@@ -60,6 +60,8 @@ const KNOWN_OFFICERS = {
   'deb crawford': '368b4d00-604b-47f9-9656-9471a0f8ee6e',
   'ken eccles': '3c25162f-d6dc-44c2-88b2-5607a322d7f9',
   'don squires': '08369a00-e2df-45d6-9e6b-6b3a6bede645',
+  // Found in M&R's raw log (2026-09-23):
+  'beau webster': '91e8e27b-1bc1-4e69-8d42-e8a816d853dc',
 };
 
 function parseCsv(text) {
@@ -105,23 +107,24 @@ function extractPlates(text) {
 
 const raw = readFileSync(csvPath, 'utf8');
 const table = parseCsv(raw).filter((r) => r.length > 1);
-// Header cells sometimes carry a leading BOM and/or an embedded newline (e.g. NCC's "24hr\nTime") -
-// normalize both before matching so candidate-name lookups are reliable across client files.
+// Header cells sometimes carry a leading BOM and/or extra/embedded whitespace (e.g. NCC's
+// "24hr\nTime", Taylors' "Log  no" with a double space) - normalize both before matching.
 const header = table[0].map((h) => h.replace(/^\uFEFF/, '').replace(/\s+/g, ' ').trim());
-// Different clients' raw sheets use different header text for the same logical column (confirmed:
-// DOC uses Location/Comments/Job Time/Job KMs; NCC uses a separate Reserve code + Location detail,
-// "24hr Time", "Description/Comments", "Job Time NCC", "Job Km NCC") - try each candidate in order,
-// first match wins, rather than assuming one fixed header set.
-const pick = (...candidates) => { for (const name of candidates) { const i = header.indexOf(name); if (i !== -1) return i; } return -1; };
+const headerLower = header.map((h) => h.toLowerCase());
+// Different clients' raw sheets use different header text (and casing) for the same logical
+// column (confirmed: DOC uses Location/Comments/Job Time/Job KMs; NCC uses a separate Reserve
+// code + Location detail, "24hr Time", "Description/Comments", "Job Time NCC"; Taylors uses
+// "Log  no"/"Action By") - matching is case-insensitive, first candidate found wins.
+const pick = (...candidates) => { for (const name of candidates) { const i = headerLower.indexOf(name.toLowerCase()); if (i !== -1) return i; } return -1; };
 const col = {
-  job: pick('Job'), patroller: pick('Patroller'), date: pick('Date'),
+  job: pick('Job', 'Log No'), patroller: pick('Patroller'), date: pick('Date'),
   time: pick('Time', '24hr Time'),
-  reserve: pick('Reserve', 'CODE'), // primary zone-code key when present (more stable than free-text Location)
+  reserve: pick('Reserve', 'CODE', 'Forest', 'Site'), // primary zone-code key when present (more stable than free-text Location)
   location: pick('Location'), // fallback zone key: free-text detail, or the only place column on non-council sheets
   comments: pick('Comments', 'Description/Comments'),
   reg: pick('Reg'),
-  jobTime: pick('Job Time', 'Job Time NCC'), jobKms: pick('Job KMs', 'Job Km NCC', 'Job kms'),
-  issue: pick('Issue'), actionBy: pick('Action by'),
+  jobTime: pick('Job Time', 'Job Time NCC', 'Job Time OFO'), jobKms: pick('Job KMs', 'Job Km NCC', 'Job kms', 'Job KM OFO'),
+  issue: pick('Issue'), actionBy: pick('Action by', 'Action By'),
 };
 
 const observationsBatch = [];
@@ -138,7 +141,12 @@ for (const r of table.slice(1)) {
   const reserveCode = col.reserve !== -1 ? (r[col.reserve] ?? '').trim() : '';
   // Reserve code (when the sheet has one) is the stable join key; free-text Location is the fallback
   // for rows where Reserve is blank, or for sheets that only ever had a single Location column.
-  const zoneId = (reserveCode && zoneMap[reserveCode]) ?? zoneMap[locationText] ?? null;
+  // A zone-map entry is normally a bare zone UUID string; some clients (e.g. Taylors) also have
+  // commercial client_sites, not just residential/patrol zones - those entries are written as
+  // { "site_id": "<uuid>" } instead, so a single map can resolve to either place type.
+  const resolved = (reserveCode && zoneMap[reserveCode]) ?? zoneMap[locationText] ?? null;
+  const zoneId = typeof resolved === 'string' ? resolved : null;
+  const siteId = resolved && typeof resolved === 'object' ? resolved.site_id ?? null : null;
   const comments = (r[col.comments] ?? '').trim();
   // Reg column sometimes holds several plates separated by commas/slashes/spaces
   // (e.g. "ACZ755, DAB364, DGY148") - split first, validate each token's shape,
@@ -162,18 +170,18 @@ for (const r of table.slice(1)) {
   };
 
   if (officerId && primaryPlate) {
-    observationsBatch.push({ external_ref: externalRef, occurred_at: occurredAt, zone_id: zoneId, officer_id: officerId, plate: primaryPlate, officer_notes: comments || null, payload });
-  } else if (zoneId) {
+    observationsBatch.push({ external_ref: externalRef, occurred_at: occurredAt, zone_id: zoneId, site_id: siteId, officer_id: officerId, plate: primaryPlate, officer_notes: comments || null, payload });
+  } else if (zoneId || siteId) {
     eventsBatch.push({
-      external_ref: externalRef, occurred_at: occurredAt, zone_id: zoneId,
+      external_ref: externalRef, occurred_at: occurredAt, zone_id: zoneId, site_id: siteId,
       event_type: isCamera ? 'camera_activation' : (officerId ? 'patrol_visit' : 'patrol_log_unattributed'),
       observed_entity_type: officerId ? 'staff' : null, observed_entity_id: officerId,
       status: (r[col.issue] || '').trim() || null, payload,
     });
   } else {
     // location_events requires client_site_id XOR zone_id (no placeless events) -
-    // a row whose Location text doesn't resolve to a seeded zone has nowhere
-    // valid to attach; skip rather than force/guess a zone.
+    // a row whose Location text doesn't resolve to a seeded zone or site has nowhere
+    // valid to attach; skip rather than force/guess a place.
     skippedNoZone += 1;
   }
 }
@@ -211,8 +219,8 @@ BEGIN
       INSERT INTO public.canonical_vehicles (plate_number, compliance_source)
       VALUES (v_plate, 'canonical') RETURNING id INTO v_vehicle_id;
     END IF;
-    INSERT INTO public.observations (organization_id, officer_id, plate_number, zone_id, observed_at, module_key, canonical_vehicle_id, officer_notes, plate_source, external_refs)
-    VALUES (v_org, (v_obs->>'officer_id')::uuid, v_plate, NULLIF(v_obs->>'zone_id','')::uuid, (v_obs->>'occurred_at')::timestamptz, 'patrol', v_vehicle_id, v_obs->>'officer_notes', 'manual',
+    INSERT INTO public.observations (organization_id, officer_id, plate_number, zone_id, site_id, observed_at, module_key, canonical_vehicle_id, officer_notes, plate_source, external_refs)
+    VALUES (v_org, (v_obs->>'officer_id')::uuid, v_plate, NULLIF(v_obs->>'zone_id','')::uuid, NULLIF(v_obs->>'site_id','')::uuid, (v_obs->>'occurred_at')::timestamptz, 'patrol', v_vehicle_id, v_obs->>'officer_notes', 'manual',
             jsonb_build_object('external_ref', v_obs->>'external_ref', 'import', v_obs->'payload'));
     v_obs_count := v_obs_count + 1;
   END LOOP;
@@ -222,7 +230,7 @@ BEGIN
       v_evt_skip := v_evt_skip + 1; CONTINUE;
     END IF;
     PERFORM public.create_location_event(
-      p_organization_id => v_org, p_event_type => v_evt->>'event_type', p_zone_id => NULLIF(v_evt->>'zone_id','')::uuid,
+      p_organization_id => v_org, p_event_type => v_evt->>'event_type', p_client_site_id => NULLIF(v_evt->>'site_id','')::uuid, p_zone_id => NULLIF(v_evt->>'zone_id','')::uuid,
       p_module_key => 'patrol', p_occurred_at => (v_evt->>'occurred_at')::timestamptz, p_status => v_evt->>'status',
       p_source => 'rm_patrol_log_import', p_external_ref => v_evt->>'external_ref', p_payload => v_evt->'payload',
       p_observed_entity_type => v_evt->>'observed_entity_type', p_observed_entity_id => NULLIF(v_evt->>'observed_entity_id','')::uuid,

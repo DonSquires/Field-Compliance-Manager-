@@ -1,0 +1,28 @@
+{
+  "seed_key": "rm_active_clients_wave6_mr_zones_2026-09-23",
+  "title": "R&M — Merril and Ring Forestland Management: additional real forest blocks found in the full 1,171-row raw log (Phase 2 import prep)",
+  "provider_organization_id": "e96d71c9-28a6-4d4a-b0f3-1c4ecdaa9c13",
+  "actor_user_id": "1b02ab97-8611-40ab-a3a0-b5c74589db58",
+  "retrieved_at": "2026-09-23",
+  "provider_modules": [],
+  "notes": [
+    "Wave 1 seeded only 2 M&R zones (Kaiuma, Waihopai) from the List sheet's Forest Name/Code table - but that List sheet is actually just a GL billing-code reference with only 2 of the 20 real Forest codes documented. Exporting the full 1,171-row NOW sheet and sampling Location/Comments text for each undocumented code identified 6 more real, named forest access roads in the Marlborough back country (Birdlip Rd, Kytes Creek Rd, Musgrove Rd/Ben Redwood Forest, Pukaka Valley Rd, Chestnut Rd, Branch Forest/River Rd).",
+    "Geocoding these specific private forestry access roads returned only generic/low-confidence fallback matches for 5 of 6 (repeated identical 'Tyntesfield Road, Waihopai Valley' catch-all, or an unrelated roading-contractor office address) - not trusted, not used. Four are created UNPLACED (no lat/lng, named block only - the same supported pattern already used for STAND's Borlace Forest) rather than guessing coordinates. Chestnut Rd and Branch Forest share one confident nearby locality match ('Blowhard, Wairau Valley' - explicitly linked in the raw log via the comment 'Recon - Branch Forest - same as chestnut rd') and are placed there approximately with a large radius."
+  ],
+  "organizations": [
+    {
+      "key": "mr",
+      "name": "Merril and Ring Forestland Management Ltd",
+      "organization_type": "private_enterprise",
+      "zone_defaults": { "zone_type": "patrol_route", "module_key": "patrol", "rule_type": "unrestricted", "radius_m": 2000 },
+      "zones": [
+        { "key": "mr:birdlip", "name": "Birdlip Rd Forest (M&R)", "status": "unplaced - no confident geocode found for this private forestry access road" },
+        { "key": "mr:kytes-creek", "name": "Kytes Creek Rd Forest (M&R)", "status": "unplaced - no confident geocode found for this private forestry access road" },
+        { "key": "mr:musgrove-ben-redwood", "name": "Musgrove Rd / Ben Redwood Forest (M&R)", "status": "unplaced - no confident geocode found for this private forestry access road" },
+        { "key": "mr:pukaka-valley", "name": "Pukaka Valley Rd Forest (M&R)", "status": "unplaced - no confident geocode found for this private forestry access road" },
+        { "key": "mr:chestnut", "name": "Chestnut Rd Forest (M&R)", "lat": -41.7333333, "lng": 173.1166667, "radius_m": 6000, "gazetteer": { "name": "Blowhard, Wairau Valley", "source": "google_address", "note": "approximate - nearest confident locality match, forest's own comments confirm it is 'same as' the adjacent Branch Forest" } },
+        { "key": "mr:branch-forest", "name": "Branch Forest / River Rd (M&R)", "lat": -41.7333333, "lng": 173.1166667, "radius_m": 6000, "gazetteer": { "name": "Blowhard, Wairau Valley", "source": "google_address", "note": "approximate - same area as Chestnut Rd Forest per raw log comment" } }
+      ]
+    }
+  ]
+}

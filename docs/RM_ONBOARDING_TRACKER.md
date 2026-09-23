@@ -177,6 +177,61 @@ turn beats false completeness.
     demo/test-fixture name collision as NCC's, not caused by this session.
     See the dedicated finding below; the same "check parent_organization_id
     before trusting a name match" rule applies to every future client.
+- **Phase 2 importer run against M&R Forestland Management** (2026-09-23,
+  4th client — small forestry client, ~1,171-row log, sheet named "NOW" not
+  "DATA"/"2025"):
+  - M&R's own List sheet is only a GL billing-code reference, NOT a forest
+    name/code lookup like NCC/TDC's — it documents just 2 of 20 real forest
+    codes actually used in the raw log (Kaimua/KAIU, Waihopai/WAIH). The
+    other 18 had to be identified by sampling Location/Comments text per
+    code rather than trusting the List sheet blindly.
+  - **6 more real forest blocks found**: Birdlip Rd (covers both ONAM and
+    BIRD codes — confirmed via matching comment content to be the same
+    physical place), Kytes Creek Rd (WAIK/KYTE/KYTES), Musgrove Rd / Ben
+    Redwood Forest (BENR/AVON), Pukaka Valley Rd (PUKA), Chestnut Rd (CHES),
+    Branch Forest / River Rd (BRAN). These are remote private forestry
+    access roads in the Marlborough back country — geocoding returned only
+    generic/wrong fallback matches for 4 of 6 (a repeated identical
+    catch-all address, or an unrelated roading-contractor's office) and
+    those 4 are created **unplaced** (named block only, no coordinates —
+    the same supported pattern already used for STAND's Borlace Forest).
+    Chestnut Rd and Branch Forest share one confident nearby locality match
+    (the raw log's own comment explicitly says Branch Forest is "same as
+    chestnut rd") and are placed there approximately with a large radius.
+  - 1 more real officer name found: Beau Webster.
+  - **Result**: 103 observations + 776 location_events imported. Verified
+    live: 0 garbage plates, 0 duplicate external_refs.
+- **Phase 2 importer run against Taylors Contracting** (2026-09-23, 5th
+  client — small orchard/quarry security client, real street addresses, no
+  Reserve/CODE column at all):
+  - Wave 1 only seeded 4 of Taylors' 6 real addresses from its own Details
+    sheet — Arthur's (53 Tahi Street, Mapua) and Mum's (16 Lansdowne Rd,
+    Appleby) homes were missed. Added as new residential zones, matching
+    the existing Charlie/Matt pattern. Mum's address needed a
+    Nelson-region-qualified geocode query — the bare address alone matched
+    an unrelated same-named street in Auckland.
+  - **`pick()` made case-insensitive**: Taylors' header has "Log  no" (double
+    space, lowercase) where every other client used "Job"/"Log No" — rather
+    than adding an endless list of case-variant candidates for every future
+    client, the header matcher now compares case-insensitively. This is a
+    durable fix, not a one-off patch.
+  - **Real, valuable capability added: site_id support.** Every prior client
+    (DOC/NCC/TDC/M&R) only ever needed `location_zones` — Taylors is the
+    first to prove the importer against a client with BOTH `client_sites`
+    (Taylors Quarry, Taylors Yard — commercial properties) and
+    `location_zones` (family residences) in the same file. `zoneMap` entries
+    can now be either a bare zone UUID string (unchanged, all prior
+    zone-maps still work) or `{ "site_id": "<uuid>" }`, and both
+    `observations` and `location_events` (`create_location_event`'s
+    `p_client_site_id` parameter) support attaching to either place type
+    with no schema changes needed — this was already a first-class
+    supported pattern in the schema, just never previously exercised by
+    this importer. Verified live: of 48 imported location_events, 28
+    correctly attached to a client_site and 20 to a zone.
+  - **Result**: 1 observation + 47 location_events imported (only ~48 of 421
+    raw rows have real data — most of the sheet is template/GL-reference
+    rows with no date, correctly skipped). Verified live: 0 garbage plates,
+    0 duplicate external_refs.
 
 ## Known gaps / real bugs found this effort (fix before relying on them again)
 
@@ -264,26 +319,33 @@ turn beats false completeness.
 3. **STAND's "Borlace Forest" zone** has no confident geocode yet — created
    unplaced; needs a better reference point (e.g. from a company map or a
    council LINZ parcel search) before it can be placed.
-4. **Run the Phase 2 importer against the remaining ~12 clients** (STAND,
-   M&R, Taylors, Birdhurst, Thomas Bros, Stringer, Fulton Hogan, DART, PVT,
-   Private-Parks, Private-Redvale-Merc) — proven against DOC, NCC, AND TDC
-   now (three clients, three different raw-sheet conventions, the importer
-   generalized cleanly each time via header-candidate lists rather than
-   per-client forks). Each client needs its own zone-name-to-zone-id map
-   built from its actual Location/Reserve/CODE/Forest column values (same
-   process used for DOC/NCC/TDC: export full raw sheet to CSV, count distinct
-   location values, cross-check the client's own List/reference sheet before
-   geocoding, geocode any new real places, build the map, dry-run, apply).
-   For any client with a large multi-year log (thousands of rows), the
-   importer's batching (chunks of 300) already handles the request-size
-   limit — no further script change needed there. More officer names will
-   likely surface — add them as real `user_profiles` the same way (role
-   'officer' unless told otherwise), and check whether a name already has a
-   profile under R&M's org before creating a duplicate (Don Squires already
-   did). Before seeding zones for any client, also run the duplicate-org
-   check (`select id, name, organization_type, parent_organization_id from
-   organizations where lower(name) = lower('<client>')`) — both NCC and TDC
-   turned out to have unrelated pre-existing orgs sharing their exact name.
+4. **Run the Phase 2 importer against the remaining ~10 clients** (STAND,
+   Birdhurst, Thomas Bros, Stringer, Fulton Hogan, DART, PVT, Private-Parks,
+   Private-Redvale-Merc) — proven against DOC, NCC, TDC, M&R, AND Taylors
+   now (five clients, several different raw-sheet conventions, and both
+   supported place types — zones-only and mixed site+zone — the importer
+   generalized cleanly each time via header-candidate lists and a
+   case-insensitive matcher rather than per-client forks). Each client needs
+   its own zone/site-name-to-id map built from its actual
+   Location/Reserve/CODE/Forest/Site column values (same process used so
+   far: export full raw sheet to CSV, count distinct location values,
+   cross-check the client's own List/Details/reference sheet before
+   geocoding — but verify it's actually a complete lookup and not just a
+   GL-billing reference like M&R's turned out to be — geocode any new real
+   places with a region qualifier if the bare address returns a wrong-region
+   match, build the map, dry-run, apply). Birdhurst and Thomas Bros are
+   orchard/commercial clients likely needing the site_id path (proven
+   working for Taylors) rather than pure zones. For any client with a large
+   multi-year log (thousands of rows), the importer's batching (chunks of
+   300) already handles the request-size limit — no further script change
+   needed there. More officer names will likely surface — add them as real
+   `user_profiles` the same way (role 'officer' unless told otherwise), and
+   check whether a name already has a profile under R&M's org before
+   creating a duplicate (Don Squires already did). Before seeding zones for
+   any client, also run the duplicate-org check (`select id, name,
+   organization_type, parent_organization_id from organizations where
+   lower(name) = lower('<client>')`) — both NCC and TDC turned out to have
+   unrelated pre-existing orgs sharing their exact name.
 5. **Whole-build live-org shakedown** (the other half of this task): with
    real, populated org data now flowing all the way through to
    `search_observations` and `location_events`, walk through the remaining

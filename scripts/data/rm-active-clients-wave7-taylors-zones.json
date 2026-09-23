@@ -1,0 +1,24 @@
+{
+  "seed_key": "rm_active_clients_wave7_taylors_zones_2026-09-23",
+  "title": "R&M — Taylors Contracting: 2 missing family residence zones (Arthur, Mum)",
+  "provider_organization_id": "e96d71c9-28a6-4d4a-b0f3-1c4ecdaa9c13",
+  "actor_user_id": "1b02ab97-8611-40ab-a3a0-b5c74589db58",
+  "retrieved_at": "2026-09-23",
+  "provider_modules": [],
+  "notes": [
+    "Wave 1 only seeded 4 of Taylors' 6 real addresses from the Details sheet (Taylors Quarry/Office and Taylors Yard/Office as client_sites; Charlie's and Matt's homes as location_zones). Arthur's (53 Tahi Street, Mapua, code MAPU) and Mum's (16 Lansdowne Rd, Appleby, code APPL) homes were missed. Added here as location_zones, matching the existing residential pattern (Charlie/Matt), not client_sites (which is reserved for the commercial quarry/yard properties).",
+    "Both geocoded live and confirmed real: Arthur's address matched directly. Mum's address needed a Nelson-region-qualified query (the bare address alone returned wrong-region matches in Auckland and Katikati) - the corrected match's suburb 'Appleby' matches the Details sheet's own APPL code for this address, confirming correctness."
+  ],
+  "organizations": [
+    {
+      "key": "taylors",
+      "name": "Taylors Contracting",
+      "organization_type": "private_enterprise",
+      "zone_defaults": { "zone_type": "patrol_route", "module_key": "patrol", "rule_type": "unrestricted", "radius_m": 150 },
+      "zones": [
+        { "key": "taylors:arthur", "name": "Tahi Street residence (Taylors — Arthur)", "lat": -41.2605518, "lng": 173.1002454, "gazetteer": { "name": "53 Tahi Street", "source": "google_place", "note": "Mapua" } },
+        { "key": "taylors:mum", "name": "Lansdowne Rd residence (Taylors — Mum)", "lat": -41.3160587, "lng": 173.1374255, "gazetteer": { "name": "16 Lansdowne Road", "source": "linz_address", "note": "Appleby, Richmond - matches Details sheet's own APPL code" } }
+      ]
+    }
+  ]
+}

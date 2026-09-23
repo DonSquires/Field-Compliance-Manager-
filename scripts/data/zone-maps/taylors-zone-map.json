@@ -1,0 +1,22 @@
+{
+  "LVL": { "site_id": "e8d9e6b0-0b81-48ed-a3c3-b002365ae508" },
+  "Lee Valley Rd": { "site_id": "e8d9e6b0-0b81-48ed-a3c3-b002365ae508" },
+  "Quarry": { "site_id": "e8d9e6b0-0b81-48ed-a3c3-b002365ae508" },
+  "Office": { "site_id": "e8d9e6b0-0b81-48ed-a3c3-b002365ae508" },
+
+  "RTR": { "site_id": "f5d0bc9e-db4f-4145-b1ce-0dd9d5f9272a" },
+  "Yard": { "site_id": "f5d0bc9e-db4f-4145-b1ce-0dd9d5f9272a" },
+
+  "Heslington Rd": "c65f8b77-d90a-4c1b-8acd-d623d6b5a22a",
+
+  "Moore Rd": "b832d4b8-9742-48ef-996c-6a34ef74b68f",
+
+  "MAPU": "4862f19f-eb8e-45f6-800e-331cbcfa188b",
+  "Tahi Street": "4862f19f-eb8e-45f6-800e-331cbcfa188b",
+  "Tahi Sreet": "4862f19f-eb8e-45f6-800e-331cbcfa188b",
+
+  "APPL": "eae13c2a-72e3-4672-803e-0126a4e4d7c1",
+  "Lansdowne Rd": "eae13c2a-72e3-4672-803e-0126a4e4d7c1",
+  "Landsdowne Rd": "eae13c2a-72e3-4672-803e-0126a4e4d7c1",
+  "Landsdown Rd": "eae13c2a-72e3-4672-803e-0126a4e4d7c1"
+}
