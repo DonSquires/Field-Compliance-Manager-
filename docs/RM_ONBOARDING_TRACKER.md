@@ -261,46 +261,70 @@ turn beats false completeness.
 - Port Blakely has **zero** real patrol-log data in R&M's files (confirmed via
   exact folder listing) — remains a CRM-only prospect; do not manufacture
   sites/zones for it.
-- **Real cross-cutting finding (whole-build shakedown): `organizations.name`
-  has no uniqueness constraint, and demo/E2E test fixtures are not visually
-  distinguished from real seeded clients.** Discovered while starting the
-  Phase 2 NCC import: THREE separate organization rows are all named exactly
+- **Real cross-cutting finding (whole-build shakedown), RESOLVED 2026-09-23:
+  `organizations.name` has no uniqueness constraint, and a prior pass modeled
+  draft/never-invited provider prospecting relationships by creating a
+  SEPARATE organization row per provider instead of one canonical council org
+  with multiple `service_agreements`.** Discovered while starting the Phase 2
+  NCC import: THREE separate organization rows were all named exactly
   "Nelson City Council" —
   - `405fc1f7-45e8-4736-a517-885bb3e5ef95` — the REAL one, R&M's wave-1 seed
-    (`organization_type='government'`, 4 real geocoded zones, 1 accepted
-    operational agreement). **Use this id for all NCC patrol-log import work.**
-  - `fc4ca1c9-e606-4a93-b21b-da79274c7440` — pre-existing E2E test fixture
-    (created 2026-08-27, before this effort started). Has a
-    `finance-e2e-client@field-compliance.test` `client_viewer` user profile
-    (matches this repo's established `*@field-compliance.test` fixture
-    convention, e.g. `scripts/seed-aam-e2e.js`), 2 client_sites, 1
-    freedom_camping zone, 3 service_agreements — all synthetic demo content,
-    zero connection to R&M.
-  - `7171d3c7-f820-483b-ba2d-122fe067b8a8` — a `status='prospect'` CRM lead
-    (created 2026-09-06, also before this effort), 3 client_sites (Miller
-    Acre — duplicated in the E2E org too, Nelson Public Library, Tahunanui
-    Beach). Also unrelated to R&M's real relationship.
-  Neither duplicate was created by this session's seed work, and no data has
-  been lost — R&M's real org is fully intact and correctly separate. But an
-  admin searching "Nelson" in CRM/org pickers today sees 3 confusing rows,
-  two of which are meaningless test/demo debris. **Not fixed yet** — a safe
-  fix (e.g. renaming the two non-R&M rows to something unambiguous like
-  "Nelson City Council (E2E Fixture)") needs to first confirm no e2e script
-  matches-by-exact-name to decide whether to (re)create its fixture, or a
-  rename could cause a 4th duplicate on the next test run. Flagging for
-  owner decision rather than guessing at a live rename. **Action for anyone
-  continuing this work: before seeding or importing against ANY client name,
-  check `select id, name, organization_type, status, created_at from
-  organizations where lower(name) = lower('<client>')` first — do not assume
-  a name match found by the seed script's own dedup logic is the only row
-  that exists.**
+    (`organization_type='government'`). **Canonical — use this id for all NCC
+    work.**
+  - `fc4ca1c9-e606-4a93-b21b-da79274c7440` — a draft, never-invited
+    "First Security Guard Services LTD" prospecting shell (59 residential
+    addresses tied to a draft "site services proposal", plus 1 real-named
+    site/zone tied to a separate draft "Responsible Camping and Guarding"
+    proposal from First Security's Nelson branch).
+  - `7171d3c7-f820-483b-ba2d-122fe067b8a8` — a `status='prospect'` shell
+    parented directly by First Security HQ (3 client_sites: Miller Acre,
+    Nelson Public Library, Tahunanui Beach; no agreement linked).
+  Initial read (2026-09-23 morning) mistook this for meaningless E2E test
+  debris because a `finance-e2e-client@field-compliance.test` user profile
+  (matching this repo's `*@field-compliance.test` fixture convention) was
+  attached to the `fc4ca1c9` shell. Owner corrected this: it is real,
+  First Security-branded prospecting data for the same real council — just
+  modeled with the wrong shape (a second org row per provider relationship
+  instead of one council org + multiple `service_agreements`, which the
+  schema already supports via `provider_organization_id`/
+  `client_organization_id`). Per the owner's own model: *a site/zone belongs
+  to the client org as a chargeable "seat" regardless of which provider, if
+  any, currently has an accepted agreement for it* — so the real fix is to
+  move the child data onto the canonical org, not quarantine it.
+  **Fix applied via `scripts/merge-legacy-org-shells-ncc-tdc.mjs`** (kept in
+  the repo as the audit trail — do not delete): retargeted 63 `client_sites`,
+  1 `location_zones`, and 4 `service_agreements` (client side only; provider
+  side left untouched as genuine CRM history of an unaccepted pitch) from
+  the two NCC shells onto `405fc1f7`, and the equivalent TDC shell
+  (`6f59d817-a432-4401-b44e-896c32e2ea05`, 1 site + 1 draft agreement) onto
+  `54ade19f-0bb7-45ca-a32d-2d87214c4e77`. Disambiguated the one literal name
+  collision the merge created (two "Miller Acre" sites). Archived (renamed,
+  `active=false`, `discoverable=false`, `status='archived'`, rationale
+  recorded in `account_notes`) the 3 emptied shells rather than deleting
+  them. Deactivated 2 genuinely-unrelated test-fixture `user_profiles`
+  (`test@test.com`, `finance-e2e-client@field-compliance.test`) found
+  attached to the shells.
+  **Schema discovery worth knowing before any future org-merge**: `client_sites`
+  and `location_zones` each "hang off" a `locations` row (an org-scoped
+  "house", itself linked to a genuinely cross-org `canonical_places` row via
+  `canonical_place_id`). Triggers `zz_client_sites_place_house` /
+  `zz_location_zones_place_house` / `zz_locations_place_identity` REJECT an
+  UPDATE that would leave a site/zone pointing at a house owned by a
+  different organization ("Site/Zone ... cannot hang off a house owned by
+  another organisation"). **You must re-home the underlying `locations` rows
+  to the new owner FIRST, in the same transaction, before retargeting the
+  sites/zones that reference them** — a naive `UPDATE client_sites SET
+  client_organization_id = ...` alone will fail partway through. Confirmed
+  before running that none of these houses were shared with any org outside
+  the 3 legacy shells (each house was privately owned 1:1), so re-homing was
+  safe; always re-verify this for any future merge rather than assuming.
   Confirmed the SAME pattern for TDC: a second, unrelated "Tasman District
-  Council" org exists with `parent_organization_id IS NULL` (not checked
-  further — no observations/location_events touch it, and R&M's real
-  `54ade19f-0bb7-45ca-a32d-2d87214c4e77` correctly received all of wave 5's
-  new zones, confirming this is systemic across the platform's demo data
-  rather than a one-off NCC quirk). Expect to find this again for other
-  government/council-style client names as more clients are onboarded.
+  Council" org existed with `parent_organization_id IS NULL` — also merged in
+  the same pass. Expect to find this again for other government/council-style
+  client names as more clients are onboarded; the fix pattern above (re-home
+  houses, retarget sites/zones/agreements client-side, disambiguate name
+  collisions, archive-don't-delete the shell) is now the reusable playbook —
+  don't re-derive it from scratch, adapt the script.
 
 ## Open items (not yet done)
 
