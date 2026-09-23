@@ -1,0 +1,31 @@
+{
+  "seed_key": "rm_active_clients_wave8_stand_zones_2026-09-23",
+  "title": "R&M — STAND (PF Olsen): additional real forest blocks found in the full 4,024-row raw log (Phase 2 import prep)",
+  "provider_organization_id": "e96d71c9-28a6-4d4a-b0f3-1c4ecdaa9c13",
+  "actor_user_id": "1b02ab97-8611-40ab-a3a0-b5c74589db58",
+  "retrieved_at": "2026-09-23",
+  "provider_modules": [],
+  "notes": [
+    "Wave 1 seeded 3 zones (Rabbit Island, Borlace Forest [unplaced], Howard Forest) from the List sheet's 3 documented Forest Name/Code pairs - but that List sheet is a GL billing-code reference, same gap already found for M&R. Exporting the full 4,024-row ACTIVE sheet and counting distinct Forest codes found 15 more codes in real use. This wave: (1) directly UPDATEd the long-outstanding Borlace Forest zone (id 8ade47c4-9a15-482e-a850-770bd0b02af6) with a real geocode found via linz-lookup this time (Borlase Avenue, St Arnaud area) - not part of this seed file, done as a targeted SQL UPDATE since the zone already existed under a different external_ref than this file's key scheme; (2) adds 4 new confidently-geocoded zones (SHER/Sherry River, LINK/Linkwater on Queen Charlotte Drive, RICH/near the Nelson Lakes Gliding Club - Howard, TEET/Tee Total Road); (3) creates 4 more UNPLACED (named block only, no confident geocode after multiple linz-lookup attempts with varied phrasing) - SLIP/Slippery River (187 rows, meaningful volume but no match found), KAIN (also covers TUNN - both codes' Location text is 'Tunnicliffes Rd', treated as the same real place per the established 'same location text = same block, different code over time' pattern), MANU, FROR (a name already flagged in prior session memory as appearing in DATA but never resolved).",
+    "ALLF (143 rows) is confirmed a non-place administrative code ('All Facilities', Forest/Location both blank in the raw data) - deliberately left unmapped, matching NCC's ALLF precedent.",
+    "No 'agreement' key included deliberately - STAND's operational agreement already exists and is accepted from wave 1; new zones are linked to it via a direct SQL INSERT INTO service_agreement_locations after this seed applies (same pattern used for DOC/NCC/TDC/M&R/Taylors)."
+  ],
+  "organizations": [
+    {
+      "key": "stand",
+      "name": "STAND",
+      "organization_type": "private_enterprise",
+      "zone_defaults": { "zone_type": "patrol_route", "module_key": "patrol", "rule_type": "unrestricted", "radius_m": 2000 },
+      "zones": [
+        { "key": "stand:sherry-river", "name": "Sherry River Forest (PF Olsen)", "lat": -41.4552383, "lng": 172.7131243, "radius_m": 3000, "gazetteer": { "name": "Sherry River", "source": "google_address" } },
+        { "key": "stand:linkwater", "name": "Linkwater Forest (PF Olsen)", "lat": -41.2894685, "lng": 173.867999, "radius_m": 4000, "gazetteer": { "name": "Linkwater, Queen Charlotte Drive", "source": "linz_address", "note": "Marlborough Sounds - a different region from the Tasman-cluster blocks; log samples show Jones Rd, Queen Charlotte Drive, Rata Rd" } },
+        { "key": "stand:glider-rd", "name": "Glider Rd Forest (PF Olsen)", "lat": -41.7628614, "lng": 172.7534938, "radius_m": 3000, "gazetteer": { "name": "Nelson Lakes Gliding Club, Howard", "source": "google_place", "note": "raw log Forest code is RICH but the only Location text found is 'Glider Rd' - named for the confirmed real place, not the code's apparent abbreviation" } },
+        { "key": "stand:teetotal-rd", "name": "Tee Total Rd Forest (PF Olsen)", "lat": -41.7777237, "lng": 172.8054289, "radius_m": 2000, "gazetteer": { "name": "Tee Total Road, Howard", "source": "google_address" } },
+        { "key": "stand:slippery-river", "name": "Slippery River Forest (PF Olsen)", "status": "unplaced - no confident geocode found for this private forestry access road after multiple search attempts" },
+        { "key": "stand:tunnicliffes-rd", "name": "Tunnicliffes Rd Forest (PF Olsen)", "status": "unplaced - no confident geocode found; covers both Forest codes KAIN and TUNN, which share the same raw-log Location text 'Tunnicliffes Rd'" },
+        { "key": "stand:manuka", "name": "Boulder Rd / Homestead Rd Forest (PF Olsen)", "status": "unplaced - no confident geocode found; Forest code MANU, low volume (3 rows)" },
+        { "key": "stand:frorieps-rd", "name": "Frorieps Rd Forest (PF Olsen)", "status": "unplaced - no confident geocode found; Forest code FROR, low volume (2 rows), previously noted in session memory as unresolved" }
+      ]
+    }
+  ]
+}

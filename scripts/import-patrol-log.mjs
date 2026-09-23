@@ -62,6 +62,9 @@ const KNOWN_OFFICERS = {
   'don squires': '08369a00-e2df-45d6-9e6b-6b3a6bede645',
   // Found in M&R's raw log (2026-09-23):
   'beau webster': '91e8e27b-1bc1-4e69-8d42-e8a816d853dc',
+  // Found in STAND's raw log (2026-09-23) - "Deborah Crawford" is the same real
+  // person as the already-known "Deb Crawford" (verified via existing profile).
+  'deborah crawford': '368b4d00-604b-47f9-9656-9471a0f8ee6e',
 };
 
 function parseCsv(text) {
@@ -82,15 +85,23 @@ function parseCsv(text) {
 }
 
 function parseNzDate(dateStr, timeStr) {
-  const m = /^(\d{1,2})\/(\d{1,2})\/(\d{4})$/.exec((dateStr ?? '').trim());
-  if (!m) return null;
-  const [, d, mo, y] = m;
+  const trimmed = (dateStr ?? '').trim();
+  let y, mo, d;
+  const m = /^(\d{1,2})\/(\d{1,2})\/(\d{4})$/.exec(trimmed);
+  if (m) { [, d, mo, y] = m; }
+  else if (/^\d{4,6}$/.test(trimmed)) {
+    // Value2-based CSV export (fast bulk COM read, no cell-by-cell .Text formatting)
+    // returns dates as raw Excel serial numbers instead of a dd/mm/yyyy string -
+    // Excel's epoch is 1899-12-30, i.e. serial 25569 == 1970-01-01 (Unix epoch).
+    const dt = new Date((Number(trimmed) - 25569) * 86400 * 1000);
+    y = dt.getUTCFullYear(); mo = dt.getUTCMonth() + 1; d = dt.getUTCDate();
+  } else return null;
   let hh = '00', mm = '00';
   const t = (timeStr ?? '').trim().replace(/\.\d+$/, '');
   if (/^\d{3,4}$/.test(t)) { const padded = t.padStart(4, '0'); hh = padded.slice(0, 2); mm = padded.slice(2, 4); }
   if (Number(hh) > 23) hh = '00';
   if (Number(mm) > 59) mm = '00';
-  return `${y}-${mo.padStart(2, '0')}-${d.padStart(2, '0')}T${hh}:${mm}:00+12:00`;
+  return `${y}-${String(mo).padStart(2, '0')}-${String(d).padStart(2, '0')}T${hh}:${mm}:00+12:00`;
 }
 
 // NZ plate shapes: 2-3 letters + 2-4 digits, or 1-3 digits + 2-3 letters (older/personalised).

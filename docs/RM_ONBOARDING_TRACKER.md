@@ -340,13 +340,13 @@ turn beats false completeness.
    Reserve, Tadmor Valley Rd, Washbourn Gardens, Motueka River, Hoddys
    Reserve, Spooners Lookout, Bartletts Rd, Richmond Recycle Centre) — geocode
    more as real patrol activity against them is found, not preemptively.
-3. **STAND's "Borlace Forest" zone** has no confident geocode yet — created
-   unplaced; needs a better reference point (e.g. from a company map or a
-   council LINZ parcel search) before it can be placed.
-4. **Run the Phase 2 importer against the remaining ~10 clients** (STAND,
-   Birdhurst, Thomas Bros, Stringer, Fulton Hogan, DART, PVT, Private-Parks,
-   Private-Redvale-Merc) — proven against DOC, NCC, TDC, M&R, AND Taylors
-   now (five clients, several different raw-sheet conventions, and both
+3. **STAND's "Borlace Forest" zone — RESOLVED 2026-09-23.** Placed via
+   `linz-lookup` during STAND's own Phase 2 run (Borlase Avenue, St Arnaud
+   area) — see the STAND write-up below.
+4. **Run the Phase 2 importer against the remaining ~9 clients** (Birdhurst,
+   Thomas Bros, Stringer, Fulton Hogan, DART, PVT, Private-Parks,
+   Private-Redvale-Merc) — proven against DOC, NCC, TDC, M&R, Taylors, AND
+   STAND now (six clients, several different raw-sheet conventions, and both
    supported place types — zones-only and mixed site+zone — the importer
    generalized cleanly each time via header-candidate lists and a
    case-insensitive matcher rather than per-client forks). Each client needs
@@ -377,6 +377,47 @@ turn beats false completeness.
    view, dispatch, rostering, finance/invoicing, permit lookup — and fix
    anything that breaks or looks wrong against real data. Record findings
    here as they're found.
+
+## PHASE 2 RUN AGAINST STAND/PF Olsen (2026-09-23) — 6th client, date-serial fix
+
+- STAND's List sheet is ONLY a GL billing-code reference (3 of 18 real Forest
+  codes documented) — same gap already found for M&R. Sampled Location text
+  per undocumented code from the full 4,024-row ACTIVE sheet to identify 8
+  more real forest blocks.
+- **Real bug found and fixed in the importer itself**: exporting the raw sheet
+  via Excel COM's bulk `Value2` read (much faster than the previous
+  cell-by-cell `.Text` approach — see below) returns dates as raw Excel serial
+  numbers (e.g. `44988`) instead of a `dd/mm/yyyy` string. `parseNzDate()` in
+  `scripts/import-patrol-log.mjs` now accepts both — a genuinely reusable fix
+  since every future client export should use the faster method.
+- **Excel COM export performance**: switched to `$range.Value2` (one bulk
+  2D-array COM call) instead of looping `$range.Cells.Item(r,c).Text` per
+  cell — the latter took minutes on a 4,025×32 sheet; `Value2` took seconds.
+  Use this for all future client exports.
+- Finally placed the long-outstanding **Borlace Forest** zone (unplaced since
+  2026-09-22) via a real `linz-lookup` hit on "Borlase Avenue", St Arnaud area
+  — done as a direct `UPDATE location_zones` (not the generic seed script,
+  since the zone already existed under a different `external_ref` than a new
+  seed file's key scheme would match).
+- 4 new zones confidently geocoded (`scripts/data/rm-active-clients-wave8-stand-zones.json`):
+  Sherry River, Linkwater (Queen Charlotte Drive, Marlborough — a different
+  region from the rest of STAND's Tasman-cluster blocks), Glider Rd (near the
+  Nelson Lakes Gliding Club, Howard — the raw Forest code is `RICH` but no
+  "Richmond"-area location text was ever found, so the zone is named for the
+  confirmed real place instead of the code's apparent abbreviation), Tee Total
+  Road. 4 more created UNPLACED after multiple failed geocode attempts:
+  Slippery River (187 rows — meaningful volume, still no confident match),
+  Tunnicliffes Rd (covers both Forest codes `KAIN` and `TUNN`, which share the
+  same raw Location text), Boulder Rd/Homestead Rd, Frorieps Rd.
+  `ALLF` (143 rows, Forest/Location both blank) confirmed a non-place
+  administrative code, same as NCC's `ALLF` — left unmapped.
+- One officer-name variant found: "Deborah Crawford" in the raw log is the
+  same real person as the already-known "Deb Crawford" — added as an alias in
+  `KNOWN_OFFICERS` pointing at the same existing `user_profiles` id, not a new
+  profile.
+- Result: 398 observations + 2695 location_events, verified live (0 garbage
+  plates, 0 duplicate external_refs, real recent+historical dates spanning
+  2023–2026 confirming the serial-date fix works across the full range).
 
 ## Conventions established / reusable
 
