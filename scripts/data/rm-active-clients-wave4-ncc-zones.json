@@ -1,0 +1,30 @@
+{
+  "seed_key": "rm_active_clients_wave4_ncc_zones_2026-09-23",
+  "title": "R&M — Nelson City Council: additional real patrol zones found in the full 3,100-row raw log (Phase 2 import prep)",
+  "provider_organization_id": "e96d71c9-28a6-4d4a-b0f3-1c4ecdaa9c13",
+  "actor_user_id": "1b02ab97-8611-40ab-a3a0-b5c74589db58",
+  "retrieved_at": "2026-09-23",
+  "provider_modules": [],
+  "notes": [
+    "Wave 1 seeded only 4 NCC zones (Marsden, Maitai Valley Rd, Atawhai, Trafalgar Park) from the List/reference sheet. Exporting the full 3,100-row DATA sheet and counting distinct Reserve codes found 22 real codes in use, most with real activity never captured. This wave adds the next 7 highest-value, confidently-geocoded ones (all verified live via linz-lookup address_autocomplete). Low-confidence/ambiguous codes (Smiths Reserve, Busch Reserve, Maungatapu Track, RICH, NELS) are deliberately left unplaced/unmapped — not guessed.",
+    "IMPORTANT: matches EXISTING org 'Nelson City Council' (organization_id 405fc1f7-45e8-4736-a517-885bb3e5ef95) via the seed script's parent_organization_id=R&M + lower(name) match — verified safe: two OTHER unrelated 'Nelson City Council' orgs exist in this project (a pre-existing E2E test fixture and a CRM-prospect lead, both under different parent providers), but the script's WHERE parent_organization_id = provider clause cannot match either of them. See docs/RM_ONBOARDING_TRACKER.md for the full finding.",
+    "No 'agreement' key included deliberately — NCC's operational agreement already exists and is accepted from wave 1; re-declaring it here would create a duplicate service_agreements row under this wave's own seed_key. New zones are linked to the existing agreement via a direct SQL INSERT INTO service_agreement_locations after this seed applies (same pattern used for DOC wave3b)."
+  ],
+  "organizations": [
+    {
+      "key": "ncc",
+      "name": "Nelson City Council",
+      "organization_type": "government",
+      "zone_defaults": { "zone_type": "patrol_route", "module_key": "patrol", "rule_type": "unrestricted", "radius_m": 500 },
+      "zones": [
+        { "key": "ncc:tantragee", "name": "Tantragee Saddle / Tantragee Rd (NCC)", "lat": -41.2936851, "lng": 173.3033822, "radius_m": 2000, "gazetteer": { "name": "Tantragee Road", "source": "google_place" } },
+        { "key": "ncc:grampians", "name": "The Grampians (NCC)", "lat": -41.297982, "lng": 173.2796656, "gazetteer": { "name": "Grampians Reserve", "source": "google_place", "note": "fly-tipping camera site; Reserve code GRAM, Location text also 'Market Rd'" } },
+        { "key": "ncc:wakapuaka", "name": "Wakapuaka Cemetery (NCC)", "lat": -41.2552594, "lng": 173.3028667, "gazetteer": { "name": "Wakapuaka Cemetery", "source": "google_place", "linz_label": "188A Atawhai Drive, Atawhai, Nelson" } },
+        { "key": "ncc:kinzett", "name": "Kinzett Terrace (NCC)", "lat": -41.264595, "lng": 173.284052, "radius_m": 250, "gazetteer": { "name": "Kinzett Terrace", "source": "linz_address" } },
+        { "key": "ncc:pioneer-park", "name": "Pioneer Park (NCC)", "lat": -41.2721342, "lng": 173.2760906, "gazetteer": { "name": "Pioneers Park", "source": "google_place", "note": "Washington Valley" } },
+        { "key": "ncc:bishopdale", "name": "Bishopdale Reserve (NCC)", "lat": -41.296915, "lng": 173.2669002, "gazetteer": { "name": "Bishopdale Reserve", "source": "google_place" } },
+        { "key": "ncc:montgomery", "name": "Montgomery Carpark (NCC)", "lat": -41.2733609, "lng": 173.2818991, "gazetteer": { "name": "Montgomery Square", "source": "google_place", "note": "town-centre carpark" } }
+      ]
+    }
+  ]
+}

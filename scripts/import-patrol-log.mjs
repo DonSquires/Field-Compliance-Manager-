@@ -44,6 +44,22 @@ const KNOWN_OFFICERS = {
   'wade sutherland-berkett': '9e96c281-3dc1-449b-819f-57b61f91c739',
   'pete crawford': '8f705807-81d5-424e-910f-3c5d8d97b80e',
   'reuben stanfield': '19e1ab78-abe3-4ffe-a006-66a4fab56804',
+  // Found in NCC's raw log (2026-09-23):
+  'sally curtis': 'd65b59e3-9c21-45d4-968f-351ca6e319fe',
+  'colin nelson': 'c8c102f0-bec6-4b03-a7a3-160f7a7585d1',
+  'ash bremner': '822509e2-7bf0-4177-b895-d27034b30252',
+  'dan douglas': '60b73649-ddae-4386-be6b-3d9243db625c',
+  'dave porter': '5bd14029-b00b-4240-b42a-c739c168b6e4',
+  'a goodall': '107e5596-a859-4fe7-900f-aa98b7f2147c',
+  'glenn gribben': 'c844ff45-eaf6-439a-bc51-b6065a6acabd',
+  // Found in TDC's raw log (2026-09-23). Don Squires already had an R&M-org profile
+  // (role=master) from earlier in this project - reused rather than duplicated.
+  'steve henery': '1a80c0eb-bfe9-4c75-b6d1-659b13b0bc75',
+  'andrew curtis': 'a77d3dfd-9fb9-4543-9928-421b369aa847',
+  'jacob lucas': 'a4c07cc6-530a-401d-8781-414f382ebe06',
+  'deb crawford': '368b4d00-604b-47f9-9656-9471a0f8ee6e',
+  'ken eccles': '3c25162f-d6dc-44c2-88b2-5607a322d7f9',
+  'don squires': '08369a00-e2df-45d6-9e6b-6b3a6bede645',
 };
 
 function parseCsv(text) {
@@ -89,9 +105,24 @@ function extractPlates(text) {
 
 const raw = readFileSync(csvPath, 'utf8');
 const table = parseCsv(raw).filter((r) => r.length > 1);
-const header = table[0];
-const idx = (name) => header.indexOf(name);
-const col = { job: idx('Job'), patroller: idx('Patroller'), date: idx('Date'), time: idx('Time'), location: idx('Location'), comments: idx('Comments'), reg: idx('Reg'), jobTime: idx('Job Time'), jobKms: idx('Job KMs'), issue: idx('Issue'), actionBy: idx('Action by') };
+// Header cells sometimes carry a leading BOM and/or an embedded newline (e.g. NCC's "24hr\nTime") -
+// normalize both before matching so candidate-name lookups are reliable across client files.
+const header = table[0].map((h) => h.replace(/^\uFEFF/, '').replace(/\s+/g, ' ').trim());
+// Different clients' raw sheets use different header text for the same logical column (confirmed:
+// DOC uses Location/Comments/Job Time/Job KMs; NCC uses a separate Reserve code + Location detail,
+// "24hr Time", "Description/Comments", "Job Time NCC", "Job Km NCC") - try each candidate in order,
+// first match wins, rather than assuming one fixed header set.
+const pick = (...candidates) => { for (const name of candidates) { const i = header.indexOf(name); if (i !== -1) return i; } return -1; };
+const col = {
+  job: pick('Job'), patroller: pick('Patroller'), date: pick('Date'),
+  time: pick('Time', '24hr Time'),
+  reserve: pick('Reserve', 'CODE'), // primary zone-code key when present (more stable than free-text Location)
+  location: pick('Location'), // fallback zone key: free-text detail, or the only place column on non-council sheets
+  comments: pick('Comments', 'Description/Comments'),
+  reg: pick('Reg'),
+  jobTime: pick('Job Time', 'Job Time NCC'), jobKms: pick('Job KMs', 'Job Km NCC', 'Job kms'),
+  issue: pick('Issue'), actionBy: pick('Action by'),
+};
 
 const observationsBatch = [];
 const eventsBatch = [];
@@ -104,7 +135,10 @@ for (const r of table.slice(1)) {
   const occurredAt = parseNzDate(r[col.date], r[col.time]);
   if (!occurredAt) { skipped += 1; continue; } // header/blank/summary rows with no real date
   const locationText = (r[col.location] ?? '').trim();
-  const zoneId = zoneMap[locationText] ?? null;
+  const reserveCode = col.reserve !== -1 ? (r[col.reserve] ?? '').trim() : '';
+  // Reserve code (when the sheet has one) is the stable join key; free-text Location is the fallback
+  // for rows where Reserve is blank, or for sheets that only ever had a single Location column.
+  const zoneId = (reserveCode && zoneMap[reserveCode]) ?? zoneMap[locationText] ?? null;
   const comments = (r[col.comments] ?? '').trim();
   // Reg column sometimes holds several plates separated by commas/slashes/spaces
   // (e.g. "ACZ755, DAB364, DGY148") - split first, validate each token's shape,
@@ -114,11 +148,15 @@ for (const r of table.slice(1)) {
   const plates = regPlates.length ? regPlates : extractPlates(comments);
   const primaryPlate = plates[0] ?? null;
   const isCamera = /^camera$/i.test(patroller);
-  const officerId = !isCamera ? KNOWN_OFFICERS[patroller.toLowerCase()] ?? null : null;
+  // Some rows record TWO officers on a joint patrol, separated by a newline/comma in one cell
+  // (e.g. "Colin Eathorne\nWade Sutherland-Berkett") - take the first name that resolves to a
+  // known officer rather than requiring the whole raw cell to match a single known name exactly.
+  const patrollerNames = patroller.split(/[\n,]+/).map((s) => s.trim().toLowerCase()).filter(Boolean);
+  const officerId = !isCamera ? patrollerNames.map((n) => KNOWN_OFFICERS[n]).find(Boolean) ?? null : null;
   const externalRef = `rm_patrol_import:${clientCode}:${job || createHash('md5').update(occurredAt + locationText + comments).digest('hex').slice(0, 8)}`;
   const payload = {
     source: 'rm_patrol_log_import', client_code: clientCode, job_number: job || null,
-    patroller_raw: patroller, location_raw: locationText, comments: comments || null,
+    patroller_raw: patroller, location_raw: locationText, reserve_raw: reserveCode || null, comments: comments || null,
     reg_raw: (r[col.reg] ?? '').trim() || null, plates_found: plates, job_time_hours: r[col.jobTime] || null,
     job_kms: r[col.jobKms] || null, issue: r[col.issue] || null, action_by: r[col.actionBy] || null,
   };
@@ -140,14 +178,23 @@ for (const r of table.slice(1)) {
   }
 }
 
-console.log(`Parsed ${table.length - 1} rows (${skipped} skipped: no date; ${skippedNoZone} skipped: no resolvable zone for "${'Location'}"): ${observationsBatch.length} -> observations, ${eventsBatch.length} -> location_events`);
+console.log(`Parsed ${table.length - 1} rows (${skipped} skipped: no date; ${skippedNoZone} skipped: no resolvable zone via Reserve/Location): ${observationsBatch.length} -> observations, ${eventsBatch.length} -> location_events`);
 
-const data = { org_id: orgId, client_code: clientCode, observations: observationsBatch, events: eventsBatch };
-const json = JSON.stringify(data);
-if (json.includes('$json$')) throw new Error('data must not contain the $json$ delimiter');
+// Large logs (thousands of rows, verbose free-text comments) can produce a combined JSON
+// payload the Management API rejects as "request entity too large" in one request - chunk
+// both batches into fixed-size slices and run one transaction per chunk, summing results.
+const CHUNK_SIZE = 300;
+function chunk(arr, size) { const out = []; for (let i = 0; i < arr.length; i += size) out.push(arr.slice(i, i + size)); return out; }
+const obsChunks = chunk(observationsBatch, CHUNK_SIZE);
+const evtChunks = chunk(eventsBatch, CHUNK_SIZE);
+const totalChunks = Math.max(obsChunks.length, evtChunks.length, 1);
 
-const body = `
-CREATE TEMP TABLE _import_counts (obs_inserted int, obs_skipped int, evt_inserted int, evt_skipped int);
+async function runChunk(obsSlice, evtSlice) {
+  const data = { org_id: orgId, client_code: clientCode, observations: obsSlice, events: evtSlice };
+  const json = JSON.stringify(data);
+  if (json.includes('$json$')) throw new Error('data must not contain the $json$ delimiter');
+  const body = `
+CREATE TEMP TABLE IF NOT EXISTS _import_counts (obs_inserted int, obs_skipped int, evt_inserted int, evt_skipped int);
 DO $import$
 DECLARE
   v_data jsonb := $json$${json}$json$::jsonb;
@@ -188,16 +235,27 @@ BEGIN
   INSERT INTO _import_counts VALUES (v_obs_count, v_obs_skip, v_evt_count, v_evt_skip);
 END
 $import$;
-SELECT * FROM _import_counts;
+SELECT * FROM (SELECT obs_inserted, obs_skipped, evt_inserted, evt_skipped FROM _import_counts ORDER BY ctid DESC LIMIT 1) t;
 `;
-
-const sql = `BEGIN;
+  const sql = `BEGIN;
 set local request.jwt.claim.sub = '${ACTOR_ID}';
 ${body}${mode === 'apply' ? 'COMMIT;' : 'ROLLBACK;'}`;
-const response = await fetch(`https://api.supabase.com/v1/projects/${PROJECT_REF}/database/query`, {
-  method: 'POST', headers: { Authorization: `Bearer ${token}`, 'Content-Type': 'application/json' }, body: JSON.stringify({ query: sql }),
-});
-const text = await response.text();
-if (!response.ok) { console.error(`${mode}: failed`, text.slice(0, 3000)); process.exit(1); }
+  const response = await fetch(`https://api.supabase.com/v1/projects/${PROJECT_REF}/database/query`, {
+    method: 'POST', headers: { Authorization: `Bearer ${token}`, 'Content-Type': 'application/json' }, body: JSON.stringify({ query: sql }),
+  });
+  const text = await response.text();
+  if (!response.ok) throw new Error(text.slice(0, 3000));
+  return JSON.parse(text)[0];
+}
+
+const totals = { obs_inserted: 0, obs_skipped: 0, evt_inserted: 0, evt_skipped: 0 };
+for (let i = 0; i < totalChunks; i += 1) {
+  const obsSlice = obsChunks[i] ?? [];
+  const evtSlice = evtChunks[i] ?? [];
+  if (!obsSlice.length && !evtSlice.length) continue;
+  console.log(`chunk ${i + 1}/${totalChunks}: ${obsSlice.length} observations, ${evtSlice.length} events`);
+  const row = await runChunk(obsSlice, evtSlice);
+  for (const key of Object.keys(totals)) totals[key] += Number(row[key] ?? 0);
+}
 console.log(`${mode}: ${clientCode} patrol log import`);
-console.log(text.slice(0, 1000));
+console.log(JSON.stringify(totals));

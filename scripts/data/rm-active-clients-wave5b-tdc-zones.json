@@ -1,0 +1,24 @@
+{
+  "seed_key": "rm_active_clients_wave5b_tdc_zones_2026-09-23",
+  "title": "R&M — Tasman District Council: 3 more significant zones (Spooners Lookout, Bartletts Rd, Richmond Recycle Centre)",
+  "provider_organization_id": "e96d71c9-28a6-4d4a-b0f3-1c4ecdaa9c13",
+  "actor_user_id": "1b02ab97-8611-40ab-a3a0-b5c74589db58",
+  "retrieved_at": "2026-09-23",
+  "provider_modules": [],
+  "notes": [
+    "Wave 5 missed 3 codes with meaningful raw-log volume (SPOO=165, BART=70, RICH=80) - added here after a second geocoding pass. Same 'matches EXISTING org via parent_organization_id' safety note as wave 5."
+  ],
+  "organizations": [
+    {
+      "key": "tdc",
+      "name": "Tasman District Council",
+      "organization_type": "government",
+      "zone_defaults": { "zone_type": "patrol_route", "module_key": "patrol", "rule_type": "unrestricted", "radius_m": 500 },
+      "zones": [
+        { "key": "tdc:spooners", "name": "Spooners Lookout (TDC)", "lat": -41.4891967, "lng": 172.8987255, "radius_m": 2000, "gazetteer": { "name": "Belgrove", "source": "google_address", "note": "Spooner Range area near Belgrove - approximate, no confident exact lookout point" } },
+        { "key": "tdc:bartletts", "name": "Bartletts Rd (TDC)", "lat": -41.3302978, "lng": 173.1393774, "gazetteer": { "name": "Bartlett Road", "source": "google_place", "note": "Hope, Richmond" } },
+        { "key": "tdc:recycle-centre", "name": "Richmond Recycle Centre (TDC)", "lat": -41.3290089, "lng": 173.1907598, "gazetteer": { "name": "Richmond Resource Recovery Centre", "source": "google_place", "note": "14 Fittal Street - matches List sheet 'Beach Rd - Recycle Centre' -> RICH" } }
+      ]
+    }
+  ]
+}

@@ -1,0 +1,36 @@
+{
+  "seed_key": "rm_active_clients_wave5_tdc_zones_2026-09-23",
+  "title": "R&M — Tasman District Council: additional real patrol zones found in the full 6,366-row raw log (Phase 2 import prep)",
+  "provider_organization_id": "e96d71c9-28a6-4d4a-b0f3-1c4ecdaa9c13",
+  "actor_user_id": "1b02ab97-8611-40ab-a3a0-b5c74589db58",
+  "retrieved_at": "2026-09-23",
+  "provider_modules": [],
+  "notes": [
+    "Wave 1 seeded only 2 TDC zones (Rabbit Island, Appleby Recreation Reserve) from a small sample. Exporting the full 6,366-row DATA sheet plus the List reference sheet found 43 real CODE values in use. This wave adds the next 11 highest-value, confidently-geocoded ones (all verified live via linz-lookup address_autocomplete, cross-checked against the client's own List sheet Name->Code lookup).",
+    "Busch Reserve (Aniseed Valley Road) is confirmed via this List sheet + geocode to be a TDC reserve, NOT a Nelson City Council one - NCC's own log also mentions 'Busch Reserve' but that reference could not be confidently geocoded to anywhere in Nelson City and was deliberately left unmapped for NCC; this TDC zone is the real one.",
+    "Haldane Rd and Rototai Reserve share the same CODE (TAKA) in TDC's own DATA sheet for some rows despite being two distinct real places in the Takaka/Golden Bay area (confirmed via distinct comment content - Haldane Rd rows mention river/greenwaste dumping, Rototai Reserve rows mention walkers/dogs) - both zones are added here, but the code TAKA itself is deliberately NOT used as a zone-map key (it's ambiguous between the two); the importer resolves these via the Location text column instead.",
+    "IMPORTANT: matches EXISTING org 'Tasman District Council' (organization_id 54ade19f-0bb7-45ca-a32d-2d87214c4e77) via the seed script's parent_organization_id=R&M + lower(name) match - verified safe: a second, unrelated 'Tasman District Council' org exists in this project with parent_organization_id=null, but the script's WHERE parent_organization_id = provider clause cannot match it.",
+    "No 'agreement' key included deliberately - TDC's operational agreement already exists and is accepted from wave 1; new zones are linked to it via a direct SQL INSERT INTO service_agreement_locations after this seed applies, same pattern as NCC wave4/DOC wave3b."
+  ],
+  "organizations": [
+    {
+      "key": "tdc",
+      "name": "Tasman District Council",
+      "organization_type": "government",
+      "zone_defaults": { "zone_type": "patrol_route", "module_key": "patrol", "rule_type": "unrestricted", "radius_m": 500 },
+      "zones": [
+        { "key": "tdc:busch", "name": "Busch Reserve (TDC)", "lat": -41.3869702, "lng": 173.15711, "gazetteer": { "name": "Busch Reserve", "source": "google_place", "note": "374 Aniseed Valley Road" } },
+        { "key": "tdc:saxton", "name": "Saxton Field (TDC)", "lat": -41.3281806, "lng": 173.2178994, "radius_m": 1500, "gazetteer": { "name": "Saxton Stadium", "source": "google_place", "note": "Stoke, Nelson - large multi-field sports park" } },
+        { "key": "tdc:baigent", "name": "Baigent Reserve (TDC)", "lat": -41.4073021, "lng": 173.0359698, "gazetteer": { "name": "Edward Baigent Reserve", "source": "google_place", "note": "Wakefield-Kohatu Highway, Wakefield" } },
+        { "key": "tdc:estuary-lane", "name": "Estuary Lane (TDC)", "lat": -41.3278804, "lng": 173.1764806, "gazetteer": { "name": "Estuary Place", "source": "google_place", "note": "Richmond" } },
+        { "key": "tdc:haldane", "name": "Haldane Rd (TDC)", "lat": -40.8467556, "lng": 172.7985599, "radius_m": 1500, "gazetteer": { "name": "Haldane Road", "source": "google_place", "note": "Takaka/Golden Bay" } },
+        { "key": "tdc:rototai", "name": "Rototai Reserve (TDC)", "lat": -40.8431894, "lng": 172.8198565, "gazetteer": { "name": "Rototai Road", "source": "linz_address", "note": "Takaka/Golden Bay" } },
+        { "key": "tdc:lee-valley", "name": "Lee Valley Reserve (TDC)", "lat": -41.4092661, "lng": 173.1459319, "gazetteer": { "name": "Lee Valley Reserve", "source": "google_place", "note": "Wairoa Valley, Brightwater" } },
+        { "key": "tdc:tadmor", "name": "Tadmor Valley Rd (TDC)", "lat": -41.4135251, "lng": 172.7918368, "radius_m": 1500, "gazetteer": { "name": "Tadmor Valley Road", "source": "google_place", "note": "Tapawera/Wakefield" } },
+        { "key": "tdc:washbourn", "name": "Washbourn Gardens (TDC)", "lat": -41.3436911, "lng": 173.1864683, "gazetteer": { "name": "Washbourn Gardens", "source": "google_place", "note": "15 Oxford Street, Richmond" } },
+        { "key": "tdc:motueka-river", "name": "Motueka River (TDC)", "lat": -41.1364262, "lng": 173.0204813, "radius_m": 1500, "gazetteer": { "name": "Motueka Marina", "source": "google_place", "note": "approximate - riverside/marina area" } },
+        { "key": "tdc:hoddys", "name": "Hoddys Reserve (TDC)", "lat": -41.2922222, "lng": 173.0966667, "gazetteer": { "name": "Hoddy Estuary Park", "source": "google_place", "note": "232 The Coastal Highway, Best Island" } }
+      ]
+    }
+  ]
+}
