@@ -198,6 +198,44 @@ zones above. This scope is for active build/seed sessions cleaning up their
 own bugs, not a general-purpose "delete a place" escape hatch — the
 2026-09-15 permanence rule still stands for anything with real history.
 
+## Provenance (2026-09-23) — this model is the real ratified "v2 house model", not a reconstruction guess
+
+> This file previously carried no GitLab provenance header, unlike almost
+> every other file in `docs/canon/` (19 of 23 were already pulled on
+> 2026-09-14). Read at source now
+> (`docs/proposals/CANONICAL_PLACE_ANCHOR_V2_HOUSE.md`, owner-ratified
+> 2026-08-05, 5-lens investigation by Jim/2iC, with a self-correcting
+> "foundation-walk gap audit" follow-up dated 2026-08-06) — access had been
+> lost before this file got its turn in the 2026-09-14 pass, so it was
+> rebuilt from live schema alone on 2026-09-15 instead.
+
+The good news: the 2026-09-15 rebuild **independently converged on the same
+real decision** — `locations` (the house) is the canonical place anchor;
+`client_sites`/`location_zones` are facets attached by `location_id`, not
+siblings attached by a zone's own `site_id`. Even the same historical orphan
+(the "Lowburn" Downer/LINZ case, both anchors null) shows up in both the
+GitLab investigation and this repo's live "Live facts" table below — it is
+the same real row, independently rediscovered.
+
+**One precision this repo's rebuild did not have, worth stating explicitly**
+(from the ratified proposal's own self-correcting gap audit, GAP 1): the
+site facet is a **route** to the house, never a co-equal fallback owner.
+Do not write ownership-resolution logic as `COALESCE(house, site)` — that
+framing was explicitly proposed once, caught by the owner's own audit, and
+retracted as "doctrinally wrong". Always resolve ownership through the
+house (`locations.organization_id`); `client_sites`/`location_zones` are
+how a user reaches it, not a second place of truth for it.
+
+**One thing this repo's rebuild added that the original GitLab ruling did
+not cover:** `canonical_places`, the cross-org registry sitting BELOW the
+house (one real-world place, searched and linked by many organisations'
+houses). The 2026-08-05 proposal ratified the house (`locations`) as
+canonical for a SINGLE organisation's view of a place; it does not mention
+a cross-org registry beneath it. Treat `canonical_places` as a genuine,
+sound extension built on top of the real ratified house model — not a
+contradiction of it, and not something to remove for "not being in the
+lineage".
+
 ## Live facts (2026-09-15, after the migration)
 
 | Fact | Value |
