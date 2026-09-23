@@ -2,6 +2,7 @@ import React, { useCallback, useEffect, useRef, useState } from 'react';
 import { AlertTriangle, CheckCircle2, ClipboardPlus, Crosshair, FileText, MapPin, RefreshCw, Search, Send, X } from 'lucide-react';
 import { useLocation } from 'react-router-dom';
 import { useAuth } from '../context/AuthContext';
+import { useServiceRelationships } from '../context/ServiceRelationshipContext';
 import { resolveAddressCandidates, resolveAddressForCoordinates } from '../lib/locationAddress';
 import { describeLoadFailures } from '../lib/friendlyLoadError';
 import { supabase } from '../lib/supabase';
@@ -23,6 +24,7 @@ const OfficerFieldReportPage: React.FC = () => {
   const investigationId = new URLSearchParams(location.search).get('investigation');
   const dispatchJobId = new URLSearchParams(location.search).get('job');
   const { profile } = useAuth();
+  const { selectedSite, selectedZone, locationStatus } = useServiceRelationships();
   const [reports, setReports] = useState<ReportRecord[]>([]);
   const [shifts, setShifts] = useState<ShiftOption[]>([]);
   const [form, setForm] = useState(initialForm);
@@ -110,6 +112,9 @@ const OfficerFieldReportPage: React.FC = () => {
       p_address: form.address.trim() || null, p_gps_lat: gps.lat, p_gps_lng: gps.lng, p_shift_id: form.shiftId || null,
       p_immediate_action: form.immediateAction.trim() || null, p_follow_up_required: form.followUp,
       p_follow_up_notes: form.followUp ? form.followUpNotes.trim() : null,
+      // Structured place from the already-live geofence resolution (ServiceRelationshipContext),
+      // not the free-text address/GPS pair above - complements it, never overrides the narrative.
+      p_site_id: selectedSite?.id ?? null, p_zone_id: selectedZone?.id ?? null,
     });
     const result = (data as Array<{ id: string; received_at: string; shift_id: string | null }> | null)?.[0];
     if (submitError || !result) setError(describeLoadFailures([['report submission', submitError]]) ?? 'Report receipt was not confirmed. Your entries remain available for retry.');
