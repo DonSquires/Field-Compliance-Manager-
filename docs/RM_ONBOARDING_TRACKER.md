@@ -343,15 +343,15 @@ turn beats false completeness.
 3. **STAND's "Borlace Forest" zone — RESOLVED 2026-09-23.** Placed via
    `linz-lookup` during STAND's own Phase 2 run (Borlase Avenue, St Arnaud
    area) — see the STAND write-up below.
-4. **Run the Phase 2 importer against the remaining ~8 clients** (Thomas Bros,
-   Stringer, Fulton Hogan, DART, PVT, Private-Parks, Private-Redvale-Merc) —
-   proven against DOC, NCC, TDC, M&R, Taylors, STAND, AND Birdhurst now (seven
-   clients, several different raw-sheet conventions, and both supported place
-   types — zones-only and mixed site+zone — the importer generalized cleanly
-   each time via header-candidate lists and a case-insensitive matcher rather
-   than per-client forks). Birdhurst additionally proved the "one billing code
-   shared by several real places, disambiguated only by free-text Location"
-   pattern — check for this before assuming a code = one physical place. Each client needs
+4. **Run the Phase 2 importer against the remaining ~7 clients** (Stringer,
+   Fulton Hogan, DART, PVT, Private-Parks, Private-Redvale-Merc) — proven
+   against DOC, NCC, TDC, M&R, Taylors, STAND, Birdhurst, AND Thomas Bros now
+   (eight clients). One reusable gotcha found this round: giving two distinct
+   real sites the IDENTICAL address string silently collapses them into one
+   house/site via `address_match_key` (the seed script's own dedup logic) —
+   always use a distinct address per site key, even an adjacent real address
+   from the same geocode cluster, and check the dry-run's `sites`/`houses`
+   counts match your intent before applying. Each client needs
    its own zone/site-name-to-id map built from its actual
    Location/Reserve/CODE/Forest/Site column values (same process used so
    far: export full raw sheet to CSV, count distinct location values,
@@ -448,6 +448,26 @@ turn beats false completeness.
 - Result: 2 observations + 129 location_events, verified live (0 garbage
   plates, 0 duplicate refs, real events correctly attributed across all 5
   MOT-disambiguated places including the newly-created Central Rd zone).
+
+## PHASE 2 RUN AGAINST Thomas Bros (2026-09-23) — 8th client, address-collision gotcha
+
+- Wave 1 seeded 2 of 5 real COMPANY sites from the Details sheet (Talasea
+  Packhouse, Dehra Doon Packhouse) — missed Accomodation (RIA), Shop (RIS),
+  and Kelso (KEL). Confirmed via the full 1,173-row 2025 sheet that all 5
+  documented codes are genuinely in use, no undocumented codes this time.
+- **Real seed-script gotcha found**: giving RIA and RIS the identical address
+  string ("opposite Talasea" gave no distinct street number) made the first
+  dry-run silently create only 1 site instead of 2 — `address_match_key`
+  matched the second site onto the first site's already-created house. Fixed
+  by using two adjacent real addresses from the same LINZ candidate cluster
+  (516/518 Main Road Riwaka) instead of reusing one string twice. Always
+  check the dry-run's `sites`/`houses` counts against how many distinct real
+  places you actually expect before applying.
+- Kelso's own name search returned only a same-named locality 500km away in
+  Otago — clearly the wrong region, so created UNPLACED rather than accept it.
+- No new officers (Rob Crawford, Colin Nelson, Pete Crawford all already known).
+- Result: 14 observations + 47 location_events, verified live (0 garbage, 0
+  dupes, real events across all 5 sites including the newly-placed ones).
 
 ## Conventions established / reusable
 

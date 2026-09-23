@@ -1,0 +1,27 @@
+{
+  "seed_key": "rm_active_clients_wave10_thomasbros_2026-09-23",
+  "title": "R&M — Thomas Bros: additional real sites found in the 1,173-row raw log (Phase 2 import prep)",
+  "provider_organization_id": "e96d71c9-28a6-4d4a-b0f3-1c4ecdaa9c13",
+  "actor_user_id": "1b02ab97-8611-40ab-a3a0-b5c74589db58",
+  "retrieved_at": "2026-09-23",
+  "provider_modules": [],
+  "notes": [
+    "Wave 1 seeded 2 of 5 real COMPANY rows documented in the Details sheet (Talasea Packhouse, Dehra Doon Packhouse) - missed Accomodation (RIA, opposite Talasea on Main Rd), Shop (RIS, ice cream/fruit shop on Main Rd), and Kelso (KEL). Confirmed via the full 1,173-row 2025 sheet's real Site-code frequency that all 5 documented codes are genuinely in use (no undocumented codes found this time, unlike Birdhurst/M&R/STAND) - RIA and RIS both sit in the same Main Road Riwaka cluster near the existing Talasea site (no distinct street number given in the source); used two adjacent real addresses from the same LINZ cluster (516/518) rather than the identical string for both, since giving them the exact same address collapsed them into one house/site via address_match_key on the first dry-run attempt. Kelso's own name search returned only a same-named locality in Otago (500km south, clearly wrong region) - created UNPLACED rather than accept a wrong-region match.",
+    "No new officers found - Rob Crawford, Colin Nelson, Pete Crawford are all already known."
+  ],
+  "organizations": [
+    {
+      "key": "thomasbros",
+      "name": "Thomas Bros",
+      "organization_type": "private_enterprise",
+      "sites": [
+        { "key": "thomasbros:accomodation", "name": "Accomodation (Main Rd, opposite Talasea)", "address": "516 Main Road Riwaka, Riwaka, Motueka", "site_type": "other", "lat": -41.0772561, "lng": 172.9973731, "source": "linz-lookup" },
+        { "key": "thomasbros:shop", "name": "Shop (Main Rd, ice cream/fruit)", "address": "518 Main Road Riwaka, Riwaka, Motueka", "site_type": "commercial_premises", "lat": -41.0772561, "lng": 172.9973731, "source": "linz-lookup" }
+      ],
+      "zone_defaults": { "zone_type": "patrol_route", "module_key": "patrol", "rule_type": "unrestricted", "radius_m": 800 },
+      "zones": [
+        { "key": "thomasbros:kelso", "name": "Kelso (Thomas Bros)", "status": "unplaced - name search only found a same-named locality in Otago, clearly the wrong region; no confident local match found" }
+      ]
+    }
+  ]
+}
