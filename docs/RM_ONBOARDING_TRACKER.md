@@ -851,6 +851,60 @@ turn beats false completeness.
   *every* CHECK constraint referencing the old set in the same migration —
   don't wait for a live usage attempt to discover the gap.
 
+## Investigation system hardening (2026-09-24) — building it out for real trespass-dispute data
+
+- Found Wrattens' real patrol log (`ACTIVE Wrattens Camera and Patrol WRAT.xlsx`)
+  contains a genuinely serious, real, multi-month neighbour dispute: Ron/Sue/
+  Richard Post (active trespass notice, alleged threats quoted directly, an
+  aggressive-driving Police file that led to a conviction, a poaching Police
+  file, alleged deliberate harassment/property damage) and a separate Mary-Ann
+  Carr easement/access dispute (also active trespass notice, explicit legal
+  threats) — plus two already-closed matters (Faulknor burglary, Lummis/
+  Renish fuel theft) tangled into the same raw log. Real PII throughout:
+  phone numbers, personal emails, a physical address, vehicle plates, direct
+  quotes of alleged threats, and live correspondence with two named Motueka
+  Police officers.
+- Researched both external enterprise-investigation patterns AND this
+  build's own prior design work before touching anything (`docs/
+  DEEP_BUILD_AUDIT_2026-09-08.md`, `docs/ENTERPRISE_COSTING_AND_PNL_DESIGN.md`,
+  `docs/SAMPLE_DATA_EXPANSION_REVIEW.md`) — the `investigations`/
+  `investigation_events`/`investigation_links` system already exists
+  (migration `20260907001000_investigation_workspace_and_followup_dispatch.sql`)
+  and already has real, already-documented gaps blocking safe use for real
+  third-party data:
+  - `link_investigation_entity` accepted ANY `entity_id` for entity types
+    other than `field_report`/`incident` with zero existence/org check
+    (High finding, 2026-09-08, unfixed until now) — exactly the path this
+    session needs for `entity_type='person'` (named dispute parties).
+  - `create_investigation`'s `p_lead_user_id` wasn't validated same-org.
+  - All 3 tables were flat `org_access_allowed` SELECT — any R&M staff
+    member could read full dispute narrative/PII; no tiering at all.
+- Fixed via `supabase/migrations/20260924010000_investigation_workspace_hardening.sql`:
+  - Added `'trespass'` to `investigation_type` (Post/Carr disputes didn't
+    fit any existing value).
+  - `link_investigation_entity` now verifies the entity really exists (and,
+    for org-scoped types, belongs to the investigation's own org) before
+    linking — `canonical_people`/`canonical_vehicles` are checked for
+    existence only, since they're the cross-org identity spine, not
+    org-scoped facts.
+  - `create_investigation`'s lead_user_id is now validated same-org.
+  - Base tables tightened to admin-or-assigned-lead-only SELECT (matches
+    the existing `person_permits`/`person_permits_fieldwork` tiering
+    pattern); added `investigations_summary` — a redacted, `org_access_
+    allowed`-visible view (reference/type/status/dates only, no narrative)
+    so ordinary staff can see an investigation exists without reading the
+    sensitive detail.
+  - Live-verified: a bogus entity id is now rejected with a clear error; a
+    real `canonical_people` id still links successfully. Schema/Atlas
+    regenerated, full `apps/web` suite green (298/1278).
+- **Not yet done**: the real Wrattens import itself — 4 separate
+  investigations (Post `trespass`/`legal_hold`, Carr `trespass`/
+  `legal_hold`, Faulknor `other`/closed, Lummis-Renish `other`), real
+  `canonical_people` for every named party (Post family, Carr, the two
+  named Police officers, Faulknor, Lummis, Renish), linked via the now-
+  hardened RPC, with the raw log rows imported as `investigation_events`.
+  This is the immediate next step.
+
 ## Conventions established / reusable
 
 - Live SQL via the Supabase Management API (`SUPABASE_ACCESS_TOKEN`, from
