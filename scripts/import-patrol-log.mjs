@@ -137,7 +137,7 @@ const col = {
   location: pick('Location'), // fallback zone key: free-text detail, or the only place column on non-council sheets
   comments: pick('Comments', 'Description/Comments'),
   reg: pick('Reg'),
-  jobTime: pick('Job Time', 'Job Time NCC', 'Job Time OFO'), jobKms: pick('Job KMs', 'Job Km NCC', 'Job kms', 'Job KM OFO', 'Job KM'),
+  jobTime: pick('Job Time', 'Job Time NCC', 'Job Time OFO', 'Job Time TPFL'), jobKms: pick('Job KMs', 'Job Km NCC', 'Job kms', 'Job KM OFO', 'Job KM', 'Job KM TPFL'),
   issue: pick('Issue'), actionBy: pick('Action by', 'Action By'),
 };
 

@@ -629,15 +629,14 @@ turn beats false completeness.
   (1,664.2km total) and 8,700 location_events (114,080.8km total)** — the
   first real proof the km-tracking work from earlier today actually works
   end-to-end on live data, not just the schema existing.
-- Not yet done: TPFL's own main patrol file, "Cycle Trails Patrol Log 2021"
-  (belongs to TPFL), "MPC log" (belongs to TPFL — Mainland Pest Control's own
-  pest-control activity stream), "Digger work 2023" and "OFO Culling Log
-  2023" (both belong to OFO). Mainland Pest Control now exists as its own
+- Not yet done: "Cycle Trails Patrol Log 2021" (belongs to TPFL), "MPC log"
+  (belongs to TPFL — Mainland Pest Control's own pest-control activity
+  stream), "Digger work 2023" and "OFO Culling Log 2023" (both belong to
+  OFO). Mainland Pest Control now exists as its own
   `organization_type='contractor'` org with a service_agreement to R&M
   (`1ccdd3fb-0b0a-478d-8441-6f14a85172aa`), per owner clarification it's a
   real subcontracting pest-control company, not a subsidiary/division of R&M.
 - **UI + DB verification (2026-09-23, later same day)**: logged into the real
-  production app (`www.fcmanager.co.nz`) as the account owner to visually
   confirm the OFO import, not just query the database. Found and fixed a
   real bug the DB-only checks had missed: the zone-seeding script looped
   over its candidate list 2-4 times, creating **145 completely empty
@@ -666,6 +665,48 @@ turn beats false completeness.
   against the expected candidate count immediately after seeding, before
   moving on to the next step — this bug would have been caught in seconds
   right after creation instead of being found later during a UI pass.
+
+## PHASE 2 RUN AGAINST TPFL/Tasman Pine Forest (2026-09-23) — 16th client
+
+- TPFL's own file ("ACTIVE TasmanPineForest camera and patrol TPFL.xlsx",
+  same List+Summary+year-DATA shape as OFO) had 9,650 real rows across 2025
+  (7,435) + 2026 (4,494). 25 of its forest codes matched TPFL's 26
+  already-seeded zones directly (Dovedale had no corresponding code in this
+  file — fine, just no patrol history recorded against it in this
+  particular log).
+- 6 new real zones needed, found by cross-referencing real row content (not
+  guessed): Harakeke and Mahana (real named forests on TPFL's own List sheet
+  that simply weren't seeded yet), a general/admin catch-all (matching
+  OFO's own convention), Fringed Hill and Inwoods (real, substantial
+  activity — camera installs/activations — missing from the List sheet
+  entirely), and Rabbit Island (a real place TPFL patrols independently of
+  TDC's/PF Olsen's own separate Rabbit Island zones — same "don't invent
+  cross-org shared zones" precedent as before).
+- Found real evidence TPFL and OFO are adjacent forestry estates with some
+  shared/boundary infrastructure: one row's comment literally reads "Remove
+  OFO lock and resecure gate". Three low-volume codes (`NORR`, `BERR`,
+  `SPOO`) that coincidentally reuse OFO's own code letters were checked
+  against real row content first — all three point at TPFL's own existing
+  "Spooners Forest (TPFL)" zone (Spooners Top Rd Nth/Sth, Spooners Gate),
+  not OFO's unrelated Norris/Berrymans zones — rolled up into that existing
+  zone rather than creating confusing near-duplicates. 6 more rows across 4
+  other low-volume codes (`SMIT`, `CULL`, `DONA`, `SERP`, `WAIR`) had no
+  strong content evidence either way and were deliberately left unmapped
+  (skipped, not guessed).
+- Fixed the same class of importer gap OFO needed: added `'Job Time TPFL'`
+  / `'Job KM TPFL'` as header picker candidates (TPFL's file uses the
+  per-client-suffixed convention, not OFO's bare `Job KM`).
+- Result: 509 observations + 9,107 location_events, verified live (0
+  garbage plates, 0 duplicate refs). `distance_km` populated on 509
+  observations (1,622.9km) and 9,107 location_events (94,511.1km).
+- Learned this run: seed new zones one at a time from an explicit, small,
+  hand-reviewed list (not a loop over every candidate in a reference sheet)
+  — avoids the OFO duplicate-seeding bug entirely by construction, no
+  cleanup needed afterward.
+- Still open: Cycle Trails (TPFL, 276 rows), MPC pest-control log (TPFL, 173
+  rows, attribute to Pete/Rob Crawford), Digger work order (OFO, 1 row,
+  ready via the now zone-capable Workshop RPC), OFO Culling Log 2023
+  (~23 rows).
 
 ## Conventions established / reusable
 
