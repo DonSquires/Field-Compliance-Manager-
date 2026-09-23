@@ -343,13 +343,15 @@ turn beats false completeness.
 3. **STAND's "Borlace Forest" zone — RESOLVED 2026-09-23.** Placed via
    `linz-lookup` during STAND's own Phase 2 run (Borlase Avenue, St Arnaud
    area) — see the STAND write-up below.
-4. **Run the Phase 2 importer against the remaining ~9 clients** (Birdhurst,
-   Thomas Bros, Stringer, Fulton Hogan, DART, PVT, Private-Parks,
-   Private-Redvale-Merc) — proven against DOC, NCC, TDC, M&R, Taylors, AND
-   STAND now (six clients, several different raw-sheet conventions, and both
-   supported place types — zones-only and mixed site+zone — the importer
-   generalized cleanly each time via header-candidate lists and a
-   case-insensitive matcher rather than per-client forks). Each client needs
+4. **Run the Phase 2 importer against the remaining ~8 clients** (Thomas Bros,
+   Stringer, Fulton Hogan, DART, PVT, Private-Parks, Private-Redvale-Merc) —
+   proven against DOC, NCC, TDC, M&R, Taylors, STAND, AND Birdhurst now (seven
+   clients, several different raw-sheet conventions, and both supported place
+   types — zones-only and mixed site+zone — the importer generalized cleanly
+   each time via header-candidate lists and a case-insensitive matcher rather
+   than per-client forks). Birdhurst additionally proved the "one billing code
+   shared by several real places, disambiguated only by free-text Location"
+   pattern — check for this before assuming a code = one physical place. Each client needs
    its own zone/site-name-to-id map built from its actual
    Location/Reserve/CODE/Forest/Site column values (same process used so
    far: export full raw sheet to CSV, count distinct location values,
@@ -418,6 +420,34 @@ turn beats false completeness.
 - Result: 398 observations + 2695 location_events, verified live (0 garbage
   plates, 0 duplicate external_refs, real recent+historical dates spanning
   2023–2026 confirming the serial-date fix works across the full range).
+
+## PHASE 2 RUN AGAINST Birdhurst (2026-09-23) — 7th client, shared-code disambiguation
+
+- Wave 1 seeded 1 site (Birdhurst Packhouse) + 4 zones from the Details
+  sheet's 6 documented COMPANY rows — but missed "Golden Bay Fruit /
+  Birdhurst Sheds" entirely, and missed a separate FAMILY section (Reese and
+  Andrea's home, Sue Wilkins' home) under an explicit "NEW CONTRACT for
+  residential security" note. Exporting the full 762-row 2025 sheet and
+  counting real (dated) Site-code frequency also found 2 more real places
+  never in the Details table at all: Central Rd (20 rows) and a covert camera
+  at Staples St (6 rows).
+- **Real pattern found: one billing code can be shared by several distinct
+  real places, disambiguated only by free-text Location.** `MOT` covers
+  Motueka Orchard, Birdhurst Packhouse, Martins Block, Central Rd, AND Staples
+  St — five different real places, not one. The zone-map deliberately has NO
+  `MOT` key; each place is matched via its own Location-text variants instead
+  (13 of 79 `MOT` rows have no Location text at all and are correctly left
+  unresolved rather than guessed which of the five they belong to).
+- 3 new `client_sites` (Golden Bay Fruit, Reese and Andrea's home, Sue
+  Wilkins' home) + 2 new `location_zones` (Central Rd, Staples St), all
+  confidently geocoded via `linz-lookup` from exact addresses given in the
+  Details sheet. Reese/Andrea and Sue Wilkins are real named individuals'
+  home addresses — same PII class as PVT's private clients, no extra table
+  security needed beyond the existing model (this is not the
+  Wrattens-style active-dispute sensitivity).
+- Result: 2 observations + 129 location_events, verified live (0 garbage
+  plates, 0 duplicate refs, real events correctly attributed across all 5
+  MOT-disambiguated places including the newly-created Central Rd zone).
 
 ## Conventions established / reusable
 

@@ -1,0 +1,30 @@
+{
+  "seed_key": "rm_active_clients_wave9_birdhurst_2026-09-23",
+  "title": "R&M — Birdhurst: additional real sites/blocks found in the 762-row raw log (Phase 2 import prep)",
+  "provider_organization_id": "e96d71c9-28a6-4d4a-b0f3-1c4ecdaa9c13",
+  "actor_user_id": "1b02ab97-8611-40ab-a3a0-b5c74589db58",
+  "retrieved_at": "2026-09-23",
+  "provider_modules": [],
+  "notes": [
+    "Wave 1 seeded 1 site (Birdhurst Packhouse) + 4 zones (Davies, Martins Block, Motueka Orchard, Strongs Block) from the Details sheet's 6 documented COMPANY rows - but missed Golden Bay Fruit/Birdhurst Sheds (GBF), and the Details sheet also has a separate FAMILY section (Reese and Andrea's home, Sue Wilkins' home) under an explicit 'NEW CONTRACT for residential security' note that was not previously captured. Exporting the full 762-row 2025 sheet and counting real (dated) Site-code frequency also found 2 more real MOT-coded sub-places not in the Details table at all: Central Rd (20 rows) and a covert camera at Staples St (6 rows, described as 'Birdhurst - Staples St Covert').",
+    "Confirmed MOT is NOT one physical place - it is shared by Motueka Orchard, Birdhurst Packhouse, Martins Block, Central Rd, AND Staples St, disambiguated only by free-text Location. The zone-map therefore intentionally has NO 'MOT' key; each real place is matched via its own Location-text variants instead (13 of 79 MOT rows have no Location text at all and are correctly left unresolved rather than guessed).",
+    "R&M's own internal admin rows (N/A/BASE, ALL, ALLF - all low volume) deliberately left unmapped, same pattern as PVT/M&R."
+  ],
+  "organizations": [
+    {
+      "key": "birdhurst",
+      "name": "Birdhurst",
+      "organization_type": "private_enterprise",
+      "sites": [
+        { "key": "birdhurst:golden-bay-fruit", "name": "Golden Bay Fruit / Birdhurst Sheds", "address": "77 Queen Victoria Street, Motueka", "site_type": "commercial_premises", "lat": -41.1185374, "lng": 172.9955747, "source": "linz-lookup" },
+        { "key": "birdhurst:reese-andrea-home", "name": "Reese and Andrea (Old House Rd)", "address": "273 Old House Road, Upper Moutere", "site_type": "other", "lat": -41.2322199, "lng": 172.9786591, "source": "linz-lookup" },
+        { "key": "birdhurst:sue-wilkins-home", "name": "Sue Wilkins (Lyndhurst Dr)", "address": "47 Lyndhurst Drive, Motueka", "site_type": "other", "lat": -41.0967413, "lng": 173.0115449, "source": "linz-lookup" }
+      ],
+      "zone_defaults": { "zone_type": "patrol_route", "module_key": "patrol", "rule_type": "unrestricted", "radius_m": 800 },
+      "zones": [
+        { "key": "birdhurst:central-rd", "name": "Central Rd Orchard (Birdhurst)", "lat": -41.166785, "lng": 172.9787223, "radius_m": 1500, "gazetteer": { "name": "Central Road, Lower Moutere", "source": "google_address" } },
+        { "key": "birdhurst:staples-st", "name": "Staples St Covert (Birdhurst)", "lat": -41.1001598, "lng": 173.0215228, "radius_m": 500, "gazetteer": { "name": "Staples Street, Motueka", "source": "google_place", "note": "covert camera location per raw log comment" } }
+      ]
+    }
+  ]
+}
