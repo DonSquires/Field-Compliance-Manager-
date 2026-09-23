@@ -65,6 +65,9 @@ const KNOWN_OFFICERS = {
   // Found in STAND's raw log (2026-09-23) - "Deborah Crawford" is the same real
   // person as the already-known "Deb Crawford" (verified via existing profile).
   'deborah crawford': '368b4d00-604b-47f9-9656-9471a0f8ee6e',
+  // Found in Private-Redvale-Merc's raw log (2026-09-23) - same person as
+  // "wade sutherland-berkett" above, just spelled without the hyphen.
+  'wade sutherland berkett': '9e96c281-3dc1-449b-819f-57b61f91c739',
 };
 
 function parseCsv(text) {

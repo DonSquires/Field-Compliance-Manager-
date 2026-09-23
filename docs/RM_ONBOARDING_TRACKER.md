@@ -343,10 +343,14 @@ turn beats false completeness.
 3. **STAND's "Borlace Forest" zone — RESOLVED 2026-09-23.** Placed via
    `linz-lookup` during STAND's own Phase 2 run (Borlase Avenue, St Arnaud
    area) — see the STAND write-up below.
-4. **Run the Phase 2 importer against the remaining ~2 clients** (Private-Parks,
-   Private-Redvale-Merc) — proven against DOC, NCC, TDC, M&R, Taylors, STAND,
-   Birdhurst, Thomas Bros, Stringer, Fulton Hogan, DART, AND PVT now (twelve
-   clients). PVT additionally proved a genuinely cross-org scenario: a shared
+4. **RESOLVED 2026-09-23 — all active clients seeded.** Private-Parks (13th)
+   and Private-Redvale-Merc (14th, final) both imported cleanly — see their
+   write-ups below. Every client in R&M's active roster except the
+   deliberately-deferred Wrattens (item 1) now has real patrol history in
+   `observations`/`location_events`. Proven against DOC, NCC, TDC, M&R,
+   Taylors, STAND, Birdhurst, Thomas Bros, Stringer, Fulton Hogan, DART, PVT,
+   Private-Parks, AND Private-Redvale-Merc (fourteen clients). PVT additionally
+   proved a genuinely cross-org scenario: a shared
    overflow log file can contain rows that really belong to a DIFFERENT
    already-seeded client, not the umbrella org itself — split the source CSV
    and run the importer once per target org/zone-map, using a distinct
@@ -551,6 +555,37 @@ turn beats false completeness.
   split) — 7 more location_events. Verified live for both (0 garbage plates,
   0 duplicate refs in either organization, confirmed no collision with
   Birdhurst's existing import).
+
+## PHASE 2 RUN AGAINST Private-Parks (2026-09-23) — 13th client, single-code simple case
+
+- Smallest client this session: 9 total DATA rows, all coded `88VA`, matching
+  the Details sheet's already-seeded "Eighty Eight Valley" property/zone
+  exactly — no new places, no new officers (Rob Crawford already known).
+- Result: 3 observations + 5 location_events. Verified live (0 garbage
+  plates, 0 duplicate refs, real plate `ZD3838` confirmed with correct 2022
+  dates via authenticated read).
+
+## PHASE 2 RUN AGAINST Private-Redvale-Merc (2026-09-23) — 14th client (FINAL), name-alias fix
+
+- Raw log used two codes, `REDT` (73 rows) and `REDB` (14 rows) — both read
+  "Redvale" in the Location column, matching the existing "Redvale Top /
+  Bottom (Redwood Valley)" zone name exactly (top vs bottom sections of the
+  same property, both already covered by one zone id) — no new places.
+- **Real name-matching gap found and fixed**: this file spells the known
+  officer "Wade Sutherland-Berkett" without the hyphen ("Wade Sutherland
+  Berkett"). Added as a second alias key in `KNOWN_OFFICERS` pointing to the
+  same existing profile UUID, same pattern as the earlier "Deborah Crawford"
+  alias — otherwise these rows would have imported fine as location_events
+  but without correct officer attribution.
+- Result: 4 observations + 83 location_events. Verified live (0 garbage
+  plates, 0 duplicate refs, real plates MLA451/MLL451/BWA214 confirmed with
+  correct 2022 dates via authenticated read).
+- **This completes the full active-client seeding objective.** Every R&M
+  client except the deliberately-deferred Wrattens now has real patrol
+  history imported. Next phase: shake down data/reports/finance/km surfaces
+  against this now-fully-populated real data, with UI/UX intuitiveness (the
+  user does as little as possible; the app and Bob do the work) as a
+  standing design lens — see open item 5 above.
 
 ## Conventions established / reusable
 
