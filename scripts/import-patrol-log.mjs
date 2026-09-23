@@ -73,6 +73,12 @@ const KNOWN_OFFICERS = {
   // - profile-only records (no auth.users row), same pattern as the officers above.
   'steve savage': 'a9342300-f1c7-4402-8c2e-4de5689fda5a',
   'sheryl murray': 'ce9f16b8-bb7f-4e60-929a-64458fefb347',
+  // PLACEHOLDER (2026-09-24) - real, substantial officer in the roster (~89
+  // mentions, Jan-Dec 2023) with no surname found anywhere yet. Owner is
+  // confirming the real name with the Crawfords; display_name "Waz Waz" and
+  // this key are a stand-in - update both (and re-run any imports keyed on
+  // this name) once the real name is known.
+  'waz': 'ee7ded2c-f2b4-4ac3-bd8c-2cc376d94331',
 };
 
 function parseCsv(text) {

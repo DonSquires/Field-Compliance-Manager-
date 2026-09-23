@@ -798,9 +798,12 @@ turn beats false completeness.
   yet then).
 - Found one real, substantial officer ("**Waz**", ~Jan-Dec 2023, ~89
   mentions) with NO surname anywhere in any file checked — deliberately
-  NOT guessed/created (overlaps in time with "Wade" as a DISTINCT tally, so
-  is very likely a different person, not a nickname). Flagged for the
-  owner; needs a real name before any record is created.- **Cycle Trails + MPC pest-control log, same day**: both genuinely belong
+  NOT guessed at first (overlaps in time with "Wade" as a DISTINCT tally,
+  so is very likely a different person, not a nickname). Owner asked for a
+  **placeholder** profile (`display_name` "Waz Waz") to be created now,
+  pending real-name confirmation from the Crawfords — created and added to
+  `KNOWN_OFFICERS` as `'waz'`; both need updating once the real name lands
+  (see `/memories/repo/rm-staff-roster-history.md` for the exact TODO).- **Cycle Trails + MPC pest-control log, same day**: both genuinely belong
   to TPFL (Cycle Trails' GL codes are TPFL's own "8558-" family; MPC's DATA
   sheet's own `Company` column literally reads "TPFL" for every real row —
   R&M's own note confirms this is TPFL's pest-control activity performed by
