@@ -703,10 +703,7 @@ turn beats false completeness.
   hand-reviewed list (not a loop over every candidate in a reference sheet)
   — avoids the OFO duplicate-seeding bug entirely by construction, no
   cleanup needed afterward.
-- Still open: Cycle Trails (TPFL, 276 rows), MPC pest-control log (TPFL, 173
-  rows, attribute to Pete/Rob Crawford), Digger work order (OFO, 1 row,
-  ready via the now zone-capable Workshop RPC), OFO Culling Log 2023
-  (~23 rows).
+- Still open: OFO Culling Log 2023 (~23 rows).
 - **Cycle Trails + MPC pest-control log, same day**: both genuinely belong
   to TPFL (Cycle Trails' GL codes are TPFL's own "8558-" family; MPC's DATA
   sheet's own `Company` column literally reads "TPFL" for every real row —
@@ -719,6 +716,41 @@ turn beats false completeness.
   — 0 observations (pest-control work has no vehicle plates to detect, only
   presence/activity), 44 location_events. Both live-verified clean (0
   garbage plates, 0 duplicate `external_ref`s) against TPFL's whole org.
+
+## Digger work order (OFO, 2026-09-24) — workshop maintenance zone_id constraint bug found and fixed
+
+- Real source: `REMSEC Digger work 2023.xlsx`, 1 row — Rob Crawford, Te Hepe
+  forest (OFO), digger trenching to secure a gate against unauthorised
+  entry, 3hrs @ $215/hr = $645, GL 8558-74500-055, work performed
+  2023-12-20 (Excel serial 45280).
+- First attempt via `create_workshop_work_order` (`p_zone_id` set to the
+  Te Hepe zone) failed on `workshop_actor_org()`'s `Active user required`
+  — fixed by wrapping the RPC call with
+  `SET LOCAL request.jwt.claim.sub = '<assignee user id>'` in the same
+  query batch (needed because these live-DB scripts call the Management
+  API directly with no real Supabase Auth session).
+- Second attempt failed on `workshop_work_orders_maintenance_needs_place`:
+  `CHECK (kind <> 'maintenance' OR client_site_id IS NOT NULL OR asset_id
+  IS NOT NULL)` — a real, previously-undetected gap. Zone support
+  (`zone_id` column + RPC overload) was added to the Workshop module
+  earlier the same day, but this CHECK constraint was never updated to
+  accept it. A forest zone has no LINZ address and is never a "site", so
+  every zone-anchored maintenance work order was silently unbookable until
+  this was the first real attempt to create one.
+- Fixed via migration
+  `20260924000000_workshop_maintenance_zone_place_constraint.sql` (drop +
+  recreate the constraint, adding `OR zone_id IS NOT NULL`). Applied live,
+  `supabase/schema.sql` regenerated, Atlas refreshed (0 capability/edge
+  changes — function-body-only, expected), full `apps/web` test suite
+  re-run clean (298 files / 1278 tests).
+- Work order created successfully: `WO-202609-0002`, kind `maintenance`,
+  status `draft`, `zone_id` = Te Hepe, assigned to Rob Crawford,
+  `scheduled_for` = `2023-12-20 13:00:00+13` (confirms the Excel-serial →
+  UTC conversion formula used elsewhere this session is correct).
+- Lesson: when extending any table/RPC to accept a new "place" type
+  alongside existing ones (`client_site_id`/`asset_id`/`zone_id`), audit
+  *every* CHECK constraint referencing the old set in the same migration —
+  don't wait for a live usage attempt to discover the gap.
 
 ## Conventions established / reusable
 
