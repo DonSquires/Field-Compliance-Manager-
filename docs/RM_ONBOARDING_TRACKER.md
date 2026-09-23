@@ -343,10 +343,10 @@ turn beats false completeness.
 3. **STAND's "Borlace Forest" zone — RESOLVED 2026-09-23.** Placed via
    `linz-lookup` during STAND's own Phase 2 run (Borlase Avenue, St Arnaud
    area) — see the STAND write-up below.
-4. **Run the Phase 2 importer against the remaining ~5 clients** (DART, PVT,
+4. **Run the Phase 2 importer against the remaining ~4 clients** (PVT,
    Private-Parks, Private-Redvale-Merc) — proven against DOC, NCC, TDC, M&R,
-   Taylors, STAND, Birdhurst, Thomas Bros, Stringer, AND Fulton Hogan now (ten
-   clients). Each client needs
+   Taylors, STAND, Birdhurst, Thomas Bros, Stringer, Fulton Hogan, AND DART
+   now (eleven clients). Each client needs
    its own zone/site-name-to-id map built from its actual
    Location/Reserve/CODE/Forest/Site column values (same process used so
    far: export full raw sheet to CSV, count distinct location values,
@@ -354,9 +354,7 @@ turn beats false completeness.
    geocoding — but verify it's actually a complete lookup and not just a
    GL-billing reference like M&R's turned out to be — geocode any new real
    places with a region qualifier if the bare address returns a wrong-region
-   match, build the map, dry-run, apply). Birdhurst and Thomas Bros are
-   orchard/commercial clients likely needing the site_id path (proven
-   working for Taylors) rather than pure zones. For any client with a large
+   match, build the map, dry-run, apply). For any client with a large
    multi-year log (thousands of rows), the importer's batching (chunks of
    300) already handles the request-size limit — no further script change
    needed there. More officer names will likely surface — add them as real
@@ -374,6 +372,12 @@ turn beats false completeness.
    view, dispatch, rostering, finance/invoicing, permit lookup — and fix
    anything that breaks or looks wrong against real data. Record findings
    here as they're found.
+6. **DART's "Update 251215" sheet (539 rows) was not imported this pass** —
+   it uses a different, header-less layout with a blanket "DART" code and no
+   per-row header row (unlike the main `2025`/`2026` sheets, which needed the
+   real header row found ~265 rows down past a leading charge-code reference
+   table, then trimmed before the importer could run). Worth a follow-up pass
+   once the higher-value clients are done.
 
 ## PHASE 2 RUN AGAINST STAND/PF Olsen (2026-09-23) — 6th client, date-serial fix
 
@@ -486,6 +490,34 @@ turn beats false completeness.
   the importer's case-insensitive `pick()` matching against its `CODE`
   candidate, no importer change needed.
 - Result: 0 observations + 8 location_events, verified live (0 duplicate refs).
+
+## PHASE 2 RUN AGAINST DART/Operation Lizard (2026-09-23) — 11th client, largest single import
+
+- Real sheet-layout quirk: unlike every other client, this workbook's `2025`
+  and `2026` raw-log sheets have their real header row ~265 rows DOWN, below
+  a leading charge-code reference table (every other client has the header
+  on row 1 and the reference table, if any, embedded within the dated rows).
+  Both sheets had to be trimmed to start from the real header before the
+  importer could run — a one-off pre-processing step, not an importer change,
+  since this exact layout hasn't recurred elsewhere.
+- Real pattern: ~95% of rows use a blanket `DART` code (not a per-site code)
+  with the actual camera/trap site number embedded in free-text Location
+  ("Trig Rd (Site 1)", "Thomas Creek Rd (Site 6)", plus "NO.n" and typo'd
+  "TrigRRd"/"TrugRRd" variants, and a third road name "Old Sow Rd" whose
+  camera numbering (10–15) overlaps Trig Rd's own — treated as the same
+  patrol area rather than a third zone). Generated the 53-entry zone-map
+  programmatically from every distinct Location string found (classified by
+  road-name prefix) rather than hand-transcribing it — far less error-prone
+  for this many variants. "All Sites" (54 rows, a blanket "covered everything
+  today" entry with no single correct zone) deliberately left unmapped.
+- Ran the two year-sheets as two separate importer invocations
+  (`--client-code DART2025` / `DART2026`) rather than one combined run, since
+  "Log no" numbering restarts each year — using the same client-code for both
+  would have silently collided their `external_ref`s and dropped the second
+  year's rows as false duplicates.
+- Result: 681 (2025) + 1105 (2026) = 1786 location_events, the largest single
+  client import this session, verified live (0 duplicate refs, correctly
+  split 1272/514 between the Trig Road and Thomas Creek zones).
 
 ## Conventions established / reusable
 
