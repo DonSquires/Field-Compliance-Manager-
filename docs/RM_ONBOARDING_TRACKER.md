@@ -343,15 +343,10 @@ turn beats false completeness.
 3. **STAND's "Borlace Forest" zone — RESOLVED 2026-09-23.** Placed via
    `linz-lookup` during STAND's own Phase 2 run (Borlase Avenue, St Arnaud
    area) — see the STAND write-up below.
-4. **Run the Phase 2 importer against the remaining ~7 clients** (Stringer,
-   Fulton Hogan, DART, PVT, Private-Parks, Private-Redvale-Merc) — proven
-   against DOC, NCC, TDC, M&R, Taylors, STAND, Birdhurst, AND Thomas Bros now
-   (eight clients). One reusable gotcha found this round: giving two distinct
-   real sites the IDENTICAL address string silently collapses them into one
-   house/site via `address_match_key` (the seed script's own dedup logic) —
-   always use a distinct address per site key, even an adjacent real address
-   from the same geocode cluster, and check the dry-run's `sites`/`houses`
-   counts match your intent before applying. Each client needs
+4. **Run the Phase 2 importer against the remaining ~6 clients** (Fulton
+   Hogan, DART, PVT, Private-Parks, Private-Redvale-Merc) — proven against
+   DOC, NCC, TDC, M&R, Taylors, STAND, Birdhurst, Thomas Bros, AND Stringer
+   now (nine clients). Each client needs
    its own zone/site-name-to-id map built from its actual
    Location/Reserve/CODE/Forest/Site column values (same process used so
    far: export full raw sheet to CSV, count distinct location values,
@@ -468,6 +463,16 @@ turn beats false completeness.
 - No new officers (Rob Crawford, Colin Nelson, Pete Crawford all already known).
 - Result: 14 observations + 47 location_events, verified live (0 garbage, 0
   dupes, real events across all 5 sites including the newly-placed ones).
+
+## PHASE 2 RUN AGAINST Private - Stringer (2026-09-23) — 9th client, single-site
+
+- Simplest client so far: one real site (Moutere Hill), already fully seeded in
+  wave 1 — pure Phase 2, no new geocoding needed. Raw log uses 3 different
+  codes (MTRN, STRI, MOUT) for the exact same physical property (confirmed via
+  identical Location-text overlap: "Moutere Hill", "Stringers Gate", "Stringer
+  Rd" all appear under more than one code) — all mapped to the one existing
+  zone. No new officers. Result: 22 observations + 225 location_events,
+  verified live (0 garbage, 0 dupes).
 
 ## Conventions established / reusable
 
