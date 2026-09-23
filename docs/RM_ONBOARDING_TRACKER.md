@@ -707,6 +707,18 @@ turn beats false completeness.
   rows, attribute to Pete/Rob Crawford), Digger work order (OFO, 1 row,
   ready via the now zone-capable Workshop RPC), OFO Culling Log 2023
   (~23 rows).
+- **Cycle Trails + MPC pest-control log, same day**: both genuinely belong
+  to TPFL (Cycle Trails' GL codes are TPFL's own "8558-" family; MPC's DATA
+  sheet's own `Company` column literally reads "TPFL" for every real row —
+  R&M's own note confirms this is TPFL's pest-control activity performed by
+  Mainland Pest Control as subcontractor, not a separate client). Both
+  imported entirely against TPFL's EXISTING zone-map — zero new zones
+  needed for either. Cycle Trails: 247 real rows, all but 32 blank-Forest
+  ones coded `SPNR` (Spooners) — 3 observations + 211 location_events.
+  MPC: 64 real rows across 4 already-known TPFL codes (MTRN/RICH/RIWA/LINK)
+  — 0 observations (pest-control work has no vehicle plates to detect, only
+  presence/activity), 44 location_events. Both live-verified clean (0
+  garbage plates, 0 duplicate `external_ref`s) against TPFL's whole org.
 
 ## Conventions established / reusable
 
