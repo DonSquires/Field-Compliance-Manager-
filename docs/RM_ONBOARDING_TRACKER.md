@@ -343,10 +343,10 @@ turn beats false completeness.
 3. **STAND's "Borlace Forest" zone — RESOLVED 2026-09-23.** Placed via
    `linz-lookup` during STAND's own Phase 2 run (Borlase Avenue, St Arnaud
    area) — see the STAND write-up below.
-4. **Run the Phase 2 importer against the remaining ~6 clients** (Fulton
-   Hogan, DART, PVT, Private-Parks, Private-Redvale-Merc) — proven against
-   DOC, NCC, TDC, M&R, Taylors, STAND, Birdhurst, Thomas Bros, AND Stringer
-   now (nine clients). Each client needs
+4. **Run the Phase 2 importer against the remaining ~5 clients** (DART, PVT,
+   Private-Parks, Private-Redvale-Merc) — proven against DOC, NCC, TDC, M&R,
+   Taylors, STAND, Birdhurst, Thomas Bros, Stringer, AND Fulton Hogan now (ten
+   clients). Each client needs
    its own zone/site-name-to-id map built from its actual
    Location/Reserve/CODE/Forest/Site column values (same process used so
    far: export full raw sheet to CSV, count distinct location values,
@@ -473,6 +473,19 @@ turn beats false completeness.
   Rd" all appear under more than one code) — all mapped to the one existing
   zone. No new officers. Result: 22 observations + 225 location_events,
   verified live (0 garbage, 0 dupes).
+
+## PHASE 2 RUN AGAINST Fulton Hogan (2026-09-23) — 10th client, completed 2022 project
+
+- Simplest client of all: only 8 real dated rows out of 382 in the whole raw
+  log, all using the same code (`MAIT`, already-seeded Maitai Dam zone).
+  Confirmed the memory hypothesis that this was a one-off, now-completed 2022
+  infrastructure-protection contract rather than an ongoing client — all 8
+  events date to Oct–Nov 2022. Both officers (Colin Eathorne, Susan Finigan)
+  already known. Header quirk: this sheet's zone-code column is literally
+  named "Code" (not "Reserve"/"CODE"/"Forest"/"Site") — already covered by
+  the importer's case-insensitive `pick()` matching against its `CODE`
+  candidate, no importer change needed.
+- Result: 0 observations + 8 location_events, verified live (0 duplicate refs).
 
 ## Conventions established / reusable
 
