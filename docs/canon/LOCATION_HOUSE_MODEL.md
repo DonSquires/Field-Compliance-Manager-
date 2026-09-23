@@ -125,6 +125,50 @@ recorded; proven by `supabase/tests/20260915170000_place_model_convergence.sql`)
 6. **Test data stays.** Duplicate test organisations and their places are not
    deleted; identity convergence happens only at the registry layer.
 
+## Ruling correction 2026-09-23 — `parent_zone_id` reinstated for same-org zone hierarchy
+
+> Owner clarification (2026-09-23): the 2026-09-15 rebuild that produced this
+> canon was done from the live Supabase schema alone — GitLab and GitHub
+> lineage were not available at the time, so item 5 above ("never nests")
+> was a simplification made without knowing why the removed column existed.
+
+Checked against the lineage now (`DonSquires/FreedomCamp-Manager`,
+`src/lib/zoneResolution.ts`, `src/lib/geofence.ts`,
+`src/components/features/ZoneHierarchyManager.tsx`,
+`get_zone_compliance_breakdown`): `zones.parent_zone_id` + `zone_type ∈
+{general, specific}` was a real, working, proven feature — a broad area
+(`general`, `parent_zone_id IS NULL`) containing many named sub-areas
+(`specific`, `parent_zone_id` set), used for compliance breakdown, child-zone
+priority in GPS resolution, and officer shift zone display. This is a
+genuinely different concern from `GEOFENCE_PRINCIPLES.md`'s four-tier model
+(Tier 1 `organizations.jurisdiction_geom` containing Tier 2 zones is a
+**cross-organisation** jurisdiction relationship — a council's overall
+boundary containing many independent operators' zones). The prototype's
+pattern is **same-organisation** zone subdivision — one estate (a forestry
+block, a large reserve) split into many named sub-areas that are all one
+org's zones. Confirmed live need: R&M's forestry clients' patrol logs record
+activity against dozens of named forest sub-blocks (e.g. OFO's "Golden Downs
+Forest" contains "Te Hepe", "Berrymans", "Cains", and more — verified against
+R&M's own real forestry maps) that have no independent address and are not
+sensibly modelled as dozens of new top-level zones.
+
+**Correction:** `location_zones.parent_zone_id` (`uuid references
+location_zones(id) on delete set null`, nullable) is reinstated, scoped
+narrowly:
+
+- A zone's `parent_zone_id`, when set, must reference another zone on the
+  **same** `organization_id` (a zone never nests under another organisation's
+  zone — that part of the original ruling stands).
+- This is a grouping/attribution/reporting relationship only — it does
+  **not** feed `resolve_context`'s P1/P2 tier resolution or geofence
+  containment. A visit to a child zone still resolves and verifies exactly as
+  a flat zone always has; `parent_zone_id` only lets a report roll a child
+  zone's activity up to its parent estate. Wiring it into geofence
+  containment/resolution is a separate future ruling if ever needed — do not
+  assume it happens automatically.
+- Site facets are unaffected: a zone still never hangs off a site, and
+  `client_sites` still never nests.
+
 ## Live facts (2026-09-15, after the migration)
 
 | Fact | Value |

@@ -23,6 +23,8 @@ export interface WorkOrderSummary {
   service_agreement_id: string | null;
   client_site_id: string | null;
   site_name: string | null;
+  zone_id: string | null;
+  zone_name: string | null;
   asset_id: string | null;
   asset_name: string | null;
   inventory_location_id: string | null;
