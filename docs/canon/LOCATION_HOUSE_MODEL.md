@@ -169,6 +169,35 @@ narrowly:
 - Site facets are unaffected: a zone still never hangs off a site, and
   `client_sites` still never nests.
 
+## Ruling correction 2026-09-23 (later same day) — `active_build_cleanup` delete scope
+
+> Owner ruling: "while we are building and seeding, you have permission to
+> delete, we want a clean db."
+
+The 2026-09-15 permanence rule is right for *real* places — anything a person
+has ever searched for, linked to, or recorded activity against must never
+silently disappear. It is the wrong rule for a genuine seeding-bug artifact
+that was never real: e.g. a duplicate-loop bug in an import script created
+145 empty `location_zones` rows (same names, zero code ever pointed at them,
+zero `observations`/`location_events`/`parent_zone_id`/`workshop_work_orders`/
+`service_agreement_locations` references — confirmed by direct query before
+any deletion) minutes after the correct rows were created. Retiring
+(`is_active = false`) such rows leaves permanent clutter in `location_zones`
+for something that was never a place at all.
+
+`tg_place_permanence()` gained one more explicit, narrow, opt-in scope
+alongside the existing `test_dataset_purge` one:
+`current_setting('app.place_delete_scope', true) = 'active_build_cleanup'`
+(migration `20260923130000_active_build_cleanup_place_delete_scope.sql`).
+This is a caller discipline, not a mechanically-enforced one — exactly like
+the pre-existing 15-minute compensating-transaction exception this function
+already trusts. Before setting this scope and deleting, verify (don't
+assume) that the target rows have zero real references anywhere they could
+plausibly be pointed at — the same check performed for the OFO duplicate
+zones above. This scope is for active build/seed sessions cleaning up their
+own bugs, not a general-purpose "delete a place" escape hatch — the
+2026-09-15 permanence rule still stands for anything with real history.
+
 ## Live facts (2026-09-15, after the migration)
 
 | Fact | Value |

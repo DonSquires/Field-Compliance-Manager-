@@ -636,6 +636,36 @@ turn beats false completeness.
   `organization_type='contractor'` org with a service_agreement to R&M
   (`1ccdd3fb-0b0a-478d-8441-6f14a85172aa`), per owner clarification it's a
   real subcontracting pest-control company, not a subsidiary/division of R&M.
+- **UI + DB verification (2026-09-23, later same day)**: logged into the real
+  production app (`www.fcmanager.co.nz`) as the account owner to visually
+  confirm the OFO import, not just query the database. Found and fixed a
+  real bug the DB-only checks had missed: the zone-seeding script looped
+  over its candidate list 2-4 times, creating **145 completely empty
+  duplicate zones** alongside the 124 real ones (same display names, e.g.
+  "Briggs (OneFortyOne)" showed 7 times in the live Zones page — 3 real,
+  from genuinely distinct historical forest codes `BRIG`/`BRIGG`/`BRIGGS`,
+  and 4 pure duplicate artifacts with zero code ever pointing at them).
+  Verified zero references anywhere (`observations`, `location_events`,
+  `parent_zone_id`, `workshop_work_orders`, `service_agreement_locations`)
+  before removing them. `location_zones` has a permanence trigger
+  (`tg_place_permanence`, ruling 2026-09-15) that blocks a raw `DELETE` —
+  owner then explicitly authorized deletion during active build/seeding
+  ("we want a clean db"), recorded as a new dated canon correction in
+  `docs/canon/LOCATION_HOUSE_MODEL.md` adding a narrow, explicit
+  `active_build_cleanup` opt-in scope to that trigger (migration
+  `20260923130000_active_build_cleanup_place_delete_scope.sql`) rather than
+  silently bypassing it. Final OFO zone count: 131 (124 new + 7
+  pre-existing), all active, all genuinely distinct.
+- **Lesson for future zone-seeding scripts**: always store the source code
+  (the actual distinguishing identifier, e.g. OFO's forest code) in the
+  zone's `metadata` at creation time, not just the display name — several
+  source codes can legitimately share one plain-English name, and without
+  the code preserved on the row there is no way to tell them apart once
+  created. Also: dedupe the candidate list by intended output (one zone per
+  unique code) before looping, and sanity-check the resulting row count
+  against the expected candidate count immediately after seeding, before
+  moving on to the next step — this bug would have been caught in seconds
+  right after creation instead of being found later during a UI pass.
 
 ## Conventions established / reusable
 
