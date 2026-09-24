@@ -905,6 +905,55 @@ turn beats false completeness.
   hardened RPC, with the raw log rows imported as `investigation_events`.
   This is the immediate next step.
 
+## Real Wrattens investigation import (2026-09-24) — the proof case, done
+
+- Found a real, still-open gap while building this: there was no governed
+  way to add a human-authored narrative event to an investigation's
+  timeline at all — the original design only ever auto-generated
+  `investigation_opened`/`entity_linked` events as side-effects of the two
+  existing RPCs. Added `add_investigation_event(p_investigation_id,
+  p_event_type, p_description, p_occurred_at)` in
+  `supabase/migrations/20260924020000_investigation_add_event_rpc.sql`,
+  gated identically to reading the timeline (admin-or-assigned-lead).
+- **Scope decision**: anchored the 4 real investigations to R&M's own
+  organization (`e96d71c9-...`), not a new "Wrattens" client org. Wrattens
+  has never been seeded as its own org/site/zone in this build (unlike
+  every other R&M client) — doing that properly (LINZ geocoding, boundary
+  work, the full patrol-log backfill) is its own real task, not a rushed
+  side-effect of proving the investigation system. A private-investigation
+  case file is legitimately the operator's own work product regardless
+  (`docs/canon/ALIGNMENT_LEDGER.md` Bucket C reasoning) — the place (Brooklyn
+  Rd) and client (Wratts family) are captured in the investigation's own
+  title/summary text instead. Seeding Wrattens as a full 17th client is
+  deferred, tracked here for whoever picks it up next.
+- Created 12 real `canonical_people` (Kerryn Wratt, John Wratt, Kasia
+  Grela, Ron/Sue/Richard Post, Mary-Ann Carr, Constables Reuben McCormack
+  and Scott Satherley, Max Neilson Faulknor, Greg Lummis, Steven Renish),
+  4 investigations (`WRAT-POST-2023`, `WRAT-CARR-2023`,
+  `WRAT-FAULKNOR-2022` closed, `WRAT-FUELTHEFT-2022`), 14 entity links
+  with real `link_role`/`link_reason` (subject/complainant/witness/Police
+  liaison distinctions preserved in the reason text since `link_role`
+  itself only has 5 coarse values), and 35 real narrative
+  `investigation_events` with real dates (Excel-serial converted) —
+  concise factual summaries of the real correspondence/Police
+  reports/camera activations, not verbatim email dumps, per the "governed
+  proposal, human review before promotion" principle already ratified in
+  `docs/SAMPLE_DATA_EXPANSION_REVIEW.md`/`docs/ENTERPRISE_COSTING_AND_PNL_
+  DESIGN.md`.
+- Rob Crawford set as `lead_user_id` on all 4 (he's the one actually
+  handling Police liaison/correspondence in the real source).
+- **Verification limitation found and recorded**
+  (`/memories/terminal-quirks.md`): the Supabase Management API's SQL
+  endpoint bypasses RLS entirely regardless of `SET LOCAL request.jwt.
+  claim.sub`, so it cannot prove read-access tiering actually works end to
+  end — only the policy definition (already confirmed via `pg_policies`)
+  and SECURITY DEFINER function logic (genuinely provable, since it checks
+  `auth.uid()` in code) can be verified this way. A true end-to-end proof
+  needs a real authenticated browser session as a non-admin, non-lead
+  officer.
+- Schema/Atlas regenerated (668 functions, +1 RPC; Atlas: 4 capabilities,
+  3 edges), full `apps/web` suite green (298/1278).
+
 ## Conventions established / reusable
 
 - Live SQL via the Supabase Management API (`SUPABASE_ACCESS_TOKEN`, from
