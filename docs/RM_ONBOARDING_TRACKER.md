@@ -953,6 +953,23 @@ turn beats false completeness.
   officer.
 - Schema/Atlas regenerated (668 functions, +1 RPC; Atlas: 4 capabilities,
   3 edges), full `apps/web` suite green (298/1278).
+- **Found and fixed a real, pre-existing frontend gap while verifying this**:
+  the "Investigations" nav link rendered `InvestigationPage.tsx` with no
+  `?id=`, which always immediately errored ("An investigation id is
+  required") for every user, always — there was no way to actually discover
+  an investigation from the UI at all before today, regardless of the RLS
+  work. Also confirmed the access tiering has a real (correct, fail-closed)
+  frontend consequence: an ordinary officer opening an investigation they
+  aren't admin/lead on now hits PostgREST `PGRST116` (0 rows via
+  `.single()`) instead of seeing full content. Fixed both in
+  `apps/web/src/pages/InvestigationPage.tsx`: added a real list view backed
+  by `investigations_summary` (safe for everyone) with click-through to the
+  existing detail view, and replaced the generic "could not be loaded"
+  message with a specific "you don't have access — only an admin or the
+  assigned lead can open this" message when `PGRST116` is the cause. Full
+  `apps/web` suite green, real production build (`npm run build`) verified
+  clean (per the standing lesson that vitest alone doesn't prove the app
+  builds).
 
 ## Conventions established / reusable
 

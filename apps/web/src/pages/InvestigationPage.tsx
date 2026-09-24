@@ -22,14 +22,21 @@ interface Agreement { id: string; name: string; client_organization_id: string; 
 interface Site { id: string; name: string; address: string | null; }
 interface Officer { id: string; display_name: string | null; email: string | null; }
 interface DispatchJob { id: string; status: string; origin_type: string; assigned_officer_id: string | null; briefing_notes: string | null; }
+// investigations_summary is the redacted, org-visible projection (no narrative) -
+// safe for the list view; the detail view below still reads the base tables,
+// which are admin-or-assigned-lead only.
+interface InvestigationSummary { id: string; investigation_reference: string; title: string; investigation_type: string; status: string; priority: string; legal_hold: boolean; opened_at: string; resolved_at: string | null; closed_at: string | null; }
 
 const InvestigationPage: React.FC = () => {
-  const [params] = useSearchParams();
+  const [params, setParams] = useSearchParams();
   const { profile, operatingOrganizationId } = useAuth();
   const investigationId = params.get('id');
   const [investigation, setInvestigation] = useState<Investigation | null>(null);
   const [links, setLinks] = useState<InvestigationLink[]>([]);
   const [events, setEvents] = useState<InvestigationEvent[]>([]);
+  const [list, setList] = useState<InvestigationSummary[]>([]);
+  const [listLoading, setListLoading] = useState(true);
+  const [listError, setListError] = useState<string | null>(null);
   const [agreements, setAgreements] = useState<Agreement[]>([]);
   const [sites, setSites] = useState<Site[]>([]);
   const [officers, setOfficers] = useState<Officer[]>([]);
@@ -47,9 +54,19 @@ const InvestigationPage: React.FC = () => {
   const [error, setError] = useState<string | null>(null);
 
   async function load() {
-    if (!investigationId) { setError('An investigation id is required.'); setLoading(false); return; }
-    setLoading(true); setError(null);
     const orgId = operatingOrganizationId ?? profile?.organizationId;
+    if (!investigationId) {
+      setListLoading(true); setListError(null);
+      const { data, error: listErr } = await supabase.from('investigations_summary')
+        .select('id,investigation_reference,title,investigation_type,status,priority,legal_hold,opened_at,resolved_at,closed_at')
+        .eq('organization_id', orgId ?? '')
+        .order('opened_at', { ascending: false });
+      if (listErr) setListError(describeLoadFailures([['investigations list', listErr]]) ?? 'Investigations list could not be loaded.');
+      else setList((data as InvestigationSummary[]) ?? []);
+      setListLoading(false); setLoading(false);
+      return;
+    }
+    setLoading(true); setError(null);
     const [investigationResponse, linksResponse, eventsResponse, agreementsResponse, sitesResponse, jobsResponse] = await Promise.all([
       supabase.from('investigations').select('id,investigation_reference,title,investigation_type,status,priority,summary,opened_at').eq('id', investigationId).single(),
       supabase.from('investigation_links').select('id,entity_type,entity_id,link_role,link_reason,linked_at').eq('investigation_id', investigationId).order('linked_at', { ascending: true }),
@@ -72,8 +89,11 @@ const InvestigationPage: React.FC = () => {
       ? await supabase.rpc('list_dispatch_target_officers', { p_service_agreement_id: agreementRows[0].id })
       : { data: [], error: null };
     const firstError = investigationResponse.error ?? linksResponse.error ?? eventsResponse.error ?? agreementsResponse.error ?? resolvedSitesResponse.error ?? officersResponse.error ?? jobsResponse.error;
-    if (firstError) setError(describeLoadFailures([['investigation workspace', firstError]]) ?? 'Investigation workspace could not be loaded.');
-    else {
+    if (investigationResponse.error?.code === 'PGRST116') {
+      setError("You do not have access to this investigation's full detail - only an organisation administrator or the assigned lead can open it.");
+    } else if (firstError) {
+      setError(describeLoadFailures([['investigation workspace', firstError]]) ?? 'Investigation workspace could not be loaded.');
+    } else {
       setInvestigation(investigationResponse.data as Investigation);
       setLinks((linksResponse.data as InvestigationLink[]) ?? []);
       setEvents((eventsResponse.data as InvestigationEvent[]) ?? []);
@@ -129,6 +149,15 @@ const InvestigationPage: React.FC = () => {
     setSaving(false);
   }
 
+  if (!investigationId) {
+    if (listLoading) return <div className="page-container"><div className="loading-state"><RefreshCw className="is-spinning" /> Loading investigations</div></div>;
+    return <div className="page-container">
+      <header className="page-header"><div><span>Evidence / Investigations</span><h1>Investigations</h1><p>Existence and status only - open an investigation to see its full detail, if you are the assigned lead or an organisation administrator.</p></div><button type="button" onClick={() => void load()}><RefreshCw size={16} /> Refresh</button></header>
+      {listError && <div className="alert alert-error" role="alert">{listError}</div>}
+      {!listError && list.length === 0 && <div className="empty-state">No investigations recorded for this organisation.</div>}
+      {list.length > 0 && <div className="contacts-list">{list.map((item) => <article className="contact-card" key={item.id}><div className="contact-header"><strong>{item.investigation_reference}</strong><small>{new Date(item.opened_at).toLocaleDateString('en-NZ')}</small></div><p>{item.title}</p><span>{item.investigation_type} · {item.priority} · {item.status}{item.legal_hold ? ' · legal hold' : ''}</span><button type="button" onClick={() => setParams({ id: item.id })}>Open</button></article>)}</div>}
+    </div>;
+  }
   if (loading) return <div className="page-container"><div className="loading-state"><RefreshCw className="is-spinning" /> Loading investigation</div></div>;
   if (error && !investigation) return <div className="page-container"><div className="alert alert-error">{error}</div></div>;
   if (!investigation) return <div className="page-container"><div className="empty-state">Investigation not found.</div></div>;
