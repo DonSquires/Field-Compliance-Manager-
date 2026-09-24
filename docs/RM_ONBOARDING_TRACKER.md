@@ -328,12 +328,11 @@ turn beats false completeness.
 
 ## Open items (not yet done)
 
-1. **Wrattens** (Wratt family farm, code WRAT) — deliberately deferred. Raw
-   comments contain an active third-party trespass dispute (named individuals,
-   phone numbers, a recorded phone-call transcript). Needs the same
-   locked-base-table + redacted-view security treatment already used for
-   `firearm_licence_number` before this client's data is imported, not a
-   simple "just seed it" pass.
+1. **RESOLVED 2026-09-24 — Wrattens fully seeded as its own 17th client
+   org.** The security prerequisite (investigation workspace hardening) was
+   completed first; see "Wrattens full client seeding" below for the
+   complete write-up. R&M's active roster is now fully populated — every
+   real client has real patrol history.
 2. **TDC has ~50 more reference-list entries** beyond the 16 now zoned
    (Rabbit Island, Appleby Recreation Reserve, Busch Reserve, Saxton Field,
    Baigent Reserve, Estuary Lane, Haldane Rd, Rototai Reserve, Lee Valley
@@ -970,6 +969,84 @@ turn beats false completeness.
   `apps/web` suite green, real production build (`npm run build`) verified
   clean (per the standing lesson that vitest alone doesn't prove the app
   builds).
+
+## Wrattens full client seeding (2026-09-24) — 17th and final client, the deferred item closed
+
+With the investigation workspace hardening done and proven (previous section),
+the reason Wrattens was deferred no longer applies. Seeded Wrattens as a real,
+full client org — the last item from the original "seed all the sites" mandate.
+
+- **Org + zones + agreement created live**: `organizations` row `Wrattens
+  (Wratt Family Farm)` (`f1a9fa3b-05f3-4489-be78-7e129a7f1e86`), 3
+  `location_zones` built through the full `canonical_places` \u2192 `locations`
+  \u2192 `location_zones` chain (the same 3-level pattern OFO's real "Te Hepe"
+  zone uses \u2014 zones do not require a `client_sites` row, they can hang
+  directly off `locations`): Brooklyn Rd (`e5950b3b-...`), Moutere Hill
+  (`2a309793-...`), and a General/Private catch-all (`04fa1405-...`) for rows
+  whose Forest code didn't cleanly resolve to either named property. One
+  `service_agreements` row (`ad2a5116-...`, `agreement_type='operational'`,
+  R&M as provider) linking them.
+- **Real forest codes extracted directly from the 3 raw data sheets**, not
+  from the unreliable "List" reference sheets (already-established rule: the
+  List sheet's Reserve Name/Code columns are not row-aligned with the DATA
+  sheet's real code usage). True distinct codes found: `BROO` (Wratts sheet,
+  37 raw rows), `WRAT`/`MTRN` (Wrattens sheet, 292/1 raw rows), `PRIVATE`/
+  `WRATT` (2025 sheet, 7/2 raw rows out of 250 \u2014 mostly blank). Zone map
+  written to `scripts/data/zone-maps/wrattens-zone-map.json`.
+- **Patrol log imported via the existing `scripts/import-patrol-log.mjs`**,
+  no script changes needed \u2014 it already handled this exact CSV/zone-map/
+  client-code shape. Three sheets, three `--client-code`s (`WRATBROO`,
+  `WRATMTR`, `WRAT2025`) to keep `external_ref`s from colliding:
+  - Brooklyn Rd: 3 observations, 33 events (261 rows parsed, 225 skipped \u2014
+    no date, 0 skipped \u2014 no zone).
+  - Moutere Hill: 6 observations, 284 events, 3 events skipped as genuine
+    within-file duplicates (296 rows parsed, 3 skipped \u2014 no date).
+  - 2025 sheet: 1 observation, 7 events (249 rows parsed, 230 skipped \u2014 no
+    date, 11 skipped \u2014 no resolvable zone; this sheet is mostly blank).
+  - Totals: 10 observations, 324 events, spanning 2021-01-04 to
+    2025-03-27. Live-verified clean: 0 garbage plates, 0 duplicate
+    `external_ref`s across the whole org.
+- **Real content directly corroborates the 4 investigations already built**
+  as this session's proof case \u2014 e.g. the actual imported observation text
+  names "LUMMIS/Greg" and "RENISH/Steven" and "Reg HCM901" for the fuel-theft
+  matter, and real camera-activation/correspondence events name Ron/Sue/
+  Richard Post and Mary-Ann Carr directly against the Brooklyn Rd zone.
+- **Investigation-to-zone linking evaluated, deliberately NOT applied \u2014 a
+  real architectural finding, not an oversight.** The 4 real Wrattens
+  investigations are anchored to R&M's own provider org (a private-
+  investigation case file is the operator's own work product, per the
+  existing Bucket C reasoning already recorded above), while the zones just
+  created belong to Wrattens' own client org. `link_investigation_entity`'s
+  org-match validation (added in the hardening migration two sections up)
+  correctly rejects linking an investigation to a `zone`/`site` entity that
+  belongs to a *different* org than the investigation itself \u2014 this is the
+  same protection that migration was written to add, not a bug to route
+  around. Loosening it to allow cross-org zone links would reintroduce the
+  exact boundary-crossing risk just closed, for a "nice to have" link that
+  isn't otherwise needed: every investigation's title/summary text already
+  names the real physical location accurately (Brooklyn Rd / Moutere Hill /
+  236 Hoddy Road Redwood Valley), and person-entity links (which are
+  correctly exempt from the org-match check, since `canonical_people` is a
+  genuine global cross-org identity spine) already anchor each case to its
+  real named parties. Specifically checked and confirmed with real evidence
+  before deciding this, not assumed:
+  - Post + Carr: real camera-activation/correspondence events naming them
+    exist directly against the Brooklyn Rd zone \u2014 a positive match, but
+    still correctly blocked by the org boundary.
+  - Fuel theft (Lummis/Renish): the real "Log 158" observation lands in the
+    Moutere Hill zone \u2014 same situation.
+  - Faulknor (236 Hoddy Road, Redwood Valley): the only "Hoddy" mention
+    anywhere in the imported Wrattens data is an unrelated commercial
+    vehicle registration address (68 Hoddy Rd, Richmond \u2014 Galeo Contracting
+    Ltd) that coincidentally shares the street name. No real evidence ties
+    this closed case to any of the 3 seeded zones at all, so per the
+    standing "don't force/guess a place" principle it was never going to be
+    zone-linked regardless of the org-boundary question \u2014 its existing
+    `canonical_people` link (Max Neilson Faulknor, already `verified`) is the
+    correct and sufficient anchor.
+- No schema/RPC/policy change was needed for this phase (pure data import
+  against already-hardened, already-tested infrastructure) \u2014 schema.sql/
+  Atlas were not regenerated because nothing changed that they track.
 
 ## Conventions established / reusable
 
