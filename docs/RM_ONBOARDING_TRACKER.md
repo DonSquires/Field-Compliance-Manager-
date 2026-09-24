@@ -1139,12 +1139,97 @@ R&M staffer reviewing "ready to invoice" work.
    real cost model changed without a human approving it first.
 
 **Still open, not yet done** (next slice of this phase): the same
-live-verification treatment for rostering (shifts/roster_slots - currently
-zero for R&M despite a very sophisticated `RosterOperationsPage.tsx` already
-built with fatigue rules, credential checks, commercial-readiness tracking)
-and reporting (`monthly_report_packs`/`ReportsHubPage.tsx` - currently zero
-report packs generated for R&M). Also still open: deciding the job-type
-billing-coverage gap above (needs a real R&M decision, not an agent one).
+live-verification treatment for the dispatch console UI itself and for
+reporting (`monthly_report_packs`/`ReportsHubPage.tsx` - currently zero
+report packs generated for R&M).
+
+## Both findings closed (2026-09-24, same day) - real approval bug found + fixed, real shifts created
+
+**User approved the pay-rate proposal in the live UI - and that approval
+itself uncovered a second, systemic, previously-latent bug.** Checking the
+result of the real approval (not assuming success) showed the action's
+`status` was `'failed'`, not `'applied'`, with error `"apply_bob_rate_rule_
+proposal failed: An active finance administrator approval is required"` -
+even though a real R&M master (Don Squires) had genuinely just approved it.
+
+**Root cause traced to source, not just the symptom**: the live "Approve &
+apply" flow calls a SEPARATE edge function, `bob-proposal-execute`
+(`supabase/functions/bob-proposal-execute/index.ts`), using the
+SERVICE-ROLE key by design (its own doc comment: "the executor is
+service-role-only"). `apply_bob_rate_rule_proposal`'s internal admin check
+called `is_admin_for_org(...)`, which resolves entirely from `auth.uid()` -
+and `auth.uid()` is always NULL under a service-role-only call. This means
+the check could **never** succeed, for any organization, any user, ever -
+not a one-off fluke tied to R&M or to Don Squires. Confirmed unconditional
+by re-testing the unfixed function with `auth.uid()` deliberately null via
+the Management API (same failure), then confirming the fixed version
+succeeds under the identical null-auth.uid() condition.
+
+**Fixed with a minimal, evidence-matched change**
+(`supabase/migrations/20260924030000_fix_apply_bob_rate_rule_proposal_actor_
+check.sql`): replaced the `is_admin_for_org(v_action.organization_id)` call
+with `can_approve_action(v_action.approved_by, v_action.organization_id)` -
+an already-built, already-tested function that takes an explicit user id
+instead of relying on `auth.uid()`, and is the SAME function
+`bob-proposal-approver` already uses earlier in this exact approve/apply
+flow (so this reuses existing, proven authorization logic rather than
+inventing a parallel check that could drift). Applied live via
+`scripts/apply-migrations-live.mjs`, verified the new function definition is
+live, then verified it actually succeeds under the exact null-auth.uid()
+condition that broke the old one. Reset the one real failed action back to
+`status='approved'` (the human approval itself was genuine; only the apply
+step had failed) and re-ran it - produced a real, live `rate_rules` row
+(`b4a32969-...`, `rule_kind='pay'`, `rate_type='per_km'`, `$1.04/km`,
+wildcard `service_type`/`job_type` so it matches broadly). Completed the
+action-ledger bookkeeping (`status='applied'`, `result_table='rate_rules'`,
+`result_record_id`) that the edge function would normally have done, since
+the RPC was invoked directly rather than through the (separately broken by
+an unrelated stale-local-credential issue, not a code bug) edge function
+call. `schema.sql`/Atlas regenerated; no frontend/TypeScript code changed,
+so the `apps/web` test suite was not re-run.
+
+**Then created the real shift infrastructure the user asked for**, closing
+the OTHER open finding (the job-type billing-coverage gap) via the option
+the user chose (link a shift) rather than inventing a new job-type-keyed
+rate: a real `patrol_routes` row (R&M, OneFortyOne - Kaituna Sawmill site,
+`route_type='patrol'`, no invented data), a real `roster_work_units` row
+(`work_unit_type='patrol'`, `service_type='patrol'`, linked to that route -
+required by a real DB constraint, `roster_work_units_exact_target_check`,
+that a `'patrol'` work unit must have a `patrol_route_id` and no other
+target FK), and one real, clearly `[TEST]`-labeled verification shift for
+Colin Eathorne (`status='accepted'`, matching the exact "safe to leave in
+place" convention already found elsewhere in this live database for
+verification shifts). Kept all three as permanent, genuinely reusable
+infrastructure - unlike disposable financial test rows, a structural
+patrol-route/work-unit/shift is real, reusable organisational data, and this
+codebase already has its own precedent for leaving a `[TEST]`-labeled
+verification shift in place rather than deleting it.
+
+**Re-verified the complete pipeline against a NEW shift-linked dispatch job**
+(same real site/GPS/officer pattern as before, this time with `p_shift_id`
+set): both real gaps are now closed, proven with real numbers, not assumed:
+- Attendance **charge** line now resolves via the shift's
+  `service_type='patrol'` fallback, matching the real "Patrolling (per
+  hour)" billing rule - **$45.10** for 0.8336h at $54.10/hr (previously an
+  unresolved $0 line).
+- Attendance **pay** line: $25.01 (unchanged, already worked).
+- Travel **charge**: $57.03 (54.839km x $1.04/km, unchanged, already worked).
+- Travel **pay**: **now resolves too** - $57.03 (54.839km x the newly-applied
+  $1.04/km pay rate) - previously not written at all.
+- **`finance_service_costs` vehicle-cost bridge now fires** -
+  `cost_type='vehicle'`, `$57.03`, landed in R&M's real open Sept 2026 P&L
+  period. Real, evidenced, non-obvious finding from this exact number: R&M's
+  pay-side and billing-side per-km rates are now identical ($1.04/km both
+  ways), so travel is currently a wash (reimbursed at cost, zero margin) -
+  not a bug, a real fact about R&M's own rate card worth them knowing, not
+  something to silently "fix" by inventing a markup.
+
+Cleaned up the second verification job's financial artifacts (pay/charge
+lines, `finance_service_costs`, the `dispatch_jobs` row itself) the same way
+as the first - kept the shift/work-unit/patrol-route. Final confirmed state:
+`dispatch_jobs`=1 (original 2026-09-18 smoke test only), `finance_service_
+costs`=0, `shifts`=1, `roster_work_units`=1, `patrol_routes`=1, pay-side
+`rate_rules`=2 (original guard wage + the new real vehicle rate).
 
 ## Conventions established / reusable
 
