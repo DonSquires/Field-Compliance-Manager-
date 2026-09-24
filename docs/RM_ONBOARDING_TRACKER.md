@@ -978,9 +978,9 @@ full client org — the last item from the original "seed all the sites" mandate
 
 - **Org + zones + agreement created live**: `organizations` row `Wrattens
   (Wratt Family Farm)` (`f1a9fa3b-05f3-4489-be78-7e129a7f1e86`), 3
-  `location_zones` built through the full `canonical_places` \u2192 `locations`
-  \u2192 `location_zones` chain (the same 3-level pattern OFO's real "Te Hepe"
-  zone uses \u2014 zones do not require a `client_sites` row, they can hang
+  `location_zones` built through the full `canonical_places` -> `locations`
+  -> `location_zones` chain (the same 3-level pattern OFO's real "Te Hepe"
+  zone uses - zones do not require a `client_sites` row, they can hang
   directly off `locations`): Brooklyn Rd (`e5950b3b-...`), Moutere Hill
   (`2a309793-...`), and a General/Private catch-all (`04fa1405-...`) for rows
   whose Forest code didn't cleanly resolve to either named property. One
@@ -991,27 +991,27 @@ full client org — the last item from the original "seed all the sites" mandate
   List sheet's Reserve Name/Code columns are not row-aligned with the DATA
   sheet's real code usage). True distinct codes found: `BROO` (Wratts sheet,
   37 raw rows), `WRAT`/`MTRN` (Wrattens sheet, 292/1 raw rows), `PRIVATE`/
-  `WRATT` (2025 sheet, 7/2 raw rows out of 250 \u2014 mostly blank). Zone map
+  `WRATT` (2025 sheet, 7/2 raw rows out of 250 - mostly blank). Zone map
   written to `scripts/data/zone-maps/wrattens-zone-map.json`.
 - **Patrol log imported via the existing `scripts/import-patrol-log.mjs`**,
-  no script changes needed \u2014 it already handled this exact CSV/zone-map/
+  no script changes needed - it already handled this exact CSV/zone-map/
   client-code shape. Three sheets, three `--client-code`s (`WRATBROO`,
   `WRATMTR`, `WRAT2025`) to keep `external_ref`s from colliding:
-  - Brooklyn Rd: 3 observations, 33 events (261 rows parsed, 225 skipped \u2014
-    no date, 0 skipped \u2014 no zone).
+  - Brooklyn Rd: 3 observations, 33 events (261 rows parsed, 225 skipped -
+    no date, 0 skipped - no zone).
   - Moutere Hill: 6 observations, 284 events, 3 events skipped as genuine
-    within-file duplicates (296 rows parsed, 3 skipped \u2014 no date).
-  - 2025 sheet: 1 observation, 7 events (249 rows parsed, 230 skipped \u2014 no
-    date, 11 skipped \u2014 no resolvable zone; this sheet is mostly blank).
+    within-file duplicates (296 rows parsed, 3 skipped - no date).
+  - 2025 sheet: 1 observation, 7 events (249 rows parsed, 230 skipped - no
+    date, 11 skipped - no resolvable zone; this sheet is mostly blank).
   - Totals: 10 observations, 324 events, spanning 2021-01-04 to
     2025-03-27. Live-verified clean: 0 garbage plates, 0 duplicate
     `external_ref`s across the whole org.
 - **Real content directly corroborates the 4 investigations already built**
-  as this session's proof case \u2014 e.g. the actual imported observation text
+  as this session's proof case - e.g. the actual imported observation text
   names "LUMMIS/Greg" and "RENISH/Steven" and "Reg HCM901" for the fuel-theft
   matter, and real camera-activation/correspondence events name Ron/Sue/
   Richard Post and Mary-Ann Carr directly against the Brooklyn Rd zone.
-- **Investigation-to-zone linking evaluated, deliberately NOT applied \u2014 a
+- **Investigation-to-zone linking evaluated, deliberately NOT applied - a
   real architectural finding, not an oversight.** The 4 real Wrattens
   investigations are anchored to R&M's own provider org (a private-
   investigation case file is the operator's own work product, per the
@@ -1019,7 +1019,7 @@ full client org — the last item from the original "seed all the sites" mandate
   created belong to Wrattens' own client org. `link_investigation_entity`'s
   org-match validation (added in the hardening migration two sections up)
   correctly rejects linking an investigation to a `zone`/`site` entity that
-  belongs to a *different* org than the investigation itself \u2014 this is the
+  belongs to a *different* org than the investigation itself - this is the
   same protection that migration was written to add, not a bug to route
   around. Loosening it to allow cross-org zone links would reintroduce the
   exact boundary-crossing risk just closed, for a "nice to have" link that
@@ -1031,22 +1031,120 @@ full client org — the last item from the original "seed all the sites" mandate
   real named parties. Specifically checked and confirmed with real evidence
   before deciding this, not assumed:
   - Post + Carr: real camera-activation/correspondence events naming them
-    exist directly against the Brooklyn Rd zone \u2014 a positive match, but
+    exist directly against the Brooklyn Rd zone - a positive match, but
     still correctly blocked by the org boundary.
   - Fuel theft (Lummis/Renish): the real "Log 158" observation lands in the
-    Moutere Hill zone \u2014 same situation.
+    Moutere Hill zone - same situation.
   - Faulknor (236 Hoddy Road, Redwood Valley): the only "Hoddy" mention
     anywhere in the imported Wrattens data is an unrelated commercial
-    vehicle registration address (68 Hoddy Rd, Richmond \u2014 Galeo Contracting
+    vehicle registration address (68 Hoddy Rd, Richmond - Galeo Contracting
     Ltd) that coincidentally shares the street name. No real evidence ties
     this closed case to any of the 3 seeded zones at all, so per the
     standing "don't force/guess a place" principle it was never going to be
-    zone-linked regardless of the org-boundary question \u2014 its existing
+    zone-linked regardless of the org-boundary question - its existing
     `canonical_people` link (Max Neilson Faulknor, already `verified`) is the
     correct and sufficient anchor.
 - No schema/RPC/policy change was needed for this phase (pure data import
-  against already-hardened, already-tested infrastructure) \u2014 schema.sql/
+  against already-hardened, already-tested infrastructure) - schema.sql/
   Atlas were not regenerated because nothing changed that they track.
+
+## Next phase: finance/km pipeline shakedown (2026-09-24) - first slice done
+
+With every real client seeded and patrol history imported, the mandate moved
+to its final stated goal: "make sure the entire build can actually work with
+a working org and its data and operations." Unlike the historical-data work
+above, this phase is about R&M's *live* operational tools - dispatch,
+rostering, finance/invoicing, reporting - which is a genuinely different kind
+of surface (forward-looking scheduling/billing, not retrospective backfill).
+
+**Reconnaissance first**: R&M's live operational tables were almost entirely
+untouched before this phase - 0 shifts, 0 roster_slots, 0 finance_service_costs,
+0 monthly_report_packs of R&M's own, and exactly 1 dispatch_job (a minimal
+`status='completed'` smoke-test row from 2026-09-18 with zero elapsed time and
+no GPS, proving the function didn't crash but exercising none of the real
+per-km/GPS logic). R&M does have a real, rich **billing** rate card (19 real
+`rate_rules`, `rule_kind='billing'`, real 2025 pricing incl. two per-km rules
+at the IRD Tier 1 rate $1.04/km) but only **one** `rule_kind='pay'` rule (a
+flat $30/hr guard wage, no vehicle/travel cost rule at all).
+
+**Real architectural finding, not a bug**: the historical `distance_km` this
+session imported into `observations`/`location_events` (patrol-log backfill,
+retrospective analytics) and the *live* per-job travel distance used for
+billing (`compute_travel_distance_km`, a haversine calc between a dispatch
+job's `insert_gps_lat/lng` and the site's coordinate, run once at job
+completion) are two separate, both-legitimate mechanisms that serve different
+purposes. They should not be conflated or forced to reconcile.
+
+**Live verification performed**: created ONE real, clearly-labeled
+verification dispatch job for R&M against a real service agreement (R&M and
+OneFortyOne, `c36761e5-...`) and a real site with real coordinates
+(OneFortyOne - Kaituna Sawmill), a realistic dispatch-origin coordinate
+(OneFortyOne's own Richmond office, ~55km away - real, existing
+infrastructure, not invented), and a realistic 50-minute on-scene duration.
+Advanced it through the real production state machine
+(`advance_dispatch_job_status`: pending -> dispatched -> en_route -> on_scene
+-> completed) as a real admin actor (Rob Crawford), letting the real,
+automatic `resolve_dispatch_job_financials_internal` trigger fire on
+completion exactly as it would for a genuine job. Result: **haversine
+distance computed correctly (54.839 km, matching a manual estimate)**, the
+real hourly guard pay rate and per-km IRD billing rate both resolved and
+computed correct real dollar amounts ($25.01 labour pay, $57.03 travel
+charge). Deleted the test job and its generated pay/charge lines immediately
+after capturing results - confirmed there is no automatic invoicing cron
+(invoicing requires an admin to explicitly run
+`create_invoice_from_completed_work` for a specific client/period, producing
+only a `draft` invoice), but a stray real-looking charge sitting in a real
+client's uninvoiced-work queue serves no purpose and could confuse a real
+R&M staffer reviewing "ready to invoice" work.
+
+**Two real, evidence-backed findings from that verification**:
+
+1. **Job-type billing-coverage gap (revenue-affecting, reported not
+   silently patched)**: of R&M's 5 real dispatch `job_type` values actually
+   in use (`patrol_support`, `trespass`, `noise_control`, `incident`,
+   `alarm_response`), only `incident` and `alarm_response` have a billing
+   rule keyed directly to `job_type`. The rest of R&M's real billing rules
+   are keyed to `service_type` (`patrol`, `cordon_guard`, `investigation`,
+   etc.), which is only available as a fallback when the dispatch job is
+   linked to a shift with that `service_type` set. A standalone
+   `patrol_support`/`trespass`/`noise_control` job with no linked shift -
+   which is a realistic real-world scenario (an ad-hoc callout with no
+   roster tie-in yet) - resolves to an "Unresolved: no active hourly charge
+   rule matched" $0 line, correctly flagged for finance review rather than
+   silently mis-billed, but a genuine attendance-revenue gap all the same.
+   No fix applied - this needs a real R&M ops/finance decision (what should
+   these job types bill at, or should ops always link a shift instead),
+   not an invented number.
+2. **Pay-side vehicle cost gap (margin-blind-spot)**: because R&M has no
+   `rule_kind='pay', rate_type='per_km'` rule, the same function's own
+   "feed travel cost into the P&L cost ledger" bridge (writes to
+   `finance_service_costs`, `cost_type='vehicle'`, only when a pay-side
+   per-km rule resolves) never fires - real vehicle running cost never
+   reaches R&M's own P&L for any job with billed travel. Every travel km
+   already correctly charged to a client is currently pure margin on paper,
+   because the corresponding cost is invisible. **Action taken**: rather
+   than directly inserting a live `rate_rules` row (a real financial-policy
+   decision I'm not positioned to make unilaterally for a real paying
+   customer), used the existing governed propose-approve-apply mechanism
+   already built for exactly this (`bob_agentic_actions`,
+   `action_type='create_rate_rule'`, applied only via
+   `apply_bob_rate_rule_proposal` after an active finance admin approves -
+   confirmed this surfaces on the real `ApprovalsActivityPage.tsx`, whose
+   `ApprovalRow` interface matches the table shape exactly). Created ONE
+   `status='pending'` proposal (`9d7159b2-...`) for a $1.04/km pay-side
+   vehicle rate - the same IRD Tier 1 rate R&M already uses identically on
+   both of its existing per-km *billing* rules, so it's a defensible,
+   already-precedented default, not an invented figure - with full
+   `bob_reasoning` recorded. Left `status='pending'`; nothing about R&M's
+   real cost model changed without a human approving it first.
+
+**Still open, not yet done** (next slice of this phase): the same
+live-verification treatment for rostering (shifts/roster_slots - currently
+zero for R&M despite a very sophisticated `RosterOperationsPage.tsx` already
+built with fatigue rules, credential checks, commercial-readiness tracking)
+and reporting (`monthly_report_packs`/`ReportsHubPage.tsx` - currently zero
+report packs generated for R&M). Also still open: deciding the job-type
+billing-coverage gap above (needs a real R&M decision, not an agent one).
 
 ## Conventions established / reusable
 
