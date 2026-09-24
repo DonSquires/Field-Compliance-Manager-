@@ -441,7 +441,7 @@ const AdminShell: React.FC = () => {
 
   const moduleAccessNotice = useMemo(() => {
     if (modulesStatus === 'configured') return null;
-    return getModuleAccessMessage(modulesStatus, false, { moduleLabel: 'Module configuration' });
+    return getModuleAccessMessage(modulesStatus, false, { moduleLabel: 'Module' });
   }, [modulesStatus]);
 
   const navigateFromNotification = useCallback((notification: NotificationRecord) => {

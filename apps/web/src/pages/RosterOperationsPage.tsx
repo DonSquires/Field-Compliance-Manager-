@@ -173,13 +173,15 @@ const RosterOperationsPage: React.FC = () => {
       return;
     }
     const operatingContext = operatingOrganizations.find((context) => context.organizationId === org);
-    if (operatingContext && operatingContext.authorityBasis !== 'branch_authorisation') {
+    // 'corporate_oversight' spans every branch at once (no single branch to roster against);
+    // 'organisation_home' and 'branch_authorisation' are both a single, real roster to run.
+    if (operatingContext && operatingContext.authorityBasis === 'corporate_oversight') {
       setError('Select a delivery branch to view roster operations.');
       setLoading(false);
       return;
     }
     setLoading(true); setError(null);
-    const canLoadBranchStaff = operatingContext?.authorityBasis === 'branch_authorisation';
+    const canLoadBranchStaff = operatingContext?.authorityBasis === 'branch_authorisation' || operatingContext?.authorityBasis === 'organisation_home';
     const responses = await Promise.all([
       canLoadBranchStaff
         ? supabase.rpc('get_operating_branch_roster_staff', { p_operating_organization_id: org })

@@ -1231,6 +1231,107 @@ as the first - kept the shift/work-unit/patrol-route. Final confirmed state:
 costs`=0, `shifts`=1, `roster_work_units`=1, `patrol_routes`=1, pay-side
 `rate_rules`=2 (original guard wage + the new real vehicle rate).
 
+## Live UI verification with R&M's real master account (2026-09-24) - real bugs found and fixed
+
+User provided R&M's own real master-account credential (`R&M_USERNAME`/
+`R&M_PASSWORD` in `deploy/laptop-worker/laptop-worker.env` - the same
+`don@ironeagle.co.nz` identity already used as `created_by`/actor
+throughout this whole session's R&M work), explicitly authorising its use
+for this verification. Logged into the live production build
+(`fcmanager.co.nz`) via a disposable Playwright spec and confirmed
+`workingInRM: true` - the real R&M master account correctly lands in R&M's
+own organisation context (no "Working In" switch needed, unlike the
+platform grand_master test identity used in the prior attempt, whose home
+org is a structurally unrelated "Iron Eagle Security").
+
+**Four real, evidence-backed findings, all fixed** (per the user's explicit
+invitation to "realign or redesign the ui to work to be more user friendly
+and simple to use with minimal moving parts"):
+
+1. **Duplicated-word text bug**: `AdminShell.tsx` passed
+   `moduleLabel: 'Module configuration'` into `getModuleAccessMessage`,
+   whose shared template already appends "configuration is still loading" -
+   producing the literal visible text "Module configuration configuration
+   is still loading." Every OTHER real caller of this shared function
+   passes a bare feature noun (`'Welfare'`, `'Field Reports'`, etc.),
+   confirming this call site was the sole, simple mistake. Fixed by
+   changing the passed label to `'Module'`.
+2. **Loading and genuine-failure states were visually identical**: the
+   "Today at a glance" dashboard (`AdminHubPage.tsx`) showed the exact same
+   "Unavailable" label for a metric whose fetch simply hadn't completed
+   yet (normal first-load latency across 11 concurrent Supabase queries
+   against a live production instance) as for a metric whose fetch
+   genuinely errored. Confirmed via live network capture that every single
+   underlying query actually returns clean `200 OK` for R&M - there was
+   no real backend error at all; the "Unavailable" banner a real screenshot
+   captured was almost certainly taken mid-flight during the first cold
+   round trip. Fixed by threading the existing page-level `loading` flag
+   into `MetricCard` (new `loading` prop, distinct `is-loading` CSS class,
+   a calmer blue tone instead of the alarming gray "unavailable" look) and
+   `displayMetric()` (now returns `'…'` while a metric has never yet
+   resolved and the page is loading, only "Unavailable" once loading has
+   settled and the value is still null). Never fires on background
+   60-second auto-refreshes, since by then `metric.value` already holds
+   the last real result.
+3. **Roster page couldn't load ANY staff for a standalone provider viewing
+   its own organisation** - a genuinely significant, real functional gap,
+   not a cosmetic one. `RosterOperationsPage.tsx`'s own gate refused to
+   even attempt loading staff unless the operating context's
+   `authorityBasis === 'branch_authorisation'`; R&M, viewed as itself, has
+   `authorityBasis === 'organisation_home'` (R&M is not part of any
+   multi-branch/franchise structure), so the gate always showed "Select a
+   delivery branch to view roster operations" and the staff-loading RPC
+   was never even called - regardless of how many real staff/shifts
+   existed. Confirmed live: the Field Operations page's own separate
+   "officers on duty" counter correctly showed 1 (my real verification
+   shift), while Roster showed "0 rosterable staff... no rosterable staff
+   in this branch yet" for the exact same underlying data - a real,
+   confusing inconsistency between two views of the same facts. Root-caused
+   two layers deep:
+   - Frontend gate too narrow: relaxed to block only
+     `'corporate_oversight'` (a read-only view spanning every branch at
+     once, genuinely ambiguous which roster to show) - `'organisation_home'`
+     now loads staff too, same as `'branch_authorisation'`.
+   - The underlying RPC, `get_operating_branch_roster_staff`, only ever
+     matched staff via `staff_branch_authorisations` - a table that only
+     has rows for multi-branch/franchise customers. R&M has zero such rows
+     (it isn't branch-structured at all), so even with the frontend gate
+     fixed, the RPC would still return nothing. Fixed additively in
+     `supabase/migrations/20260924040000_roster_staff_home_org_fallback.sql`:
+     the RPC now ALSO matches a `user_profiles` row whose `organization_id`
+     IS the operating org directly (a standalone org's own staff), purely
+     as an additional `UNION` branch - every existing branch/franchise
+     customer's results are byte-identical, this only adds rows that were
+     never returned before for organisations with no branch structure.
+4. **R&M's real 22 officers had never been onboarded into `staff_profiles`
+   at all** - the deeper prerequisite the RPC fix alone couldn't paper
+   over, since its join requires a matching `staff_profiles` row to exist.
+   Confirmed live: even after both fixes above, the RPC still returned
+   empty, because R&M had zero `staff_profiles` rows full stop (despite 22
+   real, already-identity-verified officers existing as `user_profiles`
+   rows from this whole session's patrol-log work). Created 23 real
+   `staff_profiles` rows (all 22 real `role='officer'` R&M officers plus
+   the "Waz Waz" placeholder) with `organization_id`=R&M and the schema's
+   own safe defaults (`employment_type='permanent'`). **Deliberately left
+   `work_ready` at its honest default (`false`)** rather than setting it
+   true for all of them - `work_ready` has its own explicit human-review
+   tracking columns (`work_ready_reviewed_by`/`_at`/`_notes`), meaning
+   marking someone work-ready is a genuine HR sign-off decision, not
+   something to shortcut unilaterally for 22 real people even though the
+   circumstantial evidence (years of real patrol history) would likely
+   support it for all of them.
+
+**Verified end to end after all four fixes**: `get_operating_branch_roster_
+staff('R&M')` now correctly returns all 23 real officers including Colin
+Eathorne (matching the real verification shift created earlier this
+session). Full `apps/web` suite green (298 files / 1278 tests), real
+production build clean (`npm run build`, "built in 1.65s", zero errors).
+`schema.sql`/Atlas regenerated. Backend fixes (RPC, `staff_profiles` rows)
+are live immediately; the three frontend `.tsx`/`.css` fixes need an actual
+build+deploy (the normal push pipeline) before they reach
+`fcmanager.co.nz` - re-verifying the LIVE UI specifically for these
+frontend changes is a follow-up once deployed, not done in this pass.
+
 ## Conventions established / reusable
 
 - Live SQL via the Supabase Management API (`SUPABASE_ACCESS_TOKEN`, from

@@ -80,7 +80,8 @@ function metricFrom(response: { count: number | null; error: { message: string }
     : { value: response.count ?? 0, error: null };
 }
 
-function displayMetric(metric: MetricState): number | string {
+function displayMetric(metric: MetricState, loading: boolean): number | string {
+  if (metric.value === null && loading) return '…';
   const unavailable = metric.value === null;
   return unavailable ? 'Unavailable' : metric.value ?? 0;
 }
@@ -355,12 +356,12 @@ const AdminHubPage: React.FC<AdminHubPageProps> = ({ onNavigate }) => {
           <small>Live totals and the last seven days</small>
         </div>
         <section className="admin-metric-grid" aria-label="Current operations metrics">
-          <MetricCard icon={Users} label="On duty now" value={displayMetric(metrics.onDuty)} unavailable={metrics.onDuty.value === null} title={metrics.onDuty.error ?? undefined} tone="blue" onClick={() => onNavigate?.('roster')} />
-          <MetricCard icon={Radio} label="Active dispatch" value={displayMetric(metrics.activeDispatch)} unavailable={metrics.activeDispatch.value === null} title={metrics.activeDispatch.error ?? undefined} tone="teal" onClick={() => onNavigate?.('dispatch')} />
-          <MetricCard icon={ShieldAlert} label="Open breaches" value={displayMetric(metrics.breaches)} unavailable={metrics.breaches.value === null} title={metrics.breaches.error ?? undefined} tone="amber" onClick={() => onNavigate?.('breach-review')} />
-          <MetricCard icon={Binoculars} label="Observations today" value={displayMetric(metrics.observations)} unavailable={metrics.observations.value === null} title={metrics.observations.error ?? undefined} tone="green" onClick={() => onNavigate?.('reports')} />
+          <MetricCard icon={Users} label="On duty now" value={displayMetric(metrics.onDuty, loading)} unavailable={!loading && metrics.onDuty.value === null} loading={loading && metrics.onDuty.value === null} title={metrics.onDuty.error ?? undefined} tone="blue" onClick={() => onNavigate?.('roster')} />
+          <MetricCard icon={Radio} label="Active dispatch" value={displayMetric(metrics.activeDispatch, loading)} unavailable={!loading && metrics.activeDispatch.value === null} loading={loading && metrics.activeDispatch.value === null} title={metrics.activeDispatch.error ?? undefined} tone="teal" onClick={() => onNavigate?.('dispatch')} />
+          <MetricCard icon={ShieldAlert} label="Open breaches" value={displayMetric(metrics.breaches, loading)} unavailable={!loading && metrics.breaches.value === null} loading={loading && metrics.breaches.value === null} title={metrics.breaches.error ?? undefined} tone="amber" onClick={() => onNavigate?.('breach-review')} />
+          <MetricCard icon={Binoculars} label="Observations today" value={displayMetric(metrics.observations, loading)} unavailable={!loading && metrics.observations.value === null} loading={loading && metrics.observations.value === null} title={metrics.observations.error ?? undefined} tone="green" onClick={() => onNavigate?.('reports')} />
           <SafetyGate status={moduleStatus} isEnabled={welfareEnabled} moduleLabel="Welfare monitoring" safetyRelevant renderUnavailable={(message) => <MetricCard icon={HeartPulse} label="Welfare alerts" value="Unavailable" unavailable title={message.description} tone="red" onClick={() => onNavigate?.('welfare-alerts')} />}>
-            <MetricCard icon={HeartPulse} label="Welfare alerts" value={displayMetric(metrics.welfare)} unavailable={metrics.welfare.value === null} title={metrics.welfare.error ?? undefined} tone="red" onClick={() => onNavigate?.('welfare-alerts')} />
+            <MetricCard icon={HeartPulse} label="Welfare alerts" value={displayMetric(metrics.welfare, loading)} unavailable={!loading && metrics.welfare.value === null} loading={loading && metrics.welfare.value === null} title={metrics.welfare.error ?? undefined} tone="red" onClick={() => onNavigate?.('welfare-alerts')} />
           </SafetyGate>
         </section>
         <section className="admin-trend-panel" aria-labelledby="dispatch-trend-heading">
