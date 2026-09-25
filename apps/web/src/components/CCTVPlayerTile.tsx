@@ -309,16 +309,26 @@ export const CCTVPlayerTile = React.forwardRef<CCTVPlayerTileHandle, CCTVPlayerT
     if (!video || !src || !enhanceRequested) { setCssFilter(null); return; }
     let cancelled = false;
     let handle: number | null = null;
+    let initialHandle: number | null = null;
     const usesVideoFrames = typeof video.requestVideoFrameCallback === 'function';
+    const drawAvailableFrame = () => { if (!cancelled) renderEnhanced(); };
     const step = () => {
       if (cancelled) return;
       renderEnhanced();
       if (!playing && !usesVideoFrames) return;
       handle = usesVideoFrames ? video.requestVideoFrameCallback!(step) : requestAnimationFrame(step);
     };
+    video.addEventListener('loadeddata', drawAvailableFrame);
+    video.addEventListener('canplay', drawAvailableFrame);
+    video.addEventListener('seeked', drawAvailableFrame);
     step();
+    initialHandle = requestAnimationFrame(drawAvailableFrame);
     return () => {
       cancelled = true;
+      video.removeEventListener('loadeddata', drawAvailableFrame);
+      video.removeEventListener('canplay', drawAvailableFrame);
+      video.removeEventListener('seeked', drawAvailableFrame);
+      if (initialHandle !== null) cancelAnimationFrame(initialHandle);
       if (handle !== null) {
         if (usesVideoFrames) video.cancelVideoFrameCallback?.(handle);
         else cancelAnimationFrame(handle);

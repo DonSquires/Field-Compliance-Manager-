@@ -213,6 +213,9 @@ describe('CCTV console', () => {
     expect(tile).toContain('estimateNoiseFloor(context.getImageData(0, 0, patch, patch).data, patch, patch)');
     expect(tile).toContain('planEnhancement(stats, { zoom: zoomState.zoom, previous: planRef.current');
     expect(tile).toContain('requestVideoFrameCallback');
+    expect(tile).toContain("video.addEventListener('loadeddata', drawAvailableFrame)");
+    expect(tile).toContain("video.addEventListener('seeked', drawAvailableFrame)");
+    expect(tile).toContain('initialHandle = requestAnimationFrame(drawAvailableFrame)');
     expect(tile).toContain("'Enhanced view' : 'Basic adjustments'");
     expect(tile).toContain('showing basic adjustments instead.');
     expect(tile).toContain('cssFilterFor(plan, manual)');
