@@ -6,6 +6,7 @@ import {
   CheckCircle2,
   CircleDot,
   Clock3,
+  Database,
   Eye,
   ExternalLink,
   FileVideo2,
@@ -28,6 +29,7 @@ import { consolidateResultData } from '../lib/motionConsolidation';
 import { buildCCTVPrintableReport, type CCTVReportReceiptProvenance } from '../lib/cctvReport';
 import { describeJobFailure, summariseFailures, type JobFailure } from '../lib/cctvJobFailure';
 import { filterUsableReportImages, type ReportEvidenceImage } from '../lib/cctvImageQuality';
+import { entityTitle, inferenceReviewLabel, isReviewed, OBSERVATION_SELECT, toObservation, type ConsoleObservation } from '../lib/cctvConsole';
 import type {
   ConsolidatedFaceEvent,
   ConsolidatedPersonEvent,
@@ -226,7 +228,10 @@ export const CCTVReviewPage: React.FC<CCTVReviewPageProps> = ({ initialFilter = 
   const [videoUrl, setVideoUrl] = useState<string | null>(null);
   const [videoLoading, setVideoLoading] = useState(false);
   const [videoError, setVideoError] = useState<string | null>(null);
-  const [activeTab, setActiveTab] = useState<'events' | 'keyframes' | 'raw'>('events');
+  const [activeTab, setActiveTab] = useState<'events' | 'records' | 'keyframes' | 'raw'>('events');
+  const [observationRecords, setObservationRecords] = useState<ConsoleObservation[]>([]);
+  const [observationRecordsLoading, setObservationRecordsLoading] = useState(false);
+  const [observationRecordsError, setObservationRecordsError] = useState<string | null>(null);
   const [enlargedImage, setEnlargedImage] = useState<{ src: string; title: string; subtitle?: string } | null>(null);
   const [personRecords, setPersonRecords] = useState<PersonRecordOption[]>([]);
   const [vehicleRecords, setVehicleRecords] = useState<VehicleRecordOption[]>([]);
@@ -393,6 +398,39 @@ export const CCTVReviewPage: React.FC<CCTVReviewPageProps> = ({ initialFilter = 
     count + result.person_events.length + result.vehicle_events.filter((event) => event.temporal_consensus).length + result.face_events.filter((event) => identityDrafts[event.event_id]?.authorityLevel !== 'approved').length
   ), 0);
   const reportReady = selectedBatchComplete && pendingObservationCount === 0;
+
+  const loadEvidenceObservationRecords = useCallback(async () => {
+    if (!profile?.organizationId || !selected?.evidence_item_id) { setObservationRecords([]); setObservationRecordsError(null); return; }
+    setObservationRecordsLoading(true); setObservationRecordsError(null);
+    const { data, error: recordsError } = await supabase
+      .from('cctv_entity_observations')
+      .select(OBSERVATION_SELECT)
+      .eq('organization_id', profile.organizationId)
+      .eq('evidence_item_id', selected.evidence_item_id)
+      .neq('review_state', 'superseded')
+      .order('observed_at');
+    if (recordsError) setObservationRecordsError(recordsError.message);
+    else setObservationRecords(((data as unknown as Record<string, unknown>[]) ?? []).map(toObservation).filter((row): row is ConsoleObservation => row !== null));
+    setObservationRecordsLoading(false);
+  }, [profile?.organizationId, selected?.evidence_item_id]);
+
+  useEffect(() => { void loadEvidenceObservationRecords(); }, [loadEvidenceObservationRecords]);
+
+  useEffect(() => {
+    if (!profile?.organizationId || !selected?.evidence_item_id) return;
+    const channel = supabase.channel(`cctv-review-records-${selected.evidence_item_id}`)
+      .on('postgres_changes', { event: '*', schema: 'public', table: 'cctv_entity_observations', filter: `organization_id=eq.${profile.organizationId}` }, (payload) => {
+        const evidenceId = (payload.new as { evidence_item_id?: string } | null)?.evidence_item_id ?? (payload.old as { evidence_item_id?: string } | null)?.evidence_item_id;
+        if (evidenceId === selected.evidence_item_id) void loadEvidenceObservationRecords();
+      })
+      .subscribe();
+    return () => { void supabase.removeChannel(channel); };
+  }, [loadEvidenceObservationRecords, profile?.organizationId, selected?.evidence_item_id]);
+
+  const openObservationRecord = useCallback((observationId: string) => {
+    const path = `/admin/field-ops?area=cctv-triage&observation=${observationId}`;
+    navigate(path);
+  }, [navigate]);
 
   const openInspectionWindow = useCallback(() => {
     if (!selected) return;
@@ -1498,6 +1536,12 @@ export const CCTVReviewPage: React.FC<CCTVReviewPageProps> = ({ initialFilter = 
                 </div>
               )}
 
+              <div className="cctv-records-summary" aria-label="Observation record summary">
+                <Database size={17} aria-hidden="true" />
+                <span><strong>{observationRecords.length} observation record{observationRecords.length === 1 ? '' : 's'}</strong><small>{observationRecords.filter((observation) => observation.personRecordId || observation.canonicalVehicleId).length} linked to canonical people or vehicles · {observationRecords.filter((observation) => !isReviewed(observation)).length} awaiting review</small></span>
+                <button type="button" className="cctv-btn-jump" onClick={() => setActiveTab('records')}>Records &amp; history</button>
+              </div>
+
               {/* Tabs */}
               <div className="cctv-tab-bar">
                 <button
@@ -1507,6 +1551,13 @@ export const CCTVReviewPage: React.FC<CCTVReviewPageProps> = ({ initialFilter = 
                 >
                   Observations (
                   {consolidated.summary_counts.face_events + consolidated.summary_counts.person_events + consolidated.summary_counts.vehicle_events})
+                </button>
+                <button
+                  type="button"
+                  className={activeTab === 'records' ? 'is-active' : ''}
+                  onClick={() => setActiveTab('records')}
+                >
+                  Records ({observationRecords.length})
                 </button>
                 <button
                   type="button"
@@ -1822,6 +1873,27 @@ export const CCTVReviewPage: React.FC<CCTVReviewPageProps> = ({ initialFilter = 
                       </div>
                     </div>
                   ))}
+                </div>
+              )}
+
+              {activeTab === 'records' && (
+                <div className="cctv-records-list" aria-label="Observation records for selected evidence">
+                  {observationRecordsLoading ? <div className="cctv-empty-small"><RefreshCw className="is-spinning" size={16} /> Loading observation records…</div> : null}
+                  {observationRecordsError ? <div className="page-error"><AlertTriangle size={16} /> Observation records could not be loaded: {observationRecordsError}</div> : null}
+                  {!observationRecordsLoading && !observationRecordsError && observationRecords.length === 0 ? <div className="cctv-empty-small"><Database size={18} /><span>No governed observation records have been created for this video yet.</span></div> : null}
+                  {observationRecords.map((observation) => {
+                    const priorMatches = observation.candidates.filter((candidate) => candidate.match_kind === 'observation').length;
+                    const recordLabel = observation.personRecordId ? observation.profileName || 'Person profile linked' : observation.canonicalVehicleId ? observation.plate ? `Vehicle ${observation.plate}` : 'Vehicle record linked' : observation.kind === 'animal' ? 'Animal observation' : 'No canonical record yet';
+                    return <article key={observation.id} className="cctv-record-card">
+                      {observation.thumbnail ? <img src={observation.thumbnail} alt="" /> : <span className="cctv-record-card__blank"><Database size={19} /></span>}
+                      <div className="cctv-record-card__body">
+                        <div><strong>{entityTitle(observation)}</strong><span className={`cctv-record-state is-${isReviewed(observation) ? 'reviewed' : 'pending'}`}>{isReviewed(observation) ? observation.reviewState.replace(/_/g, ' ') : 'Review needed'}</span></div>
+                        <p>{recordLabel}</p>
+                        <small>{inferenceReviewLabel(observation)} · {priorMatches ? `${priorMatches} matched prior sighting${priorMatches === 1 ? '' : 's'}` : observation.portfolioKey ? 'History ready' : 'First unlinked sighting'}</small>
+                      </div>
+                      <div className="cctv-record-card__actions"><button type="button" className="cctv-btn-jump" onClick={() => openObservationRecord(observation.id)}>{observation.personRecordId || observation.canonicalVehicleId ? 'Update record' : 'Add or link record'}</button><a className="cctv-btn-jump" href={`/admin/field-ops?area=cctv-triage&observation=${observation.id}`} target="_blank" rel="noopener noreferrer" title="Open this observation and its previous sightings on another screen"><ExternalLink size={13} /> History on screen 2</a></div>
+                    </article>;
+                  })}
                 </div>
               )}
 

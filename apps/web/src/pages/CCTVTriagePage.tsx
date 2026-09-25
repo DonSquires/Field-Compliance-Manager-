@@ -1,6 +1,6 @@
 import React, { useCallback, useEffect, useMemo, useState } from 'react';
-import { useNavigate } from 'react-router-dom';
-import { AlertTriangle, Car, Check, Eye, ExternalLink, Loader2, PawPrint, RefreshCw, UserRound, X } from 'lucide-react';
+import { useLocation, useNavigate } from 'react-router-dom';
+import { AlertTriangle, Car, Check, Database, Eye, ExternalLink, History, Loader2, PawPrint, RefreshCw, UserRound, X } from 'lucide-react';
 import { useAuth } from '../context/AuthContext';
 import { supabase } from '../lib/supabase';
 import {
@@ -49,15 +49,20 @@ function placeLabel(row: Record<string, unknown>): string {
 const CCTVTriagePage: React.FC = () => {
   const { profile } = useAuth();
   const navigate = useNavigate();
+  const location = useLocation();
   const organizationId = profile?.organizationId ?? null;
+  const requestedObservationId = new URLSearchParams(location.search).get('observation');
 
   const [observations, setObservations] = useState<ConsoleObservation[]>([]);
   const [cameras, setCameras] = useState<Record<string, CameraLookup>>({});
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<TriageError | null>(null);
   const [kindFilter, setKindFilter] = useState<KindFilter>('all');
-  const [showReviewed, setShowReviewed] = useState(false);
-  const [selectedId, setSelectedId] = useState<string | null>(null);
+  const [showReviewed, setShowReviewed] = useState(Boolean(requestedObservationId));
+  const [selectedId, setSelectedId] = useState<string | null>(requestedObservationId);
+  const [previousObservations, setPreviousObservations] = useState<ConsoleObservation[]>([]);
+  const [historyLoading, setHistoryLoading] = useState(false);
+  const [historyError, setHistoryError] = useState<string | null>(null);
 
   const [reviewBusy, setReviewBusy] = useState<string | null>(null);
   const [reviewMessage, setReviewMessage] = useState<string | null>(null);
@@ -90,6 +95,10 @@ const CCTVTriagePage: React.FC = () => {
     setError(null);
     const rows = ((obsRes.data as unknown as Record<string, unknown>[]) ?? []).map(toObservation).filter((row): row is ConsoleObservation => row !== null);
     setObservations(rows);
+    if (requestedObservationId && rows.some((row) => row.id === requestedObservationId)) {
+      setShowReviewed(true);
+      setSelectedId(requestedObservationId);
+    }
     const lookup: Record<string, CameraLookup> = {};
     for (const row of (importsRes.data as unknown as Record<string, unknown>[]) ?? []) {
       if (typeof row.id !== 'string') continue;
@@ -101,7 +110,7 @@ const CCTVTriagePage: React.FC = () => {
     }
     setCameras(lookup);
     setLoading(false);
-  }, [organizationId]);
+  }, [organizationId, requestedObservationId]);
 
   useEffect(() => { void load(); }, [load]);
 
@@ -122,6 +131,29 @@ const CCTVTriagePage: React.FC = () => {
   const pendingCount = useMemo(() => observations.filter((observation) => !isReviewed(observation)).length, [observations]);
   const selected = filtered.find((observation) => observation.id === selectedId) ?? filtered[0] ?? null;
   const selectedCamera = selected?.importId ? cameras[selected.importId] ?? null : null;
+
+  useEffect(() => {
+    let active = true;
+    const loadHistory = async () => {
+      if (!organizationId || !selected?.portfolioKey) { setPreviousObservations([]); setHistoryError(null); return; }
+      setHistoryLoading(true); setHistoryError(null);
+      const { data, error: historyLoadError } = await supabase
+        .from('cctv_entity_observations')
+        .select(OBSERVATION_SELECT)
+        .eq('organization_id', organizationId)
+        .eq('portfolio_key', selected.portfolioKey)
+        .neq('id', selected.id)
+        .neq('review_state', 'superseded')
+        .order('observed_at', { ascending: false })
+        .limit(50);
+      if (!active) return;
+      if (historyLoadError) setHistoryError(historyLoadError.message);
+      else setPreviousObservations(((data as unknown as Record<string, unknown>[]) ?? []).map(toObservation).filter((row): row is ConsoleObservation => row !== null));
+      setHistoryLoading(false);
+    };
+    void loadHistory();
+    return () => { active = false; };
+  }, [organizationId, selected?.id, selected?.portfolioKey]);
 
   // Each newly-selected observation gets its own blank reviewer inputs - otherwise a name/note typed
   // for one sighting would silently carry over and get saved against the next one.
@@ -317,6 +349,11 @@ const CCTVTriagePage: React.FC = () => {
                 {isReviewed(selected) ? selected.reviewState.replace(/_/g, ' ') : `${inferenceReviewLabel(selected)} · ${selected.candidates.length ? `${selected.candidates.length} possible match${selected.candidates.length === 1 ? '' : 'es'}` : selected.portfolioState === 'candidate' ? 'seen before in this footage' : 'first sighting'}`}
               </small>
 
+              <div className="cctv-triage__record-state" aria-label="Canonical record status">
+                <Database size={15} aria-hidden="true" />
+                <span><strong>{selected.personRecordId ? 'Person profile linked' : selected.canonicalVehicleId ? 'Vehicle record linked' : 'No canonical record linked yet'}</strong>{selected.personRecordId || selected.canonicalVehicleId ? ' Updates below apply to the shared record and remain visible on later sightings.' : ' Confirm or record this observation below to create or link one.'}</span>
+              </div>
+
               {selected.kind === 'vehicle' ? (
                 <>
                   <dl className="cctv-entity__facts">
@@ -411,6 +448,22 @@ const CCTVTriagePage: React.FC = () => {
                   })}
                 </div>
               ) : null}
+
+              <section className="cctv-triage__history" aria-label="Previous observations">
+                <div className="cctv-triage__history-head"><span><History size={15} aria-hidden="true" /><strong>Previous observations</strong></span><em>{previousObservations.length}</em></div>
+                {historyLoading ? <p className="cctv-console__muted"><Loader2 size={14} className="spin" aria-hidden="true" /> Loading sighting history…</p> : null}
+                {historyError ? <p className="cctv-console__muted">History could not be loaded: {historyError}</p> : null}
+                {!historyLoading && !historyError && previousObservations.length === 0 ? <p className="cctv-console__muted">No earlier or later sightings are linked to this record yet.</p> : null}
+                {previousObservations.map((observation) => {
+                  const camera = observation.importId ? cameras[observation.importId] : null;
+                  const timezone = camera?.timeZone ?? 'Pacific/Auckland';
+                  return <article key={observation.id} className="cctv-triage__history-row">
+                    {observation.thumbnail ? <img src={observation.thumbnail} alt="" /> : <span className="cctv-triage__history-icon">{KIND_ICON[observation.kind]}</span>}
+                    <span><strong>{entityTitle(observation)}</strong><small>{camera?.label ?? 'Camera'} · {formatDate(observation.observedAtMs, timezone)} · {formatClock(observation.observedAtMs, timezone)}</small><small>{observation.reviewState.replace(/_/g, ' ')}</small></span>
+                    <div><button type="button" className="page-action" onClick={() => { setShowReviewed(true); setKindFilter('all'); setSelectedId(observation.id); }}><Eye size={13} aria-hidden="true" /> Review</button>{observation.importId ? <a className="page-action" href={`/admin/field-ops?area=cctv-console&import=${observation.importId}`} target="_blank" rel="noopener noreferrer"><ExternalLink size={13} aria-hidden="true" /> Footage</a> : null}</div>
+                  </article>;
+                })}
+              </section>
 
               {!isReviewed(selected) ? (
                 <>

@@ -23,8 +23,29 @@
 .cctv-triage__detail-head { align-items: flex-start; display: flex; gap: 14px; justify-content: space-between; }
 .cctv-triage__detail-head h2 { color: var(--cc-text); font-size: 18px; margin: 0 0 4px; }
 .cctv-triage__hero { border-radius: 6px; max-height: 420px; object-fit: contain; width: 100%; background: #030a0f; }
+.cctv-triage__record-state { align-items: center; background: rgba(35, 194, 176, .09); border: 1px solid rgba(35, 194, 176, .28); border-radius: 6px; color: var(--cc-text-2); display: flex; gap: 9px; line-height: 1.4; padding: 9px 11px; }
+.cctv-triage__record-state svg { color: var(--cc-brand); flex: 0 0 auto; }
+.cctv-triage__record-state strong { color: var(--cc-text); display: block; font-size: 12px; }
+.cctv-triage__record-state span { font-size: 12px; }
+.cctv-triage__history { border-top: 1px solid var(--cc-line); display: grid; gap: 7px; padding-top: 12px; }
+.cctv-triage__history-head { align-items: center; display: flex; justify-content: space-between; }
+.cctv-triage__history-head > span { align-items: center; color: var(--cc-text); display: flex; gap: 6px; }
+.cctv-triage__history-head em { background: var(--cc-elevated); border-radius: 10px; color: var(--cc-text-2); font-size: 11px; font-style: normal; padding: 2px 7px; }
+.cctv-triage__history-row { align-items: center; background: var(--cc-elevated); border: 1px solid var(--cc-line); border-radius: 5px; display: grid; gap: 8px; grid-template-columns: 62px minmax(0, 1fr) auto; padding: 6px; }
+.cctv-triage__history-row > img,
+.cctv-triage__history-icon { background: #030a0f; border-radius: 3px; height: 42px; object-fit: cover; width: 62px; }
+.cctv-triage__history-icon { align-items: center; color: var(--cc-text-3); display: flex; justify-content: center; }
+.cctv-triage__history-row > span { display: grid; gap: 1px; min-width: 0; }
+.cctv-triage__history-row strong { color: var(--cc-text); font-size: 12px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.cctv-triage__history-row small { color: var(--cc-text-3); font-size: 11px; }
+.cctv-triage__history-row > div { display: flex; gap: 4px; }
+.cctv-triage__history-row .page-action { font-size: 11px; padding: 5px 7px; }
 
 @media (max-width: 900px) {
   .cctv-triage__layout { grid-template-columns: minmax(0, 1fr); }
   .cctv-triage__queue { max-height: 320px; }
+  .cctv-triage__history-row { grid-template-columns: 54px minmax(0, 1fr); }
+  .cctv-triage__history-row > img,
+  .cctv-triage__history-icon { height: 40px; width: 54px; }
+  .cctv-triage__history-row > div { grid-column: 1 / -1; }
 }

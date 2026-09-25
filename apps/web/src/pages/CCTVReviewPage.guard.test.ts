@@ -81,4 +81,17 @@ describe('CCTV inference review', () => {
     expect(source).toContain('evidenceDisplayName(job.evidence)');
     expect(source).toContain('evidenceDisplayName(selected.evidence)');
   });
+
+  it('integrates governed observation records and hands canonical writes to the record editor', () => {
+    expect(source).toContain("from('cctv_entity_observations')");
+    expect(source).toContain(".eq('evidence_item_id', selected.evidence_item_id)");
+    expect(source).toContain('.map(toObservation)');
+    expect(source).toContain("activeTab === 'records'");
+    expect(source).toContain('Add or link record');
+    expect(source).toContain('Update record');
+    expect(source).toContain('History on screen 2');
+    expect(source).toContain('area=cctv-triage&observation=${observationId}');
+    expect(source).toContain("table: 'cctv_entity_observations'");
+    expect(source).not.toMatch(/from\('canonical_(people|vehicles)'\)[\s\S]{0,300}\.(insert|update|delete)\(/);
+  });
 });

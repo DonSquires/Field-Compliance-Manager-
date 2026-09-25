@@ -65,4 +65,14 @@ describe('CCTV observation triage', () => {
   it('lets a reviewer jump back to the wall to watch the source footage for a selected sighting', () => {
     expect(page).toContain('/admin/field-ops?area=cctv-console&import=${selected.importId}');
   });
+
+  it('opens a requested observation even when reviewed and shows its full portfolio history', () => {
+    expect(page).toContain("new URLSearchParams(location.search).get('observation')");
+    expect(page).toContain('useState(Boolean(requestedObservationId))');
+    expect(page).toContain(".eq('portfolio_key', selected.portfolioKey)");
+    expect(page).toContain(".neq('review_state', 'superseded')");
+    expect(page).toContain('aria-label="Previous observations"');
+    expect(page).toContain('setSelectedId(observation.id)');
+    expect(page).toContain('aria-label="Canonical record status"');
+  });
 });

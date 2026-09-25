@@ -160,6 +160,26 @@
 .cctv-decision-message.is-good { color: #126b62; }
 .cctv-decision-message.is-bad { color: #a13d3d; font-weight: 700; }
 
+/* Governed observations bridge inference events to canonical people/vehicle records. */
+.cctv-records-summary { align-items: center; background: #edf5f4; border: 1px solid #cddfdd; border-radius: 6px; color: #315761; display: grid; gap: 10px; grid-template-columns: auto minmax(0, 1fr) auto; padding: 10px 12px; }
+.cctv-records-summary > span { display: grid; gap: 2px; min-width: 0; }
+.cctv-records-summary strong { color: #1f393e; font-size: 13px; }
+.cctv-records-summary small { color: #60737b; font-size: 12px; line-height: 1.35; }
+.cctv-records-list { display: grid; gap: 8px; max-height: 48vh; overflow-y: auto; padding-right: 3px; }
+.cctv-record-card { align-items: center; background: #f9fbfb; border: 1px solid #dfe7e8; border-radius: 6px; display: grid; gap: 11px; grid-template-columns: 84px minmax(180px, 1fr) auto; padding: 8px; }
+.cctv-record-card > img,
+.cctv-record-card__blank { background: #e7eeee; border-radius: 4px; height: 58px; object-fit: cover; width: 84px; }
+.cctv-record-card__blank { align-items: center; color: #809197; display: flex; justify-content: center; }
+.cctv-record-card__body { display: grid; gap: 3px; min-width: 0; }
+.cctv-record-card__body > div { align-items: center; display: flex; flex-wrap: wrap; gap: 7px; }
+.cctv-record-card__body strong { color: #23363e; font-size: 13px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.cctv-record-card__body p { color: #40565e; font-size: 12px; font-weight: 700; margin: 0; }
+.cctv-record-card__body small { color: #687a82; font-size: 12px; line-height: 1.35; }
+.cctv-record-state { border-radius: 3px; font-size: 11px; font-weight: 700; padding: 2px 6px; }
+.cctv-record-state.is-reviewed { background: #dcefe5; color: #26724c; }
+.cctv-record-state.is-pending { background: #fff0d3; color: #8b641a; }
+.cctv-record-card__actions { align-items: flex-end; display: flex; flex-direction: column; gap: 5px; }
+
 /* Tabs */
 .cctv-tab-bar { display: flex; border-bottom: 1px solid #dde3e6; gap: 8px; }
 .cctv-tab-bar button { background: none; border: 0; border-bottom: 2px solid transparent; color: #61707a; cursor: pointer; font-size: 13px; font-weight: 600; padding: 8px 10px; }
@@ -382,7 +402,8 @@
 .cctv-review-layout.mode-inspect .cctv-media-container { aspect-ratio: 16 / 7.5; min-height: 420px; }
 .cctv-review-layout.mode-inspect .cctv-video-player { max-height: 62vh; }
 .cctv-review-layout.mode-inspect .cctv-events-list,
-.cctv-review-layout.mode-inspect .cctv-keyframes-grid { max-height: none; }
+.cctv-review-layout.mode-inspect .cctv-keyframes-grid,
+.cctv-review-layout.mode-inspect .cctv-records-list { max-height: none; }
 .cctv-review-page.is-review-popout .cctv-review-header { display: none; }
 .cctv-review-page.is-review-popout .cctv-workspace-modes,
 .cctv-review-page.is-review-popout .cctv-workspace-selection button { display: none; }
@@ -428,4 +449,11 @@
   .cctv-media-container,
   .cctv-review-layout.mode-inspect .cctv-media-container { aspect-ratio: 16 / 9; min-height: 210px; }
   .cctv-queue-tools label { display: none; }
+  .cctv-records-summary { grid-template-columns: auto minmax(0, 1fr); }
+  .cctv-records-summary .cctv-btn-jump { grid-column: 1 / -1; justify-content: center; }
+  .cctv-record-card { align-items: start; grid-template-columns: 68px minmax(0, 1fr); }
+  .cctv-record-card > img,
+  .cctv-record-card__blank { height: 52px; width: 68px; }
+  .cctv-record-card__actions { align-items: stretch; flex-direction: row; grid-column: 1 / -1; }
+  .cctv-record-card__actions button { flex: 1; justify-content: center; }
 }
