@@ -18,6 +18,9 @@ describe('generic place selection policy', () => {
     expect(cctv).toContain('p_zone_id: zoneId');
     expect(banner).toContain('<optgroup label="Sites">');
     expect(banner).toContain('<optgroup label="Zones">');
+    for (const outcome of ['outside_all_geofences', 'unresolved_no_geofence', 'unresolved_unverified', 'unresolved_invalid']) expect(banner).toContain(`${outcome}:`);
+    expect(banner).toContain('visually verify this Site or Zone');
+    expect(banner).not.toContain("locationStatus === 'outside_geofence'\n      ? 'Outside the selected service geofence'");
     expect(observations).toContain('<span>Site</span>');
     expect(observations).toContain('<span>Zone</span>');
     expect(observations).toContain("if (event.target.value) setNextZoneId('')");
