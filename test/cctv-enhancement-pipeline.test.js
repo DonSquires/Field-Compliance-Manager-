@@ -26,6 +26,10 @@ test('laptop GPU is primary, VPS CPU is resilient, and RunPod is final fallback'
   assert.match(laptopUpdater, /git worktree add --detach \$temporaryWorktree origin\/main/);
   assert.match(laptopUpdater, /Tracked local changes preserved/);
   assert.match(laptopUpdater, /LAPTOP_WORKER_ENV_FILE/);
+  assert.match(laptopUpdater, /inspectJson \| ConvertFrom-Json/);
+  assert.match(laptopUpdater, /Get-DockerContainerInspect/);
+  assert.match(laptopUpdater, /Labels\.'com\.docker\.compose\.project'/);
+  assert.doesNotMatch(laptopUpdater, /docker inspect --format/);
   assert.doesNotMatch(laptopUpdater, /throw 'The checkout has tracked local changes/);
   assert.match(laptopCompose, /LAPTOP_WORKER_ENV_FILE:-\.\/deploy\/laptop-worker\/laptop-worker\.env/);
   assert.match(laptopUpdater, /health\.cuda -ne \$true/);
