@@ -74,7 +74,6 @@ import {
   nextRate,
   normalizeCCTVInspection,
   observationCountsByEvidence,
-  OBSERVATION_SELECT,
   parseClipIntegrity,
   parseMs,
   previousClipBefore,
@@ -156,7 +155,7 @@ const CUSTODY_EVENT_LABEL: Record<string, string> = {
 };
 
 const SIGNED_URL_TTL_SECONDS = 3600;
-const DETAIL_POLL_INTERVAL_MS = 10_000;
+const DETAIL_POLL_INTERVAL_MS = 30_000;
 // Realtime change bursts (progress ticks, observation inserts) collapse into one reload per import per window.
 const DETAIL_REFRESH_COALESCE_MS = 1500;
 type ConsoleError = ConsoleFailure & { retry: (() => void) | null };
@@ -331,38 +330,24 @@ const CCTVConsolePage: React.FC = () => {
   const loadImportDetail = useCallback(async (importId: string) => {
     if (!organizationId) return;
     setDetailLoading(true);
-    const [evidenceRes, marksRes, observationsRes] = await Promise.all([
-      supabase.from('evidence_items').select('id, storage_path, captured_at, metadata, sha256_hash, is_court_ready, locked_at, retention_hold').eq('organization_id', organizationId).eq('cctv_import_id', importId).order('captured_at'),
-      supabase.from('cctv_device_events').select('id, source, source_ref, event_start_at, event_end_at, severity, thumbnail_path, metadata').eq('cctv_import_id', importId).order('event_start_at').limit(5000),
-      supabase.from('cctv_entity_observations').select(OBSERVATION_SELECT).eq('organization_id', organizationId).eq('cctv_import_id', importId).order('observed_at').limit(2000),
-    ]);
-    const failed = evidenceRes.error ? 'recordings' : marksRes.error ? 'camera events' : observationsRes.error ? 'observations' : null;
-    const failure = evidenceRes.error ?? marksRes.error ?? observationsRes.error;
-    if (failure && failed) {
+    const { data, error: detailError } = await supabase.rpc('get_cctv_console_import_detail', { p_import_id: importId });
+    if (detailError) {
       // Keep whatever this camera already showed; a dropped connection must not blank the wall or the timeline.
-      setError({ ...describeConsoleFailure(failure.message, `${failed} for this camera`, navigator.onLine), retry: () => void loadImportDetail(importId) });
+      setError({ ...describeConsoleFailure(detailError.message, 'recordings, events and observations for this camera', navigator.onLine), retry: () => void loadImportDetail(importId) });
       setDetailLoading(false);
       return;
     }
-    const evidenceRows = (evidenceRes.data as Array<{ id: string; storage_path: string | null; captured_at: string; metadata: Record<string, unknown> | null; sha256_hash: string | null; is_court_ready: boolean | null; locked_at: string | null; retention_hold: boolean | null }>) ?? [];
-    const evidenceIds = evidenceRows.map((row) => row.id);
-    const [jobsRes, synopsisRes] = evidenceIds.length
-      ? await Promise.all([
-          supabase.from('inference_jobs').select('id, evidence_item_id, status').in('evidence_item_id', evidenceIds).eq('domain', 'video_motion'),
-          supabase.from('evidence_summary_approvals').select('evidence_id, approval_status, generated_summary, generated_at').in('evidence_id', evidenceIds).eq('generated_mode', 'cctv_vision_llm_scene_synopsis'),
-        ])
-      : [{ data: [], error: null }, { data: [], error: null }];
-    const { data: jobRows, error: jobsError } = jobsRes;
-    if (jobsError) {
-      setError({ ...describeConsoleFailure(jobsError.message, 'analysis status for this camera', navigator.onLine), retry: () => void loadImportDetail(importId) });
-      setDetailLoading(false);
-      return;
-    }
+    const detail = asRecord(data);
+    const evidenceRows = (Array.isArray(detail.evidence) ? detail.evidence : []) as Array<{ id: string; storage_path: string | null; captured_at: string; metadata: Record<string, unknown> | null; sha256_hash: string | null; is_court_ready: boolean | null; locked_at: string | null; retention_hold: boolean | null }>;
+    const jobRows = (Array.isArray(detail.jobs) ? detail.jobs : []) as Array<{ id: string; evidence_item_id: string; status: string }>;
+    const synopsisRows = (Array.isArray(detail.synopses) ? detail.synopses : []) as Array<{ evidence_id: string; approval_status: string; generated_summary: string | null; generated_at: string | null }>;
+    const markRows = (Array.isArray(detail.marks) ? detail.marks : []) as Array<Record<string, unknown>>;
+    const observationRows = (Array.isArray(detail.observations) ? detail.observations : []) as Array<Record<string, unknown>>;
     setError((current) => (current?.retryable ? null : current));
     const jobByEvidence = new Map<string, { id: string; status: string }>();
-    for (const job of (jobRows as Array<{ id: string; evidence_item_id: string; status: string }>) ?? []) jobByEvidence.set(job.evidence_item_id, { id: job.id, status: job.status });
+    for (const job of jobRows) jobByEvidence.set(job.evidence_item_id, { id: job.id, status: job.status });
     const synopsisByEvidence = new Map<string, SceneSynopsis>();
-    for (const row of (synopsisRes.data as Array<{ evidence_id: string; approval_status: string; generated_summary: string | null; generated_at: string | null }>) ?? []) {
+    for (const row of synopsisRows) {
       if (row.generated_summary) synopsisByEvidence.set(row.evidence_id, { text: row.generated_summary, approvalStatus: row.approval_status, generatedAt: row.generated_at });
     }
     const clips: ConsoleClip[] = evidenceRows.flatMap((row) => {
@@ -394,7 +379,7 @@ const CCTVConsolePage: React.FC = () => {
         sceneSynopsis: synopsisByEvidence.get(row.id) ?? null,
       }];
     });
-    const marks: ConsoleMark[] = ((marksRes.data as Array<Record<string, unknown>>) ?? []).flatMap((row) => {
+    const marks: ConsoleMark[] = markRows.flatMap((row) => {
       const startMs = parseMs(typeof row.event_start_at === 'string' ? row.event_start_at : null);
       if (startMs === null) return [];
       const metadata = asRecord(row.metadata);
@@ -405,7 +390,7 @@ const CCTVConsolePage: React.FC = () => {
           : 'Camera motion event';
       return [{ id: String(row.id), startMs, endMs, severity: markSeverity(row.severity, row.source, kind), source: String(row.source), kind, thumbnailPath: typeof row.thumbnail_path === 'string' ? row.thumbnail_path : null, label }];
     });
-    const observations = ((observationsRes.data as Array<Record<string, unknown>>) ?? []).map(toObservation).filter((item): item is ConsoleObservation => Boolean(item));
+    const observations = observationRows.map(toObservation).filter((item): item is ConsoleObservation => Boolean(item));
     setClipsByImport((current) => ({ ...current, [importId]: clips }));
     setMarksByImport((current) => ({ ...current, [importId]: marks }));
     setObservationsByImport((current) => ({ ...current, [importId]: observations }));

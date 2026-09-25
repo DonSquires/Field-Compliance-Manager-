@@ -235,19 +235,17 @@ export const CCTVPlayerTile = React.forwardRef<CCTVPlayerTileHandle, CCTVPlayerT
   // remains the untouched source. A clip that cannot be read cross-origin falls back to CSS filters.
   useEffect(() => {
     const canvas = canvasRef.current;
+    rendererRef.current?.dispose();
+    rendererRef.current = null;
     if (!canvas || !enhanceRequested || gpuUnavailable) return;
-    if (!rendererRef.current) {
-      try {
-        rendererRef.current = createEnhancementRenderer(canvas);
-      } catch {
-        rendererRef.current = null;
-      }
-      if (!rendererRef.current) { setGpuUnavailable('This browser cannot run the enhanced view; showing basic adjustments instead.'); return; }
+    try {
+      rendererRef.current = createEnhancementRenderer(canvas);
+    } catch {
+      rendererRef.current = null;
     }
-    return () => { /* renderer kept for the tile's lifetime */ };
-  }, [enhanceRequested, gpuUnavailable]);
-
-  useEffect(() => () => { rendererRef.current?.dispose(); rendererRef.current = null; }, []);
+    if (!rendererRef.current) { setGpuUnavailable('This browser cannot run the enhanced view; showing basic adjustments instead.'); return; }
+    return () => { rendererRef.current?.dispose(); rendererRef.current = null; };
+  }, [enhanceRequested, gpuUnavailable, src, clip?.evidenceId]);
 
   useEffect(() => {
     planRef.current = null;

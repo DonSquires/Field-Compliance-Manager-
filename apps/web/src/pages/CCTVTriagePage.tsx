@@ -79,7 +79,7 @@ const CCTVTriagePage: React.FC = () => {
     }
     setLoading(true);
     const [obsRes, importsRes] = await Promise.all([
-      supabase.from('cctv_entity_observations').select(OBSERVATION_SELECT).eq('organization_id', organizationId).order('observed_at').limit(1000),
+      supabase.from('cctv_entity_observations').select(OBSERVATION_SELECT).eq('organization_id', organizationId).neq('review_state', 'superseded').order('observed_at').limit(1000),
       supabase.from('cctv_imports').select('id, camera_label, source_timezone, locations(name, address)').eq('organization_id', organizationId).neq('status', 'archived').limit(500),
     ]);
     if (obsRes.error) {

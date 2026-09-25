@@ -6,7 +6,7 @@ const test = require('node:test');
 process.env.SUPABASE_URL ||= 'https://example.invalid';
 process.env.SUPABASE_SERVICE_ROLE_KEY ||= 'test-service-role-key';
 
-const { choosePlaybackStrategy, ffmpegArgsFor, PLAYBACK_PROFILES, normaliseAnimals, localTriageResult, triageOrderFor, triageCoverage, INFERENCE_POLICY } = require('../services/vision/vision_job_watcher');
+const { choosePlaybackStrategy, ffmpegArgsFor, PLAYBACK_PROFILES, normaliseAnimals, localTriageResult, triageOrderFor, triageCoverage, compactMotionSummaryForIngestion, INFERENCE_POLICY } = require('../services/vision/vision_job_watcher');
 const { consolidateAnimals, consolidatePeople, consolidateMotionSummary, buildEntityObservations, buildInferenceDeviceEvents, isReviewableCandidate } = require('../services/vision/motion_consolidator');
 
 const watcherSource = fs.readFileSync(path.join(__dirname, '..', 'services/vision/vision_job_watcher.js'), 'utf8');
@@ -239,6 +239,21 @@ test('watcher records observations and timeline marks through the P2 RPCs before
   assert.ok(persistIndex > 0 && persistIndex < ingestIndex, 'observations are written while the job is still processing');
   assert.match(watcherSource, /select\('id, organization_id, evidence_kind, storage_path, metadata, captured_at, cctv_import_id, locked_at, sha256_hash'\)/);
   assert.match(watcherSource, /recordedStartAt: evidence\.metadata\?\.recorded_start_at \|\| null, capturedAt: evidence\.captured_at \|\| null/);
+  assert.match(watcherSource, /supabase\.rpc\('coalesce_cctv_stationary_vehicle_observations', \{ p_job_id: job\.id \}\)/);
+  assert.match(watcherSource, /stationary_vehicle_sources_coalesced: coalesced/);
+});
+
+test('ingestion sends event summaries and window counts, not per-frame worker scratch data', () => {
+  const input = {
+    total_frames_parsed: 10,
+    motion_segments: [{ start_time_seconds: 1, end_time_seconds: 3, frames: [{ sha256_hash: 'a', file_path: '/tmp/a.jpg' }, { sha256_hash: 'b' }] }],
+    consolidated_events: { vehicle_events: [{ event_id: 'v1', best_frame_hash: 'a' }] },
+  };
+  const compact = compactMotionSummaryForIngestion(input);
+  assert.deepEqual(compact.motion_segments, [{ start_time_seconds: 1, end_time_seconds: 3, frame_count: 2 }]);
+  assert.deepEqual(compact.consolidated_events, input.consolidated_events);
+  assert.equal(input.motion_segments[0].frames.length, 2, 'compaction does not mutate the in-memory result used by other worker steps');
+  assert.match(watcherSource, /motion_summary: compactMotionSummaryForIngestion\(summary\)/);
 });
 
 test('watcher records the source file hash once, before playback conversion, and verifies it on every later pass', () => {

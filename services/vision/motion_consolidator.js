@@ -47,7 +47,7 @@ function averageEmbedding(existingAvg, count, newEmbedding) {
   return updated;
 }
 
-async function loadBase64Thumbnail(filePath, maxBytes = 250_000) {
+async function loadBase64Thumbnail(filePath, maxBytes = 40_000) {
   if (!filePath) return null;
   let stat;
   try {
@@ -66,15 +66,14 @@ async function loadBase64Thumbnail(filePath, maxBytes = 250_000) {
       return null;
     }
   }
-  // A full-resolution motion-extractor frame (busy daylight scene, or a high-megapixel camera) commonly
-  // exceeds the byte budget; downscale/recompress it instead of silently dropping the photo the reviewer
-  // needs to see. ffmpeg is already in this image for the extractor itself.
+  // Review thumbnails cross the database/API frequently; keep them small while the untouched source frame
+  // remains linked as evidence. ffmpeg is already in this image for the extractor itself.
   const scaledPath = path.join(os.tmpdir(), `thumb-${crypto.randomUUID()}.jpg`);
   try {
     await execFileAsync('ffmpeg', [
       '-y', '-i', filePath,
-      '-vf', "scale='min(960,iw)':-2",
-      '-q:v', '5',
+      '-vf', "scale='min(480,iw)':-2",
+      '-q:v', '8',
       scaledPath,
     ], { timeout: 15_000 });
     const scaledStat = await fs.stat(scaledPath);

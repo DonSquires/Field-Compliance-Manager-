@@ -64,6 +64,32 @@ describe('frame analysis', () => {
     expect(infrared.gains).toEqual([1, 1, 1]);
   });
 
+  it('removes the uniform pink cast produced by an IR-cut filter', () => {
+    const pinkIr = analyseFramePixels(frame(96, 54, (x, y) => {
+      const base = 32 + ((x * 5 + y * 3) % 70);
+      return [base * 1.35, base * 0.72, base * 1.22];
+    }), 96, 54)!;
+    expect(pinkIr.chroma).toBeGreaterThan(MONO_CHROMA_THRESHOLD);
+    expect(pinkIr.mono).toBe(true);
+    const plan = planEnhancement(pinkIr, { zoom: 1, smoothing: 1 });
+    expect(plan.saturation).toBe(0);
+    expect(plan.gains).toEqual([1, 1, 1]);
+  });
+
+  it('keeps real magenta and mixed-colour footage in colour', () => {
+    const daylightMagenta = analyseFramePixels(frame(96, 54, (x, y) => {
+      const detail = (x * 3 + y * 5) % 45;
+      return [205 + detail, 105 + detail / 2, 190 + detail];
+    }), 96, 54)!;
+    expect(daylightMagenta.mono).toBe(false);
+
+    const mixedNightColour = analyseFramePixels(frame(96, 54, (x, y) => {
+      const base = 25 + ((x + y) % 25);
+      return x < 48 ? [base * 1.35, base * 0.72, base * 1.2] : [base * 0.75, base * 1.3, base * 0.8];
+    }), 96, 54)!;
+    expect(mixedNightColour.mono).toBe(false);
+  });
+
   it('estimates sensor noise and trades sharpening for denoising when it is present', () => {
     const clean = analyseFramePixels(frame(96, 54, (x) => [80 + (x % 50), 80 + (x % 50), 80 + (x % 50)]), 96, 54)!;
     const noisy = analyseFramePixels(frame(96, 54, (x) => { const n = noise(); return [80 + (x % 50) + n, 80 + (x % 50) + n, 80 + (x % 50) + n]; }), 96, 54)!;

@@ -299,7 +299,7 @@ async function ingest(job, summary) {
       inference_job_id: job.id,
       evidence_item_id: job.evidence_item_id,
       organization_id: job.organization_id,
-      motion_summary: summary
+      motion_summary: compactMotionSummaryForIngestion(summary)
     }),
     signal: AbortSignal.timeout(30_000)
   });
@@ -307,6 +307,15 @@ async function ingest(job, summary) {
     const detail = (await response.text()).slice(0, 1000);
     throw new Error(`motion ingestion returned HTTP ${response.status}${detail ? `: ${detail}` : ''}`);
   }
+}
+
+// The database needs review events and window provenance, not every classified frame object. The original
+// video remains the durable source if a future model needs to recompute those machine-working details.
+function compactMotionSummaryForIngestion(summary) {
+  return {
+    ...summary,
+    motion_segments: (summary.motion_segments || []).map(({ frames, ...segment }) => ({ ...segment, frame_count: Array.isArray(frames) ? frames.length : 0 })),
+  };
 }
 
 // Spreads the classification budget fairly across every motion segment (vehicle/person event),
@@ -965,7 +974,9 @@ async function recordEntityObservations(job, evidence, summary) {
     p_observations: observations,
   });
   if (error) throw new Error(`entity observation persistence failed: ${error.message}`);
-  log('entity_observations_recorded', { job_id: job.id, submitted: observations.length, saved: data, kinds: observations.reduce((counts, item) => ({ ...counts, [item.entity_kind]: (counts[item.entity_kind] || 0) + 1 }), {}) });
+  const { data: coalesced, error: coalesceError } = await supabase.rpc('coalesce_cctv_stationary_vehicle_observations', { p_job_id: job.id });
+  if (coalesceError) throw new Error(`stationary vehicle event consolidation failed: ${coalesceError.message}`);
+  log('entity_observations_recorded', { job_id: job.id, submitted: observations.length, saved: data, stationary_vehicle_sources_coalesced: coalesced, kinds: observations.reduce((counts, item) => ({ ...counts, [item.entity_kind]: (counts[item.entity_kind] || 0) + 1 }), {}) });
   return data;
 }
 
@@ -1159,4 +1170,4 @@ async function main() {
 
 if (require.main === module) main().catch((error) => { log('watcher_stopped', { error: error.message }); process.exitCode = 1; });
 
-module.exports = { safeVideoPath, safeCacheVideoPath, ensureVideoPath, runExtractor, claimJob, processOne, playbackStoragePath, ensurePlaybackCopy, selectFramesForClassification, representativeFrameHashes, probeVideo, choosePlaybackStrategy, ffmpegArgsFor, PLAYBACK_PROFILES, normaliseAnimals, recordEntityObservations, recordInferenceDeviceEvents, hashFile, recordSourceHash, localTriageResult, triageOrderFor, triageCoverage, INFERENCE_POLICY, cpuSample, stealRatioSince, extractorStarved, STARVED_STEAL_RATIO };
+module.exports = { safeVideoPath, safeCacheVideoPath, ensureVideoPath, runExtractor, claimJob, processOne, playbackStoragePath, ensurePlaybackCopy, selectFramesForClassification, representativeFrameHashes, probeVideo, choosePlaybackStrategy, ffmpegArgsFor, PLAYBACK_PROFILES, normaliseAnimals, recordEntityObservations, recordInferenceDeviceEvents, hashFile, recordSourceHash, localTriageResult, triageOrderFor, triageCoverage, compactMotionSummaryForIngestion, INFERENCE_POLICY, cpuSample, stealRatioSince, extractorStarved, STARVED_STEAL_RATIO };

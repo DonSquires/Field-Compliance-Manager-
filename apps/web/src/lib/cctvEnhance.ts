@@ -90,6 +90,11 @@ export function analyseFramePixels(pixels: Uint8ClampedArray, width: number, hei
   let sumLum = 0;
   let chromaSum = 0;
   let maxSum = 0;
+  let chromaticR = 0;
+  let chromaticG = 0;
+  let chromaticR2 = 0;
+  let chromaticG2 = 0;
+  let chromaticCount = 0;
   let clipLow = 0;
   let clipHigh = 0;
   for (let index = 0; index < count; index += 1) {
@@ -107,6 +112,16 @@ export function analyseFramePixels(pixels: Uint8ClampedArray, width: number, hei
     const brightest = Math.max(r, g, b);
     chromaSum += brightest - Math.min(r, g, b);
     maxSum += brightest;
+    const channelSum = r + g + b;
+    if (channelSum > 24) {
+      const normalR = r / channelSum;
+      const normalG = g / channelSum;
+      chromaticR += normalR;
+      chromaticG += normalG;
+      chromaticR2 += normalR * normalR;
+      chromaticG2 += normalG * normalG;
+      chromaticCount += 1;
+    }
     if (lum <= 2) clipLow += 1;
     if (lum >= 253) clipHigh += 1;
   }
@@ -130,7 +145,16 @@ export function analyseFramePixels(pixels: Uint8ClampedArray, width: number, hei
   const grey = (meanR + meanG + meanB) / 3;
   // Brightness-weighted saturation: infrared footage is grey at any exposure, a dim colour scene is not.
   const meanChroma = chromaSum / Math.max(1, maxSum);
-  const mono = meanChroma < MONO_CHROMA_THRESHOLD;
+  const chromaticityVariance = chromaticCount
+    ? Math.max(0, chromaticR2 / chromaticCount - (chromaticR / chromaticCount) ** 2)
+      + Math.max(0, chromaticG2 / chromaticCount - (chromaticG / chromaticCount) ** 2)
+    : 0;
+  // Some IR-cut filters leave a uniform pink cast: red and blue rise together while scene detail remains
+  // monochrome. Channel-ratio stability separates that from a genuinely warm scene, where blue falls away.
+  const magentaCast = meanG < Math.min(meanR, meanB) * 0.84
+    && Math.max(meanR, meanB) / Math.max(1, Math.min(meanR, meanB)) < 1.5;
+  const tintedInfrared = magentaCast && percentile(histogram, count, 0.5) < 110 && chromaticityVariance < 0.0008;
+  const mono = meanChroma < MONO_CHROMA_THRESHOLD || tintedInfrared;
   const gain = (channel: number) => clamp(grey / Math.max(1, channel), 0.85, 1.2);
   return {
     width,

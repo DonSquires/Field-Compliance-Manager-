@@ -19,16 +19,15 @@ describe('CCTV console', () => {
   it('is driven by the place-anchored CCTV spine, scoped to the organisation', () => {
     expect(page).toContain("from('cctv_imports')");
     expect(page).toContain("locations(name, address)");
-    expect(page).toContain("from('cctv_device_events')");
-    expect(page).toContain("from('cctv_entity_observations')");
-    expect(page).toContain(".eq('cctv_import_id', importId)");
+    expect(page).toContain("supabase.rpc('get_cctv_console_import_detail'");
+    expect(page).toContain("p_import_id: importId");
     expect(page).toContain(".eq('organization_id', organizationId)");
     expect(page).toContain("text: 'Organisation access could not be confirmed. The CCTV console is unavailable.'");
   });
 
   it('explains data-service faults by scope with a retry, and coalesces realtime refresh bursts', () => {
     expect(page).toContain('describeConsoleFailure(');
-    expect(page).toContain("'recordings' : marksRes.error ? 'camera events' : observationsRes.error ? 'observations'");
+    expect(page).toContain("'recordings, events and observations for this camera'");
     expect(page).toContain('retry: () => void loadImportDetail(importId)');
     expect(page).toContain('retry: () => void loadImports()');
     expect(page).toContain("setError((current) => (current?.retryable ? null : current));");
@@ -183,7 +182,7 @@ describe('CCTV console', () => {
     expect(page).toContain("supabase.rpc('lock_cctv_evidence'");
     expect(page).toContain('disabled={!activeClip || Boolean(activeClip.lockedAt) || !activeClip.sha256}');
     expect(page).toContain('lockDraft.reason.trim().length < 5');
-    expect(page).toContain('sha256_hash, is_court_ready, locked_at, retention_hold');
+    expect(page).toContain('sha256_hash: string | null; is_court_ready: boolean | null; locked_at: string | null; retention_hold: boolean | null');
     expect(page).toContain('retention cannot purge it · cannot be undone here');
     expect(page).not.toMatch(/from\('evidence_items'\)[\s\S]{0,400}\.(update|insert|delete)\(/);
   });
@@ -208,6 +207,8 @@ describe('CCTV console', () => {
     expect(page).toContain('enhancementReadout(enhancementState?.plan ?? null)');
     expect(tile).toContain('crossOrigin="anonymous"');
     expect(tile).toContain('createEnhancementRenderer(canvas)');
+    expect(tile).toContain('rendererRef.current?.dispose()');
+    expect(tile).toContain('[enhanceRequested, gpuUnavailable, src, clip?.evidenceId]');
     expect(tile).toContain('analyseFramePixels(context.getImageData');
     expect(tile).toContain('estimateNoiseFloor(context.getImageData(0, 0, patch, patch).data, patch, patch)');
     expect(tile).toContain('planEnhancement(stats, { zoom: zoomState.zoom, previous: planRef.current');
@@ -251,7 +252,7 @@ describe('CCTV console', () => {
   });
 
   it('refreshes an active job when Realtime table publication is unavailable', () => {
-    expect(page).toContain('const DETAIL_POLL_INTERVAL_MS = 10_000;');
+    expect(page).toContain('const DETAIL_POLL_INTERVAL_MS = 30_000;');
     expect(page).toContain("clip.jobStatus === 'queued' || clip.jobStatus === 'processing'");
     expect(page).toContain('window.setInterval(() => {');
     expect(page).toContain('for (const importId of activeImportIds) requestDetailRefresh(importId);');
