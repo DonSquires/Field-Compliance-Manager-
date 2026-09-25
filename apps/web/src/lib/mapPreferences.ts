@@ -1,35 +1,47 @@
 /**
- * Map preferences shared by every Leaflet surface: the LINZ base layers, the person's remembered base-layer
+ * Map preferences shared by every Leaflet surface: the base layers, the person's remembered base-layer
  * choice (per browser, localStorage) and the last viewport of a named map (per tab, sessionStorage), so a map
  * comes back the way it was left instead of snapping to its default framing on every render or return.
  */
 import L from 'leaflet';
 
-export type BaseLayerKey = 'topographic' | 'aerial';
+export type BaseLayerKey = 'street' | 'satellite' | 'aerial' | 'topographic';
 const BASE_LAYER_KEY = 'fcm.map.baseLayer';
 const VIEW_PREFIX = 'fcm.map.view:';
-const LINZ_ATTRIBUTION = '&copy; LINZ | CC BY 4.0';
+
+/** Street and satellite answer "which building, which driveway"; LINZ aerial and Topo50 are the official NZ sources. */
+const BASE_LAYERS: Array<{ key: BaseLayerKey; label: string; attribution: string }> = [
+  { key: 'street', label: 'Street map', attribution: '&copy; Google' },
+  { key: 'satellite', label: 'Satellite', attribution: '&copy; Google' },
+  { key: 'aerial', label: 'LINZ aerial', attribution: '&copy; LINZ | CC BY 4.0' },
+  { key: 'topographic', label: 'LINZ topographic', attribution: '&copy; LINZ | CC BY 4.0' },
+];
+const DEFAULT_BASE_LAYER: BaseLayerKey = 'street';
 
 export const linzTileUrl = (layer: BaseLayerKey): string => `${import.meta.env.VITE_SUPABASE_URL}/functions/v1/linz-map-tile?layer=${layer}&z={z}&x={x}&y={y}`;
 
 const safe = <T,>(read: () => T, fallback: T): T => { try { return read(); } catch { return fallback; } };
 
-export const readBaseLayer = (): BaseLayerKey => safe(() => (window.localStorage.getItem(BASE_LAYER_KEY) === 'aerial' ? 'aerial' : 'topographic'), 'topographic');
+export const readBaseLayer = (): BaseLayerKey => safe(() => {
+  const stored = window.localStorage.getItem(BASE_LAYER_KEY) as BaseLayerKey | null;
+  return stored && BASE_LAYERS.some((layer) => layer.key === stored) ? stored : DEFAULT_BASE_LAYER;
+}, DEFAULT_BASE_LAYER);
 export const rememberBaseLayer = (layer: BaseLayerKey): void => { safe(() => window.localStorage.setItem(BASE_LAYER_KEY, layer), undefined); };
 
-/** Adds both LINZ base layers (the remembered one shown), the switcher, and keeps remembering the person's choice. */
+/** Adds every base layer (the remembered one shown), the switcher, and keeps remembering the person's choice. */
 export function addLinzBaseLayers(map: L.Map, options: { collapsed?: boolean; overlays?: Record<string, L.Layer>; maxZoom?: number } = {}): Record<BaseLayerKey, L.TileLayer> {
   const maxZoom = options.maxZoom ?? 20;
-  const layers: Record<BaseLayerKey, L.TileLayer> = {
-    topographic: L.tileLayer(linzTileUrl('topographic'), { maxZoom, attribution: LINZ_ATTRIBUTION }),
-    aerial: L.tileLayer(linzTileUrl('aerial'), { maxZoom, attribution: LINZ_ATTRIBUTION }),
-  };
+  const layers = Object.fromEntries(BASE_LAYERS.map((layer) => [layer.key, L.tileLayer(linzTileUrl(layer.key), { maxZoom, attribution: layer.attribution })])) as Record<BaseLayerKey, L.TileLayer>;
   layers[readBaseLayer()].addTo(map);
-  L.control.layers({ 'LINZ topographic': layers.topographic, 'LINZ aerial': layers.aerial }, options.overlays, { collapsed: options.collapsed ?? true }).addTo(map);
-  map.on('baselayerchange', (event) => { rememberBaseLayer((event as L.LayersControlEvent).name === 'LINZ aerial' ? 'aerial' : 'topographic'); });
+  L.control.layers(Object.fromEntries(BASE_LAYERS.map((layer) => [layer.label, layers[layer.key]])), options.overlays, { collapsed: options.collapsed ?? true }).addTo(map);
+  map.on('baselayerchange', (event) => {
+    const chosen = BASE_LAYERS.find((layer) => layer.label === (event as L.LayersControlEvent).name);
+    if (chosen) rememberBaseLayer(chosen.key);
+  });
   keepPageStillOnClick(map);
   return layers;
 }
+
 
 /**
  * Leaflet's keyboard handler focuses the map container on pointer-down, and the browser scrolls the shell's scrolling pane

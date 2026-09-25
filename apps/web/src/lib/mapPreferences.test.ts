@@ -29,15 +29,17 @@ describe('map preferences', () => {
   beforeEach(() => { window.localStorage.clear(); window.sessionStorage.clear(); });
 
   it('remembers the base layer per browser and shows it first next time', () => {
-    expect(readBaseLayer()).toBe('topographic');
+    expect(readBaseLayer()).toBe('street');
     const map = fakeMap();
     addLinzBaseLayers(map as never);
+    map.fire('baselayerchange', { name: 'Satellite' });
+    expect(readBaseLayer()).toBe('satellite');
     map.fire('baselayerchange', { name: 'LINZ aerial' });
     expect(readBaseLayer()).toBe('aerial');
-    map.fire('baselayerchange', { name: 'LINZ topographic' });
-    expect(readBaseLayer()).toBe('topographic');
-    rememberBaseLayer('aerial');
-    expect(window.localStorage.getItem('fcm.map.baseLayer')).toBe('aerial');
+    map.fire('baselayerchange', { name: 'Street map' });
+    expect(readBaseLayer()).toBe('street');
+    rememberBaseLayer('topographic');
+    expect(window.localStorage.getItem('fcm.map.baseLayer')).toBe('topographic');
   });
 
   it('restores the last viewport of a named map in this tab, otherwise frames the default', () => {

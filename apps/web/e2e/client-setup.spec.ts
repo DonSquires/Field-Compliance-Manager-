@@ -15,6 +15,8 @@ test('an administrator sets up a new client in five plain steps and is handed th
   // create_crm_site returns a table (one row), as the live function does
   await rpc('create_crm_site', [{ id: 's1s1s1s1-0000-4000-8000-000000000001', name: 'Main store', address: '44 Trafalgar Street, The Wood, Nelson', site_type: 'commercial_premises', active: true, boundary_status: 'provisional', boundary_verification: 'unverified', created: true }]);
   await rpc('ensure_crm_client_agreement', { agreement_id: 'a1a1a1a1-0000-4000-8000-000000000001', created: true, invitation_status: 'not_invited' });
+  await rpc('propose_boundary', [{ proposal_id: 'b1b1b1b1-0000-4000-8000-000000000001' }]);
+  await rpc('accept_boundary_proposal', [{ entity_id: 's1s1s1s1-0000-4000-8000-000000000001' }]);
   await rpc('manage_crm_agreement_delivery_schedule', { schedule_id: 'd1d1d1d1-0000-4000-8000-000000000001', patrol_config_id: 'p1', module_key: 'general_patrol' });
   await rpc('create_patrol_route_from_agreement', [{ route_id: 'r1r1r1r1-0000-4000-8000-000000000001', route_name: 'Trafalgar Street Dairy Ltd patrol run', created: true, attached_places: 1, skipped_places: 0 }]);
   await rpc('create_operating_roster_work_unit', { id: 'w1w1w1w1-0000-4000-8000-000000000001', name: 'Trafalgar Street Dairy Ltd patrol run' });
@@ -47,6 +49,29 @@ test('an administrator sets up a new client in five plain steps and is handed th
   const site = writes.find((write) => write.fn === 'create_crm_site')?.body;
   expect(site).toMatchObject({ p_name: 'Main store', p_site_type: 'commercial_premises' });
   expect(typeof site?.p_center_lat).toBe('number');
+
+  // the geofence sets itself from the LINZ land lot, unverified until a person confirms the shape
+  const map = page.getByRole('region', { name: 'Map for Main store' });
+  await expect(map.getByText(/Boundary found and set from LINZ \(legal parcel\)/)).toBeVisible();
+  expect(writes.find((write) => write.fn === 'propose_boundary')?.body).toMatchObject({ p_source: 'linz_parcel', p_entity_type: 'client_site', p_entity_id: 's1s1s1s1-0000-4000-8000-000000000001' });
+  expect(writes.find((write) => write.fn === 'accept_boundary_proposal')?.body).toMatchObject({ p_verify: false });
+
+  // and a person can outline the place by hand instead, saved through the same proposal path
+  await map.getByRole('button', { name: 'Draw the boundary' }).click();
+  const canvas = map.locator('.house-map-canvas');
+  const box = await canvas.boundingBox();
+  const width = box?.width ?? 320;
+  const height = box?.height ?? 300;
+  for (const corner of [[0.35, 0.35], [0.65, 0.35], [0.65, 0.65], [0.35, 0.65]]) {
+    await canvas.click({ position: { x: Math.floor(width * corner[0]), y: Math.floor(height * corner[1]) }, delay: 60 });
+    await page.waitForTimeout(350);
+  }
+  await expect(map.getByText('4 corners placed')).toBeVisible();
+  await map.getByRole('button', { name: 'Save this shape' }).click();
+  await expect(map.getByText('Boundary saved from the 4 corners you placed.')).toBeVisible();
+  const proposal = writes.filter((write) => write.fn === 'propose_boundary').at(-1)?.body;
+  expect(proposal).toMatchObject({ p_source: 'user_drawn', p_entity_type: 'client_site', p_entity_id: 's1s1s1s1-0000-4000-8000-000000000001', p_proposed_via: 'house_map' });
+  expect((proposal?.p_geojson as { coordinates: number[][][] }).coordinates[0]).toHaveLength(5);
   await page.getByRole('button', { name: 'Continue' }).click();
 
   // 3 What we do — the read-back sentence says the contract the way a manager would

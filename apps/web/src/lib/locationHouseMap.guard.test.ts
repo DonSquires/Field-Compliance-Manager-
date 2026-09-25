@@ -26,6 +26,21 @@ describe('location house map', () => {
     expect(source).not.toContain('.update(');
   });
 
+  it('lets a person outline the place by hand and saves it through the governed proposal path', () => {
+    expect(source).toContain("setDrawPoints((points) => [...points, [Number(latlng.lng.toFixed(7)), Number(latlng.lat.toFixed(7))]])");
+    expect(source).toContain("'user_drawn'");
+    expect(source).toContain("supabase.rpc('propose_boundary'");
+    expect(source).toContain("supabase.rpc('accept_boundary_proposal'");
+    expect(source).toContain('Draw the boundary');
+    expect(source).toContain('Undo corner');
+  });
+
+  it('sets the geofence itself on a place with no boundary, and only on an exact LINZ match', () => {
+    expect(source).toContain("preview?.match.startsWith('Exact')");
+    expect(source).toContain('saveLinzBoundary(preview, false)');
+    expect(source).toContain('if (facet?.boundary || autoResolvedRef.current === editableEntity.id) return;');
+  });
+
   it('resolves selected points through the canonical geofence spine', () => {
     expect(source).toContain("supabase.rpc('resolve_context_authorized'");
     expect(source).toContain("supabase.rpc('is_zone_closed'");

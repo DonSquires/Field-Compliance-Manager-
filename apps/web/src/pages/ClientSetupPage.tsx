@@ -22,6 +22,7 @@ import './ClientSetupPage.css';
 type Step = 1 | 2 | 3 | 4 | 5;
 interface ClientRecord { id: string; name: string; contact_email: string | null; contact_phone: string | null; status: string | null }
 interface PlaceRecord { id: string; name: string; address: string | null; site_type: string | null }
+interface ResumePlace extends PlaceRecord { gps_lat: number | null; gps_lng: number | null; boundary: GeoJSON.Geometry | null; boundary_verification: string }
 interface SavedService { schedule_id: string | null; place_id: string; module_key: string; words: string }
 interface ExistingMatch { id: string; name: string; status: string | null }
 
@@ -88,7 +89,7 @@ const ClientSetupPage: React.FC<{ onNavigate?: NavigateWithContext }> = ({ onNav
   const [placeForm, setPlaceForm] = useState({ name: '', address: '', type: 'commercial_premises' });
   const [addressCandidates, setAddressCandidates] = useState<AddressCandidate[]>([]);
   const [chosenAddress, setChosenAddress] = useState<AddressCandidate | null>(null);
-  const [justAddedPlace, setJustAddedPlace] = useState<{ id: string; name: string; address: string | null; lat: number; lng: number; boundary: GeoJSON.Geometry | null; boundaryLabel: string | null } | null>(null);
+  const [justAddedPlace, setJustAddedPlace] = useState<{ id: string; name: string; address: string | null; lat: number; lng: number; boundary: GeoJSON.Geometry | null; boundaryVerification: string; boundaryLabel: string | null } | null>(null);
   const placeRequest = useRef(crypto.randomUUID());
   // Step 3
   const [agreementId, setAgreementId] = useState<string | null>(null);
@@ -121,9 +122,14 @@ const ClientSetupPage: React.FC<{ onNavigate?: NavigateWithContext }> = ({ onNav
     setClientForm((form) => ({ ...form, name: org.name, email: org.contact_email ?? '', phone: org.contact_phone ?? '' }));
     const { data: contacts } = await supabase.from('crm_contacts').select('id').eq('organization_id', accountId).eq('is_primary', true).is('deactivated_at', null).limit(1);
     setContactSaved(Boolean(contacts?.length));
-    const { data: sites } = await supabase.from('client_sites').select('id, name, address, site_type').eq('client_organization_id', accountId).eq('active', true).order('created_at');
-    setPlaces((sites as PlaceRecord[]) ?? []);
-    setStep(sites?.length ? 3 : 2);
+    const { data: sites } = await supabase.from('client_sites').select('id, name, address, site_type, gps_lat, gps_lng, boundary, boundary_verification').eq('client_organization_id', accountId).eq('active', true).order('created_at');
+    const savedPlaces = (sites as ResumePlace[] | null) ?? [];
+    setPlaces(savedPlaces);
+    const unresolved = savedPlaces.find((site) => site.boundary_verification !== 'verified');
+    if (unresolved && unresolved.gps_lat != null && unresolved.gps_lng != null) {
+      setJustAddedPlace({ id: unresolved.id, name: unresolved.name, address: unresolved.address, lat: unresolved.gps_lat, lng: unresolved.gps_lng, boundary: unresolved.boundary, boundaryVerification: unresolved.boundary_verification, boundaryLabel: null });
+    }
+    setStep(unresolved ? 2 : savedPlaces.length ? 3 : 2);
   }, []);
 
   useEffect(() => {
@@ -201,7 +207,7 @@ const ClientSetupPage: React.FC<{ onNavigate?: NavigateWithContext }> = ({ onNav
       const row = (Array.isArray(data) ? data[0] : data) as { id: string; name: string; address: string | null; site_type: string | null } | undefined;
       if (!row?.id) throw new Error('The place was saved but could not be read back. Refresh and it will appear.');
       setPlaces((current) => [...current, { id: row.id, name: row.name, address: row.address, site_type: row.site_type }]);
-      setJustAddedPlace({ id: row.id, name: row.name, address: row.address, lat: chosenAddress.lat, lng: chosenAddress.lng, boundary: chosenAddress.boundary ?? null, boundaryLabel: chosenAddress.boundary ? chosenAddress.label : null });
+      setJustAddedPlace({ id: row.id, name: row.name, address: row.address, lat: chosenAddress.lat, lng: chosenAddress.lng, boundary: chosenAddress.boundary ?? null, boundaryVerification: 'unverified', boundaryLabel: chosenAddress.boundary ? chosenAddress.label : null });
       placeRequest.current = crypto.randomUUID();
       setPlaceForm({ name: '', address: '', type: placeForm.type }); setAddressCandidates([]); setChosenAddress(null);
       return `${row.name} added at ${row.address ?? 'the chosen address'}.`;
@@ -339,7 +345,7 @@ const ClientSetupPage: React.FC<{ onNavigate?: NavigateWithContext }> = ({ onNav
           <button type="button" className="btn btn-primary" disabled={places.length === 0 || busy !== null} onClick={() => { setServicePlaceId(places[0]?.id ?? ''); setStep(3); }}>Continue <ArrowRight size={15} aria-hidden="true" /></button>
         </footer>
       </form>
-      {justAddedPlace && <LocationHouseMap organizationId={client?.id ?? ''} house={{ name: justAddedPlace.name, address: justAddedPlace.address }} sites={[{ id: justAddedPlace.id, name: justAddedPlace.name, gps_lat: justAddedPlace.lat, gps_lng: justAddedPlace.lng, boundary: null, boundary_status: 'provisional', boundary_verification: 'unverified' }]} zones={[]} editableEntity={{ type: 'client_site', id: justAddedPlace.id, organizationId: client?.id ?? '', centerLat: justAddedPlace.lat, centerLng: justAddedPlace.lng }} seedBoundary={justAddedPlace.boundary ? { geometry: justAddedPlace.boundary, kind: 'reserve', label: justAddedPlace.boundaryLabel ?? justAddedPlace.name, lat: justAddedPlace.lat, lng: justAddedPlace.lng } : null} />}
+      {justAddedPlace && <LocationHouseMap organizationId={client?.id ?? ''} house={{ name: justAddedPlace.name, address: justAddedPlace.address }} sites={[{ id: justAddedPlace.id, name: justAddedPlace.name, gps_lat: justAddedPlace.lat, gps_lng: justAddedPlace.lng, boundary: justAddedPlace.boundaryLabel ? null : justAddedPlace.boundary, boundary_status: 'provisional', boundary_verification: justAddedPlace.boundaryVerification }]} zones={[]} editableEntity={{ type: 'client_site', id: justAddedPlace.id, organizationId: client?.id ?? '', centerLat: justAddedPlace.lat, centerLng: justAddedPlace.lng, onSaved: (verified) => setJustAddedPlace((place) => place ? { ...place, boundaryVerification: verified ? 'verified' : 'unverified' } : place) }} seedBoundary={justAddedPlace.boundaryLabel && justAddedPlace.boundary ? { geometry: justAddedPlace.boundary, kind: 'reserve', label: justAddedPlace.boundaryLabel, lat: justAddedPlace.lat, lng: justAddedPlace.lng } : null} />}
       <p className="client-setup-hint">Officers can be rostered before the boundary is confirmed; arrivals are recorded as unverified until it is done.</p>
     </section>}
 
