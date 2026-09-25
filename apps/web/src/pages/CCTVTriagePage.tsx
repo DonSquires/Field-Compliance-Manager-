@@ -2,8 +2,10 @@ import React, { useCallback, useEffect, useMemo, useState } from 'react';
 import { useLocation, useNavigate } from 'react-router-dom';
 import { AlertTriangle, Car, Check, Database, Eye, ExternalLink, History, Loader2, PawPrint, RefreshCw, UserRound, X } from 'lucide-react';
 import { useAuth } from '../context/AuthContext';
+import { CCTVStillComparison, type EnhancementReceipt } from '../components/CCTVStillComparison';
 import { supabase } from '../lib/supabase';
 import {
+  asRecord,
   candidateAction,
   describeConsoleFailure,
   entityTitle,
@@ -75,6 +77,7 @@ const CCTVTriagePage: React.FC = () => {
   const [correctingVehicleId, setCorrectingVehicleId] = useState<string | null>(null);
   const [correctMake, setCorrectMake] = useState('');
   const [correctModel, setCorrectModel] = useState('');
+  const [enhancedStill, setEnhancedStill] = useState<string | null>(null);
 
   const load = useCallback(async () => {
     if (!organizationId) {
@@ -131,6 +134,20 @@ const CCTVTriagePage: React.FC = () => {
   const pendingCount = useMemo(() => observations.filter((observation) => !isReviewed(observation)).length, [observations]);
   const selected = filtered.find((observation) => observation.id === selectedId) ?? filtered[0] ?? null;
   const selectedCamera = selected?.importId ? cameras[selected.importId] ?? null : null;
+  const captureRecognition = selected ? asRecord(selected.attributes.capture_recognition) : {};
+  const enhancementReceipt = asRecord(captureRecognition.enhancement) as EnhancementReceipt;
+  const enhancedStoragePath = typeof captureRecognition.enhanced_storage_path === 'string' ? captureRecognition.enhanced_storage_path : null;
+  const enhancedStorageBucket = typeof captureRecognition.enhanced_storage_bucket === 'string' ? captureRecognition.enhanced_storage_bucket : 'bob-uploads';
+
+  useEffect(() => {
+    let active = true;
+    setEnhancedStill(null);
+    if (!enhancedStoragePath) return () => { active = false; };
+    void supabase.storage.from(enhancedStorageBucket).createSignedUrl(enhancedStoragePath, 15 * 60).then(({ data }) => {
+      if (active) setEnhancedStill(data?.signedUrl ?? null);
+    });
+    return () => { active = false; };
+  }, [selected?.id, enhancedStorageBucket, enhancedStoragePath]);
 
   useEffect(() => {
     let active = true;
@@ -343,7 +360,7 @@ const CCTVTriagePage: React.FC = () => {
                 ) : null}
               </div>
 
-              {selected.thumbnail ? <img className="cctv-triage__hero" src={selected.thumbnail} alt="" /> : null}
+              {selected.thumbnail ? <CCTVStillComparison original={selected.thumbnail} enhanced={enhancedStill} receipt={Object.keys(enhancementReceipt).length ? enhancementReceipt : null} subjectLabel={entityTitle(selected)} /> : null}
 
               <small className={`cctv-entity__state${isWeakInferenceCandidate(selected) ? ' is-weak' : ''}`}>
                 {isReviewed(selected) ? selected.reviewState.replace(/_/g, ' ') : `${inferenceReviewLabel(selected)} · ${selected.candidates.length ? `${selected.candidates.length} possible match${selected.candidates.length === 1 ? '' : 'es'}` : selected.portfolioState === 'candidate' ? 'seen before in this footage' : 'first sighting'}`}

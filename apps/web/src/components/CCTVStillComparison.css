@@ -1,0 +1,25 @@
+.cctv-still-compare { background: var(--cc-elevated); border: 1px solid var(--cc-line); border-radius: 7px; display: grid; gap: 9px; padding: 10px; }
+.cctv-still-compare > header { align-items: center; display: flex; gap: 12px; justify-content: space-between; }
+.cctv-still-compare > header > div { align-items: center; color: var(--cc-brand); display: flex; gap: 8px; min-width: 0; }
+.cctv-still-compare > header span { display: grid; gap: 1px; }
+.cctv-still-compare > header strong { color: var(--cc-text); font-size: 13px; }
+.cctv-still-compare > header small { color: var(--cc-text-3); font-size: 11px; font-weight: 400; }
+.cctv-still-compare__authority { align-items: center; color: var(--cc-good) !important; display: flex !important; flex: 0 0 auto; font-size: 11px; font-weight: 700; gap: 5px !important; }
+.cctv-still-compare__grid { display: grid; gap: 8px; grid-template-columns: repeat(2, minmax(0, 1fr)); }
+.cctv-still-compare figure { background: var(--cc-surface); border: 1px solid var(--cc-line); border-radius: 5px; margin: 0; min-width: 0; overflow: hidden; }
+.cctv-still-compare__image { align-items: center; aspect-ratio: 4 / 3; background: #03080c; display: flex; justify-content: center; overflow: hidden; position: relative; }
+.cctv-still-compare__image img,
+.cctv-still-compare__image canvas { display: block; height: 100%; object-fit: contain; width: 100%; }
+.cctv-still-compare figcaption { display: grid; gap: 1px; padding: 7px 8px; }
+.cctv-still-compare figcaption strong { color: var(--cc-text); font-size: 12px; }
+.cctv-still-compare figcaption span { color: var(--cc-text-3); font-size: 10px; }
+.cctv-still-compare__error { align-items: center; background: rgba(3,8,12,.88); color: #ffb4ad; display: flex; font-size: 11px; gap: 6px; inset: 0; justify-content: center; padding: 12px; position: absolute; text-align: center; }
+.cctv-still-compare > footer { align-items: center; color: var(--cc-text-3); display: flex; flex-wrap: wrap; font-size: 10px; gap: 5px; }
+.cctv-still-compare > footer span { flex: 1 1 auto; }
+.cctv-still-compare > footer em { font-style: normal; }
+
+@media (max-width: 680px) {
+  .cctv-still-compare > header { align-items: flex-start; display: grid; }
+  .cctv-still-compare__authority { justify-self: start; }
+  .cctv-still-compare__grid { grid-template-columns: 1fr; }
+}

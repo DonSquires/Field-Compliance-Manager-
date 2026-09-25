@@ -75,4 +75,10 @@ describe('CCTV observation triage', () => {
     expect(page).toContain('setSelectedId(observation.id)');
     expect(page).toContain('aria-label="Canonical record status"');
   });
+
+  it('compares the authoritative original still with an enhanced review derivative', () => {
+    expect(page).toContain('CCTVStillComparison');
+    expect(page).toContain('original={selected.thumbnail}');
+    expect(page).toContain('receipt={Object.keys(enhancementReceipt).length ? enhancementReceipt : null}');
+  });
 });
