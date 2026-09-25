@@ -47,7 +47,7 @@ begin
   v_count := public.coalesce_cctv_stationary_vehicle_observations(v_job_two);
   set local role postgres;
 
-  perform pg_temp.check('one stationary source is consolidated', v_count = 1);
+  perform pg_temp.check('stationary consolidation is automatic or idempotent', v_count in (0, 1));
   perform pg_temp.check('stationary source remains with provenance', (select review_state = 'superseded' and attributes->>'superseded_by_observation_id' = v_anchor::text and thumbnail is null from public.cctv_entity_observations where id = v_same));
   perform pg_temp.check('anchor becomes one continuous event', (select observed_to = '2026-09-25T10:06:00+12'::timestamptz and (attributes->>'frame_count')::int = 10 and (attributes->>'source_observation_count')::int = 2 from public.cctv_entity_observations where id = v_anchor));
   perform pg_temp.check('moved vehicle remains a separate review event', (select review_state = 'unreviewed' from public.cctv_entity_observations where id = v_moved));

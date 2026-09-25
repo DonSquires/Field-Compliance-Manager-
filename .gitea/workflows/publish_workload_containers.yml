@@ -62,4 +62,5 @@ jobs:
           fcm-voice|services/fcm-voice|
           fcm-planner|services/fcm-planner|
           fcm-solver|services/fcm-solver|
+          fcm-vision-watcher|services/vision|
           IMAGES
