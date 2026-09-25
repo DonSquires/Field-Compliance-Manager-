@@ -41,7 +41,7 @@ COPY download_models.py ./
 RUN mkdir -p /app/models && python download_models.py
 COPY --from=speciesnet-export /export/out/ /app/models/
 
-COPY app.py detector.py plates.py species.py runpod_handler.py ./
+COPY app.py detector.py plates.py species.py super_resolution.py runpod_handler.py ./
 
 RUN useradd --create-home --uid 10001 appuser
 USER appuser

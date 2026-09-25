@@ -77,6 +77,7 @@ const CCTVTriagePage: React.FC = () => {
   const [correctingVehicleId, setCorrectingVehicleId] = useState<string | null>(null);
   const [correctMake, setCorrectMake] = useState('');
   const [correctModel, setCorrectModel] = useState('');
+  const [originalDerivativeStill, setOriginalDerivativeStill] = useState<string | null>(null);
   const [enhancedStill, setEnhancedStill] = useState<string | null>(null);
 
   const load = useCallback(async () => {
@@ -136,18 +137,27 @@ const CCTVTriagePage: React.FC = () => {
   const selectedCamera = selected?.importId ? cameras[selected.importId] ?? null : null;
   const captureRecognition = selected ? asRecord(selected.attributes.capture_recognition) : {};
   const enhancementReceipt = asRecord(captureRecognition.enhancement) as EnhancementReceipt;
+  const recognitionComparison = asRecord(captureRecognition.recognition_comparison);
+  const originalStoragePath = typeof captureRecognition.original_storage_path === 'string' ? captureRecognition.original_storage_path : null;
+  const originalStorageBucket = typeof captureRecognition.original_storage_bucket === 'string' ? captureRecognition.original_storage_bucket : 'bob-uploads';
   const enhancedStoragePath = typeof captureRecognition.enhanced_storage_path === 'string' ? captureRecognition.enhanced_storage_path : null;
   const enhancedStorageBucket = typeof captureRecognition.enhanced_storage_bucket === 'string' ? captureRecognition.enhanced_storage_bucket : 'bob-uploads';
+  const comparisonOriginal = originalDerivativeStill || selected?.thumbnail || null;
 
   useEffect(() => {
     let active = true;
+    setOriginalDerivativeStill(null);
     setEnhancedStill(null);
-    if (!enhancedStoragePath) return () => { active = false; };
-    void supabase.storage.from(enhancedStorageBucket).createSignedUrl(enhancedStoragePath, 15 * 60).then(({ data }) => {
-      if (active) setEnhancedStill(data?.signedUrl ?? null);
+    void Promise.all([
+      originalStoragePath ? supabase.storage.from(originalStorageBucket).createSignedUrl(originalStoragePath, 15 * 60) : Promise.resolve({ data: null }),
+      enhancedStoragePath ? supabase.storage.from(enhancedStorageBucket).createSignedUrl(enhancedStoragePath, 15 * 60) : Promise.resolve({ data: null }),
+    ]).then(([original, enhanced]) => {
+      if (!active) return;
+      setOriginalDerivativeStill(original.data?.signedUrl ?? null);
+      setEnhancedStill(enhanced.data?.signedUrl ?? null);
     });
     return () => { active = false; };
-  }, [selected?.id, enhancedStorageBucket, enhancedStoragePath]);
+  }, [selected?.id, originalStorageBucket, originalStoragePath, enhancedStorageBucket, enhancedStoragePath]);
 
   useEffect(() => {
     let active = true;
@@ -360,7 +370,7 @@ const CCTVTriagePage: React.FC = () => {
                 ) : null}
               </div>
 
-              {selected.thumbnail ? <CCTVStillComparison original={selected.thumbnail} enhanced={enhancedStill} receipt={Object.keys(enhancementReceipt).length ? enhancementReceipt : null} subjectLabel={entityTitle(selected)} /> : null}
+              {comparisonOriginal ? <CCTVStillComparison original={comparisonOriginal} enhanced={enhancedStill} receipt={Object.keys(enhancementReceipt).length ? enhancementReceipt : null} provider={typeof captureRecognition.provider === 'string' ? captureRecognition.provider : null} recognitionComparison={Object.keys(recognitionComparison).length ? recognitionComparison : null} subjectLabel={entityTitle(selected)} /> : null}
 
               <small className={`cctv-entity__state${isWeakInferenceCandidate(selected) ? ' is-weak' : ''}`}>
                 {isReviewed(selected) ? selected.reviewState.replace(/_/g, ' ') : `${inferenceReviewLabel(selected)} · ${selected.candidates.length ? `${selected.candidates.length} possible match${selected.candidates.length === 1 ? '' : 'es'}` : selected.portfolioState === 'candidate' ? 'seen before in this footage' : 'first sighting'}`}

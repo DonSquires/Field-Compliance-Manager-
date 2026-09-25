@@ -21,14 +21,16 @@ try {
   if ($LASTEXITCODE -ne 0) { throw 'The checkout cannot fast-forward cleanly.' }
 
   $revision = (git rev-parse --short HEAD).Trim()
-  docker compose --env-file $envFile -f $composeFile build --pull fcm-vision-watcher
-  if ($LASTEXITCODE -ne 0) { throw 'The laptop watcher image did not build.' }
-  docker compose --env-file $envFile -f $composeFile up -d --no-deps --force-recreate fcm-vision-watcher
-  if ($LASTEXITCODE -ne 0) { throw 'The laptop watcher container did not restart.' }
+  docker compose --env-file $envFile -f $composeFile build --pull fcm-inference fcm-vision-watcher
+  if ($LASTEXITCODE -ne 0) { throw 'The laptop GPU inference or watcher image did not build.' }
+  docker compose --env-file $envFile -f $composeFile up -d --force-recreate --wait fcm-inference fcm-vision-watcher
+  if ($LASTEXITCODE -ne 0) { throw 'The laptop GPU inference/watcher pair did not restart cleanly.' }
 
+  $inferenceState = (docker inspect --format '{{.State.Status}}' fcm-inference-laptop).Trim()
   $state = (docker inspect --format '{{.State.Status}}' fcm-vision-watcher-laptop).Trim()
+  if ($inferenceState -ne 'running') { throw "The laptop GPU inference service is $inferenceState after deployment." }
   if ($state -ne 'running') { throw "The laptop watcher is $state after deployment." }
-  Write-Host "Laptop CCTV watcher is running at revision $revision"
+  Write-Host "Laptop CCTV GPU inference and watcher are running at revision $revision"
   docker compose --env-file $envFile -f $composeFile logs --tail 20 fcm-vision-watcher
 } finally {
   Pop-Location

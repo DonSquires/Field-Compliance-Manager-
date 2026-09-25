@@ -8,6 +8,7 @@ import numpy as np
 import runpod
 
 from app import (
+    MODELS_DIR,
     _detect_people,
     _face_models,
     _health_payload,
@@ -16,32 +17,9 @@ from app import (
     _triage_with_attributes,
 )
 import detector as entity_detector
+import super_resolution
 
 MAX_IMAGE_PIXELS = 20_000_000
-
-
-def _enhance_capture(image: np.ndarray, scale: int = 3) -> tuple[np.ndarray, dict[str, Any]]:
-    source_hash = __import__('hashlib').sha256(image.tobytes()).hexdigest()
-    height, width = image.shape[:2]
-    upscaled = cv2.resize(image, (width * scale, height * scale), interpolation=cv2.INTER_CUBIC)
-    lab = cv2.cvtColor(upscaled, cv2.COLOR_BGR2LAB)
-    lightness, green_red, blue_yellow = cv2.split(lab)
-    lightness = cv2.createCLAHE(clipLimit=2.0, tileGridSize=(8, 8)).apply(lightness)
-    equalized = cv2.cvtColor(cv2.merge((lightness, green_red, blue_yellow)), cv2.COLOR_LAB2BGR)
-    denoised = cv2.bilateralFilter(equalized, d=5, sigmaColor=35, sigmaSpace=35)
-    blurred = cv2.GaussianBlur(denoised, (0, 0), 1.1)
-    enhanced = np.clip(cv2.addWeighted(denoised, 1.35, blurred, -0.35, 0), 0, 255).astype(np.uint8)
-    return enhanced, {
-        "profile": "deterministic_capture_v1",
-        "operations": ["crop", f"resize_{scale}x", "clahe_luminance", "bilateral_denoise", "unsharp_mask"],
-        "generative": False,
-        "source_sha256": source_hash,
-        "enhanced_sha256": __import__('hashlib').sha256(enhanced.tobytes()).hexdigest(),
-        "source_width": width,
-        "source_height": height,
-        "output_width": enhanced.shape[1],
-        "output_height": enhanced.shape[0],
-    }
 
 
 def _image_from_input(value: str) -> np.ndarray:
@@ -67,19 +45,28 @@ def handler(job: dict[str, Any]) -> dict[str, Any]:
         return {"success": True, "results": results}
     if payload.get("action") == "capture_recognition":
         image = _image_from_input(payload.get("image_base64", ""))
-        enhanced, enhancement = _enhance_capture(image)
+        enhanced, enhancement = super_resolution.enhance(image, MODELS_DIR)
         tasks = set(payload.get("tasks") or [])
+        encoded, jpeg = cv2.imencode('.jpg', enhanced, [cv2.IMWRITE_JPEG_QUALITY, 94])
+        if not encoded:
+            return {"success": False, "error": "enhanced_derivative_encode_failed", "review_required": True}
         result = {
-            "schema_version": 1,
+            "schema_version": 2,
             "source_frame_hash": payload.get("source_frame_hash"),
             "enhanced_crop_hash": enhancement["enhanced_sha256"],
             "enhancement": enhancement,
+            "enhanced_image_base64": base64.b64encode(jpeg.tobytes()).decode('ascii'),
             "authority": "provisional",
             "review_required": True,
             "alpr": {"state": "candidate", "result": _infer_alpr_if_requested(enhanced) if "alpr" in tasks else None, "review_required": True},
             "face": {"state": "candidate", "result": _infer_face_if_requested(enhanced) if "face_embedding" in tasks else None, "review_required": True},
             "vehicle": {"state": "ready" if "vehicle_attributes" in tasks else "not_requested", "result": _infer_vehicle_attributes(enhanced) if "vehicle_attributes" in tasks else None, "review_required": True},
             "animals": _animals_if_requested(enhanced) if "animal_detection" in tasks else {"state": "not_requested"},
+            "recognition": {
+                "source": _infer_frame(image, {"person", "vehicle", "animal", "plate", "face"}),
+                "enhanced": _infer_frame(enhanced, {"person", "vehicle", "animal", "plate", "face"}),
+                "decision_rule": "human_review_of_source_and_enhanced_candidates",
+            },
         }
         return result
     if payload.get("action") != "infer":

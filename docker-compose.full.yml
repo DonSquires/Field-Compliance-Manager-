@@ -227,6 +227,7 @@ services:
       RUNPOD_CAPTURE_API_URL: ${RUNPOD_CAPTURE_API_URL:-}
       RUNPOD_CAPTURE_API_KEY: ${RUNPOD_CAPTURE_API_KEY:-${RUNPOD_API_KEY:-}}
       VISION_MAX_CLASSIFICATION_FRAMES: 120
+      VISION_MAX_OBSERVATION_DERIVATIVES: ${VISION_MAX_OBSERVATION_DERIVATIVES:-8}
       VISION_RUNPOD_BATCH_SIZE: ${VISION_RUNPOD_BATCH_SIZE:-6}
       # Two jobs at once, two FFmpeg decode threads each (2026-09-21): the extractor used to open one decode
       # thread per core per capture, so three jobs ran 24 decode threads against the detector on eight cores
@@ -236,8 +237,10 @@ services:
       OMP_NUM_THREADS: ${VISION_DECODE_THREADS:-2}
       VISION_LOCAL_PEOPLE_INFERENCE: "false"
       VISION_LOCAL_VEHICLE_INFERENCE: "false"
-      # Where detector work runs (owner ruling 2026-09-20, GPU cost): vps_first | vps_only | gpu_first.
-      VISION_INFERENCE_POLICY: ${VISION_INFERENCE_POLICY:-vps_first}
+      # Laptop GPU over Tailscale first; VPS CPU next; RunPod only for unanswered frames.
+      VISION_INFERENCE_POLICY: ${VISION_INFERENCE_POLICY:-local_gpu_first}
+      LOCAL_GPU_INFERENCE_URL: ${LOCAL_GPU_INFERENCE_URL:-}
+      LOCAL_GPU_INFERENCE_API_KEY: ${LOCAL_GPU_INFERENCE_API_KEY:-${INFERENCE_API_KEY:-}}
       # The VPS detector shares eight cores with transcoding; two frames in flight per job keeps it responsive.
       VISION_LOCAL_DETECT_CONCURRENCY: ${VISION_LOCAL_DETECT_CONCURRENCY:-2}
       VISION_RUNPOD_TIMEOUT_MS: ${VISION_RUNPOD_TIMEOUT_MS:-90000}

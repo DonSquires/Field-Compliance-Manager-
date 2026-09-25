@@ -2,6 +2,7 @@
 from __future__ import annotations
 
 import os
+import hashlib
 from pathlib import Path
 from urllib.request import urlopen
 
@@ -52,11 +53,17 @@ FILES.update({
     'cct_s_v2_global_plate_config.yaml': 'https://github.com/ankandrew/cnn-ocr-lp/releases/download/arg-plates/cct_s_v2_global_plate_config.yaml',
     'vehicle-detection-0200.xml': 'https://storage.openvinotoolkit.org/repositories/open_model_zoo/2021.4/models_bin/3/vehicle-detection-0200/FP16/vehicle-detection-0200.xml',
     'vehicle-detection-0200.bin': 'https://storage.openvinotoolkit.org/repositories/open_model_zoo/2021.4/models_bin/3/vehicle-detection-0200/FP16/vehicle-detection-0200.bin',
+    # Real-ESRGAN upstream is BSD-3-Clause. This pinned ONNX conversion is packaged by the MIT-licensed
+    # mimageviewer repository at a fixed commit; checksum verification below makes the artifact immutable.
+    'realesrgan_x4plus.onnx': 'https://media.githubusercontent.com/media/MikageSawatari/mimageviewer/8d95fffe5571e72924c2922a7cb06485fbe210c7/models/realesrgan_x4plus.onnx',
 })
 FILES.update(SPECIESNET_FILES)
 # Anything under this size is an error page, not a model.
 MIN_BYTES = {'.onnx': 100_000, '.bin': 10_000, '.xml': 1_000, '.yaml': 200, '.txt': 100_000, '.json': 1_000_000, '.pt': 100_000_000, '.jpg': 20_000}
 OPTIONAL_FILES: dict[str, str] = {}
+EXPECTED_SHA256 = {
+    'realesrgan_x4plus.onnx': '0a06c68f463a14bf5563b78d77d61ba4394024e148383c4308d6d3783eac2dc5',
+}
 
 
 def download_file(url: str, destination: Path) -> None:
@@ -72,6 +79,10 @@ def download_file(url: str, destination: Path) -> None:
     if size < MIN_BYTES.get(destination.suffix, 1):
         partial.unlink(missing_ok=True)
         raise RuntimeError(f'{destination.name} downloaded {size} bytes; expected a model file')
+    expected = EXPECTED_SHA256.get(destination.name)
+    if expected and hashlib.sha256(partial.read_bytes()).hexdigest() != expected:
+        partial.unlink(missing_ok=True)
+        raise RuntimeError(f'{destination.name} checksum mismatch')
     partial.replace(destination)
     print(f'downloaded {destination.name} ({size / 1_000_000:.1f} MB)')
 
@@ -87,7 +98,8 @@ if __name__ == '__main__':
         targets = FILES
     for filename, url in targets.items():
         destination = MODELS_DIR / filename
-        if destination.exists() and destination.stat().st_size >= MIN_BYTES.get(destination.suffix, 1):
+        expected = EXPECTED_SHA256.get(filename)
+        if destination.exists() and destination.stat().st_size >= MIN_BYTES.get(destination.suffix, 1) and (not expected or hashlib.sha256(destination.read_bytes()).hexdigest() == expected):
             print(f'skipping {filename} (already present)')
             continue
         download_file(url, destination)

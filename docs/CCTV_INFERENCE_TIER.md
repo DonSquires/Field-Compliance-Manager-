@@ -9,6 +9,12 @@ This document is the authority for `services/fcm-inference` (the model service),
 worker that runs the same code on a GPU, and the parts of `services/vision` that consume its answers.
 It replaces the MegaDetector/ultralytics plan that was never staged.
 
+**Owner ruling 2026-09-25 — laptop GPU first.** The technician laptop GPU is the primary model tier. The
+VPS CPU tier is the locally controlled resilience tier; paid RunPod is used only for frames the laptop and
+VPS could not answer. Observation enhancement follows the same order: laptop GPU → RunPod fallback →
+deterministic worker fallback. `VISION_INFERENCE_POLICY=local_gpu_first` is the platform default; the laptop
+watcher uses its co-located GPU service first and RunPod only for unanswered work.
+
 ## 1. What the tier is for
 
 One motion frame in, one **advisory** answer out: every person, vehicle and animal in the frame, each with a
@@ -38,6 +44,7 @@ wide, however confident the OCR claims to be.
 | Person re-ID / vehicle colour-type | OpenVINO person-reidentification-retail-0288, vehicle-attributes-recognition-barrier-0039 | Apache-2.0 | OpenVINO CPU | both |
 | Vehicle-only fallback | OpenVINO vehicle-detection-0200 | Apache-2.0 | OpenVINO CPU | only when no RF-DETR export is present in `MODELS_DIR` |
 | Species | SpeciesNet v4.0.2a `always_crop` (Google; EfficientNetV2-M, 2,498 labels, camera-trap trained), exported to ONNX at image build from the Addax Data Science Hugging Face mirror (Apache-2.0, pinned revision `c56465f`), geofenced `NZL` | Apache-2.0 | onnxruntime | both |
+| Recognition still super-resolution | Real-ESRGAN x4plus, pinned ONNX SHA-256 `0a06c68f…eac2dc5` (upstream BSD-3-Clause; MIT-packaged conversion at fixed commit) | BSD-3-Clause / MIT packaging | onnxruntime CUDA, CPU fallback | laptop GPU primary; RunPod fallback |
 
 Rejected: Ultralytics YOLO (AGPL-3.0 — incompatible with a closed SaaS), Plate Recognizer / cloud ALPR
 (evidence leaves the custodian's control), tesseract on contour heuristics (kept only as the not-staged
@@ -50,6 +57,21 @@ CPU trial on the real TAPO sample (2304x1296, 16-core Codespace): RF-DETR nano 8
 medium 195 ms, large 297 ms per full frame; the VPS CPU tier (small-512, 5 passes) is ~0.9–1.2 s per
 2304x1296 frame and ~0.4 s per 640x360 snapshot. Large-704 gave the highest confidence on the same frames
 (person 0.93–0.96, car 0.96, truck 0.87–0.94) and is the GPU default.
+
+## 2a. Recognition still pipeline
+
+Only observations that enter human review receive derivatives (default 8/job, hard cap 20). Up to 12
+usable source crops around the observation window are quality-ranked, affine-aligned and temporal-median
+fused (`aligned_temporal_median_v1`). Frames that cannot align at the minimum correlation are excluded and
+named in the receipt. The fused crop is sent to Real-ESRGAN on the laptop GPU; RunPod is the paid fallback;
+OpenCV levels/denoise/sharpen is the non-generative final fallback.
+
+ALPR, face and animal/vehicle recognition run independently on the source crop and enhanced derivative.
+Both answers and their agreement are stored; disagreement never auto-resolves. The original and enhanced
+JPEGs are separate private Storage objects under the evidence id. `cctv_observation_derivatives` stores
+source/enhanced hashes, model/provider, fusion/enhancement receipts and recognition results. The source
+video/frame stays authoritative. Real-ESRGAN output is labelled generative/interpretive and always requires
+human confirmation.
 
 ## 3. Detection rules (`services/fcm-inference/detector.py`)
 

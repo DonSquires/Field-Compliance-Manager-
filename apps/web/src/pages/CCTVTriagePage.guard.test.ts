@@ -78,7 +78,7 @@ describe('CCTV observation triage', () => {
 
   it('compares the authoritative original still with an enhanced review derivative', () => {
     expect(page).toContain('CCTVStillComparison');
-    expect(page).toContain('original={selected.thumbnail}');
+    expect(page).toContain('original={comparisonOriginal}');
     expect(page).toContain('receipt={Object.keys(enhancementReceipt).length ? enhancementReceipt : null}');
   });
 });

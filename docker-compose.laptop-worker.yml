@@ -58,13 +58,16 @@ services:
       VISION_EXTRACTOR_PATH: /app/video_motion_extractor.py
       INFERENCE_SERVICE_URL: http://fcm-inference:3000
       INFERENCE_API_KEY: ${LAPTOP_INFERENCE_API_KEY:-laptop-local-shared-key}
-      # This instance's own GPU tier is already the "vps" slot below; no separate RunPod ask from here.
-      VISION_INFERENCE_POLICY: vps_only
+      # This instance's own GPU is the local service slot; RunPod receives only frames it cannot answer.
+      VISION_INFERENCE_POLICY: vps_first
+      RUNPOD_API_URL: ${RUNPOD_API_URL:-https://api.runpod.ai/v2/katqqnmds1dphs}
+      RUNPOD_API: ${RUNPOD_API:-${RUNPOD_API_KEY:-}}
       VISION_LOCAL_DETECT_INFERENCE: "true"
       VISION_LOCAL_PEOPLE_INFERENCE: "false"
       VISION_LOCAL_VEHICLE_INFERENCE: "false"
       VISION_WORKER_CONCURRENCY: "1"
       VISION_MAX_CLASSIFICATION_FRAMES: "120"
+      VISION_MAX_OBSERVATION_DERIVATIVES: "8"
       # This machine already runs its own Ollama (native, GPU-capable) for other work - reuse it via Docker
       # Desktop's host gateway instead of adding a second dockerized instance or a Tailscale hop to the VPS.
       OLLAMA_VISION_URL: "${OLLAMA_VISION_URL:-http://host.docker.internal:11434}"

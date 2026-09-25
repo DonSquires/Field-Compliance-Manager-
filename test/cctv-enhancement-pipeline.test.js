@@ -1,0 +1,53 @@
+const assert = require('node:assert/strict');
+const fs = require('node:fs');
+const path = require('node:path');
+const test = require('node:test');
+
+const read = (file) => fs.readFileSync(path.join(__dirname, '..', file), 'utf8');
+const watcher = read('services/vision/vision_job_watcher.js');
+const derivativeHelpers = read('services/vision/observation_derivatives.js');
+const inference = read('services/fcm-inference/app.py');
+const superResolution = read('services/fcm-inference/super_resolution.py');
+const models = read('services/fcm-inference/download_models.py');
+const migration = read('supabase/migrations/20260925140000_cctv_observation_derivatives.sql');
+const reviewer = read('apps/web/src/components/CCTVStillComparison.tsx');
+const vpsCompose = read('docker-compose.full.yml');
+const laptopCompose = read('docker-compose.laptop-worker.yml');
+
+test('laptop GPU is primary, VPS CPU is resilient, and RunPod is final fallback', () => {
+  assert.match(vpsCompose, /VISION_INFERENCE_POLICY: \$\{VISION_INFERENCE_POLICY:-local_gpu_first\}/);
+  assert.match(watcher, /if \(policy === 'local_gpu_first'\) return \['local_gpu', 'vps', 'gpu'\]/);
+  assert.match(watcher, /callLaptopEnhancement\(fusedBytes[\s\S]*?callRunpodEnhancement\(fusedBytes[\s\S]*?'worker_deterministic'/);
+  assert.match(laptopCompose, /VISION_INFERENCE_POLICY: vps_first/);
+  assert.match(laptopCompose, /RUNPOD_API_URL:/);
+});
+
+test('the enhancement model is pinned, checksummed, GPU-aware and explicitly generative', () => {
+  assert.match(models, /realesrgan_x4plus\.onnx/);
+  assert.match(models, /0a06c68f463a14bf5563b78d77d61ba4394024e148383c4308d6d3783eac2dc5/);
+  assert.match(superResolution, /"CUDAExecutionProvider", "CPUExecutionProvider"/);
+  assert.match(superResolution, /"generative": True/);
+  assert.match(inference, /@app\.post\("\/infer\/enhance"\)/);
+  assert.match(inference, /"source": _infer_frame\(image, tasks\)/);
+  assert.match(inference, /"enhanced": _infer_frame\(enhanced, tasks\)/);
+});
+
+test('derivatives are bounded, private, evidence-scoped and persisted only through the service writer', () => {
+  assert.match(watcher, /VISION_MAX_OBSERVATION_DERIVATIVES \|\| 8/);
+  assert.match(derivativeHelpers, /cctv-derivatives/);
+  assert.match(watcher, /supabase\.storage\.from\(paths\.bucket\)\.upload\(paths\.original/);
+  assert.match(watcher, /supabase\.storage\.from\(paths\.bucket\)\.upload\(paths\.enhanced/);
+  assert.match(watcher, /record_cctv_observation_derivatives/);
+  assert.match(migration, /CREATE TABLE IF NOT EXISTS public\.cctv_observation_derivatives/);
+  assert.match(migration, /CREATE POLICY cctv_observation_derivatives_select/);
+  assert.match(migration, /Service identity required/);
+  assert.match(migration, /Derivative storage path or enhancement profile is invalid/);
+});
+
+test('the reviewer sees source and enhanced results without surrendering source authority', () => {
+  assert.match(reviewer, /Original remains authoritative/);
+  assert.match(reviewer, /AI-enhanced derivative/);
+  assert.match(reviewer, /Source and enhanced recognition comparison/);
+  assert.match(reviewer, /human comparison required/);
+  assert.doesNotMatch(reviewer, /review_cctv_entity_observation|canonical_vehicles.*update/);
+});

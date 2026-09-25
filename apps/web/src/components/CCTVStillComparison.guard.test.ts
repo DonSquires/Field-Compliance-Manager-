@@ -13,6 +13,9 @@ describe('CCTV still comparison', () => {
     expect(component).toContain('AI-enhanced derivative');
     expect(component).toContain('AI-restored · interpretive pixels');
     expect(component).toContain('Local deterministic preview · display only');
+    expect(component).toContain("provider === 'laptop_gpu' ? 'Laptop GPU'");
+    expect(component).toContain('Source and enhanced recognition comparison');
+    expect(component).toContain('human comparison required');
   });
 
   it('derives the local fallback through the tested non-generative enhancement plan', () => {
@@ -23,7 +26,7 @@ describe('CCTV still comparison', () => {
   });
 
   it('is shown in the governed editor and accepts a future capture receipt without writing evidence', () => {
-    expect(triage).toContain('<CCTVStillComparison original={selected.thumbnail}');
+    expect(triage).toContain('<CCTVStillComparison original={comparisonOriginal}');
     expect(triage).toContain('captureRecognition.enhancement');
     expect(triage).toContain('captureRecognition.enhanced_storage_path');
     expect(triage).toContain('createSignedUrl(enhancedStoragePath, 15 * 60)');

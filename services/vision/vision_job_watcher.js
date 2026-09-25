@@ -2,10 +2,14 @@ const fs = require('node:fs/promises');
 const { readFileSync } = require('node:fs');
 const path = require('node:path');
 const crypto = require('node:crypto');
-const { spawn } = require('node:child_process');
+const { execFile, spawn } = require('node:child_process');
+const { promisify } = require('node:util');
 const { createClient } = require('@supabase/supabase-js');
 const { signJobToken } = require('./local_jwt_signer');
 const { consolidateMotionSummary, buildEntityObservations, buildInferenceDeviceEvents } = require('./motion_consolidator');
+const { MAX_JOB_DERIVATIVES, candidateFramesForEvent, derivativeStoragePaths, recognitionComparison } = require('./observation_derivatives');
+
+const execFileAsync = promisify(execFile);
 
 const SUPABASE_URL = (process.env.SUPABASE_URL || '').replace(/\/+$/, '');
 const SUPABASE_SERVICE_ROLE_KEY = process.env.SUPABASE_SERVICE_ROLE_KEY || '';
@@ -23,11 +27,13 @@ const VIDEO_CACHE_ROOT = path.resolve(process.env.VISION_VIDEO_CACHE_ROOT || pat
 const EXTRACTOR_PATH = path.resolve(
   process.env.VISION_EXTRACTOR_PATH || path.join(__dirname, 'video_motion_extractor.py')
 );
+const CAPTURE_DERIVATIVE_PATH = path.resolve(process.env.VISION_CAPTURE_DERIVATIVE_PATH || path.join(__dirname, 'capture_derivative.py'));
 const POLL_INTERVAL_MS = Number(process.env.VISION_POLL_INTERVAL_MS || 5000);
 const WORKER_CONCURRENCY = Math.max(1, Math.min(8, Number(process.env.VISION_WORKER_CONCURRENCY || 1)));
 const EXTRACTOR_TIMEOUT_MS = Number(process.env.VISION_EXTRACTOR_TIMEOUT_MS || 30 * 60 * 1000);
 const MAX_SUMMARY_BYTES = Number(process.env.VISION_MAX_SUMMARY_BYTES || 2 * 1024 * 1024);
 const MAX_CLASSIFICATION_FRAMES = Number(process.env.VISION_MAX_CLASSIFICATION_FRAMES || 120);
+const MAX_OBSERVATION_DERIVATIVES = Math.max(1, Math.min(MAX_JOB_DERIVATIVES, Number(process.env.VISION_MAX_OBSERVATION_DERIVATIVES || 8)));
 const RUNPOD_BATCH_SIZE = Number(process.env.VISION_RUNPOD_BATCH_SIZE || 6);
 // How long a budget-deferred job waits before the queue offers it again (bounded by the budget's reset time).
 const BUDGET_DEFER_MIN_SECONDS = Number(process.env.VISION_BUDGET_DEFER_MIN_SECONDS || 900);
@@ -36,12 +42,10 @@ const configuredRunpodBackoff = Number(process.env.VISION_RUNPOD_BACKOFF_MS);
 const RUNPOD_BACKOFF_MS = Number.isFinite(configuredRunpodBackoff) ? Math.max(0, configuredRunpodBackoff) : 5 * 60_000;
 // Cold starts on the serverless GPU run 45-90 s; a shorter limit turned every first call into a "timeout".
 const RUNPOD_TIMEOUT_MS = Number(process.env.VISION_RUNPOD_TIMEOUT_MS || 90_000);
-// Where detector work runs (owner ruling 2026-09-20: GPU cost). `vps_first`: the VPS detector triages and
-// recognises every frame and RunPod is asked only for frames the VPS could not answer; `vps_only` never asks
-// RunPod; `gpu_first` is the earlier order (RunPod, then VPS); `local_gpu_first` asks a technician's own GPU
-// (reachable over Tailscale, e.g. a laptop) before the VPS, and RunPod only as the last resort.
+// Where detector work runs (owner ruling 2026-09-25): the technician's laptop GPU is primary, VPS CPU is
+// the resilient local tier, and paid RunPod is the final fallback for unanswered frames only.
 const INFERENCE_POLICIES = ['vps_first', 'vps_only', 'gpu_first', 'local_gpu_first'];
-const INFERENCE_POLICY = INFERENCE_POLICIES.includes(process.env.VISION_INFERENCE_POLICY) ? process.env.VISION_INFERENCE_POLICY : 'vps_first';
+const INFERENCE_POLICY = INFERENCE_POLICIES.includes(process.env.VISION_INFERENCE_POLICY) ? process.env.VISION_INFERENCE_POLICY : 'local_gpu_first';
 const LOCAL_DETECT_CONCURRENCY = Math.max(1, Number(process.env.VISION_LOCAL_DETECT_CONCURRENCY || 2));
 const LOCAL_DETECT_TIMEOUT_MS = Number(process.env.VISION_LOCAL_DETECT_TIMEOUT_MS || 90_000);
 // A technician's own GPU (e.g. a laptop reachable over Tailscale), running the same fcm-inference image RunPod
@@ -830,6 +834,127 @@ async function runCaptureRecognition(frame, image, job) {
   }
 }
 
+function observationEventMap(summary) {
+  const events = summary.consolidated_events || {};
+  return new Map([
+    ...(events.vehicle_events || []).map((event) => [event.event_id, { event, kind: 'vehicle' }]),
+    ...(events.person_events || []).map((event) => [event.event_id, { event, kind: 'person' }]),
+    ...(events.face_events || []).map((event) => [event.event_id, { event, kind: 'face' }]),
+    ...(events.animal_events || []).map((event) => [event.event_id, { event, kind: 'animal' }]),
+  ]);
+}
+
+async function callLaptopEnhancement(image, sourceFrameHash) {
+  if (!LOCAL_GPU_INFERENCE_URL || Date.now() < localGpuUnavailableUntil) return null;
+  const form = new FormData();
+  form.append('photo', new Blob([image], { type: 'image/jpeg' }), `${sourceFrameHash || 'fused'}.jpg`);
+  form.append('tasks', JSON.stringify(['person', 'vehicle', 'animal', 'plate', 'face']));
+  if (sourceFrameHash) form.append('source_frame_hash', sourceFrameHash);
+  try {
+    const startedAt = Date.now();
+    const response = await fetch(`${LOCAL_GPU_INFERENCE_URL}/infer/enhance`, {
+      method: 'POST', headers: { Authorization: `Bearer ${LOCAL_GPU_INFERENCE_API_KEY}` }, body: form,
+      signal: AbortSignal.timeout(Math.max(LOCAL_GPU_TIMEOUT_MS, 90_000)),
+    });
+    if (!response.ok) {
+      localGpuUnavailableUntil = Date.now() + LOCAL_GPU_BACKOFF_MS;
+      log('laptop_gpu_enhancement_degraded', { status: response.status, retry_after_ms: LOCAL_GPU_BACKOFF_MS });
+      return null;
+    }
+    const payload = await response.json();
+    return payload?.success && payload.enhanced_image_base64 ? { ...payload, provider: 'laptop_gpu', gpu_elapsed_ms: Date.now() - startedAt } : null;
+  } catch (error) {
+    localGpuUnavailableUntil = Date.now() + LOCAL_GPU_BACKOFF_MS;
+    log('laptop_gpu_enhancement_unavailable', { error: error.message, retry_after_ms: LOCAL_GPU_BACKOFF_MS });
+    return null;
+  }
+}
+
+async function callRunpodEnhancement(image, sourceFrameHash) {
+  if (!RUNPOD_API_KEY || Date.now() < runpodUnavailableUntil) return null;
+  try {
+    const startedAt = Date.now();
+    const response = await fetch(`${RUNPOD_API_URL}/runsync`, {
+      method: 'POST', headers: { Authorization: `Bearer ${RUNPOD_API_KEY}`, 'Content-Type': 'application/json' },
+      body: JSON.stringify({ input: { action: 'capture_recognition', source_frame_hash: sourceFrameHash, image_base64: image.toString('base64'), tasks: ['alpr', 'face_embedding', 'vehicle_attributes', 'animal_detection'], enhancement_profile: 'realesrgan_x4plus_onnx_v1' } }),
+      signal: AbortSignal.timeout(RUNPOD_TIMEOUT_MS),
+    });
+    if (!response.ok) return null;
+    const payload = await response.json();
+    return payload?.status === 'COMPLETED' && payload.output?.enhanced_image_base64 ? { ...payload.output, provider: 'runpod_fallback', gpu_elapsed_ms: Date.now() - startedAt } : null;
+  } catch (error) {
+    log('runpod_enhancement_unavailable', { error: error.message });
+    return null;
+  }
+}
+
+async function recogniseDeterministicFallback(original, enhanced) {
+  const headers = { Authorization: `Bearer ${INFERENCE_API_KEY}` };
+  const detect = (bytes, name) => classifyLocally(INFERENCE_SERVICE_URL, '/infer/detect', headers, () => {
+    const form = new FormData(); form.append('photo', new Blob([bytes], { type: 'image/jpeg' }), name); return form;
+  }, LOCAL_DETECT_TIMEOUT_MS);
+  const [source, derivative] = await Promise.all([detect(original, 'original.jpg'), detect(enhanced, 'enhanced.jpg')]);
+  return { source, enhanced: derivative, decision_rule: 'human_review_of_source_and_enhanced_candidates' };
+}
+
+async function buildObservationDerivatives(job, evidence, summary) {
+  const context = { recordedStartAt: evidence.metadata?.recorded_start_at || null, capturedAt: evidence.captured_at || null };
+  const { data: activeRows, error: activeError } = await supabase.from('cctv_entity_observations').select('source_event_id').eq('inference_job_id', job.id).neq('review_state', 'superseded');
+  if (activeError) throw new Error(`active observation lookup failed: ${activeError.message}`);
+  const activeEvents = new Set((activeRows || []).map((row) => row.source_event_id));
+  const observationEvents = buildEntityObservations(summary, context).filter((observation) => activeEvents.has(observation.source_event_id)).slice(0, MAX_OBSERVATION_DERIVATIVES);
+  const events = observationEventMap(summary);
+  const derivatives = [];
+  for (const observation of observationEvents) {
+    const mapped = events.get(observation.source_event_id);
+    if (!mapped) continue;
+    const frames = candidateFramesForEvent(summary, mapped.event, mapped.kind);
+    if (!frames.length) continue;
+    const outputDir = path.join(DERIVED_ROOT, job.id, 'observation-derivatives', String(observation.source_event_id).replace(/[^a-zA-Z0-9_-]+/g, '-').slice(0, 120));
+    const manifestPath = path.join(outputDir, 'manifest.json');
+    await fs.mkdir(outputDir, { recursive: true });
+    await fs.writeFile(manifestPath, JSON.stringify({ event_id: observation.source_event_id, entity_kind: mapped.kind, frames, scale: 3 }), { mode: 0o600 });
+    try {
+      const { stdout } = await execFileAsync('python3', [CAPTURE_DERIVATIVE_PATH, '--manifest', manifestPath, '--output-dir', outputDir], { timeout: 120_000, maxBuffer: 4 * 1024 * 1024 });
+      const localReceipt = JSON.parse(stdout);
+      const originalBytes = await fs.readFile(localReceipt.original_artifact.file);
+      const fusedBytes = await fs.readFile(localReceipt.fused_artifact.file);
+      const deterministicBytes = await fs.readFile(localReceipt.enhanced_artifact.file);
+      const gpu = await callLaptopEnhancement(fusedBytes, localReceipt.source_frame_hash)
+        || await callRunpodEnhancement(fusedBytes, localReceipt.source_frame_hash);
+      const finalEnhanced = gpu?.enhanced_image_base64 ? Buffer.from(gpu.enhanced_image_base64, 'base64') : deterministicBytes;
+      const recognition = gpu?.recognition || await recogniseDeterministicFallback(originalBytes, finalEnhanced);
+      const provider = gpu?.provider || 'worker_deterministic';
+      const enhancement = gpu?.enhancement || localReceipt.enhancement;
+      const paths = derivativeStoragePaths(evidence, observation.source_event_id);
+      const originalUpload = await supabase.storage.from(paths.bucket).upload(paths.original, originalBytes, { contentType: 'image/jpeg', upsert: true });
+      if (originalUpload.error) throw new Error(`original derivative upload failed: ${originalUpload.error.message}`);
+      const enhancedUpload = await supabase.storage.from(paths.bucket).upload(paths.enhanced, finalEnhanced, { contentType: 'image/jpeg', upsert: true });
+      if (enhancedUpload.error) throw new Error(`enhanced derivative upload failed: ${enhancedUpload.error.message}`);
+      derivatives.push({
+        source_event_id: observation.source_event_id, entity_kind: observation.entity_kind,
+        original_bucket: paths.bucket, original_path: paths.original, original_sha256: crypto.createHash('sha256').update(originalBytes).digest('hex'),
+        enhanced_bucket: paths.bucket, enhanced_path: paths.enhanced, enhanced_sha256: crypto.createHash('sha256').update(finalEnhanced).digest('hex'),
+        provider, fusion: localReceipt.fusion, enhancement,
+        gpu_elapsed_ms: Number(gpu?.gpu_elapsed_ms) || 0,
+        recognition, recognition_comparison: recognitionComparison(recognition?.source, recognition?.enhanced),
+        source_frame_hash: localReceipt.source_frame_hash, source_frames: localReceipt.source_frames,
+      });
+      log('observation_derivative_ready', { job_id: job.id, source_event_id: observation.source_event_id, provider, frames_aligned: localReceipt.fusion?.frames_aligned, generative: enhancement?.generative === true });
+    } catch (error) {
+      log('observation_derivative_unavailable', { job_id: job.id, source_event_id: observation.source_event_id, error: error.message });
+    }
+  }
+  return derivatives;
+}
+
+async function recordObservationDerivatives(job, derivatives) {
+  if (!derivatives.length) return 0;
+  const { data, error } = await supabase.rpc('record_cctv_observation_derivatives', { p_job_id: job.id, p_derivatives: derivatives });
+  if (error) throw new Error(`observation derivative persistence failed: ${error.message}`);
+  return data;
+}
+
 async function failJob(jobId, message) {
   const { error } = await supabase.from('inference_jobs').update({ status: 'failed', stage: 'failed', error_message: String(message).slice(0, 4000), lease_token: null, lease_expires_at: null, heartbeat_at: null }).eq('id', jobId).eq('status', 'processing');
   if (error) log('job_failure_update_failed', { job_id: jobId, error: error.message });
@@ -1123,6 +1248,14 @@ async function processOne() {
     await updateProgress(job, 'persisting_result', { label: 'Saving observations, timeline and evidence links' });
     // Observations first: a failure here fails the job while it is still 'processing', so a re-run can repair it.
     await recordEntityObservations(job, evidence, summary);
+    const observationDerivatives = await buildObservationDerivatives(job, evidence, summary);
+    await recordObservationDerivatives(job, observationDerivatives);
+    const gpuDerivatives = observationDerivatives.filter((derivative) => derivative.provider === 'laptop_gpu' || derivative.provider === 'runpod_fallback');
+    if (observationDerivatives.length) await recordInferenceUsage(job, {
+      frames_sampled: 0, frames_recognised: observationDerivatives.length,
+      frames_sent: gpuDerivatives.length, gpu_calls: gpuDerivatives.length,
+      gpu_ms: gpuDerivatives.reduce((total, derivative) => total + (derivative.gpu_elapsed_ms || 0), 0),
+    });
     await recordInferenceDeviceEvents(job, evidence, summary);
     await recordSceneSynopsis(job, evidence, summary);
     await ingest(job, summary);
@@ -1170,4 +1303,4 @@ async function main() {
 
 if (require.main === module) main().catch((error) => { log('watcher_stopped', { error: error.message }); process.exitCode = 1; });
 
-module.exports = { safeVideoPath, safeCacheVideoPath, ensureVideoPath, runExtractor, claimJob, processOne, playbackStoragePath, ensurePlaybackCopy, selectFramesForClassification, representativeFrameHashes, probeVideo, choosePlaybackStrategy, ffmpegArgsFor, PLAYBACK_PROFILES, normaliseAnimals, recordEntityObservations, recordInferenceDeviceEvents, hashFile, recordSourceHash, localTriageResult, triageOrderFor, triageCoverage, compactMotionSummaryForIngestion, INFERENCE_POLICY, cpuSample, stealRatioSince, extractorStarved, STARVED_STEAL_RATIO };
+module.exports = { safeVideoPath, safeCacheVideoPath, ensureVideoPath, runExtractor, claimJob, processOne, playbackStoragePath, ensurePlaybackCopy, selectFramesForClassification, representativeFrameHashes, probeVideo, choosePlaybackStrategy, ffmpegArgsFor, PLAYBACK_PROFILES, normaliseAnimals, recordEntityObservations, recordInferenceDeviceEvents, buildObservationDerivatives, recordObservationDerivatives, hashFile, recordSourceHash, localTriageResult, triageOrderFor, triageCoverage, compactMotionSummaryForIngestion, INFERENCE_POLICY, cpuSample, stealRatioSince, extractorStarved, STARVED_STEAL_RATIO };

@@ -8,6 +8,7 @@ process.env.SUPABASE_SERVICE_ROLE_KEY ||= 'test-service-role-key';
 
 const { choosePlaybackStrategy, ffmpegArgsFor, PLAYBACK_PROFILES, normaliseAnimals, localTriageResult, triageOrderFor, triageCoverage, compactMotionSummaryForIngestion, INFERENCE_POLICY } = require('../services/vision/vision_job_watcher');
 const { consolidateAnimals, consolidatePeople, consolidateMotionSummary, buildEntityObservations, buildInferenceDeviceEvents, isReviewableCandidate } = require('../services/vision/motion_consolidator');
+const { candidateFramesForEvent, derivativeStoragePaths, enhancementProviderOrder, recognitionComparison } = require('../services/vision/observation_derivatives');
 
 const watcherSource = fs.readFileSync(path.join(__dirname, '..', 'services/vision/vision_job_watcher.js'), 'utf8');
 
@@ -241,6 +242,15 @@ test('watcher records observations and timeline marks through the P2 RPCs before
   assert.match(watcherSource, /recordedStartAt: evidence\.metadata\?\.recorded_start_at \|\| null, capturedAt: evidence\.captured_at \|\| null/);
   assert.match(watcherSource, /supabase\.rpc\('coalesce_cctv_stationary_vehicle_observations', \{ p_job_id: job\.id \}\)/);
   assert.match(watcherSource, /stationary_vehicle_sources_coalesced: coalesced/);
+  const recordIndex = watcherSource.indexOf('await recordEntityObservations(job, evidence, summary);');
+  const derivativeIndex = watcherSource.indexOf('await buildObservationDerivatives(job, evidence, summary);');
+  assert.ok(recordIndex > 0 && derivativeIndex > recordIndex, 'derivatives are built only after observation rows exist');
+  assert.match(watcherSource, /supabase\.rpc\('record_cctv_observation_derivatives'/);
+  assert.match(watcherSource, /callLaptopEnhancement\(fusedBytes/);
+  assert.match(watcherSource, /callRunpodEnhancement\(fusedBytes/);
+  assert.match(watcherSource, /select\('source_event_id'\).*?\.neq\('review_state', 'superseded'\)/);
+  assert.match(watcherSource, /VISION_MAX_OBSERVATION_DERIVATIVES \|\| 8/);
+  assert.match(watcherSource, /gpuDerivatives\.reduce\(\(total, derivative\)/);
 });
 
 test('ingestion sends event summaries and window counts, not per-frame worker scratch data', () => {
@@ -294,14 +304,34 @@ test('the VPS detector answer takes the shape of a GPU answer, with its own prov
   assert.equal(localTriageResult(null), null);
 });
 
-test('inference runs on the VPS first by default; the GPU is asked only about frames the VPS left unanswered', () => {
-  assert.equal(INFERENCE_POLICY, 'vps_first');
+test('inference runs on the laptop GPU first by default and RunPod is the final fallback', () => {
+  assert.equal(INFERENCE_POLICY, 'local_gpu_first');
+  assert.deepEqual(triageOrderFor('local_gpu_first'), ['local_gpu', 'vps', 'gpu']);
   assert.deepEqual(triageOrderFor('vps_first'), ['vps', 'gpu']);
   assert.deepEqual(triageOrderFor('vps_only'), ['vps']);
   assert.deepEqual(triageOrderFor('gpu_first'), ['gpu', 'vps']);
   assert.deepEqual(triageOrderFor(undefined), ['vps', 'gpu']);
   // Recognition follows the same policy: only gpu_first re-reads the best frames on the GPU.
   assert.match(watcherSource, /const gpuResults = INFERENCE_POLICY === 'gpu_first' \? await classifyWithRunpodBatch\(pendingBatch, undefined, usage\) : new Map\(\);/);
+});
+
+test('observation derivative candidates are bounded, quality-ranked and stored under the evidence identity', () => {
+  const summary = { motion_segments: [{ frames: Array.from({ length: 20 }, (_, index) => ({ file_path: `/tmp/${index}.jpg`, sha256_hash: `h${index}`, frame_index: index, relative_timestamp_seconds: index / 2, sharpness_score: index, quality_state: 'clear', runpod: { vehicles: [{ bbox: { x: 10 + index, y: 10, width: 80, height: 40 } }] } })) }] };
+  const candidates = candidateFramesForEvent(summary, { first_seen_seconds: 1, last_seen_seconds: 8, best_bbox: { x: 12, y: 10, width: 80, height: 40 } }, 'vehicle');
+  assert.equal(candidates.length, 12);
+  assert.ok(candidates[0].sharpness_score > candidates.at(-1).sharpness_score);
+  assert.deepEqual(enhancementProviderOrder(), ['laptop_gpu', 'runpod_fallback', 'worker_deterministic']);
+  assert.deepEqual(derivativeStoragePaths({ id: 'e1', organization_id: 'o1', metadata: { storage_bucket: 'private' } }, 'vehicle/ABC 123'), { bucket: 'private', original: 'org/o1/cctv-derivatives/e1/vehicle-ABC-123/original.jpg', enhanced: 'org/o1/cctv-derivatives/e1/vehicle-ABC-123/enhanced.jpg' });
+});
+
+test('source and enhanced recognition stay separate and require human review', () => {
+  const comparison = recognitionComparison({ alpr: { success: true, plate: 'ABC123', confidence: .82 }, faces: [{}], animals: [] }, { alpr: { success: true, plate: 'ABC123', confidence: .94 }, faces: [{}, {}], animals: [{}] });
+  assert.equal(comparison.alpr.agreement, true);
+  assert.equal(comparison.alpr.source.confidence, .82);
+  assert.equal(comparison.alpr.enhanced.confidence, .94);
+  assert.equal(comparison.source_face_count, 1);
+  assert.equal(comparison.enhanced_face_count, 2);
+  assert.equal(comparison.authority, 'provisional_human_review_required');
 });
 
 test('coverage counts the frames nobody answered, and the watcher defers instead of completing on a gap', () => {

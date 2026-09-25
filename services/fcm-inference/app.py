@@ -20,6 +20,7 @@ from openvino import Core
 
 import detector as entity_detector
 import plates as plate_reader
+import super_resolution
 
 MAX_IMAGE_BYTES = 10 * 1024 * 1024
 MAX_IMAGE_PIXELS = 20_000_000
@@ -641,6 +642,7 @@ def _health_payload() -> dict[str, Any]:
         "plate_detector_model": plate_state["plate_detector_model"],
         "plate_ocr_model": plate_state["plate_ocr_model"],
         "cuda": entity_detector.cuda_available(),
+        "super_resolution": super_resolution.status(MODELS_DIR),
         "cpu_threads_per_session": entity_detector.intra_op_threads(),
         "queue": {"running": _cpu_running, "waiting": _cpu_waiting, "concurrency": INFERENCE_CONCURRENCY, "max_waiting": INFERENCE_MAX_WAITING},
     }
@@ -1059,6 +1061,47 @@ def _infer_frame(image: np.ndarray, tasks: set[str]) -> dict[str, Any]:
         result["faces"] = result["face"].get("faces", [])
         result["face_review_required"] = True
     return result
+
+
+def _enhance_and_recognise(image: np.ndarray, tasks: set[str]) -> dict[str, Any]:
+    enhanced, receipt = super_resolution.enhance(image, MODELS_DIR)
+    encoded, jpeg = cv2.imencode('.jpg', enhanced, [cv2.IMWRITE_JPEG_QUALITY, 94])
+    if not encoded:
+        raise RuntimeError('enhanced derivative could not be encoded')
+    return {
+        "success": True,
+        "schema_version": 2,
+        "authority": "provisional",
+        "review_required": True,
+        "enhancement": receipt,
+        "enhanced_image_base64": base64.b64encode(jpeg.tobytes()).decode('ascii'),
+        "recognition": {
+            "source": _infer_frame(image, tasks),
+            "enhanced": _infer_frame(enhanced, tasks),
+            "decision_rule": "human_review_of_source_and_enhanced_candidates",
+        },
+    }
+
+
+@app.post("/infer/enhance")
+async def enhance_capture(
+    photo: Annotated[UploadFile, File()],
+    tasks: Annotated[str | None, Form()] = None,
+    source_frame_hash: Annotated[str | None, Form()] = None,
+    authorization: Annotated[str | None, Header()] = None,
+    x_inference_api_key: Annotated[str | None, Header()] = None,
+) -> JSONResponse:
+    _authorize(authorization, x_inference_api_key)
+    image = await _read_image(photo)
+    try:
+        parsed_tasks = json.loads(tasks) if tasks else ["person", "vehicle", "animal", "plate", "face"]
+        if not isinstance(parsed_tasks, list) or not all(isinstance(task, str) for task in parsed_tasks):
+            raise ValueError
+    except (ValueError, json.JSONDecodeError) as error:
+        raise HTTPException(status_code=422, detail="tasks must be a JSON string array") from error
+    result = await _run_cpu(_enhance_and_recognise, image, set(parsed_tasks))
+    result["source_frame_hash"] = source_frame_hash
+    return JSONResponse(result)
 
 
 class BatchFrameInput(BaseModel):
