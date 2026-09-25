@@ -36,6 +36,9 @@ test('laptop GPU is primary, VPS CPU is resilient, and RunPod is final fallback'
   assert.match(laptopUpdater, /\^\(\[A-Za-z_\]\[A-Za-z0-9_\]\*\)=\(\.\*\)\$/);
   assert.match(laptopUpdater, /System\.Text\.UTF8Encoding\(\$false\)/);
   assert.match(laptopUpdater, /Remove-Item \$deploymentEnvFile -Force/);
+  assert.match(laptopUpdater, /for \(\$attempt = 1; \$attempt -le 3; \$attempt\+\+\)/);
+  assert.match(laptopUpdater, /Docker GPU startup failed after the build/);
+  assert.match(laptopUpdater, /did not restart cleanly after three attempts/);
   assert.doesNotMatch(laptopUpdater, /throw 'The checkout has tracked local changes/);
   assert.match(laptopCompose, /LAPTOP_WORKER_ENV_FILE:-\.\/deploy\/laptop-worker\/laptop-worker\.env/);
   assert.match(laptopUpdater, /health\.cuda -ne \$true/);

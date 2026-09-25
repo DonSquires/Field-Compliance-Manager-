@@ -96,8 +96,17 @@ try {
   $composeArgs = @('compose', '--project-name', $composeProject, '--env-file', $deploymentEnvFile, '-f', $composeFile)
   & docker @composeArgs build --pull fcm-inference fcm-vision-watcher
   if ($LASTEXITCODE -ne 0) { throw 'The laptop GPU inference or watcher image did not build.' }
-  & docker @composeArgs up -d --force-recreate --wait fcm-inference fcm-vision-watcher
-  if ($LASTEXITCODE -ne 0) { throw 'The laptop GPU inference/watcher pair did not restart cleanly.' }
+  $started = $false
+  for ($attempt = 1; $attempt -le 3; $attempt++) {
+    & docker @composeArgs up -d --force-recreate --wait fcm-inference fcm-vision-watcher
+    if ($LASTEXITCODE -eq 0) { $started = $true; break }
+    if ($attempt -lt 3) {
+      $delaySeconds = 15 * $attempt
+      Write-Warning "Docker GPU startup failed after the build; retrying in $delaySeconds seconds (attempt $($attempt + 1) of 3)."
+      Start-Sleep -Seconds $delaySeconds
+    }
+  }
+  if (-not $started) { throw 'The laptop GPU inference/watcher pair did not restart cleanly after three attempts.' }
 
   $inferenceState = (Get-DockerContainerInspect -ContainerName 'fcm-inference-laptop').State.Status
   $state = (Get-DockerContainerInspect -ContainerName 'fcm-vision-watcher-laptop').State.Status
