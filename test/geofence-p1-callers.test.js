@@ -19,7 +19,7 @@ const schema = read('supabase/schema.sql');
 const OUTCOMES = ['resolved', 'outside_all_geofences', 'unresolved_no_geofence', 'unresolved_unverified', 'unresolved_invalid'];
 
 test('the resolver contract exposes resolution_status and governor_overlap_flag to every caller', () => {
-  for (const fn of ['resolve_context', 'resolve_context_authorized', 'resolve_operational_context']) {
+  for (const fn of ['resolve_context', 'resolve_context_authorized', 'resolve_operational_context', 'resolve_operational_context_authorized']) {
     const start = schema.indexOf(`CREATE OR REPLACE FUNCTION "public"."${fn}"(`);
     assert.ok(start > 0, `${fn} must exist live`);
     const signature = schema.slice(start, schema.indexOf('LANGUAGE', start));

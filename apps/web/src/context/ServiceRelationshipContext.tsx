@@ -342,7 +342,7 @@ export function ServiceRelationshipProvider({ children }: { children: ReactNode 
 
       try {
         const [{ data, error: resolutionError }, address] = await Promise.all([
-          supabase.rpc('resolve_context_authorized', {
+          supabase.rpc('resolve_operational_context_authorized', {
             p_lat: coordinates.lat,
             p_lng: coordinates.lng,
             p_org_id: organizationId,

@@ -34,7 +34,7 @@ describe('generic place selection policy', () => {
 
   it('uses GPS geofence resolution only when a field shell opts in', () => {
     expect(relationships).toContain("locationMode !== 'gps'");
-    expect(relationships).toContain("supabase.rpc('resolve_context_authorized'");
+    expect(relationships).toContain("supabase.rpc('resolve_operational_context_authorized'");
     expect(relationships).toContain('matchedAgreementZone');
     expect(relationships).toContain('matchedAgreementSite');
   });
