@@ -1,6 +1,7 @@
 /* Review observations — a cross-camera queue-first screen: the review job that used to be squeezed into
    the console's narrowest sidebar now gets most of the page. Colours/tokens come from .cctv-console
    (imported alongside this file); the queue and detail layout classes are all this page owns. */
+.cctv-triage { min-width: 0; }
 .cctv-triage__header { align-items: flex-start; display: flex; gap: 18px; justify-content: space-between; margin-bottom: 14px; }
 .cctv-triage__error { align-items: center; background: rgba(216, 80, 80, .14); border: 1px solid var(--cc-critical); border-radius: 6px; color: #ffb4ad; display: flex; gap: 10px; justify-content: space-between; margin-bottom: 12px; padding: 8px 12px; }
 .cctv-triage__filters { align-items: center; display: flex; flex-wrap: wrap; gap: 8px; margin-bottom: 14px; }
