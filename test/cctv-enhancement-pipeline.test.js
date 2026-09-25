@@ -30,6 +30,10 @@ test('laptop GPU is primary, VPS CPU is resilient, and RunPod is final fallback'
   assert.match(laptopUpdater, /Get-DockerContainerInspect/);
   assert.match(laptopUpdater, /Labels\.'com\.docker\.compose\.project'/);
   assert.doesNotMatch(laptopUpdater, /docker inspect --format/);
+  assert.match(laptopUpdater, /New-LaptopDeploymentEnv/);
+  assert.match(laptopUpdater, /\^\(\[A-Za-z_\]\[A-Za-z0-9_\]\*\)=\(\.\*\)\$/);
+  assert.match(laptopUpdater, /System\.Text\.UTF8Encoding\(\$false\)/);
+  assert.match(laptopUpdater, /Remove-Item \$deploymentEnvFile -Force/);
   assert.doesNotMatch(laptopUpdater, /throw 'The checkout has tracked local changes/);
   assert.match(laptopCompose, /LAPTOP_WORKER_ENV_FILE:-\.\/deploy\/laptop-worker\/laptop-worker\.env/);
   assert.match(laptopUpdater, /health\.cuda -ne \$true/);

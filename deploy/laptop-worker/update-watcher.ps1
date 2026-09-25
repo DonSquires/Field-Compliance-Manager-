@@ -18,14 +18,42 @@ function Get-DockerContainerInspect {
   return @($inspectJson | ConvertFrom-Json)[0]
 }
 
+function New-LaptopDeploymentEnv {
+  param([string]$SourcePath)
+
+  $validLines = New-Object System.Collections.Generic.List[string]
+  $values = @{}
+  $omittedCount = 0
+  foreach ($line in Get-Content $SourcePath) {
+    if ([string]::IsNullOrWhiteSpace($line) -or $line.TrimStart().StartsWith('#')) {
+      $validLines.Add($line)
+    } elseif ($line -match '^([A-Za-z_][A-Za-z0-9_]*)=(.*)$') {
+      $validLines.Add($line)
+      $values[$Matches[1]] = $Matches[2]
+    } else {
+      $omittedCount++
+    }
+  }
+
+  $requiredNames = @('SUPABASE_URL', 'SUPABASE_SERVICE_ROLE_KEY', 'WORKLOAD_SIGNING_SECRET', 'VISION_INGESTION_URL', 'LAPTOP_INFERENCE_API_KEY')
+  $missingNames = @($requiredNames | Where-Object { -not $values.ContainsKey($_) -or [string]::IsNullOrWhiteSpace($values[$_]) })
+  if ($missingNames.Count -gt 0) { throw "Laptop worker env is missing required settings: $($missingNames -join ', ')" }
+
+  $laptopKey = $values['LAPTOP_INFERENCE_API_KEY'].Trim()
+  if ($laptopKey.Length -lt 32 -or $laptopKey -eq 'laptop-local-shared-key') { throw 'Set LAPTOP_INFERENCE_API_KEY to a unique value of at least 32 characters before updating.' }
+
+  $targetPath = Join-Path ([System.IO.Path]::GetTempPath()) ("fcm-laptop-env-$([guid]::NewGuid().ToString('N'))")
+  $utf8NoBom = New-Object System.Text.UTF8Encoding($false)
+  [System.IO.File]::WriteAllLines($targetPath, $validLines, $utf8NoBom)
+  if ($omittedCount -gt 0) { Write-Warning "Omitted $omittedCount invalid env entry from the temporary deployment copy." }
+  return $targetPath
+}
+
 $envFile = Join-Path $RepositoryRoot 'deploy\laptop-worker\laptop-worker.env'
 $composeFile = Join-Path $RepositoryRoot 'docker-compose.laptop-worker.yml'
 
 if (-not (Test-Path $envFile)) { throw "Missing $envFile" }
 if (-not (Test-Path $composeFile)) { throw "Missing $composeFile" }
-$keyLine = Get-Content $envFile | Where-Object { $_ -match '^LAPTOP_INFERENCE_API_KEY=' } | Select-Object -First 1
-$laptopKey = if ($keyLine) { ($keyLine -split '=', 2)[1].Trim() } else { '' }
-if ($laptopKey.Length -lt 32 -or $laptopKey -eq 'laptop-local-shared-key') { throw 'Set LAPTOP_INFERENCE_API_KEY to a unique value of at least 32 characters before updating.' }
 
 $composeProject = 'fcm-laptop'
 $containerInspect = Get-DockerContainerInspect -ContainerName 'fcm-inference-laptop' -AllowMissing
@@ -38,11 +66,14 @@ if ($containerInspect) {
 
 $releaseRoot = $RepositoryRoot
 $temporaryWorktree = $null
+$deploymentEnvFile = $null
 $hadWorkerEnvFile = Test-Path Env:LAPTOP_WORKER_ENV_FILE
 $previousWorkerEnvFile = $env:LAPTOP_WORKER_ENV_FILE
 
 Push-Location $RepositoryRoot
 try {
+  $deploymentEnvFile = New-LaptopDeploymentEnv -SourcePath $envFile
+
   git fetch --prune origin main
   if ($LASTEXITCODE -ne 0) { throw 'Could not fetch origin/main.' }
 
@@ -61,8 +92,8 @@ try {
 
   $composeFile = Join-Path $releaseRoot 'docker-compose.laptop-worker.yml'
   $revision = (git -C $releaseRoot rev-parse --short HEAD).Trim()
-  $env:LAPTOP_WORKER_ENV_FILE = $envFile
-  $composeArgs = @('compose', '--project-name', $composeProject, '--env-file', $envFile, '-f', $composeFile)
+  $env:LAPTOP_WORKER_ENV_FILE = $deploymentEnvFile
+  $composeArgs = @('compose', '--project-name', $composeProject, '--env-file', $deploymentEnvFile, '-f', $composeFile)
   & docker @composeArgs build --pull fcm-inference fcm-vision-watcher
   if ($LASTEXITCODE -ne 0) { throw 'The laptop GPU inference or watcher image did not build.' }
   & docker @composeArgs up -d --force-recreate --wait fcm-inference fcm-vision-watcher
@@ -88,6 +119,9 @@ try {
   if ($temporaryWorktree -and (Test-Path $temporaryWorktree)) {
     git worktree remove --force $temporaryWorktree
     if ($LASTEXITCODE -ne 0) { Write-Warning "Temporary release cleanup failed: $temporaryWorktree" }
+  }
+  if ($deploymentEnvFile -and (Test-Path $deploymentEnvFile)) {
+    Remove-Item $deploymentEnvFile -Force
   }
   Pop-Location
 }
