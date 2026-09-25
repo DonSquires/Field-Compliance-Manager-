@@ -1367,9 +1367,12 @@ automatically to the live portal instead.
 `scripts/configure-rm-monthly-reporting.mjs` implements that decision as a
 single-transaction, idempotent, count-gated, audit-backed operation. Its live
 dry run produced exactly one template, 17 configured agreements, zero report
-packs, and one audit row before rollback. Apply and post-write verification are
-the only remaining reporting-configuration steps; the dispatch-console live
-shakedown remains the separate final open slice.
+packs, and one audit row before rollback. Commit `70d9cf70` is on GitHub `main`;
+the guarded production apply then produced the same `1 / 17 / 0 / 1` state,
+and a post-apply rollback run proved the operation is idempotent. Reporting
+configuration is complete. The first September drafts remain intentionally
+deferred until on or after 1 October; the dispatch-console live shakedown remains
+the separate final open slice.
 
 ## Conventions established / reusable
 
