@@ -8,11 +8,10 @@ import {
   FileVideo2,
   FolderOpen,
   Images,
-  MapPin,
   RefreshCw,
-  Search,
   XCircle,
 } from 'lucide-react';
+import { PlaceFacetPicker } from '../components/PlaceFacetPicker';
 import { useAuth } from '../context/AuthContext';
 import { supabase } from '../lib/supabase';
 import {
@@ -105,7 +104,6 @@ const CCTVImportPage: React.FC = () => {
   const [sites, setSites] = useState<SiteRow[]>([]);
   const [zones, setZones] = useState<ZoneRow[]>([]);
   const [placesLoading, setPlacesLoading] = useState(true);
-  const [placeQuery, setPlaceQuery] = useState('');
   const [houseId, setHouseId] = useState<string | null>(null);
   const [siteId, setSiteId] = useState<string | null>(null);
   const [zoneId, setZoneId] = useState<string | null>(null);
@@ -144,15 +142,6 @@ const CCTVImportPage: React.FC = () => {
   const leftOut = useMemo(() => scanned.filter((item) => item.kind === 'other' || item.kind === 'index'), [scanned]);
   const hiddenPartition = useMemo(() => (scanning || !rawInputs.length ? { likely: false, reason: null } : assessHiddenPartitionCard(scanned, folderLabel)), [scanned, folderLabel, scanning, rawInputs.length]);
   const selectedHouse = houses.find((house) => house.id === houseId) ?? null;
-  const houseSites = useMemo(() => sites.filter((site) => site.location_id === houseId), [sites, houseId]);
-  const houseZones = useMemo(() => zones.filter((zone) => zone.location_id === houseId), [zones, houseId]);
-  const filteredHouses = useMemo(() => {
-    const query = placeQuery.trim().toLowerCase();
-    const list = query
-      ? houses.filter((house) => `${house.name} ${house.address ?? ''}`.toLowerCase().includes(query))
-      : houses;
-    return list.slice(0, 60);
-  }, [houses, placeQuery]);
   const busy = phase === 'creating' || phase === 'uploading';
 
   const loadPlaces = useCallback(async () => {
@@ -459,58 +448,16 @@ const CCTVImportPage: React.FC = () => {
               <p>Pick the place the camera watches. New places are created in CRM from a LINZ address, never typed here.</p>
             </div>
           </div>
-          <label className="cctv-import-search">
-            <Search size={15} />
-            <input
-              type="search"
-              value={placeQuery}
-              placeholder="Search places by name or address"
-              onChange={(event) => setPlaceQuery(event.target.value)}
-              disabled={busy}
-            />
-          </label>
-          <div className="cctv-import-places" role="listbox" aria-label="Places">
-            {placesLoading && <p className="cctv-import-muted">Loading places…</p>}
-            {!placesLoading && filteredHouses.length === 0 && (
-              <p className="cctv-import-muted">No places match. Places are onboarded in CRM → Locations before footage can be imported.</p>
-            )}
-            {filteredHouses.map((house) => (
-              <button
-                key={house.id}
-                type="button"
-                role="option"
-                aria-selected={house.id === houseId}
-                className={`cctv-import-place${house.id === houseId ? ' is-selected' : ''}`}
-                disabled={busy}
-                onClick={() => { setHouseId(house.id); setSiteId(null); setZoneId(null); }}
-              >
-                <MapPin size={15} />
-                <span>
-                  <strong>{house.name}</strong>
-                  <small>{house.address ?? 'No street address (area place)'}</small>
-                </span>
-              </button>
-            ))}
-          </div>
-          {selectedHouse && (houseSites.length > 0 || houseZones.length > 0) && (
-            <div className="cctv-import-facets">
-              <span>Narrow to a site or zone at {selectedHouse.name} (optional)</span>
-              <div>
-                {houseSites.map((site) => (
-                  <button key={site.id} type="button" className={siteId === site.id ? 'is-selected' : ''} disabled={busy}
-                    onClick={() => setSiteId(siteId === site.id ? null : site.id)}>
-                    Site · {site.name}
-                  </button>
-                ))}
-                {houseZones.map((zone) => (
-                  <button key={zone.id} type="button" className={zoneId === zone.id ? 'is-selected' : ''} disabled={busy}
-                    onClick={() => setZoneId(zoneId === zone.id ? null : zone.id)}>
-                    Zone · {zone.name}{zone.module_key ? ` (${zone.module_key.replace(/_/g, ' ')})` : ''}
-                  </button>
-                ))}
-              </div>
-            </div>
-          )}
+          <PlaceFacetPicker
+            houses={houses}
+            sites={sites}
+            zones={zones}
+            value={houseId ? { locationId: houseId, siteId, zoneId } : null}
+            onChange={(selection) => { setHouseId(selection.locationId); setSiteId(selection.siteId); setZoneId(selection.zoneId); }}
+            disabled={busy}
+            loading={placesLoading}
+            label="Camera site or zone"
+          />
         </section>
 
         <section className="cctv-import-step" aria-labelledby="cctv-import-camera">

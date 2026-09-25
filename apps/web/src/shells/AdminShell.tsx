@@ -297,7 +297,7 @@ const AdminShell: React.FC = () => {
   const { profile, signOut, operatingOrganizationId, operatingOrganizations, setOperatingOrganization } = useAuth();
   const activeOrganizationId = operatingOrganizationId ?? profile?.organizationId ?? null;
   const { status: modulesStatus, isModuleEnabled } = useEnabledModules(activeOrganizationId);
-  const { agreements, sites, zones, selectedAgreement, selectedSite, selectedZone, loading: relationshipLoading } = useServiceRelationships();
+  const { agreements, sites, zones, selectedAgreement, selectedSite, selectedZone, setLocationMode, loading: relationshipLoading } = useServiceRelationships();
 
   const [activePage, setActivePage] = useState<AdminPage>('hub');
   const [crmTab, setCrmTab] = useState<CRMTab>('crm');
@@ -313,6 +313,7 @@ const AdminShell: React.FC = () => {
   const [isMobile, setIsMobile] = useState(window.innerWidth < 768);
   const [accessNotice, setAccessNotice] = useState<string | null>(null);
   const [showDesktopDownload, setShowDesktopDownload] = useState(false);
+  useEffect(() => { setLocationMode('manual'); }, [setLocationMode]);
   const dismissDesktopDownload = () => {
     if (profile?.id) window.localStorage.setItem(`fcm:desktop-download-prompt-v2-dismissed:${profile.id}`, '1');
     setShowDesktopDownload(false);

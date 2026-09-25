@@ -51,7 +51,7 @@ export function ModuleShell() {
   const { moduleKey = '' } = useParams<{ moduleKey: string }>();
   const navigate = useNavigate();
   const { profile } = useAuth();
-  const { selectedAgreement, selectedSite, selectedZone } = useServiceRelationships();
+  const { selectedAgreement, selectedSite, selectedZone, setLocationMode } = useServiceRelationships();
   const { status, isModuleEnabled } = useEnabledModules(profile?.organizationId ?? null);
   const moduleDefinition = SPECIALTY_MODULES.find((module) => module.key === moduleKey || module.integratedKey === moduleKey);
   const canonicalKey = moduleDefinition?.key ?? (moduleKey === 'smoke_control' ? 'smoke_complaints' : moduleKey);
@@ -74,6 +74,8 @@ export function ModuleShell() {
     const moduleAllowed = !moduleContext.loading && moduleContext.moduleKey === module.key ? moduleContext.enabled : isModuleEnabled(module.key);
     return moduleAllowed;
   });
+
+  useEffect(() => { setLocationMode(adminView ? 'manual' : 'gps'); }, [adminView, setLocationMode]);
 
   useEffect(() => {
     if (status !== 'loading' && !allowed) navigate('/officer', { replace: true });

@@ -79,6 +79,8 @@ export function ScanShell() {
   const [queuedCount, setQueuedCount] = useState(0);
   const [queueMessage, setQueueMessage] = useState<string | null>(null);
 
+  useEffect(() => { relationships.setLocationMode('gps'); }, [relationships.setLocationMode]);
+
   const loadEntitlements = useCallback(async () => {
     const agreementIds = relationships.agreements.map((agreement) => agreement.id);
     if (relationships.loading) return;

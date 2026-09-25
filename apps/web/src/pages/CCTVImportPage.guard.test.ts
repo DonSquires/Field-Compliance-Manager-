@@ -8,6 +8,7 @@ const page = readFileSync(resolve(process.cwd(), 'src/pages/CCTVImportPage.tsx')
 const shell = readFileSync(resolve(process.cwd(), 'src/shells/AdminShell.tsx'), 'utf8');
 const fieldOps = readFileSync(resolve(process.cwd(), 'src/pages/FieldOperationsPage.tsx'), 'utf8');
 const review = readFileSync(resolve(process.cwd(), 'src/pages/CCTVReviewPage.tsx'), 'utf8');
+const placePicker = readFileSync(resolve(process.cwd(), 'src/components/PlaceFacetPicker.tsx'), 'utf8');
 
 describe('CCTV import — the place comes first, files are classified locally, writes go through governed RPCs', () => {
   it('requires a house before anything is created and never takes a free-text address', () => {
@@ -18,6 +19,17 @@ describe('CCTV import — the place comes first, files are classified locally, w
     expect(page).not.toContain("supabase.rpc('manage_crm_location'");
     expect(page).toContain("p_watermark_location_hint: watermarkHint.trim() || null");
     expect(page).toContain('Location text in the video watermark (hint only)');
+  });
+
+  it('makes site and zone facets equally searchable and selects only one facet', () => {
+    expect(page).toContain('<PlaceFacetPicker');
+    expect(page).toContain('setSiteId(selection.siteId); setZoneId(selection.zoneId)');
+    expect(placePicker).toContain("kind: 'site'");
+    expect(placePicker).toContain("kind: 'zone'");
+    expect(placePicker).toContain('Search sites and zones');
+    expect(placePicker).toContain('siteId: null,');
+    expect(placePicker).toContain('zoneId: null,');
+    expect(placePicker).toContain("label = 'Places'");
   });
 
   it('creates, registers and records only through the P2 RPCs', () => {

@@ -68,7 +68,9 @@ interface ServiceRelationshipContextValue {
   currentAddress: string | null;
   geofenceResolution: { resolutionStatus: string; siteId: string | null; zoneId: string | null } | null;
   locationError: string | null;
+  locationMode: 'manual' | 'gps';
   refetch: () => Promise<void>;
+  setLocationMode: (mode: 'manual' | 'gps') => void;
   selectAgreement: (agreementId: string | null) => void;
   selectSite: (siteId: string | null) => void;
   selectZone: (zoneId: string | null) => void;
@@ -93,7 +95,9 @@ const ServiceRelationshipContext = createContext<ServiceRelationshipContextValue
   currentAddress: null,
   geofenceResolution: null,
   locationError: null,
+  locationMode: 'manual',
   refetch: async () => undefined,
+  setLocationMode: () => undefined,
   selectAgreement: () => undefined,
   selectSite: () => undefined,
   selectZone: () => undefined,
@@ -106,8 +110,9 @@ export function ServiceRelationshipProvider({ children }: { children: ReactNode 
   const [zones, setZones] = useState<ServiceLocationZone[]>([]);
   const [agreementLocationLinks, setAgreementLocationLinks] = useState<ServiceAgreementLocationLink[]>([]);
   const [selectedAgreementId, setSelectedAgreementId] = useState<string | null>(null);
-  const [selectedSiteId, setSelectedSiteId] = useState<string | null>(null);
-  const [selectedZoneId, setSelectedZoneId] = useState<string | null>(null);
+  const [selectedPlaceIds, setSelectedPlaceIds] = useState<{ siteId: string | null; zoneId: string | null }>({ siteId: null, zoneId: null });
+  const selectedSiteId = selectedPlaceIds.siteId;
+  const selectedZoneId = selectedPlaceIds.zoneId;
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
   const [locationStatus, setLocationStatus] = useState<ServiceRelationshipContextValue['locationStatus']>('idle');
@@ -115,6 +120,7 @@ export function ServiceRelationshipProvider({ children }: { children: ReactNode 
   const [currentAddress, setCurrentAddress] = useState<string | null>(null);
   const [geofenceResolution, setGeofenceResolution] = useState<ServiceRelationshipContextValue['geofenceResolution']>(null);
   const [locationError, setLocationError] = useState<string | null>(null);
+  const [locationMode, setLocationMode] = useState<'manual' | 'gps'>('manual');
   const locationRequestRef = useRef(0);
 
   const refetch = useCallback(async () => {
@@ -124,8 +130,7 @@ export function ServiceRelationshipProvider({ children }: { children: ReactNode 
       setZones([]);
       setAgreementLocationLinks([]);
       setSelectedAgreementId(null);
-      setSelectedSiteId(null);
-      setSelectedZoneId(null);
+      setSelectedPlaceIds({ siteId: null, zoneId: null });
       setLoading(false);
       return;
     }
@@ -179,6 +184,7 @@ export function ServiceRelationshipProvider({ children }: { children: ReactNode 
       const agreementIds = normalizedAgreements.map((agreement) => agreement.id);
       let linkedSites: ServiceLocationSite[] = [];
       let linkedZones: ServiceLocationZone[] = [];
+      let loadedLinks: ServiceAgreementLocationLink[] = [];
 
       if (agreementIds.length > 0) {
         const { data: links, error: linksError } = await supabase
@@ -189,7 +195,8 @@ export function ServiceRelationshipProvider({ children }: { children: ReactNode 
 
         if (linksError) throw linksError;
 
-        setAgreementLocationLinks((links ?? []) as ServiceAgreementLocationLink[]);
+        loadedLinks = (links ?? []) as ServiceAgreementLocationLink[];
+        setAgreementLocationLinks(loadedLinks);
 
         const siteIds = (links ?? []).map((link) => link.site_id).filter(Boolean) as string[];
         const zoneIds = (links ?? []).map((link) => link.zone_id).filter(Boolean) as string[];
@@ -235,30 +242,20 @@ export function ServiceRelationshipProvider({ children }: { children: ReactNode 
       setZones(linkedZones);
       if (agreementIds.length === 0) setAgreementLocationLinks([]);
 
-      setSelectedAgreementId((current) => {
-        if (current && normalizedAgreements.some((agreement) => agreement.id === current)) return current;
-        return normalizedAgreements[0]?.id ?? null;
+      const nextAgreementId = selectedAgreementId && normalizedAgreements.some((agreement) => agreement.id === selectedAgreementId)
+        ? selectedAgreementId
+        : normalizedAgreements[0]?.id ?? null;
+      setSelectedAgreementId(nextAgreementId);
+      const nextLinks = loadedLinks.filter((link) => link.service_agreement_id === nextAgreementId);
+      const nextSiteIds = new Set(nextLinks.map((link) => link.site_id).filter(Boolean));
+      const nextZoneIds = new Set(nextLinks.map((link) => link.zone_id).filter(Boolean));
+      setSelectedPlaceIds((current) => {
+        if (current.zoneId && nextZoneIds.has(current.zoneId) && linkedZones.some((zone) => zone.id === current.zoneId)) return { siteId: null, zoneId: current.zoneId };
+        if (current.siteId && nextSiteIds.has(current.siteId) && linkedSites.some((site) => site.id === current.siteId)) return { siteId: current.siteId, zoneId: null };
+        const zoneId = linkedZones.find((zone) => nextZoneIds.has(zone.id))?.id ?? null;
+        if (zoneId) return { siteId: null, zoneId };
+        return { siteId: linkedSites.find((site) => nextSiteIds.has(site.id))?.id ?? null, zoneId: null };
       });
-
-      if (selectedAgreementId && normalizedAgreements.some((agreement) => agreement.id === selectedAgreementId)) {
-        setSelectedSiteId((current) => {
-          const currentSiteExists = linkedSites.some((site) => site.id === current);
-          if (!currentSiteExists) {
-            return linkedSites[0]?.id ?? null;
-          }
-          return current;
-        });
-        setSelectedZoneId((current) => {
-          const currentZoneExists = linkedZones.some((zone) => zone.id === current);
-          if (!currentZoneExists) {
-            return linkedZones[0]?.id ?? null;
-          }
-          return current;
-        });
-      } else {
-        setSelectedSiteId(linkedSites[0]?.id ?? null);
-        setSelectedZoneId(linkedZones[0]?.id ?? null);
-      }
     } catch (err) {
       console.error('Failed to load service relationship context:', err);
       setError(err instanceof Error ? err.message : 'Failed to load service relationship context');
@@ -267,8 +264,7 @@ export function ServiceRelationshipProvider({ children }: { children: ReactNode 
       setZones([]);
       setAgreementLocationLinks([]);
       setSelectedAgreementId(null);
-      setSelectedSiteId(null);
-      setSelectedZoneId(null);
+      setSelectedPlaceIds({ siteId: null, zoneId: null });
     } finally {
       setLoading(false);
     }
@@ -320,8 +316,8 @@ export function ServiceRelationshipProvider({ children }: { children: ReactNode 
 
   useEffect(() => {
     const organizationId = profile?.organizationId;
-    // Client portal users read delivered records; their position is never asked for or recorded.
-    if (!organizationId || profile?.role.startsWith('client_')) {
+    // Admin selection is deliberate. Only field/scan shells opt into GPS resolution.
+    if (locationMode !== 'gps' || !organizationId || profile?.role.startsWith('client_')) {
       setLocationStatus('idle');
       setCurrentCoordinates(null);
       setCurrentAddress(null);
@@ -365,16 +361,13 @@ export function ServiceRelationshipProvider({ children }: { children: ReactNode 
         // P1: an absent resolver row is 'unavailable', never a fabricated "outside all geofences".
         setGeofenceResolution({ resolutionStatus: row?.resolution_status ?? 'unavailable', siteId, zoneId });
         if (matchedAgreementZone) {
-          setSelectedZoneId(zoneId);
-          setSelectedSiteId(null);
+          setSelectedPlaceIds({ siteId: null, zoneId });
           setLocationStatus('resolved');
         } else if (matchedAgreementSite) {
-          setSelectedSiteId(siteId);
-          setSelectedZoneId(null);
+          setSelectedPlaceIds({ siteId, zoneId: null });
           setLocationStatus('resolved');
         } else {
-          setSelectedSiteId(null);
-          setSelectedZoneId(null);
+          setSelectedPlaceIds({ siteId: null, zoneId: null });
           setLocationStatus('outside_geofence');
         }
       } catch (locationLoadError) {
@@ -388,7 +381,7 @@ export function ServiceRelationshipProvider({ children }: { children: ReactNode 
     }, { enableHighAccuracy: true, maximumAge: 30_000, timeout: 15_000 });
 
     return () => navigator.geolocation.clearWatch(watchId);
-  }, [profile?.organizationId, selectedAgreementSites, selectedAgreementZones]);
+  }, [locationMode, profile?.organizationId, profile?.role, selectedAgreementSites, selectedAgreementZones]);
 
   const value = useMemo<ServiceRelationshipContextValue>(() => ({
     agreements,
@@ -409,24 +402,26 @@ export function ServiceRelationshipProvider({ children }: { children: ReactNode 
     currentAddress,
     geofenceResolution,
     locationError,
+    locationMode,
     refetch,
+    setLocationMode,
     selectAgreement: (agreementId) => {
       setSelectedAgreementId(agreementId);
       const links = agreementLocationLinks.filter((link) => link.service_agreement_id === agreementId);
       const siteIds = new Set(links.map((link) => link.site_id).filter(Boolean));
       const zoneIds = new Set(links.map((link) => link.zone_id).filter(Boolean));
-      setSelectedSiteId(sites.find((site) => siteIds.has(site.id))?.id ?? null);
-      setSelectedZoneId(zones.find((zone) => zoneIds.has(zone.id))?.id ?? null);
+      const zoneId = zones.find((zone) => zoneIds.has(zone.id))?.id ?? null;
+      setSelectedPlaceIds(zoneId
+        ? { siteId: null, zoneId }
+        : { siteId: sites.find((site) => siteIds.has(site.id))?.id ?? null, zoneId: null });
     },
     selectSite: (siteId) => {
-      setSelectedSiteId(siteId);
-      if (siteId) setSelectedZoneId(null);
+      setSelectedPlaceIds({ siteId, zoneId: null });
     },
     selectZone: (zoneId) => {
-      setSelectedZoneId(zoneId);
-      if (zoneId) setSelectedSiteId(null);
+      setSelectedPlaceIds({ siteId: null, zoneId });
     },
-  }), [agreements, sites, zones, agreementLocationLinks, selectedAgreementId, selectedSiteId, selectedZoneId, selectedAgreement, selectedSite, selectedZone, selectedAgreementSites, selectedAgreementZones, loading, error, locationStatus, currentCoordinates, currentAddress, geofenceResolution, locationError, refetch]);
+  }), [agreements, sites, zones, agreementLocationLinks, selectedAgreementId, selectedSiteId, selectedZoneId, selectedAgreement, selectedSite, selectedZone, selectedAgreementSites, selectedAgreementZones, loading, error, locationStatus, currentCoordinates, currentAddress, geofenceResolution, locationError, locationMode, refetch]);
 
   return <ServiceRelationshipContext.Provider value={value}>{children}</ServiceRelationshipContext.Provider>;
 }

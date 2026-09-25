@@ -18,4 +18,16 @@ describe('service relationship operational scope', () => {
   it('never selects the nonexistent zone agreement column', () => {
     expect(source).not.toMatch(/from\('location_zones'\)[\s\S]{0,180}service_agreement_id/);
   });
+
+  it('keeps admin place selection manual and field place selection GPS-driven', () => {
+    expect(source).toContain("locationMode !== 'gps'");
+    expect(source).toContain("const [locationMode, setLocationMode] = useState<'manual' | 'gps'>('manual')");
+    expect(source).toContain('setSelectedPlaceIds({ siteId: null, zoneId })');
+    expect(source).toContain('setSelectedPlaceIds({ siteId, zoneId: null })');
+    expect(source).toContain("supabase.rpc('resolve_context_authorized'");
+    expect(source).toContain('if (matchedAgreementZone)');
+    expect(source).toContain('if (matchedAgreementSite)');
+    expect(source).not.toContain('setSelectedSiteId');
+    expect(source).not.toContain('setSelectedZoneId');
+  });
 });

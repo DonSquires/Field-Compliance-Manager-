@@ -56,6 +56,7 @@ import { BobPanel } from '../components/BobPanel';
 import { NotificationCenter, type NotificationRecord } from '../components/NotificationCenter';
 import { HelpInstructions } from '../components/HelpInstructions';
 import { OfficerLocationAdvisory } from '../components/OfficerLocationAdvisory';
+import { PlaceContextBanner } from '../components/PlaceContextBanner';
 import { resolveNotificationDestination } from '../lib/notificationNavigation';
 import { SPECIALTY_MODULES } from '../config/specialtyModules';
 import {
@@ -145,7 +146,7 @@ const OfficerShell: React.FC = () => {
   const { profile, signOut, updatePassword } = useAuth();
   const { shift: activeShift, isLoading: shiftLoading, error: shiftError, refetch: refreshShift } = useActiveShift(profile?.id ?? '', profile?.organizationId ?? '');
   const { status: moduleStatus, enabledModules, isModuleEnabled } = useEnabledModules(profile?.organizationId ?? null);
-  const { selectedAgreement, selectedSite, selectedZone } = useServiceRelationships();
+  const { selectedAgreement, selectedSite, selectedZone, setLocationMode } = useServiceRelationships();
   const [activeModule, setActiveModule] = useState<ActiveModule>(null);
   const moduleContext = useActiveModuleContext(activeModule ?? null);
 
@@ -178,6 +179,8 @@ const OfficerShell: React.FC = () => {
   const [breadcrumbIssue, setBreadcrumbIssue] = useState<{ pendingCount: number; error: string } | null>(null);
   const [isOnline, setIsOnline] = useState(() => typeof navigator === 'undefined' ? true : navigator.onLine);
   const lastBreadcrumbAtRef = useRef<number | null>(null);
+
+  useEffect(() => { setLocationMode('gps'); }, [setLocationMode]);
 
   useEffect(() => {
     const handleOnline = () => setIsOnline(true);
@@ -519,6 +522,7 @@ const OfficerShell: React.FC = () => {
 
       <main data-app-content className="officer-shell-content">
         <OfficerLocationAdvisory shift={activeShift} />
+        <PlaceContextBanner />
         {safety.writeStatus === 'error' && safety.lastError && (
           <div role="alert" className="officer-shell-safety-error">
             Safety action not confirmed: {safety.lastError}
