@@ -98,6 +98,14 @@ interface ZoneClosure {
   effective_to: string | null;
 }
 
+const RESOLUTION_LABEL: Record<string, string> = {
+  resolved: 'Verified boundary matched',
+  outside_all_geofences: 'Outside all verified boundaries',
+  unresolved_no_geofence: 'No boundary configured here',
+  unresolved_unverified: 'Boundary needs visual confirmation',
+  unresolved_invalid: 'Boundary shape needs repair',
+};
+
 export function LocationHouseMap({ organizationId, house, sites, zones, editableEntity, seedBoundary }: { organizationId: string; house: { name: string; address: string | null }; sites: HouseMapSite[]; zones: HouseMapZone[]; editableEntity?: EditableEntity; seedBoundary?: SeedBoundary | null }) {
   const containerRef = useRef<HTMLDivElement | null>(null);
   const mapRef = useRef<L.Map | null>(null);
@@ -193,7 +201,7 @@ export function LocationHouseMap({ organizationId, house, sites, zones, editable
     let active = true;
     const resolvePoint = async () => {
       setProbing(true); setError(null);
-      const { data, error: resolveError } = await supabase.rpc('resolve_context_authorized', { p_lat: probePoint.lat, p_lng: probePoint.lng, p_org_id: organizationId, p_module_key: null });
+      const { data, error: resolveError } = await supabase.rpc('resolve_operational_context_authorized', { p_lat: probePoint.lat, p_lng: probePoint.lng, p_org_id: organizationId, p_module_key: null });
       if (!active) return;
       const row = Array.isArray(data) ? data[0] : data;
       if (resolveError || !row) setError(resolveError?.message ?? 'The geofence spine returned no resolution evidence for this point.');
@@ -327,15 +335,15 @@ export function LocationHouseMap({ organizationId, house, sites, zones, editable
     })();
   };
 
-  const verifiedZones = zones.filter((zone) => zone.boundary && zone.boundary_verification === 'verified').length;
+  const verifiedPlaces = [...sites, ...zones].filter((place) => place.boundary && place.boundary_verification === 'verified').length;
   const unresolvedFacets = [...sites, ...zones].filter((facet) => !facet.boundary || facet.boundary_verification !== 'verified').length;
   const editableFacet = editableEntity ? [...sites, ...zones].find((facet) => facet.id === editableEntity.id) : null;
   return <section className="house-map" aria-label={`Map for ${house.name}`}>
-    <header><div><span>Geofence control spine</span><h3>{house.name}</h3><p>{house.address ?? 'Address not recorded'}</p></div><button type="button" onClick={() => void previewLinzBoundary()} disabled={resolving || (!house.address && !house.name)}>{resolving ? <LoaderCircle size={15} className="is-spinning" /> : <LandPlot size={15} />}{resolving ? 'Resolving LINZ' : 'Preview LINZ boundary'}</button></header>
-    <div className="house-map-gates"><span className={verifiedZones ? 'is-ready' : 'is-blocked'}><ShieldCheck size={14} /><strong>{verifiedZones}</strong> verified runtime zone{verifiedZones === 1 ? '' : 's'}</span><span className={unresolvedFacets ? 'is-blocked' : 'is-ready'}><AlertTriangle size={14} /><strong>{unresolvedFacets}</strong> facet{unresolvedFacets === 1 ? '' : 's'} need boundary review</span><span><Crosshair size={14} />{drawing ? 'Drawing the boundary' : probing ? 'Resolving point' : 'Select map point to resolve context'}</span></div>
+    <header><div><span>Place boundary map</span><h3>{house.name}</h3><p>{house.address ?? 'Address not recorded'}</p></div><button type="button" onClick={() => void previewLinzBoundary()} disabled={resolving || (!house.address && !house.name)}>{resolving ? <LoaderCircle size={15} className="is-spinning" /> : <LandPlot size={15} />}{resolving ? 'Finding LINZ boundary' : 'Find LINZ boundary'}</button></header>
+    <div className="house-map-gates"><span className={verifiedPlaces ? 'is-ready' : 'is-blocked'}><ShieldCheck size={14} /><strong>{verifiedPlaces}</strong> verified place boundar{verifiedPlaces === 1 ? 'y' : 'ies'}</span><span className={unresolvedFacets ? 'is-blocked' : 'is-ready'}><AlertTriangle size={14} /><strong>{unresolvedFacets}</strong> Site or work area{unresolvedFacets === 1 ? '' : 's'} need review</span><span><Crosshair size={14} />{drawing ? 'Drawing the boundary' : probing ? 'Checking this point' : 'Click the map to check a location'}</span></div>
     {error && <div className="house-map-message is-error" role="alert"><AlertTriangle size={15} />{error}</div>}
     {linzPreview && <><div className="house-map-message is-success" role="status"><CheckCircle2 size={15} /><span><strong>{linzPreview.kind === 'reserve' ? 'Council reserve boundary' : `Read-only LINZ ${linzPreview.kind === 'parcel' ? 'land-lot' : 'building'} preview`}</strong>{linzPreview.address} · {linzPreview.match}</span></div><div className="house-map-lot-details"><div><span>Canonical address</span><strong>{linzPreview.address}</strong></div><div><span>Source</span><strong>{linzPreview.source.replaceAll('_', ' ')}</strong></div><div><span>Geometry</span><strong>{linzPreview.kind === 'reserve' ? 'Council reserve boundary' : linzPreview.kind === 'parcel' ? 'LINZ parcel / land lot' : 'LINZ building outline'}</strong></div>{Object.entries(linzPreview.properties).filter(([, value]) => value !== null && value !== '').slice(0, 6).map(([key, value]) => <div key={key}><span>{key.replaceAll('_', ' ')}</span><strong>{String(value)}</strong></div>)}</div></>}
-    {resolution && <div className={`house-map-resolution is-${resolution.resolution_status === 'resolved' ? 'resolved' : 'unresolved'}`} role="status"><div><span>Resolution</span><strong>{resolution.resolution_status.replaceAll('_', ' ')}</strong></div><div><span>Operating bounds</span><strong>{resolution.in_operating_bounds ? 'Inside' : resolution.out_of_bounds_district ? `Outside · ${resolution.out_of_bounds_district}` : 'Outside'}</strong></div><div><span>Runtime zone</span><strong>{resolution.matched_zone_id ? zones.find((zone) => zone.id === resolution.matched_zone_id)?.name ?? 'Matched zone' : 'No verified active zone'}</strong></div><div><span>Site state</span><strong>{resolution.site_id ? resolution.on_site ? 'On site' : 'Zone match · off site' : 'No site match'}</strong></div><div><span>Module trigger</span><strong>{resolution.matched_module_key?.replaceAll('_', ' ') ?? 'None'}</strong></div><div><span>Effective rules</span><strong>{resolution.effective_rules ? `${Object.keys(resolution.effective_rules).length} resolved values` : 'None'}</strong></div><div className={closure ? 'is-warning' : ''}><span>Operational overlay</span><strong>{closure ? `${closure.closure_type.replaceAll('_', ' ')} · ${closure.reason ?? 'No reason recorded'}` : 'No in-force closure'}</strong></div>{resolution.governor_overlap_flag && <div className="is-warning"><span>Jurisdiction</span><strong>Governor overlap review</strong></div>}</div>}
+    {resolution && <div className={`house-map-resolution is-${resolution.resolution_status === 'resolved' ? 'resolved' : 'unresolved'}`} role="status"><div><span>Map check</span><strong>{RESOLUTION_LABEL[resolution.resolution_status] ?? 'Location could not be confirmed'}</strong></div><div><span>Provider service area</span><strong>{resolution.in_operating_bounds ? 'Inside' : resolution.out_of_bounds_district ? `Outside · ${resolution.out_of_bounds_district}` : 'Outside'}</strong></div><div><span>Matched work area</span><strong>{resolution.matched_zone_id ? zones.find((zone) => zone.id === resolution.matched_zone_id)?.name ?? 'Matched work area' : 'No verified active work area'}</strong></div><div><span>Site match</span><strong>{resolution.site_id ? resolution.on_site ? 'Inside the Site' : 'Work area matched · outside Site boundary' : 'No verified Site match'}</strong></div><div><span>Service</span><strong>{resolution.matched_module_key?.replaceAll('_', ' ') ?? 'None'}</strong></div><div><span>Rules loaded</span><strong>{resolution.effective_rules ? `${Object.keys(resolution.effective_rules).length} applicable setting${Object.keys(resolution.effective_rules).length === 1 ? '' : 's'}` : 'None'}</strong></div><div className={closure ? 'is-warning' : ''}><span>Temporary restriction</span><strong>{closure ? `${closure.closure_type.replaceAll('_', ' ')} · ${closure.reason ?? 'No reason recorded'}` : 'None in force'}</strong></div>{resolution.governor_overlap_flag && <div className="is-warning"><span>Jurisdiction</span><strong>Overlapping authority needs review</strong></div>}</div>}
     {boundaryNotice && <div className="house-map-message is-success" role="status"><CheckCircle2 size={15} />{boundaryNotice}</div>}
     {editableEntity && <div className="house-map-editable">
       <span>{drawing ? 'Click each corner of the place on the map, then save the shape. Switch the map to Satellite to see what is actually there.' : 'Set the boundary right here — no separate workbench needed.'}</span>
@@ -353,6 +361,6 @@ export function LocationHouseMap({ organizationId, house, sites, zones, editable
       </div>
     </div>}
     <div className="house-map-canvas" ref={containerRef} />
-    <footer><span><Building2 size={13} />Geometry answers where</span><span><MapPin size={13} />Rules and closures answer what</span><span><LandPlot size={13} />LINZ source preview</span><em>{editableEntity ? 'A saved boundary is what runtime resolution uses; a preview on its own is not.' : 'LINZ preview is not saved, verified, or used by runtime resolution.'}</em></footer>
+    <footer><span><Building2 size={13} />Boundary shows where work applies</span><span><MapPin size={13} />Area settings control what officers do</span><span><LandPlot size={13} />LINZ supplies the property outline</span><em>{editableEntity ? 'Officers use only a saved and confirmed boundary. A preview alone changes nothing.' : 'A LINZ preview changes nothing until it is saved and confirmed.'}</em></footer>
   </section>;
 }

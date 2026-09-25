@@ -20,7 +20,7 @@ describe('location house map', () => {
   });
 
   it('keeps LINZ preview read-only and does not claim verification', () => {
-    expect(source).toContain('LINZ preview is not saved, verified, or used by runtime resolution.');
+    expect(source).toContain('A LINZ preview changes nothing until it is saved and confirmed.');
     expect(source).not.toContain(".from('");
     expect(source).not.toContain('.insert(');
     expect(source).not.toContain('.update(');
@@ -42,12 +42,12 @@ describe('location house map', () => {
   });
 
   it('resolves selected points through the canonical geofence spine', () => {
-    expect(source).toContain("supabase.rpc('resolve_context_authorized'");
+    expect(source).toContain("supabase.rpc('resolve_operational_context_authorized'");
     expect(source).toContain("supabase.rpc('is_zone_closed'");
     expect(source).toContain('p_org_id: organizationId');
     expect(source).toContain('matched_zone_id');
     expect(source).toContain('effective_rules');
-    expect(source).toContain('LINZ preview is not saved, verified, or used by runtime resolution.');
-    expect(source).toContain('Geometry answers where');
+    expect(source).toContain('A LINZ preview changes nothing until it is saved and confirmed.');
+    expect(source).toContain('Boundary shows where work applies');
   });
 });

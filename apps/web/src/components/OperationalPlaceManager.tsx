@@ -1,37 +1,366 @@
-import { useCallback, useEffect, useState, type FormEvent } from 'react';
+import { useCallback, useEffect, useMemo, useState, type FormEvent } from 'react';
 import { AlertTriangle, CheckCircle2, LandPlot, MapPinned, ShieldCheck, Siren, X } from 'lucide-react';
+import { LocationHouseMap, type EditableEntity, type HouseMapSite, type HouseMapZone } from './LocationHouseMap';
 import { supabase } from '../lib/supabase';
 import './OperationalPlaceManager.css';
+import './OperationalPlaceManagerHuman.css';
 
 type View = 'site' | 'zones' | 'boundary' | 'closures';
-interface Site { id:string;name:string;risk_level:string|null;site_brief:string|null;access_instructions:string|null;hs_notes:string|null;active:boolean;boundary_status:string;boundary_verification:string;configuration_version:number }
-interface Zone { id:string;name:string;zone_type:string;module_key:string;rule_type:string;is_active:boolean;nightly_limit_consecutive:number|null;nightly_limit_monthly:number|null;scv_required:boolean;enforcement_workflow_override:string|null;boundary_status:string;boundary_verification:string;configuration_version:number }
-interface Module { module_key:string;display_name:string }
-interface Closure { id:string;zone_id:string;closure_type:string;status:string;effective_from:string;effective_to:string|null;reason:string|null;resolution_notes:string|null }
-interface EditorData { location:{id:string;name:string;organization_id:string};sites:Site[];zones:Zone[];modules:Module[];closures:Closure[] }
-const zoneTypes=['general','access_control','biosecurity','freedom_camping','noise_control','parking','patrol_route','trespass'];
-const ruleTypes=['restricted','unrestricted','prohibited','day_visit_only','overnight_limited'];
-const emptyZone={name:'',zoneType:'general',moduleKey:'patrol',ruleType:'restricted',active:true,nightConsecutive:'',nightMonthly:'',scv:false,workflow:''};
 
-export function OperationalPlaceManager({locationId,initialZoneId,onClose,onSaved}:{locationId:string;initialZoneId?:string|null;onClose:()=>void;onSaved:()=>void}){
-  const[data,setData]=useState<EditorData|null>(null),[view,setView]=useState<View>(initialZoneId?'zones':'site'),[siteId,setSiteId]=useState(''),[zoneId,setZoneId]=useState(initialZoneId??''),[busy,setBusy]=useState(false),[error,setError]=useState<string|null>(null),[notice,setNotice]=useState<string|null>(null);
-  const[siteForm,setSiteForm]=useState({risk:'',brief:'',access:'',safety:'',active:true}),[zoneForm,setZoneForm]=useState(emptyZone),[creatingZone,setCreatingZone]=useState(false);
-  const[boundary,setBoundary]=useState({entityType:'client_site',entityId:'',source:'manual_geojson',geojson:''}),[closure,setClosure]=useState({type:'temporary_closure',from:new Date().toISOString().slice(0,10),to:'',reason:''});
-  const site=data?.sites.find(item=>item.id===siteId)??null,zone=data?.zones.find(item=>item.id===zoneId)??null;
-  const load=useCallback(async()=>{setError(null);const{data:result,error:loadError}=await supabase.rpc('get_crm_operational_place_editor',{p_location_id:locationId});if(loadError){setError(loadError.message);return;}const next=result as EditorData;setData(next);setSiteId(current=>next.sites.some(item=>item.id===current)?current:next.sites[0]?.id??'');setZoneId(current=>next.zones.some(item=>item.id===current)?current:initialZoneId&&next.zones.some(item=>item.id===initialZoneId)?initialZoneId:next.zones[0]?.id??'');},[locationId,initialZoneId]);
-  useEffect(()=>{void load();},[load]);
-  useEffect(()=>{if(site)setSiteForm({risk:site.risk_level??'',brief:site.site_brief??'',access:site.access_instructions??'',safety:site.hs_notes??'',active:site.active});},[site]);
-  useEffect(()=>{if(zone&&!creatingZone)setZoneForm({name:zone.name,zoneType:zone.zone_type,moduleKey:zone.module_key,ruleType:zone.rule_type,active:zone.is_active,nightConsecutive:zone.nightly_limit_consecutive?.toString()??'',nightMonthly:zone.nightly_limit_monthly?.toString()??'',scv:zone.scv_required,workflow:zone.enforcement_workflow_override??''});},[zone,creatingZone]);
-  useEffect(()=>{const selected=boundary.entityType==='client_site'?site:zone;if(selected)setBoundary(current=>({...current,entityId:selected.id}));},[boundary.entityType,site,zone]);
-  const complete=async(action:()=>PromiseLike<{error:any}>,message:string)=>{setBusy(true);setError(null);setNotice(null);const{error:actionError}=await action();if(actionError)setError(actionError.message);else{setNotice(message);await load();onSaved();}setBusy(false);};
-  const saveSite=(event:FormEvent)=>{event.preventDefault();if(!site)return;void complete(()=>supabase.rpc('manage_crm_site_profile',{p_site_id:site.id,p_expected_version:site.configuration_version,p_risk_level:siteForm.risk||null,p_site_brief:siteForm.brief,p_access_instructions:siteForm.access,p_hs_notes:siteForm.safety,p_active:siteForm.active}),`${site.name} operational profile saved.`);};
-  const saveZone=(event:FormEvent)=>{event.preventDefault();if(!data)return;void complete(()=>supabase.rpc('manage_crm_zone',{p_action:creatingZone?'create':'update',p_zone_id:creatingZone?null:zone?.id??null,p_location_id:data.location.id,p_expected_version:creatingZone?0:zone?.configuration_version??0,p_name:zoneForm.name,p_zone_type:zoneForm.zoneType,p_module_key:zoneForm.moduleKey,p_rule_type:zoneForm.ruleType,p_is_active:zoneForm.active,p_nightly_limit_consecutive:zoneForm.nightConsecutive?Number(zoneForm.nightConsecutive):null,p_nightly_limit_monthly:zoneForm.nightMonthly?Number(zoneForm.nightMonthly):null,p_scv_required:zoneForm.scv,p_enforcement_workflow_override:zoneForm.workflow||null}),creatingZone?'Zone created. Add its boundary next.':'Zone settings saved.');setCreatingZone(false);};
-  const saveBoundary=(verify:boolean)=>{const selected=boundary.entityType==='client_site'?site:zone;if(!selected)return;let geojson:null|Record<string,unknown>=null;if(!verify){try{geojson=JSON.parse(boundary.geojson);}catch{setError('GeoJSON must be valid JSON.');return;}}void complete(()=>supabase.rpc('manage_crm_place_boundary',{p_entity_type:boundary.entityType,p_entity_id:selected.id,p_expected_version:selected.configuration_version,p_geojson:geojson,p_source:boundary.source,p_verify:verify}),verify?'Boundary verified and recorded.':'Boundary uploaded. Review the map, then verify it.');};
-  const createClosure=(event:FormEvent)=>{event.preventDefault();if(!zone)return;void complete(()=>supabase.rpc('manage_crm_zone_closure',{p_zone_id:zone.id,p_action:'create',p_closure_id:null,p_closure_type:closure.type,p_effective_from:closure.from,p_effective_to:closure.to||null,p_reason:closure.reason}),'Zone closure created.');};
-  const liftClosure=(item:Closure)=>{if(!zone)return;void complete(()=>supabase.rpc('manage_crm_zone_closure',{p_zone_id:zone.id,p_action:'lift',p_closure_id:item.id,p_closure_type:item.closure_type,p_effective_from:item.effective_from,p_effective_to:item.effective_to,p_reason:'Lifted by operations administrator'}),'Zone closure lifted.');};
-  return <div className="place-manager-backdrop"><section className="place-manager" role="dialog" aria-modal="true" aria-labelledby="place-manager-title"><header><div><span>Operational setup</span><h2 id="place-manager-title">Manage {data?.location.name??'location'}</h2><p>Site briefings, zones, boundaries, verification, and closures in one workflow.</p></div><button type="button" onClick={onClose} aria-label="Close operational setup"><X size={18}/></button></header>
-    <nav aria-label="Operational setup steps"><button className={view==='site'?'is-active':''} onClick={()=>setView('site')}><ShieldCheck size={15}/>1. Site briefing</button><button className={view==='zones'?'is-active':''} onClick={()=>setView('zones')}><MapPinned size={15}/>2. Zones</button><button className={view==='boundary'?'is-active':''} onClick={()=>setView('boundary')}><LandPlot size={15}/>3. Boundaries</button><button className={view==='closures'?'is-active':''} onClick={()=>setView('closures')}><Siren size={15}/>4. Closures</button></nav>
-    {error&&<div className="place-manager-message is-error" role="alert"><AlertTriangle size={15}/>{error}</div>}{notice&&<div className="place-manager-message is-success" role="status"><CheckCircle2 size={15}/>{notice}</div>}
-    <main>{!data?<div className="place-manager-empty">Loading operational setup</div>:view==='site'?<form onSubmit={saveSite}><div className="place-manager-heading"><div><h3>Site operational briefing</h3><p>This is what roster and handoff teams need before work starts.</p></div><select aria-label="Site to edit" value={siteId} onChange={e=>setSiteId(e.target.value)}>{data.sites.map(item=><option value={item.id} key={item.id}>{item.name}</option>)}</select></div>{site?<><div className="place-manager-grid"><label><span>Risk level</span><select value={siteForm.risk} onChange={e=>setSiteForm({...siteForm,risk:e.target.value})}><option value="">Not assessed</option>{['low','medium','high','critical'].map(value=><option key={value}>{value}</option>)}</select></label><label className="place-manager-check"><input type="checkbox" checked={siteForm.active} onChange={e=>setSiteForm({...siteForm,active:e.target.checked})}/>Active operational site</label></div><label><span>Site briefing</span><textarea rows={3} value={siteForm.brief} onChange={e=>setSiteForm({...siteForm,brief:e.target.value})}/></label><label><span>Access instructions</span><textarea rows={3} value={siteForm.access} onChange={e=>setSiteForm({...siteForm,access:e.target.value})}/></label><label><span>Health and safety notes</span><textarea rows={3} value={siteForm.safety} onChange={e=>setSiteForm({...siteForm,safety:e.target.value})}/></label><footer><span>Version {site.configuration_version}</span><button type="submit" className="is-primary" disabled={busy}>Save site briefing</button></footer></>:<div className="place-manager-empty">No site is linked to this location.</div>}</form>:view==='zones'?<form onSubmit={saveZone}><div className="place-manager-heading"><div><h3>{creatingZone?'Create zone':'Edit zone rules'}</h3><p>Name the operational area, module, legal rule, and workflow.</p></div><div><select aria-label="Zone to edit" value={zoneId} disabled={creatingZone} onChange={e=>setZoneId(e.target.value)}>{data.zones.map(item=><option value={item.id} key={item.id}>{item.name}</option>)}</select><button type="button" onClick={()=>{setCreatingZone(!creatingZone);setZoneForm(emptyZone);}}>{creatingZone?'Cancel new zone':'Create zone'}</button></div></div><div className="place-manager-grid"><label><span>Zone name</span><input required value={zoneForm.name} onChange={e=>setZoneForm({...zoneForm,name:e.target.value})}/></label><label><span>Module</span><select value={zoneForm.moduleKey} onChange={e=>setZoneForm({...zoneForm,moduleKey:e.target.value})}>{data.modules.map(item=><option value={item.module_key} key={item.module_key}>{item.display_name}</option>)}</select></label><label><span>Zone type</span><select value={zoneForm.zoneType} onChange={e=>setZoneForm({...zoneForm,zoneType:e.target.value})}>{zoneTypes.map(value=><option key={value} value={value}>{value.replaceAll('_',' ')}</option>)}</select></label><label><span>Rule</span><select value={zoneForm.ruleType} onChange={e=>setZoneForm({...zoneForm,ruleType:e.target.value})}>{ruleTypes.map(value=><option key={value} value={value}>{value.replaceAll('_',' ')}</option>)}</select></label><label><span>Consecutive night limit</span><input type="number" min="0" value={zoneForm.nightConsecutive} onChange={e=>setZoneForm({...zoneForm,nightConsecutive:e.target.value})}/></label><label><span>Monthly night limit</span><input type="number" min="0" value={zoneForm.nightMonthly} onChange={e=>setZoneForm({...zoneForm,nightMonthly:e.target.value})}/></label><label><span>Enforcement workflow</span><select value={zoneForm.workflow} onChange={e=>setZoneForm({...zoneForm,workflow:e.target.value})}><option value="">Organization default</option><option value="admin_first">Admin first</option><option value="officer_direct">Officer direct</option><option value="hybrid">Hybrid</option></select></label><label className="place-manager-check"><input type="checkbox" checked={zoneForm.active} onChange={e=>setZoneForm({...zoneForm,active:e.target.checked})}/>Active zone</label><label className="place-manager-check"><input type="checkbox" checked={zoneForm.scv} onChange={e=>setZoneForm({...zoneForm,scv:e.target.checked})}/>SCV required</label></div><footer><span>{creatingZone?'Boundary will start unverified':`Version ${zone?.configuration_version??0}`}</span><button type="submit" className="is-primary" disabled={busy}>Save zone</button></footer></form>:view==='boundary'?<div><div className="place-manager-heading"><div><h3>Boundary upload and verification</h3><p>Upload a GeoJSON Polygon, inspect it on the map, then verify it as a separate action.</p></div><select aria-label="Boundary entity" value={boundary.entityType} onChange={e=>setBoundary({...boundary,entityType:e.target.value})}><option value="client_site">Site boundary</option><option value="location_zone">Zone boundary</option></select></div><label><span>{boundary.entityType==='client_site'?'Site':'Zone'}</span><select value={boundary.entityType==='client_site'?siteId:zoneId} onChange={e=>boundary.entityType==='client_site'?setSiteId(e.target.value):setZoneId(e.target.value)}>{(boundary.entityType==='client_site'?data.sites:data.zones).map(item=><option value={item.id} key={item.id}>{item.name}</option>)}</select></label><label><span>Boundary source</span><input value={boundary.source} onChange={e=>setBoundary({...boundary,source:e.target.value})}/></label><label><span>GeoJSON Polygon</span><textarea aria-label="GeoJSON Polygon" rows={10} value={boundary.geojson} onChange={e=>setBoundary({...boundary,geojson:e.target.value})} placeholder='{"type":"Polygon","coordinates":[...]}'/></label><div className="place-manager-verdict"><strong>Current state: {(boundary.entityType==='client_site'?site:zone)?.boundary_status} · {(boundary.entityType==='client_site'?site:zone)?.boundary_verification}</strong><span>Uploading resets verification. Verification is always an explicit second action.</span></div><footer><button type="button" onClick={()=>saveBoundary(false)} disabled={busy||!boundary.geojson.trim()}>Upload boundary</button><button type="button" className="is-primary" onClick={()=>saveBoundary(true)} disabled={busy||(boundary.entityType==='client_site'?site:zone)?.boundary_verification==='verified'}>Verify current boundary</button></footer></div>:<div><div className="place-manager-heading"><div><h3>Zone closures</h3><p>Create temporary operational overlays or lift an active closure.</p></div><select aria-label="Closure zone" value={zoneId} onChange={e=>setZoneId(e.target.value)}>{data.zones.map(item=><option value={item.id} key={item.id}>{item.name}</option>)}</select></div><form onSubmit={createClosure}><div className="place-manager-grid"><label><span>Closure type</span><select value={closure.type} onChange={e=>setClosure({...closure,type:e.target.value})}><option value="temporary_closure">Temporary closure</option><option value="restricted">Restricted</option><option value="prohibited">Prohibited</option></select></label><label><span>Starts</span><input type="date" required value={closure.from} onChange={e=>setClosure({...closure,from:e.target.value})}/></label><label><span>Ends</span><input type="date" value={closure.to} onChange={e=>setClosure({...closure,to:e.target.value})}/></label></div><label><span>Operational reason</span><textarea rows={3} required value={closure.reason} onChange={e=>setClosure({...closure,reason:e.target.value})}/></label><footer><span>Closure history is retained.</span><button type="submit" className="is-primary" disabled={busy||!zone}>Create closure</button></footer></form><section className="place-manager-closures">{data.closures.filter(item=>item.zone_id===zoneId).map(item=><article key={item.id}><div><strong>{item.closure_type.replaceAll('_',' ')}</strong><span>{item.effective_from}{item.effective_to?` to ${item.effective_to}`:''} · {item.status}</span><p>{item.reason}</p></div>{item.status!=='lifted'&&<button type="button" onClick={()=>liftClosure(item)} disabled={busy}>Lift closure</button>}</article>)}</section></div>}</main>
-  </section></div>;
+interface Site extends HouseMapSite {
+  risk_level: string | null;
+  site_brief: string | null;
+  access_instructions: string | null;
+  hs_notes: string | null;
+  active: boolean;
+  configuration_version: number;
+}
+
+interface Zone extends HouseMapZone {
+  zone_type: string;
+  module_key: string;
+  rule_type: string;
+  is_active: boolean;
+  nightly_limit_consecutive: number | null;
+  nightly_limit_monthly: number | null;
+  scv_required: boolean;
+  enforcement_workflow_override: string | null;
+  configuration_version: number;
+}
+
+interface Module { module_key: string; display_name: string }
+interface Closure { id: string; zone_id: string; closure_type: string; status: string; effective_from: string; effective_to: string | null; reason: string | null; resolution_notes: string | null }
+interface EditorData { location: { id: string; name: string; address: string | null; organization_id: string }; sites: Site[]; zones: Zone[]; modules: Module[]; closures: Closure[] }
+interface GeographyData { locations: Array<{ id: string; address: string | null }>; sites: HouseMapSite[]; zones: HouseMapZone[] }
+
+interface ZoneForm {
+  name: string;
+  zoneType: string;
+  moduleKey: string;
+  ruleType: string;
+  active: boolean;
+  nightConsecutive: string;
+  nightMonthly: string;
+  scv: boolean;
+  workflow: string;
+}
+
+const ZONE_TYPE_LABELS: Record<string, string> = {
+  general: 'General service area',
+  access_control: 'Entry and access area',
+  biosecurity: 'Biosecurity control area',
+  freedom_camping: 'Freedom camping area',
+  noise_control: 'Noise control area',
+  parking: 'Parking area',
+  patrol_route: 'Patrol area or route',
+  trespass: 'Restricted or trespass area',
+};
+
+const MODULE_ZONE_TYPES: Record<string, string[]> = {
+  freedom_camping: ['freedom_camping', 'general'],
+  parking_enforcement: ['parking', 'general'],
+  parking: ['parking', 'general'],
+  noise_control: ['noise_control', 'general'],
+  biosecurity: ['biosecurity', 'access_control', 'general'],
+  patrol: ['patrol_route', 'access_control', 'general', 'trespass'],
+  site_guard: ['access_control', 'general', 'trespass'],
+  static_guarding: ['access_control', 'general', 'trespass'],
+};
+
+const RULE_LABELS: Record<string, string> = {
+  unrestricted: 'Normal operations allowed',
+  restricted: 'Restricted access or activity',
+  prohibited: 'No entry or activity allowed',
+  day_visit_only: 'Daytime use only',
+  overnight_limited: 'Overnight stay limits apply',
+};
+
+const WORKFLOW_LABELS: Record<string, string> = {
+  '': 'Use the service default',
+  admin_first: 'Send to a supervisor before action',
+  officer_direct: 'Officer may act directly',
+  hybrid: 'Officer records it, supervisor reviews',
+};
+
+const RESTRICTION_LABELS: Record<string, string> = {
+  temporary_closure: 'Closed temporarily',
+  restricted: 'Restricted access',
+  prohibited: 'No entry or activity',
+};
+
+const allowedRules = (moduleKey: string) => moduleKey === 'freedom_camping'
+  ? ['overnight_limited', 'day_visit_only', 'restricted', 'prohibited', 'unrestricted']
+  : ['restricted', 'prohibited', 'unrestricted'];
+
+const defaultsForModule = (moduleKey: string): Pick<ZoneForm, 'zoneType' | 'ruleType'> => ({
+  zoneType: MODULE_ZONE_TYPES[moduleKey]?.[0] ?? 'general',
+  ruleType: moduleKey === 'freedom_camping' ? 'overnight_limited' : moduleKey === 'patrol' ? 'unrestricted' : 'restricted',
+});
+
+const emptyZone = (moduleKey = 'patrol'): ZoneForm => ({
+  name: '',
+  moduleKey,
+  ...defaultsForModule(moduleKey),
+  active: true,
+  nightConsecutive: '',
+  nightMonthly: '',
+  scv: false,
+  workflow: '',
+});
+
+const today = () => new Date().toISOString().slice(0, 10);
+
+export function OperationalPlaceManager({ locationId, initialZoneId, onClose, onSaved }: { locationId: string; initialZoneId?: string | null; onClose: () => void; onSaved: () => void }) {
+  const [data, setData] = useState<EditorData | null>(null);
+  const [view, setView] = useState<View>(initialZoneId ? 'zones' : 'site');
+  const [siteId, setSiteId] = useState('');
+  const [zoneId, setZoneId] = useState(initialZoneId ?? '');
+  const [boundaryTarget, setBoundaryTarget] = useState(initialZoneId ? `zone:${initialZoneId}` : '');
+  const [busy, setBusy] = useState(false);
+  const [error, setError] = useState<string | null>(null);
+  const [notice, setNotice] = useState<string | null>(null);
+  const [siteForm, setSiteForm] = useState({ risk: '', brief: '', access: '', safety: '', active: true });
+  const [zoneForm, setZoneForm] = useState<ZoneForm>(emptyZone());
+  const [creatingZone, setCreatingZone] = useState(false);
+  const [restriction, setRestriction] = useState({ type: 'temporary_closure', from: today(), to: '', reason: '' });
+
+  const site = data?.sites.find((item) => item.id === siteId) ?? null;
+  const zone = data?.zones.find((item) => item.id === zoneId) ?? null;
+  const isFreedomCamping = zoneForm.moduleKey === 'freedom_camping';
+  const selectedRestrictions = useMemo(() => data?.closures.filter((item) => item.zone_id === zoneId) ?? [], [data?.closures, zoneId]);
+
+  const load = useCallback(async (preferredZoneId?: string) => {
+    setError(null);
+    const [editorResponse, geographyResponse] = await Promise.all([
+      supabase.rpc('get_crm_operational_place_editor', { p_location_id: locationId }),
+      supabase.rpc('get_crm_operational_geography'),
+    ]);
+    const loadError = editorResponse.error ?? geographyResponse.error;
+    if (loadError) { setError(loadError.message); return; }
+
+    const editor = editorResponse.data as Omit<EditorData, 'location' | 'sites' | 'zones'> & {
+      location: Omit<EditorData['location'], 'address'>;
+      sites: Array<Omit<Site, keyof HouseMapSite> & { id: string; name: string }>;
+      zones: Array<Omit<Zone, keyof HouseMapZone> & { id: string; name: string }>;
+    };
+    const geography = geographyResponse.data as GeographyData;
+    const siteGeometry = new Map(geography.sites.map((item) => [item.id, item]));
+    const zoneGeometry = new Map(geography.zones.map((item) => [item.id, item]));
+    const next: EditorData = {
+      ...editor,
+      location: { ...editor.location, address: geography.locations.find((item) => item.id === locationId)?.address ?? null },
+      sites: editor.sites.map((item) => ({ ...item, ...siteGeometry.get(item.id) })) as Site[],
+      zones: editor.zones.map((item) => ({ ...item, ...zoneGeometry.get(item.id) })) as Zone[],
+    };
+    setData(next);
+    setSiteId((current) => next.sites.some((item) => item.id === current) ? current : next.sites[0]?.id ?? '');
+    const requestedZoneId = preferredZoneId ?? initialZoneId ?? '';
+    setZoneId((current) => next.zones.some((item) => item.id === requestedZoneId) ? requestedZoneId : next.zones.some((item) => item.id === current) ? current : next.zones[0]?.id ?? '');
+    setBoundaryTarget((current) => {
+      if (current.startsWith('site:') && next.sites.some((item) => `site:${item.id}` === current)) return current;
+      if (current.startsWith('zone:') && next.zones.some((item) => `zone:${item.id}` === current)) return current;
+      if (requestedZoneId && next.zones.some((item) => item.id === requestedZoneId)) return `zone:${requestedZoneId}`;
+      return next.sites[0] ? `site:${next.sites[0].id}` : next.zones[0] ? `zone:${next.zones[0].id}` : '';
+    });
+  }, [initialZoneId, locationId]);
+
+  useEffect(() => { void load(); }, [load]);
+  useEffect(() => {
+    if (site) setSiteForm({ risk: site.risk_level ?? '', brief: site.site_brief ?? '', access: site.access_instructions ?? '', safety: site.hs_notes ?? '', active: site.active });
+  }, [site]);
+  useEffect(() => {
+    if (zone && !creatingZone) setZoneForm({
+      name: zone.name,
+      zoneType: zone.zone_type,
+      moduleKey: zone.module_key,
+      ruleType: zone.rule_type,
+      active: zone.is_active,
+      nightConsecutive: zone.nightly_limit_consecutive?.toString() ?? '',
+      nightMonthly: zone.nightly_limit_monthly?.toString() ?? '',
+      scv: zone.scv_required,
+      workflow: zone.enforcement_workflow_override ?? '',
+    });
+  }, [creatingZone, zone]);
+
+  const complete = async (action: () => PromiseLike<{ error: { message: string } | null }>, message: string) => {
+    setBusy(true); setError(null); setNotice(null);
+    const { error: actionError } = await action();
+    if (actionError) setError(actionError.message);
+    else { setNotice(message); await load(); onSaved(); }
+    setBusy(false);
+  };
+
+  const saveSite = (event: FormEvent) => {
+    event.preventDefault();
+    if (!site) return;
+    void complete(() => supabase.rpc('manage_crm_site_profile', {
+      p_site_id: site.id,
+      p_expected_version: site.configuration_version,
+      p_risk_level: siteForm.risk || null,
+      p_site_brief: siteForm.brief,
+      p_access_instructions: siteForm.access,
+      p_hs_notes: siteForm.safety,
+      p_active: siteForm.active,
+    }), `${site.name} briefing saved.`);
+  };
+
+  const changeModule = (moduleKey: string) => {
+    const defaults = defaultsForModule(moduleKey);
+    setZoneForm((current) => ({ ...current, moduleKey, ...defaults, nightConsecutive: '', nightMonthly: '', scv: false }));
+  };
+
+  const saveZone = async (event: FormEvent) => {
+    event.preventDefault();
+    if (!data || !zoneForm.name.trim()) return;
+    setBusy(true); setError(null); setNotice(null);
+    const { data: saved, error: saveError } = await supabase.rpc('manage_crm_zone', {
+      p_action: creatingZone ? 'create' : 'update',
+      p_zone_id: creatingZone ? null : zone?.id ?? null,
+      p_location_id: data.location.id,
+      p_expected_version: creatingZone ? 0 : zone?.configuration_version ?? 0,
+      p_name: zoneForm.name.trim(),
+      p_zone_type: zoneForm.zoneType,
+      p_module_key: zoneForm.moduleKey,
+      p_rule_type: zoneForm.ruleType,
+      p_is_active: zoneForm.active,
+      p_nightly_limit_consecutive: isFreedomCamping && zoneForm.nightConsecutive ? Number(zoneForm.nightConsecutive) : null,
+      p_nightly_limit_monthly: isFreedomCamping && zoneForm.nightMonthly ? Number(zoneForm.nightMonthly) : null,
+      p_scv_required: isFreedomCamping ? zoneForm.scv : false,
+      p_enforcement_workflow_override: zoneForm.workflow || null,
+    });
+    if (saveError) setError(saveError.message);
+    else {
+      const savedZone = saved as Zone;
+      setCreatingZone(false);
+      setZoneId(savedZone.id);
+      setBoundaryTarget(`zone:${savedZone.id}`);
+      setView('boundary');
+      setNotice(creatingZone ? 'Work area saved. Draw or confirm its boundary next.' : 'Work area settings saved. Check its boundary next.');
+      await load(savedZone.id);
+      onSaved();
+    }
+    setBusy(false);
+  };
+
+  const createRestriction = (event: FormEvent) => {
+    event.preventDefault();
+    if (!zone) return;
+    if (!restriction.reason.trim()) { setError('Explain why access or activity is changing.'); return; }
+    void complete(() => supabase.rpc('manage_crm_zone_closure', {
+      p_zone_id: zone.id,
+      p_action: 'create',
+      p_closure_id: null,
+      p_closure_type: restriction.type,
+      p_effective_from: restriction.from,
+      p_effective_to: restriction.to || null,
+      p_reason: restriction.reason.trim(),
+    }), 'Temporary restriction scheduled. Officers will see it when this area resolves from GPS.');
+  };
+
+  const endRestriction = (item: Closure) => {
+    if (!zone) return;
+    void complete(() => supabase.rpc('manage_crm_zone_closure', {
+      p_zone_id: zone.id,
+      p_action: 'lift',
+      p_closure_id: item.id,
+      p_closure_type: item.closure_type,
+      p_effective_from: item.effective_from,
+      p_effective_to: item.effective_to,
+      p_reason: 'Ended by operations administrator',
+    }), 'Temporary restriction ended. The history remains on this area.');
+  };
+
+  const startNewZone = () => {
+    const moduleKey = data?.modules.find((item) => item.module_key === 'patrol')?.module_key ?? data?.modules[0]?.module_key ?? 'patrol';
+    setZoneForm(emptyZone(moduleKey));
+    setCreatingZone(true);
+    setNotice(null);
+    setError(null);
+  };
+
+  const boundaryKind = boundaryTarget.split(':')[0];
+  const boundaryId = boundaryTarget.split(':')[1] ?? '';
+  const boundarySite = boundaryKind === 'site' ? data?.sites.find((item) => item.id === boundaryId) ?? null : null;
+  const boundaryZone = boundaryKind === 'zone' ? data?.zones.find((item) => item.id === boundaryId) ?? null : null;
+  const editableEntity: EditableEntity | undefined = data && (boundarySite || boundaryZone) ? {
+    type: boundarySite ? 'client_site' : 'location_zone',
+    id: (boundarySite ?? boundaryZone)!.id,
+    organizationId: data.location.organization_id,
+    zoneType: boundaryZone?.zone_type ?? null,
+    centerLat: boundarySite?.gps_lat ?? boundaryZone?.center_point?.coordinates?.[1] ?? null,
+    centerLng: boundarySite?.gps_lng ?? boundaryZone?.center_point?.coordinates?.[0] ?? null,
+    onSaved: (verified) => {
+      setNotice(verified ? 'Boundary confirmed. GPS can now use this place.' : 'Boundary saved for visual review.');
+      void load();
+      onSaved();
+    },
+  } : undefined;
+
+  const zoneTypeOptions = [...new Set([...(MODULE_ZONE_TYPES[zoneForm.moduleKey] ?? MODULE_ZONE_TYPES.patrol), zoneForm.zoneType])];
+  const ruleOptions = [...new Set([...allowedRules(zoneForm.moduleKey), zoneForm.ruleType])];
+
+  return <div className="place-manager-backdrop">
+    <section className="place-manager" role="dialog" aria-modal="true" aria-labelledby="place-manager-title">
+      <header>
+        <div><span>Operational setup</span><h2 id="place-manager-title">Manage {data?.location.name ?? 'place'}</h2><p>Brief the team, define work areas on the map, and record temporary access changes.</p></div>
+        <button type="button" onClick={onClose} aria-label="Close operational setup"><X size={18} /></button>
+      </header>
+      <nav aria-label="Operational setup steps">
+        <button className={view === 'site' ? 'is-active' : ''} onClick={() => setView('site')}><ShieldCheck size={15} />1. Site briefing</button>
+        <button className={view === 'zones' ? 'is-active' : ''} onClick={() => setView('zones')}><MapPinned size={15} />2. Work areas</button>
+        <button className={view === 'boundary' ? 'is-active' : ''} onClick={() => setView('boundary')}><LandPlot size={15} />3. Map boundaries</button>
+        <button className={view === 'closures' ? 'is-active' : ''} onClick={() => setView('closures')}><Siren size={15} />4. Temporary restrictions</button>
+      </nav>
+      {error && <div className="place-manager-message is-error" role="alert"><AlertTriangle size={15} />{error}</div>}
+      {notice && <div className="place-manager-message is-success" role="status"><CheckCircle2 size={15} />{notice}</div>}
+      <main>
+        {!data ? <div className="place-manager-empty">Loading operational setup...</div> : view === 'site' ? (
+          <form onSubmit={saveSite}>
+            <div className="place-manager-heading"><div><h3>Site briefing</h3><p>What officers need to know before they arrive.</p></div><select aria-label="Site to edit" value={siteId} onChange={(event) => { setSiteId(event.target.value); setBoundaryTarget(`site:${event.target.value}`); }}>{data.sites.map((item) => <option value={item.id} key={item.id}>{item.name}</option>)}</select></div>
+            {site ? <>
+              <div className="place-manager-grid"><label><span>Risk level</span><select value={siteForm.risk} onChange={(event) => setSiteForm({ ...siteForm, risk: event.target.value })}><option value="">Not assessed</option><option value="low">Low</option><option value="medium">Medium</option><option value="high">High</option><option value="critical">Critical</option></select></label><label className="place-manager-check"><input type="checkbox" checked={siteForm.active} onChange={(event) => setSiteForm({ ...siteForm, active: event.target.checked })} />Available for operations</label></div>
+              <label><span>What happens at this site?</span><textarea rows={3} value={siteForm.brief} onChange={(event) => setSiteForm({ ...siteForm, brief: event.target.value })} placeholder="Purpose, normal activity, client expectations..." /></label>
+              <label><span>How do officers enter and move around?</span><textarea rows={3} value={siteForm.access} onChange={(event) => setSiteForm({ ...siteForm, access: event.target.value })} placeholder="Gates, keys, access hours, parking, check-in point..." /></label>
+              <label><span>Health and safety information</span><textarea rows={3} value={siteForm.safety} onChange={(event) => setSiteForm({ ...siteForm, safety: event.target.value })} placeholder="Hazards, PPE, emergency contacts, areas to avoid..." /></label>
+              <footer><span>Saved version {site.configuration_version}</span><button type="submit" className="is-primary" disabled={busy}>Save site briefing</button></footer>
+            </> : <div className="place-manager-empty">No Site is linked to this place. Add it in the client portfolio first.</div>}
+          </form>
+        ) : view === 'zones' ? (
+          <form onSubmit={(event) => void saveZone(event)}>
+            <div className="place-manager-heading"><div><h3>{creatingZone ? 'Add a work area' : 'Work area settings'}</h3><p>A work area is the named part of this place where a service and its rules apply.</p></div><div>{!creatingZone && <select aria-label="Work area to edit" value={zoneId} onChange={(event) => { setZoneId(event.target.value); setBoundaryTarget(`zone:${event.target.value}`); }}>{data.zones.map((item) => <option value={item.id} key={item.id}>{item.name}</option>)}</select>}<button type="button" onClick={creatingZone ? () => setCreatingZone(false) : startNewZone}>{creatingZone ? 'Cancel' : 'Add work area'}</button></div></div>
+            {(zone || creatingZone) ? <>
+              <div className="place-manager-help"><MapPinned size={17} /><div><strong>{creatingZone ? 'Name the area officers will recognise.' : 'These settings tell officers what applies after GPS selects this area.'}</strong><span>The boundary itself is drawn and confirmed in the next step.</span></div></div>
+              <div className="place-manager-grid is-three">
+                <label><span>Area name</span><input required value={zoneForm.name} onChange={(event) => setZoneForm({ ...zoneForm, name: event.target.value })} placeholder="North gate, river reserve, patrol sector..." /></label>
+                <label><span>Service</span><select value={zoneForm.moduleKey} onChange={(event) => changeModule(event.target.value)}>{data.modules.map((item) => <option value={item.module_key} key={item.module_key}>{item.display_name}</option>)}</select></label>
+                <label><span>Area purpose</span><select value={zoneForm.zoneType} onChange={(event) => setZoneForm({ ...zoneForm, zoneType: event.target.value })}>{zoneTypeOptions.map((value) => <option value={value} key={value}>{ZONE_TYPE_LABELS[value] ?? value.replaceAll('_', ' ')}</option>)}</select></label>
+                <label><span>What may officers or visitors do here?</span><select value={zoneForm.ruleType} onChange={(event) => setZoneForm({ ...zoneForm, ruleType: event.target.value })}>{ruleOptions.map((value) => <option value={value} key={value}>{RULE_LABELS[value] ?? value.replaceAll('_', ' ')}</option>)}</select></label>
+                <label><span>If an issue is found</span><select value={zoneForm.workflow} onChange={(event) => setZoneForm({ ...zoneForm, workflow: event.target.value })}>{Object.entries(WORKFLOW_LABELS).map(([value, label]) => <option value={value} key={value || 'default'}>{label}</option>)}</select></label>
+                <label className="place-manager-check"><input type="checkbox" checked={zoneForm.active} onChange={(event) => setZoneForm({ ...zoneForm, active: event.target.checked })} />Area is available for operations</label>
+              </div>
+              {isFreedomCamping && <fieldset className="place-manager-module-fields"><legend>Freedom camping limits</legend><p>These controls appear only because the selected service is Freedom camping.</p><div className="place-manager-grid"><label><span>Consecutive-night limit</span><input type="number" min="0" value={zoneForm.nightConsecutive} onChange={(event) => setZoneForm({ ...zoneForm, nightConsecutive: event.target.value })} placeholder="No limit recorded" /></label><label><span>Monthly-night limit</span><input type="number" min="0" value={zoneForm.nightMonthly} onChange={(event) => setZoneForm({ ...zoneForm, nightMonthly: event.target.value })} placeholder="No limit recorded" /></label><label className="place-manager-check"><input type="checkbox" checked={zoneForm.scv} onChange={(event) => setZoneForm({ ...zoneForm, scv: event.target.checked })} />Self-contained vehicle requirement applies</label></div></fieldset>}
+              <footer><span>{creatingZone ? 'Saving creates the area, then opens its map boundary.' : `Saved version ${zone?.configuration_version ?? 0}`}</span><button type="submit" className="is-primary" disabled={busy || !zoneForm.name.trim()}>{creatingZone ? 'Save and draw boundary' : 'Save area settings'}</button></footer>
+            </> : <div className="place-manager-empty">No work area exists yet. Add one to describe where a service applies.</div>}
+          </form>
+        ) : view === 'boundary' ? (
+          <div className="place-manager-boundary">
+            <div className="place-manager-heading"><div><h3>Draw or update a boundary</h3><p>Choose a Site or work area, inspect the real map, then confirm the shape officers may rely on.</p></div><select aria-label="Boundary to edit" value={boundaryTarget} onChange={(event) => setBoundaryTarget(event.target.value)}><optgroup label="Sites">{data.sites.map((item) => <option value={`site:${item.id}`} key={item.id}>{item.name}</option>)}</optgroup><optgroup label="Work areas">{data.zones.map((item) => <option value={`zone:${item.id}`} key={item.id}>{item.name}</option>)}</optgroup></select></div>
+            <div className="place-manager-help"><LandPlot size={17} /><div><strong>Use the map, not GeoJSON.</strong><span>Find the LINZ parcel, draw corners over satellite imagery, or use a measured radius. A boundary is not used by officers until a person confirms it.</span></div></div>
+            {editableEntity ? <LocationHouseMap key={boundaryTarget} organizationId={data.location.organization_id} house={data.location} sites={data.sites} zones={data.zones} editableEntity={editableEntity} /> : <div className="place-manager-empty">Add a Site or work area before drawing a boundary.</div>}
+          </div>
+        ) : (
+          <div className="place-manager-restrictions">
+            <div className="place-manager-heading"><div><h3>Temporary restrictions</h3><p>Temporarily change access or activity without changing the area's permanent rules.</p></div><select aria-label="Work area for temporary restriction" value={zoneId} onChange={(event) => setZoneId(event.target.value)}>{data.zones.map((item) => <option value={item.id} key={item.id}>{item.name}</option>)}</select></div>
+            <div className="place-manager-help is-warning"><Siren size={17} /><div><strong>Use this for a storm, fire risk, event, maintenance, or temporary client instruction.</strong><span>Officers see the restriction when GPS matches this area. The start, end, reason, author, and history are retained.</span></div></div>
+            {zone ? <form onSubmit={createRestriction}>
+              <div className="place-manager-grid is-three"><label><span>What changes?</span><select value={restriction.type} onChange={(event) => setRestriction({ ...restriction, type: event.target.value })}>{Object.entries(RESTRICTION_LABELS).map(([value, label]) => <option value={value} key={value}>{label}</option>)}</select></label><label><span>Starts</span><input type="date" required value={restriction.from} onChange={(event) => setRestriction({ ...restriction, from: event.target.value })} /></label><label><span>Ends (optional)</span><input type="date" value={restriction.to} min={restriction.from} onChange={(event) => setRestriction({ ...restriction, to: event.target.value })} /></label></div>
+              <label><span>Why is access or activity changing?</span><textarea required rows={3} value={restriction.reason} onChange={(event) => setRestriction({ ...restriction, reason: event.target.value })} placeholder="For example: bridge inspection until 4 pm; use the south entrance." /></label>
+              <footer><span>Leaving the end date blank keeps the restriction active until an administrator ends it.</span><button type="submit" className="is-primary" disabled={busy || !restriction.reason.trim()}>Schedule restriction</button></footer>
+            </form> : <div className="place-manager-empty">Add a work area before scheduling a temporary restriction.</div>}
+            {selectedRestrictions.length > 0 && <section className="place-manager-restriction-history"><h4>Restriction history</h4>{selectedRestrictions.map((item) => <article key={item.id}><div><strong>{RESTRICTION_LABELS[item.closure_type] ?? item.closure_type.replaceAll('_', ' ')}</strong><span>{item.effective_from}{item.effective_to ? ` to ${item.effective_to}` : ' until ended'} · {item.status.replaceAll('_', ' ')}</span><p>{item.reason ?? 'No reason recorded'}{item.resolution_notes ? ` · ${item.resolution_notes}` : ''}</p></div>{['active', 'scheduled'].includes(item.status) && <button type="button" disabled={busy} onClick={() => endRestriction(item)}>End restriction now</button>}</article>)}</section>}
+          </div>
+        )}
+      </main>
+    </section>
+  </div>;
 }
