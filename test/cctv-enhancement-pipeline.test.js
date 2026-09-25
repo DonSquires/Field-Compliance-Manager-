@@ -20,6 +20,8 @@ test('laptop GPU is primary, VPS CPU is resilient, and RunPod is final fallback'
   assert.match(watcher, /if \(policy === 'local_gpu_first'\) return \['local_gpu', 'vps', 'gpu'\]/);
   assert.match(watcher, /callLaptopEnhancement\(fusedBytes[\s\S]*?callRunpodEnhancement\(fusedBytes[\s\S]*?'worker_deterministic'/);
   assert.match(laptopCompose, /VISION_INFERENCE_POLICY: vps_first/);
+  assert.match(laptopCompose, /LOCAL_GPU_INFERENCE_URL: http:\/\/fcm-inference:3000/);
+  assert.match(laptopCompose, /LOCAL_GPU_INFERENCE_API_KEY: \$\{LAPTOP_INFERENCE_API_KEY:\?LAPTOP_INFERENCE_API_KEY is required\}/);
   assert.match(laptopCompose, /RUNPOD_API_URL:/);
   assert.match(laptopCompose, /LAPTOP_INFERENCE_API_KEY:\?LAPTOP_INFERENCE_API_KEY is required/);
   assert.match(laptopUpdater, /laptopKey\.Length -lt 32/);
