@@ -1332,6 +1332,27 @@ build+deploy (the normal push pipeline) before they reach
 `fcmanager.co.nz` - re-verifying the LIVE UI specifically for these
 frontend changes is a follow-up once deployed, not done in this pass.
 
+## Report review and live-client delivery (2026-09-26) — implementation ready, live proof pending
+
+The next reporting slice now has a governed implementation on
+`feature/report-pack-review`. Report generation produces provider-private
+drafts rather than immediately client-readable packs. Provider administrators
+can review source metrics, edit a bounded client-facing title/summary/notes/
+follow-up layer, save without releasing, preview a PDF, and explicitly publish.
+Publication routes to the live client portal when the client organisation has
+an active client login; otherwise the reviewed pack becomes eligible for email.
+The email function refuses portal-delivered packs, and drafts are hidden from
+client RLS. Sent packs remain immutable.
+
+Evidence completed before live deployment: the rollback-only authenticated
+database oracle passes 12 provider/client/outsider/concurrency/audit cases;
+focused backend contracts pass; Reports Hub guards pass; the production web
+build passes; and the review/publish flow passes Playwright at desktop and Pixel
+7 viewports with no horizontal overflow or browser errors. Still pending: apply
+the migration and deploy both report Edge Functions, snapshot the live schema,
+refresh Atlas, then generate and review R&M's first bounded pack without sending
+it. The dispatch-console live shakedown remains the separate final open slice.
+
 ## Conventions established / reusable
 
 - Live SQL via the Supabase Management API (`SUPABASE_ACCESS_TOKEN`, from

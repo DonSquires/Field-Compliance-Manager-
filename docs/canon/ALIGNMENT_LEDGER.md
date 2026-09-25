@@ -496,3 +496,22 @@ manual citations remain readable and recordable so prior evidence is not erased,
 but the fuel panel now selects the URL-checked path for approved sources. This
 is deliberately a governed review step, not an undocumented retail-site scraper.
 Truth table: `supabase/tests/20260917080000_approved_fuel_price_sources.sql`.
+
+### 2026-09-26 — Report packs require provider review before client delivery (Don Squires)
+
+> "I would like it if the user could review and have ability to edit the
+> report before it is sent to the client unless the client has a login to link
+> into the live reporting system."
+
+**Build status (migration `20260926010000`, pending live application).** Monthly
+report generation now creates provider-private `draft` packs. A provider
+administrator reviews and may edit only the bounded client-facing editorial
+layer (title, executive summary, client notes, and follow-up); source-derived
+metrics remain a separate immutable operational snapshot. Saving and publishing
+use one audited, optimistic-lock RPC. Publication records the actor/time and
+chooses `portal` when the client organisation has an active client login under
+an agreement with reporting enabled, otherwise `email`. Client RLS exposes only
+published/sent packs, never drafts. Portal-delivered packs refuse duplicate
+email delivery; email packs require explicit publication; sent packs remain
+immutable. Reviewed editorial content is used by PDF and email renderers. Truth
+table: `supabase/tests/20260926010000_report_pack_review_and_delivery.sql`.

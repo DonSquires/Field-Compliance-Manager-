@@ -291,6 +291,7 @@
 
 .client-report-row .is-success { color: #72d6a2; }
 .client-report-row .is-danger { color: #ff8585; }
+.client-report-copy p { margin: 3px 0 0; color: #b4c6d2; font-size: 12px; line-height: 1.45; }
 
 .client-inline-error,
 .client-page-state {

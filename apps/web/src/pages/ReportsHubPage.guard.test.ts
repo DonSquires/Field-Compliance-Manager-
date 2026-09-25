@@ -3,7 +3,8 @@ import { resolve } from 'node:path';
 import { describe, expect, it } from 'vitest';
 
 const page = readFileSync(resolve(process.cwd(), 'src/pages/ReportsHubPage.tsx'), 'utf8');
-const migration = readFileSync(resolve(process.cwd(), '../../supabase/migrations/20260901001000_govern_report_pack_generation.sql'), 'utf8');
+const reviewPanel = readFileSync(resolve(process.cwd(), 'src/components/ReportPackReviewPanel.tsx'), 'utf8');
+const migration = readFileSync(resolve(process.cwd(), '../../supabase/migrations/20260926010000_govern_report_pack_review_and_delivery.sql'), 'utf8');
 
 describe('governed monthly report pack generation', () => {
   it('fails closed when organisation context is unavailable', () => {
@@ -16,7 +17,8 @@ describe('governed monthly report pack generation', () => {
     expect(page).toContain("rpc('generate_due_report_packs'");
     expect(page).toContain("from('monthly_report_packs')");
     expect(page).toContain('report packs generated');
-    expect(page).toContain('Generate report packs');
+    expect(page).toContain('Generate report drafts');
+    expect(migration).toContain("'draft'");
   });
 
   it('includes the complete selected end date for timestamped evidence', () => {
@@ -27,10 +29,14 @@ describe('governed monthly report pack generation', () => {
     expect(page).not.toContain(".lte('observed_at', dateRange.end)");
   });
 
-  it('sends generated packs through the authenticated delivery function', () => {
+  it('reviews and publishes through the governed RPC before delivery', () => {
+    expect(reviewPanel).toContain("rpc('review_monthly_report_pack'");
+    expect(reviewPanel).toContain("p_action: action");
+    expect(reviewPanel).toContain('Publish reviewed report');
     expect(page).toContain("supabase.functions.invoke('send-report-pack'");
     expect(page).toContain('pack_id: pack.id');
-    expect(page).toContain('Send to client');
+    expect(page).toContain('Send reviewed report');
+    expect(page).toContain('Available in client portal');
     expect(page).not.toMatch(/from\('monthly_report_packs'\)[\s\S]{0,240}\.update\(/);
   });
 
@@ -44,6 +50,13 @@ describe('governed monthly report pack generation', () => {
     expect(page).not.toMatch(/from\('monthly_report_packs'\)[\s\S]{0,240}\.(insert|update|upsert)\(/);
   });
 
+  it('keeps drafts provider-private and exposes only published client reports', () => {
+    expect(migration).toContain("monthly_report_packs.status in ('generated', 'sent')");
+    expect(migration).toContain('agreement.client_portal_reports_enabled');
+    expect(migration).toContain('public.is_admin_for_org(organization_id)');
+    expect(migration).toContain('revoke insert, update, delete on table public.monthly_report_packs from anon, authenticated');
+  });
+
   it('shows parent oversight as a branch-preserving reporting read model', () => {
     expect(page).toContain("rpc('get_consolidated_reporting_overview'");
     expect(page).toContain('Group Reporting Overview');
@@ -52,10 +65,10 @@ describe('governed monthly report pack generation', () => {
   });
 
   it('limits generation to the active provider administrator and records an audit receipt', () => {
-    expect(migration).toContain('provider_organization_id=v_provider');
+    expect(migration).toContain('agreement.provider_organization_id = any(public.get_descendant_organizations(v_provider))');
     expect(migration).toContain('public.is_admin_for_org(v_provider)');
     expect(migration).toContain("'monthly_report_packs_generated'");
-    expect(migration).toContain('from public,anon;');
-    expect(migration).toContain('to authenticated,service_role;');
+    expect(migration).toContain('from public, anon, authenticated, service_role');
+    expect(migration).toContain('to authenticated, service_role');
   });
 });

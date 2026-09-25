@@ -1,0 +1,54 @@
+.report-review-panel {
+  margin-block: 18px 26px;
+  padding-block: 18px 22px;
+  border-block: 1px solid var(--color-border, #334155);
+}
+
+.report-review-heading {
+  display: flex;
+  align-items: flex-start;
+  justify-content: space-between;
+  gap: 16px;
+}
+
+.report-review-heading h3 { margin: 4px 0 0; font-size: 18px; }
+.report-review-heading p { margin: 4px 0 0; color: var(--color-text-secondary, #94a3b8); font-size: 13px; }
+.report-review-kicker { display: inline-flex; align-items: center; gap: 7px; color: var(--color-primary, #60a5fa); font-size: 12px; font-weight: 700; letter-spacing: 0; text-transform: uppercase; }
+.report-review-warning { display: flex; align-items: flex-start; gap: 8px; margin: 14px 0 0; padding: 10px 12px; border-left: 3px solid var(--color-warning, #f59e0b); color: var(--color-text-secondary, #cbd5e1); background: var(--color-bg-secondary, #0f172a); font-size: 13px; }
+.report-review-warning svg { flex: none; }
+
+.report-review-source {
+  display: grid;
+  grid-template-columns: repeat(5, minmax(0, 1fr));
+  margin-top: 16px;
+  border-block: 1px solid var(--color-border, #334155);
+}
+
+.report-review-source div { min-width: 0; padding: 11px 12px; }
+.report-review-source div + div { border-left: 1px solid var(--color-border, #334155); }
+.report-review-source span { display: block; color: var(--color-text-secondary, #94a3b8); font-size: 12px; }
+.report-review-source strong { display: block; margin-top: 3px; font-size: 18px; }
+.report-review-source-note { margin: 7px 0 16px; color: var(--color-text-secondary, #94a3b8); font-size: 12px; }
+
+.report-review-form { display: grid; grid-template-columns: 1fr 1fr; gap: 15px 18px; }
+.report-review-form label { display: grid; align-content: start; gap: 6px; min-width: 0; color: var(--color-text-primary, #e2e8f0); font-size: 13px; font-weight: 600; }
+.report-review-form label:first-child { grid-column: 1 / -1; }
+.report-review-form input,
+.report-review-form textarea { width: 100%; box-sizing: border-box; padding: 10px 11px; border: 1px solid var(--color-border, #475569); border-radius: 6px; color: var(--color-text-primary, #f8fafc); background: var(--color-bg-elevated, #0f1b2d); font: inherit; font-size: 16px; line-height: 1.45; resize: vertical; }
+.report-review-form input:focus-visible,
+.report-review-form textarea:focus-visible { outline: 3px solid var(--color-primary, #60a5fa); outline-offset: 2px; }
+.report-review-form small { color: var(--color-text-secondary, #94a3b8); font-size: 12px; font-weight: 400; text-align: right; }
+.report-review-actions { grid-column: 1 / -1; display: flex; justify-content: flex-end; gap: 8px; }
+
+@media (max-width: 760px) {
+  .report-review-heading { align-items: stretch; flex-direction: column; }
+  .report-review-source { grid-template-columns: 1fr 1fr; }
+  .report-review-source div + div { border-left: 0; }
+  .report-review-source div:nth-child(even) { border-left: 1px solid var(--color-border, #334155); }
+  .report-review-source div:nth-child(n + 3) { border-top: 1px solid var(--color-border, #334155); }
+  .report-review-form { grid-template-columns: 1fr; }
+  .report-review-form label:first-child,
+  .report-review-actions { grid-column: 1; }
+  .report-review-actions { align-items: stretch; flex-direction: column-reverse; }
+  .report-review-actions .btn { min-height: 44px; }
+}

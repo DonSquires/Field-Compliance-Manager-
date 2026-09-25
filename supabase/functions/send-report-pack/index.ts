@@ -34,22 +34,29 @@ const CAN_SEND = [
   'master',
   'admin'
 ];
+function escapeHtml(value) {
+  return String(value ?? '').replaceAll('&', '&amp;').replaceAll('<', '&lt;').replaceAll('>', '&gt;').replaceAll('"', '&quot;').replaceAll("'", '&#39;');
+}
 function summaryHtml(pack) {
   const d = pack.data ?? {};
+  const editorial = pack.editorial ?? {};
   const fac = d.facilities ?? [];
   const facRows = fac.map((f)=>{
     const pct = f.expected > 0 ? Math.round(f.completed / f.expected * 100) : 0;
-    return `<tr><td>${f.siteName}</td><td align="right">${f.expected}</td><td align="right">${f.completed}</td><td align="right">${pct}%</td></tr>`;
+    return `<tr><td>${escapeHtml(f.siteName)}</td><td align="right">${escapeHtml(f.expected)}</td><td align="right">${escapeHtml(f.completed)}</td><td align="right">${pct}%</td></tr>`;
   }).join('');
   return `
-    <h2>Monthly Report Pack</h2>
-    <p>Period: ${pack.period_start} to ${pack.period_end}</p>
+    <h2>${escapeHtml(editorial.title || 'Monthly Report Pack')}</h2>
+    <p>Period: ${escapeHtml(pack.period_start)} to ${escapeHtml(pack.period_end)}</p>
+    ${editorial.executive_summary ? `<h3>Executive summary</h3><p>${escapeHtml(editorial.executive_summary)}</p>` : ''}
+    ${editorial.client_notes ? `<h3>Notes</h3><p>${escapeHtml(editorial.client_notes)}</p>` : ''}
+    ${editorial.follow_up ? `<h3>Follow-up</h3><p>${escapeHtml(editorial.follow_up)}</p>` : ''}
     <h3>SLA Performance</h3>
-    <p>${d.slaMet ?? 0} met · ${d.slaBreached ?? 0} breached · ${d.slaRunning ?? 0} running</p>
+    <p>${escapeHtml(d.slaMet ?? 0)} met · ${escapeHtml(d.slaBreached ?? 0)} breached · ${escapeHtml(d.slaRunning ?? 0)} running</p>
     <h3>Incidents</h3>
-    <p>${d.incidentsTotal ?? 0} total</p>
+    <p>${escapeHtml(d.incidentsTotal ?? 0)} total</p>
     <h3>Patrol &amp; Compliance</h3>
-    <p>Checkpoint visits: ${d.checkpointVisits ?? 0} · Breach alerts: ${d.breachAlerts ?? 0}</p>
+    <p>Checkpoint visits: ${escapeHtml(d.checkpointVisits ?? 0)} · Breach alerts: ${escapeHtml(d.breachAlerts ?? 0)}</p>
     ${fac.length ? `<h3>Patrol Completion by Facility</h3>
     <table border="1" cellpadding="4" cellspacing="0">
       <tr><th align="left">Facility</th><th>Expected</th><th>Completed</th><th>Completion</th></tr>
@@ -93,7 +100,7 @@ serve(async (req)=>{
       error: 'pack_id is required'
     }, 400);
     // Load the pack and verify org.
-    const { data: pack } = await admin.from('monthly_report_packs').select('id, organization_id, service_agreement_id, period_start, period_end, data').eq('id', body.pack_id).single();
+    const { data: pack } = await admin.from('monthly_report_packs').select('id, organization_id, service_agreement_id, period_start, period_end, status, published_at, delivery_channel, data, editorial').eq('id', body.pack_id).single();
     if (!pack) return json({
       error: 'Pack not found'
     }, 404);
@@ -103,6 +110,21 @@ serve(async (req)=>{
       return json({
         error: 'Cannot send packs for other organizations'
       }, 403);
+    }
+    if (pack.status !== 'generated' || !pack.published_at) {
+      return json({
+        error: 'Review and publish this report pack before sending it'
+      }, 409);
+    }
+    if (pack.delivery_channel === 'portal') {
+      return json({
+        error: 'This client has live portal reporting. The published report is already available in their portal.'
+      }, 409);
+    }
+    if (pack.delivery_channel !== 'email') {
+      return json({
+        error: 'Report delivery channel has not been confirmed'
+      }, 409);
     }
     // Resolve recipient: explicit `to`, else the agreement's client billing contact.
     let recipient = body.to ?? '';
@@ -143,7 +165,7 @@ serve(async (req)=>{
       await client.send({
         from: SMTP_FROM,
         to: recipient,
-        subject: `Monthly Report Pack — ${pack.period_start} to ${pack.period_end}`,
+        subject: `${String(pack.editorial?.title || 'Monthly Report Pack')} — ${pack.period_start} to ${pack.period_end}`,
         html: summaryHtml(pack)
       });
       await client.close();
@@ -160,13 +182,27 @@ serve(async (req)=>{
       }, 502);
     }
     // Record delivery.
-    await admin.from('monthly_report_packs').update({
+    const { data: sentPack, error: updateError } = await admin.from('monthly_report_packs').update({
       status: 'sent',
       sent_at: new Date().toISOString(),
       sent_to: recipient,
       delivery_error: null,
       updated_at: new Date().toISOString()
-    }).eq('id', pack.id);
+    }).eq('id', pack.id).eq('status', 'generated').eq('delivery_channel', 'email').select('id').maybeSingle();
+    if (updateError || !sentPack) return json({
+      error: updateError?.message ?? 'Report delivery state changed before the send receipt was recorded'
+    }, 409);
+    await admin.from('audit_log').insert({
+      organization_id: pack.organization_id,
+      actor_user_id: caller.id,
+      action: 'monthly_report_pack_sent',
+      target_table: 'monthly_report_packs',
+      target_id: pack.id,
+      metadata: {
+        delivery_channel: 'email',
+        sent_to: recipient
+      }
+    });
     return json({
       success: true,
       sent_to: recipient
