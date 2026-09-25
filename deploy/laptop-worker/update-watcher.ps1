@@ -8,6 +8,9 @@ $composeFile = Join-Path $RepositoryRoot 'docker-compose.laptop-worker.yml'
 
 if (-not (Test-Path $envFile)) { throw "Missing $envFile" }
 if (-not (Test-Path $composeFile)) { throw "Missing $composeFile" }
+$keyLine = Get-Content $envFile | Where-Object { $_ -match '^LAPTOP_INFERENCE_API_KEY=' } | Select-Object -First 1
+$laptopKey = if ($keyLine) { ($keyLine -split '=', 2)[1].Trim() } else { '' }
+if ($laptopKey.Length -lt 32 -or $laptopKey -eq 'laptop-local-shared-key') { throw 'Set LAPTOP_INFERENCE_API_KEY to a unique value of at least 32 characters before updating.' }
 
 Push-Location $RepositoryRoot
 try {

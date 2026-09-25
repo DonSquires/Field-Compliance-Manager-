@@ -28,7 +28,7 @@ services:
       DETECTOR_TILES: auto
       VEHICLE_ATTRS_PROVIDER: basic
       # Shared with the VPS's LOCAL_GPU_INFERENCE_API_KEY so it can call /infer/batch here too.
-      INFERENCE_API_KEY: ${LAPTOP_INFERENCE_API_KEY:-laptop-local-shared-key}
+      INFERENCE_API_KEY: ${LAPTOP_INFERENCE_API_KEY:?LAPTOP_INFERENCE_API_KEY is required}
     deploy:
       resources:
         reservations:
@@ -57,7 +57,7 @@ services:
       VISION_DERIVED_ROOT: /opt/fcm/derived
       VISION_EXTRACTOR_PATH: /app/video_motion_extractor.py
       INFERENCE_SERVICE_URL: http://fcm-inference:3000
-      INFERENCE_API_KEY: ${LAPTOP_INFERENCE_API_KEY:-laptop-local-shared-key}
+      INFERENCE_API_KEY: ${LAPTOP_INFERENCE_API_KEY:?LAPTOP_INFERENCE_API_KEY is required}
       # This instance's own GPU is the local service slot; RunPod receives only frames it cannot answer.
       VISION_INFERENCE_POLICY: vps_first
       RUNPOD_API_URL: ${RUNPOD_API_URL:-https://api.runpod.ai/v2/katqqnmds1dphs}

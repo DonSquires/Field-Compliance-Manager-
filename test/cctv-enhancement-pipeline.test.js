@@ -13,6 +13,7 @@ const migration = read('supabase/migrations/20260925140000_cctv_observation_deri
 const reviewer = read('apps/web/src/components/CCTVStillComparison.tsx');
 const vpsCompose = read('docker-compose.full.yml');
 const laptopCompose = read('docker-compose.laptop-worker.yml');
+const laptopUpdater = read('deploy/laptop-worker/update-watcher.ps1');
 
 test('laptop GPU is primary, VPS CPU is resilient, and RunPod is final fallback', () => {
   assert.match(vpsCompose, /VISION_INFERENCE_POLICY: \$\{VISION_INFERENCE_POLICY:-local_gpu_first\}/);
@@ -20,6 +21,8 @@ test('laptop GPU is primary, VPS CPU is resilient, and RunPod is final fallback'
   assert.match(watcher, /callLaptopEnhancement\(fusedBytes[\s\S]*?callRunpodEnhancement\(fusedBytes[\s\S]*?'worker_deterministic'/);
   assert.match(laptopCompose, /VISION_INFERENCE_POLICY: vps_first/);
   assert.match(laptopCompose, /RUNPOD_API_URL:/);
+  assert.match(laptopCompose, /LAPTOP_INFERENCE_API_KEY:\?LAPTOP_INFERENCE_API_KEY is required/);
+  assert.match(laptopUpdater, /laptopKey\.Length -lt 32/);
 });
 
 test('the enhancement model is pinned, checksummed, GPU-aware and explicitly generative', () => {
