@@ -7,6 +7,7 @@ import { addLinzBaseLayers, rememberViewport, restoreViewportOr } from '../lib/m
 import './LocationHouseMap.css';
 import './LocationHouseMapSpine.css';
 
+// ATLAS INVOKES: linz-map-tile
 type Boundary = GeoJSON.GeoJsonObject | null;
 
 export interface HouseMapSite {
