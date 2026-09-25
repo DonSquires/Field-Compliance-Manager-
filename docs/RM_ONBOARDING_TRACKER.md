@@ -1332,7 +1332,7 @@ build+deploy (the normal push pipeline) before they reach
 `fcmanager.co.nz` - re-verifying the LIVE UI specifically for these
 frontend changes is a follow-up once deployed, not done in this pass.
 
-## Report review and live-client delivery (2026-09-26) — implementation ready, live proof pending
+## Report review and live-client delivery (2026-09-26) — workflow live, R&M configuration approved
 
 The next reporting slice now has a governed implementation on
 `feature/report-pack-review`. Report generation produces provider-private
@@ -1344,14 +1344,32 @@ an active client login; otherwise the reviewed pack becomes eligible for email.
 The email function refuses portal-delivered packs, and drafts are hidden from
 client RLS. Sent packs remain immutable.
 
-Evidence completed before live deployment: the rollback-only authenticated
+Evidence completed before deployment: the rollback-only authenticated
 database oracle passes 12 provider/client/outsider/concurrency/audit cases;
 focused backend contracts pass; Reports Hub guards pass; the production web
 build passes; and the review/publish flow passes Playwright at desktop and Pixel
-7 viewports with no horizontal overflow or browser errors. Still pending: apply
-the migration and deploy both report Edge Functions, snapshot the live schema,
-refresh Atlas, then generate and review R&M's first bounded pack without sending
-it. The dispatch-console live shakedown remains the separate final open slice.
+7 viewports with no horizontal overflow or browser errors. Commit `65cd9194`
+is on GitHub `main`; migration `20260926010000` is recorded live; both report
+Edge Functions are ACTIVE; the live schema snapshot is clean; and Atlas records
+`review_monthly_report_pack` as present/wired with its component, table, audit,
+agreement, user, and authorization edges. `exercised` remains honestly unset
+until an authenticated human runs the real workflow.
+
+The production-readiness check found a configuration prerequisite rather than a
+code defect: R&M had 17 accepted operational agreements, all reporting-enabled,
+but zero monthly template assignments and zero client-login profiles. The owner
+approved configuring all 17 agreements with one reviewed monthly accountability
+template, while generating no pack until September has closed. The first period
+is 1–30 September 2026, generated no earlier than 1 October. Until a client login
+is added, publication routes to reviewed email; future active client logins route
+automatically to the live portal instead.
+
+`scripts/configure-rm-monthly-reporting.mjs` implements that decision as a
+single-transaction, idempotent, count-gated, audit-backed operation. Its live
+dry run produced exactly one template, 17 configured agreements, zero report
+packs, and one audit row before rollback. Apply and post-write verification are
+the only remaining reporting-configuration steps; the dispatch-console live
+shakedown remains the separate final open slice.
 
 ## Conventions established / reusable
 
