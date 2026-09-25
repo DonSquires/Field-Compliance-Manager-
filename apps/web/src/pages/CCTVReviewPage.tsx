@@ -7,12 +7,14 @@ import {
   CircleDot,
   Clock3,
   Eye,
+  ExternalLink,
   FileVideo2,
   Maximize2,
   Play,
   Printer,
   RotateCcw,
   RefreshCw,
+  Search,
   ShieldAlert,
   UserRound,
   X,
@@ -36,6 +38,10 @@ import './PageStyles.css';
 import './CCTVReviewPage.css';
 
 type ReviewFilter = 'all' | 'queued' | 'processing' | 'manual_review_required' | 'complete' | 'failed' | 'archived';
+type ReviewWorkspaceMode = 'split' | 'queue' | 'inspect';
+
+const REVIEW_SELECTION_KEY = 'fcm.cctv.review.selectedJob';
+const REVIEW_MODE_KEY = 'fcm.cctv.review.workspaceMode';
 
 type CCTVJob = {
   id: string;
@@ -170,6 +176,13 @@ function evidencePlaceContext(metadata: Record<string, unknown> | null): string 
   return labels.length ? labels.join(' · ') : 'Unassigned place context';
 }
 
+function evidenceDisplayName(evidence: CCTVJob['evidence']): string {
+  const metadataName = evidence?.metadata && typeof evidence.metadata.file_name === 'string' ? evidence.metadata.file_name.trim() : '';
+  if (metadataName) return metadataName;
+  const pathName = evidence?.storage_path?.split('/').filter(Boolean).pop();
+  return pathName || (evidence?.evidence_kind === 'photo' ? 'Camera snapshot' : 'CCTV video');
+}
+
 function desktopReviewBatch(metadata: Record<string, unknown> | null): DesktopReviewBatch | null {
   const value = metadata?.desktop_review_batch;
   if (!value || typeof value !== 'object' || Array.isArray(value)) return null;
@@ -193,7 +206,20 @@ export const CCTVReviewPage: React.FC<CCTVReviewPageProps> = ({ initialFilter = 
   const { profile } = useAuth();
   const [jobs, setJobs] = useState<CCTVJob[]>([]);
   const [filter, setFilter] = useState<ReviewFilter>(initialFilter);
-  const [selectedId, setSelectedId] = useState<string | null>(null);
+  const [queueSearch, setQueueSearch] = useState('');
+  const [selectedId, setSelectedId] = useState<string | null>(() => {
+    const requested = new URLSearchParams(window.location.search).get('reviewJob');
+    try { return requested || window.localStorage.getItem(REVIEW_SELECTION_KEY); } catch { return requested; }
+  });
+  const [workspaceMode, setWorkspaceMode] = useState<ReviewWorkspaceMode>(() => {
+    const requested = new URLSearchParams(window.location.search).get('reviewMode');
+    if (requested === 'queue' || requested === 'inspect' || requested === 'split') return requested;
+    try {
+      const remembered = window.localStorage.getItem(REVIEW_MODE_KEY);
+      return remembered === 'queue' || remembered === 'inspect' || remembered === 'split' ? remembered : 'split';
+    } catch { return 'split'; }
+  });
+  const isReviewPopout = new URLSearchParams(window.location.search).get('reviewPopout') === '1';
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
 
@@ -234,6 +260,24 @@ export const CCTVReviewPage: React.FC<CCTVReviewPageProps> = ({ initialFilter = 
 
   const videoRef = useRef<HTMLVideoElement | null>(null);
   const isAdmin = ['admin', 'master', 'grand_master'].includes(profile?.role ?? '');
+
+  const chooseWorkspaceMode = useCallback((mode: ReviewWorkspaceMode) => {
+    setWorkspaceMode(mode);
+    try { window.localStorage.setItem(REVIEW_MODE_KEY, mode); } catch { /* browser storage can be unavailable */ }
+  }, []);
+
+  const selectReviewJob = useCallback((jobId: string) => {
+    setSelectedId(jobId);
+    try { window.localStorage.setItem(REVIEW_SELECTION_KEY, jobId); } catch { /* browser storage can be unavailable */ }
+  }, []);
+
+  useEffect(() => {
+    const syncSelection = (event: StorageEvent) => {
+      if (event.key === REVIEW_SELECTION_KEY && event.newValue) setSelectedId(event.newValue);
+    };
+    window.addEventListener('storage', syncSelection);
+    return () => window.removeEventListener('storage', syncSelection);
+  }, []);
 
   // Org-scoped metering readout; refreshed with the queue so a paused job and its reason appear together.
   const loadUsage = useCallback(async () => {
@@ -330,6 +374,12 @@ export const CCTVReviewPage: React.FC<CCTVReviewPageProps> = ({ initialFilter = 
   }, [loadJobs, profile?.organizationId]);
 
   const selected = jobs.find((job) => job.id === selectedId) ?? null;
+  const visibleJobs = useMemo(() => {
+    const query = queueSearch.trim().toLocaleLowerCase('en-NZ');
+    if (!query) return jobs;
+    return jobs.filter((job) => [evidenceDisplayName(job.evidence), job.id, job.status, job.stage ?? '', job.domain]
+      .some((value) => value.toLocaleLowerCase('en-NZ').includes(query)));
+  }, [jobs, queueSearch]);
   const selectedBatch = desktopReviewBatch(selected?.evidence?.metadata || null);
   const selectedBatchJobs = selectedBatch
     ? (batchJobs.length > 0 ? batchJobs : jobs.filter((job) => desktopReviewBatch(job.evidence?.metadata || null)?.batch_id === selectedBatch.batch_id))
@@ -343,6 +393,15 @@ export const CCTVReviewPage: React.FC<CCTVReviewPageProps> = ({ initialFilter = 
     count + result.person_events.length + result.vehicle_events.filter((event) => event.temporal_consensus).length + result.face_events.filter((event) => identityDrafts[event.event_id]?.authorityLevel !== 'approved').length
   ), 0);
   const reportReady = selectedBatchComplete && pendingObservationCount === 0;
+
+  const openInspectionWindow = useCallback(() => {
+    if (!selected) return;
+    const url = new URL(window.location.href);
+    url.searchParams.set('reviewMode', 'inspect');
+    url.searchParams.set('reviewJob', selected.id);
+    url.searchParams.set('reviewPopout', '1');
+    window.open(url.toString(), `fcm-cctv-inspector-${selected.id}`, 'popup=yes,width=1440,height=1000,left=120,top=60');
+  }, [selected]);
 
   useEffect(() => {
     let active = true;
@@ -1106,7 +1165,7 @@ export const CCTVReviewPage: React.FC<CCTVReviewPageProps> = ({ initialFilter = 
   };
 
   return (
-    <div className="cctv-review-page">
+    <div className={`cctv-review-page${isReviewPopout ? ' is-review-popout' : ''}`}>
       <header className="cctv-review-header">
         <div>
           <span>Field outcomes</span>
@@ -1136,7 +1195,19 @@ export const CCTVReviewPage: React.FC<CCTVReviewPageProps> = ({ initialFilter = 
         </div>
       </header>
 
-      <div className="cctv-review-layout">
+      <div className="cctv-workspace-toolbar" aria-label="Review workspace layout">
+        <div className="cctv-workspace-modes" role="group" aria-label="Choose review layout">
+          <button type="button" className={workspaceMode === 'queue' ? 'is-active' : ''} aria-pressed={workspaceMode === 'queue'} onClick={() => chooseWorkspaceMode('queue')}><FileVideo2 size={15} /> Queue</button>
+          <button type="button" className={workspaceMode === 'split' ? 'is-active' : ''} aria-pressed={workspaceMode === 'split'} onClick={() => chooseWorkspaceMode('split')}><Eye size={15} /> Split review</button>
+          <button type="button" className={workspaceMode === 'inspect' ? 'is-active' : ''} aria-pressed={workspaceMode === 'inspect'} onClick={() => chooseWorkspaceMode('inspect')}><Maximize2 size={15} /> Inspector</button>
+        </div>
+        <div className="cctv-workspace-selection">
+          <span>{selected ? `${selected.evidence?.evidence_kind === 'photo' ? 'Snapshot' : 'Video'} · ${timeLabel(selected.created_at)}` : 'No evidence selected'}</span>
+          <button type="button" onClick={openInspectionWindow} disabled={!selected} title="Open the selected evidence inspector on another screen"><ExternalLink size={15} /> Open inspector window</button>
+        </div>
+      </div>
+
+      <div className={`cctv-review-layout mode-${workspaceMode}`}>
         {/* Left Filter Rail */}
         <aside className="cctv-filter-rail" aria-label="CCTV review filters">
           <span>Review view</span>
@@ -1187,7 +1258,10 @@ export const CCTVReviewPage: React.FC<CCTVReviewPageProps> = ({ initialFilter = 
               <span>Evidence queue</span>
               <h2>{filter === 'all' ? 'Recent camera work' : statusLabel(filter)}</h2>
             </div>
-            <strong>{jobs.length}</strong>
+            <div className="cctv-queue-tools">
+              <label><Search size={14} /><input type="search" value={queueSearch} onChange={(event) => setQueueSearch(event.target.value)} aria-label="Find CCTV evidence" placeholder="Find file or job" /></label>
+              <strong>{visibleJobs.length}</strong>
+            </div>
           </div>
           {jobFailures.size > 0 && (
             <div className="cctv-failure-summary" role="status">
@@ -1215,8 +1289,10 @@ export const CCTVReviewPage: React.FC<CCTVReviewPageProps> = ({ initialFilter = 
               <strong>No CCTV work here</strong>
               <span>Uploaded camera evidence will appear after an inference job is created.</span>
             </div>
+          ) : visibleJobs.length === 0 ? (
+            <div className="cctv-empty"><Search size={22} /><strong>No matching camera work</strong><span>Clear the search or choose another status.</span></div>
           ) : (
-            jobs.map((job) => {
+            visibleJobs.map((job) => {
               const jobConsolidated = consolidateResultData(job.result?.result);
               const faceCount = jobConsolidated.summary_counts.face_events;
               const personCount = jobConsolidated.summary_counts.person_events;
@@ -1226,11 +1302,11 @@ export const CCTVReviewPage: React.FC<CCTVReviewPageProps> = ({ initialFilter = 
 
               return (
                 <div key={job.id} className={`cctv-job-row ${selectedId === job.id ? 'is-selected' : ''}`}>
-                  <button type="button" className="cctv-job-row-main" onClick={() => setSelectedId(job.id)}>
+                  <button type="button" className="cctv-job-row-main" onClick={() => selectReviewJob(job.id)}>
                     <span className="cctv-job-icon"><FileVideo2 size={19} /></span>
                     <span className="cctv-job-copy">
-                      <strong>{job.evidence?.evidence_kind === 'photo' ? 'Camera snapshot' : 'CCTV video'}</strong>
-                      <small>{timeLabel(job.created_at)} · {job.domain} · {String(job.id).slice(0, 8)}{job.stage ? ` · ${statusLabel(job.stage)}` : ''}</small>
+                      <strong title={evidenceDisplayName(job.evidence)}>{evidenceDisplayName(job.evidence)}</strong>
+                      <small>{job.evidence?.evidence_kind === 'photo' ? 'Camera snapshot' : 'CCTV video'} · {timeLabel(job.created_at)} · {String(job.id).slice(0, 8)}{job.stage ? ` · ${statusLabel(job.stage)}` : ''}</small>
                       {batch && <small className="cctv-batch-link">Desktop batch {batch.batch_id.slice(0, 8)} · clip {batch.clip_index}/{batch.clip_total}{batch.channel ? ` · camera ${batch.channel}` : ''}</small>}
                     </span>
                     <span className="cctv-job-findings">
@@ -1281,11 +1357,35 @@ export const CCTVReviewPage: React.FC<CCTVReviewPageProps> = ({ initialFilter = 
               <div className="cctv-detail-heading">
                 <div>
                   <span>Evidence inspection</span>
-                  <h2>{selected.evidence?.evidence_kind === 'photo' ? 'Camera snapshot' : 'CCTV video'}</h2>
+                  <h2 title={evidenceDisplayName(selected.evidence)}>{evidenceDisplayName(selected.evidence)}</h2>
                   <small className="cctv-place-context">Place: {evidencePlaceContext(selected.evidence?.metadata || null)}</small>
                   {selectedBatch && <small className="cctv-place-context">Desktop batch {selectedBatch.batch_id.slice(0, 8)} · clip {selectedBatch.clip_index} of {selectedBatch.clip_total}{selectedBatch.start_time && selectedBatch.end_time ? ` · ${selectedBatch.start_time} to ${selectedBatch.end_time}` : ''}</small>}
                 </div>
                 <Eye size={19} />
+              </div>
+
+              {/* Primary evidence stays first: administrative report/export controls follow the picture. */}
+              <div className="cctv-media-container">
+                {videoLoading ? (
+                  <div className="cctv-media-loading">
+                    <RefreshCw className="is-spinning" size={20} />
+                    <span>Loading secured video stream...</span>
+                  </div>
+                ) : videoUrl ? (
+                  <div className="cctv-video-wrapper">
+                    <video ref={videoRef} src={videoUrl} controls playsInline preload="metadata" className="cctv-video-player" />
+                  </div>
+                ) : videoError === 'CONVERTING' ? (
+                  <div className="cctv-media-loading">
+                    <RefreshCw className="is-spinning" size={20} />
+                    <span>Converting to a playable format for review...</span>
+                  </div>
+                ) : (
+                  <div className="cctv-media-placeholder">
+                    <FileVideo2 size={32} />
+                    <span>{videoError || 'Video stream preview unavailable'}</span>
+                  </div>
+                )}
               </div>
 
               {selectedBatch && (
@@ -1370,37 +1470,6 @@ export const CCTVReviewPage: React.FC<CCTVReviewPageProps> = ({ initialFilter = 
                   <small>{progressLabel(selected)}{selected.progress_total ? ` · iteration ${selected.progress_current ?? 0} of ${selected.progress_total}` : ''}</small>
                 </div>
               )}
-
-              {/* Video Player */}
-              <div className="cctv-media-container">
-                {videoLoading ? (
-                  <div className="cctv-media-loading">
-                    <RefreshCw className="is-spinning" size={20} />
-                    <span>Loading secured video stream...</span>
-                  </div>
-                ) : videoUrl ? (
-                  <div className="cctv-video-wrapper">
-                    <video
-                      ref={videoRef}
-                      src={videoUrl}
-                      controls
-                      playsInline
-                      preload="metadata"
-                      className="cctv-video-player"
-                    />
-                  </div>
-                ) : videoError === 'CONVERTING' ? (
-                  <div className="cctv-media-loading">
-                    <RefreshCw className="is-spinning" size={20} />
-                    <span>Converting to a playable format for review...</span>
-                  </div>
-                ) : (
-                  <div className="cctv-media-placeholder">
-                    <FileVideo2 size={32} />
-                    <span>{videoError || 'Video stream preview unavailable'}</span>
-                  </div>
-                )}
-              </div>
 
               {/* Summary Stats Grid */}
               <div className="cctv-finding-grid">

@@ -63,4 +63,22 @@ describe('CCTV inference review', () => {
     // The governed RPC remains the only way a job changes state from this page.
     expect(source).not.toMatch(/from\('inference_jobs'\)[\s\S]{0,300}\.(update|delete)\(/);
   });
+
+  it('supports a searchable split workspace and a synchronized second-screen inspector', () => {
+    expect(source).toContain("type ReviewWorkspaceMode = 'split' | 'queue' | 'inspect'");
+    expect(source).toContain('aria-label="Choose review layout"');
+    expect(source).toContain('aria-label="Find CCTV evidence"');
+    expect(source).toContain("window.localStorage.setItem(REVIEW_SELECTION_KEY, jobId)");
+    expect(source).toContain("window.addEventListener('storage', syncSelection)");
+    expect(source).toContain("url.searchParams.set('reviewMode', 'inspect')");
+    expect(source).toContain("url.searchParams.set('reviewPopout', '1')");
+    expect(source).toContain('Open inspector window');
+  });
+
+  it('puts the primary recording before report administration in the inspector', () => {
+    expect(source.indexOf('className="cctv-media-container"')).toBeGreaterThan(0);
+    expect(source.indexOf('className="cctv-media-container"')).toBeLessThan(source.indexOf('className={`cctv-report-readiness'));
+    expect(source).toContain('evidenceDisplayName(job.evidence)');
+    expect(source).toContain('evidenceDisplayName(selected.evidence)');
+  });
 });
