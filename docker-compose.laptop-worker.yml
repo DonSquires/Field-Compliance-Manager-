@@ -51,7 +51,7 @@ services:
     restart: unless-stopped
     # tini (PID 1) reaps orphaned ffmpeg/extractor children on stop — same reasoning as docker-compose.full.yml.
     init: true
-    env_file: ./deploy/laptop-worker/laptop-worker.env
+    env_file: "${LAPTOP_WORKER_ENV_FILE:-./deploy/laptop-worker/laptop-worker.env}"
     environment:
       VISION_VIDEO_ROOT: /opt/fcm/storage
       VISION_DERIVED_ROOT: /opt/fcm/derived

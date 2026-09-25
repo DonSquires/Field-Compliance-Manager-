@@ -12,21 +12,43 @@ $keyLine = Get-Content $envFile | Where-Object { $_ -match '^LAPTOP_INFERENCE_AP
 $laptopKey = if ($keyLine) { ($keyLine -split '=', 2)[1].Trim() } else { '' }
 if ($laptopKey.Length -lt 32 -or $laptopKey -eq 'laptop-local-shared-key') { throw 'Set LAPTOP_INFERENCE_API_KEY to a unique value of at least 32 characters before updating.' }
 
+$composeProject = docker inspect --format '{{ index .Config.Labels "com.docker.compose.project" }}' fcm-inference-laptop 2>$null
+if ($LASTEXITCODE -ne 0 -or [string]::IsNullOrWhiteSpace($composeProject) -or $composeProject -eq '<no value>') {
+  $composeProject = 'fcm-laptop'
+} else {
+  $composeProject = $composeProject.Trim()
+}
+
+$releaseRoot = $RepositoryRoot
+$temporaryWorktree = $null
+$hadWorkerEnvFile = Test-Path Env:LAPTOP_WORKER_ENV_FILE
+$previousWorkerEnvFile = $env:LAPTOP_WORKER_ENV_FILE
+
 Push-Location $RepositoryRoot
 try {
-  $trackedChanges = git status --porcelain --untracked-files=no
-  if ($LASTEXITCODE -ne 0) { throw 'Could not inspect the laptop worker checkout.' }
-  if ($trackedChanges) { throw 'The checkout has tracked local changes. Commit or preserve them before updating the worker.' }
-
   git fetch --prune origin main
   if ($LASTEXITCODE -ne 0) { throw 'Could not fetch origin/main.' }
-  git merge --ff-only FETCH_HEAD
-  if ($LASTEXITCODE -ne 0) { throw 'The checkout cannot fast-forward cleanly.' }
 
-  $revision = (git rev-parse --short HEAD).Trim()
-  docker compose --env-file $envFile -f $composeFile build --pull fcm-inference fcm-vision-watcher
+  $trackedChanges = git status --porcelain --untracked-files=no
+  if ($LASTEXITCODE -ne 0) { throw 'Could not inspect the laptop worker checkout.' }
+  if ($trackedChanges) {
+    $temporaryWorktree = Join-Path ([System.IO.Path]::GetTempPath()) ("fcm-laptop-release-$([guid]::NewGuid().ToString('N'))")
+    git worktree add --detach $temporaryWorktree origin/main
+    if ($LASTEXITCODE -ne 0) { throw 'Could not create a clean temporary release from origin/main.' }
+    $releaseRoot = $temporaryWorktree
+    Write-Host 'Tracked local changes preserved; deploying from a clean temporary release.'
+  } else {
+    git merge --ff-only origin/main
+    if ($LASTEXITCODE -ne 0) { throw 'The checkout cannot fast-forward cleanly.' }
+  }
+
+  $composeFile = Join-Path $releaseRoot 'docker-compose.laptop-worker.yml'
+  $revision = (git -C $releaseRoot rev-parse --short HEAD).Trim()
+  $env:LAPTOP_WORKER_ENV_FILE = $envFile
+  $composeArgs = @('compose', '--project-name', $composeProject, '--env-file', $envFile, '-f', $composeFile)
+  & docker @composeArgs build --pull fcm-inference fcm-vision-watcher
   if ($LASTEXITCODE -ne 0) { throw 'The laptop GPU inference or watcher image did not build.' }
-  docker compose --env-file $envFile -f $composeFile up -d --force-recreate --wait fcm-inference fcm-vision-watcher
+  & docker @composeArgs up -d --force-recreate --wait fcm-inference fcm-vision-watcher
   if ($LASTEXITCODE -ne 0) { throw 'The laptop GPU inference/watcher pair did not restart cleanly.' }
 
   $inferenceState = (docker inspect --format '{{.State.Status}}' fcm-inference-laptop).Trim()
@@ -39,7 +61,16 @@ try {
   if ($health.cuda -ne $true) { throw "Laptop inference is not using CUDA ($($health.detector_provider))." }
   if ($health.super_resolution.state -ne 'ready') { throw "Laptop super-resolution model is $($health.super_resolution.state), not ready." }
   Write-Host "Laptop CCTV GPU inference and watcher are running at revision $revision"
-  docker compose --env-file $envFile -f $composeFile logs --tail 20 fcm-vision-watcher
+  & docker @composeArgs logs --tail 20 fcm-vision-watcher
 } finally {
+  if ($hadWorkerEnvFile) {
+    $env:LAPTOP_WORKER_ENV_FILE = $previousWorkerEnvFile
+  } else {
+    Remove-Item Env:LAPTOP_WORKER_ENV_FILE -ErrorAction SilentlyContinue
+  }
+  if ($temporaryWorktree -and (Test-Path $temporaryWorktree)) {
+    git worktree remove --force $temporaryWorktree
+    if ($LASTEXITCODE -ne 0) { Write-Warning "Temporary release cleanup failed: $temporaryWorktree" }
+  }
   Pop-Location
 }

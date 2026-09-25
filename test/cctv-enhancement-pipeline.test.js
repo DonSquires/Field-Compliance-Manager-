@@ -23,6 +23,11 @@ test('laptop GPU is primary, VPS CPU is resilient, and RunPod is final fallback'
   assert.match(laptopCompose, /RUNPOD_API_URL:/);
   assert.match(laptopCompose, /LAPTOP_INFERENCE_API_KEY:\?LAPTOP_INFERENCE_API_KEY is required/);
   assert.match(laptopUpdater, /laptopKey\.Length -lt 32/);
+  assert.match(laptopUpdater, /git worktree add --detach \$temporaryWorktree origin\/main/);
+  assert.match(laptopUpdater, /Tracked local changes preserved/);
+  assert.match(laptopUpdater, /LAPTOP_WORKER_ENV_FILE/);
+  assert.doesNotMatch(laptopUpdater, /throw 'The checkout has tracked local changes/);
+  assert.match(laptopCompose, /LAPTOP_WORKER_ENV_FILE:-\.\/deploy\/laptop-worker\/laptop-worker\.env/);
   assert.match(laptopUpdater, /health\.cuda -ne \$true/);
   assert.match(laptopUpdater, /health\.super_resolution\.state -ne 'ready'/);
 });
