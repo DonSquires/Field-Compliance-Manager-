@@ -33,6 +33,11 @@ try {
   $state = (docker inspect --format '{{.State.Status}}' fcm-vision-watcher-laptop).Trim()
   if ($inferenceState -ne 'running') { throw "The laptop GPU inference service is $inferenceState after deployment." }
   if ($state -ne 'running') { throw "The laptop watcher is $state after deployment." }
+  $healthJson = docker exec fcm-inference-laptop python -c "import json,urllib.request; print(json.dumps(json.load(urllib.request.urlopen('http://127.0.0.1:3000/health'))))"
+  if ($LASTEXITCODE -ne 0) { throw 'The laptop inference health endpoint did not answer.' }
+  $health = $healthJson | ConvertFrom-Json
+  if ($health.cuda -ne $true) { throw "Laptop inference is not using CUDA ($($health.detector_provider))." }
+  if ($health.super_resolution.state -ne 'ready') { throw "Laptop super-resolution model is $($health.super_resolution.state), not ready." }
   Write-Host "Laptop CCTV GPU inference and watcher are running at revision $revision"
   docker compose --env-file $envFile -f $composeFile logs --tail 20 fcm-vision-watcher
 } finally {

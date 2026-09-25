@@ -23,6 +23,8 @@ test('laptop GPU is primary, VPS CPU is resilient, and RunPod is final fallback'
   assert.match(laptopCompose, /RUNPOD_API_URL:/);
   assert.match(laptopCompose, /LAPTOP_INFERENCE_API_KEY:\?LAPTOP_INFERENCE_API_KEY is required/);
   assert.match(laptopUpdater, /laptopKey\.Length -lt 32/);
+  assert.match(laptopUpdater, /health\.cuda -ne \$true/);
+  assert.match(laptopUpdater, /health\.super_resolution\.state -ne 'ready'/);
 });
 
 test('the enhancement model is pinned, checksummed, GPU-aware and explicitly generative', () => {
