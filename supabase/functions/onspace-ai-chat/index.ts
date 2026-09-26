@@ -10114,8 +10114,12 @@ serve(async (req)=>{
         // 150s budget across multiple loop iterations.
 
         // TASK CONTINUITY: Merge durable task checkpoint with ephemeral loop state
+        // Time left tells the planner (and its router) to answer with what it has rather than
+        // search variants until the budget pause dumps raw tool output (proving-series round 2).
+        const loopTimeLeftMs = Math.max(0, BUDGET_PAUSE_MS - (Date.now() - startTime));
         const loopTaskState = {
           ...taskState,
+          time_left_s: Math.round(loopTimeLeftMs / 1000),
           // Include the durable task checkpoint if available
           ...(taskLedger && taskLedger.checkpoint ? { durable_checkpoint: taskLedger.checkpoint } : {})
         };
@@ -10123,6 +10127,7 @@ serve(async (req)=>{
         const nextPlan = await callPlan({
           ...planPayload,
           task_state: loopTaskState,
+          deadline_ms: loopTimeLeftMs,
           allow_delegation: subagentRunsThisTurn.length === 0
         }, false);
         if (!nextPlan.ok) {

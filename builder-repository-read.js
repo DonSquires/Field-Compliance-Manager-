@@ -15,6 +15,8 @@ const { execFileSync } = require('node:child_process');
 const SECRET_PATH = /(^|\/)((.*\.)?env(\..*)?|.*\.pem|.*\.key|.*secret.*|.*credential.*|id_rsa.*|id_ed25519.*)$/i;
 const MAX_FILE_BYTES = 400 * 1024;
 const MAX_MATCHES = 100;
+// Generated output is noise for a code search (a minified bundle matches everything).
+const SEARCH_EXCLUDES = [':!**/dist/**', ':!**/node_modules/**', ':!**/*.min.js', ':!**/*.map', ':!**/package-lock.json', ':!**/pnpm-lock.yaml', ':!**/yarn.lock', ':!supabase/schema.sql'];
 
 function git(cwd, args, { maxBuffer = 16 * 1024 * 1024 } = {}) {
   return execFileSync('git', args, { cwd, encoding: 'utf8', stdio: ['ignore', 'pipe', 'pipe'], maxBuffer });
@@ -43,8 +45,7 @@ function searchRepository({ sourceDir, sha, query, pathspec = null, limit = 30, 
   if (term.length > 200) throw new Error('query is too long');
   const cap = Math.min(Math.max(Number(limit) || 30, 1), MAX_MATCHES);
   const spec = safePathspec(pathspec);
-  const args = ['grep', '-n', '-I', '-i', regex ? '-E' : '-F', '-e', term, sha];
-  if (spec) args.push('--', spec);
+  const args = ['grep', '-n', '-I', '-i', regex ? '-E' : '-F', '-e', term, sha, '--', ...(spec ? [spec] : []), ...SEARCH_EXCLUDES];
   let out = '';
   try {
     out = git(sourceDir, args);

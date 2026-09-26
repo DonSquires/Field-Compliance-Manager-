@@ -21,6 +21,8 @@ function makeRepo() {
   fs.writeFileSync(path.join(root, 'docs', 'README.md'), '# Docs\nrotate keys nightly\n');
   fs.writeFileSync(path.join(root, '.env'), 'SECRET=rotate-keys-token\n');
   fs.writeFileSync(path.join(root, 'blob.bin'), Buffer.from([0, 1, 2, 3]));
+  fs.mkdirSync(path.join(root, 'apps', 'web', 'dist'), { recursive: true });
+  fs.writeFileSync(path.join(root, 'apps', 'web', 'dist', 'bundle.js'), 'rotate rotate rotate\n');
   git('add', '-A');
   git('-c', 'commit.gpgsign=false', 'commit', '-q', '-m', 'init');
   const sha = git('rev-parse', 'HEAD').trim();
@@ -51,6 +53,8 @@ test('search, file and tree answer from the pinned commit and never expose secre
   const search = searchRepository({ sourceDir: root, sha, query: 'rotate' });
   assert.deepEqual(search.matches.map((m) => m.path).sort(), ['docs/README.md', 'scripts/rotate-keys.mjs', 'scripts/rotate-keys.mjs']);
   assert.ok(search.matches.every((m) => m.path !== '.env'), '.env matched "rotate" but is filtered');
+  assert.ok(search.matches.every((m) => !m.path.includes('/dist/')), 'build output is excluded by default');
+  assert.deepEqual(listRepositoryTree({ sourceDir: root, sha }).entries, ['apps', 'blob.bin', 'docs', 'scripts']);
   assert.equal(search.capped, false);
   assert.deepEqual(searchRepository({ sourceDir: root, sha, query: 'rotate', pathspec: 'docs' }).matches.map((m) => m.path), ['docs/README.md']);
   assert.deepEqual(searchRepository({ sourceDir: root, sha, query: 'no-such-token-anywhere' }), { matches: [], count: 0, capped: false });
@@ -67,7 +71,6 @@ test('search, file and tree answer from the pinned commit and never expose secre
   assert.throws(() => readRepositoryFile({ sourceDir: root, sha, path: '.env' }), (e) => e.code === 'FORBIDDEN');
   assert.throws(() => readRepositoryFile({ sourceDir: root, sha, path: 'blob.bin' }), (e) => e.code === 'FORBIDDEN');
 
-  assert.deepEqual(listRepositoryTree({ sourceDir: root, sha }).entries, ['blob.bin', 'docs', 'scripts']);
   assert.deepEqual(listRepositoryTree({ sourceDir: root, sha, path: 'scripts' }).entries, ['rotate-keys.mjs']);
   assert.throws(() => listRepositoryTree({ sourceDir: root, sha, path: 'nope' }), (e) => e.code === 'NOT_FOUND');
   fs.rmSync(root, { recursive: true, force: true });

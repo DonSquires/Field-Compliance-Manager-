@@ -273,7 +273,14 @@ function createModelGateway({ env = process.env, fetchImpl = globalThis.fetch, n
     return config.providers[providerName] ? config.providers[providerName].kind : null;
   }
 
-  return { config, chatJson, status, probe, isReasoningModel, chainAfter, providerKind };
+  // The role's chain without the in-house (ollama) tiers; null when the chain has no fast tier.
+  function fastChain(role) {
+    const chain = config.chains[role] || config.chains.planner;
+    const fast = chain.filter((name) => providerKind(name) === 'openai');
+    return fast.length && fast.length < chain.length ? fast : null;
+  }
+
+  return { config, chatJson, status, probe, isReasoningModel, chainAfter, fastChain, providerKind };
 }
 
 module.exports = { createGatewayConfig, createModelGateway, isReasoningModel, paramsUnsupportedError, parseChain };

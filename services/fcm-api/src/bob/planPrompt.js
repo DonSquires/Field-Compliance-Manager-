@@ -196,6 +196,7 @@ function buildTaskStateBlock(taskState) {
     '',
     'TASK STATE (you are in a multi-step reasoning loop — the conductor has already executed these steps for you):',
     `Goal: ${String(ts.goal ?? '')}`,
+    Number.isFinite(Number(ts.time_left_s)) ? `TIME LEFT IN THIS TURN: about ${Math.max(0, Math.round(Number(ts.time_left_s)))} s. If the results below already answer the question (a not_found IS an answer), select action=answer NOW with a plain, complete reply; do not spend the remaining time on variant searches.` : '',
     stepsDesc ? `Steps completed:\n${stepsDesc}` : '',
     ts.last_tool_result ? `Last tool result (use this to decide your NEXT step):\n${sliceWithDisclosure(ts.last_tool_result, PLAN_LAST_TOOL_RESULT_BUDGET, 'the last tool result')}` : '',
     ts.durable_checkpoint ? `Durable task checkpoint: ${safeJson(ts.durable_checkpoint, 3000)}` : '',

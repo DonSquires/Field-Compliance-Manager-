@@ -405,3 +405,37 @@ test('owner rulings and Bob\'s own notes get their own prompt block, not a trunc
   const prompt = buildPlannerPrompt({ message: 'hi', tools: [], memoryContext });
   assert.match(prompt, /OWNER RULINGS/);
 });
+
+test('a tight deadline skips the in-house planner and shortens the turn; the prompt tells the model how long is left', async () => {
+  const { createModelGateway } = require('../services/fcm-api/src/bob/modelGateway');
+  const { readBody } = require('../services/fcm-api/src/bob/plan');
+  const real = createModelGateway({ env: { OPENAI_API_KEY: 'k', GPU_WORKSTATION_URL: 'http://laptop:11434/v1', GPU_WORKSTATION_MODEL: 'qwen2.5-coder:7b' } });
+  assert.deepEqual(real.fastChain('planner'), ['openai']);
+  assert.equal(createModelGateway({ env: { OPENAI_API_KEY: 'k', BOB_ROUTE_PLANNER: 'openai' } }).fastChain('planner'), null, 'no in-house tier to skip');
+  assert.equal(readBody({ deadline_ms: '30000' }).deadlineMs, 30000);
+  assert.equal(readBody({ deadline_ms: -5 }).deadlineMs, null);
+  assert.equal(readBody({}).deadlineMs, null);
+
+  const calls = [];
+  const gateway = {
+    chainAfter: real.chainAfter,
+    providerKind: real.providerKind,
+    fastChain: real.fastChain,
+    async chatJson(role, messages, options = {}) {
+      calls.push({ role, chain: options.chain ?? null, timeoutMs: options.timeoutMs });
+      return { content: JSON.stringify({ action: 'answer', reply: 'That script does not exist in the build.', confidence: 0.9 }), provider: 'openai', model: 'gpt-5.4', latency_ms: 40 };
+    },
+  };
+  const result = await planTurn({ message: 'fix scripts/ghost.mjs', tools: TOOLS, verify: false, deadline_ms: 30000, task_state: { goal: 'fix scripts/ghost.mjs', steps_taken: [{ tool: 'repo_search', outcome: 'ok', result_summary: 'status: not_found' }], time_left_s: 30 } }, { gateway, env: {} });
+  assert.equal(result.body.action, 'answer');
+  assert.deepEqual(calls[0].chain, ['openai'], 'no time for the laptop model: straight to the fast tier');
+  assert.ok(calls[0].timeoutMs <= 25000, `turn budget shrank to the deadline (got ${calls[0].timeoutMs})`);
+
+  // A comfortable deadline keeps in-house first.
+  const calls2 = [];
+  await planTurn({ message: 'hi', tools: TOOLS, verify: false, deadline_ms: 90000 }, { gateway: { ...gateway, async chatJson(role, messages, options = {}) { calls2.push(options.chain ?? null); return { content: JSON.stringify({ action: 'answer', reply: 'Hello.' }), provider: 'gpu_workstation', model: 'q', latency_ms: 5 }; } }, env: {} });
+  assert.deepEqual(calls2, [null]);
+
+  const prompt = buildPlannerPrompt({ message: 'x', tools: [], taskState: { goal: 'g', steps_taken: [], time_left_s: 27 } });
+  assert.match(prompt, /TIME LEFT IN THIS TURN: about 27 s\. If the results below already answer the question \(a not_found IS an answer\), select action=answer NOW/);
+});

@@ -35,6 +35,9 @@ function readBody(body) {
     allowDelegation: b.allow_delegation !== false,
     verify: b.verify !== false,
     requestId: typeof b.request_id === 'string' ? b.request_id : null,
+    // Milliseconds the caller can still wait for this turn (a reasoning-loop step late in the Edge
+    // budget). Shortens the turn budget and, when tight, skips the in-house planner.
+    deadlineMs: Number.isFinite(Number(b.deadline_ms)) && Number(b.deadline_ms) > 0 ? Math.floor(Number(b.deadline_ms)) : null,
   };
 }
 
@@ -74,14 +77,18 @@ async function planTurn(body, { gateway, now = Date.now, logger = console, env =
   if (!input.message && !input.attachment) {
     return { status: 400, body: { ok: false, error: 'message or attachment is required' } };
   }
-  const turnBudgetMs = Math.max(20000, Number(env.BOB_PLAN_TURN_BUDGET_MS || 80000));
+  const turnBudgetMs = Math.max(20000, Math.min(Number(env.BOB_PLAN_TURN_BUDGET_MS || 80000), input.deadlineMs || Infinity));
   const verifyEnabled = input.verify && env.BOB_VERIFY_ENABLED !== 'false';
   const useCritic = env.BOB_VERIFY_MODE !== 'deterministic';
   const elapsed = () => now() - started;
+  // In-house first, but not when the caller is nearly out of time: a 7B laptop planner takes
+  // 40-50 s a call, so a tight deadline goes straight to the fastest configured tier.
+  const FAST_TURN_MS = Math.max(20000, Number(env.BOB_PLAN_FAST_TURN_MS || 45000));
+  const fastChain = input.deadlineMs && input.deadlineMs < FAST_TURN_MS && typeof gateway.fastChain === 'function' ? gateway.fastChain('planner') : null;
 
   let attempt;
   try {
-    attempt = await runPlannerOnce(gateway, input, { timeoutMs: Math.max(15000, turnBudgetMs - 5000) });
+    attempt = await runPlannerOnce(gateway, input, { timeoutMs: Math.max(15000, turnBudgetMs - 5000), ...(fastChain ? { chain: fastChain } : {}) });
   } catch (error) {
     const attemptsLog = error && Array.isArray(error.attempts) ? JSON.stringify(error.attempts) : '[]';
     if (logger && logger.error) logger.error(`[bob/plan] planner unavailable: ${String(error && error.message || error)} attempts=${attemptsLog}`);
