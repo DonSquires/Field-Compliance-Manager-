@@ -829,7 +829,14 @@ turn beats false completeness.
   **placeholder** profile (`display_name` "Waz Waz") to be created now,
   pending real-name confirmation from the Crawfords — created and added to
   `KNOWN_OFFICERS` as `'waz'`; both need updating once the real name lands
-  (see `/memories/repo/rm-staff-roster-history.md` for the exact TODO).- **Cycle Trails + MPC pest-control log, same day**: both genuinely belong
+  (see `/memories/repo/rm-staff-roster-history.md` for the exact TODO).
+- Corrected the first historical-roster projection after review: task-ledger
+  rows are evidence, not roster slots. The dedicated roster now imports
+  2,135 date/beat assignments (1,888 Nelson, 247 Blenheim), with 920 missing
+  dates supplemented from field evidence. The correction removed all 639
+  superseded `roster_slots`, created no shifts or notifications, and preserves
+  hashed unresolved cell values plus source provenance in `roster_assignments`.
+- **Cycle Trails + MPC pest-control log, same day**: both genuinely belong
   to TPFL (Cycle Trails' GL codes are TPFL's own "8558-" family; MPC's DATA
   sheet's own `Company` column literally reads "TPFL" for every real row —
   R&M's own note confirms this is TPFL's pest-control activity performed by

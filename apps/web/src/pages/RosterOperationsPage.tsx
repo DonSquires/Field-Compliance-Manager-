@@ -83,6 +83,9 @@ export const credentialBadgeWords = (person: Pick<Staff, 'workReady' | 'credenti
 interface Shift { id: string; officer_user_id: string; service_type: string; scheduled_start: string; scheduled_end: string; status: string; shift_health: string | null; total_stops: number; completed_stops?: number | null; notes: string | null; actual_start?: string | null; actual_end?: string | null; ended_reason?: string | null; }
 interface WorkUnit { id: string; name: string; work_unit_type: 'patrol' | 'static' | 'internal'; service_type: string; external_refs?: { deputy?: { code?: string; name?: string } } | null; }
 interface RosterSlot { id: string; work_unit_id: string; staff_id: string | null; scheduled_start: string; scheduled_end: string; status: string; linked_shift_id: string | null; notes: string | null; }
+interface HistoricalOfficer { display_name: string | null; email: string | null; }
+interface HistoricalAssignment { id: string; officer_id: string; patrol_route_id: string | null; service_type: string; specific_date: string; shift: string; start_time: string | null; end_time: string | null; officer: HistoricalOfficer | HistoricalOfficer[] | null; external_refs: { source?: string; beat_names?: string[]; time_precision?: string; source_event_count?: number } | null; }
+interface PatrolRoute { id: string; name: string; route_code: string | null; }
 interface Leave { staff_id: string; starts_on: string; ends_on: string; }
 interface Availability { staff_id: string; day_of_week: number | null; specific_date: string | null; available_from: string | null; available_to: string | null; all_day: boolean; availability_type: string; }
 interface Coverage { id: string; shift_date: string; }
@@ -119,6 +122,8 @@ const RosterOperationsPage: React.FC = () => {
   const [shifts, setShifts] = useState<Shift[]>([]);
   const [workUnits, setWorkUnits] = useState<WorkUnit[]>([]);
   const [slots, setSlots] = useState<RosterSlot[]>([]);
+  const [historicalAssignments, setHistoricalAssignments] = useState<HistoricalAssignment[]>([]);
+  const [patrolRoutes, setPatrolRoutes] = useState<PatrolRoute[]>([]);
   const [leave, setLeave] = useState<Leave[]>([]);
   const [availability, setAvailability] = useState<Availability[]>([]);
   const [coverage, setCoverage] = useState<Coverage[]>([]);
@@ -195,6 +200,8 @@ const RosterOperationsPage: React.FC = () => {
       supabase.from('shifts').select('id,officer_user_id,service_type,scheduled_start,scheduled_end,status,shift_health,total_stops,completed_stops,notes,actual_start,actual_end,ended_reason').eq('organization_id', org).gte('scheduled_start', weekStart.toISOString()).lt('scheduled_start', weekEnd.toISOString()).order('scheduled_start'),
       supabase.from('roster_work_units').select('id,name,work_unit_type,service_type,external_refs').eq('organization_id', org).eq('active', true).order('name'),
       supabase.from('roster_slots').select('id,work_unit_id,staff_id,scheduled_start,scheduled_end,status,linked_shift_id,notes').eq('organization_id', org).gte('scheduled_start', weekStart.toISOString()).lt('scheduled_start', weekEnd.toISOString()).order('scheduled_start'),
+      supabase.from('roster_assignments').select('id,officer_id,patrol_route_id,service_type,specific_date,shift,start_time,end_time,external_refs,officer:user_profiles!roster_assignments_officer_id_fkey(display_name,email)').eq('organization_id', org).gte('specific_date', isoDate(weekStart)).lt('specific_date', isoDate(weekEnd)).order('specific_date'),
+      supabase.from('patrol_routes').select('id,name,route_code').eq('organization_id', org).order('name'),
       supabase.from('leave_requests').select('staff_id,starts_on,ends_on,status').eq('organization_id', org).eq('status', 'approved').lte('starts_on', isoDate(addDays(weekEnd, -1))).gte('ends_on', isoDate(weekStart)),
       supabase.from('staff_availability').select('staff_id,day_of_week,specific_date,available_from,available_to,all_day,availability_type').eq('organization_id', org).in('availability_type', ['unavailable', 'leave']).or(`day_of_week.not.is.null,and(specific_date.gte.${isoDate(weekStart)},specific_date.lt.${isoDate(weekEnd)})`),
       supabase.from('shift_coverage_requests').select('id,shift_date').eq('organization_id', org).eq('status', 'open').gte('shift_date', isoDate(weekStart)).lt('shift_date', isoDate(weekEnd)),
@@ -203,7 +210,7 @@ const RosterOperationsPage: React.FC = () => {
       supabase.rpc('get_roster_labour_cost', { p_organization_id: org, p_from: weekStart.toISOString(), p_to: weekEnd.toISOString() }),
       supabase.rpc('get_roster_attendance_exceptions', { p_organization_id: org, p_grace_minutes: 15, p_from: weekStart.toISOString(), p_to: weekEnd.toISOString() }),
     ]);
-    const [rosterStaffRes, shiftRes, unitRes, slotRes, leaveRes, availabilityRes, coverageRes, calendarRes, commercialRes, labourRes, attendanceRes] = responses;
+    const [rosterStaffRes, shiftRes, unitRes, slotRes, historicalRes, routeRes, leaveRes, availabilityRes, coverageRes, calendarRes, commercialRes, labourRes, attendanceRes] = responses;
     const failures = responses.filter((response) => response.error).map((response) => response.error?.message);
     if (failures.length) setError(failures.join(' · '));
     const now = Date.now();
@@ -213,7 +220,7 @@ const RosterOperationsPage: React.FC = () => {
       else if (user.credential_expiry && new Date(user.credential_expiry).getTime() - now < 30 * 86_400_000) credentialRisk = 'expiring';
       return { id: user.user_id, staffId: user.staff_id, name: user.display_name || user.email || 'Unnamed staff', workReady: user.work_ready, employmentType: user.employment_type, credentialRisk, credentialExpiry: user.credential_expiry ?? null };
     }));
-    setShifts((shiftRes.data as Shift[]) ?? []); setWorkUnits((unitRes.data as WorkUnit[]) ?? []); setSlots((slotRes.data as RosterSlot[]) ?? []); setLeave((leaveRes.data as Leave[]) ?? []); setAvailability((availabilityRes.data as Availability[]) ?? []); setCoverage((coverageRes.data as Coverage[]) ?? []); setCalendarRegion((calendarRes.data?.[0] as { region_code: string | null } | undefined)?.region_code ?? null); setCommercialReadiness((commercialRes.data as CommercialReadiness[]) ?? []); setLabourCost((labourRes.data as LabourCost[]) ?? []); setAttendanceExceptions((attendanceRes.data as AttendanceException[]) ?? []); setLoading(false);
+    setShifts((shiftRes.data as Shift[]) ?? []); setWorkUnits((unitRes.data as WorkUnit[]) ?? []); setSlots((slotRes.data as RosterSlot[]) ?? []); setHistoricalAssignments((historicalRes.data as HistoricalAssignment[]) ?? []); setPatrolRoutes((routeRes.data as PatrolRoute[]) ?? []); setLeave((leaveRes.data as Leave[]) ?? []); setAvailability((availabilityRes.data as Availability[]) ?? []); setCoverage((coverageRes.data as Coverage[]) ?? []); setCalendarRegion((calendarRes.data?.[0] as { region_code: string | null } | undefined)?.region_code ?? null); setCommercialReadiness((commercialRes.data as CommercialReadiness[]) ?? []); setLabourCost((labourRes.data as LabourCost[]) ?? []); setAttendanceExceptions((attendanceRes.data as AttendanceException[]) ?? []); setLoading(false);
   }, [operatingOrganizationId, operatingOrganizations, profile?.organizationId, weekEnd, weekStart]);
   useEffect(() => { void load(); }, [load]);
   const syncOfficerResponses = useCallback(async () => {
@@ -489,6 +496,20 @@ const RosterOperationsPage: React.FC = () => {
     <div className="roster-horizon-bar"><div className="roster-horizon" aria-label="Roster horizon">{([['week', 'Week'], ['fortnight', '2 weeks'], ['month', 'Month']] as const).map(([value, label]) => <button type="button" className={horizon === value ? 'is-active' : ''} aria-pressed={horizon === value} onClick={() => { setHorizon(value); setPeriodAnchor(new Date()); }} key={value}>{label}</button>)}</div><label><span>Regional holidays</span><select value={calendarRegion ?? ''} disabled={saving} onChange={(event) => void updateCalendarRegion(event.target.value)}><option value="">National only</option>{NZ_HOLIDAY_REGIONS.map(([code, name]) => <option value={code} key={code}>{name}</option>)}</select></label></div>
     <div className="roster-toolbar"><div className="roster-week-nav"><button onClick={() => setPeriodAnchor(moveRosterPeriod(periodAnchor, horizon, -1))} title="Previous period"><ChevronLeft /></button><button onClick={() => setPeriodAnchor(new Date())}>Today</button><strong>{weekStart.toLocaleDateString('en-NZ', { day: 'numeric', month: 'short' })} – {addDays(weekEnd, -1).toLocaleDateString('en-NZ', { day: 'numeric', month: 'short', year: 'numeric' })}</strong><button onClick={() => setPeriodAnchor(moveRosterPeriod(periodAnchor, horizon, 1))} title="Next period"><ChevronRight /></button></div><label><Search size={15} /><input value={search} onChange={(event) => setSearch(event.target.value)} placeholder="Search staff" /></label><div className="roster-readiness"><Filter size={14} />{([['all', 'All'], ['ready', 'Ready'], ['risk', 'At risk']] as Array<[ReadinessFilter, string]>).map(([item, label]) => <button className={readiness === item ? 'is-active' : ''} aria-pressed={readiness === item} onClick={() => setReadiness(item)} key={item}>{label}</button>)}</div></div>
     {holidays.length > 0 && <section className="roster-holidays" aria-label="Public holidays">{holidays.map((holiday) => <div className={`is-${holiday.scope}`} key={`${holiday.date}-${holiday.name}`}><CalendarDays size={14} /><span>{new Date(`${holiday.date}T12:00:00`).toLocaleDateString('en-NZ', { weekday: 'short', day: 'numeric', month: 'short' })}</span><strong>{holiday.name}</strong><i>{holiday.scope}</i></div>)}</section>}
+    <section className="roster-history" aria-labelledby="roster-history-title">
+      <header><div><span>Historical source records</span><h2 id="roster-history-title">Forestry roster history</h2></div><strong>{historicalAssignments.length}</strong></header>
+      <div className="roster-history-table-wrap">
+        {historicalAssignments.length === 0 ? <p className="roster-history-empty">No historical assignments in this period.</p> : <table><caption className="sr-only">Historical forestry roster assignments in {periodLabel}</caption><thead><tr><th scope="col">Date</th><th scope="col">Officer</th><th scope="col">Patrol</th><th scope="col">Shift</th><th scope="col">Beat evidence</th></tr></thead><tbody>{historicalAssignments.map((assignment) => {
+          const historicalOfficer = Array.isArray(assignment.officer) ? assignment.officer[0] : assignment.officer;
+          const officerName = historicalOfficer?.display_name ?? historicalOfficer?.email ?? staff.find((person) => person.id === assignment.officer_id)?.name ?? 'Unmatched officer';
+          const routeName = patrolRoutes.find((route) => route.id === assignment.patrol_route_id)?.name ?? 'Forestry patrol';
+          const shiftName = assignment.shift === 'swing' ? 'Evening' : assignment.shift.charAt(0).toUpperCase() + assignment.shift.slice(1);
+          const times = assignment.start_time ? `${assignment.start_time.slice(0, 5)}${assignment.end_time ? `–${assignment.end_time.slice(0, 5)}` : ''}` : 'Time not recorded';
+          const beats = assignment.external_refs?.beat_names?.join(', ') || `${assignment.external_refs?.source_event_count ?? 0} field entries`;
+          return <tr key={assignment.id}><td>{new Date(`${assignment.specific_date}T12:00:00`).toLocaleDateString('en-NZ', { day: 'numeric', month: 'short', year: 'numeric' })}</td><td>{officerName}</td><td>{routeName}</td><td>{shiftName} · {times}</td><td>{beats}</td></tr>;
+        })}</tbody></table>}
+      </div>
+    </section>
     <div className="roster-board" style={{ '--roster-days': days.length } as React.CSSProperties}>
       <div className="roster-board-head">
         <div>Staff</div>

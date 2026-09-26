@@ -6,7 +6,7 @@ const BATCH_SIZE = 250;
 const MAX_RETIREMENTS = 100;
 const ROOT_SOURCE_FILES = [
   'supabase-workflow-client.js',
-  'scripts/seed-historical-patrol-roster.mjs'
+  'scripts/seed-rm-forestry-roster-history.mjs'
 ];
 const MANAGED_SOURCES = [
   'apps/web/src/pages/RosterOperationsPage.tsx',
@@ -84,7 +84,7 @@ const MANAGED_SOURCES = [
   'apps/mobile/src/lib/officerOfflinePackage.ts',
   'apps/mobile/src/lib/officerPtt.ts',
   'apps/mobile/src/lib/officerTimesheetWork.ts',
-  'scripts/seed-historical-patrol-roster.mjs',
+  'scripts/seed-rm-forestry-roster-history.mjs',
   'supabase/migrations/20260903180000_timesheet_work_ledger.sql',
   'supabase/functions/process-officer-scan/index.ts',
   'supabase/functions/resolve-point-context/index.ts',
@@ -128,7 +128,7 @@ const MANAGED_SOURCES = [
   'supabase/migrations/20260831096000_boundary_admin_upload_provenance.sql',
   'supabase/migrations/20260927010000_govern_custom_report_builder.sql',
   'supabase/migrations/20260927060000_dispatch_jobs_site_or_zone.sql',
-  'supabase/migrations/20260927100000_project_historical_patrol_roster.sql',
+  'supabase/migrations/20260927140000_fix_historical_forestry_roster_rpc.sql',
   'supabase/migrations/20260901020000_resolve_contracted_operational_context.sql',
   'supabase/migrations/20260913150000_add_physical_address_to_officer_gps_evidence.sql',
   'supabase/migrations/20260913151000_include_physical_address_in_officer_timeline.sql',

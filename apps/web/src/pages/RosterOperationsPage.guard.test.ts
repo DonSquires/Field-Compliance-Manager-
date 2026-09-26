@@ -7,6 +7,12 @@ describe('enterprise roster operations', () => {
   it('combines canonical field shifts and typed workforce slots', () => {
     expect(page).toContain("from('shifts')");
     expect(page).toContain("from('roster_slots')");
+    expect(page).toContain("from('roster_assignments')");
+    expect(page).toContain('officer:user_profiles!roster_assignments_officer_id_fkey(display_name,email)');
+    expect(page).toContain('Array.isArray(assignment.officer)');
+    expect(page).toContain('historicalOfficer?.display_name');
+    expect(page).toContain('Historical source records');
+    expect(page).toContain('roster-history-table-wrap');
     expect(page).toContain('!slot.linked_shift_id');
     expect(shell).toContain('return <RosterOperationsPage />');
   });

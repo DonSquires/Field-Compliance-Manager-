@@ -3,52 +3,65 @@ const fs = require('node:fs');
 const path = require('node:path');
 const test = require('node:test');
 
-const migration = fs.readFileSync(path.resolve(__dirname, '../supabase/migrations/20260927100000_project_historical_patrol_roster.sql'), 'utf8');
-const script = fs.readFileSync(path.resolve(__dirname, '../scripts/seed-historical-patrol-roster.mjs'), 'utf8');
-const config = JSON.parse(fs.readFileSync(path.resolve(__dirname, '../scripts/data/patrol-roster-projections/rm-ofo-forestry.json'), 'utf8'));
+const migration = fs.readFileSync(path.resolve(__dirname, '../supabase/migrations/20260927140000_fix_historical_forestry_roster_rpc.sql'), 'utf8');
+const cleanupMigration = fs.readFileSync(path.resolve(__dirname, '../supabase/migrations/20260927150000_drop_broken_historical_roster_rpc_overload.sql'), 'utf8');
+const script = fs.readFileSync(path.resolve(__dirname, '../scripts/seed-rm-forestry-roster-history.mjs'), 'utf8');
+const config = JSON.parse(fs.readFileSync(path.resolve(__dirname, '../scripts/data/patrol-roster-projections/rm-forestry-roster-history.json'), 'utf8'));
 
-test('historical roster projection is tenant-bound, admin-only, and reads existing evidence', () => {
-  assert.match(migration, /public\.is_admin_for_org\(p_provider_organization_id\)/);
-  assert.match(migration, /agreement\.provider_organization_id = p_provider_organization_id/);
-  assert.match(migration, /agreement\.client_organization_id = p_client_organization_id/);
-  assert.match(migration, /FROM public\.location_events event/);
-  assert.match(migration, /FROM public\.observations observation/);
+test('date-specific roster import is tenant-admin-only, audited, replay-safe, and notification-suppressed', () => {
+  assert.match(migration, /public\.is_admin_for_org\(p_organization_id\)/);
+  assert.match(migration, /audit\.action = 'historical_roster_assignment_imported'/);
+  assert.match(migration, /external_refs->>'source_key' = v_source_key/);
+  assert.match(migration, /IF new\.external_refs->>'source' IN \('rm_forestry_roster_history', 'rm_patrol_log_roster_evidence'\)/);
+  assert.match(migration, /'notifications_created', 0/);
 });
 
-test('projection creates route and roster structure without inventing shifts or identities', () => {
-  assert.match(migration, /INSERT INTO public\.patrol_routes/);
-  assert.match(migration, /INSERT INTO public\.patrol_route_zones/);
-  assert.match(migration, /INSERT INTO public\.patrol_route_sites/);
-  assert.match(migration, /INSERT INTO public\.roster_work_units/);
-  assert.match(migration, /INSERT INTO public\.roster_slots/);
+test('correction disables task-geocode roster slots and replaces only the superseded projection', () => {
+  assert.match(migration, /Superseded: import the dedicated forestry roster/);
+  assert.match(migration, /DELETE FROM public\.roster_slots slot[\s\S]*rm_patrol_log_roster_projection/);
+  assert.match(migration, /DELETE FROM public\.patrol_route_zones/);
+  assert.match(migration, /DELETE FROM public\.patrol_route_sites/);
+  assert.doesNotMatch(migration, /INSERT INTO public\.roster_slots/);
   assert.doesNotMatch(migration, /INSERT INTO public\.shifts/);
   assert.doesNotMatch(migration, /INSERT INTO public\.(user_profiles|staff_profiles)/);
-  assert.match(migration, /'future_schedule_created', false/);
-  assert.match(migration, /'shifts_created', 0/);
 });
 
-test('historical slots are replay-safe and preserve source-event provenance', () => {
-  assert.match(migration, /md5\(/);
-  assert.match(migration, /client_request_id = v_slot_request_id/);
-  assert.match(migration, /'source', 'rm_patrol_log_roster_projection'/);
-  assert.match(migration, /'source_event_refs', v_slot\.source_event_refs/);
-  assert.match(migration, /status = 'completed'/);
-  assert.match(migration, /'unresolved_place_events', v_unresolved_place/);
-  assert.match(migration, /'uncontracted_place_events', v_uncontracted_place/);
-  assert.match(migration, /'ambiguous_staff_days', v_ambiguous_staff_days/);
+test('roster assignments preserve exact dates, optional task times, beats, and event provenance', () => {
+  assert.match(migration, /INSERT INTO public\.roster_assignments/);
+  assert.match(migration, /specific_date/);
+  assert.match(migration, /nullif\(v_item->>'start_time', ''\)::time/);
+  assert.match(migration, /'source_rows', coalesce\(v_item->'source_rows'/);
+  assert.match(migration, /'beat_names', coalesce\(v_item->'beat_names'/);
+  assert.match(migration, /'source_event_refs', grouped\.source_event_refs/);
+  assert.match(migration, /event\.organization_id = p_client_organization_id/);
+  assert.match(migration, /observation\.organization_id = p_client_organization_id/);
+  assert.match(migration, /p_client_organization_id uuid/);
+  assert.match(migration, /'prior_slots_removed', v_prior_slots_removed/);
 });
 
-test('seed entry point is intentionally postgres-only', () => {
-  assert.match(migration, /REVOKE ALL ON FUNCTION public\.project_historical_patrol_roster\(uuid, uuid, uuid, text\[\], jsonb, boolean\) FROM PUBLIC, anon, authenticated, service_role/);
-  assert.match(migration, /GRANT EXECUTE ON FUNCTION public\.project_historical_patrol_roster\(uuid, uuid, uuid, text\[\], jsonb, boolean\) TO postgres/);
+test('seed function is PostgreSQL-only and future dates are rejected', () => {
+  assert.match(migration, /REVOKE ALL ON FUNCTION public\.apply_historical_roster_assignment_import\(uuid, uuid, uuid, text, text, jsonb, jsonb, text\[\], jsonb, boolean\) FROM PUBLIC, anon, authenticated, service_role/);
+  assert.match(migration, /GRANT EXECUTE ON FUNCTION public\.apply_historical_roster_assignment_import\(uuid, uuid, uuid, text, text, jsonb, jsonb, text\[\], jsonb, boolean\) TO postgres/);
+  assert.match(migration, /IF \(v_item->>'specific_date'\)::date > current_date/);
+  assert.match(cleanupMigration, /DROP FUNCTION IF EXISTS public\.apply_historical_roster_assignment_import\([\s\S]*uuid, uuid, text, text, jsonb, jsonb, text\[\], jsonb, boolean/);
 });
 
-test('OFO seed uses stored evidence and declares the two requested regional routes', () => {
-  assert.match(script, /The source workbook is never opened/);
-  assert.match(script, /project_historical_patrol_roster/);
+test('dedicated roster maps only forestry beat columns and keeps Marlborough distinct', () => {
+  assert.equal(config.beat_columns.length, 11);
+  assert.deepEqual(config.beat_columns.filter((beat) => beat.route_code === 'RM-BLENHEIM-FORESTRY').map((beat) => beat.contains), ['Marlborough']);
+  assert.equal(config.beat_columns.some((beat) => /toilets|rabbit|fencing|pathways/i.test(beat.contains)), false);
+  assert.ok(config.beat_columns.some((beat) => beat.shift === 'swing'));
+  assert.equal(config.field_source_codes.includes('OFO2026'), true);
+});
+
+test('roster importer is dry-run-first and hashes unresolved notes before persistence', () => {
+  assert.match(script, /apply_historical_roster_assignment_import/);
   assert.match(script, /args\.includes\('--apply'\) \? 'apply' : 'dry-run'/);
-  assert.deepEqual(config.source_codes, ['OFO2025', 'OFO2026']);
-  assert.equal(config.link_missing_agreement_locations, true);
-  assert.deepEqual(config.routes.map((route) => route.name), ['Nelson Forestry Patrol', 'Blenheim Forestry Patrol']);
-  assert.match(config.provenance.limitations, /Unplaced events and ambiguous overlapping route-days remain unseeded/);
+  assert.match(script, /const batchSize = 250/);
+  assert.match(script, /const isFinalChunk = index === chunks\.length - 1/);
+  assert.match(script, /const chunkSourceCodes = isFinalChunk \? sourceCodes : ''/);
+  assert.match(script, /ARRAY\[\$\{chunkSourceCodes\}\]::text\[\]/);
+  assert.match(script, /chunkRequestId/);
+  assert.match(script, /value_hash: valueHash/);
+  assert.doesNotMatch(script, /unresolvedValues.*value,/);
 });
