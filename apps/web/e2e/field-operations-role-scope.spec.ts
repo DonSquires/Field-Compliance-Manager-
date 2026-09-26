@@ -18,20 +18,3 @@ test('admin officer receives enabled response and review tools', async ({ page }
   await expect(page.locator('.field-ops-workflow')).toHaveCount(11);
   expect(browserErrors, browserErrors.join('\n')).toEqual([]);
 });
-
-test('NZSCV monitor sees only vehicle compliance tools and no team metrics', async ({ page }) => {
-  const browserErrors = monitorBrowserErrors(page);
-  await installSupabaseFixtures(page, { adminRole: 'nzscv_monitor', officerModules: enabledOperationalModules });
-  await signInAsAdmin(page, '/admin/field-ops?area=landing');
-
-  await expect(page.getByRole('heading', { name: 'Vehicle compliance' })).toBeVisible();
-  await expect(page.locator('.field-ops-metrics')).toHaveCount(0);
-  await expect(page.locator('.field-ops-workflow')).toHaveCount(3);
-  await expect(page.getByRole('button', { name: /^Breach review/ })).toBeVisible();
-  await expect(page.getByRole('button', { name: /^Vehicle intelligence/ })).toBeVisible();
-  await expect(page.getByRole('button', { name: /^Observation search/ })).toBeVisible();
-  await expect(page.getByRole('button', { name: /^Dispatch console/ })).toHaveCount(0);
-  await expect(page.getByRole('button', { name: /^Welfare response/ })).toHaveCount(0);
-  await expect(page.getByRole('button', { name: /^CCTV & video/ })).toHaveCount(0);
-  expect(browserErrors, browserErrors.join('\n')).toEqual([]);
-});

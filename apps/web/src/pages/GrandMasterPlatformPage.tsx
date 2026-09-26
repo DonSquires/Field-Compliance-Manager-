@@ -8,6 +8,7 @@
  */
 
 import React, { useEffect, useState, useCallback } from 'react';
+import { useNavigate } from 'react-router-dom';
 import { useAuth } from '../context/AuthContext';
 import { supabase } from '../lib/supabase';
 import './PageStyles.css';
@@ -37,6 +38,7 @@ interface HealthCheckResult {
 
 const GrandMasterPlatformPage: React.FC = () => {
   const { profile } = useAuth();
+  const navigate = useNavigate();
   const [orgs, setOrgs] = useState<OrgSummary[]>([]);
   const [breachCount, setBreachCount] = useState(0);
   const [observationCount, setObservationCount] = useState(0);
@@ -187,6 +189,7 @@ const GrandMasterPlatformPage: React.FC = () => {
         <h2>Infrastructure data</h2>
         <p className="subtitle">Grand Master infrastructure ownership only. SCV register imports update the canonical platform vehicle source.</p>
         {scvImportResult && <div className="alert alert-success" role="status">{scvImportResult}</div>}
+        <button type="button" className="btn btn-secondary btn-sm" onClick={() => navigate('/nzscv')}>Open NZSCV supplier view</button>
         <label className="btn btn-primary btn-sm" style={{ display: 'inline-flex', cursor: scvImporting ? 'wait' : 'pointer' }}>
           {scvImporting ? 'Importing SCV register...' : 'Import SCV CSV'}
           <input type="file" accept=".csv,text/csv" onChange={importScvRegister} disabled={scvImporting} hidden />

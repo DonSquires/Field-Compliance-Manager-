@@ -4,7 +4,8 @@
  * Source of truth: docs/INSTRUCTION_MANUAL.md §2.3
  *
  * Routes the authenticated user to the correct portal based on their role:
- *   - grand_master / master / admin / admin_officer / nzscv_monitor → Admin shell (/admin/*)
+ *   - grand_master / master / admin / admin_officer → Admin shell (/admin/*)
+ *   - nzscv_monitor → dedicated supplier transparency portal (/nzscv/*)
  *   - officer → Officer shell (/officer/*)
  *   - scan_operator → Scan shell (/scan)
  *   - client_admin / client_officer / client_viewer → Client shell (/client/*)
@@ -21,6 +22,8 @@ import OfficerShell from '../shells/OfficerShell';
 import { ClientShell } from '../shells/ClientShell';
 import { ScanShell } from '../shells/ScanShell';
 import ModuleShell from '../shells/ModuleShell';
+
+const NzscvSupplierPage = React.lazy(() => import('../pages/NzscvSupplierPage'));
 
 const PORTAL_CHOICE_KEY = 'fcm.admin_officer.portal';
 type PortalChoice = 'admin' | 'field';
@@ -46,6 +49,11 @@ export function RoleRouter() {
   }
 
   const { role } = profile;
+  const path = location.pathname;
+
+  if (isWithinRolePrefix(path, '/nzscv') && (role === 'nzscv_monitor' || role === 'grand_master')) {
+    return <React.Suspense fallback={<div style={{ padding: 32 }}>Loading NZSCV registry…</div>}><NzscvSupplierPage /></React.Suspense>;
+  }
 
   function choosePortal(choice: PortalChoice | null) {
     if (choice) sessionStorage.setItem(PORTAL_CHOICE_KEY, choice);
@@ -72,10 +80,11 @@ export function RoleRouter() {
   } else if (
     role === 'grand_master' ||
     role === 'master' ||
-    role === 'admin' ||
-    role === 'nzscv_monitor'
+    role === 'admin'
   ) {
     expectedPrefix = '/admin';
+  } else if (role === 'nzscv_monitor') {
+    expectedPrefix = '/nzscv';
   } else if (role === 'officer') {
     expectedPrefix = '/officer';
   } else if (
@@ -94,7 +103,6 @@ export function RoleRouter() {
     );
   }
 
-  const path = location.pathname;
   const standaloneModulePath = ['officer', 'grand_master', 'master', 'admin', 'admin_officer'].includes(role)
     && path.startsWith('/modules/');
   if (!standaloneModulePath && !isWithinRolePrefix(path, expectedPrefix)) {

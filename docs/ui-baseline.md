@@ -232,8 +232,9 @@ Three occurrences across independently-audited files is enough to treat this as 
 
 | Role(s) | Expected prefix | Shell | Route shape |
 |---|---|---|---|
-| `grand_master`, `master`, `admin`, `nzscv_monitor` | `/admin` | `AdminShell` | `/admin`, `/admin/:page` |
+| `grand_master`, `master`, `admin` | `/admin` | `AdminShell` | `/admin`, `/admin/:page` |
 | `admin_officer` (after portal choice) | `/admin` or `/officer` | `AdminShell` or `OfficerShell` | as above / below |
+| `nzscv_monitor` | `/nzscv` | `NzscvSupplierPage` | `/nzscv`, `/nzscv/*` |
 | `officer` | `/officer` | `OfficerShell` | `/officer`, `/officer/:module` |
 | `scan_operator` | `/scan` | `ScanShell` | `/scan` only (no dynamic segment) |
 | `client_admin`, `client_officer`, `client_viewer` | `/client` | `ClientShell` | `/client`, `/client/*` (wildcard, not a named param) |
@@ -527,14 +528,15 @@ Bob's read-only inspection has now verified the shared admin shell and role rout
 
 | Role | Expected prefix | Shell |
 |---|---|---|
-| `grand_master`, `master`, `admin`, `nzscv_monitor` | `/admin` | `AdminShell` |
+| `grand_master`, `master`, `admin` | `/admin` | `AdminShell` |
 | `admin_officer` | `/admin` or `/officer` after portal choice | `AdminShell` or `OfficerShell` |
+| `nzscv_monitor` | `/nzscv` | dedicated supplier transparency portal |
 | `officer` | `/officer` | `OfficerShell` |
 | `scan_operator` | `/scan` | `ScanShell` |
 | `client_admin`, `client_officer`, `client_viewer` | `/client` | `ClientShell` |
 | unknown role | none | inline access error |
 
-Verified route shapes include `/admin`, `/admin/:page`, `/officer`, and `/officer/:module`; catch-all routes redirect to the relevant shell root.
+Verified route shapes include `/admin`, `/admin/:page`, `/officer`, `/officer/:module`, and `/nzscv/*`; catch-all routes redirect to the relevant shell root. Grand master may also open `/nzscv` from Platform Overview for support and oversight.
 
 ### Authorization boundary caveat
 

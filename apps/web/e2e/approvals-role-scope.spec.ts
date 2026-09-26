@@ -21,7 +21,7 @@ for (const roleCase of [
   });
 }
 
-for (const role of ['admin_officer', 'nzscv_monitor'] as const) {
+for (const role of ['admin_officer'] as const) {
   test(`${role} does not see or deep-link into Approvals`, async ({ page }) => {
     const browserErrors = monitorBrowserErrors(page);
     if (role === 'admin_officer') {

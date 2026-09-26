@@ -167,6 +167,23 @@ export async function installSupabaseFixtures(page: Page, options: { officerModu
       return;
     }
     if (table === 'get_manageable_user_identities') { await route.fulfill(fulfillJson(identityUsers)); return; }
+    if (table === 'get_nzscv_supplier_dashboard') {
+      const payload = JSON.parse(request.postData() ?? '{}');
+      const register = [
+        { id: 'abababab-abab-4bab-8bab-ababababab31', plate_number: 'ABC123', certificate_number: 'SCV-1001', certificate_status: 'active', issued_date: '2025-01-15', expiry_date: '2029-01-15' },
+        { id: 'abababab-abab-4bab-8bab-ababababab32', plate_number: 'XYZ789', certificate_number: 'SCV-1002', certificate_status: 'expired', issued_date: '2021-02-10', expiry_date: '2025-02-10' },
+      ];
+      const term = String(payload.p_search ?? '').toUpperCase();
+      await route.fulfill(fulfillJson({
+        summary: { registry_total: 58902, active: 58100, expired: 760, suspended: 30, cancelled: 12, expiring_90_days: 340, last_registry_update: '2026-08-30T08:00:00.000Z', freedom_camping_lookups_30_days: 1873, freedom_camping_lookups_total: 9240 },
+        daily_usage: Array.from({ length: 30 }, (_, index) => ({ date: `2026-08-${String(index + 1).padStart(2, '0')}`, lookups: index % 5 })),
+        imports: [{ id: 'abababab-abab-4bab-8bab-ababababab33', source_name: 'canonical_scv_csv', status: 'completed', total_rows: 58902, valid_rows: 58902, inserted_rows: 58000, updated_rows: 902, skipped_rows: 0, invalid_rows: 0, started_at: '2026-08-30T07:55:00.000Z', completed_at: '2026-08-30T08:00:00.000Z', created_at: '2026-08-30T07:55:00.000Z' }],
+        records: register.filter((row) => !term || row.plate_number.includes(term) || row.certificate_number.includes(term)),
+        page: { limit: payload.p_limit ?? 50, offset: payload.p_offset ?? 0, search: term },
+        privacy: { usage_is_aggregate: true, tenant_details_included: false, officer_details_included: false, incident_details_included: false, raw_source_rows_included: false },
+      }));
+      return;
+    }
     if (table === 'resolve_active_rules') { await route.fulfill(fulfillJson([{ organization_id: ORG_ID, module_key: 'dispatch', enabled: true, active_zone_id: null, active_site_id: null, resolution_status: 'resolved', policy_status: 'active' }])); return; }
     if (table === 'user_profiles') {
       const select = url.searchParams.get('select') ?? '';
@@ -202,10 +219,11 @@ export async function installSupabaseFixtures(page: Page, options: { officerModu
     if (table === 'organizations') {
       const accountQuery = url.searchParams.has('parent_organization_id');
       const clientQuery = url.searchParams.get('organization_type') === 'eq.client';
+      const platformOverviewQuery = !accountQuery && !clientQuery && (url.searchParams.get('select') ?? '').includes('organization_type,status,active');
       const idFilter = url.searchParams.get('id') ?? '';
       const portfolioQuery = idFilter.startsWith('in.');
       const portfolioRows = crmOrganizations.filter((organization) => idFilter.includes(String(organization.id)));
-      await route.fulfill(fulfillJson(clientQuery ? crmOrganizations.filter((organization) => organization.organization_type === 'client') : accountQuery ? crmOrganizations : portfolioQuery ? portfolioRows : { id: ORG_ID, name: 'Harbour Compliance Services', organization_type: 'service_provider', parent_organization_id: null, active: true, status: 'active', updated_at: '2026-08-29T20:00:00.000Z', contact_email: 'operations@harbour.test', contact_phone: '03 555 0100', billing_email: 'accounts@harbour.test', billing_address: '10 Port Road, Nelson', enforcement_workflow_mode: 'officer_direct', jurisdiction_verification: 'verified' }));
+      await route.fulfill(fulfillJson(clientQuery ? crmOrganizations.filter((organization) => organization.organization_type === 'client') : accountQuery ? crmOrganizations : portfolioQuery ? portfolioRows : platformOverviewQuery ? [{ id: ORG_ID, name: 'Harbour Compliance Services', organization_type: 'service_provider', active: true, status: 'active' }, ...crmOrganizations] : { id: ORG_ID, name: 'Harbour Compliance Services', organization_type: 'service_provider', parent_organization_id: null, active: true, status: 'active', updated_at: '2026-08-29T20:00:00.000Z', contact_email: 'operations@harbour.test', contact_phone: '03 555 0100', billing_email: 'accounts@harbour.test', billing_address: '10 Port Road, Nelson', enforcement_workflow_mode: 'officer_direct', jurisdiction_verification: 'verified' }));
       return;
     }
     if (table === 'crm_contacts') { const primaryOnly = url.searchParams.get('is_primary') === 'eq.true'; await route.fulfill(fulfillJson(primaryOnly ? crmContacts.map(({ organization_id, first_name, last_name, is_primary }) => ({ organization_id, first_name, last_name, is_primary })) : crmContacts.filter((contact) => !contact.deactivated_at))); return; }

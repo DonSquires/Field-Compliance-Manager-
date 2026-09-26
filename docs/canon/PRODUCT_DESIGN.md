@@ -152,7 +152,7 @@ is consistent everywhere it appears.
 
 ### 3.2 Admin Shell
 
-**Who:** Admin, master, grand_master, admin_officer, nzscv_monitor  
+**Who:** Admin, master, grand_master, admin_officer
 **Density:** Standard (desktop), compact on tablet  
 **Chrome:**
 
@@ -183,7 +183,7 @@ is consistent everywhere it appears.
 
 **Sidebar navigation groups (canonical order):**
 1. OPERATIONS: Dashboard, Dispatch, Roster, Live Map, Welfare, Staff, Training, Assets
-2. COMPLIANCE: Breach Review, Disputes, Overnight Queue, Enforcement, Compliance, NZSCV Monitor, Vehicle Search
+2. COMPLIANCE: Breach Review, Disputes, Overnight Queue, Enforcement, Compliance, Vehicle Search
 3. FIELD MODULES: FC Patrol, Parking, Noise Control, Biosecurity, Smoke Control
 4. SCHEDULING: Shift Templates, Patrol Routes, Leave, Timesheets, Callouts, On-Call Pay
 5. FINANCE: Invoicing, Payments, Generate Invoice, Tenders
@@ -201,6 +201,17 @@ is consistent everywhere it appears.
 **Who:** client_viewer, client_officer, client_admin  
 **Density:** Standard. Professional. Read-mostly.  
 **Sidebar sections:** Overview, Operations, Enforcement, Records, Reports, Support
+
+### 3.4 NZSCV Supplier Portal
+
+**Owner ruling 2026-09-26.** `nzscv_monitor` is not a mainstream administrator role. It belongs to the external company that supplies the New Zealand self-containment register.
+
+- The role lands on a dedicated read-only supplier transparency page, not the Admin shell.
+- The page may show the public certificate register, source/import health, and aggregate analytics describing how the register supports Freedom Camping lookups.
+- It must not expose client, officer, incident, location, photo, or raw source-row details.
+- It has no enforcement, dispatch, roster, HR, finance, or general administration controls.
+- `grand_master` may open the same supplier view for platform support and oversight.
+- The NZSCV register remains lookup data for the Freedom Camping module; it is not a standalone operational module.
 
 ---
 

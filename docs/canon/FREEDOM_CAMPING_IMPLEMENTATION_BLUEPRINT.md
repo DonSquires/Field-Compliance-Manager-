@@ -222,6 +222,8 @@ canonical_scv CSV import
 
 Expired certificates must not mark a vehicle compliant.
 
+**Owner ruling 2026-09-26 — supplier boundary.** The NZSCV register is lookup data for Freedom Camping, not a mainstream application area. Users with the `nzscv_monitor` role represent the company supplying that register and use a dedicated read-only transparency portal. They may inspect public certificate fields, import health, and aggregate Freedom Camping lookup analytics only. They do not enter the Admin shell or receive tenant, officer, incident, location, image, or raw source-row detail. Grand master may access the same portal for platform oversight.
+
 ---
 
 ## 8. Reports and visibility
