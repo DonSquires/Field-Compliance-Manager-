@@ -78,14 +78,18 @@ describe('organisation file system', () => {
     expect(page).toContain('Quarantined:');
   });
 
-  it('shows a manifest-based import preview for staged sample data before promotion', () => {
+  it('previews only a human-selected import file before promotion', () => {
     expect(page).toContain('Import preview');
-    expect(page).toContain('Batch manifest');
-    expect(page).toContain('structured_data');
-    expect(page).toContain('quarantine');
+    expect(page).toContain('Structured data imports');
+    expect(page).toContain('Choose a CSV or XLSX file');
+    expect(page).toContain('No structured file selected.');
+    expect(page).not.toContain('SAMPLE_MANIFEST_PREVIEW');
+    expect(page).not.toContain('SAMPLE_IMPORT_PREVIEWS');
+    expect(page).not.toContain('sample-data-2026-09-08');
+    expect(page).not.toContain('Vehicle Log (1).csv');
     expect(page).toContain('Column mapping');
-    expect(page).toContain('duplicate rows');
-    expect(page).toContain('unresolved references');
+    expect(page).toContain('Duplicate rows');
+    expect(page).toContain('Unresolved values');
     expect(page).toContain("rpc('create_file_import_batch'");
     expect(page).toContain('Create review batch');
     expect(page).toContain('No canonical records were changed');

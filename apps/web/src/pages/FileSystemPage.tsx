@@ -59,17 +59,6 @@ interface IntakeAttachment {
   created_at: string;
 }
 
-interface ManifestPreview {
-  batch_name: string;
-  file_count: number;
-  total_bytes: number;
-  structured_data: number;
-  quarantine: number;
-  document: number;
-  media: number;
-  unresolved: number;
-}
-
 interface FileImportBatch {
   id: string;
   batch_name: string;
@@ -144,54 +133,6 @@ const FILE_SPACES = [
   { key: 'generated', label: 'Generated outputs' },
 ] as const;
 
-const SAMPLE_MANIFEST_PREVIEW: ManifestPreview = {
-  batch_name: 'sample-data-2026-09-08',
-  file_count: 5648,
-  total_bytes: 8930000000,
-  structured_data: 1842,
-  quarantine: 632,
-  document: 1490,
-  media: 713,
-  unresolved: 171,
-};
-
-const SAMPLE_IMPORT_PREVIEWS: ImportSchemaPreview[] = [
-  {
-    source_file: 'Vehicle Log (1).csv',
-    parser: 'CSV / vehicle observations',
-    row_count: 4396,
-    duplicate_count: 12,
-    date_range: '02 Jan 2026 - 31 Jan 2026',
-    mappings: [
-      { source: 'REGO', target: 'vehicle.registration', confidence: '99%' },
-      { source: 'RecordedDate', target: 'observation.observed_at', confidence: '98%' },
-      { source: 'Title', target: 'observation.site_name', confidence: '94%' },
-    ],
-    warnings: ['17 vehicle registrations need organisation matching', 'No canonical vehicle records will be written during preview'],
-  },
-  {
-    source_file: 'Site Report By Vehicle.csv',
-    parser: 'CSV / patrol movement events',
-    row_count: 107,
-    duplicate_count: 3,
-    date_range: '22 Dec 2025 - 27 Dec 2025',
-    mappings: [
-      { source: 'Registration', target: 'vehicle.registration', confidence: '99%' },
-      { source: 'EnteredTime / ExitTime', target: 'movement.event_time', confidence: '96%' },
-      { source: 'Site', target: 'site.name', confidence: '91%' },
-    ],
-    warnings: ['6 site names need canonical location matching', 'Driver values remain unresolved until staff matching is approved'],
-  },
-];
-
-function formatBytes(bytes: number): string {
-  if (!Number.isFinite(bytes) || bytes <= 0) return '0 B';
-  const units = ['B', 'KB', 'MB', 'GB', 'TB'];
-  const index = Math.min(Math.floor(Math.log(bytes) / Math.log(1024)), units.length - 1);
-  const value = bytes / 1024 ** index;
-  return `${value >= 10 || index === 0 ? value.toFixed(0) : value.toFixed(1)} ${units[index]}`;
-}
-
 function fileIcon(mimeType: string) {
   if (mimeType.startsWith('image/')) return Image;
   if (mimeType.startsWith('video/')) return Video;
@@ -262,7 +203,6 @@ const FileSystemPage: React.FC = () => {
   const [uploadedImportPreview, setUploadedImportPreview] = useState<ImportSchemaPreview | null>(null);
   const [previewError, setPreviewError] = useState<string | null>(null);
   const [creatingBatch, setCreatingBatch] = useState(false);
-  const [importPreviewIndex, setImportPreviewIndex] = useState(0);
   const [importBatches, setImportBatches] = useState<FileImportBatch[]>([]);
   const [batchStatus, setBatchStatus] = useState<'all' | FileImportBatch['status']>('all');
   const [selectedBatchId, setSelectedBatchId] = useState<string | null>(null);
@@ -460,11 +400,11 @@ const FileSystemPage: React.FC = () => {
     }
   };
 
-  const activeImportPreview = uploadedImportPreview ?? SAMPLE_IMPORT_PREVIEWS[importPreviewIndex];
+  const activeImportPreview = uploadedImportPreview;
 
   const createReviewBatch = async () => {
     const organizationId = operatingOrganizationId ?? profile?.organizationId;
-    if (!organizationId) {
+    if (!organizationId || !activeImportPreview) {
       setPreviewError('An operating organisation is required before a review batch can be created.');
       return;
     }
@@ -519,65 +459,37 @@ const FileSystemPage: React.FC = () => {
     <header className="file-system-header"><div><span>Organisation workspace / Files</span><h1>File system</h1><p>Find source documents, inspect provenance, and review extracted versions before anything becomes an authoritative record.</p></div><div className="file-system-header-actions"><label className="file-system-human-upload"><Upload size={17} />{uploadingFile ? 'Uploading...' : 'Upload source file'}<input type="file" aria-label="Upload source file" disabled={uploadingFile} onChange={(event) => { const file = event.target.files?.[0]; if (file) void uploadHumanIntakeFile(file); event.currentTarget.value = ''; }} /></label><button type="button" onClick={() => navigate('/admin/approvals')}><ShieldCheck size={17} />Review promotions</button><button type="button" onClick={() => void loadDocuments()} disabled={loading}><RefreshCw size={17} className={loading ? 'is-spinning' : ''} />Refresh</button></div></header>
     {error && <div className="file-system-message is-error" role="alert"><span>{error}</span><button type="button" title="Dismiss" onClick={() => setError(null)} aria-label="Dismiss error"><X size={16} /></button></div>}
     {notice && <div className="file-system-message is-success" role="status"><ShieldCheck size={16} /><span>{notice}</span><button type="button" title="Dismiss" onClick={() => setNotice(null)} aria-label="Dismiss notice"><X size={16} /></button></div>}
-    <section className="file-system-intake" aria-label="Manifest-based import preview">
-      <div>
-        <span>Import preview</span>
-        <h2>Batch manifest: {SAMPLE_MANIFEST_PREVIEW.batch_name}</h2>
-        <p>Staged sample data is previewed before any promotion. The manifest separates structured_data, quarantine, media, and unresolved references so review remains explicit.</p>
-      </div>
-      <div className="file-system-manifest-grid">
-        <article>
-          <strong>{SAMPLE_MANIFEST_PREVIEW.file_count.toLocaleString()}</strong>
-          <small>Files in batch</small>
-        </article>
-        <article>
-          <strong>{formatBytes(SAMPLE_MANIFEST_PREVIEW.total_bytes)}</strong>
-          <small>Total bytes</small>
-        </article>
-        <article>
-          <strong>{SAMPLE_MANIFEST_PREVIEW.structured_data.toLocaleString()}</strong>
-          <small>structured_data</small>
-        </article>
-        <article>
-          <strong>{SAMPLE_MANIFEST_PREVIEW.quarantine.toLocaleString()}</strong>
-          <small>quarantine</small>
-        </article>
-        <article>
-          <strong>{SAMPLE_MANIFEST_PREVIEW.document.toLocaleString()}</strong>
-          <small>document</small>
-        </article>
-        <article>
-          <strong>{SAMPLE_MANIFEST_PREVIEW.media.toLocaleString()}</strong>
-          <small>media</small>
-        </article>
-        <article>
-          <strong>{SAMPLE_MANIFEST_PREVIEW.unresolved.toLocaleString()}</strong>
-          <small>unresolved</small>
-        </article>
-      </div>
-      <div className="file-system-import-switcher" role="tablist" aria-label="Import batch previews">
-        {SAMPLE_IMPORT_PREVIEWS.map((preview, index) => <button type="button" role="tab" aria-selected={!uploadedImportPreview && importPreviewIndex === index} className={!uploadedImportPreview && importPreviewIndex === index ? 'is-active' : ''} key={preview.source_file} onClick={() => { setUploadedImportPreview(null); setImportPreviewIndex(index); }}>{preview.source_file}</button>)}
-        <label className="file-system-import-upload">Preview CSV/XLSX<input type="file" aria-label="Upload import CSV or XLSX" accept=".csv,.xlsx,text/csv,application/vnd.openxmlformats-officedocument.spreadsheetml.sheet" onChange={(event) => { const file = event.target.files?.[0]; if (file) void previewImportFile(file); event.currentTarget.value = ''; }} /></label>
-      </div>
-      <div className="file-system-import-detail">
-        <strong className="file-system-import-source">{activeImportPreview.source_file}</strong>
-        <small className="file-system-import-hash">SHA-256: {activeImportPreview.source_sha256 ?? 'Generated when a local source is selected'}</small>
+    <details className="file-system-import-tools">
+      <summary><span>Structured data imports</span><small>{importBatches.length} review batch{importBatches.length === 1 ? '' : 'es'}</small></summary>
+      <section className="file-system-intake" aria-label="Structured data import preview">
+        <div>
+          <span>Import preview</span>
+          <h2>Choose a CSV or XLSX file</h2>
+          <p>Preview its columns, sample rows and unresolved values before creating a review batch. No business records are changed here.</p>
+        </div>
+        <div className="file-system-import-switcher">
+          <label className="file-system-import-upload">Choose CSV/XLSX<input type="file" aria-label="Upload import CSV or XLSX" accept=".csv,.xlsx,text/csv,application/vnd.openxmlformats-officedocument.spreadsheetml.sheet" onChange={(event) => { const file = event.target.files?.[0]; if (file) void previewImportFile(file); event.currentTarget.value = ''; }} /></label>
+        </div>
         {previewError && <p className="file-system-import-warning" role="alert">{previewError}</p>}
-        <button type="button" className="file-system-import-create" onClick={() => void createReviewBatch()} disabled={creatingBatch} aria-label="Create import batch for review">{creatingBatch ? 'Creating review batch' : 'Create review batch'}</button>
-        <div className="file-system-import-facts"><div><small>Parser</small><strong>{activeImportPreview.parser}</strong></div><div><small>Rows</small><strong>{activeImportPreview.row_count.toLocaleString()}</strong></div><div><small>duplicate rows</small><strong>{activeImportPreview.duplicate_count}</strong></div><div><small>Malformed rows</small><strong>{activeImportPreview.malformed_row_count ?? 0}</strong></div><div><small>Unresolved values</small><strong>{activeImportPreview.unresolved_count ?? 0}</strong></div><div><small>Date range</small><strong>{activeImportPreview.date_range}</strong></div></div>
-        {activeImportPreview.headers && activeImportPreview.sample_rows && <div className="file-system-import-sample"><span>Sample rows, first 5 only</span><div className="file-system-import-table-wrap"><table><thead><tr>{activeImportPreview.headers.map((header) => <th key={header}>{header}</th>)}</tr></thead><tbody>{activeImportPreview.sample_rows.map((row, rowIndex) => <tr key={`sample-${rowIndex}`}>{activeImportPreview.headers?.map((header, columnIndex) => <td key={`${header}-${rowIndex}`}>{row[columnIndex] || '-'}</td>)}</tr>)}</tbody></table></div></div>}
-        <div className="file-system-import-columns"><div><span>Column mapping</span>{activeImportPreview.mappings.map((mapping) => <div className="file-system-import-mapping" key={`${mapping.source}-${mapping.target}`}><strong>{mapping.source}</strong><span>to {mapping.target}</span><small>{mapping.confidence}</small></div>)}</div><div><span>Review warnings</span>{activeImportPreview.warnings.map((warning) => <p key={warning}>{warning}</p>)}<p className="file-system-import-warning">{activeImportPreview.unresolved_count ?? 0} unresolved values</p></div></div>
-      </div>
-    </section>
+        {!activeImportPreview ? <p className="file-system-muted">No structured file selected.</p> : <div className="file-system-import-detail">
+          <strong className="file-system-import-source">{activeImportPreview.source_file}</strong>
+          <small className="file-system-import-hash">SHA-256: {activeImportPreview.source_sha256 ?? 'Generated when a local source is selected'}</small>
+          <button type="button" className="file-system-import-create" onClick={() => void createReviewBatch()} disabled={creatingBatch} aria-label="Create import batch for review">{creatingBatch ? 'Creating review batch' : 'Create review batch'}</button>
+          <div className="file-system-import-facts"><div><small>Parser</small><strong>{activeImportPreview.parser}</strong></div><div><small>Rows</small><strong>{activeImportPreview.row_count.toLocaleString()}</strong></div><div><small>Duplicate rows</small><strong>{activeImportPreview.duplicate_count}</strong></div><div><small>Malformed rows</small><strong>{activeImportPreview.malformed_row_count ?? 0}</strong></div><div><small>Unresolved values</small><strong>{activeImportPreview.unresolved_count ?? 0}</strong></div><div><small>Date range</small><strong>{activeImportPreview.date_range}</strong></div></div>
+          {activeImportPreview.headers && activeImportPreview.sample_rows && <div className="file-system-import-sample"><span>Sample rows, first 5 only</span><div className="file-system-import-table-wrap"><table><thead><tr>{activeImportPreview.headers.map((header) => <th key={header}>{header}</th>)}</tr></thead><tbody>{activeImportPreview.sample_rows.map((row, rowIndex) => <tr key={`sample-${rowIndex}`}>{activeImportPreview.headers?.map((header, columnIndex) => <td key={`${header}-${rowIndex}`}>{row[columnIndex] || '-'}</td>)}</tr>)}</tbody></table></div></div>}
+          <div className="file-system-import-columns"><div><span>Column mapping</span>{activeImportPreview.mappings.map((mapping) => <div className="file-system-import-mapping" key={`${mapping.source}-${mapping.target}`}><strong>{mapping.source}</strong><span>to {mapping.target}</span><small>{mapping.confidence}</small></div>)}</div><div><span>Review warnings</span>{activeImportPreview.warnings.map((warning) => <p key={warning}>{warning}</p>)}<p className="file-system-import-warning">{activeImportPreview.unresolved_count ?? 0} unresolved values</p></div></div>
+        </div>}
+      </section>
     <section className="file-system-batches" aria-label="Import batch history">
       <div className="file-system-batches-heading"><div><span>Review history</span><h2>Import batches</h2></div><select id="batch-status-filter" aria-label="Import batch status" value={batchStatus} onChange={(event) => setBatchStatus(event.target.value as typeof batchStatus)}><option value="all">All statuses</option><option value="preview">Preview</option><option value="needs_review">Needs review</option><option value="approved">Approved</option><option value="applied">Applied</option><option value="rejected">Rejected</option><option value="failed">Failed</option></select></div>
       {visibleBatches.length === 0 ? <p className="file-system-muted">No persisted review batches match this status.</p> : <div className="file-system-batch-grid">{visibleBatches.map((batch) => <button type="button" key={batch.id} className={selectedBatchId === batch.id ? 'is-selected' : ''} onClick={() => setSelectedBatchId(batch.id)}><strong>{batch.source_file}</strong><span>{batch.status.replaceAll('_', ' ')} · {batch.row_count.toLocaleString()} rows</span><small>{batch.duplicate_of_batch_id ? 'Duplicate source linked' : 'Original source'} · {batch.duplicate_count} row duplicates · {batch.unresolved_count} unresolved</small></button>)}</div>}
       {selectedBatch && <article className="file-system-batch-detail"><div><strong>{selectedBatch.batch_name}</strong><span>{selectedBatch.parser} · {selectedBatch.status.replaceAll('_', ' ')}</span><small>{selectedBatch.source_sha256 ? `SHA-256 ${selectedBatch.source_sha256}` : 'Source hash unavailable'}</small>{selectedBatch.duplicate_of_batch_id && <small>Duplicate of batch {selectedBatch.duplicate_of_batch_id.slice(0, 8)}</small>}{selectedBatch.review_reason && <small>Reason: {selectedBatch.review_reason}</small>}</div><div><span>Mappings</span>{(selectedBatch.schema_json.mappings ?? []).map((mapping) => <small key={`${mapping.source}-${mapping.target}`}>{mapping.source} to {mapping.target} ({mapping.confidence})</small>)}</div><div><span>Warnings</span>{(selectedBatch.schema_json.warnings ?? []).map((warning) => <small key={warning}>{warning}</small>)}</div>{selectedBatch.schema_json.headers && selectedBatch.schema_json.sample_rows && <div className="file-system-batch-sample"><span>Sample rows</span>{selectedBatch.schema_json.sample_rows.map((row, rowIndex) => <small key={`batch-sample-${rowIndex}`}>{row.join(' · ')}</small>)}</div>}<section className="file-system-mapping-review" aria-label="Human mapping review"><div><span>Human mapping review</span><strong>Bob proposes; you confirm the target.</strong><small>These decisions are stored as review evidence only. No canonical records are changed here.</small></div>{selectedMappingSources.length === 0 ? <p className="file-system-muted">No source columns were captured for this batch.</p> : selectedMappingSources.map((sourceColumn) => { const existing = mappingReviews.find((review) => review.source_column === sourceColumn); const draft = mappingDrafts[sourceColumn] ?? { targetEntity: existing?.target_entity ?? '', targetField: existing?.target_field ?? '', decision: existing?.decision ?? 'proposed', reason: existing?.review_reason ?? '' }; return <div className="file-system-mapping-row" key={sourceColumn}><strong>{sourceColumn}</strong><label><span>Target entity</span><input aria-label="Target entity" value={draft.targetEntity} onChange={(event) => setMappingDrafts((current) => ({ ...current, [sourceColumn]: { ...draft, targetEntity: event.target.value } }))} placeholder="Bob/schema candidate" /></label><label><span>Target field</span><input aria-label="Target field" value={draft.targetField} onChange={(event) => setMappingDrafts((current) => ({ ...current, [sourceColumn]: { ...draft, targetField: event.target.value } }))} placeholder="Canonical field" /></label><label><span>Decision</span><select aria-label="Decision" value={draft.decision} onChange={(event) => setMappingDrafts((current) => ({ ...current, [sourceColumn]: { ...draft, decision: event.target.value as FileImportMappingReview['decision'] } }))}><option value="proposed">Proposed</option><option value="confirmed">Confirmed</option><option value="rejected">Rejected</option></select></label><label><span>Reason</span><input aria-label="Review reason" value={draft.reason} onChange={(event) => setMappingDrafts((current) => ({ ...current, [sourceColumn]: { ...draft, reason: event.target.value } }))} placeholder="Evidence or unresolved reason" /></label><button type="button" onClick={() => void saveMappingReview(sourceColumn)} disabled={savingMapping === sourceColumn}>{savingMapping === sourceColumn ? 'Saving' : 'Record mapping review'}</button></div>; })}</section>{(selectedBatch.status === 'preview' || selectedBatch.status === 'needs_review') && <div className="file-system-batch-review"><label htmlFor="batch-review-reason">Review reason</label><textarea id="batch-review-reason" rows={2} value={reviewReason} onChange={(event) => setReviewReason(event.target.value)} placeholder="Explain the review decision" /><div><button type="button" onClick={() => void reviewBatch('approved')} disabled={reviewingBatch}>Approve batch</button><button type="button" onClick={() => void reviewBatch('rejected')} disabled={reviewingBatch}>Reject batch</button></div></div>}</article>}
     </section>
+    </details>
     {intakeAttachments.length > 0 && <section className="file-system-intake" aria-label="Bob intake waiting registration"><div><span>Bob intake</span><h2>Files waiting registration</h2><p>These uploads are not yet canonical Files records. Registration extracts, hashes, classifies, and preserves upload provenance.</p></div><div>{intakeAttachments.map((attachment) => { const disposition = intakeDisposition(attachment); return <article key={attachment.id}><strong>{attachment.file_name}</strong><small>{attachment.file_type} · {Math.round(attachment.file_size_bytes / 1024)} KB · {new Date(attachment.created_at).toLocaleDateString('en-NZ')}</small>{disposition.allowed ? <button type="button" onClick={() => void registerAttachment(attachment)}>Register in Files</button> : <span className="file-system-quarantine">Quarantined: {disposition.reason}</span>}</article>; })}</div></section>}
     <section className="file-system-spaces" aria-label="File spaces">{FILE_SPACES.map((item) => <button type="button" key={item.key} className={space === item.key ? 'is-active' : ''} onClick={() => setSpace(item.key)} aria-label={`File space: ${item.label}`}><FolderOpen size={16} /><span>{item.label}</span></button>)}</section>
-    {space === 'all' || space === 'generated' ? <section className="file-system-batches file-system-generated-registry" aria-label="Generated outputs"><div className="file-system-batches-heading"><div><span>Generated Outputs</span><h2>Approved document artifacts</h2></div><div className="file-system-output-filters"><select aria-label="Generated output status" value={outputStatus} onChange={(event) => setOutputStatus(event.target.value as OutputStatusFilter)}><option value="all">All statuses</option><option value="requested">Requested</option><option value="generating">Generating</option><option value="ready">Ready</option><option value="failed">Failed</option><option value="revoked">Revoked</option></select><select aria-label="Generated output format" value={outputFormat} onChange={(event) => setOutputFormat(event.target.value as OutputFormatFilter)}><option value="all">All formats</option><option value="print">Print PDF</option><option value="pdf">PDF</option><option value="docx">DOCX</option></select><Download size={17} /></div></div>{visibleOutputs.length === 0 ? <p className="file-system-muted">No generated outputs match this view.</p> : <div className="file-system-output-grid">{visibleOutputs.map((output) => { const version = relationOne(output.document_versions); return <article className={`file-system-output-card is-${output.status}`} key={output.id}><div><span>{outputLabel(output.output_format)} · {output.status.replaceAll('_', ' ')}</span><strong>{outputTitle(output)}</strong><small>{version?.version_label ?? 'Version unavailable'} · {output.generated_at ? new Date(output.generated_at).toLocaleString('en-NZ') : 'Not generated'}</small></div><dl><div><dt>MIME</dt><dd>{output.mime_type ?? 'Pending'}</dd></div><div><dt>Renderer</dt><dd>{output.renderer_version ?? 'Pending'}</dd></div><div><dt>Approved</dt><dd>{output.approved_at ? new Date(output.approved_at).toLocaleString('en-NZ') : 'Pending'}</dd></div><div><dt>SHA-256</dt><dd>{output.sha256 ?? 'Checksum pending'}</dd></div></dl><button type="button" onClick={() => void openGeneratedOutput(output)} disabled={output.status !== 'ready'}>{output.status === 'ready' ? 'Open output' : 'Not ready'}</button></article>; })}</div>}</section> : null}
-    {space === 'all' || space === 'generated' ? <section className="file-system-batches file-system-generated-registry" aria-label="Enforcement notice artifacts"><div className="file-system-batches-heading"><div><span>Enforcement notices</span><h2>Issued notice artifacts</h2></div><ShieldCheck size={17} /></div>{noticeArtifacts.length === 0 ? <p className="file-system-muted">No notice artifacts are available for this organisation.</p> : <div className="file-system-output-grid">{noticeArtifacts.map((notice) => <article className="file-system-output-card is-ready" key={`${notice.kind}-${notice.id}`}><div><span>{notice.label} · {notice.status.replaceAll('_', ' ')}</span><strong>{notice.notice_number ?? `Vehicle ${notice.plate_number}`}</strong><small>{new Date(notice.issued_at).toLocaleString('en-NZ')}</small></div><dl><div><dt>Vehicle</dt><dd>{notice.plate_number}</dd></div><div><dt>Storage</dt><dd>{notice.storage_path ? 'HTML artifact' : 'Unavailable'}</dd></div></dl><button type="button" onClick={() => void openNoticeArtifact(notice)} disabled={!notice.storage_path}>{notice.storage_path ? 'Open notice' : 'Unavailable'}<Download size={14} /></button></article>)}</div>}</section> : null}
+    {space === 'generated' ? <section className="file-system-batches file-system-generated-registry" aria-label="Generated outputs"><div className="file-system-batches-heading"><div><span>Generated Outputs</span><h2>Approved document artifacts</h2></div><div className="file-system-output-filters"><select aria-label="Generated output status" value={outputStatus} onChange={(event) => setOutputStatus(event.target.value as OutputStatusFilter)}><option value="all">All statuses</option><option value="requested">Requested</option><option value="generating">Generating</option><option value="ready">Ready</option><option value="failed">Failed</option><option value="revoked">Revoked</option></select><select aria-label="Generated output format" value={outputFormat} onChange={(event) => setOutputFormat(event.target.value as OutputFormatFilter)}><option value="all">All formats</option><option value="print">Print PDF</option><option value="pdf">PDF</option><option value="docx">DOCX</option></select><Download size={17} /></div></div>{visibleOutputs.length === 0 ? <p className="file-system-muted">No generated outputs match this view.</p> : <div className="file-system-output-grid">{visibleOutputs.map((output) => { const version = relationOne(output.document_versions); return <article className={`file-system-output-card is-${output.status}`} key={output.id}><div><span>{outputLabel(output.output_format)} · {output.status.replaceAll('_', ' ')}</span><strong>{outputTitle(output)}</strong><small>{version?.version_label ?? 'Version unavailable'} · {output.generated_at ? new Date(output.generated_at).toLocaleString('en-NZ') : 'Not generated'}</small></div><dl><div><dt>MIME</dt><dd>{output.mime_type ?? 'Pending'}</dd></div><div><dt>Renderer</dt><dd>{output.renderer_version ?? 'Pending'}</dd></div><div><dt>Approved</dt><dd>{output.approved_at ? new Date(output.approved_at).toLocaleString('en-NZ') : 'Pending'}</dd></div><div><dt>SHA-256</dt><dd>{output.sha256 ?? 'Checksum pending'}</dd></div></dl><button type="button" onClick={() => void openGeneratedOutput(output)} disabled={output.status !== 'ready'}>{output.status === 'ready' ? 'Open output' : 'Not ready'}</button></article>; })}</div>}</section> : null}
+    {space === 'generated' ? <section className="file-system-batches file-system-generated-registry" aria-label="Enforcement notice artifacts"><div className="file-system-batches-heading"><div><span>Enforcement notices</span><h2>Issued notice artifacts</h2></div><ShieldCheck size={17} /></div>{noticeArtifacts.length === 0 ? <p className="file-system-muted">No notice artifacts are available for this organisation.</p> : <div className="file-system-output-grid">{noticeArtifacts.map((notice) => <article className="file-system-output-card is-ready" key={`${notice.kind}-${notice.id}`}><div><span>{notice.label} · {notice.status.replaceAll('_', ' ')}</span><strong>{notice.notice_number ?? `Vehicle ${notice.plate_number}`}</strong><small>{new Date(notice.issued_at).toLocaleString('en-NZ')}</small></div><dl><div><dt>Vehicle</dt><dd>{notice.plate_number}</dd></div><div><dt>Storage</dt><dd>{notice.storage_path ? 'HTML artifact' : 'Unavailable'}</dd></div></dl><button type="button" onClick={() => void openNoticeArtifact(notice)} disabled={!notice.storage_path}>{notice.storage_path ? 'Open notice' : 'Unavailable'}<Download size={14} /></button></article>)}</div>}</section> : null}
     <div className="file-system-toolbar"><label><Search size={16} /><input type="search" aria-label="Search files" placeholder="Search filenames, type, source, or hash" value={search} onChange={(event) => setSearch(event.target.value)} /></label><select aria-label="File status" value={scope} onChange={(event) => setScope(event.target.value as FileFilter)}><option value="all">All statuses</option><option value="quarantined">Quarantined</option><option value="tenant_reference">Reference</option><option value="tenant">Tenant files</option><option value="global_reference">Global reference</option></select></div>
     <div className="file-system-layout"><section className="file-system-list" aria-label="Files"><div className="file-system-list-heading"><div><span>Permitted records</span><h2>{visibleDocuments.length} files</h2></div><small>{documents.length} loaded</small></div>{loading ? <div className="file-system-empty"><RefreshCw size={20} className="is-spinning" />Loading files</div> : visibleDocuments.length === 0 ? <div className="file-system-empty"><FileArchive size={22} />No files match this view</div> : <div className="file-system-records">{visibleDocuments.map((document) => { const Icon = fileIcon(document.mime_type); return <button type="button" key={document.id} className={selectedId === document.id ? 'is-selected' : ''} onClick={() => setSelectedId(document.id)}><span className="file-system-record-icon"><Icon size={17} /></span><span><strong>{document.original_filename}</strong><small>{spaceFor(document)} · {scopeLabel(document.current_scope)}</small></span><time dateTime={document.updated_at}>{new Date(document.updated_at).toLocaleDateString('en-NZ', { day: 'numeric', month: 'short' })}</time></button>; })}</div>}</section>
     <aside className="file-system-detail" aria-label="File details">{!selected ? <div className="file-system-empty"><FileText size={22} />Select a file to inspect</div> : <><div className="file-system-detail-heading"><div><span>{spaceFor(selected)}</span><h2>{selected.original_filename}</h2><small>{selected.mime_type} · {scopeLabel(selected.current_scope)}</small></div><button type="button" onClick={() => void openFile()} disabled={opening || !selected.storage_object_ref} title="Open source file"><Download size={17} />{opening ? 'Opening' : 'Open source'}</button></div><dl className="file-system-facts"><div><dt>Source</dt><dd>{selected.source_channel.replaceAll('_', ' ')}</dd></div><div><dt>Storage</dt><dd>{selected.storage_bucket}</dd></div><div><dt>Uploaded</dt><dd>{new Date(selected.created_at).toLocaleString('en-NZ')}</dd></div><div><dt>SHA-256</dt><dd>{selected.sha256 ?? 'Not recorded'}</dd></div></dl><section className="file-system-section"><div className="file-system-section-heading"><div><span>Versions</span><h3>{versions.length} extracted versions</h3></div>{versionsLoading && <RefreshCw size={15} className="is-spinning" />}</div>{versions.length === 0 ? <p className="file-system-muted">No extracted version is available yet. This source remains reviewable without treating it as authoritative.</p> : <div className="file-system-versions">{versions.map((version) => <article key={version.id}><strong>{version.version_label}</strong><span>{version.extraction_confidence === null ? 'Confidence unavailable' : `${Math.round(version.extraction_confidence * 100)}% extraction confidence`}{version.ocr_required ? ' · OCR required' : ''}</span><small>{version.extracted_text?.slice(0, 280) || 'No extracted text preview.'}</small></article>)}</div>}</section><section className="file-system-provenance"><Clock3 size={15} /><span>Promotion is deliberately separate from file storage. Bob can prepare a review, but a human must approve any CRM, HR, finance, evidence, or investigation change.</span></section></>}</aside></div>
