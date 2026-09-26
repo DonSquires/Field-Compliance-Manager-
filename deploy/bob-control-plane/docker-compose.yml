@@ -13,6 +13,14 @@ services:
     environment:
       PORT: "8080"
       BOB_STATE_DIR: /data
+      # Worker bind mounts are resolved by the HOST docker daemon: translate /data -> /var/lib/bob.
+      BOB_HOST_DATA_DIR: /var/lib/bob
+      # Handoffs stage patches/results in os.tmpdir(); keep it on the data volume so workers can mount it.
+      TMPDIR: /data/tmp
+      BOB_WORKER_IMAGE: ${BOB_WORKER_IMAGE:-fcm/bob-worker:current}
+    # Docker socket access for isolated workers (no-new-privileges, cap-drop ALL, network none).
+    group_add:
+      - "${DOCKER_GID:-999}"
     healthcheck:
       test: ["CMD", "node", "-e", "fetch('http://127.0.0.1:8080/health').then(r=>process.exit(r.ok?0:1)).catch(()=>process.exit(1))"]
       interval: 30s
@@ -24,6 +32,7 @@ services:
       - "172.16.0.1:8091:8080"
     volumes:
       - /var/lib/bob:/data
+      - /var/run/docker.sock:/var/run/docker.sock
     networks:
       - default
       - gitea_default

@@ -7,9 +7,14 @@ const { runSecurityReview } = require('./builder-security-handoff');
 const { startOptionalCodeReview } = require('./supabase/functions/_shared/builder-code-review');
 const { runIndependentCodeReview } = require('./supabase/functions/_shared/builder-independent-code-review');
 const { runReleaseEngineer } = require('./supabase/functions/_shared/builder-release-engineer');
+const { runAgenticEngineer } = require('./builder-agentic-engineer');
 
 const TERMINAL_STATUSES = new Set(['release_ready', 'deployed', 'failed', 'cancelled']);
 const APPROVAL_STATUSES = new Set(['specification_ready', 'approval_pending']);
+const MAX_BACKEND_ATTEMPTS = 3;
+// Bob works the implementation steps as a coding agent (explore → edit → test →
+// iterate) unless explicitly switched back to the one-shot engineers.
+const AGENTIC_ENABLED = process.env.BOB_BUILDER_AGENTIC !== 'false';
 
 function byStep(snapshot, stepId) {
   return snapshot.steps.find(step => step.step_id === stepId);
@@ -94,10 +99,52 @@ function implementationArtifacts(snapshot) {
   return { patch: patches, manifest: manifests, buildLogs };
 }
 
+async function loadArtifactJson(supabase, artifact) {
+  if (!artifact?.storage_location?.startsWith('supabase_storage://builder-artifacts/')) return null;
+  const { data, error } = await supabase.storage.from('builder-artifacts').download(artifact.storage_location.slice('supabase_storage://builder-artifacts/'.length));
+  if (error || !data) return null;
+  const text = Buffer.from(await data.arrayBuffer()).toString('utf8');
+  try { return JSON.parse(text); } catch { return text.slice(0, 20000); }
+}
+
+/** Agentic generation for a lane, shaped like the one-shot engineers' result so handoffs stay unchanged. */
+function agenticGenerator(lane, context, extra = {}) {
+  return async ({ supabase, gateway, job, step, uxArtifact, productArtifact, requestedFiles, liveContext, failureArtifact, failedPatchArtifact }) => {
+    const [specification, uxPlan, previousFailure] = await Promise.all([
+      productArtifact ? loadArtifactJson(supabase, productArtifact) : Promise.resolve(extra.specification ?? null),
+      uxArtifact ? loadArtifactJson(supabase, uxArtifact) : Promise.resolve(null),
+      failureArtifact ? loadArtifactJson(supabase, failureArtifact) : Promise.resolve(null)
+    ]);
+    return runAgenticEngineer({
+      supabase, gateway, job, step, lane,
+      sourceDir: context.gitSourceDir || context.sourceDir,
+      workspaceRoot: context.workspaceRoot,
+      repoRoot: context.repoRoot,
+      specification, uxPlan, liveContext,
+      hints: requestedFiles,
+      previousFailure: previousFailure ? { failure_evidence: previousFailure, failed_patch_artifact_id: failedPatchArtifact?.id ?? null } : null,
+      inputArtifactIds: [productArtifact?.id, uxArtifact?.id, failureArtifact?.id].filter(Boolean)
+    });
+  };
+}
+
 async function runBackendImplementation(input) {
-  const generation = await runBackendEngineer(input);
+  const agentic = AGENTIC_ENABLED && input.context?.workspaceRoot;
+  const generate = agentic ? agenticGenerator('backend', input.context) : runBackendEngineer;
+  let generation = await generate(input);
   if (!generation.ok || !generation.patch_artifact?.id) return { success: false, phase: 'generation', result: generation };
-  return runBackendHandoff({ ...input, patchArtifact: generation.patch_artifact });
+  let patchArtifact = generation.patch_artifact;
+  for (let attempt = 1; attempt <= (agentic ? MAX_BACKEND_ATTEMPTS : 1); attempt += 1) {
+    const verification = await runBackendHandoff({ ...input, patchArtifact });
+    if (verification.success || !agentic) return { ...verification, attempts: attempt, patch_artifact: patchArtifact };
+    if (attempt >= MAX_BACKEND_ATTEMPTS) return { ...verification, success: false, phase: 'repair_limit', attempts: attempt };
+    const failureArtifact = verification.failure_artifact || verification.artifacts?.[0];
+    // Feed the independent worker's failure evidence back to Bob and let him repair.
+    generation = await generate({ ...input, failureArtifact, failedPatchArtifact: patchArtifact });
+    if (!generation.ok || !generation.patch_artifact?.id) return { success: false, phase: 'repair', attempts: attempt, result: generation };
+    patchArtifact = generation.patch_artifact;
+  }
+  return { success: false, phase: 'verification', attempts: MAX_BACKEND_ATTEMPTS };
 }
 
 async function executeBuilderAction({ snapshot, action, supabase, gateway, context, handlers = {} }) {
@@ -119,8 +166,12 @@ async function executeBuilderAction({ snapshot, action, supabase, gateway, conte
   }
   if (action.type === 'run_product_analysis') return run.product({ ...common, repositoryContext: context.repositoryContext, constraints: context.constraints, requestedFromUsers: context.requestedFromUsers });
   if (action.type === 'run_ux_design') return run.ux({ ...common, specificationArtifact: artifactsFor(snapshot, 'product_analysis', 'product_specification').at(-1), repositoryContext: context.designContext });
-  if (action.type === 'run_frontend') return run.frontend({ ...common, uxArtifact: artifactsFor(snapshot, 'ui_design', 'ui_design_plan').at(-1), sourceDir: context.sourceDir, requestedFiles: context.frontendFiles, workerImage: context.workerImage, runnerId: context.runnerId, liveContext: context.liveContext });
-  if (action.type === 'run_backend') return run.backend({ ...common, productArtifact: artifactsFor(snapshot, 'product_analysis', 'product_specification').at(-1), sourceDir: context.sourceDir, requestedFiles: context.backendFiles, workerImage: context.workerImage, runnerId: context.runnerId, liveContext: context.liveContext });
+  if (action.type === 'run_frontend') {
+    const agentic = AGENTIC_ENABLED && context.workspaceRoot && !handlers.frontend;
+    const generator = agentic ? agenticGenerator('frontend', context) : undefined;
+    return run.frontend({ ...common, uxArtifact: artifactsFor(snapshot, 'ui_design', 'ui_design_plan').at(-1), sourceDir: context.sourceDir, requestedFiles: context.frontendFiles, workerImage: context.workerImage, runnerId: context.runnerId, liveContext: context.liveContext, ...(generator ? { generate: generator, repair: generator } : {}) });
+  }
+  if (action.type === 'run_backend') return run.backend({ ...common, context, productArtifact: artifactsFor(snapshot, 'product_analysis', 'product_specification').at(-1), sourceDir: context.sourceDir, requestedFiles: context.backendFiles, workerImage: context.workerImage, runnerId: context.runnerId, liveContext: context.liveContext });
   const implementation = implementationArtifacts(snapshot);
   const runs = implementationRuns(snapshot);
   const securityArtifact = artifactsFor(snapshot, 'security_review', 'security_review').at(-1);
@@ -162,6 +213,9 @@ async function runBuilderUntilPause({
 }
 
 module.exports = {
+  AGENTIC_ENABLED,
+  MAX_BACKEND_ATTEMPTS,
+  agenticGenerator,
   artifactsFor,
   implementationRuns,
   implementationArtifacts,

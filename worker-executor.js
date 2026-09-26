@@ -19,10 +19,23 @@ function workerCommand(profile) {
   return [...command];
 }
 
-function dockerArguments({ image, sourceDir, artifactDir, profile, memory = '2g', cpus = '1', pidsLimit = 256, environment = {} }) {
+// The control plane runs in a container but talks to the HOST docker daemon, so
+// bind-mount sources must be host paths: /data/... -> /var/lib/bob/... when
+// BOB_HOST_DATA_DIR is set. Anything outside the data volume cannot be mounted.
+function hostPath(containerPath, env = process.env) {
+  const from = (env.BOB_CONTAINER_DATA_DIR || env.BOB_STATE_DIR || '').replace(/\/+$/, '');
+  const to = (env.BOB_HOST_DATA_DIR || '').replace(/\/+$/, '');
+  if (!from || !to) return containerPath;
+  if (containerPath === from || containerPath.startsWith(`${from}/`)) return `${to}${containerPath.slice(from.length)}`;
+  throw new Error(`worker mount must live under ${from} to be visible to the host docker daemon: ${containerPath}`);
+}
+
+function dockerArguments({ image, sourceDir, artifactDir, profile, memory = '2g', cpus = '1', pidsLimit = 256, environment = {}, env = process.env }) {
   if (!image) throw new Error('worker image is required');
   if (!sourceDir || !artifactDir) throw new Error('sourceDir and artifactDir are required');
   const command = workerCommand(profile);
+  const sourceMount = hostPath(sourceDir, env);
+  const artifactMount = hostPath(artifactDir, env);
   const args = [
     'run', '--rm', '--init',
     profile === 'human-qa-live' ? '--network=bridge' : '--network=none',
@@ -45,8 +58,8 @@ function dockerArguments({ image, sourceDir, artifactDir, profile, memory = '2g'
     }
   }
   args.push(
-    '--mount', `type=bind,src=${sourceDir},dst=/workspace,readonly`,
-    '--mount', `type=bind,src=${artifactDir},dst=/artifacts`,
+    '--mount', `type=bind,src=${sourceMount},dst=/workspace,readonly`,
+    '--mount', `type=bind,src=${artifactMount},dst=/artifacts`,
     image,
     ...command
   );
@@ -93,4 +106,4 @@ function redact(value) {
     .replace(/(sk-[A-Za-z0-9_-]+)/g, '[REDACTED]');
 }
 
-module.exports = { WORKER_PROFILES, dockerArguments, executeWorker, redact, workerCommand };
+module.exports = { WORKER_PROFILES, dockerArguments, executeWorker, hostPath, redact, workerCommand };

@@ -1,7 +1,9 @@
 FROM node:22-alpine
 
-# Builder workspaces, verified commits, and pushes need a real git binary.
-RUN apk add --no-cache git
+# Builder workspaces, verified commits, and pushes need a real git binary; the
+# docker CLI lets the control plane launch isolated verification workers via the
+# host daemon socket (mounted by deploy/bob-control-plane/docker-compose.yml).
+RUN apk add --no-cache git docker-cli
 
 ENV NODE_ENV=production
 ENV PORT=8080

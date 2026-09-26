@@ -8,6 +8,7 @@ const {
   contentMetadata
 } = require('./builder-model-adapter');
 const { collectRepositoryContext } = require('./builder-repository-context');
+const { laneAllows } = require('../../../builder-path-policy');
 
 const BACKEND_ENGINEER_PROMPT_VERSION = 'backend-engineer-v2';
 const MAX_SOURCE_FILES = 40;
@@ -15,6 +16,8 @@ const MAX_SOURCE_FILE_BYTES = 100000;
 const MAX_SOURCE_TOTAL_BYTES = 500000;
 const MAX_PATCH_BYTES = 2 * 1024 * 1024;
 
+// Legacy narrow patterns kept for reference; the lane now follows builder-path-policy
+// (everything outside apps/web that is not a protected path).
 const BACKEND_SOURCE_PATTERNS = [
   /^supabase\/migrations\/\d{14}_[a-z0-9_]+\.sql$/,
   /^supabase\/functions\/(?:_shared|[a-z0-9-]+)\/[A-Za-z0-9_.-]+\.(?:js|ts)$/,
@@ -25,7 +28,7 @@ const BACKEND_SOURCE_PATTERNS = [
 const DESTRUCTIVE_SQL = /(?:\bdrop\s+(?:table|schema|database|type|column)\b|\btruncate\s+table\b|\balter\s+table[\s\S]{0,120}\bdrop\b|\bdelete\s+from\s+\S+\s*;)/i;
 
 function isAllowedBackendPath(relativePath) {
-  return BACKEND_SOURCE_PATTERNS.some(pattern => pattern.test(relativePath));
+  return laneAllows('backend', relativePath);
 }
 
 function collectBackendSourceContext({ sourceDir, targetSha, requestedFiles }) {

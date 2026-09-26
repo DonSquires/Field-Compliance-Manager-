@@ -8270,12 +8270,12 @@ serve(async (req)=>{
             const storedJob = pending && pending.kind === 'builder_job_pending' && pending.builder_job ? pending.builder_job : null;
             const bjTitle = String(toolArgs.title ?? storedJob?.title ?? '').trim().slice(0, 200);
             const bjDescription = String(toolArgs.task_description ?? toolArgs.brief ?? storedJob?.task_description ?? '').trim().slice(0, 12000);
-            const bjFrontend = typeof toolArgs.frontend_required === 'boolean' ? toolArgs.frontend_required : storedJob ? storedJob.frontend_required !== false : true;
-            const bjBackend = typeof toolArgs.backend_required === 'boolean' ? toolArgs.backend_required : storedJob ? storedJob.backend_required === true : false;
-            const bjReview = [
-              'independent',
-              'human'
-            ].includes(String(toolArgs.code_review_mode ?? storedJob?.code_review_mode)) ? String(toolArgs.code_review_mode ?? storedJob?.code_review_mode) : 'independent';
+            // Self-heal spans the repository (backend lane); the web lane joins only when the brief is about the app UI.
+            const bjMentionsWeb = /\b(ui|page|panel|component|screen|web app|frontend|apps\/web|css|react|tsx)\b/i.test(`${bjTitle} ${bjDescription}`);
+            const bjFrontend = typeof toolArgs.frontend_required === 'boolean' ? toolArgs.frontend_required : storedJob ? storedJob.frontend_required === true : bjMentionsWeb;
+            const bjBackend = typeof toolArgs.backend_required === 'boolean' ? toolArgs.backend_required : storedJob ? storedJob.backend_required !== false : true;
+            const bjReviewRaw = String(toolArgs.code_review_mode ?? storedJob?.code_review_mode ?? 'independent_ai');
+            const bjReview = bjReviewRaw === 'human' ? 'human' : 'independent_ai';
             if (!bjTitle || bjDescription.length < 40) {
               return {
                 reply: 'I need a short title and a grounded brief (symptom, evidence, suspected cause, files involved, acceptance test) before I open a Builder job. Let me gather the evidence first if you like.',
@@ -8365,7 +8365,7 @@ serve(async (req)=>{
               job_id: bjJob.id,
               max_actions: 8
             });
-            const runNote = started.ok ? 'The Builder runner has started working through research → implementation → tests → review.' : 'The job is created; the runner did not start automatically, so start it from the Builder control room.';
+            const runNote = started.ok ? 'The Builder is working now — research → implementation in an isolated worktree → tests → independent code and security review — at full reasoning effort, so this takes minutes, not seconds.' : 'The job is created; the runner did not start automatically, so start it from the Builder control room.';
             return {
               reply: `Builder job **${bjTitle}** is open in the GitHub repository at commit \`${String(bjJob.target_sha ?? '').slice(0, 10)}\`. ${runNote} When it is ready you will get a **DRAFT pull request** to review — I will not merge or deploy it. Track it under Platform & Settings → Builder.`,
               meta: {

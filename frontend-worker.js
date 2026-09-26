@@ -2,6 +2,7 @@ const crypto = require('node:crypto');
 const fs = require('node:fs');
 const path = require('node:path');
 const { spawnSync } = require('node:child_process');
+const { isProtectedPath } = require('./builder-path-policy');
 
 const MAX_PATCH_BYTES = 2 * 1024 * 1024;
 const MAX_CHANGED_FILES = 100;
@@ -56,7 +57,7 @@ function validatePatchText(patchText) {
     if (!file.startsWith('apps/web/')) throw new Error(`frontend patch cannot modify ${file}`);
     if (BLOCKED_FILES.has(file)) throw new Error(`dependency manifest changes require separate approval: ${file}`);
     if (/(?:^|\/)\.env(?:\.|$)/.test(file)) throw new Error(`environment files are not allowed: ${file}`);
-    if (PROTECTED_FRONTEND_PATHS.some(pattern => pattern.test(file))) {
+    if (PROTECTED_FRONTEND_PATHS.some(pattern => pattern.test(file)) || isProtectedPath(file)) {
       throw new Error(`protected frontend changes require separate approval: ${file}`);
     }
   }

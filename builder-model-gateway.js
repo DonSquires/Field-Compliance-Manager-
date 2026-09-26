@@ -1,4 +1,4 @@
-const DEFAULT_MAX_PROMPT_CHARS = 100000;
+const DEFAULT_MAX_PROMPT_CHARS = 1_200_000; // ~300k tokens: room for a real working set, the way a coding agent holds one
 const ALLOWED_BUILDER_MODES = new Set([
   'product_analyst',
   'ux_designer',
@@ -8,9 +8,14 @@ const ALLOWED_BUILDER_MODES = new Set([
   'code_reviewer',
   'release_engineer'
 ]);
+const REASONING_EFFORTS = new Set(['low', 'medium', 'high']);
 
 function parseModelAllowlist(value, fallback) {
   return new Set(String(value || fallback).split(',').map(model => model.trim()).filter(Boolean));
+}
+
+function isReasoningModel(model) {
+  return /^(gpt-5|o[0-9])/i.test(String(model || ''));
 }
 
 function createModelGatewayConfig(env = process.env) {
@@ -18,15 +23,25 @@ function createModelGatewayConfig(env = process.env) {
     openai: {
       apiKey: env.OPENAI_API_KEY || '',
       baseUrl: (env.OPENAI_BASE_URL || 'https://api.openai.com/v1').replace(/\/+$/, ''),
-      models: parseModelAllowlist(env.BOB_OPENAI_MODELS, 'gpt-4o-mini')
+      // Bob Builder authors at full strength by default; the allowlist still bounds what a request may ask for.
+      models: parseModelAllowlist(env.BOB_OPENAI_MODELS, 'gpt-5.4,gpt-5.4-mini,gpt-4o-mini')
     },
     ollama: {
       baseUrl: (env.OLLAMA_BASE_URL || 'http://127.0.0.1:11434').replace(/\/+$/, ''),
       models: parseModelAllowlist(env.BOB_OLLAMA_MODELS, 'qwen2.5:7b')
     },
-    timeoutMs: Math.min(Number(env.BOB_MODEL_TIMEOUT_MS || 90000), 145000),
+    // The agentic lane is not bound by an edge timeout: give reasoning models
+    // maximum effort, room to write, and long turns.
+    reasoningEffort: REASONING_EFFORTS.has(env.BOB_BUILDER_REASONING_EFFORT) ? env.BOB_BUILDER_REASONING_EFFORT : 'high',
+    maxOutputTokens: Math.max(1000, Number(env.BOB_BUILDER_MAX_OUTPUT_TOKENS || 32000)),
+    timeoutMs: Math.min(Number(env.BOB_MODEL_TIMEOUT_MS || 600000), 900000),
     maxPromptChars: Number(env.BOB_MODEL_MAX_PROMPT_CHARS || DEFAULT_MAX_PROMPT_CHARS)
   };
+}
+
+function promptLength(input) {
+  if (Array.isArray(input.messages)) return input.messages.reduce((sum, message) => sum + String(message?.content ?? '').length, 0);
+  return String(input.system_prompt || '').length + String(input.user_prompt || '').length;
 }
 
 function validateModelRequest(input, config) {
@@ -35,11 +50,40 @@ function validateModelRequest(input, config) {
   if (!ALLOWED_BUILDER_MODES.has(input.builder_mode)) return 'unsupported builder mode';
   if (!input.prompt_version || typeof input.prompt_version !== 'string') return 'prompt_version is required';
   if (!input.idempotency_key || typeof input.idempotency_key !== 'string') return 'idempotency_key is required';
-  if (!input.system_prompt || !input.user_prompt) return 'system_prompt and user_prompt are required';
-  if (typeof input.system_prompt !== 'string' || typeof input.user_prompt !== 'string') return 'prompts must be strings';
-  if (input.system_prompt.length + input.user_prompt.length > config.maxPromptChars) return 'prompt exceeds configured limit';
+  if (Array.isArray(input.messages)) {
+    // Multi-turn (agentic) requests carry the conversation; every turn must be a typed, string message.
+    if (!input.messages.length) return 'messages must not be empty';
+    if (input.messages.some(message => !message || !['system', 'user', 'assistant'].includes(message.role) || typeof message.content !== 'string')) return 'messages must be role/content pairs';
+  } else {
+    if (!input.system_prompt || !input.user_prompt) return 'system_prompt and user_prompt are required';
+    if (typeof input.system_prompt !== 'string' || typeof input.user_prompt !== 'string') return 'prompts must be strings';
+  }
+  if (promptLength(input) > config.maxPromptChars) return 'prompt exceeds configured limit';
   if (input.model && !config[input.provider].models.has(input.model)) return 'model is not allowed';
+  if (input.reasoning_effort && !REASONING_EFFORTS.has(input.reasoning_effort)) return 'unsupported reasoning effort';
   return null;
+}
+
+function buildProviderBody({ input, config, model }) {
+  const isOpenAI = input.provider === 'openai';
+  const messages = Array.isArray(input.messages)
+    ? input.messages
+    : [{ role: 'system', content: input.system_prompt }, { role: 'user', content: input.user_prompt }];
+  const body = { model, messages };
+  if (!isOpenAI) {
+    body.stream = false;
+    if (input.output_schema) body.format = 'json';
+    return body;
+  }
+  if (input.output_schema) body.response_format = { type: 'json_object' };
+  if (isReasoningModel(model)) {
+    body.reasoning_effort = input.reasoning_effort || config.reasoningEffort;
+    body.max_completion_tokens = Math.min(Number(input.max_output_tokens) || config.maxOutputTokens, config.maxOutputTokens);
+  } else {
+    body.max_tokens = Math.min(Number(input.max_output_tokens) || 16000, 16000);
+    body.temperature = typeof input.temperature === 'number' ? input.temperature : 0.2;
+  }
+  return body;
 }
 
 async function invokeBuilderModel({ input, config, fetchImpl = globalThis.fetch }) {
@@ -64,20 +108,14 @@ async function invokeBuilderModel({ input, config, fetchImpl = globalThis.fetch 
           'Content-Type': 'application/json',
           ...(isOpenAI ? { Authorization: `Bearer ${providerConfig.apiKey}` } : {})
         },
-        body: JSON.stringify({
-          model,
-          messages: [
-            { role: 'system', content: input.system_prompt },
-            { role: 'user', content: input.user_prompt }
-          ],
-          ...(isOpenAI ? {} : { stream: false })
-        }),
+        body: JSON.stringify(buildProviderBody({ input, config, model })),
         signal: controller.signal
       }
     );
     const data = await response.json().catch(() => null);
     if (!response.ok || !data) {
-      return { status: 502, body: { error: `${input.provider} provider request failed` } };
+      const detail = data?.error?.message ? `: ${String(data.error.message).slice(0, 200)}` : '';
+      return { status: 502, body: { error: `${input.provider} provider request failed${detail}` } };
     }
 
     const content = isOpenAI ? data.choices?.[0]?.message?.content : data.message?.content;
@@ -91,6 +129,7 @@ async function invokeBuilderModel({ input, config, fetchImpl = globalThis.fetch 
         provider: input.provider,
         model,
         content,
+        finish_reason: isOpenAI ? (data.choices?.[0]?.finish_reason ?? null) : (data.done_reason ?? null),
         usage: isOpenAI
           ? (data.usage || {})
           : { input_tokens: data.prompt_eval_count || 0, output_tokens: data.eval_count || 0 }
@@ -109,7 +148,10 @@ async function invokeBuilderModel({ input, config, fetchImpl = globalThis.fetch 
 
 module.exports = {
   ALLOWED_BUILDER_MODES,
+  REASONING_EFFORTS,
+  buildProviderBody,
   createModelGatewayConfig,
+  isReasoningModel,
   validateModelRequest,
   invokeBuilderModel
 };

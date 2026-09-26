@@ -157,6 +157,10 @@ async function builderRuntimeContext(body, source = { sourceDir: assessmentRoot,
   const liveContext = builderSupabase ? await collectBuilderLiveContext(builderSupabase) : null;
   return {
     sourceDir: source.sourceDir,
+    // The agentic engineer spawns the job worktree from the pinned shared checkout and reads the canon from the image copy.
+    gitSourceDir: source.gitSourceDir || null,
+    workspaceRoot: builderWorkspaceRoot,
+    repoRoot: assessmentRoot,
     workerImage: builderWorkerImage,
     runnerId: builderRunnerId,
     reviewerModelName: typeof body.reviewerModelName === 'string' ? body.reviewerModelName.slice(0, 200) : null,
@@ -189,14 +193,23 @@ function refreshAtlas() {
 }
 
 async function resolveBuilderSourceDir(jobId) {
-  const { data: job, error } = await builderSupabase.from('builder_jobs').select('workspace_branch,workspace_head_sha,target_sha').eq('id', jobId).single();
+  const { data: job, error } = await builderSupabase.from('builder_jobs').select('id,workspace_branch,workspace_head_sha,target_sha').eq('id', jobId).single();
   if (error || !job?.target_sha) throw new Error('Builder job source is unavailable');
-  if (!job.workspace_branch) return { sourceDir: assessmentRoot, targetSha: job.target_sha };
+  if (!job.workspace_branch) {
+    // No bound workspace yet: work from the job's own worktree at the pinned commit
+    // (the image copy has no .git). The workspace route later binds this same branch.
+    const gitSourceDir = builderGitSource(job.target_sha);
+    const workspace = createBranchWorkspace({ sourceDir: gitSourceDir, workspaceRoot: builderWorkspaceRoot, jobId: job.id, targetSha: job.target_sha });
+    return { sourceDir: workspace.workspacePath, gitSourceDir, targetSha: job.target_sha };
+  }
   const sourceDir = workspacePathForBranch(builderWorkspaceRoot, job.workspace_branch);
   if (!fs.existsSync(sourceDir)) throw new Error('Builder workspace is unavailable');
   if (job.workspace_head_sha !== job.target_sha) throw new Error('Builder job does not match its workspace head');
-  return { sourceDir, targetSha: job.target_sha };
+  return { sourceDir, gitSourceDir: builderSourceDir, targetSha: job.target_sha };
 }
+
+// One Builder run per job at a time; runs continue after the HTTP caller has gone.
+const runningBuilderJobs = new Map();
 
 function webhookValid(req, rawBody) {
   if (!webhookSecret) return false;
@@ -354,18 +367,22 @@ async function route(req, res, body) {
     if (!builderSupabase || !modelGatewayToken || !builderWorkerImage) {
       return json(res, 503, { error: 'Builder runtime is unavailable' });
     }
+    const jobId = builderMatch[1];
+    if (runningBuilderJobs.has(jobId)) return json(res, 202, { accepted: true, already_running: true, job_id: jobId, started_at: runningBuilderJobs.get(jobId) });
+    let context;
     try {
-      const outcome = await runBuilderUntilPause({
-        supabase: builderSupabase,
-        gateway: builderGateway,
-        jobId: builderMatch[1],
-        context: await builderRuntimeContext(body, await resolveBuilderSourceDir(builderMatch[1])),
-        maxActions: body.maxActions
-      });
-      return json(res, 200, outcome);
-    } catch {
-      return json(res, 409, { error: 'Builder runtime could not continue' });
+      context = await builderRuntimeContext(body, await resolveBuilderSourceDir(jobId));
+    } catch (error) {
+      return json(res, 409, { error: 'Builder runtime could not continue', detail: String(error instanceof Error ? error.message : error).slice(0, 200) });
     }
+    const execution = runBuilderUntilPause({ supabase: builderSupabase, gateway: builderGateway, jobId, context, maxActions: body.maxActions })
+      .then((outcome) => { record('builder', 'builder.run.paused', jobId, { reason: outcome.reason, actions: outcome.history?.length ?? 0 }); return outcome; })
+      .catch((error) => { record('builder', 'builder.run.failed', jobId, { error: String(error instanceof Error ? error.message : error).slice(0, 300) }); return { paused: true, reason: 'error' }; })
+      .finally(() => runningBuilderJobs.delete(jobId));
+    runningBuilderJobs.set(jobId, new Date().toISOString());
+    if (body.wait === true) return json(res, 200, await execution);
+    // Agentic implementation steps run for many minutes; callers poll the job instead of holding the socket.
+    return json(res, 202, { accepted: true, job_id: jobId, started_at: runningBuilderJobs.get(jobId) });
   }
   if (builderMatch && req.method === 'POST' && builderMatch[2] === 'workspace') {
     if (!builderSupabase) return json(res, 503, { error: 'Builder persistence is unavailable' });

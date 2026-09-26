@@ -122,7 +122,7 @@ function contentMetadata(content) {
   };
 }
 
-async function persistModelArtifact({ supabase, modelRunId, modelRequest, gatewayData }) {
+async function persistModelArtifact({ supabase, modelRunId, modelRequest, gatewayData, artifactType = null }) {
   if (typeof gatewayData?.content !== 'string' || !gatewayData.content) {
     return { success: false, error: 'model gateway returned no artifact content' };
   }
@@ -152,7 +152,7 @@ async function persistModelArtifact({ supabase, modelRunId, modelRequest, gatewa
 
   const { data: artifact, error: rpcError } = await supabase.rpc('builder_finalize_model_artifact', {
     _model_run_id: modelRunId,
-    _artifact_type: resolveArtifactType(modelRequest),
+    _artifact_type: artifactType || resolveArtifactType(modelRequest),
     _content_type: metadata.contentType,
     _object_path: objectPath,
     _sha256: metadata.checksum,
