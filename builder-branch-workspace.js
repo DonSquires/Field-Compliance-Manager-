@@ -71,7 +71,7 @@ function createBranchWorkspace({ sourceDir, workspaceRoot, jobId, targetSha, bra
   return { branchName, workspacePath, head: git(workspacePath, ['rev-parse', 'HEAD']), existing: false };
 }
 
-function commitVerifiedPatch({ workspacePath, branchName, patch, message, push = false }) {
+function commitVerifiedPatch({ workspacePath, branchName, patch, message, body = '', push = false }) {
   if (!branchName.startsWith(BRANCH_PREFIX) || git(workspacePath, ['branch', '--show-current']) !== branchName) throw new Error('Builder workspace branch is invalid');
   if (git(workspacePath, ['status', '--porcelain', '--untracked-files=normal'])) throw new Error('Builder workspace must be clean before applying a patch');
   // The lane worker has already verified this patch; the commit step enforces path safety and the protected paths, not the lane fence.
@@ -87,7 +87,7 @@ function commitVerifiedPatch({ workspacePath, branchName, patch, message, push =
     git(workspacePath, ['apply', '--index', '--whitespace=error-all', patchPath]);
     const actualFiles = changedFilesFromPatch(git(workspacePath, ['diff', '--cached', '--binary']));
     if (JSON.stringify(actualFiles) !== JSON.stringify(changedFiles)) throw new Error('Applied patch files do not match its declared manifest');
-    git(workspacePath, ['-c', `user.name=${BUILDER_NAME}`, '-c', `user.email=${BUILDER_EMAIL}`, 'commit', '-m', String(message || 'Bob Builder verified change').slice(0, 200)]);
+    git(workspacePath, ['-c', `user.name=${BUILDER_NAME}`, '-c', `user.email=${BUILDER_EMAIL}`, 'commit', '-m', String(message || 'Bob Builder verified change').slice(0, 200), ...(body ? ['-m', String(body).slice(0, 2000)] : [])]);
     const commitSha = git(workspacePath, ['rev-parse', 'HEAD']);
     if (push) git(workspacePath, ['push', 'origin', branchName]);
     return { branchName, commitSha, changedFiles, pushed: push };

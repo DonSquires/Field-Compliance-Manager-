@@ -23,8 +23,10 @@ test('Builder branch workspace is pinned, isolated, and commits only validated p
     const workspace = createBranchWorkspace({ sourceDir: repo.root, workspaceRoot: repo.workspaceRoot, jobId: '12345678-1234-1234-1234-123456789abc', targetSha: repo.sha });
     assert.equal(workspace.branchName, 'bob/job-12345678123412341234');
     assert.equal(workspace.head, repo.sha);
-    const committed = commitVerifiedPatch({ workspacePath: workspace.workspacePath, branchName: workspace.branchName, patch, message: 'Bob Builder: update example' });
+    const committed = commitVerifiedPatch({ workspacePath: workspace.workspacePath, branchName: workspace.branchName, patch, message: 'Bob Builder: update example', body: 'Builder job j-1\nVerified patch artifact a-1' });
     assert.match(committed.commitSha, /^[a-f0-9]{40}$/);
+    assert.equal(git(repo.root, ['log', '-1', '--format=%s', committed.commitSha]), 'Bob Builder: update example');
+    assert.equal(git(repo.root, ['log', '-1', '--format=%b', committed.commitSha]).trim(), 'Builder job j-1\nVerified patch artifact a-1', 'the body carries provenance a reviewer can follow');
     assert.deepEqual(committed.changedFiles, ['apps/web/src/example.ts']);
     assert.equal(git(repo.root, ['show', `${committed.commitSha}:apps/web/src/example.ts`]), 'export const value = 2;');
     assert.equal(git(repo.root, ['show', `${repo.sha}:apps/web/src/example.ts`]), 'export const value = 1;');

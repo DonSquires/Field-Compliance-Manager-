@@ -50,6 +50,7 @@ jobs:
         env:
           GH_TOKEN: ${{ github.token }}
           REPO: ${{ github.repository }}
+          GITEA_MIRROR_USERNAME: ${{ secrets.GITEA_MIRROR_USERNAME }}
           GITEA_MIRROR_TOKEN: ${{ secrets.GITEA_MIRROR_TOKEN }}
         run: |
           set -euo pipefail
@@ -60,8 +61,12 @@ jobs:
           fi
           echo "Bridging $(printf '%s\n' "$branches" | wc -l) branch(es)."
           # The autopilot writes an explanatory pull request on Gitea (what changed, how it was verified);
-          # reuse it so reviewers on GitHub read the same account. Falls back to a minimal body.
-          gitea_prs="$(curl -sf -H "Authorization: token $GITEA_MIRROR_TOKEN" 'https://git.fcmanager.co.nz/api/v1/repos/Iron-Eagle-Security-Ltd/field-compliance-manager/pulls?state=all&limit=50' || echo '[]')"
+          # reuse it so reviewers on GitHub read the same account. Same basic credentials as the fetch
+          # step (the `token` header scheme silently failed for PR #20 and the body fell back).
+          gitea_prs="$(curl -sf -u "$GITEA_MIRROR_USERNAME:$GITEA_MIRROR_TOKEN" 'https://git.fcmanager.co.nz/api/v1/repos/Iron-Eagle-Security-Ltd/field-compliance-manager/pulls?state=all&limit=50' || echo '[]')"
+          if [ "$(printf '%s' "$gitea_prs" | jq -r 'length' 2>/dev/null || echo 0)" = "0" ]; then
+            echo "::warning::Could not read Bob's pull requests from Gitea; GitHub PR titles/bodies will fall back to the commit message."
+          fi
           pr_failures=0
           main_sha="$(git rev-parse origin/main)"
           git config user.name "Bob Builder"
@@ -104,7 +109,7 @@ jobs:
             if [ "$existing" = "0" ]; then
               gitea_title="$(printf '%s' "$gitea_prs" | jq -r --arg b "$branch" '[.[] | select(.head.ref == $b)] | sort_by(.number) | last | .title // empty' 2>/dev/null || true)"
               gitea_body="$(printf '%s' "$gitea_prs" | jq -r --arg b "$branch" '[.[] | select(.head.ref == $b)] | sort_by(.number) | last | .body // empty' 2>/dev/null || true)"
-              title="${gitea_title:-Bob Builder: $(git log -1 --format=%s "$sha" | cut -c1-200)}"
+              title="${gitea_title:-Bob Builder: $(git log -1 --format=%s "$sha" | sed 's/^Bob Builder: //' | cut -c1-180)}"
               provenance="$(printf '\n\n---\n**Bridge provenance.** Verified head on Gitea: `%s`; replayed onto main `%s` as `%s`. Draft for human review only; it does not authorize a merge or deployment.' "$sha" "${main_sha:0:10}" "$rebased")"
               body="${gitea_body:-$(printf '## Bob Builder review\n\nVerified Builder branch `%s`, published from the VPS via the Gitea mirror.\n\nJob record: builder_jobs where workspace_branch = `%s`.' "$branch" "$branch")}${provenance}"
               if gh pr create --repo "$REPO" --draft --base main --head "$branch" --title "$(printf '%s' "$title" | cut -c1-200)" --body "$body"; then

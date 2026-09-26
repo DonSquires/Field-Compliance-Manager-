@@ -248,7 +248,7 @@ async function bindBuilderWorkspace(jobId) {
 }
 
 async function commitBuilderPatch(jobId, artifactId) {
-  const { data: job } = await builderSupabase.from('builder_jobs').select('id,workspace_branch,workspace_head_sha').eq('id', jobId).single();
+  const { data: job } = await builderSupabase.from('builder_jobs').select('id,title,target_sha,workspace_branch,workspace_head_sha').eq('id', jobId).single();
   const { data: artifact } = await builderSupabase.from('builder_artifacts').select('id,status,artifact_type,storage_location,checksum').eq('id', artifactId).eq('job_id', jobId).single();
   if (!job?.workspace_branch || !job.workspace_head_sha || !artifact || artifact.status !== 'final' || artifact.artifact_type !== 'code_implementation' || !artifact.storage_location?.startsWith('supabase_storage://builder-artifacts/')) throw new BuilderStepError(409, 'Verified Builder workspace or patch artifact is unavailable');
   const { data: object, error: downloadError } = await builderSupabase.storage.from('builder-artifacts').download(artifact.storage_location.slice('supabase_storage://builder-artifacts/'.length));
@@ -257,7 +257,8 @@ async function commitBuilderPatch(jobId, artifactId) {
   // The recorded head is the truth; a tree left dirty (or one commit ahead but unrecorded) by an
   // interrupted commit step is restored to it and the verified patch is applied again.
   const workspace = createBranchWorkspace({ sourceDir: builderSourceDir, workspaceRoot: builderWorkspaceRoot, jobId: job.id, targetSha: job.workspace_head_sha, branchName: job.workspace_branch, recoverInterrupted: true });
-  const commit = commitVerifiedPatch({ workspacePath: workspace.workspacePath, branchName: workspace.branchName, patch, message: `Bob Builder: ${artifact.id}` });
+  // The subject is what GitHub shows as the PR title when the bridge cannot read the Gitea PR (PR #20 read "Bob Builder: <artifact id>").
+  const commit = commitVerifiedPatch({ workspacePath: workspace.workspacePath, branchName: workspace.branchName, patch, message: `Bob Builder: ${String(job.title || 'verified change').trim()}`, body: `Builder job ${job.id}\nVerified patch artifact ${artifact.id}\nPinned to ${job.target_sha}` });
   const { data: updated, error: recordError } = await builderSupabase.rpc('builder_record_workspace_commit', { _job_id: job.id, _expected_head_sha: job.workspace_head_sha, _commit_sha: commit.commitSha });
   if (recordError || !updated) throw new BuilderStepError(409, 'Builder workspace commit could not be recorded');
   return { branch: commit.branchName, head: commit.commitSha, changedFiles: commit.changedFiles };
