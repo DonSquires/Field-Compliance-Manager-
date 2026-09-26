@@ -283,6 +283,14 @@ serve(async req => {
     if (decisionError) return json({ error: decisionError.message }, 409);
     return json({ job: safeJob(data as Record<string, unknown>) });
   }
+  if (action === 'cancel') {
+    const reason = typeof body.reason === 'string' ? body.reason.trim() : '';
+    if (!reason) return json({ error: 'Cancellation reason is required' }, 400);
+    const { data, error } = await callerClient.rpc('builder_cancel_job', { _job_id: jobId, _reason: reason });
+    if (error) return json({ error: error.message }, 409);
+    await audit(job.organization_id, 'cancelled', jobId);
+    return json({ job: safeJob(data as Record<string, unknown>) });
+  }
   if (action === 'read_artifact') {
     const artifactId = typeof body.artifact_id === 'string' ? body.artifact_id : '';
     if (!artifactId) return json({ error: 'Artifact is required' }, 400);
