@@ -80,6 +80,14 @@ if (cmd === 'create') {
   const [jobId, reason] = args;
   const out = await room({ action: 'cancel', job_id: jobId, reason });
   console.log(out.job ? brief(out) : `status=${out.status} error=${out.error ?? '-'}`);
+} else if (cmd === 'approve') {
+  // The human's click for ONE pending gate (e.g. an evidential hold); the autopilot resumes on its own.
+  const [jobId, comment] = args;
+  const snap = await room({ action: 'get', job_id: jobId });
+  const pendingApproval = (snap.approvals ?? []).find((a) => a.status === 'pending');
+  if (!pendingApproval) { console.log('no pending approval'); process.exit(1); }
+  const decided = await room({ action: 'decide_approval', job_id: jobId, approval_id: pendingApproval.id, decision: 'approved', comment: comment || 'Approved by the human test driver.' });
+  console.log('approval', pendingApproval.approval_type, decided.status, decided.error ?? 'approved');
 } else if (cmd === 'follow') {
   const jobId = args[0];
   const deadline = Date.now() + Number(process.env.E2E_BUDGET_MIN || 90) * 60_000;
@@ -130,6 +138,6 @@ if (cmd === 'create') {
   console.log(String(data.reply ?? data.message ?? data.raw ?? JSON.stringify(data)).slice(0, 4000));
   if (data.meta) console.log('--- meta ---', JSON.stringify({ intent: data.meta.intent, route: data.meta.route_selected, verification: data.meta.verification?.status }).slice(0, 400));
 } else {
-  console.log('usage: create <title> <description> | follow <job_id> | publish <job_id> <artifact_id> | show <job_id> | cancel <job_id> "<reason>" | chat <message>');
+  console.log('usage: create <title> <description> | follow <job_id> | publish <job_id> <artifact_id> | show <job_id> | cancel <job_id> "<reason>" | approve <job_id> "<comment>" | chat <message>');
   process.exit(2);
 }

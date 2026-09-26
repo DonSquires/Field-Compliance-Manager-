@@ -453,3 +453,22 @@ test('a code request answered with a procedure and no repository lookup is block
   // No repo tool for this user (not admiral) -> no demand for evidence he cannot gather.
   assert.equal(runDeterministicChecks(procedure, { message: 'fix scripts/x.mjs crash', tools: [{ tool: 'query_records' }] }).some((i) => i.code === 'code_answer_without_evidence'), false);
 });
+
+test('owner-level code requests go straight to the strong planner tier; ordinary requests stay in-house first', async () => {
+  const { createModelGateway } = require('../services/fcm-api/src/bob/modelGateway');
+  const real = createModelGateway({ env: { OPENAI_API_KEY: 'k', GPU_WORKSTATION_URL: 'http://laptop:11434/v1', GPU_WORKSTATION_MODEL: 'qwen2.5-coder:7b' } });
+  const chains = [];
+  const gateway = {
+    chainAfter: real.chainAfter, providerKind: real.providerKind, fastChain: real.fastChain,
+    async chatJson(role, messages, options = {}) { chains.push(options.chain ?? null); return { content: JSON.stringify({ action: 'answer', reply: 'ok' }), provider: options.chain ? 'openai' : 'gpu_workstation', model: 'm', latency_ms: 5 }; },
+  };
+  const ownerTools = [...TOOLS, { tool: 'repo_search' }, { tool: 'create_builder_job' }];
+  await planTurn({ message: 'Bob, apps/mobile/src/components/OfficerVehicleLookup.tsx shows raw errors to officers; fix it and add a test', tools: ownerTools, verify: false }, { gateway, env: {} });
+  await planTurn({ message: 'Bob, apps/mobile/src/components/OfficerVehicleLookup.tsx shows raw errors', tools: TOOLS, verify: false }, { gateway, env: {} });
+  await planTurn({ message: 'who is rostered at Nelson tonight?', tools: ownerTools, verify: false }, { gateway, env: {} });
+  await planTurn({ message: 'fix scripts/x.mjs crash', tools: ownerTools, verify: false }, { gateway, env: { BOB_PLAN_CODE_REQUESTS_IN_HOUSE: 'true' } });
+  assert.deepEqual(chains, [['openai'], null, null, null], 'only the owner-level code request skips the laptop planner');
+  // A "we should…" restatement of a code request with no lookup is blocked too.
+  const issues = runDeterministicChecks({ action: 'answer', reply: 'The catch block shows the raw message. To improve security, we should display a plain message and log the cause. If the app has a test runner, we should add a unit test.' }, { message: 'Bob, in apps/mobile/src/components/OfficerVehicleLookup.tsx the catch shows cause.message to officers; fix it and add a test', tools: ownerTools });
+  assert.ok(issues.some((i) => i.code === 'code_answer_without_evidence'));
+});

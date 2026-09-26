@@ -18,8 +18,8 @@ const BLANKET_AFFIRMATIVE_RE = /^\s*(yes|yep|yeah|yes please|ok|okay|sure|correc
 const DRAFT_REQUEST_RE = /\b(draft|write|create|prepare|produce|generate|put together)\b[\s\S]{0,80}\b(job description|position description|advert(isement)?|job ad|seek ad|agreement|contract|letter|policy|sop|procedure|report|checklist|proposal|email|memo|site instruction|brief|synopsis|summary)\b/i;
 // A request about the code: names a source path, or asks to fix/debug a crash, bug, test, function…
 const CODE_REQUEST_RE = /(\b[\w./-]+\.(?:m?js|c?js|tsx?|sql|py|ps1|json|ya?ml)\b|\b(?:fix|debug|patch|repair|investigate)\b[\s\S]{0,60}\b(?:crash|bug|error|exception|typeerror|failing|test|function|script|component|migration|endpoint|edge function)\b)/i;
-// A reply that only narrates a procedure ("I will…", numbered "First…") and ends by asking for approval of the approach.
-const PROCEDURE_ONLY_RE = /\b(I will|I'll|I would|I am going to|I'm going to|first,? I)\b[\s\S]*\b(what do you think|does this approach|shall I proceed|let me know if|sound good)\b/i;
+// A reply that only narrates a procedure ("I will…", "we should…") and takes no step, or ends by asking for approval of the approach.
+const PROCEDURE_ONLY_RE = /\b(I will|I'll|I would|I am going to|I'm going to|first,? I|we should|we need to|you should|the fix is to|to improve|to fix (?:it|this),? we)\b/i;
 
 function countQuestionLines(text) {
   return String(text || '').split('\n').filter((line) => /^\s*(?:\d+[.)]|[-*•])\s+.*\?\s*$/.test(line)).length;
@@ -243,6 +243,7 @@ function scrubReply(reply) {
 
 module.exports = {
   BLANKET_AFFIRMATIVE_RE,
+  CODE_REQUEST_RE,
   DRAFT_REQUEST_RE,
   autoRepairArgs,
   buildCriticMessages,
