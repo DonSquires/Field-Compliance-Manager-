@@ -4,6 +4,7 @@ const path = require('node:path');
 const test = require('node:test');
 
 const migration = fs.readFileSync(path.resolve(__dirname, '../supabase/migrations/20260927010000_govern_custom_report_builder.sql'), 'utf8');
+const custodyHotfix = fs.readFileSync(path.resolve(__dirname, '../supabase/migrations/20260927011000_remove_report_grand_master_cross_tenant_bypass.sql'), 'utf8');
 const builder = fs.readFileSync(path.resolve(__dirname, '../apps/web/src/components/CustomReportBuilder.tsx'), 'utf8');
 const snapshot = fs.readFileSync(path.resolve(__dirname, '../apps/web/src/components/CustomReportSnapshot.tsx'), 'utf8');
 const hub = fs.readFileSync(path.resolve(__dirname, '../apps/web/src/pages/ReportsHubPage.tsx'), 'utf8');
@@ -17,6 +18,8 @@ test('custom report generation is agreement anchored and provider-admin governed
   assert.match(migration, /agreement\.invitation_status = 'accepted'/);
   assert.match(migration, /not public\.is_report_provider_custodian_for_org\(v_agreement\.provider_organization_id\)/);
   assert.match(migration, /create or replace function public\.report_provider_custodian_for_actor/);
+  assert.match(custodyHotfix, /profile\.organization_id = p_target_organization_id/);
+  assert.doesNotMatch(custodyHotfix, /profile\.role = 'grand_master'\s+or/);
   assert.match(migration, /\) is true\)\s*\)\s*\);/);
   assert.match(migration, /drop policy if exists monthly_report_packs_insert/);
   assert.match(migration, /drop policy if exists monthly_report_packs_update/);

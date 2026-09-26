@@ -15,6 +15,7 @@ $$;
 
 do $$
 declare
+  v_platform_owner uuid := gen_random_uuid();
   v_parent uuid := gen_random_uuid();
   v_provider uuid := gen_random_uuid();
   v_other_provider uuid := gen_random_uuid();
@@ -22,6 +23,7 @@ declare
   v_other_client uuid := gen_random_uuid();
   v_outsider_org uuid := gen_random_uuid();
   v_parent_admin uuid := gen_random_uuid();
+  v_grand_master uuid := gen_random_uuid();
   v_other_provider_admin uuid := gen_random_uuid();
   v_client_user uuid := gen_random_uuid();
   v_client_viewer uuid := gen_random_uuid();
@@ -30,6 +32,7 @@ declare
   v_other_agreement uuid := gen_random_uuid();
   v_same_client_agreement uuid := gen_random_uuid();
   v_provider_as_client_agreement uuid := gen_random_uuid();
+  v_financial_agreement uuid := gen_random_uuid();
   v_place uuid := gen_random_uuid();
   v_other_place uuid := gen_random_uuid();
   v_location uuid := gen_random_uuid();
@@ -65,6 +68,7 @@ declare
 begin
   insert into public.organizations (id, name, organization_type, parent_organization_id, active, status)
   values
+    (v_platform_owner, 'Platform Owner', 'service_provider', null, true, 'active'),
     (v_parent, 'Custom Report Parent', 'service_provider', null, true, 'active'),
     (v_provider, 'Custom Report Branch', 'service_provider', v_parent, true, 'active'),
     (v_other_provider, 'Unrelated Report Provider', 'service_provider', null, true, 'active'),
@@ -74,6 +78,7 @@ begin
 
   insert into auth.users (id, instance_id, aud, role, email)
   values
+    (v_grand_master, '00000000-0000-0000-0000-000000000000', 'authenticated', 'authenticated', 'platform-owner@example.test'),
     (v_parent_admin, '00000000-0000-0000-0000-000000000000', 'authenticated', 'authenticated', 'custom-report-parent@example.test'),
     (v_other_provider_admin, '00000000-0000-0000-0000-000000000000', 'authenticated', 'authenticated', 'other-report-provider@example.test'),
     (v_client_user, '00000000-0000-0000-0000-000000000000', 'authenticated', 'authenticated', 'custom-report-client@example.test'),
@@ -82,6 +87,7 @@ begin
 
   insert into public.user_profiles (id, role, organization_id, employer_organization_id, display_name, email)
   values
+    (v_grand_master, 'grand_master', v_platform_owner, v_platform_owner, 'Platform Owner', 'platform-owner@example.test'),
     (v_parent_admin, 'master', v_parent, v_parent, 'Custom Report Parent Admin', 'custom-report-parent@example.test'),
     (v_other_provider_admin, 'admin', v_other_provider, v_other_provider, 'Other Report Provider Admin', 'other-report-provider@example.test'),
     (v_client_user, 'client_admin', v_client, v_client, 'Custom Report Client User', 'approved@example.test'),
@@ -92,6 +98,7 @@ begin
     id, provider_organization_id, client_organization_id, name,
     agreement_type, starts_on, invitation_status, client_portal_reports_enabled
   ) values
+    (v_financial_agreement, v_platform_owner, v_provider, 'Platform Subscription', 'financial', date '2098-01-01', 'accepted', false),
     (v_agreement, v_provider, v_client, 'Custom Reporting Agreement', 'operational', date '2098-01-01', 'accepted', true),
     (v_other_agreement, v_provider, v_other_client, 'Other Reporting Agreement', 'operational', date '2098-01-01', 'accepted', true),
     (v_same_client_agreement, v_other_provider, v_client, 'Unrelated Provider Agreement', 'operational', date '2098-01-01', 'accepted', true),
@@ -563,6 +570,26 @@ begin
     v_denied := sqlerrm like '%Provider custodian access required%';
   end;
   perform pg_temp.check('upstream provider cannot review another providers custom report', v_denied);
+
+  perform set_config('request.jwt.claim.sub', v_grand_master::text, true);
+  set local role authenticated;
+  perform pg_temp.check(
+    'platform owner grand master and financial agreement do not confer subscriber report access',
+    not public.is_report_provider_custodian_for_org(v_provider)
+    and not exists(select 1 from public.monthly_report_packs where id = v_checkpoint_pack)
+    and not public.can_read_current_report_pack_pdf(
+      'org/' || v_provider || '/report-packs/' || v_pack || '/published.pdf'
+    )
+  );
+  v_denied := false;
+  begin
+    perform public.get_custom_report_scope_options(
+      v_agreement, date '2098-01-01', date '2098-01-31'
+    );
+  exception when others then
+    v_denied := sqlerrm like '%Provider administrator access required%';
+  end;
+  perform pg_temp.check('platform owner grand master cannot inspect subscriber report scope', v_denied);
 
   perform set_config('request.jwt.claim.sub', v_parent_admin::text, true);
   set local role authenticated;

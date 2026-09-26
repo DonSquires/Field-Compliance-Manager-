@@ -14,9 +14,11 @@ A report cannot combine unrelated clients or agreements. This preserves the
 agreement as the authorization and delivery boundary.
 
 Provider authority is deliberately narrower than general agreement visibility:
-only a direct provider custodian, its parent organisation, or `grand_master`
-may administer the report. A provider that happens to serve the report-owning
-provider as a client does not inherit report access.
+only a direct provider custodian or its parent organisation may administer the
+report. A provider that happens to serve the report-owning provider as a client
+does not inherit report access. Human platform-owner administrators, including
+`grand_master`, have no standing subscriber report access; diagnostics require
+the governed, audited break-glass path.
 
 ## Scope Semantics
 
