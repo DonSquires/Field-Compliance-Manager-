@@ -1,0 +1,89 @@
+.officer-incident-identity {
+  margin-top: 16px;
+  padding: 16px;
+  border: 1px solid #31514f;
+  border-radius: 8px;
+  background: #0b1b25;
+}
+
+.officer-incident-identity > p {
+  margin: 8px 0 0;
+  color: #9cb2be;
+  font-size: 12px;
+}
+
+.officer-incident-identity form,
+.officer-incident-identity form > label {
+  display: grid;
+  gap: 8px;
+}
+
+.officer-incident-identity form {
+  margin-top: 14px;
+}
+
+.officer-incident-identity label > span {
+  color: #7dd3c7;
+  font-size: 12px;
+  font-weight: 850;
+  text-transform: uppercase;
+}
+
+.officer-incident-identity input,
+.officer-incident-identity select,
+.officer-incident-identity textarea {
+  width: 100%;
+  box-sizing: border-box;
+  border: 1px solid #385061;
+  border-radius: 5px;
+  padding: 10px;
+  color: #e7eef5;
+  background: #07131d;
+  font: inherit;
+}
+
+.officer-identity-submit {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+}
+
+.officer-identity-submit span {
+  color: #91a3b5;
+  font-size: 12px;
+}
+
+.officer-identity-submit button {
+  display: inline-flex;
+  align-items: center;
+  gap: 7px;
+  min-height: 40px;
+  border: 1px solid #64baad;
+  border-radius: 5px;
+  padding: 0 14px;
+  color: #071713;
+  background: #7dd3c7;
+  font-weight: 800;
+}
+
+.officer-identity-submit button:disabled {
+  opacity: 0.55;
+  cursor: not-allowed;
+}
+
+@media (max-width: 760px) {
+  .officer-incident-identity .officer-report-grid {
+    grid-template-columns: 1fr;
+  }
+
+  .officer-identity-submit {
+    align-items: stretch;
+    flex-direction: column;
+  }
+
+  .officer-identity-submit button {
+    justify-content: center;
+    width: 100%;
+  }
+}

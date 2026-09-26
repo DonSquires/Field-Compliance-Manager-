@@ -9,6 +9,7 @@ const migration = read('supabase/migrations/20260926110000_identity_records_work
 const securityLicenceMigration = read('supabase/migrations/20260926140000_security_licence_identity_intake.sql');
 const deterministicTypesMigration = read('supabase/migrations/20260927020000_deterministic_identity_document_types.sql');
 const canonicalIncidentMigration = read('supabase/migrations/20260927030000_canonical_staff_and_incident_people.sql');
+const incidentEvidenceMigration = read('supabase/migrations/20260927040000_incident_identity_evidence_workflow.sql');
 const api = read('services/fcm-api/server.js');
 const dockerfile = read('services/fcm-api/Dockerfile');
 const inferenceEdge = read('supabase/functions/bob-inference/index.ts');
@@ -16,6 +17,7 @@ const perceptionEdge = read('supabase/functions/bob-perceive-image/index.ts');
 const workspace = read('apps/web/src/components/IdentityRecordsWorkspace.tsx');
 const identityPage = read('apps/web/src/pages/UserManagementPage.tsx');
 const cctvReviewPage = read('apps/web/src/pages/CCTVReviewPage.tsx');
+const officerFieldReportPage = read('apps/web/src/pages/OfficerFieldReportPage.tsx');
 const { extractIdentityFields, isoDate } = require('../services/fcm-api/src/bob/identityDocument');
 
 test('identity OCR proposes editable driver, firearms, and security licence fields', () => {
@@ -75,7 +77,10 @@ test('private identity evidence runs local OCR and source-face inference', () =>
   assert.match(perceptionEdge, /register_deterministic_identity_document_proposal/);
   assert.match(perceptionEdge, /admin\.rpc\('register_deterministic_identity_document_proposal'/);
   assert.match(perceptionEdge, /att\.uploaded_by !== user\.id/);
-  assert.match(perceptionEdge, /callerClient\.from\('bob_attachments'\)/);
+  assert.match(perceptionEdge, /const attachmentClient = incidentMode \? admin : callerClient/);
+  assert.match(perceptionEdge, /incident_identity_document/);
+  assert.match(perceptionEdge, /can_record_incident_person/);
+  assert.match(perceptionEdge, /attach_incident_identity_proposal/);
   assert.match(perceptionEdge, /att\.purpose !== 'identity_document'/);
   assert.match(api, /unsupported_identity_document_type/);
   assert.match(api, /verifiedIdentityContext/);
@@ -119,6 +124,19 @@ test('staff and incident identities converge on canonical people', () => {
   assert.match(canonicalIncidentMigration, /incident_person_identity_recorded/);
 });
 
+test('assigned officers capture incident ID evidence and admins hand staff credentials to HR', () => {
+  assert.match(incidentEvidenceMigration, /FUNCTION public\.register_incident_identity_attachment/);
+  assert.match(incidentEvidenceMigration, /incident-.*can_record_incident_person/s);
+  assert.match(incidentEvidenceMigration, /FUNCTION public\.attach_incident_identity_proposal/);
+  assert.match(incidentEvidenceMigration, /FUNCTION public\.review_canonical_identity_evidence/);
+  assert.match(incidentEvidenceMigration, /record_staff_credential/);
+  assert.match(incidentEvidenceMigration, /false,'Created from approved identity evidence; People & HR verification still required'/);
+  assert.match(officerFieldReportPage, /Record a person and ID source/);
+  assert.match(officerFieldReportPage, /register_incident_identity_attachment/);
+  assert.match(officerFieldReportPage, /mode: 'incident_identity_document'/);
+  assert.match(officerFieldReportPage, /remains unverified until approval/);
+});
+
 test('People and Access exposes manual people, vehicles, and human-reviewed ID intake', () => {
   assert.match(identityPage, /Identity records/);
   assert.match(identityPage, /<IdentityRecordsWorkspace/);
@@ -132,7 +150,8 @@ test('People and Access exposes manual people, vehicles, and human-reviewed ID i
   assert.match(workspace, /People &amp;\s*HR → Credentials/);
   assert.match(workspace, /multiple/);
   assert.match(workspace, /Upload and extract \$\{documentFiles\.length\} files/);
-  assert.match(workspace, /review_deterministic_identity_evidence/);
+  assert.match(workspace, /review_canonical_identity_evidence/);
+  assert.match(workspace, /unverified credential handoff is ready in People & HR → Credentials/);
   assert.match(workspace, /Reject it, then upload it under the matching evidence type/);
   assert.match(workspace, /Historical licence retained without replacing current details/);
   assert.match(workspace, /Historical evidence · Current details unchanged/);

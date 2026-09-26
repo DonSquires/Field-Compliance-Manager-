@@ -14,7 +14,16 @@ describe('officer field report capture UI', () => {
   it('uses only the governed capture RPC for submission', () => {
     expect(source).toContain("supabase.rpc('submit_officer_field_report'");
     expect(source).not.toContain(".from('officer_field_reports').insert");
-    expect(source).not.toContain(".from('incidents')");
+    expect(source).not.toContain(".from('incidents').insert");
+    expect(source).toContain(".from('incidents')");
+    expect(source).toContain(".eq('officer_user_id', profile.id)");
+  });
+  it('records incident identity only through governed RPCs and private evidence intake', () => {
+    expect(source).toContain("supabase.rpc('record_incident_person_identity'");
+    expect(source).toContain("supabase.rpc('register_incident_identity_attachment'");
+    expect(source).toContain("mode: 'incident_identity_document'");
+    expect(source).toContain("supabase.storage.from('identity-evidence').upload");
+    expect(source).toContain('remains unverified until approval');
   });
   it('preserves retry identity and capture time until confirmed', () => {
     expect(source).toContain('p_client_event_id: eventIdRef.current');

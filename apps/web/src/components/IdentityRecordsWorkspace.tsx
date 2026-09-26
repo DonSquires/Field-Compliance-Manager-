@@ -702,7 +702,7 @@ export function IdentityRecordsWorkspace({
     setError(null);
     setNotice(null);
     const { data: reviewResult, error: reviewError } = await supabase.rpc(
-      "review_deterministic_identity_evidence",
+      "review_canonical_identity_evidence",
       {
         p_identity_document_id: selectedDocument.id,
         p_action: action,
@@ -714,7 +714,7 @@ export function IdentityRecordsWorkspace({
     else {
       setNotice(
         action === "approve"
-          ? `Identity evidence approved.${reviewResult?.identity_verified ? " Identity details are verified." : " This evidence type does not verify identity details."}${["driver_licence", "firearms_licence", "security_licence"].includes(selectedDocument.document_kind) ? (reviewResult?.current_credential_updated ? " Current licence details were updated." : " Historical licence retained without replacing current details.") : ""}${reviewResult?.face_candidate_enrolled ? " One face candidate is now active." : " No face candidate was enrolled."}`
+          ? `Identity evidence approved.${reviewResult?.identity_verified ? " Identity details are verified." : " This evidence type does not verify identity details."}${["driver_licence", "firearms_licence", "security_licence"].includes(selectedDocument.document_kind) ? (reviewResult?.current_credential_updated ? " Current licence details were updated." : " Historical licence retained without replacing current details.") : ""}${reviewResult?.staff_verification_required ? " An unverified credential handoff is ready in People & HR → Credentials." : ""}${reviewResult?.face_candidate_enrolled ? " One face candidate is now active." : " No face candidate was enrolled."}`
           : "Identity evidence rejected. Its face template was removed.",
       );
       setSelectedDocument(null);

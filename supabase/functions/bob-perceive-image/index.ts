@@ -105,27 +105,42 @@ serve(async (req)=>{
     if (!attachmentId) return json({
       error: 'attachment_id is required'
     }, 400);
-    const { data: att } = await callerClient.from('bob_attachments').select('id, organization_id, uploaded_by, file_name, purpose, storage_bucket, storage_path').eq('id', attachmentId).maybeSingle();
+    const incidentMode = body.mode === 'incident_identity_document';
+    const attachmentClient = incidentMode ? admin : callerClient;
+    const { data: att } = await attachmentClient.from('bob_attachments').select('id, organization_id, uploaded_by, file_name, purpose, storage_bucket, storage_path, extraction_payload').eq('id', attachmentId).maybeSingle();
     if (!att) return json({
       error: 'Attachment not found'
     }, 404);
     if (att.uploaded_by !== user.id) return json({ error: 'Attachment belongs to another user' }, 403);
-    if (body.mode === 'identity_document') {
-      if (!['grand_master', 'master', 'admin'].includes(String(profile.role))) {
+    if (body.mode === 'identity_document' || incidentMode) {
+      if (!incidentMode && !['grand_master', 'master', 'admin'].includes(String(profile.role))) {
         return json({ error: 'Forbidden: administrator identity review required' }, 403);
       }
       const personRecordId = String(body.person_record_id ?? '').trim();
       const organizationId = String(body.organization_id ?? att.organization_id ?? '').trim();
       const documentKind = String(body.document_kind ?? '').trim();
-      const expectedPrefix = `org/${organizationId}/identity/${user.id}/`;
+      const incidentId = incidentMode ? String(body.incident_id ?? att.extraction_payload?.incident_id ?? '').trim() : '';
+      const expectedPrefix = incidentMode
+        ? `org/${organizationId}/identity/${user.id}/incident-${incidentId}/`
+        : `org/${organizationId}/identity/${user.id}/`;
       if (!personRecordId || !organizationId || !documentKind || att.organization_id !== organizationId) {
         return json({ error: 'Identity document organization, person, and kind are required' }, 400);
       }
       if (att.purpose !== 'identity_document' || att.storage_bucket !== 'identity-evidence' || !att.storage_path.startsWith(expectedPrefix)) {
         return json({ error: 'Identity attachment is outside the governed private intake path' }, 400);
       }
-      const { data: canAdminister } = await callerClient.rpc('is_admin_for_org', { target_org_id: organizationId });
-      if (!canAdminister) return json({ error: 'Forbidden: administrator access to this organization is required' }, 403);
+      if (incidentMode) {
+        const { data: canRecord } = await callerClient.rpc('can_record_incident_person', { p_incident_id: incidentId, p_actor: user.id });
+        const payloadPerson = String(att.extraction_payload?.person_record_id ?? '');
+        if (!incidentId || canRecord !== true || payloadPerson !== personRecordId || String(att.extraction_payload?.document_kind ?? '') !== documentKind) {
+          return json({ error: 'Forbidden: assigned incident identity context required' }, 403);
+        }
+        const { data: incidentLink } = await admin.from('incident_person_links').select('id').eq('incident_id', incidentId).eq('person_record_id', personRecordId).maybeSingle();
+        if (!incidentLink) return json({ error: 'Record the person on the incident before adding identity evidence' }, 400);
+      } else {
+        const { data: canAdminister } = await callerClient.rpc('is_admin_for_org', { target_org_id: organizationId });
+        if (!canAdminister) return json({ error: 'Forbidden: administrator access to this organization is required' }, 403);
+      }
       const inference = await callInference('identity_document', {
         attachment_id: att.id,
         organization_id: organizationId,
@@ -152,6 +167,16 @@ serve(async (req)=>{
         p_face_count: image.face_count ?? 0,
       });
       if (proposalError) return json({ error: proposalError.message }, 400);
+      if (incidentMode) {
+        const identityDocumentId = proposal?.identity_document_id;
+        const { error: incidentProposalError } = await admin.rpc('attach_incident_identity_proposal', {
+          p_actor_user_id: user.id,
+          p_incident_id: incidentId,
+          p_person_record_id: personRecordId,
+          p_identity_document_id: identityDocumentId,
+        });
+        if (incidentProposalError) return json({ error: incidentProposalError.message }, 400);
+      }
       return json({
         success: true,
         proposal,

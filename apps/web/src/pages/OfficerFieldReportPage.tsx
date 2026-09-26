@@ -1,5 +1,5 @@
 import React, { useCallback, useEffect, useRef, useState } from 'react';
-import { AlertTriangle, CheckCircle2, ClipboardPlus, Crosshair, FileText, MapPin, RefreshCw, Search, Send, X } from 'lucide-react';
+import { AlertTriangle, CheckCircle2, ClipboardPlus, Crosshair, FileText, IdCard, MapPin, RefreshCw, Search, Send, Upload, X } from 'lucide-react';
 import { useLocation } from 'react-router-dom';
 import { useAuth } from '../context/AuthContext';
 import { useServiceRelationships } from '../context/ServiceRelationshipContext';
@@ -8,15 +8,19 @@ import { describeLoadFailures } from '../lib/friendlyLoadError';
 import { supabase } from '../lib/supabase';
 import { ShellLayout } from '../layouts/ShellLayout';
 import './OfficerFieldReportPage.css';
+import './OfficerIncidentIdentity.css';
 
 type ReportType = 'incident' | 'maintenance' | 'health_safety';
 type ReportSeverity = 'low' | 'medium' | 'high' | 'critical';
 interface ShiftOption { id: string; service_type: string; scheduled_start: string; status: string; }
 interface ReportRecord { id: string; report_type: ReportType; severity: ReportSeverity; status: string; title: string; description: string; location_name: string | null; reported_at: string; follow_up_required: boolean; review_notes: string | null; reviewed_at: string | null; }
+interface IncidentOption { id: string; incident_type: string; status: string; occurred_at: string; }
+interface DocumentTypeOption { document_kind: string; display_name: string; }
 interface GpsState { status: 'idle' | 'locating' | 'captured' | 'unavailable'; lat: number | null; lng: number | null; accuracy: number | null; }
 type AddressResolution = 'idle' | 'resolving' | 'resolved' | 'unavailable';
 
 const initialForm = { reportType: 'incident' as ReportType, severity: 'medium' as ReportSeverity, shiftId: '', title: '', description: '', locationName: '', address: '', immediateAction: '', followUp: false, followUpNotes: '' };
+const initialIdentityForm = { incidentId: '', displayName: '', involvementRole: 'subject', notes: '', documentKind: 'national_id' };
 
 const OfficerFieldReportPage: React.FC = () => {
   const location = useLocation();
@@ -27,6 +31,8 @@ const OfficerFieldReportPage: React.FC = () => {
   const { selectedSite, selectedZone, locationStatus } = useServiceRelationships();
   const [reports, setReports] = useState<ReportRecord[]>([]);
   const [shifts, setShifts] = useState<ShiftOption[]>([]);
+  const [incidents, setIncidents] = useState<IncidentOption[]>([]);
+  const [documentTypes, setDocumentTypes] = useState<DocumentTypeOption[]>([]);
   const [form, setForm] = useState(initialForm);
   const [gps, setGps] = useState<GpsState>({ status: 'idle', lat: null, lng: null, accuracy: null });
   const [addressResolution, setAddressResolution] = useState<AddressResolution>('idle');
@@ -35,6 +41,11 @@ const OfficerFieldReportPage: React.FC = () => {
   const [submitting, setSubmitting] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [receipt, setReceipt] = useState<{ id: string; receivedAt: string; shiftId: string | null; shiftLabel: string | null } | null>(null);
+  const [identityForm, setIdentityForm] = useState(initialIdentityForm);
+  const [identityFiles, setIdentityFiles] = useState<File[]>([]);
+  const [identityInputKey, setIdentityInputKey] = useState(0);
+  const [identitySubmitting, setIdentitySubmitting] = useState(false);
+  const [identityMessage, setIdentityMessage] = useState<{ tone: 'success' | 'error'; text: string } | null>(null);
   const eventIdRef = useRef(crypto.randomUUID());
   const capturedAtRef = useRef(new Date().toISOString());
 
@@ -48,13 +59,17 @@ const OfficerFieldReportPage: React.FC = () => {
     }
     setLoading(true); setError(null);
     const since = new Date(Date.now() - 24 * 60 * 60 * 1000).toISOString();
-    const [reportResponse, shiftResponse] = await Promise.all([
+    const [reportResponse, shiftResponse, incidentResponse, documentTypeResponse] = await Promise.all([
       supabase.from('officer_field_reports').select('id, report_type, severity, status, title, description, location_name, reported_at, follow_up_required, review_notes, reviewed_at').eq('officer_id', profile.id).order('reported_at', { ascending: false }).limit(20),
       supabase.from('shifts').select('id, service_type, scheduled_start, status').eq('officer_user_id', profile.id).in('status', ['accepted', 'in_progress', 'completed']).gte('scheduled_end', since).order('scheduled_start', { ascending: false }).limit(10),
+      supabase.from('incidents').select('id,incident_type,status,occurred_at').eq('officer_user_id', profile.id).in('status', ['open', 'in_review', 'escalated']).order('occurred_at', { ascending: false }).limit(50),
+      supabase.rpc('get_identity_document_types'),
     ]);
     setReports((reportResponse.data as ReportRecord[]) ?? []); setShifts((shiftResponse.data as ShiftOption[]) ?? []);
+    setIncidents((incidentResponse.data as IncidentOption[]) ?? []);
+    setDocumentTypes(((documentTypeResponse.data as DocumentTypeOption[]) ?? []).filter((definition) => definition.document_kind !== 'person_photo'));
     setForm((current) => ({ ...current, shiftId: current.shiftId || (shiftResponse.data as ShiftOption[] | null)?.[0]?.id || '' }));
-    const failure = describeLoadFailures([['reports', reportResponse.error], ['shifts', shiftResponse.error]]);
+    const failure = describeLoadFailures([['reports', reportResponse.error], ['shifts', shiftResponse.error], ['assigned incidents', incidentResponse.error], ['identity document types', documentTypeResponse.error]]);
     if (failure) setError(failure); setLoading(false);
   }, [profile?.id, profile?.organizationId]);
   useEffect(() => { void loadData(); }, [loadData]);
@@ -102,6 +117,68 @@ const OfficerFieldReportPage: React.FC = () => {
     }
   };
 
+  const submitIncidentIdentity = async (event: React.FormEvent) => {
+    event.preventDefault();
+    if (!profile?.id || !profile.organizationId || !identityForm.incidentId || !identityForm.displayName.trim() || !identityForm.notes.trim()) return;
+    setIdentitySubmitting(true); setIdentityMessage(null);
+    try {
+      const { data: personLink, error: personError } = await supabase.rpc('record_incident_person_identity', {
+        p_incident_id: identityForm.incidentId,
+        p_involvement_role: identityForm.involvementRole,
+        p_notes: identityForm.notes.trim(),
+        p_person_record_id: null,
+        p_staff_profile_id: null,
+        p_display_name: identityForm.displayName.trim(),
+        p_identity_document_id: null,
+      });
+      if (personError || !personLink?.person_record_id) throw personError ?? new Error('The incident person receipt was not returned.');
+      const personRecordId = personLink.person_record_id as string;
+      const failures: string[] = [];
+      let queued = 0;
+      for (const file of identityFiles) {
+        if (file.size > 25 * 1024 * 1024) { failures.push(`${file.name} is larger than 25 MB.`); continue; }
+        const attachmentId = crypto.randomUUID();
+        const safeName = file.name.replace(/[^a-zA-Z0-9._-]+/g, '_').slice(-180);
+        const storagePath = `org/${profile.organizationId}/identity/${profile.id}/incident-${identityForm.incidentId}/${attachmentId}-${safeName}`;
+        let uploaded = false;
+        let registered = false;
+        try {
+          const upload = await supabase.storage.from('identity-evidence').upload(storagePath, file, { contentType: file.type || 'application/octet-stream', upsert: false });
+          if (upload.error) throw upload.error;
+          uploaded = true;
+          const registration = await supabase.rpc('register_incident_identity_attachment', {
+            p_incident_id: identityForm.incidentId,
+            p_person_record_id: personRecordId,
+            p_document_kind: identityForm.documentKind,
+            p_attachment_id: attachmentId,
+            p_file_name: file.name,
+            p_file_type: file.type || 'application/octet-stream',
+            p_file_size_bytes: file.size,
+            p_storage_path: storagePath,
+          });
+          if (registration.error) throw registration.error;
+          registered = true;
+          const perception = await supabase.functions.invoke('bob-perceive-image', { body: {
+            mode: 'incident_identity_document', attachment_id: attachmentId, organization_id: profile.organizationId,
+            incident_id: identityForm.incidentId, person_record_id: personRecordId, document_kind: identityForm.documentKind,
+          } });
+          if (perception.error || !perception.data?.success) throw perception.error ?? new Error(perception.data?.error || 'Identity extraction failed');
+          queued += 1;
+        } catch (identityError) {
+          if (registered) await supabase.from('bob_attachments').update({ processing_state: 'failed' }).eq('id', attachmentId).eq('uploaded_by', profile.id);
+          else if (uploaded) await supabase.storage.from('identity-evidence').remove([storagePath]);
+          failures.push(`${file.name}: ${identityError instanceof Error ? identityError.message : 'could not be processed'}`);
+        }
+      }
+      setIdentityForm(initialIdentityForm); setIdentityFiles([]); setIdentityInputKey((value) => value + 1);
+      setIdentityMessage({ tone: failures.length ? 'error' : 'success', text: queued
+        ? `${queued} identity source${queued === 1 ? '' : 's'} sent for administrator review. The incident person remains unverified until approval.${failures.length ? ` ${failures.join(' ')}` : ''}`
+        : `Person recorded on the incident for administrator review.${failures.length ? ` ${failures.join(' ')}` : ''}` });
+    } catch (identityError) {
+      setIdentityMessage({ tone: 'error', text: identityError instanceof Error ? identityError.message : 'The incident identity could not be recorded.' });
+    } finally { setIdentitySubmitting(false); }
+  };
+
   const canSubmit = form.title.trim().length >= 5 && form.description.trim().length >= 10 && (!form.followUp || form.followUpNotes.trim().length > 0) && !submitting;
   const submitReport = async (event: React.FormEvent) => {
     event.preventDefault(); if (!canSubmit) return;
@@ -127,6 +204,26 @@ const OfficerFieldReportPage: React.FC = () => {
     <header className="officer-report-header"><div><span>Field evidence</span><h1>Field report</h1><p>{investigationId ? 'Investigation follow-up report. This submission will be linked to the investigation.' : 'Submit operational, maintenance, or health and safety concerns.'}</p></div><button type="button" onClick={() => void loadData()} disabled={loading} title="Refresh reports" aria-label="Refresh field reports"><RefreshCw size={17} className={loading ? 'is-spinning' : ''} /></button></header>
     {error && <div className="officer-report-message is-error" role="alert"><AlertTriangle size={17} /><span>{error}</span><button type="button" onClick={() => setError(null)} title="Dismiss" aria-label="Dismiss error"><X size={16} /></button></div>}
     {receipt && <div className="officer-report-message is-success" role="status"><CheckCircle2 size={17} /><span>Report confirmed · receipt {receipt.id.slice(0, 8)} · {receipt.shiftId ? `linked to ${receipt.shiftLabel ?? `shift ${receipt.shiftId.slice(0, 8)}`}` : 'not linked to a shift'} · {new Date(receipt.receivedAt).toLocaleTimeString('en-NZ', { hour: '2-digit', minute: '2-digit' })}</span><button type="button" onClick={() => setReceipt(null)} title="Dismiss" aria-label="Dismiss receipt"><X size={16} /></button></div>}
+    <section className="officer-incident-identity" aria-labelledby="officer-incident-identity-title">
+      <div className="officer-report-panel-heading"><div><span>Incident identity</span><h2 id="officer-incident-identity-title">Record a person and ID source</h2></div><IdCard size={20} /></div>
+      <p>Use only for an active incident assigned to you. The person and source go to administrator review; this does not verify identity or grant staff authority.</p>
+      {identityMessage && <div className={`officer-report-message is-${identityMessage.tone}`} role={identityMessage.tone === 'error' ? 'alert' : 'status'}><span>{identityMessage.text}</span></div>}
+      {incidents.length === 0 ? <div className="officer-report-empty"><IdCard size={20} />No active incidents are assigned to you.</div> : (
+        <form onSubmit={submitIncidentIdentity}>
+          <div className="officer-report-grid">
+            <label><span>Assigned incident</span><select required value={identityForm.incidentId} onChange={(event) => setIdentityForm({ ...identityForm, incidentId: event.target.value })}><option value="">Select an incident</option>{incidents.map((incident) => <option value={incident.id} key={incident.id}>{incident.incident_type.replaceAll('_', ' ')} · {incident.status} · {new Date(incident.occurred_at).toLocaleDateString('en-NZ')}</option>)}</select></label>
+            <label><span>Person's involvement</span><select value={identityForm.involvementRole} onChange={(event) => setIdentityForm({ ...identityForm, involvementRole: event.target.value })}><option value="subject">Subject</option><option value="reporting_party">Reporting party</option><option value="witness">Witness</option><option value="affected_person">Affected person</option><option value="staff_involved">Staff involved</option><option value="other">Other</option></select></label>
+          </div>
+          <div className="officer-report-grid">
+            <label><span>Name stated or shown</span><input required value={identityForm.displayName} onChange={(event) => setIdentityForm({ ...identityForm, displayName: event.target.value })} placeholder="Enter exactly what was stated or shown" /></label>
+            <label><span>Evidence type</span><select value={identityForm.documentKind} onChange={(event) => setIdentityForm({ ...identityForm, documentKind: event.target.value })}>{documentTypes.map((definition) => <option value={definition.document_kind} key={definition.document_kind}>{definition.display_name}</option>)}</select></label>
+          </div>
+          <label><span>How was identity obtained?</span><textarea required rows={2} value={identityForm.notes} onChange={(event) => setIdentityForm({ ...identityForm, notes: event.target.value })} placeholder="For example: person stated their name and presented a driver licence" /></label>
+          <label><span>ID source files (optional)</span><input key={identityInputKey} type="file" multiple accept="image/jpeg,image/png,image/webp,image/bmp,image/tiff,application/pdf" onChange={(event) => setIdentityFiles(Array.from(event.target.files ?? []))} /></label>
+          <div className="officer-identity-submit"><span>{identityFiles.length ? `${identityFiles.length} source file${identityFiles.length === 1 ? '' : 's'} selected` : 'You may record the stated identity now and add evidence later.'}</span><button type="submit" disabled={identitySubmitting || !identityForm.incidentId || !identityForm.displayName.trim() || !identityForm.notes.trim()}>{identitySubmitting ? <><RefreshCw size={16} className="is-spinning" />Processing</> : <><Upload size={16} />Record identity</>}</button></div>
+        </form>
+      )}
+    </section>
     <div className="officer-report-layout">
       <form className="officer-report-form" onSubmit={submitReport}><div className="officer-report-panel-heading"><div><span>New submission</span><h2>Report details</h2></div><ClipboardPlus size={20} /></div>
         <div className="officer-report-grid"><label><span>Type</span><select aria-label="Report type" value={form.reportType} onChange={(e) => setForm({ ...form, reportType: e.target.value as ReportType })}><option value="incident">Incident</option><option value="maintenance">Maintenance</option><option value="health_safety">Health & safety</option></select></label><label><span>Severity</span><select aria-label="Report severity" value={form.severity} onChange={(e) => setForm({ ...form, severity: e.target.value as ReportSeverity })}><option value="low">Low</option><option value="medium">Medium</option><option value="high">High</option><option value="critical">Critical</option></select></label></div>
