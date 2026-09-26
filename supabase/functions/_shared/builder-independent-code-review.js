@@ -3,6 +3,7 @@ const {
   executeBuilderModelRun
 } = require('./builder-model-adapter');
 const { downloadVerifiedArtifact } = require('../../../builder-frontend-handoff');
+const { unwrapPatchArtifact } = require('./builder-patch-envelope');
 
 const INDEPENDENT_CODE_REVIEW_PROMPT_VERSION = 'independent-code-review-v2';
 
@@ -53,8 +54,10 @@ async function loadCodeReviewEvidence({ supabase, job, artifacts }) {
     Promise.all(buildLogArtifacts.map(artifact => downloadVerifiedArtifact(supabase, artifact.id, job.id, 'build_logs'))),
     downloadVerifiedArtifact(supabase, artifacts.security.id, job.id, 'security_review')
   ]);
+  const unwrapped = patches.map(patch => unwrapPatchArtifact(patch.bytes));
   return {
-    patches: patches.map(patch => patch.bytes.toString('utf8')),
+    patches: unwrapped.map(item => item.patch),
+    author_summaries: unwrapped.map(item => (item.envelope && typeof item.envelope.summary === 'string' ? item.envelope.summary.slice(0, 4000) : null)),
     manifests: manifests.map(manifest => JSON.parse(manifest.bytes.toString('utf8'))),
     buildLogs: buildLogs.map(log => JSON.parse(log.bytes.toString('utf8'))),
     security: JSON.parse(security.bytes.toString('utf8'))

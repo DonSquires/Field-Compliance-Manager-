@@ -48,6 +48,35 @@ test('security handoff treats policy findings as a completed review, not infrast
   assert.deepEqual(calls, ['execute', 'register', 'finish:1']);
 });
 
+test('security handoff unwraps an agentic proposal envelope so the worker receives the diff (job 3a4a2d06)', async () => {
+  const diff = 'diff --git a/lib/a.js b/lib/a.js\n--- a/lib/a.js\n+++ b/lib/a.js\n@@ -1 +1 @@\n-a\n+b\n';
+  const envelope = Buffer.from(JSON.stringify({ summary: 'change a to b', patch: diff.trimEnd(), changed_files: ['lib/a.js'], lane: 'backend' }));
+  const manifest = Buffer.from('[{"path":"lib/a.js"}]');
+  let written;
+  const result = await runSecurityReview({
+    supabase: {},
+    job: { id: 'job-1', organization_id: 'org-1', target_sha: 'sha-1' },
+    securityStep: { id: 'step-security', step_id: 'security_review' },
+    frontendWorkerRunId: 'backend-run', sourceDir: '/repo', workerImage: 'worker:test', runnerId: 'runner-1',
+    claim: async () => ({ run_id: 'run-security', lease_token: 'lease', organization_id: 'org-1', job_id: 'job-1', patch_artifact_id: 'proposal-id', manifest_artifact_id: 'manifest-id' }),
+    loadArtifact: async (_s, id) => ({ bytes: id === 'proposal-id' ? envelope : manifest }),
+    execute: async options => {
+      written = fs.readFileSync(path.join(options.artifactDir, 'validated.patch'), 'utf8');
+      fs.writeFileSync(path.join(options.artifactDir, 'security-review.json'), JSON.stringify({
+        passed: true, counts: { critical: 0, high: 0, medium: 0, low: 0 },
+        patch_sha256: crypto.createHash('sha256').update(Buffer.from(diff)).digest('hex'),
+        manifest_sha256: crypto.createHash('sha256').update(manifest).digest('hex')
+      }));
+      return { status: 'succeeded', exitCode: 0 };
+    },
+    register: async () => ({ id: 'security-artifact' }),
+    finish: async () => ({ status: 'security_review' }),
+    abort: async () => { throw new Error('must not abort'); }
+  });
+  assert.equal(written, diff, 'the worker sees the unified diff with its terminating newline, not the JSON envelope');
+  assert.equal(result.success, true);
+});
+
 test('security handoff aggregates frontend and backend worker evidence into one digest-bound review', async () => {
   const frontendPatch = Buffer.from([
     'diff --git a/apps/web/src/example.ts b/apps/web/src/example.ts',

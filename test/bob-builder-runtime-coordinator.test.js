@@ -145,7 +145,7 @@ test('agentic runtime advances the complete post-spec workflow to final human ap
   assert.equal(result.snapshot.job.status, 'approval_pending');
 });
 
-test('independent review and release receive only the worker-verified artifact set, not agentic proposal envelopes', async () => {
+test('independent review and release receive the author patch plus the worker-verified manifest/log, never stray proposal envelopes', async () => {
   const { executeBuilderAction } = require('../builder-runtime-coordinator');
   const state = snapshot('security_review', { job: { code_review_mode: 'independent_ai' } });
   const backendStep = state.steps.find(step => step.step_id === 'backend_implementation');
@@ -155,20 +155,20 @@ test('independent review and release receive only the worker-verified artifact s
   const final = (id, artifact_type, step_id = backendStep.id) => ({ id, artifact_type, step_id, status: 'final' });
   state.artifacts = [
     final('proposal-1', 'code_implementation'), final('transcript-1', 'build_logs'),      // engineer attempt 1 (failed verification)
-    final('proposal-2', 'code_implementation'), final('transcript-2', 'build_logs'),      // engineer attempt 2 (verified)
+    final('proposal-2', 'code_implementation'), final('transcript-2', 'build_logs'),      // engineer attempt 2 (verified) = author patch
     final('verification', 'build_logs'), final('validated-patch', 'code_implementation'), final('manifest', 'changed_file_manifest'),
     final('security-report', 'security_review', securityStep.id)
   ];
   state.workerRuns = [
-    { id: 'run-fail', step_id: backendStep.id, status: 'failed', profile: 'backend-verify', output_artifact_ids: ['old-verification'] },
-    { id: 'run-ok', step_id: backendStep.id, status: 'completed', profile: 'backend-verify', output_artifact_ids: ['verification', 'validated-patch', 'manifest'] },
+    { id: 'run-fail', step_id: backendStep.id, status: 'failed', profile: 'backend-verify', patch_artifact_id: 'proposal-1', output_artifact_ids: ['old-verification'] },
+    { id: 'run-ok', step_id: backendStep.id, status: 'completed', profile: 'backend-verify', patch_artifact_id: 'proposal-2', output_artifact_ids: ['verification', 'validated-patch', 'manifest'] },
     { id: 'sec', step_id: securityStep.id, status: 'completed', profile: 'security-review', output_artifact_ids: ['security-report'] }
   ];
   const action = planBuilderAction(state);
   assert.equal(action.type, 'run_independent_review');
   let received;
   await executeBuilderAction({ snapshot: state, action, supabase: {}, gateway: {}, context: { reviewerModelName: 'gpt-5.4-mini' }, handlers: { independentReview: async (input) => { received = input; return { ok: true }; } } });
-  assert.deepEqual(received.artifacts.patch.map(a => a.id), ['validated-patch']);
+  assert.deepEqual(received.artifacts.patch.map(a => a.id), ['proposal-2'], 'the author artifact keeps model-run provenance for the reviewer != author check');
   assert.deepEqual(received.artifacts.manifest.map(a => a.id), ['manifest']);
   assert.deepEqual(received.artifacts.buildLogs.map(a => a.id), ['verification']);
   assert.equal(received.artifacts.security.id, 'security-report');

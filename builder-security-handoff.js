@@ -4,6 +4,7 @@ const os = require('node:os');
 const path = require('node:path');
 const { executeWorker } = require('./worker-executor');
 const { downloadVerifiedArtifact, heartbeatFrontendWorker } = require('./builder-frontend-handoff');
+const { unwrapPatchArtifact } = require('./supabase/functions/_shared/builder-patch-envelope');
 
 function validateSecurityReport(report, patchBytes, manifestBytes) {
   if (!report || typeof report !== 'object' || typeof report.passed !== 'boolean') throw new Error('security report is malformed');
@@ -131,9 +132,11 @@ async function runSecurityReview({
       Promise.all(patchIds.map(id => loadArtifact(supabase, id, job.id, 'code_implementation'))),
       Promise.all(manifestIds.map(id => loadArtifact(supabase, id, job.id, 'changed_file_manifest')))
     ]);
-    const patchBytes = patches.length === 1
-      ? patches[0].bytes
-      : Buffer.from(`${patches.map(item => item.bytes.toString('utf8').trimEnd()).join('\n')}\n`);
+    // The reviewed artifact is the author's (provenance anchor); the agentic lane wraps its diff in a JSON envelope.
+    const patchTexts = patches.map(item => unwrapPatchArtifact(item.bytes).patch);
+    const patchBytes = patchTexts.length === 1
+      ? Buffer.from(patchTexts[0])
+      : Buffer.from(`${patchTexts.map(text => text.trimEnd()).join('\n')}\n`);
     const manifestRows = manifests.flatMap(item => JSON.parse(item.bytes.toString('utf8')));
     const manifestPaths = manifestRows.map(item => item?.path).filter(Boolean);
     if (new Set(manifestPaths).size !== manifestPaths.length) throw new Error('aggregate security evidence changes the same file more than once');

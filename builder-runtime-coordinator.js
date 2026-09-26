@@ -108,16 +108,19 @@ function implementationArtifacts(snapshot) {
   const patches = [];
   const manifests = [];
   const buildLogs = [];
-  // Review and release must see exactly the sets the independent workers verified (their
-  // output_artifact_ids). The agentic engineer also leaves proposal envelopes and transcripts on
-  // the same step as code_implementation/build_logs; counting those broke the "one or two
-  // complete sets" invariant (job 3a4a2d06).
-  const verifiedIds = new Set(implementationRuns(snapshot).flatMap(run => Array.isArray(run.output_artifact_ids) ? run.output_artifact_ids : []));
-  const verified = artifact => verifiedIds.size === 0 || verifiedIds.has(artifact.id);
+  // Review and release must see exactly one evidence set per verified lane. The reviewed PATCH is
+  // the author's artifact (the verify run's input, patch_artifact_id): that id carries the model-run
+  // provenance the completion RPC checks (reviewer != author). Manifest and build log are the
+  // independent worker's outputs. The agentic engineer also leaves proposal envelopes and transcripts
+  // on the same step, which is why "every final artifact on the step" broke the invariant (job 3a4a2d06).
+  const runs = implementationRuns(snapshot);
+  const authorPatchIds = new Set(runs.map(run => run.patch_artifact_id).filter(Boolean));
+  const outputIds = new Set(runs.flatMap(run => Array.isArray(run.output_artifact_ids) ? run.output_artifact_ids : []));
+  const anchored = runs.length > 0;
   for (const stepId of ['frontend_implementation', 'backend_implementation']) {
-    patches.push(...artifactsFor(snapshot, stepId, 'code_implementation').filter(verified));
-    manifests.push(...artifactsFor(snapshot, stepId, 'changed_file_manifest').filter(verified));
-    buildLogs.push(...artifactsFor(snapshot, stepId, 'build_logs').filter(verified));
+    patches.push(...artifactsFor(snapshot, stepId, 'code_implementation').filter(artifact => !anchored || authorPatchIds.has(artifact.id)));
+    manifests.push(...artifactsFor(snapshot, stepId, 'changed_file_manifest').filter(artifact => !anchored || outputIds.has(artifact.id)));
+    buildLogs.push(...artifactsFor(snapshot, stepId, 'build_logs').filter(artifact => !anchored || outputIds.has(artifact.id)));
   }
   return { patch: patches, manifest: manifests, buildLogs };
 }
