@@ -23,7 +23,7 @@ jobs:
         env:
           REGISTRY_URL: https://git.fcmanager.co.nz
           REGISTRY_USER: ${{ gitea.actor }}
-          REGISTRY_TOKEN: ${{ secrets.GITEA_TOKEN }}
+          REGISTRY_TOKEN: ${{ secrets.REGISTRY_PUBLISH_TOKEN }}
         run: |
           set -eu
           test -n "$REGISTRY_URL" || { echo "GITEA_REGISTRY_URL is required" >&2; exit 1; }
