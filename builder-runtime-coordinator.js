@@ -108,10 +108,16 @@ function implementationArtifacts(snapshot) {
   const patches = [];
   const manifests = [];
   const buildLogs = [];
+  // Review and release must see exactly the sets the independent workers verified (their
+  // output_artifact_ids). The agentic engineer also leaves proposal envelopes and transcripts on
+  // the same step as code_implementation/build_logs; counting those broke the "one or two
+  // complete sets" invariant (job 3a4a2d06).
+  const verifiedIds = new Set(implementationRuns(snapshot).flatMap(run => Array.isArray(run.output_artifact_ids) ? run.output_artifact_ids : []));
+  const verified = artifact => verifiedIds.size === 0 || verifiedIds.has(artifact.id);
   for (const stepId of ['frontend_implementation', 'backend_implementation']) {
-    patches.push(...artifactsFor(snapshot, stepId, 'code_implementation'));
-    manifests.push(...artifactsFor(snapshot, stepId, 'changed_file_manifest'));
-    buildLogs.push(...artifactsFor(snapshot, stepId, 'build_logs'));
+    patches.push(...artifactsFor(snapshot, stepId, 'code_implementation').filter(verified));
+    manifests.push(...artifactsFor(snapshot, stepId, 'changed_file_manifest').filter(verified));
+    buildLogs.push(...artifactsFor(snapshot, stepId, 'build_logs').filter(verified));
   }
   return { patch: patches, manifest: manifests, buildLogs };
 }

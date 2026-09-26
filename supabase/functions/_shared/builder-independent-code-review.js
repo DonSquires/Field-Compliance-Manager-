@@ -112,7 +112,15 @@ async function runIndependentCodeReview({
   ];
   const started = await startReview(supabase, job.id, step.id, artifactIds);
   if (!started.success) return { ok: false, status: 409, error: started.error };
-  const evidence = await loadEvidence({ supabase, job, artifacts });
+  let evidence;
+  try {
+    evidence = await loadEvidence({ supabase, job, artifacts });
+  } catch (error) {
+    // Never leave the step "running" (which reads as waiting-for-human) when the evidence itself is unusable.
+    const message = error instanceof Error ? error.message : String(error);
+    await abortReview(supabase, job.id, step.id, `Independent review evidence unavailable: ${message}`.slice(0, 500));
+    return { ok: false, status: 409, error: message, review: null };
+  }
   const modelRequest = buildModelRunRequest({
     organizationId: job.organization_id,
     jobId: job.id,
