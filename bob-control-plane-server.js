@@ -45,24 +45,44 @@ const giteaBaseUrl = process.env.GITEA_BASE_URL || '';
 const giteaToken = process.env.GITEA_TOKEN || '';
 const giteaOwner = process.env.GITEA_OWNER || '';
 const giteaRepo = process.env.GITEA_REPO || '';
+const giteaUsername = process.env.GITEA_USERNAME || '';
 // GitHub is the single target build; Gitea stays available as the mirror host.
+// Without a GitHub token the Builder publishes to Gitea and the
+// bob-builder-bridge GitHub Action carries bob/job-* branches to GitHub as draft PRs.
 const githubToken = process.env.GITHUB_TOKEN || '';
 const githubOwner = process.env.GITHUB_OWNER || '';
 const githubRepo = process.env.GITHUB_REPO || '';
 const builderGitHost = process.env.BUILDER_GIT_HOST || (githubToken && githubOwner && githubRepo ? 'github' : 'gitea');
 const builderSourceDir = process.env.BOB_BUILDER_SOURCE_DIR || path.join(stateDir, 'builder-source');
 
-// Where git work (worktrees, commits, pushes) starts from. On the GitHub host
-// this is a real clone kept at the job's pinned SHA; the image copy at
-// assessmentRoot has no .git and is only read for assessment.
+function giteaRepoUrl() {
+  if (!giteaBaseUrl || !giteaOwner || !giteaRepo) throw new Error('Builder Gitea repository is not configured');
+  return `${giteaBaseUrl.replace(/\/+$/, '')}/${giteaOwner}/${giteaRepo}.git`;
+}
+
+// Gitea's git-over-HTTP takes the access token as a Basic password (per-invocation header, never stored).
+function giteaGitAuthHeader() {
+  if (!giteaToken) throw new Error('Builder Gitea token is not configured');
+  return `Authorization: Basic ${Buffer.from(`${giteaUsername || giteaOwner}:${giteaToken}`).toString('base64')}`;
+}
+
+function builderGitTarget() {
+  return builderGitHost === 'github'
+    ? { host: 'github', repoUrl: githubRepoUrl(githubOwner, githubRepo), authHeader: githubAuthHeader(githubToken) }
+    : { host: 'gitea', repoUrl: giteaRepoUrl(), authHeader: giteaGitAuthHeader() };
+}
+
+// Where git work (worktrees, commits, pushes) starts from: a real clone kept at
+// the job's pinned SHA. The image copy at assessmentRoot has no .git and is
+// only read for assessment.
 function builderGitSource(targetSha) {
-  if (builderGitHost !== 'github') return assessmentRoot;
-  return ensureSourceCheckout({ sourceDir: builderSourceDir, repoUrl: githubRepoUrl(githubOwner, githubRepo), authHeader: githubAuthHeader(githubToken), sha: targetSha }).sourceDir;
+  const target = builderGitTarget();
+  return ensureSourceCheckout({ sourceDir: builderSourceDir, repoUrl: target.repoUrl, authHeader: target.authHeader, sha: targetSha }).sourceDir;
 }
 
 function builderRepositoryHead(ref = 'main') {
-  if (builderGitHost === 'github') return { host: 'github', ref, sha: resolveRemoteHead({ repoUrl: githubRepoUrl(githubOwner, githubRepo), authHeader: githubAuthHeader(githubToken), ref }) };
-  return { host: 'gitea', ref, sha: resolveRemoteHead({ repoUrl: `${giteaBaseUrl.replace(/\/+$/, '')}/${giteaOwner}/${giteaRepo}.git`, authHeader: giteaToken ? `Authorization: token ${giteaToken}` : null, ref }) };
+  const target = builderGitTarget();
+  return { host: target.host, ref, sha: resolveRemoteHead({ repoUrl: target.repoUrl, authHeader: target.authHeader, ref }) };
 }
 const stateFile = path.join(stateDir, 'bob-state.json');
 const maxRequestBytes = 1024 * 1024;
@@ -371,7 +391,7 @@ async function route(req, res, body) {
       const { data: object, error: downloadError } = await builderSupabase.storage.from('builder-artifacts').download(artifact.storage_location.slice('supabase_storage://builder-artifacts/'.length));
       const patch = object ? Buffer.from(await object.arrayBuffer()).toString('utf8') : '';
       if (downloadError || !patch || crypto.createHash('sha256').update(patch).digest('hex') !== artifact.checksum) return json(res, 409, { error: 'Verified patch artifact integrity check failed' });
-      const workspace = createBranchWorkspace({ sourceDir: builderGitHost === 'github' ? builderSourceDir : assessmentRoot, workspaceRoot: builderWorkspaceRoot, jobId: job.id, targetSha: job.workspace_head_sha, branchName: job.workspace_branch });
+      const workspace = createBranchWorkspace({ sourceDir: builderSourceDir, workspaceRoot: builderWorkspaceRoot, jobId: job.id, targetSha: job.workspace_head_sha, branchName: job.workspace_branch });
       const commit = commitVerifiedPatch({ workspacePath: workspace.workspacePath, branchName: workspace.branchName, patch, message: `Bob Builder: ${artifact.id}` });
       const { data: updated, error: recordError } = await builderSupabase.rpc('builder_record_workspace_commit', { _job_id: job.id, _expected_head_sha: job.workspace_head_sha, _commit_sha: commit.commitSha });
       if (recordError || !updated) return json(res, 409, { error: 'Builder workspace commit could not be recorded' });
@@ -385,9 +405,8 @@ async function route(req, res, body) {
       if (!job?.workspace_branch || !job.workspace_head_sha) return json(res, 409, { error: 'Verified Builder workspace is unavailable' });
       if (job.workspace_published_head_sha === job.workspace_head_sha) return json(res, 200, { branch: job.workspace_branch, head: job.workspace_head_sha, existing: true });
       const workspacePath = workspacePathForBranch(builderWorkspaceRoot, job.workspace_branch);
-      const publication = builderGitHost === 'github'
-        ? publishWorkspaceBranch({ workspacePath, branchName: job.workspace_branch, expectedHeadSha: job.workspace_head_sha, pushUrl: githubRepoUrl(githubOwner, githubRepo), pushAuthHeader: githubAuthHeader(githubToken) })
-        : publishWorkspaceBranch({ workspacePath, branchName: job.workspace_branch, expectedHeadSha: job.workspace_head_sha });
+      const target = builderGitTarget();
+      const publication = publishWorkspaceBranch({ workspacePath, branchName: job.workspace_branch, expectedHeadSha: job.workspace_head_sha, pushUrl: target.repoUrl, pushAuthHeader: target.authHeader });
       const { data: updated, error } = await builderSupabase.rpc('builder_record_workspace_publication', { _job_id: job.id, _expected_head_sha: publication.head });
       if (error || !updated) return json(res, 409, { error: 'Builder branch publication could not be recorded' });
       return json(res, 201, { branch: publication.branchName, head: publication.head, existing: false });

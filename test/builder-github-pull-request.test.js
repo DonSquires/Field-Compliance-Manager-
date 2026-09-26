@@ -82,9 +82,12 @@ test('GitHub credentials travel as a per-invocation header, never inside a remot
 
 test('control plane routes publication and pull requests by git host and keeps git available in the image', () => {
   assert.match(controlPlane, /const builderGitHost = process\.env\.BUILDER_GIT_HOST \|\| \(githubToken && githubOwner && githubRepo \? 'github' : 'gitea'\)/);
-  assert.match(controlPlane, /builderGitHost === 'github'\s*\?\s*publishWorkspaceBranch\(\{[^}]*pushUrl: githubRepoUrl\(githubOwner, githubRepo\), pushAuthHeader: githubAuthHeader\(githubToken\)/);
+  // Both hosts publish from a real clone with a per-invocation auth header; nothing is stored in .git/config.
+  assert.match(controlPlane, /publishWorkspaceBranch\(\{ workspacePath, branchName: job\.workspace_branch, expectedHeadSha: job\.workspace_head_sha, pushUrl: target\.repoUrl, pushAuthHeader: target\.authHeader \}\)/);
   assert.match(controlPlane, /builderGitHost === 'github'\s*\?\s*await createGitHubPullRequest/);
   assert.match(controlPlane, /\/api\/bob\/builder\/repository\/head/);
-  assert.match(controlPlane, /ensureSourceCheckout\(\{ sourceDir: builderSourceDir, repoUrl: githubRepoUrl\(githubOwner, githubRepo\)/);
+  assert.match(controlPlane, /ensureSourceCheckout\(\{ sourceDir: builderSourceDir, repoUrl: target\.repoUrl, authHeader: target\.authHeader, sha: targetSha \}\)/);
+  assert.match(controlPlane, /function giteaGitAuthHeader\(\)/);
+  assert.doesNotMatch(controlPlane, /sourceDir: assessmentRoot/);
   assert.match(dockerfile, /apk add --no-cache git/);
 });

@@ -1,0 +1,85 @@
+name: Bob Builder bridge (Gitea bob/job-* -> GitHub draft PRs)
+
+# Bob's self-heal lane publishes verified `bob/job-*` branches to the Gitea
+# mirror from the VPS. This job carries them to GitHub — the single target
+# build — and opens a DRAFT pull request for human review. It uses only
+# credentials the repository already holds: the workflow token (branch push +
+# PR creation) and the existing Gitea mirror secrets (read the branches).
+# It never merges, never touches main, and never deletes anything.
+
+on:
+  schedule:
+    - cron: '*/10 * * * *'
+  workflow_dispatch:
+  push:
+    paths:
+      - '.github/workflows/bob-builder-bridge.yml'
+
+concurrency:
+  group: bob-builder-bridge
+  cancel-in-progress: false
+
+permissions:
+  contents: write
+  pull-requests: write
+
+jobs:
+  bridge:
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - name: Fetch Bob's verified branches from Gitea
+        env:
+          GITEA_MIRROR_USERNAME: ${{ secrets.GITEA_MIRROR_USERNAME }}
+          GITEA_MIRROR_TOKEN: ${{ secrets.GITEA_MIRROR_TOKEN }}
+        run: |
+          set -euo pipefail
+          test -n "$GITEA_MIRROR_USERNAME"
+          test -n "$GITEA_MIRROR_TOKEN"
+          auth="$(printf '%s:%s' "$GITEA_MIRROR_USERNAME" "$GITEA_MIRROR_TOKEN" | base64 -w0)"
+          echo "::add-mask::$auth"
+          git config --local http.https://git.fcmanager.co.nz/.extraheader "Authorization: Basic $auth"
+          git remote add gitea "https://git.fcmanager.co.nz/Iron-Eagle-Security-Ltd/field-compliance-manager.git"
+          git fetch --prune gitea '+refs/heads/bob/job-*:refs/remotes/gitea/bob/job-*' || echo "no bob/job-* branches on Gitea yet"
+
+      - name: Push branches to GitHub and open draft pull requests
+        env:
+          GH_TOKEN: ${{ github.token }}
+          REPO: ${{ github.repository }}
+        run: |
+          set -euo pipefail
+          branches="$(git for-each-ref --format='%(refname:strip=3)' 'refs/remotes/gitea/bob/job-*' || true)"
+          if [ -z "$branches" ]; then
+            echo "Nothing to bridge."
+            exit 0
+          fi
+          main_sha="$(git rev-parse origin/main)"
+          while IFS= read -r branch; do
+            [ -n "$branch" ] || continue
+            case "$branch" in bob/job-*) ;; *) echo "skipping unexpected ref $branch"; continue;; esac
+            sha="$(git rev-parse "refs/remotes/gitea/$branch")"
+            # A verified Builder branch is pinned to a main commit; refuse unrelated history.
+            if ! git merge-base "$sha" "$main_sha" >/dev/null 2>&1; then
+              echo "::warning::$branch shares no history with main; skipped"
+              continue
+            fi
+            if [ "$(git ls-remote origin "refs/heads/$branch" | cut -f1)" != "$sha" ]; then
+              git push origin "$sha:refs/heads/$branch"
+              echo "pushed $branch @ ${sha:0:10}"
+            fi
+            existing="$(gh pr list --repo "$REPO" --head "$branch" --state all --json number --jq 'length')"
+            if [ "$existing" = "0" ]; then
+              title="$(git log -1 --format=%s "$sha" | cut -c1-200)"
+              body="$(printf '## Bob Builder review\n\nVerified Builder branch `%s` at `%s`, published from the VPS via the Gitea mirror.\n\nThis pull request is for human review only. It does not authorize a merge or deployment.\n\nJob record: builder_jobs where workspace_branch = `%s`.' "$branch" "$sha" "$branch")"
+              if gh pr create --repo "$REPO" --draft --base main --head "$branch" --title "Bob Builder: $title" --body "$body"; then
+                echo "opened draft PR for $branch"
+              else
+                echo "::error::Could not open a pull request for $branch. If the message says GitHub Actions is not permitted to create pull requests, enable 'Allow GitHub Actions to create and approve pull requests' under Settings > Actions > General."
+                exit 1
+              fi
+            fi
+          done <<< "$branches"
