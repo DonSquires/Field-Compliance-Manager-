@@ -3,11 +3,18 @@
 // keep the bounded runner moving, publish the verified branch, open the pull
 // request, and leave a plain-language report for Bob to relay. It never merges,
 // deploys, or touches protected paths (those stay human; docs/canon/BOB_DOCTRINE.md §9).
+// Owner ruling 2026-09-26: human approval is required for evidential work — a gate on a
+// job that touches evidential paths is never cleared by the autopilot; it waits for a person.
 const { runBuilderUntilPause, loadBuilderRuntimeSnapshot, implementationRuns } = require('./builder-runtime-coordinator');
 const { unwrapPatchArtifact } = require('./supabase/functions/_shared/builder-patch-envelope');
+const { evidentialMentions, evidentialPathsIn } = require('./builder-path-policy');
 
 const TERMINAL = new Set(['failed', 'cancelled', 'deployed']);
 const GATES = new Set(['specification_ready', 'approval_pending']);
+const GATE_LABEL = {
+  specification_review: 'the specification gate, before any code is written',
+  release_approval: 'the release gate: the change is built and checked, and waits for you before it is published as a pull request'
+};
 
 function plain(value, cap = 600) {
   return String(value ?? '').replace(/\s+/g, ' ').trim().slice(0, cap);
@@ -69,7 +76,7 @@ async function collectEvidence({ supabase, snapshot }) {
   };
 }
 
-function composeReport({ job, evidence, pullRequestUrl, state, reason }) {
+function composeReport({ job, evidence, pullRequestUrl, state, reason, hold }) {
   const lines = [];
   if (state === 'published') {
     lines.push(`Done: "${plain(job.title, 160)}" is built, checked, and waiting for review.`);
@@ -91,6 +98,12 @@ function composeReport({ job, evidence, pullRequestUrl, state, reason }) {
     lines.push(`Why: ${plain(reason, 500) || 'the Builder could not continue'}.`);
     if (evidence?.summary) lines.push(`What Bob had done so far: ${evidence.summary}`);
     lines.push('What to do: open Platform & Settings → Builder for the details, or tell Bob to try again with a changed brief.');
+  } else if (state === 'awaiting_human') {
+    lines.push(`Needs your approval: "${plain(job.title, 160)}" touches evidential work, so Bob has paused at ${GATE_LABEL[hold?.gate] ?? 'an approval gate'}.`);
+    lines.push(`What is evidential here: ${describeFiles(hold?.files)}.`);
+    if (evidence?.summary) lines.push(`What Bob has done so far: ${evidence.summary}`);
+    if (evidence?.review?.verdict) lines.push(`An independent AI reviewer (a different model from the author) said "${evidence.review.verdict}"${evidence.review.summary ? `: ${evidence.review.summary}` : ''}.`);
+    lines.push('What to do: open Platform & Settings → Builder → this job → Approvals and approve or decline with a note. Bob continues only after your decision; nothing is published or merged before then.');
   }
   return {
     state,
@@ -98,6 +111,8 @@ function composeReport({ job, evidence, pullRequestUrl, state, reason }) {
     text: lines.join('\n'),
     pull_request_url: pullRequestUrl ?? null,
     changed_files: evidence?.changedFiles ?? [],
+    evidential_files: hold?.files ?? [],
+    gate: hold?.gate ?? null,
     review_verdict: evidence?.review?.verdict ?? null,
     security_passed: evidence?.security?.passed ?? null,
     generated_at: new Date().toISOString(),
@@ -130,6 +145,17 @@ function composePullRequestBody({ job, evidence, branchName, headSha }) {
 }
 
 /**
+ * The evidential-work hold for one pending gate: paths named in the brief always count; at the
+ * release gate the files the verified patch actually changed count too. Null means Bob may clear it.
+ */
+function evidentialHold({ job, approval, evidence }) {
+  const mentioned = evidentialMentions(`${job.title ?? ''}\n${job.task_description ?? ''}`);
+  const changed = approval.approval_type === 'release_approval' ? evidentialPathsIn(evidence?.changedFiles) : [];
+  const files = [...new Set([...changed, ...mentioned])].sort();
+  return files.length ? { gate: approval.approval_type, files } : null;
+}
+
+/**
  * Drive one autopilot job one tick forward. `actions` is injected so the loop can be
  * exercised without a live control plane: { listPending, approve, run, publish, record }.
  */
@@ -146,13 +172,39 @@ async function autopilotTick({ supabase, jobs, actions, log = () => {} }) {
         }
         continue;
       }
+      if (job.autopilot_state === 'awaiting_human') {
+        // Still at the held gate: the decision is the human's; nothing to do this tick.
+        const heldGate = job.autopilot_report?.gate ?? null;
+        const stillHeld = GATES.has(job.status) && (await actions.listPending(job.id)).some((approval) => approval.approval_type === heldGate);
+        if (stillHeld) { outcomes.push({ job: job.id, outcome: 'awaiting_human', gate: heldGate }); continue; }
+        // The human decided and the job moved on: resume driving (the report stays as history).
+        await actions.record(job.id, 'driving', null);
+        job.autopilot_state = 'driving';
+        log({ job: job.id, resumed: job.status });
+      }
       if (GATES.has(job.status)) {
         const pending = await actions.listPending(job.id);
+        let evidence = null;
+        let hold = null;
+        let cleared = 0;
         for (const approval of pending) {
-          await actions.approve(approval.id, `Cleared by Bob autopilot: the requester asked for this change in chat (conversation ${job.autopilot_conversation_id ?? 'n/a'}). ${approval.approval_type === 'release_approval' ? 'Publishing the branch as a pull request for human review; no merge or deployment.' : 'Proceeding to implementation on the approved brief.'}`);
+          if (approval.approval_type === 'release_approval' && !evidence) {
+            const snapshot = await loadBuilderRuntimeSnapshot(supabase, job.id).catch(() => null);
+            evidence = snapshot ? await collectEvidence({ supabase, snapshot }).catch(() => null) : null;
+          }
+          hold = hold || evidentialHold({ job, approval, evidence });
+          if (hold) continue;
+          await actions.approve(approval.id, `Cleared by Bob autopilot: the requester asked for this change in chat (conversation ${job.autopilot_conversation_id ?? 'n/a'}). ${approval.approval_type === 'release_approval' ? 'Publishing the branch as a pull request for human review; no merge or deployment.' : 'Proceeding to implementation on the approved brief.'} No evidential paths are involved.`);
+          cleared += 1;
           log({ job: job.id, cleared: approval.approval_type });
         }
-        outcomes.push({ job: job.id, outcome: 'gate_cleared', count: pending.length });
+        if (hold) {
+          await actions.record(job.id, 'awaiting_human', composeReport({ job, evidence, state: 'awaiting_human', hold }));
+          log({ job: job.id, awaiting_human: hold.gate, evidential: hold.files.slice(0, 6) });
+          outcomes.push({ job: job.id, outcome: 'awaiting_human', gate: hold.gate, files: hold.files });
+          continue;
+        }
+        outcomes.push({ job: job.id, outcome: 'gate_cleared', count: cleared });
         continue;
       }
       if (job.status === 'release_ready') {
@@ -197,9 +249,9 @@ async function autopilotTick({ supabase, jobs, actions, log = () => {} }) {
 async function listAutopilotJobs(supabase, limit = 5) {
   const { data, error } = await supabase
     .from('builder_jobs')
-    .select('id, organization_id, title, task_description, status, target_sha, last_error, workspace_branch, workspace_head_sha, workspace_published_head_sha, workspace_pull_request_url, autopilot_requested_by, autopilot_conversation_id, autopilot_state, autopilot_updated_at')
+    .select('id, organization_id, title, task_description, status, target_sha, last_error, workspace_branch, workspace_head_sha, workspace_published_head_sha, workspace_pull_request_url, autopilot_requested_by, autopilot_conversation_id, autopilot_state, autopilot_report, autopilot_updated_at')
     .not('autopilot_requested_by', 'is', null)
-    .in('autopilot_state', ['driving'])
+    .in('autopilot_state', ['driving', 'awaiting_human'])
     .order('autopilot_updated_at', { ascending: true })
     .limit(limit);
   if (error) throw new Error('autopilot jobs could not be listed');
@@ -212,4 +264,4 @@ async function listPendingApprovals(supabase, jobId) {
   return data || [];
 }
 
-module.exports = { autopilotTick, collectEvidence, composeReport, composePullRequestBody, listAutopilotJobs, listPendingApprovals, TERMINAL, GATES };
+module.exports = { autopilotTick, collectEvidence, composeReport, composePullRequestBody, evidentialHold, listAutopilotJobs, listPendingApprovals, TERMINAL, GATES };

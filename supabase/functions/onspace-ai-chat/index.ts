@@ -8391,6 +8391,13 @@ serve(async (req)=>{
             }
             const bjJob = created.data.job;
             const bjAutopilot = created.data.autopilot === true;
+            if (created.data.duplicate === true) {
+              // The control room returned a job already underway for this exact brief: do not run it twice.
+              return {
+                reply: `**${bjTitle}** is already underway (job started ${String(bjJob.created_at ?? '').slice(0, 16).replace('T', ' ')} UTC, currently ${String(bjJob.status ?? 'in progress').replace(/_/g, ' ')}). I have not started a second copy. I will report here when it is ready or if I get stuck.`,
+                meta: { tool: 'create_builder_job', outcome: 'duplicate', builder_job_id: bjJob.id, builder_job_status: bjJob.status ?? null, autopilot: bjAutopilot }
+              };
+            }
             const started = await callFn('bob-builder-control-room', authHeader, {
               action: 'run',
               job_id: bjJob.id,

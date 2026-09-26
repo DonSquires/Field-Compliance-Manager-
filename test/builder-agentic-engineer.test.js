@@ -366,3 +366,16 @@ test('worker mounts are translated to host paths when the control plane runs in 
   assert.ok(args.includes('type=bind,src=/var/lib/bob/tmp/bob-backend-worker-1,dst=/artifacts'));
   assert.ok(args.includes('--network=none') && args.includes('--cap-drop=ALL'));
 });
+
+test('path policy classifies evidential work (owner ruling 2026-09-26: human approval required)', () => {
+  const { isEvidentialPath, evidentialPathsIn, evidentialMentions } = require('../builder-path-policy');
+  for (const file of ['supabase/functions/generate-parking-notice/index.ts', 'supabase/functions/capture-environmental-evidence/index.ts', 'supabase/functions/bob-perceive-video/index.ts', 'apps/web/src/pages/CCTVReviewPage.tsx', 'apps/web/src/pages/OfficerFieldReportPage.tsx', 'apps/mobile/src/anything.tsx', 'apps/sd-card-bridge-v2/src/import.ts', 'services/fcm-inference/app.py', 'supabase/migrations/20260926012000_cctv_photo_inference.sql', 'test/cctv-observations.test.py']) {
+    assert.equal(isEvidentialPath(file), true, `${file} should be evidential`);
+  }
+  for (const file of ['services/fcm-api/src/bob/verify.js', 'scripts/bob-builder-e2e.mjs', 'test/fcm-api-bob-planner.test.js', 'supabase/functions/onspace-ai-chat/index.ts', 'supabase/functions/_shared/builder-model-adapter.js', 'builder-autopilot.js', 'apps/web/src/pages/RosteringPage.tsx', 'supabase/migrations/20260926150000_builder_model_run_providers.sql', 'docs/ATLAS_BUILD_REPORT.md']) {
+    assert.equal(isEvidentialPath(file), false, `${file} should not be evidential`);
+  }
+  assert.deepEqual(evidentialPathsIn(['services/fcm-api/src/bob/verify.js', 'supabase/functions/generate-notice/index.ts', 'supabase/functions/generate-notice/index.ts']), ['supabase/functions/generate-notice/index.ts']);
+  assert.deepEqual(evidentialMentions('Symptom: `supabase/functions/generate-parking-notice/index.ts` prints the wrong plate (see apps/web/src/pages/ParkingOversightPage.tsx). Unrelated: services/fcm-api/src/bob/plan.js.'), ['apps/web/src/pages/ParkingOversightPage.tsx', 'supabase/functions/generate-parking-notice/index.ts']);
+  assert.deepEqual(evidentialMentions('Make Bob accept "go for it" in services/fcm-api/src/bob/verify.js'), []);
+});

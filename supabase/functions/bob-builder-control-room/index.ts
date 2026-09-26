@@ -158,6 +158,21 @@ serve(async req => {
     if (targetEnvironment === 'production' && codeReviewMode !== 'human') return json({ error: 'Production jobs require human code review' }, 400);
     const { data: project } = await admin.from('builder_projects').select('id, organization_id, gitea_owner, gitea_repo').eq('id', projectId).eq('organization_id', requestedOrgId).eq('status', 'active').single();
     if (!project) return json({ error: 'Builder project is unavailable' }, 404);
+    const title = typeof body.title === 'string' ? body.title.slice(0, 200) : '';
+    const taskDescription = typeof body.task_description === 'string' ? body.task_description.slice(0, 12000) : '';
+    // Idempotent create: the same brief submitted twice within a few minutes (a chat retry, a driver whose
+    // output was hidden) returns the job already underway instead of paying for a second run.
+    const duplicateSince = new Date(Date.now() - 15 * 60 * 1000).toISOString();
+    const { data: duplicate } = await admin.from('builder_jobs')
+      .select('*')
+      .eq('organization_id', requestedOrgId).eq('project_id', projectId).eq('title', title).eq('task_description', taskDescription)
+      .gte('created_at', duplicateSince)
+      .not('status', 'in', '("deployed","failed","cancelled")')
+      .order('created_at', { ascending: false }).limit(1).maybeSingle();
+    if (duplicate) {
+      await audit(requestedOrgId, 'duplicate_returned', String(duplicate.id));
+      return json({ job: safeJob(duplicate as Record<string, unknown>), duplicate: true, autopilot: Boolean((duplicate as Record<string, unknown>).autopilot_requested_by) }, 200);
+    }
     // Bob's self-heal path names a ref (usually main); pin it to the live head so the job is commit-pinned.
     let targetSha = typeof body.target_sha === 'string' ? body.target_sha : '';
     if (!/^[a-f0-9]{40}$/i.test(targetSha)) {
@@ -170,8 +185,8 @@ serve(async req => {
     const { data: created, error: createError } = await admin.rpc('builder_create_job_v2', {
       _organization_id: requestedOrgId,
       _project_id: projectId,
-      _title: typeof body.title === 'string' ? body.title.slice(0, 200) : '',
-      _task_description: typeof body.task_description === 'string' ? body.task_description.slice(0, 12000) : '',
+      _title: title,
+      _task_description: taskDescription,
       _target_sha: targetSha,
       _branch_name: typeof body.branch_name === 'string' ? body.branch_name.slice(0, 200) : 'main',
       _description: typeof body.description === 'string' ? body.description.slice(0, 2000) : null,

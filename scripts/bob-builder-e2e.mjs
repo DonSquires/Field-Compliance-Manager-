@@ -66,7 +66,7 @@ if (cmd === 'create') {
   // E2E_AUTOPILOT=1 hands the job to Bob's autopilot (as the chat path does); otherwise drive it with `follow`.
   const autopilot = process.env.E2E_AUTOPILOT === '1';
   const out = await room({ action: 'create', organization_id: ORG, project_id: PROJECT, title, task_description: description, description: 'Opened by the Bob self-heal human-test driver.', target_ref: 'main', requested_action: 'prepare_change', target_environment: 'development', code_review_mode: 'independent_ai', frontend_required: false, backend_required: true, ...(autopilot ? { autopilot: true } : {}) });
-  console.log(out.status, out.job ? `job ${out.job.id} status=${out.job.status} target=${String(out.job.target_sha).slice(0, 10)} autopilot=${out.autopilot === true ? out.job.autopilot_state ?? 'bound' : 'off'}${out.autopilot_error ? ` (${out.autopilot_error})` : ''}` : JSON.stringify(out));
+  console.log(out.status, out.job ? `${out.duplicate ? 'already underway: ' : ''}job ${out.job.id} status=${out.job.status} target=${String(out.job.target_sha).slice(0, 10)} autopilot=${out.autopilot === true ? out.job.autopilot_state ?? 'bound' : 'off'}${out.autopilot_error ? ` (${out.autopilot_error})` : ''}` : JSON.stringify(out));
 } else if (cmd === 'show') {
   const out = await room({ action: 'get', job_id: args[0] });
   console.log(brief(out));

@@ -39,12 +39,14 @@ function parseChain(raw, fallback) {
 // Owner ruling 2026-09-26: Bob works on his own compute (laptop GPU, then the VPS) and only
 // outsources to OpenAI when he is stuck — unreachable, too small for the prompt, or failing.
 // Restricted data never leaves the house. Chains are env-tunable per workload class.
+// The VPS (CPU, 8B models) carries light and restricted work only: live, it reviewed a patch as
+// `{"verdict":"passed","summary":""}` — a rubber stamp is worse than an outsourced review.
 function routingChains(env = process.env) {
   return {
     restricted: parseChain(env.BOB_BUILDER_ROUTE_RESTRICTED, [PROVIDERS.OLLAMA, PROVIDERS.GPU_WORKSTATION]),
     local: parseChain(env.BOB_BUILDER_ROUTE_LOCAL, [PROVIDERS.GPU_WORKSTATION, PROVIDERS.OLLAMA, PROVIDERS.OPENAI]),
     author: parseChain(env.BOB_BUILDER_ROUTE_AUTHOR, [PROVIDERS.GPU_WORKSTATION, PROVIDERS.OPENAI]),
-    review: parseChain(env.BOB_BUILDER_ROUTE_REVIEW, [PROVIDERS.GPU_WORKSTATION, PROVIDERS.OLLAMA, PROVIDERS.OPENAI]),
+    review: parseChain(env.BOB_BUILDER_ROUTE_REVIEW, [PROVIDERS.GPU_WORKSTATION, PROVIDERS.OPENAI]),
     analysis: parseChain(env.BOB_BUILDER_ROUTE_ANALYSIS, [PROVIDERS.GPU_WORKSTATION, PROVIDERS.OPENAI])
   };
 }

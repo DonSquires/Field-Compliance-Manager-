@@ -148,3 +148,61 @@ test('report and pull-request composers degrade honestly when evidence is thin',
   assert.match(body, /brief text/);
   assert.match(body, /\*\*Files:\*\* n\/a/);
 });
+
+// Owner ruling 2026-09-26: human approval is required for evidential work.
+test('autopilot holds the specification gate for a human when the brief names evidential work, and resumes after the decision', async () => {
+  const job = { id: 'job-6', status: 'specification_ready', autopilot_state: 'driving', autopilot_conversation_id: 'conv-6', title: 'Parking notice PDF shows the wrong plate', task_description: 'Symptom: supabase/functions/generate-parking-notice/index.ts prints the previous vehicle plate. Change: read the plate from the observation row.', target_sha: 'f'.repeat(40) };
+  const actions = actionsRecorder({ pending: [{ id: 'appr-6', approval_type: 'specification_review', status: 'pending' }] });
+  const outcomes = await autopilotTick({ supabase: fakeSupabase({ job }), jobs: [job], actions });
+  assert.deepEqual(outcomes, [{ job: 'job-6', outcome: 'awaiting_human', gate: 'specification_review', files: ['supabase/functions/generate-parking-notice/index.ts'] }]);
+  assert.ok(!actions.calls.some(([name]) => name === 'approve'), 'the autopilot never clears an evidential gate');
+  const recorded = actions.calls.find(([name]) => name === 'record');
+  assert.equal(recorded[2], 'awaiting_human');
+  assert.match(recorded[3].text, /^Needs your approval: "Parking notice PDF shows the wrong plate" touches evidential work, so Bob has paused at the specification gate/);
+  assert.match(recorded[3].text, /What is evidential here: supabase\/functions\/generate-parking-notice\/index\.ts\./);
+  assert.match(recorded[3].text, /Bob continues only after your decision/);
+  assert.equal(recorded[3].gate, 'specification_review');
+  assert.deepEqual(recorded[3].evidential_files, ['supabase/functions/generate-parking-notice/index.ts']);
+
+  // Still held while the same gate is pending: nothing happens.
+  const waiting = { ...job, autopilot_state: 'awaiting_human', autopilot_report: recorded[3] };
+  const idle = actionsRecorder({ pending: [{ id: 'appr-6', approval_type: 'specification_review', status: 'pending' }] });
+  assert.deepEqual(await autopilotTick({ supabase: fakeSupabase({ job: waiting }), jobs: [waiting], actions: idle }), [{ job: 'job-6', outcome: 'awaiting_human', gate: 'specification_review' }]);
+  assert.deepEqual(idle.calls.map(([name]) => name), ['listPending']);
+
+  // The human approved the specification: the job moved on and the autopilot resumes driving.
+  const approved = { ...waiting, status: 'design_pending' };
+  const resumed = actionsRecorder({ run: { paused: true, reason: 'action_limit' } });
+  assert.deepEqual(await autopilotTick({ supabase: fakeSupabase({ job: approved }), jobs: [approved], actions: resumed }), [{ job: 'job-6', outcome: 'advanced', reason: 'action_limit' }]);
+  assert.deepEqual(resumed.calls[0], ['record', 'job-6', 'driving', null]);
+  assert.equal(resumed.calls[1][0], 'run');
+});
+
+test('autopilot holds the release gate when the verified patch touched evidential files, even if the brief did not say so', async () => {
+  const { job, supabase } = releaseReadyFixture();
+  const held = { ...job, status: 'approval_pending' };
+  const supabaseWithEvidentialManifest = (() => {
+    const base = supabase;
+    const original = base.storage.from;
+    base.storage.from = () => ({ download: async (path) => (path.endsWith('changed-files.json')
+      ? { data: { arrayBuffer: async () => Buffer.from(JSON.stringify([{ path: 'services/fcm-api/src/bob/verify.js' }, { path: 'supabase/functions/generate-noise-evidence-package/index.ts' }])) }, error: null }
+      : original().download(path)) });
+    return base;
+  })();
+  const actions = actionsRecorder({ pending: [{ id: 'appr-7', approval_type: 'release_approval', status: 'pending' }] });
+  const outcomes = await autopilotTick({ supabase: supabaseWithEvidentialManifest, jobs: [held], actions });
+  assert.deepEqual(outcomes, [{ job: 'job-4', outcome: 'awaiting_human', gate: 'release_approval', files: ['supabase/functions/generate-noise-evidence-package/index.ts'] }]);
+  assert.ok(!actions.calls.some(([name]) => name === 'approve' || name === 'publish'));
+  const recorded = actions.calls.find(([name]) => name === 'record');
+  assert.match(recorded[3].text, /paused at the release gate/);
+  assert.match(recorded[3].text, /What Bob has done so far: Added 'go for it'/);
+  assert.match(recorded[3].text, /independent AI reviewer .* said "passed"/);
+});
+
+test('autopilot still clears the release gate itself for non-evidential work', async () => {
+  const { job, supabase } = releaseReadyFixture();
+  const gated = { ...job, status: 'approval_pending' };
+  const actions = actionsRecorder({ pending: [{ id: 'appr-8', approval_type: 'release_approval', status: 'pending' }] });
+  assert.deepEqual(await autopilotTick({ supabase, jobs: [gated], actions }), [{ job: 'job-4', outcome: 'gate_cleared', count: 1 }]);
+  assert.match(actions.calls.find(([name]) => name === 'approve')[2], /No evidential paths are involved/);
+});

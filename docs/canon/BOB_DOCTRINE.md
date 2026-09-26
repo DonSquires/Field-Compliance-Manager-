@@ -276,3 +276,47 @@ environment changes remain human; the pull request is a draft for a person.
 Bob never approves on behalf of someone who could not approve themselves
 (`can_approve_action` is checked for the requester), never rejects, and never
 clears a gate on a job nobody asked for (`autopilot_requested_by` is required).
+
+### 2026-09-26 — Human approval is required for evidential work (Don Squires)
+
+> "Human approval is required for evidential work."
+
+**Ruling.** The autopilot ruling above lets Bob clear his own gates on the
+requester's standing instruction. This ruling narrows it: where the work is
+**evidential**, a person decides every gate. Evidential work is code that
+captures, classifies, alters, presents, or delivers records a person may rely
+on as evidence of harm or compliance — the anchor of [FOUNDATION.md](../../FOUNDATION.md):
+evidence capture and photo/video/CCTV inference, incidents and breaches,
+notices and infringements, patrol and dispatch records, observations, vehicle
+and plate lookups, report packs and their delivery, audit trails, signatures,
+and the field-staff portal and desktop import tools in their entirety. It
+also covers promoting values extracted from sample or imported material into
+business records (already a governed, human-approved path in `AGENTS.md`).
+
+**Mechanism.** `builder-path-policy.js` (`isEvidentialPath`,
+`evidentialMentions`) classifies repository paths deterministically:
+capture/inference surfaces by root, everything else by the evidential terms
+in the path, with Bob's own machinery, docs and tooling classified by the code
+they touch rather than their wording. At each gate the autopilot classifies
+the brief's named paths and — at the release gate — the files the verified
+patch actually changed. If any is evidential the gate is **not** cleared: the
+job is parked as `autopilot_state = 'awaiting_human'` with a plain-language
+report ("Needs your approval … touches evidential work"), an
+`approval_requested` audit event, and Bob relays it in chat. A person decides
+through `builder_decide_approval` (Builder control room); the autopilot
+resumes only after that decision, or reports the job as stopped if it was
+declined. Non-evidential work keeps the autopilot flow; migration
+`20260927050000_builder_autopilot_awaiting_human.sql`.
+
+**Consequences for merging.** Bob still merges nothing. A non-evidential Bob
+pull request that has passed the isolated worker, the security scan and the
+independent review may be merged by the owner or, on the owner's standing
+instruction to the coding agent ("just push fixes as you do"), by the coding
+agent after its own review — as was done on this date for pull requests #2,
+#3 and #4 (chat-verifier affirmatives; test-driver re-login). An evidential
+pull request is merged only by a person. Whether Bob may one day merge
+non-evidential work himself is an open owner decision (§7), not something to
+resolve by drift.
+
+**Tuning.** The term and root lists are a floor, not a ceiling: adding a path
+is a one-line change; removing one is an owner decision recorded here.

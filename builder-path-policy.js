@@ -81,4 +81,36 @@ function protectedReason(file) {
   return 'protected path';
 }
 
-module.exports = { PROTECTED_PATTERNS, isMigrationPath, isProtectedPath, laneAllows, laneFor, normalizeRepoPath, protectedReason };
+// Owner ruling 2026-09-26: "human approval is required for evidential work". Evidential work is
+// code that captures, classifies, alters, presents, or delivers records a person may rely on as
+// evidence of harm or compliance (FOUNDATION.md: the harmed party and the place of harm are the
+// anchor). Bob may build it, but a human — not the autopilot — clears its gates.
+const EVIDENTIAL_TERMS = /(evidence|evidential|incident|infring|notice|breach|cctv|camera|capture|motion|video|photo|image|perceive|inference|vision|classif|plate|vehicle|patrol|dispatch|observation|custody|report|audit|signature|signing|noise|parking|biosecurity|welfare|enforcement|complaint|tow(ing)?|warden|inspection)/i;
+// Capture and inference surfaces are evidential in their entirety.
+const EVIDENTIAL_ROOTS = [/^apps\/mobile\//, /^apps\/sd-card-bridge(-v2)?\//, /^services\/(fcm-capture-inference|fcm-inference|vision)\//, /^deploy\/vision-worker\//, /^desktop-signing-intake\//];
+// Bob's own machinery, docs, and tooling are classified by the code they touch, not by their wording.
+const NON_EVIDENTIAL_ROOTS = [/^docs\//, /^Build-Plan(\/|\.md$)/, /^scripts\//, /^\.github\//, /^supabase\/functions\/_shared\/builder-/, /^supabase\/functions\/bob-builder-/, /^supabase\/functions\/onspace-ai-chat\//, /^builder-[^/]+\.js$/, /^bob-control-plane-server\.js$/, /^(frontend|backend|security)-worker\.js$/, /^worker-executor\.js$/, /^services\/fcm-api\/src\/bob\//];
+
+function isEvidentialPath(file) {
+  const normalized = normalizeRepoPath(file);
+  if (!normalized) return false;
+  if (EVIDENTIAL_ROOTS.some((pattern) => pattern.test(normalized))) return true;
+  if (NON_EVIDENTIAL_ROOTS.some((pattern) => pattern.test(normalized))) return false;
+  return EVIDENTIAL_TERMS.test(normalized);
+}
+
+function evidentialPathsIn(files) {
+  return [...new Set((Array.isArray(files) ? files : []).filter((file) => isEvidentialPath(file)))].sort();
+}
+
+/** Repository paths named in free text (a brief) that point at evidential work. */
+function evidentialMentions(text) {
+  const found = new Set();
+  for (const match of String(text ?? '').matchAll(/(?:^|[\s"'`(\[])((?:apps|supabase|services|deploy|desktop-signing-intake)\/[A-Za-z0-9_./-]*[A-Za-z0-9_])/g)) {
+    const candidate = match[1].replace(/[.,;:)]+$/, '');
+    if (isEvidentialPath(candidate)) found.add(candidate);
+  }
+  return [...found].sort();
+}
+
+module.exports = { EVIDENTIAL_ROOTS, EVIDENTIAL_TERMS, PROTECTED_PATTERNS, evidentialMentions, evidentialPathsIn, isEvidentialPath, isMigrationPath, isProtectedPath, laneAllows, laneFor, normalizeRepoPath, protectedReason };

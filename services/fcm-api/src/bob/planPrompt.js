@@ -134,9 +134,9 @@ function buildCompletedWorkBlock(items) {
   const lines = items.map((w, i) => `  ${i + 1}. [${String(w.state ?? 'done')}] ${String(w.title ?? 'Builder job')}${w.pull_request_url ? ` — review link: ${String(w.pull_request_url)}` : ''}\n     ${sliceWithDisclosure(String(w.report ?? ''), 3000, `completed work ${i + 1} report`)}`);
   return [
     '',
-    'COMPLETED WORK TO REPORT (Builder jobs this person asked you to do have finished or stopped since you last spoke; they have NOT been told yet):',
+    'COMPLETED WORK TO REPORT (Builder jobs this person asked you to do have finished, stopped, or paused for their approval since you last spoke; they have NOT been told yet):',
     ...lines,
-    'RELAY RULE: open your reply with a short plain-language report of each item for a non-technical owner — what changed (in terms of behaviour they would notice), how it was checked, the review link, and what they need to do (usually: review and merge when happy; nothing is live until then). For a [blocked] item say plainly what stopped it and what you need from them. Then answer their current message. Do not use file paths, commit hashes, or tool names in this report unless they ask; the link carries the technical detail. Never claim anything was merged or deployed.',
+    'RELAY RULE: open your reply with a short plain-language report of each item for a non-technical owner — what changed (in terms of behaviour they would notice), how it was checked, the review link, and what they need to do (usually: review and merge when happy; nothing is live until then). For a [blocked] item say plainly what stopped it and what you need from them. For an [awaiting_human] item say plainly that you have paused because the work is evidential (owner ruling: human approval is required for evidential work), which gate is waiting, and that they approve or decline it in Platform & Settings → Builder; do not proceed on their say-so in chat. Then answer their current message. Do not use file paths, commit hashes, or tool names in this report unless they ask; the link carries the technical detail. Never claim anything was merged or deployed.',
   ].join('\n');
 }
 

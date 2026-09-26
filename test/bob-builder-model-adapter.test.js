@@ -35,7 +35,8 @@ test('model routing is in-house first with OpenAI as the outsourced fallback, pe
   assert.deepEqual(routeBuilderModel({ workloadKind: 'architecture' }).chain, ['gpu_workstation', 'openai']);
   assert.deepEqual(routeBuilderModel({ workloadKind: 'backend_implementation' }).chain, ['gpu_workstation', 'openai']);
   assert.equal(routeBuilderModel({ workloadKind: 'backend_implementation' }).reason, 'in_house_first_author');
-  assert.deepEqual(routeBuilderModel({ workloadKind: 'independent_code_review' }).chain, ['gpu_workstation', 'ollama', 'openai']);
+  assert.deepEqual(routeBuilderModel({ workloadKind: 'independent_code_review' }).chain, ['gpu_workstation', 'openai'], 'the VPS CPU tier rubber-stamped a review live; it is not in the default review chain');
+  assert.deepEqual(routeBuilderModel({ workloadKind: 'independent_code_review', env: { BOB_BUILDER_ROUTE_REVIEW: 'gpu_workstation,ollama,openai' } }).chain, ['gpu_workstation', 'ollama', 'openai'], 'operators can opt the VPS back in');
   // Operators can pin a class to OpenAI (or anything else) without a code change.
   assert.deepEqual(routeBuilderModel({ workloadKind: 'backend_implementation', env: { BOB_BUILDER_ROUTE_AUTHOR: 'openai' } }).chain, ['openai']);
   assert.deepEqual(routeBuilderModel({ workloadKind: 'backend_implementation', env: { BOB_BUILDER_ROUTE_AUTHOR: 'nonsense' } }).chain, ['gpu_workstation', 'openai'], 'unknown providers fall back to the default chain');
@@ -282,7 +283,14 @@ test('invalid model output is rejected before artifact upload', async () => {
 });
 test('model execution walks the in-house-first chain and escalates to OpenAI only when a local provider is stuck', async () => {
   const { selectProviders } = require('../supabase/functions/_shared/builder-model-adapter.js');
-  const request = makeRequest({ workloadKind: 'independent_code_review', modelName: 'gpt-5.4-mini' });
+  const previousReviewRoute = process.env.BOB_BUILDER_ROUTE_REVIEW;
+  process.env.BOB_BUILDER_ROUTE_REVIEW = 'gpu_workstation,ollama,openai';
+  let request;
+  try {
+    request = makeRequest({ workloadKind: 'independent_code_review', modelName: 'gpt-5.4-mini' });
+  } finally {
+    if (previousReviewRoute === undefined) delete process.env.BOB_BUILDER_ROUTE_REVIEW; else process.env.BOB_BUILDER_ROUTE_REVIEW = previousReviewRoute;
+  }
   assert.deepEqual(request.chain, ['gpu_workstation', 'ollama', 'openai']);
   const health = {
     gpu_workstation: { configured: true, healthy: false, models: ['qwen2.5-coder:7b'], ready_model: null },
