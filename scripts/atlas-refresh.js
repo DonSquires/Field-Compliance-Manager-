@@ -125,7 +125,7 @@ const MANAGED_SOURCES = [
   'supabase/migrations/20260831095000_operational_place_editor.sql',
   'supabase/migrations/20260831096000_boundary_admin_upload_provenance.sql',
   'supabase/migrations/20260927010000_govern_custom_report_builder.sql',
-  'supabase/migrations/20260927020000_dispatch_jobs_site_or_zone.sql',
+  'supabase/migrations/20260927040000_dispatch_jobs_site_or_zone.sql',
   'supabase/migrations/20260901020000_resolve_contracted_operational_context.sql',
   'supabase/migrations/20260913150000_add_physical_address_to_officer_gps_evidence.sql',
   'supabase/migrations/20260913151000_include_physical_address_in_officer_timeline.sql',

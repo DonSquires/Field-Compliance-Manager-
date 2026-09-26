@@ -3,7 +3,7 @@ const { readFileSync } = require('node:fs');
 const { resolve } = require('node:path');
 const test = require('node:test');
 
-const migration = readFileSync(resolve(__dirname, '../supabase/migrations/20260927020000_dispatch_jobs_site_or_zone.sql'), 'utf8');
+const migration = readFileSync(resolve(__dirname, '../supabase/migrations/20260927040000_dispatch_jobs_site_or_zone.sql'), 'utf8');
 const routeGuidance = readFileSync(resolve(__dirname, '../supabase/functions/officer-route-guidance/index.ts'), 'utf8');
 
 test('dispatch jobs require exactly one governed Site or Zone', () => {
