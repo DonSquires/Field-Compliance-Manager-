@@ -27,7 +27,6 @@ import { describeLoadFailures } from '../lib/friendlyLoadError';
 import { useEnabledModules } from '../hooks/useEnabledModules';
 import { supabase } from '../lib/supabase';
 import { ShellLayout } from '../layouts/ShellLayout';
-import { ADMIN_COMMAND_CENTRE_GROUPS } from '../config/adminCommandCentre';
 import './AdminHubPage.css';
 
 interface AdminHubPageProps {
@@ -328,7 +327,6 @@ const AdminHubPage: React.FC<AdminHubPageProps> = ({ onNavigate }) => {
       ? `${attentionCount} active items need attention across safety, dispatch, and compliance.`
       : 'Operations are clear across safety, dispatch, and compliance.';
   const maxTrendJobs = Math.max(1, ...trend.map((point) => point.jobs));
-  const visibleCommandGroups = ADMIN_COMMAND_CENTRE_GROUPS.filter((group) => group.allowedRoles.some((role) => role === profile?.role));
 
   return (
     <ShellLayout shell="admin" className="admin-shell-surface">
@@ -349,62 +347,6 @@ const AdminHubPage: React.FC<AdminHubPageProps> = ({ onNavigate }) => {
       </header>
 
       <StatusStrip tone={overviewTone}>{overviewMessage}</StatusStrip>
-
-      <section className="admin-dashboard" aria-labelledby="dashboard-heading">
-        <div className="admin-dashboard-heading">
-          <div><span>Operational intelligence</span><h2 id="dashboard-heading">Dashboard</h2></div>
-          <small>Live totals and the last seven days</small>
-        </div>
-        <section className="admin-metric-grid" aria-label="Current operations metrics">
-          <MetricCard icon={Users} label="On duty now" value={displayMetric(metrics.onDuty, loading)} unavailable={!loading && metrics.onDuty.value === null} loading={loading && metrics.onDuty.value === null} title={metrics.onDuty.error ?? undefined} tone="blue" onClick={() => onNavigate?.('roster')} />
-          <MetricCard icon={Radio} label="Active dispatch" value={displayMetric(metrics.activeDispatch, loading)} unavailable={!loading && metrics.activeDispatch.value === null} loading={loading && metrics.activeDispatch.value === null} title={metrics.activeDispatch.error ?? undefined} tone="teal" onClick={() => onNavigate?.('dispatch')} />
-          <MetricCard icon={ShieldAlert} label="Open breaches" value={displayMetric(metrics.breaches, loading)} unavailable={!loading && metrics.breaches.value === null} loading={loading && metrics.breaches.value === null} title={metrics.breaches.error ?? undefined} tone="amber" onClick={() => onNavigate?.('breach-review')} />
-          <MetricCard icon={Binoculars} label="Observations today" value={displayMetric(metrics.observations, loading)} unavailable={!loading && metrics.observations.value === null} loading={loading && metrics.observations.value === null} title={metrics.observations.error ?? undefined} tone="green" onClick={() => onNavigate?.('reports')} />
-          <SafetyGate status={moduleStatus} isEnabled={welfareEnabled} moduleLabel="Welfare monitoring" safetyRelevant renderUnavailable={(message) => <MetricCard icon={HeartPulse} label="Welfare alerts" value="Unavailable" unavailable title={message.description} tone="red" onClick={() => onNavigate?.('welfare-alerts')} />}>
-            <MetricCard icon={HeartPulse} label="Welfare alerts" value={displayMetric(metrics.welfare, loading)} unavailable={!loading && metrics.welfare.value === null} loading={loading && metrics.welfare.value === null} title={metrics.welfare.error ?? undefined} tone="red" onClick={() => onNavigate?.('welfare-alerts')} />
-          </SafetyGate>
-        </section>
-        <section className="admin-trend-panel" aria-labelledby="dispatch-trend-heading">
-          <div className="admin-section-heading"><div><span>Work volume</span><h2 id="dispatch-trend-heading">Dispatch jobs</h2></div><small>Created versus completed</small></div>
-          <div className="admin-trend-chart" role="img" aria-label="Seven day dispatch jobs trend">
-            {trend.map((point) => <div className="admin-trend-column" key={point.label}><div className="admin-trend-bars"><span style={{ height: `${(point.jobs / maxTrendJobs) * 100}%` }} title={`${point.jobs} jobs`} /><span className="is-completed" style={{ height: `${(point.completed / maxTrendJobs) * 100}%` }} title={`${point.completed} completed`} /></div><small>{point.label}</small></div>)}
-          </div>
-          <div className="admin-trend-legend"><span><i /> Jobs created</span><span><i className="is-completed" /> Completed</span></div>
-        </section>
-      </section>
-
-      <section className="admin-command-centre" aria-labelledby="command-centre-heading">
-        <div className="admin-command-centre-heading">
-          <div>
-            <span>Service provider portal</span>
-            <h2 id="command-centre-heading">Command Centre</h2>
-          </div>
-          <small>All organisations</small>
-        </div>
-        <div className="admin-domain-grid">
-          {visibleCommandGroups.map((group) => {
-            const Icon = group.icon;
-            const metric = group.stat ? metrics[group.stat] : null;
-            return (
-              <section key={group.key} className={`admin-domain-card admin-domain-card--${group.accent}`}>
-                <header>
-                  <span className="admin-domain-icon"><Icon size={18} aria-hidden="true" /></span>
-                  <div><h3>{group.label}</h3><p>{group.description}</p></div>
-                  <span className="admin-domain-stat"><strong>{metric?.value ?? '—'}</strong><small>{group.statLabel}</small></span>
-                </header>
-                <div className="admin-domain-links">
-                  {group.links.map(([label, destination]) => (
-                    <button key={`${group.key}-${label}`} type="button" onClick={() => onNavigate?.(destination)}>
-                      {label}
-                    </button>
-                  ))}
-                </div>
-                <button type="button" className="admin-domain-open" onClick={() => onNavigate?.(group.open)}>{group.openLabel}<ArrowRight size={14} aria-hidden="true" /></button>
-              </section>
-            );
-          })}
-        </div>
-      </section>
 
       {queueWarnings.length > 0 && (
         <div className="admin-data-warning" role="alert">
@@ -430,7 +372,7 @@ const AdminHubPage: React.FC<AdminHubPageProps> = ({ onNavigate }) => {
         </section>
 
         <aside className="admin-command-panel">
-          <div className="admin-section-heading"><div><span>Navigation</span><h2>Command areas</h2></div></div>
+          <div className="admin-section-heading"><div><span>Shortcuts</span><h2>Quick actions</h2></div></div>
           <div className="admin-command-group"><span>Respond now</span>
           <CommandLink icon={Radio} label="Dispatch console" detail="Jobs, resources, and SLA state" onClick={() => onNavigate?.('dispatch')} />
           <CommandLink icon={Map} label="Operational map" detail="Officers, sites, and zones" onClick={() => onNavigate?.('live-map')} />
@@ -443,6 +385,30 @@ const AdminHubPage: React.FC<AdminHubPageProps> = ({ onNavigate }) => {
           </div>
         </aside>
       </div>
+
+      <section className="admin-dashboard" aria-labelledby="dashboard-heading">
+        <div className="admin-dashboard-heading">
+          <div><span>Operational intelligence</span><h2 id="dashboard-heading">Dashboard</h2></div>
+          <small>Live totals and the last seven days</small>
+        </div>
+        <section className="admin-metric-grid" aria-label="Current operations metrics">
+          <MetricCard icon={Users} label="On duty now" value={displayMetric(metrics.onDuty, loading)} unavailable={!loading && metrics.onDuty.value === null} loading={loading && metrics.onDuty.value === null} title={metrics.onDuty.error ?? undefined} tone="blue" onClick={() => onNavigate?.('roster')} />
+          <MetricCard icon={Radio} label="Active dispatch" value={displayMetric(metrics.activeDispatch, loading)} unavailable={!loading && metrics.activeDispatch.value === null} loading={loading && metrics.activeDispatch.value === null} title={metrics.activeDispatch.error ?? undefined} tone="teal" onClick={() => onNavigate?.('dispatch')} />
+          <MetricCard icon={ShieldAlert} label="Open breaches" value={displayMetric(metrics.breaches, loading)} unavailable={!loading && metrics.breaches.value === null} loading={loading && metrics.breaches.value === null} title={metrics.breaches.error ?? undefined} tone="amber" onClick={() => onNavigate?.('breach-review')} />
+          <MetricCard icon={Binoculars} label="Observations today" value={displayMetric(metrics.observations, loading)} unavailable={!loading && metrics.observations.value === null} loading={loading && metrics.observations.value === null} title={metrics.observations.error ?? undefined} tone="green" onClick={() => onNavigate?.('reports')} />
+          <SafetyGate status={moduleStatus} isEnabled={welfareEnabled} moduleLabel="Welfare monitoring" safetyRelevant renderUnavailable={(message) => <MetricCard icon={HeartPulse} label="Welfare alerts" value="Unavailable" unavailable title={message.description} tone="red" />}>
+            <MetricCard icon={HeartPulse} label="Welfare alerts" value={displayMetric(metrics.welfare, loading)} unavailable={!loading && metrics.welfare.value === null} loading={loading && metrics.welfare.value === null} title={metrics.welfare.error ?? undefined} tone="red" onClick={() => onNavigate?.('welfare-alerts')} />
+          </SafetyGate>
+        </section>
+        <section className="admin-trend-panel" aria-labelledby="dispatch-trend-heading">
+          <div className="admin-section-heading"><div><span>Work volume</span><h2 id="dispatch-trend-heading">Dispatch jobs</h2></div><small>Created versus completed</small></div>
+          <div className="admin-trend-chart" role="img" aria-label="Seven day dispatch jobs trend">
+            {trend.map((point) => <div className="admin-trend-column" key={point.label}><div className="admin-trend-bars"><span style={{ height: `${(point.jobs / maxTrendJobs) * 100}%` }} title={`${point.jobs} jobs`} /><span className="is-completed" style={{ height: `${(point.completed / maxTrendJobs) * 100}%` }} title={`${point.completed} completed`} /></div><small>{point.label}</small></div>)}
+          </div>
+          <div className="admin-trend-legend"><span><i /> Jobs created</span><span><i className="is-completed" /> Completed</span></div>
+        </section>
+      </section>
+
       </div>
     </ShellLayout>
   );

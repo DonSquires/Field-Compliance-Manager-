@@ -41,4 +41,15 @@ describe('Admin Hub operational data contract', () => {
     expect(source).toContain('setQueueWarnings([message]);');
     expect(source).toContain('setLoading(false);');
   });
+
+  it('keeps live work ahead of supporting metrics without a duplicate shortcut directory', () => {
+    expect(source.indexOf('className="admin-overview-layout"')).toBeLessThan(source.indexOf('className="admin-dashboard"'));
+    expect(source).toContain('<h2>Quick actions</h2>');
+    expect(source).not.toContain('Command Centre');
+    expect(source).not.toContain('ADMIN_COMMAND_CENTRE_GROUPS');
+  });
+
+  it('does not offer navigation from an unavailable welfare metric', () => {
+    expect(source).toMatch(/renderUnavailable=\{\(message\) => <MetricCard[^>]+label="Welfare alerts"[^>]+tone="red" \/>\}/);
+  });
 });
