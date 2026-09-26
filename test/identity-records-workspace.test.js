@@ -58,7 +58,8 @@ test('private identity evidence runs local OCR and source-face inference', () =>
   assert.match(api, /\/api\/bob\/media\/identity-document/);
   assert.match(api, /tesseractText/);
   assert.match(api, /pdftoppm/);
-  assert.match(api, /recognition\?\.source\?\.faces/);
+  assert.match(api, /\/infer\/face/);
+  assert.match(api, /Array\.isArray\(payload\?\.faces\)/);
   assert.match(inferenceEdge, /action === 'identity_document'/);
   assert.match(perceptionEdge, /register_identity_document_proposal/);
   assert.match(perceptionEdge, /admin\.rpc\('register_identity_document_proposal'/);

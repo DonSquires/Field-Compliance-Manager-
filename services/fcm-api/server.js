@@ -190,7 +190,7 @@ async function inferIdentityImage(loaded) {
   form.append('photo', new Blob([loaded.bytes], { type: loaded.detectedMime }), loaded.attachment.file_name);
   form.append('tasks', JSON.stringify(['face']));
   form.append('source_frame_hash', loaded.sha256);
-  const response = await fetch(`${inferenceServiceUrl}/infer/enhance`, {
+  const response = await fetch(`${inferenceServiceUrl}/infer/face`, {
     method: 'POST',
     headers: inferenceApiKey ? { Authorization: `Bearer ${inferenceApiKey}` } : {},
     body: form,
@@ -198,7 +198,7 @@ async function inferIdentityImage(loaded) {
   });
   if (!response.ok) return { face_count: 0, face_embedding: null, face_confidence: null, face_error: `identity_face_http_${response.status}` };
   const payload = await response.json();
-  const faces = Array.isArray(payload?.recognition?.source?.faces) ? payload.recognition.source.faces : [];
+  const faces = Array.isArray(payload?.faces) ? payload.faces : [];
   const face = faces.length === 1 ? faces[0] : null;
   return {
     face_count: faces.length,
