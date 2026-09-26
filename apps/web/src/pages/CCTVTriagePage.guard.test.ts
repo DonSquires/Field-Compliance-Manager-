@@ -8,8 +8,9 @@ const fieldOps = readFileSync(resolve(process.cwd(), 'src/pages/FieldOperationsP
 const lib = readFileSync(resolve(process.cwd(), 'src/lib/cctvConsole.ts'), 'utf8');
 
 describe('CCTV observation triage', () => {
-  it('is wired into field ops as its own nav area, separate from the wall/playback console', () => {
-    expect(fieldOps).toContain("area: 'cctv-triage', label: 'Review observations'");
+  it('remains a direct field-ops route behind the consolidated CCTV workspace', () => {
+    expect(fieldOps).toContain("area: 'cctv-console', label: 'CCTV & video'");
+    expect(fieldOps).not.toContain("area: 'cctv-triage', label:");
     expect(shell).toContain("case 'cctv-triage':");
     expect(shell).toContain('<CCTVTriagePage />');
     expect(shell).toContain("'cctv-triage'");

@@ -3,7 +3,7 @@ import { installSupabaseFixtures, monitorBrowserErrors, signInAsAdmin } from './
 
 test.beforeEach(async ({ page }) => {
   await page.clock.setFixedTime(new Date('2026-08-30T09:30:00+12:00'));
-  await installSupabaseFixtures(page);
+  await installSupabaseFixtures(page, { officerModules: ['dispatch', 'cctv', 'static_guarding', 'freedom_camping', 'parking_enforcement'] });
 });
 
 test('operations landing is visually stable and every command is interactive', async ({ page }) => {
@@ -33,8 +33,11 @@ test('operations landing is visually stable and every command is interactive', a
     ['Welfare response', 'welfare-alerts'],
     ['Patrol operations', 'patrol'],
     ['Field reports', 'field-reports'],
+    ['CCTV & video', 'cctv-console'],
+    ['Debrief follow-up', 'debrief-followup'],
     ['Breach review', 'breach-review'],
     ['Vehicle intelligence', 'vehicle-search'],
+    ['Observation search', 'observation-search'],
     ['Officer investigations', 'officer-activity'],
   ] as const;
   for (const [label, area] of commands) {

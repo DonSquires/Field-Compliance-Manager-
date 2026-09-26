@@ -262,12 +262,12 @@ describe('CCTV console', () => {
     expect(page).toContain('window.clearInterval(timer)');
   });
 
-  it('is wired as the CCTV wall & playback surface, with review split into its own triage queue and the job queue kept for exports', () => {
+  it('is the single Field Operations CCTV entry while subordinate routes remain wired inside the workspace', () => {
     expect(shell).toContain("case 'cctv-console':");
     expect(shell).toContain('<CCTVConsolePage />');
-    expect(fieldOps).toContain("area: 'cctv-console', label: 'CCTV wall & playback'");
-    expect(fieldOps).toContain("area: 'cctv-triage', label: 'Review observations'");
-    expect(fieldOps).toContain("area: 'cctv-review', label: 'CCTV job queue & exports'");
+    expect(fieldOps).toContain("area: 'cctv-console', label: 'CCTV & video'");
+    expect(fieldOps).not.toContain("area: 'cctv-triage', label:");
+    expect(fieldOps).not.toContain("area: 'cctv-review', label:");
     expect(importPage).toContain('/admin/field-ops?area=cctv-console&import=${importRow.id}');
     expect(page).toContain("const requestedImportId = search.get('import');");
     expect(page).toContain("navigate('/admin/field-ops?area=cctv-review')");

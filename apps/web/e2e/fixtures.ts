@@ -167,6 +167,7 @@ export async function installSupabaseFixtures(page: Page, options: { officerModu
       return;
     }
     if (table === 'get_manageable_user_identities') { await route.fulfill(fulfillJson(identityUsers)); return; }
+    if (table === 'resolve_active_rules') { await route.fulfill(fulfillJson([{ organization_id: ORG_ID, module_key: 'dispatch', enabled: true, active_zone_id: null, active_site_id: null, resolution_status: 'resolved', policy_status: 'active' }])); return; }
     if (table === 'user_profiles') {
       const select = url.searchParams.get('select') ?? '';
       const identityQuery = select.includes('module_access') || select.includes('updated_at');

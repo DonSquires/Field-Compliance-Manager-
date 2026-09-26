@@ -74,7 +74,8 @@ describe('CCTV import — the place comes first, files are classified locally, w
   it('is reachable as a field-ops area and from the review page', () => {
     expect(shell).toContain("case 'cctv-import':");
     expect(shell).toContain("'cctv-import'");
-    expect(fieldOps).toContain("area: 'cctv-import'");
+    expect(fieldOps).toContain("area: 'cctv-console', label: 'CCTV & video'");
+    expect(fieldOps).not.toContain("area: 'cctv-import', label:");
     expect(review).toContain("navigate('/admin/field-ops?area=cctv-import')");
     expect(page).toContain('navigate(`/admin/field-ops?area=cctv-console&import=${importRow.id}`)');
   });
