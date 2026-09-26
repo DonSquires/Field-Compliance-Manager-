@@ -50,6 +50,15 @@ describe('governed monthly report pack generation', () => {
     expect(page).not.toMatch(/from\('monthly_report_packs'\)[\s\S]{0,240}\.(insert|update|upsert)\(/);
   });
 
+  it('keeps Freedom Camping summaries behind the organisation module entitlement', () => {
+    expect(page).toContain("useEnabledModules(profile?.organizationId)");
+    expect(page).toContain("isModuleEnabled('freedom_camping')");
+    expect(page).toContain('!freedomCampingEnabled\n          ? Promise.resolve({ data: [], error: null })');
+    expect(page).toContain('{freedomCampingEnabled && <div className="kpi-grid">');
+    expect(page).toContain('{freedomCampingEnabled && <section className="reports-section">\n        <h2>Recent Breach Alerts');
+    expect(page).toContain('{freedomCampingEnabled && <section className="reports-section">\n        <h2>Vehicle Observations');
+  });
+
   it('keeps drafts provider-private and exposes only published client reports', () => {
     expect(migration).toContain("monthly_report_packs.status in ('generated', 'sent')");
     expect(migration).toContain('agreement.client_portal_reports_enabled');

@@ -14,6 +14,7 @@ import { useAuth } from '../context/AuthContext';
 import { useServiceRelationships } from '../context/ServiceRelationshipContext';
 import { CustomReportBuilder } from '../components/CustomReportBuilder';
 import { ReportPackReviewPanel, type ReportPackEditorial, type ReviewableReportPack } from '../components/ReportPackReviewPanel';
+import { useEnabledModules } from '../hooks/useEnabledModules';
 import { supabase } from '../lib/supabase';
 import './PageStyles.css';
 
@@ -156,6 +157,8 @@ function exclusiveEndIso(date: string): string {
 
 const ReportsHubPage: React.FC = () => {
   const { profile } = useAuth();
+  const { isModuleEnabled } = useEnabledModules(profile?.organizationId);
+  const freedomCampingEnabled = isModuleEnabled('freedom_camping');
   const relationships = useServiceRelationships();
   // The hub filters by an agreement the reader chooses here, not by the app-wide place context.
   const [agreementFilterId, setAgreementFilterId] = useState('');
@@ -208,7 +211,9 @@ const ReportsHubPage: React.FC = () => {
       const { data: descendantOrgIds } = await supabase.rpc('get_descendant_organizations', { org_id: profile.organizationId });
       const houseOrgIds = [...new Set([profile.organizationId, ...(Array.isArray(descendantOrgIds) ? descendantOrgIds : [])])];
       const [breachResponse, observationResponse, packResponse, consolidatedResponse] = await Promise.all([
-        activeZoneIds && activeZoneIds.length > 0
+        !freedomCampingEnabled
+          ? Promise.resolve({ data: [], error: null })
+          : activeZoneIds && activeZoneIds.length > 0
           ? supabase
               .from('breach_alerts')
               .select('id, created_at, breach_type, status, plate_number, zone_id, notes')
@@ -223,7 +228,9 @@ const ReportsHubPage: React.FC = () => {
               .gte('created_at', dateRange.start)
               .lt('created_at', timestampEndExclusive)
               .order('created_at', { ascending: false }),
-        activeZoneIds && activeZoneIds.length > 0
+        !freedomCampingEnabled
+          ? Promise.resolve({ data: [], error: null })
+          : activeZoneIds && activeZoneIds.length > 0
           ? supabase
               .from('observations')
               .select('id, observed_at, plate_number, officer_id, is_compliant, compliance_reason, zone_id')
@@ -271,7 +278,7 @@ const ReportsHubPage: React.FC = () => {
     } finally {
       setLoading(false);
     }
-  }, [profile?.organizationId, selectedAgreement, dateRange.end, dateRange.start]);
+  }, [freedomCampingEnabled, profile?.organizationId, selectedAgreement, dateRange.end, dateRange.start]);
 
   useEffect(() => { void loadReports(); }, [loadReports]);
 
@@ -363,8 +370,8 @@ const ReportsHubPage: React.FC = () => {
   return (
     <div className="page-container reports-hub-page">
       <header className="page-header">
-        <h1>Reports & Analytics</h1>
-        <p className="subtitle">Compliance metrics, breach alerts, vehicle observations</p>
+        <h1>Reports</h1>
+        <p className="subtitle">Create, review and deliver accountable client reports.</p>
       </header>
 
       {error && (
@@ -421,7 +428,7 @@ const ReportsHubPage: React.FC = () => {
         />
       )}
 
-      <div className="kpi-grid">
+      {freedomCampingEnabled && <div className="kpi-grid">
         <div className="kpi-card">
           <div className="kpi-value">{metrics.totalBreaches}</div>
           <div className="kpi-label">Breach Alerts</div>
@@ -437,7 +444,7 @@ const ReportsHubPage: React.FC = () => {
           <div className="kpi-label">Non-Compliant</div>
           <div className="kpi-unit">observations</div>
         </div>
-      </div>
+      </div>}
 
       {consolidatedReporting.length > 1 && <section className="reports-section"><h2>Group Reporting Overview</h2><p className="subtitle">Branch-owned operational activity, consolidated for parent oversight. Detailed queues below remain in the current organization context.</p><div className="reports-table-wrapper"><table className="reports-table"><thead><tr><th>Operating Organization</th><th>Breach Alerts</th><th>Observations</th><th>Non-Compliant</th><th>Report Packs</th></tr></thead><tbody>{consolidatedReporting.map((row) => <tr key={row.source_organization_id}><td>{row.source_organization_name}</td><td>{row.breach_count}</td><td>{row.observation_count}</td><td>{row.non_compliant_observation_count}</td><td>{row.report_pack_count}</td></tr>)}</tbody></table></div></section>}
 
@@ -465,7 +472,7 @@ const ReportsHubPage: React.FC = () => {
         {reviewingPack && <ReportPackReviewPanel pack={{ ...reviewingPack, agreementName: reportAgreementName(reviewingPack) } as ReviewableReportPack} onClose={() => setReviewingPackId(null)} onSaved={finishReview} />}
       </section>
 
-      <section className="reports-section">
+      {freedomCampingEnabled && <section className="reports-section">
         <h2>Recent Breach Alerts ({breachAlerts.length})</h2>
         <div className="reports-table-wrapper">
           <table className="reports-table">
@@ -505,9 +512,9 @@ const ReportsHubPage: React.FC = () => {
             </tbody>
           </table>
         </div>
-      </section>
+      </section>}
 
-      <section className="reports-section">
+      {freedomCampingEnabled && <section className="reports-section">
         <h2>Vehicle Observations ({observations.length})</h2>
         <div className="reports-table-wrapper">
           <table className="reports-table">
@@ -541,7 +548,7 @@ const ReportsHubPage: React.FC = () => {
             </tbody>
           </table>
         </div>
-      </section>
+      </section>}
     </div>
   );
 };

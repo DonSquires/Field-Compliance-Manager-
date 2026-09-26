@@ -1,16 +1,33 @@
 import { expect, test } from '@playwright/test';
 import { installSupabaseFixtures, monitorBrowserErrors, signInAsAdmin } from './fixtures';
 
-test.beforeEach(async ({ page }) => {
+test.beforeEach(async ({ page }, testInfo) => {
   await page.clock.setFixedTime(new Date('2026-08-30T09:30:00+12:00'));
-  await installSupabaseFixtures(page);
+  await installSupabaseFixtures(page, { officerModules: testInfo.title.includes('without Freedom Camping') ? [] : ['freedom_camping'] });
+});
+
+test('reports remain focused without Freedom Camping', async ({ page }) => {
+  const moduleRequests: string[] = [];
+  page.on('request', (request) => {
+    const url = new URL(request.url());
+    const select = url.searchParams.get('select') ?? '';
+    const reportsHubBreachRead = url.pathname.endsWith('/breach_alerts') && select.includes('zone_id,notes');
+    const reportsHubObservationRead = url.pathname.endsWith('/observations') && select.includes('compliance_reason,zone_id');
+    if (reportsHubBreachRead || reportsHubObservationRead) moduleRequests.push(request.url());
+  });
+  await signInAsAdmin(page, '/admin/reports');
+  await expect(page.getByRole('heading', { name: 'Reports', exact: true })).toBeVisible();
+  await expect(page.getByRole('button', { name: 'Generate report drafts' })).toBeVisible();
+  await expect(page.getByRole('heading', { name: /Recent Breach Alerts/ })).toHaveCount(0);
+  await expect(page.getByRole('heading', { name: /Vehicle Observations/ })).toHaveCount(0);
+  expect(moduleRequests).toEqual([]);
 });
 
 test('administrator reviews and publishes a tenant report pack to the live client portal', async ({ page }, testInfo) => {
   const browserErrors = monitorBrowserErrors(page);
   await signInAsAdmin(page, '/admin/reports');
 
-  await expect(page.getByRole('heading', { name: 'Reports & Analytics' })).toBeVisible();
+  await expect(page.getByRole('heading', { name: 'Reports', exact: true })).toBeVisible();
   await expect(page.getByText('No report packs in this period')).toBeVisible();
   await page.getByRole('button', { name: 'Generate report drafts' }).click();
 
