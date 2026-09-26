@@ -19,9 +19,21 @@ function migrationTimestamp(file) {
   return Number(path.basename(file).match(/^(\d{14})_[a-z0-9_]+\.sql$/)?.[1] || 0);
 }
 
+// Pre-ledger heuristic (late August 2026): the snapshot then predated the Builder tables, so
+// these families had to be replayed on top of it. Used only when the snapshot has no ledger.
 function isPostSchemaMigration(file) {
   const name = path.basename(file);
   return /(?:builder_|bob_task_continuity|bob_repo_read_progress|workflow_run_leases)/.test(name);
+}
+
+// schema-snapshot-live.mjs records `-- applied_migrations: v1,v2,...`: the migrations the live
+// database (and therefore the snapshot) already contains. Replaying any of those on top of the
+// snapshot fails on non-idempotent statements (job 1021dbaa: `policy ... already exists`).
+function appliedMigrationsFromSchema(schemaText) {
+  const match = String(schemaText || '').match(/^--\s*applied_migrations:\s*([0-9,\s]+)$/m);
+  if (!match) return null;
+  const versions = match[1].split(',').map((v) => v.trim()).filter((v) => /^\d{14}$/.test(v));
+  return versions.length ? new Set(versions) : null;
 }
 
 function collectMigrationPlan(sourceDir, patchText) {
@@ -30,7 +42,11 @@ function collectMigrationPlan(sourceDir, patchText) {
     .filter(file => /^\d{14}_[a-z0-9_]+\.sql$/.test(file))
     .map(file => `supabase/migrations/${file}`)
     .sort();
-  const baseline = repositoryMigrations.filter(isPostSchemaMigration);
+  const schemaPath = path.join(sourceDir, 'supabase/schema.sql');
+  const applied = fs.existsSync(schemaPath) ? appliedMigrationsFromSchema(fs.readFileSync(schemaPath, 'utf8')) : null;
+  const baseline = applied
+    ? repositoryMigrations.filter(file => !applied.has(String(migrationTimestamp(file))))
+    : repositoryMigrations.filter(isPostSchemaMigration);
   const latestBaseline = Math.max(0, ...repositoryMigrations.map(migrationTimestamp));
   for (const candidate of candidates) {
     if (!migrationTimestamp(candidate) || migrationTimestamp(candidate) <= latestBaseline) {
@@ -39,6 +55,7 @@ function collectMigrationPlan(sourceDir, patchText) {
   }
   return {
     baseline,
+    baseline_source: applied ? 'snapshot_ledger' : 'name_heuristic',
     canonicalMigrationCount: repositoryMigrations.length - baseline.length,
     candidates: [...new Set(candidates)].sort(),
     latest_baseline_timestamp: latestBaseline
@@ -150,6 +167,7 @@ function executeBackendDatabaseVerification({
       reason: 'Patch contains no database migrations.',
       image,
       baseline_migration_count: plan.baseline.length,
+      baseline_source: plan.baseline_source,
       canonical_migration_count: plan.canonicalMigrationCount,
       candidate_migrations: []
     };
@@ -196,6 +214,7 @@ function executeBackendDatabaseVerification({
       deferred_schema_foreign_keys: canonicalSchema.deferredForeignKeyCount,
       normalized_quoted_trim_calls: canonicalSchema.normalizedQuotedTrimCount,
       baseline_migration_count: plan.baseline.length,
+      baseline_source: plan.baseline_source,
       canonical_migration_count: plan.canonicalMigrationCount,
       candidate_migrations: plan.candidates,
       stages
@@ -206,6 +225,7 @@ function executeBackendDatabaseVerification({
       performed: true,
       image,
       baseline_migration_count: plan.baseline.length,
+      baseline_source: plan.baseline_source,
       canonical_migration_count: plan.canonicalMigrationCount,
       candidate_migrations: plan.candidates,
       stages,
@@ -241,6 +261,7 @@ module.exports = {
   BOOTSTRAP_SQL,
   isPostSchemaMigration,
   collectMigrationPlan,
+  appliedMigrationsFromSchema,
   prepareCanonicalSchema,
   executeBackendDatabaseVerification,
   waitForDatabase
