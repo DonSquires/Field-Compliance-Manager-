@@ -341,3 +341,43 @@ test('in-house providers get a longer gateway timeout than OpenAI, and an explic
   assert.equal(gatewayTimeoutFor('ollama', { timeoutMs: 15000 }, {}), 15000);
   assert.equal(gatewayTimeoutFor('openai', { timeoutMs: 'nope' }, {}), 90000);
 });
+
+test('model gateway retries a dropped connection once and names the cause; timeouts are not retried', async () => {
+  let calls = 0;
+  const result = await callModelGateway({
+    gatewayUrl: 'https://control.example',
+    apiToken: 'server-token',
+    modelRequest: makeRequest(),
+    fetchImpl: async () => {
+      calls++;
+      if (calls === 1) throw Object.assign(new TypeError('fetch failed'), { cause: { code: 'ECONNRESET' } });
+      return { ok: true, status: 200, text: async () => JSON.stringify({ content: 'hi' }) };
+    }
+  });
+  assert.equal(calls, 2);
+  assert.equal(result.ok, true);
+
+  let calls2 = 0;
+  const dead = await callModelGateway({
+    gatewayUrl: 'https://control.example',
+    apiToken: 'server-token',
+    modelRequest: makeRequest(),
+    fetchImpl: async () => { calls2++; throw Object.assign(new TypeError('fetch failed'), { cause: { code: 'ECONNREFUSED' } }); }
+  });
+  assert.equal(calls2, 2);
+  assert.equal(dead.ok, false);
+  assert.equal(dead.status, 502);
+  assert.equal(dead.error, 'model gateway unavailable (ECONNREFUSED)');
+
+  let calls3 = 0;
+  const slow = await callModelGateway({
+    gatewayUrl: 'https://control.example',
+    apiToken: 'server-token',
+    modelRequest: makeRequest(),
+    timeoutMs: 20,
+    fetchImpl: (_url, { signal }) => { calls3++; return new Promise((_r, reject) => signal.addEventListener('abort', () => reject(Object.assign(new Error('aborted'), { name: 'AbortError' })))); }
+  });
+  assert.equal(calls3, 1, 'a timeout is the model being slow, not the socket dropping');
+  assert.equal(slow.ok, false);
+  assert.equal(slow.timeout, true);
+});

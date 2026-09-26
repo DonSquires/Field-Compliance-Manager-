@@ -18,7 +18,7 @@ const fs = require('node:fs');
 const os = require('node:os');
 const path = require('node:path');
 const crypto = require('node:crypto');
-const { execFileSync, spawnSync } = require('node:child_process');
+const { execFileSync, spawn, spawnSync } = require('node:child_process');
 const { createBranchWorkspace, redactGitError } = require('./builder-branch-workspace');
 const { isProtectedPath, laneAllows, protectedReason, isMigrationPath, normalizeRepoPath } = require('./builder-path-policy');
 const { buildModelRunRequest, callModelGateway, persistModelArtifact, fetchModelHealth, selectProviders, providerRequest } = require('./supabase/functions/_shared/builder-model-adapter');
@@ -198,17 +198,34 @@ function createTools({ workspacePath, repoRoot, lane, supabase, limits, log }) {
     const argv = text.match(/"[^"]*"|\S+/g).map((part) => part.replace(/^"|"$/g, ''));
     const started = Date.now();
     // A nested `node --test` inherits the parent test-runner context and misreports; give the child a clean runner env.
-    const { NODE_TEST_CONTEXT: _testContext, NODE_OPTIONS: _nodeOptions, ...childEnv } = process.env;
-    const result = spawnSync(argv[0], argv.slice(1), { cwd: workspacePath, encoding: 'utf8', timeout: limits.runTimeoutMs, maxBuffer: 64 * 1024 * 1024, env: { ...childEnv, CI: '1', FORCE_COLOR: '0' } });
-    runs.push({ command: text, exit_code: result.status, at: new Date(started).toISOString(), duration_ms: Date.now() - started });
-    return {
-      command: text,
-      exit_code: result.status,
-      timed_out: Boolean(result.error && result.error.code === 'ETIMEDOUT'),
-      duration_ms: Date.now() - started,
-      stdout: clip(result.stdout, limits.runCapChars, 'stdout'),
-      stderr: clip(redactGitError(result.stderr), limits.runCapChars, 'stderr'),
-    };
+    // The child never sees the control plane's own secrets or port.
+    const { NODE_TEST_CONTEXT: _testContext, NODE_OPTIONS: _nodeOptions, PORT: _port, BOB_ADMIN_TOKEN: _admin, BOB_RUNNER_TOKEN: _runner, BOB_MODEL_GATEWAY_TOKEN: _gw, SUPABASE_SERVICE_ROLE_KEY: _srk, OPENAI_API_KEY: _oai, GITEA_TOKEN: _gitea, GITHUB_TOKEN: _gh, ...childEnv } = process.env;
+    // Asynchronous: a full test suite can run for a minute, and a blocked event loop would stall
+    // the control plane's own HTTP server (health, model gateway) for that long.
+    return new Promise((resolve) => {
+      const child = spawn(argv[0], argv.slice(1), { cwd: workspacePath, env: { ...childEnv, CI: '1', FORCE_COLOR: '0' }, stdio: ['ignore', 'pipe', 'pipe'] });
+      let stdout = '';
+      let stderr = '';
+      let timedOut = false;
+      const cap = 64 * 1024 * 1024;
+      child.stdout.on('data', (chunk) => { if (stdout.length < cap) stdout += chunk.toString('utf8'); });
+      child.stderr.on('data', (chunk) => { if (stderr.length < cap) stderr += chunk.toString('utf8'); });
+      const timer = setTimeout(() => { timedOut = true; try { child.kill('SIGKILL'); } catch { /* gone */ } }, limits.runTimeoutMs);
+      const finish = (status, spawnError) => {
+        clearTimeout(timer);
+        runs.push({ command: text, exit_code: status, at: new Date(started).toISOString(), duration_ms: Date.now() - started });
+        resolve({
+          command: text,
+          exit_code: status,
+          timed_out: timedOut,
+          duration_ms: Date.now() - started,
+          stdout: clip(stdout, limits.runCapChars, 'stdout'),
+          stderr: clip(redactGitError(spawnError ? `${stderr}\n${spawnError.message}` : stderr), limits.runCapChars, 'stderr'),
+        });
+      };
+      child.on('error', (error) => finish(null, error));
+      child.on('close', (code) => finish(code));
+    });
   };
 
   const policyCheck = (file) => {
@@ -546,6 +563,7 @@ async function runAgenticEngineer({
   };
   // Local providers reject prompts that outgrow their window (413) or go away (5xx/timeouts); OpenAI errors end the run.
   const ESCALATE_STATUSES = new Set([408, 413, 429, 500, 502, 503, 504]);
+  let unavailableStreak = 0;
 
   while (turns < limits.maxTurns && now() - started < limits.wallBudgetMs) {
     turns++;
@@ -554,11 +572,17 @@ async function runAgenticEngineer({
     const request = { ...base, idempotency_key: `${base.idempotency_key}::turn-${turns}`, request: { ...base.request, messages: compactMessages(messages), ...(isOpenAI ? { reasoning_effort: process.env.BOB_BUILDER_REASONING_EFFORT || 'high' } : {}), max_output_tokens: Number(process.env.BOB_BUILDER_MAX_OUTPUT_TOKENS || 32000) } };
     const response = await callModel({ ...gateway, modelRequest: request, timeoutMs: limits.turnTimeoutMs });
     if (!response.ok) {
-      log({ turn: turns, provider: candidates[active].provider, error: `model unavailable: ${response.error}` });
-      if ((ESCALATE_STATUSES.has(Number(response.status)) || response.timeout) && escalate(`provider ${response.status ?? 'timeout'}: ${String(response.error).slice(0, 120)}`)) continue;
-      if (response.timeout || turns >= 3) { outcome = { ok: false, error: `model unavailable: ${response.error}` }; break; }
+      unavailableStreak++;
+      log({ turn: turns, provider: candidates[active].provider, error: `model unavailable: ${response.error}`, streak: unavailableStreak });
+      if ((ESCALATE_STATUSES.has(Number(response.status)) || response.timeout) && escalate(`provider ${response.status ?? 'timeout'}: ${String(response.error).slice(0, 120)}`)) { unavailableStreak = 0; continue; }
+      // One dropped connection at turn 42 used to discard 41 turns of work (job 1021dbaa); give the
+      // same provider three consecutive chances with a short backoff before calling it unavailable.
+      if (unavailableStreak >= 3) { outcome = { ok: false, error: `model unavailable: ${response.error}` }; break; }
+      turns--; // the turn did not happen
+      await new Promise((resolve) => setTimeout(resolve, 2000 * unavailableStreak));
       continue;
     }
+    unavailableStreak = 0;
     summariseUsage(usage, response.data?.usage);
     const content = String(response.data?.content ?? '');
     const call = parseToolCall(content);

@@ -210,7 +210,8 @@ async function callModelGateway({
   gatewayUrl,
   apiToken,
   modelRequest,
-  timeoutMs = DEFAULT_GATEWAY_TIMEOUT_MS
+  timeoutMs = DEFAULT_GATEWAY_TIMEOUT_MS,
+  retrying = false
 }) {
   if (typeof fetchImpl !== 'function') throw new Error('fetch implementation is required');
   if (!gatewayUrl || !apiToken) throw new Error('model gateway credentials are required');
@@ -247,10 +248,18 @@ async function callModelGateway({
     return { ok: true, status: response.status, data };
   } catch (error) {
     const timedOut = error?.name === 'AbortError';
+    // A dropped keep-alive socket (the control plane calls its own gateway) is not the model being
+    // down: retry once after a short pause before reporting it. Timeouts are never retried here.
+    if (!timedOut && !retrying) {
+      clearTimeout(timer);
+      await new Promise((resolve) => setTimeout(resolve, 1500));
+      return callModelGateway({ fetchImpl, gatewayUrl, apiToken, modelRequest, timeoutMs, retrying: true });
+    }
+    const detail = String(error?.cause?.code || error?.cause?.message || error?.message || '').slice(0, 120);
     return {
       ok: false,
       status: timedOut ? 408 : 502,
-      error: timedOut ? 'model gateway timed out' : 'model gateway unavailable',
+      error: timedOut ? 'model gateway timed out' : `model gateway unavailable${detail ? ` (${detail})` : ''}`,
       timeout: timedOut
     };
   } finally {

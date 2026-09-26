@@ -291,7 +291,7 @@ test('compactMessages keeps recent turns verbatim and collapses older bulky resu
   assert.equal(messages[3].content.length > 5000, true, 'the in-memory transcript is not mutated');
 });
 
-test('finish is refused when a change touches tests but no test run passed this session; verified_runs carry first-hand evidence', () => {
+test('finish is refused when a change touches tests but no test run passed this session; verified_runs carry first-hand evidence', async () => {
   const repo = makeRepo();
   const workspaceRoot = path.join(repo.root, 'workspaces');
   const { createBranchWorkspace } = require('../builder-branch-workspace');
@@ -303,9 +303,9 @@ test('finish is refused when a change touches tests but no test run passed this 
   const refused = buildProposal({ workspacePath: ws.workspacePath, lane: 'backend', tools, args });
   assert.match(refused.error, /touches tests but no `node --test …` run passed/);
   // Claims in args.tests do not count; only an actual passing run does.
-  tools.run({ command: 'node --check lib/sum.js' });
+  await tools.run({ command: 'node --check lib/sum.js' });
   assert.match(buildProposal({ workspacePath: ws.workspacePath, lane: 'backend', tools, args }).error, /no `node --test …` run passed/);
-  const run = tools.run({ command: 'node --test test/sum.test.js' });
+  const run = await tools.run({ command: 'node --test test/sum.test.js' });
   assert.equal(run.exit_code, 0);
   const ok = buildProposal({ workspacePath: ws.workspacePath, lane: 'backend', tools, args });
   assert.ok(ok.proposal, JSON.stringify(ok));
@@ -427,4 +427,36 @@ test('the engineer paces its budget and gets one grace turn to finish when edits
   assert.match(result.proposal.summary, /changed to addition/);
   assert.ok(seen.some((m) => /BUDGET: .*left/.test(m)), 'a budget note was injected before the end');
   assert.ok(seen.at(-1).includes('FINAL TURN'), 'the grace turn asked for finish only');
+});
+
+test('a dropped gateway connection mid-run is retried on the same turn; three in a row end the run (live job 1021dbaa lost 41 turns to one)', async () => {
+  const repo = makeRepo();
+  const workspaceRoot = path.join(repo.root, 'workspaces');
+  const job = { id: 'd0c0d0c0d0c0d0c0d0c0d0c0d0c0d0c0', organization_id: '00000000-0000-0000-0000-000000000001', target_sha: repo.sha, title: 'sum subtracts', task_description: 'fix sum' };
+  const step = { id: 'step-hiccup', builder_mode: 'backend_engineer' };
+  const seen = [];
+  const script = [
+    { tool: 'write_file', args: { path: 'lib/sum.js', content: "'use strict';\nmodule.exports = { sum: (a, b) => a + b };\n" } },
+    'drop', 'drop',
+    { tool: 'run', args: { command: 'node --test test/sum.test.js' } },
+    { tool: 'finish', args: { summary: 'sum() used subtraction; changed to addition; test passes.', tests: ['node --test test/sum.test.js'], rollback_notes: ['revert'] } },
+  ];
+  const callModel = async ({ modelRequest }) => {
+    seen.push(modelRequest.idempotency_key);
+    const next = script[Math.min(seen.length - 1, script.length - 1)];
+    if (next === 'drop') return { ok: false, status: 502, error: 'model gateway unavailable (ECONNRESET)' };
+    return { ok: true, status: 200, data: { content: JSON.stringify(next), model: 'gpt-5.4' } };
+  };
+  const result = await runAgenticEngineer({ supabase: null, gateway: { gatewayUrl: 'http://gw', apiToken: 't' }, job, step, lane: 'backend', sourceDir: repo.source, workspaceRoot, repoRoot: repo.source, callModel, limits: { ...DEFAULT_LIMITS, maxTurns: 10 }, providerHealth: LAPTOP_OFF });
+  assert.equal(result.ok, true, JSON.stringify(result.error));
+  assert.equal(seen.length, 5, 'two dropped calls, then the run carries on');
+  assert.equal(seen[1], seen[2], 'a retried turn keeps the same turn number/idempotency key');
+  assert.equal(seen[2], seen[3]);
+
+  const seen2 = [];
+  const result2 = await runAgenticEngineer({ supabase: null, gateway: { gatewayUrl: 'http://gw', apiToken: 't' }, job: { ...job, id: 'd0c0d0c0d0c0d0c0d0c0d0c0d0c0d0c1' }, step, lane: 'backend', sourceDir: repo.source, workspaceRoot, repoRoot: repo.source, callModel: async () => { seen2.push(1); return { ok: false, status: 502, error: 'model gateway unavailable' }; }, limits: { ...DEFAULT_LIMITS, maxTurns: 10 }, providerHealth: LAPTOP_OFF });
+  assert.equal(result2.ok, false);
+  assert.match(result2.error, /model unavailable/);
+  assert.equal(seen2.length, 3, 'three consecutive failures on the last provider end the run, not thirty');
+  fs.rmSync(repo.root, { recursive: true, force: true });
 });
