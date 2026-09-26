@@ -12,7 +12,7 @@
 
 const { execFileSync } = require('node:child_process');
 
-const SECRET_PATH = /(^|\/)(\.env(\..*)?|.*\.pem|.*\.key|.*secret.*|.*credential.*|id_rsa.*|id_ed25519.*)$/i;
+const SECRET_PATH = /(^|\/)((.*\.)?env(\..*)?|.*\.pem|.*\.key|.*secret.*|.*credential.*|id_rsa.*|id_ed25519.*)$/i;
 const MAX_FILE_BYTES = 400 * 1024;
 const MAX_MATCHES = 100;
 

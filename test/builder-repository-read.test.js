@@ -38,6 +38,9 @@ test('safeRepoPath refuses escapes, absolute paths and secret material', () => {
   assert.equal(safeRepoPath('/etc/passwd'), null);
   assert.equal(safeRepoPath('deploy/.env'), null);
   assert.equal(safeRepoPath('deploy/.env.production'), null);
+  assert.equal(safeRepoPath('deploy/laptop-worker/laptop-worker.env'), null);
+  assert.equal(safeRepoPath('deploy/laptop-worker/laptop-worker.env.example'), null);
+  assert.equal(safeRepoPath('src/environment.ts'), 'src/environment.ts');
   assert.equal(safeRepoPath('keys/server.pem'), null);
   assert.equal(safeRepoPath('deploy/bob-laptop/id_ed25519.pub'), null);
   assert.equal(safeRepoPath('a//b'), null);
