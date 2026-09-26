@@ -21,6 +21,14 @@ const UX_DESIGN_SCHEMA = Object.freeze({
   ]
 });
 
+function boundedDirectoryCounts(value) {
+  if (!value || typeof value !== 'object' || Array.isArray(value)) return {};
+  return Object.fromEntries(Object.entries(value)
+    .filter(([key, count]) => typeof key === 'string' && Number.isInteger(count) && count >= 0)
+    .slice(0, 50)
+    .map(([key, count]) => [key.slice(0, 120), count]));
+}
+
 function normalizeDesignContext(context = {}) {
   const buildMap = context.build_map && typeof context.build_map === 'object' ? context.build_map : {};
   const liveContext = context.live_context && typeof context.live_context === 'object' ? context.live_context : null;
@@ -41,6 +49,8 @@ function normalizeDesignContext(context = {}) {
       target_sha: typeof buildMap.target_sha === 'string' ? buildMap.target_sha.slice(0, 64) : '',
       file_count: Number.isInteger(buildMap.file_count) ? buildMap.file_count : 0,
       tracked_files: Array.isArray(buildMap.tracked_files) ? buildMap.tracked_files.filter(value => typeof value === 'string').slice(0, 2000) : [],
+      tracked_files_truncated: buildMap.tracked_files_truncated === true,
+      directory_counts: boundedDirectoryCounts(buildMap.directory_counts),
       packages: Array.isArray(buildMap.packages) ? buildMap.packages.slice(0, 20) : [],
       compose: Array.isArray(buildMap.compose) ? buildMap.compose.slice(0, 20) : [],
       supabase_edge_functions: Array.isArray(buildMap.supabase_edge_functions) ? buildMap.supabase_edge_functions.filter(value => typeof value === 'string').slice(0, 500) : [],

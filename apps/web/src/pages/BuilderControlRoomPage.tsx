@@ -128,7 +128,7 @@ const BuilderControlRoomPage: React.FC = () => {
   const invoke = useCallback(async (body: Record<string, unknown>) => {
     const { data, error: invokeError } = await supabase.functions.invoke('bob-builder-control-room', { body });
     if (invokeError) throw invokeError;
-    if (data?.error) throw new Error(data.error);
+    if (data?.error) throw new Error(typeof data.detail === 'string' && data.detail ? `${data.error}: ${data.detail}` : data.error);
     return data;
   }, []);
 

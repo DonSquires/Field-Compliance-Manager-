@@ -71,6 +71,15 @@ async function relay(path: string, method: 'GET' | 'POST', body?: unknown) {
   return { ok: response.ok, status: response.status, payload };
 }
 
+// Callers here already hold a Builder role; a short, bounded reason turns a dead-end 409 into
+// something the operator (or Bob's self-heal loop) can act on. Never the raw payload.
+function failureDetail(source: unknown): string | undefined {
+  const candidate = source && typeof source === 'object'
+    ? (source as Record<string, unknown>).detail ?? (source as Record<string, unknown>).message ?? (source as Record<string, unknown>).error
+    : source;
+  return typeof candidate === 'string' && candidate.trim() ? candidate.trim().slice(0, 300) : undefined;
+}
+
 serve(async req => {
   let stage = 'request';
   try {
@@ -174,7 +183,7 @@ serve(async req => {
       _target_environment: targetEnvironment,
     });
     await audit(requestedOrgId, createError ? 'failed' : 'created', String(created?.id ?? '') || null);
-    return createError ? json({ error: 'Builder job could not be created' }, 409) : json({ job: safeJob(created) }, 201);
+    return createError ? json({ error: 'Builder job could not be created', detail: failureDetail(createError) }, 409) : json({ job: safeJob(created) }, 201);
   }
 
   const jobId = typeof body.job_id === 'string' ? body.job_id : '';
@@ -245,7 +254,7 @@ serve(async req => {
     if (!CONTROL_PLANE_URL || !CONTROL_PLANE_TOKEN) return json({ error: 'Builder execution host is unavailable' }, 503);
     const result = await relay(`/api/bob/builder/jobs/${encodeURIComponent(jobId)}/workspace`, 'POST');
     await audit(job.organization_id, result.ok ? 'workspace_created' : 'workspace_failed', jobId);
-    if (!result.ok) return json({ error: 'Builder workspace could not be created' }, result.status);
+    if (!result.ok) return json({ error: 'Builder workspace could not be created', detail: failureDetail(result.payload) }, result.status);
     return json({ workspace: result.payload });
   }
   if (action === 'create_followup') {
@@ -269,21 +278,21 @@ serve(async req => {
     if (!artifactId || !CONTROL_PLANE_URL || !CONTROL_PLANE_TOKEN) return json({ error: 'Verified patch and Builder execution host are required' }, 400);
     const result = await relay(`/api/bob/builder/jobs/${encodeURIComponent(jobId)}/commit`, 'POST', { artifactId });
     await audit(job.organization_id, result.ok ? 'workspace_patch_committed' : 'workspace_commit_failed', jobId);
-    if (!result.ok) return json({ error: 'Verified Builder patch could not be committed' }, result.status);
+    if (!result.ok) return json({ error: 'Verified Builder patch could not be committed', detail: failureDetail(result.payload) }, result.status);
     return json({ commit: result.payload });
   }
   if (action === 'publish_workspace') {
     if (!CONTROL_PLANE_URL || !CONTROL_PLANE_TOKEN) return json({ error: 'Builder execution host is unavailable' }, 503);
     const result = await relay(`/api/bob/builder/jobs/${encodeURIComponent(jobId)}/publish`, 'POST');
     await audit(job.organization_id, result.ok ? 'workspace_published' : 'workspace_publish_failed', jobId);
-    if (!result.ok) return json({ error: 'Builder branch could not be published' }, result.status);
+    if (!result.ok) return json({ error: 'Builder branch could not be published', detail: failureDetail(result.payload) }, result.status);
     return json({ publication: result.payload });
   }
   if (action === 'create_pull_request') {
     if (!CONTROL_PLANE_URL || !CONTROL_PLANE_TOKEN) return json({ error: 'Builder execution host is unavailable' }, 503);
     const result = await relay(`/api/bob/builder/jobs/${encodeURIComponent(jobId)}/pull-request`, 'POST');
     await audit(job.organization_id, result.ok ? 'pull_request_created' : 'pull_request_failed', jobId);
-    if (!result.ok) return json({ error: 'Builder pull request could not be created' }, result.status);
+    if (!result.ok) return json({ error: 'Builder pull request could not be created', detail: failureDetail(result.payload) }, result.status);
     return json({ pull_request: result.payload });
   }
   if (action === 'advance' || action === 'run') {
@@ -303,7 +312,7 @@ serve(async req => {
       maxActions: action === 'run' ? Math.min(Math.max(Number(body.max_actions) || 8, 1), 8) : undefined,
     });
     await audit(job.organization_id, result.ok ? action : 'failed', jobId);
-    if (!result.ok) return json({ error: `Builder job could not ${action}` }, result.status);
+    if (!result.ok) return json({ error: `Builder job could not ${action}`, detail: failureDetail(result.payload) }, result.status);
     const snapshot = result.payload.snapshot && typeof result.payload.snapshot === 'object'
       ? safeSnapshot(result.payload.snapshot as Record<string, unknown>)
       : null;

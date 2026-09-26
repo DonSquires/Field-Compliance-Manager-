@@ -5,6 +5,10 @@ const { createAssessment } = require('../../../assessment-manifest');
 const MAX_TRACKED_FILES = 2000;
 const MAX_SCHEMA_ENTITIES = 1000;
 const EXCLUDED_PATH = /(?:^|\/)\.env(?:\.|$)/;
+// Trimmed first when the inventory must be bounded: the schema inventory already
+// carries the database truth, so individual migration files are the lowest-signal
+// entries for a model reading the build map.
+const LOW_SIGNAL_PATH = /^supabase\/migrations\//;
 
 function git(sourceDir, args) {
   return execFileSync('git', args, { cwd: sourceDir, encoding: 'utf8' }).trim();
@@ -26,6 +30,24 @@ function collectSchemaInventory(sourceDir) {
   };
 }
 
+function directoryCounts(files) {
+  const counts = new Map();
+  for (const file of files) {
+    const top = file.includes('/') ? file.slice(0, file.indexOf('/')) : '.';
+    counts.set(top, (counts.get(top) || 0) + 1);
+  }
+  return Object.fromEntries([...counts.entries()].sort((a, b) => b[1] - a[1] || a[0].localeCompare(b[0])));
+}
+
+// The full inventory is only bounded, never a reason to fail: consumers already
+// slice tracked_files, and a repository that grows past the cap must still build.
+function boundTrackedFiles(files) {
+  if (files.length <= MAX_TRACKED_FILES) return { tracked_files: files, truncated: false };
+  const primary = files.filter(file => !LOW_SIGNAL_PATH.test(file));
+  const lowSignal = files.filter(file => LOW_SIGNAL_PATH.test(file));
+  return { tracked_files: [...primary, ...lowSignal].slice(0, MAX_TRACKED_FILES), truncated: true };
+}
+
 function collectRepositoryContext({ sourceDir, targetSha }) {
   if (!sourceDir || !targetSha) throw new Error('sourceDir and targetSha are required');
   if (git(sourceDir, ['rev-parse', 'HEAD']) !== targetSha) {
@@ -37,12 +59,14 @@ function collectRepositoryContext({ sourceDir, targetSha }) {
   const files = git(sourceDir, ['ls-tree', '-r', '--name-only', targetSha])
     .split('\n')
     .filter(file => file && !EXCLUDED_PATH.test(file));
-  if (files.length > MAX_TRACKED_FILES) throw new Error('repository inventory exceeds file limit');
+  const bounded = boundTrackedFiles(files);
   const assessment = createAssessment(sourceDir);
   return {
     target_sha: targetSha,
     file_count: files.length,
-    tracked_files: files,
+    tracked_files: bounded.tracked_files,
+    tracked_files_truncated: bounded.truncated,
+    directory_counts: directoryCounts(files),
     packages: assessment.packages,
     compose: assessment.compose,
     supabase_edge_functions: assessment.supabaseEdgeFunctions,
@@ -52,4 +76,4 @@ function collectRepositoryContext({ sourceDir, targetSha }) {
   };
 }
 
-module.exports = { MAX_TRACKED_FILES, MAX_SCHEMA_ENTITIES, EXCLUDED_PATH, collectSchemaInventory, collectRepositoryContext };
+module.exports = { MAX_TRACKED_FILES, MAX_SCHEMA_ENTITIES, EXCLUDED_PATH, LOW_SIGNAL_PATH, boundTrackedFiles, directoryCounts, collectSchemaInventory, collectRepositoryContext };

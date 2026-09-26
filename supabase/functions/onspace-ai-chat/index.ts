@@ -8349,12 +8349,13 @@ serve(async (req)=>{
               backend_required: bjBackend
             });
             if (!created.ok || !created.data?.job?.id) {
+              const bjFailure = [created.data?.error ?? created.status, created.data?.detail].filter(Boolean).map(String).join(': ');
               return {
-                reply: `I could not open the Builder job (${String(created.data?.error ?? created.status).slice(0, 200)}). The brief is kept — tell me to try again once the Builder host is reachable.`,
+                reply: `I could not open the Builder job (${bjFailure.slice(0, 300)}). The brief is kept — tell me to try again once the Builder host is reachable.`,
                 meta: {
                   tool: 'create_builder_job',
                   outcome: 'failed',
-                  error: String(created.data?.error ?? created.status).slice(0, 300),
+                  error: bjFailure.slice(0, 300),
                   pending_builder_job: storedJob
                 }
               };
@@ -8365,7 +8366,9 @@ serve(async (req)=>{
               job_id: bjJob.id,
               max_actions: 8
             });
-            const runNote = started.ok ? 'The Builder is working now — research → implementation in an isolated worktree → tests → independent code and security review — at full reasoning effort, so this takes minutes, not seconds.' : 'The job is created; the runner did not start automatically, so start it from the Builder control room.';
+            const runNote = started.ok
+              ? 'The Builder is working now — research → implementation in an isolated worktree → tests → independent code and security review — at full reasoning effort, so this takes minutes, not seconds.'
+              : `The job is created; the runner did not start automatically (${[started.data?.error ?? started.status, started.data?.detail].filter(Boolean).map(String).join(': ').slice(0, 200)}), so start it from the Builder control room.`;
             return {
               reply: `Builder job **${bjTitle}** is open in the GitHub repository at commit \`${String(bjJob.target_sha ?? '').slice(0, 10)}\`. ${runNote} When it is ready you will get a **DRAFT pull request** to review — I will not merge or deploy it. Track it under Platform & Settings → Builder.`,
               meta: {
