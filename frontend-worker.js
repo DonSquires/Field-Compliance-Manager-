@@ -88,12 +88,55 @@ function run(command, args, options) {
   };
 }
 
-function frontendVerificationCommands() {
+// The repository's own CI runs this smoke subset (apps/web package.json test:e2e:ci-smoke); the full
+// 75-spec suite across two browser projects does not fit any verifier budget (job ecfb4dc4 was
+// killed at the 15-minute lease with lint+build+unit done and e2e still running).
+const E2E_SMOKE_SPECS = Object.freeze([
+  'e2e/admin-hub-dispatch.spec.ts',
+  'e2e/dr-bob-automation-geofence-module.spec.ts',
+  'e2e/geofence-spine-map.spec.ts',
+  'e2e/officer-module-entitlements.spec.ts'
+]);
+const E2E_TARGETED_MAX = 6;
+
+function kebab(name) {
+  return String(name).replace(/([a-z0-9])([A-Z])/g, '$1-$2').replace(/[^A-Za-z0-9]+/g, '-').toLowerCase();
+}
+
+/** Spec files whose name or text refers to a changed web page/component (e.g. BuilderControlRoomPage.tsx -> *builder-control-room*.spec.ts). */
+function targetedE2eSpecs(changedFiles, webDir) {
+  const e2eDir = path.join(webDir, 'e2e');
+  if (!fs.existsSync(e2eDir)) return [];
+  const stems = new Set();
+  for (const file of changedFiles) {
+    const match = String(file).match(/^apps\/web\/src\/.*\/([A-Za-z0-9_]+)\.(?:tsx?|css)$/);
+    if (!match) continue;
+    const stem = match[1].replace(/(Page|Panel|View|Screen|Component|Modal|Card)$/, '');
+    if (stem.length >= 5) stems.add(stem);
+  }
+  if (!stems.size) return [];
+  const specs = fs.readdirSync(e2eDir).filter((entry) => entry.endsWith('.spec.ts')).sort();
+  const selected = [];
+  for (const spec of specs) {
+    const specKebab = kebab(spec);
+    let text = null;
+    for (const stem of stems) {
+      if (specKebab.includes(kebab(stem))) { selected.push(`e2e/${spec}`); break; }
+      if (text === null) { try { text = fs.readFileSync(path.join(e2eDir, spec), 'utf8'); } catch { text = ''; } }
+      if (text.includes(stem)) { selected.push(`e2e/${spec}`); break; }
+    }
+    if (selected.length >= E2E_TARGETED_MAX) break;
+  }
+  return selected;
+}
+
+function frontendVerificationCommands({ changedFiles = [], webDir = null } = {}) {
+  const targeted = webDir ? targetedE2eSpecs(changedFiles, webDir).filter((spec) => !E2E_SMOKE_SPECS.includes(spec)) : [];
   return [
     ['run', 'lint', '--prefix', 'apps/web'],
     ['run', 'build', '--prefix', 'apps/web'],
     ['run', 'test', '--prefix', 'apps/web', '--', '--pool=threads', '--maxWorkers=1', '--reporter=dot'],
-    ['run', 'test:e2e', '--prefix', 'apps/web', '--', '--workers=1', '--reporter=line']
+    ['run', 'test:e2e', '--prefix', 'apps/web', '--', ...E2E_SMOKE_SPECS, ...targeted, '--project=desktop-chromium', '--workers=1', '--reporter=line']
   ];
 }
 
@@ -122,7 +165,12 @@ function executeFrontendPatch({ sourceDir, patchPath, artifactDir, workDir = '/w
   }
 
   if (patchApplied) {
-    for (const args of frontendVerificationCommands()) {
+    const e2eTargeted = targetedE2eSpecs(changedFiles, path.join(workDir, 'apps/web'));
+    const progressPath = path.join(artifactDir, 'verification.json');
+    for (const args of frontendVerificationCommands({ changedFiles, webDir: path.join(workDir, 'apps/web') })) {
+      // Evidence before each step: a worker killed at its lease still tells the handoff what was running.
+      fs.mkdirSync(artifactDir, { recursive: true });
+      fs.writeFileSync(progressPath, `${JSON.stringify({ succeeded: false, in_progress: true, running: ['npm', ...args].join(' '), started_at: new Date().toISOString(), commands, e2e_selection: { smoke: E2E_SMOKE_SPECS, targeted: e2eTargeted, project: 'desktop-chromium' } }, null, 2)}\n`, { mode: 0o600 });
       commands.push(run('npm', args, { cwd: workDir }));
       if (commands.at(-1).status !== 0) break;
     }
@@ -142,7 +190,7 @@ function executeFrontendPatch({ sourceDir, patchPath, artifactDir, workDir = '/w
   }
   fs.writeFileSync(path.join(artifactDir, 'changed-files.json'), `${JSON.stringify(manifest, null, 2)}\n`, { mode: 0o600 });
   if (patchApplied) fs.writeFileSync(path.join(artifactDir, 'validated.patch'), patchText, { mode: 0o600 });
-  fs.writeFileSync(path.join(artifactDir, 'verification.json'), `${JSON.stringify({ succeeded, commands }, null, 2)}\n`, { mode: 0o600 });
+  fs.writeFileSync(path.join(artifactDir, 'verification.json'), `${JSON.stringify({ succeeded, commands, e2e_selection: patchApplied ? { smoke: E2E_SMOKE_SPECS, targeted: targetedE2eSpecs(changedFiles, path.join(workDir, 'apps/web')), project: 'desktop-chromium' } : null }, null, 2)}\n`, { mode: 0o600 });
   return { succeeded, changed_files: manifest, commands };
 }
 
@@ -164,6 +212,7 @@ if (require.main === module) {
 }
 
 module.exports = {
+  E2E_SMOKE_SPECS,
   MAX_PATCH_BYTES,
   PROTECTED_FRONTEND_PATHS,
   VERIFICATION_ENV,
@@ -171,5 +220,6 @@ module.exports = {
   changedFilesFromPatch,
   validatePatchText,
   frontendVerificationCommands,
+  targetedE2eSpecs,
   executeFrontendPatch
 };

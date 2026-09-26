@@ -149,7 +149,11 @@ async function runBackendHandoff({
       fs.writeFileSync(verificationPath, `${JSON.stringify(verification, null, 2)}\n`, { mode: 0o600 });
     }
     const succeeded = staticSucceeded && databaseVerification?.succeeded === true;
-    const infrastructure = succeeded ? { infrastructure: false, reason: null } : classifyVerificationFailure(verification);
+    const infrastructure = succeeded
+      ? { infrastructure: false, reason: null }
+      : result.status === 'timeout'
+        ? { infrastructure: true, reason: `verifier timed out after ${timeoutSeconds} s` }
+        : classifyVerificationFailure(verification);
     const artifacts = [];
     if (verification) {
       artifacts.push(await registerOutput(supabase, lease, verificationPath, 'build_logs', 'application/json'));

@@ -74,3 +74,36 @@ test('frontend artifact download rejects checksum mismatch', async () => {
   const supabase = { from:()=>query, storage:{from:()=>({download:async()=>({data:{arrayBuffer:async()=>content},error:null})})} };
   await assert.rejects(downloadVerifiedArtifact(supabase, 'a', 'j', 'code_implementation'), /integrity check failed/);
 });
+test('a worker killed at its lease is an infrastructure failure naming the step that was running, with the partial evidence kept', async () => {
+  const repo = fixture();
+  const summaries = [];
+  try {
+    const result = await runFrontendHandoff({
+      supabase: {},
+      job: { id: 'job-1', organization_id: 'org-1', target_sha: repo.sha },
+      step: { id: 'step-1', builder_mode: 'frontend_engineer' },
+      patchArtifact: { id: 'patch-1' },
+      sourceDir: repo.root,
+      workerImage: 'worker:test',
+      runnerId: 'runner-1',
+      timeoutSeconds: 1800,
+      loadPatch: async () => ({ bytes: Buffer.from(JSON.stringify({ summary: 'Change', patch, changed_files: ['apps/web/src/example.ts'], tests: [] })) }),
+      claim: async () => ({ run_id: 'run-1', lease_token: 'lease', organization_id: 'org-1', job_id: 'job-1' }),
+      resetRetry: async () => {},
+      execute: async options => {
+        // What the worker writes before each step; it was in e2e when the lease expired.
+        fs.writeFileSync(path.join(options.artifactDir, 'verification.json'), JSON.stringify({ succeeded: false, in_progress: true, running: 'npm run test:e2e --prefix apps/web -- e2e/admin-hub-dispatch.spec.ts', commands: [{ command: 'npm run lint', status: 0 }, { command: 'npm run build', status: 0 }, { command: 'npm run test', status: 0 }] }));
+        return { status: 'timeout', exitCode: null };
+      },
+      registerOutput: async (_supabase, _lease, file, type) => ({ id: `${type}:${path.basename(file)}` }),
+      finish: async (_supabase, _lease, succeeded, _exitCode, summary) => { summaries.push([succeeded, summary]); return { status: 'implementation_pending' }; }
+    });
+    assert.equal(result.success, false);
+    assert.equal(result.infrastructure_failure, true);
+    assert.equal(result.infrastructure_reason, 'verifier timed out after 1800 s during npm run test:e2e --prefix apps/web -- e2e/admin-hub-dispatch.spec.ts');
+    assert.equal(result.failure_artifact.id, 'build_logs:verification.json', 'the partial evidence is registered, not lost');
+    assert.deepEqual(summaries, [[false, 'Frontend verifier infrastructure failure (verifier timed out after 1800 s during npm run test:e2e --prefix apps/web -- e2e/admin-hub-dispatch.spec.ts); the same patch is re-verified']]);
+  } finally {
+    fs.rmSync(repo.root, { recursive: true, force: true });
+  }
+});

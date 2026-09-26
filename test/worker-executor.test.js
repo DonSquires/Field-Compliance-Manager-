@@ -4,7 +4,7 @@ const os = require('node:os');
 const path = require('node:path');
 const test = require('node:test');
 const { dockerArguments, redact, workerCommand } = require('../worker-executor');
-const { validatePatchText, changedFilesFromPatch, executeFrontendPatch, frontendVerificationCommands, redactLog, VERIFICATION_ENV } = require('../frontend-worker');
+const { validatePatchText, changedFilesFromPatch, executeFrontendPatch, frontendVerificationCommands, targetedE2eSpecs, E2E_SMOKE_SPECS, redactLog, VERIFICATION_ENV } = require('../frontend-worker');
 
 test('worker profiles use fixed commands', () => {
   assert.deepEqual(workerCommand('assessment'), ['node', '/opt/bob/assessment-manifest.js', '/workspace', '/artifacts/system-assessment.json']);
@@ -29,9 +29,28 @@ test('frontend verification uses a bounded Vitest worker pool', () => {
   assert.deepEqual(testCommand, ['run', 'test', '--prefix', 'apps/web', '--', '--pool=threads', '--maxWorkers=1', '--reporter=dot']);
 });
 
-test('frontend verification runs Playwright serially after build and unit checks', () => {
+test('frontend verification runs Playwright serially after build and unit checks: CI smoke set plus specs targeting the changed files', () => {
   const e2eCommand = frontendVerificationCommands().at(-1);
-  assert.deepEqual(e2eCommand, ['run', 'test:e2e', '--prefix', 'apps/web', '--', '--workers=1', '--reporter=line']);
+  assert.deepEqual(e2eCommand, ['run', 'test:e2e', '--prefix', 'apps/web', '--', ...E2E_SMOKE_SPECS, '--project=desktop-chromium', '--workers=1', '--reporter=line']);
+  // Targeting: a spec whose name or text refers to a changed page/component joins the run (job ecfb4dc4:
+  // the full 75-spec suite could not finish inside the lease).
+  const root = fs.mkdtempSync(path.join(os.tmpdir(), 'e2e-target-'));
+  const webDir = path.join(root, 'apps/web');
+  fs.mkdirSync(path.join(webDir, 'e2e'), { recursive: true });
+  fs.writeFileSync(path.join(webDir, 'e2e/builder-control-room.spec.ts'), "test('x', () => {});\n");
+  fs.writeFileSync(path.join(webDir, 'e2e/reports-hub.spec.ts'), "await page.goto('/builder'); // exercises BuilderControlRoom\n");
+  fs.writeFileSync(path.join(webDir, 'e2e/officer-leave.spec.ts'), "test('leave', () => {});\n");
+  fs.writeFileSync(path.join(webDir, 'e2e/admin-hub-dispatch.spec.ts'), "BuilderControlRoom\n");
+  try {
+    const changed = ['apps/web/src/pages/BuilderControlRoomPage.tsx', 'apps/web/src/pages/BuilderControlRoomPage.guard.test.ts'];
+    assert.deepEqual(targetedE2eSpecs(changed, webDir), ['e2e/admin-hub-dispatch.spec.ts', 'e2e/builder-control-room.spec.ts', 'e2e/reports-hub.spec.ts']);
+    const cmd = frontendVerificationCommands({ changedFiles: changed, webDir }).at(-1);
+    assert.deepEqual(cmd.slice(5, 5 + E2E_SMOKE_SPECS.length + 2), [...E2E_SMOKE_SPECS, 'e2e/builder-control-room.spec.ts', 'e2e/reports-hub.spec.ts'], 'a smoke spec is not listed twice');
+    assert.deepEqual(targetedE2eSpecs(['apps/web/src/lib/tiny.ts'], webDir), [], 'short stems do not match everything');
+    assert.deepEqual(targetedE2eSpecs(['supabase/functions/x/index.ts'], webDir), []);
+  } finally {
+    fs.rmSync(root, { recursive: true, force: true });
+  }
 });
 
 test('frontend verification supplies deterministic non-secret Supabase test values', () => {

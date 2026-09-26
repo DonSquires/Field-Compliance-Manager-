@@ -181,7 +181,12 @@ async function runFrontendHandoff({
       try { verification = JSON.parse(fs.readFileSync(verificationPath, 'utf8')); } catch { /* unreadable evidence is a failure below */ }
     }
     const succeeded = result.status === 'succeeded' && verification?.succeeded === true;
-    const infrastructure = succeeded ? { infrastructure: false, reason: null } : classifyVerificationFailure(verification);
+    // A lease timeout leaves the progressive evidence the worker wrote before it was killed.
+    const infrastructure = succeeded
+      ? { infrastructure: false, reason: null }
+      : result.status === 'timeout'
+        ? { infrastructure: true, reason: `verifier timed out after ${timeoutSeconds} s during ${String(verification?.running || 'verification').slice(0, 120)}` }
+        : classifyVerificationFailure(verification);
     const artifacts = [];
     if (fs.existsSync(verificationPath)) {
       artifacts.push(await registerOutput(supabase, lease, verificationPath, 'build_logs', 'application/json'));

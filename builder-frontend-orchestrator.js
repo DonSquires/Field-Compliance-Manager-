@@ -27,7 +27,7 @@ async function runFrontendImplementation({
   workerImage,
   runnerId,
   liveContext,
-  timeoutSeconds = 900,
+  timeoutSeconds = Math.min(3600, Math.max(300, Number(process.env.BOB_BUILDER_FRONTEND_TIMEOUT_SECONDS) || 1800)),
   generate = runFrontendEngineer,
   repair = runFrontendRepair,
   handoff = runFrontendHandoff,
