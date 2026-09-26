@@ -15,7 +15,7 @@
        from the VPS's Tailscale address only. Nothing is opened to your LAN or the internet.
     4. Bob's terminal: installs Windows OpenSSH Server (built into Windows), sets it to start only
        when you say so, makes PowerShell its shell, and authorises Bob's public key
-       (deploy/bob-laptop/bob_laptop_id_ed25519.pub — a public key, nothing secret).
+       (deploy/bob-laptop/bob_laptop_id_ed25519.pub - a public key, nothing secret).
 
   You stay in control
     -Allow   start the SSH service (Bob can run commands you approve in chat)
@@ -46,6 +46,16 @@ $RepoRoot = Split-Path -Parent (Split-Path -Parent $PSScriptRoot)
 $ScriptVersion = '2026-09-26'
 function Write-Log([string]$Message) { Write-Host ("{0:HH:mm:ss} {1}" -f (Get-Date), $Message) }
 function Test-Admin { ([Security.Principal.WindowsPrincipal][Security.Principal.WindowsIdentity]::GetCurrent()).IsInRole([Security.Principal.WindowsBuiltInRole]::Administrator) }
+# Under ErrorActionPreference=Stop, Windows PowerShell 5.1 turns a native command's stderr into a
+# terminating error when it is redirected; run such commands with Continue and return their output.
+function Invoke-Native([scriptblock]$Block) {
+  $previous = $ErrorActionPreference
+  $ErrorActionPreference = 'Continue'
+  try { & $Block } finally { $ErrorActionPreference = $previous }
+}
+function Get-OllamaTags {
+  try { return Invoke-RestMethod -Uri 'http://127.0.0.1:11434/api/tags' -TimeoutSec 5 } catch { return $null }
+}
 
 # deploy/laptop-worker/laptop-worker.env already holds the project's Supabase URL + service key for the
 # CCTV worker on this laptop; the same file lets this script register the laptop with Bob.
@@ -64,7 +74,7 @@ if ($LaptopEnv['BOB_GPU_MODELS'] -and -not $PSBoundParameters.ContainsKey('Model
 
 $tailscale = @("$env:ProgramFiles\Tailscale\tailscale.exe", 'tailscale') | Where-Object { Get-Command $_ -ErrorAction SilentlyContinue } | Select-Object -First 1
 if (-not $tailscale) { throw 'Tailscale is not installed on this laptop (https://tailscale.com/download/windows).' }
-$tsStatus = & $tailscale status --json 2>$null | ConvertFrom-Json
+$tsStatus = Invoke-Native { & $tailscale status --json 2>$null } | ConvertFrom-Json
 if (-not $tsStatus -or $tsStatus.BackendState -ne 'Running') { throw 'Tailscale is installed but not connected. Open Tailscale and sign in, then run this again.' }
 $myIp = ($tsStatus.Self.TailscaleIPs | Where-Object { $_ -like '100.*' } | Select-Object -First 1)
 $myName = ($tsStatus.Self.DNSName -replace '\.$', '')
@@ -80,11 +90,12 @@ function Get-SshdState {
 # switch is on, models present). Service-role only table; nothing secret leaves the laptop.
 function Register-BobLaptop([bool]$SshAllowed) {
   $url = $LaptopEnv['SUPABASE_URL']; $key = $LaptopEnv['SUPABASE_SERVICE_ROLE_KEY']
-  if (-not $url -or -not $key) { Write-Log "No deploy\laptop-worker\laptop-worker.env with SUPABASE_URL + SUPABASE_SERVICE_ROLE_KEY — not registered. Tell Bob: laptop user is '$env:USERNAME'."; return }
+  if (-not $url -or -not $key) { Write-Log "No deploy\laptop-worker\laptop-worker.env with SUPABASE_URL + SUPABASE_SERVICE_ROLE_KEY - not registered. Tell Bob: laptop user is '$env:USERNAME'."; return }
   [string[]]$models = @()
-  try { $models = @((Invoke-RestMethod -Uri 'http://127.0.0.1:11434/api/tags' -TimeoutSec 5).models | ForEach-Object { [string]$_.name }) } catch {}
+  $tags = Get-OllamaTags
+  if ($tags) { $models = @($tags.models | ForEach-Object { [string]$_.name }) }
   $gpu = $null
-  try { $gpu = [string](& nvidia-smi --query-gpu=name --format=csv,noheader 2>$null | Select-Object -First 1) } catch {}
+  try { $gpu = [string](Invoke-Native { & nvidia-smi --query-gpu=name --format=csv,noheader 2>$null } | Select-Object -First 1) } catch { $gpu = $null }
   $row = [ordered]@{
     id = 'primary'; host_name = $env:COMPUTERNAME; tailscale_ip = $myIp; windows_user = $env:USERNAME
     ssh_allowed = $SshAllowed; ssh_port = 22
@@ -92,9 +103,9 @@ function Register-BobLaptop([bool]$SshAllowed) {
     script_version = $ScriptVersion; reported_at = (Get-Date).ToUniversalTime().ToString('o')
   }
   $body = ConvertTo-Json -InputObject $row -Compress -Depth 4
-  $headers = @{ apikey = $key; Authorization = "Bearer $key"; 'Content-Type' = 'application/json'; Prefer = 'resolution=merge-duplicates,return=minimal' }
+  $headers = @{ apikey = $key; Authorization = "Bearer $key"; Prefer = 'resolution=merge-duplicates,return=minimal' }
   try {
-    Invoke-RestMethod -Method Post -Uri "$($url.TrimEnd('/'))/rest/v1/bob_laptop_link?on_conflict=id" -Headers $headers -Body $body -TimeoutSec 20 | Out-Null
+    Invoke-RestMethod -Method Post -Uri "$($url.TrimEnd('/'))/rest/v1/bob_laptop_link?on_conflict=id" -Headers $headers -ContentType 'application/json' -Body $body -TimeoutSec 20 | Out-Null
     Write-Log ("Registered with Bob: user '{0}', {1}, SSH {2}" -f $env:USERNAME, $myIp, $(if ($SshAllowed) { 'ON' } else { 'OFF' }))
   } catch {
     Write-Log "Registration with Bob failed (non-fatal): $($_.Exception.Message). Tell Bob: laptop user is '$env:USERNAME'."
@@ -105,9 +116,9 @@ function Show-Status {
   Write-Host ''
   Write-Host '== Bob laptop link status =='
   Write-Host ("  Tailscale        : {0} ({1})" -f $myName, $myIp)
-  $tags = try { Invoke-RestMethod -Uri 'http://127.0.0.1:11434/api/tags' -TimeoutSec 5 } catch { $null }
-  Write-Host ("  Ollama           : {0}" -f $(if ($tags) { 'running — ' + (($tags.models | ForEach-Object { $_.name }) -join ', ') } else { 'not running' }))
-  Write-Host ("  Ollama bind      : {0}" -f $(if ([Environment]::GetEnvironmentVariable('OLLAMA_HOST', 'User')) { [Environment]::GetEnvironmentVariable('OLLAMA_HOST', 'User') } else { '127.0.0.1 (localhost only — VPS cannot reach it)' }))
+  $tags = Get-OllamaTags
+  Write-Host ("  Ollama           : {0}" -f $(if ($tags) { 'running - ' + (($tags.models | ForEach-Object { $_.name }) -join ', ') } else { 'not running' }))
+  Write-Host ("  Ollama bind      : {0}" -f $(if ([Environment]::GetEnvironmentVariable('OLLAMA_HOST', 'User')) { [Environment]::GetEnvironmentVariable('OLLAMA_HOST', 'User') } else { '127.0.0.1 (localhost only - VPS cannot reach it)' }))
   Write-Host ("  SSH (Bob shell)  : {0}" -f (Get-SshdState))
   Write-Host ("  Firewall rules   : {0}" -f ((Get-NetFirewallRule -DisplayName 'Bob *' -ErrorAction SilentlyContinue | ForEach-Object { "$($_.DisplayName)=$($_.Enabled)" }) -join ', '))
   Write-Host ("  Windows user     : {0}" -f $env:USERNAME)
@@ -115,7 +126,7 @@ function Show-Status {
 }
 
 if ($Status) { Show-Status; Register-BobLaptop ((Get-Service sshd -ErrorAction SilentlyContinue).Status -eq 'Running'); exit 0 }
-if (-not (Test-Admin)) { throw 'Run this from an Administrator PowerShell (right-click PowerShell → Run as administrator).' }
+if (-not (Test-Admin)) { throw 'Run this from an Administrator PowerShell (right-click PowerShell -> Run as administrator).' }
 
 if ($Deny) {
   if (Get-Service sshd -ErrorAction SilentlyContinue) { Stop-Service sshd -ErrorAction SilentlyContinue; Set-Service sshd -StartupType Manual }
@@ -123,13 +134,13 @@ if ($Deny) {
   Show-Status; Register-BobLaptop $false; exit 0
 }
 if ($Allow) {
-  if (-not (Get-Service sshd -ErrorAction SilentlyContinue)) { throw 'OpenSSH Server is not set up yet — run this script once without switches first.' }
+  if (-not (Get-Service sshd -ErrorAction SilentlyContinue)) { throw 'OpenSSH Server is not set up yet - run this script once without switches first.' }
   Start-Service sshd
   Write-Log "Bob's terminal is ON (sshd running). Use -Deny to switch it off."
   Show-Status; Register-BobLaptop $true; exit 0
 }
 
-# ── 1. Ollama over Tailscale ──────────────────────────────────────────────────────────────────
+# -- 1. Ollama over Tailscale ------------------------------------------------------------------
 if (-not $SkipOllama) {
   if (-not (Get-Command ollama -ErrorAction SilentlyContinue)) {
     Write-Log 'Ollama is not installed. Installing with winget (https://ollama.com/download otherwise)...'
@@ -150,10 +161,11 @@ if (-not $SkipOllama) {
     if (Test-Path $app) { Start-Process -FilePath $app -WindowStyle Hidden } else { Start-Process -FilePath 'ollama' -ArgumentList 'serve' -WindowStyle Hidden }
   }
   $deadline = (Get-Date).AddSeconds(45)
-  do { Start-Sleep -Seconds 2; $ok = try { (Invoke-RestMethod -Uri 'http://127.0.0.1:11434/api/tags' -TimeoutSec 4) -ne $null } catch { $false } } while (-not $ok -and (Get-Date) -lt $deadline)
+  $ok = $false
+  do { Start-Sleep -Seconds 2; $ok = ($null -ne (Get-OllamaTags)) } while (-not $ok -and (Get-Date) -lt $deadline)
   if (-not $ok) { throw 'Ollama did not come up on 11434. Start the Ollama app from the Start menu and run this again.' }
   if ($BiggerModels) { $Models += @('qwen2.5-coder:14b', 'qwen3-coder:30b') }
-  $have = (Invoke-RestMethod -Uri 'http://127.0.0.1:11434/api/tags').models | ForEach-Object { $_.name }
+  $have = @((Get-OllamaTags).models | ForEach-Object { $_.name })
   foreach ($model in $Models) {
     if ($have -contains $model) { Write-Log "Model present: $model" } else { Write-Log "Pulling $model (one-off download)..."; & ollama pull $model }
   }
@@ -163,8 +175,8 @@ if (-not $SkipOllama) {
   Write-Log "Firewall: Ollama 11434 reachable from the Tailscale network only"
 }
 
-# ── 2. Bob's terminal: Windows OpenSSH Server, Tailscale-only, owner-toggled ──────────────────
-if (-not (Test-Path $BobPublicKeyPath)) { throw "Bob's public key was not found at $BobPublicKeyPath — run 'git pull' in the repo first." }
+# -- 2. Bob's terminal: Windows OpenSSH Server, Tailscale-only, owner-toggled ------------------
+if (-not (Test-Path $BobPublicKeyPath)) { throw "Bob's public key was not found at $BobPublicKeyPath - run 'git pull' in the repo first." }
 $bobKey = (Get-Content $BobPublicKeyPath -Raw).Trim()
 if ($bobKey -notmatch '^ssh-ed25519 AAAA[0-9A-Za-z+/=]+') { throw "The file at $BobPublicKeyPath does not look like an ssh-ed25519 public key." }
 
