@@ -89,7 +89,7 @@ BEGIN
   END;
   PERFORM pg_temp.check('browser roles cannot read pending vectors', v_error LIKE '%permission denied%');
 
-  v_result := public.review_identity_document(v_document, 'approve',
+  v_result := public.review_identity_evidence(v_document, 'approve',
     '{"display_name":"Approved Name","date_of_birth":"1990-05-04","driver_licence_number":"AB123456","driver_licence_expiry":"2030-02-01","embedding":[1,2,3]}'::jsonb,
     'Compared each approved field with the source');
   PERFORM pg_temp.check('strong identity evidence can verify a person', (v_result->>'identity_verified')::boolean);
@@ -101,7 +101,7 @@ BEGIN
   WHERE basis = 'face_identity' AND person_record_id = v_person;
   PERFORM pg_temp.check('approved private template participates in matching', v_count = 1);
   BEGIN
-    PERFORM public.review_identity_document(v_document, 'reject', '{}'::jsonb, 'Second transition');
+    PERFORM public.review_identity_evidence(v_document, 'reject', '{}'::jsonb, 'Second transition');
     v_error := NULL;
   EXCEPTION WHEN OTHERS THEN v_error := SQLERRM;
   END;
@@ -112,11 +112,11 @@ BEGIN
     '{"display_name":"Photo Fixture"}'::jsonb, NULL, NULL, 0);
   v_photo_document := (v_result->>'identity_document_id')::uuid;
   PERFORM pg_temp.as_user(v_admin);
-  v_result := public.review_identity_document(v_photo_document, 'approve', '{"display_name":"Photo Fixture"}'::jsonb, 'Confirmed this is the supplied reference photo');
+  v_result := public.review_identity_evidence(v_photo_document, 'approve', '{"display_name":"Photo Fixture"}'::jsonb, 'Confirmed this is the supplied reference photo');
   PERFORM pg_temp.check('a reference photo does not verify legal identity', NOT (v_result->>'identity_verified')::boolean
     AND (SELECT review_state = 'manual_review_required' FROM public.person_records WHERE id = v_photo_person));
 
-  PERFORM public.manage_identity_person(v_org, v_person, 'retire_faces', '{}'::jsonb, 'No continuing operational purpose');
+  PERFORM public.manage_identity_person_record(v_org, v_person, 'retire_faces', '{}'::jsonb, 'No continuing operational purpose');
   SELECT count(*) INTO v_count FROM public.find_cctv_portfolio_matches(v_org, 'person', v_embedding, NULL, NULL, NULL, 10)
   WHERE basis = 'face_identity' AND person_record_id = v_person;
   PERFORM pg_temp.check('retired face templates stop matching immediately', v_count = 0);

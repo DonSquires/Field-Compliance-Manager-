@@ -6,6 +6,7 @@ const test = require('node:test');
 const root = path.resolve(__dirname, '..');
 const read = (file) => fs.readFileSync(path.join(root, file), 'utf8');
 const migration = read('supabase/migrations/20260926110000_identity_records_workspace.sql');
+const securityLicenceMigration = read('supabase/migrations/20260926140000_security_licence_identity_intake.sql');
 const api = read('services/fcm-api/server.js');
 const dockerfile = read('services/fcm-api/Dockerfile');
 const inferenceEdge = read('supabase/functions/bob-inference/index.ts');
@@ -15,11 +16,16 @@ const identityPage = read('apps/web/src/pages/UserManagementPage.tsx');
 const cctvReviewPage = read('apps/web/src/pages/CCTVReviewPage.tsx');
 const { extractIdentityFields, isoDate } = require('../services/fcm-api/src/bob/identityDocument');
 
-test('identity OCR proposes editable driver and firearms licence fields', () => {
+test('identity OCR proposes editable driver, firearms, and security licence fields', () => {
   assert.deepEqual(extractIdentityFields('DRIVER LICENCE\nName: Jane Citizen\nLicence No: AB123456\nDate of Birth: 04/05/1990\nExpiry Date: 01/02/2030', 'driver_licence'), {
     display_name: 'Jane Citizen', date_of_birth: '1990-05-04', expiry_date: '2030-02-01', driver_licence_number: 'AB123456',
   });
   assert.equal(extractIdentityFields('FIREARMS LICENCE\nName: Jamie Example\nLicence Number: Z1234567', 'firearms_licence').firearms_licence_number, 'Z1234567');
+  assert.deepEqual(extractIdentityFields('PRIVATE SECURITY PERSONNEL BADGE\nName: Jamie Example\nCertificate of Approval Number: TEST-1234\nExpiry 24-07-2030\nPSG CC SC ST RPA', 'security_licence'), {
+    display_name: 'Jamie Example', expiry_date: '2030-07-24', security_licence_number: 'TEST-1234',
+    security_licence_authority: 'Private Security Personnel Licensing Authority',
+    security_endorsements: 'Personal guard, Crowd controller, Security consultant, Security technician, Repossession agent',
+  });
   assert.equal(isoDate('04/05/90'), '1990-05-04');
   assert.equal(isoDate('04/05/26'), '2026-05-04');
   assert.equal(isoDate('31/02/2030'), null);
@@ -71,15 +77,32 @@ test('private identity evidence runs local OCR and source-face inference', () =>
   assert.match(inferenceEdge, /X-Identity-Context/);
 });
 
+test('security licences and historical versions use governed current-value rules', () => {
+  assert.match(securityLicenceMigration, /'security_licence'/);
+  assert.match(securityLicenceMigration, /FUNCTION public\.manage_identity_person_record/);
+  assert.match(securityLicenceMigration, /FUNCTION public\.review_identity_evidence/);
+  assert.match(securityLicenceMigration, /v_incoming_expiry >= current_date/);
+  assert.match(securityLicenceMigration, /v_incoming_expiry >= v_existing_expiry/);
+  assert.match(securityLicenceMigration, /promoted_to_current_profile/);
+  assert.match(securityLicenceMigration, /REVOKE EXECUTE ON FUNCTION public\.review_identity_document[\s\S]*FROM authenticated/);
+});
+
 test('People and Access exposes manual people, vehicles, and human-reviewed ID intake', () => {
   assert.match(identityPage, /Identity records/);
   assert.match(identityPage, /<IdentityRecordsWorkspace/);
-  assert.match(workspace, /manage_identity_person/);
+  assert.match(workspace, /manage_identity_person_record/);
   assert.match(workspace, /manage_identity_vehicle/);
   assert.match(workspace, /mode: ["']identity_document["']/);
   assert.match(workspace, /Approve and update person/);
   assert.match(workspace, /Reject evidence/);
-  assert.match(workspace, /One source-image face can become a matching candidate after approval/);
+  assert.match(workspace, /contain one source face that can become a candidate after approval/);
+  assert.match(workspace, /Security licence \/ CoA/);
+  assert.match(workspace, /People &amp;\s*HR → Credentials/);
+  assert.match(workspace, /multiple/);
+  assert.match(workspace, /Upload and extract \$\{documentFiles\.length\} files/);
+  assert.match(workspace, /review_identity_evidence/);
+  assert.match(workspace, /Historical licence retained without replacing current details/);
+  assert.match(workspace, /Historical evidence · Current details unchanged/);
   assert.match(workspace, /Remove face candidate/);
   assert.match(workspace, /Evidence review complete/);
   assert.match(workspace, /No people match this search\. Add a person to begin\./);

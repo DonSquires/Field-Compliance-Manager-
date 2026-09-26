@@ -224,6 +224,11 @@
 .identity-documents > p {
   color: #60736d;
 }
+.identity-documents > .identity-records-guidance {
+  padding-left: 10px;
+  border-left: 3px solid #28765c;
+  color: #35584d;
+}
 .identity-documents > form {
   display: grid;
   grid-template-columns: 1fr 1fr auto;

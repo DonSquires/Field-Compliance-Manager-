@@ -51,6 +51,7 @@ type IdentityDocument = {
   extracted_fields: {
     proposed?: Record<string, unknown>;
     approved?: Record<string, unknown>;
+    promoted_to_current_profile?: boolean;
     face_count?: number;
     candidate_matches?: Array<{
       match_id: string;
@@ -85,6 +86,10 @@ type PersonForm = {
   driver_licence_expiry: string;
   firearms_licence_number: string;
   firearms_licence_expiry: string;
+  security_licence_number: string;
+  security_licence_expiry: string;
+  security_licence_authority: string;
+  security_endorsements: string;
   notes: string;
 };
 type VehicleForm = {
@@ -111,6 +116,10 @@ const EMPTY_PERSON: PersonForm = {
   driver_licence_expiry: "",
   firearms_licence_number: "",
   firearms_licence_expiry: "",
+  security_licence_number: "",
+  security_licence_expiry: "",
+  security_licence_authority: "",
+  security_endorsements: "",
   notes: "",
 };
 const EMPTY_VEHICLE: VehicleForm = {
@@ -128,6 +137,7 @@ const EMPTY_VEHICLE: VehicleForm = {
 const DOCUMENT_KINDS = [
   ["driver_licence", "Driver licence"],
   ["firearms_licence", "Firearms licence"],
+  ["security_licence", "Security licence / CoA"],
   ["passport", "Passport"],
   ["national_id", "Other government ID"],
   ["person_photo", "Person reference photo"],
@@ -155,6 +165,10 @@ function personForm(person: PersonRecord): PersonForm {
     driver_licence_expiry: value("driver_licence_expiry"),
     firearms_licence_number: value("firearms_licence_number"),
     firearms_licence_expiry: value("firearms_licence_expiry"),
+    security_licence_number: value("security_licence_number"),
+    security_licence_expiry: value("security_licence_expiry"),
+    security_licence_authority: value("security_licence_authority"),
+    security_endorsements: value("security_endorsements"),
     notes: value("notes"),
   };
 }
@@ -172,6 +186,8 @@ function proposedPersonForm(
       values.driver_licence_expiry = proposed.expiry_date;
     if (documentKind === "firearms_licence")
       values.firearms_licence_expiry = proposed.expiry_date;
+    if (documentKind === "security_licence")
+      values.security_licence_expiry = proposed.expiry_date;
   }
   return { ...current, ...values } as PersonForm;
 }
@@ -215,7 +231,8 @@ export function IdentityRecordsWorkspace({
   const [vehicle, setVehicle] = useState<VehicleForm>(EMPTY_VEHICLE);
   const [reason, setReason] = useState("");
   const [documentKind, setDocumentKind] = useState("driver_licence");
-  const [documentFile, setDocumentFile] = useState<File | null>(null);
+  const [documentFiles, setDocumentFiles] = useState<File[]>([]);
+  const [documentInputKey, setDocumentInputKey] = useState(0);
   const [selectedDocument, setSelectedDocument] =
     useState<IdentityDocument | null>(null);
   const [documentFields, setDocumentFields] =
@@ -282,7 +299,7 @@ export function IdentityRecordsWorkspace({
     setError(null);
     setNotice(null);
     const { data: savedPerson, error: saveError } = await supabase.rpc(
-      "manage_identity_person",
+      "manage_identity_person_record",
       {
         p_organization_id: organizationId,
         p_person_record_id: selectedPersonId,
@@ -314,7 +331,7 @@ export function IdentityRecordsWorkspace({
     setError(null);
     setNotice(null);
     const { error: retireError } = await supabase.rpc(
-      "manage_identity_person",
+      "manage_identity_person_record",
       {
         p_organization_id: organizationId,
         p_person_record_id: selectedPersonId,
@@ -385,86 +402,84 @@ export function IdentityRecordsWorkspace({
 
   const uploadDocument = async (event: FormEvent) => {
     event.preventDefault();
-    if (!selectedPersonId || !documentFile) return;
+    if (!selectedPersonId || documentFiles.length === 0) return;
     setBusy("document");
     setError(null);
     setNotice(null);
-    const attachmentId = crypto.randomUUID();
-    const safeName = documentFile.name
-      .replace(/[^a-zA-Z0-9._-]+/g, "_")
-      .slice(-180);
-    if (documentFile.size > 25 * 1024 * 1024) {
-      setError("Identity evidence must be 25 MB or smaller.");
+    const oversized = documentFiles.find((file) => file.size > 25 * 1024 * 1024);
+    if (oversized) {
+      setError(`${oversized.name} is larger than 25 MB. Choose a smaller source file.`);
       setBusy(null);
       return;
     }
-    const storagePath = `org/${organizationId}/identity/${userId}/${attachmentId}-${safeName}`;
-    let metadataRegistered = false;
+    const completed: Array<{ attachmentId: string; proposed: Record<string, unknown>; faceCount: number }> = [];
+    const failures: string[] = [];
     try {
-      const upload = await supabase.storage
-        .from("identity-evidence")
-        .upload(storagePath, documentFile, {
-          contentType: documentFile.type || "application/octet-stream",
-          upsert: false,
-        });
-      if (upload.error) throw upload.error;
       const convId = await conversationId();
-      const metadata = await supabase
-        .from("bob_attachments")
-        .insert({
-          id: attachmentId,
-          organization_id: organizationId,
-          conversation_id: convId,
-          uploaded_by: userId,
-          file_name: documentFile.name,
-          file_type: documentFile.type || "application/octet-stream",
-          file_size_bytes: documentFile.size,
-          storage_bucket: "identity-evidence",
-          storage_path: storagePath,
-          purpose: "identity_document",
-          processing_state: "processing",
-        });
-      if (metadata.error) throw metadata.error;
-      metadataRegistered = true;
-      const perception = await supabase.functions.invoke("bob-perceive-image", {
-        body: {
-          mode: "identity_document",
-          attachment_id: attachmentId,
-          organization_id: organizationId,
-          person_record_id: selectedPersonId,
-          document_kind: documentKind,
-        },
-      });
-      if (perception.error || !perception.data?.success)
-        throw (
-          perception.error ??
-          new Error(perception.data?.error || "Identity extraction failed")
-        );
-      const proposed = perception.data.proposed_fields ?? {};
-      setDocumentFields(proposedPersonForm(person, proposed, documentKind));
-      setNotice(
-        `Extraction ready for human review. ${perception.data.face?.count === 1 ? "One source-image face can become a matching candidate after approval." : perception.data.face?.count > 1 ? "Several faces were found, so none will be enrolled." : "No enrolment face was found."}`,
-      );
-      setDocumentFile(null);
+      for (const file of documentFiles) {
+        const attachmentId = crypto.randomUUID();
+        const safeName = file.name.replace(/[^a-zA-Z0-9._-]+/g, "_").slice(-180);
+        const storagePath = `org/${organizationId}/identity/${userId}/${attachmentId}-${safeName}`;
+        let metadataRegistered = false;
+        try {
+          const upload = await supabase.storage.from("identity-evidence").upload(storagePath, file, {
+            contentType: file.type || "application/octet-stream",
+            upsert: false,
+          });
+          if (upload.error) throw upload.error;
+          const metadata = await supabase.from("bob_attachments").insert({
+            id: attachmentId,
+            organization_id: organizationId,
+            conversation_id: convId,
+            uploaded_by: userId,
+            file_name: file.name,
+            file_type: file.type || "application/octet-stream",
+            file_size_bytes: file.size,
+            storage_bucket: "identity-evidence",
+            storage_path: storagePath,
+            purpose: "identity_document",
+            processing_state: "processing",
+          });
+          if (metadata.error) throw metadata.error;
+          metadataRegistered = true;
+          const perception = await supabase.functions.invoke("bob-perceive-image", {
+            body: {
+              mode: "identity_document",
+              attachment_id: attachmentId,
+              organization_id: organizationId,
+              person_record_id: selectedPersonId,
+              document_kind: documentKind,
+            },
+          });
+          if (perception.error || !perception.data?.success) {
+            throw perception.error ?? new Error(perception.data?.error || "Identity extraction failed");
+          }
+          completed.push({
+            attachmentId,
+            proposed: perception.data.proposed_fields ?? {},
+            faceCount: perception.data.face?.count ?? 0,
+          });
+        } catch (uploadError) {
+          if (metadataRegistered) {
+            await supabase.from("bob_attachments").update({ processing_state: "failed" }).eq("id", attachmentId).eq("uploaded_by", userId);
+          } else {
+            await supabase.storage.from("identity-evidence").remove([storagePath]);
+          }
+          failures.push(`${file.name}: ${uploadError instanceof Error ? uploadError.message : "extraction failed"}`);
+        }
+      }
+
+      setDocumentFiles([]);
+      setDocumentInputKey((value) => value + 1);
       const next = await load(search);
-      const document =
-        next?.documents?.find((item) => item.attachment_id === attachmentId) ??
-        null;
+      const document = next?.documents?.find((item) => completed.some((result) => result.attachmentId === item.attachment_id)) ?? null;
+      if (completed[0]) setDocumentFields(proposedPersonForm(person, completed[0].proposed, documentKind));
       if (document) await selectIdentityDocument(document);
-    } catch (uploadError) {
-      if (metadataRegistered)
-        await supabase
-          .from("bob_attachments")
-          .update({ processing_state: "failed" })
-          .eq("id", attachmentId)
-          .eq("uploaded_by", userId);
-      else
-        await supabase.storage.from("identity-evidence").remove([storagePath]);
-      setError(
-        uploadError instanceof Error
-          ? uploadError.message
-          : "Identity document intake failed.",
-      );
+      const faceReady = completed.filter((result) => result.faceCount === 1).length;
+      if (completed.length) {
+        setNotice(`${completed.length} source file${completed.length === 1 ? "" : "s"} ready for human review.${faceReady ? ` ${faceReady} contain one source face that can become a candidate after approval.` : " No enrolment face was found."}`);
+      }
+      if (failures.length) setError(`${failures.length} source file${failures.length === 1 ? "" : "s"} failed. ${failures.join(" ")}`);
     } finally {
       setBusy(null);
     }
@@ -495,7 +510,7 @@ export function IdentityRecordsWorkspace({
     setError(null);
     setNotice(null);
     const { data: reviewResult, error: reviewError } = await supabase.rpc(
-      "review_identity_document",
+      "review_identity_evidence",
       {
         p_identity_document_id: selectedDocument.id,
         p_action: action,
@@ -507,7 +522,7 @@ export function IdentityRecordsWorkspace({
     else {
       setNotice(
         action === "approve"
-          ? `Identity evidence approved.${reviewResult?.identity_verified ? " Identity details are verified." : " This evidence type does not verify identity details."}${reviewResult?.face_candidate_enrolled ? " One face candidate is now active." : " No face candidate was enrolled."}`
+          ? `Identity evidence approved.${reviewResult?.identity_verified ? " Identity details are verified." : " This evidence type does not verify identity details."}${["driver_licence", "firearms_licence", "security_licence"].includes(selectedDocument.document_kind) ? reviewResult?.current_credential_updated ? " Current licence details were updated." : " Historical licence retained without replacing current details." : ""}${reviewResult?.face_candidate_enrolled ? " One face candidate is now active." : " No face candidate was enrolled."}`
           : "Identity evidence rejected. Its face template was removed.",
       );
       setSelectedDocument(null);
@@ -797,6 +812,55 @@ export function IdentityRecordsWorkspace({
                         }
                       />
                     </label>
+                    <label>
+                      <span>Security licence / CoA number</span>
+                      <input
+                        value={person.security_licence_number}
+                        onChange={(event) =>
+                          setPerson({
+                            ...person,
+                            security_licence_number: event.target.value,
+                          })
+                        }
+                      />
+                    </label>
+                    <label>
+                      <span>Security licence / CoA expiry</span>
+                      <input
+                        type="date"
+                        value={person.security_licence_expiry}
+                        onChange={(event) =>
+                          setPerson({
+                            ...person,
+                            security_licence_expiry: event.target.value,
+                          })
+                        }
+                      />
+                    </label>
+                    <label>
+                      <span>Security licence authority</span>
+                      <input
+                        value={person.security_licence_authority}
+                        onChange={(event) =>
+                          setPerson({
+                            ...person,
+                            security_licence_authority: event.target.value,
+                          })
+                        }
+                      />
+                    </label>
+                    <label>
+                      <span>Security endorsements</span>
+                      <input
+                        value={person.security_endorsements}
+                        onChange={(event) =>
+                          setPerson({
+                            ...person,
+                            security_endorsements: event.target.value,
+                          })
+                        }
+                      />
+                    </label>
                     <label className="is-wide">
                       <span>Notes</span>
                       <textarea
@@ -858,6 +922,13 @@ export function IdentityRecordsWorkspace({
                       Upload a clear image or PDF. OCR and face detection fill a
                       proposal; compare it with the source before approval.
                     </p>
+                    {documentKind === "security_licence" && (
+                      <p className="identity-records-guidance">
+                        This records identity evidence and face matching only.
+                        For an employee, record the approved CoA in People &amp;
+                        HR → Credentials to update work readiness.
+                      </p>
+                    )}
                     <form onSubmit={uploadDocument}>
                       <label>
                         <span>Evidence type</span>
@@ -875,24 +946,28 @@ export function IdentityRecordsWorkspace({
                         </select>
                       </label>
                       <label>
-                        <span>Source file</span>
+                        <span>Source files</span>
                         <input
+                          key={documentInputKey}
                           type="file"
                           required
+                          multiple
                           accept="image/jpeg,image/png,image/webp,image/bmp,image/tiff,application/pdf"
                           onChange={(event) =>
-                            setDocumentFile(event.target.files?.[0] ?? null)
+                            setDocumentFiles(Array.from(event.target.files ?? []))
                           }
                         />
                       </label>
                       <button
                         type="submit"
-                        disabled={busy !== null || !documentFile}
+                        disabled={busy !== null || documentFiles.length === 0}
                       >
                         <Upload size={15} />
                         {busy === "document"
                           ? "Reading evidence"
-                          : "Upload and extract"}
+                          : documentFiles.length > 1
+                            ? `Upload and extract ${documentFiles.length} files`
+                            : "Upload and extract"}
                       </button>
                     </form>
                     <div className="identity-document-list">
@@ -911,7 +986,10 @@ export function IdentityRecordsWorkspace({
                             </strong>
                             <small>
                               {document.file_name ?? "Source file"} ·{" "}
-                              {words(document.review_state)}
+                              {document.review_state === "approved" &&
+                              document.extracted_fields.promoted_to_current_profile === false
+                                ? "Historical evidence · Current details unchanged"
+                                : words(document.review_state)}
                             </small>
                           </span>
                         </button>
@@ -1192,6 +1270,63 @@ export function IdentityRecordsWorkspace({
                       }
                     />
                   </label>
+                  {selectedDocument.document_kind === "security_licence" && (
+                    <>
+                      <label>
+                        <span>Security licence / CoA number</span>
+                        <input
+                          disabled={selectedDocument.review_state !== "manual_review_required"}
+                          value={documentFields.security_licence_number}
+                          onChange={(event) =>
+                            setDocumentFields({
+                              ...documentFields,
+                              security_licence_number: event.target.value,
+                            })
+                          }
+                        />
+                      </label>
+                      <label>
+                        <span>Security licence / CoA expiry</span>
+                        <input
+                          type="date"
+                          disabled={selectedDocument.review_state !== "manual_review_required"}
+                          value={documentFields.security_licence_expiry}
+                          onChange={(event) =>
+                            setDocumentFields({
+                              ...documentFields,
+                              security_licence_expiry: event.target.value,
+                            })
+                          }
+                        />
+                      </label>
+                      <label>
+                        <span>Issuing authority</span>
+                        <input
+                          disabled={selectedDocument.review_state !== "manual_review_required"}
+                          value={documentFields.security_licence_authority}
+                          onChange={(event) =>
+                            setDocumentFields({
+                              ...documentFields,
+                              security_licence_authority: event.target.value,
+                            })
+                          }
+                        />
+                      </label>
+                      <label>
+                        <span>Endorsements</span>
+                        <input
+                          disabled={selectedDocument.review_state !== "manual_review_required"}
+                          value={documentFields.security_endorsements}
+                          onChange={(event) =>
+                            setDocumentFields({
+                              ...documentFields,
+                              security_endorsements: event.target.value,
+                            })
+                          }
+                        />
+                      </label>
+                    </>
+                  )}
                   <label className="is-wide">
                     <span>Address</span>
                     <input
