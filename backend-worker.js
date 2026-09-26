@@ -69,6 +69,16 @@ function executeBackendPatch({ sourceDir, patchPath, artifactDir, workDir = '/wo
       checks.push(run('node', ['--check', file], workDir));
       if (checks.at(-1).status !== 0) break;
     }
+    // Mobile screens and edge functions are TypeScript: the same syntax gate the repo uses for edge
+    // functions (parse diagnostics; the untyped Deno code has no clean `tsc` pass to hold it to).
+    const tsFiles = changedFiles.filter(file => /\.(?:ts|tsx)$/.test(file) && !file.endsWith('.d.ts'));
+    if (tsFiles.length && checks.every(check => check.status === 0)) {
+      const typescriptDir = [process.env.BOB_TYPESCRIPT_DIR, '/opt/bob/web-node_modules/typescript', path.join(workDir, 'apps/web/node_modules/typescript')].filter(Boolean).find(dir => fs.existsSync(dir));
+      if (typescriptDir) {
+        const script = `const ts=require(process.argv[1]);const fs=require('fs');let bad=0;for(const f of process.argv.slice(2)){const sf=ts.createSourceFile(f,fs.readFileSync(f,'utf8'),ts.ScriptTarget.ES2022,true,f.endsWith('x')?ts.ScriptKind.TSX:ts.ScriptKind.TS);for(const d of sf.parseDiagnostics){bad++;console.error(f+': '+ts.flattenDiagnosticMessageText(d.messageText,' '));}}process.exit(bad?1:0);`;
+        checks.push(run('node', ['-e', script, typescriptDir, ...tsFiles], workDir));
+      }
+    }
   }
   // Static checks alone left the release evidence saying "only syntax checks were run". Execute the
   // test files the patch touches (root node:test suites need no npm dependencies; the container has no network).

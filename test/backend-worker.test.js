@@ -136,3 +136,34 @@ test('backend worker redacts credentials from evidence', () => {
     'token=[REDACTED] authorization=[REDACTED] [REDACTED]'
   );
 });
+test('backend worker syntax-gates TypeScript/TSX (mobile screens, edge functions) when a TypeScript install is available', () => {
+  const tsDir = path.resolve(__dirname, '../apps/web/node_modules/typescript');
+  if (!fs.existsSync(tsDir)) return; // no local TypeScript: the worker image carries its own
+  const tsxPatch = (body) => [
+    'diff --git a/apps/mobile/src/components/Panel.tsx b/apps/mobile/src/components/Panel.tsx',
+    'new file mode 100644',
+    '--- /dev/null',
+    '+++ b/apps/mobile/src/components/Panel.tsx',
+    `@@ -0,0 +1,${body.length} @@`,
+    ...body.map((line) => `+${line}`),
+    ''
+  ];
+  const previous = process.env.BOB_TYPESCRIPT_DIR;
+  process.env.BOB_TYPESCRIPT_DIR = tsDir;
+  const good = fixture(tsxPatch(["import React from 'react';", 'export const Panel = ({ error }: { error: string | null }) => <span>{error ?? "ok"}</span>;']));
+  const bad = fixture(tsxPatch(["import React from 'react';", 'export const Panel = ({ error }: { error: string | null }) => <span>{error ?? "ok"}</span>', 'const = ;']));
+  try {
+    const ok = executeBackendPatch({ sourceDir: good.sourceDir, patchPath: good.patchPath, artifactDir: good.artifactDir, workDir: path.join(good.root, 'work') });
+    assert.equal(ok.succeeded, true, JSON.stringify(ok.checks.map(c => [c.command.slice(0, 40), c.status, c.stderr.slice(0, 200)])));
+    assert.ok(ok.checks.some(c => c.command.startsWith('node -e') && c.status === 0), 'the TS syntax gate ran');
+    const failed = executeBackendPatch({ sourceDir: bad.sourceDir, patchPath: bad.patchPath, artifactDir: bad.artifactDir, workDir: path.join(bad.root, 'work') });
+    assert.equal(failed.succeeded, false);
+    const gate = failed.checks.find(c => c.command.startsWith('node -e'));
+    assert.equal(gate.status, 1);
+    assert.match(gate.stderr, /apps\/mobile\/src\/components\/Panel\.tsx: /);
+  } finally {
+    if (previous === undefined) delete process.env.BOB_TYPESCRIPT_DIR; else process.env.BOB_TYPESCRIPT_DIR = previous;
+    fs.rmSync(good.root, { recursive: true, force: true });
+    fs.rmSync(bad.root, { recursive: true, force: true });
+  }
+});

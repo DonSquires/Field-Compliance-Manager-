@@ -8325,9 +8325,16 @@ serve(async (req)=>{
             const bjTitle = String(toolArgs.title ?? storedJob?.title ?? '').trim().slice(0, 200);
             const bjDescription = String(toolArgs.task_description ?? toolArgs.brief ?? storedJob?.task_description ?? '').trim().slice(0, 12000);
             // Self-heal spans the repository (backend lane); the web lane joins only when the brief is about the app UI.
-            const bjMentionsWeb = /\b(ui|page|panel|component|screen|web app|frontend|apps\/web|css|react|tsx)\b/i.test(`${bjTitle} ${bjDescription}`);
-            const bjFrontend = typeof toolArgs.frontend_required === 'boolean' ? toolArgs.frontend_required : storedJob ? storedJob.frontend_required === true : bjMentionsWeb;
-            const bjBackend = typeof toolArgs.backend_required === 'boolean' ? toolArgs.backend_required : storedJob ? storedJob.backend_required !== false : true;
+            // Paths named in the brief are evidence and win over the model's guess: the web lane edits only
+            // apps/web/, so a mobile screen (apps/mobile) or anything else is backend-lane work even when the
+            // words say "component"/"screen" (job 958829bd was scoped frontend-only and could not touch it).
+            const bjText = `${bjTitle} ${bjDescription}`;
+            const bjPaths = bjText.match(/\b(?:apps|supabase|services|scripts|test|docs|deploy)\/[\w./-]+/g) ?? [];
+            const bjWebPaths = bjPaths.filter((p)=>p.startsWith('apps/web/'));
+            const bjOtherPaths = bjPaths.filter((p)=>!p.startsWith('apps/web/'));
+            const bjMentionsWeb = /\b(ui|page|panel|component|screen|web app|frontend|apps\/web|css|react|tsx)\b/i.test(bjText);
+            const bjFrontend = bjPaths.length ? bjWebPaths.length > 0 : typeof toolArgs.frontend_required === 'boolean' ? toolArgs.frontend_required : storedJob ? storedJob.frontend_required === true : bjMentionsWeb;
+            const bjBackend = bjPaths.length ? bjOtherPaths.length > 0 : typeof toolArgs.backend_required === 'boolean' ? toolArgs.backend_required : storedJob ? storedJob.backend_required !== false : true;
             const bjReviewRaw = String(toolArgs.code_review_mode ?? storedJob?.code_review_mode ?? 'independent_ai');
             const bjReview = bjReviewRaw === 'human' ? 'human' : 'independent_ai';
             if (!bjTitle || bjDescription.length < 40) {
