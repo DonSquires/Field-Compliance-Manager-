@@ -26,6 +26,9 @@ test('identity OCR proposes editable driver, firearms, and security licence fiel
     security_licence_authority: 'Private Security Personnel Licensing Authority',
     security_endorsements: 'Personal guard, Crowd controller, Security consultant, Security technician, Repossession agent',
   });
+  const noisyCoa = extractIdentityFields('PRIVATE SECURITY PERSONNEL BADGE\nCertificate of Approval Number:\ne e 17-041302\n24-07-2036\nPSG CC', 'security_licence');
+  assert.equal(noisyCoa.security_licence_number, '17-041302');
+  assert.equal(noisyCoa.expiry_date, '2036-07-24');
   assert.equal(isoDate('04/05/90'), '1990-05-04');
   assert.equal(isoDate('04/05/26'), '2026-05-04');
   assert.equal(isoDate('31/02/2030'), null);

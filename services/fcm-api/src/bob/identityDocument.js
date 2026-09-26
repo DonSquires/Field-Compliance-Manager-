@@ -31,19 +31,31 @@ function isoDate(value) {
     ? `${year}-${String(month).padStart(2, '0')}-${String(day).padStart(2, '0')}` : null;
 }
 
+function datesIn(text) {
+  return [...String(text || '').matchAll(new RegExp(DATE_PATTERN, 'g'))]
+    .map((match) => isoDate(match[0]))
+    .filter(Boolean);
+}
+
 function extractIdentityFields(rawText, documentKind) {
   const text = String(rawText || '').replace(/\r/g, '');
   const surname = labelled(text, ['surname', 'family name', 'last name']);
   const givenNames = labelled(text, ['given names?', 'first names?']);
-  const displayName = labelled(text, ['full name', 'name']) || clean([givenNames, surname].filter(Boolean).join(' ')) || null;
+  const displayName = labelled(text, ['full name', 'name', 'holder']) || clean([givenNames, surname].filter(Boolean).join(' ')) || null;
   const dateOfBirth = isoDate(labelled(text, ['date of birth', 'birth date', 'dob'], DATE_PATTERN));
   const expiryDate = isoDate(labelled(text, ['date of expiry', 'expiry date', 'expiry', 'expires?', 'valid to'], DATE_PATTERN));
   const issuedDate = isoDate(labelled(text, ['date of issue', 'issue date', 'issued'], DATE_PATTERN));
   let licenceNumber = labelled(text, ['licen[cs]e (?:no|number)', 'licen[cs]e', 'document (?:no|number)', 'card (?:no|number)'], '[A-Z0-9 -]{4,24}');
   if (!licenceNumber && documentKind === 'driver_licence') licenceNumber = (text.toUpperCase().match(/\b[A-Z]{2}\d{6}\b/) || [])[0] || null;
-  if (!licenceNumber && documentKind === 'firearms_licence') licenceNumber = (text.toUpperCase().match(/\b[A-Z0-9]{6,12}\b/) || [])[0] || null;
+  if (!licenceNumber && documentKind === 'firearms_licence') licenceNumber = (text.toUpperCase().match(/\b(?=[A-Z0-9]{6,12}\b)(?=[A-Z0-9]*\d)[A-Z0-9]+\b/) || [])[0] || null;
   if (!licenceNumber && documentKind === 'security_licence') {
     licenceNumber = labelled(text, ['badge (?:no|number)', 'certificate of approval (?:no|number)', 'coa (?:no|number)'], '[A-Z0-9 -]{4,24}');
+    if (!licenceNumber) {
+      const section = text.match(/(?:badge|certificate of approval|coa)(?:\s+(?:no|number))?[\s\S]{0,160}/i)?.[0] || '';
+      licenceNumber = (section.toUpperCase().match(/\b(?=[A-Z0-9-]{6,24}\b)(?=[A-Z0-9-]*\d)[A-Z0-9]+(?:-[A-Z0-9]+)+\b/) || [])[0] || null;
+    }
+    const licenceToken = String(licenceNumber || '').toUpperCase().match(/\b(?=[A-Z0-9-]{6,24}\b)(?=[A-Z0-9-]*\d)[A-Z0-9]+(?:-[A-Z0-9]+)+\b/);
+    if (licenceToken) licenceNumber = licenceToken[0];
   }
   const address = labelled(text, ['address'], '[^\\n]{5,140}');
   const fields = { display_name: displayName, date_of_birth: dateOfBirth, expiry_date: expiryDate, issued_date: issuedDate, address };
@@ -51,6 +63,7 @@ function extractIdentityFields(rawText, documentKind) {
   else if (documentKind === 'firearms_licence') fields.firearms_licence_number = clean(licenceNumber) || null;
   else if (documentKind === 'security_licence') {
     fields.security_licence_number = clean(licenceNumber) || null;
+    fields.expiry_date = fields.expiry_date || datesIn(text).sort().at(-1) || null;
     fields.security_licence_authority = /private security personnel|pspla/i.test(text) ? 'Private Security Personnel Licensing Authority' : null;
     fields.security_endorsements = SECURITY_ENDORSEMENTS.filter(([code]) => new RegExp(`\\b${code}\\b`, 'i').test(text)).map(([, label]) => label).join(', ') || null;
   }
