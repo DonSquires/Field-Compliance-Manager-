@@ -8,6 +8,7 @@
 //   node scripts/bob-builder-e2e.mjs follow  <job_id>                          -> run/poll/approve until release_ready or blocked
 //   node scripts/bob-builder-e2e.mjs publish <job_id> <patch_artifact_id>      -> workspace, commit, publish, pull request
 //   node scripts/bob-builder-e2e.mjs show    <job_id>
+//   node scripts/bob-builder-e2e.mjs cancel  <job_id> "<reason>"
 import fs from 'node:fs';
 
 const SUPABASE_URL = process.env.SUPABASE_URL;
@@ -75,6 +76,10 @@ if (cmd === 'create') {
 } else if (cmd === 'show') {
   const out = await room({ action: 'get', job_id: args[0] });
   console.log(brief(out));
+} else if (cmd === 'cancel') {
+  const [jobId, reason] = args;
+  const out = await room({ action: 'cancel', job_id: jobId, reason });
+  console.log(out.job ? brief(out) : `status=${out.status} error=${out.error ?? '-'}`);
 } else if (cmd === 'follow') {
   const jobId = args[0];
   const deadline = Date.now() + Number(process.env.E2E_BUDGET_MIN || 90) * 60_000;
@@ -121,6 +126,6 @@ if (cmd === 'create') {
   console.log(String(data.reply ?? data.message ?? data.raw ?? JSON.stringify(data)).slice(0, 4000));
   if (data.meta) console.log('--- meta ---', JSON.stringify({ intent: data.meta.intent, route: data.meta.route_selected, verification: data.meta.verification?.status }).slice(0, 400));
 } else {
-  console.log('usage: create <title> <description> | follow <job_id> | publish <job_id> <artifact_id> | show <job_id> | chat <message>');
+  console.log('usage: create <title> <description> | follow <job_id> | publish <job_id> <artifact_id> | show <job_id> | cancel <job_id> "<reason>" | chat <message>');
   process.exit(2);
 }
