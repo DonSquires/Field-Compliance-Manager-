@@ -1332,6 +1332,42 @@ build+deploy (the normal push pipeline) before they reach
 `fcmanager.co.nz` - re-verifying the LIVE UI specifically for these
 frontend changes is a follow-up once deployed, not done in this pass.
 
+## Zone-backed dispatch shakedown (2026-09-26) - production workflow completed
+
+Authenticated production verification used R&M's human-operated master session
+and the real Wrattens agreement. No dispatch job was submitted.
+
+- **Before:** Wrattens had three active Zone records and an accepted operational
+  agreement, but none of the Zones had an active `service_agreement_locations`
+  link. The Dispatch form was Site-only, showed "No active sites", and disabled
+  Create. The database reinforced the same limitation: `dispatch_jobs` and
+  `create_dispatch_job` had only `client_site_id`, despite the canonical field
+  model allowing an existing Site or Zone.
+- **During:** migration `20260927060000_dispatch_jobs_site_or_zone.sql` added an
+  exact Site/Zone anchor, a governed `create_dispatch_job_for_place` command,
+  and a compatibility wrapper for every existing Site caller. Zone context now
+  reaches alarm provenance, officer/admin/mobile readers, live-map and route
+  guidance, completion distance, Zone-specific pay/billing, and audit evidence.
+  The rollback oracle passes six creation, replay, boundary, provenance,
+  financial, and compatibility checks against both isolated PostgreSQL and the
+  live database. The web suite passes 302 files / 1,309 tests; production web,
+  mobile TypeScript, and the Edge Function compile cleanly. Atlas was refreshed,
+  and `officer-route-guidance` is ACTIVE at version 19.
+- **After:** commit `bbf40074` is on GitHub `main`, and the current production
+  dispatch chunk contains the Site-or-Zone selector and place-aware RPC. The
+  existing agreement setup UI was then used to link Brooklyn Rd, Moutere Hill,
+  and General / Private to the Wrattens agreement through
+  `manage_crm_agreement_zone_coverage`; the dialog confirmed **Covered places
+  3** and wrote the normal audit receipts. Returning to Dispatch showed all
+  three Zones. Selecting Brooklyn Rd enabled Create and matched the live
+  `$58.30/hour` billing rule. Create was deliberately not clicked, so the
+  shakedown changed agreement coverage only and created no operational job.
+
+The release also reconciled a concurrent migration-ledger collision: the
+idempotent identity resolver moved to `20260927051000`, preserving
+`20260927050000` for `builder_autopilot_awaiting_human`. Local and production
+migration histories were confirmed fully aligned before publication.
+
 ## Report review and live-client delivery (2026-09-26) — workflow live, R&M configuration approved
 
 The next reporting slice now has a governed implementation on
@@ -1371,8 +1407,8 @@ packs, and one audit row before rollback. Commit `70d9cf70` is on GitHub `main`;
 the guarded production apply then produced the same `1 / 17 / 0 / 1` state,
 and a post-apply rollback run proved the operation is idempotent. Reporting
 configuration is complete. The first September drafts remain intentionally
-deferred until on or after 1 October; the dispatch-console live shakedown remains
-the separate final open slice.
+deferred until on or after 1 October. The dispatch-console live shakedown is
+closed by the production verification above.
 
 ## Conventions established / reusable
 
