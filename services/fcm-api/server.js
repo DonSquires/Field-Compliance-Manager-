@@ -11,7 +11,7 @@ const { verifyJobToken } = require('./src/security/job_token_verifier');
 const { createModelGateway } = require('./src/bob/modelGateway');
 const { planTurn } = require('./src/bob/plan');
 const { subagentStep } = require('./src/bob/subagent');
-const { extractIdentityFields } = require('./src/bob/identityDocument');
+const { classifyIdentityDocument, extractIdentityFields, identityDocumentDefinition } = require('./src/bob/identityDocument');
 
 const execFileAsync = promisify(execFile);
 
@@ -211,6 +211,7 @@ async function inferIdentityImage(loaded) {
 
 async function identityDocument(request, response, ocrOnly = false) {
   const body = await readJson(request);
+  const documentKind = String(body.document_kind || 'other_identity');
   const context = ocrOnly ? null : verifiedIdentityContext(request, String(body.attachment_id || ''));
   const loaded = await ocrAttachment(String(body.attachment_id || ''), context);
   if (ocrOnly) return json(response, 200, { ocr: { text: loaded.text, provider: loaded.provider, page_count: loaded.pageCount, sha256: loaded.sha256, review_required: true } });
@@ -218,10 +219,12 @@ async function identityDocument(request, response, ocrOnly = false) {
   return json(response, 200, {
     success: true,
     attachment_id: loaded.attachment.id,
-    document_kind: String(body.document_kind || 'other_identity'),
+    document_kind: documentKind,
     sha256: loaded.sha256,
     ocr: { text: loaded.text, provider: loaded.provider, page_count: loaded.pageCount, review_required: true },
-    proposed_fields: extractIdentityFields(loaded.text, String(body.document_kind || 'other_identity')),
+    proposed_fields: extractIdentityFields(loaded.text, documentKind),
+    classification: classifyIdentityDocument(loaded.text, documentKind),
+    document_definition: identityDocumentDefinition(documentKind),
     image,
     authority: 'provisional',
     review_required: true,

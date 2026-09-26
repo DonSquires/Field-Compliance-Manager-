@@ -7,6 +7,8 @@ const root = path.resolve(__dirname, '..');
 const read = (file) => fs.readFileSync(path.join(root, file), 'utf8');
 const migration = read('supabase/migrations/20260926110000_identity_records_workspace.sql');
 const securityLicenceMigration = read('supabase/migrations/20260926140000_security_licence_identity_intake.sql');
+const deterministicTypesMigration = read('supabase/migrations/20260927020000_deterministic_identity_document_types.sql');
+const canonicalIncidentMigration = read('supabase/migrations/20260927030000_canonical_staff_and_incident_people.sql');
 const api = read('services/fcm-api/server.js');
 const dockerfile = read('services/fcm-api/Dockerfile');
 const inferenceEdge = read('supabase/functions/bob-inference/index.ts');
@@ -70,8 +72,8 @@ test('private identity evidence runs local OCR and source-face inference', () =>
   assert.match(api, /\/infer\/face/);
   assert.match(api, /Array\.isArray\(payload\?\.faces\)/);
   assert.match(inferenceEdge, /action === 'identity_document'/);
-  assert.match(perceptionEdge, /register_identity_document_proposal/);
-  assert.match(perceptionEdge, /admin\.rpc\('register_identity_document_proposal'/);
+  assert.match(perceptionEdge, /register_deterministic_identity_document_proposal/);
+  assert.match(perceptionEdge, /admin\.rpc\('register_deterministic_identity_document_proposal'/);
   assert.match(perceptionEdge, /att\.uploaded_by !== user\.id/);
   assert.match(perceptionEdge, /callerClient\.from\('bob_attachments'\)/);
   assert.match(perceptionEdge, /att\.purpose !== 'identity_document'/);
@@ -90,6 +92,33 @@ test('security licences and historical versions use governed current-value rules
   assert.match(securityLicenceMigration, /REVOKE EXECUTE ON FUNCTION public\.review_identity_document[\s\S]*FROM authenticated/);
 });
 
+test('identity and warrant intake is driven by deterministic document definitions', () => {
+  for (const kind of ['warrant_of_appointment', 'noise_control_warrant', 'parking_warrant', 'freedom_camping_warrant', 'biosecurity_warrant']) {
+    assert.match(deterministicTypesMigration, new RegExp(`'${kind}'`));
+  }
+  assert.match(deterministicTypesMigration, /CREATE TABLE IF NOT EXISTS public\.identity_document_type_definitions/);
+  assert.match(deterministicTypesMigration, /'parking_warrant'[\s\S]*'warrant_of_authority'[\s\S]*ARRAY\['Parking warden'\]/);
+  assert.match(deterministicTypesMigration, /'freedom_camping_warrant'[\s\S]*'warrant_of_authority'[\s\S]*ARRAY\['Freedom camping officer'\]/);
+  assert.match(deterministicTypesMigration, /FUNCTION public\.register_deterministic_identity_document_proposal/);
+  assert.match(deterministicTypesMigration, /FUNCTION public\.review_deterministic_identity_evidence/);
+  const noise = extractIdentityFields('NOISE CONTROL OFFICER WARRANT\nWarrant Number: NCO-1234\nIssued by: Example Council\nValid to: 01-09-2031', 'noise_control_warrant');
+  assert.equal(noise.document_number, 'NCO-1234');
+  assert.equal(noise.expiry_date, '2031-09-01');
+  assert.equal(noise.issuing_authority, 'Example Council');
+  assert.equal(noise.authorized_activities, 'Noise control officer');
+});
+
+test('staff and incident identities converge on canonical people', () => {
+  assert.match(canonicalIncidentMigration, /FUNCTION public\.ensure_canonical_person_for_staff/);
+  assert.match(canonicalIncidentMigration, /source_table\s*=\s*'staff_profiles'|source_table,source_id[\s\S]*'staff_profiles'/);
+  assert.match(canonicalIncidentMigration, /CREATE TABLE IF NOT EXISTS public\.incident_person_links/);
+  assert.match(canonicalIncidentMigration, /FUNCTION public\.record_incident_person_identity/);
+  assert.match(canonicalIncidentMigration, /incident\.officer_user_id=p_actor/);
+  assert.match(canonicalIncidentMigration, /review_state,metadata\)[\s\S]*'manual_review_required'/);
+  assert.match(canonicalIncidentMigration, /Approved identity evidence for this person is required/);
+  assert.match(canonicalIncidentMigration, /incident_person_identity_recorded/);
+});
+
 test('People and Access exposes manual people, vehicles, and human-reviewed ID intake', () => {
   assert.match(identityPage, /Identity records/);
   assert.match(identityPage, /<IdentityRecordsWorkspace/);
@@ -103,7 +132,7 @@ test('People and Access exposes manual people, vehicles, and human-reviewed ID i
   assert.match(workspace, /People &amp;\s*HR → Credentials/);
   assert.match(workspace, /multiple/);
   assert.match(workspace, /Upload and extract \$\{documentFiles\.length\} files/);
-  assert.match(workspace, /review_identity_evidence/);
+  assert.match(workspace, /review_deterministic_identity_evidence/);
   assert.match(workspace, /Historical licence retained without replacing current details/);
   assert.match(workspace, /Historical evidence · Current details unchanged/);
   assert.match(workspace, /Remove face candidate/);
@@ -114,6 +143,9 @@ test('People and Access exposes manual people, vehicles, and human-reviewed ID i
   assert.match(workspace, /review required/);
   assert.match(workspace, /1\. \{selectedPersonId \? "Person details" : "Add person"\}/);
   assert.match(workspace, /2\. Identity evidence/);
+  assert.match(workspace, /3\. Incident involvement/);
+  assert.match(workspace, /record_incident_person_identity/);
+  assert.match(workspace, /Link person to incident/);
   assert.match(workspace, /purpose: "identity_document"/);
   assert.match(workspace, /from\("identity-evidence"\)/);
   assert.match(workspace, /Driver licence expiry/);

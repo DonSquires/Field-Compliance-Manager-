@@ -134,14 +134,19 @@ serve(async (req)=>{
       });
       if (!inference.ok || !inference.data?.success) return json({ error: 'Identity document perception failed', detail: inference.data }, 502);
       const image = inference.data.image ?? {};
-      const { data: proposal, error: proposalError } = await admin.rpc('register_identity_document_proposal', {
+      const proposedFields = {
+        ...(inference.data.proposed_fields ?? {}),
+        document_classification: inference.data.classification ?? null,
+        document_definition: inference.data.document_definition ?? null,
+      };
+      const { data: proposal, error: proposalError } = await admin.rpc('register_deterministic_identity_document_proposal', {
         p_actor_user_id: user.id,
         p_organization_id: organizationId,
         p_person_record_id: personRecordId,
         p_attachment_id: att.id,
         p_document_kind: documentKind,
         p_sha256: inference.data.sha256,
-        p_proposed_fields: inference.data.proposed_fields ?? {},
+        p_proposed_fields: proposedFields,
         p_face_embedding: image.face_embedding ?? null,
         p_face_confidence: image.face_confidence ?? null,
         p_face_count: image.face_count ?? 0,
@@ -151,7 +156,7 @@ serve(async (req)=>{
         success: true,
         proposal,
         document_kind: documentKind,
-        proposed_fields: inference.data.proposed_fields ?? {},
+        proposed_fields: proposedFields,
         ocr: inference.data.ocr ?? {},
         face: { count: image.face_count ?? 0, candidate_ready_after_approval: Boolean(image.face_count === 1 && image.face_embedding) },
         authority: 'provisional',

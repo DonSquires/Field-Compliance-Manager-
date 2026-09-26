@@ -4,6 +4,7 @@ import {
   Car,
   CheckCircle2,
   FileBadge,
+  Link2,
   Loader2,
   Plus,
   Save,
@@ -74,6 +75,7 @@ type Registry = {
   vehicles: VehicleRecord[];
   documents: IdentityDocument[];
 };
+type IncidentOption = { id: string; incident_type: string; status: string; occurred_at: string };
 type Mode = "people" | "vehicles";
 type PersonForm = {
   display_name: string;
@@ -90,6 +92,11 @@ type PersonForm = {
   security_licence_expiry: string;
   security_licence_authority: string;
   security_endorsements: string;
+  document_number: string;
+  issued_date: string;
+  expiry_date: string;
+  issuing_authority: string;
+  authorized_activities: string;
   notes: string;
 };
 type VehicleForm = {
@@ -120,6 +127,11 @@ const EMPTY_PERSON: PersonForm = {
   security_licence_expiry: "",
   security_licence_authority: "",
   security_endorsements: "",
+  document_number: "",
+  issued_date: "",
+  expiry_date: "",
+  issuing_authority: "",
+  authorized_activities: "",
   notes: "",
 };
 const EMPTY_VEHICLE: VehicleForm = {
@@ -138,11 +150,28 @@ const DOCUMENT_KINDS = [
   ["driver_licence", "Driver licence"],
   ["firearms_licence", "Firearms licence"],
   ["security_licence", "Security licence / CoA"],
+  ["warrant_of_appointment", "Warrant of appointment"],
+  ["noise_control_warrant", "Noise control officer warrant"],
+  ["parking_warrant", "Parking warden warrant"],
+  ["freedom_camping_warrant", "Freedom camping officer warrant"],
+  ["biosecurity_warrant", "Biosecurity officer warrant"],
   ["passport", "Passport"],
   ["national_id", "Other government ID"],
   ["person_photo", "Person reference photo"],
   ["other_identity", "Other identity evidence"],
 ] as const;
+const WARRANT_KINDS = new Set(["warrant_of_appointment", "noise_control_warrant", "parking_warrant", "freedom_camping_warrant", "biosecurity_warrant"]);
+const CURRENT_PROFILE_LICENCE_KINDS = new Set(["driver_licence", "firearms_licence", "security_licence"]);
+const STAFF_CREDENTIAL_LABELS: Record<string, string> = {
+  driver_licence: "driver licence",
+  firearms_licence: "firearms licence",
+  security_licence: "security licence",
+  warrant_of_appointment: "warrant of authority",
+  noise_control_warrant: "noise control warrant",
+  parking_warrant: "warrant of authority with Parking warden activity",
+  freedom_camping_warrant: "warrant of authority with Freedom camping officer activity",
+  biosecurity_warrant: "biosecurity warrant",
+};
 
 function words(value: string) {
   return value
@@ -169,6 +198,11 @@ function personForm(person: PersonRecord): PersonForm {
     security_licence_expiry: value("security_licence_expiry"),
     security_licence_authority: value("security_licence_authority"),
     security_endorsements: value("security_endorsements"),
+    document_number: "",
+    issued_date: "",
+    expiry_date: "",
+    issuing_authority: "",
+    authorized_activities: "",
     notes: value("notes"),
   };
 }
@@ -238,6 +272,10 @@ export function IdentityRecordsWorkspace({
   const [documentFields, setDocumentFields] =
     useState<PersonForm>(EMPTY_PERSON);
   const [documentReviewNote, setDocumentReviewNote] = useState("");
+  const [incidents, setIncidents] = useState<IncidentOption[]>([]);
+  const [incidentId, setIncidentId] = useState("");
+  const [involvementRole, setInvolvementRole] = useState("subject");
+  const [incidentIdentityNotes, setIncidentIdentityNotes] = useState("");
   const [sourceUrl, setSourceUrl] = useState<string | null>(null);
   const [loading, setLoading] = useState(true);
   const [busy, setBusy] = useState<string | null>(null);
@@ -248,14 +286,14 @@ export function IdentityRecordsWorkspace({
     async (term = "") => {
       setLoading(true);
       setError(null);
-      const { data, error: loadError } = await supabase.rpc(
-        "get_identity_registry",
-        {
+      const [{ data, error: loadError }, incidentResult] = await Promise.all([
+        supabase.rpc("get_identity_registry", {
           p_organization_id: organizationId,
           p_search: term.trim() || null,
           p_limit: 150,
-        },
-      );
+        }),
+        supabase.from("incidents").select("id,incident_type,status,occurred_at").eq("organization_id", organizationId).in("status", ["open", "in_review", "escalated"]).order("occurred_at", { ascending: false }).limit(100),
+      ]);
       if (loadError) setError(loadError.message);
       else {
         const value = data as Partial<Registry> | null;
@@ -265,6 +303,7 @@ export function IdentityRecordsWorkspace({
           documents: value?.documents ?? [],
         };
         setRegistry(nextRegistry);
+        setIncidents((incidentResult.data ?? []) as IncidentOption[]);
         setLoading(false);
         return nextRegistry;
       }
@@ -285,6 +324,8 @@ export function IdentityRecordsWorkspace({
     setSelectedDocument(null);
     setDocumentFields(EMPTY_PERSON);
     setSourceUrl(null);
+    setIncidentId("");
+    setIncidentIdentityNotes("");
   };
 
   const selectVehicle = (record: VehicleRecord | null) => {
@@ -510,7 +551,7 @@ export function IdentityRecordsWorkspace({
     setError(null);
     setNotice(null);
     const { data: reviewResult, error: reviewError } = await supabase.rpc(
-      "review_identity_evidence",
+      "review_deterministic_identity_evidence",
       {
         p_identity_document_id: selectedDocument.id,
         p_action: action,
@@ -528,6 +569,29 @@ export function IdentityRecordsWorkspace({
       setSelectedDocument(null);
       setSourceUrl(null);
       await load(search);
+    }
+    setBusy(null);
+  };
+
+  const linkPersonToIncident = async (event: FormEvent) => {
+    event.preventDefault();
+    if (!selectedPersonId || !incidentId || !incidentIdentityNotes.trim()) return;
+    setBusy("incident-person");
+    setError(null);
+    setNotice(null);
+    const { error: linkError } = await supabase.rpc("record_incident_person_identity", {
+      p_incident_id: incidentId,
+      p_involvement_role: involvementRole,
+      p_notes: incidentIdentityNotes.trim(),
+      p_person_record_id: selectedPersonId,
+      p_staff_profile_id: null,
+      p_display_name: null,
+      p_identity_document_id: null,
+    });
+    if (linkError) setError(linkError.message);
+    else {
+      setNotice("Person linked to the incident through their canonical identity.");
+      setIncidentIdentityNotes("");
     }
     setBusy(null);
   };
@@ -922,10 +986,10 @@ export function IdentityRecordsWorkspace({
                       Upload a clear image or PDF. OCR and face detection fill a
                       proposal; compare it with the source before approval.
                     </p>
-                    {documentKind === "security_licence" && (
+                    {STAFF_CREDENTIAL_LABELS[documentKind] && (
                       <p className="identity-records-guidance">
                         This records identity evidence and face matching only.
-                        For an employee, record the approved CoA in People &amp;
+                        For an employee, record the approved {STAFF_CREDENTIAL_LABELS[documentKind]} in People &amp;
                         HR → Credentials to update work readiness.
                       </p>
                     )}
@@ -986,7 +1050,7 @@ export function IdentityRecordsWorkspace({
                             </strong>
                             <small>
                               {document.file_name ?? "Source file"} ·{" "}
-                              {document.review_state === "approved" &&
+                              {document.review_state === "approved" && CURRENT_PROFILE_LICENCE_KINDS.has(document.document_kind) &&
                               document.extracted_fields.promoted_to_current_profile === false
                                 ? "Historical evidence · Current details unchanged"
                                 : words(document.review_state)}
@@ -998,6 +1062,46 @@ export function IdentityRecordsWorkspace({
                         <p>No identity evidence recorded yet.</p>
                       )}
                     </div>
+                  </section>
+                )}
+                {selectedPersonId && (
+                  <section className="identity-incidents">
+                    <h3>3. Incident involvement</h3>
+                    {incidents.length ? (
+                      <form onSubmit={linkPersonToIncident}>
+                        <label>
+                          <span>Active incident</span>
+                          <select value={incidentId} onChange={(event) => setIncidentId(event.target.value)} required>
+                            <option value="">Select an incident</option>
+                            {incidents.map((incident) => (
+                              <option value={incident.id} key={incident.id}>
+                                {words(incident.incident_type)} · {words(incident.status)} · {new Date(incident.occurred_at).toLocaleDateString("en-NZ")}
+                              </option>
+                            ))}
+                          </select>
+                        </label>
+                        <label>
+                          <span>Person's involvement</span>
+                          <select value={involvementRole} onChange={(event) => setInvolvementRole(event.target.value)}>
+                            <option value="subject">Subject</option>
+                            <option value="reporting_party">Reporting party</option>
+                            <option value="witness">Witness</option>
+                            <option value="affected_person">Affected person</option>
+                            <option value="staff_involved">Staff involved</option>
+                            <option value="other">Other</option>
+                          </select>
+                        </label>
+                        <label className="is-wide">
+                          <span>How was the identity established?</span>
+                          <textarea value={incidentIdentityNotes} onChange={(event) => setIncidentIdentityNotes(event.target.value)} rows={2} required placeholder="For example: stated identity, approved ID, or staff profile" />
+                        </label>
+                        <button type="submit" disabled={busy !== null || !incidentId || !incidentIdentityNotes.trim()}>
+                          <Link2 size={15} />{busy === "incident-person" ? "Linking" : "Link person to incident"}
+                        </button>
+                      </form>
+                    ) : (
+                      <p>No active incidents are available for this organization.</p>
+                    )}
                   </section>
                 )}
               </>
@@ -1323,6 +1427,52 @@ export function IdentityRecordsWorkspace({
                               security_endorsements: event.target.value,
                             })
                           }
+                        />
+                      </label>
+                    </>
+                  )}
+                  {WARRANT_KINDS.has(selectedDocument.document_kind) && (
+                    <>
+                      <label>
+                        <span>Warrant or appointment number</span>
+                        <input
+                          disabled={selectedDocument.review_state !== "manual_review_required"}
+                          value={documentFields.document_number}
+                          onChange={(event) => setDocumentFields({ ...documentFields, document_number: event.target.value })}
+                        />
+                      </label>
+                      <label>
+                        <span>Issuing authority</span>
+                        <input
+                          disabled={selectedDocument.review_state !== "manual_review_required"}
+                          value={documentFields.issuing_authority}
+                          onChange={(event) => setDocumentFields({ ...documentFields, issuing_authority: event.target.value })}
+                        />
+                      </label>
+                      <label>
+                        <span>Issue date</span>
+                        <input
+                          type="date"
+                          disabled={selectedDocument.review_state !== "manual_review_required"}
+                          value={documentFields.issued_date}
+                          onChange={(event) => setDocumentFields({ ...documentFields, issued_date: event.target.value })}
+                        />
+                      </label>
+                      <label>
+                        <span>Expiry date</span>
+                        <input
+                          type="date"
+                          disabled={selectedDocument.review_state !== "manual_review_required"}
+                          value={documentFields.expiry_date}
+                          onChange={(event) => setDocumentFields({ ...documentFields, expiry_date: event.target.value })}
+                        />
+                      </label>
+                      <label className="is-wide">
+                        <span>Authorized activities</span>
+                        <input
+                          disabled={selectedDocument.review_state !== "manual_review_required"}
+                          value={documentFields.authorized_activities}
+                          onChange={(event) => setDocumentFields({ ...documentFields, authorized_activities: event.target.value })}
                         />
                       </label>
                     </>
