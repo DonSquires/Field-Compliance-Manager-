@@ -8,6 +8,7 @@ const { startOptionalCodeReview } = require('./supabase/functions/_shared/builde
 const { runIndependentCodeReview } = require('./supabase/functions/_shared/builder-independent-code-review');
 const { runReleaseEngineer } = require('./supabase/functions/_shared/builder-release-engineer');
 const { runAgenticEngineer } = require('./builder-agentic-engineer');
+const { recordGenerationFailure } = require('./builder-generation-failure');
 
 const TERMINAL_STATUSES = new Set(['release_ready', 'deployed', 'failed', 'cancelled']);
 const APPROVAL_STATUSES = new Set(['specification_ready', 'approval_pending']);
@@ -168,7 +169,10 @@ async function runBackendImplementation(input) {
   if (agentic && (!generation.ok || !generation.patch_artifact?.id) && escalationPoint(generation)) {
     generation = await generate({ ...input, startAfterProvider: escalationPoint(generation) });
   }
-  if (!generation.ok || !generation.patch_artifact?.id) return { success: false, phase: 'generation', result: generation };
+  if (!generation.ok || !generation.patch_artifact?.id) {
+    await recordGenerationFailure(input, generation, 'generation');
+    return { success: false, phase: 'generation', result: generation };
+  }
   let patchArtifact = generation.patch_artifact;
   for (let attempt = 1; attempt <= (agentic ? MAX_BACKEND_ATTEMPTS : 1); attempt += 1) {
     const verification = await runBackendHandoff({ ...input, patchArtifact });
@@ -178,7 +182,10 @@ async function runBackendImplementation(input) {
     // Feed the independent worker's failure evidence back to Bob and let him repair; an in-house author
     // that failed verification hands the repair to the next provider in the chain.
     generation = await generate({ ...input, failureArtifact, failedPatchArtifact: patchArtifact, startAfterProvider: escalationPoint(generation) });
-    if (!generation.ok || !generation.patch_artifact?.id) return { success: false, phase: 'repair', attempts: attempt, result: generation };
+    if (!generation.ok || !generation.patch_artifact?.id) {
+      await recordGenerationFailure(input, generation, 'repair');
+      return { success: false, phase: 'repair', attempts: attempt, result: generation };
+    }
     patchArtifact = generation.patch_artifact;
   }
   return { success: false, phase: 'verification', attempts: MAX_BACKEND_ATTEMPTS };

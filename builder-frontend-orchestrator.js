@@ -1,6 +1,7 @@
 const { runFrontendEngineer } = require('./supabase/functions/_shared/builder-frontend-engineer');
 const { runFrontendRepair } = require('./supabase/functions/_shared/builder-frontend-repair');
 const { runFrontendHandoff } = require('./builder-frontend-handoff');
+const { recordGenerationFailure } = require('./builder-generation-failure');
 
 const MAX_FRONTEND_ATTEMPTS = 3;
 
@@ -37,6 +38,7 @@ async function runFrontendImplementation({
     supabase, gateway, job, step: currentStep, uxArtifact, sourceDir, requestedFiles, liveContext
   });
   if (!generation.ok || !generation.patch_artifact?.id) {
+    await recordGenerationFailure({ supabase, job, step: currentStep }, generation, 'generation');
     return { success: false, phase: 'generation', result: generation, attempts: 0 };
   }
 
@@ -80,6 +82,7 @@ async function runFrontendImplementation({
       return { success: false, phase: 'repair_limit', attempts: attempt, result: generation };
     }
     if (!generation.ok || !generation.patch_artifact?.id) {
+      await recordGenerationFailure({ supabase, job, step: currentStep }, generation, 'repair');
       return { success: false, phase: 'repair', attempts: attempt, result: generation };
     }
     patchArtifact = generation.patch_artifact;

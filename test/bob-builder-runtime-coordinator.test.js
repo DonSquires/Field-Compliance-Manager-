@@ -226,3 +226,26 @@ test('backend implementation resumes the provider chain past an in-house author 
     void Module;
   }
 });
+
+test('an author run that ends without a proposal is counted against the step ceiling (builder_record_generation_failure)', async () => {
+  const engineerPath = require.resolve('../builder-agentic-engineer');
+  const originalEngineer = require.cache[engineerPath].exports;
+  const coordinatorPath = require.resolve('../builder-runtime-coordinator');
+  delete require.cache[coordinatorPath];
+  require.cache[engineerPath].exports = { ...originalEngineer, runAgenticEngineer: async () => ({ ok: false, error: 'turn budget exhausted', routing: { provider: 'openai' } }) };
+  const rpcs = [];
+  const supabase = { rpc: async (name, args) => { rpcs.push({ name, args }); return { data: { status: 'failed', attempt_count: 1 }, error: null }; } };
+  try {
+    const fresh = require('../builder-runtime-coordinator');
+    const result = await fresh.runBackendImplementation({ supabase, gateway: {}, job: { id: 'job-x' }, step: { id: 'step-x' }, context: { workspaceRoot: '/ws', gitSourceDir: '/src', repoRoot: '/repo' } });
+    assert.equal(result.success, false);
+    assert.equal(result.phase, 'generation');
+    assert.deepEqual(rpcs.map((r) => r.name), ['builder_record_generation_failure']);
+    assert.equal(rpcs[0].args._job_id, 'job-x');
+    assert.equal(rpcs[0].args._step_id, 'step-x');
+    assert.match(rpcs[0].args._reason, /^generation: turn budget exhausted/);
+  } finally {
+    require.cache[engineerPath].exports = originalEngineer;
+    delete require.cache[coordinatorPath];
+  }
+});
