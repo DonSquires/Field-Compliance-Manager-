@@ -59,6 +59,7 @@ test('Atlas refresh extracts concrete entities and Supabase calls without test n
       supabase.from('alpha').select('id');
       supabase.functions.invoke('ping');
     `);
+    write(root, 'scripts/seed-historical-patrol-roster.mjs', '// ATLAS CALLS: get_alpha');
     write(root, 'apps/web/src/pages/TestPage.test.tsx', `supabase.from('test_noise').select('*');`);
 
     const manifest = collectAtlasRefresh(root);
@@ -76,6 +77,7 @@ test('Atlas refresh extracts concrete entities and Supabase calls without test n
     assert.ok(manifest.edges.some(row => row.source_name === 'ping' && row.target_type === 'edge_function' && row.target_name === 'echo'));
     assert.ok(manifest.edges.some(row => row.source_name === 'mobile/components/TestPanel' && row.target_name === 'alpha' && row.edge_kind === 'reads'));
     assert.ok(manifest.edges.some(row => row.source_name === 'mobile/components/TestPanel' && row.target_type === 'edge_function' && row.target_name === 'ping'));
+    assert.ok(manifest.edges.some(row => row.source_name === 'scripts/seed-historical-patrol-roster' && row.target_type === 'rpc' && row.target_name === 'get_alpha'));
     assert.ok(manifest.edges.some(row => row.source_type === 'rpc' && row.source_name === 'get_alpha' && row.target_name === 'alpha' && row.edge_kind === 'reads'));
     assert.ok(manifest.edges.some(row => row.source_type === 'rpc' && row.source_name === 'update_alpha' && row.target_name === 'alpha' && row.edge_kind === 'writes'));
     assert.ok(manifest.edges.some(row => row.source_type === 'rpc' && row.source_name === 'wrap_alpha' && row.target_type === 'rpc' && row.target_name === 'get_alpha' && row.edge_kind === 'calls'));
@@ -513,6 +515,8 @@ test('managed Atlas refresh derives governed component and RPC flow edges', () =
   assert.equal(hasEdge('create_crm_account_activity', 'crm_account_activities', 'writes'), true);
   assert.equal(hasEdge('manage_crm_invoice', 'invoices', 'writes'), true);
   assert.equal(hasEdge('manage_crm_invoice', 'audit_log', 'writes'), true);
+  assert.equal(hasEdge('scripts/seed-historical-patrol-roster', 'project_historical_patrol_roster', 'calls'), true);
+  assert.equal(hasEdge('project_historical_patrol_roster', 'roster_slots', 'writes'), true);
 });
 
 test('managed Atlas refresh includes capability nodes without inferring exercise', () => {
@@ -547,4 +551,12 @@ test('stale edge compatibility helper retires only live CI-generated identities'
   ];
   const generated = [{ ...base, target_name: 'quotes', edge_kind: 'reads' }];
   assert.deepEqual(staleGeneratedEdgeIds(existing, generated), ['stale']);
+});
+
+test('component extraction recognizes governed Management API SQL RPC calls', () => {
+  const inventory = { rpcs: new Set(['project_historical_patrol_roster']) };
+  const edges = collectComponentEdges('scripts/seed-historical-patrol-roster.mjs', `
+    const query = \`SELECT public.project_historical_patrol_roster($1);\`;
+  `, inventory);
+  assert.ok(edges.some(edge => edge.target_name === 'project_historical_patrol_roster' && edge.edge_kind === 'calls'));
 });

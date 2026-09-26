@@ -842,6 +842,38 @@ turn beats false completeness.
   presence/activity), 44 location_events. Both live-verified clean (0
   garbage plates, 0 duplicate `external_ref`s) against TPFL's whole org.
 
+## OFO field-ledger roster projection (2026-09-27) — two forestry patrols seeded
+
+- The large OneFortyOne workbook was **not reopened**. The source was the
+  provenance-bearing OFO2025/OFO2026 evidence already imported into
+  `location_events` and `observations`; the new pipeline does not parse the
+  workbook a second time.
+- Migration `20260927100000_project_historical_patrol_roster.sql` adds the
+  postgres-only, audited `project_historical_patrol_roster(...)` command.
+  `scripts/seed-historical-patrol-roster.mjs` is dry-run-first and the checked-in
+  `rm-ofo-forestry.json` config defines the two owner-requested assignments:
+  **Nelson Forestry Patrol** and **Blenheim Forestry Patrol**.
+- Live applied result: 2 active `patrol_routes`, 2 active patrol
+  `roster_work_units`, 119 missing active OFO agreement-location links repaired,
+  34 source-backed route zones attached (33 Nelson, 1 Blenheim), and 639
+  completed historical `roster_slots` (638 Nelson, 1 Blenheim) covering 8
+  resolved R&M staff from 2024-12-22 through 2026-09-22.
+- Every slot carries its source event references in `external_refs`; all 639
+  are `completed`, none has a linked shift, no slot exceeds 24 hours, there are
+  zero overlapping projected slots, zero duplicate request IDs, and exactly one
+  projection audit receipt. Replaying the same request returned the same receipt
+  and created nothing else. R&M's pre-existing live shift count remained 1.
+- The projection is deliberately honest about remaining gaps: 1,394 imported
+  staff-event candidates do not resolve to a current R&M staff profile, 4,542
+  events have neither an authoritative place coordinate nor a geocoded parent
+  estate, and 73 events reference places that could not be linked as active OFO
+  agreement coverage. They remain unprojected rather than being guessed into a
+  regional route.
+- This seed creates **history and reusable route/work-unit structure only**.
+  It creates no future roster schedule, no shifts, and no identities. Future
+  cadence/windows still require an approved delivery schedule through the normal
+  CRM/roster path.
+
 ## Digger work order (OFO, 2026-09-24) — workshop maintenance zone_id constraint bug found and fixed
 
 - Real source: `REMSEC Digger work 2023.xlsx`, 1 row — Rob Crawford, Te Hepe

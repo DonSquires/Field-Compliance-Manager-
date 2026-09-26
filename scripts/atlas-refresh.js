@@ -5,7 +5,8 @@ const OWNER_MARKER = '[repo-atlas-refresh:v1]';
 const BATCH_SIZE = 250;
 const MAX_RETIREMENTS = 100;
 const ROOT_SOURCE_FILES = [
-  'supabase-workflow-client.js'
+  'supabase-workflow-client.js',
+  'scripts/seed-historical-patrol-roster.mjs'
 ];
 const MANAGED_SOURCES = [
   'apps/web/src/pages/RosterOperationsPage.tsx',
@@ -83,6 +84,7 @@ const MANAGED_SOURCES = [
   'apps/mobile/src/lib/officerOfflinePackage.ts',
   'apps/mobile/src/lib/officerPtt.ts',
   'apps/mobile/src/lib/officerTimesheetWork.ts',
+  'scripts/seed-historical-patrol-roster.mjs',
   'supabase/migrations/20260903180000_timesheet_work_ledger.sql',
   'supabase/functions/process-officer-scan/index.ts',
   'supabase/functions/resolve-point-context/index.ts',
@@ -126,6 +128,7 @@ const MANAGED_SOURCES = [
   'supabase/migrations/20260831096000_boundary_admin_upload_provenance.sql',
   'supabase/migrations/20260927010000_govern_custom_report_builder.sql',
   'supabase/migrations/20260927060000_dispatch_jobs_site_or_zone.sql',
+  'supabase/migrations/20260927100000_project_historical_patrol_roster.sql',
   'supabase/migrations/20260901020000_resolve_contracted_operational_context.sql',
   'supabase/migrations/20260913150000_add_physical_address_to_officer_gps_evidence.sql',
   'supabase/migrations/20260913151000_include_physical_address_in_officer_timeline.sql',
@@ -157,7 +160,7 @@ function walkFiles(rootDir, relativeDir) {
 }
 
 function isSourceFile(file) {
-  return /\.(?:js|jsx|ts|tsx)$/.test(file)
+  return /\.(?:[cm]?js|jsx|ts|tsx)$/.test(file)
     && !/(?:^|\/)(?:__tests__|test|tests)(?:\/|$)/.test(file)
     && !/\.(?:test|spec)\.[jt]sx?$/.test(file);
 }
@@ -181,7 +184,7 @@ function sourceIdentity(file) {
   }
   return {
     source_type: 'component',
-    source_name: file.replace(/^supabase\/functions\//, 'functions/').replace(/\.[jt]sx?$/, '').replace(/\/index$/, '')
+    source_name: file.replace(/^supabase\/functions\//, 'functions/').replace(/\.(?:[cm]?js|jsx|ts|tsx)$/, '').replace(/\/index$/, '')
   };
 }
 
@@ -202,10 +205,10 @@ function uniqueBy(items, keyOf) {
 }
 
 function componentName(sourceFile) {
-  return sourceFile.replace(/^apps\/web\/src\//, '').replace(/\.(tsx?|jsx?)$/, '');
+  return sourceFile.replace(/^apps\/web\/src\//, '').replace(/\.(?:[cm]?js|jsx|ts|tsx)$/, '');
 }
 
-function collectComponentEdges(sourceFile, content) {
+function collectComponentEdges(sourceFile, content, inventory) {
   const source = sourceIdentity(sourceFile);
   const sourceName = source.source_name;
   const edges = [];
@@ -224,6 +227,11 @@ function collectComponentEdges(sourceFile, content) {
   for (const match of content.matchAll(/(?:supabase|admin|callerClient)\s*\.\s*rpc\([^;]*?\?\s*['"]([^'"]+)['"]\s*:\s*['"]([^'"]+)['"]/g)) {
     for (const rpcName of [match[1], match[2]]) {
       edges.push({ ...source, target_type: 'rpc', target_name: rpcName, edge_kind: 'calls', evidence_class: 'live-code', source_file: sourceFile, caller_context: 'Supabase RPC call in source' });
+    }
+  }
+  for (const match of content.matchAll(/\bSELECT\s+public\.([a-zA-Z0-9_]+)\s*\(/gi)) {
+    if (!inventory || inventory.rpcs.has(match[1])) {
+      edges.push({ ...source, target_type: 'rpc', target_name: match[1], edge_kind: 'calls', evidence_class: 'live-code', source_file: sourceFile, caller_context: 'Management API SQL RPC call in source' });
     }
   }
   return edges;
@@ -271,7 +279,7 @@ function collectManagedAtlas(rootDir = process.cwd()) {
     const content = fs.readFileSync(filePath, 'utf8');
     edges.push(...(sourceFile.endsWith('.sql')
       ? collectManagedRpcEdges(sourceFile, content, inventory)
-      : collectComponentEdges(sourceFile, content)));
+      : collectComponentEdges(sourceFile, content, inventory)));
   }
   const dedupedEdges = uniqueBy(edges, edgeKey);
   const nodes = uniqueBy(dedupedEdges.flatMap(edge => [

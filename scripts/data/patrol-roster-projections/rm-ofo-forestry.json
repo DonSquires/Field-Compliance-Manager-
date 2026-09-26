@@ -1,0 +1,36 @@
+{
+  "client_request_id": "d58f0aaf-2a7f-4d2b-a3ca-7b38684f70f5",
+  "provider_organization_id": "e96d71c9-28a6-4d4a-b0f3-1c4ecdaa9c13",
+  "client_organization_id": "c48c1aaf-236b-417c-bbce-938c151662d6",
+  "actor_user_id": "08369a00-e2df-45d6-9e6b-6b3a6bede645",
+  "source_codes": [
+    "OFO2025",
+    "OFO2026"
+  ],
+  "link_missing_agreement_locations": true,
+  "routes": [
+    {
+      "route_code": "RM-NELSON-FORESTRY",
+      "name": "Nelson Forestry Patrol",
+      "hub_lat": -41.2706,
+      "hub_lng": 173.284,
+      "classification_note": "Nelson regional hub used only to classify already-canonical place coordinates; it is not created as a route stop."
+    },
+    {
+      "route_code": "RM-BLENHEIM-FORESTRY",
+      "name": "Blenheim Forestry Patrol",
+      "hub_lat": -41.5134,
+      "hub_lng": 173.9612,
+      "classification_note": "Blenheim regional hub used only to classify already-canonical place coordinates; it is not created as a route stop."
+    }
+  ],
+  "provenance": {
+    "source": "already-imported R&M patrol evidence",
+    "source_tables": [
+      "location_events",
+      "observations"
+    ],
+    "scope": "OneFortyOne 2025 and 2026 main patrol history",
+    "limitations": "Active OFO places referenced by the selected imports are linked to the existing R&M-OFO agreement. Only staff-attributed events whose canonical place or parent estate has a coordinate are projected. Unplaced events and ambiguous overlapping route-days remain unseeded and are counted in the receipt."
+  }
+}
