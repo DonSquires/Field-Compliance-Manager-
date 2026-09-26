@@ -99,7 +99,23 @@ if (cmd === 'create') {
     console.log(step.action, out.status, JSON.stringify(out).slice(0, 300));
     if (out.status >= 400) break;
   }
+} else if (cmd === 'chat') {
+  // One chat turn as the dedicated test identity, exactly as BobPanel sends it. Proves the
+  // autopilot report relay: Bob must lead with any unreported outcome for this person.
+  const s = await session();
+  const rest = (path, init = {}) => fetch(`${SUPABASE_URL}/rest/v1/${path}`, { ...init, headers: { apikey: s.anon, Authorization: `Bearer ${s.access_token}`, 'Content-Type': 'application/json', Prefer: 'return=representation', ...(init.headers ?? {}) } });
+  const profile = await (await rest('user_profiles?select=id,organization_id&limit=1')).json();
+  const { id: userId, organization_id: organizationId } = profile[0];
+  const created = await (await rest('bob_conversations', { method: 'POST', body: JSON.stringify([{ organization_id: organizationId, user_id: userId, module_key: 'operations', title: 'E2E autopilot relay check' }]) })).json();
+  const conversationId = created[0].id;
+  const r = await fetch(`${SUPABASE_URL}/functions/v1/onspace-ai-chat`, { method: 'POST', headers: { apikey: s.anon, Authorization: `Bearer ${s.access_token}`, 'Content-Type': 'application/json' }, body: JSON.stringify({ message: args.join(' ') || 'Hi Bob — anything to report?', conversation_id: conversationId, attachments: [], context: { agent_mode: 'operations' } }) });
+  const text = await r.text();
+  let data; try { data = JSON.parse(text); } catch { data = { raw: text.slice(0, 500) }; }
+  console.log('status', r.status, 'conversation', conversationId);
+  console.log('--- reply ---');
+  console.log(String(data.reply ?? data.message ?? data.raw ?? JSON.stringify(data)).slice(0, 4000));
+  if (data.meta) console.log('--- meta ---', JSON.stringify({ intent: data.meta.intent, route: data.meta.route_selected, verification: data.meta.verification?.status }).slice(0, 400));
 } else {
-  console.log('usage: create <title> <description> | follow <job_id> | publish <job_id> <artifact_id> | show <job_id>');
+  console.log('usage: create <title> <description> | follow <job_id> | publish <job_id> <artifact_id> | show <job_id> | chat <message>');
   process.exit(2);
 }

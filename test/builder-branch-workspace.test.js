@@ -119,5 +119,10 @@ test('Builder opens a human-review-only pull request through the configured Gite
     assert.equal(request.init.headers.Authorization, 'token token');
     assert.deepEqual(JSON.parse(request.init.body), { base: 'main', head: workspace.branchName, title: 'Bob Builder: review', body: 'Human review only.' });
     assert.equal(result.url, 'https://gitea.internal/Iron-Eagle-Security-Ltd/field-compliance-manager/pulls/42');
+    // With a public host configured, people get a link they can open; the API call stays internal.
+    const { publicGiteaUrl } = require('../builder-branch-workspace');
+    assert.equal(publicGiteaUrl('http://gitea:3000/Iron-Eagle-Security-Ltd/field-compliance-manager/pulls/3', { baseUrl: 'http://gitea:3000', publicBaseUrl: 'https://git.fcmanager.co.nz/' }), 'https://git.fcmanager.co.nz/Iron-Eagle-Security-Ltd/field-compliance-manager/pulls/3');
+    assert.equal(publicGiteaUrl('https://gitea.internal/o/r/pulls/1', { baseUrl: 'https://gitea.internal', publicBaseUrl: '' }), 'https://gitea.internal/o/r/pulls/1');
+    assert.equal(publicGiteaUrl('https://elsewhere.example/o/r/pulls/1', { baseUrl: 'https://gitea.internal', publicBaseUrl: 'https://git.fcmanager.co.nz' }), 'https://elsewhere.example/o/r/pulls/1');
   } finally { fs.rmSync(repo.root, { recursive: true, force: true }); }
 });

@@ -191,7 +191,7 @@ function giteaRepositoryPath(remote) {
   return (httpsMatch?.[1] || sshUrlMatch?.[1] || sshMatch?.[1] || '').replace(/\.git$/, '');
 }
 
-async function createGiteaPullRequest({ workspacePath, branchName, expectedHeadSha, title, body, giteaBaseUrl, giteaToken, owner, repo, fetchImpl = globalThis.fetch }) {
+async function createGiteaPullRequest({ workspacePath, branchName, expectedHeadSha, title, body, giteaBaseUrl, giteaToken, owner, repo, publicBaseUrl = process.env.GITEA_PUBLIC_URL, fetchImpl = globalThis.fetch }) {
   if (!branchName.startsWith(BRANCH_PREFIX) || git(workspacePath, ['branch', '--show-current']) !== branchName) throw new Error('Builder workspace branch is invalid');
   if (git(workspacePath, ['status', '--porcelain', '--untracked-files=normal'])) throw new Error('Builder workspace must be clean before opening a pull request');
   if (git(workspacePath, ['rev-parse', 'HEAD']) !== expectedHeadSha) throw new Error('Builder workspace head is stale');
@@ -207,7 +207,19 @@ async function createGiteaPullRequest({ workspacePath, branchName, expectedHeadS
   });
   const data = await response.json().catch(() => ({}));
   if (!response.ok || typeof data.html_url !== 'string' || !/^https?:\/\/[^\s]+\/pulls\/\d+$/.test(data.html_url)) throw new Error('Gitea pull request creation failed');
-  return { branchName, head: expectedHeadSha, url: data.html_url };
+  return { branchName, head: expectedHeadSha, url: publicGiteaUrl(data.html_url, { baseUrl, publicBaseUrl }) };
 }
 
-module.exports = { BRANCH_PREFIX, BUILDER_NAME, BUILDER_EMAIL, branchNameForJob, workspacePathForBranch, createBranchWorkspace, commitVerifiedPatch, publishWorkspaceBranch, giteaRepositoryPath, createGiteaPullRequest, verifySnapshot, githubAuthHeader, githubRepoUrl, resolveRemoteHead, ensureSourceCheckout, createGitHubPullRequest, redactGitError };
+// Gitea builds html_url from its own ROOT_URL, which on this host is the compose-internal
+// http://gitea:3000. People need the public host; the API call keeps using the internal base.
+function publicGiteaUrl(url, { baseUrl, publicBaseUrl }) {
+  const pub = String(publicBaseUrl || '').replace(/\/+$/, '');
+  if (!pub || !/^https?:\/\//.test(pub)) return url;
+  const internal = String(baseUrl || '').replace(/\/+$/, '');
+  for (const prefix of [internal, 'http://gitea:3000']) {
+    if (prefix && url.startsWith(`${prefix}/`)) return `${pub}${url.slice(prefix.length)}`;
+  }
+  return url;
+}
+
+module.exports = { BRANCH_PREFIX, BUILDER_NAME, BUILDER_EMAIL, branchNameForJob, workspacePathForBranch, createBranchWorkspace, commitVerifiedPatch, publishWorkspaceBranch, giteaRepositoryPath, createGiteaPullRequest, publicGiteaUrl, verifySnapshot, githubAuthHeader, githubRepoUrl, resolveRemoteHead, ensureSourceCheckout, createGitHubPullRequest, redactGitError };
