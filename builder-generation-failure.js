@@ -9,8 +9,11 @@
 async function recordGenerationFailure({ supabase, job, step, logger = console }, generation, phase) {
   if (!supabase || typeof supabase.rpc !== 'function' || !job?.id || !step?.id) return null;
   const reason = `${phase}: ${String(generation?.error || generation?.result?.error || 'author produced no proposal').slice(0, 300)}`;
+  // An honest "no change" (the file does not exist, the task is unsafe) is an answer for the requester,
+  // not a failure to run again: job 92f7369a repeated one six times before the ceiling stopped it.
+  const retryable = !generation?.no_change;
   try {
-    const { data, error } = await supabase.rpc('builder_record_generation_failure', { _job_id: job.id, _step_id: step.id, _reason: reason });
+    const { data, error } = await supabase.rpc('builder_record_generation_failure', { _job_id: job.id, _step_id: step.id, _reason: reason, _retryable: retryable });
     if (error) { logger?.warn?.(`[builder] generation failure not recorded: ${error.message}`); return null; }
     return data ?? null;
   } catch (error) {

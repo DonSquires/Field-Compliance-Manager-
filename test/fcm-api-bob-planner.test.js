@@ -3,7 +3,7 @@
 const test = require('node:test');
 const assert = require('node:assert/strict');
 
-const { buildPendingBlock, buildPlannerPrompt, buildPlannerMessages, buildTaskStateBlock, buildMemoryBlock, sliceWithDisclosure } = require('../services/fcm-api/src/bob/planPrompt');
+const { buildPendingBlock, buildPlannerPrompt, buildPlannerMessages, buildTaskStateBlock, buildMemoryBlock, buildRulingsAndNotesBlock, sliceWithDisclosure } = require('../services/fcm-api/src/bob/planPrompt');
 const { normalizeDecision, parsePlanContent } = require('../services/fcm-api/src/bob/planParse');
 const { autoRepairArgs, runDeterministicChecks, scrubReply, parseCriticContent } = require('../services/fcm-api/src/bob/verify');
 const { planTurn } = require('../services/fcm-api/src/bob/plan');
@@ -383,4 +383,25 @@ test('a pending laptop command resumes on an affirmative with the stored command
   assert.match(block, /Get-ChildItem C:\\\\Users\\\\Don\\\\Documents\\\\Contracts -Filter \*\.pdf/);
   assert.match(block, /tool=laptop_shell and args=\{ command, purpose \}/);
   assert.match(block, /If they decline, drop it/);
+});
+
+test('owner rulings and Bob\'s own notes get their own prompt block, not a truncated memory line', () => {
+  const memoryContext = {
+    organization_name: 'Iron Eagle',
+    owner_rulings: ['Branch is not a client: A branch shares the parent org\'s agreements. ' + 'x'.repeat(700), '', 'Never guess a legal classification: ask for the bylaw.'],
+    bob_own_notes: ['[correction] The owner prefers plain language over jargon.'],
+  };
+  const block = buildRulingsAndNotesBlock(memoryContext);
+  assert.match(block, /OWNER RULINGS \(standing decisions by the platform owner/);
+  assert.match(block, /  - Branch is not a client: A branch shares/);
+  assert.match(block, /  - Never guess a legal classification/);
+  assert.doesNotMatch(block, /x{501}/, 'each ruling is capped at 500 chars');
+  assert.match(block, /YOUR OWN NOTES[\s\S]*  - \[correction\] The owner prefers plain language/);
+  assert.match(block, /self_memory_write if that tool is available/);
+  const generic = buildMemoryBlock(memoryContext);
+  assert.match(generic, /organization_name: Iron Eagle/);
+  assert.doesNotMatch(generic, /owner_rulings|bob_own_notes/, 'the generic block does not repeat them');
+  assert.equal(buildRulingsAndNotesBlock({ organization_name: 'x' }), '');
+  const prompt = buildPlannerPrompt({ message: 'hi', tools: [], memoryContext });
+  assert.match(prompt, /OWNER RULINGS/);
 });

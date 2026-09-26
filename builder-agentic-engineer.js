@@ -136,9 +136,9 @@ function systemPrompt({ lane, limits }) {
     '- delete_file {path}                     delete a file',
     `- run {command}                          allowed: node --test [test files], node --check <file>, git status/diff/log/show/blame (timeout ${Math.round(limits.runTimeoutMs / 60000)} min)`,
     '- read_canon {}                          AGENTS.md + docs/canon/README.md + docs/canon/BOB_DOCTRINE.md (bounded)',
-    '- read_notes {limit?}                    your persistent builder notes (lessons from earlier jobs)',
+    '- read_notes {limit?}                    your persistent builder notes (lessons from earlier jobs); the 10 most recent are already in your task packet',
     '- write_note {text}                      leave a durable lesson for future jobs (short, factual, no secrets)',
-    '- finish {summary, tests, rollback_notes, follow_ups?, tests_not_run_reason?}   hand over: your worktree diff becomes the reviewed patch. A change that touches tests is refused unless a `node --test` run passed in this session (or tests_not_run_reason says plainly why none could).',
+    '- finish {summary, tests, rollback_notes, follow_ups?, tests_not_run_reason?, lessons?}   hand over: your worktree diff becomes the reviewed patch. A change that touches tests is refused unless a `node --test` run passed in this session (or tests_not_run_reason says plainly why none could). lessons: up to 3 short, generalisable facts about this codebase or these tools that would save a future job time (or omit).',
     '',
     `Budget: ${limits.maxTurns} tool turns / ${Math.round(limits.wallBudgetMs / 60000)} minutes. Pace it: spend at most about a third of the turns reading before you start editing; you will be told when the budget is running low. Do not repeat identical calls. If the task is impossible, unsafe, or requires a protected path, finish with an empty change set and explain plainly in the summary what a human must do.`,
   ].join('\n');
@@ -166,6 +166,31 @@ function summariseUsage(total, usage) {
     if (typeof usage[key] === 'number') total[key] = (total[key] || 0) + usage[key];
   }
   return total;
+}
+
+/** One factual line per run for bob_self_memory: what happened, where the tools fought back, what the model learned. */
+function composeRunNote({ job, lane, outcome, transcript, turns, provider, model, lessons = [] }) {
+  const friction = {};
+  let finishRefused = null;
+  let lastTool = null;
+  for (const entry of transcript) {
+    if (entry.tool) lastTool = entry.tool;
+    if (entry.result?.error && lastTool && lastTool !== 'finish') friction[lastTool] = (friction[lastTool] || 0) + 1;
+    if (entry.finish_refused && !finishRefused) finishRefused = String(entry.finish_refused).slice(0, 160);
+  }
+  const frictionText = Object.entries(friction).sort((a, b) => b[1] - a[1]).slice(0, 4).map(([tool, count]) => `${tool} failed x${count}`).join(', ');
+  const files = outcome.ok ? (outcome.proposal?.changed_files || []).slice(0, 8).join(', ') : '';
+  const result = outcome.ok ? 'proposal handed over' : outcome.no_change ? `no change: ${String(outcome.error).slice(0, 200)}` : `failed: ${String(outcome.error).slice(0, 200)}`;
+  const cleanLessons = lessons.map((l) => String(l).trim()).filter(Boolean).slice(0, 3).map((l) => l.slice(0, 300));
+  const parts = [
+    `[job ${String(job.id).slice(0, 8)} ${lane}] "${String(job.title || '').slice(0, 100)}" -> ${result}.`,
+    `${turns} turns on ${provider}/${model}.`,
+    frictionText ? `Friction: ${frictionText}.` : null,
+    finishRefused ? `Finish refused once: ${finishRefused}.` : null,
+    files ? `Files: ${files}.` : null,
+    cleanLessons.length ? `Lessons: ${cleanLessons.join(' | ')}` : null,
+  ].filter(Boolean);
+  return parts.join(' ').slice(0, 1800);
 }
 
 // Every turn re-sends the whole conversation, so a 25-turn job with a few 60k-char file reads
@@ -552,6 +577,7 @@ async function runAgenticEngineer({
   let parseFailures = 0;
   let outcome = null;
   let turns = 0;
+  let lessons = [];
 
   const health = providerHealth || await fetchModelHealth(gateway || {});
   const candidates = selectProviders(baseRequest, { health, startAfter: startAfterProvider });
@@ -605,6 +631,7 @@ async function runAgenticEngineer({
     log({ turn: turns, thought: String(call.thought ?? '').slice(0, 600), tool: call.tool, args: call.tool === 'write_file' ? { path: args.path, bytes: Buffer.byteLength(String(args.content ?? '')) } : call.tool === 'apply_patch' ? { bytes: Buffer.byteLength(String(args.diff ?? '')) } : args });
 
     if (call.tool === 'finish') {
+      lessons = Array.isArray(args.lessons) ? args.lessons : [];
       if (args.no_change_reason && !tools.__changedFiles().length) {
         outcome = { ok: false, no_change: true, error: String(args.no_change_reason).slice(0, 2000), summary: String(args.summary ?? '') };
         break;
@@ -654,6 +681,7 @@ async function runAgenticEngineer({
     const call = response.ok ? parseToolCall(String(response.data?.content ?? '')) : null;
     if (call && call.tool === 'finish') {
       const args = call.args && typeof call.args === 'object' ? call.args : {};
+      lessons = Array.isArray(args.lessons) ? args.lessons : lessons;
       log({ turn: turns + 1, grace_finish: true, tool: 'finish' });
       const built = buildProposal({ workspacePath, lane, tools, args });
       if (built.error) log({ turn: turns + 1, finish_refused: built.error });
@@ -680,6 +708,11 @@ async function runAgenticEngineer({
   // Leave the worktree clean at the pinned commit for the handoff's own apply.
   try { git(workspacePath, ['reset', '-q', '--hard', job.target_sha]); git(workspacePath, ['clean', '-fdq']); } catch (error) { if (logger?.warn) logger.warn(`[agentic-engineer] worktree reset failed: ${error.message}`); }
 
+  // Bob's own memory: models never volunteer write_note (0 rows after five live jobs), so every run
+  // leaves a factual note itself; the next job reads it in `your_recent_notes`.
+  const note = composeRunNote({ job, lane, outcome, transcript, turns, provider: candidates[active].provider, model: authorModel, lessons });
+  if (note) await tools.write_note({ text: note }).catch(() => ({}));
+
   return {
     ok: outcome.ok,
     error: outcome.ok ? undefined : outcome.error,
@@ -694,4 +727,4 @@ async function runAgenticEngineer({
   };
 }
 
-module.exports = { DEFAULT_LIMITS, PROMPT_VERSION, RUN_ALLOWLIST, buildProposal, compactMessages, createTools, parseToolCall, runAgenticEngineer, systemPrompt, taskPacket };
+module.exports = { DEFAULT_LIMITS, PROMPT_VERSION, RUN_ALLOWLIST, buildProposal, compactMessages, composeRunNote, createTools, parseToolCall, runAgenticEngineer, systemPrompt, taskPacket };

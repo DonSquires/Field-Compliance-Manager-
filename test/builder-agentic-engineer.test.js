@@ -9,7 +9,7 @@ const { execFileSync } = require('node:child_process');
 
 const policy = require('../builder-path-policy');
 const gateway = require('../builder-model-gateway');
-const { runAgenticEngineer, parseToolCall, RUN_ALLOWLIST, buildProposal, createTools, DEFAULT_LIMITS } = require('../builder-agentic-engineer');
+const { runAgenticEngineer, parseToolCall, RUN_ALLOWLIST, buildProposal, createTools, composeRunNote, DEFAULT_LIMITS } = require('../builder-agentic-engineer');
 
 test('path policy: protected paths are refused on every lane, lanes split at apps/web', () => {
   for (const file of ['.github/workflows/ci.yml', 'deploy/bob-vps/compose.yml', 'Dockerfile', 'services/fcm-api/Dockerfile', 'docker-compose.full.yml', 'package.json', 'apps/web/package-lock.json', '.env', 'apps/web/.env.production', 'supabase/schema.sql', 'apps/web/src/context/AuthContext.tsx', 'supabase/functions/_shared/auth.ts', 'certs/site.pem', '../etc/passwd', 'a/../../b']) {
@@ -463,5 +463,48 @@ test('a dropped gateway connection mid-run is retried on the same turn; three in
   assert.equal(result2.ok, false);
   assert.match(result2.error, /model unavailable/);
   assert.equal(seen2.length, 3, 'three consecutive failures on the last provider end the run, not thirty');
+  fs.rmSync(repo.root, { recursive: true, force: true });
+});
+
+test('every run leaves a factual note in bob_self_memory (builder_note) and the next run reads it', async () => {
+  const note = composeRunNote({
+    job: { id: 'abcdef1234567890', title: 'Fix sum' }, lane: 'backend', turns: 7, provider: 'openai', model: 'gpt-x',
+    outcome: { ok: true, proposal: { changed_files: ['lib/sum.js', 'test/sum.test.js'] } },
+    transcript: [
+      { tool: 'apply_patch', args: {} }, { result: { error: 'patch does not apply' } },
+      { tool: 'apply_patch', args: {} }, { result: { error: 'patch does not apply' } },
+      { tool: 'replace_in_file', args: {} }, { result: { ok: true } },
+      { finish_refused: 'finish refused: this change touches tests but no `node --test …` run passed' },
+      { tool: 'run', args: {} }, { result: { ok: true } },
+    ],
+    lessons: ['apply_patch hunks drift after edits; use replace_in_file', '', 'x'.repeat(500)],
+  });
+  assert.match(note, /^\[job abcdef12 backend\] "Fix sum" -> proposal handed over\. 7 turns on openai\/gpt-x\./);
+  assert.match(note, /Friction: apply_patch failed x2\./);
+  assert.match(note, /Finish refused once: finish refused: this change touches tests/);
+  assert.match(note, /Files: lib\/sum\.js, test\/sum\.test\.js\./);
+  assert.match(note, /Lessons: apply_patch hunks drift after edits; use replace_in_file \| x{300}$/);
+  assert.match(composeRunNote({ job: { id: 'a', title: 't' }, lane: 'backend', turns: 2, provider: 'openai', model: 'm', outcome: { ok: false, no_change: true, error: 'file does not exist' }, transcript: [], lessons: [] }), /-> no change: file does not exist\. 2 turns/);
+
+  // Live shape: a chainable supabase stub; the run reads notes first and writes one at the end.
+  const repo = makeRepo();
+  const workspaceRoot = path.join(repo.root, 'workspaces');
+  const inserted = [];
+  const rows = [{ memory_text: 'earlier lesson: tests live under test/', created_at: '2026-09-26T00:00:00Z' }];
+  const table = { select() { return this; }, eq() { return this; }, order() { return this; }, async limit() { return { data: rows, error: null }; }, async insert(row) { inserted.push(row); return { error: null }; } };
+  const other = { upsert() { return this; }, select() { return this; }, async single() { return { data: null, error: { message: 'stub' } }; } };
+  const supabase = { from(name) { return name === 'bob_self_memory' ? table : other; }, rpc: async () => ({ data: null, error: null }) };
+  let packet = null;
+  const callModel = async ({ modelRequest }) => {
+    packet = packet || modelRequest.request.messages[1].content;
+    return { ok: true, status: 200, data: { content: JSON.stringify({ tool: 'finish', args: { summary: 'nothing to do here', no_change_reason: 'the named file does not exist in this repository', lessons: ['check the file exists before planning'] } }), model: 'gpt-5.4' } };
+  };
+  const result = await runAgenticEngineer({ supabase, gateway: { gatewayUrl: 'http://gw', apiToken: 't' }, job: { id: 'n0te0000n0te0000n0te0000n0te0000', organization_id: '00000000-0000-0000-0000-000000000001', target_sha: repo.sha, title: 'ghost file', task_description: 'fix scripts/ghost.mjs' }, step: { id: 'step-note', builder_mode: 'backend_engineer' }, lane: 'backend', sourceDir: repo.source, workspaceRoot, repoRoot: repo.source, callModel, limits: { ...DEFAULT_LIMITS, maxTurns: 5 }, providerHealth: LAPTOP_OFF });
+  assert.equal(result.no_change, true);
+  assert.match(packet, /earlier lesson: tests live under test\//, 'recent notes are in the task packet');
+  assert.equal(inserted.length, 1);
+  assert.equal(inserted[0].memory_kind, 'builder_note');
+  assert.match(inserted[0].memory_text, /\[job n0te0000 backend\] "ghost file" -> no change: the named file does not exist/);
+  assert.match(inserted[0].memory_text, /Lessons: check the file exists before planning/);
   fs.rmSync(repo.root, { recursive: true, force: true });
 });

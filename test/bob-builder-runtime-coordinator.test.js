@@ -244,6 +244,39 @@ test('an author run that ends without a proposal is counted against the step cei
     assert.equal(rpcs[0].args._job_id, 'job-x');
     assert.equal(rpcs[0].args._step_id, 'step-x');
     assert.match(rpcs[0].args._reason, /^generation: turn budget exhausted/);
+    assert.equal(rpcs[0].args._retryable, true);
+  } finally {
+    require.cache[engineerPath].exports = originalEngineer;
+    delete require.cache[coordinatorPath];
+  }
+});
+
+test('an honest no-change answer parks the step (not retryable) and the planner blocks the job with that reason', async () => {
+  const engineerPath = require.resolve('../builder-agentic-engineer');
+  const originalEngineer = require.cache[engineerPath].exports;
+  const coordinatorPath = require.resolve('../builder-runtime-coordinator');
+  delete require.cache[coordinatorPath];
+  require.cache[engineerPath].exports = { ...originalEngineer, runAgenticEngineer: async () => ({ ok: false, no_change: true, error: 'the named script does not exist at this commit; inventing it would be unsafe', routing: { provider: 'openai' } }) };
+  const rpcs = [];
+  const supabase = { rpc: async (name, args) => { rpcs.push({ name, args }); return { data: { status: 'failed', attempt_count: 1, retryable: false }, error: null }; } };
+  try {
+    const fresh = require('../builder-runtime-coordinator');
+    const result = await fresh.runBackendImplementation({ supabase, gateway: {}, job: { id: 'job-y' }, step: { id: 'step-y' }, context: { workspaceRoot: '/ws', gitSourceDir: '/src', repoRoot: '/repo' } });
+    assert.equal(result.success, false);
+    assert.equal(rpcs[0].args._retryable, false, 'job 92f7369a: the same honest answer was re-run six times');
+    const action = fresh.planBuilderAction({
+      job: { id: 'job-y', status: 'implementation_pending', backend_required: true },
+      steps: [
+        { id: 's1', step_id: 'product_analysis', builder_mode: 'product_analyst', status: 'completed' },
+        { id: 's2', step_id: 'frontend_implementation', builder_mode: 'frontend_engineer', status: 'skipped' },
+        { id: 's3', step_id: 'backend_implementation', builder_mode: 'backend_engineer', status: 'failed', retryable: false, attempt_count: 1, error: 'generation: the named script does not exist at this commit; inventing it would be unsafe' },
+      ],
+      artifacts: [], workerRuns: [], approvals: [],
+    });
+    assert.equal(action.type, 'blocked');
+    assert.equal(action.reason, 'blocked');
+    assert.equal(action.step_id, 'backend_implementation');
+    assert.equal(action.detail, 'the named script does not exist at this commit; inventing it would be unsafe');
   } finally {
     require.cache[engineerPath].exports = originalEngineer;
     delete require.cache[coordinatorPath];

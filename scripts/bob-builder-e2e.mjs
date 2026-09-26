@@ -116,8 +116,12 @@ if (cmd === 'create') {
   const rest = (path, init = {}) => fetch(`${SUPABASE_URL}/rest/v1/${path}`, { ...init, headers: { apikey: s.anon, Authorization: `Bearer ${s.access_token}`, 'Content-Type': 'application/json', Prefer: 'return=representation', ...(init.headers ?? {}) } });
   const profile = await (await rest('user_profiles?select=id,organization_id&limit=1')).json();
   const { id: userId, organization_id: organizationId } = profile[0];
-  const created = await (await rest('bob_conversations', { method: 'POST', body: JSON.stringify([{ organization_id: organizationId, user_id: userId, module_key: 'operations', title: 'E2E autopilot relay check' }]) })).json();
-  const conversationId = created[0].id;
+  // E2E_CONVERSATION=<id> continues an earlier turn (e.g. answering "yes" to a composed brief).
+  let conversationId = process.env.E2E_CONVERSATION || '';
+  if (!conversationId) {
+    const created = await (await rest('bob_conversations', { method: 'POST', body: JSON.stringify([{ organization_id: organizationId, user_id: userId, module_key: 'operations', title: 'E2E autopilot relay check' }]) })).json();
+    conversationId = created[0].id;
+  }
   const r = await fetch(`${SUPABASE_URL}/functions/v1/onspace-ai-chat`, { method: 'POST', headers: { apikey: s.anon, Authorization: `Bearer ${s.access_token}`, 'Content-Type': 'application/json' }, body: JSON.stringify({ message: args.join(' ') || 'Hi Bob — anything to report?', conversation_id: conversationId, attachments: [], context: { agent_mode: 'operations' } }) });
   const text = await r.text();
   let data; try { data = JSON.parse(text); } catch { data = { raw: text.slice(0, 500) }; }

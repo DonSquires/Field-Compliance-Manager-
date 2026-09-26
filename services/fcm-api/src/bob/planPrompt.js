@@ -247,7 +247,7 @@ function buildModuleMapBlock(profiles) {
   ].join('\n');
 }
 
-const MEMORY_KEYS_TO_HIDE = new Set(['message', 'conversation_id', 'request_id', 'user_id', 'organization_id', 'knowledge_cards', 'has_attachment', 'last_message_role', 'turn_count']);
+const MEMORY_KEYS_TO_HIDE = new Set(['message', 'conversation_id', 'request_id', 'user_id', 'organization_id', 'knowledge_cards', 'has_attachment', 'last_message_role', 'turn_count', 'owner_rulings', 'bob_own_notes']);
 
 function buildMemoryBlock(memoryContext) {
   if (!memoryContext || typeof memoryContext !== 'object') return '';
@@ -259,6 +259,20 @@ function buildMemoryBlock(memoryContext) {
     'WHO YOU ARE WORKING WITH (session + remembered context; higher entries win on conflict — request context > recent messages > remembered habits > learned lessons):',
     ...lines,
     'Use the organisation name and the person\'s role naturally. Never echo identifiers.',
+  ].join('\n');
+}
+
+// Rulings and Bob's own notes are lists of sentences, not key/value habits; the generic memory
+// block would truncate them to one 600-char line, so they get their own block.
+function buildRulingsAndNotesBlock(memoryContext) {
+  if (!memoryContext || typeof memoryContext !== 'object') return '';
+  const rulings = Array.isArray(memoryContext.owner_rulings) ? memoryContext.owner_rulings.filter((r) => typeof r === 'string' && r.trim()).slice(0, 12) : [];
+  const notes = Array.isArray(memoryContext.bob_own_notes) ? memoryContext.bob_own_notes.filter((n) => typeof n === 'string' && n.trim()).slice(0, 8) : [];
+  if (!rulings.length && !notes.length) return '';
+  return [
+    '',
+    ...(rulings.length ? ['OWNER RULINGS (standing decisions by the platform owner; they outrank your own judgement and any knowledge card — apply them, cite them by title when they decide a question):', ...rulings.map((r) => `  - ${r.slice(0, 500)}`)] : []),
+    ...(notes.length ? ['YOUR OWN NOTES (things you recorded in earlier conversations — lessons, corrections, observations; newest first). Use them; when this conversation teaches you something durable, record it with self_memory_write if that tool is available:', ...notes.map((n) => `  - ${n.slice(0, 300)}`)] : []),
   ].join('\n');
 }
 
@@ -334,6 +348,7 @@ function buildPlannerPrompt(input) {
     '- EXPLICIT WRITE-REFUSAL: if the CURRENT message says not to write/propose/file anything ("don\'t file anything", "resolve and report only", "no action yet"), select action=answer with your findings — NEVER a propose_* or other write-capable tool. Confirm plainly that nothing was filed. Applies to the current message only.',
     knowledge ? `\nRelevant knowledge (use it to reason about what each table/module is FOR and how source data maps; prefer it over guessing):\n${knowledge}` : '',
     buildMemoryBlock(memoryContext),
+    buildRulingsAndNotesBlock(memoryContext),
     buildConversationFactsBlock(conversationFacts),
     buildModuleMapBlock(enabledModuleProfiles),
     buildPendingBlock(pending),
@@ -395,6 +410,7 @@ module.exports = {
   buildPlannerMessages,
   buildPlannerPrompt,
   buildReviewerNotesBlock,
+  buildRulingsAndNotesBlock,
   buildSubagentResultsBlock,
   buildSystemMessage,
   buildTaskStateBlock,

@@ -1941,7 +1941,7 @@ async function loadUserMemory(supabase, userId, orgId) {
   };
   if (!userId) return empty;
   try {
-    const [ctxRes, learnRes] = await Promise.all([
+    const [ctxRes, learnRes, rulingsRes, selfRes] = await Promise.all([
       supabase.from('bob_context_memory').select('context_key, context_data, last_seen_at').eq('user_id', userId).order('last_seen_at', {
         ascending: false
       }).limit(10),
@@ -1950,10 +1950,21 @@ async function loadUserMemory(supabase, userId, orgId) {
       }).limit(10) : Promise.resolve({
         data: null,
         error: null
-      })
+      }),
+      // Owner rulings (global, non-tenant policy) and Bob's own kept notes were written to but never
+      // read on a chat turn (6 active rulings, 0 reads — 2026-09-26). Both are global by design:
+      // bob_self_memory has no organisation column, so nothing tenant-specific may be stored there.
+      supabase.from('bob_owner_rulings').select('title, ruling_text, domain').eq('ruling_status', 'active').order('created_at', {
+        ascending: true
+      }).limit(12),
+      supabase.from('bob_self_memory').select('memory_kind, memory_text, created_at').eq('status', 'kept').neq('memory_kind', 'builder_note').order('created_at', {
+        ascending: false
+      }).limit(8)
     ]);
     const contextRows = Array.isArray(ctxRes.data) ? ctxRes.data : [];
     const learningRows = Array.isArray(learnRes.data) ? learnRes.data : [];
+    const rulingRows = Array.isArray(rulingsRes.data) ? rulingsRes.data : [];
+    const selfRows = Array.isArray(selfRes.data) ? selfRes.data : [];
     const contextMemory = {};
     for (const r of contextRows){
       if (r.context_key) contextMemory[r.context_key] = r.context_data;
@@ -1961,6 +1972,12 @@ async function loadUserMemory(supabase, userId, orgId) {
     const learningMemory = {};
     if (learningRows.length) {
       learningMemory.recent_lessons = learningRows.map((r)=>`[${r.memory_kind}] ${r.content}`.slice(0, 300));
+    }
+    if (rulingRows.length) {
+      learningMemory.owner_rulings = rulingRows.map((r)=>`${r.title}: ${String(r.ruling_text || '').replace(/\s+/g, ' ')}`.slice(0, 500));
+    }
+    if (selfRows.length) {
+      learningMemory.bob_own_notes = selfRows.map((r)=>`[${r.memory_kind}] ${String(r.memory_text || '').replace(/\s+/g, ' ')}`.slice(0, 300));
     }
     return {
       contextMemory,

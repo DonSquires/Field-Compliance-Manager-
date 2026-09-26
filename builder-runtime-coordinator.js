@@ -49,6 +49,15 @@ function attemptCeilingBlock(job, step) {
   return { type: 'blocked', status: job.status, reason: 'attempt_ceiling', step_id: step.step_id, attempts: Number(step.attempt_count) || 0, limit: MAX_STEP_ATTEMPTS, detail: `${step.step_id} failed ${step.attempt_count} times (ceiling ${MAX_STEP_ATTEMPTS}); a human must fix the cause and open a follow-up job` };
 }
 
+// A failed step nobody may retry (the author declined with a reason) blocks the job with that reason.
+function parkedStep(step) {
+  return step?.status === 'failed' && step.retryable === false;
+}
+
+function parkedStepBlock(job, step) {
+  return { type: 'blocked', status: job.status, reason: 'blocked', step_id: step.step_id, detail: String(step.error || `${step.step_id} was declined by the author`).replace(/^(generation|repair): /, '').slice(0, 1000) };
+}
+
 function planBuilderAction(snapshot) {
   const { job } = snapshot;
   if (!job?.id) throw new Error('Builder runtime snapshot is missing a job');
@@ -71,9 +80,11 @@ function planBuilderAction(snapshot) {
     const frontend = byStep(snapshot, 'frontend_implementation');
     if (stepIsRunnable(frontend)) return { type: 'run_frontend', step: frontend };
     if (attemptCeilingReached(frontend)) return attemptCeilingBlock(job, frontend);
+    if (parkedStep(frontend)) return parkedStepBlock(job, frontend);
     const backend = byStep(snapshot, 'backend_implementation');
     if (stepIsRunnable(backend)) return { type: 'run_backend', step: backend };
     if (attemptCeilingReached(backend)) return attemptCeilingBlock(job, backend);
+    if (parkedStep(backend)) return parkedStepBlock(job, backend);
   }
   if (job.status === 'testing') return { type: 'run_security_review', step: byStep(snapshot, 'security_review') };
   if (job.status === 'security_review') {
