@@ -61,6 +61,11 @@ function Invoke-Native([scriptblock]$Block) {
 function Get-OllamaTags {
   try { return Invoke-RestMethod -Uri 'http://127.0.0.1:11434/api/tags' -TimeoutSec 5 } catch { return $null }
 }
+# What actually matters for the VPS is the bind, not the env var: 0.0.0.0 / :: means reachable over Tailscale.
+function Get-OllamaBind {
+  try { return @(Get-NetTCPConnection -LocalPort 11434 -State Listen -ErrorAction Stop | ForEach-Object { $_.LocalAddress } | Sort-Object -Unique) } catch { return @() }
+}
+function Test-OllamaExposed { return ((Get-OllamaBind) | Where-Object { $_ -eq '0.0.0.0' -or $_ -eq '::' }).Count -gt 0 }
 
 # deploy/laptop-worker/laptop-worker.env already holds the project's Supabase URL + service key for the
 # CCTV worker on this laptop; the same file lets this script register the laptop with Bob.
@@ -122,8 +127,9 @@ function Show-Status {
   Write-Host '== Bob laptop link status =='
   Write-Host ("  Tailscale        : {0} ({1})" -f $myName, $myIp)
   $tags = Get-OllamaTags
-  Write-Host ("  Ollama           : {0}" -f $(if ($tags) { 'running - ' + (($tags.models | ForEach-Object { $_.name }) -join ', ') } else { 'not running' }))
-  Write-Host ("  Ollama bind      : {0}" -f $(if ([Environment]::GetEnvironmentVariable('OLLAMA_HOST', 'User')) { [Environment]::GetEnvironmentVariable('OLLAMA_HOST', 'User') } else { '127.0.0.1 (localhost only - VPS cannot reach it)' }))
+  $bind = Get-OllamaBind
+  Write-Host ("  Ollama           : {0}" -f $(if ($tags) { 'running - ' + (($tags.models | ForEach-Object { $_.name }) -join ', ') } elseif ($bind.Count) { 'listening (models not readable locally right now)' } else { 'not running' }))
+  Write-Host ("  Ollama bind      : {0}" -f $(if ($bind.Count) { ($bind -join ', ') + $(if (Test-OllamaExposed) { ' (reachable from the VPS over Tailscale)' } else { ' (localhost only - VPS cannot reach it)' }) } else { 'no listener on 11434' }))
   Write-Host ("  SSH (Bob shell)  : {0}" -f (Get-SshdState))
   Write-Host ("  Firewall rules   : {0}" -f ((Get-NetFirewallRule -DisplayName 'Bob *' -ErrorAction SilentlyContinue | ForEach-Object { "$($_.DisplayName)=$($_.Enabled)" }) -join ', '))
   Write-Host ("  Windows user     : {0}" -f $env:USERNAME)
@@ -158,19 +164,25 @@ if (-not $SkipOllama) {
     if ([Environment]::GetEnvironmentVariable($name, 'User') -ne $wanted[$name]) { [Environment]::SetEnvironmentVariable($name, $wanted[$name], 'User'); $changed = $true }
     Set-Item -Path "Env:$name" -Value $wanted[$name]
   }
-  if ($changed -or -not (Get-Process -Name 'ollama' -ErrorAction SilentlyContinue)) {
+  if (Test-OllamaExposed) {
+    Write-Log ('Ollama already listens on all interfaces (' + ((Get-OllamaBind) -join ', ') + ') - leaving it running.' + $(if ($changed) { ' Updated settings apply the next time Ollama restarts.' } else { '' }))
+  } else {
     Write-Log 'Restarting Ollama so it listens for the VPS over Tailscale...'
     Get-Process -Name 'ollama app', 'ollama' -ErrorAction SilentlyContinue | Stop-Process -Force -ErrorAction SilentlyContinue
     Start-Sleep -Seconds 2
     $app = Join-Path $env:LOCALAPPDATA 'Programs\Ollama\ollama app.exe'
     if (Test-Path $app) { Start-Process -FilePath $app -WindowStyle Hidden } else { Start-Process -FilePath 'ollama' -ArgumentList 'serve' -WindowStyle Hidden }
+    # The Ollama app starts its window first and the server after; allow it a few minutes.
+    $deadline = (Get-Date).AddSeconds(180)
+    $ok = $false
+    do { Start-Sleep -Seconds 3; $ok = (Test-OllamaExposed) -or ($null -ne (Get-OllamaTags)) } while (-not $ok -and (Get-Date) -lt $deadline)
+    if (-not $ok) { throw 'Ollama did not come up on 11434 within 3 minutes. Start the Ollama app from the Start menu, wait for its window, and run this again.' }
+    if (-not (Test-OllamaExposed)) { Write-Log ('WARNING: Ollama is up but bound to ' + ((Get-OllamaBind) -join ', ') + ' - the VPS may not reach it. Quit Ollama from the tray, start it again, and re-run this script.') }
   }
-  $deadline = (Get-Date).AddSeconds(45)
-  $ok = $false
-  do { Start-Sleep -Seconds 2; $ok = ($null -ne (Get-OllamaTags)) } while (-not $ok -and (Get-Date) -lt $deadline)
-  if (-not $ok) { throw 'Ollama did not come up on 11434. Start the Ollama app from the Start menu and run this again.' }
   if ($BiggerModels) { $Models += @('qwen2.5-coder:14b', 'qwen3-coder:30b') }
-  $have = @((Get-OllamaTags).models | ForEach-Object { $_.name })
+  $tags = Get-OllamaTags
+  $have = @()
+  if ($tags) { $have = @($tags.models | ForEach-Object { $_.name }) }
   foreach ($model in $Models) {
     if ($have -contains $model) { Write-Log "Model present: $model" } else { Write-Log "Pulling $model (one-off download)..."; Invoke-Native { & ollama pull $model } }
   }
