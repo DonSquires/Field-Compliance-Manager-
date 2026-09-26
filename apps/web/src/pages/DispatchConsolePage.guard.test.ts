@@ -11,6 +11,15 @@ describe('dispatch agreement and creation boundary', () => {
     expect(source).not.toMatch(/from\('client_sites'\)[\s\S]{0,200}\.eq\('organization_id'/);
   });
 
+  it('allows a dispatch place to be an agreement-linked Site or Zone', () => {
+    expect(source).toContain('selectedAgreementZones.filter((zone) => zone.is_active)');
+    expect(source).toContain('Select a site or zone...');
+    expect(source).toContain("supabase.rpc('create_dispatch_job_for_place'");
+    expect(source).toContain('p_client_site_id: formSiteId || null');
+    expect(source).toContain('p_zone_id: formZoneId || null');
+    expect(source).not.toContain('No active sites are linked to the selected agreement.');
+  });
+
   it('loads the exact requested job for overview deep links even outside the selected branch queue', () => {
     expect(source).toContain("get('job')");
     expect(source).toContain(".eq('id', requestedJobId).eq('organization_id', operatingBranchId).maybeSingle()");
@@ -24,7 +33,7 @@ describe('dispatch agreement and creation boundary', () => {
   });
 
   it('persists agreement and absolute SLA context and confirms the insert', () => {
-    expect(source).toContain(".rpc('create_dispatch_job'");
+    expect(source).toContain(".rpc('create_dispatch_job_for_place'");
     expect(source).toContain('p_service_agreement_id: selectedAgreement.id');
     expect(source).toContain('p_sla_minutes: formSlaMinutes');
     expect(source).toContain('dispatch job was not confirmed');
@@ -40,7 +49,7 @@ describe('dispatch agreement and creation boundary', () => {
 
   it('lists jobs as a scannable table in plain words and opens one job at a time', () => {
     expect(source).toContain('const DispatchJobList');
-    expect(source).toContain('<th>Priority</th><th>Job</th><th>Site</th><th>Status</th><th>Assigned to</th><th>Respond by</th>');
+    expect(source).toContain('<th>Priority</th><th>Job</th><th>Place</th><th>Status</th><th>Assigned to</th><th>Respond by</th>');
     expect(source).toContain("pending: 'Waiting to dispatch'");
     expect(source).toContain("en_route: 'On the way'");
     expect(source).toContain('role="dialog"');

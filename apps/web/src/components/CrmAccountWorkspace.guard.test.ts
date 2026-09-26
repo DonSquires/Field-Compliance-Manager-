@@ -5,6 +5,12 @@ import { describe, expect, it } from 'vitest';
 const source = readFileSync(resolve(process.cwd(), 'src/components/CrmAccountWorkspace.tsx'), 'utf8');
 
 describe('client portfolio hub', () => {
+  it('loads dispatch history through account agreements so Site and Zone jobs are included', () => {
+    expect(source).toContain(".in('service_agreement_id', agreementIds)");
+    expect(source).toContain('service_agreement_id,client_site_id,zone_id');
+    expect(source).not.toContain(".in('client_site_id', siteIds)");
+  });
+
   it('keeps modules inside the organization portfolio context', () => {
     expect(source).toContain('Modules');
     expect(source).toContain('organizationModules.filter((module) => module.enabled)');

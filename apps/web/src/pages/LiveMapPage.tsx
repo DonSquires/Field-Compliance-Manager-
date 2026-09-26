@@ -24,6 +24,10 @@ export type { LiveOfficer } from '../lib/liveMapWords';
 interface LivePicture { organization_id: string; reach: string[]; since: string; refreshed_at: string; officers: LiveOfficer[] }
 interface OfficerView extends LiveOfficer { safety_status: SafetyStatus | null; pin_status: OfficerPinStatus }
 interface OpenJob { id: string; job_type: string; priority: string; status: string; site: { name: string; gps_lat: number | null; gps_lng: number | null } | null }
+interface OpenJobRow extends Omit<OpenJob, 'site'> {
+  site: OpenJob['site'] | OpenJob['site'][];
+  zone: { name: string; center_point: { coordinates?: [number, number] } | null } | Array<{ name: string; center_point: { coordinates?: [number, number] } | null }> | null;
+}
 interface ZoneShape { id: string; name: string; boundary: GeoJSON.GeoJsonObject | null }
 
 const ACTIVE_JOB_STATUSES = ['pending', 'assigned', 'dispatched', 'acknowledged', 'en_route', 'on_scene'];
@@ -60,12 +64,20 @@ const LiveMapPage: React.FC = () => {
     // ATLAS READS: get_live_officer_positions (officer_gps_log, shifts, welfare_alerts, officer_welfare_settings for the branch reach)
     const [positionsResponse, jobsResponse, zonesResponse] = await Promise.all([
       supabase.rpc('get_live_officer_positions', { p_organization_id: branchId, p_since_minutes: 240, p_zone_ids: zoneIds }),
-      supabase.from('dispatch_jobs').select('id, job_type, priority, status, site:client_site_id(name, gps_lat, gps_lng)').eq('organization_id', branchId).in('status', ACTIVE_JOB_STATUSES),
+      supabase.from('dispatch_jobs').select('id, job_type, priority, status, site:client_site_id(name, gps_lat, gps_lng), zone:zone_id(name, center_point)').eq('organization_id', branchId).in('status', ACTIVE_JOB_STATUSES),
       zoneIds ? supabase.from('location_zones').select('id, name, boundary').in('id', zoneIds) : Promise.resolve({ data: [] as ZoneShape[], error: null }),
     ]);
     if (positionsResponse.error) setError(positionsResponse.error.message);
     else setPicture((positionsResponse.data as LivePicture | null) ?? null);
-    if (!jobsResponse.error) setJobs(((jobsResponse.data as unknown as Array<OpenJob & { site: OpenJob['site'] | OpenJob['site'][] }>) ?? []).map((job) => ({ ...job, site: Array.isArray(job.site) ? job.site[0] ?? null : job.site })));
+    if (!jobsResponse.error) setJobs(((jobsResponse.data as unknown as OpenJobRow[]) ?? []).map((job) => {
+      const site = Array.isArray(job.site) ? job.site[0] ?? null : job.site;
+      const zone = Array.isArray(job.zone) ? job.zone[0] ?? null : job.zone;
+      const point = zone?.center_point?.coordinates;
+      return {
+        ...job,
+        site: site ?? (zone ? { name: zone.name, gps_lat: point?.[1] ?? null, gps_lng: point?.[0] ?? null } : null),
+      };
+    }));
     if (!zonesResponse.error) setZoneShapes((zonesResponse.data as ZoneShape[]) ?? []);
     setRefreshedAt(new Date());
     setLoading(false);

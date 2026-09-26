@@ -23,7 +23,7 @@ serve(async (request) => {
   const admin = createClient(SUPABASE_URL, SUPABASE_SERVICE_ROLE_KEY);
   const [{ data: profile }, { data: job }] = await Promise.all([
     admin.from('user_profiles').select('role, organization_id').eq('id', user.id).maybeSingle(),
-    admin.from('dispatch_jobs').select('id, organization_id, shift_id, site:client_site_id(address, gps_lat, gps_lng, center_point)').eq('id', jobId).maybeSingle(),
+    admin.from('dispatch_jobs').select('id, organization_id, shift_id, site:client_site_id(name, address, gps_lat, gps_lng, center_point), zone:zone_id(name, center_point)').eq('id', jobId).maybeSingle(),
   ]);
   if (!profile || !job || profile.organization_id !== job.organization_id) return json({ error: 'Dispatch job is not available.' }, 404);
   const isAdmin = ['grand_master', 'master', 'admin', 'admin_officer'].includes(profile.role);
@@ -33,18 +33,22 @@ serve(async (request) => {
   }
   if (body?.mode === 'plan') {
     const [{ data: jobs }, { data: patrolStops }] = await Promise.all([
-      admin.from('dispatch_jobs').select('id, priority, sla_respond_by, expected_dwell_minutes, site:client_site_id(gps_lat, gps_lng, center_point)').eq('shift_id', job.shift_id).in('status', ['dispatched', 'acknowledged', 'en_route']),
-      admin.from('shift_stops').select('id, sla_arrive_by, required_dwell_minutes, site:site_id(gps_lat, gps_lng, center_point)').eq('shift_id', job.shift_id).in('status', ['pending', 'en_route']),
+      admin.from('dispatch_jobs').select('id, priority, sla_respond_by, expected_dwell_minutes, site:client_site_id(gps_lat, gps_lng, center_point), zone:zone_id(center_point)').eq('shift_id', job.shift_id).in('status', ['dispatched', 'acknowledged', 'en_route']),
+      admin.from('shift_stops').select('id, sla_arrive_by, required_dwell_minutes, site:site_id(gps_lat, gps_lng, center_point), zone:zone_id(center_point)').eq('shift_id', job.shift_id).in('status', ['pending', 'en_route']),
     ]);
     const dispatchStops = (jobs ?? []).flatMap((assigned) => {
       const assignedSite = Array.isArray(assigned.site) ? assigned.site[0] : assigned.site;
-      const point = assignedSite?.center_point?.coordinates;
+      const assignedZone = Array.isArray(assigned.zone) ? assigned.zone[0] : assigned.zone;
+      const place = assignedSite ?? assignedZone;
+      const point = place?.center_point?.coordinates;
       const lat = Number(assignedSite?.gps_lat ?? point?.[1]), lng = Number(assignedSite?.gps_lng ?? point?.[0]);
       return Number.isFinite(lat) && Number.isFinite(lng) ? [{ id: assigned.id, kind: 'dispatch', priority: assigned.priority, sla_respond_by: assigned.sla_respond_by, lat, lng, dwell_seconds: Math.max(60, Number(assigned.expected_dwell_minutes ?? 5) * 60) }] : [];
     });
     const scheduledStops = (patrolStops ?? []).flatMap((stop) => {
       const site = Array.isArray(stop.site) ? stop.site[0] : stop.site;
-      const point = site?.center_point?.coordinates;
+      const zone = Array.isArray(stop.zone) ? stop.zone[0] : stop.zone;
+      const place = site ?? zone;
+      const point = place?.center_point?.coordinates;
       const lat = Number(site?.gps_lat ?? point?.[1]), lng = Number(site?.gps_lng ?? point?.[0]);
       return Number.isFinite(lat) && Number.isFinite(lng) ? [{ id: stop.id, kind: 'patrol_stop', priority: 'normal', sla_respond_by: stop.sla_arrive_by, lat, lng, dwell_seconds: Math.max(60, Number(stop.required_dwell_minutes) * 60) }] : [];
     });
@@ -56,11 +60,13 @@ serve(async (request) => {
     return json(plan);
   }
   const site = Array.isArray(job.site) ? job.site[0] : job.site;
-  const point = site?.center_point?.coordinates;
+  const zone = Array.isArray(job.zone) ? job.zone[0] : job.zone;
+  const place = site ?? zone;
+  const point = place?.center_point?.coordinates;
   const destinationLat = Number(site?.gps_lat ?? point?.[1]), destinationLng = Number(site?.gps_lng ?? point?.[0]);
   if (!Number.isFinite(destinationLat) || !Number.isFinite(destinationLng)) return json({ error: 'This location has no routeable coordinates.' }, 422);
   const response = await fetch(`${API_URL}/api/navigation/route`, { method: 'POST', headers: { Authorization: `Bearer ${API_TOKEN}`, 'Content-Type': 'application/json' }, body: JSON.stringify({ origin_lat: originLat, origin_lng: originLng, destination_lat: destinationLat, destination_lng: destinationLng }) });
   const route = await response.json().catch(() => null);
   if (!response.ok) return json({ error: route?.error ?? 'Route guidance is unavailable.' }, 502);
-  return json({ ...route, destination_address: site?.address ?? null, destination_lat: destinationLat, destination_lng: destinationLng });
+  return json({ ...route, destination_address: site?.address ?? zone?.name ?? null, destination_lat: destinationLat, destination_lng: destinationLng });
 });

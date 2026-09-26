@@ -3,10 +3,10 @@
  * Real-time dispatch console for creating and managing field jobs
  *
  * Architecture:
- * - Workflow: A(shifts/jobs/resources), B(shift stops), C(agreement-owned sites), D(billing rates)
+ * - Workflow: A(shifts/jobs/resources), B(shift stops), C(agreement-owned places), D(billing rates)
  * - Three-column layout: Shifts (left) | Stops (center) | Jobs (right); becomes tabs on mobile
  * - Shift card selection → load stops → inspect → create job
- * - Job creation form: type, priority, SLA, briefing, and agreement-owned site
+ * - Job creation form: type, priority, SLA, briefing, and agreement-owned Site or Zone
  * - Active service-agreement location filtering
  * - Rate rule matching (Phase D)
  * - Mobile: 3-column layout → tab bar
@@ -73,7 +73,8 @@ interface DispatchJob {
   siteAddress: string | null;
   safetyNotes: string | null;
   accessInstructions: string | null;
-  siteId: string;
+  siteId: string | null;
+  zoneId: string | null;
   shiftId?: string;
   resourceName: string | null;
   expectedDwellMinutes: number | null;
@@ -93,6 +94,11 @@ interface ClientSite {
   gpsLat: number;
   gpsLng: number;
   clientOrganizationId: string;
+}
+
+interface DispatchZone {
+  id: string;
+  name: string;
 }
 
 interface ResourceUnit {
@@ -118,9 +124,9 @@ const JOB_STATUS_LABELS: Record<JobStatus, string> = { pending: 'Waiting to disp
 const DispatchJobList: React.FC<{ jobs: DispatchJob[]; onOpen: (jobId: string) => void }> = ({ jobs, onOpen }) => (
   <div className="dispatch-job-list-wrap">
     <table className="dispatch-job-list">
-      <thead><tr><th>Priority</th><th>Job</th><th>Site</th><th>Status</th><th>Assigned to</th><th>Respond by</th></tr></thead>
+      <thead><tr><th>Priority</th><th>Job</th><th>Place</th><th>Status</th><th>Assigned to</th><th>Respond by</th></tr></thead>
       <tbody>{jobs.length === 0 ? <tr><td colSpan={6} className="dispatch-job-list-empty">No active jobs</td></tr> : jobs.map((job) => <tr key={job.id} className={`priority-${job.priority} ${job.slaBreached ? 'is-sla-breached' : ''}`} onClick={() => onOpen(job.id)} tabIndex={0} onKeyDown={(event) => { if (event.key === 'Enter' || event.key === ' ') onOpen(job.id); }}>
-        <td><span className="dispatch-job-list-priority">{job.priority}</span></td><td>{JOB_TYPES.find((type) => type.id === job.jobType)?.label ?? job.jobType.replaceAll('_', ' ')}</td><td><strong>{job.siteName}</strong><small>{job.siteAddress ?? 'Address not recorded'}</small></td><td>{JOB_STATUS_LABELS[job.status]}</td><td>{job.resourceName ?? 'Unassigned'}</td><td>{job.slaRespondBy ? new Date(job.slaRespondBy).toLocaleTimeString('en-NZ', { hour: '2-digit', minute: '2-digit' }) : 'Not set'}</td>
+        <td><span className="dispatch-job-list-priority">{job.priority}</span></td><td>{JOB_TYPES.find((type) => type.id === job.jobType)?.label ?? job.jobType.replaceAll('_', ' ')}</td><td><strong>{job.siteName}</strong><small>{job.siteAddress ?? 'Address or route point not recorded'}</small></td><td>{JOB_STATUS_LABELS[job.status]}</td><td>{job.resourceName ?? 'Unassigned'}</td><td>{job.slaRespondBy ? new Date(job.slaRespondBy).toLocaleTimeString('en-NZ', { hour: '2-digit', minute: '2-digit' }) : 'Not set'}</td>
       </tr>)}</tbody>
     </table>
   </div>
@@ -227,6 +233,7 @@ const DispatchConsolePage: React.FC = () => {
   const [jobs, setJobs] = useState<DispatchJob[]>([]);
   const [alarmsByJob, setAlarmsByJob] = useState<Record<string, AlarmSignal>>({});
   const [sites, setSites] = useState<ClientSite[]>([]);
+  const [zones, setZones] = useState<DispatchZone[]>([]);
   const [resources, setResources] = useState<ResourceUnit[]>([]);
   const [loading, setLoading] = useState(true);
 
@@ -314,13 +321,13 @@ const DispatchConsolePage: React.FC = () => {
         activeZoneIds && activeZoneIds.length > 0 && selectedAgreement
           ? supabase
               .from('dispatch_jobs')
-              .select('*, site:client_site_id(name, address, hs_notes, access_instructions), resource:dispatch_resource_id(name)')
+              .select('*, site:client_site_id(name, address, hs_notes, access_instructions), zone:zone_id(name, zone_type), resource:dispatch_resource_id(name)')
               .eq('organization_id', operatingBranchId)
               .eq('service_agreement_id', selectedAgreement.id)
               .in('status', ACTIVE_DISPATCH_JOB_STATUSES as readonly string[])
           : supabase
               .from('dispatch_jobs')
-              .select('*, site:client_site_id(name, address, hs_notes, access_instructions), resource:dispatch_resource_id(name)')
+              .select('*, site:client_site_id(name, address, hs_notes, access_instructions), zone:zone_id(name, zone_type), resource:dispatch_resource_id(name)')
               .eq('organization_id', operatingBranchId)
               .in('status', ACTIVE_DISPATCH_JOB_STATUSES as readonly string[]),
         supabase
@@ -328,7 +335,7 @@ const DispatchConsolePage: React.FC = () => {
           .select('id, name, callsign, status, assigned_officer_id')
           .eq('organization_id', operatingBranchId),
         requestedJobId
-          ? supabase.from('dispatch_jobs').select('*, site:client_site_id(name, address, hs_notes, access_instructions), resource:dispatch_resource_id(name)').eq('id', requestedJobId).eq('organization_id', operatingBranchId).maybeSingle()
+          ? supabase.from('dispatch_jobs').select('*, site:client_site_id(name, address, hs_notes, access_instructions), zone:zone_id(name, zone_type), resource:dispatch_resource_id(name)').eq('id', requestedJobId).eq('organization_id', operatingBranchId).maybeSingle()
           : Promise.resolve({ data: null, error: null }),
       ]);
 
@@ -369,11 +376,12 @@ const DispatchConsolePage: React.FC = () => {
           slaMinutes: j.sla_minutes || 15,
           slaRespondBy: j.sla_respond_by ?? null,
           slaBreached: j.sla_breached ?? false,
-          siteName: j.site?.name || 'Unknown Site',
-          siteAddress: j.site?.address ?? null,
+          siteName: j.site?.name || j.zone?.name || 'Unknown place',
+          siteAddress: j.site?.address ?? (j.zone ? 'Zone or service area' : null),
           safetyNotes: j.site?.hs_notes ?? null,
           accessInstructions: j.site?.access_instructions ?? null,
-          siteId: j.client_site_id,
+          siteId: j.client_site_id ?? null,
+          zoneId: j.zone_id ?? null,
           shiftId: j.shift_id ?? undefined,
           resourceName: j.resource?.name ?? null,
           expectedDwellMinutes: j.expected_dwell_minutes ?? null,
@@ -421,6 +429,7 @@ const DispatchConsolePage: React.FC = () => {
 
   useEffect(() => {
     const activeAgreementSites = selectedAgreementSites.filter((site) => site.active);
+    const activeAgreementZones = selectedAgreementZones.filter((zone) => zone.is_active);
     setSites(activeAgreementSites.map((site) => ({
       id: site.id,
       name: site.name,
@@ -429,8 +438,10 @@ const DispatchConsolePage: React.FC = () => {
       gpsLng: 0,
       clientOrganizationId: site.client_organization_id ?? '',
     })));
+    setZones(activeAgreementZones.map((zone) => ({ id: zone.id, name: zone.name })));
     setFormSiteId((current) => current && activeAgreementSites.some((site) => site.id === current) ? current : '');
-  }, [selectedAgreementSites]);
+    setFormZoneId((current) => current && activeAgreementZones.some((zone) => zone.id === current) ? current : '');
+  }, [selectedAgreementSites, selectedAgreementZones]);
 
   // Load Phase B: Shift stops
   const loadPhaseB = useCallback(async (shiftId: string) => {
@@ -500,7 +511,7 @@ const DispatchConsolePage: React.FC = () => {
 
   // Resolve billing rate
   const resolveBillingRate = useCallback(() => {
-    if (!formSiteId || !selectedAgreement?.client_organization_id) {
+    if ((!formSiteId && !formZoneId) || !selectedAgreement?.client_organization_id) {
       setIsUnrateable(true);
       setResolvedRate(null);
       return;
@@ -528,8 +539,8 @@ const DispatchConsolePage: React.FC = () => {
 
   // Create job
   const handleCreateJob = useCallback(async () => {
-    if ((!formSiteId && !isNewIncidentLocation) || !operatingBranchId) {
-      setError('Select a site or add an incident location');
+    if ((!formSiteId && !formZoneId && !isNewIncidentLocation) || !operatingBranchId) {
+      setError('Select a site or zone, or add an incident location');
       return;
     }
     if (isNewIncidentLocation && !resolvedLocation) {
@@ -554,10 +565,11 @@ const DispatchConsolePage: React.FC = () => {
             p_location_name: resolvedLocation!.label, p_location_address: resolvedLocation!.label, p_location_lat: resolvedLocation!.lat, p_location_lng: resolvedLocation!.lng,
             p_dispatch_resource_id: formResourceId || null, p_briefing_notes: briefingNotes, p_shift_id: formShiftId || null,
           })
-        : await supabase.rpc('create_dispatch_job', {
+        : await supabase.rpc('create_dispatch_job_for_place', {
           p_organization_id: operatingBranchId,
           p_service_agreement_id: selectedAgreement.id,
-          p_client_site_id: formSiteId,
+          p_client_site_id: formSiteId || null,
+          p_zone_id: formZoneId || null,
           p_client_request_id: formRequestId,
           p_job_type: formJobType,
           p_priority: schemaDispatchJobPriority(formPriority),
@@ -633,7 +645,7 @@ const DispatchConsolePage: React.FC = () => {
     } finally {
       setSaving(false);
     }
-  }, [operatingBranchId, relationshipLoading, relationshipError, selectedAgreement, formRequestId, formJobType, formPriority, formSiteId, isNewIncidentLocation, resolvedLocation, formShiftId, formResourceId, formSlaMinutes, formNotes, loadPhaseA, formComplainantAddress, resolvedComplainant, formComplainantSiteId, formComplainantName, formComplainantPhone, formComplainantNotes, formAlarmIntakeChannel, formAlarmSignalType, formAlarmReceivedAt]);
+  }, [operatingBranchId, relationshipLoading, relationshipError, selectedAgreement, formRequestId, formJobType, formPriority, formSiteId, formZoneId, isNewIncidentLocation, resolvedLocation, formShiftId, formResourceId, formSlaMinutes, formNotes, loadPhaseA, formComplainantAddress, resolvedComplainant, formComplainantSiteId, formComplainantName, formComplainantPhone, formComplainantNotes, formAlarmIntakeChannel, formAlarmSignalType, formAlarmReceivedAt]);
 
   const resolveComplainantLocation = useCallback(async () => {
     try {
@@ -701,7 +713,11 @@ const DispatchConsolePage: React.FC = () => {
     [loadPhaseB, isMobile]
   );
 
-  const handleSelectSite = useCallback((siteId: string) => setFormSiteId(siteId), []);
+  const handleSelectPlace = useCallback((place: string) => {
+    const [kind, id] = place.split(':', 2);
+    setFormSiteId(kind === 'site' ? id : '');
+    setFormZoneId(kind === 'zone' ? id : '');
+  }, []);
 
   const operatorAction = async (target: 'stop' | 'shift', action: string) => {
     const reason = window.prompt(`Reason for ${action.replaceAll('_', ' ')}:`)?.trim();
@@ -886,18 +902,21 @@ const DispatchConsolePage: React.FC = () => {
       )}
 
       <div className="dispatch-console-form-field">
-        <label className="dispatch-console-form-label">Site</label>
-        <select value={formSiteId} disabled={isNewIncidentLocation} onChange={(e) => handleSelectSite(e.target.value)}>
-          <option value="">Select a site...</option>
-          {sites.map((s) => (
-            <option key={s.id} value={s.id}>{s.name}</option>
-          ))}
+        <label className="dispatch-console-form-label" htmlFor="dispatch-place">Site or Zone</label>
+        <select id="dispatch-place" value={formSiteId ? `site:${formSiteId}` : formZoneId ? `zone:${formZoneId}` : ''} disabled={isNewIncidentLocation} onChange={(e) => handleSelectPlace(e.target.value)}>
+          <option value="">Select a site or zone...</option>
+          {sites.length > 0 && <optgroup label="Sites">{sites.map((site) => (
+            <option key={site.id} value={`site:${site.id}`}>{site.name}</option>
+          ))}</optgroup>}
+          {zones.length > 0 && <optgroup label="Zones">{zones.map((zone) => (
+            <option key={zone.id} value={`zone:${zone.id}`}>{zone.name}</option>
+          ))}</optgroup>}
         </select>
-        {!relationshipLoading && sites.length === 0 && (
-          <div className="dispatch-console-inline-warning">No active sites are linked to the selected agreement.</div>
+        {!relationshipLoading && sites.length === 0 && zones.length === 0 && (
+          <div className="dispatch-console-inline-warning">No active sites or zones are linked to the selected agreement.</div>
         )}
         <label className="dispatch-console-check-row">
-          <input type="checkbox" checked={isNewIncidentLocation} onChange={(event) => { setIsNewIncidentLocation(event.target.checked); setFormSiteId(''); setResolvedLocation(null); }} />
+          <input type="checkbox" checked={isNewIncidentLocation} onChange={(event) => { setIsNewIncidentLocation(event.target.checked); setFormSiteId(''); setFormZoneId(''); setResolvedLocation(null); }} />
           Create location from this dispatch
         </label>
         {isNewIncidentLocation && (
@@ -973,7 +992,7 @@ const DispatchConsolePage: React.FC = () => {
           type="button"
           className="dispatch-console-primary-button"
           onClick={handleCreateJob}
-          disabled={saving || !selectedAgreement || selectedAgreement.provider_organization_id !== operatingBranchId || (!formSiteId && !resolvedLocation) || (formJobType === 'alarm_response' && !formAlarmReceivedAt) || (Boolean(formResourceId) && !formShiftId)}
+          disabled={saving || !selectedAgreement || selectedAgreement.provider_organization_id !== operatingBranchId || (!formSiteId && !formZoneId && !resolvedLocation) || (formJobType === 'alarm_response' && !formAlarmReceivedAt) || (Boolean(formResourceId) && !formShiftId)}
         >
           Create
         </button>

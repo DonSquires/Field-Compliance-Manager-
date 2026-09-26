@@ -31,6 +31,11 @@ interface DispatchJob {
   site: { name: string; address: string | null; hs_notes: string | null; access_instructions: string | null } | null;
 }
 
+interface DispatchJobRow extends Omit<DispatchJob, 'site'> {
+  site: DispatchJob['site'] | DispatchJob['site'][];
+  zone: { name: string; zone_type: string | null } | Array<{ name: string; zone_type: string | null }> | null;
+}
+
 interface CompletionReceipt {
   id: string;
   shiftId: string | null;
@@ -142,7 +147,7 @@ const OfficerDispatchPage: React.FC<{ onNavigate?: (destination: 'home' | 'map' 
 
       const jobQuery = supabase
         .from('dispatch_jobs')
-        .select('id, job_type, priority, status, briefing_notes, sla_respond_by, expected_dwell_minutes, timing_source, created_at, investigation_id, site:client_site_id(name, address, hs_notes, access_instructions)')
+        .select('id, job_type, priority, status, briefing_notes, sla_respond_by, expected_dwell_minutes, timing_source, created_at, investigation_id, site:client_site_id(name, address, hs_notes, access_instructions), zone:zone_id(name, zone_type)')
         .or(`${shiftIds.length ? `shift_id.in.(${shiftIds.join(',')}),` : ''}assigned_officer_id.eq.${profile.id}`)
         .in('status', ACTIVE_DISPATCH_JOB_STATUSES as readonly string[]);
       const scopedJobQuery = activeZoneIds && activeZoneIds.length > 0
@@ -153,7 +158,14 @@ const OfficerDispatchPage: React.FC<{ onNavigate?: (destination: 'home' | 'map' 
         .order('created_at', { ascending: true });
 
       if (err) throw err;
-      setJobs((data as unknown as DispatchJob[]) || []);
+      setJobs(((data as unknown as DispatchJobRow[]) || []).map((row) => {
+        const site = Array.isArray(row.site) ? row.site[0] ?? null : row.site;
+        const zone = Array.isArray(row.zone) ? row.zone[0] ?? null : row.zone;
+        return {
+          ...row,
+          site: site ?? (zone ? { name: zone.name, address: null, hs_notes: null, access_instructions: null } : null),
+        };
+      }));
     } catch (err) {
       setError(err instanceof Error ? err.message : 'Failed to load dispatch jobs');
     } finally {

@@ -20,6 +20,8 @@ describe('officer coverage tenant states', () => {
   it('elevates the officer’s next assigned dispatch job before generic tools', () => {
     expect(source).toContain("from('dispatch_jobs')");
     expect(source).toContain(".eq('assigned_officer_id', officerId)");
+    expect(source).toContain('zone:zone_id(name)');
+    expect(source).toContain('site: site ?? (zone ?');
     expect(source).toContain('Your next job');
     expect(source).toContain('Open and acknowledge job');
     expect(source).toContain('nextDispatchError');

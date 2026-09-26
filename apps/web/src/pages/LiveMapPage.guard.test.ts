@@ -33,4 +33,10 @@ describe('live officer safety layer', () => {
   it('clears loading state when the operating branch is unavailable', () => {
     expect(source).toContain("if (!branchId) { setPicture(null); setError('Operating branch access could not be confirmed. Live positions are unavailable.'); setLoading(false); return; }");
   });
+
+  it('plots dispatch jobs at either their Site centre or Zone centre', () => {
+    expect(source).toContain('zone:zone_id(name, center_point)');
+    expect(source).toContain('site: site ?? (zone ?');
+    expect(source).toContain('gps_lat: point?.[1] ?? null');
+  });
 });

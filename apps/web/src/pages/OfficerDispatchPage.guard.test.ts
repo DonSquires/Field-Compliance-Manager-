@@ -47,6 +47,8 @@ describe('officer dispatch lifecycle boundary', () => {
 
   it('shows location, access, and safety context before attendance', () => {
     expect(source).toContain('site:client_site_id(name, address, hs_notes, access_instructions)');
+    expect(source).toContain('zone:zone_id(name, zone_type)');
+    expect(source).toContain('site: site ?? (zone ?');
     expect(source).toContain('Access: {job.site.access_instructions}');
     expect(source).toContain('Safety: ');
     expect(source).toContain("const briefHeading = rank >= 3 ? 'On-site notes' : 'Before you arrive';");

@@ -48,6 +48,11 @@ interface AssignedDispatchJob {
   site: { name: string; address: string | null } | null;
 }
 
+interface AssignedDispatchJobRow extends Omit<AssignedDispatchJob, 'site'> {
+  site: AssignedDispatchJob['site'] | AssignedDispatchJob['site'][];
+  zone: { name: string } | Array<{ name: string }> | null;
+}
+
 type HomeDestination = 'dispatch' | 'patrol' | 'site_guard' | 'freedom_camping' | 'parking' | 'noise_control' | 'biosecurity' | 'smoke_control' | 'map' | 'report' | 'modules' | 'schedule' | 'vehicle_lookup' | 'credentials' | 'leave' | 'timesheet';
 
 interface OfficerHomePageProps {
@@ -187,14 +192,21 @@ function useNextDispatchJob(officerId: string | null | undefined) {
     if (!officerId) { setJob(null); setLoading(false); return; }
     setLoading(true); setError(null);
     const { data, error: queryError } = await supabase.from('dispatch_jobs')
-      .select('id,job_type,priority,status,sla_respond_by,site:client_site_id(name,address)')
+      .select('id,job_type,priority,status,sla_respond_by,site:client_site_id(name,address),zone:zone_id(name)')
       .eq('assigned_officer_id', officerId)
       .in('status', ['pending', 'dispatched', 'acknowledged', 'en_route', 'on_scene'])
       .order('sla_respond_by', { ascending: true, nullsFirst: false })
       .order('created_at', { ascending: true })
       .limit(1)
       .maybeSingle();
-    if (queryError) setError(queryError.message); else setJob(data as AssignedDispatchJob | null);
+    if (queryError) setError(queryError.message);
+    else if (!data) setJob(null);
+    else {
+      const row = data as unknown as AssignedDispatchJobRow;
+      const site = Array.isArray(row.site) ? row.site[0] ?? null : row.site;
+      const zone = Array.isArray(row.zone) ? row.zone[0] ?? null : row.zone;
+      setJob({ ...row, site: site ?? (zone ? { name: zone.name, address: null } : null) });
+    }
     setLoading(false);
   }, [officerId]);
   useEffect(() => { void load(); }, [load]);

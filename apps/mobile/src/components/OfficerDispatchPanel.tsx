@@ -3,7 +3,10 @@ import { ActivityIndicator, Linking, Pressable, StyleSheet, Text, TextInput, Vie
 import { captureCoordinates } from '../lib/officerScan';
 import { supabase } from '../lib/supabase';
 
-type DispatchJob = { id: string; job_type: string; priority: string; status: string; briefing_notes: string | null; sla_respond_by: string | null; site: { name: string; address: string | null; hs_notes: string | null; access_instructions: string | null } | null };
+type DispatchPlace = { name: string; address: string | null; hs_notes: string | null; access_instructions: string | null };
+type DispatchJob = { id: string; job_type: string; priority: string; status: string; briefing_notes: string | null; sla_respond_by: string | null; site: DispatchPlace | null };
+type DispatchZone = { name: string; center_point: { coordinates?: [number, number] } | null };
+type DispatchJobRow = Omit<DispatchJob, 'site'> & { site: DispatchPlace | DispatchPlace[] | null; zone: DispatchZone | DispatchZone[] | null };
 type Props = { shiftId: string | null };
 
 const ACTIVE_STATUSES = ['dispatched', 'acknowledged', 'en_route', 'on_scene'];
@@ -30,9 +33,14 @@ export function OfficerDispatchPanel({ shiftId }: Props) {
     setLoading(true);
     setError(null);
     try {
-      const { data, error: queryError } = await supabase.from('dispatch_jobs').select('id, job_type, priority, status, briefing_notes, sla_respond_by, site:client_site_id(name, address, hs_notes, access_instructions)').eq('shift_id', shiftId).in('status', ACTIVE_STATUSES).order('priority', { ascending: false }).order('created_at');
+      const { data, error: queryError } = await supabase.from('dispatch_jobs').select('id, job_type, priority, status, briefing_notes, sla_respond_by, site:client_site_id(name, address, hs_notes, access_instructions), zone:zone_id(name, center_point)').eq('shift_id', shiftId).in('status', ACTIVE_STATUSES).order('priority', { ascending: false }).order('created_at');
       if (queryError) throw queryError;
-      setJobs((data as unknown as DispatchJob[]) ?? []);
+      setJobs(((data as unknown as DispatchJobRow[]) ?? []).map((row) => {
+        const site = Array.isArray(row.site) ? row.site[0] ?? null : row.site;
+        const zone = Array.isArray(row.zone) ? row.zone[0] ?? null : row.zone;
+        const point = zone?.center_point?.coordinates;
+        return { ...row, site: site ?? (zone ? { name: zone.name, address: point ? `${point[1]},${point[0]}` : null, hs_notes: null, access_instructions: null } : null) };
+      }));
     } catch (cause) { setError(cause instanceof Error ? cause.message : 'Dispatch jobs could not be loaded.'); } finally { setLoading(false); }
   }, [shiftId]);
 
@@ -47,7 +55,7 @@ export function OfficerDispatchPanel({ shiftId }: Props) {
 
   useEffect(() => {
     const client = supabase;
-    if (!client || !recommendedJob?.site?.address) { setRoute(null); return; }
+    if (!client || !recommendedJob?.site) { setRoute(null); return; }
     let cancelled = false;
     const refreshRoute = async () => {
       const position = await captureCoordinates();
@@ -57,7 +65,7 @@ export function OfficerDispatchPanel({ shiftId }: Props) {
     };
     void refreshRoute();
     return () => { cancelled = true; };
-  }, [recommendedJob?.id, recommendedJob?.site?.address]);
+  }, [recommendedJob?.id, recommendedJob?.site]);
 
   const advance = async (job: DispatchJob) => {
     const next = NEXT_STATUS[job.status];
