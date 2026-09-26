@@ -161,6 +161,36 @@ $$;
 REVOKE ALL ON FUNCTION public.set_cctv_import_manifest(uuid,jsonb,text) FROM PUBLIC, anon;
 GRANT EXECUTE ON FUNCTION public.set_cctv_import_manifest(uuid,jsonb,text) TO authenticated, service_role;
 
+CREATE OR REPLACE FUNCTION public.tg_seal_verified_photo_evidence()
+RETURNS trigger
+LANGUAGE plpgsql
+SECURITY DEFINER
+SET search_path = public
+AS $$
+DECLARE
+  v_raw_hash text := new.metadata->>'raw_sha256';
+  v_watermarked_hash text := new.metadata->>'watermarked_sha256';
+BEGIN
+  -- CCTV imports preserve the camera's original bytes and source hash. They become court-ready only through
+  -- the explicit evidence-lock workflow; they are not officer photos and must not claim an inference watermark.
+  IF new.evidence_kind <> 'photo' OR new.module_key = 'cctv_review' THEN
+    RETURN new;
+  END IF;
+
+  IF coalesce(new.metadata->>'watermark_text', '') = ''
+    OR coalesce(new.metadata->>'watermark_service', '') <> 'inference'
+    OR v_raw_hash !~ '^[0-9a-f]{64}$'
+    OR v_watermarked_hash !~ '^[0-9a-f]{64}$' THEN
+    RAISE EXCEPTION 'Court photo evidence requires inference watermark provenance and SHA-256 hashes';
+  END IF;
+
+  new.sha256_hash := v_watermarked_hash;
+  new.is_court_ready := true;
+  new.locked_at := coalesce(new.locked_at, clock_timestamp());
+  RETURN new;
+END;
+$$;
+
 COMMENT ON FUNCTION public.register_cctv_import_photo(uuid,text,text,bigint,text,timestamptz,text,text,text,integer,integer) IS
   'Registers an immutable CCTV photo as evidence and a dated timeline event, then queues laptop-first face/ALPR review.';
 COMMENT ON FUNCTION public.complete_cctv_still_inference(uuid,uuid,uuid,jsonb) IS
