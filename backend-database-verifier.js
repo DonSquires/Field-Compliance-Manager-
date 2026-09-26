@@ -192,15 +192,22 @@ function executeBackendDatabaseVerification({
     const start = runtime.start(containerName, image);
     if (!start.ok || !waitForDatabase(runtime, containerName)) throw new Error('disposable database failed to start');
 
-    const runStage = (name, sql) => {
+    const runStage = (name, sql, { tolerateAlreadyPresent = false } = {}) => {
       const result = runtime.applySql(containerName, sql);
+      // A baseline migration the snapshot already contains fails on its first non-idempotent
+      // statement with "already exists": that is proof it is present, not a defect. Only used for
+      // trees whose snapshot predates the applied-migrations ledger (job 1021dbaa, pinned before it).
+      if (!result.ok && tolerateAlreadyPresent && /already exists/i.test(result.output || '')) {
+        stages.push({ name, succeeded: true, skipped: 'already_present', error: null });
+        return;
+      }
       stages.push({ name, succeeded: result.ok, error: result.ok ? null : result.output.slice(-1000) });
       if (!result.ok) throw new Error(`${name} failed`);
     };
     runStage('platform_bootstrap', BOOTSTRAP_SQL);
     runStage('canonical_schema', canonicalSchema.sql);
     for (const migration of plan.baseline) {
-      runStage(`baseline:${path.basename(migration)}`, fs.readFileSync(path.join(sourceDir, migration), 'utf8'));
+      runStage(`baseline:${path.basename(migration)}`, fs.readFileSync(path.join(sourceDir, migration), 'utf8'), { tolerateAlreadyPresent: plan.baseline_source === 'name_heuristic' });
     }
     for (const migration of plan.candidates) {
       runStage(`candidate:${path.basename(migration)}`, fs.readFileSync(path.join(workDir, migration), 'utf8'));

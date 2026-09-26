@@ -186,3 +186,32 @@ test('the baseline is the set of repository migrations the snapshot ledger does 
     fs.rmSync(setup.root, { recursive: true, force: true });
   }
 });
+
+test('with a pre-ledger snapshot, a baseline migration that is already present is skipped, but a failing candidate is still fatal', () => {
+  const setup = fixture('20260901000000');
+  try {
+    fs.writeFileSync(path.join(setup.sourceDir, 'supabase/migrations/20260830181000_builder_existing.sql'), 'CREATE POLICY p ON public.base;\n');
+    const seen = [];
+    const runtime = {
+      start() { return { ok: true }; },
+      ready() { return true; },
+      applySql(_name, sql) {
+        seen.push(sql.slice(0, 40));
+        if (sql.includes('CREATE POLICY p')) return { ok: false, output: 'ERROR:  policy "p" for table "base" already exists' };
+        if (sql.includes('candidate')) return { ok: false, output: 'ERROR:  syntax error at or near "TABL"' };
+        return { ok: true, output: '' };
+      },
+      remove() {}
+    };
+    const result = executeBackendDatabaseVerification({ sourceDir: setup.sourceDir, patchPath: setup.patchPath, artifactDir: setup.artifactDir, image: DATABASE_IMAGE, runtime });
+    assert.equal(result.baseline_source, 'name_heuristic');
+    const baseline = result.stages.find((s) => s.name.startsWith('baseline:'));
+    assert.equal(baseline.succeeded, true);
+    assert.equal(baseline.skipped, 'already_present');
+    const candidate = result.stages.find((s) => s.name.startsWith('candidate:'));
+    assert.equal(candidate.succeeded, false, 'the candidate migration is never excused');
+    assert.equal(result.succeeded, false);
+  } finally {
+    fs.rmSync(setup.root, { recursive: true, force: true });
+  }
+});
