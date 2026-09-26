@@ -31,6 +31,12 @@ describe('AdminShell access and routing boundaries', () => {
     expect(source).toContain("if (page === 'approvals' && (!role || !APPROVAL_DECISION_ROLES.has(role))) return false;");
   });
 
+  it('shows roster planning only to workforce-management roles', () => {
+    expect(source).toContain("const ROSTER_MANAGEMENT_ROLES = new Set(['grand_master', 'master', 'admin', 'admin_officer'])");
+    expect(source).toContain("const ROSTER_MANAGEMENT_PAGES = new Set<AdminPage>(['roster', 'roster-targets'])");
+    expect(source).toContain('if (ROSTER_MANAGEMENT_PAGES.has(page) && (!role || !ROSTER_MANAGEMENT_ROLES.has(role))) return false;');
+  });
+
   it('gates platform module pages (crm, rostering, hr, finance) by organisation subscription', () => {
     expect(source).toContain('PAGE_PLATFORM_MODULE');
     expect(source).toContain("crm: 'crm'");

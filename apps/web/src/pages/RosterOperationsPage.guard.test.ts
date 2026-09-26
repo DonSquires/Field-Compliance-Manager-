@@ -66,4 +66,19 @@ describe('enterprise roster operations', () => {
     expect(page).toContain('if (!org) {');
     expect(page).toContain('setLoading(false);');
   });
+
+  it('keeps Deputy import out of the live roster and blocks shifts without a work unit', () => {
+    expect(page).not.toContain('DeputyImportWizard');
+    expect(page).not.toContain('Import from Deputy');
+    expect(page).toContain('workUnits.length > 0 && <>');
+    expect(page).toContain("(loading || workUnits.length > 0) && <>");
+    expect(page).toContain("Add rosterable staff in People, Pay & HR as well.");
+  });
+
+  it('uses role-specific planning language without changing the roster job', () => {
+    expect(page).toContain("grand_master: { eyebrow: 'Roster oversight'");
+    expect(page).toContain("admin: { eyebrow: 'Team planning'");
+    expect(page).toContain("admin_officer: { eyebrow: 'Daily scheduling'");
+    expect(page).toContain('<h1>Roster</h1><p>{rosterView.description}</p>');
+  });
 });

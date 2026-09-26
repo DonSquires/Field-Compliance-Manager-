@@ -140,9 +140,11 @@ test('roster page explains what to set up first when the branch has nothing to r
         await expect(page.getByText('Nothing to roster against yet')).toBeVisible();
         await expect(page.getByText(/Build a patrol run from a client agreement in Client Portfolios/)).toBeVisible();
         await expect(page.locator('.roster-setup-banner').getByRole('button', { name: 'Client Portfolios' })).toBeVisible();
-        await expect(page.getByText('No rosterable staff in this branch yet')).toBeVisible();
-        await expect(page.getByRole('button', { name: 'Open People, Pay & HR' })).toBeVisible();
-        await expect(page.getByRole('button', { name: 'Publish 0 drafts' })).toBeDisabled();
+        await expect(page.locator('.roster-setup-banner').getByRole('button', { name: 'Work units' })).toBeVisible();
+        await expect(page.locator('.roster-setup-banner').getByRole('button', { name: 'People, Pay & HR' })).toBeVisible();
+        await expect(page.locator('.roster-board')).toHaveCount(0);
+        await expect(page.getByRole('button', { name: /Publish .*draft/ })).toHaveCount(0);
+        await expect(page.getByRole('button', { name: 'Create shift' })).toHaveCount(0);
 });
 test('the Create shift dialog shows the officer\'s rest, hours and days in a row and says when the roster will refuse', async ({ page }) => {
         let requested: Record<string, unknown> | null = null;
