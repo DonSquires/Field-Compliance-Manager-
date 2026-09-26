@@ -79,8 +79,9 @@ function publishWorkspaceBranch({ workspacePath, branchName, expectedHeadSha, pu
   const head = git(workspacePath, ['rev-parse', 'HEAD']);
   if (head !== expectedHeadSha) throw new Error('Builder workspace head is stale');
   if (pushUrl) {
-    // Credentials travel as a per-invocation header, never into .git/config.
-    if (!/^https:\/\/[^\s@]+$/.test(String(pushUrl))) throw new Error('Builder push URL must be a credential-free https URL');
+    // Credentials travel as a per-invocation header, never inside the URL or .git/config.
+    // Plain http is only ever the compose-internal Gitea address; GitHub is always https.
+    if (!/^https?:\/\/[^\s@]+$/.test(String(pushUrl))) throw new Error('Builder push URL must be a credential-free URL');
     git(workspacePath, [...(pushAuthHeader ? ['-c', `http.extraheader=${pushAuthHeader}`] : []), 'push', pushUrl, `HEAD:refs/heads/${branchName}`]);
     return { branchName, head, remote: pushUrl };
   }

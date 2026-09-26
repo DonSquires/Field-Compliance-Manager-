@@ -77,7 +77,8 @@ test('GitHub credentials travel as a per-invocation header, never inside a remot
   assert.equal(workspace.githubAuthHeader('tok'), `Authorization: Basic ${Buffer.from('x-access-token:tok').toString('base64')}`);
   assert.throws(() => workspace.githubAuthHeader(''), /GitHub token is not configured/);
   assert.match(adapter, /http\.extraheader=\$\{pushAuthHeader\}/);
-  assert.match(adapter, /credential-free https URL/);
+  assert.match(adapter, /credential-free URL/);
+  assert.throws(() => workspace.publishWorkspaceBranch({ workspacePath: '/nonexistent', branchName: 'feature/x', expectedHeadSha: 'a'.repeat(40), pushUrl: 'https://user:tok@github.com/o/r.git' }), /Builder workspace branch is invalid|credential-free URL/);
 });
 
 test('control plane routes publication and pull requests by git host and keeps git available in the image', () => {
