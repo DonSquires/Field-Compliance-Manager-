@@ -12,8 +12,8 @@ test('house map separates LINZ source geometry from runtime geofence decisions',
 
   await expect(page.getByRole('heading', { name: 'Locations', exact: true })).toBeVisible();
   const map = page.getByRole('region', { name: 'Map for Civic Events House' });
-  await expect(map.getByText('1 verified runtime zone')).toBeVisible();
-  await expect(map.getByText('1 facet need boundary review')).toBeVisible();
+  await expect(map.getByText('2 verified place boundaries')).toBeVisible();
+  await expect(map.getByText('1 Site or work area need review')).toBeVisible();
   const canvas = map.locator('.house-map-canvas');
   await expect(canvas).toBeVisible();
   expect(await map.locator('.leaflet-overlay-pane path').count()).toBeGreaterThanOrEqual(2);
@@ -22,14 +22,14 @@ test('house map separates LINZ source geometry from runtime geofence decisions',
   expect(mapBox?.height ?? 0).toBeGreaterThan(250);
   await canvas.click({ position: { x: Math.floor((mapBox?.width ?? 300) / 2), y: Math.floor((mapBox?.height ?? 300) / 2) } });
   const resolution = map.locator('.house-map-resolution');
-  await expect(resolution).toContainText('resolved');
+  await expect(resolution).toContainText('Verified boundary matched');
   await expect(resolution).toContainText('Civic Event Operations Zone');
-  await expect(resolution).toContainText('On site');
+  await expect(resolution).toContainText('Inside');
   await expect(resolution).toContainText('static guarding');
-  await expect(resolution).toContainText('2 resolved values');
+  await expect(resolution).toContainText('2 applicable settings');
   await expect(resolution).toContainText('restricted · Controlled loading access only');
 
-  await map.getByRole('button', { name: 'Preview LINZ boundary' }).click();
+  await map.getByRole('button', { name: 'Find LINZ boundary' }).click();
   await expect(map.getByText('Read-only LINZ land-lot preview')).toBeVisible();
   await expect(map.getByText(/Exact parcel/)).toBeVisible();
   await expect(page).toHaveScreenshot('geofence-house-runtime.png');

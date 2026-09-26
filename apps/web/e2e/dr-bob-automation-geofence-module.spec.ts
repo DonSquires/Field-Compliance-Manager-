@@ -20,8 +20,8 @@ test.describe("Dr. Bob's automation, geofence, and module rules walkthrough", ()
     await signInAsAdmin(page, '/admin/locations');
     await expect(page.getByRole('heading', { name: 'Locations', exact: true })).toBeVisible();
     const map = page.getByRole('region', { name: 'Map for Civic Events House' });
-    await expect(map.getByText('1 verified runtime zone')).toBeVisible();
-    await expect(map.getByText('1 facet need boundary review')).toBeVisible();
+    await expect(map.getByText('2 verified place boundaries')).toBeVisible();
+    await expect(map.getByText('1 Site or work area need review')).toBeVisible();
     console.log('[BOB EXPECTED/PRESENT] module=static_guarding expected enabled present enabled');
     console.log('[BOB EXPECTED/PRESENT] auto_dispatch expected disabled by agreement present disabled');
 
@@ -31,9 +31,9 @@ test.describe("Dr. Bob's automation, geofence, and module rules walkthrough", ()
     const box = await canvas.boundingBox();
     await canvas.click({ position: { x: Math.floor((box?.width ?? 300) / 2), y: Math.floor((box?.height ?? 300) / 2) } });
     const resolution = map.locator('.house-map-resolution');
-    await expect(resolution).toContainText('resolved');
+    await expect(resolution).toContainText('Verified boundary matched');
     await expect(resolution).toContainText('Civic Event Operations Zone');
-    await expect(resolution).toContainText('On site');
+    await expect(resolution).toContainText('Inside');
     await expect(resolution).toContainText('static guarding');
     await expect(resolution).toContainText('restricted · Controlled loading access only');
     console.log('[BOB EXPECTED/PRESENT] geofence resolution expected resolved present resolved');
@@ -44,14 +44,14 @@ test.describe("Dr. Bob's automation, geofence, and module rules walkthrough", ()
     await expect(map.getByText(/Do not auto-dispatch|manual review|admin first|controlled loading/i)).toBeVisible().catch(() => {
       console.log('[BOB OBSERVATION] No explicit automation warning rendered; inspect whether the UI should explain the disabled auto-dispatch rule.');
     });
-    await map.getByRole('button', { name: 'Preview LINZ boundary' }).click();
+    await map.getByRole('button', { name: 'Find LINZ boundary' }).click();
     await expect(map.getByText('Read-only LINZ land-lot preview')).toBeVisible();
     const screenshot = await page.screenshot({ fullPage: true });
     await testInfo.attach('automation-geofence-module.png', { body: screenshot, contentType: 'image/png' });
     expect(errors, errors.join('\n')).toEqual([]);
     await testInfo.attach('automation-expectations.txt', {
       body: [
-        'BEFORE: static_guarding enabled; allows_auto_dispatch=false; verified runtime zone present.',
+        'BEFORE: static_guarding enabled; allows_auto_dispatch=false; verified place boundary present.',
         'DURING: point resolves to the controlled zone with restricted access and active closure.',
         'AFTER: no automatic dispatch should be offered; human/admin review remains the safe next action.',
       ].join('\n'),
