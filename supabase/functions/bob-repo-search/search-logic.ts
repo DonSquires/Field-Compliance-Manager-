@@ -77,7 +77,7 @@ export function deriveSearchStatus(input) {
   }
   return {
     status: 'not_found',
-    note: wasOrQuery ? `No matches for any of ${termCount} terms; each was searched separately (GitLab basic search has no OR operator).` : undefined
+    note: wasOrQuery ? `No matches for any of ${termCount} terms; each was searched separately as a fixed string against the build's main commit.` : undefined
   };
 }
 // PER-TERM status decision (Jim Attack A). Extracted from the impure fetch loop

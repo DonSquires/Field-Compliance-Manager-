@@ -1262,8 +1262,8 @@ function computeEgressForbiddenSet(caps, meta) {
     },
     {
       tool: 'repo_search',
-      purpose: 'ADMIRAL ONLY. Search (grep) and READ the app source code (e.g. grep for a symbol across apps/web, apps/api, supabase/functions; read a file). Use this to actually FIND/READ code instead of describing a command.',
-      governance: 'read-only; admiral (grand_master) only; secret-safe'
+      purpose: 'ADMIRAL ONLY. Search (grep) and READ the source of THIS build (DonSquires/Field-Compliance-Manager- at main: apps/web, apps/mobile, supabase/functions, supabase/migrations, services, scripts, root *.js, test, docs). Args: { action: "search", query, path?, limit? } (fixed-string; a|b searches each term) or { action: "read", path, start_line?, end_line? }. A not_found result IS evidence the file/symbol does not exist in the build — say so instead of searching variants; two searches are usually enough.',
+      governance: 'read-only; admiral (grand_master) only; secret-safe; answers from the pinned main commit'
     },
     {
       tool: 'perceive_media',

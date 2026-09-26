@@ -2,33 +2,30 @@
  * bob-repo-search — ADMIRAL-ONLY repository code read/search (Bob's grep)
  *                   + scoped append-only write to docs/bob/BOB_CHAT.md
  *
- * Lets the grand_master ask Bob to actually SEARCH and READ the codebase (e.g.
- * grep for from('locations') across apps/web, apps/api, supabase/functions) and
- * READ a file, instead of Bob merely explaining the command. Backed by the
- * GitLab API (read-only by nature — cannot write), NOT a server-side shell.
+ * Lets the grand_master ask Bob to actually SEARCH and READ the codebase and
+ * READ a file, instead of Bob merely explaining the command.
  *
- * The 'write_bob_chat' action is the SOLE write capability: it appends a
- * message to docs/bob/BOB_CHAT.md (Bob's private notepad) via the GitLab
- * Commits API. The target path is HARD-CODED — no other file can be written.
+ * TARGET REPOSITORY (owner ruling, single target build): `search` and `read`
+ * answer from the Bob control plane's own checkout of the repository being built
+ * (GET /api/bob/builder/repository/{search,file}), pinned to main's head. Until
+ * 2026-09-26 they searched the GitLab lineage repository, so Bob's evidence came
+ * from a codebase that is not the one being built. GitLab remains only behind
+ * the legacy BOB_CHAT notepad actions.
  *
  * DEFENCE IN DEPTH:
  *   1. Auth: JWT required; caller MUST be grand_master (admiral). No other rank.
- *   2. Read-only: uses GitLab blob search + raw file GET only (search/read).
+ *   2. Read-only: search/file GETs on the control plane; no shell.
  *   3. Write-scoped: write_bob_chat is hard-coded to docs/bob/BOB_CHAT.md only.
- *   4. Secret-safe: excludes .env*, key/secret/credential files, and redacts
- *      obvious secret-looking lines from returned file content.
+ *   4. Secret-safe: excludes .env*, key/secret/credential files (here and on the
+ *      control plane), and redacts obvious secret-looking lines from content.
  *
  * Env:
- *   GITLAB_READ_TOKEN   — project-scoped read_api/read_repository token
- *   GITLAB_WRITE_TOKEN  — separate write_repository token for write_bob_chat only
- *   GITLAB_PROJECT_ID   — numeric id or url-encoded path (default 83317421)
- *   GITLAB_ALLOWED_PROJECTS — exact comma-separated project IDs/paths allowed by this function
- *   GITLAB_BASE_URL     — default https://gitlab.com
- *   GITLAB_DEFAULT_REF  — default Main
+ *   BOB_CONTROL_PLANE_URL / BOB_ADMIN_TOKEN — the control plane (search/read)
+ *   GITLAB_* — legacy notepad actions only
  *
  * Body:
- *   { action: 'search', query: string, ref?: string, limit?: number }
- *   { action: 'read',   path: string,  ref?: string }
+ *   { action: 'search', query: string, path?: string, limit?: number }
+ *   { action: 'read',   path: string, start_line?, end_line? | offset? }
  *   { action: 'write_bob_chat', message: string }
  */ import { serve } from 'https://deno.land/std@0.168.0/http/server.ts';
 import { createClient } from 'https://esm.sh/@supabase/supabase-js@2';
@@ -46,6 +43,9 @@ const GITLAB_PROJECT_ID = Deno.env.get('GITLAB_PROJECT_ID') ?? '83317421';
 const GITLAB_ALLOWED_PROJECTS = new Set((Deno.env.get('GITLAB_ALLOWED_PROJECTS') ?? GITLAB_PROJECT_ID).split(',').map((value)=>value.trim()).filter(Boolean));
 const GITLAB_BASE_URL = (Deno.env.get('GITLAB_BASE_URL') ?? 'https://gitlab.com').replace(/\/+$/, '');
 const GITLAB_DEFAULT_REF = Deno.env.get('GITLAB_DEFAULT_REF') ?? 'Main';
+const CONTROL_PLANE_URL = (Deno.env.get('BOB_CONTROL_PLANE_URL') ?? Deno.env.get('FCM_API_URL') ?? '').replace(/\/+$/, '');
+const CONTROL_PLANE_TOKEN = Deno.env.get('BOB_ADMIN_TOKEN') ?? Deno.env.get('FCM_API_TOKEN') ?? '';
+const REPO_REF = 'main';
 const CORS = {
   'Access-Control-Allow-Origin': '*',
   'Access-Control-Allow-Headers': 'authorization, x-client-info, apikey, content-type'
@@ -106,6 +106,13 @@ async function gl(path, token = GITLAB_READ_TOKEN) {
     }
   });
 }
+// The build's own repository, served by the control plane from its pinned checkout.
+async function cp(path) {
+  return fetch(`${CONTROL_PLANE_URL}${path}`, {
+    headers: { Authorization: `Bearer ${CONTROL_PLANE_TOKEN}` },
+    signal: AbortSignal.timeout(45_000)
+  });
+}
 serve(async (req)=>{
   if (req.method === 'OPTIONS') return new Response('ok', {
     headers: CORS
@@ -142,10 +149,13 @@ serve(async (req)=>{
     }, 503);
     const body = await req.json().catch(()=>({}));
     const action = String(body.action ?? 'search');
-    if (!GITLAB_READ_TOKEN) return json({
-      error: 'Repo search not configured (GITLAB_READ_TOKEN or legacy GITLAB_TOKEN missing)'
+    if ((action === 'search' || action === 'read') && (!CONTROL_PLANE_URL || !CONTROL_PLANE_TOKEN)) return json({
+      error: 'Repo search not configured (BOB_CONTROL_PLANE_URL / BOB_ADMIN_TOKEN missing)'
     }, 503);
-    const ref = String(body.ref ?? GITLAB_DEFAULT_REF);
+    if ((action === 'write_bob_chat' || action === 'read_bob_chat') && !GITLAB_READ_TOKEN) return json({
+      error: 'Notepad not configured (GITLAB_READ_TOKEN missing)'
+    }, 503);
+    const ref = action === 'search' || action === 'read' ? REPO_REF : String(body.ref ?? GITLAB_DEFAULT_REF);
     if (action === 'search') {
       const query = String(body.query ?? '').trim();
       if (!query) return json({
@@ -186,20 +196,17 @@ serve(async (req)=>{
       // so a clean-zero term and an errored term are distinguishable per-question,
       // not collapsed into one aggregate. status: found | not_found | could_not_verify.
       const termStatus = [];
+      const pathspec = typeof body.path === 'string' && body.path.trim() ? `&path=${encodeURIComponent(body.path.trim())}` : '';
       for (const term of terms){
-        const r = await gl(`/search?scope=blobs&ref=${encodeURIComponent(ref)}&search=${encodeURIComponent(term)}&per_page=${limit}`);
-        if (!r.ok) {
+        const r = await cp(`/api/bob/builder/repository/search?q=${encodeURIComponent(term)}&limit=${limit}${pathspec}`).catch(()=>null);
+        if (!r || !r.ok) {
           // A term we COULD NOT SEARCH is not evidence of absence (Bob criterion
           // 1/5): record it as could_not_verify, never fold it into not_found.
-          // Include only upstream status and opaque request ID, never credentials
-          // or a response body, so operators can distinguish auth, project, ref,
-          // and GitLab service failures without exposing protected information.
           const failure = {
-            status: r.status,
-            request_id: r.headers.get('x-request-id') ?? r.headers.get('x-gitlab-request-id') ?? null
+            status: r ? r.status : 0
           };
           couldNotVerify = true;
-          failedTerms.push(`${term} (GitLab HTTP ${failure.status}${failure.request_id ? `; request ${failure.request_id}` : ''})`);
+          failedTerms.push(`${term} (repository HTTP ${failure.status || 'unreachable'})`);
           termStatus.push({
             term,
             status: deriveTermStatus({
@@ -211,13 +218,13 @@ serve(async (req)=>{
           });
           continue;
         }
-        const hits = await r.json().catch(()=>[]);
-        let termHits = 0;
+        const payload = await r.json().catch(()=>({}));
+        const hits = Array.isArray(payload.matches) ? payload.matches : [];
+        let termHits = Number(payload.count) || hits.length;
         for (const h of hits){
           const p = String(h.path ?? '');
-          if (SECRET_PATH.test(p) || PRIVATE_PATH.test(p)) continue;
-          termHits++; // this term matched (counted pre-cap so the map is truthful about coverage)
-          const dedupeKey = `${p}#${h.startline ?? ''}`;
+          if (SECRET_PATH.test(p) || PRIVATE_PATH.test(p)) { termHits = Math.max(0, termHits - 1); continue; }
+          const dedupeKey = `${p}#${h.line ?? ''}`;
           if (seen.has(dedupeKey)) continue;
           seen.add(dedupeKey);
           // TOTAL-LIMIT CAP (Jim #3): the aggregate result list never exceeds the
@@ -226,8 +233,8 @@ serve(async (req)=>{
           if (results.length < limit) {
             results.push({
               path: h.path,
-              startline: h.startline,
-              snippet: redactSecretLines(String(h.data ?? '')).slice(0, 500)
+              startline: h.line,
+              snippet: redactSecretLines(String(h.text ?? '')).slice(0, 500)
             });
           }
         }
@@ -276,16 +283,20 @@ serve(async (req)=>{
         ok: false,
         error: 'That path is private and not readable.'
       }, 403);
-      const r = await gl(`/repository/files/${encodeURIComponent(path)}/raw?ref=${encodeURIComponent(ref)}`);
-      if (r.status === 404) return json({
+      const r = await cp(`/api/bob/builder/repository/file?path=${encodeURIComponent(path)}`).catch(()=>null);
+      if (r && r.status === 404) return json({
         ok: false,
         error: `File not found: ${path} @ ${ref}`
       }, 404);
-      if (!r.ok) return json({
+      if (r && r.status === 403) return json({
         ok: false,
-        error: `GitLab file read returned ${r.status}`
+        error: 'That path is excluded (secrets and binaries are not readable).'
+      }, 403);
+      if (!r || !r.ok) return json({
+        ok: false,
+        error: `Repository file read returned ${r ? r.status : 'unreachable'}`
       }, 502);
-      const raw = await r.text();
+      const raw = String((await r.json().catch(()=>({}))).content ?? '');
       // Redact BEFORE windowing so a redaction can never be split across a window
       // boundary (a half-redacted secret line would defeat the guard). The window
       // math is the pure computeReadWindow helper (Bob Blocker 1, boundary-tested).

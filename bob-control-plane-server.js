@@ -10,6 +10,7 @@ const { collectBuilderLiveContext } = require('./builder-live-context');
 const { buildAtlasGraph } = require('./scripts/atlas-graph');
 const { createModelGatewayConfig, defaultReviewerModel, invokeBuilderModel, modelHealth } = require('./builder-model-gateway');
 const { loadBuilderRuntimeSnapshot, advanceBuilderJob, runBuilderUntilPause } = require('./builder-runtime-coordinator');
+const { listRepositoryTree, readRepositoryFile, searchRepository } = require('./builder-repository-read');
 const { autopilotTick, listAutopilotJobs, listPendingApprovals } = require('./builder-autopilot');
 const { laptopStatus, runLaptopCommand, laptopConfig, loadLaptopLink, mergeLaptopLink, describeLink } = require('./bob-laptop-shell');
 const { createBranchWorkspace, commitVerifiedPatch, publishWorkspaceBranch, createGiteaPullRequest, workspacePathForBranch, createGitHubPullRequest, ensureSourceCheckout, githubAuthHeader, githubRepoUrl, resolveRemoteHead, redactGitError } = require('./builder-branch-workspace');
@@ -91,6 +92,17 @@ function builderGitSource(targetSha) {
 function builderRepositoryHead(ref = 'main') {
   const target = builderGitTarget();
   return { host: target.host, ref, sha: resolveRemoteHead({ repoUrl: target.repoUrl, authHeader: target.authHeader, ref }) };
+}
+
+// Read-only repository views for Bob's chat tools: pinned to main's head (re-resolved at most
+// once a minute) and served from the shared checkout's object database.
+const repositoryReadCache = { at: 0, sha: null, sourceDir: null };
+function repositoryReadTarget() {
+  if (Date.now() - repositoryReadCache.at < 60_000 && repositoryReadCache.sha) return repositoryReadCache;
+  const { sha } = builderRepositoryHead('main');
+  const sourceDir = builderGitSource(sha);
+  Object.assign(repositoryReadCache, { at: Date.now(), sha, sourceDir });
+  return repositoryReadCache;
 }
 const stateFile = path.join(stateDir, 'bob-state.json');
 const maxRequestBytes = 1024 * 1024;
@@ -489,6 +501,24 @@ async function route(req, res, body) {
       return json(res, 200, builderRepositoryHead(ref));
     } catch {
       return json(res, 503, { error: 'Builder repository head is unavailable' });
+    }
+  }
+  const repositoryReadMatch = url.pathname.match(/^\/api\/bob\/builder\/repository\/(search|file|tree)$/);
+  if (repositoryReadMatch && req.method === 'GET') {
+    if (!authorized(req)) return json(res, 401, { error: 'unauthorized' });
+    let target;
+    try { target = repositoryReadTarget(); } catch { return json(res, 503, { error: 'Builder repository is unavailable' }); }
+    const base = { ref: 'main', sha: target.sha };
+    try {
+      if (repositoryReadMatch[1] === 'search') {
+        const result = searchRepository({ sourceDir: target.sourceDir, sha: target.sha, query: url.searchParams.get('q'), pathspec: url.searchParams.get('path'), limit: url.searchParams.get('limit'), regex: url.searchParams.get('regex') === '1' });
+        return json(res, 200, { ...base, ...result });
+      }
+      if (repositoryReadMatch[1] === 'file') return json(res, 200, { ...base, ...readRepositoryFile({ sourceDir: target.sourceDir, sha: target.sha, path: url.searchParams.get('path') }) });
+      return json(res, 200, { ...base, ...listRepositoryTree({ sourceDir: target.sourceDir, sha: target.sha, path: url.searchParams.get('path') || '' }) });
+    } catch (error) {
+      const status = error?.code === 'NOT_FOUND' ? 404 : error?.code === 'FORBIDDEN' ? 403 : 400;
+      return json(res, status, { ...base, error: String(error?.message || 'repository read failed').slice(0, 200) });
     }
   }
   if (builderContextMatch && req.method === 'GET') {
