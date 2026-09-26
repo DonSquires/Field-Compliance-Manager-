@@ -1,0 +1,1 @@
+Throwaway file: proves the GitHub Actions bridge can open a draft PR after the repository setting was enabled on 2026-09-26. Close the PR unmerged; delete the branch.
