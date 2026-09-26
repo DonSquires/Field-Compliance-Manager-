@@ -47,6 +47,42 @@ test('backend worker applies a bounded patch in disposable storage and emits exp
   }
 });
 
+test('backend worker executes the test files a patch touches and fails when they fail', () => {
+  const testPatch = (assertion) => [
+    'diff --git a/test/example.test.js b/test/example.test.js',
+    'new file mode 100644',
+    '--- /dev/null',
+    '+++ b/test/example.test.js',
+    '@@ -0,0 +1,4 @@',
+    "+const test = require('node:test');",
+    "+const assert = require('node:assert/strict');",
+    "+const value = require('../supabase/functions/_shared/example.js');",
+    `+test('example', () => assert.equal(value, ${assertion}));`,
+    ''
+  ];
+  const passing = fixture(testPatch('1'));
+  try {
+    const result = executeBackendPatch({ sourceDir: passing.sourceDir, patchPath: passing.patchPath, artifactDir: passing.artifactDir, workDir: path.join(passing.root, 'work') });
+    assert.equal(result.succeeded, true, JSON.stringify(result.checks.map(c => [c.command, c.status])));
+    const testRun = result.checks.find(check => check.command.startsWith('node --test'));
+    assert.equal(testRun.command, 'node --test test/example.test.js');
+    assert.equal(testRun.status, 0);
+    assert.match(testRun.stdout, /# pass 1/);
+  } finally {
+    fs.rmSync(passing.root, { recursive: true, force: true });
+  }
+  const failing = fixture(testPatch('999'));
+  try {
+    const result = executeBackendPatch({ sourceDir: failing.sourceDir, patchPath: failing.patchPath, artifactDir: failing.artifactDir, workDir: path.join(failing.root, 'work') });
+    assert.equal(result.succeeded, false);
+    const testRun = result.checks.find(check => check.command.startsWith('node --test'));
+    assert.equal(testRun.status, 1);
+    assert.equal(fs.existsSync(path.join(failing.artifactDir, 'validated.patch')), true, 'the patch applied; the evidence records that its tests failed');
+  } finally {
+    fs.rmSync(failing.root, { recursive: true, force: true });
+  }
+});
+
 test('backend worker fails closed on JavaScript syntax errors', () => {
   const setup = fixture([
     'diff --git a/supabase/functions/_shared/example.js b/supabase/functions/_shared/example.js',

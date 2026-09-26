@@ -51,12 +51,16 @@ async function collectEvidence({ supabase, snapshot }) {
   ]);
   const envelope = author && typeof author === 'object' && typeof author.patch === 'string' ? author : (typeof author === 'string' ? unwrapPatchArtifact(author).envelope : null);
   const changedFiles = Array.isArray(manifestRows) ? manifestRows.map((row) => row?.path).filter(Boolean) : (envelope?.changed_files ?? []);
+  const verifiedRuns = Array.isArray(envelope?.verified_runs) ? envelope.verified_runs.filter((r) => r && typeof r.command === 'string') : [];
+  const passingTests = verifiedRuns.filter((r) => /^node --test\b/.test(r.command) && r.exit_code === 0).map((r) => plain(r.command, 160));
   return {
     verifyRun,
     validatedPatchId: validatedPatch?.id ?? null,
     summary: plain(envelope?.summary ?? release?.summary ?? '', 1200),
     changedFiles,
-    testsRun: Array.isArray(envelope?.tests) ? envelope.tests.map((t) => plain(t, 160)) : [],
+    // Prefer what the tool log proves ran; fall back to the author's list only when no log exists (one-shot lanes).
+    testsRun: passingTests.length ? passingTests : (verifiedRuns.length ? [] : (Array.isArray(envelope?.tests) ? envelope.tests.map((t) => plain(t, 160)) : [])),
+    testsNotRunReason: typeof envelope?.tests_not_run_reason === 'string' ? plain(envelope.tests_not_run_reason, 300) : null,
     followUps: Array.isArray(envelope?.follow_ups) ? envelope.follow_ups.map((t) => plain(t, 300)) : [],
     rollbackNotes: Array.isArray(envelope?.rollback_notes) ? envelope.rollback_notes.map((t) => plain(t, 300)) : [],
     security: securityReport && typeof securityReport === 'object' ? { passed: securityReport.passed === true, counts: securityReport.counts ?? null } : null,
@@ -72,7 +76,8 @@ function composeReport({ job, evidence, pullRequestUrl, state, reason }) {
     if (evidence.summary) lines.push(`What changed: ${evidence.summary}`);
     lines.push(`Files touched: ${describeFiles(evidence.changedFiles)}.`);
     const checks = [];
-    if (evidence.testsRun.length) checks.push(`Bob ran ${evidence.testsRun.length === 1 ? 'the test' : `${evidence.testsRun.length} test commands`} himself (${evidence.testsRun.slice(0, 3).join('; ')})`);
+    if (evidence.testsRun.length) checks.push(`Bob ran ${evidence.testsRun.length === 1 ? 'the test' : `${evidence.testsRun.length} test commands`} himself and they passed (${evidence.testsRun.slice(0, 3).join('; ')})`);
+    else if (evidence.testsNotRunReason) checks.push(`Bob could not run tests here (${evidence.testsNotRunReason})`);
     if (evidence.verifyRun) checks.push('an isolated worker re-applied the change from scratch and it passed');
     if (evidence.security) checks.push(evidence.security.passed ? 'the security scan found nothing' : 'the security scan raised findings (see the pull request)');
     if (evidence.review?.verdict) checks.push(`an independent AI reviewer (a different model from the author) said "${evidence.review.verdict}"${evidence.review.summary ? `: ${evidence.review.summary}` : ''}`);
@@ -107,7 +112,8 @@ function composePullRequestBody({ job, evidence, branchName, headSha }) {
   md.push(`**Files:** ${evidence.changedFiles.map((f) => `\`${f}\``).join(', ') || 'n/a'}`);
   md.push('');
   md.push('## How it was verified');
-  if (evidence.testsRun.length) md.push(`- Author ran: ${evidence.testsRun.map((t) => `\`${t}\``).join(', ')}`);
+  if (evidence.testsRun.length) md.push(`- Author ran and passed: ${evidence.testsRun.map((t) => `\`${t}\``).join(', ')}`);
+  else if (evidence.testsNotRunReason) md.push(`- Author could not run tests: ${evidence.testsNotRunReason}`);
   if (evidence.verifyRun) md.push(`- Independent worker (\`${evidence.verifyRun.profile}\`) re-applied the patch in an isolated container: **passed**`);
   if (evidence.security) md.push(`- Security scan: **${evidence.security.passed ? 'passed' : 'findings'}**${evidence.security.counts ? ` (critical ${evidence.security.counts.critical ?? 0}, high ${evidence.security.counts.high ?? 0}, medium ${evidence.security.counts.medium ?? 0}, low ${evidence.security.counts.low ?? 0})` : ''}`);
   if (evidence.review?.verdict) md.push(`- Independent AI code review (different model from the author): **${evidence.review.verdict}** — ${evidence.review.summary || 'no summary'}`);

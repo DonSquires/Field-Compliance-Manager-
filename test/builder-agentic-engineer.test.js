@@ -231,6 +231,33 @@ test('compactMessages keeps recent turns verbatim and collapses older bulky resu
   assert.equal(messages[3].content.length > 5000, true, 'the in-memory transcript is not mutated');
 });
 
+test('finish is refused when a change touches tests but no test run passed this session; verified_runs carry first-hand evidence', () => {
+  const repo = makeRepo();
+  const workspaceRoot = path.join(repo.root, 'workspaces');
+  const { createBranchWorkspace } = require('../builder-branch-workspace');
+  const ws = createBranchWorkspace({ sourceDir: repo.source, workspaceRoot, jobId: 'abad1deaabad1deaabad1dea', targetSha: repo.sha });
+  const tools = createTools({ workspacePath: ws.workspacePath, repoRoot: repo.source, lane: 'backend', supabase: null, limits: DEFAULT_LIMITS, log() {} });
+  fs.writeFileSync(path.join(ws.workspacePath, 'lib', 'sum.js'), "'use strict';\nmodule.exports = { sum: (a, b) => a + b };\n");
+  fs.writeFileSync(path.join(ws.workspacePath, 'test', 'sum.test.js'), "const test = require('node:test');\nconst assert = require('node:assert/strict');\nconst { sum } = require('../lib/sum');\ntest('sum adds', () => assert.equal(sum(2, 3), 5));\ntest('sum adds zero', () => assert.equal(sum(2, 0), 2));\n");
+  const args = { summary: 'Fix sum and extend its test; verified locally.', tests: 'node --check lib/sum.js\nnode --test test/sum.test.js', rollback_notes: ['revert'] };
+  const refused = buildProposal({ workspacePath: ws.workspacePath, lane: 'backend', tools, args });
+  assert.match(refused.error, /touches tests but no `node --test …` run passed/);
+  // Claims in args.tests do not count; only an actual passing run does.
+  tools.run({ command: 'node --check lib/sum.js' });
+  assert.match(buildProposal({ workspacePath: ws.workspacePath, lane: 'backend', tools, args }).error, /no `node --test …` run passed/);
+  const run = tools.run({ command: 'node --test test/sum.test.js' });
+  assert.equal(run.exit_code, 0);
+  const ok = buildProposal({ workspacePath: ws.workspacePath, lane: 'backend', tools, args });
+  assert.ok(ok.proposal, JSON.stringify(ok));
+  assert.deepEqual(ok.proposal.tests, ['node --check lib/sum.js', 'node --test test/sum.test.js'], 'a newline-joined tests string is normalised to a list');
+  assert.deepEqual(ok.proposal.verified_runs.map(r => [r.command, r.exit_code]), [['node --check lib/sum.js', 0], ['node --test test/sum.test.js', 0]]);
+  // An honest reason is the only other way through.
+  const tools2 = createTools({ workspacePath: ws.workspacePath, repoRoot: repo.source, lane: 'backend', supabase: null, limits: DEFAULT_LIMITS, log() {} });
+  const explained = buildProposal({ workspacePath: ws.workspacePath, lane: 'backend', tools: tools2, args: { ...args, tests: [], tests_not_run_reason: 'the suite needs a live database that is not available in this worktree' } });
+  assert.equal(explained.proposal.tests_not_run_reason, 'the suite needs a live database that is not available in this worktree');
+  fs.rmSync(repo.root, { recursive: true, force: true });
+});
+
 test('buildProposal keeps a trailing blank context line (live job 3a4a2d06 lost it and the worker saw a corrupt patch)', () => {
   const repo = makeRepo();
   // A change followed by <blank>, line, <blank>: the hunk's last context line is a lone space.

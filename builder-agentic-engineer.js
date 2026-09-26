@@ -137,7 +137,7 @@ function systemPrompt({ lane, limits }) {
     '- read_canon {}                          AGENTS.md + docs/canon/README.md + docs/canon/BOB_DOCTRINE.md (bounded)',
     '- read_notes {limit?}                    your persistent builder notes (lessons from earlier jobs)',
     '- write_note {text}                      leave a durable lesson for future jobs (short, factual, no secrets)',
-    '- finish {summary, tests, rollback_notes, follow_ups?}   hand over: your worktree diff becomes the reviewed patch',
+    '- finish {summary, tests, rollback_notes, follow_ups?, tests_not_run_reason?}   hand over: your worktree diff becomes the reviewed patch. A change that touches tests is refused unless a `node --test` run passed in this session (or tests_not_run_reason says plainly why none could).',
     '',
     `Budget: ${limits.maxTurns} tool turns / ${Math.round(limits.wallBudgetMs / 60000)} minutes. Do not repeat identical calls. If the task is impossible, unsafe, or requires a protected path, finish with an empty change set and explain plainly in the summary what a human must do.`,
   ].join('\n');
@@ -189,6 +189,8 @@ function compactMessages(messages, { keepRecent = 6, stubChars = 600, threshold 
 }
 
 function createTools({ workspacePath, repoRoot, lane, supabase, limits, log }) {
+  // First-hand evidence of what Bob actually executed (not what he says he ran).
+  const runs = [];
   const run = (command) => {
     const text = String(command ?? '').trim();
     if (!RUN_ALLOWLIST.some((pattern) => pattern.test(text))) return { error: 'command not allowed; allowed forms: node --test [test/<file>.test.js …], node --check <file>, git status|diff|log|show|blame' };
@@ -197,6 +199,7 @@ function createTools({ workspacePath, repoRoot, lane, supabase, limits, log }) {
     // A nested `node --test` inherits the parent test-runner context and misreports; give the child a clean runner env.
     const { NODE_TEST_CONTEXT: _testContext, NODE_OPTIONS: _nodeOptions, ...childEnv } = process.env;
     const result = spawnSync(argv[0], argv.slice(1), { cwd: workspacePath, encoding: 'utf8', timeout: limits.runTimeoutMs, maxBuffer: 64 * 1024 * 1024, env: { ...childEnv, CI: '1', FORCE_COLOR: '0' } });
+    runs.push({ command: text, exit_code: result.status, at: new Date(started).toISOString(), duration_ms: Date.now() - started });
     return {
       command: text,
       exit_code: result.status,
@@ -345,6 +348,7 @@ function createTools({ workspacePath, repoRoot, lane, supabase, limits, log }) {
     },
     __changedFiles: changedFiles,
     __policyCheck: policyCheck,
+    __runs: () => runs.slice(),
     __log: log,
   };
 }
@@ -365,13 +369,26 @@ function buildProposal({ workspacePath, lane, tools, args }) {
   if (/GIT binary patch|Binary files .* differ/m.test(patch)) return { error: 'finish refused: binary changes are not allowed' };
   const summary = String(args.summary ?? '').trim();
   if (summary.length < 20) return { error: 'finish refused: summary must explain the change (what, why, how verified)' };
+  // Truth Protocol at the gate: a change that touches tests (or that the brief asked to test) must come with a
+  // passing `node --test` run from THIS session, or an explicit reason why none could run. Claims are not evidence.
+  const sessionRuns = typeof tools.__runs === 'function' ? tools.__runs() : [];
+  const passingTestRuns = sessionRuns.filter((r) => /^node --test\b/.test(r.command) && r.exit_code === 0);
+  const touchesTests = files.some((file) => /^test\/|\.test\.(?:[cm]?js|tsx?)$/.test(file));
+  const testsNotRunReason = String(args.tests_not_run_reason ?? '').trim();
+  if (touchesTests && !passingTestRuns.length && !testsNotRunReason) {
+    return { error: 'finish refused: this change touches tests but no `node --test …` run passed in this session. Run the relevant test file (run {"command":"node --test test/<file>.test.js"}) and finish again, or set args.tests_not_run_reason to say plainly why it cannot run here.' };
+  }
+  const tests = (Array.isArray(args.tests) ? args.tests : typeof args.tests === 'string' ? args.tests.split(/\r?\n/) : []).map((t) => String(t).trim()).filter(Boolean).slice(0, 20);
   const proposal = {
     summary,
     patch,
     changed_files: files,
     database_migrations: files.filter((file) => file.startsWith('supabase/migrations/')),
     edge_functions: [...new Set(files.filter((file) => /^supabase\/functions\/(?!_shared\/)[^/]+\//.test(file)).map((file) => file.split('/')[2]))].sort(),
-    tests: Array.isArray(args.tests) ? args.tests.map(String).slice(0, 20) : [],
+    tests,
+    // What actually ran, from the tool log (command + exit code), so reviewers need not trust the summary.
+    verified_runs: sessionRuns.filter((r) => /^node --(test|check)\b/.test(r.command)).slice(-20),
+    tests_not_run_reason: testsNotRunReason || undefined,
     rollback_notes: Array.isArray(args.rollback_notes) && args.rollback_notes.length ? args.rollback_notes.map(String).slice(0, 10) : ['Revert the pull request; no live data, migrations, or deployments are applied by this change.'],
     follow_ups: Array.isArray(args.follow_ups) ? args.follow_ups.map(String).slice(0, 10) : [],
     lane,

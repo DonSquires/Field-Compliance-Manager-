@@ -8,6 +8,7 @@ const {
 } = require('./supabase/functions/_shared/builder-backend-engineer');
 
 const MAX_LOG_BYTES = 512 * 1024;
+const TEST_TIMEOUT_MS = 5 * 60 * 1000;
 
 function redactLog(value) {
   return String(value || '')
@@ -21,16 +22,18 @@ function sha256File(filePath) {
   return crypto.createHash('sha256').update(fs.readFileSync(filePath)).digest('hex');
 }
 
-function run(command, args, cwd) {
+function run(command, args, cwd, timeout) {
   const result = spawnSync(command, args, {
     cwd,
     encoding: 'utf8',
     maxBuffer: MAX_LOG_BYTES,
+    timeout,
     env: { PATH: process.env.PATH, HOME: '/tmp', CI: 'true', NODE_ENV: 'test' }
   });
   return {
     command: [command, ...args].join(' '),
     status: result.status,
+    timed_out: Boolean(result.error && result.error.code === 'ETIMEDOUT'),
     stdout: redactLog(String(result.stdout || '').slice(-MAX_LOG_BYTES)),
     stderr: redactLog(String(result.stderr || '').slice(-MAX_LOG_BYTES)),
     error: result.error ? redactLog(result.error.message) : null
@@ -66,6 +69,12 @@ function executeBackendPatch({ sourceDir, patchPath, artifactDir, workDir = '/wo
       checks.push(run('node', ['--check', file], workDir));
       if (checks.at(-1).status !== 0) break;
     }
+  }
+  // Static checks alone left the release evidence saying "only syntax checks were run". Execute the
+  // test files the patch touches (root node:test suites need no npm dependencies; the container has no network).
+  const changedTests = changedFiles.filter(file => /^test\/[^/]+\.test\.js$/.test(file));
+  if (patchApplied && checks.every(check => check.status === 0) && changedTests.length) {
+    checks.push(run('node', ['--test', ...changedTests], workDir, TEST_TIMEOUT_MS));
   }
 
   const succeeded = patchApplied && checks.every(check => check.status === 0);
