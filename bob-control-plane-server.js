@@ -10,7 +10,13 @@ const { collectBuilderLiveContext } = require('./builder-live-context');
 const { buildAtlasGraph } = require('./scripts/atlas-graph');
 const { createModelGatewayConfig, defaultReviewerModel, invokeBuilderModel } = require('./builder-model-gateway');
 const { loadBuilderRuntimeSnapshot, advanceBuilderJob, runBuilderUntilPause } = require('./builder-runtime-coordinator');
-const { createBranchWorkspace, commitVerifiedPatch, publishWorkspaceBranch, createGiteaPullRequest, workspacePathForBranch, createGitHubPullRequest, ensureSourceCheckout, githubAuthHeader, githubRepoUrl, resolveRemoteHead } = require('./builder-branch-workspace');
+const { createBranchWorkspace, commitVerifiedPatch, publishWorkspaceBranch, createGiteaPullRequest, workspacePathForBranch, createGitHubPullRequest, ensureSourceCheckout, githubAuthHeader, githubRepoUrl, resolveRemoteHead, redactGitError } = require('./builder-branch-workspace');
+
+// Route failures used to be swallowed into a bare 409; keep a short redacted reason so the
+// operator (and Bob's self-heal loop) can act without a shell on the host.
+function failureDetail(error) {
+  return redactGitError(String(error instanceof Error ? error.message : error)).slice(0, 300);
+}
 
 const port = Number(process.env.PORT || 8080);
 const webhookSecret = process.env.GITEA_WEBHOOK_SECRET || '';
@@ -394,8 +400,8 @@ async function route(req, res, body) {
       const { data: bound, error: bindError } = await builderSupabase.rpc('builder_bind_workspace', { _job_id: job.id, _workspace_branch: workspace.branchName, _workspace_head_sha: workspace.head });
       if (bindError || !bound) return json(res, 409, { error: 'Builder workspace could not be bound' });
       return json(res, 201, { branch: workspace.branchName, head: workspace.head, existing: workspace.existing });
-    } catch {
-      return json(res, 409, { error: 'Builder workspace could not be created' });
+    } catch (error) {
+      return json(res, 409, { error: 'Builder workspace could not be created', detail: failureDetail(error) });
     }
   }
   if (builderMatch && req.method === 'POST' && builderMatch[2] === 'commit') {
@@ -413,7 +419,7 @@ async function route(req, res, body) {
       const { data: updated, error: recordError } = await builderSupabase.rpc('builder_record_workspace_commit', { _job_id: job.id, _expected_head_sha: job.workspace_head_sha, _commit_sha: commit.commitSha });
       if (recordError || !updated) return json(res, 409, { error: 'Builder workspace commit could not be recorded' });
       return json(res, 201, { branch: commit.branchName, head: commit.commitSha, changedFiles: commit.changedFiles });
-    } catch { return json(res, 409, { error: 'Builder workspace commit could not be created' }); }
+    } catch (error) { return json(res, 409, { error: 'Builder workspace commit could not be created', detail: failureDetail(error) }); }
   }
   if (builderMatch && req.method === 'POST' && builderMatch[2] === 'publish') {
     if (!builderSupabase) return json(res, 503, { error: 'Builder persistence is unavailable' });
@@ -427,7 +433,7 @@ async function route(req, res, body) {
       const { data: updated, error } = await builderSupabase.rpc('builder_record_workspace_publication', { _job_id: job.id, _expected_head_sha: publication.head });
       if (error || !updated) return json(res, 409, { error: 'Builder branch publication could not be recorded' });
       return json(res, 201, { branch: publication.branchName, head: publication.head, existing: false });
-    } catch { return json(res, 409, { error: 'Builder branch could not be published' }); }
+    } catch (error) { return json(res, 409, { error: 'Builder branch could not be published', detail: failureDetail(error) }); }
   }
   if (builderMatch && req.method === 'POST' && builderMatch[2] === 'pull-request') {
     if (!builderSupabase) return json(res, 503, { error: 'Builder persistence is unavailable' });
@@ -443,7 +449,7 @@ async function route(req, res, body) {
       const { data: updated, error } = await builderSupabase.rpc('builder_record_workspace_pull_request', { _job_id: job.id, _expected_head_sha: pullRequest.head, _pull_request_url: pullRequest.url });
       if (error || !updated) return json(res, 409, { error: 'Builder pull request could not be recorded' });
       return json(res, 201, { ...pullRequest, existing: false });
-    } catch { return json(res, 409, { error: 'Builder pull request could not be created' }); }
+    } catch (error) { return json(res, 409, { error: 'Builder pull request could not be created', detail: failureDetail(error) }); }
   }
 
   const match = url.pathname.match(/^\/jobs\/([^/]+)(?:\/(approve|cancel))?$/);
