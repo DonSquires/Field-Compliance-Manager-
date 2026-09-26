@@ -81,6 +81,17 @@ test('GitHub credentials travel as a per-invocation header, never inside a remot
   assert.throws(() => workspace.publishWorkspaceBranch({ workspacePath: '/nonexistent', branchName: 'feature/x', expectedHeadSha: 'a'.repeat(40), pushUrl: 'https://user:tok@github.com/o/r.git' }), /Builder workspace branch is invalid|credential-free URL/);
 });
 
+test('a failing git command never echoes an auth header or embedded credential', () => {
+  assert.equal(workspace.redactGitError('git -c http.extraheader=Authorization: Basic ZG9uOnNlY3JldA== push https://x:y@host/r.git'), 'git -c http.extraheader=Authorization: [redacted] push https://[redacted]@host/r.git');
+  const repo = fs.mkdtempSync(path.join(os.tmpdir(), 'bob-redact-'));
+  execFileSync('git', ['init', '-q', repo]);
+  assert.throws(
+    () => workspace.resolveRemoteHead({ repoUrl: 'http://127.0.0.1:9/none.git', authHeader: 'Authorization: Basic c2VjcmV0', ref: 'main', cwd: repo }),
+    (error) => !/c2VjcmV0/.test(String(error.message) + String(error.stderr || '')) && /\[redacted\]|could not be resolved|Connection refused|unable to access/i.test(error.message)
+  );
+  fs.rmSync(repo, { recursive: true, force: true });
+});
+
 test('control plane routes publication and pull requests by git host and keeps git available in the image', () => {
   assert.match(controlPlane, /const builderGitHost = process\.env\.BUILDER_GIT_HOST \|\| \(githubToken && githubOwner && githubRepo \? 'github' : 'gitea'\)/);
   // Both hosts publish from a real clone with a per-invocation auth header; nothing is stored in .git/config.

@@ -59,6 +59,8 @@ jobs:
           fi
           echo "Bridging $(printf '%s\n' "$branches" | wc -l) branch(es)."
           main_sha="$(git rev-parse origin/main)"
+          git config user.name "Bob Builder"
+          git config user.email "bob-builder@fieldcompliance.local"
           while IFS= read -r branch; do
             [ -n "$branch" ] || continue
             case "$branch" in bob/job-*) ;; *) echo "skipping unexpected ref $branch"; continue;; esac
@@ -68,14 +70,29 @@ jobs:
               echo "::warning::$branch shares no history with main; skipped"
               continue
             fi
-            if [ "$(git ls-remote origin "refs/heads/$branch" | cut -f1)" != "$sha" ]; then
-              git push origin "$sha:refs/heads/$branch"
-              echo "pushed $branch @ ${sha:0:10}"
+            # The workflow token may not push commits whose workflow files differ from
+            # main, and a Builder branch is pinned to an older main. Replay Bob's
+            # commits onto the current main so reviewers see an up-to-date branch;
+            # the verified original stays on Gitea and is cited in the PR body.
+            git checkout -q -B "bridge-tmp" "$sha"
+            if ! git rebase -q "$main_sha" >/dev/null 2>&1; then
+              git rebase --abort || true
+              echo "::warning::$branch does not replay cleanly onto main; review it on Gitea"
+              continue
+            fi
+            rebased="$(git rev-parse HEAD)"
+            if [ -n "$(git diff --name-only "$main_sha" "$rebased" -- .github/workflows)" ]; then
+              echo "::warning::$branch changes workflow files (protected path); skipped"
+              continue
+            fi
+            if [ "$(git ls-remote origin "refs/heads/$branch" | cut -f1)" != "$rebased" ]; then
+              git push --force-with-lease="refs/heads/$branch" origin "$rebased:refs/heads/$branch"
+              echo "pushed $branch @ ${rebased:0:10} (verified original ${sha:0:10})"
             fi
             existing="$(gh pr list --repo "$REPO" --head "$branch" --state all --json number --jq 'length')"
             if [ "$existing" = "0" ]; then
               title="$(git log -1 --format=%s "$sha" | cut -c1-200)"
-              body="$(printf '## Bob Builder review\n\nVerified Builder branch `%s` at `%s`, published from the VPS via the Gitea mirror.\n\nThis pull request is for human review only. It does not authorize a merge or deployment.\n\nJob record: builder_jobs where workspace_branch = `%s`.' "$branch" "$sha" "$branch")"
+              body="$(printf '## Bob Builder review\n\nVerified Builder branch `%s`, published from the VPS via the Gitea mirror.\n\n- Verified head (Gitea): `%s`\n- Replayed onto main `%s` for review: `%s`\n\nThis pull request is for human review only. It does not authorize a merge or deployment.\n\nJob record: builder_jobs where workspace_branch = `%s`.' "$branch" "$sha" "${main_sha:0:10}" "$rebased" "$branch")"
               if gh pr create --repo "$REPO" --draft --base main --head "$branch" --title "Bob Builder: $title" --body "$body"; then
                 echo "opened draft PR for $branch"
               else

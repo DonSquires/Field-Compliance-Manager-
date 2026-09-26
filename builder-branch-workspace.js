@@ -8,8 +8,20 @@ const BRANCH_PREFIX = 'bob/job-';
 const BUILDER_NAME = 'Bob Builder';
 const BUILDER_EMAIL = 'bob-builder@fieldcompliance.local';
 
+function redactGitError(message) {
+  return String(message || '').replace(/Authorization:\s*(Basic|Bearer|token)\s+\S+/gi, 'Authorization: [redacted]').replace(/https?:\/\/[^\s/@]+:[^\s/@]+@/gi, 'https://[redacted]@');
+}
+
 function git(directory, args, options = {}) {
-  return execFileSync('git', args, { cwd: directory, encoding: 'utf8', stdio: ['ignore', 'pipe', 'pipe'], ...options }).trim();
+  try {
+    return execFileSync('git', args, { cwd: directory, encoding: 'utf8', stdio: ['ignore', 'pipe', 'pipe'], ...options }).trim();
+  } catch (error) {
+    // execFileSync echoes the full command line (including any auth header) into the error; never let that escape.
+    const sanitized = new Error(redactGitError(error && error.message));
+    sanitized.stderr = redactGitError(error && error.stderr);
+    sanitized.status = error && error.status;
+    throw sanitized;
+  }
 }
 
 function branchNameForJob(jobId) {
@@ -120,7 +132,7 @@ function ensureSourceCheckout({ sourceDir, repoUrl, authHeader = null, sha }) {
   const authArgs = authHeader ? ['-c', `http.extraheader=${authHeader}`] : [];
   fs.mkdirSync(path.dirname(path.resolve(sourceDir)), { recursive: true, mode: 0o700 });
   if (!fs.existsSync(path.join(sourceDir, '.git'))) {
-    execFileSync('git', [...authArgs, 'clone', '--no-checkout', repoUrl, path.resolve(sourceDir)], { encoding: 'utf8', stdio: ['ignore', 'pipe', 'pipe'] });
+    git(path.dirname(path.resolve(sourceDir)), [...authArgs, 'clone', '--no-checkout', repoUrl, path.resolve(sourceDir)]);
   }
   if (git(sourceDir, ['remote', 'get-url', 'origin']) !== repoUrl) throw new Error('Builder source checkout points at an unexpected repository');
   try {
@@ -190,4 +202,4 @@ async function createGiteaPullRequest({ workspacePath, branchName, expectedHeadS
   return { branchName, head: expectedHeadSha, url: data.html_url };
 }
 
-module.exports = { BRANCH_PREFIX, BUILDER_NAME, BUILDER_EMAIL, branchNameForJob, workspacePathForBranch, createBranchWorkspace, commitVerifiedPatch, publishWorkspaceBranch, giteaRepositoryPath, createGiteaPullRequest, verifySnapshot, githubAuthHeader, githubRepoUrl, resolveRemoteHead, ensureSourceCheckout, createGitHubPullRequest };
+module.exports = { BRANCH_PREFIX, BUILDER_NAME, BUILDER_EMAIL, branchNameForJob, workspacePathForBranch, createBranchWorkspace, commitVerifiedPatch, publishWorkspaceBranch, giteaRepositoryPath, createGiteaPullRequest, verifySnapshot, githubAuthHeader, githubRepoUrl, resolveRemoteHead, ensureSourceCheckout, createGitHubPullRequest, redactGitError };
