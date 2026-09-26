@@ -4,7 +4,11 @@ const {
 } = require('./builder-model-adapter');
 const { downloadVerifiedArtifact } = require('../../../builder-frontend-handoff');
 
-const INDEPENDENT_CODE_REVIEW_PROMPT_VERSION = 'independent-code-review-v1';
+const INDEPENDENT_CODE_REVIEW_PROMPT_VERSION = 'independent-code-review-v2';
+
+// The exact shape the validator accepts; json_object mode does not enforce `required`, and the
+// first live reviewer (gpt-5.4-mini, job 3a4a2d06) omitted the two list fields and failed the job.
+const REVIEW_OUTPUT_CONTRACT = 'Return exactly this JSON object and nothing else: {"verdict": "passed" | "blocked", "summary": string, "findings": [{"severity": "critical" | "high" | "medium" | "low", "file": string, "message": string}], "test_gaps": [string], "residual_risks": [string]}. Use empty arrays when there is nothing to report. "blocked" requires at least one critical or high finding; "passed" requires none.';
 
 function artifactList(value) {
   return Array.isArray(value) ? value : value ? [value] : [];
@@ -20,7 +24,10 @@ function parseIndependentCodeReview(content) {
   }
   if (!['passed', 'blocked'].includes(report.verdict)) throw new Error('independent code review verdict is invalid');
   if (typeof report.summary !== 'string' || !report.summary.trim()) throw new Error('independent code review summary is required');
-  for (const key of ['findings', 'test_gaps', 'residual_risks']) {
+  if (!Array.isArray(report.findings)) throw new Error('findings must be an array');
+  // An omitted list means "nothing to report"; a present non-array is still a contract violation.
+  for (const key of ['test_gaps', 'residual_risks']) {
+    if (report[key] === undefined || report[key] === null) report[key] = [];
     if (!Array.isArray(report[key])) throw new Error(`${key} must be an array`);
   }
   for (const finding of report.findings) {
@@ -121,6 +128,13 @@ async function runIndependentCodeReview({
     await abortReview(supabase, job.id, step.id, `Independent review evidence unavailable: ${message}`.slice(0, 500));
     return { ok: false, status: 409, error: message, review: null };
   }
+  const systemPrompt = [
+    'You are an independent coding AI reviewer for Field Compliance Manager.',
+    'Review correctness, regressions, tenant isolation, authorization assumptions, data exposure, and missing tests.',
+    'You can recommend passed or blocked. You have no approval, merge, deployment, or code-modification authority.',
+    'Use only the verified patch, manifest, build logs, and security report.',
+    REVIEW_OUTPUT_CONTRACT
+  ].join(' ');
   const modelRequest = buildModelRunRequest({
     organizationId: job.organization_id,
     jobId: job.id,
@@ -129,17 +143,25 @@ async function runIndependentCodeReview({
     workloadKind: 'independent_code_review',
     promptVersion: INDEPENDENT_CODE_REVIEW_PROMPT_VERSION,
     modelName: reviewerModelName,
-    systemPrompt: [
-      'You are an independent coding AI reviewer for Field Compliance Manager.',
-      'Review correctness, regressions, tenant isolation, authorization assumptions, data exposure, and missing tests.',
-      'You can recommend passed or blocked. You have no approval, merge, deployment, or code-modification authority.',
-      'Use only the verified patch, manifest, build logs, and security report. Return JSON only.'
-    ].join(' '),
+    systemPrompt,
     userPrompt: JSON.stringify(evidence),
     inputArtifactIds: artifactIds,
     outputSchema: { type: 'object', required: ['verdict', 'summary', 'findings', 'test_gaps', 'residual_risks'] }
   });
-  const result = await executeModelRun({ supabase, gateway, modelRequest, validateOutput: parseIndependentCodeReview });
+  let result = await executeModelRun({ supabase, gateway, modelRequest, validateOutput: parseIndependentCodeReview });
+  if (!result.ok && result.status === 422) {
+    // One repair turn: the reviewer sees the validator's reason and the contract again. A shape slip
+    // must not fail a job that has passed every independent worker.
+    const repairRequest = {
+      ...modelRequest,
+      idempotency_key: `${modelRequest.idempotency_key}::repair`,
+      request: {
+        ...modelRequest.request,
+        system_prompt: `${systemPrompt} Your previous reply was rejected: ${String(result.error || 'invalid output').slice(0, 300)}. Reply again with the exact JSON shape.`
+      }
+    };
+    result = await executeModelRun({ supabase, gateway, modelRequest: repairRequest, validateOutput: parseIndependentCodeReview });
+  }
   if (!result.ok) {
     await abortReview(supabase, job.id, step.id, result.error || 'Independent reviewer failed');
     return { ...result, review: null };
