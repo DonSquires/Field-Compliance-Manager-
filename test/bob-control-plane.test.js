@@ -31,6 +31,10 @@ test.before(async () => {
     cwd: root,
     env: {
       ...process.env,
+      // Hermetic: the developer's live Supabase env must not leak into the unit server
+      // (it made /health read the live laptop registry once the laptop had registered).
+      SUPABASE_URL: '',
+      SUPABASE_SERVICE_ROLE_KEY: '',
       PORT: String(port),
       BOB_ADMIN_TOKEN: adminToken,
       BOB_RUNNER_TOKEN: runnerToken,

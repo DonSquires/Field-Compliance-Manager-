@@ -379,3 +379,52 @@ test('path policy classifies evidential work (owner ruling 2026-09-26: human app
   assert.deepEqual(evidentialMentions('Symptom: `supabase/functions/generate-parking-notice/index.ts` prints the wrong plate (see apps/web/src/pages/ParkingOversightPage.tsx). Unrelated: services/fcm-api/src/bob/plan.js.'), ['apps/web/src/pages/ParkingOversightPage.tsx', 'supabase/functions/generate-parking-notice/index.ts']);
   assert.deepEqual(evidentialMentions('Make Bob accept "go for it" in services/fcm-api/src/bob/verify.js'), []);
 });
+
+// Lesson from job 1021dbaa (2026-09-26): gpt-6-sol did 28 turns of good reading, then burned
+// the remaining 12 on unified-diff hunks that would not apply, three attempts in a row.
+test('replace_in_file edits by exact text, refuses ambiguity, hints at whitespace misses, and respects policy', () => {
+  const repo = makeRepo();
+  const workspaceRoot = path.join(repo.root, 'workspaces');
+  const { createBranchWorkspace } = require('../builder-branch-workspace');
+  const ws = createBranchWorkspace({ sourceDir: repo.source, workspaceRoot, jobId: 'd00dd00dd00dd00dd00dd00d', targetSha: repo.sha });
+  const tools = createTools({ workspacePath: ws.workspacePath, repoRoot: repo.source, lane: 'backend', supabase: null, limits: DEFAULT_LIMITS, log() {} });
+  const before = fs.readFileSync(path.join(ws.workspacePath, 'lib/sum.js'), 'utf8');
+  assert.match(before, /a - b/);
+  const ok = tools.replace_in_file({ path: 'lib/sum.js', old_text: 'a - b', new_text: 'a + b' });
+  assert.equal(ok.replaced, 1);
+  assert.match(fs.readFileSync(path.join(ws.workspacePath, 'lib/sum.js'), 'utf8'), /a \+ b/);
+  assert.deepEqual(tools.__changedFiles(), ['lib/sum.js']);
+  assert.match(tools.replace_in_file({ path: 'lib/sum.js', old_text: 'not here at all', new_text: 'x' }).error, /old_text not found/);
+  assert.match(tools.replace_in_file({ path: 'lib/sum.js', old_text: 'a  +  b', new_text: 'x' }).error, /different whitespace/);
+  fs.writeFileSync(path.join(ws.workspacePath, 'lib/sum.js'), 'const x = 1;\nconst x = 1;\n');
+  assert.match(tools.replace_in_file({ path: 'lib/sum.js', old_text: 'const x = 1;', new_text: 'const y = 2;' }).error, /occurs 2 times/);
+  assert.equal(tools.replace_in_file({ path: 'lib/sum.js', old_text: 'const x = 1;', new_text: 'const y = 2;', all: true }).replaced, 2);
+  assert.match(tools.replace_in_file({ path: 'package.json', old_text: '{', new_text: '[' }).error, /refused/);
+  assert.match(tools.replace_in_file({ path: 'lib/missing.js', old_text: 'a', new_text: 'b' }).error, /not found: lib\/missing\.js/);
+});
+
+test('the engineer paces its budget and gets one grace turn to finish when edits exist at the limit', async () => {
+  const repo = makeRepo();
+  const workspaceRoot = path.join(repo.root, 'workspaces');
+  const job = { id: 'feedfacefeedfacefeedfacefeedface', organization_id: '00000000-0000-0000-0000-000000000001', target_sha: repo.sha, title: 't', task_description: 'd' };
+  const seen = [];
+  const turns = [
+    { tool: 'read_file', args: { path: 'lib/sum.js' } },
+    { tool: 'replace_in_file', args: { path: 'lib/sum.js', old_text: 'a - b', new_text: 'a + b' } },
+    { tool: 'run', args: { command: 'node --test test/sum.test.js' } },
+    { tool: 'read_file', args: { path: 'lib/sum.js' } }, // dawdling: the budget runs out here
+    { tool: 'finish', args: { summary: 'sum() used subtraction; changed to addition. Verified with node --test.', tests: ['node --test test/sum.test.js'], rollback_notes: ['Revert.'] } },
+  ];
+  let i = 0;
+  const callModel = async ({ modelRequest }) => {
+    seen.push(modelRequest.request.messages.at(-1).content);
+    const t = turns[Math.min(i, turns.length - 1)]; i++;
+    return { ok: true, data: { content: JSON.stringify(t), model: 'm', usage: {} } };
+  };
+  const result = await runAgenticEngineer({ supabase: null, gateway: { gatewayUrl: 'x', apiToken: 'y' }, job, step: { id: 's' }, lane: 'backend', sourceDir: repo.source, workspaceRoot, repoRoot: repo.source, callModel, limits: { ...DEFAULT_LIMITS, maxTurns: 4 } });
+  assert.equal(result.ok, true, result.error);
+  assert.equal(result.turns, 4, 'the loop itself stopped at the budget');
+  assert.match(result.proposal.summary, /changed to addition/);
+  assert.ok(seen.some((m) => /BUDGET: .*left/.test(m)), 'a budget note was injected before the end');
+  assert.ok(seen.at(-1).includes('FINAL TURN'), 'the grace turn asked for finish only');
+});

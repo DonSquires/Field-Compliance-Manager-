@@ -24,9 +24,9 @@ const { isProtectedPath, laneAllows, protectedReason, isMigrationPath, normalize
 const { buildModelRunRequest, callModelGateway, persistModelArtifact, fetchModelHealth, selectProviders, providerRequest } = require('./supabase/functions/_shared/builder-model-adapter');
 const { collectRepositoryContext } = require('./supabase/functions/_shared/builder-repository-context');
 
-const PROMPT_VERSION = 'agentic-engineer-v1';
+const PROMPT_VERSION = 'agentic-engineer-v2';
 const DEFAULT_LIMITS = Object.freeze({
-  maxTurns: Math.max(4, Number(process.env.BOB_BUILDER_AGENT_TURNS || 40)),
+  maxTurns: Math.max(4, Number(process.env.BOB_BUILDER_AGENT_TURNS || 60)),
   wallBudgetMs: Math.max(5 * 60_000, Number(process.env.BOB_BUILDER_AGENT_BUDGET_MS || 45 * 60_000)),
   readCapChars: 60_000,
   searchCapLines: 200,
@@ -117,7 +117,7 @@ function systemPrompt({ lane, limits }) {
     'You are Bob Builder, the engineering half of Bob — the Field Compliance Manager platform\'s own agent. You work the way a senior coding agent works, at full effort:',
     '1. UNDERSTAND before editing: read AGENTS.md / the canon (read_canon), your own notes (read_notes), and the code paths involved (search, read_file, list_dir, git_log). Trace the whole seam before changing part of it.',
     '2. PLAN the smallest correct change that fixes the root cause. Prefer editing existing files over adding new ones. Do not add features, refactors, comments, or "improvements" beyond the task.',
-    '3. IMPLEMENT with write_file / apply_patch inside your worktree. Keep existing conventions. Never invent schema, tables, or behaviour absent from the evidence — verify with search/read_file.',
+    '3. IMPLEMENT inside your worktree: replace_in_file for edits to existing files (exact old text -> new text; no line counting), write_file for new files or full rewrites, apply_patch only if you already hold a correct unified diff. Keep existing conventions. Never invent schema, tables, or behaviour absent from the evidence — verify with search/read_file.',
     '4. VERIFY: run the relevant tests (run "node --test test/<file>.test.js"), node --check on changed files, and read git diff. If a test fails, read the failure, fix the cause, and run again. Add or update a test when the change is testable at this layer.',
     '5. FINISH with a truthful summary. Truth Protocol: state what you verified, what you inferred, and what you could not check. Never claim a merge, deployment, migration application, or live write — none happen here; a human reviews the draft PR.',
     '',
@@ -131,7 +131,8 @@ function systemPrompt({ lane, limits }) {
     '- git_log {path?, limit?}               recent commits (optionally for a path)',
     '- git_diff {}                            your uncommitted changes so far',
     '- write_file {path, content}             create or overwrite a file (full content)',
-    '- apply_patch {diff}                     apply a unified diff (git apply)',
+    '- replace_in_file {path, old_text, new_text, all?}   PREFERRED EDIT: replace one exact occurrence of old_text (copy it verbatim from read_file, several lines is fine) with new_text; all=true replaces every occurrence. Fails safely when the text is missing or ambiguous.',
+    '- apply_patch {diff}                     apply a unified diff (git apply); hunk counts must be exact — use replace_in_file instead when unsure',
     '- delete_file {path}                     delete a file',
     `- run {command}                          allowed: node --test [test files], node --check <file>, git status/diff/log/show/blame (timeout ${Math.round(limits.runTimeoutMs / 60000)} min)`,
     '- read_canon {}                          AGENTS.md + docs/canon/README.md + docs/canon/BOB_DOCTRINE.md (bounded)',
@@ -139,7 +140,7 @@ function systemPrompt({ lane, limits }) {
     '- write_note {text}                      leave a durable lesson for future jobs (short, factual, no secrets)',
     '- finish {summary, tests, rollback_notes, follow_ups?, tests_not_run_reason?}   hand over: your worktree diff becomes the reviewed patch. A change that touches tests is refused unless a `node --test` run passed in this session (or tests_not_run_reason says plainly why none could).',
     '',
-    `Budget: ${limits.maxTurns} tool turns / ${Math.round(limits.wallBudgetMs / 60000)} minutes. Do not repeat identical calls. If the task is impossible, unsafe, or requires a protected path, finish with an empty change set and explain plainly in the summary what a human must do.`,
+    `Budget: ${limits.maxTurns} tool turns / ${Math.round(limits.wallBudgetMs / 60000)} minutes. Pace it: spend at most about a third of the turns reading before you start editing; you will be told when the budget is running low. Do not repeat identical calls. If the task is impossible, unsafe, or requires a protected path, finish with an empty change set and explain plainly in the summary what a human must do.`,
   ].join('\n');
 }
 
@@ -286,6 +287,29 @@ function createTools({ workspacePath, repoRoot, lane, supabase, limits, log }) {
       fs.mkdirSync(path.dirname(absolute), { recursive: true });
       fs.writeFileSync(absolute, content);
       return { path: normalized, bytes: Buffer.byteLength(content) };
+    },
+    // Exact-text replacement: the edit models get right far more often than unified-diff hunks
+    // (job 1021dbaa burned 3 x 40 turns on "corrupt patch" / "does not apply").
+    replace_in_file({ path: file, old_text, new_text, all = false }) {
+      const { normalized, absolute } = resolveInside(workspacePath, file);
+      const violation = policyCheck(normalized);
+      if (violation) return { error: `refused: ${violation}` };
+      if (typeof old_text !== 'string' || !old_text.length) return { error: 'old_text is required (copy it verbatim from read_file)' };
+      if (typeof new_text !== 'string') return { error: 'new_text must be a string (use "" to delete the text)' };
+      if (isMigrationPath(normalized)) return { error: `refused: ${normalized} is a migration; migrations may only be added as new files` };
+      if (!fs.existsSync(absolute)) return { error: `not found: ${normalized}` };
+      const current = fs.readFileSync(absolute, 'utf8');
+      const occurrences = current.split(old_text).length - 1;
+      if (occurrences === 0) {
+        // A near miss is almost always whitespace; say so instead of making the model guess.
+        const collapsed = (s) => s.replace(/\s+/g, ' ').trim();
+        const hint = collapsed(current).includes(collapsed(old_text)) ? ' (the text exists with different whitespace/indentation - copy it exactly as read_file shows it)' : '';
+        return { error: `old_text not found in ${normalized}${hint}` };
+      }
+      if (occurrences > 1 && !all) return { error: `old_text occurs ${occurrences} times in ${normalized}; include more surrounding lines to make it unique, or pass all=true` };
+      const updated = all ? current.split(old_text).join(new_text) : current.replace(old_text, () => new_text);
+      fs.writeFileSync(absolute, updated);
+      return { path: normalized, replaced: all ? occurrences : 1, bytes: Buffer.byteLength(updated) };
     },
     apply_patch({ diff }) {
       if (typeof diff !== 'string' || !diff.trim()) return { error: 'diff is required' };
@@ -581,7 +605,32 @@ async function runAgenticEngineer({
       result = { error: `unknown tool ${call.tool}` };
     }
     log({ turn: turns, result: typeof result?.error === 'string' ? { error: result.error.slice(0, 500) } : { ok: true } });
-    messages.push({ role: 'user', content: JSON.stringify({ tool_result: result }) });
+    const remaining = limits.maxTurns - turns;
+    const budgetNote = remaining === Math.floor(limits.maxTurns / 2)
+      ? `BUDGET: half your turns are used (${remaining} left). If you have not started editing, start now.`
+      : remaining > 0 && remaining <= 6
+        ? `BUDGET: ${remaining} turn${remaining === 1 ? '' : 's'} left. Run your test and call finish before they run out; an unfinished worktree is discarded.`
+        : null;
+    messages.push({ role: 'user', content: JSON.stringify(budgetNote ? { tool_result: result, budget: budgetNote } : { tool_result: result }) });
+  }
+
+  // Grace turn: edits exist but the budget ran out mid-flight. One more call, finish only.
+  if (!outcome && turns >= limits.maxTurns && tools.__changedFiles().length) {
+    const base = activeRequest();
+    const isOpenAI = candidates[active].provider === 'openai';
+    messages.push({ role: 'user', content: JSON.stringify({ budget: 'FINAL TURN: the turn budget is used up. Reply with finish now (summary, tests actually run, rollback_notes; tests_not_run_reason if none ran) or this attempt is discarded.' }) });
+    const request = { ...base, idempotency_key: `${base.idempotency_key}::turn-final`, request: { ...base.request, messages: compactMessages(messages), ...(isOpenAI ? { reasoning_effort: 'low' } : {}), max_output_tokens: 4000 } };
+    const response = await callModel({ ...gateway, modelRequest: request, timeoutMs: limits.turnTimeoutMs });
+    const call = response.ok ? parseToolCall(String(response.data?.content ?? '')) : null;
+    if (call && call.tool === 'finish') {
+      const args = call.args && typeof call.args === 'object' ? call.args : {};
+      log({ turn: turns + 1, grace_finish: true, tool: 'finish' });
+      const built = buildProposal({ workspacePath, lane, tools, args });
+      if (built.error) log({ turn: turns + 1, finish_refused: built.error });
+      else outcome = { ok: true, proposal: built.proposal, model: response.data?.model };
+    } else {
+      log({ turn: turns + 1, grace_finish: false, error: response.ok ? 'no finish call' : `model unavailable: ${response.error}` });
+    }
   }
 
   if (!outcome) outcome = { ok: false, error: now() - started >= limits.wallBudgetMs ? 'time budget exhausted' : 'turn budget exhausted' };
