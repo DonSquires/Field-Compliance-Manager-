@@ -37,12 +37,17 @@ param(
   [switch]$BiggerModels,
   [switch]$SkipOllama,
   [string]$VpsTailscaleIp = $(if ($env:BOB_VPS_TAILSCALE_IP) { $env:BOB_VPS_TAILSCALE_IP } else { '100.85.95.104' }),
-  [string]$BobPublicKeyPath = (Join-Path (Split-Path -Parent (Split-Path -Parent $PSScriptRoot)) 'deploy\bob-laptop\bob_laptop_id_ed25519.pub'),
+  # Resolved below: Windows PowerShell 5.1 has no $PSScriptRoot while param() defaults are evaluated.
+  [string]$BobPublicKeyPath = '',
   [string[]]$Models = @('qwen2.5:7b', 'qwen2.5-coder:7b')
 )
 
 $ErrorActionPreference = 'Stop'
-$RepoRoot = Split-Path -Parent (Split-Path -Parent $PSScriptRoot)
+# Older .NET defaults on Windows PowerShell 5.1 may not offer TLS 1.2 to Supabase.
+try { [Net.ServicePointManager]::SecurityProtocol = [Net.ServicePointManager]::SecurityProtocol -bor [Net.SecurityProtocolType]::Tls12 } catch {}
+$ScriptDir = if ($PSScriptRoot) { $PSScriptRoot } else { Split-Path -Parent $MyInvocation.MyCommand.Path }
+$RepoRoot = Split-Path -Parent (Split-Path -Parent $ScriptDir)
+if (-not $BobPublicKeyPath) { $BobPublicKeyPath = Join-Path $RepoRoot 'deploy\bob-laptop\bob_laptop_id_ed25519.pub' }
 $ScriptVersion = '2026-09-26'
 function Write-Log([string]$Message) { Write-Host ("{0:HH:mm:ss} {1}" -f (Get-Date), $Message) }
 function Test-Admin { ([Security.Principal.WindowsPrincipal][Security.Principal.WindowsIdentity]::GetCurrent()).IsInRole([Security.Principal.WindowsBuiltInRole]::Administrator) }
@@ -144,7 +149,7 @@ if ($Allow) {
 if (-not $SkipOllama) {
   if (-not (Get-Command ollama -ErrorAction SilentlyContinue)) {
     Write-Log 'Ollama is not installed. Installing with winget (https://ollama.com/download otherwise)...'
-    winget install --id Ollama.Ollama -e --accept-source-agreements --accept-package-agreements | Out-Null
+    Invoke-Native { winget install --id Ollama.Ollama -e --accept-source-agreements --accept-package-agreements } | Out-Null
     $env:Path = [Environment]::GetEnvironmentVariable('Path', 'Machine') + ';' + [Environment]::GetEnvironmentVariable('Path', 'User')
   }
   $wanted = @{ OLLAMA_HOST = '0.0.0.0:11434'; OLLAMA_KEEP_ALIVE = '2h'; OLLAMA_CONTEXT_LENGTH = '32768'; OLLAMA_MAX_LOADED_MODELS = '2' }
@@ -167,7 +172,7 @@ if (-not $SkipOllama) {
   if ($BiggerModels) { $Models += @('qwen2.5-coder:14b', 'qwen3-coder:30b') }
   $have = @((Get-OllamaTags).models | ForEach-Object { $_.name })
   foreach ($model in $Models) {
-    if ($have -contains $model) { Write-Log "Model present: $model" } else { Write-Log "Pulling $model (one-off download)..."; & ollama pull $model }
+    if ($have -contains $model) { Write-Log "Model present: $model" } else { Write-Log "Pulling $model (one-off download)..."; Invoke-Native { & ollama pull $model } }
   }
   $rule = 'Bob Ollama (Tailscale)'
   Get-NetFirewallRule -DisplayName $rule -ErrorAction SilentlyContinue | Remove-NetFirewallRule
@@ -198,7 +203,7 @@ foreach ($authorized in @($adminKeys, (Join-Path $sshDir 'authorized_keys'))) {
   $existing = if (Test-Path $authorized) { Get-Content $authorized } else { @() }
   if (-not ($existing | Where-Object { $_ -like "*$keyBody*" })) { Add-Content -Path $authorized -Value $bobKey -Encoding ascii; Write-Log "Authorised Bob's key in $authorized" } else { Write-Log "Bob's key already authorised in $authorized" }
 }
-& icacls $adminKeys /inheritance:r /grant 'Administrators:F' /grant 'SYSTEM:F' | Out-Null
+Invoke-Native { & icacls $adminKeys /inheritance:r /grant 'Administrators:F' /grant 'SYSTEM:F' } | Out-Null
 
 $rule = 'Bob SSH (Tailscale, VPS only)'
 Get-NetFirewallRule -DisplayName $rule -ErrorAction SilentlyContinue | Remove-NetFirewallRule
