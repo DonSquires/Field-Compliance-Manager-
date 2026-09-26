@@ -4,6 +4,22 @@ The VPS is the default CPU runner for the full Playwright human suite. RunPod
 remains available as scale-to-zero overflow capacity and for future GPU visual
 analysis.
 
+## Shipping a release (control plane / fcm-api / worker image)
+
+From a clean checkout that is at `origin/main`:
+
+```bash
+scripts/bob-vps-deploy.sh control-plane          # or: fcm-api, worker-image, or several
+```
+
+It bundles `main` on top of the newest release the VPS already has, adds a
+release worktree under `/srv/fcm/releases/<sha>`, verifies the worktree is at
+the pushed commit **before** building anything, rebuilds only the named
+services, checks their health (and that the health shape is the current one),
+and prunes releases older than the newest four. Never build from
+`/root/field-compliance-manager` directly: it lags and once shipped a stale
+control plane when a hand-typed deploy chain fell through (2026-09-26).
+
 ## Configure
 
 ```bash
