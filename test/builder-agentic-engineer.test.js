@@ -351,6 +351,11 @@ test('buildProposal enforces additive-only migrations and the lane validator', (
   const ok = buildProposal({ workspacePath: ws.workspacePath, lane: 'backend', tools, args: { summary: 'Fix sum to add instead of subtract; verified with the unit test.', tests: ['node --test test/sum.test.js'] } });
   assert.deepEqual(ok.proposal.changed_files, ['lib/sum.js']);
   assert.deepEqual(ok.proposal.database_migrations, []);
+  // A lane-validator rejection is a tool result the model can act on, not an exception (live job 1021dbaa
+  // crashed the whole run on 'destructive SQL is not allowed' and the step never counted the attempt).
+  fs.writeFileSync(path.join(ws.workspacePath, 'lib', 'sum.js'), "'use strict';\n// cleanup: DROP TABLE totals\nmodule.exports = { sum: (a, b) => a + b };\n");
+  const refused = buildProposal({ workspacePath: ws.workspacePath, lane: 'backend', tools, args: { summary: 'Fix sum to add instead of subtract; verified with the unit test.', tests: [] } });
+  assert.match(refused.error, /finish refused by the backend lane validator: destructive SQL is not allowed/);
   fs.rmSync(repo.root, { recursive: true, force: true });
 });
 

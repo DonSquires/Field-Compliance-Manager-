@@ -436,12 +436,18 @@ function buildProposal({ workspacePath, lane, tools, args }) {
     prompt_version: PROMPT_VERSION,
   };
   // The lane validators are the same ones the independent handoff applies; fail here, not there.
-  if (lane === 'backend') {
-    const { parseBackendProposal } = require('./supabase/functions/_shared/builder-backend-engineer');
-    parseBackendProposal(JSON.stringify(proposal));
-  } else {
-    const { validatePatchText } = require('./frontend-worker');
-    validatePatchText(patch);
+  // A rejection is a tool result the model can act on (live job 1021dbaa: 'destructive SQL is not
+  // allowed' escaped as an exception, crashed the run, and left the step's attempt count untouched).
+  try {
+    if (lane === 'backend') {
+      const { parseBackendProposal } = require('./supabase/functions/_shared/builder-backend-engineer');
+      parseBackendProposal(JSON.stringify(proposal));
+    } else {
+      const { validatePatchText } = require('./frontend-worker');
+      validatePatchText(patch);
+    }
+  } catch (error) {
+    return { error: `finish refused by the ${lane} lane validator: ${clip(redactGitError(error && error.message), 800)}. Fix the change (or drop the offending text) and finish again.` };
   }
   return { proposal };
 }

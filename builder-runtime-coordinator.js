@@ -142,6 +142,8 @@ function agenticGenerator(lane, context, extra = {}) {
       uxArtifact ? loadArtifactJson(supabase, uxArtifact) : Promise.resolve(null),
       failureArtifact ? loadArtifactJson(supabase, failureArtifact) : Promise.resolve(null)
     ]);
+    // An engineer crash is a failed generation (counted against the step's attempt ceiling and recorded
+    // with its reason), not a failed run that leaves the step looking untouched.
     return runAgenticEngineer({
       supabase, gateway, job, step, lane,
       sourceDir: context.gitSourceDir || context.sourceDir,
@@ -152,7 +154,7 @@ function agenticGenerator(lane, context, extra = {}) {
       startAfterProvider,
       previousFailure: previousFailure ? { failure_evidence: previousFailure, failed_patch_artifact_id: failedPatchArtifact?.id ?? null } : null,
       inputArtifactIds: [productArtifact?.id, uxArtifact?.id, failureArtifact?.id].filter(Boolean)
-    });
+    }).catch((error) => ({ ok: false, error: `engineer crashed: ${String(error instanceof Error ? error.message : error).slice(0, 500)}` }));
   };
 }
 
