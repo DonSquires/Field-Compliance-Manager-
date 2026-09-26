@@ -50,6 +50,7 @@ jobs:
         env:
           GH_TOKEN: ${{ github.token }}
           REPO: ${{ github.repository }}
+          GITEA_MIRROR_TOKEN: ${{ secrets.GITEA_MIRROR_TOKEN }}
         run: |
           set -euo pipefail
           branches="$(git for-each-ref --format='%(refname:strip=3)' 'refs/remotes/gitea/bob/job-*' || true)"
@@ -58,6 +59,10 @@ jobs:
             exit 0
           fi
           echo "Bridging $(printf '%s\n' "$branches" | wc -l) branch(es)."
+          # The autopilot writes an explanatory pull request on Gitea (what changed, how it was verified);
+          # reuse it so reviewers on GitHub read the same account. Falls back to a minimal body.
+          gitea_prs="$(curl -sf -H "Authorization: token $GITEA_MIRROR_TOKEN" 'https://git.fcmanager.co.nz/api/v1/repos/Iron-Eagle-Security-Ltd/field-compliance-manager/pulls?state=all&limit=50' || echo '[]')"
+          pr_failures=0
           main_sha="$(git rev-parse origin/main)"
           git config user.name "Bob Builder"
           git config user.email "bob-builder@fieldcompliance.local"
@@ -91,13 +96,20 @@ jobs:
             fi
             existing="$(gh pr list --repo "$REPO" --head "$branch" --state all --json number --jq 'length')"
             if [ "$existing" = "0" ]; then
-              title="$(git log -1 --format=%s "$sha" | cut -c1-200)"
-              body="$(printf '## Bob Builder review\n\nVerified Builder branch `%s`, published from the VPS via the Gitea mirror.\n\n- Verified head (Gitea): `%s`\n- Replayed onto main `%s` for review: `%s`\n\nThis pull request is for human review only. It does not authorize a merge or deployment.\n\nJob record: builder_jobs where workspace_branch = `%s`.' "$branch" "$sha" "${main_sha:0:10}" "$rebased" "$branch")"
-              if gh pr create --repo "$REPO" --draft --base main --head "$branch" --title "Bob Builder: $title" --body "$body"; then
+              gitea_title="$(printf '%s' "$gitea_prs" | jq -r --arg b "$branch" '[.[] | select(.head.ref == $b)] | sort_by(.number) | last | .title // empty' 2>/dev/null || true)"
+              gitea_body="$(printf '%s' "$gitea_prs" | jq -r --arg b "$branch" '[.[] | select(.head.ref == $b)] | sort_by(.number) | last | .body // empty' 2>/dev/null || true)"
+              title="${gitea_title:-Bob Builder: $(git log -1 --format=%s "$sha" | cut -c1-200)}"
+              provenance="$(printf '\n\n---\n**Bridge provenance.** Verified head on Gitea: `%s`; replayed onto main `%s` as `%s`. Draft for human review only; it does not authorize a merge or deployment.' "$sha" "${main_sha:0:10}" "$rebased")"
+              body="${gitea_body:-$(printf '## Bob Builder review\n\nVerified Builder branch `%s`, published from the VPS via the Gitea mirror.\n\nJob record: builder_jobs where workspace_branch = `%s`.' "$branch" "$branch")}${provenance}"
+              if gh pr create --repo "$REPO" --draft --base main --head "$branch" --title "$(printf '%s' "$title" | cut -c1-200)" --body "$body"; then
                 echo "opened draft PR for $branch"
               else
                 echo "::error::Could not open a pull request for $branch. If the message says GitHub Actions is not permitted to create pull requests, enable 'Allow GitHub Actions to create and approve pull requests' under Settings > Actions > General."
-                exit 1
+                pr_failures=$((pr_failures + 1))
               fi
             fi
           done <<< "$branches"
+          if [ "$pr_failures" -gt 0 ]; then
+            echo "::error::$pr_failures branch(es) are pushed to GitHub but have no pull request yet."
+            exit 1
+          fi
