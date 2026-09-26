@@ -439,3 +439,17 @@ test('a tight deadline skips the in-house planner and shortens the turn; the pro
   const prompt = buildPlannerPrompt({ message: 'x', tools: [], taskState: { goal: 'g', steps_taken: [], time_left_s: 27 } });
   assert.match(prompt, /TIME LEFT IN THIS TURN: about 27 s\. If the results below already answer the question \(a not_found IS an answer\), select action=answer NOW/);
 });
+
+test('a code request answered with a procedure and no repository lookup is blocked for repair', () => {
+  const tools = [{ tool: 'repo_search' }, { tool: 'query_records' }];
+  const procedure = { action: 'answer', reply: 'The error indicates a TypeError. To fix it I will follow these steps:\n1. Identify the error\n2. Fix the error\n3. Add a test\nWhat do you think about this approach?' };
+  const issues = runDeterministicChecks(procedure, { message: 'Bob, scripts/rotate-evidence-keys.mjs crashes on startup with a TypeError. Please fix it and add a test.', tools });
+  assert.ok(issues.some((i) => i.code === 'code_answer_without_evidence' && i.severity === 'block'), JSON.stringify(issues));
+  // A real answer after a repository lookup passes.
+  const grounded = { action: 'answer', reply: 'There is no scripts/rotate-evidence-keys.mjs in the build (searched main; not found). Which script did you mean?' };
+  assert.equal(runDeterministicChecks(grounded, { message: 'fix scripts/rotate-evidence-keys.mjs crash', tools, taskState: { steps_taken: [{ tool: 'repo_search', outcome: 'ok' }] } }).some((i) => i.code === 'code_answer_without_evidence'), false);
+  // Not a code request -> the rule stays out of the way.
+  assert.equal(runDeterministicChecks({ action: 'answer', reply: 'I will draft the letter first, what do you think?' }, { message: 'help me reply to the council', tools }).some((i) => i.code === 'code_answer_without_evidence'), false);
+  // No repo tool for this user (not admiral) -> no demand for evidence he cannot gather.
+  assert.equal(runDeterministicChecks(procedure, { message: 'fix scripts/x.mjs crash', tools: [{ tool: 'query_records' }] }).some((i) => i.code === 'code_answer_without_evidence'), false);
+});

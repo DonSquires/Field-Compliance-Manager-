@@ -16,6 +16,10 @@ const FALSE_COMPLETION_RE = /\b(I have|I've|I just|has been|have been|was|were) 
 const BANNED_FILLER_RE = /\b(certainly|of course|happy to help|great question|absolutely|as an ai( language model)?|i am programmed to|leverage|streamline|robust)\b/gi;
 const BLANKET_AFFIRMATIVE_RE = /^\s*(yes|yep|yeah|yes please|ok|okay|sure|correct|confirmed|agreed|go ahead|go for it|proceed|do it|all good(?: with me)?|crack on|sounds good|yes to all|yes to everything|all of (them|the above)|use your (defaults|best guess(es)?)|go with your (defaults|best guess(es)?)|you decide|whatever you recommend|as you suggest(ed)?)[\s.!]*$/i;
 const DRAFT_REQUEST_RE = /\b(draft|write|create|prepare|produce|generate|put together)\b[\s\S]{0,80}\b(job description|position description|advert(isement)?|job ad|seek ad|agreement|contract|letter|policy|sop|procedure|report|checklist|proposal|email|memo|site instruction|brief|synopsis|summary)\b/i;
+// A request about the code: names a source path, or asks to fix/debug a crash, bug, test, function…
+const CODE_REQUEST_RE = /(\b[\w./-]+\.(?:m?js|c?js|tsx?|sql|py|ps1|json|ya?ml)\b|\b(?:fix|debug|patch|repair|investigate)\b[\s\S]{0,60}\b(?:crash|bug|error|exception|typeerror|failing|test|function|script|component|migration|endpoint|edge function)\b)/i;
+// A reply that only narrates a procedure ("I will…", numbered "First…") and ends by asking for approval of the approach.
+const PROCEDURE_ONLY_RE = /\b(I will|I'll|I would|I am going to|I'm going to|first,? I)\b[\s\S]*\b(what do you think|does this approach|shall I proceed|let me know if|sound good)\b/i;
 
 function countQuestionLines(text) {
   return String(text || '').split('\n').filter((line) => /^\s*(?:\d+[.)]|[-*•])\s+.*\?\s*$/.test(line)).length;
@@ -99,6 +103,14 @@ function runDeterministicChecks(decision, input) {
     }
     if (decision.action === 'ask' && DRAFT_REQUEST_RE.test(message)) {
       issues.push({ code: 'draft_stalled_on_question', severity: 'warn', note: 'This is a drafting request. Drafting discipline: draft now using sensible NZ defaults with [TO CONFIRM: …] markers and an Assumptions list; ask ONE question only if the draft genuinely cannot be started.' });
+    }
+    // A code request answered with a procedure ("first I will identify the error… what do you
+    // think?") and no repository lookup this turn is a non-answer: the laptop planner produced
+    // exactly this for a script that does not exist (proving-series round 2, 2026-09-26).
+    const hasRepoTool = Array.isArray(input.tools) && input.tools.some((t) => t && t.tool === 'repo_search');
+    const stepsTaken = input.taskState && Array.isArray(input.taskState.steps_taken) ? input.taskState.steps_taken : [];
+    if (decision.action === 'answer' && !decision.tool && hasRepoTool && !stepsTaken.length && CODE_REQUEST_RE.test(message) && PROCEDURE_ONLY_RE.test(reply)) {
+      issues.push({ code: 'code_answer_without_evidence', severity: 'block', note: 'This is a request about the code and you have not looked at the repository this turn. Do not describe a procedure you would follow. Either select repo_search now (search for the named file/symbol; a not_found result IS the answer and must be stated plainly), or if you already know the file does not exist, say so directly.' });
     }
     const filler = reply.match(BANNED_FILLER_RE) || [];
     if (filler.length) {
