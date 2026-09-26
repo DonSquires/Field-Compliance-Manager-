@@ -1621,6 +1621,8 @@ async function callPlan(planPayload, allowFallback = true) {
     pending: planPayload.pending ?? null,
     task_state: planPayload.task_state ?? undefined,
     memory_context: planPayload.memory_context ?? undefined,
+    // Bob autopilot outcomes (Builder jobs this person asked for) to relay first.
+    completed_work: planPayload.completed_work ?? undefined,
     // Pillar A Step 2 (#136): forward structured conversation facts to the
     // planner so it can see the active slot's accumulated facts.
     conversation_facts: planPayload.conversation_facts ?? undefined,
@@ -6760,6 +6762,29 @@ serve(async (req)=>{
     // user's answer CONTINUES the stage-gate instead of cold-starting a re-ask.
     const { history, pending } = await loadHistory(admin, conversationId, 8);
     let taskLedger = await ensureTaskLedger(admin, conversationId, orgId, message);
+    // Bob autopilot outcomes for this person (Builder jobs they asked Bob to do) that have not been
+    // relayed yet. Bob leads his reply with them; they are marked reported once the plan is made.
+    let completedWork = [];
+    try {
+      const { data: autopilotJobs } = await admin
+        .from('builder_jobs')
+        .select('id, title, status, autopilot_state, autopilot_report, autopilot_updated_at, workspace_pull_request_url')
+        .eq('autopilot_requested_by', user.id)
+        .not('autopilot_report', 'is', null)
+        .is('autopilot_reported_at', null)
+        .order('autopilot_updated_at', { ascending: true })
+        .limit(5);
+      completedWork = (autopilotJobs ?? []).map(job => ({
+        job_id: job.id,
+        title: job.title,
+        state: job.autopilot_state,
+        report: job.autopilot_report?.text ?? '',
+        pull_request_url: job.autopilot_report?.pull_request_url ?? job.workspace_pull_request_url ?? null,
+        completed_at: job.autopilot_updated_at
+      }));
+    } catch (e) {
+      console.warn('[conductor][autopilot-reports] unavailable (non-fatal):', e);
+    }
     // ── PILLAR A Step 2 — load structured conversation facts (#136) ─────────
     // Read the bob_conversation_facts row for this conversation (if it exists).
     // The active slot's facts are injected as ADDITIONAL structured context into
@@ -8346,7 +8371,11 @@ serve(async (req)=>{
               target_environment: 'development',
               code_review_mode: bjReview,
               frontend_required: bjFrontend,
-              backend_required: bjBackend
+              backend_required: bjBackend,
+              // The owner's confirmation in chat is the key turn: Bob drives the job through its gates on
+              // their behalf (recorded), publishes the branch, opens the PR and reports back here.
+              autopilot: true,
+              conversation_id: conversationId ?? null
             });
             if (!created.ok || !created.data?.job?.id) {
               const bjFailure = [created.data?.error ?? created.status, created.data?.detail].filter(Boolean).map(String).join(': ');
@@ -8361,23 +8390,30 @@ serve(async (req)=>{
               };
             }
             const bjJob = created.data.job;
+            const bjAutopilot = created.data.autopilot === true;
             const started = await callFn('bob-builder-control-room', authHeader, {
               action: 'run',
               job_id: bjJob.id,
               max_actions: 8
             });
             const runNote = started.ok
-              ? 'The Builder is working now — research → implementation in an isolated worktree → tests → independent code and security review — at full reasoning effort, so this takes minutes, not seconds.'
+              ? (bjAutopilot
+                ? 'I am on it: I will work the change through in an isolated copy of the code, run the tests, have an independent reviewer and a security scan check it, and open a pull request for you to review. That takes a while (usually 10–20 minutes). I will tell you here when it is ready or if I get stuck.'
+                : 'The Builder is working now — research → implementation in an isolated worktree → tests → independent code and security review — at full reasoning effort, so this takes minutes, not seconds.')
               : `The job is created; the runner did not start automatically (${[started.data?.error ?? started.status, started.data?.detail].filter(Boolean).map(String).join(': ').slice(0, 200)}), so start it from the Builder control room.`;
             return {
-              reply: `Builder job **${bjTitle}** is open in the GitHub repository at commit \`${String(bjJob.target_sha ?? '').slice(0, 10)}\`. ${runNote} When it is ready you will get a **DRAFT pull request** to review — I will not merge or deploy it. Track it under Platform & Settings → Builder.`,
+              reply: bjAutopilot
+                ? `Started **${bjTitle}** (pinned to commit \`${String(bjJob.target_sha ?? '').slice(0, 10)}\`). ${runNote} Nothing changes in the live app until a person merges that pull request.`
+                : `Builder job **${bjTitle}** is open in the GitHub repository at commit \`${String(bjJob.target_sha ?? '').slice(0, 10)}\`. ${runNote} When it is ready you will get a **DRAFT pull request** to review — I will not merge or deploy it. Track it under Platform & Settings → Builder.`,
               meta: {
                 tool: 'create_builder_job',
                 outcome: 'ok',
                 builder_job_id: bjJob.id,
                 builder_job_status: bjJob.status ?? null,
                 target_sha: bjJob.target_sha ?? null,
-                runner_started: Boolean(started.ok)
+                runner_started: Boolean(started.ok),
+                autopilot: bjAutopilot,
+                autopilot_error: typeof created.data.autopilot_error === 'string' ? created.data.autopilot_error : undefined
               }
             };
           }
@@ -8606,9 +8642,18 @@ serve(async (req)=>{
         task: taskLedger.task,
         checkpoint: taskLedger.checkpoint,
         steps: taskLedger.steps
-      } : null
+      } : null,
+      // Bob autopilot outcomes to relay to this person before anything else (see planPrompt COMPLETED WORK).
+      completed_work: completedWork.length ? completedWork : undefined
     };
     const plan = await callPlan(planPayload);
+    if (plan.ok && completedWork.length) {
+      for (const item of completedWork) {
+        admin.rpc('builder_autopilot_mark_reported', { _job_id: item.job_id }).then(({ error }) => {
+          if (error) console.warn('[conductor][autopilot-reports] mark_reported failed:', error.message);
+        }).catch(() => {});
+      }
+    }
     if (!plan.ok) {
       const failReply = `I had trouble reasoning about that (${plan.data?.error ?? plan.status}). Try rephrasing, or upload the file again.`;
       await persist(admin, orgId, conversationId, [

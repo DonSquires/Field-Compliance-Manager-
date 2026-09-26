@@ -31,6 +31,7 @@ function readBody(body) {
     conversationFacts: b.conversation_facts && typeof b.conversation_facts === 'object' ? b.conversation_facts : null,
     enabledModuleProfiles: Array.isArray(b.enabled_module_profiles) ? b.enabled_module_profiles : null,
     memoryContext: b.memory_context && typeof b.memory_context === 'object' ? b.memory_context : null,
+    completedWork: Array.isArray(b.completed_work) ? b.completed_work.filter((w) => w && typeof w === 'object').slice(0, 5) : [],
     allowDelegation: b.allow_delegation !== false,
     verify: b.verify !== false,
     requestId: typeof b.request_id === 'string' ? b.request_id : null,

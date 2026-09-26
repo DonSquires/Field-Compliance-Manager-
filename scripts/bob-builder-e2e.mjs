@@ -54,7 +54,8 @@ function brief(snapshot) {
   const steps = (snapshot.steps ?? []).map((s) => `${s.step_id}:${s.status}`).join(' ');
   const artifacts = (snapshot.artifacts ?? []).map((a) => `${a.artifact_type}:${a.status}:${a.id.slice(0, 8)}`).join(' ');
   const approvals = (snapshot.approvals ?? []).map((a) => `${a.approval_type}:${a.status}:${a.id}`).join(' ');
-  return `status=${job.status} step=${job.current_step_name ?? '-'} error=${job.last_error ?? '-'}\n  steps: ${steps}\n  artifacts: ${artifacts}\n  approvals: ${approvals}`;
+  const autopilot = job.autopilot_state ? `\n  autopilot: ${job.autopilot_state}${job.autopilot_report?.headline ? ` — ${job.autopilot_report.headline}` : ''}${job.workspace_pull_request_url ? ` (${job.workspace_pull_request_url})` : ''}` : '';
+  return `status=${job.status} step=${job.current_step_name ?? '-'} error=${job.last_error ?? '-'}\n  steps: ${steps}\n  artifacts: ${artifacts}\n  approvals: ${approvals}${autopilot}`;
 }
 
 const sleep = (ms) => new Promise((resolve) => setTimeout(resolve, ms));
@@ -62,8 +63,10 @@ const [cmd, ...args] = process.argv.slice(2);
 
 if (cmd === 'create') {
   const [title, description] = args;
-  const out = await room({ action: 'create', organization_id: ORG, project_id: PROJECT, title, task_description: description, description: 'Opened by the Bob self-heal human-test driver.', target_ref: 'main', requested_action: 'prepare_change', target_environment: 'development', code_review_mode: 'independent_ai', frontend_required: false, backend_required: true });
-  console.log(out.status, out.job ? `job ${out.job.id} status=${out.job.status} target=${String(out.job.target_sha).slice(0, 10)}` : JSON.stringify(out));
+  // E2E_AUTOPILOT=1 hands the job to Bob's autopilot (as the chat path does); otherwise drive it with `follow`.
+  const autopilot = process.env.E2E_AUTOPILOT === '1';
+  const out = await room({ action: 'create', organization_id: ORG, project_id: PROJECT, title, task_description: description, description: 'Opened by the Bob self-heal human-test driver.', target_ref: 'main', requested_action: 'prepare_change', target_environment: 'development', code_review_mode: 'independent_ai', frontend_required: false, backend_required: true, ...(autopilot ? { autopilot: true } : {}) });
+  console.log(out.status, out.job ? `job ${out.job.id} status=${out.job.status} target=${String(out.job.target_sha).slice(0, 10)} autopilot=${out.autopilot === true ? out.job.autopilot_state ?? 'bound' : 'off'}${out.autopilot_error ? ` (${out.autopilot_error})` : ''}` : JSON.stringify(out));
 } else if (cmd === 'show') {
   const out = await room({ action: 'get', job_id: args[0] });
   console.log(brief(out));

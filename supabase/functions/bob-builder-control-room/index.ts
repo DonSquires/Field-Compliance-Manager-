@@ -27,7 +27,7 @@ function strings(value: unknown, maximum: number) {
 
 function safeJob(job: Record<string, unknown> | null) {
   if (!job) return null;
-  const keys = ['id', 'organization_id', 'project_id', 'title', 'description', 'task_description', 'status', 'current_step_name', 'current_step_index', 'total_steps', 'branch_name', 'target_sha', 'workspace_branch', 'workspace_head_sha', 'workspace_published_at', 'workspace_published_head_sha', 'workspace_pull_request_url', 'workspace_pull_request_head_sha', 'requested_action', 'target_environment', 'frontend_required', 'backend_required', 'code_review_mode', 'code_review_status', 'last_error', 'created_at', 'updated_at'];
+  const keys = ['id', 'organization_id', 'project_id', 'title', 'description', 'task_description', 'status', 'current_step_name', 'current_step_index', 'total_steps', 'branch_name', 'target_sha', 'workspace_branch', 'workspace_head_sha', 'workspace_published_at', 'workspace_published_head_sha', 'workspace_pull_request_url', 'workspace_pull_request_head_sha', 'requested_action', 'target_environment', 'frontend_required', 'backend_required', 'code_review_mode', 'code_review_status', 'last_error', 'autopilot_requested_by', 'autopilot_state', 'autopilot_report', 'autopilot_updated_at', 'autopilot_reported_at', 'created_at', 'updated_at'];
   return Object.fromEntries(keys.map(key => [key, job[key]]));
 }
 
@@ -183,7 +183,22 @@ serve(async req => {
       _target_environment: targetEnvironment,
     });
     await audit(requestedOrgId, createError ? 'failed' : 'created', String(created?.id ?? '') || null);
-    return createError ? json({ error: 'Builder job could not be created', detail: failureDetail(createError) }, 409) : json({ job: safeJob(created) }, 201);
+    if (createError) return json({ error: 'Builder job could not be created', detail: failureDetail(createError) }, 409);
+    let job = created as Record<string, unknown>;
+    // Bob autopilot: the caller's chat instruction is the key turn. Bind the job to that person so the
+    // control plane can clear its gates on their behalf (recorded), publish the branch, open the PR and
+    // leave a plain-language report. Merge and deployment stay human (BOB_DOCTRINE §9).
+    if (body.autopilot === true) {
+      const conversationId = typeof body.conversation_id === 'string' && /^[0-9a-f-]{36}$/i.test(body.conversation_id) ? body.conversation_id : null;
+      const { data: bound, error: bindError } = await admin.rpc('builder_autopilot_bind', { _job_id: job.id, _requested_by: user.id, _conversation_id: conversationId });
+      if (bindError) {
+        await audit(requestedOrgId, 'autopilot_bind_failed', String(job.id));
+        return json({ job: safeJob(job), autopilot: false, autopilot_error: failureDetail(bindError) }, 201);
+      }
+      job = bound as Record<string, unknown>;
+      await audit(requestedOrgId, 'autopilot_bound', String(job.id));
+    }
+    return json({ job: safeJob(job), autopilot: body.autopilot === true }, 201);
   }
 
   const jobId = typeof body.job_id === 'string' ? body.job_id : '';

@@ -231,3 +231,48 @@ drafting and re-asked questions the owner had already answered ("yes to all").
 
 **What does not move.** Rank and Privacy Act rails, `isGovernanceLocked` on the
 chat path, the sensitive floor, and the protected paths are untouched.
+
+### 2026-09-26 — Autopilot: Bob finishes what he is asked to build (Don Squires)
+
+> "I'm not a coding person and don't know if Bob is building or correcting the
+> right things; all I know is what I want and how it should work and look. So
+> Bob is going to need to be as reliable as you and just push fixes as you do
+> and let me know what has happened once it's done, as you do."
+
+**Finding.** The first end-to-end self-heal run (jobs `5ba292f4`, `3a4a2d06`,
+`42b542a5`) proved the Builder lane could build, verify, review and publish a
+Bob-authored change — but only with an operator driving every gate and
+publication step by hand, and it surfaced eight latent defects that had made
+the lane unusable since early September (audit event types, repository
+inventory cap, worker image manifest, patch newline handling, the security
+claim's patch anchor, the reviewer's missing model and output contract, the
+release engineer's output contract, the commit step's frontend fence). Each is
+fixed, tested and recorded in the commit history of this date.
+
+**Ruling and mechanism.** The 2026-09-14 ruling already lets the agentic lane
+continue without a human confirm at each step. The owner's chat instruction to
+make a change is the key turn. From it, Bob autopilot
+(`builder-autopilot.js`, control plane) drives the job to a reviewed pull
+request unattended:
+- **Gates** — `specification_review` and `release_approval` are cleared on the
+  requester's behalf by `builder_autopilot_decide_approval`, which mirrors the
+  human RPC's invariants and records the requester as approver and Bob as
+  actor (`source: bob_autopilot`). Rejection stays human-only.
+- **Runner** — the bounded runner keeps moving (ceilings: eight actions per
+  run, `MAX_STEP_ATTEMPTS` per step); a retryable failure is retried next tick,
+  a ceiling or terminal state becomes a **blocked** report.
+- **Publication** — at `release_ready` the worker-validated diff is committed
+  on the job branch, pushed, and opened as a pull request whose body carries
+  what changed, how it was verified (author's tests, isolated worker, security
+  scan, independent AI review) and provenance.
+- **Report** — a plain-language outcome is stored on the job
+  (`autopilot_report`); the conductor gives it to the planner as
+  `completed_work` on the requester's next turn and Bob leads with it (what
+  changed in behaviour terms, how it was checked, the review link, what the
+  person must do). Marked reported once relayed.
+
+**What does not move.** Merge, deployment, DDL, auth/RLS, dependency and
+environment changes remain human; the pull request is a draft for a person.
+Bob never approves on behalf of someone who could not approve themselves
+(`can_approve_action` is checked for the requester), never rejects, and never
+clears a gate on a job nobody asked for (`autopilot_requested_by` is required).

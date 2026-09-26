@@ -72,6 +72,22 @@ test('planner prompt exposes drafting discipline, one-question rule, and delegat
   assert.equal(messages[2].role, 'assistant');
 });
 
+test('completed autopilot work is relayed first, in plain language, and the rule forbids merge/deploy claims', () => {
+  const { buildCompletedWorkBlock } = require('../services/fcm-api/src/bob/planPrompt');
+  assert.equal(buildCompletedWorkBlock([]), '');
+  const block = buildCompletedWorkBlock([{ state: 'published', title: "Accept 'go for it' as a yes", pull_request_url: 'https://git.example/pulls/9', report: 'Done: built, checked, waiting for review.' }]);
+  assert.match(block, /COMPLETED WORK TO REPORT/);
+  assert.match(block, /\[published\] Accept 'go for it' as a yes — review link: https:\/\/git\.example\/pulls\/9/);
+  assert.match(block, /Done: built, checked, waiting for review\./);
+  assert.match(block, /RELAY RULE: open your reply with a short plain-language report/);
+  assert.match(block, /Never claim anything was merged or deployed/);
+  const prompt = buildPlannerPrompt({ message: 'hi', tools: TOOLS, completedWork: [{ state: 'blocked', title: 'T', report: 'Stopped: needs a person.' }] });
+  assert.match(prompt, /\[blocked\] T\n\s+Stopped: needs a person\./);
+  // readBody carries the conductor's completed_work through to the prompt input.
+  const { readBody } = require('../services/fcm-api/src/bob/plan');
+  assert.deepEqual(readBody({ completed_work: [{ state: 'published', title: 'x' }, 'junk', null] }).completedWork, [{ state: 'published', title: 'x' }]);
+});
+
 test('task state renders subagent results and truncation disclosure', () => {
   const block = buildTaskStateBlock({ goal: 'g', subagent_results: [{ role: 'research', goal: 'COA', findings: 'Green COA is issued by the PSPLA.', sources: ['https://www.pspla.govt.nz'], confidence: 0.8, steps: [{ tool: 'web_research', outcome: 'ok' }] }] });
   assert.match(block, /DELEGATION COMPLETE/);

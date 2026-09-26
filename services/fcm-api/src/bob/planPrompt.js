@@ -129,6 +129,17 @@ function buildSubagentResultsBlock(results) {
   ].join('\n');
 }
 
+function buildCompletedWorkBlock(items) {
+  if (!Array.isArray(items) || !items.length) return '';
+  const lines = items.map((w, i) => `  ${i + 1}. [${String(w.state ?? 'done')}] ${String(w.title ?? 'Builder job')}${w.pull_request_url ? ` — review link: ${String(w.pull_request_url)}` : ''}\n     ${sliceWithDisclosure(String(w.report ?? ''), 3000, `completed work ${i + 1} report`)}`);
+  return [
+    '',
+    'COMPLETED WORK TO REPORT (Builder jobs this person asked you to do have finished or stopped since you last spoke; they have NOT been told yet):',
+    ...lines,
+    'RELAY RULE: open your reply with a short plain-language report of each item for a non-technical owner — what changed (in terms of behaviour they would notice), how it was checked, the review link, and what they need to do (usually: review and merge when happy; nothing is live until then). For a [blocked] item say plainly what stopped it and what you need from them. Then answer their current message. Do not use file paths, commit hashes, or tool names in this report unless they ask; the link carries the technical detail. Never claim anything was merged or deployed.',
+  ].join('\n');
+}
+
 function buildTaskStateBlock(taskState) {
   if (!taskState || typeof taskState !== 'object') return '';
   const ts = taskState;
@@ -261,7 +272,7 @@ function buildReviewerNotesBlock(reviewerNotes) {
 const DELEGABLE_ROLES = ['research', 'data', 'drafting', 'review'];
 
 function buildPlannerPrompt(input) {
-  const { message, attachment, tools = [], knowledge, pending, taskState, conversationFacts, enabledModuleProfiles, memoryContext, reviewerNotes, allowDelegation = true } = input;
+  const { message, attachment, tools = [], knowledge, pending, taskState, conversationFacts, enabledModuleProfiles, memoryContext, reviewerNotes, allowDelegation = true, completedWork = [] } = input;
   const toolList = tools.map((t) => `- ${t.tool}: ${t.purpose}${t.governance ? ` [${t.governance}]` : ''}`).join('\n');
   const delegable = tools.filter((t) => t.delegable !== false && /^(query_records|client_site_compare|scv_lookup|schema_inspect|retrieve_knowledge|understand_documents|web_research|sql_read|repo_search|query_atlas|read_issues|resolve_address|resolve_geofence|self_audit|assess_system)$/.test(t.tool)).map((t) => t.tool);
   const canDelegate = allowDelegation && delegable.length > 0;
@@ -317,6 +328,7 @@ function buildPlannerPrompt(input) {
     buildConversationFactsBlock(conversationFacts),
     buildModuleMapBlock(enabledModuleProfiles),
     buildPendingBlock(pending),
+    buildCompletedWorkBlock(completedWork),
     buildTaskStateBlock(taskState),
     buildAttachmentBlock(attachment),
     buildReviewerNotesBlock(reviewerNotes),
@@ -365,6 +377,7 @@ module.exports = {
   BLANKET_AFFIRMATIVE_RULE,
   DELEGABLE_ROLES,
   buildAttachmentBlock,
+  buildCompletedWorkBlock,
   buildConversationFactsBlock,
   buildHistoryMessages,
   buildMemoryBlock,

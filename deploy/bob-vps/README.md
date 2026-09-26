@@ -28,7 +28,13 @@ The agentic Builder lane needs, in `/var/lib/bob/control-plane.env`:
 `OPENAI_API_KEY`, `BOB_OPENAI_MODELS=gpt-5.4,gpt-5.4-mini,gpt-4o-mini`,
 `BOB_BUILDER_MODEL=gpt-5.4`, `BOB_BUILDER_REASONING_EFFORT=high`,
 `GITEA_USERNAME` + `GITEA_TOKEN` (scopes `write:repository,write:issue,read:user`),
-and the worker image `fcm/bob-worker:current` built as below. The compose file
+and the worker image `fcm/bob-worker:current` built as below. Bob autopilot
+(`builder-autopilot.js`) runs inside the control plane whenever those are set:
+`BOB_BUILDER_AUTOPILOT=false` disables it, `BOB_BUILDER_AUTOPILOT_INTERVAL_MS`
+(default 60000) sets the tick, `BOB_BUILDER_REVIEWER_MODEL` picks the
+independent reviewer (must differ from `BOB_BUILDER_MODEL`), and
+`BOB_BUILDER_MAX_STEP_ATTEMPTS` (default 6) caps retries per step. `/health`
+reports `autopilot`, `autopilotIntervalMs`, and `runningBuilderJobs`. The compose file
 mounts the docker socket (`group_add` = the host `docker` gid) and translates
 `/data` → `/var/lib/bob` for worker bind mounts.
 

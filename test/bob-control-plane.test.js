@@ -62,7 +62,8 @@ test('health is public and reports the control plane', async () => {
   const { response, body } = await request('GET', '/health');
   assert.equal(response.status, 200);
   // Health names the git host Bob's Builder lane publishes to; secrets never appear, only whether the host is configured.
-  assert.deepEqual(body, { status: 'ok', service: 'bob-control-plane', activeLease: false, builderGitHost: 'gitea', builderSourceConfigured: false });
+  // Autopilot reads false here: the test server has no Supabase, model gateway, or worker image.
+  assert.deepEqual(body, { status: 'ok', service: 'bob-control-plane', activeLease: false, builderGitHost: 'gitea', builderSourceConfigured: false, autopilot: false, autopilotIntervalMs: 60_000, runningBuilderJobs: 0 });
 });
 
 test('assessment is authenticated and read-only', async () => {
