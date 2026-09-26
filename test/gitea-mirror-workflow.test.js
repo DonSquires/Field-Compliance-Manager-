@@ -9,6 +9,9 @@ test('Gitea mirror follows GitHub main and refuses divergent history', () => {
   assert.match(workflow, /branches: \[main\]/);
   assert.match(workflow, /GITEA_MIRROR_USERNAME: \$\{\{ secrets\.GITEA_MIRROR_USERNAME \}\}/);
   assert.match(workflow, /GITEA_MIRROR_TOKEN: \$\{\{ secrets\.GITEA_MIRROR_TOKEN \}\}/);
+  assert.match(workflow, /http\.https:\/\/git\.fcmanager\.co\.nz\/\.extraheader "Authorization: Basic \$auth"/);
+  assert.match(workflow, /echo "::add-mask::\$auth"/);
+  assert.doesNotMatch(workflow, /https:\/\/\$\{GITEA_MIRROR_USERNAME\}:\$\{GITEA_MIRROR_TOKEN\}@/);
   assert.match(workflow, /git fetch gitea main/);
   assert.match(workflow, /git merge-base --is-ancestor "\$GITEA_MAIN" HEAD/);
   assert.match(workflow, /refusing to overwrite mirror history/);

@@ -28,7 +28,10 @@ jobs:
           set -euo pipefail
           test -n "$GITEA_MIRROR_USERNAME"
           test -n "$GITEA_MIRROR_TOKEN"
-          git remote add gitea "https://${GITEA_MIRROR_USERNAME}:${GITEA_MIRROR_TOKEN}@git.fcmanager.co.nz/Iron-Eagle-Security-Ltd/field-compliance-manager.git"
+          auth="$(printf '%s:%s' "$GITEA_MIRROR_USERNAME" "$GITEA_MIRROR_TOKEN" | base64 -w0)"
+          echo "::add-mask::$auth"
+          git config --local http.https://git.fcmanager.co.nz/.extraheader "Authorization: Basic $auth"
+          git remote add gitea "https://git.fcmanager.co.nz/Iron-Eagle-Security-Ltd/field-compliance-manager.git"
       - name: Fast-forward Gitea main
         run: |
           set -euo pipefail
