@@ -149,6 +149,50 @@ test('agentic engineer refuses to finish with out-of-lane edits and stops on bud
   fs.rmSync(repo.root, { recursive: true, force: true });
 });
 
+// Lessons from the first live run (job 5ba292f4, 2026-09-26): the model searched two
+// pathspecs at once and got "Command failed"; a no-match grep was reported as an error;
+// and three fenced / miscounted diffs were rejected outright, forcing full-file rewrites.
+test('search honours several pathspecs and treats no matches as a result; apply_patch tolerates fences and miscounted hunks', () => {
+  const repo = makeRepo();
+  const workspaceRoot = path.join(repo.root, 'workspaces');
+  const { createBranchWorkspace } = require('../builder-branch-workspace');
+  const ws = createBranchWorkspace({ sourceDir: repo.source, workspaceRoot, jobId: 'cafebabecafebabecafebabe', targetSha: repo.sha });
+  const tools = createTools({ workspacePath: ws.workspacePath, repoRoot: repo.source, lane: 'backend', supabase: null, limits: DEFAULT_LIMITS, log() {} });
+
+  const multi = tools.search({ query: 'sum', path: 'lib test' });
+  assert.deepEqual(multi.paths, ['lib', 'test']);
+  assert.equal(multi.matches, 3, JSON.stringify(multi)); // 1 in lib/sum.js + 2 in test/sum.test.js
+  const none = tools.search({ query: 'definitely-not-present', path: 'lib' });
+  assert.equal(none.error, undefined);
+  assert.equal(none.matches, 0);
+  const regex = tools.search({ query: 'sum|assert', path: ['test'], regex: true });
+  assert.ok(regex.matches >= 2);
+
+  // Fenced diff with a wrong hunk length (says 3 lines, has 2) still applies via --recount.
+  const fenced = [
+    '```diff',
+    'diff --git a/lib/sum.js b/lib/sum.js',
+    '--- a/lib/sum.js',
+    '+++ b/lib/sum.js',
+    '@@ -1,3 +1,3 @@',
+    " 'use strict';",
+    '-module.exports = { sum: (a, b) => a - b };',
+    '+module.exports = { sum: (a, b) => a + b };',
+    '```',
+  ].join('\n');
+  const applied = tools.apply_patch({ diff: fenced });
+  assert.equal(applied.applied, true, JSON.stringify(applied));
+  assert.deepEqual(applied.changed_files, ['lib/sum.js']);
+  assert.match(fs.readFileSync(path.join(ws.workspacePath, 'lib', 'sum.js'), 'utf8'), /a \+ b/);
+
+  // A hunk whose context does not exist anywhere is still refused with actionable guidance.
+  const bogus = 'diff --git a/lib/sum.js b/lib/sum.js\n--- a/lib/sum.js\n+++ b/lib/sum.js\n@@ -1,2 +1,2 @@\n-this line is not in the file\n+replacement\n';
+  const refused = tools.apply_patch({ diff: bogus });
+  assert.match(refused.error, /patch did not apply/);
+  assert.match(refused.error, /write_file/);
+  fs.rmSync(repo.root, { recursive: true, force: true });
+});
+
 test('buildProposal enforces additive-only migrations and the lane validator', () => {
   const repo = makeRepo();
   const workspaceRoot = path.join(repo.root, 'workspaces');

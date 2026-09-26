@@ -192,7 +192,20 @@ function createTools({ workspacePath, repoRoot, lane, supabase, limits, log }) {
     return null;
   };
 
-  const changedFiles = () => git(workspacePath, ['status', '--porcelain', '--untracked-files=all']).split('\n').filter(Boolean).map((line) => line.slice(3).trim().replace(/^"|"$/g, '').split(' -> ').pop());
+  // Untrimmed, NUL-separated: git()'s trim() would eat the leading space of an unstaged
+  // " M path" entry and turn the first changed path into "ath" — which then fed the policy check.
+  const changedFiles = () => {
+    const raw = execFileSync('git', ['status', '--porcelain=v1', '-z', '--untracked-files=all'], { cwd: workspacePath, encoding: 'utf8', stdio: ['ignore', 'pipe', 'pipe'], maxBuffer: 64 * 1024 * 1024 });
+    const entries = raw.split('\0').filter(Boolean);
+    const files = [];
+    for (let index = 0; index < entries.length; index += 1) {
+      const entry = entries[index];
+      const status = entry.slice(0, 2);
+      files.push(entry.slice(3));
+      if (status[0] === 'R' || status[0] === 'C') index += 1; // renames/copies carry the source path in the next NUL field
+    }
+    return files;
+  };
 
   const revertPath = (file) => {
     try { git(workspacePath, ['checkout', '--', file]); } catch { /* untracked */ }
@@ -220,16 +233,15 @@ function createTools({ workspacePath, repoRoot, lane, supabase, limits, log }) {
     },
     search({ query, path: pathspec, regex }) {
       if (!query || typeof query !== 'string') return { error: 'query is required' };
-      const args = ['grep', '-n', '-I', regex ? '-E' : '-F', '-e', query, '--'];
-      if (pathspec) args.push(normalizeRepoPath(pathspec) || '.');
-      let output = '';
-      try {
-        output = git(workspacePath, args);
-      } catch (error) {
-        if (!/exit|code 1/i.test(String(error.message)) && String(error.message).trim()) return { error: clip(error.message, 500) };
-      }
-      const lines = output.split('\n').filter(Boolean);
-      return { query, matches: lines.length, results: lines.slice(0, limits.searchCapLines), truncated: lines.length > limits.searchCapLines };
+      // Models pass several pathspecs at once ("services/fcm-api/src/bob test"); honour each one.
+      const pathspecs = (Array.isArray(pathspec) ? pathspec : String(pathspec ?? '').split(/[\s,]+/))
+        .map((value) => normalizeRepoPath(value)).filter(Boolean);
+      const args = ['grep', '-n', '-I', regex ? '-E' : '-F', '-e', query, '--', ...(pathspecs.length ? pathspecs : ['.'])];
+      const result = spawnSync('git', args, { cwd: workspacePath, encoding: 'utf8', maxBuffer: 64 * 1024 * 1024 });
+      // git grep: 0 = matches, 1 = no matches, anything else is a real error.
+      if (result.status !== 0 && result.status !== 1) return { error: clip(redactGitError(result.stderr || result.error?.message || `git grep exited ${result.status}`), 500) };
+      const lines = String(result.stdout || '').split('\n').filter(Boolean);
+      return { query, paths: pathspecs, matches: lines.length, results: lines.slice(0, limits.searchCapLines), truncated: lines.length > limits.searchCapLines };
     },
     git_log({ path: file, limit } = {}) {
       const args = ['log', '--no-color', `-n${Math.min(50, Math.max(1, Number(limit) || 20))}`, '--format=%h %ad %s', '--date=short'];
@@ -255,12 +267,24 @@ function createTools({ workspacePath, repoRoot, lane, supabase, limits, log }) {
       if (typeof diff !== 'string' || !diff.trim()) return { error: 'diff is required' };
       const before = new Set(changedFiles());
       const patchPath = path.join(fs.mkdtempSync(path.join(os.tmpdir(), 'bob-agent-patch-')), 'patch.diff');
+      // Models wrap diffs in fences and miscount hunk lengths; tolerate both before asking for a rewrite.
+      const text = diff.replace(/^\s*```(?:diff|patch)?\s*\n/, '').replace(/\n```\s*$/, '');
+      const strategies = [[], ['--recount'], ['--recount', '--ignore-whitespace']];
+      let failure = '';
       try {
-        fs.writeFileSync(patchPath, diff.endsWith('\n') ? diff : `${diff}\n`);
-        git(workspacePath, ['apply', '--check', '--whitespace=nowarn', patchPath]);
-        git(workspacePath, ['apply', '--whitespace=nowarn', patchPath]);
-      } catch (error) {
-        return { error: `patch did not apply: ${clip(error.message, 1500)}. Read the current file and try write_file instead.` };
+        fs.writeFileSync(patchPath, text.endsWith('\n') ? text : `${text}\n`);
+        let applied = false;
+        for (const flags of strategies) {
+          try {
+            git(workspacePath, ['apply', '--check', '--whitespace=nowarn', ...flags, patchPath]);
+            git(workspacePath, ['apply', '--whitespace=nowarn', ...flags, patchPath]);
+            applied = true;
+            break;
+          } catch (error) {
+            failure = failure || String(error.message);
+          }
+        }
+        if (!applied) return { error: `patch did not apply: ${clip(failure, 1500)}. Read the current file (exact lines) and either send a corrected hunk or use write_file with the full content.` };
       } finally {
         fs.rmSync(path.dirname(patchPath), { recursive: true, force: true });
       }
