@@ -199,7 +199,7 @@ async function resolveBuilderSourceDir(jobId) {
     // No bound workspace yet: work from the job's own worktree at the pinned commit
     // (the image copy has no .git). The workspace route later binds this same branch.
     const gitSourceDir = builderGitSource(job.target_sha);
-    const workspace = createBranchWorkspace({ sourceDir: gitSourceDir, workspaceRoot: builderWorkspaceRoot, jobId: job.id, targetSha: job.target_sha });
+    const workspace = createBranchWorkspace({ sourceDir: gitSourceDir, workspaceRoot: builderWorkspaceRoot, jobId: job.id, targetSha: job.target_sha, recoverInterrupted: true });
     return { sourceDir: workspace.workspacePath, gitSourceDir, targetSha: job.target_sha };
   }
   const sourceDir = workspacePathForBranch(builderWorkspaceRoot, job.workspace_branch);
@@ -376,7 +376,7 @@ async function route(req, res, body) {
       return json(res, 409, { error: 'Builder runtime could not continue', detail: String(error instanceof Error ? error.message : error).slice(0, 200) });
     }
     const execution = runBuilderUntilPause({ supabase: builderSupabase, gateway: builderGateway, jobId, context, maxActions: body.maxActions })
-      .then((outcome) => { record('builder', 'builder.run.paused', jobId, { reason: outcome.reason, actions: outcome.history?.length ?? 0 }); return outcome; })
+      .then((outcome) => { record('builder', 'builder.run.paused', jobId, { reason: outcome.reason, detail: outcome.detail ?? null, actions: outcome.history?.length ?? 0 }); return outcome; })
       .catch((error) => { record('builder', 'builder.run.failed', jobId, { error: String(error instanceof Error ? error.message : error).slice(0, 300) }); return { paused: true, reason: 'error' }; })
       .finally(() => runningBuilderJobs.delete(jobId));
     runningBuilderJobs.set(jobId, new Date().toISOString());

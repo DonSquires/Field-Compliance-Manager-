@@ -31,6 +31,23 @@ test('Builder branch workspace is pinned, isolated, and commits only validated p
   } finally { fs.rmSync(repo.root, { recursive: true, force: true }); }
 });
 
+test('an unbound scratch workspace left dirty by an interrupted run is restored to the pin only when asked', () => {
+  const repo = fixture();
+  try {
+    const first = createBranchWorkspace({ sourceDir: repo.root, workspaceRoot: repo.workspaceRoot, jobId: 'abcdefabcdefabcdefabcdef', targetSha: repo.sha });
+    fs.writeFileSync(path.join(first.workspacePath, 'apps/web/src/example.ts'), 'export const value = 99;\n');
+    fs.writeFileSync(path.join(first.workspacePath, 'scratch.txt'), 'left behind\n');
+    // Default behaviour is unchanged: a dirty workspace is refused (a bound/published branch must never be silently reset).
+    assert.throws(() => createBranchWorkspace({ sourceDir: repo.root, workspaceRoot: repo.workspaceRoot, jobId: 'abcdefabcdefabcdefabcdef', targetSha: repo.sha }), /must be clean/);
+    const recovered = createBranchWorkspace({ sourceDir: repo.root, workspaceRoot: repo.workspaceRoot, jobId: 'abcdefabcdefabcdefabcdef', targetSha: repo.sha, recoverInterrupted: true });
+    assert.equal(recovered.existing, true);
+    assert.equal(recovered.head, repo.sha);
+    assert.equal(git(recovered.workspacePath, ['status', '--porcelain', '--untracked-files=normal']), '');
+    assert.equal(fs.readFileSync(path.join(recovered.workspacePath, 'apps/web/src/example.ts'), 'utf8'), 'export const value = 1;\n');
+    assert.equal(fs.existsSync(path.join(recovered.workspacePath, 'scratch.txt')), false);
+  } finally { fs.rmSync(repo.root, { recursive: true, force: true }); }
+});
+
 test('Builder branch names are deterministic and cannot target protected branches', () => {
   assert.equal(branchNameForJob('abcdefgh-1234'), 'bob/job-abcdefgh1234');
   assert.throws(() => branchNameForJob('short'), /invalid/);

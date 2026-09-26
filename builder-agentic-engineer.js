@@ -167,6 +167,27 @@ function summariseUsage(total, usage) {
   return total;
 }
 
+// Every turn re-sends the whole conversation, so a 25-turn job with a few 60k-char file reads
+// costs ~1.6M prompt tokens. Recent turns stay verbatim; older bulky tool results and full-file
+// write payloads are collapsed to a head + a pointer (the model can re-read a file if it needs it).
+function compactMessages(messages, { keepRecent = 6, stubChars = 600, threshold = 1500 } = {}) {
+  const [system, task, ...turns] = messages;
+  const cutoff = Math.max(0, turns.length - keepRecent * 2);
+  const compacted = turns.map((message, index) => {
+    if (index >= cutoff || typeof message.content !== 'string' || message.content.length <= threshold) return message;
+    if (message.role === 'assistant') {
+      try {
+        const call = JSON.parse(message.content);
+        if (call.tool === 'write_file' && call.args) return { ...message, content: JSON.stringify({ thought: call.thought, tool: 'write_file', args: { path: call.args.path, bytes: Buffer.byteLength(String(call.args.content ?? '')), content: '[compacted: full file was written; read_file to see it]' } }) };
+        if (call.tool === 'apply_patch' && call.args) return { ...message, content: JSON.stringify({ thought: call.thought, tool: 'apply_patch', args: { bytes: Buffer.byteLength(String(call.args.diff ?? '')), diff: '[compacted: patch applied earlier; git_diff shows the current state]' } }) };
+      } catch { /* leave as is */ }
+      return message;
+    }
+    return { ...message, content: `${message.content.slice(0, stubChars)}…[compacted ${message.content.length - stubChars} chars: re-run the tool if you need this again]` };
+  });
+  return [system, task, ...compacted];
+}
+
 function createTools({ workspacePath, repoRoot, lane, supabase, limits, log }) {
   const run = (command) => {
     const text = String(command ?? '').trim();
@@ -465,7 +486,7 @@ async function runAgenticEngineer({
 
   while (turns < limits.maxTurns && now() - started < limits.wallBudgetMs) {
     turns++;
-    const request = { ...baseRequest, idempotency_key: `${baseRequest.idempotency_key}::turn-${turns}`, request: { ...baseRequest.request, messages: [...messages], reasoning_effort: process.env.BOB_BUILDER_REASONING_EFFORT || 'high', max_output_tokens: Number(process.env.BOB_BUILDER_MAX_OUTPUT_TOKENS || 32000) } };
+    const request = { ...baseRequest, idempotency_key: `${baseRequest.idempotency_key}::turn-${turns}`, request: { ...baseRequest.request, messages: compactMessages(messages), reasoning_effort: process.env.BOB_BUILDER_REASONING_EFFORT || 'high', max_output_tokens: Number(process.env.BOB_BUILDER_MAX_OUTPUT_TOKENS || 32000) } };
     const response = await callModel({ ...gateway, modelRequest: request, timeoutMs: limits.turnTimeoutMs });
     if (!response.ok) {
       log({ turn: turns, error: `model unavailable: ${response.error}` });
@@ -548,4 +569,4 @@ async function runAgenticEngineer({
   };
 }
 
-module.exports = { DEFAULT_LIMITS, PROMPT_VERSION, RUN_ALLOWLIST, buildProposal, createTools, parseToolCall, runAgenticEngineer, systemPrompt, taskPacket };
+module.exports = { DEFAULT_LIMITS, PROMPT_VERSION, RUN_ALLOWLIST, buildProposal, compactMessages, createTools, parseToolCall, runAgenticEngineer, systemPrompt, taskPacket };

@@ -12,6 +12,11 @@ const { runAgenticEngineer } = require('./builder-agentic-engineer');
 const TERMINAL_STATUSES = new Set(['release_ready', 'deployed', 'failed', 'cancelled']);
 const APPROVAL_STATUSES = new Set(['specification_ready', 'approval_pending']);
 const MAX_BACKEND_ATTEMPTS = 3;
+// attempt_count is persisted by the start RPCs, so this ceiling holds across `run` calls: a
+// failed step that has already been started this many times is a systemic failure that needs
+// a human (fix the cause, then a follow-up job), not another model run. Job 5ba292f4 burned
+// eight full engineer runs against a broken worker image before this existed.
+const MAX_STEP_ATTEMPTS = Math.max(1, Number(process.env.BOB_BUILDER_MAX_STEP_ATTEMPTS) || 6);
 // Bob works the implementation steps as a coding agent (explore → edit → test →
 // iterate) unless explicitly switched back to the one-shot engineers.
 const AGENTIC_ENABLED = process.env.BOB_BUILDER_AGENTIC !== 'false';
@@ -31,8 +36,16 @@ function implementationRuns(snapshot) {
   return snapshot.workerRuns.filter(run => stepIds.has(run.step_id) && run.status === 'completed' && ['frontend-verify', 'backend-verify'].includes(run.profile));
 }
 
+function attemptCeilingReached(step) {
+  return step?.status === 'failed' && Number(step.attempt_count) >= MAX_STEP_ATTEMPTS;
+}
+
 function stepIsRunnable(step) {
-  return step?.status === 'pending' || (step?.status === 'failed' && step.retryable === true);
+  return step?.status === 'pending' || (step?.status === 'failed' && step.retryable === true && !attemptCeilingReached(step));
+}
+
+function attemptCeilingBlock(job, step) {
+  return { type: 'blocked', status: job.status, reason: 'attempt_ceiling', step_id: step.step_id, attempts: Number(step.attempt_count) || 0, limit: MAX_STEP_ATTEMPTS, detail: `${step.step_id} failed ${step.attempt_count} times (ceiling ${MAX_STEP_ATTEMPTS}); a human must fix the cause and open a follow-up job` };
 }
 
 function planBuilderAction(snapshot) {
@@ -46,16 +59,20 @@ function planBuilderAction(snapshot) {
   if (['intake', 'analysis_pending'].includes(job.status) && stepIsRunnable(product)) {
     return { type: 'run_product_analysis', step: product };
   }
+  if (['intake', 'analysis_pending'].includes(job.status) && attemptCeilingReached(product)) return attemptCeilingBlock(job, product);
   const ux = byStep(snapshot, 'ui_design');
   if (job.status === 'design_pending' && stepIsRunnable(ux)) return { type: 'run_ux_design', step: ux };
+  if (job.status === 'design_pending' && attemptCeilingReached(ux)) return attemptCeilingBlock(job, ux);
   if (job.status === 'design_pending' && ux?.status === 'skipped' && !job.frontend_required && job.backend_required) {
     return { type: 'continue_backend_only', step: ux };
   }
   if (job.status === 'implementation_pending') {
     const frontend = byStep(snapshot, 'frontend_implementation');
     if (stepIsRunnable(frontend)) return { type: 'run_frontend', step: frontend };
+    if (attemptCeilingReached(frontend)) return attemptCeilingBlock(job, frontend);
     const backend = byStep(snapshot, 'backend_implementation');
     if (stepIsRunnable(backend)) return { type: 'run_backend', step: backend };
+    if (attemptCeilingReached(backend)) return attemptCeilingBlock(job, backend);
   }
   if (job.status === 'testing') return { type: 'run_security_review', step: byStep(snapshot, 'security_review') };
   if (job.status === 'security_review') {
@@ -204,7 +221,7 @@ async function runBuilderUntilPause({
   for (let index = 0; index < limit; index += 1) {
     const outcome = await advanceBuilderJob({ supabase, gateway, jobId, context, handlers, loadSnapshot });
     history.push({ action: outcome.action, advanced: outcome.advanced });
-    if (!outcome.advanced) return { paused: true, reason: outcome.action.type, history, snapshot: outcome.snapshot };
+    if (!outcome.advanced) return { paused: true, reason: outcome.action.reason || outcome.action.type, detail: outcome.action.detail, history, snapshot: outcome.snapshot };
     if (outcome.result?.ok === false || outcome.result?.success === false) {
       return { paused: true, reason: 'action_failed', history, result: outcome.result };
     }
@@ -213,6 +230,8 @@ async function runBuilderUntilPause({
 }
 
 module.exports = {
+  MAX_STEP_ATTEMPTS,
+  attemptCeilingReached,
   AGENTIC_ENABLED,
   MAX_BACKEND_ATTEMPTS,
   agenticGenerator,

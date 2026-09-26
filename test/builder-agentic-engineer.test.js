@@ -198,6 +198,35 @@ test('search honours several pathspecs and treats no matches as a result; apply_
   fs.rmSync(repo.root, { recursive: true, force: true });
 });
 
+test('compactMessages keeps recent turns verbatim and collapses older bulky results and write payloads', () => {
+  const { compactMessages } = require('../builder-agentic-engineer');
+  const big = 'x'.repeat(5000);
+  const messages = [
+    { role: 'system', content: 'sys' },
+    { role: 'user', content: 'task' },
+    { role: 'assistant', content: JSON.stringify({ thought: 't', tool: 'read_file', args: { path: 'a.js' } }) },
+    { role: 'user', content: JSON.stringify({ tool_result: { content: big } }) },
+    { role: 'assistant', content: JSON.stringify({ thought: 'write', tool: 'write_file', args: { path: 'a.js', content: big } }) },
+    { role: 'user', content: JSON.stringify({ tool_result: { ok: true } }) },
+    { role: 'assistant', content: JSON.stringify({ thought: 'recent', tool: 'read_file', args: { path: 'b.js' } }) },
+    { role: 'user', content: JSON.stringify({ tool_result: { content: big } }) },
+  ];
+  const out = compactMessages(messages, { keepRecent: 1 });
+  assert.equal(out.length, messages.length);
+  assert.equal(out[0], messages[0]);
+  assert.equal(out[1], messages[1]);
+  assert.ok(out[3].content.length < 1000 && /compacted \d+ chars/.test(out[3].content), 'old bulky tool result is stubbed');
+  const write = JSON.parse(out[4].content);
+  assert.equal(write.tool, 'write_file');
+  assert.equal(write.args.path, 'a.js');
+  assert.equal(write.args.bytes, 5000);
+  assert.match(write.args.content, /compacted/);
+  assert.equal(out[5], messages[5], 'small messages are untouched');
+  assert.equal(out[6], messages[6]);
+  assert.equal(out[7], messages[7], 'the most recent result stays verbatim');
+  assert.equal(messages[3].content.length > 5000, true, 'the in-memory transcript is not mutated');
+});
+
 test('buildProposal enforces additive-only migrations and the lane validator', () => {
   const repo = makeRepo();
   const workspaceRoot = path.join(repo.root, 'workspaces');

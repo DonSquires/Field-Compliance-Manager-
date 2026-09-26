@@ -51,6 +51,28 @@ test('runtime never retries a failed step unless durable state marks it retryabl
   assert.equal(planBuilderAction(state).type, 'run_product_analysis');
 });
 
+test('runtime stops re-launching a retryable step once its persisted attempt count reaches the ceiling', async () => {
+  const { MAX_STEP_ATTEMPTS } = require('../builder-runtime-coordinator');
+  const state = snapshot('implementation_pending');
+  state.steps.find(step => step.step_id === 'frontend_implementation').status = 'skipped';
+  const backend = state.steps.find(step => step.step_id === 'backend_implementation');
+  backend.status = 'failed';
+  backend.retryable = true;
+  backend.attempt_count = MAX_STEP_ATTEMPTS - 1;
+  assert.equal(planBuilderAction(state).type, 'run_backend', 'below the ceiling the step is still runnable');
+  backend.attempt_count = MAX_STEP_ATTEMPTS;
+  const blocked = planBuilderAction(state);
+  assert.equal(blocked.type, 'blocked');
+  assert.equal(blocked.reason, 'attempt_ceiling');
+  assert.equal(blocked.step_id, 'backend_implementation');
+  assert.match(blocked.detail, /human must fix the cause/);
+  // The pause reason reaches the caller (and therefore the control room `detail`) unchanged.
+  const paused = await runBuilderUntilPause({ supabase: {}, gateway: {}, jobId: 'job-1', context: {}, loadSnapshot: async () => state, maxActions: 3 });
+  assert.equal(paused.paused, true);
+  assert.equal(paused.reason, 'attempt_ceiling');
+  assert.match(paused.detail, /failed 6 times/);
+});
+
 test('runtime advances exactly one planned action', async () => {
   const calls = [];
   const state = snapshot('intake');

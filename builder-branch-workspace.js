@@ -48,13 +48,20 @@ function verifySnapshot(sourceDir, targetSha) {
   if (git(sourceDir, ['status', '--porcelain', '--untracked-files=normal'])) throw new Error('Builder source checkout must be clean');
 }
 
-function createBranchWorkspace({ sourceDir, workspaceRoot, jobId, targetSha, branchName = branchNameForJob(jobId) }) {
+function createBranchWorkspace({ sourceDir, workspaceRoot, jobId, targetSha, branchName = branchNameForJob(jobId), recoverInterrupted = false }) {
   if (!branchName.startsWith(BRANCH_PREFIX) || !/^bob\/job-[a-z0-9]+$/.test(branchName)) throw new Error('Builder branch name is invalid');
   const workspacePath = workspacePathForBranch(workspaceRoot, branchName);
   fs.mkdirSync(workspaceRoot, { recursive: true, mode: 0o700 });
 
   if (fs.existsSync(workspacePath)) {
     if (git(workspacePath, ['branch', '--show-current']) !== branchName) throw new Error('Existing Builder workspace has an unexpected branch');
+    // A job whose branch was never bound/published owns a disposable scratch worktree at the
+    // pinned commit. If an engineer run was interrupted (restart, crash) it leaves edits behind
+    // that would otherwise wedge every later run on the clean-checkout guard; restore the pin.
+    if (recoverInterrupted && (git(workspacePath, ['rev-parse', 'HEAD']) !== targetSha || git(workspacePath, ['status', '--porcelain', '--untracked-files=normal']))) {
+      git(workspacePath, ['reset', '-q', '--hard', targetSha]);
+      git(workspacePath, ['clean', '-fdq']);
+    }
     verifySnapshot(workspacePath, targetSha);
     return { branchName, workspacePath, head: git(workspacePath, ['rev-parse', 'HEAD']), existing: true };
   }
