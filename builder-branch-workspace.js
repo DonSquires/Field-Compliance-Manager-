@@ -73,15 +73,94 @@ function commitVerifiedPatch({ workspacePath, branchName, patch, message, push =
   }
 }
 
-function publishWorkspaceBranch({ workspacePath, branchName, expectedHeadSha }) {
+function publishWorkspaceBranch({ workspacePath, branchName, expectedHeadSha, pushUrl = null, pushAuthHeader = null }) {
   if (!branchName.startsWith(BRANCH_PREFIX) || git(workspacePath, ['branch', '--show-current']) !== branchName) throw new Error('Builder workspace branch is invalid');
   if (git(workspacePath, ['status', '--porcelain', '--untracked-files=normal'])) throw new Error('Builder workspace must be clean before publication');
   const head = git(workspacePath, ['rev-parse', 'HEAD']);
   if (head !== expectedHeadSha) throw new Error('Builder workspace head is stale');
+  if (pushUrl) {
+    // Credentials travel as a per-invocation header, never into .git/config.
+    if (!/^https:\/\/[^\s@]+$/.test(String(pushUrl))) throw new Error('Builder push URL must be a credential-free https URL');
+    git(workspacePath, [...(pushAuthHeader ? ['-c', `http.extraheader=${pushAuthHeader}`] : []), 'push', pushUrl, `HEAD:refs/heads/${branchName}`]);
+    return { branchName, head, remote: pushUrl };
+  }
   const remote = git(workspacePath, ['remote', 'get-url', 'origin']);
   if (!remote) throw new Error('Builder workspace has no origin remote');
   git(workspacePath, ['push', 'origin', `HEAD:refs/heads/${branchName}`]);
   return { branchName, head, remote };
+}
+
+// ── GitHub host adapter ───────────────────────────────────────────────────────
+// Bob's self-heal lane works in the GitHub repository the way a coding agent
+// does: a real clone as the source of truth, a branch per job, a verified
+// commit, a push, and a DRAFT pull request for human review. Nothing merges.
+
+function githubAuthHeader(token) {
+  if (!token) throw new Error('GitHub token is not configured');
+  return `Authorization: Basic ${Buffer.from(`x-access-token:${token}`).toString('base64')}`;
+}
+
+function githubRepoUrl(owner, repo) {
+  if (!/^[A-Za-z0-9_.-]+$/.test(String(owner)) || !/^[A-Za-z0-9_.-]+$/.test(String(repo))) throw new Error('GitHub repository coordinates are invalid');
+  return `https://github.com/${owner}/${repo}.git`;
+}
+
+function resolveRemoteHead({ repoUrl, authHeader = null, ref = 'main', cwd = os.tmpdir() }) {
+  if (!/^[A-Za-z0-9_./-]+$/.test(String(ref))) throw new Error('Git ref is invalid');
+  const output = git(cwd, [...(authHeader ? ['-c', `http.extraheader=${authHeader}`] : []), 'ls-remote', repoUrl, `refs/heads/${ref}`]);
+  const sha = output.split(/\s+/)[0] || '';
+  if (!/^[a-f0-9]{40}$/i.test(sha)) throw new Error(`Remote ref ${ref} could not be resolved`);
+  return sha;
+}
+
+/** Keep a persistent, detached checkout of the repository at exactly `sha` (clone on first use). */
+function ensureSourceCheckout({ sourceDir, repoUrl, authHeader = null, sha }) {
+  if (!/^[a-f0-9]{40}$/i.test(String(sha ?? ''))) throw new Error('Builder target SHA must be a full Git SHA');
+  const authArgs = authHeader ? ['-c', `http.extraheader=${authHeader}`] : [];
+  fs.mkdirSync(path.dirname(path.resolve(sourceDir)), { recursive: true, mode: 0o700 });
+  if (!fs.existsSync(path.join(sourceDir, '.git'))) {
+    execFileSync('git', [...authArgs, 'clone', '--no-checkout', repoUrl, path.resolve(sourceDir)], { encoding: 'utf8', stdio: ['ignore', 'pipe', 'pipe'] });
+  }
+  if (git(sourceDir, ['remote', 'get-url', 'origin']) !== repoUrl) throw new Error('Builder source checkout points at an unexpected repository');
+  try {
+    git(sourceDir, ['cat-file', '-e', `${sha}^{commit}`]);
+  } catch {
+    git(sourceDir, [...authArgs, 'fetch', '--prune', 'origin', '+refs/heads/*:refs/remotes/origin/*']);
+  }
+  git(sourceDir, ['checkout', '--detach', '--force', sha]);
+  git(sourceDir, ['clean', '-fdx']);
+  verifySnapshot(sourceDir, sha);
+  return { sourceDir: path.resolve(sourceDir), head: sha };
+}
+
+async function githubApi({ fetchImpl, githubToken, method, urlPath, body }) {
+  const response = await fetchImpl(`https://api.github.com${urlPath}`, {
+    method,
+    headers: {
+      Authorization: `Bearer ${githubToken}`,
+      Accept: 'application/vnd.github+json',
+      'X-GitHub-Api-Version': '2022-11-28',
+      'User-Agent': 'bob-builder',
+      ...(body ? { 'Content-Type': 'application/json' } : {})
+    },
+    body: body ? JSON.stringify(body) : undefined
+  });
+  const data = await response.json().catch(() => ({}));
+  return { ok: response.ok, status: response.status, data };
+}
+
+async function createGitHubPullRequest({ workspacePath, branchName, expectedHeadSha, title, body, githubToken, owner, repo, base = 'main', fetchImpl = globalThis.fetch }) {
+  if (!branchName.startsWith(BRANCH_PREFIX) || git(workspacePath, ['branch', '--show-current']) !== branchName) throw new Error('Builder workspace branch is invalid');
+  if (git(workspacePath, ['status', '--porcelain', '--untracked-files=normal'])) throw new Error('Builder workspace must be clean before opening a pull request');
+  if (git(workspacePath, ['rev-parse', 'HEAD']) !== expectedHeadSha) throw new Error('Builder workspace head is stale');
+  if (!githubToken || !owner || !repo || typeof fetchImpl !== 'function') throw new Error('Builder GitHub integration is not configured');
+  githubRepoUrl(owner, repo);
+  const repoPath = `/repos/${encodeURIComponent(owner)}/${encodeURIComponent(repo)}`;
+  const ref = await githubApi({ fetchImpl, githubToken, method: 'GET', urlPath: `${repoPath}/git/ref/heads/${encodeURIComponent(branchName)}` });
+  if (!ref.ok || ref.data?.object?.sha !== expectedHeadSha) throw new Error('Published GitHub branch does not match the verified head');
+  const created = await githubApi({ fetchImpl, githubToken, method: 'POST', urlPath: `${repoPath}/pulls`, body: { base, head: branchName, title: String(title).slice(0, 200), body: String(body).slice(0, 10000), draft: true, maintainer_can_modify: true } });
+  if (!created.ok || typeof created.data?.html_url !== 'string' || !/^https:\/\/github\.com\/[^/\s]+\/[^/\s]+\/pull\/\d+$/.test(created.data.html_url)) throw new Error('GitHub pull request creation failed');
+  return { branchName, head: expectedHeadSha, url: created.data.html_url, number: created.data.number ?? null, draft: true };
 }
 
 function giteaRepositoryPath(remote) {
@@ -110,4 +189,4 @@ async function createGiteaPullRequest({ workspacePath, branchName, expectedHeadS
   return { branchName, head: expectedHeadSha, url: data.html_url };
 }
 
-module.exports = { BRANCH_PREFIX, BUILDER_NAME, BUILDER_EMAIL, branchNameForJob, workspacePathForBranch, createBranchWorkspace, commitVerifiedPatch, publishWorkspaceBranch, giteaRepositoryPath, createGiteaPullRequest, verifySnapshot };
+module.exports = { BRANCH_PREFIX, BUILDER_NAME, BUILDER_EMAIL, branchNameForJob, workspacePathForBranch, createBranchWorkspace, commitVerifiedPatch, publishWorkspaceBranch, giteaRepositoryPath, createGiteaPullRequest, verifySnapshot, githubAuthHeader, githubRepoUrl, resolveRemoteHead, ensureSourceCheckout, createGitHubPullRequest };

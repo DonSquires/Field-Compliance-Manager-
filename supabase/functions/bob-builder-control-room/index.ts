@@ -149,12 +149,21 @@ serve(async req => {
     if (targetEnvironment === 'production' && codeReviewMode !== 'human') return json({ error: 'Production jobs require human code review' }, 400);
     const { data: project } = await admin.from('builder_projects').select('id, organization_id, gitea_owner, gitea_repo').eq('id', projectId).eq('organization_id', requestedOrgId).eq('status', 'active').single();
     if (!project) return json({ error: 'Builder project is unavailable' }, 404);
+    // Bob's self-heal path names a ref (usually main); pin it to the live head so the job is commit-pinned.
+    let targetSha = typeof body.target_sha === 'string' ? body.target_sha : '';
+    if (!/^[a-f0-9]{40}$/i.test(targetSha)) {
+      const targetRef = typeof body.target_ref === 'string' && /^[A-Za-z0-9_./-]{1,120}$/.test(body.target_ref) ? body.target_ref : 'main';
+      if (!CONTROL_PLANE_URL || !CONTROL_PLANE_TOKEN) return json({ error: 'Builder execution host is unavailable' }, 503);
+      const head = await relay(`/api/bob/builder/repository/head?ref=${encodeURIComponent(targetRef)}`, 'GET');
+      targetSha = head.ok && typeof head.payload.sha === 'string' ? head.payload.sha : '';
+      if (!/^[a-f0-9]{40}$/i.test(targetSha)) return json({ error: 'Builder target commit could not be resolved' }, 503);
+    }
     const { data: created, error: createError } = await admin.rpc('builder_create_job_v2', {
       _organization_id: requestedOrgId,
       _project_id: projectId,
       _title: typeof body.title === 'string' ? body.title.slice(0, 200) : '',
       _task_description: typeof body.task_description === 'string' ? body.task_description.slice(0, 12000) : '',
-      _target_sha: typeof body.target_sha === 'string' ? body.target_sha : '',
+      _target_sha: targetSha,
       _branch_name: typeof body.branch_name === 'string' ? body.branch_name.slice(0, 200) : 'main',
       _description: typeof body.description === 'string' ? body.description.slice(0, 2000) : null,
       _frontend_required: body.frontend_required !== false,

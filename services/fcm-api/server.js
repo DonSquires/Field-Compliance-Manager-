@@ -3,6 +3,9 @@ const http = require('node:http');
 const { createClient } = require('@supabase/supabase-js');
 const { verifyAndConsumeToken } = require('./src/security/job_token_consumer');
 const { verifyJobToken } = require('./src/security/job_token_verifier');
+const { createModelGateway } = require('./src/bob/modelGateway');
+const { planTurn } = require('./src/bob/plan');
+const { subagentStep } = require('./src/bob/subagent');
 
 const port = Number(process.env.PORT || 3000);
 const apiToken = process.env.FCM_API_TOKEN || '';
@@ -12,10 +15,8 @@ const osrmUrl = (process.env.OSRM_URL || '').replace(/\/+$/, '');
 const workloadSigningSecret = process.env.WORKLOAD_SIGNING_SECRET || '';
 const supabaseUrl = (process.env.SUPABASE_URL || '').replace(/\/+$/, '');
 const supabaseServiceRoleKey = process.env.SUPABASE_SERVICE_ROLE_KEY || '';
-const openaiApiKey = process.env.OPENAI_API_KEY || '';
-const openaiBaseUrl = (process.env.OPENAI_BASE_URL || 'https://api.openai.com/v1').replace(/\/+$/, '');
-const openaiPlanModel = process.env.OPENAI_PLAN_MODEL || process.env.OPENAI_MODEL || 'gpt-4o-mini';
 const maxBodyBytes = Number(process.env.MAX_BODY_BYTES || 256 * 1024 * 1024);
+const modelGateway = createModelGateway();
 const supabase = supabaseUrl && supabaseServiceRoleKey
   ? createClient(supabaseUrl, supabaseServiceRoleKey, { auth: { autoRefreshToken: false, persistSession: false } })
   : null;
@@ -71,45 +72,24 @@ async function proxyVoiceSpeech(request, response) {
   return json(response, upstream.status, payload);
 }
 
-async function planWithOpenAI(request, response) {
-  if (!openaiApiKey) return json(response, 503, { error: 'model_provider_not_configured' });
+// Bob's brain: canonical planner (src/bob/planPrompt.js) → verifying subagent
+// (src/bob/verify.js, different model identity) → one self-heal repair pass.
+async function planBobTurn(request, response) {
   const body = await readJson(request);
-  const message = typeof body.message === 'string' ? body.message.trim() : '';
-  if (!message) return json(response, 400, { error: 'message is required' });
-  const systemPrompt = 'You are Bob, the Field Compliance Manager planning engine. Return only valid JSON with keys: action, tool, args, reply, questions, reasoning, confidence, route_selected. Use action="answer" and tool=null unless a supplied tool is clearly appropriate. Never claim a write, approval, deployment, or identity match has happened.';
-  const upstream = await fetch(`${openaiBaseUrl}/chat/completions`, {
-    method: 'POST',
-    headers: { Authorization: `Bearer ${openaiApiKey}`, 'Content-Type': 'application/json' },
-    body: JSON.stringify({
-      model: openaiPlanModel,
-      messages: [
-        { role: 'system', content: systemPrompt },
-        { role: 'user', content: JSON.stringify({ message, tools: body.tools || [], context: body.platform_context || '', history: body.history || [] }) }
-      ],
-      response_format: { type: 'json_object' }
-    }),
-    signal: AbortSignal.timeout(120_000)
-  });
-  const providerBody = await upstream.json().catch(() => null);
-  if (!upstream.ok || !providerBody) return json(response, 502, { error: 'model_provider_request_failed' });
-  const content = providerBody.choices?.[0]?.message?.content;
-  if (typeof content !== 'string') return json(response, 502, { error: 'model_provider_returned_no_plan' });
-  try {
-    const plan = JSON.parse(content);
-    return json(response, 200, {
-      ok: true,
-      action: typeof plan.action === 'string' ? plan.action : 'answer',
-      tool: typeof plan.tool === 'string' ? plan.tool : null,
-      args: plan.args && typeof plan.args === 'object' ? plan.args : {},
-      reply: typeof plan.reply === 'string' ? plan.reply : '',
-      questions: Array.isArray(plan.questions) ? plan.questions : [],
-      reasoning: typeof plan.reasoning === 'string' ? plan.reasoning : '',
-      confidence: typeof plan.confidence === 'number' ? plan.confidence : 0,
-      route_selected: typeof plan.route_selected === 'string' ? plan.route_selected : 'answer'
-    });
-  } catch {
-    return json(response, 502, { error: 'model_provider_returned_invalid_plan' });
-  }
+  const result = await planTurn(body, { gateway: modelGateway });
+  return json(response, result.status, result.body);
+}
+
+// One bounded step of a read-only subagent Bob delegated to; the conductor loops it.
+async function runBobSubagentStep(request, response) {
+  const body = await readJson(request);
+  const result = await subagentStep(body, { gateway: modelGateway });
+  return json(response, result.status, result.body);
+}
+
+async function bobHealth(_request, response) {
+  const status = await modelGateway.status();
+  return json(response, 200, { status: 'ok', service: 'fcm-api', bob: status });
 }
 
 function bearerToken(request) {
@@ -225,14 +205,16 @@ http.createServer(async (request, response) => {
     if (!apiToken) return json(response, 503, { error: 'api_authentication_not_configured' });
     if (!authorized(request)) return json(response, 401, { error: 'unauthorized' });
     try {
-      return await planWithOpenAI(request, response);
+      return await planBobTurn(request, response);
     } catch (error) {
-      return json(response, 502, { error: error instanceof Error ? error.message : 'planning_failed' });
+      return json(response, 502, { ok: false, error: error instanceof Error ? error.message : 'planning_failed', route_selected: 'error' });
     }
   }
   if (!apiToken) return json(response, 503, { error: 'api_authentication_not_configured' });
   if (!authorized(request)) return json(response, 401, { error: 'unauthorized' });
   try {
+    if (request.method === 'POST' && request.url === '/api/bob/subagent') return await runBobSubagentStep(request, response);
+    if (request.method === 'GET' && request.url === '/api/bob/health') return await bobHealth(request, response);
     if (request.method === 'POST' && request.url === '/api/bob/voice/transcribe') return await proxyVoiceTranscription(request, response);
     if (request.method === 'POST' && request.url === '/api/bob/voice/speak') return await proxyVoiceSpeech(request, response);
     if (request.method === 'POST' && request.url === '/api/navigation/route') return await routeGuidance(request, response);

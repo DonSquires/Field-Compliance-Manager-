@@ -10,7 +10,7 @@ const { collectBuilderLiveContext } = require('./builder-live-context');
 const { buildAtlasGraph } = require('./scripts/atlas-graph');
 const { createModelGatewayConfig, invokeBuilderModel } = require('./builder-model-gateway');
 const { loadBuilderRuntimeSnapshot, advanceBuilderJob, runBuilderUntilPause } = require('./builder-runtime-coordinator');
-const { createBranchWorkspace, commitVerifiedPatch, publishWorkspaceBranch, createGiteaPullRequest, workspacePathForBranch } = require('./builder-branch-workspace');
+const { createBranchWorkspace, commitVerifiedPatch, publishWorkspaceBranch, createGiteaPullRequest, workspacePathForBranch, createGitHubPullRequest, ensureSourceCheckout, githubAuthHeader, githubRepoUrl, resolveRemoteHead } = require('./builder-branch-workspace');
 
 const port = Number(process.env.PORT || 8080);
 const webhookSecret = process.env.GITEA_WEBHOOK_SECRET || '';
@@ -45,6 +45,25 @@ const giteaBaseUrl = process.env.GITEA_BASE_URL || '';
 const giteaToken = process.env.GITEA_TOKEN || '';
 const giteaOwner = process.env.GITEA_OWNER || '';
 const giteaRepo = process.env.GITEA_REPO || '';
+// GitHub is the single target build; Gitea stays available as the mirror host.
+const githubToken = process.env.GITHUB_TOKEN || '';
+const githubOwner = process.env.GITHUB_OWNER || '';
+const githubRepo = process.env.GITHUB_REPO || '';
+const builderGitHost = process.env.BUILDER_GIT_HOST || (githubToken && githubOwner && githubRepo ? 'github' : 'gitea');
+const builderSourceDir = process.env.BOB_BUILDER_SOURCE_DIR || path.join(stateDir, 'builder-source');
+
+// Where git work (worktrees, commits, pushes) starts from. On the GitHub host
+// this is a real clone kept at the job's pinned SHA; the image copy at
+// assessmentRoot has no .git and is only read for assessment.
+function builderGitSource(targetSha) {
+  if (builderGitHost !== 'github') return assessmentRoot;
+  return ensureSourceCheckout({ sourceDir: builderSourceDir, repoUrl: githubRepoUrl(githubOwner, githubRepo), authHeader: githubAuthHeader(githubToken), sha: targetSha }).sourceDir;
+}
+
+function builderRepositoryHead(ref = 'main') {
+  if (builderGitHost === 'github') return { host: 'github', ref, sha: resolveRemoteHead({ repoUrl: githubRepoUrl(githubOwner, githubRepo), authHeader: githubAuthHeader(githubToken), ref }) };
+  return { host: 'gitea', ref, sha: resolveRemoteHead({ repoUrl: `${giteaBaseUrl.replace(/\/+$/, '')}/${giteaOwner}/${giteaRepo}.git`, authHeader: giteaToken ? `Authorization: token ${giteaToken}` : null, ref }) };
+}
 const stateFile = path.join(stateDir, 'bob-state.json');
 const maxRequestBytes = 1024 * 1024;
 const jobs = new Map();
@@ -207,7 +226,7 @@ async function createJob(input, actor) {
 
 async function route(req, res, body) {
   const url = new URL(req.url, `http://${req.headers.host || 'localhost'}`);
-  if (req.method === 'GET' && url.pathname === '/health') return json(res, 200, { status: 'ok', service: 'bob-control-plane', activeLease: Boolean(activeLease) });
+  if (req.method === 'GET' && url.pathname === '/health') return json(res, 200, { status: 'ok', service: 'bob-control-plane', activeLease: Boolean(activeLease), builderGitHost, builderSourceConfigured: builderGitHost === 'github' ? Boolean(githubToken && githubOwner && githubRepo) : Boolean(giteaBaseUrl && giteaToken && giteaOwner && giteaRepo) });
   if (req.method === 'POST' && url.pathname === '/api/bob/builder/model-run') {
     if (!modelGatewayAuthorized(req)) return json(res, 401, { error: 'model gateway unauthorized' });
     const result = await invokeBuilderModel({ input: body, config: modelGatewayConfig });
@@ -267,6 +286,14 @@ async function route(req, res, body) {
 
   const builderMatch = url.pathname.match(/^\/api\/bob\/builder\/jobs\/([^/]+)(?:\/(advance|run|workspace|commit|publish|pull-request))?$/);
   const builderContextMatch = url.pathname.match(/^\/api\/bob\/builder\/jobs\/([^/]+)\/context$/);
+  if (req.method === 'GET' && url.pathname === '/api/bob/builder/repository/head') {
+    try {
+      const ref = String(url.searchParams.get('ref') || 'main');
+      return json(res, 200, builderRepositoryHead(ref));
+    } catch {
+      return json(res, 503, { error: 'Builder repository head is unavailable' });
+    }
+  }
   if (builderContextMatch && req.method === 'GET') {
     if (!builderSupabase) return json(res, 503, { error: 'Builder persistence is unavailable' });
     try {
@@ -326,7 +353,7 @@ async function route(req, res, body) {
       const { data: job, error } = await builderSupabase.from('builder_jobs').select('id,target_sha,workspace_branch,workspace_head_sha').eq('id', builderMatch[1]).single();
       if (error || !job?.target_sha) return json(res, 404, { error: 'Builder job is unavailable' });
       if (job.workspace_branch && job.workspace_head_sha) return json(res, 200, { branch: job.workspace_branch, head: job.workspace_head_sha, existing: true });
-      const workspace = createBranchWorkspace({ sourceDir: assessmentRoot, workspaceRoot: builderWorkspaceRoot, jobId: job.id, targetSha: job.target_sha });
+      const workspace = createBranchWorkspace({ sourceDir: builderGitSource(job.target_sha), workspaceRoot: builderWorkspaceRoot, jobId: job.id, targetSha: job.target_sha });
       const { data: bound, error: bindError } = await builderSupabase.rpc('builder_bind_workspace', { _job_id: job.id, _workspace_branch: workspace.branchName, _workspace_head_sha: workspace.head });
       if (bindError || !bound) return json(res, 409, { error: 'Builder workspace could not be bound' });
       return json(res, 201, { branch: workspace.branchName, head: workspace.head, existing: workspace.existing });
@@ -344,7 +371,7 @@ async function route(req, res, body) {
       const { data: object, error: downloadError } = await builderSupabase.storage.from('builder-artifacts').download(artifact.storage_location.slice('supabase_storage://builder-artifacts/'.length));
       const patch = object ? Buffer.from(await object.arrayBuffer()).toString('utf8') : '';
       if (downloadError || !patch || crypto.createHash('sha256').update(patch).digest('hex') !== artifact.checksum) return json(res, 409, { error: 'Verified patch artifact integrity check failed' });
-      const workspace = createBranchWorkspace({ sourceDir: assessmentRoot, workspaceRoot: builderWorkspaceRoot, jobId: job.id, targetSha: job.workspace_head_sha, branchName: job.workspace_branch });
+      const workspace = createBranchWorkspace({ sourceDir: builderGitHost === 'github' ? builderSourceDir : assessmentRoot, workspaceRoot: builderWorkspaceRoot, jobId: job.id, targetSha: job.workspace_head_sha, branchName: job.workspace_branch });
       const commit = commitVerifiedPatch({ workspacePath: workspace.workspacePath, branchName: workspace.branchName, patch, message: `Bob Builder: ${artifact.id}` });
       const { data: updated, error: recordError } = await builderSupabase.rpc('builder_record_workspace_commit', { _job_id: job.id, _expected_head_sha: job.workspace_head_sha, _commit_sha: commit.commitSha });
       if (recordError || !updated) return json(res, 409, { error: 'Builder workspace commit could not be recorded' });
@@ -358,7 +385,9 @@ async function route(req, res, body) {
       if (!job?.workspace_branch || !job.workspace_head_sha) return json(res, 409, { error: 'Verified Builder workspace is unavailable' });
       if (job.workspace_published_head_sha === job.workspace_head_sha) return json(res, 200, { branch: job.workspace_branch, head: job.workspace_head_sha, existing: true });
       const workspacePath = workspacePathForBranch(builderWorkspaceRoot, job.workspace_branch);
-      const publication = publishWorkspaceBranch({ workspacePath, branchName: job.workspace_branch, expectedHeadSha: job.workspace_head_sha });
+      const publication = builderGitHost === 'github'
+        ? publishWorkspaceBranch({ workspacePath, branchName: job.workspace_branch, expectedHeadSha: job.workspace_head_sha, pushUrl: githubRepoUrl(githubOwner, githubRepo), pushAuthHeader: githubAuthHeader(githubToken) })
+        : publishWorkspaceBranch({ workspacePath, branchName: job.workspace_branch, expectedHeadSha: job.workspace_head_sha });
       const { data: updated, error } = await builderSupabase.rpc('builder_record_workspace_publication', { _job_id: job.id, _expected_head_sha: publication.head });
       if (error || !updated) return json(res, 409, { error: 'Builder branch publication could not be recorded' });
       return json(res, 201, { branch: publication.branchName, head: publication.head, existing: false });
@@ -371,7 +400,10 @@ async function route(req, res, body) {
       if (!job?.workspace_branch || !job.workspace_head_sha || job.workspace_published_head_sha !== job.workspace_head_sha) return json(res, 409, { error: 'Published Builder workspace is required' });
       if (job.workspace_pull_request_head_sha === job.workspace_head_sha && job.workspace_pull_request_url) return json(res, 200, { branch: job.workspace_branch, head: job.workspace_head_sha, url: job.workspace_pull_request_url, existing: true });
       const workspacePath = workspacePathForBranch(builderWorkspaceRoot, job.workspace_branch);
-      const pullRequest = await createGiteaPullRequest({ workspacePath, branchName: job.workspace_branch, expectedHeadSha: job.workspace_head_sha, title: `Bob Builder: ${job.title}`, body: `## Bob Builder review\n\nVerified Builder workspace branch: \`${job.workspace_branch}\`\n\nPinned commit: \`${job.workspace_head_sha}\`\n\nThis pull request is for human review only. It does not authorize a merge or deployment.`, giteaBaseUrl, giteaToken, owner: giteaOwner, repo: giteaRepo });
+      const reviewBody = `## Bob Builder review\n\nVerified Builder workspace branch: \`${job.workspace_branch}\`\n\nPinned commit: \`${job.workspace_head_sha}\`\n\nThis pull request is for human review only. It does not authorize a merge or deployment.`;
+      const pullRequest = builderGitHost === 'github'
+        ? await createGitHubPullRequest({ workspacePath, branchName: job.workspace_branch, expectedHeadSha: job.workspace_head_sha, title: `Bob Builder: ${job.title}`, body: reviewBody, githubToken, owner: githubOwner, repo: githubRepo })
+        : await createGiteaPullRequest({ workspacePath, branchName: job.workspace_branch, expectedHeadSha: job.workspace_head_sha, title: `Bob Builder: ${job.title}`, body: reviewBody, giteaBaseUrl, giteaToken, owner: giteaOwner, repo: giteaRepo });
       const { data: updated, error } = await builderSupabase.rpc('builder_record_workspace_pull_request', { _job_id: job.id, _expected_head_sha: pullRequest.head, _pull_request_url: pullRequest.url });
       if (error || !updated) return json(res, 409, { error: 'Builder pull request could not be recorded' });
       return json(res, 201, { ...pullRequest, existing: false });

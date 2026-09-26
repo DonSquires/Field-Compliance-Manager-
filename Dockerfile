@@ -1,5 +1,8 @@
 FROM node:22-alpine
 
+# Builder workspaces, verified commits, and pushes need a real git binary.
+RUN apk add --no-cache git
+
 ENV NODE_ENV=production
 ENV PORT=8080
 ENV NODE_PATH=/opt/bob/node_modules

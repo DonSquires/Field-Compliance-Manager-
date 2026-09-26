@@ -92,7 +92,9 @@ RLS remains the hard backstop underneath. In this repo the mechanism is
 | Caddie — tool catalogue from Atlas-wired capability; describes, never selects | `caddie.ts` `TOOL_REGISTRY` + caddie cards | `supabase/functions/onspace-ai-chat/caddie.ts` (`generateToolCatalogue`) |
 | Oracle — truth-state of turn, caller, candidate effect, proof grade, safety | welfare seam | `conductor-oracle.ts`, `conductor-welfare-seam.ts` |
 | Atlas — capability map, terrain edges, gap report, blast radius | `bob-query-atlas` (admiral) | `bob-query-atlas`, `bob_capability_map`, `bob_app_map_edges`, `scripts/atlas-refresh.js` |
-| Planner | `apps/api/src/bobPlan.ts` (23 routes) → conductor cross-checks | VPS `/api/bob/plan` via `callPlan`; `bob-inference` |
+| Planner | `apps/api/src/bobPlan.ts` (23 routes) → conductor cross-checks | VPS `/api/bob/plan` via `callPlan` → `services/fcm-api/src/bob/plan.js` (prompt `planPrompt.js`, model routing `modelGateway.js`); `bob-inference` fallback |
+| Verifier (chat lane) | — | `services/fcm-api/src/bob/verify.js`: deterministic checks + independent critic (different model), recommend-only; author repairs once |
+| Working subagents | Duo flows (GitLab) | planner `delegate` → conductor `runSubagents` (read-only tools via `dispatchTool`) + VPS `/api/bob/subagent` |
 | Memory | request → `bob_messages` → `bob_context_memory` → `bob_knowledge_cards` → `bob_learning_memory`; `bob_self_memory` is Bob's own diary; growth is human-judged | same tables live; `bob_self_memory` present; knowledge cards never written from chat |
 | Build/ops | `bob-review-merge-request`, `bob-read-issues`, Gitea/GitLab MR flow | Builder control plane (`bob-control-plane-server.js`, `worker-executor.js`, `builder_*` tables, `builder_approvals`), Gitea PRs, no merge/deploy authority |
 
@@ -179,3 +181,53 @@ runner continue through implement → verify → repair loops on subagent eviden
 rather than stopping for a human after each specialist action; stop only at a
 protected path, a blocked state, a failed verification the subagents cannot
 repair, or the operational action ceiling.
+
+### 2026-09-26 — Bob's brain restored, verified, delegating, in-house (Don Squires)
+
+> "Bob is not just a chat bot, he is an agentic heuristic agent that works
+> through the entire app and is also meant to be able to do self healing work …
+> subagents to verify Bob's work before it is sent to the user … Bob should be
+> able to ask sub agents to do work for him as appropriate … Bob should be
+> running in the VPS and laptop GPU … self healing must be able to work in the
+> GH repo."
+
+**Finding.** The canonical planner (`apps/api/src/bobPlan.ts` in the lineage)
+was lost when the VPS API was rebuilt on 2026-09-06; `/api/bob/plan` had become
+a one-sentence stub that dropped persona, the in-flight plan, conversation
+facts, knowledge, and task state. That is why Bob interrogated instead of
+drafting and re-asked questions the owner had already answered ("yes to all").
+
+**Ruling and mechanism.**
+- **Planner** — restored and extended in `services/fcm-api/src/bob/planPrompt.js`
+  (Truth Protocol, drafting discipline, one-question rule, blanket-answer
+  resume, delegation, self-heal evidence-first). One canonical prompt; the
+  conductor stays the gate.
+- **Verifying subagent (chat lane)** — `services/fcm-api/src/bob/verify.js`:
+  deterministic checks plus an independent critic on a *different model
+  identity* from the author, recommend-only; the author repairs once from
+  reviewer notes (self-heal), then a mechanical scrub as the last resort. The
+  verdict is persisted on the turn (`bob_messages.metadata.verification`,
+  `bob_event_log` `plan_verified`) and shown to the user as "Checked".
+- **Working subagents** — planner action `delegate`; the conductor runs up to
+  three read-only subagents in parallel under the caller's own envelope through
+  `dispatchTool` (rank gating, egress and audit unchanged), then Bob plans again
+  over their findings. Writes never reach a subagent. Events `subagent_started`,
+  `subagent_step`, `subagent_completed`, `delegation_completed`.
+- **Synthesis pass** — a tool result that is reasoning context (`[INTERNAL…]`,
+  web research, Atlas, SQL rows) is never returned raw; the planner answers over
+  it (`synthesis_completed`).
+- **In-house brain** — `services/fcm-api/src/bob/modelGateway.js` routes each
+  role through `gpu_workstation → vps_ollama → openai` chains
+  (`BOB_ROUTE_*`); the owner's laptop GPU joins over a forwarding-only reverse
+  SSH link (`scripts/bob-gpu-link/`). The author role stays on the strongest
+  model unless routed in-house on purpose; the verifier prefers the GPU, which
+  also keeps it a different identity from the author. Health: `/api/bob/health`.
+- **Self-heal in the GitHub repository** — Bob tool `create_builder_job`
+  (admiral only, two-turn confirm) opens a Builder job pinned to GitHub `main`;
+  the Builder lane publishes to GitHub with per-invocation credentials and opens
+  a **draft** pull request (`builder-branch-workspace.js`,
+  `bob-control-plane-server.js` `BUILDER_GIT_HOST=github`). Merge, deploy and
+  migrations remain human (§9 protected paths unchanged).
+
+**What does not move.** Rank and Privacy Act rails, `isGovernanceLocked` on the
+chat path, the sensitive floor, and the protected paths are untouched.

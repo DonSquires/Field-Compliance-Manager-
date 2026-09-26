@@ -245,6 +245,11 @@ const TOOL_REGISTRY = {
     governance: 'WRITE-draft; human-confirms-before-dispatch; output is always DRAFT MR; Bob NEVER merges',
     effect_class: 'draft_governed_write'
   },
+  create_builder_job: {
+    purpose: "SELF-HEAL / BUILD in the GitHub repository (DonSquires/Field-Compliance-Manager-, the single target build): open a Bob Builder job that works the way a coding agent works — specialist subagents research the code, implement a patch on a branch pinned to the current main commit, run tests, independent code + security review, then a DRAFT GitHub pull request for human review. Bob NEVER merges or deploys. Use this when you have found a reproducible defect (a failing verification, a broken tool path, a repeated error, a wrong page wiring, a schema/Atlas gap) or the owner asks for a code change. FIRST gather evidence with repo_search / self_audit / query_atlas / sql_read so the brief is grounded; THEN select this tool. Two-turn: your first selection PROPOSES the job brief for human review; on the human's confirmation select it again and it is created and started. Args: { title: \"short title\", task_description: \"full brief: symptom, evidence (redacted), suspected cause, files/functions involved, acceptance test, out-of-scope\", frontend_required?: boolean, backend_required?: boolean, code_review_mode?: \"independent\"|\"human\" }.",
+    governance: 'WRITE-draft; admiral only; human-confirms-before-creation; output is a DRAFT GitHub PR; Bob NEVER merges or deploys',
+    effect_class: 'draft_governed_write'
+  },
   generic_write: {
     purpose: 'RESERVED (not yet active): a governed, schema-driven create/update on an allowlisted table via the generic path, for entities no bespoke propose_* tool covers. Staged for a governed rollout; currently blocked.',
     governance: 'WRITE-governed; governance-locked (not yet active); bounded by TABLE_ALLOWLIST + GUARDED_COLUMNS + AUTH_DELEGATE',
@@ -603,6 +608,7 @@ const TOOL_REGISTRY = {
     self_audit: 'bob-self-audit',
     review_merge_request: 'bob-review-merge-request',
     dispatch_flow: 'bob-dispatch-flow',
+    create_builder_job: 'bob-builder-control-room',
     check_proposals: 'bob-check-proposals',
     generic_write: 'bob-upsert-generic',
     // Proposal tools — each dispatches to its OWN edge function, NOT to

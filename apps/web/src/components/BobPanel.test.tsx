@@ -335,10 +335,42 @@ describe('BobPanel', () => {
 
     expect(await screen.findByText('Idle')).toBeTruthy();
     expect(screen.getByText('Ready for input. No Bob work is running.')).toBeTruthy();
+    // Idle is announced to assistive tech but does not take a visible band above the thread.
+    expect(screen.getByRole('status').className).toContain('sr-only');
     expect(screen.getByText(/Any file type up to 128 GB each/)).toBeTruthy();
     expect(screen.getByLabelText('Attach files')).toBeTruthy();
     expect(screen.getByRole('button', { name: 'New chat' })).toBeTruthy();
     expect(screen.getByRole('button', { name: 'Start voice capture' })).toBeTruthy();
+  });
+
+  it('keeps the thread uncluttered: quick actions live in the empty state and workspace boilerplate is not chipped', async () => {
+    const { rerender } = render(<BobPanel open onClose={() => undefined} context={{ page: 'bob', workspace: 'agent command center', operating_model: 'research, plan, verify, propose, approve' }} />);
+
+    expect(await screen.findByRole('button', { name: 'Plan work' })).toBeTruthy();
+    expect(screen.queryByLabelText('Active context')).toBeNull();
+    expect(screen.queryByText(/Start recording/)).toBeNull();
+
+    messageHistory = [{ id: 'message-1', role: 'assistant', content: 'Here is the plan.', confidence: 0.9, flagged: false, created_at: '2026-09-02T06:00:00.000Z', metadata: {} }];
+    rerender(<BobPanel open onClose={() => undefined} context={{ site: { id: 'site-1', name: 'North Plant' } }} />);
+    fireEvent.click(screen.getByRole('button', { name: 'New chat' }));
+    await waitFor(() => expect(screen.queryByRole('button', { name: 'Plan work' })).toBeTruthy());
+  });
+
+  it('surfaces the independent verifier verdict and delegated subagents on a reply', async () => {
+    messageHistory = [{
+      id: 'message-1', role: 'assistant', content: 'Casual Security Officer — draft agreement.', confidence: 0.88,
+      flagged: false, created_at: '2026-09-02T06:00:00.000Z',
+      metadata: {
+        verification: { checked: true, verdict: 'repair', replanned: true, issues: [{ code: 're_ask_after_blanket_answer', severity: 'block' }] },
+        subagent_runs: [{ role: 'research', goal: 'NZ COA requirements', status: 'completed' }],
+      },
+    }];
+
+    render(<BobPanel open onClose={() => undefined} />);
+
+    const badge = await screen.findByText('Checked · revised');
+    expect(badge.closest('span')?.getAttribute('title')).toContain('re_ask_after_blanket_answer');
+    expect(screen.getByText('Subagents: research')).toBeTruthy();
   });
 
   it('records voice as an audio evidence attachment', async () => {
@@ -374,10 +406,11 @@ describe('BobPanel', () => {
     render(<BobPanel open onClose={() => undefined} />);
 
     fireEvent.click(await screen.findByRole('button', { name: 'Start voice capture' }));
-    expect(await screen.findByText('Stop recording')).toBeTruthy();
+    const stopButton = await screen.findByRole('button', { name: 'Stop voice capture' });
+    expect(stopButton.getAttribute('aria-pressed')).toBe('true');
     expect(screen.getByText('Bob is listening')).toBeTruthy();
     expect(screen.getByText('Recording voice note')).toBeTruthy();
-    fireEvent.click(screen.getByLabelText('Stop voice capture'));
+    fireEvent.click(stopButton);
 
     await waitFor(() => {
       expect(screen.getByText(/voice-note-.*\.webm/)).toBeTruthy();

@@ -288,6 +288,7 @@ function safeAgentWorkspaceContext(value) {
         'fetch_bylaw_source',
         'propose_freedom_camping_org_strategy',
         'dispatch_flow',
+        'create_builder_job',
         'review_merge_request',
         'config_error',
         'plan_failed',
@@ -695,6 +696,8 @@ const WRITE_CAPABLE_TOOLS = new Set([
   'write_bob_chat',
   // dispatch_flow dispatches a Duo coding flow (produces a DRAFT MR) — write-capable.
   'dispatch_flow',
+  // create_builder_job opens a GitHub Builder job (produces a DRAFT PR) — write-capable.
+  'create_builder_job',
   // C5 stage 1b (#243): generic_write is write-capable, so the explicit
   // write-refusal guard must cover it too (an in-message "don't write" blocks it).
   'generic_write'
@@ -1445,7 +1448,8 @@ function computeEgressForbiddenSet(caps, meta) {
     t.tool === 'write_bob_chat' && caps.tier === 'admiral' || t.tool === 'query_atlas' && caps.tier === 'admiral' || t.tool === 'read_issues' && caps.tier === 'admiral' || // write_self_memory is Bob's direct-write to his own memory — ADMIRAL ONLY.
     t.tool === 'write_self_memory' && caps.tier === 'admiral' || // read_self_memory is Bob's read of his own memory — ADMIRAL ONLY.
     t.tool === 'read_self_memory' && caps.tier === 'admiral' || // dispatch_flow dispatches a governed Duo coding flow — ADMIRAL ONLY.
-    t.tool === 'dispatch_flow' && caps.tier === 'admiral' || allowed.has(t.tool) || allowed.has(envelopeName[t.tool] ?? ''));
+    t.tool === 'dispatch_flow' && caps.tier === 'admiral' || // create_builder_job opens a GitHub self-heal/build job (DRAFT PR) — ADMIRAL ONLY.
+    t.tool === 'create_builder_job' && caps.tier === 'admiral' || allowed.has(t.tool) || allowed.has(envelopeName[t.tool] ?? ''));
 }
 // ── Persona + platform grounding (passed to the brain) ───────────────────────
 function buildPersona(tier) {
@@ -1481,11 +1485,12 @@ function buildPersona(tier) {
   ].filter(Boolean).join('\n');
 }
 const PLATFORM_CONTEXT = [
-  '[PLATFORM] Field Compliance Manager: a multi-module NZ field operations + compliance platform (Iron Eagle Security).',
-  'Canonical model: Organization -> (client_sites = addressed Site | location_zones = area Zone) -> checkpoints; events in location_events; per-place services in site_services.',
+  '[PLATFORM] Field Compliance Manager (FCM): a multi-tenant New Zealand enterprise SaaS for field compliance and accountability — security guarding and patrols, investigations, freedom camping, parking, noise, biosecurity, smoke control, welfare and safety, dispatch, HR and people, rostering, finance, reporting, CCTV/evidence intake, and a field-staff portal — all sharing one schema spine. Each tenant organisation is served as its own business; the caller\'s organisation, name, and role are in the WHO YOU ARE WORKING WITH block.',
+  'Purpose (FOUNDATION): accountability recorded honestly, preserved faithfully, and provable in court. The harmed party and the place of harm are the anchor; the operator is custodian of the record, not its owner.',
+  'Operating spine: Organisation -> Agreement (service_agreements; Model A: every organisation is own-rooted and provider/client roles are contextual per agreement) -> Place (one location house = locations, with Site = client_sites and Zone = location_zones facets, checkpoints, geofences; events in location_events; per-place services in site_services) -> Staff (people and capability) -> Roster (coverage and availability) -> Dispatch (live response) -> Evidence (field outcomes, media, reports) -> Finance (rates and billing) -> Reports (accountability).',
   'client_sites ownership is client_organization_id (NO organization_id). Import-matching columns: external_ref (source Client ID), internal_client_ref (source Internal ClientId), address_match_key, name, address.',
-  'Modules: CRM, Sites, Staff, Roster, Dispatch, FC Patrol, Locations, Compliance, Reports, Finance, Vehicles, Persons, Welfare, PTT.',
-  'Bob is the in-app operational copilot + the single import/enrichment system. Bob proposes; humans approve high-impact writes. Bob never runs DDL and never writes to auth/identity/governance/audit tables.'
+  'Unified field model: every field role is "a guard on a place for a shift, with a toolset"; a module is a data profile attached to the shared spines (see MODULE MAP), never a code branch.',
+  'Bob is the platform\'s reasoning engine and single import/enrichment system: he thinks fleet-wide, speaks within the caller\'s rank, does research and drafting himself, delegates bounded read-only work to subagents, proposes governed writes for human approval, and never runs DDL or writes auth/identity/governance/audit tables.'
 ].join('\n');
 const BUILDER_WORKSPACE_CONTEXT = [
   '[BUILDER WORKSPACE] You are Bob Builder, the coding agent for an allowlisted, commit-pinned repository job.',
@@ -1621,7 +1626,12 @@ async function callPlan(planPayload, allowFallback = true) {
     conversation_facts: planPayload.conversation_facts ?? undefined,
     // C2 (#240): forward the module map (all profiles, enabled-flagged) so the
     // planner can reason about how any module fits this org.
-    enabled_module_profiles: planPayload.enabled_module_profiles ?? undefined
+    enabled_module_profiles: planPayload.enabled_module_profiles ?? undefined,
+    // Delegation is offered to the author only where the conductor can run
+    // subagents (never on synthesis/answer-only passes); verify defaults on.
+    allow_delegation: planPayload.allow_delegation !== false,
+    verify: planPayload.verify !== false,
+    request_id: planPayload.request_id ?? undefined
   };
   // Per-attempt plan timeout. Env-driven (BOB_PLAN_TIMEOUT_MS) so the plan
   // model can keep medium reasoning_effort without complex/technical questions
@@ -1668,6 +1678,78 @@ async function callPlan(planPayload, allowFallback = true) {
     const isTimeout = err?.name === 'AbortError';
     console.error(`[conductor][callPlan] ${isTimeout ? 'TIMEOUT (55s)' : 'ERROR'}: ${err?.message ?? err}`);
     return fallback(isTimeout ? 'VPS plan timeout' : String(err?.message ?? err));
+  }
+}
+// callSubagentStep: one bounded step of a read-only subagent Bob delegated to
+// (VPS /api/bob/subagent). No bob-inference fallback: a missing subagent path
+// simply ends the delegation with whatever was gathered.
+const BOB_SUBAGENT_MAX_STEPS = Math.max(1, Math.min(8, parseInt(Deno.env.get('BOB_SUBAGENT_MAX_STEPS') ?? '4', 10) || 4));
+const BOB_SUBAGENT_BUDGET_MS = Math.max(10_000, parseInt(Deno.env.get('BOB_SUBAGENT_BUDGET_MS') ?? '45000', 10) || 45_000);
+// Tools a subagent may run: read-only, loop-safe, plus the two research tools.
+// Writes never reach a subagent; the conductor also intersects with the caller's catalogue.
+const SUBAGENT_DELEGABLE_TOOLS = new Set([
+  'query_records',
+  'client_site_compare',
+  'scv_lookup',
+  'schema_inspect',
+  'retrieve_knowledge',
+  'understand_documents',
+  'web_research',
+  'sql_read',
+  'repo_search',
+  'query_atlas',
+  'read_issues',
+  'resolve_address',
+  'resolve_geofence',
+  'self_audit',
+  'assess_system'
+]);
+async function callSubagentStep(payload) {
+  const apiUrl = (Deno.env.get('API_URL') ?? '').replace(/\/+$/, '');
+  const apiToken = Deno.env.get('API_TOKEN') ?? '';
+  if (!apiUrl || !apiToken) return {
+    ok: false,
+    status: 503,
+    data: {
+      error: 'subagent path not configured'
+    }
+  };
+  const controller = new AbortController();
+  const timer = setTimeout(()=>controller.abort(), 50_000);
+  try {
+    const r = await fetch(`${apiUrl}/api/bob/subagent`, {
+      method: 'POST',
+      headers: {
+        'Content-Type': 'application/json',
+        'Authorization': `Bearer ${apiToken}`
+      },
+      body: JSON.stringify(payload),
+      signal: controller.signal
+    });
+    clearTimeout(timer);
+    const text = await r.text();
+    let data = {};
+    try {
+      data = JSON.parse(text);
+    } catch  {
+      data = {
+        raw: text.slice(0, 500)
+      };
+    }
+    return {
+      ok: r.ok,
+      status: r.status,
+      data
+    };
+  } catch (err) {
+    clearTimeout(timer);
+    return {
+      ok: false,
+      status: 502,
+      data: {
+        error: err?.name === 'AbortError' ? 'subagent timeout' : String(err?.message ?? err)
+      }
+    };
   }
 }
 async function retrieveKnowledgeTraced(admin, query, scopeOrgId, matchCount = 4) {
@@ -1795,6 +1877,15 @@ async function loadHistory(supabase, conversationId, limit = 8) {
         dispatch: md.pending_dispatch
       };
     // keep scanning older turns in case a proposal precedes it.
+    }
+    // A create_builder_job turn with a pending_builder_job marker: Bob composed a
+    // GitHub self-heal/build brief and asked the human to confirm. Same tier as
+    // dispatch_pending so a bare "yes" creates the job instead of re-composing.
+    if (!dispatchPending && md.tool === 'create_builder_job' && md.pending_builder_job && typeof md.pending_builder_job === 'object') {
+      dispatchPending = {
+        kind: 'builder_job_pending',
+        builder_job: md.pending_builder_job
+      };
     }
     if (!askPending && md.intent === 'clarifying_questions' && Array.isArray(md.questions) && md.questions.length) {
       askPending = {
@@ -6046,6 +6137,13 @@ serve(async (req)=>{
     let role = String(profile?.role ?? 'guest');
     const orgId = profile?.organization_id ?? null;
     const displayName = String(profile?.display_name ?? 'there');
+    // Bob serves each tenant as their own copilot; he needs the organisation's
+    // name (never just its id) to write in their voice. Best-effort read.
+    let organizationName = null;
+    if (orgId) {
+      const { data: orgRow } = await admin.from('organizations').select('name').eq('id', orgId).maybeSingle();
+      organizationName = orgRow?.name ? String(orgRow.name) : null;
+    }
     // ── OWNER ELEVATION ────────────────────────────────────────────────────
     // Pillar C (#138): OWNER_EMAILS + resolveEffectiveRole imported from
     // _shared/auth.ts (single source of truth). Don Squires is the platform
@@ -6704,6 +6802,7 @@ serve(async (req)=>{
       } : {},
       contextMemory: {
         organization_id: orgId,
+        organization_name: organizationName,
         user_tier: caps.tier,
         user_role: role,
         display_name: displayName,
@@ -6726,7 +6825,7 @@ serve(async (req)=>{
     const canon = (s)=>String(s ?? '').toLowerCase().replace(/[^a-z0-9]/g, '');
     /** Parse a raw plan decision into normalised action/tool/args. */ const parsePlanDecision = (d)=>{
       const ra = canon(d.action);
-      const na = ra === 'usetool' ? 'use_tool' : ra === 'ask' ? 'ask' : ra === 'introspect' ? 'introspect' : 'answer';
+      const na = ra === 'usetool' ? 'use_tool' : ra === 'ask' ? 'ask' : ra === 'introspect' ? 'introspect' : ra === 'delegate' ? 'delegate' : 'answer';
       const ct = na === 'use_tool' ? resolveCatalogueTool(catalogue, d.tool) : null;
       const a = d.args && typeof d.args === 'object' ? d.args : {};
       // Always inject conversation_id into args so propose functions can save it
@@ -6738,7 +6837,185 @@ serve(async (req)=>{
         args: a
       };
     };
-    // Mutable carry-forward: when the reasoning loop executes resolve_geofence,
+    /** Planner-side trace worth persisting with the turn: verification verdict, models, subagent runs. */ let subagentRunsThisTurn = [];
+    const planTrace = (d)=>{
+      const trace = {};
+      if (d?.verification && typeof d.verification === 'object') trace.verification = d.verification;
+      if (typeof d?.model === 'string') trace.plan_model = d.model;
+      if (typeof d?.provider === 'string') trace.plan_provider = d.provider;
+      if (subagentRunsThisTurn.length) trace.subagent_runs = subagentRunsThisTurn;
+      return trace;
+    };
+    // ── DELEGATION — Bob's working subagents ──────────────────────────────────
+    // Bob may hand up to three bounded, READ-ONLY sub-tasks to subagents that run
+    // in parallel under the caller's own capability envelope: each step is a VPS
+    // /api/bob/subagent decision executed here through dispatchTool (so rank
+    // gating, egress, and audit apply exactly as they do for Bob), until the
+    // subagent reports "done" or hits its step/time cap. Findings return to the
+    // planner as task_state.subagent_results. Writes never reach a subagent.
+    const runSubagents = async (requests, dispatch)=>{
+      const allowedNames = new Set(catalogue.map((t)=>t.tool).filter((name)=>SUBAGENT_DELEGABLE_TOOLS.has(name)));
+      const jobs = (Array.isArray(requests) ? requests : []).slice(0, 3).map((req)=>({
+          role: [
+            'research',
+            'data',
+            'drafting',
+            'review'
+          ].includes(String(req?.role)) ? String(req.role) : 'research',
+          goal: String(req?.goal ?? '').trim(),
+          inputs: req?.inputs && typeof req.inputs === 'object' ? req.inputs : {},
+          tools: catalogue.filter((t)=>allowedNames.has(t.tool) && (Array.isArray(req?.tools) ? req.tools.map(String).includes(t.tool) : false))
+        })).filter((job)=>job.goal && job.tools.length);
+      if (!jobs.length) return [];
+      const deadline = Date.now() + BOB_SUBAGENT_BUDGET_MS;
+      const runOne = async (job, index)=>{
+        const steps = [];
+        const signatures = new Set();
+        const sources = [];
+        await emitEvent('subagent_started', {
+          subagent: index + 1,
+          role: job.role,
+          goal: job.goal.slice(0, 300),
+          tools: job.tools.map((t)=>t.tool)
+        });
+        let outcome = {
+          status: 'completed',
+          findings: '',
+          confidence: null,
+          gaps: []
+        };
+        for(let step = 0; step <= BOB_SUBAGENT_MAX_STEPS; step++){
+          if (Date.now() > deadline) {
+            outcome.status = 'budget_exhausted';
+            break;
+          }
+          const decisionResp = await callSubagentStep({
+            role: job.role,
+            goal: job.goal,
+            inputs: job.inputs,
+            tools: job.tools.map((t)=>({
+                tool: t.tool,
+                purpose: t.purpose
+              })),
+            steps_taken: steps,
+            max_steps: BOB_SUBAGENT_MAX_STEPS,
+            user_message: message,
+            knowledge: job.role === 'research' || job.role === 'drafting' ? knowledge.slice(0, 20_000) : '',
+            platform_context: PLATFORM_CONTEXT
+          });
+          if (!decisionResp.ok) {
+            outcome.status = steps.length ? 'model_unavailable_partial' : 'model_unavailable';
+            break;
+          }
+          const d = decisionResp.data ?? {};
+          if (d.action !== 'use_tool' || !d.tool || steps.length >= BOB_SUBAGENT_MAX_STEPS) {
+            outcome = {
+              status: 'completed',
+              findings: String(d.findings ?? ''),
+              confidence: typeof d.confidence === 'number' ? d.confidence : null,
+              gaps: Array.isArray(d.gaps) ? d.gaps.map(String).slice(0, 8) : []
+            };
+            for (const s of Array.isArray(d.sources) ? d.sources : [])if (s) sources.push(String(s).slice(0, 400));
+            break;
+          }
+          const toolName = resolveCatalogueTool(job.tools, d.tool);
+          if (!toolName || !allowedNames.has(toolName)) {
+            steps.push({
+              tool: String(d.tool),
+              args: {},
+              outcome: 'tool_not_allowed',
+              result_summary: 'That tool is not available to this subagent.'
+            });
+            continue;
+          }
+          const toolArgs = d.args && typeof d.args === 'object' ? {
+            ...d.args
+          } : {};
+          if (conversationId) toolArgs._conversation_id = conversationId;
+          let sig;
+          try {
+            sig = `${toolName}::${JSON.stringify(toolArgs, Object.keys(toolArgs).sort())}`;
+          } catch  {
+            sig = `${toolName}::${String(d.args)}`;
+          }
+          if (signatures.has(sig)) {
+            steps.push({
+              tool: toolName,
+              args: toolArgs,
+              outcome: 'repeat_blocked',
+              result_summary: 'Identical call already made; use the earlier result.'
+            });
+            continue;
+          }
+          signatures.add(sig);
+          let stepResult;
+          try {
+            stepResult = await dispatch(toolName, toolArgs, {});
+          } catch (err) {
+            stepResult = {
+              reply: 'Tool failed for this step.',
+              meta: {
+                tool: toolName,
+                outcome: 'error',
+                tool_call_error: String(err?.message ?? err).slice(0, 300)
+              }
+            };
+          }
+          const summary = String(stepResult?.reply ?? '').replace(/^\[INTERNAL[^\]]*\]\s*/i, '');
+          steps.push({
+            tool: toolName,
+            args: toolArgs,
+            outcome: String(stepResult?.meta?.outcome ?? 'ok'),
+            result_summary: sliceWithTruncationDisclosure(summary, LOOP_STEP_SUMMARY_BUDGET * 3, `subagent ${job.role} step ${steps.length + 1}`)
+          });
+          await emitEvent('subagent_step', {
+            subagent: index + 1,
+            role: job.role,
+            step: steps.length,
+            tool: toolName,
+            outcome: String(stepResult?.meta?.outcome ?? 'ok')
+          }, {
+            tool: toolName,
+            outcome: String(stepResult?.meta?.outcome ?? 'ok')
+          });
+        }
+        if (!outcome.findings) {
+          outcome.findings = steps.length ? `Findings were not finalised (${outcome.status}); step results follow.\n${steps.map((s, i)=>`${i + 1}. ${s.tool} (${s.outcome}): ${s.result_summary.slice(0, 2500)}`).join('\n')}` : `The subagent could not gather anything (${outcome.status}).`;
+        }
+        await emitEvent('subagent_completed', {
+          subagent: index + 1,
+          role: job.role,
+          status: outcome.status,
+          steps: steps.length,
+          confidence: outcome.confidence
+        });
+        return {
+          role: job.role,
+          goal: job.goal,
+          status: outcome.status,
+          findings: outcome.findings,
+          confidence: outcome.confidence,
+          gaps: outcome.gaps,
+          sources: [
+            ...new Set(sources)
+          ].slice(0, 12),
+          steps: steps.map((s)=>({
+              tool: s.tool,
+              outcome: s.outcome
+            }))
+        };
+      };
+      return Promise.all(jobs.map((job, index)=>runOne(job, index)));
+    };
+    /** Compact, acyclic summary of subagent runs for metadata and the UI. */ const summariseSubagentRuns = (runs)=>runs.map((r)=>({
+        role: r.role,
+        goal: String(r.goal).slice(0, 300),
+        status: r.status,
+        confidence: r.confidence,
+        steps: r.steps,
+        sources: r.sources.slice(0, 6),
+        findings_preview: String(r.findings).slice(0, 400)
+      }));
     // the resolved geometry is stored here so dispatchTool can inject it into a
     // subsequent propose_freedom_camping_zone call within the SAME loop turn.
     // This mirrors the cross-turn carry-forward from pending.kind='geofence_resolved'
@@ -7974,6 +8251,133 @@ serve(async (req)=>{
               }
             };
           }
+        // create_builder_job: Bob's self-heal/build lane in the GitHub repo — ADMIRAL ONLY.
+        // Two-turn: PROPOSE the brief (meta carries pending_builder_job), then on a
+        // human affirmative (pending.kind='builder_job_pending') create the job via
+        // bob-builder-control-room (caller's JWT, same role checks) and start the
+        // bounded runner. Output is a DRAFT GitHub PR; nothing merges or deploys.
+        case 'create_builder_job':
+          {
+            if (caps.tier !== 'admiral') {
+              return {
+                reply: 'Opening a Builder job in the repository is restricted to the platform owner.',
+                meta: {
+                  tool: 'create_builder_job',
+                  outcome: 'forbidden'
+                }
+              };
+            }
+            const storedJob = pending && pending.kind === 'builder_job_pending' && pending.builder_job ? pending.builder_job : null;
+            const bjTitle = String(toolArgs.title ?? storedJob?.title ?? '').trim().slice(0, 200);
+            const bjDescription = String(toolArgs.task_description ?? toolArgs.brief ?? storedJob?.task_description ?? '').trim().slice(0, 12000);
+            const bjFrontend = typeof toolArgs.frontend_required === 'boolean' ? toolArgs.frontend_required : storedJob ? storedJob.frontend_required !== false : true;
+            const bjBackend = typeof toolArgs.backend_required === 'boolean' ? toolArgs.backend_required : storedJob ? storedJob.backend_required === true : false;
+            const bjReview = [
+              'independent',
+              'human'
+            ].includes(String(toolArgs.code_review_mode ?? storedJob?.code_review_mode)) ? String(toolArgs.code_review_mode ?? storedJob?.code_review_mode) : 'independent';
+            if (!bjTitle || bjDescription.length < 40) {
+              return {
+                reply: 'I need a short title and a grounded brief (symptom, evidence, suspected cause, files involved, acceptance test) before I open a Builder job. Let me gather the evidence first if you like.',
+                meta: {
+                  tool: 'create_builder_job',
+                  outcome: 'need_params'
+                }
+              };
+            }
+            if (!storedJob) {
+              return {
+                reply: [
+                  'I have composed a Builder job for the GitHub repository. Please review before I open it:',
+                  '',
+                  `**Title:** ${bjTitle}`,
+                  `**Scope:** ${bjFrontend ? 'web/frontend' : ''}${bjFrontend && bjBackend ? ' + ' : ''}${bjBackend ? 'backend/edge' : ''}${!bjFrontend && !bjBackend ? 'as described' : ''} · **Review:** ${bjReview === 'human' ? 'human code review' : 'independent model review + security review'}`,
+                  '',
+                  '**Brief:**',
+                  bjDescription.slice(0, 4000),
+                  bjDescription.length > 4000 ? `\n[... ${bjDescription.length - 4000} more chars ...]` : '',
+                  '',
+                  'The job pins the current `main` commit, works on its own `bob/job-…` branch, runs tests and review, and opens a **DRAFT pull request** for you. I never merge or deploy.',
+                  '',
+                  'Say **yes** or **go ahead** to open it, or tell me what to change in the brief.'
+                ].filter(Boolean).join('\n'),
+                meta: {
+                  tool: 'create_builder_job',
+                  outcome: 'proposed',
+                  pending_builder_job: {
+                    title: bjTitle,
+                    task_description: bjDescription,
+                    frontend_required: bjFrontend,
+                    backend_required: bjBackend,
+                    code_review_mode: bjReview
+                  }
+                }
+              };
+            }
+            // Prefer the caller's own registered repository; the owner (admiral,
+            // cross-org unrestricted) may fall back to the platform's single target build.
+            let bjProject = null;
+            if (orgId) {
+              const { data: ownProject } = await admin.from('builder_projects').select('id, organization_id').eq('status', 'active').eq('organization_id', orgId).order('name').limit(1).maybeSingle();
+              bjProject = ownProject ?? null;
+            }
+            if (!bjProject && caps.crossOrgUnrestricted) {
+              const { data: anyProject } = await admin.from('builder_projects').select('id, organization_id').eq('status', 'active').order('name').limit(1).maybeSingle();
+              bjProject = anyProject ?? null;
+            }
+            if (!bjProject?.id) {
+              return {
+                reply: 'There is no active Builder project registered for this organisation, so I cannot open a repository job yet. Register the repository in the Builder control room first.',
+                meta: {
+                  tool: 'create_builder_job',
+                  outcome: 'no_project'
+                }
+              };
+            }
+            const created = await callFn('bob-builder-control-room', authHeader, {
+              action: 'create',
+              organization_id: bjProject.organization_id ?? orgId,
+              project_id: bjProject.id,
+              title: bjTitle,
+              task_description: bjDescription,
+              description: `Opened by Bob from conversation ${conversationId ?? 'n/a'} on behalf of the owner.`,
+              target_ref: 'main',
+              requested_action: 'prepare_change',
+              target_environment: 'development',
+              code_review_mode: bjReview,
+              frontend_required: bjFrontend,
+              backend_required: bjBackend
+            });
+            if (!created.ok || !created.data?.job?.id) {
+              return {
+                reply: `I could not open the Builder job (${String(created.data?.error ?? created.status).slice(0, 200)}). The brief is kept — tell me to try again once the Builder host is reachable.`,
+                meta: {
+                  tool: 'create_builder_job',
+                  outcome: 'failed',
+                  error: String(created.data?.error ?? created.status).slice(0, 300),
+                  pending_builder_job: storedJob
+                }
+              };
+            }
+            const bjJob = created.data.job;
+            const started = await callFn('bob-builder-control-room', authHeader, {
+              action: 'run',
+              job_id: bjJob.id,
+              max_actions: 8
+            });
+            const runNote = started.ok ? 'The Builder runner has started working through research → implementation → tests → review.' : 'The job is created; the runner did not start automatically, so start it from the Builder control room.';
+            return {
+              reply: `Builder job **${bjTitle}** is open in the GitHub repository at commit \`${String(bjJob.target_sha ?? '').slice(0, 10)}\`. ${runNote} When it is ready you will get a **DRAFT pull request** to review — I will not merge or deploy it. Track it under Platform & Settings → Builder.`,
+              meta: {
+                tool: 'create_builder_job',
+                outcome: 'ok',
+                builder_job_id: bjJob.id,
+                builder_job_status: bjJob.status ?? null,
+                target_sha: bjJob.target_sha ?? null,
+                runner_started: Boolean(started.ok)
+              }
+            };
+          }
         case 'check_proposals':
           {
             const cpPayload = {
@@ -8059,10 +8463,11 @@ serve(async (req)=>{
         case 'understand_documents':
           return execUnderstandDocuments(conversationId, message);
         case 'web_research':
-          return execWebResearch(authHeader, message);
+          // Subagents and the planner may scope the query; a bare call researches the user's message.
+          return execWebResearch(authHeader, typeof toolArgs?.query === 'string' && toolArgs.query.trim() ? toolArgs.query.trim() : message);
         case 'retrieve_knowledge':
           {
-            const kn = await retrieveKnowledgeTraced(admin, message, orgId, 4);
+            const kn = await retrieveKnowledgeTraced(admin, typeof toolArgs?.query === 'string' && toolArgs.query.trim() ? toolArgs.query.trim() : message, orgId, 4);
             const cards = kn.cards;
             // Retrieval telemetry (#288): path (vector|keyword|none), embed_ok,
             // and the top scored titles so a retrieval miss can be classified
@@ -8229,6 +8634,70 @@ serve(async (req)=>{
     }
     let decision = plan.data ?? {};
     let { normAction, chosenTool, args } = parsePlanDecision(decision);
+    // PILLAR H: plan_verified — the planner's own verifying subagent verdict for this turn.
+    if (decision.verification && typeof decision.verification === 'object') {
+      await emitEvent("plan_verified", {
+        verdict: String(decision.verification.verdict ?? 'unknown'),
+        issues: Array.isArray(decision.verification.issues) ? decision.verification.issues.map((i)=>i.code).slice(0, 12) : [],
+        replanned: Boolean(decision.verification.replanned),
+        critic_model: decision.verification.critic?.model ?? null,
+        plan_model: decision.model ?? null,
+        plan_provider: decision.provider ?? null
+      }, {
+        outcome: String(decision.verification.verdict ?? 'unknown')
+      });
+    }
+    // ── DELEGATION (first plan) ─────────────────────────────────────────────
+    // Bob asked for subagents: run them, then let Bob plan again over their
+    // findings. He may then answer, ask, or select a tool as normal. If he asks
+    // to delegate again, or the re-plan fails, he answers from the findings.
+    if (normAction === 'delegate') {
+      const subagentRuns = Date.now() - startTime < 70_000 ? await runSubagents(decision.subagents, dispatchTool) : [];
+      const delegatedTaskState = {
+        goal: message,
+        steps_taken: [],
+        subagent_results: subagentRuns,
+        ...taskLedger && taskLedger.checkpoint ? {
+          durable_checkpoint: taskLedger.checkpoint
+        } : {}
+      };
+      const rePlan = subagentRuns.length ? await callPlan({
+        ...planPayload,
+        task_state: delegatedTaskState,
+        allow_delegation: false
+      }, false) : {
+        ok: false,
+        data: {}
+      };
+      const runSummary = summariseSubagentRuns(subagentRuns);
+      subagentRunsThisTurn = [
+        ...subagentRunsThisTurn,
+        ...runSummary
+      ];
+      if (rePlan.ok && rePlan.data && canon(rePlan.data.action) !== 'delegate') {
+        decision = {
+          ...rePlan.data,
+          subagent_runs: runSummary
+        };
+      } else {
+        const findings = subagentRuns.map((r, i)=>`**${i + 1}. ${r.role} — ${r.goal}**\n${String(r.findings).slice(0, 4000)}${r.sources.length ? `\nSources: ${r.sources.join(' · ')}` : ''}`).join('\n\n');
+        decision = {
+          action: 'answer',
+          tool: null,
+          args: {},
+          reply: findings ? `Here is what my subagents found:\n\n${findings}` : String(decision.reply || 'I could not run that research just now. Tell me to try again, or give me the specific source you want me to use.'),
+          reasoning: 'delegation completed without a converged re-plan',
+          confidence: decision.confidence ?? null,
+          subagent_runs: runSummary
+        };
+      }
+      ({ normAction, chosenTool, args } = parsePlanDecision(decision));
+      await emitEvent("delegation_completed", {
+        subagents: runSummary.length,
+        next_action: normAction,
+        next_tool: chosenTool ?? null
+      });
+    }
     const explicitAtlasRequest = caps.tier === 'admiral'
       && /\b(?:atlas|terrain|capability map|gap report|blast radius)\b/i.test(message)
       && /\b(?:query|check|inspect|use|explain|triage|show|look)\b/i.test(message);
@@ -9039,6 +9508,7 @@ serve(async (req)=>{
             content: sweptAskReply,
             metadata: {
               ...askResult.meta,
+              ...planTrace(decision),
               route_selected: 'clarifying_questions'
             }
           }
@@ -9513,7 +9983,8 @@ serve(async (req)=>{
 
         const nextPlan = await callPlan({
           ...planPayload,
-          task_state: loopTaskState
+          task_state: loopTaskState,
+          allow_delegation: subagentRunsThisTurn.length === 0
         }, false);
         if (!nextPlan.ok) {
           // Graceful degradation: return the best answer so far, never error.
@@ -9522,6 +9993,51 @@ serve(async (req)=>{
         }
         const nextDecision = nextPlan.data ?? {};
         const next = parsePlanDecision(nextDecision);
+        // DELEGATE inside the loop: the subagents run as ONE loop step and their
+        // findings ride into the next plan call as task_state.subagent_results.
+        if (next.normAction === 'delegate') {
+          const runs = Date.now() - startTime < 70_000 && subagentRunsThisTurn.length === 0 ? await runSubagents(nextDecision.subagents, dispatchTool) : [];
+          const runSummary = summariseSubagentRuns(runs);
+          subagentRunsThisTurn = [
+            ...subagentRunsThisTurn,
+            ...runSummary
+          ];
+          stepCount++;
+          const findingsText = runs.map((r)=>`[${r.role}] ${r.goal}\n${String(r.findings)}${r.sources.length ? `\nSources: ${r.sources.join(' | ')}` : ''}`).join('\n\n') || 'No subagent findings (delegation skipped or unavailable).';
+          loopSteps.push({
+            step: stepCount,
+            tool: 'delegate',
+            args: {
+              subagents: runs.map((r)=>({
+                  role: r.role,
+                  goal: r.goal
+                }))
+            },
+            outcome: runs.length ? 'ok' : 'skipped',
+            result_summary: sliceWithTruncationDisclosure(findingsText, LOOP_STEP_SUMMARY_BUDGET, 'delegation step'),
+            meta: {
+              subagent_runs: JSON.stringify(runSummary).slice(0, 2000)
+            }
+          });
+          taskState = {
+            ...taskState,
+            steps_taken: loopSteps,
+            subagent_results: runs,
+            last_tool: 'delegate',
+            last_tool_result: sliceWithTruncationDisclosure(findingsText, LOOP_LAST_TOOL_RESULT_BUDGET, 'the subagent findings')
+          };
+          decision = nextDecision;
+          result = {
+            reply: findingsText,
+            meta: {
+              tool: 'delegate',
+              outcome: runs.length ? 'ok' : 'skipped',
+              internal: true
+            }
+          };
+          console.log(`[conductor][loop] step=${stepCount} delegate subagents=${runs.length}`);
+          continue;
+        }
         // ASK halts the loop — Bob needs human input.
         if (next.normAction === 'ask') {
           const askResult = handleAsk(nextDecision);
@@ -9553,6 +10069,7 @@ serve(async (req)=>{
                 content: sweptLoopAskReply,
                 metadata: {
                   ...askResult.meta,
+                  ...planTrace(nextDecision),
                   route_selected: 'clarifying_questions',
                   loop_steps: loopSteps,
                   loop_step_count: stepCount
@@ -9826,6 +10343,72 @@ serve(async (req)=>{
     // ══════════════════════════════════════════════════════════════════════════
     // END REASONING LOOP
     // ══════════════════════════════════════════════════════════════════════════
+    // ── SYNTHESIS PASS ──────────────────────────────────────────────────────
+    // A tool result flagged internal (web-research excerpts, Atlas dumps, SQL
+    // rows, subagent findings) is reasoning context, not an answer. When the
+    // turn is about to return one raw — a non-loop tool such as web_research,
+    // the loop halting on its step cap, or a plan failure mid-loop — give the
+    // planner one answer-only pass (no tools, no delegation) so the user gets
+    // Bob's reasoning over the evidence instead of the evidence dump.
+    if (chosenTool && normAction !== 'ask' && (result.meta?.internal === true || /^\[INTERNAL/i.test(String(result.reply ?? '').trim())) && Date.now() - startTime < 105_000) {
+      const priorSteps = Array.isArray(result.meta?.loop_steps) && result.meta.loop_steps.length ? result.meta.loop_steps.map((s)=>({
+          tool: s.tool,
+          outcome: s.outcome,
+          result_summary: s.result_summary
+        })) : [
+        {
+          tool: chosenTool,
+          outcome: String(result.meta?.outcome ?? 'ok'),
+          result_summary: sliceWithTruncationDisclosure(result.reply, LOOP_STEP_SUMMARY_BUDGET, 'synthesis step')
+        }
+      ];
+      const synthesisPlan = await callPlan({
+        ...planPayload,
+        tools: [],
+        allow_delegation: false,
+        task_state: {
+          goal: message,
+          steps_taken: priorSteps,
+          ...subagentRunsThisTurn.length ? {
+            subagent_results: subagentRunsThisTurn.map((r)=>({
+                ...r,
+                findings: r.findings_preview
+              }))
+          } : {},
+          last_tool: chosenTool,
+          last_tool_result: sliceWithTruncationDisclosure(result.reply, LOOP_LAST_TOOL_RESULT_BUDGET, 'the tool result')
+        }
+      }, false);
+      const synthesized = synthesisPlan.ok ? String(synthesisPlan.data?.reply ?? '').trim() : '';
+      if (synthesized && !/^\[INTERNAL/i.test(synthesized)) {
+        result = {
+          reply: synthesized,
+          meta: {
+            ...result.meta,
+            internal: false,
+            synthesized_from: chosenTool
+          }
+        };
+        decision = {
+          ...decision,
+          reasoning: synthesisPlan.data?.reasoning ?? decision.reasoning,
+          confidence: synthesisPlan.data?.confidence ?? decision.confidence,
+          verification: synthesisPlan.data?.verification ?? decision.verification,
+          model: synthesisPlan.data?.model ?? decision.model,
+          provider: synthesisPlan.data?.provider ?? decision.provider
+        };
+        await emitEvent("synthesis_completed", {
+          from_tool: chosenTool,
+          steps: priorSteps.length,
+          verdict: synthesisPlan.data?.verification?.verdict ?? null
+        }, {
+          tool: chosenTool,
+          outcome: 'synthesized'
+        });
+      } else {
+        console.warn(`[conductor][synthesis] no synthesized reply for tool=${chosenTool} (${synthesisPlan.ok ? 'empty' : synthesisPlan.data?.error ?? synthesisPlan.status}); falling back to stripInternal`);
+      }
+    }
     // LAYER 5 — respond: redact + persist + v2 structured response.
     // Strip [INTERNAL:...] prefixes before the reply reaches the user.
     // These are reasoning-context markers returned by tools like check_proposals
@@ -9910,6 +10493,7 @@ serve(async (req)=>{
       'web_research',
       'clarifying_questions',
       'dispatch_flow',
+      'create_builder_job',
       'config_error',
       'plan_failed',
       'error'
@@ -10009,6 +10593,7 @@ serve(async (req)=>{
             planned_tool: chosenTool,
             reasoning: decision.reasoning ?? null,
             confidence: decision.confidence ?? null,
+            ...planTrace(decision),
             ...result.meta,
             ...documentQa ? {
               document_qa: documentQa
@@ -10037,6 +10622,7 @@ serve(async (req)=>{
       planned_tool: chosenTool,
       reasoning: decision.reasoning ?? null,
       confidence: decision.confidence ?? null,
+      ...planTrace(decision),
       ...result.meta
     };
     delete clientMeta.tool_call_error;

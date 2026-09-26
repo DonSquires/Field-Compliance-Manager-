@@ -131,6 +131,9 @@ interface WorkState {
 type ActivityPhase = 'idle' | 'preparing' | 'uploading' | 'waiting' | 'refreshing' | 'recording';
 
 const DOCUMENT_REGISTRATION_ROLES = new Set(['grand_master', 'master', 'admin', 'admin_officer']);
+// Only working-context entities earn a chip above the thread; workspace/page
+// boilerplate and raw identifiers belong in the Context drawer, not the chat.
+const CONTEXT_CHIP_KEYS = new Set(['agreement', 'site', 'zone', 'job', 'route', 'crmTab', 'rosterTab', 'fieldOpsSubArea', 'reportsTab', 'orgName']);
 
 const CONTEXT_LABELS: Record<string, string> = {
   page: 'Workspace', crmTab: 'CRM view', rosterTab: 'Roster view', fieldOpsSubArea: 'Operations view',
@@ -197,7 +200,7 @@ export const BobPanel: React.FC<BobPanelProps> = ({ open, onClose, context, mode
   const panelRef = useRef<HTMLDivElement>(null);
   const returnFocusRef = useRef<HTMLElement | null>(null);
   const appliedLaunchPromptRef = useRef<string | null>(null);
-  const contextEntries = useMemo(() => Object.entries(context ?? {}).flatMap(([key, value]) => {
+  const contextEntries = useMemo(() => Object.entries(context ?? {}).filter(([key]) => CONTEXT_CHIP_KEYS.has(key)).flatMap(([key, value]) => {
     if (typeof value === 'string' || typeof value === 'number') return [formatContextEntry(key, String(value))];
     if (value && typeof value === 'object' && !Array.isArray(value)) {
       const record = value as Record<string, unknown>;
@@ -789,10 +792,11 @@ export const BobPanel: React.FC<BobPanelProps> = ({ open, onClose, context, mode
       <header className="bob-panel-header">
         <div className="bob-panel-identity"><span><Bot size={18} /></span><div><strong>{mode === 'builder' ? 'Bob Builder' : 'Bob Operations'}</strong><small><ShieldCheck size={12} /> Governed session</small></div></div>
         <div className="bob-panel-header-actions">
+          {!sidebarOpen && <button type="button" className="bob-icon-button" onClick={() => void startNewConversation()} disabled={loading || sending} title="New chat" aria-label="New chat"><Plus size={17} /></button>}
           <button type="button" className="bob-icon-button" onClick={() => setSidebarOpen(current => !current)} title={sidebarOpen ? 'Hide sessions' : 'Show sessions'} aria-label={sidebarOpen ? 'Hide sessions' : 'Show sessions'} aria-expanded={sidebarOpen}><PanelLeft size={17} /></button>
           <button type="button" className="bob-icon-button" onClick={() => setContextPanelOpen(current => !current)} title={contextPanelOpen ? 'Hide context panel' : 'Show context panel'} aria-label={contextPanelOpen ? 'Hide context panel' : 'Show context panel'} aria-expanded={contextPanelOpen}><PanelRight size={17} /></button>
           <button type="button" className="bob-workspace-toggle" onClick={() => setStudioOpen(current => !current)} title={studioOpen ? 'Hide document studio' : 'Open document studio'} aria-label={studioOpen ? 'Hide document studio' : 'Open document studio'} aria-expanded={studioOpen}><Sparkles size={16} /><span>Studio</span></button>
-          <button type="button" className="bob-workspace-toggle" onClick={() => setWorkspaceExpanded(current => !current)} title={workspaceExpanded ? 'Use compact panel' : 'Open full workspace'} aria-label={workspaceExpanded ? 'Use compact panel' : 'Open full workspace'}>{workspaceExpanded ? <Minimize2 size={16} /> : <Maximize2 size={16} />}<span>{workspaceExpanded ? 'Compact' : 'Studio'}</span></button>
+          <button type="button" className="bob-workspace-toggle" onClick={() => setWorkspaceExpanded(current => !current)} title={workspaceExpanded ? 'Use compact panel' : 'Open full workspace'} aria-label={workspaceExpanded ? 'Use compact panel' : 'Open full workspace'}>{workspaceExpanded ? <Minimize2 size={16} /> : <Maximize2 size={16} />}<span>{workspaceExpanded ? 'Compact' : 'Expand'}</span></button>
           <button type="button" className="bob-close-button" onClick={onClose} title="Close Bob" aria-label="Close Bob"><X size={16} /><span>Close</span></button>
         </div>
       </header>
@@ -831,7 +835,8 @@ export const BobPanel: React.FC<BobPanelProps> = ({ open, onClose, context, mode
         <div className="bob-main-pane">
           {contextEntries.length > 0 && <div className="bob-context" aria-label="Active context"><FileSearch size={15} /><div>{contextEntries.map(([key, value], index) => <span key={`${key}-${index}`}><b>{key.replaceAll('_', ' ')}</b>{String(value)}</span>)}</div></div>}
 
-          <div className={`bob-work-state state-${workState.tone}`} role="status" aria-live="polite"><span>{workState.label}</span><p>{workState.detail}</p></div>
+          {/* Idle stays a screen-reader status only; a visible pill appears when Bob is actually working, waiting, or paused. */}
+          <div className={`bob-work-state state-${workState.tone} ${workState.tone === 'idle' ? 'sr-only' : ''}`} role="status" aria-live="polite"><span>{workState.label}</span><p>{workState.detail}</p></div>
 
           {error && (
             <div className="bob-panel-error" role="alert"><AlertTriangle size={15} /> {error}</div>
@@ -847,11 +852,17 @@ export const BobPanel: React.FC<BobPanelProps> = ({ open, onClose, context, mode
               <div className="bob-empty-state">
                 <Bot size={24} />
                 <strong>{mode === 'builder' ? 'What should we build?' : 'What are we working on?'}</strong>
-                <p>Start a new chat, upload documents, or resume recent work from the session list.</p>
-                <div>
-                  <button type="button" className="is-primary" onClick={() => void startNewConversation()}>Start a new chat</button>
-                  <button type="button" onClick={() => fileInputRef.current?.click()}>Upload documents</button>
+                <p>{mode === 'builder' ? 'Describe the change and Bob plans, implements, verifies, and opens a draft pull request for review.' : 'Ask for a plan, a draft, a check on live records, or drop files for Bob to read.'}</p>
+                <div className="bob-quick-actions" aria-label="Quick actions">
+                  {quickActions.map(action => (
+                    <button key={action.label} type="button" onClick={() => { setInput(action.prompt); focusComposer(); }} disabled={sending}>{action.label}</button>
+                  ))}
+                  {mode === 'operations' && <>
+                    <button type="button" onClick={() => openStudioWithPrompt('Draft a document using the current context and attached source files. Use clear headings, fill only evidence-backed fields, mark unknowns as [TO CONFIRM], and finish with a human-review checklist.')} disabled={sending}>Document studio</button>
+                    <button type="button" onClick={() => openStudioWithPrompt('Create a Mermaid diagram for the current context. Return only one mermaid code block. Use clear nodes, named decision points, and mark unknowns explicitly instead of inventing links.')} disabled={sending}>Diagram studio</button>
+                  </>}
                 </div>
+                <p className="bob-composer-hint">{ACCEPTED_BOB_UPLOAD_LABEL}. Attach with the paperclip or drop files onto this panel.</p>
               </div>
             ) : (
               messages.map((m) => (
@@ -887,28 +898,7 @@ export const BobPanel: React.FC<BobPanelProps> = ({ open, onClose, context, mode
             </div>
           )}
 
-          <div className="bob-quick-actions" aria-label="Quick actions">
-            {quickActions.map(action => (
-              <button key={action.label} type="button" onClick={() => setInput(action.prompt)} disabled={sending}>{action.label}</button>
-            ))}
-            {mode === 'operations' && <>
-              <button type="button" onClick={() => openStudioWithPrompt('Draft a document using the current context and attached source files. Use clear headings, fill only evidence-backed fields, mark unknowns as [TO CONFIRM], and finish with a human-review checklist.')} disabled={sending}>Document studio</button>
-              <button type="button" onClick={() => openStudioWithPrompt('Create a Mermaid diagram for the current context. Return only one mermaid code block. Use clear nodes, named decision points, and mark unknowns explicitly instead of inventing links.')} disabled={sending}>Diagram studio</button>
-            </>}
-          </div>
-
-          <p className="bob-composer-hint">{ACCEPTED_BOB_UPLOAD_LABEL}. Attach with the paperclip or drop files onto this panel.</p>
-
-          <div className="bob-session-actions" aria-label="Bob session and voice controls">
-            <button type="button" className="bob-session-action" onClick={() => void startNewConversation()} disabled={loading || sending}>
-              <Plus size={15} />
-              <span>New chat</span>
-            </button>
-            <button type="button" className={`bob-session-action bob-voice-action ${voiceState === 'recording' ? 'is-recording' : ''}`} onClick={() => voiceState === 'recording' ? stopVoiceCapture() : void startVoiceCapture()} disabled={sending} aria-label={voiceState === 'recording' ? 'Stop voice capture' : 'Start voice capture'}>
-              <Mic size={15} />
-              <span>{voiceState === 'recording' ? 'Stop recording' : 'Start recording'}</span>
-            </button>
-          </div>
+          {voiceTranscript && !input && <p className="bob-composer-hint">Voice note transcribed: “{voiceTranscript.slice(0, 140)}{voiceTranscript.length > 140 ? '…' : ''}” — send to use it.</p>}
 
           <form onSubmit={handleSend} className="bob-composer">
             <input ref={fileInputRef} type="file" multiple onChange={(event) => { if (event.target.files) addFiles(event.target.files); event.currentTarget.value = ''; }} className="sr-only" aria-label="Attach evidence files" />
@@ -929,6 +919,17 @@ export const BobPanel: React.FC<BobPanelProps> = ({ open, onClose, context, mode
               disabled={sending || !conversationId}
             >
               <Paperclip size={17} />
+            </button>
+            <button
+              type="button"
+              className={`bob-evidence-button bob-voice-action ${voiceState === 'recording' ? 'is-recording' : ''}`}
+              onClick={() => voiceState === 'recording' ? stopVoiceCapture() : void startVoiceCapture()}
+              disabled={sending}
+              title={voiceState === 'recording' ? 'Stop recording' : 'Record a voice note'}
+              aria-label={voiceState === 'recording' ? 'Stop voice capture' : 'Start voice capture'}
+              aria-pressed={voiceState === 'recording'}
+            >
+              <Mic size={17} />
             </button>
             <button
               type="submit"
@@ -1006,19 +1007,20 @@ function BobActivityTimeline({ phase, sending, loading, pendingFiles }: { phase:
 
   if (phase === 'recording') {
     return (
-      <section className="bob-working-panel" aria-label="Bob working state">
-        <div><Sparkles size={14} className="is-spinning" /><span>Bob is listening</span></div>
-        <ol><li className="is-active"><strong>Recording voice note</strong><small>Press Stop voice capture to queue the audio as evidence.</small></li></ol>
+      <section className="bob-working-panel is-compact" aria-label="Bob working state">
+        <div><Sparkles size={14} className="is-spinning" /><span>Bob is listening</span><em>Recording voice note</em></div>
+        <p className="sr-only">Press Stop voice capture to queue the audio as evidence.</p>
       </section>
     );
   }
 
+  const current = steps[Math.max(0, activeIndex)];
   return (
-    <section className="bob-working-panel" aria-label="Bob working state">
-      <div><Sparkles size={14} className="is-spinning" /><span>Bob is working</span></div>
-      <ol>
-        {steps.map((step, index) => (
-          <li key={step.id} className={index < activeIndex ? 'is-complete' : index === activeIndex ? 'is-active' : ''}>
+    <section className="bob-working-panel is-compact" aria-label="Bob working state">
+      <div><Sparkles size={14} className="is-spinning" /><span>Bob is working</span><em>{current.label}</em><small>{current.detail}</small></div>
+      <ol className="sr-only" aria-label="Remaining steps">
+        {steps.filter((_, index) => index !== activeIndex).map((step, index) => (
+          <li key={step.id} className={index < activeIndex ? 'is-complete' : ''}>
             <strong>{step.label}</strong>
             <small>{step.detail}</small>
           </li>
@@ -1366,8 +1368,14 @@ function AgentMetadata({ message }: { message: BobMessage }) {
   const plannedTool = typeof metadata.planned_tool === 'string' ? metadata.planned_tool : null;
   const suggestedAction = typeof metadata.suggested_action === 'string' ? metadata.suggested_action : null;
   const confidence = typeof metadata.confidence === 'number' ? metadata.confidence : message.confidence;
-  if (!plannedTool && confidence == null && !suggestedAction) return null;
-  return <div className="bob-agent-metadata">{plannedTool && <span><TerminalSquare size={12} /> {plannedTool.replaceAll('_', ' ')}</span>}{confidence != null && <span><CheckCircle2 size={12} /> {Math.round(confidence * 100)}% confidence</span>}{suggestedAction && <span className="bob-agent-next"><ListChecks size={12} /> {suggestedAction}</span>}</div>;
+  const verification = metadata.verification && typeof metadata.verification === 'object' ? metadata.verification as Record<string, unknown> : null;
+  const verdict = verification && verification.checked ? asString(verification.verdict) : null;
+  const verificationIssues = verification ? asArray(verification.issues).map(issue => asString((issue as Record<string, unknown>)?.code)).filter(Boolean) as string[] : [];
+  const subagentRuns = asArray(metadata.subagent_runs).map(run => asString((run as Record<string, unknown>)?.role)).filter(Boolean) as string[];
+  if (!plannedTool && confidence == null && !suggestedAction && !verdict && !subagentRuns.length) return null;
+  const verificationLabel = verdict === 'repair' ? 'Checked · revised' : verdict === 'pass_with_notes' ? 'Checked · notes' : verdict === 'pass' ? 'Checked' : null;
+  const verificationTitle = verdict ? `Independent verifier: ${verdict}${verificationIssues.length ? ` — ${verificationIssues.join(', ')}` : ''}` : undefined;
+  return <div className="bob-agent-metadata">{plannedTool && <span><TerminalSquare size={12} /> {plannedTool.replaceAll('_', ' ')}</span>}{confidence != null && <span><CheckCircle2 size={12} /> {Math.round(confidence * 100)}% confidence</span>}{verificationLabel && <span className="bob-agent-verified" title={verificationTitle}><ShieldCheck size={12} /> {verificationLabel}</span>}{subagentRuns.length > 0 && <span title="Read-only subagents Bob delegated to for this reply"><Bot size={12} /> Subagents: {subagentRuns.join(', ')}</span>}{suggestedAction && <span className="bob-agent-next"><ListChecks size={12} /> {suggestedAction}</span>}</div>;
 }
 
 export default BobPanel;
