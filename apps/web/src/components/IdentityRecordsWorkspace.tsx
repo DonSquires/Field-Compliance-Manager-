@@ -88,6 +88,11 @@ type ResolutionCandidate = {
   staff_profile_id: string | null;
   score: number;
   basis: string;
+  last_seen_at: string | null;
+  cctv_sighting_count: number;
+  approved_identity_document_count: number;
+  incident_count: number;
+  confidence_label: "strong" | "possible" | "weak";
 };
 type DocumentTypeDefinition = {
   document_kind: string;
@@ -281,6 +286,26 @@ function words(value: string) {
     .replace(/\b\w/g, (letter) => letter.toUpperCase());
 }
 
+function recommendationReason(candidate: ResolutionCandidate) {
+  const support = [
+    `${Math.round(candidate.score * 100)}% ${words(candidate.basis).toLowerCase()}`,
+    candidate.staff_profile_id ? "linked staff profile" : null,
+    candidate.cctv_sighting_count
+      ? `${candidate.cctv_sighting_count} prior CCTV sighting${candidate.cctv_sighting_count === 1 ? "" : "s"}`
+      : null,
+    candidate.approved_identity_document_count
+      ? `${candidate.approved_identity_document_count} approved identity source${candidate.approved_identity_document_count === 1 ? "" : "s"}`
+      : null,
+    candidate.incident_count
+      ? `${candidate.incident_count} linked incident${candidate.incident_count === 1 ? "" : "s"}`
+      : null,
+    candidate.last_seen_at
+      ? `last observed ${new Date(candidate.last_seen_at).toLocaleDateString("en-NZ")}`
+      : null,
+  ].filter(Boolean);
+  return `System suggestion: ${candidate.display_name || "existing person"} based on ${support.join(", ")}.`;
+}
+
 function personForm(person: PersonRecord): PersonForm {
   const detail = person.profile_details ?? {};
   const value = (key: string) =>
@@ -377,6 +402,7 @@ export function IdentityRecordsWorkspace({
   const [resolutionCandidates, setResolutionCandidates] = useState<ResolutionCandidate[]>([]);
   const [resolutionTargetId, setResolutionTargetId] = useState("");
   const [resolutionReason, setResolutionReason] = useState("");
+  const [resolutionConfirmed, setResolutionConfirmed] = useState(false);
   const [incidents, setIncidents] = useState<IncidentOption[]>([]);
   const [documentTypes, setDocumentTypes] = useState<DocumentTypeDefinition[]>(
     FALLBACK_DOCUMENT_TYPES,
@@ -694,6 +720,7 @@ export function IdentityRecordsWorkspace({
     setResolutionCandidates([]);
     setResolutionTargetId("");
     setResolutionReason("");
+    setResolutionConfirmed(false);
     const proposed =
       document.extracted_fields?.approved ??
       document.extracted_fields?.proposed ??
@@ -717,6 +744,7 @@ export function IdentityRecordsWorkspace({
         const rows = (candidates.data ?? []) as ResolutionCandidate[];
         setResolutionCandidates(rows);
         setResolutionTargetId(rows[0]?.person_record_id ?? "");
+        setResolutionReason(rows[0] ? recommendationReason(rows[0]) : "");
       }
     }
   };
@@ -750,7 +778,12 @@ export function IdentityRecordsWorkspace({
   };
 
   const resolveDocumentPerson = async () => {
-    if (!selectedDocument || !resolutionTargetId || !resolutionReason.trim())
+    if (
+      !selectedDocument ||
+      !resolutionTargetId ||
+      !resolutionReason.trim() ||
+      !resolutionConfirmed
+    )
       return;
     setBusy("resolve-person");
     setError(null);
@@ -793,6 +826,7 @@ export function IdentityRecordsWorkspace({
       setResolutionCandidates([]);
       setResolutionTargetId("");
       setResolutionReason("");
+      setResolutionConfirmed(false);
       setNotice(
         "Identity evidence moved to the existing canonical person. Complete the source review before approval.",
       );
@@ -851,6 +885,9 @@ export function IdentityRecordsWorkspace({
         matches_requested_kind?: boolean;
       }
     | undefined;
+  const selectedRecommendation = resolutionCandidates.find(
+    (candidate) => candidate.person_record_id === resolutionTargetId,
+  );
 
   return (
     <div className="identity-records-backdrop">
@@ -1894,10 +1931,11 @@ export function IdentityRecordsWorkspace({
                 </div>
               </div>
               {selectedDocument.review_state === "manual_review_required" &&
-                registry.people.some(
-                  (record) =>
-                    record.person_record_id !== selectedDocument.person_record_id,
-                ) && (
+                (resolutionCandidates.length > 0 ||
+                  registry.people.some(
+                    (record) =>
+                      record.person_record_id !== selectedDocument.person_record_id,
+                  )) && (
                   <div className="identity-resolution-panel">
                     <strong>Resolve to an existing person</strong>
                     <p>
@@ -1909,9 +1947,17 @@ export function IdentityRecordsWorkspace({
                       <span>Existing person</span>
                       <select
                         value={resolutionTargetId}
-                        onChange={(event) =>
-                          setResolutionTargetId(event.target.value)
-                        }
+                        onChange={(event) => {
+                          const nextId = event.target.value;
+                          const candidate = resolutionCandidates.find(
+                            (item) => item.person_record_id === nextId,
+                          );
+                          setResolutionTargetId(nextId);
+                          setResolutionReason(
+                            candidate ? recommendationReason(candidate) : "",
+                          );
+                          setResolutionConfirmed(false);
+                        }}
                       >
                         <option value="">Select an existing person</option>
                         {resolutionCandidates.length > 0 && (
@@ -1950,8 +1996,42 @@ export function IdentityRecordsWorkspace({
                         </optgroup>
                       </select>
                     </label>
+                    {selectedRecommendation && (
+                      <div
+                        className={`identity-recommendation is-${selectedRecommendation.confidence_label}`}
+                      >
+                        <span>
+                          {words(selectedRecommendation.confidence_label)} system
+                          suggestion
+                        </span>
+                        <strong>
+                          {selectedRecommendation.display_name ||
+                            "Unnamed person"}
+                          {selectedRecommendation.staff_profile_id
+                            ? " · Staff"
+                            : ""}
+                        </strong>
+                        <p>
+                          {Math.round(selectedRecommendation.score * 100)}% {words(
+                            selectedRecommendation.basis,
+                          ).toLowerCase()}
+                          {selectedRecommendation.cctv_sighting_count
+                            ? ` · ${selectedRecommendation.cctv_sighting_count} prior CCTV sighting${selectedRecommendation.cctv_sighting_count === 1 ? "" : "s"}`
+                            : ""}
+                          {selectedRecommendation.approved_identity_document_count
+                            ? ` · ${selectedRecommendation.approved_identity_document_count} approved identity source${selectedRecommendation.approved_identity_document_count === 1 ? "" : "s"}`
+                            : ""}
+                          {selectedRecommendation.incident_count
+                            ? ` · ${selectedRecommendation.incident_count} linked incident${selectedRecommendation.incident_count === 1 ? "" : "s"}`
+                            : ""}
+                          {selectedRecommendation.last_seen_at
+                            ? ` · Last observed ${new Date(selectedRecommendation.last_seen_at).toLocaleDateString("en-NZ")}`
+                            : ""}
+                        </p>
+                      </div>
+                    )}
                     <label>
-                      <span>Resolution reason</span>
+                      <span>Suggested audit reason</span>
                       <textarea
                         rows={2}
                         value={resolutionReason}
@@ -1961,13 +2041,26 @@ export function IdentityRecordsWorkspace({
                         placeholder="Record what proves these are the same person"
                       />
                     </label>
+                    <label className="identity-resolution-confirm">
+                      <input
+                        type="checkbox"
+                        checked={resolutionConfirmed}
+                        onChange={(event) =>
+                          setResolutionConfirmed(event.target.checked)
+                        }
+                      />
+                      <span>
+                        I compared the source and confirm this is the same person.
+                      </span>
+                    </label>
                     <button
                       type="button"
                       onClick={() => void resolveDocumentPerson()}
                       disabled={
                         busy !== null ||
                         !resolutionTargetId ||
-                        !resolutionReason.trim()
+                        !resolutionReason.trim() ||
+                        !resolutionConfirmed
                       }
                     >
                       <Link2 size={15} />

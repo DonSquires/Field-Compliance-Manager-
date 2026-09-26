@@ -180,6 +180,10 @@ test('People and Access exposes manual people, vehicles, and human-reviewed ID i
   assert.match(workspace, /Resolve to an existing person/);
   assert.match(workspace, /resolve_identity_document_person/);
   assert.match(workspace, /Use existing person/);
+  assert.match(workspace, /System suggestion:/);
+  assert.match(workspace, /prior CCTV sighting/);
+  assert.match(workspace, /approved identity source/);
+  assert.match(workspace, /I compared the source and confirm this is the same person/);
   assert.match(workspace, /purpose: "identity_document"/);
   assert.match(workspace, /from\("identity-evidence"\)/);
   assert.match(workspace, /Driver licence expiry/);
