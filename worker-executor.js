@@ -49,7 +49,7 @@ function dockerArguments({ image, sourceDir, artifactDir, profile, memory = '2g'
     '--tmpfs=/tmp:rw,noexec,nosuid,size=64m',
   ];
   if (profile === 'frontend-verify' || profile === 'backend-verify') {
-    args.push('--tmpfs=/work:rw,exec,nosuid,size=1024m');
+    args.push(`--tmpfs=/work:rw,exec,nosuid,size=${profile === 'frontend-verify' ? '2048m' : '1024m'}`);
   }
   if (profile === 'human-qa' || profile === 'human-qa-live' || profile === 'full-page-audit') {
     args.push('--tmpfs=/workspace/apps/web/node_modules:rw,exec,nosuid,size=512m,uid=1000,gid=1000,mode=0755');

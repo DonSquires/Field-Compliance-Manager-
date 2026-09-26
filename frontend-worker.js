@@ -10,7 +10,9 @@ const MAX_LOG_BYTES = 512 * 1024;
 const VERIFICATION_ENV = Object.freeze({
   VITE_SUPABASE_URL: 'http://127.0.0.1:54321',
   VITE_SUPABASE_ANON_KEY: 'playwright-anon-key',
-  PLAYWRIGHT_BROWSERS_PATH: '/ms-playwright'
+  PLAYWRIGHT_BROWSERS_PATH: '/ms-playwright',
+  // `tsc --noEmit` on apps/web needs >1 GB of heap; V8's default inside the container was ~1 GB (job ecfb4dc4 OOMed in lint).
+  NODE_OPTIONS: '--max-old-space-size=2048'
 });
 const BLOCKED_FILES = new Set([
   'apps/web/package.json',

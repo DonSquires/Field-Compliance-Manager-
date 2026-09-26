@@ -38,7 +38,8 @@ test('frontend verification supplies deterministic non-secret Supabase test valu
   assert.deepEqual(VERIFICATION_ENV, {
     VITE_SUPABASE_URL: 'http://127.0.0.1:54321',
     VITE_SUPABASE_ANON_KEY: 'playwright-anon-key',
-    PLAYWRIGHT_BROWSERS_PATH: '/ms-playwright'
+    PLAYWRIGHT_BROWSERS_PATH: '/ms-playwright',
+    NODE_OPTIONS: '--max-old-space-size=2048'
   });
 });
 
@@ -80,7 +81,8 @@ test('frontend verification executes only in disposable tmpfs while source remai
     artifactDir: '/tmp/artifacts',
     profile: 'frontend-verify'
   });
-  assert.ok(args.includes('--tmpfs=/work:rw,exec,nosuid,size=1024m'));
+  // node_modules (460 MB) is copied onto this tmpfs, so the web verifier gets a larger one.
+  assert.ok(args.includes('--tmpfs=/work:rw,exec,nosuid,size=2048m'));
   assert.ok(args.includes('--tmpfs=/tmp:rw,noexec,nosuid,size=64m'));
   assert.ok(args.includes('type=bind,src=/tmp/source,dst=/workspace,readonly'));
   assert.equal(args.some(value => value.includes('docker.sock')), false);

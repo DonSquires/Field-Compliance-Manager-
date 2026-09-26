@@ -165,7 +165,8 @@ async function runFrontendHandoff({
       artifactDir,
       profile: 'frontend-verify',
       timeoutMs: timeoutSeconds * 1000,
-      memory: '2g',
+      // 460 MB of node_modules copied onto the /work tmpfs is charged to this limit too; 2g left ~1 GB for tsc.
+      memory: '4g',
       cpus: '2',
       pidsLimit: 256
     });
