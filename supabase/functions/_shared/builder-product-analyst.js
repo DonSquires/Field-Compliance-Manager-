@@ -168,10 +168,12 @@ async function runProductAnalyst({
   requestedFromUsers = [],
   executeModelRun = executeBuilderModelRun,
   startAnalysis = startProductAnalysis,
-  completeAnalysis = completeProductAnalysis
+  completeAnalysis = completeProductAnalysis,
+  abortStep = null
 }) {
   if (!job?.id || !job?.organization_id) throw new Error('job identity is required');
   if (!step?.id || step.builder_mode !== 'product_analyst') throw new Error('product analyst step is required');
+  const abort = abortStep || require('./builder-ux-designer').abortModelStep;
   const started = await startAnalysis(supabase, job.id, step.id);
   if (!started.success) return { ok: false, status: 409, error: started.error };
   const prompts = buildProductAnalystPrompt({
@@ -199,6 +201,7 @@ async function runProductAnalyst({
     validateOutput: parseProductSpecification
   });
   if (!result.ok) {
+    await abort(supabase, { jobId: job.id, stepId: step.id, reason: `product analysis: ${result.error || 'model run failed'}` });
     return {
       ...result,
       specification: null,

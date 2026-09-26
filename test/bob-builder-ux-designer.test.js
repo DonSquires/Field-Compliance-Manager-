@@ -44,7 +44,9 @@ test('UX Designer prompt carries approved specification and forbids invented beh
 test('UX Designer parser enforces complete responsive and accessibility output', () => {
   const plan = validDesignPlan();
   assert.deepEqual(parseUxDesignPlan(JSON.stringify(plan)), plan);
-  assert.throws(() => parseUxDesignPlan(JSON.stringify({ ...plan, route_map: [] })), /route_map must not be empty/);
+  // A component-only or native-mobile change has no web route (job 958829bd failed validation here).
+  assert.deepEqual(parseUxDesignPlan(JSON.stringify({ ...plan, route_map: [] })).route_map, []);
+  assert.throws(() => parseUxDesignPlan(JSON.stringify({ ...plan, component_inventory: [] })), /component_inventory must not be empty/);
   assert.throws(() => parseUxDesignPlan(JSON.stringify({ ...plan, accessibility_requirements: 'none' })), /must be an array/);
 });
 
@@ -145,4 +147,28 @@ test('UX Designer rejects unapproved specification artifacts before dispatch', a
     startDesign: async () => { started = true; }
   }), /final product specification artifact/);
   assert.equal(started, false);
+});
+test('a failed designer model run returns the step to failed/retryable with the reason instead of leaving it running', async () => {
+  const aborted = [];
+  const result = await runUxDesigner({
+    supabase: {},
+    gateway: {},
+    job: { id: 'job-1', organization_id: 'org-1' },
+    step: { id: 'step-2', builder_mode: 'ux_designer' },
+    specificationArtifact: { id: 'artifact-spec', artifact_type: 'product_specification', status: 'final' },
+    repositoryContext: {},
+    loadSpecification: async () => ({ artifact: { id: 'artifact-spec' }, specification: { product_brief: { outcome: 'x' } } }),
+    startDesign: async () => ({ success: true }),
+    executeModelRun: async () => ({ ok: false, status: 422, error: 'model output failed validation: interface_states.error is required' }),
+    abortStep: async (_supabase, args) => { aborted.push(args); return true; },
+    completeDesign: async () => { throw new Error('must not complete'); }
+  });
+  assert.equal(result.ok, false);
+  assert.deepEqual(aborted, [{ jobId: 'job-1', stepId: 'step-2', reason: 'ux design: model output failed validation: interface_states.error is required' }]);
+  // The real abort calls the service-role RPC and never throws.
+  const { abortModelStep } = require('../supabase/functions/_shared/builder-ux-designer');
+  const calls = [];
+  assert.equal(await abortModelStep({ rpc: async (name, args) => { calls.push({ name, args }); return { data: {}, error: null }; } }, { jobId: 'j', stepId: 's', reason: 'r' }), true);
+  assert.deepEqual(calls, [{ name: 'builder_abort_model_step', args: { _job_id: 'j', _step_id: 's', _reason: 'r' } }]);
+  assert.equal(await abortModelStep({ rpc: async () => { throw new Error('down'); } }, { jobId: 'j', stepId: 's', reason: 'r' }), false);
 });

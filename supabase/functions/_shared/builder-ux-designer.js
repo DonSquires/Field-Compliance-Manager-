@@ -78,6 +78,7 @@ function buildUxDesignerPrompt({ specification, repositoryContext }) {
     'Do not invent product behavior, routes, schema, permissions, or capabilities.',
     'Reuse the existing design system and components where they satisfy the approved requirements.',
     'Cover desktop and mobile behavior, accessibility, and loading, empty, error, and success states.',
+    'route_map lists the web routes the change touches; for a change inside one component or a native mobile screen with no route it is an empty array — never invent a route to fill it.',
     'Return one JSON object matching the supplied schema, with no markdown fence.'
   ].join(' ');
   return {
@@ -116,7 +117,8 @@ function parseUxDesignPlan(content) {
   for (const key of arrayKeys) {
     if (!Array.isArray(plan[key])) throw new Error(`${key} must be an array`);
   }
-  for (const key of ['information_architecture', 'route_map', 'component_inventory', 'responsive_behavior', 'accessibility_requirements']) {
+  // route_map may be empty: a component-only or native-mobile change has no web route (job 958829bd).
+  for (const key of ['information_architecture', 'component_inventory', 'responsive_behavior', 'accessibility_requirements']) {
     if (plan[key].length === 0) throw new Error(`${key} must not be empty`);
   }
   if (!plan.interface_states || typeof plan.interface_states !== 'object') {
@@ -184,6 +186,17 @@ async function completeUxDesign(supabase, { jobId, stepId, artifactId, resultSum
   return { success: true, job: data };
 }
 
+// A model run that fails after the step started must not leave the step 'running' (job 958829bd
+// sat at design_pending with "the Builder is blocked" and no reason). Best-effort: never throws.
+async function abortModelStep(supabase, { jobId, stepId, reason }) {
+  try {
+    const { error } = await supabase.rpc('builder_abort_model_step', { _job_id: jobId, _step_id: stepId, _reason: String(reason || 'model run failed').slice(0, 2000) });
+    return !error;
+  } catch {
+    return false;
+  }
+}
+
 async function runUxDesigner({
   supabase,
   gateway,
@@ -194,6 +207,7 @@ async function runUxDesigner({
   executeModelRun = executeBuilderModelRun,
   startDesign = startUxDesign,
   completeDesign = completeUxDesign,
+  abortStep = abortModelStep,
   loadSpecification = loadApprovedSpecification
 }) {
   if (!job?.id || !job?.organization_id) throw new Error('job identity is required');
@@ -225,7 +239,10 @@ async function runUxDesigner({
     modelRequest,
     validateOutput: parseUxDesignPlan
   });
-  if (!result.ok) return { ...result, design_plan: null };
+  if (!result.ok) {
+    await abortStep(supabase, { jobId: job.id, stepId: step.id, reason: `ux design: ${result.error || 'model run failed'}` });
+    return { ...result, design_plan: null };
+  }
 
   const completion = await completeDesign(supabase, {
     jobId: job.id,
@@ -234,6 +251,7 @@ async function runUxDesigner({
     resultSummary: `${result.validated_output.component_inventory.length} components across ${result.validated_output.route_map.length} routes`
   });
   if (!completion.success) {
+    await abortStep(supabase, { jobId: job.id, stepId: step.id, reason: `ux design: ${completion.error}` });
     return { ...result, ok: false, status: 503, error: completion.error, design_plan: result.validated_output };
   }
   return {
@@ -251,6 +269,7 @@ async function runUxDesigner({
 module.exports = {
   UX_DESIGNER_PROMPT_VERSION,
   UX_DESIGN_SCHEMA,
+  abortModelStep,
   normalizeDesignContext,
   buildUxDesignerPrompt,
   parseUxDesignPlan,
