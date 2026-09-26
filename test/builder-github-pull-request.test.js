@@ -88,6 +88,7 @@ test('control plane routes publication and pull requests by git host and keeps g
   assert.match(controlPlane, /\/api\/bob\/builder\/repository\/head/);
   assert.match(controlPlane, /ensureSourceCheckout\(\{ sourceDir: builderSourceDir, repoUrl: target\.repoUrl, authHeader: target\.authHeader, sha: targetSha \}\)/);
   assert.match(controlPlane, /function giteaGitAuthHeader\(\)/);
-  assert.doesNotMatch(controlPlane, /sourceDir: assessmentRoot/);
+  // Git work never starts from the image copy (it has no .git); assessment reads may.
+  assert.doesNotMatch(controlPlane, /createBranchWorkspace\(\{ sourceDir: assessmentRoot/);
   assert.match(dockerfile, /apk add --no-cache git/);
 });
