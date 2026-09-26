@@ -26,11 +26,13 @@ async function anonKey() {
   return (keys.find((k) => k.name === 'anon') ?? keys.find((k) => /anon/i.test(k.name))).api_key;
 }
 
-async function session() {
-  try {
-    const cached = JSON.parse(fs.readFileSync(CACHE, 'utf8'));
-    if (cached.expires_at - 60 > Date.now() / 1000) return cached;
-  } catch {}
+async function session({ fresh = false } = {}) {
+  if (!fresh) {
+    try {
+      const cached = JSON.parse(fs.readFileSync(CACHE, 'utf8'));
+      if (cached.expires_at - 60 > Date.now() / 1000) return cached;
+    } catch {}
+  }
   const key = await anonKey();
   const r = await fetch(`${SUPABASE_URL}/auth/v1/token?grant_type=password`, { method: 'POST', headers: { apikey: key, 'Content-Type': 'application/json' }, body: JSON.stringify({ email: EMAIL, password: PASSWORD }) });
   if (!r.ok) throw new Error(`login ${r.status}`);
@@ -42,7 +44,10 @@ async function session() {
 
 async function room(body) {
   const s = await session();
-  const r = await fetch(`${SUPABASE_URL}/functions/v1/bob-builder-control-room`, { method: 'POST', headers: { apikey: s.anon, Authorization: `Bearer ${s.access_token}`, 'Content-Type': 'application/json' }, body: JSON.stringify(body) });
+  const payload = JSON.stringify(body);
+  const sendRequest = (auth) => fetch(`${SUPABASE_URL}/functions/v1/bob-builder-control-room`, { method: 'POST', headers: { apikey: auth.anon, Authorization: `Bearer ${auth.access_token}`, 'Content-Type': 'application/json' }, body: payload });
+  let r = await sendRequest(s);
+  if (r.status === 401) r = await sendRequest(await session({ fresh: true }));
   const text = await r.text();
   let parsed;
   try { parsed = JSON.parse(text); } catch { parsed = { raw: text.slice(0, 300) }; }
