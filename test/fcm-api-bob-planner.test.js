@@ -110,6 +110,12 @@ test('deterministic checks catch questionnaires, re-asks after a blanket answer,
   const reAsk = runDeterministicChecks({ action: 'ask', reply: 'Great.', questions: [{ question: 'Do you want a 90 day trial clause included?' }], args: {} }, { message: 'yes to all', pending });
   assert.ok(reAsk.some((issue) => issue.code === 're_ask_after_blanket_answer' && issue.severity === 'block'));
 
+  const goForIt = runDeterministicChecks({ action: 'ask', reply: 'Great.', questions: [{ question: 'Do you want a 90 day trial clause included?' }], args: {} }, { message: 'go for it', pending });
+  assert.ok(goForIt.some((issue) => issue.code === 're_ask_after_blanket_answer' && issue.severity === 'block'));
+
+  const yesPlease = runDeterministicChecks({ action: 'ask', reply: 'Great.', questions: [{ question: 'Do you want a 90 day trial clause included?' }], args: {} }, { message: 'Yes please!', pending });
+  assert.ok(yesPlease.some((issue) => issue.code === 're_ask_after_blanket_answer' && issue.severity === 'block'));
+
   const questionnaire = runDeterministicChecks({ action: 'answer', reply: '1. Casual?\n2. Region?\n3. Trial clause?\n4. Vehicle?', questions: [], args: {} }, { message: 'draft an agreement', pending: null });
   assert.ok(questionnaire.some((issue) => issue.code === 'questionnaire'));
 
