@@ -44,6 +44,10 @@ test('builder model gateway: max effort defaults, multi-turn messages, and allow
   const classic = gateway.buildProviderBody({ input: { ...base, system_prompt: 'a', user_prompt: 'b' }, config, model: 'gpt-4o-mini' });
   assert.equal(classic.max_tokens, 16000);
   assert.equal(classic.reasoning_effort, undefined);
+  // The independent reviewer defaults to a model that differs from the author's (job 3a4a2d06 stalled on a missing reviewer).
+  assert.equal(gateway.defaultReviewerModel({ BOB_BUILDER_MODEL: 'gpt-5.4', BOB_OPENAI_MODELS: 'gpt-5.4,gpt-5.4-mini,gpt-4o-mini' }), 'gpt-5.4-mini');
+  assert.equal(gateway.defaultReviewerModel({ BOB_BUILDER_MODEL: 'gpt-5.4', BOB_BUILDER_REVIEWER_MODEL: 'gpt-4o-mini' }), 'gpt-4o-mini');
+  assert.equal(gateway.defaultReviewerModel({ BOB_BUILDER_MODEL: 'gpt-5.4', BOB_BUILDER_REVIEWER_MODEL: 'gpt-5.4', BOB_OPENAI_MODELS: 'gpt-5.4' }), null, 'the author may never review itself');
 });
 
 test('tool-call parsing tolerates fences and prose; run allowlist is narrow', () => {

@@ -18,6 +18,16 @@ function isReasoningModel(model) {
   return /^(gpt-5|o[0-9])/i.test(String(model || ''));
 }
 
+// Independent AI review must come from a model other than the author's. Autonomous jobs
+// (opened by Bob) supply no reviewer, so pick one: BOB_BUILDER_REVIEWER_MODEL, else the first
+// allowlisted model that is not the author model; null when no distinct model is configured.
+function defaultReviewerModel(env = process.env) {
+  const author = String(env.BOB_BUILDER_MODEL || 'gpt-5.4').trim();
+  const explicit = String(env.BOB_BUILDER_REVIEWER_MODEL || '').trim();
+  if (explicit && explicit !== author) return explicit;
+  return [...parseModelAllowlist(env.BOB_OPENAI_MODELS, 'gpt-5.4,gpt-5.4-mini,gpt-4o-mini')].find(model => model !== author) || null;
+}
+
 function createModelGatewayConfig(env = process.env) {
   return {
     openai: {
@@ -151,6 +161,7 @@ module.exports = {
   REASONING_EFFORTS,
   buildProviderBody,
   createModelGatewayConfig,
+  defaultReviewerModel,
   isReasoningModel,
   validateModelRequest,
   invokeBuilderModel

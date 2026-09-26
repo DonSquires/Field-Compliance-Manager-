@@ -8,7 +8,7 @@ const { createAssessment } = require('./assessment-manifest');
 const { collectRepositoryContext } = require('./supabase/functions/_shared/builder-repository-context');
 const { collectBuilderLiveContext } = require('./builder-live-context');
 const { buildAtlasGraph } = require('./scripts/atlas-graph');
-const { createModelGatewayConfig, invokeBuilderModel } = require('./builder-model-gateway');
+const { createModelGatewayConfig, defaultReviewerModel, invokeBuilderModel } = require('./builder-model-gateway');
 const { loadBuilderRuntimeSnapshot, advanceBuilderJob, runBuilderUntilPause } = require('./builder-runtime-coordinator');
 const { createBranchWorkspace, commitVerifiedPatch, publishWorkspaceBranch, createGiteaPullRequest, workspacePathForBranch, createGitHubPullRequest, ensureSourceCheckout, githubAuthHeader, githubRepoUrl, resolveRemoteHead } = require('./builder-branch-workspace');
 
@@ -163,7 +163,7 @@ async function builderRuntimeContext(body, source = { sourceDir: assessmentRoot,
     repoRoot: assessmentRoot,
     workerImage: builderWorkerImage,
     runnerId: builderRunnerId,
-    reviewerModelName: typeof body.reviewerModelName === 'string' ? body.reviewerModelName.slice(0, 200) : null,
+    reviewerModelName: typeof body.reviewerModelName === 'string' && body.reviewerModelName.trim() ? body.reviewerModelName.slice(0, 200) : defaultReviewerModel(),
     frontendFiles: boundedStringArray(body.frontendFiles, 30),
     backendFiles: boundedStringArray(body.backendFiles, 40),
     constraints: boundedStringArray(body.constraints, 100),
