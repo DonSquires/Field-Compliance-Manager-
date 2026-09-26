@@ -10,6 +10,11 @@ test('administrator searches, reviews, and opens a source document', async ({ pa
   const browserErrors = monitorBrowserErrors(page);
   await signInAsAdmin(page, '/admin/files');
   await expect(page.getByRole('heading', { name: 'File system' })).toBeVisible();
+  await expect(page.getByRole('navigation', { name: 'Folders' })).toBeVisible();
+  await expect(page.getByText('Company records', { exact: true })).toBeVisible();
+  await expect(page.getByText('Health & safety', { exact: true })).toBeVisible();
+  expect(await page.evaluate(() => document.documentElement.scrollWidth <= window.innerWidth)).toBe(true);
+  await expect(page).toHaveScreenshot('file-explorer-home.png');
   await expect(page.getByText('sample-data-2026-09-08')).toHaveCount(0);
   await expect(page.getByText('Vehicle Log (1).csv')).toHaveCount(0);
   const importTools = page.locator('details.file-system-import-tools');
@@ -24,17 +29,17 @@ test('administrator searches, reviews, and opens a source document', async ({ pa
   await expect(page.getByRole('heading', { name: 'Files waiting registration' })).toBeVisible();
   await expect(page.getByRole('heading', { name: 'Approved document artifacts' })).toHaveCount(0);
   await expect(page.getByRole('heading', { name: 'Issued notice artifacts' })).toHaveCount(0);
-  await page.getByRole('button', { name: 'File space: Generated outputs' }).click();
+  await page.getByRole('button', { name: 'Open section Generated outputs' }).click();
   await expect(page.getByRole('heading', { name: 'Approved document artifacts' })).toBeVisible();
   await expect(page.getByRole('heading', { name: 'Issued notice artifacts' })).toBeVisible();
-  await page.getByRole('button', { name: 'File space: All files' }).click();
+  await page.getByRole('button', { name: 'All files', exact: true }).click();
   await expect(page.getByText('Quarantined: Unsupported or unsafe artifact')).toBeVisible();
   await page.getByRole('button', { name: 'Register in Files' }).click();
   await expect(page.getByRole('status')).toContainText('registered into the Files workspace');
   await expect(page.getByRole('heading', { name: '107 Gorge Road - Service Agreement.pdf' })).toBeVisible();
   await page.getByPlaceholder('Search filenames, type, source, or hash').fill('Gorge Road');
   await expect(page.getByRole('heading', { name: '1 files' })).toBeVisible();
-  await page.getByRole('button', { name: 'File space: Contracts', exact: true }).click();
+  await page.getByRole('button', { name: 'Open section Contracts', exact: true }).click();
   await expect(page.getByText('94% extraction confidence')).toBeVisible();
   await expect(page.getByText('Service agreement for contracted security services at 107 Gorge Road.')).toBeVisible();
   await page.evaluate(() => {
@@ -70,4 +75,25 @@ test('administrator creates an import review batch only from a selected file', a
   await expect(page.getByRole('status')).toContainText('Review batch abababab created. No canonical records were changed.');
   expect(batchPayload).toMatchObject({ p_source_file: 'current-vehicle-observations.csv', p_row_count: 1, p_organization_id: '41414141-4141-4141-8141-414141414141' });
   expect(String(batchPayload.p_source_sha256)).toMatch(/^[a-f0-9]{64}$/);
+});
+
+test('administrator creates a folder and moves a file into it', async ({ page }) => {
+  await signInAsAdmin(page, '/admin/files');
+  await page.getByRole('button', { name: 'New folder' }).click();
+  const newFolder = page.getByRole('dialog', { name: 'Create inside Organisation' });
+  await newFolder.getByLabel('Folder name').fill('Board records');
+  await newFolder.getByRole('button', { name: 'Create folder' }).click();
+  await expect(page.getByRole('button', { name: 'Open folder Board records' })).toBeVisible();
+
+  await page.getByRole('button', { name: 'All files', exact: true }).click();
+  await page.getByRole('button', { name: /107 Gorge Road - Service Agreement\.pdf/ }).click();
+  await page.getByRole('button', { name: 'Move', exact: true }).click();
+  const moveFile = page.getByRole('dialog', { name: '107 Gorge Road - Service Agreement.pdf' });
+  await moveFile.getByLabel('Destination').selectOption({ label: 'Organisation / Board records' });
+  await moveFile.getByRole('button', { name: 'Move file', exact: true }).click();
+  await expect(page.getByRole('status')).toContainText('moved to Organisation / Board records');
+  await expect(page.getByRole('heading', { name: 'Board records' })).toBeVisible();
+  await expect(page.locator('.file-system-records').getByText('107 Gorge Road - Service Agreement.pdf', { exact: true })).toBeVisible();
+  expect(await page.evaluate(() => document.documentElement.scrollWidth <= window.innerWidth)).toBe(true);
+  await expect(page).toHaveScreenshot('file-explorer-folder.png');
 });

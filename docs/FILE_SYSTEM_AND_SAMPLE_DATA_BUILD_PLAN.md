@@ -18,6 +18,10 @@ The sample corpus in `Build-Plan/sample data` is the acceptance corpus. It conta
 
 ## Target user experience
 
+### Owner ruling 2026-09-26 — familiar folders, generated from the canonical spines
+
+The File System must behave like a familiar Windows File Explorer or OneDrive workspace, not as a flat technical document registry. Every organisation receives its own persistent folder tree. Standard folders include Company records, Health & safety, Policies, Contracts, Locations, People, Finance, Evidence, Investigations, Bob intake, and Generated outputs. New `locations` houses and tenant people/users create linked folders automatically; staff user and person projections share one folder. Authorised administrators may add ordinary nested folders and move documents without changing the document's source provenance or storage identity. Filename guessing is not folder placement.
+
 ### File System home
 
 Route: `/admin/files` for administrators and `/client/files` for client-scoped users.

@@ -5,7 +5,7 @@ import { describe, expect, it } from 'vitest';
 const page = readFileSync(resolve(process.cwd(), 'src/pages/NzscvSupplierPage.tsx'), 'utf8');
 const router = readFileSync(resolve(process.cwd(), 'src/routing/RoleRouter.tsx'), 'utf8');
 const platform = readFileSync(resolve(process.cwd(), 'src/pages/GrandMasterPlatformPage.tsx'), 'utf8');
-const migration = readFileSync(resolve(process.cwd(), '../../supabase/migrations/20260927120000_nzscv_supplier_dashboard.sql'), 'utf8');
+const migration = readFileSync(resolve(process.cwd(), '../../supabase/migrations/20260927160000_nzscv_supplier_dashboard.sql'), 'utf8');
 
 describe('NZSCV supplier transparency portal', () => {
   it('is a dedicated portal for NZSCV suppliers with grand-master oversight access', () => {

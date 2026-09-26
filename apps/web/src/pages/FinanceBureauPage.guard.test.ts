@@ -21,6 +21,6 @@ describe('Finance Bureau', () => {
     expect(page).toContain('Hourly and per-km rates live in Pay and charge rules');
     expect(shell).toContain("'finance-bureau'");
     expect(shell).toContain('Finance home');
-    expect(shell).toContain("<FinanceBureauPage onOpenBob={(prompt) => { setBobLaunchPrompt(prompt); setBobOpen(true); }} onNavigate={(destination) => navigateToPage(destination as AdminPage)} />");
+    expect(shell).toContain("<FinanceBureauPage onOpenBob={(prompt) => { setBobLaunchPrompt(prompt); setBobOpen(true); }} onNavigate={navigateFinance} />");
   });
 });

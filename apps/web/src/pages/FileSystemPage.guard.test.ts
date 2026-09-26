@@ -4,6 +4,7 @@ import { describe, expect, it } from 'vitest';
 
 const page = readFileSync(resolve(process.cwd(), 'src/pages/FileSystemPage.tsx'), 'utf8');
 const shell = readFileSync(resolve(process.cwd(), 'src/shells/AdminShell.tsx'), 'utf8');
+const folderMigration = readFileSync(resolve(process.cwd(), '../../supabase/migrations/20260927190000_file_explorer_folders.sql'), 'utf8');
 
 describe('organisation file system', () => {
   it('reads the canonical document and version spine within tenant scope', () => {
@@ -17,6 +18,28 @@ describe('organisation file system', () => {
     expect(page).toContain('createSignedUrl');
     expect(page).toContain('900');
     expect(page).not.toContain('SUPABASE_SERVICE_ROLE_KEY');
+  });
+
+  it('uses a persistent Explorer hierarchy with governed folder and move actions', () => {
+    expect(page).toContain("rpc('get_file_explorer_tree'");
+    expect(page).toContain("rpc('create_file_folder'");
+    expect(page).toContain("rpc('move_document_to_folder'");
+    expect(page).toContain('<FileExplorerTree');
+    expect(page).not.toContain('const FILE_SPACES');
+    expect(page).not.toContain('function spaceFor(');
+    expect(folderMigration).toContain('CREATE TABLE IF NOT EXISTS public.file_spaces');
+    expect(folderMigration).toContain('CREATE TABLE IF NOT EXISTS public.file_folders');
+    expect(folderMigration).toContain('CREATE TABLE IF NOT EXISTS public.document_placements');
+    expect(folderMigration).toContain('CREATE TRIGGER trg_file_organization_tree');
+    expect(folderMigration).toContain('CREATE TRIGGER trg_file_location_folder');
+    expect(folderMigration).toContain('CREATE TRIGGER trg_file_person_folder');
+    expect(folderMigration).toContain("'Company records'");
+    expect(folderMigration).toContain("'Health & safety'");
+    expect(folderMigration).toContain('file_restricted_access_allowed');
+    expect(folderMigration).toContain("actor.role IN('grand_master','master','admin')");
+    expect(folderMigration).not.toContain("p_sensitivity <> 'restricted' OR public.is_admin_for_org");
+    expect(folderMigration).toContain('DROP POLICY IF EXISTS documents_select');
+    expect(folderMigration).toContain('public.file_space_access_allowed(space.organization_id,space.sensitivity)');
   });
 
   it('surfaces generated document outputs as a first-class governed registry', () => {
