@@ -227,6 +227,27 @@ test('compactMessages keeps recent turns verbatim and collapses older bulky resu
   assert.equal(messages[3].content.length > 5000, true, 'the in-memory transcript is not mutated');
 });
 
+test('buildProposal keeps a trailing blank context line (live job 3a4a2d06 lost it and the worker saw a corrupt patch)', () => {
+  const repo = makeRepo();
+  // A change followed by <blank>, line, <blank>: the hunk's last context line is a lone space.
+  fs.writeFileSync(path.join(repo.source, 'lib', 'spaced.js'), "const a = 1;\n\nconst b = 2;\n\n");
+  repo.git(['add', '-A']);
+  repo.git(['-c', 'user.name=t', '-c', 'user.email=t@example.com', 'commit', '-q', '-m', 'spaced']);
+  const sha = repo.git(['rev-parse', 'HEAD']);
+  const workspaceRoot = path.join(repo.root, 'workspaces');
+  const { createBranchWorkspace } = require('../builder-branch-workspace');
+  const ws = createBranchWorkspace({ sourceDir: repo.source, workspaceRoot, jobId: 'feedfacefeedfacefeedface', targetSha: sha });
+  const tools = createTools({ workspacePath: ws.workspacePath, repoRoot: repo.source, lane: 'backend', supabase: null, limits: DEFAULT_LIMITS, log() {} });
+  fs.writeFileSync(path.join(ws.workspacePath, 'lib', 'spaced.js'), "const a = 10;\n\nconst b = 2;\n\n");
+  const built = buildProposal({ workspacePath: ws.workspacePath, lane: 'backend', tools, args: { summary: 'Bump a from 1 to 10; verified by reading the diff.', tests: [] } });
+  assert.ok(built.proposal, JSON.stringify(built));
+  assert.ok(built.proposal.patch.endsWith('\n \n'), `trailing blank context line must survive: ${JSON.stringify(built.proposal.patch.slice(-20))}`);
+  const patchFile = path.join(repo.root, 'spaced.patch');
+  fs.writeFileSync(patchFile, built.proposal.patch);
+  assert.equal(repo.git(['apply', '--check', '--whitespace=error-all', patchFile]), '');
+  fs.rmSync(repo.root, { recursive: true, force: true });
+});
+
 test('buildProposal enforces additive-only migrations and the lane validator', () => {
   const repo = makeRepo();
   const workspaceRoot = path.join(repo.root, 'workspaces');
