@@ -114,3 +114,17 @@ test('a verifier infrastructure failure re-runs the same patch once instead of a
   });
   assert.deepEqual(calls2.slice(0, 3), ['verify:patch-1', 'verify:patch-1', 'repair']);
 });
+
+test('a resumed step verifies the patch the lost verifier was checking instead of authoring again', async () => {
+  const calls = [];
+  const result = await runFrontendImplementation({
+    ...base,
+    resumePatchArtifact: { id: 'patch-lost', artifact_type: 'code_implementation', status: 'final' },
+    generate: async () => { calls.push('generate'); return { ok: true, patch_artifact: { id: 'patch-new' } }; },
+    handoff: async ({ patchArtifact }) => { calls.push(`verify:${patchArtifact.id}`); return { success: true, artifacts: [], job: { status: 'testing' } }; },
+    reloadStep: async () => base.step,
+    repair: async () => { throw new Error('no repair expected'); }
+  });
+  assert.equal(result.success, true);
+  assert.deepEqual(calls, ['verify:patch-lost'], 'job ecfb4dc4: the author is not re-run for a patch nobody rejected');
+});

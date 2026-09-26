@@ -31,12 +31,16 @@ async function runFrontendImplementation({
   generate = runFrontendEngineer,
   repair = runFrontendRepair,
   handoff = runFrontendHandoff,
-  reloadStep = reloadFrontendStep
+  reloadStep = reloadFrontendStep,
+  resumePatchArtifact = null
 }) {
   let currentStep = step;
-  let generation = await generate({
-    supabase, gateway, job, step: currentStep, uxArtifact, sourceDir, requestedFiles, liveContext
-  });
+  // A lost verifier (lease expired, runner gone) left a patch nobody rejected: verify it again first.
+  let generation = resumePatchArtifact
+    ? { ok: true, patch_artifact: resumePatchArtifact }
+    : await generate({
+      supabase, gateway, job, step: currentStep, uxArtifact, sourceDir, requestedFiles, liveContext
+    });
   if (!generation.ok || !generation.patch_artifact?.id) {
     await recordGenerationFailure({ supabase, job, step: currentStep }, generation, 'generation');
     return { success: false, phase: 'generation', result: generation, attempts: 0 };

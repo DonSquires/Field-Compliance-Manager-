@@ -282,3 +282,33 @@ test('an honest no-change answer parks the step (not retryable) and the planner 
     delete require.cache[coordinatorPath];
   }
 });
+
+test('expired verifier leases are recovered before every advance, and the recovered step resumes with its recorded patch', async () => {
+  const { advanceBuilderJob, planBuilderAction } = require('../builder-runtime-coordinator');
+  const rpcs = [];
+  const supabase = { rpc: async (name) => { rpcs.push(name); return { data: 1, error: null }; } };
+  const patch = { id: 'patch-7606', artifact_type: 'code_implementation', status: 'final' };
+  const step = { id: 's-fe', step_id: 'frontend_implementation', builder_mode: 'frontend_engineer', status: 'failed', retryable: true, attempt_count: 4, error: 'Frontend worker lease expired (runner lost); the same patch is verified again', input_context: { patch_artifact_id: 'patch-7606' } };
+  const snapshot = {
+    job: { id: 'job-e', status: 'implementation_pending', frontend_required: true, backend_required: false },
+    steps: [
+      { id: 's-pa', step_id: 'product_analysis', builder_mode: 'product_analyst', status: 'completed' },
+      { id: 's-ux', step_id: 'ui_design', builder_mode: 'ux_designer', status: 'completed' },
+      step,
+      { id: 's-be', step_id: 'backend_implementation', builder_mode: 'backend_engineer', status: 'skipped' },
+    ],
+    artifacts: [patch, { id: 'ux-plan', artifact_type: 'ui_design_plan', status: 'final', step_id: 's-ux' }],
+    workerRuns: [{ id: 'run-lost', profile: 'frontend-verify', status: 'timeout' }],
+    approvals: [],
+  };
+  assert.equal(planBuilderAction(snapshot).type, 'run_frontend', 'a timed-out run no longer blocks as waiting_for_worker');
+  let received = null;
+  const outcome = await advanceBuilderJob({ supabase, gateway: {}, jobId: 'job-e', context: {}, loadSnapshot: async () => snapshot, handlers: { frontend: async (input) => { received = input; return { success: true }; } } });
+  assert.deepEqual(rpcs, ['builder_recover_expired_worker_runs']);
+  assert.equal(outcome.advanced, true);
+  assert.equal(received.resumePatchArtifact?.id, 'patch-7606');
+  // A step that failed for any other reason authors afresh.
+  const otherSnapshot = { ...snapshot, steps: snapshot.steps.map((s) => s === step ? { ...step, error: 'Frontend worker verification failed' } : s) };
+  await advanceBuilderJob({ supabase, gateway: {}, jobId: 'job-e', context: {}, loadSnapshot: async () => otherSnapshot, handlers: { frontend: async (input) => { received = input; return { success: true }; } } });
+  assert.equal(received.resumePatchArtifact, undefined);
+});

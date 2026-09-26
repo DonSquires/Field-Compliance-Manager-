@@ -175,10 +175,34 @@ function escalationPoint(generation) {
   return provider && provider !== 'openai' ? provider : null;
 }
 
+// The patch a lost verifier was checking (builder_recover_expired_worker_runs keeps the step's
+// input_context): verify it again rather than spend an author run on a patch nobody rejected.
+function resumablePatchArtifact(snapshot, step) {
+  if (!step || step.status !== 'failed' || step.retryable !== true || !/lease expired/i.test(String(step.error || ''))) return null;
+  const patchId = step.input_context?.patch_artifact_id;
+  if (!patchId) return null;
+  const artifact = (snapshot?.artifacts || []).find((item) => item.id === patchId && item.artifact_type === 'code_implementation' && item.status === 'final');
+  return artifact || null;
+}
+
+// Runners that died with their lease (redeploy, crash) must not hold a job for ever. Best-effort.
+async function recoverExpiredWorkerRuns(supabase, logger = console) {
+  if (!supabase || typeof supabase.rpc !== 'function') return 0;
+  try {
+    const { data, error } = await supabase.rpc('builder_recover_expired_worker_runs');
+    if (error) { logger?.warn?.(`[builder] expired worker runs not recovered: ${error.message}`); return 0; }
+    if (Number(data) > 0) logger?.warn?.(`[builder] recovered ${data} expired verification run(s)`);
+    return Number(data) || 0;
+  } catch (error) {
+    logger?.warn?.(`[builder] expired worker runs not recovered: ${error instanceof Error ? error.message : error}`);
+    return 0;
+  }
+}
+
 async function runBackendImplementation(input) {
   const agentic = AGENTIC_ENABLED && input.context?.workspaceRoot;
   const generate = agentic ? agenticGenerator('backend', input.context) : runBackendEngineer;
-  let generation = await generate(input);
+  let generation = input.resumePatchArtifact ? { ok: true, patch_artifact: input.resumePatchArtifact, routing: { provider: 'resumed' } } : await generate(input);
   if (agentic && (!generation.ok || !generation.patch_artifact?.id) && escalationPoint(generation)) {
     generation = await generate({ ...input, startAfterProvider: escalationPoint(generation) });
   }
@@ -229,9 +253,10 @@ async function executeBuilderAction({ snapshot, action, supabase, gateway, conte
   if (action.type === 'run_frontend') {
     const agentic = AGENTIC_ENABLED && context.workspaceRoot && !handlers.frontend;
     const generator = agentic ? agenticGenerator('frontend', context) : undefined;
-    return run.frontend({ ...common, uxArtifact: artifactsFor(snapshot, 'ui_design', 'ui_design_plan').at(-1), sourceDir: context.sourceDir, requestedFiles: context.frontendFiles, workerImage: context.workerImage, runnerId: context.runnerId, liveContext: context.liveContext, ...(generator ? { generate: generator, repair: generator } : {}) });
+    const resumePatchArtifact = resumablePatchArtifact(snapshot, action.step);
+    return run.frontend({ ...common, uxArtifact: artifactsFor(snapshot, 'ui_design', 'ui_design_plan').at(-1), sourceDir: context.sourceDir, requestedFiles: context.frontendFiles, workerImage: context.workerImage, runnerId: context.runnerId, liveContext: context.liveContext, ...(resumePatchArtifact ? { resumePatchArtifact } : {}), ...(generator ? { generate: generator, repair: generator } : {}) });
   }
-  if (action.type === 'run_backend') return run.backend({ ...common, context, productArtifact: artifactsFor(snapshot, 'product_analysis', 'product_specification').at(-1), sourceDir: context.sourceDir, requestedFiles: context.backendFiles, workerImage: context.workerImage, runnerId: context.runnerId, liveContext: context.liveContext });
+  if (action.type === 'run_backend') return run.backend({ ...common, context, productArtifact: artifactsFor(snapshot, 'product_analysis', 'product_specification').at(-1), sourceDir: context.sourceDir, requestedFiles: context.backendFiles, workerImage: context.workerImage, runnerId: context.runnerId, liveContext: context.liveContext, resumePatchArtifact: resumablePatchArtifact(snapshot, action.step) });
   const implementation = implementationArtifacts(snapshot);
   const runs = implementationRuns(snapshot);
   const securityArtifact = artifactsFor(snapshot, 'security_review', 'security_review').at(-1);
@@ -243,6 +268,7 @@ async function executeBuilderAction({ snapshot, action, supabase, gateway, conte
 }
 
 async function advanceBuilderJob({ supabase, gateway, jobId, context, handlers, loadSnapshot = loadBuilderRuntimeSnapshot }) {
+  await recoverExpiredWorkerRuns(supabase);
   const snapshot = await loadSnapshot(supabase, jobId);
   const action = planBuilderAction(snapshot);
   if (['terminal', 'waiting_for_human', 'waiting_for_worker', 'blocked'].includes(action.type)) return { advanced: false, action, snapshot };
