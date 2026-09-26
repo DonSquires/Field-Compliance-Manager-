@@ -60,7 +60,7 @@ test('frontend handoff claims, executes, registers evidence, and finishes in ord
     assert.equal(result.success, true);
     assert.deepEqual(calls, ['claim', 'reset', 'execute', 'register:build_logs', 'register:code_implementation', 'register:changed_file_manifest', 'finish:true']);
     assert.equal(result.job.status, 'testing');
-    assert.equal(workerOptions.memory, '2g');
+    assert.equal(workerOptions.memory, '4g', 'tsc on apps/web needs >1 GB of heap plus the node_modules copy on tmpfs');
     assert.equal(workerOptions.cpus, '2');
     assert.equal(workerOptions.pidsLimit, 256);
   } finally {
