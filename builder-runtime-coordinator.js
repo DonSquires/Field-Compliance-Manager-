@@ -135,7 +135,7 @@ async function loadArtifactJson(supabase, artifact) {
 
 /** Agentic generation for a lane, shaped like the one-shot engineers' result so handoffs stay unchanged. */
 function agenticGenerator(lane, context, extra = {}) {
-  return async ({ supabase, gateway, job, step, uxArtifact, productArtifact, requestedFiles, liveContext, failureArtifact, failedPatchArtifact }) => {
+  return async ({ supabase, gateway, job, step, uxArtifact, productArtifact, requestedFiles, liveContext, failureArtifact, failedPatchArtifact, startAfterProvider = null }) => {
     const [specification, uxPlan, previousFailure] = await Promise.all([
       productArtifact ? loadArtifactJson(supabase, productArtifact) : Promise.resolve(extra.specification ?? null),
       uxArtifact ? loadArtifactJson(supabase, uxArtifact) : Promise.resolve(null),
@@ -148,25 +148,36 @@ function agenticGenerator(lane, context, extra = {}) {
       repoRoot: context.repoRoot,
       specification, uxPlan, liveContext,
       hints: requestedFiles,
+      startAfterProvider,
       previousFailure: previousFailure ? { failure_evidence: previousFailure, failed_patch_artifact_id: failedPatchArtifact?.id ?? null } : null,
       inputArtifactIds: [productArtifact?.id, uxArtifact?.id, failureArtifact?.id].filter(Boolean)
     });
   };
 }
 
+// A local (in-house) author that fails is "stuck": the next attempt resumes the chain past it.
+function escalationPoint(generation) {
+  const provider = generation?.routing?.provider;
+  return provider && provider !== 'openai' ? provider : null;
+}
+
 async function runBackendImplementation(input) {
   const agentic = AGENTIC_ENABLED && input.context?.workspaceRoot;
   const generate = agentic ? agenticGenerator('backend', input.context) : runBackendEngineer;
   let generation = await generate(input);
+  if (agentic && (!generation.ok || !generation.patch_artifact?.id) && escalationPoint(generation)) {
+    generation = await generate({ ...input, startAfterProvider: escalationPoint(generation) });
+  }
   if (!generation.ok || !generation.patch_artifact?.id) return { success: false, phase: 'generation', result: generation };
   let patchArtifact = generation.patch_artifact;
   for (let attempt = 1; attempt <= (agentic ? MAX_BACKEND_ATTEMPTS : 1); attempt += 1) {
     const verification = await runBackendHandoff({ ...input, patchArtifact });
-    if (verification.success || !agentic) return { ...verification, attempts: attempt, patch_artifact: patchArtifact };
+    if (verification.success || !agentic) return { ...verification, attempts: attempt, patch_artifact: patchArtifact, routing: generation.routing };
     if (attempt >= MAX_BACKEND_ATTEMPTS) return { ...verification, success: false, phase: 'repair_limit', attempts: attempt };
     const failureArtifact = verification.failure_artifact || verification.artifacts?.[0];
-    // Feed the independent worker's failure evidence back to Bob and let him repair.
-    generation = await generate({ ...input, failureArtifact, failedPatchArtifact: patchArtifact });
+    // Feed the independent worker's failure evidence back to Bob and let him repair; an in-house author
+    // that failed verification hands the repair to the next provider in the chain.
+    generation = await generate({ ...input, failureArtifact, failedPatchArtifact: patchArtifact, startAfterProvider: escalationPoint(generation) });
     if (!generation.ok || !generation.patch_artifact?.id) return { success: false, phase: 'repair', attempts: attempt, result: generation };
     patchArtifact = generation.patch_artifact;
   }

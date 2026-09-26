@@ -8,7 +8,7 @@ const { createAssessment } = require('./assessment-manifest');
 const { collectRepositoryContext } = require('./supabase/functions/_shared/builder-repository-context');
 const { collectBuilderLiveContext } = require('./builder-live-context');
 const { buildAtlasGraph } = require('./scripts/atlas-graph');
-const { createModelGatewayConfig, defaultReviewerModel, invokeBuilderModel } = require('./builder-model-gateway');
+const { createModelGatewayConfig, defaultReviewerModel, invokeBuilderModel, modelHealth } = require('./builder-model-gateway');
 const { loadBuilderRuntimeSnapshot, advanceBuilderJob, runBuilderUntilPause } = require('./builder-runtime-coordinator');
 const { autopilotTick, listAutopilotJobs, listPendingApprovals } = require('./builder-autopilot');
 const { createBranchWorkspace, commitVerifiedPatch, publishWorkspaceBranch, createGiteaPullRequest, workspacePathForBranch, createGitHubPullRequest, ensureSourceCheckout, githubAuthHeader, githubRepoUrl, resolveRemoteHead, redactGitError } = require('./builder-branch-workspace');
@@ -383,7 +383,14 @@ async function createJob(input, actor) {
 
 async function route(req, res, body) {
   const url = new URL(req.url, `http://${req.headers.host || 'localhost'}`);
-  if (req.method === 'GET' && url.pathname === '/health') return json(res, 200, { status: 'ok', service: 'bob-control-plane', activeLease: Boolean(activeLease), builderGitHost, builderSourceConfigured: builderGitHost === 'github' ? Boolean(githubToken && githubOwner && githubRepo) : Boolean(giteaBaseUrl && giteaToken && giteaOwner && giteaRepo), autopilot: autopilotEnabled && Boolean(builderSupabase && modelGatewayToken && builderWorkerImage), autopilotIntervalMs, runningBuilderJobs: runningBuilderJobs.size });
+  if (req.method === 'GET' && url.pathname === '/health') {
+    const providers = await modelHealth(modelGatewayConfig).catch(() => ({}));
+    return json(res, 200, { status: 'ok', service: 'bob-control-plane', activeLease: Boolean(activeLease), builderGitHost, builderSourceConfigured: builderGitHost === 'github' ? Boolean(githubToken && githubOwner && githubRepo) : Boolean(giteaBaseUrl && giteaToken && giteaOwner && giteaRepo), autopilot: autopilotEnabled && Boolean(builderSupabase && modelGatewayToken && builderWorkerImage), autopilotIntervalMs, runningBuilderJobs: runningBuilderJobs.size, modelProviders: Object.fromEntries(Object.entries(providers).map(([name, p]) => [name, { configured: p.configured, healthy: p.healthy, ready_model: p.ready_model }])) });
+  }
+  if (req.method === 'GET' && url.pathname === '/api/bob/builder/model-health') {
+    if (!modelGatewayAuthorized(req) && !authorized(req)) return json(res, 401, { error: 'model gateway unauthorized' });
+    return json(res, 200, await modelHealth(modelGatewayConfig));
+  }
   if (req.method === 'POST' && url.pathname === '/api/bob/builder/model-run') {
     if (!modelGatewayAuthorized(req)) return json(res, 401, { error: 'model gateway unauthorized' });
     const result = await invokeBuilderModel({ input: body, config: modelGatewayConfig });

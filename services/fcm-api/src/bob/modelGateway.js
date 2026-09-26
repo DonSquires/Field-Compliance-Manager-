@@ -79,14 +79,15 @@ function createGatewayConfig(env = process.env) {
   };
   return {
     providers,
-    // The planner is the AUTHOR; it stays on the strongest model unless routed
-    // in-house on purpose. Verifier/subagents run in-house first when the GPU
-    // link is up, which also keeps the verifier a different identity from the author.
+    // In-house first (owner ruling 2026-09-26): every role tries the laptop GPU when the link is
+    // up, then OpenAI. The VPS Ollama is CPU-only and too slow for the chat turn budget, so it
+    // joins a chat chain only when configured explicitly (BOB_ROUTE_*). plan.js escalates to the
+    // next provider when a local author's plan is unparseable or the verifier blocks it.
     chains: {
-      planner: parseChain(env.BOB_ROUTE_PLANNER, ['openai']),
+      planner: parseChain(env.BOB_ROUTE_PLANNER, ['gpu_workstation', 'openai']),
       verifier: parseChain(env.BOB_ROUTE_VERIFIER, ['gpu_workstation', 'openai']),
       subagent: parseChain(env.BOB_ROUTE_SUBAGENT, ['gpu_workstation', 'openai']),
-      synthesis: parseChain(env.BOB_ROUTE_SYNTHESIS, ['openai']),
+      synthesis: parseChain(env.BOB_ROUTE_SYNTHESIS, ['gpu_workstation', 'openai']),
     },
     timeoutMs: Math.max(5000, Number(env.BOB_MODEL_TIMEOUT_MS || env.OPENAI_TIMEOUT_MS || DEFAULT_TIMEOUT_MS)),
     temperature: Number.isFinite(Number.parseFloat(env.BOB_PLAN_TEMPERATURE)) ? Number.parseFloat(env.BOB_PLAN_TEMPERATURE) : 0.6,
@@ -254,7 +255,19 @@ function createModelGateway({ env = process.env, fetchImpl = globalThis.fetch, n
     };
   }
 
-  return { config, chatJson, status, probe, isReasoningModel };
+  // The rest of a role's chain after `providerName` (escalation), or null when it was the last resort.
+  function chainAfter(role, providerName) {
+    const chain = config.chains[role] || config.chains.planner;
+    const index = chain.indexOf(providerName);
+    if (index < 0 || index + 1 >= chain.length) return null;
+    return chain.slice(index + 1);
+  }
+
+  function providerKind(providerName) {
+    return config.providers[providerName] ? config.providers[providerName].kind : null;
+  }
+
+  return { config, chatJson, status, probe, isReasoningModel, chainAfter, providerKind };
 }
 
 module.exports = { createGatewayConfig, createModelGateway, isReasoningModel, paramsUnsupportedError, parseChain };

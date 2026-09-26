@@ -96,6 +96,22 @@ async function abortIndependentCodeReview(supabase, jobId, stepId, reason) {
   return { success: !error };
 }
 
+// The provider+model identities that authored the reviewed patches; the reviewer must differ.
+async function loadAuthorIdentities(supabase, jobId) {
+  try {
+    const { data, error } = await supabase
+      .from('builder_model_runs')
+      .select('provider, model_name, builder_job_steps!inner(builder_mode)')
+      .eq('job_id', jobId)
+      .eq('status', 'completed')
+      .in('builder_job_steps.builder_mode', ['frontend_engineer', 'backend_engineer']);
+    if (error || !Array.isArray(data)) return [];
+    return [...new Map(data.map(row => [`${row.provider}::${row.model_name}`, { provider: row.provider, model: row.model_name }])).values()];
+  } catch {
+    return [];
+  }
+}
+
 async function runIndependentCodeReview({
   supabase,
   gateway,
@@ -104,6 +120,7 @@ async function runIndependentCodeReview({
   artifacts,
   reviewerModelName,
   loadEvidence = loadCodeReviewEvidence,
+  loadAuthors = loadAuthorIdentities,
   startReview = startCodeReview,
   executeModelRun = executeBuilderModelRun,
   completeReview = completeIndependentCodeReview,
@@ -151,7 +168,8 @@ async function runIndependentCodeReview({
     inputArtifactIds: artifactIds,
     outputSchema: { type: 'object', required: ['verdict', 'summary', 'findings', 'test_gaps', 'residual_risks'] }
   });
-  let result = await executeModelRun({ supabase, gateway, modelRequest, validateOutput: parseIndependentCodeReview });
+  const avoidIdentities = await loadAuthors(supabase, job.id);
+  let result = await executeModelRun({ supabase, gateway, modelRequest, validateOutput: parseIndependentCodeReview, avoidIdentities });
   if (!result.ok && result.status === 422) {
     // One repair turn: the reviewer sees the validator's reason and the contract again. A shape slip
     // must not fail a job that has passed every independent worker.
@@ -163,7 +181,7 @@ async function runIndependentCodeReview({
         system_prompt: `${systemPrompt} Your previous reply was rejected: ${String(result.error || 'invalid output').slice(0, 300)}. Reply again with the exact JSON shape.`
       }
     };
-    result = await executeModelRun({ supabase, gateway, modelRequest: repairRequest, validateOutput: parseIndependentCodeReview });
+    result = await executeModelRun({ supabase, gateway, modelRequest: repairRequest, validateOutput: parseIndependentCodeReview, avoidIdentities });
   }
   if (!result.ok) {
     await abortReview(supabase, job.id, step.id, result.error || 'Independent reviewer failed');

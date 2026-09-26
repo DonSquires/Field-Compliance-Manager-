@@ -2,7 +2,8 @@ const crypto = require('node:crypto');
 
 const PROVIDERS = Object.freeze({
   OPENAI: 'openai',
-  OLLAMA: 'ollama'
+  OLLAMA: 'ollama',
+  GPU_WORKSTATION: 'gpu_workstation'
 });
 
 const LOCAL_WORKLOADS = new Set([
@@ -11,6 +12,26 @@ const LOCAL_WORKLOADS = new Set([
   'repository_summary',
   'simple_documentation'
 ]);
+const AUTHOR_WORKLOADS = new Set(['backend_implementation', 'frontend_implementation', 'frontend_repair']);
+const REVIEW_WORKLOADS = new Set(['independent_code_review']);
+
+function parseChain(raw, fallback) {
+  const list = String(raw || '').split(',').map(item => item.trim()).filter(item => Object.values(PROVIDERS).includes(item));
+  return list.length ? list : fallback;
+}
+
+// Owner ruling 2026-09-26: Bob works on his own compute (laptop GPU, then the VPS) and only
+// outsources to OpenAI when he is stuck — unreachable, too small for the prompt, or failing.
+// Restricted data never leaves the house. Chains are env-tunable per workload class.
+function routingChains(env = process.env) {
+  return {
+    restricted: parseChain(env.BOB_BUILDER_ROUTE_RESTRICTED, [PROVIDERS.OLLAMA, PROVIDERS.GPU_WORKSTATION]),
+    local: parseChain(env.BOB_BUILDER_ROUTE_LOCAL, [PROVIDERS.GPU_WORKSTATION, PROVIDERS.OLLAMA, PROVIDERS.OPENAI]),
+    author: parseChain(env.BOB_BUILDER_ROUTE_AUTHOR, [PROVIDERS.GPU_WORKSTATION, PROVIDERS.OPENAI]),
+    review: parseChain(env.BOB_BUILDER_ROUTE_REVIEW, [PROVIDERS.GPU_WORKSTATION, PROVIDERS.OLLAMA, PROVIDERS.OPENAI]),
+    analysis: parseChain(env.BOB_BUILDER_ROUTE_ANALYSIS, [PROVIDERS.GPU_WORKSTATION, PROVIDERS.OPENAI])
+  };
+}
 
 function stableSerialize(value) {
   if (Array.isArray(value)) {
@@ -24,22 +45,19 @@ function stableSerialize(value) {
   return JSON.stringify(value);
 }
 
-function routeBuilderModel({ workloadKind, containsRestrictedData = false }) {
+function routeBuilderModel({ workloadKind, containsRestrictedData = false, env = process.env }) {
   if (!workloadKind || typeof workloadKind !== 'string') {
     throw new Error('workloadKind is required');
   }
-
-  if (containsRestrictedData || LOCAL_WORKLOADS.has(workloadKind)) {
-    return {
-      provider: PROVIDERS.OLLAMA,
-      reason: containsRestrictedData ? 'restricted_data_local_only' : 'low_risk_local_workload'
-    };
-  }
-
-  return {
-    provider: PROVIDERS.OPENAI,
-    reason: 'complex_builder_workload'
-  };
+  const chains = routingChains(env);
+  let chain;
+  let reason;
+  if (containsRestrictedData) { chain = chains.restricted; reason = 'restricted_data_local_only'; }
+  else if (LOCAL_WORKLOADS.has(workloadKind)) { chain = chains.local; reason = 'low_risk_local_workload'; }
+  else if (AUTHOR_WORKLOADS.has(workloadKind)) { chain = chains.author; reason = 'in_house_first_author'; }
+  else if (REVIEW_WORKLOADS.has(workloadKind)) { chain = chains.review; reason = 'in_house_first_review'; }
+  else { chain = chains.analysis; reason = 'in_house_first_analysis'; }
+  return { provider: chain[0], chain, reason };
 }
 
 function buildModelRunRequest({
@@ -85,6 +103,7 @@ function buildModelRunRequest({
     job_id: jobId,
     step_id: stepId,
     provider: route.provider,
+    chain: route.chain,
     routing_reason: route.reason,
     model_name: modelName,
     prompt_version: promptVersion,
@@ -221,8 +240,82 @@ async function callModelGateway({
   }
 }
 
-async function executeBuilderModelRun({ supabase, modelRequest, gateway, validateOutput = null }) {
+const healthSnapshotCache = { at: 0, value: null };
+const HEALTH_SNAPSHOT_TTL_MS = 20_000;
+
+// Provider health as the control plane sees it (configured, reachable, installed models).
+// Cached briefly; a missing route or failure yields null and the chain falls back to
+// "try every provider in order", which the gateway's own probes still guard.
+async function fetchModelHealth({ gatewayUrl, apiToken, fetchImpl = globalThis.fetch, now = Date.now, health = null } = {}) {
+  if (health) return health;
+  if (!gatewayUrl || !apiToken) return null;
+  if (healthSnapshotCache.value && now() - healthSnapshotCache.at < HEALTH_SNAPSHOT_TTL_MS) return healthSnapshotCache.value;
+  try {
+    const response = await fetchImpl(`${gatewayUrl.replace(/\/+$/, '')}/api/bob/builder/model-health`, { headers: { Authorization: `Bearer ${apiToken}` }, signal: AbortSignal.timeout(5000) });
+    if (!response.ok) return null;
+    const value = await response.json();
+    healthSnapshotCache.at = now();
+    healthSnapshotCache.value = value && typeof value === 'object' ? value : null;
+    return healthSnapshotCache.value;
+  } catch {
+    return null;
+  }
+}
+
+/**
+ * The ordered providers a request may try, with the model each would serve. Unhealthy or
+ * unconfigured providers are dropped when health is known; `avoid` removes provider+model
+ * identities (the independent reviewer must not be the author); `startAfter` resumes the
+ * chain past a provider that already failed (escalation between attempts).
+ */
+function selectProviders(modelRequest, { health = null, avoid = [], startAfter = null } = {}) {
+  const chain = Array.isArray(modelRequest.chain) && modelRequest.chain.length ? modelRequest.chain : [modelRequest.provider];
+  const from = startAfter ? chain.indexOf(startAfter) + 1 : 0;
+  const candidates = [];
+  for (const provider of chain.slice(from)) {
+    const status = health ? health[provider] : null;
+    if (status && (!status.configured || !status.healthy)) continue;
+    const model = provider === PROVIDERS.OPENAI
+      ? (modelRequest.model_name || null)
+      : (status?.ready_model || (Array.isArray(status?.models) ? status.models[0] : null) || null);
+    if (avoid.some(identity => identity && identity.provider === provider && (!identity.model || !model || identity.model === model))) continue;
+    candidates.push({ provider, model });
+  }
+  return candidates;
+}
+
+const ESCALATE_STATUSES = new Set([408, 413, 422, 429, 500, 502, 503, 504]);
+
+function providerRequest(modelRequest, candidate, suffix) {
+  return {
+    ...modelRequest,
+    provider: candidate.provider,
+    model_name: candidate.model,
+    idempotency_key: suffix ? `${modelRequest.idempotency_key}::${suffix}` : modelRequest.idempotency_key,
+    request: { ...modelRequest.request, provider: candidate.provider, model_name: candidate.model }
+  };
+}
+
+async function executeBuilderModelRun({ supabase, modelRequest, gateway, validateOutput = null, avoidIdentities = [], startAfter = null }) {
   if (!supabase || !modelRequest) throw new Error('supabase and modelRequest are required');
+  const health = await fetchModelHealth(gateway || {});
+  const candidates = selectProviders(modelRequest, { health, avoid: avoidIdentities, startAfter });
+  if (!candidates.length) return { ok: false, status: 503, error: 'no model provider is available for this request', attempts: [] };
+  const attempts = [];
+  let last = null;
+  for (let index = 0; index < candidates.length; index += 1) {
+    const candidate = candidates[index];
+    // The first provider keeps the caller's idempotency key; escalations get their own run record.
+    const attemptRequest = providerRequest(modelRequest, candidate, index === 0 ? null : candidate.provider);
+    last = await executeSingleModelRun({ supabase, modelRequest: attemptRequest, gateway, validateOutput });
+    attempts.push({ provider: candidate.provider, model: candidate.model, ok: last.ok, status: last.status ?? null, error: last.ok ? null : String(last.error || '').slice(0, 200) });
+    if (last.ok || last.duplicate) return { ...last, provider: candidate.provider, model_name: candidate.model, attempts, escalated: index > 0 };
+    if (!ESCALATE_STATUSES.has(Number(last.status))) break;
+  }
+  return { ...last, attempts, escalated: attempts.length > 1 };
+}
+
+async function executeSingleModelRun({ supabase, modelRequest, gateway, validateOutput = null }) {
 
   const { data: existing } = await supabase
     .from('builder_model_runs')
@@ -313,6 +406,9 @@ async function executeBuilderModelRun({ supabase, modelRequest, gateway, validat
 module.exports = {
   PROVIDERS,
   LOCAL_WORKLOADS,
+  AUTHOR_WORKLOADS,
+  REVIEW_WORKLOADS,
+  routingChains,
   stableSerialize,
   routeBuilderModel,
   buildModelRunRequest,
@@ -320,5 +416,9 @@ module.exports = {
   contentMetadata,
   persistModelArtifact,
   callModelGateway,
-  executeBuilderModelRun
+  fetchModelHealth,
+  selectProviders,
+  providerRequest,
+  executeBuilderModelRun,
+  executeSingleModelRun
 };

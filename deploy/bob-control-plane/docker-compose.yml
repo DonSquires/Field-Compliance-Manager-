@@ -18,6 +18,12 @@ services:
       # Handoffs stage patches/results in os.tmpdir(); keep it on the data volume so workers can mount it.
       TMPDIR: /data/tmp
       BOB_WORKER_IMAGE: ${BOB_WORKER_IMAGE:-fcm/bob-worker:current}
+      # In-house model providers: the VPS Ollama (fcm network) and the laptop GPU (reverse SSH
+      # tunnel bound on the host at 11435). Override in control-plane.env; OpenAI stays the fallback.
+      OLLAMA_BASE_URL: ${OLLAMA_BASE_URL:-http://ollama:11434}
+      GPU_WORKSTATION_URL: ${GPU_WORKSTATION_URL:-http://host.docker.internal:11435}
+    extra_hosts:
+      - "host.docker.internal:host-gateway"
     # Docker socket access for isolated workers (no-new-privileges, cap-drop ALL, network none).
     group_add:
       - "${DOCKER_GID:-999}"
@@ -36,8 +42,12 @@ services:
     networks:
       - default
       - gitea_default
+      - fcm_net
 
 networks:
   default:
   gitea_default:
     external: true
+  fcm_net:
+    external: true
+    name: fcm_fcm-net

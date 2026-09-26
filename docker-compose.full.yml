@@ -292,6 +292,13 @@ services:
     container_name: ollama
     restart: unless-stopped
     expose: ["11434"]
+    environment:
+      # Bob's in-house reviewer/critic models run here on CPU: keep a loaded model resident
+      # (a cold load cost ~100 s) and give it a window that fits Bob's prompts without
+      # exhausting RAM (16k ctx on a 7-8B model is ~2 GB of KV cache).
+      OLLAMA_KEEP_ALIVE: ${OLLAMA_KEEP_ALIVE:-2h}
+      OLLAMA_CONTEXT_LENGTH: ${OLLAMA_CONTEXT_LENGTH:-16384}
+      OLLAMA_MAX_LOADED_MODELS: ${OLLAMA_MAX_LOADED_MODELS:-3}
     volumes:
       - ollama-models:/root/.ollama
     healthcheck:

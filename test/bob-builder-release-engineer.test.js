@@ -103,7 +103,9 @@ test('release engineer uses verified implementation and security artifact proven
     completeRelease: async () => ({ success: true, approval: { id: 'approval-1' } }),
     abortRelease: async () => ({ success: true })
   });
-  assert.equal(captured.modelRequest.provider, 'openai');
+  // In-house first: analysis work tries the laptop GPU, then OpenAI.
+  assert.deepEqual(captured.modelRequest.chain, ['gpu_workstation', 'openai']);
+  assert.equal(captured.modelRequest.provider, 'gpu_workstation');
   assert.equal(captured.modelRequest.prompt_version, RELEASE_ENGINEER_PROMPT_VERSION);
   assert.deepEqual(captured.modelRequest.input_artifact_ids, ['patch-1', 'manifest-1', 'logs-1', 'security-1', 'review-1']);
   assert.equal(result.approval.id, 'approval-1');

@@ -244,6 +244,56 @@ test('planTurn passes a clean tool decision without a critic call and returns th
   assert.equal(result.body.model, 'gpt-5.4');
 });
 
+test('planTurn works in-house first and escalates to OpenAI only when the local author is stuck', async () => {
+  const { createModelGateway } = require('../services/fcm-api/src/bob/modelGateway');
+  const real = createModelGateway({ env: { OPENAI_API_KEY: 'k', GPU_WORKSTATION_URL: 'http://laptop:11434/v1', GPU_WORKSTATION_MODEL: 'qwen2.5-coder:7b' } });
+  assert.deepEqual(real.config.chains.planner, ['gpu_workstation', 'openai']);
+  assert.deepEqual(real.chainAfter('planner', 'gpu_workstation'), ['openai']);
+  assert.equal(real.chainAfter('planner', 'openai'), null, 'OpenAI is the last resort');
+  assert.equal(real.providerKind('gpu_workstation'), 'ollama');
+
+  // 1) The laptop model answers with prose instead of the JSON contract -> the turn goes to OpenAI.
+  const calls = [];
+  const gateway = {
+    chainAfter: real.chainAfter,
+    providerKind: real.providerKind,
+    async chatJson(role, messages, options = {}) {
+      calls.push({ role, chain: options.chain ?? null });
+      if (role === 'planner' && !options.chain) return { content: 'Sure! Here is what I would do…', provider: 'gpu_workstation', model: 'qwen2.5-coder:7b', latency_ms: 30 };
+      if (role === 'planner') return { content: JSON.stringify({ action: 'use_tool', tool: 'query_records', args: { query: 'find_org', name: 'LINZ' }, reply: 'Looking that up.' }), provider: 'openai', model: 'gpt-5.4', latency_ms: 40 };
+      throw new Error(`unexpected role ${role}`);
+    },
+  };
+  const result = await planTurn({ message: 'find LINZ', tools: TOOLS }, { gateway, env: {} });
+  assert.equal(result.body.tool, 'query_records');
+  assert.equal(result.body.provider, 'openai');
+  assert.equal(result.body.verification.escalated, true);
+  assert.deepEqual(result.body.passes.map((p) => [p.pass, p.provider]), [['author', 'gpu_workstation'], ['escalate', 'openai']]);
+  assert.deepEqual(calls.map((c) => c.chain), [null, ['openai']]);
+
+  // 2) The laptop model's draft is blocked by the verifier -> the repair goes to OpenAI, not back to the same model.
+  const calls2 = [];
+  const gateway2 = {
+    chainAfter: real.chainAfter,
+    providerKind: real.providerKind,
+    async chatJson(role, messages, options = {}) {
+      calls2.push({ role, chain: options.chain ?? null });
+      if (role === 'planner' && !options.chain) return { content: JSON.stringify({ action: 'ask', reply: 'Before I draft:', questions: [{ question: 'Do you want a 90-day trial clause included?' }] }), provider: 'gpu_workstation', model: 'qwen2.5-coder:7b', latency_ms: 30 };
+      if (role === 'planner') return { content: JSON.stringify({ action: 'answer', reply: '## Casual Security Officer — Job Description\n\n…', confidence: 0.9 }), provider: 'openai', model: 'gpt-5.4', latency_ms: 40 };
+      if (role === 'verifier') return { content: JSON.stringify({ verdict: 'repair', issues: [], summary: 're-ask' }), provider: 'openai', model: 'gpt-5.4-mini', latency_ms: 3 };
+      throw new Error(`unexpected role ${role}`);
+    },
+  };
+  const repaired = await planTurn({ message: 'yes to all', tools: TOOLS, pending: { kind: 'ask', questions: [{ question: 'Do you want a 90-day trial clause included?' }] } }, { gateway: gateway2, env: {} });
+  assert.equal(repaired.body.action, 'answer');
+  assert.equal(repaired.body.verification.replanned, true);
+  assert.equal(repaired.body.verification.escalated, true);
+  const repairPass = repaired.body.passes.find((p) => p.pass === 'repair');
+  assert.equal(repairPass.provider, 'openai');
+  assert.equal(repairPass.escalated_from, 'gpu_workstation');
+  assert.deepEqual(calls2.filter((c) => c.role === 'planner').map((c) => c.chain), [null, ['openai']]);
+});
+
 test('planTurn returns 502 with attempts when every provider fails', async () => {
   const gateway = { async chatJson() { const error = new Error('no model provider available'); error.attempts = [{ provider: 'openai', ok: false, error: 'http_500' }]; throw error; } };
   const result = await planTurn({ message: 'hi', tools: [] }, { gateway, env: {}, logger: { error() {} } });

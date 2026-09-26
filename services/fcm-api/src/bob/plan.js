@@ -42,9 +42,9 @@ function delegableTools(tools) {
   return tools.map((t) => t.tool).filter((name) => DELEGABLE_TOOL_RE.test(name));
 }
 
-async function runPlannerOnce(gateway, input, { reviewerNotes = [], timeoutMs, role = 'planner' } = {}) {
+async function runPlannerOnce(gateway, input, { reviewerNotes = [], timeoutMs, role = 'planner', chain } = {}) {
   const messages = buildPlannerMessages({ ...input, reviewerNotes });
-  const completion = await gateway.chatJson(role, messages, { timeoutMs, reasoningEffort: authorEffort(input) });
+  const completion = await gateway.chatJson(role, messages, { timeoutMs, reasoningEffort: authorEffort(input), ...(chain ? { chain } : {}) });
   const parsed = parsePlanContent(completion.content);
   let raw = parsed;
   if (!raw) {
@@ -102,6 +102,23 @@ async function planTurn(body, { gateway, now = Date.now, logger = console, env =
   let verification = { checked: false, verdict: 'skipped', issues: [], notes: [], critic: null, latency_ms: 0 };
   let replanned = false;
   let scrubbed = false;
+  let escalated = false;
+
+  // In-house first, outsource when stuck: a local author (laptop/VPS model) whose plan did not parse
+  // hands the turn to the next provider in the chain while there is budget to do so.
+  const inHouse = (provider) => typeof gateway.providerKind === 'function' && gateway.providerKind(provider) !== 'openai';
+  const nextChain = (provider) => (typeof gateway.chainAfter === 'function' ? gateway.chainAfter('planner', provider) : null);
+  if (!attempt.parsedOk && inHouse(attempt.completion.provider) && nextChain(attempt.completion.provider) && turnBudgetMs - elapsed() > 25000) {
+    try {
+      const escalation = await runPlannerOnce(gateway, input, { timeoutMs: Math.max(15000, turnBudgetMs - elapsed() - 5000), chain: nextChain(attempt.completion.provider) });
+      passes.push({ pass: 'escalate', reason: 'unparseable_in_house_plan', from: attempt.completion.provider, provider: escalation.completion.provider, model: escalation.completion.model, latency_ms: escalation.completion.latency_ms, parsed_ok: escalation.parsedOk });
+      attempt = escalation;
+      decision = escalation.decision;
+      escalated = true;
+    } catch (error) {
+      passes.push({ pass: 'escalate', ok: false, error: String(error && error.message || error).slice(0, 200) });
+    }
+  }
 
   if (verifyEnabled) {
     const remaining = turnBudgetMs - elapsed();
@@ -110,9 +127,13 @@ async function planTurn(body, { gateway, now = Date.now, logger = console, env =
 
     if (verification.verdict === 'repair' && turnBudgetMs - elapsed() > 20000) {
       try {
-        const repair = await runPlannerOnce(gateway, input, { reviewerNotes: verification.notes, timeoutMs: Math.max(15000, turnBudgetMs - elapsed() - 2000) });
+        // A blocked in-house plan is repaired by the next provider in the chain (escalation); an OpenAI
+        // plan is repaired by the same author from the reviewer notes.
+        const escalateTo = inHouse(attempt.completion.provider) ? nextChain(attempt.completion.provider) : null;
+        const repair = await runPlannerOnce(gateway, input, { reviewerNotes: verification.notes, timeoutMs: Math.max(15000, turnBudgetMs - elapsed() - 2000), ...(escalateTo ? { chain: escalateTo } : {}) });
         replanned = true;
-        passes.push({ pass: 'repair', provider: repair.completion.provider, model: repair.completion.model, latency_ms: repair.completion.latency_ms, parsed_ok: repair.parsedOk, addressed: verification.issues.map((issue) => issue.code) });
+        if (escalateTo) escalated = true;
+        passes.push({ pass: 'repair', provider: repair.completion.provider, model: repair.completion.model, latency_ms: repair.completion.latency_ms, parsed_ok: repair.parsedOk, addressed: verification.issues.map((issue) => issue.code), ...(escalateTo ? { escalated_from: attempt.completion.provider } : {}) });
         const recheck = runDeterministicChecks(repair.decision, input);
         const stillBlocked = recheck.filter((issue) => issue.severity === 'block');
         // Keep the repaired draft unless it introduced NEW blocking problems the original did not have.
@@ -157,6 +178,7 @@ async function planTurn(body, { gateway, now = Date.now, logger = console, env =
         issues: verification.issues.map((issue) => ({ code: issue.code, severity: issue.severity, source: issue.source || 'deterministic' })),
         critic: verification.critic ? { verdict: verification.critic.verdict, provider: verification.critic.provider || null, model: verification.critic.model || null, summary: verification.critic.summary || '' } : null,
         replanned,
+        escalated,
         scrubbed,
         regressed: Boolean(verification.regressed),
         latency_ms: verification.latency_ms,

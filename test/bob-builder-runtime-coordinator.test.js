@@ -193,3 +193,36 @@ test('backend-only transition requires approved specification and an intentional
   assert.match(migration, /SET status = 'implementation_pending'/);
   assert.match(migration, /GRANT EXECUTE[\s\S]*TO service_role/);
 });
+test('backend implementation resumes the provider chain past an in-house author that failed', async () => {
+  const { runBackendImplementation } = require('../builder-runtime-coordinator');
+  const Module = require('node:module');
+  // Swap the agentic engineer and backend handoff for fakes for this test only.
+  const engineerPath = require.resolve('../builder-agentic-engineer');
+  const handoffPath = require.resolve('../builder-backend-handoff');
+  const originalEngineer = require.cache[engineerPath].exports;
+  const originalHandoff = require.cache[handoffPath].exports;
+  const calls = [];
+  const coordinatorPath = require.resolve('../builder-runtime-coordinator');
+  delete require.cache[coordinatorPath];
+  require.cache[engineerPath].exports = { ...originalEngineer, runAgenticEngineer: async (input) => {
+    calls.push({ startAfter: input.startAfterProvider ?? null });
+    const local = !input.startAfterProvider;
+    return { ok: true, patch_artifact: { id: local ? 'patch-local' : 'patch-openai' }, routing: { provider: local ? 'gpu_workstation' : 'openai' } };
+  } };
+  require.cache[handoffPath].exports = { ...originalHandoff, runBackendHandoff: async ({ patchArtifact }) => (patchArtifact.id === 'patch-local'
+    ? { success: false, failure_artifact: { id: 'fail-1' }, artifacts: [{ id: 'fail-1' }] }
+    : { success: true, artifacts: [{ id: 'verified' }] }) };
+  try {
+    const fresh = require('../builder-runtime-coordinator');
+    const result = await fresh.runBackendImplementation({ supabase: {}, gateway: {}, job: { id: 'j' }, step: { id: 's' }, context: { workspaceRoot: '/ws', gitSourceDir: '/src', repoRoot: '/repo' } });
+    assert.equal(result.success, true);
+    assert.equal(result.attempts, 2);
+    assert.equal(result.routing.provider, 'openai');
+    assert.deepEqual(calls, [{ startAfter: null }, { startAfter: 'gpu_workstation' }], 'the repair attempt skips the local provider that just failed verification');
+  } finally {
+    require.cache[engineerPath].exports = originalEngineer;
+    require.cache[handoffPath].exports = originalHandoff;
+    delete require.cache[coordinatorPath];
+    void Module;
+  }
+});

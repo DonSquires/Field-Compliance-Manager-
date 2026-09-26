@@ -9,7 +9,9 @@ VPS_USER="${BOB_GPU_LINK_USER:-bobgpu}"
 GATEWAY_IP="${BOB_GPU_LINK_GATEWAY:-172.16.0.1}"
 REMOTE_PORT="${BOB_GPU_LINK_PORT:-11435}"
 LOCAL_PORT="${OLLAMA_PORT:-11434}"
-MODELS="${BOB_GPU_MODELS:-qwen2.5:7b}"
+MODELS="${BOB_GPU_MODELS:-qwen2.5:7b,qwen2.5-coder:7b}"
+# Ollama's default 4k window would truncate Bob's prompts silently.
+CONTEXT_LENGTH="${BOB_GPU_CONTEXT_LENGTH:-32768}"
 KEY="${HOME}/.ssh/bob-gpu-link"
 
 log() { printf '%s %s\n' "$(date -u +'%Y-%m-%dT%H:%M:%SZ')" "$*"; }
@@ -25,8 +27,8 @@ if [[ ! -f "$KEY" ]]; then
 fi
 
 if ! curl -fs "http://127.0.0.1:${LOCAL_PORT}/api/tags" >/dev/null 2>&1; then
-  log "Starting Ollama"
-  (ollama serve >/dev/null 2>&1 &)
+  log "Starting Ollama (context ${CONTEXT_LENGTH}, models stay loaded 2h)"
+  (OLLAMA_CONTEXT_LENGTH="$CONTEXT_LENGTH" OLLAMA_KEEP_ALIVE=2h OLLAMA_FLASH_ATTENTION=1 ollama serve >/dev/null 2>&1 &)
   sleep 4
 fi
 for model in ${MODELS//,/ }; do

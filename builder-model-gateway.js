@@ -9,9 +9,73 @@ const ALLOWED_BUILDER_MODES = new Set([
   'release_engineer'
 ]);
 const REASONING_EFFORTS = new Set(['low', 'medium', 'high']);
+// In-house first: the laptop GPU and the VPS Ollama are Bob's own compute; OpenAI is the
+// outsourced fallback for when Bob is stuck or the prompt does not fit a local context window.
+const PROVIDER_KINDS = Object.freeze({ openai: 'openai', ollama: 'ollama', gpu_workstation: 'ollama' });
+const HEALTH_OK_TTL_MS = 30_000;
+const HEALTH_FAIL_TTL_MS = 60_000;
+const HEALTH_PROBE_TIMEOUT_MS = 2_000;
+const CHARS_PER_TOKEN = 3.5;
+const healthCache = new Map();
 
 function parseModelAllowlist(value, fallback) {
   return new Set(String(value || fallback).split(',').map(model => model.trim()).filter(Boolean));
+}
+
+function estimateTokens(chars) {
+  return Math.ceil(Number(chars || 0) / CHARS_PER_TOKEN);
+}
+
+// Prompts that cannot fit a local model's context are the clearest "outsource this" signal.
+function promptFitsProvider(input, providerConfig) {
+  if (providerConfig.kind !== 'ollama') return true;
+  return estimateTokens(promptLength(input)) <= Math.floor(providerConfig.numCtx * 0.85);
+}
+
+async function probeProvider(config, name, { fetchImpl = globalThis.fetch, now = Date.now } = {}) {
+  const providerConfig = config[name];
+  if (!providerConfig) return { name, configured: false, healthy: false, installed: [] };
+  if (providerConfig.kind === 'openai') return { name, configured: Boolean(providerConfig.apiKey), healthy: Boolean(providerConfig.apiKey), installed: [...providerConfig.models] };
+  if (!providerConfig.baseUrl) return { name, configured: false, healthy: false, installed: [] };
+  const cached = healthCache.get(name);
+  if (cached && cached.until > now()) return { name, configured: true, healthy: cached.healthy, installed: cached.installed, cached: true };
+  let healthy = false;
+  let installed = [];
+  try {
+    const response = await fetchImpl(`${providerConfig.baseUrl}/api/tags`, { signal: AbortSignal.timeout(HEALTH_PROBE_TIMEOUT_MS) });
+    healthy = response.ok;
+    const data = healthy ? await response.json().catch(() => null) : null;
+    installed = Array.isArray(data?.models) ? data.models.map(model => String(model.name || model.model || '')).filter(Boolean) : [];
+  } catch {
+    healthy = false;
+  }
+  healthCache.set(name, { healthy, installed, until: now() + (healthy ? HEALTH_OK_TTL_MS : HEALTH_FAIL_TTL_MS) });
+  return { name, configured: true, healthy, installed, cached: false };
+}
+
+// The model a provider would actually serve for a request: the requested model when allowed and
+// installed, else the first allowlisted model that is installed (local) or allowlisted (OpenAI).
+function resolveProviderModel(config, name, requestedModel, installed = null) {
+  const providerConfig = config[name];
+  if (!providerConfig) return null;
+  const allowed = [...providerConfig.models];
+  const available = model => !Array.isArray(installed) || installed.length === 0 || installed.includes(model) || installed.includes(`${model}:latest`);
+  if (requestedModel && providerConfig.models.has(requestedModel) && available(requestedModel)) return requestedModel;
+  return allowed.find(available) || null;
+}
+
+async function modelHealth(config, options = {}) {
+  const names = Object.keys(PROVIDER_KINDS);
+  const probes = await Promise.all(names.map(name => probeProvider(config, name, options)));
+  return Object.fromEntries(probes.map(probe => [probe.name, {
+    kind: PROVIDER_KINDS[probe.name],
+    configured: probe.configured,
+    healthy: probe.healthy,
+    models: [...(config[probe.name]?.models ?? [])],
+    installed: probe.installed,
+    ready_model: probe.healthy ? resolveProviderModel(config, probe.name, null, probe.installed) : null,
+    num_ctx: config[probe.name]?.numCtx ?? null
+  }]));
 }
 
 function isReasoningModel(model) {
@@ -31,14 +95,24 @@ function defaultReviewerModel(env = process.env) {
 function createModelGatewayConfig(env = process.env) {
   return {
     openai: {
+      kind: 'openai',
       apiKey: env.OPENAI_API_KEY || '',
       baseUrl: (env.OPENAI_BASE_URL || 'https://api.openai.com/v1').replace(/\/+$/, ''),
       // Bob Builder authors at full strength by default; the allowlist still bounds what a request may ask for.
       models: parseModelAllowlist(env.BOB_OPENAI_MODELS, 'gpt-5.4,gpt-5.4-mini,gpt-4o-mini')
     },
     ollama: {
+      kind: 'ollama',
       baseUrl: (env.OLLAMA_BASE_URL || 'http://127.0.0.1:11434').replace(/\/+$/, ''),
-      models: parseModelAllowlist(env.BOB_OLLAMA_MODELS, 'qwen2.5:7b')
+      models: parseModelAllowlist(env.BOB_OLLAMA_MODELS, 'qwen2.5-coder:7b'),
+      // CPU inference on the VPS: keep the window modest so the KV cache fits and prompt eval stays bounded.
+      numCtx: Math.max(4096, Number(env.BOB_OLLAMA_NUM_CTX) || 16384)
+    },
+    gpu_workstation: {
+      kind: 'ollama',
+      baseUrl: (env.GPU_WORKSTATION_URL || '').replace(/\/(v1)?\/*$/, ''),
+      models: parseModelAllowlist(env.BOB_GPU_MODELS, 'qwen2.5-coder:7b'),
+      numCtx: Math.max(4096, Number(env.BOB_GPU_NUM_CTX) || 32768)
     },
     // The agentic lane is not bound by an edge timeout: give reasoning models
     // maximum effort, room to write, and long turns.
@@ -56,7 +130,7 @@ function promptLength(input) {
 
 function validateModelRequest(input, config) {
   if (!input || typeof input !== 'object') return 'request body is required';
-  if (!['openai', 'ollama'].includes(input.provider)) return 'unsupported model provider';
+  if (!PROVIDER_KINDS[input.provider]) return 'unsupported model provider';
   if (!ALLOWED_BUILDER_MODES.has(input.builder_mode)) return 'unsupported builder mode';
   if (!input.prompt_version || typeof input.prompt_version !== 'string') return 'prompt_version is required';
   if (!input.idempotency_key || typeof input.idempotency_key !== 'string') return 'idempotency_key is required';
@@ -81,8 +155,12 @@ function buildProviderBody({ input, config, model }) {
     : [{ role: 'system', content: input.system_prompt }, { role: 'user', content: input.user_prompt }];
   const body = { model, messages };
   if (!isOpenAI) {
+    const providerConfig = config[input.provider];
     body.stream = false;
     if (input.output_schema) body.format = 'json';
+    // Ollama defaults to a 4k window and would truncate Bob's prompts silently; keep the model warm between turns.
+    body.options = { num_ctx: providerConfig.numCtx, temperature: typeof input.temperature === 'number' ? input.temperature : 0.2, num_predict: Math.min(Number(input.max_output_tokens) || 8192, 16384) };
+    body.keep_alive = '30m';
     return body;
   }
   if (input.output_schema) body.response_format = { type: 'json_object' };
@@ -101,10 +179,19 @@ async function invokeBuilderModel({ input, config, fetchImpl = globalThis.fetch 
   if (validationError) return { status: 400, body: { error: validationError } };
 
   const providerConfig = config[input.provider];
-  const model = input.model || [...providerConfig.models][0];
   if (input.provider === 'openai' && !providerConfig.apiKey) {
-    return { status: 503, body: { error: 'OpenAI provider is not configured' } };
+    return { status: 503, body: { error: 'OpenAI provider is not configured', code: 'provider_unconfigured' } };
   }
+  if (providerConfig.kind === 'ollama' && !providerConfig.baseUrl) {
+    return { status: 503, body: { error: `${input.provider} provider is not configured`, code: 'provider_unconfigured' } };
+  }
+  if (!promptFitsProvider(input, providerConfig)) {
+    return { status: 413, body: { error: `prompt exceeds the ${input.provider} context window (${providerConfig.numCtx} tokens)`, code: 'context_exceeded' } };
+  }
+  const probe = providerConfig.kind === 'ollama' ? await probeProvider(config, input.provider, { fetchImpl }) : null;
+  if (probe && !probe.healthy) return { status: 503, body: { error: `${input.provider} provider is unreachable`, code: 'provider_unavailable' } };
+  const model = resolveProviderModel(config, input.provider, input.model, probe?.installed ?? null);
+  if (!model) return { status: 503, body: { error: `${input.provider} has none of the allowed models installed`, code: 'model_unavailable' } };
 
   const controller = new AbortController();
   const timer = setTimeout(() => controller.abort(), config.timeoutMs);
@@ -124,8 +211,9 @@ async function invokeBuilderModel({ input, config, fetchImpl = globalThis.fetch 
     );
     const data = await response.json().catch(() => null);
     if (!response.ok || !data) {
-      const detail = data?.error?.message ? `: ${String(data.error.message).slice(0, 200)}` : '';
-      return { status: 502, body: { error: `${input.provider} provider request failed${detail}` } };
+      const detail = data?.error?.message ? `: ${String(data.error.message).slice(0, 200)}` : (typeof data?.error === 'string' ? `: ${data.error.slice(0, 200)}` : '');
+      if (providerConfig.kind === 'ollama' && (response.status >= 500 || response.status === 429)) healthCache.set(input.provider, { healthy: false, installed: [], until: Date.now() + HEALTH_FAIL_TTL_MS });
+      return { status: 502, body: { error: `${input.provider} provider request failed${detail}`, code: 'provider_error' } };
     }
 
     const content = isOpenAI ? data.choices?.[0]?.message?.content : data.message?.content;
@@ -147,9 +235,10 @@ async function invokeBuilderModel({ input, config, fetchImpl = globalThis.fetch 
     };
   } catch (error) {
     const timedOut = error?.name === 'AbortError';
+    if (!timedOut && providerConfig.kind === 'ollama') healthCache.set(input.provider, { healthy: false, installed: [], until: Date.now() + HEALTH_FAIL_TTL_MS });
     return {
       status: timedOut ? 504 : 502,
-      body: { error: timedOut ? 'model provider timed out' : 'model provider unavailable' }
+      body: { error: timedOut ? 'model provider timed out' : 'model provider unavailable', code: timedOut ? 'provider_timeout' : 'provider_unavailable' }
     };
   } finally {
     clearTimeout(timer);
@@ -158,7 +247,13 @@ async function invokeBuilderModel({ input, config, fetchImpl = globalThis.fetch 
 
 module.exports = {
   ALLOWED_BUILDER_MODES,
+  PROVIDER_KINDS,
   REASONING_EFFORTS,
+  estimateTokens,
+  modelHealth,
+  probeProvider,
+  promptFitsProvider,
+  resolveProviderModel,
   buildProviderBody,
   createModelGatewayConfig,
   defaultReviewerModel,

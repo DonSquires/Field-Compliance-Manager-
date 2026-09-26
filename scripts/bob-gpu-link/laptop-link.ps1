@@ -21,7 +21,12 @@ param(
   [string]$GatewayIp = $(if ($env:BOB_GPU_LINK_GATEWAY) { $env:BOB_GPU_LINK_GATEWAY } else { '172.16.0.1' }),
   [int]$RemotePort = 11435,
   [int]$LocalPort = 11434,
-  [string[]]$Models = @('qwen2.5:7b'),
+  # Chat roles use qwen2.5:7b; the Builder author/reviewer use the coder models. Add the bigger
+  # coder (-BiggerModels) when the GPU has the room: 14B needs ~10 GB VRAM at Q4, the 30B MoE
+  # (3B active) runs well split across GPU + 32 GB system RAM.
+  [string[]]$Models = @('qwen2.5:7b', 'qwen2.5-coder:7b'),
+  [switch]$BiggerModels,
+  [int]$ContextLength = 32768,
   [switch]$Install
 )
 
@@ -58,10 +63,15 @@ if (-not (Test-Path $keyPath)) {
 $ollamaUp = $false
 try { Invoke-RestMethod -Uri "http://127.0.0.1:$LocalPort/api/tags" -TimeoutSec 3 | Out-Null; $ollamaUp = $true } catch {}
 if (-not $ollamaUp) {
-  Write-Log 'Starting Ollama...'
+  Write-Log "Starting Ollama (context $ContextLength, models stay loaded 2h)..."
+  # Ollama's default 4k window would truncate Bob's prompts silently.
+  $env:OLLAMA_CONTEXT_LENGTH = "$ContextLength"
+  $env:OLLAMA_KEEP_ALIVE = '2h'
+  $env:OLLAMA_FLASH_ATTENTION = '1'
   Start-Process -FilePath 'ollama' -ArgumentList 'serve' -WindowStyle Hidden
   Start-Sleep -Seconds 4
 }
+if ($BiggerModels) { $Models += @('qwen2.5-coder:14b', 'qwen3-coder:30b') }
 foreach ($model in $Models) {
   $have = (& ollama list 2>$null) -match [regex]::Escape($model)
   if (-not $have) { Write-Log "Pulling $model..."; & ollama pull $model }

@@ -21,7 +21,7 @@ const crypto = require('node:crypto');
 const { execFileSync, spawnSync } = require('node:child_process');
 const { createBranchWorkspace, redactGitError } = require('./builder-branch-workspace');
 const { isProtectedPath, laneAllows, protectedReason, isMigrationPath, normalizeRepoPath } = require('./builder-path-policy');
-const { buildModelRunRequest, callModelGateway, persistModelArtifact } = require('./supabase/functions/_shared/builder-model-adapter');
+const { buildModelRunRequest, callModelGateway, persistModelArtifact, fetchModelHealth, selectProviders, providerRequest } = require('./supabase/functions/_shared/builder-model-adapter');
 const { collectRepositoryContext } = require('./supabase/functions/_shared/builder-repository-context');
 
 const PROMPT_VERSION = 'agentic-engineer-v1';
@@ -456,6 +456,9 @@ async function runAgenticEngineer({
   limits = DEFAULT_LIMITS,
   modelName = process.env.BOB_BUILDER_MODEL || 'gpt-5.4',
   callModel = callModelGateway,
+  // In-house first: resume the chain past a provider whose earlier attempt failed verification.
+  startAfterProvider = null,
+  providerHealth = null,
   now = Date.now,
   logger = console,
 }) {
@@ -502,12 +505,32 @@ async function runAgenticEngineer({
   let outcome = null;
   let turns = 0;
 
+  const health = providerHealth || await fetchModelHealth(gateway || {});
+  const candidates = selectProviders(baseRequest, { health, startAfter: startAfterProvider });
+  if (!candidates.length) {
+    return { ok: false, error: 'no model provider is available for the author', turns: 0, usage, duration_ms: now() - started, routing: { provider: null, reason: baseRequest.routing_reason, prompt_version: PROMPT_VERSION, model: null, chain: baseRequest.chain } };
+  }
+  let active = 0;
+  const activeRequest = () => providerRequest(baseRequest, candidates[active], null);
+  const escalate = (reason) => {
+    if (active + 1 >= candidates.length) return false;
+    active += 1;
+    parseFailures = 0;
+    log({ turn: turns, escalated_to: candidates[active].provider, model: candidates[active].model, reason });
+    return true;
+  };
+  // Local providers reject prompts that outgrow their window (413) or go away (5xx/timeouts); OpenAI errors end the run.
+  const ESCALATE_STATUSES = new Set([408, 413, 429, 500, 502, 503, 504]);
+
   while (turns < limits.maxTurns && now() - started < limits.wallBudgetMs) {
     turns++;
-    const request = { ...baseRequest, idempotency_key: `${baseRequest.idempotency_key}::turn-${turns}`, request: { ...baseRequest.request, messages: compactMessages(messages), reasoning_effort: process.env.BOB_BUILDER_REASONING_EFFORT || 'high', max_output_tokens: Number(process.env.BOB_BUILDER_MAX_OUTPUT_TOKENS || 32000) } };
+    const base = activeRequest();
+    const isOpenAI = candidates[active].provider === 'openai';
+    const request = { ...base, idempotency_key: `${base.idempotency_key}::turn-${turns}`, request: { ...base.request, messages: compactMessages(messages), ...(isOpenAI ? { reasoning_effort: process.env.BOB_BUILDER_REASONING_EFFORT || 'high' } : {}), max_output_tokens: Number(process.env.BOB_BUILDER_MAX_OUTPUT_TOKENS || 32000) } };
     const response = await callModel({ ...gateway, modelRequest: request, timeoutMs: limits.turnTimeoutMs });
     if (!response.ok) {
-      log({ turn: turns, error: `model unavailable: ${response.error}` });
+      log({ turn: turns, provider: candidates[active].provider, error: `model unavailable: ${response.error}` });
+      if ((ESCALATE_STATUSES.has(Number(response.status)) || response.timeout) && escalate(`provider ${response.status ?? 'timeout'}: ${String(response.error).slice(0, 120)}`)) continue;
       if (response.timeout || turns >= 3) { outcome = { ok: false, error: `model unavailable: ${response.error}` }; break; }
       continue;
     }
@@ -516,8 +539,9 @@ async function runAgenticEngineer({
     const call = parseToolCall(content);
     if (!call || typeof call.tool !== 'string') {
       parseFailures++;
-      log({ turn: turns, error: 'unparseable tool call', preview: content.slice(0, 300) });
+      log({ turn: turns, provider: candidates[active].provider, error: 'unparseable tool call', preview: content.slice(0, 300) });
       messages.push({ role: 'assistant', content: content.slice(0, 4000) }, { role: 'user', content: JSON.stringify({ error: 'Reply with ONLY one JSON object: {"thought": string, "tool": string, "args": object}.' }) });
+      if (parseFailures >= 3 && escalate('three unparseable tool calls in a row')) continue;
       if (parseFailures >= 3) { outcome = { ok: false, error: 'model did not produce tool calls' }; break; }
       continue;
     }
@@ -561,12 +585,15 @@ async function runAgenticEngineer({
 
   if (!outcome) outcome = { ok: false, error: now() - started >= limits.wallBudgetMs ? 'time budget exhausted' : 'turn budget exhausted' };
 
-  const transcriptRequest = { ...baseRequest, idempotency_key: `${baseRequest.idempotency_key}::transcript` };
-  const transcriptArtifact = await recordRun({ supabase, modelRequest: transcriptRequest, content: JSON.stringify({ lane, turns, outcome: outcome.ok ? 'proposal' : outcome.error, usage, transcript }, null, 0), model: modelName, usage, artifactType: 'build_logs' }).catch(() => ({ artifact: null }));
+  // Persist under the provider/model that actually did the work (provenance for the reviewer-independence rule).
+  const authored = activeRequest();
+  const authorModel = candidates[active].model || modelName;
+  const transcriptRequest = { ...authored, idempotency_key: `${baseRequest.idempotency_key}::transcript` };
+  const transcriptArtifact = await recordRun({ supabase, modelRequest: transcriptRequest, content: JSON.stringify({ lane, turns, outcome: outcome.ok ? 'proposal' : outcome.error, usage, provider: candidates[active].provider, model: authorModel, transcript }, null, 0), model: authorModel, usage, artifactType: 'build_logs' }).catch(() => ({ artifact: null }));
 
   let patchArtifact = null;
   if (outcome.ok) {
-    const recorded = await recordRun({ supabase, modelRequest: { ...baseRequest, idempotency_key: `${baseRequest.idempotency_key}::proposal` }, content: JSON.stringify(outcome.proposal), model: outcome.model || modelName, usage, artifactType: 'code_implementation' });
+    const recorded = await recordRun({ supabase, modelRequest: { ...authored, idempotency_key: `${baseRequest.idempotency_key}::proposal` }, content: JSON.stringify(outcome.proposal), model: outcome.model || authorModel, usage, artifactType: 'code_implementation' });
     if (supabase && !recorded.artifact) outcome = { ok: false, error: recorded.error || 'proposal artifact could not be recorded' };
     patchArtifact = recorded.artifact;
   }
@@ -583,7 +610,7 @@ async function runAgenticEngineer({
     turns,
     usage,
     duration_ms: now() - started,
-    routing: { provider: baseRequest.provider, reason: baseRequest.routing_reason, prompt_version: PROMPT_VERSION, model: modelName, reasoning_effort: process.env.BOB_BUILDER_REASONING_EFFORT || 'high' },
+    routing: { provider: candidates[active].provider, model: authorModel, chain: baseRequest.chain, escalated: active > 0, reason: baseRequest.routing_reason, prompt_version: PROMPT_VERSION, reasoning_effort: process.env.BOB_BUILDER_REASONING_EFFORT || 'high' },
   };
 }
 

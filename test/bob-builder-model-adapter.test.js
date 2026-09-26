@@ -25,17 +25,26 @@ function makeRequest(overrides = {}) {
   });
 }
 
-test('model routing keeps low-risk preprocessing local', () => {
-  assert.equal(routeBuilderModel({ workloadKind: 'repository_summary' }).provider, 'ollama');
+test('model routing keeps low-risk preprocessing in-house first', () => {
+  const route = routeBuilderModel({ workloadKind: 'repository_summary' });
+  assert.deepEqual(route.chain, ['gpu_workstation', 'ollama', 'openai']);
+  assert.equal(route.provider, 'gpu_workstation');
 });
 
-test('model routing sends complex builder work to OpenAI', () => {
-  assert.equal(routeBuilderModel({ workloadKind: 'architecture' }).provider, 'openai');
+test('model routing is in-house first with OpenAI as the outsourced fallback, per workload class', () => {
+  assert.deepEqual(routeBuilderModel({ workloadKind: 'architecture' }).chain, ['gpu_workstation', 'openai']);
+  assert.deepEqual(routeBuilderModel({ workloadKind: 'backend_implementation' }).chain, ['gpu_workstation', 'openai']);
+  assert.equal(routeBuilderModel({ workloadKind: 'backend_implementation' }).reason, 'in_house_first_author');
+  assert.deepEqual(routeBuilderModel({ workloadKind: 'independent_code_review' }).chain, ['gpu_workstation', 'ollama', 'openai']);
+  // Operators can pin a class to OpenAI (or anything else) without a code change.
+  assert.deepEqual(routeBuilderModel({ workloadKind: 'backend_implementation', env: { BOB_BUILDER_ROUTE_AUTHOR: 'openai' } }).chain, ['openai']);
+  assert.deepEqual(routeBuilderModel({ workloadKind: 'backend_implementation', env: { BOB_BUILDER_ROUTE_AUTHOR: 'nonsense' } }).chain, ['gpu_workstation', 'openai'], 'unknown providers fall back to the default chain');
 });
 
 test('model routing keeps restricted data local regardless of workload', () => {
   const route = routeBuilderModel({ workloadKind: 'architecture', containsRestrictedData: true });
-  assert.equal(route.provider, 'ollama');
+  assert.deepEqual(route.chain, ['ollama', 'gpu_workstation']);
+  assert.ok(!route.chain.includes('openai'));
   assert.equal(route.reason, 'restricted_data_local_only');
 });
 
@@ -158,7 +167,7 @@ test('model execution does not dispatch when provenance cannot be recorded', asy
     gateway: {
       gatewayUrl: 'https://control.example',
       apiToken: 'server-token',
-      fetchImpl: async () => { dispatched = true; }
+      fetchImpl: async (url) => { if (String(url).endsWith('/model-run')) dispatched = true; return { ok: false, status: 404, json: async () => ({}), text: async () => '' }; }
     }
   });
 
@@ -175,7 +184,7 @@ test('model execution returns completed duplicate without dispatch', async () =>
     gateway: {
       gatewayUrl: 'https://control.example',
       apiToken: 'server-token',
-      fetchImpl: async () => { dispatched = true; }
+      fetchImpl: async (url) => { if (String(url).endsWith('/model-run')) dispatched = true; return { ok: false, status: 404, json: async () => ({}), text: async () => '' }; }
     }
   });
 
@@ -192,7 +201,7 @@ test('model execution does not redispatch a running idempotency key', async () =
     gateway: {
       gatewayUrl: 'https://control.example',
       apiToken: 'server-token',
-      fetchImpl: async () => { dispatched = true; }
+      fetchImpl: async (url) => { if (String(url).endsWith('/model-run')) dispatched = true; return { ok: false, status: 404, json: async () => ({}), text: async () => '' }; }
     }
   });
 
@@ -270,4 +279,46 @@ test('invalid model output is rejected before artifact upload', async () => {
   const update = mock.writes.find(write => write.type === 'update');
   assert.equal(update.value.status, 'failed');
   assert.match(update.value.error, /invalid shape/, 'the validator reason is persisted on the model run');
+});
+test('model execution walks the in-house-first chain and escalates to OpenAI only when a local provider is stuck', async () => {
+  const { selectProviders } = require('../supabase/functions/_shared/builder-model-adapter.js');
+  const request = makeRequest({ workloadKind: 'independent_code_review', modelName: 'gpt-5.4-mini' });
+  assert.deepEqual(request.chain, ['gpu_workstation', 'ollama', 'openai']);
+  const health = {
+    gpu_workstation: { configured: true, healthy: false, models: ['qwen2.5-coder:7b'], ready_model: null },
+    ollama: { configured: true, healthy: true, models: ['llama3.1:8b'], ready_model: 'llama3.1:8b' },
+    openai: { configured: true, healthy: true, models: ['gpt-5.4', 'gpt-5.4-mini'] }
+  };
+  // The laptop is off, so the chain starts at the VPS; the author identity is excluded for the reviewer.
+  assert.deepEqual(selectProviders(request, { health }), [{ provider: 'ollama', model: 'llama3.1:8b' }, { provider: 'openai', model: 'gpt-5.4-mini' }]);
+  assert.deepEqual(selectProviders(request, { health, avoid: [{ provider: 'ollama', model: 'llama3.1:8b' }] }), [{ provider: 'openai', model: 'gpt-5.4-mini' }]);
+  assert.deepEqual(selectProviders(request, { health, startAfter: 'ollama' }), [{ provider: 'openai', model: 'gpt-5.4-mini' }]);
+
+  const mock = createSupabaseMock();
+  const calls = [];
+  const result = await executeBuilderModelRun({
+    supabase: mock.client,
+    modelRequest: request,
+    gateway: {
+      gatewayUrl: 'https://control.example',
+      apiToken: 'server-token',
+      health,
+      fetchImpl: async (url, init) => {
+        const body = JSON.parse(init.body);
+        calls.push({ provider: body.provider, model: body.model, key: body.idempotency_key });
+        if (body.provider === 'ollama') return { ok: false, status: 413, text: async () => JSON.stringify({ error: 'prompt exceeds the ollama context window (16384 tokens)', code: 'context_exceeded' }) };
+        return { ok: true, status: 200, text: async () => JSON.stringify({ provider: 'openai', model: 'gpt-5.4-mini', content: '{"verdict":"passed"}', usage: {} }) };
+      }
+    },
+    validateOutput: content => JSON.parse(content)
+  });
+  assert.equal(result.ok, true);
+  assert.equal(result.escalated, true);
+  assert.equal(result.provider, 'openai');
+  assert.deepEqual(calls.map(c => c.provider), ['ollama', 'openai']);
+  assert.equal(calls[0].key, request.idempotency_key, 'the first provider keeps the caller idempotency key');
+  assert.equal(calls[1].key, `${request.idempotency_key}::openai`, 'an escalation is its own run record');
+  assert.deepEqual(result.attempts.map(a => [a.provider, a.ok, a.status]), [['ollama', false, 413], ['openai', true, 200]]);
+  const upserts = mock.writes.filter(w => w.type === 'upsert').map(w => [w.value.provider, w.value.model_name]);
+  assert.deepEqual(upserts, [['ollama', 'llama3.1:8b'], ['openai', 'gpt-5.4-mini']]);
 });

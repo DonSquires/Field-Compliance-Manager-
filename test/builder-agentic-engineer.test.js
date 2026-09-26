@@ -96,6 +96,52 @@ function fakeModel(turns) {
   return { callModel, seen };
 }
 
+// Provider health as the control plane reports it: laptop GPU off, VPS Ollama up, OpenAI configured.
+const LAPTOP_OFF = Object.freeze({
+  gpu_workstation: { configured: true, healthy: false, models: ['qwen2.5-coder:7b'], ready_model: null },
+  ollama: { configured: true, healthy: true, models: ['llama3.1:8b'], ready_model: 'llama3.1:8b' },
+  openai: { configured: true, healthy: true, models: ['gpt-5.4', 'gpt-5.4-mini'] },
+});
+const LAPTOP_ON = Object.freeze({ ...LAPTOP_OFF, gpu_workstation: { configured: true, healthy: true, models: ['qwen2.5-coder:7b'], ready_model: 'qwen2.5-coder:7b' } });
+
+test('the author works in-house first and escalates to OpenAI only when the local model is stuck', async () => {
+  const repo = makeRepo();
+  const workspaceRoot = path.join(repo.root, 'workspaces');
+  const job = { id: 'e5ca1a7ee5ca1a7ee5ca1a7ee5ca1a7e', organization_id: '00000000-0000-0000-0000-000000000001', target_sha: repo.sha, title: 'sum subtracts', task_description: 'fix sum' };
+  const step = { id: 'step-esc', builder_mode: 'backend_engineer' };
+  const seen = [];
+  const callModel = async ({ modelRequest }) => {
+    seen.push({ provider: modelRequest.provider, model: modelRequest.model_name, effort: modelRequest.request.reasoning_effort ?? null });
+    // The laptop answers the first turn, then its window overflows (413) -> escalate; OpenAI finishes the job.
+    if (modelRequest.provider === 'gpu_workstation') {
+      if (seen.filter(s => s.provider === 'gpu_workstation').length === 1) return { ok: true, status: 200, data: { content: JSON.stringify({ tool: 'read_file', args: { path: 'lib/sum.js' } }), model: 'qwen2.5-coder:7b' } };
+      return { ok: false, status: 413, error: 'prompt exceeds the gpu_workstation context window (32768 tokens)' };
+    }
+    const openaiTurn = seen.filter(s => s.provider === 'openai').length;
+    const script = [
+      { tool: 'write_file', args: { path: 'lib/sum.js', content: "'use strict';\nmodule.exports = { sum: (a, b) => a + b };\n" } },
+      { tool: 'run', args: { command: 'node --test test/sum.test.js' } },
+      { tool: 'finish', args: { summary: 'sum() used subtraction; changed to addition; test passes.', tests: ['node --test test/sum.test.js'], rollback_notes: ['revert'] } },
+    ];
+    return { ok: true, status: 200, data: { content: JSON.stringify(script[Math.min(openaiTurn - 1, script.length - 1)]), model: 'gpt-5.4' } };
+  };
+  const result = await runAgenticEngineer({ supabase: null, gateway: { gatewayUrl: 'http://gw', apiToken: 't' }, job, step, lane: 'backend', sourceDir: repo.source, workspaceRoot, repoRoot: repo.source, callModel, limits: { ...DEFAULT_LIMITS, maxTurns: 10 }, providerHealth: LAPTOP_ON });
+  assert.equal(result.ok, true, JSON.stringify(result.error));
+  assert.deepEqual(seen.slice(0, 3).map(s => s.provider), ['gpu_workstation', 'gpu_workstation', 'openai']);
+  assert.equal(seen[0].model, 'qwen2.5-coder:7b');
+  assert.equal(seen[0].effort, null, 'local models get no OpenAI reasoning params');
+  assert.equal(seen[2].effort, 'high');
+  assert.deepEqual(result.routing.chain, ['gpu_workstation', 'openai']);
+  assert.equal(result.routing.provider, 'openai');
+  assert.equal(result.routing.escalated, true);
+  // Resuming past the failed local provider skips it entirely on the next attempt.
+  const seen2 = [];
+  const result2 = await runAgenticEngineer({ supabase: null, gateway: { gatewayUrl: 'http://gw', apiToken: 't' }, job: { ...job, id: 'e5ca1a7ee5ca1a7ee5ca1a7ee5ca1a7f' }, step, lane: 'backend', sourceDir: repo.source, workspaceRoot, repoRoot: repo.source, callModel: async ({ modelRequest }) => { seen2.push(modelRequest.provider); return { ok: true, status: 200, data: { content: JSON.stringify({ tool: 'finish', args: { summary: 'x', no_change_reason: 'nothing to do here really' } }), model: 'gpt-5.4' } }; }, limits: { ...DEFAULT_LIMITS, maxTurns: 3 }, providerHealth: LAPTOP_ON, startAfterProvider: 'gpu_workstation' });
+  assert.deepEqual(seen2, ['openai']);
+  assert.equal(result2.no_change, true);
+  fs.rmSync(repo.root, { recursive: true, force: true });
+});
+
 test('agentic engineer explores, fixes the bug, runs the tests, and hands over a validated patch', async () => {
   const repo = makeRepo();
   const workspaceRoot = path.join(repo.root, 'workspaces');
@@ -111,7 +157,7 @@ test('agentic engineer explores, fixes the bug, runs the tests, and hands over a
     { thought: 'verify', tool: 'run', args: { command: 'node --test test/sum.test.js' } },
     { thought: 'done', tool: 'finish', args: { summary: 'sum() used subtraction; changed to addition. Verified with node --test test/sum.test.js (1 pass).', tests: ['node --test test/sum.test.js'], rollback_notes: ['revert the PR'] } },
   ]);
-  const result = await runAgenticEngineer({ supabase: null, gateway: { gatewayUrl: 'http://gw', apiToken: 't' }, job, step, lane: 'backend', sourceDir: repo.source, workspaceRoot, repoRoot: repo.source, callModel, limits: { ...DEFAULT_LIMITS, maxTurns: 12 } });
+  const result = await runAgenticEngineer({ supabase: null, gateway: { gatewayUrl: 'http://gw', apiToken: 't' }, job, step, lane: 'backend', sourceDir: repo.source, workspaceRoot, repoRoot: repo.source, callModel, limits: { ...DEFAULT_LIMITS, maxTurns: 12 }, providerHealth: LAPTOP_OFF });
   assert.equal(result.ok, true, JSON.stringify(result.error));
   assert.equal(result.turns, 8);
   assert.deepEqual(result.proposal.changed_files, ['lib/sum.js']);
@@ -148,7 +194,7 @@ test('agentic engineer refuses to finish with out-of-lane edits and stops on bud
     { tool: 'finish', args: { summary: 'changed a backend file from the frontend lane, which must be refused' } },
     { tool: 'git_diff', args: {} },
   ]);
-  const result = await runAgenticEngineer({ supabase: null, gateway: { gatewayUrl: 'http://gw', apiToken: 't' }, job, step, lane: 'frontend', sourceDir: repo.source, workspaceRoot, repoRoot: repo.source, callModel, limits: { ...DEFAULT_LIMITS, maxTurns: 4 } });
+  const result = await runAgenticEngineer({ supabase: null, gateway: { gatewayUrl: 'http://gw', apiToken: 't' }, job, step, lane: 'frontend', sourceDir: repo.source, workspaceRoot, repoRoot: repo.source, callModel, limits: { ...DEFAULT_LIMITS, maxTurns: 4 }, providerHealth: LAPTOP_OFF });
   assert.equal(result.ok, false);
   assert.match(result.error, /turn budget exhausted/);
   const writeResult = JSON.parse(seen[1].request.messages.at(-1).content).tool_result;
