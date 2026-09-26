@@ -86,6 +86,12 @@ jobs:
               continue
             fi
             rebased="$(git rev-parse HEAD)"
+            # Already merged (a human took it in from Gitea): nothing left to review, and GitHub
+            # refuses a pull request with no commits, which used to fail every run after a merge.
+            if [ "$(git rev-list --count "$main_sha".."$rebased")" = "0" ]; then
+              echo "$branch is fully contained in main (${main_sha:0:10}); nothing to bridge"
+              continue
+            fi
             if [ -n "$(git diff --name-only "$main_sha" "$rebased" -- .github/workflows)" ]; then
               echo "::warning::$branch changes workflow files (protected path); skipped"
               continue
