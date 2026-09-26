@@ -152,7 +152,11 @@ async function runSecurityReview({
     heartbeatTimer = null;
     if (heartbeatError) throw new Error('security review lost its lease heartbeat');
     const reportPath = path.join(artifactDir, 'security-review.json');
-    if (!fs.existsSync(reportPath)) throw new Error('security worker produced no report');
+    if (!fs.existsSync(reportPath)) {
+      // executeWorker already redacts secrets from both streams; keep the tail so the run record says why.
+      const tail = String(execution.stderr || execution.stdout || '').trim().slice(-400);
+      throw new Error(`security worker produced no report (status ${execution.status}, exit ${execution.exitCode ?? 'n/a'})${tail ? `: ${tail}` : ''}`);
+    }
     const report = validateSecurityReport(JSON.parse(fs.readFileSync(reportPath, 'utf8')), patchBytes, manifestBytes);
     const artifact = await register(supabase, lease, reportPath);
     const completedJob = await finish(supabase, lease, artifact.id, report.counts);
