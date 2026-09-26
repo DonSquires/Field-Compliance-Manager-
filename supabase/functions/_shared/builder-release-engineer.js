@@ -7,7 +7,7 @@ const {
 const { downloadVerifiedArtifact } = require('../../../builder-frontend-handoff');
 const { isAllowedBackendPath } = require('./builder-backend-engineer');
 
-const RELEASE_ENGINEER_PROMPT_VERSION = 'release-engineer-v1';
+const RELEASE_ENGINEER_PROMPT_VERSION = 'release-engineer-v2';
 
 function deriveReleaseImpact(changedFiles) {
   if (!Array.isArray(changedFiles) || changedFiles.length === 0) throw new Error('changed files are required');
@@ -34,6 +34,10 @@ function parseReleasePackage(content, evidence) {
     release = JSON.parse(content.trim().replace(/^```(?:json)?\s*/i, '').replace(/\s*```$/, ''));
   } catch {
     throw new Error('release package must be valid JSON');
+  }
+  if (release.summary && typeof release.summary === 'object' && !Array.isArray(release.summary)) {
+    // Models sometimes return the summary as a structured object (job 42b542a5); keep the facts as prose.
+    release.summary = Object.entries(release.summary).map(([key, value]) => `${key}: ${typeof value === 'string' ? value : JSON.stringify(value)}`).join('; ');
   }
   if (typeof release.summary !== 'string' || !release.summary.trim()) throw new Error('release summary is required');
   for (const key of ['changed_files', 'deployment_checklist', 'rollback_steps', 'release_notes', 'known_risks', 'unresolved_questions']) {
@@ -233,7 +237,7 @@ async function runReleaseEngineer({
     'You are the Release Engineer for Field Compliance Manager.',
     'Prepare release evidence only; production deployment is disabled.',
     'Use the supplied verified files, build result, security result, and derived impact without changing those facts.',
-    'Return one JSON object with summary, changed_files, impact, deployment_checklist, rollback_steps, release_notes, known_risks, and unresolved_questions.'
+    'Return exactly this JSON object and nothing else: {"summary": string (prose, one paragraph), "changed_files": [string] (exactly the supplied changed_files), "impact": (the supplied impact object, unchanged), "deployment_checklist": [string] (non-empty), "rollback_steps": [string] (non-empty), "release_notes": [string] (non-empty), "known_risks": [string], "unresolved_questions": [string]}.'
   ].join(' ');
   const userPrompt = JSON.stringify({
     target_sha: job.target_sha,
@@ -255,12 +259,25 @@ async function runReleaseEngineer({
     inputArtifactIds: artifactIds,
     outputSchema: { type: 'object' }
   });
-  const result = await executeModelRun({
+  let result = await executeModelRun({
     supabase,
     gateway,
     modelRequest,
     validateOutput: content => parseReleasePackage(content, evidence)
   });
+  if (!result.ok && result.status === 422) {
+    // One repair turn with the validator's reason; an output-shape slip must not fail a fully verified job.
+    result = await executeModelRun({
+      supabase,
+      gateway,
+      modelRequest: {
+        ...modelRequest,
+        idempotency_key: `${modelRequest.idempotency_key}::repair`,
+        request: { ...modelRequest.request, system_prompt: `${systemPrompt} Your previous reply was rejected: ${String(result.error || 'invalid output').slice(0, 300)}. Reply again with the exact JSON shape.` }
+      },
+      validateOutput: content => parseReleasePackage(content, evidence)
+    });
+  }
   if (!result.ok) {
     await abortRelease(supabase, job.id, step.id, result.error || 'Release model failed');
     return { ...result, release_package: null };

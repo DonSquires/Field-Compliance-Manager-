@@ -44,6 +44,16 @@ test('release package parser enforces evidence-derived files and impact', () => 
     changedFiles: ['apps/web/src/pages/ApprovalsActivityPage.tsx'],
     impact: deriveReleaseImpact(['apps/web/src/pages/ApprovalsActivityPage.tsx'])
   }), /changed files do not match/);
+  // A structured summary object (job 42b542a5's release engineer) is flattened to prose rather than refused.
+  const structured = parseReleasePackage(JSON.stringify({ ...releasePackage(), summary: { release_status: 'evidence_prepared', production_deployment: 'disabled' } }), {
+    changedFiles: ['apps/web/src/pages/ApprovalsActivityPage.tsx'],
+    impact: deriveReleaseImpact(['apps/web/src/pages/ApprovalsActivityPage.tsx'])
+  });
+  assert.equal(structured.summary, 'release_status: evidence_prepared; production_deployment: disabled');
+  assert.throws(() => parseReleasePackage(JSON.stringify({ ...releasePackage(), summary: '' }), {
+    changedFiles: ['apps/web/src/pages/ApprovalsActivityPage.tsx'],
+    impact: deriveReleaseImpact(['apps/web/src/pages/ApprovalsActivityPage.tsx'])
+  }), /summary is required/);
 });
 
 test('release evidence merges frontend and backend manifests without losing verification provenance', () => {
