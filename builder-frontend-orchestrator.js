@@ -43,6 +43,7 @@ async function runFrontendImplementation({
   }
 
   let patchArtifact = generation.patch_artifact;
+  let infrastructureRetries = 0;
   for (let attempt = 1; attempt <= MAX_FRONTEND_ATTEMPTS; attempt += 1) {
     const verification = await handoff({
       supabase, job, step: currentStep, patchArtifact, sourceDir, workerImage, runnerId, timeoutSeconds
@@ -60,6 +61,12 @@ async function runFrontendImplementation({
     currentStep = await reloadStep(supabase, step.id, job.id);
     if (!currentStep.retryable) {
       return { success: false, phase: 'verification', attempts: attempt, job: verification.job };
+    }
+    // The verifier failed, not the patch (OOM, killed, timed out): run the same patch again once
+    // rather than sending the author a failure it did not cause.
+    if (verification.infrastructure_failure && infrastructureRetries < 1) {
+      infrastructureRetries += 1;
+      continue;
     }
     const failureArtifact = verification.failure_artifact || verification.artifacts?.[0];
     if (!failureArtifact?.id) {

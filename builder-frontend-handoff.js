@@ -4,6 +4,7 @@ const os = require('node:os');
 const path = require('node:path');
 const { execFileSync } = require('node:child_process');
 const { executeWorker } = require('./worker-executor');
+const { classifyVerificationFailure } = require('./builder-verification-outcome');
 const { parseFrontendProposal } = require('./supabase/functions/_shared/builder-frontend-engineer');
 
 function verifyRepositorySnapshot(sourceDir, targetSha) {
@@ -175,8 +176,12 @@ async function runFrontendHandoff({
     if (heartbeatError) throw new Error('frontend worker lost its lease heartbeat');
 
     const verificationPath = path.join(artifactDir, 'verification.json');
-    const succeeded = result.status === 'succeeded' && fs.existsSync(verificationPath)
-      && JSON.parse(fs.readFileSync(verificationPath, 'utf8')).succeeded === true;
+    let verification = null;
+    if (fs.existsSync(verificationPath)) {
+      try { verification = JSON.parse(fs.readFileSync(verificationPath, 'utf8')); } catch { /* unreadable evidence is a failure below */ }
+    }
+    const succeeded = result.status === 'succeeded' && verification?.succeeded === true;
+    const infrastructure = succeeded ? { infrastructure: false, reason: null } : classifyVerificationFailure(verification);
     const artifacts = [];
     if (fs.existsSync(verificationPath)) {
       artifacts.push(await registerOutput(supabase, lease, verificationPath, 'build_logs', 'application/json'));
@@ -190,13 +195,15 @@ async function runFrontendHandoff({
       lease,
       succeeded,
       result.exitCode ?? 1,
-      succeeded ? 'Frontend patch passed lint, build, and tests' : 'Frontend patch verification failed'
+      succeeded ? 'Frontend patch passed lint, build, and tests' : infrastructure.infrastructure ? `Frontend verifier infrastructure failure (${infrastructure.reason}); the same patch is re-verified` : 'Frontend patch verification failed'
     );
     return {
       success: succeeded,
       job: completedJob,
       worker_run_id: lease.run_id,
       artifacts,
+      infrastructure_failure: infrastructure.infrastructure,
+      infrastructure_reason: infrastructure.reason,
       failure_artifact: succeeded ? null : artifacts[0] || null
     };
   } catch (error) {

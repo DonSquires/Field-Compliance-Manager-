@@ -2,6 +2,7 @@ const fs = require('node:fs');
 const os = require('node:os');
 const path = require('node:path');
 const { executeWorker } = require('./worker-executor');
+const { classifyVerificationFailure } = require('./builder-verification-outcome');
 const {
   verifyRepositorySnapshot,
   downloadVerifiedArtifact,
@@ -148,6 +149,7 @@ async function runBackendHandoff({
       fs.writeFileSync(verificationPath, `${JSON.stringify(verification, null, 2)}\n`, { mode: 0o600 });
     }
     const succeeded = staticSucceeded && databaseVerification?.succeeded === true;
+    const infrastructure = succeeded ? { infrastructure: false, reason: null } : classifyVerificationFailure(verification);
     const artifacts = [];
     if (verification) {
       artifacts.push(await registerOutput(supabase, lease, verificationPath, 'build_logs', 'application/json'));
@@ -165,7 +167,9 @@ async function runBackendHandoff({
         ? proposal.database_migrations.length > 0
           ? 'Backend patch passed static verification and disposable migration execution'
           : 'Backend patch passed static verification; no migration execution was required'
-        : 'Backend patch verification failed'
+        : infrastructure.infrastructure
+          ? `Backend verifier infrastructure failure (${infrastructure.reason}); the same patch is re-verified`
+          : 'Backend patch verification failed'
     );
     return {
       success: succeeded,
@@ -173,6 +177,8 @@ async function runBackendHandoff({
       worker_run_id: lease.run_id,
       artifacts,
       verification,
+      infrastructure_failure: infrastructure.infrastructure,
+      infrastructure_reason: infrastructure.reason,
       failure_artifact: succeeded ? null : artifacts[0] || null
     };
   } catch (error) {

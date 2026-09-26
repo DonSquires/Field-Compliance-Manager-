@@ -187,9 +187,12 @@ async function runBackendImplementation(input) {
     return { success: false, phase: 'generation', result: generation };
   }
   let patchArtifact = generation.patch_artifact;
+  let infrastructureRetries = 0;
   for (let attempt = 1; attempt <= (agentic ? MAX_BACKEND_ATTEMPTS : 1); attempt += 1) {
     const verification = await runBackendHandoff({ ...input, patchArtifact });
     if (verification.success || !agentic) return { ...verification, attempts: attempt, patch_artifact: patchArtifact, routing: generation.routing };
+    // The verifier failed, not the patch (OOM, killed, timed out): same patch again, once, no repair.
+    if (verification.infrastructure_failure && infrastructureRetries < 1) { infrastructureRetries += 1; continue; }
     if (attempt >= MAX_BACKEND_ATTEMPTS) return { ...verification, success: false, phase: 'repair_limit', attempts: attempt };
     const failureArtifact = verification.failure_artifact || verification.artifacts?.[0];
     // Feed the independent worker's failure evidence back to Bob and let him repair; an in-house author
