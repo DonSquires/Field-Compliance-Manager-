@@ -38,13 +38,14 @@ reports `autopilot`, `autopilotIntervalMs`, and `runningBuilderJobs`. The compos
 mounts the docker socket (`group_add` = the host `docker` gid) and translates
 `/data` → `/var/lib/bob` for worker bind mounts.
 
-Build the worker image from the checked-out commit (the control plane's
-Builder workers use `fcm/bob-worker:current`; the human-QA runner env above
-still references the base tag, so tag the same build both ways):
+Build the worker image from the checked-out commit (both the control plane's
+Builder workers and the human-QA runner use `fcm/bob-worker:current`). Never
+re-tag the built image as `mcr.microsoft.com/playwright:*`: that aliases the
+Dockerfile's base to a non-root image and the next build fails in `apt-get`
+(`docker pull mcr.microsoft.com/playwright:v1.62.1-jammy` restores it).
 
 ```bash
 docker build -f Dockerfile.worker -t fcm/bob-worker:current .
-docker tag fcm/bob-worker:current mcr.microsoft.com/playwright:v1.62.1-jammy
 ```
 
 For each approved human-QA lease, set `BOB_JOB_ID` in the VPS environment and
