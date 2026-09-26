@@ -21,7 +21,7 @@ if [[ -z "$PUBKEY" || ! "$PUBKEY" =~ ^ssh-(ed25519|rsa)\  ]]; then
   exit 2
 fi
 
-GATEWAY_IP="$(docker network inspect bridge -f '{{(index .IPAM.Config 0).Gateway}}' 2>/dev/null || echo 172.17.0.1)"
+GATEWAY_IP="$(docker network inspect bridge -f '{{(index .IPAM.Config 0).Gateway}}' 2>/dev/null || echo 172.16.0.1)"
 echo "docker gateway address: ${GATEWAY_IP}"
 
 if ! id "$LINK_USER" >/dev/null 2>&1; then

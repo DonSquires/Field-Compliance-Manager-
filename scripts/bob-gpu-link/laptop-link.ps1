@@ -18,7 +18,7 @@
 param(
   [string]$VpsHost = $(if ($env:BOB_GPU_LINK_HOST) { $env:BOB_GPU_LINK_HOST } else { '72.61.123.97' }),
   [string]$VpsUser = $(if ($env:BOB_GPU_LINK_USER) { $env:BOB_GPU_LINK_USER } else { 'bobgpu' }),
-  [string]$GatewayIp = $(if ($env:BOB_GPU_LINK_GATEWAY) { $env:BOB_GPU_LINK_GATEWAY } else { '172.17.0.1' }),
+  [string]$GatewayIp = $(if ($env:BOB_GPU_LINK_GATEWAY) { $env:BOB_GPU_LINK_GATEWAY } else { '172.16.0.1' }),
   [int]$RemotePort = 11435,
   [int]$LocalPort = 11434,
   [string[]]$Models = @('qwen2.5:7b'),

@@ -139,7 +139,7 @@ function buildCriticMessages(decision, input, deterministicIssues) {
         'CHECKLIST (a failure on any item means verdict="repair"):',
         '1. Continuity: does the draft re-ask something the user already answered (including a blanket "yes to all" / "use your defaults")? Does it ignore an in-flight plan the user just approved?',
         '2. One-question rule: does the draft ask more than one question, or present a questionnaire instead of doing the work?',
-        '3. Drafting discipline: if the user asked for a document (job description, ad, agreement, letter, policy, report…), does the draft actually deliver it (with [TO CONFIRM] markers for unknowns) rather than stalling?',
+        '3. Drafting discipline: if the user asked for a document (job description, ad, agreement, letter, policy, report…), does the draft actually deliver it (with [TO CONFIRM] markers for unknowns) rather than stalling? Delivering the FIRST complete document with a one-line offer of the next one is acceptable when several were requested; a summary of what Bob would write is not.',
         '4. Truthfulness: does it claim a write, approval, filing, deployment, or identity match happened when no tool ran? Does it state a specific NZ legal rule, rate, or date as fact without the supplied knowledge/research supporting it? (Unsupported specifics should be hedged or marked [TO CONFIRM].)',
         '5. Leakage: raw identifiers, internal bracketed markers, tool/function names, database or system error text.',
         '6. Responsiveness: does it answer what was actually asked, in the requested form (shorter/longer/format), without echoing the user\'s text back?',
