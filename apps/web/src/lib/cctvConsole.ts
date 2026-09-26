@@ -15,6 +15,7 @@ export type ConsoleClip = {
   jobId: string | null;
   jobStatus: ClipJobStatus;
   fileName: string;
+  mediaKind?: 'video' | 'photo';
   startMs: number;
   /** End from the intake slot or the decoded duration; the player refines it once metadata loads. */
   endMs: number;

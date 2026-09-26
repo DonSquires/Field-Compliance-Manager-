@@ -246,6 +246,16 @@ failure after frames were written or of the software encoder is reported as the 
 under the player names the encoder that actually produced the copy. Thumbnails and filmstrips were never
 affected: they write JPEGs, which need no H.264 encoder.
 
+0.4.9 adds first-class still-photo evidence and faster calendar navigation.
+
+- JPEG, PNG, WebP, BMP and TIFF files can be selected beside videos. Each photo is hashed before upload,
+  registered as immutable photo evidence, placed at its captured time, and queued for provisional face,
+  vehicle, animal and number-plate recognition. Dahua picture streams now use the same inference path.
+- Every place picker can select a Site or Zone directly. Per-recording and whole-day overrides preserve the
+  selected facet when Desktop V2 creates the corresponding CCTV import.
+- The media list has a selectable day timeline. It names the weekday and date, distinguishes weekends, and
+  provides a time marker that opens and scrolls to each recording, photo and split clip.
+
 The DHFS logic lives in `crates/dhfs` (`fcm-dhfs`), a dependency-light crate
 with its own unit tests over synthetic cards (MBR-hidden partition, raw device
 start, all-zero partition table with the `0x6c0` superblock fallback, DHII

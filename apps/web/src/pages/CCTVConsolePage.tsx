@@ -354,9 +354,11 @@ const CCTVConsolePage: React.FC = () => {
       const metadata = row.metadata ?? {};
       const startMs = parseMs(typeof metadata.recorded_start_at === 'string' ? metadata.recorded_start_at : null) ?? parseMs(row.captured_at);
       if (startMs === null || !row.storage_path) return [];
+      const fileType = typeof metadata.file_type === 'string' ? metadata.file_type : 'video/mp4';
+      const mediaKind = fileType.startsWith('image/') ? 'photo' : 'video';
       const known = durationOverrides.current.get(row.id);
       const slotEnd = parseMs(typeof metadata.recorded_end_at === 'string' ? metadata.recorded_end_at : null);
-      const endMs = known ? startMs + known : slotEnd && slotEnd > startMs ? slotEnd : startMs + 30 * 60_000;
+      const endMs = mediaKind === 'photo' ? startMs + 1000 : known ? startMs + known : slotEnd && slotEnd > startMs ? slotEnd : startMs + 30 * 60_000;
       const job = jobByEvidence.get(row.id);
       return [{
         evidenceId: row.id,
@@ -364,12 +366,13 @@ const CCTVConsolePage: React.FC = () => {
         jobId: job?.id ?? null,
         jobStatus: (job?.status as ClipJobStatus) ?? 'none',
         fileName: typeof metadata.file_name === 'string' ? metadata.file_name : row.storage_path.split('/').pop() || row.id,
+        mediaKind,
         startMs,
         endMs,
         bucket: typeof metadata.storage_bucket === 'string' ? metadata.storage_bucket : 'bob-uploads',
         playbackPath: typeof metadata.playback_storage_path === 'string' ? metadata.playback_storage_path : null,
         sourcePath: row.storage_path,
-        fileType: typeof metadata.file_type === 'string' ? metadata.file_type : 'video/mp4',
+        fileType,
         sizeBytes: typeof metadata.file_size_bytes === 'number' ? metadata.file_size_bytes : typeof metadata.source_size_bytes === 'number' ? metadata.source_size_bytes : null,
         sha256: row.sha256_hash ?? (typeof metadata.source_sha256 === 'string' ? metadata.source_sha256 : null),
         courtReady: Boolean(row.is_court_ready),
@@ -990,7 +993,7 @@ const CCTVConsolePage: React.FC = () => {
                       <button type="button" className="cctv-day__toggle" onClick={() => setExpandedDays((current) => ({ ...current, [group.day]: !expanded }))} aria-expanded={expanded}>
                         <ChevronDown size={14} aria-hidden="true" className={expanded ? '' : 'is-collapsed'} />
                         <strong>{group.day}</strong>
-                        <small>{group.clips.length} recording{group.clips.length === 1 ? '' : 's'} · {durationLabel(group.clips.reduce((sum, clip) => sum + (clip.endMs - clip.startMs), 0))}{pendingInDay ? ` · ${pendingInDay} to review` : ''}</small>
+                        <small>{group.clips.length} media item{group.clips.length === 1 ? '' : 's'} · {durationLabel(group.clips.reduce((sum, clip) => sum + (clip.endMs - clip.startMs), 0))}{pendingInDay ? ` · ${pendingInDay} to review` : ''}</small>
                       </button>
                       <button type="button" className="cctv-console__icon-btn" onClick={() => openDayOnWall(group.clips)} title={`Open up to nine recordings from ${group.day} on the wall, each on its own clock`} aria-label={`Open ${group.day} on the wall`}><Grid2x2 size={14} aria-hidden="true" /></button>
                     </div>
@@ -1004,7 +1007,7 @@ const CCTVConsolePage: React.FC = () => {
                           return (
                             <li key={clip.evidenceId} className={`cctv-clip${isCurrent ? ' is-current' : ''}${onWall ? ' is-on-wall' : ''}${clip.lockedAt ? ' is-locked' : ''}`}>
                               <button type="button" className="cctv-clip__main" onClick={() => jumpToRecording(clip)} title="Jump the shared clock to this recording" aria-current={isCurrent ? 'true' : undefined}>
-                                <span className="cctv-clip__time"><strong>{formatClock(clip.startMs, timeZone)}</strong><small>{durationLabel(clip.endMs - clip.startMs)}</small></span>
+                                <span className="cctv-clip__time"><strong>{formatClock(clip.startMs, timeZone)}</strong><small>{clip.mediaKind === 'photo' ? 'Photo' : durationLabel(clip.endMs - clip.startMs)}</small></span>
                                 <span className="cctv-clip__text">
                                   <span className="cctv-clip__name">{clip.fileName}</span>
                                   {clip.sceneSynopsis ? <small className="cctv-clip__synopsis" title="Self-hosted vision-LLM draft, unverified until a reviewer confirms it">AI draft (unreviewed): {clip.sceneSynopsis.text}</small> : null}
@@ -1017,7 +1020,7 @@ const CCTVConsolePage: React.FC = () => {
                                 </span>
                               </button>
                               <span className="cctv-clip__actions">
-                                <button type="button" className="cctv-console__icon-btn" onClick={() => showRecordingAlone(clip)} title="Play this recording on its own" aria-label={`Play ${clip.fileName} on its own`}><Play size={14} aria-hidden="true" /></button>
+                                <button type="button" className="cctv-console__icon-btn" onClick={() => showRecordingAlone(clip)} title={clip.mediaKind === 'photo' ? 'Open this photo on its own' : 'Play this recording on its own'} aria-label={`${clip.mediaKind === 'photo' ? 'Open' : 'Play'} ${clip.fileName} on its own`}>{clip.mediaKind === 'photo' ? <ImageDown size={14} aria-hidden="true" /> : <Play size={14} aria-hidden="true" />}</button>
                                 <button type="button" className="cctv-console__icon-btn" onClick={() => (onWall ? removeTile(pinnedId) : addRecordingToWall(clip))} title={onWall ? 'Remove this recording from the wall' : 'Add this recording to the wall on its own clock'} aria-label={onWall ? `Remove ${clip.fileName} from the wall` : `Add ${clip.fileName} to the wall`}>{onWall ? <X size={14} aria-hidden="true" /> : <Plus size={14} aria-hidden="true" />}</button>
                               </span>
                             </li>

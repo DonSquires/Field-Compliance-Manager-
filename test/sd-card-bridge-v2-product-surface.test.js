@@ -9,6 +9,7 @@ const native = fs.readFileSync(path.join(root, 'apps/sd-card-bridge-v2/src-tauri
 const entrypoint = fs.readFileSync(path.join(root, 'apps/sd-card-bridge-v2/src-tauri/src/main.rs'), 'utf8');
 const readme = fs.readFileSync(path.join(root, 'apps/sd-card-bridge-v2/README.md'), 'utf8');
 const workflow = fs.readFileSync(path.join(root, '.github/workflows/release-sd-card-bridge-v2.yml'), 'utf8');
+const photoMigration = fs.readFileSync(path.join(root, 'supabase/migrations/20260926012000_cctv_photo_inference.sql'), 'utf8');
 
 test('Desktop V2 preserves V1 and keeps its read-only, card-first boundaries', () => {
   // 0.2.0 ruling: the card is the drive. Recordings are read straight from the hidden partition; the exact image is optional.
@@ -154,6 +155,28 @@ test('Desktop V2 exposes catalog + extraction to the UI from either the image or
   assert.match(source, /invoke<ExtractedClip>\('extract_dhfs_recording', \{ source: catalogSource, partitionIndex: recording\.partitionIndex, descriptor: recording\.descriptor, destinationDirectory: directory, reuseExisting: true \}\)/);
   assert.match(workflow, /cargo test --manifest-path crates\/dhfs\/Cargo\.toml/);
   assert.match(workflow, /cargo test --manifest-path crates\/decoder\/Cargo\.toml/);
+});
+
+test('Desktop V2 sends ordinary and card-extracted photos through governed face and plate inference', () => {
+  assert.match(native, /const PHOTO_EXTENSIONS: \[&str; 7\]/);
+  assert.match(native, /return if image \{ \("image", Some\("image"\)\) \}/);
+  assert.match(source, /type FileContent = 'video' \| 'image'/);
+  assert.match(source, /kind: file\.content === 'image' \? 'local_photo' : 'local_video'/);
+  assert.equal((source.match(/supabase\.rpc\('register_cctv_import_photo'/g) || []).length, 2, 'ordinary photos and card picture streams use the photo RPC');
+  assert.match(source, /p_capture_time_source: 'camera_index'/);
+  assert.match(source, /queued for provisional face and plate recognition/);
+  assert.match(photoMigration, /evidence_kind, storage_path[\s\S]*'photo'/);
+  assert.match(photoMigration, /'video_motion', 'queued'/);
+});
+
+test('Desktop V2 selects canonical Sites and Zones and offers direct day/clip timeline navigation', () => {
+  assert.match(source, /supabase\.from\('client_sites'\)/);
+  assert.match(source, /supabase\.from\('location_zones'\)/);
+  assert.match(source, /p_site_id: place\.siteId \?\? null, p_zone_id: place\.zoneId \?\? null/);
+  assert.match(source, /className="media-day-timeline"/);
+  assert.match(source, /weekday === 'Saturday' \|\| weekday === 'Sunday'/);
+  assert.match(source, /jumpToTimelineItem\(entry\.key\)/);
+  assert.match(source, /clipKey\(file, cut\.index\)/);
 });
 
 const decoder = fs.readFileSync(path.join(root, 'apps/sd-card-bridge-v2/crates/decoder/src/lib.rs'), 'utf8');

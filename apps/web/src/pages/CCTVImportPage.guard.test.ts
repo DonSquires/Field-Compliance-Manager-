@@ -33,7 +33,7 @@ describe('CCTV import — the place comes first, files are classified locally, w
   });
 
   it('creates, registers and records only through the P2 RPCs', () => {
-    for (const rpc of ['create_cctv_import', 'set_cctv_import_manifest', 'register_cctv_import_video', 'record_cctv_device_events']) {
+    for (const rpc of ['create_cctv_import', 'set_cctv_import_manifest', 'register_cctv_import_video', 'register_cctv_import_photo', 'record_cctv_device_events']) {
       expect(page).toContain(`supabase.rpc('${rpc}'`);
     }
     expect(page).not.toContain("supabase.from('evidence_items')");
@@ -58,14 +58,16 @@ describe('CCTV import — the place comes first, files are classified locally, w
     expect(page).toContain('Empty slots skipped');
     expect(page).toContain('showDirectoryPicker');
     expect(page).toContain('webkitdirectory=""');
-    expect(page).toContain('Choose video files');
+    expect(page).toContain('Choose videos or photos');
+    expect(page).toContain('.jpg,.jpeg,.png,.webp,.bmp,.tif,.tiff');
+    expect(page).toContain("p_capture_time_source: item.kind === 'snapshot' ? 'camera_filename'");
     // The browser cannot read a hidden camera partition; the page says so and hands over to the desktop reader.
     expect(page).toContain('assessHiddenPartitionCard(scanned, folderLabel)');
     expect(page).toContain('The recordings are not where the browser can see them.');
     expect(page).toContain('href={DESKTOP_V2_DOWNLOAD_URL}');
     expect(page).toContain('left out — show which');
     expect(page).toContain("dahua: 'Dahua DVR/NVR export (.dav)'");
-    expect(page).toContain('accept=".mp4,.mov,.mkv,.avi,.m4v,.ts,.h264,.h265,.hevc,.264,.265,.dav,.asf,.wmv,.webm,video/*"');
+    expect(page).toContain('video/*,image/jpeg,image/png,image/webp,image/bmp,image/tiff');
     expect(page).toContain('role="status"');
   });
 

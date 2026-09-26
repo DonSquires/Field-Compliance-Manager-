@@ -6,7 +6,7 @@ const test = require('node:test');
 process.env.SUPABASE_URL ||= 'https://example.invalid';
 process.env.SUPABASE_SERVICE_ROLE_KEY ||= 'test-service-role-key';
 
-const { choosePlaybackStrategy, ffmpegArgsFor, PLAYBACK_PROFILES, normaliseAnimals, localTriageResult, triageOrderFor, triageCoverage, compactMotionSummaryForIngestion, INFERENCE_POLICY } = require('../services/vision/vision_job_watcher');
+const { choosePlaybackStrategy, ffmpegArgsFor, PLAYBACK_PROFILES, normaliseAnimals, stillEntityObservations, localTriageResult, triageOrderFor, triageCoverage, compactMotionSummaryForIngestion, INFERENCE_POLICY } = require('../services/vision/vision_job_watcher');
 const { consolidateAnimals, consolidatePeople, consolidateMotionSummary, buildEntityObservations, buildInferenceDeviceEvents, isReviewableCandidate } = require('../services/vision/motion_consolidator');
 const { candidateFramesForEvent, derivativeStoragePaths, enhancementProviderOrder, recognitionComparison } = require('../services/vision/observation_derivatives');
 
@@ -49,6 +49,39 @@ test('normaliseAnimals distinguishes "none seen" from "no model could look"', ()
   const localFull = normaliseAnimals(null, { success: true, detector_coverage: ['person', 'vehicle', 'animal'], animals: [], species_status: 'model_not_staged', detector_provider: 'megadetector:md_v5a.0.0.pt' });
   assert.equal(localFull.status, 'detector_only_species_not_staged');
   assert.equal(normaliseAnimals(null, { success: false }).success, false);
+});
+
+test('still recognition produces provisional face and ALPR review candidates without trusting enhanced face identity', () => {
+  const sourceFaceEmbedding = Array(128).fill(0.05);
+  const observations = stillEntityObservations({
+    source: {
+      success: true,
+      people: [{ confidence: 0.91, bbox: { x: 10, y: 20, width: 30, height: 80 } }],
+      faces: [{ confidence: 0.88, bbox: { x: 14, y: 22, width: 20, height: 20 }, embedding: sourceFaceEmbedding }],
+      vehicles: [{ confidence: 0.95, bbox: { x: 100, y: 100, width: 200, height: 120 }, attributes: { vehicle_colour: 'white', vehicle_type: 'ute' } }],
+      alpr: { success: true, plate: 'ABC123', confidence: 0.9 },
+    },
+    enhanced: { success: true, faces: [{ embedding: Array(128).fill(0.2) }], alpr: { success: true, plate: 'ABC128', confidence: 0.7 } },
+  }, { capturedAt: '2026-09-26T01:02:03.000Z', frameSha256: 'a'.repeat(64) });
+  const person = observations.find((item) => item.entity_kind === 'person');
+  const vehicle = observations.find((item) => item.entity_kind === 'vehicle');
+  assert.deepEqual(person.candidate_embedding, sourceFaceEmbedding);
+  assert.equal(person.attributes.face_basis, 'authoritative_source');
+  assert.equal(vehicle.candidate_plate, 'ABC123');
+  assert.equal(vehicle.attributes.plate_basis, 'authoritative_source');
+  assert.equal(vehicle.attributes.review_required, true);
+  assert.equal(vehicle.observed_at, '2026-09-26T01:02:03.000Z');
+});
+
+test('enhanced-only face detection is visible but never emits an identity embedding', () => {
+  const observations = stillEntityObservations({
+    source: { success: true, people: [], faces: [], vehicles: [], animals: [] },
+    enhanced: { success: true, faces: [{ confidence: 0.72, embedding: Array(128).fill(0.1) }] },
+  }, { capturedAt: '2026-09-26T01:02:03.000Z' });
+  assert.equal(observations.length, 1);
+  assert.equal(observations[0].entity_kind, 'person');
+  assert.equal(observations[0].candidate_embedding, undefined);
+  assert.equal(observations[0].attributes.face_basis, 'enhanced_candidate');
 });
 
 test('watcher skips the full-frame vehicle pass when a detector covered vehicles and found none', () => {

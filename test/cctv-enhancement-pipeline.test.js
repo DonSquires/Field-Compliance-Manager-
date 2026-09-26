@@ -10,6 +10,7 @@ const inference = read('services/fcm-inference/app.py');
 const superResolution = read('services/fcm-inference/super_resolution.py');
 const models = read('services/fcm-inference/download_models.py');
 const migration = read('supabase/migrations/20260925140000_cctv_observation_derivatives.sql');
+const photoMigration = read('supabase/migrations/20260926012000_cctv_photo_inference.sql');
 const reviewer = read('apps/web/src/components/CCTVStillComparison.tsx');
 const vpsCompose = read('docker-compose.full.yml');
 const laptopCompose = read('docker-compose.laptop-worker.yml');
@@ -73,4 +74,16 @@ test('the reviewer sees source and enhanced results without surrendering source 
   assert.match(reviewer, /Source and enhanced recognition comparison/);
   assert.match(reviewer, /human comparison required/);
   assert.doesNotMatch(reviewer, /review_cctv_entity_observation|canonical_vehicles.*update/);
+});
+
+test('photos use immutable evidence, the laptop-first worker, and a service-only completion boundary', () => {
+  assert.match(photoMigration, /evidence_kind, storage_path[\s\S]*'photo'/);
+  assert.match(photoMigration, /'video_motion', 'queued'/);
+  assert.match(photoMigration, /Photo queued for face and plate review/);
+  assert.match(photoMigration, /REVOKE ALL ON FUNCTION public\.complete_cctv_still_inference[\s\S]*authenticated/);
+  assert.match(photoMigration, /GRANT EXECUTE ON FUNCTION public\.complete_cctv_still_inference[\s\S]*TO service_role/);
+  assert.match(watcher, /evidence\.evidence_kind === 'photo'/);
+  assert.match(watcher, /callLaptopEnhancement\(originalBytes[\s\S]*recogniseDeterministicFallback\(originalBytes, originalBytes\)[\s\S]*callRunpodEnhancement\(originalBytes/);
+  assert.match(watcher, /complete_cctv_still_inference/);
+  assert.match(watcher, /playback_transcode_profile: 'photo-normalised-jpeg-v1'/);
 });

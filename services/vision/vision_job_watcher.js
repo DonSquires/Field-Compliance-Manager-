@@ -713,6 +713,117 @@ function normaliseAnimals(runpodResult, localDetect) {
   return { success: false, animals: [], status: 'animal_inference_unavailable', review_required: true };
 }
 
+function confidence(value) {
+  const number = Number(value);
+  return Number.isFinite(number) ? Math.min(1, Math.max(0, number)) : null;
+}
+
+function stillEntityObservations(recognition, context = {}) {
+  const source = recognition?.source || {};
+  const enhanced = recognition?.enhanced || {};
+  const observedAt = context.capturedAt || new Date().toISOString();
+  const frameSha256 = context.frameSha256 || null;
+  const observations = [];
+  const choose = (key) => {
+    const sourceItems = Array.isArray(source[key]) ? source[key] : [];
+    return sourceItems.length
+      ? { items: sourceItems, basis: 'authoritative_source' }
+      : { items: Array.isArray(enhanced[key]) ? enhanced[key] : [], basis: 'enhanced_candidate' };
+  };
+
+  const faces = choose('faces');
+  const people = choose('people');
+  const personCount = Math.max(faces.items.length, people.items.length);
+  for (let index = 0; index < personCount; index += 1) {
+    const person = people.items[index] || {};
+    const face = faces.items[index] || {};
+    const sourceFace = faces.basis === 'authoritative_source' ? face : null;
+    observations.push({
+      source_event_id: `still-person-${index + 1}`,
+      entity_kind: 'person',
+      observed_at: observedAt,
+      observed_to: observedAt,
+      candidate_label: sourceFace?.subject_label || null,
+      candidate_embedding: Array.isArray(sourceFace?.embedding) ? sourceFace.embedding : undefined,
+      appearance_embedding: Array.isArray(person?.attributes?.appearance_embedding) ? person.attributes.appearance_embedding : undefined,
+      model_confidence: confidence(person.confidence ?? face.confidence ?? face.det_score),
+      quality_state: 'clear',
+      attributes: {
+        bbox: person.bbox || face.bbox || null,
+        face_detected: Boolean(Object.keys(face).length),
+        face_basis: Object.keys(face).length ? faces.basis : null,
+        person_basis: Object.keys(person).length ? people.basis : null,
+        appearance_embedding_model: person?.attributes?.appearance_embedding_model || null,
+        authority: 'provisional',
+        review_required: true,
+      },
+      frame_sha256: frameSha256,
+    });
+  }
+
+  const vehicles = choose('vehicles');
+  const sourcePlate = source.alpr?.success && source.alpr?.plate ? source.alpr : null;
+  const enhancedPlate = enhanced.alpr?.success && enhanced.alpr?.plate ? enhanced.alpr : null;
+  const plate = sourcePlate || enhancedPlate;
+  const vehicleItems = vehicles.items.length ? vehicles.items : plate ? [{}] : [];
+  for (let index = 0; index < vehicleItems.length; index += 1) {
+    const vehicle = vehicleItems[index] || {};
+    const attributes = vehicle.attributes || vehicle.vehicle || {};
+    observations.push({
+      source_event_id: `still-vehicle-${index + 1}`,
+      entity_kind: 'vehicle',
+      observed_at: observedAt,
+      observed_to: observedAt,
+      candidate_label: attributes.vehicle_colour || attributes.colour || attributes.vehicle_type || null,
+      candidate_plate: index === 0 ? plate?.plate || null : null,
+      appearance_embedding: vehicles.basis === 'authoritative_source' && Array.isArray(attributes.appearance_embedding) ? attributes.appearance_embedding : undefined,
+      model_confidence: confidence(vehicle.confidence ?? vehicle.detection?.confidence ?? (index === 0 ? plate?.confidence : null)),
+      quality_state: 'clear',
+      attributes: {
+        bbox: vehicle.bbox || vehicle.detection?.bbox || plate?.plate_bbox || null,
+        colour: attributes.vehicle_colour || attributes.colour || null,
+        body_type: attributes.vehicle_type || attributes.body_type || null,
+        vehicle_basis: vehicles.basis,
+        plate_basis: plate ? (sourcePlate ? 'authoritative_source' : 'enhanced_candidate') : null,
+        plate_confidence: confidence(plate?.confidence),
+        authority: 'provisional',
+        review_required: true,
+      },
+      frame_sha256: frameSha256,
+    });
+  }
+
+  const animals = choose('animals');
+  for (let index = 0; index < animals.items.length; index += 1) {
+    const animal = animals.items[index] || {};
+    observations.push({
+      source_event_id: `still-animal-${index + 1}`,
+      entity_kind: 'animal',
+      observed_at: observedAt,
+      observed_to: observedAt,
+      candidate_label: animal.common_name || animal.species || null,
+      animal_type: animal.species || null,
+      species_confidence: confidence(animal.species_confidence),
+      is_pest: typeof animal.is_pest === 'boolean' ? animal.is_pest : undefined,
+      model_confidence: confidence(animal.confidence),
+      quality_state: 'clear',
+      attributes: {
+        bbox: animal.bbox || null,
+        recognition_basis: animals.basis,
+        species_status: animal.species_status || null,
+        species_provider: animal.species_provider || null,
+        authority: 'provisional',
+        review_required: true,
+      },
+      frame_sha256: frameSha256,
+    });
+  }
+  return observations.map((observation) => ({
+    ...observation,
+    attributes: Object.fromEntries(Object.entries(observation.attributes).filter(([, value]) => value !== null && value !== undefined)),
+  }));
+}
+
 async function classifyWithRunpodBatch(batch, tasks = ['person', 'vehicle', 'animal', 'plate', 'face'], usage = null) {
   if (!RUNPOD_API_KEY || batch.length === 0) return new Map();
   if (Date.now() < runpodUnavailableUntil) {
@@ -953,6 +1064,127 @@ async function recordObservationDerivatives(job, derivatives) {
   const { data, error } = await supabase.rpc('record_cctv_observation_derivatives', { p_job_id: job.id, p_derivatives: derivatives });
   if (error) throw new Error(`observation derivative persistence failed: ${error.message}`);
   return data;
+}
+
+async function normaliseStillJpeg(sourcePath, outputPath) {
+  await execFileAsync('ffmpeg', ['-y', '-v', 'error', '-i', sourcePath, '-frames:v', '1', '-q:v', '2', outputPath], { timeout: 120_000, maxBuffer: 4 * 1024 * 1024 });
+  return fs.readFile(outputPath);
+}
+
+async function processStillEvidence(job, evidence) {
+  await updateProgress(job, 'preparing_photo', { percent: 10, label: 'Preparing photo for face and plate analysis' });
+  const sourcePath = await ensureVideoPath(evidence);
+  const custody = await recordSourceHash(job, evidence, sourcePath);
+  const budgetDeferred = await deferIfBudgetExhausted(job);
+  if (budgetDeferred) return { deferred: true };
+  const outputDir = path.join(DERIVED_ROOT, job.id, 'still');
+  const normalisedPath = path.join(outputDir, 'source-normalised.jpg');
+  await fs.mkdir(outputDir, { recursive: true });
+  const originalBytes = await normaliseStillJpeg(sourcePath, normalisedPath);
+  const frameSha256 = crypto.createHash('sha256').update(originalBytes).digest('hex');
+
+  await updateProgress(job, 'classifying_photo', { percent: 35, label: 'Checking the photo for faces, plates and other candidates' });
+  let answer = await callLaptopEnhancement(originalBytes, frameSha256);
+  let localRecognition = null;
+  if (!answer) localRecognition = await recogniseDeterministicFallback(originalBytes, originalBytes);
+  if (!answer) answer = await callRunpodEnhancement(originalBytes, frameSha256);
+  const recognition = answer?.recognition || localRecognition;
+  const recognitionAnswered = recognition?.source?.success === true || recognition?.enhanced?.success === true;
+  if (!recognitionAnswered) {
+    const reason = 'Deferred: the laptop, local detector and RunPod did not answer for this photo; analysis retries automatically';
+    const { data: deferred, error } = await supabase.rpc('defer_cctv_inference_job', {
+      p_job_id: job.id, p_lease_token: job.lease_token, p_reason: reason, p_not_before_seconds: DETECTOR_DEFER_SECONDS,
+    });
+    if (error || deferred !== true) throw new Error(`photo inference was unavailable and the job could not be deferred${error ? `: ${error.message}` : ''}`);
+    log('still_detector_unavailable_deferred', { job_id: job.id, not_before_seconds: DETECTOR_DEFER_SECONDS });
+    return { deferred: true };
+  }
+
+  const enhancedBytes = answer?.enhanced_image_base64 ? Buffer.from(answer.enhanced_image_base64, 'base64') : originalBytes;
+  const provider = answer?.provider || 'worker_deterministic';
+  const enhancement = answer?.enhancement || {
+    profile: 'source_image_no_enhancement_v1', generative: false,
+    authority: 'authoritative_source_rendering', review_required: true,
+  };
+  const comparison = recognitionComparison(recognition?.source, recognition?.enhanced);
+  const capturedAt = evidence.metadata?.recorded_start_at || evidence.captured_at || new Date().toISOString();
+  const observations = stillEntityObservations(recognition, { capturedAt, frameSha256 });
+
+  await updateProgress(job, 'persisting_result', { percent: 75, label: 'Saving photo observations and review copies' });
+  if (observations.length) {
+    const { error } = await supabase.rpc('record_cctv_entity_observations', {
+      p_job_id: job.id,
+      p_evidence_id: evidence.id,
+      p_organization_id: job.organization_id,
+      p_observations: observations,
+    });
+    if (error) throw new Error(`still observation persistence failed: ${error.message}`);
+    const { error: coalesceError } = await supabase.rpc('coalesce_cctv_stationary_vehicle_observations', { p_job_id: job.id });
+    if (coalesceError) throw new Error(`still vehicle event consolidation failed: ${coalesceError.message}`);
+  }
+
+  const overviewPaths = derivativeStoragePaths(evidence, 'still-overview');
+  const originalUpload = await supabase.storage.from(overviewPaths.bucket).upload(overviewPaths.original, originalBytes, { contentType: 'image/jpeg', upsert: true });
+  if (originalUpload.error) throw new Error(`still source rendering upload failed: ${originalUpload.error.message}`);
+  const enhancedUpload = await supabase.storage.from(overviewPaths.bucket).upload(overviewPaths.enhanced, enhancedBytes, { contentType: 'image/jpeg', upsert: true });
+  if (enhancedUpload.error) throw new Error(`still enhanced rendering upload failed: ${enhancedUpload.error.message}`);
+  const { error: reviewCopyError } = await supabase.rpc('set_cctv_playback_copy', {
+    p_evidence_id: evidence.id,
+    p_playback: {
+      playback_storage_path: overviewPaths.original,
+      playback_content_type: 'image/jpeg',
+      playback_transcode_profile: 'photo-normalised-jpeg-v1',
+      playback_source_codec: evidence.metadata?.file_type || null,
+      playback_source_preserved: true,
+    },
+  });
+  if (reviewCopyError) throw new Error(`still review copy registration failed: ${reviewCopyError.message}`);
+  const originalSha256 = crypto.createHash('sha256').update(originalBytes).digest('hex');
+  const enhancedSha256 = crypto.createHash('sha256').update(enhancedBytes).digest('hex');
+  const derivatives = observations.slice(0, MAX_OBSERVATION_DERIVATIVES).map((observation) => ({
+    source_event_id: observation.source_event_id,
+    entity_kind: observation.entity_kind,
+    original_bucket: overviewPaths.bucket,
+    original_path: overviewPaths.original,
+    original_sha256: originalSha256,
+    enhanced_bucket: overviewPaths.bucket,
+    enhanced_path: overviewPaths.enhanced,
+    enhanced_sha256: enhancedSha256,
+    provider,
+    fusion: {
+      profile: 'single_still_source_v1', frames_aligned: 1, source_evidence_path: evidence.storage_path,
+      source_evidence_sha256: custody?.sha256 || evidence.sha256_hash || null, authoritative_source_preserved: true,
+    },
+    enhancement,
+    recognition,
+    recognition_comparison: comparison,
+    source_frame_hash: frameSha256,
+    source_frames: [{ frame_index: 0, relative_timestamp_seconds: 0, sha256_hash: frameSha256 }],
+  }));
+  await recordObservationDerivatives(job, derivatives);
+  if (provider === 'laptop_gpu' || provider === 'runpod_fallback') {
+    await recordInferenceUsage(job, { frames_sampled: 1, frames_recognised: 1, frames_sent: 1, gpu_calls: 1, gpu_ms: Number(answer?.gpu_elapsed_ms) || 0 });
+  }
+
+  const result = {
+    media_kind: 'photo',
+    authority: 'provisional',
+    review_required: true,
+    provider,
+    source_evidence: { storage_path: evidence.storage_path, sha256: custody?.sha256 || evidence.sha256_hash || null },
+    source_rendering: { bucket: overviewPaths.bucket, path: overviewPaths.original, sha256: originalSha256 },
+    enhanced_rendering: { bucket: overviewPaths.bucket, path: overviewPaths.enhanced, sha256: enhancedSha256 },
+    enhancement,
+    recognition,
+    recognition_comparison: comparison,
+    observation_counts: observations.reduce((counts, observation) => ({ ...counts, [observation.entity_kind]: (counts[observation.entity_kind] || 0) + 1 }), {}),
+  };
+  const { error: completionError } = await supabase.rpc('complete_cctv_still_inference', {
+    p_job_id: job.id, p_evidence_id: evidence.id, p_org_id: job.organization_id, p_result: result,
+  });
+  if (completionError) throw new Error(`still inference completion failed: ${completionError.message}`);
+  log('still_job_completed', { job_id: job.id, provider, observations: observations.length, recognition_comparison: comparison });
+  return { deferred: false, observations: observations.length };
 }
 
 async function failJob(jobId, message) {
@@ -1210,7 +1442,13 @@ async function processOne() {
       .eq('organization_id', job.organization_id)
       .maybeSingle();
     if (evidenceError || !evidence) throw new Error(`evidence lookup failed: ${evidenceError?.message || 'not found'}`);
-    if (evidence.evidence_kind !== 'video') throw new Error('evidence item is not video');
+    if (evidence.evidence_kind === 'photo') {
+      log('still_job_started', { job_id: job.id, evidence_item_id: job.evidence_item_id });
+      const outcome = await processStillEvidence(job, evidence);
+      if (outcome.deferred) currentJobId = null;
+      return;
+    }
+    if (evidence.evidence_kind !== 'video') throw new Error('evidence item is not supported CCTV media');
     await updateProgress(job, 'converting', { label: 'Preparing video for analysis' });
     const videoPath = await ensureVideoPath(evidence);
     await recordSourceHash(job, evidence, videoPath);
@@ -1303,4 +1541,4 @@ async function main() {
 
 if (require.main === module) main().catch((error) => { log('watcher_stopped', { error: error.message }); process.exitCode = 1; });
 
-module.exports = { safeVideoPath, safeCacheVideoPath, ensureVideoPath, runExtractor, claimJob, processOne, playbackStoragePath, ensurePlaybackCopy, selectFramesForClassification, representativeFrameHashes, probeVideo, choosePlaybackStrategy, ffmpegArgsFor, PLAYBACK_PROFILES, normaliseAnimals, recordEntityObservations, recordInferenceDeviceEvents, buildObservationDerivatives, recordObservationDerivatives, hashFile, recordSourceHash, localTriageResult, triageOrderFor, triageCoverage, compactMotionSummaryForIngestion, INFERENCE_POLICY, cpuSample, stealRatioSince, extractorStarved, STARVED_STEAL_RATIO };
+module.exports = { safeVideoPath, safeCacheVideoPath, ensureVideoPath, runExtractor, claimJob, processOne, playbackStoragePath, ensurePlaybackCopy, selectFramesForClassification, representativeFrameHashes, probeVideo, choosePlaybackStrategy, ffmpegArgsFor, PLAYBACK_PROFILES, normaliseAnimals, stillEntityObservations, recordEntityObservations, recordInferenceDeviceEvents, buildObservationDerivatives, recordObservationDerivatives, hashFile, recordSourceHash, localTriageResult, triageOrderFor, triageCoverage, compactMotionSummaryForIngestion, INFERENCE_POLICY, cpuSample, stealRatioSince, extractorStarved, STARVED_STEAL_RATIO };

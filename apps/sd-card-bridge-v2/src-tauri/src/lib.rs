@@ -837,10 +837,11 @@ fn export_mp4(app: tauri::AppHandle, clip_path: String, output_directory: String
 }
 
 // ---------------------------------------------------------------------------------------------
-// Video files already on this computer (or in a synced cloud folder): a second source besides the card
+// Video and photo files already on this computer (or in a synced cloud folder): a second source besides the card
 // ---------------------------------------------------------------------------------------------
 
 const VIDEO_EXTENSIONS: [&str; 15] = ["mp4", "mov", "mkv", "avi", "m4v", "ts", "h264", "h265", "hevc", "264", "265", "dav", "asf", "wmv", "webm"];
+const PHOTO_EXTENSIONS: [&str; 7] = ["jpg", "jpeg", "png", "webp", "bmp", "tif", "tiff"];
 
 #[derive(Serialize)]
 #[serde(rename_all = "camelCase")]
@@ -881,6 +882,16 @@ fn sniff_video_content(path: &Path, file_name: &str, metadata: &fs::Metadata) ->
         buffer
     };
     let head = read_at(0);
+    let extension = path.extension().map(|ext| ext.to_string_lossy().to_ascii_lowercase()).unwrap_or_default();
+    if PHOTO_EXTENSIONS.contains(&extension.as_str()) {
+        let image = head.starts_with(&[0xff, 0xd8, 0xff])
+            || head.starts_with(b"\x89PNG\r\n\x1a\n")
+            || (head.starts_with(b"RIFF") && head.get(8..12) == Some(b"WEBP"))
+            || head.starts_with(b"BM")
+            || head.starts_with(b"II*\0")
+            || head.starts_with(b"MM\0*");
+        return if image { ("image", Some("image")) } else { ("unrecognised", None) };
+    }
     if let Some(container) = fcm_decoder::container_signature(&head) { return ("video", Some(container)); }
     let body: Vec<Vec<u8>> = if len > (SAMPLE as u64) * 4 { [len / 4, len / 2, len / 4 * 3].into_iter().map(&mut read_at).collect() } else { Vec::new() };
     let samples: Vec<&[u8]> = std::iter::once(head.as_slice()).chain(body.iter().map(Vec::as_slice)).collect();
@@ -888,17 +899,17 @@ fn sniff_video_content(path: &Path, file_name: &str, metadata: &fs::Metadata) ->
     ("unrecognised", None)
 }
 
-/// A file as the list shows it, or `None` when it is not a non-empty video file by extension.
+/// A file as the list shows it, or `None` when it is not a supported non-empty video or photo by extension.
 fn describe_video_file(path: &Path, metadata: &fs::Metadata) -> Option<LocalVideoFile> {
     let extension = path.extension().map(|ext| ext.to_string_lossy().to_ascii_lowercase()).unwrap_or_default();
-    if !VIDEO_EXTENSIONS.contains(&extension.as_str()) || metadata.len() == 0 { return None; }
+    if (!VIDEO_EXTENSIONS.contains(&extension.as_str()) && !PHOTO_EXTENSIONS.contains(&extension.as_str())) || metadata.len() == 0 { return None; }
     let modified_epoch_ms = metadata.modified().ok().and_then(|time| time.duration_since(std::time::UNIX_EPOCH).ok()).map(|d| d.as_millis() as u64).unwrap_or(0);
     let file_name = path.file_name().map(|n| n.to_string_lossy().to_string()).unwrap_or_default();
     let (content, container) = sniff_video_content(path, &file_name, metadata);
     Some(LocalVideoFile { path: path.to_string_lossy().to_string(), file_name, extension, bytes: metadata.len(), modified_epoch_ms, content, container })
 }
 
-/// The video files directly inside a folder (not its subfolders), by name. Each is opened only for the
+/// The video and photo files directly inside a folder (not its subfolders), by name. Each is opened only for the
 /// content sniff (a few kilobytes); nothing is decoded or hashed yet.
 #[tauri::command(async)]
 fn list_video_files(directory: String) -> Result<VideoFolder, String> {
@@ -936,7 +947,7 @@ fn describe_video_files(paths: Vec<String>) -> Result<VideoFolder, String> {
 #[tauri::command(async)]
 fn read_pictures(paths: Vec<String>) -> Result<Vec<String>, String> {
     const MAX_FILES: usize = 40;
-    const MAX_BYTES: u64 = 4 << 20;
+    const MAX_BYTES: u64 = 32 << 20;
     paths.iter().take(MAX_FILES).map(|path| {
         let metadata = fs::metadata(path).map_err(|error| format!("{path}: {error}"))?;
         if metadata.len() > MAX_BYTES { return Err(format!("{path} is {} MB, larger than a picture-stream JPEG; not shown.", metadata.len() >> 20)); }

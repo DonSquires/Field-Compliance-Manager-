@@ -101,7 +101,7 @@ type DhfsRecording = {
 
 type DhfsCatalog = { volume: DhfsVolume; recordings: DhfsRecording[]; skippedDescriptors: number; warnings: string[] };
 
-type ContentKind = 'dhav_video' | 'pictures' | 'raw_stream' | 'local_video';
+ type ContentKind = 'dhav_video' | 'pictures' | 'raw_stream' | 'local_video' | 'local_photo';
 
 type ExtractionStats = {
   framesKept: number; videoFrames: number; keyFrames: number; audioFrames: number;
@@ -157,7 +157,9 @@ const supabase = createClient(FCM_SUPABASE_URL, FCM_PUBLISHABLE_KEY, { auth: { a
 
 type OperatingOrganization = { organizationId: string; organizationName: string; isDefault: boolean };
 type HouseRow = { id: string; name: string; address: string | null; organization_id: string };
-type ImportRow = { id: string; camera_label: string; status: string; location_id: string; organization_id: string };
+type SiteRow = { id: string; name: string; address: string | null; location_id: string };
+type ZoneRow = { id: string; name: string; module_key: string | null; zone_type: string | null; location_id: string };
+type ImportRow = { id: string; camera_label: string; status: string; location_id: string; site_id: string | null; zone_id: string | null; organization_id: string };
 type FcmProfile = { displayName: string; organizationId: string | null };
 type SendStatus = 'extracting' | 'uploading' | 'registering' | 'done' | 'failed';
 type SendState = { status: SendStatus; sent: number; total: number; error?: string };
@@ -167,7 +169,7 @@ type UploadOutcome = { status: 'complete' | 'exists' | 'unauthorized'; uploadUrl
 // Review here: the pinned decoder and what it renders on this computer. Nothing here is ever sent or registered.
 type DecoderStatus = { installed: boolean; version: string; path: string | null; licence: string; licenceUrl: string; downloadBytes: number; rejectedReason: string | null };
 type DecoderProgress = { bytesDone: number; totalBytes: number };
-type Filmstrip = { frames: Array<{ atSeconds: number; jpegBase64: string }>; keyFramesUsed: number };
+ type Filmstrip = { frames: Array<{ atSeconds: number; jpegBase64: string; mimeType?: string }>; keyFramesUsed: number };
 type H264Encoder = 'nvenc' | 'amf' | 'qsv' | 'media_foundation' | 'open_h264';
 type PreviewRendition = { path: string; bytes: number; encoder: H264Encoder | null; seconds: number; cached: boolean };
 type ReviewState = { busy: 'filmstrip' | 'preview' | null; filmstrip?: Filmstrip; preview?: PreviewRendition; error?: string; note?: string };
@@ -178,7 +180,7 @@ type SavedCopy = { directory: string; fileName: string; mp4: Mp4Export | null };
 
 // Video files already on this computer (or in a synced cloud folder): the second source besides the card.
 /** What the native side found in a file's first bytes at listing time: see `sniff_video_content`. */
-type FileContent = 'video' | 'unwritten' | 'blank' | 'unrecognised' | 'offline';
+ type FileContent = 'video' | 'image' | 'unwritten' | 'blank' | 'unrecognised' | 'offline';
 type LocalVideoFile = { path: string; fileName: string; extension: string; bytes: number; modifiedEpochMs: number; content: FileContent; container: string | null };
 type VideoFolder = { directory: string; files: LocalVideoFile[]; subfolders: number; otherFiles: number; picked: boolean; volume: VolumeInfo | null };
 type MediaProbe = { durationSeconds: number | null; creationTime: string | null; codec: string | null; width: number | null; height: number | null };
@@ -187,7 +189,7 @@ type ClockSource = 'file_name' | 'file_metadata' | 'modified_time' | 'operator';
 type FileClock = { start: DhfsTime; source: ClockSource };
 type FileFacts = { sha256: string; bytes: number; probe: MediaProbe | null };
 type SourceMode = 'card' | 'files';
-/** One thing the operator can preview, send or skip: a recording on the card or a video file in a folder. */
+ /** One thing the operator can preview, send or skip: a recording on the card or a video/photo file in a folder. */
 type SourceItem = { kind: 'card'; key: string; recording: DhfsRecording } | { kind: 'file'; key: string; file: LocalVideoFile } | { kind: 'clip'; key: string; clip: SplitClip; file: LocalVideoFile };
 /** What the native side found in a file's own index: the motion clips a camera wrote back to back (see `crates/decoder/src/mp4.rs`).
  *  `eventStartUnix`/`eventEndUnix` are the camera's own event times from the card index beside the file (Tapo `sys01.bin`),
@@ -203,6 +205,8 @@ type SplitRecord = { directory: string; audio: SplitAudio; method: string; clock
  *  event time; without it the start is a lower bound: the camera pauses between motion events and the file does
  *  not record the gaps. */
 type SegmentProvenance = { index: number; count: number; startSeconds: number; endSeconds: number; cutStartSeconds: number; cutEndSeconds: number; triggerOffsetSeconds: number; sourcePath: string; sourceFileName: string; sourceBytes: number; method: string; audio: SplitAudio; clockSource: 'card_index' | 'none'; eventStartUnix: number | null; eventEndUnix: number | null };
+type DayTimelineEntry = { key: string; at: DhfsTime; label: string; kind: 'recording' | 'clip' | 'photo' };
+type DayTimelineGroup = { day: string; weekday: string; dateLabel: string; weekend: boolean; entries: DayTimelineEntry[] };
 
 // The operator's verdict on a recording, colour-coded so the list reads at a glance. Marks are the operator's
 // working notes, kept on this computer per card/folder; they travel to FCM only as manifest provenance.
@@ -217,12 +221,13 @@ const markLabel = (mark: ReviewMark) => MARKS.find((candidate) => candidate.id =
 /** Which recordings “Send all” takes: not sent yet, not skipped, and not marked as nothing / already reviewed. */
 const excludedFromSendAll = (mark: ReviewMark | undefined) => mark === 'nothing_here' || mark === 'reviewed';
 
-/** Where one recording was made. A portable covert camera moves between places; the client organisation does not. */
-type PlaceChoice = { houseId: string; cameraLabel: string };
+/** Where one recording was made. Site and Zone are peer facets under the same place and stay mutually exclusive. */
+type PlaceChoice = { houseId: string; siteId?: string | null; zoneId?: string | null; cameraLabel: string };
+type PlaceOption = { key: string; houseId: string; siteId: string | null; zoneId: string | null; label: string; detail: string };
 /** A send that completed: FCM holds the bytes under this path with the hash taken here. Kept so a restart still knows. */
 type SentRecord = { importId: string; storagePath: string; fileName: string; sentAt: string; bytes: number };
 type ReviewFile = { version: 1; marks: Record<string, ReviewMark>; places: Record<string, PlaceChoice>; sent: Record<string, SentRecord>; splits?: Record<string, SplitRecord>; savedAt: string };
-const placeKeyOf = (place: PlaceChoice) => `${place.houseId}::${place.cameraLabel.trim().toLowerCase()}`;
+const placeKeyOf = (place: PlaceChoice) => `${place.houseId}::${place.siteId ?? ''}::${place.zoneId ?? ''}::${place.cameraLabel.trim().toLowerCase()}`;
 /** Six-digit descriptor and the camera's file stamp, exactly as the extractor names files: `-p0-d000722-2026-08-11_14-14-53-`. */
 const fileStamp = (time: DhfsTime) => `${time.year}-${pad(time.month)}-${pad(time.day)}_${pad(time.hour)}-${pad(time.minute)}-${pad(time.second)}`;
 const recordingStemMarker = (recording: DhfsRecording) => `-p${recording.partitionIndex}-d${String(recording.descriptor).padStart(6, '0')}-${fileStamp(recording.start)}-`;
@@ -278,6 +283,7 @@ const describeClip = (clip: ExtractedClip) => {
   const codecLabel = codec === 'unknown' ? 'video (codec not declared)' : `${codec.toUpperCase()} video`;
   const parts: string[] = [];
   if (clip.kind === 'pictures') parts.push(`${s.pictures} event picture${s.pictures === 1 ? '' : 's'}`);
+    else if (clip.kind === 'local_photo') parts.push('photo');
   else if (clip.kind === 'local_video') parts.push(`${codecLabel} · ${formatDuration(clip.durationSeconds)}`);
   else if (clip.kind === 'dhav_video') parts.push(`${codecLabel} · ${s.videoFrames.toLocaleString()} frames`);
   else parts.push(`${clip.codec} stream (frames not validated)`);
@@ -312,7 +318,8 @@ const clockAdd = (time: DhfsTime, seconds: number): DhfsTime => {
   return { year: at.getUTCFullYear(), month: at.getUTCMonth() + 1, day: at.getUTCDate(), hour: at.getUTCHours(), minute: at.getUTCMinutes(), second: at.getUTCSeconds() };
 };
 const clockSeconds = (time: DhfsTime) => Date.UTC(time.year, time.month - 1, time.day, time.hour, time.minute, time.second) / 1000;
-const VIDEO_FILE_EXTENSIONS = ['mp4', 'mov', 'mkv', 'avi', 'm4v', 'ts', 'h264', 'h265', 'hevc', '264', '265', 'dav', 'asf', 'wmv', 'webm'];
+ const VIDEO_FILE_EXTENSIONS = ['mp4', 'mov', 'mkv', 'avi', 'm4v', 'ts', 'h264', 'h265', 'hevc', '264', '265', 'dav', 'asf', 'wmv', 'webm'];
+ const PHOTO_FILE_EXTENSIONS = ['jpg', 'jpeg', 'png', 'webp', 'bmp', 'tif', 'tiff'];
 /** An instant (ISO 8601 or epoch ms) as the camera's wall clock in `timeZone`. */
 const instantToWallClock = (instant: string | number, timeZone: string): DhfsTime | null => {
   const ms = typeof instant === 'number' ? instant : Date.parse(instant);
@@ -336,7 +343,7 @@ const inputValueToClock = (value: string): DhfsTime | null => {
   return { year: Number(match[1]), month: Number(match[2]), day: Number(match[3]), hour: Number(match[4]), minute: Number(match[5]), second: Number(match[6] ?? 0) };
 };
 const clockSourceLabel: Record<ClockSource, string> = { file_name: 'from the file name', file_metadata: 'from the file’s own metadata', modified_time: 'estimated from when the file was last written', operator: 'set by you' };
-const CONTENT_TYPES: Record<string, string> = { mp4: 'video/mp4', m4v: 'video/mp4', mov: 'video/quicktime', mkv: 'video/x-matroska', webm: 'video/webm', avi: 'video/x-msvideo', ts: 'video/mp2t', asf: 'video/x-ms-asf', wmv: 'video/x-ms-asf', dav: 'video/x-dahua-dav', h264: 'video/h264', '264': 'video/h264', h265: 'video/h265', '265': 'video/h265', hevc: 'video/h265' };
+ const CONTENT_TYPES: Record<string, string> = { mp4: 'video/mp4', m4v: 'video/mp4', mov: 'video/quicktime', mkv: 'video/x-matroska', webm: 'video/webm', avi: 'video/x-msvideo', ts: 'video/mp2t', asf: 'video/x-ms-asf', wmv: 'video/x-ms-asf', dav: 'video/x-dahua-dav', h264: 'video/h264', '264': 'video/h264', h265: 'video/h265', '265': 'video/h265', hevc: 'video/h265', jpg: 'image/jpeg', jpeg: 'image/jpeg', png: 'image/png', webp: 'image/webp', bmp: 'image/bmp', tif: 'image/tiff', tiff: 'image/tiff' };
 const contentTypeFor = (extension: string) => CONTENT_TYPES[extension.toLowerCase()] ?? 'application/octet-stream';
 /** The wall clock of a cut clip's first frame, in the operator's time zone. From the camera's own event time when
  *  the card index dated it (the first clip of a slot starts `triggerOffsetSeconds` of pre-roll before its trigger);
@@ -358,6 +365,7 @@ const audioLabel: Record<SplitAudio, string> = { copy: 'audio copied', aac: 'aud
  *  only on request and never part of “Send all”. Everything else stays in the list for the decoder to judge. */
 const isSetAside = (file: LocalVideoFile) => file.content === 'unwritten' || file.content === 'blank';
 const contentBadge: Record<Exclude<FileContent, 'video'>, { label: string; hint: string }> = {
+  image: { label: 'Photo', hint: 'A still image. It can be reviewed here and sent to FCM for provisional face and plate recognition.' },
   unwritten: { label: 'Unwritten slot', hint: 'The camera pre-allocated this file and has not recorded into it (its name is the recorder’s placeholder). Anything inside is a previous occupant’s leftovers.' },
   blank: { label: 'Blank', hint: 'Filler bytes or a repeating fill pattern at every sampled offset: nothing was recorded here.' },
   unrecognised: { label: 'No video header', hint: 'No recognised container signature in the first bytes. Listed anyway; the decoder decides on preview or send.' },
@@ -375,6 +383,13 @@ const thumbnailLimiter = (() => {
 })();
 const formatWhen = (epochMs: number) => (epochMs ? new Date(epochMs).toLocaleString() : '—');
 const formatDay = (time: DhfsTime) => `${time.year}-${pad(time.month)}-${pad(time.day)}`;
+const dayLabel = (day: string) => {
+  const match = /^(\d{4})-(\d{2})-(\d{2})$/.exec(day);
+  if (!match) return { weekday: 'Date unknown', dateLabel: day, weekend: false };
+  const date = new Date(Date.UTC(Number(match[1]), Number(match[2]) - 1, Number(match[3])));
+  const weekday = new Intl.DateTimeFormat('en-NZ', { weekday: 'long', timeZone: 'UTC' }).format(date);
+  return { weekday, dateLabel: new Intl.DateTimeFormat('en-NZ', { day: 'numeric', month: 'short', year: 'numeric', timeZone: 'UTC' }).format(date), weekend: weekday === 'Saturday' || weekday === 'Sunday' };
+};
 const formatDuration = (seconds: number) => {
   if (!Number.isFinite(seconds) || seconds < 0) return '—';
   const h = Math.floor(seconds / 3600); const m = Math.floor((seconds % 3600) / 60); const s = Math.floor(seconds % 60);
@@ -422,13 +437,13 @@ function RowThumb({ id, state, enabled, onVisible, idle }: { id: string; state: 
   const loaded = state && state !== 'failed';
   const title = loaded ? 'First key frame' : state === 'failed' ? 'No picture could be decoded from the start of this recording' : idle.title;
   const icon = state === 'failed' || idle.icon === 'off' ? <EyeOff size={14} /> : idle.icon === 'cloud' ? <UploadCloud size={14} /> : <Film size={14} />;
-  return <span ref={ref} className={`recording__thumb ${loaded ? 'has-image' : ''} ${state === 'failed' ? 'is-failed' : ''}`} title={title}>{loaded ? <img src={`data:image/jpeg;base64,${state}`} alt="" /> : icon}</span>;
+  return <span ref={ref} className={`recording__thumb ${loaded ? 'has-image' : ''} ${state === 'failed' ? 'is-failed' : ''}`} title={title}>{loaded ? <img src={state.startsWith('data:') ? state : `data:image/jpeg;base64,${state}`} alt="" /> : icon}</span>;
 }
 
 /** A file row's thumbnail: the first key frame, only for files with something to decode. */
 function FileThumb({ file, state, enabled, onVisible }: { file: LocalVideoFile; state: string | 'failed' | undefined; enabled: boolean; onVisible: () => void }) {
-  const decodable = file.content === 'video' || file.content === 'unrecognised';
-  const idle = { title: decodable ? (enabled ? 'Thumbnail loads when the row is in view' : 'Install the decoder under “Review here” to see thumbnails') : contentBadge[file.content as Exclude<FileContent, 'video'>].label, icon: (file.content === 'offline' ? 'cloud' : decodable ? 'film' : 'off') as 'film' | 'off' | 'cloud' };
+  const decodable = file.content === 'video' || file.content === 'image' || file.content === 'unrecognised';
+  const idle = { title: file.content === 'image' ? 'Photo preview loads when the row is in view' : decodable ? (enabled ? 'Thumbnail loads when the row is in view' : 'Install the decoder under “Review here” to see thumbnails') : contentBadge[file.content as Exclude<FileContent, 'video'>].label, icon: (file.content === 'offline' ? 'cloud' : decodable ? 'film' : 'off') as 'film' | 'off' | 'cloud' };
   return <RowThumb id={file.path} state={state} enabled={enabled} onVisible={onVisible} idle={idle} />;
 }
 
@@ -450,8 +465,8 @@ function PopoutViewer() {
     {state && <>
       {state.preview
         ? <video key={state.preview.path} className="popout__video" controls autoPlay preload="metadata" src={convertFileSrc(state.preview.path)} />
-        : <div className="popout__stage">{state.busy === 'preview' ? <><div className="progress is-indeterminate" role="progressbar" aria-busy="true"><div /></div><p className="muted">Rendering the 480p viewing copy on this computer…</p></> : state.busy === 'filmstrip' ? <><div className="progress is-indeterminate" role="progressbar" aria-busy="true"><div /></div><p className="muted">{state.clipKind === 'pictures' ? 'Reading the pictures…' : 'Decoding key frames…'}</p></> : state.clipKind === 'pictures' ? <p className="muted">A picture stream: the pictures below are the recording.</p> : frames.length ? <button className="primary popout__play" onClick={() => act('play')}><Play size={18} /> Play preview (480p, rendered here)</button> : <p className="muted">{state.error ?? 'Nothing decoded yet.'}</p>}</div>}
-      {frames.length > 0 && clockBase && <div className="filmstrip popout__filmstrip">{frames.map((frame, index) => <figure key={`${state.itemKey}:${index}`}><img src={`data:image/jpeg;base64,${frame.jpegBase64}`} alt={`Key frame ${index + 1} at ${clockPlus(clockBase, frame.atSeconds)}`} /><figcaption>{clockPlus(clockBase, frame.atSeconds)}</figcaption></figure>)}</div>}
+        : <div className="popout__stage">{state.busy === 'preview' ? <><div className="progress is-indeterminate" role="progressbar" aria-busy="true"><div /></div><p className="muted">Rendering the 480p viewing copy on this computer…</p></> : state.busy === 'filmstrip' ? <><div className="progress is-indeterminate" role="progressbar" aria-busy="true"><div /></div><p className="muted">{state.clipKind === 'pictures' || state.clipKind === 'local_photo' ? 'Reading the pictures…' : 'Decoding key frames…'}</p></> : state.clipKind === 'pictures' || state.clipKind === 'local_photo' ? <p className="muted">The original photo is shown below.</p> : frames.length ? <button className="primary popout__play" onClick={() => act('play')}><Play size={18} /> Play preview (480p, rendered here)</button> : <p className="muted">{state.error ?? 'Nothing decoded yet.'}</p>}</div>}
+      {frames.length > 0 && clockBase && <div className="filmstrip popout__filmstrip">{frames.map((frame, index) => <figure key={`${state.itemKey}:${index}`}><img src={`data:${frame.mimeType ?? 'image/jpeg'};base64,${frame.jpegBase64}`} alt={`Key frame ${index + 1} at ${clockPlus(clockBase, frame.atSeconds)}`} /><figcaption>{clockPlus(clockBase, frame.atSeconds)}</figcaption></figure>)}</div>}
       {state.note && <p className="review__note">{state.note}</p>}
       {state.error && <p className="review__error">{state.error}</p>}
       <footer className="popout__actions">
@@ -491,8 +506,12 @@ export default function App() {
   const [organizations, setOrganizations] = useState<OperatingOrganization[]>([]);
   const [organizationId, setOrganizationId] = useState<string | null>(null);
   const [houses, setHouses] = useState<HouseRow[]>([]);
+  const [sites, setSites] = useState<SiteRow[]>([]);
+  const [zones, setZones] = useState<ZoneRow[]>([]);
   const [houseQuery, setHouseQuery] = useState('');
   const [houseId, setHouseId] = useState<string | null>(null);
+  const [siteId, setSiteId] = useState<string | null>(null);
+  const [zoneId, setZoneId] = useState<string | null>(null);
   const [cameraLabel, setCameraLabel] = useState('');
   const [timeZone, setTimeZone] = useState(() => Intl.DateTimeFormat().resolvedOptions().timeZone || 'Pacific/Auckland');
   const [notes, setNotes] = useState('');
@@ -530,6 +549,7 @@ export default function App() {
   // One import per (client organisation, place, camera label) in this session; a moved camera gets one per place.
   const [imports, setImports] = useState<Record<string, ImportRow>>({});
   const [markFilter, setMarkFilter] = useState<ReviewMark | 'unmarked' | 'all'>('all');
+  const [selectedTimelineDay, setSelectedTimelineDay] = useState<string | null>(null);
   // Sends that completed, this session or earlier ones (persisted with the marks): the basis for "Sent" and for cleanup.
   const [sentRecords, setSentRecords] = useState<Record<string, SentRecord>>({});
   const [disk, setDisk] = useState<DiskReport | null>(null);
@@ -589,13 +609,23 @@ export default function App() {
   }, [catalog]);
   const totalRecordingBytes = useMemo(() => (catalog?.recordings ?? []).reduce((sum, recording) => sum + recording.bytes, 0), [catalog]);
   const sourceLabel = (source: DhfsSource | null) => (source ? (source.kind === 'image' ? 'verified image' : `card ${source.id}`) : 'no source');
-  const visibleHouses = useMemo(() => {
+  const placeOptions = useMemo<PlaceOption[]>(() => {
     const scoped = organizationId ? houses.filter((house) => house.organization_id === organizationId) : houses;
     const pool = scoped.length ? scoped : houses;
+    const houseIds = new Set(pool.map((house) => house.id));
+    const houseById = new Map(pool.map((house) => [house.id, house]));
+    return [
+      ...pool.map((house) => ({ key: `place:${house.id}`, houseId: house.id, siteId: null, zoneId: null, label: house.name, detail: `Place · ${house.address ?? 'no address recorded'}` })),
+      ...sites.filter((site) => houseIds.has(site.location_id)).map((site) => ({ key: `site:${site.id}`, houseId: site.location_id, siteId: site.id, zoneId: null, label: site.name, detail: `Site · ${houseById.get(site.location_id)?.name ?? 'place'}${site.address ? ` · ${site.address}` : ''}` })),
+      ...zones.filter((zone) => houseIds.has(zone.location_id)).map((zone) => ({ key: `zone:${zone.id}`, houseId: zone.location_id, siteId: null, zoneId: zone.id, label: zone.name, detail: `Zone · ${houseById.get(zone.location_id)?.name ?? 'place'}` })),
+    ].sort((a, b) => a.label.localeCompare(b.label));
+  }, [houses, sites, zones, organizationId]);
+  const visiblePlaces = useMemo(() => {
     const query = houseQuery.trim().toLowerCase();
-    return (query ? pool.filter((house) => `${house.name} ${house.address ?? ''}`.toLowerCase().includes(query)) : pool).slice(0, 8);
-  }, [houses, houseQuery, organizationId]);
+    return (query ? placeOptions.filter((option) => `${option.label} ${option.detail}`.toLowerCase().includes(query)) : placeOptions).slice(0, 12);
+  }, [placeOptions, houseQuery]);
   const selectedHouse = useMemo(() => houses.find((house) => house.id === houseId) ?? null, [houses, houseId]);
+  const selectedPlace = useMemo(() => placeOptions.find((option) => option.houseId === houseId && option.siteId === siteId && option.zoneId === zoneId) ?? null, [placeOptions, houseId, siteId, zoneId]);
   const setAsideFiles = useMemo(() => (videoFolder?.files ?? []).filter(isSetAside), [videoFolder]);
   const setAsideSummary = useMemo(() => {
     const unwritten = setAsideFiles.filter((file) => file.content === 'unwritten').length;
@@ -623,9 +653,10 @@ export default function App() {
     return counts;
   }, [items, marks]);
   const passesFilter = (key: string) => markFilter === 'all' || (markFilter === 'unmarked' ? !marks[key] : marks[key] === markFilter);
-  const placeFor = (key: string): PlaceChoice | null => places[key] ?? (houseId && cameraLabel.trim() ? { houseId, cameraLabel: cameraLabel.trim() } : null);
+  const placeFor = (key: string): PlaceChoice | null => places[key] ?? (houseId && cameraLabel.trim() ? { houseId, siteId, zoneId, cameraLabel: cameraLabel.trim() } : null);
   const houseName = (id: string | null | undefined) => houses.find((house) => house.id === id)?.name ?? null;
-  const placesInUse = useMemo(() => { const seen = new Map<string, number>(); for (const item of items) { const place = placeFor(item.key); if (place) seen.set(place.houseId, (seen.get(place.houseId) ?? 0) + 1); } return seen; }, [items, places, houseId, cameraLabel]);
+  const placeName = (place: PlaceChoice | null | undefined) => place ? place.siteId ? sites.find((site) => site.id === place.siteId)?.name ?? houseName(place.houseId) : place.zoneId ? zones.find((zone) => zone.id === place.zoneId)?.name ?? houseName(place.houseId) : houseName(place.houseId) : null;
+  const placesInUse = useMemo(() => { const seen = new Map<string, { place: PlaceChoice; count: number }>(); for (const item of items) { const place = placeFor(item.key); if (place) { const key = placeKeyOf(place); const current = seen.get(key); seen.set(key, { place, count: (current?.count ?? 0) + 1 }); } } return seen; }, [items, places, houseId, siteId, zoneId, cameraLabel]);
 
   // ---- Review state kept on this computer, per card or folder ------------------------------------------
   // A card recording is persisted under its key plus its start time, so a descriptor reused after the card
@@ -686,6 +717,43 @@ export default function App() {
     }
     return [...groups.entries()];
   }, [listedFiles, fileClocks]);
+  const dayTimeline = useMemo<DayTimelineGroup[]>(() => {
+    const groups = new Map<string, DayTimelineEntry[]>();
+    const add = (entry: DayTimelineEntry) => {
+      const day = formatDay(entry.at);
+      groups.set(day, [...(groups.get(day) ?? []), entry]);
+    };
+    if (mode === 'card') {
+      for (const recording of catalog?.recordings ?? []) add({ key: recordingKey(recording), at: recording.start, label: `Channel ${recording.channel} at ${formatClock(recording.start)}`, kind: 'recording' });
+    } else {
+      for (const file of listedFiles) {
+        const parentClock = fileClocks[fileKey(file)];
+        if (!parentClock) continue;
+        add({ key: fileKey(file), at: parentClock.start, label: `${file.content === 'image' ? 'Photo' : 'File'} ${file.fileName} at ${formatClock(parentClock.start)}`, kind: file.content === 'image' ? 'photo' : 'recording' });
+        for (const cut of splits[fileKey(file)]?.clips ?? []) {
+          const at = clipStart(cut, parentClock.start, timeZone).start;
+          add({ key: clipKey(file, cut.index), at, label: `${file.fileName}, clip ${cut.index + 1} at ${formatClock(at)}`, kind: 'clip' });
+        }
+      }
+    }
+    return [...groups.entries()].sort(([left], [right]) => left.localeCompare(right)).map(([day, entries]) => ({ day, ...dayLabel(day), entries: entries.sort((left, right) => clockSeconds(left.at) - clockSeconds(right.at)) }));
+  }, [mode, catalog, listedFiles, fileClocks, splits, timeZone]);
+  const jumpToTimelineItem = (key: string) => {
+    setMarkFilter('all');
+    setSelectedTimelineDay(dayTimeline.find((group) => group.entries.some((entry) => entry.key === key))?.day ?? null);
+    const item = items.find((candidate) => candidate.key === key);
+    if (item) void review(item);
+    window.requestAnimationFrame(() => window.requestAnimationFrame(() => {
+      const rowIndex = items.findIndex((item) => item.key === key);
+      const row = rowIndex >= 0 ? document.querySelectorAll<HTMLElement>('.recordings-panel .recording')[rowIndex] : null;
+      row?.scrollIntoView({ behavior: 'smooth', block: 'center' });
+    }));
+  };
+  const jumpToTimelineDay = (day: string) => {
+    setSelectedTimelineDay(day);
+    const first = dayTimeline.find((group) => group.day === day)?.entries[0];
+    if (first) jumpToTimelineItem(first.key);
+  };
 
   const discover = async () => {
     setStage('discovery'); setError(null); setProbe(null); setStatus('Enumerating disks without opening a write handle...');
@@ -828,7 +896,7 @@ export default function App() {
     const setAside = folder.files.filter(isSetAside);
     const n = folder.files.length - setAside.length;
     const medium = folder.volume?.removable ? ` on removable card ${folder.volume.driveLetter}${folder.volume.label ? ` “${folder.volume.label}”` : ''}${folder.volume.cardKind === 'tapo' ? ' (TP-Link Tapo card, event index found)' : ''} — the card is only read` : '';
-    setStatus(`${n} video file${n === 1 ? '' : 's'} ${how}${medium}${setAside.length ? `; ${setAside.length} set aside as unwritten slots or blank files (${formatBytes(setAside.reduce((sum, file) => sum + file.bytes, 0))}) — “Show” in the list header lists them` : ''}${folder.subfolders ? ` (${folder.subfolders} subfolder${folder.subfolders === 1 ? '' : 's'} not included)` : ''}${folder.otherFiles ? `; ${folder.otherFiles} ${folder.picked ? 'pick' : 'other file'}${folder.otherFiles === 1 ? '' : 's'} ${folder.picked ? 'set aside (not a video file, or empty)' : 'ignored'}` : ''}. Check each file's start time, then preview or send.`);
+    setStatus(`${n} video or photo file${n === 1 ? '' : 's'} ${how}${medium}${setAside.length ? `; ${setAside.length} set aside as unwritten slots or blank files (${formatBytes(setAside.reduce((sum, file) => sum + file.bytes, 0))}) — “Show” in the list header lists them` : ''}${folder.subfolders ? ` (${folder.subfolders} subfolder${folder.subfolders === 1 ? '' : 's'} not included)` : ''}${folder.otherFiles ? `; ${folder.otherFiles} ${folder.picked ? 'pick' : 'other file'}${folder.otherFiles === 1 ? '' : 's'} ${folder.picked ? 'set aside (not supported media, or empty)' : 'ignored'}` : ''}. Check each file's time, then preview or send.`);
   };
 
   /** The volume a folder lives on: a removable card's serial keeps its review state and provenance across drive letters. */
@@ -852,11 +920,19 @@ export default function App() {
     await listDirectory(`${volume.driveLetter}\\`, `on card ${volume.driveLetter}`);
   };
 
-  const requestThumbnail = (key: string, path: string) => {
+  const requestThumbnail = (key: string, path: string, imageType?: string) => {
     if (thumbnailPending.current.has(key)) return;
     thumbnailPending.current.add(key);
     void thumbnailLimiter(async () => {
-      try { const thumb = await invoke<{ jpegBase64: string; cached: boolean }>('render_thumbnail', { path }); setThumbnails((current) => ({ ...current, [key]: thumb.jpegBase64 })); }
+      try {
+        if (imageType) {
+          const [base64] = await invoke<string[]>('read_pictures', { paths: [path] });
+          setThumbnails((current) => ({ ...current, [key]: `data:${imageType};base64,${base64}` }));
+        } else {
+          const thumb = await invoke<{ jpegBase64: string; cached: boolean }>('render_thumbnail', { path });
+          setThumbnails((current) => ({ ...current, [key]: thumb.jpegBase64 }));
+        }
+      }
       catch { setThumbnails((current) => ({ ...current, [key]: 'failed' })); }
       finally { thumbnailPending.current.delete(key); }
     });
@@ -878,6 +954,7 @@ export default function App() {
 
   /** Read an MP4's own index for motion clips written back to back (Tapo slots). No decoder needed; the media data is never read. */
   const requestSegments = (key: string, file: LocalVideoFile) => {
+    if (file.content === 'image') { requestThumbnail(key, file.path, contentTypeFor(file.extension)); return; }
     if (file.container !== 'mp4' || segmentsPending.current.has(key)) return;
     segmentsPending.current.add(key);
     void thumbnailLimiter(async () => {
@@ -928,7 +1005,7 @@ export default function App() {
     setError(null);
     let picked: string[];
     try {
-      const result = await open({ title: 'Choose video files', multiple: true, directory: false, defaultPath: videoFolder?.directory, filters: [{ name: 'Video files', extensions: VIDEO_FILE_EXTENSIONS }, { name: 'All files', extensions: ['*'] }] });
+      const result = await open({ title: 'Choose videos or photos', multiple: true, directory: false, defaultPath: videoFolder?.directory, filters: [{ name: 'Videos and photos', extensions: [...VIDEO_FILE_EXTENSIONS, ...PHOTO_FILE_EXTENSIONS] }, { name: 'All files', extensions: ['*'] }] });
       picked = Array.isArray(result) ? result : typeof result === 'string' ? [result] : [];
     } catch (cause) { failWith(cause, 'The file dialog could not be opened.'); return; }
     if (!picked.length) return;
@@ -944,7 +1021,7 @@ export default function App() {
     setError(null);
     let chosen: string | null;
     try {
-      const picked = await open({ title: 'Choose a folder of video files (the folder picker shows folders only; the files inside are listed after you choose)', directory: true, multiple: false, defaultPath: videoFolder?.directory });
+      const picked = await open({ title: 'Choose a folder of videos or photos (the folder picker shows folders only; the files inside are listed after you choose)', directory: true, multiple: false, defaultPath: videoFolder?.directory });
       chosen = typeof picked === 'string' ? picked : null;
     } catch (cause) { failWith(cause, 'The folder dialog could not be opened.'); return; }
     if (!chosen) return;
@@ -1015,7 +1092,7 @@ export default function App() {
       setStatus(`Hashing ${file.fileName} (${formatBytes(file.bytes)})…`);
       const digest = await invoke<{ sha256: string; bytes: number }>('hash_local_file', { path: file.path });
       let probe: MediaProbe | null = null;
-      if (decoder?.installed) { try { probe = await invoke<MediaProbe>('probe_video_file', { path: file.path }); } catch { probe = null; } }
+      if (file.content !== 'image' && decoder?.installed) { try { probe = await invoke<MediaProbe>('probe_video_file', { path: file.path }); } catch { probe = null; } }
       facts = { sha256: digest.sha256, bytes: digest.bytes, probe };
       setFileFacts((current) => ({ ...current, [item.key]: facts as FileFacts }));
     }
@@ -1030,11 +1107,11 @@ export default function App() {
       if (fromEnd) { clock = { start: fromEnd, source: 'modified_time' }; setFileClocks((current) => ({ ...current, [item.key]: clock as FileClock })); }
     }
     if (!clock) throw new Error(`No start time is known for ${file.fileName}; set one in the list first.`);
-    const durationSeconds = facts.probe?.durationSeconds ?? 0;
+    const durationSeconds = file.content === 'image' ? 0 : facts.probe?.durationSeconds ?? 0;
     const end = clockAdd(clock.start, durationSeconds);
     const clip: ExtractedClip = {
       path: file.path, fileName: file.fileName, bytes: facts.bytes, sha256: facts.sha256, contentType: contentTypeFor(file.extension), codec: facts.probe?.codec ?? 'unknown',
-      streamStartOffset: 0, channel: 0, start: clock.start, end, durationSeconds, fragments: 0, descriptor: 0, partitionIndex: -1, kind: 'local_video',
+      streamStartOffset: 0, channel: 0, start: clock.start, end, durationSeconds, fragments: 0, descriptor: 0, partitionIndex: -1, kind: file.content === 'image' ? 'local_photo' : 'local_video',
       stats: { framesKept: 0, videoFrames: 0, keyFrames: 0, audioFrames: 0, staleFrames: 0, staleBytes: 0, unstructuredBytes: 0, structuralBytesRemoved: 0, leadingFramesDropped: 0, sourceBytesRead: facts.bytes, pictures: 0, contentStart: clock.start, contentEnd: end, stoppedAtNextRecording: false, truncatedFinalFrame: false },
       pictures: [],
       volume: videoFolder?.volume ?? undefined,
@@ -1055,10 +1132,20 @@ export default function App() {
   };
 
   /** Open the review for an item: extract or hash it if needed, then decode key frames on this computer. */
-  const review = async (item: SourceItem) => {
+  async function review(item: SourceItem) {
     const { key } = item;
     setOpenReview(key); setError(null);
     if (reviews[key]?.filmstrip) return;
+    if (item.kind === 'file' && item.file.content === 'image') {
+      updateReview(key, { busy: 'filmstrip', error: undefined, note: undefined });
+      try {
+        const clip = await ensureClip(item);
+        const [image] = await invoke<string[]>('read_pictures', { paths: [clip.path] });
+        updateReview(key, { busy: null, filmstrip: { frames: [{ atSeconds: 0, jpegBase64: image ?? '', mimeType: clip.contentType }], keyFramesUsed: 0 }, note: 'This original photo is shown as captured. Sending it queues provisional face and plate recognition; a person reviews every suggestion.' });
+        setStatus(`${clip.fileName} is ready to review and send as photo evidence.`);
+      } catch (cause) { updateReview(key, { busy: null, error: describeFailure(cause, 'The photo could not be reviewed.') }); }
+      return;
+    }
     if (!decoder?.installed) { updateReview(key, { busy: null, error: 'Install the decoder under “Review here” first; previews are decoded on this computer.' }); return; }
     updateReview(key, { busy: 'filmstrip', error: undefined, note: undefined });
     try {
@@ -1069,7 +1156,7 @@ export default function App() {
         const jpegs = await invoke<string[]>('read_pictures', { paths: shown.map((picture) => picture.path) });
         const base = clip.stats.contentStart ?? clip.start;
         const filmstrip: Filmstrip = { frames: shown.map((picture, index) => ({ atSeconds: clockSeconds(picture.takenAt) - clockSeconds(base), jpegBase64: jpegs[index] ?? '' })), keyFramesUsed: 0 };
-        updateReview(key, { busy: null, filmstrip, note: `${clip.pictures.length} dated picture${clip.pictures.length === 1 ? '' : 's'}${clip.pictures.length > shown.length ? ` (first ${shown.length} shown)` : ''} — a picture stream is sent to FCM as dated timeline events with these as thumbnails, not as video.` });
+        updateReview(key, { busy: null, filmstrip, note: `${clip.pictures.length} dated picture${clip.pictures.length === 1 ? '' : 's'}${clip.pictures.length > shown.length ? ` (first ${shown.length} shown)` : ''} — each picture is sent as photo evidence, placed on the timeline, and queued for provisional face and plate recognition.` });
         setStatus(`${shown.length} event pictures from ${clip.fileName}, dated by the camera. Choose Send or Skip.`);
         return;
       }
@@ -1078,7 +1165,7 @@ export default function App() {
       updateReview(key, { busy: null, filmstrip });
       setStatus(`${filmstrip.frames.length} key frames from ${clip.fileName}, labelled with the ${clip.kind === 'local_video' ? 'recorded' : 'camera'} clock. Play the preview for the whole recording, then choose Send or Skip.`);
     } catch (cause) { updateReview(key, { busy: null, error: describeFailure(cause, 'The recording could not be reviewed.') }); }
-  };
+  }
 
   const playPreview = async (item: SourceItem) => {
     const clip = clips[item.key];
@@ -1105,12 +1192,14 @@ export default function App() {
   };
 
   const loadFcmContext = async (userId: string) => {
-    const [profileRes, contextsRes, housesRes] = await Promise.all([
+    const [profileRes, contextsRes, housesRes, sitesRes, zonesRes] = await Promise.all([
       supabase.from('user_profiles').select('id, display_name, email, organization_id').eq('id', userId).maybeSingle(),
       supabase.rpc('get_operating_organization_contexts'),
       supabase.from('locations').select('id, name, address, organization_id').order('name'),
+      supabase.from('client_sites').select('id, name, address, location_id').eq('active', true).order('name'),
+      supabase.from('location_zones').select('id, name, module_key, zone_type, location_id').eq('is_active', true).order('name'),
     ]);
-    const failure = profileRes.error ?? contextsRes.error ?? housesRes.error;
+    const failure = profileRes.error ?? contextsRes.error ?? housesRes.error ?? sitesRes.error ?? zonesRes.error;
     if (failure) throw new Error(failure.message);
     const profile = profileRes.data as { display_name: string | null; email: string | null; organization_id: string | null } | null;
     const contexts: OperatingOrganization[] = (Array.isArray(contextsRes.data) ? contextsRes.data : []).map((row: { organization_id: string; organization_name: string; is_default: boolean | null }) => ({ organizationId: row.organization_id, organizationName: row.organization_name, isDefault: Boolean(row.is_default) }));
@@ -1118,6 +1207,8 @@ export default function App() {
     setOrganizations(contexts);
     setOrganizationId(contexts.find((context) => context.isDefault)?.organizationId ?? profile?.organization_id ?? contexts[0]?.organizationId ?? null);
     setHouses((housesRes.data as HouseRow[]) ?? []);
+    setSites((sitesRes.data as SiteRow[]) ?? []);
+    setZones((zonesRes.data as ZoneRow[]) ?? []);
   };
 
   const signIn = async () => {
@@ -1136,7 +1227,7 @@ export default function App() {
 
   const signOut = async () => {
     try { await supabase.auth.signOut(); } catch { /* the in-memory session is dropped regardless */ }
-    setFcmSession(null); setFcmProfile(null); setOrganizations([]); setOrganizationId(null); setHouses([]); setHouseId(null); setImportRow(null); setImports({}); setSends({}); doneClipsRef.current = {};
+    setFcmSession(null); setFcmProfile(null); setOrganizations([]); setOrganizationId(null); setHouses([]); setSites([]); setZones([]); setHouseId(null); setSiteId(null); setZoneId(null); setImportRow(null); setImports({}); setSends({}); doneClipsRef.current = {};
   };
 
   /** One `cctv_imports` row for a client organisation, place and camera label; the RPCs the web import page uses. */
@@ -1145,7 +1236,7 @@ export default function App() {
     if (!isValidTimeZone(timeZone)) throw new Error('Enter a valid time zone for the camera clock (for example Pacific/Auckland).');
     const rootLabel = mode === 'files' ? (videoFolder?.directory ?? null) : selectedDevice ? `${selectedDevice.driveLetters.join(' ')} ${selectedDevice.label}`.trim() : catalogSource ? sourceLabel(catalogSource) : null;
     const { data, error: createError } = await supabase.rpc('create_cctv_import', {
-      p_organization_id: organizationId, p_location_id: place.houseId, p_camera_label: place.cameraLabel.trim(), p_site_id: null, p_zone_id: null,
+      p_organization_id: organizationId, p_location_id: place.houseId, p_camera_label: place.cameraLabel.trim(), p_site_id: place.siteId ?? null, p_zone_id: place.zoneId ?? null,
       p_source_device_kind: mode === 'files' ? 'generic_folder' : 'dahua', p_source_timezone: timeZone, p_source_root_label: rootLabel, p_watermark_location_hint: null, p_notes: notes.trim() || null,
     });
     if (createError) throw new Error(createError.message);
@@ -1162,10 +1253,10 @@ export default function App() {
     if (!isValidTimeZone(timeZone)) { setError('Enter a valid time zone for the camera clock (for example Pacific/Auckland).'); return; }
     setFcmBusy(true); setError(null);
     try {
-      const place = { houseId, cameraLabel: cameraLabel.trim() };
+      const place = { houseId, siteId, zoneId, cameraLabel: cameraLabel.trim() };
       const row = await createImportRow(place);
       setImportRow(row); setImports({ [placeKeyOf(place)]: row }); setSends({}); doneClipsRef.current = {};
-      setStatus(`Ready to send to ${selectedHouse?.name ?? 'the chosen place'}. Recordings made somewhere else can be given their own place on the row (or for a whole day) before sending.`);
+      setStatus(`Ready to send to ${selectedPlace?.label ?? selectedHouse?.name ?? 'the chosen place'}. Recordings made somewhere else can be given their own Site or Zone on the row (or for a whole day) before sending.`);
     } catch (cause) { failWith(cause, 'The import could not be created.'); }
     finally { setFcmBusy(false); }
   };
@@ -1176,9 +1267,9 @@ export default function App() {
     const place = places[item.key];
     if (!place) return importRow;
     const placeKey = placeKeyOf(place);
-    const existing = imports[placeKey] ?? (placeKey === placeKeyOf({ houseId: importRow.location_id, cameraLabel: importRow.camera_label }) ? importRow : null);
+    const existing = imports[placeKey] ?? (placeKey === placeKeyOf({ houseId: importRow.location_id, siteId: importRow.site_id, zoneId: importRow.zone_id, cameraLabel: importRow.camera_label }) ? importRow : null);
     if (existing) return existing;
-    setStatus(`Creating an import for ${houseName(place.houseId) ?? 'the chosen place'} (${place.cameraLabel})…`);
+    setStatus(`Creating an import for ${placeName(place) ?? 'the chosen place'} (${place.cameraLabel})…`);
     const row = await createImportRow(place);
     setImports((current) => ({ ...current, [placeKey]: row }));
     return row;
@@ -1210,8 +1301,7 @@ export default function App() {
   };
 
   /** Send one item and register it against the import: a card recording is read off the card (or its finished copy
-   *  reused); a file is hashed as it lies. Video becomes evidence queued for analysis; a picture stream becomes dated
-   *  timeline events with thumbnails. */
+   *  reused); a file is hashed as it lies. Videos and photos become immutable evidence queued for analysis. */
   const sendItem = async (item: SourceItem, importTarget: ImportRow): Promise<boolean> => {
     if (item.kind === 'card' && !catalogSource) return false;
     const { key } = item;
@@ -1227,8 +1317,17 @@ export default function App() {
           setStatus(`Sending picture ${index + 1} of ${clip.pictures.length} (${formatTime(picture.takenAt)})…`);
           const objectName = storagePathFor(importTarget.organization_id, importTarget.id, `${clip.fileName}/${picture.fileName}`);
           await uploadFile(`${key}:${index}`, picture.path, objectName, 'image/jpeg');
+          const sourceRef = `${clip.fileName}/${picture.fileName}`;
+          const { error: registerError } = await supabase.rpc('register_cctv_import_photo', {
+            p_import_id: importTarget.id, p_storage_path: objectName, p_file_name: picture.fileName,
+            p_file_size_bytes: picture.bytes, p_sha256: picture.sha256,
+            p_captured_at: wallClockToIso(picture.takenAt, timeZone), p_source_ref: sourceRef,
+            p_content_type: 'image/jpeg', p_capture_time_source: 'camera_index',
+            p_width: picture.width, p_height: picture.height,
+          });
+          if (registerError) throw new Error(registerError.message);
           events.push({
-            source: 'device_snapshot', source_ref: picture.fileName, event_start_at: wallClockToIso(picture.takenAt, timeZone), event_end_at: null, severity: 'motion', thumbnail_path: objectName,
+            source: 'device_snapshot', source_ref: sourceRef, event_start_at: wallClockToIso(picture.takenAt, timeZone), event_end_at: null, severity: 'motion', thumbnail_path: objectName,
             metadata: { size_bytes: picture.bytes, sha256: picture.sha256, width: picture.width, height: picture.height, channel: clip.channel, descriptor: clip.descriptor, origin: 'dahua_picture_stream' },
           });
           updateSend(key, { status: 'uploading', sent: index + 1, total: clip.pictures.length });
@@ -1239,7 +1338,29 @@ export default function App() {
         doneClipsRef.current[key] = { clip, importId: importTarget.id };
         setSentRecords((current) => ({ ...current, [key]: { importId: importTarget.id, storagePath: storagePathFor(importTarget.organization_id, importTarget.id, clip.fileName), fileName: clip.fileName, sentAt: new Date().toISOString(), bytes: clip.bytes } }));
         updateSend(key, { status: 'done' });
-        setStatus(`${clip.pictures.length} event pictures from ${formatTime(clip.pictures[0].takenAt)} are on the timeline at ${houseName(importTarget.location_id) ?? 'the chosen place'}.`);
+        setStatus(`${clip.pictures.length} event pictures from ${formatTime(clip.pictures[0].takenAt)} are on the timeline and queued for face and plate analysis at ${placeName({ houseId: importTarget.location_id, siteId: importTarget.site_id, zoneId: importTarget.zone_id, cameraLabel: importTarget.camera_label }) ?? 'the chosen place'}.`);
+        return true;
+      }
+      if (clip.kind === 'local_photo') {
+        const objectName = storagePathFor(importTarget.organization_id, importTarget.id, clip.fileName);
+        updateSend(key, { status: 'uploading', sent: 0, total: clip.bytes });
+        setStatus(`Sending ${clip.fileName} (${formatBytes(clip.bytes)}) to FCM for face and plate analysis…`);
+        await uploadFile(key, clip.path, objectName, clip.contentType);
+        updateSend(key, { status: 'registering', sent: clip.bytes, total: clip.bytes });
+        const source = fileClocks[key]?.source ?? 'modified_time';
+        const captureTimeSource = source === 'file_name' ? 'camera_filename' : source === 'modified_time' ? 'file_modified_time' : source;
+        const { error: registerError } = await supabase.rpc('register_cctv_import_photo', {
+          p_import_id: importTarget.id, p_storage_path: objectName, p_file_name: clip.fileName,
+          p_file_size_bytes: clip.bytes, p_sha256: clip.sha256,
+          p_captured_at: wallClockToIso(clip.start, timeZone), p_source_ref: clip.fileName,
+          p_content_type: clip.contentType, p_capture_time_source: captureTimeSource,
+          p_width: null, p_height: null,
+        });
+        if (registerError) throw new Error(registerError.message);
+        doneClipsRef.current[key] = { clip, importId: importTarget.id };
+        setSentRecords((current) => ({ ...current, [key]: { importId: importTarget.id, storagePath: objectName, fileName: clip.fileName, sentAt: new Date().toISOString(), bytes: clip.bytes } }));
+        updateSend(key, { status: 'done' });
+        setStatus(`${clip.fileName} is immutable photo evidence in FCM and queued for provisional face and plate recognition at ${placeName({ houseId: importTarget.location_id, siteId: importTarget.site_id, zoneId: importTarget.zone_id, cameraLabel: importTarget.camera_label }) ?? 'the chosen place'}.`);
         return true;
       }
       if (!clip.contentType.startsWith('video/')) throw new Error(`${clip.fileName} was not recognised as a video stream (${clip.codec}); it stays ${item.kind === 'card' ? 'in the working folder' : 'where it is'} and is not sent.`);
@@ -1259,7 +1380,7 @@ export default function App() {
       doneClipsRef.current[key] = { clip, importId: importTarget.id };
       setSentRecords((current) => ({ ...current, [key]: { importId: importTarget.id, storagePath: objectName, fileName: clip.fileName, sentAt: new Date().toISOString(), bytes: clip.bytes } }));
       updateSend(key, { status: 'done' });
-      setStatus(`${clip.fileName} is in FCM (SHA-256 anchored ${item.kind === 'card' ? 'from the card' : 'before it left this computer'}) and queued for analysis at ${houseName(importTarget.location_id) ?? 'the chosen place'}.`);
+      setStatus(`${clip.fileName} is in FCM (SHA-256 anchored ${item.kind === 'card' ? 'from the card' : 'before it left this computer'}) and queued for analysis at ${placeName({ houseId: importTarget.location_id, siteId: importTarget.site_id, zoneId: importTarget.zone_id, cameraLabel: importTarget.camera_label }) ?? 'the chosen place'}.`);
       return true;
     } catch (cause) {
       const message = mediaHint(describeFailure(cause, 'The recording could not be sent.'), item);
@@ -1275,6 +1396,9 @@ export default function App() {
     }
     const start = clip.stats.contentStart ?? clip.start;
     const end = clip.stats.contentEnd ?? clip.end;
+    if (clip.kind === 'local_photo') {
+      return [{ name: clip.fileName, relative_path: clip.fileName, size_bytes: clip.bytes, kind: 'photo', slot_start_at: wallClockToIso(clip.start, timeZone), sha256: clip.sha256, import_id: target.id, content_kind: clip.kind, start_time_source: fileClocks[key]?.source ?? 'unknown', source_path: clip.path, review_mark }];
+    }
     const timing = clip.kind !== 'local_video' ? { frames: clip.stats.videoFrames, stale_bytes_skipped: clip.stats.staleBytes }
       : clip.segment ? {
         start_time_source: clip.segment.clockSource === 'card_index' ? 'camera_card_index' : 'segment_offset_lower_bound', source_path: clip.segment.sourcePath, source_file_name: clip.segment.sourceFileName, source_bytes: clip.segment.sourceBytes,
@@ -1427,7 +1551,7 @@ export default function App() {
       preview: reviewState?.preview ?? null, busy: reviewState?.busy ?? null, note: reviewState?.note ?? null, error: reviewState?.error ?? null,
       canSend: Boolean(importRow), sendStatus: send?.status ?? (sentRecords[openItem.key] ? 'done' : null), skipped: Boolean(skipped[openItem.key]),
       sendHint: importRow ? null : fcmSession ? 'Create the import under “Send to FCM” in the main window to send this recording.' : 'Sign in under “Send to FCM” in the main window to send this recording.',
-      mark: marks[openItem.key] ?? null, placeName: (() => { const place = placeFor(openItem.key); return place ? `${houseName(place.houseId) ?? 'place'} · ${place.cameraLabel}` : null; })(),
+      mark: marks[openItem.key] ?? null, placeName: (() => { const place = placeFor(openItem.key); return place ? `${placeName(place) ?? 'place'} · ${place.cameraLabel}` : null; })(),
     };
   }, [openItem, clips, reviews, sends, sentRecords, skipped, importRow, fcmSession, marks, places, houseId, cameraLabel, houses]);
   const popoutStateRef = useRef(popoutState);
@@ -1471,14 +1595,14 @@ export default function App() {
   const renderReview = (item: SourceItem, clip: ExtractedClip | undefined, reviewState: ReviewState | undefined, send: SendState | undefined, isSkipped: boolean, title: string) => <div className="review" role="region" aria-label={`Review of ${title}`}>
     <div className="review__head"><strong>{clip ? `${clip.fileName} · ${describeClip(clip)}` : item.kind === 'card' ? 'Reading from the card…' : 'Hashing the file…'}</strong><small>{reviewState?.filmstrip ? (clip?.kind === 'pictures' ? `${reviewState.filmstrip.frames.length} pictures · times are the camera clock` : `${reviewState.filmstrip.frames.length} key frames${reviewState.filmstrip.keyFramesUsed > 1 ? `, every ${reviewState.filmstrip.keyFramesUsed}th` : reviewState.filmstrip.keyFramesUsed === 1 ? ', every one' : ', spread over the duration'} · times are the ${item.kind === 'card' ? 'camera' : 'recorded'} clock`) : reviewState?.busy === 'filmstrip' ? (clip?.kind === 'pictures' ? 'Reading the pictures…' : 'Decoding key frames on this computer…') : ''}</small><button className="secondary review__popout" onClick={() => void openPopout(item)} title="Open this preview in its own window, for a second screen"><ExternalLink size={14} /> {popoutOpen ? 'Show in preview window' : 'Pop out'}</button></div>
     {reviewState?.busy === 'filmstrip' && <div className="progress is-indeterminate" role="progressbar" aria-busy="true"><div /></div>}
-    {reviewState?.filmstrip && clip && <div className="filmstrip">{reviewState.filmstrip.frames.map((frame, index) => <figure key={`${item.key}:${index}`}><img src={`data:image/jpeg;base64,${frame.jpegBase64}`} alt={`Key frame ${index + 1} at ${clockPlus(clip.stats.contentStart ?? clip.start, frame.atSeconds)}`} /><figcaption>{clockPlus(clip.stats.contentStart ?? clip.start, frame.atSeconds)}</figcaption></figure>)}</div>}
+    {reviewState?.filmstrip && clip && <div className="filmstrip">{reviewState.filmstrip.frames.map((frame, index) => <figure key={`${item.key}:${index}`}><img src={`data:${frame.mimeType ?? 'image/jpeg'};base64,${frame.jpegBase64}`} alt={`${clip.kind === 'local_photo' ? 'Photo' : `Key frame ${index + 1}`} at ${clockPlus(clip.stats.contentStart ?? clip.start, frame.atSeconds)}`} /><figcaption>{clockPlus(clip.stats.contentStart ?? clip.start, frame.atSeconds)}</figcaption></figure>)}</div>}
     {reviewState?.preview && <video controls preload="metadata" src={convertFileSrc(reviewState.preview.path)} />}
     {reviewState?.busy === 'preview' && <div className="progress is-indeterminate" role="progressbar" aria-busy="true"><div /></div>}
     {reviewState?.note && <p className="review__note">{reviewState.note}</p>}
     {reviewState?.error && <p className="review__error">{reviewState.error}</p>}
     <div className="review__actions">
       <MarkPicker value={marks[item.key] ?? null} onChange={(next) => setMark(item, next)} />
-      {clip && clip.kind !== 'pictures' && !reviewState?.preview && <button className="secondary" onClick={() => void playPreview(item)} disabled={reviewState?.busy !== null && reviewState?.busy !== undefined}><Play size={14} /> {reviewState?.busy === 'preview' ? 'Rendering 480p copy…' : 'Play preview (480p, rendered here)'}</button>}
+      {clip && clip.kind !== 'pictures' && clip.kind !== 'local_photo' && !reviewState?.preview && <button className="secondary" onClick={() => void playPreview(item)} disabled={reviewState?.busy !== null && reviewState?.busy !== undefined}><Play size={14} /> {reviewState?.busy === 'preview' ? 'Rendering 480p copy…' : 'Play preview (480p, rendered here)'}</button>}
       {importRow ? <button className="primary" onClick={() => void sendOne(item)} disabled={busyAnywhere || send?.status === 'done'}><Send size={14} /> {send?.status === 'done' ? 'Sent to FCM' : 'Send this recording to FCM'}</button> : <small>{fcmSession ? 'Create the import under “Send to FCM” to send this recording.' : 'Sign in under “Send to FCM” to send this recording.'}</small>}
       {send?.status !== 'done' && <button className="secondary" onClick={() => toggleSkip(item)}>{isSkipped ? <><Undo2 size={14} /> Include again</> : <><EyeOff size={14} /> Skip — do not send</>}</button>}
       {reviewState?.preview && <small>{encoderLabel(reviewState.preview)} · {formatBytes(reviewState.preview.bytes)} · viewing copy only, never sent</small>}
@@ -1492,15 +1616,16 @@ export default function App() {
   /** Choose the place (and camera label) for one recording or a whole day; scoped to the client organisation of the import. */
   const renderPlaceEditor = (keys: string[], close: () => void) => {
     const current = keys.length === 1 ? places[keys[0]] ?? null : null;
-    const pool = houses.filter((house) => !organizationId || house.organization_id === organizationId);
+    const importPlace: PlaceChoice | null = importRow ? { houseId: importRow.location_id, siteId: importRow.site_id, zoneId: importRow.zone_id, cameraLabel: importRow.camera_label } : null;
+    const effective = current ?? importPlace;
     const query = placeQuery.trim().toLowerCase();
-    const shown = (query ? pool.filter((house) => `${house.name} ${house.address ?? ''}`.toLowerCase().includes(query)) : pool).slice(0, 8);
+    const shown = (query ? placeOptions.filter((option) => `${option.label} ${option.detail}`.toLowerCase().includes(query)) : placeOptions).slice(0, 12);
     const label = current?.cameraLabel ?? (cameraLabel.trim() || 'Covert cam');
     return <div className="place-editor" role="group" aria-label="Place for this recording">
-      <div className="place-editor__head"><strong>{keys.length === 1 ? 'Where was this recording made?' : `Where were these ${keys.length} recordings made?`}</strong><small>Same client organisation ({organizations.find((organization) => organization.organizationId === organizationId)?.organizationName ?? 'chosen'}); a different place gets its own import when it is sent. Camera label stays “{label}” unless you change it below.</small></div>
-      <input type="search" placeholder="Search places by name or address" value={placeQuery} onChange={(event) => setPlaceQuery(event.target.value)} autoFocus />
-      <div className="house-list">{shown.map((house) => <button key={house.id} type="button" className={`device ${current?.houseId === house.id || (!current && importRow?.location_id === house.id) ? 'is-selected' : ''}`} onClick={() => { setPlaceOverride(keys, importRow && house.id === importRow.location_id && label === importRow.camera_label ? null : { houseId: house.id, cameraLabel: label }); close(); }}><span className="device-icon"><MapPin size={16} /></span><span><strong>{house.name}</strong><small>{house.address ?? 'no address recorded'}{house.id === importRow?.location_id ? ' · the import’s place' : ''}</small></span><CheckCircle2 size={16} /></button>)}{shown.length === 0 && <p className="muted small">{pool.length ? 'No place matches that search.' : 'No places are visible for this organisation yet. Add the place in FCM first.'}</p>}</div>
-      <div className="actions"><label className="field"><span>Camera label for this place</span><input type="text" value={label} maxLength={120} onChange={(event) => { const next = event.target.value; setPlaceOverride(keys, current ? { ...current, cameraLabel: next } : { houseId: importRow?.location_id ?? '', cameraLabel: next }); }} /></label>{current && <button type="button" className="secondary" onClick={() => { setPlaceOverride(keys, null); close(); }}><Undo2 size={14} /> Use the import’s place</button>}<button type="button" className="secondary" onClick={close}>Close</button></div>
+      <div className="place-editor__head"><strong>{keys.length === 1 ? 'Where was this recording made?' : `Where were these ${keys.length} recordings made?`}</strong><small>Choose the Site or Zone the camera watched. A different facet gets its own import when sent. Camera label stays “{label}” unless you change it below.</small></div>
+      <input type="search" placeholder="Search Sites, Zones or places" value={placeQuery} onChange={(event) => setPlaceQuery(event.target.value)} autoFocus />
+      <div className="house-list">{shown.map((option) => { const selected = effective?.houseId === option.houseId && (effective?.siteId ?? null) === option.siteId && (effective?.zoneId ?? null) === option.zoneId; const isDefault = importPlace && placeKeyOf({ ...importPlace, cameraLabel: label }) === placeKeyOf({ ...option, cameraLabel: label }); return <button key={option.key} type="button" className={`device ${selected ? 'is-selected' : ''}`} onClick={() => { setPlaceOverride(keys, isDefault && label === importRow?.camera_label ? null : { houseId: option.houseId, siteId: option.siteId, zoneId: option.zoneId, cameraLabel: label }); close(); }}><span className="device-icon"><MapPin size={16} /></span><span><strong>{option.label}</strong><small>{option.detail}{isDefault ? ' · the import’s selection' : ''}</small></span><CheckCircle2 size={16} /></button>; })}{shown.length === 0 && <p className="muted small">{placeOptions.length ? 'No Site, Zone or place matches that search.' : 'No places are visible for this organisation yet. Add the place in FCM first.'}</p>}</div>
+      <div className="actions"><label className="field"><span>Camera label for this place</span><input type="text" value={label} maxLength={120} onChange={(event) => { const next = event.target.value; setPlaceOverride(keys, effective ? { ...effective, cameraLabel: next } : { houseId: importRow?.location_id ?? '', siteId: importRow?.site_id ?? null, zoneId: importRow?.zone_id ?? null, cameraLabel: next }); }} /></label>{current && <button type="button" className="secondary" onClick={() => { setPlaceOverride(keys, null); close(); }}><Undo2 size={14} /> Use the import’s Site or Zone</button>}<button type="button" className="secondary" onClick={close}>Close</button></div>
     </div>;
   };
 
@@ -1544,7 +1669,7 @@ export default function App() {
     <aside className="rail"><div className="brand"><span><Waves size={19} /></span><div><b>FCM</b><small>Desktop V2 · v{APP_VERSION}</small></div></div>
       <nav>
         <button className={mode === 'card' ? 'is-active' : ''} onClick={() => switchMode('card')} aria-pressed={mode === 'card'}><HardDrive size={17} /> Camera card</button>
-        <button className={mode === 'files' ? 'is-active' : ''} onClick={() => switchMode('files')} aria-pressed={mode === 'files'}><FolderOpen size={17} /> Video files</button>
+        <button className={mode === 'files' ? 'is-active' : ''} onClick={() => switchMode('files')} aria-pressed={mode === 'files'}><FolderOpen size={17} /> Videos &amp; photos</button>
         <button onClick={() => jumpTo('panel-review')}><Cpu size={17} /> Review here</button>
         <button onClick={() => jumpTo('panel-send')}><Send size={17} /> Send to FCM</button>
       </nav>
@@ -1552,7 +1677,7 @@ export default function App() {
     <section className="workspace">
       {mode === 'card'
         ? <header className="topbar"><div><span className="eyebrow">Evidence workstation</span><h1>Read the card. Send the recordings.</h1><p>FCM reads the hidden Dahua partition straight from the card, stitches only the recordings you choose, and sends them to the place they belong. An exact image of the whole card is optional.</p></div><div className="topbar-badge"><ShieldCheck size={17} /> Read-only source</div></header>
-        : <header className="topbar"><div><span className="eyebrow">Evidence workstation</span><h1>Video files on this computer.</h1><p>Point FCM at a folder — a download, a camera export, a synced cloud folder — and send the files you choose to the place they belong, hashed before they leave. Preview any of them here first.</p></div><div className="topbar-badge"><ShieldCheck size={17} /> Files hashed before sending</div></header>}
+        : <header className="topbar"><div><span className="eyebrow">Evidence workstation</span><h1>Videos and photos on this computer.</h1><p>Point FCM at a folder, camera export, download, or synced drive. Videos and photos are hashed before upload, and photos are queued for face and plate review.</p></div><div className="topbar-badge"><ShieldCheck size={17} /> Files hashed before sending</div></header>}
       {mode === 'card'
         ? <section className="steps"><Step number="01" title="Discover" detail="Find the card" complete={stage !== 'idle' && stage !== 'discovery'} active={stage === 'discovery'} /><ChevronRight size={17} /><Step number="02" title="Recordings" detail="List from the card" complete={Boolean(catalog)} active={catalogBusy} /><ChevronRight size={17} /><Step number="03" title="Review here" detail="Optional · on this computer" complete={reviewed} active={reviewing} /><ChevronRight size={17} /><Step number="04" title="Send to FCM" detail="Straight from the card" complete={sentCount > 0} active={sendingKey !== null} /><ChevronRight size={17} /><Step number="05" title="Exact image" detail="Optional forensic copy" complete={stage === 'complete'} active={stage === 'cloning' || stage === 'verifying'} /></section>
         : <section className="steps"><Step number="01" title="Choose files" detail="On this computer or synced" complete={Boolean(videoFolder)} active={folderBusy} /><ChevronRight size={17} /><Step number="02" title="Files" detail="Check each start time" complete={Boolean(videoFolder?.files.length)} /><ChevronRight size={17} /><Step number="03" title="Review here" detail="Optional · on this computer" complete={reviewed} active={reviewing} /><ChevronRight size={17} /><Step number="04" title="Send to FCM" detail="Hashed before sending" complete={sentCount > 0} active={sendingKey !== null} /></section>}
@@ -1578,6 +1703,12 @@ export default function App() {
             {mode === 'card' && catalog?.recordings.length === 0 && <p className="muted">The volume is intact but holds no trustworthy recordings.</p>}
             {mode === 'files' && videoFolder?.files.length === 0 && <p className="muted">No video files directly in this folder{videoFolder.subfolders ? ' — its subfolders were not searched; choose one of them' : ''}.</p>}
             {mode === 'files' && videoFolder && videoFolder.files.length > 0 && listedFiles.length === 0 && <p className="muted">Every video file here is an unwritten slot or blank — the camera has not recorded into this {videoFolder.picked ? 'selection' : 'folder'} yet. “Show” above lists them anyway.</p>}
+            {dayTimeline.length > 0 && <nav className="media-day-timeline" aria-label="Recording days and media times">
+              {dayTimeline.map((group) => <section key={group.day} className={`media-day-timeline__day ${group.weekend ? 'is-weekend' : ''}${selectedTimelineDay === group.day ? ' is-selected' : ''}`}>
+                <button type="button" className="media-day-timeline__label" onClick={() => jumpToTimelineDay(group.day)}><strong>{group.weekday}</strong><span>{group.dateLabel}</span><small>{group.entries.length} item{group.entries.length === 1 ? '' : 's'}</small></button>
+                <div className="media-day-timeline__track">{group.entries.map((entry) => <button key={entry.key} type="button" className={`media-day-timeline__tick is-${entry.kind}${openReview === entry.key ? ' is-active' : ''}`} onClick={() => jumpToTimelineItem(entry.key)} title={entry.label} aria-label={`Jump to ${entry.label}`}><span>{formatClock(entry.at)}</span></button>)}</div>
+              </section>)}
+            </nav>}
             {mode === 'card' && <div className="recording-days">{recordingDays.map(([day, recordings]) => <div className="recording-day" key={day}><div className="recording-day__head"><strong>{day}</strong><small>{recordings.length} recording{recordings.length === 1 ? '' : 's'} · {formatBytes(recordings.reduce((sum, recording) => sum + recording.bytes, 0))}{renderDaySummary(recordings.map(recordingKey))}</small>{importRow && <button type="button" className="secondary day-place" onClick={() => { setPlaceEditor(placeEditor === `day:${day}` ? null : `day:${day}`); setPlaceQuery(''); }}><MapPin size={12} /> Place for this day</button>}</div>{placeEditor === `day:${day}` && renderPlaceEditor(recordings.map(recordingKey).filter((key) => !isSent(key)), () => setPlaceEditor(null))}
               {recordings.map((recording) => { const item: SourceItem = { kind: 'card', key: recordingKey(recording), recording }; const { key } = item; const clip = clips[key]; const send = sends[key]; const reviewState = reviews[key]; const isSkipped = Boolean(skipped[key]); const isOpen = openReview === key; const inFlight = send && send.status !== 'done' && send.status !== 'failed'; const saved = saves[key]; if (!passesFilter(key)) return null; const mark = marks[key]; const sentRecord = sentRecords[key]; const rowSent = send?.status === 'done' || Boolean(sentRecord); const place = placeFor(key); const overridden = Boolean(places[key]); return <Fragment key={key}><div className={`recording recording--thumb ${clip ? 'is-extracted' : ''} ${rowSent ? 'is-sent' : ''} ${isSkipped ? 'is-skipped' : ''} ${mark ? `is-mark-${mark}` : ''}`}><span className="recording__time">{formatClock(recording.start)}</span><RowThumb id={key} state={thumbnails[key]} enabled={Boolean(decoder?.installed) && Boolean(catalogSource)} onVisible={() => { if (decoder?.installed) requestCardThumbnail(key, recording); }} idle={{ title: decoder?.installed ? 'Thumbnail loads when the row is in view — the first frames are read straight from the card' : 'Install the decoder under “Review here” to see thumbnails', icon: 'film' }} /><span className="recording__meta"><strong>{mark && <span className={`mark__dot mark__dot--${mark}`} title={markLabel(mark)} aria-label={markLabel(mark)} />}Channel {recording.channel} · {formatDuration(recording.durationSeconds)}{importRow && place && <button type="button" className={`place-chip ${overridden ? 'is-overridden' : ''}`} onClick={() => { setPlaceEditor(placeEditor === key ? null : key); setPlaceQuery(''); }} disabled={rowSent} title={overridden ? 'This recording goes to a different place than the import default. Click to change.' : 'Goes to the import\u2019s place. Click to send this recording to a different place.'}><MapPin size={11} /> {houseName(place.houseId) ?? 'place'}{overridden ? ' · ' + place.cameraLabel : ''}</button>}</strong><small>to {formatClock(recording.end)} · {formatBytes(recording.bytes)} · {recording.fragmentCount} fragment{recording.fragmentCount === 1 ? '' : 's'} · descriptor {recording.descriptor}</small>{clip && <small className="mono">{clip.fileName} · {describeClip(clip)} · SHA-256 {clip.sha256.slice(0, 16)}…</small>}{saved && <small className="send-state send-state--saved"><CheckCircle2 size={11} /> Saved to {saved.directory} — {saved.fileName}{saved.mp4 ? ` + ${saved.mp4.path.split(/[\\/]/).pop()} (${mp4Label(saved.mp4)})` : ''}</small>}{isSkipped && send?.status !== 'done' && <small className="send-state send-state--skipped">Skipped by you — left out of “Send all”; still on the card{clip ? ' and in the working folder' : ''}.</small>}{inFlight && <div className={`progress recording__progress ${send.status === 'uploading' ? '' : 'is-indeterminate'}`} role="progressbar" aria-busy={send.status !== 'uploading'} aria-valuemin={0} aria-valuemax={100} aria-valuenow={send.total ? Math.floor((send.sent / send.total) * 100) : 0}><div style={send.status === 'uploading' ? { width: `${send.total ? Math.min(100, (send.sent / send.total) * 100) : 0}%` } : undefined} /></div>}{send && <small className={`send-state send-state--${send.status}`}>{send.status === 'extracting' ? 'Reading from card…' : sendLabel[send.status]}{send.status === 'uploading' && send.total ? (clip?.kind === 'pictures' ? ` picture ${send.sent} of ${send.total}` : ` ${formatBytes(send.sent)} of ${formatBytes(send.total)}`) : ''}{send.error ? ` — ${send.error}` : ''}</small>}{sentRecord && !send && <small className="send-state send-state--done">Sent to FCM {new Date(sentRecord.sentAt).toLocaleString()}{fcmVerified[key] === 'verified' ? ' · FCM verified the hash' : fcmVerified[key] === 'mismatch' ? ' · FCM reports a HASH MISMATCH — keep the local copy' : ''}</small>}{placeEditor === key && renderPlaceEditor([key], () => setPlaceEditor(null))}</span><span className="recording__actions"><MarkPicker compact value={mark ?? null} onChange={(next) => setMark(item, next)} /><button className="secondary" onClick={() => { if (isOpen) setOpenReview(null); else void review(item); }} disabled={busyAnywhere || reviewState?.busy === 'filmstrip'}><Film size={14} /> {reviewState?.busy === 'filmstrip' ? 'Decoding…' : isOpen ? 'Close preview' : reviewState?.filmstrip ? 'Show preview' : 'Preview'}</button>{importRow && <button className="primary" onClick={() => void sendOne(item)} disabled={busyAnywhere || rowSent}><Send size={14} /> {rowSent ? 'Sent' : sendingKey === key && send ? (send.status === 'extracting' ? 'Reading from card…' : sendLabel[send.status]) : send?.status === 'failed' ? 'Send again' : clip?.kind === 'pictures' ? 'Send pictures to FCM' : 'Send to FCM'}</button>}<button className="secondary" onClick={() => void extract(recording)} disabled={busyAnywhere} title={saved ? `Already saved to ${saved.directory}. Click to save another copy elsewhere (you will be asked first).` : 'Choose a folder; the hashed original and a playable MP4 are written there.'}>{saved ? <CheckCircle2 size={14} /> : <Download size={14} />} {extracting === key ? 'Saving…' : saved ? 'Saved' : 'Save to folder…'}</button></span></div>
               {isOpen && renderReview(item, clip, reviewState, send, isSkipped, `channel ${recording.channel} at ${formatClock(recording.start)}`)}</Fragment>; })}
@@ -1628,17 +1759,17 @@ export default function App() {
           </>}
           {fcmSession && <div className="signed-in"><span><strong>{fcmProfile?.displayName ?? fcmSession.user.email}</strong><small>{organizations.find((organization) => organization.organizationId === organizationId)?.organizationName ?? 'organisation not set'}</small></span><button className="secondary" onClick={() => void signOut()} disabled={sendingKey !== null}><LogOut size={14} /> Sign out</button></div>}
           {fcmSession && !importRow && <>
-            {organizations.length > 1 && <label className="field"><span>Organisation</span><select value={organizationId ?? ''} onChange={(event) => { setOrganizationId(event.target.value || null); setHouseId(null); }}>{organizations.map((organization) => <option key={organization.organizationId} value={organization.organizationId}>{organization.organizationName}</option>)}</select></label>}
-            <label className="field"><span>Place the camera watches</span><input type="search" placeholder="Search by name or address" value={houseQuery} onChange={(event) => setHouseQuery(event.target.value)} /></label>
-            <div className="house-list">{visibleHouses.map((house) => <button key={house.id} type="button" className={`device ${houseId === house.id ? 'is-selected' : ''}`} onClick={() => setHouseId(house.id)}><span className="device-icon"><MapPin size={16} /></span><span><strong>{house.name}</strong><small>{house.address ?? 'no address recorded'}</small></span><CheckCircle2 size={16} /></button>)}{visibleHouses.length === 0 && <p className="muted small">{houses.length ? 'No place matches that search.' : 'No places are visible to your account yet. Add the place in FCM first; cameras carry no GPS.'}</p>}</div>
+            {organizations.length > 1 && <label className="field"><span>Organisation</span><select value={organizationId ?? ''} onChange={(event) => { setOrganizationId(event.target.value || null); setHouseId(null); setSiteId(null); setZoneId(null); }}>{organizations.map((organization) => <option key={organization.organizationId} value={organization.organizationId}>{organization.organizationName}</option>)}</select></label>}
+            <label className="field"><span>Site or Zone the camera watches</span><input type="search" placeholder="Search Sites, Zones or places" value={houseQuery} onChange={(event) => setHouseQuery(event.target.value)} /></label>
+            <div className="house-list">{visiblePlaces.map((option) => <button key={option.key} type="button" className={`device ${houseId === option.houseId && siteId === option.siteId && zoneId === option.zoneId ? 'is-selected' : ''}`} onClick={() => { setHouseId(option.houseId); setSiteId(option.siteId); setZoneId(option.zoneId); }}><span className="device-icon"><MapPin size={16} /></span><span><strong>{option.label}</strong><small>{option.detail}</small></span><CheckCircle2 size={16} /></button>)}{visiblePlaces.length === 0 && <p className="muted small">{placeOptions.length ? 'No Site, Zone or place matches that search.' : 'No places are visible to your account yet. Add the place in FCM first; cameras carry no GPS.'}</p>}</div>
             <div className="field-row"><label className="field"><span>Camera label</span><input type="text" placeholder="e.g. Gate cam 1" value={cameraLabel} onChange={(event) => setCameraLabel(event.target.value)} maxLength={120} /></label><label className="field"><span>Camera clock time zone</span><input type="text" value={timeZone} onChange={(event) => setTimeZone(event.target.value)} className={isValidTimeZone(timeZone) ? '' : 'is-invalid'} /></label></div>
             <label className="field"><span>Notes (optional)</span><input type="text" value={notes} onChange={(event) => setNotes(event.target.value)} maxLength={500} /></label>
             <div className="actions"><button className="primary" onClick={() => void createImport()} disabled={fcmBusy || !houseId || !cameraLabel.trim()}><MapPin size={15} /> {fcmBusy ? 'Creating…' : 'Create import for this card'}</button><small className="muted">Times on the card are the camera's wall clock; the time zone turns them into real instants.</small></div>
           </>}
           {importRow && <>
             <div className="facts"><span>Client<strong>{organizations.find((organization) => organization.organizationId === importRow.organization_id)?.organizationName ?? 'organisation'}</strong></span><span>Camera<strong>{importRow.camera_label}</strong></span><span>Sent<strong>{sentCount} of {items.length}</strong></span></div>
-            <div className="place-list"><span className="eyebrow">Places on this {mode === 'card' ? 'card' : 'folder'}</span>{[...placesInUse.entries()].map(([id, n]) => <span key={id} className={`place-chip ${id === importRow.location_id ? '' : 'is-overridden'}`}><MapPin size={11} /> {houseName(id) ?? 'place'} · {n} recording{n === 1 ? '' : 's'}{id === importRow.location_id ? ' (import default)' : ''}</span>)}<small className="muted">A portable camera moves: set a different place on a recording or a whole day and it is sent under its own import for that place, same client, same camera label unless you change it.</small></div>
-            <p className="muted small">Import {importRow.id.slice(0, 8)}… Recordings sent here appear in FCM → CCTV review under this camera at {selectedHouse?.name ?? 'the chosen place'}, each carrying the SHA-256 taken as it left the card.</p>
+            <div className="place-list"><span className="eyebrow">Sites and Zones on this {mode === 'card' ? 'card' : 'folder'}</span>{[...placesInUse.entries()].map(([key, entry]) => { const isDefault = placeKeyOf(entry.place) === placeKeyOf({ houseId: importRow.location_id, siteId: importRow.site_id, zoneId: importRow.zone_id, cameraLabel: importRow.camera_label }); return <span key={key} className={`place-chip ${isDefault ? '' : 'is-overridden'}`}><MapPin size={11} /> {placeName(entry.place) ?? 'place'} · {entry.count} media item{entry.count === 1 ? '' : 's'}{isDefault ? ' (import default)' : ''}</span>; })}<small className="muted">A portable camera moves: set a different Site or Zone on a recording, photo or whole day and it is sent under its own import for that facet.</small></div>
+            <p className="muted small">Import {importRow.id.slice(0, 8)}… Media sent here appears in FCM → CCTV review under this camera at {selectedPlace?.label ?? selectedHouse?.name ?? 'the chosen place'}, each carrying the SHA-256 taken before upload.</p>
             <div className="actions"><button className="secondary" onClick={() => { setImportRow(null); setSends({}); doneClipsRef.current = {}; }} disabled={sendingKey !== null}>Start another import</button></div>
           </>}
         </section>

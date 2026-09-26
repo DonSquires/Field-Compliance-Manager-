@@ -111,6 +111,14 @@
 .place-chip.is-overridden{border-color:#e4c37a;color:#ffe3a3;background:#332a12}
 .place-chip:disabled{cursor:default;opacity:.7}
 .recording-day__head .day-place{padding:5px 9px;font-size:10px;margin-left:auto}
+.media-day-timeline{display:flex;gap:1px;margin:16px 0 12px;overflow-x:auto;border:1px solid #35534a;background:#0b1513;scrollbar-color:#4e7067 #0b1513}
+.media-day-timeline__day{display:grid;grid-template-rows:auto 42px;min-width:180px;border-right:1px solid #35534a;background:#12201e}
+.media-day-timeline__day:last-child{border-right:0}.media-day-timeline__day.is-weekend{background:#24251d;border-top:3px solid #e4c37a}
+.media-day-timeline__day.is-selected{box-shadow:inset 0 -3px 0 #b7e4cf;background:#19302a}
+.media-day-timeline__label{display:grid;grid-template-columns:1fr auto;gap:1px 10px;border:0;border-bottom:1px solid #2c423e;background:transparent;color:#dceae5;padding:9px 11px;text-align:left;cursor:pointer;font-family:'DM Sans',sans-serif}
+.media-day-timeline__label:hover{background:#1b302b}.media-day-timeline__label strong{font-size:12px}.media-day-timeline__label span{font:10px 'Space Mono',monospace;color:#9fc9b8}.media-day-timeline__label small{grid-column:1 / -1;color:#82978f;font-size:10px}
+.media-day-timeline__track{display:flex;align-items:center;gap:3px;padding:7px 9px;overflow-x:auto;background:linear-gradient(#20342f 0 0) center/100% 1px no-repeat}
+.media-day-timeline__tick{display:grid;align-items:end;min-width:32px;height:26px;border:0;border-left:3px solid #75b99f;background:transparent;color:#a9c2b9;padding:0 3px;cursor:pointer;font:8px 'Space Mono',monospace}.media-day-timeline__tick.is-clip{border-color:#e4c37a}.media-day-timeline__tick.is-photo{border-color:#7fb6e8}.media-day-timeline__tick:hover,.media-day-timeline__tick.is-active{background:#28463f;color:#fff}
 .place-editor{margin:8px 12px 12px;padding:12px;border:1px solid #48766a;border-radius:8px;background:#0f1c1a;display:grid;gap:10px}
 .place-editor__head strong{display:block;font-size:12px}
 .place-editor__head small{display:block;color:#8ea39c;font-size:11px;line-height:1.45;margin-top:3px}

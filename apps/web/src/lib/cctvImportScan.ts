@@ -1,7 +1,7 @@
 // Client-side classification of a camera folder / SD-card dump before anything is uploaded.
 // Pure: no supabase, no DOM beyond File. Pinned by cctvImportScan.test.ts.
 
-export type ScannedKind = 'video' | 'skipped_empty' | 'snapshot' | 'index' | 'other';
+export type ScannedKind = 'video' | 'photo' | 'skipped_empty' | 'snapshot' | 'index' | 'other';
 export type DeviceKind = 'tapo' | 'dahua' | 'hikvision' | 'reolink' | 'generic_folder' | 'single_file' | 'unknown';
 
 export interface ScanInput {
@@ -22,15 +22,18 @@ export interface ScannedFile {
   slotEndAt?: string;
   /** Trailing code on TAPO snapshot names (e.g. 02, 06); meaning is device-specific. */
   snapshotCode?: string;
+  captureTimeSource?: 'camera_filename' | 'file_modified_time';
 }
 
 export interface ScanSummary {
   videoCount: number;
   skippedCount: number;
   snapshotCount: number;
+  photoCount: number;
   otherCount: number;
   videoBytes: number;
   snapshotBytes: number;
+  photoBytes: number;
   recordedFrom: string | null;
   recordedTo: string | null;
 }
@@ -39,6 +42,7 @@ export const DEFAULT_SOURCE_TIME_ZONE = 'Pacific/Auckland';
 export const COMMON_TIME_ZONES = ['Pacific/Auckland', 'Pacific/Chatham', 'Australia/Sydney', 'Australia/Brisbane', 'Australia/Perth', 'UTC'];
 
 const VIDEO_EXTENSIONS = new Set(['mp4', 'mov', 'mkv', 'avi', 'm4v', 'ts', 'h264', 'h265', 'hevc', '264', '265', 'dav', 'asf', 'wmv', 'webm']);
+export const PHOTO_EXTENSIONS = new Set(['jpg', 'jpeg', 'png', 'webp', 'bmp', 'tif', 'tiff']);
 const INDEX_EXTENSIONS = new Set(['index', 'idx', 'bin', 'db', 'sqlite', 'log', 'txt', 'json', 'xml', 'ini', 'dat']);
 const TAPO_VIDEO = /^(\d{4})(\d{2})(\d{2})_(\d{2})(\d{2})(\d{2})_tp(\d+)\.mp4$/i;
 const TAPO_EMPTY_SLOT = /^x{6,}_0{6}_tp\d+\.mp4$/i;
@@ -135,6 +139,17 @@ export function parseTapoSnapshotName(name: string): { startAt: string; endAt: s
   return { startAt: new Date(start * 1000).toISOString(), endAt: new Date(end * 1000).toISOString(), code: match[3] };
 }
 
+export function photoCaptureTime(file: Pick<File, 'name' | 'lastModified'>, timeZone: string): { capturedAt: string; source: 'camera_filename' | 'file_modified_time' } {
+  const match = /(\d{4})[-_.]?(\d{2})[-_.]?(\d{2})[_\-T ]?(\d{2})[-_:.]?(\d{2})[-_:.]?(\d{2})/.exec(file.name);
+  if (match) {
+    const [year, month, day, hour, minute, second] = match.slice(1).map(Number);
+    if (year >= 2000 && year <= 2100 && month >= 1 && month <= 12 && day >= 1 && day <= 31 && hour <= 23 && minute <= 59 && second <= 59) {
+      return { capturedAt: zonedWallClockToIso(year, month, day, hour, minute, second, timeZone), source: 'camera_filename' };
+    }
+  }
+  return { capturedAt: new Date(file.lastModified || Date.now()).toISOString(), source: 'file_modified_time' };
+}
+
 /** True when the first bytes carry no container signature (an unused, pre-allocated ring slot). */
 export function isEmptyVideoHeader(bytes: Uint8Array): boolean {
   if (bytes.length === 0) return true;
@@ -190,6 +205,11 @@ export async function classifyFolder(inputs: ScanInput[], timeZone: string): Pro
         : { ...base, kind: 'other', skipReason: 'snapshot name carries no event window' });
       continue;
     }
+    if (PHOTO_EXTENSIONS.has(ext)) {
+      const capture = photoCaptureTime(input.file, zone);
+      scanned.push({ ...base, kind: 'photo', slotStartAt: capture.capturedAt, captureTimeSource: capture.source });
+      continue;
+    }
     if (VIDEO_EXTENSIONS.has(ext)) {
       if (TAPO_EMPTY_SLOT.test(name)) {
         scanned.push({ ...base, kind: 'skipped_empty', skipReason: 'pre-allocated ring slot never recorded' });
@@ -239,15 +259,19 @@ export function withSlotEnds(scanned: ScannedFile[]): ScannedFile[] {
 export function summarize(scanned: ScannedFile[]): ScanSummary {
   const videos = scanned.filter((item) => item.kind === 'video');
   const snapshots = scanned.filter((item) => item.kind === 'snapshot');
-  const starts = videos.map((item) => item.slotStartAt).filter((value): value is string => Boolean(value)).sort();
-  const endsOrStarts = videos.map((item) => item.slotEndAt ?? item.slotStartAt).filter((value): value is string => Boolean(value)).sort();
+  const photos = scanned.filter((item) => item.kind === 'photo');
+  const timedMedia = [...videos, ...snapshots, ...photos];
+  const starts = timedMedia.map((item) => item.slotStartAt).filter((value): value is string => Boolean(value)).sort();
+  const endsOrStarts = timedMedia.map((item) => item.slotEndAt ?? item.slotStartAt).filter((value): value is string => Boolean(value)).sort();
   return {
     videoCount: videos.length,
     skippedCount: scanned.filter((item) => item.kind === 'skipped_empty').length,
     snapshotCount: snapshots.length,
+    photoCount: photos.length,
     otherCount: scanned.filter((item) => item.kind === 'index' || item.kind === 'other').length,
     videoBytes: videos.reduce((sum, item) => sum + item.sizeBytes, 0),
     snapshotBytes: snapshots.reduce((sum, item) => sum + item.sizeBytes, 0),
+    photoBytes: photos.reduce((sum, item) => sum + item.sizeBytes, 0),
     recordedFrom: starts[0] ?? null,
     recordedTo: endsOrStarts[endsOrStarts.length - 1] ?? null,
   };

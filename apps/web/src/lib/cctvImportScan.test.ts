@@ -10,6 +10,7 @@ import {
   isValidTimeZone,
   parseTapoSnapshotName,
   parseTapoVideoName,
+  photoCaptureTime,
   storagePathFor,
   summarize,
   zonedWallClockToIso,
@@ -91,6 +92,7 @@ describe('classifyFolder', () => {
     { file: fileOf('xxxxxxxx_000000_tp00002.mp4', zeros()), relativePath: 'xxxxxxxx_000000_tp00002.mp4' },
     { file: fileOf('20260912_000000_tp00003.mp4', zeros()), relativePath: '20260912_000000_tp00003.mp4' },
     { file: fileOf('1789271600_1789271617_02.jpg', 400, 'image/jpeg'), relativePath: 'snapshot/20260913/15/1789271600_1789271617_02.jpg' },
+    { file: fileOf('gate_20260913_161500.png', 500, 'image/png'), relativePath: 'evidence/gate_20260913_161500.png' },
     { file: fileOf('15.index', 32, 'application/octet-stream'), relativePath: 'snapshot/20260913/15.index' },
     { file: fileOf('index_info.bin', 32, 'application/octet-stream'), relativePath: 'index_info.bin' },
     { file: fileOf('diagnose_log', 32, ''), relativePath: 'diagnose_log' },
@@ -107,6 +109,7 @@ describe('classifyFolder', () => {
       'xxxxxxxx_000000_tp00002.mp4': 'skipped_empty',
       '20260912_000000_tp00003.mp4': 'skipped_empty',
       'snapshot/20260913/15/1789271600_1789271617_02.jpg': 'snapshot',
+      'evidence/gate_20260913_161500.png': 'photo',
       'snapshot/20260913/15.index': 'index',
       'index_info.bin': 'index',
       diagnose_log: 'index',
@@ -124,7 +127,7 @@ describe('classifyFolder', () => {
   it('summarises, builds the manifest and the device timeline without File objects', async () => {
     const scanned = await classifyFolder(inputs, 'Pacific/Auckland');
     const summary = summarize(scanned);
-    expect(summary).toMatchObject({ videoCount: 3, skippedCount: 2, snapshotCount: 1, otherCount: 4, snapshotBytes: 400 });
+    expect(summary).toMatchObject({ videoCount: 3, skippedCount: 2, snapshotCount: 1, photoCount: 1, otherCount: 4, snapshotBytes: 400, photoBytes: 500 });
     expect(summary.recordedFrom).toBe('2026-09-11T02:31:56.000Z');
     expect(summary.recordedTo).toBe('2026-09-15T02:18:19.000Z');
     const manifest = buildManifest(scanned);
@@ -147,6 +150,11 @@ describe('helpers', () => {
     expect(formatBytes(268435456)).toBe('256 MB');
     expect(formatBytes(4500)).toBe('4.4 KB');
     expect(formatBytes(0)).toBe('0 B');
+  });
+
+  it('dates ordinary photos from a camera filename, then falls back to modified time', () => {
+    expect(photoCaptureTime({ name: 'gate_20260913_161500.png', lastModified: 1 }, 'Pacific/Auckland')).toEqual({ capturedAt: '2026-09-13T04:15:00.000Z', source: 'camera_filename' });
+    expect(photoCaptureTime({ name: 'inspection.png', lastModified: 1_700_000_000_000 }, 'Pacific/Auckland')).toEqual({ capturedAt: '2023-11-14T22:13:20.000Z', source: 'file_modified_time' });
   });
 
   it('keeps uploads inside the import folder with safe segments', () => {

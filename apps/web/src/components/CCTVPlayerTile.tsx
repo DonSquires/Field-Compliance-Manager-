@@ -63,6 +63,7 @@ type VideoFrameCapable = HTMLVideoElement & {
  */
 export const CCTVPlayerTile = React.forwardRef<CCTVPlayerTileHandle, CCTVPlayerTileProps>(function CCTVPlayerTile({ label, placeLabel, clips, clockMs, seekNonce = 0, playing, rate, muted, isMaster, active, timeZone, pinnedClip = null, resolveUrl, onTick, onClipEnded, onDurationKnown, onActivate, inspection, onInspectionChange, onEnhancementPlan, onRemove }, ref) {
   const videoRef = useRef<HTMLVideoElement | null>(null);
+  const imageRef = useRef<HTMLImageElement | null>(null);
   const bodyRef = useRef<HTMLDivElement | null>(null);
   const canvasRef = useRef<HTMLCanvasElement | null>(null);
   const rendererRef = useRef<EnhancementRenderer | null>(null);
@@ -80,12 +81,13 @@ export const CCTVPlayerTile = React.forwardRef<CCTVPlayerTileHandle, CCTVPlayerT
   const frameRef = useRef<number | null>(null);
   const openingRef = useRef<string | null>(null);
 
-  const enhanceRequested = Boolean(inspection && inspection.enhance !== 'off' && (inspection.enhance === 'on' || inspection.zoom > 1));
-  const gpuActive = enhanceRequested && !gpuUnavailable;
-
   const pinned = Boolean(pinnedClip);
   const targetClip = pinnedClip ?? clipAtTime(clips, clockMs);
+  const mediaIsPhoto = targetClip?.mediaKind === 'photo';
+  const enhanceRequested = Boolean(!mediaIsPhoto && inspection && inspection.enhance !== 'off' && (inspection.enhance === 'on' || inspection.zoom > 1));
+  const gpuActive = enhanceRequested && !gpuUnavailable;
   const effectivePlaying = playing;
+  const videoPlaying = effectivePlaying && !mediaIsPhoto;
   const converting = Boolean(targetClip && !targetClip.playbackPath && /^video\/h26[45]$/.test(targetClip.fileType));
 
   // Keyed on the clip id held in a ref, not on state, so the re-render caused by setClip does not cancel
@@ -148,15 +150,15 @@ export const CCTVPlayerTile = React.forwardRef<CCTVPlayerTileHandle, CCTVPlayerT
   useEffect(() => {
     const video = videoRef.current;
     if (!video || !src) return;
-    if (effectivePlaying) {
+    if (videoPlaying) {
       void video.play().catch(() => { /* autoplay blocked until the user interacts; the play button retries */ });
     } else {
       video.pause();
     }
-  }, [effectivePlaying, src]);
+  }, [videoPlaying, src]);
 
   useEffect(() => {
-    if ((!isMaster && !pinned) || !effectivePlaying || !src) return;
+    if ((!isMaster && !pinned) || !videoPlaying || !src) return;
     const step = () => {
       const video = videoRef.current;
       if (video && clip && !video.paused && !video.seeking) {
@@ -168,7 +170,7 @@ export const CCTVPlayerTile = React.forwardRef<CCTVPlayerTileHandle, CCTVPlayerT
     };
     frameRef.current = requestAnimationFrame(step);
     return () => { if (frameRef.current) cancelAnimationFrame(frameRef.current); };
-  }, [isMaster, pinned, effectivePlaying, src, clip, onTick]);
+  }, [isMaster, pinned, videoPlaying, src, clip, onTick]);
 
   useEffect(() => { setLocalMs(pinnedClip ? pinnedClip.startMs : null); }, [pinnedClip?.evidenceId]);
 
@@ -179,7 +181,7 @@ export const CCTVPlayerTile = React.forwardRef<CCTVPlayerTileHandle, CCTVPlayerT
     seekToClock(true);
     video.playbackRate = rate;
     video.muted = muted;
-    if (effectivePlaying) void video.play().catch(() => undefined);
+    if (videoPlaying) void video.play().catch(() => undefined);
   };
 
   useImperativeHandle(ref, () => ({
@@ -196,10 +198,11 @@ export const CCTVPlayerTile = React.forwardRef<CCTVPlayerTileHandle, CCTVPlayerT
     },
     captureFrame: async () => {
       const video = videoRef.current;
-      if (!video || !clip || video.readyState < 2) return null;
-      const source: HTMLCanvasElement | HTMLVideoElement = gpuActive && canvasRef.current ? canvasRef.current : video;
-      const width = source instanceof HTMLVideoElement ? source.videoWidth : source.width;
-      const height = source instanceof HTMLVideoElement ? source.videoHeight : source.height;
+      const image = imageRef.current;
+      if (!clip || (!mediaIsPhoto && (!video || video.readyState < 2)) || (mediaIsPhoto && (!image || !image.complete))) return null;
+      const source: HTMLCanvasElement | HTMLVideoElement | HTMLImageElement = gpuActive && canvasRef.current ? canvasRef.current : mediaIsPhoto ? image as HTMLImageElement : video as HTMLVideoElement;
+      const width = source instanceof HTMLVideoElement ? source.videoWidth : source instanceof HTMLImageElement ? source.naturalWidth : source.width;
+      const height = source instanceof HTMLVideoElement ? source.videoHeight : source instanceof HTMLImageElement ? source.naturalHeight : source.height;
       if (!width || !height) return null;
       const canvas = document.createElement('canvas');
       canvas.width = width;
@@ -212,11 +215,11 @@ export const CCTVPlayerTile = React.forwardRef<CCTVPlayerTileHandle, CCTVPlayerT
         return null;
       }
       const blob = await new Promise<Blob | null>((resolve) => canvas.toBlob(resolve, 'image/png'));
-      return blob ? { blob, width, height, atMs: clip.startMs + video.currentTime * 1000, enhanced: gpuActive } : null;
+      return blob ? { blob, width, height, atMs: mediaIsPhoto ? clip.startMs : clip.startMs + (video?.currentTime ?? 0) * 1000, enhanced: gpuActive } : null;
     },
     currentMs: () => {
       const video = videoRef.current;
-      return video && clip ? clip.startMs + video.currentTime * 1000 : null;
+      return clip ? mediaIsPhoto ? clip.startMs : video ? clip.startMs + video.currentTime * 1000 : null : null;
     },
     syncTo: (seconds) => {
       const video = videoRef.current;
@@ -227,7 +230,7 @@ export const CCTVPlayerTile = React.forwardRef<CCTVPlayerTileHandle, CCTVPlayerT
       if (pinned) setLocalMs(at);
       if (isMaster) onTick(at);
     },
-  }), [clip, pinned, isMaster, gpuActive, onTick]);
+  }), [clip, pinned, isMaster, gpuActive, mediaIsPhoto, onTick]);
 
   const nextClip = !targetClip && !pinned ? nextClipAfter(clips, clockMs) : null;
 
@@ -432,11 +435,13 @@ export const CCTVPlayerTile = React.forwardRef<CCTVPlayerTileHandle, CCTVPlayerT
         onPointerDown={inspection ? handlePointerDown : undefined}
         onPointerMove={inspection ? handlePointerMove : undefined} onPointerUp={inspection ? handlePointerUp : undefined} onPointerCancel={() => { dragRef.current = null; }}>
         {targetClip && !converting ? (
-          <video ref={videoRef} src={src ?? undefined} className="cctv-tile__video" playsInline preload="auto" crossOrigin="anonymous"
-            style={videoStyle}
-            onLoadedMetadata={handleLoadedMetadata}
-            onEnded={() => { if (!pinned && isMaster && clip) onClipEnded(clip); }}
-            onError={() => setError('This clip could not be played in the browser.')} />
+          mediaIsPhoto
+            ? <img ref={imageRef} src={src ?? undefined} className="cctv-tile__video" crossOrigin="anonymous" style={videoStyle} alt={`Evidence photo ${targetClip.fileName}`} onError={() => setError('This photo could not be opened in the browser.')} />
+            : <video ref={videoRef} src={src ?? undefined} className="cctv-tile__video" playsInline preload="auto" crossOrigin="anonymous"
+              style={videoStyle}
+              onLoadedMetadata={handleLoadedMetadata}
+              onEnded={() => { if (!pinned && isMaster && clip) onClipEnded(clip); }}
+              onError={() => setError('This clip could not be played in the browser.')} />
         ) : null}
         {targetClip && !converting && enhanceRequested ? <canvas ref={canvasRef} className={`cctv-tile__enhanced${gpuActive ? ' is-live' : ''}`} aria-hidden="true" /> : null}
         {targetClip && !converting && enhanceRequested && inspection ? (

@@ -51,8 +51,22 @@ const DEVICE_LABELS: Record<DeviceKind, string> = {
 };
 const RESUMABLE_UPLOAD_THRESHOLD = 8 * 1024 * 1024;
 const RESUMABLE_CHUNK_BYTES = 6 * 1024 * 1024;
-const SNAPSHOT_UPLOAD_CONCURRENCY = 4;
 const DEVICE_EVENT_BATCH = 400;
+
+async function fileSha256(file: File): Promise<string> {
+  const digest = await crypto.subtle.digest('SHA-256', await file.arrayBuffer());
+  return Array.from(new Uint8Array(digest), (byte) => byte.toString(16).padStart(2, '0')).join('');
+}
+
+function imageContentType(file: File): string {
+  if (file.type.startsWith('image/')) return file.type === 'image/jpg' ? 'image/jpeg' : file.type;
+  const extension = file.name.split('.').pop()?.toLowerCase();
+  return extension === 'png' ? 'image/png'
+    : extension === 'webp' ? 'image/webp'
+      : extension === 'bmp' ? 'image/bmp'
+        : extension === 'tif' || extension === 'tiff' ? 'image/tiff'
+          : 'image/jpeg';
+}
 
 type DirectoryHandle = {
   name: string;
@@ -139,6 +153,8 @@ const CCTVImportPage: React.FC = () => {
   const summary = useMemo(() => summarize(scanned), [scanned]);
   const videos = useMemo(() => scanned.filter((item) => item.kind === 'video'), [scanned]);
   const snapshots = useMemo(() => scanned.filter((item) => item.kind === 'snapshot'), [scanned]);
+  const photos = useMemo(() => scanned.filter((item) => item.kind === 'photo'), [scanned]);
+  const selectedStills = useMemo(() => [...photos, ...(includeSnapshots ? snapshots : [])], [photos, snapshots, includeSnapshots]);
   const leftOut = useMemo(() => scanned.filter((item) => item.kind === 'other' || item.kind === 'index'), [scanned]);
   const hiddenPartition = useMemo(() => (scanning || !rawInputs.length ? { likely: false, reason: null } : assessHiddenPartitionCard(scanned, folderLabel)), [scanned, folderLabel, scanning, rawInputs.length]);
   const selectedHouse = houses.find((house) => house.id === houseId) ?? null;
@@ -233,21 +249,21 @@ const CCTVImportPage: React.FC = () => {
     event.target.value = '';
   };
 
-  const onVideoInput = (event: React.ChangeEvent<HTMLInputElement>) => {
+  const onMediaInput = (event: React.ChangeEvent<HTMLInputElement>) => {
     const list = event.target.files;
     if (!list || list.length === 0) return;
     const inputs = Array.from(list).map((file) => ({ file, relativePath: file.name }));
-    acceptInputs(inputs, inputs.length === 1 ? inputs[0].file.name : `${inputs.length} selected video files`);
+    acceptInputs(inputs, inputs.length === 1 ? inputs[0].file.name : `${inputs.length} selected media files`);
     event.target.value = '';
   };
 
   useEffect(() => {
     if (!rawInputs.length || scanning) return;
-    const accepted = scanned.filter((item) => item.kind === 'video').length;
+    const accepted = scanned.filter((item) => item.kind === 'video' || item.kind === 'photo' || item.kind === 'snapshot').length;
     const excluded = scanned.length - accepted;
     setSelectionStatus(accepted
-      ? `${accepted} video file${accepted === 1 ? '' : 's'} ready to import${excluded ? `; ${excluded} item${excluded === 1 ? '' : 's'} excluded` : ''}.`
-      : `No usable video files among ${scanned.length} item${scanned.length === 1 ? '' : 's'}. The browser can only read files Windows shows; accepted types are .mp4, .dav, .mov, .mkv, .avi and raw camera streams (.h264/.h265).`);
+      ? `${accepted} video or photo file${accepted === 1 ? '' : 's'} ready to import${excluded ? `; ${excluded} item${excluded === 1 ? '' : 's'} excluded` : ''}.`
+      : `No usable videos or photos among ${scanned.length} item${scanned.length === 1 ? '' : 's'}. Accepted photo types are JPEG, PNG, WebP, BMP and TIFF; accepted video types include MP4, DAV, MOV, MKV, AVI and raw camera streams.`);
   }, [rawInputs.length, scanned, scanning]);
 
   const uploadObject = async (file: File, objectName: string, contentType: string, onBytes?: (sent: number) => void): Promise<void> => {
@@ -300,7 +316,8 @@ const CCTVImportPage: React.FC = () => {
     if (!houseId) { setError('Choose the place this camera watches before importing. Cameras carry no GPS.'); return; }
     if (!cameraLabel.trim()) { setError('Give the camera a label (for example “Gate cam 1”).'); return; }
     if (!timeZoneValid) { setError('Enter a valid IANA time zone for the camera clock.'); return; }
-    if (videos.length === 0) { setError('No usable video files were found in this folder.'); return; }
+    if (videos.length === 0 && selectedStills.length === 0) { setError('No usable videos or photos were found in this folder.'); return; }
+    const importManifest = buildManifest(includeSnapshots ? scanned : scanned.filter((item) => item.kind !== 'snapshot'));
     cancelRef.current = false;
     setError(null);
     setPhase('creating');
@@ -324,7 +341,7 @@ const CCTVImportPage: React.FC = () => {
         current = data as ImportRow;
         setImportRow(current);
         const { error: manifestError } = await supabase.rpc('set_cctv_import_manifest', {
-          p_import_id: current.id, p_manifest: buildManifest(scanned), p_status: 'uploading',
+          p_import_id: current.id, p_manifest: importManifest, p_status: 'uploading',
         });
         if (manifestError) throw manifestError;
       }
@@ -332,29 +349,44 @@ const CCTVImportPage: React.FC = () => {
       setPhase('uploading');
 
       const snapshotPaths = new Map<string, string>();
-      if (includeSnapshots && snapshots.length) {
-        setStepMessage(`Uploading ${snapshots.length} camera event snapshots for the timeline…`);
-        const queue = snapshots.filter((item) => progress[item.relativePath]?.status !== 'done');
-        let index = 0;
-        const worker = async () => {
-          while (index < queue.length && !cancelRef.current) {
-            const item = queue[index];
-            index += 1;
-            const objectName = storagePathFor(organizationId, importId, item.relativePath);
-            try {
-              await uploadObject(item.file, objectName, item.file.type || 'image/jpeg');
-              snapshotPaths.set(item.relativePath, objectName);
-              setFileProgress(item.relativePath, { status: 'done', sent: item.sizeBytes });
-            } catch (snapshotError) {
-              setFileProgress(item.relativePath, { status: 'failed', error: snapshotError instanceof Error ? snapshotError.message : 'upload failed' });
-            }
-          }
-        };
-        await Promise.all(Array.from({ length: SNAPSHOT_UPLOAD_CONCURRENCY }, worker));
+      let registered = 0;
+      let failed = 0;
+      for (const item of selectedStills) {
+        if (cancelRef.current) break;
+        if (progress[item.relativePath]?.status === 'done') { registered += 1; continue; }
+        const objectName = storagePathFor(organizationId, importId, item.relativePath);
+        setStepMessage(`Uploading ${item.name} for face and plate analysis…`);
+        setFileProgress(item.relativePath, { status: 'uploading', sent: 0, error: undefined });
+        try {
+          const contentType = imageContentType(item.file);
+          const sha256 = await fileSha256(item.file);
+          await uploadObject(item.file, objectName, contentType, (sent) => setFileProgress(item.relativePath, { sent }));
+          setFileProgress(item.relativePath, { status: 'registering', sent: item.sizeBytes });
+          const { error: registerError } = await supabase.rpc('register_cctv_import_photo', {
+            p_import_id: importId,
+            p_storage_path: objectName,
+            p_file_name: item.name,
+            p_file_size_bytes: item.sizeBytes,
+            p_sha256: sha256,
+            p_captured_at: item.slotStartAt ?? null,
+            p_source_ref: item.relativePath,
+            p_content_type: contentType,
+            p_capture_time_source: item.kind === 'snapshot' ? 'camera_filename' : item.captureTimeSource ?? 'file_modified_time',
+            p_width: null,
+            p_height: null,
+          });
+          if (registerError) throw registerError;
+          snapshotPaths.set(item.relativePath, objectName);
+          registered += 1;
+          setFileProgress(item.relativePath, { status: 'done', sent: item.sizeBytes });
+        } catch (photoError) {
+          failed += 1;
+          setFileProgress(item.relativePath, { status: 'failed', error: photoError instanceof Error ? photoError.message : 'upload failed' });
+        }
       }
       if (cancelRef.current) throw new Error('Import paused. Choose the same folder again to resume.');
 
-      if (snapshots.length) {
+      if (includeSnapshots && snapshots.length) {
         setStepMessage('Recording the camera’s own motion timeline…');
         const events = buildDeviceEvents(scanned, (item) => snapshotPaths.get(item.relativePath) ?? null);
         for (let offset = 0; offset < events.length; offset += DEVICE_EVENT_BATCH) {
@@ -365,8 +397,6 @@ const CCTVImportPage: React.FC = () => {
         }
       }
 
-      let registered = 0;
-      let failed = 0;
       for (const item of videos) {
         if (cancelRef.current) break;
         if (progress[item.relativePath]?.status === 'done') { registered += 1; continue; }
@@ -397,10 +427,10 @@ const CCTVImportPage: React.FC = () => {
       }
       if (cancelRef.current) throw new Error('Import paused. Choose the same folder again to resume.');
       const finalStatus = registered > 0 ? 'registered' : 'failed';
-      await supabase.rpc('set_cctv_import_manifest', { p_import_id: importId, p_manifest: buildManifest(scanned), p_status: finalStatus });
+      await supabase.rpc('set_cctv_import_manifest', { p_import_id: importId, p_manifest: importManifest, p_status: finalStatus });
       setStepMessage(failed
-        ? `${registered} video${registered === 1 ? '' : 's'} queued for analysis; ${failed} failed. Retry the failed files or choose the folder again later.`
-        : `${registered} video${registered === 1 ? '' : 's'} queued for analysis at ${selectedHouse?.name ?? 'the chosen place'}.`);
+        ? `${registered} media file${registered === 1 ? '' : 's'} queued for analysis; ${failed} failed. Retry the failed files or choose the folder again later.`
+        : `${registered} media file${registered === 1 ? '' : 's'} queued for face, plate and activity analysis at ${selectedHouse?.name ?? 'the chosen place'}.`);
       setPhase(failed ? 'failed' : 'done');
       void loadRecentImports();
     } catch (runError) {
@@ -414,17 +444,18 @@ const CCTVImportPage: React.FC = () => {
     activeUploadRef.current?.abort();
   };
 
-  const totalVideoBytes = summary.videoBytes;
-  const sentVideoBytes = videos.reduce((sum, item) => sum + Math.min(item.sizeBytes, progress[item.relativePath]?.sent ?? 0), 0);
-  const overallPercent = totalVideoBytes > 0 ? Math.min(100, Math.round((sentVideoBytes / totalVideoBytes) * 100)) : 0;
-  const readyToStart = Boolean(houseId && cameraLabel.trim() && timeZoneValid && videos.length > 0 && !busy && !scanning);
+  const queuedMedia = [...videos, ...selectedStills];
+  const totalMediaBytes = queuedMedia.reduce((sum, item) => sum + item.sizeBytes, 0);
+  const sentMediaBytes = queuedMedia.reduce((sum, item) => sum + Math.min(item.sizeBytes, progress[item.relativePath]?.sent ?? 0), 0);
+  const overallPercent = totalMediaBytes > 0 ? Math.min(100, Math.round((sentMediaBytes / totalMediaBytes) * 100)) : 0;
+  const readyToStart = Boolean(houseId && cameraLabel.trim() && timeZoneValid && queuedMedia.length > 0 && !busy && !scanning);
 
   return (
     <div className="cctv-import-page">
       <header className="cctv-import-header">
         <div>
           <span>Field outcomes</span>
-          <h1>Import camera footage</h1>
+          <h1>Import camera footage and photos</h1>
           <p>Bring an SD card or a camera folder into review. The camera’s place comes first — SD cards carry no GPS, and a burnt-in watermark is only a hint.</p>
         </div>
         <button type="button" className="page-action" onClick={() => navigate('/admin/field-ops?area=cctv-console')}>
@@ -520,12 +551,12 @@ const CCTVImportPage: React.FC = () => {
               <FolderOpen size={17} /> {folderLabel ? 'Choose a different folder' : 'Choose SD card or camera folder'}
             </button>
             <button type="button" className="page-action" onClick={() => videoInputRef.current?.click()} disabled={busy || scanning}>
-              <FileVideo2 size={17} /> Choose video files
+              <Images size={17} /> Choose videos or photos
             </button>
             <input ref={folderInputRef} type="file" multiple hidden onChange={onFolderInput}
               // @ts-expect-error webkitdirectory is a non-standard attribute understood by all major browsers
               webkitdirectory="" />
-            <input ref={videoInputRef} type="file" multiple hidden accept=".mp4,.mov,.mkv,.avi,.m4v,.ts,.h264,.h265,.hevc,.264,.265,.dav,.asf,.wmv,.webm,video/*" onChange={onVideoInput} />
+            <input ref={videoInputRef} type="file" multiple hidden accept=".mp4,.mov,.mkv,.avi,.m4v,.ts,.h264,.h265,.hevc,.264,.265,.dav,.asf,.wmv,.webm,.jpg,.jpeg,.png,.webp,.bmp,.tif,.tiff,video/*,image/jpeg,image/png,image/webp,image/bmp,image/tiff" onChange={onMediaInput} />
             {folderLabel && <span className="cctv-import-muted">{folderLabel}{scanning ? ' · scanning…' : ` · ${DEVICE_LABELS[deviceKind]}`}</span>}
           </div>
           {selectionStatus && <p className="cctv-import-selection-status" role="status">{selectionStatus}</p>}
@@ -557,6 +588,7 @@ const CCTVImportPage: React.FC = () => {
                 <div><dt>Recorded</dt><dd>{formatWhen(summary.recordedFrom, timeZone)} → {formatWhen(summary.recordedTo, timeZone)}</dd></div>
                 <div><dt>Empty slots skipped</dt><dd>{summary.skippedCount}</dd></div>
                 <div><dt><Images size={14} /> Event snapshots</dt><dd>{summary.snapshotCount} · {formatBytes(summary.snapshotBytes)}</dd></div>
+                <div><dt><Images size={14} /> Other photos</dt><dd>{summary.photoCount} · {formatBytes(summary.photoBytes)}</dd></div>
                 <div><dt>Device / other files</dt><dd>{summary.otherCount} left out</dd></div>
               </dl>
               {snapshots.length > 0 && (
@@ -566,7 +598,7 @@ const CCTVImportPage: React.FC = () => {
                 </label>
               )}
               <ul className="cctv-import-files">
-                {videos.map((item) => {
+                {queuedMedia.map((item) => {
                   const state = progress[item.relativePath];
                   const percent = state ? Math.min(100, Math.round((state.sent / Math.max(item.sizeBytes, 1)) * 100)) : 0;
                   return (
@@ -584,7 +616,7 @@ const CCTVImportPage: React.FC = () => {
                     </li>
                   );
                 })}
-                {videos.length === 0 && <li className="is-pending"><span className="cctv-import-file-name">No usable videos found in this folder.</span></li>}
+                {queuedMedia.length === 0 && <li className="is-pending"><span className="cctv-import-file-name">No usable videos or photos found in this folder.</span></li>}
               </ul>
             </>
           )}
@@ -595,7 +627,7 @@ const CCTVImportPage: React.FC = () => {
             <span className="cctv-import-step-number">4</span>
             <div>
               <h2 id="cctv-import-start">Start</h2>
-              <p>Videos upload one at a time and resume if the connection drops. Each becomes evidence at the chosen place and is queued for analysis.</p>
+              <p>Videos and photos upload one at a time and resume if the connection drops. Each becomes evidence at the chosen place and is queued for face, plate and activity analysis.</p>
             </div>
           </div>
           {!readyToStart && !busy && phase === 'idle' && (
@@ -603,13 +635,13 @@ const CCTVImportPage: React.FC = () => {
               <li className={houseId ? 'is-ok' : ''}>{houseId ? <CheckCircle2 size={14} /> : <span className="dot" />} Place chosen</li>
               <li className={cameraLabel.trim() ? 'is-ok' : ''}>{cameraLabel.trim() ? <CheckCircle2 size={14} /> : <span className="dot" />} Camera labelled</li>
               <li className={timeZoneValid ? 'is-ok' : ''}>{timeZoneValid ? <CheckCircle2 size={14} /> : <span className="dot" />} Clock zone valid</li>
-              <li className={videos.length ? 'is-ok' : ''}>{videos.length ? <CheckCircle2 size={14} /> : <span className="dot" />} Folder scanned with at least one video</li>
+              <li className={queuedMedia.length ? 'is-ok' : ''}>{queuedMedia.length ? <CheckCircle2 size={14} /> : <span className="dot" />} At least one video or photo ready</li>
             </ul>
           )}
           {busy && (
             <div className="cctv-import-progress">
               <progress max={100} value={overallPercent} aria-label="Overall upload progress" />
-              <span>{overallPercent}% · {formatBytes(sentVideoBytes)} of {formatBytes(totalVideoBytes)}</span>
+              <span>{overallPercent}% · {formatBytes(sentMediaBytes)} of {formatBytes(totalMediaBytes)}</span>
             </div>
           )}
           {stepMessage && <p className={`cctv-import-status${phase === 'done' ? ' is-done' : ''}`}>{stepMessage}</p>}
@@ -644,7 +676,7 @@ const CCTVImportPage: React.FC = () => {
         ) : (
           <table className="cctv-import-table">
             <thead>
-              <tr><th>Camera</th><th>Place</th><th>Recorded</th><th>Videos</th><th>Status</th><th /></tr>
+              <tr><th>Camera</th><th>Place</th><th>Recorded</th><th>Media</th><th>Status</th><th /></tr>
             </thead>
             <tbody>
               {recentImports.map((row) => (
@@ -652,7 +684,7 @@ const CCTVImportPage: React.FC = () => {
                   <td>{row.camera_label}</td>
                   <td>{houses.find((house) => house.id === row.location_id)?.name ?? '—'}</td>
                   <td>{formatWhen(row.recorded_from, timeZone)}{row.recorded_to ? ` → ${formatWhen(row.recorded_to, timeZone)}` : ''}</td>
-                  <td>{row.video_count}{row.skipped_count ? ` (+${row.skipped_count} empty)` : ''}</td>
+                  <td>{row.video_count} video{row.video_count === 1 ? '' : 's'} · {row.snapshot_count} photo{row.snapshot_count === 1 ? '' : 's'}{row.skipped_count ? ` (+${row.skipped_count} empty)` : ''}</td>
                   <td><span className={`cctv-import-badge is-${row.status}`}>{row.status.replace(/_/g, ' ')}</span></td>
                   <td>
                     <button type="button" className="cctv-import-link" onClick={() => navigate(`/admin/field-ops?area=cctv-console&import=${row.id}`)}>Open</button>
