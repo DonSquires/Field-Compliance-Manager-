@@ -206,3 +206,12 @@
 }
 
 .roster-hr-tab-list{display:flex;flex-wrap:wrap;gap:6px;margin:10px 0 18px;padding:10px 12px;border-left:2px solid #14c8d4;background:#0c202b}.roster-hr-tab-list .btn{min-height:30px}.roster-hr-tab-list .btn-secondary{border-color:#294b5a;color:#a9c2cd;background:#0a1b25}@media(max-width:560px){.roster-hr-tab-list{overflow-x:auto;flex-wrap:nowrap;margin-bottom:14px}.roster-hr-tab-list .btn{flex:0 0 auto}}
+
+.hr-start-panel{display:grid;grid-template-columns:minmax(220px,1fr) repeat(3,auto);align-items:center;gap:10px;margin:0 0 16px;padding:12px;border:1px solid #285267;border-left:3px solid #14c8d4;border-radius:6px;background:#0c202b}
+.hr-start-panel>div{display:grid;gap:3px}
+.hr-start-panel strong{color:#e6f0f4;font-size:14px}
+.hr-start-panel span{color:#9db1bd;font-size:12px;line-height:1.4}
+.hr-setup-details{margin-top:20px;border-top:1px solid #2b3d4c}
+.hr-setup-details summary{padding:12px 0;color:#b9cbd5;font-size:14px;font-weight:800;cursor:pointer}
+.hr-setup-details[open] summary{margin-bottom:8px}
+@media(max-width:700px){.hr-start-panel{grid-template-columns:1fr}.hr-start-panel .btn{width:100%}}

@@ -282,6 +282,8 @@ const TAB_GROUPS: { id: RosterTabGroup; label: string; tabs: RosterTab[] }[] = [
   { id: 'pay-assets', label: 'Pay & Assets', tabs: ['timesheets', 'pay-review', 'assets'] },
 ];
 
+const ADMIN_OFFICER_TABS = new Set<RosterTab>(['staff', 'onboarding', 'credentials', 'leave', 'shift-templates', 'roster-rules', 'coverage', 'oncall', 'timesheets', 'assets']);
+
 const tabGroupFor = (tab: RosterTab): RosterTabGroup => TAB_GROUPS.find((group) => group.tabs.includes(tab))?.id ?? 'workforce';
 
 /** What a reviewer reads on a timesheet row; the officer's own words live on the officer page. */
@@ -311,8 +313,12 @@ const RosterHRPage: React.FC = () => {
   // "Working in" the organisation itself sets operatingOrganizationId to the home org; only another org is branch mode.
   const workingInBranch = Boolean(operatingOrganizationId && operatingOrganizationId !== profile?.organizationId);
   const corporatePayrollReviewer = Boolean(profile?.employerOrganizationId && profile.employerOrganizationId === profile.organizationId && ['grand_master', 'master', 'admin'].includes(profile.role));
-  const [tab, setTab] = useState<RosterTab>(new URLSearchParams(location.search).get('tab') === 'credentials' ? 'credentials' : 'staff');
-  const [tabGroup, setTabGroup] = useState<RosterTabGroup>(tabGroupFor(new URLSearchParams(location.search).get('tab') === 'credentials' ? 'credentials' : 'staff'));
+  const requestedTab = new URLSearchParams(location.search).get('tab') as RosterTab | null;
+  const roleTabs = profile?.role === 'admin_officer' ? ADMIN_OFFICER_TABS : new Set<RosterTab>(TABS.map((item) => item.id));
+  const visibleTabGroups = TAB_GROUPS.map((group) => ({ ...group, tabs: group.tabs.filter((item) => roleTabs.has(item)) })).filter((group) => group.tabs.length > 0);
+  const initialTab = requestedTab && roleTabs.has(requestedTab) ? requestedTab : 'staff';
+  const [tab, setTab] = useState<RosterTab>(initialTab);
+  const [tabGroup, setTabGroup] = useState<RosterTabGroup>(tabGroupFor(initialTab));
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
 
@@ -407,6 +413,13 @@ const RosterHRPage: React.FC = () => {
     required_staff_count: '1',
     notes: '',
   });
+
+  useEffect(() => {
+    if (roleTabs.has(tab)) return;
+    const fallback = visibleTabGroups[0]?.tabs[0] ?? 'staff';
+    setTab(fallback);
+    setTabGroup(tabGroupFor(fallback));
+  }, [profile?.role]);
 
   // ATLAS READS: user_profiles, staff_profiles, staff_credentials,
   // shift_templates, leave_requests, timesheets, shift_coverage_requests
@@ -1195,14 +1208,14 @@ const RosterHRPage: React.FC = () => {
       {evidenceAction?.action === 'record_induction' && siteInductionState.length > 0 && <div className="alert alert-info" role="status">Current induction state: {siteInductionState.filter((item) => item.completed).length} of {siteInductionState.length} requirements complete.</div>}
 
       <div className="crm-branch-filter" aria-label="Roster and HR workspace">
-        {TAB_GROUPS.map((group) => (
+        {visibleTabGroups.map((group) => (
           <button type="button" key={group.id} className={`btn btn-sm ${tabGroup === group.id ? 'btn-primary' : 'btn-secondary'}`} onClick={() => { setTabGroup(group.id); setTab(group.tabs[0]); }}>
             {group.label}
           </button>
         ))}
       </div>
-      <div className="roster-hr-tab-list" aria-label={`${TAB_GROUPS.find((group) => group.id === tabGroup)?.label} views`}>
-        {TABS.filter((item) => tabGroupFor(item.id) === tabGroup).map((t) => (
+      <div className="roster-hr-tab-list" aria-label={`${visibleTabGroups.find((group) => group.id === tabGroup)?.label} views`}>
+        {TABS.filter((item) => roleTabs.has(item.id) && tabGroupFor(item.id) === tabGroup).map((t) => (
           <button
             key={t.id}
             className={`btn btn-sm ${tab === t.id ? 'btn-primary' : 'btn-secondary'}`}
@@ -1217,6 +1230,15 @@ const RosterHRPage: React.FC = () => {
         <section className="reports-section">
           <h2>Staff ({staff.length})</h2>
           <p className="hr-section-hint">Who works here and whether they can be rostered. Field staff join through Recruitment (offer accepted, then hired), complete Onboarding, and are then marked work-ready.</p>
+          <div className="hr-start-panel" aria-label="People and HR next steps">
+            <div>
+              <strong>What are you here to do?</strong>
+              <span>Choose the task, then follow the person or record through to the next step.</span>
+            </div>
+            {roleTabs.has('recruitment') && <button type="button" className="btn btn-sm btn-secondary" onClick={() => { setTab('recruitment'); setTabGroup(tabGroupFor('recruitment')); }}>Hire someone</button>}
+            <button type="button" className="btn btn-sm btn-secondary" onClick={() => { setTab('onboarding'); setTabGroup(tabGroupFor('onboarding')); }}>Prepare someone to work</button>
+            <button type="button" className="btn btn-sm btn-secondary" onClick={() => { setTab('credentials'); setTabGroup(tabGroupFor('credentials')); }}>Check credentials</button>
+          </div>
           <div className="contacts-list">
             {staff.length === 0 ? (
               <div className="empty-state hr-empty-guide">
@@ -1245,6 +1267,9 @@ const RosterHRPage: React.FC = () => {
             )}
           </div>
 
+          <details className="hr-setup-details">
+            <summary>Workforce setup</summary>
+            <p className="hr-section-hint">These lists change the rules used by onboarding and rostering. Most people do not need to open them for day-to-day staff work.</p>
           <h2 style={{ marginTop: '1.5rem' }}>Skill catalog</h2>
           <p className="hr-section-hint">Reference list of skills a work unit can require and a staff member can hold.</p>
           <div className="assessment-actions" style={{ marginBottom: '1rem' }}>
@@ -1385,6 +1410,8 @@ const RosterHRPage: React.FC = () => {
               ))
             )}
           </div>
+
+          </details>
 
           <h2 style={{ marginTop: '1.5rem' }}>Shift swap requests ({shiftSwaps.filter((item) => item.status === 'pending').length})</h2>
           <div className="contacts-list">

@@ -3,10 +3,32 @@ import { installSupabaseFixtures, monitorBrowserErrors, signInAsAdmin } from './
 
 test.beforeEach(async ({ page }) => { await page.clock.setFixedTime(new Date('2026-08-30T09:30:00+12:00')); await installSupabaseFixtures(page); });
 
+test('admin officer sees only the People & HR work needed for daily service administration', async ({ page }) => {
+  await page.addInitScript(() => window.sessionStorage.setItem('fcm.admin_officer.portal', 'admin'));
+  await installSupabaseFixtures(page, { adminRole: 'admin_officer' });
+  await signInAsAdmin(page, '/admin/people-hr');
+  await expect(page.getByRole('button', { name: 'Workforce', exact: true })).toBeVisible();
+  await expect(page.getByRole('button', { name: 'People', exact: true })).toBeVisible();
+  await expect(page.getByRole('button', { name: 'Rostering', exact: true })).toBeVisible();
+  await expect(page.getByRole('button', { name: 'Pay & Assets', exact: true })).toBeVisible();
+  await page.getByRole('button', { name: 'People', exact: true }).click();
+  await expect(page.getByRole('button', { name: 'Leave', exact: true })).toBeVisible();
+  await expect(page.getByRole('button', { name: 'Recruitment', exact: true })).toHaveCount(0);
+  await expect(page.getByRole('button', { name: 'Performance', exact: true })).toHaveCount(0);
+  await expect(page.getByRole('button', { name: 'HR Cases', exact: true })).toHaveCount(0);
+  await page.getByRole('button', { name: 'Pay & Assets', exact: true }).click();
+  await expect(page.getByRole('button', { name: 'Timesheets', exact: true })).toBeVisible();
+  await expect(page.getByRole('button', { name: 'Pay Review', exact: true })).toHaveCount(0);
+  await page.getByRole('button', { name: 'Rostering', exact: true }).click();
+  await expect(page.getByRole('button', { name: 'Court', exact: true })).toHaveCount(0);
+});
+
 test('people and HR decisions are governed and operational', async ({ page }) => {
   const errors = monitorBrowserErrors(page); await signInAsAdmin(page, '/admin/people-hr');
   await expect(page.getByRole('heading', { name: 'Roster & HR' })).toBeVisible();
   await expect(page.getByText('Ana Ngata', { exact: true })).toBeVisible();
+  await expect(page.getByRole('button', { name: 'Prepare someone to work' })).toBeVisible();
+  await expect(page.getByText('These lists change the rules used by onboarding and rostering.')).toBeHidden();
   await expect(page.getByText('No verified current credential')).toBeVisible();
   const staffCard = page.locator('.contact-card', { has: page.getByRole('heading', { name: 'Ana Ngata' }) });
   await expect(staffCard.getByText('Work ready', { exact: true })).toBeVisible();
