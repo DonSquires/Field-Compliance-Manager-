@@ -65,9 +65,13 @@ port 22 to the **VPS's Tailscale address only**.
 In chat, Bob shows the exact command and runs it only after you say yes. The
 control plane refuses destructive or privilege-changing commands outright
 (`bob-laptop-shell.js`), caps and redacts the output, and records each run
-(command head + hash, never the output). After the first run, tell Bob your
-Windows user name (the script prints it); it goes in
-`/var/lib/bob/control-plane.env` as `BOB_LAPTOP_SSH_USER`.
+(command head + hash, never the output). The script **registers the laptop
+with Bob** each time it runs (Windows user name, Tailscale address, whether the
+switch is on, models present) through the Supabase settings already in
+`deploy/laptop-worker/laptop-worker.env` — nothing to copy across.
+`BOB_LAPTOP_SSH_USER` / `BOB_LAPTOP_HOST` in `/var/lib/bob/control-plane.env`
+pin values instead if ever needed. Optional overrides in `laptop-worker.env`:
+`BOB_VPS_TAILSCALE_IP`, `BOB_GPU_MODELS` (comma-separated).
 
 ### Fallback without Tailscale: reverse SSH tunnel
 

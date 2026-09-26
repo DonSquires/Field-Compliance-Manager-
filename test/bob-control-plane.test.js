@@ -66,7 +66,7 @@ test('health is public and reports the control plane', async () => {
   const { modelProviders, laptopShell, ...rest } = body;
   assert.deepEqual(rest, { status: 'ok', service: 'bob-control-plane', activeLease: false, builderGitHost: 'gitea', builderSourceConfigured: false, autopilot: false, autopilotIntervalMs: 60_000, runningBuilderJobs: 0 });
   // Bob's laptop terminal is off unless the owner-side env enables it; health never carries the user or key path.
-  assert.deepEqual(laptopShell, { enabled: false, configured: false, host: null });
+  assert.deepEqual(laptopShell, { enabled: false, configured: false, host: null, ssh_allowed: null });
   // Provider health names Bob's own compute first and never carries secrets or URLs.
   assert.deepEqual(Object.keys(modelProviders).sort(), ['gpu_workstation', 'ollama', 'openai']);
   assert.deepEqual(Object.keys(modelProviders.openai).sort(), ['configured', 'healthy', 'ready_model']);

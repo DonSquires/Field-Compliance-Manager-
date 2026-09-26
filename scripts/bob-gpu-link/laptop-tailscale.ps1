@@ -42,8 +42,25 @@ param(
 )
 
 $ErrorActionPreference = 'Stop'
+$RepoRoot = Split-Path -Parent (Split-Path -Parent $PSScriptRoot)
+$ScriptVersion = '2026-09-26'
 function Write-Log([string]$Message) { Write-Host ("{0:HH:mm:ss} {1}" -f (Get-Date), $Message) }
 function Test-Admin { ([Security.Principal.WindowsPrincipal][Security.Principal.WindowsIdentity]::GetCurrent()).IsInRole([Security.Principal.WindowsBuiltInRole]::Administrator) }
+
+# deploy/laptop-worker/laptop-worker.env already holds the project's Supabase URL + service key for the
+# CCTV worker on this laptop; the same file lets this script register the laptop with Bob.
+function Read-EnvFile([string]$Path) {
+  $values = @{}
+  if (-not (Test-Path $Path)) { return $values }
+  foreach ($line in Get-Content $Path) {
+    if ($line.TrimStart().StartsWith('#')) { continue }
+    if ($line -match '^\s*([A-Za-z_][A-Za-z0-9_]*)\s*=\s*(.*)$') { $values[$Matches[1]] = $Matches[2].Trim().Trim('"').Trim("'") }
+  }
+  return $values
+}
+$LaptopEnv = Read-EnvFile (Join-Path $RepoRoot 'deploy\laptop-worker\laptop-worker.env')
+if ($LaptopEnv['BOB_VPS_TAILSCALE_IP'] -and -not $PSBoundParameters.ContainsKey('VpsTailscaleIp')) { $VpsTailscaleIp = $LaptopEnv['BOB_VPS_TAILSCALE_IP'] }
+if ($LaptopEnv['BOB_GPU_MODELS'] -and -not $PSBoundParameters.ContainsKey('Models')) { $Models = $LaptopEnv['BOB_GPU_MODELS'] -split ',' | ForEach-Object { $_.Trim() } | Where-Object { $_ } }
 
 $tailscale = @("$env:ProgramFiles\Tailscale\tailscale.exe", 'tailscale') | Where-Object { Get-Command $_ -ErrorAction SilentlyContinue } | Select-Object -First 1
 if (-not $tailscale) { throw 'Tailscale is not installed on this laptop (https://tailscale.com/download/windows).' }
@@ -59,6 +76,31 @@ function Get-SshdState {
   return "$($svc.Status) (startup: $($svc.StartType))"
 }
 
+# Tell Bob's control plane how to reach this laptop (Windows user, Tailscale address, whether the SSH
+# switch is on, models present). Service-role only table; nothing secret leaves the laptop.
+function Register-BobLaptop([bool]$SshAllowed) {
+  $url = $LaptopEnv['SUPABASE_URL']; $key = $LaptopEnv['SUPABASE_SERVICE_ROLE_KEY']
+  if (-not $url -or -not $key) { Write-Log "No deploy\laptop-worker\laptop-worker.env with SUPABASE_URL + SUPABASE_SERVICE_ROLE_KEY — not registered. Tell Bob: laptop user is '$env:USERNAME'."; return }
+  [string[]]$models = @()
+  try { $models = @((Invoke-RestMethod -Uri 'http://127.0.0.1:11434/api/tags' -TimeoutSec 5).models | ForEach-Object { [string]$_.name }) } catch {}
+  $gpu = $null
+  try { $gpu = [string](& nvidia-smi --query-gpu=name --format=csv,noheader 2>$null | Select-Object -First 1) } catch {}
+  $row = [ordered]@{
+    id = 'primary'; host_name = $env:COMPUTERNAME; tailscale_ip = $myIp; windows_user = $env:USERNAME
+    ssh_allowed = $SshAllowed; ssh_port = 22
+    ollama_host = [Environment]::GetEnvironmentVariable('OLLAMA_HOST', 'User'); ollama_models = $models; gpu = $gpu
+    script_version = $ScriptVersion; reported_at = (Get-Date).ToUniversalTime().ToString('o')
+  }
+  $body = ConvertTo-Json -InputObject $row -Compress -Depth 4
+  $headers = @{ apikey = $key; Authorization = "Bearer $key"; 'Content-Type' = 'application/json'; Prefer = 'resolution=merge-duplicates,return=minimal' }
+  try {
+    Invoke-RestMethod -Method Post -Uri "$($url.TrimEnd('/'))/rest/v1/bob_laptop_link?on_conflict=id" -Headers $headers -Body $body -TimeoutSec 20 | Out-Null
+    Write-Log ("Registered with Bob: user '{0}', {1}, SSH {2}" -f $env:USERNAME, $myIp, $(if ($SshAllowed) { 'ON' } else { 'OFF' }))
+  } catch {
+    Write-Log "Registration with Bob failed (non-fatal): $($_.Exception.Message). Tell Bob: laptop user is '$env:USERNAME'."
+  }
+}
+
 function Show-Status {
   Write-Host ''
   Write-Host '== Bob laptop link status =='
@@ -70,22 +112,21 @@ function Show-Status {
   Write-Host ("  Firewall rules   : {0}" -f ((Get-NetFirewallRule -DisplayName 'Bob *' -ErrorAction SilentlyContinue | ForEach-Object { "$($_.DisplayName)=$($_.Enabled)" }) -join ', '))
   Write-Host ("  Windows user     : {0}" -f $env:USERNAME)
   Write-Host ''
-  Write-Host "Tell Bob: laptop user is '$env:USERNAME', Tailscale address $myIp"
 }
 
-if ($Status) { Show-Status; exit 0 }
+if ($Status) { Show-Status; Register-BobLaptop ((Get-Service sshd -ErrorAction SilentlyContinue).Status -eq 'Running'); exit 0 }
 if (-not (Test-Admin)) { throw 'Run this from an Administrator PowerShell (right-click PowerShell → Run as administrator).' }
 
 if ($Deny) {
   if (Get-Service sshd -ErrorAction SilentlyContinue) { Stop-Service sshd -ErrorAction SilentlyContinue; Set-Service sshd -StartupType Manual }
   Write-Log "Bob's terminal is OFF (sshd stopped). Ollama over Tailscale is unaffected."
-  Show-Status; exit 0
+  Show-Status; Register-BobLaptop $false; exit 0
 }
 if ($Allow) {
   if (-not (Get-Service sshd -ErrorAction SilentlyContinue)) { throw 'OpenSSH Server is not set up yet — run this script once without switches first.' }
   Start-Service sshd
   Write-Log "Bob's terminal is ON (sshd running). Use -Deny to switch it off."
-  Show-Status; exit 0
+  Show-Status; Register-BobLaptop $true; exit 0
 }
 
 # ── 1. Ollama over Tailscale ──────────────────────────────────────────────────────────────────
@@ -156,3 +197,4 @@ Write-Log "Firewall: SSH 22 reachable from the VPS ($VpsTailscaleIp) only"
 Start-Service sshd
 Write-Log "Bob's terminal is ON. Switch it off any time with:  powershell -ExecutionPolicy Bypass -File scripts\bob-gpu-link\laptop-tailscale.ps1 -Deny"
 Show-Status
+Register-BobLaptop $true

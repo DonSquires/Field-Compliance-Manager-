@@ -140,3 +140,32 @@ test('laptopStatus reports reachability and the remote identity without running 
   assert.equal(off.reachable, false);
   assert.equal(off.enabled, false);
 });
+
+test('the laptop\'s own registration fills in address and user unless env pins them', () => {
+  const link = { host_name: 'FCM-GPU-LAPTOP', tailscale_ip: '100.114.240.13/32', windows_user: 'donsq', ssh_allowed: true, ssh_port: 22, ollama_models: ['qwen2.5:7b'], gpu: 'NVIDIA GeForce RTX 5050', reported_at: '2026-09-26T11:00:00Z' };
+  const merged = shell.mergeLaptopLink({ BOB_LAPTOP_SHELL_ENABLED: 'true' }, link);
+  assert.equal(merged.BOB_LAPTOP_HOST, '100.114.240.13');
+  assert.equal(merged.BOB_LAPTOP_SSH_USER, 'donsq');
+  assert.equal(merged.BOB_LAPTOP_SSH_PORT, '22');
+  const pinned = shell.mergeLaptopLink({ BOB_LAPTOP_SSH_USER: 'operator', BOB_LAPTOP_HOST: '100.64.0.9' }, link);
+  assert.equal(pinned.BOB_LAPTOP_SSH_USER, 'operator');
+  assert.equal(pinned.BOB_LAPTOP_HOST, '100.64.0.9');
+  assert.deepEqual(shell.mergeLaptopLink({ A: '1' }, null), { A: '1' });
+  assert.deepEqual(shell.describeLink(link), { host_name: 'FCM-GPU-LAPTOP', tailscale_ip: '100.114.240.13', windows_user: 'donsq', ssh_allowed: true, ollama_models: ['qwen2.5:7b'], gpu: 'NVIDIA GeForce RTX 5050', reported_at: '2026-09-26T11:00:00Z' });
+  assert.equal(shell.describeLink(null), null);
+});
+
+test('loadLaptopLink reads the single registry row through the service client and caches it briefly', async () => {
+  let calls = 0;
+  const supabase = { from: (table) => { assert.equal(table, 'bob_laptop_link'); return { select() { return this; }, eq() { return this; }, maybeSingle: async () => { calls += 1; return { data: { windows_user: 'donsq', tailscale_ip: '100.114.240.13', ssh_allowed: false }, error: null }; } }; } };
+  let t = 1_000_000;
+  const now = () => t;
+  const first = await shell.loadLaptopLink(supabase, { now });
+  assert.equal(first.windows_user, 'donsq');
+  await shell.loadLaptopLink(supabase, { now });
+  assert.equal(calls, 1, 'cached within the window');
+  t += 60_000;
+  await shell.loadLaptopLink(supabase, { now });
+  assert.equal(calls, 2, 'refreshed after the window');
+  assert.equal(await shell.loadLaptopLink(null, { now }), null);
+});

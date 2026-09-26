@@ -149,4 +149,42 @@ async function laptopStatus({ env = process.env, spawnImpl = spawn } = {}) {
   return { ...base, reachable: probe.ok, powershell: probe.ok ? lines[0] ?? null : null, remote_user: probe.ok ? lines[1] ?? null : null, computer: probe.ok ? lines[2] ?? null : null, error: probe.ok ? null : probe.error, latency_ms: probe.duration_ms };
 }
 
-module.exports = { DENIED_PATTERNS, MAX_COMMAND_CHARS, MAX_OUTPUT_BYTES, MAX_TIMEOUT_MS, commandPolicy, encodePowerShell, laptopConfig, laptopStatus, redact, runLaptopCommand, sshArguments };
+const LINK_CACHE_MS = 30_000;
+const linkCache = { at: 0, value: null };
+
+/**
+ * The registration the laptop script writes (bob_laptop_link) when it runs: Tailscale address,
+ * the Windows user Bob logs in as, whether the owner's SSH switch is on. Cached briefly; a
+ * missing table or row yields null and env alone decides.
+ */
+async function loadLaptopLink(supabase, { now = Date.now } = {}) {
+  if (!supabase) return null;
+  if (linkCache.value !== undefined && now() - linkCache.at < LINK_CACHE_MS) return linkCache.value;
+  try {
+    const { data, error } = await supabase.from('bob_laptop_link').select('host_name, tailscale_ip, windows_user, ssh_allowed, ssh_port, ollama_host, ollama_models, gpu, reported_at').eq('id', 'primary').maybeSingle();
+    linkCache.value = error ? null : (data || null);
+  } catch {
+    linkCache.value = null;
+  }
+  linkCache.at = now();
+  return linkCache.value;
+}
+
+/** Env pins win; otherwise the laptop's own registration fills in the address and user. */
+function mergeLaptopLink(env, link) {
+  if (!link) return { ...env };
+  const ip = typeof link.tailscale_ip === 'string' ? link.tailscale_ip.replace(/\/\d+$/, '') : '';
+  return {
+    ...env,
+    BOB_LAPTOP_HOST: env.BOB_LAPTOP_HOST || ip,
+    BOB_LAPTOP_SSH_USER: env.BOB_LAPTOP_SSH_USER || link.windows_user || '',
+    BOB_LAPTOP_SSH_PORT: env.BOB_LAPTOP_SSH_PORT || (link.ssh_port ? String(link.ssh_port) : ''),
+  };
+}
+
+function describeLink(link) {
+  if (!link) return null;
+  return { host_name: link.host_name ?? null, tailscale_ip: typeof link.tailscale_ip === 'string' ? link.tailscale_ip.replace(/\/\d+$/, '') : null, windows_user: link.windows_user ?? null, ssh_allowed: link.ssh_allowed === true, ollama_models: Array.isArray(link.ollama_models) ? link.ollama_models : [], gpu: link.gpu ?? null, reported_at: link.reported_at ?? null };
+}
+
+module.exports = { DENIED_PATTERNS, MAX_COMMAND_CHARS, MAX_OUTPUT_BYTES, MAX_TIMEOUT_MS, commandPolicy, describeLink, encodePowerShell, laptopConfig, laptopStatus, loadLaptopLink, mergeLaptopLink, redact, runLaptopCommand, sshArguments };

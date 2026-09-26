@@ -11,7 +11,7 @@ const { buildAtlasGraph } = require('./scripts/atlas-graph');
 const { createModelGatewayConfig, defaultReviewerModel, invokeBuilderModel, modelHealth } = require('./builder-model-gateway');
 const { loadBuilderRuntimeSnapshot, advanceBuilderJob, runBuilderUntilPause } = require('./builder-runtime-coordinator');
 const { autopilotTick, listAutopilotJobs, listPendingApprovals } = require('./builder-autopilot');
-const { laptopStatus, runLaptopCommand, laptopConfig } = require('./bob-laptop-shell');
+const { laptopStatus, runLaptopCommand, laptopConfig, loadLaptopLink, mergeLaptopLink, describeLink } = require('./bob-laptop-shell');
 const { createBranchWorkspace, commitVerifiedPatch, publishWorkspaceBranch, createGiteaPullRequest, workspacePathForBranch, createGitHubPullRequest, ensureSourceCheckout, githubAuthHeader, githubRepoUrl, resolveRemoteHead, redactGitError } = require('./builder-branch-workspace');
 
 // Route failures used to be swallowed into a bare 409; keep a short redacted reason so the
@@ -389,7 +389,9 @@ async function route(req, res, body) {
   const url = new URL(req.url, `http://${req.headers.host || 'localhost'}`);
   if (req.method === 'GET' && url.pathname === '/health') {
     const providers = await modelHealth(modelGatewayConfig).catch(() => ({}));
-    return json(res, 200, { status: 'ok', service: 'bob-control-plane', activeLease: Boolean(activeLease), builderGitHost, builderSourceConfigured: builderGitHost === 'github' ? Boolean(githubToken && githubOwner && githubRepo) : Boolean(giteaBaseUrl && giteaToken && giteaOwner && giteaRepo), autopilot: autopilotEnabled && Boolean(builderSupabase && modelGatewayToken && builderWorkerImage), autopilotIntervalMs, runningBuilderJobs: runningBuilderJobs.size, modelProviders: Object.fromEntries(Object.entries(providers).map(([name, p]) => [name, { configured: p.configured, healthy: p.healthy, ready_model: p.ready_model }])), laptopShell: (() => { const c = laptopConfig(); return { enabled: c.enabled, configured: c.configured, host: c.host || null }; })() });
+    const laptopLink = await loadLaptopLink(builderSupabase).catch(() => null);
+    const laptop = laptopConfig(mergeLaptopLink(process.env, laptopLink));
+    return json(res, 200, { status: 'ok', service: 'bob-control-plane', activeLease: Boolean(activeLease), builderGitHost, builderSourceConfigured: builderGitHost === 'github' ? Boolean(githubToken && githubOwner && githubRepo) : Boolean(giteaBaseUrl && giteaToken && giteaOwner && giteaRepo), autopilot: autopilotEnabled && Boolean(builderSupabase && modelGatewayToken && builderWorkerImage), autopilotIntervalMs, runningBuilderJobs: runningBuilderJobs.size, modelProviders: Object.fromEntries(Object.entries(providers).map(([name, p]) => [name, { configured: p.configured, healthy: p.healthy, ready_model: p.ready_model }])), laptopShell: { enabled: laptop.enabled, configured: laptop.configured, host: laptop.host || null, ssh_allowed: laptopLink ? laptopLink.ssh_allowed === true : null } });
   }
   if (req.method === 'GET' && url.pathname === '/api/bob/builder/model-health') {
     if (!modelGatewayAuthorized(req) && !authorized(req)) return json(res, 401, { error: 'model gateway unauthorized' });
@@ -400,10 +402,13 @@ async function route(req, res, body) {
     const result = await invokeBuilderModel({ input: body, config: modelGatewayConfig });
     return json(res, result.status, result.body);
   }
-  // Bob's terminal on the owner's laptop (Tailscale-only Windows OpenSSH; owner toggles it).
+  // Bob's terminal on the owner's laptop (Tailscale-only Windows OpenSSH; owner toggles it). The
+  // laptop registers itself (bob_laptop_link) when the owner runs laptop-tailscale.ps1; env pins win.
   if (req.method === 'GET' && url.pathname === '/api/bob/laptop/status') {
     if (!authorized(req)) return json(res, 401, { error: 'unauthorized' });
-    return json(res, 200, await laptopStatus());
+    const link = await loadLaptopLink(builderSupabase);
+    const status = await laptopStatus({ env: mergeLaptopLink(process.env, link) });
+    return json(res, 200, { ...status, link: describeLink(link) });
   }
   if (req.method === 'POST' && url.pathname === '/api/bob/laptop/run') {
     if (!authorized(req)) return json(res, 401, { error: 'unauthorized' });
@@ -411,10 +416,14 @@ async function route(req, res, body) {
     const requestedBy = typeof body?.requested_by === 'string' ? body.requested_by.slice(0, 120) : null;
     const conversationId = typeof body?.conversation_id === 'string' ? body.conversation_id.slice(0, 64) : null;
     const purpose = typeof body?.purpose === 'string' ? body.purpose.slice(0, 300) : null;
-    const result = await runLaptopCommand({ command, timeoutMs: Number(body?.timeout_ms) || undefined });
+    const link = await loadLaptopLink(builderSupabase);
+    const env = mergeLaptopLink(process.env, link);
+    const result = link && link.ssh_allowed === false && !process.env.BOB_LAPTOP_SSH_USER
+      ? { ok: false, status: 503, error: `the owner's Bob switch on the laptop is off (laptop-tailscale.ps1 -Allow turns it on; last reported ${link.reported_at ?? 'unknown'})`, exit_code: null, command_sha256: crypto.createHash('sha256').update(command).digest('hex') }
+      : await runLaptopCommand({ command, timeoutMs: Number(body?.timeout_ms) || undefined, env });
     // The audit keeps the command's head and hash, never its output (it may be the owner's private files).
     record(requestedBy || 'bob', 'laptop.shell.run', result.command_sha256 || null, {
-      command_head: command.slice(0, 200), purpose, conversation_id: conversationId, host: laptopConfig().host || null,
+      command_head: command.slice(0, 200), purpose, conversation_id: conversationId, host: laptopConfig(env).host || null,
       status: result.status, exit_code: result.exit_code ?? null, ok: result.ok === true, timed_out: result.timed_out === true,
       stdout_bytes: result.stdout ? Buffer.byteLength(result.stdout) : 0, duration_ms: result.duration_ms ?? null, error: result.error ?? null,
     });
