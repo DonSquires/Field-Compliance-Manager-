@@ -90,7 +90,10 @@ function createGatewayConfig(env = process.env) {
     },
     timeoutMs: Math.max(5000, Number(env.BOB_MODEL_TIMEOUT_MS || env.OPENAI_TIMEOUT_MS || DEFAULT_TIMEOUT_MS)),
     temperature: Number.isFinite(Number.parseFloat(env.BOB_PLAN_TEMPERATURE)) ? Number.parseFloat(env.BOB_PLAN_TEMPERATURE) : 0.6,
-    planMaxTokens: Number(env.OPENAI_PLAN_MAX_TOKENS || 6000),
+    // Drafts (job descriptions, agreements) are long; reasoning tokens count against
+    // this budget too, so a small cap silently returns an empty or truncated reply.
+    planMaxTokens: Number(env.OPENAI_PLAN_MAX_TOKENS || 16000),
+    planRetryMaxTokens: Number(env.OPENAI_PLAN_RETRY_MAX_TOKENS || 24000),
   };
 }
 
@@ -141,7 +144,7 @@ function createModelGateway({ env = process.env, fetchImpl = globalThis.fetch, n
       body.max_completion_tokens = options.maxTokens || config.planMaxTokens;
       body.reasoning_effort = options.reasoningEffort || (provider.reasoningEffort ? provider.reasoningEffort[role] : undefined) || 'medium';
     } else {
-      body.max_tokens = options.maxTokens || (role === 'planner' || role === 'synthesis' ? 3000 : 1500);
+      body.max_tokens = options.maxTokens || (role === 'planner' || role === 'synthesis' ? 6000 : 1500);
       body.temperature = typeof options.temperature === 'number' ? options.temperature : config.temperature;
     }
     return body;
@@ -150,9 +153,15 @@ function createModelGateway({ env = process.env, fetchImpl = globalThis.fetch, n
   async function callProvider(provider, role, messages, options, attempts) {
     const timeoutMs = Math.min(options.timeoutMs || config.timeoutMs, config.timeoutMs);
     let forceClassicParams = false;
-    for (let attempt = 0; attempt < 2; attempt++) {
+    let budgetRetry = false;
+    for (let attempt = 0; attempt < 3; attempt++) {
       const started = now();
-      const body = buildBody(provider, role, messages, { ...options, forceClassicParams });
+      const body = buildBody(provider, role, messages, {
+        ...options,
+        forceClassicParams,
+        // Second chance after an empty/truncated completion: less reasoning, more room for the answer.
+        ...(budgetRetry ? { maxTokens: Math.max(options.maxTokens || 0, config.planRetryMaxTokens), reasoningEffort: 'low' } : {}),
+      });
       let response;
       let text = '';
       try {
@@ -186,13 +195,21 @@ function createModelGateway({ env = process.env, fetchImpl = globalThis.fetch, n
         attempts.push({ provider: provider.name, model: provider.model, ok: false, error: 'invalid_provider_json', latency_ms: now() - started });
         return null;
       }
-      const content = parsed && parsed.choices && parsed.choices[0] && parsed.choices[0].message ? parsed.choices[0].message.content : null;
-      if (typeof content !== 'string' || !content.trim()) {
+      const choice = parsed && parsed.choices && parsed.choices[0] ? parsed.choices[0] : null;
+      const content = choice && choice.message ? choice.message.content : null;
+      const finishReason = choice ? choice.finish_reason : null;
+      const empty = typeof content !== 'string' || !content.trim();
+      if ((empty || finishReason === 'length') && !budgetRetry && (role === 'planner' || role === 'synthesis')) {
+        budgetRetry = true;
+        attempts.push({ provider: provider.name, model: provider.model, ok: false, error: empty ? 'empty_completion_retrying_low_effort' : 'truncated_completion_retrying_low_effort', latency_ms: now() - started });
+        continue;
+      }
+      if (empty) {
         attempts.push({ provider: provider.name, model: provider.model, ok: false, error: 'empty_completion', latency_ms: now() - started });
         return null;
       }
-      attempts.push({ provider: provider.name, model: provider.model, ok: true, latency_ms: now() - started });
-      return { content, provider: provider.name, model: provider.model, latency_ms: now() - started, usage: parsed.usage || null };
+      attempts.push({ provider: provider.name, model: provider.model, ok: true, latency_ms: now() - started, finish_reason: finishReason });
+      return { content, provider: provider.name, model: provider.model, latency_ms: now() - started, usage: parsed.usage || null, finish_reason: finishReason, truncated: finishReason === 'length' };
     }
     return null;
   }

@@ -235,3 +235,38 @@ test('planTurn returns 502 with attempts when every provider fails', async () =>
   assert.equal(result.body.route_selected, 'error');
   assert.equal(result.body.attempts[0].error, 'http_500');
 });
+
+test('gateway retries an empty or length-truncated planner completion once with low effort and a bigger budget', async () => {
+  const bodies = [];
+  const gateway = createModelGateway({
+    env: { OPENAI_API_KEY: 'k', OPENAI_PLAN_MODEL: 'gpt-5.4', OPENAI_MODEL: 'gpt-5.4-mini' },
+    fetchImpl: fakeFetch([
+      async (url, body) => {
+        if (!url.endsWith('/chat/completions')) return null;
+        bodies.push(body);
+        if (bodies.length === 1) return jsonResponse(200, { choices: [{ message: { content: '' }, finish_reason: 'length' }] });
+        return jsonResponse(200, { choices: [{ message: { content: '{"action":"answer","reply":"draft"}' }, finish_reason: 'stop' }] });
+      },
+    ]),
+  });
+  const result = await gateway.chatJson('planner', [{ role: 'user', content: 'draft' }]);
+  assert.equal(bodies.length, 2);
+  assert.equal(bodies[0].max_completion_tokens, 16000);
+  assert.equal(bodies[0].reasoning_effort, 'medium');
+  assert.equal(bodies[1].max_completion_tokens, 24000);
+  assert.equal(bodies[1].reasoning_effort, 'low');
+  assert.equal(result.truncated, false);
+  assert.ok(result.attempts.some((attempt) => attempt.error === 'empty_completion_retrying_low_effort'));
+});
+
+test('a draft cut off mid-JSON is salvaged as the reply so the user never sees broken JSON', async () => {
+  const { salvageReplyFromTruncatedJson } = require('../services/fcm-api/src/bob/planParse');
+  assert.equal(salvageReplyFromTruncatedJson('{"action":"answer","reply":"## Job Description\\n\\nLine one \\"quoted\\" and'), '## Job Description\n\nLine one "quoted" and');
+  assert.equal(salvageReplyFromTruncatedJson('no json here'), null);
+  const gateway = { async chatJson() { return { content: '{"action":"answer","reply":"## Casual Security Officer\\n\\nSection 1', provider: 'openai', model: 'gpt-5.4', latency_ms: 5, truncated: true }; } };
+  const result = await planTurn({ message: 'draft the agreement', tools: [] }, { gateway, env: { BOB_VERIFY_ENABLED: 'false' } });
+  assert.equal(result.body.action, 'answer');
+  assert.match(result.body.reply, /^## Casual Security Officer/);
+  assert.match(result.body.reply, /Say "continue"/);
+  assert.equal(result.body.observability.degraded, true);
+});

@@ -1,7 +1,7 @@
 'use strict';
 
 const { buildPlannerMessages } = require('./planPrompt');
-const { normalizeDecision, parsePlanContent } = require('./planParse');
+const { normalizeDecision, parsePlanContent, salvageReplyFromTruncatedJson } = require('./planParse');
 const { autoRepairArgs, runDeterministicChecks, scrubReply, verifyDecision } = require('./verify');
 
 const DELEGABLE_TOOL_RE = /^(query_records|client_site_compare|scv_lookup|schema_inspect|retrieve_knowledge|understand_documents|web_research|sql_read|repo_search|query_atlas|read_issues|resolve_address|resolve_geofence|self_audit|assess_system)$/;
@@ -36,7 +36,13 @@ async function runPlannerOnce(gateway, input, { reviewerNotes = [], timeoutMs, r
   const messages = buildPlannerMessages({ ...input, reviewerNotes });
   const completion = await gateway.chatJson(role, messages, { timeoutMs });
   const parsed = parsePlanContent(completion.content);
-  const raw = parsed ?? { action: 'answer', tool: null, args: {}, reply: String(completion.content).slice(0, 3000), questions: [], reasoning: 'non-JSON model output', confidence: 0.3 };
+  let raw = parsed;
+  if (!raw) {
+    const salvaged = salvageReplyFromTruncatedJson(completion.content);
+    raw = salvaged
+      ? { action: 'answer', tool: null, args: {}, reply: `${salvaged}\n\n_(This draft was cut off by the model\'s output limit. Say "continue" and I will finish it.)_`, questions: [], reasoning: 'truncated model output salvaged', confidence: 0.4 }
+      : { action: 'answer', tool: null, args: {}, reply: String(completion.content).slice(0, 3000), questions: [], reasoning: 'non-JSON model output', confidence: 0.3 };
+  }
   const decision = normalizeDecision(raw, input.tools, { delegableTools: delegableTools(input.tools) });
   if (decision.tool) {
     const repaired = autoRepairArgs(decision.tool, decision.args);
@@ -67,7 +73,8 @@ async function planTurn(body, { gateway, now = Date.now, logger = console, env =
   try {
     attempt = await runPlannerOnce(gateway, input, { timeoutMs: Math.max(15000, turnBudgetMs - 5000) });
   } catch (error) {
-    if (logger && logger.error) logger.error(`[bob/plan] planner unavailable: ${String(error && error.message || error)}`);
+    const attemptsLog = error && Array.isArray(error.attempts) ? JSON.stringify(error.attempts) : '[]';
+    if (logger && logger.error) logger.error(`[bob/plan] planner unavailable: ${String(error && error.message || error)} attempts=${attemptsLog}`);
     return {
       status: 502,
       body: {

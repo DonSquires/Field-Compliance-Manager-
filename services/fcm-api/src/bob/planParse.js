@@ -46,6 +46,23 @@ function parsePlanContent(content) {
   return null;
 }
 
+/**
+ * When a completion was cut off mid-JSON (finish_reason=length), recover the
+ * partial "reply" string so the user gets the draft so far, never raw JSON.
+ */
+function salvageReplyFromTruncatedJson(content) {
+  const raw = typeof content === 'string' ? content : '';
+  const match = raw.match(/"reply"\s*:\s*"((?:[^"\\]|\\.)*)/);
+  if (!match) return null;
+  let text = match[1];
+  try {
+    text = JSON.parse(`"${text.replace(/\\$/, '')}"`);
+  } catch {
+    text = text.replace(/\\n/g, '\n').replace(/\\"/g, '"').replace(/\\\\/g, '\\');
+  }
+  return text.trim() ? text : null;
+}
+
 const canon = (value) => String(value ?? '').toLowerCase().replace(/[^a-z0-9]/g, '');
 
 function normalizeAction(raw) {
@@ -128,4 +145,4 @@ function normalizeDecision(decision, tools, { delegableTools = [] } = {}) {
   };
 }
 
-module.exports = { MAX_SUBAGENTS, SUBAGENT_ROLES, canon, normalizeAction, normalizeDecision, normalizeQuestions, normalizeSubagents, parsePlanContent };
+module.exports = { MAX_SUBAGENTS, SUBAGENT_ROLES, canon, normalizeAction, normalizeDecision, normalizeQuestions, normalizeSubagents, parsePlanContent, salvageReplyFromTruncatedJson };
