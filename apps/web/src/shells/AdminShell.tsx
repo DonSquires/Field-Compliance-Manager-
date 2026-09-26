@@ -430,6 +430,12 @@ const AdminShell: React.FC = () => {
     navigate(`/admin/field-ops?area=${area}`);
   }, [navigate]);
 
+  const navigateFinance = useCallback((page: Extract<AdminPage, 'finance-bureau' | 'finance-connections' | 'finance-money' | 'finance-costing' | 'finance-pricing'>) => {
+    window.scrollTo({ top: 0 });
+    document.querySelector<HTMLElement>('[data-app-content]')?.scrollTo({ top: 0 });
+    navigateToPage(page);
+  }, [navigateToPage]);
+
   const navigateFromHub = useCallback((destination: string) => {
     if (destination.startsWith('dispatch?')) {
       setFieldOpsSubArea('dispatch');
@@ -609,15 +615,15 @@ const AdminShell: React.FC = () => {
       case 'workshop':
         return <WorkshopPage onNavigate={(destination) => navigateToPage(destination as AdminPage)} />;
       case 'finance-bureau':
-        return <FinanceBureauPage onOpenBob={(prompt) => { setBobLaunchPrompt(prompt); setBobOpen(true); }} onNavigate={(destination) => navigateToPage(destination as AdminPage)} />;
+        return <FinanceBureauPage onOpenBob={(prompt) => { setBobLaunchPrompt(prompt); setBobOpen(true); }} onNavigate={navigateFinance} />;
       case 'finance-connections':
-        return <FinanceConnectionsPage onBack={() => navigateToPage('finance-bureau')} />;
+        return <FinanceConnectionsPage onBack={() => navigateFinance('finance-bureau')} />;
       case 'finance-money':
-        return <FinanceMoneyPage onBack={() => navigateToPage('finance-bureau')} />;
+        return <FinanceMoneyPage onBack={() => navigateFinance('finance-bureau')} />;
       case 'finance-costing':
-        return <FinanceCostingPage onBack={() => navigateToPage('finance-bureau')} />;
+        return <FinanceCostingPage onBack={() => navigateFinance('finance-bureau')} />;
       case 'finance-pricing':
-        return <FinanceBureauPage view="pricing" onOpenBob={(prompt) => { setBobLaunchPrompt(prompt); setBobOpen(true); }} onNavigate={(destination) => navigateToPage(destination as AdminPage)} />;
+        return <FinanceBureauPage view="pricing" onOpenBob={(prompt) => { setBobLaunchPrompt(prompt); setBobOpen(true); }} onNavigate={navigateFinance} />;
       case 'people-hr':
         return <RosterHRPage />;
       case 'roster-targets':
@@ -625,7 +631,7 @@ const AdminShell: React.FC = () => {
       default:
         return <AdminHubPage />;
     }
-  }, [activePage, fieldOpsSubArea, navigateFromHub, navigateToFieldOps, setBobOpen]);
+  }, [activePage, fieldOpsSubArea, navigateFinance, navigateFromHub, navigateToFieldOps, setBobOpen]);
 
   // A popped-out CCTV wall is a second-monitor surface: the console alone, no navigation or banners.
   const isVideoWall = activePage === 'field-ops' && fieldOpsSubArea === 'cctv-console' && new URLSearchParams(location.search).get('popout') === '1';

@@ -18,18 +18,19 @@ type FinanceBobLauncher = (prompt: string) => void;
 
 function FinanceHomeCards({ onOpenBob, onNavigate }: { onOpenBob?: FinanceBobLauncher; onNavigate?: (destination: FinanceDestination) => void }) {
   const { profile, operatingOrganizationId } = useAuth();
-  const openPlainLanguageCheck = () => onOpenBob?.('Check the finance records and guide me through the next useful action in plain language. Do the record-checking first, explain what matters, and ask me only for missing decisions.');
   return <div className="page-container finance-home-page">
     <header className="page-header"><div><p className="finance-owner-eyebrow">Finance, made simple</p><h1>What would you like to do?</h1><p className="subtitle">Bob checks the records and prepares the work. You review the important decisions.</p></div></header>
     <CompletedWorkToInvoicePanel organizationId={operatingOrganizationId ?? profile?.organizationId ?? null} onOpenInvoices={onNavigate ? () => onNavigate('finance-money') : undefined} />
-    <FinanceOwnerGuide onOpenBob={onOpenBob} />
-    <section className="finance-task-grid" aria-label="Finance tasks">
-      <FinanceCard eyebrow="Daily overview" title="See how the business is doing" description="Money earned, money left after costs, tax to plan for, and payments to sort." action="Open money check" tone="primary" onClick={() => onNavigate?.('finance-money')} />
-      <FinanceCard eyebrow="Connections" title="Connect ANZ or IRD" description="Bob prepares the secure connection. Your login stays with the provider." action="Open connections" tone="neutral" onClick={() => onNavigate?.('finance-connections')} />
-      <FinanceCard eyebrow="Before quoting" title="Work out what a job should cost" description="Use the job facts to see wages, vehicles, gear, and what should be left over." action="Open job cost check" tone="attention" onClick={() => onNavigate?.('finance-costing')} />
-      <FinanceCard eyebrow="Prices" title="Set prices and discounts" description="Keep customer prices and discount plans in one controlled workspace." action="Open prices" tone="good" onClick={() => onNavigate?.('finance-pricing')} />
+    <section className="finance-primary-tasks" aria-labelledby="finance-primary-tasks-heading">
+      <div><h2 id="finance-primary-tasks-heading">Choose a finance task</h2><p>Start with the job you need to finish. Each workspace shows the records and the next safe action.</p></div>
+      <div className="finance-task-grid">
+        <FinanceCard eyebrow="Daily overview" title="See how the business is doing" description="Money earned, money left after costs, tax to plan for, and payments to sort." action="Open money check" tone="primary" onClick={() => onNavigate?.('finance-money')} />
+        <FinanceCard eyebrow="Connections" title="Connect ANZ or IRD" description="Bob prepares the secure connection. Your login stays with the provider." action="Open connections" tone="neutral" onClick={() => onNavigate?.('finance-connections')} />
+        <FinanceCard eyebrow="Before quoting" title="Work out what a job should cost" description="Use the job facts to see wages, vehicles, gear, and what should be left over." action="Open job cost check" tone="attention" onClick={() => onNavigate?.('finance-costing')} />
+        <FinanceCard eyebrow="Prices" title="Set prices and discounts" description="Keep customer prices and discount plans in one controlled workspace." action="Open prices" tone="good" onClick={() => onNavigate?.('finance-pricing')} />
+      </div>
     </section>
-    <div className="finance-home-note"><strong>Not sure?</strong><span>Ask Bob "what needs my attention?" and he will start with the records, not accounting jargon.</span><button type="button" className="btn btn-secondary" onClick={openPlainLanguageCheck}>Ask Bob</button></div>
+    <FinanceOwnerGuide onOpenBob={onOpenBob} />
   </div>;
 }
 

@@ -22,6 +22,9 @@ test('owner can walk finance from simple home to final review boundary', async (
   await expect(page.getByRole('heading', { name: 'What would you like to do?' })).toBeVisible();
   await expect(page.getByRole('button', { name: /See how the business is doing/ })).toBeVisible();
   await expect(page.getByRole('button', { name: /Connect ANZ or IRD/ })).toBeVisible();
+  const firstTask = await page.getByRole('button', { name: /See how the business is doing/ }).boundingBox();
+  const bobGuide = await page.getByRole('heading', { name: 'You do not need to be an accountant' }).boundingBox();
+  expect(firstTask?.y).toBeLessThan(bobGuide?.y ?? 0);
   await expect(page).toHaveScreenshot('finance-home-desktop.png');
 
   await page.getByRole('button', { name: /See how the business is doing/ }).click();
@@ -39,6 +42,7 @@ test('owner can walk finance from simple home to final review boundary', async (
 
   await page.getByRole('button', { name: /Connect ANZ or IRD/ }).click();
   await expect(page.getByRole('heading', { name: 'Connect your finance accounts' })).toBeVisible();
+  await expect.poll(() => page.evaluate(() => ({ window: window.scrollY, content: document.querySelector<HTMLElement>('[data-app-content]')?.scrollTop ?? 0 }))).toEqual({ window: 0, content: 0 });
   await expect(page.getByText('We never ask for online-banking passwords')).toBeVisible();
   await page.getByRole('button', { name: /ANZ bank account/ }).click();
   await expect(page).toHaveScreenshot('finance-anz-connection-before-submit.png');
