@@ -270,3 +270,12 @@ test('a draft cut off mid-JSON is salvaged as the reply so the user never sees b
   assert.match(result.body.reply, /Say "continue"/);
   assert.equal(result.body.observability.degraded, true);
 });
+
+test('author effort drops to low for drafting, synthesis, and tool-less passes', () => {
+  const { authorEffort } = require('../services/fcm-api/src/bob/plan');
+  assert.equal(authorEffort({ message: 'draft a job description', tools: TOOLS, history: [] }), 'low');
+  assert.equal(authorEffort({ message: 'yes to all', tools: TOOLS, history: [{ role: 'user', content: 'write the employment agreement' }] }), 'low');
+  assert.equal(authorEffort({ message: 'yes', tools: TOOLS, history: [], taskState: { subagent_results: [{ role: 'research' }] } }), 'low');
+  assert.equal(authorEffort({ message: 'find LINZ', tools: [], history: [] }), 'low');
+  assert.equal(authorEffort({ message: 'find LINZ', tools: TOOLS, history: [] }), undefined);
+});

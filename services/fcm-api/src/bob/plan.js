@@ -2,9 +2,18 @@
 
 const { buildPlannerMessages } = require('./planPrompt');
 const { normalizeDecision, parsePlanContent, salvageReplyFromTruncatedJson } = require('./planParse');
-const { autoRepairArgs, runDeterministicChecks, scrubReply, verifyDecision } = require('./verify');
+const { autoRepairArgs, runDeterministicChecks, scrubReply, verifyDecision, DRAFT_REQUEST_RE } = require('./verify');
 
 const DELEGABLE_TOOL_RE = /^(query_records|client_site_compare|scv_lookup|schema_inspect|retrieve_knowledge|understand_documents|web_research|sql_read|repo_search|query_atlas|read_issues|resolve_address|resolve_geofence|self_audit|assess_system)$/;
+
+// Drafting and synthesis passes are output-heavy: the thinking is mostly done
+// (research gathered, decisions taken), so spend the turn budget on writing.
+function authorEffort(input) {
+  const lastUser = [...(input.history || [])].reverse().find((h) => h && h.role === 'user');
+  const drafting = DRAFT_REQUEST_RE.test(input.message) || (lastUser && DRAFT_REQUEST_RE.test(String(lastUser.content || '')));
+  const synthesising = Boolean(input.taskState && (Array.isArray(input.taskState.subagent_results) && input.taskState.subagent_results.length || input.taskState.last_tool_result));
+  return drafting || synthesising || input.tools.length === 0 ? 'low' : undefined;
+}
 
 function readBody(body) {
   const b = body && typeof body === 'object' ? body : {};
@@ -34,7 +43,7 @@ function delegableTools(tools) {
 
 async function runPlannerOnce(gateway, input, { reviewerNotes = [], timeoutMs, role = 'planner' } = {}) {
   const messages = buildPlannerMessages({ ...input, reviewerNotes });
-  const completion = await gateway.chatJson(role, messages, { timeoutMs });
+  const completion = await gateway.chatJson(role, messages, { timeoutMs, reasoningEffort: authorEffort(input) });
   const parsed = parsePlanContent(completion.content);
   let raw = parsed;
   if (!raw) {
@@ -157,4 +166,4 @@ async function planTurn(body, { gateway, now = Date.now, logger = console, env =
   };
 }
 
-module.exports = { DELEGABLE_TOOL_RE, delegableTools, planTurn, readBody, runPlannerOnce };
+module.exports = { DELEGABLE_TOOL_RE, authorEffort, delegableTools, planTurn, readBody, runPlannerOnce };
