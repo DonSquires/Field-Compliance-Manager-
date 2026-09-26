@@ -63,8 +63,10 @@ test('health is public and reports the control plane', async () => {
   assert.equal(response.status, 200);
   // Health names the git host Bob's Builder lane publishes to; secrets never appear, only whether the host is configured.
   // Autopilot reads false here: the test server has no Supabase, model gateway, or worker image.
-  const { modelProviders, ...rest } = body;
+  const { modelProviders, laptopShell, ...rest } = body;
   assert.deepEqual(rest, { status: 'ok', service: 'bob-control-plane', activeLease: false, builderGitHost: 'gitea', builderSourceConfigured: false, autopilot: false, autopilotIntervalMs: 60_000, runningBuilderJobs: 0 });
+  // Bob's laptop terminal is off unless the owner-side env enables it; health never carries the user or key path.
+  assert.deepEqual(laptopShell, { enabled: false, configured: false, host: null });
   // Provider health names Bob's own compute first and never carries secrets or URLs.
   assert.deepEqual(Object.keys(modelProviders).sort(), ['gpu_workstation', 'ollama', 'openai']);
   assert.deepEqual(Object.keys(modelProviders.openai).sort(), ['configured', 'healthy', 'ready_model']);
@@ -279,4 +281,26 @@ test('Gitea webhooks reject repositories outside the allowlist', async () => {
   });
   assert.equal(response.status, 403);
   assert.deepEqual(await response.json(), { error: 'repository is not allowed' });
+});
+
+test('laptop shell routes are admin-only and report "not available" until the owner-side link is configured', async () => {
+  const anon = await request('GET', '/api/bob/laptop/status');
+  assert.equal(anon.response.status, 401);
+  const status = await request('GET', '/api/bob/laptop/status', undefined, { authorization: `Bearer ${adminToken}` });
+  assert.equal(status.response.status, 200);
+  assert.equal(status.body.reachable, false);
+  assert.equal(status.body.configured, false);
+  assert.ok(status.body.missing.includes('BOB_LAPTOP_SHELL_ENABLED'));
+  const run = await request('POST', '/api/bob/laptop/run', { command: 'Get-Date' }, { authorization: `Bearer ${adminToken}` });
+  assert.equal(run.response.status, 503);
+  assert.match(run.body.error, /laptop shell is not available/);
+  // The refusal is recorded (command head + hash only), so the owner can see what Bob attempted.
+  const audit = await request('GET', '/api/bob/audit', undefined, { authorization: `Bearer ${adminToken}` });
+  if (audit.response.status === 200) {
+    const events = Array.isArray(audit.body) ? audit.body : audit.body.events || [];
+    const entry = events.find((e) => e.type === 'laptop.shell.run');
+    assert.ok(entry, 'laptop.shell.run audit event');
+    assert.equal(entry.metadata.command_head, 'Get-Date');
+    assert.equal(entry.metadata.status, 503);
+  }
 });

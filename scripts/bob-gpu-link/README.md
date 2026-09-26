@@ -26,38 +26,55 @@ for the Builder reviewer, which has minutes to answer, but too slow for a chat
 turn — so the chat lane skips it unless you set `BOB_ROUTE_*` to include
 `vps_ollama`.
 
-## Connect the laptop (Windows)
+## Connect the laptop (Windows) — Tailscale
 
-Once, in PowerShell on the laptop, from a checkout of this repository:
-
-```powershell
-powershell -ExecutionPolicy Bypass -File scripts\bob-gpu-link\laptop-link.ps1
-```
-
-The first run prints a public key. On the VPS run
-`bash scripts/bob-gpu-link/vps-setup.sh "<that key line>"` once, then run the
-laptop command again. It starts Ollama with a 32k context window, pulls
-`qwen2.5:7b` and `qwen2.5-coder:7b` (~9 GB), and holds a forwarding-only SSH
-tunnel so the VPS sees your GPU as `host.docker.internal:11435`. Nothing on
-the VPS can connect back into the laptop.
-
-Register it to start at logon:
+The VPS (`fcm-vps`, 100.85.95.104) and the laptop (`fcm-gpu-laptop`,
+100.114.240.13) are on the same private Tailscale network, so the VPS reaches
+the laptop's own Ollama directly — no tunnel. Once, in an **Administrator**
+PowerShell on the laptop, from a checkout of this repository (`git pull` first):
 
 ```powershell
-powershell -ExecutionPolicy Bypass -File scripts\bob-gpu-link\laptop-link.ps1 -Install
+powershell -ExecutionPolicy Bypass -File scripts\bob-gpu-link\laptop-tailscale.ps1
 ```
 
-### Bigger models (if the GPU has the room)
+It makes the existing Ollama listen for the VPS (32k context, 2 h keep-alive),
+pulls `qwen2.5:7b` and `qwen2.5-coder:7b` (~9 GB), opens port 11434 to the
+Tailscale network only, and sets up **Bob's terminal** (below). Add
+`-BiggerModels` for `qwen2.5-coder:14b` and `qwen3-coder:30b` if the GPU has
+the room. Run it again any time; it only changes what is missing.
 
-```powershell
-powershell -ExecutionPolicy Bypass -File scripts\bob-gpu-link\laptop-link.ps1 -BiggerModels
-```
+The VPS side already points at the laptop:
+`GPU_WORKSTATION_URL=http://100.114.240.13:11434` (control plane) and
+`…/v1` (fcm-api). Within a minute of the script finishing,
+`/health` shows `gpu_workstation.healthy: true` and Bob's chat and Builder
+work start landing on the laptop.
 
-pulls `qwen2.5-coder:14b` (needs ~10 GB VRAM at Q4) and `qwen3-coder:30b`
-(a 30B mixture-of-experts with 3B active parameters — ~18 GB, runs split
-across the GPU and 32 GB of system RAM at usable speed). Bob picks the best
-installed model from the allowlist automatically (`BOB_GPU_MODELS` on the
-control plane, best first). On an 8 GB card, stay with the 7B models.
+### Bob's terminal on the laptop
+
+Owner instruction (2026-09-26): Bob may use Windows PowerShell on the laptop
+to read files and do setup **when the owner wants him to**. The same script
+installs Windows' built-in OpenSSH Server, makes PowerShell its shell,
+authorises Bob's public key (`deploy/bob-laptop/bob_laptop_id_ed25519.pub`;
+the private key never leaves the VPS's `/var/lib/bob/laptop/`), and opens
+port 22 to the **VPS's Tailscale address only**.
+
+- `laptop-tailscale.ps1 -Deny` — Bob cannot reach the laptop at all.
+- `laptop-tailscale.ps1 -Allow` — Bob may run commands you approve in chat.
+- `laptop-tailscale.ps1 -Status` — what is on.
+
+In chat, Bob shows the exact command and runs it only after you say yes. The
+control plane refuses destructive or privilege-changing commands outright
+(`bob-laptop-shell.js`), caps and redacts the output, and records each run
+(command head + hash, never the output). After the first run, tell Bob your
+Windows user name (the script prints it); it goes in
+`/var/lib/bob/control-plane.env` as `BOB_LAPTOP_SSH_USER`.
+
+### Fallback without Tailscale: reverse SSH tunnel
+
+`laptop-link.ps1` / `laptop-link.sh` + `vps-setup.sh` hold a forwarding-only
+tunnel that lands the laptop's Ollama on the VPS at `host.docker.internal:11435`
+(set `GPU_WORKSTATION_URL` accordingly). Kept for machines that cannot join
+the tailnet.
 
 ## Check it
 

@@ -376,3 +376,11 @@ test('the verifier skips a provider that would answer with the author\'s exact i
   assert.equal(escalated.provider, 'openai');
   assert.equal(escalated.attempts[0].error, 'same_identity_as_author');
 });
+
+test('a pending laptop command resumes on an affirmative with the stored command, verbatim', () => {
+  const block = buildPendingBlock({ kind: 'laptop_command_pending', laptop_command: { command: 'Get-ChildItem C:\\Users\\Don\\Documents\\Contracts -Filter *.pdf', purpose: 'list the contract PDFs' } });
+  assert.match(block, /IN-FLIGHT PLAN: on the previous turn you SHOWED the owner a PowerShell command/);
+  assert.match(block, /Get-ChildItem C:\\\\Users\\\\Don\\\\Documents\\\\Contracts -Filter \*\.pdf/);
+  assert.match(block, /tool=laptop_shell and args=\{ command, purpose \}/);
+  assert.match(block, /If they decline, drop it/);
+});

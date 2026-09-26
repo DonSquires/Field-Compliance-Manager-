@@ -18,10 +18,16 @@ services:
       # Handoffs stage patches/results in os.tmpdir(); keep it on the data volume so workers can mount it.
       TMPDIR: /data/tmp
       BOB_WORKER_IMAGE: ${BOB_WORKER_IMAGE:-fcm/bob-worker:current}
-      # In-house model providers: the VPS Ollama (fcm network) and the laptop GPU (reverse SSH
-      # tunnel bound on the host at 11435). Override in control-plane.env; OpenAI stays the fallback.
+      # In-house model providers: the VPS Ollama (fcm network) and the laptop GPU, reached over the
+      # private Tailscale network (fcm-gpu-laptop = 100.114.240.13; scripts/bob-gpu-link/laptop-tailscale.ps1).
+      # Override in control-plane.env; OpenAI stays the fallback.
       OLLAMA_BASE_URL: ${OLLAMA_BASE_URL:-http://ollama:11434}
-      GPU_WORKSTATION_URL: ${GPU_WORKSTATION_URL:-http://host.docker.internal:11435}
+      GPU_WORKSTATION_URL: ${GPU_WORKSTATION_URL:-http://100.114.240.13:11434}
+      # Bob's terminal on the owner's laptop (Windows OpenSSH over Tailscale, owner-toggled). The private
+      # key lives on the data volume; the user is set in control-plane.env once the owner names it.
+      BOB_LAPTOP_SHELL_ENABLED: ${BOB_LAPTOP_SHELL_ENABLED:-true}
+      BOB_LAPTOP_HOST: ${BOB_LAPTOP_HOST:-100.114.240.13}
+      BOB_LAPTOP_SSH_KEY: ${BOB_LAPTOP_SSH_KEY:-/data/laptop/id_ed25519}
     extra_hosts:
       - "host.docker.internal:host-gateway"
     # Docker socket access for isolated workers (no-new-privileges, cap-drop ALL, network none).

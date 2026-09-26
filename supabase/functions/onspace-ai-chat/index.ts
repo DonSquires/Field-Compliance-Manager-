@@ -289,6 +289,7 @@ function safeAgentWorkspaceContext(value) {
         'propose_freedom_camping_org_strategy',
         'dispatch_flow',
         'create_builder_job',
+        'laptop_shell',
         'review_merge_request',
         'config_error',
         'plan_failed',
@@ -698,6 +699,8 @@ const WRITE_CAPABLE_TOOLS = new Set([
   'dispatch_flow',
   // create_builder_job opens a GitHub Builder job (produces a DRAFT PR) — write-capable.
   'create_builder_job',
+  // laptop_shell runs a PowerShell command on the owner's laptop — write-capable (it acts on a real machine).
+  'laptop_shell',
   // C5 stage 1b (#243): generic_write is write-capable, so the explicit
   // write-refusal guard must cover it too (an in-message "don't write" blocks it).
   'generic_write'
@@ -1449,7 +1452,8 @@ function computeEgressForbiddenSet(caps, meta) {
     t.tool === 'write_self_memory' && caps.tier === 'admiral' || // read_self_memory is Bob's read of his own memory — ADMIRAL ONLY.
     t.tool === 'read_self_memory' && caps.tier === 'admiral' || // dispatch_flow dispatches a governed Duo coding flow — ADMIRAL ONLY.
     t.tool === 'dispatch_flow' && caps.tier === 'admiral' || // create_builder_job opens a GitHub self-heal/build job (DRAFT PR) — ADMIRAL ONLY.
-    t.tool === 'create_builder_job' && caps.tier === 'admiral' || allowed.has(t.tool) || allowed.has(envelopeName[t.tool] ?? ''));
+    t.tool === 'create_builder_job' && caps.tier === 'admiral' || // laptop_shell runs a confirmed PowerShell command on the owner's laptop — ADMIRAL ONLY.
+    t.tool === 'laptop_shell' && caps.tier === 'admiral' || allowed.has(t.tool) || allowed.has(envelopeName[t.tool] ?? ''));
 }
 // ── Persona + platform grounding (passed to the brain) ───────────────────────
 function buildPersona(tier) {
@@ -1887,6 +1891,14 @@ async function loadHistory(supabase, conversationId, limit = 8) {
       dispatchPending = {
         kind: 'builder_job_pending',
         builder_job: md.pending_builder_job
+      };
+    }
+    // A laptop_shell turn with a pending_laptop_command marker: Bob showed the owner the exact
+    // PowerShell command and asked before running it on their laptop. Same tier as dispatch_pending.
+    if (!dispatchPending && md.tool === 'laptop_shell' && md.pending_laptop_command && typeof md.pending_laptop_command === 'object') {
+      dispatchPending = {
+        kind: 'laptop_command_pending',
+        laptop_command: md.pending_laptop_command
       };
     }
     if (!askPending && md.intent === 'clarifying_questions' && Array.isArray(md.questions) && md.questions.length) {
@@ -8422,6 +8434,61 @@ serve(async (req)=>{
                 autopilot: bjAutopilot,
                 autopilot_error: typeof created.data.autopilot_error === 'string' ? created.data.autopilot_error : undefined
               }
+            };
+          }
+        // laptop_shell: a PowerShell command on the owner's laptop over the private Tailscale link —
+        // ADMIRAL ONLY (owner instruction 2026-09-26: "give Bob Windows PowerShell so he can access files
+        // on my computer if I want him to, and a terminal to work with"). Two-turn: SHOW the exact command
+        // and purpose (meta carries pending_laptop_command), run only on the owner's affirmative
+        // (pending.kind='laptop_command_pending'). The laptop's SSH service is the owner's on/off switch;
+        // the control plane refuses destructive or privilege-changing commands regardless.
+        case 'laptop_shell':
+          {
+            if (caps.tier !== 'admiral') {
+              return { reply: 'Running commands on the owner\'s laptop is restricted to the platform owner.', meta: { tool: 'laptop_shell', outcome: 'forbidden' } };
+            }
+            const storedCommand = pending && pending.kind === 'laptop_command_pending' && pending.laptop_command ? pending.laptop_command : null;
+            const lsCommand = String(toolArgs.command ?? storedCommand?.command ?? '').trim().slice(0, 4000);
+            const lsPurpose = String(toolArgs.purpose ?? storedCommand?.purpose ?? '').trim().slice(0, 300);
+            if (!lsCommand) {
+              return { reply: 'Tell me what you would like me to look at or do on your laptop and I will show you the exact command before running it.', meta: { tool: 'laptop_shell', outcome: 'need_params' } };
+            }
+            // A changed command is a new proposal, never a silent substitution for the one confirmed.
+            if (!storedCommand || (typeof toolArgs.command === 'string' && toolArgs.command.trim() && toolArgs.command.trim() !== storedCommand.command)) {
+              return {
+                reply: [
+                  `I would like to run this on your laptop${lsPurpose ? ` — ${lsPurpose}` : ''}:`,
+                  '',
+                  '```powershell',
+                  lsCommand,
+                  '```',
+                  '',
+                  'It runs as you, over the private Tailscale link, with a time limit, and I will show you what came back. Say **yes** to run it, or tell me what to change. (Your laptop\'s Bob switch: `laptop-tailscale.ps1 -Deny` turns me off entirely.)'
+                ].join('\n'),
+                meta: { tool: 'laptop_shell', outcome: 'proposed', pending_laptop_command: { command: lsCommand, purpose: lsPurpose } }
+              };
+            }
+            const ran = await callFn('bob-builder-control-room', authHeader, { action: 'laptop_run', command: lsCommand, purpose: lsPurpose, conversation_id: conversationId ?? null });
+            const run = (ran.data && typeof ran.data === 'object' && ran.data.run && typeof ran.data.run === 'object') ? ran.data.run as Record<string, unknown> : null;
+            if (!ran.ok || !run) {
+              const lsFailure = String(run?.error ?? ran.data?.error ?? `HTTP ${ran.status}`).slice(0, 300);
+              const offHint = /not available|BOB_LAPTOP|Connection refused|timed out|connect to host/i.test(lsFailure)
+                ? ' Your laptop may be off, asleep, or the Bob switch is off — on the laptop run `scripts\\bob-gpu-link\\laptop-tailscale.ps1 -Allow` (or `-Status` to check).'
+                : '';
+              return { reply: `I could not run that on your laptop (${lsFailure}).${offHint}`, meta: { tool: 'laptop_shell', outcome: 'failed', error: lsFailure, command: lsCommand } };
+            }
+            const lsOut = String(run.stdout ?? '').trim();
+            const lsErr = String(run.stderr ?? '').trim();
+            const shown = (lsOut || lsErr || '(no output)').slice(0, 6000);
+            const exitCode = typeof run.exit_code === 'number' ? run.exit_code : null;
+            return {
+              reply: [
+                `Ran on your laptop (exit code ${exitCode ?? 'n/a'}${run.truncated ? ', output shortened' : ''}, ${Math.round(Number(run.duration_ms ?? 0) / 100) / 10}s):`,
+                '```',
+                shown,
+                '```'
+              ].join('\n'),
+              meta: { tool: 'laptop_shell', outcome: exitCode === 0 ? 'ran' : 'ran_with_error', command: lsCommand, exit_code: exitCode, truncated: run.truncated === true, output_chars: shown.length }
             };
           }
         case 'check_proposals':

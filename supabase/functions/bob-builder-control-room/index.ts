@@ -129,6 +129,32 @@ serve(async req => {
     return json({ atlas_refresh: result.payload });
   }
 
+  // Bob's terminal on the owner's laptop (owner instruction 2026-09-26). Grand master only: the laptop
+  // is the owner's personal machine, reached over Tailscale, and switched on/off by the owner. The
+  // command has already been shown to and confirmed by the owner in chat; the control plane applies
+  // its own deny list and records the command's head and hash (never the output).
+  if (action === 'laptop_status' || action === 'laptop_run') {
+    if (role !== 'grand_master') return json({ error: 'The laptop terminal is restricted to the platform owner' }, 403);
+    if (!CONTROL_PLANE_URL || !CONTROL_PLANE_TOKEN) return json({ error: 'Builder execution host is unavailable' }, 503);
+    if (action === 'laptop_status') {
+      const result = await relay('/api/bob/laptop/status', 'GET');
+      await audit(profile.organization_id, result.ok ? 'laptop_status' : 'laptop_status_failed');
+      return json({ laptop: result.payload }, result.ok ? 200 : result.status);
+    }
+    const command = typeof body.command === 'string' ? body.command.slice(0, 4000) : '';
+    const purpose = typeof body.purpose === 'string' ? body.purpose.slice(0, 300) : '';
+    if (!command.trim()) return json({ error: 'A command is required' }, 400);
+    const result = await relay('/api/bob/laptop/run', 'POST', {
+      command,
+      purpose,
+      timeout_ms: Number.isFinite(Number(body.timeout_ms)) ? Number(body.timeout_ms) : undefined,
+      requested_by: user.id,
+      conversation_id: typeof body.conversation_id === 'string' ? body.conversation_id.slice(0, 64) : null,
+    });
+    await audit(profile.organization_id, result.ok ? 'laptop_command_ran' : `laptop_command_${result.status}`);
+    return json({ run: result.payload }, result.ok ? 200 : result.status);
+  }
+
   if (action === 'list') {
     stage = 'list_builder_state';
     const organizations = role === 'grand_master' ? null : [...allowedOrganizations];

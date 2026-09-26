@@ -38,12 +38,12 @@ services:
       # (3003 is only the host-published port). Without this, fcm-api fell back
       # to 127.0.0.1:3003 and bob-voice-speak 502'd. See STAGING.md 2026-07-06.
       VOICE_URL: "http://fcm-voice:3000"
-      # Bob's brain runs on the VPS AND the owner's laptop GPU. The laptop keeps a
-      # reverse SSH tunnel to the VPS (scripts/bob-gpu-link/) that lands its Ollama
-      # on the docker gateway address, so the container reaches it via
-      # host.docker.internal. When the laptop is off, the gateway falls back to
-      # OpenAI on its own (services/fcm-api/src/bob/modelGateway.js).
-      GPU_WORKSTATION_URL: ${GPU_WORKSTATION_URL:-http://host.docker.internal:11435/v1}
+      # Bob's brain runs on the VPS AND the owner's laptop GPU. The laptop (fcm-gpu-laptop) is on the
+      # same private Tailscale network as the VPS, so the container reaches its native Ollama directly
+      # at its Tailscale address (scripts/bob-gpu-link/laptop-tailscale.ps1 opens 11434 to the tailnet
+      # only). When the laptop is off, the gateway falls back to OpenAI on its own
+      # (services/fcm-api/src/bob/modelGateway.js).
+      GPU_WORKSTATION_URL: ${GPU_WORKSTATION_URL:-http://100.114.240.13:11434/v1}
       GPU_WORKSTATION_MODEL: ${GPU_WORKSTATION_MODEL:-qwen2.5:7b}
       # The planner (author) uses a different laptop model from the verifier so the critic
       # keeps a different identity in-house; both are pulled by scripts/bob-gpu-link/.

@@ -111,6 +111,15 @@ function buildPendingBlock(pending) {
       'The job pins main, works on its own branch, runs tests and review, and opens a DRAFT GitHub pull request. Bob never merges or deploys.',
     ].join('\n');
   }
+  if (p.kind === 'laptop_command_pending') {
+    const cmd = p.laptop_command && typeof p.laptop_command === 'object' ? p.laptop_command : {};
+    return [
+      '',
+      `IN-FLIGHT PLAN: on the previous turn you SHOWED the owner a PowerShell command to run on their laptop and asked before running it. Stored command (reuse VERBATIM unless the owner asks for a change): ${safeJson(cmd, 4000)}`,
+      'RESUME: on ANY affirmative — "yes", "go ahead", "run it", "do it", "ok", "confirmed" — ADVANCE by selecting action=use_tool with tool=laptop_shell and args={ command, purpose } from the stored command. If the owner asks for a change, propose the changed command again (it will be shown before running). If they decline, drop it and answer normally.',
+      'The command runs as the owner on their own machine over a private link; summarise what came back in plain language.',
+    ].join('\n');
+  }
   return '';
 }
 

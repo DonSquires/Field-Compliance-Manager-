@@ -250,6 +250,11 @@ const TOOL_REGISTRY = {
     governance: 'WRITE-draft; admiral only; human-confirms-before-creation; output is a DRAFT GitHub PR; Bob NEVER merges or deploys',
     effect_class: 'draft_governed_write'
   },
+  laptop_shell: {
+    purpose: "Run ONE PowerShell command on the owner's own Windows laptop (fcm-gpu-laptop) over the private Tailscale link — the owner's terminal for Bob. Use it when the owner asks you to look at, list, read, or check something on their computer (folders, documents, the GPU link: `ollama list`, `nvidia-smi`, `tailscale status`, `docker compose ... ps`), or to do setup they asked for. Two-turn: FIRST call with args { command, purpose } to SHOW the exact command; it runs only after the owner's affirmative on the next turn. Prefer read-only commands; never propose deletion, formatting, account/firewall/registry changes, credential access, or download-and-execute — the control plane refuses them. Output comes back capped; summarise it for the owner rather than dumping it. If the laptop is off or the owner's Bob switch is off, say so and tell them how to turn it on (laptop-tailscale.ps1 -Allow).",
+    governance: 'WRITE-direct on the owner\'s laptop; admiral only; human-confirms-every-command; owner-toggled SSH; deny list + audit on the control plane',
+    effect_class: 'direct_world_change'
+  },
   generic_write: {
     purpose: 'RESERVED (not yet active): a governed, schema-driven create/update on an allowlisted table via the generic path, for entities no bespoke propose_* tool covers. Staged for a governed rollout; currently blocked.',
     governance: 'WRITE-governed; governance-locked (not yet active); bounded by TABLE_ALLOWLIST + GUARDED_COLUMNS + AUTH_DELEGATE',
@@ -609,6 +614,7 @@ const TOOL_REGISTRY = {
     review_merge_request: 'bob-review-merge-request',
     dispatch_flow: 'bob-dispatch-flow',
     create_builder_job: 'bob-builder-control-room',
+    laptop_shell: 'bob-builder-control-room',
     check_proposals: 'bob-check-proposals',
     generic_write: 'bob-upsert-generic',
     // Proposal tools — each dispatches to its OWN edge function, NOT to
