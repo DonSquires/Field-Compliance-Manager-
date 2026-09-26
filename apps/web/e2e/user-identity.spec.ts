@@ -70,29 +70,30 @@ test('administrator sends a non-field identity invitation', async ({ page }) => 
 test('administrator ends a direct area grant with retained reason', async ({ page }) => {
   const errors = monitorBrowserErrors(page);
   await signInAsAdmin(page, '/admin/access-control');
-  await expect(page.getByRole('heading', { name: 'Access Control' })).toBeVisible();
-  const grantRow = page.getByText('reports', { exact: true }).locator('..');
-  await grantRow.getByRole('button', { name: 'Revoke' }).click();
-  const dialog = page.getByRole('dialog', { name: 'End direct access grant' });
+  await expect(page.getByRole('heading', { name: 'Access rules' })).toBeVisible();
+  const grantRow = page.getByText('Reports', { exact: true }).locator('..');
+  await grantRow.getByRole('button', { name: 'End access' }).click();
+  const dialog = page.getByRole('dialog', { name: 'End branch permission' });
   await expect(dialog.getByText(/Jordan Lee/)).toBeVisible();
   await dialog.getByLabel('Reason for ending access').fill('Temporary reporting review assignment has ended.');
-  await dialog.getByRole('button', { name: 'End grant' }).click();
-  await expect(page.getByText('ended', { exact: true })).toBeVisible();
+  await dialog.getByRole('button', { name: 'End access' }).click();
+  await expect(page.getByText('Ended', { exact: true })).toBeVisible();
   expect(errors, errors.join('\n')).toEqual([]);
 });
 
 test('administrator grants a local branch authority with retained reason', async ({ page }) => {
   const errors = monitorBrowserErrors(page);
   await signInAsAdmin(page, '/admin/access-control');
-  await page.getByRole('button', { name: 'Grant branch authority' }).click();
-  const dialog = page.getByRole('dialog', { name: 'Grant branch authority' });
-  await expect(dialog.getByRole('button', { name: 'Grant authority' })).toBeDisabled();
+  await page.getByRole('button', { name: 'Add branch permission' }).click();
+  const dialog = page.getByRole('dialog', { name: 'Add branch permission' });
+  await expect(dialog.getByRole('button', { name: 'Add permission' })).toBeDisabled();
   await expect(dialog).toHaveScreenshot('branch-authority-grant.png');
   await dialog.getByLabel('Staff member').selectOption({ label: 'Jordan Lee' });
-  await dialog.getByLabel('Authority area').selectOption('timesheet_local_review');
-  await dialog.getByLabel('Access level').selectOption('approve');
-  await dialog.getByLabel('Reason for grant').fill('Jordan provides local timesheet review cover.');
-  await dialog.getByRole('button', { name: 'Grant authority' }).click();
-  await expect(page.getByText('timesheet_local_review', { exact: true })).toBeVisible();
+  await dialog.getByLabel('Permission').selectOption('timesheet_local_review');
+  await dialog.getByLabel('Access').selectOption('approve');
+  await dialog.getByLabel('Why is this needed?').fill('Jordan provides local timesheet review cover.');
+  await dialog.getByRole('button', { name: 'Add permission' }).click();
+  await expect(page.getByText('Timesheet local review', { exact: true })).toBeVisible();
+  await expect(page.getByText('timesheet_local_review', { exact: true })).toHaveCount(0);
   expect(errors, errors.join('\n')).toEqual([]);
 });

@@ -17,6 +17,13 @@ const BRANCH_AUTHORITY_AREAS = [
   ['timesheet_local_review', 'Timesheet local review'], ['leave_branch_approve', 'Leave branch approval'], ['roster_impact_approve', 'Roster impact approval'],
   ['credentials_supervise', 'Credential supervision'], ['hr_case_local_investigate', 'Local people-matter investigation'], ['incident_manage_local', 'Local incident management'],
 ] as const;
+const BRANCH_AUTHORITY_LABELS = Object.fromEntries(BRANCH_AUTHORITY_AREAS) as Record<string, string>;
+const ACCESS_LEVEL_LABELS: Record<string, string> = { view: 'View', verify: 'Verify', approve: 'Approve', adjust: 'Adjust', manage: 'Manage' };
+const ACCESS_STATUS_LABELS: Record<string, string> = { active: 'Active', ended: 'Ended', suspended: 'Suspended' };
+const accessLabel = (value: string) => {
+  const words = value.replaceAll('_', ' ');
+  return `${words.charAt(0).toUpperCase()}${words.slice(1)}`;
+};
 
 interface AccessPreset {
   id: string;
@@ -166,8 +173,8 @@ const AccessControlPage: React.FC = () => {
   return (
     <div className="page-container">
       <header className="page-header">
-        <h1>Access Control</h1>
-        <p className="subtitle">{presets.length} presets · {grants.length} direct area grants</p>
+        <h1>Access rules</h1>
+        <p className="subtitle">{presets.length} named access presets · {grants.filter((grant) => grant.status === 'active').length} extra branch permissions</p>
       </header>
 
       {error && (
@@ -180,7 +187,7 @@ const AccessControlPage: React.FC = () => {
       )}
 
       <section className="reports-section">
-        <h2>Access Presets ({presets.length})</h2>
+        <h2>Named access presets ({presets.length})</h2>
         <div className="contacts-list">
           {presets.length === 0 ? (
             <div className="empty-state">
@@ -210,14 +217,14 @@ const AccessControlPage: React.FC = () => {
       </section>
 
       <section className="reports-section">
-        <div className="access-section-heading"><h2>Direct Area Grants ({grants.filter((g) => g.status === 'active').length})</h2><button className="btn btn-sm btn-primary" onClick={() => { setGrantForm({ userId: '', area: BRANCH_AUTHORITY_AREAS[0][0], level: 'approve', reason: '' }); setShowGrantForm(true); }}>Grant branch authority</button></div>
+        <div className="access-section-heading"><div><h2>Extra branch permissions ({grants.filter((g) => g.status === 'active').length})</h2><p className="access-section-hint">Use these only when a person needs authority beyond their named access preset.</p></div><button className="btn btn-sm btn-primary" onClick={() => { setGrantForm({ userId: '', area: BRANCH_AUTHORITY_AREAS[0][0], level: 'approve', reason: '' }); setShowGrantForm(true); }}>Add branch permission</button></div>
         <div className="reports-table-wrapper">
           <table className="reports-table">
             <thead>
               <tr>
                 <th>User</th>
-                <th>Area</th>
-                <th>Level</th>
+                <th>Permission</th>
+                <th>Access</th>
                 <th>Status</th>
                 <th></th>
               </tr>
@@ -226,24 +233,24 @@ const AccessControlPage: React.FC = () => {
               {grants.length === 0 ? (
                 <tr>
                   <td colSpan={5} className="text-center">
-                    No direct grants
+                    No extra branch permissions
                   </td>
                 </tr>
               ) : (
                 grants.map((grant) => (
                   <tr key={grant.id}>
                     <td>{userLabel(grant.user_id)}</td>
-                    <td>{grant.area}</td>
+                    <td>{BRANCH_AUTHORITY_LABELS[grant.area] ?? accessLabel(grant.area)}</td>
                     <td>
-                      <span className="badge">{grant.level}</span>
+                      <span className="badge">{ACCESS_LEVEL_LABELS[grant.level] ?? grant.level}</span>
                     </td>
                     <td>
-                      <span className={`status-badge status-${grant.status}`}>{grant.status}</span>
+                      <span className={`status-badge status-${grant.status}`}>{ACCESS_STATUS_LABELS[grant.status] ?? grant.status}</span>
                     </td>
                     <td>
                       {grant.status === 'active' && (
                         <button className="btn btn-sm btn-danger" onClick={() => { setRevokeGrant(grant); setRevokeReason(''); }}>
-                          Revoke
+                          End access
                         </button>
                       )}
                     </td>
@@ -254,8 +261,8 @@ const AccessControlPage: React.FC = () => {
           </table>
         </div>
       </section>
-      {showGrantForm && <div className="access-dialog-backdrop"><form className="access-dialog" role="dialog" aria-modal="true" aria-labelledby="grant-branch-authority-title" onSubmit={handleGrant}><h2 id="grant-branch-authority-title">Grant branch authority</h2><p>This applies only to the selected operating branch. Corporate payroll and formal disciplinary authority are managed separately.</p><label><span>Staff member</span><select required value={grantForm.userId} onChange={(event) => setGrantForm({ ...grantForm, userId: event.target.value })}><option value="">Select staff member</option>{Object.values(users).filter((user) => user.id !== profile?.id).map((user) => <option value={user.id} key={user.id}>{user.display_name ?? user.email ?? user.id}</option>)}</select></label><label><span>Authority area</span><select value={grantForm.area} onChange={(event) => setGrantForm({ ...grantForm, area: event.target.value })}>{BRANCH_AUTHORITY_AREAS.map(([value, label]) => <option value={value} key={value}>{label}</option>)}</select></label><label><span>Access level</span><select value={grantForm.level} onChange={(event) => setGrantForm({ ...grantForm, level: event.target.value })}><option value="view">View</option><option value="verify">Verify</option><option value="approve">Approve</option><option value="adjust">Adjust</option><option value="manage">Manage</option></select></label><label><span>Reason for grant</span><textarea required rows={3} value={grantForm.reason} onChange={(event) => setGrantForm({ ...grantForm, reason: event.target.value })} /></label><div className="access-dialog-actions"><button type="button" onClick={() => setShowGrantForm(false)}>Cancel</button><button type="submit" disabled={!grantForm.userId || !grantForm.reason.trim()}>Grant authority</button></div></form></div>}
-      {revokeGrant && <div className="access-dialog-backdrop"><form className="access-dialog" role="dialog" aria-modal="true" aria-labelledby="revoke-grant-title" onSubmit={handleRevokeGrant}><h2 id="revoke-grant-title">End direct access grant</h2><p>{userLabel(revokeGrant.user_id)} · {revokeGrant.area} · {revokeGrant.level}</p><label><span>Reason for ending access</span><textarea required rows={3} value={revokeReason} onChange={(event) => setRevokeReason(event.target.value)} /></label><div className="access-dialog-actions"><button type="button" onClick={() => setRevokeGrant(null)}>Cancel</button><button type="submit" className="is-danger" disabled={!revokeReason.trim()}>End grant</button></div></form></div>}
+      {showGrantForm && <div className="access-dialog-backdrop"><form className="access-dialog" role="dialog" aria-modal="true" aria-labelledby="grant-branch-authority-title" onSubmit={handleGrant}><h2 id="grant-branch-authority-title">Add branch permission</h2><p>This applies only to the selected operating branch. Corporate payroll and formal disciplinary authority are managed separately.</p><label><span>Staff member</span><select required value={grantForm.userId} onChange={(event) => setGrantForm({ ...grantForm, userId: event.target.value })}><option value="">Select staff member</option>{Object.values(users).filter((user) => user.id !== profile?.id).map((user) => <option value={user.id} key={user.id}>{user.display_name ?? user.email ?? user.id}</option>)}</select></label><label><span>Permission</span><select value={grantForm.area} onChange={(event) => setGrantForm({ ...grantForm, area: event.target.value })}>{BRANCH_AUTHORITY_AREAS.map(([value, label]) => <option value={value} key={value}>{label}</option>)}</select></label><label><span>Access</span><select value={grantForm.level} onChange={(event) => setGrantForm({ ...grantForm, level: event.target.value })}><option value="view">View</option><option value="verify">Verify</option><option value="approve">Approve</option><option value="adjust">Adjust</option><option value="manage">Manage</option></select></label><label><span>Why is this needed?</span><textarea required rows={3} value={grantForm.reason} onChange={(event) => setGrantForm({ ...grantForm, reason: event.target.value })} /></label><div className="access-dialog-actions"><button type="button" onClick={() => setShowGrantForm(false)}>Cancel</button><button type="submit" disabled={!grantForm.userId || !grantForm.reason.trim()}>Add permission</button></div></form></div>}
+      {revokeGrant && <div className="access-dialog-backdrop"><form className="access-dialog" role="dialog" aria-modal="true" aria-labelledby="revoke-grant-title" onSubmit={handleRevokeGrant}><h2 id="revoke-grant-title">End branch permission</h2><p>{userLabel(revokeGrant.user_id)} · {BRANCH_AUTHORITY_LABELS[revokeGrant.area] ?? accessLabel(revokeGrant.area)} · {ACCESS_LEVEL_LABELS[revokeGrant.level] ?? accessLabel(revokeGrant.level)}</p><label><span>Reason for ending access</span><textarea required rows={3} value={revokeReason} onChange={(event) => setRevokeReason(event.target.value)} /></label><div className="access-dialog-actions"><button type="button" onClick={() => setRevokeGrant(null)}>Cancel</button><button type="submit" className="is-danger" disabled={!revokeReason.trim()}>End access</button></div></form></div>}
     </div>
   );
 };
