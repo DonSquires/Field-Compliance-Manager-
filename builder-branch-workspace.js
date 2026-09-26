@@ -74,7 +74,8 @@ function createBranchWorkspace({ sourceDir, workspaceRoot, jobId, targetSha, bra
 function commitVerifiedPatch({ workspacePath, branchName, patch, message, push = false }) {
   if (!branchName.startsWith(BRANCH_PREFIX) || git(workspacePath, ['branch', '--show-current']) !== branchName) throw new Error('Builder workspace branch is invalid');
   if (git(workspacePath, ['status', '--porcelain', '--untracked-files=normal'])) throw new Error('Builder workspace must be clean before applying a patch');
-  const changedFiles = validatePatchText(patch);
+  // The lane worker has already verified this patch; the commit step enforces path safety and the protected paths, not the lane fence.
+  const changedFiles = validatePatchText(patch, { lane: 'verified' });
   const patchPath = path.join(fs.mkdtempSync(path.join(os.tmpdir(), 'bob-verified-patch-')), 'patch.diff');
   try {
     fs.writeFileSync(patchPath, patch, { mode: 0o600 });

@@ -41,7 +41,7 @@ function changedFilesFromPatch(patchText) {
   return [...files].sort();
 }
 
-function validatePatchText(patchText) {
+function validatePatchText(patchText, { lane = 'frontend' } = {}) {
   if (typeof patchText !== 'string' || !patchText.trim()) throw new Error('patch is empty');
   if (Buffer.byteLength(patchText) > MAX_PATCH_BYTES) throw new Error('patch exceeds size limit');
   if (/GIT binary patch|Binary files .* differ/m.test(patchText)) throw new Error('binary patches are not allowed');
@@ -54,11 +54,12 @@ function validatePatchText(patchText) {
     if (normalized !== file || file.startsWith('/') || file.includes('\0') || normalized.startsWith('../')) {
       throw new Error(`unsafe path in patch: ${file}`);
     }
-    if (!file.startsWith('apps/web/')) throw new Error(`frontend patch cannot modify ${file}`);
+    // The frontend lane is fenced to apps/web; a verified patch from any lane only has to respect the protected paths.
+    if (lane === 'frontend' && !file.startsWith('apps/web/')) throw new Error(`frontend patch cannot modify ${file}`);
     if (BLOCKED_FILES.has(file)) throw new Error(`dependency manifest changes require separate approval: ${file}`);
     if (/(?:^|\/)\.env(?:\.|$)/.test(file)) throw new Error(`environment files are not allowed: ${file}`);
     if (PROTECTED_FRONTEND_PATHS.some(pattern => pattern.test(file)) || isProtectedPath(file)) {
-      throw new Error(`protected frontend changes require separate approval: ${file}`);
+      throw new Error(`protected ${lane === 'frontend' ? 'frontend ' : ''}changes require separate approval: ${file}`);
     }
   }
   return files;

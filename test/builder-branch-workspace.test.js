@@ -31,6 +31,24 @@ test('Builder branch workspace is pinned, isolated, and commits only validated p
   } finally { fs.rmSync(repo.root, { recursive: true, force: true }); }
 });
 
+test('a verified backend patch commits (the commit step enforces protected paths, not the frontend fence)', () => {
+  const repo = fixture();
+  try {
+    fs.mkdirSync(path.join(repo.root, 'services/api'), { recursive: true });
+    fs.writeFileSync(path.join(repo.root, 'services/api/verify.js'), 'const RE = /^(yes|ok)$/i;\n');
+    fs.writeFileSync(path.join(repo.root, 'package.json'), '{"name":"fixture"}\n');
+    git(repo.root, ['add', '.']); git(repo.root, ['commit', '-qm', 'backend fixture']);
+    const sha = git(repo.root, ['rev-parse', 'HEAD']);
+    const workspace = createBranchWorkspace({ sourceDir: repo.root, workspaceRoot: repo.workspaceRoot, jobId: '0123456789abcdef0123456789abcdef', targetSha: sha });
+    const backendPatch = ['diff --git a/services/api/verify.js b/services/api/verify.js', '--- a/services/api/verify.js', '+++ b/services/api/verify.js', '@@ -1 +1 @@', '-const RE = /^(yes|ok)$/i;', '+const RE = /^(yes|ok|go for it)$/i;', ''].join('\n');
+    const committed = commitVerifiedPatch({ workspacePath: workspace.workspacePath, branchName: workspace.branchName, patch: backendPatch, message: 'Bob Builder: backend change' });
+    assert.deepEqual(committed.changedFiles, ['services/api/verify.js']);
+    assert.equal(git(repo.root, ['show', `${committed.commitSha}:services/api/verify.js`]), 'const RE = /^(yes|ok|go for it)$/i;');
+    const protectedPatch = ['diff --git a/package.json b/package.json', '--- a/package.json', '+++ b/package.json', '@@ -1 +1 @@', '-{"name":"fixture"}', '+{"name":"fixture","dependencies":{"left-pad":"*"}}', ''].join('\n');
+    assert.throws(() => commitVerifiedPatch({ workspacePath: workspace.workspacePath, branchName: workspace.branchName, patch: protectedPatch, message: 'x' }), /protected changes require separate approval: package.json/);
+  } finally { fs.rmSync(repo.root, { recursive: true, force: true }); }
+});
+
 test('an unbound scratch workspace left dirty by an interrupted run is restored to the pin only when asked', () => {
   const repo = fixture();
   try {
