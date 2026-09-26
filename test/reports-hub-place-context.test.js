@@ -5,8 +5,8 @@ const test = require('node:test');
 
 const source = fs.readFileSync(path.resolve(__dirname, '../apps/web/src/pages/ReportsHubPage.tsx'), 'utf8');
 
-test('ReportsHubPage resolves the active place-first module context before loading report data', () => {
-  assert.match(source, /useActiveModuleContext/);
+test('ReportsHubPage scopes report data to the agreement selected in the hub', () => {
+  assert.doesNotMatch(source, /useActiveModuleContext/);
   assert.match(source, /useServiceRelationships/);
   // The reader chooses the agreement on the hub; its zones scope breaches and observations (owner walk 2026-09-19).
   assert.match(source, /const \[agreementFilterId, setAgreementFilterId\] = useState\(''\);/);

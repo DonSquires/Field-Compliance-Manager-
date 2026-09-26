@@ -115,14 +115,14 @@ test('managed organization spine routes human actions through governed RPCs', ()
   assert.equal(hasEdge('pages/AccountOnboardingPage', 'activate_crm_account', 'calls'), true);
   assert.equal(hasEdge('pages/ActivationHandoffsPage', 'get_crm_activation_handoffs', 'calls'), true);
   assert.equal(hasEdge('pages/ActivationHandoffsPage', 'manage_crm_activation_handoff_task', 'calls'), true);
-  assert.equal(hasEdge('components/LocationHouseMap', 'resolve_context_authorized', 'calls'), true);
+  assert.equal(hasEdge('components/LocationHouseMap', 'resolve_operational_context_authorized', 'calls'), true);
   assert.equal(hasEdge('components/LocationHouseMap', 'is_zone_closed', 'calls'), true);
   assert.equal(hasEdge('pages/LocationsPage', 'get_crm_operational_geography', 'calls'), true);
   assert.equal(hasEdge('pages/ZoneDetailPage', 'get_crm_operational_geography', 'calls'), true);
   assert.equal(hasEdge('components/OperationalPlaceManager', 'get_crm_operational_place_editor', 'calls'), true);
   assert.equal(hasEdge('components/OperationalPlaceManager', 'manage_crm_site_profile', 'calls'), true);
   assert.equal(hasEdge('components/OperationalPlaceManager', 'manage_crm_zone', 'calls'), true);
-  assert.equal(hasEdge('components/OperationalPlaceManager', 'manage_crm_place_boundary', 'calls'), true);
+  assert.equal(hasEdge('components/OperationalPlaceManager', 'manage_crm_place_boundary', 'calls'), false);
   assert.equal(hasEdge('components/OperationalPlaceManager', 'manage_crm_zone_closure', 'calls'), true);
   assert.equal(hasEdge('get_crm_operational_geography', 'locations', 'reads'), true);
   assert.equal(hasEdge('get_crm_operational_geography', 'client_sites', 'reads'), true);
@@ -131,7 +131,7 @@ test('managed organization spine routes human actions through governed RPCs', ()
   assert.equal(hasEdge('components/OperationalPlaceManager', 'get_crm_operational_place_editor', 'calls'), true);
   assert.equal(hasEdge('components/OperationalPlaceManager', 'manage_crm_site_profile', 'calls'), true);
   assert.equal(hasEdge('components/OperationalPlaceManager', 'manage_crm_zone', 'calls'), true);
-  assert.equal(hasEdge('components/OperationalPlaceManager', 'manage_crm_place_boundary', 'calls'), true);
+  assert.equal(hasEdge('components/OperationalPlaceManager', 'manage_crm_place_boundary', 'calls'), false);
   assert.equal(hasEdge('components/OperationalPlaceManager', 'manage_crm_zone_closure', 'calls'), true);
   assert.equal(hasEdge('manage_crm_site_profile', 'client_sites', 'writes'), true);
   assert.equal(hasEdge('manage_crm_zone', 'location_zones', 'writes'), true);
