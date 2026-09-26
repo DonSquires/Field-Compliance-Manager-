@@ -188,6 +188,7 @@ begin
   );
   set local role postgres;
 
+  perform set_config('request.jwt.claim.sub', v_admin::text, true);
   update public.monthly_report_packs set status = 'sent' where id = v_email_pack;
   select updated_at into v_updated_at
   from public.monthly_report_packs where id = v_email_pack;

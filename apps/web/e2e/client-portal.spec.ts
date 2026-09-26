@@ -59,6 +59,22 @@ test('the delivery view is not offered on a scan-only agreement, and the URL doe
   await expect(page.locator('.client-overview-panel').filter({ hasText: 'Presence at your places' })).toHaveCount(0);
 });
 
+test('a client reads the frozen scope and source details of a published custom report', async ({ page }) => {
+  const browserErrors = monitorBrowserErrors(page);
+  await installClientPortalFixtures(page, { reportsEnabled: true, role: 'client_admin' });
+  await signInAsClient(page, '/client/reports');
+
+  await expect(page.getByText('Selected activity report')).toBeVisible();
+  await expect(page.getByText(/Custom report ·/)).toBeVisible();
+  await page.getByText('View report contents').click();
+  await expect(page.getByRole('definition').filter({ hasText: 'Civic Events Centre' })).toBeVisible();
+  await expect(page.getByRole('definition').filter({ hasText: 'Casey Morgan' })).toBeVisible();
+  await expect(page.getByRole('heading', { name: 'Frozen source detail' })).toBeVisible();
+  await expect(page.getByText('Non-compliant · Follow-up required')).toBeVisible();
+  expect(await page.evaluate(() => document.documentElement.scrollWidth <= window.innerWidth)).toBe(true);
+  expect(browserErrors, browserErrors.join('\n')).toEqual([]);
+});
+
 test('an invited client administrator lands on "set your password", sets it, and the acceptance is recorded', async ({ page }) => {
   const browserErrors = monitorBrowserErrors(page);
   await installClientPortalFixtures(page);

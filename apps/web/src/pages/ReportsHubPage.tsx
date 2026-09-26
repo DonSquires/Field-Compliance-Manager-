@@ -9,8 +9,10 @@
  */
 
 import React, { useState, useEffect, useCallback, useMemo } from 'react';
+import { FilePlus2 } from 'lucide-react';
 import { useAuth } from '../context/AuthContext';
 import { useServiceRelationships } from '../context/ServiceRelationshipContext';
+import { CustomReportBuilder } from '../components/CustomReportBuilder';
 import { ReportPackReviewPanel, type ReportPackEditorial, type ReviewableReportPack } from '../components/ReportPackReviewPanel';
 import { supabase } from '../lib/supabase';
 import './PageStyles.css';
@@ -52,6 +54,8 @@ interface ConsolidatedReportingRow {
 interface MonthlyReportPack {
   id: string;
   template_code: string;
+  report_kind: 'monthly' | 'custom';
+  report_scope: Record<string, unknown>;
   period_start: string;
   period_end: string;
   status: string;
@@ -65,6 +69,7 @@ interface MonthlyReportPack {
   sent_at: string | null;
   pdf_path: string | null;
   pdf_sha256: string | null;
+  pdf_source_updated_at: string | null;
   // PostgREST embeds a to-one relation as an object; older fixtures send an array.
   agreement: { name: string } | Array<{ name: string }> | null;
 }
@@ -79,6 +84,14 @@ function reportStatusLabel(pack: MonthlyReportPack): string {
   if (!pack.published_at) return 'Review required';
   if (pack.delivery_channel === 'portal') return 'Live in portal';
   return 'Approved';
+}
+
+function reportKindLabel(pack: MonthlyReportPack): string {
+  return pack.report_kind === 'custom' ? 'Custom' : 'Monthly';
+}
+
+function hasCurrentPdf(pack: MonthlyReportPack): boolean {
+  return Boolean(pack.pdf_path && pack.pdf_source_updated_at && pack.pdf_source_updated_at === pack.updated_at);
 }
 
 function complianceLabel(value: boolean | null): string {
@@ -96,7 +109,7 @@ interface ReportPackRowProps {
 }
 
 function reportPdfAction(pack: MonthlyReportPack, busy: boolean, onOpenPdf: () => void, onGeneratePdf: () => void): React.ReactNode {
-  if (pack.pdf_path) {
+  if (hasCurrentPdf(pack)) {
     return <button type="button" className="btn btn-sm btn-secondary" onClick={onOpenPdf} disabled={busy}>{busy ? 'Opening...' : 'Open PDF'}</button>;
   }
   if (pack.status === 'sent') return '-';
@@ -110,6 +123,7 @@ function reportDeliveryAction(pack: MonthlyReportPack, busy: boolean, onSend: ()
   const isPublished = pack.status === 'generated' && Boolean(pack.published_at);
   if (isPublished && pack.delivery_channel === 'portal') return 'Available in client portal';
   if (isPublished && pack.delivery_channel === 'email') {
+    if (!hasCurrentPdf(pack)) return 'Generate reviewed PDF first';
     return <button type="button" className="btn btn-sm btn-primary" onClick={onSend} disabled={busy}>{busy ? 'Sending...' : 'Send reviewed report'}</button>;
   }
   return 'Publish after review';
@@ -125,6 +139,7 @@ function ReportPackRow({ pack, busy, onReview, onOpenPdf, onGeneratePdf, onSend 
     <tr>
       <td>{reportAgreementName(pack)}</td>
       <td>{pack.period_start} to {pack.period_end}</td>
+      <td>{reportKindLabel(pack)}</td>
       <td><span className={`status-badge status-${pack.status}`}>{reportStatusLabel(pack)}</span></td>
       <td>{reportReviewAction(pack, onReview)}</td>
       <td>{reportPdfAction(pack, busy, onOpenPdf, onGeneratePdf)}</td>
@@ -159,6 +174,7 @@ const ReportsHubPage: React.FC = () => {
   const [loading, setLoading] = useState(true);
   const [generating, setGenerating] = useState(false);
   const [generatingRollup, setGeneratingRollup] = useState(false);
+  const [showCustomReportBuilder, setShowCustomReportBuilder] = useState(false);
   const [busyPackId, setBusyPackId] = useState<string | null>(null);
   const [reviewingPackId, setReviewingPackId] = useState<string | null>(null);
   const [error, setError] = useState<string | null>(null);
@@ -225,14 +241,14 @@ const ReportsHubPage: React.FC = () => {
         selectedAgreement?.id
           ? supabase
               .from('monthly_report_packs')
-              .select('id, template_code, period_start, period_end, status, data, editorial, generated_at, updated_at, reviewed_at, published_at, delivery_channel, sent_at, pdf_path, pdf_sha256, agreement:service_agreement_id(name)')
+              .select('id, template_code, report_kind, report_scope, period_start, period_end, status, data, editorial, generated_at, updated_at, reviewed_at, published_at, delivery_channel, sent_at, pdf_path, pdf_sha256, pdf_source_updated_at, agreement:service_agreement_id(name)')
               .eq('service_agreement_id', selectedAgreement.id)
               .gte('period_start', dateRange.start)
               .lte('period_end', dateRange.end)
               .order('period_end', { ascending: false })
           : supabase
               .from('monthly_report_packs')
-              .select('id, template_code, period_start, period_end, status, data, editorial, generated_at, updated_at, reviewed_at, published_at, delivery_channel, sent_at, pdf_path, pdf_sha256, agreement:service_agreement_id(name)')
+              .select('id, template_code, report_kind, report_scope, period_start, period_end, status, data, editorial, generated_at, updated_at, reviewed_at, published_at, delivery_channel, sent_at, pdf_path, pdf_sha256, pdf_source_updated_at, agreement:service_agreement_id(name)')
               .in('organization_id', houseOrgIds)
               .gte('period_start', dateRange.start)
               .lte('period_end', dateRange.end)
@@ -290,7 +306,7 @@ const ReportsHubPage: React.FC = () => {
   };
 
   const openReportPackPdf = async (pack: MonthlyReportPack) => {
-    if (!pack.pdf_path) return;
+    if (!hasCurrentPdf(pack) || !pack.pdf_path) return;
     setBusyPackId(pack.id);
     setError(null);
     const { data, error: signedError } = await supabase.storage.from('bob-uploads').createSignedUrl(pack.pdf_path, 900);
@@ -304,6 +320,14 @@ const ReportsHubPage: React.FC = () => {
     setError(null);
     setReviewingPackId(null);
     await loadReports();
+  };
+
+  const finishCustomReport = async (message: string, agreementId: string) => {
+    setNotice(message);
+    setError(null);
+    setAgreementFilterId(agreementId);
+    setShowCustomReportBuilder(false);
+    if (agreementId === agreementFilterId) await loadReports();
   };
 
   const generateDailyRollup = async () => {
@@ -380,8 +404,22 @@ const ReportsHubPage: React.FC = () => {
           />
         </div>
         <button type="button" className="btn btn-primary" onClick={() => void generateReportPacks()} disabled={generating}>{generating ? 'Generating...' : 'Generate report drafts'}</button>
+        <button type="button" className="btn btn-secondary" onClick={() => setShowCustomReportBuilder((current) => !current)} disabled={providerAgreements.length === 0} aria-expanded={showCustomReportBuilder}>
+          <FilePlus2 size={17} aria-hidden="true" /> Build custom report
+        </button>
         <button type="button" className="btn btn-secondary" onClick={() => void generateDailyRollup()} disabled={generatingRollup}>{generatingRollup ? 'Generating rollup...' : 'Generate daily rollup'}</button>
       </div>
+
+      {showCustomReportBuilder && (
+        <CustomReportBuilder
+          agreements={providerAgreements}
+          initialAgreementId={selectedAgreement?.id ?? null}
+          periodStart={dateRange.start}
+          periodEnd={dateRange.end}
+          onClose={() => setShowCustomReportBuilder(false)}
+          onCreated={finishCustomReport}
+        />
+      )}
 
       <div className="kpi-grid">
         <div className="kpi-card">
@@ -404,13 +442,13 @@ const ReportsHubPage: React.FC = () => {
       {consolidatedReporting.length > 1 && <section className="reports-section"><h2>Group Reporting Overview</h2><p className="subtitle">Branch-owned operational activity, consolidated for parent oversight. Detailed queues below remain in the current organization context.</p><div className="reports-table-wrapper"><table className="reports-table"><thead><tr><th>Operating Organization</th><th>Breach Alerts</th><th>Observations</th><th>Non-Compliant</th><th>Report Packs</th></tr></thead><tbody>{consolidatedReporting.map((row) => <tr key={row.source_organization_id}><td>{row.source_organization_name}</td><td>{row.breach_count}</td><td>{row.observation_count}</td><td>{row.non_compliant_observation_count}</td><td>{row.report_pack_count}</td></tr>)}</tbody></table></div></section>}
 
       <section className="reports-section">
-        <h2>Monthly Report Packs ({reportPacks.length})</h2>
+        <h2>Report Packs ({reportPacks.length})</h2>
         <p className="subtitle">Generated evidence remains an internal draft until a provider administrator reviews and publishes it.</p>
         <div className="reports-table-wrapper">
           <table className="reports-table">
-            <thead><tr><th>Agreement</th><th>Period</th><th>Status</th><th>Review</th><th>PDF</th><th>Delivery</th></tr></thead>
+            <thead><tr><th>Agreement</th><th>Period</th><th>Type</th><th>Status</th><th>Review</th><th>PDF</th><th>Delivery</th></tr></thead>
             <tbody>
-              {reportPacks.length === 0 ? <tr><td colSpan={6} className="text-center">No report packs in this period</td></tr> : reportPacks.map((pack) => (
+              {reportPacks.length === 0 ? <tr><td colSpan={7} className="text-center">No report packs in this period</td></tr> : reportPacks.map((pack) => (
                 <ReportPackRow
                   key={pack.id}
                   pack={pack}

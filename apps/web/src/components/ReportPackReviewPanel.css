@@ -29,7 +29,6 @@
 .report-review-source span { display: block; color: var(--color-text-secondary, #94a3b8); font-size: 12px; }
 .report-review-source strong { display: block; margin-top: 3px; font-size: 18px; }
 .report-review-source-note { margin: 7px 0 16px; color: var(--color-text-secondary, #94a3b8); font-size: 12px; }
-
 .report-review-form { display: grid; grid-template-columns: 1fr 1fr; gap: 15px 18px; }
 .report-review-form label { display: grid; align-content: start; gap: 6px; min-width: 0; color: var(--color-text-primary, #e2e8f0); font-size: 13px; font-weight: 600; }
 .report-review-form label:first-child { grid-column: 1 / -1; }

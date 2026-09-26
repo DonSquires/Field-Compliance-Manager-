@@ -1,5 +1,6 @@
 import { useEffect, useState, type FormEvent } from 'react';
 import { FileCheck2, ShieldCheck } from 'lucide-react';
+import { CustomReportSnapshot } from './CustomReportSnapshot';
 import { supabase } from '../lib/supabase';
 import './ReportPackReviewPanel.css';
 
@@ -13,6 +14,8 @@ export interface ReportPackEditorial {
 export interface ReviewableReportPack {
   id: string;
   template_code: string;
+  report_kind: 'monthly' | 'custom';
+  report_scope: Record<string, unknown>;
   period_start: string;
   period_end: string;
   status: string;
@@ -85,11 +88,12 @@ export function ReportPackReviewPanel({ pack, onClose, onSaved }: ReportPackRevi
       return;
     }
     const result = data as unknown as ReviewResult;
-    const message = action === 'save'
-      ? `Draft review saved for ${pack.agreementName}.`
-      : result.delivery_channel === 'portal'
+    let message = `Draft review saved for ${pack.agreementName}.`;
+    if (action === 'publish') {
+      message = result.delivery_channel === 'portal'
         ? `Reviewed report published to ${pack.agreementName}'s live client portal.`
         : `Reviewed report approved for email delivery to ${pack.agreementName}.`;
+    }
     await onSaved(message);
     setSavingAction(null);
   };
@@ -115,13 +119,17 @@ export function ReportPackReviewPanel({ pack, onClose, onSaved }: ReportPackRevi
       )}
       {error && <div className="alert alert-error" role="alert">{error}</div>}
 
-      <div className="report-review-source" aria-label="Generated source metrics">
-        <div><span>SLA met</span><strong>{numberFrom(pack.data, 'slaMet')}</strong></div>
-        <div><span>SLA breached</span><strong>{numberFrom(pack.data, 'slaBreached')}</strong></div>
-        <div><span>Incidents</span><strong>{numberFrom(pack.data, 'incidentsTotal')}</strong></div>
-        <div><span>Checkpoint visits</span><strong>{numberFrom(pack.data, 'checkpointVisits')}</strong></div>
-        <div><span>Breach alerts</span><strong>{numberFrom(pack.data, 'breachAlerts')}</strong></div>
-      </div>
+      {pack.report_kind === 'custom' ? (
+        <CustomReportSnapshot data={pack.data} reportScope={pack.report_scope} idPrefix={`report-${pack.id}`} />
+      ) : (
+        <div className="report-review-source" aria-label="Generated source metrics">
+          <div><span>SLA met</span><strong>{numberFrom(pack.data, 'slaMet')}</strong></div>
+          <div><span>SLA breached</span><strong>{numberFrom(pack.data, 'slaBreached')}</strong></div>
+          <div><span>Incidents</span><strong>{numberFrom(pack.data, 'incidentsTotal')}</strong></div>
+          <div><span>Checkpoint visits</span><strong>{numberFrom(pack.data, 'checkpointVisits')}</strong></div>
+          <div><span>Breach alerts</span><strong>{numberFrom(pack.data, 'breachAlerts')}</strong></div>
+        </div>
+      )}
       <p className="report-review-source-note">These values come from governed operational records and cannot be edited here.</p>
 
       <form className="report-review-form" onSubmit={saveDraft}>

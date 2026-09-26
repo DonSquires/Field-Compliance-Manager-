@@ -1,0 +1,106 @@
+const assert = require('node:assert/strict');
+const fs = require('node:fs');
+const path = require('node:path');
+const test = require('node:test');
+
+const migration = fs.readFileSync(path.resolve(__dirname, '../supabase/migrations/20260927010000_govern_custom_report_builder.sql'), 'utf8');
+const builder = fs.readFileSync(path.resolve(__dirname, '../apps/web/src/components/CustomReportBuilder.tsx'), 'utf8');
+const snapshot = fs.readFileSync(path.resolve(__dirname, '../apps/web/src/components/CustomReportSnapshot.tsx'), 'utf8');
+const hub = fs.readFileSync(path.resolve(__dirname, '../apps/web/src/pages/ReportsHubPage.tsx'), 'utf8');
+const pdf = fs.readFileSync(path.resolve(__dirname, '../supabase/functions/generate-report-pack-pdf/index.ts'), 'utf8');
+const email = fs.readFileSync(path.resolve(__dirname, '../supabase/functions/send-report-pack/index.ts'), 'utf8');
+
+test('custom report generation is agreement anchored and provider-admin governed', () => {
+  assert.match(migration, /report_kind in \('monthly', 'custom'\)/);
+  assert.match(migration, /report_scope->>'match_semantics' = 'or_within_dimensions_and_across_dimensions'/);
+  assert.match(migration, /report_scope->>'privacy_tier' in \('operational_metadata', 'personal', 'sensitive_personal'\)/);
+  assert.match(migration, /agreement\.invitation_status = 'accepted'/);
+  assert.match(migration, /not public\.is_report_provider_custodian_for_org\(v_agreement\.provider_organization_id\)/);
+  assert.match(migration, /create or replace function public\.report_provider_custodian_for_actor/);
+  assert.match(migration, /\) is true\)\s*\)\s*\);/);
+  assert.match(migration, /drop policy if exists monthly_report_packs_insert/);
+  assert.match(migration, /drop policy if exists monthly_report_packs_update/);
+  assert.match(migration, /revoke insert, update, delete on table public\.monthly_report_packs from anon, authenticated/);
+  assert.match(migration, /Selected Site or Zone is outside this agreement/);
+  assert.match(migration, /Selected person is outside this agreement and reporting period/);
+  assert.match(migration, /Selected vehicle is outside this agreement and reporting period/);
+  assert.match(migration, /Custom report scope exceeds 1000 observations/);
+  assert.match(migration, /client_profile\.role = 'client_admin'/);
+  assert.match(migration, /client_profile\.id = auth\.uid\(\)[\s\S]+client_profile\.organization_id = agreement\.client_organization_id/);
+  assert.match(migration, /array_position\(v_sections, 'incidents'\) is not null then 'sensitive_personal'/);
+  assert.match(migration, /create or replace function public\.can_read_current_report_pack_pdf/);
+  assert.match(migration, /report_pack\.pdf_source_updated_at = report_pack\.updated_at/);
+  assert.match(migration, /public\.can_read_current_report_pack_pdf\(storage\.objects\.name\)/);
+  assert.match(migration, /old\.status = 'sent' and new is distinct from old/);
+  assert.match(migration, /create trigger prevent_sent_report_pack_delete/);
+  assert.match(migration, /create or replace function public\.claim_report_pack_email_delivery/);
+  assert.match(migration, /create or replace function public\.finalize_report_pack_email_delivery/);
+  assert.match(migration, /create or replace function public\.record_report_pack_pdf/);
+  assert.match(migration, /create or replace function public\.custom_report_source_snapshot/);
+  assert.match(migration, /with scoped_observations as not materialized/);
+  assert.match(migration, /limited_observations as materialized/);
+  assert.match(migration, /alert\.organization_id = p_provider_organization_id/);
+  assert.match(migration, /'site_name', alert\.site_name/);
+  assert.match(migration, /observation\.zone_id,[\s\S]+observation\.zone_name/);
+  assert.match(migration, /visit\.route_checkpoint_id/);
+  assert.match(migration, /route\.site_id/);
+  assert.match(migration, /grant execute on function public\.record_report_pack_pdf[\s\S]+to service_role/);
+  assert.match(migration, /Personal and sensitive reports require an active client administrator before publication/);
+  assert.match(migration, /Personal report email recipient must be an active client administrator/);
+  assert.match(migration, /limit 1001/g);
+  assert.match(migration, /array_position\(v_sections, 'observations'\) is not null and v_observation_count > 1000/);
+  assert.match(migration, /grant execute on function public\.generate_custom_report_pack[\s\S]+to authenticated;/);
+});
+
+test('person and vehicle labels use redacted projections and entity filters only traverse linked observations', () => {
+  assert.match(migration, /from public\.canonical_person_public person/);
+  assert.match(migration, /from public\.canonical_vehicle_public vehicle/);
+  assert.match(migration, /observation\.canonical_person_id = any\(p_person_ids\)/);
+  assert.match(migration, /observation\.canonical_vehicle_id = any\(p_vehicle_ids\)/);
+  assert.match(migration, /'site_name', observation\.site_name/);
+  assert.match(migration, /'person_name', observation\.person_name/);
+  assert.match(migration, /'vehicle_plate', observation\.vehicle_plate/);
+  assert.match(migration, /Incident and checkpoint sections do not have a governed person or vehicle link/);
+  assert.doesNotMatch(migration, /date_of_birth|registered_owner_name|homeless_notes/);
+});
+
+test('the report hub builds custom drafts and reuses the existing review queue', () => {
+  assert.match(builder, /rpc\('get_custom_report_scope_options'/);
+  assert.match(builder, /rpc\('generate_custom_report_pack'/);
+  assert.match(builder, /Any selected Site or Zone, and any selected Person, and any selected Vehicle/);
+  assert.match(builder, /agreement\.invitation_status === 'accepted' && agreement\.agreement_type === 'operational'/);
+  assert.match(builder, /No accepted operational agreement is available/);
+  assert.match(builder, /private identity attributes are excluded/i);
+  assert.match(hub, /<CustomReportBuilder/);
+  assert.match(hub, /pack\.report_kind === 'custom'/);
+  assert.match(hub, /<ReportPackReviewPanel/);
+  assert.match(snapshot, /places\.join\(' · '\)/);
+  assert.match(snapshot, /<th>Date<\/th><th>Place<\/th><th>Vehicle/);
+  assert.match(fs.readFileSync(path.resolve(__dirname, '../apps/web/src/pages/ClientPortalPage.tsx'), 'utf8'), /<CustomReportSnapshot/);
+});
+
+test('PDF and email artifacts carry the frozen custom scope', () => {
+  assert.match(pdf, /Frozen report scope/);
+  assert.match(pdf, /report_scope/);
+  assert.match(pdf, /fcm-report-pack-pdf-lib-a4-v4/);
+  assert.match(pdf, /widthOfTextAtSize/);
+  assert.doesNotMatch(pdf, /truncateCodePoints/);
+  assert.match(pdf, /provider-private draft for review/);
+  assert.match(pdf, /published in the authorized client portal/);
+  assert.match(pdf, /prepared for approved primary-contact email delivery/);
+  assert.doesNotMatch(pdf, /remain available in the client portal/);
+  assert.match(pdf, /profile\.deactivated_at/);
+  assert.match(pdf, /mayRender !== true/);
+  assert.match(pdf, /rpc\('record_report_pack_pdf'/);
+  assert.match(pdf, /remove\(\[pack\.pdf_path\]\)/);
+  assert.match(email, /Frozen report scope/);
+  assert.match(email, /report_kind, report_scope/);
+  assert.match(email, /pack\.pdf_source_updated_at !== pack\.updated_at/);
+  assert.match(email, /callerProfile\.deactivated_at/);
+  assert.match(email, /maySend !== true/);
+  assert.match(email, /rpc\('claim_report_pack_email_delivery'/);
+  assert.match(email, /p_requested_recipient: requestedRecipient \|\| null/);
+  assert.match(email, /rpc\('finalize_report_pack_email_delivery'/);
+  assert.match(email, /monthly_report_pack_failed_delivery_pdf_cleanup_failed/);
+  assert.match(email, /remove\(\[pack\.pdf_path\]\)/);
+});

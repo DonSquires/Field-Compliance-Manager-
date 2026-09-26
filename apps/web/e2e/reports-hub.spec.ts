@@ -15,7 +15,7 @@ test('administrator reviews and publishes a tenant report pack to the live clien
   await page.getByRole('button', { name: 'Generate report drafts' }).click();
 
   await expect(page.getByRole('status')).toContainText('1 report packs generated for the selected period.');
-  const packs = page.getByRole('heading', { name: 'Monthly Report Packs (1)' }).locator('..');
+  const packs = page.getByRole('heading', { name: 'Report Packs (1)' }).locator('..');
   await expect(packs.getByText('Civic Events Compliance Services')).toBeVisible();
   await expect(packs.getByText('Needs review', { exact: true })).toBeVisible();
   await page.getByRole('button', { name: 'Review', exact: true }).click();
@@ -30,4 +30,43 @@ test('administrator reviews and publishes a tenant report pack to the live clien
   expect(await page.evaluate(() => document.documentElement.scrollWidth <= window.innerWidth)).toBe(true);
   expect(browserErrors, browserErrors.join('\n')).toEqual([]);
   await testInfo.attach('report-review-published', { body: await page.screenshot({ fullPage: true }), contentType: 'image/png' });
+});
+
+test('administrator builds a mixed-scope custom report and reviews the frozen snapshot', async ({ page }, testInfo) => {
+  const browserErrors = monitorBrowserErrors(page);
+  await signInAsAdmin(page, '/admin/reports');
+
+  await page.getByLabel('Agreement').selectOption('24242424-2424-4424-8424-242424242424');
+  await page.getByRole('button', { name: 'Build custom report' }).click();
+  await expect(page.getByRole('heading', { name: 'Build a governed report draft' })).toBeVisible();
+  await expect(page.getByText('All agreement activity')).toBeVisible();
+
+  await page.getByRole('checkbox', { name: /Civic Events Centre/ }).check();
+  await page.getByRole('checkbox', { name: 'Civic Event Operations Zone' }).check();
+  await page.getByRole('checkbox', { name: 'Casey Morgan' }).check();
+  await page.getByRole('checkbox', { name: /FCM123/ }).check();
+  await expect(page.getByText('4 scoped records')).toBeVisible();
+  await expect(page.getByText(/private identity attributes are excluded/i)).toBeVisible();
+  await expect(page.getByRole('checkbox', { name: 'Incident register' })).toBeDisabled();
+  await expect(page.getByRole('checkbox', { name: 'Checkpoint visits' })).toBeDisabled();
+
+  await page.getByLabel('Report title').fill('Selected people, vehicles, and places');
+  await testInfo.attach('custom-report-builder', { body: await page.screenshot({ fullPage: true }), contentType: 'image/png' });
+  await page.getByRole('button', { name: 'Create review draft' }).click();
+
+  await expect(page.getByRole('status')).toContainText('Custom report draft created with 2 observations and 1 linked breaches.');
+  await expect(page.getByRole('heading', { name: 'Report Packs (1)' })).toBeVisible();
+  await expect(page.getByText('Custom', { exact: true })).toBeVisible();
+  await page.getByRole('button', { name: 'Review', exact: true }).click();
+  await expect(page.getByRole('definition').filter({ hasText: 'Civic Events Centre' })).toBeVisible();
+  await expect(page.getByRole('definition').filter({ hasText: 'Casey Morgan' })).toBeVisible();
+  await expect(page.getByRole('definition').filter({ hasText: 'FCM123' })).toBeVisible();
+  await expect(page.getByRole('heading', { name: 'Frozen source detail' })).toBeVisible();
+  await expect(page.getByRole('heading', { name: 'Observations (1)' })).toBeVisible();
+  await expect(page.getByText('Non-compliant · Follow-up required')).toBeVisible();
+  await page.getByRole('button', { name: 'Publish reviewed report' }).click();
+  await expect(page.getByRole('status')).toContainText('published to Civic Events Compliance Services');
+
+  expect(await page.evaluate(() => document.documentElement.scrollWidth <= window.innerWidth)).toBe(true);
+  expect(browserErrors, browserErrors.join('\n')).toEqual([]);
 });

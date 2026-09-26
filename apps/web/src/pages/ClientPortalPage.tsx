@@ -4,7 +4,6 @@ import {
   Building2,
   CalendarRange,
   CheckCircle2,
-  ClipboardList,
   Eye,
   FileText,
   MapPin,
@@ -16,6 +15,7 @@ import {
 import { useAuth } from '../context/AuthContext';
 import { agreementOptionSuffix } from '../lib/agreementTerm';
 import { ClientPeoplePanel } from '../components/ClientPeoplePanel';
+import { CustomReportSnapshot } from '../components/CustomReportSnapshot';
 import { useServiceRelationships } from '../context/ServiceRelationshipContext';
 import type { ClientPortalPage } from '../lib/clientPortalAccess';
 import { getClientPortalPages } from '../lib/clientPortalAccess';
@@ -38,6 +38,9 @@ interface ClientObservation {
 interface MonthlyReportPack {
   id: string;
   template_code: string;
+  report_kind: 'monthly' | 'custom';
+  report_scope: Record<string, unknown>;
+  data: Record<string, unknown> | null;
   period_start: string;
   period_end: string;
   status: 'draft' | 'generated' | 'sent' | 'failed';
@@ -48,11 +51,13 @@ interface MonthlyReportPack {
     follow_up?: string;
   } | null;
   generated_at: string | null;
+  updated_at: string;
   published_at: string | null;
   delivery_channel: 'portal' | 'email' | null;
   sent_at: string | null;
   pdf_path: string | null;
   pdf_sha256: string | null;
+  pdf_source_updated_at: string | null;
   delivery_error: string | null;
 }
 
@@ -123,7 +128,7 @@ export function ClientPortalPage({ page }: { page: ClientPortalPage }) {
       const reportPromise = allowedPages.has('reports')
         ? supabase
             .from('monthly_report_packs')
-            .select('id, template_code, period_start, period_end, status, editorial, generated_at, published_at, delivery_channel, sent_at, pdf_path, pdf_sha256, delivery_error')
+            .select('id, template_code, report_kind, report_scope, data, period_start, period_end, status, editorial, generated_at, updated_at, published_at, delivery_channel, sent_at, pdf_path, pdf_sha256, pdf_source_updated_at, delivery_error')
             .eq('service_agreement_id', agreement.id)
             .order('period_end', { ascending: false })
             .limit(24)
@@ -435,7 +440,7 @@ function ReportRow({ report }: { report: MonthlyReportPack }) {
   const [opening, setOpening] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const openPdf = async () => {
-    if (!report.pdf_path) return;
+    if (!report.pdf_path || report.pdf_source_updated_at !== report.updated_at) return;
     setOpening(true);
     setError(null);
     const { data, error: signedError } = await supabase.storage.from('bob-uploads').createSignedUrl(report.pdf_path, 900);
@@ -444,17 +449,22 @@ function ReportRow({ report }: { report: MonthlyReportPack }) {
     setOpening(false);
   };
   const title = report.editorial?.title ?? `${report.template_code.replaceAll('_', ' ')} report`;
+  const periodStartLabel = new Date(report.period_start + 'T00:00:00').toLocaleDateString('en-NZ');
+  const periodEndLabel = new Date(report.period_end + 'T00:00:00').toLocaleDateString('en-NZ');
+  const periodLabel = `${periodStartLabel} to ${periodEndLabel}`;
   const availableLabel = report.status === 'sent' ? 'Issued report' : 'Available live';
+  const pdfIsCurrent = Boolean(report.pdf_path && report.pdf_source_updated_at === report.updated_at);
   let publishedLabel = 'Published report';
   if (report.sent_at) publishedLabel = `Sent ${new Date(report.sent_at).toLocaleDateString('en-NZ')}`;
   else if (report.published_at) publishedLabel = `Published ${new Date(report.published_at).toLocaleDateString('en-NZ')}`;
   return (
     <article className="client-report-row">
       <span><CalendarRange size={19} /></span>
-      <div className="client-report-copy"><strong>{title}</strong><small>{new Date(`${report.period_start}T00:00:00`).toLocaleDateString('en-NZ', { month: 'long', year: 'numeric' })}</small>{report.editorial?.executive_summary && <p>{report.editorial.executive_summary}</p>}</div>
+      <div className="client-report-copy"><strong>{title}</strong><small>{report.report_kind === 'custom' ? `Custom report · ${periodLabel}` : periodLabel}</small>{report.editorial?.executive_summary && <p>{report.editorial.executive_summary}</p>}</div>
       <div><strong>{availableLabel}</strong><small>{publishedLabel}</small></div>
-      {report.pdf_path && <button type="button" onClick={() => void openPdf()} disabled={opening} title="Open report PDF"><FileText size={17} aria-hidden="true" /><span className="sr-only">{opening ? 'Opening report PDF' : 'Open report PDF'}</span></button>}
+      {pdfIsCurrent && <button type="button" onClick={() => void openPdf()} disabled={opening} title="Open report PDF"><FileText size={17} aria-hidden="true" /><span className="sr-only">{opening ? 'Opening report PDF' : 'Open report PDF'}</span></button>}
       <CheckCircle2 size={18} className="is-success" aria-label="Published report" />
+      {report.report_kind === 'custom' && <details className="client-custom-report"><summary>View report contents</summary><CustomReportSnapshot data={report.data} reportScope={report.report_scope} idPrefix={`client-report-${report.id}`} /></details>}
       {error && <small role="alert">{error}</small>}
     </article>
   );
