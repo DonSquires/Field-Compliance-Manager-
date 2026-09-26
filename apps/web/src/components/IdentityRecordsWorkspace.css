@@ -371,6 +371,40 @@
   border: 1px solid #cad8d3;
   background: #f7faf9;
 }
+.identity-resolution-panel {
+  display: grid;
+  gap: 10px;
+  margin: 0 18px 16px;
+  padding: 12px;
+  border: 1px solid #9dbdb2;
+  background: #edf6f2;
+}
+.identity-resolution-panel > p {
+  margin: 0;
+  color: #526d64;
+  font-size: 12px;
+}
+.identity-resolution-panel label {
+  display: grid;
+  gap: 5px;
+}
+.identity-resolution-panel label > span {
+  color: #48675d;
+  font-size: 11px;
+  text-transform: uppercase;
+}
+.identity-resolution-panel button {
+  display: inline-flex;
+  align-items: center;
+  gap: 7px;
+  width: max-content;
+  padding: 9px 12px;
+  border: 1px solid #21694f;
+  border-radius: 5px;
+  color: #21694f;
+  background: #fff;
+  font-weight: 700;
+}
 .identity-candidate-matches > p {
   margin: 3px 0 9px;
   color: #687a74;

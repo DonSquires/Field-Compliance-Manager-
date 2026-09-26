@@ -10,6 +10,7 @@ const securityLicenceMigration = read('supabase/migrations/20260926140000_securi
 const deterministicTypesMigration = read('supabase/migrations/20260927020000_deterministic_identity_document_types.sql');
 const canonicalIncidentMigration = read('supabase/migrations/20260927030000_canonical_staff_and_incident_people.sql');
 const incidentEvidenceMigration = read('supabase/migrations/20260927040000_incident_identity_evidence_workflow.sql');
+const identityResolutionMigration = read('supabase/migrations/20260927050000_resolve_identity_to_existing_person.sql');
 const api = read('services/fcm-api/server.js');
 const dockerfile = read('services/fcm-api/Dockerfile');
 const inferenceEdge = read('supabase/functions/bob-inference/index.ts');
@@ -137,6 +138,16 @@ test('assigned officers capture incident ID evidence and admins hand staff crede
   assert.match(officerFieldReportPage, /remains unverified until approval/);
 });
 
+test('admins resolve temporary incident identities to an existing canonical person', () => {
+  assert.match(identityResolutionMigration, /FUNCTION public\.get_identity_resolution_candidates/);
+  assert.match(identityResolutionMigration, /FUNCTION public\.resolve_identity_document_person/);
+  assert.match(identityResolutionMigration, /UPDATE public\.person_identity_face_proposals SET person_record_id=v_target\.id/);
+  assert.match(identityResolutionMigration, /UPDATE public\.cctv_entity_observations SET person_record_id=v_target\.id,canonical_person_id=v_target_canonical/);
+  assert.match(identityResolutionMigration, /UPDATE public\.face_observations SET person_record_id=v_target\.id/);
+  assert.match(identityResolutionMigration, /UPDATE public\.observations SET person_record_id=v_target\.id,canonical_person_id=v_target_canonical/);
+  assert.match(identityResolutionMigration, /identity_document_person_resolved/);
+});
+
 test('People and Access exposes manual people, vehicles, and human-reviewed ID intake', () => {
   assert.match(identityPage, /Identity records/);
   assert.match(identityPage, /<IdentityRecordsWorkspace/);
@@ -166,6 +177,9 @@ test('People and Access exposes manual people, vehicles, and human-reviewed ID i
   assert.match(workspace, /3\. Incident involvement/);
   assert.match(workspace, /record_incident_person_identity/);
   assert.match(workspace, /Link person to incident/);
+  assert.match(workspace, /Resolve to an existing person/);
+  assert.match(workspace, /resolve_identity_document_person/);
+  assert.match(workspace, /Use existing person/);
   assert.match(workspace, /purpose: "identity_document"/);
   assert.match(workspace, /from\("identity-evidence"\)/);
   assert.match(workspace, /Driver licence expiry/);

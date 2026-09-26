@@ -81,6 +81,14 @@ type IncidentOption = {
   status: string;
   occurred_at: string;
 };
+type ResolutionCandidate = {
+  person_record_id: string;
+  display_name: string | null;
+  review_state: string;
+  staff_profile_id: string | null;
+  score: number;
+  basis: string;
+};
 type DocumentTypeDefinition = {
   document_kind: string;
   display_name: string;
@@ -366,6 +374,9 @@ export function IdentityRecordsWorkspace({
   const [documentFields, setDocumentFields] =
     useState<PersonForm>(EMPTY_PERSON);
   const [documentReviewNote, setDocumentReviewNote] = useState("");
+  const [resolutionCandidates, setResolutionCandidates] = useState<ResolutionCandidate[]>([]);
+  const [resolutionTargetId, setResolutionTargetId] = useState("");
+  const [resolutionReason, setResolutionReason] = useState("");
   const [incidents, setIncidents] = useState<IncidentOption[]>([]);
   const [documentTypes, setDocumentTypes] = useState<DocumentTypeDefinition[]>(
     FALLBACK_DOCUMENT_TYPES,
@@ -680,6 +691,9 @@ export function IdentityRecordsWorkspace({
   const selectIdentityDocument = async (document: IdentityDocument) => {
     setSelectedDocument(document);
     setDocumentReviewNote("");
+    setResolutionCandidates([]);
+    setResolutionTargetId("");
+    setResolutionReason("");
     const proposed =
       document.extracted_fields?.approved ??
       document.extracted_fields?.proposed ??
@@ -693,6 +707,17 @@ export function IdentityRecordsWorkspace({
         .from(document.storage_bucket)
         .createSignedUrl(document.storage_path, 600);
       if (!signed.error) setSourceUrl(signed.data.signedUrl);
+    }
+    if (document.review_state === "manual_review_required") {
+      const candidates = await supabase.rpc("get_identity_resolution_candidates", {
+        p_identity_document_id: document.id,
+      });
+      if (candidates.error) setError(candidates.error.message);
+      else {
+        const rows = (candidates.data ?? []) as ResolutionCandidate[];
+        setResolutionCandidates(rows);
+        setResolutionTargetId(rows[0]?.person_record_id ?? "");
+      }
     }
   };
 
@@ -720,6 +745,57 @@ export function IdentityRecordsWorkspace({
       setSelectedDocument(null);
       setSourceUrl(null);
       await load(search);
+    }
+    setBusy(null);
+  };
+
+  const resolveDocumentPerson = async () => {
+    if (!selectedDocument || !resolutionTargetId || !resolutionReason.trim())
+      return;
+    setBusy("resolve-person");
+    setError(null);
+    setNotice(null);
+    const { error: resolutionError } = await supabase.rpc(
+      "resolve_identity_document_person",
+      {
+        p_identity_document_id: selectedDocument.id,
+        p_target_person_record_id: resolutionTargetId,
+        p_resolution_reason: resolutionReason.trim(),
+      },
+    );
+    if (resolutionError) setError(resolutionError.message);
+    else {
+      const next = await load(search);
+      const target = next?.people.find(
+        (record) => record.person_record_id === resolutionTargetId,
+      );
+      const movedDocument = next?.documents.find(
+        (document) => document.id === selectedDocument.id,
+      );
+      if (target) {
+        setSelectedPersonId(target.person_record_id);
+        setPerson(personForm(target));
+      }
+      if (movedDocument) {
+        setSelectedDocument(movedDocument);
+        const proposed =
+          movedDocument.extracted_fields.approved ??
+          movedDocument.extracted_fields.proposed ??
+          {};
+        setDocumentFields(
+          proposedPersonForm(
+            target ? personForm(target) : person,
+            proposed,
+            movedDocument.document_kind,
+          ),
+        );
+      }
+      setResolutionCandidates([]);
+      setResolutionTargetId("");
+      setResolutionReason("");
+      setNotice(
+        "Identity evidence moved to the existing canonical person. Complete the source review before approval.",
+      );
     }
     setBusy(null);
   };
@@ -1817,6 +1893,90 @@ export function IdentityRecordsWorkspace({
                   </label>
                 </div>
               </div>
+              {selectedDocument.review_state === "manual_review_required" &&
+                registry.people.some(
+                  (record) =>
+                    record.person_record_id !== selectedDocument.person_record_id,
+                ) && (
+                  <div className="identity-resolution-panel">
+                    <strong>Resolve to an existing person</strong>
+                    <p>
+                      Compare the source and identity fields first. This moves
+                      the pending evidence, incident involvement, and CCTV links
+                      onto the selected canonical person.
+                    </p>
+                    <label>
+                      <span>Existing person</span>
+                      <select
+                        value={resolutionTargetId}
+                        onChange={(event) =>
+                          setResolutionTargetId(event.target.value)
+                        }
+                      >
+                        <option value="">Select an existing person</option>
+                        {resolutionCandidates.length > 0 && (
+                          <optgroup label="Suggested matches">
+                            {resolutionCandidates.map((candidate) => (
+                              <option
+                                value={candidate.person_record_id}
+                                key={candidate.person_record_id}
+                              >
+                                {candidate.display_name || "Unnamed person"} · {Math.round(candidate.score * 100)}%
+                                {candidate.staff_profile_id ? " · Staff" : ""}
+                              </option>
+                            ))}
+                          </optgroup>
+                        )}
+                        <optgroup label="Other people">
+                          {registry.people
+                            .filter(
+                              (record) =>
+                                record.person_record_id !==
+                                  selectedDocument.person_record_id &&
+                                !resolutionCandidates.some(
+                                  (candidate) =>
+                                    candidate.person_record_id ===
+                                    record.person_record_id,
+                                ),
+                            )
+                            .map((record) => (
+                              <option
+                                value={record.person_record_id}
+                                key={record.person_record_id}
+                              >
+                                {record.display_name || "Unnamed person"}
+                              </option>
+                            ))}
+                        </optgroup>
+                      </select>
+                    </label>
+                    <label>
+                      <span>Resolution reason</span>
+                      <textarea
+                        rows={2}
+                        value={resolutionReason}
+                        onChange={(event) =>
+                          setResolutionReason(event.target.value)
+                        }
+                        placeholder="Record what proves these are the same person"
+                      />
+                    </label>
+                    <button
+                      type="button"
+                      onClick={() => void resolveDocumentPerson()}
+                      disabled={
+                        busy !== null ||
+                        !resolutionTargetId ||
+                        !resolutionReason.trim()
+                      }
+                    >
+                      <Link2 size={15} />
+                      {busy === "resolve-person"
+                        ? "Resolving"
+                        : "Use existing person"}
+                    </button>
+                  </div>
+                )}
               {(selectedDocument.extracted_fields.candidate_matches?.length ??
                 0) > 0 && (
                 <div className="identity-candidate-matches">
