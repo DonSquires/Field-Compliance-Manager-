@@ -80,7 +80,7 @@ async function runBackendHandoff({
 
   const artifactDir = fs.mkdtempSync(path.join(os.tmpdir(), 'bob-backend-worker-'));
   fs.chmodSync(artifactDir, 0o755);
-  fs.writeFileSync(path.join(artifactDir, 'input.patch'), proposal.patch, { mode: 0o644 });
+  fs.writeFileSync(path.join(artifactDir, 'input.patch'), proposal.patch.endsWith('\n') ? proposal.patch : `${proposal.patch}\n`, { mode: 0o644 });
   let lease;
   let heartbeatTimer;
   let heartbeatError = null;

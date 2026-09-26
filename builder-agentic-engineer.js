@@ -337,7 +337,8 @@ function buildProposal({ workspacePath, lane, tools, args }) {
   const modified = git(workspacePath, ['diff', '--cached', '--name-only', '--diff-filter=MD']).split('\n').filter(Boolean);
   const badMigrations = modified.filter((file) => isMigrationPath(file));
   if (badMigrations.length) return { error: `finish refused: migrations may only be added, never modified or deleted: ${badMigrations.join(', ')}` };
-  const patch = git(workspacePath, ['diff', '--cached', '--no-color']);
+  // git() trims its output; a unified diff whose last line is unterminated is "corrupt" to git apply.
+  const patch = `${git(workspacePath, ['diff', '--cached', '--no-color'])}\n`;
   if (Buffer.byteLength(patch) > DEFAULT_LIMITS.maxPatchBytes) return { error: 'finish refused: patch exceeds 2 MB' };
   if (/GIT binary patch|Binary files .* differ/m.test(patch)) return { error: 'finish refused: binary changes are not allowed' };
   const summary = String(args.summary ?? '').trim();

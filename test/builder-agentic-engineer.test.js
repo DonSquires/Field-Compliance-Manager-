@@ -113,6 +113,11 @@ test('agentic engineer explores, fixes the bug, runs the tests, and hands over a
   assert.deepEqual(result.proposal.changed_files, ['lib/sum.js']);
   assert.match(result.proposal.patch, /-module\.exports = \{ sum: \(a, b\) => a - b \};/);
   assert.match(result.proposal.patch, /\+module\.exports = \{ sum: \(a, b\) => a \+ b \};/);
+  assert.ok(result.proposal.patch.endsWith('\n'), 'patch keeps its terminating newline (git apply rejects an unterminated last line as corrupt)');
+  // The handed-over patch must be applicable, byte for byte, to a clean checkout of the pinned commit.
+  const patchFile = path.join(repo.root, 'proposal.patch');
+  fs.writeFileSync(patchFile, result.proposal.patch);
+  assert.equal(repo.git(['apply', '--check', '--whitespace=error-all', patchFile]), '');
   assert.equal(result.proposal.lane, 'backend');
   // Every turn went to the gateway as a multi-turn request at high effort with the conversation attached.
   assert.ok(seen.every((request) => Array.isArray(request.request.messages) && request.request.reasoning_effort === 'high'));
