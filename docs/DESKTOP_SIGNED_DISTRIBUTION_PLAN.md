@@ -116,7 +116,10 @@ Owner direction 2026-09-19: the signing material belongs in Supabase, not GitHub
    GPU: the LGPL sidecar has no `libx264`, so the encoder chain is now NVENC → AMF → Quick Sync → Media
    Foundation → OpenH264): SHA-256 `4abd0d3df87d87af33aa647daebc8bc4cb744051c7e4ff6f301f055b8f974cfb`
    (3,150,640 bytes), verified from the public URL with a DigiCert timestamp; the web app's download link points
-   at 0.4.8.
+  at 0.4.8. **0.4.9 signed the same way on 2026-09-26** (JPEG/PNG/WebP/BMP/TIFF evidence with provisional
+  face and plate inference, direct Site/Zone selection, and selectable weekday/date timeline): SHA-256
+  `251947e908fe11f162b21d69269208c55199926c54d47bb98f885e87960dcf5b` (3,150,240 bytes), verified from the
+  public URL with a DigiCert timestamp; the web app's download link points at 0.4.9.
 
    **Toolchain note (2026-09-20).** The signer is a self-signed *end-entity* certificate (CA:FALSE, keyUsage
    digitalSignature). OpenSSL 1.1.1 will not accept such a certificate as its own trust anchor and reports
