@@ -454,7 +454,8 @@ async function runAgenticEngineer({
   previousFailure = null,
   inputArtifactIds = [],
   limits = DEFAULT_LIMITS,
-  modelName = process.env.BOB_BUILDER_MODEL || 'gpt-5.4',
+  // null = the outsourced tier serves its strongest available allowlisted model (BOB_OPENAI_MODELS, best first).
+  modelName = process.env.BOB_BUILDER_MODEL || null,
   callModel = callModelGateway,
   // In-house first: resume the chain past a provider whose earlier attempt failed verification.
   startAfterProvider = null,

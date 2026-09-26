@@ -162,6 +162,7 @@ function boundedStringArray(value, maximum = 100) {
 async function builderRuntimeContext(body, source = { sourceDir: assessmentRoot, targetSha: null }) {
   const buildMap = source.targetSha ? collectRepositoryContext(source) : null;
   const liveContext = builderSupabase ? await collectBuilderLiveContext(builderSupabase) : null;
+  const providers = await modelHealth(modelGatewayConfig).catch(() => ({}));
   return {
     sourceDir: source.sourceDir,
     // The agentic engineer spawns the job worktree from the pinned shared checkout and reads the canon from the image copy.
@@ -170,7 +171,7 @@ async function builderRuntimeContext(body, source = { sourceDir: assessmentRoot,
     repoRoot: assessmentRoot,
     workerImage: builderWorkerImage,
     runnerId: builderRunnerId,
-    reviewerModelName: typeof body.reviewerModelName === 'string' && body.reviewerModelName.trim() ? body.reviewerModelName.slice(0, 200) : defaultReviewerModel(),
+    reviewerModelName: typeof body.reviewerModelName === 'string' && body.reviewerModelName.trim() ? body.reviewerModelName.slice(0, 200) : defaultReviewerModel(process.env, providers.openai?.installed ?? null),
     frontendFiles: boundedStringArray(body.frontendFiles, 30),
     backendFiles: boundedStringArray(body.backendFiles, 40),
     constraints: boundedStringArray(body.constraints, 100),

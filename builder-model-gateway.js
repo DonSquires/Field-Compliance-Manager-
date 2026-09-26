@@ -8,7 +8,9 @@ const ALLOWED_BUILDER_MODES = new Set([
   'code_reviewer',
   'release_engineer'
 ]);
-const REASONING_EFFORTS = new Set(['low', 'medium', 'high']);
+// 'xhigh' is the highest value the Chat Completions API accepts for current reasoning models
+// (probed 2026-09-26 against gpt-5.4 … gpt-6-*; 'max' is rejected).
+const REASONING_EFFORTS = new Set(['none', 'low', 'medium', 'high', 'xhigh']);
 // In-house first: the laptop GPU and the VPS Ollama are Bob's own compute; OpenAI is the
 // outsourced fallback for when Bob is stuck or the prompt does not fit a local context window.
 const PROVIDER_KINDS = Object.freeze({ openai: 'openai', ollama: 'ollama', gpu_workstation: 'ollama' });
@@ -35,7 +37,20 @@ function promptFitsProvider(input, providerConfig) {
 async function probeProvider(config, name, { fetchImpl = globalThis.fetch, now = Date.now } = {}) {
   const providerConfig = config[name];
   if (!providerConfig) return { name, configured: false, healthy: false, installed: [] };
-  if (providerConfig.kind === 'openai') return { name, configured: Boolean(providerConfig.apiKey), healthy: Boolean(providerConfig.apiKey), installed: [...providerConfig.models] };
+  if (providerConfig.kind === 'openai') {
+    if (!providerConfig.apiKey) return { name, configured: false, healthy: false, installed: [] };
+    const cached = healthCache.get(name);
+    if (cached && cached.until > now()) return { name, configured: true, healthy: cached.healthy, installed: cached.installed, cached: true };
+    // The account's model list decides which allowlisted model is real today; unreachable = assume the allowlist.
+    let installed = [];
+    try {
+      const response = await fetchImpl(`${providerConfig.baseUrl}/models`, { headers: { Authorization: `Bearer ${providerConfig.apiKey}` }, signal: AbortSignal.timeout(HEALTH_PROBE_TIMEOUT_MS * 3) });
+      const data = response.ok ? await response.json().catch(() => null) : null;
+      installed = Array.isArray(data?.data) ? data.data.map(model => String(model.id || '')).filter(Boolean) : [];
+    } catch { installed = []; }
+    healthCache.set(name, { healthy: true, installed, until: now() + (installed.length ? 10 * 60_000 : HEALTH_FAIL_TTL_MS) });
+    return { name, configured: true, healthy: true, installed, cached: false };
+  }
   if (!providerConfig.baseUrl) return { name, configured: false, healthy: false, installed: [] };
   const cached = healthCache.get(name);
   if (cached && cached.until > now()) return { name, configured: true, healthy: cached.healthy, installed: cached.installed, cached: true };
@@ -58,10 +73,9 @@ async function probeProvider(config, name, { fetchImpl = globalThis.fetch, now =
 function resolveProviderModel(config, name, requestedModel, installed = null) {
   const providerConfig = config[name];
   if (!providerConfig) return null;
-  const allowed = [...providerConfig.models];
   const available = model => !Array.isArray(installed) || installed.length === 0 || installed.includes(model) || installed.includes(`${model}:latest`);
   if (requestedModel && providerConfig.models.has(requestedModel) && available(requestedModel)) return requestedModel;
-  return allowed.find(available) || null;
+  return bestAvailableModel(providerConfig.models, installed);
 }
 
 async function modelHealth(config, options = {}) {
@@ -79,17 +93,31 @@ async function modelHealth(config, options = {}) {
 }
 
 function isReasoningModel(model) {
-  return /^(gpt-5|o[0-9])/i.test(String(model || ''));
+  return /^(gpt-[5-9]|o[0-9])/i.test(String(model || ''));
+}
+
+// Deterministic "best available": the allowlist is ordered strongest-first and the provider serves
+// the first entry it actually has (installed locally / listed by the OpenAI account).
+function bestAvailableModel(allowlist, installed = null) {
+  const available = model => !Array.isArray(installed) || installed.length === 0 || installed.includes(model) || installed.includes(`${model}:latest`);
+  return [...allowlist].find(available) || null;
 }
 
 // Independent AI review must come from a model other than the author's. Autonomous jobs
 // (opened by Bob) supply no reviewer, so pick one: BOB_BUILDER_REVIEWER_MODEL, else the first
-// allowlisted model that is not the author model; null when no distinct model is configured.
-function defaultReviewerModel(env = process.env) {
-  const author = String(env.BOB_BUILDER_MODEL || 'gpt-5.4').trim();
+// allowlisted (and available) model that is not the author model; null when none is distinct.
+function defaultReviewerModel(env = process.env, installed = null) {
+  const allowlist = [...parseModelAllowlist(env.BOB_OPENAI_MODELS, 'gpt-5.4,gpt-5.4-mini,gpt-4o-mini')];
+  const author = String(env.BOB_BUILDER_MODEL || bestAvailableModel(allowlist, installed) || allowlist[0] || '').trim();
   const explicit = String(env.BOB_BUILDER_REVIEWER_MODEL || '').trim();
   if (explicit && explicit !== author) return explicit;
-  return [...parseModelAllowlist(env.BOB_OPENAI_MODELS, 'gpt-5.4,gpt-5.4-mini,gpt-4o-mini')].find(model => model !== author) || null;
+  return bestAvailableModel(allowlist.filter(model => model !== author), installed);
+}
+
+function defaultAuthorModel(env = process.env, installed = null) {
+  const explicit = String(env.BOB_BUILDER_MODEL || '').trim();
+  if (explicit) return explicit;
+  return bestAvailableModel([...parseModelAllowlist(env.BOB_OPENAI_MODELS, 'gpt-5.4,gpt-5.4-mini,gpt-4o-mini')], installed) || 'gpt-5.4';
 }
 
 function createModelGatewayConfig(env = process.env) {
@@ -188,9 +216,9 @@ async function invokeBuilderModel({ input, config, fetchImpl = globalThis.fetch 
   if (!promptFitsProvider(input, providerConfig)) {
     return { status: 413, body: { error: `prompt exceeds the ${input.provider} context window (${providerConfig.numCtx} tokens)`, code: 'context_exceeded' } };
   }
-  const probe = providerConfig.kind === 'ollama' ? await probeProvider(config, input.provider, { fetchImpl }) : null;
-  if (probe && !probe.healthy) return { status: 503, body: { error: `${input.provider} provider is unreachable`, code: 'provider_unavailable' } };
-  const model = resolveProviderModel(config, input.provider, input.model, probe?.installed ?? null);
+  const probe = await probeProvider(config, input.provider, { fetchImpl });
+  if (providerConfig.kind === 'ollama' && !probe.healthy) return { status: 503, body: { error: `${input.provider} provider is unreachable`, code: 'provider_unavailable' } };
+  const model = resolveProviderModel(config, input.provider, input.model, probe.installed ?? null);
   if (!model) return { status: 503, body: { error: `${input.provider} has none of the allowed models installed`, code: 'model_unavailable' } };
 
   const controller = new AbortController();
@@ -249,6 +277,8 @@ module.exports = {
   ALLOWED_BUILDER_MODES,
   PROVIDER_KINDS,
   REASONING_EFFORTS,
+  bestAvailableModel,
+  defaultAuthorModel,
   estimateTokens,
   modelHealth,
   probeProvider,

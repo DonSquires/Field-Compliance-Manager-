@@ -80,3 +80,25 @@ node scripts/bob-gpu-link/ollama-bench.mjs http://127.0.0.1:11434 qwen2.5-coder:
 Chat lane (`/opt/fcm/.env`): `BOB_ROUTE_PLANNER`, `BOB_ROUTE_VERIFIER`,
 `BOB_ROUTE_SUBAGENT`, `BOB_ROUTE_SYNTHESIS`, `GPU_WORKSTATION_MODEL`,
 `GPU_WORKSTATION_PLAN_MODEL`.
+
+## The outsourced tier (OpenAI) — deterministic best-available
+
+Because OpenAI is only reached when Bob is stuck, it should be the strongest
+model the account has, at the highest effort the API allows:
+
+- `BOB_OPENAI_MODELS` is an allowlist ordered **strongest first**. The gateway
+  reads the account's `/v1/models` list (cached 10 min) and uses the first
+  entry that exists, so a not-yet-released name at the front is harmless and
+  a retired one is skipped. `BOB_BUILDER_MODEL` pins the author instead.
+- The independent reviewer is the strongest available model that is **not**
+  the author (`BOB_BUILDER_REVIEWER_MODEL` pins it).
+- `BOB_BUILDER_REASONING_EFFORT=xhigh` — probed 2026-09-26: `xhigh` is the
+  maximum for gpt-5.4 … gpt-6-*; `max` is rejected. `-pro` models are not chat
+  models and cannot be used here.
+- The chat planner's fallback (`OPENAI_PLAN_MODEL` in `/opt/fcm/.env`) is a
+  separate choice: chat turns have a 90-second budget and, while the laptop is
+  off, every turn lands there — keep it on a fast model (gpt-5.4) unless
+  latency is acceptable.
+
+`node scripts/bob-gpu-link/openai-probe.mjs <model...>` (with the key in the
+environment, on the VPS) shows what each model accepts.

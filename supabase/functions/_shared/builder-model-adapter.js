@@ -276,7 +276,7 @@ function selectProviders(modelRequest, { health = null, avoid = [], startAfter =
     const status = health ? health[provider] : null;
     if (status && (!status.configured || !status.healthy)) continue;
     const model = provider === PROVIDERS.OPENAI
-      ? (modelRequest.model_name || null)
+      ? (modelRequest.model_name || status?.ready_model || null)
       : (status?.ready_model || (Array.isArray(status?.models) ? status.models[0] : null) || null);
     if (avoid.some(identity => identity && identity.provider === provider && (!identity.model || !model || identity.model === model))) continue;
     candidates.push({ provider, model });

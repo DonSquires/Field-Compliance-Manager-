@@ -30,7 +30,7 @@ function parseChain(raw, fallback) {
 function isReasoningModel(model, override) {
   if (override === 'true') return true;
   if (override === 'false') return false;
-  return /^(gpt-5|o[0-9])/i.test(String(model || ''));
+  return /^(gpt-[5-9]|o[0-9])/i.test(String(model || ''));
 }
 
 function createGatewayConfig(env = process.env) {

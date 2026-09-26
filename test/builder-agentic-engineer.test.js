@@ -48,6 +48,20 @@ test('builder model gateway: max effort defaults, multi-turn messages, and allow
   assert.equal(gateway.defaultReviewerModel({ BOB_BUILDER_MODEL: 'gpt-5.4', BOB_OPENAI_MODELS: 'gpt-5.4,gpt-5.4-mini,gpt-4o-mini' }), 'gpt-5.4-mini');
   assert.equal(gateway.defaultReviewerModel({ BOB_BUILDER_MODEL: 'gpt-5.4', BOB_BUILDER_REVIEWER_MODEL: 'gpt-4o-mini' }), 'gpt-4o-mini');
   assert.equal(gateway.defaultReviewerModel({ BOB_BUILDER_MODEL: 'gpt-5.4', BOB_BUILDER_REVIEWER_MODEL: 'gpt-5.4', BOB_OPENAI_MODELS: 'gpt-5.4' }), null, 'the author may never review itself');
+  // Deterministic best-available: the allowlist is strongest-first and only models the account lists count.
+  const account = ['gpt-5.4', 'gpt-5.4-mini', 'gpt-5.6-sol', 'gpt-6-sol', 'o3'];
+  assert.equal(gateway.bestAvailableModel(['gpt-7-nova', 'gpt-6-sol', 'gpt-5.6-sol'], account), 'gpt-6-sol', 'an unreleased first choice is skipped');
+  assert.equal(gateway.defaultAuthorModel({ BOB_OPENAI_MODELS: 'gpt-7-nova,gpt-6-sol,gpt-5.6-sol,gpt-5.4' }, account), 'gpt-6-sol');
+  assert.equal(gateway.defaultAuthorModel({ BOB_OPENAI_MODELS: 'gpt-6-sol,gpt-5.4', BOB_BUILDER_MODEL: 'gpt-5.4' }, account), 'gpt-5.4', 'a pinned author wins');
+  assert.equal(gateway.defaultReviewerModel({ BOB_OPENAI_MODELS: 'gpt-6-sol,gpt-5.6-sol,gpt-5.4' }, account), 'gpt-5.6-sol', 'the reviewer is the strongest available model that is not the author');
+  assert.equal(gateway.defaultReviewerModel({ BOB_OPENAI_MODELS: 'gpt-7-nova,gpt-6-sol,gpt-5.6-sol' }, account), 'gpt-5.6-sol');
+  assert.ok(gateway.REASONING_EFFORTS.has('xhigh'), 'xhigh is the API maximum for gpt-5.4 … gpt-6 (probed 2026-09-26)');
+  assert.ok(!gateway.REASONING_EFFORTS.has('max'));
+  assert.equal(gateway.isReasoningModel('gpt-6-sol'), true);
+  assert.equal(gateway.isReasoningModel('gpt-4.1'), false);
+  const bodyXhigh = gateway.buildProviderBody({ input: { ...base, messages: [{ role: 'user', content: 'hi' }], reasoning_effort: 'xhigh' }, config, model: 'gpt-6-sol' });
+  assert.equal(bodyXhigh.reasoning_effort, 'xhigh');
+  assert.equal(gateway.validateModelRequest({ ...base, messages: [{ role: 'user', content: 'b' }], reasoning_effort: 'max' }, config), 'unsupported reasoning effort');
 });
 
 test('tool-call parsing tolerates fences and prose; run allowlist is narrow', () => {
