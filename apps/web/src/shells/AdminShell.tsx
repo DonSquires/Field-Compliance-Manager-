@@ -142,6 +142,8 @@ const CRM_MANAGEMENT_PAGES = new Set<AdminPage>([
   'relationships', 'onboarding', 'handoffs', 'crm', 'client-setup', 'finance-bureau', 'finance-connections', 'finance-money', 'finance-costing', 'finance-pricing', 'sites',
 ]);
 
+const APPROVAL_DECISION_ROLES = new Set(['grand_master', 'master', 'admin']);
+
 const FIELD_CONTEXT_PAGES = new Set<AdminPage>(['field-ops', 'site-360', 'locations', 'zones', 'sites', 'workshop', 'investigations']);
 
 const FIELD_OPS_AREAS = new Set<FieldOpsSubArea>([
@@ -164,6 +166,7 @@ const PAGE_PLATFORM_MODULE: Partial<Record<AdminPage, string>> = {
 function canAccessAdminPage(page: AdminPage, role: string | undefined, isModuleEnabled: (moduleKey: string) => boolean): boolean {
   if (PLATFORM_ONLY_PAGES.has(page)) return role === 'grand_master' || role === 'master';
   if (CRM_MANAGEMENT_PAGES.has(page) && !(role === 'grand_master' || role === 'master' || role === 'admin')) return false;
+  if (page === 'approvals' && (!role || !APPROVAL_DECISION_ROLES.has(role))) return false;
   const requiredModule = PAGE_PLATFORM_MODULE[page];
   if (requiredModule && !isModuleEnabled(requiredModule)) return false;
   return true;

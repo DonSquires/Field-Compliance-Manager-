@@ -9,7 +9,7 @@ describe('Approvals activity job plans', () => {
   it('loads durable whole-plan records and their ordered steps', () => {
     expect(source).toContain("from('bob_job_plans')");
     expect(source).toContain("from('bob_job_plan_steps')");
-    expect(source).toContain("in('status', filter === 'all' ? ['proposed', 'executing', 'needs_review'] : filter === 'pending' ? ['proposed'] : [])");
+    expect(source).toContain("in('status', ['proposed', 'executing', 'needs_review'])");
   });
 
   it('uses the dedicated governed plan decision endpoint with required reasoning', () => {

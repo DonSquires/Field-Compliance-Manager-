@@ -1,3 +1,4 @@
+type ApprovalWorkArea = 'actions' | 'documents' | 'plans';
 import React, { useCallback, useEffect, useMemo, useState } from 'react';
 import { useNavigate } from 'react-router-dom';
 import { AlertTriangle, CheckCircle2, ChevronRight, Clock3, FileCheck2, Filter, History, ListChecks, RefreshCw, Search, ShieldCheck, X, XCircle } from 'lucide-react';
@@ -7,7 +8,8 @@ import { supabase } from '../lib/supabase';
 import { ShellLayout } from '../layouts/ShellLayout';
 import './ApprovalsActivityPage.css';
 
-type ActionStatus = 'pending' | 'approved' | 'rejected' | 'applied' | 'failed';
+type ActionStatus = 'pending' | 'pending_approval' | 'proposed' | 'approved' | 'rejected' | 'applied' | 'failed';
+type StatusFilter = 'pending' | 'approved' | 'rejected' | 'applied' | 'failed' | 'all';
 
 interface ApprovalRow {
   id: string;
@@ -22,6 +24,7 @@ interface ApprovalRow {
   approved_at: string | null;
   proposed_payload: Record<string, unknown>;
   amended_payload: Record<string, unknown> | null;
+  organization_id: string;
   org_name: string | null;
   triggered_by_name: string | null;
   user_name: string | null;
@@ -109,7 +112,7 @@ interface ClientOrganizationOption { id: string; name: string; }
 interface StaffOption { id: string; display_name: string | null; email: string | null; }
 interface InvestigationOption { id: string; investigation_reference: string; title: string; status: string; }
 
-const STATUS_FILTERS: Array<{ id: ActionStatus | 'all'; label: string }> = [
+const STATUS_FILTERS: Array<{ id: StatusFilter; label: string }> = [
   { id: 'pending', label: 'Pending' },
   { id: 'approved', label: 'Approved' },
   { id: 'applied', label: 'Applied' },
@@ -117,6 +120,39 @@ const STATUS_FILTERS: Array<{ id: ActionStatus | 'all'; label: string }> = [
   { id: 'failed', label: 'Failed' },
   { id: 'all', label: 'All activity' },
 ];
+
+const APPROVAL_VIEW_BY_ROLE: Record<string, { eyebrow: string; title: string; description: string; scope: string }> = {
+  grand_master: {
+    eyebrow: 'Platform governance',
+    title: 'Platform approvals',
+    description: 'Review consequential decisions across the organisations you oversee.',
+    scope: 'Platform and authorised organisations',
+  },
+  master: {
+    eyebrow: 'Organisation governance',
+    title: 'Organisation approvals',
+    description: 'Review plans and consequential decisions for your organisation and its branches.',
+    scope: 'Your organisation and branches',
+  },
+  admin: {
+    eyebrow: 'Team governance',
+    title: 'Team approvals',
+    description: 'Review operational and document decisions for your organisation.',
+    scope: 'Your organisation',
+  },
+};
+
+function isPendingAction(status: ActionStatus): boolean {
+  return status === 'pending' || status === 'pending_approval' || status === 'proposed';
+}
+
+function matchesStatusFilter(status: ActionStatus, filter: StatusFilter): boolean {
+  return filter === 'all' || (filter === 'pending' ? isPendingAction(status) : status === filter);
+}
+
+function statusClass(status: ActionStatus): string {
+  return isPendingAction(status) ? 'pending' : status;
+}
 
 const ApprovalsActivityPage: React.FC = () => {
   const navigate = useNavigate();
@@ -127,7 +163,8 @@ const ApprovalsActivityPage: React.FC = () => {
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
   const [notice, setNotice] = useState<string | null>(null);
-  const [filter, setFilter] = useState<ActionStatus | 'all'>('pending');
+  const [filter, setFilter] = useState<StatusFilter>('pending');
+    const [reviewArea, setReviewArea] = useState<ApprovalWorkArea>('actions');
   const [search, setSearch] = useState('');
   const [selectedId, setSelectedId] = useState<string | null>(null);
   const [decision, setDecision] = useState<'approve' | 'reject' | null>(null);
@@ -157,6 +194,12 @@ const ApprovalsActivityPage: React.FC = () => {
   const [documentReviews, setDocumentReviews] = useState<DocumentReviewRow[]>([]);
   const [selectedDocumentReview, setSelectedDocumentReview] = useState<DocumentReviewRow | null>(null);
   const [documentReviewDecision, setDocumentReviewDecision] = useState<'approved' | 'rejected' | null>(null);
+  const approvalView = APPROVAL_VIEW_BY_ROLE[profile?.role ?? ''] ?? {
+    eyebrow: 'Governed activity',
+    title: 'My approval activity',
+    description: 'Review decisions assigned to you.',
+    scope: 'Assigned work',
+  };
 
   const loadActivity = useCallback(async () => {
     setLoading(true);
@@ -166,10 +209,10 @@ const ApprovalsActivityPage: React.FC = () => {
         supabase.rpc('get_approvals_activity', {
         p_limit: 100,
         p_offset: 0,
-        p_statuses: filter === 'all' ? null : [filter],
+        p_statuses: null,
         p_action_types: null,
         }),
-        supabase.from('bob_job_plans').select('id,goal,status,reasoning,created_at,organization_id').in('status', filter === 'all' ? ['proposed', 'executing', 'needs_review'] : filter === 'pending' ? ['proposed'] : []).order('created_at', { ascending: false }).limit(30),
+        supabase.from('bob_job_plans').select('id,goal,status,reasoning,created_at,organization_id').in('status', ['proposed', 'executing', 'needs_review']).order('created_at', { ascending: false }).limit(30),
         supabase.from('bob_job_plan_steps').select('id,plan_id,sequence,action_type,status').order('sequence'),
         supabase.from('documents').select('id,original_filename,current_scope,updated_at,document_versions(id,version_label,extracted_text,extraction_confidence,ocr_required,created_at,metadata_json,document_classifications(privacy_class,confidence,rationale,contains_pii,contains_operational_security,contains_financial_data,contains_legal_privilege,classifier_source,reviewed_at,created_at))').in('current_scope', ['conversation_only', 'tenant', 'quarantined']).order('created_at', { ascending: false }).limit(50),
         supabase.from('document_promotion_proposals').select('id,target_type,status,proposed_payload,source_map,created_at,review_reason,document_version:document_versions(documents(original_filename))').order('created_at', { ascending: false }).limit(50),
@@ -185,7 +228,10 @@ const ApprovalsActivityPage: React.FC = () => {
       if (clientsResponse.error) throw clientsResponse.error;
       if (staffResponse.error) throw staffResponse.error;
       if (investigationsResponse.error) throw investigationsResponse.error;
-      const activity = (activityResponse.data as ApprovalRow[]) ?? [];
+      const scopeOrganizationId = profile?.role === 'admin'
+        ? profile.organizationId
+        : operatingOrganizationId ?? profile?.organizationId ?? null;
+      const activity = ((activityResponse.data as ApprovalRow[]) ?? []).filter((row) => !scopeOrganizationId || row.organization_id === scopeOrganizationId);
       setRows(activity);
       const planRows = (plansResponse.data as JobPlanRow[]) ?? [];
       setPlans(planRows);
@@ -220,7 +266,7 @@ const ApprovalsActivityPage: React.FC = () => {
     } finally {
       setLoading(false);
     }
-  }, [filter]);
+  }, [operatingOrganizationId, profile?.organizationId]);
 
   const promoteDocument = async (document: DocumentPromotionRow) => {
     setPromotingDocumentId(document.version_id); setError(null); setNotice(null);
@@ -370,15 +416,35 @@ const ApprovalsActivityPage: React.FC = () => {
 
   const visibleRows = useMemo(() => {
     const term = search.trim().toLowerCase();
-    if (!term) return rows;
-    return rows.filter((row) => [row.action_type, row.context_summary, row.context_table, row.org_name, row.triggered_by_name]
-      .some((value) => value?.toLowerCase().includes(term)));
-  }, [rows, search]);
+    return rows.filter((row) => matchesStatusFilter(row.status, filter) && (!term || [row.action_type, row.context_summary, row.context_table, row.org_name, row.triggered_by_name]
+      .some((value) => value?.toLowerCase().includes(term))));
+  }, [filter, rows, search]);
+
+  useEffect(() => {
+    setSelectedId((current) => current && visibleRows.some((row) => row.id === current) ? current : visibleRows[0]?.id ?? null);
+  }, [visibleRows]);
 
   const selected = rows.find((row) => row.id === selectedId) ?? null;
-  const pendingCount = rows.filter((row) => row.status === 'pending').length;
+  const pendingCount = rows.filter((row) => isPendingAction(row.status)).length;
   const failedCount = rows.filter((row) => row.status === 'failed').length;
-  const decidableCount = rows.filter((row) => row.status === 'pending' && row.can_decide).length;
+  const decidableCount = rows.filter((row) => isPendingAction(row.status) && row.can_decide).length;
+  const visibleStatusFilters = STATUS_FILTERS.filter((item) => item.id === 'all' || rows.some((row) => matchesStatusFilter(row.status, item.id)));
+  const documentWorkCount = documentReviews.length + documentPromotions.length + promotionProposals.filter((proposal) => proposal.status === 'proposed' || proposal.status === 'approved').length;
+  const workAreas: Array<{ id: ApprovalWorkArea; label: string; count: number }> = [
+    ...(rows.length > 0 || (documentWorkCount === 0 && plans.length === 0) ? [{ id: 'actions' as const, label: 'Decisions', count: rows.length }] : []),
+    ...(documentWorkCount > 0 ? [{ id: 'documents' as const, label: 'Documents', count: documentWorkCount }] : []),
+    ...(plans.length > 0 ? [{ id: 'plans' as const, label: 'Plans', count: plans.length }] : []),
+  ];
+
+  useEffect(() => {
+    if (loading || visibleStatusFilters.some((item) => item.id === filter)) return;
+    setFilter(visibleStatusFilters[0]?.id ?? 'all');
+  }, [filter, loading, visibleStatusFilters]);
+
+  useEffect(() => {
+    if (loading || workAreas.some((area) => area.id === reviewArea)) return;
+    setReviewArea(workAreas[0]?.id ?? 'actions');
+  }, [loading, reviewArea, workAreas]);
 
   const openDecision = (nextDecision: 'approve' | 'reject') => {
     setDecision(nextDecision);
@@ -512,32 +578,35 @@ const ApprovalsActivityPage: React.FC = () => {
       <div className="approvals-page">
       {targetExecution && <div className="approvals-dialog-backdrop"><form className="approvals-dialog" onSubmit={applyTargetProposal} role="dialog" aria-modal="true" aria-labelledby="target-proposal-apply-title"><div className="approvals-panel-heading"><div><span>Approved proposal</span><h2 id="target-proposal-apply-title">{targetExecution.target === 'credential' ? 'Apply approved credential' : targetExecution.target === 'hr_case' ? 'Apply approved HR document' : targetExecution.target === 'site_brief' ? 'Apply approved site brief' : targetExecution.target === 'investigation_link' ? 'Apply approved investigation link' : `Apply approved ${formatActionType(targetExecution.target)}`}</h2></div><button type="button" onClick={() => setTargetExecution(null)}><X size={18} /><span className="sr-only">Close</span></button></div><p className="approvals-context">Enter the authoritative target details explicitly. No inference is applied silently.</p>{renderTargetExecutionFields()}<div className="approvals-dialog-actions"><button type="button" onClick={() => setTargetExecution(null)}>Cancel</button><button type="submit" className="is-approve" disabled={busyId === targetExecution.proposal.id}>{targetExecution.target === 'credential' ? 'Apply approved credential' : targetExecution.target === 'hr_case' ? 'Apply approved HR document' : targetExecution.target === 'site_brief' ? 'Apply approved site brief' : targetExecution.target === 'investigation_link' ? 'Apply approved investigation link' : `Apply approved ${formatActionType(targetExecution.target)}`}</button></div></form></div>}
       <header className="approvals-heading">
-        <div><span>Governed operations</span><h1>Approvals and activity</h1><p>Review consequential actions before they enter the application.</p></div>
-        <button type="button" onClick={() => void loadActivity()} disabled={loading}><RefreshCw size={17} className={loading ? 'is-spinning' : ''} /> Refresh</button>
+        <div><span>{approvalView.eyebrow}</span><h1>{approvalView.title}</h1><p>{approvalView.description}</p></div>
+        <div className="approvals-heading-actions"><span>{approvalView.scope}</span><button type="button" onClick={() => void loadActivity()} disabled={loading}><RefreshCw size={17} className={loading ? 'is-spinning' : ''} /> Refresh</button></div>
       </header>
 
-      <section className="approvals-summary" aria-label="Approval queue summary">
-        <div><Clock3 size={18} /><span>Pending in view</span><strong>{pendingCount}</strong></div>
+      {workAreas.length > 1 && <div className="approvals-work-areas" role="tablist" aria-label="Approval work area">{workAreas.map((area) => <button type="button" role="tab" aria-selected={reviewArea === area.id} className={reviewArea === area.id ? 'is-active' : ''} onClick={() => setReviewArea(area.id)} key={area.id}><span>{area.label}</span><strong>{area.count}</strong></button>)}</div>}
+
+      {reviewArea === 'actions' && <section className="approvals-summary" aria-label="Approval queue summary">
+        <div><Clock3 size={18} /><span>Pending</span><strong>{pendingCount}</strong></div>
         <div><ShieldCheck size={18} /><span>You can decide</span><strong>{decidableCount}</strong></div>
-        <div><AlertTriangle size={18} /><span>Failed in view</span><strong>{failedCount}</strong></div>
-        <div><History size={18} /><span>Loaded activity</span><strong>{rows.length}</strong></div>
-      </section>
+        <div><AlertTriangle size={18} /><span>Failed</span><strong>{failedCount}</strong></div>
+        <div><History size={18} /><span>Visible activity</span><strong>{rows.length}</strong></div>
+      </section>}
 
-      {documentReviews.length > 0 && <section className="approvals-queue" aria-label="Bob document review queue"><div className="approvals-panel-heading"><div><span>Bob authoring</span><h2>Documents needing review</h2></div><FileCheck2 size={18} /></div><div className="approvals-list">{documentReviews.map((document) => <article className="status-pending" key={document.version_id}><div><strong>{document.title}</strong><small>{formatActionType(document.document_type)} · {formatAge(document.updated_at)}</small></div><p>{document.review_reason ?? 'The author requested human review of this document.'}</p><small>Source file: {document.file_name} · Conversation-only until approved{document.unconfirmed_count ? ` · ⚠️ ${document.unconfirmed_count} unconfirmed field${document.unconfirmed_count === 1 ? '' : 's'}` : ''}</small><div className="approvals-actions"><button type="button" className="is-secondary" onClick={() => navigate(`/admin/document-studio?document=${encodeURIComponent(document.document_id)}`)}>Open in Studio</button><button type="button" className="is-reject" onClick={() => { setSelectedDocumentReview(document); setDocumentReviewDecision('rejected'); setReasoning(''); }}>Reject document</button><button type="button" className="is-approve" onClick={() => { setSelectedDocumentReview(document); setDocumentReviewDecision('approved'); setReasoning(''); }}>Review document</button></div></article>)}</div></section>}
+      {reviewArea === 'documents' && documentReviews.length > 0 && <section className="approvals-queue" aria-label="Bob document review queue"><div className="approvals-panel-heading"><div><span>Bob authoring</span><h2>Documents needing review</h2></div><FileCheck2 size={18} /></div><div className="approvals-list">{documentReviews.map((document) => <article className="status-pending" key={document.version_id}><div><strong>{document.title}</strong><small>{formatActionType(document.document_type)} · {formatAge(document.updated_at)}</small></div><p>{document.review_reason ?? 'The author requested human review of this document.'}</p><small>Source file: {document.file_name} · Conversation-only until approved{document.unconfirmed_count ? ` · ⚠️ ${document.unconfirmed_count} unconfirmed field${document.unconfirmed_count === 1 ? '' : 's'}` : ''}</small><div className="approvals-actions"><button type="button" className="is-secondary" onClick={() => navigate(`/admin/document-studio?document=${encodeURIComponent(document.document_id)}`)}>Open in Studio</button><button type="button" className="is-reject" onClick={() => { setSelectedDocumentReview(document); setDocumentReviewDecision('rejected'); setReasoning(''); }}>Reject document</button><button type="button" className="is-approve" onClick={() => { setSelectedDocumentReview(document); setDocumentReviewDecision('approved'); setReasoning(''); }}>Review document</button></div></article>)}</div></section>}
 
-      {plans.length > 0 && <section className="approvals-queue" aria-label="Governed job plans"><div className="approvals-panel-heading"><div><span>Whole-plan approval</span><h2>Job plans awaiting review</h2></div><ListChecks size={18} /></div><div className="approvals-list">{plans.map((plan) => { const steps = planSteps[plan.id] ?? []; return <article className={`status-${plan.status}`} key={plan.id}><div><strong>{plan.goal}</strong><small>{steps.length} ordered step{steps.length === 1 ? '' : 's'} · {formatAge(plan.created_at)}</small></div><p>{plan.reasoning ?? 'No plan reasoning was recorded.'}</p><small>{steps.map((step) => `${step.sequence + 1}. ${formatActionType(step.action_type)} (${step.status})`).join(' · ')}</small>{plan.status === 'proposed' && <div className="approvals-actions"><button type="button" className="is-reject" onClick={() => openPlanDecision(plan, 'reject')}><XCircle size={17} /> Reject plan</button><button type="button" className="is-approve" onClick={() => openPlanDecision(plan, 'approve')}><CheckCircle2 size={17} /> Review plan</button></div>}</article>; })}</div></section>}
+      {reviewArea === 'plans' && plans.length > 0 && <section className="approvals-queue" aria-label="Governed job plans"><div className="approvals-panel-heading"><div><span>Whole-plan approval</span><h2>Job plans awaiting review</h2></div><ListChecks size={18} /></div><div className="approvals-list">{plans.map((plan) => { const steps = planSteps[plan.id] ?? []; return <article className={`status-${plan.status}`} key={plan.id}><div><strong>{plan.goal}</strong><small>{steps.length} ordered step{steps.length === 1 ? '' : 's'} · {formatAge(plan.created_at)}</small></div><p>{plan.reasoning ?? 'No plan reasoning was recorded.'}</p><small>{steps.map((step) => `${step.sequence + 1}. ${formatActionType(step.action_type)} (${step.status})`).join(' · ')}</small>{plan.status === 'proposed' && <div className="approvals-actions"><button type="button" className="is-reject" onClick={() => openPlanDecision(plan, 'reject')}><XCircle size={17} /> Reject plan</button><button type="button" className="is-approve" onClick={() => openPlanDecision(plan, 'approve')}><CheckCircle2 size={17} /> Review plan</button></div>}</article>; })}</div></section>}
 
-      {documentPromotions.length > 0 && <section className="approvals-queue" aria-label="Document promotion queue"><div className="approvals-panel-heading"><div><span>Reference library</span><h2>Documents awaiting promotion</h2></div><ShieldCheck size={18} /></div><div className="approvals-list">{documentPromotions.map((document) => <article className="status-pending" key={document.version_id}><div><strong>{document.file_name}</strong><small>{document.privacy_class ?? 'Unclassified'} · {document.confidence == null ? 'No confidence' : `${Math.round(document.confidence * 100)}% confidence`} · {document.reviewed_at ? 'Human reviewed' : 'Review pending'}</small></div><div className="approvals-document-flags">{document.contains_pii && <span>PII</span>}{document.contains_operational_security && <span>Operational security</span>}{document.contains_financial_data && <span>Financial data</span>}{document.contains_legal_privilege && <span>Legal privilege</span>}</div><p>{document.ocr_required ? 'OCR is still required before reliable classification.' : document.rationale ?? 'Review the classification and tenant scope before promotion.'}</p>{document.extracted_text && <details className="approvals-payload"><summary>Extracted source preview</summary><p>{document.extracted_text.slice(0, 900)}</p></details>}<small>Classifier: {document.classifier_source ?? 'Unavailable'} · Scope: {document.scope.replaceAll('_', ' ')}</small><div className="approvals-actions">{domainProposalTarget(document.file_name) && <button type="button" className="is-secondary" disabled={proposingDocumentId === document.version_id} onClick={() => void proposeDocumentPromotion(document, domainProposalTarget(document.file_name)!.type)}>{proposingDocumentId === document.version_id ? 'Preparing proposal...' : domainProposalTarget(document.file_name)!.label}</button>}<button type="button" className="is-secondary" onClick={() => { setClassificationReview(document); setClassificationForm({ privacyClass: document.privacy_class ?? 'tenant_sensitive', containsPii: document.contains_pii, containsOperationalSecurity: document.contains_operational_security, containsFinancialData: document.contains_financial_data, containsLegalPrivilege: document.contains_legal_privilege, reason: '' }); }}>Review classification</button><button type="button" className="is-approve" disabled={promotingDocumentId === document.version_id || document.ocr_required || !document.privacy_class} onClick={() => void promoteDocument(document)}>{promotingDocumentId === document.version_id ? 'Promoting...' : 'Promote to tenant library'}</button></div></article>)}</div></section>}
-      {promotionProposals.length > 0 && <section className="approvals-queue" aria-label="Document promotion proposals"><div className="approvals-panel-heading"><div><span>Domain intake</span><h2>Promotion proposals</h2></div><FileCheck2 size={18} /></div><div className="approvals-list">{promotionProposals.map((proposal) => <article className={`status-${proposal.status}`} key={proposal.id}><div><strong>{proposal.document_version?.documents?.original_filename ?? 'Document proposal'}</strong><small>{formatActionType(proposal.target_type)} · {proposal.status} · {formatAge(proposal.created_at)}</small></div><p>{String(proposal.proposed_payload.title ?? 'Prepared domain promotion proposal')}</p><small>Source: {String(proposal.source_map.source_excerpt ?? 'Source map recorded')}</small>{proposal.review_reason && <small>Review reason: {proposal.review_reason}</small>}{proposal.status === 'approved' && <p className="approvals-proposal-boundary">No authoritative CRM record has been created by this approval.</p>}{proposal.status === 'approved' && proposal.target_type === 'crm_agreement' && <div className="approvals-actions"><button type="button" className="is-approve" onClick={() => { setExecutionProposal(proposal); setExecutionForm({ clientOrganizationId: '', name: String(proposal.proposed_payload.title ?? ''), startsOn: '', endsOn: '' }); }}>Apply to CRM</button></div>}{proposal.status === 'proposed' && <div className="approvals-actions"><button type="button" className="is-reject" onClick={() => { setSelectedProposal(proposal); setProposalDecision('rejected'); setReasoning(''); }}>Reject proposal</button><button type="button" className="is-approve" onClick={() => { setSelectedProposal(proposal); setProposalDecision('approved'); setReasoning(''); }}>Approve proposal</button></div>}</article>)}</div></section>}
+      {reviewArea === 'documents' && documentPromotions.length > 0 && <section className="approvals-queue" aria-label="Document promotion queue"><div className="approvals-panel-heading"><div><span>Reference library</span><h2>Documents awaiting promotion</h2></div><ShieldCheck size={18} /></div><div className="approvals-list">{documentPromotions.map((document) => <article className="status-pending" key={document.version_id}><div><strong>{document.file_name}</strong><small>{document.privacy_class ?? 'Unclassified'} · {document.confidence == null ? 'No confidence' : `${Math.round(document.confidence * 100)}% confidence`} · {document.reviewed_at ? 'Human reviewed' : 'Review pending'}</small></div><div className="approvals-document-flags">{document.contains_pii && <span>PII</span>}{document.contains_operational_security && <span>Operational security</span>}{document.contains_financial_data && <span>Financial data</span>}{document.contains_legal_privilege && <span>Legal privilege</span>}</div><p>{document.ocr_required ? 'OCR is still required before reliable classification.' : document.rationale ?? 'Review the classification and tenant scope before promotion.'}</p>{document.extracted_text && <details className="approvals-payload"><summary>Extracted source preview</summary><p>{document.extracted_text.slice(0, 900)}</p></details>}<small>Classifier: {document.classifier_source ?? 'Unavailable'} · Scope: {document.scope.replaceAll('_', ' ')}</small><div className="approvals-actions">{domainProposalTarget(document.file_name) && <button type="button" className="is-secondary" disabled={proposingDocumentId === document.version_id} onClick={() => void proposeDocumentPromotion(document, domainProposalTarget(document.file_name)!.type)}>{proposingDocumentId === document.version_id ? 'Preparing proposal...' : domainProposalTarget(document.file_name)!.label}</button>}<button type="button" className="is-secondary" onClick={() => { setClassificationReview(document); setClassificationForm({ privacyClass: document.privacy_class ?? 'tenant_sensitive', containsPii: document.contains_pii, containsOperationalSecurity: document.contains_operational_security, containsFinancialData: document.contains_financial_data, containsLegalPrivilege: document.contains_legal_privilege, reason: '' }); }}>Review classification</button><button type="button" className="is-approve" disabled={promotingDocumentId === document.version_id || document.ocr_required || !document.privacy_class} onClick={() => void promoteDocument(document)}>{promotingDocumentId === document.version_id ? 'Promoting...' : 'Promote to tenant library'}</button></div></article>)}</div></section>}
+      {reviewArea === 'documents' && promotionProposals.length > 0 && <section className="approvals-queue" aria-label="Document promotion proposals"><div className="approvals-panel-heading"><div><span>Domain intake</span><h2>Promotion proposals</h2></div><FileCheck2 size={18} /></div><div className="approvals-list">{promotionProposals.map((proposal) => <article className={`status-${proposal.status}`} key={proposal.id}><div><strong>{proposal.document_version?.documents?.original_filename ?? 'Document proposal'}</strong><small>{formatActionType(proposal.target_type)} · {proposal.status} · {formatAge(proposal.created_at)}</small></div><p>{String(proposal.proposed_payload.title ?? 'Prepared domain promotion proposal')}</p><small>Source: {String(proposal.source_map.source_excerpt ?? 'Source map recorded')}</small>{proposal.review_reason && <small>Review reason: {proposal.review_reason}</small>}{proposal.status === 'approved' && <p className="approvals-proposal-boundary">No authoritative CRM record has been created by this approval.</p>}{proposal.status === 'approved' && proposal.target_type === 'crm_agreement' && <div className="approvals-actions"><button type="button" className="is-approve" onClick={() => { setExecutionProposal(proposal); setExecutionForm({ clientOrganizationId: '', name: String(proposal.proposed_payload.title ?? ''), startsOn: '', endsOn: '' }); }}>Apply to CRM</button></div>}{proposal.status === 'proposed' && <div className="approvals-actions"><button type="button" className="is-reject" onClick={() => { setSelectedProposal(proposal); setProposalDecision('rejected'); setReasoning(''); }}>Reject proposal</button><button type="button" className="is-approve" onClick={() => { setSelectedProposal(proposal); setProposalDecision('approved'); setReasoning(''); }}>Approve proposal</button></div>}</article>)}</div></section>}
 
-      {promotionProposals.some((proposal) => proposal.status === 'approved' && proposal.target_type === 'finance_reconciliation') && <section className="approvals-queue" aria-label="Approved finance proposals"><div className="approvals-panel-heading"><div><span>Finance intake</span><h2>Approved finance proposals</h2></div><FileCheck2 size={18} /></div><div className="approvals-actions">{promotionProposals.filter((proposal) => proposal.status === 'approved' && proposal.target_type === 'finance_reconciliation').map((proposal) => <button type="button" className="is-approve" key={proposal.id} onClick={() => { setFinanceProposal(proposal); setFinanceForm({ clientOrganizationId: '', serviceAgreementId: '', invoiceNumber: '', invoiceDate: new Date().toISOString().slice(0, 10), dueDate: '', subtotal: '', gstAmount: '', totalAmount: '', notes: '' }); }}>Create draft invoice for {proposal.document_version?.documents?.original_filename ?? 'approved proposal'}</button>)}</div></section>}
-      {promotionProposals.some((proposal) => proposal.status === 'approved' && ['credential','hr_case','site_brief','investigation_link'].includes(proposal.target_type)) && <section className="approvals-queue" aria-label="Approved operational proposals"><div className="approvals-panel-heading"><div><span>Operational intake</span><h2>Approved operational proposals</h2></div><FileCheck2 size={18} /></div><div className="approvals-list">{promotionProposals.filter((proposal) => proposal.status === 'approved' && ['credential','hr_case','site_brief','investigation_link'].includes(proposal.target_type)).map((proposal) => <article className="status-approved" key={proposal.id}><strong>{proposal.document_version?.documents?.original_filename ?? 'Approved proposal'}</strong><small>{formatActionType(proposal.target_type)}</small><div className="approvals-actions"><button type="button" className="is-approve" onClick={() => { setTargetExecution({ proposal, target: proposal.target_type as DomainProposalTarget }); setTargetForm({ ...targetForm, name: String(proposal.proposed_payload.title ?? '') }); }}>{`Apply ${formatActionType(proposal.target_type)}`}</button></div></article>)}</div></section>}
+      {reviewArea === 'documents' && promotionProposals.some((proposal) => proposal.status === 'approved' && proposal.target_type === 'finance_reconciliation') && <section className="approvals-queue" aria-label="Approved finance proposals"><div className="approvals-panel-heading"><div><span>Finance intake</span><h2>Approved finance proposals</h2></div><FileCheck2 size={18} /></div><div className="approvals-actions">{promotionProposals.filter((proposal) => proposal.status === 'approved' && proposal.target_type === 'finance_reconciliation').map((proposal) => <button type="button" className="is-approve" key={proposal.id} onClick={() => { setFinanceProposal(proposal); setFinanceForm({ clientOrganizationId: '', serviceAgreementId: '', invoiceNumber: '', invoiceDate: new Date().toISOString().slice(0, 10), dueDate: '', subtotal: '', gstAmount: '', totalAmount: '', notes: '' }); }}>Create draft invoice for {proposal.document_version?.documents?.original_filename ?? 'approved proposal'}</button>)}</div></section>}
+      {reviewArea === 'documents' && promotionProposals.some((proposal) => proposal.status === 'approved' && ['credential','hr_case','site_brief','investigation_link'].includes(proposal.target_type)) && <section className="approvals-queue" aria-label="Approved operational proposals"><div className="approvals-panel-heading"><div><span>Operational intake</span><h2>Approved operational proposals</h2></div><FileCheck2 size={18} /></div><div className="approvals-list">{promotionProposals.filter((proposal) => proposal.status === 'approved' && ['credential','hr_case','site_brief','investigation_link'].includes(proposal.target_type)).map((proposal) => <article className="status-approved" key={proposal.id}><strong>{proposal.document_version?.documents?.original_filename ?? 'Approved proposal'}</strong><small>{formatActionType(proposal.target_type)}</small><div className="approvals-actions"><button type="button" className="is-approve" onClick={() => { setTargetExecution({ proposal, target: proposal.target_type as DomainProposalTarget }); setTargetForm({ ...targetForm, name: String(proposal.proposed_payload.title ?? '') }); }}>{`Apply ${formatActionType(proposal.target_type)}`}</button></div></article>)}</div></section>}
       {error && <div className="approvals-message is-error" role="alert"><AlertTriangle size={17} /><span>{error}</span><button type="button" onClick={() => setError(null)}><X size={16} /><span className="sr-only">Dismiss</span></button></div>}
       {notice && <div className={`approvals-message ${notice.includes('failed') ? 'is-warning' : 'is-success'}`} role="status"><CheckCircle2 size={17} /><span>{notice}</span><button type="button" onClick={() => setNotice(null)}><X size={16} /><span className="sr-only">Dismiss</span></button></div>}
 
+      {reviewArea === 'actions' && <>
       <div className="approvals-toolbar">
         <div className="approvals-filters" role="tablist" aria-label="Action status">
-          {STATUS_FILTERS.map((item) => <button type="button" role="tab" aria-selected={filter === item.id} className={filter === item.id ? 'is-active' : ''} onClick={() => setFilter(item.id)} key={item.id}>{item.label}</button>)}
+          {visibleStatusFilters.map((item) => <button type="button" role="tab" aria-selected={filter === item.id} className={filter === item.id ? 'is-active' : ''} onClick={() => setFilter(item.id)} key={item.id}>{item.label}</button>)}
         </div>
         <label className="approvals-search"><Search size={16} /><input value={search} onChange={(event) => setSearch(event.target.value)} placeholder="Search actions, organisations, or targets" /></label>
       </div>
@@ -548,7 +617,7 @@ const ApprovalsActivityPage: React.FC = () => {
           {loading ? <div className="approvals-empty"><RefreshCw size={20} className="is-spinning" /> Loading governed actions</div> : visibleRows.length === 0 ? <div className="approvals-empty"><FileCheck2 size={21} /> No actions match this view</div> : (
             <div className="approvals-list">
               {visibleRows.map((row) => (
-                <button type="button" className={`${selectedId === row.id ? 'is-selected' : ''} status-${row.status}`} onClick={() => setSelectedId(row.id)} key={row.id}>
+                <button type="button" className={`${selectedId === row.id ? 'is-selected' : ''} status-${statusClass(row.status)}`} onClick={() => setSelectedId(row.id)} key={row.id}>
                   <span className="approvals-status-mark" />
                   <div><strong>{formatActionType(row.action_type)}</strong><small>{row.context_summary ?? row.context_table ?? 'No context summary provided'}</small></div>
                   <div><span>{row.org_name ?? 'Organisation unavailable'}</span><time dateTime={row.created_at}>{formatAge(row.created_at)}</time></div>
@@ -562,7 +631,7 @@ const ApprovalsActivityPage: React.FC = () => {
         <aside className="approvals-detail">
           {!selected ? <div className="approvals-empty"><FileCheck2 size={22} /> Select an action to inspect</div> : (
             <>
-              <div className="approvals-panel-heading"><div><span>Action review</span><h2>{formatActionType(selected.action_type)}</h2></div><span className={`approvals-status status-${selected.status}`}>{selected.status}</span></div>
+              <div className="approvals-panel-heading"><div><span>Action review</span><h2>{formatActionType(selected.action_type)}</h2></div><span className={`approvals-status status-${statusClass(selected.status)}`}>{formatActionType(selected.status)}</span></div>
               <p className="approvals-context">{selected.context_summary ?? 'No context summary was provided for this action.'}</p>
 
               <section className="approvals-live-summary" aria-label="Live evidence and action summary">
@@ -596,13 +665,14 @@ const ApprovalsActivityPage: React.FC = () => {
               {selected.error_message && <div className="approvals-outcome is-failed"><AlertTriangle size={17} /><div><strong>Application error</strong><span>{selected.error_message}</span></div></div>}
               {selected.result_record_id && <div className="approvals-outcome is-applied"><CheckCircle2 size={17} /><div><strong>Applied result</strong><span>{selected.result_table ?? 'record'} · {selected.result_record_id}</span></div></div>}
 
-              {selected.status === 'pending' && (
+              {isPendingAction(selected.status) && (
                 selected.can_decide ? <div className="approvals-actions"><button type="button" className="is-reject" onClick={() => openDecision('reject')}><XCircle size={17} /> Reject action</button><button type="button" className="is-approve" onClick={() => openDecision('approve')}><CheckCircle2 size={17} /> Approve action</button></div> : <div className="approvals-no-authority"><ShieldCheck size={17} /> {selected.assigned_approver_name ? `${selected.assigned_approver_name} owns this decision. Your current scope is view only.` : 'This decision is routed by role and organisation scope. Your current scope is view only.'}</div>
               )}
             </>
           )}
         </aside>
       </div>
+      </>}
 
       {decision && selected && (
         <div className="approvals-dialog-backdrop">

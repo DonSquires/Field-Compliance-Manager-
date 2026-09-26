@@ -9,7 +9,7 @@ test('approval review names the assigned decision owner and viewer authority', a
   const browserErrors = monitorBrowserErrors(page);
   await signInAsAdmin(page, '/admin/approvals');
 
-  await expect(page.getByRole('heading', { name: 'Approvals and activity' })).toBeVisible();
+  await expect(page.getByRole('heading', { name: 'Team approvals' })).toBeVisible();
   await expect(page.getByRole('complementary').getByText('Publish North District evening patrol')).toBeVisible();
   await expect(page.getByText('Decision owner').locator('..')).toContainText('Jordan Lee');
   await expect(page.getByText('Your authority').locator('..')).toContainText('View only');

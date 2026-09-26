@@ -234,7 +234,8 @@ test.describe('production document workflow visual audit', () => {
     await expect(page.getByLabel('Document type')).toHaveValue('site_safety_plan');
     await expect(page.getByText('Bob prepared this draft from source context and submitted it for human review.', { exact: true })).toBeVisible({ timeout: 30_000 });
     await page.goto(`${LIVE_URL}/admin/approvals`, { waitUntil: 'domcontentloaded' });
-    await expect(page.getByRole('heading', { name: 'Approvals and activity' })).toBeVisible({ timeout: 30_000 });
+    await expect(page.getByRole('heading', { name: /^(Platform|Organisation|Team) approvals$/ })).toBeVisible({ timeout: 30_000 });
+    await page.getByRole('tab', { name: /Documents/ }).click();
     const documentQueue = page.getByRole('region', { name: 'Bob document review queue' });
     await expect(documentQueue).toBeVisible({ timeout: 30_000 });
     await expect(documentQueue.getByText('Site Safety Plan', { exact: false }).first()).toBeVisible({ timeout: 30_000 });

@@ -7,7 +7,32 @@ const source = readFileSync(resolve(process.cwd(), 'src/pages/ApprovalsActivityP
 describe('governed approvals workbench', () => {
   it('loads tree-scoped activity through the canonical RPC', () => {
     expect(source).toContain("rpc('get_approvals_activity'");
+    expect(source).toContain('p_statuses: null');
+    expect(source).toContain("profile?.role === 'admin'");
+    expect(source).toContain('row.organization_id === scopeOrganizationId');
     expect(source).not.toContain(".from('bob_agentic_actions')");
+  });
+
+  it('uses role-specific language and shows only status filters that contain work', () => {
+    expect(source).toContain("title: 'Platform approvals'");
+    expect(source).toContain("title: 'Organisation approvals'");
+    expect(source).toContain("title: 'Team approvals'");
+    expect(source).toContain('visibleStatusFilters.map');
+    expect(source).toContain("setFilter(visibleStatusFilters[0]?.id ?? 'all')");
+    expect(source).toContain("setReviewArea(workAreas[0]?.id ?? 'actions')");
+  });
+
+  it('separates decisions, documents, and plans into relevant work areas', () => {
+    expect(source).toContain("type ApprovalWorkArea = 'actions' | 'documents' | 'plans'");
+    expect(source).toContain('aria-label="Approval work area"');
+    expect(source).toContain("reviewArea === 'documents' && documentReviews.length > 0");
+    expect(source).toContain("reviewArea === 'plans' && plans.length > 0");
+    expect(source).toContain("reviewArea === 'actions' && <>");
+  });
+
+  it('treats every pending lifecycle status as decision work', () => {
+    expect(source).toContain("status === 'pending_approval' || status === 'proposed'");
+    expect(source).toContain('isPendingAction(selected.status)');
   });
 
   it('requires reasoning and uses the governed decision edge function', () => {

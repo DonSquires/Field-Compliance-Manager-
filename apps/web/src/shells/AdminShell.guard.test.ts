@@ -26,6 +26,11 @@ describe('AdminShell access and routing boundaries', () => {
     expect(source).toContain("items.filter((item) => isPageEnabled(item.id as AdminPage))");
   });
 
+  it('shows approvals only to roles that can make governed decisions', () => {
+    expect(source).toContain("const APPROVAL_DECISION_ROLES = new Set(['grand_master', 'master', 'admin'])");
+    expect(source).toContain("if (page === 'approvals' && (!role || !APPROVAL_DECISION_ROLES.has(role))) return false;");
+  });
+
   it('gates platform module pages (crm, rostering, hr, finance) by organisation subscription', () => {
     expect(source).toContain('PAGE_PLATFORM_MODULE');
     expect(source).toContain("crm: 'crm'");

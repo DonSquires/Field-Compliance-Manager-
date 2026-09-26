@@ -9,7 +9,8 @@ test.beforeEach(async ({ page }) => {
 test('administrator reviews extraction evidence before promoting a document', async ({ page }) => {
   const browserErrors = monitorBrowserErrors(page);
   await signInAsAdmin(page, '/admin/approvals');
-  await expect(page.getByRole('heading', { name: 'Approvals and activity' })).toBeVisible();
+  await expect(page.getByRole('heading', { name: 'Team approvals' })).toBeVisible();
+  await page.getByRole('tab', { name: /Documents/ }).click();
   const queue = page.getByRole('region', { name: 'Document promotion queue' });
   await expect(queue.getByText('107 Gorge Road - Service Agreement.pdf')).toBeVisible();
   await expect(queue.getByText('Operational security')).toBeVisible();
