@@ -57,6 +57,7 @@ jobs:
             echo "Nothing to bridge."
             exit 0
           fi
+          echo "Bridging $(printf '%s\n' "$branches" | wc -l) branch(es)."
           main_sha="$(git rev-parse origin/main)"
           while IFS= read -r branch; do
             [ -n "$branch" ] || continue
