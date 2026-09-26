@@ -26,9 +26,9 @@ test('the reports hub filters by an agreement the reader chooses, lists the whol
 });
 
 test('rendering and sending a report pack is authorised against the pack\'s organisation as the caller (branch-held packs)', () => {
-  assert.match(pdfFn, /const \{ data: mayRender \} = await caller\.rpc\('is_admin_for_org', \{ target_org_id: pack\.organization_id \}\);/);
-  assert.match(pdfFn, /if \(String\(profile\.role\) !== 'grand_master' && mayRender !== true\) return json\(\{ error: 'Forbidden' \}, 403\);/);
+  assert.match(pdfFn, /const \{ data: mayRender \} = await caller\.rpc\('is_report_provider_custodian_for_org', \{ p_target_organization_id: pack\.organization_id \}\);/);
+  assert.match(pdfFn, /if \(mayRender !== true\) throw new RequestError\('Forbidden', 403\);/);
   assert.doesNotMatch(pdfFn, /pack\.organization_id !== profile\.organization_id/);
-  assert.match(sendFn, /const \{ data: maySend \} = await callerClient\.rpc\('is_admin_for_org', \{ target_org_id: pack\.organization_id \}\);/);
+  assert.match(sendFn, /const \{ data: maySend \} = await callerClient\.rpc\('is_report_provider_custodian_for_org', \{ p_target_organization_id: pack\.organization_id \}\);/);
   assert.doesNotMatch(sendFn, /pack\.organization_id !== callerProfile\.organization_id/);
 });

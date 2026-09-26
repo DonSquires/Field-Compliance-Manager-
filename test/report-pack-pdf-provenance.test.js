@@ -12,6 +12,6 @@ test('report-pack PDFs expose source snapshot provenance and scope', () => {
   assert.match(source, /Report pack ID: \$\{packId\}/);
   assert.match(source, /Source snapshot generated:/);
   assert.match(source, /Renderer: \$\{rendererVersion\}/);
-  assert.match(source, /governed aggregate snapshot/);
+  assert.match(source, /governed FCM report-pack snapshot/);
   assert.match(source, /generated_at/);
 });
