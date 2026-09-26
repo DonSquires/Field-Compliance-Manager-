@@ -19,6 +19,27 @@
   margin-bottom: 18px;
 }
 
+.identity-heading-actions {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}
+
+.identity-heading-actions > button {
+  display: inline-flex;
+  align-items: center;
+  gap: 7px;
+  min-height: 38px;
+  padding: 0 12px;
+  border: 1px solid #405665;
+  border-radius: 6px;
+  color: #d9e5eb;
+  background: #172630;
+  cursor: pointer;
+  font-size: 12px;
+  font-weight: 800;
+}
+
 .identity-heading > div > span,
 .identity-panel-heading > div > span {
   color: #7dd3c7;

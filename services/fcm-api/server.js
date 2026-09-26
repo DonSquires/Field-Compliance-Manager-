@@ -1,11 +1,19 @@
 const crypto = require('node:crypto');
+const fs = require('node:fs/promises');
 const http = require('node:http');
+const os = require('node:os');
+const path = require('node:path');
+const { execFile } = require('node:child_process');
+const { promisify } = require('node:util');
 const { createClient } = require('@supabase/supabase-js');
 const { verifyAndConsumeToken } = require('./src/security/job_token_consumer');
 const { verifyJobToken } = require('./src/security/job_token_verifier');
 const { createModelGateway } = require('./src/bob/modelGateway');
 const { planTurn } = require('./src/bob/plan');
 const { subagentStep } = require('./src/bob/subagent');
+const { extractIdentityFields } = require('./src/bob/identityDocument');
+
+const execFileAsync = promisify(execFile);
 
 const port = Number(process.env.PORT || 3000);
 const apiToken = process.env.FCM_API_TOKEN || '';
@@ -15,7 +23,11 @@ const osrmUrl = (process.env.OSRM_URL || '').replace(/\/+$/, '');
 const workloadSigningSecret = process.env.WORKLOAD_SIGNING_SECRET || '';
 const supabaseUrl = (process.env.SUPABASE_URL || '').replace(/\/+$/, '');
 const supabaseServiceRoleKey = process.env.SUPABASE_SERVICE_ROLE_KEY || '';
+const inferenceServiceUrl = (process.env.INFERENCE_SERVICE_URL || '').replace(/\/+$/, '');
+const inferenceApiKey = process.env.INFERENCE_API_KEY || '';
+const identityInferenceSecret = process.env.IDENTITY_INFERENCE_SECRET || '';
 const maxBodyBytes = Number(process.env.MAX_BODY_BYTES || 256 * 1024 * 1024);
+const maxIdentityBytes = Number(process.env.IDENTITY_DOCUMENT_MAX_BYTES || 25 * 1024 * 1024);
 const modelGateway = createModelGateway();
 const supabase = supabaseUrl && supabaseServiceRoleKey
   ? createClient(supabaseUrl, supabaseServiceRoleKey, { auth: { autoRefreshToken: false, persistSession: false } })
@@ -29,6 +41,28 @@ function json(response, status, body) {
 function authorized(request) {
   const token = (request.headers.authorization || '').replace(/^Bearer /, '');
   return apiToken && token.length === apiToken.length && crypto.timingSafeEqual(Buffer.from(token), Buffer.from(apiToken));
+}
+
+function verifiedIdentityContext(request, attachmentId) {
+  const value = String(request.headers['x-identity-context'] || '');
+  const [encodedPayload, suppliedSignature] = value.split('.');
+  if (!identityInferenceSecret || !encodedPayload || !suppliedSignature) throw new Error('identity_inference_context_required');
+  const expectedSignature = crypto.createHmac('sha256', identityInferenceSecret).update(encodedPayload).digest('hex');
+  if (suppliedSignature.length !== expectedSignature.length || !crypto.timingSafeEqual(Buffer.from(suppliedSignature), Buffer.from(expectedSignature))) {
+    throw new Error('identity_inference_context_invalid');
+  }
+  let payload;
+  try {
+    payload = JSON.parse(Buffer.from(encodedPayload, 'base64url').toString('utf8'));
+  } catch {
+    throw new Error('identity_inference_context_invalid');
+  }
+    const nowSeconds = Math.floor(Date.now() / 1000);
+    if (payload.attachment_id !== attachmentId || !isUuid(payload.organization_id) || !isUuid(payload.actor_id)
+      || !Number.isFinite(payload.expires_at) || payload.expires_at < nowSeconds || payload.expires_at > nowSeconds + 120) {
+    throw new Error('identity_inference_context_invalid');
+  }
+  return payload;
 }
 
 async function readJson(request) {
@@ -90,6 +124,108 @@ async function runBobSubagentStep(request, response) {
 async function bobHealth(_request, response) {
   const status = await modelGateway.status();
   return json(response, 200, { status: 'ok', service: 'fcm-api', bob: status });
+}
+
+async function loadAttachment(attachmentId) {
+  if (!supabase || !isUuid(attachmentId)) throw new Error('valid_attachment_id_required');
+  const { data: attachment, error } = await supabase.from('bob_attachments')
+    .select('id,organization_id,file_name,file_type,file_size_bytes,storage_bucket,storage_path')
+    .eq('id', attachmentId).maybeSingle();
+  if (error || !attachment) throw new Error('attachment_not_found');
+  if (Number(attachment.file_size_bytes) > maxIdentityBytes) throw new Error('identity_document_too_large');
+  const downloaded = await supabase.storage.from(attachment.storage_bucket).download(attachment.storage_path);
+  if (downloaded.error || !downloaded.data) throw new Error('attachment_download_failed');
+  const bytes = Buffer.from(await downloaded.data.arrayBuffer());
+  if (!bytes.length || bytes.length > maxIdentityBytes) throw new Error('identity_document_size_invalid');
+  return { attachment, bytes, sha256: crypto.createHash('sha256').update(bytes).digest('hex') };
+}
+
+async function tesseractText(filePath) {
+  const { stdout } = await execFileAsync('tesseract', [filePath, 'stdout', '-l', 'eng', '--psm', '6'], { timeout: 90_000, maxBuffer: 4 * 1024 * 1024 });
+  return String(stdout || '').trim();
+}
+
+async function ocrAttachment(attachmentId, identityContext = null) {
+  const loaded = await loadAttachment(attachmentId);
+  if (loaded.attachment.storage_bucket === 'identity-evidence'
+      && (!identityContext || loaded.attachment.organization_id !== identityContext.organization_id)) {
+    throw new Error('identity_attachment_scope_mismatch');
+  }
+  const bytes = loaded.bytes;
+  const isPdf = bytes.subarray(0, 5).toString('ascii') === '%PDF-';
+  const isJpeg = bytes[0] === 0xff && bytes[1] === 0xd8 && bytes[2] === 0xff;
+  const isPng = bytes.subarray(0, 8).equals(Buffer.from([0x89, 0x50, 0x4e, 0x47, 0x0d, 0x0a, 0x1a, 0x0a]));
+  const isWebp = bytes.subarray(0, 4).toString('ascii') === 'RIFF' && bytes.subarray(8, 12).toString('ascii') === 'WEBP';
+  const isBmp = bytes.subarray(0, 2).toString('ascii') === 'BM';
+  const isTiff = bytes.subarray(0, 4).equals(Buffer.from([0x49, 0x49, 0x2a, 0x00])) || bytes.subarray(0, 4).equals(Buffer.from([0x4d, 0x4d, 0x00, 0x2a]));
+  if (!isPdf && !isJpeg && !isPng && !isWebp && !isBmp && !isTiff) throw new Error('unsupported_identity_document_type');
+  const work = await fs.mkdtemp(path.join(os.tmpdir(), 'fcm-identity-'));
+  const extension = isPdf ? '.pdf' : isJpeg ? '.jpg' : isPng ? '.png' : isWebp ? '.webp' : isBmp ? '.bmp' : '.tiff';
+  const sourcePath = path.join(work, `source${extension}`);
+  try {
+    await fs.writeFile(sourcePath, loaded.bytes, { mode: 0o600 });
+    let pages = [sourcePath];
+    if (isPdf) {
+      const prefix = path.join(work, 'page');
+      await execFileAsync('pdftoppm', ['-f', '1', '-l', '4', '-jpeg', '-r', '220', sourcePath, prefix], { timeout: 90_000, maxBuffer: 2 * 1024 * 1024 });
+      pages = (await fs.readdir(work)).filter((name) => /^page-.*\.jpg$/i.test(name)).sort().map((name) => path.join(work, name));
+      if (!pages.length) throw new Error('identity_pdf_render_failed');
+    }
+    const text = (await Promise.all(pages.map(tesseractText))).filter(Boolean).join('\n\n').slice(0, 40_000);
+    return {
+      ...loaded,
+      text,
+      pageCount: pages.length,
+      provider: 'tesseract-5',
+      detectedMime: isPdf ? 'application/pdf' : isJpeg ? 'image/jpeg' : isPng ? 'image/png' : isWebp ? 'image/webp' : isBmp ? 'image/bmp' : 'image/tiff',
+    };
+  } finally {
+    await fs.rm(work, { recursive: true, force: true });
+  }
+}
+
+async function inferIdentityImage(loaded) {
+  if (!inferenceServiceUrl || !loaded.detectedMime?.startsWith('image/')) return { face_count: 0, face_embedding: null, face_confidence: null };
+  const form = new FormData();
+  form.append('photo', new Blob([loaded.bytes], { type: loaded.detectedMime }), loaded.attachment.file_name);
+  form.append('tasks', JSON.stringify(['face']));
+  form.append('source_frame_hash', loaded.sha256);
+  const response = await fetch(`${inferenceServiceUrl}/infer/enhance`, {
+    method: 'POST',
+    headers: inferenceApiKey ? { Authorization: `Bearer ${inferenceApiKey}` } : {},
+    body: form,
+    signal: AbortSignal.timeout(120_000),
+  });
+  if (!response.ok) return { face_count: 0, face_embedding: null, face_confidence: null, face_error: `identity_face_http_${response.status}` };
+  const payload = await response.json();
+  const faces = Array.isArray(payload?.recognition?.source?.faces) ? payload.recognition.source.faces : [];
+  const face = faces.length === 1 ? faces[0] : null;
+  return {
+    face_count: faces.length,
+    face_embedding: Array.isArray(face?.embedding) ? face.embedding : null,
+    face_confidence: Number.isFinite(Number(face?.confidence ?? face?.det_score)) ? Number(face.confidence ?? face.det_score) : null,
+    face_model: 'sface',
+    face_authority: 'provisional_source_image',
+  };
+}
+
+async function identityDocument(request, response, ocrOnly = false) {
+  const body = await readJson(request);
+  const context = ocrOnly ? null : verifiedIdentityContext(request, String(body.attachment_id || ''));
+  const loaded = await ocrAttachment(String(body.attachment_id || ''), context);
+  if (ocrOnly) return json(response, 200, { ocr: { text: loaded.text, provider: loaded.provider, page_count: loaded.pageCount, sha256: loaded.sha256, review_required: true } });
+  const image = await inferIdentityImage(loaded);
+  return json(response, 200, {
+    success: true,
+    attachment_id: loaded.attachment.id,
+    document_kind: String(body.document_kind || 'other_identity'),
+    sha256: loaded.sha256,
+    ocr: { text: loaded.text, provider: loaded.provider, page_count: loaded.pageCount, review_required: true },
+    proposed_fields: extractIdentityFields(loaded.text, String(body.document_kind || 'other_identity')),
+    image,
+    authority: 'provisional',
+    review_required: true,
+  });
 }
 
 function bearerToken(request) {
@@ -217,6 +353,8 @@ http.createServer(async (request, response) => {
     if (request.method === 'GET' && request.url === '/api/bob/health') return await bobHealth(request, response);
     if (request.method === 'POST' && request.url === '/api/bob/voice/transcribe') return await proxyVoiceTranscription(request, response);
     if (request.method === 'POST' && request.url === '/api/bob/voice/speak') return await proxyVoiceSpeech(request, response);
+    if (request.method === 'POST' && request.url === '/api/bob/media/ocr-image') return await identityDocument(request, response, true);
+    if (request.method === 'POST' && request.url === '/api/bob/media/identity-document') return await identityDocument(request, response, false);
     if (request.method === 'POST' && request.url === '/api/navigation/route') return await routeGuidance(request, response);
     if (request.method === 'POST' && request.url === '/api/navigation/plan') return await routePlan(request, response);
     return json(response, 503, { error: 'capability_unavailable', capability: 'unrecovered_fcm_api_route' });

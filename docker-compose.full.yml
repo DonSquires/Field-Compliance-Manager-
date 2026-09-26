@@ -28,6 +28,9 @@ services:
       MAX_BODY_BYTES: ${MAX_BODY_BYTES:-268435456}
       OSRM_URL: "http://osrm:5000"
       SOLVER_URL: "http://fcm-solver:5001"
+      INFERENCE_SERVICE_URL: "http://fcm-inference:3000"
+      INFERENCE_API_KEY: ${INFERENCE_API_KEY:-}
+      IDENTITY_INFERENCE_SECRET: ${IDENTITY_INFERENCE_SECRET:?set IDENTITY_INFERENCE_SECRET}
       # In-house embeddings (Bob RAG). Reachable by compose service name on fcm-net.
       OLLAMA_URL: "http://ollama:11434"
       EMBED_MODEL: "nomic-embed-text"

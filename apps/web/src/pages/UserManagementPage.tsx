@@ -1,9 +1,10 @@
 import React, { useCallback, useEffect, useMemo, useState } from 'react';
-import { AlertTriangle, CheckCircle2, Filter, History, MailPlus, MoreHorizontal, RefreshCw, Search, ShieldCheck, UserCheck, UserMinus, Users, X } from 'lucide-react';
+import { AlertTriangle, CheckCircle2, ContactRound, Filter, History, MailPlus, MoreHorizontal, RefreshCw, Search, ShieldCheck, UserCheck, UserMinus, Users, X } from 'lucide-react';
 import { useAuth, type AppRole } from '../context/AuthContext';
 import { getAssignableRoles, IDENTITY_ROLE_LABEL } from '../lib/identityRoles';
 import { supabase } from '../lib/supabase';
 import { UserIdentityWorkspace, type ManagedUserIdentity, type UserAccessPreset, type UserPresetAssignment, type UserSpineReadiness } from '../components/UserIdentityWorkspace';
+import { IdentityRecordsWorkspace } from '../components/IdentityRecordsWorkspace';
 import './UserManagementPage.css';
 
 interface UserRow {
@@ -47,9 +48,11 @@ const UserManagementPage: React.FC = () => {
   const [assignments, setAssignments] = useState<UserPresetAssignment[]>([]);
   const [readiness, setReadiness] = useState<UserSpineReadiness[]>([]);
   const [selectedUser, setSelectedUser] = useState<UserRow | null>(null);
+  const [showIdentityRecords, setShowIdentityRecords] = useState(false);
 
   const assignableRoles = useMemo(() => getAssignableRoles(profile?.role ?? 'unknown'), [profile?.role]);
   const directInviteRoles = useMemo(() => assignableRoles.filter((role) => !['officer', 'admin_officer'].includes(role)), [assignableRoles]);
+  const canManageIdentityRecords = ['grand_master', 'master', 'admin'].includes(profile?.role ?? 'unknown');
 
   const loadIdentity = useCallback(async () => {
     const operatingBranchId = operatingOrganizationId ?? profile?.organizationId;
@@ -183,7 +186,7 @@ const UserManagementPage: React.FC = () => {
     <div className="identity-page">
       <header className="identity-heading">
         <div><span>Administration</span><h1>Identity and access</h1><p>Manage staff identity and access for the selected operating branch.</p></div>
-        <button type="button" className="identity-invite-button" onClick={() => setShowInvite((open) => !open)}><MailPlus size={17} /> Invite user</button>
+        <div className="identity-heading-actions">{canManageIdentityRecords && <button type="button" onClick={() => setShowIdentityRecords(true)}><ContactRound size={17} /> Identity records</button>}<button type="button" className="identity-invite-button" onClick={() => setShowInvite((open) => !open)}><MailPlus size={17} /> Invite user</button></div>
       </header>
 
       <section className="identity-summary" aria-label="Account summary">
@@ -259,6 +262,7 @@ const UserManagementPage: React.FC = () => {
         </div>
       )}
       {selectedUser && <UserIdentityWorkspace user={selectedUser as ManagedUserIdentity} callerRole={profile?.role ?? 'unknown'} presets={presets} assignment={assignments.find((assignment) => assignment.user_id === selectedUser.id) ?? null} readiness={readiness.find((row) => row.user_id === selectedUser.id) ?? null} branches={operatingOrganizations} onClose={() => setSelectedUser(null)} onChanged={async () => { await loadIdentity(); }} />}
+      {canManageIdentityRecords && showIdentityRecords && profile?.id && (operatingOrganizationId ?? profile.organizationId) && <IdentityRecordsWorkspace organizationId={(operatingOrganizationId ?? profile.organizationId) as string} userId={profile.id} onClose={() => setShowIdentityRecords(false)} />}
     </div>
   );
 };

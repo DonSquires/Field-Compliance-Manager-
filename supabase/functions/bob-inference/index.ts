@@ -27,11 +27,27 @@
 const BOB_INFERENCE_SECRET = Deno.env.get('BOB_INFERENCE_SECRET') ?? '';
 const API_URL = Deno.env.get('FCM_API_URL') ?? Deno.env.get('API_URL') ?? Deno.env.get('RAILWAY_API_URL') ?? '';
 const API_TOKEN = Deno.env.get('FCM_API_TOKEN') ?? Deno.env.get('API_TOKEN') ?? Deno.env.get('RAILWAY_API_TOKEN') ?? '';
+const IDENTITY_INFERENCE_SECRET = Deno.env.get('IDENTITY_INFERENCE_SECRET') ?? '';
+
+async function identityContext(body: Record<string, any>) {
+  if (!IDENTITY_INFERENCE_SECRET || !body.attachment_id || !body.organization_id || !body.actor_id) return null;
+  const payload = JSON.stringify({
+    attachment_id: body.attachment_id,
+    organization_id: body.organization_id,
+    actor_id: body.actor_id,
+    expires_at: Math.floor(Date.now() / 1000) + 60,
+  });
+  const encodedPayload = btoa(payload).replaceAll('+', '-').replaceAll('/', '_').replace(/=+$/, '');
+  const key = await crypto.subtle.importKey('raw', new TextEncoder().encode(IDENTITY_INFERENCE_SECRET), { name: 'HMAC', hash: 'SHA-256' }, false, ['sign']);
+  const signature = Array.from(new Uint8Array(await crypto.subtle.sign('HMAC', key, new TextEncoder().encode(encodedPayload))))
+    .map((byte) => byte.toString(16).padStart(2, '0')).join('');
+  return `${encodedPayload}.${signature}`;
+}
 serve(async (req)=>{
   if (req.method === 'OPTIONS') return new Response('ok', {
     status: 200
   });
-  const json = (body, status = 200)=>new Response(JSON.stringify(body), {
+  const json = (body: unknown, status = 200)=>new Response(JSON.stringify(body), {
       status,
       headers: {
         'Content-Type': 'application/json'
@@ -58,11 +74,11 @@ serve(async (req)=>{
     // v2 contract: pass through request_id for correlation
     const requestId = body.request_id;
     console.log(`[bob-inference] action=${action} has_attachment=${Boolean(body.attachment_id)} has_query=${Boolean(body.query)} has_message=${Boolean(body.message?.trim())} request_id=${requestId ?? 'none'}`);
-    const endpoint = action === 'extract_service_agreement' ? '/api/bob/extract/service-agreement' : action === 'extract_credential' ? '/api/bob/extract/credential' : action === 'extract_freedom_camping_bylaw' ? '/api/bob/extract/freedom-camping-bylaw' : action === 'understand_document' ? '/api/bob/document/understand' : action === 'understand_documents_batch' ? '/api/bob/documents/understand-batch' : action === 'retrieve_knowledge' ? '/api/bob/knowledge/retrieve' : action === 'describe_image' ? '/api/bob/vision/describe' : action === 'ocr_image' ? '/api/bob/media/ocr-image' : action === 'transcribe_media' ? '/api/bob/media/transcribe' : action === 'sample_video_frames' ? '/api/bob/media/sample-frames' : action === 'plan_import_mapping' ? '/api/bob/import/plan-mapping' : action === 'plan' ? '/api/bob/plan' : action === 'embed' ? '/api/bob/embed' : '/api/bob/chat';
+    const endpoint = action === 'extract_service_agreement' ? '/api/bob/extract/service-agreement' : action === 'extract_credential' ? '/api/bob/extract/credential' : action === 'extract_freedom_camping_bylaw' ? '/api/bob/extract/freedom-camping-bylaw' : action === 'understand_document' ? '/api/bob/document/understand' : action === 'understand_documents_batch' ? '/api/bob/documents/understand-batch' : action === 'retrieve_knowledge' ? '/api/bob/knowledge/retrieve' : action === 'describe_image' ? '/api/bob/vision/describe' : action === 'ocr_image' ? '/api/bob/media/ocr-image' : action === 'identity_document' ? '/api/bob/media/identity-document' : action === 'transcribe_media' ? '/api/bob/media/transcribe' : action === 'sample_video_frames' ? '/api/bob/media/sample-frames' : action === 'plan_import_mapping' ? '/api/bob/import/plan-mapping' : action === 'plan' ? '/api/bob/plan' : action === 'embed' ? '/api/bob/embed' : '/api/bob/chat';
     if (action === 'chat' && !body.message?.trim()) return json({
       error: 'message is required'
     }, 400);
-    if ((action === 'extract_service_agreement' || action === 'extract_credential' || action === 'extract_freedom_camping_bylaw' || action === 'understand_document' || action === 'describe_image' || action === 'ocr_image' || action === 'transcribe_media' || action === 'sample_video_frames') && !body.attachment_id?.trim()) return json({
+    if ((action === 'extract_service_agreement' || action === 'extract_credential' || action === 'extract_freedom_camping_bylaw' || action === 'understand_document' || action === 'describe_image' || action === 'ocr_image' || action === 'identity_document' || action === 'transcribe_media' || action === 'sample_video_frames') && !body.attachment_id?.trim()) return json({
       error: 'attachment_id is required'
     }, 400);
     if (action === 'retrieve_knowledge' && !body.query?.trim()) return json({
@@ -104,7 +120,7 @@ serve(async (req)=>{
       memory_context: body.memory_context ?? undefined
     } : action === 'embed' ? {
       text: body.text ?? ''
-    } : action === 'ocr_image' || action === 'transcribe_media' || action === 'sample_video_frames' ? {
+    } : action === 'ocr_image' || action === 'identity_document' || action === 'transcribe_media' || action === 'sample_video_frames' ? {
       ...body
     } : action === 'understand_documents_batch' ? {
       conversation_id: body.conversation_id,
@@ -124,11 +140,14 @@ serve(async (req)=>{
     if (requestId) {
       actionPayload.request_id = requestId;
     }
+    const signedIdentityContext = action === 'identity_document' ? await identityContext(body) : null;
+    if (action === 'identity_document' && !signedIdentityContext) return json({ error: 'Identity inference context is not configured' }, 503);
     const apiRes = await fetch(`${API_URL}${endpoint}`, {
       method: 'POST',
       headers: {
         'Content-Type': 'application/json',
-        'Authorization': `Bearer ${API_TOKEN}`
+        'Authorization': `Bearer ${API_TOKEN}`,
+        ...(signedIdentityContext ? { 'X-Identity-Context': signedIdentityContext } : {}),
       },
       body: JSON.stringify(actionPayload)
     });
@@ -152,7 +171,7 @@ serve(async (req)=>{
     if (action === 'plan_import_mapping') return json(data);
     if (action === 'plan') return json(data);
     if (action === 'embed') return json(data);
-    if (action === 'ocr_image' || action === 'transcribe_media' || action === 'sample_video_frames') return json(data);
+    if (action === 'ocr_image' || action === 'identity_document' || action === 'transcribe_media' || action === 'sample_video_frames') return json(data);
     if (action === 'describe_image') return json({
       vision: data
     });

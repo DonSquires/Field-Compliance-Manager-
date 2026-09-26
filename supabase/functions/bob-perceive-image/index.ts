@@ -28,7 +28,7 @@ const CAN_PERCEIVE = new Set([
   'admin_officer',
   'officer'
 ]);
-function json(body, status = 200) {
+function json(body: unknown, status = 200) {
   return new Response(JSON.stringify(body), {
     status,
     headers: {
@@ -37,7 +37,7 @@ function json(body, status = 200) {
     }
   });
 }
-async function callInference(action, payload) {
+async function callInference(action: string, payload: Record<string, unknown>): Promise<{ ok: boolean; status: number; data: Record<string, any> }> {
   const res = await fetch(BOB_INFERENCE_URL, {
     method: 'POST',
     headers: {
@@ -88,8 +88,8 @@ serve(async (req)=>{
       error: 'Unauthorized'
     }, 401);
     const admin = createClient(SUPABASE_URL, SUPABASE_SERVICE_ROLE_KEY);
-    const { data: profile } = await admin.from('user_profiles').select('id, role').eq('id', user.id).single();
-    if (!profile || !CAN_PERCEIVE.has(String(profile.role))) {
+    const { data: profile } = await admin.from('user_profiles').select('id, role, organization_id, deactivated_at').eq('id', user.id).single();
+    if (!profile || profile.deactivated_at || !CAN_PERCEIVE.has(String(profile.role))) {
       return json({
         error: 'Forbidden: insufficient role for image perception'
       }, 403);
@@ -105,13 +105,62 @@ serve(async (req)=>{
     if (!attachmentId) return json({
       error: 'attachment_id is required'
     }, 400);
-    const { data: att } = await admin.from('bob_attachments').select('id, organization_id, file_name, purpose, storage_path').eq('id', attachmentId).maybeSingle();
+    const { data: att } = await callerClient.from('bob_attachments').select('id, organization_id, uploaded_by, file_name, purpose, storage_bucket, storage_path').eq('id', attachmentId).maybeSingle();
     if (!att) return json({
       error: 'Attachment not found'
     }, 404);
+    if (att.uploaded_by !== user.id) return json({ error: 'Attachment belongs to another user' }, 403);
+    if (body.mode === 'identity_document') {
+      if (!['grand_master', 'master', 'admin'].includes(String(profile.role))) {
+        return json({ error: 'Forbidden: administrator identity review required' }, 403);
+      }
+      const personRecordId = String(body.person_record_id ?? '').trim();
+      const organizationId = String(body.organization_id ?? att.organization_id ?? '').trim();
+      const documentKind = String(body.document_kind ?? '').trim();
+      const expectedPrefix = `org/${organizationId}/identity/${user.id}/`;
+      if (!personRecordId || !organizationId || !documentKind || att.organization_id !== organizationId) {
+        return json({ error: 'Identity document organization, person, and kind are required' }, 400);
+      }
+      if (att.purpose !== 'identity_document' || att.storage_bucket !== 'identity-evidence' || !att.storage_path.startsWith(expectedPrefix)) {
+        return json({ error: 'Identity attachment is outside the governed private intake path' }, 400);
+      }
+      const { data: canAdminister } = await callerClient.rpc('is_admin_for_org', { target_org_id: organizationId });
+      if (!canAdminister) return json({ error: 'Forbidden: administrator access to this organization is required' }, 403);
+      const inference = await callInference('identity_document', {
+        attachment_id: att.id,
+        organization_id: organizationId,
+        actor_id: user.id,
+        document_kind: documentKind,
+      });
+      if (!inference.ok || !inference.data?.success) return json({ error: 'Identity document perception failed', detail: inference.data }, 502);
+      const image = inference.data.image ?? {};
+      const { data: proposal, error: proposalError } = await admin.rpc('register_identity_document_proposal', {
+        p_actor_user_id: user.id,
+        p_organization_id: organizationId,
+        p_person_record_id: personRecordId,
+        p_attachment_id: att.id,
+        p_document_kind: documentKind,
+        p_sha256: inference.data.sha256,
+        p_proposed_fields: inference.data.proposed_fields ?? {},
+        p_face_embedding: image.face_embedding ?? null,
+        p_face_confidence: image.face_confidence ?? null,
+        p_face_count: image.face_count ?? 0,
+      });
+      if (proposalError) return json({ error: proposalError.message }, 400);
+      return json({
+        success: true,
+        proposal,
+        document_kind: documentKind,
+        proposed_fields: inference.data.proposed_fields ?? {},
+        ocr: inference.data.ocr ?? {},
+        face: { count: image.face_count ?? 0, candidate_ready_after_approval: Boolean(image.face_count === 1 && image.face_embedding) },
+        authority: 'provisional',
+        review_required: true,
+      });
+    }
     const wantOcr = body.want_ocr !== false;
     const wantVision = body.want_vision !== false;
-    const result = {
+    const result: Record<string, any> = {
       success: true,
       attachment_id: att.id,
       file_name: att.file_name,

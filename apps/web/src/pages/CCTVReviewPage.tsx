@@ -128,6 +128,7 @@ type FaceObservationLink = {
   metadata: {
     candidates?: FaceCandidate[];
     original_thumbnail?: string | null;
+    source_event_id?: string | null;
   } | null;
 };
 
@@ -699,8 +700,8 @@ export const CCTVReviewPage: React.FC<CCTVReviewPageProps> = ({ initialFilter = 
         return;
       }
       const [{ data: observations, error: observationsError }, { data: records, error: recordsError }, { data: vehicles, error: vehiclesError }, { data: incidents, error: incidentsError }, { data: drafts, error: draftsError }, { data: reviewEvents, error: reviewEventsError }] = await Promise.all([
-        supabase.from('face_observations').select('id, person_record_id, metadata').eq('organization_id', profile.organizationId).eq('evidence_item_id', selected.evidence_item_id),
-        supabase.from('person_records').select('id, display_name, review_state, metadata').eq('organization_id', profile.organizationId).order('created_at', { ascending: true }),
+        supabase.rpc('get_cctv_face_observation_links', { p_organization_id: profile.organizationId, p_evidence_item_id: selected.evidence_item_id }),
+        supabase.rpc('get_cctv_review_person_records', { p_organization_id: profile.organizationId }),
         supabase.from('vehicles').select('id, plate, make, model').eq('organization_id', profile.organizationId).order('plate', { ascending: true }),
         supabase.from('incidents').select('id, incident_type, status, occurred_at').eq('organization_id', profile.organizationId).in('status', ['open', 'in_review', 'escalated']).order('occurred_at', { ascending: false }),
         supabase.from('cctv_identity_drafts').select('id, event_id, proposed_person_record_id, proposed_display_name, status, authority_level').eq('organization_id', profile.organizationId).eq('evidence_item_id', selected.evidence_item_id),
@@ -712,13 +713,11 @@ export const CCTVReviewPage: React.FC<CCTVReviewPageProps> = ({ initialFilter = 
         return;
       }
       const nextRecords = (records ?? []) as PersonRecordOption[];
-      const recordById = new Map(nextRecords.map((record) => [record.id, record]));
       const nextLinks: Record<string, FaceObservationLink> = {};
       const nextDrafts: Record<string, IdentityDraftState> = {};
       const nextReviewStates: Record<string, ReviewEventState> = {};
       for (const observation of (observations ?? []) as FaceObservationLink[]) {
-        const record = observation.person_record_id ? recordById.get(observation.person_record_id) : null;
-        const eventId = typeof record?.metadata?.source_event_id === 'string' ? record.metadata.source_event_id : null;
+        const eventId = typeof observation.metadata?.source_event_id === 'string' ? observation.metadata.source_event_id : null;
         if (eventId) nextLinks[eventId] = observation;
       }
       for (const draft of drafts ?? []) {
@@ -1883,13 +1882,14 @@ export const CCTVReviewPage: React.FC<CCTVReviewPageProps> = ({ initialFilter = 
                   {!observationRecordsLoading && !observationRecordsError && observationRecords.length === 0 ? <div className="cctv-empty-small"><Database size={18} /><span>No governed observation records have been created for this video yet.</span></div> : null}
                   {observationRecords.map((observation) => {
                     const priorMatches = observation.candidates.filter((candidate) => candidate.match_kind === 'observation').length;
-                    const recordLabel = observation.personRecordId ? observation.profileName || 'Person profile linked' : observation.canonicalVehicleId ? observation.plate ? `Vehicle ${observation.plate}` : 'Vehicle record linked' : observation.kind === 'animal' ? 'Animal observation' : 'No canonical record yet';
+                    const identityMatches = observation.candidates.filter((candidate) => candidate.match_kind === 'person_record' && candidate.person_record_id);
+                    const recordLabel = observation.personRecordId ? observation.profileName || 'Person profile linked' : observation.canonicalVehicleId ? observation.plate ? `Vehicle ${observation.plate}` : 'Vehicle record linked' : identityMatches.length ? `Possible person: ${identityMatches[0].display_name || 'review required'}` : observation.kind === 'animal' ? 'Animal observation' : 'No canonical record yet';
                     return <article key={observation.id} className="cctv-record-card">
                       {observation.thumbnail ? <img src={observation.thumbnail} alt="" /> : <span className="cctv-record-card__blank"><Database size={19} /></span>}
                       <div className="cctv-record-card__body">
                         <div><strong>{entityTitle(observation)}</strong><span className={`cctv-record-state is-${isReviewed(observation) ? 'reviewed' : 'pending'}`}>{isReviewed(observation) ? observation.reviewState.replace(/_/g, ' ') : 'Review needed'}</span></div>
                         <p>{recordLabel}</p>
-                        <small>{inferenceReviewLabel(observation)} · {priorMatches ? `${priorMatches} matched prior sighting${priorMatches === 1 ? '' : 's'}` : observation.portfolioKey ? 'History ready' : 'First unlinked sighting'}</small>
+                        <small>{inferenceReviewLabel(observation)} · {identityMatches.length ? `${identityMatches.length} possible person match${identityMatches.length === 1 ? '' : 'es'}` : priorMatches ? `${priorMatches} matched prior sighting${priorMatches === 1 ? '' : 's'}` : observation.portfolioKey ? 'History ready' : 'First unlinked sighting'}</small>
                       </div>
                       <div className="cctv-record-card__actions"><button type="button" className="cctv-btn-jump" onClick={() => openObservationRecord(observation.id)}>{observation.personRecordId || observation.canonicalVehicleId ? 'Update record' : 'Add or link record'}</button><a className="cctv-btn-jump" href={`/admin/field-ops?area=cctv-triage&observation=${observation.id}`} target="_blank" rel="noopener noreferrer" title="Open this observation and its previous sightings on another screen"><ExternalLink size={13} /> History on screen 2</a></div>
                     </article>;
