@@ -264,10 +264,14 @@ async function executeBuilderModelRun({ supabase, modelRequest, gateway, validat
     if (validateOutput) {
       try {
         result.validated_output = validateOutput(result.data?.content);
-      } catch {
+      } catch (validationError) {
+        // Keep the validator's reason and a short, redacted head of the output: a bare
+        // "failed validation" cost a live round-trip to diagnose (job 3a4a2d06's reviewer).
+        const reason = validationError instanceof Error ? validationError.message : String(validationError);
+        const preview = String(result.data?.content ?? '').replace(/\s+/g, ' ').slice(0, 240);
         result.ok = false;
         result.status = 422;
-        result.error = 'model output failed validation';
+        result.error = `model output failed validation: ${reason}${preview ? ` (output starts: ${preview})` : ''}`.slice(0, 600);
       }
     }
   }

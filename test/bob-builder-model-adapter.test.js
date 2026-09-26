@@ -265,8 +265,9 @@ test('invalid model output is rejected before artifact upload', async () => {
 
   assert.equal(result.ok, false);
   assert.equal(result.status, 422);
-  assert.equal(result.error, 'model output failed validation');
+  assert.equal(result.error, 'model output failed validation: invalid shape (output starts: invalid)');
   assert.equal(mock.storageWrites.length, 0);
   const update = mock.writes.find(write => write.type === 'update');
   assert.equal(update.value.status, 'failed');
+  assert.match(update.value.error, /invalid shape/, 'the validator reason is persisted on the model run');
 });
