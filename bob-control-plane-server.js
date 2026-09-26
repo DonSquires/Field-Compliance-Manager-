@@ -241,7 +241,9 @@ async function commitBuilderPatch(jobId, artifactId) {
   const { data: object, error: downloadError } = await builderSupabase.storage.from('builder-artifacts').download(artifact.storage_location.slice('supabase_storage://builder-artifacts/'.length));
   const patch = object ? Buffer.from(await object.arrayBuffer()).toString('utf8') : '';
   if (downloadError || !patch || crypto.createHash('sha256').update(patch).digest('hex') !== artifact.checksum) throw new BuilderStepError(409, 'Verified patch artifact integrity check failed');
-  const workspace = createBranchWorkspace({ sourceDir: builderSourceDir, workspaceRoot: builderWorkspaceRoot, jobId: job.id, targetSha: job.workspace_head_sha, branchName: job.workspace_branch });
+  // The recorded head is the truth; a tree left dirty (or one commit ahead but unrecorded) by an
+  // interrupted commit step is restored to it and the verified patch is applied again.
+  const workspace = createBranchWorkspace({ sourceDir: builderSourceDir, workspaceRoot: builderWorkspaceRoot, jobId: job.id, targetSha: job.workspace_head_sha, branchName: job.workspace_branch, recoverInterrupted: true });
   const commit = commitVerifiedPatch({ workspacePath: workspace.workspacePath, branchName: workspace.branchName, patch, message: `Bob Builder: ${artifact.id}` });
   const { data: updated, error: recordError } = await builderSupabase.rpc('builder_record_workspace_commit', { _job_id: job.id, _expected_head_sha: job.workspace_head_sha, _commit_sha: commit.commitSha });
   if (recordError || !updated) throw new BuilderStepError(409, 'Builder workspace commit could not be recorded');

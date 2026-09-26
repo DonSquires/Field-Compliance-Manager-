@@ -77,17 +77,27 @@ function commitVerifiedPatch({ workspacePath, branchName, patch, message, push =
   // The lane worker has already verified this patch; the commit step enforces path safety and the protected paths, not the lane fence.
   const changedFiles = validatePatchText(patch, { lane: 'verified' });
   const patchPath = path.join(fs.mkdtempSync(path.join(os.tmpdir(), 'bob-verified-patch-')), 'patch.diff');
+  const head = git(workspacePath, ['rev-parse', 'HEAD']);
   try {
     fs.writeFileSync(patchPath, patch, { mode: 0o600 });
     git(workspacePath, ['apply', '--check', '--whitespace=error-all', patchPath]);
-    git(workspacePath, ['apply', '--whitespace=error-all', patchPath]);
-    const actualFiles = changedFilesFromPatch(git(workspacePath, ['diff', '--binary']));
+    // Apply to the index as well as the tree: a file the patch creates is otherwise untracked,
+    // `git diff` leaves it out, and the manifest check fails a patch that is in fact exact
+    // (job f6fbd0da added test/bob-builder-e2e-driver.test.js).
+    git(workspacePath, ['apply', '--index', '--whitespace=error-all', patchPath]);
+    const actualFiles = changedFilesFromPatch(git(workspacePath, ['diff', '--cached', '--binary']));
     if (JSON.stringify(actualFiles) !== JSON.stringify(changedFiles)) throw new Error('Applied patch files do not match its declared manifest');
-    git(workspacePath, ['add', '--', ...changedFiles]);
     git(workspacePath, ['-c', `user.name=${BUILDER_NAME}`, '-c', `user.email=${BUILDER_EMAIL}`, 'commit', '-m', String(message || 'Bob Builder verified change').slice(0, 200)]);
     const commitSha = git(workspacePath, ['rev-parse', 'HEAD']);
     if (push) git(workspacePath, ['push', 'origin', branchName]);
     return { branchName, commitSha, changedFiles, pushed: push };
+  } catch (error) {
+    // Leave the worktree as we found it; a half-applied patch would wedge every later attempt
+    // on the clean-checkout guard ("Builder source checkout must be clean").
+    if (git(workspacePath, ['rev-parse', 'HEAD']) === head) {
+      try { git(workspacePath, ['reset', '-q', '--hard', head]); git(workspacePath, ['clean', '-fdq']); } catch { /* the original error is the one to report */ }
+    }
+    throw error;
   } finally {
     fs.rmSync(path.dirname(patchPath), { recursive: true, force: true });
   }

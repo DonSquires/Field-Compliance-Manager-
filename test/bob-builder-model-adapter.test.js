@@ -322,3 +322,14 @@ test('model execution walks the in-house-first chain and escalates to OpenAI onl
   const upserts = mock.writes.filter(w => w.type === 'upsert').map(w => [w.value.provider, w.value.model_name]);
   assert.deepEqual(upserts, [['ollama', 'llama3.1:8b'], ['openai', 'gpt-5.4-mini']]);
 });
+
+test('in-house providers get a longer gateway timeout than OpenAI, and an explicit gateway timeout wins', () => {
+  const { gatewayTimeoutFor } = require('../supabase/functions/_shared/builder-model-adapter.js');
+  assert.equal(gatewayTimeoutFor('openai', {}, {}), 90000);
+  // A cold CPU load alone took ~100 s live (job 73560f1c); 90 s read "slow" as "stuck".
+  assert.equal(gatewayTimeoutFor('ollama', {}, {}), 420000);
+  assert.equal(gatewayTimeoutFor('gpu_workstation', {}, {}), 420000);
+  assert.equal(gatewayTimeoutFor('ollama', {}, { BOB_LOCAL_MODEL_TIMEOUT_MS: '300000' }), 300000);
+  assert.equal(gatewayTimeoutFor('ollama', { timeoutMs: 15000 }, {}), 15000);
+  assert.equal(gatewayTimeoutFor('openai', { timeoutMs: 'nope' }, {}), 90000);
+});

@@ -14,6 +14,22 @@ const LOCAL_WORKLOADS = new Set([
 ]);
 const AUTHOR_WORKLOADS = new Set(['backend_implementation', 'frontend_implementation', 'frontend_repair']);
 const REVIEW_WORKLOADS = new Set(['independent_code_review']);
+const LOCAL_PROVIDERS = new Set([PROVIDERS.OLLAMA, PROVIDERS.GPU_WORKSTATION]);
+
+// OpenAI answers within the 90 s that suits an edge-style caller; an in-house model may need
+// ~100 s just to load cold on the VPS CPU (llama3.1:8b, job 73560f1c timed out at 90 s) and then
+// generates at ~13 tok/s. Give local providers a longer budget so "slow" is not read as "stuck".
+const DEFAULT_GATEWAY_TIMEOUT_MS = 90000;
+const DEFAULT_LOCAL_GATEWAY_TIMEOUT_MS = 420000;
+
+function gatewayTimeoutFor(provider, gateway = {}, env = process.env) {
+  if (Number.isFinite(Number(gateway.timeoutMs)) && Number(gateway.timeoutMs) > 0) return Number(gateway.timeoutMs);
+  if (LOCAL_PROVIDERS.has(provider)) {
+    const configured = Number(env?.BOB_LOCAL_MODEL_TIMEOUT_MS);
+    return Number.isFinite(configured) && configured > 0 ? configured : DEFAULT_LOCAL_GATEWAY_TIMEOUT_MS;
+  }
+  return DEFAULT_GATEWAY_TIMEOUT_MS;
+}
 
 function parseChain(raw, fallback) {
   const list = String(raw || '').split(',').map(item => item.trim()).filter(item => Object.values(PROVIDERS).includes(item));
@@ -192,7 +208,7 @@ async function callModelGateway({
   gatewayUrl,
   apiToken,
   modelRequest,
-  timeoutMs = 90000
+  timeoutMs = DEFAULT_GATEWAY_TIMEOUT_MS
 }) {
   if (typeof fetchImpl !== 'function') throw new Error('fetch implementation is required');
   if (!gatewayUrl || !apiToken) throw new Error('model gateway credentials are required');
@@ -351,7 +367,7 @@ async function executeSingleModelRun({ supabase, modelRequest, gateway, validate
     return { ok: false, status: 503, error: 'model run provenance could not be recorded' };
   }
 
-  const result = await callModelGateway({ ...gateway, modelRequest });
+  const result = await callModelGateway({ ...gateway, modelRequest, timeoutMs: gatewayTimeoutFor(modelRequest.provider, gateway) });
   const completedAt = new Date().toISOString();
   if (result.ok) {
     if (validateOutput) {
@@ -417,6 +433,7 @@ module.exports = {
   persistModelArtifact,
   callModelGateway,
   fetchModelHealth,
+  gatewayTimeoutFor,
   selectProviders,
   providerRequest,
   executeBuilderModelRun,

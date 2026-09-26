@@ -81,6 +81,21 @@ Chat lane (`/opt/fcm/.env`): `BOB_ROUTE_PLANNER`, `BOB_ROUTE_VERIFIER`,
 `BOB_ROUTE_SUBAGENT`, `BOB_ROUTE_SYNTHESIS`, `GPU_WORKSTATION_MODEL`,
 `GPU_WORKSTATION_PLAN_MODEL`.
 
+## What the first live run showed (2026-09-26, laptop off)
+
+Jobs 73560f1c and f6fbd0da, author on OpenAI (no GPU on the link), reviewer
+chain `gpu_workstation → ollama → openai`:
+
+- VPS `llama3.1:8b` cold-loaded for ~100 s and hit the adapter's 90 s budget
+  once (`model gateway timed out`). Local providers now get
+  `BOB_LOCAL_MODEL_TIMEOUT_MS` (default 420 s).
+- On the next job it answered in 59 s with
+  `{"verdict":"passed","summary":"", …}` — a hollow pass. The validator
+  rejected it and the chain escalated to `gpt-5.6-sol`, which is the intended
+  behaviour: a small model that rubber-stamps is "stuck", not "done". Expect
+  the VPS CPU tier to be escalated past for real reviews until the laptop GPU
+  (qwen2.5-coder:14b / qwen3-coder:30b) is on the link.
+
 ## The outsourced tier (OpenAI) — deterministic best-available
 
 Because OpenAI is only reached when Bob is stuck, it should be the strongest

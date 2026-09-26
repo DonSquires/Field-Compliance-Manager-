@@ -49,6 +49,30 @@ test('a verified backend patch commits (the commit step enforces protected paths
   } finally { fs.rmSync(repo.root, { recursive: true, force: true }); }
 });
 
+test('a verified patch that creates a new file commits with an exact manifest, and a failed commit leaves the workspace clean', () => {
+  const repo = fixture();
+  try {
+    const workspace = createBranchWorkspace({ sourceDir: repo.root, workspaceRoot: repo.workspaceRoot, jobId: 'f6fbd0da474b48fb92649cc641d9d55f', targetSha: repo.sha });
+    // Live failure (job f6fbd0da): the added test file was untracked after `git apply`, `git diff`
+    // omitted it, and the manifest check rejected an exact patch — then the half-applied tree
+    // wedged every later publish attempt on "must be clean".
+    const newFilePatch = [
+      'diff --git a/apps/web/src/example.ts b/apps/web/src/example.ts', '--- a/apps/web/src/example.ts', '+++ b/apps/web/src/example.ts', '@@ -1 +1 @@', '-export const value = 1;', '+export const value = 3;',
+      'diff --git a/test/example.test.js b/test/example.test.js', 'new file mode 100644', '--- /dev/null', '+++ b/test/example.test.js', '@@ -0,0 +1 @@', '+// added by Bob', ''
+    ].join('\n');
+    const committed = commitVerifiedPatch({ workspacePath: workspace.workspacePath, branchName: workspace.branchName, patch: newFilePatch, message: 'Bob Builder: add a test' });
+    assert.deepEqual(committed.changedFiles, ['apps/web/src/example.ts', 'test/example.test.js']);
+    assert.equal(git(repo.root, ['show', `${committed.commitSha}:test/example.test.js`]), '// added by Bob');
+    assert.equal(git(workspace.workspacePath, ['status', '--porcelain']), '');
+
+    // A patch that no longer applies must not leave a dirty tree behind.
+    const stalePatch = ['diff --git a/apps/web/src/example.ts b/apps/web/src/example.ts', '--- a/apps/web/src/example.ts', '+++ b/apps/web/src/example.ts', '@@ -1 +1 @@', '-export const value = 1;', '+export const value = 4;', ''].join('\n');
+    assert.throws(() => commitVerifiedPatch({ workspacePath: workspace.workspacePath, branchName: workspace.branchName, patch: stalePatch, message: 'x' }));
+    assert.equal(git(workspace.workspacePath, ['status', '--porcelain']), '');
+    assert.equal(git(workspace.workspacePath, ['rev-parse', 'HEAD']), committed.commitSha);
+  } finally { fs.rmSync(repo.root, { recursive: true, force: true }); }
+});
+
 test('an unbound scratch workspace left dirty by an interrupted run is restored to the pin only when asked', () => {
   const repo = fixture();
   try {
