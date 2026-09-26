@@ -353,3 +353,26 @@ test('author effort drops to low for drafting, synthesis, and tool-less passes',
   assert.equal(authorEffort({ message: 'find LINZ', tools: [], history: [] }), 'low');
   assert.equal(authorEffort({ message: 'find LINZ', tools: TOOLS, history: [] }), undefined);
 });
+
+test('the verifier skips a provider that would answer with the author\'s exact identity (in-house critic stays a different model)', async () => {
+  const calls = [];
+  const gateway = createModelGateway({
+    env: { OPENAI_API_KEY: 'k', OPENAI_MODEL: 'gpt-5.4-mini', OPENAI_PLAN_MODEL: 'gpt-5.4', GPU_WORKSTATION_URL: 'http://gpu:11435/v1', GPU_WORKSTATION_MODEL: 'qwen2.5:7b', GPU_WORKSTATION_PLAN_MODEL: 'qwen2.5-coder:7b', BOB_ROUTE_PLANNER: 'gpu_workstation,openai', BOB_ROUTE_VERIFIER: 'gpu_workstation,openai' },
+    fetchImpl: fakeFetch([
+      async (url) => (url.startsWith('http://gpu:11435/v1/models') ? jsonResponse(200, { data: [] }) : null),
+      async (url, body) => {
+        if (!/chat\/completions$/.test(url)) return null;
+        calls.push({ url, model: body.model });
+        return completion('{"verdict":"pass","issues":[]}');
+      },
+    ]),
+  });
+  // Distinct laptop models: planner on the coder model, critic on the general model — both in-house.
+  const inHouse = await gateway.chatJson('verifier', [{ role: 'user', content: 'x' }], { maxTokens: 100, avoid: { provider: 'gpu_workstation', model: 'qwen2.5-coder:7b' } });
+  assert.equal(inHouse.provider, 'gpu_workstation');
+  assert.equal(inHouse.model, 'qwen2.5:7b');
+  // Same identity as the author: the laptop is skipped and the critic escalates to OpenAI.
+  const escalated = await gateway.chatJson('verifier', [{ role: 'user', content: 'x' }], { maxTokens: 100, avoid: { provider: 'gpu_workstation', model: 'qwen2.5:7b' } });
+  assert.equal(escalated.provider, 'openai');
+  assert.equal(escalated.attempts[0].error, 'same_identity_as_author');
+});

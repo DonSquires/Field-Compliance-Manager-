@@ -123,7 +123,7 @@ async function planTurn(body, { gateway, now = Date.now, logger = console, env =
   if (verifyEnabled) {
     const remaining = turnBudgetMs - elapsed();
     const criticBudget = Math.min(30000, remaining - 30000);
-    verification = await verifyDecision({ decision, input, gateway, now, budgetMs: criticBudget, useCritic: useCritic && criticBudget > 4000, logger });
+    verification = await verifyDecision({ decision, input, gateway, now, budgetMs: criticBudget, useCritic: useCritic && criticBudget > 4000, logger, avoid: { provider: attempt.completion.provider, model: attempt.completion.model } });
 
     if (verification.verdict === 'repair' && turnBudgetMs - elapsed() > 20000) {
       try {

@@ -45,14 +45,17 @@ services:
       # OpenAI on its own (services/fcm-api/src/bob/modelGateway.js).
       GPU_WORKSTATION_URL: ${GPU_WORKSTATION_URL:-http://host.docker.internal:11435/v1}
       GPU_WORKSTATION_MODEL: ${GPU_WORKSTATION_MODEL:-qwen2.5:7b}
-      GPU_WORKSTATION_PLAN_MODEL: ${GPU_WORKSTATION_PLAN_MODEL:-}
-      # Per-role provider chains (first healthy wins). The planner (author) stays
-      # on OpenAI unless routed in-house on purpose; verifier + subagents prefer
-      # the GPU and so keep a different model identity from the author.
-      BOB_ROUTE_PLANNER: ${BOB_ROUTE_PLANNER:-openai}
+      # The planner (author) uses a different laptop model from the verifier so the critic
+      # keeps a different identity in-house; both are pulled by scripts/bob-gpu-link/.
+      GPU_WORKSTATION_PLAN_MODEL: ${GPU_WORKSTATION_PLAN_MODEL:-qwen2.5-coder:7b}
+      # Per-role provider chains (first healthy wins). In-house first (owner ruling
+      # 2026-09-26): every role tries the laptop GPU, then OpenAI. plan.js escalates when a
+      # local plan is unparseable or the verifier blocks it; the gateway skips a verifier
+      # that would share the author's identity.
+      BOB_ROUTE_PLANNER: ${BOB_ROUTE_PLANNER:-gpu_workstation,openai}
       BOB_ROUTE_VERIFIER: ${BOB_ROUTE_VERIFIER:-gpu_workstation,openai}
       BOB_ROUTE_SUBAGENT: ${BOB_ROUTE_SUBAGENT:-gpu_workstation,openai}
-      BOB_ROUTE_SYNTHESIS: ${BOB_ROUTE_SYNTHESIS:-openai}
+      BOB_ROUTE_SYNTHESIS: ${BOB_ROUTE_SYNTHESIS:-gpu_workstation,openai}
       BOB_VERIFY_ENABLED: ${BOB_VERIFY_ENABLED:-true}
       BOB_PLAN_TURN_BUDGET_MS: ${BOB_PLAN_TURN_BUDGET_MS:-80000}
     extra_hosts:

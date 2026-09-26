@@ -10,11 +10,12 @@ the work, so the cost split is auditable (`builder_model_runs.provider`).
 
 | Role | First choice | Then | Last resort |
 |---|---|---|---|
-| Chat planner / drafting, synthesis | laptop GPU (`qwen2.5:7b`) | — | OpenAI (`gpt-5.4`) |
-| Chat verifier (critic), research subagents | laptop GPU | — | OpenAI (`gpt-5.4-mini`) |
-| Builder author (writes the code) | laptop GPU (`qwen2.5-coder:*`) | — | OpenAI (`gpt-5.4`) |
-| Builder independent reviewer | laptop GPU | VPS Ollama (`llama3.1:8b`, CPU) | OpenAI (`gpt-5.4-mini`) |
-| Builder analyst / release notes | laptop GPU | — | OpenAI |
+| Chat planner / drafting, synthesis | laptop GPU (`qwen2.5-coder:7b`) | — | OpenAI (`gpt-5.4`) |
+| Chat verifier (critic), research subagents | laptop GPU (`qwen2.5:7b`, never the planner's model) | — | OpenAI (`gpt-5.4-mini`) |
+| Builder author (writes the code) | laptop GPU (`qwen2.5-coder:*`) | — | OpenAI (`gpt-6-sol`) |
+| Builder independent reviewer | laptop GPU | — | OpenAI (`gpt-5.6-sol`) |
+| Builder analyst / release notes | laptop GPU | — | OpenAI (`gpt-6-sol`) |
+| Light / restricted-data work (classification, summaries) | laptop GPU | VPS Ollama (`llama3.1:8b`, CPU) | OpenAI (never for restricted data) |
 | Embeddings, image/vision helpers | VPS Ollama | — | — |
 
 The reviewer is always a different model identity from the author (checked in

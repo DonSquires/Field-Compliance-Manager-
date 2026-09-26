@@ -187,7 +187,7 @@ function needsRepair(issues) {
  * runs for user-facing decisions when time allows. Returns
  * { checked, verdict, issues, notes, critic, latency_ms }.
  */
-async function verifyDecision({ decision, input, gateway, now = Date.now, budgetMs = 25000, useCritic = true, logger = console }) {
+async function verifyDecision({ decision, input, gateway, now = Date.now, budgetMs = 25000, useCritic = true, logger = console, avoid = null }) {
   const started = now();
   const deterministic = runDeterministicChecks(decision, input);
   const issues = [...deterministic];
@@ -195,7 +195,7 @@ async function verifyDecision({ decision, input, gateway, now = Date.now, budget
   const userFacing = decision.action === 'answer' || decision.action === 'ask';
   if (useCritic && userFacing && gateway && budgetMs > 4000) {
     try {
-      const result = await gateway.chatJson('verifier', buildCriticMessages(decision, input, deterministic), { maxTokens: 700, timeoutMs: Math.min(budgetMs, 30000), reasoningEffort: 'low', temperature: 0.1 });
+      const result = await gateway.chatJson('verifier', buildCriticMessages(decision, input, deterministic), { maxTokens: 700, timeoutMs: Math.min(budgetMs, 30000), reasoningEffort: 'low', temperature: 0.1, ...(avoid ? { avoid } : {}) });
       const parsed = parseCriticContent(result.content);
       critic = parsed
         ? { ...parsed, provider: result.provider, model: result.model, latency_ms: result.latency_ms }

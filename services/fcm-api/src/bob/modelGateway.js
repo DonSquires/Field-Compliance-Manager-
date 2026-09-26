@@ -218,7 +218,9 @@ function createModelGateway({ env = process.env, fetchImpl = globalThis.fetch, n
   /**
    * Run a JSON-mode chat completion for a role. Returns
    * { content, provider, model, latency_ms, attempts } or throws when every
-   * provider in the chain failed.
+   * provider in the chain failed. `options.avoid` ({ provider, model }) skips a
+   * provider that would answer with that exact identity — the critic must never be
+   * the model that wrote the draft (BOB_DOCTRINE §9).
    */
   async function chatJson(role, messages, options = {}) {
     const chain = options.chain || config.chains[role] || config.chains.planner;
@@ -226,6 +228,10 @@ function createModelGateway({ env = process.env, fetchImpl = globalThis.fetch, n
     for (const name of chain) {
       const provider = providerFor(name, role);
       if (!provider) continue;
+      if (options.avoid && options.avoid.provider === name && options.avoid.model === provider.model) {
+        attempts.push({ provider: name, model: provider.model, ok: false, error: 'same_identity_as_author' });
+        continue;
+      }
       if (provider.kind !== 'openai') {
         const status = await probe(name);
         if (!status.healthy) {
