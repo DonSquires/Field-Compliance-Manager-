@@ -228,7 +228,7 @@ export function IdentityRecordsWorkspace({
   const [notice, setNotice] = useState<string | null>(null);
 
   const load = useCallback(
-    async (term = search) => {
+    async (term = "") => {
       setLoading(true);
       setError(null);
       const { data, error: loadError } = await supabase.rpc(
@@ -242,15 +242,19 @@ export function IdentityRecordsWorkspace({
       if (loadError) setError(loadError.message);
       else {
         const value = data as Partial<Registry> | null;
-        setRegistry({
+        const nextRegistry = {
           people: value?.people ?? [],
           vehicles: value?.vehicles ?? [],
           documents: value?.documents ?? [],
-        });
+        };
+        setRegistry(nextRegistry);
+        setLoading(false);
+        return nextRegistry;
       }
       setLoading(false);
+      return null;
     },
-    [organizationId, search],
+    [organizationId],
   );
 
   useEffect(() => {
@@ -277,13 +281,16 @@ export function IdentityRecordsWorkspace({
     setBusy("person");
     setError(null);
     setNotice(null);
-    const { error: saveError } = await supabase.rpc("manage_identity_person", {
-      p_organization_id: organizationId,
-      p_person_record_id: selectedPersonId,
-      p_action: selectedPersonId ? "update" : "create",
-      p_fields: person,
-      p_reason: reason.trim(),
-    });
+    const { data: savedPerson, error: saveError } = await supabase.rpc(
+      "manage_identity_person",
+      {
+        p_organization_id: organizationId,
+        p_person_record_id: selectedPersonId,
+        p_action: selectedPersonId ? "update" : "create",
+        p_fields: person,
+        p_reason: reason.trim(),
+      },
+    );
     if (saveError) setError(saveError.message);
     else {
       setNotice(
@@ -292,7 +299,11 @@ export function IdentityRecordsWorkspace({
           : "Draft person record created.",
       );
       setReason("");
-      await load();
+      const nextRegistry = await load(search);
+      const savedRecord = nextRegistry?.people.find(
+        (record) => record.person_record_id === savedPerson?.person_record_id,
+      );
+      if (savedRecord) selectPerson(savedRecord);
     }
     setBusy(null);
   };
@@ -316,7 +327,7 @@ export function IdentityRecordsWorkspace({
     else {
       setNotice("Face candidates removed. The reason remains in audit history.");
       setReason("");
-      await load();
+      await load(search);
     }
     setBusy(null);
   };
@@ -341,7 +352,7 @@ export function IdentityRecordsWorkspace({
           : "Canonical vehicle created.",
       );
       setReason("");
-      await load();
+      await load(search);
     }
     setBusy(null);
   };
@@ -435,14 +446,7 @@ export function IdentityRecordsWorkspace({
         `Extraction ready for human review. ${perception.data.face?.count === 1 ? "One source-image face can become a matching candidate after approval." : perception.data.face?.count > 1 ? "Several faces were found, so none will be enrolled." : "No enrolment face was found."}`,
       );
       setDocumentFile(null);
-      await load();
-      const next = (
-        await supabase.rpc("get_identity_registry", {
-          p_organization_id: organizationId,
-          p_search: null,
-          p_limit: 150,
-        })
-      ).data as Registry | null;
+      const next = await load(search);
       const document =
         next?.documents?.find((item) => item.attachment_id === attachmentId) ??
         null;
@@ -508,7 +512,7 @@ export function IdentityRecordsWorkspace({
       );
       setSelectedDocument(null);
       setSourceUrl(null);
-      await load();
+      await load(search);
     }
     setBusy(null);
   };
@@ -588,7 +592,7 @@ export function IdentityRecordsWorkspace({
           className="identity-records-search"
           onSubmit={(event) => {
             event.preventDefault();
-            void load();
+            void load(search);
           }}
         >
           <Search size={16} />
@@ -632,6 +636,13 @@ export function IdentityRecordsWorkspace({
                   <small>
                     {words(record.review_state)} · {record.document_count}{" "}
                     document{record.document_count === 1 ? "" : "s"}
+                    {registry.documents.filter(
+                      (document) =>
+                        document.person_record_id === record.person_record_id &&
+                        document.review_state === "manual_review_required",
+                    ).length
+                      ? ` · ${registry.documents.filter((document) => document.person_record_id === record.person_record_id && document.review_state === "manual_review_required").length} review required`
+                      : ""}
                     {record.face_candidate_ready
                       ? " · Face candidate ready"
                       : ""}
@@ -657,12 +668,20 @@ export function IdentityRecordsWorkspace({
                 </button>
               ))
             )}
+            {!loading && mode === "people" && registry.people.length === 0 && (
+              <p>No people match this search. Add a person to begin.</p>
+            )}
+            {!loading && mode === "vehicles" && registry.vehicles.length === 0 && (
+              <p>No vehicles match this search. Add a vehicle to begin.</p>
+            )}
           </aside>
           <main className="identity-records-editor">
             {mode === "people" ? (
               <>
                 <form onSubmit={savePerson}>
-                  <h3>{selectedPersonId ? "Person details" : "Add person"}</h3>
+                  <h3>
+                    1. {selectedPersonId ? "Person details" : "Add person"}
+                  </h3>
                   <div className="identity-records-fields">
                     <label>
                       <span>Name</span>
@@ -795,6 +814,7 @@ export function IdentityRecordsWorkspace({
                         rows={2}
                         value={reason}
                         onChange={(event) => setReason(event.target.value)}
+                        placeholder="Required: why is this record changing?"
                       />
                     </label>
                   </div>
@@ -833,7 +853,7 @@ export function IdentityRecordsWorkspace({
                 </form>
                 {selectedPersonId && (
                   <section className="identity-documents">
-                    <h3>Identity evidence</h3>
+                    <h3>2. Identity evidence</h3>
                     <p>
                       Upload a clear image or PDF. OCR and face detection fill a
                       proposal; compare it with the source before approval.
@@ -1057,7 +1077,11 @@ export function IdentityRecordsWorkspace({
             <section>
               <header>
                 <div>
-                  <span>Human review required</span>
+                  <span>
+                    {selectedDocument.review_state === "manual_review_required"
+                      ? "Human review required"
+                      : "Evidence review complete"}
+                  </span>
                   <h3 id="identity-document-review-title">
                     {selectedDocument.file_name ?? "Identity evidence"}
                   </h3>
@@ -1090,6 +1114,7 @@ export function IdentityRecordsWorkspace({
                   <label>
                     <span>Name</span>
                     <input
+                      disabled={selectedDocument.review_state !== "manual_review_required"}
                       value={documentFields.display_name}
                       onChange={(event) =>
                         setDocumentFields({
@@ -1103,6 +1128,7 @@ export function IdentityRecordsWorkspace({
                     <span>Date of birth</span>
                     <input
                       type="date"
+                      disabled={selectedDocument.review_state !== "manual_review_required"}
                       value={documentFields.date_of_birth}
                       onChange={(event) =>
                         setDocumentFields({
@@ -1115,6 +1141,7 @@ export function IdentityRecordsWorkspace({
                   <label>
                     <span>Driver licence number</span>
                     <input
+                      disabled={selectedDocument.review_state !== "manual_review_required"}
                       value={documentFields.driver_licence_number}
                       onChange={(event) =>
                         setDocumentFields({
@@ -1127,6 +1154,7 @@ export function IdentityRecordsWorkspace({
                   <label>
                     <span>Firearms licence number</span>
                     <input
+                      disabled={selectedDocument.review_state !== "manual_review_required"}
                       value={documentFields.firearms_licence_number}
                       onChange={(event) =>
                         setDocumentFields({
@@ -1140,6 +1168,7 @@ export function IdentityRecordsWorkspace({
                     <span>Driver licence expiry</span>
                     <input
                       type="date"
+                      disabled={selectedDocument.review_state !== "manual_review_required"}
                       value={documentFields.driver_licence_expiry}
                       onChange={(event) =>
                         setDocumentFields({
@@ -1153,6 +1182,7 @@ export function IdentityRecordsWorkspace({
                     <span>Firearms licence expiry</span>
                     <input
                       type="date"
+                      disabled={selectedDocument.review_state !== "manual_review_required"}
                       value={documentFields.firearms_licence_expiry}
                       onChange={(event) =>
                         setDocumentFields({
@@ -1163,9 +1193,23 @@ export function IdentityRecordsWorkspace({
                     />
                   </label>
                   <label className="is-wide">
+                    <span>Address</span>
+                    <input
+                      disabled={selectedDocument.review_state !== "manual_review_required"}
+                      value={documentFields.address}
+                      onChange={(event) =>
+                        setDocumentFields({
+                          ...documentFields,
+                          address: event.target.value,
+                        })
+                      }
+                    />
+                  </label>
+                  <label className="is-wide">
                     <span>Review notes</span>
                     <textarea
                       required
+                      disabled={selectedDocument.review_state !== "manual_review_required"}
                       rows={3}
                       value={documentReviewNote}
                       onChange={(event) =>
@@ -1197,22 +1241,36 @@ export function IdentityRecordsWorkspace({
                 </div>
               )}
               <footer>
-                <button
-                  type="button"
-                  onClick={() => void reviewDocument("reject")}
-                  disabled={busy !== null || !documentReviewNote.trim()}
-                >
-                  Reject evidence
-                </button>
-                <button
-                  type="button"
-                  className="identity-records-primary"
-                  onClick={() => void reviewDocument("approve")}
-                  disabled={busy !== null || !documentReviewNote.trim()}
-                >
-                  <CheckCircle2 size={15} />
-                  Approve and update person
-                </button>
+                {selectedDocument.review_state === "manual_review_required" ? (
+                  <>
+                    <button
+                      type="button"
+                      onClick={() => void reviewDocument("reject")}
+                      disabled={busy !== null || !documentReviewNote.trim()}
+                    >
+                      Reject evidence
+                    </button>
+                    <button
+                      type="button"
+                      className="identity-records-primary"
+                      onClick={() => void reviewDocument("approve")}
+                      disabled={busy !== null || !documentReviewNote.trim()}
+                    >
+                      <CheckCircle2 size={15} />
+                      Approve and update person
+                    </button>
+                  </>
+                ) : (
+                  <button
+                    type="button"
+                    onClick={() => {
+                      setSelectedDocument(null);
+                      setSourceUrl(null);
+                    }}
+                  >
+                    Close
+                  </button>
+                )}
               </footer>
             </section>
           </div>

@@ -101,9 +101,9 @@ const LoginPage: React.FC = () => {
             {(localError || authError) && <div className="login-error" role="alert">{localError || authError}</div>}
 
             {mode !== 'update_password' && (
-              <label className="login-field">
+              <label className="login-field" htmlFor="login-email">
                 <span>Email address</span>
-                <div><Mail size={17} aria-hidden="true" /><input type="email" required autoComplete="email" value={email} onChange={(event) => setEmail(event.target.value)} placeholder="name@organisation.nz" /></div>
+                <div><Mail size={17} aria-hidden="true" /><input id="login-email" aria-label="Email address" type="email" required autoComplete="email" value={email} onChange={(event) => setEmail(event.target.value)} placeholder="name@organisation.nz" /></div>
               </label>
             )}
 

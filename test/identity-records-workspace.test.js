@@ -81,6 +81,13 @@ test('People and Access exposes manual people, vehicles, and human-reviewed ID i
   assert.match(workspace, /Reject evidence/);
   assert.match(workspace, /One source-image face can become a matching candidate after approval/);
   assert.match(workspace, /Remove face candidate/);
+  assert.match(workspace, /Evidence review complete/);
+  assert.match(workspace, /No people match this search\. Add a person to begin\./);
+  assert.match(workspace, /const savedRecord = nextRegistry\?\.people\.find/);
+  assert.match(workspace, /<span>Address<\/span>/);
+  assert.match(workspace, /review required/);
+  assert.match(workspace, /1\. \{selectedPersonId \? "Person details" : "Add person"\}/);
+  assert.match(workspace, /2\. Identity evidence/);
   assert.match(workspace, /purpose: "identity_document"/);
   assert.match(workspace, /from\("identity-evidence"\)/);
   assert.match(workspace, /Driver licence expiry/);
