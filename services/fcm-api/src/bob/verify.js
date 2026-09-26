@@ -14,7 +14,7 @@ const INTERNAL_MARKER_RE = /\[(INTERNAL|SYSTEM|DEBUG|ERROR|TOOL|QUERY|TRUNCATED)
 const SQL_ERROR_RE = /(column\s+"?[\w.]+"?\s+does not exist|relation\s+"?[\w.]+"?\s+does not exist|syntax error at or near|PGRST\d{3}|\b42P01\b|\b42703\b|permission denied for (table|relation))/i;
 const FALSE_COMPLETION_RE = /\b(I have|I've|I just|has been|have been|was|were) (now )?(created|filed|updated|deleted|deployed|merged|approved|saved|written|applied|submitted|executed|imported|rostered|invoiced|paid)\b/i;
 const BANNED_FILLER_RE = /\b(certainly|of course|happy to help|great question|absolutely|as an ai( language model)?|i am programmed to|leverage|streamline|robust)\b/gi;
-const BLANKET_AFFIRMATIVE_RE = /^\s*(yes|yep|yeah|ok|okay|sure|correct|confirmed|agreed|go ahead|proceed|do it|all good|sounds good|yes to all|yes to everything|all of (them|the above)|use your (defaults|best guess(es)?)|go with your (defaults|best guess(es)?)|you decide|whatever you recommend|as you suggest(ed)?)[\s.!]*$/i;
+const BLANKET_AFFIRMATIVE_RE = /^\s*(yes|yep|yeah|ok|okay|sure|correct|confirmed|agreed|go ahead|proceed|do it|all good(?: with me)?|crack on|sounds good|yes to all|yes to everything|all of (them|the above)|use your (defaults|best guess(es)?)|go with your (defaults|best guess(es)?)|you decide|whatever you recommend|as you suggest(ed)?)[\s.!]*$/i;
 const DRAFT_REQUEST_RE = /\b(draft|write|create|prepare|produce|generate|put together)\b[\s\S]{0,80}\b(job description|position description|advert(isement)?|job ad|seek ad|agreement|contract|letter|policy|sop|procedure|report|checklist|proposal|email|memo|site instruction|brief|synopsis|summary)\b/i;
 
 function countQuestionLines(text) {

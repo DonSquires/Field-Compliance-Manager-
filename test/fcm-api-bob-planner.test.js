@@ -107,8 +107,10 @@ test('memory block hides identifiers and knowledge cards, keeps who the user is'
 
 test('deterministic checks catch questionnaires, re-asks after a blanket answer, leaks, and tool misuse', () => {
   const pending = { kind: 'ask', questions: [{ question: 'Do you want a 90-day trial clause?' }, { question: 'Own vehicle between sites?' }] };
-  const reAsk = runDeterministicChecks({ action: 'ask', reply: 'Great.', questions: [{ question: 'Do you want a 90 day trial clause included?' }], args: {} }, { message: 'yes to all', pending });
-  assert.ok(reAsk.some((issue) => issue.code === 're_ask_after_blanket_answer' && issue.severity === 'block'));
+  for (const message of ['yes to all', 'all good with me', 'Crack on!']) {
+    const reAsk = runDeterministicChecks({ action: 'ask', reply: 'Great.', questions: [{ question: 'Do you want a 90 day trial clause included?' }], args: {} }, { message, pending });
+    assert.ok(reAsk.some((issue) => issue.code === 're_ask_after_blanket_answer' && issue.severity === 'block'));
+  }
 
   const questionnaire = runDeterministicChecks({ action: 'answer', reply: '1. Casual?\n2. Region?\n3. Trial clause?\n4. Vehicle?', questions: [], args: {} }, { message: 'draft an agreement', pending: null });
   assert.ok(questionnaire.some((issue) => issue.code === 'questionnaire'));
