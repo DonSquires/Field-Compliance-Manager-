@@ -45,7 +45,7 @@ export function OfficerVehicleLookup({ organizationId }: Props) {
         if (flagError) throw flagError;
         setFlags((data as Flag[]) ?? []);
       } else setFlags([]);
-    } catch (cause) { setError(cause instanceof Error ? cause.message : 'Vehicle lookup could not be completed.'); } finally { setLoading(false); }
+    } catch (cause) { console.warn('Vehicle lookup failed', cause); setError("We couldn't look up this vehicle right now. Please try again."); } finally { setLoading(false); }
   };
 
   const hasResults = Boolean(vehicle || scv || observations.length || breaches.length);
