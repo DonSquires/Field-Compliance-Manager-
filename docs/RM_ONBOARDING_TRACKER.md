@@ -380,12 +380,14 @@ turn beats false completeness.
    view, dispatch, rostering, finance/invoicing, permit lookup — and fix
    anything that breaks or looks wrong against real data. Record findings
    here as they're found.
-6. **DART's "Update 251215" sheet (539 rows) was not imported this pass** —
-   it uses a different, header-less layout with a blanket "DART" code and no
-   per-row header row (unlike the main `2025`/`2026` sheets, which needed the
-   real header row found ~265 rows down past a leading charge-code reference
-   table, then trimmed before the importer could run). Worth a follow-up pass
-   once the higher-value clients are done.
+6. **RESOLVED 2026-09-26 - DART's "Update 251215" sheet imported.** Its
+  header-less 539-row layout was normalized locally without changing the
+  source workbook. The importer now collapses duplicate external references
+  before chunking and can preserve source filename, SHA-256, sheet, and row
+  provenance. Fifteen verified `Cat` location aliases were added to the
+  existing DART Zone map. Result: 323 unique events imported, 162 duplicate
+  source rows collapsed, and 54 blank/"All Sites" rows intentionally left
+  unplaced. See the DART follow-up below.
 
 ## PHASE 2 RUN AGAINST STAND/PF Olsen (2026-09-23) — 6th client, date-serial fix
 
@@ -526,6 +528,31 @@ turn beats false completeness.
 - Result: 681 (2025) + 1105 (2026) = 1786 location_events, the largest single
   client import this session, verified live (0 duplicate refs, correctly
   split 1272/514 between the Trig Road and Thomas Creek zones).
+
+### DART `Update 251215` follow-up (2026-09-26) - deferred sheet completed
+
+- Converted the workbook locally through the approved Excel-to-Markdown path,
+  then exported only the `Update 251215` worksheet to a temporary
+  importer-compatible CSV. The source workbook was opened read-only and was
+  not modified or uploaded.
+- Reused the existing `DART2025` idempotency namespace because this update
+  overlaps the 2025 period. Added the 15 exact `Cat` spelling variants present
+  in this sheet to `dart-zone-map.json`; blank Start/Finish rows and blanket
+  `All Sites` rows remain deliberately unmapped rather than being forced onto
+  one Zone.
+- Hardened `import-patrol-log.mjs` to collapse duplicate external references
+  before its 300-row transaction chunks. This makes rollback previews exact
+  even when repeated source rows cross chunk boundaries. Added optional
+  source filename/hash/sheet/row provenance without storing an absolute local
+  path.
+- Reviewed preview: 539 source rows; 485 place-mappable rows; 162 duplicate
+  source keys; 54 intentionally placeless rows; 323 unique new events; two
+  already-known patroller labels; date range 2025-10-13 to 2025-12-05.
+- Applied 323 events in two governed chunks. Live verification: 323 rows, 323
+  distinct external references, all 323 with source filename, SHA-256, sheet,
+  and source-row metadata; 174 events at the Trig Road Zone and 149 at the
+  Thomas Creek Zone. An identical post-apply dry run inserted 0 and skipped
+  all 323, proving replay safety.
 
 ## PHASE 2 RUN AGAINST PVT/R&M Other Private Clients (2026-09-23) — 12th client, cross-org split
 

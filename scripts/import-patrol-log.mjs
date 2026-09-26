@@ -11,7 +11,8 @@
  * external_ref/external_refs so a re-run does not duplicate.
  *
  *   node scripts/import-patrol-log.mjs --csv <path> --org-id <uuid> --client-code <code>
- *     --zone-map-file <path-to-json> [--dry-run|--apply]
+ *     --zone-map-file <path-to-json> [--source-label <file>] [--source-hash <sha256>]
+ *     [--source-sheet <sheet>] [--source-first-row <number>] [--dry-run|--apply]
  *
  * Required: FIELD_COMPLIANCE_CODESPACE (Supabase management token; never printed).
  */
@@ -28,10 +29,16 @@ const csvPath = flag('--csv');
 const orgId = flag('--org-id');
 const clientCode = flag('--client-code');
 const zoneMapFile = flag('--zone-map-file');
+const sourceLabel = flag('--source-label');
+const sourceHash = flag('--source-hash');
+const sourceSheet = flag('--source-sheet');
+const sourceFirstRow = Number(flag('--source-first-row') ?? 2);
 const zoneMap = zoneMapFile ? JSON.parse(readFileSync(zoneMapFile, 'utf8')) : JSON.parse(flag('--zone-map') ?? '{}');
 const token = process.env.FIELD_COMPLIANCE_CODESPACE;
 if (!token) { console.error('FIELD_COMPLIANCE_CODESPACE is required'); process.exit(1); }
 if (!csvPath || !orgId || !clientCode) { console.error('Usage: --csv <path> --org-id <uuid> --client-code <code> --zone-map-file <path> [--dry-run|--apply]'); process.exit(1); }
+if (sourceHash && !/^[a-f0-9]{64}$/i.test(sourceHash)) { console.error('--source-hash must be a SHA-256 hex digest'); process.exit(1); }
+if (!Number.isInteger(sourceFirstRow) || sourceFirstRow < 1) { console.error('--source-first-row must be a positive integer'); process.exit(1); }
 
 // R&M's own known officers (created 2026-09-23 on owner instruction). Extend
 // this list as more real names are confirmed from other client files.
@@ -154,10 +161,12 @@ const col = {
 
 const observationsBatch = [];
 const eventsBatch = [];
+const seenExternalRefs = new Set();
 let skipped = 0;
 let skippedNoZone = 0;
+let skippedDuplicate = 0;
 
-for (const r of table.slice(1)) {
+for (const [rowIndex, r] of table.slice(1).entries()) {
   const job = (r[col.job] ?? '').trim();
   const patroller = (r[col.patroller] ?? '').trim();
   const occurredAt = parseNzDate(r[col.date], r[col.time]);
@@ -187,8 +196,15 @@ for (const r of table.slice(1)) {
   const patrollerNames = patroller.split(/[\n,]+/).map((s) => s.trim().toLowerCase()).filter(Boolean);
   const officerId = !isCamera ? patrollerNames.map((n) => KNOWN_OFFICERS[n]).find(Boolean) ?? null : null;
   const externalRef = `rm_patrol_import:${clientCode}:${job || createHash('md5').update(occurredAt + locationText + comments).digest('hex').slice(0, 8)}`;
+  if (seenExternalRefs.has(externalRef)) {
+    skippedDuplicate += 1;
+    continue;
+  }
+  seenExternalRefs.add(externalRef);
   const payload = {
     source: 'rm_patrol_log_import', client_code: clientCode, job_number: job || null,
+    source_file: sourceLabel || null, source_sha256: sourceHash || null,
+    source_sheet: sourceSheet || null, source_row: sourceSheet ? sourceFirstRow + rowIndex : null,
     patroller_raw: patroller, location_raw: locationText, reserve_raw: reserveCode || null, comments: comments || null,
     reg_raw: (r[col.reg] ?? '').trim() || null, plates_found: plates, job_time_hours: r[col.jobTime] || null,
     job_kms: r[col.jobKms] || null, issue: r[col.issue] || null, action_by: r[col.actionBy] || null,
@@ -211,7 +227,7 @@ for (const r of table.slice(1)) {
   }
 }
 
-console.log(`Parsed ${table.length - 1} rows (${skipped} skipped: no date; ${skippedNoZone} skipped: no resolvable zone via Reserve/Location): ${observationsBatch.length} -> observations, ${eventsBatch.length} -> location_events`);
+console.log(`Parsed ${table.length - 1} rows (${skipped} skipped: no date; ${skippedNoZone} skipped: no resolvable zone via Reserve/Location; ${skippedDuplicate} skipped: duplicate external reference): ${observationsBatch.length} -> observations, ${eventsBatch.length} -> location_events`);
 
 // Large logs (thousands of rows, verbose free-text comments) can produce a combined JSON
 // payload the Management API rejects as "request entity too large" in one request - chunk
