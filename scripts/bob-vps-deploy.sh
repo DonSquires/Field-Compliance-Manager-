@@ -35,11 +35,11 @@ if [[ "$BASE" == "$SHA" ]]; then
   echo "release $SHA already on the VPS"
 else
   echo "bundle $BASE..$SHA"
-  git bundle create "/tmp/bob-$SHA.bundle" "$BASE..HEAD"
+  git bundle create "/tmp/bob-$SHA.bundle" "$BASE..refs/heads/main"
   scp -q -i "$SSH_KEY" -o BatchMode=yes "/tmp/bob-$SHA.bundle" "root@$VPS_HOST:/tmp/bob-$SHA.bundle"
   "${SSH[@]}" "set -euo pipefail
     cd /root/field-compliance-manager
-    git fetch -q /tmp/bob-$SHA.bundle main:refs/bundles/bob-$SHA
+    git fetch -q /tmp/bob-$SHA.bundle refs/heads/main:refs/bundles/bob-$SHA
     rm -f /tmp/bob-$SHA.bundle
     git cat-file -e $HEAD_SHA^{commit}
     [[ -d /srv/fcm/releases/$SHA ]] || git worktree add -q /srv/fcm/releases/$SHA $HEAD_SHA
