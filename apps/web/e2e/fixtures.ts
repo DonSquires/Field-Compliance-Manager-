@@ -55,6 +55,13 @@ export const DESKTOP_PROMPT_KEY = `fcm:desktop-download-prompt-v2-dismissed:${AD
 
 export async function installSupabaseFixtures(page: Page, options: { officerModules?: string[]; adminRole?: 'grand_master' | 'master' | 'admin' | 'admin_officer' | 'nzscv_monitor' } = {}): Promise<void> {
   await page.clock.install({ time: new Date('2026-08-29T12:00:00.000Z') });
+  // Bob's verifier runs this suite in a container with no network: an external resource the app
+  // loads (fonts, tiles) would surface as ERR_INTERNET_DISCONNECTED console errors and fail the
+  // browser-error assertions for reasons unrelated to the change. Registered first, so every
+  // specific mock below takes precedence; local dev/CI (with network) are unaffected.
+  if (process.env.E2E_OFFLINE === '1') {
+    await page.route((url) => !['127.0.0.1', 'localhost'].includes(url.hostname), async (route) => route.fulfill({ status: 204, body: '' }));
+  }
   const adminRole = options.adminRole ?? 'admin';
   // Admin surfaces run as a returning user; the desktop companion prompt is a modal that would otherwise block every click.
   await page.addInitScript((key) => window.localStorage.setItem(key, '1'), DESKTOP_PROMPT_KEY);
