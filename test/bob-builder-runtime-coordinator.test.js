@@ -312,3 +312,29 @@ test('expired verifier leases are recovered before every advance, and the recove
   await advanceBuilderJob({ supabase, gateway: {}, jobId: 'job-e', context: {}, loadSnapshot: async () => otherSnapshot, handlers: { frontend: async (input) => { received = input; return { success: true }; } } });
   assert.equal(received.resumePatchArtifact, undefined);
 });
+
+test('an author with nothing to change in its lane skips the step when the other lane delivered the patch; otherwise it parks', async () => {
+  const engineerPath = require.resolve('../builder-agentic-engineer');
+  const originalEngineer = require.cache[engineerPath].exports;
+  const coordinatorPath = require.resolve('../builder-runtime-coordinator');
+  delete require.cache[coordinatorPath];
+  require.cache[engineerPath].exports = { ...originalEngineer, runAgenticEngineer: async () => ({ ok: false, no_change: true, error: 'the cancel action already exists in the edge function; the change is web-only', routing: { provider: 'openai' } }) };
+  const rpcs = [];
+  const supabase = { rpc: async (name, args) => { rpcs.push({ name, args }); return { data: {}, error: null }; } };
+  try {
+    const fresh = require('../builder-runtime-coordinator');
+    const skipped = await fresh.runBackendImplementation({ supabase, gateway: {}, job: { id: 'job-z' }, step: { id: 'step-z', builder_mode: 'backend_engineer' }, siblingCompleted: true, context: { workspaceRoot: '/ws', gitSourceDir: '/src', repoRoot: '/repo' } });
+    assert.equal(skipped.success, true);
+    assert.equal(skipped.skipped, true);
+    assert.deepEqual(rpcs.map((r) => r.name), ['builder_skip_implementation_step']);
+    assert.equal(rpcs[0].args._builder_mode, 'backend_engineer');
+    assert.match(rpcs[0].args._reason, /^Nothing to change in this lane; the frontend lane delivered the change\. Author: the cancel action already exists/);
+    rpcs.length = 0;
+    const parked = await fresh.runBackendImplementation({ supabase, gateway: {}, job: { id: 'job-z' }, step: { id: 'step-z', builder_mode: 'backend_engineer' }, siblingCompleted: false, context: { workspaceRoot: '/ws', gitSourceDir: '/src', repoRoot: '/repo' } });
+    assert.equal(parked.success, false);
+    assert.deepEqual(rpcs.map((r) => r.name), ['builder_record_generation_failure'], 'no sibling patch: the honest no-change still goes to a human');
+  } finally {
+    require.cache[engineerPath].exports = originalEngineer;
+    delete require.cache[coordinatorPath];
+  }
+});

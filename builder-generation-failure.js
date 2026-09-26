@@ -22,4 +22,22 @@ async function recordGenerationFailure({ supabase, job, step, logger = console }
   }
 }
 
-module.exports = { recordGenerationFailure };
+/**
+ * The author found nothing to change in its lane and the sibling lane already delivered the
+ * patch (a brief that names both apps/web and an edge function it must not touch): the step is
+ * skipped with the author's reason, not parked for a human. Returns true when skipped.
+ */
+async function skipLaneWithNothingToDo({ supabase, job, step, siblingCompleted, logger = console }, generation) {
+  if (!generation?.no_change || !siblingCompleted || !supabase || typeof supabase.rpc !== 'function' || !job?.id || !step?.id) return false;
+  const reason = `Nothing to change in this lane; the ${step.builder_mode === 'frontend_engineer' ? 'backend' : 'frontend'} lane delivered the change. Author: ${String(generation.error || '').slice(0, 600)}`;
+  try {
+    const { error } = await supabase.rpc('builder_skip_implementation_step', { _job_id: job.id, _step_id: step.id, _builder_mode: step.builder_mode, _reason: reason });
+    if (error) { logger?.warn?.(`[builder] lane skip not recorded: ${error.message}`); return false; }
+    return true;
+  } catch (error) {
+    logger?.warn?.(`[builder] lane skip not recorded: ${error instanceof Error ? error.message : error}`);
+    return false;
+  }
+}
+
+module.exports = { recordGenerationFailure, skipLaneWithNothingToDo };

@@ -1,7 +1,7 @@
 const { runFrontendEngineer } = require('./supabase/functions/_shared/builder-frontend-engineer');
 const { runFrontendRepair } = require('./supabase/functions/_shared/builder-frontend-repair');
 const { runFrontendHandoff } = require('./builder-frontend-handoff');
-const { recordGenerationFailure } = require('./builder-generation-failure');
+const { recordGenerationFailure, skipLaneWithNothingToDo } = require('./builder-generation-failure');
 
 const MAX_FRONTEND_ATTEMPTS = 3;
 
@@ -32,7 +32,8 @@ async function runFrontendImplementation({
   repair = runFrontendRepair,
   handoff = runFrontendHandoff,
   reloadStep = reloadFrontendStep,
-  resumePatchArtifact = null
+  resumePatchArtifact = null,
+  siblingCompleted = false
 }) {
   let currentStep = step;
   // A lost verifier (lease expired, runner gone) left a patch nobody rejected: verify it again first.
@@ -42,6 +43,7 @@ async function runFrontendImplementation({
       supabase, gateway, job, step: currentStep, uxArtifact, sourceDir, requestedFiles, liveContext
     });
   if (!generation.ok || !generation.patch_artifact?.id) {
+    if (await skipLaneWithNothingToDo({ supabase, job, step: currentStep, siblingCompleted }, generation)) return { success: true, skipped: true, phase: 'generation', result: generation, attempts: 0 };
     await recordGenerationFailure({ supabase, job, step: currentStep }, generation, 'generation');
     return { success: false, phase: 'generation', result: generation, attempts: 0 };
   }

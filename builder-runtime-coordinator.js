@@ -8,7 +8,7 @@ const { startOptionalCodeReview } = require('./supabase/functions/_shared/builde
 const { runIndependentCodeReview } = require('./supabase/functions/_shared/builder-independent-code-review');
 const { runReleaseEngineer } = require('./supabase/functions/_shared/builder-release-engineer');
 const { runAgenticEngineer } = require('./builder-agentic-engineer');
-const { recordGenerationFailure } = require('./builder-generation-failure');
+const { recordGenerationFailure, skipLaneWithNothingToDo } = require('./builder-generation-failure');
 
 const TERMINAL_STATUSES = new Set(['release_ready', 'deployed', 'failed', 'cancelled']);
 const APPROVAL_STATUSES = new Set(['specification_ready', 'approval_pending']);
@@ -207,6 +207,7 @@ async function runBackendImplementation(input) {
     generation = await generate({ ...input, startAfterProvider: escalationPoint(generation) });
   }
   if (!generation.ok || !generation.patch_artifact?.id) {
+    if (await skipLaneWithNothingToDo(input, generation)) return { success: true, skipped: true, phase: 'generation', result: generation };
     await recordGenerationFailure(input, generation, 'generation');
     return { success: false, phase: 'generation', result: generation };
   }
@@ -254,9 +255,10 @@ async function executeBuilderAction({ snapshot, action, supabase, gateway, conte
     const agentic = AGENTIC_ENABLED && context.workspaceRoot && !handlers.frontend;
     const generator = agentic ? agenticGenerator('frontend', context) : undefined;
     const resumePatchArtifact = resumablePatchArtifact(snapshot, action.step);
-    return run.frontend({ ...common, uxArtifact: artifactsFor(snapshot, 'ui_design', 'ui_design_plan').at(-1), sourceDir: context.sourceDir, requestedFiles: context.frontendFiles, workerImage: context.workerImage, runnerId: context.runnerId, liveContext: context.liveContext, ...(resumePatchArtifact ? { resumePatchArtifact } : {}), ...(generator ? { generate: generator, repair: generator } : {}) });
+    const siblingCompleted = byStep(snapshot, 'backend_implementation')?.status === 'completed';
+    return run.frontend({ ...common, siblingCompleted, uxArtifact: artifactsFor(snapshot, 'ui_design', 'ui_design_plan').at(-1), sourceDir: context.sourceDir, requestedFiles: context.frontendFiles, workerImage: context.workerImage, runnerId: context.runnerId, liveContext: context.liveContext, ...(resumePatchArtifact ? { resumePatchArtifact } : {}), ...(generator ? { generate: generator, repair: generator } : {}) });
   }
-  if (action.type === 'run_backend') return run.backend({ ...common, context, productArtifact: artifactsFor(snapshot, 'product_analysis', 'product_specification').at(-1), sourceDir: context.sourceDir, requestedFiles: context.backendFiles, workerImage: context.workerImage, runnerId: context.runnerId, liveContext: context.liveContext, resumePatchArtifact: resumablePatchArtifact(snapshot, action.step) });
+  if (action.type === 'run_backend') return run.backend({ ...common, context, siblingCompleted: byStep(snapshot, 'frontend_implementation')?.status === 'completed', productArtifact: artifactsFor(snapshot, 'product_analysis', 'product_specification').at(-1), sourceDir: context.sourceDir, requestedFiles: context.backendFiles, workerImage: context.workerImage, runnerId: context.runnerId, liveContext: context.liveContext, resumePatchArtifact: resumablePatchArtifact(snapshot, action.step) });
   const implementation = implementationArtifacts(snapshot);
   const runs = implementationRuns(snapshot);
   const securityArtifact = artifactsFor(snapshot, 'security_review', 'security_review').at(-1);
