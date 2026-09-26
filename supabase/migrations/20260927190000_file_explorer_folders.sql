@@ -254,7 +254,15 @@ END $$;
 
 -- Backfill user folders without invoking a trigger function outside trigger context.
 DO $$ DECLARE item record;BEGIN
-  FOR item IN SELECT profile.id,profile.organization_id,coalesce(nullif(trim(profile.display_name),''),nullif(trim(profile.email),''),'User') name FROM public.user_profiles profile LOOP
+  FOR item IN
+    SELECT profile.id,profile.organization_id,coalesce(nullif(trim(profile.display_name),''),nullif(trim(profile.email),''),'User') name
+    FROM public.user_profiles profile
+    WHERE NOT EXISTS(
+      SELECT 1 FROM public.staff_profiles staff
+      JOIN public.person_records person ON person.metadata->>'staff_profile_id'=staff.id::text AND person.organization_id=profile.organization_id
+      WHERE coalesce(staff.user_id,staff.id)=profile.id
+    )
+  LOOP
     PERFORM public.upsert_file_entity_folder(item.organization_id,'people','users_staff','user_profile',item.id,item.name);
   END LOOP;
   FOR item IN SELECT id,organization_id,display_name,metadata FROM public.person_records LOOP
@@ -360,6 +368,9 @@ CREATE POLICY documents_select ON public.documents FOR SELECT TO authenticated U
   )
 );
 DROP POLICY IF EXISTS documents_write ON public.documents;
+DROP POLICY IF EXISTS documents_insert ON public.documents;
+DROP POLICY IF EXISTS documents_update ON public.documents;
+DROP POLICY IF EXISTS documents_delete ON public.documents;
 CREATE POLICY documents_insert ON public.documents FOR INSERT TO authenticated WITH CHECK(organization_id IS NOT NULL AND public.is_admin_for_org(organization_id));
 CREATE POLICY documents_update ON public.documents FOR UPDATE TO authenticated USING(
   EXISTS(SELECT 1 FROM public.document_placements placement JOIN public.file_spaces space ON space.id=placement.space_id WHERE placement.document_id=documents.id AND placement.is_primary AND placement.removed_at IS NULL AND public.file_space_access_allowed(space.organization_id,space.sensitivity))
