@@ -320,3 +320,27 @@ resolve by drift.
 
 **Tuning.** The term and root lists are a floor, not a ceiling: adding a path
 is a one-line change; removing one is an owner decision recorded here.
+
+### 2026-09-26 — Bob's compute and terminal on the owner's laptop (Don Squires)
+
+> "The laptop is connected using Tailscale … we should give Bob Windows
+> PowerShell so he can access files on my computer if I want him to, and also
+> have a terminal to work with."
+
+**Ruling.** The owner's laptop (`fcm-gpu-laptop`) joins Bob's in-house compute
+over the private Tailscale network, and Bob may use a PowerShell terminal on it
+— **only while the owner allows it and only for commands the owner has seen and
+confirmed**. This is the owner's own machine: the terminal is a convenience the
+owner grants and withdraws, not a Bob entitlement.
+
+**Mechanism.** Windows' built-in OpenSSH Server, PowerShell as its shell,
+reachable from the VPS's Tailscale address only, started and stopped by the
+owner (`scripts/bob-gpu-link/laptop-tailscale.ps1 -Allow / -Deny`). Bob's
+private key lives only in the control plane's data volume. In chat
+(`laptop_shell`, admiral only) Bob shows the exact command and purpose and runs
+it only on the owner's affirmative; the control plane (`bob-laptop-shell.js`)
+refuses destructive, privilege-changing, credential, firewall, persistence and
+link-cutting commands regardless of confirmation, caps and redacts output, times
+out, and records the command's head and hash — never its output, which may be
+the owner's private files. The Builder lane does not get this tool: Bob builds
+software in isolated worktrees, not on the owner's machine.
