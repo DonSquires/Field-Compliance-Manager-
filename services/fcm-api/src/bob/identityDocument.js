@@ -51,14 +51,26 @@ function datesIn(text) {
     .filter(Boolean);
 }
 
-function identityDocumentDefinition(documentKind) {
-  return DOCUMENT_DEFINITIONS[documentKind] || DOCUMENT_DEFINITIONS.other_identity;
+function regexEscape(value) {
+  return String(value || '').replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
 }
 
-function classifyIdentityDocument(rawText, requestedKind) {
+function identityDocumentDefinition(documentKind, storedDefinition = null) {
+  const fallback = DOCUMENT_DEFINITIONS[documentKind] || DOCUMENT_DEFINITIONS.other_identity;
+  return storedDefinition ? { ...fallback, ...storedDefinition } : fallback;
+}
+
+function classifyIdentityDocument(rawText, requestedKind, requestedDefinition = null) {
   const text = String(rawText || '');
-  const ranked = Object.entries(DOCUMENT_DEFINITIONS)
-    .map(([kind, definition]) => ({ kind, score: definition.indicators.filter((indicator) => indicator.test(text)).length }))
+  const definitions = { ...DOCUMENT_DEFINITIONS };
+  if (requestedDefinition) definitions[requestedKind] = requestedDefinition;
+  const ranked = Object.entries(definitions)
+    .map(([kind, definition]) => {
+      const storedIndicators = Array.isArray(definition.extraction_rules?.indicators) ? definition.extraction_rules.indicators : [];
+      const score = (definition.indicators || []).filter((indicator) => indicator.test(text)).length
+        + storedIndicators.filter((indicator) => text.toLowerCase().includes(String(indicator).toLowerCase())).length;
+      return { kind, score };
+    })
     .filter((candidate) => candidate.score > 0)
     .sort((left, right) => right.score - left.score || left.kind.localeCompare(right.kind));
   const detectedKind = ranked[0]?.kind || null;
@@ -70,9 +82,9 @@ function classifyIdentityDocument(rawText, requestedKind) {
   };
 }
 
-function extractIdentityFields(rawText, documentKind) {
+function extractIdentityFields(rawText, documentKind, requestedDefinition = null) {
   const text = String(rawText || '').replace(/\r/g, '');
-  const definition = identityDocumentDefinition(documentKind);
+  const definition = identityDocumentDefinition(documentKind, requestedDefinition);
   const isWarrant = definition.category === 'warrant';
   const surname = labelled(text, ['surname', 'family name', 'last name']);
   const givenNames = labelled(text, ['given names?', 'first names?']);
@@ -81,6 +93,7 @@ function extractIdentityFields(rawText, documentKind) {
   const expiryDate = isoDate(labelled(text, ['date of expiry', 'expiry date', 'expiry', 'expires?', 'valid to'], DATE_PATTERN));
   const issuedDate = isoDate(labelled(text, ['date of issue', 'issue date', 'issued'], DATE_PATTERN));
   let licenceNumber = labelled(text, [
+    ...(Array.isArray(definition.extraction_rules?.number_labels) ? definition.extraction_rules.number_labels.map(regexEscape) : []),
     ...(isWarrant ? ['warrant (?:no|number)', 'appointment (?:no|number)'] : []),
     'licen[cs]e (?:no|number)', 'licen[cs]e', 'document (?:no|number)', 'card (?:no|number)'
   ], '[A-Z0-9 -]{4,24}');
@@ -113,7 +126,7 @@ function extractIdentityFields(rawText, documentKind) {
     fields.document_number = clean(licenceNumber) || null;
     fields.expiry_date = fields.expiry_date || datesIn(text).sort().at(-1) || null;
     fields.issuing_authority = labelled(text, ['issuing authority', 'issued by', 'appointing authority', 'appointed by']);
-    fields.authorized_activities = definition.activity;
+    fields.authorized_activities = definition.activity || definition.default_authorized_activities?.join(', ');
   }
   else fields.document_number = clean(licenceNumber) || null;
   return Object.fromEntries(Object.entries(fields).filter(([, value]) => value));

@@ -216,15 +216,24 @@ async function identityDocument(request, response, ocrOnly = false) {
   const loaded = await ocrAttachment(String(body.attachment_id || ''), context);
   if (ocrOnly) return json(response, 200, { ocr: { text: loaded.text, provider: loaded.provider, page_count: loaded.pageCount, sha256: loaded.sha256, review_required: true } });
   const image = await inferIdentityImage(loaded);
+  const definitionResult = await supabase.from('identity_document_type_definitions')
+    .select('document_kind,display_name,category,canonical_destination,staff_credential_type,default_authorized_activities,extraction_rules')
+    .eq('document_kind', documentKind).eq('active', true).maybeSingle();
+  const definition = identityDocumentDefinition(documentKind, definitionResult.data);
   return json(response, 200, {
     success: true,
     attachment_id: loaded.attachment.id,
     document_kind: documentKind,
     sha256: loaded.sha256,
     ocr: { text: loaded.text, provider: loaded.provider, page_count: loaded.pageCount, review_required: true },
-    proposed_fields: extractIdentityFields(loaded.text, documentKind),
-    classification: classifyIdentityDocument(loaded.text, documentKind),
-    document_definition: identityDocumentDefinition(documentKind),
+    proposed_fields: extractIdentityFields(loaded.text, documentKind, definition),
+    classification: classifyIdentityDocument(loaded.text, documentKind, definition),
+    document_definition: {
+      label: definition.label,
+      category: definition.category,
+      credential_type: definition.credential_type,
+      authorized_activities: definition.activity ? [definition.activity] : definition.default_authorized_activities ?? [],
+    },
     image,
     authority: 'provisional',
     review_required: true,

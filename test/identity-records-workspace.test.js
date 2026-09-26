@@ -133,6 +133,7 @@ test('People and Access exposes manual people, vehicles, and human-reviewed ID i
   assert.match(workspace, /multiple/);
   assert.match(workspace, /Upload and extract \$\{documentFiles\.length\} files/);
   assert.match(workspace, /review_deterministic_identity_evidence/);
+  assert.match(workspace, /Reject it, then upload it under the matching evidence type/);
   assert.match(workspace, /Historical licence retained without replacing current details/);
   assert.match(workspace, /Historical evidence · Current details unchanged/);
   assert.match(workspace, /Remove face candidate/);

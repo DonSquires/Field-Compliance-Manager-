@@ -319,6 +319,17 @@
   background: #fff;
   border-radius: 8px;
 }
+.identity-document-classification {
+  display: flex;
+  align-items: flex-start;
+  gap: 8px;
+  margin: 14px 18px 0;
+  padding: 10px 12px;
+  border: 1px solid #d5ad67;
+  background: #fff8e8;
+  color: #674514;
+  font-size: 13px;
+}
 .identity-document-review-body {
   display: grid;
   grid-template-columns: minmax(280px, 0.9fr) minmax(360px, 1.1fr);

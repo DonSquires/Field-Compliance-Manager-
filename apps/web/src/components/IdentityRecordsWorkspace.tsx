@@ -75,7 +75,24 @@ type Registry = {
   vehicles: VehicleRecord[];
   documents: IdentityDocument[];
 };
-type IncidentOption = { id: string; incident_type: string; status: string; occurred_at: string };
+type IncidentOption = {
+  id: string;
+  incident_type: string;
+  status: string;
+  occurred_at: string;
+};
+type DocumentTypeDefinition = {
+  document_kind: string;
+  display_name: string;
+  category: "identity" | "credential" | "warrant" | "photo" | "other";
+  canonical_destination:
+    | "person_records"
+    | "person_records_and_staff_credentials"
+    | "staff_credentials"
+    | "evidence_only";
+  staff_credential_type: string | null;
+  default_authorized_activities: string[];
+};
 type Mode = "people" | "vehicles";
 type PersonForm = {
   display_name: string;
@@ -146,32 +163,109 @@ const EMPTY_VEHICLE: VehicleForm = {
   cof_expiry: "",
   notes: "",
 };
-const DOCUMENT_KINDS = [
-  ["driver_licence", "Driver licence"],
-  ["firearms_licence", "Firearms licence"],
-  ["security_licence", "Security licence / CoA"],
-  ["warrant_of_appointment", "Warrant of appointment"],
-  ["noise_control_warrant", "Noise control officer warrant"],
-  ["parking_warrant", "Parking warden warrant"],
-  ["freedom_camping_warrant", "Freedom camping officer warrant"],
-  ["biosecurity_warrant", "Biosecurity officer warrant"],
-  ["passport", "Passport"],
-  ["national_id", "Other government ID"],
-  ["person_photo", "Person reference photo"],
-  ["other_identity", "Other identity evidence"],
-] as const;
-const WARRANT_KINDS = new Set(["warrant_of_appointment", "noise_control_warrant", "parking_warrant", "freedom_camping_warrant", "biosecurity_warrant"]);
-const CURRENT_PROFILE_LICENCE_KINDS = new Set(["driver_licence", "firearms_licence", "security_licence"]);
-const STAFF_CREDENTIAL_LABELS: Record<string, string> = {
-  driver_licence: "driver licence",
-  firearms_licence: "firearms licence",
-  security_licence: "security licence",
-  warrant_of_appointment: "warrant of authority",
-  noise_control_warrant: "noise control warrant",
-  parking_warrant: "warrant of authority with Parking warden activity",
-  freedom_camping_warrant: "warrant of authority with Freedom camping officer activity",
-  biosecurity_warrant: "biosecurity warrant",
-};
+const FALLBACK_DOCUMENT_TYPES: DocumentTypeDefinition[] = [
+  {
+    document_kind: "driver_licence",
+    display_name: "Driver licence",
+    category: "identity",
+    canonical_destination: "person_records_and_staff_credentials",
+    staff_credential_type: "drivers_licence",
+    default_authorized_activities: [],
+  },
+  {
+    document_kind: "firearms_licence",
+    display_name: "Firearms licence",
+    category: "identity",
+    canonical_destination: "person_records_and_staff_credentials",
+    staff_credential_type: "firearms_licence",
+    default_authorized_activities: [],
+  },
+  {
+    document_kind: "security_licence",
+    display_name: "Security licence / CoA",
+    category: "credential",
+    canonical_destination: "person_records_and_staff_credentials",
+    staff_credential_type: "security_licence",
+    default_authorized_activities: [],
+  },
+  {
+    document_kind: "warrant_of_appointment",
+    display_name: "Warrant of appointment",
+    category: "warrant",
+    canonical_destination: "staff_credentials",
+    staff_credential_type: "warrant_of_authority",
+    default_authorized_activities: ["Appointed officer"],
+  },
+  {
+    document_kind: "noise_control_warrant",
+    display_name: "Noise control officer warrant",
+    category: "warrant",
+    canonical_destination: "staff_credentials",
+    staff_credential_type: "noise_control_warrant",
+    default_authorized_activities: ["Noise control officer"],
+  },
+  {
+    document_kind: "parking_warrant",
+    display_name: "Parking warden warrant",
+    category: "warrant",
+    canonical_destination: "staff_credentials",
+    staff_credential_type: "warrant_of_authority",
+    default_authorized_activities: ["Parking warden"],
+  },
+  {
+    document_kind: "freedom_camping_warrant",
+    display_name: "Freedom camping officer warrant",
+    category: "warrant",
+    canonical_destination: "staff_credentials",
+    staff_credential_type: "warrant_of_authority",
+    default_authorized_activities: ["Freedom camping officer"],
+  },
+  {
+    document_kind: "biosecurity_warrant",
+    display_name: "Biosecurity officer warrant",
+    category: "warrant",
+    canonical_destination: "staff_credentials",
+    staff_credential_type: "biosecurity_warrant",
+    default_authorized_activities: ["Biosecurity officer"],
+  },
+  {
+    document_kind: "passport",
+    display_name: "Passport",
+    category: "identity",
+    canonical_destination: "person_records",
+    staff_credential_type: null,
+    default_authorized_activities: [],
+  },
+  {
+    document_kind: "national_id",
+    display_name: "Other government ID",
+    category: "identity",
+    canonical_destination: "person_records",
+    staff_credential_type: null,
+    default_authorized_activities: [],
+  },
+  {
+    document_kind: "person_photo",
+    display_name: "Person reference photo",
+    category: "photo",
+    canonical_destination: "person_records",
+    staff_credential_type: null,
+    default_authorized_activities: [],
+  },
+  {
+    document_kind: "other_identity",
+    display_name: "Other identity evidence",
+    category: "other",
+    canonical_destination: "evidence_only",
+    staff_credential_type: null,
+    default_authorized_activities: [],
+  },
+];
+const CURRENT_PROFILE_LICENCE_KINDS = new Set([
+  "driver_licence",
+  "firearms_licence",
+  "security_licence",
+]);
 
 function words(value: string) {
   return value
@@ -273,6 +367,9 @@ export function IdentityRecordsWorkspace({
     useState<PersonForm>(EMPTY_PERSON);
   const [documentReviewNote, setDocumentReviewNote] = useState("");
   const [incidents, setIncidents] = useState<IncidentOption[]>([]);
+  const [documentTypes, setDocumentTypes] = useState<DocumentTypeDefinition[]>(
+    FALLBACK_DOCUMENT_TYPES,
+  );
   const [incidentId, setIncidentId] = useState("");
   const [involvementRole, setInvolvementRole] = useState("subject");
   const [incidentIdentityNotes, setIncidentIdentityNotes] = useState("");
@@ -286,14 +383,22 @@ export function IdentityRecordsWorkspace({
     async (term = "") => {
       setLoading(true);
       setError(null);
-      const [{ data, error: loadError }, incidentResult] = await Promise.all([
-        supabase.rpc("get_identity_registry", {
-          p_organization_id: organizationId,
-          p_search: term.trim() || null,
-          p_limit: 150,
-        }),
-        supabase.from("incidents").select("id,incident_type,status,occurred_at").eq("organization_id", organizationId).in("status", ["open", "in_review", "escalated"]).order("occurred_at", { ascending: false }).limit(100),
-      ]);
+      const [{ data, error: loadError }, incidentResult, documentTypeResult] =
+        await Promise.all([
+          supabase.rpc("get_identity_registry", {
+            p_organization_id: organizationId,
+            p_search: term.trim() || null,
+            p_limit: 150,
+          }),
+          supabase
+            .from("incidents")
+            .select("id,incident_type,status,occurred_at")
+            .eq("organization_id", organizationId)
+            .in("status", ["open", "in_review", "escalated"])
+            .order("occurred_at", { ascending: false })
+            .limit(100),
+          supabase.rpc("get_identity_document_types"),
+        ]);
       if (loadError) setError(loadError.message);
       else {
         const value = data as Partial<Registry> | null;
@@ -304,6 +409,9 @@ export function IdentityRecordsWorkspace({
         };
         setRegistry(nextRegistry);
         setIncidents((incidentResult.data ?? []) as IncidentOption[]);
+        if (!documentTypeResult.error && documentTypeResult.data?.length) {
+          setDocumentTypes(documentTypeResult.data as DocumentTypeDefinition[]);
+        }
         setLoading(false);
         return nextRegistry;
       }
@@ -383,7 +491,9 @@ export function IdentityRecordsWorkspace({
     );
     if (retireError) setError(retireError.message);
     else {
-      setNotice("Face candidates removed. The reason remains in audit history.");
+      setNotice(
+        "Face candidates removed. The reason remains in audit history.",
+      );
       setReason("");
       await load(search);
     }
@@ -447,26 +557,38 @@ export function IdentityRecordsWorkspace({
     setBusy("document");
     setError(null);
     setNotice(null);
-    const oversized = documentFiles.find((file) => file.size > 25 * 1024 * 1024);
+    const oversized = documentFiles.find(
+      (file) => file.size > 25 * 1024 * 1024,
+    );
     if (oversized) {
-      setError(`${oversized.name} is larger than 25 MB. Choose a smaller source file.`);
+      setError(
+        `${oversized.name} is larger than 25 MB. Choose a smaller source file.`,
+      );
       setBusy(null);
       return;
     }
-    const completed: Array<{ attachmentId: string; proposed: Record<string, unknown>; faceCount: number }> = [];
+    const completed: Array<{
+      attachmentId: string;
+      proposed: Record<string, unknown>;
+      faceCount: number;
+    }> = [];
     const failures: string[] = [];
     try {
       const convId = await conversationId();
       for (const file of documentFiles) {
         const attachmentId = crypto.randomUUID();
-        const safeName = file.name.replace(/[^a-zA-Z0-9._-]+/g, "_").slice(-180);
+        const safeName = file.name
+          .replace(/[^a-zA-Z0-9._-]+/g, "_")
+          .slice(-180);
         const storagePath = `org/${organizationId}/identity/${userId}/${attachmentId}-${safeName}`;
         let metadataRegistered = false;
         try {
-          const upload = await supabase.storage.from("identity-evidence").upload(storagePath, file, {
-            contentType: file.type || "application/octet-stream",
-            upsert: false,
-          });
+          const upload = await supabase.storage
+            .from("identity-evidence")
+            .upload(storagePath, file, {
+              contentType: file.type || "application/octet-stream",
+              upsert: false,
+            });
           if (upload.error) throw upload.error;
           const metadata = await supabase.from("bob_attachments").insert({
             id: attachmentId,
@@ -483,17 +605,23 @@ export function IdentityRecordsWorkspace({
           });
           if (metadata.error) throw metadata.error;
           metadataRegistered = true;
-          const perception = await supabase.functions.invoke("bob-perceive-image", {
-            body: {
-              mode: "identity_document",
-              attachment_id: attachmentId,
-              organization_id: organizationId,
-              person_record_id: selectedPersonId,
-              document_kind: documentKind,
+          const perception = await supabase.functions.invoke(
+            "bob-perceive-image",
+            {
+              body: {
+                mode: "identity_document",
+                attachment_id: attachmentId,
+                organization_id: organizationId,
+                person_record_id: selectedPersonId,
+                document_kind: documentKind,
+              },
             },
-          });
+          );
           if (perception.error || !perception.data?.success) {
-            throw perception.error ?? new Error(perception.data?.error || "Identity extraction failed");
+            throw (
+              perception.error ??
+              new Error(perception.data?.error || "Identity extraction failed")
+            );
           }
           completed.push({
             attachmentId,
@@ -502,25 +630,48 @@ export function IdentityRecordsWorkspace({
           });
         } catch (uploadError) {
           if (metadataRegistered) {
-            await supabase.from("bob_attachments").update({ processing_state: "failed" }).eq("id", attachmentId).eq("uploaded_by", userId);
+            await supabase
+              .from("bob_attachments")
+              .update({ processing_state: "failed" })
+              .eq("id", attachmentId)
+              .eq("uploaded_by", userId);
           } else {
-            await supabase.storage.from("identity-evidence").remove([storagePath]);
+            await supabase.storage
+              .from("identity-evidence")
+              .remove([storagePath]);
           }
-          failures.push(`${file.name}: ${uploadError instanceof Error ? uploadError.message : "extraction failed"}`);
+          failures.push(
+            `${file.name}: ${uploadError instanceof Error ? uploadError.message : "extraction failed"}`,
+          );
         }
       }
 
       setDocumentFiles([]);
       setDocumentInputKey((value) => value + 1);
       const next = await load(search);
-      const document = next?.documents?.find((item) => completed.some((result) => result.attachmentId === item.attachment_id)) ?? null;
-      if (completed[0]) setDocumentFields(proposedPersonForm(person, completed[0].proposed, documentKind));
+      const document =
+        next?.documents?.find((item) =>
+          completed.some(
+            (result) => result.attachmentId === item.attachment_id,
+          ),
+        ) ?? null;
+      if (completed[0])
+        setDocumentFields(
+          proposedPersonForm(person, completed[0].proposed, documentKind),
+        );
       if (document) await selectIdentityDocument(document);
-      const faceReady = completed.filter((result) => result.faceCount === 1).length;
+      const faceReady = completed.filter(
+        (result) => result.faceCount === 1,
+      ).length;
       if (completed.length) {
-        setNotice(`${completed.length} source file${completed.length === 1 ? "" : "s"} ready for human review.${faceReady ? ` ${faceReady} contain one source face that can become a candidate after approval.` : " No enrolment face was found."}`);
+        setNotice(
+          `${completed.length} source file${completed.length === 1 ? "" : "s"} ready for human review.${faceReady ? ` ${faceReady} contain one source face that can become a candidate after approval.` : " No enrolment face was found."}`,
+        );
       }
-      if (failures.length) setError(`${failures.length} source file${failures.length === 1 ? "" : "s"} failed. ${failures.join(" ")}`);
+      if (failures.length)
+        setError(
+          `${failures.length} source file${failures.length === 1 ? "" : "s"} failed. ${failures.join(" ")}`,
+        );
     } finally {
       setBusy(null);
     }
@@ -563,7 +714,7 @@ export function IdentityRecordsWorkspace({
     else {
       setNotice(
         action === "approve"
-          ? `Identity evidence approved.${reviewResult?.identity_verified ? " Identity details are verified." : " This evidence type does not verify identity details."}${["driver_licence", "firearms_licence", "security_licence"].includes(selectedDocument.document_kind) ? reviewResult?.current_credential_updated ? " Current licence details were updated." : " Historical licence retained without replacing current details." : ""}${reviewResult?.face_candidate_enrolled ? " One face candidate is now active." : " No face candidate was enrolled."}`
+          ? `Identity evidence approved.${reviewResult?.identity_verified ? " Identity details are verified." : " This evidence type does not verify identity details."}${["driver_licence", "firearms_licence", "security_licence"].includes(selectedDocument.document_kind) ? (reviewResult?.current_credential_updated ? " Current licence details were updated." : " Historical licence retained without replacing current details.") : ""}${reviewResult?.face_candidate_enrolled ? " One face candidate is now active." : " No face candidate was enrolled."}`
           : "Identity evidence rejected. Its face template was removed.",
       );
       setSelectedDocument(null);
@@ -575,22 +726,28 @@ export function IdentityRecordsWorkspace({
 
   const linkPersonToIncident = async (event: FormEvent) => {
     event.preventDefault();
-    if (!selectedPersonId || !incidentId || !incidentIdentityNotes.trim()) return;
+    if (!selectedPersonId || !incidentId || !incidentIdentityNotes.trim())
+      return;
     setBusy("incident-person");
     setError(null);
     setNotice(null);
-    const { error: linkError } = await supabase.rpc("record_incident_person_identity", {
-      p_incident_id: incidentId,
-      p_involvement_role: involvementRole,
-      p_notes: incidentIdentityNotes.trim(),
-      p_person_record_id: selectedPersonId,
-      p_staff_profile_id: null,
-      p_display_name: null,
-      p_identity_document_id: null,
-    });
+    const { error: linkError } = await supabase.rpc(
+      "record_incident_person_identity",
+      {
+        p_incident_id: incidentId,
+        p_involvement_role: involvementRole,
+        p_notes: incidentIdentityNotes.trim(),
+        p_person_record_id: selectedPersonId,
+        p_staff_profile_id: null,
+        p_display_name: null,
+        p_identity_document_id: null,
+      },
+    );
     if (linkError) setError(linkError.message);
     else {
-      setNotice("Person linked to the incident through their canonical identity.");
+      setNotice(
+        "Person linked to the incident through their canonical identity.",
+      );
       setIncidentIdentityNotes("");
     }
     setBusy(null);
@@ -602,6 +759,22 @@ export function IdentityRecordsWorkspace({
   const selectedPerson = registry.people.find(
     (record) => record.person_record_id === selectedPersonId,
   );
+  const selectedDocumentType = documentTypes.find(
+    (definition) => definition.document_kind === documentKind,
+  );
+  const reviewedDocumentType = selectedDocument
+    ? documentTypes.find(
+        (definition) =>
+          definition.document_kind === selectedDocument.document_kind,
+      )
+    : null;
+  const selectedClassification = selectedDocument?.extracted_fields.proposed
+    ?.document_classification as
+    | {
+        detected_kind?: string | null;
+        matches_requested_kind?: boolean;
+      }
+    | undefined;
 
   return (
     <div className="identity-records-backdrop">
@@ -750,9 +923,11 @@ export function IdentityRecordsWorkspace({
             {!loading && mode === "people" && registry.people.length === 0 && (
               <p>No people match this search. Add a person to begin.</p>
             )}
-            {!loading && mode === "vehicles" && registry.vehicles.length === 0 && (
-              <p>No vehicles match this search. Add a vehicle to begin.</p>
-            )}
+            {!loading &&
+              mode === "vehicles" &&
+              registry.vehicles.length === 0 && (
+                <p>No vehicles match this search. Add a vehicle to begin.</p>
+              )}
           </aside>
           <main className="identity-records-editor">
             {mode === "people" ? (
@@ -986,11 +1161,12 @@ export function IdentityRecordsWorkspace({
                       Upload a clear image or PDF. OCR and face detection fill a
                       proposal; compare it with the source before approval.
                     </p>
-                    {STAFF_CREDENTIAL_LABELS[documentKind] && (
+                    {selectedDocumentType?.staff_credential_type && (
                       <p className="identity-records-guidance">
                         This records identity evidence and face matching only.
-                        For an employee, record the approved {STAFF_CREDENTIAL_LABELS[documentKind]} in People &amp;
-                        HR → Credentials to update work readiness.
+                        For an employee, record the approved{" "}
+                        {selectedDocumentType.display_name.toLowerCase()} in
+                        People &amp; HR → Credentials to update work readiness.
                       </p>
                     )}
                     <form onSubmit={uploadDocument}>
@@ -1002,9 +1178,12 @@ export function IdentityRecordsWorkspace({
                             setDocumentKind(event.target.value)
                           }
                         >
-                          {DOCUMENT_KINDS.map(([value, label]) => (
-                            <option value={value} key={value}>
-                              {label}
+                          {documentTypes.map((definition) => (
+                            <option
+                              value={definition.document_kind}
+                              key={definition.document_kind}
+                            >
+                              {definition.display_name}
                             </option>
                           ))}
                         </select>
@@ -1018,7 +1197,9 @@ export function IdentityRecordsWorkspace({
                           multiple
                           accept="image/jpeg,image/png,image/webp,image/bmp,image/tiff,application/pdf"
                           onChange={(event) =>
-                            setDocumentFiles(Array.from(event.target.files ?? []))
+                            setDocumentFiles(
+                              Array.from(event.target.files ?? []),
+                            )
                           }
                         />
                       </label>
@@ -1044,14 +1225,20 @@ export function IdentityRecordsWorkspace({
                           <FileBadge size={15} />
                           <span>
                             <strong>
-                              {DOCUMENT_KINDS.find(
-                                ([value]) => value === document.document_kind,
-                              )?.[1] ?? words(document.document_kind)}
+                              {documentTypes.find(
+                                (definition) =>
+                                  definition.document_kind ===
+                                  document.document_kind,
+                              )?.display_name ?? words(document.document_kind)}
                             </strong>
                             <small>
                               {document.file_name ?? "Source file"} ·{" "}
-                              {document.review_state === "approved" && CURRENT_PROFILE_LICENCE_KINDS.has(document.document_kind) &&
-                              document.extracted_fields.promoted_to_current_profile === false
+                              {document.review_state === "approved" &&
+                              CURRENT_PROFILE_LICENCE_KINDS.has(
+                                document.document_kind,
+                              ) &&
+                              document.extracted_fields
+                                .promoted_to_current_profile === false
                                 ? "Historical evidence · Current details unchanged"
                                 : words(document.review_state)}
                             </small>
@@ -1071,36 +1258,77 @@ export function IdentityRecordsWorkspace({
                       <form onSubmit={linkPersonToIncident}>
                         <label>
                           <span>Active incident</span>
-                          <select value={incidentId} onChange={(event) => setIncidentId(event.target.value)} required>
+                          <select
+                            value={incidentId}
+                            onChange={(event) =>
+                              setIncidentId(event.target.value)
+                            }
+                            required
+                          >
                             <option value="">Select an incident</option>
                             {incidents.map((incident) => (
                               <option value={incident.id} key={incident.id}>
-                                {words(incident.incident_type)} · {words(incident.status)} · {new Date(incident.occurred_at).toLocaleDateString("en-NZ")}
+                                {words(incident.incident_type)} ·{" "}
+                                {words(incident.status)} ·{" "}
+                                {new Date(
+                                  incident.occurred_at,
+                                ).toLocaleDateString("en-NZ")}
                               </option>
                             ))}
                           </select>
                         </label>
                         <label>
                           <span>Person's involvement</span>
-                          <select value={involvementRole} onChange={(event) => setInvolvementRole(event.target.value)}>
+                          <select
+                            value={involvementRole}
+                            onChange={(event) =>
+                              setInvolvementRole(event.target.value)
+                            }
+                          >
                             <option value="subject">Subject</option>
-                            <option value="reporting_party">Reporting party</option>
+                            <option value="reporting_party">
+                              Reporting party
+                            </option>
                             <option value="witness">Witness</option>
-                            <option value="affected_person">Affected person</option>
-                            <option value="staff_involved">Staff involved</option>
+                            <option value="affected_person">
+                              Affected person
+                            </option>
+                            <option value="staff_involved">
+                              Staff involved
+                            </option>
                             <option value="other">Other</option>
                           </select>
                         </label>
                         <label className="is-wide">
                           <span>How was the identity established?</span>
-                          <textarea value={incidentIdentityNotes} onChange={(event) => setIncidentIdentityNotes(event.target.value)} rows={2} required placeholder="For example: stated identity, approved ID, or staff profile" />
+                          <textarea
+                            value={incidentIdentityNotes}
+                            onChange={(event) =>
+                              setIncidentIdentityNotes(event.target.value)
+                            }
+                            rows={2}
+                            required
+                            placeholder="For example: stated identity, approved ID, or staff profile"
+                          />
                         </label>
-                        <button type="submit" disabled={busy !== null || !incidentId || !incidentIdentityNotes.trim()}>
-                          <Link2 size={15} />{busy === "incident-person" ? "Linking" : "Link person to incident"}
+                        <button
+                          type="submit"
+                          disabled={
+                            busy !== null ||
+                            !incidentId ||
+                            !incidentIdentityNotes.trim()
+                          }
+                        >
+                          <Link2 size={15} />
+                          {busy === "incident-person"
+                            ? "Linking"
+                            : "Link person to incident"}
                         </button>
                       </form>
                     ) : (
-                      <p>No active incidents are available for this organization.</p>
+                      <p>
+                        No active incidents are available for this organization.
+                      </p>
                     )}
                   </section>
                 )}
@@ -1279,6 +1507,14 @@ export function IdentityRecordsWorkspace({
                   <X size={17} />
                 </button>
               </header>
+              {selectedClassification?.matches_requested_kind === false && (
+                <div className="identity-document-classification" role="alert">
+                  <AlertTriangle size={16} />
+                  <span>
+                    This source resembles {documentTypes.find((definition) => definition.document_kind === selectedClassification.detected_kind)?.display_name ?? words(selectedClassification.detected_kind ?? "another document type")}, not {reviewedDocumentType?.display_name ?? words(selectedDocument.document_kind)}. Reject it, then upload it under the matching evidence type.
+                  </span>
+                </div>
+              )}
               <div className="identity-document-review-body">
                 <div className="identity-document-source">
                   {sourceUrl &&
@@ -1296,7 +1532,10 @@ export function IdentityRecordsWorkspace({
                   <label>
                     <span>Name</span>
                     <input
-                      disabled={selectedDocument.review_state !== "manual_review_required"}
+                      disabled={
+                        selectedDocument.review_state !==
+                        "manual_review_required"
+                      }
                       value={documentFields.display_name}
                       onChange={(event) =>
                         setDocumentFields({
@@ -1310,7 +1549,10 @@ export function IdentityRecordsWorkspace({
                     <span>Date of birth</span>
                     <input
                       type="date"
-                      disabled={selectedDocument.review_state !== "manual_review_required"}
+                      disabled={
+                        selectedDocument.review_state !==
+                        "manual_review_required"
+                      }
                       value={documentFields.date_of_birth}
                       onChange={(event) =>
                         setDocumentFields({
@@ -1323,7 +1565,10 @@ export function IdentityRecordsWorkspace({
                   <label>
                     <span>Driver licence number</span>
                     <input
-                      disabled={selectedDocument.review_state !== "manual_review_required"}
+                      disabled={
+                        selectedDocument.review_state !==
+                        "manual_review_required"
+                      }
                       value={documentFields.driver_licence_number}
                       onChange={(event) =>
                         setDocumentFields({
@@ -1336,7 +1581,10 @@ export function IdentityRecordsWorkspace({
                   <label>
                     <span>Firearms licence number</span>
                     <input
-                      disabled={selectedDocument.review_state !== "manual_review_required"}
+                      disabled={
+                        selectedDocument.review_state !==
+                        "manual_review_required"
+                      }
                       value={documentFields.firearms_licence_number}
                       onChange={(event) =>
                         setDocumentFields({
@@ -1350,7 +1598,10 @@ export function IdentityRecordsWorkspace({
                     <span>Driver licence expiry</span>
                     <input
                       type="date"
-                      disabled={selectedDocument.review_state !== "manual_review_required"}
+                      disabled={
+                        selectedDocument.review_state !==
+                        "manual_review_required"
+                      }
                       value={documentFields.driver_licence_expiry}
                       onChange={(event) =>
                         setDocumentFields({
@@ -1364,7 +1615,10 @@ export function IdentityRecordsWorkspace({
                     <span>Firearms licence expiry</span>
                     <input
                       type="date"
-                      disabled={selectedDocument.review_state !== "manual_review_required"}
+                      disabled={
+                        selectedDocument.review_state !==
+                        "manual_review_required"
+                      }
                       value={documentFields.firearms_licence_expiry}
                       onChange={(event) =>
                         setDocumentFields({
@@ -1379,7 +1633,10 @@ export function IdentityRecordsWorkspace({
                       <label>
                         <span>Security licence / CoA number</span>
                         <input
-                          disabled={selectedDocument.review_state !== "manual_review_required"}
+                          disabled={
+                            selectedDocument.review_state !==
+                            "manual_review_required"
+                          }
                           value={documentFields.security_licence_number}
                           onChange={(event) =>
                             setDocumentFields({
@@ -1393,7 +1650,10 @@ export function IdentityRecordsWorkspace({
                         <span>Security licence / CoA expiry</span>
                         <input
                           type="date"
-                          disabled={selectedDocument.review_state !== "manual_review_required"}
+                          disabled={
+                            selectedDocument.review_state !==
+                            "manual_review_required"
+                          }
                           value={documentFields.security_licence_expiry}
                           onChange={(event) =>
                             setDocumentFields({
@@ -1406,7 +1666,10 @@ export function IdentityRecordsWorkspace({
                       <label>
                         <span>Issuing authority</span>
                         <input
-                          disabled={selectedDocument.review_state !== "manual_review_required"}
+                          disabled={
+                            selectedDocument.review_state !==
+                            "manual_review_required"
+                          }
                           value={documentFields.security_licence_authority}
                           onChange={(event) =>
                             setDocumentFields({
@@ -1419,7 +1682,10 @@ export function IdentityRecordsWorkspace({
                       <label>
                         <span>Endorsements</span>
                         <input
-                          disabled={selectedDocument.review_state !== "manual_review_required"}
+                          disabled={
+                            selectedDocument.review_state !==
+                            "manual_review_required"
+                          }
                           value={documentFields.security_endorsements}
                           onChange={(event) =>
                             setDocumentFields({
@@ -1431,48 +1697,88 @@ export function IdentityRecordsWorkspace({
                       </label>
                     </>
                   )}
-                  {WARRANT_KINDS.has(selectedDocument.document_kind) && (
+                  {reviewedDocumentType?.category === "warrant" && (
                     <>
                       <label>
                         <span>Warrant or appointment number</span>
                         <input
-                          disabled={selectedDocument.review_state !== "manual_review_required"}
+                          disabled={
+                            selectedDocument.review_state !==
+                            "manual_review_required"
+                          }
                           value={documentFields.document_number}
-                          onChange={(event) => setDocumentFields({ ...documentFields, document_number: event.target.value })}
+                          onChange={(event) =>
+                            setDocumentFields({
+                              ...documentFields,
+                              document_number: event.target.value,
+                            })
+                          }
                         />
                       </label>
                       <label>
                         <span>Issuing authority</span>
                         <input
-                          disabled={selectedDocument.review_state !== "manual_review_required"}
+                          disabled={
+                            selectedDocument.review_state !==
+                            "manual_review_required"
+                          }
                           value={documentFields.issuing_authority}
-                          onChange={(event) => setDocumentFields({ ...documentFields, issuing_authority: event.target.value })}
+                          onChange={(event) =>
+                            setDocumentFields({
+                              ...documentFields,
+                              issuing_authority: event.target.value,
+                            })
+                          }
                         />
                       </label>
                       <label>
                         <span>Issue date</span>
                         <input
                           type="date"
-                          disabled={selectedDocument.review_state !== "manual_review_required"}
+                          disabled={
+                            selectedDocument.review_state !==
+                            "manual_review_required"
+                          }
                           value={documentFields.issued_date}
-                          onChange={(event) => setDocumentFields({ ...documentFields, issued_date: event.target.value })}
+                          onChange={(event) =>
+                            setDocumentFields({
+                              ...documentFields,
+                              issued_date: event.target.value,
+                            })
+                          }
                         />
                       </label>
                       <label>
                         <span>Expiry date</span>
                         <input
                           type="date"
-                          disabled={selectedDocument.review_state !== "manual_review_required"}
+                          disabled={
+                            selectedDocument.review_state !==
+                            "manual_review_required"
+                          }
                           value={documentFields.expiry_date}
-                          onChange={(event) => setDocumentFields({ ...documentFields, expiry_date: event.target.value })}
+                          onChange={(event) =>
+                            setDocumentFields({
+                              ...documentFields,
+                              expiry_date: event.target.value,
+                            })
+                          }
                         />
                       </label>
                       <label className="is-wide">
                         <span>Authorized activities</span>
                         <input
-                          disabled={selectedDocument.review_state !== "manual_review_required"}
+                          disabled={
+                            selectedDocument.review_state !==
+                            "manual_review_required"
+                          }
                           value={documentFields.authorized_activities}
-                          onChange={(event) => setDocumentFields({ ...documentFields, authorized_activities: event.target.value })}
+                          onChange={(event) =>
+                            setDocumentFields({
+                              ...documentFields,
+                              authorized_activities: event.target.value,
+                            })
+                          }
                         />
                       </label>
                     </>
@@ -1480,7 +1786,10 @@ export function IdentityRecordsWorkspace({
                   <label className="is-wide">
                     <span>Address</span>
                     <input
-                      disabled={selectedDocument.review_state !== "manual_review_required"}
+                      disabled={
+                        selectedDocument.review_state !==
+                        "manual_review_required"
+                      }
                       value={documentFields.address}
                       onChange={(event) =>
                         setDocumentFields({
@@ -1494,7 +1803,10 @@ export function IdentityRecordsWorkspace({
                     <span>Review notes</span>
                     <textarea
                       required
-                      disabled={selectedDocument.review_state !== "manual_review_required"}
+                      disabled={
+                        selectedDocument.review_state !==
+                        "manual_review_required"
+                      }
                       rows={3}
                       value={documentReviewNote}
                       onChange={(event) =>
