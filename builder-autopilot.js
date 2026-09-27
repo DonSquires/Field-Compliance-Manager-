@@ -217,6 +217,22 @@ function repairJobFor(job, baseline) {
   };
 }
 
+/** The same brief again, for a fresh job pinned to the current main. */
+function reopenSpec(job) {
+  return {
+    parentJobId: job.id,
+    organizationId: job.organization_id,
+    projectId: job.project_id,
+    title: job.title,
+    taskDescription: job.task_description,
+    frontendRequired: job.frontend_required === true,
+    backendRequired: job.backend_required === true,
+    codeReviewMode: job.code_review_mode || 'independent_ai',
+    requestedBy: job.autopilot_requested_by,
+    conversationId: job.autopilot_conversation_id ?? null,
+  };
+}
+
 /** A job parked behind a repair: re-open it on current main once the repair's files are on main; report a failed repair plainly. */
 async function resumeAfterRepair({ supabase, job, actions, log }) {
   const repairId = job.autopilot_report.repair_job_id;
@@ -236,18 +252,7 @@ async function resumeAfterRepair({ supabase, job, actions, log }) {
   if (!evidence?.manifestRows?.length || !(await actions.changeLanded(evidence.manifestRows))) {
     return { job: job.id, outcome: 'waiting_for_repair', repair_job: repairId };
   }
-  const reopened = await actions.createJob({
-    parentJobId: job.id,
-    organizationId: job.organization_id,
-    projectId: job.project_id,
-    title: job.title,
-    taskDescription: job.task_description,
-    frontendRequired: job.frontend_required === true,
-    backendRequired: job.backend_required === true,
-    codeReviewMode: job.code_review_mode || 'independent_ai',
-    requestedBy: job.autopilot_requested_by,
-    conversationId: job.autopilot_conversation_id ?? null,
-  });
+  const reopened = await actions.createJob(reopenSpec(job));
   await actions.record(job.id, 'done', { ...composeReport({ job, state: 'resumed', resumedAs: reopened.id }), repair_job_id: repairId, repair_outcome: 'landed' });
   log({ job: job.id, resumed_as: reopened.id, after_repair: repairId });
   return { job: job.id, outcome: 'resumed', resumed_as: reopened.id };
@@ -333,6 +338,16 @@ async function autopilotTick({ supabase, jobs, actions, log = () => {} }) {
         const evidence = snapshot ? await collectEvidence({ supabase, snapshot }).catch(() => null) : null;
         const baseline = baselineBlock(blockedReason);
         if (baseline && !isRepairJob(job) && typeof actions.createJob === 'function') {
+          // Main may have moved on since this job was pinned (someone may already have fixed the checks):
+          // try the same brief on the current main first; only a job already at main's head needs a repair.
+          const mainHead = typeof actions.mainHead === 'function' ? await actions.mainHead() : null;
+          if (mainHead && job.target_sha && mainHead !== job.target_sha) {
+            const reopened = await actions.createJob(reopenSpec(job));
+            await actions.record(job.id, 'done', { ...composeReport({ job, state: 'resumed', resumedAs: reopened.id }), repair_outcome: 'main_moved' });
+            log({ job: job.id, resumed_as: reopened.id, reason: 'red baseline at an older commit; main has moved' });
+            outcomes.push({ job: job.id, outcome: 'resumed', resumed_as: reopened.id });
+            continue;
+          }
           const repair = await actions.createJob(repairJobFor(job, baseline));
           await actions.record(job.id, 'blocked', composeReport({ job, evidence, state: 'repairing', reason: baseline.reason, repair }));
           log({ job: job.id, repair_job: repair.id, reason: baseline.reason.slice(0, 200) });

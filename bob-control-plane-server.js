@@ -385,6 +385,7 @@ async function autopilotOnce() {
           return data || null;
         },
         changeLanded: (manifestRows) => changeLandedOnMain(manifestRows),
+        mainHead: async () => builderRepositoryHead('main').sha,
       },
     });
   } catch (error) {

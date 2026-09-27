@@ -222,7 +222,18 @@ test('a job blocked by a red main opens a repair job for the same requester inst
   assert.match(repairSpec.taskDescription, /Acceptance test: the failing command passes/);
   assert.equal(isRepairJob({ title: repairSpec.title }), true);
 
+  // Main has moved past the pinned commit: the checks may already be fixed, so the same brief is
+  // tried again on current main before any repair is opened.
+  const moved = actionsRecorder({ run: { paused: true, reason: 'blocked', detail } });
+  moved.mainHead = async () => 'd'.repeat(40);
+  const reopened = [];
+  moved.createJob = async (spec) => { reopened.push(spec); return { id: 'job-r2' }; };
+  assert.deepEqual(await autopilotTick({ supabase: fakeSupabase({ job }), jobs: [job], actions: moved }), [{ job: 'job-r', outcome: 'resumed', resumed_as: 'job-r2' }]);
+  assert.equal(reopened[0].title, 'Add Cancel control');
+  assert.equal(moved.calls.find(([name]) => name === 'record')[3].repair_outcome, 'main_moved');
+
   const actions = actionsRecorder({ run: { paused: true, reason: 'blocked', detail } });
+  actions.mainHead = async () => job.target_sha;
   const created = [];
   actions.createJob = async (spec) => { created.push(spec); return { id: 'job-repair', title: spec.title }; };
   const outcomes = await autopilotTick({ supabase: fakeSupabase({ job }), jobs: [job], actions });
