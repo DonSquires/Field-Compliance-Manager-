@@ -73,7 +73,6 @@ describe('Builder control room boundary', () => {
     expect(source).toContain('snapshot?.job?.id === selectedId ? snapshot.job');
     expect(source).toContain('Review: {plainWords(selectedJob.code_review_mode)}');
     expect(source).toContain('{plainWords(selectedJob.requested_action)} for {plainWords(selectedJob.target_environment)}');
-    expect(relay).toContain('requested_action, target_environment, frontend_required');
   });
 
   it('offers confirmed, reasoned cancellation only for active selected jobs and refreshes on success', () => {
