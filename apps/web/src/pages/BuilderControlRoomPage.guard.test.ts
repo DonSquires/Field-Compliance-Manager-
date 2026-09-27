@@ -68,6 +68,23 @@ describe('Builder control room boundary', () => {
     expect(source).toContain("surface: 'builder_control_room'");
   });
 
+  it('offers confirmed, reasoned cancellation only for active selected jobs and refreshes on success', () => {
+    expect(source).toContain("!['deployed', 'failed', 'cancelled'].includes(selectedJob.status)");
+    expect(source).toContain('Cancellation reason<textarea');
+    expect(source).toContain('required disabled={Boolean(busy)}');
+    expect(source).toContain('disabled={Boolean(busy) || !cancellationReason.trim()}');
+    expect(source).toContain('if (!window.confirm(`Cancel Builder job');
+    expect(source).toContain("await invoke({ action: 'cancel', job_id: jobId, reason });");
+    expect(source).toContain('const reason = cancellationReason.trim()');
+    expect(source).toContain('const refreshedJobs = await loadList()');
+    expect(source).toContain('await loadSnapshot(jobId)');
+    expect(source).toContain('setError(cancelError instanceof Error ? cancelError.message');
+    expect(source).toContain('const payload = await context.json().catch(() => null)');
+    expect(relay).toContain("if (action === 'cancel')");
+    expect(relay).toContain("callerClient.rpc('builder_cancel_job', { _job_id: jobId, _reason: reason })");
+    expect(relay).toContain('if (error) return json({ error: error.message }, 409)');
+  });
+
   it('keeps relay authority server-side and organization-scoped', () => {
     expect(relay).toContain("Deno.env.get('BOB_ADMIN_TOKEN')");
     expect(relay).toContain('canAccessOrganization');

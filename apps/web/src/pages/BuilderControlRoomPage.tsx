@@ -119,6 +119,7 @@ const BuilderControlRoomPage: React.FC = () => {
   const [artifactContent, setArtifactContent] = useState<{ id: string; content: string; checksum: string | null } | null>(null);
   const [artifactLoading, setArtifactLoading] = useState(false);
   const [followupTask, setFollowupTask] = useState('');
+  const [cancellationReason, setCancellationReason] = useState('');
   const [form, setForm] = useState({
     projectId: '', title: '', taskDescription: '', targetSha: '', branchName: 'main',
     frontendRequired: true, backendRequired: false, codeReviewMode: 'human' as ReviewMode,
@@ -127,7 +128,16 @@ const BuilderControlRoomPage: React.FC = () => {
 
   const invoke = useCallback(async (body: Record<string, unknown>) => {
     const { data, error: invokeError } = await supabase.functions.invoke('bob-builder-control-room', { body });
-    if (invokeError) throw invokeError;
+    if (invokeError) {
+      const context = invokeError.context;
+      if (context instanceof Response) {
+        const payload = await context.json().catch(() => null);
+        if (payload && typeof payload.error === 'string') {
+          throw new Error(typeof payload.detail === 'string' && payload.detail ? `${payload.error}: ${payload.detail}` : payload.error);
+        }
+      }
+      throw invokeError;
+    }
     if (data?.error) throw new Error(typeof data.detail === 'string' && data.detail ? `${data.error}: ${data.detail}` : data.error);
     return data;
   }, []);
@@ -143,8 +153,10 @@ const BuilderControlRoomPage: React.FC = () => {
       setJobs(nextJobs);
       setForm(current => ({ ...current, projectId: current.projectId || nextProjects[0]?.id || '' }));
       setSelectedId(current => current && nextJobs.some(job => job.id === current) ? current : nextJobs[0]?.id ?? null);
+      return nextJobs;
     } catch (loadError) {
       setError(loadError instanceof Error ? loadError.message : 'Builder activity could not be loaded.');
+      return null;
     } finally {
       setLoading(false);
     }
@@ -154,9 +166,11 @@ const BuilderControlRoomPage: React.FC = () => {
     try {
       const data = await invoke({ action: 'get', job_id: jobId });
       setSnapshot(data as BuilderSnapshot);
+      return true;
     } catch (loadError) {
       setSnapshot(null);
       setError(loadError instanceof Error ? loadError.message : 'Builder job could not be loaded.');
+      return false;
     }
   }, [invoke]);
 
@@ -171,6 +185,7 @@ const BuilderControlRoomPage: React.FC = () => {
   }, [invoke]);
 
   useEffect(() => { void loadList(); }, [loadList]);
+  useEffect(() => { setCancellationReason(''); }, [selectedId]);
   useEffect(() => { if (selectedId) { void loadSnapshot(selectedId); void loadContext(selectedId); } else { setSnapshot(null); setContextSnapshot(null); } }, [selectedId, loadSnapshot, loadContext]);
 
   const selectedProject = projects.find(project => project.id === form.projectId) ?? null;
@@ -316,6 +331,26 @@ const BuilderControlRoomPage: React.FC = () => {
     } finally { setBusy(null); }
   };
 
+  const cancelJob = async () => {
+    if (!selectedId || !selectedJob || selectedJob.id !== selectedId || ['deployed', 'failed', 'cancelled'].includes(selectedJob.status) || busy || !cancellationReason.trim()) return;
+    const jobId = selectedId;
+    const reason = cancellationReason.trim();
+    if (!window.confirm(`Cancel Builder job "${selectedJob.title}" (${jobId})? This will stop the job. Select OK to cancel it.`)) return;
+    setBusy('cancel');
+    setError(null);
+    setNotice(null);
+    try {
+      await invoke({ action: 'cancel', job_id: jobId, reason });
+      const refreshedJobs = await loadList();
+      if (!refreshedJobs) return;
+      if (refreshedJobs.some(job => job.id === jobId) && !await loadSnapshot(jobId)) return;
+      setCancellationReason('');
+      setNotice('Builder job cancelled.');
+    } catch (cancelError) {
+      setError(cancelError instanceof Error ? cancelError.message : 'Builder job could not be cancelled.');
+    } finally { setBusy(null); }
+  };
+
   const refreshAtlas = async () => {
     setBusy('atlas-refresh');
     setError(null);
@@ -441,6 +476,7 @@ const BuilderControlRoomPage: React.FC = () => {
               <button type="button" className="is-primary" onClick={() => void advance('run')} disabled={Boolean(busy)}>{busy === 'run' ? <RefreshCw size={15} className="is-spinning" /> : <Workflow size={15} />} Run to gate</button>
             </div>
             {selectedJob.workspace_branch && <section className="builder-followup"><label>Continue on this branch<textarea value={followupTask} onChange={event => setFollowupTask(event.target.value)} rows={3} placeholder="Describe the next change, refinement, or repair for Bob Builder" /></label><button type="button" onClick={() => void createFollowup()} disabled={Boolean(busy) || !followupTask.trim()}><Bot size={15} /> {busy === 'followup' ? 'Starting...' : 'Continue build'}</button></section>}
+            {!['deployed', 'failed', 'cancelled'].includes(selectedJob.status) && <section className="builder-followup builder-cancel" aria-label="Cancel Builder job"><label>Cancellation reason<textarea value={cancellationReason} onChange={event => setCancellationReason(event.target.value)} rows={3} required disabled={Boolean(busy)} /></label><button type="button" className="is-danger" onClick={() => void cancelJob()} disabled={Boolean(busy) || !cancellationReason.trim()}><CircleStop size={15} /> {busy === 'cancel' ? 'Cancelling…' : 'Cancel job'}</button></section>}
           </>}
         </section>
       </div>
