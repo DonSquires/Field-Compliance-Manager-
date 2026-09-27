@@ -170,6 +170,7 @@ function executeFrontendPatch({ sourceDir, patchPath, artifactDir, workDir = '/w
     patchApplied = commands.at(-1).status === 0;
   }
 
+  let baseline = null;
   if (patchApplied) {
     const e2eTargeted = targetedE2eSpecs(changedFiles, path.join(workDir, 'apps/web'));
     const progressPath = path.join(artifactDir, 'verification.json');
@@ -178,7 +179,10 @@ function executeFrontendPatch({ sourceDir, patchPath, artifactDir, workDir = '/w
       fs.mkdirSync(artifactDir, { recursive: true });
       fs.writeFileSync(progressPath, `${JSON.stringify({ succeeded: false, in_progress: true, running: ['npm', ...args].join(' '), started_at: new Date().toISOString(), commands, e2e_selection: { smoke: E2E_SMOKE_SPECS, targeted: e2eTargeted, project: 'desktop-chromium', offline: true, snapshots: E2E_SNAPSHOT_NOTE } }, null, 2)}\n`, { mode: 0o600 });
       commands.push(run('npm', args, { cwd: workDir }));
-      if (commands.at(-1).status !== 0) break;
+      if (commands.at(-1).status !== 0) {
+        baseline = baselineCheck({ workDir, patchPath, args, progressPath, commands });
+        break;
+      }
     }
   }
 
@@ -196,8 +200,38 @@ function executeFrontendPatch({ sourceDir, patchPath, artifactDir, workDir = '/w
   }
   fs.writeFileSync(path.join(artifactDir, 'changed-files.json'), `${JSON.stringify(manifest, null, 2)}\n`, { mode: 0o600 });
   if (patchApplied) fs.writeFileSync(path.join(artifactDir, 'validated.patch'), patchText, { mode: 0o600 });
-  fs.writeFileSync(path.join(artifactDir, 'verification.json'), `${JSON.stringify({ succeeded, commands, e2e_selection: patchApplied ? { smoke: E2E_SMOKE_SPECS, targeted: targetedE2eSpecs(changedFiles, path.join(workDir, 'apps/web')), project: 'desktop-chromium', offline: true, snapshots: E2E_SNAPSHOT_NOTE } : null }, null, 2)}\n`, { mode: 0o600 });
-  return { succeeded, changed_files: manifest, commands };
+  fs.writeFileSync(path.join(artifactDir, 'verification.json'), `${JSON.stringify({ succeeded, commands, baseline, baseline_failure: Boolean(baseline?.also_fails), baseline_reason: baseline?.also_fails ? baseline.reason : null, e2e_selection: patchApplied ? { smoke: E2E_SMOKE_SPECS, targeted: targetedE2eSpecs(changedFiles, path.join(workDir, 'apps/web')), project: 'desktop-chromium', offline: true, snapshots: E2E_SNAPSHOT_NOTE } : null }, null, 2)}\n`, { mode: 0o600 });
+  return { succeeded, changed_files: manifest, commands, baseline_failure: Boolean(baseline?.also_fails) };
+}
+
+/**
+ * A failing step is re-run once on the unpatched tree. If it fails there too the repository is red
+ * at the pinned commit (job 72edc782: three guard tests broken by unrelated commits on main) and
+ * the author must not be sent that failure as their own.
+ */
+function baselineCheck({ workDir, patchPath, args, progressPath, commands }) {
+  const label = ['npm', ...args].join(' ');
+  fs.writeFileSync(progressPath, `${JSON.stringify({ succeeded: false, in_progress: true, running: `baseline check: ${label}`, started_at: new Date().toISOString(), commands }, null, 2)}\n`, { mode: 0o600 });
+  const revert = run('git', ['apply', '-R', '--whitespace=nowarn', patchPath], { cwd: workDir });
+  if (revert.status !== 0) return { command: label, checked: false, reason: 'patch could not be reverted for a baseline check' };
+  let result;
+  try {
+    result = run('npm', args, { cwd: workDir });
+  } finally {
+    run('git', ['apply', '--whitespace=nowarn', patchPath], { cwd: workDir });
+  }
+  const alsoFails = result.status !== 0;
+  const failing = alsoFails ? (`${result.stdout}\n${result.stderr}`.match(/(?:FAIL|\u00d7|\u2716)\s+([\w./-]+\.(?:test|spec)\.[cm]?[jt]sx?)/g) || []).map((m) => m.replace(/^(?:FAIL|\u00d7|\u2716)\s+/, '')).filter((v, i, a) => a.indexOf(v) === i).slice(0, 8) : [];
+  return {
+    command: label,
+    checked: true,
+    also_fails: alsoFails,
+    status: result.status,
+    failing_files: failing,
+    reason: alsoFails ? `${label} also fails on the pinned commit without this patch (the repository is red at the target commit${failing.length ? `: ${failing.join(', ')}` : ''}); not caused by this change` : null,
+    stdout: redactLog(String(result.stdout || '').slice(-8000)),
+    stderr: redactLog(String(result.stderr || '').slice(-8000))
+  };
 }
 
 function main() {

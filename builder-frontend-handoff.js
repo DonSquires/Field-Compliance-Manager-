@@ -183,9 +183,9 @@ async function runFrontendHandoff({
     const succeeded = result.status === 'succeeded' && verification?.succeeded === true;
     // A lease timeout leaves the progressive evidence the worker wrote before it was killed.
     const infrastructure = succeeded
-      ? { infrastructure: false, reason: null }
+      ? { infrastructure: false, baseline: false, reason: null }
       : result.status === 'timeout'
-        ? { infrastructure: true, reason: `verifier timed out after ${timeoutSeconds} s during ${String(verification?.running || 'verification').slice(0, 120)}` }
+        ? { infrastructure: true, baseline: false, reason: `verifier timed out after ${timeoutSeconds} s during ${String(verification?.running || 'verification').slice(0, 120)}` }
         : classifyVerificationFailure(verification);
     const artifacts = [];
     if (fs.existsSync(verificationPath)) {
@@ -200,7 +200,7 @@ async function runFrontendHandoff({
       lease,
       succeeded,
       result.exitCode ?? 1,
-      succeeded ? 'Frontend patch passed lint, build, and tests' : infrastructure.infrastructure ? `Frontend verifier infrastructure failure (${infrastructure.reason}); the same patch is re-verified` : 'Frontend patch verification failed'
+      succeeded ? 'Frontend patch passed lint, build, and tests' : infrastructure.baseline ? `Repository is red at the pinned commit (${infrastructure.reason}); not caused by this patch` : infrastructure.infrastructure ? `Frontend verifier infrastructure failure (${infrastructure.reason}); the same patch is re-verified` : 'Frontend patch verification failed'
     );
     return {
       success: succeeded,
@@ -209,6 +209,8 @@ async function runFrontendHandoff({
       artifacts,
       infrastructure_failure: infrastructure.infrastructure,
       infrastructure_reason: infrastructure.reason,
+      baseline_failure: infrastructure.baseline === true,
+      baseline_reason: infrastructure.baseline ? infrastructure.reason : null,
       failure_artifact: succeeded ? null : artifacts[0] || null
     };
   } catch (error) {

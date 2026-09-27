@@ -150,9 +150,9 @@ async function runBackendHandoff({
     }
     const succeeded = staticSucceeded && databaseVerification?.succeeded === true;
     const infrastructure = succeeded
-      ? { infrastructure: false, reason: null }
+      ? { infrastructure: false, baseline: false, reason: null }
       : result.status === 'timeout'
-        ? { infrastructure: true, reason: `verifier timed out after ${timeoutSeconds} s` }
+        ? { infrastructure: true, baseline: false, reason: `verifier timed out after ${timeoutSeconds} s` }
         : classifyVerificationFailure(verification);
     const artifacts = [];
     if (verification) {
@@ -171,7 +171,9 @@ async function runBackendHandoff({
         ? proposal.database_migrations.length > 0
           ? 'Backend patch passed static verification and disposable migration execution'
           : 'Backend patch passed static verification; no migration execution was required'
-        : infrastructure.infrastructure
+        : infrastructure.baseline
+          ? `Repository is red at the pinned commit (${infrastructure.reason}); not caused by this patch`
+          : infrastructure.infrastructure
           ? `Backend verifier infrastructure failure (${infrastructure.reason}); the same patch is re-verified`
           : 'Backend patch verification failed'
     );
@@ -183,6 +185,8 @@ async function runBackendHandoff({
       verification,
       infrastructure_failure: infrastructure.infrastructure,
       infrastructure_reason: infrastructure.reason,
+      baseline_failure: infrastructure.baseline === true,
+      baseline_reason: infrastructure.baseline ? infrastructure.reason : null,
       failure_artifact: succeeded ? null : artifacts[0] || null
     };
   } catch (error) {

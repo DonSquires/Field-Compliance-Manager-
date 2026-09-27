@@ -81,8 +81,8 @@ test('a verifier infrastructure failure re-runs the same patch once instead of a
     { command: 'git apply --check', status: 0 },
     { command: 'npm run lint --prefix apps/web', status: 134, stderr: 'FATAL ERROR: Ineffective mark-compacts near heap limit Allocation failed - JavaScript heap out of memory' },
   ] };
-  assert.deepEqual(classifyVerificationFailure(oom), { infrastructure: true, reason: 'npm run lint --prefix apps/web: heap out of memory' });
-  assert.deepEqual(classifyVerificationFailure({ succeeded: false, commands: [{ command: 'npm run test', status: 1, stdout: '3 failed' }] }), { infrastructure: false, reason: null });
+  assert.deepEqual(classifyVerificationFailure(oom), { infrastructure: true, baseline: false, reason: 'npm run lint --prefix apps/web: heap out of memory' });
+  assert.deepEqual(classifyVerificationFailure({ succeeded: false, commands: [{ command: 'npm run test', status: 1, stdout: '3 failed' }] }), { infrastructure: false, baseline: false, reason: null });
   assert.deepEqual(classifyVerificationFailure({ succeeded: false, checks: [{ command: 'node --test test/x.test.js', status: 137, stderr: '' }] }).infrastructure, true, 'SIGKILL (cgroup OOM) is never a test result');
   assert.equal(classifyVerificationFailure({ succeeded: true }).infrastructure, false);
 
@@ -127,4 +127,23 @@ test('a resumed step verifies the patch the lost verifier was checking instead o
   });
   assert.equal(result.success, true);
   assert.deepEqual(calls, ['verify:patch-lost'], 'job ecfb4dc4: the author is not re-run for a patch nobody rejected');
+});
+
+test('a red baseline parks the step with the reason instead of sending the author a repair', async () => {
+  const calls = [];
+  const rpcs = [];
+  const result = await runFrontendImplementation({
+    ...base,
+    supabase: { rpc: async (name, args) => { rpcs.push({ name, args }); return { data: {}, error: null }; } },
+    generate: async () => ({ ok: true, patch_artifact: { id: 'patch-1' } }),
+    handoff: async () => ({ success: false, worker_run_id: 'run-1', artifacts: [{ id: 'log-1' }], job: { status: 'implementation_pending' }, baseline_failure: true, baseline_reason: 'npm run test also fails on the pinned commit without this patch: src/pages/FinanceBureauPage.guard.test.ts; not caused by this change' }),
+    reloadStep: async () => ({ ...base.step, status: 'failed', retryable: true, attempt_count: 1 }),
+    repair: async () => { calls.push('repair'); return { ok: true, patch_artifact: { id: 'patch-2' } }; }
+  });
+  assert.equal(result.success, false);
+  assert.equal(result.phase, 'baseline');
+  assert.deepEqual(calls, [], 'no author repair for someone else\'s red main');
+  assert.equal(rpcs[0].name, 'builder_record_generation_failure');
+  assert.equal(rpcs[0].args._retryable, false);
+  assert.match(rpcs[0].args._reason, /^baseline: repository red at the pinned commit: npm run test also fails/);
 });

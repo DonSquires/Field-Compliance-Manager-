@@ -68,6 +68,12 @@ async function runFrontendImplementation({
     if (!currentStep.retryable) {
       return { success: false, phase: 'verification', attempts: attempt, job: verification.job };
     }
+    // The repository itself is red at the pinned commit: no repair can pass, so the step is parked
+    // with the real reason for a human instead of burning author runs on someone else's break.
+    if (verification.baseline_failure) {
+      await recordGenerationFailure({ supabase, job, step: currentStep }, { no_change: true, error: `repository red at the pinned commit: ${verification.baseline_reason}` }, 'baseline');
+      return { success: false, phase: 'baseline', attempts: attempt, job: verification.job, error: verification.baseline_reason };
+    }
     // The verifier failed, not the patch (OOM, killed, timed out): run the same patch again once
     // rather than sending the author a failure it did not cause.
     if (verification.infrastructure_failure && infrastructureRetries < 1) {

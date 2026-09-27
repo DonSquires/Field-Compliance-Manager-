@@ -21,8 +21,11 @@ const INFRASTRUCTURE_PATTERNS = [
 const INFRASTRUCTURE_EXIT_CODES = new Set([134, 137]);
 
 function classifyVerificationFailure(verification) {
-  if (!verification || typeof verification !== 'object') return { infrastructure: false, reason: null };
-  if (verification.succeeded === true) return { infrastructure: false, reason: null };
+  if (!verification || typeof verification !== 'object') return { infrastructure: false, baseline: false, reason: null };
+  if (verification.succeeded === true) return { infrastructure: false, baseline: false, reason: null };
+  // The same step fails without the patch: the repository is red at the pinned commit. Neither a
+  // re-run nor an author repair can fix that; a human has to fix main (job 72edc782).
+  if (verification.baseline_failure === true) return { infrastructure: false, baseline: true, reason: String(verification.baseline_reason || 'the verification step also fails without this patch').slice(0, 400) };
   const commands = Array.isArray(verification.commands) ? verification.commands : Array.isArray(verification.checks) ? verification.checks : [];
   for (const command of commands) {
     if (!command || command.status === 0) continue;
@@ -31,10 +34,10 @@ function classifyVerificationFailure(verification) {
     if (pattern || INFRASTRUCTURE_EXIT_CODES.has(Number(command.status))) {
       const label = String(command.command || 'verification command').slice(0, 80);
       const why = pattern ? (text.match(pattern) || [''])[0] : `exit ${command.status}`;
-      return { infrastructure: true, reason: `${label}: ${why}`.slice(0, 200) };
+      return { infrastructure: true, baseline: false, reason: `${label}: ${why}`.slice(0, 200) };
     }
   }
-  return { infrastructure: false, reason: null };
+  return { infrastructure: false, baseline: false, reason: null };
 }
 
 module.exports = { INFRASTRUCTURE_EXIT_CODES, INFRASTRUCTURE_PATTERNS, classifyVerificationFailure };

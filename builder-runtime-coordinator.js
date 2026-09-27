@@ -55,7 +55,7 @@ function parkedStep(step) {
 }
 
 function parkedStepBlock(job, step) {
-  return { type: 'blocked', status: job.status, reason: 'blocked', step_id: step.step_id, detail: String(step.error || `${step.step_id} was declined by the author`).replace(/^(generation|repair): /, '').slice(0, 1000) };
+  return { type: 'blocked', status: job.status, reason: 'blocked', step_id: step.step_id, detail: String(step.error || `${step.step_id} was declined by the author`).replace(/^(generation|repair|baseline): /, '').slice(0, 1000) };
 }
 
 function planBuilderAction(snapshot) {
@@ -218,6 +218,11 @@ async function runBackendImplementation(input) {
     if (verification.success || !agentic) return { ...verification, attempts: attempt, patch_artifact: patchArtifact, routing: generation.routing };
     // The verifier failed, not the patch (OOM, killed, timed out): same patch again, once, no repair.
     if (verification.infrastructure_failure && infrastructureRetries < 1) { infrastructureRetries += 1; continue; }
+    // The repository is red at the pinned commit: park with the reason; no repair can pass.
+    if (verification.baseline_failure) {
+      await recordGenerationFailure(input, { no_change: true, error: `repository red at the pinned commit: ${verification.baseline_reason}` }, 'baseline');
+      return { ...verification, success: false, phase: 'baseline', attempts: attempt, error: verification.baseline_reason };
+    }
     if (attempt >= MAX_BACKEND_ATTEMPTS) return { ...verification, success: false, phase: 'repair_limit', attempts: attempt };
     const failureArtifact = verification.failure_artifact || verification.artifacts?.[0];
     // Feed the independent worker's failure evidence back to Bob and let him repair; an in-house author
