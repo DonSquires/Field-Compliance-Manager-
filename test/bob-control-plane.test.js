@@ -77,6 +77,13 @@ test('health is public and reports the control plane', async () => {
   assert.equal(modelProviders.gpu_workstation.configured, false, 'no GPU link in the test environment');
 });
 
+test('control-plane source has a bounded stale Builder lease recovery path', () => {
+  const source = fs.readFileSync(path.join(root, 'bob-control-plane-server.js'), 'utf8');
+  assert.match(source, /BOB_BUILDER_STALE_RUN_MS/);
+  assert.match(source, /builder\.run\.stale_lease_cleared/);
+  assert.match(source, /clearStaleBuilderRun\(jobId\)/);
+});
+
 test('assessment is authenticated and read-only', async () => {
   const denied = await request('GET', '/assessment');
   assert.equal(denied.response.status, 401);

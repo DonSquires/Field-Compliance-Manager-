@@ -252,6 +252,17 @@ async function resolveBuilderSourceDir(jobId) {
 
 // One Builder run per job at a time; runs continue after the HTTP caller has gone.
 const runningBuilderJobs = new Map();
+const staleBuilderRunMs = Math.max(5 * 60_000, Number(process.env.BOB_BUILDER_STALE_RUN_MS) || 45 * 60_000);
+
+function clearStaleBuilderRun(jobId, now = Date.now()) {
+  const startedAt = runningBuilderJobs.get(jobId);
+  if (!startedAt) return false;
+  const age = now - Date.parse(startedAt);
+  if (!Number.isFinite(age) || age < staleBuilderRunMs) return false;
+  runningBuilderJobs.delete(jobId);
+  record('builder', 'builder.run.stale_lease_cleared', jobId, { age_ms: age, stale_after_ms: staleBuilderRunMs });
+  return true;
+}
 
 // Expected-state failures on the publication steps (a 4xx with a plain reason, no stack).
 class BuilderStepError extends Error {
@@ -316,6 +327,7 @@ async function openBuilderPullRequest(jobId, bodyFor = null) {
 }
 
 async function runBuilderJobBounded(jobId, body = {}) {
+  clearStaleBuilderRun(jobId);
   if (runningBuilderJobs.has(jobId)) return { skipped: true, already_running: true, started_at: runningBuilderJobs.get(jobId) };
   const context = await builderRuntimeContext(body, await resolveBuilderSourceDir(jobId));
   const execution = runBuilderUntilPause({ supabase: builderSupabase, gateway: builderGateway, jobId, context, maxActions: body.maxActions })
