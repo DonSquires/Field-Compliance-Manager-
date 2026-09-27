@@ -8377,7 +8377,7 @@ serve(async (req)=>{
                   bjDescription.slice(0, 4000),
                   bjDescription.length > 4000 ? `\n[... ${bjDescription.length - 4000} more chars ...]` : '',
                   '',
-                  'The job pins the current `main` commit, works on its own `bob/job-…` branch, runs tests and review, and opens a **DRAFT pull request** for you. I never merge or deploy.',
+                  'The job pins the current `main` commit, works on its own `bob/job-…` branch, runs tests, an isolated re-verification, a security scan and an independent review, then opens a pull request. When every one of those checks passes and nothing evidential is touched, I merge it myself and the release lane puts it live (owner ruling 2026-09-27); otherwise it waits as a draft for a person. I report either way.',
                   '',
                   'Say **yes** or **go ahead** to open it, or tell me what to change in the brief.'
                 ].filter(Boolean).join('\n'),
