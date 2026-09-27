@@ -289,6 +289,7 @@ function safeAgentWorkspaceContext(value) {
         'propose_freedom_camping_org_strategy',
         'dispatch_flow',
         'create_builder_job',
+        'cancel_builder_job',
         'laptop_shell',
         'review_merge_request',
         'config_error',
@@ -699,6 +700,7 @@ const WRITE_CAPABLE_TOOLS = new Set([
   'dispatch_flow',
   // create_builder_job opens a GitHub Builder job (produces a DRAFT PR) — write-capable.
   'create_builder_job',
+  'cancel_builder_job',
   // laptop_shell runs a PowerShell command on the owner's laptop — write-capable (it acts on a real machine).
   'laptop_shell',
   // C5 stage 1b (#243): generic_write is write-capable, so the explicit
@@ -1452,7 +1454,7 @@ function computeEgressForbiddenSet(caps, meta) {
     t.tool === 'write_self_memory' && caps.tier === 'admiral' || // read_self_memory is Bob's read of his own memory — ADMIRAL ONLY.
     t.tool === 'read_self_memory' && caps.tier === 'admiral' || // dispatch_flow dispatches a governed Duo coding flow — ADMIRAL ONLY.
     t.tool === 'dispatch_flow' && caps.tier === 'admiral' || // create_builder_job opens a GitHub self-heal/build job (DRAFT PR) — ADMIRAL ONLY.
-    t.tool === 'create_builder_job' && caps.tier === 'admiral' || // laptop_shell runs a confirmed PowerShell command on the owner's laptop — ADMIRAL ONLY.
+    t.tool === 'create_builder_job' && caps.tier === 'admiral' || t.tool === 'cancel_builder_job' && caps.tier === 'admiral' || // laptop_shell runs a confirmed PowerShell command on the owner's laptop — ADMIRAL ONLY.
     t.tool === 'laptop_shell' && caps.tier === 'admiral' || allowed.has(t.tool) || allowed.has(envelopeName[t.tool] ?? ''));
 }
 // ── Persona + platform grounding (passed to the brain) ───────────────────────
@@ -8466,6 +8468,55 @@ serve(async (req)=>{
         // and purpose (meta carries pending_laptop_command), run only on the owner's affirmative
         // (pending.kind='laptop_command_pending'). The laptop's SSH service is the owner's on/off switch;
         // the control plane refuses destructive or privilege-changing commands regardless.
+        case 'cancel_builder_job':
+          {
+            const meta = (outcome, extra = {}) => ({ tool: 'cancel_builder_job', outcome, ...extra });
+            const reply = (text, outcome) => ({ reply: text, meta: meta(outcome) });
+            if (caps.tier !== 'admiral' || !user?.id) return reply('You are not authorized to cancel Builder jobs.', 'forbidden');
+            if (!conversationId) return reply('Start a conversation before requesting a Builder cancellation.', 'need_conversation');
+            const { data: last, error: historyError } = await callerClient.from('bob_messages')
+              .select('role, metadata').eq('conversation_id', conversationId)
+              .order('created_at', { ascending: false }).limit(1).maybeSingle();
+            if (historyError) return reply('I could not verify the previous turn, so I will not cancel anything.', 'failed');
+            const stored = last?.role === 'assistant' && last.metadata?.tool === 'cancel_builder_job' && last.metadata?.outcome === 'proposed'
+              ? last.metadata.pending_builder_cancel : null;
+            const pendingCancel = stored && stored.requester_id === user.id && typeof stored.job_id === 'string' && typeof stored.reason === 'string'
+              ? stored : null;
+            const affirmative = /^(yes|yes,? cancel(?: it| the job)?|confirm|confirm cancellation|go ahead|cancel it)$/i.test(message.trim());
+            const suppliedId = String(toolArgs.job_id ?? '').trim();
+            const suppliedTitle = String(toolArgs.title ?? '').trim();
+            const suppliedReason = String(toolArgs.reason ?? '').trim();
+            if (affirmative && pendingCancel && (!suppliedId || suppliedId === pendingCancel.job_id) &&
+                (!suppliedTitle || suppliedTitle === pendingCancel.title) && (!suppliedReason || suppliedReason === pendingCancel.reason)) {
+              const { data, error } = await callerClient.rpc('builder_cancel_job', {
+                _job_id: pendingCancel.job_id, _reason: pendingCancel.reason
+              });
+              if (error) {
+                const detail = String(error.message ?? '');
+                if (/already cancel|already finish|terminal|completed|finished/i.test(detail)) return reply('That Builder job is already cancelled or finished; no new cancellation was made.', 'already_finished');
+                if (/not found|does not exist/i.test(detail)) return reply('That Builder job could not be found or is not accessible to you.', 'not_found');
+                return reply('I could not cancel that Builder job. No success was reported.', 'failed');
+              }
+              if (data && data.id === pendingCancel.job_id && data.status === 'cancelled') {
+                return reply(`Builder job ${pendingCancel.job_id} was cancelled. Reason: ${pendingCancel.reason}`, 'cancelled');
+              }
+              return reply('The cancellation result could not be verified; I cannot report success.', 'failed');
+            }
+            if (affirmative && !pendingCancel && !suppliedId && !suppliedTitle) return reply('There is no valid cancellation preview to confirm. Name the Builder job and give a reason first.', 'no_preview');
+            if (pendingCancel && /^(no|nope|stop|never mind|do not cancel|don't cancel)$/i.test(message.trim())) return reply('Understood. I did not cancel the Builder job.', 'declined');
+            if (!suppliedReason || (!suppliedId && !suppliedTitle)) return reply('Please give a Builder job ID or title and a nonblank cancellation reason. I will show you the exact target before cancelling.', 'need_params');
+            if (suppliedId && suppliedTitle) return reply('Specify either the job ID or the title, not both, so I can verify the target.', 'need_params');
+            const jobsQuery = callerClient.from('builder_jobs').select('id,title,status').limit(2);
+            const { data: jobs, error: lookupError } = await (suppliedId ? jobsQuery.eq('id', suppliedId) : jobsQuery.eq('title', suppliedTitle));
+            if (lookupError) return reply('I could not verify a caller-visible Builder job; nothing was cancelled.', 'failed');
+            if (!jobs?.length) return reply('I could not find a Builder job matching that ID or title in the jobs you can access.', 'not_found');
+            if (jobs.length !== 1) return reply('More than one visible Builder job has that title. Please give the exact job ID; I will not choose one.', 'ambiguous');
+            const job = jobs[0];
+            return {
+              reply: `Please confirm cancellation of Builder job ${job.id}${job.title ? ` ("${job.title}")` : ''}.\nExact reason: ${suppliedReason}\n\nSay **yes, cancel it** in your next message to cancel this job, or say no. Nothing has been cancelled yet.`,
+              meta: meta('proposed', { pending_builder_cancel: { job_id: job.id, title: job.title ?? '', reason: suppliedReason, requester_id: user.id } })
+            };
+          }
         case 'laptop_shell':
           {
             if (caps.tier !== 'admiral') {
