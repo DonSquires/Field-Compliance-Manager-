@@ -32,11 +32,11 @@ interface BuilderJob {
   workspace_published_head_sha: string | null;
   workspace_pull_request_url: string | null;
   workspace_pull_request_head_sha: string | null;
-  requested_action: RequestedAction;
-  target_environment: TargetEnvironment;
+  requested_action?: RequestedAction | null;
+  target_environment?: TargetEnvironment | null;
   frontend_required: boolean;
   backend_required: boolean;
-  code_review_mode: ReviewMode;
+  code_review_mode?: ReviewMode | null;
   code_review_status: string;
   last_error: string | null;
   created_at: string;
@@ -96,6 +96,8 @@ interface BuilderContextSnapshot {
   build_map: { file_count: number; schema: { tables: string[] } };
   live_context: { atlas: { capability_count: number; edge_count: number; wired_capability_count: number; exercised_capability_count: number; capability_last_refreshed_at: string | null }; live_data: { tables: Array<{ table: string; count: number | null; available: boolean }> } };
 }
+
+const plainWords = (value: unknown, fallback = 'Not recorded') => typeof value === 'string' && value.trim() ? value.replaceAll('_', ' ') : fallback;
 
 const BuilderControlRoomPage: React.FC = () => {
   const [projects, setProjects] = useState<BuilderProject[]>([]);
@@ -381,7 +383,7 @@ const BuilderControlRoomPage: React.FC = () => {
     }
   };
 
-  const selectedJob = useMemo(() => jobs.find(job => job.id === selectedId) ?? snapshot?.job ?? null, [jobs, selectedId, snapshot]);
+  const selectedJob = useMemo(() => snapshot?.job?.id === selectedId ? snapshot.job : jobs.find(job => job.id === selectedId) ?? null, [jobs, selectedId, snapshot]);
 
   return (
     <div className="builder-page">
@@ -412,7 +414,7 @@ const BuilderControlRoomPage: React.FC = () => {
               <button type="button" key={job.id} className={selectedId === job.id ? 'is-selected' : ''} onClick={() => setSelectedId(job.id)}>
                 <span className={`builder-state state-${job.status}`} />
                 <div><strong>{job.title}</strong><small>{job.current_step_name ?? 'Awaiting first step'}</small></div>
-                <div><span>{job.status.replaceAll('_', ' ')}</span><time>{new Date(job.updated_at).toLocaleDateString()}</time></div>
+                <div><span>{plainWords(job.status, 'Unknown status')}</span><time>{new Date(job.updated_at).toLocaleDateString()}</time></div>
                 <ChevronRight size={16} />
               </button>
             ))}</div>
@@ -421,13 +423,13 @@ const BuilderControlRoomPage: React.FC = () => {
 
         <section className="builder-detail">
           {!selectedJob || !snapshot ? <div className="builder-empty"><FileCode2 size={20} /> Select a job to inspect</div> : <>
-            <div className="builder-panel-heading"><div><span>Execution</span><h2>{selectedJob.title}</h2></div><span className={`builder-status state-${selectedJob.status}`}>{selectedJob.status.replaceAll('_', ' ')}</span></div>
+            <div className="builder-panel-heading"><div><span>Execution</span><h2>{selectedJob.title}</h2></div><span className={`builder-status state-${selectedJob.status}`}>{plainWords(selectedJob.status, 'Unknown status')}</span></div>
             <div className="builder-job-meta">
               <span>Commit <code>{selectedJob.target_sha.slice(0, 12)}</code></span>
               <span>{selectedJob.workspace_branch ?? 'Workspace not created'}</span>
               <span>{selectedJob.frontend_required ? 'Frontend' : null}{selectedJob.frontend_required && selectedJob.backend_required ? ' + ' : null}{selectedJob.backend_required ? 'Backend' : null}</span>
-              <span>Review: {selectedJob.code_review_mode.replaceAll('_', ' ')}</span>
-              <span>{selectedJob.requested_action.replaceAll('_', ' ')} for {selectedJob.target_environment}</span>
+              <span>Review: {plainWords(selectedJob.code_review_mode)}</span>
+              <span>{plainWords(selectedJob.requested_action)} for {plainWords(selectedJob.target_environment)}</span>
               <span>{completedSteps}/{snapshot.steps.length} steps satisfied</span>
             </div>
             {selectedJob.last_error && <div className="builder-inline-error"><AlertTriangle size={15} /> {selectedJob.last_error}</div>}
@@ -439,7 +441,7 @@ const BuilderControlRoomPage: React.FC = () => {
                 <button type="button" className={workspaceView === 'context' ? 'is-active' : ''} aria-current={workspaceView === 'context' ? 'page' : undefined} onClick={() => setWorkspaceView('context')}><Database size={15} /> Context</button>
               </nav>
               {workspaceView === 'task' && <div className="builder-workbench-content"><span>Immutable task brief</span><pre>{selectedJob.task_description || 'No task description was retained for this job.'}</pre></div>}
-              {workspaceView === 'evidence' && <div className="builder-workbench-content"><span>Verified artifacts</span>{snapshot.artifacts.length === 0 ? <p>No artifacts have been produced yet.</p> : <><ul className="builder-workbench-artifacts">{snapshot.artifacts.map(artifact => <li key={artifact.id}><button type="button" className={selectedArtifactId === artifact.id ? 'is-selected' : ''} onClick={() => void openArtifact(artifact)} disabled={artifactLoading}><FileCode2 size={15} /><div><strong>{artifact.artifact_type.replaceAll('_', ' ')}</strong><small>{artifact.status} · {artifact.content_size_bytes ?? 0} bytes</small></div><code>{artifact.checksum?.slice(0, 12) ?? 'No checksum'}</code></button>{selectedJob.workspace_branch && artifact.status === 'final' && artifact.artifact_type === 'code_implementation' && <button type="button" className="builder-commit-patch" onClick={() => void commitVerifiedPatch(artifact)} disabled={Boolean(busy)}>Commit verified patch</button>}</li>)}</ul>{artifactLoading && <p>Loading verified artifact...</p>}{artifactContent && <pre className="builder-artifact-preview" aria-label="Selected artifact content">{artifactContent.content}</pre>}</>}</div>}
+              {workspaceView === 'evidence' && <div className="builder-workbench-content"><span>Verified artifacts</span>{snapshot.artifacts.length === 0 ? <p>No artifacts have been produced yet.</p> : <><ul className="builder-workbench-artifacts">{snapshot.artifacts.map(artifact => <li key={artifact.id}><button type="button" className={selectedArtifactId === artifact.id ? 'is-selected' : ''} onClick={() => void openArtifact(artifact)} disabled={artifactLoading}><FileCode2 size={15} /><div><strong>{plainWords(artifact.artifact_type)}</strong><small>{artifact.status} · {artifact.content_size_bytes ?? 0} bytes</small></div><code>{artifact.checksum?.slice(0, 12) ?? 'No checksum'}</code></button>{selectedJob.workspace_branch && artifact.status === 'final' && artifact.artifact_type === 'code_implementation' && <button type="button" className="builder-commit-patch" onClick={() => void commitVerifiedPatch(artifact)} disabled={Boolean(busy)}>Commit verified patch</button>}</li>)}</ul>{artifactLoading && <p>Loading verified artifact...</p>}{artifactContent && <pre className="builder-artifact-preview" aria-label="Selected artifact content">{artifactContent.content}</pre>}</>}</div>}
               {workspaceView === 'execution' && <div className="builder-workbench-content"><span>Durable execution timeline</span><ol className="builder-workbench-runs">{snapshot.workerRuns.length === 0 ? <li>No worker run has started.</li> : snapshot.workerRuns.map(run => <li key={run.id}><TerminalSquare size={15} /><div><strong>{run.profile}</strong><small>{run.status}{run.exit_code == null ? '' : ` · exit ${run.exit_code}`}</small></div><code>{run.target_sha?.slice(0, 12) ?? 'No commit'}</code></li>)}</ol></div>}
               {workspaceView === 'context' && <div className="builder-workbench-content"><span>Commit-pinned build and live evidence</span>{contextLoading ? <p>Loading Builder context...</p> : !contextSnapshot ? <p>Context is unavailable.</p> : <><p>{contextSnapshot.build_map.file_count} tracked files and {contextSnapshot.build_map.schema.tables.length} schema tables. Atlas has {contextSnapshot.live_context.atlas.capability_count} capabilities and {contextSnapshot.live_context.atlas.edge_count} live edges; {contextSnapshot.live_context.atlas.wired_capability_count} are wired and {contextSnapshot.live_context.atlas.exercised_capability_count} are exercised.</p><ul className="builder-workbench-runs">{contextSnapshot.live_context.live_data.tables.map(row => <li key={row.table}><Database size={15} /><div><strong>{row.table.replaceAll('_', ' ')}</strong><small>Aggregate live row count</small></div><code>{row.available ? row.count ?? 0 : 'Unavailable'}</code></li>)}</ul><button type="button" onClick={() => void refreshAtlas()} disabled={Boolean(busy)}><RefreshCw size={15} className={busy === 'atlas-refresh' ? 'is-spinning' : ''} /> Refresh Atlas</button></>}</div>}
             </section>

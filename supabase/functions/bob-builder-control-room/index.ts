@@ -159,7 +159,7 @@ serve(async req => {
     stage = 'list_builder_state';
     const organizations = role === 'grand_master' ? null : [...allowedOrganizations];
     let projectsQuery = admin.from('builder_projects').select('id, organization_id, gitea_owner, gitea_repo, name, status').eq('status', 'active').order('name');
-    let jobsQuery = admin.from('builder_jobs').select('id, organization_id, project_id, title, status, current_step_name, target_sha, frontend_required, backend_required, code_review_mode, code_review_status, last_error, created_at, updated_at').order('created_at', { ascending: false }).limit(100);
+    let jobsQuery = admin.from('builder_jobs').select('id, organization_id, project_id, title, task_description, status, current_step_name, target_sha, workspace_branch, workspace_head_sha, workspace_published_at, workspace_published_head_sha, workspace_pull_request_url, workspace_pull_request_head_sha, requested_action, target_environment, frontend_required, backend_required, code_review_mode, code_review_status, last_error, created_at, updated_at').order('created_at', { ascending: false }).limit(100);
     if (organizations) {
       projectsQuery = projectsQuery.in('organization_id', organizations);
       jobsQuery = jobsQuery.in('organization_id', organizations);

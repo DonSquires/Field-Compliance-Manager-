@@ -68,6 +68,14 @@ describe('Builder control room boundary', () => {
     expect(source).toContain("surface: 'builder_control_room'");
   });
 
+  it('renders partial historical jobs without calling string methods on missing fields', () => {
+    expect(source).toContain("const plainWords = (value: unknown, fallback = 'Not recorded')");
+    expect(source).toContain('snapshot?.job?.id === selectedId ? snapshot.job');
+    expect(source).toContain('Review: {plainWords(selectedJob.code_review_mode)}');
+    expect(source).toContain('{plainWords(selectedJob.requested_action)} for {plainWords(selectedJob.target_environment)}');
+    expect(relay).toContain('requested_action, target_environment, frontend_required');
+  });
+
   it('offers confirmed, reasoned cancellation only for active selected jobs and refreshes on success', () => {
     expect(source).toContain("!['deployed', 'failed', 'cancelled'].includes(selectedJob.status)");
     expect(source).toContain('Cancellation reason<textarea');
