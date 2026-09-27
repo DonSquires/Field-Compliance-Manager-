@@ -50,7 +50,8 @@ test('autopilot runs the bounded runner for a working job and blocks when the at
   const job = { id: 'job-2', status: 'implementation_pending', autopilot_state: 'driving', title: 'Fix', target_sha: 'b'.repeat(40) };
   const running = actionsRecorder({ run: { paused: true, reason: 'action_limit' } });
   assert.deepEqual(await autopilotTick({ supabase: fakeSupabase({ job }), jobs: [job], actions: running }), [{ job: 'job-2', outcome: 'advanced', reason: 'action_limit' }]);
-  const ceiling = actionsRecorder({ run: { paused: true, reason: 'attempt_ceiling', detail: 'backend_implementation failed 6 times (ceiling 6); a human must fix the cause and open a follow-up job' } });
+  const ceiling = actionsRecorder({ run: { paused: true, reason: 'attempt_ceiling', detail: 'backend_implementation failed 6 times (ceiling 6); last failure: Backend worker verification failed' } });
+  ceiling.mainHead = async () => job.target_sha;
   const outcomes = await autopilotTick({ supabase: fakeSupabase({ job }), jobs: [job], actions: ceiling });
   assert.equal(outcomes[0].outcome, 'blocked');
   const recorded = ceiling.calls.find(([name]) => name === 'record');
@@ -299,4 +300,21 @@ test('a job waiting on a repair is re-opened on current main once the repair has
   const failedRecord = failed.calls.find(([name]) => name === 'record');
   assert.equal(failedRecord[3].repair_outcome, 'failed');
   assert.match(failedRecord[3].text, /^Stopped: Bob could not fix the app's own failing checks/);
+});
+
+test('at the attempt ceiling a job pinned behind main is re-opened once on current main; a re-opened job is not re-opened again', async () => {
+  const job = { id: 'job-c', organization_id: 'org-1', project_id: 'proj-1', status: 'implementation_pending', autopilot_state: 'driving', autopilot_requested_by: 'user-1', title: 'Add Cancel control', task_description: 'brief', frontend_required: true, backend_required: false, target_sha: 'c'.repeat(40) };
+  const actions = actionsRecorder({ run: { paused: true, reason: 'attempt_ceiling', detail: 'frontend_implementation failed 7 times (ceiling 6); last failure: Frontend worker lease expired (runner lost); the same patch is verified again' } });
+  actions.mainHead = async () => 'e'.repeat(40);
+  const created = [];
+  actions.createJob = async (spec) => { created.push(spec); return { id: 'job-c2' }; };
+  assert.deepEqual(await autopilotTick({ supabase: fakeSupabase({ job }), jobs: [job], actions }), [{ job: 'job-c', outcome: 'resumed', resumed_as: 'job-c2' }]);
+  assert.equal(created[0].taskDescription, 'brief');
+  const reopened = { ...job, id: 'job-c2', description: "Opened by Bob's autopilot from job job-c.", target_sha: 'e'.repeat(40) };
+  const again = actionsRecorder({ run: { paused: true, reason: 'attempt_ceiling', detail: 'frontend_implementation failed 6 times (ceiling 6); last failure: Frontend worker verification failed' } });
+  again.mainHead = async () => 'f'.repeat(40);
+  again.createJob = async () => { throw new Error('one automatic re-open per brief'); };
+  const outcome = await autopilotTick({ supabase: fakeSupabase({ job: reopened }), jobs: [reopened], actions: again });
+  assert.equal(outcome[0].outcome, 'blocked');
+  assert.match(again.calls.find(([name]) => name === 'record')[3].text, /What you can do: tell Bob "try again"/);
 });

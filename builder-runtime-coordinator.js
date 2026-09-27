@@ -46,7 +46,8 @@ function stepIsRunnable(step) {
 }
 
 function attemptCeilingBlock(job, step) {
-  return { type: 'blocked', status: job.status, reason: 'attempt_ceiling', step_id: step.step_id, attempts: Number(step.attempt_count) || 0, limit: MAX_STEP_ATTEMPTS, detail: `${step.step_id} failed ${step.attempt_count} times (ceiling ${MAX_STEP_ATTEMPTS}); a human must fix the cause and open a follow-up job` };
+  const last = String(step.error || '').replace(/^(generation|repair|baseline): /, '').slice(0, 600);
+  return { type: 'blocked', status: job.status, reason: 'attempt_ceiling', step_id: step.step_id, attempts: Number(step.attempt_count) || 0, limit: MAX_STEP_ATTEMPTS, detail: `${step.step_id} failed ${step.attempt_count} times (ceiling ${MAX_STEP_ATTEMPTS})${last ? `; last failure: ${last}` : ''}` };
 }
 
 // A failed step nobody may retry (the author declined with a reason) blocks the job with that reason.

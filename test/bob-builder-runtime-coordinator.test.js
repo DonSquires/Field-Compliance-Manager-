@@ -65,7 +65,7 @@ test('runtime stops re-launching a retryable step once its persisted attempt cou
   assert.equal(blocked.type, 'blocked');
   assert.equal(blocked.reason, 'attempt_ceiling');
   assert.equal(blocked.step_id, 'backend_implementation');
-  assert.match(blocked.detail, /human must fix the cause/);
+  assert.match(blocked.detail, /^backend_implementation failed 6 times \(ceiling 6\)/, 'no "a human must fix" wording: Bob does the coding (owner ruling 2026-09-27)');
   // The pause reason reaches the caller (and therefore the control room `detail`) unchanged.
   const paused = await runBuilderUntilPause({ supabase: {}, gateway: {}, jobId: 'job-1', context: {}, loadSnapshot: async () => state, maxActions: 3 });
   assert.equal(paused.paused, true);

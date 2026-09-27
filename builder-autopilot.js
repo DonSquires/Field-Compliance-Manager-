@@ -190,6 +190,13 @@ function isRepairJob(job) {
   return String(job?.title ?? '').startsWith(REPAIR_TITLE_PREFIX);
 }
 
+const REOPEN_MARK = "Opened by Bob's autopilot from job ";
+
+/** A job the autopilot itself opened again from an earlier one (one automatic re-open per brief). */
+function isReopenedJob(job) {
+  return String(job?.description ?? '').startsWith(REOPEN_MARK);
+}
+
 /** The brief for the job that fixes main, bound to the same requester and conversation as the blocked job. */
 function repairJobFor(job, baseline) {
   const web = baseline.files.some((f) => f.startsWith('src/') || f.startsWith('apps/web/')) || /--prefix apps\/web/.test(baseline.reason);
@@ -337,17 +344,19 @@ async function autopilotTick({ supabase, jobs, actions, log = () => {} }) {
         const snapshot = await loadBuilderRuntimeSnapshot(supabase, job.id).catch(() => null);
         const evidence = snapshot ? await collectEvidence({ supabase, snapshot }).catch(() => null) : null;
         const baseline = baselineBlock(blockedReason);
+        const mainHead = typeof actions.mainHead === 'function' ? await actions.mainHead().catch(() => null) : null;
+        const mainMoved = Boolean(mainHead && job.target_sha && mainHead !== job.target_sha);
+        // Main has moved past the pinned commit (someone may already have fixed the checks, or the
+        // failures were the verifier's): try the same brief once on the current main before anything
+        // else. A job that is itself an automatic re-open is not re-opened again.
+        if ((baseline || run?.reason === 'attempt_ceiling') && mainMoved && !isRepairJob(job) && !isReopenedJob(job) && typeof actions.createJob === 'function') {
+          const reopened = await actions.createJob(reopenSpec(job));
+          await actions.record(job.id, 'done', { ...composeReport({ job, state: 'resumed', resumedAs: reopened.id }), repair_outcome: 'main_moved' });
+          log({ job: job.id, resumed_as: reopened.id, reason: `${baseline ? 'red baseline' : 'attempt ceiling'} at an older commit; main has moved` });
+          outcomes.push({ job: job.id, outcome: 'resumed', resumed_as: reopened.id });
+          continue;
+        }
         if (baseline && !isRepairJob(job) && typeof actions.createJob === 'function') {
-          // Main may have moved on since this job was pinned (someone may already have fixed the checks):
-          // try the same brief on the current main first; only a job already at main's head needs a repair.
-          const mainHead = typeof actions.mainHead === 'function' ? await actions.mainHead() : null;
-          if (mainHead && job.target_sha && mainHead !== job.target_sha) {
-            const reopened = await actions.createJob(reopenSpec(job));
-            await actions.record(job.id, 'done', { ...composeReport({ job, state: 'resumed', resumedAs: reopened.id }), repair_outcome: 'main_moved' });
-            log({ job: job.id, resumed_as: reopened.id, reason: 'red baseline at an older commit; main has moved' });
-            outcomes.push({ job: job.id, outcome: 'resumed', resumed_as: reopened.id });
-            continue;
-          }
           const repair = await actions.createJob(repairJobFor(job, baseline));
           await actions.record(job.id, 'blocked', composeReport({ job, evidence, state: 'repairing', reason: baseline.reason, repair }));
           log({ job: job.id, repair_job: repair.id, reason: baseline.reason.slice(0, 200) });
@@ -371,7 +380,7 @@ async function autopilotTick({ supabase, jobs, actions, log = () => {} }) {
 async function listAutopilotJobs(supabase, limit = 5) {
   const { data, error } = await supabase
     .from('builder_jobs')
-    .select('id, organization_id, project_id, title, task_description, status, target_sha, last_error, frontend_required, backend_required, code_review_mode, workspace_branch, workspace_head_sha, workspace_published_head_sha, workspace_pull_request_url, autopilot_requested_by, autopilot_conversation_id, autopilot_state, autopilot_report, autopilot_updated_at')
+    .select('id, organization_id, project_id, title, description, task_description, status, target_sha, last_error, frontend_required, backend_required, code_review_mode, workspace_branch, workspace_head_sha, workspace_published_head_sha, workspace_pull_request_url, autopilot_requested_by, autopilot_conversation_id, autopilot_state, autopilot_report, autopilot_updated_at')
     .not('autopilot_requested_by', 'is', null)
     .in('autopilot_state', ['driving', 'awaiting_human'])
     .order('autopilot_updated_at', { ascending: true })
@@ -380,7 +389,7 @@ async function listAutopilotJobs(supabase, limit = 5) {
   // Jobs parked behind a repair of main are re-checked each tick until the repair lands or fails.
   const { data: waiting, error: waitingError } = await supabase
     .from('builder_jobs')
-    .select('id, organization_id, project_id, title, task_description, status, target_sha, last_error, frontend_required, backend_required, code_review_mode, workspace_branch, workspace_head_sha, workspace_published_head_sha, workspace_pull_request_url, autopilot_requested_by, autopilot_conversation_id, autopilot_state, autopilot_report, autopilot_updated_at')
+    .select('id, organization_id, project_id, title, description, task_description, status, target_sha, last_error, frontend_required, backend_required, code_review_mode, workspace_branch, workspace_head_sha, workspace_published_head_sha, workspace_pull_request_url, autopilot_requested_by, autopilot_conversation_id, autopilot_state, autopilot_report, autopilot_updated_at')
     .not('autopilot_requested_by', 'is', null)
     .eq('autopilot_state', 'blocked')
     .not('autopilot_report->>repair_job_id', 'is', null)
@@ -398,4 +407,4 @@ async function listPendingApprovals(supabase, jobId) {
   return data || [];
 }
 
-module.exports = { autopilotTick, baselineBlock, collectEvidence, composeReport, composePullRequestBody, evidentialHold, isRepairJob, listAutopilotJobs, listPendingApprovals, repairJobFor, TERMINAL, GATES };
+module.exports = { autopilotTick, baselineBlock, collectEvidence, composeReport, composePullRequestBody, evidentialHold, isRepairJob, isReopenedJob, listAutopilotJobs, listPendingApprovals, repairJobFor, TERMINAL, GATES };
