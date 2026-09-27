@@ -197,7 +197,7 @@ test('gateway falls back from an unreachable GPU workstation to OpenAI and adapt
   assert.equal(result.model, 'gpt-5.4-mini');
   assert.equal(calls.length, 2);
   assert.ok('max_tokens' in calls[1]);
-  assert.ok(result.attempts.some((attempt) => attempt.provider === 'gpu_workstation' && attempt.error === 'unhealthy_or_unreachable'));
+  assert.ok(result.attempts.some((attempt) => attempt.provider === 'gpu_workstation' && /^unhealthy_or_unreachable/.test(attempt.error)));
 });
 
 test('planTurn repairs a re-ask after "yes to all" through the reviewer notes loop', async () => {
@@ -250,6 +250,27 @@ test('planTurn passes a clean tool decision without a critic call and returns th
   assert.equal(result.body.route_selected, 'query_records');
   assert.equal(result.body.verification.verdict, 'pass');
   assert.equal(result.body.model, 'gpt-5.4');
+});
+
+test('the laptop provider accepts its URL with or without /v1 and health names why a probe failed', async () => {
+  const { createModelGateway } = require('../services/fcm-api/src/bob/modelGateway');
+  // The control plane shares GPU_WORKSTATION_URL without /v1; 2026-09-27 that made the gateway probe
+  // http://laptop:11434/models (404) and report the in-house model unreachable while OpenAI was out of credit.
+  const bare = createModelGateway({ env: { GPU_WORKSTATION_URL: 'http://laptop:11434', GPU_WORKSTATION_MODEL: 'qwen2.5:7b', OLLAMA_URL: 'http://ollama:11434/' } });
+  assert.equal(bare.config.providers.gpu_workstation.baseUrl, 'http://laptop:11434/v1');
+  assert.equal(bare.config.providers.vps_ollama.baseUrl, 'http://ollama:11434/v1');
+  const withV1 = createModelGateway({ env: { GPU_WORKSTATION_URL: 'http://laptop:11434/v1/', GPU_WORKSTATION_MODEL: 'qwen2.5:7b' } });
+  assert.equal(withV1.config.providers.gpu_workstation.baseUrl, 'http://laptop:11434/v1');
+
+  const probed = [];
+  const gateway = createModelGateway({
+    env: { GPU_WORKSTATION_URL: 'http://laptop:11434', GPU_WORKSTATION_MODEL: 'qwen2.5:7b' },
+    fetchImpl: async (url) => { probed.push(url); return { ok: false, status: 404 }; },
+  });
+  const status = await gateway.probe('gpu_workstation');
+  assert.equal(status.healthy, false);
+  assert.match(status.reason, /^probe_http_404 http:\/\/laptop:11434\/v1\/models$/);
+  assert.deepEqual(probed, ['http://laptop:11434/v1/models']);
 });
 
 test('planTurn works in-house first and escalates to OpenAI only when the local author is stuck', async () => {

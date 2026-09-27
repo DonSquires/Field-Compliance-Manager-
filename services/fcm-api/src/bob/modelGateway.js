@@ -23,6 +23,13 @@ function trimSlash(value) {
   return String(value || '').replace(/\/+$/, '');
 }
 
+// Ollama's OpenAI-compatible API lives under /v1; the control plane shares the same variable without it.
+function ollamaOpenAiBase(value) {
+  const base = trimSlash(value);
+  if (!base) return '';
+  return /\/v1$/.test(base) ? base : `${base}/v1`;
+}
+
 function parseChain(raw, fallback) {
   const list = String(raw || '').split(',').map((item) => item.trim()).filter(Boolean);
   return list.length ? list : fallback;
@@ -57,7 +64,7 @@ function createGatewayConfig(env = process.env) {
     },
     gpu_workstation: {
       kind: 'ollama',
-      baseUrl: trimSlash(env.GPU_WORKSTATION_URL || ''),
+      baseUrl: ollamaOpenAiBase(env.GPU_WORKSTATION_URL),
       apiKey: env.GPU_WORKSTATION_API_KEY || 'ollama',
       models: {
         planner: env.GPU_WORKSTATION_PLAN_MODEL || env.GPU_WORKSTATION_MODEL || '',
@@ -68,7 +75,7 @@ function createGatewayConfig(env = process.env) {
     },
     vps_ollama: {
       kind: 'ollama',
-      baseUrl: env.OLLAMA_URL ? `${trimSlash(env.OLLAMA_URL)}/v1` : '',
+      baseUrl: ollamaOpenAiBase(env.OLLAMA_URL),
       apiKey: 'ollama',
       models: {
         planner: env.BOB_OLLAMA_PLAN_MODEL || '',
@@ -122,17 +129,20 @@ function createModelGateway({ env = process.env, fetchImpl = globalThis.fetch, n
     const cached = health.get(name);
     if (cached && cached.until > now()) return { name, configured: true, healthy: cached.healthy, cached: true, ...(cached.reason ? { reason: cached.reason } : {}) };
     let healthy = false;
+    let reason = null;
     try {
       const response = await fetchImpl(`${provider.baseUrl}/models`, {
         headers: { Authorization: `Bearer ${provider.apiKey || 'none'}` },
         signal: AbortSignal.timeout(HEALTH_PROBE_TIMEOUT_MS),
       });
       healthy = response.ok;
-    } catch {
+      if (!healthy) reason = `probe_http_${response.status} ${provider.baseUrl}/models`;
+    } catch (error) {
       healthy = false;
+      reason = `probe_${(error && error.name === 'TimeoutError') ? 'timeout' : 'unreachable'} ${provider.baseUrl}`;
     }
-    health.set(name, { healthy, until: now() + (healthy ? HEALTH_OK_TTL_MS : HEALTH_FAIL_TTL_MS) });
-    return { name, configured: true, healthy, cached: false };
+    health.set(name, { healthy, until: now() + (healthy ? HEALTH_OK_TTL_MS : HEALTH_FAIL_TTL_MS), ...(reason ? { reason } : {}) });
+    return { name, configured: true, healthy, cached: false, ...(reason ? { reason } : {}) };
   }
 
   function markUnhealthy(name, ttlMs = HEALTH_FAIL_TTL_MS, reason = null) {
@@ -240,7 +250,7 @@ function createModelGateway({ env = process.env, fetchImpl = globalThis.fetch, n
       if (provider.kind !== 'openai') {
         const status = await probe(name);
         if (!status.healthy) {
-          attempts.push({ provider: name, model: provider.model, ok: false, error: 'unhealthy_or_unreachable' });
+          attempts.push({ provider: name, model: provider.model, ok: false, error: status.reason ? `unhealthy_or_unreachable (${status.reason})` : 'unhealthy_or_unreachable' });
           continue;
         }
       }
