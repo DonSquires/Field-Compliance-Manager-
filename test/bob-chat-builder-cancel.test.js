@@ -30,9 +30,83 @@ test('a newest proposed cancellation is recovered on the confirmation turn witho
   assert.equal(pending.builder_cancellation.job_id, proposal.job_id);
 });
 
-test('a non-newest proposed cancellation is ignored', async () => {
-  assert.equal((await recover([cancel('proposed'), user])).pending, null);
-  assert.equal((await recover([cancel('proposed'), builder])).pending.kind, 'builder_job_pending');
+test('a tied-timestamp USER row after the newest ASSISTANT proposal does not hide cancellation', async () => {
+  const created_at = '2026-09-27T05:27:41.616Z';
+  const request = { role: 'user', content: 'Cancel this Builder job', created_at };
+  const preview = { ...cancel('proposed'), created_at };
+  const { pending } = await recover([preview, request]);
+  assert.equal(pending.kind, 'builder_cancellation_pending');
+  assert.equal(pending.builder_cancellation.job_id, proposal.job_id);
+  assert.equal((await recover([request, preview])).pending.kind, 'builder_cancellation_pending');
+});
+
+test('a tied-timestamp preview followed by yes uses the cancellation route, not another preview', async () => {
+  const branch = chat.slice(chat.indexOf("case 'cancel_builder_job':"), chat.indexOf("case 'laptop_shell':"))
+    .replace('const toolMeta = (outcome: string)', 'const toolMeta = (outcome)');
+  const routeStart = chat.indexOf("    if (pending?.kind === 'builder_cancellation_pending') {\n      // Consume");
+  const route = chat.slice(routeStart, chat.indexOf('    // ── Plan call', routeStart));
+  assert.ok(route.startsWith("    if (pending?.kind === 'builder_cancellation_pending')"));
+  const makeFlow = vm.runInNewContext(`(env) => {
+    const { caps, pending, user, conversationId, message, callFn, authHeader, createClient,
+      persist, admin, orgId, startTime, json, buildStructuredResponse } = env;
+    const dispatchTool = async (tool, toolArgs) => {
+      switch (tool) {
+        ${branch}
+        default: throw new Error('Unexpected tool');
+      }
+    };
+    const confirm = async () => {
+      ${route}
+      return null;
+    };
+    return { dispatchTool, confirm };
+  }`, { Deno: { env: { get: () => '' } } });
+  const events = [];
+  const savedTurns = [];
+  const env = {
+    caps: { tier: 'admiral' }, pending: null, user: { id: proposal.user_id },
+    conversationId: proposal.conversation_id, message: 'Cancel this Builder job',
+    authHeader: 'test-auth', admin: {}, orgId: 'test-org', startTime: 0,
+    callFn: async (name, header, body) => {
+      assert.equal(name, 'bob-builder-control-room');
+      assert.equal(header, env.authHeader);
+      assert.equal(body.action, 'list');
+      events.push('list');
+      return { ok: true, data: { jobs: [{ id: proposal.job_id, title: proposal.title, status: 'running' }] } };
+    },
+    createClient: (_url, _key, options) => {
+      assert.equal(options.global.headers.Authorization, env.authHeader);
+      return { rpc: async (name, args) => {
+        assert.equal(name, 'builder_cancel_job');
+        assert.equal(args._job_id, proposal.job_id);
+        assert.equal(args._reason, proposal.reason);
+        events.push('rpc');
+        return { data: { id: proposal.job_id, status: 'cancelled' }, error: null };
+      } };
+    },
+    persist: async (_admin, _orgId, _conversationId, turns) => { savedTurns.push(turns); events.push('persist'); },
+    json: (result) => result,
+    buildStructuredResponse: (result) => result,
+  };
+  const preview = await makeFlow(env).dispatchTool('cancel_builder_job', { job_id: proposal.job_id, reason: proposal.reason });
+  assert.equal(preview.meta.outcome, 'proposed');
+  assert.match(preview.reply, /Preview only/);
+  const created_at = '2026-09-27T05:27:41.616Z';
+  env.pending = (await recover([
+    { role: 'assistant', content: preview.reply, metadata: preview.meta, created_at },
+    { role: 'user', content: env.message, created_at },
+  ])).pending;
+  env.message = 'yes';
+  const confirmation = await makeFlow(env).confirm();
+  assert.equal(confirmation.meta.outcome, 'cancelled');
+  assert.match(confirmation.reply, /^Cancelled Builder job/);
+  assert.deepEqual(events, ['list', 'list', 'rpc', 'persist']);
+  assert.equal(savedTurns[0][1].metadata.outcome, 'cancelled');
+});
+
+test('a proposed cancellation followed by another ASSISTANT row is ignored', async () => {
+  assert.equal((await recover([cancel('proposed'), user, assistant({})])).pending, null);
+  assert.equal((await recover([cancel('proposed'), user, builder])).pending.kind, 'builder_job_pending');
 });
 
 test('declined or consumed cancellation markers do not mask other pending kinds', async () => {
@@ -44,8 +118,8 @@ test('declined or consumed cancellation markers do not mask other pending kinds'
 });
 
 test('old proposed cancellation is skipped when scanning past it for another pending kind', async () => {
-  assert.equal((await recover([laptop, cancel('proposed'), user])).pending.kind, 'laptop_command_pending');
-  assert.equal((await recover([builder, cancel('proposed'), user])).pending.kind, 'builder_job_pending');
+  assert.equal((await recover([cancel('proposed'), laptop, user])).pending.kind, 'laptop_command_pending');
+  assert.equal((await recover([cancel('proposed'), builder, user])).pending.kind, 'builder_job_pending');
 });
 
 test('the control-room list data is narrowed before jobs are read', () => {
