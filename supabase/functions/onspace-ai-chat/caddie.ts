@@ -245,6 +245,11 @@ const TOOL_REGISTRY = {
     governance: 'WRITE-draft; human-confirms-before-dispatch; output is always DRAFT MR; Bob NEVER merges',
     effect_class: 'draft_governed_write'
   },
+  cancel_builder_job: {
+    purpose: 'Cancel a caller-visible Builder job only after an exact two-turn confirmation preview. On the first turn provide either job_id (UUID) or title (exact title) and a nonblank reason; Bob previews the resolved ID, title and reason. Only an explicit second-turn yes to that preview executes. Ambiguous titles require a job ID. Args: { job_id?: string, title?: string, reason?: string }. Never infer consent from tool arguments.',
+    governance: 'WRITE-governed; requester-confirmed cancellation through builder_cancel_job',
+    effect_class: 'governed_write'
+  },
   create_builder_job: {
     purpose: "SELF-HEAL / BUILD in the GitHub repository (DonSquires/Field-Compliance-Manager-, the single target build): open a Bob Builder job that works the way a coding agent works — Bob explores the code, edits in an isolated worktree pinned to the current main commit, runs the tests and iterates, then independent code + security review, then a DRAFT pull request for human review. Bob NEVER merges or deploys. Use this when you have found a reproducible defect (a failing verification, a broken tool path, a repeated error, a wrong page wiring, a schema/Atlas gap) or the owner asks for a code change. FIRST gather evidence with repo_search / self_audit / query_atlas / sql_read so the brief is grounded; THEN select this tool. Two-turn: your first selection PROPOSES the job brief for human review; on the human's confirmation select it again and it is created and started. Args: { title: \"short title\", task_description: \"full brief: symptom, evidence (redacted), suspected cause, files/functions involved, acceptance test, out-of-scope\", frontend_required?: boolean (only when the change is in apps/web), backend_required?: boolean (default true), code_review_mode?: \"independent_ai\"|\"human\" }.",
     governance: 'WRITE-draft; admiral only; human-confirms-before-creation; output is a DRAFT GitHub PR; Bob NEVER merges or deploys',
