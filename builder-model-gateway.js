@@ -93,7 +93,8 @@ async function modelHealth(config, options = {}) {
     models: [...(config[probe.name]?.models ?? [])],
     installed: probe.installed,
     ready_model: probe.healthy ? resolveProviderModel(config, probe.name, null, probe.installed) : null,
-    num_ctx: config[probe.name]?.numCtx ?? null
+    num_ctx: config[probe.name]?.numCtx ?? null,
+    max_output_tokens: config[probe.name]?.maxOutputTokens ?? config.maxOutputTokens ?? null
   }]));
 }
 

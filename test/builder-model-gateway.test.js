@@ -99,3 +99,16 @@ test('model gateway does not expose provider response bodies on failure', async 
   assert.equal(result.status, 502);
   assert.doesNotMatch(JSON.stringify(result), /provider-detail/);
 });
+test('model health publishes each provider effective output cap so callers can size prompts', async () => {
+  const localConfig = createModelGatewayConfig({
+    OLLAMA_BASE_URL: 'http://ollama.example:11434',
+    BOB_OLLAMA_MODELS: 'approved-local',
+    BOB_OLLAMA_NUM_CTX: '32768',
+    BOB_BUILDER_MAX_OUTPUT_TOKENS: '32000'
+  });
+  const { modelHealth } = require('../builder-model-gateway');
+  const health = await modelHealth(localConfig, { fetchImpl: async () => ({ ok: true, json: async () => ({ models: [{ name: 'approved-local' }] }) }) });
+  assert.equal(health.ollama.num_ctx, 32768);
+  assert.equal(health.ollama.max_output_tokens, 8192, 'a local provider never reserves more than its own cap');
+  assert.equal(health.openai.max_output_tokens, 32000);
+});

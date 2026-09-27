@@ -813,9 +813,11 @@ async function runAgenticEngineer({
     const isOpenAI = candidates[active].provider === 'openai';
     const activeHealth = health?.[candidates[active].provider] || {};
     const localContext = activeHealth.num_ctx;
-    const localOutputBudget = Number(process.env.BOB_BUILDER_MAX_OUTPUT_TOKENS || 8192);
+    // The provider's own cap, not the raw env: BOB_BUILDER_MAX_OUTPUT_TOKENS=32000 against a 32k window
+    // would reserve the whole context and leave the prompt a few hundred characters.
+    const localOutputBudget = Math.min(Number(activeHealth.max_output_tokens || process.env.BOB_BUILDER_MAX_OUTPUT_TOKENS || 8192), localContext ? Math.floor(localContext / 2) : 8192);
     const promptBudgetChars = localContext ? Math.floor((localContext - localOutputBudget - 512) * 3.5 * (compaction.maxContextRatio ?? 1)) : Infinity;
-    const maxOutputTokens = Number(process.env.BOB_BUILDER_MAX_OUTPUT_TOKENS || 8192);
+    const maxOutputTokens = localContext ? localOutputBudget : Number(process.env.BOB_BUILDER_MAX_OUTPUT_TOKENS || 8192);
     const request = { ...base, idempotency_key: `${base.idempotency_key}::turn-${turns}`, request: { ...base.request, messages: compactMessages(messages, { ...compaction, maxChars: promptBudgetChars }), ...(isOpenAI ? { reasoning_effort: process.env.BOB_BUILDER_REASONING_EFFORT || 'high' } : {}), max_output_tokens: maxOutputTokens } };
     const response = await callModel({ ...gateway, modelRequest: request, timeoutMs: limits.turnTimeoutMs });
     if (!response.ok) {
