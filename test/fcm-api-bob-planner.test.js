@@ -406,11 +406,46 @@ test('owner rulings and Bob\'s own notes get their own prompt block, not a trunc
   assert.match(prompt, /OWNER RULINGS/);
 });
 
+test('an empty OpenAI balance degrades a code request to the in-house planner and is named in health and in the failure reply (live 2026-09-27: every code request 502d)', async () => {
+  const { createModelGateway } = require('../services/fcm-api/src/bob/modelGateway');
+  let clock = 1_000_000;
+  const calls = [];
+  const fetchImpl = async (url, init) => {
+    calls.push(url);
+    if (url.startsWith('https://api.openai.com')) {
+      if (url.endsWith('/models')) return new Response('{"data":[]}', { status: 200 });
+      return new Response('{"error":{"message":"You have no credits remaining. Add credits to continue using the API at https://platform.openai.com/settings/organization/billing/.","type":"insufficient_quota"}}', { status: 429 });
+    }
+    if (url.endsWith('/models')) return new Response('{"models":[]}', { status: 200 });
+    return new Response(JSON.stringify({ choices: [{ message: { content: JSON.stringify({ action: 'answer', reply: 'laptop answered' }) } }], model: 'qwen2.5-coder:7b' }), { status: 200 });
+  };
+  const gateway = createModelGateway({ env: { OPENAI_API_KEY: 'k', GPU_WORKSTATION_URL: 'http://laptop:11434/v1', GPU_WORKSTATION_MODEL: 'qwen2.5-coder:7b' }, fetchImpl, now: () => clock, logger: { error() {}, warn() {} } });
+  const result = await gateway.chatJson('planner', [{ role: 'user', content: 'hi' }], { chain: gateway.fastChain('planner') });
+  assert.equal(result.provider, 'gpu_workstation', 'the laptop took the turn after OpenAI said no credits');
+  assert.equal(result.attempts[0].error, 'insufficient_quota');
+  const openai = (await gateway.status()).providers.find((p) => p.name === 'openai');
+  assert.equal(openai.healthy, false);
+  assert.equal(openai.reason, 'insufficient_quota', 'health names the cause');
+  // Ten minutes, not one: the balance does not refill by itself.
+  clock += 5 * 60000;
+  assert.equal((await gateway.probe('openai')).healthy, false);
+  clock += 6 * 60000;
+  assert.equal((await gateway.probe('openai')).cached, false, 'probed again after the quota TTL');
+
+  // Both tiers down: the planner's error tells the owner what to do instead of "API returned 502".
+  const dead = { chainAfter: () => null, providerKind: () => 'openai', fastChain: () => ['openai'], async chatJson() { const e = new Error('no model provider available for role planner'); e.attempts = [{ provider: 'openai', error: 'insufficient_quota' }, { provider: 'gpu_workstation', error: 'unhealthy_or_unreachable' }]; throw e; } };
+  const out = await planTurn({ message: 'fix loadHistory please', tools: [...TOOLS, { tool: 'repo_search' }, { tool: 'create_builder_job' }], verify: false }, { gateway: dead, env: {}, logger: { error() {} } });
+  assert.equal(out.status, 502);
+  assert.equal(out.body.quota_exhausted, true);
+  assert.match(out.body.error, /OpenAI\) has no credits left/);
+  assert.match(out.body.error, /platform\.openai\.com\/settings\/organization\/billing/);
+});
+
 test('a tight deadline skips the in-house planner and shortens the turn; the prompt tells the model how long is left', async () => {
   const { createModelGateway } = require('../services/fcm-api/src/bob/modelGateway');
   const { readBody } = require('../services/fcm-api/src/bob/plan');
   const real = createModelGateway({ env: { OPENAI_API_KEY: 'k', GPU_WORKSTATION_URL: 'http://laptop:11434/v1', GPU_WORKSTATION_MODEL: 'qwen2.5-coder:7b' } });
-  assert.deepEqual(real.fastChain('planner'), ['openai']);
+  assert.deepEqual(real.fastChain('planner'), ['openai', 'gpu_workstation'], 'strong tier first, in-house kept as the fallback for an empty OpenAI balance');
   assert.equal(createModelGateway({ env: { OPENAI_API_KEY: 'k', BOB_ROUTE_PLANNER: 'openai' } }).fastChain('planner'), null, 'no in-house tier to skip');
   assert.equal(readBody({ deadline_ms: '30000' }).deadlineMs, 30000);
   assert.equal(readBody({ deadline_ms: -5 }).deadlineMs, null);
@@ -428,7 +463,7 @@ test('a tight deadline skips the in-house planner and shortens the turn; the pro
   };
   const result = await planTurn({ message: 'fix scripts/ghost.mjs', tools: TOOLS, verify: false, deadline_ms: 30000, task_state: { goal: 'fix scripts/ghost.mjs', steps_taken: [{ tool: 'repo_search', outcome: 'ok', result_summary: 'status: not_found' }], time_left_s: 30 } }, { gateway, env: {} });
   assert.equal(result.body.action, 'answer');
-  assert.deepEqual(calls[0].chain, ['openai'], 'no time for the laptop model: straight to the fast tier');
+  assert.deepEqual(calls[0].chain, ['openai', 'gpu_workstation'], 'no time for the laptop model: straight to the fast tier (laptop only as fallback)');
   assert.ok(calls[0].timeoutMs <= 25000, `turn budget shrank to the deadline (got ${calls[0].timeoutMs})`);
 
   // A comfortable deadline keeps in-house first.
@@ -481,7 +516,7 @@ test('a bug report that names code identifiers is a code request, and a prose pr
   const chains = [];
   const gateway = { chainAfter: real.chainAfter, providerKind: real.providerKind, fastChain: real.fastChain, async chatJson(role, messages, options = {}) { chains.push(options.chain ?? null); return { content: JSON.stringify({ action: 'answer', reply: 'ok' }), provider: 'openai', model: 'm' }; } };
   await planTurn({ message: report, tools: [...TOOLS, ...tools], verify: false }, { gateway, env: {} });
-  assert.deepEqual(chains, [['openai']]);
+  assert.deepEqual(chains, [['openai', 'gpu_workstation']]);
 });
 
 test('owner-level code requests go straight to the strong planner tier; ordinary requests stay in-house first', async () => {
@@ -497,7 +532,7 @@ test('owner-level code requests go straight to the strong planner tier; ordinary
   await planTurn({ message: 'Bob, apps/mobile/src/components/OfficerVehicleLookup.tsx shows raw errors', tools: TOOLS, verify: false }, { gateway, env: {} });
   await planTurn({ message: 'who is rostered at Nelson tonight?', tools: ownerTools, verify: false }, { gateway, env: {} });
   await planTurn({ message: 'fix scripts/x.mjs crash', tools: ownerTools, verify: false }, { gateway, env: { BOB_PLAN_CODE_REQUESTS_IN_HOUSE: 'true' } });
-  assert.deepEqual(chains, [['openai'], null, null, null], 'only the owner-level code request skips the laptop planner');
+  assert.deepEqual(chains, [['openai', 'gpu_workstation'], null, null, null], 'only the owner-level code request goes strong-tier first');
   // A "we should…" restatement of a code request with no lookup is blocked too.
   const issues = runDeterministicChecks({ action: 'answer', reply: 'The catch block shows the raw message. To improve security, we should display a plain message and log the cause. If the app has a test runner, we should add a unit test.' }, { message: 'Bob, in apps/mobile/src/components/OfficerVehicleLookup.tsx the catch shows cause.message to officers; fix it and add a test', tools: ownerTools });
   assert.ok(issues.some((i) => i.code === 'code_answer_without_evidence'));

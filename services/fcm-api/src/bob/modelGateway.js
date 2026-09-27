@@ -16,6 +16,7 @@
 const DEFAULT_TIMEOUT_MS = 120000;
 const HEALTH_OK_TTL_MS = 30000;
 const HEALTH_FAIL_TTL_MS = 60000;
+const QUOTA_FAIL_TTL_MS = 10 * 60000;
 const HEALTH_PROBE_TIMEOUT_MS = 1500;
 
 function trimSlash(value) {
@@ -119,7 +120,7 @@ function createModelGateway({ env = process.env, fetchImpl = globalThis.fetch, n
     const provider = config.providers[name];
     if (!provider || !provider.baseUrl) return { name, configured: false, healthy: false };
     const cached = health.get(name);
-    if (cached && cached.until > now()) return { name, configured: true, healthy: cached.healthy, cached: true };
+    if (cached && cached.until > now()) return { name, configured: true, healthy: cached.healthy, cached: true, ...(cached.reason ? { reason: cached.reason } : {}) };
     let healthy = false;
     try {
       const response = await fetchImpl(`${provider.baseUrl}/models`, {
@@ -134,8 +135,8 @@ function createModelGateway({ env = process.env, fetchImpl = globalThis.fetch, n
     return { name, configured: true, healthy, cached: false };
   }
 
-  function markUnhealthy(name) {
-    health.set(name, { healthy: false, until: now() + HEALTH_FAIL_TTL_MS });
+  function markUnhealthy(name, ttlMs = HEALTH_FAIL_TTL_MS, reason = null) {
+    health.set(name, { healthy: false, until: now() + ttlMs, ...(reason ? { reason } : {}) });
   }
 
   function buildBody(provider, role, messages, options) {
@@ -185,8 +186,12 @@ function createModelGateway({ env = process.env, fetchImpl = globalThis.fetch, n
         continue;
       }
       if (!response.ok) {
-        attempts.push({ provider: provider.name, model: provider.model, ok: false, error: `http_${response.status}`, detail: text.slice(0, 200), latency_ms: now() - started });
-        if (response.status >= 500 || response.status === 429) markUnhealthy(provider.name);
+        // "You have no credits remaining" (429 insufficient_quota) is not a burst limit: keep OpenAI out
+        // of the chain for a while and say so in health, instead of re-hitting it every turn (2026-09-27).
+        const quota = response.status === 429 && /insufficient_quota|no credits|billing/i.test(text);
+        attempts.push({ provider: provider.name, model: provider.model, ok: false, error: quota ? 'insufficient_quota' : `http_${response.status}`, detail: text.slice(0, 200), latency_ms: now() - started });
+        if (quota) markUnhealthy(provider.name, QUOTA_FAIL_TTL_MS, 'insufficient_quota');
+        else if (response.status >= 500 || response.status === 429) markUnhealthy(provider.name);
         return null;
       }
       let parsed;
@@ -273,11 +278,16 @@ function createModelGateway({ env = process.env, fetchImpl = globalThis.fetch, n
     return config.providers[providerName] ? config.providers[providerName].kind : null;
   }
 
-  // The role's chain without the in-house (ollama) tiers; null when the chain has no fast tier.
+  // The role's chain with the strong (openai) tiers first and the in-house tiers kept as fallback:
+  // a code request wants the strong planner, but an exhausted OpenAI balance must degrade to the
+  // laptop model, not fail the turn (2026-09-27: every code request 502'd on "no credits remaining").
+  // Null when the chain has no strong tier or is already strong-first.
   function fastChain(role) {
     const chain = config.chains[role] || config.chains.planner;
     const fast = chain.filter((name) => providerKind(name) === 'openai');
-    return fast.length && fast.length < chain.length ? fast : null;
+    if (!fast.length || fast.length === chain.length) return null;
+    const reordered = [...fast, ...chain.filter((name) => providerKind(name) !== 'openai')];
+    return reordered.join(',') === chain.join(',') ? null : reordered;
   }
 
   return { config, chatJson, status, probe, isReasoningModel, chainAfter, fastChain, providerKind };

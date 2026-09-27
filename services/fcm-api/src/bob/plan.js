@@ -94,15 +94,23 @@ async function planTurn(body, { gateway, now = Date.now, logger = console, env =
   try {
     attempt = await runPlannerOnce(gateway, input, { timeoutMs: Math.max(15000, turnBudgetMs - 5000), ...(fastChain ? { chain: fastChain } : {}) });
   } catch (error) {
-    const attemptsLog = error && Array.isArray(error.attempts) ? JSON.stringify(error.attempts) : '[]';
+    const attempts = error && Array.isArray(error.attempts) ? error.attempts : [];
+    const attemptsLog = JSON.stringify(attempts);
     if (logger && logger.error) logger.error(`[bob/plan] planner unavailable: ${String(error && error.message || error)} attempts=${attemptsLog}`);
+    // Name the real cause for the person reading the chat: an empty OpenAI balance is something the
+    // owner can fix in a minute, "API returned 502" is not.
+    const quota = attempts.some((a) => a && a.error === 'insufficient_quota');
+    const summary = attempts.map((a) => `${a.provider}: ${a.error}`).join('; ');
     return {
       status: 502,
       body: {
         ok: false,
-        error: 'Planner unavailable',
+        error: quota
+          ? `My outsourced model (OpenAI) has no credits left and the in-house model could not take this turn (${summary}). Add credits at platform.openai.com/settings/organization/billing, or make sure the laptop model is on.`
+          : `Planner unavailable${summary ? ` (${summary})` : ''}`,
+        quota_exhausted: quota,
         route_selected: 'error',
-        attempts: error && Array.isArray(error.attempts) ? error.attempts : [],
+        attempts,
         observability: { route: 'error', degraded: true, latency_ms: elapsed(), timestamp: new Date().toISOString() },
       },
     };
