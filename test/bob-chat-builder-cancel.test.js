@@ -40,27 +40,33 @@ test('a tied-timestamp USER row after the newest ASSISTANT proposal does not hid
   assert.equal((await recover([request, preview])).pending.kind, 'builder_cancellation_pending');
 });
 
+const branch = chat.slice(chat.indexOf("case 'cancel_builder_job':"), chat.indexOf("case 'laptop_shell':"))
+  .replace('const toolMeta = (outcome: string)', 'const toolMeta = (outcome)');
+const matcherStart = chat.indexOf('    const builderCancellationDecision = ');
+assert.ok(matcherStart >= 0);
+const matcher = chat.slice(matcherStart, chat.indexOf('    /** Dispatch a single tool', matcherStart))
+  .replace('(text: string)', '(text)');
+const routeStart = chat.indexOf("    if (pending?.kind === 'builder_cancellation_pending' && builderCancellationDecision(message)) {");
+assert.ok(routeStart >= 0);
+const route = chat.slice(routeStart, chat.indexOf('    // ── Plan call', routeStart));
+const makeFlow = vm.runInNewContext(`(env) => {
+  const { caps, pending, user, conversationId, message, callFn, authHeader, createClient,
+    persist, admin, orgId, startTime, json, buildStructuredResponse } = env;
+  ${matcher}
+  const dispatchTool = async (tool, toolArgs) => {
+    switch (tool) {
+      ${branch}
+      default: throw new Error('Unexpected tool');
+    }
+  };
+  const confirm = async () => {
+    ${route}
+    return null;
+  };
+  return { dispatchTool, confirm };
+}`, { Deno: { env: { get: () => '' } } });
+
 test('a tied-timestamp preview followed by yes uses the cancellation route, not another preview', async () => {
-  const branch = chat.slice(chat.indexOf("case 'cancel_builder_job':"), chat.indexOf("case 'laptop_shell':"))
-    .replace('const toolMeta = (outcome: string)', 'const toolMeta = (outcome)');
-  const routeStart = chat.indexOf("    if (pending?.kind === 'builder_cancellation_pending') {\n      // Consume");
-  const route = chat.slice(routeStart, chat.indexOf('    // ── Plan call', routeStart));
-  assert.ok(route.startsWith("    if (pending?.kind === 'builder_cancellation_pending')"));
-  const makeFlow = vm.runInNewContext(`(env) => {
-    const { caps, pending, user, conversationId, message, callFn, authHeader, createClient,
-      persist, admin, orgId, startTime, json, buildStructuredResponse } = env;
-    const dispatchTool = async (tool, toolArgs) => {
-      switch (tool) {
-        ${branch}
-        default: throw new Error('Unexpected tool');
-      }
-    };
-    const confirm = async () => {
-      ${route}
-      return null;
-    };
-    return { dispatchTool, confirm };
-  }`, { Deno: { env: { get: () => '' } } });
   const events = [];
   const savedTurns = [];
   const env = {
@@ -104,6 +110,60 @@ test('a tied-timestamp preview followed by yes uses the cancellation route, not 
   assert.equal(savedTurns[0][1].metadata.outcome, 'cancelled');
 });
 
+test('pending Builder cancellation consumes only bounded confirmation and decline phrases', async () => {
+  for (const [expected, phrases] of [
+    ['cancelled', ['yes', 'yes please', 'yep', 'yeah', 'go ahead', 'do it', 'confirm', 'cancel it']],
+    ['declined', ['no', 'stop', "don't", 'leave it']],
+  ]) {
+    for (const message of phrases) {
+      const calls = [];
+      const env = {
+        caps: { tier: 'admiral' }, pending: { kind: 'builder_cancellation_pending', builder_cancellation: proposal },
+        user: { id: proposal.user_id }, conversationId: proposal.conversation_id, message,
+        authHeader: 'test-auth', admin: {}, orgId: 'test-org', startTime: 0,
+        callFn: async (name, header, body) => {
+          assert.equal(name, 'bob-builder-control-room');
+          assert.equal(header, 'test-auth');
+          assert.equal(body.action, 'list');
+          calls.push('list');
+          return { ok: true, data: { jobs: [{ id: proposal.job_id, title: proposal.title, status: 'running' }] } };
+        },
+        createClient: (_url, _key, options) => {
+          assert.equal(options.global.headers.Authorization, 'test-auth');
+          return { rpc: async (name, args) => {
+            assert.equal(name, 'builder_cancel_job');
+            assert.equal(args._job_id, proposal.job_id);
+            assert.equal(args._reason, proposal.reason);
+            calls.push('rpc');
+            return { data: { id: proposal.job_id, status: 'cancelled' }, error: null };
+          } };
+        },
+        persist: async (_admin, _orgId, _conversationId, turns) => {
+          calls.push('persist');
+          assert.equal(turns[1].metadata.outcome, expected);
+        },
+        json: (result) => result,
+        buildStructuredResponse: (result) => result,
+      };
+      const result = await makeFlow(env).confirm();
+      assert.equal(result.meta.outcome, expected, message);
+      assert.deepEqual(calls, expected === 'cancelled' ? ['list', 'rpc', 'persist'] : ['persist'], message);
+    }
+  }
+  for (const message of ['What is the job status?', 'yes please do not cancel', 'cancel it later', 'no, cancel it']) {
+    const env = {
+      pending: { kind: 'builder_cancellation_pending', builder_cancellation: proposal }, message,
+      caps: { tier: 'admiral' }, user: { id: proposal.user_id }, conversationId: proposal.conversation_id,
+      callFn: () => { throw new Error('Non-decision must not list Builder jobs'); },
+      createClient: () => { throw new Error('Non-decision must not cancel Builder jobs'); },
+      persist: () => { throw new Error('Non-decision must not be consumed'); },
+    };
+    const flow = makeFlow(env);
+    assert.equal(await flow.confirm(), null, message);
+    assert.equal((await flow.dispatchTool('cancel_builder_job', {})).meta.outcome, 'unconfirmed', message);
+  }
+});
+
 test('a proposed cancellation followed by another ASSISTANT row is ignored', async () => {
   assert.equal((await recover([cancel('proposed'), user, assistant({})])).pending, null);
   assert.equal((await recover([cancel('proposed'), user, builder])).pending.kind, 'builder_job_pending');
@@ -144,8 +204,10 @@ test('preview, caller RPC, immediate consumption and deterministic routing remai
   assert.match(branch, /pending_builder_cancellation: \{ job_id: job\.id, title: job\.title, reason, user_id: user\.id, conversation_id: conversationId \}/);
   assert.match(branch, /createClient\(Deno\.env\.get\('SUPABASE_URL'\).*Authorization: authHeader/);
   assert.match(branch, /callerClient\.rpc\('builder_cancel_job', \{ _job_id: jobId, _reason: reason \}\)/);
-  assert.match(branch, /if \(stored && !\/\^\(yes\|/);
-  const immediate = chat.slice(chat.indexOf("if (pending?.kind === 'builder_cancellation_pending') {\n      // Consume"), chat.indexOf('    const plan = await callPlan(planPayload);'));
+  assert.match(branch, /const cancellationDecision = builderCancellationDecision\(message\)/);
+  assert.match(branch, /if \(stored && cancellationDecision !== 'confirm'\)/);
+  const immediate = chat.slice(routeStart, chat.indexOf('    const plan = await callPlan(planPayload);'));
+  assert.match(immediate, /builderCancellationDecision\(message\)/);
   assert.match(immediate, /dispatchTool\('cancel_builder_job', \{\}/);
   assert.match(immediate, /await persist\(admin, orgId, conversationId, \[/);
   assert.match(immediate, /return json\(buildStructuredResponse\(/);

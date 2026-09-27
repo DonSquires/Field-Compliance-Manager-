@@ -7189,6 +7189,12 @@ serve(async (req)=>{
       }
       return found;
     };
+    const builderCancellationDecision = (text: string) => {
+      const answer = text.trim();
+      if (/^(?:yes(?: please)?|yep|yeah|go ahead|do it|confirm|cancel it)[.!\s]*$/i.test(answer)) return 'confirm';
+      if (/^(?:no|stop|don't|leave it)[.!\s]*$/i.test(answer)) return 'decline';
+      return null;
+    };
     /** Dispatch a single tool and return { reply, meta }. Pure execution, no persistence. */ const dispatchTool = async (tool, toolArgs, d)=>{
       // Geofence carry-forward (!752): if the planner chose propose_freedom_camping_zone
       // but did not re-supply the geometry (a terse "Confirmed" after a resolve turn),
@@ -8488,8 +8494,9 @@ serve(async (req)=>{
               /^[0-9a-f]{8}-[0-9a-f-]{27,}$/i.test(stored.job_id) &&
               typeof stored.title === 'string' && stored.title.trim() && typeof stored.reason === 'string' && stored.reason.trim();
             if (stored && !trusted) return { reply: 'That cancellation preview cannot be verified. Please start again.', meta: toolMeta('unconfirmed') };
-            if (stored && !/^(yes|yeah|yep|confirm|confirmed|go ahead|do it|please do|proceed)[.!\s]*$/i.test(message.trim())) {
-              return { reply: /^(no|nope|cancel|stop|decline)[.!\s]*$/i.test(message.trim()) ? 'Understood. I will not cancel that Builder job.' : 'I have not cancelled the job. Please answer yes to confirm, or no to decline.', meta: toolMeta('declined') };
+            const cancellationDecision = builderCancellationDecision(message);
+            if (stored && cancellationDecision !== 'confirm') {
+              return { reply: cancellationDecision === 'decline' ? 'Understood. I will not cancel that Builder job.' : 'I have not cancelled the job. Please answer yes to confirm, or no to decline.', meta: toolMeta(cancellationDecision === 'decline' ? 'declined' : 'unconfirmed') };
             }
             const jobId = stored ? stored.job_id : String(toolArgs.job_id ?? '').trim();
             const title = stored ? stored.title : String(toolArgs.title ?? '').trim();
@@ -8740,8 +8747,8 @@ serve(async (req)=>{
     // Bob now reasons his way through affirmations using his knowledge cards and
     // conversation history. The gate was a training-wheels workaround that treated
     // Bob as a keyword-driven bot rather than an agentic copilot.
-    if (pending?.kind === 'builder_cancellation_pending') {
-      // Consume the immediately preceding preview on this turn, regardless of the planner's answer.
+    if (pending?.kind === 'builder_cancellation_pending' && builderCancellationDecision(message)) {
+      // Consume the immediately preceding preview when the user explicitly confirms or declines.
       const result = await dispatchTool('cancel_builder_job', {}, { action: 'use_tool', tool: 'cancel_builder_job', args: {} });
       await persist(admin, orgId, conversationId, [
         { role: 'user', content: message },
@@ -8851,7 +8858,7 @@ serve(async (req)=>{
     let decision = plan.data ?? {};
     // Resume a stored cancellation deterministically; the model cannot supply the target.
     if (pending?.kind === 'builder_cancellation_pending' && caps.tier === 'admiral' &&
-        /^(yes|yeah|yep|confirm|confirmed|go ahead|do it|please do|proceed)[.!\s]*$/i.test(message.trim()) &&
+        builderCancellationDecision(message) === 'confirm' &&
         pending.builder_cancellation?.user_id === user.id && pending.builder_cancellation?.conversation_id === conversationId) {
       decision = { action: 'use_tool', tool: 'cancel_builder_job', args: {} };
     }
