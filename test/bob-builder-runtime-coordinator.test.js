@@ -251,6 +251,50 @@ test('an author run that ends without a proposal is counted against the step cei
   }
 });
 
+test('an author that ran out of turns reading gets one immediate second run seeded with its reading map (live job 118731bd)', async () => {
+  const engineerPath = require.resolve('../builder-agentic-engineer');
+  const originalEngineer = require.cache[engineerPath].exports;
+  const coordinatorPath = require.resolve('../builder-runtime-coordinator');
+  delete require.cache[coordinatorPath];
+  const calls = [];
+  const map = { files_read: [{ path: 'supabase/functions/onspace-ai-chat/index.ts', ranges: ['240-315', '8020-8595'] }], searches: ['laptop_shell in supabase/functions/onspace-ai-chat'], conclusion: 'could not finish within the budget', turns_used: 60 };
+  require.cache[engineerPath].exports = { ...originalEngineer, runAgenticEngineer: async (input) => {
+    calls.push(input.previousAttempt ?? null);
+    if (!input.previousAttempt) return { ok: false, no_change: true, budget_exhausted: true, resume_hints: map, error: 'Could not complete within the remaining budget', turns: 60, routing: { provider: 'openai' } };
+    return { ok: true, patch_artifact: { id: 'patch-2' }, routing: { provider: 'openai' } };
+  } };
+  const handoffPath = require.resolve('../builder-backend-handoff');
+  const originalHandoff = require.cache[handoffPath].exports;
+  require.cache[handoffPath].exports = { ...originalHandoff, runBackendHandoff: async () => ({ success: true, artifacts: [{ id: 'verified' }] }) };
+  const rpcs = [];
+  const supabase = { rpc: async (name, args) => { rpcs.push({ name, args }); return { data: null, error: null }; } };
+  try {
+    const fresh = require('../builder-runtime-coordinator');
+    const result = await fresh.runBackendImplementation({ supabase, gateway: {}, job: { id: 'job-z' }, step: { id: 'step-z' }, context: { workspaceRoot: '/ws', gitSourceDir: '/src', repoRoot: '/repo' } });
+    assert.equal(result.success, true, JSON.stringify(result));
+    assert.equal(calls.length, 2, 'exactly one extra run, in the same tick');
+    assert.equal(calls[0], null);
+    assert.deepEqual(calls[1], map, 'the second run starts from the first run\'s reading map');
+    assert.equal(rpcs.length, 0, 'no failure is recorded when the second run delivers');
+
+    // Both runs out of turns: parked once, with both facts in the reason, not retried six times.
+    calls.length = 0;
+    require.cache[engineerPath].exports = { ...originalEngineer, runAgenticEngineer: async (input) => { calls.push(1); return { ok: false, no_change: true, budget_exhausted: true, resume_hints: map, error: input.previousAttempt ? 'still too big' : 'first', turns: 60, routing: { provider: 'openai' } }; } };
+    delete require.cache[coordinatorPath];
+    const again = require('../builder-runtime-coordinator');
+    const parked = await again.runBackendImplementation({ supabase, gateway: {}, job: { id: 'job-z' }, step: { id: 'step-z' }, context: { workspaceRoot: '/ws', gitSourceDir: '/src', repoRoot: '/repo' } });
+    assert.equal(parked.success, false);
+    assert.equal(calls.length, 2);
+    assert.equal(rpcs.length, 1);
+    assert.equal(rpcs[0].args._retryable, false);
+    assert.match(rpcs[0].args._reason, /two attempts ran out of turns without an edit; second attempt: still too big/);
+  } finally {
+    require.cache[engineerPath].exports = originalEngineer;
+    require.cache[handoffPath].exports = originalHandoff;
+    delete require.cache[coordinatorPath];
+  }
+});
+
 test('an honest no-change answer parks the step (not retryable) and the planner blocks the job with that reason', async () => {
   const engineerPath = require.resolve('../builder-agentic-engineer');
   const originalEngineer = require.cache[engineerPath].exports;

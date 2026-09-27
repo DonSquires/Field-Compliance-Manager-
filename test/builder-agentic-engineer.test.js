@@ -9,7 +9,7 @@ const { execFileSync } = require('node:child_process');
 
 const policy = require('../builder-path-policy');
 const gateway = require('../builder-model-gateway');
-const { runAgenticEngineer, parseToolCall, RUN_ALLOWLIST, buildProposal, createTools, composeRunNote, DEFAULT_LIMITS } = require('../builder-agentic-engineer');
+const { runAgenticEngineer, parseToolCall, RUN_ALLOWLIST, buildProposal, createTools, composeRunNote, classifyNoChange, outlineLines, readingMap, taskPacket, DEFAULT_LIMITS } = require('../builder-agentic-engineer');
 
 test('path policy: protected paths are refused on every lane, lanes split at apps/web', () => {
   for (const file of ['.github/workflows/ci.yml', 'deploy/bob-vps/compose.yml', 'Dockerfile', 'services/fcm-api/Dockerfile', 'docker-compose.full.yml', 'package.json', 'apps/web/package-lock.json', '.env', 'apps/web/.env.production', 'supabase/schema.sql', 'apps/web/src/context/AuthContext.tsx', 'supabase/functions/_shared/auth.ts', 'certs/site.pem', '../etc/passwd', 'a/../../b']) {
@@ -221,6 +221,115 @@ test('agentic engineer refuses to finish with out-of-lane edits and stops on bud
 // Lessons from the first live run (job 5ba292f4, 2026-09-26): the model searched two
 // pathspecs at once and got "Command failed"; a no-match grep was reported as an error;
 // and three fenced / miscounted diffs were rejected outright, forcing full-file rewrites.
+test('outline indexes the declarations of a big file with line numbers; search can return context lines (live job 118731bd walked a 10k-line file in 42 reads)', () => {
+  const source = [
+    "import { serve } from 'std/http';",
+    'const TOOL_CATALOGUE = {',
+    "  laptop_shell: { purpose: 'run' },",
+    '};',
+    'export async function loadUserMemory(supabase: any, userId: string) {',
+    '  if (!userId) return null;',
+    '  return supabase.from("bob_self_memory").select();',
+    '}',
+    'async function dispatchTool(name: string, args: Record<string, unknown>) {',
+    '  switch (name) {',
+    "    case 'laptop_shell':",
+    '      return runLaptop(args);',
+    "    case 'builder_create_job':",
+    '      return createJob(args);',
+    '  }',
+    '}',
+    'const tools = {',
+    '  async write_note({ text }) {',
+    '    return text;',
+    '  },',
+    '};',
+    'type Pending = { kind: string };',
+    'Deno.serve(async (req) => handle(req));',
+    'CREATE OR REPLACE FUNCTION public.builder_cancel_job(_job_id uuid)',
+  ].join('\n');
+  const { entries, total_lines } = outlineLines(source);
+  assert.equal(total_lines, 24);
+  const text = entries.join('\n');
+  assert.match(text, /^2: const TOOL_CATALOGUE = \{/m);
+  assert.match(text, /^5: export async function loadUserMemory/m);
+  assert.match(text, /^9: async function dispatchTool/m);
+  assert.match(text, /^11: case 'laptop_shell':/m);
+  assert.match(text, /^13: case 'builder_create_job':/m);
+  assert.match(text, /^18: async write_note\(\{ text \}\) \{/m);
+  assert.match(text, /^22: type Pending/m);
+  assert.match(text, /^23: Deno\.serve/m);
+  assert.match(text, /^24: CREATE OR REPLACE FUNCTION/m);
+  assert.doesNotMatch(text, /if \(!userId\)|return supabase|return runLaptop/, 'statements are not declarations');
+  assert.deepEqual(outlineLines(source, { pattern: 'laptop' }).entries, ["11: case 'laptop_shell':"]);
+  assert.equal(outlineLines(source, { cap: 3 }).entries.length, 3);
+
+  const repo = makeRepo();
+  const workspaceRoot = path.join(repo.root, 'workspaces');
+  const { createBranchWorkspace } = require('../builder-branch-workspace');
+  const ws = createBranchWorkspace({ sourceDir: repo.source, workspaceRoot, jobId: 'ab1eab1eab1eab1eab1eab1e', targetSha: repo.sha });
+  const tools = createTools({ workspacePath: ws.workspacePath, repoRoot: repo.source, lane: 'backend', supabase: null, limits: DEFAULT_LIMITS, log() {} });
+  const outline = tools.outline({ path: 'test/sum.test.js' });
+  assert.equal(outline.total_lines, 5);
+  assert.match(outline.entries.join('\n'), /^1: const test = require/m);
+  assert.match(tools.outline({ path: 'lib/sum.js', pattern: '[' }).error, /not a valid regular expression/);
+  assert.match(tools.outline({ path: 'lib' }).error, /not a file/);
+
+  const plain = tools.search({ query: 'sum adds', path: 'test' });
+  assert.equal(plain.results.length, 1);
+  assert.equal(plain.context, undefined);
+  const around = tools.search({ query: 'sum adds', path: 'test', context: 2 });
+  assert.equal(around.context, 2);
+  assert.ok(around.results.length >= 3, JSON.stringify(around));
+  assert.ok(around.results.some((line) => /test\/sum\.test\.js-3-/.test(line)), 'surrounding lines come back with the hit');
+  assert.equal(tools.search({ query: 'sum adds', path: 'test', context: 99 }).context, 8, 'context is capped');
+  fs.rmSync(repo.root, { recursive: true, force: true });
+});
+
+test('a no_change after a long read-only walk is classified as budget exhaustion and yields a reading map for the next attempt', async () => {
+  const limits = { ...DEFAULT_LIMITS, maxTurns: 60 };
+  const walk = (n) => Array.from({ length: n }, (_, i) => ({ tool: i % 4 === 3 ? 'search' : 'read_file', args: i % 4 === 3 ? { query: `q${i}`, path: 'supabase' } : { path: 'supabase/functions/onspace-ai-chat/index.ts', start_line: i * 100, end_line: i * 100 + 99 } }));
+  assert.equal(classifyNoChange({ reason: 'Could not complete and verify the coordinated chat changes within this session', turns: 60, transcript: walk(50), limits }), true);
+  assert.equal(classifyNoChange({ reason: 'the codebase has no such module', turns: 40, transcript: walk(20), limits }), true, 'late finish after 20 explorations is budget, whatever the wording');
+  assert.equal(classifyNoChange({ reason: 'the named script does not exist at this commit', turns: 5, transcript: walk(3), limits }), false, 'a quick honest answer stays an answer');
+  assert.equal(classifyNoChange({ reason: 'requires a protected path (deploy/)', turns: 12, transcript: walk(9), limits }), false);
+  assert.equal(classifyNoChange({ reason: 'ran out of turns before the first edit', turns: 12, transcript: walk(9), limits }), true, 'the model saying so is enough once it has explored');
+
+  const map = readingMap([...walk(6), { tool: 'outline', args: { path: 'a.ts' } }, { tool: 'run', args: { command: 'git status' } }]);
+  assert.deepEqual(map.files_outlined, ['a.ts']);
+  assert.equal(map.files_read.length, 1);
+  assert.equal(map.files_read[0].path, 'supabase/functions/onspace-ai-chat/index.ts');
+  assert.deepEqual(map.files_read[0].ranges.slice(0, 2), ['0-99', '100-199']);
+  assert.deepEqual(map.searches, ['q3 in supabase']);
+
+  // End to end: the run reports budget_exhausted + resume_hints, and a seeded packet tells the next run what not to repeat.
+  const repo = makeRepo();
+  const workspaceRoot = path.join(repo.root, 'workspaces');
+  const job = { id: 'b0dgetb0dgetb0dgetb0dgetb0dget00', organization_id: '00000000-0000-0000-0000-000000000001', target_sha: repo.sha, title: 'big seam', task_description: 'd' };
+  const script = [
+    ...Array.from({ length: 8 }, (_, i) => ({ tool: 'read_file', args: { path: 'lib/sum.js', start_line: 1, end_line: 1 + (i % 2) } })),
+    { tool: 'finish', args: { summary: 'Explored but did not edit.', no_change_reason: 'Could not complete within the remaining budget.' } },
+  ];
+  const seen = [];
+  let i = 0;
+  const callModel = async ({ modelRequest }) => { seen.push(modelRequest.request.messages.at(-1).content); const t = script[Math.min(i, script.length - 1)]; i++; return { ok: true, data: { content: JSON.stringify(t), model: 'm', usage: {} } }; };
+  const result = await runAgenticEngineer({ supabase: null, gateway: { gatewayUrl: 'x', apiToken: 'y' }, job, step: { id: 's' }, lane: 'backend', sourceDir: repo.source, workspaceRoot, repoRoot: repo.source, callModel, limits: { ...DEFAULT_LIMITS, maxTurns: 12 } });
+  assert.equal(result.ok, false);
+  assert.equal(result.no_change, true);
+  assert.equal(result.budget_exhausted, true);
+  assert.equal(result.resume_hints.turns_used, 9);
+  assert.equal(result.resume_hints.files_read[0].path, 'lib/sum.js');
+  assert.match(result.resume_hints.conclusion, /Explored but did not edit/);
+  assert.ok(seen.some((m) => /BUDGET: a third of your turns are used .* nothing is edited yet/.test(m)), 'the one-third nudge fires when nothing is edited');
+
+  const packet = JSON.parse(taskPacket({ job, lane: 'backend', notes: [], previousAttempt: result.resume_hints }));
+  assert.equal(packet.previous_attempt_ran_out_of_turns.files_read[0].path, 'lib/sum.js');
+  assert.match(packet.previous_attempt_ran_out_of_turns.instruction, /Do not repeat that walk/);
+  assert.match(packet.how_to_start, /Skip read_canon/);
+  assert.match(composeRunNote({ job, lane: 'backend', outcome: { ok: false, no_change: true, budget_exhausted: true, error: 'x' }, transcript: [], turns: 9, provider: 'openai', model: 'm' }), /ran out of turns reading, no edits/);
+  fs.rmSync(repo.root, { recursive: true, force: true });
+});
+
 test('search honours several pathspecs and treats no matches as a result; apply_patch tolerates fences and miscounted hunks', () => {
   const repo = makeRepo();
   const workspaceRoot = path.join(repo.root, 'workspaces');

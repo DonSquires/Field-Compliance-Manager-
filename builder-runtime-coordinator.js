@@ -156,7 +156,7 @@ function agenticGenerator(lane, context, extra = {}) {
     ]);
     // An engineer crash is a failed generation (counted against the step's attempt ceiling and recorded
     // with its reason), not a failed run that leaves the step looking untouched.
-    return runAgenticEngineer({
+    const attempt = (previousAttempt = null) => (extra.runEngineer || runAgenticEngineer)({
       supabase, gateway, job, step, lane,
       sourceDir: context.gitSourceDir || context.sourceDir,
       workspaceRoot: context.workspaceRoot,
@@ -165,8 +165,19 @@ function agenticGenerator(lane, context, extra = {}) {
       hints: requestedFiles,
       startAfterProvider,
       previousFailure: previousFailure ? { failure_evidence: previousFailure, failed_patch_artifact_id: failedPatchArtifact?.id ?? null } : null,
+      previousAttempt,
       inputArtifactIds: [productArtifact?.id, uxArtifact?.id, failureArtifact?.id].filter(Boolean)
     }).catch((error) => ({ ok: false, error: `engineer crashed: ${String(error instanceof Error ? error.message : error).slice(0, 500)}` }));
+    let generation = await attempt();
+    // The author spent its turns reading a large seam and edited nothing (job 118731bd). That is not
+    // "nothing to do": give it one more run that starts from the map the first run built, so the
+    // owner is not asked to say "try again" for a failure Bob can absorb himself.
+    if (generation.no_change && generation.budget_exhausted && generation.resume_hints) {
+      const second = await attempt(generation.resume_hints);
+      generation = { ...second, attempts: 2, first_attempt: { turns: generation.turns, conclusion: String(generation.error || '').slice(0, 300) } };
+      if (generation.no_change) generation = { ...generation, error: `two attempts ran out of turns without an edit; second attempt: ${String(second.error || '').slice(0, 600)}` };
+    }
+    return generation;
   };
 }
 

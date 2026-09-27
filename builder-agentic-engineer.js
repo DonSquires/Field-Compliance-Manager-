@@ -112,6 +112,44 @@ function looksBinary(buffer) {
   return sample.includes(0);
 }
 
+// Declaration index for a file: where functions, exported consts, classes, types, switch cases and SQL
+// objects start. Live job 118731bd spent 42 read_file turns walking a 10k-line edge function in
+// 100-500 line windows and never reached an edit; one outline call is the map that walk was building.
+const OUTLINE_PATTERNS = [
+  /^\s{0,4}(?:export\s+)?(?:default\s+)?(?:async\s+)?function\s*\*?\s*[A-Za-z_$][\w$]*/,
+  /^\s{0,2}(?:export\s+)?(?:const|let|var)\s+[A-Za-z_$][\w$]*/,
+  /^\s{0,4}(?:export\s+)?(?:abstract\s+)?(?:class|interface|type|enum)\s+[A-Za-z_$][\w$]*/,
+  /^\s{0,4}(?:export\s+)?(?:default\s+)?(?:async\s+)?[A-Za-z_$][\w$]*\s*\([^()]*\)\s*(?::\s*[^{]+)?\{\s*$/,
+  /^\s{2,8}(?:async\s+)?[A-Za-z_$][\w$]*\s*\([^()]*\)\s*(?::\s*[^{]+)?\{\s*$/,
+  /^\s*case\s+['"`][^'"`]+['"`]\s*:/,
+  /^\s*(?:create|alter|drop)\s+(?:or\s+replace\s+)?(?:table|function|policy|trigger|view|index|type)\b/i,
+  /^\s*(?:def|class)\s+[A-Za-z_][\w]*/,
+  /^Deno\.serve|^serve\(/,
+];
+const OUTLINE_NOISE = /^\s*(?:if|else|for|while|switch|return|await|catch|try|do|typeof|new|throw)\b/;
+// When a file has more declarations than the cap, indented variables go first, then top-level
+// variables; functions, classes, types, cases and SQL objects are the skeleton and stay.
+const outlinePriority = (line) => (/^\s*(?:export\s+)?(?:const|let|var)\s/.test(line) ? (/^\S/.test(line) ? 1 : 2) : 0);
+
+function outlineLines(text, { pattern = null, cap = 400 } = {}) {
+  const filter = pattern ? new RegExp(pattern, 'i') : null;
+  const lines = String(text ?? '').split('\n');
+  let candidates = [];
+  for (let index = 0; index < lines.length; index++) {
+    const line = lines[index];
+    if (!line.trim() || OUTLINE_NOISE.test(line)) continue;
+    if (!OUTLINE_PATTERNS.some((rule) => rule.test(line))) continue;
+    if (filter && !filter.test(line)) continue;
+    candidates.push({ index, line, priority: outlinePriority(line) });
+  }
+  const found = candidates.length;
+  if (candidates.length > cap) {
+    // Keep the whole skeleton; fill what is left of the cap with variables in file order.
+    candidates = candidates.map((entry, order) => ({ ...entry, order })).sort((a, b) => a.priority - b.priority || a.order - b.order).slice(0, cap).sort((a, b) => a.index - b.index);
+  }
+  return { entries: candidates.map(({ index, line }) => `${index + 1}: ${line.trim().slice(0, 140)}`), total_lines: lines.length, omitted: found - candidates.length };
+}
+
 function systemPrompt({ lane, limits }) {
   return [
     'You are Bob Builder, the engineering half of Bob — the Field Compliance Manager platform\'s own agent. You work the way a senior coding agent works, at full effort:',
@@ -127,7 +165,8 @@ function systemPrompt({ lane, limits }) {
     'TOOLS (one call per turn; reply with ONLY a JSON object {"thought": string, "tool": string, "args": object}):',
     '- list_dir {path}                        list a directory (node_modules/.git skipped)',
     `- read_file {path, start_line?, end_line?}   read a text file (max ${limits.readCapChars} chars per call)`,
-    '- search {query, path?, regex?}          git grep across the worktree (path = pathspec, e.g. "supabase/functions"); regex defaults to false',
+    '- outline {path, pattern?}              declaration index of one file: every function/const/class/type/case/SQL object with its line number (pattern narrows it). USE THIS FIRST on any file over ~800 lines, then read_file only the ranges you need — never walk a big file window by window.',
+    '- search {query, path?, regex?, context?}   git grep across the worktree (path = pathspec, e.g. "supabase/functions"); regex defaults to false; context = lines of surrounding code per hit (0-8) so a hit often needs no follow-up read',
     '- git_log {path?, limit?}               recent commits (optionally for a path)',
     '- git_diff {}                            your uncommitted changes so far',
     '- write_file {path, content}             create or overwrite a file (full content)',
@@ -140,12 +179,12 @@ function systemPrompt({ lane, limits }) {
     '- write_note {text}                      leave a durable lesson for future jobs (short, factual, no secrets)',
     '- finish {summary, tests, rollback_notes, follow_ups?, tests_not_run_reason?, lessons?}   hand over: your worktree diff becomes the reviewed patch. A change that touches tests is refused unless a `node --test` run passed in this session (or tests_not_run_reason says plainly why none could). lessons: up to 3 short, generalisable facts about this codebase or these tools that would save a future job time (or omit).',
     '',
-    `Budget: ${limits.maxTurns} tool turns / ${Math.round(limits.wallBudgetMs / 60000)} minutes. Pace it: spend at most about a third of the turns reading before you start editing; you will be told when the budget is running low. Do not repeat identical calls. If the task is impossible, unsafe, or requires a protected path, finish with an empty change set and explain plainly in the summary what a human must do.`,
+    `Budget: ${limits.maxTurns} tool turns / ${Math.round(limits.wallBudgetMs / 60000)} minutes. Pace it: spend at most about a third of the turns reading before you start editing; you will be told when the budget is running low. Do not repeat identical calls. Large files: outline first, then targeted reads — a task that names a 10,000-line file is still a 60-turn task. When the full change will not fit, land the smallest correct, tested slice and list the rest under follow_ups; running out of turns with nothing edited is a failure, not a safe outcome. If the task is impossible, unsafe, or requires a protected path, finish with an empty change set and explain plainly in the summary what a human must do.`,
   ].join('\n');
 }
 
 function taskPacket(input) {
-  const { job, lane, specification, uxPlan, repositoryContext, liveContext, notes, previousFailure, hints } = input;
+  const { job, lane, specification, uxPlan, repositoryContext, liveContext, notes, previousFailure, hints, previousAttempt } = input;
   return JSON.stringify({
     job: { title: job.title, task_description: job.task_description, description: job.description ?? null, target_sha: job.target_sha, requested_action: job.requested_action ?? null, target_environment: job.target_environment ?? null },
     lane,
@@ -156,8 +195,48 @@ function taskPacket(input) {
     file_hints: Array.isArray(hints) && hints.length ? hints : undefined,
     your_recent_notes: notes,
     previous_attempt_failed_verification: previousFailure ?? undefined,
-    how_to_start: 'Call read_canon and read_notes once, then explore the code paths named in the task with search/read_file before editing. Finish only after your own test run passes or you can explain exactly why it cannot run here.',
+    previous_attempt_ran_out_of_turns: previousAttempt ? {
+      ...previousAttempt,
+      instruction: 'The previous attempt spent its whole budget reading and edited nothing. Its reading map is above: the files and line ranges it read, the searches it ran, and what it concluded. Do not repeat that walk. Use outline on the big files, read only the ranges you need for the FIRST edit, and make that edit by turn 12. Land the smallest correct, tested slice; list what is left under follow_ups.',
+    } : undefined,
+    how_to_start: previousAttempt
+      ? 'Skip read_canon. Call read_notes once, outline the main file named in the reading map, then edit.'
+      : 'Call read_canon and read_notes once, then explore the code paths named in the task with search/read_file before editing. Finish only after your own test run passes or you can explain exactly why it cannot run here.',
   }, null, 0);
+}
+
+// What an attempt that ran out of turns learned, in a shape the next attempt can start from.
+function readingMap(transcript) {
+  const files = new Map();
+  const searches = [];
+  const outlines = [];
+  for (const entry of transcript) {
+    if (!entry.tool || !entry.args) continue;
+    if (entry.tool === 'read_file' && entry.args.path) {
+      const ranges = files.get(entry.args.path) || [];
+      ranges.push(entry.args.start_line || entry.args.end_line ? `${entry.args.start_line ?? 1}-${entry.args.end_line ?? 'end'}` : 'all');
+      files.set(entry.args.path, ranges);
+    } else if (entry.tool === 'outline' && entry.args.path) {
+      outlines.push(entry.args.path);
+    } else if (entry.tool === 'search' && entry.args.query) {
+      searches.push(`${String(entry.args.query).slice(0, 120)}${entry.args.path ? ` in ${entry.args.path}` : ''}`);
+    }
+  }
+  return {
+    files_read: [...files.entries()].slice(0, 40).map(([file, ranges]) => ({ path: file, ranges: ranges.slice(0, 30) })),
+    files_outlined: outlines.slice(0, 20),
+    searches: searches.slice(0, 40),
+  };
+}
+
+// A no_change that arrives after most of the budget went on reading is not an answer ("nothing to
+// do"); it is the budget failing. Live job 118731bd: 42 reads, 11 searches, 60 turns, zero edits,
+// then "cannot complete within the remaining budget" — parked as if the task were impossible.
+function classifyNoChange({ reason, turns, transcript, limits }) {
+  const exploring = transcript.filter((entry) => ['read_file', 'search', 'outline', 'list_dir', 'git_log'].includes(entry.tool)).length;
+  const lateFinish = turns >= Math.ceil(limits.maxTurns * 0.5);
+  const mentionsBudget = /\b(budget|turns?|remaining|ran out|could not (?:complete|finish)|cannot be completed)\b/i.test(String(reason || ''));
+  return exploring >= 8 && (lateFinish || mentionsBudget);
 }
 
 function summariseUsage(total, usage) {
@@ -180,7 +259,7 @@ function composeRunNote({ job, lane, outcome, transcript, turns, provider, model
   }
   const frictionText = Object.entries(friction).sort((a, b) => b[1] - a[1]).slice(0, 4).map(([tool, count]) => `${tool} failed x${count}`).join(', ');
   const files = outcome.ok ? (outcome.proposal?.changed_files || []).slice(0, 8).join(', ') : '';
-  const result = outcome.ok ? 'proposal handed over' : outcome.no_change ? `no change: ${String(outcome.error).slice(0, 200)}` : `failed: ${String(outcome.error).slice(0, 200)}`;
+  const result = outcome.ok ? 'proposal handed over' : outcome.no_change ? `${outcome.budget_exhausted ? 'ran out of turns reading, no edits' : 'no change'}: ${String(outcome.error).slice(0, 200)}` : `failed: ${String(outcome.error).slice(0, 200)}`;
   const cleanLessons = lessons.map((l) => String(l).trim()).filter(Boolean).slice(0, 3).map((l) => l.slice(0, 300));
   const parts = [
     `[job ${String(job.id).slice(0, 8)} ${lane}] "${String(job.title || '').slice(0, 100)}" -> ${result}.`,
@@ -298,17 +377,31 @@ function createTools({ workspacePath, repoRoot, lane, supabase, limits, log }) {
       const slice = lines.slice(start - 1, end).map((line, index) => `${start + index}: ${line}`).join('\n');
       return { path: normalized, total_lines: lines.length, start_line: start, end_line: end, content: clip(slice, limits.readCapChars, `${normalized} lines ${start}-${end}`) };
     },
-    search({ query, path: pathspec, regex }) {
+    outline({ path: file, pattern }) {
+      const { normalized, absolute } = resolveInside(workspacePath, file);
+      if (!fs.existsSync(absolute) || !fs.statSync(absolute).isFile()) return { error: `not a file: ${normalized}` };
+      const buffer = fs.readFileSync(absolute);
+      if (looksBinary(buffer)) return { error: `binary file: ${normalized}` };
+      let filter = null;
+      if (pattern) {
+        try { filter = String(pattern); new RegExp(filter, 'i'); } catch { return { error: `pattern is not a valid regular expression: ${String(pattern).slice(0, 100)}` }; }
+      }
+      const { entries, total_lines, omitted } = outlineLines(buffer.toString('utf8'), { pattern: filter, cap: limits.listCapEntries });
+      return { path: normalized, total_lines, entries, omitted: omitted || undefined, hint: omitted ? `${omitted} variable declarations were left out to fit; pass pattern to narrow. read_file the line ranges you need; search with context for call sites` : 'read_file the line ranges you need; search with context for call sites' };
+    },
+    search({ query, path: pathspec, regex, context }) {
       if (!query || typeof query !== 'string') return { error: 'query is required' };
       // Models pass several pathspecs at once ("services/fcm-api/src/bob test"); honour each one.
       const pathspecs = (Array.isArray(pathspec) ? pathspec : String(pathspec ?? '').split(/[\s,]+/))
         .map((value) => normalizeRepoPath(value)).filter(Boolean);
-      const args = ['grep', '-n', '-I', regex ? '-E' : '-F', '-e', query, '--', ...(pathspecs.length ? pathspecs : ['.'])];
+      const around = Math.min(8, Math.max(0, Number(context) || 0));
+      const args = ['grep', '-n', '-I', regex ? '-E' : '-F', ...(around ? [`-C${around}`] : []), '-e', query, '--', ...(pathspecs.length ? pathspecs : ['.'])];
       const result = spawnSync('git', args, { cwd: workspacePath, encoding: 'utf8', maxBuffer: 64 * 1024 * 1024 });
       // git grep: 0 = matches, 1 = no matches, anything else is a real error.
       if (result.status !== 0 && result.status !== 1) return { error: clip(redactGitError(result.stderr || result.error?.message || `git grep exited ${result.status}`), 500) };
       const lines = String(result.stdout || '').split('\n').filter(Boolean);
-      return { query, paths: pathspecs, matches: lines.length, results: lines.slice(0, limits.searchCapLines), truncated: lines.length > limits.searchCapLines };
+      const cap = around ? limits.searchCapLines * 2 : limits.searchCapLines;
+      return { query, paths: pathspecs, context: around || undefined, matches: lines.length, results: lines.slice(0, cap), truncated: lines.length > cap };
     },
     git_log({ path: file, limit } = {}) {
       const args = ['log', '--no-color', `-n${Math.min(50, Math.max(1, Number(limit) || 20))}`, '--format=%h %ad %s', '--date=short'];
@@ -410,7 +503,13 @@ function createTools({ workspacePath, repoRoot, lane, supabase, limits, log }) {
       if (/(sk-|ghp_|github_pat_|ghu_|eyJ[A-Za-z0-9_-]{20,}|password|secret)/i.test(value)) return { error: 'refused: notes must not contain secrets' };
       if (!supabase) return { saved: false };
       const { error } = await supabase.from('bob_self_memory').insert({ memory_text: value, memory_kind: 'builder_note', content: value });
-      return error ? { error: 'note could not be saved' } : { saved: true };
+      if (error) {
+        // Found live: a CHECK constraint rejected every builder_note for days and nobody saw it
+        // because the reason was dropped here. Keep the reason in the log and in the tool result.
+        if (logger?.warn) logger.warn(`[agentic-engineer] bob_self_memory insert failed: ${error.message}`);
+        return { error: `note could not be saved: ${error.message}` };
+      }
+      return { saved: true };
     },
     __changedFiles: changedFiles,
     __policyCheck: policyCheck,
@@ -524,6 +623,7 @@ async function runAgenticEngineer({
   liveContext = null,
   hints = [],
   previousFailure = null,
+  previousAttempt = null,
   inputArtifactIds = [],
   limits = DEFAULT_LIMITS,
   // null = the outsourced tier serves its strongest available allowlisted model (BOB_OPENAI_MODELS, best first).
@@ -555,7 +655,7 @@ async function runAgenticEngineer({
 
   const messages = [
     { role: 'system', content: systemPrompt({ lane, limits }) },
-    { role: 'user', content: taskPacket({ job, lane, specification, uxPlan, repositoryContext, liveContext, notes, previousFailure, hints }) },
+    { role: 'user', content: taskPacket({ job, lane, specification, uxPlan, repositoryContext, liveContext, notes, previousFailure, hints, previousAttempt }) },
   ];
   const builderMode = lane === 'frontend' ? 'frontend_engineer' : 'backend_engineer';
   const baseRequest = buildModelRunRequest({
@@ -633,7 +733,10 @@ async function runAgenticEngineer({
     if (call.tool === 'finish') {
       lessons = Array.isArray(args.lessons) ? args.lessons : [];
       if (args.no_change_reason && !tools.__changedFiles().length) {
-        outcome = { ok: false, no_change: true, error: String(args.no_change_reason).slice(0, 2000), summary: String(args.summary ?? '') };
+        const reason = String(args.no_change_reason).slice(0, 2000);
+        const budgetExhausted = classifyNoChange({ reason, turns, transcript, limits });
+        if (budgetExhausted) log({ turn: turns, budget_no_change: true });
+        outcome = { ok: false, no_change: true, budget_exhausted: budgetExhausted, error: reason, summary: String(args.summary ?? '') };
         break;
       }
       const built = buildProposal({ workspacePath, lane, tools, args });
@@ -663,11 +766,14 @@ async function runAgenticEngineer({
     }
     log({ turn: turns, result: typeof result?.error === 'string' ? { error: result.error.slice(0, 500) } : { ok: true } });
     const remaining = limits.maxTurns - turns;
-    const budgetNote = remaining === Math.floor(limits.maxTurns / 2)
-      ? `BUDGET: half your turns are used (${remaining} left). If you have not started editing, start now.`
-      : remaining > 0 && remaining <= 6
-        ? `BUDGET: ${remaining} turn${remaining === 1 ? '' : 's'} left. Run your test and call finish before they run out; an unfinished worktree is discarded.`
-        : null;
+    const edited = tools.__changedFiles().length > 0;
+    const budgetNote = remaining === limits.maxTurns - Math.ceil(limits.maxTurns / 3) && !edited
+      ? `BUDGET: a third of your turns are used (${remaining} left) and nothing is edited yet. Stop surveying: outline the main file if you have not, read the one range you need, and make the first edit within the next 3 turns.`
+      : remaining === Math.floor(limits.maxTurns / 2)
+        ? `BUDGET: half your turns are used (${remaining} left). ${edited ? 'Finish the slice you started, run the test, then finish.' : 'If you have not started editing, start now.'}`
+        : remaining > 0 && remaining <= 6
+          ? `BUDGET: ${remaining} turn${remaining === 1 ? '' : 's'} left. Run your test and call finish before they run out; an unfinished worktree is discarded.`
+          : null;
     messages.push({ role: 'user', content: JSON.stringify(budgetNote ? { tool_result: result, budget: budgetNote } : { tool_result: result }) });
   }
 
@@ -717,6 +823,9 @@ async function runAgenticEngineer({
     ok: outcome.ok,
     error: outcome.ok ? undefined : outcome.error,
     no_change: Boolean(outcome.no_change),
+    // The next attempt starts from this map instead of from nothing (see classifyNoChange).
+    budget_exhausted: Boolean(outcome.budget_exhausted),
+    resume_hints: outcome.budget_exhausted ? { ...readingMap(transcript), conclusion: String(outcome.summary || outcome.error || '').slice(0, 1500), turns_used: turns, lessons: lessons.slice(0, 3) } : null,
     proposal: outcome.proposal || null,
     patch_artifact: patchArtifact,
     transcript_artifact: transcriptArtifact.artifact || null,
@@ -727,4 +836,4 @@ async function runAgenticEngineer({
   };
 }
 
-module.exports = { DEFAULT_LIMITS, PROMPT_VERSION, RUN_ALLOWLIST, buildProposal, compactMessages, composeRunNote, createTools, parseToolCall, runAgenticEngineer, systemPrompt, taskPacket };
+module.exports = { DEFAULT_LIMITS, PROMPT_VERSION, RUN_ALLOWLIST, buildProposal, classifyNoChange, compactMessages, composeRunNote, createTools, outlineLines, parseToolCall, readingMap, runAgenticEngineer, systemPrompt, taskPacket };
