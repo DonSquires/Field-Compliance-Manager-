@@ -8380,7 +8380,7 @@ serve(async (req)=>{
             const bjGrounding = storedJob ? { grounded: true, overlap: 1, missing_paths: [] as string[], source: '', judged: false } : builderBriefGrounding(bjRecentRequests, `${bjTitle} ${bjDescription}`);
             let bjGroundingNote = '';
             if (!bjGrounding.grounded) {
-              const ownWords = String(bjGrounding.source || message ?? '').trim();
+              const ownWords = String(bjGrounding.source || message || '').trim();
               bjTitle = ownWords.replace(/\s+/g, ' ').split(/(?<=[.!?])\s/)[0].slice(0, 120) || bjTitle;
               bjDescription = `${ownWords.slice(0, 11000)}\n\nAcceptance: the change does what this brief says, existing tests pass, and new tests cover the change.`;
               bjGroundingNote = `_The drafted brief did not match what you asked (${bjGrounding.missing_paths.length ? `it dropped ${bjGrounding.missing_paths.slice(0, 2).join(', ')}` : `${Math.round(bjGrounding.overlap * 100)}% of your words`}), so I have used your own words as the brief._`;
