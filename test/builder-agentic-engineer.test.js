@@ -30,7 +30,7 @@ test('path policy: protected paths are refused on every lane, lanes split at app
 test('builder model gateway: max effort defaults, multi-turn messages, and allowlist', () => {
   const config = gateway.createModelGatewayConfig({ OPENAI_API_KEY: 'k' });
   assert.equal(config.reasoningEffort, 'high');
-  assert.equal(config.maxOutputTokens, 32000);
+  assert.equal(config.maxOutputTokens, 8192);
   assert.ok(config.maxPromptChars >= 1_000_000);
   assert.ok(config.openai.models.has('gpt-5.4'));
   const base = { provider: 'openai', builder_mode: 'backend_engineer', prompt_version: 'v', idempotency_key: 'k' };
@@ -39,7 +39,7 @@ test('builder model gateway: max effort defaults, multi-turn messages, and allow
   assert.equal(gateway.validateModelRequest({ ...base, system_prompt: 'a', user_prompt: 'b', reasoning_effort: 'max' }, config), 'unsupported reasoning effort');
   const body = gateway.buildProviderBody({ input: { ...base, messages: [{ role: 'user', content: 'hi' }], output_schema: { type: 'object' } }, config, model: 'gpt-5.4' });
   assert.equal(body.reasoning_effort, 'high');
-  assert.equal(body.max_completion_tokens, 32000);
+  assert.equal(body.max_completion_tokens, 8192);
   assert.deepEqual(body.response_format, { type: 'json_object' });
   const classic = gateway.buildProviderBody({ input: { ...base, system_prompt: 'a', user_prompt: 'b' }, config, model: 'gpt-4o-mini' });
   assert.equal(classic.max_tokens, 16000);
@@ -477,6 +477,25 @@ test('compactMessages keeps recent turns verbatim and collapses older bulky resu
   assert.equal(out[6], messages[6]);
   assert.equal(out[7], messages[7], 'the most recent result stays verbatim');
   assert.equal(messages[3].content.length > 5000, true, 'the in-memory transcript is not mutated');
+});
+
+test('compactMessages fits even oversized recent tool results under the active local prompt budget', () => {
+  const { compactMessages } = require('../builder-agentic-engineer');
+  const messages = [
+    { role: 'system', content: 'system'.repeat(100) },
+    { role: 'user', content: 'task'.repeat(1000) },
+    { role: 'assistant', content: JSON.stringify({ thought: 'read source', tool: 'read_file', args: { path: 'src/large.ts' } }) },
+    { role: 'user', content: JSON.stringify({ tool_result: { path: 'src/large.ts', content: 'A'.repeat(30000) } }) },
+    { role: 'assistant', content: JSON.stringify({ thought: 'inspect usage', tool: 'search', args: { query: 'largeSource' } }) },
+    { role: 'user', content: JSON.stringify({ tool_result: { matches: ['B'.repeat(30000)] } }) }
+  ];
+  const out = compactMessages(messages, { keepRecent: 1, maxChars: 12000 });
+  assert.ok(out.reduce((total, message) => total + message.content.length, 0) <= 12000);
+  assert.equal(out[0], messages[0]);
+  assert.equal(out[1], messages[1]);
+  assert.equal(out.at(-2), messages.at(-2), 'the latest model action is preserved');
+  assert.match(out.at(-1).content, /compacted/);
+  assert.match(out.at(-1).content, /src\/large\.ts|BBBB/);
 });
 
 test('finish is refused when a change touches tests but no test run passed this session; verified_runs carry first-hand evidence', async () => {

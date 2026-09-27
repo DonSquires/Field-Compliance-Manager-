@@ -217,7 +217,7 @@ function taskPacket(input) {
 // the unfitted build map alone (2000 paths, every schema name) blew past the 40k-token VPS window and every
 // in-house provider was skipped on a 413 (job c00059ca, 2026-09-27). Fit the build map to the task, cap the
 // live context, and shrink until system prompt plus packet fits the laptop's 24k window as well.
-function buildOpeningPacket({ job, lane, specification, uxPlan, rawRepositoryContext, liveContext, notes, previousFailure, hints, previousAttempt, seeded, budgetChars = Number(process.env.BOB_BUILDER_PACKET_MAX_CHARS || 60_000) }) {
+function buildOpeningPacket({ job, lane, specification, uxPlan, rawRepositoryContext, liveContext, notes, previousFailure, hints, previousAttempt, seeded, budgetChars = Number(process.env.BOB_BUILDER_PACKET_MAX_CHARS || 48_000) }) {
   const taskText = `${job.title ?? ''} ${job.task_description ?? ''} ${JSON.stringify(specification ?? '')}`;
   const liveText = liveContext ? JSON.stringify(liveContext) : '';
   const boundedLiveContext = !liveContext ? null : liveText.length <= 12_000 ? liveContext : { truncated_live_context: `${liveText.slice(0, 12_000)}…`, note: 'live context trimmed to fit the model window' };
@@ -301,7 +301,36 @@ function composeRunNote({ job, lane, outcome, transcript, turns, provider, model
 // Every turn re-sends the whole conversation, so a 25-turn job with a few 60k-char file reads
 // costs ~1.6M prompt tokens. Recent turns stay verbatim; older bulky tool results and full-file
 // write payloads are collapsed to a head + a pointer (the model can re-read a file if it needs it).
-function compactMessages(messages, { keepRecent = 6, stubChars = 600, threshold = 1500 } = {}) {
+function compactExcerpt(value, maxChars) {
+  const text = String(value ?? '');
+  if (text.length <= maxChars) return text;
+  const marker = `...[compacted ${text.length - maxChars} chars]...`;
+  const available = Math.max(0, maxChars - marker.length);
+  const head = Math.ceil(available * 0.65);
+  return `${text.slice(0, head)}${marker}${text.slice(-(available - head))}`;
+}
+
+function compactValue(value, stringChars, depth = 0) {
+  if (typeof value === 'string') return compactExcerpt(value, stringChars);
+  if (depth >= 5 || value === null || typeof value !== 'object') return value;
+  if (Array.isArray(value)) return value.slice(0, 16).map((entry) => compactValue(entry, stringChars, depth + 1));
+  return Object.fromEntries(Object.entries(value).slice(0, 48).map(([key, entry]) => [key, compactValue(entry, stringChars, depth + 1)]));
+}
+
+function compactMessageContent(message, maxChars) {
+  try {
+    const parsed = JSON.parse(message.content);
+    let stringChars = Math.max(64, Math.floor(maxChars / 5));
+    for (let attempt = 0; attempt < 6; attempt++) {
+      const content = JSON.stringify(compactValue(parsed, stringChars));
+      if (content.length <= maxChars) return content;
+      stringChars = Math.max(32, Math.floor(stringChars / 2));
+    }
+  } catch { /* compact plain text below */ }
+  return compactExcerpt(message.content, maxChars);
+}
+
+function compactMessages(messages, { keepRecent = 6, stubChars = 600, threshold = 1500, maxChars = Infinity } = {}) {
   const [system, task, ...turns] = messages;
   const cutoff = Math.max(0, turns.length - keepRecent * 2);
   const compacted = turns.map((message, index) => {
@@ -316,7 +345,27 @@ function compactMessages(messages, { keepRecent = 6, stubChars = 600, threshold 
     }
     return { ...message, content: `${message.content.slice(0, stubChars)}…[compacted ${message.content.length - stubChars} chars: re-run the tool if you need this again]` };
   });
-  return [system, task, ...compacted];
+  const fitted = [system, task, ...compacted];
+  const size = () => fitted.reduce((total, message) => total + String(message.content ?? '').length, 0);
+  let attempts = 0;
+  while (size() > maxChars && attempts++ < 128) {
+    const candidates = fitted.map((message, index) => ({ message, index, length: String(message.content ?? '').length }))
+      .filter((entry) => entry.index >= 2 && entry.length > 128)
+      .sort((a, b) => b.length - a.length || a.index - b.index);
+    const largest = candidates[0];
+    if (largest) {
+      const excess = size() - maxChars;
+      const target = Math.max(128, largest.length - excess - 64);
+      const content = compactMessageContent(largest.message, target);
+      if (content.length < largest.length) {
+        fitted[largest.index] = { ...largest.message, content };
+        continue;
+      }
+    }
+    if (fitted.length > 4) fitted.splice(2, 2);
+    else break;
+  }
+  return fitted;
 }
 
 function createTools({ workspacePath, repoRoot, lane, supabase, limits, log }) {
@@ -762,14 +811,19 @@ async function runAgenticEngineer({
     turns++;
     const base = activeRequest();
     const isOpenAI = candidates[active].provider === 'openai';
-    const request = { ...base, idempotency_key: `${base.idempotency_key}::turn-${turns}`, request: { ...base.request, messages: compactMessages(messages, compaction), ...(isOpenAI ? { reasoning_effort: process.env.BOB_BUILDER_REASONING_EFFORT || 'high' } : {}), max_output_tokens: Number(process.env.BOB_BUILDER_MAX_OUTPUT_TOKENS || 32000) } };
+    const activeHealth = health?.[candidates[active].provider] || {};
+    const localContext = activeHealth.num_ctx;
+    const localOutputBudget = Number(process.env.BOB_BUILDER_MAX_OUTPUT_TOKENS || 8192);
+    const promptBudgetChars = localContext ? Math.floor((localContext - localOutputBudget - 512) * 3.5 * (compaction.maxContextRatio ?? 1)) : Infinity;
+    const maxOutputTokens = Number(process.env.BOB_BUILDER_MAX_OUTPUT_TOKENS || 8192);
+    const request = { ...base, idempotency_key: `${base.idempotency_key}::turn-${turns}`, request: { ...base.request, messages: compactMessages(messages, { ...compaction, maxChars: promptBudgetChars }), ...(isOpenAI ? { reasoning_effort: process.env.BOB_BUILDER_REASONING_EFFORT || 'high' } : {}), max_output_tokens: maxOutputTokens } };
     const response = await callModel({ ...gateway, modelRequest: request, timeoutMs: limits.turnTimeoutMs });
     if (!response.ok) {
       unavailableStreak++;
       log({ turn: turns, provider: candidates[active].provider, error: `model unavailable: ${response.error}`, streak: unavailableStreak });
       const status = Number(response.status);
       if (status === 413 && !compaction.keepRecent) {
-        compaction = { keepRecent: 2, stubChars: 300, threshold: 800 };
+        compaction = { keepRecent: 1, stubChars: 120, threshold: 250, maxContextRatio: 0.65 };
         log({ turn: turns, provider: candidates[active].provider, compacted_hard: true });
         unavailableStreak = 0; turns--;
         continue;

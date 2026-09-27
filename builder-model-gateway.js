@@ -33,7 +33,8 @@ function estimateTokens(chars) {
 // Prompts that cannot fit a local model's context are the clearest "outsource this" signal.
 function promptFitsProvider(input, providerConfig) {
   if (providerConfig.kind !== 'ollama') return true;
-  return estimateTokens(promptLength(input)) <= Math.floor(providerConfig.numCtx * 0.85);
+  const outputBudget = Math.min(Number(input.max_output_tokens) || providerConfig.maxOutputTokens || 8192, providerConfig.maxOutputTokens || 8192, 16384);
+  return estimateTokens(promptLength(input)) + outputBudget + 512 <= providerConfig.numCtx;
 }
 
 async function probeProvider(config, name, { fetchImpl = globalThis.fetch, now = Date.now } = {}) {
@@ -125,6 +126,7 @@ function defaultAuthorModel(env = process.env, installed = null) {
 }
 
 function createModelGatewayConfig(env = process.env) {
+  const maxOutputTokens = Math.max(1000, Number(env.BOB_BUILDER_MAX_OUTPUT_TOKENS || 8192));
   return {
     openai: {
       kind: 'openai',
@@ -137,6 +139,7 @@ function createModelGatewayConfig(env = process.env) {
       kind: 'ollama',
       baseUrl: (env.OLLAMA_BASE_URL || 'http://127.0.0.1:11434').replace(/\/+$/, ''),
       models: parseModelAllowlist(env.BOB_OLLAMA_MODELS, 'qwen2.5-coder:7b'),
+      maxOutputTokens: Math.min(maxOutputTokens, 8192),
       // CPU inference on the VPS: keep the window modest so the KV cache fits and prompt eval stays bounded.
       numCtx: Math.max(4096, Number(env.BOB_OLLAMA_NUM_CTX) || 16384)
     },
@@ -144,12 +147,13 @@ function createModelGatewayConfig(env = process.env) {
       kind: 'ollama',
       baseUrl: (env.GPU_WORKSTATION_URL || '').replace(/\/(v1)?\/*$/, ''),
       models: parseModelAllowlist(env.BOB_GPU_MODELS, 'qwen2.5-coder:7b'),
+      maxOutputTokens: Math.min(maxOutputTokens, 8192),
       numCtx: Math.max(4096, Number(env.BOB_GPU_NUM_CTX) || 32768)
     },
     // The agentic lane is not bound by an edge timeout: give reasoning models
     // maximum effort, room to write, and long turns.
     reasoningEffort: REASONING_EFFORTS.has(env.BOB_BUILDER_REASONING_EFFORT) ? env.BOB_BUILDER_REASONING_EFFORT : 'high',
-    maxOutputTokens: Math.max(1000, Number(env.BOB_BUILDER_MAX_OUTPUT_TOKENS || 32000)),
+    maxOutputTokens,
     // CPU prompt evaluation on the VPS MoE reviewer can take many minutes on a first, uncached turn.
     timeoutMs: Math.min(Number(env.BOB_MODEL_TIMEOUT_MS || 600000), 1800000),
     maxPromptChars: Number(env.BOB_MODEL_MAX_PROMPT_CHARS || DEFAULT_MAX_PROMPT_CHARS)
@@ -192,7 +196,7 @@ function buildProviderBody({ input, config, model }) {
     body.stream = false;
     if (input.output_schema) body.format = 'json';
     // Ollama defaults to a 4k window and would truncate Bob's prompts silently; keep the model warm between turns.
-    body.options = { num_ctx: providerConfig.numCtx, temperature: typeof input.temperature === 'number' ? input.temperature : 0.2, num_predict: Math.min(Number(input.max_output_tokens) || 8192, 16384) };
+    body.options = { num_ctx: providerConfig.numCtx, temperature: typeof input.temperature === 'number' ? input.temperature : 0.2, num_predict: Math.min(Number(input.max_output_tokens) || providerConfig.maxOutputTokens || 8192, providerConfig.maxOutputTokens || 8192, 16384) };
     body.keep_alive = '30m';
     return body;
   }
