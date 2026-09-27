@@ -385,7 +385,7 @@ function collectSourceEdges(rootDir, knownEntities) {
   const sourceFiles = [
     ...walkFiles(rootDir, 'apps/web/src'),
     ...walkFiles(rootDir, 'apps/mobile/src'),
-    ...walkFiles(rootDir, 'apps/sd-card-bridge/src'),
+    ...walkFiles(rootDir, 'apps/sd-card-bridge-v2/src'),
     ...walkFiles(rootDir, 'supabase/functions'),
     ...walkFiles(rootDir, 'services'),
     ...ROOT_SOURCE_FILES.filter(file => fs.existsSync(path.join(rootDir, file)))
@@ -492,7 +492,7 @@ function collectAtlasRefresh(rootDir = process.cwd()) {
   const repositoryFiles = [
     ...walkFiles(rootDir, 'apps/web/src'),
     ...walkFiles(rootDir, 'apps/mobile/src'),
-    ...walkFiles(rootDir, 'apps/sd-card-bridge/src'),
+    ...walkFiles(rootDir, 'apps/sd-card-bridge-v2/src'),
     ...walkFiles(rootDir, 'supabase/functions')
   ].sort();
   const edgeFunctions = new Set(

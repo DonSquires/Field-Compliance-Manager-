@@ -926,7 +926,7 @@ const CCTVConsolePage: React.FC = () => {
         <div>
           <h1 className="page-title"><Camera size={20} aria-hidden="true" /> CCTV console{popout ? <span className="cctv-console__popout-badge">Pop-out wall</span> : null}</h1>
           <p className="page-subtitle">
-            {selectedImport ? <>{selectedImport.camera_label} · {placeLabelOf(selectedImport)} · {selectedImport.recorded_from ? `${formatDate(parseMs(selectedImport.recorded_from) ?? 0, timeZone)} · ` : ''}{selectedImport.video_count} recording{selectedImport.video_count === 1 ? '' : 's'}{selectedImport.skipped_count ? `, ${selectedImport.skipped_count} empty slots skipped` : ''}</> : 'Choose a camera to review.'}
+            {selectedImport ? <>{selectedImport.camera_label} · {placeLabelOf(selectedImport)} · {selectedImport.recorded_from ? `${formatDate(parseMs(selectedImport.recorded_from) ?? 0, timeZone)} · ` : ''}{selectedImport.video_count} video{selectedImport.video_count === 1 ? '' : 's'} · {selectedImport.snapshot_count} photo{selectedImport.snapshot_count === 1 ? '' : 's'}{selectedImport.skipped_count ? `, ${selectedImport.skipped_count} empty slots skipped` : ''}</> : 'Choose a camera to review.'}
           </p>
         </div>
         <div className="cctv-console__header-actions">
@@ -966,7 +966,7 @@ const CCTVConsolePage: React.FC = () => {
                   <button type="button" className="cctv-console__camera-main" onClick={() => setSelectedImportId(row.id)} aria-pressed={row.id === selectedImportId}>
                     <span className="cctv-console__camera-label">{row.camera_label}</span>
                     <span className="cctv-console__camera-place">{placeLabelOf(row)}</span>
-                    <span className="cctv-console__camera-meta">{row.recorded_from ? formatDate(parseMs(row.recorded_from) ?? 0, row.source_timezone) : 'No footage yet'} · {row.video_count} recording{row.video_count === 1 ? '' : 's'} · <span className={`cctv-console__status is-${row.status}`}>{row.status.replace(/_/g, ' ')}</span>{observationsByImport[row.id] ? ` · ${pending} to review` : ''}</span>
+                    <span className="cctv-console__camera-meta">{row.recorded_from ? formatDate(parseMs(row.recorded_from) ?? 0, row.source_timezone) : row.snapshot_count ? 'Photos ready' : 'No media yet'} · {row.video_count} video{row.video_count === 1 ? '' : 's'} · {row.snapshot_count} photo{row.snapshot_count === 1 ? '' : 's'} · <span className={`cctv-console__status is-${row.status}`}>{row.status.replace(/_/g, ' ')}</span>{observationsByImport[row.id] ? ` · ${pending} to review` : ''}</span>
                   </button>
                   {onWall
                     ? <button type="button" className="cctv-console__icon-btn" onClick={() => removeTile(cameraItem(row.id).id)} aria-label={`Remove ${row.camera_label} from the wall`} disabled={wallItems.length === 1}><X size={14} aria-hidden="true" /></button>
@@ -979,11 +979,11 @@ const CCTVConsolePage: React.FC = () => {
           {selectedImport ? (
             <section className="cctv-console__recordings" aria-label={`Recordings from ${selectedImport.camera_label}`}>
               <div className="cctv-console__aside-head">
-                <strong>Recordings</strong>
+                <strong>Photos &amp; videos</strong>
                 <span className="cctv-console__count is-neutral">{selectedClips.length}</span>
               </div>
               {detailLoading && selectedClips.length === 0 ? <p className="cctv-console__muted"><Loader2 size={14} className="spin" aria-hidden="true" /> Loading recordings…</p> : null}
-              {!detailLoading && selectedClips.length === 0 ? <p className="cctv-console__muted">No recordings have been registered for this camera yet.</p> : null}
+              {!detailLoading && selectedClips.length === 0 ? <p className="cctv-console__muted">No photos or videos have been registered for this camera yet.</p> : null}
               {dayGroups.map((group, groupIndex) => {
                 const expanded = expandedDays[group.day] ?? groupIndex === 0;
                 const pendingInDay = group.clips.reduce((sum, clip) => sum + (evidenceCounts[clip.evidenceId]?.pending ?? 0), 0);
@@ -1043,7 +1043,7 @@ const CCTVConsolePage: React.FC = () => {
                 if (!item || !row || clockMs === null) {
                   return (
                     <div key={`empty-${index}`} className="cctv-tile is-empty">
-                      <span>{item ? 'Loading footage…' : 'Empty tile — add a camera or a recording from the list'}</span>
+                      <span>{item ? 'Loading camera media…' : 'Empty tile — add a camera, photo or video from the list'}</span>
                     </div>
                   );
                 }

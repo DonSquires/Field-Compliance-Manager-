@@ -1,5 +1,5 @@
 import React, { useCallback, useEffect, useImperativeHandle, useRef, useState } from 'react';
-import { Loader2, Sparkles, VideoOff } from 'lucide-react';
+import { ImageOff, Loader2, Sparkles, VideoOff } from 'lucide-react';
 import { clipAtTime, formatClock, nextClipAfter, type CCTVInspection, type ConsoleClip } from '../lib/cctvConsole';
 import { analyseFramePixels, cssFilterFor, estimateNoiseFloor, panBy, planEnhancement, roiFor, zoomAt, type EnhancementPlan, type ZoomState } from '../lib/cctvEnhance';
 import { createEnhancementRenderer, type EnhancementRenderer } from '../lib/cctvEnhanceRenderer';
@@ -109,9 +109,9 @@ export const CCTVPlayerTile = React.forwardRef<CCTVPlayerTileHandle, CCTVPlayerT
       .then((url) => {
         if (openingRef.current !== nextId) return;
         setSrc(url);
-        if (!url) setError('The video could not be opened.');
+        if (!url) setError(mediaIsPhoto ? 'The photo could not be opened.' : 'The video could not be opened.');
       })
-      .catch((cause) => { if (openingRef.current === nextId) setError(cause instanceof Error ? cause.message : 'The video could not be opened.'); })
+      .catch((cause) => { if (openingRef.current === nextId) setError(cause instanceof Error ? cause.message : mediaIsPhoto ? 'The photo could not be opened.' : 'The video could not be opened.'); })
       .finally(() => { if (openingRef.current === nextId) setLoading(false); });
   }, [targetClip, clip, converting, resolveUrl]);
 
@@ -449,9 +449,9 @@ export const CCTVPlayerTile = React.forwardRef<CCTVPlayerTileHandle, CCTVPlayerT
             <Sparkles size={11} aria-hidden="true" /> {gpuActive ? 'Enhanced view' : 'Basic adjustments'}{inspection.zoom > 1 ? ` · ${inspection.zoom.toFixed(inspection.zoom % 1 ? 2 : 0)}×` : ''}
           </span>
         ) : null}
-        {loading ? <div className="cctv-tile__overlay"><Loader2 size={20} className="spin" aria-hidden="true" /> Opening clip…</div> : null}
+        {loading ? <div className="cctv-tile__overlay"><Loader2 size={20} className="spin" aria-hidden="true" /> {mediaIsPhoto ? 'Opening photo…' : 'Opening video…'}</div> : null}
         {converting ? <div className="cctv-tile__overlay"><Loader2 size={20} className="spin" aria-hidden="true" /> Converting this clip for playback…</div> : null}
-        {error ? <div className="cctv-tile__overlay is-error"><VideoOff size={20} aria-hidden="true" /> {error}</div> : null}
+        {error ? <div className="cctv-tile__overlay is-error">{mediaIsPhoto ? <ImageOff size={20} aria-hidden="true" /> : <VideoOff size={20} aria-hidden="true" />} {error}</div> : null}
         {!targetClip ? (
           <div className="cctv-tile__overlay">
             <VideoOff size={22} aria-hidden="true" />

@@ -9,8 +9,8 @@
 //!
 //! Layout references: gbatmobile/dhfs_extractor (MIT) for the DHFS4.1 partition table, superblock
 //! and 32-byte descriptor layout; FFmpeg `libavformat/dhav.c` for the DHAV frame container that
-//! newer firmware writes inside fragments; the V1 field bridge (`apps/sd-card-bridge`) for the two
-//! behaviours proven on real cards: the partition table must be found through the `DHFS_DPT:`
+//! newer firmware writes inside fragments; field evidence from the earlier implementation for the
+//! two behaviours proven on real cards: the partition table must be found through the `DHFS_DPT:`
 //! marker rather than a fixed 0x3c00, and a card whose table is all zero keeps its superblock at
 //! marker + 0x6c0.
 
@@ -1545,7 +1545,7 @@ mod tests {
         let mut image = vec![0_u8; (VIDEO_BLOCKS as u64) as usize * 512 + 8 * FRAG_SIZE];
         put(&mut image, 0, MAGIC);
         put(&mut image, 0x3c00, DPT_MARKER);
-        // Partition-table entries left all zero: the real card that shaped V1 looked like this.
+        // Partition-table entries left all zero: the real card that shaped this case looked like this.
         write_partition(&mut image, 0, 0x3c00 + SINGLE_PARTITION_SUPERBLOCK_OFFSET);
         image
     }

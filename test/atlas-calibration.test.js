@@ -260,17 +260,17 @@ test('Atlas refresh derives Ops scheduler HTTP calls to edge functions', () => {
 
 test('Atlas refresh derives FCM Desktop evidence registration calls', () => {
   const rootDir = fs.mkdtempSync(path.join(os.tmpdir(), 'atlas-desktop-bridge-'));
-  const sourcePath = path.join(rootDir, 'apps/sd-card-bridge/src/main.tsx');
-  const targetPath = path.join(rootDir, 'supabase/functions/register-desktop-video-import/index.ts');
+  const sourcePath = path.join(rootDir, 'apps/sd-card-bridge-v2/src/main.tsx');
+  const schemaPath = path.join(rootDir, 'supabase/schema.sql');
   fs.mkdirSync(path.dirname(sourcePath), { recursive: true });
-  fs.mkdirSync(path.dirname(targetPath), { recursive: true });
-  fs.writeFileSync(sourcePath, "supabase.functions.invoke('register-desktop-video-import', { body: {} });");
-  fs.writeFileSync(targetPath, 'export default {}');
+  fs.mkdirSync(path.dirname(schemaPath), { recursive: true });
+  fs.writeFileSync(sourcePath, "supabase.rpc('prepare_cctv_media_upload', {});");
+  fs.writeFileSync(schemaPath, 'CREATE FUNCTION public.prepare_cctv_media_upload() RETURNS void LANGUAGE sql AS $$ SELECT NULL $$;');
 
   const manifest = require('../scripts/atlas-refresh').collectAtlasRefresh(rootDir);
 
-  assert.ok(manifest.edges.some((edge) => edge.source_name === 'apps/sd-card-bridge/src/main'
-    && edge.target_name === 'register-desktop-video-import'
+  assert.ok(manifest.edges.some((edge) => edge.source_name === 'apps/sd-card-bridge-v2/src/main'
+    && edge.target_name === 'prepare_cctv_media_upload'
     && edge.edge_kind === 'calls'));
   fs.rmSync(rootDir, { recursive: true, force: true });
 });

@@ -1,8 +1,7 @@
 # FCM Desktop V2
 
-Desktop V2 is the Windows companion the web app links to for Dahua cards, built beside the older `apps/sd-card-bridge`
-application. It does not replace or modify Desktop V1: V1 stays the stable bridge for mountable cards and its own release
-line; V2 owns the hidden-partition (DHFS) path, local review and the video-files source.
+Desktop V2 is the operating Windows companion the web app links to for Dahua cards. It owns the hidden-partition
+(DHFS) path, local photo and video review, and the video-files source.
 
 ## Purpose
 
@@ -255,6 +254,10 @@ affected: they write JPEGs, which need no H.264 encoder.
   selected facet when Desktop V2 creates the corresponding CCTV import.
 - The media list has a selectable day timeline. It names the weekday and date, distinguishes weekends, and
   provides a time marker that opens and scrolls to each recording, photo and split clip.
+
+0.4.10 makes Desktop V2 the sole operating FCM Desktop release. The review timeline stays visible while
+scrolling, thumbnails are larger, photo and video actions are explicit, and SHA-256 claims prevent duplicate
+uploads and duplicate inference review. Failed empty sends return to Draft instead of remaining in Uploading.
 
 The DHFS logic lives in `crates/dhfs` (`fcm-dhfs`), a dependency-light crate
 with its own unit tests over synthetic cards (MBR-hidden partition, raw device

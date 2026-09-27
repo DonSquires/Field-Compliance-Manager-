@@ -11,9 +11,10 @@ test('administrator is offered the desktop companion once and can dismiss it', a
   await expect(downloadBtn).toBeVisible();
   await downloadBtn.click();
 
-  const prompt = page.getByRole('dialog', { name: 'Choose your evidence workstation' });
+  const prompt = page.getByRole('dialog', { name: 'Download the evidence workstation' });
   await expect(prompt).toBeVisible();
-  await expect(prompt.getByRole('link', { name: 'FCM Desktop V1' })).toBeVisible();
+  await expect(prompt.getByRole('link', { name: /FCM Desktop · v/ })).toBeVisible();
+  await expect(prompt.getByRole('link')).toHaveCount(1);
 
   await prompt.getByRole('button', { name: 'Not now' }).click();
   await expect(prompt).toBeHidden();

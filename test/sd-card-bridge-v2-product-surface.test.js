@@ -10,8 +10,10 @@ const entrypoint = fs.readFileSync(path.join(root, 'apps/sd-card-bridge-v2/src-t
 const readme = fs.readFileSync(path.join(root, 'apps/sd-card-bridge-v2/README.md'), 'utf8');
 const workflow = fs.readFileSync(path.join(root, '.github/workflows/release-sd-card-bridge-v2.yml'), 'utf8');
 const photoMigration = fs.readFileSync(path.join(root, 'supabase/migrations/20260926012000_cctv_photo_inference.sql'), 'utf8');
+const dedupeMigration = fs.readFileSync(path.join(root, 'supabase/migrations/20260927290000_cctv_media_hash_dedupe.sql'), 'utf8');
+const styles = fs.readFileSync(path.join(root, 'apps/sd-card-bridge-v2/src/styles.css'), 'utf8');
 
-test('Desktop V2 preserves V1 and keeps its read-only, card-first boundaries', () => {
+test('Desktop V2 is the operating desktop and keeps its read-only, card-first boundaries', () => {
   // 0.2.0 ruling: the card is the drive. Recordings are read straight from the hidden partition; the exact image is optional.
   assert.match(source, /Read the card\. Send the recordings\./);
   assert.match(source, /Discover camera cards and disks/);
@@ -29,14 +31,17 @@ test('Desktop V2 preserves V1 and keeps its read-only, card-first boundaries', (
   assert.match(native, /create_new\(true\)/);
   assert.match(native, /with_extension\("img\.part"\)/);
   assert.match(native, /Could not commit verified image atomically/);
-  assert.match(readme, /does not replace or modify Desktop V1/);
+  assert.match(readme, /operating Windows companion/);
   // GitHub builds and publishes an unsigned installer with its integrity manifest; signing happens on the protected side
   // (scripts/desktop-signing/sign-and-publish.mjs) and replaces the release assets with the signed set.
   assert.match(workflow, /FCM-Desktop-V2-Setup\.exe/);
   assert.match(workflow, /Write integrity manifest \(unsigned build\)/);
   assert.match(workflow, /Publish V2 release \(unsigned; sign on the protected side\)/);
   assert.match(workflow, /SmartScreen/);
-  assert.match(workflow, /Reuse the approved FCM desktop icon set/);
+  for (const icon of ['32x32.png', '128x128.png', '128x128@2x.png', 'icon.ico']) {
+    assert.equal(fs.existsSync(path.join(root, 'apps/sd-card-bridge-v2/src-tauri/icons', icon)), true, `${icon} is owned by V2`);
+  }
+  assert.doesNotMatch(workflow, /apps\/sd-card-bridge(?!-v2)/);
 });
 
 const dhfs = fs.readFileSync(path.join(root, 'apps/sd-card-bridge-v2/crates/dhfs/src/lib.rs'), 'utf8');
@@ -161,12 +166,30 @@ test('Desktop V2 sends ordinary and card-extracted photos through governed face 
   assert.match(native, /const PHOTO_EXTENSIONS: \[&str; 7\]/);
   assert.match(native, /return if image \{ \("image", Some\("image"\)\) \}/);
   assert.match(source, /type FileContent = 'video' \| 'image'/);
-  assert.match(source, /kind: file\.content === 'image' \? 'local_photo' : 'local_video'/);
+  assert.match(source, /const isPhotoFile = \(file: LocalVideoFile\) => file\.content === 'image' \|\| PHOTO_FILE_EXTENSIONS\.includes/);
+  assert.match(source, /kind: photo \? 'local_photo' : 'local_video'/);
+  assert.match(source, /if \(item\.kind === 'file' && isPhotoFile\(item\.file\)\)/);
+  assert.match(source, /<img src=\{`data:\$\{frame\.mimeType/);
   assert.equal((source.match(/supabase\.rpc\('register_cctv_import_photo'/g) || []).length, 2, 'ordinary photos and card picture streams use the photo RPC');
   assert.match(source, /p_capture_time_source: 'camera_index'/);
   assert.match(source, /queued for provisional face and plate recognition/);
   assert.match(photoMigration, /evidence_kind, storage_path[\s\S]*'photo'/);
   assert.match(photoMigration, /'video_motion', 'queued'/);
+});
+
+test('Desktop V2 keeps review navigation visible, uses inspectable thumbnails, and deduplicates before review and upload', () => {
+  assert.match(styles, /\.media-day-timeline\{position:sticky;top:0;z-index:25/);
+  assert.match(styles, /\.recording__thumb\{width:192px/);
+  assert.match(styles, /\.recording__thumb\{width:144px\}/);
+  assert.match(source, /if \(isOpen\) return photo \? 'Close photo' : 'Close video preview'/);
+  assert.match(source, /return photo \? 'View photo' : 'Preview video'/);
+  assert.equal((source.match(/reviewActionLabel\(item, isOpen, reviewState\)/g) || []).length, 3, 'clip, card and file rows use media-specific review labels');
+  assert.match(source, /supabase\.rpc\('find_existing_cctv_media_by_hash'/);
+  assert.match(source, /supabase\.rpc\('prepare_cctv_media_upload'/);
+  assert.match(source, /p_status: anySent \? 'registered' : 'draft'/);
+  assert.match(dedupeMigration, /UNIQUE\(organization_id,evidence_kind,sha256\)/);
+  assert.match(dedupeMigration, /pg_advisory_xact_lock/);
+  assert.match(dedupeMigration, /status='uploading' AND import\.video_count=0 AND import\.snapshot_count=0/);
 });
 
 test('Desktop V2 selects canonical Sites and Zones and offers direct day/clip timeline navigation', () => {

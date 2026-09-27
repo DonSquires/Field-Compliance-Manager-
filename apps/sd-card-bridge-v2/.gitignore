@@ -1,5 +1,4 @@
 src-tauri/target/
 src-tauri/gen/
-src-tauri/icons/
 crates/*/target/
 node_modules/

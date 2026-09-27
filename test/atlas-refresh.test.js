@@ -59,6 +59,9 @@ test('Atlas refresh extracts concrete entities and Supabase calls without test n
       supabase.from('alpha').select('id');
       supabase.functions.invoke('ping');
     `);
+    write(root, 'apps/sd-card-bridge-v2/src/main.tsx', `
+      supabase.rpc('get_alpha');
+    `);
     write(root, 'scripts/seed-rm-forestry-roster-history.mjs', '// ATLAS CALLS: get_alpha');
     write(root, 'apps/web/src/pages/TestPage.test.tsx', `supabase.from('test_noise').select('*');`);
 
@@ -77,6 +80,7 @@ test('Atlas refresh extracts concrete entities and Supabase calls without test n
     assert.ok(manifest.edges.some(row => row.source_name === 'ping' && row.target_type === 'edge_function' && row.target_name === 'echo'));
     assert.ok(manifest.edges.some(row => row.source_name === 'mobile/components/TestPanel' && row.target_name === 'alpha' && row.edge_kind === 'reads'));
     assert.ok(manifest.edges.some(row => row.source_name === 'mobile/components/TestPanel' && row.target_type === 'edge_function' && row.target_name === 'ping'));
+    assert.ok(manifest.edges.some(row => row.source_name === 'apps/sd-card-bridge-v2/src/main' && row.target_type === 'rpc' && row.target_name === 'get_alpha'));
     assert.ok(manifest.edges.some(row => row.source_name === 'scripts/seed-rm-forestry-roster-history' && row.target_type === 'rpc' && row.target_name === 'get_alpha'));
     assert.ok(manifest.edges.some(row => row.source_type === 'rpc' && row.source_name === 'get_alpha' && row.target_name === 'alpha' && row.edge_kind === 'reads'));
     assert.ok(manifest.edges.some(row => row.source_type === 'rpc' && row.source_name === 'update_alpha' && row.target_name === 'alpha' && row.edge_kind === 'writes'));

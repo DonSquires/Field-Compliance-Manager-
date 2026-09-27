@@ -95,6 +95,17 @@ describe('CCTV console', () => {
     expect(tile).toContain('No footage at');
   });
 
+  it('renders photo evidence as a signed still and reports photo-only imports as media', () => {
+    expect(page).toContain('selectedImport.snapshot_count} photo');
+    expect(page).toContain('row.snapshot_count} photo');
+    expect(page).toContain('<strong>Photos &amp; videos</strong>');
+    expect(page).toContain('No photos or videos have been registered for this camera yet.');
+    expect(page).toContain('Loading camera media…');
+    expect(tile).toContain("const mediaIsPhoto = targetClip?.mediaKind === 'photo';");
+    expect(tile).toContain('? <img ref={imageRef} src={src ?? undefined}');
+    expect(tile).toContain("mediaIsPhoto ? 'Opening photo…' : 'Opening video…'");
+  });
+
   it('lists every recording individually, by day, and lets a reviewer play one alone or several at once on their own clocks', () => {
     expect(page).toContain('groupClipsByDay(selectedClips, timeZone)');
     expect(page).toContain('aria-label={`Recordings from ${selectedImport.camera_label}`}');

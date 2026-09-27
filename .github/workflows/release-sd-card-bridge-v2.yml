@@ -24,9 +24,6 @@ jobs:
           cache-dependency-path: apps/sd-card-bridge-v2/package-lock.json
       - name: Install V2 dependencies
         run: npm ci
-      - name: Reuse the approved FCM desktop icon set
-        shell: pwsh
-        run: Copy-Item ../sd-card-bridge/src-tauri/icons src-tauri/icons -Recurse -Force
       - name: Prove the DHFS reader against synthetic cards
         run: cargo test --manifest-path crates/dhfs/Cargo.toml && cargo test --manifest-path crates/decoder/Cargo.toml
       - name: Build installer
@@ -97,4 +94,4 @@ jobs:
             replaces the assets here with the signed installer, its `SHA256SUMS`, `manifest.json` and the public `FCM-Desktop-Signing.cer`.
             Until then this asset is unsigned: Windows SmartScreen will warn (More info → Run anyway); verify the SHA-256 first.
 
-            Reading a Dahua card needs the app run as administrator. Do not use this prototype as the production V1 workstation.
+            Reading a Dahua card needs the app run as administrator. This is the production FCM Desktop workstation.
