@@ -47,13 +47,13 @@
 
 .cctv-console__layout { display: grid; gap: 14px; grid-template-columns: 300px minmax(420px, 1fr) minmax(320px, 380px); align-items: start; }
 
-/* Pop-out: the wall owns the window. Compact header, rail on the left, grid and transport fill the rest. */
+/* Pop-out: camera wall and entity review own the window; browsing/import controls stay in the main console. */
 .cctv-console.is-popout { display: flex; flex-direction: column; height: 100vh; padding: 10px 14px 12px; }
 .cctv-console.is-popout .cctv-console__header { align-items: center; margin-bottom: 8px; }
 .cctv-console.is-popout .cctv-console__header .page-title { font-size: 18px; }
 .cctv-console.is-popout .cctv-console__header .page-subtitle { font-size: 12px; margin-top: 2px; }
-.cctv-console.is-popout .cctv-console__layout { flex: 1; grid-template-columns: 280px minmax(0, 1fr); grid-template-rows: minmax(0, 1fr); min-height: 0; }
-.cctv-console.is-popout .cctv-console__cameras { max-height: none; height: 100%; }
+.cctv-console.is-popout .cctv-console__layout { flex: 1; grid-template-columns: minmax(0, 1fr) minmax(320px, 380px); grid-template-rows: minmax(0, 1fr); min-height: 0; }
+.cctv-console.is-popout .cctv-console__entities { height: 100%; max-height: none; }
 .cctv-console.is-popout .cctv-console__stage { display: flex; flex-direction: column; height: 100%; min-height: 0; }
 .cctv-console.is-popout .cctv-console__grid-wrap { display: grid; flex: 1; min-height: 0; }
 .cctv-console.is-popout .cctv-console__grid { grid-auto-rows: minmax(0, 1fr); height: 100%; min-height: 0; }
@@ -130,9 +130,11 @@
 /* Wall */
 .cctv-console__stage { display: grid; gap: 10px; min-width: 0; }
 .cctv-console__grid-wrap { background: #030a0f; border: 1px solid var(--cc-line); border-radius: 6px; padding: 6px; }
-.cctv-console__grid-wrap:fullscreen { padding: 0; border: 0; border-radius: 0; display: grid; place-items: stretch; }
-.cctv-console__grid-wrap:fullscreen .cctv-console__grid { height: 100%; }
-.cctv-console__grid-wrap:fullscreen .cctv-tile { aspect-ratio: auto; }
+.cctv-console__stage:fullscreen { background: var(--cc-bg); display: flex; flex-direction: column; gap: 8px; overflow: auto; padding: 8px; }
+.cctv-console__stage:fullscreen .cctv-console__grid-wrap { display: grid; flex: 1 1 auto; min-height: 0; padding: 0; }
+.cctv-console__stage:fullscreen .cctv-console__grid { grid-auto-rows: minmax(0, 1fr); height: 100%; min-height: 0; }
+.cctv-console__stage:fullscreen .cctv-tile { aspect-ratio: auto; height: 100%; min-height: 0; }
+.cctv-console__stage:fullscreen .cctv-console__snapshots { display: none; }
 .cctv-console__grid { display: grid; gap: 6px; }
 .cctv-tile { aspect-ratio: 16 / 9; background: #0a1319; border: 2px solid transparent; border-radius: 4px; color: #d6dde3; cursor: pointer; display: flex; flex-direction: column; min-width: 0; overflow: hidden; position: relative; }
 .cctv-tile.is-active { border-color: var(--cc-brand); }
@@ -294,12 +296,15 @@
 .cctv-entity__actions { display: flex; flex-wrap: wrap; gap: 6px; }
 
 @media (max-width: 1280px) {
-  .cctv-console__layout, .cctv-console.is-popout .cctv-console__layout { grid-template-columns: 260px minmax(0, 1fr); }
+  .cctv-console__layout { grid-template-columns: 260px minmax(0, 1fr); }
   .cctv-console__entities { grid-column: 1 / -1; max-height: none; }
+  .cctv-console.is-popout .cctv-console__layout { grid-template-columns: minmax(0, 1fr) minmax(300px, 340px); }
+  .cctv-console.is-popout .cctv-console__entities { grid-column: auto; }
   .cctv-console__inspection-panel { grid-template-columns: repeat(2, minmax(0, 1fr)); }
 }
 @media (max-width: 860px) {
   .cctv-console__layout, .cctv-console.is-popout .cctv-console__layout { grid-template-columns: minmax(0, 1fr); }
+  .cctv-console.is-popout .cctv-console__entities { grid-column: 1; }
   .cctv-console__cameras { max-height: 320px; }
   .cctv-console__layouts, .cctv-console__zoom, .cctv-console__inspection-controls, .cctv-console__evidence-controls { border-left: 0; margin-left: 0; padding-left: 0; }
   .cctv-console__inspection-panel { grid-template-columns: 1fr; }

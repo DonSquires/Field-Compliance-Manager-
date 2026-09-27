@@ -237,7 +237,7 @@ const CCTVConsolePage: React.FC = () => {
   const [evidenceBusy, setEvidenceBusy] = useState<string | null>(null);
   const [evidenceMessage, setEvidenceMessage] = useState<string | null>(null);
 
-  const gridRef = useRef<HTMLDivElement | null>(null);
+  const reviewPaneRef = useRef<HTMLElement | null>(null);
   const tileRefs = useRef<Record<string, CCTVPlayerTileHandle | null>>({});
   const urlCache = useRef<Map<string, { url: string; expiresAt: number }>>(new Map());
   const durationOverrides = useRef<Map<string, number>>(new Map());
@@ -741,7 +741,7 @@ const CCTVConsolePage: React.FC = () => {
         case 'frame': stepFrame(action.direction); break;
         case 'rate': setRate((current) => nextRate(current, action.direction)); break;
         case 'layout': setLayout(action.layout); break;
-        case 'fullscreen': void gridRef.current?.requestFullscreen?.(); break;
+        case 'fullscreen': void reviewPaneRef.current?.requestFullscreen?.(); break;
         case 'mute': setMuted((current) => !current); break;
         case 'bookmark': startBookmark(); break;
         case 'snapshot': void captureSnapshot(); break;
@@ -932,7 +932,7 @@ const CCTVConsolePage: React.FC = () => {
         <div className="cctv-console__header-actions">
           <button type="button" className="page-action" onClick={() => setShowKeys((current) => !current)} aria-expanded={showKeys}><Keyboard size={16} aria-hidden="true" /> Keys</button>
           {!popout ? <button type="button" className="page-action" onClick={openPopout} title="Open the wall in its own window for a second monitor"><ExternalLink size={16} aria-hidden="true" /> Pop out wall</button> : null}
-          <button type="button" className="page-action" onClick={() => void gridRef.current?.requestFullscreen?.()} title="Full-screen wall (f)"><Maximize2 size={16} aria-hidden="true" /> Full screen</button>
+          <button type="button" className="page-action" onClick={() => void reviewPaneRef.current?.requestFullscreen?.()} title="Full-screen video review (f)"><Maximize2 size={16} aria-hidden="true" /> Full screen</button>
           {!popout ? <button type="button" className="page-action" onClick={() => navigate('/admin/field-ops?area=cctv-import')}><Plus size={16} aria-hidden="true" /> Import footage</button> : null}
           {!popout ? <button type="button" className="page-action" onClick={() => navigate('/admin/field-ops?area=cctv-review')}>Job queue &amp; exports</button> : null}
         </div>
@@ -953,7 +953,7 @@ const CCTVConsolePage: React.FC = () => {
       ) : null}
 
       <div className="cctv-console__layout">
-        <aside className="cctv-console__cameras" aria-label="Cameras and recordings">
+        {!popout ? <aside className="cctv-console__cameras" aria-label="Cameras and recordings">
           <div className="cctv-console__aside-head"><strong>Cameras</strong><button type="button" className="cctv-console__icon-btn" onClick={() => void loadImports()} aria-label="Refresh cameras"><RefreshCw size={14} aria-hidden="true" /></button></div>
           {importsLoading ? <p className="cctv-console__muted"><Loader2 size={14} className="spin" aria-hidden="true" /> Loading…</p> : null}
           {!importsLoading && imports.length === 0 ? <p className="cctv-console__muted">No camera footage has been imported yet. Use “Import footage” to bring an SD card in.</p> : null}
@@ -1033,10 +1033,10 @@ const CCTVConsolePage: React.FC = () => {
               })}
             </section>
           ) : null}
-        </aside>
+        </aside> : null}
 
-        <main className="cctv-console__stage">
-          <div className="cctv-console__grid-wrap" ref={gridRef}>
+        <main className="cctv-console__stage" ref={reviewPaneRef} aria-label="Video review pane">
+          <div className="cctv-console__grid-wrap">
             <div className="cctv-console__grid" style={{ gridTemplateColumns: `repeat(${columns}, minmax(0, 1fr))` }}>
               {wallTiles.map((item, index) => {
                 const row = item ? importById.get(item.importId) ?? null : null;
@@ -1209,8 +1209,7 @@ const CCTVConsolePage: React.FC = () => {
           ) : null}
         </main>
 
-        {!popout ? (
-          <aside className="cctv-console__entities" aria-label="Entities seen">
+        <aside className="cctv-console__entities" aria-label="Entities seen">
             <div className="cctv-console__aside-head">
               <strong>Entities</strong>
               <span className="cctv-console__count">{pendingObservations.length} to review</span>
@@ -1419,8 +1418,7 @@ const CCTVConsolePage: React.FC = () => {
                 <Film size={13} aria-hidden="true" /> <button type="button" className="cctv-import-link" onClick={() => navigate(`/admin/field-ops?area=cctv-review`)}>Open this clip in the job queue</button> for exports and report receipts.
               </p>
             ) : null}
-          </aside>
-        ) : null}
+        </aside>
       </div>
     </div>
   );
