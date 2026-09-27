@@ -1896,7 +1896,7 @@ async function loadHistory(supabase, conversationId, limit = 8) {
         builder_job: md.pending_builder_job
       };
     }
-    if (md.tool === 'cancel_builder_job' && i === rows.length - 1 && md.outcome === 'proposed') {
+    if (md.tool === 'cancel_builder_job' && !rows.slice(i + 1).some((row)=>row.role === 'assistant') && md.outcome === 'proposed') {
       const proposal = md.pending_builder_cancellation;
       if (proposal && typeof proposal === 'object' &&
           typeof proposal.job_id === 'string' && typeof proposal.title === 'string' &&
