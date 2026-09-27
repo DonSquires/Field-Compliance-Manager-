@@ -22,7 +22,7 @@ const { execFileSync, spawn, spawnSync } = require('node:child_process');
 const { createBranchWorkspace, redactGitError } = require('./builder-branch-workspace');
 const { isProtectedPath, laneAllows, protectedReason, isMigrationPath, normalizeRepoPath } = require('./builder-path-policy');
 const { buildModelRunRequest, callModelGateway, persistModelArtifact, fetchModelHealth, selectProviders, providerRequest } = require('./supabase/functions/_shared/builder-model-adapter');
-const { collectRepositoryContext } = require('./supabase/functions/_shared/builder-repository-context');
+const { collectRepositoryContext, fitRepositoryContext } = require('./supabase/functions/_shared/builder-repository-context');
 
 const PROMPT_VERSION = 'agentic-engineer-v2';
 const DEFAULT_LIMITS = Object.freeze({
@@ -211,6 +211,24 @@ function taskPacket(input) {
       ? 'Skip read_canon. Call read_notes once, outline the main file named in the reading map, then edit.'
       : 'Call read_canon and read_notes once, then explore the code paths named in the task with search/read_file before editing. Finish only after your own test run passes or you can explain exactly why it cannot run here.',
   }, null, 0);
+}
+
+// The opening packet must fit the smallest local window on turn 1, when there is no transcript to compact:
+// the unfitted build map alone (2000 paths, every schema name) blew past the 40k-token VPS window and every
+// in-house provider was skipped on a 413 (job c00059ca, 2026-09-27). Fit the build map to the task, cap the
+// live context, and shrink until system prompt plus packet fits the laptop's 24k window as well.
+function buildOpeningPacket({ job, lane, specification, uxPlan, rawRepositoryContext, liveContext, notes, previousFailure, hints, previousAttempt, seeded, budgetChars = Number(process.env.BOB_BUILDER_PACKET_MAX_CHARS || 60_000) }) {
+  const taskText = `${job.title ?? ''} ${job.task_description ?? ''} ${JSON.stringify(specification ?? '')}`;
+  const liveText = liveContext ? JSON.stringify(liveContext) : '';
+  const boundedLiveContext = !liveContext ? null : liveText.length <= 12_000 ? liveContext : { truncated_live_context: `${liveText.slice(0, 12_000)}…`, note: 'live context trimmed to fit the model window' };
+  let repositoryContext = null;
+  let packet = '';
+  for (const budget of [40_000, 20_000, 10_000, 4_000]) {
+    repositoryContext = rawRepositoryContext ? fitRepositoryContext(JSON.parse(JSON.stringify(rawRepositoryContext)), taskText, budget) : null;
+    packet = taskPacket({ job, lane, specification, uxPlan, repositoryContext, liveContext: boundedLiveContext, notes, previousFailure, hints, previousAttempt, seeded });
+    if (packet.length <= budgetChars) break;
+  }
+  return { packet, repositoryContext, liveContext: boundedLiveContext };
 }
 
 // What an attempt that ran out of turns learned, in a shape the next attempt can start from.
@@ -688,13 +706,14 @@ async function runAgenticEngineer({
     }
   }
   const notes = supabase ? (await tools.read_notes({ limit: 10 })).notes ?? [] : [];
-  const repositoryContext = (() => {
+  const rawRepositoryContext = (() => {
     try { return collectRepositoryContext({ sourceDir: workspacePath, targetSha: job.target_sha }); } catch { return null; }
   })();
+  const opening = buildOpeningPacket({ job, lane, specification, uxPlan, rawRepositoryContext, liveContext, notes, previousFailure, hints, previousAttempt, seeded });
 
   const messages = [
     { role: 'system', content: systemPrompt({ lane, limits }) },
-    { role: 'user', content: taskPacket({ job, lane, specification, uxPlan, repositoryContext, liveContext, notes, previousFailure, hints, previousAttempt, seeded }) },
+    { role: 'user', content: opening.packet },
   ];
   const builderMode = lane === 'frontend' ? 'frontend_engineer' : 'backend_engineer';
   const baseRequest = buildModelRunRequest({
@@ -897,4 +916,4 @@ async function runAgenticEngineer({
   };
 }
 
-module.exports = { DEFAULT_LIMITS, PROMPT_VERSION, RUN_ALLOWLIST, buildProposal, classifyNoChange, compactMessages, composeRunNote, createTools, outlineLines, parseToolCall, readingMap, runAgenticEngineer, systemPrompt, taskPacket };
+module.exports = { DEFAULT_LIMITS, PROMPT_VERSION, RUN_ALLOWLIST, buildOpeningPacket, buildProposal, classifyNoChange, compactMessages, composeRunNote, createTools, outlineLines, parseToolCall, readingMap, runAgenticEngineer, systemPrompt, taskPacket };

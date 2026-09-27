@@ -696,3 +696,23 @@ test('every run leaves a factual note in bob_self_memory (builder_note) and the 
   assert.match(inserted[0].memory_text, /Lessons: check the file exists before planning/);
   fs.rmSync(repo.root, { recursive: true, force: true });
 });
+
+test('the opening packet is fitted to a local model window: the build map keeps what the task names and the whole packet stays under budget', () => {
+  const { buildOpeningPacket, systemPrompt, DEFAULT_LIMITS } = require('../builder-agentic-engineer');
+  const tracked = Array.from({ length: 2000 }, (_, i) => `apps/web/src/pages/Page${i}.tsx`).concat(['apps/web/src/components/BobPanel.tsx']);
+  const rawRepositoryContext = {
+    repository: 'r', ref: 'main', commit_sha: 'a'.repeat(40), architecture_summary: 'x'.repeat(12000), relevant_files: [], known_capabilities: [],
+    build_map: { target_sha: 'a'.repeat(40), file_count: 2001, tracked_files: tracked, directory_counts: {}, packages: [], compose: [], supabase_edge_functions: [],
+      schema: { available: true, tables: Array.from({ length: 1000 }, (_, i) => `table_${i}`).concat(['bob_conversations']), views: [], functions: [] }, recent_commits: [] }
+  };
+  const job = { id: 'j', title: 'Tappable options in BobPanel', task_description: 'Render metadata.options in apps/web/src/components/BobPanel.tsx; history is in bob_conversations.', target_sha: 'a'.repeat(40) };
+  const liveContext = { big: 'y'.repeat(50_000) };
+  const opening = buildOpeningPacket({ job, lane: 'frontend', specification: { product_brief: { problem: 'p' } }, uxPlan: null, rawRepositoryContext, liveContext, notes: [], previousFailure: null, hints: null, previousAttempt: null, seeded: null });
+  assert.ok(opening.packet.length <= 60_000, `packet ${opening.packet.length} chars`);
+  assert.equal(opening.repositoryContext.build_map.tracked_files[0], 'apps/web/src/components/BobPanel.tsx');
+  assert.equal(opening.repositoryContext.build_map.schema.tables[0], 'bob_conversations');
+  assert.ok(opening.liveContext.truncated_live_context, 'oversized live context is trimmed');
+  // System prompt + packet fit the laptop window (24576 tokens at 4 chars/token, 85% usable) and the VPS window.
+  const total = systemPrompt({ lane: 'frontend', limits: DEFAULT_LIMITS }).length + opening.packet.length;
+  assert.ok(total / 4 <= 24576 * 0.85, `system+packet ${total} chars`);
+});

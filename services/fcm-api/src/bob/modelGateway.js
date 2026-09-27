@@ -17,7 +17,8 @@ const DEFAULT_TIMEOUT_MS = 120000;
 const HEALTH_OK_TTL_MS = 30000;
 const HEALTH_FAIL_TTL_MS = 60000;
 const QUOTA_FAIL_TTL_MS = 10 * 60000;
-const HEALTH_PROBE_TIMEOUT_MS = 1500;
+// A laptop pulling or loading a model answers /models late; a short probe called it unreachable (2026-09-27).
+const HEALTH_PROBE_TIMEOUT_MS = Math.max(1500, Number(process.env.BOB_MODEL_PROBE_TIMEOUT_MS || 8000));
 
 function trimSlash(value) {
   return String(value || '').replace(/\/+$/, '');
