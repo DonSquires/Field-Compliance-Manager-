@@ -454,6 +454,36 @@ test('a code request answered with a procedure and no repository lookup is block
   assert.equal(runDeterministicChecks(procedure, { message: 'fix scripts/x.mjs crash', tools: [{ tool: 'query_records' }] }).some((i) => i.code === 'code_answer_without_evidence'), false);
 });
 
+test('a bug report that names code identifiers is a code request, and a prose promise of engineering work is blocked (live 2026-09-27: the 7B planner narrated "I will update the loadHistory logic" and opened nothing)', async () => {
+  const { isCodeRequest } = require('../services/fcm-api/src/bob/verify');
+  const report = "Bob, the confirmation does not work: persist() writes the user row and the assistant row with the identical created_at, so loadHistory can see the USER row as newest. Fix loadHistory so the proposal counts when it is the newest ASSISTANT row, and add a test. Go ahead.";
+  assert.equal(isCodeRequest(report), true, 'loadHistory / created_at / persist() are code identifiers');
+  assert.equal(isCodeRequest('Fix the failing roster export test please'), true);
+  assert.equal(isCodeRequest('please look at PR #10 again'), true);
+  for (const plain of ['who is rostered at Nelson tonight?', 'help me reply to the council about the camping bylaw', 'Please draft a job description for a Site Supervisor', 'What does the parking module do?', 'How many vehicles were scanned at Wakefield Quay yesterday?']) {
+    assert.equal(isCodeRequest(plain), false, plain);
+  }
+  // Identifiers are case-sensitive: an ordinary capitalised word is not camelCase.
+  assert.equal(isCodeRequest('Tahunanui Beach noise complaints'), false);
+
+  const tools = [{ tool: 'repo_search' }, { tool: 'create_builder_job' }];
+  const narration = { action: 'answer', reply: 'I have identified the issue. To fix this, I will update the loadHistory logic to identify the newest assistant proposal. I will also add a test case. Once the fix is implemented, I will propose the changes for review.' };
+  const blocked = runDeterministicChecks(narration, { message: report, tools, taskState: { steps_taken: [{ tool: 'repo_search', outcome: 'ok' }] } });
+  assert.ok(blocked.some((i) => i.code === 'promised_work' && i.severity === 'block'), JSON.stringify(blocked));
+  // Honest inability, a real job, a non-admiral user, or a non-code drafting promise are not blocked by this rule.
+  assert.equal(runDeterministicChecks({ action: 'answer', reply: 'I could not open a job: the Builder is paused. Nothing was changed.' }, { message: report, tools }).some((i) => i.code === 'promised_work'), false);
+  assert.equal(runDeterministicChecks({ action: 'use_tool', tool: 'create_builder_job', args: { title: 't', task_description: 'd' } }, { message: report, tools }).some((i) => i.code === 'promised_work'), false);
+  assert.equal(runDeterministicChecks(narration, { message: report, tools: [{ tool: 'query_records' }] }).some((i) => i.code === 'promised_work'), false);
+  assert.equal(runDeterministicChecks({ action: 'answer', reply: 'I will write the letter using the council template.' }, { message: 'help me reply to the council', tools }).some((i) => i.code === 'promised_work'), false);
+  // Routing: the identifier-only bug report goes to the strong tier like a path-naming one.
+  const { createModelGateway } = require('../services/fcm-api/src/bob/modelGateway');
+  const real = createModelGateway({ env: { OPENAI_API_KEY: 'k', GPU_WORKSTATION_URL: 'http://laptop:11434/v1', GPU_WORKSTATION_MODEL: 'qwen2.5-coder:7b' } });
+  const chains = [];
+  const gateway = { chainAfter: real.chainAfter, providerKind: real.providerKind, fastChain: real.fastChain, async chatJson(role, messages, options = {}) { chains.push(options.chain ?? null); return { content: JSON.stringify({ action: 'answer', reply: 'ok' }), provider: 'openai', model: 'm' }; } };
+  await planTurn({ message: report, tools: [...TOOLS, ...tools], verify: false }, { gateway, env: {} });
+  assert.deepEqual(chains, [['openai']]);
+});
+
 test('owner-level code requests go straight to the strong planner tier; ordinary requests stay in-house first', async () => {
   const { createModelGateway } = require('../services/fcm-api/src/bob/modelGateway');
   const real = createModelGateway({ env: { OPENAI_API_KEY: 'k', GPU_WORKSTATION_URL: 'http://laptop:11434/v1', GPU_WORKSTATION_MODEL: 'qwen2.5-coder:7b' } });

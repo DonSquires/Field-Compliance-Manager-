@@ -13,7 +13,7 @@ import fs from 'node:fs';
 
 const SUPABASE_URL = process.env.SUPABASE_URL;
 const PROJECT_REF = new URL(SUPABASE_URL).hostname.split('.')[0];
-const PAT = process.env.FIELD_COMPLIANCE_CODESPACE;
+const PAT = process.env.SUPABASE_ACCESS_TOKEN ?? process.env.FIELD_COMPLIANCE_CODESPACE;
 const EMAIL = process.env.GRANDMASTER_TEST_EMAIL;
 const PASSWORD = process.env.GRANDMASTER_TEST_PASSWORD;
 const CACHE = '/tmp/.fcm-builder-e2e-session.json';

@@ -16,10 +16,23 @@ const FALSE_COMPLETION_RE = /\b(I have|I've|I just|has been|have been|was|were) 
 const BANNED_FILLER_RE = /\b(certainly|of course|happy to help|great question|absolutely|as an ai( language model)?|i am programmed to|leverage|streamline|robust)\b/gi;
 const BLANKET_AFFIRMATIVE_RE = /^\s*(yes|yep|yeah|yes please|ok|okay|sure|correct|confirmed|agreed|go ahead|go for it|proceed|do it|all good(?: with me)?|crack on|sounds good|yes to all|yes to everything|all of (them|the above)|use your (defaults|best guess(es)?)|go with your (defaults|best guess(es)?)|you decide|whatever you recommend|as you suggest(ed)?)[\s.!]*$/i;
 const DRAFT_REQUEST_RE = /\b(draft|write|create|prepare|produce|generate|put together)\b[\s\S]{0,80}\b(job description|position description|advert(isement)?|job ad|seek ad|agreement|contract|letter|policy|sop|procedure|report|checklist|proposal|email|memo|site instruction|brief|synopsis|summary)\b/i;
-// A request about the code: names a source path, or asks to fix/debug a crash, bug, test, function…
-const CODE_REQUEST_RE = /(\b[\w./-]+\.(?:m?js|c?js|tsx?|sql|py|ps1|json|ya?ml)\b|\b(?:fix|debug|patch|repair|investigate)\b[\s\S]{0,60}\b(?:crash|bug|error|exception|typeerror|failing|test|function|script|component|migration|endpoint|edge function)\b)/i;
+// A request about the code: names a source path, a PR, or asks to fix/change a crash, bug, test, function…
+const CODE_REQUEST_RE = /(\b[\w./-]+\.(?:m?js|c?js|tsx?|sql|py|ps1|json|ya?ml)\b|\b(?:PR|pull request) #?\d+|\b(?:fix|debug|patch|repair|investigate|update|change|refactor|implement|rewrite)\b[\s\S]{0,200}\b(?:crash|bug|error|exception|typeerror|failing|test|function|script|component|migration|endpoint|edge function|tool|handler|regex|check|query|table|column|policy|rpc)\b)/i;
+// …or names a code identifier: camelCase (loadHistory), snake_case (created_at), a call (persist()).
+// Case-sensitive on purpose; under /i the camelCase branch matched every word. Live 2026-09-27: a bug
+// report naming loadHistory, persist() and created_at (no file path) went to the 7B planner, which narrated.
+const CODE_IDENTIFIER_RE = /(\b[a-z]+[A-Z][A-Za-z0-9]*\b|\b[a-z][a-z0-9]*_[a-z0-9_]+\b|\b\w+\(\))/;
+function isCodeRequest(message) {
+  const text = String(message || '');
+  return CODE_REQUEST_RE.test(text) || CODE_IDENTIFIER_RE.test(text);
+}
 // A reply that only narrates a procedure ("I will…", "we should…") and takes no step, or ends by asking for approval of the approach.
 const PROCEDURE_ONLY_RE = /\b(I will|I'll|I would|I am going to|I'm going to|first,? I|we should|we need to|you should|the fix is to|to improve|to fix (?:it|this),? we)\b/i;
+// A promise of future engineering work in prose. Bob never promises code; he opens the job or says
+// what he could not do (live 2026-09-27: "I will update the loadHistory logic… Once the fix is
+// implemented, I will propose the changes" — no job was opened, the 7B critic passed it).
+const PROMISED_WORK_RE = /\b(?:I(?:'ll| will| am going to|'m going to)\s+(?:now\s+)?(?:update|fix|change|add|implement|create|open|make|propose|write|refactor|patch|correct|adjust|modify|wire|remove)\b|once (?:the|this) (?:fix|change|patch) is (?:implemented|made|in place)|I will (?:then )?propose the changes)/i;
+const CODE_NOUN_RE = /\b(?:code|logic|function|test(?: case)?s?|bug|patch|pull request|PR|migration|handler|regex|component|edge function|repository|refactor|implementation)\b/i;
 
 function countQuestionLines(text) {
   return String(text || '').split('\n').filter((line) => /^\s*(?:\d+[.)]|[-*•])\s+.*\?\s*$/.test(line)).length;
@@ -109,8 +122,12 @@ function runDeterministicChecks(decision, input) {
     // exactly this for a script that does not exist (proving-series round 2, 2026-09-26).
     const hasRepoTool = Array.isArray(input.tools) && input.tools.some((t) => t && t.tool === 'repo_search');
     const stepsTaken = input.taskState && Array.isArray(input.taskState.steps_taken) ? input.taskState.steps_taken : [];
-    if (decision.action === 'answer' && !decision.tool && hasRepoTool && !stepsTaken.length && CODE_REQUEST_RE.test(message) && PROCEDURE_ONLY_RE.test(reply)) {
+    if (decision.action === 'answer' && !decision.tool && hasRepoTool && !stepsTaken.length && isCodeRequest(message) && PROCEDURE_ONLY_RE.test(reply)) {
       issues.push({ code: 'code_answer_without_evidence', severity: 'block', note: 'This is a request about the code and you have not looked at the repository this turn. Do not describe a procedure you would follow. Either select repo_search now (search for the named file/symbol; a not_found result IS the answer and must be stated plainly), or if you already know the file does not exist, say so directly.' });
+    }
+    const canOpenJob = Array.isArray(input.tools) && input.tools.some((t) => t && t.tool === 'create_builder_job');
+    if (decision.action === 'answer' && !decision.tool && canOpenJob && PROMISED_WORK_RE.test(reply) && (isCodeRequest(message) || CODE_NOUN_RE.test(reply))) {
+      issues.push({ code: 'promised_work', severity: 'block', note: 'You promised engineering work in prose ("I will update/fix/add…"). Bob never promises future code changes: if the owner asked for a change ("go ahead", "fix it", "add a test"), select create_builder_job NOW with the brief; if you cannot, say plainly what you could not do and why. Do not narrate what you would do.' });
     }
     const filler = reply.match(BANNED_FILLER_RE) || [];
     if (filler.length) {
@@ -244,6 +261,7 @@ function scrubReply(reply) {
 module.exports = {
   BLANKET_AFFIRMATIVE_RE,
   CODE_REQUEST_RE,
+  isCodeRequest,
   DRAFT_REQUEST_RE,
   autoRepairArgs,
   buildCriticMessages,

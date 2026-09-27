@@ -2,7 +2,7 @@
 
 const { buildPlannerMessages } = require('./planPrompt');
 const { normalizeDecision, parsePlanContent, salvageReplyFromTruncatedJson } = require('./planParse');
-const { autoRepairArgs, runDeterministicChecks, scrubReply, verifyDecision, CODE_REQUEST_RE, DRAFT_REQUEST_RE } = require('./verify');
+const { autoRepairArgs, runDeterministicChecks, scrubReply, verifyDecision, isCodeRequest, DRAFT_REQUEST_RE } = require('./verify');
 
 const DELEGABLE_TOOL_RE = /^(query_records|client_site_compare|scv_lookup|schema_inspect|retrieve_knowledge|understand_documents|web_research|sql_read|repo_search|query_atlas|read_issues|resolve_address|resolve_geofence|self_audit|assess_system)$/;
 
@@ -87,7 +87,7 @@ async function planTurn(body, { gateway, now = Date.now, logger = console, env =
   // Owner-level code work (repo_search / create_builder_job in the catalogue) needs tool discipline the
   // 7B in-house planner does not have: it restated the request or narrated a procedure on every try
   // (proving-series round 2/3, 2026-09-26). "In-house unless stuck" — for this class we are stuck.
-  const codeRequest = CODE_REQUEST_RE.test(input.message) && input.tools.some((t) => t.tool === 'repo_search' || t.tool === 'create_builder_job') && env.BOB_PLAN_CODE_REQUESTS_IN_HOUSE !== 'true';
+  const codeRequest = isCodeRequest(input.message) && input.tools.some((t) => t.tool === 'repo_search' || t.tool === 'create_builder_job') && env.BOB_PLAN_CODE_REQUESTS_IN_HOUSE !== 'true';
   const fastChain = ((input.deadlineMs && input.deadlineMs < FAST_TURN_MS) || codeRequest) && typeof gateway.fastChain === 'function' ? gateway.fastChain('planner') : null;
 
   let attempt;
