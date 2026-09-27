@@ -22,6 +22,11 @@ STATE_DIR="${BOB_RELEASE_STATE_DIR:-/var/lib/bob/release-lane}"
 REPO_DIR="${BOB_RELEASE_REPO_DIR:-/root/field-compliance-manager}"
 RELEASES_DIR="${BOB_RELEASE_RELEASES_DIR:-/srv/fcm/releases}"
 MODE="${BOB_RELEASE_MODE:-dry-run}"
+# Under systemd root has no HOME, so /root/.gitconfig's safe.directory is never read, and the
+# checkout is owned by another user: every git call failed with "dubious ownership" (2026-09-27).
+export GIT_CONFIG_COUNT=2 \
+  GIT_CONFIG_KEY_0=safe.directory GIT_CONFIG_VALUE_0="$REPO_DIR" \
+  GIT_CONFIG_KEY_1=safe.directory GIT_CONFIG_VALUE_1="$RELEASES_DIR/*"
 
 load_env() {
   local file="$1"
@@ -121,6 +126,11 @@ if [[ -n "$NEW_MIGRATIONS" ]]; then
   : "${SUPABASE_ACCESS_TOKEN:?SUPABASE_ACCESS_TOKEN is required for migrations}"; : "${SUPABASE_PROJECT_REF:?}"
   for file in $NEW_MIGRATIONS; do
     version="$(basename "$file" | cut -d_ -f1)"
+    # Already in the live ledger (applied by hand or by another agent): re-running it is the risk, not the fix.
+    recorded="$(curl -s -X POST "https://api.supabase.com/v1/projects/${SUPABASE_PROJECT_REF}/database/query" \
+      -H "Authorization: Bearer ${SUPABASE_ACCESS_TOKEN}" -H 'Content-Type: application/json' \
+      --data-binary "{\"query\":\"select version from supabase_migrations.schema_migrations where version = '${version}'\"}" | tr -d ' \n')"
+    if [[ "$recorded" == *"\"version\":\"${version}\""* ]]; then RESULTS+=("migration $version already applied, skipped"); continue; fi
     if grep -qiE '^\s*(drop\s+(table|schema|database|column)|truncate\s+table|alter\s+table[^;]*\bdrop\b|delete\s+from\s+\S+\s*;)' "$file"; then
       fail_note "migration $file contains destructive SQL; not applied automatically"; OK=false; continue
     fi

@@ -18,4 +18,20 @@ test('release lane fetches with gc off and logs the real, token-free fetch error
   assert.match(fetchLine, /-c gc\.auto=0/);
   assert.doesNotMatch(source, /log "fetch failed: mirror unreachable"/);
   assert.match(source, /fetch failed: \$\(printf '%s' "\$fetch_err" \| sed -e "s\/\$\{GITEA_TOKEN\}\/<token>\/g"/);
+  // systemd gives root no HOME, so the global safe.directory is invisible; the script must carry its own.
+  assert.match(source, /GIT_CONFIG_KEY_0=safe\.directory GIT_CONFIG_VALUE_0="\$REPO_DIR"/);
+  assert.match(source, /GIT_CONFIG_KEY_1=safe\.directory GIT_CONFIG_VALUE_1="\$RELEASES_DIR\/\*"/);
+});
+
+test('release lane skips migrations already in the live ledger, and a hand deploy moves its live pointer', () => {
+  const lane = fs.readFileSync(SCRIPT, 'utf8');
+  const ledgerCheck = lane.indexOf("select version from supabase_migrations.schema_migrations where version = '${version}'");
+  const destructiveCheck = lane.indexOf('contains destructive SQL');
+  assert.ok(ledgerCheck > 0, 'the ledger is consulted per migration');
+  assert.ok(ledgerCheck < destructiveCheck, 'an applied migration is skipped before any content check runs on it');
+  assert.match(lane, /already applied, skipped/);
+
+  const deploy = fs.readFileSync(path.resolve(__dirname, '../scripts/bob-vps-deploy.sh'), 'utf8');
+  assert.equal(spawnSync('bash', ['-n', path.resolve(__dirname, '../scripts/bob-vps-deploy.sh')], { encoding: 'utf8' }).status, 0);
+  assert.match(deploy, /> \/var\/lib\/bob\/release-lane\/deployed_sha/);
 });
