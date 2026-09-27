@@ -8466,12 +8466,12 @@ serve(async (req)=>{
             });
             const runNote = started.ok
               ? (bjAutopilot
-                ? 'I am on it: I will work the change through in an isolated copy of the code, run the tests, have an independent reviewer and a security scan check it, and open a pull request for you to review. That takes a while (usually 10–20 minutes). I will tell you here when it is ready or if I get stuck.'
+                ? 'I am on it: I will work the change through in an isolated copy of the code, run the tests, have an independent reviewer and a security scan check it, and open a pull request. That takes a while (usually 10–20 minutes). I will tell you here when it is ready or if I get stuck.'
                 : 'The Builder is working now — research → implementation in an isolated worktree → tests → independent code and security review — at full reasoning effort, so this takes minutes, not seconds.')
               : `The job is created; the runner did not start automatically (${[started.data?.error ?? started.status, started.data?.detail].filter(Boolean).map(String).join(': ').slice(0, 200)}), so start it from the Builder control room.`;
             return {
               reply: bjAutopilot
-                ? `Started **${bjTitle}** (pinned to commit \`${String(bjJob.target_sha ?? '').slice(0, 10)}\`). ${runNote} Nothing changes in the live app until a person merges that pull request.`
+                ? `Started **${bjTitle}** (pinned to commit \`${String(bjJob.target_sha ?? '').slice(0, 10)}\`). ${runNote} If every check passes and nothing evidential is involved, I merge it myself and the release lane puts it live; otherwise it waits as a draft pull request for a person. My report here will say which.`
                 : `Builder job **${bjTitle}** is open in the GitHub repository at commit \`${String(bjJob.target_sha ?? '').slice(0, 10)}\`. ${runNote} When it is ready you will get a **DRAFT pull request** to review — I will not merge or deploy it. Track it under Platform & Settings → Builder.`,
               meta: {
                 tool: 'create_builder_job',
