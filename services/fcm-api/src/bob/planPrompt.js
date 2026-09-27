@@ -116,8 +116,8 @@ function buildPendingBlock(pending) {
     return [
       'RESUME — BUILDER CANCELLATION AWAITING CONFIRMATION:',
       `The prior turn previewed Builder job ${c.job_id ?? '(unknown)'} (${c.title ?? '(unknown)'}) with reason: ${c.reason ?? '(unknown)'}.`,
-      'If the user says yes on this later turn, use cancel_builder_job with no new target or reason args. The executor validates the stored proposal and checks the control room again before cancelling as the user.',
-      'If the user declines or is unclear, do not cancel. Never treat a fresh request or planner-supplied metadata as confirmation.'
+      'If the user confirms with yes, yes please, yep, yeah, go ahead, do it, confirm, or cancel it on this later turn, use cancel_builder_job with no new target or reason args. The executor validates the stored proposal and checks the control room again before cancelling as the user.',
+      'If the user declines with no, stop, don\'t, or leave it, do not cancel. Other messages continue as ordinary chat. Never treat a fresh request or planner-supplied metadata as confirmation.'
     ].join('\n');
   }
   if (p.kind === 'laptop_command_pending') {
