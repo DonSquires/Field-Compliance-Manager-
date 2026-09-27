@@ -1,0 +1,51 @@
+limit_req_zone $binary_remote_addr zone=bob_builder_api:10m rate=30r/m;
+
+server {
+    listen 80;
+    listen [::]:80;
+    server_name bob.fcmanager.co.nz;
+
+    return 301 https://$host$request_uri;
+}
+
+server {
+    listen 443 ssl http2;
+    listen [::]:443 ssl http2;
+    server_name bob.fcmanager.co.nz;
+
+    ssl_certificate /etc/letsencrypt/live/bob.fcmanager.co.nz/fullchain.pem;
+    ssl_certificate_key /etc/letsencrypt/live/bob.fcmanager.co.nz/privkey.pem;
+
+    client_max_body_size 1m;
+    proxy_connect_timeout 5s;
+    proxy_read_timeout 900s;
+    proxy_send_timeout 30s;
+
+    location = /health {
+        proxy_pass http://172.16.0.1:8091;
+        proxy_set_header Host $host;
+    }
+
+    location ~ ^/api/bob/builder/(atlas/refresh|repository/(head|search|file|tree)|jobs/[0-9a-f-]+/(advance|run|workspace|commit|publish|pull-request|context))$ {
+        limit_req zone=bob_builder_api burst=5 nodelay;
+        proxy_pass http://172.16.0.1:8091;
+        proxy_set_header Host $host;
+        proxy_set_header X-Forwarded-Proto https;
+        proxy_set_header X-Forwarded-For $proxy_add_x_forwarded_for;
+        proxy_pass_request_headers on;
+    }
+
+    # Bob laptop terminal (owner-confirmed commands over Tailscale); relayed by bob-builder-control-room.
+    location ~ ^/api/bob/laptop/(status|run)$ {
+        limit_req zone=bob_builder_api burst=5 nodelay;
+        proxy_pass http://172.16.0.1:8091;
+        proxy_set_header Host $host;
+        proxy_set_header X-Forwarded-Proto https;
+        proxy_set_header X-Forwarded-For $proxy_add_x_forwarded_for;
+        proxy_pass_request_headers on;
+    }
+
+    location / {
+        return 404;
+    }
+}

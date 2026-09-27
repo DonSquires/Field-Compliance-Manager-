@@ -39,4 +39,25 @@ test('release lane skips migrations already in the live ledger, and a hand deplo
   assert.match(lane, /deferred \$\{HEAD_SHA:0:8\}: a Bob model run is in flight/);
   // The gates the worker image carries rebuild it when they change.
   assert.match(lane, /builder-data-path-gate\\\.js\|builder-ts-delta-gate\\\.js/);
+  assert.match(lane, /has '\^deploy\/bob-vps\/nginx\/' && TARGETS\+=\(nginx\)/);
+  assert.match(lane, /nginx -t/);
+});
+
+test('every control-plane path the edge functions relay is allowed through the public nginx site', () => {
+  const site = fs.readFileSync(path.resolve(__dirname, '../deploy/bob-vps/nginx/bob.fcmanager.co.nz'), 'utf8');
+  const allow = [...site.matchAll(/location ~ (\^[^\s{]+) \{/g)].map((m) => new RegExp(m[1]));
+  assert.ok(allow.length >= 2, 'allowlist locations present');
+  const fnDir = path.resolve(__dirname, '../supabase/functions');
+  const relayed = new Set();
+  for (const name of fs.readdirSync(fnDir)) {
+    const file = path.join(fnDir, name, 'index.ts');
+    if (!fs.existsSync(file)) continue;
+    const src = fs.readFileSync(file, 'utf8');
+    for (const m of src.matchAll(/relay\((?:'|`)(\/api\/bob\/[^'`?]+)/g)) {
+      // Template parts become a representative concrete path.
+      relayed.add(m[1].replace(/\$\{encodeURIComponent\(jobId\)\}/g, '0f1e2d3c-0000-4000-8000-000000000000').replace(/\$\{action\}/g, 'advance'));
+    }
+  }
+  assert.ok(relayed.has('/api/bob/laptop/run'), 'laptop run relay found');
+  for (const p of relayed) assert.ok(allow.some((re) => re.test(p)), `${p} is not allowed by deploy/bob-vps/nginx/bob.fcmanager.co.nz (it would be an HTTP 404 in Bob's chat)`);
 });

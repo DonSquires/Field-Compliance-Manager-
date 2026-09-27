@@ -90,6 +90,7 @@ TARGETS=()
 has '^(bob-control-plane-server\.js|builder-[a-z-]+\.js|bob-laptop-shell\.js|supabase-workflow-client\.js|package(-lock)?\.json|Dockerfile|deploy/bob-control-plane/|supabase/functions/_shared/builder-)' && TARGETS+=(control-plane)
 has '^services/fcm-api/' && TARGETS+=(fcm-api)
 has '^(Dockerfile\.worker|frontend-worker\.js|backend-worker\.js|security-worker\.js|worker-executor\.js|builder-verification-outcome\.js|builder-path-policy\.js|builder-data-path-gate\.js|builder-ts-delta-gate\.js|assessment-manifest\.js|apps/web/package(-lock)?\.json)' && TARGETS+=(worker-image)
+has '^deploy/bob-vps/nginx/' && TARGETS+=(nginx)
 WEB_ONLY_NOTE=""; has '^apps/web/' && WEB_ONLY_NOTE="apps/web changed: Vercel deploys it from main on its own"
 
 PLAN="$(node -e '
@@ -195,6 +196,19 @@ for target in "${TARGETS[@]:-}"; do
         docker run -d --restart unless-stopped --name fcm-bob-worker-keeper --network none --memory 64m --cpus 0.05 --read-only --entrypoint sleep fcm/bob-worker:current infinity >/dev/null || fail_note "worker image keeper could not be started"
         RESULTS+=("worker image rebuilt at $SHA8")
       else OK=false; fail_note "worker image build failed"; fi ;;
+    nginx)
+      # The public allowlist in front of the control plane: a relay path missing here is an HTTP 404
+      # in Bob's chat (laptop terminal, 2026-09-27). Installed only when nginx accepts the whole config.
+      nginx_ok=true
+      for site in deploy/bob-vps/nginx/*; do
+        [[ -f "$site" ]] || continue
+        install -m 644 -b -S .lane-previous "$site" "/etc/nginx/sites-enabled/$(basename "$site")" || nginx_ok=false
+      done
+      if $nginx_ok && nginx -t >/dev/null 2>&1 && systemctl reload nginx; then RESULTS+=("nginx sites installed at $SHA8")
+      else
+        for site in deploy/bob-vps/nginx/*; do b="/etc/nginx/sites-enabled/$(basename "$site")"; [[ -f "$b.lane-previous" ]] && mv -f "$b.lane-previous" "$b"; done
+        systemctl reload nginx || true; OK=false; fail_note "nginx rejected the new site config; previous restored"
+      fi ;;
   esac
 done
 
