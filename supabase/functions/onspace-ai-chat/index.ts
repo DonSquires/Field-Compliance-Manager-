@@ -7189,29 +7189,23 @@ serve(async (req)=>{
       }
       return found;
     };
-    // Is a drafted Builder brief about what the person said? Significant-word overlap plus every repository
-    // path they named, judged against their recent messages (the request often precedes a nudge such as
-    // "compose the job now"). Short requests (under six significant words) cannot be judged and pass.
+    // Is a drafted Builder brief about what the person said? The reference is the most substantial of their
+    // recent messages (the request; a nudge such as "compose the job now" is never it), and the brief must
+    // share its significant words and every repository path it names. Under six significant words in every
+    // message there is nothing to judge, so it passes.
     const builderBriefGrounding = (userTexts: string | string[], brief: string) => {
       const STOP = new Set(['this', 'that', 'with', 'from', 'into', 'when', 'then', 'than', 'have', 'will', 'would', 'should', 'could', 'about', 'which', 'there', 'their', 'they', 'them', 'these', 'those', 'what', 'where', 'your', 'yours', 'also', 'only', 'just', 'like', 'make', 'made', 'need', 'needs', 'want', 'please', 'every', 'under', 'over', 'after', 'before', 'while', 'some', 'more', 'most', 'such', 'very', 'been', 'being', 'does', 'done', 'because', 'each', 'other', 'same', 'still', 'here', 'never', 'again', 'exactly', 'today', 'thing', 'things']);
       const words = (text: string) => new Set((String(text ?? '').toLowerCase().match(/[a-z][a-z0-9_./-]{3,}/g) ?? []).map((w) => w.replace(/[.,;:]+$/, '')));
       const paths = (text: string) => [...new Set(String(text ?? '').match(/\b(?:apps|supabase|services|scripts|test|docs|deploy)\/[\w./-]+/g) ?? [])];
       const briefWords = words(brief);
-      const candidates = (Array.isArray(userTexts) ? userTexts : [userTexts]).map((t) => String(t ?? '').trim()).filter(Boolean);
-      let best: { grounded: boolean; overlap: number; missing_paths: string[]; source: string; judged: boolean } | null = null;
-      for (const text of candidates) {
-        const userWords = [...words(text)].filter((w) => !STOP.has(w));
-        const judged = userWords.length >= 6;
-        const overlap = judged ? userWords.filter((w) => briefWords.has(w)).length / userWords.length : 0;
-        const missing_paths = paths(text).filter((p) => !String(brief ?? '').includes(p));
-        const verdict = { grounded: judged && overlap >= 0.25 && missing_paths.length === 0, overlap, missing_paths, source: text, judged };
-        if (verdict.grounded) return verdict;
-        // The replacement brief is the request that matched best; a longer real request beats a short nudge.
-        if (!best || (verdict.judged && !best.judged) || (verdict.judged === best.judged && (verdict.overlap > best.overlap || (verdict.overlap === best.overlap && text.length > best.source.length)))) best = verdict;
-      }
-      if (!best) return { grounded: true, overlap: 1, missing_paths: [] as string[], source: '', judged: false };
-      if (!best.judged) return { ...best, grounded: true, overlap: 1 };
-      return best;
+      const candidates = (Array.isArray(userTexts) ? userTexts : [userTexts]).map((t) => String(t ?? '').trim()).filter(Boolean)
+        .map((text) => ({ text, userWords: [...words(text)].filter((w) => !STOP.has(w)) }));
+      // Most substance first; on a tie the earlier entry (the more recent message) stays first.
+      const reference = candidates.slice().sort((a, b) => b.userWords.length - a.userWords.length)[0];
+      if (!reference || reference.userWords.length < 6) return { grounded: true, overlap: 1, missing_paths: [] as string[], source: reference?.text ?? '', judged: false, substance: reference?.userWords.length ?? 0 };
+      const overlap = reference.userWords.filter((w) => briefWords.has(w)).length / reference.userWords.length;
+      const missing_paths = paths(reference.text).filter((p) => !String(brief ?? '').includes(p));
+      return { grounded: overlap >= 0.25 && missing_paths.length === 0, overlap, missing_paths, source: reference.text, judged: true, substance: reference.userWords.length };
     };
     const builderCancellationDecision = (text: string) => {
       const answer = text.trim();

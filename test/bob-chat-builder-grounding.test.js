@@ -10,9 +10,7 @@ assert.ok(start >= 0);
 const source = chat.slice(start, chat.indexOf('    const builderCancellationDecision = ', start))
   .replace('(userTexts: string | string[], brief: string)', '(userTexts, brief)')
   .replace(/\(text: string\)/g, '(text)')
-  .replace(/\[\] as string\[\]/g, '[]')
-  .replace(/let best: \{[^}]*\} \| null = null;/, 'let best = null;')
-  .replace(/\((w|p|t)\) =>/g, '($1) =>');
+  .replace(/\[\] as string\[\]/g, '[]');
 const builderBriefGrounding = vm.runInNewContext(`(() => { ${source} return builderBriefGrounding; })()`);
 
 const request = "In Bob's chat, whenever Bob asks me a question or proposes something that needs my confirmation — a Builder job proposal, a laptop command, a cancellation — show tappable choice buttons under his message, for example 'Yes, run it' / 'Change it' / 'No'. Server side, in supabase/functions/onspace-ai-chat/index.ts, include meta.options on every proposed outcome; client side, in apps/web/src/components/BobPanel.tsx, render metadata.options as accessible buttons. Add component tests.";
@@ -43,12 +41,17 @@ test('short requests cannot be judged and pass', () => {
   assert.equal(builderBriefGrounding('fix the login bug', 'Anything at all').grounded, true);
 });
 
-test('judged against recent messages: a nudge is not the brief, and the replacement is the real request (job 2fba8ca0)', () => {
+test('judged against recent messages: a nudge is not the brief, and the replacement is the real request (jobs 2fba8ca0, 02378cc2)', () => {
   const nudge = 'Do not investigate in chat. Compose the Builder job now from my brief exactly as written; the job does the reading and the changes.';
   const fabricated = 'Fix Freedom Camping Zone Classification. The council has requested a review of Zone 123 at Client XYZ.';
   const verdict = builderBriefGrounding([nudge, request], fabricated);
   assert.equal(verdict.grounded, false);
   assert.equal(verdict.source, request, 'the replacement brief is the real request, not the nudge');
+  // A draft that matches only the nudge is not grounded either: the reference is the substantial request.
+  const nudgeLike = 'A brief for the Builder: investigate the chat and compose written changes; reading the job.';
+  const nudged = builderBriefGrounding([nudge, request], nudgeLike);
+  assert.equal(nudged.grounded, false);
+  assert.equal(nudged.source, request);
   // A grounded brief is accepted when it matches any recent request.
   const good = "Tappable choice buttons under Bob's messages for proposals and confirmations: supabase/functions/onspace-ai-chat/index.ts adds meta.options; apps/web/src/components/BobPanel.tsx renders metadata.options as accessible buttons; a Builder job proposal, laptop command or cancellation shows them; component tests added.";
   assert.equal(builderBriefGrounding([nudge, request], good).grounded, true);
