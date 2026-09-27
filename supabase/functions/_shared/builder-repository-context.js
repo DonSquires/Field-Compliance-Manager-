@@ -102,7 +102,10 @@ function fitRepositoryContext(context, task, maxChars = Number(process.env.BOB_B
   const size = () => JSON.stringify(context).length;
   if (size() <= maxChars) return context;
   const terms = relevanceTerms(task);
-  const buildMap = context.build_map && typeof context.build_map === 'object' ? context.build_map : (context.build_map = {});
+  // collectRepositoryContext puts the build map at the top level; the analyst/designer normalisers nest it
+  // under build_map. Trim whichever shape holds the file list (the engineer passed the raw shape, 2026-09-27).
+  const nested = context.build_map && typeof context.build_map === 'object' && Array.isArray(context.build_map.tracked_files);
+  const buildMap = nested ? context.build_map : context;
   const schema = buildMap.schema && typeof buildMap.schema === 'object' ? buildMap.schema : null;
   const steps = [
     () => {

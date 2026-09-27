@@ -97,3 +97,13 @@ test('fitRepositoryContext trims a build map to a local model window, keeping wh
   const prompt = buildProductAnalystPrompt({ taskDescription: task, repositoryContext: context });
   assert.ok((prompt.systemPrompt.length + prompt.userPrompt.length) / 4 < 24576 * 0.85, 'analyst prompt fits the VPS window');
 });
+
+test('fitRepositoryContext also trims the raw collectRepositoryContext shape (build map at the top level), which the engineer passes', () => {
+  const { fitRepositoryContext } = require('../supabase/functions/_shared/builder-repository-context.js');
+  const raw = { target_sha: 'a'.repeat(40), file_count: 2001, tracked_files: Array.from({ length: 2000 }, (_, i) => `apps/web/src/pages/Page${i}.tsx`).concat(['apps/web/src/components/BobPanel.tsx']), tracked_files_truncated: false, directory_counts: {}, packages: [], compose: [], supabase_edge_functions: [], schema: { available: true, tables: Array.from({ length: 1000 }, (_, i) => `table_${i}`).concat(['bob_conversations']), views: [], functions: [] }, recent_commits: [] };
+  const fitted = fitRepositoryContext(JSON.parse(JSON.stringify(raw)), 'buttons in apps/web/src/components/BobPanel.tsx using bob_conversations', 30000);
+  assert.ok(JSON.stringify(fitted).length <= 30000);
+  assert.equal(fitted.tracked_files[0], 'apps/web/src/components/BobPanel.tsx');
+  assert.equal(fitted.schema.tables[0], 'bob_conversations');
+  assert.equal(fitted.build_map, undefined, 'no empty build_map is invented');
+});
