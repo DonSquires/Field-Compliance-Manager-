@@ -353,6 +353,27 @@ test('a no_change after a long read-only walk is classified as budget exhaustion
   fs.rmSync(repo.root, { recursive: true, force: true });
 });
 
+test('run chains allowlisted commands with && and stops at the first failure; a disallowed part is refused on its own', async () => {
+  const repo = makeRepo();
+  const workspaceRoot = path.join(repo.root, 'workspaces');
+  const { createBranchWorkspace } = require('../builder-branch-workspace');
+  const ws = createBranchWorkspace({ sourceDir: repo.source, workspaceRoot, jobId: 'c4a1c4a1c4a1c4a1c4a1c4a1', targetSha: repo.sha });
+  const tools = createTools({ workspacePath: ws.workspacePath, repoRoot: repo.source, lane: 'backend', supabase: null, limits: DEFAULT_LIMITS, log() {} });
+  const chained = await tools.run({ command: 'node --check lib/sum.js && git status --short' });
+  assert.equal(chained.exit_code, 0, JSON.stringify(chained));
+  assert.equal(chained.steps.length, 2);
+  assert.equal(chained.stopped_at, undefined);
+  const failing = await tools.run({ command: 'node --test test/sum.test.js && node --check lib/sum.js' });
+  assert.equal(failing.steps.length, 1, 'the failing test (sum subtracts) stops the chain');
+  assert.notEqual(failing.exit_code, 0);
+  assert.equal(failing.stopped_at, 'node --test test/sum.test.js');
+  const refused = await tools.run({ command: 'node --check lib/sum.js && rm -rf lib' });
+  assert.equal(refused.steps.length, 2);
+  assert.match(refused.error, /command not allowed/);
+  assert.equal(refused.stopped_at, 'rm -rf lib');
+  fs.rmSync(repo.root, { recursive: true, force: true });
+});
+
 test('search honours several pathspecs and treats no matches as a result; apply_patch tolerates fences and miscounted hunks', () => {
   const repo = makeRepo();
   const workspaceRoot = path.join(repo.root, 'workspaces');

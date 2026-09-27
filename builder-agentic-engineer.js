@@ -175,7 +175,7 @@ function systemPrompt({ lane, limits }) {
     '- replace_in_file {path, old_text, new_text, all?}   PREFERRED EDIT: replace one exact occurrence of old_text (copy it verbatim from read_file, several lines is fine) with new_text; all=true replaces every occurrence. Fails safely when the text is missing or ambiguous.',
     '- apply_patch {diff}                     apply a unified diff (git apply); hunk counts must be exact — use replace_in_file instead when unsure',
     '- delete_file {path}                     delete a file',
-    `- run {command}                          allowed: node --test [test files], node --check <file>, git status/diff/log/show/blame (timeout ${Math.round(limits.runTimeoutMs / 60000)} min)`,
+    `- run {command}                          allowed: node --test [test files], node --check <file>, git status/diff/log/show/blame (timeout ${Math.round(limits.runTimeoutMs / 60000)} min); chain allowed commands with && (stops at the first failure)`,
     '- read_canon {}                          AGENTS.md + docs/canon/README.md + docs/canon/BOB_DOCTRINE.md (bounded)',
     '- read_notes {limit?}                    your persistent builder notes (lessons from earlier jobs); the 10 most recent are already in your task packet',
     '- write_note {text}                      leave a durable lesson for future jobs (short, factual, no secrets)',
@@ -485,8 +485,20 @@ function createTools({ workspacePath, repoRoot, lane, supabase, limits, log }) {
       fs.rmSync(absolute, { force: true });
       return { deleted: normalized };
     },
-    run({ command }) {
-      return run(command);
+    async run({ command }) {
+      // `a && b` of allowlisted commands runs them in order, stopping at the first failure (job 79b4c08f
+      // lost a turn to "command not allowed" on exactly that). Each part is checked on its own.
+      const parts = String(command ?? '').split(/\s*&&\s*/).map((part) => part.trim()).filter(Boolean);
+      if (parts.length <= 1) return run(command);
+      const results = [];
+      for (const part of parts) {
+        const result = await run(part);
+        results.push(result);
+        if (result.error || result.exit_code !== 0) break;
+      }
+      const last = results.at(-1);
+      const failed = Boolean(last.error) || last.exit_code !== 0;
+      return { command: parts.join(' && '), steps: results, exit_code: last.error ? null : last.exit_code, error: last.error, stopped_at: failed ? parts[results.length - 1] : undefined };
     },
     read_canon() {
       const read = (file) => {
