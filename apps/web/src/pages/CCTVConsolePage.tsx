@@ -924,18 +924,18 @@ const CCTVConsolePage: React.FC = () => {
     <div className={`page-container cctv-console${popout ? ' is-popout' : ''}`}>
       <header className="cctv-console__header">
         <div>
-          <h1 className="page-title"><Camera size={20} aria-hidden="true" /> CCTV console{popout ? <span className="cctv-console__popout-badge">Pop-out wall</span> : null}</h1>
+          <h1 className="page-title"><Camera size={20} aria-hidden="true" /> CCTV console{popout ? <span className="cctv-console__popout-badge">Pop-out review</span> : null}</h1>
           <p className="page-subtitle">
             {selectedImport ? <>{selectedImport.camera_label} · {placeLabelOf(selectedImport)} · {selectedImport.recorded_from ? `${formatDate(parseMs(selectedImport.recorded_from) ?? 0, timeZone)} · ` : ''}{selectedImport.video_count} video{selectedImport.video_count === 1 ? '' : 's'} · {selectedImport.snapshot_count} photo{selectedImport.snapshot_count === 1 ? '' : 's'}{selectedImport.skipped_count ? `, ${selectedImport.skipped_count} empty slots skipped` : ''}</> : 'Choose a camera to review.'}
           </p>
         </div>
-        <div className="cctv-console__header-actions">
+        {!popout ? <div className="cctv-console__header-actions">
           <button type="button" className="page-action" onClick={() => setShowKeys((current) => !current)} aria-expanded={showKeys}><Keyboard size={16} aria-hidden="true" /> Keys</button>
-          {!popout ? <button type="button" className="page-action" onClick={openPopout} title="Open the wall in its own window for a second monitor"><ExternalLink size={16} aria-hidden="true" /> Pop out wall</button> : null}
+          <button type="button" className="page-action" onClick={openPopout} title="Open cameras and entity review in their own window"><ExternalLink size={16} aria-hidden="true" /> Pop out wall</button>
           <button type="button" className="page-action" onClick={() => void reviewPaneRef.current?.requestFullscreen?.()} title="Full-screen video review (f)"><Maximize2 size={16} aria-hidden="true" /> Full screen</button>
-          {!popout ? <button type="button" className="page-action" onClick={() => navigate('/admin/field-ops?area=cctv-import')}><Plus size={16} aria-hidden="true" /> Import footage</button> : null}
-          {!popout ? <button type="button" className="page-action" onClick={() => navigate('/admin/field-ops?area=cctv-review')}>Job queue &amp; exports</button> : null}
-        </div>
+          <button type="button" className="page-action" onClick={() => navigate('/admin/field-ops?area=cctv-import')}><Plus size={16} aria-hidden="true" /> Import footage</button>
+          <button type="button" className="page-action" onClick={() => navigate('/admin/field-ops?area=cctv-review')}>Job queue &amp; exports</button>
+        </div> : null}
       </header>
       {showKeys ? (
         <div className="cctv-console__keys" role="note">
@@ -953,7 +953,7 @@ const CCTVConsolePage: React.FC = () => {
       ) : null}
 
       <div className="cctv-console__layout">
-        {!popout ? <aside className="cctv-console__cameras" aria-label="Cameras and recordings">
+        <aside className="cctv-console__cameras" aria-label="Cameras and recordings">
           <div className="cctv-console__aside-head"><strong>Cameras</strong><button type="button" className="cctv-console__icon-btn" onClick={() => void loadImports()} aria-label="Refresh cameras"><RefreshCw size={14} aria-hidden="true" /></button></div>
           {importsLoading ? <p className="cctv-console__muted"><Loader2 size={14} className="spin" aria-hidden="true" /> Loading…</p> : null}
           {!importsLoading && imports.length === 0 ? <p className="cctv-console__muted">No camera footage has been imported yet. Use “Import footage” to bring an SD card in.</p> : null}
@@ -1033,9 +1033,9 @@ const CCTVConsolePage: React.FC = () => {
               })}
             </section>
           ) : null}
-        </aside> : null}
+        </aside>
 
-        <main className="cctv-console__stage" ref={reviewPaneRef} aria-label="Video review pane">
+        {!popout ? <main className="cctv-console__stage" ref={reviewPaneRef} aria-label="Video review pane">
           <div className="cctv-console__grid-wrap">
             <div className="cctv-console__grid" style={{ gridTemplateColumns: `repeat(${columns}, minmax(0, 1fr))` }}>
               {wallTiles.map((item, index) => {
@@ -1207,7 +1207,7 @@ const CCTVConsolePage: React.FC = () => {
               ))}
             </div>
           ) : null}
-        </main>
+        </main> : null}
 
         <aside className="cctv-console__entities" aria-label="Entities seen">
             <div className="cctv-console__aside-head">

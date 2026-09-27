@@ -47,18 +47,13 @@
 
 .cctv-console__layout { display: grid; gap: 14px; grid-template-columns: 300px minmax(420px, 1fr) minmax(320px, 380px); align-items: start; }
 
-/* Pop-out: camera wall and entity review own the window; browsing/import controls stay in the main console. */
+/* Pop-out: camera/recording browser and entity review own the window; video playback stays in the main console. */
 .cctv-console.is-popout { display: flex; flex-direction: column; height: 100vh; padding: 10px 14px 12px; }
 .cctv-console.is-popout .cctv-console__header { align-items: center; margin-bottom: 8px; }
 .cctv-console.is-popout .cctv-console__header .page-title { font-size: 18px; }
 .cctv-console.is-popout .cctv-console__header .page-subtitle { font-size: 12px; margin-top: 2px; }
-.cctv-console.is-popout .cctv-console__layout { flex: 1; grid-template-columns: minmax(0, 1fr) minmax(320px, 380px); grid-template-rows: minmax(0, 1fr); min-height: 0; }
-.cctv-console.is-popout .cctv-console__entities { height: 100%; max-height: none; }
-.cctv-console.is-popout .cctv-console__stage { display: flex; flex-direction: column; height: 100%; min-height: 0; }
-.cctv-console.is-popout .cctv-console__grid-wrap { display: grid; flex: 1; min-height: 0; }
-.cctv-console.is-popout .cctv-console__grid { grid-auto-rows: minmax(0, 1fr); height: 100%; min-height: 0; }
-.cctv-console.is-popout .cctv-tile { aspect-ratio: auto; height: 100%; min-height: 0; }
-.cctv-console.is-popout .cctv-console__legend, .cctv-console.is-popout .cctv-console__snapshots { display: none; }
+.cctv-console.is-popout .cctv-console__layout { flex: 1; grid-template-columns: minmax(300px, 360px) minmax(420px, 1fr); grid-template-rows: minmax(0, 1fr); min-height: 0; }
+.cctv-console.is-popout .cctv-console__cameras, .cctv-console.is-popout .cctv-console__entities { height: 100%; max-height: none; }
 .cctv-console__cameras, .cctv-console__entities { background: var(--cc-surface); border: 1px solid var(--cc-line); border-radius: 6px; min-width: 0; padding: 12px; max-height: calc(100vh - 170px); overflow: auto; }
 .cctv-console__aside-head { align-items: center; display: flex; gap: 8px; justify-content: space-between; margin-bottom: 8px; }
 .cctv-console__aside-head strong { color: var(--cc-text-3); font-size: 12px; letter-spacing: .08em; text-transform: uppercase; }
@@ -298,7 +293,7 @@
 @media (max-width: 1280px) {
   .cctv-console__layout { grid-template-columns: 260px minmax(0, 1fr); }
   .cctv-console__entities { grid-column: 1 / -1; max-height: none; }
-  .cctv-console.is-popout .cctv-console__layout { grid-template-columns: minmax(0, 1fr) minmax(300px, 340px); }
+  .cctv-console.is-popout .cctv-console__layout { grid-template-columns: minmax(280px, 340px) minmax(0, 1fr); }
   .cctv-console.is-popout .cctv-console__entities { grid-column: auto; }
   .cctv-console__inspection-panel { grid-template-columns: repeat(2, minmax(0, 1fr)); }
 }

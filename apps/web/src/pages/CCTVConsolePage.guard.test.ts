@@ -161,23 +161,24 @@ describe('CCTV console', () => {
     expect(page).toContain('if (covering) setActiveTileId(covering.id);');
   });
 
-  it('pops out the camera wall with entities and full-screens only the video review pane', () => {
+  it('pops out cameras with entities and full-screens only the video review pane', () => {
     expect(page).toContain("const popout = search.get('popout') === '1';");
     expect(page).toContain("new URLSearchParams({ area: 'cctv-console', popout: '1' })");
     expect(page).toContain('window.open(popoutUrl, `fcm-cctv-wall-${selectedImportId ?? \'wall\'}`');
     expect(page).toContain('Pop out wall');
-    expect(page).toContain('{!popout ? <aside className="cctv-console__cameras"');
+    expect(page).toContain('<aside className="cctv-console__cameras" aria-label="Cameras and recordings">');
+    expect(page).toContain('{!popout ? <main className="cctv-console__stage"');
     expect(page).toContain('<aside className="cctv-console__entities" aria-label="Entities seen">');
     expect(page).toContain('<main className="cctv-console__stage" ref={reviewPaneRef} aria-label="Video review pane">');
     expect(page).toContain('reviewPaneRef.current?.requestFullscreen?.()');
     expect(page).not.toContain('gridRef.current?.requestFullscreen?.()');
     expect(styles).toContain('.cctv-console.is-popout');
-    // The popped-out wall is a second-monitor surface: the shell drops its own chrome and the grid fills the window.
+    // The popped-out review is a second-monitor surface: the shell drops its chrome and the two review rails fill the window.
     expect(shell).toContain("fieldOpsSubArea === 'cctv-console' && new URLSearchParams(location.search).get('popout') === '1'");
     expect(shell).toContain('className="admin-shell admin-shell-video-wall"');
     expect(styles).toContain('.cctv-console.is-popout { display: flex; flex-direction: column; height: 100vh;');
-    expect(styles).toContain('.cctv-console.is-popout .cctv-console__layout { flex: 1; grid-template-columns: minmax(0, 1fr) minmax(320px, 380px);');
-    expect(styles).toContain('.cctv-console.is-popout .cctv-console__grid-wrap { display: grid; flex: 1; min-height: 0; }');
+    expect(styles).toContain('.cctv-console.is-popout .cctv-console__layout { flex: 1; grid-template-columns: minmax(300px, 360px) minmax(420px, 1fr);');
+    expect(styles).toContain('.cctv-console.is-popout .cctv-console__cameras, .cctv-console.is-popout .cctv-console__entities { height: 100%;');
     expect(styles).toContain('.cctv-console__stage:fullscreen { background: var(--cc-bg); display: flex; flex-direction: column;');
     expect(styles).not.toContain('.cctv-console__grid-wrap:fullscreen');
   });
