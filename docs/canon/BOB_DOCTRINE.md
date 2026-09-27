@@ -344,3 +344,21 @@ link-cutting commands regardless of confirmation, caps and redacts output, times
 out, and records the command's head and hash — never its output, which may be
 the owner's private files. The Builder lane does not get this tool: Bob builds
 software in isolated worktrees, not on the owner's machine.
+
+### 2026-09-27 — Bob merges his own reviewed work; the owner keeps the off switch (Don Squires)
+
+**Ruling.** The owner cannot review code and has asked to be hands-off: Bob does
+the coding and does not ask a human to fix anything. A Builder change therefore
+merges itself when — and only when — it was requested in chat, the isolated
+worker re-applied and verified the patch, the security scan passed, the
+independent review (strongest model first, a different model from the author)
+passed with no critical or high finding, and no evidential path is touched.
+Anything else stays a draft pull request for a person, and evidential work still
+waits for a human (the 2026-09-26 ruling stands). The mechanism is env-gated on
+the control plane (`BOB_AUTOPILOT_AUTOMERGE=true`, `automergeEligible` in
+`builder-autopilot.js`, the bridge merges on the marker in the pull-request
+body); removing that line restores per-change human merging. The release lane
+(`scripts/bob-release-lane.sh`, live mode) puts merged `main` into service with
+health checks and rollback, and Bob reports in chat what merged and what went
+live. §4's "a human turns the key" is amended to this: the key is the owner's
+off switch, not a per-change approval.
