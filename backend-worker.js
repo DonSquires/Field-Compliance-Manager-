@@ -7,6 +7,7 @@ const {
   classifyBackendChangeRisk
 } = require('./supabase/functions/_shared/builder-backend-engineer');
 const { checkCallerReads } = require('./builder-data-path-gate');
+const { gateTypeScriptDelta, loadTypeScript } = require('./builder-ts-delta-gate');
 
 const MAX_LOG_BYTES = 512 * 1024;
 const TEST_TIMEOUT_MS = 5 * 60 * 1000;
@@ -65,6 +66,7 @@ function executeBackendPatch({ sourceDir, patchPath, artifactDir, workDir = '/wo
     checks.push(run('git', ['apply', '--whitespace=error-all', patchPath], workDir));
     patchApplied = checks.at(-1).status === 0;
   }
+  let typeDelta = { checked: [], warnings: [] };
   if (patchApplied) {
     for (const file of changedFiles.filter(file => file.endsWith('.js'))) {
       checks.push(run('node', ['--check', file], workDir));
@@ -78,6 +80,33 @@ function executeBackendPatch({ sourceDir, patchPath, artifactDir, workDir = '/wo
       if (typescriptDir) {
         const script = `const ts=require(process.argv[1]);const fs=require('fs');let bad=0;for(const f of process.argv.slice(2)){const sf=ts.createSourceFile(f,fs.readFileSync(f,'utf8'),ts.ScriptTarget.ES2022,true,f.endsWith('x')?ts.ScriptKind.TSX:ts.ScriptKind.TS);for(const d of sf.parseDiagnostics){bad++;console.error(f+': '+ts.flattenDiagnosticMessageText(d.messageText,' '));}}process.exit(bad?1:0);`;
         checks.push(run('node', ['-e', script, typescriptDir, ...tsFiles], workDir));
+        // Semantic delta: diagnostics the patch introduced that the file did not have before (an
+        // undefined name, a missing property). The file's pre-existing hundreds are not the patch's.
+        if (checks.at(-1).status === 0) {
+          const started = Date.now();
+          try {
+            const ts = loadTypeScript(typescriptDir);
+            const existing = tsFiles.filter(file => !/^test\//.test(file) && fs.existsSync(path.join(workDir, file)));
+            const delta = gateTypeScriptDelta({
+              ts,
+              files: existing,
+              readBefore: file => (fs.existsSync(path.join(sourceDir, file)) ? fs.readFileSync(path.join(sourceDir, file), 'utf8') : null),
+              readAfter: file => fs.readFileSync(path.join(workDir, file), 'utf8'),
+            });
+            typeDelta = { checked: delta.checked, warnings: delta.warnings.slice(0, 40) };
+            checks.push({
+              command: `typescript semantic delta (${delta.checked.length} file${delta.checked.length === 1 ? '' : 's'}): new diagnostics vs the unpatched file`,
+              status: delta.failures.length ? 1 : 0,
+              timed_out: false,
+              stdout: delta.warnings.length ? `warnings (not failing):\n${delta.warnings.slice(0, 40).join('\n')}` : '',
+              stderr: delta.failures.join('\n'),
+              error: null,
+              duration_ms: Date.now() - started
+            });
+          } catch (error) {
+            checks.push({ command: 'typescript semantic delta', status: 0, timed_out: false, stdout: '', stderr: '', error: `skipped: ${redactLog(error.message)}` });
+          }
+        }
       }
     }
   }
@@ -118,6 +147,7 @@ function executeBackendPatch({ sourceDir, patchPath, artifactDir, workDir = '/wo
     verification_scope: 'static_backend_patch',
     risk,
     data_path: dataPath,
+    type_delta: typeDelta,
     checks,
     migration_execution: {
       performed: false,

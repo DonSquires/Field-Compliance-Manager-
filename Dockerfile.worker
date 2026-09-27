@@ -10,6 +10,7 @@ WORKDIR /opt/bob
 COPY assessment-manifest.js /opt/bob/assessment-manifest.js
 COPY builder-path-policy.js /opt/bob/builder-path-policy.js
 COPY builder-data-path-gate.js /opt/bob/builder-data-path-gate.js
+COPY builder-ts-delta-gate.js /opt/bob/builder-ts-delta-gate.js
 COPY frontend-worker.js /opt/bob/frontend-worker.js
 COPY backend-worker.js /opt/bob/backend-worker.js
 COPY security-worker.js /opt/bob/security-worker.js
