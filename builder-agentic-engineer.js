@@ -186,7 +186,7 @@ function systemPrompt({ lane, limits }) {
 }
 
 function taskPacket(input) {
-  const { job, lane, specification, uxPlan, repositoryContext, liveContext, notes, previousFailure, hints, previousAttempt } = input;
+  const { job, lane, specification, uxPlan, repositoryContext, liveContext, notes, previousFailure, hints, previousAttempt, seeded } = input;
   return JSON.stringify({
     job: { title: job.title, task_description: job.task_description, description: job.description ?? null, target_sha: job.target_sha, requested_action: job.requested_action ?? null, target_environment: job.target_environment ?? null },
     lane,
@@ -197,11 +197,16 @@ function taskPacket(input) {
     file_hints: Array.isArray(hints) && hints.length ? hints : undefined,
     your_recent_notes: notes,
     previous_attempt_failed_verification: previousFailure ?? undefined,
+    previous_attempt_applied: seeded ? (seeded.failed
+      ? { from_job: seeded.from_job, applied: false, reason: seeded.failed, instruction: 'The previous attempt\'s change could not be applied to the current main, so you start from main. Rebuild the whole change and resolve the review findings.' }
+      : { from_job: seeded.from_job, applied: true, files: seeded.files, instruction: 'The previous attempt\'s verified change is ALREADY in your worktree (these files; git_diff shows the full diff). This is a REVISION: read the review findings in the task, read the changed code, and fix the findings in place. Do not rebuild it from scratch, do not remove it, and keep the tests it added passing.' }) : undefined,
     previous_attempt_ran_out_of_turns: previousAttempt ? {
       ...previousAttempt,
       instruction: 'The previous attempt spent its whole budget reading and edited nothing. Its reading map is above: the files and line ranges it read, the searches it ran, and what it concluded. Do not repeat that walk. Use outline on the big files, read only the ranges you need for the FIRST edit, and make that edit by turn 12. Land the smallest correct, tested slice; list what is left under follow_ups. If the previous attempt stopped over a design or security worry, build to the precedent the task names and put the worry under follow_ups — declining again leaves the owner with nothing.',
     } : undefined,
-    how_to_start: previousAttempt
+    how_to_start: seeded && !seeded.failed
+      ? 'Call read_notes once, then git_diff to see the previous attempt\'s change, then go straight to the review findings: outline/read only what each finding touches, fix it, run the tests, finish.'
+      : previousAttempt
       ? 'Skip read_canon. Call read_notes once, outline the main file named in the reading map, then edit.'
       : 'Call read_canon and read_notes once, then explore the code paths named in the task with search/read_file before editing. Finish only after your own test run passes or you can explain exactly why it cannot run here.',
   }, null, 0);
@@ -638,6 +643,7 @@ async function runAgenticEngineer({
   hints = [],
   previousFailure = null,
   previousAttempt = null,
+  seedPatch = null,
   inputArtifactIds = [],
   limits = DEFAULT_LIMITS,
   // null = the outsourced tier serves its strongest available allowlisted model (BOB_OPENAI_MODELS, best first).
@@ -662,6 +668,24 @@ async function runAgenticEngineer({
   const transcript = [];
   const log = (entry) => transcript.push({ at: new Date().toISOString(), ...entry });
   const tools = createTools({ workspacePath, repoRoot, lane, supabase, limits, log });
+  // A revision after a blocked review starts from the previous attempt's verified change, applied
+  // here so the model edits it instead of rebuilding from main (round 2 of job f233ec31 did the latter).
+  let seeded = null;
+  if (seedPatch?.text) {
+    const seedFile = path.join(os.tmpdir(), `bob-seed-${job.id.slice(0, 8)}-${process.pid}.patch`);
+    try {
+      fs.writeFileSync(seedFile, seedPatch.text.endsWith('\n') ? seedPatch.text : `${seedPatch.text}\n`);
+      git(workspacePath, ['apply', '--whitespace=nowarn', seedFile]);
+      seeded = { from_job: seedPatch.from_job ?? null, files: tools.__changedFiles() };
+      log({ turn: 0, seed_applied: seeded.files });
+    } catch (error) {
+      seeded = { from_job: seedPatch.from_job ?? null, files: [], failed: String(error && error.message).slice(0, 300) };
+      log({ turn: 0, seed_failed: seeded.failed });
+      try { git(workspacePath, ['reset', '-q', '--hard', job.target_sha]); git(workspacePath, ['clean', '-fdq']); } catch { /* fresh anyway */ }
+    } finally {
+      try { fs.rmSync(seedFile, { force: true }); } catch { /* gone */ }
+    }
+  }
   const notes = supabase ? (await tools.read_notes({ limit: 10 })).notes ?? [] : [];
   const repositoryContext = (() => {
     try { return collectRepositoryContext({ sourceDir: workspacePath, targetSha: job.target_sha }); } catch { return null; }
@@ -669,7 +693,7 @@ async function runAgenticEngineer({
 
   const messages = [
     { role: 'system', content: systemPrompt({ lane, limits }) },
-    { role: 'user', content: taskPacket({ job, lane, specification, uxPlan, repositoryContext, liveContext, notes, previousFailure, hints, previousAttempt }) },
+    { role: 'user', content: taskPacket({ job, lane, specification, uxPlan, repositoryContext, liveContext, notes, previousFailure, hints, previousAttempt, seeded }) },
   ];
   const builderMode = lane === 'frontend' ? 'frontend_engineer' : 'backend_engineer';
   const baseRequest = buildModelRunRequest({

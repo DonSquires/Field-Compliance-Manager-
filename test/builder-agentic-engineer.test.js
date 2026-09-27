@@ -374,6 +374,38 @@ test('run chains allowlisted commands with && and stops at the first failure; a 
   fs.rmSync(repo.root, { recursive: true, force: true });
 });
 
+test('a review revision starts from the previous attempt\'s patch applied in the worktree; an unappliable seed falls back to main and says so', async () => {
+  const repo = makeRepo();
+  const workspaceRoot = path.join(repo.root, 'workspaces');
+  const job = { id: '5eed5eed5eed5eed5eed5eed5eed5eed', organization_id: '00000000-0000-0000-0000-000000000001', target_sha: repo.sha, title: 'revise', task_description: 'fix the review findings', description: "Opened by Bob's autopilot from job p after independent review (round 1 of 2) [[seed_patch:v]]" };
+  const seed = 'diff --git a/lib/sum.js b/lib/sum.js\n--- a/lib/sum.js\n+++ b/lib/sum.js\n@@ -1,2 +1,2 @@\n \'use strict\';\n-module.exports = { sum: (a, b) => a - b };\n+module.exports = { sum: (a, b) => a + b };\n';
+  const packets = [];
+  const script = [
+    { tool: 'run', args: { command: 'node --test test/sum.test.js' } },
+    { tool: 'finish', args: { summary: 'Kept the previous attempt\'s fix; tests pass.', tests: ['node --test test/sum.test.js'], rollback_notes: ['revert'] } },
+  ];
+  let i = 0;
+  const callModel = async ({ modelRequest }) => { packets.push(modelRequest.request.messages[1].content); const t = script[Math.min(i, script.length - 1)]; i++; return { ok: true, data: { content: JSON.stringify(t), model: 'm', usage: {} } }; };
+  const result = await runAgenticEngineer({ supabase: null, gateway: { gatewayUrl: 'x', apiToken: 'y' }, job, step: { id: 's' }, lane: 'backend', sourceDir: repo.source, workspaceRoot, repoRoot: repo.source, callModel, seedPatch: { text: seed, from_job: 'p' }, limits: { ...DEFAULT_LIMITS, maxTurns: 6 } });
+  assert.equal(result.ok, true, result.error);
+  assert.deepEqual(result.proposal.changed_files, ['lib/sum.js'], 'the seed is part of the handed-over diff without the model editing anything');
+  const packet = JSON.parse(packets[0]);
+  assert.equal(packet.previous_attempt_applied.applied, true);
+  assert.deepEqual(packet.previous_attempt_applied.files, ['lib/sum.js']);
+  assert.match(packet.previous_attempt_applied.instruction, /ALREADY in your worktree/);
+  assert.match(packet.how_to_start, /git_diff to see the previous attempt/);
+
+  const bad = seed.replace("a - b", 'not in the file');
+  let k = 0;
+  const packets2 = [];
+  const result2 = await runAgenticEngineer({ supabase: null, gateway: { gatewayUrl: 'x', apiToken: 'y' }, job: { ...job, id: '5eed5eed5eed5eed5eed5eed5eed5ee2' }, step: { id: 's' }, lane: 'backend', sourceDir: repo.source, workspaceRoot, repoRoot: repo.source, callModel: async ({ modelRequest }) => { packets2.push(modelRequest.request.messages[1].content); const t = [{ tool: 'finish', args: { summary: 'nothing', no_change_reason: 'seed missing' } }][0]; k++; return { ok: true, data: { content: JSON.stringify(t), model: 'm', usage: {} } }; }, seedPatch: { text: bad, from_job: 'p' }, limits: { ...DEFAULT_LIMITS, maxTurns: 4 } });
+  assert.equal(result2.no_change, true);
+  const packet2 = JSON.parse(packets2[0]);
+  assert.equal(packet2.previous_attempt_applied.applied, false);
+  assert.match(packet2.previous_attempt_applied.instruction, /start from main/);
+  fs.rmSync(repo.root, { recursive: true, force: true });
+});
+
 test('search honours several pathspecs and treats no matches as a result; apply_patch tolerates fences and miscounted hunks', () => {
   const repo = makeRepo();
   const workspaceRoot = path.join(repo.root, 'workspaces');

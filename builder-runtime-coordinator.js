@@ -9,6 +9,8 @@ const { runIndependentCodeReview } = require('./supabase/functions/_shared/build
 const { runReleaseEngineer } = require('./supabase/functions/_shared/builder-release-engineer');
 const { runAgenticEngineer } = require('./builder-agentic-engineer');
 const { recordGenerationFailure, skipLaneWithNothingToDo } = require('./builder-generation-failure');
+const { downloadVerifiedArtifact } = require('./builder-frontend-handoff');
+const { unwrapPatchArtifact } = require('./supabase/functions/_shared/builder-patch-envelope');
 
 const TERMINAL_STATUSES = new Set(['release_ready', 'deployed', 'failed', 'cancelled']);
 const APPROVAL_STATUSES = new Set(['specification_ready', 'approval_pending']);
@@ -146,13 +148,31 @@ async function loadArtifactJson(supabase, artifact) {
   try { return JSON.parse(text); } catch { return text.slice(0, 20000); }
 }
 
+// A review re-open names the previous attempt's verified patch in its description
+// (builder-autopilot.js reviewReopenSpec): the revision starts from that code, not from main.
+const SEED_PATCH = /^Opened by Bob's autopilot from job ([0-9a-f-]{36}) .*\[\[seed_patch:([0-9a-f-]{36})\]\]/i;
+
+async function loadSeedPatch(supabase, job) {
+  const match = String(job?.description ?? '').match(SEED_PATCH);
+  if (!match || !supabase) return null;
+  const [, parentJobId, artifactId] = match;
+  try {
+    const downloaded = await downloadVerifiedArtifact(supabase, artifactId, parentJobId, 'code_implementation');
+    const { patch } = unwrapPatchArtifact(downloaded.bytes);
+    return patch && patch.trim() ? { text: patch, from_job: parentJobId, artifact_id: artifactId } : null;
+  } catch {
+    return null;
+  }
+}
+
 /** Agentic generation for a lane, shaped like the one-shot engineers' result so handoffs stay unchanged. */
 function agenticGenerator(lane, context, extra = {}) {
   return async ({ supabase, gateway, job, step, uxArtifact, productArtifact, requestedFiles, liveContext, failureArtifact, failedPatchArtifact, startAfterProvider = null }) => {
-    const [specification, uxPlan, previousFailure] = await Promise.all([
+    const [specification, uxPlan, previousFailure, seedPatch] = await Promise.all([
       productArtifact ? loadArtifactJson(supabase, productArtifact) : Promise.resolve(extra.specification ?? null),
       uxArtifact ? loadArtifactJson(supabase, uxArtifact) : Promise.resolve(null),
-      failureArtifact ? loadArtifactJson(supabase, failureArtifact) : Promise.resolve(null)
+      failureArtifact ? loadArtifactJson(supabase, failureArtifact) : Promise.resolve(null),
+      (extra.loadSeedPatch || loadSeedPatch)(supabase, job)
     ]);
     // An engineer crash is a failed generation (counted against the step's attempt ceiling and recorded
     // with its reason), not a failed run that leaves the step looking untouched.
@@ -166,6 +186,7 @@ function agenticGenerator(lane, context, extra = {}) {
       startAfterProvider,
       previousFailure: previousFailure ? { failure_evidence: previousFailure, failed_patch_artifact_id: failedPatchArtifact?.id ?? null } : null,
       previousAttempt,
+      seedPatch,
       inputArtifactIds: [productArtifact?.id, uxArtifact?.id, failureArtifact?.id].filter(Boolean)
     }).catch((error) => ({ ok: false, error: `engineer crashed: ${String(error instanceof Error ? error.message : error).slice(0, 500)}` }));
     let generation = await attempt();
@@ -324,6 +345,7 @@ module.exports = {
   AGENTIC_ENABLED,
   MAX_BACKEND_ATTEMPTS,
   agenticGenerator,
+  loadSeedPatch,
   artifactsFor,
   implementationRuns,
   implementationArtifacts,

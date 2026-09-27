@@ -227,7 +227,7 @@ function reviewBlock(job) {
 }
 
 /** The same brief with the reviewer's findings appended, for a fresh job pinned to the current main. */
-function reviewReopenSpec(job, review) {
+function reviewReopenSpec(job, review, seedPatchId = null) {
   const round = reviewRound(job) + 1;
   const findings = (review?.findingList ?? []).map((f) => `- [${f.severity || 'finding'}] ${f.file ? `${f.file}: ` : ''}${f.message}`);
   const gaps = (review?.testGaps ?? []).slice(0, 6).map((t) => `- ${t}`);
@@ -238,11 +238,14 @@ function reviewReopenSpec(job, review) {
     review?.summary ? `Reviewer's summary: ${review.summary}` : null,
     findings.length ? `Findings:\n${findings.join('\n')}` : null,
     gaps.length ? `Test gaps the reviewer named:\n${gaps.join('\n')}` : null,
+    // Round 2 of job f233ec31 (2026-09-27) started from main without the previous attempt's code and
+    // shipped a patch that only touched the control room: the revision must build on the earlier work.
+    seedPatchId ? `START FROM THE PREVIOUS ATTEMPT: its verified change is applied to your worktree before you begin (git_diff shows it). Revise that code to resolve the findings; do not rebuild it from scratch and do not remove it.` : null,
   ].filter((line) => line !== null).join('\n');
   return {
     ...reopenSpec(job),
     taskDescription: taskDescription.slice(0, 12000),
-    description: `${REOPEN_MARK}${job.id} after independent review (round ${round} of ${REVIEW_ROUNDS})`,
+    description: `${REOPEN_MARK}${job.id} after independent review (round ${round} of ${REVIEW_ROUNDS})${seedPatchId ? ` [[seed_patch:${seedPatchId}]]` : ''}`,
   };
 }
 
@@ -328,7 +331,7 @@ async function autopilotTick({ supabase, jobs, actions, log = () => {} }) {
           const snapshot = await loadBuilderRuntimeSnapshot(supabase, job.id).catch(() => null);
           const evidence = snapshot ? await collectEvidence({ supabase, snapshot }).catch(() => null) : null;
           if (job.status === 'failed' && reviewBlock(job) && reviewRound(job) < REVIEW_ROUNDS && typeof actions.createJob === 'function') {
-            const reopened = await actions.createJob(reviewReopenSpec(job, evidence?.review));
+            const reopened = await actions.createJob(reviewReopenSpec(job, evidence?.review, evidence?.validatedPatchId ?? null));
             const said = evidence?.review?.findingList?.length ? evidence.review.findingList.map((f) => f.message).join(' ') : (evidence?.review?.summary || job.last_error);
             await actions.record(job.id, 'done', { ...composeReport({ job, evidence, state: 'review_reopened', reason: said, resumedAs: reopened.id }), repair_outcome: 'review_reopened' });
             log({ job: job.id, review_reopened_as: reopened.id, round: reviewRound(job) + 1 });

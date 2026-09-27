@@ -298,6 +298,45 @@ test('an author that ran out of turns reading gets one immediate second run seed
   }
 });
 
+test('a review re-open\'s seed patch is loaded from the parent job\'s verified artifact and handed to the engineer', async () => {
+  const { loadSeedPatch } = require('../builder-runtime-coordinator');
+  const crypto = require('node:crypto');
+  const patch = 'diff --git a/x b/x\n--- a/x\n+++ b/x\n@@ -1 +1 @@\n-a\n+b\n';
+  const parent = '019d2088-47e9-4361-86f9-1b6af2b6dbae';
+  const artifactId = '610c4b87-0000-4000-8000-000000000000';
+  const seen = [];
+  const supabase = {
+    from(name) {
+      const chain = { select() { return chain; }, eq(col, val) { seen.push([col, val]); return chain; }, single: async () => ({ data: { id: artifactId, job_id: parent, artifact_type: 'code_implementation', status: 'final', storage_location: 'supabase_storage://builder-artifacts/org/p/validated.patch', checksum: crypto.createHash('sha256').update(patch).digest('hex') }, error: null }) };
+      assert.equal(name, 'builder_artifacts');
+      return chain;
+    },
+    storage: { from: () => ({ download: async () => ({ data: { arrayBuffer: async () => Buffer.from(patch) }, error: null }) }) },
+  };
+  assert.equal(await loadSeedPatch(supabase, { description: 'Opened by Bob from conversation x' }), null);
+  assert.equal(await loadSeedPatch(supabase, { description: `Opened by Bob's autopilot from job ${parent} after independent review (round 1 of 2)` }), null, 'no marker, no seed');
+  const seed = await loadSeedPatch(supabase, { description: `Opened by Bob's autopilot from job ${parent} after independent review (round 1 of 2) [[seed_patch:${artifactId}]]` });
+  assert.equal(seed.text, patch);
+  assert.equal(seed.from_job, parent);
+  assert.deepEqual(seen, [['id', artifactId], ['job_id', parent]], 'the artifact is verified against the PARENT job, not this one');
+
+  const engineerPath = require.resolve('../builder-agentic-engineer');
+  const originalEngineer = require.cache[engineerPath].exports;
+  const coordinatorPath = require.resolve('../builder-runtime-coordinator');
+  delete require.cache[coordinatorPath];
+  const inputs = [];
+  require.cache[engineerPath].exports = { ...originalEngineer, runAgenticEngineer: async (input) => { inputs.push(input); return { ok: true, patch_artifact: { id: 'p2' }, routing: { provider: 'openai' } }; } };
+  try {
+    const fresh = require('../builder-runtime-coordinator');
+    const generate = fresh.agenticGenerator('backend', { workspaceRoot: '/ws', gitSourceDir: '/src', repoRoot: '/repo' }, { loadSeedPatch: async () => seed });
+    await generate({ supabase: {}, gateway: {}, job: { id: 'j2', description: 'x' }, step: { id: 's' } });
+    assert.equal(inputs[0].seedPatch.text, patch);
+  } finally {
+    require.cache[engineerPath].exports = originalEngineer;
+    delete require.cache[coordinatorPath];
+  }
+});
+
 test('an honest no-change answer parks the step (not retryable) and the planner blocks the job with that reason', async () => {
   const engineerPath = require.resolve('../builder-agentic-engineer');
   const originalEngineer = require.cache[engineerPath].exports;

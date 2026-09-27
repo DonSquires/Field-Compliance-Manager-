@@ -142,16 +142,21 @@ test('autopilot records a blocked report for a job that ended terminally without
 test('a job the independent reviewer blocked is re-opened with the findings folded into the brief, twice at most (live job 019d2088)', async () => {
   const org = '56710c19-d604-4767-9ad8-9c5863b4ceb7';
   const base = { organization_id: org, project_id: 'proj-1', status: 'failed', last_error: 'Independent AI code review found blocking defects', autopilot_state: 'driving', autopilot_requested_by: 'user-1', autopilot_conversation_id: 'conv-9', title: 'Redo chat cancel_builder_job tool', task_description: 'Symptom: … Required behaviour: (3) the same two-turn confirmation as laptop_shell, including the planner RESUME block.', target_sha: 'f'.repeat(40), frontend_required: false, backend_required: true, code_review_mode: 'independent_ai' };
-  const steps = [{ id: 's-review', step_id: 'code_review', builder_mode: 'code_reviewer', status: 'failed' }];
-  const artifacts = [{ id: 'review', step_id: 's-review', artifact_type: 'code_review', status: 'final', storage_location: `supabase_storage://builder-artifacts/${org}/job-r/review.json` }];
+  const steps = [{ id: 's-review', step_id: 'code_review', builder_mode: 'code_reviewer', status: 'failed' }, { id: 's-backend', step_id: 'backend_implementation', builder_mode: 'backend_engineer', status: 'completed' }];
+  const artifacts = [
+    { id: 'review', step_id: 's-review', artifact_type: 'code_review', status: 'final', storage_location: `supabase_storage://builder-artifacts/${org}/job-r/review.json` },
+    { id: 'proposal', step_id: 's-backend', artifact_type: 'code_implementation', status: 'final', storage_location: `supabase_storage://builder-artifacts/${org}/job-r/proposal.json` },
+    { id: 'validated', step_id: 's-backend', artifact_type: 'code_implementation', status: 'final', storage_location: `supabase_storage://builder-artifacts/${org}/job-r/validated.patch` },
+  ];
+  const workerRuns = [{ id: 'run-ok', step_id: 's-backend', status: 'completed', profile: 'backend-verify', patch_artifact_id: 'proposal', output_artifact_ids: ['validated'] }];
   const objects = { [`${org}/job-r/review.json`]: JSON.stringify({ verdict: 'blocked', summary: 'The pending cancellation is persisted and reloaded but never wired into the planner continuation path.', findings: [{ severity: 'high', file: 'supabase/functions/onspace-ai-chat/index.ts', message: 'The new builder_cancellation_pending kind has no corresponding planner RESUME wiring, so a bare "yes" is not routed back to cancel_builder_job.' }], test_gaps: ['No test covers the affirmative turn routing back to the tool.'], residual_risks: [] }) };
 
-  // Round 1: the failed job is re-opened; the new brief carries the finding and the round marker.
+  // Round 1: the failed job is re-opened; the new brief carries the finding, the round marker and the seed patch.
   const job = { ...base, id: 'job-r', description: null };
   const actions = actionsRecorder();
   const created = [];
   actions.createJob = async (spec) => { created.push(spec); return { id: 'job-r2' }; };
-  const outcomes = await autopilotTick({ supabase: fakeSupabase({ job, steps, artifacts, objects }), jobs: [job], actions });
+  const outcomes = await autopilotTick({ supabase: fakeSupabase({ job, steps, artifacts, workerRuns, objects }), jobs: [job], actions });
   assert.deepEqual(outcomes, [{ job: 'job-r', outcome: 'review_reopened', resumed_as: 'job-r2' }]);
   assert.equal(created.length, 1);
   assert.equal(created[0].title, job.title);
@@ -162,7 +167,8 @@ test('a job the independent reviewer blocked is re-opened with the findings fold
   assert.match(created[0].taskDescription, /INDEPENDENT REVIEW OF THE PREVIOUS ATTEMPT \(job job-r\) BLOCKED IT/);
   assert.match(created[0].taskDescription, /- \[high\] supabase\/functions\/onspace-ai-chat\/index\.ts: The new builder_cancellation_pending kind has no corresponding planner RESUME wiring/);
   assert.match(created[0].taskDescription, /Test gaps the reviewer named:\n- No test covers the affirmative turn/);
-  assert.equal(created[0].description, "Opened by Bob's autopilot from job job-r after independent review (round 1 of 2)");
+  assert.match(created[0].taskDescription, /START FROM THE PREVIOUS ATTEMPT: its verified change is applied to your worktree/);
+  assert.equal(created[0].description, "Opened by Bob's autopilot from job job-r after independent review (round 1 of 2) [[seed_patch:validated]]");
   const recorded = actions.calls.find(([name]) => name === 'record');
   assert.equal(recorded[2], 'done');
   assert.match(recorded[3].text, /^Revising: an independent AI reviewer .* found problems with Bob's attempt/);
@@ -170,13 +176,14 @@ test('a job the independent reviewer blocked is re-opened with the findings fold
   assert.equal(recorded[3].resumed_as_job_id, 'job-r2');
   assert.equal(recorded[3].repair_outcome, 'review_reopened');
 
-  // Round 2 fails too: re-opened once more (round 2 of 2).
-  const second = { ...base, id: 'job-r2', description: "Opened by Bob's autopilot from job job-r after independent review (round 1 of 2)" };
+  // Round 2 fails too: re-opened once more (round 2 of 2). Without a verified patch there is no seed.
+  const second = { ...base, id: 'job-r2', description: "Opened by Bob's autopilot from job job-r after independent review (round 1 of 2) [[seed_patch:validated]]" };
   const actions2 = actionsRecorder();
   const created2 = [];
   actions2.createJob = async (spec) => { created2.push(spec); return { id: 'job-r3' }; };
-  assert.equal((await autopilotTick({ supabase: fakeSupabase({ job: second, steps, artifacts, objects }), jobs: [second], actions: actions2 }))[0].outcome, 'review_reopened');
-  assert.match(created2[0].description, /round 2 of 2/);
+  assert.equal((await autopilotTick({ supabase: fakeSupabase({ job: second, steps: steps.slice(0, 1), artifacts: artifacts.slice(0, 1), objects }), jobs: [second], actions: actions2 }))[0].outcome, 'review_reopened');
+  assert.match(created2[0].description, /round 2 of 2\)$/);
+  assert.doesNotMatch(created2[0].taskDescription, /START FROM THE PREVIOUS ATTEMPT/);
 
   // Round 3 would exceed the bound: blocked, in plain language, with the reviewer's words.
   const third = { ...base, id: 'job-r3', description: "Opened by Bob's autopilot from job job-r2 after independent review (round 2 of 2)" };
