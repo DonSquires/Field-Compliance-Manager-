@@ -301,6 +301,12 @@ test('model execution walks the in-house-first chain and escalates to OpenAI onl
   // The laptop is off, so the chain starts at the VPS; the author identity is excluded for the reviewer.
   assert.deepEqual(selectProviders(request, { health }), [{ provider: 'ollama', model: 'llama3.1:8b' }, { provider: 'openai', model: 'gpt-5.4-mini' }]);
   assert.deepEqual(selectProviders(request, { health, avoid: [{ provider: 'ollama', model: 'llama3.1:8b' }] }), [{ provider: 'openai', model: 'gpt-5.4-mini' }]);
+  // In-house independence: the VPS serves the reviewer from its next installed allowlisted model when
+  // its default is the author's; an allowlisted-but-uninstalled alternative is not good enough.
+  const vps = { ...health, ollama: { configured: true, healthy: true, models: ['qwen3-coder:30b', 'gpt-oss:20b', 'llama3.1:8b'], installed: ['qwen3-coder:30b', 'llama3.1:8b'], ready_model: 'qwen3-coder:30b' } };
+  assert.deepEqual(selectProviders(request, { health: vps, avoid: [{ provider: 'ollama', model: 'qwen3-coder:30b' }] })[0], { provider: 'ollama', model: 'llama3.1:8b' });
+  const vpsWithReviewer = { ...vps, ollama: { ...vps.ollama, installed: ['qwen3-coder:30b', 'gpt-oss:20b'] } };
+  assert.deepEqual(selectProviders(request, { health: vpsWithReviewer, avoid: [{ provider: 'ollama', model: 'qwen3-coder:30b' }] })[0], { provider: 'ollama', model: 'gpt-oss:20b' });
   assert.deepEqual(selectProviders(request, { health, startAfter: 'ollama' }), [{ provider: 'openai', model: 'gpt-5.4-mini' }]);
 
   const mock = createSupabaseMock();

@@ -70,11 +70,13 @@ async function probeProvider(config, name, { fetchImpl = globalThis.fetch, now =
 
 // The model a provider would actually serve for a request: the requested model when allowed and
 // installed, else the first allowlisted model that is installed (local) or allowlisted (OpenAI).
+// A requested local model that is allowlisted but not installed resolves to nothing rather than to a
+// substitute: the adapter asks for a specific model when it must differ from the author's.
 function resolveProviderModel(config, name, requestedModel, installed = null) {
   const providerConfig = config[name];
   if (!providerConfig) return null;
   const available = model => !Array.isArray(installed) || installed.length === 0 || installed.includes(model) || installed.includes(`${model}:latest`);
-  if (requestedModel && providerConfig.models.has(requestedModel) && available(requestedModel)) return requestedModel;
+  if (requestedModel && providerConfig.models.has(requestedModel)) return available(requestedModel) ? requestedModel : null;
   return bestAvailableModel(providerConfig.models, installed);
 }
 

@@ -307,10 +307,19 @@ function selectProviders(modelRequest, { health = null, avoid = [], startAfter =
   for (const provider of chain.slice(from)) {
     const status = health ? health[provider] : null;
     if (status && (!status.configured || !status.healthy)) continue;
-    const model = provider === PROVIDERS.OPENAI
+    const avoided = candidate => avoid.some(identity => identity && identity.provider === provider && (!identity.model || !candidate || identity.model === candidate));
+    let model = provider === PROVIDERS.OPENAI
       ? (modelRequest.model_name || status?.ready_model || null)
       : (status?.ready_model || (Array.isArray(status?.models) ? status.models[0] : null) || null);
-    if (avoid.some(identity => identity && identity.provider === provider && (!identity.model || !model || identity.model === model))) continue;
+    if (avoided(model)) {
+      if (provider === PROVIDERS.OPENAI) continue;
+      // The in-house reviewer may share the author's machine but not its model: the next installed
+      // allowlisted model on the same provider (e.g. gpt-oss:20b after qwen3-coder:30b) serves instead.
+      const installed = Array.isArray(status?.installed) && status.installed.length ? status.installed : null;
+      const isInstalled = candidate => !installed || installed.includes(candidate) || installed.includes(`${candidate}:latest`);
+      model = (Array.isArray(status?.models) ? status.models : []).find(candidate => !avoided(candidate) && isInstalled(candidate)) || null;
+      if (!model) continue;
+    }
     candidates.push({ provider, model });
   }
   return candidates;
