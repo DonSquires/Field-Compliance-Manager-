@@ -139,6 +139,62 @@ test('autopilot records a blocked report for a job that ended terminally without
   assert.match(recorded[3].text, /Why: Independent AI review retry limit reached/);
 });
 
+test('a job the independent reviewer blocked is re-opened with the findings folded into the brief, twice at most (live job 019d2088)', async () => {
+  const org = '56710c19-d604-4767-9ad8-9c5863b4ceb7';
+  const base = { organization_id: org, project_id: 'proj-1', status: 'failed', last_error: 'Independent AI code review found blocking defects', autopilot_state: 'driving', autopilot_requested_by: 'user-1', autopilot_conversation_id: 'conv-9', title: 'Redo chat cancel_builder_job tool', task_description: 'Symptom: … Required behaviour: (3) the same two-turn confirmation as laptop_shell, including the planner RESUME block.', target_sha: 'f'.repeat(40), frontend_required: false, backend_required: true, code_review_mode: 'independent_ai' };
+  const steps = [{ id: 's-review', step_id: 'code_review', builder_mode: 'code_reviewer', status: 'failed' }];
+  const artifacts = [{ id: 'review', step_id: 's-review', artifact_type: 'code_review', status: 'final', storage_location: `supabase_storage://builder-artifacts/${org}/job-r/review.json` }];
+  const objects = { [`${org}/job-r/review.json`]: JSON.stringify({ verdict: 'blocked', summary: 'The pending cancellation is persisted and reloaded but never wired into the planner continuation path.', findings: [{ severity: 'high', file: 'supabase/functions/onspace-ai-chat/index.ts', message: 'The new builder_cancellation_pending kind has no corresponding planner RESUME wiring, so a bare "yes" is not routed back to cancel_builder_job.' }], test_gaps: ['No test covers the affirmative turn routing back to the tool.'], residual_risks: [] }) };
+
+  // Round 1: the failed job is re-opened; the new brief carries the finding and the round marker.
+  const job = { ...base, id: 'job-r', description: null };
+  const actions = actionsRecorder();
+  const created = [];
+  actions.createJob = async (spec) => { created.push(spec); return { id: 'job-r2' }; };
+  const outcomes = await autopilotTick({ supabase: fakeSupabase({ job, steps, artifacts, objects }), jobs: [job], actions });
+  assert.deepEqual(outcomes, [{ job: 'job-r', outcome: 'review_reopened', resumed_as: 'job-r2' }]);
+  assert.equal(created.length, 1);
+  assert.equal(created[0].title, job.title);
+  assert.equal(created[0].parentJobId, 'job-r');
+  assert.equal(created[0].requestedBy, 'user-1');
+  assert.equal(created[0].conversationId, 'conv-9');
+  assert.match(created[0].taskDescription, /^Symptom: …/);
+  assert.match(created[0].taskDescription, /INDEPENDENT REVIEW OF THE PREVIOUS ATTEMPT \(job job-r\) BLOCKED IT/);
+  assert.match(created[0].taskDescription, /- \[high\] supabase\/functions\/onspace-ai-chat\/index\.ts: The new builder_cancellation_pending kind has no corresponding planner RESUME wiring/);
+  assert.match(created[0].taskDescription, /Test gaps the reviewer named:\n- No test covers the affirmative turn/);
+  assert.equal(created[0].description, "Opened by Bob's autopilot from job job-r after independent review (round 1 of 2)");
+  const recorded = actions.calls.find(([name]) => name === 'record');
+  assert.equal(recorded[2], 'done');
+  assert.match(recorded[3].text, /^Revising: an independent AI reviewer .* found problems with Bob's attempt/);
+  assert.match(recorded[3].text, /What the reviewer found: The new builder_cancellation_pending kind/);
+  assert.equal(recorded[3].resumed_as_job_id, 'job-r2');
+  assert.equal(recorded[3].repair_outcome, 'review_reopened');
+
+  // Round 2 fails too: re-opened once more (round 2 of 2).
+  const second = { ...base, id: 'job-r2', description: "Opened by Bob's autopilot from job job-r after independent review (round 1 of 2)" };
+  const actions2 = actionsRecorder();
+  const created2 = [];
+  actions2.createJob = async (spec) => { created2.push(spec); return { id: 'job-r3' }; };
+  assert.equal((await autopilotTick({ supabase: fakeSupabase({ job: second, steps, artifacts, objects }), jobs: [second], actions: actions2 }))[0].outcome, 'review_reopened');
+  assert.match(created2[0].description, /round 2 of 2/);
+
+  // Round 3 would exceed the bound: blocked, in plain language, with the reviewer's words.
+  const third = { ...base, id: 'job-r3', description: "Opened by Bob's autopilot from job job-r2 after independent review (round 2 of 2)" };
+  const actions3 = actionsRecorder();
+  actions3.createJob = async () => { throw new Error('must not re-open a third time'); };
+  const out3 = await autopilotTick({ supabase: fakeSupabase({ job: third, steps, artifacts, objects }), jobs: [third], actions: actions3 });
+  assert.deepEqual(out3, [{ job: 'job-r3', outcome: 'blocked' }]);
+  const blocked = actions3.calls.find(([name]) => name === 'record');
+  assert.equal(blocked[2], 'blocked');
+  assert.match(blocked[3].text, /after 2 attempts the independent reviewer still blocks it: The new builder_cancellation_pending kind/);
+
+  // Other terminal failures are untouched by this path.
+  const other = { ...base, id: 'job-o', last_error: 'Independent AI review retry limit reached' };
+  const actions4 = actionsRecorder();
+  actions4.createJob = async () => { throw new Error('not a review block'); };
+  assert.deepEqual(await autopilotTick({ supabase: fakeSupabase({ job: other }), jobs: [other], actions: actions4 }), [{ job: 'job-o', outcome: 'blocked' }]);
+});
+
 test('report and pull-request composers degrade honestly when evidence is thin', () => {
   const evidence = { changedFiles: [], testsRun: [], followUps: [], rollbackNotes: [], summary: '', verifyRun: null, security: null, review: null, releaseNotes: null };
   const report = composeReport({ job: { title: 'T' }, evidence, pullRequestUrl: null, state: 'published' });

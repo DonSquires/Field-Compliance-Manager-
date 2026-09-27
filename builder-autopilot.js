@@ -73,7 +73,15 @@ async function collectEvidence({ supabase, snapshot }) {
     followUps: Array.isArray(envelope?.follow_ups) ? envelope.follow_ups.map((t) => plain(t, 300)) : [],
     rollbackNotes: Array.isArray(envelope?.rollback_notes) ? envelope.rollback_notes.map((t) => plain(t, 300)) : [],
     security: securityReport && typeof securityReport === 'object' ? { passed: securityReport.passed === true, counts: securityReport.counts ?? null } : null,
-    review: reviewReport && typeof reviewReport === 'object' ? { verdict: reviewReport.verdict ?? null, summary: plain(reviewReport.summary, 800), findings: Array.isArray(reviewReport.findings) ? reviewReport.findings.length : null, model: null } : null,
+    review: reviewReport && typeof reviewReport === 'object' ? {
+      verdict: reviewReport.verdict ?? null,
+      summary: plain(reviewReport.summary, 800),
+      findings: Array.isArray(reviewReport.findings) ? reviewReport.findings.length : null,
+      // The reviewer's actual words: what a review re-open hands back to the author.
+      findingList: Array.isArray(reviewReport.findings) ? reviewReport.findings.filter((f) => f && typeof f.message === 'string').map((f) => ({ severity: String(f.severity ?? ''), file: plain(f.file, 160), message: plain(f.message, 700) })) : [],
+      testGaps: Array.isArray(reviewReport.test_gaps) ? reviewReport.test_gaps.map((t) => plain(t, 400)) : [],
+      model: null,
+    } : null,
     releaseNotes: release && typeof release === 'object' ? { notes: Array.isArray(release.release_notes) ? release.release_notes.map((t) => plain(t, 300)) : [], risks: Array.isArray(release.known_risks) ? release.known_risks.map((t) => plain(t, 300)) : [] } : null,
   };
 }
@@ -106,6 +114,10 @@ function composeReport({ job, evidence, pullRequestUrl, state, reason, hold, rep
     lines.push(`What Bob is doing: he has opened a repair job, "${plain(repair?.title, 160)}", which goes through the same build, test and review steps. When that repair is merged, Bob re-runs your change automatically. Nothing for you to do now.`);
   } else if (state === 'resumed') {
     lines.push(`Resumed: main is fixed, so Bob has started "${plain(job.title, 160)}" again from the current code. You will get a fresh report when it is built and checked.`);
+  } else if (state === 'review_reopened') {
+    lines.push(`Revising: an independent AI reviewer (a different model from the author) found problems with Bob's attempt at "${plain(job.title, 160)}", so Bob is fixing them in a new attempt.`);
+    lines.push(`What the reviewer found: ${plain(reason, 700)}`);
+    lines.push('Nothing was published. You will get a fresh report when the revised change is built, checked and reviewed again.');
   } else if (state === 'repair_failed') {
     lines.push(`Stopped: Bob could not fix the app's own failing checks that were blocking "${plain(job.title, 160)}".`);
     lines.push(`Why: ${plain(reason, 500)}.`);
@@ -197,6 +209,43 @@ function isReopenedJob(job) {
   return String(job?.description ?? '').startsWith(REOPEN_MARK);
 }
 
+// The independent reviewer blocked the change. That is the normal author -> review -> revise loop
+// of a coding agent, not a stop: the same brief goes again with the reviewer's findings folded in,
+// at most REVIEW_ROUNDS times per brief (job 019d2088, 2026-09-27: a correct high finding —
+// the planner RESUME block was missing — ended the job as "Bob could not finish on his own").
+const REVIEW_ROUNDS = 2;
+const REVIEW_BLOCK = /independent ai code review found blocking defects/i;
+const REVIEW_ROUND_MARK = /after independent review \(round (\d+) of \d+\)/i;
+
+function reviewRound(job) {
+  const match = String(job?.description ?? '').match(REVIEW_ROUND_MARK);
+  return match ? Number(match[1]) : 0;
+}
+
+function reviewBlock(job) {
+  return REVIEW_BLOCK.test(String(job?.last_error ?? ''));
+}
+
+/** The same brief with the reviewer's findings appended, for a fresh job pinned to the current main. */
+function reviewReopenSpec(job, review) {
+  const round = reviewRound(job) + 1;
+  const findings = (review?.findingList ?? []).map((f) => `- [${f.severity || 'finding'}] ${f.file ? `${f.file}: ` : ''}${f.message}`);
+  const gaps = (review?.testGaps ?? []).slice(0, 6).map((t) => `- ${t}`);
+  const taskDescription = [
+    String(job.task_description ?? '').trim(),
+    '',
+    `INDEPENDENT REVIEW OF THE PREVIOUS ATTEMPT (job ${job.id}) BLOCKED IT. This attempt must fix every finding below; treat each as a required behaviour, and add a test for each where the layer allows.`,
+    review?.summary ? `Reviewer's summary: ${review.summary}` : null,
+    findings.length ? `Findings:\n${findings.join('\n')}` : null,
+    gaps.length ? `Test gaps the reviewer named:\n${gaps.join('\n')}` : null,
+  ].filter((line) => line !== null).join('\n');
+  return {
+    ...reopenSpec(job),
+    taskDescription: taskDescription.slice(0, 12000),
+    description: `${REOPEN_MARK}${job.id} after independent review (round ${round} of ${REVIEW_ROUNDS})`,
+  };
+}
+
 /** The brief for the job that fixes main, bound to the same requester and conversation as the blocked job. */
 function repairJobFor(job, baseline) {
   const web = baseline.files.some((f) => f.startsWith('src/') || f.startsWith('apps/web/')) || /--prefix apps\/web/.test(baseline.reason);
@@ -278,7 +327,18 @@ async function autopilotTick({ supabase, jobs, actions, log = () => {} }) {
         if (job.autopilot_state !== 'blocked' && job.autopilot_state !== 'done') {
           const snapshot = await loadBuilderRuntimeSnapshot(supabase, job.id).catch(() => null);
           const evidence = snapshot ? await collectEvidence({ supabase, snapshot }).catch(() => null) : null;
-          await actions.record(job.id, 'blocked', composeReport({ job, evidence: evidence || { changedFiles: [], testsRun: [], followUps: [], rollbackNotes: [] }, state: 'blocked', reason: job.last_error || `the job ended as ${job.status}` }));
+          if (job.status === 'failed' && reviewBlock(job) && reviewRound(job) < REVIEW_ROUNDS && typeof actions.createJob === 'function') {
+            const reopened = await actions.createJob(reviewReopenSpec(job, evidence?.review));
+            const said = evidence?.review?.findingList?.length ? evidence.review.findingList.map((f) => f.message).join(' ') : (evidence?.review?.summary || job.last_error);
+            await actions.record(job.id, 'done', { ...composeReport({ job, evidence, state: 'review_reopened', reason: said, resumedAs: reopened.id }), repair_outcome: 'review_reopened' });
+            log({ job: job.id, review_reopened_as: reopened.id, round: reviewRound(job) + 1 });
+            outcomes.push({ job: job.id, outcome: 'review_reopened', resumed_as: reopened.id });
+            continue;
+          }
+          const reason = job.status === 'failed' && reviewBlock(job) && evidence?.review?.findingList?.length
+            ? `after ${REVIEW_ROUNDS} attempts the independent reviewer still blocks it: ${evidence.review.findingList.map((f) => f.message).join(' ')}`
+            : (job.last_error || `the job ended as ${job.status}`);
+          await actions.record(job.id, 'blocked', composeReport({ job, evidence: evidence || { changedFiles: [], testsRun: [], followUps: [], rollbackNotes: [] }, state: 'blocked', reason }));
           outcomes.push({ job: job.id, outcome: 'blocked' });
         }
         continue;

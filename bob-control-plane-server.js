@@ -366,7 +366,7 @@ async function autopilotOnce() {
             _task_description: String(input.taskDescription).slice(0, 12000),
             _target_sha: sha,
             _branch_name: 'main',
-            _description: input.parentJobId ? `Opened by Bob's autopilot from job ${input.parentJobId}.` : null,
+            _description: input.description ? String(input.description).slice(0, 500) : input.parentJobId ? `Opened by Bob's autopilot from job ${input.parentJobId}.` : null,
             _frontend_required: input.frontendRequired === true,
             _backend_required: input.backendRequired === true,
             _code_review_mode: input.codeReviewMode || 'independent_ai',
