@@ -80,6 +80,30 @@ jobs:
               echo "::warning::$branch shares no history with main; skipped"
               continue
             fi
+            # Review is over when the newest pull request for the branch was closed without a merge
+            # (Gitea or GitHub): re-pushing it re-created a deleted branch and a blocked Vercel preview
+            # every ten minutes (bob/job-79b4c08f, 2026-09-27). A merged one is caught below.
+            gitea_state="$(printf '%s' "$gitea_prs" | jq -r --arg b "$branch" '[.[] | select(.head.ref == $b)] | sort_by(.number) | last | if . == null then "" elif .merged then "merged" else .state end' 2>/dev/null || true)"
+            if [ "$gitea_state" = "closed" ]; then
+              echo "$branch: its Gitea pull request was closed without merging; nothing to bridge"
+              continue
+            fi
+            github_state="$(gh pr list --repo "$REPO" --head "$branch" --state all --json number,state --jq 'sort_by(.number) | last | .state // ""' 2>/dev/null || true)"
+            if [ "$github_state" = "CLOSED" ]; then
+              echo "$branch: its GitHub pull request was closed without merging; nothing to bridge"
+              continue
+            fi
+            # Nothing new from Bob since the last bridge: leave the GitHub branch alone. Replaying onto
+            # every new main commit pushed a fresh sha (and a preview deployment) each time main moved.
+            pushed_head="$(git ls-remote origin "refs/heads/$branch" | cut -f1)"
+            up_to_date=0
+            if [ -n "$pushed_head" ] && git cat-file -e "$pushed_head^{commit}" 2>/dev/null \
+               && git log -1 --format=%B "$pushed_head" | grep -q "^Verified-Gitea-Head: $sha$"; then
+              echo "$branch: GitHub already has Bob's verified head ${sha:0:10}; nothing to push"
+              up_to_date=1
+              rebased="$pushed_head"
+            fi
+            if [ "$up_to_date" = "0" ]; then
             # The workflow token may not push commits whose workflow files differ from
             # main, and a Builder branch is pinned to an older main. Replay Bob's
             # commits onto the current main so reviewers see an up-to-date branch;
@@ -101,9 +125,13 @@ jobs:
               echo "::warning::$branch changes workflow files (protected path); skipped"
               continue
             fi
-            if [ "$(git ls-remote origin "refs/heads/$branch" | cut -f1)" != "$rebased" ]; then
+            # Stamp the verified Gitea head on the replayed tip so the next run can tell "same content" from "Bob revised it".
+            git commit -q --amend -m "$(git log -1 --format=%B HEAD | sed '/^Verified-Gitea-Head: /d')" -m "Verified-Gitea-Head: $sha"
+            rebased="$(git rev-parse HEAD)"
+            if [ "$pushed_head" != "$rebased" ]; then
               git push --force-with-lease="refs/heads/$branch" origin "$rebased:refs/heads/$branch"
               echo "pushed $branch @ ${rebased:0:10} (verified original ${sha:0:10})"
+            fi
             fi
             existing="$(gh pr list --repo "$REPO" --head "$branch" --state all --json number --jq 'length')"
             if [ "$existing" = "0" ]; then
