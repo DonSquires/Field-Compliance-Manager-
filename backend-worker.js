@@ -6,6 +6,7 @@ const {
   changedFilesFromPatch,
   classifyBackendChangeRisk
 } = require('./supabase/functions/_shared/builder-backend-engineer');
+const { checkCallerReads } = require('./builder-data-path-gate');
 
 const MAX_LOG_BYTES = 512 * 1024;
 const TEST_TIMEOUT_MS = 5 * 60 * 1000;
@@ -86,6 +87,25 @@ function executeBackendPatch({ sourceDir, patchPath, artifactDir, workDir = '/wo
   if (patchApplied && checks.every(check => check.status === 0) && changedTests.length) {
     checks.push(run('node', ['--test', ...changedTests], workDir, TEST_TIMEOUT_MS));
   }
+  // Data-path gate: a caller-scoped read of a service-role-only table is a feature that can never
+  // show data (job 79b4c08f). schema.sql in the pinned tree is the truth it is checked against.
+  let dataPath = { checked: false, findings: [] };
+  if (patchApplied) {
+    const schemaPath = path.join(workDir, 'supabase/schema.sql');
+    const schema = fs.existsSync(schemaPath) ? fs.readFileSync(schemaPath, 'utf8') : null;
+    const findings = checkCallerReads(patchText, schema);
+    dataPath = { checked: Boolean(schema), findings };
+    if (findings.length) {
+      checks.push({
+        command: 'data-path gate: caller-scoped reads vs row-level security (supabase/schema.sql)',
+        status: 1,
+        timed_out: false,
+        stdout: '',
+        stderr: findings.map(finding => finding.message).join('\n'),
+        error: null
+      });
+    }
+  }
 
   const succeeded = patchApplied && checks.every(check => check.status === 0);
   const manifest = changedFiles.map(file => ({
@@ -97,6 +117,7 @@ function executeBackendPatch({ sourceDir, patchPath, artifactDir, workDir = '/wo
     succeeded,
     verification_scope: 'static_backend_patch',
     risk,
+    data_path: dataPath,
     checks,
     migration_execution: {
       performed: false,

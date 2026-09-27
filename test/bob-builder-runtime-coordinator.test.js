@@ -278,8 +278,11 @@ test('an author that ran out of turns reading gets one immediate second run seed
     assert.equal(rpcs.length, 0, 'no failure is recorded when the second run delivers');
 
     // Both runs out of turns: parked once, with both facts in the reason, not retried six times.
+    // (The first ran dry without ever calling finish — job 79b4c08f — which must count the same way.)
     calls.length = 0;
-    require.cache[engineerPath].exports = { ...originalEngineer, runAgenticEngineer: async (input) => { calls.push(1); return { ok: false, no_change: true, budget_exhausted: true, resume_hints: map, error: input.previousAttempt ? 'still too big' : 'first', turns: 60, routing: { provider: 'openai' } }; } };
+    require.cache[engineerPath].exports = { ...originalEngineer, runAgenticEngineer: async (input) => { calls.push(1); return input.previousAttempt
+      ? { ok: false, no_change: true, budget_exhausted: true, resume_hints: map, error: 'still too big', turns: 60, routing: { provider: 'openai' } }
+      : { ok: false, budget_exhausted: true, resume_hints: map, error: 'turn budget exhausted', turns: 60, routing: { provider: 'openai' } }; } };
     delete require.cache[coordinatorPath];
     const again = require('../builder-runtime-coordinator');
     const parked = await again.runBackendImplementation({ supabase, gateway: {}, job: { id: 'job-z' }, step: { id: 'step-z' }, context: { workspaceRoot: '/ws', gitSourceDir: '/src', repoRoot: '/repo' } });

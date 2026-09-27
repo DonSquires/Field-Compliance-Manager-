@@ -15,7 +15,29 @@ function artifactList(value) {
   return Array.isArray(value) ? value : value ? [value] : [];
 }
 
-function parseIndependentCodeReview(content) {
+// Live job 79b4c08f (2026-09-27): the in-house 7B reviewer "passed" a patch whose lookup read a
+// service-role-only table with the caller's client; its summary was the author's own summary, and
+// findings/test_gaps/residual_risks were all empty. A review that restates the author, or reports
+// nothing at all on a substantive patch, is not a review; the validator rejects it so the chain
+// escalates to a reviewer that reads the patch.
+const normaliseWords = (text) => String(text ?? '').toLowerCase().replace(/[^a-z0-9\s]/g, ' ').split(/\s+/).filter(Boolean);
+function restatesAuthor(summary, authorSummaries) {
+  const words = normaliseWords(summary);
+  if (words.length < 8) return false;
+  const grams = (list) => new Set(list.slice(3).map((_, i) => list.slice(i, i + 4).join(' ')));
+  const own = grams(words);
+  for (const author of authorSummaries || []) {
+    const theirs = grams(normaliseWords(author));
+    if (!theirs.size || !own.size) continue;
+    let shared = 0;
+    for (const gram of own) if (theirs.has(gram)) shared++;
+    if (shared / own.size >= 0.6) return true;
+  }
+  return false;
+}
+const SUBSTANTIVE_PATCH_LINES = 40;
+
+function parseIndependentCodeReview(content, context = {}) {
   if (typeof content !== 'string' || !content.trim()) throw new Error('independent code review is empty');
   let report;
   try {
@@ -37,7 +59,15 @@ function parseIndependentCodeReview(content) {
   }
   const hasBlocking = report.findings.some(finding => ['critical', 'high'].includes(finding.severity));
   if ((report.verdict === 'passed') === hasBlocking) throw new Error('independent code review verdict conflicts with findings');
+  if (restatesAuthor(report.summary, context.authorSummaries)) throw new Error('independent code review summary restates the author\'s own summary; describe what YOU verified in the patch (data paths, authorization, tests), not what the author said it does');
+  if (report.verdict === 'passed' && Number(context.addedLines) >= SUBSTANTIVE_PATCH_LINES && !report.findings.length && !report.test_gaps.length && !report.residual_risks.length) {
+    throw new Error(`independent code review reports nothing at all on a ${context.addedLines}-line patch; name at least one concrete finding, test gap, or residual risk you checked (or a low-severity finding stating what you verified and why it holds)`);
+  }
   return report;
+}
+
+function addedLineCount(patches) {
+  return (patches || []).reduce((total, patch) => total + String(patch ?? '').split('\n').filter(line => line.startsWith('+') && !line.startsWith('+++')).length, 0);
 }
 
 async function loadCodeReviewEvidence({ supabase, job, artifacts }) {
@@ -151,6 +181,8 @@ async function runIndependentCodeReview({
   const systemPrompt = [
     'You are an independent coding AI reviewer for Field Compliance Manager.',
     'Review correctness, regressions, tenant isolation, authorization assumptions, data exposure, and missing tests.',
+    'Data paths: for every table the patch reads or writes, check who can see it (row-level security in supabase/schema.sql is the truth: a caller-scoped client reading a service-role-only table gets no rows) and that the two-turn/pending patterns the code claims to follow are wired at every seam the precedent uses.',
+    'Write the summary in your own words about what you verified; do not restate the author\'s description. On any patch of substance, list the test gaps and residual risks you see.',
     'You can recommend passed or blocked. You have no approval, merge, deployment, or code-modification authority.',
     'Use only the verified patch, manifest, build logs, and security report.',
     REVIEW_OUTPUT_CONTRACT
@@ -169,7 +201,8 @@ async function runIndependentCodeReview({
     outputSchema: { type: 'object', required: ['verdict', 'summary', 'findings', 'test_gaps', 'residual_risks'] }
   });
   const avoidIdentities = await loadAuthors(supabase, job.id);
-  let result = await executeModelRun({ supabase, gateway, modelRequest, validateOutput: parseIndependentCodeReview, avoidIdentities });
+  const validateOutput = (content) => parseIndependentCodeReview(content, { authorSummaries: evidence.author_summaries, addedLines: addedLineCount(evidence.patches) });
+  let result = await executeModelRun({ supabase, gateway, modelRequest, validateOutput, avoidIdentities });
   if (!result.ok && result.status === 422) {
     // One repair turn: the reviewer sees the validator's reason and the contract again. A shape slip
     // must not fail a job that has passed every independent worker.
@@ -181,7 +214,7 @@ async function runIndependentCodeReview({
         system_prompt: `${systemPrompt} Your previous reply was rejected: ${String(result.error || 'invalid output').slice(0, 300)}. Reply again with the exact JSON shape.`
       }
     };
-    result = await executeModelRun({ supabase, gateway, modelRequest: repairRequest, validateOutput: parseIndependentCodeReview, avoidIdentities });
+    result = await executeModelRun({ supabase, gateway, modelRequest: repairRequest, validateOutput, avoidIdentities });
   }
   if (!result.ok) {
     await abortReview(supabase, job.id, step.id, result.error || 'Independent reviewer failed');

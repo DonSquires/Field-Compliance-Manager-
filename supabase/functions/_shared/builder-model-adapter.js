@@ -41,12 +41,17 @@ function parseChain(raw, fallback) {
 // Restricted data never leaves the house. Chains are env-tunable per workload class.
 // The VPS (CPU, 8B models) carries light and restricted work only: live, it reviewed a patch as
 // `{"verdict":"passed","summary":""}` — a rubber stamp is worse than an outsourced review.
+// Review 2026-09-27 (job 79b4c08f): the laptop 7B also rubber-stamped — it passed a patch whose
+// lookup read a service-role-only table with the caller's client, with the author's summary as its
+// own and no findings. The independent review is the owner's only code check (the owner does not
+// read code), so it is the one workload that goes to the strongest reviewer first and falls back
+// in-house; BOB_BUILDER_ROUTE_REVIEW still overrides.
 function routingChains(env = process.env) {
   return {
     restricted: parseChain(env.BOB_BUILDER_ROUTE_RESTRICTED, [PROVIDERS.OLLAMA, PROVIDERS.GPU_WORKSTATION]),
     local: parseChain(env.BOB_BUILDER_ROUTE_LOCAL, [PROVIDERS.GPU_WORKSTATION, PROVIDERS.OLLAMA, PROVIDERS.OPENAI]),
     author: parseChain(env.BOB_BUILDER_ROUTE_AUTHOR, [PROVIDERS.GPU_WORKSTATION, PROVIDERS.OPENAI]),
-    review: parseChain(env.BOB_BUILDER_ROUTE_REVIEW, [PROVIDERS.GPU_WORKSTATION, PROVIDERS.OPENAI]),
+    review: parseChain(env.BOB_BUILDER_ROUTE_REVIEW, [PROVIDERS.OPENAI, PROVIDERS.GPU_WORKSTATION]),
     analysis: parseChain(env.BOB_BUILDER_ROUTE_ANALYSIS, [PROVIDERS.GPU_WORKSTATION, PROVIDERS.OPENAI])
   };
 }

@@ -171,11 +171,12 @@ function agenticGenerator(lane, context, extra = {}) {
     let generation = await attempt();
     // The author spent its turns reading a large seam and edited nothing (job 118731bd). That is not
     // "nothing to do": give it one more run that starts from the map the first run built, so the
-    // owner is not asked to say "try again" for a failure Bob can absorb himself.
-    if (generation.no_change && generation.budget_exhausted && generation.resume_hints) {
+    // owner is not asked to say "try again" for a failure Bob can absorb himself. Two such runs in a
+    // row park the step with both facts (no_change → not retried six more times).
+    if (generation.budget_exhausted && generation.resume_hints) {
       const second = await attempt(generation.resume_hints);
       generation = { ...second, attempts: 2, first_attempt: { turns: generation.turns, conclusion: String(generation.error || '').slice(0, 300) } };
-      if (generation.no_change) generation = { ...generation, error: `two attempts ran out of turns without an edit; second attempt: ${String(second.error || '').slice(0, 600)}` };
+      if (generation.budget_exhausted || generation.no_change) generation = { ...generation, no_change: true, error: `two attempts ran out of turns without an edit; second attempt: ${String(second.error || '').slice(0, 600)}` };
     }
     return generation;
   };

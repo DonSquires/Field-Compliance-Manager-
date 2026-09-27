@@ -27,6 +27,41 @@ test('independent reviewer parser requires structured severity findings', () => 
   assert.throws(() => parseIndependentCodeReview(JSON.stringify({ ...report(), findings: undefined })), /findings must be an array/);
 });
 
+test('a review that restates the author or reports nothing on a substantive patch is rejected (live job 79b4c08f: 7B reviewer passed a dead data path)', async () => {
+  const author = 'Added a chat cancel_builder_job tool with caller-scoped ID or exact-title lookup, an exact-target-and-reason preview, and a second-turn confirmation gate. Confirmed cancellations call builder_cancel_job through the requester’s Supabase client; missing, ambiguous, declined, repeat/finished, and unverifiable outcomes receive distinct responses. Added caddie metadata and contract tests.';
+  const parroted = { verdict: 'passed', summary: `The patch adds a new 'cancel_builder_job' tool with caller-scoped ID or exact-title lookup, an exact-target-and-reason preview, and a second-turn confirmation gate. Confirmed cancellations call builder_cancel_job through the requester’s Supabase client; missing, ambiguous, declined, repeat/finished, and unverifiable outcomes receive distinct responses. Added caddie metadata and contract tests.`, findings: [], test_gaps: [], residual_risks: [] };
+  const context = { authorSummaries: [author], addedLines: 62 };
+  assert.throws(() => parseIndependentCodeReview(JSON.stringify(parroted), context), /restates the author/);
+
+  const hollow = { ...parroted, summary: 'I read the diff: the new switch case, the allowlist entries and the regex tests all look consistent with the laptop_shell precedent.' };
+  assert.throws(() => parseIndependentCodeReview(JSON.stringify(hollow), context), /reports nothing at all on a 62-line patch/);
+  // Small patches may honestly have nothing to report; a real observation makes a big one acceptable.
+  assert.equal(parseIndependentCodeReview(JSON.stringify(hollow), { ...context, addedLines: 12 }).verdict, 'passed');
+  const engaged = { ...hollow, residual_risks: ['builder_jobs is read with the caller client; RLS on that table admits only the service role, so the lookup may return no rows for a real user'] };
+  assert.equal(parseIndependentCodeReview(JSON.stringify(engaged), context).verdict, 'passed');
+  assert.equal(parseIndependentCodeReview(JSON.stringify(engaged)).verdict, 'passed', 'no context = the shape checks only');
+
+  // The run wires the evidence into the validator, and the prompt asks for data-path checks in the reviewer's own words.
+  let validator = null;
+  const requests = [];
+  await runIndependentCodeReview({
+    supabase: {}, gateway: {},
+    job: { id: 'job-2', organization_id: 'org-1', target_sha: 'sha-1', code_review_mode: 'independent_ai' },
+    step: { id: 'review-step', step_id: 'code_review', builder_mode: 'code_reviewer' },
+    artifacts: { patch: { id: 'patch-1' }, manifest: { id: 'manifest-1' }, buildLogs: { id: 'logs-1' }, security: { id: 'security-1' } },
+    reviewerModelName: 'reviewer-model',
+    loadEvidence: async () => ({ patches: [Array.from({ length: 50 }, (_, i) => `+line ${i}`).join('\n')], author_summaries: [author] }),
+    startReview: async () => ({ success: true }),
+    executeModelRun: async input => { requests.push(input.modelRequest); validator = input.validateOutput; return { ok: true, validated_output: report(), artifact: { id: 'review-2' }, model_run_id: 'run-review' }; },
+    completeReview: async () => ({ success: true, job: { status: 'security_review', code_review_status: 'passed' } }),
+    abortReview: async () => ({ success: true })
+  });
+  assert.match(requests[0].request.system_prompt, /row-level security in supabase\/schema.sql is the truth/);
+  assert.match(requests[0].request.system_prompt, /do not restate the author/);
+  assert.throws(() => validator(JSON.stringify(parroted)), /restates the author/);
+  assert.throws(() => validator(JSON.stringify(hollow)), /50-line patch/);
+});
+
 test('independent reviewer states the exact output contract and repairs once on a validation failure', async () => {
   const requests = [];
   let aborted = false;

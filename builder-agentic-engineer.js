@@ -158,6 +158,8 @@ function systemPrompt({ lane, limits }) {
     '3. IMPLEMENT inside your worktree: replace_in_file for edits to existing files (exact old text -> new text; no line counting), write_file for new files or full rewrites, apply_patch only if you already hold a correct unified diff. Keep existing conventions. Never invent schema, tables, or behaviour absent from the evidence — verify with search/read_file.',
     '4. VERIFY: run the relevant tests (run "node --test test/<file>.test.js"), node --check on changed files, and read git diff. If a test fails, read the failure, fix the cause, and run again. Add or update a test when the change is testable at this layer.',
     '5. FINISH with a truthful summary. Truth Protocol: state what you verified, what you inferred, and what you could not check. Never claim a merge, deployment, migration application, or live write — none happen here; a human reviews the draft PR.',
+    '6. PRECEDENT PARITY: when the task says "like X" or "the way X does", X is the accepted pattern. First run search {query: "X"} over the WHOLE repo: every file that wires X (tool catalogue, allowlists/gates, the pending-marker loader, the planner prompt under services/fcm-api/src/bob, tests) is a seam the new thing must be wired into as well — wire each one or list it under follow_ups by name. Copy X\'s authorization, confirmation and persistence behaviour exactly; a risk X already carries is not a reason to stop — build to parity and record the residual concern under follow_ups. You are the only engineer on this job: nobody picks up a task you decline. Decline (empty change set, no_change_reason) ONLY for a protected path, destructive SQL, secret material, or evidence that the change would break something. A design worry is a follow_up, not a refusal.',
+    '7. DATA PATHS ARE CHECKED: a caller-scoped client (callerClient/userClient) reading a table whose row-level security admits only the service role returns no rows for a real user — the verifier fails such a patch. Before reading a table with the caller\'s client, search supabase/schema.sql for `CREATE POLICY ... ON "public"."<table>"`; if only service_role can see it, go through the path that verifies the caller and then reads with the service role (for Builder tables: callFn(\'bob-builder-control-room\', authHeader, { action: \'list\' }) as create_builder_job does).',
     '',
     `LANE: ${lane}. ${lane === 'frontend' ? 'You may only change files under apps/web/. Web build/tests are run afterwards by the independent worker; keep changes type-safe and covered by the existing vitest suite where possible.' : 'You may change anything outside apps/web/ that is not protected (edge functions, services, scripts, root modules, tests, docs, ADDITIVE migrations).'}`,
     'PROTECTED (refused, human-only): CI workflows, deploy/, Dockerfiles and compose files, dependency manifests and lockfiles, .env and secret material, supabase/schema.sql (regenerated), auth/identity code (AuthContext, lib/supabase.ts, routing, SafetyGate, access components, _shared/auth.ts). Migrations must be NEW additive files; no destructive SQL. No binary files. Never print, store, or move secrets.',
@@ -197,7 +199,7 @@ function taskPacket(input) {
     previous_attempt_failed_verification: previousFailure ?? undefined,
     previous_attempt_ran_out_of_turns: previousAttempt ? {
       ...previousAttempt,
-      instruction: 'The previous attempt spent its whole budget reading and edited nothing. Its reading map is above: the files and line ranges it read, the searches it ran, and what it concluded. Do not repeat that walk. Use outline on the big files, read only the ranges you need for the FIRST edit, and make that edit by turn 12. Land the smallest correct, tested slice; list what is left under follow_ups.',
+      instruction: 'The previous attempt spent its whole budget reading and edited nothing. Its reading map is above: the files and line ranges it read, the searches it ran, and what it concluded. Do not repeat that walk. Use outline on the big files, read only the ranges you need for the FIRST edit, and make that edit by turn 12. Land the smallest correct, tested slice; list what is left under follow_ups. If the previous attempt stopped over a design or security worry, build to the precedent the task names and put the worry under follow_ups — declining again leaves the owner with nothing.',
     } : undefined,
     how_to_start: previousAttempt
       ? 'Skip read_canon. Call read_notes once, outline the main file named in the reading map, then edit.'
@@ -732,8 +734,11 @@ async function runAgenticEngineer({
 
     if (call.tool === 'finish') {
       lessons = Array.isArray(args.lessons) ? args.lessons : [];
-      if (args.no_change_reason && !tools.__changedFiles().length) {
-        const reason = String(args.no_change_reason).slice(0, 2000);
+      // "No changes made" in the summary with no no_change_reason is still a no-change answer (job 79b4c08f
+      // put it in summary, was refused on its last turn, and ended as a bare 'turn budget exhausted').
+      const noChangeReason = args.no_change_reason || (/\bno changes?\b|\bnot (?:made|implemented)\b|\bunchanged\b/i.test(String(args.summary ?? '')) ? args.summary : null);
+      if (noChangeReason && !tools.__changedFiles().length) {
+        const reason = String(noChangeReason).slice(0, 2000);
         const budgetExhausted = classifyNoChange({ reason, turns, transcript, limits });
         if (budgetExhausted) log({ turn: turns, budget_no_change: true });
         outcome = { ok: false, no_change: true, budget_exhausted: budgetExhausted, error: reason, summary: String(args.summary ?? '') };
@@ -798,6 +803,12 @@ async function runAgenticEngineer({
   }
 
   if (!outcome) outcome = { ok: false, error: now() - started >= limits.wallBudgetMs ? 'time budget exhausted' : 'turn budget exhausted' };
+  // The loop ran dry with nothing edited after a real exploration: same budget failure as a late no_change,
+  // and the next attempt deserves the same reading map (job 79b4c08f: first edit at turn 24, reverted at 58).
+  if (!outcome.ok && !outcome.budget_exhausted && !tools.__changedFiles().length && /budget exhausted/.test(String(outcome.error)) && classifyNoChange({ reason: outcome.error, turns, transcript, limits })) {
+    outcome.budget_exhausted = true;
+    log({ turn: turns, budget_no_change: true, loop_exhausted: true });
+  }
 
   // Persist under the provider/model that actually did the work (provenance for the reviewer-independence rule).
   const authored = activeRequest();

@@ -325,8 +325,31 @@ test('a no_change after a long read-only walk is classified as budget exhaustion
   const packet = JSON.parse(taskPacket({ job, lane: 'backend', notes: [], previousAttempt: result.resume_hints }));
   assert.equal(packet.previous_attempt_ran_out_of_turns.files_read[0].path, 'lib/sum.js');
   assert.match(packet.previous_attempt_ran_out_of_turns.instruction, /Do not repeat that walk/);
+  assert.match(packet.previous_attempt_ran_out_of_turns.instruction, /build to the precedent/);
   assert.match(packet.how_to_start, /Skip read_canon/);
   assert.match(composeRunNote({ job, lane: 'backend', outcome: { ok: false, no_change: true, budget_exhausted: true, error: 'x' }, transcript: [], turns: 9, provider: 'openai', model: 'm' }), /ran out of turns reading, no edits/);
+
+  // Job 79b4c08f: "No changes made" went into summary without no_change_reason, the finish was refused on the last
+  // turn and the run ended as a bare 'turn budget exhausted'. Summary-only no-change is a no-change answer.
+  const summaryOnly = [
+    ...Array.from({ length: 8 }, (_, i) => ({ tool: 'read_file', args: { path: 'lib/sum.js', start_line: 1, end_line: 1 + (i % 2) } })),
+    { tool: 'finish', args: { summary: 'No changes made. The RPC accepts a job id only; exposing the tool without a verified claim would be unsafe.', tests: [], rollback_notes: [] } },
+  ];
+  let j = 0;
+  const result2 = await runAgenticEngineer({ supabase: null, gateway: { gatewayUrl: 'x', apiToken: 'y' }, job: { ...job, id: 'b0dgetb0dgetb0dgetb0dgetb0dget01' }, step: { id: 's' }, lane: 'backend', sourceDir: repo.source, workspaceRoot, repoRoot: repo.source, callModel: async () => { const t = summaryOnly[Math.min(j, summaryOnly.length - 1)]; j++; return { ok: true, data: { content: JSON.stringify(t), model: 'm', usage: {} } }; }, limits: { ...DEFAULT_LIMITS, maxTurns: 12 } });
+  assert.equal(result2.no_change, true, JSON.stringify(result2.error));
+  assert.match(result2.error, /^No changes made/);
+  assert.equal(result2.budget_exhausted, true, 'late, after eight reads: budget, with a map for the next run');
+  assert.equal(result2.turns, 9, 'accepted on the turn it was given, not refused into the wall');
+
+  // The loop runs dry with nothing edited (no finish at all): same classification, same map.
+  let k = 0;
+  const result3 = await runAgenticEngineer({ supabase: null, gateway: { gatewayUrl: 'x', apiToken: 'y' }, job: { ...job, id: 'b0dgetb0dgetb0dgetb0dgetb0dget02' }, step: { id: 's' }, lane: 'backend', sourceDir: repo.source, workspaceRoot, repoRoot: repo.source, callModel: async () => { k++; return { ok: true, data: { content: JSON.stringify({ tool: 'read_file', args: { path: 'lib/sum.js', start_line: 1, end_line: 1 + (k % 2) } }), model: 'm', usage: {} } }; }, limits: { ...DEFAULT_LIMITS, maxTurns: 10 } });
+  assert.equal(result3.ok, false);
+  assert.equal(result3.no_change, false);
+  assert.equal(result3.error, 'turn budget exhausted');
+  assert.equal(result3.budget_exhausted, true);
+  assert.equal(result3.resume_hints.files_read[0].path, 'lib/sum.js');
   fs.rmSync(repo.root, { recursive: true, force: true });
 });
 
