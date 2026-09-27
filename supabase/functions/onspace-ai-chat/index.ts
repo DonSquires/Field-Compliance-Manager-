@@ -1673,6 +1673,11 @@ async function callPlan(planPayload, allowFallback = true) {
     }
     if (!r.ok) {
       console.error(`[conductor][callPlan] VPS /api/bob/plan error status=${r.status}: ${text.slice(0, 300)}`);
+      // An empty OpenAI balance: the fallback hop uses the same account, so pass the planner's plain
+      // explanation to the person instead of a second failure that reads "API returned 502".
+      if (data && typeof data === 'object' && (data as Record<string, unknown>).quota_exhausted === true && typeof (data as Record<string, unknown>).error === 'string') {
+        return { ok: false, status: 502, data: { error: (data as Record<string, unknown>).error } };
+      }
       return fallback(`VPS ${r.status}`);
     }
     // bobPlan.ts returns { ok, action, tool, args, reply, questions, reasoning,
