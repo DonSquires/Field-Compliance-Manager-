@@ -41,8 +41,15 @@ A new control-plane route must be added to that `location ~` regex (test with
 `nginx -t`, then `systemctl reload nginx`; keep backups outside `sites-enabled/`).
 
 The agentic Builder lane needs, in `/var/lib/bob/control-plane.env`:
-`OPENAI_API_KEY`, `BOB_OPENAI_MODELS=gpt-5.4,gpt-5.4-mini,gpt-4o-mini`,
-`BOB_BUILDER_MODEL=gpt-5.4`, `BOB_BUILDER_REASONING_EFFORT=high`,
+`OPENAI_API_KEY`, `BOB_OPENAI_MODELS=gpt-5.4-mini,gpt-5.4,gpt-5.1-codex-mini,gpt-5.4-nano`,
+`BOB_BUILDER_MODEL=gpt-5.4-mini`, `BOB_BUILDER_REASONING_EFFORT=medium`,
+`BOB_BUILDER_REVIEWER_MODEL=gpt-5.4` (owner ruling 2026-09-27: cheaper but
+effective — the author makes 30–60 calls per job, the reviewer one, so the mini
+tier authors and the full tier reviews; `gpt-6-sol` at `xhigh` emptied the
+account in an afternoon). In-house first: `BOB_BUILDER_ROUTE_AUTHOR|REVIEW|ANALYSIS=ollama,gpu_workstation,openai`
+with `BOB_OLLAMA_MODELS=qwen3-coder:30b,gpt-oss:20b,...` (the VPS authors on the
+MoE coder and reviews on gpt-oss, a different model family) and
+`BOB_OLLAMA_NUM_CTX=40960`; OpenAI is the last resort.
 `GITEA_USERNAME` + `GITEA_TOKEN` (scopes `write:repository,write:issue,read:user`),
 and the worker image `fcm/bob-worker:current` built as below. Bob autopilot
 (`builder-autopilot.js`) runs inside the control plane whenever those are set:
