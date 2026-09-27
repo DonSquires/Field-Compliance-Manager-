@@ -46,9 +46,11 @@ log() { printf '%s %s\n' "$(date -u +%Y-%m-%dT%H:%M:%SZ)" "$*" | tee -a "$LOG" >
 GITEA_URL="${GITEA_PUBLIC_URL:-$GITEA_BASE_URL}"
 REMOTE_URL="${GITEA_URL%/}/${GITEA_OWNER}/${GITEA_REPO}.git"
 
-# 1. What is main now?
-git -C "$REPO_DIR" -c "http.extraheader=Authorization: token ${GITEA_TOKEN}" fetch -q "$REMOTE_URL" "+refs/heads/main:refs/remotes/release-lane/main" 2>/dev/null \
-  || { log "fetch failed: mirror unreachable"; exit 0; }
+# 1. What is main now? Housekeeping is not the lane's job: a stale .git/gc.log from a pruned worktree
+# made every fetch's auto-gc exit non-zero for 12 hours and the lane logged "mirror unreachable" each
+# time (2026-09-27). Fetch with gc off, and log the real (token-free) reason.
+fetch_err="$(git -C "$REPO_DIR" -c gc.auto=0 -c "http.extraheader=Authorization: token ${GITEA_TOKEN}" fetch -q "$REMOTE_URL" "+refs/heads/main:refs/remotes/release-lane/main" 2>&1 >/dev/null)" \
+  || { log "fetch failed: $(printf '%s' "$fetch_err" | sed -e "s/${GITEA_TOKEN}/<token>/g" | tr '\n' ' ' | cut -c1-300)"; exit 0; }
 HEAD_SHA="$(git -C "$REPO_DIR" rev-parse refs/remotes/release-lane/main)"
 
 # 2. What is live? (bootstrap: the newest release worktree the deploy script left behind)
