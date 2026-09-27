@@ -2,6 +2,7 @@ const {
   buildModelRunRequest,
   executeBuilderModelRun
 } = require('./builder-model-adapter');
+const { fitRepositoryContext } = require('./builder-repository-context');
 
 const PRODUCT_ANALYST_PROMPT_VERSION = 'product-analyst-v2';
 
@@ -71,7 +72,7 @@ function normalizeRepositoryContext(context = {}) {
 function buildProductAnalystPrompt({ taskDescription, repositoryContext, constraints = [] }) {
   const task = boundedString(taskDescription, 12000);
   if (!task) throw new Error('taskDescription is required');
-  const context = normalizeRepositoryContext(repositoryContext);
+  const context = fitRepositoryContext(normalizeRepositoryContext(repositoryContext), task);
   const safeConstraints = Array.isArray(constraints)
     ? constraints.filter(value => typeof value === 'string').slice(0, 100)
     : [];

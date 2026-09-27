@@ -7189,6 +7189,19 @@ serve(async (req)=>{
       }
       return found;
     };
+    // Is a drafted Builder brief about what the person said? Significant-word overlap plus every repository
+    // path they named. Short requests (under six significant words) cannot be judged and pass.
+    const builderBriefGrounding = (userText: string, brief: string) => {
+      const STOP = new Set(['this', 'that', 'with', 'from', 'into', 'when', 'then', 'than', 'have', 'will', 'would', 'should', 'could', 'about', 'which', 'there', 'their', 'they', 'them', 'these', 'those', 'what', 'where', 'your', 'yours', 'also', 'only', 'just', 'like', 'make', 'made', 'need', 'needs', 'want', 'please', 'every', 'under', 'over', 'after', 'before', 'while', 'some', 'more', 'most', 'such', 'very', 'been', 'being', 'does', 'done', 'because', 'each', 'other', 'same', 'still', 'here', 'never', 'again', 'exactly', 'today', 'thing', 'things']);
+      const words = (text: string) => new Set((String(text ?? '').toLowerCase().match(/[a-z][a-z0-9_./-]{3,}/g) ?? []).map((w) => w.replace(/[.,;:]+$/, '')));
+      const paths = (text: string) => [...new Set(String(text ?? '').match(/\b(?:apps|supabase|services|scripts|test|docs|deploy)\/[\w./-]+/g) ?? [])];
+      const userWords = [...words(userText)].filter((w) => !STOP.has(w));
+      if (userWords.length < 6) return { grounded: true, overlap: 1, missing_paths: [] as string[] };
+      const briefWords = words(brief);
+      const overlap = userWords.filter((w) => briefWords.has(w)).length / userWords.length;
+      const missing_paths = paths(userText).filter((p) => !String(brief ?? '').includes(p));
+      return { grounded: overlap >= 0.25 && missing_paths.length === 0, overlap, missing_paths };
+    };
     const builderCancellationDecision = (text: string) => {
       const answer = text.trim();
       if (/^(?:yes(?: please)?|yep|yeah|go ahead|do it|confirm|cancel it)[.!\s]*$/i.test(answer)) return 'confirm';
@@ -8347,8 +8360,19 @@ serve(async (req)=>{
               };
             }
             const storedJob = pending && pending.kind === 'builder_job_pending' && pending.builder_job ? pending.builder_job : null;
-            const bjTitle = String(toolArgs.title ?? storedJob?.title ?? '').trim().slice(0, 200);
-            const bjDescription = String(toolArgs.task_description ?? toolArgs.brief ?? storedJob?.task_description ?? '').trim().slice(0, 12000);
+            let bjTitle = String(toolArgs.title ?? storedJob?.title ?? '').trim().slice(0, 200);
+            let bjDescription = String(toolArgs.task_description ?? toolArgs.brief ?? storedJob?.task_description ?? '').trim().slice(0, 12000);
+            // A small in-house planner once proposed its prompt's own example brief ("Zone 123 at Client XYZ")
+            // for a request about chat buttons, and the owner's yes opened it (job b2ce9660, 2026-09-27). A brief
+            // that is not about what the person said is replaced by their words, and the proposal says so.
+            const bjGrounding = storedJob ? { grounded: true, overlap: 1, missing_paths: [] as string[] } : builderBriefGrounding(message, `${bjTitle} ${bjDescription}`);
+            let bjGroundingNote = '';
+            if (!bjGrounding.grounded) {
+              const ownWords = String(message ?? '').trim();
+              bjTitle = ownWords.replace(/\s+/g, ' ').split(/(?<=[.!?])\s/)[0].slice(0, 120) || bjTitle;
+              bjDescription = `${ownWords.slice(0, 11000)}\n\nAcceptance: the change does what this brief says, existing tests pass, and new tests cover the change.`;
+              bjGroundingNote = `_The drafted brief did not match what you asked (${bjGrounding.missing_paths.length ? `it dropped ${bjGrounding.missing_paths.slice(0, 2).join(', ')}` : `${Math.round(bjGrounding.overlap * 100)}% of your words`}), so I have used your own words as the brief._`;
+            }
             // Self-heal spans the repository (backend lane); the web lane joins only when the brief is about the app UI.
             // Paths named in the brief are evidence and win over the model's guess: the web lane edits only
             // apps/web/, so a mobile screen (apps/mobile) or anything else is backend-lane work even when the
@@ -8375,6 +8399,7 @@ serve(async (req)=>{
               return {
                 reply: [
                   'I have composed a Builder job for the GitHub repository. Please review before I open it:',
+                  bjGroundingNote,
                   '',
                   `**Title:** ${bjTitle}`,
                   `**Scope:** ${bjFrontend ? 'web/frontend' : ''}${bjFrontend && bjBackend ? ' + ' : ''}${bjBackend ? 'backend/edge' : ''}${!bjFrontend && !bjBackend ? 'as described' : ''} · **Review:** ${bjReview === 'human' ? 'human code review' : 'independent model review + security review'}`,
@@ -8390,6 +8415,7 @@ serve(async (req)=>{
                 meta: {
                   tool: 'create_builder_job',
                   outcome: 'proposed',
+                  grounding: { grounded: bjGrounding.grounded, overlap: Number(bjGrounding.overlap.toFixed(2)), replaced_with_owner_words: !bjGrounding.grounded },
                   pending_builder_job: {
                     title: bjTitle,
                     task_description: bjDescription,

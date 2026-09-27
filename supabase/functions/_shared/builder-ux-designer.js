@@ -3,6 +3,7 @@ const {
   executeBuilderModelRun,
   contentMetadata
 } = require('./builder-model-adapter');
+const { fitRepositoryContext } = require('./builder-repository-context');
 
 const UX_DESIGNER_PROMPT_VERSION = 'ux-designer-v2';
 
@@ -71,7 +72,7 @@ function buildUxDesignerPrompt({ specification, repositoryContext }) {
   if (!specification || typeof specification !== 'object' || Array.isArray(specification)) {
     throw new Error('approved specification is required');
   }
-  const context = normalizeDesignContext(repositoryContext);
+  const context = fitRepositoryContext(normalizeDesignContext(repositoryContext), JSON.stringify(specification));
   const systemPrompt = [
     'You are the UX/UI Designer for Field Compliance Manager.',
     'Design from the approved product specification and supplied repository context.',

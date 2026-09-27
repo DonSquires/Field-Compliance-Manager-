@@ -67,3 +67,33 @@ test('boundTrackedFiles is a pure, order-preserving trim that only reorders when
   assert.ok(bounded.tracked_files.filter(f => f.startsWith('src/')).length === big.filter(f => f.startsWith('src/')).length);
   assert.deepEqual(directoryCounts(['a/1', 'a/2', 'b/1', 'root']), { a: 2, '.': 1, b: 1 });
 });
+
+test('fitRepositoryContext trims a build map to a local model window, keeping what the brief names first', () => {
+  const { fitRepositoryContext } = require('../supabase/functions/_shared/builder-repository-context.js');
+  const { buildProductAnalystPrompt } = require('../supabase/functions/_shared/builder-product-analyst.js');
+  const tracked = Array.from({ length: 2000 }, (_, i) => `apps/web/src/pages/Page${i}.tsx`);
+  tracked.push('apps/web/src/components/BobPanel.tsx', 'supabase/functions/onspace-ai-chat/index.ts');
+  const tables = Array.from({ length: 1000 }, (_, i) => `table_${i}`).concat(['bob_conversations']);
+  const context = {
+    repository: 'r', ref: 'main', commit_sha: 'a'.repeat(40), architecture_summary: 'x'.repeat(12000),
+    relevant_files: [], known_capabilities: [],
+    build_map: { target_sha: 'a'.repeat(40), file_count: 2002, tracked_files: tracked, directory_counts: {}, packages: [], compose: [], supabase_edge_functions: [], schema: { available: true, tables, views: [], functions: [] }, recent_commits: [] }
+  };
+  const task = 'Show tappable options under Bob\'s messages in apps/web/src/components/BobPanel.tsx; the chat edge function is supabase/functions/onspace-ai-chat/index.ts and history lives in bob_conversations.';
+  const before = JSON.stringify(context).length;
+  assert.ok(before > 40000);
+  const fitted = fitRepositoryContext(JSON.parse(JSON.stringify(context)), task, 40000);
+  const after = JSON.stringify(fitted).length;
+  assert.ok(after <= 40000, `fitted to ${after}`);
+  assert.equal(fitted.build_map.tracked_files[0], 'apps/web/src/components/BobPanel.tsx');
+  assert.equal(fitted.build_map.tracked_files[1], 'supabase/functions/onspace-ai-chat/index.ts');
+  assert.equal(fitted.build_map.schema.tables[0], 'bob_conversations');
+  assert.equal(fitted.build_map.tracked_files_truncated, true);
+  assert.equal(fitted.context_fitted_to_chars, 40000);
+  // Within budget nothing changes.
+  const small = fitRepositoryContext({ build_map: { tracked_files: ['a.js'] } }, task, 40000);
+  assert.deepEqual(small, { build_map: { tracked_files: ['a.js'] } });
+  // The analyst prompt itself fits a 24k-token local window (4 chars/token, 85% usable).
+  const prompt = buildProductAnalystPrompt({ taskDescription: task, repositoryContext: context });
+  assert.ok((prompt.systemPrompt.length + prompt.userPrompt.length) / 4 < 24576 * 0.85, 'analyst prompt fits the VPS window');
+});

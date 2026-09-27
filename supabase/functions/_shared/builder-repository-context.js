@@ -76,4 +76,66 @@ function collectRepositoryContext({ sourceDir, targetSha }) {
   };
 }
 
-module.exports = { MAX_TRACKED_FILES, MAX_SCHEMA_ENTITIES, EXCLUDED_PATH, LOW_SIGNAL_PATH, boundTrackedFiles, directoryCounts, collectSchemaInventory, collectRepositoryContext };
+// A local model's window (24-40k tokens) cannot hold the full build map: the file list and schema names
+// alone exceeded it and every in-house analyst call failed at step one (2026-09-27). Keep what the brief
+// names, then whatever else fits; the engineer reads the rest of the repository itself.
+const DEFAULT_CONTEXT_MAX_CHARS = 40000;
+
+function relevanceTerms(text) {
+  return [...new Set((String(text || '').toLowerCase().match(/[a-z][a-z0-9_./-]{3,}/g) || []).map(term => term.replace(/[.,;:]+$/, '')))];
+}
+
+function keepRelevantFirst(list, terms, cap) {
+  const items = Array.isArray(list) ? list.filter(value => typeof value === 'string') : [];
+  const relevant = name => {
+    const lower = name.toLowerCase();
+    const base = lower.split('/').pop().replace(/\.[a-z0-9]+$/, '');
+    return terms.some(term => lower.includes(term) || (base.length >= 4 && term.includes(base)));
+  };
+  const hits = items.filter(relevant);
+  const hitSet = new Set(hits);
+  return [...hits, ...items.filter(item => !hitSet.has(item))].slice(0, cap);
+}
+
+function fitRepositoryContext(context, task, maxChars = Number(process.env.BOB_BUILDER_CONTEXT_MAX_CHARS || DEFAULT_CONTEXT_MAX_CHARS)) {
+  if (!context || typeof context !== 'object') return context;
+  const size = () => JSON.stringify(context).length;
+  if (size() <= maxChars) return context;
+  const terms = relevanceTerms(task);
+  const buildMap = context.build_map && typeof context.build_map === 'object' ? context.build_map : (context.build_map = {});
+  const schema = buildMap.schema && typeof buildMap.schema === 'object' ? buildMap.schema : null;
+  const steps = [
+    () => {
+      buildMap.tracked_files = keepRelevantFirst(buildMap.tracked_files, terms, 300); buildMap.tracked_files_truncated = true;
+      // Relevance order without a cut, so what the brief names leads even when this step is enough.
+      if (schema) { schema.tables = keepRelevantFirst(schema.tables, terms, 1000); schema.views = keepRelevantFirst(schema.views, terms, 1000); schema.functions = keepRelevantFirst(schema.functions, terms, 1000); }
+      buildMap.supabase_edge_functions = keepRelevantFirst(buildMap.supabase_edge_functions, terms, 500);
+    },
+    () => {
+      if (schema) { schema.tables = keepRelevantFirst(schema.tables, terms, 150); schema.views = keepRelevantFirst(schema.views, terms, 40); schema.functions = keepRelevantFirst(schema.functions, terms, 80); }
+      buildMap.supabase_edge_functions = keepRelevantFirst(buildMap.supabase_edge_functions, terms, 60);
+    },
+    () => {
+      context.relevant_files = keepRelevantFirst(context.relevant_files, terms, 60);
+      if (Array.isArray(context.known_capabilities)) context.known_capabilities = context.known_capabilities.slice(0, 60);
+      if (typeof context.architecture_summary === 'string') context.architecture_summary = context.architecture_summary.slice(0, 6000);
+      if (typeof context.existing_design_system === 'string') context.existing_design_system = context.existing_design_system.slice(0, 6000);
+    },
+    () => {
+      buildMap.tracked_files = keepRelevantFirst(buildMap.tracked_files, terms, 120);
+      if (schema) { schema.tables = keepRelevantFirst(schema.tables, terms, 60); schema.functions = keepRelevantFirst(schema.functions, terms, 30); }
+      context.live_context = null;
+    },
+    () => {
+      buildMap.tracked_files = keepRelevantFirst(buildMap.tracked_files, terms, 40);
+      if (Array.isArray(buildMap.recent_commits)) buildMap.recent_commits = buildMap.recent_commits.slice(0, 5);
+      if (typeof context.architecture_summary === 'string') context.architecture_summary = context.architecture_summary.slice(0, 2500);
+      if (typeof context.existing_design_system === 'string') context.existing_design_system = context.existing_design_system.slice(0, 2500);
+    }
+  ];
+  for (const step of steps) { step(); if (size() <= maxChars) break; }
+  context.context_fitted_to_chars = maxChars;
+  return context;
+}
+
+module.exports = { MAX_TRACKED_FILES, MAX_SCHEMA_ENTITIES, EXCLUDED_PATH, LOW_SIGNAL_PATH, DEFAULT_CONTEXT_MAX_CHARS, boundTrackedFiles, directoryCounts, collectSchemaInventory, collectRepositoryContext, fitRepositoryContext, relevanceTerms };
