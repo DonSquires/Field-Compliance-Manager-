@@ -1,0 +1,11 @@
+[Unit]
+Description=Bob release lane: put merged main live (dry-run until BOB_RELEASE_MODE=live)
+After=docker.service network-online.target
+Wants=network-online.target
+
+[Service]
+Type=oneshot
+ExecStart=/srv/fcm/release-lane/bob-release-lane.sh
+WorkingDirectory=/root/field-compliance-manager
+Nice=5
+TimeoutStartSec=45min

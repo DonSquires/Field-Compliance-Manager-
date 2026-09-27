@@ -1,0 +1,40 @@
+# Bob release lane (merge → live)
+
+Owner ruling 2026-09-27: the owner gives guidance and cannot code; Bob does the coding and
+nobody is asked to deploy by hand. This lane closes the last gap after a pull request merges.
+
+`scripts/bob-release-lane.sh` runs on the VPS host from a systemd timer every 5 minutes:
+
+1. fetches `main` from the Gitea mirror (trails GitHub by 1–2 minutes),
+2. compares it with the last release the lane put live (`/var/lib/bob/release-lane/deployed_sha`;
+   bootstrapped from the newest `/srv/fcm/releases/<sha>` worktree),
+3. classifies the changed paths into targets — new `supabase/migrations/*.sql`, changed edge
+   functions (a `_shared` change fans out to every function that imports it), control plane,
+   `fcm-api`, worker image; `apps/web` is left to Vercel,
+4. **dry-run** (default): writes the plan to `plan.json` and the log, once per new head;
+   **live**: applies migrations (refusing destructive SQL), deploys edge functions, rebuilds and
+   restarts services with a health check, rolling a failed service back to the previous release,
+5. records a ledger (`ledger.json`) and a note in Bob's own memory (`bob_self_memory`, kind
+   `deployment`) so Bob can tell the owner what went live. The live pointer only moves when
+   every target succeeded, so a partial release is retried next tick, not forgotten.
+
+## Install (once, on the VPS host)
+
+```bash
+mkdir -p /srv/fcm/release-lane /var/lib/bob/release-lane
+cp scripts/bob-release-lane.sh /srv/fcm/release-lane/ && chmod 700 /srv/fcm/release-lane/bob-release-lane.sh
+cp deploy/bob-release-lane/bob-release-lane.{service,timer} /etc/systemd/system/
+printf 'BOB_RELEASE_MODE=dry-run\nSUPABASE_PROJECT_REF=dotczcyyzgabmtmnglqj\nSUPABASE_ACCESS_TOKEN=<management token>\n' > /var/lib/bob/release-lane.env
+chmod 600 /var/lib/bob/release-lane.env
+systemctl daemon-reload && systemctl enable --now bob-release-lane.timer
+```
+
+The script itself is copied, not symlinked, so a broken commit cannot change the lane that is
+about to deploy it; update the copy deliberately after reviewing the diff. Switch to live with
+`BOB_RELEASE_MODE=live` once the proving series has passed and the dry-run plans have been read.
+
+## What stays with a person
+
+- Merging the pull request (until the self-merge decision is taken).
+- Migrations with destructive SQL (the lane refuses them and says so).
+- A `main` that does not descend from the live release (force-push or manual rollback).
