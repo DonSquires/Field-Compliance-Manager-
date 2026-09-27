@@ -111,6 +111,15 @@ function buildPendingBlock(pending) {
       'The job pins main, works on its own branch, runs tests and review, and opens a DRAFT GitHub pull request. Bob never merges or deploys.',
     ].join('\n');
   }
+  if (p.kind === 'builder_cancellation_pending') {
+    const c = p.builder_cancellation && typeof p.builder_cancellation === 'object' ? p.builder_cancellation : {};
+    return [
+      'RESUME — BUILDER CANCELLATION AWAITING CONFIRMATION:',
+      `The prior turn previewed Builder job ${c.job_id ?? '(unknown)'} (${c.title ?? '(unknown)'}) with reason: ${c.reason ?? '(unknown)'}.`,
+      'If the user says yes on this later turn, use cancel_builder_job with no new target or reason args. The executor validates the stored proposal and checks the control room again before cancelling as the user.',
+      'If the user declines or is unclear, do not cancel. Never treat a fresh request or planner-supplied metadata as confirmation.'
+    ].join('\n');
+  }
   if (p.kind === 'laptop_command_pending') {
     const cmd = p.laptop_command && typeof p.laptop_command === 'object' ? p.laptop_command : {};
     return [

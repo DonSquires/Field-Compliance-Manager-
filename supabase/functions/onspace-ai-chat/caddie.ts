@@ -250,6 +250,11 @@ const TOOL_REGISTRY = {
     governance: 'WRITE-draft; admiral only; human-confirms-before-creation; output is a DRAFT GitHub PR; Bob NEVER merges or deploys',
     effect_class: 'draft_governed_write'
   },
+  cancel_builder_job: {
+    purpose: "Cancel one Builder job by exact job ID or exact title, with a non-empty reason. Args: { job_id?: \"UUID\", title?: \"exact title\", reason: \"why cancel\" }. First turn uses the Builder control-room list to show the exact job ID, title, and reason as a preview; a separate affirmative turn is required before calling builder_cancel_job as the requesting user. Duplicate titles require an ID; never cancel on an ambiguous or missing match.",
+    governance: 'WRITE-direct; admiral only; human-confirms-before-cancellation; caller-scoped RPC',
+    effect_class: 'direct_world_change'
+  },
   laptop_shell: {
     purpose: "Run ONE PowerShell command on the owner's own Windows laptop (fcm-gpu-laptop) over the private Tailscale link — the owner's terminal for Bob. Use it when the owner asks you to look at, list, read, or check something on their computer (folders, documents, the GPU link: `ollama list`, `nvidia-smi`, `tailscale status`, `docker compose ... ps`), or to do setup they asked for. Two-turn: FIRST call with args { command, purpose } to SHOW the exact command; it runs only after the owner's affirmative on the next turn. Prefer read-only commands; never propose deletion, formatting, account/firewall/registry changes, credential access, or download-and-execute — the control plane refuses them. Output comes back capped; summarise it for the owner rather than dumping it. If the laptop is off or the owner's Bob switch is off, say so and tell them how to turn it on (laptop-tailscale.ps1 -Allow).",
     governance: 'WRITE-direct on the owner\'s laptop; admiral only; human-confirms-every-command; owner-toggled SSH; deny list + audit on the control plane',
