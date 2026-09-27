@@ -1,7 +1,7 @@
 const assert = require('node:assert/strict');
 const test = require('node:test');
 
-const { autopilotTick, composeReport, composePullRequestBody, collectEvidence } = require('../builder-autopilot');
+const { autopilotTick, baselineBlock, composeReport, composePullRequestBody, collectEvidence, repairJobFor, isRepairJob } = require('../builder-autopilot');
 
 // Minimal Supabase stand-in for loadBuilderRuntimeSnapshot + storage downloads.
 function fakeSupabase({ job, steps = [], artifacts = [], workerRuns = [], objects = {} }) {
@@ -55,9 +55,9 @@ test('autopilot runs the bounded runner for a working job and blocks when the at
   assert.equal(outcomes[0].outcome, 'blocked');
   const recorded = ceiling.calls.find(([name]) => name === 'record');
   assert.equal(recorded[2], 'blocked');
-  assert.match(recorded[3].text, /^Stopped: "Fix" needs a person\./);
+  assert.match(recorded[3].text, /^Stopped: Bob could not finish "Fix" on his own\./);
   assert.match(recorded[3].text, /failed 6 times/);
-  assert.match(recorded[3].text, /What to do:/);
+  assert.match(recorded[3].text, /What you can do: tell Bob "try again"/);
 });
 
 test('autopilot skips a job whose run is already in flight and retries a retryable step failure next tick', async () => {
@@ -205,4 +205,87 @@ test('autopilot still clears the release gate itself for non-evidential work', a
   const actions = actionsRecorder({ pending: [{ id: 'appr-8', approval_type: 'release_approval', status: 'pending' }] });
   assert.deepEqual(await autopilotTick({ supabase, jobs: [gated], actions }), [{ job: 'job-4', outcome: 'gate_cleared', count: 1 }]);
   assert.match(actions.calls.find(([name]) => name === 'approve')[2], /No evidential paths are involved/);
+});
+
+test('a job blocked by a red main opens a repair job for the same requester instead of asking a person to fix it', async () => {
+  const detail = 'repository red at the pinned commit: npm run test --prefix apps/web -- --pool=threads also fails on the pinned commit without this patch (the repository is red at the target commit: src/pages/FinanceBureauPage.guard.test.ts, src/pages/NzscvSupplierPage.guard.test.ts); not caused by this change';
+  const baseline = baselineBlock(detail);
+  assert.deepEqual(baseline.files, ['src/pages/FinanceBureauPage.guard.test.ts', 'src/pages/NzscvSupplierPage.guard.test.ts']);
+  assert.equal(baselineBlock('backend_implementation failed 6 times (ceiling 6)'), null);
+  const job = { id: 'job-r', organization_id: 'org-1', project_id: 'proj-1', status: 'implementation_pending', autopilot_state: 'driving', autopilot_requested_by: 'user-1', autopilot_conversation_id: 'conv-1', title: 'Add Cancel control', task_description: 'brief', frontend_required: true, backend_required: false, target_sha: 'c'.repeat(40) };
+  const repairSpec = repairJobFor(job, baseline);
+  assert.equal(repairSpec.title, 'Repair main: 2 failing checks (FinanceBureauPage.guard.test.ts, NzscvSupplierPage.guard.test.ts)');
+  assert.equal(repairSpec.frontendRequired, true);
+  assert.equal(repairSpec.backendRequired, false);
+  assert.equal(repairSpec.requestedBy, 'user-1');
+  assert.match(repairSpec.taskDescription, /apps\/web\/src\/pages\/FinanceBureauPage\.guard\.test\.ts/);
+  assert.match(repairSpec.taskDescription, /Acceptance test: the failing command passes/);
+  assert.equal(isRepairJob({ title: repairSpec.title }), true);
+
+  const actions = actionsRecorder({ run: { paused: true, reason: 'blocked', detail } });
+  const created = [];
+  actions.createJob = async (spec) => { created.push(spec); return { id: 'job-repair', title: spec.title }; };
+  const outcomes = await autopilotTick({ supabase: fakeSupabase({ job }), jobs: [job], actions });
+  assert.deepEqual(outcomes, [{ job: 'job-r', outcome: 'repairing', repair_job: 'job-repair' }]);
+  assert.equal(created.length, 1);
+  const recorded = actions.calls.find(([name]) => name === 'record');
+  assert.equal(recorded[2], 'blocked');
+  assert.equal(recorded[3].state, 'repairing');
+  assert.equal(recorded[3].repair_job_id, 'job-repair');
+  assert.match(recorded[3].text, /^Paused: "Add Cancel control" is waiting while Bob fixes the app's own checks first\./);
+  assert.match(recorded[3].text, /not caused by the change you asked for/);
+  assert.match(recorded[3].text, /Nothing for you to do now\./);
+
+  // A repair job that is itself blocked by a red main does not open another repair (no loops).
+  const repairJob = { ...job, id: 'job-repair', title: repairSpec.title };
+  const again = actionsRecorder({ run: { paused: true, reason: 'blocked', detail } });
+  again.createJob = async () => { throw new Error('must not recurse'); };
+  const loopOutcome = await autopilotTick({ supabase: fakeSupabase({ job: repairJob }), jobs: [repairJob], actions: again });
+  assert.equal(loopOutcome[0].outcome, 'blocked');
+});
+
+test('a job waiting on a repair is re-opened on current main once the repair has landed, or reported plainly if the repair failed', async () => {
+  const waiting = { id: 'job-w', organization_id: 'org-1', project_id: 'proj-1', status: 'implementation_pending', autopilot_state: 'blocked', autopilot_requested_by: 'user-1', autopilot_conversation_id: 'conv-1', title: 'Add Cancel control', task_description: 'brief', frontend_required: true, backend_required: false, code_review_mode: 'independent_ai', target_sha: 'c'.repeat(40), autopilot_report: { state: 'repairing', repair_job_id: 'job-repair' } };
+  const manifest = JSON.stringify([{ path: 'apps/web/src/pages/FinanceBureauPage.guard.test.ts', before_sha256: 'a'.repeat(64), after_sha256: 'b'.repeat(64) }]);
+  const repairSnapshot = {
+    job: { id: 'job-repair', status: 'release_ready' },
+    steps: [{ id: 's-fe', step_id: 'frontend_implementation', builder_mode: 'frontend_engineer', status: 'completed' }],
+    artifacts: [{ id: 'art-manifest', artifact_type: 'changed_file_manifest', status: 'final', storage_location: 'supabase_storage://builder-artifacts/m.json' }, { id: 'art-patch', artifact_type: 'code_implementation', status: 'final', storage_location: 'supabase_storage://builder-artifacts/p.patch' }],
+    workerRuns: [{ id: 'run-1', profile: 'frontend-verify', status: 'completed', step_id: 's-fe', output_artifact_ids: ['art-manifest', 'art-patch'], patch_artifact_id: 'art-author' }],
+  };
+  const supabase = fakeSupabase({ job: repairSnapshot.job, steps: repairSnapshot.steps, artifacts: repairSnapshot.artifacts, workerRuns: repairSnapshot.workerRuns, objects: { 'm.json': manifest } });
+
+  // 1) Repair published but not yet on main: keep waiting.
+  const pending = actionsRecorder();
+  pending.loadJob = async () => ({ id: 'job-repair', status: 'release_ready', workspace_pull_request_url: 'https://git.example/pulls/12' });
+  pending.changeLanded = async () => false;
+  pending.createJob = async () => { throw new Error('too early'); };
+  assert.deepEqual(await autopilotTick({ supabase, jobs: [waiting], actions: pending }), [{ job: 'job-w', outcome: 'waiting_for_repair', repair_job: 'job-repair' }]);
+  assert.ok(!pending.calls.some(([name]) => name === 'record'));
+
+  // 2) Landed: the original brief is opened again on current main and the old job is closed out.
+  const landed = actionsRecorder();
+  landed.loadJob = pending.loadJob;
+  const landedRows = [];
+  landed.changeLanded = async (rows) => { landedRows.push(rows); return true; };
+  const created = [];
+  landed.createJob = async (spec) => { created.push(spec); return { id: 'job-w2' }; };
+  assert.deepEqual(await autopilotTick({ supabase, jobs: [waiting], actions: landed }), [{ job: 'job-w', outcome: 'resumed', resumed_as: 'job-w2' }]);
+  assert.deepEqual(landedRows[0].map((r) => [r.path, r.after_sha256]), [['apps/web/src/pages/FinanceBureauPage.guard.test.ts', 'b'.repeat(64)]]);
+  assert.equal(created[0].title, 'Add Cancel control');
+  assert.equal(created[0].taskDescription, 'brief');
+  assert.equal(created[0].requestedBy, 'user-1');
+  const recorded = landed.calls.find(([name]) => name === 'record');
+  assert.equal(recorded[2], 'done');
+  assert.equal(recorded[3].resumed_as_job_id, 'job-w2');
+  assert.equal(recorded[3].repair_outcome, 'landed');
+  assert.match(recorded[3].text, /^Resumed: main is fixed, so Bob has started "Add Cancel control" again/);
+
+  // 3) The repair itself failed: say so plainly, once.
+  const failed = actionsRecorder();
+  failed.loadJob = async () => ({ id: 'job-repair', status: 'implementation_pending', autopilot_state: 'blocked', last_error: 'frontend_implementation failed 3 times' });
+  assert.deepEqual(await autopilotTick({ supabase, jobs: [waiting], actions: failed }), [{ job: 'job-w', outcome: 'repair_failed', repair_job: 'job-repair' }]);
+  const failedRecord = failed.calls.find(([name]) => name === 'record');
+  assert.equal(failedRecord[3].repair_outcome, 'failed');
+  assert.match(failedRecord[3].text, /^Stopped: Bob could not fix the app's own failing checks/);
 });

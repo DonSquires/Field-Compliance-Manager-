@@ -10,7 +10,7 @@ const { collectBuilderLiveContext } = require('./builder-live-context');
 const { buildAtlasGraph } = require('./scripts/atlas-graph');
 const { createModelGatewayConfig, defaultReviewerModel, invokeBuilderModel, modelHealth } = require('./builder-model-gateway');
 const { loadBuilderRuntimeSnapshot, advanceBuilderJob, runBuilderUntilPause } = require('./builder-runtime-coordinator');
-const { listRepositoryTree, readRepositoryFile, searchRepository } = require('./builder-repository-read');
+const { fileSha256, listRepositoryTree, readRepositoryFile, searchRepository } = require('./builder-repository-read');
 const { autopilotTick, listAutopilotJobs, listPendingApprovals } = require('./builder-autopilot');
 const { laptopStatus, runLaptopCommand, laptopConfig, loadLaptopLink, mergeLaptopLink, describeLink } = require('./bob-laptop-shell');
 const { createBranchWorkspace, commitVerifiedPatch, publishWorkspaceBranch, createGiteaPullRequest, workspacePathForBranch, createGitHubPullRequest, ensureSourceCheckout, githubAuthHeader, githubRepoUrl, resolveRemoteHead, redactGitError } = require('./builder-branch-workspace');
@@ -103,6 +103,19 @@ function repositoryReadTarget() {
   const sourceDir = builderGitSource(sha);
   Object.assign(repositoryReadCache, { at: Date.now(), sha, sourceDir });
   return repositoryReadCache;
+}
+
+// "Has this verified change landed on main?" by content, so a squash or rebase merge counts:
+// every file the patch changed must exist on main's head with the patch's after_sha256.
+function changeLandedOnMain(manifestRows) {
+  const rows = Array.isArray(manifestRows) ? manifestRows.filter((row) => row && typeof row.path === 'string' && /^[a-f0-9]{64}$/i.test(String(row.after_sha256 || ''))) : [];
+  if (!rows.length) return false;
+  const { sha } = builderRepositoryHead('main');
+  const sourceDir = builderGitSource(sha);
+  for (const row of rows) {
+    if (fileSha256({ sourceDir, sha, path: row.path }) !== row.after_sha256.toLowerCase()) return false;
+  }
+  return true;
 }
 const stateFile = path.join(stateDir, 'bob-state.json');
 const maxRequestBytes = 1024 * 1024;
@@ -342,6 +355,36 @@ async function autopilotOnce() {
           const { error } = await builderSupabase.rpc('builder_autopilot_record', { _job_id: jobId, _state: state, _report: report });
           if (error) throw new Error(`autopilot outcome could not be recorded: ${error.message}`);
         },
+        // Self-heal (owner ruling 2026-09-27): a job blocked by a red main opens a repair job bound to the
+        // same requester, and is re-opened on current main once the repair has landed.
+        createJob: async (input) => {
+          const { sha } = builderRepositoryHead('main');
+          const { data: created, error } = await builderSupabase.rpc('builder_create_job_v2', {
+            _organization_id: input.organizationId,
+            _project_id: input.projectId,
+            _title: String(input.title).slice(0, 200),
+            _task_description: String(input.taskDescription).slice(0, 12000),
+            _target_sha: sha,
+            _branch_name: 'main',
+            _description: input.parentJobId ? `Opened by Bob's autopilot from job ${input.parentJobId}.` : null,
+            _frontend_required: input.frontendRequired === true,
+            _backend_required: input.backendRequired === true,
+            _code_review_mode: input.codeReviewMode || 'independent_ai',
+            _task_run_id: null,
+            _requested_action: 'prepare_change',
+            _target_environment: 'development',
+          });
+          if (error || !created?.id) throw new Error(`autopilot could not open a job: ${error?.message || 'no job returned'}`);
+          const { data: bound, error: bindError } = await builderSupabase.rpc('builder_autopilot_bind', { _job_id: created.id, _requested_by: input.requestedBy, _conversation_id: input.conversationId ?? null });
+          if (bindError) throw new Error(`autopilot could not bind the new job: ${bindError.message}`);
+          record('autopilot', 'builder.autopilot.job_opened', created.id, { parent: input.parentJobId ?? null, title: String(input.title).slice(0, 120) });
+          return bound || created;
+        },
+        loadJob: async (jobId) => {
+          const { data } = await builderSupabase.from('builder_jobs').select('id, title, status, last_error, workspace_pull_request_url, autopilot_state, autopilot_report').eq('id', jobId).maybeSingle();
+          return data || null;
+        },
+        changeLanded: (manifestRows) => changeLandedOnMain(manifestRows),
       },
     });
   } catch (error) {

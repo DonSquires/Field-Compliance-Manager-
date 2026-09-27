@@ -7,7 +7,7 @@ const os = require('node:os');
 const path = require('node:path');
 const { execFileSync } = require('node:child_process');
 
-const { listRepositoryTree, readRepositoryFile, safeRepoPath, searchRepository } = require('../builder-repository-read');
+const { fileSha256, listRepositoryTree, readRepositoryFile, safeRepoPath, searchRepository } = require('../builder-repository-read');
 
 function makeRepo() {
   const root = fs.mkdtempSync(path.join(os.tmpdir(), 'repo-read-'));
@@ -73,5 +73,10 @@ test('search, file and tree answer from the pinned commit and never expose secre
 
   assert.deepEqual(listRepositoryTree({ sourceDir: root, sha, path: 'scripts' }).entries, ['rotate-keys.mjs']);
   assert.throws(() => listRepositoryTree({ sourceDir: root, sha, path: 'nope' }), (e) => e.code === 'NOT_FOUND');
+  // Exact blob hash at the pinned commit (the "has this change landed on main" fingerprint).
+  const crypto = require('node:crypto');
+  assert.equal(fileSha256({ sourceDir: root, sha, path: 'scripts/rotate-keys.mjs' }), crypto.createHash('sha256').update("// rotates keys\nexport const rotateKeys = () => 'rotated';\n").digest('hex'));
+  assert.equal(fileSha256({ sourceDir: root, sha, path: 'scripts/missing.mjs' }), null);
+  assert.equal(fileSha256({ sourceDir: root, sha, path: '../etc/passwd' }), null);
   fs.rmSync(root, { recursive: true, force: true });
 });

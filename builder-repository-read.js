@@ -98,4 +98,16 @@ function listRepositoryTree({ sourceDir, sha, path: dirPath = '' }) {
   return { path: value, entries };
 }
 
-module.exports = { MAX_FILE_BYTES, MAX_MATCHES, SECRET_PATH, listRepositoryTree, readRepositoryFile, safeRepoPath, searchRepository };
+/** sha256 of the exact blob bytes at `sha:path`, or null when the path is absent. */
+function fileSha256({ sourceDir, sha, path: filePath }) {
+  const value = String(filePath ?? '').trim().replace(/\\/g, '/').replace(/^\.\//, '');
+  if (!value || value.startsWith('/') || value.split('/').some((part) => part === '..' || part === '')) return null;
+  try {
+    const bytes = execFileSync('git', ['show', `${sha}:${value}`], { cwd: sourceDir, stdio: ['ignore', 'pipe', 'pipe'], maxBuffer: 64 * 1024 * 1024 });
+    return require('node:crypto').createHash('sha256').update(bytes).digest('hex');
+  } catch {
+    return null;
+  }
+}
+
+module.exports = { MAX_FILE_BYTES, MAX_MATCHES, SECRET_PATH, fileSha256, listRepositoryTree, readRepositoryFile, safeRepoPath, searchRepository };

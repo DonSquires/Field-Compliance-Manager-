@@ -63,6 +63,8 @@ async function collectEvidence({ supabase, snapshot }) {
   return {
     verifyRun,
     validatedPatchId: validatedPatch?.id ?? null,
+    // path + after_sha256 of every file the verified patch changed: the fingerprint of "this change is on main".
+    manifestRows: Array.isArray(manifestRows) ? manifestRows.filter((row) => row && typeof row.path === 'string' && typeof row.after_sha256 === 'string') : [],
     summary: plain(envelope?.summary ?? release?.summary ?? '', 1200),
     changedFiles,
     // Prefer what the tool log proves ran; fall back to the author's list only when no log exists (one-shot lanes).
@@ -76,7 +78,7 @@ async function collectEvidence({ supabase, snapshot }) {
   };
 }
 
-function composeReport({ job, evidence, pullRequestUrl, state, reason, hold }) {
+function composeReport({ job, evidence, pullRequestUrl, state, reason, hold, repair, resumedAs }) {
   const lines = [];
   if (state === 'published') {
     lines.push(`Done: "${plain(job.title, 160)}" is built, checked, and waiting for review.`);
@@ -94,10 +96,20 @@ function composeReport({ job, evidence, pullRequestUrl, state, reason, hold }) {
     lines.push(pullRequestUrl ? `Where to review it: ${pullRequestUrl}` : 'The branch is published; the pull request link will follow.');
     lines.push('Nothing is live yet. When you (or your reviewer) merge the pull request, the change ships; until then the app is unchanged.');
   } else if (state === 'blocked') {
-    lines.push(`Stopped: "${plain(job.title, 160)}" needs a person.`);
+    lines.push(`Stopped: Bob could not finish "${plain(job.title, 160)}" on his own.`);
     lines.push(`Why: ${plain(reason, 500) || 'the Builder could not continue'}.`);
     if (evidence?.summary) lines.push(`What Bob had done so far: ${evidence.summary}`);
-    lines.push('What to do: open Platform & Settings → Builder for the details, or tell Bob to try again with a changed brief.');
+    lines.push('What you can do: tell Bob "try again" to start a fresh attempt with what he learned, or describe the change differently. Nothing was published.');
+  } else if (state === 'repairing') {
+    lines.push(`Paused: "${plain(job.title, 160)}" is waiting while Bob fixes the app's own checks first.`);
+    lines.push(`Why: ${plain(reason, 500)}. This is not caused by the change you asked for.`);
+    lines.push(`What Bob is doing: he has opened a repair job, "${plain(repair?.title, 160)}", which goes through the same build, test and review steps. When that repair is merged, Bob re-runs your change automatically. Nothing for you to do now.`);
+  } else if (state === 'resumed') {
+    lines.push(`Resumed: main is fixed, so Bob has started "${plain(job.title, 160)}" again from the current code. You will get a fresh report when it is built and checked.`);
+  } else if (state === 'repair_failed') {
+    lines.push(`Stopped: Bob could not fix the app's own failing checks that were blocking "${plain(job.title, 160)}".`);
+    lines.push(`Why: ${plain(reason, 500)}.`);
+    lines.push('What you can do: tell Bob "try the repair again", or ask him to explain what is failing in plain terms. Nothing was published.');
   } else if (state === 'awaiting_human') {
     lines.push(`Needs your approval: "${plain(job.title, 160)}" touches evidential work, so Bob has paused at ${GATE_LABEL[hold?.gate] ?? 'an approval gate'}.`);
     lines.push(`What is evidential here: ${describeFiles(hold?.files)}.`);
@@ -115,6 +127,8 @@ function composeReport({ job, evidence, pullRequestUrl, state, reason, hold }) {
     gate: hold?.gate ?? null,
     review_verdict: evidence?.review?.verdict ?? null,
     security_passed: evidence?.security?.passed ?? null,
+    repair_job_id: repair?.id ?? null,
+    resumed_as_job_id: resumedAs ?? null,
     generated_at: new Date().toISOString(),
   };
 }
@@ -157,12 +171,97 @@ function evidentialHold({ job, approval, evidence }) {
 
 /**
  * Drive one autopilot job one tick forward. `actions` is injected so the loop can be
- * exercised without a live control plane: { listPending, approve, run, publish, record }.
+ * exercised without a live control plane: { listPending, approve, run, publish, record,
+ * createJob?, loadJob?, changeLanded? }.
  */
+const REPAIR_TITLE_PREFIX = 'Repair main: ';
+
+/** A block whose cause is the repository being red at the pinned commit (not the job's own change). */
+function baselineBlock(reason) {
+  const text = String(reason ?? '');
+  const match = text.match(/repository red at the pinned commit:\s*(.+)$/is);
+  if (!match) return null;
+  const detail = match[1].trim();
+  const files = [...new Set((detail.match(/[\w./-]+\.(?:test|spec|guard\.test)\.[cm]?[jt]sx?/g) || []))].slice(0, 8);
+  return { reason: detail.slice(0, 600), files };
+}
+
+function isRepairJob(job) {
+  return String(job?.title ?? '').startsWith(REPAIR_TITLE_PREFIX);
+}
+
+/** The brief for the job that fixes main, bound to the same requester and conversation as the blocked job. */
+function repairJobFor(job, baseline) {
+  const web = baseline.files.some((f) => f.startsWith('src/') || f.startsWith('apps/web/')) || /--prefix apps\/web/.test(baseline.reason);
+  const files = baseline.files.map((f) => (f.startsWith('apps/') ? f : `apps/web/${f}`));
+  const title = `${REPAIR_TITLE_PREFIX}${files.length ? `${files.length} failing ${files.length === 1 ? 'check' : 'checks'} (${files.map((f) => f.split('/').pop()).slice(0, 3).join(', ')}${files.length > 3 ? ', …' : ''})` : 'failing checks'}`.slice(0, 200);
+  const description = [
+    'Symptom: the repository\'s own verification fails on main at the pinned commit, without any pending change applied. This blocked another Builder job that is not the cause.',
+    `Evidence (from the isolated verifier, unpatched tree): ${baseline.reason}`,
+    files.length ? `Files implicated: ${files.join(', ')}. Read each failing test and the source it asserts on; decide whether the test is stale (the code moved on) or the code regressed, and fix the true cause. Guard tests that assert exact source text usually need the assertion brought back to what the source now says.` : 'Files implicated: identify the failing test files from the verifier command output first.',
+    'Acceptance test: the failing command passes in the isolated verifier with no other tests newly failing; changes are limited to what the failing checks require.',
+    'Out of scope: unrelated refactors, changing behaviour the failing tests do not cover, deleting tests to make them pass.',
+    `Origin: opened automatically by Bob's autopilot for job ${job.id} ("${String(job.title ?? '').slice(0, 120)}"), which re-runs when this repair is merged.`,
+  ].join('\n');
+  return {
+    parentJobId: job.id,
+    organizationId: job.organization_id,
+    projectId: job.project_id,
+    title,
+    taskDescription: description,
+    frontendRequired: web,
+    backendRequired: !web,
+    codeReviewMode: 'independent_ai',
+    requestedBy: job.autopilot_requested_by,
+    conversationId: job.autopilot_conversation_id ?? null,
+  };
+}
+
+/** A job parked behind a repair: re-open it on current main once the repair's files are on main; report a failed repair plainly. */
+async function resumeAfterRepair({ supabase, job, actions, log }) {
+  const repairId = job.autopilot_report.repair_job_id;
+  const repair = typeof actions.loadJob === 'function' ? await actions.loadJob(repairId) : null;
+  if (!repair) return { job: job.id, outcome: 'waiting_for_repair', repair_job: repairId };
+  if (TERMINAL.has(repair.status) || repair.autopilot_state === 'blocked') {
+    const reason = repair.last_error || repair.autopilot_report?.headline || `the repair job ended as ${repair.status}`;
+    await actions.record(job.id, 'blocked', { ...composeReport({ job, state: 'repair_failed', reason }), repair_job_id: repairId, repair_outcome: 'failed' });
+    log({ job: job.id, repair_failed: repairId });
+    return { job: job.id, outcome: 'repair_failed', repair_job: repairId };
+  }
+  if (repair.status !== 'release_ready' || !repair.workspace_pull_request_url || typeof actions.changeLanded !== 'function') {
+    return { job: job.id, outcome: 'waiting_for_repair', repair_job: repairId };
+  }
+  const snapshot = await loadBuilderRuntimeSnapshot(supabase, repair.id).catch(() => null);
+  const evidence = snapshot ? await collectEvidence({ supabase, snapshot }).catch(() => null) : null;
+  if (!evidence?.manifestRows?.length || !(await actions.changeLanded(evidence.manifestRows))) {
+    return { job: job.id, outcome: 'waiting_for_repair', repair_job: repairId };
+  }
+  const reopened = await actions.createJob({
+    parentJobId: job.id,
+    organizationId: job.organization_id,
+    projectId: job.project_id,
+    title: job.title,
+    taskDescription: job.task_description,
+    frontendRequired: job.frontend_required === true,
+    backendRequired: job.backend_required === true,
+    codeReviewMode: job.code_review_mode || 'independent_ai',
+    requestedBy: job.autopilot_requested_by,
+    conversationId: job.autopilot_conversation_id ?? null,
+  });
+  await actions.record(job.id, 'done', { ...composeReport({ job, state: 'resumed', resumedAs: reopened.id }), repair_job_id: repairId, repair_outcome: 'landed' });
+  log({ job: job.id, resumed_as: reopened.id, after_repair: repairId });
+  return { job: job.id, outcome: 'resumed', resumed_as: reopened.id };
+}
+
 async function autopilotTick({ supabase, jobs, actions, log = () => {} }) {
   const outcomes = [];
   for (const job of jobs) {
     try {
+      // Waiting on a repair of main (owner ruling 2026-09-27: Bob does the coding; nobody is asked to fix main).
+      if (job.autopilot_state === 'blocked' && job.autopilot_report?.repair_job_id && !job.autopilot_report?.resumed_as_job_id && !job.autopilot_report?.repair_outcome) {
+        outcomes.push(await resumeAfterRepair({ supabase, job, actions, log }));
+        continue;
+      }
       if (TERMINAL.has(job.status)) {
         if (job.autopilot_state !== 'blocked' && job.autopilot_state !== 'done') {
           const snapshot = await loadBuilderRuntimeSnapshot(supabase, job.id).catch(() => null);
@@ -232,6 +331,14 @@ async function autopilotTick({ supabase, jobs, actions, log = () => {} }) {
       if (blockedReason && run?.reason !== 'action_failed') {
         const snapshot = await loadBuilderRuntimeSnapshot(supabase, job.id).catch(() => null);
         const evidence = snapshot ? await collectEvidence({ supabase, snapshot }).catch(() => null) : null;
+        const baseline = baselineBlock(blockedReason);
+        if (baseline && !isRepairJob(job) && typeof actions.createJob === 'function') {
+          const repair = await actions.createJob(repairJobFor(job, baseline));
+          await actions.record(job.id, 'blocked', composeReport({ job, evidence, state: 'repairing', reason: baseline.reason, repair }));
+          log({ job: job.id, repair_job: repair.id, reason: baseline.reason.slice(0, 200) });
+          outcomes.push({ job: job.id, outcome: 'repairing', repair_job: repair.id });
+          continue;
+        }
         await actions.record(job.id, 'blocked', composeReport({ job, evidence: evidence || { changedFiles: [], testsRun: [], followUps: [], rollbackNotes: [] }, state: 'blocked', reason: blockedReason }));
         outcomes.push({ job: job.id, outcome: 'blocked', reason: blockedReason });
         continue;
@@ -249,13 +356,25 @@ async function autopilotTick({ supabase, jobs, actions, log = () => {} }) {
 async function listAutopilotJobs(supabase, limit = 5) {
   const { data, error } = await supabase
     .from('builder_jobs')
-    .select('id, organization_id, title, task_description, status, target_sha, last_error, workspace_branch, workspace_head_sha, workspace_published_head_sha, workspace_pull_request_url, autopilot_requested_by, autopilot_conversation_id, autopilot_state, autopilot_report, autopilot_updated_at')
+    .select('id, organization_id, project_id, title, task_description, status, target_sha, last_error, frontend_required, backend_required, code_review_mode, workspace_branch, workspace_head_sha, workspace_published_head_sha, workspace_pull_request_url, autopilot_requested_by, autopilot_conversation_id, autopilot_state, autopilot_report, autopilot_updated_at')
     .not('autopilot_requested_by', 'is', null)
     .in('autopilot_state', ['driving', 'awaiting_human'])
     .order('autopilot_updated_at', { ascending: true })
     .limit(limit);
   if (error) throw new Error('autopilot jobs could not be listed');
-  return data || [];
+  // Jobs parked behind a repair of main are re-checked each tick until the repair lands or fails.
+  const { data: waiting, error: waitingError } = await supabase
+    .from('builder_jobs')
+    .select('id, organization_id, project_id, title, task_description, status, target_sha, last_error, frontend_required, backend_required, code_review_mode, workspace_branch, workspace_head_sha, workspace_published_head_sha, workspace_pull_request_url, autopilot_requested_by, autopilot_conversation_id, autopilot_state, autopilot_report, autopilot_updated_at')
+    .not('autopilot_requested_by', 'is', null)
+    .eq('autopilot_state', 'blocked')
+    .not('autopilot_report->>repair_job_id', 'is', null)
+    .is('autopilot_report->>resumed_as_job_id', null)
+    .is('autopilot_report->>repair_outcome', null)
+    .order('autopilot_updated_at', { ascending: true })
+    .limit(limit);
+  if (waitingError) throw new Error('autopilot jobs waiting on a repair could not be listed');
+  return [...(data || []), ...(waiting || [])];
 }
 
 async function listPendingApprovals(supabase, jobId) {
@@ -264,4 +383,4 @@ async function listPendingApprovals(supabase, jobId) {
   return data || [];
 }
 
-module.exports = { autopilotTick, collectEvidence, composeReport, composePullRequestBody, evidentialHold, listAutopilotJobs, listPendingApprovals, TERMINAL, GATES };
+module.exports = { autopilotTick, baselineBlock, collectEvidence, composeReport, composePullRequestBody, evidentialHold, isRepairJob, listAutopilotJobs, listPendingApprovals, repairJobFor, TERMINAL, GATES };
