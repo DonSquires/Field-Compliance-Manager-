@@ -2,6 +2,14 @@ const http = require('http');
 const crypto = require('crypto');
 const fs = require('fs');
 const path = require('path');
+// Node's fetch gives up waiting for response headers after five minutes; a model run on the VPS CPU
+// (and the gateway call that wraps it) can take longer. One dispatcher with the model budget for all.
+{
+  const { Agent, fetch: undiciFetch, setGlobalDispatcher } = require('undici');
+  const budgetMs = Math.min(Number(process.env.BOB_MODEL_TIMEOUT_MS || 600000), 1800000) + 120000;
+  setGlobalDispatcher(new Agent({ headersTimeout: budgetMs, bodyTimeout: budgetMs, connectTimeout: 15000 }));
+  globalThis.fetch = undiciFetch;
+}
 const { createClient } = require('@supabase/supabase-js');
 const { createWorkflowClient } = require('./supabase-workflow-client');
 const { createAssessment } = require('./assessment-manifest');
@@ -768,6 +776,11 @@ const server = http.createServer(async (req, res) => {
   });
 });
 
+// A model run on the VPS CPU can legitimately take longer than Node's 5-minute default request timeout;
+// at 5:03 the socket closed mid-generation, the gateway marked Ollama unhealthy and every retry was told
+// "unreachable" (job 2fba8ca0, 2026-09-27). Give requests the model budget plus a margin.
+server.requestTimeout = Math.min(Number(process.env.BOB_MODEL_TIMEOUT_MS || 600000), 1800000) + 120000;
+server.keepAliveTimeout = 65000;
 server.listen(port, '0.0.0.0', () => console.log(`bob-control-plane listening on ${port}`));
 if (autopilotEnabled && builderSupabase) {
   // This process is the only verifier runner: anything still 'running' at startup was orphaned by

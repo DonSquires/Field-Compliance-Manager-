@@ -308,3 +308,17 @@ test('laptop shell routes are admin-only and report "not available" until the ow
     assert.equal(entry.metadata.status, 503);
   }
 });
+
+test('the control plane gives long in-house model runs their full budget: no 5-minute socket or fetch cut-off', () => {
+  const fs = require('node:fs');
+  const path = require('node:path');
+  const source = fs.readFileSync(path.resolve(__dirname, '../bob-control-plane-server.js'), 'utf8');
+  // Node's http server (requestTimeout) and fetch (undici headersTimeout) both default to 300 s; job 2fba8ca0's
+  // author call was cut at 5:03 and reported as "ollama provider is unreachable".
+  assert.match(source, /server\.requestTimeout = Math\.min\(Number\(process\.env\.BOB_MODEL_TIMEOUT_MS \|\| 600000\), 1800000\) \+ 120000;/);
+  assert.match(source, /setGlobalDispatcher\(new Agent\(\{ headersTimeout: budgetMs, bodyTimeout: budgetMs/);
+  assert.match(source, /globalThis\.fetch = undiciFetch;/);
+  const gateway = fs.readFileSync(path.resolve(__dirname, '../builder-model-gateway.js'), 'utf8');
+  assert.match(gateway, /HEALTH_PROBE_TIMEOUT_MS = Math\.max\(2_000, Number\(process\.env\.BOB_MODEL_PROBE_TIMEOUT_MS \|\| 10_000\)\)/);
+  assert.equal(require('../package.json').dependencies.undici !== undefined, true);
+});

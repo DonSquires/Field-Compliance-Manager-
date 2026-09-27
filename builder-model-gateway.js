@@ -16,7 +16,9 @@ const REASONING_EFFORTS = new Set(['none', 'low', 'medium', 'high', 'xhigh']);
 const PROVIDER_KINDS = Object.freeze({ openai: 'openai', ollama: 'ollama', gpu_workstation: 'ollama' });
 const HEALTH_OK_TTL_MS = 30_000;
 const HEALTH_FAIL_TTL_MS = 60_000;
-const HEALTH_PROBE_TIMEOUT_MS = 2_000;
+// A CPU box evaluating a prompt on every core answers /api/tags late; two seconds called a working
+// model "unreachable".
+const HEALTH_PROBE_TIMEOUT_MS = Math.max(2_000, Number(process.env.BOB_MODEL_PROBE_TIMEOUT_MS || 10_000));
 const CHARS_PER_TOKEN = 3.5;
 const healthCache = new Map();
 
