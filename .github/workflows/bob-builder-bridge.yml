@@ -142,6 +142,17 @@ jobs:
               body="${gitea_body:-$(printf '## Bob Builder review\n\nVerified Builder branch `%s`, published from the VPS via the Gitea mirror.\n\nJob record: builder_jobs where workspace_branch = `%s`.' "$branch" "$branch")}${provenance}"
               if gh pr create --repo "$REPO" --draft --base main --head "$branch" --title "$(printf '%s' "$title" | cut -c1-200)" --body "$body"; then
                 echo "opened draft PR for $branch"
+                # Owner ruling 2026-09-27: a change whose every independent check passed carries Bob's
+                # auto-merge marker in the body the autopilot wrote; the owner cannot review code and
+                # asked to be hands-off. Evidential work never carries the marker.
+                if printf '%s' "$gitea_body" | grep -q 'bob-automerge: yes'; then
+                  number="$(gh pr list --repo "$REPO" --head "$branch" --state open --json number --jq '.[0].number')"
+                  if [ -n "$number" ] && gh pr ready "$number" --repo "$REPO" && gh pr merge "$number" --repo "$REPO" --merge --delete-branch --subject "$(printf '%s' "$title" | cut -c1-200)" --body "Auto-merged by Bob's bridge: independent worker verification, security scan and independent AI review all passed; no evidential paths (marker set by the autopilot)."; then
+                    echo "auto-merged PR #$number for $branch"
+                  else
+                    echo "::warning::auto-merge of $branch did not complete; the draft PR stays open for a person"
+                  fi
+                fi
               else
                 echo "::error::Could not open a pull request for $branch. If the message says GitHub Actions is not permitted to create pull requests, enable 'Allow GitHub Actions to create and approve pull requests' under Settings > Actions > General."
                 pr_failures=$((pr_failures + 1))

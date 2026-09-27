@@ -89,7 +89,7 @@ has() { printf '%s\n' "$CHANGED" | grep -qE "$1"; }
 TARGETS=()
 has '^(bob-control-plane-server\.js|builder-[a-z-]+\.js|bob-laptop-shell\.js|supabase-workflow-client\.js|package(-lock)?\.json|Dockerfile|deploy/bob-control-plane/|supabase/functions/_shared/builder-)' && TARGETS+=(control-plane)
 has '^services/fcm-api/' && TARGETS+=(fcm-api)
-has '^(Dockerfile\.worker|frontend-worker\.js|backend-worker\.js|security-worker\.js|worker-executor\.js|builder-verification-outcome\.js|builder-path-policy\.js|apps/web/package(-lock)?\.json)' && TARGETS+=(worker-image)
+has '^(Dockerfile\.worker|frontend-worker\.js|backend-worker\.js|security-worker\.js|worker-executor\.js|builder-verification-outcome\.js|builder-path-policy\.js|builder-data-path-gate\.js|builder-ts-delta-gate\.js|assessment-manifest\.js|apps/web/package(-lock)?\.json)' && TARGETS+=(worker-image)
 WEB_ONLY_NOTE=""; has '^apps/web/' && WEB_ONLY_NOTE="apps/web changed: Vercel deploys it from main on its own"
 
 PLAN="$(node -e '
@@ -110,6 +110,11 @@ fi
 
 # 4. Live: apply in a safe order. Data first (migrations are additive by Builder policy), then
 #    edge functions, then the VPS services, each with a health check and rollback.
+# Restarting the control plane mid-run discards the author's turns; wait for the next tick instead.
+if [[ -n "${SUPABASE_URL:-}" && -n "${SUPABASE_SERVICE_ROLE_KEY:-}" ]] && printf '%s\n' "${TARGETS[@]:-}" | grep -qE '^(control-plane|fcm-api)$'; then
+  inflight="$(curl -s "${SUPABASE_URL%/}/rest/v1/builder_model_runs?select=id&status=in.(running,queued)&limit=1" -H "apikey: ${SUPABASE_SERVICE_ROLE_KEY}" -H "Authorization: Bearer ${SUPABASE_SERVICE_ROLE_KEY}" | tr -d ' \n')"
+  if [[ "$inflight" != "[]" && -n "$inflight" ]]; then log "deferred ${HEAD_SHA:0:8}: a Bob model run is in flight; retrying next tick"; exit 0; fi
+fi
 SHA8="${HEAD_SHA:0:8}"
 PREVIOUS_RELEASE="$RELEASES_DIR/${DEPLOYED_SHA:0:8}"
 RESULTS=()

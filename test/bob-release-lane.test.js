@@ -34,4 +34,9 @@ test('release lane skips migrations already in the live ledger, and a hand deplo
   const deploy = fs.readFileSync(path.resolve(__dirname, '../scripts/bob-vps-deploy.sh'), 'utf8');
   assert.equal(spawnSync('bash', ['-n', path.resolve(__dirname, '../scripts/bob-vps-deploy.sh')], { encoding: 'utf8' }).status, 0);
   assert.match(deploy, /> \/var\/lib\/bob\/release-lane\/deployed_sha/);
+  // A control-plane restart mid-run would discard the author's turns: the lane waits for the next tick.
+  assert.match(lane, /builder_model_runs\?select=id&status=in\.\(running,queued\)/);
+  assert.match(lane, /deferred \$\{HEAD_SHA:0:8\}: a Bob model run is in flight/);
+  // The gates the worker image carries rebuild it when they change.
+  assert.match(lane, /builder-data-path-gate\\\.js\|builder-ts-delta-gate\\\.js/);
 });

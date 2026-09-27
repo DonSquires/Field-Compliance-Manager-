@@ -202,6 +202,29 @@ test('a job the independent reviewer blocked is re-opened with the findings fold
   assert.deepEqual(await autopilotTick({ supabase: fakeSupabase({ job: other }), jobs: [other], actions: actions4 }), [{ job: 'job-o', outcome: 'blocked' }]);
 });
 
+test('auto-merge is env-gated and narrow: every independent check clean, requested in chat, nothing evidential; the PR body carries the marker and the report says so', async () => {
+  const { automergeEligible, AUTOMERGE_MARK } = require('../builder-autopilot');
+  const job = { id: 'job-am', autopilot_requested_by: 'user-1', title: 'Fix', target_sha: 'a'.repeat(40), task_description: 'brief' };
+  const clean = { verifyRun: { profile: 'backend-verify' }, security: { passed: true, counts: {} }, review: { verdict: 'passed', summary: 'checked the data path', findings: 1, findingList: [{ severity: 'low', file: 'x', message: 'nit' }], testGaps: ['none named'] }, changedFiles: ['services/fcm-api/src/bob/verify.js'], testsRun: [], followUps: [], rollbackNotes: [], summary: 's' };
+  assert.equal(automergeEligible({ job, evidence: clean, env: {} }).ok, false, 'off by default');
+  const on = { BOB_AUTOPILOT_AUTOMERGE: 'true' };
+  assert.equal(automergeEligible({ job, evidence: clean, env: on }).ok, true);
+  assert.equal(automergeEligible({ job: { ...job, autopilot_requested_by: null }, evidence: clean, env: on }).ok, false, 'not asked for in chat');
+  assert.equal(automergeEligible({ job, evidence: { ...clean, verifyRun: null }, env: on }).ok, false, 'no worker verification');
+  assert.equal(automergeEligible({ job, evidence: { ...clean, security: { passed: false } }, env: on }).ok, false, 'security findings');
+  assert.equal(automergeEligible({ job, evidence: { ...clean, review: { ...clean.review, verdict: 'blocked' } }, env: on }).ok, false, 'review blocked');
+  assert.equal(automergeEligible({ job, evidence: { ...clean, review: { ...clean.review, findingList: [{ severity: 'high', file: 'x', message: 'bad' }] } }, env: on }).ok, false, 'a high finding on a passed review still blocks');
+  assert.match(automergeEligible({ job, evidence: { ...clean, changedFiles: ['apps/mobile/src/screens/Evidence.tsx'] }, env: on }).reason, /evidential paths need a person/);
+  const eligible = automergeEligible({ job, evidence: clean, env: on });
+  const body = composePullRequestBody({ job, evidence: clean, branchName: 'bob/job-am', headSha: 'deadbeef', automerge: eligible });
+  assert.ok(body.includes(AUTOMERGE_MARK));
+  assert.match(body, /Auto-merge: Bob merges this himself/);
+  assert.doesNotMatch(composePullRequestBody({ job, evidence: clean, branchName: 'b', headSha: 'd' }), /bob-automerge/);
+  const report = composeReport({ job, evidence: clean, pullRequestUrl: 'https://git.example/pulls/1', state: 'published', automerge: eligible });
+  assert.match(report.text, /Bob will merge this himself within about ten minutes/);
+  assert.match(composeReport({ job, evidence: clean, pullRequestUrl: 'u', state: 'published' }).text, /Nothing is live yet/);
+});
+
 test('report and pull-request composers degrade honestly when evidence is thin', () => {
   const evidence = { changedFiles: [], testsRun: [], followUps: [], rollbackNotes: [], summary: '', verifyRun: null, security: null, review: null, releaseNotes: null };
   const report = composeReport({ job: { title: 'T' }, evidence, pullRequestUrl: null, state: 'published' });
