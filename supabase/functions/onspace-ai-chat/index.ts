@@ -289,6 +289,7 @@ function safeAgentWorkspaceContext(value) {
         'propose_freedom_camping_org_strategy',
         'dispatch_flow',
         'create_builder_job',
+        'cancel_builder_job',
         'laptop_shell',
         'review_merge_request',
         'config_error',
@@ -699,6 +700,7 @@ const WRITE_CAPABLE_TOOLS = new Set([
   'dispatch_flow',
   // create_builder_job opens a GitHub Builder job (produces a DRAFT PR) — write-capable.
   'create_builder_job',
+  'cancel_builder_job',
   // laptop_shell runs a PowerShell command on the owner's laptop — write-capable (it acts on a real machine).
   'laptop_shell',
   // C5 stage 1b (#243): generic_write is write-capable, so the explicit
@@ -1452,7 +1454,8 @@ function computeEgressForbiddenSet(caps, meta) {
     t.tool === 'write_self_memory' && caps.tier === 'admiral' || // read_self_memory is Bob's read of his own memory — ADMIRAL ONLY.
     t.tool === 'read_self_memory' && caps.tier === 'admiral' || // dispatch_flow dispatches a governed Duo coding flow — ADMIRAL ONLY.
     t.tool === 'dispatch_flow' && caps.tier === 'admiral' || // create_builder_job opens a GitHub self-heal/build job (DRAFT PR) — ADMIRAL ONLY.
-    t.tool === 'create_builder_job' && caps.tier === 'admiral' || // laptop_shell runs a confirmed PowerShell command on the owner's laptop — ADMIRAL ONLY.
+    t.tool === 'create_builder_job' && caps.tier === 'admiral' ||
+    t.tool === 'cancel_builder_job' && caps.tier === 'admiral' || // laptop_shell runs a confirmed PowerShell command on the owner's laptop — ADMIRAL ONLY.
     t.tool === 'laptop_shell' && caps.tier === 'admiral' || allowed.has(t.tool) || allowed.has(envelopeName[t.tool] ?? ''));
 }
 // ── Persona + platform grounding (passed to the brain) ───────────────────────
@@ -1892,6 +1895,17 @@ async function loadHistory(supabase, conversationId, limit = 8) {
         kind: 'builder_job_pending',
         builder_job: md.pending_builder_job
       };
+    }
+    if (md.tool === 'cancel_builder_job' && i === rows.length - 1 && md.outcome === 'proposed') {
+      const proposal = md.pending_builder_cancellation;
+      if (proposal && typeof proposal === 'object' &&
+          typeof proposal.job_id === 'string' && typeof proposal.title === 'string' &&
+          typeof proposal.reason === 'string' && typeof proposal.user_id === 'string' &&
+          typeof proposal.conversation_id === 'string') {
+        return { history, pending: {
+          kind: 'builder_cancellation_pending', builder_cancellation: proposal
+        } };
+      }
     }
     // A laptop_shell turn with a pending_laptop_command marker: Bob showed the owner the exact
     // PowerShell command and asked before running it on their laptop. Same tier as dispatch_pending.
@@ -8460,6 +8474,45 @@ serve(async (req)=>{
               }
             };
           }
+        case 'cancel_builder_job':
+          {
+            const toolMeta = (outcome: string) => ({ tool: 'cancel_builder_job', outcome });
+            if (caps.tier !== 'admiral') return { reply: 'Only the platform owner can cancel Builder jobs here.', meta: toolMeta('forbidden') };
+            const stored = pending?.kind === 'builder_cancellation_pending' ? pending.builder_cancellation : null;
+            const trusted = stored && stored.user_id === user.id && stored.conversation_id === conversationId &&
+              /^[0-9a-f]{8}-[0-9a-f-]{27,}$/i.test(stored.job_id) &&
+              typeof stored.title === 'string' && stored.title.trim() && typeof stored.reason === 'string' && stored.reason.trim();
+            if (stored && !trusted) return { reply: 'That cancellation preview cannot be verified. Please start again.', meta: toolMeta('unconfirmed') };
+            if (stored && !/^(yes|yeah|yep|confirm|confirmed|go ahead|do it|please do|proceed)[.!\s]*$/i.test(message.trim())) {
+              return { reply: /^(no|nope|cancel|stop|decline)[.!\s]*$/i.test(message.trim()) ? 'Understood. I will not cancel that Builder job.' : 'I have not cancelled the job. Please answer yes to confirm, or no to decline.', meta: toolMeta('declined') };
+            }
+            const jobId = stored ? stored.job_id : String(toolArgs.job_id ?? '').trim();
+            const title = stored ? stored.title : String(toolArgs.title ?? '').trim();
+            const reason = stored ? stored.reason : String(toolArgs.reason ?? '').trim();
+            if (!jobId && !title || !reason) return { reply: 'Please provide a Builder job ID or exact title and a non-empty reason for cancellation.', meta: toolMeta('need_params') };
+            const idPattern = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
+            if (jobId && !idPattern.test(jobId)) return { reply: 'That is not a valid Builder job ID. Please provide the full ID.', meta: toolMeta('need_params') };
+            const listed = await callFn('bob-builder-control-room', authHeader, { action: 'list' });
+            const jobs = (listed.data && typeof listed.data === 'object' && 'jobs' in listed.data && Array.isArray(listed.data.jobs)) ? listed.data.jobs : null;
+            if (!listed.ok || !jobs) return { reply: 'I could not check the Builder control room. No cancellation was made.', meta: toolMeta('lookup_failed') };
+            const matches = jobId ? jobs.filter((j) => j?.id === jobId) : jobs.filter((j) => j?.title === title);
+            if (matches.length > 1) return { reply: `More than one Builder job has the title "${title}". Please provide the exact job ID; I have not cancelled anything.`, meta: toolMeta('ambiguous') };
+            if (!matches.length) return { reply: 'I could not find that Builder job in the control room. No cancellation was made.', meta: toolMeta('not_found') };
+            const job = matches[0];
+            if (stored && (job.id !== stored.job_id || job.title !== stored.title)) return { reply: 'That job is missing or its title has changed since the preview. Please request a fresh cancellation preview.', meta: toolMeta('changed') };
+            if (!stored) {
+              return {
+                reply: `Preview only — cancel Builder job "${job.title}" (ID: ${job.id})\nReason: ${reason}\n\nNo cancellation has been made. Reply **yes** in your next message to confirm, or **no** to decline.`,
+                meta: { ...toolMeta('proposed'), pending_builder_cancellation: { job_id: job.id, title: job.title, reason, user_id: user.id, conversation_id: conversationId } }
+              };
+            }
+            if (['cancelled', 'completed', 'failed', 'merged', 'rejected'].includes(String(job.status))) return { reply: `Builder job "${title}" is already ${job.status}; I did not cancel it again.`, meta: toolMeta('already_finished') };
+            const callerClient = createClient(Deno.env.get('SUPABASE_URL') ?? '', Deno.env.get('SUPABASE_ANON_KEY') ?? '', { global: { headers: { Authorization: authHeader } } });
+            const { data: cancelled, error: cancelError } = await callerClient.rpc('builder_cancel_job', { _job_id: jobId, _reason: reason });
+            if (cancelError) return { reply: `I could not cancel that Builder job (${cancelError.message}).`, meta: toolMeta('failed') };
+            if (!cancelled || cancelled.id !== jobId || cancelled.status !== 'cancelled') return { reply: 'The cancellation returned an unexpected result; I cannot confirm that the job was cancelled.', meta: toolMeta('unexpected_result') };
+            return { reply: `Cancelled Builder job "${title}" (ID: ${jobId}). Reason: ${reason}`, meta: toolMeta('cancelled') };
+          }
         // laptop_shell: a PowerShell command on the owner's laptop over the private Tailscale link —
         // ADMIRAL ONLY (owner instruction 2026-09-26: "give Bob Windows PowerShell so he can access files
         // on my computer if I want him to, and a terminal to work with"). Two-turn: SHOW the exact command
@@ -8682,6 +8735,18 @@ serve(async (req)=>{
     // Bob now reasons his way through affirmations using his knowledge cards and
     // conversation history. The gate was a training-wheels workaround that treated
     // Bob as a keyword-driven bot rather than an agentic copilot.
+    if (pending?.kind === 'builder_cancellation_pending') {
+      // Consume the immediately preceding preview on this turn, regardless of the planner's answer.
+      const result = await dispatchTool('cancel_builder_job', {}, { action: 'use_tool', tool: 'cancel_builder_job', args: {} });
+      await persist(admin, orgId, conversationId, [
+        { role: 'user', content: message },
+        { role: 'assistant', content: result.reply, metadata: result.meta }
+      ]);
+      return json(buildStructuredResponse({
+        reply: result.reply, route: 'tool', startTime,
+        meta: { intent: 'conductor', planned_tool: 'cancel_builder_job', ...result.meta }
+      }));
+    }
     // ── Plan call (first iteration — shared by both paths) ───────────────────
     // callPlan posts to the VPS /api/bob/plan (bobPlan.ts — the single
     // canonical planning prompt), bypassing the bob-inference hop, and falls
@@ -8779,6 +8844,12 @@ serve(async (req)=>{
       return json(structured, 200);
     }
     let decision = plan.data ?? {};
+    // Resume a stored cancellation deterministically; the model cannot supply the target.
+    if (pending?.kind === 'builder_cancellation_pending' && caps.tier === 'admiral' &&
+        /^(yes|yeah|yep|confirm|confirmed|go ahead|do it|please do|proceed)[.!\s]*$/i.test(message.trim()) &&
+        pending.builder_cancellation?.user_id === user.id && pending.builder_cancellation?.conversation_id === conversationId) {
+      decision = { action: 'use_tool', tool: 'cancel_builder_job', args: {} };
+    }
     let { normAction, chosenTool, args } = parsePlanDecision(decision);
     // PILLAR H: plan_verified — the planner's own verifying subagent verdict for this turn.
     if (decision.verification && typeof decision.verification === 'object') {
