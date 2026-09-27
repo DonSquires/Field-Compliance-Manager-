@@ -9,6 +9,7 @@ const native = fs.readFileSync(path.join(root, 'apps/sd-card-bridge-v2/src-tauri
 const entrypoint = fs.readFileSync(path.join(root, 'apps/sd-card-bridge-v2/src-tauri/src/main.rs'), 'utf8');
 const readme = fs.readFileSync(path.join(root, 'apps/sd-card-bridge-v2/README.md'), 'utf8');
 const workflow = fs.readFileSync(path.join(root, '.github/workflows/release-sd-card-bridge-v2.yml'), 'utf8');
+const signer = fs.readFileSync(path.join(root, 'scripts/desktop-signing/sign-and-publish.mjs'), 'utf8');
 const photoMigration = fs.readFileSync(path.join(root, 'supabase/migrations/20260926012000_cctv_photo_inference.sql'), 'utf8');
 const dedupeMigration = fs.readFileSync(path.join(root, 'supabase/migrations/20260927290000_cctv_media_hash_dedupe.sql'), 'utf8');
 const styles = fs.readFileSync(path.join(root, 'apps/sd-card-bridge-v2/src/styles.css'), 'utf8');
@@ -37,6 +38,8 @@ test('Desktop V2 is the operating desktop and keeps its read-only, card-first bo
   assert.match(workflow, /FCM-Desktop-V2-Setup\.exe/);
   assert.match(workflow, /Write integrity manifest \(unsigned build\)/);
   assert.match(workflow, /Publish V2 release \(unsigned; sign on the protected side\)/);
+  assert.match(signer, /\['rev-parse', `\$\{TAG\}\^\{commit\}`\]/);
+  assert.match(signer, /'--prerelease=false', '--latest'/);
   assert.match(workflow, /SmartScreen/);
   for (const icon of ['32x32.png', '128x128.png', '128x128@2x.png', 'icon.ico']) {
     assert.equal(fs.existsSync(path.join(root, 'apps/sd-card-bridge-v2/src-tauri/icons', icon)), true, `${icon} is owned by V2`);

@@ -126,7 +126,7 @@ try {
   // 5. Integrity manifest.
   const signedBytes = readFileSync(signedPath);
   const sha256 = createHash('sha256').update(signedBytes).digest('hex');
-  const gitSha = spawnSync('git', ['rev-parse', TAG], { encoding: 'utf8' }).stdout?.trim() || null;
+  const gitSha = spawnSync('git', ['rev-parse', `${TAG}^{commit}`], { encoding: 'utf8' }).stdout?.trim() || null;
   const manifest = {
     product: 'FCM Desktop V2', version, file: FILE_NAME, sha256, size_bytes: signedBytes.length, git_sha: gitSha,
     built_from_tag: TAG, unsigned_sha256: unsignedSha, signed: true, signer: subject, signer_thumbprint: thumbprint,
@@ -152,6 +152,8 @@ try {
     writeFileSync(join(work, 'FCM-Desktop-Signing.cer'), cerDer);
     run('gh', ['release', 'upload', TAG, release, join(work, 'SHA256SUMS'), join(work, 'manifest.json'), join(work, 'FCM-Desktop-Signing.cer'), '--repo', REPO, '--clobber']);
     log('release_assets_replaced', { tag: TAG });
+    run('gh', ['release', 'edit', TAG, '--repo', REPO, '--prerelease=false', '--latest']);
+    log('release_promoted', { tag: TAG, latest: true });
   }
   console.log(`\nSigned ${FILE_NAME} v${version} as ${subject}\nSHA-256 ${sha256}\nPublished to ${BUCKET}/${prefix}/`);
 } catch (error) {
