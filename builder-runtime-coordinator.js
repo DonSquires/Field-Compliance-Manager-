@@ -186,12 +186,12 @@ function resumablePatchArtifact(snapshot, step) {
 }
 
 // Runners that died with their lease (redeploy, crash) must not hold a job for ever. Best-effort.
-async function recoverExpiredWorkerRuns(supabase, logger = console) {
+async function recoverExpiredWorkerRuns(supabase, logger = console, { includeActive = false, reason = null } = {}) {
   if (!supabase || typeof supabase.rpc !== 'function') return 0;
   try {
-    const { data, error } = await supabase.rpc('builder_recover_expired_worker_runs');
+    const { data, error } = await supabase.rpc('builder_recover_expired_worker_runs', { _include_active: includeActive === true, _reason: reason });
     if (error) { logger?.warn?.(`[builder] expired worker runs not recovered: ${error.message}`); return 0; }
-    if (Number(data) > 0) logger?.warn?.(`[builder] recovered ${data} expired verification run(s)`);
+    if (Number(data) > 0) logger?.warn?.(`[builder] recovered ${data} ${includeActive ? 'orphaned' : 'expired'} verification run(s)`);
     return Number(data) || 0;
   } catch (error) {
     logger?.warn?.(`[builder] expired worker runs not recovered: ${error instanceof Error ? error.message : error}`);
@@ -316,6 +316,7 @@ module.exports = {
   implementationArtifacts,
   stepIsRunnable,
   planBuilderAction,
+  recoverExpiredWorkerRuns,
   loadBuilderRuntimeSnapshot,
   runBackendImplementation,
   executeBuilderAction,

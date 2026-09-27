@@ -9,7 +9,7 @@ const { collectRepositoryContext } = require('./supabase/functions/_shared/build
 const { collectBuilderLiveContext } = require('./builder-live-context');
 const { buildAtlasGraph } = require('./scripts/atlas-graph');
 const { createModelGatewayConfig, defaultReviewerModel, invokeBuilderModel, modelHealth } = require('./builder-model-gateway');
-const { loadBuilderRuntimeSnapshot, advanceBuilderJob, runBuilderUntilPause } = require('./builder-runtime-coordinator');
+const { loadBuilderRuntimeSnapshot, advanceBuilderJob, runBuilderUntilPause, recoverExpiredWorkerRuns } = require('./builder-runtime-coordinator');
 const { fileSha256, listRepositoryTree, readRepositoryFile, searchRepository } = require('./builder-repository-read');
 const { autopilotTick, listAutopilotJobs, listPendingApprovals } = require('./builder-autopilot');
 const { laptopStatus, runLaptopCommand, laptopConfig, loadLaptopLink, mergeLaptopLink, describeLink } = require('./bob-laptop-shell');
@@ -770,6 +770,11 @@ const server = http.createServer(async (req, res) => {
 
 server.listen(port, '0.0.0.0', () => console.log(`bob-control-plane listening on ${port}`));
 if (autopilotEnabled && builderSupabase) {
+  // This process is the only verifier runner: anything still 'running' at startup was orphaned by
+  // the restart and would otherwise hold its job until the lease ran out (job 72edc782: 33 minutes).
+  recoverExpiredWorkerRuns(builderSupabase, console, { includeActive: true, reason: 'control plane restarted before the verifier reported' })
+    .then((count) => { if (count) record('autopilot', 'builder.autopilot.recovered_on_restart', 'startup', { runs: count }); })
+    .catch(() => {});
   const autopilotTimer = setInterval(() => { autopilotOnce().catch(() => {}); }, autopilotIntervalMs);
   autopilotTimer.unref?.();
   setTimeout(() => { autopilotOnce().catch(() => {}); }, 5_000).unref?.();
