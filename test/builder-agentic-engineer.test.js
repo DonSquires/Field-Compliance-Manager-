@@ -131,7 +131,7 @@ test('the author works in-house first and escalates to OpenAI only when the loca
       if (seen.filter(s => s.provider === 'gpu_workstation').length === 1) return { ok: true, status: 200, data: { content: JSON.stringify({ tool: 'read_file', args: { path: 'lib/sum.js' } }), model: 'qwen2.5-coder:7b' } };
       return { ok: false, status: 413, error: 'prompt exceeds the gpu_workstation context window (32768 tokens)' };
     }
-    const openaiTurn = seen.filter(s => s.provider === 'openai').length;
+    const openaiTurn = seen.filter(s => s.provider !== 'gpu_workstation').length;
     const script = [
       { tool: 'write_file', args: { path: 'lib/sum.js', content: "'use strict';\nmodule.exports = { sum: (a, b) => a + b };\n" } },
       { tool: 'run', args: { command: 'node --test test/sum.test.js' } },
@@ -141,17 +141,19 @@ test('the author works in-house first and escalates to OpenAI only when the loca
   };
   const result = await runAgenticEngineer({ supabase: null, gateway: { gatewayUrl: 'http://gw', apiToken: 't' }, job, step, lane: 'backend', sourceDir: repo.source, workspaceRoot, repoRoot: repo.source, callModel, limits: { ...DEFAULT_LIMITS, maxTurns: 10 }, providerHealth: LAPTOP_ON });
   assert.equal(result.ok, true, JSON.stringify(result.error));
-  assert.deepEqual(seen.slice(0, 3).map(s => s.provider), ['gpu_workstation', 'gpu_workstation', 'openai']);
+  // A window overflow compacts the transcript hard and retries the laptop once; the second overflow
+  // escalates to the next in-house provider (the VPS Ollama), never straight to OpenAI.
+  assert.deepEqual(seen.slice(0, 4).map(s => s.provider), ['gpu_workstation', 'gpu_workstation', 'gpu_workstation', 'ollama']);
   assert.equal(seen[0].model, 'qwen2.5-coder:7b');
   assert.equal(seen[0].effort, null, 'local models get no OpenAI reasoning params');
-  assert.equal(seen[2].effort, 'high');
-  assert.deepEqual(result.routing.chain, ['gpu_workstation', 'openai']);
-  assert.equal(result.routing.provider, 'openai');
+  assert.equal(seen[3].effort, null);
+  assert.deepEqual(result.routing.chain, ['gpu_workstation', 'ollama', 'openai']);
+  assert.equal(result.routing.provider, 'ollama');
   assert.equal(result.routing.escalated, true);
   // Resuming past the failed local provider skips it entirely on the next attempt.
   const seen2 = [];
   const result2 = await runAgenticEngineer({ supabase: null, gateway: { gatewayUrl: 'http://gw', apiToken: 't' }, job: { ...job, id: 'e5ca1a7ee5ca1a7ee5ca1a7ee5ca1a7f' }, step, lane: 'backend', sourceDir: repo.source, workspaceRoot, repoRoot: repo.source, callModel: async ({ modelRequest }) => { seen2.push(modelRequest.provider); return { ok: true, status: 200, data: { content: JSON.stringify({ tool: 'finish', args: { summary: 'x', no_change_reason: 'nothing to do here really' } }), model: 'gpt-5.4' } }; }, limits: { ...DEFAULT_LIMITS, maxTurns: 3 }, providerHealth: LAPTOP_ON, startAfterProvider: 'gpu_workstation' });
-  assert.deepEqual(seen2, ['openai']);
+  assert.deepEqual(seen2, ['ollama']);
   assert.equal(result2.no_change, true);
   fs.rmSync(repo.root, { recursive: true, force: true });
 });
@@ -184,7 +186,8 @@ test('agentic engineer explores, fixes the bug, runs the tests, and hands over a
   assert.equal(repo.git(['apply', '--check', '--whitespace=error-all', patchFile]), '');
   assert.equal(result.proposal.lane, 'backend');
   // Every turn went to the gateway as a multi-turn request at high effort with the conversation attached.
-  assert.ok(seen.every((request) => Array.isArray(request.request.messages) && request.request.reasoning_effort === 'high'));
+  // Laptop off: the VPS Ollama authors (in-house), so no OpenAI reasoning params are sent.
+  assert.ok(seen.every((request) => Array.isArray(request.request.messages) && request.provider === 'ollama' && request.request.reasoning_effort === undefined));
   const firstTest = JSON.parse(seen[4].request.messages.at(-1).content).tool_result;
   assert.equal(firstTest.exit_code, 1, 'the failing test ran inside the worktree');
   const refused = JSON.parse(seen[5].request.messages.at(-1).content).tool_result;
@@ -647,7 +650,7 @@ test('a dropped gateway connection mid-run is retried on the same turn; three in
   const result2 = await runAgenticEngineer({ supabase: null, gateway: { gatewayUrl: 'http://gw', apiToken: 't' }, job: { ...job, id: 'd0c0d0c0d0c0d0c0d0c0d0c0d0c0d0c1' }, step, lane: 'backend', sourceDir: repo.source, workspaceRoot, repoRoot: repo.source, callModel: async () => { seen2.push(1); return { ok: false, status: 502, error: 'model gateway unavailable' }; }, limits: { ...DEFAULT_LIMITS, maxTurns: 10 }, providerHealth: LAPTOP_OFF });
   assert.equal(result2.ok, false);
   assert.match(result2.error, /model unavailable/);
-  assert.equal(seen2.length, 3, 'three consecutive failures on the last provider end the run, not thirty');
+  assert.equal(seen2.length, 6, 'three consecutive failures move to the next provider (VPS Ollama -> OpenAI); three more end the run, not thirty');
   fs.rmSync(repo.root, { recursive: true, force: true });
 });
 

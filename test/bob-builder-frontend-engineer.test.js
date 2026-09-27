@@ -103,7 +103,7 @@ test('Frontend Engineer routes approved UX and bounded source through governed m
       }
     });
     // In-house first: the author chain starts on the laptop GPU and falls back to OpenAI when stuck.
-    assert.deepEqual(captured.modelRequest.chain, ['gpu_workstation', 'openai']);
+    assert.deepEqual(captured.modelRequest.chain, ['gpu_workstation', 'ollama', 'openai']);
     assert.equal(captured.modelRequest.provider, 'gpu_workstation');
     assert.equal(captured.modelRequest.prompt_version, FRONTEND_ENGINEER_PROMPT_VERSION);
     assert.deepEqual(captured.modelRequest.input_artifact_ids, ['ux-1']);

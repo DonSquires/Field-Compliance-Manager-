@@ -28,12 +28,13 @@ const PROMPT_VERSION = 'agentic-engineer-v2';
 const DEFAULT_LIMITS = Object.freeze({
   maxTurns: Math.max(4, Number(process.env.BOB_BUILDER_AGENT_TURNS || 60)),
   wallBudgetMs: Math.max(5 * 60_000, Number(process.env.BOB_BUILDER_AGENT_BUDGET_MS || 45 * 60_000)),
-  readCapChars: 60_000,
+  // A 60 kB read is ~15k tokens: half a small local model's window. Operators shrink it for in-house authors.
+  readCapChars: Math.max(8_000, Number(process.env.BOB_BUILDER_READ_CAP_CHARS || 60_000)),
   searchCapLines: 200,
   listCapEntries: 400,
   runCapChars: 20_000,
   runTimeoutMs: 10 * 60_000,
-  turnTimeoutMs: 620_000,
+  turnTimeoutMs: Math.max(60_000, Number(process.env.BOB_BUILDER_TURN_TIMEOUT_MS || 620_000)),
   maxPatchBytes: 2 * 1024 * 1024,
 });
 
@@ -734,19 +735,32 @@ async function runAgenticEngineer({
   // Local providers reject prompts that outgrow their window (413) or go away (5xx/timeouts); OpenAI errors end the run.
   const ESCALATE_STATUSES = new Set([408, 413, 429, 500, 502, 503, 504]);
   let unavailableStreak = 0;
+  // A window overflow first compacts the transcript harder on the same provider; in-house-only runs
+  // have nowhere stronger to escalate to, and the recent turns are what the model needs.
+  let compaction = {};
 
   while (turns < limits.maxTurns && now() - started < limits.wallBudgetMs) {
     turns++;
     const base = activeRequest();
     const isOpenAI = candidates[active].provider === 'openai';
-    const request = { ...base, idempotency_key: `${base.idempotency_key}::turn-${turns}`, request: { ...base.request, messages: compactMessages(messages), ...(isOpenAI ? { reasoning_effort: process.env.BOB_BUILDER_REASONING_EFFORT || 'high' } : {}), max_output_tokens: Number(process.env.BOB_BUILDER_MAX_OUTPUT_TOKENS || 32000) } };
+    const request = { ...base, idempotency_key: `${base.idempotency_key}::turn-${turns}`, request: { ...base.request, messages: compactMessages(messages, compaction), ...(isOpenAI ? { reasoning_effort: process.env.BOB_BUILDER_REASONING_EFFORT || 'high' } : {}), max_output_tokens: Number(process.env.BOB_BUILDER_MAX_OUTPUT_TOKENS || 32000) } };
     const response = await callModel({ ...gateway, modelRequest: request, timeoutMs: limits.turnTimeoutMs });
     if (!response.ok) {
       unavailableStreak++;
       log({ turn: turns, provider: candidates[active].provider, error: `model unavailable: ${response.error}`, streak: unavailableStreak });
-      if ((ESCALATE_STATUSES.has(Number(response.status)) || response.timeout) && escalate(`provider ${response.status ?? 'timeout'}: ${String(response.error).slice(0, 120)}`)) { unavailableStreak = 0; continue; }
-      // One dropped connection at turn 42 used to discard 41 turns of work (job 1021dbaa); give the
-      // same provider three consecutive chances with a short backoff before calling it unavailable.
+      const status = Number(response.status);
+      if (status === 413 && !compaction.keepRecent) {
+        compaction = { keepRecent: 2, stubChars: 300, threshold: 800 };
+        log({ turn: turns, provider: candidates[active].provider, compacted_hard: true });
+        unavailableStreak = 0; turns--;
+        continue;
+      }
+      // A window overflow or an exhausted quota will not clear on its own; a dropped connection or a
+      // 5xx usually does. One dropped connection at turn 42 used to discard 41 turns of work (job
+      // 1021dbaa): give the same provider three consecutive chances with a short backoff first.
+      const transient = (ESCALATE_STATUSES.has(status) && status !== 413 && status !== 429) || response.timeout;
+      const giveUpHere = status === 413 || status === 429 || (transient && unavailableStreak >= 3);
+      if (giveUpHere && escalate(`provider ${response.status ?? 'timeout'}: ${String(response.error).slice(0, 120)}`)) { unavailableStreak = 0; continue; }
       if (unavailableStreak >= 3) { outcome = { ok: false, error: `model unavailable: ${response.error}` }; break; }
       turns--; // the turn did not happen
       await new Promise((resolve) => setTimeout(resolve, 2000 * unavailableStreak));

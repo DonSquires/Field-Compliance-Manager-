@@ -73,7 +73,7 @@ test('UX Designer uses approved specification artifact as model provenance', asy
   });
 
   // In-house first: analysis work tries the laptop GPU, then OpenAI.
-  assert.deepEqual(captured.modelRequest.chain, ['gpu_workstation', 'openai']);
+  assert.deepEqual(captured.modelRequest.chain, ['gpu_workstation', 'ollama', 'openai']);
   assert.equal(captured.modelRequest.provider, 'gpu_workstation');
   assert.equal(captured.modelRequest.prompt_version, UX_DESIGNER_PROMPT_VERSION);
   assert.deepEqual(captured.modelRequest.input_artifact_ids, ['artifact-spec']);

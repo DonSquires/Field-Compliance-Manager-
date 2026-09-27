@@ -146,7 +146,8 @@ function createModelGatewayConfig(env = process.env) {
     // maximum effort, room to write, and long turns.
     reasoningEffort: REASONING_EFFORTS.has(env.BOB_BUILDER_REASONING_EFFORT) ? env.BOB_BUILDER_REASONING_EFFORT : 'high',
     maxOutputTokens: Math.max(1000, Number(env.BOB_BUILDER_MAX_OUTPUT_TOKENS || 32000)),
-    timeoutMs: Math.min(Number(env.BOB_MODEL_TIMEOUT_MS || 600000), 900000),
+    // CPU prompt evaluation on the VPS MoE reviewer can take many minutes on a first, uncached turn.
+    timeoutMs: Math.min(Number(env.BOB_MODEL_TIMEOUT_MS || 600000), 1800000),
     maxPromptChars: Number(env.BOB_MODEL_MAX_PROMPT_CHARS || DEFAULT_MAX_PROMPT_CHARS)
   };
 }
