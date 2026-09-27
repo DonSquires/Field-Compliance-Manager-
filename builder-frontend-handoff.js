@@ -4,7 +4,7 @@ const os = require('node:os');
 const path = require('node:path');
 const { execFileSync } = require('node:child_process');
 const { executeWorker } = require('./worker-executor');
-const { classifyVerificationFailure } = require('./builder-verification-outcome');
+const { classifyMissingEvidence, classifyVerificationFailure } = require('./builder-verification-outcome');
 const { parseFrontendProposal } = require('./supabase/functions/_shared/builder-frontend-engineer');
 
 function verifyRepositorySnapshot(sourceDir, targetSha) {
@@ -186,7 +186,9 @@ async function runFrontendHandoff({
       ? { infrastructure: false, baseline: false, reason: null }
       : result.status === 'timeout'
         ? { infrastructure: true, baseline: false, reason: `verifier timed out after ${timeoutSeconds} s during ${String(verification?.running || 'verification').slice(0, 120)}` }
-        : classifyVerificationFailure(verification);
+        : verification
+          ? classifyVerificationFailure(verification)
+          : classifyMissingEvidence(result);
     const artifacts = [];
     if (fs.existsSync(verificationPath)) {
       artifacts.push(await registerOutput(supabase, lease, verificationPath, 'build_logs', 'application/json'));

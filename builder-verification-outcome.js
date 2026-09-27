@@ -40,4 +40,17 @@ function classifyVerificationFailure(verification) {
   return { infrastructure: false, baseline: false, reason: null };
 }
 
-module.exports = { INFRASTRUCTURE_EXIT_CODES, INFRASTRUCTURE_PATTERNS, classifyVerificationFailure };
+/**
+ * The worker wrote no evidence at all: the container never ran (docker exit 125 — image missing after
+ * the VPS's daily image prune, job a0379a3d 2026-09-27 — or a mount/daemon error) or died before its
+ * first write. That is the verifier's failure, never the patch's: re-run the same patch, and say why.
+ */
+function classifyMissingEvidence(result) {
+  const code = Number(result?.exitCode);
+  const stderr = String(result?.stderr || result?.error || '').trim().split('\n').filter(Boolean).at(-1) || '';
+  const detail = stderr ? `: ${stderr.slice(0, 160)}` : '';
+  if (code === 125) return { infrastructure: true, baseline: false, reason: `the verifier container could not start (docker exit 125${detail}); check that fcm/bob-worker:current exists on the host` };
+  return { infrastructure: true, baseline: false, reason: `the verifier produced no evidence (exit ${Number.isFinite(code) ? code : 'unknown'}${detail})` };
+}
+
+module.exports = { INFRASTRUCTURE_EXIT_CODES, INFRASTRUCTURE_PATTERNS, classifyMissingEvidence, classifyVerificationFailure };

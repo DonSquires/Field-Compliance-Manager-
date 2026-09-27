@@ -63,8 +63,14 @@ for target in "$@"; do
         for i in \$(seq 1 20); do sleep 2; curl -sf -H \"Authorization: Bearer \$T\" http://127.0.0.1:3001/api/bob/health >/tmp/api-health.json && break; done
         node -e 'const h=require(\"/tmp/api-health.json\"); console.log(\"fcm-api ok:\", JSON.stringify(h.bob.chains))'" ;;
     worker-image)
+      # The VPS prunes unused images daily (cron 03:27 `docker image prune -af --filter until=24h`; the 02:52
+      # cleanup also prunes stopped containers), and BuildKit gives a rebuilt image its cached layers' old
+      # Created time — so the worker image, used only while a verification runs, vanished on 2026-09-27
+      # (docker run exit 125, every verification "failed"). A running keeper container pins it.
       "${SSH[@]}" "set -euo pipefail; cd /srv/fcm/releases/$SHA
-        docker build -q -f Dockerfile.worker -t fcm/bob-worker:current . >/dev/null && echo 'worker image built: fcm/bob-worker:current'" ;;
+        docker build -q -f Dockerfile.worker -t fcm/bob-worker:current . >/dev/null && echo 'worker image built: fcm/bob-worker:current'
+        docker rm -f fcm-bob-worker-keeper >/dev/null 2>&1 || true
+        docker run -d --restart unless-stopped --name fcm-bob-worker-keeper --network none --memory 64m --cpus 0.05 --read-only --entrypoint sleep fcm/bob-worker:current infinity >/dev/null && echo 'worker image pinned by fcm-bob-worker-keeper'" ;;
     *) echo "unknown target: $target" >&2; exit 2 ;;
   esac
 done

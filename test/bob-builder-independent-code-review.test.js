@@ -62,6 +62,46 @@ test('a review that restates the author or reports nothing on a substantive patc
   assert.throws(() => validator(JSON.stringify(hollow)), /50-line patch/);
 });
 
+test('a review re-open hands the reviewer the previous round\'s review and asks for a revision check, so rounds converge', async () => {
+  const { loadPreviousReview } = require('../supabase/functions/_shared/builder-independent-code-review');
+  const previous = { verdict: 'blocked', summary: 'Rejection is not persisted.', findings: [{ severity: 'high', file: 'index.ts', message: 'A negative response does not consume the pending cancellation.' }], test_gaps: ['no behavioural two-turn test'], residual_risks: ['list-to-RPC race'] };
+  const supabase = {
+    from(name) {
+      assert.equal(name, 'builder_artifacts');
+      const chain = { select() { return chain; }, eq() { return chain; }, order() { return chain; }, limit: async () => ({ data: [{ id: 'rev-parent', created_at: '2026-09-27T03:40:00Z' }], error: null }), single: async () => ({ data: { id: 'rev-parent', job_id: 'a0379a3d-15c5-49ee-94a5-34cd9ef5961a', artifact_type: 'code_review', status: 'final', storage_location: 'supabase_storage://builder-artifacts/org/a0379a3d/review.json', checksum: 'a'.repeat(64) }, error: null }) };
+      return chain;
+    },
+    storage: { from: () => ({ download: async () => ({ data: { arrayBuffer: async () => Buffer.from(JSON.stringify(previous)) }, error: null }) }) },
+  };
+  const crypto = require('node:crypto');
+  // downloadVerifiedArtifact checks the checksum; make the fake consistent.
+  supabase.from = ((original) => (name) => { const chain = original(name); const single = chain.single; chain.single = async () => { const r = await single(); r.data.checksum = crypto.createHash('sha256').update(Buffer.from(JSON.stringify(previous))).digest('hex'); return r; }; return chain; })(supabase.from);
+
+  assert.equal(await loadPreviousReview(supabase, { description: 'Opened by Bob from conversation x' }), null, 'a first attempt has no previous review');
+  const loaded = await loadPreviousReview(supabase, { description: "Opened by Bob's autopilot from job a0379a3d-15c5-49ee-94a5-34cd9ef5961a after independent review (round 2 of 2)" });
+  assert.equal(loaded.parent_job_id, 'a0379a3d-15c5-49ee-94a5-34cd9ef5961a');
+  assert.equal(loaded.round, 2);
+  assert.equal(loaded.report.verdict, 'blocked');
+  assert.equal(loaded.report.findings[0].message, 'A negative response does not consume the pending cancellation.');
+
+  const requests = [];
+  await runIndependentCodeReview({
+    supabase: {}, gateway: {},
+    job: { id: 'job-3', organization_id: 'org-1', target_sha: 'sha-1', code_review_mode: 'independent_ai', description: "Opened by Bob's autopilot from job a0379a3d-15c5-49ee-94a5-34cd9ef5961a after independent review (round 2 of 2)" },
+    step: { id: 'review-step', step_id: 'code_review', builder_mode: 'code_reviewer' },
+    artifacts: { patch: { id: 'patch-1' }, manifest: { id: 'manifest-1' }, buildLogs: { id: 'logs-1' }, security: { id: 'security-1' } },
+    reviewerModelName: 'reviewer-model',
+    loadEvidence: async () => ({ patches: ['+x'], author_summaries: ['s'], previous_review: loaded }),
+    startReview: async () => ({ success: true }),
+    executeModelRun: async input => { requests.push(input.modelRequest); return { ok: true, validated_output: report(), artifact: { id: 'review-3' }, model_run_id: 'run-review' }; },
+    completeReview: async () => ({ success: true, job: { status: 'security_review', code_review_status: 'passed' } }),
+    abortReview: async () => ({ success: true })
+  });
+  assert.match(requests[0].request.system_prompt, /This is a REVISION \(round 2 of 2\)/);
+  assert.match(requests[0].request.system_prompt, /Block only for a previous finding that is still unresolved or for a NEW critical\/high defect/);
+  assert.match(requests[0].request.user_prompt, /"previous_review":\{"parent_job_id":"a0379a3d/);
+});
+
 test('independent reviewer states the exact output contract and repairs once on a validation failure', async () => {
   const requests = [];
   let aborted = false;

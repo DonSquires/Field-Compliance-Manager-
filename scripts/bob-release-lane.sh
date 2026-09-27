@@ -184,7 +184,12 @@ for target in "${TARGETS[@]:-}"; do
         if $healthy; then RESULTS+=("fcm-api live at $SHA8"); else OK=false; rollback fcm-api; fi
       else OK=false; fail_note "fcm-api build/up failed"; fi ;;
     worker-image)
-      if docker build -q -f Dockerfile.worker -t fcm/bob-worker:current . >/dev/null; then RESULTS+=("worker image rebuilt at $SHA8"); else OK=false; fail_note "worker image build failed"; fi ;;
+      if docker build -q -f Dockerfile.worker -t fcm/bob-worker:current . >/dev/null; then
+        # Pin the image against the VPS's daily image prune (see scripts/bob-vps-deploy.sh).
+        docker rm -f fcm-bob-worker-keeper >/dev/null 2>&1 || true
+        docker run -d --restart unless-stopped --name fcm-bob-worker-keeper --network none --memory 64m --cpus 0.05 --read-only --entrypoint sleep fcm/bob-worker:current infinity >/dev/null || fail_note "worker image keeper could not be started"
+        RESULTS+=("worker image rebuilt at $SHA8")
+      else OK=false; fail_note "worker image build failed"; fi ;;
   esac
 done
 

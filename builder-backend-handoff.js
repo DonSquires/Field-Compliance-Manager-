@@ -2,7 +2,7 @@ const fs = require('node:fs');
 const os = require('node:os');
 const path = require('node:path');
 const { executeWorker } = require('./worker-executor');
-const { classifyVerificationFailure } = require('./builder-verification-outcome');
+const { classifyMissingEvidence, classifyVerificationFailure } = require('./builder-verification-outcome');
 const {
   verifyRepositorySnapshot,
   downloadVerifiedArtifact,
@@ -153,7 +153,9 @@ async function runBackendHandoff({
       ? { infrastructure: false, baseline: false, reason: null }
       : result.status === 'timeout'
         ? { infrastructure: true, baseline: false, reason: `verifier timed out after ${timeoutSeconds} s` }
-        : classifyVerificationFailure(verification);
+        : verification
+          ? classifyVerificationFailure(verification)
+          : classifyMissingEvidence(result);
     const artifacts = [];
     if (verification) {
       artifacts.push(await registerOutput(supabase, lease, verificationPath, 'build_logs', 'application/json'));

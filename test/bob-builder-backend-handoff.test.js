@@ -71,6 +71,36 @@ test('backend handoff claims, verifies, registers evidence, and finishes in orde
   }
 });
 
+test('a verifier container that never ran (docker exit 125, no evidence) is an infrastructure failure, not the patch\'s (live job a0379a3d: image pruned)', async () => {
+  const repo = fixture();
+  const finishes = [];
+  try {
+    const result = await runBackendHandoff({
+      supabase: {},
+      job: { id: 'job-125', organization_id: 'org-1', target_sha: repo.sha },
+      step: { id: 'step-125', builder_mode: 'backend_engineer' },
+      patchArtifact: { id: 'patch-1' }, sourceDir: repo.root,
+      workerImage: 'fcm/bob-worker:current', runnerId: 'runner-1',
+      loadPatch: async () => ({ bytes: Buffer.from(proposal) }),
+      claim: async () => ({ run_id: 'run-125', lease_token: 'lease', organization_id: 'org-1', job_id: 'job-125' }),
+      resetRetry: async () => {},
+      execute: async () => ({ status: 'failed', exitCode: 125, stdout: '', stderr: "Unable to find image 'fcm/bob-worker:current' locally\ndocker: Error response from daemon: pull access denied for fcm/bob-worker" }),
+      verifyDatabase: () => ({ succeeded: true, performed: false, candidate_migrations: [] }),
+      registerOutput: async (_client, _lease, file, type) => ({ id: `${type}:${path.basename(file)}` }),
+      finish: async (_client, _lease, succeeded, exitCode, summary) => { finishes.push({ succeeded, exitCode, summary }); return { status: 'implementation_pending' }; }
+    });
+    assert.equal(result.success, false);
+    assert.equal(result.infrastructure_failure, true, 'the same patch is re-verified; the author is not asked to repair');
+    assert.match(result.infrastructure_reason, /verifier container could not start \(docker exit 125: docker: Error response from daemon: pull access denied/);
+    assert.match(result.infrastructure_reason, /fcm\/bob-worker:current exists on the host/);
+    assert.equal(result.failure_artifact, null, 'no evidence was written, so none is registered');
+    assert.equal(finishes[0].exitCode, 125);
+    assert.match(finishes[0].summary, /^Backend verifier infrastructure failure \(the verifier container could not start/);
+  } finally {
+    fs.rmSync(repo.root, { recursive: true, force: true });
+  }
+});
+
 test('backend handoff fails closed when evidence overstates migration execution', async () => {
   const repo = fixture();
   const calls = [];

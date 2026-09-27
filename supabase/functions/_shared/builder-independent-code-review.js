@@ -5,7 +5,7 @@ const {
 const { downloadVerifiedArtifact } = require('../../../builder-frontend-handoff');
 const { unwrapPatchArtifact } = require('./builder-patch-envelope');
 
-const INDEPENDENT_CODE_REVIEW_PROMPT_VERSION = 'independent-code-review-v2';
+const INDEPENDENT_CODE_REVIEW_PROMPT_VERSION = 'independent-code-review-v3';
 
 // The exact shape the validator accepts; json_object mode does not enforce `required`, and the
 // first live reviewer (gpt-5.4-mini, job 3a4a2d06) omitted the two list fields and failed the job.
@@ -70,6 +70,39 @@ function addedLineCount(patches) {
   return (patches || []).reduce((total, patch) => total + String(patch ?? '').split('\n').filter(line => line.startsWith('+') && !line.startsWith('+++')).length, 0);
 }
 
+// A job the autopilot re-opened after a blocked review (builder-autopilot.js reviewReopenSpec) names
+// its parent in the description. The reviewer of the revision gets the previous review, so it
+// checks that those findings are resolved instead of raising a fresh set each round (convergence;
+// the loop is bounded to two rounds).
+const REVIEW_REOPEN = /^Opened by Bob's autopilot from job ([0-9a-f-]{36}) after independent review \(round (\d+) of (\d+)\)/i;
+
+async function loadPreviousReview(supabase, job) {
+  const match = String(job?.description ?? '').match(REVIEW_REOPEN);
+  if (!match) return null;
+  const [, parentJobId, round, of] = match;
+  try {
+    const { data, error } = await supabase
+      .from('builder_artifacts')
+      .select('id, created_at')
+      .eq('job_id', parentJobId)
+      .eq('artifact_type', 'code_review')
+      .eq('status', 'final')
+      .order('created_at', { ascending: false })
+      .limit(1);
+    if (error || !Array.isArray(data) || !data.length) return { parent_job_id: parentJobId, round: Number(round), of: Number(of), report: null };
+    const downloaded = await downloadVerifiedArtifact(supabase, data[0].id, parentJobId, 'code_review');
+    const report = JSON.parse(downloaded.bytes.toString('utf8'));
+    return {
+      parent_job_id: parentJobId,
+      round: Number(round),
+      of: Number(of),
+      report: { verdict: report.verdict, summary: String(report.summary ?? '').slice(0, 1500), findings: Array.isArray(report.findings) ? report.findings.slice(0, 12) : [], test_gaps: Array.isArray(report.test_gaps) ? report.test_gaps.slice(0, 8) : [] },
+    };
+  } catch {
+    return { parent_job_id: parentJobId, round: Number(round), of: Number(of), report: null };
+  }
+}
+
 async function loadCodeReviewEvidence({ supabase, job, artifacts }) {
   const patchArtifacts = artifactList(artifacts.patch);
   const manifestArtifacts = artifactList(artifacts.manifest);
@@ -78,11 +111,12 @@ async function loadCodeReviewEvidence({ supabase, job, artifacts }) {
       || patchArtifacts.length !== manifestArtifacts.length || patchArtifacts.length !== buildLogArtifacts.length) {
     throw new Error('one or two complete implementation artifact sets are required');
   }
-  const [patches, manifests, buildLogs, security] = await Promise.all([
+  const [patches, manifests, buildLogs, security, previousReview] = await Promise.all([
     Promise.all(patchArtifacts.map(artifact => downloadVerifiedArtifact(supabase, artifact.id, job.id, 'code_implementation'))),
     Promise.all(manifestArtifacts.map(artifact => downloadVerifiedArtifact(supabase, artifact.id, job.id, 'changed_file_manifest'))),
     Promise.all(buildLogArtifacts.map(artifact => downloadVerifiedArtifact(supabase, artifact.id, job.id, 'build_logs'))),
-    downloadVerifiedArtifact(supabase, artifacts.security.id, job.id, 'security_review')
+    downloadVerifiedArtifact(supabase, artifacts.security.id, job.id, 'security_review'),
+    loadPreviousReview(supabase, job)
   ]);
   const unwrapped = patches.map(patch => unwrapPatchArtifact(patch.bytes));
   return {
@@ -90,7 +124,8 @@ async function loadCodeReviewEvidence({ supabase, job, artifacts }) {
     author_summaries: unwrapped.map(item => (item.envelope && typeof item.envelope.summary === 'string' ? item.envelope.summary.slice(0, 4000) : null)),
     manifests: manifests.map(manifest => JSON.parse(manifest.bytes.toString('utf8'))),
     buildLogs: buildLogs.map(log => JSON.parse(log.bytes.toString('utf8'))),
-    security: JSON.parse(security.bytes.toString('utf8'))
+    security: JSON.parse(security.bytes.toString('utf8')),
+    ...(previousReview ? { previous_review: previousReview } : {})
   };
 }
 
@@ -183,10 +218,11 @@ async function runIndependentCodeReview({
     'Review correctness, regressions, tenant isolation, authorization assumptions, data exposure, and missing tests.',
     'Data paths: for every table the patch reads or writes, check who can see it (row-level security in supabase/schema.sql is the truth: a caller-scoped client reading a service-role-only table gets no rows) and that the two-turn/pending patterns the code claims to follow are wired at every seam the precedent uses.',
     'Write the summary in your own words about what you verified; do not restate the author\'s description. On any patch of substance, list the test gaps and residual risks you see.',
+    evidence.previous_review ? `This is a REVISION (round ${evidence.previous_review.round} of ${evidence.previous_review.of}): an earlier attempt was blocked and the author was given that review (previous_review in the evidence). First check whether each previous finding is resolved in this patch. Block only for a previous finding that is still unresolved or for a NEW critical/high defect this patch introduces; concerns the previous review already listed as residual risks or test gaps stay residual risks or test gaps, not new blocking findings. Say explicitly which previous findings are resolved.` : null,
     'You can recommend passed or blocked. You have no approval, merge, deployment, or code-modification authority.',
     'Use only the verified patch, manifest, build logs, and security report.',
     REVIEW_OUTPUT_CONTRACT
-  ].join(' ');
+  ].filter(Boolean).join(' ');
   const modelRequest = buildModelRunRequest({
     organizationId: job.organization_id,
     jobId: job.id,
@@ -238,6 +274,7 @@ module.exports = {
   INDEPENDENT_CODE_REVIEW_PROMPT_VERSION,
   artifactList,
   parseIndependentCodeReview,
+  loadPreviousReview,
   loadCodeReviewEvidence,
   startCodeReview,
   completeIndependentCodeReview,
