@@ -12,6 +12,7 @@ const { createModelGateway } = require('./src/bob/modelGateway');
 const { planTurn } = require('./src/bob/plan');
 const { subagentStep } = require('./src/bob/subagent');
 const { classifyIdentityDocument, extractIdentityFields, identityDocumentDefinition } = require('./src/bob/identityDocument');
+const { createDocumentReader, docxXmlToText } = require('./src/bob/documents');
 
 const execFileAsync = promisify(execFile);
 
@@ -240,6 +241,42 @@ async function identityDocument(request, response, ocrOnly = false) {
   });
 }
 
+const maxDocumentBytes = Number(process.env.BOB_DOCUMENT_MAX_BYTES || 40 * 1024 * 1024);
+
+async function extractDocumentText(attachment, kind) {
+  if (Number(attachment.file_size_bytes) > maxDocumentBytes) throw new Error('document_too_large');
+  const downloaded = await supabase.storage.from(attachment.storage_bucket).download(attachment.storage_path);
+  if (downloaded.error || !downloaded.data) throw new Error('attachment_download_failed');
+  const bytes = Buffer.from(await downloaded.data.arrayBuffer());
+  if (kind === 'text') return bytes.toString('utf8').slice(0, 60_000);
+  const work = await fs.mkdtemp(path.join(os.tmpdir(), 'fcm-doc-'));
+  const sourcePath = path.join(work, `source.${kind === 'image' ? 'img' : kind}`);
+  try {
+    await fs.writeFile(sourcePath, bytes, { mode: 0o600 });
+    if (kind === 'pdf') {
+      const { stdout } = await execFileAsync('pdftotext', ['-layout', '-l', '30', sourcePath, '-'], { timeout: 90_000, maxBuffer: 16 * 1024 * 1024 });
+      return String(stdout || '').slice(0, 60_000);
+    }
+    if (kind === 'docx') {
+      const { stdout } = await execFileAsync('unzip', ['-p', sourcePath, 'word/document.xml'], { timeout: 60_000, maxBuffer: 32 * 1024 * 1024 });
+      return docxXmlToText(stdout).slice(0, 60_000);
+    }
+    if (kind === 'image') return (await tesseractText(sourcePath)).slice(0, 60_000);
+    return '';
+  } finally {
+    await fs.rm(work, { recursive: true, force: true });
+  }
+}
+
+const documentReader = supabase ? createDocumentReader({ supabase, gateway: modelGateway, extract: extractDocumentText }) : null;
+
+async function understandDocumentsBatch(request, response) {
+  if (!documentReader) return json(response, 503, { error: 'capability_unavailable', capability: 'document_understanding' });
+  const body = await readJson(request);
+  const result = await documentReader.understandBatch(body);
+  return json(response, result.status, result.body);
+}
+
 function bearerToken(request) {
   const value = request.headers.authorization || '';
   return value.toLowerCase().startsWith('bearer ') ? value.slice(7).trim() : '';
@@ -367,6 +404,7 @@ http.createServer(async (request, response) => {
     if (request.method === 'POST' && request.url === '/api/bob/voice/speak') return await proxyVoiceSpeech(request, response);
     if (request.method === 'POST' && request.url === '/api/bob/media/ocr-image') return await identityDocument(request, response, true);
     if (request.method === 'POST' && request.url === '/api/bob/media/identity-document') return await identityDocument(request, response, false);
+    if (request.method === 'POST' && request.url === '/api/bob/documents/understand-batch') return await understandDocumentsBatch(request, response);
     if (request.method === 'POST' && request.url === '/api/navigation/route') return await routeGuidance(request, response);
     if (request.method === 'POST' && request.url === '/api/navigation/plan') return await routePlan(request, response);
     return json(response, 503, { error: 'capability_unavailable', capability: 'unrecovered_fcm_api_route' });
