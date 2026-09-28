@@ -15,15 +15,53 @@ struct DeviceCandidate { id: String, label: String, size_bytes: u64, removable: 
 #[serde(rename_all = "camelCase")]
 struct VolumeInfo { drive_letter: String, serial: Option<String>, label: Option<String>, file_system: Option<String>, removable: bool, card_kind: Option<&'static str> }
 
+/// Deadlines for the Windows calls discovery depends on. A healthy laptop answers all three in well under a
+/// second; these are the point past which the answer is not coming and the operator needs to be told so.
+#[cfg_attr(not(target_os = "windows"), allow(dead_code))]
+const DISK_LIST_TIMEOUT: Duration = Duration::from_secs(20);
+#[cfg_attr(not(target_os = "windows"), allow(dead_code))]
+const VOLUME_LIST_TIMEOUT: Duration = Duration::from_secs(10);
+const VOLUME_ROOT_TIMEOUT: Duration = Duration::from_secs(3);
+
+/// A Windows enumeration that never outlives its deadline. Windows blocks these calls for minutes on a
+/// half-present removable volume (a card pulled mid-read, a reader that answers the bus but not the media),
+/// and an unbounded call left discovery showing "Scanning..." forever instead of listing the disks it had.
+#[cfg(target_os = "windows")]
+fn powershell_json(script: &str, timeout: Duration, what: &str) -> Result<Vec<u8>, String> {
+    use std::process::Stdio;
+    let mut child = std::process::Command::new("powershell.exe")
+        .args(["-NoProfile", "-NonInteractive", "-Command", script])
+        .stdin(Stdio::null()).stdout(Stdio::piped()).stderr(Stdio::piped())
+        .spawn().map_err(|e| format!("PowerShell could not be started to {what}: {e}"))?;
+    let mut out_pipe = child.stdout.take();
+    let mut err_pipe = child.stderr.take();
+    let out_reader = std::thread::spawn(move || { let mut buffer = Vec::new(); if let Some(pipe) = out_pipe.as_mut() { let _ = pipe.read_to_end(&mut buffer); } buffer });
+    let err_reader = std::thread::spawn(move || { let mut buffer = Vec::new(); if let Some(pipe) = err_pipe.as_mut() { let _ = pipe.read_to_end(&mut buffer); } buffer });
+    let deadline = Instant::now() + timeout;
+    let status = loop {
+        match child.try_wait().map_err(|e| format!("Windows stopped answering while it ran {what}: {e}"))? {
+            Some(status) => break Some(status),
+            None if Instant::now() >= deadline => { let _ = child.kill(); let _ = child.wait(); break None; }
+            None => std::thread::sleep(Duration::from_millis(50)),
+        }
+    };
+    let stdout = out_reader.join().unwrap_or_default();
+    let stderr = err_reader.join().unwrap_or_default();
+    match status {
+        Some(status) if status.success() => Ok(stdout),
+        Some(_) => Err(format!("Windows could not {what}: {}", String::from_utf8_lossy(&stderr).trim())),
+        None => Err(format!("Windows did not finish listing {what} within {}s, so it was stopped. A card or reader that stopped responding does this: unplug the reader, wait for Windows to settle, plug it back in and discover again.", timeout.as_secs())),
+    }
+}
+
 /// Windows' logical disks (`Win32_LogicalDisk`): letter, volume serial, label, filesystem, drive type.
 fn logical_disks() -> Result<Vec<VolumeInfo>, String> {
     #[cfg(target_os = "windows")]
     {
         const SCRIPT: &str = r#"$ErrorActionPreference='SilentlyContinue'; ConvertTo-Json -Compress @(Get-CimInstance Win32_LogicalDisk | ForEach-Object { [pscustomobject]@{ DeviceID = [string]$_.DeviceID; Serial = [string]$_.VolumeSerialNumber; Label = [string]$_.VolumeName; FileSystem = [string]$_.FileSystem; DriveType = [int]$_.DriveType } })"#;
-        let output = std::process::Command::new("powershell.exe").args(["-NoProfile", "-NonInteractive", "-Command", SCRIPT]).output().map_err(|e| format!("PowerShell could not be started to list volumes: {e}"))?;
-        if !output.status.success() { return Err(format!("Volume listing failed: {}", String::from_utf8_lossy(&output.stderr).trim())); }
-        if output.stdout.iter().all(|byte| byte.is_ascii_whitespace()) { return Ok(Vec::new()); }
-        let value: serde_json::Value = serde_json::from_slice(&output.stdout).map_err(|e| format!("Volume list was not readable: {e}"))?;
+        let stdout = powershell_json(SCRIPT, VOLUME_LIST_TIMEOUT, "list volumes")?;
+        if stdout.iter().all(|byte| byte.is_ascii_whitespace()) { return Ok(Vec::new()); }
+        let value: serde_json::Value = serde_json::from_slice(&stdout).map_err(|e| format!("Volume list was not readable: {e}"))?;
         let rows = if value.is_array() { value.as_array().cloned().unwrap_or_default() } else { vec![value] };
         let text = |row: &serde_json::Value, key: &str| row.get(key).and_then(|v| v.as_str()).map(str::trim).filter(|s| !s.is_empty()).map(str::to_string);
         Ok(rows.iter().filter_map(|row| {
@@ -38,7 +76,16 @@ fn logical_disks() -> Result<Vec<VolumeInfo>, String> {
 
 /// What kind of camera card a volume root holds, from the files the camera leaves there. A Tapo card carries
 /// its event index `sys01.bin` and a `sys00.bin` beginning "TP-Link"; the recordings are ordinary MP4 files.
+/// Reading the root of an unresponsive removable volume can block for minutes, so an answer that does not
+/// arrive in time is treated as "not a Tapo card" and discovery carries on; the worker thread is abandoned.
 fn card_kind_at(root: &Path) -> Option<&'static str> {
+    let root = root.to_path_buf();
+    let (sender, receiver) = std::sync::mpsc::channel();
+    std::thread::spawn(move || { let _ = sender.send(card_kind_now(&root)); });
+    receiver.recv_timeout(VOLUME_ROOT_TIMEOUT).unwrap_or(None)
+}
+
+fn card_kind_now(root: &Path) -> Option<&'static str> {
     let has_index = fs::read_dir(root).ok()?.flatten().any(|entry| fcm_decoder::tapo::is_card_index_name(&entry.file_name().to_string_lossy()));
     if !has_index { return None; }
     let vendor = fs::read(root.join("sys00.bin")).ok().map(|bytes| bytes.starts_with(b"TP-Link")).unwrap_or(false);
@@ -140,10 +187,9 @@ const DISCOVERY_SCRIPT: &str = r#"$ErrorActionPreference='SilentlyContinue'; $di
 fn discover_read_only_devices() -> Result<Vec<DeviceCandidate>, String> {
     #[cfg(target_os = "windows")]
     {
-        let output = std::process::Command::new("powershell.exe").args(["-NoProfile", "-NonInteractive", "-Command", DISCOVERY_SCRIPT]).output().map_err(|e| format!("PowerShell could not be started to list disks: {e}"))?;
-        if !output.status.success() { return Err(format!("Disk discovery failed: {}", String::from_utf8_lossy(&output.stderr).trim())); }
-        if output.stdout.iter().all(|byte| byte.is_ascii_whitespace()) { return Ok(Vec::new()); }
-        let value: serde_json::Value = serde_json::from_slice(&output.stdout).map_err(|e| format!("Disk list was not readable: {e}"))?;
+        let stdout = powershell_json(DISCOVERY_SCRIPT, DISK_LIST_TIMEOUT, "list disks")?;
+        if stdout.iter().all(|byte| byte.is_ascii_whitespace()) { return Ok(Vec::new()); }
+        let value: serde_json::Value = serde_json::from_slice(&stdout).map_err(|e| format!("Disk list was not readable: {e}"))?;
         let rows = if value.is_array() { value.as_array().cloned().unwrap_or_default() } else { vec![value] };
         let volumes = logical_disks().unwrap_or_default();
         let mut devices: Vec<DeviceCandidate> = rows.into_iter().enumerate().map(|(index, row)| {
