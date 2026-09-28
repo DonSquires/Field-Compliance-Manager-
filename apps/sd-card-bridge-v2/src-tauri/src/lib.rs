@@ -66,8 +66,12 @@ fn logical_disks() -> Result<Vec<VolumeInfo>, String> {
         let text = |row: &serde_json::Value, key: &str| row.get(key).and_then(|v| v.as_str()).map(str::trim).filter(|s| !s.is_empty()).map(str::to_string);
         Ok(rows.iter().filter_map(|row| {
             let drive_letter = text(row, "DeviceID")?;
+            let file_system = text(row, "FileSystem");
             let root = format!("{drive_letter}\\");
-            Some(VolumeInfo { card_kind: card_kind_at(Path::new(&root)), drive_letter, serial: text(row, "Serial"), label: text(row, "Label"), file_system: text(row, "FileSystem"), removable: row.get("DriveType").and_then(|v| v.as_i64()) == Some(2) })
+            // A letter with no filesystem is a reader holding media Windows cannot mount (a Dahua card is
+            // exactly this): reading its root blocks for minutes, and it can never be a Tapo card anyway.
+            let card_kind = file_system.as_ref().and_then(|_| card_kind_at(Path::new(&root)));
+            Some(VolumeInfo { card_kind, drive_letter, serial: text(row, "Serial"), label: text(row, "Label"), file_system, removable: row.get("DriveType").and_then(|v| v.as_i64()) == Some(2) })
         }).collect())
     }
     #[cfg(not(target_os = "windows"))]
