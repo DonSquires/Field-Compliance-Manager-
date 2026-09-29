@@ -57,6 +57,6 @@ describe('human operational controls', () => {
   });
 
   it('labels user lifecycle and access commands', () => {
-    for (const label of ['Resend', 'Reactivate', 'Deactivate', 'Manage access']) expect(users).toContain(label);
+    for (const label of ['Resend', 'Reactivate', 'Deactivate', 'Edit user']) expect(users).toContain(label);
   });
 });

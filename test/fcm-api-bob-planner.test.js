@@ -72,6 +72,20 @@ test('planner prompt exposes drafting discipline, one-question rule, and delegat
   assert.equal(messages[2].role, 'assistant');
 });
 
+test('planner is told which files are already in the session and never to ask for them again', () => {
+  const prompt = buildPlannerPrompt({
+    message: 'can you print it in this chat',
+    tools: [{ tool: 'understand_documents', purpose: 'read session files' }],
+    sessionAttachments: [{ name: 'RM capability 2024.pdf', kind: 'application/pdf' }, { name: 'Services list.docx', kind: null }],
+  });
+  assert.match(prompt, /FILES ALREADY IN THIS SESSION \(2/);
+  assert.match(prompt, /RM capability 2024\.pdf/);
+  assert.match(prompt, /select understand_documents/);
+  assert.match(prompt, /NEVER ask the user to re-attach/);
+  assert.match(prompt, /capability statements/);
+  assert.doesNotMatch(buildPlannerPrompt({ message: 'hi', tools: TOOLS }), /FILES ALREADY IN THIS SESSION/);
+});
+
 test('completed autopilot work is relayed first, in plain language, and the rule forbids merge/deploy claims', () => {
   const { buildCompletedWorkBlock } = require('../services/fcm-api/src/bob/planPrompt');
   assert.equal(buildCompletedWorkBlock([]), '');
@@ -132,6 +146,13 @@ test('deterministic checks catch questionnaires, re-asks after a blanket answer,
 
   const clean = runDeterministicChecks({ action: 'answer', reply: 'Here is the draft.\n\n## Casual Security Officer', questions: [], args: {} }, { message: 'draft it', pending: null });
   assert.equal(clean.filter((issue) => issue.severity === 'block').length, 0);
+
+  // Live failure 2026-09-29: Bob announced a capability statement draft and printed none of it.
+  const announcedOnly = runDeterministicChecks({ action: 'answer', reply: 'Based on the documents and online research, here is a draft of the updated capability statement for R&M Security. I have included their services, company profile, and core capabilities. Please review.', questions: [], args: {} }, { message: 'padout the cabability statment for R&M security', pending: null });
+  assert.ok(announcedOnly.some((issue) => issue.code === 'announced_draft_missing' && issue.severity === 'block'));
+
+  const stalledCapability = runDeterministicChecks({ action: 'ask', reply: 'Before I start:', questions: [{ question: 'Which services?' }], args: {} }, { message: 'padout the cabability statment for R&M security' });
+  assert.ok(stalledCapability.some((issue) => issue.code === 'draft_stalled_on_question'));
 
   const rejected = runDeterministicChecks({ action: 'answer', reply: 'ok', questions: [], args: {}, planned_tool_rejected: 'run_sql' }, { message: 'x' });
   assert.ok(rejected.some((issue) => issue.code === 'tool_not_in_catalogue'));

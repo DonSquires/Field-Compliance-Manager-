@@ -484,6 +484,34 @@
   color: #d6fff8;
 }
 
+.bob-answer-choices {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px;
+  margin-top: 8px;
+}
+
+.bob-answer-choices button {
+  min-height: 30px;
+  padding: 0 12px;
+  border: 1px solid #7dd3c7;
+  border-radius: 999px;
+  color: #d6fff8;
+  background: #10303a;
+  cursor: pointer;
+  font: inherit;
+  font-size: 12px;
+}
+
+.bob-answer-choices button:hover:not(:disabled) {
+  background: #17454f;
+}
+
+.bob-answer-choices button:disabled {
+  opacity: 0.5;
+  cursor: not-allowed;
+}
+
 .bob-composer-hint {
   margin: 8px 12px 0;
   color: #6d8595;

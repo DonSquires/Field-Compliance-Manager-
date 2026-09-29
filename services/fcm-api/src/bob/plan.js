@@ -10,7 +10,8 @@ const DELEGABLE_TOOL_RE = /^(query_records|client_site_compare|scv_lookup|schema
 // (research gathered, decisions taken), so spend the turn budget on writing.
 function authorEffort(input) {
   const lastUser = [...(input.history || [])].reverse().find((h) => h && h.role === 'user');
-  const drafting = DRAFT_REQUEST_RE.test(input.message) || (lastUser && DRAFT_REQUEST_RE.test(String(lastUser.content || '')));
+  const isDraft = (text) => DRAFT_REQUEST_RE.test(text) && !isCodeRequest(text);
+  const drafting = isDraft(input.message) || (lastUser && isDraft(String(lastUser.content || '')));
   const synthesising = Boolean(input.taskState && (Array.isArray(input.taskState.subagent_results) && input.taskState.subagent_results.length || input.taskState.last_tool_result));
   return drafting || synthesising || input.tools.length === 0 ? 'low' : undefined;
 }
@@ -21,6 +22,7 @@ function readBody(body) {
   return {
     message: String(b.message ?? '').trim(),
     attachment: b.attachment && typeof b.attachment === 'object' ? b.attachment : null,
+    sessionAttachments: Array.isArray(b.session_attachments) ? b.session_attachments.filter((a) => a && typeof a.name === 'string').slice(0, 20) : [],
     tools,
     persona: typeof b.persona === 'string' ? b.persona : '',
     platformContext: typeof b.platform_context === 'string' ? b.platform_context : '',

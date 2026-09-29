@@ -192,6 +192,37 @@ describe('BobPanel', () => {
     expect(screen.getByText('Review the affected files before proposing a change.')).toBeTruthy();
   });
 
+  it('answers a clarifying question by clicking a supplied option instead of retyping it', async () => {
+    messageHistory = [{
+      id: 'message-1', role: 'assistant', content: 'Which organisation is this capability statement for?', confidence: 0.6,
+      flagged: false, created_at: '2026-09-02T06:00:00.000Z',
+      metadata: { intent: 'clarifying_questions', answer_options: ['R & M Security and Investigation', 'R&M Other Private Clients'] },
+    }];
+    mockInvoke.mockResolvedValue({ data: { reply: 'ok' }, error: null });
+
+    render(<BobPanel open onClose={() => undefined} />);
+
+    fireEvent.click(await screen.findByRole('button', { name: 'R & M Security and Investigation' }));
+
+    await waitFor(() => {
+      expect(mockInvoke).toHaveBeenCalledWith('onspace-ai-chat', expect.objectContaining({
+        body: expect.objectContaining({ message: 'R & M Security and Investigation' }),
+      }));
+    });
+  });
+
+  it('offers Bob\'s best guess as a clickable answer when no options are supplied', async () => {
+    messageHistory = [{
+      id: 'message-1', role: 'assistant', content: 'Should I use the 2026 rate card?', confidence: 0.6,
+      flagged: false, created_at: '2026-09-02T06:00:00.000Z',
+      metadata: { intent: 'clarifying_questions', best_guess: 'Yes, use the 2026 rate card' },
+    }];
+
+    render(<BobPanel open onClose={() => undefined} />);
+
+    expect(await screen.findByRole('button', { name: 'Yes, use the 2026 rate card' })).toBeTruthy();
+  });
+
   it('renders Bob headings, bold text, and lists as structured elements', async () => {
     messageHistory = [{
       id: 'message-1', role: 'assistant', flagged: false, confidence: null,

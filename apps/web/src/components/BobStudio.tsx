@@ -24,9 +24,15 @@ interface StudioAttachment {
 }
 
 type StudioTab = 'document' | 'diagram' | 'media';
-type DocumentKind = 'rfq_response' | 'employment_contract' | 'report_design' | 'custom_document';
+type DocumentKind = 'capability_statement' | 'rfq_response' | 'employment_contract' | 'report_design' | 'custom_document';
 
 const DOCUMENT_PRESETS: Record<DocumentKind, { label: string; shortLabel: string; prompt: string; note: string }> = {
+  capability_statement: {
+    label: 'Capability statement',
+    shortLabel: 'Capability',
+    prompt: 'Draft a capability statement for this organisation. Use the organisation record, the service lines it operates, its client and agreement counts, and any attached source documents. Cover who the company is, what it delivers, its operating scale, and how work is evidenced and reported. Mark licences, certifications, insurance, and any other fact not present in the data or attachments as [TO CONFIRM] rather than estimating it.',
+    note: 'Grounded in the organisation record and live service lines. Licences and certifications must be confirmed by a human.',
+  },
   rfq_response: {
     label: 'RFQ response',
     shortLabel: 'RFQ',
@@ -53,7 +59,7 @@ const DOCUMENT_PRESETS: Record<DocumentKind, { label: string; shortLabel: string
   },
 };
 
-const documentKindOrder: DocumentKind[] = ['rfq_response', 'employment_contract', 'report_design', 'custom_document'];
+const documentKindOrder: DocumentKind[] = ['capability_statement', 'rfq_response', 'employment_contract', 'report_design', 'custom_document'];
 
 function isMediaAttachment(attachment: StudioAttachment) {
   return attachment.file_type.startsWith('image/') || attachment.file_type.startsWith('video/') || attachment.file_type.startsWith('audio/');
@@ -76,11 +82,13 @@ export function BobStudio({
   attachments,
   onPrompt,
   onAttach,
+  organizationId,
 }: {
   messages: StudioMessage[];
   attachments: StudioAttachment[];
   onPrompt: (prompt: string) => void;
   onAttach: () => void;
+  organizationId?: string | null;
 }) {
   const [tab, setTab] = useState<StudioTab>('document');
   const [documentKind, setDocumentKind] = useState<DocumentKind>('rfq_response');
@@ -172,7 +180,7 @@ export function BobStudio({
           <h2>Documents, diagrams, and media</h2>
           <p>Full-page space for evidence-backed drafts. Nothing here applies legal, commercial, HR, or operational changes without human review.</p>
         </div>
-        <div className="bob-studio-header-actions"><a className="bob-studio-editor-link" href="/admin/document-studio"><FileText size={15} /> Open document editor</a><button type="button" onClick={onAttach}><Paperclip size={15} /> Add source</button></div>
+        <div className="bob-studio-header-actions"><a className="bob-studio-editor-link" href={documentKind === 'capability_statement' && organizationId ? `/admin/document-studio?sourceType=company&sourceId=${encodeURIComponent(organizationId)}` : '/admin/document-studio'}><FileText size={15} /> Open document editor</a><button type="button" onClick={onAttach}><Paperclip size={15} /> Add source</button></div>
       </header>
 
       <div className="bob-studio-tabs" role="tablist" aria-label="Studio artifact type">

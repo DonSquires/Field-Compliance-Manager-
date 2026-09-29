@@ -293,6 +293,16 @@ function buildAttachmentBlock(attachment) {
   return '';
 }
 
+// Files attached on earlier turns stay in the conversation; without this Bob asks the user to re-attach them.
+function buildSessionAttachmentsBlock(sessionAttachments, tools = []) {
+  if (!Array.isArray(sessionAttachments) || !sessionAttachments.length) return '';
+  const canRead = tools.some((t) => t && t.tool === 'understand_documents');
+  const list = sessionAttachments.map((a) => `  - ${a.name}${a.kind ? ` (${a.kind})` : ''}`).join('\n');
+  return `\nFILES ALREADY IN THIS SESSION (${sessionAttachments.length}, attached on earlier turns and still available):\n${list}\n${canRead
+    ? 'When the request depends on these files and their content is not already in the history above, select understand_documents with a question describing what you need; it reads every file in the session. NEVER ask the user to re-attach a file listed here.'
+    : 'NEVER ask the user to re-attach a file listed here; say which file you need read if its content is not in the history.'}`;
+}
+
 function buildReviewerNotesBlock(reviewerNotes) {
   if (!Array.isArray(reviewerNotes) || !reviewerNotes.length) return '';
   return [
@@ -305,7 +315,7 @@ function buildReviewerNotesBlock(reviewerNotes) {
 const DELEGABLE_ROLES = ['research', 'data', 'drafting', 'review'];
 
 function buildPlannerPrompt(input) {
-  const { message, attachment, tools = [], knowledge, pending, taskState, conversationFacts, enabledModuleProfiles, memoryContext, reviewerNotes, allowDelegation = true, completedWork = [] } = input;
+  const { message, attachment, sessionAttachments = [], tools = [], knowledge, pending, taskState, conversationFacts, enabledModuleProfiles, memoryContext, reviewerNotes, allowDelegation = true, completedWork = [] } = input;
   const toolList = tools.map((t) => `- ${t.tool}: ${t.purpose}${t.governance ? ` [${t.governance}]` : ''}`).join('\n');
   const delegable = tools.filter((t) => t.delegable !== false && /^(query_records|client_site_compare|scv_lookup|schema_inspect|retrieve_knowledge|understand_documents|web_research|sql_read|repo_search|query_atlas|read_issues|resolve_address|resolve_geofence|self_audit|assess_system)$/.test(t.tool)).map((t) => t.tool);
   const canDelegate = allowDelegation && delegable.length > 0;
@@ -324,8 +334,8 @@ function buildPlannerPrompt(input) {
     '',
     'Rules:',
     '- TRUTH PROTOCOL: label what you KNOW (from tools, documents, or the user), what you INFER, and what is UNKNOWN. Never fabricate a fact, law, rate, date, capability, or record to be agreeable. A missing fact is stated as missing. Confidence reflects evidence, not tone.',
-    '- DRAFTING DISCIPLINE (job descriptions, adverts, employment agreements, letters, policies, SOPs, site instructions, reports, checklists): DRAFT NOW. Use sensible New Zealand defaults, the organisation\'s details you already know, and any research or knowledge supplied. Put genuinely unknown facts in the draft as [TO CONFIRM: what] rather than stopping to ask. End with a short "Assumptions" list (only real assumptions) and, for legal/HR/finance documents, a one-line note that a qualified human must review before use. Ask a question only if the draft cannot be STARTED without it — and then ask exactly ONE. Never present a questionnaire before drafting.',
-    '- ONE DOCUMENT PER TURN: keep a single reply under about 1,200 words. When the deliverable is longer than that (for example a job description AND an employment agreement), deliver the FIRST document complete now and finish with one line offering the next ("Say next for the employment agreement."). Never stop mid-document and never summarise what you would write instead of writing it.',
+    '- DRAFTING DISCIPLINE (job descriptions, adverts, employment agreements, letters, policies, SOPs, site instructions, reports, checklists, capability statements, company profiles, tender responses, proposals): DRAFT NOW. Use sensible New Zealand defaults, the organisation\'s details you already know, and any research or knowledge supplied. Put genuinely unknown facts in the draft as [TO CONFIRM: what] rather than stopping to ask. End with a short "Assumptions" list (only real assumptions) and, for legal/HR/finance documents, a one-line note that a qualified human must review before use. Ask a question only if the draft cannot be STARTED without it — and then ask exactly ONE. Never present a questionnaire before drafting.',
+    '- ONE DOCUMENT PER TURN: keep a single reply under about 1,200 words. When the deliverable is longer than that (for example a job description AND an employment agreement), deliver the FIRST document complete now and finish with one line offering the next ("Say next for the employment agreement."). Never stop mid-document and never summarise what you would write instead of writing it. Never say "here is the draft" or "I have drafted" unless the complete document text is in this same reply.',
     '- ONE QUESTION RULE: action=ask carries exactly ONE question (with your best_guess). If you find yourself with several unknowns, choose the one that changes the outcome most, assume the rest with stated defaults, and proceed. Never put a numbered list of questions in "reply".',
     '- ROUTING for uploaded data: (a) to READ/understand/relate uploaded file(s), use understand_documents. (b) to CREATE or ENRICH ENTITIES from the data, treat the file as a SOURCE — read it with understand_documents, relate/dedupe with query_records + client_site_compare, then PROPOSE creating the entities PARENT-FIRST (owning client org -> its sites -> their events). Do NOT dump multi-entity source data into one flat table. (c) ONLY use plan_import for bulk-loading a whole CLEAN tabular file into ONE existing table.',
     '- A provider patrol/despatch export is MULTI-ENTITY: distinct sites -> client_sites, per-row visits -> location_events; a Bureau is a service TYPE, NOT the site or owner; each distinct Client is usually its own client org under the branch.',
@@ -365,13 +375,14 @@ function buildPlannerPrompt(input) {
     buildCompletedWorkBlock(completedWork),
     buildTaskStateBlock(taskState),
     buildAttachmentBlock(attachment),
+    buildSessionAttachmentsBlock(sessionAttachments, tools),
     buildReviewerNotesBlock(reviewerNotes),
     '',
     'Return ONLY valid JSON, no markdown:',
     `{ "action": "answer" | "use_tool" | "ask"${canDelegate ? ' | "delegate"' : ''} | "introspect", "tool": string|null, "args": object, "reply": string, "questions": [ { "topic": string, "question": string, "best_guess": string, "options": [string] } ]${canDelegate ? ', "subagents": [ { "role": "research"|"data"|"drafting"|"review", "goal": string, "tools": [string], "inputs": object } ]' : ''}, "proposed_entities": object|null, "reasoning": string, "confidence": number }`,
     '- action=answer: put your FULL answer in "reply" (markdown; for drafts, the complete document); tool=null; questions=[].',
     '- action=use_tool: set "tool" to the exact tool name and "args" to its parameters; "reply" may be a short "what I\'m doing" note; questions=[].',
-    '- action=ask: put your read of the situation + your plan in "reply", and the ONE genuine unknown in "questions" (with best_guess and, where helpful, options). tool=null.',
+    '- action=ask: put your read of the situation + your plan in "reply", and the ONE genuine unknown in "questions" (with best_guess and 2-5 short "options" the user can click as their answer whenever the answer is a choice). tool=null.',
     canDelegate ? '- action=delegate: fill "subagents" (1-3 entries, each with role, goal, tools, inputs) and put a one-line "reply" saying what you are looking into; tool=null; questions=[].' : '',
     '- action=introspect: brief note in "reply"; tool=null; questions=[]. The conductor renders the field values mechanically.',
     '- proposed_entities (ALL actions, whenever you have extracted concrete facts this turn — a client name, site name/address, owning branch, patrol route, zone details, job title, pay rate, region, employment type): put those facts here as a plain object. If you extract facts while choosing action=ask, you MUST still populate proposed_entities; otherwise those facts are LOST once the human answers.',
@@ -411,6 +422,7 @@ module.exports = {
   BLANKET_AFFIRMATIVE_RULE,
   DELEGABLE_ROLES,
   buildAttachmentBlock,
+  buildSessionAttachmentsBlock,
   buildCompletedWorkBlock,
   buildConversationFactsBlock,
   buildHistoryMessages,

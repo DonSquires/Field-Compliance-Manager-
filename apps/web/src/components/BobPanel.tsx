@@ -683,10 +683,10 @@ export const BobPanel: React.FC<BobPanelProps> = ({ open, onClose, context, mode
     }
   };
 
-  const handleSend = async (e: React.FormEvent) => {
-    e.preventDefault();
-    const message = input.trim() || voiceTranscript.trim();
-    if ((!message && pendingFiles.length === 0) || !conversationId) return;
+  const handleSend = async (e: React.FormEvent | null, override?: string) => {
+    e?.preventDefault();
+    const message = (override ?? (input.trim() || voiceTranscript.trim())).trim();
+    if ((!message && pendingFiles.length === 0) || !conversationId || sending) return;
 
     const optimisticId = `optimistic-${Date.now()}`;
     const attachmentNames = pendingFiles.map(item => item.file.name);
@@ -871,6 +871,7 @@ export const BobPanel: React.FC<BobPanelProps> = ({ open, onClose, context, mode
                   <div className="bob-message-body">
                     {m.role === 'assistant' && <AgentMetadata message={m} />}
                     <div className="bob-message-content">{m.role === 'assistant' ? <BobMarkdown content={m.content} /> : m.content}</div>
+                    {m.role === 'assistant' && <AnswerChoices message={m} disabled={sending} onAnswer={(answer) => void handleSend(null, answer)} />}
                     <footer><time dateTime={m.created_at}>{new Date(m.created_at).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })}</time>{m.role === 'assistant' && <button type="button" onClick={() => void speakMessage(m)} disabled={speakingMessageId !== null} title="Listen to this reply" aria-label="Listen to this reply"><Volume2 size={13} />{speakingMessageId === m.id ? 'Speaking' : <span className="sr-only">Listen to this reply</span>}</button>}{m.flagged && <span className="bob-flagged"><AlertTriangle size={12} /> Review required</span>}</footer>
                   </div>
                 </article>
@@ -942,7 +943,7 @@ export const BobPanel: React.FC<BobPanelProps> = ({ open, onClose, context, mode
           </form>
         </div>
 
-        {workspaceExpanded && studioOpen && <BobStudio messages={messages} attachments={attachments} onPrompt={(prompt) => { setInput(prompt); focusComposer(); }} onAttach={() => fileInputRef.current?.click()} />}
+        {workspaceExpanded && studioOpen && <BobStudio messages={messages} attachments={attachments} organizationId={profile?.organizationId ?? null} onPrompt={(prompt) => { setInput(prompt); focusComposer(); }} onAttach={() => fileInputRef.current?.click()} />}
 
         {workspaceExpanded && contextPanelOpen && <div className="bob-pane-divider is-right" role="separator" aria-orientation="vertical" aria-label="Resize context pane" onPointerDown={(event) => beginPaneResize('right', event)} />}
         {contextPanelOpen && (
@@ -1322,6 +1323,23 @@ function classifyMessageState(message: BobMessage): WorkState {
   if (hasEvidence) return { tone: 'completed', label: 'Completed', detail: 'Bob attached structured evidence or reasoning metadata to this turn.' };
   if (plannedTool) return { tone: 'completed', label: 'Completed', detail: `Bob completed ${plannedTool.replaceAll('_', ' ')} for this turn.` };
   return { tone: 'completed', label: 'Answered', detail: 'Bob returned assistant prose only; no governed action was prepared.' };
+}
+
+// Bob's clarifying questions are answered by clicking, not by retyping what he already guessed.
+function AnswerChoices({ message, onAnswer, disabled }: { message: BobMessage; onAnswer: (answer: string) => void; disabled: boolean }) {
+  const metadata = message.metadata ?? {};
+  if (asString(metadata.intent) !== 'clarifying_questions') return null;
+  const supplied = asArray(metadata.answer_options).map(asString).filter(Boolean) as string[];
+  const bestGuess = asString(metadata.best_guess);
+  const choices = supplied.length ? supplied : bestGuess ? [bestGuess] : [];
+  if (!choices.length) return null;
+  return (
+    <div className="bob-answer-choices" aria-label="Answer Bob's question">
+      {choices.map((choice) => (
+        <button key={choice} type="button" onClick={() => onAnswer(choice)} disabled={disabled}>{choice}</button>
+      ))}
+    </div>
+  );
 }
 
 function OperationalCards({ message }: { message: BobMessage }) {

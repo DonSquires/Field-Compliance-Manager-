@@ -8757,6 +8757,11 @@ serve(async (req)=>{
       const read = String(d.reply ?? '').trim();
       // Compact format: context line (if any) + single direct question.
       const reply = read ? `${read}\n\n${question}${guess}` : `${question}${guess}`;
+      // Answer choices the panel renders as buttons so the human clicks instead of retyping.
+      // The planner may omit them; best_guess still gives the panel one concrete answer.
+      const answerOptions = Array.isArray(q?.options)
+        ? q.options.map((option)=>String(option?.label ?? option ?? '').trim()).filter((label)=>label.length > 0).slice(0, 6)
+        : [];
       const freshPe = d.proposed_entities && typeof d.proposed_entities === 'object' && !Array.isArray(d.proposed_entities) && Object.keys(d.proposed_entities).length > 0 ? d.proposed_entities : null;
       const resolvedPe = freshPe ?? (pending && pending.proposed_entities ? pending.proposed_entities : null);
       return {
@@ -8767,6 +8772,8 @@ serve(async (req)=>{
           reasoning: d.reasoning ?? null,
           confidence: d.confidence ?? null,
           questions: rawQuestions,
+          answer_options: answerOptions,
+          best_guess: q?.best_guess ? String(q.best_guess) : null,
           pending_attachment: att ? {
             name: att.name,
             type: att.type
@@ -8818,6 +8825,16 @@ serve(async (req)=>{
       console.warn('[conductor][module-map] failed to resolve enabled modules (non-fatal):', e);
       enabledModuleProfiles = buildModuleMap(new Set());
     }
+    // Earlier-turn files stay readable via understand_documents; the planner must know they exist.
+    let sessionAttachments = [];
+    if (conversationId) {
+      try {
+        const { data: sessionRows } = await admin.from('bob_attachments').select('file_name, file_type').eq('conversation_id', conversationId).order('created_at', { ascending: true }).limit(20);
+        sessionAttachments = (sessionRows ?? []).filter((r)=>r.file_name && r.file_name !== att?.name).map((r)=>({ name: String(r.file_name), kind: r.file_type ? String(r.file_type) : null }));
+      } catch (e) {
+        console.warn('[conductor][session-attachments] failed to list session files (non-fatal):', e);
+      }
+    }
     const planPayload = {
       action: 'plan',
       message: message || (att ? `The user uploaded ${att.name}.` : ''),
@@ -8826,6 +8843,7 @@ serve(async (req)=>{
         kind: att.type,
         text: attText ? attText.slice(0, 2000) : undefined
       } : null,
+      session_attachments: sessionAttachments,
       tools: catalogue,
       persona: buildPersona(caps.tier),
       platform_context: agentWorkspaceContext.agent_mode === 'builder'

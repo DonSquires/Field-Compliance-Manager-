@@ -23,4 +23,9 @@ describe('enterprise identity console', () => {
     expect(source).toContain('directInviteRoles.map');
     expect(source).toContain("assignableRoles.filter((role) => !['officer', 'admin_officer'].includes(role))");
   });
+
+  it('names the row action for what it edits, so changing a person is discoverable', () => {
+    expect(source).toContain('Edit user');
+    expect(source).not.toContain('<span>Manage access</span>');
+  });
 });

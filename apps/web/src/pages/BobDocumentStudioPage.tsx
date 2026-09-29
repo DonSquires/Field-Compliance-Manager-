@@ -19,7 +19,7 @@ type ReferenceResult = {
   retrieval_handle: string;
 };
 
-type SaveState = 'idle' | 'saving' | 'saved' | 'reviewing' | 'needs_review' | 'error';
+type SaveState = 'idle' | 'saving' | 'saved' | 'reviewing' | 'needs_review' | 'approved' | 'error';
 type OutputFormat = 'print' | 'docx';
 type DraftSummary = { id: string; title: string; updatedAt: string; versionId: string; status: string; html: string; text: string; documentType: string; sourceChannel: string; currentScope: string; authorable: boolean };
 type BrandAsset = { id: string; label: string; asset_kind: string; variant: string; status: string; asset_url: string | null; storage_bucket: string | null; storage_path: string | null; alt_text: string | null };
@@ -156,6 +156,27 @@ export default function BobDocumentStudioPage() {
             });
             setDocumentType(debrief.safety_incident_reported ? 'incident_report' : debrief.equipment_issue_reported || debrief.follow_up_required ? 'corrective_action' : 'report');
             setTitle(`Shift Debrief Report - ${debrief.submitted_at ? debrief.submitted_at.slice(0, 10) : 'Handover'}`);
+          }
+        } else if (sourceType === 'company') {
+          // Grounds a capability statement in the org's own record, live service lines and client
+          // count, so the draft states what the business demonstrably does rather than a guess.
+          const [organizationResponse, moduleResponse, agreementResponse] = await Promise.all([
+            supabase.from('organizations').select('id,name,nzbn,contact_email,contact_phone,organization_type').eq('id', sourceId).maybeSingle(),
+            supabase.from('organization_modules').select('module_key').eq('organization_id', sourceId).eq('enabled', true),
+            supabase.from('service_agreements').select('client_organization_id').eq('provider_organization_id', sourceId),
+          ]);
+          const organization = organizationResponse.data;
+          if (active && organization) {
+            const serviceLines = (moduleResponse.data ?? []).map((row) => String(row.module_key).replaceAll('_', ' '));
+            const clientCount = new Set((agreementResponse.data ?? []).map((row) => row.client_organization_id)).size;
+            setSourceContext({
+              type: 'company',
+              id: organization.id,
+              label: organization.name,
+              prompt: `Draft a capability statement for ${organization.name}. NZBN: ${organization.nzbn || '[TO CONFIRM]'}. Contact: ${organization.contact_email || '[TO CONFIRM]'} / ${organization.contact_phone || '[TO CONFIRM]'}. Service lines currently operated in the platform: ${serviceLines.length ? serviceLines.join(', ') : '[TO CONFIRM]'}. Client organisations under active service agreements: ${clientCount || '[TO CONFIRM]'}. Cover who the company is, the services it delivers, its operating scale, and how work is evidenced and reported. Use only the facts given here plus attached source files; mark licences, certifications, insurance, and anything else not supplied as [TO CONFIRM] rather than estimating.`,
+            });
+            setDocumentType('capability_statement');
+            setTitle(`Capability Statement - ${organization.name}`);
           }
         }
       } catch (err) {
@@ -339,14 +360,14 @@ export default function BobDocumentStudioPage() {
       setNotice(error?.message ?? data?.error ?? 'The review decision could not be recorded.');
       return;
     }
-    setSaveState(decision === 'approved' ? 'saved' : 'error');
-    setNotice(decision === 'approved' ? 'Approved with a durable review receipt. Promotion remains a separate governed action.' : 'Rejected with a durable review receipt. Create a revision after addressing the reviewer reason.');
+    setSaveState(decision === 'approved' ? 'approved' : 'error');
+    setNotice(decision === 'approved' ? 'Approved with a durable review receipt. You can now generate an output.' : 'Rejected with a durable review receipt. Create a revision after addressing the reviewer reason.');
   };
 
   const outputLabel = (format: OutputReceipt['output_format']) => format === 'docx' ? 'DOCX' : 'Print PDF';
 
   const requestDocumentOutput = async () => {
-    if (!draftIds || saveState !== 'saved') return;
+    if (!draftIds || saveState !== 'approved') return;
     setOutputBusy(true); setNotice(null);
     const { data: receipt, error: requestError } = await supabase.rpc('request_bob_document_output', {
       p_document_id: draftIds.documentId,
@@ -395,7 +416,7 @@ export default function BobDocumentStudioPage() {
     setTitle(draft.title);
     setDocumentType(draft.documentType);
     setDraftIds({ documentId: draft.id, versionId: draft.versionId });
-    setSaveState(draft.status === 'needs_review' ? 'needs_review' : 'saved');
+    setSaveState(draft.status === 'needs_review' ? 'needs_review' : draft.status === 'approved' ? 'approved' : 'saved');
     setOutputReceipt(null);
     editor?.commands.setContent(draft.html);
     editor?.commands.focus('end');
@@ -432,14 +453,14 @@ export default function BobDocumentStudioPage() {
       <header className="bob-document-topbar">
         <div className="bob-document-brand"><span><Sparkles size={17} /></span><div><strong>Bob document studio</strong><small>Author, reference, review, promote</small></div></div>
         <div className="bob-document-top-actions">
-          <span className={`bob-save-state is-${saveState}`} role="status">{saveState === 'saving' ? 'Saving…' : saveState === 'reviewing' ? 'Submitting…' : saveState === 'saved' ? 'Saved draft' : saveState === 'needs_review' ? 'Needs review' : 'Draft'}</span>
+          <span className={`bob-save-state is-${saveState}`} role="status">{saveState === 'saving' ? 'Saving…' : saveState === 'reviewing' ? 'Submitting…' : saveState === 'saved' ? 'Step 2 of 4 · Saved draft' : saveState === 'needs_review' ? 'Step 3 of 4 · Awaiting your decision' : saveState === 'approved' ? 'Step 4 of 4 · Approved' : 'Step 1 of 4 · Writing'}</span>
           {unconfirmedMatches > 0 && <span className="bob-unconfirmed-badge" role="status"><AlertTriangle size={13} /><span>{unconfirmedMatches} unconfirmed</span><button type="button" onClick={jumpToNextUnconfirmed}>Find next</button></span>}
           <button type="button" className="bob-document-secondary" onClick={() => navigate('/admin/bob')}><X size={15} /> Close</button>
           <button type="button" className="bob-document-primary" onClick={() => void saveDraft()} disabled={saveState === 'saving'}><Save size={15} /> Save draft</button>
-          {draftIds && saveState === 'saved' && <button type="button" className="bob-document-review" onClick={() => void submitForReview()}>Submit for review</button>}
-          {draftIds && saveState === 'needs_review' && <><button type="button" className="bob-document-reject" onClick={() => void decideReview('rejected')}>Reject</button><button type="button" className="bob-document-review" onClick={() => void decideReview('approved')}>Approve</button></>}
-          {draftIds && saveState === 'saved' && <label className="bob-output-format">Output<select value={outputFormat} onChange={(event) => { setOutputFormat(event.target.value as OutputFormat); setOutputReceipt(null); }}><option value="print">Print PDF</option><option value="docx">DOCX</option></select></label>}
-          {draftIds && saveState === 'saved' && <button type="button" className="bob-document-output" onClick={() => outputReceipt?.status === 'ready' ? void openOutput() : void requestDocumentOutput()} disabled={outputBusy}>{outputBusy ? 'Generating…' : outputReceipt?.status === 'ready' ? `Open ${outputLabel(outputReceipt.output_format)}` : `Generate ${outputLabel(outputFormat)}`}</button>}
+          {draftIds && saveState === 'saved' && <button type="button" className="bob-document-review" onClick={() => void submitForReview()} title="Lock this version and move it to the approval step">Send to review</button>}
+          {draftIds && saveState === 'needs_review' && <><button type="button" className="bob-document-reject" onClick={() => void decideReview('rejected')} title="Send back for edits">Reject</button><button type="button" className="bob-document-review" onClick={() => void decideReview('approved')} title="Approve so the document can be printed or exported">Approve</button></>}
+          {draftIds && saveState === 'approved' && <label className="bob-output-format">Output<select value={outputFormat} onChange={(event) => { setOutputFormat(event.target.value as OutputFormat); setOutputReceipt(null); }}><option value="print">Print PDF</option><option value="docx">DOCX</option></select></label>}
+          {draftIds && saveState === 'approved' && <button type="button" className="bob-document-output" onClick={() => outputReceipt?.status === 'ready' ? void openOutput() : void requestDocumentOutput()} disabled={outputBusy}>{outputBusy ? 'Generating…' : outputReceipt?.status === 'ready' ? `Open ${outputLabel(outputReceipt.output_format)}` : `Generate ${outputLabel(outputFormat)}`}</button>}
         </div>
       </header>
 
@@ -457,7 +478,7 @@ export default function BobDocumentStudioPage() {
           {sourceContext && <div className="bob-source-context" role="status" aria-label="Source context for document"><span className="bob-source-type">{sourceContext.type.replace('_', ' ').toUpperCase()}</span><strong>{sourceContext.label}</strong><p className="bob-source-prompt">{sourceContext.prompt}</p></div>}
           <label htmlFor="bob-document-title">Title<input id="bob-document-title" aria-label="Document title" value={title} onChange={(event) => setTitle(event.target.value)} /></label>
           <label htmlFor="bob-document-type">Type<select id="bob-document-type" aria-label="Document type" value={documentType} onChange={(event) => setDocumentType(event.target.value)}>
-            <option value="site_safety_plan">Site safety plan</option><option value="risk_assessment">Security risk assessment</option><option value="incident_report">Incident / near miss</option><option value="corrective_action">Corrective action review</option><option value="emergency_plan">Emergency response plan</option><option value="working_alone_plan">Working-alone plan</option><option value="training_record">Training / competency record</option><option value="customer_review">Customer service review</option><option value="report">Operational report</option><option value="letter">Controlled correspondence</option><option value="policy">Policy / SOP</option><option value="proposal">Proposal / RFQ</option><option value="evidence_package">Evidence package</option><option value="custom">Custom</option>
+            <option value="capability_statement">Capability statement</option><option value="company_profile">Company profile</option><option value="site_safety_plan">Site safety plan</option><option value="risk_assessment">Security risk assessment</option><option value="incident_report">Incident / near miss</option><option value="corrective_action">Corrective action review</option><option value="emergency_plan">Emergency response plan</option><option value="working_alone_plan">Working-alone plan</option><option value="training_record">Training / competency record</option><option value="customer_review">Customer service review</option><option value="report">Operational report</option><option value="letter">Controlled correspondence</option><option value="policy">Policy / SOP</option><option value="proposal">Proposal / RFQ</option><option value="evidence_package">Evidence package</option><option value="custom">Custom</option>
           </select></label>
           <div className="bob-document-template-heading">Start with structure</div>
           <button type="button" onClick={() => insertTemplate('<h1>Report title</h1><p><strong>Purpose</strong></p><p>Describe the decision this document supports.</p><h2>Findings</h2><p>Record evidence-backed findings and mark unknowns as [TO CONFIRM].</p><h2>Recommended next action</h2><p>State the safe next step and owner.</p>')}>Report structure</button>

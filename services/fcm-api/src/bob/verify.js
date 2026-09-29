@@ -15,7 +15,10 @@ const SQL_ERROR_RE = /(column\s+"?[\w.]+"?\s+does not exist|relation\s+"?[\w.]+"
 const FALSE_COMPLETION_RE = /\b(I have|I've|I just|has been|have been|was|were) (now )?(created|filed|updated|deleted|deployed|merged|approved|saved|written|applied|submitted|executed|imported|rostered|invoiced|paid)\b/i;
 const BANNED_FILLER_RE = /\b(certainly|of course|happy to help|great question|absolutely|as an ai( language model)?|i am programmed to|leverage|streamline|robust)\b/gi;
 const BLANKET_AFFIRMATIVE_RE = /^\s*(yes|yep|yeah|yes please|ok|okay|sure|correct|confirmed|agreed|go ahead|go for it|proceed|do it|all good(?: with me)?|crack on|sounds good|yes to all|yes to everything|all of (them|the above)|use your (defaults|best guess(es)?)|go with your (defaults|best guess(es)?)|you decide|whatever you recommend|as you suggest(ed)?)[\s.!]*$/i;
-const DRAFT_REQUEST_RE = /\b(draft|write|create|prepare|produce|generate|put together)\b[\s\S]{0,80}\b(job description|position description|advert(isement)?|job ad|seek ad|agreement|contract|letter|policy|sop|procedure|report|checklist|proposal|email|memo|site instruction|brief|synopsis|summary)\b/i;
+const DRAFT_REQUEST_RE = /\b(draft|write|create|prepare|produce|generate|put together|pad ?out|flesh out|expand|update|rewrite|redo|improve|print)\b[\s\S]{0,80}\b(job description|position description|advert(isement)?|job ad|seek ad|agreement|contract|letter|policy|sop|procedure|report|checklist|proposal|email|memo|site instruction|brief|synopsis|summary|capa?bi?li?ty stat[e]?ment|ca\w{0,4}li?ty\s+stat\w*|company profile|profile|tender|rfq|stat[e]?ment|document)\b/i;
+// A reply that presents a draft ("here is a draft…") but is too short to contain one.
+const ANNOUNCED_DRAFT_RE = /\b(here is|here's|below is|i have (drafted|prepared|written|updated)|i've (drafted|prepared|written|updated))\b[^.]{0,60}\b(draft|document|statement|version|profile|letter|report)\b/i;
+const MIN_DRAFT_REPLY_WORDS = 150;
 // A request about the code: names a source path, a PR, or asks to fix/change a crash, bug, test, function…
 const CODE_REQUEST_RE = /(\b[\w./-]+\.(?:m?js|c?js|tsx?|sql|py|ps1|json|ya?ml)\b|\b(?:PR|pull request) #?\d+|\b(?:fix|debug|patch|repair|investigate|update|change|refactor|implement|rewrite)\b[\s\S]{0,200}\b(?:crash|bug|error|exception|typeerror|failing|test|function|script|component|migration|endpoint|edge function|tool|handler|regex|check|query|table|column|policy|rpc)\b)/i;
 // …or names a code identifier: camelCase (loadHistory), snake_case (created_at), a call (persist()).
@@ -116,6 +119,9 @@ function runDeterministicChecks(decision, input) {
     }
     if (decision.action === 'ask' && DRAFT_REQUEST_RE.test(message)) {
       issues.push({ code: 'draft_stalled_on_question', severity: 'warn', note: 'This is a drafting request. Drafting discipline: draft now using sensible NZ defaults with [TO CONFIRM: …] markers and an Assumptions list; ask ONE question only if the draft genuinely cannot be started.' });
+    }
+    if (decision.action === 'answer' && ANNOUNCED_DRAFT_RE.test(reply) && reply.trim().split(/\s+/).length < MIN_DRAFT_REPLY_WORDS && !/^\s*(#{1,6}\s|[-*]\s|\d+\.\s|\|)/m.test(reply)) {
+      issues.push({ code: 'announced_draft_missing', severity: 'block', note: 'The reply says a draft is here but does not contain it. Put the complete document text in this reply (with [TO CONFIRM: …] markers for unknowns), or if the source files are needed, select understand_documents first.' });
     }
     // A code request answered with a procedure ("first I will identify the error… what do you
     // think?") and no repository lookup this turn is a non-answer: the laptop planner produced

@@ -71,6 +71,8 @@ export const AuthContext = createContext<AuthContextValue>({
 
 // ATLAS READS: user_profiles (mapped to the authenticated auth.users session)
 async function loadProfile(userId: string): Promise<AppProfile | null> {
+  // A confirmed email change lands in auth.users first; bring this profile's copy up to it.
+  await supabase.rpc('sync_my_profile_email');
   const { data, error } = await supabase
     .from('user_profiles')
     .select('id, display_name, email, role, organization_id, employer_organization_id, module_access')

@@ -233,7 +233,7 @@ const UserManagementPage: React.FC = () => {
                     <div className="identity-actions">
                       <button type="button" disabled={busyId === user.id} onClick={() => void resendInvite(user)} title="Resend invitation"><MailPlus size={16} /><span>Resend</span></button>
                       <button type="button" disabled={self || busyId === user.id} onClick={() => { setLifecycle({ user, action: user.deactivated_at ? 'reactivate' : 'deactivate' }); setReason(''); }} title={self ? 'You cannot change your own lifecycle state' : user.deactivated_at ? 'Reactivate account' : 'Deactivate account'}>{user.deactivated_at ? <UserCheck size={16} /> : <UserMinus size={16} />}<span>{user.deactivated_at?'Reactivate':'Deactivate'}</span></button>
-                      <button type="button" onClick={() => setSelectedUser(user)} title="Manage identity and access"><MoreHorizontal size={16} /><span>Manage access</span></button>
+                      <button type="button" onClick={() => setSelectedUser(user)} title="Edit name, email, role and access"><MoreHorizontal size={16} /><span>Edit user</span></button>
                     </div>
                   </article>
                 );
