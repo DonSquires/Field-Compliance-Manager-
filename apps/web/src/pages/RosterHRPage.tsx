@@ -8,7 +8,7 @@
  */
 
 import React, { useEffect, useState, useCallback, useRef } from 'react';
-import { useLocation } from 'react-router-dom';
+import { useLocation, useNavigate } from 'react-router-dom';
 import { useAuth } from '../context/AuthContext';
 import { supabase } from '../lib/supabase';
 import { plainWords } from '../lib/rosterWords';
@@ -37,7 +37,7 @@ interface StaffRow {
   role_code: string | null;
 }
 
-interface RoleCodeRow { code: string; name: string; }
+interface RoleCodeRow { id?: string; code: string; name: string; }
 
 interface ReadinessAssessment { staff_id: string; user_id: string | null; work_ready: boolean; identity_status: string; employment_status: string; credential_status: string; training_status: string; blockers: string[]; }
 interface CatalogSkill { id: string; skill_name: string; skill_category: string; active: boolean; }
@@ -307,12 +307,14 @@ const onboardingStatusLabel = (status: string | undefined) => ({ in_progress: 'I
 
 const RosterHRPage: React.FC = () => {
   const location = useLocation();
+  const navigate = useNavigate();
   const requestedCredentialId = new URLSearchParams(location.search).get('credential');
   const { profile, operatingOrganizationId, operatingOrganizations } = useAuth();
   const operatingBranchId = operatingOrganizationId ?? profile?.organizationId ?? null;
   // "Working in" the organisation itself sets operatingOrganizationId to the home org; only another org is branch mode.
   const workingInBranch = Boolean(operatingOrganizationId && operatingOrganizationId !== profile?.organizationId);
   const corporatePayrollReviewer = Boolean(profile?.employerOrganizationId && profile.employerOrganizationId === profile.organizationId && ['grand_master', 'master', 'admin'].includes(profile.role));
+  const canManagePayRoles = Boolean(profile && ['grand_master', 'master', 'admin'].includes(profile.role));
   const requestedTab = new URLSearchParams(location.search).get('tab') as RosterTab | null;
   const roleTabs = profile?.role === 'admin_officer' ? ADMIN_OFFICER_TABS : new Set<RosterTab>(TABS.map((item) => item.id));
   const visibleTabGroups = TAB_GROUPS.map((group) => ({ ...group, tabs: group.tabs.filter((item) => roleTabs.has(item)) })).filter((group) => group.tabs.length > 0);
@@ -358,6 +360,8 @@ const RosterHRPage: React.FC = () => {
   const [payReviewFilter, setPayReviewFilter] = useState<'exceptions' | 'resolved' | 'all'>('exceptions');
   const [roleCodes, setRoleCodes] = useState<RoleCodeRow[]>([]);
   const [payRoleDrafts, setPayRoleDrafts] = useState<Record<string, string>>({});
+  const [showPayRoleCodeForm, setShowPayRoleCodeForm] = useState(false);
+  const [payRoleCodeForm, setPayRoleCodeForm] = useState({ code: '', name: '' });
   const [staffNames, setStaffNames] = useState<Record<string, string>>({});
   const [coverageRequests, setCoverageRequests] = useState<CoverageRequestRow[]>([]);
   const [shiftSwaps, setShiftSwaps] = useState<ShiftSwapRow[]>([]);
@@ -457,11 +461,11 @@ const RosterHRPage: React.FC = () => {
             .eq('organization_id', orgId),
           supabase
             .from('staff_profiles')
-            .select('id, user_id, employment_type, start_date, end_date, work_ready')
+            .select('id, user_id, employment_type, start_date, end_date, work_ready, role_code')
             .eq('organization_id', orgId),
           supabase
             .from('reference_codes')
-            .select('code, name')
+            .select('id, code, name')
             .eq('organization_id', orgId)
             .eq('code_type', 'role_code')
             .eq('is_active', true)
@@ -599,7 +603,7 @@ const RosterHRPage: React.FC = () => {
         start_date: staffProfileById.get(p.id)?.start_date ?? null,
         end_date: staffProfileById.get(p.id)?.end_date ?? null,
         work_ready: staffProfileById.get(p.id)?.work_ready ?? null,
-        role_code: null,
+        role_code: staffProfileById.get(p.id)?.role_code ?? null,
       }));
 
       const names: Record<string, string> = {};
@@ -709,6 +713,40 @@ const RosterHRPage: React.FC = () => {
     });
     if (payRoleError) setError(payRoleError.message);
     else { setNotice(`Payroll role updated for ${person.display_name || person.email || 'staff member'}.`); await loadAll(); }
+    setSaving(false);
+  };
+
+  const createPayRoleCode = async (event: React.FormEvent) => {
+    event.preventDefault();
+    if (!profile?.organizationId || !canManagePayRoles) return;
+    setSaving(true); setError(null); setNotice(null);
+    const { error: createError } = await supabase.rpc('manage_pay_role_code', {
+      p_action: 'create',
+      p_code: payRoleCodeForm.code.trim(),
+      p_name: payRoleCodeForm.name.trim(),
+      p_role_code_id: null,
+    });
+    if (createError) setError(createError.message);
+    else {
+      setNotice(`Payroll role code ${payRoleCodeForm.code.trim()} created. Add its pay rule for each branch that uses it.`);
+      setPayRoleCodeForm({ code: '', name: '' });
+      setShowPayRoleCodeForm(false);
+      await loadAll();
+    }
+    setSaving(false);
+  };
+
+  const deactivatePayRoleCode = async (code: RoleCodeRow) => {
+    if (!code.id || !canManagePayRoles || !window.confirm(`Deactivate ${code.code}? It must first be removed from every staff profile.`)) return;
+    setSaving(true); setError(null); setNotice(null);
+    const { error: deactivateError } = await supabase.rpc('manage_pay_role_code', {
+      p_action: 'deactivate',
+      p_code: null,
+      p_name: null,
+      p_role_code_id: code.id,
+    });
+    if (deactivateError) setError(deactivateError.message);
+    else { setNotice(`Payroll role code ${code.code} deactivated.`); await loadAll(); }
     setSaving(false);
   };
 
@@ -1226,6 +1264,40 @@ const RosterHRPage: React.FC = () => {
         ))}
       </div>
 
+      {tab === 'staff' && canManagePayRoles && (
+        <section className="reports-section hr-pay-role-code-section">
+          <header className="page-header">
+            <div>
+              <span className="contact-meta">Payroll setup</span>
+              <h2>Payroll role codes</h2>
+              <p className="subtitle">Create the organisation-owned code first, assign it to each staff profile, then add a matching pay rule for each operating branch. This is separate from login and branch-access roles.</p>
+            </div>
+            <div className="assessment-actions">
+              <button type="button" className="btn btn-sm btn-secondary" onClick={() => navigate('/admin/rate-rules')}>Set branch pay rules</button>
+              <button type="button" className="btn btn-sm btn-primary" onClick={() => setShowPayRoleCodeForm((open) => !open)}>{showPayRoleCodeForm ? 'Cancel' : 'Add payroll role code'}</button>
+            </div>
+          </header>
+          {roleCodes.length === 0 ? (
+            <div className="empty-state"><p><strong>No active payroll role codes.</strong> Create one here before assigning Payroll role to staff.</p></div>
+          ) : (
+            <div className="contacts-list">
+              {roleCodes.map((code) => <div className="contact-card" key={code.id ?? code.code}>
+                <div className="contact-header"><h3>{code.code}</h3><span className="contact-type-badge">Payroll role</span></div>
+                <div className="contact-details"><p>{code.name}</p></div>
+                {code.id && <button type="button" className="btn btn-sm btn-secondary" disabled={saving} onClick={() => void deactivatePayRoleCode(code)}>Deactivate code</button>}
+              </div>)}
+            </div>
+          )}
+          {showPayRoleCodeForm && <form className="assessment-form" onSubmit={(event) => void createPayRoleCode(event)}>
+            <div className="form-row">
+              <label><span>Payroll role code</span><input required maxLength={32} pattern="[A-Za-z0-9][A-Za-z0-9_-]*" value={payRoleCodeForm.code} onChange={(event) => setPayRoleCodeForm((form) => ({ ...form, code: event.target.value }))} placeholder="FIELD_SECURITY" /></label>
+              <label><span>Name shown to staff admins</span><input required maxLength={120} value={payRoleCodeForm.name} onChange={(event) => setPayRoleCodeForm((form) => ({ ...form, name: event.target.value }))} placeholder="Field security officer" /></label>
+            </div>
+            <button type="submit" className="btn btn-primary" disabled={saving}>{saving ? 'Creating…' : 'Create payroll role code'}</button>
+          </form>}
+        </section>
+      )}
+
       {tab === 'staff' && (
         <section className="reports-section">
           <h2>Staff ({staff.length})</h2>
@@ -1259,7 +1331,7 @@ const RosterHRPage: React.FC = () => {
                       {plainWords(s.employment_type, 'Employment type not set')}
                       {s.start_date ? ` · started ${new Date(s.start_date).toLocaleDateString('en-NZ')}` : ''}
                     </p>
-                    {s.staff_id && <div className="form-row" style={{ marginTop: '0.75rem' }}><label><span>Payroll role</span><select value={payRoleDrafts[s.id] ?? s.role_code ?? ''} onChange={(event) => setPayRoleDrafts((drafts) => ({ ...drafts, [s.id]: event.target.value }))}><option value="">No role code assigned</option>{roleCodes.map((code) => <option value={code.code} key={code.code}>{code.code} · {code.name}</option>)}</select></label><button type="button" className="btn btn-sm btn-secondary" disabled={saving || ((payRoleDrafts[s.id] ?? s.role_code ?? '') === (s.role_code ?? ''))} onClick={() => void saveStaffPayRole(s)}>Save payroll role</button></div>}
+                    {s.staff_id && canManagePayRoles && <div className="form-row" style={{ marginTop: '0.75rem' }}><label><span>Payroll role</span><select value={payRoleDrafts[s.id] ?? s.role_code ?? ''} onChange={(event) => setPayRoleDrafts((drafts) => ({ ...drafts, [s.id]: event.target.value }))}><option value="">No role code assigned</option>{roleCodes.map((code) => <option value={code.code} key={code.code}>{code.code} · {code.name}</option>)}</select></label><button type="button" className="btn btn-sm btn-secondary" disabled={saving || ((payRoleDrafts[s.id] ?? s.role_code ?? '') === (s.role_code ?? ''))} onClick={() => void saveStaffPayRole(s)}>Save payroll role</button></div>}
                     {s.staff_id && (() => { const assessment = readinessAssessments.find((item) => item.staff_id === s.staff_id); return assessment ? <div className="hr-readiness"><div><span>Identity</span><strong>{plainWords(assessment.identity_status)}</strong></div><div><span>Employment</span><strong>{plainWords(assessment.employment_status)}</strong></div><div><span>Credentials</span><strong>{plainWords(assessment.credential_status)}</strong></div><div><span>Training advisory</span><strong>{plainWords(assessment.training_status)}</strong></div>{assessment.blockers.length > 0 && <p>{assessment.blockers.join(' · ')}</p>}<div className="hr-readiness-actions">{['missing_valid', 'attention'].includes(assessment.credential_status) && <button type="button" className="btn btn-sm btn-secondary" onClick={() => openEvidence(assessment.staff_id, s.display_name || s.email || 'Staff member', 'record_credential')}>Record credential</button>}<button type="button" className={`btn btn-sm ${assessment.work_ready ? 'btn-danger' : 'btn-primary'}`} onClick={() => { setReadinessNotes('');setReadinessReview({ staffId: assessment.staff_id, name: s.display_name || s.email || 'Staff member', current: assessment.work_ready, next: !assessment.work_ready }); }}>{assessment.work_ready ? 'Remove work readiness' : 'Mark work ready'}</button></div></div> : null; })()}
                   </div>
                 </div>

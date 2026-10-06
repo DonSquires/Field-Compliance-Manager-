@@ -21,7 +21,7 @@ test('administrator manages identity and access preset', async ({ page }) => {
   await expect(page.getByRole('heading', { name: 'Branch staff access' })).toBeVisible();
 
   const jordan = page.getByText('Jordan Lee', { exact: true }).locator('..').locator('..');
-  await jordan.getByTitle('Manage identity and access').click();
+  await jordan.getByRole('button', { name: 'Edit user' }).click();
   const workspace = page.getByRole('dialog', { name: 'Jordan Lee' });
   await expect(workspace.getByText('Verify credential')).toBeVisible();
   await expect(workspace.getByText('missing_valid')).toBeVisible();
@@ -36,7 +36,7 @@ test('administrator manages identity and access preset', async ({ page }) => {
 
   await workspace.getByLabel('Role').selectOption('admin_officer');
   await workspace.getByLabel('Phone').fill('021 555 0199');
-  await workspace.getByLabel('Reason for change').fill('Jordan is taking the duty administration rotation.');
+  await workspace.getByPlaceholder('Why is this identity or role changing?').fill('Jordan is taking the duty administration rotation.');
   await workspace.getByRole('button', { name: 'Save identity' }).click();
   await expect(workspace.getByRole('status')).toContainText('Identity and role updated');
 
@@ -60,11 +60,56 @@ test('administrator sends a non-field identity invitation', async ({ page }) => 
   await invite.getByLabel('Display name').fill('Tama Ropata');
   await invite.getByLabel('Email address').fill('tama@fcm.test');
   await invite.getByLabel('Role').selectOption('client_viewer');
-  await expect(invite.getByText('Field staff are provisioned through Recruitment after offer acceptance.')).toBeVisible();
+  await expect(invite.getByRole('switch')).toHaveCount(0);
   await invite.getByRole('button', { name: 'Send invitation' }).click();
   await expect(page.getByRole('status')).toContainText('Invitation sent to tama@fcm.test');
   await expect(page.getByText('Tama Ropata', { exact: true })).toBeVisible();
   expect(errors, errors.join('\n')).toEqual([]);
+});
+
+for (const linkage of ['account-only', 'hr-only', 'roster-only', 'both'] as const) {
+  test(`administrator sends an officer invitation with ${linkage} linkage`, async ({ page }) => {
+    await page.route('**/rest/v1/organizations**', async (route) => {
+      if (route.request().url().includes('organization_type=eq.branch')) {
+        await route.fulfill({ contentType: 'application/json', body: JSON.stringify([{ id: '41414141-4141-4141-8141-414141414141', name: 'Northern Branch' }]) });
+      } else await route.fallback();
+    });
+    await signInAsAdmin(page, '/admin/users');
+    await page.getByRole('button', { name: 'Invite user' }).click();
+    const invite = page.locator('form.identity-invite-form');
+    await invite.getByLabel('Display name').fill('Test Officer');
+    await invite.getByLabel('Email address').fill('officer@fcm.test');
+    await invite.getByLabel('Role').selectOption('officer');
+    await expect(invite.getByRole('switch', { name: 'Link to HR' })).not.toBeChecked();
+    await expect(invite.getByRole('switch', { name: 'Link to rostering' })).not.toBeChecked();
+    if (linkage === 'hr-only' || linkage === 'both') await invite.getByRole('switch', { name: 'Link to HR' }).check();
+    if (linkage === 'roster-only' || linkage === 'both') {
+      await invite.getByRole('switch', { name: 'Link to rostering' }).check();
+      await invite.getByLabel('Delivery branch').selectOption('41414141-4141-4141-8141-414141414141');
+    }
+    const request = page.waitForRequest('**/functions/v1/create-user');
+    await invite.getByRole('button', { name: 'Send invitation' }).click();
+    const payload = (await request).postDataJSON();
+    expect(payload.role).toBe('officer');
+    if (linkage === 'hr-only' || linkage === 'both') expect(payload.staff).toEqual({ employment_type: 'permanent', work_ready: false });
+    else expect(payload).not.toHaveProperty('staff');
+    if (linkage === 'roster-only' || linkage === 'both') expect(payload.branch_authorisations).toEqual([{ branch_org_id: '41414141-4141-4141-8141-414141414141', role_at_branch: 'officer', module_access: [], can_be_rostered: false }]);
+    else expect(payload).not.toHaveProperty('branch_authorisations');
+    await expect(page.getByRole('status')).toContainText('Invitation sent to officer@fcm.test');
+  });
+}
+
+test('failed invitation retains the profile form and shows the actual send error', async ({ page }) => {
+  await page.route('**/functions/v1/create-user', async (route) => route.fulfill({ status: 400, contentType: 'application/json', body: JSON.stringify({ error: 'Email service temporarily unavailable' }) }));
+  await signInAsAdmin(page, '/admin/users');
+  await page.getByRole('button', { name: 'Invite user' }).click();
+  const invite = page.locator('form.identity-invite-form');
+  await invite.getByLabel('Display name').fill('Test Officer');
+  await invite.getByLabel('Email address').fill('officer@fcm.test');
+  await invite.getByRole('button', { name: 'Send invitation' }).click();
+  await expect(page.getByRole('alert')).toContainText('Email service temporarily unavailable');
+  await expect(invite.getByLabel('Email address')).toHaveValue('officer@fcm.test');
+  await expect(page.getByRole('status').filter({ hasText: 'Invitation sent' })).toHaveCount(0);
 });
 
 test('administrator ends a direct area grant with retained reason', async ({ page }) => {

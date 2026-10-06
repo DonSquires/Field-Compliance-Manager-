@@ -41,7 +41,8 @@ const UserManagementPage: React.FC = () => {
   const [search, setSearch] = useState('');
   const [statusFilter, setStatusFilter] = useState<StatusFilter>('all');
   const [showInvite, setShowInvite] = useState(false);
-  const [inviteForm, setInviteForm] = useState({ email: '', displayName: '', role: 'officer' as AppRole, employmentType: 'permanent', presetKey: '' });
+  const [inviteForm, setInviteForm] = useState({ email: '', displayName: '', role: 'officer' as AppRole, employmentType: 'permanent', presetKey: '', linkHR: false, linkRoster: false, branchId: '' });
+  const [inviteBranches, setInviteBranches] = useState<Array<{ id: string; name: string }>>([]);
   const [lifecycle, setLifecycle] = useState<{ user: UserRow; action: LifecycleAction } | null>(null);
   const [reason, setReason] = useState('');
   const [presets, setPresets] = useState<UserAccessPreset[]>([]);
@@ -51,7 +52,8 @@ const UserManagementPage: React.FC = () => {
   const [showIdentityRecords, setShowIdentityRecords] = useState(false);
 
   const assignableRoles = useMemo(() => getAssignableRoles(profile?.role ?? 'unknown'), [profile?.role]);
-  const directInviteRoles = useMemo(() => assignableRoles.filter((role) => !['officer', 'admin_officer'].includes(role)), [assignableRoles]);
+  const directInviteRoles = assignableRoles;
+  const isFieldInvite = ['officer', 'admin_officer'].includes(inviteForm.role);
   const canManageIdentityRecords = ['grand_master', 'master', 'admin'].includes(profile?.role ?? 'unknown');
 
   const loadIdentity = useCallback(async () => {
@@ -99,6 +101,17 @@ const UserManagementPage: React.FC = () => {
     void loadIdentity();
   }, [loadIdentity]);
 
+  useEffect(() => {
+    if (!showInvite || !operatingOrganizations.length) return;
+    let active = true;
+    void supabase.from('organizations').select('id,name').in('id', operatingOrganizations.map((organization) => organization.organizationId)).eq('organization_type', 'branch').eq('active', true).then(({ data, error: branchError }) => {
+      if (!active) return;
+      setInviteBranches(branchError ? [] : data ?? []);
+      if (branchError) setError('Delivery branches could not be loaded. You can still send an account-only invitation.');
+    });
+    return () => { active = false; };
+  }, [showInvite, operatingOrganizations]);
+
   const filteredUsers = useMemo(() => {
     const term = search.trim().toLowerCase();
     return users.filter((user) => {
@@ -110,24 +123,33 @@ const UserManagementPage: React.FC = () => {
 
   const inviteUser = async (event: React.FormEvent) => {
     event.preventDefault();
-    if (!profile?.organizationId || !directInviteRoles.includes(inviteForm.role)) return;
+    if (!profile?.organizationId || !directInviteRoles.includes(inviteForm.role) || busyId === 'invite') return;
+    if (isFieldInvite && inviteForm.linkRoster && !inviteBranches.some((branch) => branch.id === inviteForm.branchId)) {
+      setError('Choose an authorized delivery branch before linking rostering.');
+      return;
+    }
     setBusyId('invite');
     setError(null);
     setNotice(null);
     try {
-      const { error: invokeError } = await supabase.functions.invoke('create-user', {
+      const { data, error: invokeError } = await supabase.functions.invoke('create-user', {
         body: {
           email: inviteForm.email.trim(),
           display_name: inviteForm.displayName.trim(),
           role: inviteForm.role,
           organization_id: profile.organizationId,
-          staff: ['officer', 'admin_officer'].includes(inviteForm.role) ? { employment_type: inviteForm.employmentType } : undefined,
+          staff: isFieldInvite && inviteForm.linkHR ? { employment_type: inviteForm.employmentType, work_ready: false } : undefined,
+          branch_authorisations: isFieldInvite && inviteForm.linkRoster ? [{ branch_org_id: inviteForm.branchId, role_at_branch: inviteForm.role, module_access: [], can_be_rostered: false }] : undefined,
           access_preset_key: ['grand_master', 'master', 'admin', 'admin_officer'].includes(inviteForm.role) ? inviteForm.presetKey || undefined : undefined,
         },
       });
-      if (invokeError) throw invokeError;
+      if (invokeError) {
+        const response = 'context' in invokeError && invokeError.context instanceof Response ? await invokeError.context.json().catch(() => null) : null;
+        throw new Error(response?.error ?? invokeError.message);
+      }
+      if (!data?.success || data.invitation_sent === false) throw new Error(data?.error ?? 'No invitation was sent. Open the existing user profile and resend its invitation.');
       setNotice(`Invitation sent to ${inviteForm.email.trim()}.`);
-      setInviteForm({ email: '', displayName: '', role: directInviteRoles[0] ?? 'client_viewer', employmentType: 'permanent', presetKey: '' });
+      setInviteForm({ email: '', displayName: '', role: 'officer', employmentType: 'permanent', presetKey: '', linkHR: false, linkRoster: false, branchId: '' });
       setShowInvite(false);
       await loadIdentity();
     } catch (inviteError) {
@@ -142,8 +164,12 @@ const UserManagementPage: React.FC = () => {
     setError(null);
     setNotice(null);
     try {
-      const { error: invokeError } = await supabase.functions.invoke('resend-invite', { body: { user_id: user.id } });
-      if (invokeError) throw invokeError;
+      const { data, error: invokeError } = await supabase.functions.invoke('resend-invite', { body: { user_id: user.id } });
+      if (invokeError) {
+        const response = 'context' in invokeError && invokeError.context instanceof Response ? await invokeError.context.json().catch(() => null) : null;
+        throw new Error(response?.error ?? invokeError.message);
+      }
+      if (!data?.success) throw new Error(data?.error ?? 'The invitation could not be resent.');
       setNotice(`Invitation resent to ${user.email ?? user.display_name ?? 'the selected user'}.`);
       await loadIdentity();
     } catch (resendError) {
@@ -208,7 +234,13 @@ const UserManagementPage: React.FC = () => {
             <label><span>Role</span><select value={inviteForm.role} onChange={(event) => setInviteForm((form) => ({ ...form, role: event.target.value as AppRole }))}>{directInviteRoles.map((role) => <option value={role} key={role}>{IDENTITY_ROLE_LABEL[role]}</option>)}</select></label>
             {['grand_master', 'master', 'admin', 'admin_officer'].includes(inviteForm.role) && <label><span>Access preset</span><select value={inviteForm.presetKey} onChange={(event) => setInviteForm((form) => ({ ...form, presetKey: event.target.value }))}><option value="">Assign after invitation</option>{presets.map((preset) => <option value={preset.key} key={preset.id}>{preset.name}</option>)}</select></label>}
           </div>
-          <div className="identity-form-footer"><span>Field staff are provisioned through Recruitment after offer acceptance.</span><button type="submit" disabled={busyId === 'invite'}>{busyId === 'invite' ? <RefreshCw size={16} className="is-spinning" /> : <MailPlus size={16} />}{busyId === 'invite' ? 'Sending' : 'Send invitation'}</button></div>
+          {isFieldInvite && <div className="identity-form-grid">
+            <label><span>Link to HR</span><input type="checkbox" role="switch" checked={inviteForm.linkHR} onChange={(event) => setInviteForm((form) => ({ ...form, linkHR: event.target.checked }))} /></label>
+            {inviteForm.linkHR && <label><span>Employment type</span><select value={inviteForm.employmentType} onChange={(event) => setInviteForm((form) => ({ ...form, employmentType: event.target.value }))}><option value="permanent">Permanent</option><option value="casual">Casual</option><option value="contractor">Contractor</option></select></label>}
+            <label><span>Link to rostering</span><input type="checkbox" role="switch" checked={inviteForm.linkRoster} onChange={(event) => setInviteForm((form) => ({ ...form, linkRoster: event.target.checked }))} /></label>
+            {inviteForm.linkRoster && <label><span>Delivery branch</span><select required value={inviteForm.branchId} onChange={(event) => setInviteForm((form) => ({ ...form, branchId: event.target.value }))}><option value="">Select branch</option>{inviteBranches.map((branch) => <option key={branch.id} value={branch.id}>{branch.name}</option>)}</select></label>}
+          </div>}
+          <div className="identity-form-footer"><span>Account invitation does not mark staff work-ready.</span><button type="submit" disabled={busyId === 'invite'}>{busyId === 'invite' ? <RefreshCw size={16} className="is-spinning" /> : <MailPlus size={16} />}{busyId === 'invite' ? 'Sending' : 'Send invitation'}</button></div>
         </form>
       )}
 

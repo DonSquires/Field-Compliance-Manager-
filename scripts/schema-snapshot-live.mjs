@@ -164,7 +164,7 @@ async function main() {
   }
   process.stderr.write('\n');
   for (const f of fnDefs) {
-    const def = f.def.replace(/^CREATE OR REPLACE (FUNCTION|PROCEDURE) public\.("?)([a-zA-Z_][a-zA-Z0-9_]*)\2\(/, (all, kind, _q, name) => `CREATE OR REPLACE ${kind} "public".${q(name)}(`);
+    const def = f.def.replace(/\r\n/g, '\n').replace(/\r/g, '').replace(/^CREATE OR REPLACE (FUNCTION|PROCEDURE) public\.?("?)([a-zA-Z_][a-zA-Z0-9_]*)\2\(/, (all, kind, _q, name) => `CREATE OR REPLACE ${kind} "public".${q(name)}(`);
     emit(def.trimEnd().replace(/;?$/, ';'));
     if (f.comment) emit(`COMMENT ON FUNCTION "public".${q(f.proname)}(${f.idargs}) IS ${lit(f.comment)};`);
     // An explicit ACL is reproduced exactly: revoke from PUBLIC and the Supabase API roles first, so the

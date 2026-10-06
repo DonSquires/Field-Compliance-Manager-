@@ -41147,6 +41147,7 @@ export type Database = {
           p_rate_rule_id?: string
           p_rate_type?: string
           p_rule_kind?: string
+          p_role_code?: string
           p_service_type?: string
           p_site_id?: string
           p_zone_id?: string
@@ -41189,6 +41190,35 @@ export type Database = {
           to: "rate_rules"
           isOneToOne: true
           isSetofReturn: false
+        }
+      }
+      manage_pay_role_code: {
+        Args: {
+          p_action: string
+          p_code?: string
+          p_name?: string
+          p_role_code_id?: string
+        }
+        Returns: {
+          code: string
+          code_type: string
+          created_at: string
+          created_by: string | null
+          description: string | null
+          external_refs: Json
+          id: string
+          is_active: boolean
+          item_category: string | null
+          name: string
+          organization_id: string
+          parent_code: string | null
+          region_code: string | null
+          service_type: string | null
+          sort_order: number
+          unit: string | null
+          updated_at: string
+          updated_by: string | null
+          default_rate: number | null
         }
       }
       manage_org_printer_settings: {

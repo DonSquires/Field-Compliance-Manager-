@@ -70,7 +70,7 @@ const WORKFLOWS: FieldWorkflow[] = [
   { area: 'dispatch', label: 'Dispatch console', detail: 'Create jobs, assign resources, and manage SLA response', icon: Radio, tone: 'teal', group: 'respond', roles: OPERATIONS_ROLES, moduleKeys: ['dispatch'] },
   { area: 'live-map', label: 'Live operations', detail: 'Review GPS freshness and separately confirmed welfare state', icon: Map, tone: 'blue', group: 'respond', roles: OPERATIONS_ROLES, moduleKeys: ['dispatch'] },
   { area: 'welfare-alerts', label: 'Welfare response', detail: 'Acknowledge, investigate, and resolve active alerts', icon: HeartPulse, tone: 'red', group: 'respond', roles: OPERATIONS_ROLES, moduleKeys: ['welfare'], safetyRelevant: true },
-  { area: 'patrol', label: 'Patrol operations', detail: 'Manage routes, checkpoints, visits, and exceptions', icon: Route, tone: 'green', group: 'respond', roles: OPERATIONS_ROLES, moduleKeys: ['static_guarding'] },
+  { area: 'patrol', label: 'Patrol evidence', detail: 'Review checkpoint visits, proximity, and exceptions', icon: Route, tone: 'green', group: 'review', roles: OPERATIONS_ROLES, moduleKeys: ['patrol', 'static_guarding'] },
   { area: 'field-reports', label: 'Field reports', detail: 'Triage submitted reports and required follow-up', icon: FileWarning, tone: 'amber', group: 'respond', roles: OPERATIONS_ROLES },
   { area: 'debrief-followup', label: 'Debrief follow-up', detail: 'Own safety, equipment, and handover actions', icon: FileWarning, tone: 'amber', group: 'respond', roles: OPERATIONS_ROLES },
   { area: 'cctv-console', label: 'CCTV & video', detail: 'Playback, observations, imports, processing jobs, and evidence exports', icon: Camera, tone: 'slate', group: 'review', roles: OPERATIONS_ROLES, moduleKeys: ['cctv'] },

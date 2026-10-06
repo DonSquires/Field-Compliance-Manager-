@@ -11,9 +11,9 @@ const credentialSql = read('../../supabase/migrations/20260901002000_govern_staf
 
 describe('governed HR administration', () => {
   it('matches live roster schema and branch context', () => {
-    expect(page).not.toContain('work_ready, role_code');
+    expect(page).toContain(".select('id, user_id, employment_type, start_date, end_date, work_ready, role_code')");
     expect(page).toContain('operatingOrganizationId\n            ? supabase.rpc');
-    expect(page).toContain('role_code: null');
+    expect(page).toContain('role_code: staffProfileById.get(p.id)?.role_code ?? null');
   });
 
   it('groups the full Roster HR workspace without removing payroll access', () => {
@@ -105,7 +105,11 @@ describe('governed HR administration', () => {
     expect(page).toContain(".eq('code_type', 'role_code')");
     expect(page).toContain("supabase.rpc('set_staff_pay_role_code'");
     expect(page).toContain('Save payroll role');
+    expect(page).toContain("supabase.rpc('manage_pay_role_code'");
+    expect(page).toContain('Create payroll role code');
+    expect(page).toContain('Add its pay rule for each branch');
     expect(page).not.toContain(".from('staff_profiles').update");
+    expect(page).not.toContain(".from('reference_codes').insert");
   });
 
   it('provisions accepted candidates with employer-owned employment and a branch authorization', () => {

@@ -3,6 +3,52 @@ import { installSupabaseFixtures, monitorBrowserErrors, signInAsAdmin } from './
 
 test.beforeEach(async ({ page }) => { await page.clock.setFixedTime(new Date('2026-08-30T09:30:00+12:00')); await installSupabaseFixtures(page); });
 
+test('creating a branch pay rule sends the selected role code in the governed RPC', async ({ page }) => {
+  const rules: Array<Record<string, unknown>> = [];
+  let createPayload: Record<string, unknown> | null = null;
+  await page.route('**/rest/v1/reference_codes*', async (route) => await route.fulfill({ status: 200, contentType: 'application/json', body: JSON.stringify([{ code: 'field_security', name: 'Field Security' }]) }));
+  await page.route('**/rest/v1/rate_rules*', async (route) => await route.fulfill({ status: 200, contentType: 'application/json', body: JSON.stringify(rules) }));
+  await page.route('**/rest/v1/rpc/manage_operating_branch_rate_rule', async (route) => {
+    const payload = JSON.parse(route.request().postData() ?? '{}') as Record<string, unknown>;
+    createPayload = payload;
+    const rule = { id: 'cdcdcdcd-cdcd-4dcd-8dcd-cdcdcdcdcdcd', rule_kind: payload.p_rule_kind, name: payload.p_name, rate_type: payload.p_rate_type, amount: payload.p_amount, pay_code: payload.p_pay_code, service_type: payload.p_service_type, job_type: payload.p_job_type, day_category: payload.p_day_category, priority: payload.p_priority, role_code: payload.p_role_code, active: true, updated_at: '2026-08-30T10:10:00.000Z' };
+    rules.push(rule);
+    await route.fulfill({ status: 200, contentType: 'application/json', body: JSON.stringify(rule) });
+  });
+
+  await signInAsAdmin(page, '/admin/rate-rules');
+  await page.getByRole('button', { name: 'New pay or charge rule' }).click();
+  const form = page.locator('form.assessment-form');
+  await form.getByLabel('Name').fill('Field security hourly pay');
+  await form.getByLabel('Amount').fill('32.50');
+  await expect(form.getByLabel('Payroll role')).toHaveCount(1);
+  await form.getByLabel('Payroll role').selectOption('field_security');
+  await form.getByRole('button', { name: 'Create rate rule' }).click();
+  await expect(page.getByText('Payroll role: field_security')).toBeVisible();
+  expect(createPayload).toMatchObject({ p_operating_organization_id: '41414141-4141-4141-8141-414141414141', p_action: 'create', p_rule_kind: 'pay', p_role_code: 'field_security' });
+});
+
+test('editing a branch pay rule sends its selected role code in the governed RPC', async ({ page }) => {
+  const rules: Array<Record<string, unknown>> = [{ id: 'cdcdcdcd-cdcd-4dcd-8dcd-cdcdcdcdcdcd', rule_kind: 'pay', name: 'Existing hourly pay', rate_type: 'hourly', amount: 30, pay_code: null, service_type: 'guarding', job_type: null, day_category: null, priority: 0, role_code: null, active: true, updated_at: '2026-08-30T09:00:00.000Z' }];
+  let updatePayload: Record<string, unknown> | null = null;
+  await page.route('**/rest/v1/reference_codes*', async (route) => await route.fulfill({ status: 200, contentType: 'application/json', body: JSON.stringify([{ code: 'field_security', name: 'Field Security' }]) }));
+  await page.route('**/rest/v1/rate_rules*', async (route) => await route.fulfill({ status: 200, contentType: 'application/json', body: JSON.stringify(rules) }));
+  await page.route('**/rest/v1/rpc/manage_operating_branch_rate_rule', async (route) => {
+    const payload = JSON.parse(route.request().postData() ?? '{}') as Record<string, unknown>;
+    updatePayload = payload;
+    Object.assign(rules[0], { role_code: payload.p_role_code, updated_at: '2026-08-30T10:10:00.000Z' });
+    await route.fulfill({ status: 200, contentType: 'application/json', body: JSON.stringify(rules[0]) });
+  });
+
+  await signInAsAdmin(page, '/admin/rate-rules');
+  await page.getByRole('button', { name: 'Edit rule' }).click();
+  const form = page.locator('form.assessment-form');
+  await expect(form.getByLabel('Payroll role')).toHaveCount(1);
+  await form.getByLabel('Payroll role').selectOption('field_security');
+  await form.getByRole('button', { name: 'Save rate rule' }).click();
+  expect(updatePayload).toMatchObject({ p_operating_organization_id: '41414141-4141-4141-8141-414141414141', p_action: 'update', p_rate_rule_id: 'cdcdcdcd-cdcd-4dcd-8dcd-cdcdcdcdcdcd', p_role_code: 'field_security' });
+});
+
 test('administrator creates a governed operating branch patrol rate rule', async ({ page }) => {
   const errors = monitorBrowserErrors(page);
   await signInAsAdmin(page, '/admin/rate-rules');

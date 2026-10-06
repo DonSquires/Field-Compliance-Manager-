@@ -131,9 +131,6 @@ serve(async (req)=>{
     if (!isClientRole && (!employerOrg.active || !['owner', 'service_provider'].includes(employerOrg.organization_type))) return json({
       error: 'Employer must be an active provider organization'
     }, 400);
-    if (staff && ['officer', 'admin_officer'].includes(role) && !branch_authorisations?.length) return json({
-      error: 'Field staff require at least one branch authorization'
-    }, 400);
     if (branch_authorisations?.length) {
       const { data: descendantIds, error: descendantsError } = await adminClient.rpc('get_descendant_organizations', { org_id: employerOrgId });
       if (descendantsError) return json({ error: 'Employer branch scope could not be verified' }, 500);
@@ -207,6 +204,9 @@ serve(async (req)=>{
       // (attach staff record + branch authorisations) instead of hard-failing.
       const msg = inviteError.message?.toLowerCase() ?? '';
       const alreadyExists = msg.includes('already') || msg.includes('registered') || msg.includes('exists');
+      if (alreadyExists && !preauthenticated && !staff && !branch_authorisations?.length) return json({
+        error: 'This account already exists. Open its user profile and resend the invitation; existing roles and HR records were not changed.'
+      }, 409);
       if (!alreadyExists) {
         console.error('[create-user] create/invite error:', inviteError.message);
         return json({
@@ -320,7 +320,7 @@ serve(async (req)=>{
     }
     // ── Unified onboarding (optional) ────────────────────────────────────────
     let staffId = null;
-    if (staff || branch_authorisations && branch_authorisations.length > 0) {
+    if (staff) {
       // Employment record lives under the corporate employer (fallback to org).
       const employerOrg = employerOrgId;
       // staff_profiles.id is a SHARED PRIMARY KEY: staff_profiles_id_fkey makes
@@ -354,6 +354,7 @@ serve(async (req)=>{
         }, 500);
       }
       staffId = staffRow.id;
+    }
       if (branch_authorisations && branch_authorisations.length > 0) {
         const rows = branch_authorisations.filter((b)=>b.branch_org_id).map((b)=>({
             user_id: userId,
@@ -376,7 +377,7 @@ serve(async (req)=>{
             console.error('[create-user] branch authorisation error:', JSON.stringify(authError2));
             return json({
               step: 'branch_authorisations',
-              error: `Login and staff created, but branch authorisation failed: ${authError2.message}`,
+              error: `Login created, but branch authorisation failed: ${authError2.message}`,
               details: authError2.details ?? null,
               hint: authError2.hint ?? null,
               user_id: userId,
@@ -385,7 +386,6 @@ serve(async (req)=>{
           }
         }
       }
-    }
     // ── Access preset assignment (issue #3, C3) ────────────────────────────
     // Optional: link the new user to a named access preset at the target org.
     // The area x level matrix only governs admin-tier roles (officers are field,
@@ -427,6 +427,7 @@ serve(async (req)=>{
     console.log(`[create-user] onboarded ${email} as ${role} in org ${targetOrgId} (staff=${staffId ?? 'none'}, preauth=${!!preauthenticated}, preset=${presetAssigned ?? 'none'})`);
     return json({
       success: true,
+      invitation_sent: !preauthenticated && !inviteError,
       user_id: userId,
       staff_id: staffId,
       email,

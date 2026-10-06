@@ -209,6 +209,13 @@
   padding: 0 10px;
 }
 
+.identity-form-grid input[type="checkbox"] {
+  width: 20px;
+  height: 20px;
+  padding: 0;
+  accent-color: #7dd3c7;
+}
+
 .identity-form-footer {
   padding-top: 12px;
   border-top: 1px solid #27394a;

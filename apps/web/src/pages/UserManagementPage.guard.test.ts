@@ -21,7 +21,12 @@ describe('enterprise identity console', () => {
   it('filters invite roles through the non-escalating presentation policy', () => {
     expect(source).toContain('getAssignableRoles');
     expect(source).toContain('directInviteRoles.map');
-    expect(source).toContain("assignableRoles.filter((role) => !['officer', 'admin_officer'].includes(role))");
+    expect(source).toContain('const directInviteRoles = assignableRoles;');
+    expect(source).toContain('linkHR: false, linkRoster: false');
+    expect(source).toContain('isFieldInvite && inviteForm.linkHR');
+    expect(source).toContain('isFieldInvite && inviteForm.linkRoster');
+    expect(source).toContain('can_be_rostered: false');
+    expect(source).toContain('data.invitation_sent === false');
   });
 
   it('names the row action for what it edits, so changing a person is discoverable', () => {

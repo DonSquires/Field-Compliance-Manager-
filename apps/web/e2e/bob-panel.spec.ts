@@ -14,8 +14,7 @@ test('administrator opens and dismisses the governed Bob workspace accessibly', 
   const panel = page.getByLabel('Bob agent workspace');
   await expect(panel).toBeVisible();
   await expect(panel.getByText('Governed session')).toBeVisible();
-  await expect(panel.locator('.bob-context span').first()).toContainText('Workspace');
-  await expect(panel.locator('.bob-context span').first()).toContainText('Bob');
+  await expect(panel.locator('.bob-context')).toHaveCount(0);
   await expect(panel.getByRole('button', { name: 'Plan work' })).toBeVisible();
   await expect(panel.getByRole('button', { name: 'Start voice capture' })).toBeVisible();
   await expect(panel.getByRole('button', { name: 'Close Bob' })).toBeVisible();
@@ -49,6 +48,7 @@ test('administrator opens and dismisses the governed Bob workspace accessibly', 
 
   await panel.getByRole('button', { name: 'Show context panel' }).click();
   await expect(panel.getByLabel('Bob context panel')).toBeVisible();
+  await expect(panel.getByLabel('Bob context panel')).toContainText('agent command center');
   await expect(panel.getByRole('tab', { name: 'Audit' })).toBeVisible();
   await page.keyboard.press('Escape');
   await expect(panel).toBeHidden();

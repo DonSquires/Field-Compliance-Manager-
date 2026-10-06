@@ -28,7 +28,7 @@ test('builder_cancel_job is an authorized, atomic human decision with an audit e
 test('control-room cancel action reuses job scope and invokes the caller-JWT RPC', () => {
   assert.match(controlRoom, /const jobId = typeof body\.job_id === 'string' \? body\.job_id : ''/);
   assert.match(controlRoom, /if \(!job \|\| !canAccessOrganization\(job\.organization_id\)\) return json\(\{ error: 'Builder job is unavailable' \}, 404\)/);
-  const cancel = controlRoom.match(/if \(action === 'cancel'\) \{([\s\S]*?)\n  \}\n  if \(action === 'read_artifact'\)/)?.[1];
+  const cancel = controlRoom.match(/if \(action === 'cancel'\) \{([\s\S]*?)\r?\n  \}\r?\n  if \(action === 'read_artifact'\)/)?.[1];
   assert.ok(cancel, 'job-scoped cancel branch exists');
   assert.match(cancel, /typeof body\.reason === 'string' \? body\.reason\.trim\(\) : ''/);
   assert.match(cancel, /if \(!reason\) return json\(\{ error: .*? \}, 400\)/);

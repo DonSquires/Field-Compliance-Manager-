@@ -571,6 +571,30 @@
   padding: 16px;
 }
 
+.rate-rules-form .form-row {
+  grid-template-columns: repeat(auto-fit, minmax(min(100%, 220px), 1fr));
+}
+
+.rate-rules-form label {
+  display: grid;
+  gap: 5px;
+  min-width: 0;
+  color: var(--color-text-secondary, #94a3b8);
+  font-size: 12px;
+}
+
+.rate-rules-form label > span {
+  overflow-wrap: anywhere;
+}
+
+.rate-rules-form input,
+.rate-rules-form select,
+.rate-rules-form textarea {
+  width: 100%;
+  min-width: 0;
+  box-sizing: border-box;
+}
+
 .form-group {
   display: flex;
   flex-direction: column;

@@ -10,5 +10,8 @@ describe('operating branch rate rules page', () => {
     expect(page).toContain("supabase.rpc('manage_operating_branch_rate_rule'");
     expect(page).toContain('p_operating_organization_id: operatingOrganizationId ?? profile?.organizationId');
     expect(page).toContain('Rate rule updated with a new audit revision.');
+    expect(page).toContain(".from('reference_codes').select('code,name')");
+    expect(page).toContain('p_role_code: form.kind === \'pay\' ? form.roleCode');
+    expect(page).toContain('Payroll role: {rule.role_code}');
   });
 });

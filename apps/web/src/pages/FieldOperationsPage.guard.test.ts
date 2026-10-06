@@ -28,6 +28,9 @@ describe('field operations command surface', () => {
     expect(page).not.toContain('nzscv_monitor');
     expect(page).toContain('workflow.roles.includes(role)');
     expect(page).toContain('workflow.moduleKeys.some');
+    expect(page).toContain("label: 'Patrol evidence'");
+    expect(page).toContain("moduleKeys: ['patrol', 'static_guarding']");
+    expect(page).not.toContain('Manage routes, checkpoints, visits, and exceptions');
   });
 
   it('uses role-specific language for operational administrators', () => {

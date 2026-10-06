@@ -310,6 +310,7 @@ const DispatchConsolePage: React.FC = () => {
           ? supabase
               .from('shifts')
               .select('*, officer:officer_user_id(display_name), route:patrol_route_id(name, route_code)')
+              .eq('organization_id', operatingBranchId)
               .in('zone_id', activeZoneIds)
               .in('status', ['published', 'accepted', 'in_progress'])
           : supabase
@@ -419,7 +420,7 @@ const DispatchConsolePage: React.FC = () => {
     } finally {
       setLoading(false);
     }
-  }, [operatingBranchId, requestedJobId, selectedAgreementZones]);
+  }, [operatingBranchId, requestedJobId, selectedAgreement, selectedAgreementZones]);
 
   useEffect(() => {
     if (!requestedJobId) return;
@@ -444,13 +445,13 @@ const DispatchConsolePage: React.FC = () => {
   }, [selectedAgreementSites, selectedAgreementZones]);
 
   // Load Phase B: Shift stops
-  const loadPhaseB = useCallback(async (shiftId: string) => {
+  const loadPhaseB = useCallback(async (shiftId: string, background = false) => {
     try {
-      setStopsLoading(true);
+      if (!background) setStopsLoading(true);
 
       const { data, error } = await supabase
         .from('shift_stops')
-        .select('id, shift_id, stop_order, site_id, zone_id, status, actual_arrived_at, actual_departed_at')
+        .select('id, shift_id, stop_order, site_id, zone_id, status, actual_arrived_at, actual_departed_at, site:site_id(name), zone:zone_id(name)')
         .eq('shift_id', shiftId)
         .order('stop_order');
 
@@ -460,7 +461,7 @@ const DispatchConsolePage: React.FC = () => {
           id: row.id,
           shiftId: row.shift_id,
           sequence: row.stop_order,
-          siteName: row.site_id ?? row.zone_id ?? 'Stop',
+          siteName: (Array.isArray(row.site) ? row.site[0]?.name : row.site?.name) ?? (Array.isArray(row.zone) ? row.zone[0]?.name : row.zone?.name) ?? 'Place unavailable',
           arrival: row.actual_arrived_at,
           departure: row.actual_departed_at,
           status: row.status,
@@ -468,8 +469,9 @@ const DispatchConsolePage: React.FC = () => {
       );
     } catch (err) {
       console.error('Failed to load Phase B (stops):', err);
+      setError(err instanceof Error ? err.message : 'The selected patrol run sheet could not be refreshed.');
     } finally {
-      setStopsLoading(false);
+      if (!background) setStopsLoading(false);
     }
   }, []);
 
@@ -701,6 +703,15 @@ const DispatchConsolePage: React.FC = () => {
     document.addEventListener('visibilitychange', onVisible);
     return () => { window.clearInterval(interval); document.removeEventListener('visibilitychange', onVisible); };
   }, [loadPhaseA, loadPhaseD]);
+
+  useEffect(() => {
+    if (!selectedShiftId) return;
+    const refreshStops = () => void loadPhaseB(selectedShiftId, true);
+    const interval = window.setInterval(refreshStops, 30_000);
+    const onVisible = () => { if (document.visibilityState === 'visible') refreshStops(); };
+    document.addEventListener('visibilitychange', onVisible);
+    return () => { window.clearInterval(interval); document.removeEventListener('visibilitychange', onVisible); };
+  }, [selectedShiftId, loadPhaseB]);
 
   // Handle shift selection (Phase B)
   const handleSelectShift = useCallback(

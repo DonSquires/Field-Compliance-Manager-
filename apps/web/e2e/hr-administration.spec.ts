@@ -3,6 +3,112 @@ import { installSupabaseFixtures, monitorBrowserErrors, signInAsAdmin } from './
 
 test.beforeEach(async ({ page }) => { await page.clock.setFixedTime(new Date('2026-08-30T09:30:00+12:00')); await installSupabaseFixtures(page); });
 
+test('organization role codes appear in Payroll role and do not replace the staff authorization role', async ({ page }) => {
+  const referenceCodeRequest: { url?: URL } = {};
+  let savedPayRole: Record<string, unknown> | null = null;
+  await page.route('**/rest/v1/reference_codes*', async (route) => {
+    referenceCodeRequest.url = new URL(route.request().url());
+    await route.fulfill({ status: 200, contentType: 'application/json', body: JSON.stringify([{ code: 'field_security', name: 'Field Security' }]) });
+  });
+  await page.route('**/rest/v1/rpc/set_staff_pay_role_code', async (route) => {
+    savedPayRole = JSON.parse(route.request().postData() ?? '{}');
+    await route.fulfill({ status: 200, contentType: 'application/json', body: JSON.stringify({ staff_id: '22222222-2222-4222-8222-222222222222', role_code: 'field_security' }) });
+  });
+
+  await signInAsAdmin(page, '/admin/people-hr');
+  const staffCard = page.locator('.contact-card', { has: page.getByRole('heading', { name: 'Ana Ngata' }) });
+  const payrollRole = staffCard.getByLabel('Payroll role');
+  await expect(payrollRole.locator('option')).toHaveCount(2);
+  await expect(payrollRole).toHaveValue('');
+  await payrollRole.selectOption('field_security');
+  await staffCard.getByRole('button', { name: 'Save payroll role' }).click();
+  await expect(page.getByRole('status')).toContainText('Payroll role updated for Ana Ngata.');
+
+  expect(referenceCodeRequest.url?.searchParams.get('organization_id')).toBe('eq.33333333-3333-4333-8333-333333333333');
+  expect(referenceCodeRequest.url?.searchParams.get('code_type')).toBe('eq.role_code');
+  expect(referenceCodeRequest.url?.searchParams.get('is_active')).toBe('eq.true');
+  expect(savedPayRole).toMatchObject({ p_staff_id: '22222222-2222-4222-8222-222222222222', p_expected_role_code: null, p_role_code: 'field_security' });
+  await expect(staffCard.getByText('Officer', { exact: true })).toBeVisible();
+});
+
+test('payroll administrator creates an organization code and assigns it to staff', async ({ page }) => {
+  const roleCodes: Array<{ id: string; code: string; name: string }> = [];
+  let createPayload: Record<string, unknown> | null = null;
+  let assignmentPayload: Record<string, unknown> | null = null;
+  await page.route('**/rest/v1/reference_codes*', async (route) => await route.fulfill({ status: 200, contentType: 'application/json', body: JSON.stringify(roleCodes) }));
+  await page.route('**/rest/v1/rpc/manage_pay_role_code', async (route) => {
+    const payload = JSON.parse(route.request().postData() ?? '{}') as Record<string, unknown>;
+    createPayload = payload;
+    const code = { id: 'rolerole-role-4role-rolecode0001', code: String(payload.p_code), name: String(payload.p_name) };
+    roleCodes.push(code);
+    await route.fulfill({ status: 200, contentType: 'application/json', body: JSON.stringify(code) });
+  });
+  await page.route('**/rest/v1/rpc/set_staff_pay_role_code', async (route) => {
+    assignmentPayload = JSON.parse(route.request().postData() ?? '{}') as Record<string, unknown>;
+    await route.fulfill({ status: 200, contentType: 'application/json', body: JSON.stringify({ staff_id: '22222222-2222-4222-8222-222222222222', role_code: 'FIELD_SECURITY' }) });
+  });
+
+  await signInAsAdmin(page, '/admin/people-hr');
+  await expect(page.getByText('No active payroll role codes.')).toBeVisible();
+  await page.getByRole('button', { name: 'Add payroll role code' }).click();
+  await page.getByLabel('Payroll role code').fill('FIELD_SECURITY');
+  await page.getByLabel('Name shown to staff admins').fill('Field security officer');
+  await page.getByRole('button', { name: 'Create payroll role code' }).click();
+  await expect(page.getByRole('status')).toContainText('Payroll role code FIELD_SECURITY created.');
+
+  const staffCard = page.locator('.contact-card', { has: page.getByRole('heading', { name: 'Ana Ngata' }) });
+  await staffCard.getByLabel('Payroll role').selectOption('FIELD_SECURITY');
+  await staffCard.getByRole('button', { name: 'Save payroll role' }).click();
+  await expect(page.getByRole('status')).toContainText('Payroll role updated for Ana Ngata.');
+  expect(createPayload).toMatchObject({ p_action: 'create', p_code: 'FIELD_SECURITY', p_name: 'Field security officer' });
+  expect(assignmentPayload).toMatchObject({ p_staff_id: '22222222-2222-4222-8222-222222222222', p_expected_role_code: null, p_role_code: 'FIELD_SECURITY' });
+});
+
+test('saving a changed payroll role sends the existing role as the expected value', async ({ page }) => {
+  let savedPayRole: Record<string, unknown> | null = null;
+  await page.route('**/rest/v1/staff_profiles*', async (route) => {
+    await route.fulfill({ status: 200, contentType: 'application/json', body: JSON.stringify([
+      { id: '22222222-2222-4222-8222-222222222222', user_id: '22222222-2222-4222-8222-222222222222', employment_type: 'permanent', start_date: '2025-02-03', end_date: null, work_ready: true, role_code: 'existing_guard' },
+      { id: '2f2f2f2f-2222-4222-8222-222222222222', user_id: '2f2f2f2f-2222-4222-8222-222222222222', employment_type: 'casual', start_date: '2026-03-01', end_date: null, work_ready: true, role_code: null },
+    ]) });
+  });
+  await page.route('**/rest/v1/reference_codes*', async (route) => await route.fulfill({ status: 200, contentType: 'application/json', body: JSON.stringify([{ code: 'existing_guard', name: 'Existing Guard' }, { code: 'field_security', name: 'Field Security' }]) }));
+  await page.route('**/rest/v1/rpc/set_staff_pay_role_code', async (route) => {
+    savedPayRole = JSON.parse(route.request().postData() ?? '{}');
+    await route.fulfill({ status: 200, contentType: 'application/json', body: JSON.stringify({ staff_id: '22222222-2222-4222-8222-222222222222', role_code: 'field_security' }) });
+  });
+
+  await signInAsAdmin(page, '/admin/people-hr');
+  const staffCard = page.locator('.contact-card', { has: page.getByRole('heading', { name: 'Ana Ngata' }) });
+  await staffCard.getByLabel('Payroll role').selectOption('field_security');
+  await staffCard.getByRole('button', { name: 'Save payroll role' }).click();
+  await expect(page.getByRole('status')).toContainText('Payroll role updated for Ana Ngata.');
+  expect(savedPayRole).toMatchObject({ p_staff_id: '22222222-2222-4222-8222-222222222222', p_expected_role_code: 'existing_guard', p_role_code: 'field_security' });
+});
+
+test('an empty organization role-code list leaves Payroll role unassigned and saving disabled', async ({ page }) => {
+  await page.route('**/rest/v1/reference_codes*', async (route) => await route.fulfill({ status: 200, contentType: 'application/json', body: '[]' }));
+
+  await signInAsAdmin(page, '/admin/people-hr');
+  const staffCard = page.locator('.contact-card', { has: page.getByRole('heading', { name: 'Ana Ngata' }) });
+  const payrollRole = staffCard.getByLabel('Payroll role');
+  await expect(payrollRole.locator('option')).toHaveText(['No role code assigned']);
+  await expect(payrollRole).toHaveValue('');
+  await expect(staffCard.getByRole('button', { name: 'Save payroll role' })).toBeDisabled();
+});
+
+test('a rejected payroll-role write is shown without changing the authorization role', async ({ page }) => {
+  await page.route('**/rest/v1/reference_codes*', async (route) => await route.fulfill({ status: 200, contentType: 'application/json', body: JSON.stringify([{ code: 'field_security', name: 'Field Security' }]) }));
+  await page.route('**/rest/v1/rpc/set_staff_pay_role_code', async (route) => await route.fulfill({ status: 400, contentType: 'application/json', body: JSON.stringify({ code: '23505', message: 'Role code already exists for this staff member.' }) }));
+
+  await signInAsAdmin(page, '/admin/people-hr');
+  const staffCard = page.locator('.contact-card', { has: page.getByRole('heading', { name: 'Ana Ngata' }) });
+  await staffCard.getByLabel('Payroll role').selectOption('field_security');
+  await staffCard.getByRole('button', { name: 'Save payroll role' }).click();
+  await expect(page.getByRole('alert')).toContainText('Role code already exists for this staff member.');
+  await expect(staffCard.getByText('Officer', { exact: true })).toBeVisible();
+});
+
 test('admin officer sees only the People & HR work needed for daily service administration', async ({ page }) => {
   await page.addInitScript(() => window.sessionStorage.setItem('fcm.admin_officer.portal', 'admin'));
   await installSupabaseFixtures(page, { adminRole: 'admin_officer' });

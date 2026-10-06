@@ -6,6 +6,37 @@ test.beforeEach(async ({ page }) => {
   await installSupabaseFixtures(page);
 });
 
+test('dispatcher keeps the selected run sheet current as patrol stops advance', async ({ page }) => {
+  await page.clock.install({ time: new Date('2026-08-30T09:30:00+12:00') });
+  let completed = false;
+  await page.route('**/rest/v1/shifts**', async (route) => route.fulfill({ contentType: 'application/json', body: JSON.stringify([{
+    id: '12121212-1212-4212-8212-121212121212', officer_user_id: '22222222-2222-4222-8222-222222222222',
+    officer: { display_name: 'Patrol Test Officer' }, route: { name: 'Northern Run', route_code: 'N-01' },
+    scheduled_start: '2026-08-29T20:00:00.000Z', scheduled_end: '2026-08-30T04:00:00.000Z', status: 'in_progress', total_stops: 1, completed_stops: completed ? 1 : 0,
+  }]) }));
+  await page.route('**/rest/v1/shift_stops**', async (route) => route.fulfill({ contentType: 'application/json', body: JSON.stringify([{
+    id: '34343434-3434-4434-8434-343434343434', shift_id: '12121212-1212-4212-8212-121212121212',
+    stop_order: 1, site_id: '42424242-4242-4242-8242-424242424242', zone_id: null,
+    site: { name: 'Civic Centre' }, zone: null,
+    status: completed ? 'completed' : 'pending', actual_arrived_at: completed ? '2026-08-29T21:30:05.000Z' : null,
+    actual_departed_at: completed ? '2026-08-29T21:30:10.000Z' : null,
+  }]) }));
+  await signInAsAdmin(page, '/admin/field-ops?area=dispatch');
+  const shift = page.getByRole('button', { name: /Patrol Test Officer/ });
+  await shift.click();
+  const stop = page.locator('.dispatch-stop-card');
+  await expect(stop).toContainText('PENDING');
+  await expect(stop).toContainText('Civic Centre');
+  await expect(stop).not.toContainText('42424242-4242-4242-8242-424242424242');
+  completed = true;
+  await page.clock.runFor(30_100);
+  await expect(stop).toContainText('COMPLETED');
+  const mobileSections = page.getByRole('tablist', { name: 'Dispatch console sections' });
+  if (await mobileSections.isVisible()) await mobileSections.getByRole('button', { name: 'Shifts', exact: true }).click();
+  await expect(shift).toHaveClass(/is-selected/);
+  await expect(shift).toContainText('1/1 stops');
+});
+
 test('priority dispatch item opens its exact operational review record', async ({ page }) => {
   const browserErrors = monitorBrowserErrors(page);
   const dispatchJob = {

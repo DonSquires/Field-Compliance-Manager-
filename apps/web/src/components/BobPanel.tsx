@@ -209,6 +209,8 @@ export const BobPanel: React.FC<BobPanelProps> = ({ open, onClose, context, mode
     }
     return [];
   }).slice(0, 4), [context]);
+  const drawerContextEntries = useMemo(() => Object.entries(context ?? {}).filter((entry): entry is [string, string | number] =>
+    typeof entry[1] === 'string' || typeof entry[1] === 'number').map(([key, value]) => [key, String(value)] as [string, string]).slice(0, 12), [context]);
   const workState = derivePanelWorkState({ loading, sending, error, input, messages, pendingFiles, attachments });
 
   const loadAttachments = useCallback(async (convId: string) => {
@@ -954,7 +956,7 @@ export const BobPanel: React.FC<BobPanelProps> = ({ open, onClose, context, mode
             attachments={attachments}
             auditEvents={auditEvents}
             governedActions={governedActions}
-            contextEntries={contextEntries}
+            contextEntries={drawerContextEntries}
             onDismiss={() => setContextPanelOpen(false)}
             width={contextPanelWidth}
           />
