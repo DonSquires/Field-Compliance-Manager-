@@ -10,5 +10,6 @@ test('ReportsHubPage scopes report data to the agreement selected in the hub', (
   assert.match(source, /useServiceRelationships/);
   // The reader chooses the agreement on the hub; its zones scope breaches and observations (owner walk 2026-09-19).
   assert.match(source, /const \[agreementFilterId, setAgreementFilterId\] = useState\(''\);/);
-  assert.match(source, /\.from\('service_agreement_locations'\)\.select\('zone_id'\)\.eq\('service_agreement_id', selectedAgreement\.id\)/);
+  assert.match(source, /const reportAgreementIds = selectedAgreement \? \[selectedAgreement\.id\] : providerAgreements\.map\(\(agreement\) => agreement\.id\)/);
+  assert.match(source, /\.from\('service_agreement_locations'\)\s*\.select\('zone_id,site_id'\)\s*\.in\('service_agreement_id', reportAgreementIds\)/);
 });

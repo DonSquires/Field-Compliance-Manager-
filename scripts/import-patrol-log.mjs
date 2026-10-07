@@ -25,6 +25,7 @@ const ACTOR_ID = '1b02ab97-8611-40ab-a3a0-b5c74589db58';
 const args = process.argv.slice(2);
 const flag = (name) => { const i = args.indexOf(name); return i !== -1 ? args[i + 1] : null; };
 const mode = args.includes('--apply') ? 'apply' : 'dry-run';
+const includeNarratives = args.includes('--include-narratives');
 const csvPath = flag('--csv');
 const orgId = flag('--org-id');
 const clientCode = flag('--client-code');
@@ -160,6 +161,7 @@ const col = {
   reg: pick('Reg', 'Numbers'),
   jobTime: pick('Job Time', 'Job Time NCC', 'Job Time OFO', 'Job Time TPFL'), jobKms: pick('Job KMs', 'Job Km NCC', 'Job kms', 'Job KM OFO', 'Job KM', 'Job KM TPFL'),
   issue: pick('Issue'), actionBy: pick('Action by', 'Action By'),
+  actionNotes: pick('Action / Notes', 'Action Notes'), lastActionDate: pick('Last Action Date'), closedBy: pick('Closed By'),
 };
 
 const observationsBatch = [];
@@ -208,10 +210,18 @@ for (const [rowIndex, r] of table.slice(1).entries()) {
     source: 'rm_patrol_log_import', client_code: clientCode, job_number: job || null,
     source_file: sourceLabel || null, source_sha256: sourceHash || null,
     source_sheet: sourceSheet || null, source_row: sourceSheet ? sourceFirstRow + rowIndex : null,
+    ...(includeNarratives ? {
+      comments: comments || null,
+      issue: (r[col.issue] ?? '').trim() || null,
+      action_by: (r[col.actionBy] ?? '').trim() || null,
+      action_notes: (r[col.actionNotes] ?? '').trim() || null,
+      last_action_date: (r[col.lastActionDate] ?? '').trim() || null,
+      closed_by: (r[col.closedBy] ?? '').trim() || null,
+    } : {}),
   };
 
   if (officerId && primaryPlate) {
-    observationsBatch.push({ external_ref: externalRef, occurred_at: occurredAt, zone_id: zoneId, site_id: siteId, officer_id: officerId, plate: primaryPlate, distance_km: r[col.jobKms] || null, payload });
+    observationsBatch.push({ external_ref: externalRef, occurred_at: occurredAt, zone_id: zoneId, site_id: siteId, officer_id: officerId, plate: primaryPlate, officer_notes: includeNarratives ? comments || null : null, distance_km: r[col.jobKms] || null, payload });
   } else if (zoneId || siteId) {
     eventsBatch.push({
       external_ref: externalRef, occurred_at: occurredAt, zone_id: zoneId, site_id: siteId,
@@ -239,20 +249,31 @@ const evtChunks = chunk(eventsBatch, CHUNK_SIZE);
 const totalChunks = Math.max(obsChunks.length, evtChunks.length, 1);
 
 async function runChunk(obsSlice, evtSlice) {
-  const data = { org_id: orgId, client_code: clientCode, observations: obsSlice, events: evtSlice };
+  const data = { org_id: orgId, client_code: clientCode, include_narratives: includeNarratives, observations: obsSlice, events: evtSlice };
   const json = JSON.stringify(data);
   if (json.includes('$json$')) throw new Error('data must not contain the $json$ delimiter');
   const body = `
-CREATE TEMP TABLE IF NOT EXISTS _import_counts (obs_inserted int, obs_skipped int, evt_inserted int, evt_skipped int);
+CREATE TEMP TABLE IF NOT EXISTS _import_counts (obs_inserted int, obs_skipped int, obs_updated int, evt_inserted int, evt_skipped int, evt_updated int);
 DO $import$
 DECLARE
   v_data jsonb := $json$${json}$json$::jsonb;
   v_org uuid := (v_data->>'org_id')::uuid;
-  v_obs jsonb; v_evt jsonb; v_plate text; v_vehicle_id uuid; v_obs_count integer := 0; v_evt_count integer := 0; v_evt_skip integer := 0; v_obs_skip integer := 0;
+  v_obs jsonb; v_evt jsonb; v_plate text; v_vehicle_id uuid; v_obs_count integer := 0; v_evt_count integer := 0; v_evt_skip integer := 0; v_obs_skip integer := 0; v_obs_updated integer := 0; v_evt_updated integer := 0; v_rows integer := 0;
 BEGIN
   FOR v_obs IN SELECT * FROM jsonb_array_elements(v_data->'observations') LOOP
     IF EXISTS (SELECT 1 FROM public.observations WHERE organization_id = v_org AND external_refs->>'external_ref' = v_obs->>'external_ref') THEN
-      v_obs_skip := v_obs_skip + 1; CONTINUE;
+      IF coalesce((v_data->>'include_narratives')::boolean, false) THEN
+        UPDATE public.observations
+        SET officer_notes = coalesce(nullif(v_obs->>'officer_notes', ''), officer_notes),
+            external_refs = coalesce(external_refs, '{}'::jsonb) || jsonb_build_object('import', v_obs->'payload'),
+            distance_km = CASE WHEN v_obs->>'distance_km' ~ '^[0-9]+([.][0-9]+)?$' THEN (v_obs->>'distance_km')::numeric ELSE distance_km END
+        WHERE organization_id = v_org AND external_refs->>'external_ref' = v_obs->>'external_ref';
+        GET DIAGNOSTICS v_rows = ROW_COUNT;
+        v_obs_updated := v_obs_updated + v_rows;
+      ELSE
+        v_obs_skip := v_obs_skip + 1;
+      END IF;
+      CONTINUE;
     END IF;
     v_plate := v_obs->>'plate';
     SELECT id INTO v_vehicle_id FROM public.canonical_vehicles WHERE upper(plate_number) = upper(v_plate) LIMIT 1;
@@ -269,7 +290,17 @@ BEGIN
 
   FOR v_evt IN SELECT * FROM jsonb_array_elements(v_data->'events') LOOP
     IF EXISTS (SELECT 1 FROM public.location_events WHERE organization_id = v_org AND external_ref = v_evt->>'external_ref') THEN
-      v_evt_skip := v_evt_skip + 1; CONTINUE;
+      IF coalesce((v_data->>'include_narratives')::boolean, false) THEN
+        UPDATE public.location_events
+        SET payload = coalesce(payload, '{}'::jsonb) || coalesce(v_evt->'payload', '{}'::jsonb),
+            distance_km = CASE WHEN v_evt->>'distance_km' ~ '^[0-9]+([.][0-9]+)?$' THEN (v_evt->>'distance_km')::numeric ELSE distance_km END
+        WHERE organization_id = v_org AND external_ref = v_evt->>'external_ref';
+        GET DIAGNOSTICS v_rows = ROW_COUNT;
+        v_evt_updated := v_evt_updated + v_rows;
+      ELSE
+        v_evt_skip := v_evt_skip + 1;
+      END IF;
+      CONTINUE;
     END IF;
     PERFORM public.create_location_event(
       p_organization_id => v_org, p_event_type => v_evt->>'event_type', p_client_site_id => NULLIF(v_evt->>'site_id','')::uuid, p_zone_id => NULLIF(v_evt->>'zone_id','')::uuid,
@@ -286,11 +317,11 @@ BEGIN
     v_evt_count := v_evt_count + 1;
   END LOOP;
 
-  RAISE NOTICE 'observations_inserted=% observations_skipped=% events_inserted=% events_skipped=%', v_obs_count, v_obs_skip, v_evt_count, v_evt_skip;
-  INSERT INTO _import_counts VALUES (v_obs_count, v_obs_skip, v_evt_count, v_evt_skip);
+  RAISE NOTICE 'observations_inserted=% observations_skipped=% observations_updated=% events_inserted=% events_skipped=% events_updated=%', v_obs_count, v_obs_skip, v_obs_updated, v_evt_count, v_evt_skip, v_evt_updated;
+  INSERT INTO _import_counts VALUES (v_obs_count, v_obs_skip, v_obs_updated, v_evt_count, v_evt_skip, v_evt_updated);
 END
 $import$;
-SELECT * FROM (SELECT obs_inserted, obs_skipped, evt_inserted, evt_skipped FROM _import_counts ORDER BY ctid DESC LIMIT 1) t;
+SELECT * FROM (SELECT obs_inserted, obs_skipped, obs_updated, evt_inserted, evt_skipped, evt_updated FROM _import_counts ORDER BY ctid DESC LIMIT 1) t;
 `;
   const sql = `BEGIN;
 set local request.jwt.claim.sub = '${ACTOR_ID}';
@@ -303,7 +334,7 @@ ${body}${mode === 'apply' ? 'COMMIT;' : 'ROLLBACK;'}`;
   return JSON.parse(text)[0];
 }
 
-const totals = { obs_inserted: 0, obs_skipped: 0, evt_inserted: 0, evt_skipped: 0 };
+const totals = { obs_inserted: 0, obs_skipped: 0, obs_updated: 0, evt_inserted: 0, evt_skipped: 0, evt_updated: 0 };
 for (let i = 0; i < totalChunks; i += 1) {
   const obsSlice = obsChunks[i] ?? [];
   const evtSlice = evtChunks[i] ?? [];

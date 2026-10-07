@@ -18,8 +18,8 @@ test('the reports hub filters by an agreement the reader chooses, lists the whol
   assert.match(hub, /const \[agreementFilterId, setAgreementFilterId\] = useState\(''\);/);
   assert.match(hub, /<option value="">All agreements \(\{providerAgreements\.length\}\)<\/option>/);
   assert.match(hub, /\.in\('organization_id', houseOrgIds\)/);
-  // a per-agreement overload never existed; calling it 404'd and failed the whole page
-  assert.doesNotMatch(hub, /p_service_agreement_id: selectedAgreement/);
+  // Agreement selection scopes generation through the validated three-argument overload.
+  assert.match(hub, /p_service_agreement_id: selectedAgreement\?\.id \?\? null/);
   assert.match(hub, /supabase\.rpc\('get_consolidated_reporting_overview', \{ p_root_organization_id: profile\.organizationId, p_from: dateRange\.start, p_to: dateRange\.end \}\)/);
   // PostgREST embeds a to-one relation as an object
   assert.match(hub, /\(Array\.isArray\(pack\.agreement\) \? pack\.agreement\[0\]\?\.name : pack\.agreement\?\.name\) \?\? 'Service agreement'/);

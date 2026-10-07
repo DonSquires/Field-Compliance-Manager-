@@ -1488,11 +1488,14 @@ closed by the production verification above.
 - Fixed two actual OFO header mismatches in `scripts/import-patrol-log.mjs`:
   `Logno` is now a job-number alias and `Numbers` is now a registration alias.
   Date parsing now rejects invalid calendar dates and years after the current
-  year. Imported shared event payloads retain source file hash/sheet/row
-  provenance only; raw comments, issue/action narratives, patroller/location
-  strings, plates, and job/travel cost fields are not copied to the
-  client-readable event stream. Valid recorded kilometres remain in the
-  structured `distance_km` column.
+  year. The first import used provenance-only event payloads. After the owner
+  explicitly chose narrative import into activity, the opt-in
+  `--include-narratives` replay updated the existing matching source rows with
+  comments, issue text, action-by/notes, last-action date, and closed-by plus
+  source hash/sheet/row provenance. Provider job/travel cost fields remain out
+  of the shared payload; recorded kilometres stay in the structured
+  `distance_km` column. These narratives are in the client-readable activity
+  stream by explicit owner choice.
 - Added agreement-place activity to Reports Hub. It reads only event metadata
   and provenance for sites/zones linked to the selected active service
   agreement; it does not select `payload` or fall back to organisation-wide
@@ -1513,12 +1516,11 @@ closed by the production verification above.
   required period from the Reports page, then review/publish through the
   existing governed workflow.
 - Four existing R&M investigations and one cancelled maintenance work order
-  were found. No source case/action rows were attached to them automatically:
-  the workbook's `Contract`/`Extra` type values do not identify investigation
-  or maintenance records, and raw narratives need a restricted review path
-  before promotion. One older event with a far-future date remains untouched
-  because it predates this source-hash import and lacks row provenance; do not
-  silently rewrite it.
+  were found. No source rows were attached to them automatically: the
+  workbook's `Contract`/`Extra` type values do not identify investigation or
+  maintenance records, and matching still requires human review. One older
+  event with a far-future date remains untouched because it predates this
+  source-hash import and lacks row provenance; do not silently rewrite it.
 - Other organisations were not imported. Reuse the corrected, sanitized
   importer only after OneFortyOne's scoped draft has been generated and
   human-reviewed; each client needs its own agreement-place coverage and
