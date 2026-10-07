@@ -34,6 +34,7 @@ import {
   FolderOpen,
   FlaskConical,
   Grid3X3,
+  Handshake,
   KeyRound,
   Landmark,
   LogOut,
@@ -49,6 +50,7 @@ import {
   Shield,
   Users,
   Wrench,
+  WalletCards,
   X,
 } from 'lucide-react';
 import type { LucideIcon } from 'lucide-react';
@@ -200,21 +202,41 @@ const LEGACY_REDIRECT_MAP: Record<string, RedirectTarget> = {
   'reports': { page: 'reports', reportsTab: 'reports-hub' },
 };
 
-const NAVIGATION_MAP = {
+interface WorkspaceItem {
+  id: AdminPage;
+  label: string;
+  icon: LucideIcon;
+  area?: FieldOpsSubArea;
+}
+
+const NAVIGATION_MAP: Record<string, WorkspaceItem[]> = {
   'Mission Control': [
     { id: 'hub', label: 'Overview', icon: Grid3X3 },
     { id: 'approvals', label: 'Approvals', icon: ClipboardCheck },
   ],
   'Field Operations': [
     { id: 'field-ops', label: 'Field Operations', icon: Radio },
+    { id: 'field-ops', label: 'Dispatch console', icon: Radio, area: 'dispatch' },
+    { id: 'field-ops', label: 'Patrol operations', icon: Route, area: 'patrol' },
+    { id: 'field-ops', label: 'Live map', icon: MapPin, area: 'live-map' },
+    { id: 'field-ops', label: 'Field reports', icon: ClipboardCheck, area: 'field-reports' },
+    { id: 'field-ops', label: 'Video evidence', icon: FolderOpen, area: 'cctv-console' },
+    { id: 'site-360', label: 'Site Workspaces', icon: Building2 },
+    { id: 'locations', label: 'Location Houses', icon: MapPin },
+    { id: 'zones', label: 'Zone Facets', icon: MapPin },
+    { id: 'sites', label: 'Geofence Workbench', icon: ClipboardCheck },
+    { id: 'workshop', label: 'Workshop', icon: Wrench },
+  ],
+  Workforce: [
     { id: 'roster', label: 'Schedules & Rosters', icon: Users },
     { id: 'people-hr', label: 'People, Pay & HR', icon: Users },
     { id: 'roster-targets', label: 'Work Units & Coverage', icon: Route },
-    { id: 'workshop', label: 'Workshop', icon: Wrench },
+    { id: 'users', label: 'People & Access', icon: Users },
   ],
   'Clients & Delivery': [
-    { id: 'client-setup', label: 'Set up a new client', icon: ClipboardCheck },
     { id: 'crm', label: 'Client Portfolios', icon: DollarSign },
+    { id: 'relationships', label: 'Agreements & services', icon: Handshake },
+    { id: 'client-setup', label: 'Set up a new client', icon: ClipboardCheck },
     { id: 'onboarding', label: 'Clients being set up', icon: ClipboardCheck },
     { id: 'handoffs', label: 'Start delivery', icon: ClipboardCheck },
   ],
@@ -234,11 +256,6 @@ const NAVIGATION_MAP = {
     { id: 'investigations', label: 'Investigations', icon: Search },
   ],
   'Platform & Settings': [
-    { id: 'site-360', label: 'Site Workspaces', icon: Building2 },
-    { id: 'locations', label: 'Location Houses', icon: MapPin },
-    { id: 'zones', label: 'Zone Facets', icon: MapPin },
-    { id: 'sites', label: 'Geofence Workbench', icon: ClipboardCheck },
-    { id: 'users', label: 'People & Access', icon: Users },
     { id: 'access-control', label: 'Access Rules', icon: KeyRound },
     { id: 'org-setup', label: 'Organisation settings', icon: Settings },
     { id: 'module-subscriptions', label: 'Modules & Subscriptions', icon: Package },
@@ -250,6 +267,17 @@ const NAVIGATION_MAP = {
     { id: 'platform-catalog', label: 'Module Pricing', icon: Package },
     { id: 'platform-subscriptions', label: 'Provider Billing', icon: CreditCard },
   ],
+};
+
+const WORKSPACE_LABELS: Record<string, { label: string; icon: LucideIcon }> = {
+  'Mission Control': { label: 'Overview & approvals', icon: Grid3X3 },
+  'Field Operations': { label: 'Guarding & Patrol', icon: Shield },
+  Workforce: { label: 'HR & Rostering', icon: Users },
+  'Clients & Delivery': { label: 'CRM & Clients', icon: Handshake },
+  Finance: { label: 'Finance', icon: WalletCards },
+  'Reports & Analytics': { label: 'Reports & Accountability', icon: FileBarChart },
+  'Intelligence & Records': { label: 'Investigations & Evidence', icon: FolderOpen },
+  'Platform & Settings': { label: 'Organisation & Settings', icon: Settings },
 };
 
 interface NavItemProps {
@@ -451,6 +479,18 @@ const AdminShell: React.FC = () => {
   }, [navigateToFieldOps, navigateToPage]);
 
   const workflowContext = useMemo(() => readWorkflowContext(location.search), [location.search]);
+
+  const visibleWorkspaces = Object.entries(NAVIGATION_MAP)
+    .map(([group, items]) => ({ group, items: items.filter((item) => isPageEnabled(item.id as AdminPage)) }))
+    .filter((workspace) => workspace.items.length > 0);
+  const activeWorkspace = visibleWorkspaces.find((workspace) => workspace.items.some((item) => item.id === activePage))
+    ?? visibleWorkspaces[0];
+  const openWorkspaceItem = (item: WorkspaceItem) => {
+    if (item.area) navigateToFieldOps(item.area);
+    else navigateToPage(item.id, workflowContext);
+  };
+  const isWorkspaceItemActive = (item: WorkspaceItem) => item.id === activePage
+    && (item.id !== 'field-ops' || (item.area ?? 'landing') === fieldOpsSubArea);
 
   const moduleAccessNotice = useMemo(() => {
     if (modulesStatus === 'configured') return null;
@@ -663,23 +703,22 @@ const AdminShell: React.FC = () => {
             </button>
           </div>
 
-          {Object.entries(NAVIGATION_MAP).filter(([group]) => (group !== 'System' && group !== 'Platform') || isPageEnabled('platform')).map(([group, items]) => (
-            <div key={group} className="admin-nav-group">
-              {!sidebarCollapsed && (
-                <div className="admin-nav-group-label">{group}</div>
-              )}
-              {items.filter((item) => isPageEnabled(item.id as AdminPage)).map((item) => (
+          <nav className="admin-workspace-selector" aria-label="Admin workspaces">
+            {!sidebarCollapsed && <div className="admin-nav-group-label">Workspaces</div>}
+            {visibleWorkspaces.map((workspace) => {
+              const section = WORKSPACE_LABELS[workspace.group];
+              return (
                 <NavItem
-                  key={item.id}
-                  id={item.id}
-                  label={item.label}
-                  icon={item.icon}
-                  active={activePage === item.id}
-                  onClick={() => navigateToPage(item.id as AdminPage)}
+                  key={workspace.group}
+                  id={workspace.group}
+                  label={section.label}
+                  icon={section.icon}
+                  active={activeWorkspace?.group === workspace.group}
+                  onClick={() => openWorkspaceItem(workspace.items[0])}
                 />
-              ))}
-            </div>
-          ))}
+              );
+            })}
+          </nav>
         </aside>
 
         <div className="admin-shell-workspace">
@@ -710,11 +749,16 @@ const AdminShell: React.FC = () => {
             </div>
           </header>
 
+          {activeWorkspace && <div className="admin-workspace-bar">
+            <span className="admin-workspace-title">{WORKSPACE_LABELS[activeWorkspace.group].label}</span>
+            <nav aria-label="Workspace sections">
+              {activeWorkspace.items.map((item) => <button type="button" key={`${item.id}:${item.area ?? ''}`} aria-current={isWorkspaceItemActive(item) ? 'page' : undefined} onClick={() => openWorkspaceItem(item)}>{item.label}</button>)}
+            </nav>
+          </div>}
           <main data-app-content className={`admin-shell-main ${activePage === 'hub' ? 'is-overview' : ''}`}>
             {showPlaceContext && <PlaceContextBanner />}
             {accessNotice && <div role="alert" className="admin-access-notice">{accessNotice}</div>}
             {moduleAccessNotice && <div role="status" className="admin-access-notice"><strong>{moduleAccessNotice.title}</strong><span>{moduleAccessNotice.description}</span></div>}
-            <OperatingSpineRibbon organizationName={orgName || 'Your organisation'} agreementName={selectedAgreement?.name ?? null} placeName={selectedZone?.name ?? selectedSite?.name ?? null} activePage={activePage} onNavigate={(page) => navigateToPage(page as AdminPage)} />
             <WorkflowRail activePage={activePage} context={workflowContext} onNavigate={(destination, context) => navigateToPage(destination as AdminPage, context)} />
             <LazyPageRecovery key={`${activePage}:${fieldOpsSubArea}`} pageKey={`${activePage}:${fieldOpsSubArea}`}>
               <React.Suspense fallback={<LazyPageFallback />}>{renderPage()}</React.Suspense>
@@ -769,7 +813,7 @@ const AdminShell: React.FC = () => {
                 {items.filter((item) => isPageEnabled(item.id as AdminPage)).map((item) => {
                   const Icon = item.icon;
                   return (
-                    <button key={item.id} onClick={() => navigateToPage(item.id as AdminPage)} className={`admin-mobile-nav-item ${activePage === item.id ? 'is-active' : ''}`} aria-current={activePage === item.id ? 'page' : undefined}>
+                    <button key={`${item.id}:${item.area ?? ''}`} onClick={() => openWorkspaceItem(item)} className={`admin-mobile-nav-item ${isWorkspaceItemActive(item) ? 'is-active' : ''}`} aria-current={isWorkspaceItemActive(item) ? 'page' : undefined}>
                       <Icon size={17} aria-hidden="true" /><span>{item.label}</span>
                     </button>
                   );

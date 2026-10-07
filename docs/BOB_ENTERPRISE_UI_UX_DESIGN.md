@@ -5,6 +5,41 @@ Date: 2026-09-11
 
 ## Design intent
 
+### Desktop workspace navigation (owner-requested, 2026-10-08)
+
+The admin desktop shell uses one workspace selector and a section-specific
+tool row rather than an always-expanded list of every page. The operating
+organisation selector and existing role/module gates remain unchanged.
+
+| Workspace | Owning workflow |
+| --- | --- |
+| Guarding & Patrol | Dispatch, patrol, live map, field reports, video evidence, places and workshop |
+| HR & Rostering | Schedules, people/HR, work units, coverage and user access |
+| CRM & Clients | Client portfolios, agreements, setup, onboarding and delivery handoff |
+| Finance | Finance home, money, connections, costing, pricing and rate rules |
+| Reports & Accountability | Historical agreement activity and governed client report packs |
+| Investigations & Evidence | Investigation workspace and canonical file system |
+| Organisation & Settings | Organisation configuration, access rules and subscriptions |
+
+The overview stays a live-work queue. A clear queue offers a Reports next action;
+it does not imply that historical activity is empty. Direct URLs and field-area
+query parameters still work. Portfolio workflow identifiers are retained when
+navigating between admin pages. Navigation does not create records, publish
+reports, alter grants, or imply that a module is built or enabled.
+
+Reference evidence retrieved 2026-10-08:
+
+- [TrackTik security operations](https://www.trackforce.com/products/tracktik/security-operations/): connected dispatch, patrol, incident reporting and operational review.
+- [Deputy scheduling](https://www.deputy.com/features/employee-scheduling): schedules, coverage, availability, time/attendance and workforce review.
+- [Xero NZ](https://www.xero.com/nz/): connected invoicing, payroll and financial reporting.
+
+These public product descriptions inform task grouping, not copied layouts or
+proof of FCM capabilities. The local evidence gate is the existing fixture-backed
+admin navigation and dispatch browser suite on desktop/mobile, plus shell
+permission/routing guards and the production web build. PDF display, report media
+attachment and case-intake completeness require separate record-workflow checks;
+this navigation release does not claim those gaps are closed.
+
 Bob is not a chat widget. Bob is the operating surface that helps authorized people understand work, gather evidence, draft artifacts, request review, and move through the FCM platform without bypassing the organization's source-of-truth systems.
 
 The UI must feel like a calm enterprise operations console: queue-first, evidence-visible, role-aware, and honest about uncertainty. The interface must not imply that an AI answer is an approved safety, legal, employment, financial, identity, or enforcement decision.

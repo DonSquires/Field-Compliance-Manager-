@@ -37,7 +37,7 @@ export function OperatingSpineRibbon({
 
   return (
     <nav className="operating-spine" aria-label="Operating spine">
-      <span className="operating-spine-title">Operating spine</span>
+      <span className="operating-spine-title">Service workflow</span>
       <div className="operating-spine-track">
         {items.map((item, index) => {
           const Icon = item.icon;

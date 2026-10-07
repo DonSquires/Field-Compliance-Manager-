@@ -92,6 +92,59 @@
   margin-top: 14px;
 }
 
+.admin-workspace-selector {
+  padding-block: 12px;
+  border-bottom: 1px solid var(--color-accent-silver);
+}
+
+.admin-workspace-bar {
+  flex: 0 0 auto;
+  min-width: 0;
+  padding: 12px 22px 0;
+  border-bottom: 1px solid var(--color-accent-silver);
+  background: var(--color-bg-surface);
+}
+
+.admin-workspace-title {
+  display: block;
+  margin-bottom: 8px;
+  font-size: 18px;
+  font-weight: 700;
+  color: var(--color-text-primary);
+}
+
+.admin-workspace-bar nav {
+  display: flex;
+  gap: 16px;
+  overflow-x: auto;
+  scrollbar-width: thin;
+}
+
+.admin-workspace-bar button {
+  flex: 0 0 auto;
+  min-height: 40px;
+  padding: 0 2px;
+  border: 0;
+  border-bottom: 3px solid transparent;
+  background: transparent;
+  color: var(--color-text-secondary);
+  font: inherit;
+  font-size: 13px;
+  cursor: pointer;
+}
+
+.admin-workspace-bar button[aria-current='page'] {
+  border-bottom-color: var(--color-brand-primary);
+  color: var(--color-text-primary);
+  font-weight: 700;
+}
+
+.admin-workspace-bar button:focus-visible,
+.admin-workspace-selector button:focus-visible {
+  outline: 2px solid var(--color-brand-primary);
+  outline-offset: -2px;
+}
+
 .admin-nav-group-label {
   padding: 5px 16px;
   color: #7192a2;

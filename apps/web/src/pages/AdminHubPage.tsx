@@ -363,7 +363,14 @@ const AdminHubPage: React.FC<AdminHubPageProps> = ({ onNavigate }) => {
           </div>
 
           {!loading && queue.length === 0 && queueWarnings.length === 0 ? (
-            <div className="admin-queue-empty"><ClipboardCheck size={24} aria-hidden="true" /><strong>Queue clear</strong><span>No active items require review.</span></div>
+            <div className="admin-queue-empty">
+              <ClipboardCheck size={24} aria-hidden="true" />
+              <strong>Queue clear</strong>
+              <span>No active items require review.</span>
+              <button type="button" className="btn btn-secondary" onClick={() => onNavigate?.('reports')}>
+                View activity history <ArrowRight size={15} aria-hidden="true" />
+              </button>
+            </div>
           ) : (
             <div className="admin-queue-list">
               {queue.map((item, index) => <QueueCard key={`${item.kind}-${item.id}`} item={item} isNext={index === 0} onOpen={() => onNavigate?.(item.navigate)} />)}
