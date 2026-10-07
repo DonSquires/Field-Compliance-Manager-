@@ -63,11 +63,11 @@ export const LoggedActivityPanel: React.FC<Props> = ({ onOpenRecords }) => {
         const sightingPlaces = [...(zoneIds.length ? [`zone_id.in.(${zoneIds.join(',')})`] : []), ...(siteIds.length ? [`site_id.in.(${siteIds.join(',')})`] : [])].join(',');
         const since = new Date(Date.now() - 30 * 24 * 60 * 60 * 1000).toISOString();
         const [visits, sightings, recentVisits, monthVisits, monthSightings] = await Promise.all([
-          supabase.from('location_events').select('id', { count: 'exact', head: true }).or(eventPlaces),
-          supabase.from('observations').select('id', { count: 'exact', head: true }).or(sightingPlaces),
+          supabase.from('location_events').select('id', { count: 'estimated', head: true }).or(eventPlaces),
+          supabase.from('observations').select('id', { count: 'estimated', head: true }).or(sightingPlaces),
           supabase.from('location_events').select('id,occurred_at,event_type,zone_id,client_site_id,payload').or(eventPlaces).order('occurred_at', { ascending: false }).limit(5),
-          supabase.from('location_events').select('id', { count: 'exact', head: true }).or(eventPlaces).gte('occurred_at', since),
-          supabase.from('observations').select('id', { count: 'exact', head: true }).or(sightingPlaces).gte('observed_at', since),
+          supabase.from('location_events').select('id', { count: 'estimated', head: true }).or(eventPlaces).gte('occurred_at', since),
+          supabase.from('observations').select('id', { count: 'estimated', head: true }).or(sightingPlaces).gte('observed_at', since),
         ]);
         const failure = visits.error ?? sightings.error ?? recentVisits.error ?? monthVisits.error ?? monthSightings.error;
         if (failure) throw failure;

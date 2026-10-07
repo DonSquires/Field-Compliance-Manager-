@@ -62,13 +62,23 @@ function formatDistance(value: number | string | null | undefined) {
   return Number.isFinite(numeric) ? `${numeric.toFixed(1)} km` : '—';
 }
 
+function daysAgoDate(days: number) {
+  return new Date(Date.now() - days * 24 * 60 * 60 * 1000).toISOString().split('T')[0];
+}
+
+function describeLoadError(err: unknown): string {
+  const message = err && typeof err === 'object' && 'message' in err ? String((err as { message: unknown }).message) : '';
+  if (/statement timeout/i.test(message)) return 'This date range holds too many records to search at once. Choose a shorter range or add a search term.';
+  return message || 'Records could not be loaded.';
+}
+
 export const ActivityRecordBrowser: React.FC<Props> = ({ zoneIds, siteIds, scopeLabel }) => {
   const navigate = useNavigate();
   const { zones, sites } = useServiceRelationships();
   const [kind, setKind] = useState<ActivityRecordKind>('visits');
   const [searchInput, setSearchInput] = useState('');
   const [search, setSearch] = useState('');
-  const [from, setFrom] = useState('');
+  const [from, setFrom] = useState(() => daysAgoDate(90));
   const [to, setTo] = useState('');
   const [page, setPage] = useState(0);
   const [visits, setVisits] = useState<VisitRecord[]>([]);
@@ -119,7 +129,7 @@ export const ActivityRecordBrowser: React.FC<Props> = ({ zoneIds, siteIds, scope
           ].join(',');
           let query = supabase
             .from('location_events')
-            .select('id,event_type,occurred_at,module_key,source,distance_km,zone_id,client_site_id,observed_entity_id,payload', { count: 'exact' })
+            .select('id,event_type,occurred_at,module_key,source,distance_km,zone_id,client_site_id,observed_entity_id,payload', { count: 'estimated' })
             .or(places);
           if (from) query = query.gte('occurred_at', startOfDayIso(from));
           if (to) query = query.lt('occurred_at', nextDayIso(to));
@@ -141,7 +151,7 @@ export const ActivityRecordBrowser: React.FC<Props> = ({ zoneIds, siteIds, scope
           ].join(',');
           let query = supabase
             .from('observations')
-            .select('id,observed_at,plate_number,officer_id,zone_id,site_id,distance_km,officer_notes,is_compliant,compliance_reason,external_refs', { count: 'exact' })
+            .select('id,observed_at,plate_number,officer_id,zone_id,site_id,distance_km,officer_notes,is_compliant,compliance_reason,external_refs', { count: 'estimated' })
             .or(places);
           if (from) query = query.gte('observed_at', startOfDayIso(from));
           if (to) query = query.lt('observed_at', nextDayIso(to));
@@ -161,7 +171,7 @@ export const ActivityRecordBrowser: React.FC<Props> = ({ zoneIds, siteIds, scope
           await loadOfficers(rows.map((row) => row.officer_id));
         }
       } catch (err) {
-        if (!cancelled) setError(err instanceof Error ? err.message : 'Records could not be loaded.');
+        if (!cancelled) setError(describeLoadError(err));
       } finally {
         if (!cancelled) setLoading(false);
       }
@@ -254,7 +264,13 @@ export const ActivityRecordBrowser: React.FC<Props> = ({ zoneIds, siteIds, scope
         </label>
         <label>From <input type="date" value={from} max={to || undefined} onChange={(event) => setFrom(event.target.value)} /></label>
         <label>To <input type="date" value={to} min={from || undefined} onChange={(event) => setTo(event.target.value)} /></label>
-        {hasFilters && <button type="button" className="btn btn-secondary" onClick={() => { setSearchInput(''); setFrom(''); setTo(''); }}>Clear filters</button>}
+        <span className="activity-browser__ranges" role="group" aria-label="Date range shortcuts">
+          <button type="button" className="btn btn-secondary" onClick={() => { setFrom(daysAgoDate(30)); setTo(''); }}>Last 30 days</button>
+          <button type="button" className="btn btn-secondary" onClick={() => { setFrom(daysAgoDate(90)); setTo(''); }}>Last 90 days</button>
+          <button type="button" className="btn btn-secondary" onClick={() => { setFrom(daysAgoDate(365)); setTo(''); }}>Last 12 months</button>
+          <button type="button" className="btn btn-secondary" onClick={() => { setFrom(''); setTo(''); }}>All time</button>
+        </span>
+        {searchInput && <button type="button" className="btn btn-secondary" onClick={() => setSearchInput('')}>Clear search</button>}
       </div>
 
       {error && <div className="alert alert-error" role="alert">{error}</div>}
@@ -262,7 +278,7 @@ export const ActivityRecordBrowser: React.FC<Props> = ({ zoneIds, siteIds, scope
       <div className="activity-browser__body">
         <div className="activity-browser__list" aria-busy={loading}>
           <p className="activity-browser__count" role="status">
-            {loading ? 'Loading records…' : `${total.toLocaleString('en-NZ')} ${total === 1 ? 'record' : 'records'}${hasFilters ? ' match your filters' : ''}`}
+            {loading ? 'Loading records…' : `${total === ACTIVITY_PAGE_SIZE * pageCount && pageCount > 1 ? 'About ' : ''}${total.toLocaleString('en-NZ')} ${total === 1 ? 'record' : 'records'}${hasFilters ? ' in this view' : ''}`}
           </p>
           <div className="reports-table-wrapper">
             <table className="reports-table">
@@ -273,7 +289,7 @@ export const ActivityRecordBrowser: React.FC<Props> = ({ zoneIds, siteIds, scope
               </thead>
               <tbody>
                 {!loading && total === 0 && (
-                  <tr><td colSpan={5} className="text-center">{zoneIds.length + siteIds.length === 0 ? 'No places are linked to this agreement yet.' : hasFilters ? 'Nothing matches these filters. Clear them to see every record.' : 'No records have been logged here yet.'}</td></tr>
+                  <tr><td colSpan={5} className="text-center">{zoneIds.length + siteIds.length === 0 ? 'No places are linked to this agreement yet.' : hasFilters ? 'Nothing matches this view. Try “All time” or clear the search.' : 'No records have been logged here yet.'}</td></tr>
                 )}
                 {kind === 'visits' && visits.map((row) => {
                   const note = text(row.payload?.comments) ?? text(row.payload?.issue);
