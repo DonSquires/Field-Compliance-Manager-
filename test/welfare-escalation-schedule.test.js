@@ -4,10 +4,11 @@ const path = require('node:path');
 const test = require('node:test');
 
 const root = path.resolve(__dirname, '..');
-const schedule = fs.readFileSync(path.join(root, 'supabase/migrations/20260908005000_schedule_welfare_escalation_tick.sql'), 'utf8');
-const activation = fs.readFileSync(path.join(root, 'supabase/migrations/20260908005100_activate_welfare_escalation_tick.sql'), 'utf8');
-const credentialSchedule = fs.readFileSync(path.join(root, 'supabase/migrations/20260908005200_schedule_credential_expiry_notifications.sql'), 'utf8');
-const taSchedule = fs.readFileSync(path.join(root, 'supabase/migrations/20260908005300_schedule_canonical_ta_refresh.sql'), 'utf8');
+const readSql = (file) => fs.readFileSync(path.join(root, file), 'utf8').replace(/\r\n/g, '\n');
+const schedule = readSql('supabase/migrations/20260908005000_schedule_welfare_escalation_tick.sql');
+const activation = readSql('supabase/migrations/20260908005100_activate_welfare_escalation_tick.sql');
+const credentialSchedule = readSql('supabase/migrations/20260908005200_schedule_credential_expiry_notifications.sql');
+const taSchedule = readSql('supabase/migrations/20260908005300_schedule_canonical_ta_refresh.sql');
 
 test('welfare escalation is scheduled through Vault-backed backend-only cron', () => {
   assert.match(schedule, /ops\.enqueue_welfare_escalation_tick/);

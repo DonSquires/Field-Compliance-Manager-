@@ -38,6 +38,18 @@ interface Observation {
   zone_id: string | null;
 }
 
+interface OperationalActivity {
+  id: string;
+  event_type: string;
+  occurred_at: string;
+  module_key: string | null;
+  source: string | null;
+  distance_km: number | string | null;
+  source_file: string | null;
+  source_sheet: string | null;
+  source_row: string | null;
+}
+
 interface ReportMetrics {
   totalBreaches: number;
   totalObservations: number;
@@ -172,6 +184,8 @@ const ReportsHubPage: React.FC = () => {
 
   const [breachAlerts, setBreachAlerts] = useState<BreachAlert[]>([]);
   const [observations, setObservations] = useState<Observation[]>([]);
+  const [operationalActivity, setOperationalActivity] = useState<OperationalActivity[]>([]);
+  const [operationalActivityCount, setOperationalActivityCount] = useState(0);
   const [reportPacks, setReportPacks] = useState<MonthlyReportPack[]>([]);
   const [consolidatedReporting, setConsolidatedReporting] = useState<ConsolidatedReportingRow[]>([]);
   const [loading, setLoading] = useState(true);
@@ -200,17 +214,30 @@ const ReportsHubPage: React.FC = () => {
       setLoading(true);
       setError(null);
 
+      const reportAgreementIds = selectedAgreement ? [selectedAgreement.id] : providerAgreements.map((agreement) => agreement.id);
       let activeZoneIds: string[] | null = null;
-      if (selectedAgreement) {
-        const { data: links } = await supabase.from('service_agreement_locations').select('zone_id').eq('service_agreement_id', selectedAgreement.id).eq('status', 'active').not('zone_id', 'is', null);
-        const zoneIds = (links ?? []).map((link) => link.zone_id as string);
-        activeZoneIds = zoneIds.length > 0 ? zoneIds : null;
+      let reportZoneIds: string[] = [];
+      let reportSiteIds: string[] = [];
+      if (reportAgreementIds.length > 0) {
+        const { data: links, error: linksError } = await supabase
+          .from('service_agreement_locations')
+          .select('zone_id,site_id')
+          .in('service_agreement_id', reportAgreementIds)
+          .eq('status', 'active');
+        if (linksError) throw linksError;
+        reportZoneIds = [...new Set((links ?? []).map((link) => link.zone_id).filter((id): id is string => Boolean(id)))];
+        reportSiteIds = [...new Set((links ?? []).map((link) => link.site_id).filter((id): id is string => Boolean(id)))];
+        if (selectedAgreement) activeZoneIds = reportZoneIds.length > 0 ? reportZoneIds : null;
       }
+      const activityPlaceFilters = [
+        ...(reportZoneIds.length ? [`zone_id.in.(${reportZoneIds.join(',')})`] : []),
+        ...(reportSiteIds.length ? [`client_site_id.in.(${reportSiteIds.join(',')})`] : []),
+      ];
       const timestampEndExclusive = exclusiveEndIso(dateRange.end);
       // Report packs belong to the agreement's provider, which is a branch under the Model A house; list the whole house.
       const { data: descendantOrgIds } = await supabase.rpc('get_descendant_organizations', { org_id: profile.organizationId });
       const houseOrgIds = [...new Set([profile.organizationId, ...(Array.isArray(descendantOrgIds) ? descendantOrgIds : [])])];
-      const [breachResponse, observationResponse, packResponse, consolidatedResponse] = await Promise.all([
+      const [breachResponse, observationResponse, packResponse, consolidatedResponse, activityResponse] = await Promise.all([
         !freedomCampingEnabled
           ? Promise.resolve({ data: [], error: null })
           : activeZoneIds && activeZoneIds.length > 0
@@ -221,6 +248,8 @@ const ReportsHubPage: React.FC = () => {
               .gte('created_at', dateRange.start)
               .lt('created_at', timestampEndExclusive)
               .order('created_at', { ascending: false })
+              : selectedAgreement
+              ? Promise.resolve({ data: [], error: null })
           : supabase
               .from('breach_alerts')
               .select('id, created_at, breach_type, status, plate_number, zone_id, notes')
@@ -238,6 +267,8 @@ const ReportsHubPage: React.FC = () => {
               .gte('observed_at', dateRange.start)
               .lt('observed_at', timestampEndExclusive)
               .order('observed_at', { ascending: false })
+              : selectedAgreement
+              ? Promise.resolve({ data: [], error: null })
           : supabase
               .from('observations')
               .select('id, observed_at, plate_number, officer_id, is_compliant, compliance_reason, zone_id')
@@ -262,14 +293,26 @@ const ReportsHubPage: React.FC = () => {
               .order('period_end', { ascending: false }),
         // The overview is per branch of the house; there is no per-agreement overload (calling one 404'd and failed the whole page).
         supabase.rpc('get_consolidated_reporting_overview', { p_root_organization_id: profile.organizationId, p_from: dateRange.start, p_to: dateRange.end }),
+        activityPlaceFilters.length > 0
+          ? supabase
+              .from('location_events')
+              .select('id,event_type,occurred_at,module_key,source,distance_km,source_file:payload->>source_file,source_sheet:payload->>source_sheet,source_row:payload->>source_row', { count: 'exact' })
+              .or(activityPlaceFilters.join(','))
+              .gte('occurred_at', dateRange.start)
+              .lt('occurred_at', timestampEndExclusive)
+              .order('occurred_at', { ascending: false })
+              .limit(50)
+          : Promise.resolve({ data: [], error: null, count: 0 }),
       ]);
 
-      const failure = breachResponse.error ?? observationResponse.error ?? packResponse.error ?? consolidatedResponse.error;
+      const failure = breachResponse.error ?? observationResponse.error ?? packResponse.error ?? consolidatedResponse.error ?? activityResponse.error;
       if (failure) throw failure;
       const breaches = (breachResponse.data as BreachAlert[]) || [];
       const obs = (observationResponse.data as Observation[]) || [];
       setBreachAlerts(breaches);
       setObservations(obs);
+      setOperationalActivity((activityResponse.data as OperationalActivity[]) || []);
+      setOperationalActivityCount(activityResponse.count ?? activityResponse.data?.length ?? 0);
       setReportPacks((packResponse.data as MonthlyReportPack[]) || []);
       setConsolidatedReporting((consolidatedResponse.data as ConsolidatedReportingRow[]) || []);
       setMetrics({ totalBreaches: breaches.length, totalObservations: obs.length, nonCompliantObservations: obs.filter((o) => o.is_compliant === false).length });
@@ -278,7 +321,7 @@ const ReportsHubPage: React.FC = () => {
     } finally {
       setLoading(false);
     }
-  }, [freedomCampingEnabled, profile?.organizationId, selectedAgreement, dateRange.end, dateRange.start]);
+  }, [freedomCampingEnabled, profile?.organizationId, selectedAgreement, providerAgreements, dateRange.end, dateRange.start]);
 
   useEffect(() => { void loadReports(); }, [loadReports]);
 
@@ -286,7 +329,11 @@ const ReportsHubPage: React.FC = () => {
     setGenerating(true);
     setError(null);
     setNotice(null);
-    const { data, error: generationError } = await supabase.rpc('generate_due_report_packs', { p_period_start: dateRange.start, p_period_end: dateRange.end });
+    const { data, error: generationError } = await supabase.rpc('generate_due_report_packs', {
+      p_period_start: dateRange.start,
+      p_period_end: dateRange.end,
+      p_service_agreement_id: selectedAgreement?.id ?? null,
+    });
     if (generationError || typeof data !== 'number') setError(generationError?.message ?? 'Report pack generation was not confirmed.');
     else { setNotice(`${data} report packs generated for the selected period.`); await loadReports(); }
     setGenerating(false);
@@ -447,6 +494,32 @@ const ReportsHubPage: React.FC = () => {
       </div>}
 
       {consolidatedReporting.length > 1 && <section className="reports-section"><h2>Group Reporting Overview</h2><p className="subtitle">Branch-owned operational activity, consolidated for parent oversight. Detailed queues below remain in the current organization context.</p><div className="reports-table-wrapper"><table className="reports-table"><thead><tr><th>Operating Organization</th><th>Breach Alerts</th><th>Observations</th><th>Non-Compliant</th><th>Report Packs</th></tr></thead><tbody>{consolidatedReporting.map((row) => <tr key={row.source_organization_id}><td>{row.source_organization_name}</td><td>{row.breach_count}</td><td>{row.observation_count}</td><td>{row.non_compliant_observation_count}</td><td>{row.report_pack_count}</td></tr>)}</tbody></table></div></section>}
+
+      <section className="reports-section">
+        <h2>Operational Activity ({operationalActivityCount})</h2>
+        <div className="reports-table-wrapper">
+          <table className="reports-table">
+            <thead><tr><th>Date</th><th>Activity</th><th>Module</th><th>Distance</th><th>Source</th><th>Reference</th></tr></thead>
+            <tbody>
+              {operationalActivity.length === 0 ? <tr><td colSpan={6} className="text-center">No operational activity in this period</td></tr> : operationalActivity.map((event) => {
+                const distance = event.distance_km === null ? null : Number(event.distance_km);
+                const reference = [event.source_sheet, event.source_row].filter(Boolean).join(' · ');
+                return (
+                  <tr key={event.id}>
+                    <td>{new Date(event.occurred_at).toLocaleString('en-NZ')}</td>
+                    <td>{event.event_type.replaceAll('_', ' ')}</td>
+                    <td>{event.module_key ?? '—'}</td>
+                    <td>{distance !== null && Number.isFinite(distance) ? `${distance.toFixed(1)} km` : '—'}</td>
+                    <td>{event.source === 'rm_patrol_log_import' ? 'Patrol log' : event.source ?? '—'}</td>
+                    <td>{event.source_file ? `${event.source_file}${reference ? ` · ${reference}` : ''}` : '—'}</td>
+                  </tr>
+                );
+              })}
+            </tbody>
+          </table>
+        </div>
+        {operationalActivityCount > operationalActivity.length && <p className="subtitle">Showing the latest {operationalActivity.length} of {operationalActivityCount} records.</p>}
+      </section>
 
       <section className="reports-section">
         <h2>Report Packs ({reportPacks.length})</h2>

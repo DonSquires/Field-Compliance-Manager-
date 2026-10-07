@@ -18,12 +18,12 @@ function localRequireClosure(entrypoints) {
   while (queue.length) {
     const file = queue.shift();
     if (seen.has(file)) continue;
-    const absolute = path.join(ROOT, file);
+    const absolute = path.join(ROOT, ...file.split('/'));
     assert.ok(fs.existsSync(absolute), `worker dependency is missing from the repo: ${file}`);
     seen.add(file);
     const source = fs.readFileSync(absolute, 'utf8');
     for (const match of source.matchAll(/require\((?:'|")(\.[^'"]+)(?:'|")\)/g)) {
-      let dependency = path.normalize(path.join(path.dirname(file), match[1]));
+      let dependency = path.posix.normalize(path.posix.join(path.posix.dirname(file), match[1].replace(/\\/g, '/')));
       if (!/\.(?:c?js|json)$/.test(dependency)) dependency += '.js';
       queue.push(dependency);
     }

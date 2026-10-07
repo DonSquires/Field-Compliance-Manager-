@@ -128,6 +128,11 @@ export function ReportPackReviewPanel({ pack, onClose, onSaved }: ReportPackRevi
           <div><span>Incidents</span><strong>{numberFrom(pack.data, 'incidentsTotal')}</strong></div>
           <div><span>Checkpoint visits</span><strong>{numberFrom(pack.data, 'checkpointVisits')}</strong></div>
           <div><span>Breach alerts</span><strong>{numberFrom(pack.data, 'breachAlerts')}</strong></div>
+          <div><span>Operational events</span><strong>{numberFrom(pack.data, 'operationalEvents')}</strong></div>
+          <div><span>Patrol visits</span><strong>{numberFrom(pack.data, 'patrolVisits')}</strong></div>
+          <div><span>Camera activations</span><strong>{numberFrom(pack.data, 'cameraActivations')}</strong></div>
+          <div><span>Vehicle observations</span><strong>{numberFrom(pack.data, 'vehicleObservations')}</strong></div>
+          <div><span>Patrol travel (km)</span><strong>{numberFrom(pack.data, 'patrolTravelKm')}</strong></div>
         </div>
       )}
       <p className="report-review-source-note">These values come from governed operational records and cannot be edited here.</p>

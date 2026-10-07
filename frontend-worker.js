@@ -75,7 +75,12 @@ function sha256File(filePath) {
 }
 
 function run(command, args, options) {
-  const result = spawnSync(command, args, {
+  const windowsNpm = process.platform === 'win32' && command === 'npm';
+  const executable = windowsNpm ? (process.env.ComSpec || 'cmd.exe') : command;
+  const executableArgs = windowsNpm
+    ? ['/d', '/s', '/c', `npm ${args.join(' ')}`]
+    : args;
+  const result = spawnSync(executable, executableArgs, {
     cwd: options.cwd,
     encoding: 'utf8',
     maxBuffer: MAX_LOG_BYTES,

@@ -6,6 +6,16 @@ const test = require('node:test');
 const { dockerArguments, redact, workerCommand } = require('../worker-executor');
 const { validatePatchText, changedFilesFromPatch, executeFrontendPatch, frontendVerificationCommands, targetedE2eSpecs, E2E_SMOKE_SPECS, redactLog, VERIFICATION_ENV } = require('../frontend-worker');
 
+function writeNpmStub(binDir, source) {
+  if (process.platform === 'win32') {
+    const scriptPath = path.join(binDir, 'npm.js');
+    fs.writeFileSync(scriptPath, source.replace(/^#![^\r\n]*\r?\n/, ''));
+    fs.writeFileSync(path.join(binDir, 'npm.cmd'), `@echo off\r\nnode "${scriptPath}" %*\r\nexit /b %errorlevel%\r\n`);
+    return;
+  }
+  fs.writeFileSync(path.join(binDir, 'npm'), source, { mode: 0o755 });
+}
+
 test('worker profiles use fixed commands', () => {
   assert.deepEqual(workerCommand('assessment'), ['node', '/opt/bob/assessment-manifest.js', '/workspace', '/artifacts/system-assessment.json']);
   assert.deepEqual(workerCommand('test'), ['npm', 'test']);
@@ -165,9 +175,9 @@ test('frontend worker applies a patch in an ephemeral copy and emits controlled 
     ''
   ].join('\n'));
   fs.writeFileSync(path.join(artifactDir, 'untrusted-output.txt'), 'remove me');
-  fs.writeFileSync(path.join(binDir, 'npm'), '#!/usr/bin/env node\nprocess.exit(0);\n', { mode: 0o755 });
+  writeNpmStub(binDir, '#!/usr/bin/env node\nprocess.exit(0);\n');
   const originalPath = process.env.PATH;
-  process.env.PATH = `${binDir}:${originalPath}`;
+  process.env.PATH = `${binDir}${path.delimiter}${originalPath}`;
   try {
     const result = executeFrontendPatch({
       sourceDir,
@@ -176,7 +186,7 @@ test('frontend worker applies a patch in an ephemeral copy and emits controlled 
       workDir
     });
     assert.equal(result.succeeded, true);
-    assert.equal(fs.readFileSync(path.join(workDir, 'apps/web/src/example.ts'), 'utf8'), 'export const value = 2;\n');
+    assert.equal(fs.readFileSync(path.join(workDir, 'apps/web/src/example.ts'), 'utf8').replace(/\r\n/g, '\n'), 'export const value = 2;\n');
     assert.deepEqual(fs.readdirSync(artifactDir).sort(), [
       'changed-files.json', 'input.patch', 'validated.patch', 'verification.json'
     ]);
@@ -254,15 +264,15 @@ test('frontend worker re-runs a failing step on the unpatched tree and reports a
     ''
   ].join('\n'));
   // Fake npm: `run test` fails whether or not the patch is applied (main is red); everything else passes.
-  fs.writeFileSync(path.join(binDir, 'npm'), [
+  writeNpmStub(binDir, [
     '#!/usr/bin/env node',
     "const fs = require('node:fs');",
-    "if (process.argv[3] === 'test') { console.log(' FAIL  src/pages/FinanceBureauPage.guard.test.ts > x\\n FAIL  src/pages/NzscvSupplierPage.guard.test.ts [ src/pages/NzscvSupplierPage.guard.test.ts ]'); process.exit(1); }",
+    "if (process.argv.includes('test')) { console.log(' FAIL  src/pages/FinanceBureauPage.guard.test.ts > x\\n FAIL  src/pages/NzscvSupplierPage.guard.test.ts [ src/pages/NzscvSupplierPage.guard.test.ts ]'); process.exit(1); }",
     'process.exit(0);',
     ''
-  ].join('\n'), { mode: 0o755 });
+  ].join('\n'));
   const originalPath = process.env.PATH;
-  process.env.PATH = `${binDir}:${originalPath}`;
+  process.env.PATH = `${binDir}${path.delimiter}${originalPath}`;
   try {
     const result = executeFrontendPatch({ sourceDir, patchPath: path.join(artifactDir, 'input.patch'), artifactDir, workDir: path.join(root, 'work') });
     assert.equal(result.succeeded, false);
@@ -274,7 +284,7 @@ test('frontend worker re-runs a failing step on the unpatched tree and reports a
     assert.deepEqual(evidence.baseline.failing_files, ['src/pages/FinanceBureauPage.guard.test.ts', 'src/pages/NzscvSupplierPage.guard.test.ts']);
     assert.match(evidence.baseline_reason, /^npm run test --prefix apps\/web .* also fails on the pinned commit without this patch .*FinanceBureauPage\.guard\.test\.ts.*; not caused by this change$/);
     // The patch is back in place after the baseline check.
-    assert.equal(fs.readFileSync(path.join(root, 'work/apps/web/src/example.ts'), 'utf8'), 'export const value = 2;\n');
+    assert.equal(fs.readFileSync(path.join(root, 'work/apps/web/src/example.ts'), 'utf8').replace(/\r\n/g, '\n'), 'export const value = 2;\n');
     const { classifyVerificationFailure } = require('../builder-verification-outcome');
     assert.deepEqual(classifyVerificationFailure(evidence), { infrastructure: false, baseline: true, reason: evidence.baseline_reason });
   } finally {

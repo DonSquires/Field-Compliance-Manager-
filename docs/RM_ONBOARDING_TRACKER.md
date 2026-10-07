@@ -1476,6 +1476,54 @@ configuration is complete. The first September drafts remain intentionally
 deferred until on or after 1 October. The dispatch-console live shakedown is
 closed by the production verification above.
 
+## OFO historical patrol import and report integration (2026-10-07)
+
+- Re-opened the actual `ACTIVE OneFortyOne camera and patrol OFO.xlsx` source
+  through the bundled Excel-to-Markdown conversion, then exported only its two
+  raw log sheets locally for the existing importer. The 2025 sheet was already
+  fully present. The 2026 sheet contributed 30 new vehicle observations and
+  305 new place events; all other resolved rows were recognized by the existing
+  idempotency keys. Missing-date, unresolved-place, duplicate, and far-future
+  rows were not imported.
+- Fixed two actual OFO header mismatches in `scripts/import-patrol-log.mjs`:
+  `Logno` is now a job-number alias and `Numbers` is now a registration alias.
+  Date parsing now rejects invalid calendar dates and years after the current
+  year. Imported shared event payloads retain source file hash/sheet/row
+  provenance only; raw comments, issue/action narratives, patroller/location
+  strings, plates, and job/travel cost fields are not copied to the
+  client-readable event stream. Valid recorded kilometres remain in the
+  structured `distance_km` column.
+- Added agreement-place activity to Reports Hub. It reads only event metadata
+  and provenance for sites/zones linked to the selected active service
+  agreement; it does not select `payload` or fall back to organisation-wide
+  records when a selected agreement has no patrol zones. Its source metrics are
+  also included in provider-private monthly report drafts and exposed in the
+  provider review panel/PDF as counts and total travel distance only.
+- Added agreement-scoped monthly draft generation for the Reports Hub. The
+  existing two-argument all-agreements RPC remains as a compatibility wrapper;
+  the scoped function verifies the agreement is an accepted operational
+  agreement owned by the active provider tree. Migrations
+  `20261006212028_add_operational_activity_to_report_packs.sql` and
+  `20261007061723_scope_report_pack_generation_to_agreement.sql` were applied
+  and the schema snapshot/Atlas refreshed.
+- Live verification confirms the R&M/OneFortyOne agreement is accepted, has
+  the reviewed monthly template, and links three sites plus 126 zones. One
+  August draft already exists. No draft was regenerated, published, or emailed
+  during this run; the next human step is to choose OneFortyOne and generate the
+  required period from the Reports page, then review/publish through the
+  existing governed workflow.
+- Four existing R&M investigations and one cancelled maintenance work order
+  were found. No source case/action rows were attached to them automatically:
+  the workbook's `Contract`/`Extra` type values do not identify investigation
+  or maintenance records, and raw narratives need a restricted review path
+  before promotion. One older event with a far-future date remains untouched
+  because it predates this source-hash import and lacks row provenance; do not
+  silently rewrite it.
+- Other organisations were not imported. Reuse the corrected, sanitized
+  importer only after OneFortyOne's scoped draft has been generated and
+  human-reviewed; each client needs its own agreement-place coverage and
+  source-map dry run.
+
 ## Conventions established / reusable
 
 - Live SQL via the Supabase Management API (`SUPABASE_ACCESS_TOKEN`, from

@@ -6,7 +6,11 @@ const test = require('node:test');
 const send = fs.readFileSync(path.resolve(__dirname, '../supabase/functions/send-report-pack/index.ts'), 'utf8');
 const pdf = fs.readFileSync(path.resolve(__dirname, '../supabase/functions/generate-report-pack-pdf/index.ts'), 'utf8');
 const client = fs.readFileSync(path.resolve(__dirname, '../apps/web/src/pages/ClientPortalPage.tsx'), 'utf8');
+const reportsHub = fs.readFileSync(path.resolve(__dirname, '../apps/web/src/pages/ReportsHubPage.tsx'), 'utf8');
 const migration = fs.readFileSync(path.resolve(__dirname, '../supabase/migrations/20260927010000_govern_custom_report_builder.sql'), 'utf8');
+const operationalActivityMigration = fs.readFileSync(path.resolve(__dirname, '../supabase/migrations/20261006212028_add_operational_activity_to_report_packs.sql'), 'utf8');
+const agreementScopeMigration = fs.readFileSync(path.resolve(__dirname, '../supabase/migrations/20261007061723_scope_report_pack_generation_to_agreement.sql'), 'utf8');
+const reviewPanel = fs.readFileSync(path.resolve(__dirname, '../apps/web/src/components/ReportPackReviewPanel.tsx'), 'utf8');
 
 test('email delivery requires reviewed publication and refuses portal-delivered packs', () => {
   assert.match(send, /pack\.status !== 'generated' \|\| !pack\.published_at/);
@@ -49,4 +53,30 @@ test('client portal reads reviewed editorial content from published report packs
   assert.match(client, /report\.editorial\?\.title/);
   assert.match(client, /report\.editorial\?\.executive_summary/);
   assert.match(client, /Available live/);
+});
+
+test('monthly report snapshots include agreement-place activity aggregates without narrative or cost data', () => {
+  assert.match(operationalActivityMigration, /from public\.location_events event/);
+  assert.match(operationalActivityMigration, /from public\.service_agreement_locations link/);
+  assert.match(operationalActivityMigration, /link\.zone_id = event\.zone_id/);
+  assert.match(operationalActivityMigration, /event\.client_site_id/);
+  assert.match(operationalActivityMigration, /observation\.distance_km/);
+  assert.match(operationalActivityMigration, /'operationalEvents'/);
+  assert.match(operationalActivityMigration, /'patrolVisits'/);
+  assert.match(operationalActivityMigration, /'cameraActivations'/);
+  assert.match(operationalActivityMigration, /'vehicleObservations'/);
+  assert.match(operationalActivityMigration, /'patrolTravelKm'/);
+  assert.doesNotMatch(operationalActivityMigration, /event\.payload|job_cost|travel_cost|comments|plate_number/i);
+  assert.match(reviewPanel, /numberFrom\(pack\.data, 'patrolVisits'\)/);
+  assert.match(reviewPanel, /numberFrom\(pack\.data, 'vehicleObservations'\)/);
+});
+
+test('report generation can be scoped to one authorized service agreement without breaking the all-agreements RPC', () => {
+  assert.match(reportsHub, /p_service_agreement_id: selectedAgreement\?\.id \?\? null/);
+  assert.match(agreementScopeMigration, /generate_due_report_packs\(\s*p_period_start date,\s*p_period_end date,\s*p_service_agreement_id uuid/s);
+  assert.match(agreementScopeMigration, /agreement\.id = p_service_agreement_id/);
+  assert.match(agreementScopeMigration, /agreement\.agreement_type = 'operational'/);
+  assert.match(agreementScopeMigration, /agreement\.invitation_status = 'accepted'/);
+  assert.match(agreementScopeMigration, /Service agreement is not available for report generation/);
+  assert.match(agreementScopeMigration, /generate_due_report_packs\(p_period_start, p_period_end, null\)/);
 });

@@ -117,6 +117,9 @@ function parseNzDate(dateStr, timeStr) {
     const dt = new Date((Number(trimmed) - 25569) * 86400 * 1000);
     y = dt.getUTCFullYear(); mo = dt.getUTCMonth() + 1; d = dt.getUTCDate();
   } else return null;
+  if (Number(y) < 2000 || Number(y) > new Date().getUTCFullYear()) return null;
+  const calendarDate = new Date(Date.UTC(Number(y), Number(mo) - 1, Number(d)));
+  if (calendarDate.getUTCFullYear() !== Number(y) || calendarDate.getUTCMonth() !== Number(mo) - 1 || calendarDate.getUTCDate() !== Number(d)) return null;
   let hh = '00', mm = '00';
   const t = (timeStr ?? '').trim().replace(/\.\d+$/, '');
   if (/^\d{3,4}$/.test(t)) { const padded = t.padStart(4, '0'); hh = padded.slice(0, 2); mm = padded.slice(2, 4); }
@@ -149,12 +152,12 @@ const headerLower = header.map((h) => h.toLowerCase());
 // "Log  no"/"Action By") - matching is case-insensitive, first candidate found wins.
 const pick = (...candidates) => { for (const name of candidates) { const i = headerLower.indexOf(name.toLowerCase()); if (i !== -1) return i; } return -1; };
 const col = {
-  job: pick('Job', 'Log No'), patroller: pick('Patroller'), date: pick('Date'),
+  job: pick('Job', 'Log No', 'Logno'), patroller: pick('Patroller'), date: pick('Date'),
   time: pick('Time', '24hr Time'),
   reserve: pick('Reserve', 'CODE', 'Forest', 'Site'), // primary zone-code key when present (more stable than free-text Location)
   location: pick('Location'), // fallback zone key: free-text detail, or the only place column on non-council sheets
   comments: pick('Comments', 'Description/Comments'),
-  reg: pick('Reg'),
+  reg: pick('Reg', 'Numbers'),
   jobTime: pick('Job Time', 'Job Time NCC', 'Job Time OFO', 'Job Time TPFL'), jobKms: pick('Job KMs', 'Job Km NCC', 'Job kms', 'Job KM OFO', 'Job KM', 'Job KM TPFL'),
   issue: pick('Issue'), actionBy: pick('Action by', 'Action By'),
 };
@@ -205,19 +208,16 @@ for (const [rowIndex, r] of table.slice(1).entries()) {
     source: 'rm_patrol_log_import', client_code: clientCode, job_number: job || null,
     source_file: sourceLabel || null, source_sha256: sourceHash || null,
     source_sheet: sourceSheet || null, source_row: sourceSheet ? sourceFirstRow + rowIndex : null,
-    patroller_raw: patroller, location_raw: locationText, reserve_raw: reserveCode || null, comments: comments || null,
-    reg_raw: (r[col.reg] ?? '').trim() || null, plates_found: plates, job_time_hours: r[col.jobTime] || null,
-    job_kms: r[col.jobKms] || null, issue: r[col.issue] || null, action_by: r[col.actionBy] || null,
   };
 
   if (officerId && primaryPlate) {
-    observationsBatch.push({ external_ref: externalRef, occurred_at: occurredAt, zone_id: zoneId, site_id: siteId, officer_id: officerId, plate: primaryPlate, officer_notes: comments || null, payload });
+    observationsBatch.push({ external_ref: externalRef, occurred_at: occurredAt, zone_id: zoneId, site_id: siteId, officer_id: officerId, plate: primaryPlate, distance_km: r[col.jobKms] || null, payload });
   } else if (zoneId || siteId) {
     eventsBatch.push({
       external_ref: externalRef, occurred_at: occurredAt, zone_id: zoneId, site_id: siteId,
       event_type: isCamera ? 'camera_activation' : (officerId ? 'patrol_visit' : 'patrol_log_unattributed'),
       observed_entity_type: officerId ? 'staff' : null, observed_entity_id: officerId,
-      status: (r[col.issue] || '').trim() || null, payload,
+      distance_km: r[col.jobKms] || null, payload,
     });
   } else {
     // location_events requires client_site_id XOR zone_id (no placeless events) -
@@ -260,10 +260,10 @@ BEGIN
       INSERT INTO public.canonical_vehicles (plate_number, compliance_source)
       VALUES (v_plate, 'canonical') RETURNING id INTO v_vehicle_id;
     END IF;
-    INSERT INTO public.observations (organization_id, officer_id, plate_number, zone_id, site_id, observed_at, module_key, canonical_vehicle_id, officer_notes, plate_source, external_refs, distance_km)
+        INSERT INTO public.observations (organization_id, officer_id, plate_number, zone_id, site_id, observed_at, module_key, canonical_vehicle_id, officer_notes, plate_source, external_refs, distance_km)
     VALUES (v_org, (v_obs->>'officer_id')::uuid, v_plate, NULLIF(v_obs->>'zone_id','')::uuid, NULLIF(v_obs->>'site_id','')::uuid, (v_obs->>'occurred_at')::timestamptz, 'patrol', v_vehicle_id, v_obs->>'officer_notes', 'manual',
             jsonb_build_object('external_ref', v_obs->>'external_ref', 'import', v_obs->'payload'),
-            CASE WHEN v_obs->'payload'->>'job_kms' ~ '^[0-9]+([.][0-9]+)?$' THEN (v_obs->'payload'->>'job_kms')::numeric ELSE NULL END);
+          CASE WHEN v_obs->>'distance_km' ~ '^[0-9]+([.][0-9]+)?$' THEN (v_obs->>'distance_km')::numeric ELSE NULL END);
     v_obs_count := v_obs_count + 1;
   END LOOP;
 
@@ -279,8 +279,8 @@ BEGIN
       p_provider_organization_id => '${PROVIDER_ORG_ID}'::uuid, p_client_organization_id => v_org
     );
     -- create_location_event has no distance_km param (shared RPC, not extended for this) - set it directly after insert.
-    IF v_evt->'payload'->>'job_kms' ~ '^[0-9]+([.][0-9]+)?$' THEN
-      UPDATE public.location_events SET distance_km = (v_evt->'payload'->>'job_kms')::numeric
+    IF v_evt->>'distance_km' ~ '^[0-9]+([.][0-9]+)?$' THEN
+      UPDATE public.location_events SET distance_km = (v_evt->>'distance_km')::numeric
       WHERE organization_id = v_org AND external_ref = v_evt->>'external_ref';
     END IF;
     v_evt_count := v_evt_count + 1;

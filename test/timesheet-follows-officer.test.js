@@ -3,8 +3,8 @@ const fs = require('node:fs');
 const path = require('node:path');
 const test = require('node:test');
 
-const migration = fs.readFileSync(path.resolve(__dirname, '../supabase/migrations/20260919080000_timesheet_work_follows_the_officer.sql'), 'utf8');
-const page = fs.readFileSync(path.resolve(__dirname, '../apps/web/src/pages/OfficerTimesheetPage.tsx'), 'utf8');
+const migration = fs.readFileSync(path.resolve(__dirname, '../supabase/migrations/20260919080000_timesheet_work_follows_the_officer.sql'), 'utf8').replace(/\r\n/g, '\n');
+const page = fs.readFileSync(path.resolve(__dirname, '../apps/web/src/pages/OfficerTimesheetPage.tsx'), 'utf8').replace(/\r\n/g, '\n');
 
 const between = (text, start, end) => text.slice(text.indexOf(start), text.indexOf(end, text.indexOf(start)));
 const readWork = between(migration, 'create or replace function public.get_officer_timesheet_work', 'create or replace function public.submit_officer_timesheet_from_work');

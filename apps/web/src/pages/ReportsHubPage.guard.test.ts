@@ -2,7 +2,7 @@ import { readFileSync } from 'node:fs';
 import { resolve } from 'node:path';
 import { describe, expect, it } from 'vitest';
 
-const page = readFileSync(resolve(process.cwd(), 'src/pages/ReportsHubPage.tsx'), 'utf8');
+const page = readFileSync(resolve(process.cwd(), 'src/pages/ReportsHubPage.tsx'), 'utf8').replace(/\r\n/g, '\n');
 const reviewPanel = readFileSync(resolve(process.cwd(), 'src/components/ReportPackReviewPanel.tsx'), 'utf8');
 const migration = readFileSync(resolve(process.cwd(), '../../supabase/migrations/20260926010000_govern_report_pack_review_and_delivery.sql'), 'utf8');
 
@@ -71,6 +71,21 @@ describe('governed monthly report pack generation', () => {
     expect(page).toContain('Group Reporting Overview');
     expect(page).toContain('row.source_organization_name');
     expect(page).toContain('Branch-owned operational activity, consolidated for parent oversight.');
+  });
+
+  it('shows operational activity only for places linked to the providers agreements without reading narratives', () => {
+    expect(page).toContain(".select('zone_id,site_id')");
+    expect(page).toContain("from('location_events')");
+    expect(page).toContain('zone_id.in.(');
+    expect(page).toContain('client_site_id.in.(');
+    expect(page).toContain('source_file:payload->>source_file');
+    expect(page).toContain('Operational Activity');
+    expect(page).not.toMatch(/from\('location_events'\)[\s\S]{0,500}(comments|action_by|job_cost|total_cost)/);
+  });
+
+  it('does not fall back to organization-wide Freedom Camping records for an agreement with no patrol zones', () => {
+    expect(page).toMatch(/:\s*selectedAgreement\s*\? Promise\.resolve\(\{ data: \[\], error: null \}\)\s*:\s*supabase\s*\.from\('breach_alerts'\)/);
+    expect(page).toMatch(/:\s*selectedAgreement\s*\? Promise\.resolve\(\{ data: \[\], error: null \}\)\s*:\s*supabase\s*\.from\('observations'\)/);
   });
 
   it('limits generation to the active provider administrator and records an audit receipt', () => {
