@@ -10,6 +10,9 @@ Date: 2026-09-11
 The admin desktop shell uses one workspace selector and a section-specific
 tool row rather than an always-expanded list of every page. The operating
 organisation selector and existing role/module gates remain unchanged.
+Role-permitted workspaces with no available tools remain visible as disabled
+"Not enabled" entries. Their visibility does not confer subscription or route
+access; role-prohibited workspaces are still omitted.
 
 | Workspace | Owning workflow |
 | --- | --- |

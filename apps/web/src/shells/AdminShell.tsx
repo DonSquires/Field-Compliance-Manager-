@@ -285,14 +285,15 @@ interface NavItemProps {
   label: string;
   icon: LucideIcon;
   active: boolean;
+  disabled?: boolean;
   onClick: () => void;
 }
 
-const NavItem: React.FC<NavItemProps> = ({ label, icon: Icon, active, onClick }) => {
+const NavItem: React.FC<NavItemProps> = ({ label, icon: Icon, active, disabled = false, onClick }) => {
   return (
-    <button type="button" onClick={onClick} className={`admin-nav-item ${active ? 'is-active' : ''}`} title={label} aria-label={label} aria-current={active ? 'page' : undefined}>
+    <button type="button" onClick={onClick} disabled={disabled} className={`admin-nav-item ${active ? 'is-active' : ''}`} title={disabled ? `${label} is not enabled for this organisation` : label} aria-label={label} aria-current={active ? 'page' : undefined}>
       <span><Icon size={17} aria-hidden="true" /></span>
-      <span>{label}</span>
+      <span>{label}{disabled && <small className="admin-workspace-unavailable">Not enabled</small>}</span>
     </button>
   );
 };
@@ -481,10 +482,10 @@ const AdminShell: React.FC = () => {
   const workflowContext = useMemo(() => readWorkflowContext(location.search), [location.search]);
 
   const visibleWorkspaces = Object.entries(NAVIGATION_MAP)
-    .map(([group, items]) => ({ group, items: items.filter((item) => isPageEnabled(item.id as AdminPage)) }))
-    .filter((workspace) => workspace.items.length > 0);
+    .filter(([, items]) => items.some((item) => canAccessAdminPage(item.id, profile?.role, () => true)))
+    .map(([group, items]) => ({ group, items: items.filter((item) => isPageEnabled(item.id as AdminPage)) }));
   const activeWorkspace = visibleWorkspaces.find((workspace) => workspace.items.some((item) => item.id === activePage))
-    ?? visibleWorkspaces[0];
+    ?? visibleWorkspaces.find((workspace) => workspace.items.length > 0);
   const openWorkspaceItem = (item: WorkspaceItem) => {
     if (item.area) navigateToFieldOps(item.area);
     else navigateToPage(item.id, workflowContext);
@@ -714,7 +715,8 @@ const AdminShell: React.FC = () => {
                   label={section.label}
                   icon={section.icon}
                   active={activeWorkspace?.group === workspace.group}
-                  onClick={() => openWorkspaceItem(workspace.items[0])}
+                  disabled={workspace.items.length === 0}
+                  onClick={() => { if (workspace.items[0]) openWorkspaceItem(workspace.items[0]); }}
                 />
               );
             })}
