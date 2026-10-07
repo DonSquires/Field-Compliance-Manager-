@@ -73,15 +73,27 @@ describe('governed monthly report pack generation', () => {
     expect(page).toContain('Branch-owned operational activity, consolidated for parent oversight.');
   });
 
-  it('shows operational activity only for places linked to the providers agreements without reading narratives', () => {
+  it('hands the providers agreement places to the searchable record browser instead of a fixed 50-row table', () => {
+    const browser = readFileSync(resolve(process.cwd(), 'src/components/ActivityRecordBrowser.tsx'), 'utf8').replace(/\r\n/g, '\n');
     expect(page).toContain(".select('zone_id,site_id')");
-    expect(page).toContain("from('location_events')");
-    expect(page).toContain('zone_id.in.(');
-    expect(page).toContain('client_site_id.in.(');
-    expect(page).toContain('source_file:payload->>source_file');
-    expect(page).toContain('Operational Activity');
-    expect(page).not.toMatch(/from\('location_events'\)[\s\S]{0,500}(comments|action_by|job_cost|total_cost)/);
+    expect(page).toContain('<ActivityRecordBrowser zoneIds={reportScope.zoneIds} siteIds={reportScope.siteIds}');
+    expect(page).not.toContain('Operational Activity (');
+    expect(browser).toContain("from('location_events')");
+    expect(browser).toContain("from('observations')");
+    expect(browser).toContain('zone_id.in.(');
+    expect(browser).toContain('client_site_id.in.(');
+    expect(browser).toContain('.range(rangeFrom, rangeTo)');
+    expect(browser).toContain('ilike');
+    // Narrative columns are read only through the signed-in session, so row-level security still decides who sees them.
+    expect(browser).toContain('officer_notes');
+    expect(browser).not.toContain('service_role');
   });
+
+  it('never replaces the whole Reports page with a spinner, so filters and navigation stay usable', () => {
+    expect(page).not.toMatch(/if \(loading\) \{\s*return/);
+    expect(page).toContain('Refreshing report totals');
+  });
+
 
   it('does not fall back to organization-wide Freedom Camping records for an agreement with no patrol zones', () => {
     expect(page).toMatch(/:\s*selectedAgreement\s*\? Promise\.resolve\(\{ data: \[\], error: null \}\)\s*:\s*supabase\s*\.from\('breach_alerts'\)/);

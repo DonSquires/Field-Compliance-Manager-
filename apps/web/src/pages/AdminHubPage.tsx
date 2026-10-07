@@ -18,6 +18,7 @@ import {
 import type { LucideIcon } from 'lucide-react';
 import { useAuth } from '../context/AuthContext';
 import { useServiceRelationships } from '../context/ServiceRelationshipContext';
+import { LoggedActivityPanel } from './LoggedActivityPanel';
 import { SafetyGate } from '../components/SafetyGate';
 import { MetricCard } from '../components/MetricCard/MetricCard';
 import { QueueCard } from '../components/QueueCard/QueueCard';
@@ -392,6 +393,8 @@ const AdminHubPage: React.FC<AdminHubPageProps> = ({ onNavigate }) => {
           </div>
         </aside>
       </div>
+
+      <LoggedActivityPanel onOpenRecords={() => onNavigate?.('reports')} />
 
       <section className="admin-dashboard" aria-labelledby="dashboard-heading">
         <div className="admin-dashboard-heading">

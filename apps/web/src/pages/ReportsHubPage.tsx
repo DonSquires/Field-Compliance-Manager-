@@ -12,6 +12,7 @@ import React, { useState, useEffect, useCallback, useMemo } from 'react';
 import { FilePlus2 } from 'lucide-react';
 import { useAuth } from '../context/AuthContext';
 import { useServiceRelationships } from '../context/ServiceRelationshipContext';
+import { ActivityRecordBrowser } from '../components/ActivityRecordBrowser';
 import { CustomReportBuilder } from '../components/CustomReportBuilder';
 import { ReportPackReviewPanel, type ReportPackEditorial, type ReviewableReportPack } from '../components/ReportPackReviewPanel';
 import { useEnabledModules } from '../hooks/useEnabledModules';
@@ -36,18 +37,6 @@ interface Observation {
   is_compliant: boolean | null;
   compliance_reason: string | null;
   zone_id: string | null;
-}
-
-interface OperationalActivity {
-  id: string;
-  event_type: string;
-  occurred_at: string;
-  module_key: string | null;
-  source: string | null;
-  distance_km: number | string | null;
-  source_file: string | null;
-  source_sheet: string | null;
-  source_row: string | null;
 }
 
 interface ReportMetrics {
@@ -184,8 +173,7 @@ const ReportsHubPage: React.FC = () => {
 
   const [breachAlerts, setBreachAlerts] = useState<BreachAlert[]>([]);
   const [observations, setObservations] = useState<Observation[]>([]);
-  const [operationalActivity, setOperationalActivity] = useState<OperationalActivity[]>([]);
-  const [operationalActivityCount, setOperationalActivityCount] = useState(0);
+  const [reportScope, setReportScope] = useState<{ zoneIds: string[]; siteIds: string[] }>({ zoneIds: [], siteIds: [] });
   const [reportPacks, setReportPacks] = useState<MonthlyReportPack[]>([]);
   const [consolidatedReporting, setConsolidatedReporting] = useState<ConsolidatedReportingRow[]>([]);
   const [loading, setLoading] = useState(true);
@@ -229,15 +217,12 @@ const ReportsHubPage: React.FC = () => {
         reportSiteIds = [...new Set((links ?? []).map((link) => link.site_id).filter((id): id is string => Boolean(id)))];
         if (selectedAgreement) activeZoneIds = reportZoneIds.length > 0 ? reportZoneIds : null;
       }
-      const activityPlaceFilters = [
-        ...(reportZoneIds.length ? [`zone_id.in.(${reportZoneIds.join(',')})`] : []),
-        ...(reportSiteIds.length ? [`client_site_id.in.(${reportSiteIds.join(',')})`] : []),
-      ];
+      setReportScope((current) => (current.zoneIds.join(',') === reportZoneIds.join(',') && current.siteIds.join(',') === reportSiteIds.join(',') ? current : { zoneIds: reportZoneIds, siteIds: reportSiteIds }));
       const timestampEndExclusive = exclusiveEndIso(dateRange.end);
       // Report packs belong to the agreement's provider, which is a branch under the Model A house; list the whole house.
       const { data: descendantOrgIds } = await supabase.rpc('get_descendant_organizations', { org_id: profile.organizationId });
       const houseOrgIds = [...new Set([profile.organizationId, ...(Array.isArray(descendantOrgIds) ? descendantOrgIds : [])])];
-      const [breachResponse, observationResponse, packResponse, consolidatedResponse, activityResponse] = await Promise.all([
+      const [breachResponse, observationResponse, packResponse, consolidatedResponse] = await Promise.all([
         !freedomCampingEnabled
           ? Promise.resolve({ data: [], error: null })
           : activeZoneIds && activeZoneIds.length > 0
@@ -293,26 +278,14 @@ const ReportsHubPage: React.FC = () => {
               .order('period_end', { ascending: false }),
         // The overview is per branch of the house; there is no per-agreement overload (calling one 404'd and failed the whole page).
         supabase.rpc('get_consolidated_reporting_overview', { p_root_organization_id: profile.organizationId, p_from: dateRange.start, p_to: dateRange.end }),
-        activityPlaceFilters.length > 0
-          ? supabase
-              .from('location_events')
-              .select('id,event_type,occurred_at,module_key,source,distance_km,source_file:payload->>source_file,source_sheet:payload->>source_sheet,source_row:payload->>source_row', { count: 'exact' })
-              .or(activityPlaceFilters.join(','))
-              .gte('occurred_at', dateRange.start)
-              .lt('occurred_at', timestampEndExclusive)
-              .order('occurred_at', { ascending: false })
-              .limit(50)
-          : Promise.resolve({ data: [], error: null, count: 0 }),
       ]);
 
-      const failure = breachResponse.error ?? observationResponse.error ?? packResponse.error ?? consolidatedResponse.error ?? activityResponse.error;
+      const failure = breachResponse.error ?? observationResponse.error ?? packResponse.error ?? consolidatedResponse.error;
       if (failure) throw failure;
       const breaches = (breachResponse.data as BreachAlert[]) || [];
       const obs = (observationResponse.data as Observation[]) || [];
       setBreachAlerts(breaches);
       setObservations(obs);
-      setOperationalActivity((activityResponse.data as OperationalActivity[]) || []);
-      setOperationalActivityCount(activityResponse.count ?? activityResponse.data?.length ?? 0);
       setReportPacks((packResponse.data as MonthlyReportPack[]) || []);
       setConsolidatedReporting((consolidatedResponse.data as ConsolidatedReportingRow[]) || []);
       setMetrics({ totalBreaches: breaches.length, totalObservations: obs.length, nonCompliantObservations: obs.filter((o) => o.is_compliant === false).length });
@@ -403,17 +376,6 @@ const ReportsHubPage: React.FC = () => {
     }
   };
 
-  if (loading) {
-    return (
-      <div className="page-container">
-        <div className="loading-state">
-          <div className="spinner"></div>
-          <p>Loading reports...</p>
-        </div>
-      </div>
-    );
-  }
-
   return (
     <div className="page-container reports-hub-page">
       <header className="page-header">
@@ -421,6 +383,7 @@ const ReportsHubPage: React.FC = () => {
         <p className="subtitle">Create, review and deliver accountable client reports.</p>
       </header>
 
+      {loading && <p className="subtitle" role="status">Refreshing report totals…</p>}
       {error && (
         <div className="alert alert-error" role="alert">
           <button className="alert-close" onClick={() => setError(null)} aria-label="Close alert">
@@ -495,31 +458,7 @@ const ReportsHubPage: React.FC = () => {
 
       {consolidatedReporting.length > 1 && <section className="reports-section"><h2>Group Reporting Overview</h2><p className="subtitle">Branch-owned operational activity, consolidated for parent oversight. Detailed queues below remain in the current organization context.</p><div className="reports-table-wrapper"><table className="reports-table"><thead><tr><th>Operating Organization</th><th>Breach Alerts</th><th>Observations</th><th>Non-Compliant</th><th>Report Packs</th></tr></thead><tbody>{consolidatedReporting.map((row) => <tr key={row.source_organization_id}><td>{row.source_organization_name}</td><td>{row.breach_count}</td><td>{row.observation_count}</td><td>{row.non_compliant_observation_count}</td><td>{row.report_pack_count}</td></tr>)}</tbody></table></div></section>}
 
-      <section className="reports-section">
-        <h2>Operational Activity ({operationalActivityCount})</h2>
-        <div className="reports-table-wrapper">
-          <table className="reports-table">
-            <thead><tr><th>Date</th><th>Activity</th><th>Module</th><th>Distance</th><th>Source</th><th>Reference</th></tr></thead>
-            <tbody>
-              {operationalActivity.length === 0 ? <tr><td colSpan={6} className="text-center">No operational activity in this period</td></tr> : operationalActivity.map((event) => {
-                const distance = event.distance_km === null ? null : Number(event.distance_km);
-                const reference = [event.source_sheet, event.source_row].filter(Boolean).join(' · ');
-                return (
-                  <tr key={event.id}>
-                    <td>{new Date(event.occurred_at).toLocaleString('en-NZ')}</td>
-                    <td>{event.event_type.replaceAll('_', ' ')}</td>
-                    <td>{event.module_key ?? '—'}</td>
-                    <td>{distance !== null && Number.isFinite(distance) ? `${distance.toFixed(1)} km` : '—'}</td>
-                    <td>{event.source === 'rm_patrol_log_import' ? 'Patrol log' : event.source ?? '—'}</td>
-                    <td>{event.source_file ? `${event.source_file}${reference ? ` · ${reference}` : ''}` : '—'}</td>
-                  </tr>
-                );
-              })}
-            </tbody>
-          </table>
-        </div>
-        {operationalActivityCount > operationalActivity.length && <p className="subtitle">Showing the latest {operationalActivity.length} of {operationalActivityCount} records.</p>}
-      </section>
+      <ActivityRecordBrowser zoneIds={reportScope.zoneIds} siteIds={reportScope.siteIds} scopeLabel={selectedAgreement ? selectedAgreement.name : 'all your agreements'} />
 
       <section className="reports-section">
         <h2>Report Packs ({reportPacks.length})</h2>

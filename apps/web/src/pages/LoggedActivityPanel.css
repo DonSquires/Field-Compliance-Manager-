@@ -1,0 +1,8 @@
+.admin-logged-activity { margin-top: 20px; }
+.admin-logged-activity__totals { display: grid; grid-template-columns: repeat(auto-fit, minmax(200px, 1fr)); gap: 12px; margin: 12px 0; }
+.admin-logged-activity__totals div { border: 1px solid var(--border-color, #d0d5dd); border-radius: 8px; padding: 12px; }
+.admin-logged-activity__totals dt { font-size: 13px; opacity: 0.75; }
+.admin-logged-activity__totals dd { margin: 4px 0 0; font-size: 26px; font-weight: 700; }
+.admin-logged-activity__recent { list-style: none; margin: 0; padding: 0; display: grid; gap: 8px; }
+.admin-logged-activity__recent li { border-bottom: 1px solid var(--border-color, #e4e7ec); padding-bottom: 8px; }
+.admin-logged-activity__recent span { display: block; margin-top: 2px; opacity: 0.8; overflow-wrap: anywhere; }

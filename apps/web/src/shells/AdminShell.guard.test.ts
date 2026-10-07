@@ -8,6 +8,10 @@ import { describe, expect, it } from 'vitest';
 const source = readFileSync(resolve(process.cwd(), 'src/shells/AdminShell.tsx'), 'utf8').replace(/\r\n/g, '\n');
 
 describe('AdminShell access and routing boundaries', () => {
+  it('treats module subscriptions that are still loading as unknown, not denied, for navigation clicks', () => {
+    expect(source).toContain("modulesStatus === 'loading' ? () => true : isModuleEnabled");
+  });
+
   it('integrates tenant-scoped role-aware notifications', () => {
     expect(source).toContain('<NotificationCenter onNavigate={navigateFromNotification} />');
     expect(source).toContain('resolveNotificationDestination');

@@ -436,8 +436,10 @@ const AdminShell: React.FC = () => {
   // GPS / geofence evidence belongs to field pages; on a desk page (clients, finance, roster, settings) it only confuses.
   const showPlaceContext = FIELD_CONTEXT_PAGES.has(activePage);
   const isPageEnabled = useCallback((page: AdminPage): boolean => {
-    return canAccessAdminPage(page, profile?.role, isModuleEnabled);
-  }, [profile?.role, isModuleEnabled]);
+    // While subscriptions are still loading, isModuleEnabled() answers false for everything; that is "unknown", not "denied".
+    // Role checks still apply, and the route effect re-evaluates the module gate once loading finishes.
+    return canAccessAdminPage(page, profile?.role, modulesStatus === 'loading' ? () => true : isModuleEnabled);
+  }, [profile?.role, isModuleEnabled, modulesStatus]);
 
   const navigateToPage = useCallback((page: AdminPage, context?: WorkflowContext) => {
     if (!isPageEnabled(page)) {
