@@ -21,10 +21,10 @@ import {
   buildDeviceEvents,
   buildManifest,
   classifyFolder,
+  contentStoragePathFor,
   detectDeviceKind,
   formatBytes,
   isValidTimeZone,
-  storagePathFor,
   summarize,
   type DeviceKind,
   type ScanInput,
@@ -354,12 +354,12 @@ const CCTVImportPage: React.FC = () => {
       for (const item of selectedStills) {
         if (cancelRef.current) break;
         if (progress[item.relativePath]?.status === 'done') { registered += 1; continue; }
-        const objectName = storagePathFor(organizationId, importId, item.relativePath);
         setStepMessage(`Uploading ${item.name} for face and plate analysis…`);
         setFileProgress(item.relativePath, { status: 'uploading', sent: 0, error: undefined });
         try {
           const contentType = imageContentType(item.file);
           const sha256 = await fileSha256(item.file);
+          const objectName = contentStoragePathFor(organizationId, sha256);
           await uploadObject(item.file, objectName, contentType, (sent) => setFileProgress(item.relativePath, { sent }));
           setFileProgress(item.relativePath, { status: 'registering', sent: item.sizeBytes });
           const { error: registerError } = await supabase.rpc('register_cctv_import_photo', {
@@ -400,10 +400,11 @@ const CCTVImportPage: React.FC = () => {
       for (const item of videos) {
         if (cancelRef.current) break;
         if (progress[item.relativePath]?.status === 'done') { registered += 1; continue; }
-        const objectName = storagePathFor(organizationId, importId, item.relativePath);
         setStepMessage(`Uploading ${item.name} (${formatBytes(item.sizeBytes)})…`);
         setFileProgress(item.relativePath, { status: 'uploading', sent: 0, error: undefined });
         try {
+          const sha256 = await fileSha256(item.file);
+          const objectName = contentStoragePathFor(organizationId, sha256);
           await uploadObject(item.file, objectName, item.file.type || 'video/mp4', (sent) => setFileProgress(item.relativePath, { sent }));
           setFileProgress(item.relativePath, { status: 'registering', sent: item.sizeBytes });
           const { error: registerError } = await supabase.rpc('register_cctv_import_video', {
@@ -411,7 +412,7 @@ const CCTVImportPage: React.FC = () => {
             p_storage_path: objectName,
             p_file_name: item.name,
             p_file_size_bytes: item.sizeBytes,
-            p_sha256: null,
+            p_sha256: sha256,
             p_recorded_start_at: item.slotStartAt ?? null,
             p_recorded_end_at: item.slotEndAt ?? null,
             p_source_ref: item.relativePath,

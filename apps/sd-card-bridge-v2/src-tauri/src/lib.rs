@@ -157,8 +157,18 @@ fn explain_device_error(error: &std::io::Error) -> String {
         Some(32) => format!("{error}. Another program holds the card open (often Explorer's 'You need to format the disk' prompt, a backup tool or antivirus). Close it and try again."),
         Some(21) | Some(1167) => format!("{error}. Windows says the device is not ready: reseat the card in the reader and discover again."),
         Some(87) | Some(27) => format!("{error}. The read fell outside the sectors Windows will serve; the reported disk size may be wrong for this reader."),
+        Some(1117) | Some(23) => format!("{error}. The reader answered with an I/O error instead of data: reseat the card, try another reader and a direct USB port rather than a hub, then discover again. If every reader fails the same way, the card itself has failed."),
         _ => error.to_string(),
     }
+}
+
+/// The same fault reached through the DHFS reader, which has already turned the Windows code into a
+/// sentence. "I/O device error" on its own reads as an FCM fault; name the card and the reader instead.
+fn explain_card_read_failure(detail: String) -> String {
+    if detail.contains("I/O device error") || detail.contains("cyclic redundancy check") {
+        return format!("{detail} Windows could not read this card's sectors at all, so there is nothing for FCM to list. Reseat the card, try another reader and a direct USB port rather than a hub, then discover again. If every reader fails the same way, the card itself has failed and the recordings need data recovery rather than FCM.");
+    }
+    detail
 }
 
 fn open_source(spec: &DhfsSourceSpec) -> Result<AlignedFileSource, String> {
@@ -228,7 +238,7 @@ fn discover_read_only_devices() -> Result<Vec<DeviceCandidate>, String> {
 fn probe_device(id: String, size_bytes: u64) -> Result<DeviceProbe, String> {
     let mut source = open_source(&DhfsSourceSpec::Device { id: id.clone(), size_bytes })?;
     let mut sector0 = vec![0_u8; 512];
-    fcm_dhfs::BlockSource::read_at(&mut source, 0, &mut sector0).map_err(|error| error.to_string())?;
+    fcm_dhfs::BlockSource::read_at(&mut source, 0, &mut sector0).map_err(|error| explain_card_read_failure(error.to_string()))?;
     let mbr_signature = sector0[510] == 0x55 && sector0[511] == 0xaa;
     let mbr_partitions = if mbr_signature {
         (0..4).filter_map(|index| {
@@ -412,8 +422,9 @@ fn inspect_acquisition_image(image_path: String) -> Result<InspectionResult, Str
 /// Locate the hidden DHFS partition and list every recording it holds, from an image or the card.
 #[tauri::command(async)]
 fn read_dhfs_catalog(source: DhfsSourceSpec) -> Result<Catalog, String> {
+    let from_card = source.label() == "card";
     let mut block_source = open_source(&source)?;
-    fcm_dhfs::catalog(&mut block_source).map_err(|error| error.to_string())
+    fcm_dhfs::catalog(&mut block_source).map_err(|error| if from_card { explain_card_read_failure(error.to_string()) } else { error.to_string() })
 }
 
 /// Copy one recording out of the volume into `destination_directory` (atomic, hashed, never overwrites).

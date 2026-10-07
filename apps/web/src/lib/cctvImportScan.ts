@@ -316,6 +316,10 @@ export function storagePathFor(organizationId: string, importId: string, relativ
   return `org/${organizationId}/cctv/${importId}/${safe || 'file'}`;
 }
 
+export function contentStoragePathFor(organizationId: string, sha256: string): string {
+  return `org/${organizationId}/cctv-media/${sha256.toLowerCase()}`;
+}
+
 export function formatBytes(bytes: number): string {
   if (!Number.isFinite(bytes) || bytes <= 0) return '0 B';
   const units = ['B', 'KB', 'MB', 'GB', 'TB'];

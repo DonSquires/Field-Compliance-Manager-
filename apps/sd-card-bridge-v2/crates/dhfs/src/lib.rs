@@ -38,6 +38,10 @@ pub const MAGIC_SCAN_LIMIT: u64 = 64 * 1024 * 1024;
 const DPT_SCAN_BYTES: usize = 96 * 1024;
 const PROBE_BYTES: usize = 256 * 1024;
 const COPY_CHUNK: u64 = 1024 * 1024;
+/// How much unreadable ground the volume scan will step over before calling the medium failed.
+const MAX_UNREADABLE_SCAN: u64 = 8 * 1024 * 1024;
+/// A failed chunk is re-read in pieces this size, so one bad sector does not hide the whole megabyte.
+const SCAN_RETRY_CHUNK: u64 = 64 * 1024;
 
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub enum DhfsError {
@@ -236,52 +240,89 @@ fn magic_at(source: &mut dyn BlockSource, offset: u64) -> bool {
     source.read_at(offset, &mut bytes).is_ok() && &bytes == MAGIC
 }
 
+fn magic_in(chunk: &[u8]) -> Option<usize> {
+    let mut position = 0;
+    while position + MAGIC.len() <= chunk.len() {
+        if &chunk[position..position + MAGIC.len()] == MAGIC { return Some(position); }
+        position += SECTOR as usize;
+    }
+    None
+}
+
 /// Find where the DHFS volume starts. Checks sector 0, then MBR/GPT partition starts, then scans.
 pub fn locate_volume(source: &mut dyn BlockSource) -> Result<VolumeLocation, DhfsError> {
-    let sector0 = read_vec(source, 0, SECTOR as usize)?;
-    if sector0.starts_with(MAGIC) {
-        return Ok(VolumeLocation { base_offset: 0, method: LocationMethod::DeviceStart });
-    }
     let mut notes = Vec::new();
-    if sector0[510] == 0x55 && sector0[511] == 0xaa {
-        let entries: Vec<(u8, u8, u32)> = (0..4).map(|index| {
-            let entry = &sector0[446 + index * 16..446 + index * 16 + 16];
-            (index as u8, entry[4], le_u32(&entry[8..12]))
-        }).collect();
-        if entries.iter().any(|(_, type_code, _)| *type_code == 0xee) {
-            match locate_in_gpt(source) {
-                Ok(Some(location)) => return Ok(location),
-                Ok(None) => notes.push("GPT present but no partition starts with DHFS4.1".to_string()),
-                Err(error) => notes.push(format!("GPT unreadable: {error}")),
+    // A card whose opening sectors have failed still holds its recordings, so an unreadable sector 0
+    // costs us the MBR and nothing else: record the loss and let the scan find the volume.
+    match read_vec(source, 0, SECTOR as usize) {
+        Ok(sector0) => {
+            if sector0.starts_with(MAGIC) {
+                return Ok(VolumeLocation { base_offset: 0, method: LocationMethod::DeviceStart });
+            }
+            if sector0[510] == 0x55 && sector0[511] == 0xaa {
+                let entries: Vec<(u8, u8, u32)> = (0..4).map(|index| {
+                    let entry = &sector0[446 + index * 16..446 + index * 16 + 16];
+                    (index as u8, entry[4], le_u32(&entry[8..12]))
+                }).collect();
+                if entries.iter().any(|(_, type_code, _)| *type_code == 0xee) {
+                    match locate_in_gpt(source) {
+                        Ok(Some(location)) => return Ok(location),
+                        Ok(None) => notes.push("GPT present but no partition starts with DHFS4.1".to_string()),
+                        Err(error) => notes.push(format!("GPT unreadable: {error}")),
+                    }
+                }
+                for (index, type_code, first_lba) in entries {
+                    if first_lba == 0 || type_code == 0 { continue; }
+                    let offset = first_lba as u64 * SECTOR;
+                    if magic_at(source, offset) {
+                        return Ok(VolumeLocation { base_offset: offset, method: LocationMethod::MbrPartition { index, type_code, first_lba } });
+                    }
+                    notes.push(format!("MBR partition {index} (type 0x{type_code:02x}, LBA {first_lba}) is not DHFS"));
+                }
+            } else {
+                notes.push("no MBR signature at sector 0".to_string());
             }
         }
-        for (index, type_code, first_lba) in entries {
-            if first_lba == 0 || type_code == 0 { continue; }
-            let offset = first_lba as u64 * SECTOR;
-            if magic_at(source, offset) {
-                return Ok(VolumeLocation { base_offset: offset, method: LocationMethod::MbrPartition { index, type_code, first_lba } });
-            }
-            notes.push(format!("MBR partition {index} (type 0x{type_code:02x}, LBA {first_lba}) is not DHFS"));
-        }
-    } else {
-        notes.push("no MBR signature at sector 0".to_string());
+        Err(error) => notes.push(format!("sector 0 could not be read ({error}), so the partition table is gone; scanned for the volume instead")),
     }
     let limit = source.size_hint().map(|size| size.min(MAGIC_SCAN_LIMIT)).unwrap_or(MAGIC_SCAN_LIMIT);
     let mut offset = SECTOR;
+    let mut unreadable = 0_u64;
     while offset + SECTOR <= limit {
         let chunk_len = (limit - offset).min(COPY_CHUNK) as usize;
-        let chunk = match read_vec(source, offset, chunk_len) {
-            Ok(chunk) => chunk,
-            Err(_) => break,
-        };
-        let mut position = 0;
-        while position + MAGIC.len() <= chunk.len() {
-            if &chunk[position..position + MAGIC.len()] == MAGIC {
-                return Ok(VolumeLocation { base_offset: offset + position as u64, method: LocationMethod::Scan });
+        match read_vec(source, offset, chunk_len) {
+            Ok(chunk) => {
+                if let Some(position) = magic_in(&chunk) {
+                    return Ok(VolumeLocation { base_offset: offset + position as u64, method: LocationMethod::Scan });
+                }
             }
-            position += SECTOR as usize;
+            // A damaged patch is a hole to step over, not the end of the search: re-read it in pieces
+            // first, then give up only once the holes stop looking like a failed header.
+            Err(_) => {
+                let end = offset + chunk_len as u64;
+                let mut piece_offset = offset;
+                while piece_offset + SECTOR <= end {
+                    let piece_len = (end - piece_offset).min(SCAN_RETRY_CHUNK) as usize;
+                    match read_vec(source, piece_offset, piece_len) {
+                        Ok(piece) => {
+                            if let Some(position) = magic_in(&piece) {
+                                return Ok(VolumeLocation { base_offset: piece_offset + position as u64, method: LocationMethod::Scan });
+                            }
+                        }
+                        Err(_) => unreadable += piece_len as u64,
+                    }
+                    piece_offset += piece_len as u64;
+                }
+                if unreadable >= MAX_UNREADABLE_SCAN {
+                    notes.push(format!("gave up after {} MiB of unreadable sectors; the reader or the card is failing, not just its header", unreadable / (1024 * 1024)));
+                    break;
+                }
+            }
         }
         offset += chunk_len as u64;
+    }
+    if unreadable > 0 && unreadable < MAX_UNREADABLE_SCAN {
+        notes.push(format!("{} MiB of the scanned region could not be read", unreadable / (1024 * 1024)));
     }
     notes.push(format!("no DHFS4.1 magic on a sector boundary within the first {} MiB", limit / (1024 * 1024)));
     Err(DhfsError::NotDhfs(notes.join("; ")))
@@ -1581,6 +1622,43 @@ mod tests {
         assert_eq!(location.base_offset, 4 * 1024 * 1024);
         let mut blank = MemorySource(vec![0_u8; 8 * 1024 * 1024]);
         assert!(matches!(locate_volume(&mut blank), Err(DhfsError::NotDhfs(_))));
+    }
+
+    /// A card that has lost its opening sectors: everything below `bad_until` answers the way Windows
+    /// answers a failing reader, and the rest of the medium is intact.
+    struct DamagedHeaderSource { image: Vec<u8>, bad_until: u64 }
+
+    impl BlockSource for DamagedHeaderSource {
+        fn size_hint(&self) -> Option<u64> { Some(self.image.len() as u64) }
+        fn read_at(&mut self, offset: u64, buf: &mut [u8]) -> Result<(), DhfsError> {
+            if offset < self.bad_until {
+                return Err(DhfsError::Io("The request could not be performed because of an I/O device error.".to_string()));
+            }
+            let end = offset.saturating_add(buf.len() as u64);
+            if end > self.image.len() as u64 {
+                return Err(DhfsError::Io(format!("read of {} bytes at {offset} runs past the end of the source", buf.len())));
+            }
+            buf.copy_from_slice(&self.image[offset as usize..end as usize]);
+            Ok(())
+        }
+    }
+
+    #[test]
+    fn a_failed_header_loses_the_partition_table_but_not_the_volume() {
+        // 64 KiB of dead sectors: sector 0 and the whole first scan chunk fail, the volume does not.
+        let mut source = DamagedHeaderSource { image: mbr_image(), bad_until: 64 * 1024 };
+        let location = locate_volume(&mut source).expect("located despite a dead header");
+        assert_eq!(location.base_offset, BASE_LBA * SECTOR);
+        assert_eq!(location.method, LocationMethod::Scan);
+    }
+
+    #[test]
+    fn a_medium_that_answers_nothing_is_reported_rather_than_ground_through() {
+        let mut source = DamagedHeaderSource { image: mbr_image(), bad_until: u64::MAX };
+        match locate_volume(&mut source) {
+            Err(DhfsError::NotDhfs(detail)) => assert!(detail.contains("sector 0 could not be read"), "{detail}"),
+            other => panic!("expected a NotDhfs report, got {other:?}"),
+        }
     }
 
     #[test]

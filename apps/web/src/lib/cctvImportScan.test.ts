@@ -4,6 +4,7 @@ import {
   buildDeviceEvents,
   buildManifest,
   classifyFolder,
+  contentStoragePathFor,
   detectDeviceKind,
   formatBytes,
   isEmptyVideoHeader,
@@ -160,5 +161,10 @@ describe('helpers', () => {
   it('keeps uploads inside the import folder with safe segments', () => {
     expect(storagePathFor('org-1', 'imp-1', 'snapshot/2026 09/13/a b.jpg')).toBe('org/org-1/cctv/imp-1/snapshot/2026_09/13/a_b.jpg');
     expect(storagePathFor('org-1', 'imp-1', '../../etc/passwd')).toBe('org/org-1/cctv/imp-1/_/_/etc/passwd');
+  });
+
+  it('uses one content-addressed object key across imports', () => {
+    const sha256 = 'A'.repeat(64);
+    expect(contentStoragePathFor('org-1', sha256)).toBe(`org/org-1/cctv-media/${sha256.toLowerCase()}`);
   });
 });

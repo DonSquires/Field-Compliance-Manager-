@@ -43,7 +43,7 @@ describe('CCTV import — the place comes first, files are classified locally, w
   });
 
   it('uploads into the import folder with resumable TUS for large files and treats an existing object as done', () => {
-    expect(page).toContain('storagePathFor(organizationId, importId, item.relativePath)');
+    expect(page).toContain('contentStoragePathFor(organizationId, sha256)');
     expect(page).toContain("endpoint: `${import.meta.env.VITE_SUPABASE_URL}/storage/v1/upload/resumable`");
     expect(page).toContain("'x-upsert': 'false'");
     expect(page).toContain('upload.findPreviousUploads()');

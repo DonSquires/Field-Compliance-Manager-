@@ -142,6 +142,11 @@ test('Desktop V2 reads the hidden DHFS partition through the shared fcm-dhfs cra
   assert.match(dhfs, /create_new\(true\)/);
   assert.match(dhfs, /existing evidence is never overwritten/);
   assert.match(dhfs, /sync_all\(\)/);
+  // A card that has lost its opening sectors still gets read: V1 could start from a known offset, V2 must too.
+  assert.doesNotMatch(dhfs, /let sector0 = read_vec\(source, 0, SECTOR as usize\)\?;/);
+  assert.match(dhfs, /sector 0 could not be read/);
+  assert.match(dhfs, /const MAX_UNREADABLE_SCAN/);
+  assert.match(dhfs, /const SCAN_RETRY_CHUNK/);
 });
 
 test('Desktop V2 exposes catalog + extraction to the UI from either the image or the card, read-only', () => {
@@ -151,13 +156,18 @@ test('Desktop V2 exposes catalog + extraction to the UI from either the image or
     assert.match(source, new RegExp(`invoke<[^>]+>\\('${command}'`), `${command} is invoked by the UI`);
   }
   // Serialised structs are camelCase so the TypeScript types are actually populated (the prototype's were not).
-  assert.match(native, /#\[serde\(tag = "kind", rename_all = "camelCase", rename_all_fields = "camelCase"\)\]\nenum DhfsSourceSpec/);
+  assert.match(native, /#\[serde\(tag = "kind", rename_all = "camelCase", rename_all_fields = "camelCase"\)\]\r?\nenum DhfsSourceSpec/);
   assert.equal((native.match(/#\[serde\(rename_all = "camelCase"\)\]/g) || []).length >= 4, true);
-  assert.match(native, /Device \{ id, size_bytes \} => \{\n\s+if !is_physical_drive_id\(id\)/);
+  assert.match(native, /Device \{ id, size_bytes \} => \{\r?\n\s+if !is_physical_drive_id\(id\)/);
   assert.match(native, /AlignedFileSource::from_file\(file, Some\(\*size_bytes\), DEVICE_READ_ALIGNMENT\)/);
   assert.match(source, /List recordings directly from card/);
   assert.match(source, /readCatalog\(\{ kind: 'device', id: selectedDevice\.id, sizeBytes: selectedDevice\.sizeBytes \}\)/);
   assert.match(source, /if \(result\.dhfs\) await readCatalog\(\{ kind: 'image', path: receipt\.imagePath \}\)/);
+  // A reader or card that answers with an I/O error is named as such, not left as a bare Windows sentence.
+  assert.match(native, /Some\(1117\) \| Some\(23\) =>/);
+  assert.match(native, /fn explain_card_read_failure/);
+  assert.match(native, /read_at\(&mut source, 0, &mut sector0\)\.map_err\(\|error\| explain_card_read_failure/);
+  assert.match(native, /if from_card \{ explain_card_read_failure\(error\.to_string\(\)\) \}/);
   // Every extraction reuses a finished copy rather than refusing or duplicating it; the operator chooses the folder.
   assert.match(source, /invoke<ExtractedClip>\('extract_dhfs_recording', \{ source: catalogSource, partitionIndex: recording\.partitionIndex, descriptor: recording\.descriptor, destinationDirectory: chosen, reuseExisting: true \}\)/);
   assert.match(source, /invoke<ExtractedClip>\('extract_dhfs_recording', \{ source: catalogSource, partitionIndex: recording\.partitionIndex, descriptor: recording\.descriptor, destinationDirectory: directory, reuseExisting: true \}\)/);
