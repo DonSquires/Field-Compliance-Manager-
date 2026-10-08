@@ -50,6 +50,11 @@ function numberFrom(data: Record<string, unknown> | null, key: string): string {
   return typeof value === 'number' ? String(value) : '0';
 }
 
+function subjectSummaryFrom(data: Record<string, unknown> | null): Record<string, unknown> | null {
+  const value = data?.subjectSummary;
+  return value && typeof value === 'object' && !Array.isArray(value) ? value as Record<string, unknown> : null;
+}
+
 export function ReportPackReviewPanel({ pack, onClose, onSaved }: ReportPackReviewPanelProps) {
   const [title, setTitle] = useState(pack.editorial?.title ?? defaultTitle(pack));
   const [executiveSummary, setExecutiveSummary] = useState(pack.editorial?.executive_summary ?? '');
@@ -57,6 +62,7 @@ export function ReportPackReviewPanel({ pack, onClose, onSaved }: ReportPackRevi
   const [followUp, setFollowUp] = useState(pack.editorial?.follow_up ?? '');
   const [savingAction, setSavingAction] = useState<'save' | 'publish' | null>(null);
   const [error, setError] = useState<string | null>(null);
+  const subjectSummary = subjectSummaryFrom(pack.data);
 
   useEffect(() => {
     setTitle(pack.editorial?.title ?? defaultTitle(pack));
@@ -133,8 +139,15 @@ export function ReportPackReviewPanel({ pack, onClose, onSaved }: ReportPackRevi
           <div><span>Camera activations</span><strong>{numberFrom(pack.data, 'cameraActivations')}</strong></div>
           <div><span>Vehicle observations</span><strong>{numberFrom(pack.data, 'vehicleObservations')}</strong></div>
           <div><span>Patrol travel (km)</span><strong>{numberFrom(pack.data, 'patrolTravelKm')}</strong></div>
+          {subjectSummary && <>
+            <div><span>Repeat vehicles</span><strong>{numberFrom(subjectSummary, 'repeatVehicles')}</strong></div>
+            <div><span>Vehicles seen at multiple places</span><strong>{numberFrom(subjectSummary, 'vehiclesAtMultiplePlaces')}</strong></div>
+            <div><span>Supporting evidence items</span><strong>{numberFrom(subjectSummary, 'supportingEvidenceItems')}</strong></div>
+            <div><span>Records with action notes</span><strong>{numberFrom(subjectSummary, 'recordsWithActionNotes')}</strong></div>
+          </>}
         </div>
       )}
+      {typeof subjectSummary?.clientSummary === 'string' && <p className="report-review-source-note">{subjectSummary.clientSummary}</p>}
       <p className="report-review-source-note">These values come from governed operational records and cannot be edited here.</p>
 
       <form className="report-review-form" onSubmit={saveDraft}>

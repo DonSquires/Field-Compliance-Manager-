@@ -33,7 +33,7 @@ type Observation = {
   officer_notes: string | null;
 };
 
-type Option = { id: string; name?: string | null; display_name?: string | null; plate_number?: string | null; incident_type?: string | null; description?: string | null };
+type Option = { id: string; canonical_person_id?: string; name?: string | null; display_name?: string | null; plate_number?: string | null; incident_type?: string | null; description?: string | null };
 type FlagFilter = '' | 'true' | 'false';
 
 const fieldStyle: React.CSSProperties = { display: 'grid', gap: 6 };
@@ -47,7 +47,7 @@ export default function ObservationSearchPage() {
   const [zoneId, setZoneId] = useState('');
   const [locationId, setLocationId] = useState('');
   const [vehicleId, setVehicleId] = useState('');
-  const [personId, setPersonId] = useState('');
+  const [personId, setPersonId] = useState(() => searchParams.get('person') ?? '');
   const [incidentId, setIncidentId] = useState('');
   const [poi, setPoi] = useState<FlagFilter>('');
   const [loi, setLoi] = useState<FlagFilter>('');
@@ -58,20 +58,25 @@ export default function ObservationSearchPage() {
   const [people, setPeople] = useState<Option[]>([]);
   const [locations, setLocations] = useState<Option[]>([]);
   const [incidents, setIncidents] = useState<Option[]>([]);
+  const [canManageIdentity, setCanManageIdentity] = useState(false);
   const [linking, setLinking] = useState<string | null>(null);
   const [error, setError] = useState<string | null>(null);
   const [selectedId, setSelectedId] = useState<string | null>(null);
 
   const loadOptions = useCallback(async () => {
     if (!profile?.organizationId) return;
-    const [siteResult, zoneResult, vehicleResult, peopleResult, locationResult, incidentResult] = await Promise.all([
+    const { data: identityAccess } = await supabase.rpc('can_manage_r_and_m_identity');
+    setCanManageIdentity(identityAccess === true);
+    const [siteResult, zoneResult, vehicleResult, locationResult, incidentResult] = await Promise.all([
       supabase.from('client_sites').select('id, name').eq('organization_id', profile.organizationId).order('name').limit(200),
       supabase.from('location_zones').select('id, name').eq('organization_id', profile.organizationId).order('name').limit(200),
       supabase.from('canonical_vehicle_public').select('id, plate_number, make, model').order('plate_number').limit(200),
-      supabase.from('person_records').select('id, display_name').eq('organization_id', profile.organizationId).order('display_name').limit(200),
       supabase.from('locations').select('id, name, address').eq('organization_id', profile.organizationId).order('name').limit(200),
       supabase.from('incidents').select('id, incident_type, description').eq('organization_id', profile.organizationId).order('created_at', { ascending: false }).limit(200),
     ]);
+    const peopleResult = identityAccess === true
+      ? await supabase.rpc('list_verified_person_projections_for_organization', { p_organization_id: profile.organizationId })
+      : { data: [] as Option[] };
     setSites((siteResult.data ?? []) as Option[]);
     setZones((zoneResult.data ?? []) as Option[]);
     setVehicles((vehicleResult.data ?? []) as Option[]);
@@ -128,6 +133,7 @@ export default function ObservationSearchPage() {
       p_zone_id: values.zoneId || null,
       p_location_id: null,
       p_incident_id: values.incidentId || null,
+      p_identity_basis: values.identityBasis || null,
     });
     if (linkError) setError(linkError.message);
     else await runSearch();
@@ -146,7 +152,7 @@ export default function ObservationSearchPage() {
         <label><span>Zone</span><select value={zoneId} onChange={(event) => setZoneId(event.target.value)}><option value="">All zones</option>{zones.map((item) => <option key={item.id} value={item.id}>{item.name}</option>)}</select></label>
         <label><span>Location house</span><select value={locationId} onChange={(event) => setLocationId(event.target.value)}><option value="">All locations</option>{locations.map((item) => <option key={item.id} value={item.id}>{item.name}</option>)}</select></label>
         <label><span>Canonical vehicle</span><select value={vehicleId} onChange={(event) => setVehicleId(event.target.value)}><option value="">All vehicles</option>{vehicles.map((item) => <option key={item.id} value={item.id}>{item.plate_number}</option>)}</select></label>
-        <label><span>Canonical person</span><select value={personId} onChange={(event) => setPersonId(event.target.value)}><option value="">All people</option>{people.map((item) => <option key={item.id} value={item.id}>{item.display_name || 'Unnamed person'}</option>)}</select></label>
+        {canManageIdentity && <label><span>Canonical person</span><select value={personId} onChange={(event) => setPersonId(event.target.value)}><option value="">All people</option>{people.map((item) => <option key={item.canonical_person_id || item.id} value={item.canonical_person_id || item.id}>{item.display_name || 'Unnamed person'}</option>)}</select></label>}
         <label><span>Incident</span><select value={incidentId} onChange={(event) => setIncidentId(event.target.value)}><option value="">All incidents</option>{incidents.map((item) => <option key={item.id} value={item.id}>{[item.incident_type, item.description].filter(Boolean).join(': ') || item.name || 'Incident'}</option>)}</select></label>
         <label><span>POI / VOI</span><select value={poi} onChange={(event) => setPoi(event.target.value as FlagFilter)}><option value="">Any POI / VOI</option><option value="true">Flagged</option><option value="false">Not flagged</option></select></label>
         <label><span>LOI</span><select value={loi} onChange={(event) => setLoi(event.target.value as FlagFilter)}><option value="">Any LOI</option><option value="true">Flagged</option><option value="false">Not flagged</option></select></label>
@@ -155,7 +161,7 @@ export default function ObservationSearchPage() {
       {error && <div className="page-error">{error}</div>}
       <section className="observation-content" aria-label="Observation results">
         <div className="observation-queue"><div className="observation-queue-header"><div><span>Review queue</span><h2>{results.length} observation{results.length === 1 ? '' : 's'}</h2></div><small>{search || siteId || zoneId ? 'Filtered results' : 'Most recent first'}</small></div>{results.map((row) => <ObservationRow key={row.observation_id} row={row} selected={row.observation_id === selected?.observation_id} onSelect={() => setSelectedId(row.observation_id)} />)}{!results.length && <div className="observation-empty"><FileSearch size={25} /><strong>No observations found</strong><span>Try a plate, place, person, incident, or note.</span></div>}</div>
-        <aside className="observation-detail" aria-label="Selected observation detail">{selected ? <ObservationDetail row={selected} sites={sites} zones={zones} vehicles={vehicles} people={people} linking={linking === selected.observation_id} onLink={linkObservation} /> : <div className="observation-detail-empty"><Eye size={28} /><strong>Select an observation</strong><span>Choose a result to inspect its links and compliance context.</span></div>}</aside>
+        <aside className="observation-detail" aria-label="Selected observation detail">{selected ? <ObservationDetail row={selected} sites={sites} zones={zones} vehicles={vehicles} people={people} canManageIdentity={canManageIdentity} linking={linking === selected.observation_id} onLink={linkObservation} /> : <div className="observation-detail-empty"><Eye size={28} /><strong>Select an observation</strong><span>Choose a result to inspect its links and compliance context.</span></div>}</aside>
       </section>
     </main>
   );
@@ -166,13 +172,219 @@ function ObservationRow({ row, selected, onSelect }: { row: Observation; selecte
   return <button type="button" className={`observation-row ${selected ? 'is-selected' : ''}`} onClick={onSelect}><span className="observation-row-icon">{row.plate_number || row.vehicle_label ? <Car size={17} /> : <UserRound size={17} />}</span><span className="observation-row-main"><strong>{title}</strong><small>{new Date(row.observed_at).toLocaleString('en-NZ')} · {row.site_name || row.zone_name || 'Unassigned place'}</small></span><span className={`observation-status observation-status-${row.compliance_status || 'unknown'}`}>{row.compliance_status || 'Unclassified'}</span></button>;
 }
 
-function ObservationDetail({ row, sites, zones, vehicles, people, linking, onLink }: { row: Observation; sites: Option[]; zones: Option[]; vehicles: Option[]; people: Option[]; linking: boolean; onLink: (id: string, values: Record<string, string>) => Promise<void> }) {
-  const [vehicleId, setVehicleId] = useState(row.vehicle_id ?? '');
-  const [personId, setPersonId] = useState(row.person_id ?? '');
-  const [nextSiteId, setNextSiteId] = useState(row.site_id ?? '');
-  const [nextZoneId, setNextZoneId] = useState(row.zone_id ?? '');
-  return <div className="observation-detail-inner"><header><div><span>Observation record</span><h2>{row.plate_number || row.vehicle_label || row.person_label || 'Unidentified observation'}</h2><small>{new Date(row.observed_at).toLocaleString('en-NZ')}</small></div><span className={`observation-detail-status observation-status-${row.compliance_status || 'unknown'}`}>{row.compliance_status || 'Unclassified'}</span></header><div className="observation-context-grid"><div><span>Place</span><strong>{row.site_name || 'No site'}{row.zone_name ? ` · ${row.zone_name}` : ''}</strong></div><div><span>Flags</span><strong>{row.poi ? 'POI' : ''}{row.poi && row.loi ? ' · ' : ''}{row.loi ? 'LOI' : ''}{!row.poi && !row.loi ? 'None' : ''}</strong></div><div><span>Person</span><strong>{row.person_label || 'Unlinked'}{row.person_category ? ` · ${row.person_category}` : ''}</strong></div><div><span>Vehicle</span><strong>{row.vehicle_label || row.plate_number || 'Unlinked'}</strong></div></div>
-      {row.vehicle_homeless_status ? <div style={{ marginTop: '12px', padding: '10px 12px', background: 'var(--color-warning-bg)', border: '1px solid var(--color-warning)', borderRadius: '6px', fontSize: '13px' }}><strong>Welfare:</strong> someone may be living in this vehicle ({row.vehicle_homeless_status.toUpperCase()}). Approach with care and follow your welfare procedure.</div> : null}
-      {row.person_homeless_status ? <div style={{ marginTop: '12px', padding: '10px 12px', background: 'var(--color-warning-bg)', border: '1px solid var(--color-warning)', borderRadius: '6px', fontSize: '13px' }}><strong>Welfare:</strong> this person may be homeless or living rough ({row.person_homeless_status.toUpperCase()}). Approach with care and follow your welfare procedure.</div> : null}
-      {row.incident_label || row.officer_notes ? <div className="observation-note"><strong>{row.incident_label ? 'Incident context' : 'Officer note'}</strong><span>{row.incident_label || row.officer_notes}</span></div> : null}<details className="observation-link-editor"><summary><Link2 size={15} /> Link records</summary><div className="observation-link-grid"><label style={fieldStyle}><span>Vehicle</span><select style={inputStyle} value={vehicleId} onChange={(event) => setVehicleId(event.target.value)}><option value="">None</option>{vehicles.map((item) => <option key={item.id} value={item.id}>{item.plate_number}</option>)}</select></label><label style={fieldStyle}><span>Person</span><select style={inputStyle} value={personId} onChange={(event) => setPersonId(event.target.value)}><option value="">None</option>{people.map((item) => <option key={item.id} value={item.id}>{item.display_name || 'Unnamed person'}</option>)}</select></label><label style={fieldStyle}><span>Site</span><select style={inputStyle} value={nextSiteId} onChange={(event) => { setNextSiteId(event.target.value); if (event.target.value) setNextZoneId(''); }}><option value="">Keep current</option>{sites.map((item) => <option key={item.id} value={item.id}>{item.name}</option>)}</select></label><label style={fieldStyle}><span>Zone</span><select style={inputStyle} value={nextZoneId} onChange={(event) => { setNextZoneId(event.target.value); if (event.target.value) setNextSiteId(''); }}><option value="">Keep current</option>{zones.map((item) => <option key={item.id} value={item.id}>{item.name}</option>)}</select></label><button type="button" className="observation-save-button" disabled={linking} onClick={() => void onLink(row.observation_id, { vehicleId, personId, siteId: nextSiteId, zoneId: nextZoneId, incidentId: '' })}>{linking ? 'Saving...' : 'Save links'}</button></div></details><div className="observation-governance"><CheckCircle2 size={16} /><span>Link changes are tenant-scoped and governed. Confirm place and identity context before using this record for compliance action.</span></div></div>;
+function ObservationDetail({
+  row,
+  sites,
+  zones,
+  vehicles,
+  people,
+  canManageIdentity,
+  linking,
+  onLink,
+}: {
+  row: Observation;
+  sites: Option[];
+  zones: Option[];
+  vehicles: Option[];
+  people: Option[];
+  canManageIdentity: boolean;
+  linking: boolean;
+  onLink: (id: string, values: Record<string, string>) => Promise<void>;
+}) {
+  const [vehicleId, setVehicleId] = useState(row.vehicle_id ?? "");
+  const [personId, setPersonId] = useState(row.person_id ?? "");
+  const [identityBasis, setIdentityBasis] = useState("");
+  const [nextSiteId, setNextSiteId] = useState(row.site_id ?? "");
+  const [nextZoneId, setNextZoneId] = useState(row.zone_id ?? "");
+  useEffect(() => {
+    setVehicleId(row.vehicle_id ?? "");
+    setPersonId(row.person_id ?? "");
+    setIdentityBasis("");
+    setNextSiteId(row.site_id ?? "");
+    setNextZoneId(row.zone_id ?? "");
+  }, [row.observation_id, row.vehicle_id, row.person_id, row.site_id, row.zone_id]);
+  useEffect(() => {
+    setVehicleId(row.vehicle_id ?? "");
+    setPersonId(row.person_id ?? "");
+    setIdentityBasis("");
+    setNextSiteId(row.site_id ?? "");
+    setNextZoneId(row.zone_id ?? "");
+  }, [row.observation_id, row.vehicle_id, row.person_id, row.site_id, row.zone_id]);
+  return (
+    <div className="observation-detail-inner">
+      <header>
+        <div>
+          <span>Observation record</span>
+          <h2>
+            {row.plate_number ||
+              row.vehicle_label ||
+              row.person_label ||
+              "Unidentified observation"}
+          </h2>
+          <small>{new Date(row.observed_at).toLocaleString("en-NZ")}</small>
+        </div>
+        <span
+          className={`observation-detail-status observation-status-${row.compliance_status || "unknown"}`}
+        >
+          {row.compliance_status || "Unclassified"}
+        </span>
+      </header>
+      <div className="observation-context-grid">
+        <div>
+          <span>Place</span>
+          <strong>
+            {row.site_name || "No site"}
+            {row.zone_name ? ` · ${row.zone_name}` : ""}
+          </strong>
+        </div>
+        <div>
+          <span>Flags</span>
+          <strong>
+            {row.poi ? "POI" : ""}
+            {row.poi && row.loi ? " · " : ""}
+            {row.loi ? "LOI" : ""}
+            {!row.poi && !row.loi ? "None" : ""}
+          </strong>
+        </div>
+        <div>
+          <span>Person</span>
+          <strong>
+            {row.person_label || "Unlinked"}
+            {row.person_category ? ` · ${row.person_category}` : ""}
+          </strong>
+        </div>
+        <div>
+          <span>Vehicle</span>
+          <strong>{row.vehicle_label || row.plate_number || "Unlinked"}</strong>
+        </div>
+      </div>
+      {row.vehicle_homeless_status ? (
+        <div
+          style={{
+            marginTop: "12px",
+            padding: "10px 12px",
+            background: "var(--color-warning-bg)",
+            border: "1px solid var(--color-warning)",
+            borderRadius: "6px",
+            fontSize: "13px",
+          }}
+        >
+          <strong>Welfare:</strong> someone may be living in this vehicle (
+          {row.vehicle_homeless_status.toUpperCase()}). Approach with care and
+          follow your welfare procedure.
+        </div>
+      ) : null}
+      {row.person_homeless_status ? (
+        <div
+          style={{
+            marginTop: "12px",
+            padding: "10px 12px",
+            background: "var(--color-warning-bg)",
+            border: "1px solid var(--color-warning)",
+            borderRadius: "6px",
+            fontSize: "13px",
+          }}
+        >
+          <strong>Welfare:</strong> this person may be homeless or living rough
+          ({row.person_homeless_status.toUpperCase()}). Approach with care and
+          follow your welfare procedure.
+        </div>
+      ) : null}
+      {row.incident_label || row.officer_notes ? (
+        <div className="observation-note">
+          <strong>
+            {row.incident_label ? "Incident context" : "Officer note"}
+          </strong>
+          <span>{row.incident_label || row.officer_notes}</span>
+        </div>
+      ) : null}
+      <details className="observation-link-editor">
+        <summary>
+          <Link2 size={15} /> Link records
+        </summary>
+        <div className="observation-link-grid">
+          {canManageIdentity && <>
+            <label style={fieldStyle}>
+              <span>Canonical vehicle</span>
+              <select style={inputStyle} value={vehicleId} onChange={(event) => setVehicleId(event.target.value)}>
+                <option value="">None</option>
+                {vehicles.map((item) => <option key={item.id} value={item.id}>{item.plate_number}</option>)}
+              </select>
+            </label>
+            <label style={fieldStyle}>
+              <span>Person record</span>
+              <select style={inputStyle} value={personId} onChange={(event) => setPersonId(event.target.value)}>
+                <option value="">None</option>
+                {people.map((item) => <option key={item.id} value={item.id}>{item.display_name || "Unnamed person"}</option>)}
+              </select>
+            </label>
+            {personId && personId !== row.person_id && <label style={fieldStyle}>
+              <span>Identification basis</span>
+              <textarea style={inputStyle} required minLength={5} maxLength={1000} value={identityBasis} onChange={(event) => setIdentityBasis(event.target.value)} placeholder="Source or evidence supporting this link" />
+            </label>}
+          </>}
+          <label style={fieldStyle}>
+            <span>Site</span>
+            <select
+              style={inputStyle}
+              value={nextSiteId}
+              onChange={(event) => {
+                setNextSiteId(event.target.value);
+                if (event.target.value) setNextZoneId("");
+              }}
+            >
+              <option value="">Keep current</option>
+              {sites.map((item) => (
+                <option key={item.id} value={item.id}>
+                  {item.name}
+                </option>
+              ))}
+            </select>
+          </label>
+          <label style={fieldStyle}>
+            <span>Zone</span>
+            <select
+              style={inputStyle}
+              value={nextZoneId}
+              onChange={(event) => {
+                setNextZoneId(event.target.value);
+                if (event.target.value) setNextSiteId("");
+              }}
+            >
+              <option value="">Keep current</option>
+              {zones.map((item) => (
+                <option key={item.id} value={item.id}>
+                  {item.name}
+                </option>
+              ))}
+            </select>
+          </label>
+          <button
+            type="button"
+            className="observation-save-button"
+            onClick={() =>
+              void onLink(row.observation_id, {
+                vehicleId: canManageIdentity ? vehicleId : "",
+                personId: canManageIdentity ? personId : "",
+                siteId: nextSiteId,
+                zoneId: nextZoneId,
+                incidentId: "",
+                identityBasis,
+              })
+            }
+            disabled={linking || (canManageIdentity && personId !== row.person_id && personId !== "" && identityBasis.trim().length < 5)}
+          >
+            {linking ? "Saving..." : "Save links"}
+          </button>
+        </div>
+      </details>
+      <div className="observation-governance">
+        <CheckCircle2 size={16} />
+        <span>
+          Link changes are tenant-scoped and governed. Confirm place and
+          identity context before using this record for compliance action.
+        </span>
+      </div>
+    </div>
+  );
 }

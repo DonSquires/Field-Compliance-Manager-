@@ -1,7 +1,10 @@
 import React, { useEffect, useMemo, useState } from 'react';
 import { X } from 'lucide-react';
+import { useAuth } from '../context/AuthContext';
 import { useServiceRelationships } from '../context/ServiceRelationshipContext';
 import { supabase } from '../lib/supabase';
+import { RecordEvidencePanel } from './RecordEvidencePanel';
+import { RepeatPeoplePanel } from './RepeatPeoplePanel';
 import './RepeatSubjectsPanel.css';
 
 interface SubjectRow {
@@ -18,12 +21,46 @@ interface SubjectRow {
 }
 
 interface HistoryRow {
-  source: 'patrol' | 'cctv';
+  source: 'patrol' | 'cctv' | 'patrol_comment';
   record_id: string;
+  organization_id: string;
   observed_at: string;
   place_id: string | null;
   officer_id: string | null;
   note: string | null;
+  canonical_vehicle_id: string | null;
+  evidence_item_id: string | null;
+  compliance_status: string | null;
+  compliance_reason: string | null;
+  photo_url: string | null;
+}
+
+interface PersonIdentification {
+  canonical_person_id: string;
+  person_record_id: string;
+  display_name: string | null;
+  identification_basis: string | null;
+  linked_at: string;
+}
+
+interface VehicleDetails {
+  canonical_vehicle_id: string;
+  plate: string;
+  make: string | null;
+  model: string | null;
+  year: number | null;
+  colour: string | null;
+  body_type: string | null;
+  fuel_type: string | null;
+  owner_identified: boolean;
+}
+
+interface PlateMention {
+  plate: string;
+  mentions: number;
+  first_seen: string;
+  last_seen: string;
+  total_count: number;
 }
 
 const PAGE_SIZE = 25;
@@ -38,7 +75,10 @@ function describe(err: unknown): string {
 }
 
 export const RepeatSubjectsPanel: React.FC = () => {
-  const { zones, sites } = useServiceRelationships();
+  const { profile } = useAuth();
+  const { agreements, zones, sites } = useServiceRelationships();
+  const [agreementId, setAgreementId] = useState('');
+  const [canManageIdentity, setCanManageIdentity] = useState(false);
   const [minSightings, setMinSightings] = useState(3);
   const [rangeIndex, setRangeIndex] = useState(0);
   const [page, setPage] = useState(0);
@@ -48,8 +88,16 @@ export const RepeatSubjectsPanel: React.FC = () => {
   const [filter, setFilter] = useState('');
   const [selected, setSelected] = useState<SubjectRow | null>(null);
   const [history, setHistory] = useState<HistoryRow[]>([]);
+  const [identifications, setIdentifications] = useState<PersonIdentification[]>([]);
+  const [vehicleDetails, setVehicleDetails] = useState<VehicleDetails | null>(null);
+  const [plateMentions, setPlateMentions] = useState<PlateMention[]>([]);
+  const [expandedEvidenceId, setExpandedEvidenceId] = useState<string | null>(null);
   const [historyLoading, setHistoryLoading] = useState(false);
   const [officerNames, setOfficerNames] = useState<Record<string, string>>({});
+
+  const providerAgreements = useMemo(() => agreements.filter((agreement) =>
+    agreement.agreement_type === 'operational' && agreement.invitation_status === 'accepted' && agreement.client_organization_id !== profile?.organizationId,
+  ), [agreements, profile?.organizationId]);
 
   const placeNames = useMemo(() => {
     const names = new Map<string, string>();
@@ -58,35 +106,66 @@ export const RepeatSubjectsPanel: React.FC = () => {
     return names;
   }, [sites, zones]);
 
-  useEffect(() => { setPage(0); }, [minSightings, rangeIndex]);
+  useEffect(() => {
+    let cancelled = false;
+    void supabase.rpc('can_manage_r_and_m_identity').then(({ data }) => {
+      if (!cancelled) setCanManageIdentity(data === true);
+    });
+    return () => { cancelled = true; };
+  }, []);
+
+  useEffect(() => { setPage(0); setSelected(null); }, [agreementId, minSightings, rangeIndex]);
 
   // ATLAS READS: observations, cctv_entity_observations via list_repeat_vehicle_subjects
   useEffect(() => {
     let cancelled = false;
     const load = async () => {
+      if (!canManageIdentity) { setLoading(false); return; }
+      if (!agreementId) { setRows([]); setPlateMentions([]); setLoading(false); return; }
       setLoading(true);
       setError(null);
       const days = RANGES[rangeIndex].days;
       const from = days ? new Date(Date.now() - days * 24 * 60 * 60 * 1000).toISOString() : null;
-      const { data, error: rpcError } = await supabase.rpc('list_repeat_vehicle_subjects', {
-        p_min_sightings: minSightings, p_from: from, p_to: null, p_limit: PAGE_SIZE, p_offset: page * PAGE_SIZE,
-      });
+      const [subjects, mentions] = await Promise.all([
+        supabase.rpc('list_repeat_vehicle_subjects_for_agreement', {
+          p_service_agreement_id: agreementId, p_min_sightings: minSightings, p_from: from, p_to: new Date().toISOString(),
+          p_limit: PAGE_SIZE, p_offset: page * PAGE_SIZE,
+        }),
+        supabase.rpc('list_unlinked_plate_mentions_for_agreement', {
+          p_service_agreement_id: agreementId, p_from: from, p_to: new Date().toISOString(), p_limit: PAGE_SIZE, p_offset: page * PAGE_SIZE,
+        }),
+      ]);
       if (cancelled) return;
-      if (rpcError) setError(describe(rpcError)); else setRows((data ?? []) as SubjectRow[]);
+      const failure = subjects.error ?? mentions.error;
+      if (failure) setError(describe(failure));
+      else {
+        setRows((subjects.data ?? []) as SubjectRow[]);
+        setPlateMentions((mentions.data ?? []) as PlateMention[]);
+      }
       setLoading(false);
     };
     void load();
     return () => { cancelled = true; };
-  }, [minSightings, rangeIndex, page]);
+  }, [agreementId, canManageIdentity, minSightings, rangeIndex, page]);
 
   const open = async (row: SubjectRow) => {
     setSelected(row);
     setHistory([]);
+    setIdentifications([]);
+    setVehicleDetails(null);
+    setExpandedEvidenceId(null);
     setHistoryLoading(true);
-    const { data, error: rpcError } = await supabase.rpc('list_vehicle_subject_history', { p_plate: row.plate, p_limit: 200 });
+    const [historyResult, detailsResult, identityResult] = await Promise.all([
+      supabase.rpc('list_vehicle_subject_history_for_agreement', { p_plate: row.plate, p_service_agreement_id: agreementId, p_limit: 200 }),
+      supabase.rpc('get_vehicle_subject_details_for_agreement', { p_plate: row.plate, p_service_agreement_id: agreementId }),
+      supabase.rpc('list_vehicle_subject_identifications', { p_plate: row.plate, p_service_agreement_id: agreementId }),
+    ]);
+    const rpcError = historyResult.error ?? detailsResult.error ?? identityResult.error;
     if (rpcError) { setError(describe(rpcError)); setHistoryLoading(false); return; }
-    const list = (data ?? []) as HistoryRow[];
+    const list = (historyResult.data ?? []) as HistoryRow[];
     setHistory(list);
+    setVehicleDetails(((detailsResult.data ?? [])[0] ?? null) as VehicleDetails | null);
+    setIdentifications((identityResult.data ?? []) as PersonIdentification[]);
     const wanted = [...new Set(list.map((item) => item.officer_id).filter((id): id is string => Boolean(id)))].filter((id) => !officerNames[id]);
     if (wanted.length) {
       const { data: people } = await supabase.from('user_profiles').select('id,display_name').in('id', wanted);
@@ -104,7 +183,10 @@ export const RepeatSubjectsPanel: React.FC = () => {
 
   const total = rows[0]?.total_count ?? 0;
   const pageCount = Math.max(1, Math.ceil(total / PAGE_SIZE));
+  const mentionTotal = plateMentions[0]?.total_count ?? 0;
   const visible = filter.trim() ? rows.filter((row) => row.plate.includes(filter.trim().toUpperCase().replace(/[^A-Z0-9]/g, ''))) : rows;
+
+  if (!canManageIdentity) return null;
 
   return (
     <section className="reports-section repeat-subjects" aria-labelledby="repeat-subjects-title">
@@ -114,6 +196,12 @@ export const RepeatSubjectsPanel: React.FC = () => {
           <p className="subtitle">Vehicles seen more than once, across patrol sightings and CCTV detections a person has accepted.</p>
         </div>
         <div className="repeat-subjects__controls">
+          <label>Agreement
+            <select value={agreementId} onChange={(event) => setAgreementId(event.target.value)}>
+              <option value="">Select an agreement</option>
+              {providerAgreements.map((agreement) => <option key={agreement.id} value={agreement.id}>{agreement.client_name ? `${agreement.client_name} · ` : ''}{agreement.name}</option>)}
+            </select>
+          </label>
           <label>Seen at least
             <select value={minSightings} onChange={(event) => setMinSightings(Number(event.target.value))}>
               {[2, 3, 5, 10].map((n) => <option key={n} value={n}>{n} times</option>)}
@@ -129,7 +217,7 @@ export const RepeatSubjectsPanel: React.FC = () => {
       </div>
 
       {error && <div className="alert alert-error" role="alert">{error}</div>}
-      <p className="repeat-subjects__count" role="status">{loading ? 'Loading repeat vehicles…' : `${total.toLocaleString('en-NZ')} ${total === 1 ? 'vehicle' : 'vehicles'}`}</p>
+      <p className="repeat-subjects__count" role="status">{!agreementId ? 'Choose an agreement to view its subjects.' : loading ? 'Loading repeat vehicles…' : `${total.toLocaleString('en-NZ')} ${total === 1 ? 'vehicle' : 'vehicles'}`}</p>
       <div className="reports-table-wrapper">
         <table className="reports-table">
           <thead><tr><th>Plate</th><th>Seen</th><th>Places</th><th>Officers</th><th>Patrol / CCTV</th><th>First seen</th><th>Last seen</th><th>Owner</th></tr></thead>
@@ -156,6 +244,30 @@ export const RepeatSubjectsPanel: React.FC = () => {
         <button type="button" className="btn btn-secondary" disabled={page + 1 >= pageCount || loading} onClick={() => setPage((current) => current + 1)}>Next</button>
       </div>
 
+      {agreementId && (
+        <section className="repeat-subjects__mentions" aria-labelledby="plate-mentions-title">
+          <h3 id="plate-mentions-title">Plate mentions to review</h3>
+          <p className="subtitle">These plate-shaped strings were found in patrol comments but are not linked to a structured observation. They are suggestions only and have not been counted as sightings.</p>
+          <p className="repeat-subjects__count" role="status">{loading ? 'Loading mentions…' : `${mentionTotal.toLocaleString('en-NZ')} unlinked plate mentions`}</p>
+          <div className="reports-table-wrapper">
+            <table className="reports-table">
+              <thead><tr><th>Plate text</th><th>Mentions</th><th>First mention</th><th>Last mention</th><th>Review</th></tr></thead>
+              <tbody>
+                {!loading && plateMentions.length === 0 && <tr><td colSpan={5} className="text-center">No unlinked plate-shaped comments in this period.</td></tr>}
+                {plateMentions.map((mention) => <tr key={mention.plate}>
+                  <td>{mention.plate}</td><td>{mention.mentions}</td>
+                  <td>{new Date(mention.first_seen).toLocaleDateString('en-NZ')}</td>
+                  <td>{new Date(mention.last_seen).toLocaleDateString('en-NZ')}</td>
+                  <td><button type="button" className="repeat-subjects__plate" onClick={() => void open({ plate: mention.plate, sightings: 0, places: 0, officers: 0, patrol_sightings: 0, cctv_sightings: 0, first_seen: mention.first_seen, last_seen: mention.last_seen, owner_identified: false, total_count: 0 })}>Review comments</button></td>
+                </tr>)}
+              </tbody>
+            </table>
+          </div>
+        </section>
+      )}
+
+      {agreementId && <RepeatPeoplePanel agreementId={agreementId} />}
+
       {selected && (
         <div className="activity-browser__overlay" onClick={(event) => { if (event.target === event.currentTarget) setSelected(null); }}>
           <aside className="activity-browser__detail" role="dialog" aria-modal="true" aria-labelledby="subject-history-title">
@@ -164,13 +276,27 @@ export const RepeatSubjectsPanel: React.FC = () => {
               <button type="button" className="activity-browser__close" onClick={() => setSelected(null)} aria-label="Close sighting history"><X size={16} aria-hidden="true" /></button>
             </div>
             <p className="subtitle">{selected.places} {selected.places === 1 ? 'place' : 'places'} · first seen {new Date(selected.first_seen).toLocaleDateString('en-NZ')} · last seen {new Date(selected.last_seen).toLocaleDateString('en-NZ')}</p>
+            {vehicleDetails && <dl className="repeat-subjects__vehicle-details">
+              <div><dt>Canonical vehicle</dt><dd>{[vehicleDetails.year, vehicleDetails.colour, vehicleDetails.make, vehicleDetails.model, vehicleDetails.body_type].filter(Boolean).join(' ') || 'No canonical detail recorded'}</dd></div>
+              <div><dt>Fuel type</dt><dd>{vehicleDetails.fuel_type || '—'}</dd></div>
+              <div><dt>Owner</dt><dd>{vehicleDetails.owner_identified ? 'Identified by R&M' : 'Not identified'}</dd></div>
+            </dl>}
+            {identifications.length > 0 && <section className="repeat-subjects__identifications" aria-label="R&M person identifications">
+              <h4>People related to these observations</h4>
+              {identifications.map((item) => <p key={`${item.canonical_person_id}-${item.linked_at}`}><strong>{item.display_name || 'Unnamed person record'}</strong> · {item.identification_basis || 'Basis recorded in audit history'} · {new Date(item.linked_at).toLocaleDateString('en-NZ')}</p>)}
+            </section>}
             {historyLoading && <p role="status">Loading history…</p>}
             <ol className="repeat-subjects__history">
               {history.map((item) => (
                 <li key={`${item.source}-${item.record_id}`}>
                   <strong>{new Date(item.observed_at).toLocaleString('en-NZ')}</strong>
-                  <span>{item.place_id ? placeNames.get(item.place_id) ?? 'Unnamed place' : 'No place recorded'} · {item.source === 'cctv' ? 'CCTV (accepted)' : 'Patrol'}{item.officer_id ? ` · ${officerNames[item.officer_id] ?? '…'}` : ''}</span>
+                  <span>{item.place_id ? placeNames.get(item.place_id) ?? 'Unnamed place' : 'No place recorded'} · {item.source === 'cctv' ? 'CCTV (accepted)' : item.source === 'patrol_comment' ? 'Patrol comment mention' : 'Patrol'}{item.officer_id ? ` · ${officerNames[item.officer_id] ?? '…'}` : ''}</span>
                   {item.note && <em>{item.note}</em>}
+                  {item.compliance_status && <span>Compliance: {item.compliance_status}</span>}
+                  {item.compliance_reason && <em>{item.compliance_reason}</em>}
+                  {item.source === 'patrol' && <details><summary>Photos and evidence</summary><RecordEvidencePanel recordKind="observation" recordId={item.record_id} organizationId={item.organization_id} canAdd={false} /></details>}
+                  {item.source === 'cctv' && item.evidence_item_id && <CctvEvidenceLink evidenceId={item.evidence_item_id} />}
+                  {item.source === 'patrol' && item.canonical_vehicle_id && <PersonObservationLink item={item} onLinked={() => void open(selected)} />}
                 </li>
               ))}
             </ol>
@@ -182,3 +308,150 @@ export const RepeatSubjectsPanel: React.FC = () => {
 };
 
 export default RepeatSubjectsPanel;
+
+function CctvEvidenceLink({ evidenceId }: { evidenceId: string }) {
+  const [signedUrl, setSignedUrl] = useState<string | null>(null);
+  const [kind, setKind] = useState('evidence');
+  useEffect(() => {
+    let cancelled = false;
+    void (async () => {
+      const { data, error } = await supabase.from('evidence_items').select('storage_path,evidence_kind').eq('id', evidenceId).maybeSingle();
+      if (error || !data?.storage_path || cancelled) return;
+      setKind(data.evidence_kind);
+      const { data: signed } = await supabase.storage.from('bob-uploads').createSignedUrl(data.storage_path, 900);
+      if (!cancelled && signed?.signedUrl) setSignedUrl(signed.signedUrl);
+    })();
+    return () => { cancelled = true; };
+  }, [evidenceId]);
+  if (!signedUrl) return <small>Source evidence unavailable</small>;
+  return <a href={signedUrl} target="_blank" rel="noopener noreferrer">Open CCTV {kind === 'video' ? 'video' : 'image'}</a>;
+}
+
+function PersonObservationLink({
+  item,
+  onLinked,
+}: {
+  item: HistoryRow;
+  onLinked: () => void;
+}) {
+  const [open, setOpen] = useState(false);
+  const [people, setPeople] = useState<
+    Array<{ id: string; display_name: string | null }>
+  >([]);
+  const [personId, setPersonId] = useState("");
+  const [basis, setBasis] = useState("");
+  const [error, setError] = useState<string | null>(null);
+  const [busy, setBusy] = useState(false);
+
+  useEffect(() => {
+    if (!open) return;
+    let cancelled = false;
+    void supabase
+      .rpc("list_verified_person_projections_for_organization", {
+        p_organization_id: item.organization_id,
+      })
+      .then(({ data, error: queryError }) => {
+        if (cancelled) return;
+        if (queryError) setError(queryError.message);
+        else setPeople((data ?? []) as typeof people);
+      });
+    return () => {
+      cancelled = true;
+    };
+  }, [item.organization_id, open]);
+
+  const save = async (event: React.FormEvent) => {
+    event.preventDefault();
+    if (!personId || basis.trim().length < 5) return;
+    setBusy(true);
+    setError(null);
+    const { error: linkError } = await supabase.rpc(
+      "link_observation_entities",
+      {
+        p_observation_id: item.record_id,
+        p_organization_id: item.organization_id,
+        p_canonical_vehicle_id: item.canonical_vehicle_id,
+        p_person_record_id: personId,
+        p_site_id: null,
+        p_zone_id: null,
+        p_location_id: null,
+        p_incident_id: null,
+        p_identity_basis: basis.trim(),
+      },
+    );
+    if (linkError) setError(linkError.message);
+    else {
+      setOpen(false);
+      setPersonId("");
+      setBasis("");
+      onLinked();
+    }
+    setBusy(false);
+  };
+
+  return (
+    <div className="repeat-subjects__person-link">
+      <button
+        type="button"
+        className="btn btn-secondary"
+        aria-expanded={open}
+        onClick={() => setOpen((value) => !value)}
+      >
+        {open ? "Cancel person link" : "Relate a person record"}
+      </button>
+      {open && (
+        <form onSubmit={(event) => void save(event)}>
+          <label>
+            Person record
+            <select
+              required
+              value={personId}
+              onChange={(event) => setPersonId(event.target.value)}
+            >
+              <option value="">Select person</option>
+              {people.map((person) => (
+                <option key={person.id} value={person.id}>
+                  {person.display_name || "Unnamed verified record"}
+                </option>
+              ))}
+            </select>
+            {people.length === 0 && (
+              <small>
+                No verified canonical identities are available for this
+                organisation; person links stay disabled until identity review
+                is complete.
+              </small>
+            )}
+          </label>
+          <label>
+            Identification basis
+            <textarea
+              required
+              minLength={5}
+              maxLength={1000}
+              value={basis}
+              onChange={(event) => setBasis(event.target.value)}
+              placeholder="Record the source or evidence that supports this link"
+            />
+          </label>
+          {error && (
+            <div className="alert alert-error" role="alert">
+              {error}
+            </div>
+          )}
+          <button
+            type="submit"
+            className="btn btn-primary"
+            disabled={busy || !personId || basis.trim().length < 5}
+          >
+            {busy ? "Saving…" : "Save link"}
+          </button>
+          <small>
+            This link is organisation-scoped and audit-logged. It does not
+            change the person record's review state.
+          </small>
+        </form>
+      )}
+    </div>
+  );
+}

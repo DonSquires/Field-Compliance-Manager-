@@ -23,8 +23,8 @@ describe('generic place selection policy', () => {
     expect(banner).not.toContain("locationStatus === 'outside_geofence'\n      ? 'Outside the selected service geofence'");
     expect(observations).toContain('<span>Site</span>');
     expect(observations).toContain('<span>Zone</span>');
-    expect(observations).toContain("if (event.target.value) setNextZoneId('')");
-    expect(observations).toContain("if (event.target.value) setNextSiteId('')");
+    expect(observations).toMatch(/if \(event\.target\.value\) setNextZoneId\(["']{2}\)/);
+    expect(observations).toMatch(/if \(event\.target\.value\) setNextSiteId\(["']{2}\)/);
     expect(rosterHr).toContain('siteInductionDraft.siteId');
     expect(rosterHr).toContain('siteInductionDraft.zoneId');
     expect(rosterTargets).toContain('site_id: string | null');

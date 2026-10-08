@@ -5,9 +5,9 @@ import { describe, expect, it } from 'vitest';
 const sourcePath = existsSync(resolve(process.cwd(), 'apps/web/src/pages/ObservationSearchPage.tsx'))
   ? resolve(process.cwd(), 'apps/web/src/pages/ObservationSearchPage.tsx')
   : resolve(process.cwd(), 'src/pages/ObservationSearchPage.tsx');
-const migrationPath = existsSync(resolve(process.cwd(), 'supabase/migrations/20260908120000_observation_links_and_global_search.sql'))
-  ? resolve(process.cwd(), 'supabase/migrations/20260908120000_observation_links_and_global_search.sql')
-  : resolve(process.cwd(), '../../supabase/migrations/20260908120000_observation_links_and_global_search.sql');
+const migrationPath = existsSync(resolve(process.cwd(), 'supabase/migrations/20261008040000_scope_subjects_and_report_privacy.sql'))
+  ? resolve(process.cwd(), 'supabase/migrations/20261008040000_scope_subjects_and_report_privacy.sql')
+  : resolve(process.cwd(), '../../supabase/migrations/20261008040000_scope_subjects_and_report_privacy.sql');
 const rlsFixPath = existsSync(resolve(process.cwd(), 'supabase/migrations/20260922070000_fix_search_observations_vehicle_rls.sql'))
   ? resolve(process.cwd(), 'supabase/migrations/20260922070000_fix_search_observations_vehicle_rls.sql')
   : resolve(process.cwd(), '../../supabase/migrations/20260922070000_fix_search_observations_vehicle_rls.sql');
@@ -28,9 +28,11 @@ describe('Observation Search canonical entity contract', () => {
   });
 
   it('loads canonical places and entities for authorised organisation context', () => {
-    for (const table of ['client_sites', 'location_zones', 'locations', 'canonical_vehicle_public', 'person_records', 'incidents']) {
+    for (const table of ['client_sites', 'location_zones', 'locations', 'canonical_vehicle_public', 'incidents']) {
       expect(source).toContain(`from('${table}')`);
     }
+    expect(source).toContain("rpc('list_verified_person_projections_for_organization'");
+    expect(searchMigration).toContain("cp.review_state='verified' AND cp.status='active'");
     // The plate registry table itself is Bob-only; pages read the projection.
     expect(source).not.toContain("from('canonical_vehicles')");
     expect(source).toContain(".eq('organization_id', profile.organizationId)");
