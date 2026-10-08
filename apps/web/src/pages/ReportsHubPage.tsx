@@ -13,6 +13,7 @@ import { FilePlus2 } from 'lucide-react';
 import { useAuth } from '../context/AuthContext';
 import { useServiceRelationships } from '../context/ServiceRelationshipContext';
 import { ActivityRecordBrowser } from '../components/ActivityRecordBrowser';
+import { RepeatSubjectsPanel } from '../components/RepeatSubjectsPanel';
 import { CustomReportBuilder } from '../components/CustomReportBuilder';
 import { ReportPackReviewPanel, type ReportPackEditorial, type ReviewableReportPack } from '../components/ReportPackReviewPanel';
 import { useEnabledModules } from '../hooks/useEnabledModules';
@@ -459,6 +460,8 @@ const ReportsHubPage: React.FC = () => {
       {consolidatedReporting.length > 1 && <section className="reports-section"><h2>Group Reporting Overview</h2><p className="subtitle">Branch-owned operational activity, consolidated for parent oversight. Detailed queues below remain in the current organization context.</p><div className="reports-table-wrapper"><table className="reports-table"><thead><tr><th>Operating Organization</th><th>Breach Alerts</th><th>Observations</th><th>Non-Compliant</th><th>Report Packs</th></tr></thead><tbody>{consolidatedReporting.map((row) => <tr key={row.source_organization_id}><td>{row.source_organization_name}</td><td>{row.breach_count}</td><td>{row.observation_count}</td><td>{row.non_compliant_observation_count}</td><td>{row.report_pack_count}</td></tr>)}</tbody></table></div></section>}
 
       <ActivityRecordBrowser zoneIds={reportScope.zoneIds} siteIds={reportScope.siteIds} scopeLabel={selectedAgreement ? selectedAgreement.name : 'all your agreements'} />
+
+      <RepeatSubjectsPanel />
 
       <section className="reports-section">
         <h2>Report Packs ({reportPacks.length})</h2>
