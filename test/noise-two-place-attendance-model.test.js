@@ -4,10 +4,11 @@ const path = require('node:path');
 const test = require('node:test');
 
 const root = path.resolve(__dirname, '..');
-const migration = fs.readFileSync(path.join(root, 'supabase/migrations/20260914110000_noise_two_place_attendance_model.sql'), 'utf8');
-const oracle = fs.readFileSync(path.join(root, 'supabase/tests/20260914110000_noise_two_place_rls.sql'), 'utf8');
-const schema = fs.readFileSync(path.join(root, 'supabase/schema.sql'), 'utf8');
-const canon = fs.readFileSync(path.join(root, 'docs/canon/NOISE_CONTROL_TWO_PLACE_MODEL.md'), 'utf8');
+const readSource = (relativePath) => fs.readFileSync(path.join(root, relativePath), 'utf8').replace(/\r\n/g, '\n');
+const migration = readSource('supabase/migrations/20260914110000_noise_two_place_attendance_model.sql');
+const oracle = readSource('supabase/tests/20260914110000_noise_two_place_rls.sql');
+const schema = readSource('supabase/schema.sql');
+const canon = readSource('docs/canon/NOISE_CONTROL_TWO_PLACE_MODEL.md');
 
 const functionBody = (name) => {
   const start = migration.indexOf(`FUNCTION public.${name}(`) >= 0 ? migration.indexOf(`FUNCTION public.${name}(`) : migration.indexOf(`FUNCTION "public"."${name}"(`);

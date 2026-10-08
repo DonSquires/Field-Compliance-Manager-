@@ -3,12 +3,13 @@ const fs = require('node:fs');
 const path = require('node:path');
 const test = require('node:test');
 
-const migration = fs.readFileSync(path.resolve(__dirname, '../supabase/migrations/20260919060000_end_shift.sql'), 'utf8');
-const dialog = fs.readFileSync(path.resolve(__dirname, '../apps/web/src/components/EndShiftDialog.tsx'), 'utf8');
-const schedulePage = fs.readFileSync(path.resolve(__dirname, '../apps/web/src/pages/OfficerSchedulePage.tsx'), 'utf8');
-const homePage = fs.readFileSync(path.resolve(__dirname, '../apps/web/src/pages/OfficerHomePage.tsx'), 'utf8');
-const debriefPage = fs.readFileSync(path.resolve(__dirname, '../apps/web/src/pages/OfficerDebriefPage.tsx'), 'utf8');
-const types = fs.readFileSync(path.resolve(__dirname, '../src/types/database.ts'), 'utf8');
+const readSource = (relativePath) => fs.readFileSync(path.resolve(__dirname, relativePath), 'utf8').replace(/\r\n/g, '\n');
+const migration = readSource('../supabase/migrations/20260919060000_end_shift.sql');
+const dialog = readSource('../apps/web/src/components/EndShiftDialog.tsx');
+const schedulePage = readSource('../apps/web/src/pages/OfficerSchedulePage.tsx');
+const homePage = readSource('../apps/web/src/pages/OfficerHomePage.tsx');
+const debriefPage = readSource('../apps/web/src/pages/OfficerDebriefPage.tsx');
+const types = readSource('../src/types/database.ts');
 
 test('get_shift_end_readiness tells the officer, in plain words, what is still open before a shift can end', () => {
   assert.match(migration, /create or replace function public\.get_shift_end_readiness\(p_shift_id uuid\)/);

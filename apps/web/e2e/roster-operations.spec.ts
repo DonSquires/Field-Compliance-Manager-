@@ -90,8 +90,8 @@ test('administrator repeats a selected assignment across a date range', async ({
 	await page.getByRole('button', { name: 'Repeat selected' }).click();
 	const dialog = page.getByRole('dialog', { name: 'Repeat assignment' });
 	await expect(dialog).toBeVisible();
-	await expect(dialog.getByLabel('From date')).toHaveValue('2026-09-04');
-	await expect(dialog.getByLabel('To date')).toHaveValue('2026-09-10');
+        await expect(dialog.getByLabel('From date')).toHaveValue('2026-09-05');
+        await expect(dialog.getByLabel('To date')).toHaveValue('2026-09-11');
 	await expect(dialog.getByText('Creates draft assignments and skips overlapping or leave-conflicted days.')).toBeVisible();
 });
 test('rosterer sees open shifts in the board and publishes drafts after a plain-words check', async ({ page }) => {

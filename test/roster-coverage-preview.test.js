@@ -3,11 +3,12 @@ const fs = require('node:fs');
 const path = require('node:path');
 const test = require('node:test');
 
-const migration = fs.readFileSync(path.resolve(__dirname, '../supabase/migrations/20260919110000_preview_work_unit_coverage.sql'), 'utf8');
-const generate = fs.readFileSync(path.resolve(__dirname, '../supabase/schemas/public/functions/generate_shift_stops.sql'), 'utf8');
-const rosterPage = fs.readFileSync(path.resolve(__dirname, '../apps/web/src/pages/RosterOperationsPage.tsx'), 'utf8');
-const targetsPage = fs.readFileSync(path.resolve(__dirname, '../apps/web/src/pages/RosterTargetsPage.tsx'), 'utf8');
-const themes = fs.readFileSync(path.resolve(__dirname, '../apps/web/src/styles/themes.css'), 'utf8');
+const readSource = (relativePath) => fs.readFileSync(path.resolve(__dirname, relativePath), 'utf8').replace(/\r\n/g, '\n');
+const migration = readSource('../supabase/migrations/20260919110000_preview_work_unit_coverage.sql');
+const generate = readSource('../supabase/schemas/public/functions/generate_shift_stops.sql');
+const rosterPage = readSource('../apps/web/src/pages/RosterOperationsPage.tsx');
+const targetsPage = readSource('../apps/web/src/pages/RosterTargetsPage.tsx');
+const themes = readSource('../apps/web/src/styles/themes.css');
 
 test('the roster-time coverage preview uses the same day and month rule as generate_shift_stops', () => {
   assert.match(generate, /v_day_of_week = ANY\(cspc\.active_days\)/i);

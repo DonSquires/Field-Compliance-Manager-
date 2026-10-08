@@ -3,10 +3,11 @@ const fs = require('node:fs');
 const path = require('node:path');
 const test = require('node:test');
 
-const migration = fs.readFileSync(path.resolve(__dirname, '../supabase/migrations/20260919070000_one_shift_at_a_time.sql'), 'utf8');
-const schedulePage = fs.readFileSync(path.resolve(__dirname, '../apps/web/src/pages/OfficerSchedulePage.tsx'), 'utf8');
-const mobileClock = fs.readFileSync(path.resolve(__dirname, '../apps/mobile/src/components/OfficerShiftClockPanel.tsx'), 'utf8');
-const types = fs.readFileSync(path.resolve(__dirname, '../src/types/database.ts'), 'utf8');
+const readSource = (relativePath) => fs.readFileSync(path.resolve(__dirname, relativePath), 'utf8').replace(/\r\n/g, '\n');
+const migration = readSource('../supabase/migrations/20260919070000_one_shift_at_a_time.sql');
+const schedulePage = readSource('../apps/web/src/pages/OfficerSchedulePage.tsx');
+const mobileClock = readSource('../apps/mobile/src/components/OfficerShiftClockPanel.tsx');
+const types = readSource('../src/types/database.ts');
 
 test('an officer is on at most one shift: the structure forbids two, and the trigger stops the earlier one rather than blocking the next', () => {
   assert.match(migration, /create unique index if not exists shifts_one_in_progress_per_officer_idx\n\s+on public\.shifts \(officer_user_id\) where status = 'in_progress';/);

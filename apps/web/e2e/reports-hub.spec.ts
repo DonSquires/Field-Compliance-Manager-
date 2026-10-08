@@ -31,7 +31,7 @@ test('administrator reviews and publishes a tenant report pack to the live clien
   await expect(page.getByText('No report packs in this period')).toBeVisible();
   await page.getByRole('button', { name: 'Generate report drafts' }).click();
 
-  await expect(page.getByRole('status')).toContainText('1 report packs generated for the selected period.');
+  await expect(page.getByText('1 report packs generated for the selected period.', { exact: true })).toBeVisible();
   const packs = page.getByRole('heading', { name: 'Report Packs (1)' }).locator('..');
   await expect(packs.getByText('Civic Events Compliance Services')).toBeVisible();
   await expect(packs.getByText('Needs review', { exact: true })).toBeVisible();
@@ -41,7 +41,7 @@ test('administrator reviews and publishes a tenant report pack to the live clien
   await page.getByLabel('Executive summary').fill('All scheduled visits were completed and one incident was recorded.');
   await testInfo.attach('report-review-editor', { body: await page.screenshot({ fullPage: true }), contentType: 'image/png' });
   await page.getByRole('button', { name: 'Publish reviewed report' }).click();
-  await expect(page.getByRole('status')).toContainText("published to Civic Events Compliance Services's live client portal");
+    await expect(page.getByText('Reviewed report published to Civic Events Compliance Services\'s live client portal.', { exact: true })).toBeVisible();
   await expect(packs.getByText('Live in portal', { exact: true })).toBeVisible();
   await expect(packs.getByText('Available in client portal', { exact: true })).toBeVisible();
   expect(await page.evaluate(() => document.documentElement.scrollWidth <= window.innerWidth)).toBe(true);
@@ -71,7 +71,7 @@ test('administrator builds a mixed-scope custom report and reviews the frozen sn
   await testInfo.attach('custom-report-builder', { body: await page.screenshot({ fullPage: true }), contentType: 'image/png' });
   await page.getByRole('button', { name: 'Create review draft' }).click();
 
-  await expect(page.getByRole('status')).toContainText('Custom report draft created with 2 observations and 1 linked breaches.');
+  await expect(page.getByText('Custom report draft created with 2 observations and 1 linked breaches.', { exact: true })).toBeVisible();
   await expect(page.getByRole('heading', { name: 'Report Packs (1)' })).toBeVisible();
   await expect(page.getByText('Custom', { exact: true })).toBeVisible();
   await page.getByRole('button', { name: 'Review', exact: true }).click();
@@ -82,7 +82,7 @@ test('administrator builds a mixed-scope custom report and reviews the frozen sn
   await expect(page.getByRole('heading', { name: 'Observations (1)' })).toBeVisible();
   await expect(page.getByText('Non-compliant · Follow-up required')).toBeVisible();
   await page.getByRole('button', { name: 'Publish reviewed report' }).click();
-  await expect(page.getByRole('status')).toContainText('published to Civic Events Compliance Services');
+  await expect(page.getByText(/published to Civic Events Compliance Services/)).toBeVisible();
 
   expect(await page.evaluate(() => document.documentElement.scrollWidth <= window.innerWidth)).toBe(true);
   expect(browserErrors, browserErrors.join('\n')).toEqual([]);

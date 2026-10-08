@@ -5,14 +5,15 @@ const test = require('node:test');
 const { spawnSync } = require('node:child_process');
 
 const SCRIPT = path.resolve(__dirname, '../scripts/bob-release-lane.sh');
+const bashSyntax = (source) => spawnSync('bash', ['-n'], { input: source.replace(/\r\n/g, '\n'), encoding: 'utf8' });
 
 // Live 2026-09-27: a stale .git/gc.log (left by a pruned worktree the day before) made the auto-gc
 // after every `git fetch` exit non-zero; the lane read that as "mirror unreachable" for 12 hours
 // while main had moved. The lane must not run housekeeping inside its fetch, and must log the
 // real reason (without the token) when the fetch does fail.
 test('release lane fetches with gc off and logs the real, token-free fetch error', () => {
-  const source = fs.readFileSync(SCRIPT, 'utf8');
-  assert.equal(spawnSync('bash', ['-n', path.basename(SCRIPT)], { cwd: path.dirname(SCRIPT), encoding: 'utf8' }).status, 0, 'bash -n');
+  const source = fs.readFileSync(SCRIPT, 'utf8').replace(/\r\n/g, '\n');
+  assert.equal(bashSyntax(source).status, 0, 'bash -n');
   const fetchLine = source.split('\n').find((line) => /fetch -q "\$REMOTE_URL"/.test(line));
   assert.ok(fetchLine, 'the main fetch is present');
   assert.match(fetchLine, /-c gc\.auto=0/);
@@ -24,15 +25,15 @@ test('release lane fetches with gc off and logs the real, token-free fetch error
 });
 
 test('release lane skips migrations already in the live ledger, and a hand deploy moves its live pointer', () => {
-  const lane = fs.readFileSync(SCRIPT, 'utf8');
+  const lane = fs.readFileSync(SCRIPT, 'utf8').replace(/\r\n/g, '\n');
   const ledgerCheck = lane.indexOf("select version from supabase_migrations.schema_migrations where version = '${version}'");
   const destructiveCheck = lane.indexOf('contains destructive SQL');
   assert.ok(ledgerCheck > 0, 'the ledger is consulted per migration');
   assert.ok(ledgerCheck < destructiveCheck, 'an applied migration is skipped before any content check runs on it');
   assert.match(lane, /already applied, skipped/);
 
-  const deploy = fs.readFileSync(path.resolve(__dirname, '../scripts/bob-vps-deploy.sh'), 'utf8');
-  assert.equal(spawnSync('bash', ['-n', 'bob-vps-deploy.sh'], { cwd: path.resolve(__dirname, '../scripts'), encoding: 'utf8' }).status, 0);
+  const deploy = fs.readFileSync(path.resolve(__dirname, '../scripts/bob-vps-deploy.sh'), 'utf8').replace(/\r\n/g, '\n');
+  assert.equal(bashSyntax(deploy).status, 0);
   assert.match(deploy, /> \/var\/lib\/bob\/release-lane\/deployed_sha/);
   // A control-plane restart mid-run would discard the author's turns: the lane waits for the next tick.
   assert.match(lane, /builder_model_runs\?select=id&status=in\.\(running,queued\)/);

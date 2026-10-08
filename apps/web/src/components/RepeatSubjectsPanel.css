@@ -1,3 +1,4 @@
+.repeat-subjects { min-width: 0; }
 .repeat-subjects__head { display: flex; flex-wrap: wrap; align-items: flex-start; justify-content: space-between; gap: 12px; }
 .repeat-subjects__controls { display: flex; flex-wrap: wrap; gap: 12px; align-items: center; }
 .repeat-subjects__controls label { display: inline-flex; align-items: center; gap: 6px; }
@@ -19,3 +20,6 @@
 .repeat-subjects__person-link select { min-height: 40px; }
 .repeat-subjects__person-link textarea { min-height: 72px; resize: vertical; }
 .repeat-subjects__person-link small { opacity: 0.75; }
+.repeat-subjects__identifications { margin-top: 12px; padding: 10px 12px; border-left: 3px solid #14c8d4; background: #0c202b; }
+.repeat-subjects__identifications h4 { margin: 0 0 6px; font-size: 14px; }
+.repeat-subjects__identifications p { margin: 4px 0; overflow-wrap: anywhere; }

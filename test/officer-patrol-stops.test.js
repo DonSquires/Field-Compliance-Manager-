@@ -3,7 +3,7 @@ const fs = require('node:fs');
 const path = require('node:path');
 const test = require('node:test');
 
-const migration = fs.readFileSync(path.resolve(__dirname, '../supabase/migrations/20260918110000_officer_patrol_stops.sql'), 'utf8');
+const migration = fs.readFileSync(path.resolve(__dirname, '../supabase/migrations/20260918110000_officer_patrol_stops.sql'), 'utf8').replace(/\r\n/g, '\n');
 
 test('officers read only their own contracted, non-adhoc, non-static stops', () => {
   assert.match(migration, /CREATE OR REPLACE FUNCTION public\.get_officer_patrol_stops\(p_shift_id uuid DEFAULT NULL\)/);

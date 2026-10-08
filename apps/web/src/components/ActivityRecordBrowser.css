@@ -7,6 +7,7 @@
 .activity-browser__search { flex: 1 1 320px; border: 1px solid var(--border-color, #d0d5dd); border-radius: 8px; padding: 0 10px; min-height: 40px; }
 .activity-browser__search input { flex: 1; border: 0; outline: 0; background: transparent; font: inherit; min-height: 38px; }
 .activity-browser__body { display: block; }
+.activity-browser__list { min-width: 0; }
 .activity-browser__count { margin: 0 0 8px; font-weight: 600; }
 .activity-browser__note { max-width: 340px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 .activity-browser__row-link { background: none; border: 0; padding: 0; color: var(--primary-color, #1d4ed8); cursor: pointer; font: inherit; text-align: left; text-decoration: underline; }

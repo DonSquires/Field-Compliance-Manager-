@@ -3,8 +3,9 @@ const fs = require('node:fs');
 const path = require('node:path');
 const test = require('node:test');
 
-const migration = fs.readFileSync(path.resolve(__dirname, '../supabase/migrations/20260919030000_roster_shift_operating_branch.sql'), 'utf8');
-const schema = fs.readFileSync(path.resolve(__dirname, '../supabase/schema.sql'), 'utf8');
+const readSource = (relativePath) => fs.readFileSync(path.resolve(__dirname, relativePath), 'utf8').replace(/\r\n/g, '\n');
+const migration = readSource('../supabase/migrations/20260919030000_roster_shift_operating_branch.sql');
+const schema = readSource('../supabase/schema.sql');
 
 test('the old nine-argument overload is dropped so nine-argument calls stay unambiguous', () => {
   assert.match(migration, /drop function if exists public\.create_roster_shift\(uuid, text, timestamp with time zone, timestamp with time zone, uuid, uuid, uuid, text, boolean\);/);

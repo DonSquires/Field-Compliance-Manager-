@@ -1526,6 +1526,42 @@ closed by the production verification above.
   human-reviewed; each client needs its own agreement-place coverage and
   source-map dry run.
 
+## Whole-build live-org shakedown checkpoint (2026-10-09)
+
+Read-only verification against the active R&M provider tree (32 organisations,
+17 accepted operational agreements, 17 client organisations). No rows were
+created, updated, published, or deleted.
+
+- Roster/dispatch: one `missed` patrol shift dated 2026-09-24 has a route but no
+  actual start/end, agreement-location/module link, zone, or generated stops.
+  The only completed job is a normal-priority `alarm_response` with an agreement
+  and site, but no shift/work-unit/zone. It has one resolved charge line and
+  one resolved pay line, so the completion financial hook is working for this
+  record; it produced no separate `finance_service_costs` row or invoice.
+- Finance: 21 R&M rate rules (19 billing, 2 pay), zero invoices, and zero
+  `finance_service_costs` rows. These counts are not proof that the rules are
+  wrong; they show there is not yet enough live completed work to shakedown the
+  invoice/P&L pipeline. Do not create a synthetic charge or invoice to fill the
+  queue.
+- Permits: 143 active permit rows are available through the schema's
+  `person_permits_fieldwork` projection. The projection omits
+  `firearm_licence_number`; permit details were not exported during this check.
+- Reports: 20 provider-private drafts exist across 17 agreements: 17 monthly
+  August packs plus three custom/rolling-period packs. All remain unpublished
+  and unreviewed; no duplicates were found. No September 1-30 monthly draft was
+  present as of this check. The generation RPC is actor-scoped, so the draft
+  was left for an authenticated R&M administrator to generate and review in
+  Reports; no stored human password was used by this audit.
+- UI verification: the finance and vehicle-lookup fixture e2e suite passed 7
+  of 9 tests; the two failures were absent Windows screenshot baselines, not
+  behavioral assertions. Targeted Reports Hub and roster repeat-date flows
+  passed on desktop and mobile after correcting their ambiguous/stale test
+  expectations. The root Node suite now passes 967/967 tests after normalizing
+  shell syntax-check input and source line endings for Windows portability. The
+  web unit suite passes 1,355/1,355 tests; lint and CSS contract checks pass,
+  and targeted Reports Hub and roster repeat-date E2E flows pass on desktop and
+  mobile.
+
 ## Conventions established / reusable
 
 - Live SQL via the Supabase Management API (`SUPABASE_ACCESS_TOKEN`, from
