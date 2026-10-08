@@ -10,6 +10,7 @@ const reportsHub = fs.readFileSync(path.resolve(__dirname, '../apps/web/src/page
 const migration = fs.readFileSync(path.resolve(__dirname, '../supabase/migrations/20260927010000_govern_custom_report_builder.sql'), 'utf8');
 const operationalActivityMigration = fs.readFileSync(path.resolve(__dirname, '../supabase/migrations/20261006212028_add_operational_activity_to_report_packs.sql'), 'utf8');
 const agreementScopeMigration = fs.readFileSync(path.resolve(__dirname, '../supabase/migrations/20261007061723_scope_report_pack_generation_to_agreement.sql'), 'utf8');
+const periodEndMigration = fs.readFileSync(path.resolve(__dirname, '../supabase/migrations/20261008195838_report_pack_refreshes_period_end.sql'), 'utf8');
 const reviewPanel = fs.readFileSync(path.resolve(__dirname, '../apps/web/src/components/ReportPackReviewPanel.tsx'), 'utf8');
 
 test('email delivery requires reviewed publication and refuses portal-delivered packs', () => {
@@ -79,4 +80,10 @@ test('report generation can be scoped to one authorized service agreement withou
   assert.match(agreementScopeMigration, /agreement\.invitation_status = 'accepted'/);
   assert.match(agreementScopeMigration, /Service agreement is not available for report generation/);
   assert.match(agreementScopeMigration, /generate_due_report_packs\(p_period_start, p_period_end, null\)/);
+});
+
+test('monthly report regeneration refreshes the period end when reusing the start-date conflict key', () => {
+  const upsert = periodEndMigration.slice(periodEndMigration.indexOf('on conflict (service_agreement_id, template_code, period_start)'));
+  assert.match(upsert, /period_end\s*=\s*excluded\.period_end/i);
+  assert.match(upsert, /where existing\.status <> 'sent'/i);
 });

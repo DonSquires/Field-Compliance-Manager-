@@ -1548,10 +1548,15 @@ created, updated, published, or deleted.
   `firearm_licence_number`; permit details were not exported during this check.
 - Reports: 20 provider-private drafts exist across 17 agreements: 17 monthly
   August packs plus three custom/rolling-period packs. All remain unpublished
-  and unreviewed; no duplicates were found. No September 1-30 monthly draft was
-  present as of this check. The generation RPC is actor-scoped, so the draft
-  was left for an authenticated R&M administrator to generate and review in
-  Reports; no stored human password was used by this audit.
+  and unreviewed; no duplicates were found. The initial read found no September
+  1-30 monthly draft. The generation RPC is actor-scoped; no stored human
+  password was used for this audit.
+- Report-period correction: the scoped generator's upsert key is agreement,
+  template, and period start, but the conflict update previously retained an
+  existing period end. The live RPC now updates that end date. Through the
+  authenticated Reports workflow, one OneFortyOne monthly draft was generated
+  for 2026-09-01 through 2026-09-30 and verified as `Needs review`. It remains
+  unpublished; no review, PDF preview, or email delivery was performed.
 - UI verification: the finance and vehicle-lookup fixture e2e suite passed 7
   of 9 tests; the two failures were absent Windows screenshot baselines, not
   behavioral assertions. Targeted Reports Hub and roster repeat-date flows
