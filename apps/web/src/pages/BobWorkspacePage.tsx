@@ -6,14 +6,17 @@ export default function BobWorkspacePage({ returnPath = '/admin/hub' }: { return
   const navigate = useNavigate();
 
   return (
-    <BobPanel
-      open
-      onClose={() => navigate(returnPath)}
-      context={{
-        page: 'bob',
-        workspace: 'agent command center',
-        operating_model: 'research, plan, verify, propose, approve',
-      }}
-    />
+    <>
+      <h1 className="sr-only">Bob agent workspace</h1>
+      <BobPanel
+        open
+        onClose={() => navigate(returnPath)}
+        context={{
+          page: 'bob',
+          workspace: 'agent command center',
+          operating_model: 'research, plan, verify, propose, approve',
+        }}
+      />
+    </>
   );
 }

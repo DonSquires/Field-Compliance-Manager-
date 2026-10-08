@@ -1082,6 +1082,7 @@ const CRMPage: React.FC<{ onNavigate?: NavigateWithContext }> = ({ onNavigate = 
   if (state.loading) {
     return (
       <div className="page-container">
+        <h1 className="sr-only">Client Portfolios</h1>
         <div className="loading-state">
           <div className="spinner"></div>
           <p>Loading CRM accounts...</p>

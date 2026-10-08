@@ -451,7 +451,7 @@ export default function BobDocumentStudioPage() {
   return (
     <main className="bob-document-page">
       <header className="bob-document-topbar">
-        <div className="bob-document-brand"><span><Sparkles size={17} /></span><div><strong>Bob document studio</strong><small>Author, reference, review, promote</small></div></div>
+        <div className="bob-document-brand"><span><Sparkles size={17} /></span><div><h1 className="bob-document-title">Bob document studio</h1><small>Author, reference, review, promote</small></div></div>
         <div className="bob-document-top-actions">
           <span className={`bob-save-state is-${saveState}`} role="status">{saveState === 'saving' ? 'Saving…' : saveState === 'reviewing' ? 'Submitting…' : saveState === 'saved' ? 'Step 2 of 4 · Saved draft' : saveState === 'needs_review' ? 'Step 3 of 4 · Awaiting your decision' : saveState === 'approved' ? 'Step 4 of 4 · Approved' : 'Step 1 of 4 · Writing'}</span>
           {unconfirmedMatches > 0 && <span className="bob-unconfirmed-badge" role="status"><AlertTriangle size={13} /><span>{unconfirmedMatches} unconfirmed</span><button type="button" onClick={jumpToNextUnconfirmed}>Find next</button></span>}
