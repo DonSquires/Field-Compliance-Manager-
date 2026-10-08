@@ -387,7 +387,8 @@ const AdminShell: React.FC = () => {
       if (redirectTarget.fieldOpsSubArea) setFieldOpsSubArea(redirectTarget.fieldOpsSubArea);
       if (redirectTarget.reportsTab) setReportsTab(redirectTarget.reportsTab);
       const areaQuery = redirectTarget.fieldOpsSubArea ? `?area=${redirectTarget.fieldOpsSubArea}` : '';
-      navigate(`/admin/${redirectTarget.page}${areaQuery}`, { replace: true });
+      // A self-redirect (reports -> reports) re-fires this effect on every navigation and traps the user on the page.
+      if (redirectTarget.page !== page) navigate(`/admin/${redirectTarget.page}${areaQuery}`, { replace: true });
     } else if (!canAccessAdminPage(page, profile?.role, isModuleEnabled)) {
       setAccessNotice(deniedNotice);
       setActivePage('hub');
