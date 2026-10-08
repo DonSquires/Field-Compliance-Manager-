@@ -21,8 +21,9 @@ interface RecentRecord {
 interface Totals {
   visits: number;
   sightings: number;
-  last30Days: number;
 }
+
+const WINDOW_DAYS = 14;
 
 /**
  * Historical record of what has been logged against the provider's agreements. The priority queue above it is
@@ -61,21 +62,20 @@ export const LoggedActivityPanel: React.FC<Props> = ({ onOpenRecords }) => {
         if (zoneIds.length === 0 && siteIds.length === 0) { if (!cancelled) { setTotals(null); setRecent([]); } return; }
         const eventPlaces = [...(zoneIds.length ? [`zone_id.in.(${zoneIds.join(',')})`] : []), ...(siteIds.length ? [`client_site_id.in.(${siteIds.join(',')})`] : [])].join(',');
         const sightingPlaces = [...(zoneIds.length ? [`zone_id.in.(${zoneIds.join(',')})`] : []), ...(siteIds.length ? [`site_id.in.(${siteIds.join(',')})`] : [])].join(',');
-        const since = new Date(Date.now() - 30 * 24 * 60 * 60 * 1000).toISOString();
-        const [visits, sightings, recentVisits, monthVisits, monthSightings] = await Promise.all([
-          supabase.from('location_events').select('id', { count: 'estimated', head: true }).or(eventPlaces),
-          supabase.from('observations').select('id', { count: 'estimated', head: true }).or(sightingPlaces),
-          supabase.from('location_events').select('id,occurred_at,event_type,zone_id,client_site_id,payload').or(eventPlaces).order('occurred_at', { ascending: false }).limit(5),
-          supabase.from('location_events').select('id', { count: 'estimated', head: true }).or(eventPlaces).gte('occurred_at', since),
-          supabase.from('observations').select('id', { count: 'estimated', head: true }).or(sightingPlaces).gte('observed_at', since),
+        // Row-level security is evaluated per row, so counts across every place are only quick over a short window.
+        const since = new Date(Date.now() - WINDOW_DAYS * 24 * 60 * 60 * 1000).toISOString();
+        const [visits, sightings, recentVisits] = await Promise.all([
+          supabase.from('location_events').select('id', { count: 'exact', head: true }).or(eventPlaces).gte('occurred_at', since),
+          supabase.from('observations').select('id', { count: 'exact', head: true }).or(sightingPlaces).gte('observed_at', since),
+          supabase.from('location_events').select('id,occurred_at,event_type,zone_id,client_site_id,payload').or(eventPlaces).gte('occurred_at', since).order('occurred_at', { ascending: false }).limit(5),
         ]);
-        const failure = visits.error ?? sightings.error ?? recentVisits.error ?? monthVisits.error ?? monthSightings.error;
+        const failure = visits.error ?? sightings.error ?? recentVisits.error;
         if (failure) throw failure;
         if (cancelled) return;
-        setTotals({ visits: visits.count ?? 0, sightings: sightings.count ?? 0, last30Days: (monthVisits.count ?? 0) + (monthSightings.count ?? 0) });
+        setTotals({ visits: visits.count ?? 0, sightings: sightings.count ?? 0 });
         setRecent((recentVisits.data ?? []) as RecentRecord[]);
       } catch (err) {
-        if (!cancelled) setError(err instanceof Error ? err.message : 'Logged activity could not be loaded.');
+        if (!cancelled) setError(err && typeof err === 'object' && 'message' in err ? String((err as { message: unknown }).message) : 'Logged activity could not be loaded.');
       } finally {
         if (!cancelled) setLoading(false);
       }
@@ -98,10 +98,10 @@ export const LoggedActivityPanel: React.FC<Props> = ({ onOpenRecords }) => {
       {totals && (
         <>
           <dl className="admin-logged-activity__totals">
-            <div><dt>Patrol visits and camera activations</dt><dd>{totals.visits.toLocaleString('en-NZ')}</dd></div>
-            <div><dt>Vehicle sightings</dt><dd>{totals.sightings.toLocaleString('en-NZ')}</dd></div>
-            <div><dt>Logged in the last 30 days</dt><dd>{totals.last30Days.toLocaleString('en-NZ')}</dd></div>
+            <div><dt>Patrol visits and camera activations, last {WINDOW_DAYS} days</dt><dd>{totals.visits.toLocaleString('en-NZ')}</dd></div>
+            <div><dt>Vehicle sightings, last {WINDOW_DAYS} days</dt><dd>{totals.sightings.toLocaleString('en-NZ')}</dd></div>
           </dl>
+          {recent.length === 0 && <p className="subtitle">Nothing logged in the last {WINDOW_DAYS} days. Browse records to look further back.</p>}
           {recent.length > 0 && (
             <ul className="admin-logged-activity__recent" aria-label="Most recent logged visits">
               {recent.map((record) => (

@@ -66,9 +66,18 @@ function daysAgoDate(days: number) {
   return new Date(Date.now() - days * 24 * 60 * 60 * 1000).toISOString().split('T')[0];
 }
 
+function shiftDate(date: string, days: number) {
+  const shifted = new Date(`${date}T00:00:00.000Z`);
+  shifted.setUTCDate(shifted.getUTCDate() + days);
+  return shifted.toISOString().split('T')[0];
+}
+
+// Row-level security is evaluated per row, so a long window across hundreds of places exceeds the statement timeout.
+const WINDOW_DAY_OPTIONS = [7, 14, 30];
+
 function describeLoadError(err: unknown): string {
   const message = err && typeof err === 'object' && 'message' in err ? String((err as { message: unknown }).message) : '';
-  if (/statement timeout/i.test(message)) return 'This date range holds too many records to search at once. Choose a shorter range or add a search term.';
+  if (/statement timeout/i.test(message)) return 'That window is too large to load for this many places. Choose a shorter window.';
   return message || 'Records could not be loaded.';
 }
 
@@ -78,8 +87,9 @@ export const ActivityRecordBrowser: React.FC<Props> = ({ zoneIds, siteIds, scope
   const [kind, setKind] = useState<ActivityRecordKind>('visits');
   const [searchInput, setSearchInput] = useState('');
   const [search, setSearch] = useState('');
-  const [from, setFrom] = useState(() => daysAgoDate(90));
-  const [to, setTo] = useState('');
+  const [windowDays, setWindowDays] = useState(14);
+  const [to, setTo] = useState(() => daysAgoDate(0));
+  const from = shiftDate(to, -windowDays);
   const [page, setPage] = useState(0);
   const [visits, setVisits] = useState<VisitRecord[]>([]);
   const [sightings, setSightings] = useState<SightingRecord[]>([]);
@@ -194,7 +204,8 @@ export const ActivityRecordBrowser: React.FC<Props> = ({ zoneIds, siteIds, scope
   const pageCount = Math.max(1, Math.ceil(total / ACTIVITY_PAGE_SIZE));
   const selectedVisit = kind === 'visits' ? visits.find((row) => row.id === selectedId) ?? null : null;
   const selectedSighting = kind === 'sightings' ? sightings.find((row) => row.id === selectedId) ?? null : null;
-  const hasFilters = Boolean(searchInput || from || to);
+  const hasFilters = Boolean(searchInput);
+  const today = daysAgoDate(0);
 
   const detailRows = (): Array<[string, string]> => {
     if (selectedVisit) {
@@ -262,14 +273,13 @@ export const ActivityRecordBrowser: React.FC<Props> = ({ zoneIds, siteIds, scope
             aria-label="Search records"
           />
         </label>
-        <label>From <input type="date" value={from} max={to || undefined} onChange={(event) => setFrom(event.target.value)} /></label>
-        <label>To <input type="date" value={to} min={from || undefined} onChange={(event) => setTo(event.target.value)} /></label>
-        <span className="activity-browser__ranges" role="group" aria-label="Date range shortcuts">
-          <button type="button" className="btn btn-secondary" onClick={() => { setFrom(daysAgoDate(30)); setTo(''); }}>Last 30 days</button>
-          <button type="button" className="btn btn-secondary" onClick={() => { setFrom(daysAgoDate(90)); setTo(''); }}>Last 90 days</button>
-          <button type="button" className="btn btn-secondary" onClick={() => { setFrom(daysAgoDate(365)); setTo(''); }}>Last 12 months</button>
-          <button type="button" className="btn btn-secondary" onClick={() => { setFrom(''); setTo(''); }}>All time</button>
-        </span>
+        <div className="activity-browser__window" role="group" aria-label="Date window">
+          <button type="button" className="btn btn-secondary" onClick={() => setTo(shiftDate(to, -windowDays))}>← Earlier</button>
+          <strong>{new Date(`${from}T00:00:00`).toLocaleDateString('en-NZ')} – {new Date(`${to}T00:00:00`).toLocaleDateString('en-NZ')}</strong>
+          <button type="button" className="btn btn-secondary" disabled={to >= today} onClick={() => setTo(shiftDate(to, windowDays) > today ? today : shiftDate(to, windowDays))}>Later →</button>
+          <label>Window <select value={windowDays} onChange={(event) => setWindowDays(Number(event.target.value))}>{WINDOW_DAY_OPTIONS.map((days) => <option key={days} value={days}>{days} days</option>)}</select></label>
+          <label>Jump to <input type="date" value={to} max={today} onChange={(event) => { if (event.target.value) setTo(event.target.value); }} /></label>
+        </div>
         {searchInput && <button type="button" className="btn btn-secondary" onClick={() => setSearchInput('')}>Clear search</button>}
       </div>
 
@@ -289,7 +299,7 @@ export const ActivityRecordBrowser: React.FC<Props> = ({ zoneIds, siteIds, scope
               </thead>
               <tbody>
                 {!loading && total === 0 && (
-                  <tr><td colSpan={5} className="text-center">{zoneIds.length + siteIds.length === 0 ? 'No places are linked to this agreement yet.' : hasFilters ? 'Nothing matches this view. Try “All time” or clear the search.' : 'No records have been logged here yet.'}</td></tr>
+                  <tr><td colSpan={5} className="text-center">{zoneIds.length + siteIds.length === 0 ? 'No places are linked to this agreement yet.' : hasFilters ? 'Nothing matches this search in this date window. Clear the search, or step Earlier.' : 'No records in this date window. Use Earlier to look further back.'}</td></tr>
                 )}
                 {kind === 'visits' && visits.map((row) => {
                   const note = text(row.payload?.comments) ?? text(row.payload?.issue);

@@ -25,3 +25,5 @@
   .activity-browser__detail { position: static; max-height: none; }
   .activity-browser__note { white-space: normal; }
 }
+.activity-browser__window { display: flex; flex-wrap: wrap; align-items: center; gap: 10px; }
+.activity-browser__window label { display: inline-flex; align-items: center; gap: 6px; }
