@@ -49,29 +49,7 @@ This is an external product-fit question for a New Zealand field-compliance plat
 
 Trackforce’s rebrand page says the three products are “the same products” under a shared brand and that existing customers do not need to migrate. Its product catalogue describes TrackTik and GuardTek as separate platforms, sharing an intelligence layer. Do not model them as one proven common UI or as three independent competitors. [T5]
 
-## 2. UI Observations
-
-### Trackforce public surface
-
-The public TrackTik overview embeds a sample command-center dashboard with a top product navigation, global search/scope controls, four headline measures, a live operations map, an activity feed, site coverage, incident categories and weekly hours/overtime. This is the strongest UI reference observed. It connects workforce, site coverage, response and performance in one scan. The dashboard is vendor-published sample content, not an authenticated production session. [T5]
-
-The child product pages show a repeatable pattern:
-
-- **Configure:** build sites, checkpoints, tour tasks, report templates and dispatch workflows.
-- **Operate:** show current guard status, location, route/checkpoint progress and open response work.
-- **Handle exceptions:** surface missed checkpoints, SLA thresholds, lone-worker alarms and incomplete reports.
-- **Prove:** retain timestamped photo/video/audio/GPS evidence and turn operational records into client reports.
-- **Improve:** roll up activity into trends, labor costs and shareable dashboards.
-
-The UI examples use map-and-queue composition for command work, guided forms on mobile, and report/dashboard previews for managers and clients. The public pages point to a sales demo rather than an unauthenticated application. I could inspect the public sample dashboard and screenshots, but not verify the logged-in product, keyboard behavior, mobile layouts or real workflow states. [T5]
-
-### FCM surfaces observed
-
-The authenticated FCM Reports surface shows an explicit operating spine—organisation, agreement, place, staff, roster, dispatch, evidence, finance and reports—plus agreement/date filters, report-draft generation, custom reports, daily rollups and review/delivery actions. The Admin Hub source has “Today at a glance,” a priority queue, quick actions, five operational measures, a seven-day dispatch trend, periodic refresh and realtime subscriptions. Field Operations has role/module-gated “Respond now” and “Review and investigate” workspaces. [T1]
-
-This is a sound foundation and already follows the task/exception shape. The visual gap is narrower: TrackTik’s advertised overview joins map, coverage, activity feed, incident state and labor trend in one place; FCM distributes those views across the Admin Hub, Field Operations, Dispatch, Roster, Reports and Live Map. A unified view is a candidate improvement, not permission to duplicate those surfaces or create an unbacked aggregate.
-
-## 3. 7 Powers Heat Map
+## 2. 7 Powers Heat Map
 
 Ratings below are directional. Trackforce figures and capabilities are vendor-reported; FCM ratings use source/schema/Atlas evidence. A rating is not a measured market advantage.
 
@@ -85,7 +63,7 @@ Ratings below are directional. Trackforce figures and capabilities are vendor-re
 | Cornered resource | 🔴 None demonstrated in public evidence reviewed. (T5) | 🟡 Possible NZ rule, jurisdiction and field-compliance knowledge; not exclusive and not yet evidenced as a moat. (T6) |
 | Process power | 🟡 Moderate: product is organized around linked scheduling, activity, reports and back-office workflow; duration-to-replicate is unknown. (T5/T6) | 🟡 Emerging: FCM has shared operational spines and governed module submissions, but some cross-domain flows remain incomplete. (T1) |
 
-## 4. Switching-Cost Decomposition
+## 3. Switching-Cost Decomposition
 
 The scores are analyst estimates, not measured churn or migration data. Progress bars are comparative hypotheses only. [T6]
 
@@ -100,7 +78,7 @@ The scores are analyst estimates, not measured churn or migration data. Progress
 
 **Key insight:** FCM should compete on trustworthy continuity and regulated field accountability, not manufacture lock-in by making client history difficult to export. The provider’s commercial configuration may be private; the place’s operational record follows the harmed party and place under FCM’s canon. [T1]
 
-## 5. Aggregation and Disruption
+## 4. Aggregation and Disruption
 
 | Question | Finding | Evidence |
 |---|---|---|
@@ -112,7 +90,7 @@ The scores are analyst estimates, not measured churn or migration data. Progress
 
 The vendor’s public case study says one customer replaced four applications and reduced payroll processing from about a day and a half to minutes. Treat this as a customer story selected and published by Trackforce, not an independent benchmark. [T5]
 
-## 6. Strategy: Where to Play / How to Win
+## 5. Strategy: Where to Play / How to Win
 
 | Product | Publicly stated where-to-play | Evidence-supported how-to-win | Limits of evidence |
 |---|---|---|---|
@@ -126,7 +104,7 @@ TrackTik’s “revealed strategy” is consistent with its stated one-platform 
 
 Basic clock-in, report storage, schedules and invoice export are increasingly commodity capabilities; they should be dependable and integrated rather than bespoke differentiators. [T6] Site-specific field procedures, evidentiary quality, jurisdictional rules and privacy-safe client transparency are more differentiating for FCM. [T1/T6] The shared activity/event spine is a product foundation still being completed: FCM’s architecture brief says `location_events` is present but not yet the universal writer. Do not claim a complete unified event stream until writers and readers are verified. [T1]
 
-## 7. Blue Ocean Check
+## 6. Blue Ocean Check
 
 | Eliminate | Reduce | Raise | Create |
 |---|---|---|---|
@@ -134,7 +112,36 @@ Basic clock-in, report storage, schedules and invoice export are increasingly co
 
 This is a positioning hypothesis, not a validated “blue ocean.” Confirm it with provider, council and client interviews before sales or roadmap commitments. [T6]
 
-## 8. Tactical Capability Matrix
+## 7. Adoption Stage Assessment
+
+| Question | Finding |
+|---|---|
+| TAL position | Trackforce presents as an established vendor; FCM’s customer adoption stage is unknown without sales/usage evidence. (T5/T1) |
+| Chasm status | Cannot be rated for FCM from repository data. No cohort, reference-customer or sales-conversion evidence was reviewed. |
+| Whole-product gap | The highest-priority gap to validate is a consistently exercised path from scheduled/assigned work through evidence, client report and finance. (T1/T6) |
+| Bowling-alley head pin | Hypothesis: NZ security providers serving councils and commercial sites that need auditable field compliance and client reporting. Validate with customer interviews and procurement evidence before acting. (T6) |
+
+## 8. Tactical Layer
+
+### UI Observations
+
+The public TrackTik overview embeds a sample command-center dashboard with top product navigation, global search/scope controls, four headline measures, a live operations map, activity feed, site coverage, incident categories and weekly hours/overtime. It connects workforce, site coverage, response and performance in one scan. This is vendor-published sample content, not an authenticated production session. [T5]
+
+The child product pages show a repeatable pattern:
+
+- **Configure:** build sites, checkpoints, tour tasks, report templates and dispatch workflows.
+- **Operate:** show current guard status, location, route/checkpoint progress and open response work.
+- **Handle exceptions:** surface missed checkpoints, SLA thresholds, lone-worker alarms and incomplete reports.
+- **Prove:** retain timestamped photo/video/audio/GPS evidence and turn operational records into client reports.
+- **Improve:** roll up activity into trends, labor costs and shareable dashboards.
+
+The public UI examples use map-and-queue composition for command work, guided forms on mobile, and report/dashboard previews for managers and clients. Trackforce’s public pages route to a sales demo rather than an unauthenticated sandbox. I could inspect the public sample dashboard and screenshots, but not verify its logged-in product, keyboard behavior, mobile layouts or real workflow states. [T5]
+
+The authenticated FCM Reports surface shows an explicit operating spine—organisation, agreement, place, staff, roster, dispatch, evidence, finance and reports—plus agreement/date filters, report-draft generation, custom reports, daily rollups and review/delivery actions. The Admin Hub source has “Today at a glance,” a priority queue, quick actions, five operational measures, a seven-day dispatch trend, periodic refresh and realtime subscriptions. Field Operations has role/module-gated “Respond now” and “Review and investigate” workspaces. [T1]
+
+This is a sound foundation and already follows the task/exception shape. The visual gap is narrower: TrackTik’s advertised overview joins map, coverage, activity feed, incident state and labor trend in one place; FCM distributes those views across Admin Hub, Field Operations, Dispatch, Roster, Reports and Live Map. A unified view is a candidate improvement, not permission to duplicate those surfaces or create an unbacked aggregate.
+
+### Feature / Capability Matrix
 
 | Capability | Strategic weight | TrackTik / GuardTek | FCM present state |
 |---|:---:|---|---|
@@ -150,14 +157,29 @@ This is a positioning hypothesis, not a validated “blue ocean.” Confirm it w
 | Regulated compliance modules | H for FCM | Public pages focus on guard operations, guarding workflows and US/EU compliance examples. NZ statutory coverage not established. (T5) | **FCM differentiation:** parking, noise, smoke, biosecurity, CCTV and freedom-camping/compliance surfaces share the field platform. (T1) |
 | Data ownership across providers | H | Trackforce enterprise pages claim vendor-independent ownership and continuity; rebrand page says existing TrackTik/GuardTek/Silvertrac customers keep their products. (T5) | **Canon is explicit:** client operational truth remains anchored to the harmed party/place when the provider changes; implementation remains a per-flow conformance question. (T1) |
 
-## 9. Adoption Stage and Win/Loss
+### GTM and Distribution Comparison
 
-| Question | Finding |
-|---|---|
-| Trackforce adoption stage | Established vendor positioning; public claims include thousands of organizations and dozens of countries. These are unverified vendor figures, not independently checked market share. (T5) |
-| FCM adoption stage | Cannot be rated from repository and Atlas evidence. Commercial and user-behavior metrics were not examined. (T1) |
-| Whole-product gap for FCM | The most important unclosed proof is a consistently exercised end-to-end path from schedule/dispatch through evidence, customer report and finance. (T1/T6) |
-| Win/loss patterns | No FCM sales win/loss set or independent Trackforce buyer interviews were available. Do not infer why customers choose either product. |
+| Dimension | Trackforce / TrackTik | FCM evidence |
+|---|---|---|
+| Pricing model | Trackforce says pricing is based on protected site count and selected modules, with a custom quote; not seat-priced, according to its pricing page. (T5) | No public FCM pricing schedule was reviewed. Do not infer parity. |
+| Free tier | No public free tier was identified on the reviewed pricing pages. (T5) | Unknown from available evidence. |
+| Enterprise motion | Demo/quote-led; public enterprise page emphasizes multi-site, multi-vendor operations, integrations and board reporting. (T5) | FCM has CRM, client onboarding, agreements and a client portal, but its sales funnel and buyer conversion were not reviewed. (T1) |
+| Distribution | Direct sales demos, webinars, customer stories, support/implementation services and partner integrations. (T5) | Direct product access is visible in the app; distribution and channel economics are unknown. |
+| Bundle leverage | Modules across frontline, workforce and financial back office are positioned as one suite; TrackTik, GuardTek and Silvertrac remain named product families. (T5) | Shared FCM schemas and modules exist, but bundle performance is not measured. (T1) |
+
+### Customer and User Signals
+
+- Trackforce’s Colonial Security story reports replacing four systems and reducing payroll processing from roughly a day and a half to minutes. Vendor-selected case study; not an independent or representative outcome. [T5]
+- Trackforce’s public webinars advertise live walkthroughs of scheduling and invoicing, but the public material does not expose the actual authenticated flows. [T5]
+- FCM’s live Reports screen exposes agreement scoping and report review/delivery; Atlas has wired reads/calls across reports, dispatch, roster and patrol. Atlas `exercised` is null, so this is not proof of end-to-end completion. [T1]
+
+## 9. Win/Loss Pattern Mapping
+
+| Pattern | Structural cause | Framework attribution |
+|---|---|---|
+| No observed FCM win/loss pattern can be stated | No FCM win/loss interviews, CRM outcome analysis or buyer-switching evidence were reviewed. | Not scored; collecting evidence is the next step. |
+| Hypothesized competitive objection: “one integrated workforce-to-invoice system” | TrackTik publicly connects attendance, scheduling, billing, payroll preparation and BI; FCM’s historic patrol cost path is not fully connected. | Switching cost / process power; hypothesis only (T5/T1/T6). |
+| Hypothesized FCM differentiation: NZ accountability, place and compliance depth | FCM’s canon and modules include harmed-party anchors, provider-independent continuity and NZ-specific compliance workflows. | Counter-positioning / cornered knowledge; no deal-level evidence yet (T1/T6). |
 
 ## 10. Strategic Recommendations (O→I→R→C→W)
 
