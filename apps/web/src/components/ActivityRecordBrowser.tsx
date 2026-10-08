@@ -1,8 +1,9 @@
-import React, { useCallback, useEffect, useMemo, useState } from 'react';
+import React, { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { Search, X } from 'lucide-react';
 import { useNavigate } from 'react-router-dom';
 import { useServiceRelationships } from '../context/ServiceRelationshipContext';
 import { ACTIVITY_PAGE_SIZE, sanitiseSearchTerm } from '../lib/activitySearch';
+import { RecordEvidencePanel } from './RecordEvidencePanel';
 import { supabase } from '../lib/supabase';
 import './ActivityRecordBrowser.css';
 
@@ -17,6 +18,7 @@ interface Props {
 
 interface VisitRecord {
   id: string;
+  organization_id: string;
   event_type: string;
   occurred_at: string;
   module_key: string | null;
@@ -30,6 +32,7 @@ interface VisitRecord {
 
 interface SightingRecord {
   id: string;
+  organization_id: string;
   observed_at: string;
   plate_number: string;
   officer_id: string | null;
@@ -139,7 +142,7 @@ export const ActivityRecordBrowser: React.FC<Props> = ({ zoneIds, siteIds, scope
           ].join(',');
           let query = supabase
             .from('location_events')
-            .select('id,event_type,occurred_at,module_key,source,distance_km,zone_id,client_site_id,observed_entity_id,payload', { count: 'estimated' })
+            .select('id,organization_id,event_type,occurred_at,module_key,source,distance_km,zone_id,client_site_id,observed_entity_id,payload', { count: 'estimated' })
             .or(places);
           if (from) query = query.gte('occurred_at', startOfDayIso(from));
           if (to) query = query.lt('occurred_at', nextDayIso(to));
@@ -161,7 +164,7 @@ export const ActivityRecordBrowser: React.FC<Props> = ({ zoneIds, siteIds, scope
           ].join(',');
           let query = supabase
             .from('observations')
-            .select('id,observed_at,plate_number,officer_id,zone_id,site_id,distance_km,officer_notes,is_compliant,compliance_reason,external_refs', { count: 'estimated' })
+            .select('id,organization_id,observed_at,plate_number,officer_id,zone_id,site_id,distance_km,officer_notes,is_compliant,compliance_reason,external_refs', { count: 'estimated' })
             .or(places);
           if (from) query = query.gte('observed_at', startOfDayIso(from));
           if (to) query = query.lt('observed_at', nextDayIso(to));
@@ -248,6 +251,19 @@ export const ActivityRecordBrowser: React.FC<Props> = ({ zoneIds, siteIds, scope
   };
 
   const details = detailRows();
+  const detailOpen = details.length > 0;
+  const closeRef = useRef<HTMLButtonElement>(null);
+  const selectedRecord = selectedVisit
+    ? { kind: 'location_event' as const, id: selectedVisit.id, organizationId: selectedVisit.organization_id }
+    : selectedSighting ? { kind: 'observation' as const, id: selectedSighting.id, organizationId: selectedSighting.organization_id } : null;
+
+  useEffect(() => {
+    if (!detailOpen) return;
+    closeRef.current?.focus();
+    const onKey = (event: KeyboardEvent) => { if (event.key === 'Escape') setSelectedId(null); };
+    window.addEventListener('keydown', onKey);
+    return () => window.removeEventListener('keydown', onKey);
+  }, [detailOpen, selectedId]);
 
   return (
     <section className="reports-section activity-browser" aria-labelledby="activity-browser-title">
@@ -332,22 +348,21 @@ export const ActivityRecordBrowser: React.FC<Props> = ({ zoneIds, siteIds, scope
           </div>
         </div>
 
-        <aside className="activity-browser__detail" aria-live="polite">
-          {details.length === 0 ? (
-            <p className="activity-browser__placeholder">Select a record to read everything the officer noted, who acted on it and where the data came from.</p>
-          ) : (
-            <>
+        {detailOpen && selectedRecord && (
+          <div className="activity-browser__overlay" onClick={(event) => { if (event.target === event.currentTarget) setSelectedId(null); }}>
+            <aside className="activity-browser__detail" role="dialog" aria-modal="true" aria-labelledby="record-detail-title">
               <div className="activity-browser__detail-head">
-                <h3>Record detail</h3>
-                <button type="button" className="activity-browser__close" onClick={() => setSelectedId(null)} aria-label="Close record detail"><X size={16} aria-hidden="true" /></button>
+                <h3 id="record-detail-title">Record detail</h3>
+                <button ref={closeRef} type="button" className="activity-browser__close" onClick={() => setSelectedId(null)} aria-label="Close record detail"><X size={16} aria-hidden="true" /></button>
               </div>
               <dl>
                 {details.map(([label, value]) => (<div key={label}><dt>{label}</dt><dd>{value}</dd></div>))}
               </dl>
+              <RecordEvidencePanel key={selectedRecord.id} recordKind={selectedRecord.kind} recordId={selectedRecord.id} organizationId={selectedRecord.organizationId} canAdd />
               <button type="button" className="btn btn-secondary" onClick={() => navigate('/admin/investigations')}>Open investigations</button>
-            </>
-          )}
-        </aside>
+            </aside>
+          </div>
+        )}
       </div>
     </section>
   );
