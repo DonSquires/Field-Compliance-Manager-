@@ -87,7 +87,7 @@ test('an unbound scratch workspace left dirty by an interrupted run is restored 
     assert.equal(recovered.existing, true);
     assert.equal(recovered.head, repo.sha);
     assert.equal(git(recovered.workspacePath, ['status', '--porcelain', '--untracked-files=normal']), '');
-    assert.equal(fs.readFileSync(path.join(recovered.workspacePath, 'apps/web/src/example.ts'), 'utf8'), 'export const value = 1;\n');
+    assert.equal(fs.readFileSync(path.join(recovered.workspacePath, 'apps/web/src/example.ts'), 'utf8').replace(/\r\n/g, '\n'), 'export const value = 1;\n');
     assert.equal(fs.existsSync(path.join(recovered.workspacePath, 'scratch.txt')), false);
   } finally { fs.rmSync(repo.root, { recursive: true, force: true }); }
 });

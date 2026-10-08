@@ -12,7 +12,7 @@ const SCRIPT = path.resolve(__dirname, '../scripts/bob-release-lane.sh');
 // real reason (without the token) when the fetch does fail.
 test('release lane fetches with gc off and logs the real, token-free fetch error', () => {
   const source = fs.readFileSync(SCRIPT, 'utf8');
-  assert.equal(spawnSync('bash', ['-n', SCRIPT], { encoding: 'utf8' }).status, 0, 'bash -n');
+  assert.equal(spawnSync('bash', ['-n', path.basename(SCRIPT)], { cwd: path.dirname(SCRIPT), encoding: 'utf8' }).status, 0, 'bash -n');
   const fetchLine = source.split('\n').find((line) => /fetch -q "\$REMOTE_URL"/.test(line));
   assert.ok(fetchLine, 'the main fetch is present');
   assert.match(fetchLine, /-c gc\.auto=0/);
@@ -32,7 +32,7 @@ test('release lane skips migrations already in the live ledger, and a hand deplo
   assert.match(lane, /already applied, skipped/);
 
   const deploy = fs.readFileSync(path.resolve(__dirname, '../scripts/bob-vps-deploy.sh'), 'utf8');
-  assert.equal(spawnSync('bash', ['-n', path.resolve(__dirname, '../scripts/bob-vps-deploy.sh')], { encoding: 'utf8' }).status, 0);
+  assert.equal(spawnSync('bash', ['-n', 'bob-vps-deploy.sh'], { cwd: path.resolve(__dirname, '../scripts'), encoding: 'utf8' }).status, 0);
   assert.match(deploy, /> \/var\/lib\/bob\/release-lane\/deployed_sha/);
   // A control-plane restart mid-run would discard the author's turns: the lane waits for the next tick.
   assert.match(lane, /builder_model_runs\?select=id&status=in\.\(running,queued\)/);

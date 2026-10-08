@@ -67,7 +67,7 @@ test('backend worker executes the test files a patch touches and fails when they
     const testRun = result.checks.find(check => check.command.startsWith('node --test'));
     assert.equal(testRun.command, 'node --test test/example.test.js');
     assert.equal(testRun.status, 0);
-    assert.match(testRun.stdout, /# pass 1/);
+    assert.match(testRun.stdout, /(# |ℹ )pass 1/);
   } finally {
     fs.rmSync(passing.root, { recursive: true, force: true });
   }

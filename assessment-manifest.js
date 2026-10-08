@@ -12,7 +12,7 @@ function listFiles(rootDir) {
       if (IGNORED_PARTS.has(entry.name) || entry.name.startsWith('.env')) continue;
       const fullPath = path.join(currentDir, entry.name);
       if (entry.isDirectory()) visit(fullPath);
-      else files.push(path.relative(rootDir, fullPath));
+      else files.push(path.relative(rootDir, fullPath).split(path.sep).join('/'));
     }
   }
   visit(rootDir);
