@@ -18,6 +18,191 @@
   color-scheme: light;
   --color-bg-base: #f1f4f1;
 }
+
+.admin-shell[data-theme='light'] .debrief-followup {
+  color: #17211d;
+}
+
+.admin-shell[data-theme='light'] .debrief-followup > header span,
+.admin-shell[data-theme='light'] .debrief-followup-heading > span,
+.admin-shell[data-theme='light'] .debrief-followup-heading > div > span {
+  color: #8f1d2b;
+}
+
+.admin-shell[data-theme='light'] .debrief-followup > header p {
+  color: #58675f;
+}
+
+.admin-shell[data-theme='light'] .debrief-followup > header button,
+.admin-shell[data-theme='light'] .debrief-followup-actions button,
+.admin-shell[data-theme='light'] .debrief-followup-dialog button {
+  border-color: #bdc9c1;
+  color: #34433b;
+  background: #ffffff;
+}
+
+.admin-shell[data-theme='light'] .debrief-followup button.is-primary {
+  border-color: #8f1d2b;
+  color: #ffffff;
+  background: #b42332;
+}
+
+.admin-shell[data-theme='light'] .debrief-followup-tabs {
+  width: max-content;
+  padding: 3px;
+  border: 1px solid #d2dad5;
+  border-radius: 6px;
+  background: #e8ede9;
+}
+
+.admin-shell[data-theme='light'] .debrief-followup-tabs button {
+  color: #485851;
+}
+
+.admin-shell[data-theme='light'] .debrief-followup-tabs button.is-active {
+  border-color: #8f1d2b;
+  color: #ffffff;
+  background: #b42332;
+}
+
+.admin-shell[data-theme='light'] .debrief-followup-list,
+.admin-shell[data-theme='light'] .debrief-followup-detail {
+  border-color: #d2dad5;
+  color: #26332c;
+  background: #ffffff;
+}
+
+.admin-shell[data-theme='light'] .debrief-followup-list > button {
+  border-top-color: #e0e6e1;
+  color: #26332c;
+}
+
+.admin-shell[data-theme='light'] .debrief-followup-list > button.is-selected {
+  outline: 1px solid #e5b8bc;
+  color: #812633;
+  background: #f8e9ea;
+}
+
+.admin-shell[data-theme='light'] .debrief-followup-list > button.priority-critical > svg {
+  color: #a82432;
+}
+
+.admin-shell[data-theme='light'] .debrief-followup-list > button.priority-high > svg {
+  color: #95620e;
+}
+
+.admin-shell[data-theme='light'] .debrief-followup-list span,
+.admin-shell[data-theme='light'] .debrief-followup-list small {
+  color: #58675f;
+}
+
+.admin-shell[data-theme='light'] .debrief-followup-list i {
+  color: #815b13;
+}
+
+.admin-shell[data-theme='light'] .debrief-followup-detail .debrief-followup-heading b {
+  color: #245f41;
+  background: #e8f3eb;
+}
+
+.admin-shell[data-theme='light'] .debrief-followup-summary {
+  border-left-color: #176f68;
+  color: #34433b;
+  background: #edf5f2;
+}
+
+.admin-shell[data-theme='light'] .debrief-followup-flags span {
+  color: #674d12;
+  background: #fff4d9;
+}
+
+.admin-shell[data-theme='light'] .debrief-followup-flags span.is-critical {
+  color: #812633;
+  background: #fbeaec;
+}
+
+.admin-shell[data-theme='light'] .debrief-followup-detail section {
+  border-color: #dce4de;
+}
+
+.admin-shell[data-theme='light'] .debrief-followup-detail section p,
+.admin-shell[data-theme='light'] .debrief-followup-empty {
+  color: #58675f;
+}
+
+.admin-shell[data-theme='light'] .debrief-followup-detail dl > div {
+  background: #f3f6f3;
+}
+
+.admin-shell[data-theme='light'] .debrief-followup-detail dt {
+  color: #58675f;
+}
+
+.admin-shell[data-theme='light'] .debrief-followup-message.is-error {
+  border-color: #e5b8bc;
+  color: #812633;
+  background: #fbeaec;
+}
+
+.admin-shell[data-theme='light'] .debrief-followup-message.is-success {
+  border-color: #bad8c4;
+  color: #245f41;
+  background: #e8f3eb;
+}
+
+.admin-shell[data-theme='light'] .debrief-followup-dialog {
+  border-color: #aebbb2;
+  color: #17211d;
+  background: #ffffff;
+  box-shadow: 0 20px 50px rgba(28, 44, 35, 0.22);
+}
+
+.admin-shell[data-theme='light'] .debrief-followup-dialog > p,
+.admin-shell[data-theme='light'] .debrief-followup-dialog label {
+  color: #485851;
+}
+
+.admin-shell[data-theme='light'] .debrief-followup-dialog textarea {
+  border-color: #bdc9c1;
+  color: #17211d;
+  background: #ffffff;
+}
+
+.admin-shell[data-theme='light'] .debrief-followup-list > button {
+  grid-template-columns: auto minmax(0, 1fr) max-content;
+  min-width: 0;
+}
+
+.admin-shell[data-theme='light'] .debrief-followup-list > button > div:first-of-type {
+  min-width: 0;
+  overflow-wrap: anywhere;
+}
+
+.admin-shell[data-theme='light'] .debrief-followup-list > button > div:first-of-type span {
+  display: block;
+  overflow-wrap: anywhere;
+  white-space: normal;
+}
+
+.admin-shell[data-theme='light'] .debrief-followup-list > button > div:last-child {
+  min-width: max-content;
+  text-align: right;
+}
+
+@media (max-width: 760px) {
+  .admin-shell[data-theme='light'] .debrief-followup-list > button {
+    grid-template-columns: auto minmax(0, 1fr);
+  }
+
+  .admin-shell[data-theme='light'] .debrief-followup-list > button > div:last-child {
+    grid-column: 2;
+    display: flex;
+    justify-content: space-between;
+    gap: 10px;
+    min-width: 0;
+    text-align: left;
+  }
+}
 .admin-shell[data-theme='light'] .noise-review-dialog {
   border-color: #bdc9c1;
   color: #17211d;
