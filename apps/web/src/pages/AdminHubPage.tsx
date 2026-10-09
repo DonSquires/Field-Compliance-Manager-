@@ -362,6 +362,9 @@ const AdminHubPage: React.FC<AdminHubPageProps> = ({ onNavigate }) => {
             <div><span>Live work</span><h2 id="priority-queue-heading">Priority queue</h2></div>
             <strong>{queue.length}</strong>
           </div>
+          <p className="admin-queue-scope-note">
+            Field items use {selectedAgreementZones.length > 0 ? 'Zones on the active agreement' : 'organization-wide scope'}. CCTV processing is organization-wide.
+          </p>
 
           {!loading && queue.length === 0 && queueWarnings.length === 0 ? (
             <div className="admin-queue-empty">

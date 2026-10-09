@@ -31,7 +31,7 @@ describe('AdminShell access and routing boundaries', () => {
     expect(source).toContain('CRM_MANAGEMENT_PAGES');
     expect(source).toContain("'relationships', 'onboarding', 'handoffs', 'crm', 'client-setup', 'finance-bureau', 'finance-connections', 'finance-money', 'finance-costing', 'finance-pricing', 'sites'");
     expect(source).toContain("role === 'grand_master' || role === 'master' || role === 'admin'");
-    expect(source).toContain("items.filter((item) => isPageEnabled(item.id as AdminPage))");
+    expect(source).toContain('items.filter((item) => isPageEnabled(item.id as AdminPage) && (!item.area || isFieldOpsAreaEnabled(item.area)))');
   });
 
   it('shows approvals only to roles that can make governed decisions', () => {
@@ -92,6 +92,21 @@ describe('AdminShell access and routing boundaries', () => {
     expect(source).toContain('new URLSearchParams(location.search)');
     expect(source).toContain('navigate(`/admin/field-ops?area=${area}`)');
     expect(source).toContain('<AdminHubPage onNavigate={navigateFromHub} />');
+  });
+
+  it('uses the same module entitlement for direct routes, desktop and mobile navigation, and shortcuts', () => {
+    expect(source).toContain('canAccessFieldOpsArea(requestedArea, moduleCheck)');
+    expect(source).toContain('(!item.area || isFieldOpsAreaEnabled(item.area))');
+    expect(source).toContain("isFieldOpsAreaEnabled('vehicle-search')");
+    expect(source).toContain('.filter((tab) => isPageEnabled(tab.id as AdminPage))');
+  });
+
+  it('normalizes retired page routes and preserves the canonical platform billing destination', () => {
+    expect(source).toContain('...Object.values(NAVIGATION_MAP).flatMap((items) => items.map((item) => item.id))');
+    expect(source).toContain("'bob', 'document-studio'");
+    expect(source).toContain("'platform-billing': { page: 'platform-subscriptions' }");
+    expect(source).toContain('!NAVIGABLE_ADMIN_PAGES.has(page)');
+    expect(source).not.toContain("'site-ownership' | 'locations'");
   });
 
   it('recovers from stale lazy page chunks instead of leaving a blank workspace', () => {

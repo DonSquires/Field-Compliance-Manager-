@@ -21,4 +21,13 @@ describe('Iron Eagle platform billing', () => {
     expect(page).toContain('Catalog list price');
     expect(page).toContain('const moduleLabel');
   });
+
+  it('filters only the loaded, RLS-scoped rows and preserves the governed edit path', () => {
+    expect(page).toContain('const visibleSubscriptions = subscriptions.filter');
+    expect(page).toContain('Filter by subscription status');
+    expect(page).toContain('No subscriptions match these filters.');
+    expect(page).toContain('Showing {visibleSubscriptions.length} of {subscriptions.length} loaded subscriptions');
+    expect(page).not.toMatch(/from\('org_module_subscriptions'\)\.update/);
+    expect(page).toContain("rpc('manage_provider_module_subscription_terms'");
+  });
 });

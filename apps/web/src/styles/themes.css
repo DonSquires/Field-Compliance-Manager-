@@ -16,15 +16,35 @@
 
 [data-theme='light'] {
   color-scheme: light;
-  --color-bg-primary: #f7fafb;
+  --color-bg-base: #f1f4f1;
+  --color-bg-surface: #ffffff;
+  --color-bg-elevated: #f8faf8;
+  --color-bg-primary: #f1f4f1;
   --color-bg-secondary: #ffffff;
-  --color-bg-elevated: #ffffff;
-  --color-bg-tertiary: #eaf0f3;
-  --color-text-primary: #10212b;
-  --color-text-secondary: #405764;
-  --color-text-muted: #607783;
-  --color-border: #d6e1e6;
-  --color-border-strong: #9db2bc;
+  --color-bg-tertiary: #e8ede9;
+  --color-brand-primary: #b42332;
+  --color-brand-hover: #8f1d2b;
+  --color-brand-cobalt: #315f8e;
+  --color-brand-gold: #95620e;
+  --color-accent-silver: #66746d;
+  --color-accent-silver-light: #d2dad5;
+  --color-text-primary: #17211d;
+  --color-text-secondary: #485851;
+  --color-text-muted: #66746d;
+  --color-border: #d2dad5;
+  --color-border-strong: #9eaaa2;
+  --color-primary: #b42332;
+  --color-primary-hover: #8f1d2b;
+  --color-primary-text: #ffffff;
+  --color-accent: #176f68;
+  --color-success: #28714f;
+  --color-success-bg: #e4f1e8;
+  --color-warning: #815b13;
+  --color-warning-bg: #fff3d5;
+  --color-danger: #a82432;
+  --color-danger-bg: #fbe9e9;
+  --color-info: #315f8e;
+  --color-info-bg: #e8f0f8;
 }
 
 [data-theme='night-patrol'] {
@@ -53,4 +73,619 @@
   --color-border: #000000;
   --color-border-strong: #000000;
   --color-accent: #0033cc;
+}
+
+/* Operations and client surfaces use the light scheme; field shells remain dark. */
+.admin-shell[data-theme='light'] .workflow-rail,
+.admin-shell[data-theme='light'] .operating-spine {
+  border-color: var(--color-border);
+  background: #ffffff;
+}
+
+.admin-shell[data-theme='light'] .workflow-rail-label,
+.admin-shell[data-theme='light'] .operating-spine-title {
+  color: #176f68;
+}
+
+.admin-shell[data-theme='light'] .workflow-rail button,
+.admin-shell[data-theme='light'] .operating-spine button {
+  color: #526158;
+}
+
+.admin-shell[data-theme='light'] .workflow-rail button.is-complete {
+  color: #28714f;
+}
+
+.admin-shell[data-theme='light'] .workflow-rail button.is-current,
+.admin-shell[data-theme='light'] .operating-spine button.is-active {
+  border-color: #b6d5c4;
+  color: #205e43;
+  background: #e4f1e8;
+}
+
+.admin-shell[data-theme='light'] .workflow-rail-label {
+  background: #ffffff;
+}
+
+.admin-shell[data-theme='light'] .operating-spine button:hover {
+  background: #edf3ef;
+}
+
+.admin-shell[data-theme='light'] .admin-overview {
+  color: var(--color-text-primary);
+}
+
+.admin-shell[data-theme='light'] .admin-overview-header h1,
+.admin-shell[data-theme='light'] .admin-dashboard-heading h2,
+.admin-shell[data-theme='light'] .admin-section-heading h2 {
+  color: #17211d;
+}
+
+.admin-shell[data-theme='light'] .admin-overview-header > div:first-child > span,
+.admin-shell[data-theme='light'] .admin-section-heading > div > span,
+.admin-shell[data-theme='light'] .admin-dashboard-heading > div > span,
+.admin-shell[data-theme='light'] .admin-command-group > span {
+  color: #8f1d2b;
+}
+
+.admin-shell[data-theme='light'] .admin-priority-queue,
+.admin-shell[data-theme='light'] .admin-command-panel,
+.admin-shell[data-theme='light'] .admin-trend-panel,
+.admin-shell[data-theme='light'] .admin-metric {
+  border-color: var(--color-border);
+  color: var(--color-text-primary);
+  background: #ffffff;
+}
+
+.admin-shell[data-theme='light'] .admin-metric:hover,
+.admin-shell[data-theme='light'] .admin-command-link:hover,
+.admin-shell[data-theme='light'] .admin-queue-row:hover {
+  border-color: #d0aaa9;
+  background: #f8f1ef;
+}
+
+.admin-shell[data-theme='light'] .admin-metric-icon,
+.admin-shell[data-theme='light'] .kind-dispatch .admin-queue-icon {
+  color: #315f8e;
+  background: #e8f0f8;
+}
+
+.admin-shell[data-theme='light'] .tone-red .admin-metric-icon,
+.admin-shell[data-theme='light'] .kind-welfare .admin-queue-icon {
+  color: #a82432;
+  background: #fbe9e9;
+}
+
+.admin-shell[data-theme='light'] .tone-amber .admin-metric-icon,
+.admin-shell[data-theme='light'] .kind-breach .admin-queue-icon {
+  color: #815b13;
+  background: #fff3d5;
+}
+
+.admin-shell[data-theme='light'] .tone-green .admin-metric-icon {
+  color: #28714f;
+  background: #e4f1e8;
+}
+
+.admin-shell[data-theme='light'] .admin-queue-row {
+  border-top-color: #e2e8e3;
+  color: #26332c;
+}
+
+.admin-shell[data-theme='light'] .admin-queue-row.is-next {
+  border-top-color: #83b698;
+  background: #edf5ef;
+}
+
+.admin-shell[data-theme='light'] .admin-queue-status {
+  border-color: var(--color-border);
+  color: #485851;
+  background: #f3f6f3;
+}
+
+.admin-shell[data-theme='light'] .admin-trend-chart {
+  border-bottom-color: #d2dad5;
+}
+
+.admin-shell[data-theme='light'] .admin-trend-bars span {
+  background: #315f8e;
+}
+
+.admin-shell[data-theme='light'] .admin-trend-bars span.is-completed,
+.admin-shell[data-theme='light'] .admin-trend-legend i.is-completed {
+  background: #28714f;
+}
+
+.admin-shell[data-theme='light'] .admin-data-warning {
+  border-color: #d6bd7d;
+  color: #674d12;
+  background: #fff3d5;
+}
+
+.admin-shell[data-theme='light'] .admin-data-warning span,
+.admin-shell[data-theme='light'] .admin-data-warning small {
+  color: #6a5a35;
+}
+
+.admin-shell[data-theme='light'] .roster-ops {
+  color: var(--color-text-primary);
+}
+
+.admin-shell[data-theme='light'] .roster-ops-header,
+.admin-shell[data-theme='light'] .roster-history {
+  border-color: var(--color-border);
+}
+
+.admin-shell[data-theme='light'] .roster-ops-header > div:first-child > span,
+.admin-shell[data-theme='light'] .roster-history > header span {
+  color: #8f1d2b;
+}
+
+.admin-shell[data-theme='light'] .roster-ops-header p,
+.admin-shell[data-theme='light'] .roster-history-empty,
+.admin-shell[data-theme='light'] .roster-board-scroll-cue {
+  color: #58675f;
+}
+
+.admin-shell[data-theme='light'] .roster-ops-header button,
+.admin-shell[data-theme='light'] .roster-quick-actions button,
+.admin-shell[data-theme='light'] .roster-week-nav button,
+.admin-shell[data-theme='light'] .roster-readiness button {
+  border-color: #c5d0c8;
+  color: #34433b;
+  background: #ffffff;
+}
+
+.admin-shell[data-theme='light'] .roster-ops-header button.is-primary {
+  border-color: #8f1d2b;
+  color: #ffffff;
+  background: #b42332;
+}
+
+.admin-shell[data-theme='light'] .roster-toolbar input,
+.admin-shell[data-theme='light'] .roster-ops select,
+.admin-shell[data-theme='light'] .roster-ops textarea {
+  border-color: #bdc9c1;
+  color: #17211d;
+  background: #ffffff;
+}
+
+.admin-shell[data-theme='light'] .roster-board {
+  border-color: #c5d0c8;
+  background: #ffffff;
+}
+
+.admin-shell[data-theme='light'] .roster-board-head {
+  border-color: #d2dad5;
+  background: #e8ede9;
+}
+
+.admin-shell[data-theme='light'] .roster-board-head > div,
+.admin-shell[data-theme='light'] .roster-cell {
+  border-color: #e0e6e1;
+  color: #485851;
+}
+
+.admin-shell[data-theme='light'] .roster-board-head .is-today {
+  color: #8f1d2b;
+  background: #f8e9ea;
+}
+
+.admin-shell[data-theme='light'] .roster-person {
+  border-color: #e0e6e1;
+  color: #26332c;
+  background: #ffffff;
+}
+
+.admin-shell[data-theme='light'] .roster-person > span {
+  color: #176f68;
+  background: #e3f0ec;
+}
+
+.admin-shell[data-theme='light'] .roster-person small,
+.admin-shell[data-theme='light'] .roster-shift small {
+  color: #58675f;
+}
+
+.admin-shell[data-theme='light'] .roster-person i.is-ready {
+  color: #28714f;
+}
+
+.admin-shell[data-theme='light'] .roster-person i.is-risk {
+  color: #815b13;
+}
+
+.admin-shell[data-theme='light'] .roster-cell.is-leave {
+  background: repeating-linear-gradient(135deg, #f2eef5, #f2eef5 6px, #eae4ef 6px, #eae4ef 12px);
+}
+
+.admin-shell[data-theme='light'] .roster-shift,
+.admin-shell[data-theme='light'] .roster-shift.status-published {
+  border-color: #c1d9d5;
+  border-left-color: #176f68;
+  color: #24433d;
+  background: #edf5f2;
+}
+
+.admin-shell[data-theme='light'] .roster-shift.status-draft {
+  border-color: #cbd2d7;
+  border-style: dashed;
+  color: #394750;
+  background: #f2f4f5;
+}
+
+.admin-shell[data-theme='light'] .roster-shift.status-accepted,
+.admin-shell[data-theme='light'] .roster-shift.status-completed {
+  border-left-color: #28714f;
+  color: #244334;
+  background: #e7f2e9;
+}
+
+.admin-shell[data-theme='light'] .roster-shift.status-in_progress,
+.admin-shell[data-theme='light'] .roster-shift.is-open {
+  border-left-color: #95620e;
+  color: #554314;
+  background: #fff3d5;
+}
+
+.admin-shell[data-theme='light'] .roster-shift.status-missed {
+  border-left-color: #a82432;
+  color: #79232b;
+  background: #fbe9e9;
+}
+
+.admin-shell[data-theme='light'] .roster-history-table-wrap,
+.admin-shell[data-theme='light'] .roster-history th,
+.admin-shell[data-theme='light'] .roster-history td {
+  border-color: #dce4de;
+  color: #34433b;
+  background: #ffffff;
+}
+
+.admin-shell[data-theme='light'] .roster-inspector,
+.admin-shell[data-theme='light'] .roster-commercial-readiness {
+  border-color: var(--color-border);
+  color: #26332c;
+  background: #ffffff;
+}
+
+.admin-shell[data-theme='light'] .roster-inspector header span {
+  color: #8f1d2b;
+}
+
+.admin-shell[data-theme='light'] .roster-context-banner:not(.roster-setup-banner) {
+  border-color: #bdd9cc;
+  border-left-color: #28714f;
+  background: #edf5ef;
+}
+
+.admin-shell[data-theme='light'] .roster-context-banner:not(.roster-setup-banner) span {
+  color: #28714f;
+}
+
+.admin-shell[data-theme='light'] .roster-context-banner:not(.roster-setup-banner) p {
+  color: #485851;
+}
+
+.admin-shell[data-theme='light'] .roster-coverage-note.is-ok,
+.admin-shell[data-theme='light'] .roster-assignment-note.is-ok {
+  border-color: #bad8c4;
+  color: #245f41;
+  background: #e8f3eb;
+}
+
+.admin-shell[data-theme='light'] .roster-coverage-note.is-warn,
+.admin-shell[data-theme='light'] .roster-assignment-note.is-warn {
+  border-color: #e5cd91;
+  color: #674d12;
+  background: #fff4d9;
+}
+
+.admin-shell[data-theme='light'] .roster-assignment-note.is-stop {
+  border-color: #e5b8bc;
+  color: #812633;
+  background: #fbeaec;
+}
+
+.admin-shell[data-theme='light'] .roster-dialog {
+  border-color: var(--color-border-strong);
+  color: #17211d;
+  background: #ffffff;
+}
+
+.admin-shell[data-theme='light'] .roster-dialog header,
+.admin-shell[data-theme='light'] .roster-dialog header button,
+.admin-shell[data-theme='light'] .roster-dialog footer button {
+  border-color: var(--color-border);
+  color: #34433b;
+  background: #f8faf8;
+}
+
+.admin-shell[data-theme='light'] .roster-dialog header span {
+  color: #8f1d2b;
+}
+
+.admin-shell[data-theme='light'] .roster-dialog footer button:last-child {
+  border-color: #8f1d2b;
+  color: #ffffff;
+  background: #b42332;
+}
+
+.admin-shell[data-theme='light'] .roster-metrics > div {
+  border-color: var(--color-border);
+  border-top-color: #176f68;
+  color: #26332c;
+  background: #ffffff;
+}
+
+.admin-shell[data-theme='light'] .roster-metrics > div:nth-child(2) {
+  border-top-color: #b42332;
+}
+
+.admin-shell[data-theme='light'] .roster-metrics > div:nth-child(3) {
+  border-top-color: #95620e;
+}
+
+.admin-shell[data-theme='light'] .roster-metrics > div:nth-child(4) {
+  border-top-color: #315f8e;
+}
+
+.admin-shell[data-theme='light'] .roster-metrics > div.is-warning {
+  border-color: #e5cd91;
+  color: #674d12;
+  background: #fff4d9;
+}
+
+.admin-shell[data-theme='light'] .roster-metrics svg {
+  color: #58675f;
+}
+
+.admin-shell[data-theme='light'] .roster-horizon {
+  border-color: var(--color-border-strong);
+  background: #e8ede9;
+}
+
+.admin-shell[data-theme='light'] .roster-horizon button {
+  color: #485851;
+}
+
+.admin-shell[data-theme='light'] .roster-horizon button.is-active {
+  color: #ffffff;
+  background: #176f68;
+}
+
+.admin-shell[data-theme='light'] .roster-horizon-bar > label {
+  color: #58675f;
+}
+
+.admin-shell[data-theme='light'] .roster-week-nav strong {
+  color: #26332c;
+}
+
+.admin-shell[data-theme='light'] .roster-toolbar > label,
+.admin-shell[data-theme='light'] .roster-readiness button.is-active {
+  border-color: var(--color-border-strong);
+  color: #34433b;
+  background: #ffffff;
+}
+
+.admin-shell[data-theme='light'] .roster-availability-queue,
+.admin-shell[data-theme='light'] .roster-commercial-queue,
+.admin-shell[data-theme='light'] .roster-slot-queue {
+  border-color: var(--color-border);
+  color: #26332c;
+  background: #ffffff;
+}
+
+.admin-shell[data-theme='light'] .roster-availability-queue h2,
+.admin-shell[data-theme='light'] .roster-commercial-queue h2,
+.admin-shell[data-theme='light'] .roster-slot-queue h2 {
+  color: #17211d;
+}
+
+.admin-shell[data-theme='light'] .roster-availability-queue > header span {
+  color: #815b13;
+}
+
+.admin-shell[data-theme='light'] .roster-availability-queue > header > strong,
+.admin-shell[data-theme='light'] .roster-availability-queue > div > button {
+  border-color: #e5cd91;
+  color: #674d12;
+  background: #fff7e5;
+}
+
+.admin-shell[data-theme='light'] .roster-availability-queue button small,
+.admin-shell[data-theme='light'] .roster-availability-queue button i {
+  color: #76591b;
+}
+
+.admin-shell[data-theme='light'] .roster-commercial-queue > header span {
+  color: #815b13;
+}
+
+.admin-shell[data-theme='light'] .roster-commercial-queue > header > strong,
+.admin-shell[data-theme='light'] .roster-commercial-queue > div > button {
+  border-color: #e5cd91;
+  color: #674d12;
+  background: #fff7e5;
+}
+
+.admin-shell[data-theme='light'] .roster-commercial-queue button small,
+.admin-shell[data-theme='light'] .roster-commercial-queue button i {
+  color: #76591b;
+}
+
+.admin-shell[data-theme='light'] .roster-commercial-queue.roster-attendance-queue > header span {
+  color: #a82432;
+}
+
+.admin-shell[data-theme='light'] .roster-slot-queue > header span {
+  color: #176f68;
+}
+
+.admin-shell[data-theme='light'] .roster-slot-queue > header > strong,
+.admin-shell[data-theme='light'] .roster-slot-queue > div > button {
+  border-color: var(--color-border);
+  color: #34433b;
+  background: #f8faf8;
+}
+
+.admin-shell[data-theme='light'] .roster-slot-queue button small,
+.admin-shell[data-theme='light'] .roster-slot-queue button i {
+  color: #58675f;
+}
+
+.admin-shell[data-theme='light'] .roster-slot-queue button > span {
+  color: #315f8e;
+  background: #e8f0f8;
+}
+
+.admin-shell[data-theme='light'] .roster-slot-queue button > span.type-internal {
+  color: #28714f;
+  background: #e4f1e8;
+}
+
+.admin-shell[data-theme='light'] .roster-inspector dl > div,
+.admin-shell[data-theme='light'] .roster-slot-inspector dl > div {
+  border-color: var(--color-border);
+  color: #26332c;
+  background: #f3f6f3;
+}
+
+.admin-shell[data-theme='light'] .roster-inspector dt,
+.admin-shell[data-theme='light'] .roster-slot-inspector dt {
+  color: #58675f;
+}
+
+.admin-shell[data-theme='light'] .roster-inspector dd,
+.admin-shell[data-theme='light'] .roster-slot-inspector dd {
+  color: #26332c;
+}
+
+.admin-shell[data-theme='light'] .roster-slot-inspector footer button {
+  border-color: var(--color-border-strong);
+  color: #34433b;
+  background: #ffffff;
+}
+
+.admin-shell[data-theme='light'] .roster-slot-inspector footer button.is-primary {
+  border-color: #8f1d2b;
+  color: #ffffff;
+  background: #b42332;
+}
+
+.admin-shell[data-theme='light'] .roster-slot-inspector > p {
+  border: 1px solid var(--color-border);
+  color: #485851;
+  background: #f3f6f3;
+}
+
+.admin-shell[data-theme='light'] .notification-trigger,
+.admin-shell[data-theme='light'] .notification-panel,
+.admin-shell[data-theme='light'] .notification-toolbar,
+.admin-shell[data-theme='light'] .notification-panel > header > button,
+.admin-shell[data-theme='light'] .notification-list > button {
+  border-color: var(--color-border);
+  color: #34433b;
+  background: #ffffff;
+}
+
+.admin-shell[data-theme='light'] .notification-panel > header span {
+  color: #176f68;
+}
+
+.admin-shell[data-theme='light'] .notification-toolbar > div button.is-active {
+  border-color: #b6d5c4;
+  color: #205e43;
+  background: #e4f1e8;
+}
+
+.admin-shell[data-theme='light'] .notification-list > button:hover,
+.admin-shell[data-theme='light'] .notification-trigger:hover {
+  color: #8f1d2b;
+  background: #f8f1ef;
+}
+
+.admin-shell[data-theme='light'] .admin-refresh-block button {
+  border-color: #8f1d2b;
+  color: #ffffff;
+  background: #b42332;
+}
+
+.admin-shell[data-theme='light'] .admin-dashboard-heading small,
+.admin-shell[data-theme='light'] .admin-trend-panel .admin-section-heading small {
+  color: #58675f;
+}
+
+.admin-shell[data-theme='light'] .admin-priority-queue,
+.admin-shell[data-theme='light'] .admin-command-panel {
+  box-shadow: 0 1px 2px rgba(28, 44, 35, 0.06);
+}
+
+.admin-shell[data-theme='light'] .admin-section-heading > strong {
+  border-color: #b5d5c4;
+  color: #205e43;
+  background: #e4f1e8;
+}
+
+.admin-shell[data-theme='light'] .admin-queue-row.is-next,
+.admin-shell[data-theme='light'] .admin-queue-row.is-next .admin-queue-icon,
+.admin-shell[data-theme='light'] .admin-queue-row.is-next .admin-queue-status {
+  border-color: #bad8c4;
+  color: #245f41;
+  background: #e8f3eb;
+}
+
+.admin-shell[data-theme='light'] .admin-queue-icon {
+  color: #315f8e;
+  background: #e8f0f8;
+}
+
+.admin-shell[data-theme='light'] .admin-queue-row > svg,
+.admin-shell[data-theme='light'] .admin-metric > svg,
+.admin-shell[data-theme='light'] .admin-command-link > svg {
+  color: #74837b;
+}
+
+.admin-shell[data-theme='light'] .admin-command-link {
+  border-color: transparent;
+  color: #26332c;
+  background: #ffffff;
+}
+
+.admin-shell[data-theme='light'] .admin-command-link > span {
+  color: #8f1d2b;
+  background: #f8e9ea;
+}
+
+.admin-shell[data-theme='light'] .admin-command-link small,
+.admin-shell[data-theme='light'] .admin-trend-column small,
+.admin-shell[data-theme='light'] .admin-trend-legend {
+  color: #58675f;
+}
+
+.admin-shell[data-theme='light'] .admin-trend-legend i {
+  background: #315f8e;
+}
+
+.admin-shell[data-theme='light'] .status-strip--normal {
+  border-color: #bad8c4;
+  border-left-color: #28714f;
+  color: #245f41;
+  background: #e8f3eb;
+}
+
+.admin-shell[data-theme='light'] .status-strip--watch,
+.admin-shell[data-theme='light'] .status-strip--action {
+  border-color: #e5cd91;
+  border-left-color: #95620e;
+  color: #674d12;
+  background: #fff4d9;
+}
+
+.admin-shell[data-theme='light'] .status-strip--critical {
+  border-color: #e5b8bc;
+  border-left-color: #a82432;
+  color: #812633;
+  background: #fbeaec;
 }

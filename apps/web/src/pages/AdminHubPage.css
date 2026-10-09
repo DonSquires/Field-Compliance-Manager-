@@ -402,6 +402,13 @@
   font-size: 12px;
 }
 
+.admin-queue-scope-note {
+  margin: 8px 0 2px;
+  color: var(--color-text-secondary);
+  font-size: 12px;
+  line-height: 1.4;
+}
+
 .admin-queue-list {
   display: grid;
   margin-top: 10px;

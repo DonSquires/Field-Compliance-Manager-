@@ -3,7 +3,7 @@ import { installSupabaseFixtures, monitorBrowserErrors, signInAsAdmin } from './
 
 test.beforeEach(async ({ page }) => {
   await page.clock.setFixedTime(new Date('2026-08-30T09:30:00+12:00'));
-  await installSupabaseFixtures(page);
+  await installSupabaseFixtures(page, { officerModules: ['dispatch'] });
 });
 
 test('dispatcher keeps the selected run sheet current as patrol stops advance', async ({ page }) => {
@@ -45,10 +45,15 @@ test('priority dispatch item opens its exact operational review record', async (
     expected_dwell_minutes: 8, timing_source: 'dispatcher_override', shift_id: '66666666-6666-4666-8666-666666666666', client_site_id: '42424242-4242-4242-8242-424242424242', created_at: '2026-08-30T09:00:00.000Z',
     site: { name: 'Civic Operations Centre', address: '10 Waimea Road, Nelson', hs_notes: 'Boundary-first arrival check required.', access_instructions: 'Use the north loading entrance.' }, resource: { name: 'Unit N587' },
   };
+  await page.route('**/rest/v1/organization_modules**', async (route) => {
+    await route.fulfill({ contentType: 'application/json', body: JSON.stringify([{ id: 'abababab-abab-4bab-8bab-ababababab31', module_key: 'dispatch', enabled: true }, { id: 'abababab-abab-4bab-8bab-ababababab32', module_key: 'welfare', enabled: true }, { id: 'abababab-abab-4bab-8bab-ababababab33', module_key: 'crm', enabled: true }, { id: 'abababab-abab-4bab-8bab-ababababab34', module_key: 'rostering', enabled: true }, { id: 'abababab-abab-4bab-8bab-ababababab35', module_key: 'finance', enabled: true }]) });
+  });
   await page.route('**/rest/v1/dispatch_jobs**', async (route) => await route.fulfill({ contentType: 'application/json', body: JSON.stringify([dispatchJob]) }));
   await signInAsAdmin(page, '/admin/hub');
+  await expect(page.getByText(/CCTV processing is organization-wide/)).toBeVisible();
   const queueItem = page.getByRole('button', { name: /Alarm response.*SLA due/i });
   await expect(queueItem).toBeVisible();
+  await expect(page).toHaveScreenshot('admin-hub-first-viewport.png');
   await queueItem.click();
   await expect(page).toHaveURL(/\/admin\/field-ops\?area=dispatch&job=cccccccc-cccc-4ccc-8ccc-cccccccccccc/);
   const detail = page.getByLabel('Dispatch details for Civic Operations Centre');

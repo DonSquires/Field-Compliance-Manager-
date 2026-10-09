@@ -65,6 +65,7 @@ import { OperatingSpineRibbon } from '../components/OperatingSpineRibbon';
 import { HelpInstructions } from '../components/HelpInstructions';
 import { PlaceContextBanner } from '../components/PlaceContextBanner';
 import { readWorkflowContext, workflowContextQuery, type WorkflowContext } from '../lib/workflowNavigation';
+import { canAccessFieldOpsArea, FIELD_OPS_AREAS, isFieldOpsSubArea, type FieldOpsSubArea } from '../lib/fieldOpsAreaAccess';
 import './AdminShell.css';
 
 import AdminHubPage from '../pages/AdminHubPage';
@@ -127,17 +128,16 @@ const ObservationSearchPage = React.lazy(() => import('../pages/ObservationSearc
 
 type AdminPage =
   | 'hub' | 'bob' | 'document-studio' | 'files' | 'relationships' | 'onboarding' | 'handoffs' | 'crm' | 'client-setup' | 'finance-bureau' | 'finance-connections' | 'finance-money' | 'finance-costing' | 'finance-pricing' | 'rate-rules' | 'roster' | 'people-hr' | 'roster-targets' | 'field-ops' | 'investigations' | 'reports' | 'sites' | 'site-360' | 'zones'
-  | 'site-ownership' | 'locations' | 'users' | 'access-control' | 'org-setup' | 'module-subscriptions'
+  | 'locations' | 'users' | 'access-control' | 'org-setup' | 'module-subscriptions'
   | 'approvals' | 'testing' | 'test-data' | 'platform' | 'platform-catalog'
-  | 'platform-subscriptions' | 'platform-billing' | 'platform-subscribers' | 'builder' | 'workshop';
+  | 'platform-subscriptions' | 'platform-subscribers' | 'builder' | 'workshop';
 
 type CRMTab = 'crm' | 'invoicing' | 'payments' | 'generate-invoice' | 'oncall' | 'financial-setup' | 'rate-rules' | 'tenders';
 type RosterTab = 'roster' | 'staff' | 'training' | 'assets' | 'disciplinary' | 'credential-expiry' | 'shift-templates' | 'leave-approval' | 'timesheets' | 'callouts';
-type FieldOpsSubArea = 'landing' | 'dispatch' | 'patrol' | 'live-map' | 'officer-activity' | 'welfare-alerts' | 'breach-review' | 'vehicle-search' | 'observation-search' | 'field-reports' | 'cctv-console' | 'cctv-triage' | 'cctv-review' | 'cctv-library' | 'cctv-import' | 'debrief-followup' | 'parking' | 'noise-control' | 'biosecurity' | 'smoke-control';
 type ReportsTab = 'reports-hub' | 'report-packs' | 'obligations' | 'fc-reporting' | 'fc-compliance' | 'fc-command-results';
 
 const PLATFORM_ONLY_PAGES = new Set<AdminPage>([
-  'testing', 'test-data', 'platform', 'platform-catalog', 'platform-subscriptions', 'platform-billing', 'platform-subscribers', 'builder',
+  'testing', 'test-data', 'platform', 'platform-catalog', 'platform-subscriptions', 'platform-subscribers', 'builder',
 ]);
 
 const CRM_MANAGEMENT_PAGES = new Set<AdminPage>([
@@ -149,12 +149,6 @@ const ROSTER_MANAGEMENT_ROLES = new Set(['grand_master', 'master', 'admin', 'adm
 const ROSTER_MANAGEMENT_PAGES = new Set<AdminPage>(['roster', 'roster-targets']);
 
 const FIELD_CONTEXT_PAGES = new Set<AdminPage>(['field-ops', 'site-360', 'locations', 'zones', 'sites', 'workshop', 'investigations']);
-
-const FIELD_OPS_AREAS = new Set<FieldOpsSubArea>([
-  'landing', 'dispatch', 'patrol', 'live-map', 'officer-activity', 'welfare-alerts', 'breach-review', 'vehicle-search',
-  'field-reports', 'observation-search', 'cctv-console', 'cctv-triage', 'cctv-review', 'cctv-library', 'cctv-import', 'parking', 'noise-control', 'biosecurity', 'smoke-control',
-  'debrief-followup',
-]);
 
 // Maps an AdminPage to the platform module (see platformModuleManifest.ts)
 // that must be enabled for the caller's org to reach it. Pages absent here
@@ -200,6 +194,7 @@ const LEGACY_REDIRECT_MAP: Record<string, RedirectTarget> = {
   'biosecurity': { page: 'field-ops', fieldOpsSubArea: 'biosecurity' },
   'smoke_control': { page: 'field-ops', fieldOpsSubArea: 'smoke-control' },
   'reports': { page: 'reports', reportsTab: 'reports-hub' },
+  'platform-billing': { page: 'platform-subscriptions' },
 };
 
 interface WorkspaceItem {
@@ -268,6 +263,11 @@ const NAVIGATION_MAP: Record<string, WorkspaceItem[]> = {
     { id: 'platform-subscriptions', label: 'Provider Billing', icon: CreditCard },
   ],
 };
+
+const NAVIGABLE_ADMIN_PAGES = new Set<AdminPage>([
+  ...Object.values(NAVIGATION_MAP).flatMap((items) => items.map((item) => item.id)),
+  'bob', 'document-studio',
+]);
 
 const WORKSPACE_LABELS: Record<string, { label: string; icon: LucideIcon }> = {
   'Mission Control': { label: 'Overview & approvals', icon: Grid3X3 },
@@ -363,22 +363,45 @@ const AdminShell: React.FC = () => {
     return 'hub';
   }, []);
 
+  const isFieldOpsAreaEnabled = useCallback((area: FieldOpsSubArea) => {
+    if (modulesStatus === 'loading') return area !== 'welfare-alerts';
+    return canAccessFieldOpsArea(area, isModuleEnabled);
+  }, [isModuleEnabled, modulesStatus]);
+
   useEffect(() => {
     // The module gate is evaluated only once the tenant's subscription state is known. While it is
     // loading, isModuleEnabled() answers false, and redirecting on that answer would silently throw
     // away every deep link / refresh on a gated page (a "loading" is not a "denied").
     if (modulesStatus === 'loading') return;
+    const routeSegment = location.pathname.split('/').filter(Boolean)[1];
     const page = pageFromUrl(location.pathname);
     const redirectTarget = LEGACY_REDIRECT_MAP[page];
+    const moduleCheck = isModuleEnabled;
     const deniedNotice = modulesStatus === 'error'
       ? 'Module subscriptions for this organisation could not be loaded, so gated areas are unavailable until they load.'
       : 'This area is not available for your current role.';
 
+    if (routeSegment && !redirectTarget && !NAVIGABLE_ADMIN_PAGES.has(page)) {
+      const unavailableNotice = 'This page is unavailable. Choose an available workspace destination.';
+      setActivePage('hub');
+      navigate('/admin/hub', { replace: true, state: { adminAccessNotice: unavailableNotice } });
+      return;
+    }
+
     if (redirectTarget) {
+      if (redirectTarget.fieldOpsSubArea && !canAccessFieldOpsArea(redirectTarget.fieldOpsSubArea, moduleCheck)) {
+        const areaNotice = modulesStatus === 'error'
+          ? deniedNotice
+          : 'This operational area is not enabled for your current organisation.';
+        setActivePage('field-ops');
+        setFieldOpsSubArea('landing');
+        navigate('/admin/field-ops', { replace: true, state: { adminAccessNotice: areaNotice } });
+        return;
+      }
       if (!canAccessAdminPage(redirectTarget.page, profile?.role, isModuleEnabled)) {
         setAccessNotice(deniedNotice);
         setActivePage('hub');
-        navigate('/admin/hub', { replace: true });
+        navigate('/admin/hub', { replace: true, state: { adminAccessNotice: deniedNotice } });
         return;
       }
       setActivePage(redirectTarget.page);
@@ -392,16 +415,30 @@ const AdminShell: React.FC = () => {
     } else if (!canAccessAdminPage(page, profile?.role, isModuleEnabled)) {
       setAccessNotice(deniedNotice);
       setActivePage('hub');
-      navigate('/admin/hub', { replace: true });
+      navigate('/admin/hub', { replace: true, state: { adminAccessNotice: deniedNotice } });
     } else {
-      setAccessNotice(null);
+      const carriedNotice = (location.state as { adminAccessNotice?: unknown } | null)?.adminAccessNotice;
+      setAccessNotice(typeof carriedNotice === 'string' ? carriedNotice : null);
       setActivePage(page);
       if (page === 'field-ops') {
-        const requestedArea = new URLSearchParams(location.search).get('area') as FieldOpsSubArea | null;
-        setFieldOpsSubArea(requestedArea && FIELD_OPS_AREAS.has(requestedArea) ? requestedArea : 'landing');
+        const requestedArea = new URLSearchParams(location.search).get('area');
+        if (!isFieldOpsSubArea(requestedArea)) {
+          setFieldOpsSubArea('landing');
+          if (requestedArea) navigate('/admin/field-ops', { replace: true });
+          return;
+        }
+        if (!canAccessFieldOpsArea(requestedArea, moduleCheck)) {
+          const areaNotice = modulesStatus === 'error'
+            ? deniedNotice
+            : 'This operational area is not enabled for your current organisation.';
+          setFieldOpsSubArea('landing');
+          navigate('/admin/field-ops', { replace: true, state: { adminAccessNotice: areaNotice } });
+          return;
+        }
+        setFieldOpsSubArea(requestedArea);
       }
     }
-  }, [location.pathname, location.search, navigate, pageFromUrl, profile?.role, isModuleEnabled, modulesStatus]);
+  }, [location.pathname, location.search, location.state, navigate, pageFromUrl, profile?.role, isModuleEnabled, modulesStatus]);
 
   useEffect(() => {
     const loadOrgName = async () => {
@@ -444,9 +481,10 @@ const AdminShell: React.FC = () => {
 
   const navigateToPage = useCallback((page: AdminPage, context?: WorkflowContext) => {
     if (!isPageEnabled(page)) {
-      setAccessNotice('This area is not available for your current role.');
+      const deniedNotice = 'This area is not available for your current role.';
+      setAccessNotice(deniedNotice);
       setActivePage('hub');
-      navigate('/admin/hub');
+      navigate('/admin/hub', { state: { adminAccessNotice: deniedNotice } });
       return;
     }
 
@@ -456,11 +494,22 @@ const AdminShell: React.FC = () => {
   }, [navigate, isPageEnabled]);
 
   const navigateToFieldOps = useCallback((area: FieldOpsSubArea) => {
+    if (!isFieldOpsAreaEnabled(area)) {
+      const areaNotice = modulesStatus === 'error'
+        ? 'Module subscriptions for this organisation could not be loaded, so gated areas are unavailable until they load.'
+        : 'This operational area is not enabled for your current organisation.';
+      setActivePage('field-ops');
+      setFieldOpsSubArea('landing');
+      setMobileMenuOpen(false);
+      navigate('/admin/field-ops', { state: { adminAccessNotice: areaNotice } });
+      return;
+    }
+    setAccessNotice(null);
     setFieldOpsSubArea(area);
     setActivePage('field-ops');
     setMobileMenuOpen(false);
     navigate(`/admin/field-ops?area=${area}`);
-  }, [navigate]);
+  }, [isFieldOpsAreaEnabled, modulesStatus, navigate]);
 
   const navigateFinance = useCallback((page: Extract<AdminPage, 'finance-bureau' | 'finance-connections' | 'finance-money' | 'finance-costing' | 'finance-pricing'>) => {
     window.scrollTo({ top: 0 });
@@ -486,7 +535,7 @@ const AdminShell: React.FC = () => {
 
   const visibleWorkspaces = Object.entries(NAVIGATION_MAP)
     .filter(([, items]) => items.some((item) => canAccessAdminPage(item.id, profile?.role, () => true)))
-    .map(([group, items]) => ({ group, items: items.filter((item) => isPageEnabled(item.id as AdminPage)) }));
+    .map(([group, items]) => ({ group, items: items.filter((item) => isPageEnabled(item.id as AdminPage) && (!item.area || isFieldOpsAreaEnabled(item.area))) }));
   const activeWorkspace = visibleWorkspaces.find((workspace) => workspace.items.some((item) => item.id === activePage))
     ?? visibleWorkspaces.find((workspace) => workspace.items.length > 0);
   const openWorkspaceItem = (item: WorkspaceItem) => {
@@ -693,7 +742,7 @@ const AdminShell: React.FC = () => {
 
   if (!isMobile) {
     return (
-      <div className="admin-shell admin-shell-desktop">
+      <div className="admin-shell admin-shell-desktop" data-theme="light">
         <aside className={`admin-sidebar ${sidebarCollapsed ? 'is-collapsed' : ''}`}>
           <div className="admin-sidebar-brand">
             <img
@@ -743,9 +792,9 @@ const AdminShell: React.FC = () => {
               <NotificationCenter onNavigate={navigateFromNotification} />
               <HelpInstructions context={activePage} role={profile?.role} />
               <button type="button" className="admin-shell-icon admin-desktop-download" onClick={() => setShowDesktopDownload(true)} title="Download FCM desktop app" aria-label="Download FCM desktop app"><Download size={19} aria-hidden="true" /></button>
-              <button type="button" className="admin-top-search" onClick={() => navigateToFieldOps('vehicle-search')} aria-label="Open vehicle search">
+              {isFieldOpsAreaEnabled('vehicle-search') && <button type="button" className="admin-top-search" onClick={() => navigateToFieldOps('vehicle-search')} aria-label="Open vehicle search">
                 <Search size={17} aria-hidden="true" /><span>Vehicle search</span>
-              </button>
+              </button>}
               <button type="button" className="admin-shell-icon" onClick={() => navigateToPage('bob')} title="Open Bob command center" aria-label="Open Bob command center" aria-expanded={bobOpen}>
                 <Bot size={19} aria-hidden="true" /><span className="sr-only">{bobOpen ? 'Bob assistant is open' : 'Open Bob assistant'}</span>
               </button>
@@ -784,7 +833,7 @@ const AdminShell: React.FC = () => {
   }
 
   return (
-    <div className="admin-shell admin-shell-mobile">
+    <div className="admin-shell admin-shell-mobile" data-theme="light">
       <header className="admin-mobile-header">
         <div className="admin-mobile-brand">
           <img
@@ -815,7 +864,7 @@ const AdminShell: React.FC = () => {
             {Object.entries(NAVIGATION_MAP).filter(([group]) => (group !== 'System' && group !== 'Platform') || isPageEnabled('platform')).map(([group, items]) => (
               <div key={group} className="admin-mobile-nav-group">
                 <div>{group}</div>
-                {items.filter((item) => isPageEnabled(item.id as AdminPage)).map((item) => {
+                {items.filter((item) => isPageEnabled(item.id as AdminPage) && (!item.area || isFieldOpsAreaEnabled(item.area))).map((item) => {
                   const Icon = item.icon;
                   return (
                     <button key={`${item.id}:${item.area ?? ''}`} onClick={() => openWorkspaceItem(item)} className={`admin-mobile-nav-item ${isWorkspaceItemActive(item) ? 'is-active' : ''}`} aria-current={isWorkspaceItemActive(item) ? 'page' : undefined}>
@@ -847,7 +896,7 @@ const AdminShell: React.FC = () => {
           { id: 'roster', label: 'Roster', icon: Users },
           { id: 'crm', label: 'CRM', icon: DollarSign },
           { id: 'reports', label: 'Reports', icon: FileBarChart },
-        ].map((tab) => {
+        ].filter((tab) => isPageEnabled(tab.id as AdminPage)).map((tab) => {
           const Icon = tab.icon;
           return (
             <button key={tab.id} onClick={() => navigateToPage(tab.id as AdminPage)} className={activePage === tab.id ? 'is-active' : ''} aria-current={activePage === tab.id ? 'page' : undefined}>

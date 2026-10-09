@@ -1,1 +1,56 @@
 .provider-terms-backdrop{position:fixed;inset:0;z-index:90;display:grid;place-items:center;padding:20px;background:rgba(2,8,13,.82);backdrop-filter:blur(4px)}.provider-terms-dialog{width:min(680px,100%);max-height:calc(100vh - 40px);overflow:auto;padding:18px;border:1px solid #315969;border-radius:6px;color:#e6f0f4;background:#0a1b25;box-shadow:0 24px 70px rgba(0,0,0,.45)}.provider-terms-dialog header{display:flex;justify-content:space-between;gap:16px;padding-bottom:13px;border-bottom:1px solid #244654}.provider-terms-dialog header span{color:#67e4e8;font-size: 12px;font-weight:800;text-transform:uppercase}.provider-terms-dialog h2{margin:4px 0 0;font-size:18px}.provider-terms-dialog header button{display:grid;place-items:center;width:32px;height:32px;border:1px solid #315969;border-radius:5px;color:#d8e6eb;background:#102b37}.provider-terms-dialog>p{margin:14px 0;padding:10px;border-left:3px solid #14c8d4;color:#b8cad4;background:#0b2f3c;font-size:12px;line-height:1.5}.provider-terms-dialog>div{display:grid;grid-template-columns:1fr 1fr;gap:10px}.provider-terms-dialog label{display:grid;gap:6px;margin-top:12px;color:#b8cad4;font-size: 12px;font-weight:800}.provider-terms-dialog input,.provider-terms-dialog select,.provider-terms-dialog textarea{width:100%;box-sizing:border-box;padding:9px;border:1px solid #315969;border-radius:5px;color:#e6f0f4;background:#071820;font:inherit}.provider-terms-dialog footer{display:flex;justify-content:flex-end;gap:8px;margin-top:16px}@media(max-width:560px){.provider-terms-backdrop{align-items:end;padding:10px}.provider-terms-dialog{padding:15px}.provider-terms-dialog>div{grid-template-columns:1fr}.provider-terms-dialog footer .btn{flex:1}}
+
+.provider-billing-list-tools{display:grid;grid-template-columns:minmax(240px,1fr) minmax(180px,220px) max-content;align-items:end;gap:12px;margin:16px 0 8px}.provider-billing-list-tools label{display:grid;gap:6px;color:var(--color-text-secondary,#b8cad4);font-size:12px;font-weight:700}.provider-billing-list-tools input,.provider-billing-list-tools select{width:100%;min-height:38px;box-sizing:border-box;padding:8px 10px;border:1px solid #315969;border-radius:5px;color:#e6f0f4;background:#071820;font:inherit}.provider-billing-result-count{padding-bottom:10px;color:var(--color-text-secondary,#b8cad4);font-size:12px;white-space:nowrap}.provider-billing-table-region{max-height:min(68vh,680px);overflow:auto;border:1px solid #244654;border-radius:6px;overscroll-behavior:contain}.provider-billing-table-region .reports-table{min-width:760px;margin:0}.provider-billing-table-region .reports-table th{position:sticky;top:0;z-index:1;background:#0a1b25}.provider-billing-filter-empty{display:grid;justify-items:center;gap:9px;padding:14px}.provider-billing-table-region:focus-visible{outline:2px solid #67e4e8;outline-offset:2px}
+.provider-billing-scroll-cue{display:none;margin:6px 0 8px;color:var(--color-text-secondary,#b8cad4);font-size:12px}
+@media(max-width:560px){.provider-billing-list-tools{grid-template-columns:1fr}.provider-billing-result-count{padding-bottom:0}}
+@media(max-width:720px){.provider-billing-scroll-cue{display:block}}
+
+.admin-shell[data-theme='light'] .provider-billing-list-tools input,
+.admin-shell[data-theme='light'] .provider-billing-list-tools select {
+	border-color: var(--color-border-strong);
+	color: var(--color-text-primary);
+	background: #ffffff;
+}
+
+.admin-shell[data-theme='light'] .provider-billing-table-region {
+	border-color: var(--color-border);
+	background: #ffffff;
+}
+
+.admin-shell[data-theme='light'] .provider-billing-table-region .reports-table th {
+	border-color: var(--color-border);
+	color: #45534b;
+	background: #e8ede9;
+}
+
+.admin-shell[data-theme='light'] .provider-billing-table-region .reports-table td {
+	border-color: var(--color-border);
+	color: #26332c;
+	background: #ffffff;
+}
+
+.admin-shell[data-theme='light'] .provider-terms-dialog {
+	border-color: var(--color-border-strong);
+	color: var(--color-text-primary);
+	background: #ffffff;
+}
+
+.admin-shell[data-theme='light'] .provider-terms-dialog header,
+.admin-shell[data-theme='light'] .provider-terms-dialog input,
+.admin-shell[data-theme='light'] .provider-terms-dialog select,
+.admin-shell[data-theme='light'] .provider-terms-dialog textarea {
+	border-color: var(--color-border);
+}
+
+.admin-shell[data-theme='light'] .provider-terms-dialog input,
+.admin-shell[data-theme='light'] .provider-terms-dialog select,
+.admin-shell[data-theme='light'] .provider-terms-dialog textarea {
+	color: var(--color-text-primary);
+	background: #ffffff;
+}
+
+.admin-shell[data-theme='light'] .provider-terms-dialog > p {
+	border-left-color: var(--color-accent);
+	color: var(--color-text-secondary);
+	background: #edf3ef;
+}

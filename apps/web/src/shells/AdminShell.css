@@ -551,3 +551,92 @@
     max-width: 165px;
   }
 }
+
+.admin-shell[data-theme='light'] {
+  color-scheme: light;
+  color: var(--color-text-primary);
+  background: var(--color-bg-primary);
+}
+
+.admin-shell[data-theme='light'] .admin-sidebar,
+.admin-shell[data-theme='light'] .admin-mobile-drawer {
+  border-color: var(--color-border);
+  background: #e9eeea;
+}
+
+.admin-shell[data-theme='light'] .admin-sidebar-brand,
+.admin-shell[data-theme='light'] .admin-workspace-selector,
+.admin-shell[data-theme='light'] .admin-shell-header,
+.admin-shell[data-theme='light'] .admin-mobile-header {
+  border-color: var(--color-border);
+  background: #ffffff;
+}
+
+.admin-shell[data-theme='light'] .admin-shell-main {
+  background: var(--color-bg-primary);
+}
+
+.admin-shell[data-theme='light'] .admin-workspace-bar {
+  border-color: var(--color-border);
+  background: #f8faf8;
+}
+
+.admin-shell[data-theme='light'] .admin-nav-group-label,
+.admin-shell[data-theme='light'] .admin-workspace-selector .admin-nav-group-label,
+.admin-shell[data-theme='light'] .admin-mobile-nav-group > div:first-child {
+  color: #68776f;
+}
+
+.admin-shell[data-theme='light'] .admin-nav-item,
+.admin-shell[data-theme='light'] .admin-mobile-nav-item {
+  color: #43524a;
+}
+
+.admin-shell[data-theme='light'] .admin-nav-item:hover,
+.admin-shell[data-theme='light'] .admin-mobile-nav-item:hover {
+  color: #17211d;
+  background: #dce5de;
+}
+
+.admin-shell[data-theme='light'] .admin-nav-item.is-active,
+.admin-shell[data-theme='light'] .admin-mobile-nav-item.is-active {
+  border-color: #e5b8bc;
+  color: #8f1d2b;
+  background: #f8e9ea;
+}
+
+.admin-shell[data-theme='light'] .admin-mobile-tabs {
+  border-color: var(--color-border);
+  background: #ffffff;
+}
+
+.admin-shell[data-theme='light'] .admin-mobile-tabs button {
+  color: #58675f;
+}
+
+.admin-shell[data-theme='light'] .admin-mobile-tabs button.is-active {
+  color: #8f1d2b;
+  background: #f8e9ea;
+}
+
+.admin-shell[data-theme='light'] .admin-shell-icon,
+.admin-shell[data-theme='light'] .admin-top-search,
+.admin-shell[data-theme='light'] .admin-mobile-header .admin-shell-icon,
+.admin-shell[data-theme='light'] .admin-operating-selector select {
+  border-color: var(--color-border-strong);
+  color: #34433b;
+  background: #ffffff;
+}
+
+.admin-shell[data-theme='light'] .admin-profile-chip {
+  border-color: var(--color-border);
+  color: #46554d;
+  background: #f8faf8;
+}
+
+.admin-shell[data-theme='light'] .admin-shell-icon:hover,
+.admin-shell[data-theme='light'] .admin-top-search:hover {
+  border-color: #b42332;
+  color: #8f1d2b;
+  background: #f8e9ea;
+}

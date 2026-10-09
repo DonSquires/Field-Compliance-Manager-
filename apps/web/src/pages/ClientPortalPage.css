@@ -383,3 +383,56 @@
   .client-heading-actions label { flex: 1; }
   .client-heading-actions select { max-width: none; width: 100%; }
 }
+
+.client-shell[data-theme='light'] .client-portal-page { color: #17211d; }
+.client-shell[data-theme='light'] .client-page-heading h1,
+.client-shell[data-theme='light'] .client-panel-heading h2 { color: #17211d; }
+.client-shell[data-theme='light'] .client-kicker,
+.client-shell[data-theme='light'] .client-panel-heading > svg { color: #8f1d2b; }
+.client-shell[data-theme='light'] .client-page-heading p,
+.client-shell[data-theme='light'] .client-panel-note,
+.client-shell[data-theme='light'] .client-compact-state,
+.client-shell[data-theme='light'] .client-delivery-note { color: #58675f; }
+.client-shell[data-theme='light'] .client-heading-actions select,
+.client-shell[data-theme='light'] .client-heading-actions button { border-color: #bdc9c1; color: #34433b; background: #ffffff; }
+.client-shell[data-theme='light'] .client-agreement-band,
+.client-shell[data-theme='light'] .client-overview-panel,
+.client-shell[data-theme='light'] .client-location-preview,
+.client-shell[data-theme='light'] .client-list-section { border-color: #d2dad5; background: #ffffff; }
+.client-shell[data-theme='light'] .client-agreement-band > div + div,
+.client-shell[data-theme='light'] .client-custom-report { border-color: #dce4de; }
+.client-shell[data-theme='light'] .client-agreement-band span { color: #58675f; }
+.client-shell[data-theme='light'] .client-status-count,
+.client-shell[data-theme='light'] .client-location-grid article,
+.client-shell[data-theme='light'] .client-observation-list article,
+.client-shell[data-theme='light'] .client-report-row,
+.client-shell[data-theme='light'] .client-delivery-list article { border-color: #dce4de; color: #26332c; background: #f8faf8; }
+.client-shell[data-theme='light'] .client-status-count span,
+.client-shell[data-theme='light'] .client-location-grid small,
+.client-shell[data-theme='light'] .client-observation-list small,
+.client-shell[data-theme='light'] .client-report-row small,
+.client-shell[data-theme='light'] .client-observation-list time,
+.client-shell[data-theme='light'] .client-delivery-list article small { color: #58675f; }
+.client-shell[data-theme='light'] .client-status-count.tone-success strong,
+.client-shell[data-theme='light'] .client-report-row .is-success { color: #28714f; }
+.client-shell[data-theme='light'] .client-status-count.tone-warning strong { color: #815b13; }
+.client-shell[data-theme='light'] .client-status-count.tone-danger strong,
+.client-shell[data-theme='light'] .client-report-row .is-danger { color: #a82432; }
+.client-shell[data-theme='light'] .client-status-count.tone-neutral strong { color: #485851; }
+.client-shell[data-theme='light'] .client-location-grid article > span,
+.client-shell[data-theme='light'] .client-report-row > span,
+.client-shell[data-theme='light'] .client-delivery-list article > span { color: #176f68; background: #e3f0ec; }
+.client-shell[data-theme='light'] .client-location-grid em,
+.client-shell[data-theme='light'] .client-custom-report summary,
+.client-shell[data-theme='light'] .client-delivery-list article em { color: #176f68; }
+.client-shell[data-theme='light'] .client-report-copy p { color: #485851; }
+.client-shell[data-theme='light'] .client-page-state { border-color: #d2dad5; color: #485851; background: #ffffff; }
+.client-shell[data-theme='light'] .client-page-state strong { color: #17211d; }
+.client-shell[data-theme='light'] .client-page-state button { border-color: #176f68; color: #ffffff; background: #176f68; }
+.client-shell[data-theme='light'] .client-delivery-toolbar { border-color: #d2dad5; background: #e8ede9; }
+.client-shell[data-theme='light'] .client-delivery-toolbar button { color: #485851; }
+.client-shell[data-theme='light'] .client-delivery-toolbar button.is-active { color: #ffffff; background: #176f68; }
+.client-shell[data-theme='light'] .client-delivery-responses { color: #34433b; }
+.client-shell[data-theme='light'] .client-delivery-responses b { color: #17211d; }
+.client-shell[data-theme='light'] .client-delivery-responses.is-warn { color: #674d12; }
+.client-shell[data-theme='light'] .client-delivery-responses.is-ok { color: #245f41; }

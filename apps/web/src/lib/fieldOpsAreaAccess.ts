@@ -1,0 +1,44 @@
+export type FieldOpsSubArea = 'landing' | 'dispatch' | 'patrol' | 'live-map' | 'officer-activity' | 'welfare-alerts' | 'breach-review' | 'vehicle-search' | 'observation-search' | 'field-reports' | 'cctv-console' | 'cctv-triage' | 'cctv-review' | 'cctv-library' | 'cctv-import' | 'debrief-followup' | 'parking' | 'noise-control' | 'biosecurity' | 'smoke-control';
+
+export const FIELD_OPS_AREAS: ReadonlySet<FieldOpsSubArea> = new Set([
+  'landing', 'dispatch', 'patrol', 'live-map', 'officer-activity', 'welfare-alerts', 'breach-review', 'vehicle-search',
+  'field-reports', 'observation-search', 'cctv-console', 'cctv-triage', 'cctv-review', 'cctv-library', 'cctv-import', 'parking', 'noise-control', 'biosecurity', 'smoke-control',
+  'debrief-followup',
+]);
+
+type ModuleRequirement = {
+  anyOf: readonly string[];
+  safetyRelevant?: boolean;
+};
+
+type ModuleAccessCheck = (moduleKey: string, options?: { safetyRelevant?: boolean }) => boolean;
+
+const AREA_MODULE_REQUIREMENTS: Partial<Record<FieldOpsSubArea, ModuleRequirement>> = {
+  dispatch: { anyOf: ['dispatch'] },
+  patrol: { anyOf: ['patrol', 'static_guarding'] },
+  'live-map': { anyOf: ['dispatch'] },
+  'welfare-alerts': { anyOf: ['welfare'], safetyRelevant: true },
+  'breach-review': { anyOf: ['freedom_camping', 'parking_enforcement'] },
+  'vehicle-search': { anyOf: ['freedom_camping', 'parking_enforcement'] },
+  'observation-search': { anyOf: ['freedom_camping', 'parking_enforcement', 'cctv'] },
+  'cctv-console': { anyOf: ['cctv'] },
+  'cctv-triage': { anyOf: ['cctv'] },
+  'cctv-review': { anyOf: ['cctv'] },
+  'cctv-library': { anyOf: ['cctv'] },
+  'cctv-import': { anyOf: ['cctv'] },
+  parking: { anyOf: ['parking_enforcement'] },
+  'noise-control': { anyOf: ['noise_control'] },
+  biosecurity: { anyOf: ['biosecurity'] },
+  'smoke-control': { anyOf: ['smoke_complaints'] },
+};
+
+export function isFieldOpsSubArea(value: string | null): value is FieldOpsSubArea {
+  return value !== null && FIELD_OPS_AREAS.has(value as FieldOpsSubArea);
+}
+
+export function canAccessFieldOpsArea(area: FieldOpsSubArea, isModuleEnabled: ModuleAccessCheck): boolean {
+  const requirement = AREA_MODULE_REQUIREMENTS[area];
+  return !requirement || requirement.anyOf.some((moduleKey) => (
+    isModuleEnabled(moduleKey, { safetyRelevant: requirement.safetyRelevant })
+  ));
+}

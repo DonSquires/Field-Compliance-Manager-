@@ -510,6 +510,7 @@ const RosterOperationsPage: React.FC = () => {
         })}</tbody></table>}
       </div>
     </section>
+    <p className="roster-board-scroll-cue" role="note">Scroll horizontally to view the full roster period.</p>
     <div className="roster-board" style={{ '--roster-days': days.length } as React.CSSProperties}>
       <div className="roster-board-head">
         <div>Staff</div>

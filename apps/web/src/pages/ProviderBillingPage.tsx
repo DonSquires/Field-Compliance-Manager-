@@ -47,6 +47,8 @@ const ProviderBillingPage: React.FC = () => {
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
   const [editingSubscription, setEditingSubscription] = useState<SubscriptionRow | null>(null);
+  const [searchTerm, setSearchTerm] = useState('');
+  const [statusFilter, setStatusFilter] = useState<'all' | 'active' | 'suspended' | 'cancelled'>('all');
   const [termsForm, setTermsForm] = useState({ basePrice: '', perSeatPrice: '', perSitePrice: '', discountPct: '0', billingPeriod: '', currency: '', effectiveFrom: '', effectiveTo: '', notes: '' });
   const isGrandMaster = profile?.role === 'grand_master';
 
@@ -122,6 +124,20 @@ const ProviderBillingPage: React.FC = () => {
     else { setSubscriptions(subscriptions.map((sub) => sub.id === editingSubscription.id ? data as SubscriptionRow : sub)); setEditingSubscription(null); }
   };
 
+  const normalizedSearch = searchTerm.trim().toLocaleLowerCase();
+  const visibleSubscriptions = subscriptions.filter((subscription) => {
+    if (statusFilter !== 'all' && subscription.status !== statusFilter) return false;
+    if (!normalizedSearch) return true;
+    const searchableFields = [
+      subscription.module_key,
+      moduleLabel(subscription.module_key),
+      subscription.status,
+      subscription.notes,
+      isGrandMaster ? orgs[subscription.organization_id] : null,
+    ];
+    return searchableFields.filter(Boolean).join(' ').toLocaleLowerCase().includes(normalizedSearch);
+  });
+
   if (loading) {
     return (
       <div className="page-container">
@@ -149,7 +165,14 @@ const ProviderBillingPage: React.FC = () => {
         </div>
       )}
 
-      <div className="reports-table-wrapper">
+      <div className="provider-billing-list-tools" role="search" aria-label="Filter provider subscriptions">
+        <label><span>Search provider subscriptions</span><input type="search" value={searchTerm} onChange={(event) => setSearchTerm(event.target.value)} placeholder="Provider, module, status, or note" /></label>
+        <label><span>Subscription status</span><select aria-label="Filter by subscription status" value={statusFilter} onChange={(event) => setStatusFilter(event.target.value as typeof statusFilter)}><option value="all">All statuses</option><option value="active">Active</option><option value="suspended">Suspended</option><option value="cancelled">Cancelled</option></select></label>
+        <span className="provider-billing-result-count" role="status" aria-live="polite">Showing {visibleSubscriptions.length} of {subscriptions.length} loaded subscriptions</span>
+      </div>
+
+      {isGrandMaster && <p className="provider-billing-scroll-cue">Scroll the table horizontally to review all pricing and actions.</p>}
+      <div className="reports-table-wrapper provider-billing-table-region" role="region" aria-label="Provider module subscriptions" tabIndex={0}>
         <table className="reports-table">
           <thead>
             <tr>
@@ -169,10 +192,16 @@ const ProviderBillingPage: React.FC = () => {
                   No subscriptions
                 </td>
               </tr>
+            ) : visibleSubscriptions.length === 0 ? (
+              <tr>
+                <td colSpan={isGrandMaster ? 7 : 5} className="text-center">
+                  <div className="provider-billing-filter-empty"><span>No subscriptions match these filters.</span><button type="button" className="btn btn-sm btn-secondary" onClick={() => { setSearchTerm(''); setStatusFilter('all'); }}>Clear filters</button></div>
+                </td>
+              </tr>
             ) : (
-              subscriptions.map((sub) => (
+              visibleSubscriptions.map((sub) => (
                 <tr key={sub.id}>
-                  {isGrandMaster && <td>{orgs[sub.organization_id] || sub.organization_id}</td>}
+                  {isGrandMaster && <td>{orgs[sub.organization_id] || 'Provider name unavailable'}</td>}
                   <td>{moduleLabel(sub.module_key)}</td>
                   <td>{sub.base_price != null ? `$${sub.base_price}` : 'Catalog list price'}<small>{` + ${sub.per_seat_price ?? 0}/seat + ${sub.per_site_price ?? 0}/site`}</small></td>
                   <td>{sub.discount_pct}%</td>

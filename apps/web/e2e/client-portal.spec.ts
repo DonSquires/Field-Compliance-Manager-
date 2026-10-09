@@ -118,9 +118,15 @@ test('a client administrator adds and removes their own people; a viewer never s
   await page.route('**/functions/v1/create-user', async (route) => { created = JSON.parse(route.request().postData() ?? '{}') as Record<string, unknown>; await route.fulfill({ status: 200, contentType: 'application/json', body: JSON.stringify({ success: true, user_id: '52525252-5252-4252-8252-525252525252' }) }); });
   await page.route('**/functions/v1/deactivate-user', async (route) => { toggled = JSON.parse(route.request().postData() ?? '{}') as Record<string, unknown>; await route.fulfill({ status: 200, contentType: 'application/json', body: JSON.stringify({ success: true }) }); });
   await signInAsClient(page);
-  const menu = page.getByRole('button', { name: 'Open navigation' });
-  if (await menu.isVisible()) await menu.click();
-  await page.getByRole('button', { name: 'Your people' }).filter({ visible: true }).first().click();
+  const mobileMenu = page.locator('.client-mobile-menu');
+  if ((page.viewportSize()?.width ?? 0) <= 760) {
+    await expect(mobileMenu).toBeVisible();
+    await mobileMenu.click();
+    await expect(page.locator('.client-mobile-drawer')).toHaveClass(/is-open/);
+    await page.locator('.client-mobile-drawer.is-open').getByRole('button', { name: 'Your people' }).click();
+  } else {
+    await page.locator('.client-shell-sidebar').getByRole('button', { name: 'Your people' }).click();
+  }
   await expect(page.getByRole('heading', { name: 'Who can sign in for your organisation' })).toBeVisible();
   const list = page.locator('.client-people-list');
   await expect(list.locator('li')).toHaveCount(2);

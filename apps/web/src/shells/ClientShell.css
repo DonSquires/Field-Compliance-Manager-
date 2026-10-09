@@ -277,3 +277,50 @@
     padding-inline: 12px;
   }
 }
+
+.client-shell[data-theme='light'] {
+  color-scheme: light;
+  color: var(--color-text-primary);
+  background: var(--color-bg-primary);
+}
+
+.client-shell[data-theme='light'] .client-shell-sidebar,
+.client-shell[data-theme='light'] .client-mobile-drawer {
+  border-color: var(--color-border);
+  background: #e9eeea;
+}
+
+.client-shell[data-theme='light'] .client-shell-brand {
+  color: #17211d;
+}
+
+.client-shell[data-theme='light'] .client-shell-nav button,
+.client-shell[data-theme='light'] .client-shell-sidebar-footer > button {
+  color: #43524a;
+}
+
+.client-shell[data-theme='light'] .client-shell-nav button:hover,
+.client-shell[data-theme='light'] .client-shell-sidebar-footer > button:hover {
+  color: #17211d;
+  background: #dce5de;
+}
+
+.client-shell[data-theme='light'] .client-shell-nav button.is-active {
+  border-color: #e5b8bc;
+  color: #8f1d2b;
+  background: #f8e9ea;
+}
+
+.client-shell[data-theme='light'] .client-shell-topbar {
+  border-color: var(--color-border);
+  background: #ffffff;
+}
+
+.client-shell[data-theme='light'] .client-shell-agreement,
+.client-shell[data-theme='light'] .client-collapse-button,
+.client-shell[data-theme='light'] .client-mobile-menu,
+.client-shell[data-theme='light'] .client-mobile-close {
+  border-color: var(--color-border);
+  color: #43524a;
+  background: #ffffff;
+}
