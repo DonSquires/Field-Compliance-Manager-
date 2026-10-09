@@ -17,6 +17,263 @@
 [data-theme='light'] {
   color-scheme: light;
   --color-bg-base: #f1f4f1;
+}
+
+.admin-shell[data-theme='light'] .welfare-page {
+  color: #17211d;
+}
+
+.admin-shell[data-theme='light'] .welfare-heading > div > span,
+.admin-shell[data-theme='light'] .welfare-panel-heading > div > span {
+  color: #8f1d2b;
+}
+
+.admin-shell[data-theme='light'] .welfare-heading h1,
+.admin-shell[data-theme='light'] .welfare-panel-heading h2 {
+  color: #17211d;
+}
+
+.admin-shell[data-theme='light'] .welfare-heading p {
+  color: #58675f;
+}
+
+.admin-shell[data-theme='light'] .welfare-heading > button {
+  border-color: #bdc9c1;
+  color: #34433b;
+  background: #ffffff;
+}
+
+.admin-shell[data-theme='light'] .welfare-summary,
+.admin-shell[data-theme='light'] .welfare-queue,
+.admin-shell[data-theme='light'] .welfare-detail {
+  border-color: #d2dad5;
+  background: #ffffff;
+}
+
+.admin-shell[data-theme='light'] .welfare-summary > div + div {
+  border-color: #dce4de;
+}
+
+.admin-shell[data-theme='light'] .welfare-summary svg {
+  color: #176f68;
+}
+
+.admin-shell[data-theme='light'] .welfare-summary span {
+  color: #58675f;
+}
+
+.admin-shell[data-theme='light'] .welfare-summary strong {
+  color: #17211d;
+}
+
+.admin-shell[data-theme='light'] .welfare-summary .is-critical svg,
+.admin-shell[data-theme='light'] .welfare-summary .is-critical strong {
+  color: #a82432;
+}
+
+.admin-shell[data-theme='light'] .welfare-filters {
+  border-color: #d2dad5;
+  background: #e8ede9;
+}
+
+.admin-shell[data-theme='light'] .welfare-filters button {
+  color: #485851;
+}
+
+.admin-shell[data-theme='light'] .welfare-filters button.is-active {
+  border-color: #176f68;
+  color: #ffffff;
+  background: #176f68;
+}
+
+.admin-shell[data-theme='light'] .welfare-list > button {
+  border-color: #dce4de;
+  border-left-color: #95620e;
+  color: #26332c;
+  background: #f8faf8;
+}
+
+.admin-shell[data-theme='light'] .welfare-list > button:hover,
+.admin-shell[data-theme='light'] .welfare-list > button.is-selected {
+  border-color: #bad8c4;
+  background: #edf5ef;
+}
+
+.admin-shell[data-theme='light'] .welfare-list > button.type-sos,
+.admin-shell[data-theme='light'] .welfare-list > button.type-armed_danger {
+  border-left-color: #a82432;
+  background: #fbeaec;
+}
+
+.admin-shell[data-theme='light'] .welfare-list > button.status-acknowledged {
+  border-left-color: #315f8e;
+}
+
+.admin-shell[data-theme='light'] .welfare-list > button.status-resolved {
+  border-left-color: #28714f;
+}
+
+.admin-shell[data-theme='light'] .welfare-row-icon {
+  color: #815b13;
+  background: #fff3d5;
+}
+
+.admin-shell[data-theme='light'] .type-sos .welfare-row-icon,
+.admin-shell[data-theme='light'] .type-armed_danger .welfare-row-icon {
+  color: #a82432;
+  background: #f8dfe1;
+}
+
+.admin-shell[data-theme='light'] .welfare-list small,
+.admin-shell[data-theme='light'] .welfare-list span,
+.admin-shell[data-theme='light'] .welfare-list time {
+  color: #58675f;
+}
+
+.admin-shell[data-theme='light'] .welfare-status {
+  border-color: #e5cd91;
+  color: #674d12;
+  background: #fff4d9;
+}
+
+.admin-shell[data-theme='light'] .welfare-status.status-acknowledged {
+  border-color: #c5d8e8;
+  color: #315f8e;
+  background: #e8f0f8;
+}
+
+.admin-shell[data-theme='light'] .welfare-status.status-resolved {
+  border-color: #bad8c4;
+  color: #245f41;
+  background: #e8f3eb;
+}
+
+.admin-shell[data-theme='light'] .welfare-alert-banner {
+  border-color: #e5cd91;
+  border-left-color: #95620e;
+  color: #674d12;
+  background: #fff4d9;
+}
+
+.admin-shell[data-theme='light'] .welfare-alert-banner.type-sos,
+.admin-shell[data-theme='light'] .welfare-alert-banner.type-armed_danger {
+  border-color: #e5b8bc;
+  border-left-color: #a82432;
+  color: #812633;
+  background: #fbeaec;
+}
+
+.admin-shell[data-theme='light'] .welfare-alert-banner span {
+  color: #58675f;
+}
+
+.admin-shell[data-theme='light'] .welfare-facts,
+.admin-shell[data-theme='light'] .welfare-facts > div,
+.admin-shell[data-theme='light'] .welfare-facts > div:nth-child(even) {
+  border-color: #dce4de;
+}
+
+.admin-shell[data-theme='light'] .welfare-facts dt {
+  color: #58675f;
+}
+
+.admin-shell[data-theme='light'] .welfare-facts dd {
+  color: #26332c;
+}
+
+.admin-shell[data-theme='light'] .welfare-notes {
+  border-left-color: #176f68;
+  background: #edf5f2;
+}
+
+.admin-shell[data-theme='light'] .welfare-notes p {
+  color: #34433b;
+}
+
+.admin-shell[data-theme='light'] .welfare-history-note {
+  border-color: #c5d8e8;
+  color: #315f8e;
+  background: #e8f0f8;
+}
+
+.admin-shell[data-theme='light'] .welfare-history-note.is-resolved {
+  border-color: #bad8c4;
+  color: #245f41;
+  background: #e8f3eb;
+}
+
+.admin-shell[data-theme='light'] .welfare-history-note span,
+.admin-shell[data-theme='light'] .welfare-history-note small {
+  color: #485851;
+}
+
+.admin-shell[data-theme='light'] .welfare-contact-actions a,
+.admin-shell[data-theme='light'] .welfare-contact-actions button {
+  border-color: #bdc9c1;
+  color: #34433b;
+  background: #ffffff;
+}
+
+.admin-shell[data-theme='light'] .welfare-actions,
+.admin-shell[data-theme='light'] .welfare-dialog-actions {
+  border-top-color: #dce4de;
+}
+
+.admin-shell[data-theme='light'] .welfare-actions .is-acknowledge,
+.admin-shell[data-theme='light'] .welfare-dialog-actions .is-acknowledge {
+  border-color: #315f8e;
+  color: #ffffff;
+  background: #315f8e;
+}
+
+.admin-shell[data-theme='light'] .welfare-actions .is-resolve,
+.admin-shell[data-theme='light'] .welfare-dialog-actions .is-resolve {
+  border-color: #28714f;
+  color: #ffffff;
+  background: #28714f;
+}
+
+.admin-shell[data-theme='light'] .welfare-empty {
+  color: #58675f;
+}
+
+.admin-shell[data-theme='light'] .welfare-dialog {
+  border-color: #bdc9c1;
+  color: #17211d;
+  background: #ffffff;
+}
+
+.admin-shell[data-theme='light'] .welfare-dialog-alert {
+  border-color: #e5cd91;
+  background: #fff4d9;
+}
+
+.admin-shell[data-theme='light'] .welfare-dialog-alert strong {
+  color: #674d12;
+}
+
+.admin-shell[data-theme='light'] .welfare-dialog-alert span,
+.admin-shell[data-theme='light'] .welfare-dialog > p {
+  color: #58675f;
+}
+
+.admin-shell[data-theme='light'] .welfare-dialog > label > span {
+  color: #34433b;
+}
+
+.admin-shell[data-theme='light'] .welfare-dialog textarea {
+  border-color: #bdc9c1;
+  color: #17211d;
+  background: #ffffff;
+}
+
+.admin-shell[data-theme='light'] .welfare-dialog-actions button:first-child {
+  border-color: #bdc9c1;
+  color: #34433b;
+  background: #ffffff;
+}
+
+[data-theme='light'] {
   --color-bg-surface: #ffffff;
   --color-bg-elevated: #f8faf8;
   --color-bg-primary: #f1f4f1;

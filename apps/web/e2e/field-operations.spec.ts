@@ -76,6 +76,7 @@ test('supervisor records acknowledgement and verified resolution through the gov
   await signInAsAdmin(page, '/admin/field-ops?area=welfare-alerts');
   await expect(page.getByRole('heading', { name: 'Welfare response' })).toBeVisible();
   await expect(page.getByText('Ana Ngata', { exact: true }).first()).toBeVisible();
+  await expect(page).toHaveScreenshot('welfare-response-first-viewport.png');
 
   await page.getByRole('button', { name: 'Acknowledge' }).click();
   const acknowledgement = page.getByRole('dialog', { name: 'Acknowledge alert' });
