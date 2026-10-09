@@ -2258,3 +2258,210 @@
 .admin-shell[data-theme='light'] .field-ops-warning span {
   color: #674d12;
 }
+
+.admin-shell[data-theme='light'] .field-reports-page {
+  color: #17211d;
+}
+
+.admin-shell[data-theme='light'] .field-reports-header > div > span,
+.admin-shell[data-theme='light'] .field-reports-panel-heading > div > span,
+.admin-shell[data-theme='light'] .field-report-description > span {
+  color: #8f1d2b;
+}
+
+.admin-shell[data-theme='light'] .field-reports-header h1,
+.admin-shell[data-theme='light'] .field-reports-panel-heading h2 {
+  color: #17211d;
+}
+
+.admin-shell[data-theme='light'] .field-reports-header p {
+  color: #58675f;
+}
+
+.admin-shell[data-theme='light'] .field-reports-header > button {
+  border-color: #bdc9c1;
+  color: #34433b;
+  background: #ffffff;
+}
+
+.admin-shell[data-theme='light'] .field-reports-summary > div,
+.admin-shell[data-theme='light'] .field-reports-queue,
+.admin-shell[data-theme='light'] .field-reports-detail {
+  border-color: #d2dad5;
+  color: #26332c;
+  background: #ffffff;
+}
+
+.admin-shell[data-theme='light'] .field-reports-summary span {
+  color: #58675f;
+}
+
+.admin-shell[data-theme='light'] .field-reports-summary .is-critical {
+  border-color: #e5b8bc;
+  color: #812633;
+  background: #fbeaec;
+}
+
+.admin-shell[data-theme='light'] .field-reports-message.is-error {
+  border-color: #e5b8bc;
+  color: #812633;
+  background: #fbeaec;
+}
+
+.admin-shell[data-theme='light'] .field-reports-message.is-success {
+  border-color: #bad8c4;
+  color: #245f41;
+  background: #e8f3eb;
+}
+
+.admin-shell[data-theme='light'] .field-reports-toolbar > label,
+.admin-shell[data-theme='light'] .field-reports-toolbar > div button {
+  border-color: #bdc9c1;
+  color: #485851;
+  background: #ffffff;
+}
+
+.admin-shell[data-theme='light'] .field-reports-toolbar input {
+  color: #17211d;
+}
+
+.admin-shell[data-theme='light'] .field-reports-toolbar > div button.is-active {
+  border-color: #b42332;
+  color: #8f1d2b;
+  background: #f8e9ea;
+}
+
+.admin-shell[data-theme='light'] .field-reports-list > button {
+  border-color: #dce4de;
+  color: #26332c;
+  background: #f8faf8;
+}
+
+.admin-shell[data-theme='light'] .field-reports-list > button:hover,
+.admin-shell[data-theme='light'] .field-reports-list > button.is-selected {
+  border-color: #bad8c4;
+  background: #edf5ef;
+}
+
+.admin-shell[data-theme='light'] .field-reports-list > button.severity-critical {
+  border-left-color: #a82432;
+}
+
+.admin-shell[data-theme='light'] .field-reports-list > button.severity-high {
+  border-left-color: #95620e;
+}
+
+.admin-shell[data-theme='light'] .field-report-mark {
+  color: #315f8e;
+  background: #e8f0f8;
+}
+
+.admin-shell[data-theme='light'] .field-reports-list small,
+.admin-shell[data-theme='light'] .field-reports-list time {
+  color: #58675f;
+}
+
+.admin-shell[data-theme='light'] .field-reports-list button > div:last-child span {
+  color: #485851;
+}
+
+.admin-shell[data-theme='light'] .field-report-status {
+  border-color: #bdc9c1;
+  color: #485851;
+  background: #f8faf8;
+}
+
+.admin-shell[data-theme='light'] .field-report-banner {
+  border-left-color: #315f8e;
+  background: #e8f0f8;
+}
+
+.admin-shell[data-theme='light'] .field-report-banner.severity-critical {
+  border-left-color: #a82432;
+  background: #fbeaec;
+}
+
+.admin-shell[data-theme='light'] .field-report-banner.severity-high {
+  border-left-color: #95620e;
+  background: #fff4d9;
+}
+
+.admin-shell[data-theme='light'] .field-report-banner span,
+.admin-shell[data-theme='light'] .field-report-description p {
+  color: #485851;
+}
+
+.admin-shell[data-theme='light'] .field-report-facts div,
+.admin-shell[data-theme='light'] .field-report-note {
+  color: #34433b;
+  background: #f8faf8;
+}
+
+.admin-shell[data-theme='light'] .field-report-facts dt {
+  color: #58675f;
+}
+
+.admin-shell[data-theme='light'] .field-report-review-record {
+  border-color: #bad8c4;
+  color: #245f41;
+  background: #e8f3eb;
+}
+
+.admin-shell[data-theme='light'] .field-report-review-record small,
+.admin-shell[data-theme='light'] .field-report-provenance {
+  color: #58675f;
+}
+
+.admin-shell[data-theme='light'] .field-report-actions button {
+  color: #ffffff;
+  background: #b42332;
+}
+
+.admin-shell[data-theme='light'] .field-reports-empty {
+  color: #58675f;
+}
+
+.admin-shell[data-theme='light'] .field-report-dialog {
+  border-color: #bdc9c1;
+  color: #17211d;
+  background: #ffffff;
+}
+
+.admin-shell[data-theme='light'] .field-report-dialog .field-reports-panel-heading > button {
+  color: #485851;
+}
+
+.admin-shell[data-theme='light'] .field-report-dialog-subject {
+  border: 1px solid #dce4de;
+  color: #26332c;
+  background: #f3f6f3;
+}
+
+.admin-shell[data-theme='light'] .field-report-dialog-subject span,
+.admin-shell[data-theme='light'] .field-report-dialog p {
+  color: #58675f;
+}
+
+.admin-shell[data-theme='light'] .field-report-dialog label {
+  color: #34433b;
+}
+
+.admin-shell[data-theme='light'] .field-report-dialog textarea,
+.admin-shell[data-theme='light'] .field-report-dialog input,
+.admin-shell[data-theme='light'] .field-report-dialog select {
+  border-color: #bdc9c1;
+  color: #17211d;
+  background: #ffffff;
+}
+
+.admin-shell[data-theme='light'] .field-report-dialog-actions button {
+  border-color: #bdc9c1;
+  color: #34433b;
+  background: #ffffff;
+}
+
+.admin-shell[data-theme='light'] .field-report-dialog-actions button:last-child {
+  border-color: #8f1d2b;
+  color: #ffffff;
+  background: #b42332;
+}
