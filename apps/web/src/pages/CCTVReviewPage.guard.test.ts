@@ -3,6 +3,7 @@ import { resolve } from 'node:path';
 import { describe, expect, it } from 'vitest';
 
 const source = readFileSync(resolve(process.cwd(), 'src/pages/CCTVReviewPage.tsx'), 'utf8');
+const styles = readFileSync(resolve(process.cwd(), 'src/pages/CCTVReviewPage.css'), 'utf8');
 
 describe('CCTV inference review', () => {
   it('loads inference jobs scoped to the organization', () => {
@@ -73,6 +74,14 @@ describe('CCTV inference review', () => {
     expect(source).toContain("url.searchParams.set('reviewMode', 'inspect')");
     expect(source).toContain("url.searchParams.set('reviewPopout', '1')");
     expect(source).toContain('Open inspector window');
+  });
+
+  it('keeps queue search available and puts the searchable queue before secondary filters on mobile', () => {
+    expect(source).toContain('aria-label="Find CCTV evidence"');
+    expect(styles).toContain('.cctv-review-layout .cctv-job-list { order: 1; }');
+    expect(styles).toContain('.cctv-review-layout .cctv-filter-rail { order: 2; }');
+    expect(styles).toContain('.cctv-queue-tools label { display: flex;');
+    expect(styles).not.toContain('.cctv-queue-tools label { display: none; }');
   });
 
   it('puts the primary recording before report administration in the inspector', () => {

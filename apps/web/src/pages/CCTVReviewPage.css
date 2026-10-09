@@ -437,6 +437,9 @@
   .cctv-review-layout.mode-queue { display: grid; grid-template-columns: 1fr; overflow: visible; }
   .cctv-review-layout.mode-split .cctv-filter-rail,
   .cctv-review-layout.mode-queue .cctv-filter-rail { display: grid; }
+  .cctv-review-layout .cctv-job-list { order: 1; }
+  .cctv-review-layout .cctv-filter-rail { order: 2; }
+  .cctv-review-layout .cctv-detail { order: 3; }
   .cctv-filter-rail,
   .cctv-job-list,
   .cctv-detail { height: auto; max-height: none; overflow: visible; }
@@ -448,7 +451,10 @@
   .cctv-review-layout.mode-inspect .cctv-detail { display: grid; margin-top: 0; }
   .cctv-media-container,
   .cctv-review-layout.mode-inspect .cctv-media-container { aspect-ratio: 16 / 9; min-height: 210px; }
-  .cctv-queue-tools label { display: none; }
+  .cctv-section-title { align-items: stretch; display: grid; gap: 9px; }
+  .cctv-queue-tools { display: grid; grid-template-columns: minmax(0, 1fr) max-content; width: 100%; }
+  .cctv-queue-tools label { display: flex; min-width: 0; width: 100%; }
+  .cctv-queue-tools input { min-width: 0; width: 100%; }
   .cctv-records-summary { grid-template-columns: auto minmax(0, 1fr); }
   .cctv-records-summary .cctv-btn-jump { grid-column: 1 / -1; justify-content: center; }
   .cctv-record-card { align-items: start; grid-template-columns: 68px minmax(0, 1fr); }
