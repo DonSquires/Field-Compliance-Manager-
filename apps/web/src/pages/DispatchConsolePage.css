@@ -615,3 +615,103 @@
   background: #b42332;
   color: #ffffff;
 }
+
+.admin-shell[data-theme='light'] .dispatch-job-dialog-backdrop {
+  background: rgba(23, 33, 29, 0.48);
+}
+
+.admin-shell[data-theme='light'] .dispatch-job-dialog {
+  border-color: #aebbb2;
+  color: #17211d;
+  background: #ffffff;
+  box-shadow: 0 20px 50px rgba(28, 44, 35, 0.22);
+}
+
+.admin-shell[data-theme='light'] .dispatch-job-dialog > header,
+.admin-shell[data-theme='light'] .dispatch-job-dialog-detail {
+  border-color: #dce4de;
+}
+
+.admin-shell[data-theme='light'] .dispatch-job-dialog h2,
+.admin-shell[data-theme='light'] .dispatch-job-dialog h3 {
+  color: #17211d;
+}
+
+.admin-shell[data-theme='light'] .dispatch-job-dialog header p,
+.admin-shell[data-theme='light'] .dispatch-job-dialog-actions label {
+  color: #485851;
+}
+
+.admin-shell[data-theme='light'] .dispatch-job-dialog-close {
+  border-color: #d2dad5;
+  color: #34433b;
+  background: #f8faf8;
+}
+
+.admin-shell[data-theme='light'] .dispatch-job-dialog-grid div {
+  border-color: #dce4de;
+  color: #26332c;
+  background: #f8faf8;
+}
+
+.admin-shell[data-theme='light'] .dispatch-job-dialog-grid strong,
+.admin-shell[data-theme='light'] .dispatch-job-dialog-detail strong {
+  color: #58675f;
+}
+
+.admin-shell[data-theme='light'] .dispatch-job-dialog-detail p.is-safety {
+  border-left-color: #a82432;
+  color: #812633;
+  background: #fbeaec;
+}
+
+.admin-shell[data-theme='light'] .dispatch-job-list-priority {
+  color: #485851;
+  background: #e8ede9;
+}
+
+.admin-shell[data-theme='light'] .dispatch-job-list-priority.priority-urgent {
+  color: #812633;
+  background: #fbeaec;
+}
+
+.admin-shell[data-theme='light'] .dispatch-job-list-priority.priority-high {
+  color: #674d12;
+  background: #fff4d9;
+}
+
+.admin-shell[data-theme='light'] .dispatch-response-verdict.is-ok {
+  border-color: #bad8c4;
+  color: #245f41;
+  background: #e8f3eb;
+}
+
+.admin-shell[data-theme='light'] .dispatch-response-verdict.is-warn {
+  border-color: #e5cd91;
+  color: #674d12;
+  background: #fff4d9;
+}
+
+.admin-shell[data-theme='light'] .dispatch-response-verdict.is-stop {
+  border-color: #e5b8bc;
+  color: #812633;
+  background: #fbeaec;
+}
+
+.admin-shell[data-theme='light'] .dispatch-response-steps li {
+  border-left-color: #bad8c4;
+  color: #34433b;
+}
+
+.admin-shell[data-theme='light'] .dispatch-response-steps li.is-pending {
+  border-left-color: #d2dad5;
+  color: #66746d;
+}
+
+.admin-shell[data-theme='light'] .dispatch-response-steps li.is-done strong {
+  color: #17211d;
+}
+
+.admin-shell[data-theme='light'] .dispatch-console-form-note {
+  color: #58675f;
+}
