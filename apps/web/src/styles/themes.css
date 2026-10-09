@@ -979,6 +979,108 @@
   color: #28714f;
 }
 
+.admin-shell[data-theme='light'] .patrol-oversight {
+  color: #17211d;
+}
+
+.admin-shell[data-theme='light'] .patrol-oversight-header > div > span {
+  color: #8f1d2b;
+}
+
+.admin-shell[data-theme='light'] .patrol-oversight-header p {
+  color: #58675f;
+}
+
+.admin-shell[data-theme='light'] .patrol-oversight-header button {
+  border-color: #bdc9c1;
+  color: #34433b;
+  background: #ffffff;
+}
+
+.admin-shell[data-theme='light'] .patrol-oversight-summary,
+.admin-shell[data-theme='light'] .patrol-oversight-table {
+  border-color: #d2dad5;
+  background: #ffffff;
+}
+
+.admin-shell[data-theme='light'] .patrol-oversight-summary > div + div {
+  border-color: #dce4de;
+}
+
+.admin-shell[data-theme='light'] .patrol-oversight-summary svg {
+  color: #176f68;
+}
+
+.admin-shell[data-theme='light'] .patrol-oversight-summary span {
+  color: #58675f;
+}
+
+.admin-shell[data-theme='light'] .patrol-oversight-summary strong {
+  color: #17211d;
+}
+
+.admin-shell[data-theme='light'] .patrol-oversight-summary .is-warning svg,
+.admin-shell[data-theme='light'] .patrol-oversight-summary .is-warning strong {
+  color: #815b13;
+}
+
+.admin-shell[data-theme='light'] .patrol-oversight-toolbar button {
+  border-color: #bdc9c1;
+  color: #485851;
+  background: #ffffff;
+}
+
+.admin-shell[data-theme='light'] .patrol-oversight-toolbar button.is-active {
+  border-color: #176f68;
+  color: #ffffff;
+  background: #176f68;
+}
+
+.admin-shell[data-theme='light'] .patrol-oversight-toolbar > span {
+  color: #58675f;
+}
+
+.admin-shell[data-theme='light'] .patrol-oversight-table th {
+  color: #34433b;
+  background: #e8ede9;
+}
+
+.admin-shell[data-theme='light'] .patrol-oversight-table td {
+  border-color: #dce4de;
+  color: #26332c;
+  background: #ffffff;
+}
+
+.admin-shell[data-theme='light'] .patrol-oversight-table td > small,
+.admin-shell[data-theme='light'] .patrol-oversight-table p {
+  color: #58675f;
+}
+
+.admin-shell[data-theme='light'] .patrol-oversight-table .is-verified {
+  color: #28714f;
+}
+
+.admin-shell[data-theme='light'] .patrol-oversight-table .is-exception {
+  color: #815b13;
+}
+
+.admin-shell[data-theme='light'] .patrol-oversight-empty {
+  color: #58675f !important;
+}
+
+.patrol-oversight-scroll-cue {
+  display: none;
+  margin: 0 0 7px;
+  color: #58675f;
+  font-size: 12px;
+}
+
+@media (max-width: 980px) {
+  .patrol-oversight-scroll-cue {
+    display: block;
+  }
+}
+
 .admin-shell[data-theme='light'] .crm-account-register-row .is-attention {
   color: #815b13;
 }

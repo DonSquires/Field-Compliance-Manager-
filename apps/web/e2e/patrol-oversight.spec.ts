@@ -3,7 +3,7 @@ import { installSupabaseFixtures, monitorBrowserErrors, signInAsAdmin } from './
 
 test.beforeEach(async ({ page }) => {
   await page.clock.setFixedTime(new Date('2026-08-30T09:30:00+12:00'));
-  await installSupabaseFixtures(page);
+  await installSupabaseFixtures(page, { officerModules: ['patrol'] });
 });
 
 test('admin patrol route shows exact officer checkpoint evidence', async ({ page }) => {
@@ -11,6 +11,12 @@ test('admin patrol route shows exact officer checkpoint evidence', async ({ page
   await signInAsAdmin(page, '/admin/field-ops?area=patrol');
 
   await expect(page.getByRole('heading', { name: 'Patrol evidence' })).toBeVisible();
+  await expect(page).toHaveScreenshot('patrol-oversight-first-viewport.png');
+  if ((page.viewportSize()?.width ?? 0) < 980) {
+    await expect(page.locator('.patrol-oversight-scroll-cue')).toBeVisible();
+    const tableSize = await page.locator('.patrol-oversight-table').evaluate((element) => ({ scrollWidth: element.scrollWidth, clientWidth: element.clientWidth }));
+    expect(tableSize.scrollWidth).toBeGreaterThan(tableSize.clientWidth);
+  }
   const verifiedVisit = page.getByText('North gate checkpoint').locator('..').locator('..');
   await expect(verifiedVisit).toBeVisible();
   await expect(verifiedVisit.getByText('Ana Ngata', { exact: true })).toBeVisible();
