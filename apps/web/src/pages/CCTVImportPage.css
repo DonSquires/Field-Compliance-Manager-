@@ -1,4 +1,8 @@
 .cctv-import-page {
+  --cctv-import-accent: #b42332;
+  --cctv-import-accent-hover: #8f1d2b;
+  --cctv-import-accent-soft: #fae9ea;
+  --cctv-import-accent-ink: #812633;
   padding: 28px clamp(18px, 3vw, 42px) 44px;
   color: #18212b;
 }
@@ -19,11 +23,12 @@
   letter-spacing: .08em;
   text-transform: uppercase;
 }
-.cctv-import-header h1 { margin: 5px 0 0; }
+.cctv-import-header h1 { font-size: 30px; line-height: 1.14; margin: 5px 0 0; max-width: 900px; }
 .cctv-import-header p { color: #5d6b75; margin: 8px 0 0; max-width: 680px; }
 
-.page-action.is-primary { background: #16847a; border-color: #16847a; color: #fff; }
-.page-action.is-primary:disabled { opacity: .55; cursor: default; }
+.cctv-import-page .page-action.is-primary { background: var(--cctv-import-accent); border-color: var(--cctv-import-accent); color: #fff; }
+.cctv-import-page .page-action.is-primary:hover:not(:disabled) { background: var(--cctv-import-accent-hover); border-color: var(--cctv-import-accent-hover); }
+.cctv-import-page .page-action.is-primary:disabled { opacity: .55; cursor: default; }
 
 .cctv-import-alert {
   align-items: center;
@@ -57,9 +62,9 @@
 .cctv-import-step-heading p { color: #65727c; font-size: 13px; line-height: 1.45; margin: 4px 0 0; }
 .cctv-import-step-number {
   align-items: center;
-  background: #e8f3f2;
+  background: var(--cctv-import-accent-soft);
   border-radius: 50%;
-  color: #167b72;
+  color: var(--cctv-import-accent-ink);
   display: inline-flex;
   flex: 0 0 28px;
   font-weight: 800;
@@ -91,8 +96,8 @@
   padding: 8px 10px;
   text-align: left;
 }
-.cctv-import-place:hover { background: #f3f9f8; }
-.cctv-import-place.is-selected { background: #eef7f5; border-color: #16847a; }
+.cctv-import-place:hover { background: #f7f2f2; }
+.cctv-import-place.is-selected { background: var(--cctv-import-accent-soft); border-color: var(--cctv-import-accent); }
 .cctv-import-place span { display: grid; gap: 2px; min-width: 0; }
 .cctv-import-place strong { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 .cctv-import-place small { color: #75828a; font-size: 12px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
@@ -109,7 +114,7 @@
   font-size: 12px;
   padding: 5px 10px;
 }
-.cctv-import-facets button.is-selected { background: #16847a; border-color: #16847a; color: #fff; }
+.cctv-import-facets button.is-selected { background: var(--cctv-import-accent); border-color: var(--cctv-import-accent); color: #fff; }
 
 .cctv-import-fields { display: grid; gap: 12px; grid-template-columns: repeat(2, minmax(0, 1fr)); }
 .cctv-import-fields label { display: grid; gap: 5px; }
@@ -169,7 +174,7 @@
 .cctv-import-file-state { align-items: center; color: #315761; display: inline-flex; font-size: 12px; font-weight: 700; gap: 5px; grid-area: state; }
 .is-failed .cctv-import-file-state { color: #8b2f2a; }
 .cctv-import-files progress,
-.cctv-import-progress progress { accent-color: #16847a; grid-area: bar; height: 6px; width: 100%; }
+.cctv-import-progress progress { accent-color: var(--cctv-import-accent); grid-area: bar; height: 6px; width: 100%; }
 
 .cctv-import-checklist { color: #65727c; display: grid; font-size: 13px; gap: 6px; list-style: none; margin: 0 0 12px; padding: 0; }
 .cctv-import-checklist li { align-items: center; display: flex; gap: 8px; }
@@ -188,10 +193,11 @@
 .cctv-import-badge { background: #edf3f4; border-radius: 999px; color: #315761; font-size: 12px; padding: 3px 9px; text-transform: capitalize; white-space: nowrap; }
 .cctv-import-badge.is-failed { background: #fbeeec; color: #8b2f2a; }
 .cctv-import-badge.is-review_ready { background: #e8f3f2; color: #11675f; }
-.cctv-import-link { background: transparent; border: 0; color: #126b62; cursor: pointer; font: inherit; font-weight: 700; padding: 0; }
+.cctv-import-link { background: transparent; border: 0; color: var(--cctv-import-accent-ink); cursor: pointer; font: inherit; font-weight: 700; padding: 0; }
 
 @media (max-width: 960px) {
   .cctv-import-layout { grid-template-columns: 1fr; }
   .cctv-import-fields { grid-template-columns: 1fr; }
   .cctv-import-header { display: grid; }
+  .cctv-import-header h1 { font-size: 26px; line-height: 1.2; }
 }

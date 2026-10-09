@@ -472,7 +472,8 @@ const AdminShell: React.FC = () => {
   }, []);
 
   // GPS / geofence evidence belongs to field pages; on a desk page (clients, finance, roster, settings) it only confuses.
-  const showPlaceContext = FIELD_CONTEXT_PAGES.has(activePage);
+  const isOrgWideCctvWorkspace = activePage === 'field-ops' && (fieldOpsSubArea === 'cctv-import' || fieldOpsSubArea === 'cctv-triage');
+  const showPlaceContext = FIELD_CONTEXT_PAGES.has(activePage) && !isOrgWideCctvWorkspace;
   const isPageEnabled = useCallback((page: AdminPage): boolean => {
     // While subscriptions are still loading, isModuleEnabled() answers false for everything; that is "unknown", not "denied".
     // Role checks still apply, and the route effect re-evaluates the module gate once loading finishes.
@@ -882,7 +883,7 @@ const AdminShell: React.FC = () => {
         {showPlaceContext && <PlaceContextBanner />}
         {accessNotice && <div role="alert" className="admin-access-notice">{accessNotice}</div>}
         {moduleAccessNotice && <div role="status" className="admin-access-notice"><strong>{moduleAccessNotice.title}</strong><span>{moduleAccessNotice.description}</span></div>}
-        <OperatingSpineRibbon organizationName={orgName || 'Your organisation'} agreementName={selectedAgreement?.name ?? null} placeName={selectedZone?.name ?? selectedSite?.name ?? null} activePage={activePage} onNavigate={(page) => navigateToPage(page as AdminPage)} />
+        {!isOrgWideCctvWorkspace && <OperatingSpineRibbon organizationName={orgName || 'Your organisation'} agreementName={selectedAgreement?.name ?? null} placeName={selectedZone?.name ?? selectedSite?.name ?? null} activePage={activePage} onNavigate={(page) => navigateToPage(page as AdminPage)} />}
         <WorkflowRail activePage={activePage} context={workflowContext} onNavigate={(destination, context) => navigateToPage(destination as AdminPage, context)} />
         <LazyPageRecovery key={`${activePage}:${fieldOpsSubArea}`} pageKey={`${activePage}:${fieldOpsSubArea}`}>
           <React.Suspense fallback={<LazyPageFallback />}>{renderPage()}</React.Suspense>

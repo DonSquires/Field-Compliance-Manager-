@@ -1,8 +1,28 @@
 /* Review observations — a cross-camera queue-first screen: the review job that used to be squeezed into
    the console's narrowest sidebar now gets most of the page. Colours/tokens come from .cctv-console
    (imported alongside this file); the queue and detail layout classes are all this page owns. */
+.admin-shell[data-theme='light'] .cctv-triage {
+  --cc-bg: #f1f4f1;
+  --cc-surface: #ffffff;
+  --cc-elevated: #f4f6f4;
+  --cc-raised: #e8ede9;
+  --cc-line: #d5ded8;
+  --cc-line-strong: #aab8af;
+  --cc-text: #18231d;
+  --cc-text-2: #44534b;
+  --cc-text-3: #69786f;
+  --cc-brand: #b42332;
+  --cc-brand-ink: #ffffff;
+  --cc-brand-dim: rgba(180, 35, 50, .1);
+  --cc-normal: #245f41;
+  --cc-watch: #80570c;
+  --cc-action: #98510f;
+  --cc-critical: #a82432;
+}
+
 .cctv-triage { min-width: 0; }
 .cctv-triage__header { align-items: flex-start; display: flex; gap: 18px; justify-content: space-between; margin-bottom: 14px; }
+.cctv-triage__header .page-title { color: var(--cc-text); font-size: 30px; line-height: 1.15; margin: 0; max-width: 900px; }
 .cctv-triage__error { align-items: center; background: rgba(216, 80, 80, .14); border: 1px solid var(--cc-critical); border-radius: 6px; color: #ffb4ad; display: flex; gap: 10px; justify-content: space-between; margin-bottom: 12px; padding: 8px 12px; }
 .cctv-triage__filters { align-items: center; display: flex; flex-wrap: wrap; gap: 8px; margin-bottom: 14px; }
 .cctv-triage__count { background: rgba(242, 191, 58, .18); border-radius: 12px; color: var(--cc-watch); font-size: 12px; font-weight: 700; margin-left: auto; padding: 2px 8px; }
@@ -19,12 +39,14 @@
 .cctv-triage__row-text strong { color: var(--cc-text); font-size: 13px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 .cctv-triage__row-text small { color: var(--cc-text-3); font-size: 11px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 .cctv-triage__weapon-badge { align-items: center; background: rgba(216, 80, 80, .22); border-radius: 3px; color: #ffb4ad; display: inline-flex; font-size: 10px; font-weight: 700; gap: 3px; padding: 1px 5px; width: fit-content; }
+.admin-shell[data-theme='light'] .cctv-triage__weapon-badge { background: #f9e8e5; color: #8b2f2a; }
 
 .cctv-triage__detail { background: var(--cc-surface); border: 1px solid var(--cc-line); border-radius: 8px; display: grid; gap: 14px; padding: 18px clamp(16px, 2vw, 28px); }
 .cctv-triage__detail-head { align-items: flex-start; display: flex; gap: 14px; justify-content: space-between; }
 .cctv-triage__detail-head h2 { color: var(--cc-text); font-size: 18px; margin: 0 0 4px; }
 .cctv-triage__hero { border-radius: 6px; max-height: 420px; object-fit: contain; width: 100%; background: #030a0f; }
 .cctv-triage__record-state { align-items: center; background: rgba(35, 194, 176, .09); border: 1px solid rgba(35, 194, 176, .28); border-radius: 6px; color: var(--cc-text-2); display: flex; gap: 9px; line-height: 1.4; padding: 9px 11px; }
+.admin-shell[data-theme='light'] .cctv-triage__record-state { background: rgba(180, 35, 50, .06); border-color: rgba(180, 35, 50, .2); }
 .cctv-triage__record-state svg { color: var(--cc-brand); flex: 0 0 auto; }
 .cctv-triage__record-state strong { color: var(--cc-text); display: block; font-size: 12px; }
 .cctv-triage__record-state span { font-size: 12px; }
@@ -41,8 +63,10 @@
 .cctv-triage__history-row small { color: var(--cc-text-3); font-size: 11px; }
 .cctv-triage__history-row > div { display: flex; gap: 4px; }
 .cctv-triage__history-row .page-action { font-size: 11px; padding: 5px 7px; }
+.admin-shell[data-theme='light'] .cctv-triage__error { background: #f9e8e5; color: #8b2f2a; }
 
 @media (max-width: 900px) {
+  .cctv-triage__header .page-title { font-size: 26px; }
   .cctv-triage__layout { grid-template-columns: minmax(0, 1fr); }
   .cctv-triage__queue { max-height: 320px; }
   .cctv-triage__history-row { grid-template-columns: 54px minmax(0, 1fr); }
