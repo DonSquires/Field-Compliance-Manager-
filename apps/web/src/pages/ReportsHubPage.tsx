@@ -505,7 +505,8 @@ const ReportsHubPage: React.FC = () => {
       <section className="reports-section report-packs-section">
         <h2>Report Packs ({reportPacks.length})</h2>
         <p className="subtitle">Generated evidence remains an internal draft until a provider administrator reviews and publishes it.</p>
-        <div className="reports-table-wrapper" role="region" aria-label="Report packs" tabIndex={0}>
+        <p className="report-packs-scroll-cue">Scroll horizontally to review report status, PDF, and delivery actions.</p>
+        <div className="reports-table-wrapper report-packs-table-region" role="region" aria-label="Report packs" tabIndex={0}>
           <table className="reports-table">
             <thead><tr><th>Agreement</th><th>Period</th><th>Type</th><th>Status</th><th>Review</th><th>PDF</th><th>Delivery</th></tr></thead>
             <tbody>

@@ -273,6 +273,30 @@
   margin-top: 12px;
 }
 
+.report-packs-table-region .reports-table {
+  min-width: 960px;
+}
+
+.report-packs-table-region .reports-table thead th {
+  position: sticky;
+  top: 0;
+  z-index: 1;
+  background: var(--color-bg-tertiary, #e8ede9);
+}
+
+.report-packs-scroll-cue {
+  display: none;
+  margin: 8px 0 0;
+  color: var(--color-text-secondary);
+  font-size: 12px;
+}
+
+@media (max-width: 760px) {
+  .report-packs-scroll-cue {
+    display: block;
+  }
+}
+
 .reports-table {
   width: 100%;
   border-collapse: collapse;

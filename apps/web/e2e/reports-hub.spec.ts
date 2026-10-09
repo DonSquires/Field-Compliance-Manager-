@@ -35,6 +35,14 @@ test('administrator reviews and publishes a tenant report pack to the live clien
   const packs = page.getByRole('heading', { name: 'Report Packs (1)' }).locator('..');
   await expect(packs.getByText('Civic Events Compliance Services')).toBeVisible();
   await expect(packs.getByText('Needs review', { exact: true })).toBeVisible();
+  const reportPackRegion = page.getByRole('region', { name: 'Report packs' });
+  expect(await reportPackRegion.locator('thead th').first().evaluate((header) => getComputedStyle(header).position)).toBe('sticky');
+  expect(await page.evaluate(() => document.documentElement.scrollWidth <= window.innerWidth)).toBe(true);
+  if ((page.viewportSize()?.width ?? 0) < 760) {
+    await expect(page.getByText('Scroll horizontally to review report status, PDF, and delivery actions.')).toBeVisible();
+    expect(await reportPackRegion.evaluate((element) => element.scrollWidth > element.clientWidth)).toBe(true);
+  }
+  await expect(reportPackRegion).toHaveScreenshot('report-pack-review-table.png');
   await page.getByRole('button', { name: 'Review', exact: true }).click();
   await expect(page.getByRole('heading', { name: 'Civic Events Compliance Services' })).toBeVisible();
   await page.getByLabel('Client-facing title').fill('August service accountability report');
