@@ -1,5 +1,5 @@
 import React, { useCallback, useEffect, useState } from 'react';
-import { Car, CheckCircle2, Eye, FileSearch, Link2, MapPin, RefreshCw, Search, UserRound } from 'lucide-react';
+import { Car, CheckCircle2, Eye, FileSearch, Filter, Link2, MapPin, RefreshCw, Search, UserRound } from 'lucide-react';
 import { useAuth } from '../context/AuthContext';
 import { useSearchParams } from 'react-router-dom';
 import { supabase } from '../lib/supabase';
@@ -51,6 +51,7 @@ export default function ObservationSearchPage() {
   const [incidentId, setIncidentId] = useState('');
   const [poi, setPoi] = useState<FlagFilter>('');
   const [loi, setLoi] = useState<FlagFilter>('');
+  const [advancedFiltersOpen, setAdvancedFiltersOpen] = useState(false);
   const [results, setResults] = useState<Observation[]>([]);
   const [sites, setSites] = useState<Option[]>([]);
   const [zones, setZones] = useState<Option[]>([]);
@@ -119,6 +120,7 @@ export default function ObservationSearchPage() {
   }, [searchParams]);
 
   const selected = results.find((row) => row.observation_id === selectedId) ?? results[0] ?? null;
+  const activeFilterCount = [siteId, zoneId, locationId, vehicleId, personId, incidentId, poi, loi].filter(Boolean).length;
 
   const linkObservation = async (observationId: string, values: Record<string, string>) => {
     if (!profile?.organizationId) return;
@@ -146,17 +148,20 @@ export default function ObservationSearchPage() {
         <div><span>Field operations / Intelligence</span><h1>Observation search</h1><p>Find the evidence trail across places, people, vehicles, incidents, and field notes.</p></div>
         <button type="button" className="page-action" onClick={() => void runSearch()}><RefreshCw size={16} /> Refresh</button>
       </header>
-      <section className="observation-search-bar" aria-label="Observation filters">
+      <section className={`observation-search-bar ${advancedFiltersOpen ? 'is-filter-open' : ''}`} aria-label="Observation filters">
         <label className="observation-search-input"><span>Search all observations</span><div><Search size={17} /><input value={search} onChange={(event) => setSearch(event.target.value)} onKeyDown={(event) => { if (event.key === 'Enter') void runSearch(); }} placeholder="Plate, person, site, zone, incident, or note" /></div><small>Use % as a wildcard anywhere: %squires, squires%, or %squ%s%</small></label>
-        <label><span>Site</span><select value={siteId} onChange={(event) => setSiteId(event.target.value)}><option value="">All sites</option>{sites.map((item) => <option key={item.id} value={item.id}>{item.name}</option>)}</select></label>
-        <label><span>Zone</span><select value={zoneId} onChange={(event) => setZoneId(event.target.value)}><option value="">All zones</option>{zones.map((item) => <option key={item.id} value={item.id}>{item.name}</option>)}</select></label>
-        <label><span>Location house</span><select value={locationId} onChange={(event) => setLocationId(event.target.value)}><option value="">All locations</option>{locations.map((item) => <option key={item.id} value={item.id}>{item.name}</option>)}</select></label>
-        <label><span>Canonical vehicle</span><select value={vehicleId} onChange={(event) => setVehicleId(event.target.value)}><option value="">All vehicles</option>{vehicles.map((item) => <option key={item.id} value={item.id}>{item.plate_number}</option>)}</select></label>
-        {canManageIdentity && <label><span>Canonical person</span><select value={personId} onChange={(event) => setPersonId(event.target.value)}><option value="">All people</option>{people.map((item) => <option key={item.canonical_person_id || item.id} value={item.canonical_person_id || item.id}>{item.display_name || 'Unnamed person'}</option>)}</select></label>}
-        <label><span>Incident</span><select value={incidentId} onChange={(event) => setIncidentId(event.target.value)}><option value="">All incidents</option>{incidents.map((item) => <option key={item.id} value={item.id}>{[item.incident_type, item.description].filter(Boolean).join(': ') || item.name || 'Incident'}</option>)}</select></label>
-        <label><span>POI / VOI</span><select value={poi} onChange={(event) => setPoi(event.target.value as FlagFilter)}><option value="">Any POI / VOI</option><option value="true">Flagged</option><option value="false">Not flagged</option></select></label>
-        <label><span>LOI</span><select value={loi} onChange={(event) => setLoi(event.target.value as FlagFilter)}><option value="">Any LOI</option><option value="true">Flagged</option><option value="false">Not flagged</option></select></label>
         <button type="button" className="observation-search-button" onClick={() => void runSearch()}>Search</button>
+        <button type="button" className="observation-filter-toggle" aria-expanded={advancedFiltersOpen} onClick={() => setAdvancedFiltersOpen((open) => !open)}><Filter size={16} aria-hidden="true" />Filters{activeFilterCount > 0 && <span>{activeFilterCount}</span>}</button>
+        <div className="observation-advanced-filters">
+          <label><span>Site</span><select value={siteId} onChange={(event) => setSiteId(event.target.value)}><option value="">All sites</option>{sites.map((item) => <option key={item.id} value={item.id}>{item.name}</option>)}</select></label>
+          <label><span>Zone</span><select value={zoneId} onChange={(event) => setZoneId(event.target.value)}><option value="">All zones</option>{zones.map((item) => <option key={item.id} value={item.id}>{item.name}</option>)}</select></label>
+          <label><span>Location house</span><select value={locationId} onChange={(event) => setLocationId(event.target.value)}><option value="">All locations</option>{locations.map((item) => <option key={item.id} value={item.id}>{item.name}</option>)}</select></label>
+          <label><span>Canonical vehicle</span><select value={vehicleId} onChange={(event) => setVehicleId(event.target.value)}><option value="">All vehicles</option>{vehicles.map((item) => <option key={item.id} value={item.id}>{item.plate_number}</option>)}</select></label>
+          {canManageIdentity && <label><span>Canonical person</span><select value={personId} onChange={(event) => setPersonId(event.target.value)}><option value="">All people</option>{people.map((item) => <option key={item.canonical_person_id || item.id} value={item.canonical_person_id || item.id}>{item.display_name || 'Unnamed person'}</option>)}</select></label>}
+          <label><span>Incident</span><select value={incidentId} onChange={(event) => setIncidentId(event.target.value)}><option value="">All incidents</option>{incidents.map((item) => <option key={item.id} value={item.id}>{[item.incident_type, item.description].filter(Boolean).join(': ') || item.name || 'Incident'}</option>)}</select></label>
+          <label><span>POI / VOI</span><select value={poi} onChange={(event) => setPoi(event.target.value as FlagFilter)}><option value="">Any POI / VOI</option><option value="true">Flagged</option><option value="false">Not flagged</option></select></label>
+          <label><span>LOI</span><select value={loi} onChange={(event) => setLoi(event.target.value as FlagFilter)}><option value="">Any LOI</option><option value="true">Flagged</option><option value="false">Not flagged</option></select></label>
+        </div>
       </section>
       {error && <div className="page-error">{error}</div>}
       <section className="observation-content" aria-label="Observation results">

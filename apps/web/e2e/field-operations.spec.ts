@@ -129,3 +129,39 @@ test('admin vehicle search presents only schema-backed registry and scoped evide
   await expect(page.locator('.page-container')).toHaveScreenshot('admin-vehicle-search-results.png');
   expect(browserErrors, browserErrors.join('\n')).toEqual([]);
 });
+
+test('observation search keeps identity linking gated while rendering the scoped evidence workspace', async ({ page }) => {
+  const browserErrors = monitorBrowserErrors(page);
+  await page.route('**/rest/v1/rpc/can_manage_r_and_m_identity', async (route) => route.fulfill({ contentType: 'application/json', body: 'false' }));
+  await page.route('**/rest/v1/rpc/search_observations', async (route) => route.fulfill({ contentType: 'application/json', body: JSON.stringify([{ observation_id: 'dddddddd-dddd-4ddd-8ddd-dddddddddddd', observed_at: '2026-08-30T08:20:00.000Z', plate_number: 'ABC123', vehicle_id: 'abababab-abab-4bab-8bab-abababababab', vehicle_label: 'Toyota Hiace', vehicle_homeless_status: null, person_id: null, person_label: null, person_category: null, person_homeless_status: null, site_id: null, site_name: 'Civic Events Centre', zone_id: '66666666-6666-4666-8666-666666666666', zone_name: 'Civic Event Operations Zone', location_id: null, location_name: null, incident_id: null, incident_label: null, poi: false, loi: false, compliance_status: 'breach', officer_notes: 'North gate scan verified.' }]) }));
+  await signInAsAdmin(page, '/admin/field-ops?area=observation-search');
+  await expect(page.getByRole('heading', { name: 'Observation search' })).toBeVisible();
+  await expect(page.getByRole('button', { name: /ABC123/ }).first()).toBeVisible();
+  await expect(page.getByText('Toyota Hiace', { exact: true })).toBeVisible();
+  await expect(page.getByText('North gate scan verified.')).toBeVisible();
+  await expect(page.locator('.observation-link-editor').getByLabel('Canonical vehicle')).toHaveCount(0);
+  expect(await page.evaluate(() => document.documentElement.scrollWidth <= window.innerWidth)).toBe(true);
+  const selectedObservation = page.locator('.observation-row.is-selected');
+  const selectedTitleColor = await selectedObservation.locator('.observation-row-main strong').evaluate((element) => getComputedStyle(element).color);
+  expect(selectedTitleColor).toBe('rgb(38, 51, 44)');
+  const filterToggle = page.getByRole('button', { name: /^Filters/ });
+  const advancedFilters = page.locator('.observation-advanced-filters');
+  if ((page.viewportSize()?.width ?? 0) <= 760) {
+    await expect(filterToggle).toBeVisible();
+    await expect(filterToggle).toHaveCSS('display', 'flex');
+    await expect(advancedFilters).toHaveCSS('display', 'none');
+    await expect(advancedFilters.getByLabel('Site')).toBeHidden();
+    await expect(page.getByRole('heading', { name: '1 observation' })).toBeVisible();
+    await expect(page.locator('.observation-queue')).toBeVisible();
+    await expect(page).toHaveScreenshot('admin-observation-search-results.png');
+    await filterToggle.click();
+    await expect(filterToggle).toHaveAttribute('aria-expanded', 'true');
+    await expect(advancedFilters).toHaveCSS('display', 'grid');
+    await expect(advancedFilters.getByLabel('Site')).toBeVisible();
+    await expect(page.locator('.observation-link-editor').getByLabel('Canonical person')).toHaveCount(0);
+  } else {
+    await expect(page).toHaveScreenshot('admin-observation-search-results.png');
+    await expect(advancedFilters.getByLabel('Site')).toBeVisible();
+  }
+  expect(browserErrors, browserErrors.join('\n')).toEqual([]);
+});

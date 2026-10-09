@@ -1005,6 +1005,137 @@
   background: #fbeaec;
 }
 
+.admin-shell[data-theme='light'] .observation-workspace {
+  color: #17211d;
+  background: transparent;
+}
+
+.admin-shell[data-theme='light'] .observation-header h1,
+.admin-shell[data-theme='light'] .observation-detail-inner h2,
+.admin-shell[data-theme='light'] .observation-context-grid strong,
+.admin-shell[data-theme='light'] .observation-note strong,
+.admin-shell[data-theme='light'] .observation-detail-empty strong,
+.admin-shell[data-theme='light'] .observation-empty strong {
+  color: #17211d;
+}
+
+.admin-shell[data-theme='light'] .observation-header p,
+.admin-shell[data-theme='light'] .observation-queue-header small,
+.admin-shell[data-theme='light'] .observation-detail-inner header small,
+.admin-shell[data-theme='light'] .observation-row-main small,
+.admin-shell[data-theme='light'] .observation-context-grid span,
+.admin-shell[data-theme='light'] .observation-note span,
+.admin-shell[data-theme='light'] .observation-detail-empty,
+.admin-shell[data-theme='light'] .observation-empty {
+  color: #58675f;
+}
+
+.admin-shell[data-theme='light'] .observation-search-bar,
+.admin-shell[data-theme='light'] .observation-queue,
+.admin-shell[data-theme='light'] .observation-detail {
+  border-color: var(--color-border);
+  background: #ffffff;
+  box-shadow: 0 1px 2px rgba(28, 44, 35, 0.06);
+}
+
+.admin-shell[data-theme='light'] .observation-search-bar label {
+  color: #485851;
+}
+
+.admin-shell[data-theme='light'] .observation-search-bar input,
+.admin-shell[data-theme='light'] .observation-search-bar select {
+  border-color: #bdc9c1;
+  color: #17211d;
+  background: #ffffff;
+}
+
+.admin-shell[data-theme='light'] .observation-search-input small {
+  color: #66746d;
+}
+
+.admin-shell[data-theme='light'] .observation-search-button,
+.admin-shell[data-theme='light'] .observation-save-button {
+  border-color: #8f1d2b;
+  color: #ffffff;
+  background: #b42332;
+}
+
+.admin-shell[data-theme='light'] .observation-search-button:hover,
+.admin-shell[data-theme='light'] .observation-save-button:hover {
+  background: #8f1d2b;
+}
+
+.admin-shell[data-theme='light'] .observation-queue-header,
+.admin-shell[data-theme='light'] .observation-detail-inner > header {
+  border-color: #dce4de;
+}
+
+.admin-shell[data-theme='light'] .observation-row {
+  border-color: #e0e6e1;
+  color: #26332c;
+  background: #ffffff;
+}
+
+.admin-shell[data-theme='light'] .observation-row:hover {
+  background: #f8faf8;
+}
+
+.admin-shell[data-theme='light'] .observation-row.is-selected {
+  background: #f8e9ea;
+  box-shadow: inset 3px 0 #b42332;
+}
+
+.admin-shell[data-theme='light'] .observation-row-main strong {
+  color: #26332c;
+}
+
+.admin-shell[data-theme='light'] .observation-row-main small {
+  color: #58675f;
+}
+
+.admin-shell[data-theme='light'] .observation-row-icon {
+  color: #315f8e;
+  background: #e8f0f8;
+}
+
+.admin-shell[data-theme='light'] .observation-context-grid > div,
+.admin-shell[data-theme='light'] .observation-note,
+.admin-shell[data-theme='light'] .observation-link-editor {
+  border-color: #dce4de;
+  background: #f8faf8;
+}
+
+.admin-shell[data-theme='light'] .observation-link-editor summary {
+  color: #34433b;
+}
+
+.admin-shell[data-theme='light'] .observation-link-editor select {
+  border-color: #bdc9c1 !important;
+  color: #17211d !important;
+  background: #ffffff !important;
+}
+
+.admin-shell[data-theme='light'] .observation-detail-status.observation-status-compliant,
+.admin-shell[data-theme='light'] .observation-status-compliant {
+  border-color: #bad8c4;
+  color: #245f41;
+  background: #e8f3eb;
+}
+
+.admin-shell[data-theme='light'] .observation-detail-status.observation-status-breach,
+.admin-shell[data-theme='light'] .observation-status-breach {
+  border-color: #e5b8bc;
+  color: #812633;
+  background: #fbeaec;
+}
+
+.admin-shell[data-theme='light'] .observation-status-unknown,
+.admin-shell[data-theme='light'] .observation-status-unclassified {
+  border-color: #d2dad5;
+  color: #485851;
+  background: #edf1ee;
+}
+
 .admin-shell[data-theme='light'] .finance-home-page {
   box-sizing: border-box;
   width: 100%;
