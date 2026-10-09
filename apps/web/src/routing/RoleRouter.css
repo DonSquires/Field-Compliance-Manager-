@@ -1,0 +1,89 @@
+.portal-selector {
+  align-items: center;
+  background: var(--color-bg-primary);
+  display: flex;
+  justify-content: center;
+  min-height: 100vh;
+  padding: 16px;
+}
+
+.portal-selector__panel {
+  background: var(--color-bg-surface);
+  border: 1px solid var(--color-border);
+  border-radius: 8px;
+  box-sizing: border-box;
+  box-shadow: 0 4px 12px rgba(0, 0, 0, .15);
+  max-width: 620px;
+  padding: clamp(22px, 5vw, 40px);
+  width: 100%;
+}
+
+.portal-selector__title {
+  color: var(--color-text-primary);
+  font-size: 28px;
+  font-weight: 700;
+  margin: 0;
+}
+
+.portal-selector__hint {
+  color: var(--color-text-secondary);
+  font-size: 14px;
+  line-height: 1.5;
+  margin: 8px 0 26px;
+}
+
+.portal-selector__grid {
+  display: grid;
+  gap: 12px;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+}
+
+.portal-selector__choice {
+  align-items: center;
+  background: var(--color-bg-elevated);
+  border: 1px solid var(--color-border);
+  border-radius: 6px;
+  color: var(--color-text-primary);
+  cursor: pointer;
+  display: flex;
+  flex-direction: column;
+  gap: 12px;
+  justify-content: center;
+  min-height: 152px;
+  min-width: 0;
+  padding: 20px 14px;
+  text-align: center;
+  transition: background-color .15s ease, border-color .15s ease;
+  width: 100%;
+}
+
+.portal-selector__choice:hover {
+  background: var(--color-bg-secondary);
+  border-color: var(--color-brand-primary);
+}
+
+.portal-selector__choice:focus-visible {
+  outline: 2px solid var(--color-brand-primary);
+  outline-offset: 2px;
+}
+
+.portal-selector__choice > svg {
+  color: var(--color-brand-primary);
+  flex: 0 0 auto;
+}
+
+.portal-selector__choice > span {
+  display: grid;
+  gap: 5px;
+  min-width: 0;
+}
+
+.portal-selector__choice strong { font-size: 16px; }
+.portal-selector__choice small { color: var(--color-text-secondary); font-size: 12px; line-height: 1.4; }
+
+@media (max-width: 520px) {
+  .portal-selector__panel { padding: 24px 20px; }
+  .portal-selector__hint { margin-bottom: 20px; }
+  .portal-selector__grid { grid-template-columns: minmax(0, 1fr); }
+  .portal-selector__choice { flex-direction: row; justify-content: flex-start; min-height: 76px; padding: 14px; text-align: left; }
+}

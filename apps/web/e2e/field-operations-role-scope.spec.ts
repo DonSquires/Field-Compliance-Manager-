@@ -12,7 +12,7 @@ test('admin officer receives enabled response and review tools', async ({ page }
   await expect(page.getByRole('heading', { name: 'Operations workspace' })).toBeVisible();
   await expect(page.getByText('Respond now', { exact: true })).toBeVisible();
   await expect(page.getByText('Review and investigate', { exact: true })).toBeVisible();
-  await expect(page.getByRole('button', { name: /^Dispatch console/ })).toBeVisible();
+  await expect(page.getByRole('button', { name: /^Dispatch console Create jobs/ })).toBeVisible();
   await expect(page.getByRole('button', { name: /^CCTV & video/ })).toBeVisible();
   await expect(page.getByRole('button', { name: /^Import camera footage/ })).toHaveCount(0);
   await expect(page.locator('.field-ops-workflow')).toHaveCount(11);

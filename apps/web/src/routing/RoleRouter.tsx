@@ -15,6 +15,7 @@
  */
 
 import React, { useState } from 'react';
+import { Building2, Radio } from 'lucide-react';
 import { Routes, Route, Navigate, useLocation, useNavigate } from 'react-router-dom';
 import { useAuth } from '../context/AuthContext';
 import AdminShell from '../shells/AdminShell';
@@ -22,6 +23,7 @@ import OfficerShell from '../shells/OfficerShell';
 import { ClientShell } from '../shells/ClientShell';
 import { ScanShell } from '../shells/ScanShell';
 import ModuleShell from '../shells/ModuleShell';
+import './RoleRouter.css';
 
 const NzscvSupplierPage = React.lazy(() => import('../pages/NzscvSupplierPage'));
 
@@ -188,24 +190,22 @@ function PortalSelector({ officerName, onChoose }: {
   onChoose: (choice: 'admin' | 'field') => void;
 }) {
   return (
-    <div style={ps.page}>
-      <div style={ps.card}>
-        <div style={ps.title}>Welcome, {officerName.split(' ')[0]}</div>
-        <div style={ps.hint}>You have dual access. Choose how you want to work right now.</div>
-        <div style={ps.grid}>
-          <button type="button" style={ps.choice} onClick={() => onChoose('admin')}>
-            <div style={ps.choiceIcon}>⊞</div>
-            <div style={ps.choiceLabel}>Admin Portal</div>
-            <div style={ps.choiceSub}>Org setup, reports, compliance</div>
+    <main className="portal-selector">
+      <section className="portal-selector__panel" aria-labelledby="portal-selector-title">
+        <h1 id="portal-selector-title" className="portal-selector__title">Welcome, {officerName.split(' ')[0]}</h1>
+        <p className="portal-selector__hint">You have dual access. Choose how you want to work right now.</p>
+        <div className="portal-selector__grid">
+          <button type="button" className="portal-selector__choice" onClick={() => onChoose('admin')}>
+            <Building2 size={24} aria-hidden="true" />
+            <span><strong>Admin Portal</strong><small>Org setup, reports, compliance</small></span>
           </button>
-          <button type="button" style={ps.choice} onClick={() => onChoose('field')}>
-            <div style={ps.choiceIcon}>📍</div>
-            <div style={ps.choiceLabel}>Field Portal</div>
-            <div style={ps.choiceSub}>Dispatch, patrols, observations</div>
+          <button type="button" className="portal-selector__choice" onClick={() => onChoose('field')}>
+            <Radio size={24} aria-hidden="true" />
+            <span><strong>Field Portal</strong><small>Dispatch, patrols, observations</small></span>
           </button>
         </div>
-      </div>
-    </div>
+      </section>
+    </main>
   );
 }
 

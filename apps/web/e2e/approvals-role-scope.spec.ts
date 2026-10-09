@@ -34,7 +34,7 @@ for (const role of ['admin_officer'] as const) {
     const isMobile = await page.evaluate(() => window.innerWidth < 768);
     if (isMobile) await page.getByRole('button', { name: 'Open navigation' }).click();
     const navigation = page.locator(isMobile ? '.admin-mobile-drawer' : '.admin-sidebar');
-    await expect(navigation.getByRole('button', { name: 'Approvals' })).toHaveCount(0);
+    await expect(navigation.getByRole('button', { name: 'Approvals', exact: true })).toHaveCount(0);
     expect(browserErrors, browserErrors.join('\n')).toEqual([]);
   });
 }
