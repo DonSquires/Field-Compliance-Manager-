@@ -2,8 +2,12 @@ import { expect, test } from '@playwright/test';
 import { installFreedomCampingFixtures, installSupabaseFixtures, monitorBrowserErrors, signInAsAdmin, signInAsOfficer } from './fixtures';
 
 test('admin records a governed breach action', async ({ page }) => {
-  const browserErrors=monitorBrowserErrors(page);await installSupabaseFixtures(page);await signInAsAdmin(page,'/admin/field-ops?area=breach-review');
+  const browserErrors=monitorBrowserErrors(page);await installSupabaseFixtures(page,{officerModules:['freedom_camping']});await signInAsAdmin(page,'/admin/field-ops?area=breach-review');
+  await expect(page.getByRole('heading',{name:'Compliance Breach Review'})).toBeVisible();
+  await expect(page).toHaveScreenshot('breach-review-queue.png');
   await page.getByRole('button',{name:/Select Enforcement Action/}).click();
+  await expect(page.getByText('Select Enforcement Order or Warning to Issue:')).toBeVisible();
+  await expect(page).toHaveScreenshot('breach-review-action-editor.png');
   await page.getByPlaceholder(/Spoke to vehicle occupant/).fill('Supervisor approved a written warning and follow-up patrol.');
   await page.getByRole('button',{name:/Written Warning/}).click();
   await expect(page.getByText('No breach records found matching the current filter.')).toBeVisible();

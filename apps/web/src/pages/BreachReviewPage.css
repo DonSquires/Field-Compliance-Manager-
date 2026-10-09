@@ -1,0 +1,101 @@
+.admin-shell[data-theme='light'] .breach-review-page {
+  color: #17211d;
+}
+
+.admin-shell[data-theme='light'] .breach-review-page .page-header h1 {
+  color: #17211d;
+}
+
+.admin-shell[data-theme='light'] .breach-review-page .page-header .subtitle {
+  color: #58675f;
+}
+
+.admin-shell[data-theme='light'] .breach-review-toolbar {
+  padding: 10px;
+  border: 1px solid #d2dad5;
+  border-radius: 7px;
+  background: #ffffff;
+}
+
+.admin-shell[data-theme='light'] .breach-review-toolbar .btn-secondary {
+  border-color: #c5d0c8;
+  color: #34433b;
+  background: #ffffff;
+}
+
+.admin-shell[data-theme='light'] .breach-review-toolbar .btn-secondary:hover {
+  border-color: #b42332;
+  color: #8f1d2b;
+  background: #f8e9ea;
+}
+
+.admin-shell[data-theme='light'] .breach-review-page .contact-card {
+  border-color: #d2dad5;
+  color: #26332c;
+  background: #ffffff;
+  box-shadow: 0 1px 2px rgba(28, 44, 35, 0.06);
+}
+
+.admin-shell[data-theme='light'] .breach-review-page .plate-banner {
+  border-color: #8d9a92;
+  color: #17211d;
+  background: #f8faf8;
+}
+
+.admin-shell[data-theme='light'] .breach-review-page .badge-danger {
+  border-color: #e5b8bc;
+  color: #812633;
+  background: #fbeaec;
+}
+
+.admin-shell[data-theme='light'] .breach-review-page .badge-warning {
+  border-color: #e5cd91;
+  color: #674d12;
+  background: #fff4d9;
+}
+
+.admin-shell[data-theme='light'] .breach-review-page .badge-success {
+  border-color: #bad8c4;
+  color: #245f41;
+  background: #e8f3eb;
+}
+
+.admin-shell[data-theme='light'] .breach-review-page .badge-info {
+  border-color: #c4d7e8;
+  color: #315f8e;
+  background: #e8f0f8;
+}
+
+.admin-shell[data-theme='light'] .breach-review-page .contact-details {
+  color: #34433b;
+}
+
+.admin-shell[data-theme='light'] .breach-review-page .contact-details > p:first-child {
+  color: #674d12;
+}
+
+.admin-shell[data-theme='light'] .breach-review-page .breach-action-editor {
+  border-color: #d2dad5 !important;
+  color: #26332c;
+  background: #f3f6f3 !important;
+}
+
+.admin-shell[data-theme='light'] .breach-review-page .breach-action-editor label {
+  color: #34433b;
+}
+
+.admin-shell[data-theme='light'] .breach-review-page .breach-action-editor input {
+  border-color: #bdc9c1;
+  color: #17211d;
+  background: #ffffff;
+}
+
+@media (max-width: 640px) {
+  .admin-shell[data-theme='light'] .breach-review-toolbar > div:first-child {
+    width: 100%;
+  }
+
+  .admin-shell[data-theme='light'] .breach-review-toolbar .btn {
+    min-height: 36px;
+  }
+}

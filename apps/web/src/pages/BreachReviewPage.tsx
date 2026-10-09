@@ -16,6 +16,7 @@ import { supabase } from '../lib/supabase';
 import { NoticePrintActions } from '../components/NoticePrintActions';
 import type { NoticeReceiptData } from '../lib/thermalReceipt';
 import './PageStyles.css';
+import './BreachReviewPage.css';
 
 type ActionType =
   | 'verbal_warning'
@@ -228,7 +229,7 @@ const BreachReviewPage: React.FC = () => {
   }
 
   return (
-    <div className="page-container">
+    <div className="page-container breach-review-page">
       <header className="page-header">
         <h1>Compliance Breach Review</h1>
         <p className="subtitle">Triage open vehicle infractions, issue enforcement notices, and manage legal actions</p>
@@ -244,7 +245,7 @@ const BreachReviewPage: React.FC = () => {
       )}
 
       {/* KPI Triage summary & filter controls */}
-      <div style={{ marginTop: '16px', display: 'flex', justifyContent: 'space-between', alignItems: 'center', flexWrap: 'wrap', gap: '12px' }}>
+      <div className="breach-review-toolbar" style={{ marginTop: '16px', display: 'flex', justifyContent: 'space-between', alignItems: 'center', flexWrap: 'wrap', gap: '12px' }}>
         <div style={{ display: 'flex', gap: '8px', alignItems: 'center', flexWrap: 'wrap' }}>
           <button
             className={`btn btn-sm ${statusFilter === 'open' ? 'btn-primary' : 'btn-secondary'}`}
@@ -316,7 +317,7 @@ const BreachReviewPage: React.FC = () => {
         )}
       </div>
 
-      <div className="contacts-list" style={{ marginTop: '16px' }}>
+      <div className="contacts-list breach-review-list" style={{ marginTop: '16px' }}>
         {filteredAlerts.length === 0 ? (
           <div className="empty-state">
             <p>No breach records found matching the current filter.</p>
@@ -326,7 +327,7 @@ const BreachReviewPage: React.FC = () => {
             const isActing = activeActionAlertId === alert.id;
 
             return (
-              <div key={alert.id} className="contact-card">
+              <div key={alert.id} className="contact-card breach-review-card">
                 <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'flex-start', flexWrap: 'wrap', gap: '10px' }}>
                   <div style={{ display: 'flex', alignItems: 'center', gap: '12px' }}>
                     <div className="plate-banner" style={{ fontSize: '18px', padding: '4px 12px' }}>
@@ -395,7 +396,7 @@ const BreachReviewPage: React.FC = () => {
                         </button>
                       </div>
                     ) : (
-                      <div style={{ background: 'var(--color-bg-primary)', padding: '12px', borderRadius: '6px', border: '1px solid var(--color-border)' }}>
+                      <div className="breach-action-editor" style={{ background: 'var(--color-bg-primary)', padding: '12px', borderRadius: '6px', border: '1px solid var(--color-border)' }}>
                         <div style={{ fontSize: '12px', fontWeight: 600, marginBottom: '8px' }}>
                           Select Enforcement Order or Warning to Issue:
                         </div>
