@@ -19,6 +19,7 @@ test('administrator manages identity and access preset', async ({ page }) => {
   await signInAsAdmin(page, '/admin/users');
   await expect(page.getByRole('heading', { name: 'Identity and access' })).toBeVisible();
   await expect(page.getByRole('heading', { name: 'Branch staff access' })).toBeVisible();
+  await expect(page).toHaveScreenshot('identity-access-overview.png');
 
   const jordan = page.getByText('Jordan Lee', { exact: true }).locator('..').locator('..');
   await jordan.getByRole('button', { name: 'Edit user' }).click();

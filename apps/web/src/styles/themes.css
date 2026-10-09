@@ -1347,3 +1347,310 @@
   color: #485851;
   background: #edf3ef;
 }
+
+.admin-shell[data-theme='light'] .identity-page {
+  color: #17211d;
+}
+
+.admin-shell[data-theme='light'] .identity-heading h1,
+.admin-shell[data-theme='light'] .identity-panel-heading h2 {
+  color: #17211d;
+}
+
+.admin-shell[data-theme='light'] .identity-heading > div > span,
+.admin-shell[data-theme='light'] .identity-panel-heading > div > span {
+  color: #8f1d2b;
+}
+
+.admin-shell[data-theme='light'] .identity-heading p {
+  color: #58675f;
+}
+
+.admin-shell[data-theme='light'] .identity-heading-actions > button,
+.admin-shell[data-theme='light'] .identity-message button,
+.admin-shell[data-theme='light'] .identity-panel-heading > button,
+.admin-shell[data-theme='light'] .identity-actions button {
+  border-color: #bdc9c1;
+  color: #34433b;
+  background: #ffffff;
+}
+
+.admin-shell[data-theme='light'] .identity-heading-actions > button:hover,
+.admin-shell[data-theme='light'] .identity-actions button:hover:not(:disabled) {
+  border-color: #b42332;
+  color: #8f1d2b;
+  background: #f8e9ea;
+}
+
+.admin-shell[data-theme='light'] .identity-invite-button,
+.admin-shell[data-theme='light'] .identity-form-footer button {
+  border-color: #8f1d2b;
+  color: #ffffff;
+  background: #b42332;
+}
+
+.admin-shell[data-theme='light'] .identity-summary,
+.admin-shell[data-theme='light'] .identity-invite-form,
+.admin-shell[data-theme='light'] .identity-directory,
+.admin-shell[data-theme='light'] .identity-audit {
+  border-color: #d2dad5;
+  color: #26332c;
+  background: #ffffff;
+}
+
+.admin-shell[data-theme='light'] .identity-summary > div + div,
+.admin-shell[data-theme='light'] .identity-summary > div:nth-child(3),
+.admin-shell[data-theme='light'] .identity-summary > div:nth-child(4) {
+  border-color: #dce4de;
+}
+
+.admin-shell[data-theme='light'] .identity-summary span,
+.admin-shell[data-theme='light'] .identity-form-grid label > span,
+.admin-shell[data-theme='light'] .identity-dialog label > span {
+  color: #58675f;
+}
+
+.admin-shell[data-theme='light'] .identity-summary strong,
+.admin-shell[data-theme='light'] .identity-user-primary strong,
+.admin-shell[data-theme='light'] .identity-audit-list strong {
+  color: #26332c;
+}
+
+.admin-shell[data-theme='light'] .identity-summary svg {
+  color: #176f68;
+}
+
+.admin-shell[data-theme='light'] .identity-message.is-success {
+  border-color: #bad8c4;
+  color: #245f41;
+  background: #e8f3eb;
+}
+
+.admin-shell[data-theme='light'] .identity-message.is-error {
+  border-color: #e5b8bc;
+  color: #812633;
+  background: #fbeaec;
+}
+
+.admin-shell[data-theme='light'] .identity-form-grid input,
+.admin-shell[data-theme='light'] .identity-form-grid select,
+.admin-shell[data-theme='light'] .identity-dialog textarea {
+  border-color: #bdc9c1;
+  color: #17211d;
+  background: #ffffff;
+}
+
+.admin-shell[data-theme='light'] .identity-form-grid input[type='checkbox'] {
+  accent-color: #176f68;
+}
+
+.admin-shell[data-theme='light'] .identity-form-footer {
+  border-color: #dce4de;
+}
+
+.admin-shell[data-theme='light'] .identity-form-footer > span,
+.admin-shell[data-theme='light'] .identity-user-primary small,
+.admin-shell[data-theme='light'] .identity-audit-list small,
+.admin-shell[data-theme='light'] .identity-audit-list time,
+.admin-shell[data-theme='light'] .identity-audit-list p,
+.admin-shell[data-theme='light'] .identity-empty {
+  color: #58675f;
+}
+
+.admin-shell[data-theme='light'] .identity-toolbar label {
+  border-color: #bdc9c1;
+  color: #58675f;
+  background: #ffffff;
+}
+
+.admin-shell[data-theme='light'] .identity-toolbar input,
+.admin-shell[data-theme='light'] .identity-toolbar select {
+  color: #26332c;
+}
+
+.admin-shell[data-theme='light'] .identity-user-list article {
+  border-color: #dce4de;
+  color: #26332c;
+  background: #ffffff;
+}
+
+.admin-shell[data-theme='light'] .identity-user-list article.is-deactivated {
+  background: #f1f3f1;
+}
+
+.admin-shell[data-theme='light'] .identity-avatar {
+  border-color: #b7d6cf;
+  color: #176f68;
+  background: #e3f0ec;
+}
+
+.admin-shell[data-theme='light'] .identity-user-primary em {
+  color: #176f68;
+  background: #e3f0ec;
+}
+
+.admin-shell[data-theme='light'] .identity-role {
+  color: #485851;
+}
+
+.admin-shell[data-theme='light'] .identity-status {
+  color: #28714f;
+}
+
+.admin-shell[data-theme='light'] .identity-status.is-off {
+  color: #815b13;
+}
+
+.admin-shell[data-theme='light'] .identity-audit-list article {
+  border-color: #dce4de;
+}
+
+.admin-shell[data-theme='light'] .identity-audit-mark {
+  background: #28714f;
+  box-shadow: 0 0 0 3px rgba(40, 113, 79, 0.12);
+}
+
+.admin-shell[data-theme='light'] .identity-dialog-backdrop,
+.admin-shell[data-theme='light'] .user-spine-backdrop {
+  background: rgba(23, 33, 29, 0.48);
+}
+
+.admin-shell[data-theme='light'] .identity-dialog,
+.admin-shell[data-theme='light'] .user-spine-dialog {
+  border-color: #bdc9c1;
+  color: #17211d;
+  background: #ffffff;
+  box-shadow: 0 24px 70px rgba(23, 33, 29, 0.22);
+}
+
+.admin-shell[data-theme='light'] .identity-dialog > p,
+.admin-shell[data-theme='light'] .user-spine-dialog > header p {
+  color: #58675f;
+}
+
+.admin-shell[data-theme='light'] .identity-dialog-actions,
+.admin-shell[data-theme='light'] .user-spine-dialog > header,
+.admin-shell[data-theme='light'] .user-spine-readiness,
+.admin-shell[data-theme='light'] .user-spine-columns,
+.admin-shell[data-theme='light'] .user-spine-email,
+.admin-shell[data-theme='light'] .user-spine-dialog > footer {
+  border-color: #dce4de;
+  color: #26332c;
+  background: #ffffff;
+}
+
+.admin-shell[data-theme='light'] .identity-dialog-actions button,
+.admin-shell[data-theme='light'] .user-spine-dialog button,
+.admin-shell[data-theme='light'] .user-spine-dialog input,
+.admin-shell[data-theme='light'] .user-spine-dialog select,
+.admin-shell[data-theme='light'] .user-spine-dialog textarea {
+  border-color: #bdc9c1;
+  color: #26332c;
+  background: #ffffff;
+}
+
+.admin-shell[data-theme='light'] .identity-dialog-actions button.is-danger {
+  border-color: #8f1d2b;
+  color: #ffffff;
+  background: #b42332;
+}
+
+.admin-shell[data-theme='light'] .identity-dialog-actions button.is-primary,
+.admin-shell[data-theme='light'] .user-spine-dialog form > button {
+  border-color: #176f68;
+  color: #ffffff;
+  background: #176f68;
+}
+
+.admin-shell[data-theme='light'] .user-spine-dialog > header span,
+.admin-shell[data-theme='light'] .user-spine-section-title svg {
+  color: #8f1d2b;
+}
+
+.admin-shell[data-theme='light'] .user-spine-dialog h2,
+.admin-shell[data-theme='light'] .user-spine-section-title strong {
+  color: #17211d;
+}
+
+.admin-shell[data-theme='light'] .user-spine-dialog label > span,
+.admin-shell[data-theme='light'] .user-spine-dialog small,
+.admin-shell[data-theme='light'] .user-spine-section-title span {
+  color: #58675f;
+}
+
+.admin-shell[data-theme='light'] .user-spine-readiness dl > div,
+.admin-shell[data-theme='light'] .user-spine-not-applicable {
+  border-color: #dce4de;
+  color: #34433b;
+  background: #f3f6f3;
+}
+
+.admin-shell[data-theme='light'] .user-spine-readiness dt,
+.admin-shell[data-theme='light'] .user-spine-readiness dd {
+  color: #485851;
+}
+
+.admin-shell[data-theme='light'] .user-spine-readiness li {
+  color: #674d12;
+  background: #fff3d5;
+}
+
+.admin-shell[data-theme='light'] .user-spine-columns > form {
+  border-color: #dce4de;
+  background: #f8faf8;
+}
+
+.admin-shell[data-theme='light'] .user-spine-section-title {
+  border-color: #dce4de;
+}
+
+.admin-shell[data-theme='light'] .user-spine-section-title svg {
+  color: #176f68;
+}
+
+.admin-shell[data-theme='light'] .user-spine-columns label > span,
+.admin-shell[data-theme='light'] .user-spine-email label span {
+  color: #485851;
+}
+
+.admin-shell[data-theme='light'] .user-spine-columns input,
+.admin-shell[data-theme='light'] .user-spine-columns select,
+.admin-shell[data-theme='light'] .user-spine-columns textarea,
+.admin-shell[data-theme='light'] .user-spine-email input {
+  border-color: #bdc9c1;
+  color: #17211d;
+  background: #ffffff;
+}
+
+.admin-shell[data-theme='light'] .user-spine-columns form > button,
+.admin-shell[data-theme='light'] .user-spine-email button {
+  border-color: #176f68;
+  color: #ffffff;
+  background: #176f68;
+}
+
+.admin-shell[data-theme='light'] .user-spine-message.is-success {
+  color: #245f41;
+  background: #e4f1e8;
+}
+
+.admin-shell[data-theme='light'] .user-spine-message.is-error {
+  color: #812633;
+  background: #fbeaec;
+}
+
+.admin-shell[data-theme='light'] .user-spine-readiness > div span {
+  color: #815b13;
+}
+
+.admin-shell[data-theme='light'] .user-spine-not-applicable {
+  color: #58675f;
+}
+
+.admin-shell[data-theme='light'] .user-spine-not-applicable strong {
+  color: #26332c;
+}
+
+.admin-shell[data-theme='light'] .user-spine-dialog > footer {
+  color: #58675f;
+}
