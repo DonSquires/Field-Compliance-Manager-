@@ -21,22 +21,31 @@ export interface UninvoicedDispatchRow {
   created_at: string;
 }
 
+export interface UninvoicedPatrolVisitRow {
+  client_organization_id: string | null;
+  client_name: string | null;
+  shift_stop_id: string;
+  line_total: number;
+  created_at: string;
+}
+
 export interface ClientUninvoicedSummary {
   clientId: string;
   clientName: string;
   workshopOrders: number;
   dispatchJobs: number;
+  patrolVisits: number;
   total: number;
   oldest: string | null;
 }
 
-export function groupUninvoicedWork(workshop: ReadonlyArray<UninvoicedWorkshopRow>, dispatch: ReadonlyArray<UninvoicedDispatchRow>): ClientUninvoicedSummary[] {
-  const byClient = new Map<string, ClientUninvoicedSummary & { orders: Set<string>; jobs: Set<string> }>();
+export function groupUninvoicedWork(workshop: ReadonlyArray<UninvoicedWorkshopRow>, dispatch: ReadonlyArray<UninvoicedDispatchRow>, patrol: ReadonlyArray<UninvoicedPatrolVisitRow> = []): ClientUninvoicedSummary[] {
+  const byClient = new Map<string, ClientUninvoicedSummary & { orders: Set<string>; jobs: Set<string>; stops: Set<string> }>();
   const bucket = (clientId: string | null, clientName: string | null) => {
     if (!clientId) return null;
     let entry = byClient.get(clientId);
     if (!entry) {
-      entry = { clientId, clientName: clientName ?? 'Client', workshopOrders: 0, dispatchJobs: 0, total: 0, oldest: null, orders: new Set(), jobs: new Set() };
+      entry = { clientId, clientName: clientName ?? 'Client', workshopOrders: 0, dispatchJobs: 0, patrolVisits: 0, total: 0, oldest: null, orders: new Set(), jobs: new Set(), stops: new Set() };
       byClient.set(clientId, entry);
     }
     return entry;
@@ -57,8 +66,15 @@ export function groupUninvoicedWork(workshop: ReadonlyArray<UninvoicedWorkshopRo
     entry.total += Number(row.line_total);
     entry.oldest = older(entry.oldest, row.created_at);
   }
+  for (const row of patrol) {
+    const entry = bucket(row.client_organization_id, row.client_name);
+    if (!entry) continue;
+    entry.stops.add(row.shift_stop_id);
+    entry.total += Number(row.line_total);
+    entry.oldest = older(entry.oldest, row.created_at);
+  }
   return Array.from(byClient.values())
-    .map(({ orders, jobs, ...entry }) => ({ ...entry, workshopOrders: orders.size, dispatchJobs: jobs.size, total: Math.round(entry.total * 100) / 100 }))
+    .map(({ orders, jobs, stops, ...entry }) => ({ ...entry, workshopOrders: orders.size, dispatchJobs: jobs.size, patrolVisits: stops.size, total: Math.round(entry.total * 100) / 100 }))
     .filter((entry) => entry.total > 0)
     .sort((a, b) => b.total - a.total);
 }
@@ -68,6 +84,7 @@ export function describeUninvoiced(entry: ClientUninvoicedSummary): string {
   const parts: string[] = [];
   if (entry.workshopOrders > 0) parts.push(`${entry.workshopOrders} workshop job${entry.workshopOrders === 1 ? '' : 's'}`);
   if (entry.dispatchJobs > 0) parts.push(`${entry.dispatchJobs} callout${entry.dispatchJobs === 1 ? '' : 's'}`);
+  if (entry.patrolVisits > 0) parts.push(`${entry.patrolVisits} patrol visit${entry.patrolVisits === 1 ? '' : 's'}`);
   const since = entry.oldest ? ` · oldest ${new Date(entry.oldest).toLocaleDateString('en-NZ')}` : '';
   return `${parts.join(' and ')} finished and not yet billed${since}`;
 }

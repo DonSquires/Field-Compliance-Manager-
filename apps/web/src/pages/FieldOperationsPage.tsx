@@ -17,7 +17,6 @@ import {
 import type { LucideIcon } from 'lucide-react';
 import { useAuth, type AppRole } from '../context/AuthContext';
 import { useServiceRelationships } from '../context/ServiceRelationshipContext';
-import { SafetyGate } from '../components/SafetyGate';
 import { ACTIVE_DISPATCH_JOB_STATUSES } from '../lib/dispatchStatus';
 import { useEnabledModules } from '../hooks/useEnabledModules';
 import { useActiveModuleContext } from '../hooks/useActiveModuleContext';
@@ -60,6 +59,7 @@ interface FieldWorkflow {
   tone: string;
   group: WorkflowGroup;
   roles: AppRole[];
+  metric?: keyof Metrics;
   moduleKeys?: string[];
   safetyRelevant?: boolean;
 }
@@ -67,11 +67,11 @@ interface FieldWorkflow {
 const OPERATIONS_ROLES: AppRole[] = ['grand_master', 'master', 'admin', 'admin_officer'];
 
 const WORKFLOWS: FieldWorkflow[] = [
-  { area: 'dispatch', label: 'Dispatch console', detail: 'Create jobs, assign resources, and manage SLA response', icon: Radio, tone: 'teal', group: 'respond', roles: OPERATIONS_ROLES, moduleKeys: ['dispatch'] },
-  { area: 'live-map', label: 'Live operations', detail: 'Review GPS freshness and separately confirmed welfare state', icon: Map, tone: 'blue', group: 'respond', roles: OPERATIONS_ROLES, moduleKeys: ['dispatch'] },
-  { area: 'welfare-alerts', label: 'Welfare response', detail: 'Acknowledge, investigate, and resolve active alerts', icon: HeartPulse, tone: 'red', group: 'respond', roles: OPERATIONS_ROLES, moduleKeys: ['welfare'], safetyRelevant: true },
+  { area: 'dispatch', label: 'Dispatch console', detail: 'Create jobs, assign resources, and manage SLA response', icon: Radio, tone: 'teal', group: 'respond', roles: OPERATIONS_ROLES, metric: 'activeDispatch', moduleKeys: ['dispatch'] },
+  { area: 'live-map', label: 'Live operations', detail: 'Review GPS freshness and separately confirmed welfare state', icon: Map, tone: 'blue', group: 'respond', roles: OPERATIONS_ROLES, metric: 'onDuty', moduleKeys: ['dispatch'] },
+  { area: 'welfare-alerts', label: 'Welfare response', detail: 'Acknowledge, investigate, and resolve active alerts', icon: HeartPulse, tone: 'red', group: 'respond', roles: OPERATIONS_ROLES, metric: 'welfareAlerts', moduleKeys: ['welfare'], safetyRelevant: true },
   { area: 'patrol', label: 'Patrol evidence', detail: 'Review checkpoint visits, proximity, and exceptions', icon: Route, tone: 'green', group: 'review', roles: OPERATIONS_ROLES, moduleKeys: ['patrol', 'static_guarding'] },
-  { area: 'field-reports', label: 'Field reports', detail: 'Triage submitted reports and required follow-up', icon: FileWarning, tone: 'amber', group: 'respond', roles: OPERATIONS_ROLES },
+  { area: 'field-reports', label: 'Field reports', detail: 'Triage submitted reports and required follow-up', icon: FileWarning, tone: 'amber', group: 'respond', roles: OPERATIONS_ROLES, metric: 'reportFollowUp' },
   { area: 'debrief-followup', label: 'Debrief follow-up', detail: 'Own safety, equipment, and handover actions', icon: FileWarning, tone: 'amber', group: 'respond', roles: OPERATIONS_ROLES },
   { area: 'cctv-console', label: 'CCTV & video', detail: 'Playback, observations, imports, processing jobs, and evidence exports', icon: Camera, tone: 'slate', group: 'review', roles: OPERATIONS_ROLES, moduleKeys: ['cctv'] },
   { area: 'breach-review', label: 'Breach review', detail: 'Assess compliance alerts and record governed outcomes', icon: ShieldAlert, tone: 'red', group: 'review', roles: OPERATIONS_ROLES, moduleKeys: ['freedom_camping', 'parking_enforcement'] },
@@ -95,7 +95,7 @@ const FieldOperationsPage: React.FC<FieldOperationsPageProps> = ({ onNavigate })
   const { profile } = useAuth();
   const { selectedAgreementZones } = useServiceRelationships();
   const dispatchContext = useActiveModuleContext('dispatch');
-  const { status: moduleStatus, isModuleEnabled } = useEnabledModules(profile?.organizationId);
+  const { isModuleEnabled } = useEnabledModules(profile?.organizationId);
   const dispatchEnabled = isModuleEnabled('dispatch');
   const dispatchAvailable = dispatchEnabled && dispatchContext.enabled;
   const welfareEnabled = isModuleEnabled('welfare', { safetyRelevant: true });
@@ -160,41 +160,24 @@ const FieldOperationsPage: React.FC<FieldOperationsPageProps> = ({ onNavigate })
 
       {warnings.length > 0 && <div className="field-ops-warning" role="alert"><AlertTriangle size={18} /><div><strong>Some operational counts are unavailable</strong><span>{warnings.map(([name, metric]) => `${name}: ${metric.error}`).join(' · ')}</span></div></div>}
 
-      <section className="field-ops-metrics" aria-label="Current operational workload">
-        {dispatchAvailable && <MetricButton icon={Users} label="Officers on duty" metric={metrics.onDuty} loading={loading} onClick={() => onNavigate('live-map')} />}
-        {dispatchAvailable && <MetricButton icon={Radio} label="Active dispatch" metric={metrics.activeDispatch} loading={loading} onClick={() => onNavigate('dispatch')} />}
-        <SafetyGate
-          status={moduleStatus}
-          isEnabled={welfareEnabled}
-          moduleLabel="Welfare monitoring"
-          safetyRelevant
-          renderUnavailable={(message) => <MetricButton icon={HeartPulse} label="Welfare alerts" metric={{ value: null, error: message.description }} loading={loading} urgent />}
-        >
-          <MetricButton icon={HeartPulse} label="Welfare alerts" metric={metrics.welfareAlerts} loading={loading} urgent onClick={() => onNavigate('welfare-alerts')} />
-        </SafetyGate>
-        <MetricButton icon={FileWarning} label="Reports for follow-up" metric={metrics.reportFollowUp} loading={loading} onClick={() => onNavigate('field-reports')} />
-      </section>
-
       <section className="field-ops-workflows">
-        <div className="field-ops-section-heading"><div><span>Workspaces</span><h2>Your operational tools</h2></div><small>Only enabled tools for your role and organisation are shown</small></div>
         {workflowGroups.map((group) => <section className="field-ops-workflow-group" aria-labelledby={`field-ops-${group.id}`} key={group.id}>
           <div><span>{group.eyebrow}</span><h3 id={`field-ops-${group.id}`}>{group.title}</h3></div>
           <div className="field-ops-workflow-grid">
-            {group.workflows.map(({ area, label, detail, icon: Icon, tone }) => (
-              <button type="button" key={area} className={`field-ops-workflow tone-${tone}`} onClick={() => onNavigate(area)}>
-                <span><Icon size={19} aria-hidden="true" /></span><div><strong>{label}</strong><small>{detail}</small></div><ArrowRight size={17} aria-hidden="true" />
-              </button>
-            ))}
+            {group.workflows.map(({ area, label, detail, icon: Icon, tone, metric: metricKey }) => {
+              const metric = metricKey ? metrics[metricKey] : null;
+              const count = !metricKey ? null : loading && metric?.value === null ? 'Updating' : metric?.value === null ? 'Unavailable' : metricKey === 'onDuty' ? `${metric?.value} on duty` : metricKey === 'reportFollowUp' ? `${metric?.value} follow-up` : `${metric?.value} active`;
+              return (
+                <button type="button" key={area} className={`field-ops-workflow tone-${tone}`} onClick={() => onNavigate(area)}>
+                  <span><Icon size={19} aria-hidden="true" /></span><div><strong>{label}</strong><small>{detail}</small></div>{count !== null && <span className={`field-ops-workflow-count ${count === 'Unavailable' ? 'is-unavailable' : ''}`} aria-label={`Current workload: ${count}`}>{count}</span>}<ArrowRight size={17} aria-hidden="true" />
+                </button>
+              );
+            })}
           </div>
         </section>)}
       </section>
     </div>
   );
 };
-
-function MetricButton({ icon: Icon, label, metric, loading, urgent = false, onClick }: { icon: LucideIcon; label: string; metric: MetricState; loading: boolean; urgent?: boolean; onClick?: () => void }) {
-  const unavailable = !loading && metric.value === null;
-  return <button type="button" className={`field-ops-metric ${urgent && (metric.value ?? 0) > 0 ? 'is-urgent' : ''} ${unavailable ? 'is-unavailable' : ''}`} onClick={onClick} disabled={!onClick} title={metric.error ?? (onClick ? `Open ${label.toLowerCase()}` : undefined)}><span><Icon size={19} /></span><div><small>{label}</small><strong>{loading ? '—' : unavailable ? 'Unavailable' : metric.value}</strong></div>{onClick && <ArrowRight size={16} />}</button>;
-}
 
 export default FieldOperationsPage;

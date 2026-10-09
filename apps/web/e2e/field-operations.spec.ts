@@ -10,10 +10,13 @@ test('operations landing is visually stable and every command is interactive', a
   const browserErrors = monitorBrowserErrors(page);
   await signInAsAdmin(page);
   await expect(page.getByRole('heading', { name: 'Field Operations' })).toBeVisible();
-  await expect(page.getByText('Officers on duty').locator('..').getByText('4')).toBeVisible();
-  await expect(page.getByText('Active dispatch').locator('..').getByText('7')).toBeVisible();
-  await expect(page.getByText('Welfare alerts').locator('..').getByText('2')).toBeVisible();
+  await expect(page.locator('.field-ops-metrics')).toHaveCount(0);
+  await expect(page.getByRole('button', { name: /Dispatch console.*7 active/ })).toBeVisible();
+  await expect(page.getByRole('button', { name: /Live operations.*4 on duty/ })).toBeVisible();
+  await expect(page.getByRole('button', { name: /Welfare response.*2 active/ })).toBeVisible();
+  await expect(page.getByRole('button', { name: /Field reports.*1 follow-up/ })).toBeVisible();
   expect(await page.evaluate(() => document.documentElement.scrollWidth <= window.innerWidth)).toBe(true);
+  await expect(page).toHaveScreenshot('field-operations-first-viewport.png');
   await expect(page).toHaveScreenshot('field-operations.png', { fullPage: true });
   const finalCommand = page.getByRole('button', { name: /^Officer investigations/ });
   await finalCommand.scrollIntoViewIfNeeded();
@@ -31,7 +34,7 @@ test('operations landing is visually stable and every command is interactive', a
     ['Dispatch console', 'dispatch'],
     ['Live operations', 'live-map'],
     ['Welfare response', 'welfare-alerts'],
-    ['Patrol operations', 'patrol'],
+    ['Patrol evidence', 'patrol'],
     ['Field reports', 'field-reports'],
     ['CCTV & video', 'cctv-console'],
     ['Debrief follow-up', 'debrief-followup'],
@@ -41,7 +44,7 @@ test('operations landing is visually stable and every command is interactive', a
     ['Officer investigations', 'officer-activity'],
   ] as const;
   for (const [label, area] of commands) {
-    await page.getByRole('button', { name: new RegExp(`^${label}`) }).click();
+    await page.locator('.field-ops-workflow').filter({ hasText: label }).click();
     await expect(page).toHaveURL(new RegExp(`area=${area}`));
     await page.goBack();
     await expect(page.getByRole('heading', { name: 'Field Operations' })).toBeVisible();

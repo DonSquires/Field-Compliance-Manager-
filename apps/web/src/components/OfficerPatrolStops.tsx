@@ -20,7 +20,7 @@ export interface PatrolStop {
   module_key: string; modules?: StopModule[]; place: StopPlace;
 }
 interface StopsBundle { shift: { id: string; status: string; scheduled_start: string; scheduled_end: string; route_name: string | null }; stops: PatrolStop[] }
-interface StopReceipt { reference: string; action: 'arrive' | 'depart'; occurred_at: string; stop_status: string; sla_status: string; arrival_verification: string | null; dwell_minutes: number | null; dwell_short: boolean; completed_stops: number; total_stops: number }
+interface StopReceipt { reference: string; action: 'arrive' | 'depart'; occurred_at: string; stop_status: string; sla_status: string; arrival_verification: string | null; dwell_minutes: number | null; dwell_short: boolean; completed_stops: number; total_stops: number; billing_review_required?: boolean }
 
 const time = (value: string | null) => value ? new Date(value).toLocaleTimeString('en-NZ', { hour: '2-digit', minute: '2-digit' }) : null;
 /** The toolset at this stop, in plain words: the modules the contract asks for, required ones first ("Parking enforcement"). */
@@ -116,6 +116,7 @@ export function OfficerPatrolStops({ shiftId }: { shiftId: string }) {
           <span><strong>{receipt.action === 'arrive' ? 'Arrival' : 'Departure'} recorded</strong> at {time(receipt.occurred_at)} · receipt {receipt.reference}
             {receipt.action === 'arrive' && receipt.arrival_verification ? ` · ${VERIFICATION_TEXT[receipt.arrival_verification] ?? receipt.arrival_verification}` : ''}
             {receipt.action === 'depart' && receipt.dwell_minutes !== null ? ` · ${receipt.dwell_minutes} min on site${receipt.dwell_short ? ' (shorter than contracted)' : ''}` : ''}
+            {receipt.billing_review_required ? ' · visit recorded; finance review required before invoicing' : ''}
             {receipt.sla_status === 'breached' ? ' · arrived after the contracted window' : ''}.
           </span>
         </div>
