@@ -17,7 +17,7 @@ test.describe('paired patrol and dispatch acceptance', () => {
     const adminErrors = monitorBrowserErrors(admin);
     const officerErrors = monitorBrowserErrors(officer);
 
-    await installSupabaseFixtures(admin);
+    await installSupabaseFixtures(admin, { officerModules: ['dispatch'] });
     await installOfficerScheduleFixtures(officer);
     const job = {
       id: 'cccccccc-cccc-4ccc-8ccc-cccccccccccc', job_type: 'alarm_response', priority: 'high', status: 'dispatched',
