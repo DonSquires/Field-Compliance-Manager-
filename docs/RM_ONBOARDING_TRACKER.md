@@ -16,6 +16,43 @@ actually work with a working org and its data and operations." Extended-scope,
 multi-session task — take as many turns as needed; real, verified progress each
 turn beats false completeness.
 
+## ACTIVE-LOG RECONCILIATION (2026-10-09)
+
+- Read-only reconciliation confirmed the active client organizations already
+  exist under their canonical names; no organizations were created from workbook
+  abbreviations. `MPC` is activity on Tasman Pine Forests Limited and uses the
+  existing `MPCPEST` import namespace, not a new client organization.
+- The authenticated, linked Supabase CLI was used for the existing importer
+  transaction path (`scripts/import-patrol-log.mjs --use-supabase-cli`). The
+  importer still defaults to rollback/dry-run; each promoted group was followed
+  by an identical dry-run with zero new inserts. No narratives, km/cost fields,
+  or finance records were imported.
+- **258 incremental patrol records applied** from the active workbooks: 38
+  observations and 220 location events. Breakdown: M&R 3 observations + 4
+  events; MPC/TPFL 7 events; NCC 1 event; OFO 2026 3 events; Stringer 6
+  observations; STAND 4 observations + 18 events; TDC 16 events; TPFL 2026 24
+  observations + 171 events; DOC 1 observation. Every new row has the source
+  workbook name, sheet, original row number, and SHA-256 in its import metadata.
+- Blank-date, duplicate, and unresolved-place rows were not forced into records.
+  Existing rows with implausible future dates were not modified: two M&R events
+  date to 2028, and one OFO plus one STAND event date to 2926. The current
+  importer rejects those future dates; correcting historic stored rows requires
+  source-level review.
+- **DOC duplicate-key exception:** the current full-sheet preview proposed 16
+  observations, but the live org already has 16 DOC observations. A read-only
+  plate/time/place comparison identified 8 exact local-time matches and 3
+  same-day/place matches. Only the single unmatched, place-resolved worksheet
+  row 105 was imported; its replay inserts zero. Other ambiguous/unplaced rows
+  remain held.
+- **CommunityCameras/CCL is not a patrol-client import.** Its 2026 sheet has 111
+  dated rows, but its `NELS`/`TASM` codes do not resolve the recorded locations
+  to existing canonical places (only 1 of 17 dated code/location pairs matched
+  after removing a trailing organization suffix). Existing NCC/TDC agreements
+  declare patrol/access-control, not Workshop; R&M's Finance subscription is
+  suspended. No CCL work orders, new sites/zones, or new organization were
+  created. Per owner ruling below, CCTV evidence and physical installation/
+  maintenance remain separate; location is the only required common link.
+
 ## Done (live, committed, tested)
 
 - `person_permits` + `person_permit_vehicles`: org-scoped forest/site access

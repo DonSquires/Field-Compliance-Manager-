@@ -20,6 +20,8 @@ test('patrol imports preserve optional source-file provenance without storing an
   assert.match(importer, /source_row: sourceSheet \? sourceFirstRow \+ rowIndex : null/);
   assert.match(importer, /--source-hash must be a SHA-256 hex digest/);
   assert.doesNotMatch(importer, /source_file:\s*csvPath/);
+  assert.match(importer, /const useSupabaseCli = args\.includes\('--use-supabase-cli'\)/);
+  assert.match(importer, /if \(!token && !useSupabaseCli\)/);
 });
 
 test('narrative fields are opt-in and provider cost fields are not added to activity payloads', () => {
@@ -38,4 +40,7 @@ test('narrative mode merges into existing source-keyed records and reports updat
   assert.match(importer, /UPDATE public\.observations[\s\S]*officer_notes = coalesce\(nullif\(v_obs->>'officer_notes', ''\), officer_notes\)/);
   assert.match(importer, /observations_updated=/);
   assert.match(importer, /events_updated=/);
+  assert.match(importer, /execFileSync\(process\.execPath, \[cliPath, 'db', 'query', '--linked', '--output-format', 'json', '--file', sqlFile\]/);
+  assert.match(importer, /mode === 'apply' \? 'COMMIT;' : 'ROLLBACK;'/);
+  assert.match(importer, /rmSync\(tempDir, \{ recursive: true, force: true \}\)/);
 });

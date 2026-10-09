@@ -17,7 +17,11 @@
  * Required: FIELD_COMPLIANCE_CODESPACE (Supabase management token; never printed).
  */
 import { readFileSync } from 'node:fs';
+import { execFileSync } from 'node:child_process';
+import { mkdtempSync, rmSync, writeFileSync } from 'node:fs';
 import { createHash } from 'node:crypto';
+import { tmpdir } from 'node:os';
+import { join } from 'node:path';
 
 const PROJECT_REF = 'dotczcyyzgabmtmnglqj';
 const PROVIDER_ORG_ID = 'e96d71c9-28a6-4d4a-b0f3-1c4ecdaa9c13'; // R&M Security and Investigations
@@ -26,6 +30,7 @@ const args = process.argv.slice(2);
 const flag = (name) => { const i = args.indexOf(name); return i !== -1 ? args[i + 1] : null; };
 const mode = args.includes('--apply') ? 'apply' : 'dry-run';
 const includeNarratives = args.includes('--include-narratives');
+const useSupabaseCli = args.includes('--use-supabase-cli');
 const csvPath = flag('--csv');
 const orgId = flag('--org-id');
 const clientCode = flag('--client-code');
@@ -36,7 +41,7 @@ const sourceSheet = flag('--source-sheet');
 const sourceFirstRow = Number(flag('--source-first-row') ?? 2);
 const zoneMap = zoneMapFile ? JSON.parse(readFileSync(zoneMapFile, 'utf8')) : JSON.parse(flag('--zone-map') ?? '{}');
 const token = process.env.FIELD_COMPLIANCE_CODESPACE;
-if (!token) { console.error('FIELD_COMPLIANCE_CODESPACE is required'); process.exit(1); }
+if (!token && !useSupabaseCli) { console.error('FIELD_COMPLIANCE_CODESPACE or --use-supabase-cli is required'); process.exit(1); }
 if (!csvPath || !orgId || !clientCode) { console.error('Usage: --csv <path> --org-id <uuid> --client-code <code> --zone-map-file <path> [--dry-run|--apply]'); process.exit(1); }
 if (sourceHash && !/^[a-f0-9]{64}$/i.test(sourceHash)) { console.error('--source-hash must be a SHA-256 hex digest'); process.exit(1); }
 if (!Number.isInteger(sourceFirstRow) || sourceFirstRow < 1) { console.error('--source-first-row must be a positive integer'); process.exit(1); }
@@ -326,6 +331,23 @@ SELECT * FROM (SELECT obs_inserted, obs_skipped, obs_updated, evt_inserted, evt_
   const sql = `BEGIN;
 set local request.jwt.claim.sub = '${ACTOR_ID}';
 ${body}${mode === 'apply' ? 'COMMIT;' : 'ROLLBACK;'}`;
+  if (useSupabaseCli) {
+    const tempDir = mkdtempSync(join(tmpdir(), 'fcm-patrol-import-'));
+    const sqlFile = join(tempDir, 'chunk.sql');
+    try {
+      writeFileSync(sqlFile, sql, 'utf8');
+      const cliPath = join(process.cwd(), 'node_modules', 'supabase', 'dist', 'supabase.js');
+      const output = execFileSync(process.execPath, [cliPath, 'db', 'query', '--linked', '--output-format', 'json', '--file', sqlFile], {
+        encoding: 'utf8',
+        maxBuffer: 32 * 1024 * 1024,
+      });
+      const result = JSON.parse(output);
+      if (!Array.isArray(result.rows) || result.rows.length === 0) throw new Error('Supabase CLI returned no import counts');
+      return result.rows[result.rows.length - 1];
+    } finally {
+      rmSync(tempDir, { recursive: true, force: true });
+    }
+  }
   const response = await fetch(`https://api.supabase.com/v1/projects/${PROJECT_REF}/database/query`, {
     method: 'POST', headers: { Authorization: `Bearer ${token}`, 'Content-Type': 'application/json' }, body: JSON.stringify({ query: sql }),
   });

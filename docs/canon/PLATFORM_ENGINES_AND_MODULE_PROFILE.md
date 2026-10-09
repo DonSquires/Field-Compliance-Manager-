@@ -130,6 +130,15 @@ module IS); `module_rule_sets` / `jurisdiction_rule_sets` are the per-org
 BEHAVIOURAL overlay (how THIS council runs it). This is the "rules are data,
 not code" principle (#144) applied to the module itself.
 
+**Owner ruling 2026-10-09 — CCTV evidence vs camera installation/maintenance.**
+The CCTV module owns footage intake, inference, human review, and evidence
+packaging. Physical camera installation and maintenance belong to Workshop's
+maintenance work-order flow, not to CCTV and not to a new CCL-specific module.
+These are separate workflows; no direct evidence-to-work-order or camera-asset
+link is required. They may share the existing canonical site/zone as their
+location. Historical maintenance import must resolve the client organization and
+place first, and must not enable finance or create billable lines implicitly.
+
 ---
 
 ## 4. The three domain-blind primitives (how the engines are built)
