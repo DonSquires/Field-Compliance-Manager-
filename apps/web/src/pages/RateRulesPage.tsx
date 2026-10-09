@@ -59,6 +59,9 @@ interface UnresolvedPatrolCharge {
   created_at: string;
 }
 
+type RuleKindFilter = 'all' | 'pay' | 'billing';
+type RuleStatusFilter = 'all' | 'active' | 'inactive';
+
 const RATE_TYPES = ['hourly', 'flat', 'daily', 'per_km', 'per_unit', 'percentage', 'per_hour_travel', 'per_hour_allowance', 'oncall_flat', 'callout', 'higher_duties_flat', 'per_visit', 'per_notice'];
 const EMPTY_FORM = { kind: 'pay' as 'pay' | 'billing', name: '', rateType: 'hourly', amount: '', payCode: '', roleCode: '', serviceType: '', jobType: '', clientOrgId: '', siteId: '', zoneId: '', dayCategory: '', effectiveFrom: '', effectiveTo: '', priority: '0' };
 const EMPTY_BAND_FORM = { id: '', serviceType: '', minimum: '', maximum: '', discountPercent: '', updatedAt: '' };
@@ -78,6 +81,9 @@ export default function RateRulesPage() {
   const [notice, setNotice] = useState<string | null>(null);
   const [showForm, setShowForm] = useState(false);
   const [editingRule, setEditingRule] = useState<RateRule | null>(null);
+  const [ruleSearch, setRuleSearch] = useState('');
+  const [ruleKindFilter, setRuleKindFilter] = useState<RuleKindFilter>('all');
+  const [ruleStatusFilter, setRuleStatusFilter] = useState<RuleStatusFilter>('all');
   const [form, setForm] = useState(EMPTY_FORM);
   const [bandForm, setBandForm] = useState(EMPTY_BAND_FORM);
   const operatingBranchId = operatingOrganizationId ?? profile?.organizationId;
@@ -98,6 +104,28 @@ export default function RateRulesPage() {
   const clientNames = useMemo(() => new Map(clientOptions.map((client) => [client.id, client.name])), [clientOptions]);
   const siteNames = useMemo(() => new Map(sites.map((site) => [site.id, site.name])), [sites]);
   const zoneNames = useMemo(() => new Map(zones.map((zone) => [zone.id, zone.name])), [zones]);
+  const normalizedRuleSearch = ruleSearch.trim().toLocaleLowerCase();
+  const visibleRules = useMemo(() => rules.filter((rule) => {
+    if (ruleKindFilter !== 'all' && rule.rule_kind !== ruleKindFilter) return false;
+    if (ruleStatusFilter !== 'all' && (ruleStatusFilter === 'active') !== rule.active) return false;
+    if (!normalizedRuleSearch) return true;
+    const searchableFields = [
+      rule.name,
+      rule.rule_kind === 'pay' ? 'staff pay' : 'customer charge billing',
+      rule.rate_type,
+      rule.pay_code,
+      rule.role_code,
+      rule.service_type,
+      rule.job_type,
+      rule.client_org_id ? clientNames.get(rule.client_org_id) : null,
+      rule.site_id ? siteNames.get(rule.site_id) : null,
+      rule.zone_id ? zoneNames.get(rule.zone_id) : null,
+      rule.day_category,
+      rule.effective_from,
+      rule.effective_to,
+    ];
+    return searchableFields.filter(Boolean).join(' ').toLocaleLowerCase().includes(normalizedRuleSearch);
+  }), [clientNames, normalizedRuleSearch, ruleKindFilter, ruleStatusFilter, rules, siteNames, zoneNames]);
 
   const load = useCallback(async () => {
     if (!operatingBranchId) {
@@ -237,7 +265,7 @@ export default function RateRulesPage() {
     setSaving(false);
   };
 
-  return <div className="page-container">
+  return <div className="page-container rate-rules-page">
     <header className="page-header"><div><h1>Pay and charge rules</h1><p className="subtitle">The rules that decide what staff are paid and what customers are charged for shifts, callouts, court time, and dispatch jobs.</p></div><div><button type="button" className="btn btn-secondary" onClick={() => void load()} disabled={loading}><RefreshCw size={16} /></button><button type="button" className="btn btn-primary" onClick={() => setShowForm((value) => !value)}><Plus size={16} />{showForm ? 'Cancel' : 'New pay or charge rule'}</button></div></header>
     {error && <div className="alert alert-error" role="alert"><AlertTriangle size={16} />{error}</div>}
     {notice && <div className="alert alert-success" role="status"><CheckCircle2 size={16} />{notice}</div>}
@@ -257,17 +285,6 @@ export default function RateRulesPage() {
       {patrolBands.length === 0 ? <p>No patrol discount bands configured; late visits use the full per-visit charge and remain visible as SLA breaches.</p> : <div className="reports-table-wrapper"><table className="reports-table"><thead><tr><th>Service type</th><th>Late by</th><th>Discount</th><th>Status</th><th /></tr></thead><tbody>{patrolBands.map((band) => <tr key={band.id}><td>{band.service_type || 'All patrol service types'}</td><td>{band.over_by_minutes_max === null ? `${band.over_by_minutes_min}+ min` : `${band.over_by_minutes_min}–${band.over_by_minutes_max} min`}</td><td>{(Number(band.discount_pct) * 100).toFixed(2).replace(/\.00$/, '')}%</td><td>{band.active ? 'Active' : 'Inactive'}</td><td><button type="button" className="btn btn-sm btn-secondary" disabled={saving} onClick={() => editPatrolBand(band)}>Edit</button> <button type="button" className="btn btn-sm btn-secondary" disabled={saving} onClick={() => void togglePatrolBand(band)}>{band.active ? 'Deactivate' : 'Reactivate'}</button></td></tr>)}</tbody></table></div>}
     </section>
     {!loading && <FuelPriceMedianPanel organizationId={operatingOrganizationId ?? profile?.organizationId ?? null} />}
-    {!loading && rules.length > 0 && <section className="reports-section">
-      <h2>Current pay and charge rules</h2>
-      <div className="contacts-list">{rules.map((rule) => <div key={`edit-${rule.id}`} className="contact-card">
-        <div className="contact-header"><h3>{rule.name}</h3><span className={`status-badge status-${rule.active ? 'active' : 'inactive'}`}>{rule.active ? 'Active' : 'Inactive'}</span></div>
-        <div className="contact-details">
-          <p>{rule.rule_kind === 'pay' ? 'Staff pay' : 'Customer charge'} - {rule.rate_type.replaceAll('_', ' ')} - {Number(rule.amount).toFixed(2)}</p>
-          {rule.role_code && <p>Payroll role: {rule.role_code}</p>}
-        </div>
-        <button type="button" className="btn btn-sm btn-secondary" disabled={saving} onClick={() => openEdit(rule)}>Edit rule</button>
-      </div>)}</div>
-    </section>}
     {!loading && <section className="reports-section"><h2>Finished jobs that still need a pay or charge rule ({completedJobs.length})</h2>{completedJobs.length === 0 ? <div className="empty-state"><p>Every finished job has been priced. New jobs are priced automatically the moment they are completed.</p></div> : <div className="contacts-list">{completedJobs.map((job) => <div className="contact-card" key={job.id}><div className="contact-header"><h3>{job.job_type.replaceAll('_', ' ')}</h3><span className="contact-type-badge">Completed</span></div><div className="contact-details"><p>Completed {job.completed_at ? new Date(job.completed_at).toLocaleString() : 'time unavailable'}</p><p className="contact-meta">Missing: {job.missing.map((kind) => kind === 'pay' ? 'staff pay rule' : 'customer charge rule').join(' and ')} for “{job.job_type.replaceAll('_', ' ')}”. Add it below (set “Job type” to {job.job_type}), then re-check. Nothing is written as $0.</p></div><button type="button" className="btn btn-sm btn-primary" disabled={saving} onClick={() => void resolveCompletedJob(job)}>{saving ? 'Checking' : 'Re-check'}</button></div>)}</div>}</section>}
     {!loading && <section className="reports-section"><h2>Completed patrol visits awaiting a per-visit rate ({unresolvedPatrol.length})</h2>{unresolvedPatrol.length === 0 ? <p>No completed patrol visit needs rate review.</p> : <div className="contacts-list">{unresolvedPatrol.map((charge) => <div className="contact-card" key={charge.id}><div className="contact-header"><h3>{clientNames.get(charge.client_organization_id ?? '') ?? (charge.status === 'unresolved_agreement' ? 'No linked client agreement' : 'Client account')}</h3><span className="contact-type-badge">Completed patrol visit</span></div><div className="contact-details"><p>{charge.module_key.replaceAll('_', ' ')} · {charge.service_type.replaceAll('_', ' ')} · stop {charge.shift_stop_id.slice(0, 8)}</p><p className="contact-meta">{charge.status === 'unresolved_agreement' ? 'The shift is not linked to an active client service agreement.' : 'No matching customer billing rule uses the per_visit rate type. No amount was charged.'} Completed {new Date(charge.created_at).toLocaleString('en-NZ')}.</p></div><button type="button" className="btn btn-sm btn-primary" disabled={saving || charge.status === 'unresolved_agreement'} onClick={() => void recheckPatrolCharge(charge)}>{saving ? 'Checking' : 'Re-check rate'}</button></div>)}</div>}</section>}
     {showForm && <form className="assessment-form rate-rules-form" onSubmit={createRule}>
@@ -319,6 +336,28 @@ export default function RateRulesPage() {
       {form.kind === 'billing' && <p role="status">Applies to {form.clientOrgId ? clientNames.get(form.clientOrgId) ?? 'the selected client' : 'any client'} · {form.siteId ? siteNames.get(form.siteId) ?? 'the selected site' : form.zoneId ? zoneNames.get(form.zoneId) ?? 'the selected zone' : 'all linked places'}.</p>}
       <button type="submit" className="btn btn-primary" disabled={saving || !form.name.trim() || !form.amount}>{saving ? 'Saving' : editingRule ? 'Save rate rule' : 'Create rate rule'}</button>
     </form>}
-    {loading ? <div className="loading-state"><div className="spinner" /><p>Loading pay and charge rules</p></div> : <div className="reports-table-wrapper"><table className="reports-table"><thead><tr><th>Name</th><th>Sets</th><th>Amount</th><th>Applies to</th><th>Priority</th><th>Status</th><th /></tr></thead><tbody>{rules.length === 0 ? <tr><td colSpan={7} className="text-center">No pay or charge rules yet</td></tr> : rules.map((rule) => <tr key={rule.id}><td>{rule.name}<small>{rule.pay_code ? ` · ${rule.pay_code}` : ''}</small></td><td>{rule.rule_kind === 'pay' ? 'Staff pay' : 'Customer charge'}</td><td>{rule.rate_type.replaceAll('_', ' ')} · {Number(rule.amount).toFixed(2)}</td><td>{[rule.client_org_id ? clientNames.get(rule.client_org_id) ?? 'Client account' : null, rule.site_id ? siteNames.get(rule.site_id) ?? 'Site override' : null, rule.zone_id ? zoneNames.get(rule.zone_id) ?? 'Zone override' : null, rule.service_type, rule.job_type, rule.day_category?.replaceAll('_', ' '), rule.effective_from ? `from ${rule.effective_from}` : null, rule.effective_to ? `through ${rule.effective_to}` : null].filter(Boolean).join(' · ') || 'Whole organisation'}</td><td>{rule.priority}</td><td><span className={`status-badge status-${rule.active ? 'active' : 'inactive'}`}>{rule.active ? 'Active' : 'Inactive'}</span></td><td><button type="button" className="btn btn-sm btn-secondary" disabled={saving} onClick={() => openEdit(rule)}>Edit</button> <button type="button" className="btn btn-sm btn-secondary" disabled={saving} onClick={() => void toggle(rule)}>{rule.active ? 'Deactivate' : 'Reactivate'}</button></td></tr>)}</tbody></table></div>}
+    {loading ? <div className="loading-state"><div className="spinner" /><p>Loading pay and charge rules</p></div> : <section className="reports-section rate-rules-ledger" aria-labelledby="rate-rules-ledger-title">
+      <header><div><h2 id="rate-rules-ledger-title">Pay and charge rules</h2><p className="subtitle">Search and review rules loaded for this operating branch.</p></div><strong role="status" aria-live="polite">Showing {visibleRules.length} of {rules.length}</strong></header>
+      <div className="rate-rules-filters" role="search" aria-label="Filter pay and charge rules">
+        <label><span>Search rules</span><input type="search" aria-label="Search pay and charge rules" value={ruleSearch} onChange={(event) => setRuleSearch(event.target.value)} placeholder="Name, client, place, code, or service" /></label>
+        <label><span>Rule type</span><select aria-label="Filter by rule type" value={ruleKindFilter} onChange={(event) => setRuleKindFilter(event.target.value as RuleKindFilter)}><option value="all">All rule types</option><option value="pay">Staff pay</option><option value="billing">Customer charge</option></select></label>
+        <label><span>Status</span><select aria-label="Filter by rule status" value={ruleStatusFilter} onChange={(event) => setRuleStatusFilter(event.target.value as RuleStatusFilter)}><option value="all">All statuses</option><option value="active">Active</option><option value="inactive">Inactive</option></select></label>
+        {(ruleSearch || ruleKindFilter !== 'all' || ruleStatusFilter !== 'all') && <button type="button" className="btn btn-secondary" onClick={() => { setRuleSearch(''); setRuleKindFilter('all'); setRuleStatusFilter('all'); }}>Clear filters</button>}
+      </div>
+      <p className="rate-rules-scroll-cue">Scroll horizontally to review rule scope and actions.</p>
+      <div className="reports-table-wrapper rate-rules-table-region" role="region" aria-label="Pay and charge rule register" tabIndex={0}>
+        <table className="reports-table"><thead><tr><th>Name</th><th>Kind</th><th>Rate</th><th>Scope and dates</th><th>Priority</th><th>Status</th><th>Actions</th></tr></thead><tbody>
+          {rules.length === 0 ? <tr><td colSpan={7} className="text-center">No pay or charge rules yet</td></tr> : visibleRules.length === 0 ? <tr><td colSpan={7} className="text-center"><div className="rate-rules-empty"><span>No rules match these filters.</span><button type="button" className="btn btn-sm btn-secondary" onClick={() => { setRuleSearch(''); setRuleKindFilter('all'); setRuleStatusFilter('all'); }}>Clear filters</button></div></td></tr> : visibleRules.map((rule) => <tr key={rule.id}>
+            <td>{rule.name}<small>{rule.pay_code ? `Pay / invoice code ${rule.pay_code}` : rule.role_code ? `Payroll role ${rule.role_code}` : ''}</small></td>
+            <td>{rule.rule_kind === 'pay' ? 'Staff pay' : 'Customer charge'}</td>
+            <td>{rule.rate_type.replaceAll('_', ' ')} · {Number(rule.amount).toFixed(2)}</td>
+            <td>{[rule.client_org_id ? clientNames.get(rule.client_org_id) ?? 'Client account' : null, rule.site_id ? siteNames.get(rule.site_id) ?? 'Site override' : null, rule.zone_id ? zoneNames.get(rule.zone_id) ?? 'Zone override' : null, rule.service_type, rule.job_type, rule.day_category?.replaceAll('_', ' '), rule.effective_from ? `from ${rule.effective_from}` : null, rule.effective_to ? `through ${rule.effective_to}` : null].filter(Boolean).join(' · ') || 'Whole organisation'}</td>
+            <td>{rule.priority}</td>
+            <td><span className={`status-badge status-${rule.active ? 'active' : 'inactive'}`}>{rule.active ? 'Active' : 'Inactive'}</span></td>
+            <td><button type="button" className="btn btn-sm btn-secondary" aria-label={`Edit rule ${rule.name}`} disabled={saving} onClick={() => openEdit(rule)}>Edit</button> <button type="button" className="btn btn-sm btn-secondary" aria-label={`${rule.active ? 'Deactivate' : 'Reactivate'} rule ${rule.name}`} disabled={saving} onClick={() => void toggle(rule)}>{rule.active ? 'Deactivate' : 'Reactivate'}</button></td>
+          </tr>)}
+        </tbody></table>
+      </div>
+    </section>}
   </div>;
 }

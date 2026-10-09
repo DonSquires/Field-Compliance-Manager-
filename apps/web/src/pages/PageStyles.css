@@ -284,6 +284,117 @@
   background: var(--color-bg-tertiary, #e8ede9);
 }
 
+.rate-rules-ledger {
+  margin-top: 16px;
+}
+
+.rate-rules-ledger > header {
+  display: flex;
+  align-items: flex-end;
+  justify-content: space-between;
+  gap: 14px;
+}
+
+.rate-rules-ledger > header h2 {
+  margin-bottom: 3px;
+}
+
+.rate-rules-ledger > header .subtitle {
+  margin: 0;
+}
+
+.rate-rules-ledger > header > strong {
+  color: var(--color-text-secondary);
+  font-size: 12px;
+  white-space: nowrap;
+}
+
+.rate-rules-filters {
+  display: grid;
+  grid-template-columns: minmax(240px, 1fr) minmax(160px, 200px) minmax(140px, 180px) max-content;
+  align-items: end;
+  gap: 10px;
+  margin: 12px 0 8px;
+}
+
+.rate-rules-filters label {
+  display: grid;
+  gap: 5px;
+  color: var(--color-text-secondary);
+  font-size: 12px;
+  font-weight: 700;
+}
+
+.rate-rules-filters input,
+.rate-rules-filters select {
+  width: 100%;
+  min-height: 38px;
+  box-sizing: border-box;
+  padding: 7px 9px;
+  border: 1px solid var(--color-border-strong);
+  border-radius: 5px;
+  color: var(--color-text-primary);
+  background: var(--color-bg-secondary);
+}
+
+.rate-rules-table-region {
+  max-height: min(64vh, 680px);
+  overflow: auto;
+  border: 1px solid var(--color-border);
+  border-radius: 6px;
+  overscroll-behavior: contain;
+}
+
+.rate-rules-table-region .reports-table {
+  min-width: 980px;
+  margin: 0;
+}
+
+.rate-rules-table-region .reports-table th {
+  position: sticky;
+  top: 0;
+  z-index: 1;
+  background: var(--color-bg-tertiary);
+}
+
+.rate-rules-table-region:focus-visible {
+  outline: 2px solid var(--color-accent);
+  outline-offset: 2px;
+}
+
+.rate-rules-empty {
+  display: grid;
+  justify-items: center;
+  gap: 9px;
+  padding: 12px;
+}
+
+.rate-rules-scroll-cue {
+  display: none;
+  margin: 6px 0 8px;
+  color: var(--color-text-secondary);
+  font-size: 12px;
+}
+
+@media (max-width: 760px) {
+  .rate-rules-filters {
+    grid-template-columns: 1fr 1fr;
+  }
+
+  .rate-rules-filters label:first-child {
+    grid-column: 1 / -1;
+  }
+
+  .rate-rules-filters > button {
+    grid-column: 1 / -1;
+    justify-self: start;
+  }
+
+  .rate-rules-scroll-cue {
+    display: block;
+  }
+}
+
 .report-packs-scroll-cue {
   display: none;
   margin: 8px 0 0;

@@ -38,4 +38,14 @@ describe('operating branch rate rules page', () => {
     expect(page).toContain('No active service agreement is linked to this patrol shift.');
     expect(page).toContain('Completed patrol visits awaiting a per-visit rate');
   });
+
+  it('uses one branch-scoped editable register with local search and filters', () => {
+    expect(page).toContain('const visibleRules = useMemo(() => rules.filter');
+    expect(page).toContain('aria-label="Pay and charge rule register"');
+    expect(page).toContain('aria-label="Search pay and charge rules"');
+    expect(page).toContain('Filter by rule type');
+    expect(page).toContain('Filter by rule status');
+    expect(page).toContain('No rules match these filters.');
+    expect(page).not.toContain('className="contacts-list">{rules.map');
+  });
 });

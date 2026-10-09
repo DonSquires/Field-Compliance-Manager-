@@ -24,7 +24,7 @@ test('creating a branch pay rule sends the selected role code in the governed RP
   await expect(form.getByLabel('Payroll role')).toHaveCount(1);
   await form.getByLabel('Payroll role').selectOption('field_security');
   await form.getByRole('button', { name: 'Create rate rule' }).click();
-  await expect(page.getByText('Payroll role: field_security')).toBeVisible();
+  await expect(page.getByRole('row').filter({ hasText: 'Field security hourly pay' })).toContainText('Payroll role field_security');
   expect(createPayload).toMatchObject({ p_operating_organization_id: '41414141-4141-4141-8141-414141414141', p_action: 'create', p_rule_kind: 'pay', p_role_code: 'field_security' });
 });
 
@@ -41,7 +41,7 @@ test('editing a branch pay rule sends its selected role code in the governed RPC
   });
 
   await signInAsAdmin(page, '/admin/rate-rules');
-  await page.getByRole('button', { name: 'Edit rule' }).click();
+  await page.getByRole('button', { name: 'Edit rule Existing hourly pay' }).click();
   const form = page.locator('form.assessment-form');
   await expect(form.getByLabel('Payroll role')).toHaveCount(1);
   await form.getByLabel('Payroll role').selectOption('field_security');
@@ -49,10 +49,39 @@ test('editing a branch pay rule sends its selected role code in the governed RPC
   expect(updatePayload).toMatchObject({ p_operating_organization_id: '41414141-4141-4141-8141-414141414141', p_action: 'update', p_rate_rule_id: 'cdcdcdcd-cdcd-4dcd-8dcd-cdcdcdcdcdcd', p_role_code: 'field_security' });
 });
 
+test('branch rate ledger searches loaded rules and filters type and status without duplicate cards', async ({ page }) => {
+  const rules = [
+    { id: 'cdcdcdcd-cdcd-4dcd-8dcd-cdcdcdcdcd31', rule_kind: 'billing', name: 'Civic Events patrol visit', rate_type: 'per_visit', amount: 42.5, pay_code: null, role_code: null, service_type: 'patrol', job_type: null, client_org_id: '40404040-4040-4040-8040-404040404040', site_id: null, zone_id: null, day_category: null, effective_from: '2026-01-01', effective_to: null, priority: 5, active: true, updated_at: '2026-08-30T09:00:00.000Z' },
+    { id: 'cdcdcdcd-cdcd-4dcd-8dcd-cdcdcdcdcd32', rule_kind: 'pay', name: 'Field officer hourly', rate_type: 'hourly', amount: 31, pay_code: 'FIELD-01', role_code: 'field_security', service_type: 'guarding', job_type: null, client_org_id: null, site_id: null, zone_id: null, day_category: 'weekday', effective_from: '2026-01-01', effective_to: null, priority: 1, active: false, updated_at: '2026-08-30T09:00:00.000Z' },
+  ];
+  await page.route('**/rest/v1/reference_codes*', async (route) => await route.fulfill({ status: 200, contentType: 'application/json', body: JSON.stringify([{ code: 'field_security', name: 'Field Security' }]) }));
+  await page.route('**/rest/v1/rate_rules**', async (route) => await route.fulfill({ status: 200, contentType: 'application/json', body: JSON.stringify(rules) }));
+  await signInAsAdmin(page, '/admin/rate-rules');
+  const register = page.getByRole('region', { name: 'Pay and charge rule register' });
+  await expect(register.getByRole('row')).toHaveCount(3);
+  await expect(register).toHaveScreenshot('rate-rules-ledger.png');
+  await expect(page.locator('.rate-rules-ledger .contact-card')).toHaveCount(0);
+  const search = page.getByRole('searchbox', { name: 'Search pay and charge rules' });
+  await search.fill('field_security');
+  await expect(register.getByRole('row')).toHaveCount(2);
+  await expect(register).toContainText('Field officer hourly');
+  await expect(page.locator('.rate-rules-ledger').getByRole('status')).toContainText('Showing 1 of 2');
+  await page.getByLabel('Filter by rule type').selectOption('billing');
+  await expect(register).toContainText('No rules match these filters.');
+  await expect(page.locator('.rate-rules-ledger').getByRole('status')).toContainText('Showing 0 of 2');
+  await register.getByRole('button', { name: 'Clear filters' }).click();
+  await page.getByLabel('Filter by rule type').selectOption('pay');
+  await page.getByLabel('Filter by rule status').selectOption('inactive');
+  await expect(register.getByRole('row')).toHaveCount(2);
+  await register.getByRole('row').filter({ hasText: 'Field officer hourly' }).getByRole('button', { name: 'Edit rule Field officer hourly' }).click();
+  await expect(page.locator('form.rate-rules-form').getByLabel('Payroll role')).toHaveValue('field_security');
+  expect(await page.evaluate(() => document.documentElement.scrollWidth <= window.innerWidth)).toBe(true);
+});
+
 test('administrator creates a governed operating branch patrol rate rule', async ({ page }) => {
   const errors = monitorBrowserErrors(page);
   await signInAsAdmin(page, '/admin/rate-rules');
-  await expect(page.getByRole('heading', { name: 'Pay and charge rules' })).toBeVisible();
+  await expect(page.getByRole('heading', { level: 1, name: 'Pay and charge rules' })).toBeVisible();
   await page.getByRole('button', { name: 'New pay or charge rule' }).click();
   const form = page.locator('form.assessment-form');
   await form.getByLabel('Name').fill('Patrol visit - branch standard');
@@ -62,8 +91,9 @@ test('administrator creates a governed operating branch patrol rate rule', async
   await expect(form).toHaveScreenshot('operating-branch-rate-rule.png');
   await form.getByRole('button', { name: 'Create rate rule' }).click();
   await expect(page.getByText('Rate rule created and available to the resolver.')).toBeVisible();
-  await expect(page.getByRole('heading', { name: 'Patrol visit - branch standard', exact: true })).toBeVisible();
-  await page.getByRole('button', { name: 'Edit rule' }).click();
+  const createdRule = page.getByRole('row').filter({ hasText: 'Patrol visit - branch standard' });
+  await expect(createdRule).toBeVisible();
+  await createdRule.getByRole('button', { name: 'Edit rule Patrol visit - branch standard' }).click();
   const editForm = page.locator('form.assessment-form');
   await expect(editForm.getByLabel('Amount')).toHaveValue('42.5');
   await editForm.getByLabel('Amount').fill('45.00');
