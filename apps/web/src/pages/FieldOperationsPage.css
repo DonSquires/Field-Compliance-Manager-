@@ -11,39 +11,27 @@
 .field-ops-warning div { display: grid; gap: 3px; min-width: 0; }
 .field-ops-warning strong { font-size: 12px; }
 .field-ops-warning span { overflow-wrap: anywhere; color: #d9bd74; font-size: 12px; }
-.field-ops-metrics { display: grid; grid-template-columns: repeat(4, minmax(0, 1fr)); gap: 10px; margin-top: 18px; }
-.field-ops-metric { display: grid; grid-template-columns: auto 1fr auto; align-items: center; gap: 11px; min-width: 0; min-height: 86px; padding: 13px; border: 1px solid #2d4053; border-top: 3px solid #5d8f94; border-radius: 7px; color: #e4edf5; background: #0a1422; cursor: pointer; text-align: left; }
-.field-ops-metric:hover { border-color: #6daaa3; background: #0d1d28; }
-.field-ops-metric > span { display: grid; place-items: center; width: 36px; height: 36px; border-radius: 6px; color: #8fd2ca; background: #10292a; }
-.field-ops-metric div { display: grid; gap: 4px; min-width: 0; }
-.field-ops-metric small { overflow: hidden; color: #93a4b5; font-size: 12px; font-weight: 750; text-overflow: ellipsis; white-space: nowrap; }
-.field-ops-metric strong { overflow: hidden; font-size: 22px; text-overflow: ellipsis; white-space: nowrap; }
-.field-ops-metric > svg { color: #647b91; }
-.field-ops-metric.is-urgent { border-top-color: #ff6b6b; }
-.field-ops-metric.is-urgent > span { color: #ff9696; background: #351a1a; }
-.field-ops-metric.is-unavailable { border-top-color: #68727d; }
-.field-ops-metric.is-unavailable strong { color: #9aa6b2; font-size: 12px; }
-.field-ops-metric:disabled { cursor: not-allowed; }
-.field-ops-metric:disabled:hover { border-color: #2d4053; background: #0a1422; }
 .field-ops-workflows { margin-top: 22px; padding: 18px; border: 1px solid #29394b; border-radius: 8px; background: #091321; }
 .field-ops-section-heading { display: flex; align-items: end; justify-content: space-between; gap: 16px; margin-bottom: 14px; }
 .field-ops-section-heading h2 { margin: 3px 0 0; color: #e7eff6; font-size: 17px; letter-spacing: 0; }
 .field-ops-section-heading small { color: #728497; font-size: 12px; }
+.field-ops-workflows { margin-top: 14px; padding: 0; border: 0; background: transparent; }
 .field-ops-workflow-group + .field-ops-workflow-group { margin-top: 18px; padding-top: 16px; border-top: 1px solid #29394b; }
 .field-ops-workflow-group > div:first-child { margin-bottom: 9px; }
 .field-ops-workflow-group > div:first-child span { color: #7dd3c7; font-size: 11px; font-weight: 800; text-transform: uppercase; }
 .field-ops-workflow-group h3 { margin: 2px 0 0; color: #dce7f1; font-size: 14px; }
 .field-ops-workflow-grid { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 8px; }
-.field-ops-workflow { display: grid; grid-template-columns: auto minmax(0, 1fr) auto; align-items: center; gap: 12px; min-height: 72px; padding: 12px 13px; border: 1px solid #293b4d; border-radius: 6px; color: #dce7f1; background: #0c1827; cursor: pointer; text-align: left; }
+.field-ops-workflow { display: grid; grid-template-columns: auto minmax(0, 1fr) max-content auto; align-items: center; gap: 12px; min-height: 72px; padding: 12px 13px; border: 1px solid #293b4d; border-radius: 6px; color: #dce7f1; background: #0c1827; cursor: pointer; text-align: left; }
 .field-ops-workflow:hover { border-color: #547b82; background: #102131; }
 .field-ops-workflow > span { display: grid; place-items: center; width: 37px; height: 37px; border-radius: 6px; color: #8dc7ce; background: #14283a; }
 .field-ops-workflow > div { display: grid; gap: 4px; min-width: 0; }
 .field-ops-workflow strong { font-size: 13px; }
 .field-ops-workflow small { overflow: hidden; color: #8ea0b1; font-size: 12px; text-overflow: ellipsis; white-space: nowrap; }
+.field-ops-workflow-count { min-width: 62px; color: #c5d6e6; font-size: 12px; font-weight: 750; text-align: right; white-space: nowrap; }
+.field-ops-workflow-count.is-unavailable { color: #a7b1bb; font-weight: 600; }
 .field-ops-workflow > svg { color: #5e758a; }
 .field-ops-workflow.tone-red > span { color: #ff9696; background: #351a1a; }
 .field-ops-workflow.tone-green > span { color: #82d9b1; background: #0b281f; }
 .field-ops-workflow.tone-amber > span { color: #ffd166; background: #2c240d; }
 .field-ops-workflow.tone-slate > span { color: #c4cbd3; background: #232c37; }
-@media (max-width: 900px) { .field-ops-metrics { grid-template-columns: repeat(2, minmax(0, 1fr)); } }
-@media (max-width: 640px) { .field-ops-home { padding: 18px 14px 42px; } .field-ops-header { align-items: flex-start; flex-direction: column; } .field-ops-refresh { width: 100%; justify-content: space-between; } .field-ops-metrics, .field-ops-workflow-grid { grid-template-columns: 1fr; } .field-ops-section-heading { align-items: flex-start; flex-direction: column; } .field-ops-workflow small { white-space: normal; } }
+@media (max-width: 640px) { .field-ops-home { padding: 18px 14px 42px; } .field-ops-header { align-items: flex-start; flex-direction: column; } .field-ops-refresh { width: 100%; justify-content: space-between; } .field-ops-workflow-grid { grid-template-columns: 1fr; } .field-ops-section-heading { align-items: flex-start; flex-direction: column; } .field-ops-workflow small { white-space: normal; } }

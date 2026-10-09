@@ -15,6 +15,7 @@
  */
 
 import React, { useEffect, useState, useCallback, useMemo } from 'react';
+import { MapPin } from 'lucide-react';
 import { useLocation } from 'react-router-dom';
 import { useAuth } from '../context/AuthContext';
 import { useServiceRelationships } from '../context/ServiceRelationshipContext';
@@ -28,6 +29,7 @@ import {
 } from '../lib/dispatchStatus';
 import { shiftStopStatusLabel } from '../lib/shiftStopStatus';
 import { resolveDispatchBillingRule, type DispatchBillingRule } from '../lib/dispatchBillingRate';
+import { findNearestAvailableUnit } from '../lib/dispatch/nearestUnit';
 import { resolveAddressCandidates } from '../lib/locationAddress';
 import { supabase } from '../lib/supabase';
 import { agreementOptionSuffix } from '../lib/agreementTerm';
@@ -91,8 +93,8 @@ interface ClientSite {
   id: string;
   name: string;
   address: string;
-  gpsLat: number;
-  gpsLng: number;
+  gpsLat: number | null;
+  gpsLng: number | null;
   clientOrganizationId: string;
 }
 
@@ -107,6 +109,9 @@ interface ResourceUnit {
   callsign?: string;
   assignedOfficerId?: string;
   status: 'available' | 'busy' | 'offline';
+  gpsLat: number | null;
+  gpsLng: number | null;
+  gpsRecordedAt: string | null;
 }
 
 interface ShiftStop {
@@ -235,6 +240,7 @@ const DispatchConsolePage: React.FC = () => {
   const [sites, setSites] = useState<ClientSite[]>([]);
   const [zones, setZones] = useState<DispatchZone[]>([]);
   const [resources, setResources] = useState<ResourceUnit[]>([]);
+  const [positionError, setPositionError] = useState<string | null>(null);
   const [loading, setLoading] = useState(true);
 
   // State: Phase B (Shift stops)
@@ -404,15 +410,39 @@ const DispatchConsolePage: React.FC = () => {
       }
 
       if (resourcesRes.data) {
-        setResources(
-          resourcesRes.data.map((r: any) => ({
+        const officerIds = [...new Set(resourcesRes.data.map((resource: any) => resource.assigned_officer_id).filter(Boolean))] as string[];
+        const positions = new Map<string, { gps_lat: number; gps_lng: number; recorded_at: string }>();
+        if (officerIds.length) {
+          const freshAfter = new Date(Date.now() - 5 * 60_000).toISOString();
+          const { data: gpsRows, error: gpsError } = await supabase
+            .from('officer_gps_log')
+            .select('officer_id,gps_lat,gps_lng,recorded_at')
+            .eq('organization_id', operatingBranchId)
+            .in('officer_id', officerIds)
+            .gte('recorded_at', freshAfter)
+            .order('recorded_at', { ascending: false })
+            .limit(500);
+          if (gpsError) setPositionError('Live officer positions are unavailable; nearest-unit suggestions are hidden.');
+          else {
+            setPositionError(null);
+            for (const row of gpsRows ?? []) {
+              if (!positions.has(row.officer_id)) positions.set(row.officer_id, { gps_lat: Number(row.gps_lat), gps_lng: Number(row.gps_lng), recorded_at: row.recorded_at });
+            }
+          }
+        } else setPositionError(null);
+        setResources(resourcesRes.data.map((r: any) => {
+          const position = r.assigned_officer_id ? positions.get(r.assigned_officer_id) : null;
+          return ({
             id: r.id,
             name: r.name,
             callsign: r.callsign,
             assignedOfficerId: r.assigned_officer_id ?? undefined,
             status: schemaDispatchResourceStatus(r.status ?? 'available'),
-          }))
-        );
+            gpsLat: position?.gps_lat ?? null,
+            gpsLng: position?.gps_lng ?? null,
+            gpsRecordedAt: position?.recorded_at ?? null,
+          });
+        }));
       }
     } catch (err) {
       console.error('Failed to load Phase A:', err);
@@ -429,19 +459,29 @@ const DispatchConsolePage: React.FC = () => {
   }, [requestedJobId]);
 
   useEffect(() => {
+    let cancelled = false;
     const activeAgreementSites = selectedAgreementSites.filter((site) => site.active);
     const activeAgreementZones = selectedAgreementZones.filter((zone) => zone.is_active);
     setSites(activeAgreementSites.map((site) => ({
       id: site.id,
       name: site.name,
       address: site.address ?? '',
-      gpsLat: 0,
-      gpsLng: 0,
+      gpsLat: null,
+      gpsLng: null,
       clientOrganizationId: site.client_organization_id ?? '',
     })));
+    const siteIds = activeAgreementSites.map((site) => site.id);
+    if (siteIds.length) {
+      void supabase.from('client_sites').select('id,gps_lat,gps_lng').in('id', siteIds).then(({ data, error }) => {
+        if (cancelled || error || !data) return;
+        const coordinates = new Map(data.map((site) => [site.id, { gpsLat: site.gps_lat == null ? null : Number(site.gps_lat), gpsLng: site.gps_lng == null ? null : Number(site.gps_lng) }]));
+        setSites((current) => current.map((site) => ({ ...site, ...coordinates.get(site.id) })));
+      });
+    }
     setZones(activeAgreementZones.map((zone) => ({ id: zone.id, name: zone.name })));
     setFormSiteId((current) => current && activeAgreementSites.some((site) => site.id === current) ? current : '');
     setFormZoneId((current) => current && activeAgreementZones.some((zone) => zone.id === current) ? current : '');
+    return () => { cancelled = true; };
   }, [selectedAgreementSites, selectedAgreementZones]);
 
   // Load Phase B: Shift stops
@@ -692,6 +732,28 @@ const DispatchConsolePage: React.FC = () => {
     resource.status === 'available' && Boolean(resource.assignedOfficerId) && activeShifts.some((shift) =>
       shift.officerUserId === resource.assignedOfficerId && ['accepted', 'in_progress'].includes(shift.status),
     )), [activeShifts, resources]);
+
+  const nearestUnit = useMemo(() => {
+    const site = sites.find((candidate) => candidate.id === formSiteId);
+    const target = isNewIncidentLocation && resolvedLocation
+      ? { gpsLat: resolvedLocation.lat, gpsLng: resolvedLocation.lng }
+      : site;
+    if (!target || target.gpsLat == null || target.gpsLng == null) return null;
+    const now = Date.now();
+    const freshResources = assignableResources.filter((resource) => {
+      if (resource.gpsLat == null || resource.gpsLng == null || !resource.gpsRecordedAt) return false;
+      const age = now - new Date(resource.gpsRecordedAt).getTime();
+      return age >= 0 && age <= 5 * 60_000;
+    }).map((resource) => ({
+      id: resource.id,
+      name: resource.name,
+      callsign: resource.callsign ?? null,
+      status: resource.status,
+      gpsLat: resource.gpsLat,
+      gpsLng: resource.gpsLng,
+    }));
+    return findNearestAvailableUnit(target, freshResources, '');
+  }, [assignableResources, formSiteId, isNewIncidentLocation, resolvedLocation, sites]);
 
   // Initial load, then every 30 s and whenever the tab comes back: officers acknowledge, arrive and complete
   // from their own app, and SLA clocks run, so the console must not sit on a stale picture.
@@ -975,6 +1037,13 @@ const DispatchConsolePage: React.FC = () => {
           ))}
         </select>
         {formResourceId && !formShiftId && <div className="dispatch-console-inline-error">No active matching shift is available for this resource.</div>}
+        {positionError && <div className="dispatch-console-inline-warning" role="status">{positionError}</div>}
+        {nearestUnit && (formResourceId === nearestUnit.resourceId ? (
+          <div className="dispatch-console-form-note" role="status">{nearestUnit.label} is the closest available unit with a GPS fix from the last 5 minutes ({nearestUnit.distanceKm.toFixed(1)} km straight-line).</div>
+        ) : (
+          <div className="dispatch-console-form-note" role="status">Closest available unit with a recent GPS fix: {nearestUnit.label} · {nearestUnit.distanceKm.toFixed(1)} km straight-line. <button type="button" className="btn btn-sm btn-secondary" onClick={() => assignResource(nearestUnit.resourceId)}><MapPin size={14} aria-hidden="true" /> Assign nearest</button></div>
+        ))}
+        {!nearestUnit && !formResourceId && (formSiteId || resolvedLocation) && <div className="dispatch-console-form-note" role="status">No proximity suggestion: a mapped place centre and a unit GPS fix from the last 5 minutes are needed. You can assign manually or leave the job unassigned.</div>}
       </div>
 
       <div className="dispatch-console-form-field">

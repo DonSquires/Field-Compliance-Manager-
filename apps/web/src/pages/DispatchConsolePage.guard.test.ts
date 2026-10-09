@@ -87,6 +87,17 @@ describe('dispatch agreement and creation boundary', () => {
     expect(source).toContain("resource.status === 'available'");
   });
 
+  it('suggests a nearest available resource only from scoped, recent GPS and real site coordinates', () => {
+    expect(source).toContain("from('officer_gps_log')");
+    expect(source).toContain(".eq('organization_id', operatingBranchId)");
+    expect(source).toContain(".gte('recorded_at', freshAfter)");
+    expect(source).toContain("from('client_sites').select('id,gps_lat,gps_lng')");
+    expect(source).toContain('gpsLat: null');
+    expect(source).toContain('findNearestAvailableUnit(target, freshResources, \'\')');
+    expect(source).toContain('km straight-line');
+    expect(source).toContain('onClick={() => assignResource(nearestUnit.resourceId)}');
+  });
+
   it('clears loading state when branch scope is unavailable', () => {
     expect(source).toContain('if (!operatingBranchId) {');
     expect(source).toContain("setError('Operating branch access could not be confirmed. Dispatch operations are unavailable.');");

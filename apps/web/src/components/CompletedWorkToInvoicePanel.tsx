@@ -1,14 +1,14 @@
 /**
  * CompletedWorkToInvoicePanel.tsx — "money sitting in finished work".
- * One row per client with completed, unbilled workshop orders or dispatch
- * callouts, and one button that turns it into a draft invoice
+ * One row per client with completed, unbilled workshop orders, dispatch
+ * callouts, and patrol visits, with one button to create a draft invoice
  * (generate_crm_invoice_from_completed_work). Written for a finance person
  * who does not know what a charge line is.
  */
 
 import React, { useCallback, useEffect, useState } from 'react';
 import { supabase } from '../lib/supabase';
-import { describeUninvoiced, groupUninvoicedWork, type ClientUninvoicedSummary, type UninvoicedDispatchRow, type UninvoicedWorkshopRow } from '../lib/uninvoicedWork';
+import { describeUninvoiced, groupUninvoicedWork, type ClientUninvoicedSummary, type UninvoicedDispatchRow, type UninvoicedPatrolVisitRow, type UninvoicedWorkshopRow } from '../lib/uninvoicedWork';
 import { money } from '../lib/workshop';
 import './CompletedWorkToInvoicePanel.css';
 
@@ -31,12 +31,13 @@ export const CompletedWorkToInvoicePanel: React.FC<Props> = ({ organizationId, o
     setLoading(true);
     setError(null);
     // ATLAS READS: workshop_work_order_summary (completed, still to invoice), dispatch_job_charge_lines (no invoice line yet)
-    const [workshopRes, dispatchRes] = await Promise.all([
+    const [workshopRes, dispatchRes, patrolRes] = await Promise.all([
       supabase.from('workshop_work_order_summary').select('client_organization_id,client_name,order_number,uninvoiced_total,completed_at').eq('organization_id', organizationId).eq('status', 'completed').gt('uninvoiced_total', 0).limit(500),
       supabase.from('dispatch_job_charge_lines').select('client_organization_id,source_dispatch_id,line_total,created_at,client:client_organization_id(name)').eq('organization_id', organizationId).is('invoice_line_item_id', null).limit(1000),
+      supabase.from('patrol_stop_charge_lines').select('client_organization_id,shift_stop_id,line_total,created_at,client:client_organization_id(name)').eq('organization_id', organizationId).eq('status', 'ready').is('invoice_line_item_id', null).limit(1000),
     ]);
-    if (workshopRes.error || dispatchRes.error) {
-      setError(workshopRes.error?.message ?? dispatchRes.error?.message ?? 'Completed work could not be loaded.');
+    if (workshopRes.error || dispatchRes.error || patrolRes.error) {
+      setError(workshopRes.error?.message ?? dispatchRes.error?.message ?? patrolRes.error?.message ?? 'Completed work could not be loaded.');
       setLoading(false);
       return;
     }
@@ -50,7 +51,17 @@ export const CompletedWorkToInvoicePanel: React.FC<Props> = ({ organizationId, o
         created_at: String(row.created_at),
       };
     });
-    setRows(groupUninvoicedWork((workshopRes.data as UninvoicedWorkshopRow[]) ?? [], dispatchRows));
+    const patrolRows: UninvoicedPatrolVisitRow[] = ((patrolRes.data as Array<Record<string, unknown>>) ?? []).map((row) => {
+      const client = row.client as { name: string } | { name: string }[] | null;
+      return {
+        client_organization_id: (row.client_organization_id as string | null) ?? null,
+        client_name: (Array.isArray(client) ? client[0]?.name : client?.name) ?? null,
+        shift_stop_id: String(row.shift_stop_id),
+        line_total: Number(row.line_total ?? 0),
+        created_at: String(row.created_at),
+      };
+    });
+    setRows(groupUninvoicedWork((workshopRes.data as UninvoicedWorkshopRow[]) ?? [], dispatchRows, patrolRows));
     setLoading(false);
   }, [organizationId]);
 
@@ -88,7 +99,7 @@ export const CompletedWorkToInvoicePanel: React.FC<Props> = ({ organizationId, o
         <div>
           <p className="finance-owner-eyebrow">Finished work, not yet billed</p>
           <h2 id="completed-work-title">{loading ? 'Checking finished work…' : rows.length === 0 ? 'Everything finished has been billed' : `${money(total)} waiting to be invoiced`}</h2>
-          <p className="subtitle">Completed workshop jobs and callouts turn into a draft invoice per client with one click. Nothing is sent until you say so.</p>
+          <p className="subtitle">Completed workshop jobs, callouts, and priced patrol visits turn into a draft invoice per client. Nothing is sent until you review it.</p>
         </div>
         {onOpenInvoices && <button type="button" className="btn btn-secondary" onClick={onOpenInvoices}>Open invoices</button>}
       </header>

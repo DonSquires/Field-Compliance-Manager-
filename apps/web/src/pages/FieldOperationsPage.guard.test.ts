@@ -45,11 +45,22 @@ describe('field operations command surface', () => {
       expect(page).toContain(`from('${table}')`);
     }
     expect(page).toContain("isModuleEnabled('welfare', { safetyRelevant: true })");
-    expect(page).toContain('<SafetyGate');
-    expect(page).toContain('Welfare monitoring is unavailable until organisation entitlement is confirmed.');
+    expect(page).toContain("const welfareEnabled = isModuleEnabled('welfare', { safetyRelevant: true })");
+    expect(page).toContain('workflow.moduleKeys.some');
+    expect(page).toContain('safetyRelevant: workflow.safetyRelevant');
     expect(page).toContain("import { ACTIVE_DISPATCH_JOB_STATUSES } from '../lib/dispatchStatus'");
     expect(page).toContain(".in('status', ACTIVE_DISPATCH_JOB_STATUSES)");
     expect(page).toContain('[dispatchAvailable, profile?.organizationId, selectedAgreementZones, welfareEnabled]');
     expect(page).toContain('Some operational counts are unavailable');
+  });
+
+  it('keeps workload counts beside their workspace actions rather than repeating a second metrics dashboard', () => {
+    expect(page).not.toContain('className="field-ops-metrics"');
+    expect(page).toContain("metric: 'activeDispatch'");
+    expect(page).toContain("metric: 'onDuty'");
+    expect(page).toContain("metric: 'welfareAlerts'");
+    expect(page).toContain("metric: 'reportFollowUp'");
+    expect(page).toContain('field-ops-workflow-count');
+    expect(page).toContain('Current workload:');
   });
 });

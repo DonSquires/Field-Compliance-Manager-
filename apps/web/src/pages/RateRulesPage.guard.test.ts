@@ -14,4 +14,28 @@ describe('operating branch rate rules page', () => {
     expect(page).toContain('p_role_code: form.kind === \'pay\' ? form.roleCode');
     expect(page).toContain('Payroll role: {rule.role_code}');
   });
+
+  it('saves client, place, and effective-date scopes supported by the rate resolver', () => {
+    expect(page).toContain('from(\'service_agreement_locations\')');
+    expect(page).toContain('aria-label="Customer billing scope"');
+    expect(page).toContain('Client account');
+    expect(page).toContain('Site or zone override');
+    expect(page).toContain('Effective from');
+    expect(page).toContain('Effective through');
+    expect(page).toContain('p_client_org_id: form.kind === \'billing\' ? form.clientOrgId || null : null');
+    expect(page).toContain('p_site_id: form.kind === \'billing\' ? form.siteId || null : null');
+    expect(page).toContain('p_zone_id: form.kind === \'billing\' ? form.zoneId || null : null');
+    expect(page).toContain('p_effective_from: form.effectiveFrom || null');
+    expect(page).toContain('p_effective_to: form.effectiveTo || null');
+  });
+
+  it('manages patrol-only SLA bands and rechecks completed visits without silently pricing them at zero', () => {
+    expect(page).toContain(".eq('module_key', 'patrol')");
+    expect(page).toContain("supabase.rpc('manage_patrol_sla_discount_band'");
+    expect(page).toContain('discount / 100');
+    expect(page).toContain("supabase.rpc('resolve_patrol_stop_charge_line'");
+    expect(page).toContain('No amount was charged.');
+    expect(page).toContain('No active service agreement is linked to this patrol shift.');
+    expect(page).toContain('Completed patrol visits awaiting a per-visit rate');
+  });
 });
