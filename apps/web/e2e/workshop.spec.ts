@@ -19,6 +19,54 @@ const summaryRow = (status: string, extra: Record<string, unknown> = {}) => ({
 
 test.beforeEach(async ({ page }) => { await page.clock.setFixedTime(new Date('2026-08-30T09:30:00+12:00')); await installSupabaseFixtures(page); });
 
+test('workshop: a person can manually create a maintenance order for an agreed client place', async ({ page }) => {
+  const errors = monitorBrowserErrors(page);
+  const calls: Array<Record<string, unknown>> = [];
+  const createdOrder = summaryRow('draft', {
+    kind: 'maintenance',
+    title: 'Inspect north gate camera mount',
+    description: 'Check mounting bolts and weather seal.',
+    client_site_id: '42424242-4242-4242-8242-424242424242',
+    site_name: 'Civic Events Centre',
+  });
+  let orders: Array<Record<string, unknown>> = [];
+  await page.route('**/rest/v1/workshop_work_order_summary**', async (route) => route.fulfill({ status: 200, contentType: 'application/json', body: JSON.stringify(orders) }));
+  await page.route('**/rest/v1/service_agreements**', async (route) => route.fulfill({ status: 200, contentType: 'application/json', body: JSON.stringify([{ id: '24242424-2424-4424-8424-242424242424', name: 'Civic Events Compliance Services', client_organization_id: CLIENT_ID, client: { name: 'Civic Events Ltd' } }]) }));
+  await page.route('**/rest/v1/client_sites**', async (route) => route.fulfill({ status: 200, contentType: 'application/json', body: JSON.stringify([{ id: '42424242-4242-4242-8242-424242424242', name: 'Civic Events Centre', client_organization_id: CLIENT_ID, active: true }]) }));
+  await page.route('**/rest/v1/rpc/create_workshop_work_order', async (route) => {
+    calls.push(JSON.parse(route.request().postData() ?? '{}'));
+    orders = [createdOrder];
+    await route.fulfill({ status: 200, contentType: 'application/json', body: JSON.stringify({ id: WO_ID }) });
+  });
+
+  await signInAsAdmin(page, '/admin/workshop');
+  await page.getByRole('button', { name: 'New work order' }).click();
+  const form = page.locator('form.workshop-card').filter({ hasText: 'New work order' });
+  await form.getByLabel('What kind of job?').selectOption('maintenance');
+  await form.getByLabel('Title').fill('Inspect north gate camera mount');
+  await form.getByLabel('Client agreement (who gets billed)').selectOption('24242424-2424-4424-8424-242424242424');
+  await form.getByLabel('Place').selectOption('42424242-4242-4242-8242-424242424242');
+  await form.getByLabel('Scheduled for').fill('2026-09-05T18:30');
+  const expectedSchedule = await form.getByLabel('Scheduled for').evaluate((element) => new Date((element as HTMLInputElement).value).toISOString());
+  await form.getByLabel('Notes').fill('Check mounting bolts and weather seal.');
+  await form.getByRole('button', { name: 'Create work order' }).click();
+
+  await expect(page.getByText('Work order created.')).toBeVisible();
+  await expect(page.getByRole('heading', { name: 'Inspect north gate camera mount' })).toBeVisible();
+  expect(calls).toHaveLength(1);
+  expect(calls[0]).toMatchObject({
+    p_organization_id: OPERATING_ORG_ID,
+    p_kind: 'maintenance',
+    p_title: 'Inspect north gate camera mount',
+    p_description: 'Check mounting bolts and weather seal.',
+    p_client_organization_id: CLIENT_ID,
+    p_service_agreement_id: '24242424-2424-4424-8424-242424242424',
+    p_client_site_id: '42424242-4242-4242-8242-424242424242',
+    p_scheduled_for: expectedSchedule,
+  });
+  expect(errors, errors.join('\n')).toEqual([]);
+});
+
 test('workshop: a fabrication order is priced from the price book, completed with stock draw-down, and invoiced in one step', async ({ page }) => {
   const errors = monitorBrowserErrors(page);
   const calls: Array<{ rpc: string; body: Record<string, unknown> }> = [];
