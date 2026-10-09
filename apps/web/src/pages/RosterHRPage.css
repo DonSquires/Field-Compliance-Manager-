@@ -216,3 +216,4 @@
 .hr-setup-details summary{padding:12px 0;color:#b9cbd5;font-size:14px;font-weight:800;cursor:pointer}
 .hr-setup-details[open] summary{margin-bottom:8px}
 @media(max-width:700px){.hr-start-panel{grid-template-columns:1fr}.hr-start-panel .btn{width:100%}}
+@media(max-width:560px){.roster-hr-page .crm-branch-filter{flex-wrap:wrap}.roster-hr-page .roster-hr-tab-list{overflow:visible;flex-wrap:wrap}.roster-hr-page .roster-hr-tab-list .btn{flex:0 0 auto}}

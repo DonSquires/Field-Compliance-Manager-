@@ -134,6 +134,7 @@ test('people and HR decisions are governed and operational', async ({ page }) =>
   await expect(page.getByRole('heading', { name: 'Roster & HR' })).toBeVisible();
   await expect(page.getByText('Ana Ngata', { exact: true })).toBeVisible();
   await expect(page.getByRole('button', { name: 'Prepare someone to work' })).toBeVisible();
+  await expect(page).toHaveScreenshot('hr-staff-overview.png');
   await expect(page.getByText('These lists change the rules used by onboarding and rostering.')).toBeHidden();
   await expect(page.getByText('No verified current credential')).toBeVisible();
   const staffCard = page.locator('.contact-card', { has: page.getByRole('heading', { name: 'Ana Ngata' }) });

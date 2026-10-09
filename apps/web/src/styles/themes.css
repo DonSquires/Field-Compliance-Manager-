@@ -1654,3 +1654,159 @@
 .admin-shell[data-theme='light'] .user-spine-dialog > footer {
   color: #58675f;
 }
+
+.admin-shell[data-theme='light'] .roster-hr-page {
+  color: #17211d;
+}
+
+.admin-shell[data-theme='light'] .roster-hr-page > .page-header .subtitle,
+.admin-shell[data-theme='light'] .roster-hr-page .hr-section-hint {
+  color: #58675f;
+}
+
+.admin-shell[data-theme='light'] .roster-hr-page .roster-hr-tab-list {
+  border-left-color: #b42332;
+  background: #e8ede9;
+}
+
+.admin-shell[data-theme='light'] .roster-hr-page .roster-hr-tab-list .btn-secondary {
+  border-color: #c5d0c8;
+  color: #34433b;
+  background: #ffffff;
+}
+
+.admin-shell[data-theme='light'] .roster-hr-page .hr-start-panel {
+  border-color: #bdd9cc;
+  border-left-color: #28714f;
+  background: #edf5ef;
+}
+
+.admin-shell[data-theme='light'] .roster-hr-page .hr-start-panel strong {
+  color: #17211d;
+}
+
+.admin-shell[data-theme='light'] .roster-hr-page .hr-start-panel span {
+  color: #485851;
+}
+
+.admin-shell[data-theme='light'] .roster-hr-page .hr-readiness {
+  border-color: #dce4de;
+}
+
+.admin-shell[data-theme='light'] .roster-hr-page .hr-readiness > div {
+  border-color: #dce4de;
+  background: #f3f6f3;
+}
+
+.admin-shell[data-theme='light'] .roster-hr-page .hr-readiness span {
+  color: #58675f;
+}
+
+.admin-shell[data-theme='light'] .roster-hr-page .hr-readiness strong {
+  color: #26332c;
+}
+
+.admin-shell[data-theme='light'] .roster-hr-page .hr-readiness > p,
+.admin-shell[data-theme='light'] .roster-hr-page .hr-onboarding-blockers {
+  border-left-color: #95620e;
+  color: #674d12;
+  background: #fff3d5;
+}
+
+.admin-shell[data-theme='light'] .roster-hr-page .hr-onboarding-ladder li {
+  border-color: #dce4de;
+  background: #f3f6f3;
+}
+
+.admin-shell[data-theme='light'] .roster-hr-page .hr-onboarding-ladder li > span {
+  color: #58675f;
+  background: #e8ede9;
+}
+
+.admin-shell[data-theme='light'] .roster-hr-page .hr-onboarding-ladder strong {
+  color: #26332c;
+}
+
+.admin-shell[data-theme='light'] .roster-hr-page .hr-onboarding-ladder small {
+  color: #58675f;
+}
+
+.admin-shell[data-theme='light'] .roster-hr-page .hr-onboarding-ladder li.is-done {
+  border-color: #bad8c4;
+}
+
+.admin-shell[data-theme='light'] .roster-hr-page .hr-onboarding-ladder li.is-done > span {
+  color: #ffffff;
+  background: #28714f;
+}
+
+.admin-shell[data-theme='light'] .roster-hr-page .hr-onboarding-ladder li.is-current {
+  border-color: #b6d5c4;
+  background: #e4f1e8;
+}
+
+.admin-shell[data-theme='light'] .roster-hr-page .hr-onboarding-ladder li.is-current > span {
+  color: #ffffff;
+  background: #176f68;
+}
+
+.admin-shell[data-theme='light'] .roster-hr-page .hr-onboarding-ladder li.is-current strong {
+  color: #17211d;
+}
+
+.admin-shell[data-theme='light'] .hr-review-dialog {
+  border-color: var(--color-border-strong);
+  color: #17211d;
+  background: #ffffff;
+  box-shadow: 0 24px 70px rgba(23, 33, 29, 0.22);
+}
+
+.admin-shell[data-theme='light'] .hr-review-dialog header {
+  border-color: #dce4de;
+}
+
+.admin-shell[data-theme='light'] .hr-review-dialog header span {
+  color: #8f1d2b;
+}
+
+.admin-shell[data-theme='light'] .hr-review-dialog header button {
+  border-color: #bdc9c1;
+  color: #34433b;
+  background: #ffffff;
+}
+
+.admin-shell[data-theme='light'] .hr-review-dialog > p {
+  border-left-color: #176f68;
+  color: #485851;
+  background: #edf3ef;
+}
+
+.admin-shell[data-theme='light'] .hr-review-dialog > label {
+  color: #485851;
+}
+
+.admin-shell[data-theme='light'] .hr-review-dialog label.roster-publish {
+  border-color: #c8d7cd;
+  background: #edf3ef;
+}
+
+.admin-shell[data-theme='light'] .hr-review-dialog label.roster-publish b {
+  color: #26332c;
+}
+
+.admin-shell[data-theme='light'] .hr-review-dialog label.roster-publish small {
+  color: #58675f;
+}
+
+.admin-shell[data-theme='light'] .hr-review-dialog input,
+.admin-shell[data-theme='light'] .hr-review-dialog textarea {
+  border-color: #bdc9c1;
+  color: #17211d;
+  background: #ffffff;
+}
+
+.admin-shell[data-theme='light'] .hr-review-error {
+  border-color: #e5b8bc;
+  color: #812633;
+  background: #fbeaec;
+}
