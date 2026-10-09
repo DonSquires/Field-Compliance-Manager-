@@ -156,7 +156,8 @@ const NoiseControlOversightPage: React.FC = () => {
       )}
       {notice&&<div className="alert alert-success" role="status">{notice}</div>}
 
-      <div className="reports-table-wrapper">
+      <p className="noise-assessment-scroll-cue" role="note">Scroll the assessment register horizontally to review every action and evidence field.</p>
+      <div className="reports-table-wrapper noise-assessment-table" role="region" aria-label="Noise assessment review register" tabIndex={0}>
         <table className="reports-table">
           <thead>
             <tr>

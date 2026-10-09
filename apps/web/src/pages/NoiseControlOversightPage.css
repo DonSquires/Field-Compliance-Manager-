@@ -11,3 +11,4 @@
 .noise-report h3{margin:6px 0 0;font-size:14px}
 .noise-report-row{margin:0;font-size:13px;padding:6px 8px;border-radius:4px;background:var(--color-bg-elevated,#16233a)}
 .noise-report-row.is-flagged{border-left:3px solid var(--color-status-action,#ff9800)}
+.noise-assessment-table{max-height:min(68vh,680px);overscroll-behavior:contain}.noise-assessment-table .reports-table{min-width:1120px;margin:0}.noise-assessment-table .reports-table th{position:sticky;top:0;z-index:1;background:#e8ede9}.noise-assessment-scroll-cue{display:none;margin:10px 0 7px;color:#58675f;font-size:12px}.noise-assessment-table:focus-visible{outline:2px solid #176f68;outline-offset:2px}@media(max-width:980px){.noise-assessment-scroll-cue{display:block}}
