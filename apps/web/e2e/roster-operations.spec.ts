@@ -87,14 +87,19 @@ test('a static post whose place has no verified boundary is flagged at roster ti
         const dialog = page.getByRole('dialog', { name: 'Create shift' });
         await expect(dialog.getByRole('alert')).toContainText('Tahunanui Patrol Zone has no verified boundary (it is a zone, not a site), so the officer cannot record arriving or leaving the post. Verify the site boundary first.');
 });
-test('administrator repeats a selected assignment across a date range', async ({ page }) => {
-        await signInAsAdmin(page, '/admin/roster');	await page.locator('.roster-slot-queue').getByRole('button', { name: /Roster Administration/ }).click();
-	await page.getByRole('button', { name: 'Repeat selected' }).click();
-	const dialog = page.getByRole('dialog', { name: 'Repeat assignment' });
-	await expect(dialog).toBeVisible();
-        await expect(dialog.getByLabel('From date')).toHaveValue('2026-09-05');
-        await expect(dialog.getByLabel('To date')).toHaveValue('2026-09-11');
-	await expect(dialog.getByText('Creates draft assignments and skips overlapping or leave-conflicted days.')).toBeVisible();
+test.describe('in the roster operating timezone', () => {
+        test.use({ timezoneId: 'Pacific/Auckland' });
+
+        test('administrator repeats a selected assignment across a date range', async ({ page }) => {
+                await signInAsAdmin(page, '/admin/roster');
+                await page.locator('.roster-slot-queue').getByRole('button', { name: /Roster Administration/ }).click();
+                await page.getByRole('button', { name: 'Repeat selected' }).click();
+                const dialog = page.getByRole('dialog', { name: 'Repeat assignment' });
+                await expect(dialog).toBeVisible();
+                await expect(dialog.getByLabel('From date')).toHaveValue('2026-09-05');
+                await expect(dialog.getByLabel('To date')).toHaveValue('2026-09-11');
+                await expect(dialog.getByText('Creates draft assignments and skips overlapping or leave-conflicted days.')).toBeVisible();
+        });
 });
 test('rosterer sees open shifts in the board and publishes drafts after a plain-words check', async ({ page }) => {
         const errors = monitorBrowserErrors(page);
