@@ -95,3 +95,37 @@ test('supervisor records acknowledgement and verified resolution through the gov
   await expect(page.getByText(/Morgan Reed · .*29\/08\/2026/)).toHaveCount(2);
   expect(browserErrors, browserErrors.join('\n')).toEqual([]);
 });
+
+test('admin vehicle search presents only schema-backed registry and scoped evidence', async ({ page }) => {
+  const browserErrors = monitorBrowserErrors(page);
+  const vehicleId = 'abababab-abab-4bab-8bab-abababababab';
+  let privateVehicleTableRead = false;
+  await page.route('**/rest/v1/canonical_vehicles**', async (route) => { privateVehicleTableRead = true; await route.fulfill({ contentType: 'application/json', body: '[]' }); });
+  await page.route('**/rest/v1/canonical_vehicle_public**', async (route) => route.fulfill({ contentType: 'application/json', body: JSON.stringify([{ id: vehicleId, plate_number: 'ABC123', make: 'Toyota', model: 'Hiace', year: 2018, colour: 'White', body_type: 'van', rego_status: 'current', rego_expiry: '2027-05-01', wof_status: 'expired', wof_expiry: '2026-08-01', cof_status: null, cof_expiry: null, homeless_status: 'confirmed' }]) }));
+  await page.route('**/rest/v1/canonical_scv_public**', async (route) => route.fulfill({ contentType: 'application/json', body: JSON.stringify([{ id: 'bcbcbcbc-bcbc-4cbc-8cbc-bcbcbcbcbcbc', certificate_number: 'SCV-2048', certificate_status: 'active', expiry_date: '2027-02-01', issued_date: '2025-02-01' }]) }));
+  await page.route('**/rest/v1/person_permits_fieldwork**', async (route) => route.fulfill({ contentType: 'application/json', body: '[]' }));
+  await page.route('**/rest/v1/observations**', async (route) => route.fulfill({ contentType: 'application/json', body: JSON.stringify([{ id: 'dededede-dede-4ede-8ede-dededededede', observed_at: '2026-08-30T08:20:00.000Z', is_compliant: false, compliance_reason: 'nightly_limit_exceeded', nights_this_zone: 3, zone: { name: 'Civic Event Operations Zone' } }]) }));
+  await page.route('**/rest/v1/breach_alerts**', async (route) => route.fulfill({ contentType: 'application/json', body: JSON.stringify([{ id: 'efefefef-efef-4fef-8fef-efefefefefef', breach_type: 'nightly_limit', status: 'open', nights_count: 3, notes: 'Supervisor review required.', created_at: '2026-08-30T08:20:00.000Z', zone: { name: 'Civic Event Operations Zone' } }]) }));
+  await page.route('**/rest/v1/entity_flags**', async (route) => route.fulfill({ contentType: 'application/json', body: JSON.stringify([{ id: 'cdcdcdcd-cdcd-4dcd-8dcd-cdcdcdcdcdcd', flag_type: 'watchlist', alert_level: 'medium', reason: 'Supervisor review requested.', active: true, raised_at: '2026-08-29T20:00:00.000Z' }]) }));
+  await page.route('**/rest/v1/rpc/get_safety_warnings**', async (route) => route.fulfill({ contentType: 'application/json', body: JSON.stringify([{ id: 'fafafafa-fafa-4afa-8afa-fafafafafafa', entity_type: 'vehicle', entity_id: vehicleId, requested_id: vehicleId, hazard_class: 'dangerous_dog', alert_level: 'high', raised_at: '2026-09-01T02:00:00.000Z', organization_id: '77777777-7777-4777-8777-777777777777', organization_name: 'Harbour City Security', contact_email: 'control@harbourcity.test', contact_phone: '04 555 0100', is_own_organization: false, reason: null }]) }));
+
+  await signInAsAdmin(page, '/admin/field-ops?area=vehicle-search');
+  await expect(page.getByRole('heading', { name: 'Vehicle Search & Flags' })).toBeVisible();
+  await page.getByPlaceholder(/Enter plate number/).fill('ABC123');
+  await page.getByRole('button', { name: 'Search Plate' }).click();
+  await expect(page.getByText('Toyota Hiace (2018)')).toBeVisible();
+  await expect(page.getByText('WOF: EXPIRED')).toBeVisible();
+  await expect(page.getByText(/Welfare: someone may be living in this vehicle \(CONFIRMED\)/)).toBeVisible();
+  await expect(page.getByText('Supervisor review requested.')).toBeVisible();
+  const warnings = page.getByTestId('safety-warnings');
+  await expect(warnings.getByText('Dangerous dog')).toBeVisible();
+  await expect(warnings.getByRole('link', { name: '04 555 0100' })).toHaveAttribute('href', 'tel:045550100');
+  await expect(page.getByRole('heading', { name: 'Observation History (1)' })).toBeVisible();
+  await expect(page.getByRole('heading', { name: 'Breach Alerts (1)' })).toBeVisible();
+  expect(await page.evaluate(() => document.documentElement.scrollWidth <= window.innerWidth)).toBe(true);
+  const vehicleOverflow = await page.locator('.vehicle-search-page').evaluate((root) => Array.from(root.querySelectorAll('*')).filter((element) => element.scrollWidth > element.clientWidth + 1).map((element) => `${element.tagName.toLowerCase()}.${String(element.className).replaceAll(' ', '.')}: ${element.scrollWidth}/${element.clientWidth}`).slice(0, 8));
+  expect(vehicleOverflow, vehicleOverflow.join('\n')).toEqual([]);
+  expect(privateVehicleTableRead, 'Admin Vehicle Search must use the public projection, never the Bob-only canonical_vehicles table.').toBe(false);
+  await expect(page.locator('.page-container')).toHaveScreenshot('admin-vehicle-search-results.png');
+  expect(browserErrors, browserErrors.join('\n')).toEqual([]);
+});

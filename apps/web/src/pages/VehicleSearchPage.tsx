@@ -18,6 +18,7 @@ import { useAuth } from '../context/AuthContext';
 import { normalizePlateNumber, vehicleHistoryOrFilter } from '../lib/canonicalIdentity';
 import { supabase } from '../lib/supabase';
 import './PageStyles.css';
+import './VehicleSearchPage.css';
 
 interface Vehicle {
   id: string;
@@ -239,7 +240,7 @@ const VehicleSearchPage: React.FC = () => {
   };
 
   return (
-    <div className="page-container">
+    <div className="page-container vehicle-search-page">
       <header className="page-header">
         <h1>Vehicle Search & Flags</h1>
         <p className="subtitle">Search vehicle register, inspect compliance history, manage VOI & safety flags</p>
@@ -254,7 +255,7 @@ const VehicleSearchPage: React.FC = () => {
         </div>
       )}
 
-      <form onSubmit={handleSearch} style={{ display: 'flex', gap: '8px', marginTop: '12px' }}>
+      <form className="vehicle-search-form" onSubmit={handleSearch}>
         <input
           type="text"
           placeholder="Enter plate number (e.g. ABC123)"
@@ -277,7 +278,7 @@ const VehicleSearchPage: React.FC = () => {
       </form>
 
       {searched && !loading && (
-        <div style={{ marginTop: '20px' }}>
+        <div className="vehicle-search-results">
           {!vehicle && !scv && permits.length === 0 && observations.length === 0 ? (
             <div className="empty-state">
               <p>No vehicle records, permits, or observations found for "{plate}".</p>
@@ -366,11 +367,11 @@ const VehicleSearchPage: React.FC = () => {
                     <div style={{ fontSize: '12px', fontWeight: 600, color: 'var(--color-text-secondary)', marginBottom: '6px' }}>
                       Your organisation's of-interest flags ({flags.length})
                     </div>
-                    <div style={{ display: 'flex', gap: '8px', flexWrap: 'wrap' }}>
+                    <div className="vehicle-search-flags" style={{ display: 'flex', gap: '8px', flexWrap: 'wrap' }}>
                       {flags.map((f) => (
                         <span
                           key={f.id}
-                          className={`badge ${f.active ? (f.alert_level === 'critical' || f.alert_level === 'high' ? 'badge-danger' : 'badge-warning') : 'badge-info'}`}
+                          className={`vehicle-search-flag badge ${f.active ? (f.alert_level === 'critical' || f.alert_level === 'high' ? 'badge-danger' : 'badge-warning') : 'badge-info'}`}
                           style={{ display: 'inline-flex', alignItems: 'center', gap: '8px', padding: '6px 10px', fontSize: '12px' }}
                         >
                           <span>

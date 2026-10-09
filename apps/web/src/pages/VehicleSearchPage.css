@@ -1,0 +1,126 @@
+.vehicle-search-page {
+  min-width: 0;
+  max-width: 100%;
+}
+
+.vehicle-search-form {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) auto;
+  gap: 8px;
+  margin-top: 12px;
+}
+
+.vehicle-search-form input {
+  min-width: 0;
+  width: 100%;
+  box-sizing: border-box;
+}
+
+.vehicle-search-form button {
+  min-height: 42px;
+}
+
+.vehicle-search-results {
+  display: grid;
+  min-width: 0;
+  gap: 16px;
+  margin-top: 20px;
+}
+
+.vehicle-search-results > *,
+.vehicle-search-page .contact-card,
+.vehicle-search-page .safety-warnings {
+  min-width: 0;
+}
+
+.vehicle-search-page .safety-warnings__lede,
+.vehicle-search-page .safety-warning__source,
+.vehicle-search-page .safety-warning__contact {
+  min-width: 0;
+  overflow-wrap: anywhere;
+}
+
+.vehicle-search-flags {
+  min-width: 0;
+}
+
+.vehicle-search-flag {
+  max-width: 100%;
+  white-space: normal;
+}
+
+.vehicle-search-flag > span {
+  min-width: 0;
+  overflow-wrap: anywhere;
+}
+
+.admin-shell[data-theme='light'] .vehicle-search-page {
+  color: #17211d;
+}
+
+.admin-shell[data-theme='light'] .vehicle-search-page .page-header h1 {
+  color: #17211d;
+}
+
+.admin-shell[data-theme='light'] .vehicle-search-page .page-header .subtitle {
+  color: #58675f;
+}
+
+.admin-shell[data-theme='light'] .vehicle-search-page .contact-card {
+  border-color: #d2dad5;
+  color: #26332c;
+  background: #ffffff;
+}
+
+.admin-shell[data-theme='light'] .vehicle-search-page .spec-item,
+.admin-shell[data-theme='light'] .vehicle-search-page .timeline-card {
+  border-color: #dce4de;
+  color: #26332c;
+  background: #f3f6f3;
+}
+
+.admin-shell[data-theme='light'] .vehicle-search-page .spec-label {
+  color: #58675f;
+}
+
+.admin-shell[data-theme='light'] .vehicle-search-page .spec-value {
+  color: #26332c;
+}
+
+.admin-shell[data-theme='light'] .vehicle-search-page .badge-success {
+  border-color: #bad8c4;
+  color: #245f41;
+  background: #e8f3eb;
+}
+
+.admin-shell[data-theme='light'] .vehicle-search-page .badge-warning {
+  border-color: #e5cd91;
+  color: #674d12;
+  background: #fff4d9;
+}
+
+.admin-shell[data-theme='light'] .vehicle-search-page .badge-danger {
+  border-color: #e5b8bc;
+  color: #812633;
+  background: #fbeaec;
+}
+
+.admin-shell[data-theme='light'] .vehicle-search-page .badge-info {
+  border-color: #c4d7e8;
+  color: #315f8e;
+  background: #e8f0f8;
+}
+
+@media (max-width: 560px) {
+  .vehicle-search-form {
+    grid-template-columns: minmax(0, 1fr);
+  }
+
+  .vehicle-search-form button {
+    width: 100%;
+  }
+
+  .vehicle-search-page .contact-card {
+    padding: 12px;
+  }
+}
