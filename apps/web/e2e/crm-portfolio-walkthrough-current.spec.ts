@@ -13,6 +13,14 @@ test('admin opens one Client Portfolio and follows the account spine', async ({ 
   await signInAsAdmin(page, '/admin/crm');
 
   await expect(page.getByRole('heading', { name: 'Client Portfolios', exact: true })).toBeVisible();
+  const search = page.getByRole('searchbox', { name: 'Search client portfolios' });
+  await search.fill('civic');
+  await expect(page.locator(`#crm-account-${accountId}`)).toBeVisible();
+  await expect(page.getByRole('status')).toContainText('Showing 1 of 2 portfolios');
+  await search.fill('no matching account');
+  await expect(page.getByText('No client portfolios match this search.')).toBeVisible();
+  await page.getByRole('button', { name: 'Clear search' }).click();
+  await expect(page).toHaveScreenshot('crm-portfolio-register.png');
   const account = page.locator(`#crm-account-${accountId}`);
   await expect(account).toContainText('Civic Events Limited');
   await account.click();
@@ -20,6 +28,7 @@ test('admin opens one Client Portfolio and follows the account spine', async ({ 
   const portfolio = page.getByRole('dialog', { name: 'Civic Events Limited' });
   await expect(portfolio).toBeVisible();
   await expect(portfolio).toContainText('Commercial, operational, and relationship context');
+  await expect(portfolio).toHaveScreenshot('crm-portfolio-overview.png');
 
   await portfolio.getByRole('button', { name: 'Places 1' }).click();
   await expect(portfolio).toContainText('Civic Events House');

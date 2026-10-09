@@ -16,6 +16,7 @@
  */
 
 import React, { useEffect, useRef, useState, useCallback } from 'react';
+import { Search } from 'lucide-react';
 import { useLocation } from 'react-router-dom';
 import { useAuth } from '../context/AuthContext';
 import { supabase } from '../lib/supabase';
@@ -241,6 +242,7 @@ const CRMPage: React.FC<{ onNavigate?: NavigateWithContext }> = ({ onNavigate = 
   const [quoteAcceptance, setQuoteAcceptance] = useState<{ quoteTitle: string; accountId: string; accountName: string; agreementId: string; variedAgreementName?: string | null } | null>(null);
   const [workspaceAccount, setWorkspaceAccount] = useState<CrmWorkspaceAccount | null>(null);
   const [workspaceInitialView, setWorkspaceInitialView] = useState<'overview' | 'sites'>('overview');
+  const [accountSearch, setAccountSearch] = useState('');
   const [invoiceAction, setInvoiceAction] = useState<{ invoice: InvoiceRow; action: 'send' | 'mark_paid' | 'void' } | null>(null);
   const [invoiceReason, setInvoiceReason] = useState('');
   const [showGenerateInvoice, setShowGenerateInvoice] = useState(false);
@@ -1092,6 +1094,20 @@ const CRMPage: React.FC<{ onNavigate?: NavigateWithContext }> = ({ onNavigate = 
   }
 
   const totalAccounts = state.clients.length + state.branches.length;
+  const normalizedAccountSearch = accountSearch.trim().toLocaleLowerCase();
+  const visibleClients = state.clients.filter((client) => {
+    if (!normalizedAccountSearch) return true;
+    return [
+      client.name,
+      ...(client.former_names ?? []),
+      client.operating_provider_name,
+      client.primary_contact_name,
+      client.status,
+      client.latest_quote_status,
+      client.next_action,
+      ...client.sites.map((site) => site.name),
+    ].filter(Boolean).join(' ').toLocaleLowerCase().includes(normalizedAccountSearch);
+  });
   const openReceivables = state.invoices.filter((invoice) => invoice.status === 'sent' || invoice.status === 'overdue');
   const receivableTotal = openReceivables.reduce((sum, invoice) => sum + Number(invoice.total_amount), 0);
 
@@ -1152,15 +1168,24 @@ const CRMPage: React.FC<{ onNavigate?: NavigateWithContext }> = ({ onNavigate = 
 
       <section className="reports-section">
         <h2>Client Portfolios ({state.clients.length})</h2>
+        <div className="crm-client-search-tools" role="search" aria-label="Search client portfolios">
+          <label className="crm-client-search-field"><Search size={16} aria-hidden="true" /><span className="sr-only">Search client portfolios</span><input type="search" value={accountSearch} onChange={(event) => setAccountSearch(event.target.value)} placeholder="Name, provider, contact, or next action" aria-label="Search client portfolios" /></label>
+          <span className="crm-client-search-count" role="status" aria-live="polite">Showing {visibleClients.length} of {state.clients.length} portfolios</span>
+        </div>
         <div className="crm-account-register" role="table" aria-label="Client accounts">
           {state.clients.length === 0 ? (
             <div className="empty-state">
               <p>No client accounts yet.</p>
             </div>
+          ) : visibleClients.length === 0 ? (
+            <div className="empty-state crm-client-search-empty">
+              <p>No client portfolios match this search.</p>
+              <button type="button" className="btn btn-secondary btn-sm" onClick={() => setAccountSearch('')}>Clear search</button>
+            </div>
           ) : (
             <>
               <div className="crm-account-register-row is-header" role="row"><span>Client and operating provider</span><span>Primary contact</span><span>Sites</span><span>Readiness</span><span>Quote</span><span>Next action</span></div>
-              {state.clients.map((client) => (
+              {visibleClients.map((client) => (
                 <button id={`crm-account-${client.id}`} type="button" role="row" key={client.id} className={`crm-account-register-row ${client.id === requestedAccountId ? 'is-context-focus' : ''}`} onClick={() => setWorkspaceAccount({ id: client.id, name: client.name, status: client.status, primaryContactName: client.primary_contact_name, siteCount: client.site_count, readinessBlockers: client.blockers, nextAction: client.next_action, latestQuoteStatus: client.latest_quote_status })}>
                   <strong>{client.name}{client.former_names?.length ? <em className="crm-former-name">formerly {client.former_names.join(', ')}</em> : null}<small>{client.operating_provider_name ? `Operating provider: ${client.operating_provider_name}` : 'Operating provider not recorded'}</small></strong><span>{client.primary_contact_name ?? 'Not assigned'}</span><span>{client.site_count}</span><span className={client.blockers.length ? 'is-attention' : 'is-ready'}>{client.blockers.length ? `${client.blockers.length} open` : 'Ready'}</span><span>{client.latest_quote_status ?? 'None'}</span><span>{client.next_action}</span>
                 </button>

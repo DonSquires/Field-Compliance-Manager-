@@ -930,3 +930,420 @@
     grid-template-columns: minmax(0, 1fr);
   }
 }
+
+.admin-shell[data-theme='light'] .crm-page {
+  color: #17211d;
+}
+
+.admin-shell[data-theme='light'] .crm-page .page-header h1,
+.admin-shell[data-theme='light'] .crm-page .reports-section > h2,
+.admin-shell[data-theme='light'] .crm-page .crm-section-heading h2 {
+  color: #17211d;
+}
+
+.admin-shell[data-theme='light'] .crm-account-register {
+  border-color: #d2dad5;
+  background: #ffffff;
+}
+
+.admin-shell[data-theme='light'] .crm-account-register-row {
+  border-top-color: #e0e6e1;
+  color: #34433b;
+  background: #ffffff;
+}
+
+.admin-shell[data-theme='light'] .crm-account-register-row.is-header {
+  color: #58675f;
+  background: #e8ede9;
+}
+
+.admin-shell[data-theme='light'] .crm-account-register-row:not(.is-header):hover,
+.admin-shell[data-theme='light'] .crm-account-register-row.is-context-focus {
+  background: #edf5ef;
+}
+
+.admin-shell[data-theme='light'] .crm-account-register-row:not(.is-header):focus-visible {
+  outline-color: #176f68;
+}
+
+.admin-shell[data-theme='light'] .crm-account-register-row strong {
+  color: #17211d;
+}
+
+.admin-shell[data-theme='light'] .crm-account-register-row strong small,
+.admin-shell[data-theme='light'] .crm-account-register-row strong .crm-former-name {
+  color: #58675f;
+}
+
+.admin-shell[data-theme='light'] .crm-account-register-row .is-ready {
+  color: #28714f;
+}
+
+.admin-shell[data-theme='light'] .crm-account-register-row .is-attention {
+  color: #815b13;
+}
+
+.admin-shell[data-theme='light'] .crm-client-search-field {
+  border-color: #bdc9c1;
+  color: #58675f;
+  background: #ffffff;
+}
+
+.admin-shell[data-theme='light'] .crm-client-search-field input {
+  color: #17211d;
+}
+
+.admin-shell[data-theme='light'] .crm-client-search-field {
+  min-width: 0;
+}
+
+.admin-shell[data-theme='light'] .crm-client-search-field input {
+  min-width: 0;
+}
+
+.admin-shell[data-theme='light'] .crm-client-search-count {
+  color: #58675f;
+}
+
+.admin-shell[data-theme='light'] .crm-finance-kpis span {
+  border-color: #dce4de;
+  color: #58675f;
+  background: #ffffff;
+}
+
+.admin-shell[data-theme='light'] .crm-finance-kpis strong {
+  color: #17211d;
+}
+
+@media (max-width: 700px) {
+  .admin-shell[data-theme='light'] .crm-client-search-tools {
+    grid-template-columns: minmax(0, 1fr);
+  }
+
+  .admin-shell[data-theme='light'] .crm-client-search-count {
+    white-space: normal;
+  }
+}
+
+.admin-shell[data-theme='light'] .crm-invoice-table {
+  border-color: #d2dad5;
+}
+
+.admin-shell[data-theme='light'] .crm-invoice-row {
+  border-top-color: #e0e6e1;
+  color: #34433b;
+  background: #ffffff;
+}
+
+.admin-shell[data-theme='light'] .crm-invoice-row.is-header {
+  color: #58675f;
+  background: #e8ede9;
+}
+
+.admin-shell[data-theme='light'] .crm-invoice-row > strong {
+  color: #17211d;
+}
+
+.admin-shell[data-theme='light'] .crm-invoice-row button {
+  border-color: #bdc9c1;
+  color: #34433b;
+  background: #ffffff;
+}
+
+.admin-shell[data-theme='light'] .crm-invoice-status {
+  color: #485851;
+  background: #e8ede9;
+}
+
+.admin-shell[data-theme='light'] .crm-invoice-status.status-paid {
+  color: #245f41;
+  background: #e4f1e8;
+}
+
+.admin-shell[data-theme='light'] .crm-invoice-status.status-overdue {
+  color: #812633;
+  background: #fbeaec;
+}
+
+.admin-shell[data-theme='light'] .crm-invoice-status.status-sent {
+  color: #315f8e;
+  background: #e8f0f8;
+}
+
+.admin-shell[data-theme='light'] .crm-workspace-backdrop {
+  background: rgba(23, 33, 29, 0.42);
+}
+
+.admin-shell[data-theme='light'] .crm-workspace {
+  border-color: #bdc9c1;
+  color: #26332c;
+  background: #ffffff;
+  box-shadow: 0 20px 60px rgba(28, 44, 35, 0.2);
+}
+
+.admin-shell[data-theme='light'] .crm-workspace > header,
+.admin-shell[data-theme='light'] .crm-workspace > nav {
+  border-color: #dce4de;
+  background: #f8faf8;
+}
+
+.admin-shell[data-theme='light'] .crm-workspace > header span,
+.admin-shell[data-theme='light'] .crm-portfolio-context-note {
+  color: #176f68 !important;
+}
+
+.admin-shell[data-theme='light'] .crm-workspace > header h2 {
+  color: #17211d;
+}
+
+.admin-shell[data-theme='light'] .crm-workspace > header p,
+.admin-shell[data-theme='light'] .crm-portfolio-freshness {
+  color: #58675f;
+}
+
+.admin-shell[data-theme='light'] .crm-headline-state.state-not_invited {
+  color: #58675f !important;
+}
+
+.admin-shell[data-theme='light'] .crm-workspace > header button,
+.admin-shell[data-theme='light'] .crm-workspace-form header button {
+  border-color: #bdc9c1;
+  color: #34433b;
+  background: #ffffff;
+}
+
+.admin-shell[data-theme='light'] .crm-portfolio-flow {
+  border-color: #dce4de;
+  background: #f1f4f1;
+}
+
+.admin-shell[data-theme='light'] .crm-portfolio-flow span {
+  border-color: #d2dad5;
+  color: #58675f;
+  background: #ffffff;
+}
+
+.admin-shell[data-theme='light'] .crm-portfolio-flow span.is-current {
+  border-color: #b6d5c4;
+  color: #205e43;
+  background: #e4f1e8;
+}
+
+.admin-shell[data-theme='light'] .crm-portfolio-flow span.is-complete {
+  border-color: #bad8c4;
+  color: #245f41;
+  background: #e8f3eb;
+}
+
+.admin-shell[data-theme='light'] .crm-portfolio-nav {
+  border-color: #dce4de;
+  background: #ffffff;
+}
+
+.admin-shell[data-theme='light'] .crm-portfolio-nav > button {
+  color: #526158;
+}
+
+.admin-shell[data-theme='light'] .crm-portfolio-nav > button.is-active {
+  border-bottom-color: #b42332;
+  color: #8f1d2b;
+}
+
+.admin-shell[data-theme='light'] .crm-portfolio-nav > button > strong {
+  color: #485851;
+  background: #e8ede9;
+}
+
+.admin-shell[data-theme='light'] .crm-workspace-toolbar,
+.admin-shell[data-theme='light'] .crm-account-overview {
+  border-color: #dce4de;
+  color: #34433b;
+  background: #ffffff;
+}
+
+.admin-shell[data-theme='light'] .crm-workspace-toolbar strong,
+.admin-shell[data-theme='light'] .crm-account-overview strong {
+  color: #17211d;
+}
+
+.admin-shell[data-theme='light'] .crm-workspace-toolbar span,
+.admin-shell[data-theme='light'] .crm-account-overview span,
+.admin-shell[data-theme='light'] .crm-account-overview small,
+.admin-shell[data-theme='light'] .crm-workspace-subtle {
+  color: #58675f;
+}
+
+.admin-shell[data-theme='light'] .crm-account-overview > button,
+.admin-shell[data-theme='light'] .crm-account-overview > div {
+  border-color: #dce4de;
+  color: #34433b;
+  background: #f8faf8;
+}
+
+.admin-shell[data-theme='light'] .crm-account-overview > button span {
+  color: #58675f;
+}
+
+.admin-shell[data-theme='light'] .crm-account-overview > button strong {
+  color: #17211d;
+}
+
+.admin-shell[data-theme='light'] .crm-account-overview .is-ready,
+.admin-shell[data-theme='light'] .crm-account-readiness-panel.is-ready {
+  border-left-color: #28714f;
+  background: #e8f3eb;
+}
+
+.admin-shell[data-theme='light'] .crm-account-overview .is-attention,
+.admin-shell[data-theme='light'] .crm-account-readiness-panel.is-attention {
+  border-left-color: #95620e;
+  background: #fff4d9;
+}
+
+.admin-shell[data-theme='light'] .crm-account-readiness-panel.is-ready strong,
+.admin-shell[data-theme='light'] .crm-onboarding-panel.is-ready strong {
+  color: #245f41;
+}
+
+.admin-shell[data-theme='light'] .crm-account-readiness-panel.is-ready ul,
+.admin-shell[data-theme='light'] .crm-onboarding-panel.is-ready span {
+  color: #485851;
+}
+
+.admin-shell[data-theme='light'] .crm-portfolio-truth,
+.admin-shell[data-theme='light'] .crm-structure-grid > section,
+.admin-shell[data-theme='light'] .crm-place-list > article,
+.admin-shell[data-theme='light'] .crm-location-finance,
+.admin-shell[data-theme='light'] .crm-onboarding-panel {
+  border-color: #d2dad5;
+  background: #f8faf8;
+}
+
+.admin-shell[data-theme='light'] .crm-portfolio-truth > span,
+.admin-shell[data-theme='light'] .crm-structure-grid h4,
+.admin-shell[data-theme='light'] .crm-place-list header span,
+.admin-shell[data-theme='light'] .crm-place-facets > div > span,
+.admin-shell[data-theme='light'] .crm-location-finance > header span,
+.admin-shell[data-theme='light'] .crm-onboarding-panel > header span {
+  color: #176f68;
+}
+
+.admin-shell[data-theme='light'] .crm-portfolio-truth button,
+.admin-shell[data-theme='light'] .crm-structure-child,
+.admin-shell[data-theme='light'] .crm-place-facets > div,
+.admin-shell[data-theme='light'] .crm-place-facets button,
+.admin-shell[data-theme='light'] .crm-onboarding-readiness article,
+.admin-shell[data-theme='light'] .crm-readiness-item {
+  border-color: #dce4de;
+  color: #34433b;
+  background: #ffffff;
+}
+
+.admin-shell[data-theme='light'] .crm-portfolio-truth button:hover,
+.admin-shell[data-theme='light'] .crm-structure-child:hover,
+.admin-shell[data-theme='light'] .crm-place-facets button:hover {
+  border-color: #b42332;
+  background: #fffafa;
+}
+
+.admin-shell[data-theme='light'] .crm-portfolio-truth strong,
+.admin-shell[data-theme='light'] .crm-structure-child strong,
+.admin-shell[data-theme='light'] .crm-module-card-list strong,
+.admin-shell[data-theme='light'] .crm-onboarding-readiness strong,
+.admin-shell[data-theme='light'] .crm-readiness-item strong {
+  color: #17211d;
+}
+
+.admin-shell[data-theme='light'] .crm-portfolio-truth small,
+.admin-shell[data-theme='light'] .crm-structure-child small,
+.admin-shell[data-theme='light'] .crm-module-card-list small,
+.admin-shell[data-theme='light'] .crm-onboarding-readiness span,
+.admin-shell[data-theme='light'] .crm-onboarding-readiness small,
+.admin-shell[data-theme='light'] .crm-readiness-item small {
+  color: #58675f;
+}
+
+.admin-shell[data-theme='light'] .crm-workspace-empty {
+  color: #58675f;
+}
+
+.admin-shell[data-theme='light'] .crm-agreement-list article,
+.admin-shell[data-theme='light'] .crm-site-list article,
+.admin-shell[data-theme='light'] .crm-job-list article,
+.admin-shell[data-theme='light'] .crm-report-list article,
+.admin-shell[data-theme='light'] .crm-finance-list article,
+.admin-shell[data-theme='light'] .crm-finance-summary > div {
+  border-color: #dce4de;
+  background: #ffffff;
+}
+
+.admin-shell[data-theme='light'] .crm-agreement-list strong,
+.admin-shell[data-theme='light'] .crm-site-list strong,
+.admin-shell[data-theme='light'] .crm-job-list strong,
+.admin-shell[data-theme='light'] .crm-report-list strong,
+.admin-shell[data-theme='light'] .crm-finance-list strong,
+.admin-shell[data-theme='light'] .crm-location-finance-heading strong {
+  color: #17211d;
+}
+
+.admin-shell[data-theme='light'] .crm-agreement-list p,
+.admin-shell[data-theme='light'] .crm-site-list p,
+.admin-shell[data-theme='light'] .crm-job-list p,
+.admin-shell[data-theme='light'] .crm-report-list p,
+.admin-shell[data-theme='light'] .crm-finance-list p,
+.admin-shell[data-theme='light'] .crm-location-agreements span,
+.admin-shell[data-theme='light'] .crm-location-finance-grid span {
+  color: #58675f;
+}
+
+.admin-shell[data-theme='light'] .crm-status-pill {
+  color: #485851;
+  background: #e8ede9;
+}
+
+.admin-shell[data-theme='light'] .crm-status-pill.status-accepted,
+.admin-shell[data-theme='light'] .crm-status-pill.status-sent,
+.admin-shell[data-theme='light'] .crm-status-pill.status-generated,
+.admin-shell[data-theme='light'] .crm-status-pill.status-paid,
+.admin-shell[data-theme='light'] .crm-status-pill.status-active {
+  color: #245f41;
+  background: #e4f1e8;
+}
+
+.admin-shell[data-theme='light'] .crm-status-pill.status-declined,
+.admin-shell[data-theme='light'] .crm-status-pill.status-expired,
+.admin-shell[data-theme='light'] .crm-status-pill.status-void,
+.admin-shell[data-theme='light'] .crm-status-pill.status-failed,
+.admin-shell[data-theme='light'] .crm-status-pill.status-overdue {
+  color: #812633;
+  background: #fbeaec;
+}
+
+.admin-shell[data-theme='light'] .crm-workspace-form,
+.admin-shell[data-theme='light'] .crm-quote-dialog {
+  border-color: var(--color-border-strong);
+  color: #26332c;
+  background: #ffffff;
+}
+
+.admin-shell[data-theme='light'] .crm-workspace-form header,
+.admin-shell[data-theme='light'] .crm-quote-dialog header {
+  border-color: #dce4de;
+}
+
+.admin-shell[data-theme='light'] .crm-workspace-form input,
+.admin-shell[data-theme='light'] .crm-workspace-form select,
+.admin-shell[data-theme='light'] .crm-workspace-form textarea,
+.admin-shell[data-theme='light'] .crm-quote-dialog input,
+.admin-shell[data-theme='light'] .crm-quote-dialog select,
+.admin-shell[data-theme='light'] .crm-quote-dialog textarea {
+  border-color: #bdc9c1;
+  color: #17211d;
+  background: #ffffff;
+}
+
+.admin-shell[data-theme='light'] .crm-quote-dialog > p {
+  border-left-color: #176f68;
+  color: #485851;
+  background: #edf3ef;
+}
