@@ -25,6 +25,7 @@ test('owner can walk finance from simple home to final review boundary', async (
   const firstTask = await page.getByRole('button', { name: /See how the business is doing/ }).boundingBox();
   const bobGuide = await page.getByRole('heading', { name: 'You do not need to be an accountant' }).boundingBox();
   expect(firstTask?.y).toBeLessThan(bobGuide?.y ?? 0);
+  expect(await page.evaluate(() => document.documentElement.scrollWidth <= window.innerWidth)).toBe(true);
   await expect(page).toHaveScreenshot('finance-home-desktop.png');
 
   await page.getByRole('button', { name: /See how the business is doing/ }).click();
@@ -74,6 +75,7 @@ test('owner can enter IRD details and calculate a job cost like a human', async 
   await page.getByRole('button', { name: 'Calculate job cost' }).click();
   await expect(page.getByText('Real cost')).toBeVisible();
   await expect(page.getByText('$1,046.00')).toBeVisible();
+  expect(await page.evaluate(() => document.documentElement.scrollWidth <= window.innerWidth)).toBe(true);
   await expect(page).toHaveScreenshot('finance-costing-result.png');
   await page.getByRole('button', { name: 'Reset' }).click();
   await expect(page.getByLabel('Hourly pay rate')).toHaveValue('');

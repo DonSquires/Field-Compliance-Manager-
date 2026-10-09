@@ -689,3 +689,244 @@
   color: #812633;
   background: #fbeaec;
 }
+
+.admin-shell[data-theme='light'] .finance-home-page {
+  box-sizing: border-box;
+  width: 100%;
+  max-width: 1180px;
+  color: #17211d;
+}
+
+.admin-shell[data-theme='light'] .finance-primary-tasks h2 {
+  color: #17211d;
+}
+
+.admin-shell[data-theme='light'] .finance-primary-tasks p {
+  color: #58675f;
+}
+
+.admin-shell[data-theme='light'] .finance-task-card,
+.admin-shell[data-theme='light'] .finance-card {
+  border-color: #d2dad5;
+  color: #485851;
+  background: #ffffff;
+  box-shadow: 0 1px 2px rgba(28, 44, 35, 0.06);
+}
+
+.admin-shell[data-theme='light'] .finance-task-card:hover,
+.admin-shell[data-theme='light'] .finance-task-card:focus-visible,
+.admin-shell[data-theme='light'] .finance-card:hover,
+.admin-shell[data-theme='light'] .finance-card:focus-visible {
+  border-color: #b42332;
+  background: #fffdfc;
+  box-shadow: 0 0 0 2px rgba(180, 35, 50, 0.14);
+}
+
+.admin-shell[data-theme='light'] .finance-task-card.is-primary,
+.admin-shell[data-theme='light'] .finance-card-primary {
+  border-color: #e5b8bc;
+  border-top-color: #b42332;
+  background: #fffafa;
+}
+
+.admin-shell[data-theme='light'] .finance-card-attention {
+  border-top-color: #95620e;
+}
+
+.admin-shell[data-theme='light'] .finance-card-good {
+  border-top-color: #28714f;
+}
+
+.admin-shell[data-theme='light'] .finance-card-title,
+.admin-shell[data-theme='light'] .finance-task-card strong {
+  color: #17211d;
+}
+
+.admin-shell[data-theme='light'] .finance-card-description,
+.admin-shell[data-theme='light'] .finance-task-card span {
+  color: #58675f;
+}
+
+.admin-shell[data-theme='light'] .finance-card-eyebrow,
+.admin-shell[data-theme='light'] .finance-card-action,
+.admin-shell[data-theme='light'] .finance-task-card b {
+  color: #8f1d2b;
+}
+
+.admin-shell[data-theme='light'] .finance-card-topline > b {
+  color: #674d12;
+  background: #fff4d9;
+}
+
+.admin-shell[data-theme='light'] .finance-owner-guide {
+  border-color: #d2dad5;
+  background: #f8faf8;
+}
+
+.admin-shell[data-theme='light'] .finance-owner-guide-icon {
+  color: #ffffff;
+  background: #b42332;
+}
+
+.admin-shell[data-theme='light'] .finance-owner-eyebrow {
+  color: #8f1d2b !important;
+}
+
+.admin-shell[data-theme='light'] .finance-owner-guide h2 {
+  color: #17211d;
+}
+
+.admin-shell[data-theme='light'] .finance-owner-guide-intro p:last-child,
+.admin-shell[data-theme='light'] .finance-owner-boundary {
+  color: #485851;
+}
+
+.admin-shell[data-theme='light'] .finance-owner-action {
+  border-color: #d2dad5;
+  color: #34433b;
+  background: #ffffff;
+}
+
+.admin-shell[data-theme='light'] .finance-owner-action:hover,
+.admin-shell[data-theme='light'] .finance-owner-action:focus-visible {
+  border-color: #b42332;
+  background: #fffafa;
+}
+
+.admin-shell[data-theme='light'] .finance-owner-action > svg,
+.admin-shell[data-theme='light'] .finance-owner-action-arrow {
+  color: #8f1d2b;
+}
+
+.admin-shell[data-theme='light'] .finance-owner-action strong {
+  color: #17211d;
+}
+
+.admin-shell[data-theme='light'] .finance-owner-action small {
+  color: #58675f;
+}
+
+.admin-shell[data-theme='light'] .finance-owner-brief {
+  border-color: #d2dad5;
+  background: #ffffff;
+}
+
+.admin-shell[data-theme='light'] .finance-owner-brief-heading,
+.admin-shell[data-theme='light'] .finance-owner-headline,
+.admin-shell[data-theme='light'] .finance-owner-brief p,
+.admin-shell[data-theme='light'] .finance-owner-readiness strong,
+.admin-shell[data-theme='light'] .finance-owner-results > strong {
+  color: #26332c;
+}
+
+.admin-shell[data-theme='light'] .finance-owner-refresh,
+.admin-shell[data-theme='light'] .finance-owner-brief li span,
+.admin-shell[data-theme='light'] .finance-owner-readiness small {
+  color: #58675f;
+}
+
+.admin-shell[data-theme='light'] .finance-owner-brief li strong {
+  color: #674d12;
+}
+
+.admin-shell[data-theme='light'] .finance-owner-check {
+  border-color: #b42332;
+  color: #ffffff;
+  background: #b42332;
+}
+
+.admin-shell[data-theme='light'] .finance-owner-result {
+  color: #674d12;
+  background: #fff4d9;
+}
+
+.admin-shell[data-theme='light'] .finance-owner-result small {
+  color: #485851;
+}
+
+.admin-shell[data-theme='light'] .finance-owner-result.status-ready {
+  color: #245f41;
+  background: #e8f3eb;
+}
+
+.admin-shell[data-theme='light'] .finance-owner-result.status-partial {
+  color: #674d12;
+  background: #fff4d9;
+}
+
+.admin-shell[data-theme='light'] .finance-owner-result.status-gap {
+  color: #812633;
+  background: #fbeaec;
+}
+
+.admin-shell[data-theme='light'] .finance-owner-boundary {
+  border-top-color: #d2dad5;
+}
+
+.admin-shell[data-theme='light'] .completed-work {
+  border-color: #d2dad5;
+  border-radius: 6px;
+  background: #ffffff;
+}
+
+.admin-shell[data-theme='light'] .completed-work__row {
+  border-color: #dce4de;
+  background: #f8faf8;
+}
+
+.admin-shell[data-theme='light'] .finance-costing-panel .crm-finance-kpis {
+  display: grid;
+  grid-template-columns: repeat(4, minmax(0, 1fr));
+  gap: 8px;
+  margin-top: 12px;
+}
+
+.admin-shell[data-theme='light'] .finance-costing-panel .crm-finance-kpis > span {
+  min-width: 0;
+  padding: 10px;
+  overflow-wrap: anywhere;
+  border: 1px solid var(--color-border);
+  border-top: 3px solid #176f68;
+  border-radius: 5px;
+  color: #485851;
+  background: #ffffff;
+  font-size: 12px;
+}
+
+.admin-shell[data-theme='light'] .finance-costing-panel .crm-finance-kpis > span:nth-child(2) {
+  border-top-color: #315f8e;
+}
+
+.admin-shell[data-theme='light'] .finance-costing-panel .crm-finance-kpis > span:nth-child(3) {
+  border-top-color: #28714f;
+}
+
+.admin-shell[data-theme='light'] .finance-costing-panel .crm-finance-kpis > span:nth-child(4) {
+  border-top-color: #95620e;
+}
+
+.admin-shell[data-theme='light'] .finance-costing-panel .crm-finance-kpis strong {
+  color: #17211d;
+  font-size: 16px;
+}
+
+@media (max-width: 650px) {
+  .admin-shell[data-theme='light'] .finance-home-page {
+    padding-right: 14px;
+    padding-left: 14px;
+  }
+
+  .admin-shell[data-theme='light'] .finance-task-grid {
+    grid-template-columns: minmax(0, 1fr);
+  }
+
+  .admin-shell[data-theme='light'] .finance-costing-panel .crm-finance-kpis {
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+  }
+}
+
+@media (max-width: 380px) {
+  .admin-shell[data-theme='light'] .finance-costing-panel .crm-finance-kpis {
+    grid-template-columns: minmax(0, 1fr);
+  }
+}
