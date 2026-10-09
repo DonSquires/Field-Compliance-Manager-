@@ -204,6 +204,32 @@
 .identity-records-fields .is-wide {
   grid-column: 1/-1;
 }
+.identity-records-fields .identity-source-marker {
+  grid-column: 1/-1;
+}
+.identity-records-fields .identity-source-marker label {
+  display: flex;
+  align-items: flex-start;
+  gap: 8px;
+}
+.identity-records .identity-source-marker input[type="checkbox"] {
+  width: 18px;
+  height: 18px;
+  margin: 1px 0 0;
+  padding: 0;
+  accent-color: #21694f;
+  flex: 0 0 auto;
+}
+.identity-records-fields .identity-source-marker label > span {
+  color: #15231f;
+  font-size: 13px;
+  text-transform: none;
+}
+.identity-source-marker p {
+  margin: 5px 0 0 26px;
+  color: #60736d;
+  font-size: 12px;
+}
 .identity-records-primary {
   display: inline-flex;
   align-items: center;

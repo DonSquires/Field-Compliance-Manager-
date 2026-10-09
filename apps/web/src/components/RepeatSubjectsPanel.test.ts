@@ -12,6 +12,8 @@ describe('repeat vehicle subjects', () => {
     expect(panel).toContain("rpc('list_vehicle_subject_history_for_agreement'");
     expect(panel).toContain('p_service_agreement_id: agreementId');
     expect(panel).toContain("rpc('list_unlinked_plate_mentions_for_agreement'");
+    expect(panel).toContain('aria-label="Repeat vehicle results" tabIndex={0}');
+    expect(panel).toContain('repeat-subjects__table-wrap');
     expect(panel).not.toContain("from('observations')");
     expect(reports).toContain('<RepeatSubjectsPanel />');
   });

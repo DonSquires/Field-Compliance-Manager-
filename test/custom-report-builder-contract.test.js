@@ -85,7 +85,7 @@ test('the report hub builds custom drafts and reuses the existing review queue',
 test('PDF and email artifacts carry the frozen custom scope', () => {
   assert.match(pdf, /Frozen report scope/);
   assert.match(pdf, /report_scope/);
-  assert.match(pdf, /fcm-report-pack-pdf-lib-a4-v4/);
+  assert.match(pdf, /fcm-report-pack-pdf-lib-a4-v5/);
   assert.match(pdf, /widthOfTextAtSize/);
   assert.doesNotMatch(pdf, /truncateCodePoints/);
   assert.match(pdf, /provider-private draft for review/);

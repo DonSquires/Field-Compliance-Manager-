@@ -25,6 +25,7 @@ const SMTP_PORT = Number(Deno.env.get('SMTP_PORT') ?? '587');
 const SMTP_USER = Deno.env.get('SMTP_USER') ?? '';
 const SMTP_PASS = Deno.env.get('SMTP_PASS') ?? '';
 const SMTP_FROM = Deno.env.get('SMTP_FROM') ?? SMTP_USER;
+const CURRENT_REPORT_PDF_RENDERER = 'fcm-report-pack-pdf-lib-a4-v5';
 const CORS = {
   'Access-Control-Allow-Origin': '*',
   'Access-Control-Allow-Headers': 'authorization, x-client-info, apikey, content-type'
@@ -52,6 +53,7 @@ interface ReportPackEmail {
   data: JsonMap | null;
   editorial: JsonMap | null;
   pdf_path: string | null;
+  pdf_renderer_version: string | null;
   pdf_source_updated_at: string | null;
   updated_at: string;
   sent_to: string | null;
@@ -127,13 +129,11 @@ function monthlySummaryHtml(pack: ReportPackEmail, pdfLink: string) {
     ${editorialHtml(editorial)}
     <h3>SLA Performance</h3>
     <p>${escapeHtml(d.slaMet ?? 0)} met · ${escapeHtml(d.slaBreached ?? 0)} breached · ${escapeHtml(d.slaRunning ?? 0)} running</p>
-    <h3>Incidents</h3>
-    <p>${escapeHtml(d.incidentsTotal ?? 0)} total</p>
-    <h3>Patrol &amp; Compliance</h3>
-    <p>Checkpoint visits: ${escapeHtml(d.checkpointVisits ?? 0)} · Breach alerts: ${escapeHtml(d.breachAlerts ?? 0)}</p>
-    ${facilities.length ? `<h3>Patrol Completion by Facility</h3>
+    <h3>Patrol &amp; Activity Summary</h3>
+    <p>Patrol visits: ${escapeHtml(d.patrolVisits ?? 'Not recorded')} · Camera activations: ${escapeHtml(d.cameraActivations ?? 'Not recorded')} · Vehicle observations: ${escapeHtml(d.vehicleObservations ?? 'Not recorded')} · Patrol travel: ${escapeHtml(d.patrolTravelKm ?? 'Not recorded')} km</p>
+    ${facilities.length ? `<h3>Site Coverage</h3>
     <table border="1" cellpadding="4" cellspacing="0">
-      <tr><th align="left">Facility</th><th>Expected</th><th>Completed</th><th>Completion</th></tr>
+      <tr><th align="left">Site</th><th>Planned activities</th><th>Completed activities</th><th>Completion</th></tr>
       ${facRows}
     </table>` : ''}
     ${pdfLink}
@@ -167,7 +167,7 @@ async function loadDeliveryContext(req: Request, packId: string) {
   const admin = createClient(SUPABASE_URL, SUPABASE_SERVICE_ROLE_KEY);
   const { data: callerProfile } = await admin.from('user_profiles').select('role, organization_id, deactivated_at').eq('id', caller.id).single();
   if (!callerProfile || callerProfile.deactivated_at || !CAN_SEND.has(callerProfile.role)) throw new RequestError('Forbidden: insufficient role', 403);
-  const { data: pack } = await admin.from('monthly_report_packs').select('id, organization_id, service_agreement_id, period_start, period_end, status, published_at, delivery_channel, report_kind, report_scope, data, editorial, pdf_path, pdf_source_updated_at, updated_at, sent_to').eq('id', packId).single();
+  const { data: pack } = await admin.from('monthly_report_packs').select('id, organization_id, service_agreement_id, period_start, period_end, status, published_at, delivery_channel, report_kind, report_scope, data, editorial, pdf_path, pdf_renderer_version, pdf_source_updated_at, updated_at, sent_to').eq('id', packId).single();
   if (!pack) throw new RequestError('Pack not found', 404);
   const { data: maySend } = await callerClient.rpc('is_report_provider_custodian_for_org', { p_target_organization_id: pack.organization_id });
   if (maySend !== true) throw new RequestError('Cannot send packs for other organizations', 403);
@@ -180,6 +180,7 @@ function assertEmailDeliveryReady(pack: ReportPackEmail): asserts pack is Report
   if (pack.delivery_channel !== 'email') throw new RequestError('Report delivery channel has not been confirmed', 409);
   if (!pack.pdf_path) throw new RequestError('Generate the reviewed PDF before sending this report', 409);
   if (pack.pdf_source_updated_at !== pack.updated_at) throw new RequestError('Generate a current reviewed PDF before sending this report', 409);
+  if (pack.pdf_renderer_version !== CURRENT_REPORT_PDF_RENDERER) throw new RequestError('Generate a PDF with the current report layout before sending this report', 409);
 }
 
 async function claimEmailDelivery(admin: SupabaseClient, callerId: string, packId: string, expectedUpdatedAt: string, requestedRecipient: string): Promise<{ deliveryAttemptId: string; recipient: string } | { alreadySentTo: string | null }> {

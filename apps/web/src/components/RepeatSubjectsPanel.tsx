@@ -218,7 +218,7 @@ export const RepeatSubjectsPanel: React.FC = () => {
 
       {error && <div className="alert alert-error" role="alert">{error}</div>}
       <p className="repeat-subjects__count" role="status">{!agreementId ? 'Choose an agreement to view its subjects.' : loading ? 'Loading repeat vehicles…' : `${total.toLocaleString('en-NZ')} ${total === 1 ? 'vehicle' : 'vehicles'}`}</p>
-      <div className="reports-table-wrapper">
+      <div className="reports-table-wrapper repeat-subjects__table-wrap" role="region" aria-label="Repeat vehicle results" tabIndex={0}>
         <table className="reports-table">
           <thead><tr><th>Plate</th><th>Seen</th><th>Places</th><th>Officers</th><th>Patrol / CCTV</th><th>First seen</th><th>Last seen</th><th>Owner</th></tr></thead>
           <tbody>
@@ -249,7 +249,7 @@ export const RepeatSubjectsPanel: React.FC = () => {
           <h3 id="plate-mentions-title">Plate mentions to review</h3>
           <p className="subtitle">These plate-shaped strings were found in patrol comments but are not linked to a structured observation. They are suggestions only and have not been counted as sightings.</p>
           <p className="repeat-subjects__count" role="status">{loading ? 'Loading mentions…' : `${mentionTotal.toLocaleString('en-NZ')} unlinked plate mentions`}</p>
-          <div className="reports-table-wrapper">
+          <div className="reports-table-wrapper repeat-subjects__table-wrap" role="region" aria-label="Unlinked plate mentions" tabIndex={0}>
             <table className="reports-table">
               <thead><tr><th>Plate text</th><th>Mentions</th><th>First mention</th><th>Last mention</th><th>Review</th></tr></thead>
               <tbody>

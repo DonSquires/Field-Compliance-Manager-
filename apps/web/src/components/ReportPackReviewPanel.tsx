@@ -50,6 +50,19 @@ function numberFrom(data: Record<string, unknown> | null, key: string): string {
   return typeof value === 'number' ? String(value) : '0';
 }
 
+function facilitiesFrom(data: Record<string, unknown> | null): Array<{ siteName: string; expected: number; completed: number }> {
+  if (!Array.isArray(data?.facilities)) return [];
+  return data.facilities.flatMap((value) => {
+    if (!value || typeof value !== 'object' || Array.isArray(value)) return [];
+    const facility = value as Record<string, unknown>;
+    return [{
+      siteName: typeof facility.siteName === 'string' ? facility.siteName : 'Unnamed site',
+      expected: typeof facility.expected === 'number' ? facility.expected : 0,
+      completed: typeof facility.completed === 'number' ? facility.completed : 0,
+    }];
+  });
+}
+
 function subjectSummaryFrom(data: Record<string, unknown> | null): Record<string, unknown> | null {
   const value = data?.subjectSummary;
   return value && typeof value === 'object' && !Array.isArray(value) ? value as Record<string, unknown> : null;
@@ -63,6 +76,7 @@ export function ReportPackReviewPanel({ pack, onClose, onSaved }: ReportPackRevi
   const [savingAction, setSavingAction] = useState<'save' | 'publish' | null>(null);
   const [error, setError] = useState<string | null>(null);
   const subjectSummary = subjectSummaryFrom(pack.data);
+  const facilities = facilitiesFrom(pack.data);
 
   useEffect(() => {
     setTitle(pack.editorial?.title ?? defaultTitle(pack));
@@ -131,10 +145,7 @@ export function ReportPackReviewPanel({ pack, onClose, onSaved }: ReportPackRevi
         <div className="report-review-source" aria-label="Generated source metrics">
           <div><span>SLA met</span><strong>{numberFrom(pack.data, 'slaMet')}</strong></div>
           <div><span>SLA breached</span><strong>{numberFrom(pack.data, 'slaBreached')}</strong></div>
-          <div><span>Incidents</span><strong>{numberFrom(pack.data, 'incidentsTotal')}</strong></div>
-          <div><span>Checkpoint visits</span><strong>{numberFrom(pack.data, 'checkpointVisits')}</strong></div>
-          <div><span>Breach alerts</span><strong>{numberFrom(pack.data, 'breachAlerts')}</strong></div>
-          <div><span>Operational events</span><strong>{numberFrom(pack.data, 'operationalEvents')}</strong></div>
+          <div><span>SLA in progress</span><strong>{numberFrom(pack.data, 'slaRunning')}</strong></div>
           <div><span>Patrol visits</span><strong>{numberFrom(pack.data, 'patrolVisits')}</strong></div>
           <div><span>Camera activations</span><strong>{numberFrom(pack.data, 'cameraActivations')}</strong></div>
           <div><span>Vehicle observations</span><strong>{numberFrom(pack.data, 'vehicleObservations')}</strong></div>
@@ -145,6 +156,17 @@ export function ReportPackReviewPanel({ pack, onClose, onSaved }: ReportPackRevi
             <div><span>Supporting evidence items</span><strong>{numberFrom(subjectSummary, 'supportingEvidenceItems')}</strong></div>
             <div><span>Records with action notes</span><strong>{numberFrom(subjectSummary, 'recordsWithActionNotes')}</strong></div>
           </>}
+        </div>
+      )}
+      {pack.report_kind === 'monthly' && facilities.length > 0 && (
+        <div className="report-review-sites">
+          <h4>Site coverage</h4>
+          <div className="reports-table-wrapper" role="region" aria-label="Site coverage table" tabIndex={0}>
+            <table className="reports-table">
+              <thead><tr><th>Site</th><th>Planned activities</th><th>Completed activities</th></tr></thead>
+              <tbody>{facilities.map((facility) => <tr key={facility.siteName}><td>{facility.siteName}</td><td>{facility.expected}</td><td>{facility.completed}</td></tr>)}</tbody>
+            </table>
+          </div>
         </div>
       )}
       {typeof subjectSummary?.clientSummary === 'string' && <p className="report-review-source-note">{subjectSummary.clientSummary}</p>}

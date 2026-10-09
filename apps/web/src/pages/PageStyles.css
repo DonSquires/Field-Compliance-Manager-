@@ -198,10 +198,25 @@
   margin-top: 24px;
 }
 
+.report-packs-section { margin-top: 18px; }
+
 .reports-section h2 {
   margin: 0 0 8px 0;
   font-size: 18px;
 }
+
+.reports-oversight__summary {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+  cursor: pointer;
+  list-style-position: inside;
+}
+
+.reports-oversight__summary h2 { display: inline; margin: 0; }
+.reports-oversight__summary span { color: var(--color-text-secondary, #94a3b8); font-size: 12px; }
+.reports-oversight[open] .reports-oversight__summary { margin-bottom: 8px; }
 
 .kpi-grid {
   display: grid;
@@ -252,6 +267,9 @@
 
 .reports-table-wrapper {
   overflow-x: auto;
+  min-width: 0;
+  max-width: 100%;
+  overscroll-behavior-inline: contain;
   margin-top: 12px;
 }
 
@@ -333,6 +351,42 @@
   color: var(--color-text-secondary, #94a3b8);
   font-size: 13px;
   font-weight: 600;
+}
+
+@media (max-width: 600px) {
+  .reports-hub-page .reports-filter { align-items: stretch; }
+  .reports-hub-page .reports-agreement-filter {
+    flex: 1 1 100%;
+    min-width: 0;
+    align-items: stretch;
+    flex-direction: column;
+  }
+  .reports-hub-page .reports-agreement-filter select {
+    width: 100%;
+    max-width: 100%;
+    box-sizing: border-box;
+  }
+  .reports-hub-page .reports-filter-label { flex: 1 1 100%; }
+  .reports-hub-page .date-inputs {
+    display: grid;
+    grid-template-columns: minmax(0, 1fr) auto minmax(0, 1fr);
+    width: 100%;
+    min-width: 0;
+  }
+  .reports-hub-page .date-inputs input {
+    width: 100%;
+    min-width: 0;
+    max-width: 100%;
+    box-sizing: border-box;
+    padding-inline: 6px;
+    font-size: 14px;
+  }
+  .reports-hub-page .reports-filter > button { flex: 1 1 100%; min-width: 0; }
+  .reports-hub-page .kpi-grid { grid-template-columns: repeat(3, minmax(0, 1fr)); gap: 8px; }
+  .reports-hub-page .kpi-card { min-width: 0; padding: 10px 8px; }
+  .reports-hub-page .kpi-value { font-size: 20px; }
+  .reports-hub-page .kpi-label { font-size: 12px; }
+  .reports-hub-page .kpi-unit { font-size: 11px; }
 }
 
 .badge-success {

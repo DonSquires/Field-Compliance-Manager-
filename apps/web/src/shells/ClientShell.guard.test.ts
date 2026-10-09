@@ -27,6 +27,8 @@ describe('ClientShell agreement boundary', () => {
   it('reads report packs by selected service agreement', () => {
     expect(pageSource).toContain(".from('monthly_report_packs')");
     expect(pageSource).toContain(".eq('service_agreement_id', agreement.id)");
+    expect(pageSource).toContain('pdf_renderer_version');
+    expect(pageSource).toContain("report.status === 'sent' || report.pdf_renderer_version === 'fcm-report-pack-pdf-lib-a4-v5'");
   });
 
   it('keeps client finance behind the canonical agreement capability boundary', () => {

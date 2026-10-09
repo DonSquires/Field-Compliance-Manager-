@@ -57,6 +57,7 @@ interface MonthlyReportPack {
   sent_at: string | null;
   pdf_path: string | null;
   pdf_sha256: string | null;
+  pdf_renderer_version: string | null;
   pdf_source_updated_at: string | null;
   delivery_error: string | null;
 }
@@ -128,7 +129,7 @@ export function ClientPortalPage({ page }: { page: ClientPortalPage }) {
       const reportPromise = allowedPages.has('reports')
         ? supabase
             .from('monthly_report_packs')
-            .select('id, template_code, report_kind, report_scope, data, period_start, period_end, status, editorial, generated_at, updated_at, published_at, delivery_channel, sent_at, pdf_path, pdf_sha256, pdf_source_updated_at, delivery_error')
+            .select('id, template_code, report_kind, report_scope, data, period_start, period_end, status, editorial, generated_at, updated_at, published_at, delivery_channel, sent_at, pdf_path, pdf_sha256, pdf_renderer_version, pdf_source_updated_at, delivery_error')
             .eq('service_agreement_id', agreement.id)
             .order('period_end', { ascending: false })
             .limit(24)
@@ -439,8 +440,13 @@ function LocationGrid({ sites, zones }: { sites: Array<{ id: string; name: strin
 function ReportRow({ report }: { report: MonthlyReportPack }) {
   const [opening, setOpening] = useState(false);
   const [error, setError] = useState<string | null>(null);
+  const pdfIsCurrent = Boolean(
+    report.pdf_path
+      && report.pdf_source_updated_at === report.updated_at
+      && (report.status === 'sent' || report.pdf_renderer_version === 'fcm-report-pack-pdf-lib-a4-v5'),
+  );
   const openPdf = async () => {
-    if (!report.pdf_path || report.pdf_source_updated_at !== report.updated_at) return;
+    if (!pdfIsCurrent || !report.pdf_path) return;
     setOpening(true);
     setError(null);
     const { data, error: signedError } = await supabase.storage.from('bob-uploads').createSignedUrl(report.pdf_path, 900);
@@ -453,7 +459,6 @@ function ReportRow({ report }: { report: MonthlyReportPack }) {
   const periodEndLabel = new Date(report.period_end + 'T00:00:00').toLocaleDateString('en-NZ');
   const periodLabel = `${periodStartLabel} to ${periodEndLabel}`;
   const availableLabel = report.status === 'sent' ? 'Issued report' : 'Available live';
-  const pdfIsCurrent = Boolean(report.pdf_path && report.pdf_source_updated_at === report.updated_at);
   let publishedLabel = 'Published report';
   if (report.sent_at) publishedLabel = `Sent ${new Date(report.sent_at).toLocaleDateString('en-NZ')}`;
   else if (report.published_at) publishedLabel = `Published ${new Date(report.published_at).toLocaleDateString('en-NZ')}`;

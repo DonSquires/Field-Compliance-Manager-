@@ -27,6 +27,8 @@ test('email delivery requires reviewed publication and refuses portal-delivered 
   assert.match(send, /rpc\('finalize_report_pack_email_delivery'/);
   assert.match(send, /pack\.pdf_source_updated_at !== pack\.updated_at/);
   assert.match(send, /Generate the reviewed PDF before sending this report/);
+  assert.match(send, /pdf_renderer_version !== CURRENT_REPORT_PDF_RENDERER/);
+  assert.match(send, /Generate a PDF with the current report layout before sending this report/);
   assert.match(send, /createSignedUrl\(pdfPath, 7 \* 24 \* 60 \* 60\)/);
   assert.match(send, /const claim = await claimEmailDelivery[\s\S]+const pdfUrl = await createReportDownloadUrl/);
   assert.doesNotMatch(send, /from\('monthly_report_packs'\)\.update/);
@@ -43,10 +45,19 @@ test('PDF previews include editorial content and cannot overwrite an issued arti
   assert.match(pdf, /noto-sans-latin-ext-400-normal\.woff/);
   assert.match(pdf, /p_expected_updated_at: pack\.updated_at/);
   assert.match(pdf, /rpc\('record_report_pack_pdf'/);
+  assert.match(pdf, /agreementName: reportAgreementName\(pack\)/);
   assert.match(pdf, /remove\(\[path\]\)/);
   assert.match(pdf, /remove\(\[pack\.pdf_path\]\)/);
   assert.match(pdf, /widthOfTextAtSize/);
   assert.doesNotMatch(pdf, /truncateCodePoints/);
+});
+
+test('monthly client email summaries exclude provider-wide incident and alert totals', () => {
+  const monthlySummary = send.slice(send.indexOf('function monthlySummaryHtml'), send.indexOf('function summaryHtml'));
+  assert.match(monthlySummary, /Patrol andamp; Activity Summary|Patrol &amp; Activity Summary/);
+  assert.match(monthlySummary, /Camera activations/);
+  assert.match(monthlySummary, /Vehicle observations/);
+  assert.doesNotMatch(monthlySummary, /d\.incidentsTotal|d\.checkpointVisits|d\.breachAlerts/);
 });
 
 test('client portal reads reviewed editorial content from published report packs', () => {
@@ -70,6 +81,9 @@ test('monthly report snapshots include agreement-place activity aggregates witho
   assert.doesNotMatch(operationalActivityMigration, /event\.payload|job_cost|travel_cost|comments|plate_number/i);
   assert.match(reviewPanel, /numberFrom\(pack\.data, 'patrolVisits'\)/);
   assert.match(reviewPanel, /numberFrom\(pack\.data, 'vehicleObservations'\)/);
+  assert.match(reviewPanel, /SLA in progress/);
+  assert.match(reviewPanel, /facilitiesFrom\(pack\.data\)/);
+  assert.doesNotMatch(reviewPanel, /Incidents|Checkpoint visits|Breach alerts|incidentsTotal|checkpointVisits|breachAlerts/);
 });
 
 test('report generation can be scoped to one authorized service agreement without breaking the all-agreements RPC', () => {

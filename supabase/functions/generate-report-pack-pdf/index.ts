@@ -13,7 +13,7 @@ const fontkit = (fontkitModule as unknown as { default: PdfFontkit }).default;
 const url = Deno.env.get('SUPABASE_URL') ?? '';
 const serviceKey = Deno.env.get('SUPABASE_SERVICE_ROLE_KEY') ?? '';
 const anonKey = Deno.env.get('SUPABASE_ANON_KEY') ?? '';
-const rendererVersion = 'fcm-report-pack-pdf-lib-a4-v4';
+const rendererVersion = 'fcm-report-pack-pdf-lib-a4-v5';
 const fontUrls = {
   normal: 'https://cdn.jsdelivr.net/npm/@fontsource/noto-sans@5.2.8/files/noto-sans-latin-ext-400-normal.woff',
   bold: 'https://cdn.jsdelivr.net/npm/@fontsource/noto-sans@5.2.8/files/noto-sans-latin-ext-700-normal.woff',
@@ -27,6 +27,7 @@ type SupabaseClient = ReturnType<typeof createClient<any>>;
 
 interface PdfReportPack {
   id: string;
+  agreement: { name: string } | Array<{ name: string }> | null;
   organization_id: string;
   period_start: string;
   period_end: string;
@@ -126,6 +127,7 @@ function wrapText(text: string, font: PDFFont, size: number, maxWidth: number) {
 
 interface ReportRenderInput {
   templateTitle: string;
+  agreementName: string;
   period: string;
   packId: string;
   snapshotGeneratedAt: string | null;
@@ -144,7 +146,11 @@ function availabilityLine(status: string, deliveryChannel: string | null) {
   return 'Availability: governed provider report record.';
 }
 
-async function renderPdf({ templateTitle, period, packId, snapshotGeneratedAt, editorial, data, reportKind, reportScope, status, deliveryChannel }: ReportRenderInput): Promise<Uint8Array> {
+function reportAgreementName(pack: PdfReportPack) {
+  return (Array.isArray(pack.agreement) ? pack.agreement[0]?.name : pack.agreement?.name) ?? 'Service agreement';
+}
+
+async function renderPdf({ templateTitle, agreementName, period, packId, snapshotGeneratedAt, editorial, data, reportKind, reportScope, status, deliveryChannel }: ReportRenderInput): Promise<Uint8Array> {
   const pdf = await PDFDocument.create();
   pdf.registerFontkit(fontkit);
   pdf.setLanguage('en-NZ');
@@ -163,8 +169,62 @@ async function renderPdf({ templateTitle, period, packId, snapshotGeneratedAt, e
       y -= size + 6;
     }
   };
+  const drawSection = (title: string) => {
+    y -= 8;
+    if (y < 110) { page = pdf.addPage([595, 842]); y = 780; }
+    page.drawText(title, { x: 54, y, size: 12, font: bold, color: rgb(0.08, 0.12, 0.13) });
+    y -= 10;
+    page.drawLine({ start: { x: 54, y }, end: { x: 541, y }, thickness: 0.7, color: rgb(0.72, 0.82, 0.80) });
+    y -= 14;
+  };
+  const drawMonthlySections = () => {
+    const snapshot = data && typeof data === 'object' && !Array.isArray(data) ? data as Record<string, unknown> : {};
+    const number = (key: string) => typeof snapshot[key] === 'number' ? snapshot[key] as number : null;
+    const format = (value: number | null, maximumFractionDigits = 0) => value === null
+      ? 'Not recorded'
+      : new Intl.NumberFormat('en-NZ', { maximumFractionDigits }).format(value);
+
+    if (typeof editorial.executive_summary === 'string' && editorial.executive_summary) {
+      drawSection('Overview');
+      draw(editorial.executive_summary);
+    }
+    if (typeof editorial.client_notes === 'string' && editorial.client_notes) {
+      drawSection('Operational Highlights');
+      draw(editorial.client_notes);
+    }
+
+    drawSection('Patrol and Activity Summary');
+    draw(`Patrol visits: ${format(number('patrolVisits'))}`);
+    draw(`Camera activations: ${format(number('cameraActivations'))}`);
+    draw(`Vehicle observations: ${format(number('vehicleObservations'))}`);
+    draw(`Patrol travel: ${format(number('patrolTravelKm'), 1)} km`);
+
+    const facilities = Array.isArray(snapshot.facilities)
+      ? snapshot.facilities.filter((value): value is Record<string, unknown> => Boolean(value) && typeof value === 'object' && !Array.isArray(value))
+      : [];
+    if (facilities.length) {
+      drawSection('Site Coverage');
+      draw('Site | Planned activities | Completed activities', bold, 9);
+      for (const facility of facilities) {
+        const expected = typeof facility.expected === 'number' ? facility.expected : null;
+        const completed = typeof facility.completed === 'number' ? facility.completed : null;
+        draw(`${typeof facility.siteName === 'string' ? facility.siteName : 'Unnamed site'} | ${format(expected)} | ${format(completed)}`);
+      }
+    }
+
+    drawSection('Service Level Performance');
+    draw(`SLA met: ${format(number('slaMet'))}`);
+    draw(`SLA breached: ${format(number('slaBreached'))}`);
+    draw(`SLA in progress: ${format(number('slaRunning'))}`);
+
+    if (typeof editorial.follow_up === 'string' && editorial.follow_up) {
+      drawSection('Follow-up');
+      draw(editorial.follow_up);
+    }
+  };
   draw('Field Compliance Manager', bold, 15);
   draw(typeof editorial.title === 'string' && editorial.title ? editorial.title : templateTitle, bold, 18);
+  draw(agreementName, bold, 13);
   draw(`Reporting period: ${period}`, normal, 10);
   draw(`Report pack ID: ${packId}`, normal, 9);
   draw(`Source snapshot generated: ${snapshotGeneratedAt ?? 'Not recorded'}`, normal, 9);
@@ -178,11 +238,15 @@ async function renderPdf({ templateTitle, period, packId, snapshotGeneratedAt, e
     for (const line of customScopeLines(reportScope)) draw(line);
     y -= 4;
   }
-  if (typeof editorial.executive_summary === 'string' && editorial.executive_summary) { draw('Executive summary', bold, 12); draw(editorial.executive_summary); y -= 4; }
-  if (typeof editorial.client_notes === 'string' && editorial.client_notes) { draw('Client notes', bold, 12); draw(editorial.client_notes); y -= 4; }
-  if (typeof editorial.follow_up === 'string' && editorial.follow_up) { draw('Follow-up', bold, 12); draw(editorial.follow_up); y -= 4; }
-  draw('Source-derived metrics', bold, 12);
-  for (const line of flatten(data)) draw(line);
+  if (reportKind === 'custom') {
+    if (typeof editorial.executive_summary === 'string' && editorial.executive_summary) { drawSection('Executive summary'); draw(editorial.executive_summary); }
+    if (typeof editorial.client_notes === 'string' && editorial.client_notes) { drawSection('Client notes'); draw(editorial.client_notes); }
+    if (typeof editorial.follow_up === 'string' && editorial.follow_up) { drawSection('Follow-up'); draw(editorial.follow_up); }
+    drawSection('Source-derived metrics');
+    for (const line of flatten(data)) draw(line);
+  } else {
+    drawMonthlySections();
+  }
   draw('This report is generated from the governed FCM report-pack snapshot.', normal, 8);
   draw(availabilityLine(status, deliveryChannel), normal, 8);
   return pdf.save();
@@ -197,7 +261,7 @@ async function loadRenderContext(req: Request, packId: string): Promise<{ admin:
   const admin = createClient(url, serviceKey);
   const { data: profile } = await admin.from('user_profiles').select('role,organization_id,deactivated_at').eq('id', user.id).single();
   if (!profile || profile.deactivated_at || !canRender.has(String(profile.role))) throw new RequestError('Provider administrator required', 403);
-  const { data: pack, error: packError } = await admin.from('monthly_report_packs').select('id,organization_id,period_start,period_end,template_code,status,data,editorial,generated_at,report_kind,report_scope,updated_at,pdf_path,delivery_channel').eq('id', packId).single();
+  const { data: pack, error: packError } = await admin.from('monthly_report_packs').select('id,organization_id,period_start,period_end,template_code,status,data,editorial,generated_at,report_kind,report_scope,updated_at,pdf_path,delivery_channel,agreement:service_agreement_id(name)').eq('id', packId).single();
   if (packError || !pack) throw new RequestError('Report pack not found', 404);
   const { data: mayRender } = await caller.rpc('is_report_provider_custodian_for_org', { p_target_organization_id: pack.organization_id });
   if (mayRender !== true) throw new RequestError('Forbidden', 403);
@@ -239,6 +303,7 @@ async function handlePdfGeneration(req: Request) {
   const { admin, userId, pack } = await loadRenderContext(req, packId);
   const bytes = await renderPdf({
     templateTitle: `${pack.template_code.replaceAll('_', ' ')} report pack`,
+    agreementName: reportAgreementName(pack),
     period: `${pack.period_start} to ${pack.period_end}`,
     packId: pack.id,
     snapshotGeneratedAt: pack.generated_at,

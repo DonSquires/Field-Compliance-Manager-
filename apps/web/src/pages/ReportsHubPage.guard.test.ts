@@ -37,7 +37,16 @@ describe('governed monthly report pack generation', () => {
     expect(page).toContain('pack_id: pack.id');
     expect(page).toContain('Send reviewed report');
     expect(page).toContain('Available in client portal');
+    expect(page).toContain("storage.from('bob-uploads').download(pack.pdf_path)");
+    expect(page).toContain('anchor.download = reportPdfFilename(pack)');
+    expect(page).toContain('hasLatestReportPdf(pack)');
     expect(page).not.toMatch(/from\('monthly_report_packs'\)[\s\S]{0,240}\.update\(/);
+  });
+
+  it('puts the report queue before secondary analysis and keeps group roll-up available as a disclosure', () => {
+    expect(page.indexOf('className="reports-section report-packs-section"')).toBeLessThan(page.indexOf('<ActivityRecordBrowser'));
+    expect(page).toContain('<details className="reports-section reports-oversight">');
+    expect(page).toContain('Group Reporting Overview');
   });
 
   it('triggers 24-hour operational rollups through the daily rollup edge function', () => {

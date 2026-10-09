@@ -3,11 +3,12 @@ const fs = require('node:fs');
 const path = require('node:path');
 const test = require('node:test');
 
-const migration = fs.readFileSync(path.resolve(__dirname, '../supabase/migrations/20260919050000_shift_start_position.sql'), 'utf8');
-const schedulePage = fs.readFileSync(path.resolve(__dirname, '../apps/web/src/pages/OfficerSchedulePage.tsx'), 'utf8');
-const advisory = fs.readFileSync(path.resolve(__dirname, '../apps/web/src/components/OfficerLocationAdvisory.tsx'), 'utf8');
-const officerShell = fs.readFileSync(path.resolve(__dirname, '../apps/web/src/shells/OfficerShell.tsx'), 'utf8');
-const activeShift = fs.readFileSync(path.resolve(__dirname, '../apps/web/src/hooks/useActiveShift.ts'), 'utf8');
+const readSource = (relativePath) => fs.readFileSync(path.resolve(__dirname, relativePath), 'utf8').replace(/\r\n/g, '\n');
+const migration = readSource('../supabase/migrations/20260919050000_shift_start_position.sql');
+const schedulePage = readSource('../apps/web/src/pages/OfficerSchedulePage.tsx');
+const advisory = readSource('../apps/web/src/components/OfficerLocationAdvisory.tsx');
+const officerShell = readSource('../apps/web/src/shells/OfficerShell.tsx');
+const activeShift = readSource('../apps/web/src/hooks/useActiveShift.ts');
 
 test('the start position is evaluated against the shift places and is never a gate', () => {
   assert.match(migration, /create or replace function public\.evaluate_shift_start_position\(p_shift_id uuid, p_gps_lat double precision, p_gps_lng double precision\)/);
@@ -27,7 +28,7 @@ test('start_officer_shift keeps its guards, records the position and reason, and
   assert.match(migration, /raise exception 'Only the assigned officer or an administrator can start this shift'/);
   assert.match(migration, /if v_shift\.status not in \('scheduled', 'published', 'accepted'\) then/);
   assert.match(migration, /v_position := public\.evaluate_shift_start_position\(v_shift\.id, p_gps_lat, p_gps_lng\);/);
-  assert.match(migration, /'start_position', v_position,\n\s+'off_site_reason', v_reason,/);
+  assert.match(migration, /'start_position', v_position,\r?\n\s+'off_site_reason', v_reason,/);
 });
 
 test('the schedule advises before an off-site or blind start and passes the reason through', () => {
@@ -52,7 +53,7 @@ test('the officer shell only warns about the geofence on a place-bound shift in 
 
 test('the active shift is the officer own shift for today whichever branch rostered it', () => {
   assert.doesNotMatch(activeShift, /\.eq\('organization_id', organizationId\)/);
-  assert.match(activeShift, /\.lte\('scheduled_start', todayEnd\.toISOString\(\)\)\n\s+\.gte\('scheduled_end', todayStart\.toISOString\(\)\)/);
+  assert.match(activeShift, /\.lte\('scheduled_start', todayEnd\.toISOString\(\)\)\r?\n\s+\.gte\('scheduled_end', todayStart\.toISOString\(\)\)/);
   assert.match(activeShift, /\.in\('status', \['accepted', 'in_progress'\]\)/);
   assert.doesNotMatch(activeShift, /maybeSingle\(\)/);
 });

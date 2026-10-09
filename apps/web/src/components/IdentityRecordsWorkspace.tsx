@@ -4,6 +4,7 @@ import {
   Car,
   CheckCircle2,
   FileBadge,
+  Flag,
   Link2,
   Loader2,
   Plus,
@@ -70,6 +71,13 @@ type IdentityDocument = {
   storage_path: string | null;
 };
 
+type PersonInterestFlag = {
+  id: string;
+  alert_level: "low" | "medium" | "high" | "critical";
+  reason: string | null;
+  raised_at: string;
+};
+
 type Registry = {
   people: PersonRecord[];
   vehicles: VehicleRecord[];
@@ -122,6 +130,7 @@ type PersonForm = {
   security_licence_expiry: string;
   security_licence_authority: string;
   security_endorsements: string;
+  nzta_mvr_sourced: boolean;
   document_number: string;
   issued_date: string;
   expiry_date: string;
@@ -157,6 +166,7 @@ const EMPTY_PERSON: PersonForm = {
   security_licence_expiry: "",
   security_licence_authority: "",
   security_endorsements: "",
+  nzta_mvr_sourced: false,
   document_number: "",
   issued_date: "",
   expiry_date: "",
@@ -325,6 +335,7 @@ function personForm(person: PersonRecord): PersonForm {
     security_licence_expiry: value("security_licence_expiry"),
     security_licence_authority: value("security_licence_authority"),
     security_endorsements: value("security_endorsements"),
+    nzta_mvr_sourced: detail.nzta_mvr_sourced === true,
     document_number: "",
     issued_date: "",
     expiry_date: "",
@@ -389,6 +400,13 @@ export function IdentityRecordsWorkspace({
     null,
   );
   const [person, setPerson] = useState<PersonForm>(EMPTY_PERSON);
+  const [personInterestFlags, setPersonInterestFlags] = useState<
+    PersonInterestFlag[]
+  >([]);
+  const [personInterestReason, setPersonInterestReason] = useState("");
+  const [personInterestLevel, setPersonInterestLevel] = useState<
+    PersonInterestFlag["alert_level"]
+  >("medium");
   const [vehicle, setVehicle] = useState<VehicleForm>(EMPTY_VEHICLE);
   const [reason, setReason] = useState("");
   const [documentKind, setDocumentKind] = useState("driver_licence");
@@ -869,6 +887,105 @@ export function IdentityRecordsWorkspace({
   const selectedPerson = registry.people.find(
     (record) => record.person_record_id === selectedPersonId,
   );
+  const selectedCanonicalPersonId = selectedPerson?.canonical_person_id ?? null;
+  const selectedPersonIsVerified =
+    selectedPerson?.review_state === "verified" &&
+    selectedPerson.canonical_review_state === "verified";
+
+  useEffect(() => {
+    if (!selectedCanonicalPersonId || !selectedPersonIsVerified) {
+      setPersonInterestFlags([]);
+      return;
+    }
+
+    let cancelled = false;
+    void supabase
+      .from("entity_flags")
+      .select("id,alert_level,reason,raised_at")
+      .eq("organization_id", organizationId)
+      .eq("entity_type", "person")
+      .eq("entity_id", selectedCanonicalPersonId)
+      .eq("flag_type", "poi")
+      .eq("active", true)
+      .is("hazard_class", null)
+      .order("raised_at", { ascending: false })
+      .then(({ data, error: flagsError }) => {
+        if (cancelled) return;
+        if (flagsError) {
+          setError(flagsError.message);
+          setPersonInterestFlags([]);
+        } else {
+          setPersonInterestFlags((data ?? []) as PersonInterestFlag[]);
+        }
+      });
+
+    return () => {
+      cancelled = true;
+    };
+  }, [organizationId, selectedCanonicalPersonId, selectedPersonIsVerified]);
+
+  const raisePersonInterestFlag = async (event: FormEvent) => {
+    event.preventDefault();
+    if (
+      !selectedCanonicalPersonId ||
+      !selectedPersonIsVerified ||
+      personInterestReason.trim().length < 5 ||
+      personInterestFlags.length > 0
+    ) return;
+
+    setBusy("person-interest");
+    setError(null);
+    setNotice(null);
+    try {
+      const { data, error: flagError } = await supabase.rpc(
+        "raise_scoped_person_interest_flag",
+        {
+          p_organization_id: organizationId,
+          p_client_request_id: crypto.randomUUID(),
+          p_canonical_person_id: selectedCanonicalPersonId,
+        p_alert_level: personInterestLevel,
+        p_reason: personInterestReason.trim(),
+        },
+      );
+      if (flagError) throw new Error(flagError.message);
+      setPersonInterestFlags([data as PersonInterestFlag]);
+      setPersonInterestReason("");
+      setNotice("Person-of-interest flag added to this organisation's record.");
+    } catch (flagError) {
+      setError(
+        flagError instanceof Error
+          ? flagError.message
+          : "The person-of-interest flag could not be added.",
+      );
+    } finally {
+      setBusy(null);
+    }
+  };
+
+  const resolvePersonInterestFlag = async (flag: PersonInterestFlag) => {
+    setBusy(`resolve-person-interest-${flag.id}`);
+    setError(null);
+    setNotice(null);
+    try {
+      const { error: resolveError } = await supabase.rpc("resolve_entity_flag", {
+        p_flag_id: flag.id,
+        p_note: null,
+      });
+      if (resolveError) throw new Error(resolveError.message);
+      setPersonInterestFlags((current) =>
+        current.filter((item) => item.id !== flag.id),
+      );
+      setNotice("Person-of-interest flag resolved with audit history.");
+    } catch (resolveError) {
+      setError(
+        resolveError instanceof Error
+          ? resolveError.message
+          : "The person-of-interest flag could not be resolved.",
+      );
+    } finally {
+      setBusy(null);
+    }
+  };
   const selectedDocumentType = documentTypes.find(
     (definition) => definition.document_kind === documentKind,
   );
@@ -1086,6 +1203,26 @@ export function IdentityRecordsWorkspace({
                         placeholder="Visitor, permit holder, person of interest…"
                       />
                     </label>
+                    <div className="identity-source-marker">
+                      <label htmlFor="identity-nzta-mvr-sourced">
+                        <input
+                          id="identity-nzta-mvr-sourced"
+                          name="nzta_mvr_sourced"
+                          type="checkbox"
+                          checked={person.nzta_mvr_sourced}
+                          onChange={(event) =>
+                            setPerson({
+                              ...person,
+                              nzta_mvr_sourced: event.target.checked,
+                            })
+                          }
+                        />
+                        <span>Previously sourced from NZTA Motor Vehicle Register</span>
+                      </label>
+                      <p>
+                        Historical provenance only. This does not authorize new lookups or confirm current access terms.
+                      </p>
+                    </div>
                     <label>
                       <span>Email</span>
                       <input
@@ -1267,6 +1404,89 @@ export function IdentityRecordsWorkspace({
                     )}
                   </div>
                 </form>
+                {selectedPersonId && (
+                  <section className="identity-documents">
+                    <h3>Person of interest</h3>
+                    {selectedPersonIsVerified ? (
+                      <>
+                        <p>
+                          This organisation&apos;s flag is private to its own
+                          records and does not, by itself, establish wrongdoing.
+                        </p>
+                        {personInterestFlags.map((flag) => (
+                          <div
+                            className="identity-records-message"
+                            key={flag.id}
+                          >
+                            <Flag size={15} />
+                            <span>
+                              Active · {words(flag.alert_level)} · {flag.reason || "No reason recorded"}
+                            </span>
+                            <button
+                              type="button"
+                              onClick={() => void resolvePersonInterestFlag(flag)}
+                              disabled={busy !== null}
+                              aria-label="Resolve person-of-interest flag"
+                            >
+                              {busy === `resolve-person-interest-${flag.id}` ? "Resolving" : "Resolve"}
+                            </button>
+                          </div>
+                        ))}
+                        {personInterestFlags.length === 0 && (
+                          <form onSubmit={raisePersonInterestFlag}>
+                            <div className="identity-records-fields">
+                              <label>
+                                <span>Priority</span>
+                                <select
+                                  value={personInterestLevel}
+                                  onChange={(event) =>
+                                    setPersonInterestLevel(
+                                      event.target.value as PersonInterestFlag["alert_level"],
+                                    )
+                                  }
+                                >
+                                  <option value="low">Low</option>
+                                  <option value="medium">Medium</option>
+                                  <option value="high">High</option>
+                                  <option value="critical">Critical</option>
+                                </select>
+                              </label>
+                              <label className="is-wide">
+                                <span>Reason and supporting basis</span>
+                                <textarea
+                                  rows={3}
+                                  required
+                                  minLength={5}
+                                  maxLength={1000}
+                                  value={personInterestReason}
+                                  onChange={(event) =>
+                                    setPersonInterestReason(event.target.value)
+                                  }
+                                />
+                              </label>
+                            </div>
+                            <button
+                              type="submit"
+                              className="identity-records-primary"
+                              disabled={
+                                busy !== null ||
+                                personInterestReason.trim().length < 5
+                              }
+                            >
+                              <Flag size={15} />
+                              {busy === "person-interest" ? "Adding flag" : "Flag as person of interest"}
+                            </button>
+                          </form>
+                        )}
+                      </>
+                    ) : (
+                      <p className="identity-records-guidance">
+                        A person-of-interest flag is available after the person
+                        record and canonical identity are verified.
+                      </p>
+                    )}
+                  </section>
+                )}
                 {selectedPersonId && (
                   <section className="identity-documents">
                     <h3>2. Identity evidence</h3>
