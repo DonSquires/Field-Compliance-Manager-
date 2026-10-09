@@ -1,6 +1,6 @@
-import { useCallback, useEffect, useMemo, useState } from 'react';
+import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { Link } from 'react-router-dom';
-import { AlertTriangle, CheckCircle2, Plus, RefreshCw } from 'lucide-react';
+import { AlertTriangle, CheckCircle2, Plus, RefreshCw, X } from 'lucide-react';
 import { useAuth } from '../context/AuthContext';
 import { useServiceRelationships } from '../context/ServiceRelationshipContext';
 import { agreementTermState } from '../lib/agreementTerm';
@@ -84,6 +84,9 @@ export default function RateRulesPage() {
   const [ruleSearch, setRuleSearch] = useState('');
   const [ruleKindFilter, setRuleKindFilter] = useState<RuleKindFilter>('all');
   const [ruleStatusFilter, setRuleStatusFilter] = useState<RuleStatusFilter>('all');
+  const ruleFormRef = useRef<HTMLFormElement>(null);
+  const ruleFormTriggerRef = useRef<HTMLButtonElement>(null);
+  const returnFocusToTrigger = useRef(false);
   const [form, setForm] = useState(EMPTY_FORM);
   const [bandForm, setBandForm] = useState(EMPTY_BAND_FORM);
   const operatingBranchId = operatingOrganizationId ?? profile?.organizationId;
@@ -164,6 +167,56 @@ export default function RateRulesPage() {
 
   useEffect(() => { void load(); }, [load]);
   useEffect(() => { if (!showForm) setEditingRule(null); }, [showForm]);
+
+  useEffect(() => {
+    if (!showForm) {
+      if (returnFocusToTrigger.current) {
+        ruleFormTriggerRef.current?.focus();
+        returnFocusToTrigger.current = false;
+      }
+      return;
+    }
+
+    const dialog = ruleFormRef.current;
+    dialog?.querySelector<HTMLElement>('select, input, textarea')?.focus();
+    const handleDialogKey = (event: KeyboardEvent) => {
+      if (event.key === 'Escape' && !saving) {
+        event.preventDefault();
+        returnFocusToTrigger.current = true;
+        setShowForm(false);
+        setEditingRule(null);
+        setForm(EMPTY_FORM);
+        return;
+      }
+      if (event.key !== 'Tab' || !dialog) return;
+      const focusable = Array.from(dialog.querySelectorAll<HTMLElement>('button:not([disabled]), input:not([disabled]), select:not([disabled]), textarea:not([disabled])'));
+      const first = focusable[0];
+      const last = focusable[focusable.length - 1];
+      if (event.shiftKey && document.activeElement === first) {
+        event.preventDefault();
+        last?.focus();
+      } else if (!event.shiftKey && document.activeElement === last) {
+        event.preventDefault();
+        first?.focus();
+      }
+    };
+    window.addEventListener('keydown', handleDialogKey);
+    return () => window.removeEventListener('keydown', handleDialogKey);
+  }, [saving, showForm]);
+
+  const openNewRule = () => {
+    setEditingRule(null);
+    setForm(EMPTY_FORM);
+    setShowForm(true);
+  };
+
+  const closeRuleForm = () => {
+    if (saving) return;
+    returnFocusToTrigger.current = true;
+    setShowForm(false);
+    setEditingRule(null);
+    setForm(EMPTY_FORM);
+  };
 
   const createRule = async (event: React.FormEvent) => {
     event.preventDefault();
@@ -266,7 +319,7 @@ export default function RateRulesPage() {
   };
 
   return <div className="page-container rate-rules-page">
-    <header className="page-header"><div><h1>Pay and charge rules</h1><p className="subtitle">The rules that decide what staff are paid and what customers are charged for shifts, callouts, court time, and dispatch jobs.</p></div><div><button type="button" className="btn btn-secondary" onClick={() => void load()} disabled={loading}><RefreshCw size={16} /></button><button type="button" className="btn btn-primary" onClick={() => setShowForm((value) => !value)}><Plus size={16} />{showForm ? 'Cancel' : 'New pay or charge rule'}</button></div></header>
+    <header className="page-header"><div><h1>Pay and charge rules</h1><p className="subtitle">The rules that decide what staff are paid and what customers are charged for shifts, callouts, court time, and dispatch jobs.</p></div><div><button type="button" className="btn btn-secondary" onClick={() => void load()} disabled={loading} title="Refresh rate rules" aria-label="Refresh rate rules"><RefreshCw size={16} /></button><button ref={ruleFormTriggerRef} type="button" className="btn btn-primary" onClick={openNewRule}><Plus size={16} />New pay or charge rule</button></div></header>
     {error && <div className="alert alert-error" role="alert"><AlertTriangle size={16} />{error}</div>}
     {notice && <div className="alert alert-success" role="status"><CheckCircle2 size={16} />{notice}</div>}
     <section className="reports-section" aria-label="Patrol SLA discount bands">
@@ -287,7 +340,8 @@ export default function RateRulesPage() {
     {!loading && <FuelPriceMedianPanel organizationId={operatingOrganizationId ?? profile?.organizationId ?? null} />}
     {!loading && <section className="reports-section"><h2>Finished jobs that still need a pay or charge rule ({completedJobs.length})</h2>{completedJobs.length === 0 ? <div className="empty-state"><p>Every finished job has been priced. New jobs are priced automatically the moment they are completed.</p></div> : <div className="contacts-list">{completedJobs.map((job) => <div className="contact-card" key={job.id}><div className="contact-header"><h3>{job.job_type.replaceAll('_', ' ')}</h3><span className="contact-type-badge">Completed</span></div><div className="contact-details"><p>Completed {job.completed_at ? new Date(job.completed_at).toLocaleString() : 'time unavailable'}</p><p className="contact-meta">Missing: {job.missing.map((kind) => kind === 'pay' ? 'staff pay rule' : 'customer charge rule').join(' and ')} for “{job.job_type.replaceAll('_', ' ')}”. Add it below (set “Job type” to {job.job_type}), then re-check. Nothing is written as $0.</p></div><button type="button" className="btn btn-sm btn-primary" disabled={saving} onClick={() => void resolveCompletedJob(job)}>{saving ? 'Checking' : 'Re-check'}</button></div>)}</div>}</section>}
     {!loading && <section className="reports-section"><h2>Completed patrol visits awaiting a per-visit rate ({unresolvedPatrol.length})</h2>{unresolvedPatrol.length === 0 ? <p>No completed patrol visit needs rate review.</p> : <div className="contacts-list">{unresolvedPatrol.map((charge) => <div className="contact-card" key={charge.id}><div className="contact-header"><h3>{clientNames.get(charge.client_organization_id ?? '') ?? (charge.status === 'unresolved_agreement' ? 'No linked client agreement' : 'Client account')}</h3><span className="contact-type-badge">Completed patrol visit</span></div><div className="contact-details"><p>{charge.module_key.replaceAll('_', ' ')} · {charge.service_type.replaceAll('_', ' ')} · stop {charge.shift_stop_id.slice(0, 8)}</p><p className="contact-meta">{charge.status === 'unresolved_agreement' ? 'The shift is not linked to an active client service agreement.' : 'No matching customer billing rule uses the per_visit rate type. No amount was charged.'} Completed {new Date(charge.created_at).toLocaleString('en-NZ')}.</p></div><button type="button" className="btn btn-sm btn-primary" disabled={saving || charge.status === 'unresolved_agreement'} onClick={() => void recheckPatrolCharge(charge)}>{saving ? 'Checking' : 'Re-check rate'}</button></div>)}</div>}</section>}
-    {showForm && <form className="assessment-form rate-rules-form" onSubmit={createRule}>
+    {showForm && <div className="rate-rule-dialog-backdrop" onMouseDown={(event) => { if (event.target === event.currentTarget) closeRuleForm(); }}><form ref={ruleFormRef} className="assessment-form rate-rules-form" role="dialog" aria-modal="true" aria-labelledby="rate-rule-dialog-title" onSubmit={createRule}>
+      <header><div><span>Branch rate rule</span><h2 id="rate-rule-dialog-title">{editingRule ? 'Edit rate rule' : 'New pay or charge rule'}</h2></div><button type="button" onClick={closeRuleForm} disabled={saving} aria-label="Close rate rule editor"><X size={18} /></button></header>
       <div className="form-row">
         <label><span>What this rule sets</span><select value={form.kind} onChange={(event) => setForm({ ...form, kind: event.target.value as 'pay' | 'billing', roleCode: event.target.value === 'billing' ? '' : form.roleCode })}><option value="pay">Staff pay</option><option value="billing">Customer charge</option></select></label>
         <label><span>Name</span><input required value={form.name} onChange={(event) => setForm({ ...form, name: event.target.value })} /></label>
@@ -335,7 +389,7 @@ export default function RateRulesPage() {
       </div>
       {form.kind === 'billing' && <p role="status">Applies to {form.clientOrgId ? clientNames.get(form.clientOrgId) ?? 'the selected client' : 'any client'} · {form.siteId ? siteNames.get(form.siteId) ?? 'the selected site' : form.zoneId ? zoneNames.get(form.zoneId) ?? 'the selected zone' : 'all linked places'}.</p>}
       <button type="submit" className="btn btn-primary" disabled={saving || !form.name.trim() || !form.amount}>{saving ? 'Saving' : editingRule ? 'Save rate rule' : 'Create rate rule'}</button>
-    </form>}
+    </form></div>}
     {loading ? <div className="loading-state"><div className="spinner" /><p>Loading pay and charge rules</p></div> : <section className="reports-section rate-rules-ledger" aria-labelledby="rate-rules-ledger-title">
       <header><div><h2 id="rate-rules-ledger-title">Pay and charge rules</h2><p className="subtitle">Search and review rules loaded for this operating branch.</p></div><strong role="status" aria-live="polite">Showing {visibleRules.length} of {rules.length}</strong></header>
       <div className="rate-rules-filters" role="search" aria-label="Filter pay and charge rules">

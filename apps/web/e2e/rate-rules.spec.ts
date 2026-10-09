@@ -18,7 +18,7 @@ test('creating a branch pay rule sends the selected role code in the governed RP
 
   await signInAsAdmin(page, '/admin/rate-rules');
   await page.getByRole('button', { name: 'New pay or charge rule' }).click();
-  const form = page.locator('form.assessment-form');
+  const form = page.getByRole('dialog', { name: 'New pay or charge rule' });
   await form.getByLabel('Name').fill('Field security hourly pay');
   await form.getByLabel('Amount').fill('32.50');
   await expect(form.getByLabel('Payroll role')).toHaveCount(1);
@@ -42,7 +42,7 @@ test('editing a branch pay rule sends its selected role code in the governed RPC
 
   await signInAsAdmin(page, '/admin/rate-rules');
   await page.getByRole('button', { name: 'Edit rule Existing hourly pay' }).click();
-  const form = page.locator('form.assessment-form');
+  const form = page.getByRole('dialog', { name: 'Edit rate rule' });
   await expect(form.getByLabel('Payroll role')).toHaveCount(1);
   await form.getByLabel('Payroll role').selectOption('field_security');
   await form.getByRole('button', { name: 'Save rate rule' }).click();
@@ -74,7 +74,11 @@ test('branch rate ledger searches loaded rules and filters type and status witho
   await page.getByLabel('Filter by rule status').selectOption('inactive');
   await expect(register.getByRole('row')).toHaveCount(2);
   await register.getByRole('row').filter({ hasText: 'Field officer hourly' }).getByRole('button', { name: 'Edit rule Field officer hourly' }).click();
-  await expect(page.locator('form.rate-rules-form').getByLabel('Payroll role')).toHaveValue('field_security');
+  const editor = page.getByRole('dialog', { name: 'Edit rate rule' });
+  await expect(editor.getByLabel('Payroll role')).toHaveValue('field_security');
+  await page.keyboard.press('Escape');
+  await expect(editor).toBeHidden();
+  await expect(page.getByRole('button', { name: 'New pay or charge rule' })).toBeFocused();
   expect(await page.evaluate(() => document.documentElement.scrollWidth <= window.innerWidth)).toBe(true);
 });
 
@@ -83,18 +87,22 @@ test('administrator creates a governed operating branch patrol rate rule', async
   await signInAsAdmin(page, '/admin/rate-rules');
   await expect(page.getByRole('heading', { level: 1, name: 'Pay and charge rules' })).toBeVisible();
   await page.getByRole('button', { name: 'New pay or charge rule' }).click();
-  const form = page.locator('form.assessment-form');
+  const form = page.getByRole('dialog', { name: 'New pay or charge rule' });
   await form.getByLabel('Name').fill('Patrol visit - branch standard');
   await form.getByLabel('How it is charged').selectOption('per_visit');
   await form.getByLabel('Amount').fill('42.50');
   await form.getByLabel('Service type').fill('patrol');
   await expect(form).toHaveScreenshot('operating-branch-rate-rule.png');
+  const dialogBounds = await form.boundingBox();
+  const viewport = page.viewportSize();
+  expect(dialogBounds && viewport && dialogBounds.x >= 0 && dialogBounds.y >= 0 && dialogBounds.x + dialogBounds.width <= viewport.width && dialogBounds.y + dialogBounds.height <= viewport.height).toBe(true);
+  if ((viewport?.width ?? 0) < 640) expect(await form.evaluate((element) => element.scrollHeight > element.clientHeight)).toBe(true);
   await form.getByRole('button', { name: 'Create rate rule' }).click();
   await expect(page.getByText('Rate rule created and available to the resolver.')).toBeVisible();
   const createdRule = page.getByRole('row').filter({ hasText: 'Patrol visit - branch standard' });
   await expect(createdRule).toBeVisible();
   await createdRule.getByRole('button', { name: 'Edit rule Patrol visit - branch standard' }).click();
-  const editForm = page.locator('form.assessment-form');
+  const editForm = page.getByRole('dialog', { name: 'Edit rate rule' });
   await expect(editForm.getByLabel('Amount')).toHaveValue('42.5');
   await editForm.getByLabel('Amount').fill('45.00');
   await editForm.getByRole('button', { name: 'Save rate rule' }).click();

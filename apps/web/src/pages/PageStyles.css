@@ -376,6 +376,78 @@
   font-size: 12px;
 }
 
+.rate-rule-dialog-backdrop {
+  position: fixed;
+  z-index: 100;
+  inset: 0;
+  display: grid;
+  place-items: center;
+  padding: 18px;
+  background: rgba(23, 33, 29, 0.42);
+  backdrop-filter: blur(3px);
+}
+
+.rate-rules-form[role='dialog'] {
+  width: min(100%, 880px);
+  max-height: calc(100vh - 36px);
+  overflow-y: auto;
+  margin: 0;
+  border-color: var(--color-border-strong);
+  background: var(--color-bg-secondary);
+  box-shadow: 0 24px 70px rgba(23, 33, 29, 0.24);
+}
+
+.rate-rules-form[role='dialog'] > header {
+  display: flex;
+  align-items: flex-start;
+  justify-content: space-between;
+  gap: 16px;
+  padding-bottom: 12px;
+  border-bottom: 1px solid var(--color-border);
+}
+
+.rate-rules-form[role='dialog'] > header > div {
+  display: grid;
+  gap: 3px;
+}
+
+.rate-rules-form[role='dialog'] > header span {
+  color: var(--color-primary);
+  font-size: 12px;
+  font-weight: 800;
+  text-transform: uppercase;
+}
+
+.rate-rules-form[role='dialog'] > header h2 {
+  margin: 0;
+  font-size: 19px;
+}
+
+.rate-rules-form[role='dialog'] > header button {
+  display: grid;
+  place-items: center;
+  flex: 0 0 36px;
+  width: 36px;
+  height: 36px;
+  border: 1px solid var(--color-border);
+  border-radius: 5px;
+  color: var(--color-text-secondary);
+  background: var(--color-bg-secondary);
+  cursor: pointer;
+}
+
+@media (max-width: 640px) {
+  .rate-rule-dialog-backdrop {
+    align-items: end;
+    padding: 8px;
+  }
+
+  .rate-rules-form[role='dialog'] {
+    max-height: calc(100vh - 16px);
+    padding: 14px;
+  }
+}
+
 @media (max-width: 760px) {
   .rate-rules-filters {
     grid-template-columns: 1fr 1fr;

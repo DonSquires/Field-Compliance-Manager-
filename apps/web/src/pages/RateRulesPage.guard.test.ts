@@ -12,7 +12,7 @@ describe('operating branch rate rules page', () => {
     expect(page).toContain('Rate rule updated with a new audit revision.');
     expect(page).toContain(".from('reference_codes').select('code,name')");
     expect(page).toContain('p_role_code: form.kind === \'pay\' ? form.roleCode');
-    expect(page).toContain('Payroll role: {rule.role_code}');
+    expect(page).toContain('`Payroll role ${rule.role_code}`');
   });
 
   it('saves client, place, and effective-date scopes supported by the rate resolver', () => {
