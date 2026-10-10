@@ -137,9 +137,7 @@ const AdminHubPage: React.FC<AdminHubPageProps> = ({ onNavigate }) => {
           ? supabase.from('dispatch_jobs').select('id', { count: 'exact', head: true }).in('zone_id', activeZoneIds).in('status', ACTIVE_DISPATCH_JOB_STATUSES)
           : supabase.from('dispatch_jobs').select('id', { count: 'exact', head: true }).eq('organization_id', organizationId).in('status', ACTIVE_DISPATCH_JOB_STATUSES),
         welfareEnabled
-          ? activeZoneIds && activeZoneIds.length > 0
-            ? supabase.from('welfare_alerts').select('id', { count: 'exact', head: true }).in('zone_id', activeZoneIds).in('status', ['pending', 'acknowledged'])
-            : supabase.from('welfare_alerts').select('id', { count: 'exact', head: true }).eq('organization_id', organizationId).in('status', ['pending', 'acknowledged'])
+          ? supabase.from('welfare_alerts').select('id', { count: 'exact', head: true }).eq('organization_id', organizationId).in('status', ['pending', 'acknowledged'])
           : Promise.resolve({ count: 0, error: null }),
         activeZoneIds && activeZoneIds.length > 0
           ? supabase.from('breach_alerts').select('id', { count: 'exact', head: true }).in('zone_id', activeZoneIds).in('status', ['open', 'acknowledged', 'actioned'])
@@ -151,9 +149,7 @@ const AdminHubPage: React.FC<AdminHubPageProps> = ({ onNavigate }) => {
           ? supabase.from('dispatch_jobs').select('created_at,status').in('zone_id', activeZoneIds).gte('created_at', trendStart.toISOString()).order('created_at', { ascending: true }).limit(1000)
           : supabase.from('dispatch_jobs').select('created_at,status').eq('organization_id', organizationId).gte('created_at', trendStart.toISOString()).order('created_at', { ascending: true }).limit(1000),
         welfareEnabled
-          ? activeZoneIds && activeZoneIds.length > 0
-            ? supabase.from('welfare_alerts').select('id, officer_user_id, alert_type, status, escalation_level, triggered_at').in('zone_id', activeZoneIds).in('status', ['pending', 'acknowledged']).order('triggered_at', { ascending: false }).limit(6)
-            : supabase.from('welfare_alerts').select('id, officer_user_id, alert_type, status, escalation_level, triggered_at').eq('organization_id', organizationId).in('status', ['pending', 'acknowledged']).order('triggered_at', { ascending: false }).limit(6)
+          ? supabase.from('welfare_alerts').select('id, officer_user_id, alert_type, status, escalation_level, triggered_at').eq('organization_id', organizationId).in('status', ['pending', 'acknowledged']).order('triggered_at', { ascending: false }).limit(6)
           : Promise.resolve({ data: [], error: null }),
         activeZoneIds && activeZoneIds.length > 0
           ? supabase.from('dispatch_jobs').select('id, job_type, priority, status, sla_respond_by, created_at').in('zone_id', activeZoneIds).in('status', ACTIVE_DISPATCH_JOB_STATUSES).order('created_at', { ascending: false }).limit(6)
@@ -363,10 +359,12 @@ const AdminHubPage: React.FC<AdminHubPageProps> = ({ onNavigate }) => {
             <strong>{queue.length}</strong>
           </div>
           <p className="admin-queue-scope-note">
-            Field items use {selectedAgreementZones.length > 0 ? 'Zones on the active agreement' : 'organization-wide scope'}. CCTV processing is organization-wide.
+            Dispatch, breaches, reports, and observations use {selectedAgreementZones.length > 0 ? 'Zones on the active agreement' : 'organization-wide scope'}. Welfare and CCTV processing are organization-wide.
           </p>
 
-          {!loading && queue.length === 0 && queueWarnings.length === 0 ? (
+          {loading && queue.length === 0 ? (
+            <div className="admin-queue-loading" role="status">Refreshing the live queue…</div>
+          ) : queue.length === 0 && queueWarnings.length === 0 ? (
             <div className="admin-queue-empty">
               <ClipboardCheck size={24} aria-hidden="true" />
               <strong>Queue clear</strong>

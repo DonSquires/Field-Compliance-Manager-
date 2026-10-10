@@ -52,4 +52,11 @@ describe('Admin Hub operational data contract', () => {
   it('does not offer navigation from an unavailable welfare metric', () => {
     expect(source).toMatch(/renderUnavailable=\{\(message\) => <MetricCard[^>]+label="Welfare alerts"[^>]+tone="red" \/>\}/);
   });
+
+  it('queries welfare organization-wide because welfare alerts have no zone column', () => {
+    const welfareQueries = source.split('\n').filter((line) => line.includes("from('welfare_alerts')"));
+    expect(welfareQueries.length).toBeGreaterThanOrEqual(2);
+    for (const query of welfareQueries) expect(query).not.toContain("in('zone_id'");
+    expect(source).toContain('Welfare and CCTV processing are organization-wide.');
+  });
 });
