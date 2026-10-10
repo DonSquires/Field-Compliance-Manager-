@@ -501,9 +501,17 @@
   flex-direction: column;
   align-items: center;
   justify-content: center;
-  min-height: 230px;
+  min-height: 118px;
   gap: 6px;
   color: #82d9b1;
+}
+
+.admin-queue-loading {
+  display: grid;
+  min-height: 96px;
+  place-items: center;
+  color: var(--color-text-secondary);
+  font-size: 13px;
 }
 
 .admin-queue-empty strong {

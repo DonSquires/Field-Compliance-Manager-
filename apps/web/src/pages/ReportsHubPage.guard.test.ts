@@ -43,8 +43,10 @@ describe('governed monthly report pack generation', () => {
     expect(page).not.toMatch(/from\('monthly_report_packs'\)[\s\S]{0,240}\.update\(/);
   });
 
-  it('puts the report queue before secondary analysis and keeps group roll-up available as a disclosure', () => {
-    expect(page.indexOf('className="reports-section report-packs-section"')).toBeLessThan(page.indexOf('<ActivityRecordBrowser'));
+  it('puts source records before report production and keeps group roll-up available as a disclosure', () => {
+    expect(page.indexOf('<ActivityRecordBrowser')).toBeLessThan(page.indexOf('className="reports-section report-packs-section"'));
+    expect(page).toContain('Step 1 · Review source records');
+    expect(page).toContain('Step 2 · Produce and approve');
     expect(page).toContain('<details className="reports-section reports-oversight">');
     expect(page).toContain('Group Reporting Overview');
   });
@@ -63,9 +65,9 @@ describe('governed monthly report pack generation', () => {
     expect(page).toContain("useEnabledModules(profile?.organizationId)");
     expect(page).toContain("isModuleEnabled('freedom_camping')");
     expect(page).toContain('!freedomCampingEnabled\n          ? Promise.resolve({ data: [], error: null })');
-    expect(page).toContain('{freedomCampingEnabled && <div className="kpi-grid">');
-    expect(page).toContain('{freedomCampingEnabled && <section className="reports-section">\n        <h2>Recent Breach Alerts');
-    expect(page).toContain('{freedomCampingEnabled && <section className="reports-section">\n        <h2>Vehicle Observations');
+    expect(page).toContain('{freedomCampingEnabled && <div className="kpi-card">');
+    expect(page).not.toContain('<h2>Recent Breach Alerts');
+    expect(page).not.toContain('<h2>Vehicle Observations');
   });
 
   it('keeps drafts provider-private and exposes only published client reports', () => {
@@ -96,6 +98,20 @@ describe('governed monthly report pack generation', () => {
     // Narrative columns are read only through the signed-in session, so row-level security still decides who sees them.
     expect(browser).toContain('officer_notes');
     expect(browser).not.toContain('service_role');
+  });
+
+  it('counts patrol activity and evidence in the selected client scope', () => {
+    expect(page).toContain("from('location_events')");
+    expect(page).toContain("from('evidence_items')");
+    expect(page).toContain("totalVisits: visitResponse.count ?? 0");
+    expect(page).toContain("totalEvidence: evidenceResponse.count ?? 0");
+  });
+
+  it('treats observations as a shared field-evidence spine rather than a Freedom Camping-only metric', () => {
+    expect(page).toContain('const observationPlaceFilter = [');
+    expect(page).toContain('observationPlaceFilter\n          ? supabase');
+    expect(page).toContain('.or(observationPlaceFilter)');
+    expect(page).toContain("...(reportSiteIds.length > 0 ? [`site_id.in.(${reportSiteIds.join(',')})`] : [])");
   });
 
   it('never replaces the whole Reports page with a spinner, so filters and navigation stay usable', () => {

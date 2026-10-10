@@ -45,6 +45,8 @@ interface ReportMetrics {
   totalBreaches: number;
   totalObservations: number;
   nonCompliantObservations: number;
+  totalVisits: number;
+  totalEvidence: number;
 }
 interface ConsolidatedReportingRow {
   source_organization_id: string;
@@ -119,11 +121,6 @@ function reportPdfFilename(pack: MonthlyReportPack): string {
   return `${stem || 'FCM report'}.pdf`;
 }
 
-function complianceLabel(value: boolean | null): string {
-  if (value === null) return '—';
-  return value ? 'Yes' : 'No';
-}
-
 interface ReportPackRowProps {
   pack: MonthlyReportPack;
   busy: boolean;
@@ -196,10 +193,10 @@ const ReportsHubPage: React.FC = () => {
     totalBreaches: 0,
     totalObservations: 0,
     nonCompliantObservations: 0,
+    totalVisits: 0,
+    totalEvidence: 0,
   });
 
-  const [breachAlerts, setBreachAlerts] = useState<BreachAlert[]>([]);
-  const [observations, setObservations] = useState<Observation[]>([]);
   const [reportScope, setReportScope] = useState<{ zoneIds: string[]; siteIds: string[] }>({ zoneIds: [], siteIds: [] });
   const [reportPacks, setReportPacks] = useState<MonthlyReportPack[]>([]);
   const [consolidatedReporting, setConsolidatedReporting] = useState<ConsolidatedReportingRow[]>([]);
@@ -242,14 +239,27 @@ const ReportsHubPage: React.FC = () => {
         if (linksError) throw linksError;
         reportZoneIds = [...new Set((links ?? []).map((link) => link.zone_id).filter((id): id is string => Boolean(id)))];
         reportSiteIds = [...new Set((links ?? []).map((link) => link.site_id).filter((id): id is string => Boolean(id)))];
-        if (selectedAgreement) activeZoneIds = reportZoneIds.length > 0 ? reportZoneIds : null;
+        activeZoneIds = reportZoneIds.length > 0 ? reportZoneIds : null;
       }
       setReportScope((current) => (current.zoneIds.join(',') === reportZoneIds.join(',') && current.siteIds.join(',') === reportSiteIds.join(',') ? current : { zoneIds: reportZoneIds, siteIds: reportSiteIds }));
       const timestampEndExclusive = exclusiveEndIso(dateRange.end);
       // Report packs belong to the agreement's provider, which is a branch under the Model A house; list the whole house.
       const { data: descendantOrgIds } = await supabase.rpc('get_descendant_organizations', { org_id: profile.organizationId });
       const houseOrgIds = [...new Set([profile.organizationId, ...(Array.isArray(descendantOrgIds) ? descendantOrgIds : [])])];
-      const [breachResponse, observationResponse, packResponse, consolidatedResponse] = await Promise.all([
+      const clientOrganizationIds = [...new Set(
+        (selectedAgreement ? [selectedAgreement] : providerAgreements)
+          .map((agreement) => agreement.client_organization_id)
+          .filter((id): id is string => Boolean(id)),
+      )];
+      const placeFilter = [
+        ...(reportZoneIds.length > 0 ? [`zone_id.in.(${reportZoneIds.join(',')})`] : []),
+        ...(reportSiteIds.length > 0 ? [`client_site_id.in.(${reportSiteIds.join(',')})`] : []),
+      ].join(',');
+      const observationPlaceFilter = [
+        ...(reportZoneIds.length > 0 ? [`zone_id.in.(${reportZoneIds.join(',')})`] : []),
+        ...(reportSiteIds.length > 0 ? [`site_id.in.(${reportSiteIds.join(',')})`] : []),
+      ].join(',');
+      const [breachResponse, observationResponse, visitResponse, evidenceResponse, packResponse, consolidatedResponse] = await Promise.all([
         !freedomCampingEnabled
           ? Promise.resolve({ data: [], error: null })
           : activeZoneIds && activeZoneIds.length > 0
@@ -269,13 +279,11 @@ const ReportsHubPage: React.FC = () => {
               .gte('created_at', dateRange.start)
               .lt('created_at', timestampEndExclusive)
               .order('created_at', { ascending: false }),
-        !freedomCampingEnabled
-          ? Promise.resolve({ data: [], error: null })
-          : activeZoneIds && activeZoneIds.length > 0
+        observationPlaceFilter
           ? supabase
               .from('observations')
               .select('id, observed_at, plate_number, officer_id, subject_kind, is_compliant, compliance_reason, zone_id')
-              .in('zone_id', activeZoneIds)
+              .or(observationPlaceFilter)
               .gte('observed_at', dateRange.start)
               .lt('observed_at', timestampEndExclusive)
               .order('observed_at', { ascending: false })
@@ -288,6 +296,22 @@ const ReportsHubPage: React.FC = () => {
               .gte('observed_at', dateRange.start)
               .lt('observed_at', timestampEndExclusive)
               .order('observed_at', { ascending: false }),
+        placeFilter
+          ? supabase
+              .from('location_events')
+              .select('id', { count: 'exact', head: true })
+              .or(placeFilter)
+              .gte('occurred_at', dateRange.start)
+              .lt('occurred_at', timestampEndExclusive)
+          : Promise.resolve({ count: 0, error: null }),
+        clientOrganizationIds.length > 0
+          ? supabase
+              .from('evidence_items')
+              .select('id', { count: 'exact', head: true })
+              .in('organization_id', clientOrganizationIds)
+              .gte('captured_at', dateRange.start)
+              .lt('captured_at', timestampEndExclusive)
+          : Promise.resolve({ count: 0, error: null }),
         selectedAgreement?.id
           ? supabase
               .from('monthly_report_packs')
@@ -307,7 +331,7 @@ const ReportsHubPage: React.FC = () => {
         supabase.rpc('get_consolidated_reporting_overview', { p_root_organization_id: profile.organizationId, p_from: dateRange.start, p_to: dateRange.end }),
       ]);
 
-      const failure = breachResponse.error ?? observationResponse.error ?? packResponse.error ?? consolidatedResponse.error;
+      const failure = breachResponse.error ?? observationResponse.error ?? visitResponse.error ?? evidenceResponse.error ?? packResponse.error ?? consolidatedResponse.error;
       if (failure) throw failure;
       const breaches = (breachResponse.data as BreachAlert[]) || [];
       const obs = (observationResponse.data as Observation[]) || [];
@@ -319,11 +343,15 @@ const ReportsHubPage: React.FC = () => {
           .in('organization_id', houseOrgIds).in('template_code', templateCodes);
         for (const template of templates ?? []) templateNames.set(`${template.organization_id}:${template.template_code}`, template.name);
       }
-      setBreachAlerts(breaches);
-      setObservations(obs);
       setReportPacks(packs.map((pack) => ({ ...pack, template_name: templateNames.get(`${pack.organization_id}:${pack.template_code}`) ?? null })));
       setConsolidatedReporting((consolidatedResponse.data as ConsolidatedReportingRow[]) || []);
-      setMetrics({ totalBreaches: breaches.length, totalObservations: obs.length, nonCompliantObservations: obs.filter((o) => o.is_compliant === false).length });
+      setMetrics({
+        totalBreaches: breaches.length,
+        totalObservations: obs.length,
+        nonCompliantObservations: obs.filter((o) => o.is_compliant === false).length,
+        totalVisits: visitResponse.count ?? 0,
+        totalEvidence: evidenceResponse.count ?? 0,
+      });
     } catch (err) {
       setError(err instanceof Error ? err.message : 'Failed to load reports');
     } finally {
@@ -495,10 +523,19 @@ const ReportsHubPage: React.FC = () => {
         />
       )}
 
-      {freedomCampingEnabled && <div className="kpi-grid">
+      <section className="reports-workflow-intro" aria-labelledby="reports-records-heading">
+        <div>
+          <span>Step 1 · Review source records</span>
+          <h2 id="reports-records-heading">Records and evidence</h2>
+          <p>Check the underlying patrol activity, observations, notes, provenance, and photos before producing a client report.</p>
+        </div>
+        <strong>{selectedAgreement ? selectedAgreement.name : `${providerAgreements.length} agreements`}</strong>
+      </section>
+
+      <div className="kpi-grid reports-kpi-grid" aria-label="Current reporting scope totals">
         <div className="kpi-card">
-          <div className="kpi-value">{metrics.totalBreaches}</div>
-          <div className="kpi-label">Breach Alerts</div>
+          <div className="kpi-value">{metrics.totalVisits}</div>
+          <div className="kpi-label">Patrol activity</div>
           <div className="kpi-unit">this period</div>
         </div>
         <div className="kpi-card">
@@ -507,21 +544,47 @@ const ReportsHubPage: React.FC = () => {
           <div className="kpi-unit">this period</div>
         </div>
         <div className="kpi-card">
-          <div className="kpi-value">{metrics.nonCompliantObservations}</div>
-          <div className="kpi-label">Non-Compliant</div>
-          <div className="kpi-unit">observations</div>
+          <div className="kpi-value">{metrics.totalEvidence}</div>
+          <div className="kpi-label">Evidence items</div>
+          <div className="kpi-unit">captured this period</div>
         </div>
-      </div>}
+        <div className="kpi-card">
+          <div className="kpi-value">{reportPacks.length}</div>
+          <div className="kpi-label">Report packs</div>
+          <div className="kpi-unit">in this period</div>
+        </div>
+        {freedomCampingEnabled && <div className="kpi-card">
+          <div className="kpi-value">{metrics.totalBreaches}</div>
+          <div className="kpi-label">Breach alerts</div>
+          <div className="kpi-unit">{metrics.nonCompliantObservations} non-compliant observations</div>
+        </div>}
+      </div>
 
-      <section className="reports-section report-packs-section">
-        <h2>Report Packs ({reportPacks.length})</h2>
-        <p className="subtitle">Generated evidence remains an internal draft until a provider administrator reviews and publishes it.</p>
+      <ActivityRecordBrowser zoneIds={reportScope.zoneIds} siteIds={reportScope.siteIds} scopeLabel={selectedAgreement ? selectedAgreement.name : 'all your agreements'} />
+
+      <details className="reports-section reports-oversight reports-subject-review">
+        <summary className="reports-oversight__summary">
+          <h2>Repeat subject review</h2>
+          <span>Open when investigation context is needed</span>
+        </summary>
+        <RepeatSubjectsPanel />
+      </details>
+
+      <section className="reports-section report-packs-section" aria-labelledby="report-production-heading">
+        <div className="reports-production-heading">
+          <div>
+            <span>Step 2 · Produce and approve</span>
+            <h2 id="report-production-heading">Client report production ({reportPacks.length})</h2>
+          </div>
+          <p>Draft → human review → governed PDF → approved delivery</p>
+        </div>
+        <p className="subtitle">Generated evidence remains provider-private until an administrator reviews and publishes it. The source records above remain the accountability anchor.</p>
         <p className="report-packs-scroll-cue">Scroll horizontally to review report status, PDF, and delivery actions.</p>
         <div className="reports-table-wrapper report-packs-table-region" role="region" aria-label="Report packs" tabIndex={0}>
           <table className="reports-table">
             <thead><tr><th>Agreement</th><th>Period</th><th>Type</th><th>Status</th><th>Review</th><th>PDF</th><th>Delivery</th></tr></thead>
             <tbody>
-              {reportPacks.length === 0 ? <tr><td colSpan={7} className="text-center">No report packs in this period</td></tr> : reportPacks.map((pack) => (
+              {reportPacks.length === 0 ? <tr><td colSpan={7} className="text-center">No report packs in this period. Check the scope and source records above, then generate report drafts.</td></tr> : reportPacks.map((pack) => (
                 <ReportPackRow
                   key={pack.id}
                   pack={pack}
@@ -544,93 +607,11 @@ const ReportsHubPage: React.FC = () => {
           <h2>Group Reporting Overview</h2>
           <span>{consolidatedReporting.length} operating organisations</span>
         </summary>
-        <p className="subtitle">Branch-owned operational activity, consolidated for parent oversight. Detailed queues below remain in the current organization context.</p>
+        <p className="subtitle">Branch-owned operational activity, consolidated for parent oversight. Record detail remains in the selected agreement and place context.</p>
         <div className="reports-table-wrapper" role="region" aria-label="Group reporting overview" tabIndex={0}>
           <table className="reports-table"><thead><tr><th>Operating Organization</th><th>Breach Alerts</th><th>Observations</th><th>Non-Compliant</th><th>Report Packs</th></tr></thead><tbody>{consolidatedReporting.map((row) => <tr key={row.source_organization_id}><td>{row.source_organization_name}</td><td>{row.breach_count}</td><td>{row.observation_count}</td><td>{row.non_compliant_observation_count}</td><td>{row.report_pack_count}</td></tr>)}</tbody></table>
         </div>
       </details>}
-
-      <ActivityRecordBrowser zoneIds={reportScope.zoneIds} siteIds={reportScope.siteIds} scopeLabel={selectedAgreement ? selectedAgreement.name : 'all your agreements'} />
-
-      <RepeatSubjectsPanel />
-
-      {freedomCampingEnabled && <section className="reports-section">
-        <h2>Recent Breach Alerts ({breachAlerts.length})</h2>
-        <div className="reports-table-wrapper">
-          <table className="reports-table">
-            <thead>
-              <tr>
-                <th>Date</th>
-                <th>Type</th>
-                <th>Plate</th>
-                <th>Status</th>
-                <th>Notes</th>
-              </tr>
-            </thead>
-            <tbody>
-              {breachAlerts.length === 0 ? (
-                <tr>
-                  <td colSpan={5} className="text-center">
-                    No breach alerts in this period
-                  </td>
-                </tr>
-              ) : (
-                breachAlerts.slice(0, 10).map((breach) => (
-                  <tr key={breach.id}>
-                    <td>{new Date(breach.created_at).toLocaleString()}</td>
-                    <td>
-                      <span className="badge">{breach.breach_type}</span>
-                    </td>
-                    <td>{breach.plate_number}</td>
-                    <td>
-                      <span className={`status-badge status-${breach.status}`}>{breach.status}</span>
-                    </td>
-                    <td className="text-truncate" title={breach.notes || ''}>
-                      {breach.notes ? breach.notes.substring(0, 50) : '-'}
-                    </td>
-                  </tr>
-                ))
-              )}
-            </tbody>
-          </table>
-        </div>
-      </section>}
-
-      {freedomCampingEnabled && <section className="reports-section">
-        <h2>Vehicle Observations ({observations.length})</h2>
-        <div className="reports-table-wrapper">
-          <table className="reports-table">
-            <thead>
-              <tr>
-                <th>Date</th>
-                <th>Plate</th>
-                <th>Compliant</th>
-                <th>Reason</th>
-              </tr>
-            </thead>
-            <tbody>
-              {observations.length === 0 ? (
-                <tr>
-                  <td colSpan={4} className="text-center">
-                    No observations in this period
-                  </td>
-                </tr>
-              ) : (
-                observations.slice(0, 10).map((obs) => (
-                  <tr key={obs.id}>
-                    <td>{new Date(obs.observed_at).toLocaleString()}</td>
-                    <td>{obs.plate_number || (obs.subject_kind === 'person' ? 'Person observation' : 'Non-vehicle observation')}</td>
-                    <td>
-                      {complianceLabel(obs.is_compliant)}
-                    </td>
-                    <td>{obs.compliance_reason ?? '-'}</td>
-                  </tr>
-                ))
-              )}
-            </tbody>
-          </table>
-        </div>
-      </section>}
     </div>
   );
 };

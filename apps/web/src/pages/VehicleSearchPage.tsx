@@ -12,7 +12,8 @@
  * - breach_alerts (compliance breaches recorded for this vehicle)
  */
 
-import React, { useState } from 'react';
+import React, { useCallback, useEffect, useState } from 'react';
+import { useSearchParams } from 'react-router-dom';
 import { SafetyWarningsPanel } from '../components/SafetyWarningsPanel';
 import { useAuth } from '../context/AuthContext';
 import { normalizePlateNumber, vehicleHistoryOrFilter } from '../lib/canonicalIdentity';
@@ -89,6 +90,7 @@ interface PermitRecord {
 
 const VehicleSearchPage: React.FC = () => {
   const { profile } = useAuth();
+  const [searchParams] = useSearchParams();
   const [plate, setPlate] = useState('');
   const [vehicle, setVehicle] = useState<Vehicle | null>(null);
   const [scv, setScv] = useState<ScvRecord | null>(null);
@@ -102,11 +104,9 @@ const VehicleSearchPage: React.FC = () => {
   const [showFlagForm, setShowFlagForm] = useState(false);
   const [flagForm, setFlagForm] = useState({ flag_type: 'watchlist', alert_level: 'medium', reason: '' });
 
-  const handleSearch = async (e: React.FormEvent) => {
-    e.preventDefault();
-    const cleanPlate = normalizePlateNumber(plate);
-    if (!cleanPlate) return;
-
+  const searchVehicle = useCallback(async (plateInput: string, canonicalVehicleId?: string) => {
+    const cleanPlate = normalizePlateNumber(plateInput);
+    if (!cleanPlate && !canonicalVehicleId) return;
     try {
       setLoading(true);
       setError(null);
@@ -115,28 +115,31 @@ const VehicleSearchPage: React.FC = () => {
       // ATLAS READS: canonical_vehicle_public, canonical_scv_public, person_permits_fieldwork, observations, breach_alerts
       // Resolve the canonical vehicle first so observation history follows the
       // global identity link, not only the plate text recorded at scan time.
-      const [vehRes, scvRes, permitRes] = await Promise.all([
-        supabase
-          .from('canonical_vehicle_public')
-          .select(
-            'id, plate_number, make, model, year, colour, body_type, rego_status, rego_expiry, wof_status, wof_expiry, cof_status, cof_expiry, homeless_status'
-          )
-          .ilike('plate_number', cleanPlate)
-          .maybeSingle(),
+      let vehicleQuery = supabase
+        .from('canonical_vehicle_public')
+        .select('id, plate_number, make, model, year, colour, body_type, rego_status, rego_expiry, wof_status, wof_expiry, cof_status, cof_expiry, homeless_status');
+      vehicleQuery = canonicalVehicleId
+        ? vehicleQuery.eq('id', canonicalVehicleId)
+        : vehicleQuery.ilike('plate_number', cleanPlate);
+      const vehRes = await vehicleQuery.maybeSingle();
+      if (vehRes.error) throw vehRes.error;
+      const vehData = vehRes.data as Vehicle | null;
+      if (canonicalVehicleId && !vehData) throw new Error('The linked canonical vehicle is unavailable or you do not have access.');
+      const resolvedPlate = normalizePlateNumber(vehData?.plate_number ?? cleanPlate);
+      if (vehData?.plate_number) setPlate(vehData.plate_number);
+
+      const historyFilter = vehicleHistoryOrFilter(resolvedPlate, vehData?.id ?? canonicalVehicleId ?? null);
+      const [scvRes, permitRes, obsRes, breachRes] = await Promise.all([
         supabase
           .from('canonical_scv_public')
           .select('id, certificate_number, certificate_status, expiry_date, issued_date')
-          .ilike('plate_number', cleanPlate)
+          .ilike('plate_number', resolvedPlate)
           .maybeSingle(),
         supabase
           .from('person_permits_fieldwork')
           .select('id, holder_name, permit_number, permit_type, forest_areas, date_from, date_to, status, firearm_licence_valid, conditions, vehicle_plates')
-          .contains('vehicle_plates', [cleanPlate])
+          .contains('vehicle_plates', [resolvedPlate])
           .order('date_to', { ascending: false }),
-      ]);
-      const canonicalVehicleId = (vehRes.data as Vehicle | null)?.id ?? null;
-      const historyFilter = vehicleHistoryOrFilter(cleanPlate, canonicalVehicleId);
-      const [obsRes, breachRes] = await Promise.all([
         supabase
           .from('observations')
           .select('id, observed_at, is_compliant, compliance_reason, nights_this_zone, zone:zone_id(name)')
@@ -146,14 +149,12 @@ const VehicleSearchPage: React.FC = () => {
         supabase
           .from('breach_alerts')
           .select('id, breach_type, status, nights_count, notes, created_at, zone:location_zones!breach_alerts_zone_id_fkey(name)')
-          .ilike('plate_number', cleanPlate)
+          .ilike('plate_number', resolvedPlate)
           .order('created_at', { ascending: false })
           .limit(10),
       ]);
 
-      if (vehRes.error) throw vehRes.error;
       if (permitRes.error) throw permitRes.error;
-      const vehData = vehRes.data as Vehicle | null;
       setVehicle(vehData);
       setScv((scvRes.data as ScvRecord) || null);
       setPermits((permitRes.data as PermitRecord[]) || []);
@@ -201,6 +202,22 @@ const VehicleSearchPage: React.FC = () => {
     } finally {
       setLoading(false);
     }
+  }, []);
+
+  useEffect(() => {
+    const canonicalVehicleId = searchParams.get('vehicle')?.trim();
+    const routedPlate = searchParams.get('plate')?.trim();
+    if (canonicalVehicleId) {
+      void searchVehicle('', canonicalVehicleId);
+    } else if (routedPlate) {
+      setPlate(routedPlate);
+      void searchVehicle(routedPlate);
+    }
+  }, [searchParams, searchVehicle]);
+
+  const handleSearch = (e: React.FormEvent) => {
+    e.preventDefault();
+    void searchVehicle(plate);
   };
 
   const handleRaiseFlag = async (e: React.FormEvent) => {

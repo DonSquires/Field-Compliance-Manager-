@@ -16,6 +16,42 @@ actually work with a working org and its data and operations." Extended-scope,
 multi-session task — take as many turns as needed; real, verified progress each
 turn beats false completeness.
 
+## REPORTING WORKSPACE AND FORESTRY PHOTO WAVE 1 (2026-10-11)
+
+- Reworked Reports around the operational decision flow: selected agreement and
+  date scope, source-record/evidence totals, searchable patrol and observation
+  detail, repeat-subject disclosure, then report drafting, human review, PDF,
+  and delivery. Removed the duplicate recent-breach and observation tables.
+- Record detail now exposes author/source provenance and existing private
+  evidence, routes only genuine canonical UUIDs to vehicle/person workspaces,
+  labels a plate-only fallback as a search, and generates an audited private
+  single-record PDF instead of injecting record values into a browser print
+  window. The PDF can include up to four linked JPG/PNG evidence photos.
+- Repaired the Overview welfare reads. `welfare_alerts` has no `zone_id`, so
+  welfare totals and queue rows are now honestly organization-wide; the UI says
+  so. Agreement-linked field queues remain place-scoped, and client-owned
+  activity was not moved into R&M ownership to make counts appear.
+- Added migration `20261010201209` so governed external photo promotion
+  preserves a known source capture timestamp in both `captured_at` and metadata.
+  Existing browser uploads retain the current-time default. The live schema
+  snapshot and Atlas were refreshed after application.
+- Promoted a bounded first wave of 50 high-confidence OneFortyOne / Tasman Pine
+  Forests photos: explicit plate, same date, matching place token, current
+  `Photos/` tree, and timestamp within 15 minutes (including the accepted
+  one-hour DST comparison where applicable). All 50 files were locally hashed,
+  uploaded to deterministic private tenant paths, linked to 50 distinct
+  observations, and recorded with source alias, original filename, match
+  rationale, capture time, and audit receipt.
+- Verified the evidence wave end to end: 50 evidence rows, 50 supporting links,
+  50 audit receipts, exact source timestamps, and an evidence-backed live PDF.
+  A full replay uploaded zero objects and reused all 50 paths and records.
+  The remaining high-confidence candidates stay held for a later human-tested
+  wave rather than being bulk-promoted automatically.
+- Chromium checks at 1440 x 1000 and 412 x 915 confirmed the source-record
+  workflow precedes report production, the empty state gives a safe next action,
+  primary mobile controls remain visible, neither viewport has page-level
+  horizontal overflow, and Overview emits no welfare/zone request failure.
+
 ## HUMAN-AUTHORED SUBJECT AND EVIDENCE INTEGRATION (2026-10-11)
 
 - Recorded the owner ruling that a human-authored report is sufficient

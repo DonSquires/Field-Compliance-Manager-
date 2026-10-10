@@ -42,6 +42,16 @@ interface SightingRecord {
   officer_notes: string | null;
   is_compliant: boolean | null;
   compliance_reason: string | null;
+  canonical_vehicle_id: string | null;
+  canonical_person_id: string | null;
+  person_record_id: string | null;
+  subject_kind: string | null;
+  reported_by_name: string | null;
+  source_document_name: string | null;
+  source_reference: string | null;
+  source_sha256: string | null;
+  source_locator: string | null;
+  person_record: { display_name: string | null } | Array<{ display_name: string | null }> | null;
   external_refs: Record<string, unknown> | null;
 }
 
@@ -101,6 +111,8 @@ export const ActivityRecordBrowser: React.FC<Props> = ({ zoneIds, siteIds, scope
   const [error, setError] = useState<string | null>(null);
   const [officerNames, setOfficerNames] = useState<Record<string, string>>({});
   const [selectedId, setSelectedId] = useState<string | null>(null);
+  const [pdfBusy, setPdfBusy] = useState(false);
+  const [pdfError, setPdfError] = useState<string | null>(null);
 
   const scopeKey = `${zoneIds.join(',')}|${siteIds.join(',')}`;
   const placeNames = useMemo(() => {
@@ -164,7 +176,7 @@ export const ActivityRecordBrowser: React.FC<Props> = ({ zoneIds, siteIds, scope
           ].join(',');
           let query = supabase
             .from('observations')
-            .select('id,organization_id,observed_at,plate_number,officer_id,zone_id,site_id,distance_km,officer_notes,is_compliant,compliance_reason,external_refs', { count: 'estimated' })
+            .select('id,organization_id,observed_at,plate_number,officer_id,zone_id,site_id,distance_km,officer_notes,is_compliant,compliance_reason,canonical_vehicle_id,canonical_person_id,person_record_id,subject_kind,reported_by_name,source_document_name,source_reference,source_sha256,source_locator,person_record:person_record_id(display_name),external_refs', { count: 'estimated' })
             .or(places);
           if (from) query = query.gte('observed_at', startOfDayIso(from));
           if (to) query = query.lt('observed_at', nextDayIso(to));
@@ -172,6 +184,8 @@ export const ActivityRecordBrowser: React.FC<Props> = ({ zoneIds, siteIds, scope
             query = query.or([
               `plate_number.ilike.${wild}`,
               `officer_notes.ilike.${wild}`,
+              `reported_by_name.ilike.${wild}`,
+              `source_document_name.ilike.${wild}`,
               ...['comments', 'issue', 'action_notes', 'action_by'].map((key) => `external_refs->import->>${key}.ilike.${wild}`),
             ].join(','));
           }
@@ -231,11 +245,20 @@ export const ActivityRecordBrowser: React.FC<Props> = ({ zoneIds, siteIds, scope
     }
     if (selectedSighting) {
       const imported = ((selectedSighting.external_refs ?? {}) as { import?: Record<string, unknown> }).import ?? {};
+      const linkedVehicleText = selectedSighting.canonical_vehicle_id ? 'Linked to canonical vehicle record' : selectedSighting.plate_number ? 'Plate recorded' : 'No vehicle record linked';
+      const linkedPersonText = selectedSighting.canonical_person_id
+        ? 'Linked to canonical person record'
+        : selectedSighting.person_record_id ? 'Tenant person record linked; canonical identity not linked' : 'No person record linked';
+      const person = Array.isArray(selectedSighting.person_record) ? selectedSighting.person_record[0] : selectedSighting.person_record;
       return [
         ['When', new Date(selectedSighting.observed_at).toLocaleString('en-NZ')],
-        ['Plate', selectedSighting.plate_number],
+        ['Subject', person?.display_name?.trim() || selectedSighting.plate_number || selectedSighting.subject_kind?.replaceAll('_', ' ') || 'Unidentified subject'],
+        ['Subject type', selectedSighting.subject_kind?.replaceAll('_', ' ') || 'Not recorded'],
+        ['Plate', selectedSighting.plate_number || 'Not recorded'],
         ['Place', placeName(selectedSighting.zone_id, selectedSighting.site_id)],
-        ['Officer', selectedSighting.officer_id ? officerNames[selectedSighting.officer_id] ?? 'Loading…' : 'Not recorded'],
+        ['Reported by', selectedSighting.reported_by_name?.trim() || (selectedSighting.officer_id ? officerNames[selectedSighting.officer_id] ?? 'Loading…' : 'Not recorded')],
+        ['Vehicle link', linkedVehicleText],
+        ['Person link', linkedPersonText],
         ['Distance', formatDistance(selectedSighting.distance_km)],
         ['Officer notes', selectedSighting.officer_notes?.trim() || 'No notes recorded'],
         ['Issue', text(imported.issue) ?? '—'],
@@ -244,7 +267,10 @@ export const ActivityRecordBrowser: React.FC<Props> = ({ zoneIds, siteIds, scope
         ['Last action', text(imported.last_action_date) ?? '—'],
         ['Closed by', text(imported.closed_by) ?? '—'],
         ['Compliance', selectedSighting.is_compliant === null ? 'Not assessed' : `${selectedSighting.is_compliant ? 'Compliant' : 'Non-compliant'}${selectedSighting.compliance_reason ? ` — ${selectedSighting.compliance_reason}` : ''}`],
-        ['Source', [text(imported.source_file), text(imported.source_sheet), imported.source_row != null ? `row ${String(imported.source_row)}` : null].filter(Boolean).join(' · ') || '—'],
+        ['Source document', selectedSighting.source_document_name?.trim() || text(imported.source_file) || '—'],
+        ['Source reference', selectedSighting.source_reference?.trim() || '—'],
+        ['Source locator', selectedSighting.source_locator?.trim() || [text(imported.source_sheet), imported.source_row != null ? `row ${String(imported.source_row)}` : null].filter(Boolean).join(' · ') || '—'],
+        ['Source SHA-256', selectedSighting.source_sha256?.trim() || '—'],
       ];
     }
     return [];
@@ -256,6 +282,36 @@ export const ActivityRecordBrowser: React.FC<Props> = ({ zoneIds, siteIds, scope
   const selectedRecord = selectedVisit
     ? { kind: 'location_event' as const, id: selectedVisit.id, organizationId: selectedVisit.organization_id }
     : selectedSighting ? { kind: 'observation' as const, id: selectedSighting.id, organizationId: selectedSighting.organization_id } : null;
+
+  const downloadRecordPdf = useCallback(async () => {
+    if (!selectedRecord) return;
+    setPdfBusy(true);
+    setPdfError(null);
+    try {
+      const { data, error: invokeError } = await supabase.functions.invoke('generate-record-pdf', {
+        body: { record_kind: selectedRecord.kind, record_id: selectedRecord.id },
+      });
+      if (invokeError) throw invokeError;
+      const signedUrl = typeof data?.signed_url === 'string' ? data.signed_url : '';
+      if (!signedUrl) throw new Error('The PDF was generated without a download link.');
+      const anchor = document.createElement('a');
+      anchor.href = signedUrl;
+      anchor.download = typeof data?.file_name === 'string' ? data.file_name : 'FCM record.pdf';
+      anchor.rel = 'noopener';
+      document.body.appendChild(anchor);
+      anchor.click();
+      anchor.remove();
+    } catch (err) {
+      setPdfError(err instanceof Error ? err.message : 'The record PDF could not be generated.');
+    } finally {
+      setPdfBusy(false);
+    }
+  }, [selectedRecord]);
+
+  useEffect(() => {
+    setPdfError(null);
+    setPdfBusy(false);
+  }, [selectedId]);
 
   useEffect(() => {
     if (!detailOpen) return;
@@ -358,8 +414,31 @@ export const ActivityRecordBrowser: React.FC<Props> = ({ zoneIds, siteIds, scope
               <dl>
                 {details.map(([label, value]) => (<div key={label}><dt>{label}</dt><dd>{value}</dd></div>))}
               </dl>
+              <div className="activity-browser__detail-actions">
+                {selectedSighting?.canonical_vehicle_id && (
+                  <button type="button" className="btn btn-secondary" onClick={() => navigate(`/admin/field-ops?area=vehicle-search&vehicle=${encodeURIComponent(selectedSighting.canonical_vehicle_id as string)}`)}>
+                    Open canonical vehicle
+                  </button>
+                )}
+                {selectedSighting?.canonical_person_id && (
+                  <button type="button" className="btn btn-secondary" onClick={() => navigate(`/admin/field-ops?area=observation-search&person=${encodeURIComponent(selectedSighting.canonical_person_id as string)}`)}>
+                    Open canonical person
+                  </button>
+                )}
+                {selectedSighting?.plate_number && !selectedSighting.canonical_vehicle_id && (
+                  <button type="button" className="btn btn-secondary" onClick={() => navigate(`/admin/field-ops?area=vehicle-search&plate=${encodeURIComponent(selectedSighting.plate_number)}`)}>
+                    Search recorded plate
+                  </button>
+                )}
+                <button type="button" className="btn btn-secondary" onClick={() => void downloadRecordPdf()} disabled={pdfBusy}>
+                  {pdfBusy ? 'Generating PDF…' : 'Download record PDF'}
+                </button>
+                <button type="button" className="btn btn-secondary" onClick={() => navigate('/admin/investigations')}>
+                  Open investigations
+                </button>
+              </div>
+              {pdfError && <div className="alert alert-error" role="alert">{pdfError}</div>}
               <RecordEvidencePanel key={selectedRecord.id} recordKind={selectedRecord.kind} recordId={selectedRecord.id} organizationId={selectedRecord.organizationId} canAdd />
-              <button type="button" className="btn btn-secondary" onClick={() => navigate('/admin/investigations')}>Open investigations</button>
             </aside>
           </div>
         )}
