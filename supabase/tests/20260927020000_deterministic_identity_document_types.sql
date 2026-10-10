@@ -9,7 +9,7 @@ DO $$
 DECLARE
   v_org uuid:=gen_random_uuid();v_admin uuid:=gen_random_uuid();v_person uuid:=gen_random_uuid();v_conversation uuid:=gen_random_uuid();v_attachment uuid:=gen_random_uuid();v_document uuid;v_result jsonb;v_error text;
 BEGIN
-  PERFORM pg_temp.check('all initial deterministic document definitions exist',(SELECT count(*)=12 FROM public.identity_document_type_definitions WHERE active));
+  PERFORM pg_temp.check('all deterministic document definitions exist',(SELECT count(*)=13 FROM public.identity_document_type_definitions WHERE active));
   PERFORM pg_temp.check('parking maps to generic authority with explicit activity',(SELECT staff_credential_type='warrant_of_authority' AND default_authorized_activities=ARRAY['Parking warden'] FROM public.identity_document_type_definitions WHERE document_kind='parking_warrant'));
   PERFORM pg_temp.check('freedom camping maps to generic authority with explicit activity',(SELECT staff_credential_type='warrant_of_authority' AND default_authorized_activities=ARRAY['Freedom camping officer'] FROM public.identity_document_type_definitions WHERE document_kind='freedom_camping_warrant'));
   INSERT INTO public.organizations(id,name,organization_type)VALUES(v_org,'T_DETERMINISTIC_IDS','service_provider');

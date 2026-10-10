@@ -13,6 +13,12 @@ const DOCUMENT_DEFINITIONS = Object.freeze({
   parking_warrant: { label: 'Parking warden warrant', category: 'warrant', credential_type: 'warrant_of_authority', activity: 'Parking warden', indicators: [/parking warden/i, /land transport act/i] },
   freedom_camping_warrant: { label: 'Freedom camping officer warrant', category: 'warrant', credential_type: 'warrant_of_authority', activity: 'Freedom camping officer', indicators: [/freedom camping officer/i, /freedom camping act/i] },
   biosecurity_warrant: { label: 'Biosecurity officer warrant', category: 'warrant', credential_type: 'biosecurity_warrant', activity: 'Biosecurity officer', indicators: [/biosecurity officer/i, /biosecurity act/i] },
+  nzta_mvr_record: {
+    label: 'NZTA Motor Vehicle Register query result',
+    category: 'identity',
+    credential_type: null,
+    indicators: [/current details query results/i, /current registered person details/i, /registration details/i],
+  },
   passport: { label: 'Passport', category: 'identity', credential_type: null, indicators: [/passport/i] },
   national_id: { label: 'Other government ID', category: 'identity', credential_type: null, indicators: [/identity card/i, /government id/i] },
   person_photo: { label: 'Person reference photo', category: 'photo', credential_type: null, indicators: [] },
@@ -51,6 +57,21 @@ function datesIn(text) {
     .filter(Boolean);
 }
 
+function localDateTime(value) {
+  const match = String(value || '').trim().match(
+    /^(\d{1,2})[/. -](\d{1,2})[/. -](\d{2,4})(?:\s+(\d{1,2}):(\d{2})(?::(\d{1,2}))?)?$/,
+  );
+  if (!match) return null;
+  const date = isoDate(`${match[1]}/${match[2]}/${match[3]}`);
+  if (!date) return null;
+  if (!match[4]) return `${date}T12:00`;
+  const hour = Number(match[4]);
+  const minute = Number(match[5]);
+  const second = Number(match[6] || 0);
+  if (hour > 23 || minute > 59 || second > 59) return null;
+  return `${date}T${String(hour).padStart(2, '0')}:${String(minute).padStart(2, '0')}:${String(second).padStart(2, '0')}`;
+}
+
 function regexEscape(value) {
   return String(value || '').replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
 }
@@ -85,6 +106,42 @@ function classifyIdentityDocument(rawText, requestedKind, requestedDefinition = 
 function extractIdentityFields(rawText, documentKind, requestedDefinition = null) {
   const text = String(rawText || '').replace(/\r/g, '');
   const definition = identityDocumentDefinition(documentKind, requestedDefinition);
+  if (documentKind === 'nzta_mvr_record') {
+    const title = text.match(/(?:^|\n)\s*((?:19|20)\d{2})\s+([A-Za-z][A-Za-z0-9-]*)\s+([A-Za-z][A-Za-z0-9-]*)(?:\s+([^\n]{2,40}))?/m);
+    const queryDateTime = text.match(
+      /current details query results[\s\S]{0,180}?(\d{1,2}[/. -]\d{1,2}[/. -]\d{2,4}\s+\d{1,2}:\d{2}(?::\d{1,2})?)/i,
+    )?.[1] || text.match(/\b\d{1,2}[/. -]\d{1,2}[/. -]\d{2,4}\s+\d{1,2}:\d{2}(?::\d{1,2})?\b/)?.[0];
+    const fields = {
+      display_name: labelled(text, ['current registered person', 'registered person', 'person name'], '[^\\n]{2,120}'),
+      plate_number: labelled(text, ['plate', 'registration plate', 'rego'], '[A-Z0-9 -]{2,12}'),
+      vin: labelled(text, ['vin'], '[A-Z0-9 -]{8,24}'),
+      query_completed_at: localDateTime(queryDateTime),
+      vehicle_year: title?.[1] || labelled(text, ['year'], '\\d{4}'),
+      vehicle_make: title?.[2] || labelled(text, ['make'], '[^\\n]{2,40}'),
+      vehicle_model: title?.[3] || labelled(text, ['model'], '[^\\n]{2,60}'),
+      vehicle_body_type: clean(title?.[4]) || labelled(text, ['vehicle type', 'body type'], '[^\\n]{2,60}'),
+      vehicle_colour: labelled(text, ['colour', 'color'], '[^\\n]{2,40}'),
+      chassis_number: labelled(text, ['chassis number', 'chassis no'], '[A-Z0-9 -]{4,30}'),
+      engine_number: labelled(text, ['engine no', 'engine number'], '[A-Z0-9 -]{3,30}'),
+      fuel_type: labelled(text, ['fuel type'], '[^\\n]{2,30}'),
+      country_of_origin: labelled(text, ['country of origin', 'previous country'], '[^\\n]{2,60}'),
+      registration_status: labelled(text, ['registration status'], '[^\\n]{2,30}'),
+      rego_expiry: isoDate(labelled(text, ['licence expiry date', 'registration expiry'], DATE_PATTERN)),
+      wof_expiry: isoDate(labelled(text, ['expiry date of last wof', 'wof expiry'], DATE_PATTERN)),
+      cof_expiry: isoDate(labelled(text, ['expiry date of last cof', 'cof expiry'], DATE_PATTERN)),
+      acquisition_date: isoDate(labelled(text, ['acquisition date'], DATE_PATTERN)),
+      physical_address: labelled(text, ['physical address'], '[^\\n]{5,180}'),
+      mailing_address: labelled(text, ['mailing address'], '[^\\n]{5,180}'),
+      gross_vehicle_mass_kg: labelled(text, ['gross vehicle mass'], '[\\d, ]{2,12}'),
+      cc_rating: labelled(text, ['cc rating'], '[\\d, ]{2,12}'),
+      number_of_seats: labelled(text, ['no\\. of seats', 'number of seats'], '\\d{1,3}'),
+      number_of_axles: labelled(text, ['no\\. of axles', 'number of axles'], '\\d{1,2}'),
+      plate_type: labelled(text, ['plate type'], '[^\\n]{2,40}'),
+      vehicle_usage: labelled(text, ['usage'], '[^\\n]{2,60}'),
+      latest_odometer: labelled(text, ['latest odometer', 'prior odometer reading'], '[\\d, ]{2,20}'),
+    };
+    return Object.fromEntries(Object.entries(fields).filter(([, value]) => value));
+  }
   const isWarrant = definition.category === 'warrant';
   const surname = labelled(text, ['surname', 'family name', 'last name']);
   const givenNames = labelled(text, ['given names?', 'first names?']);
@@ -132,4 +189,11 @@ function extractIdentityFields(rawText, documentKind, requestedDefinition = null
   return Object.fromEntries(Object.entries(fields).filter(([, value]) => value));
 }
 
-module.exports = { DOCUMENT_DEFINITIONS, classifyIdentityDocument, extractIdentityFields, identityDocumentDefinition, isoDate };
+module.exports = {
+  DOCUMENT_DEFINITIONS,
+  classifyIdentityDocument,
+  extractIdentityFields,
+  identityDocumentDefinition,
+  isoDate,
+  localDateTime,
+};

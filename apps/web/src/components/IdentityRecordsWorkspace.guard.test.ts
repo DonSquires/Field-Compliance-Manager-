@@ -23,6 +23,18 @@ describe("identity person-of-interest workflow", () => {
     expect(workspace).toContain('detail.nzta_mvr_sourced === true');
   });
 
+  it("requires human source comparison before promoting an NZTA person-vehicle check", () => {
+    expect(workspace).toContain('"nzta_mvr_record"');
+    expect(workspace).toContain('"review_nzta_mvr_identity_evidence"');
+    expect(workspace).toContain("person_vehicle_match_confirmed");
+    expect(workspace).toContain('"get_vehicle_identity_checks"');
+    expect(workspace).toContain("Open linked person");
+    expect(workspace).toContain("Open private NZTA source");
+    expect(workspace).toContain(
+      "Historical source-time association; current",
+    );
+  });
+
   it("flags only verified canonical people through the scoped audited RPC", () => {
     expect(workspace).toContain('selectedPerson?.review_state === "verified"');
     expect(workspace).toContain('selectedPerson.canonical_review_state === "verified"');
