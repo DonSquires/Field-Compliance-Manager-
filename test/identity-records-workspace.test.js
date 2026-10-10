@@ -22,7 +22,13 @@ const workspace = read('apps/web/src/components/IdentityRecordsWorkspace.tsx');
 const identityPage = read('apps/web/src/pages/UserManagementPage.tsx');
 const cctvReviewPage = read('apps/web/src/pages/CCTVReviewPage.tsx');
 const officerFieldReportPage = read('apps/web/src/pages/OfficerFieldReportPage.tsx');
-const { extractIdentityFields, isoDate } = require('../services/fcm-api/src/bob/identityDocument');
+const {
+  extractIdentityFields,
+  extractIdentityFieldsConsensus,
+  isoDate,
+  resolveNztaPlateFromOcr,
+} = require('../services/fcm-api/src/bob/identityDocument');
+const { guardPlateLines, guardProposedEntities, structuredExtractionFor } = require('../services/fcm-api/src/bob/documents');
 
 test('identity OCR proposes editable driver, firearms, and security licence fields', () => {
   assert.deepEqual(extractIdentityFields('DRIVER LICENCE\nName: Jane Citizen\nLicence No: AB123456\nDate of Birth: 04/05/1990\nExpiry Date: 01/02/2030', 'driver_licence'), {
@@ -80,6 +86,7 @@ test('NZTA MVR screenshots produce source-time person and vehicle review candida
     rego_expiry: '2027-09-28',
     wof_expiry: '2026-12-23',
   });
+
   assert.match(nztaIdentityMigration, /CREATE TABLE public\.vehicle_identity_checks/);
   assert.match(nztaIdentityMigration, /review_nzta_mvr_identity_evidence/);
   assert.match(nztaIdentityMigration, /person_vehicle_match_confirmed/);
@@ -92,6 +99,44 @@ test('NZTA MVR screenshots produce source-time person and vehicle review candida
   assert.match(vehicleJsonMigration, /REVOKE ALL ON FUNCTION public\.jsonb_object_length/);
   assert.match(nztaComplianceSourceMigration, /canonical_vehicles_compliance_source_check/);
   assert.match(nztaComplianceSourceMigration, /'nzta_mvr'::text/);
+});
+
+test('NZTA plate extraction requires valid multi-location OCR consensus and blocks conflicting model text', () => {
+  const noisy = [
+    'Current details query results\nShow the results for plate/VIN\n11739\nPlate: 11739\nPlate type: Standard',
+    'Current details query results\nShow the results for plate/VIN\nJJJ739\nPlate: JJJ739\nPlate type: Standard',
+  ];
+  const plate = resolveNztaPlateFromOcr(noisy);
+  assert.equal(plate.status, 'verified_candidate');
+  assert.equal(plate.value, 'JJJ739');
+  assert.equal(plate.candidates.find((candidate) => candidate.value === '11739').valid_shape, false);
+
+  const consensus = extractIdentityFieldsConsensus(noisy, 'nzta_mvr_record');
+  assert.equal(consensus.fields.plate_number, 'JJJ739');
+  assert.equal(consensus.identifier_verification.review_required, true);
+  assert.equal(
+    guardPlateLines('**Plate Number:** 11739', [{ structured_extraction: { document_kind: 'nzta_mvr_record', identifier_verification: consensus.identifier_verification } }]),
+    '**Plate Number:** JJJ739',
+  );
+  assert.equal(
+    guardPlateLines('The vehicle associated with 11739 was returned.', [{ structured_extraction: { document_kind: 'nzta_mvr_record', identifier_verification: consensus.identifier_verification } }]),
+    'The vehicle associated with JJJ739 was returned.',
+  );
+  assert.deepEqual(
+    guardProposedEntities({ vehicle: { plate_number: '11739' } }, [{ structured_extraction: { document_kind: 'nzta_mvr_record', identifier_verification: consensus.identifier_verification } }]),
+    { vehicle: { plate_number: 'JJJ739' } },
+  );
+});
+
+test('NZTA plate uncertainty remains explicit instead of becoming a confident identifier', () => {
+  const raw = 'Current details query results\nShow the results for plate/VIN\n11739\nPlate: 11739\nPlate type: Standard';
+  const structured = structuredExtractionFor({ text: raw, variants: [raw] });
+  const plate = structured.identifier_verification.plate_number;
+  assert.equal(plate.status, 'manual_review_required');
+  assert.equal(plate.value, null);
+  assert.equal(guardPlateLines('Plate: 11739', [{ structured_extraction: structured }]), 'Plate: [TO CONFIRM]');
+  assert.equal(guardPlateLines('The vehicle associated with 11739 was returned.', [{ structured_extraction: structured }]), 'The vehicle associated with [TO CONFIRM] was returned.');
+  assert.deepEqual(guardProposedEntities({ plate_number: '11739' }, [{ structured_extraction: structured }]), {});
 });
 
 test('identity registry writes are administrator-only, audited, and review-gated', () => {

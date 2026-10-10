@@ -74,6 +74,7 @@ interface BobAttachmentRecord {
   storage_path: string | null;
   processing_state: 'pending' | 'processing' | 'extracted' | 'failed' | 'manual_review_required' | string;
   extraction_summary: string | null;
+  extraction_payload: Record<string, unknown> | null;
   confidence: number | null;
   created_at: string;
 }
@@ -216,7 +217,7 @@ export const BobPanel: React.FC<BobPanelProps> = ({ open, onClose, context, mode
   const loadAttachments = useCallback(async (convId: string) => {
     const { data, error: attachmentErr } = await supabase
       .from('bob_attachments')
-      .select('id, file_name, file_type, file_size_bytes, storage_bucket, storage_path, processing_state, extraction_summary, confidence, created_at')
+      .select('id, file_name, file_type, file_size_bytes, storage_bucket, storage_path, processing_state, extraction_summary, extraction_payload, confidence, created_at')
       .eq('conversation_id', convId)
       .order('created_at', { ascending: true });
 
@@ -1298,7 +1299,7 @@ function ContextPanel(props: {
 
 function AttachmentResultCard({ attachment }: { attachment: BobAttachmentRecord }) {
   const label = attachmentStateLabel(attachment.processing_state);
-  const confidence = typeof attachment.confidence === 'number' ? `${Math.round(attachment.confidence * 100)}% confidence` : null;
+  const confidence = typeof attachment.confidence === 'number' ? `Extraction confidence ${Math.round(attachment.confidence * 100)}%` : null;
   return (
     <article className={`bob-attachment-card state-${attachment.processing_state}`}>
       <FileUp size={14} />
@@ -1392,10 +1393,14 @@ function AgentMetadata({ message }: { message: BobMessage }) {
   const verdict = verification && verification.checked ? asString(verification.verdict) : null;
   const verificationIssues = verification ? asArray(verification.issues).map(issue => asString((issue as Record<string, unknown>)?.code)).filter(Boolean) as string[] : [];
   const subagentRuns = asArray(metadata.subagent_runs).map(run => asString((run as Record<string, unknown>)?.role)).filter(Boolean) as string[];
-  if (!plannedTool && confidence == null && !suggestedAction && !verdict && !subagentRuns.length) return null;
+  const sourceReviewRequired = asArray(metadata.files).some((file) => {
+    const structured = file && typeof file === 'object' ? (file as Record<string, unknown>).structured_extraction : null;
+    return Boolean(structured && typeof structured === 'object' && (structured as Record<string, unknown>).review_required);
+  });
+  if (!plannedTool && confidence == null && !suggestedAction && !verdict && !subagentRuns.length && !sourceReviewRequired) return null;
   const verificationLabel = verdict === 'repair' ? 'Checked · revised' : verdict === 'pass_with_notes' ? 'Checked · notes' : verdict === 'pass' ? 'Checked' : null;
   const verificationTitle = verdict ? `Independent verifier: ${verdict}${verificationIssues.length ? ` — ${verificationIssues.join(', ')}` : ''}` : undefined;
-  return <div className="bob-agent-metadata">{plannedTool && <span><TerminalSquare size={12} /> {plannedTool.replaceAll('_', ' ')}</span>}{confidence != null && <span><CheckCircle2 size={12} /> {Math.round(confidence * 100)}% confidence</span>}{verificationLabel && <span className="bob-agent-verified" title={verificationTitle}><ShieldCheck size={12} /> {verificationLabel}</span>}{subagentRuns.length > 0 && <span title="Read-only subagents Bob delegated to for this reply"><Bot size={12} /> Subagents: {subagentRuns.join(', ')}</span>}{suggestedAction && <span className="bob-agent-next"><ListChecks size={12} /> {suggestedAction}</span>}</div>;
+  return <div className="bob-agent-metadata">{plannedTool && <span><TerminalSquare size={12} /> {plannedTool.replaceAll('_', ' ')}</span>}{confidence != null && <span title="This is Bob's response-planning confidence, not verification of extracted source fields."><CheckCircle2 size={12} /> Response confidence {Math.round(confidence * 100)}%</span>}{sourceReviewRequired && <span className="bob-agent-source-review" title="Identity and source fields remain provisional until compared with the source image."><AlertTriangle size={12} /> Source fields need review</span>}{verificationLabel && <span className="bob-agent-verified" title={verificationTitle}><ShieldCheck size={12} /> {verificationLabel}</span>}{subagentRuns.length > 0 && <span title="Read-only subagents Bob delegated to for this reply"><Bot size={12} /> Subagents: {subagentRuns.join(', ')}</span>}{suggestedAction && <span className="bob-agent-next"><ListChecks size={12} /> {suggestedAction}</span>}</div>;
 }
 
 export default BobPanel;

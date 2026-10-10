@@ -1131,6 +1131,12 @@
   text-transform: capitalize;
 }
 
+.bob-agent-metadata > .bob-agent-source-review {
+  border-color: #8f6d2a;
+  color: #ffd98a;
+  background: #33260f;
+}
+
 .bob-file-tray {
   display: flex;
   flex-wrap: wrap;

@@ -188,7 +188,7 @@ describe('BobPanel', () => {
     render(<BobPanel open onClose={() => undefined} />);
 
     expect(await screen.findByText('repo search')).toBeTruthy();
-    expect(screen.getByText('80% confidence')).toBeTruthy();
+    expect(screen.getByText('Response confidence 80%')).toBeTruthy();
     expect(screen.getByText('Review the affected files before proposing a change.')).toBeTruthy();
   });
 
@@ -318,10 +318,10 @@ describe('BobPanel', () => {
     expect(screen.getByText('agreement.pdf')).toBeTruthy();
     expect(screen.getByText('Reading/OCR')).toBeTruthy();
     expect(screen.getByText('site-photo.jpg')).toBeTruthy();
-    expect(screen.getByText('Extracted · 84% confidence')).toBeTruthy();
+    expect(screen.getByText('Extracted · Extraction confidence 84%')).toBeTruthy();
     expect(screen.getByText('Detected site frontage and signage.')).toBeTruthy();
     expect(screen.getByText('unclear-audio.webm')).toBeTruthy();
-    expect(screen.getByText('Needs review · 42% confidence')).toBeTruthy();
+    expect(screen.getByText('Needs review · Extraction confidence 42%')).toBeTruthy();
     expect(screen.getByText('Using app data')).toBeTruthy();
   });
 

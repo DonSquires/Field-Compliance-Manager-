@@ -11,7 +11,7 @@ const { verifyJobToken } = require('./src/security/job_token_verifier');
 const { createModelGateway } = require('./src/bob/modelGateway');
 const { planTurn } = require('./src/bob/plan');
 const { subagentStep } = require('./src/bob/subagent');
-const { classifyIdentityDocument, extractIdentityFields, identityDocumentDefinition } = require('./src/bob/identityDocument');
+const { classifyIdentityDocument, extractIdentityFields, extractIdentityFieldsConsensus, identityDocumentDefinition } = require('./src/bob/identityDocument');
 const { createDocumentReader, docxXmlToText } = require('./src/bob/documents');
 
 const execFileAsync = promisify(execFile);
@@ -141,8 +141,8 @@ async function loadAttachment(attachmentId) {
   return { attachment, bytes, sha256: crypto.createHash('sha256').update(bytes).digest('hex') };
 }
 
-async function tesseractText(filePath) {
-  const { stdout } = await execFileAsync('tesseract', [filePath, 'stdout', '-l', 'eng', '--psm', '6'], { timeout: 90_000, maxBuffer: 4 * 1024 * 1024 });
+async function tesseractText(filePath, pageSegmentationMode = 6) {
+  const { stdout } = await execFileAsync('tesseract', [filePath, 'stdout', '-l', 'eng', '--psm', String(pageSegmentationMode)], { timeout: 90_000, maxBuffer: 4 * 1024 * 1024 });
   return String(stdout || '').trim();
 }
 
@@ -172,12 +172,19 @@ async function ocrAttachment(attachmentId, identityContext = null) {
       pages = (await fs.readdir(work)).filter((name) => /^page-.*\.jpg$/i.test(name)).sort().map((name) => path.join(work, name));
       if (!pages.length) throw new Error('identity_pdf_render_failed');
     }
-    const text = (await Promise.all(pages.map(tesseractText))).filter(Boolean).join('\n\n').slice(0, 40_000);
+    const pageVariants = [];
+    for (const page of pages) {
+      const variants = await Promise.all([6, 11].map((mode) => tesseractText(page, mode)));
+      pageVariants.push(variants);
+    }
+    const ocrVariants = [0, 1].map((variantIndex) => pageVariants.map((variants) => variants[variantIndex]).filter(Boolean).join('\n\n').slice(0, 40_000));
+    const text = ocrVariants[0] || ocrVariants[1] || '';
     return {
       ...loaded,
       text,
+      ocrVariants,
       pageCount: pages.length,
-      provider: 'tesseract-5',
+      provider: 'tesseract-5-ensemble-psm6-psm11',
       detectedMime: isPdf ? 'application/pdf' : isJpeg ? 'image/jpeg' : isPng ? 'image/png' : isWebp ? 'image/webp' : isBmp ? 'image/bmp' : 'image/tiff',
     };
   } finally {
@@ -221,14 +228,19 @@ async function identityDocument(request, response, ocrOnly = false) {
     .select('document_kind,display_name,category,canonical_destination,staff_credential_type,default_authorized_activities,extraction_rules')
     .eq('document_kind', documentKind).eq('active', true).maybeSingle();
   const definition = identityDocumentDefinition(documentKind, definitionResult.data);
+  const consensus = documentKind === 'nzta_mvr_record'
+    ? extractIdentityFieldsConsensus(loaded.ocrVariants ?? [loaded.text], documentKind, definition)
+    : null;
   return json(response, 200, {
     success: true,
     attachment_id: loaded.attachment.id,
     document_kind: documentKind,
     sha256: loaded.sha256,
     ocr: { text: loaded.text, provider: loaded.provider, page_count: loaded.pageCount, review_required: true },
-    proposed_fields: extractIdentityFields(loaded.text, documentKind, definition),
-    classification: classifyIdentityDocument(loaded.text, documentKind, definition),
+    proposed_fields: consensus
+      ? { ...consensus.fields, _identifier_verification: consensus.identifier_verification }
+      : extractIdentityFields(loaded.text, documentKind, definition),
+    classification: classifyIdentityDocument((loaded.ocrVariants ?? [loaded.text]).join('\n'), documentKind, definition),
     document_definition: {
       label: definition.label,
       category: definition.category,
@@ -261,7 +273,14 @@ async function extractDocumentText(attachment, kind) {
       const { stdout } = await execFileAsync('unzip', ['-p', sourcePath, 'word/document.xml'], { timeout: 60_000, maxBuffer: 32 * 1024 * 1024 });
       return docxXmlToText(stdout).slice(0, 60_000);
     }
-    if (kind === 'image') return (await tesseractText(sourcePath)).slice(0, 60_000);
+    if (kind === 'image') {
+      const variants = await Promise.all([6, 11].map((mode) => tesseractText(sourcePath, mode)));
+      return {
+        text: (variants[0] || variants[1] || '').slice(0, 60_000),
+        variants: variants.map((value) => value.slice(0, 60_000)),
+        provider: 'tesseract-5-ensemble-psm6-psm11',
+      };
+    }
     return '';
   } finally {
     await fs.rm(work, { recursive: true, force: true });

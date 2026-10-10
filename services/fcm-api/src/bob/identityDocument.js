@@ -76,6 +76,86 @@ function regexEscape(value) {
   return String(value || '').replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
 }
 
+function normalizePlateCandidate(value) {
+  const normalized = String(value || '').toUpperCase().replace(/[^A-Z0-9]/g, '');
+  return normalized.length >= 3 && normalized.length <= 8 ? normalized : null;
+}
+
+function nztaPlateEvidence(rawText, variantIndex = 0) {
+  const text = String(rawText || '').replace(/\r/g, '');
+  const evidence = [];
+  const add = (value, source) => {
+    const normalized = normalizePlateCandidate(value);
+    if (normalized) evidence.push({ value: normalized, source, variant_index: variantIndex });
+  };
+  for (const match of text.matchAll(/(?:^|\n)\s*(?:plate|registration plate|rego)(?!\s+type\b)\s*[:#-]?\s*([A-Z0-9 -]{3,12})/gim)) {
+    add(match[1], 'labelled_plate');
+  }
+  for (const match of text.matchAll(/show\s+the\s+results\s+for\s+plate\s*\/?\s*vin\s*[:#-]?\s*(?:\n|\s)+([A-Z0-9-]{3,20})/gim)) {
+    add(match[1], 'query_entry');
+  }
+  return evidence;
+}
+
+function resolveNztaPlateFromOcr(rawVariants) {
+  const variants = (Array.isArray(rawVariants) ? rawVariants : [rawVariants]).map((value) => String(value || '')).filter(Boolean);
+  const allEvidence = variants.flatMap((text, index) => nztaPlateEvidence(text, index));
+  const plateType = variants.map((text) => labelled(text, ['plate type'], '[^\\n]{2,40}')).find(Boolean) || null;
+  const standard = /\bstandard\b/i.test(String(plateType || ''));
+  const byValue = new Map();
+  for (const item of allEvidence) {
+    const current = byValue.get(item.value) || { value: item.value, occurrences: 0, variants: new Set(), sources: new Set() };
+    current.occurrences += 1;
+    current.variants.add(item.variant_index);
+    current.sources.add(item.source);
+    byValue.set(item.value, current);
+  }
+  const candidates = [...byValue.values()].map((item) => {
+    const standardShape = /^[A-Z]{3}\d{3}$/.test(item.value) || /^[A-Z]{2}\d{4}$/.test(item.value);
+    const mixed = /[A-Z]/.test(item.value) && /\d/.test(item.value);
+    const validShape = standard ? standardShape : mixed;
+    const score = item.occurrences + item.variants.size + item.sources.size + (standardShape ? 2 : 0);
+    return {
+      value: item.value,
+      occurrences: item.occurrences,
+      variant_count: item.variants.size,
+      source_kinds: [...item.sources].sort(),
+      valid_shape: validShape,
+      score,
+    };
+  }).sort((left, right) => right.score - left.score || right.occurrences - left.occurrences || left.value.localeCompare(right.value));
+  const valid = candidates.filter((candidate) => candidate.valid_shape);
+  const winner = valid[0] || null;
+  const runnerUp = valid[1] || null;
+  const verified = Boolean(winner
+    && (winner.variant_count >= 2 || winner.source_kinds.length >= 2 || winner.occurrences >= 2)
+    && (!runnerUp || winner.score > runnerUp.score));
+  return {
+    status: verified ? 'verified_candidate' : 'manual_review_required',
+    value: verified ? winner.value : null,
+    candidates,
+    plate_type: plateType,
+    rule: standard ? 'nz_standard_plate_shape_and_ocr_consensus' : 'mixed_alphanumeric_and_ocr_consensus',
+  };
+}
+
+function extractIdentityFieldsConsensus(rawVariants, documentKind, requestedDefinition = null) {
+  const variants = (Array.isArray(rawVariants) ? rawVariants : [rawVariants]).map((value) => String(value || '')).filter(Boolean);
+  const fields = extractIdentityFields(variants[0] || '', documentKind, requestedDefinition);
+  if (documentKind !== 'nzta_mvr_record') return { fields, identifier_verification: null };
+  const plate = resolveNztaPlateFromOcr(variants);
+  delete fields.plate_number;
+  if (plate.value) fields.plate_number = plate.value;
+  return {
+    fields,
+    identifier_verification: {
+      plate_number: plate,
+      authority: 'provisional_source_time',
+      review_required: true,
+    },
+  };
+}
+
 function identityDocumentDefinition(documentKind, storedDefinition = null) {
   const fallback = DOCUMENT_DEFINITIONS[documentKind] || DOCUMENT_DEFINITIONS.other_identity;
   return storedDefinition ? { ...fallback, ...storedDefinition } : fallback;
@@ -193,7 +273,11 @@ module.exports = {
   DOCUMENT_DEFINITIONS,
   classifyIdentityDocument,
   extractIdentityFields,
+  extractIdentityFieldsConsensus,
   identityDocumentDefinition,
   isoDate,
   localDateTime,
+  normalizePlateCandidate,
+  nztaPlateEvidence,
+  resolveNztaPlateFromOcr,
 };
