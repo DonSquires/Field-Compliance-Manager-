@@ -41,6 +41,12 @@ Field Compliance Manager (FCM) is an enterprise SaaS platform designed to replac
      `perception_evidence_reviews`. Raw candidates are currently
      administrator-only; domain adapters must add the proper task-entitlement
      policy before widening access.
+    - **CCTV ALPR receipts:** Plated CCTV observations are projected into the
+     shared evidence spine only after source/enhanced derivatives are stored.
+     Original hashes, raw/corrected OCR, frame location, quality floors,
+     temporal consensus and disagreements remain visible. Machine consensus
+     never removes review; the existing CCTV observation review is the one
+     human decision mirrored into shared authority and append-only history.
    - **Self-Heal Boundary:** Bob may reproduce, edit, test, independently
      verify, repair and prepare a draft release in an isolated worker. Schema,
      auth/RLS, secrets, protected-branch merge, deployment and destructive bulk

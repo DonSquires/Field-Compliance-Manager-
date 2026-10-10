@@ -1066,6 +1066,13 @@ async function recordObservationDerivatives(job, derivatives) {
   return data;
 }
 
+async function recordSharedAlprEvidence(job) {
+  const { data, error } = await supabase.rpc('record_cctv_alpr_perception_envelopes', { p_job_id: job.id });
+  if (error) throw new Error(`shared ALPR evidence persistence failed: ${error.message}`);
+  log('shared_alpr_evidence_recorded', { job_id: job.id, ...data });
+  return data;
+}
+
 async function normaliseStillJpeg(sourcePath, outputPath) {
   await execFileAsync('ffmpeg', ['-y', '-v', 'error', '-i', sourcePath, '-frames:v', '1', '-q:v', '2', outputPath], { timeout: 120_000, maxBuffer: 4 * 1024 * 1024 });
   return fs.readFile(outputPath);
@@ -1162,6 +1169,7 @@ async function processStillEvidence(job, evidence) {
     source_frames: [{ frame_index: 0, relative_timestamp_seconds: 0, sha256_hash: frameSha256 }],
   }));
   await recordObservationDerivatives(job, derivatives);
+  await recordSharedAlprEvidence(job);
   if (provider === 'laptop_gpu' || provider === 'runpod_fallback') {
     await recordInferenceUsage(job, { frames_sampled: 1, frames_recognised: 1, frames_sent: 1, gpu_calls: 1, gpu_ms: Number(answer?.gpu_elapsed_ms) || 0 });
   }
@@ -1488,6 +1496,7 @@ async function processOne() {
     await recordEntityObservations(job, evidence, summary);
     const observationDerivatives = await buildObservationDerivatives(job, evidence, summary);
     await recordObservationDerivatives(job, observationDerivatives);
+    await recordSharedAlprEvidence(job);
     const gpuDerivatives = observationDerivatives.filter((derivative) => derivative.provider === 'laptop_gpu' || derivative.provider === 'runpod_fallback');
     if (observationDerivatives.length) await recordInferenceUsage(job, {
       frames_sampled: 0, frames_recognised: observationDerivatives.length,

@@ -395,6 +395,16 @@ the deterministic verifier blocks unsupported plate claims. Raw candidate
 reads are administrator-only pending the domain-specific task-entitlement
 policies delivered with each Phase C adapter.
 
+Phase C CCTV ALPR slice shipped 2026-10-11: plated CCTV observations now compile
+into replay-safe shared perception envelopes after derivative persistence.
+Original evidence/frame hashes, raw and corrected reads, source/enhanced
+comparison, ALPR quality, crop width, minimum character confidence and temporal
+consensus remain inspectable. Weak or conflicting reads cannot become verified
+candidates. `cctv_entity_observations.review_state` remains the single human
+decision and is projected into shared authority and review receipts. Raw access
+remains administrator-only pending a separately tested CCTV task-entitlement
+policy. Face/person, vehicle-attribute and vertical-module adapters remain.
+
 **Gate:** live `bob_messages` show no context-losing fallbacks; a Builder job
 runs implement → verify → repair without human touch and stops cleanly at
 `release_ready`; egress proven per rank; Atlas `exercised` is populated from

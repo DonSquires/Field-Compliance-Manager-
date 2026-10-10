@@ -279,6 +279,9 @@ test('watcher records observations and timeline marks through the P2 RPCs before
   const derivativeIndex = watcherSource.indexOf('await buildObservationDerivatives(job, evidence, summary);');
   assert.ok(recordIndex > 0 && derivativeIndex > recordIndex, 'derivatives are built only after observation rows exist');
   assert.match(watcherSource, /supabase\.rpc\('record_cctv_observation_derivatives'/);
+  assert.match(watcherSource, /supabase\.rpc\('record_cctv_alpr_perception_envelopes', \{ p_job_id: job\.id \}\)/);
+  const sharedEvidenceIndex = watcherSource.indexOf('await recordSharedAlprEvidence(job);', derivativeIndex);
+  assert.ok(sharedEvidenceIndex > derivativeIndex, 'the shared ALPR receipt is compiled after derivative evidence is stored');
   assert.match(watcherSource, /callLaptopEnhancement\(fusedBytes/);
   assert.match(watcherSource, /callRunpodEnhancement\(fusedBytes/);
   assert.match(watcherSource, /select\('source_event_id'\).*?\.neq\('review_state', 'superseded'\)/);
