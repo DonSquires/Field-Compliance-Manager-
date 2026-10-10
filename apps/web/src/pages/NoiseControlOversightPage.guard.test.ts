@@ -5,6 +5,7 @@ import { describe, expect, it } from 'vitest';
 const admin = readFileSync(resolve(process.cwd(), 'src/pages/NoiseControlOversightPage.tsx'), 'utf8');
 const officer = readFileSync(resolve(process.cwd(), 'src/pages/OfficerNoiseControlPage.tsx'), 'utf8');
 const sql = readFileSync(resolve(process.cwd(), '../../supabase/migrations/20260901012000_govern_noise_review.sql'), 'utf8');
+const evidencePackage = readFileSync(resolve(process.cwd(), '../../supabase/functions/generate-noise-evidence-package/index.ts'), 'utf8');
 
 describe('governed noise review return', () => {
   it('routes admin decisions through an expected-state RPC', () => {
@@ -20,6 +21,16 @@ describe('governed noise review return', () => {
     expect(admin).toContain('assessment_id: assessment.id');
     expect(admin).toContain('Generate evidence package');
     expect(admin).not.toMatch(/from\('noise_assessments'\)[\s\S]{0,300}\.update\(/);
+    expect(evidencePackage).toContain('caller.rpc("is_admin_for_org", { target_org_id: assessment.organization_id })');
+    expect(evidencePackage).toContain('if (mayGenerate !== true)');
+    expect(evidencePackage).toContain('deactivated_at');
+    expect(admin).toContain('evidence_package_url');
+    expect(admin).toContain('GeneratedArtifactActions bucket="notice-artifacts"');
+    expect(evidencePackage).toContain('up to 8 days');
+    expect(evidencePackage).toContain('recorded expiry above governs this assessment');
+    expect(evidencePackage).toContain('may apply for return of seized property at any time');
+    expect(evidencePackage).not.toContain('72 hours from the time of issue');
+    expect(evidencePackage).not.toContain('minimum of 28 days');
   });
 
   it('shows and focuses exact officer review outcomes', () => {

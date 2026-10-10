@@ -21,6 +21,12 @@ describe('parking oversight schema parity', () => {
     expect(page).toContain('reviewCount');
   });
 
+  it('offers preview and download for stored infringement PDFs', () => {
+    expect(page).toContain('noticeArtifactPaths');
+    expect(page).toContain('GeneratedArtifactActions bucket="notice-artifacts"');
+    expect(page).toContain('infringement record was created, but its PDF artifact could not be stored');
+  });
+
   it('clears loading state when organization scope is unavailable', () => {
     expect(page).toContain('if (!orgId) {');
     expect(page).toContain('setLoading(false);');

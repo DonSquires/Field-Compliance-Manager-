@@ -49,7 +49,7 @@ async function signInAsHuman(page: Parameters<typeof installSupabaseFixtures>[0]
 }
 
 async function dismissDesktopPrompt(page: Parameters<typeof installSupabaseFixtures>[0], session: HumanTestSession) {
-  const prompt = page.getByRole('dialog', { name: 'Choose your evidence workstation' });
+  const prompt = page.locator('.desktop-download-overlay [role="dialog"]');
   if (await prompt.isVisible({ timeout: 1000 }).catch(() => false)) {
     await session.step('dismiss the optional desktop companion prompt', async () => {
       await prompt.getByRole('button', { name: 'Not now', exact: true }).click();
@@ -154,11 +154,18 @@ test.describe("Dr. Bob's human browser test", () => {
     await session.finish();
   });
 
+  test('dismisses the desktop companion prompt so the next safe button remains usable', async ({ page }, testInfo) => {
+    const session = new HumanTestSession(page, testInfo);
+    await signInAsAdmin(page, '/admin');
+    await session.walkEveryVisibleButton('/admin/hub');
+    await expect(page.getByRole('button', { name: 'Open vehicle search' })).toBeVisible();
+    await session.finish();
+  });
+
   test('follows every safe button across every page route', async ({ page }, testInfo) => {
     test.setTimeout(900_000);
     const session = new HumanTestSession(page, testInfo);
-    await installSupabaseFixtures(page);
-    await signInAsAdmin(page, '/admin');
+    await signInAsHuman(page, session);
     const adminRoutes = [
       '/admin/hub', '/admin/approvals', '/admin/field-ops', '/admin/reports', '/admin/files',
       '/admin/investigations', '/admin/sites', '/admin/locations', '/admin/zones', '/admin/users',

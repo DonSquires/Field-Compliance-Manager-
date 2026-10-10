@@ -14,6 +14,7 @@ import { useAuth } from '../context/AuthContext';
 import { useServiceRelationships } from '../context/ServiceRelationshipContext';
 import { supabase } from '../lib/supabase';
 import { NoticePrintActions } from '../components/NoticePrintActions';
+import { GeneratedArtifactActions } from '../components/GeneratedArtifactActions';
 import type { NoticeReceiptData } from '../lib/thermalReceipt';
 import './PageStyles.css';
 import './BreachReviewPage.css';
@@ -70,6 +71,7 @@ const BreachReviewPage: React.FC = () => {
   const [busyId, setBusyId] = useState<string | null>(null);
   const [generatingNoticeId, setGeneratingNoticeId] = useState<string | null>(null);
   const [noticeReceipts, setNoticeReceipts] = useState<Record<string, NoticeReceiptData>>({});
+  const [noticeArtifactPaths, setNoticeArtifactPaths] = useState<Record<string, string>>({});
 
   // ATLAS READS: breach_alerts, location_zones, observations
   const loadAlerts = useCallback(async () => {
@@ -188,13 +190,12 @@ const BreachReviewPage: React.FC = () => {
     } else {
       if (data.receipt) setNoticeReceipts((current) => ({ ...current, [alert.id]: data.receipt as NoticeReceiptData }));
       if (data.pdf_url) {
-        const { data: signed, error: signedError } = await supabase.storage.from('notice-artifacts').createSignedUrl(data.pdf_url, 900);
-        if (signedError || !signed?.signedUrl) setError(signedError?.message ?? 'The notice PDF could not be opened.');
-        else window.open(signed.signedUrl, '_blank', 'noopener,noreferrer');
+        setNoticeArtifactPaths((current) => ({ ...current, [alert.id]: data.pdf_url as string }));
       } else {
         const draftUrl = URL.createObjectURL(new Blob([data.html], { type: 'text/html' }));
         window.open(draftUrl, '_blank', 'noopener,noreferrer');
         window.setTimeout(() => URL.revokeObjectURL(draftUrl), 60_000);
+        setError('The notice preview opened, but its PDF artifact could not be stored. Download is unavailable until generation succeeds.');
       }
     }
 
@@ -466,6 +467,7 @@ const BreachReviewPage: React.FC = () => {
                       </button>
                     </div>
                     {noticeReceipts[alert.id] && <NoticePrintActions receipt={noticeReceipts[alert.id]} />}
+                    {noticeArtifactPaths[alert.id] && <GeneratedArtifactActions bucket="notice-artifacts" path={noticeArtifactPaths[alert.id]} fileName={`notice-${noticeReceipts[alert.id]?.noticeNumber ?? alert.id}.pdf`} label="Notice PDF" />}
                   </div>
                 )}
               </div>

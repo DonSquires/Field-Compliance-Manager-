@@ -10,6 +10,7 @@ import { useAuth } from '../context/AuthContext';
 import { useServiceRelationships } from '../context/ServiceRelationshipContext';
 import { supabase } from '../lib/supabase';
 import { NoticePrintActions } from '../components/NoticePrintActions';
+import { GeneratedArtifactActions } from '../components/GeneratedArtifactActions';
 import type { NoticeReceiptData } from '../lib/thermalReceipt';
 import './PageStyles.css';
 
@@ -44,6 +45,7 @@ const ParkingOversightPage: React.FC = () => {
   const [filter, setFilter] = useState<ParkingFilter>('all');
   const [issuingId, setIssuingId] = useState<string | null>(null);
   const [noticeReceipts, setNoticeReceipts] = useState<Record<string, NoticeReceiptData>>({});
+  const [noticeArtifactPaths, setNoticeArtifactPaths] = useState<Record<string, string>>({});
 
   // ATLAS READS: parking_chalk_records
   const loadRecords = useCallback(async () => {
@@ -105,9 +107,9 @@ const ParkingOversightPage: React.FC = () => {
     } else {
       if (data.receipt) setNoticeReceipts((current) => ({ ...current, [record.id]: data.receipt as NoticeReceiptData }));
       if (data.pdf_url) {
-        const { data: signed, error: signedError } = await supabase.storage.from('notice-artifacts').createSignedUrl(data.pdf_url, 900);
-        if (signedError || !signed?.signedUrl) setError(signedError?.message ?? 'The notice PDF could not be opened.');
-        else window.open(signed.signedUrl, '_blank', 'noopener,noreferrer');
+        setNoticeArtifactPaths((current) => ({ ...current, [record.id]: data.pdf_url as string }));
+      } else {
+        setError('The infringement record was created, but its PDF artifact could not be stored. Preview and download are unavailable.');
       }
       await loadRecords();
     }
@@ -187,6 +189,7 @@ const ParkingOversightPage: React.FC = () => {
                   <td>
                     {!r.infringement_number && <button type="button" className="btn btn-sm btn-primary" disabled={issuingId === r.id} onClick={() => void issueInfringement(r)}>{issuingId === r.id ? 'Issuing…' : 'Issue infringement'}</button>}
                     {noticeReceipts[r.id] && <NoticePrintActions receipt={noticeReceipts[r.id]} />}
+                    {noticeArtifactPaths[r.id] && <GeneratedArtifactActions bucket="notice-artifacts" path={noticeArtifactPaths[r.id]} fileName={`parking-notice-${noticeReceipts[r.id]?.noticeNumber ?? r.id}.pdf`} label="Notice PDF" />}
                   </td>
                 </tr>
               ))

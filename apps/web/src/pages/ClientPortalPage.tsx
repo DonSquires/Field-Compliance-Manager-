@@ -16,6 +16,7 @@ import { useAuth } from '../context/AuthContext';
 import { agreementOptionSuffix } from '../lib/agreementTerm';
 import { ClientPeoplePanel } from '../components/ClientPeoplePanel';
 import { CustomReportSnapshot } from '../components/CustomReportSnapshot';
+import { GeneratedArtifactActions } from '../components/GeneratedArtifactActions';
 import { useServiceRelationships } from '../context/ServiceRelationshipContext';
 import type { ClientPortalPage } from '../lib/clientPortalAccess';
 import { getClientPortalPages } from '../lib/clientPortalAccess';
@@ -438,22 +439,11 @@ function LocationGrid({ sites, zones }: { sites: Array<{ id: string; name: strin
 }
 
 function ReportRow({ report }: { report: MonthlyReportPack }) {
-  const [opening, setOpening] = useState(false);
-  const [error, setError] = useState<string | null>(null);
   const pdfIsCurrent = Boolean(
     report.pdf_path
       && report.pdf_source_updated_at === report.updated_at
-      && (report.status === 'sent' || report.pdf_renderer_version === 'fcm-report-pack-pdf-lib-a4-v5'),
+      && (report.status === 'sent' || report.pdf_renderer_version === 'fcm-report-pack-pdf-lib-a4-v9'),
   );
-  const openPdf = async () => {
-    if (!pdfIsCurrent || !report.pdf_path) return;
-    setOpening(true);
-    setError(null);
-    const { data, error: signedError } = await supabase.storage.from('bob-uploads').createSignedUrl(report.pdf_path, 900);
-    if (signedError || !data?.signedUrl) setError(signedError?.message ?? 'The report PDF could not be opened.');
-    else window.open(data.signedUrl, '_blank', 'noopener,noreferrer');
-    setOpening(false);
-  };
   const title = report.editorial?.title ?? `${report.template_code.replaceAll('_', ' ')} report`;
   const periodStartLabel = new Date(report.period_start + 'T00:00:00').toLocaleDateString('en-NZ');
   const periodEndLabel = new Date(report.period_end + 'T00:00:00').toLocaleDateString('en-NZ');
@@ -467,10 +457,9 @@ function ReportRow({ report }: { report: MonthlyReportPack }) {
       <span><CalendarRange size={19} /></span>
       <div className="client-report-copy"><strong>{title}</strong><small>{report.report_kind === 'custom' ? `Custom report · ${periodLabel}` : periodLabel}</small>{report.editorial?.executive_summary && <p>{report.editorial.executive_summary}</p>}</div>
       <div><strong>{availableLabel}</strong><small>{publishedLabel}</small></div>
-      {pdfIsCurrent && <button type="button" onClick={() => void openPdf()} disabled={opening} title="Open report PDF"><FileText size={17} aria-hidden="true" /><span className="sr-only">{opening ? 'Opening report PDF' : 'Open report PDF'}</span></button>}
+      {pdfIsCurrent && report.pdf_path && <GeneratedArtifactActions bucket="bob-uploads" path={report.pdf_path} fileName={`report-${report.id.slice(0, 8)}-${report.period_start}.pdf`} label="Report PDF" />}
       <CheckCircle2 size={18} className="is-success" aria-label="Published report" />
       {report.report_kind === 'custom' && <details className="client-custom-report"><summary>View report contents</summary><CustomReportSnapshot data={report.data} reportScope={report.report_scope} idPrefix={`client-report-${report.id}`} /></details>}
-      {error && <small role="alert">{error}</small>}
     </article>
   );
 }

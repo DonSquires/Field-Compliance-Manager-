@@ -7,6 +7,7 @@ import {
   CircleDot,
   Clock3,
   Database,
+  Download,
   Eye,
   ExternalLink,
   FileVideo2,
@@ -145,6 +146,12 @@ type CCTVReviewPageProps = {
   libraryMode?: boolean;
 };
 
+type PrintableCCTVReport = {
+  html: string;
+  fileName: string;
+  previewWindow: Window;
+};
+
 const CCTV_DOMAINS = ['video_motion', 'vehicle', 'face'] as const;
 
 const FILTERS: Array<{ value: ReviewFilter; label: string }> = [
@@ -248,6 +255,7 @@ export const CCTVReviewPage: React.FC<CCTVReviewPageProps> = ({ initialFilter = 
   const [decisionSaving, setDecisionSaving] = useState(false);
   const [decisionMessage, setDecisionMessage] = useState<string | null>(null);
   const [reportReceipt, setReportReceipt] = useState<{ reportId: string; generatedAt: string; sha256: string; observationCount: number } | null>(null);
+  const [printableReport, setPrintableReport] = useState<PrintableCCTVReport | null>(null);
   const [verifyDraft, setVerifyDraft] = useState<{ receiptId: string; sha256: string }>({ receiptId: '', sha256: '' });
   const [verifyResult, setVerifyResult] = useState<{ text: string; ok: boolean | null } | null>(null);
   const [verifying, setVerifying] = useState(false);
@@ -1192,13 +1200,37 @@ export const CCTVReviewPage: React.FC<CCTVReviewPageProps> = ({ initialFilter = 
     reportWindow.document.write(report);
     reportWindow.document.close();
     reportWindow.focus();
-    reportWindow.print();
+    setPrintableReport({
+      html: report,
+      fileName: `cctv-report-${issuedReceipt.report_id.slice(0, 8)}.html`,
+      previewWindow: reportWindow,
+    });
     setReportReceipt({
       reportId: receipt.report_id,
       generatedAt: receipt.generated_at,
       sha256: receipt.sha256,
       observationCount: receipt.observation_count,
     });
+  };
+
+  const printCCTVReport = () => {
+    if (!printableReport) return;
+    if (printableReport.previewWindow.closed) {
+      setDecisionMessage('The report preview tab is closed. Generate the report again to print or save it as PDF.');
+      return;
+    }
+    printableReport.previewWindow.focus();
+    printableReport.previewWindow.print();
+  };
+
+  const downloadCCTVReport = () => {
+    if (!printableReport) return;
+    const objectUrl = URL.createObjectURL(new Blob([printableReport.html], { type: 'text/html;charset=utf-8' }));
+    const anchor = document.createElement('a');
+    anchor.href = objectUrl;
+    anchor.download = printableReport.fileName;
+    anchor.click();
+    window.setTimeout(() => URL.revokeObjectURL(objectUrl), 30_000);
   };
 
   return (
@@ -1456,14 +1488,14 @@ export const CCTVReviewPage: React.FC<CCTVReviewPageProps> = ({ initialFilter = 
                 <button type="button" className="cctv-btn-jump" disabled={exportSaving} onClick={() => void createExportDraft()} title="Create an approval-gated export draft from accepted observations">
                   {exportSaving ? 'Creating export...' : 'Create export draft'}
                 </button>
-                <button type="button" className="cctv-btn-jump" disabled={resultLoading} onClick={() => void printSelectedReport()} title="Print or save this evidence report as PDF">
-                  <Printer size={13} /> Print draft report
+                <button type="button" className="cctv-btn-jump" disabled={resultLoading} onClick={() => void printSelectedReport()} title="Preview a draft evidence report">
+                  <Eye size={13} /> Preview draft report
                 </button>
                 <button type="button" className="cctv-btn-jump" disabled={!selected?.evidence_item_id} onClick={draftBobDocument} title="Draft an incident report with Bob from this CCTV evidence">
                   Bob: Draft incident report
                 </button>
-                <button type="button" className="cctv-btn-confirm" disabled={!reportReady} onClick={() => void printSelectedReport('review_ready')} title={reportReady ? 'Print the final evidence report' : 'Resolve all observations and load the complete batch first'}>
-                  <Printer size={13} /> Final report
+                <button type="button" className="cctv-btn-confirm" disabled={!reportReady} onClick={() => void printSelectedReport('review_ready')} title={reportReady ? 'Preview the final evidence report' : 'Resolve all observations and load the complete batch first'}>
+                  <Eye size={13} /> Final report preview
                 </button>
                 {['failed', 'inconclusive', 'manual_review_required'].includes(selected.status) && (
                   <button type="button" className="cctv-btn-jump" disabled={jobAction !== null} onClick={() => void manageSelectedJob('retry')}>
@@ -2028,6 +2060,7 @@ export const CCTVReviewPage: React.FC<CCTVReviewPageProps> = ({ initialFilter = 
                   <span>{reportReceipt.observationCount} observations · {timeLabel(reportReceipt.generatedAt)}</span>
                   <span>Receipt ID: {reportReceipt.reportId}</span>
                   <span>SHA-256: {reportReceipt.sha256}</span>
+                  {printableReport && <div className="cctv-card-actions"><button type="button" className="cctv-btn-jump" onClick={printCCTVReport}><Printer size={13} /> Print / Save as PDF</button><button type="button" className="cctv-btn-jump" onClick={downloadCCTVReport}><Download size={13} /> Download HTML</button></div>}
                 </div>
               )}
               <form className="cctv-quality-panel cctv-verify-receipt" aria-label="Verify a printed report" onSubmit={(event) => { event.preventDefault(); void verifyReceipt(); }}>

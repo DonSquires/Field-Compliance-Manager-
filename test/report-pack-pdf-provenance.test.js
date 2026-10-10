@@ -17,7 +17,14 @@ test('report-pack PDFs expose source snapshot provenance and scope', () => {
 });
 
 test('monthly PDFs render agreement-scoped activity sections without provider-wide totals', () => {
-  assert.match(source, /'fcm-report-pack-pdf-lib-a4-v5'/);
+  assert.match(source, /'fcm-report-pack-pdf-lib-a4-v9'/);
+  assert.match(source, /embedPdfNotoFonts\(pdf\)/);
+  assert.doesNotMatch(source, /noto-sans-[^'" ]+\.woff/);
+  assert.doesNotMatch(source, /pdf\.embedFont\(/);
+  assert.match(source, /pdf\.setTitle\(reportTitle\)/);
+  assert.match(source, /editorial\.title\.trim\(\)/);
+  assert.match(source, /templateTitle = typeof template\?\.name === 'string'/);
+  assert.match(source, /\$\{templateTitle\} - \$\{period\}/);
   assert.match(source, /Patrol and Activity Summary/);
   assert.match(source, /Site Coverage/);
   assert.match(source, /Service Level Performance/);

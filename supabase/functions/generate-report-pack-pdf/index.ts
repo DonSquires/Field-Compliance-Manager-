@@ -5,19 +5,13 @@
 import { serve } from 'https://deno.land/std@0.168.0/http/server.ts';
 import { createClient } from 'https://esm.sh/@supabase/supabase-js@2';
 import { PDFDocument, rgb, type PDFFont } from 'https://esm.sh/pdf-lib@1.17.1';
-import * as fontkitModule from 'https://esm.sh/@pdf-lib/fontkit@1.1.1';
-
-type PdfFontkit = Parameters<PDFDocument['registerFontkit']>[0];
-const fontkit = (fontkitModule as unknown as { default: PdfFontkit }).default;
+import { embedPdfNotoFonts } from '../_shared/pdf-noto-fonts.ts';
+import { pdfTextFontRuns } from '../_shared/pdf-text-fonts.ts';
 
 const url = Deno.env.get('SUPABASE_URL') ?? '';
 const serviceKey = Deno.env.get('SUPABASE_SERVICE_ROLE_KEY') ?? '';
 const anonKey = Deno.env.get('SUPABASE_ANON_KEY') ?? '';
-const rendererVersion = 'fcm-report-pack-pdf-lib-a4-v5';
-const fontUrls = {
-  normal: 'https://cdn.jsdelivr.net/npm/@fontsource/noto-sans@5.2.8/files/noto-sans-latin-ext-400-normal.woff',
-  bold: 'https://cdn.jsdelivr.net/npm/@fontsource/noto-sans@5.2.8/files/noto-sans-latin-ext-700-normal.woff',
-};
+const rendererVersion = 'fcm-report-pack-pdf-lib-a4-v9';
 const cors = { 'Access-Control-Allow-Origin': '*', 'Access-Control-Allow-Headers': 'authorization, x-client-info, apikey, content-type' };
 const json = (body: unknown, status = 200) => new Response(JSON.stringify(body), { status, headers: { ...cors, 'Content-Type': 'application/json' } });
 const sha256 = async (bytes: Uint8Array) => Array.from(new Uint8Array(await crypto.subtle.digest('SHA-256', Uint8Array.from(bytes).buffer))).map((value) => value.toString(16).padStart(2, '0')).join('');
@@ -41,6 +35,13 @@ interface PdfReportPack {
   updated_at: string;
   pdf_path: string | null;
   delivery_channel: string | null;
+}
+
+interface PdfFontPair {
+  latin: PDFFont;
+  latinExtended: PDFFont;
+  latinCodePoints: ReadonlySet<number>;
+  latinExtendedCodePoints: ReadonlySet<number>;
 }
 
 class RequestError extends Error {
@@ -89,12 +90,17 @@ function customScopeLines(reportScope: unknown): string[] {
   ];
 }
 
-function splitTokenToWidth(token: string, font: PDFFont, size: number, maxWidth: number) {
+function textWidth(text: string, fonts: PdfFontPair, size: number) {
+  return pdfTextFontRuns(text, fonts.latin, fonts.latinExtended, fonts.latinCodePoints, fonts.latinExtendedCodePoints)
+    .reduce((width, run) => width + run.font.widthOfTextAtSize(run.text, size), 0);
+}
+
+function splitTokenToWidth(token: string, fonts: PdfFontPair, size: number, maxWidth: number) {
   const chunks: string[] = [];
   let chunk = '';
   for (const character of Array.from(token)) {
     const candidate = `${chunk}${character}`;
-    if (chunk && font.widthOfTextAtSize(candidate, size) > maxWidth) {
+    if (chunk && textWidth(candidate, fonts, size) > maxWidth) {
       chunks.push(chunk);
       chunk = character;
     } else {
@@ -105,14 +111,14 @@ function splitTokenToWidth(token: string, font: PDFFont, size: number, maxWidth:
   return chunks;
 }
 
-function wrapText(text: string, font: PDFFont, size: number, maxWidth: number) {
+function wrapText(text: string, fonts: PdfFontPair, size: number, maxWidth: number) {
   const lines: string[] = [];
   for (const paragraph of text.split('\n')) {
-    const tokens = paragraph.trim().split(/\s+/).filter(Boolean).flatMap((token) => splitTokenToWidth(token, font, size, maxWidth));
+    const tokens = paragraph.trim().split(/\s+/).filter(Boolean).flatMap((token) => splitTokenToWidth(token, fonts, size, maxWidth));
     let line = '';
     for (const token of tokens) {
       const candidate = line ? `${line} ${token}` : token;
-      if (line && font.widthOfTextAtSize(candidate, size) > maxWidth) {
+      if (line && textWidth(candidate, fonts, size) > maxWidth) {
         lines.push(line);
         line = token;
       } else {
@@ -152,27 +158,32 @@ function reportAgreementName(pack: PdfReportPack) {
 
 async function renderPdf({ templateTitle, agreementName, period, packId, snapshotGeneratedAt, editorial, data, reportKind, reportScope, status, deliveryChannel }: ReportRenderInput): Promise<Uint8Array> {
   const pdf = await PDFDocument.create();
-  pdf.registerFontkit(fontkit);
   pdf.setLanguage('en-NZ');
-  const [normalResponse, boldResponse] = await Promise.all([fetch(fontUrls.normal), fetch(fontUrls.bold)]);
-  if (!normalResponse.ok || !boldResponse.ok) throw new Error('Unicode report fonts could not be loaded');
-  const [normal, bold] = await Promise.all([
-    pdf.embedFont(await normalResponse.arrayBuffer(), { subset: true }),
-    pdf.embedFont(await boldResponse.arrayBuffer(), { subset: true }),
-  ]);
+  const { normal, bold } = await embedPdfNotoFonts(pdf);
+  const reportTitle = typeof editorial.title === 'string' && editorial.title.trim()
+    ? editorial.title.trim()
+    : `${templateTitle} - ${period}`;
+  pdf.setTitle(reportTitle);
+  pdf.setSubject(`${agreementName} | ${period}`);
+  pdf.setCreator('Field Compliance Manager');
   let page = pdf.addPage([595, 842]);
   let y = 780;
-  const draw = (text: string, font = normal, size = 10) => {
-    for (const line of wrapText(text, font, size, 487)) {
+  const draw = (text: string, fonts = normal, size = 10) => {
+    for (const line of wrapText(text, fonts, size, 487)) {
       if (y < 64) { page = pdf.addPage([595, 842]); y = 780; }
-      page.drawText(line, { x: 54, y, size, font, color: rgb(0.08, 0.12, 0.13) });
+      let x = 54;
+      const runs = pdfTextFontRuns(line, fonts.latin, fonts.latinExtended, fonts.latinCodePoints, fonts.latinExtendedCodePoints);
+      for (const run of runs) {
+        page.drawText(run.text, { x, y, size, font: run.font, color: rgb(0.08, 0.12, 0.13) });
+        x += run.font.widthOfTextAtSize(run.text, size);
+      }
       y -= size + 6;
     }
   };
   const drawSection = (title: string) => {
     y -= 8;
     if (y < 110) { page = pdf.addPage([595, 842]); y = 780; }
-    page.drawText(title, { x: 54, y, size: 12, font: bold, color: rgb(0.08, 0.12, 0.13) });
+    draw(title, bold, 12);
     y -= 10;
     page.drawLine({ start: { x: 54, y }, end: { x: 541, y }, thickness: 0.7, color: rgb(0.72, 0.82, 0.80) });
     y -= 14;
@@ -223,7 +234,7 @@ async function renderPdf({ templateTitle, agreementName, period, packId, snapsho
     }
   };
   draw('Field Compliance Manager', bold, 15);
-  draw(typeof editorial.title === 'string' && editorial.title ? editorial.title : templateTitle, bold, 18);
+  draw(reportTitle, bold, 18);
   draw(agreementName, bold, 13);
   draw(`Reporting period: ${period}`, normal, 10);
   draw(`Report pack ID: ${packId}`, normal, 9);
@@ -301,8 +312,13 @@ async function handlePdfGeneration(req: Request) {
   const packId = typeof body.pack_id === 'string' ? body.pack_id.trim() : '';
   if (!packId) throw new RequestError('pack_id is required', 400);
   const { admin, userId, pack } = await loadRenderContext(req, packId);
+  const { data: template } = await admin.from('report_templates').select('name')
+    .eq('organization_id', pack.organization_id).eq('template_code', pack.template_code).maybeSingle();
+  const templateTitle = typeof template?.name === 'string' && template.name.trim()
+    ? template.name.trim()
+    : pack.report_kind === 'custom' ? 'Custom report' : `${pack.template_code.replaceAll('_', ' ')} report`;
   const bytes = await renderPdf({
-    templateTitle: `${pack.template_code.replaceAll('_', ' ')} report pack`,
+    templateTitle,
     agreementName: reportAgreementName(pack),
     period: `${pack.period_start} to ${pack.period_end}`,
     packId: pack.id,

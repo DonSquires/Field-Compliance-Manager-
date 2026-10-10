@@ -96,6 +96,25 @@ function Get-SshdState {
   return "$($svc.Status) (startup: $($svc.StartType))"
 }
 
+function Ensure-OllamaStartupShortcut([string]$ExecutablePath, [string]$Arguments = '') {
+  if (-not (Test-Path $ExecutablePath)) { return }
+  $startupDirectory = Join-Path $env:APPDATA 'Microsoft\Windows\Start Menu\Programs\Startup'
+  New-Item -ItemType Directory -Path $startupDirectory -Force | Out-Null
+  $shortcutPath = Join-Path $startupDirectory 'Ollama.lnk'
+  $shell = New-Object -ComObject WScript.Shell
+  $shortcut = $shell.CreateShortcut($shortcutPath)
+  if ($shortcut.TargetPath -eq $ExecutablePath -and $shortcut.Arguments -eq $Arguments) {
+    Write-Log 'Ollama already has a valid sign-in startup shortcut.'
+    return
+  }
+  $shortcut.TargetPath = $ExecutablePath
+  $shortcut.Arguments = $Arguments
+  $shortcut.WorkingDirectory = Split-Path -Parent $ExecutablePath
+  $shortcut.WindowStyle = 7
+  $shortcut.Save()
+  Write-Log 'Ensured Ollama starts automatically when this Windows user signs in.'
+}
+
 # Tell Bob's control plane how to reach this laptop (Windows user, Tailscale address, whether the SSH
 # switch is on, models present). Service-role only table; nothing secret leaves the laptop.
 function Register-BobLaptop([bool]$SshAllowed) {
@@ -139,6 +158,13 @@ function Show-Status {
 if ($Status) { Show-Status; Register-BobLaptop ((Get-Service sshd -ErrorAction SilentlyContinue).Status -eq 'Running'); exit 0 }
 if (-not (Test-Admin)) { throw 'Run this from an Administrator PowerShell (right-click PowerShell -> Run as administrator).' }
 
+$tailscaleService = Get-Service -Name 'Tailscale' -ErrorAction SilentlyContinue
+if (-not $tailscaleService) { throw 'Tailscale service is not installed; install Tailscale before configuring the FCM laptop link.' }
+if ($tailscaleService.StartType -ne 'Automatic') {
+  Set-Service -Name 'Tailscale' -StartupType Automatic
+  Write-Log 'Configured the Tailscale service to start automatically at Windows boot.'
+}
+
 if ($Deny) {
   if (Get-Service sshd -ErrorAction SilentlyContinue) { Stop-Service sshd -ErrorAction SilentlyContinue; Set-Service sshd -StartupType Manual }
   Write-Log "Bob's terminal is OFF (sshd stopped). Ollama over Tailscale is unaffected."
@@ -164,14 +190,24 @@ if (-not $SkipOllama) {
     if ([Environment]::GetEnvironmentVariable($name, 'User') -ne $wanted[$name]) { [Environment]::SetEnvironmentVariable($name, $wanted[$name], 'User'); $changed = $true }
     Set-Item -Path "Env:$name" -Value $wanted[$name]
   }
+  $app = Join-Path $env:LOCALAPPDATA 'Programs\Ollama\ollama app.exe'
+  $ollamaCommand = Get-Command ollama -ErrorAction SilentlyContinue
+  if (Test-Path $app) {
+    Ensure-OllamaStartupShortcut $app
+  } elseif ($ollamaCommand) {
+    Ensure-OllamaStartupShortcut $ollamaCommand.Source 'serve'
+  }
   if (Test-OllamaExposed) {
     Write-Log ('Ollama already listens on all interfaces (' + ((Get-OllamaBind) -join ', ') + ') - leaving it running.' + $(if ($changed) { ' Updated settings apply the next time Ollama restarts.' } else { '' }))
   } else {
     Write-Log 'Restarting Ollama so it listens for the VPS over Tailscale...'
     Get-Process -Name 'ollama app', 'ollama' -ErrorAction SilentlyContinue | Stop-Process -Force -ErrorAction SilentlyContinue
     Start-Sleep -Seconds 2
-    $app = Join-Path $env:LOCALAPPDATA 'Programs\Ollama\ollama app.exe'
-    if (Test-Path $app) { Start-Process -FilePath $app -WindowStyle Hidden } else { Start-Process -FilePath 'ollama' -ArgumentList 'serve' -WindowStyle Hidden }
+    if (Test-Path $app) {
+      Start-Process -FilePath $app -WindowStyle Hidden
+    } else {
+      Start-Process -FilePath 'ollama' -ArgumentList 'serve' -WindowStyle Hidden
+    }
     # The Ollama app starts its window first and the server after; allow it a few minutes.
     $deadline = (Get-Date).AddSeconds(180)
     $ok = $false

@@ -9,6 +9,7 @@ import React, { useEffect, useState, useCallback } from 'react';
 import { useAuth } from '../context/AuthContext';
 import { useServiceRelationships } from '../context/ServiceRelationshipContext';
 import { supabase } from '../lib/supabase';
+import { GeneratedArtifactActions } from '../components/GeneratedArtifactActions';
 import './PageStyles.css';
 import './NoiseControlOversightPage.css';
 
@@ -29,6 +30,7 @@ interface NoiseAssessment {
   end_expires_at: string | null;
   police_present: boolean | null;
   assessment_distance_to_complainant_m: number | null;
+  evidence_package_url: string | null;
 }
 
 interface AttendanceReport {
@@ -88,7 +90,7 @@ const NoiseControlOversightPage: React.FC = () => {
 
         let query = supabase
           .from('noise_assessments')
-          .select('id, officer_name, decibel_reading, noise_source, prior_notice_count, action_taken, assessed_at, review_status, reviewed_at, review_notes, follow_up_required, dispatch_job_id, end_number, end_expires_at, police_present, assessment_distance_to_complainant_m')
+          .select('id, officer_name, decibel_reading, noise_source, prior_notice_count, action_taken, assessed_at, review_status, reviewed_at, review_notes, follow_up_required, dispatch_job_id, end_number, end_expires_at, police_present, assessment_distance_to_complainant_m, evidence_package_url')
           .eq('organization_id', orgId);
         if (selectedAgreementSites.length > 0) {
           query = query.in('site_id', selectedAgreementSites.map((site) => site.id));
@@ -124,7 +126,10 @@ const NoiseControlOversightPage: React.FC = () => {
     setGeneratingPackageId(assessment.id); setError(null); setNotice(null);
     const { data, error: packageError } = await supabase.functions.invoke<{ evidence_package_url?: string }>('generate-noise-evidence-package', { body: { assessment_id: assessment.id } });
     if (packageError || !data?.evidence_package_url) setError(packageError?.message ?? 'The noise evidence package was not generated.');
-    else setNotice(`Court-ready evidence package generated for ${assessment.id.slice(0, 8)}.`);
+    else {
+      setAssessments((current) => current.map((row) => row.id === assessment.id ? { ...row, evidence_package_url: data.evidence_package_url as string } : row));
+      setNotice(`Court-ready evidence package generated for ${assessment.id.slice(0, 8)}.`);
+    }
     setGeneratingPackageId(null);
   };
 
@@ -188,7 +193,7 @@ const NoiseControlOversightPage: React.FC = () => {
                   <td>{a.action_taken || '-'}{a.end_number ? ` · ${a.end_number}` : ''}{a.end_expires_at ? <small> · in force until {new Date(a.end_expires_at).toLocaleString('en-NZ')}</small> : null}{REVIEW_FLAGS(a).map((flag) => <span key={flag} className="noise-review-flag">{flag}</span>)}</td>
                   <td>{new Date(a.assessed_at).toLocaleString()}</td>
                   <td><span className={`status-badge status-${a.review_status}`}>{a.review_status.replaceAll('_',' ')}</span>{a.follow_up_required&&<small> · follow-up required</small>}</td>
-                  <td><div className="noise-review-actions">{a.dispatch_job_id&&<button className="btn btn-sm btn-secondary" disabled={loadingReportId===a.dispatch_job_id} onClick={()=>void openReport(a.dispatch_job_id!)}>{loadingReportId===a.dispatch_job_id?'Loading report':'Attendance report'}</button>}{a.review_status==='open'&&<button className="btn btn-sm btn-secondary" onClick={()=>{setSelected(a);setReviewAction('acknowledge');setReviewNotes('');}}>Acknowledge</button>}{a.review_status!=='closed'&&<button className="btn btn-sm btn-secondary" onClick={()=>{setSelected(a);setReviewAction('require_follow_up');setReviewNotes('');}}>Require follow-up</button>}{a.review_status!=='closed'&&<button className="btn btn-sm btn-primary" onClick={()=>{setSelected(a);setReviewAction('close');setReviewNotes('');}}>Close review</button>}{a.review_status==='closed'&&<button className="btn btn-sm btn-primary" disabled={generatingPackageId===a.id} onClick={()=>void generateEvidencePackage(a)}>{generatingPackageId===a.id?'Generating...':'Generate evidence package'}</button>}</div></td>
+                  <td><div className="noise-review-actions">{a.dispatch_job_id&&<button className="btn btn-sm btn-secondary" disabled={loadingReportId===a.dispatch_job_id} onClick={()=>void openReport(a.dispatch_job_id!)}>{loadingReportId===a.dispatch_job_id?'Loading report':'Attendance report'}</button>}{a.review_status==='open'&&<button className="btn btn-sm btn-secondary" onClick={()=>{setSelected(a);setReviewAction('acknowledge');setReviewNotes('');}}>Acknowledge</button>}{a.review_status!=='closed'&&<button className="btn btn-sm btn-secondary" onClick={()=>{setSelected(a);setReviewAction('require_follow_up');setReviewNotes('');}}>Require follow-up</button>}{a.review_status!=='closed'&&<button className="btn btn-sm btn-primary" onClick={()=>{setSelected(a);setReviewAction('close');setReviewNotes('');}}>Close review</button>}{a.review_status==='closed'&&!a.evidence_package_url&&<button className="btn btn-sm btn-primary" disabled={generatingPackageId===a.id} onClick={()=>void generateEvidencePackage(a)}>{generatingPackageId===a.id?'Generating...':'Generate evidence package'}</button>}{a.evidence_package_url&&<GeneratedArtifactActions bucket="notice-artifacts" path={a.evidence_package_url} fileName={`noise-evidence-${a.id.slice(0,8)}.pdf`} label="Evidence PDF" />}</div></td>
                 </tr>
               ))
             )}

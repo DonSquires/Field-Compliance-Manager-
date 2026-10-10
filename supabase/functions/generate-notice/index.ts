@@ -35,31 +35,72 @@
  *   The breach_alert action_type is updated to reflect the draft.
 */ import { serve } from 'https://deno.land/std@0.168.0/http/server.ts';
 import { createClient } from 'https://esm.sh/@supabase/supabase-js@2';
-import { PDFDocument, StandardFonts, rgb } from 'https://esm.sh/pdf-lib@1.17.1';
+import { PDFDocument, rgb, type PDFFont } from 'https://esm.sh/pdf-lib@1.17.1';
+import { embedPdfNotoFonts } from '../_shared/pdf-noto-fonts.ts';
+import { pdfTextFontRuns, wrapPdfText, type PdfTextFontPair } from '../_shared/pdf-text-fonts.ts';
 const corsHeaders = {
   'Access-Control-Allow-Origin': '*',
   'Access-Control-Allow-Headers': 'authorization, x-client-info, apikey, content-type'
 };
-const PDF_RENDERER_VERSION = 'fcm-notice-pdf-lib-a4-v1';
+const PDF_RENDERER_VERSION = 'fcm-notice-pdf-lib-a4-v5';
+const supabaseUrl = Deno.env.get('SUPABASE_URL') ?? '';
+const serviceRoleKey = Deno.env.get('SUPABASE_SERVICE_ROLE_KEY') ?? '';
 
-function htmlToLines(html) {
+interface NoticeHtmlData {
+  noticeType: string;
+  noticeNumber: string;
+  plate: string;
+  zoneName: string;
+  siteName: string;
+  siteAddress: string;
+  orgName: string;
+  officerName: string;
+  authorizedBy: string;
+  noticeDate: string;
+  vacateBy: string;
+  fineAmount: number;
+  paymentUrl: string;
+  objectionsEmail: string;
+  objectionsAddress: string;
+  bylawRef: string;
+  additionalNotes: string;
+  breachType: string;
+  customBody?: string;
+  footerText?: string;
+  logoUrl?: string;
+  issuingAuthority?: string;
+}
+
+function escapeHtml(value: string): string {
+  return value.replace(/[&<>"']/g, (character) => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' })[character] ?? character);
+}
+
+function htmlToLines(html: string): string[] {
   return html.replace(/<br\s*\/?><\/p>/gi, '\n').replace(/<\/(p|div|h1|h2|h3|li|tr|footer)>/gi, '\n').replace(/<li[^>]*>/gi, '- ').replace(/<[^>]+>/g, '').replace(/&amp;/g, '&').replace(/&lt;/g, '<').replace(/&gt;/g, '>').replace(/&quot;/g, '"').replace(/&#39;/g, "'").split(/\r?\n/).map((line) => line.replace(/\s+/g, ' ').trim()).filter(Boolean);
 }
 
-async function buildNoticePdfBytes(html, title, noticeNumber) {
+async function buildNoticePdfBytes(html: string, title: string, noticeNumber: string): Promise<Uint8Array> {
   const pdf = await PDFDocument.create();
-  const normal = await pdf.embedFont(StandardFonts.Helvetica);
-  const bold = await pdf.embedFont(StandardFonts.HelveticaBold);
+  const { normal, bold } = await embedPdfNotoFonts(pdf);
+  pdf.setTitle(title);
+  pdf.setSubject(`Notice ${noticeNumber}`);
+  pdf.setCreator('Field Compliance Manager');
   const lines = htmlToLines(html);
   let page = pdf.addPage([595, 842]);
   let y = 780;
-  const drawLine = (text, font = normal, size = 10) => {
-    if (y < 64) {
-      page = pdf.addPage([595, 842]);
-      y = 780;
+  const drawLine = (text: string, fonts: PdfTextFontPair<PDFFont> = normal, size = 10) => {
+    for (const line of wrapPdfText(text, fonts, size, 487)) {
+      if (y < 64) {
+        page = pdf.addPage([595, 842]);
+        y = 780;
+      }
+      let x = 54;
+      for (const run of pdfTextFontRuns(line, fonts.latin, fonts.latinExtended, fonts.latinCodePoints, fonts.latinExtendedCodePoints)) {
+        page.drawText(run.text, { x, y, size, font: run.font, color: rgb(0.08, 0.08, 0.08) });
+        x += run.font.widthOfTextAtSize(run.text, size);
+      }
+      y -= size + 6;
     }
-    page.drawText(text.slice(0, 115), { x: 54, y, size, font, color: rgb(0.08, 0.08, 0.08) });
-    y -= size + 6;
   };
   drawLine(title, bold, 17);
   drawLine(`Notice number: ${noticeNumber}`, normal, 9);
@@ -75,7 +116,7 @@ serve(async (req)=>{
     headers: corsHeaders
   });
   try {
-    const supabase = createClient(Deno.env.get('SUPABASE_URL'), Deno.env.get('SUPABASE_SERVICE_ROLE_KEY'));
+    const supabase = createClient(supabaseUrl, serviceRoleKey);
     // Auth
     const authHeader = req.headers.get('Authorization');
     if (!authHeader) return new Response(JSON.stringify({
@@ -135,8 +176,10 @@ serve(async (req)=>{
     // Build notice data from template (if available) or hardcoded defaults
     const plate = alert.plate_number ?? 'UNKNOWN';
     const zone = alert.location_zones;
-    const zoneName = zone?.name ?? location_name ?? 'Unknown location';
-    const siteAddress = zone?.locations?.address ?? '';
+    const zoneRecord = Array.isArray(zone) ? zone[0] : zone;
+    const zoneLocation = Array.isArray(zoneRecord?.locations) ? zoneRecord.locations[0] : zoneRecord?.locations;
+    const zoneName = zoneRecord?.name ?? location_name ?? 'Unknown location';
+    const siteAddress = zoneLocation?.address ?? '';
     const orgName = org?.name ?? 'Field Compliance Manager';
     const noticeDate = new Date().toLocaleDateString('en-NZ', {
       dateStyle: 'long',
@@ -189,6 +232,7 @@ serve(async (req)=>{
       fineAmount,
       paymentUrl,
       objectionsEmail,
+      objectionsAddress,
       bylawRef,
       additionalNotes: additional_notes ?? '',
       breachType: alert.breach_type
@@ -196,7 +240,7 @@ serve(async (req)=>{
     let html;
     if (template?.body_html) {
       // Render template body with {{variable}} placeholders
-      const renderedBody = template.body_html.replace(/\{\{plate\}\}/g, plate).replace(/\{\{zone\}\}/g, zoneName).replace(/\{\{officer\}\}/g, noticeData.officerName).replace(/\{\{date\}\}/g, noticeDate).replace(/\{\{vacate_by\}\}/g, vacateByStr).replace(/\{\{notice_number\}\}/g, noticeNumber).replace(/\{\{fine_amount\}\}/g, String(fineAmount)).replace(/\{\{payment_url\}\}/g, paymentUrl).replace(/\{\{objections_address\}\}/g, objectionsAddress).replace(/\{\{objections_email\}\}/g, objectionsEmail).replace(/\{\{org_name\}\}/g, orgName);
+      const renderedBody = template.body_html.replace(/\{\{plate\}\}/g, escapeHtml(plate)).replace(/\{\{zone\}\}/g, escapeHtml(zoneName)).replace(/\{\{officer\}\}/g, escapeHtml(noticeData.officerName)).replace(/\{\{date\}\}/g, escapeHtml(noticeDate)).replace(/\{\{vacate_by\}\}/g, escapeHtml(vacateByStr)).replace(/\{\{notice_number\}\}/g, escapeHtml(noticeNumber)).replace(/\{\{fine_amount\}\}/g, escapeHtml(String(fineAmount))).replace(/\{\{payment_url\}\}/g, escapeHtml(paymentUrl)).replace(/\{\{objections_address\}\}/g, escapeHtml(objectionsAddress)).replace(/\{\{objections_email\}\}/g, escapeHtml(objectionsEmail)).replace(/\{\{org_name\}\}/g, escapeHtml(orgName));
       // Wrap the rendered body in the standard notice HTML shell
       html = generateNoticeHtmlWithBody({
         ...noticeData,
@@ -262,7 +306,7 @@ serve(async (req)=>{
       contentType: 'text/html',
       upsert: true
     });
-    const { error: pdfUploadErr } = await supabase.storage.from('notice-artifacts').upload(pdfPath, new Blob([pdfBytes], { type: 'application/pdf' }), {
+    const { error: pdfUploadErr } = await supabase.storage.from('notice-artifacts').upload(pdfPath, new Blob([Uint8Array.from(pdfBytes).buffer], { type: 'application/pdf' }), {
       contentType: 'application/pdf',
       upsert: true
     });
@@ -328,19 +372,26 @@ serve(async (req)=>{
     });
   }
 });
-function generateNoticeHtmlWithBody(d) {
-  const titles = {
+function generateNoticeHtmlWithBody(d: NoticeHtmlData): string {
+  const titles: Record<string, string> = {
     written_warning: 'WRITTEN WARNING',
     notice_to_vacate: 'NOTICE TO VACATE',
     infringement: 'INFRINGEMENT NOTICE'
   };
   const title = titles[d.noticeType] ?? 'NOTICE';
+  const noticeNumber = escapeHtml(d.noticeNumber);
+  const issuingAuthority = escapeHtml(d.issuingAuthority ?? '');
+  const logoUrl = d.logoUrl?.trim() && /^https:\/\//i.test(d.logoUrl.trim()) ? escapeHtml(d.logoUrl.trim()) : '';
+  const officerName = escapeHtml(d.officerName);
+  const authorizedBy = escapeHtml(d.authorizedBy);
+  const noticeDate = escapeHtml(d.noticeDate);
+  const footerText = escapeHtml(d.footerText ?? '');
   return `<!DOCTYPE html>
 <html lang="en">
 <head>
   <meta charset="UTF-8">
   <meta name="viewport" content="width=device-width, initial-scale=1.0">
-  <title>${title} — ${d.noticeNumber}</title>
+  <title>${title} — ${noticeNumber}</title>
   <style>
     * { box-sizing: border-box; margin: 0; padding: 0; }
     body { font-family: Arial, Helvetica, sans-serif; font-size: 12pt; color: #000; background: #fff; padding: 20mm; }
@@ -369,13 +420,13 @@ function generateNoticeHtmlWithBody(d) {
 <body>
   <div class="header">
     <div>
-      ${d.logoUrl ? `<img class="logo" src="${d.logoUrl}" alt="${d.issuingAuthority}" />` : ''}
-      <div class="org-name">${d.issuingAuthority}</div>
+      ${logoUrl ? `<img class="logo" src="${logoUrl}" alt="${issuingAuthority}" />` : ''}
+      <div class="org-name">${issuingAuthority}</div>
       <div style="font-size:10pt;color:#555;margin-top:4px;">Authorised Enforcement Officer</div>
     </div>
     <div>
       <div class="notice-type">${title}</div>
-      <div class="notice-number">${d.noticeNumber}</div>
+      <div class="notice-number">${noticeNumber}</div>
     </div>
   </div>
 
@@ -388,73 +439,87 @@ function generateNoticeHtmlWithBody(d) {
   <div class="signature-section">
     <div class="sig-block">
       <div class="sig-line"></div>
-      <div class="sig-label">Officer signature: ${d.officerName}</div>
+      <div class="sig-label">Officer signature: ${officerName}</div>
     </div>
     <div class="sig-block">
       <div class="sig-line"></div>
-      <div class="sig-label">Authorised by: ${d.authorizedBy}</div>
+      <div class="sig-label">Authorised by: ${authorizedBy}</div>
     </div>
     <div class="sig-block">
       <div class="sig-line"></div>
-      <div class="sig-label">Date: ${d.noticeDate}</div>
+      <div class="sig-label">Date: ${noticeDate}</div>
     </div>
   </div>
 
   <div class="footer">
-    ${d.footerText || `Issued under ${d.bylawRef}. This notice was generated by ${d.issuingAuthority} field compliance system. Notice number: ${d.noticeNumber}. For queries contact ${d.issuingAuthority}.`}
+    ${footerText || `Issued under ${escapeHtml(d.bylawRef)}. This notice was generated by ${issuingAuthority} field compliance system. Notice number: ${noticeNumber}. For queries contact ${issuingAuthority}.`}
   </div>
 </body>
 </html>`;
 }
-function generateNoticeHtml(d) {
-  const titles = {
+function generateNoticeHtml(d: NoticeHtmlData): string {
+  const titles: Record<string, string> = {
     written_warning: 'WRITTEN WARNING',
     notice_to_vacate: 'NOTICE TO VACATE',
     infringement: 'INFRINGEMENT NOTICE'
   };
   const title = titles[d.noticeType] ?? 'NOTICE';
+  const noticeNumber = escapeHtml(d.noticeNumber);
+  const plate = escapeHtml(d.plate);
+  const zoneName = escapeHtml(d.zoneName);
+  const siteName = escapeHtml(d.siteName);
+  const siteAddress = escapeHtml(d.siteAddress);
+  const noticeDate = escapeHtml(d.noticeDate);
+  const bylawRef = escapeHtml(d.bylawRef);
+  const paymentUrl = escapeHtml(d.paymentUrl);
+  const objectionsEmail = escapeHtml(d.objectionsEmail);
+  const additionalNotes = escapeHtml(d.additionalNotes);
+  const vacateBy = escapeHtml(d.vacateBy);
+  const orgName = escapeHtml(d.orgName);
+  const officerName = escapeHtml(d.officerName);
+  const authorizedBy = escapeHtml(d.authorizedBy);
   const bodyContent = d.noticeType === 'infringement' ? `
-      <p>You are hereby issued an infringement notice under <strong>${d.bylawRef}</strong> for freedom camping in a prohibited area.</p>
+      <p>You are hereby issued an infringement notice under <strong>${bylawRef}</strong> for freedom camping in a prohibited area.</p>
       <table class="detail-table">
-        <tr><td>Vehicle plate:</td><td><strong>${d.plate}</strong></td></tr>
-        <tr><td>Location:</td><td>${d.zoneName}${d.siteName ? ` — ${d.siteName}` : ''}</td></tr>
-        <tr><td>Address:</td><td>${d.siteAddress}</td></tr>
-        <tr><td>Date of offence:</td><td>${d.noticeDate}</td></tr>
-        <tr><td>Notice number:</td><td><strong>${d.noticeNumber}</strong></td></tr>
+        <tr><td>Vehicle plate:</td><td><strong>${plate}</strong></td></tr>
+        <tr><td>Location:</td><td>${zoneName}${siteName ? ` — ${siteName}` : ''}</td></tr>
+        <tr><td>Address:</td><td>${siteAddress}</td></tr>
+        <tr><td>Date of offence:</td><td>${noticeDate}</td></tr>
+        <tr><td>Notice number:</td><td><strong>${noticeNumber}</strong></td></tr>
         <tr><td>Fine amount:</td><td><strong>NZD $${d.fineAmount.toFixed(2)}</strong></td></tr>
         <tr><td>Payment due:</td><td>Within 28 days of this notice</td></tr>
-        ${d.paymentUrl ? `<tr><td>Pay online:</td><td>${d.paymentUrl}</td></tr>` : ''}
-        ${d.objectionsEmail ? `<tr><td>Objections to:</td><td>${d.objectionsEmail}</td></tr>` : ''}
+        ${paymentUrl ? `<tr><td>Pay online:</td><td>${paymentUrl}</td></tr>` : ''}
+        ${objectionsEmail ? `<tr><td>Objections to:</td><td>${objectionsEmail}</td></tr>` : ''}
       </table>
       <p>Failure to pay within 28 days may result in further enforcement action.</p>
-      ${d.additionalNotes ? `<p><strong>Additional notes:</strong> ${d.additionalNotes}</p>` : ''}
+      ${additionalNotes ? `<p><strong>Additional notes:</strong> ${additionalNotes}</p>` : ''}
     ` : d.noticeType === 'notice_to_vacate' ? `
-      <p>You are hereby directed to vacate the following location under <strong>${d.bylawRef}</strong>.</p>
+      <p>You are hereby directed to vacate the following location under <strong>${bylawRef}</strong>.</p>
       <table class="detail-table">
-        <tr><td>Vehicle plate:</td><td><strong>${d.plate}</strong></td></tr>
-        <tr><td>Location:</td><td>${d.zoneName}${d.siteName ? ` — ${d.siteName}` : ''}</td></tr>
-        <tr><td>Address:</td><td>${d.siteAddress}</td></tr>
-        <tr><td>Date issued:</td><td>${d.noticeDate}</td></tr>
-        <tr><td>Vacate by:</td><td><strong>${d.vacateBy}</strong></td></tr>
+        <tr><td>Vehicle plate:</td><td><strong>${plate}</strong></td></tr>
+        <tr><td>Location:</td><td>${zoneName}${siteName ? ` — ${siteName}` : ''}</td></tr>
+        <tr><td>Address:</td><td>${siteAddress}</td></tr>
+        <tr><td>Date issued:</td><td>${noticeDate}</td></tr>
+        <tr><td>Vacate by:</td><td><strong>${vacateBy}</strong></td></tr>
       </table>
       <p>Failure to vacate by the time specified may result in an infringement notice being issued.</p>
-      ${d.additionalNotes ? `<p><strong>Additional notes:</strong> ${d.additionalNotes}</p>` : ''}
+      ${additionalNotes ? `<p><strong>Additional notes:</strong> ${additionalNotes}</p>` : ''}
     ` : `
       <p>This is a formal written warning regarding freedom camping at the following location.</p>
       <table class="detail-table">
-        <tr><td>Vehicle plate:</td><td><strong>${d.plate}</strong></td></tr>
-        <tr><td>Location:</td><td>${d.zoneName}${d.siteName ? ` — ${d.siteName}` : ''}</td></tr>
-        <tr><td>Date issued:</td><td>${d.noticeDate}</td></tr>
+        <tr><td>Vehicle plate:</td><td><strong>${plate}</strong></td></tr>
+        <tr><td>Location:</td><td>${zoneName}${siteName ? ` — ${siteName}` : ''}</td></tr>
+        <tr><td>Date issued:</td><td>${noticeDate}</td></tr>
       </table>
       <p>Please ensure you comply with freedom camping regulations. Further non-compliance may result in a Notice to Vacate or Infringement Notice.</p>
-      ${d.additionalNotes ? `<p><strong>Additional notes:</strong> ${d.additionalNotes}</p>` : ''}
+      ${additionalNotes ? `<p><strong>Additional notes:</strong> ${additionalNotes}</p>` : ''}
     `;
   return `<!DOCTYPE html>
 <html lang="en">
 <head>
   <meta charset="UTF-8">
   <meta name="viewport" content="width=device-width, initial-scale=1.0">
-  <title>${title} — ${d.noticeNumber}</title>
+  <title>${title} — ${noticeNumber}</title>
   <style>
     * { box-sizing: border-box; margin: 0; padding: 0; }
     body { font-family: Arial, Helvetica, sans-serif; font-size: 12pt; color: #000; background: #fff; padding: 20mm; }
@@ -482,12 +547,12 @@ function generateNoticeHtml(d) {
 <body>
   <div class="header">
     <div>
-      <div class="org-name">${d.orgName}</div>
+      <div class="org-name">${orgName}</div>
       <div style="font-size:10pt;color:#555;margin-top:4px;">Authorised Enforcement Officer</div>
     </div>
     <div>
       <div class="notice-type">${title}</div>
-      <div class="notice-number">${d.noticeNumber}</div>
+      <div class="notice-number">${noticeNumber}</div>
     </div>
   </div>
 
@@ -500,21 +565,21 @@ function generateNoticeHtml(d) {
   <div class="signature-section">
     <div class="sig-block">
       <div class="sig-line"></div>
-      <div class="sig-label">Officer signature: ${d.officerName}</div>
+      <div class="sig-label">Officer signature: ${officerName}</div>
     </div>
     <div class="sig-block">
       <div class="sig-line"></div>
-      <div class="sig-label">Authorised by: ${d.authorizedBy}</div>
+      <div class="sig-label">Authorised by: ${authorizedBy}</div>
     </div>
     <div class="sig-block">
       <div class="sig-line"></div>
-      <div class="sig-label">Date: ${d.noticeDate}</div>
+      <div class="sig-label">Date: ${noticeDate}</div>
     </div>
   </div>
 
   <div class="footer">
-    Issued under ${d.bylawRef}. This notice was generated by ${d.orgName} field compliance system.
-    Notice number: ${d.noticeNumber}. For queries contact ${d.orgName}.
+    Issued under ${bylawRef}. This notice was generated by ${orgName} field compliance system.
+    Notice number: ${noticeNumber}. For queries contact ${orgName}.
   </div>
 </body>
 </html>`;

@@ -78,6 +78,7 @@ export function FinanceCostingPanel() {
     const payload = Object.fromEntries(Object.entries(inputs).filter(([, value]) => value !== '').map(([key, value]) => [key, Number(value)]));
     const { data, error: calculationError } = await supabase.rpc('calculate_finance_quote_cost', { p_inputs: payload });
     if (calculationError) setError(calculationError.message);
+    else if (!data || Array.isArray(data) || typeof data.breakdown !== 'object' || data.breakdown === null) setError('The cost check returned no result. Try again, or contact support if it keeps happening.');
     else setResult(data as CostResult);
     setSaving(false);
   };

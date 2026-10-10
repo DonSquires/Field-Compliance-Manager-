@@ -6,6 +6,7 @@ import Placeholder from '@tiptap/extension-placeholder';
 import { useNavigate, useSearchParams } from 'react-router-dom';
 import { useAuth } from '../context/AuthContext';
 import { supabase } from '../lib/supabase';
+import { GeneratedArtifactActions } from '../components/GeneratedArtifactActions';
 import './BobDocumentStudioPage.css';
 
 type ReferenceResult = {
@@ -382,25 +383,15 @@ export default function BobDocumentStudioPage() {
     setOutputReceipt(receipt as OutputReceipt);
     setOutputHistory((current) => [receipt as OutputReceipt, ...current.filter((item) => item.id !== receipt.id)]);
     const { data: generated, error: generationError } = await supabase.functions.invoke('generate-bob-document-output', { body: { output_id: receipt.id } });
-    if (generationError || !generated?.output) setNotice(generationError?.message ?? generated?.error ?? `${outputLabel(outputFormat)} output could not be generated.`);
-    else {
+    if (generationError || !generated?.output) {
+      setNotice(generationError?.message ?? generated?.error ?? `${outputLabel(outputFormat)} output could not be generated.`);
+    } else {
       const ready = generated.output as OutputReceipt;
       setOutputReceipt(ready);
       setOutputHistory((current) => [ready, ...current.filter((item) => item.id !== ready.id)]);
       if (!ready.storage_bucket || !ready.storage_path) setNotice('The output receipt is missing its private storage location. It was not opened.');
-      else {
-        const { data: signed, error: signedError } = await supabase.storage.from(ready.storage_bucket).createSignedUrl(ready.storage_path, 900);
-        if (signedError) setNotice(signedError.message); else if (signed?.signedUrl) window.open(signed.signedUrl, '_blank', 'noopener,noreferrer');
-      }
     }
     setOutputBusy(false);
-  };
-
-  const openOutput = async () => {
-    if (!outputReceipt?.storage_bucket || !outputReceipt.storage_path) return;
-    const { data, error } = await supabase.storage.from(outputReceipt.storage_bucket).createSignedUrl(outputReceipt.storage_path, 900);
-    if (error) setNotice(error.message);
-    else if (data?.signedUrl) window.open(data.signedUrl, '_blank', 'noopener,noreferrer');
   };
 
   const insertTemplate = (template: string) => {
@@ -460,7 +451,7 @@ export default function BobDocumentStudioPage() {
           {draftIds && saveState === 'saved' && <button type="button" className="bob-document-review" onClick={() => void submitForReview()} title="Lock this version and move it to the approval step">Send to review</button>}
           {draftIds && saveState === 'needs_review' && <><button type="button" className="bob-document-reject" onClick={() => void decideReview('rejected')} title="Send back for edits">Reject</button><button type="button" className="bob-document-review" onClick={() => void decideReview('approved')} title="Approve so the document can be printed or exported">Approve</button></>}
           {draftIds && saveState === 'approved' && <label className="bob-output-format">Output<select value={outputFormat} onChange={(event) => { setOutputFormat(event.target.value as OutputFormat); setOutputReceipt(null); }}><option value="print">Print PDF</option><option value="docx">DOCX</option></select></label>}
-          {draftIds && saveState === 'approved' && <button type="button" className="bob-document-output" onClick={() => outputReceipt?.status === 'ready' ? void openOutput() : void requestDocumentOutput()} disabled={outputBusy}>{outputBusy ? 'Generating…' : outputReceipt?.status === 'ready' ? `Open ${outputLabel(outputReceipt.output_format)}` : `Generate ${outputLabel(outputFormat)}`}</button>}
+          {draftIds && saveState === 'approved' && <button type="button" className="bob-document-output" onClick={() => void requestDocumentOutput()} disabled={outputBusy || outputReceipt?.status === 'ready'}>{outputBusy ? 'Generating…' : `Generate ${outputLabel(outputFormat)}`}</button>}
         </div>
       </header>
 
@@ -505,8 +496,8 @@ export default function BobDocumentStudioPage() {
             <div className="bob-editor-paper" role="textbox" aria-label="Document content" aria-multiline="true"><EditorContent editor={editor} /></div>
           </div>
           {notice && <p className="bob-document-notice" role={saveState === 'error' ? 'alert' : 'status'}>{notice}</p>}
-          {outputReceipt?.status === 'ready' && <p className="bob-output-receipt" role="status"><CheckCircle2 size={14} /><span>{outputLabel(outputReceipt.output_format)} ready · SHA-256 {outputReceipt.sha256?.slice(0, 16) ?? 'unavailable'}…</span><button type="button" onClick={() => void openOutput()}>Open again</button></p>}
-          {outputHistory.length > 0 && <section className="bob-output-history" aria-label="Generated document outputs"><strong>Generated outputs</strong>{outputHistory.map((output) => <div key={output.id}><span>{outputLabel(output.output_format)} · {output.status}</span><small>{output.sha256 ? `SHA-256 ${output.sha256.slice(0, 16)}…` : 'Checksum pending'}</small>{output.status === 'ready' && <button type="button" onClick={() => { setOutputReceipt(output); void openOutput(); }}>Open</button>}</div>)}</section>}
+          {outputReceipt?.status === 'ready' && <><p className="bob-output-receipt" role="status"><CheckCircle2 size={14} /><span>{outputLabel(outputReceipt.output_format)} ready · SHA-256 {outputReceipt.sha256?.slice(0, 16) ?? 'unavailable'}…</span></p>{outputReceipt.storage_bucket && outputReceipt.storage_path && <GeneratedArtifactActions bucket={outputReceipt.storage_bucket} path={outputReceipt.storage_path} fileName={`${title}.${outputReceipt.output_format === 'docx' ? 'docx' : 'pdf'}`} label={outputLabel(outputReceipt.output_format)} />}</>}
+          {outputHistory.length > 0 && <section className="bob-output-history" aria-label="Generated document outputs"><strong>Generated outputs</strong>{outputHistory.map((output) => <div key={output.id}><span>{outputLabel(output.output_format)} · {output.status}</span><small>{output.sha256 ? `SHA-256 ${output.sha256.slice(0, 16)}…` : 'Checksum pending'}</small>{output.status === 'ready' && output.storage_bucket && output.storage_path && <GeneratedArtifactActions bucket={output.storage_bucket} path={output.storage_path} fileName={`${output.id}.${output.output_format === 'docx' ? 'docx' : 'pdf'}`} label={outputLabel(output.output_format)} />}</div>)}</section>}
           {draftIds && saveState === 'saved' && <label className="bob-review-reason">Review reason<textarea value={reviewReason} onChange={(event) => setReviewReason(event.target.value)} maxLength={1000} rows={2} /></label>}
           {draftIds && saveState === 'needs_review' && <label className="bob-review-reason">Reviewer rationale<textarea value={decisionReason} onChange={(event) => setDecisionReason(event.target.value)} maxLength={1000} rows={2} /></label>}
         </section>

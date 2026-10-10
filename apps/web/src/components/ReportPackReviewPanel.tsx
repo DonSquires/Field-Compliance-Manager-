@@ -26,6 +26,7 @@ export interface ReviewableReportPack {
   published_at: string | null;
   delivery_channel: 'portal' | 'email' | null;
   agreementName: string;
+  templateName?: string | null;
 }
 
 interface ReviewResult {
@@ -41,8 +42,8 @@ interface ReportPackReviewPanelProps {
 }
 
 function defaultTitle(pack: ReviewableReportPack): string {
-  const template = pack.template_code.replaceAll('_', ' ');
-  return `${template} report - ${pack.period_start} to ${pack.period_end}`;
+  const template = pack.templateName?.trim() || (pack.report_kind === 'custom' ? 'Custom report' : `${pack.template_code.replaceAll('_', ' ')} report`);
+  return `${template} - ${pack.period_start} to ${pack.period_end}`;
 }
 
 function numberFrom(data: Record<string, unknown> | null, key: string): string {

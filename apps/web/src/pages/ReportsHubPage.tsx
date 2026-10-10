@@ -56,7 +56,9 @@ interface ConsolidatedReportingRow {
 
 interface MonthlyReportPack {
   id: string;
+  organization_id: string;
   template_code: string;
+  template_name?: string | null;
   report_kind: 'monthly' | 'custom';
   report_scope: Record<string, unknown>;
   period_start: string;
@@ -98,7 +100,7 @@ function hasCurrentPdf(pack: MonthlyReportPack): boolean {
   return Boolean(pack.pdf_path && pack.pdf_source_updated_at && pack.pdf_source_updated_at === pack.updated_at);
 }
 
-const CURRENT_REPORT_PDF_RENDERER = 'fcm-report-pack-pdf-lib-a4-v5';
+const CURRENT_REPORT_PDF_RENDERER = 'fcm-report-pack-pdf-lib-a4-v9';
 
 function hasLatestReportPdf(pack: MonthlyReportPack): boolean {
   return hasCurrentPdf(pack) && pack.pdf_renderer_version === CURRENT_REPORT_PDF_RENDERER;
@@ -288,14 +290,14 @@ const ReportsHubPage: React.FC = () => {
         selectedAgreement?.id
           ? supabase
               .from('monthly_report_packs')
-              .select('id, template_code, report_kind, report_scope, period_start, period_end, status, data, editorial, generated_at, updated_at, reviewed_at, published_at, delivery_channel, sent_at, pdf_path, pdf_sha256, pdf_renderer_version, pdf_source_updated_at, agreement:service_agreement_id(name)')
+              .select('id, organization_id, template_code, report_kind, report_scope, period_start, period_end, status, data, editorial, generated_at, updated_at, reviewed_at, published_at, delivery_channel, sent_at, pdf_path, pdf_sha256, pdf_renderer_version, pdf_source_updated_at, agreement:service_agreement_id(name)')
               .eq('service_agreement_id', selectedAgreement.id)
               .gte('period_start', dateRange.start)
               .lte('period_end', dateRange.end)
               .order('period_end', { ascending: false })
           : supabase
               .from('monthly_report_packs')
-              .select('id, template_code, report_kind, report_scope, period_start, period_end, status, data, editorial, generated_at, updated_at, reviewed_at, published_at, delivery_channel, sent_at, pdf_path, pdf_sha256, pdf_renderer_version, pdf_source_updated_at, agreement:service_agreement_id(name)')
+              .select('id, organization_id, template_code, report_kind, report_scope, period_start, period_end, status, data, editorial, generated_at, updated_at, reviewed_at, published_at, delivery_channel, sent_at, pdf_path, pdf_sha256, pdf_renderer_version, pdf_source_updated_at, agreement:service_agreement_id(name)')
               .in('organization_id', houseOrgIds)
               .gte('period_start', dateRange.start)
               .lte('period_end', dateRange.end)
@@ -308,9 +310,17 @@ const ReportsHubPage: React.FC = () => {
       if (failure) throw failure;
       const breaches = (breachResponse.data as BreachAlert[]) || [];
       const obs = (observationResponse.data as Observation[]) || [];
+      const packs = (packResponse.data as MonthlyReportPack[]) || [];
+      const templateCodes = [...new Set(packs.map((pack) => pack.template_code).filter(Boolean))];
+      const templateNames = new Map<string, string>();
+      if (templateCodes.length) {
+        const { data: templates } = await supabase.from('report_templates').select('organization_id,template_code,name')
+          .in('organization_id', houseOrgIds).in('template_code', templateCodes);
+        for (const template of templates ?? []) templateNames.set(`${template.organization_id}:${template.template_code}`, template.name);
+      }
       setBreachAlerts(breaches);
       setObservations(obs);
-      setReportPacks((packResponse.data as MonthlyReportPack[]) || []);
+      setReportPacks(packs.map((pack) => ({ ...pack, template_name: templateNames.get(`${pack.organization_id}:${pack.template_code}`) ?? null })));
       setConsolidatedReporting((consolidatedResponse.data as ConsolidatedReportingRow[]) || []);
       setMetrics({ totalBreaches: breaches.length, totalObservations: obs.length, nonCompliantObservations: obs.filter((o) => o.is_compliant === false).length });
     } catch (err) {
@@ -525,7 +535,7 @@ const ReportsHubPage: React.FC = () => {
             </tbody>
           </table>
         </div>
-        {reviewingPack && <ReportPackReviewPanel pack={{ ...reviewingPack, agreementName: reportAgreementName(reviewingPack) } as ReviewableReportPack} onClose={() => setReviewingPackId(null)} onSaved={finishReview} />}
+        {reviewingPack && <ReportPackReviewPanel pack={{ ...reviewingPack, agreementName: reportAgreementName(reviewingPack), templateName: reviewingPack.template_name ?? null } as ReviewableReportPack} onClose={() => setReviewingPackId(null)} onSaved={finishReview} />}
       </section>
 
       {consolidatedReporting.length > 1 && <details className="reports-section reports-oversight">

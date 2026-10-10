@@ -11,6 +11,10 @@ test('generated document worker uses a real PDF renderer and private artifact pa
   assert.match(source, /application\/pdf/);
   assert.match(source, /org\/\$\{output\.organization_id\}\/generated/);
   assert.match(source, /crypto\.subtle\.digest\('SHA-256'/);
+  assert.match(source, /embedPdfNotoFonts/);
+  assert.match(source, /wrapPdfText/);
+  assert.match(source, /pdfDoc\.setTitle\(title\)/);
+  assert.doesNotMatch(source, /StandardFonts\.Helvetica|text\.slice\(0, 120\)/);
 });
 
 test('generated document worker supports governed DOCX output', () => {
@@ -18,6 +22,7 @@ test('generated document worker supports governed DOCX output', () => {
   assert.match(source, /buildDocxBytes/);
   assert.match(source, /application\/vnd\.openxmlformats-officedocument\.wordprocessingml\.document/);
   assert.match(source, /fcm-ooxml-docx-v1/);
+  assert.match(source, /fcm-pdf-lib-a4-v5/);
   assert.match(source, /zipSync/);
 });
 

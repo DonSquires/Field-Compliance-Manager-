@@ -41,12 +41,16 @@ describe('CCTV inference review', () => {
     expect(source).not.toMatch(/from\('cctv_inference_budgets'\)/);
   });
 
-  it('issues the receipt before printing, prints it on the page, and offers verification through the governed RPC', () => {
+  it('issues the receipt before opening a preview and offers print, download, and verification actions', () => {
     const issueIndex = source.indexOf("supabase.rpc('issue_cctv_report_receipt'");
     const buildIndex = source.indexOf('const report = buildCCTVPrintableReport({');
     expect(issueIndex).toBeGreaterThan(0);
     expect(buildIndex).toBeGreaterThan(issueIndex);
     expect(source).toContain('receipt: { reportId: issuedReceipt.report_id, issuedAt: issuedReceipt.generated_at, sha256: issuedReceipt.sha256, provenance: issuedReceipt.provenance ?? null }');
+    expect(source).toContain('setPrintableReport({');
+    expect(source).toContain('printableReport.previewWindow.print()');
+    expect(source).toContain('anchor.download = printableReport.fileName');
+    expect(source).toContain('Download HTML');
     expect(source).toContain("supabase.rpc('verify_cctv_report_receipt', { p_receipt_id: receiptId, p_sha256: verifyDraft.sha256.trim() || null })");
     expect(source).toContain('aria-label="Verify a printed report"');
     expect(source).toContain('The hash on the page does NOT match this receipt.');

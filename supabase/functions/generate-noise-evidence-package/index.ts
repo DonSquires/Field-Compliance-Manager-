@@ -26,11 +26,89 @@
  * Issue #60. Uses pdf-lib@1.17.1 (pure TypeScript, Deno-compatible).
  */ import { serve } from "https://deno.land/std@0.168.0/http/server.ts";
 import { createClient } from "https://esm.sh/@supabase/supabase-js@2";
-import { PDFDocument, StandardFonts, rgb } from "https://esm.sh/pdf-lib@1.17.1";
+import { PDFDocument, rgb, type PDFFont, type PDFPage } from "https://esm.sh/pdf-lib@1.17.1";
+import { embedPdfNotoFonts } from "../_shared/pdf-noto-fonts.ts";
+import { pdfTextFontRuns, pdfTextWidth, wrapPdfText, type PdfTextFontPair } from "../_shared/pdf-text-fonts.ts";
 const corsHeaders = {
   "Access-Control-Allow-Origin": "*",
   "Access-Control-Allow-Headers": "authorization, x-client-info, apikey, content-type"
 };
+const supabaseUrl = Deno.env.get("SUPABASE_URL") ?? "";
+const anonKey = Deno.env.get("SUPABASE_ANON_KEY") ?? "";
+const PDF_RENDERER_VERSION = "fcm-noise-evidence-pdf-lib-a4-v5";
+type NoiseSupabaseClient = ReturnType<typeof createClient<any>>;
+interface NoisePhotoEntry {
+  storage_path?: string;
+  name?: string;
+}
+interface NoiseSeizure {
+  item_description?: string | null;
+  police_present?: boolean | null;
+  police_name?: string | null;
+  seizure_form_number?: string | null;
+  photo_urls?: NoisePhotoEntry[] | null;
+  legal_authority?: string | null;
+  seized_at?: string | null;
+  make?: string | null;
+  model?: string | null;
+  serial_number?: string | null;
+}
+interface NoiseAssessment {
+  id: string;
+  organization_id: string;
+  job_number?: string | null;
+  action?: string | null;
+  received_at?: string | null;
+  assessed_at?: string | null;
+  arrived_at?: string | null;
+  departed_at?: string | null;
+  officer_name?: string | null;
+  volume_score?: number | null;
+  time_score?: number | null;
+  tone_score?: number | null;
+  matrix_total?: number | null;
+  is_problem_address?: boolean | null;
+  occupant_cooperative?: boolean | null;
+  prior_end_within_72hrs?: boolean | null;
+  permanent_abatement_active?: boolean | null;
+  police_requested?: boolean | null;
+  police_present?: boolean | null;
+  end_number?: string | null;
+    end_expires_at?: string | null;
+    end_given_orally?: boolean | null;
+    end_recipient_role?: string | null;
+    entry_notice_left?: boolean | null;
+  occupant_name?: string | null;
+  complaint_address?: string | null;
+  assessment_location?: string | null;
+  assessment_gps_lat?: number | null;
+  assessment_gps_lng?: number | null;
+  assessment_gps_accuracy?: number | null;
+  noise_source_address?: string | null;
+  arrival_gps_lat?: number | null;
+  arrival_gps_lng?: number | null;
+  arrival_gps_accuracy?: number | null;
+  address_discrepancy_noted?: boolean | null;
+  address_discrepancy_reason?: string | null;
+  hs_checklist_completed?: boolean | null;
+  hs_checklist_items?: unknown;
+  hs_abort_reason?: string | null;
+  photo_assessment_point?: NoisePhotoEntry[] | null;
+  photo_source_address?: NoisePhotoEntry[] | null;
+  photo_service_evidence?: NoisePhotoEntry[] | null;
+  incident_report_text?: string | null;
+  notes?: string | null;
+  follow_up_required?: boolean | null;
+  complainant_protected?: boolean | null;
+  client_sites?: { name?: string | null; address?: string | null } | { name?: string | null; address?: string | null }[] | null;
+}
+interface NoisePdfContext {
+  doc: PDFDocument;
+  page: PDFPage;
+  y: number;
+  fontNormal: PdfTextFontPair<PDFFont>;
+  fontBold: PdfTextFontPair<PDFFont>;
+}
 /* ---- Layout constants (A4 in points: 595 x 842) ---- */ const PAGE_W = 595;
 const PAGE_H = 842;
 const MARGIN = 50;
@@ -39,7 +117,7 @@ const LINE_HEIGHT = 14;
 const SECTION_GAP = 20;
 const PHOTO_MAX_W = 240;
 const PHOTO_MAX_H = 180;
-function ensureSpace(ctx, needed) {
+function ensureSpace(ctx: NoisePdfContext, needed: number): NoisePdfContext {
   if (ctx.y - needed < MARGIN) {
     const newPage = ctx.doc.addPage([
       PAGE_W,
@@ -50,7 +128,23 @@ function ensureSpace(ctx, needed) {
   }
   return ctx;
 }
-function drawSectionTitle(ctx, title) {
+function drawPdfRuns(page: PDFPage, text: string, fonts: PdfTextFontPair<PDFFont>, size: number, x: number, y: number, color: ReturnType<typeof rgb>): number {
+  let drawX = x;
+  for (const run of pdfTextFontRuns(text, fonts.latin, fonts.latinExtended, fonts.latinCodePoints, fonts.latinExtendedCodePoints)) {
+    page.drawText(run.text, { x: drawX, y, size, font: run.font, color });
+    drawX += run.font.widthOfTextAtSize(run.text, size);
+  }
+  return drawX - x;
+}
+function drawPdfText(ctx: NoisePdfContext, text: string, fonts: PdfTextFontPair<PDFFont>, size: number, x = MARGIN, maxWidth = CONTENT_W): NoisePdfContext {
+  for (const line of wrapPdfText(text, fonts, size, maxWidth)) {
+    ctx = ensureSpace(ctx, LINE_HEIGHT);
+    drawPdfRuns(ctx.page, line, fonts, size, x, ctx.y, rgb(0, 0, 0));
+    ctx.y -= LINE_HEIGHT;
+  }
+  return ctx;
+}
+function drawSectionTitle(ctx: NoisePdfContext, title: string): NoisePdfContext {
   ctx = ensureSpace(ctx, SECTION_GAP + LINE_HEIGHT * 2);
   ctx.y -= SECTION_GAP;
   ctx.page.drawLine({
@@ -66,42 +160,15 @@ function drawSectionTitle(ctx, title) {
     color: rgb(0.6, 0.6, 0.6)
   });
   ctx.y -= LINE_HEIGHT + 2;
-  ctx.page.drawText(title, {
-    x: MARGIN,
-    y: ctx.y,
-    size: 12,
-    font: ctx.fontBold,
-    color: rgb(0, 0, 0)
-  });
-  ctx.y -= LINE_HEIGHT;
+  return drawPdfText(ctx, title, ctx.fontBold, 12);
+}
+function drawField(ctx: NoisePdfContext, label: string, value: string): NoisePdfContext {
+  ctx = ensureSpace(ctx, LINE_HEIGHT);
+  drawPdfRuns(ctx.page, `${label}:`, ctx.fontBold, 9, MARGIN, ctx.y, rgb(0.3, 0.3, 0.3));
+  ctx = drawPdfText(ctx, value || "N/A", ctx.fontNormal, 9, MARGIN + 140, CONTENT_W - 140);
   return ctx;
 }
-function drawField(ctx, label, value) {
-  ctx = ensureSpace(ctx, LINE_HEIGHT * 2);
-  ctx.page.drawText(`${label}:`, {
-    x: MARGIN,
-    y: ctx.y,
-    size: 9,
-    font: ctx.fontBold,
-    color: rgb(0.3, 0.3, 0.3)
-  });
-  // Wrap long values
-  const maxChars = 70;
-  const lines = wrapText(value || "N/A", maxChars);
-  for (const line of lines){
-    ctx = ensureSpace(ctx, LINE_HEIGHT);
-    ctx.page.drawText(line, {
-      x: MARGIN + 140,
-      y: ctx.y,
-      size: 9,
-      font: ctx.fontNormal,
-      color: rgb(0, 0, 0)
-    });
-    ctx.y -= LINE_HEIGHT;
-  }
-  return ctx;
-}
-function wrapText(text, maxChars) {
+function wrapText(text: string, maxChars: number): string[] {
   if (!text) return [
     "N/A"
   ];
@@ -126,23 +193,10 @@ function wrapText(text, maxChars) {
     "N/A"
   ];
 }
-function drawWrappedText(ctx, text, fontSize = 9) {
-  const maxChars = Math.floor(CONTENT_W / (fontSize * 0.52));
-  const lines = wrapText(text, maxChars);
-  for (const line of lines){
-    ctx = ensureSpace(ctx, LINE_HEIGHT);
-    ctx.page.drawText(line, {
-      x: MARGIN,
-      y: ctx.y,
-      size: fontSize,
-      font: ctx.fontNormal,
-      color: rgb(0, 0, 0)
-    });
-    ctx.y -= LINE_HEIGHT;
-  }
-  return ctx;
+function drawWrappedText(ctx: NoisePdfContext, text: string, fontSize = 9): NoisePdfContext {
+  return drawPdfText(ctx, text, ctx.fontNormal, fontSize);
 }
-function fmtDate(d) {
+function fmtDate(d: string | null | undefined): string {
   if (!d) return "N/A";
   try {
     return new Date(d).toLocaleString("en-NZ", {
@@ -154,7 +208,7 @@ function fmtDate(d) {
     return d;
   }
 }
-function fmtDuration(start, end) {
+function fmtDuration(start: string | null | undefined, end: string | null | undefined): string {
   if (!start || !end) return "N/A";
   const ms = new Date(end).getTime() - new Date(start).getTime();
   if (ms < 0) return "0 minutes";
@@ -164,7 +218,7 @@ function fmtDuration(start, end) {
   const rem = mins % 60;
   return `${hrs}h ${rem}m`;
 }
-async function embedPhoto(ctx, supabase, photoEntry, label) {
+async function embedPhoto(ctx: NoisePdfContext, supabase: NoiseSupabaseClient, photoEntry: NoisePhotoEntry | null | undefined, label: string): Promise<NoisePdfContext> {
   if (!photoEntry?.storage_path) return ctx;
   try {
     // Get a signed URL for the photo
@@ -201,13 +255,7 @@ async function embedPhoto(ctx, supabase, photoEntry, label) {
     const drawH = embeddedImage.height * scale;
     // Label
     ctx = ensureSpace(ctx, drawH + LINE_HEIGHT + 4);
-    ctx.page.drawText(label, {
-      x: MARGIN,
-      y: ctx.y,
-      size: 8,
-      font: ctx.fontBold,
-      color: rgb(0.3, 0.3, 0.3)
-    });
+    drawPdfRuns(ctx.page, label, ctx.fontBold, 8, MARGIN, ctx.y, rgb(0.3, 0.3, 0.3));
     ctx.y -= 2;
     // Image
     ctx.page.drawImage(embeddedImage, {
@@ -219,14 +267,7 @@ async function embedPhoto(ctx, supabase, photoEntry, label) {
     ctx.y -= drawH + 6;
     // Photo name caption
     if (photoEntry.name) {
-      ctx.page.drawText(photoEntry.name, {
-        x: MARGIN,
-        y: ctx.y,
-        size: 7,
-        font: ctx.fontNormal,
-        color: rgb(0.5, 0.5, 0.5)
-      });
-      ctx.y -= LINE_HEIGHT;
+      ctx = drawPdfText(ctx, photoEntry.name, ctx.fontNormal, 7);
     }
   } catch (e) {
     const msg = e instanceof Error ? e.message : String(e);
@@ -234,7 +275,7 @@ async function embedPhoto(ctx, supabase, photoEntry, label) {
   }
   return ctx;
 }
-/* ---- Notice template rendering ---- */ function renderTemplateText(bodyHtml, vars) {
+/* ---- Notice template rendering ---- */ function renderTemplateText(bodyHtml: string, vars: Record<string, string>): string {
   // Strip HTML tags for plain-text PDF rendering
   let text = bodyHtml.replace(/<br\s*\/?>/gi, "\n").replace(/<\/p>/gi, "\n").replace(/<\/div>/gi, "\n").replace(/<\/tr>/gi, "\n").replace(/<\/li>/gi, "\n").replace(/<[^>]+>/g, "").replace(/&amp;/g, "&").replace(/&lt;/g, "<").replace(/&gt;/g, ">").replace(/&quot;/g, '"').replace(/&#39;/g, "'").replace(/&nbsp;/g, " ");
   // Replace {{variable}} placeholders
@@ -243,35 +284,39 @@ async function embedPhoto(ctx, supabase, photoEntry, label) {
   }
   return text.trim();
 }
-/* ---- Default RMA citation content (fallback when no notice_templates row) ---- */ function defaultEndNoticeText(assessment) {
+/* ---- Default RMA citation content (fallback when no notice_templates row) ---- */ function defaultEndNoticeText(assessment: NoiseAssessment): string {
   const endNum = assessment.end_number ?? "N/A";
   const occupant = assessment.occupant_name ?? "N/A";
   const address = assessment.noise_source_address ?? assessment.assessment_location ?? "N/A";
-  const issuedAt = fmtDate(assessment.arrived_at);
+  const assessedAt = fmtDate(assessment.assessed_at);
+  const expiry = assessment.end_expires_at ? fmtDate(assessment.end_expires_at) : "Not recorded - verify before serving";
+  const delivery = assessment.end_given_orally === true ? "Orally" : assessment.end_given_orally === false ? "In writing" : "Not recorded";
+  const recipient = assessment.end_recipient_role ?? "Not recorded";
   return [
     "EXCESSIVE NOISE DIRECTION (END)",
     `END Number: ${endNum}`,
     `Issued to: ${occupant}`,
     `Address: ${address}`,
-    `Date/Time Issued: ${issuedAt}`,
+    `Assessment Date/Time (direction issue time not separately recorded): ${assessedAt}`,
+    `Direction given: ${delivery}`,
+    `Direction recipient: ${recipient}`,
+    `Recorded expiry: ${expiry}`,
     "",
     "Legislative Authority: Resource Management Act 1991, Section 326",
     "",
     "You are hereby directed to immediately reduce the noise emanating from",
     "the above address to a reasonable level.",
     "",
-    "This direction remains in force for 72 hours from the time of issue.",
+    "RMA section 327(3) permits a direction for up to 8 days, or a shorter period set by the council rule or officer. The recorded expiry above governs this assessment.",
     "",
-    "Failure to comply with this direction is an offence under Section 327",
-    "of the Resource Management Act 1991 and may result in:",
-    "  - Seizure of noise-making equipment (s.327)",
-    "  - A fine not exceeding $10,000 (s.338(2))",
+    "Contravening an excessive noise direction is an offence under RMA section 338(2).",
+    "The maximum fine is $10,000 plus up to $1,000 for each continuing day.",
+    "Seizure is governed by RMA section 328 and its constable-attendance requirements.",
     "",
-    "Equipment seized will be held for a minimum of 28 days.",
-    "A return fee may apply."
+    "An owner may apply for return of seized property at any time under RMA section 336, subject to its return conditions and applicable costs."
   ].join("\n");
 }
-function defaultSeizureNoticeText(assessment, seizure) {
+function defaultSeizureNoticeText(assessment: NoiseAssessment, seizure: NoiseSeizure | null): string {
   const endNum = assessment.end_number ?? "N/A";
   const occupant = assessment.occupant_name ?? "N/A";
   const address = assessment.noise_source_address ?? assessment.assessment_location ?? "N/A";
@@ -284,34 +329,33 @@ function defaultSeizureNoticeText(assessment, seizure) {
     `Occupant: ${occupant}`,
     `Address: ${address}`,
     "",
-    "Legislative Authority: Resource Management Act 1991, Section 327",
+    "Legislative Authority: Resource Management Act 1991, Section 328",
     "",
-    "The following equipment has been seized under s.327 of the RMA 1991",
-    "due to continued non-compliance with an Excessive Noise Direction:",
+    "The following equipment has been seized under s.328 of the RMA 1991",
+    "with the required constable attendance:",
     "",
     `Items seized: ${items}`,
     `Seizure form number: ${formNum}`,
     `Police officer present: ${policeOfficer}`,
     "",
-    "Equipment will be held for a minimum of 28 days.",
-    "A return/storage fee may apply upon collection.",
-    "Maximum penalty for non-compliance: $10,000 (s.338(2))."
+    "An owner may apply for return of seized property at any time under RMA section 336, subject to the statutory return conditions and applicable costs.",
+    "Contravention of an excessive noise direction may carry a fine up to $10,000, plus up to $1,000 for each continuing day (RMA section 338(2))."
   ].join("\n");
 }
-/* ---- Volume/Time/Tone labels ---- */ const VOLUME_LABELS = {
+/* ---- Volume/Time/Tone labels ---- */ const VOLUME_LABELS: Record<number, string> = {
   0: "No Noise",
   1: "Barely Audible",
   2: "Clearly Audible",
   3: "Loud",
   4: "Extremely Loud"
 };
-const TIME_LABELS = {
+const TIME_LABELS: Record<number, string> = {
   1: "7am-9pm",
   2: "9pm-midnight",
   3: "midnight-2am",
   4: "2am-7am"
 };
-const TONE_LABELS = {
+const TONE_LABELS: Record<number, string> = {
   0: "No bass",
   1: "Slight bass",
   2: "Heavy bass"
@@ -328,22 +372,20 @@ const HS_ITEMS = [
     headers: corsHeaders
   });
   try {
-    const supabase = createClient(Deno.env.get("SUPABASE_URL"), Deno.env.get("SUPABASE_SERVICE_ROLE_KEY"));
-    // Auth
     const authHeader = req.headers.get("Authorization");
-    if (!authHeader) return new Response(JSON.stringify({
-      error: "Unauthorized"
-    }), {
-      status: 401,
-      headers: corsHeaders
-    });
-    const { data: { user }, error: authErr } = await supabase.auth.getUser(authHeader.replace("Bearer ", ""));
+    if (!authHeader) return new Response(JSON.stringify({ error: "Unauthorized" }), { status: 401, headers: corsHeaders });
+    const caller = createClient(supabaseUrl, anonKey, { global: { headers: { Authorization: authHeader } } });
+    const supabase = createClient(supabaseUrl, Deno.env.get("SUPABASE_SERVICE_ROLE_KEY") ?? "");
+    // Auth
+    const { data: { user }, error: authErr } = await caller.auth.getUser();
     if (authErr || !user) return new Response(JSON.stringify({
       error: "Unauthorized"
     }), {
       status: 401,
       headers: corsHeaders
     });
+    const { data: profile } = await supabase.from("user_profiles").select("id, deactivated_at").eq("id", user.id).maybeSingle();
+    if (!profile || profile.deactivated_at) return new Response(JSON.stringify({ error: "Forbidden" }), { status: 403, headers: corsHeaders });
     const body = await req.json();
     const { assessment_id } = body;
     if (!assessment_id) return new Response(JSON.stringify({
@@ -353,14 +395,16 @@ const HS_ITEMS = [
       headers: corsHeaders
     });
     // ---- Load assessment ----
-    const { data: assessment, error: assessErr } = await supabase.from("noise_assessments").select(`id, organization_id, job_number, site_id, status, action,
+    const { data: assessmentRow, error: assessErr } = await supabase.from("noise_assessments").select(`id, organization_id, job_number, site_id, status, action,
          received_at, arrived_at, departed_at, created_at,
+                 received_at, assessed_at, arrived_at, departed_at, created_at,
          officer_id, officer_name,
          volume_score, time_score, tone_score, matrix_total,
          visit_number_tonight, is_problem_address, occupant_cooperative,
          prior_end_within_72hrs, permanent_abatement_active,
          police_requested, police_present,
          end_number, occupant_name,
+                 end_number, end_expires_at, end_given_orally, end_recipient_role, entry_notice_left, occupant_name,
          complaint_address,
          assessment_location, assessment_gps_lat, assessment_gps_lng, assessment_gps_accuracy,
          noise_source_address, noise_source_gps_lat, noise_source_gps_lng,
@@ -372,17 +416,22 @@ const HS_ITEMS = [
          complainant_protected, referred_animal_control,
          evidence_package_url,
          client_sites(name, address)`).eq("id", assessment_id).single();
-    if (assessErr || !assessment) return new Response(JSON.stringify({
+    if (assessErr || !assessmentRow) return new Response(JSON.stringify({
       error: `Assessment not found: ${assessErr?.message ?? "no data"}`
     }), {
       status: 404,
       headers: corsHeaders
     });
+    const assessment = assessmentRow as unknown as NoiseAssessment;
+    const { data: mayGenerate, error: accessErr } = await caller.rpc("is_admin_for_org", { target_org_id: assessment.organization_id });
+    if (accessErr) return new Response(JSON.stringify({ error: "Noise evidence access could not be confirmed" }), { status: 503, headers: corsHeaders });
+    if (mayGenerate !== true) return new Response(JSON.stringify({ error: "Assessment not found" }), { status: 404, headers: corsHeaders });
     // ---- Load org ----
     const { data: org } = await supabase.from("organizations").select("name, contact_email, contact_phone, logo_url").eq("id", assessment.organization_id).single();
     const orgName = org?.name ?? "Iron Eagle Field Services";
     // ---- Load seizure record (if any) ----
-    const { data: seizure } = await supabase.from("noise_seizures").select("id, item_description, police_present, police_name, seizure_form_number, photo_urls, legal_authority, seized_at, make, model, serial_number").eq("noise_assessment_id", assessment_id).maybeSingle();
+    const { data: seizureRow } = await supabase.from("noise_seizures").select("id, item_description, police_present, police_name, seizure_form_number, photo_urls, legal_authority, seized_at, make, model, serial_number").eq("noise_assessment_id", assessment_id).maybeSingle();
+    const seizure = seizureRow as NoiseSeizure | null;
     // ---- Load notice template (for END or seizure) ----
     const noticeType = assessment.action === "seizure" ? "seizure" : "end";
     const { data: template } = await supabase.from("notice_templates").select("*").eq("organization_id", assessment.organization_id).eq("notice_type", noticeType).eq("is_active", true).order("version", {
@@ -390,8 +439,7 @@ const HS_ITEMS = [
     }).limit(1).maybeSingle();
     // ---- Build PDF ----
     const pdfDoc = await PDFDocument.create();
-    const fontNormal = await pdfDoc.embedFont(StandardFonts.Helvetica);
-    const fontBold = await pdfDoc.embedFont(StandardFonts.HelveticaBold);
+    const { normal: fontNormal, bold: fontBold } = await embedPdfNotoFonts(pdfDoc);
     const page = pdfDoc.addPage([
       PAGE_W,
       PAGE_H
@@ -403,38 +451,23 @@ const HS_ITEMS = [
       fontNormal,
       fontBold
     };
-    const siteAddress = assessment.client_sites?.address ?? "N/A";
+    const clientSite = Array.isArray(assessment.client_sites) ? assessment.client_sites[0] : assessment.client_sites;
+    const siteAddress = clientSite?.address ?? "N/A";
     const jobNumber = assessment.job_number ?? "N/A";
     const generatedAt = new Date().toLocaleString("en-NZ", {
       timeZone: "Pacific/Auckland",
       dateStyle: "long",
       timeStyle: "short"
     });
+    pdfDoc.setTitle(`Noise Control Evidence Package - ${jobNumber}`);
+    pdfDoc.setAuthor(orgName);
+    pdfDoc.setSubject(`Noise control evidence for job ${jobNumber}`);
+    pdfDoc.setCreator("Field Compliance Manager");
+    pdfDoc.setLanguage("en-NZ");
     // ---- Title / Header ----
-    ctx.page.drawText(orgName, {
-      x: MARGIN,
-      y: ctx.y,
-      size: 16,
-      font: fontBold,
-      color: rgb(0, 0, 0)
-    });
-    ctx.y -= 18;
-    ctx.page.drawText("NOISE CONTROL EVIDENCE PACKAGE", {
-      x: MARGIN,
-      y: ctx.y,
-      size: 14,
-      font: fontBold,
-      color: rgb(0.13, 0.13, 0.6)
-    });
-    ctx.y -= 16;
-    ctx.page.drawText("Court-Ready Evidence Bundle", {
-      x: MARGIN,
-      y: ctx.y,
-      size: 10,
-      font: fontNormal,
-      color: rgb(0.4, 0.4, 0.4)
-    });
-    ctx.y -= LINE_HEIGHT;
+    ctx = drawPdfText(ctx, orgName, fontBold, 16);
+    ctx = drawPdfText(ctx, "NOISE CONTROL EVIDENCE PACKAGE", fontBold, 14);
+    ctx = drawPdfText(ctx, "Court-Ready Evidence Bundle", fontNormal, 10);
     ctx.page.drawLine({
       start: {
         x: MARGIN,
@@ -534,22 +567,27 @@ const HS_ITEMS = [
     ctx = drawField(ctx, "Time of Day", vol === 0 ? "N/A (Volume is 0)" : tim != null ? `${tim} - ${TIME_LABELS[tim] ?? "Unknown"}` : "N/A");
     ctx = drawField(ctx, "Tone / Bass", ton != null ? `${ton} - ${TONE_LABELS[ton] ?? "Unknown"}` : "N/A");
     ctx = drawField(ctx, "Matrix Total", String(total ?? 0));
-    const assessmentLabel = total === null || total === 0 ? "No Noise" : total < 5 ? "Acceptable" : "Excessive Noise";
+    const assessmentLabel = total == null || total === 0 ? "No Noise" : total < 5 ? "Acceptable" : "Excessive Noise";
     ctx = drawField(ctx, "Assessment", assessmentLabel);
-    const actionLabels = {
+    const actionLabels: Record<string, string> = {
       no_noise: "No Noise - no further action",
       acceptable: "Noise acceptable - no further action",
       verbal_warning: "Verbal Warning issued",
       end: "Excessive Noise Direction (END) issued",
       seizure: "Equipment seized - police present"
     };
-    ctx = drawField(ctx, "Action Taken", actionLabels[assessment.action] ?? assessment.action ?? "N/A");
+    ctx = drawField(ctx, "Action Taken", actionLabels[assessment.action ?? ""] ?? assessment.action ?? "N/A");
     // ---- Section 8: Issued Notices ----
     ctx = drawSectionTitle(ctx, "8. ISSUED NOTICES");
     if (assessment.action === "end" || assessment.action === "seizure") {
       ctx = drawField(ctx, "END Number", assessment.end_number ?? "N/A");
       ctx = drawField(ctx, "Occupant Name", assessment.occupant_name ?? "N/A");
       ctx = drawField(ctx, "Time Issued", fmtDate(assessment.arrived_at));
+        ctx = drawField(ctx, "Assessment Time", fmtDate(assessment.assessed_at));
+        if (assessment.end_given_orally != null) ctx = drawField(ctx, "Direction Given", assessment.end_given_orally ? "Orally" : "In writing");
+        if (assessment.end_recipient_role) ctx = drawField(ctx, "Direction Recipient", assessment.end_recipient_role);
+        if (assessment.end_expires_at) ctx = drawField(ctx, "Direction Expires", fmtDate(assessment.end_expires_at));
+        if (assessment.entry_notice_left) ctx = drawField(ctx, "Entry Notice", "Written direction and entry notice left at the unoccupied place");
       ctx = drawField(ctx, "Legislative Authority", "Resource Management Act 1991 s.326/s.327");
       // Render notice content from template or fallback
       ctx.y -= 6;
@@ -596,7 +634,7 @@ const HS_ITEMS = [
     ctx = drawSectionTitle(ctx, "10. INCIDENT REPORT");
     ctx = drawField(ctx, "Time on Site", `${fmtDate(assessment.arrived_at)} to ${fmtDate(assessment.departed_at)}`);
     ctx = drawField(ctx, "Duration", fmtDuration(assessment.arrived_at, assessment.departed_at));
-    ctx = drawField(ctx, "Action Taken", actionLabels[assessment.action] ?? assessment.action ?? "N/A");
+    ctx = drawField(ctx, "Action Taken", actionLabels[assessment.action ?? ""] ?? assessment.action ?? "N/A");
     ctx = drawField(ctx, "Follow-up Required", assessment.follow_up_required ? "Yes" : "No");
     // Full incident report text
     if (assessment.incident_report_text) {
@@ -619,14 +657,7 @@ const HS_ITEMS = [
       color: rgb(0.6, 0.6, 0.6)
     });
     ctx.y -= LINE_HEIGHT;
-    ctx.page.drawText("OFFICER DECLARATION", {
-      x: MARGIN,
-      y: ctx.y,
-      size: 10,
-      font: fontBold,
-      color: rgb(0, 0, 0)
-    });
-    ctx.y -= LINE_HEIGHT;
+    ctx = drawPdfText(ctx, "OFFICER DECLARATION", fontBold, 10);
     ctx = drawWrappedText(ctx, "I declare that the information contained in this evidence package is true and correct to the best of my knowledge and belief.");
     ctx.y -= LINE_HEIGHT * 2;
     ctx = drawField(ctx, "Officer", assessment.officer_name ?? "N/A");
@@ -635,20 +666,10 @@ const HS_ITEMS = [
     const pages = pdfDoc.getPages();
     for(let i = 0; i < pages.length; i++){
       const p = pages[i];
-      p.drawText(`${orgName} | Evidence Package | ${jobNumber} | Page ${i + 1} of ${pages.length}`, {
-        x: MARGIN,
-        y: 25,
-        size: 7,
-        font: fontNormal,
-        color: rgb(0.5, 0.5, 0.5)
-      });
-      p.drawText(`Generated: ${generatedAt}`, {
-        x: PAGE_W - MARGIN - 120,
-        y: 25,
-        size: 7,
-        font: fontNormal,
-        color: rgb(0.5, 0.5, 0.5)
-      });
+      drawPdfRuns(p, `${orgName} | Evidence Package | ${jobNumber} | Page ${i + 1} of ${pages.length}`, fontNormal, 7, MARGIN, 25, rgb(0.5, 0.5, 0.5));
+      const footerText = `Generated: ${generatedAt}`;
+      const footerWidth = pdfTextWidth(footerText, fontNormal, 7);
+      drawPdfRuns(p, footerText, fontNormal, 7, PAGE_W - MARGIN - footerWidth, 25, rgb(0.5, 0.5, 0.5));
     }
     // ---- Save PDF ----
     const pdfBytes = await pdfDoc.save();
@@ -684,7 +705,8 @@ const HS_ITEMS = [
     }
     return new Response(JSON.stringify({
       ok: true,
-      evidence_package_url: storagePath
+      evidence_package_url: storagePath,
+      pdf_renderer_version: PDF_RENDERER_VERSION
     }), {
       headers: {
         ...corsHeaders,

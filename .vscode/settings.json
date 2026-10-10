@@ -5,6 +5,14 @@
   // This shared release engine is Node CommonJS, so keep it on the built-in JS/TS language service.
   "deno.disablePaths": ["./supabase/functions/_shared/builder-release-engineer.js"],
   "deno.lint": true,
+  "camel.ls.java.home": "C:\\Users\\squir\\.jdks\\temurin-21",
+  "java.configuration.runtimes": [
+    {
+      "name": "JavaSE-21",
+      "path": "C:\\Users\\squir\\.jdks\\temurin-21",
+      "default": true
+    }
+  ],
   "[choicescript]": {
     "editor.quickSuggestions": {
       "comments": false,

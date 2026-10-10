@@ -74,4 +74,11 @@ describe('client portfolio hub', () => {
     expect(source).toContain('const childType = !canAddBranch');
     expect(source).toContain("'department' : childOrganizationForm.type");
   });
+
+  it('offers only current report-pack PDFs for preview and download', () => {
+    expect(source).toContain('pdf_source_updated_at === pack.updated_at');
+    expect(source).toContain('pack.pdf_renderer_version === CURRENT_REPORT_PDF_RENDERER');
+    expect(source).toContain('GeneratedArtifactActions bucket="bob-uploads"');
+    expect(source).toContain('pdf_path,pdf_renderer_version,pdf_source_updated_at');
+  });
 });

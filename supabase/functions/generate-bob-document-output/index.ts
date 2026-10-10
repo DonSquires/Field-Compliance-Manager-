@@ -1,13 +1,15 @@
 import { serve } from 'https://deno.land/std@0.168.0/http/server.ts';
 import { createClient } from 'https://esm.sh/@supabase/supabase-js@2';
-import { PDFDocument, StandardFonts, rgb } from 'https://esm.sh/pdf-lib@1.17.1';
+import { PDFDocument, rgb } from 'https://esm.sh/pdf-lib@1.17.1';
 import { strToU8, zipSync } from 'https://esm.sh/fflate@0.8.2';
+import { embedPdfNotoFonts } from '../_shared/pdf-noto-fonts.ts';
+import { pdfTextFontRuns, wrapPdfText } from '../_shared/pdf-text-fonts.ts';
 
 const SUPABASE_URL = Deno.env.get('SUPABASE_URL') ?? '';
 const SERVICE_ROLE_KEY = Deno.env.get('SUPABASE_SERVICE_ROLE_KEY') ?? '';
 const ANON_KEY = Deno.env.get('SUPABASE_ANON_KEY') ?? '';
 const CORS = { 'Access-Control-Allow-Origin': '*', 'Access-Control-Allow-Headers': 'authorization, x-client-info, apikey, content-type' };
-const PDF_RENDERER_VERSION = 'fcm-pdf-lib-a4-v1';
+const PDF_RENDERER_VERSION = 'fcm-pdf-lib-a4-v5';
 const DOCX_RENDERER_VERSION = 'fcm-ooxml-docx-v1';
 const json = (body: unknown, status = 200) => new Response(JSON.stringify(body), { status, headers: { ...CORS, 'Content-Type': 'application/json' } });
 const hex = (bytes: Uint8Array) => Array.from(bytes).map((value) => value.toString(16).padStart(2, '0')).join('');
@@ -97,8 +99,11 @@ serve(async (req) => {
       rendererVersion = DOCX_RENDERER_VERSION;
     } else {
       const pdfDoc = await PDFDocument.create();
-      const normal = await pdfDoc.embedFont(StandardFonts.Helvetica);
-      const bold = await pdfDoc.embedFont(StandardFonts.HelveticaBold);
+      const { normal, bold } = await embedPdfNotoFonts(pdfDoc);
+      pdfDoc.setTitle(title);
+      pdfDoc.setAuthor(organizationName);
+      pdfDoc.setSubject('Approved FCM document output');
+      pdfDoc.setCreator('Field Compliance Manager');
       let page = pdfDoc.addPage([595, 842]);
       let y = 780;
       if (brandAsset) {
@@ -121,9 +126,16 @@ serve(async (req) => {
           // A missing or unsupported logo must degrade to text branding, not fail the document output.
         }
       }
-      const drawText = (text: string, font = normal, size = 10) => {
-        if (y < 70) { page = pdfDoc.addPage([595, 842]); y = 780; }
-        page.drawText(text.slice(0, 120), { x: 54, y, size, font, color: rgb(0.09, 0.17, 0.18) }); y -= size + 7;
+      const drawText = (text: string, fonts = normal, size = 10) => {
+        for (const line of wrapPdfText(text, fonts, size, 487)) {
+          if (y < 70) { page = pdfDoc.addPage([595, 842]); y = 780; }
+          let x = 54;
+          for (const run of pdfTextFontRuns(line, fonts.latin, fonts.latinExtended, fonts.latinCodePoints, fonts.latinExtendedCodePoints)) {
+            page.drawText(run.text, { x, y, size, font: run.font, color: rgb(0.09, 0.17, 0.18) });
+            x += run.font.widthOfTextAtSize(run.text, size);
+          }
+          y -= size + 7;
+        }
       };
       drawText(organizationName, bold, 15);
       drawText(title, bold, 18);
@@ -135,12 +147,12 @@ serve(async (req) => {
       drawText('This output is not legal advice.', normal, 8);
       bytes = await pdfDoc.save();
     }
-    const digest = await crypto.subtle.digest('SHA-256', bytes);
+    const digest = await crypto.subtle.digest('SHA-256', Uint8Array.from(bytes).buffer);
     const sha256 = hex(new Uint8Array(digest));
     const storagePath = `org/${output.organization_id}/generated/${output.document_id}/${output.id}.html`;
     const outputExtension = output.output_format === 'docx' ? 'docx' : output.output_format === 'pdf' ? 'pdf' : 'print.pdf';
     const finalStoragePath = storagePath.replace(/\.html$/, `.${outputExtension}`);
-    const { error: uploadError } = await admin.storage.from('bob-uploads').upload(finalStoragePath, new Blob([bytes], { type: mimeType }), { upsert: false, contentType: mimeType });
+    const { error: uploadError } = await admin.storage.from('bob-uploads').upload(finalStoragePath, new Blob([Uint8Array.from(bytes).buffer], { type: mimeType }), { upsert: false, contentType: mimeType });
     if (uploadError) throw new Error(uploadError.message);
     const { data: updated, error: updateError } = await admin.from('bob_generated_document_outputs').update({ status: 'ready', storage_bucket: 'bob-uploads', storage_path: finalStoragePath, mime_type: mimeType, renderer_version: rendererVersion, sha256, generated_at: new Date().toISOString(), updated_at: new Date().toISOString() }).eq('id', output.id).eq('status', 'requested').select('id,status,output_format,mime_type,renderer_version,sha256,storage_bucket,storage_path').single();
     if (updateError || !updated) throw new Error(updateError?.message ?? 'Output state could not be updated');

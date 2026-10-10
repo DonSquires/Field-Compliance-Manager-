@@ -19,13 +19,19 @@
  */
 import { serve } from 'https://deno.land/std@0.168.0/http/server.ts';
 import { createClient } from 'https://esm.sh/@supabase/supabase-js@2';
-import { PDFDocument, StandardFonts, rgb } from 'https://esm.sh/pdf-lib@1.17.1';
+import { PDFDocument, rgb } from 'https://esm.sh/pdf-lib@1.17.1';
+import { embedPdfNotoFonts } from '../_shared/pdf-noto-fonts.ts';
+import { pdfTextFontRuns, wrapPdfText } from '../_shared/pdf-text-fonts.ts';
 
 const CORS = {
   'Access-Control-Allow-Origin': '*',
   'Access-Control-Allow-Headers': 'authorization, x-client-info, apikey, content-type',
 };
-const PDF_RENDERER_VERSION = 'fcm-parking-notice-pdf-lib-a4-v1';
+const PDF_RENDERER_VERSION = 'fcm-parking-notice-pdf-lib-a4-v5';
+
+function escapeHtml(value: string): string {
+  return value.replace(/[&<>"']/g, (character) => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' })[character] ?? character);
+}
 
 function json(body: unknown, status = 200) {
   return new Response(JSON.stringify(body), { status, headers: { ...CORS, 'Content-Type': 'application/json' } });
@@ -37,21 +43,30 @@ function htmlToLines(html: string): string[] {
     .replace(/<\/(p|div|h1|h2|h3|li|tr|footer)>/gi, '\n')
     .replace(/<li[^>]*>/gi, '- ')
     .replace(/<[^>]+>/g, '')
+    .replace(/&nbsp;/gi, ' ').replace(/&#160;/g, ' ')
     .replace(/&amp;/g, '&').replace(/&lt;/g, '<').replace(/&gt;/g, '>').replace(/&quot;/g, '"').replace(/&#39;/g, "'")
     .split(/\r?\n/).map((line) => line.replace(/\s+/g, ' ').trim()).filter(Boolean);
 }
 
 async function buildPdfBytes(html: string, title: string, noticeNumber: string): Promise<Uint8Array> {
   const pdf = await PDFDocument.create();
-  const normal = await pdf.embedFont(StandardFonts.Helvetica);
-  const bold = await pdf.embedFont(StandardFonts.HelveticaBold);
+  const { normal, bold } = await embedPdfNotoFonts(pdf);
+  pdf.setTitle(title);
+  pdf.setSubject(`Parking notice ${noticeNumber}`);
+  pdf.setCreator('Field Compliance Manager');
   const lines = htmlToLines(html);
   let page = pdf.addPage([595, 842]);
   let y = 780;
-  const draw = (text: string, font = normal, size = 10) => {
-    if (y < 64) { page = pdf.addPage([595, 842]); y = 780; }
-    page.drawText(text.slice(0, 115), { x: 54, y, size, font, color: rgb(0.08, 0.08, 0.08) });
-    y -= size + 6;
+  const draw = (text: string, fonts = normal, size = 10) => {
+    for (const line of wrapPdfText(text, fonts, size, 487)) {
+      if (y < 64) { page = pdf.addPage([595, 842]); y = 780; }
+      let x = 54;
+      for (const run of pdfTextFontRuns(line, fonts.latin, fonts.latinExtended, fonts.latinCodePoints, fonts.latinExtendedCodePoints)) {
+        page.drawText(run.text, { x, y, size, font: run.font, color: rgb(0.08, 0.08, 0.08) });
+        x += run.font.widthOfTextAtSize(run.text, size);
+      }
+      y -= size + 6;
+    }
   };
   draw(title, bold, 17);
   draw(`Notice number: ${noticeNumber}`, normal, 9);
@@ -70,19 +85,19 @@ function noticeHtml(d: {
   return `<!doctype html><html><head><meta charset="utf-8"><title>Parking Infringement Notice - ${d.noticeNumber}</title></head>
 <body style="font-family:Arial,sans-serif;color:#111;max-width:640px;margin:24px auto;">
 <h1 style="margin:0 0 6px;">PARKING INFRINGEMENT NOTICE</h1>
-<p style="color:#555;font-size:13px;">${d.orgName}</p>
+<p style="color:#555;font-size:13px;">${escapeHtml(d.orgName)}</p>
 <hr/>
-<p><strong>Notice number:</strong> ${d.noticeNumber}</p>
-<p><strong>Date issued:</strong> ${d.noticeDate}</p>
-<p><strong>Vehicle plate:</strong> ${d.plate}</p>
-<p><strong>Location:</strong> ${d.zoneName}</p>
+<p><strong>Notice number:</strong> ${escapeHtml(d.noticeNumber)}</p>
+<p><strong>Date issued:</strong> ${escapeHtml(d.noticeDate)}</p>
+<p><strong>Vehicle plate:</strong> ${escapeHtml(d.plate)}</p>
+<p><strong>Location:</strong> ${escapeHtml(d.zoneName)}</p>
 <p><strong>Amount:</strong> $${d.fineAmount.toFixed(2)}</p>
-<p><strong>Payment due:</strong> ${d.dueDate}</p>
-<p><strong>Legislative basis:</strong> ${d.legislativeText}</p>
-${d.additionalNotes ? `<p><strong>Notes:</strong> ${d.additionalNotes}</p>` : ''}
+<p><strong>Payment due:</strong> ${escapeHtml(d.dueDate)}</p>
+<p><strong>Legislative basis:</strong> ${escapeHtml(d.legislativeText)}</p>
+${d.additionalNotes ? `<p><strong>Notes:</strong> ${escapeHtml(d.additionalNotes)}</p>` : ''}
 <hr/>
-<p><strong>Issuing officer:</strong> ${d.officerName}</p>
-<p><strong>Authorised by:</strong> ${d.authorizedBy}</p>
+<p><strong>Issuing officer:</strong> ${escapeHtml(d.officerName)}</p>
+<p><strong>Authorised by:</strong> ${escapeHtml(d.authorizedBy)}</p>
 <p style="font-size:11px;color:#777;">This is a draft notice. It is not formally issued until reviewed, signed, and confirmed by an authorised officer.</p>
 </body></html>`;
 }
@@ -185,7 +200,7 @@ serve(async (req) => {
 
     const pdfBytes = await buildPdfBytes(html, `${orgName} — Parking Infringement Notice`, noticeNumber);
     const pdfPath = `org/${chalk.organization_id}/notices/parking/${noticeRecord.id}.pdf`;
-    const { error: uploadErr } = await supabase.storage.from('notice-artifacts').upload(pdfPath, new Blob([pdfBytes], { type: 'application/pdf' }), { contentType: 'application/pdf', upsert: true });
+    const { error: uploadErr } = await supabase.storage.from('notice-artifacts').upload(pdfPath, new Blob([Uint8Array.from(pdfBytes).buffer], { type: 'application/pdf' }), { contentType: 'application/pdf', upsert: true });
     let pdfUrl: string | null = null;
     if (!uploadErr) {
       pdfUrl = pdfPath;

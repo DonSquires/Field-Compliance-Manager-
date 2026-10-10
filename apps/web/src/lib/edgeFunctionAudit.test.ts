@@ -30,6 +30,10 @@ const generateNoticeSource = readFileSync(
   resolve(process.cwd(), '../../supabase/functions/generate-notice/index.ts'),
   'utf8',
 );
+const generateParkingNoticeSource = readFileSync(
+  resolve(process.cwd(), '../../supabase/functions/generate-parking-notice/index.ts'),
+  'utf8',
+);
 const photoEvidenceFunctionSources = [
   processOfficerScanSource,
   readFileSync(resolve(process.cwd(), '../../supabase/functions/capture-environmental-evidence/index.ts'), 'utf8'),
@@ -151,6 +155,33 @@ describe('Edge Function Schema Audit', () => {
       expect(generateNoticeSource).toContain('html_storage_path');
       expect(generateNoticeSource).toContain('.pdf`');
       expect(generateNoticeSource).not.toContain('True PDF generation (Puppeteer) is a future enhancement');
+      expect(generateNoticeSource).toContain('embedPdfNotoFonts');
+      expect(generateNoticeSource).toContain('wrapPdfText');
+      expect(generateNoticeSource).toContain("pdf.setTitle(title)");
+      expect(generateNoticeSource).not.toContain('StandardFonts.Helvetica');
+      expect(generateNoticeSource).not.toContain('text.slice(0, 115)');
+    });
+
+    it('keeps template and record values as text in generated notice HTML', () => {
+      expect(generateNoticeSource).toContain('function escapeHtml(value: string)');
+      expect(generateNoticeSource).toContain('escapeHtml(noticeData.officerName)');
+      expect(generateNoticeSource).toContain('escapeHtml(d.additionalNotes)');
+      expect(generateNoticeSource).toContain('escapeHtml(d.siteAddress)');
+      expect(generateNoticeSource).toContain("/^https:\\/\\//i.test(d.logoUrl.trim())");
+      expect(generateNoticeSource).toContain('escapeHtml(objectionsAddress)');
+    });
+
+    it('parking notice PDF preserves long and extended text with document metadata', () => {
+      expect(generateParkingNoticeSource).toContain('embedPdfNotoFonts');
+      expect(generateParkingNoticeSource).toContain('wrapPdfText');
+      expect(generateParkingNoticeSource).toContain('pdf.setTitle(title)');
+      expect(generateParkingNoticeSource).toContain('fcm-parking-notice-pdf-lib-a4-v5');
+      expect(generateParkingNoticeSource).not.toContain('StandardFonts.Helvetica');
+      expect(generateParkingNoticeSource).not.toContain('text.slice(0, 115)');
+      expect(generateParkingNoticeSource).toContain('function escapeHtml(value: string)');
+      expect(generateParkingNoticeSource).toContain('${escapeHtml(d.legislativeText)}');
+      expect(generateParkingNoticeSource).toContain('${escapeHtml(d.additionalNotes)}');
+      expect(generateParkingNoticeSource).toContain(".replace(/&nbsp;/gi, ' ')");
     });
 
     it('parking breach alerts leave observation_id null without an observations record', () => {

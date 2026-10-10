@@ -17,7 +17,9 @@ describe('governed breach outcome return', () => {
     expect(page).toContain("functions.invoke<{ html?: string; pdf_url?: string; receipt?: NoticeReceiptData }>('generate-notice'");
     expect(page).toContain('breach_alert_id: alert.id');
     expect(page).toContain("['written_warning', 'notice_to_vacate', 'infringement']");
-    expect(page).toContain("storage.from('notice-artifacts').createSignedUrl(data.pdf_url, 900)");
+    expect(page).toContain('noticeArtifactPaths');
+    expect(page).toContain('GeneratedArtifactActions bucket="notice-artifacts"');
+    expect(page).toContain('notice preview opened, but its PDF artifact could not be stored');
     expect(page).not.toMatch(/from\('(notices_to_vacate|infringement_notices)'\)/);
   });
 

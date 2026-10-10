@@ -1,5 +1,5 @@
 import { useState } from 'react';
-import { Bluetooth, Printer, RefreshCw } from 'lucide-react';
+import { Bluetooth, Download, Printer, RefreshCw } from 'lucide-react';
 import { buildReceiptEscPos, buildReceiptText, type NoticeReceiptData, type ReceiptPaperWidth } from '../lib/thermalReceipt';
 import { connectThermalPrinter, isWebBluetoothSupported, type ThermalPrinterConnection } from '../lib/useThermalPrinter';
 import './NoticePrintActions.css';
@@ -72,6 +72,16 @@ export function NoticePrintActions({
     printWindow.print();
   };
 
+  const downloadReceipt = () => {
+    const blob = new Blob([previewText], { type: 'text/plain;charset=utf-8' });
+    const objectUrl = URL.createObjectURL(blob);
+    const anchor = document.createElement('a');
+    anchor.href = objectUrl;
+    anchor.download = `notice-${receipt.noticeNumber.replace(/[^A-Za-z0-9_-]+/g, '-')}.txt`;
+    anchor.click();
+    window.setTimeout(() => URL.revokeObjectURL(objectUrl), 30_000);
+  };
+
   return (
     <div className="notice-print-actions" aria-label="Print notice">
       {error && <div className="notice-print-message is-error" role="alert">{error}</div>}
@@ -83,6 +93,9 @@ export function NoticePrintActions({
         </select></label>
         <button type="button" onClick={printViaBrowser} title="Print via a WiFi/USB printer registered with this device">
           <Printer size={15} /> Print (WiFi/USB)
+        </button>
+        <button type="button" onClick={downloadReceipt} title="Download the formatted receipt text">
+          <Download size={15} /> Download receipt
         </button>
         {isWebBluetoothSupported() ? (
           <button type="button" disabled={busy} onClick={() => void printBluetooth()} title="Print via a Bluetooth (BLE) thermal printer">

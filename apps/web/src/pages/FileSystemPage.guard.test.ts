@@ -53,15 +53,17 @@ describe('organisation file system', () => {
     expect(page).toContain('SHA-256');
     expect(page).toContain('documents(original_filename,source_channel,current_scope)');
     expect(page).toContain('document_versions(version_label,metadata_json)');
-    expect(page).toContain('openGeneratedOutput');
+    expect(page).toContain('GeneratedArtifactActions bucket={output.storage_bucket}');
+    expect(page).toContain('artifactFileName(outputTitle(output), extension)');
   });
 
   it('surfaces enforcement notices separately from Bob-generated outputs', () => {
     expect(page).toContain("from('notices_to_vacate')");
     expect(page).toContain("from('infringement_notices')");
-    expect(page).toContain("from('notice-artifacts')");
+    expect(page).toContain('bucket="notice-artifacts"');
     expect(page).toContain('Enforcement notice artifacts');
-    expect(page).toContain('openNoticeArtifact');
+    expect(page).toContain('GeneratedArtifactActions bucket="notice-artifacts"');
+    expect(page).toContain("'PDF artifact'");
     expect(page).toContain('eq(\'organization_id\', organizationId)');
   });
 

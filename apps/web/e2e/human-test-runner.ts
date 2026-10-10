@@ -276,8 +276,8 @@ export class HumanTestSession {
       await this.page.waitForLoadState('domcontentloaded');
       await this.page.waitForTimeout(150);
       const candidates = this.page.locator('button:visible');
-      const candidate = candidates.nth(button.index);
-      const currentLabel = (await candidate.textContent().catch(() => null) ?? '').replace(/\s+/g, ' ').trim();
+      const indexedButton = candidates.nth(button.index);
+      const currentLabel = (await indexedButton.textContent().catch(() => null) ?? '').replace(/\s+/g, ' ').trim();
       const label = button.label || currentLabel || `button-${button.index}`;
       if (!label || isWriteOrDestructiveAction(label)) {
         console.log(`[HUMAN BUTTON SKIP] ${route} #${button.index} ${label || '(unnamed)'}: write/destructive action requires governed evidence`);
@@ -287,19 +287,71 @@ export class HumanTestSession {
         console.log(`[HUMAN BUTTON SKIP] ${route} #${button.index} ${label}: equivalent semantic button already followed`);
         continue;
       }
+      let candidate = await this.findButtonByLabel(label);
+      if (!candidate) {
+        await this.page.goto(route);
+        await this.page.waitForLoadState('domcontentloaded');
+        await this.page.waitForTimeout(100);
+        candidate = await this.findButtonByLabel(label);
+      }
+      if (!candidate) {
+        console.log(`[HUMAN BUTTON SKIP] ${route} #${button.index} ${label}: not present after route restore`);
+        continue;
+      }
       if (await candidate.isDisabled().catch(() => true)) {
         console.log(`[HUMAN BUTTON SKIP] ${route} #${button.index} ${label}: disabled state verified`);
         continue;
       }
       this.auditedButtonLabels.add(label);
       await this.step(`button ${route} #${button.index}: ${label}`, async () => {
-        await candidate.click();
-        await this.page.waitForTimeout(250);
-        await this.observe(`after button ${route} #${button.index}: ${label}`);
+        await candidate.click({ timeout: 2000 });
+        await this.page.waitForTimeout(100);
+        const renderedText = compact(await this.page.locator('body').textContent(), 500);
+        if (!renderedText) throw new Error(`Page became blank after clicking ${label}.`);
+        console.log(`[HUMAN BUTTON RESULT] ${label} -> ${this.page.url()}`);
+        await this.dismissSafeDialog();
+        const bobPanel = this.page.getByLabel('Bob agent workspace');
+        if (!route.includes('/bob') && await bobPanel.isVisible({ timeout: 250 }).catch(() => false)) {
+          await bobPanel.getByRole('button', { name: 'Close Bob' }).click({ timeout: 2000 });
+          await expect(bobPanel).toBeHidden({ timeout: 2000 });
+        }
+        const onRoute = () => {
+          const current = new URL(this.page.url());
+          const target = new URL(route, current);
+          return current.pathname === target.pathname && current.search === target.search;
+        };
+        if (!onRoute()) {
+          await this.page.goBack().catch(() => null);
+          await this.page.waitForTimeout(100);
+          if (!onRoute()) {
+            await this.page.goto(route);
+            await this.page.waitForLoadState('domcontentloaded');
+          }
+        }
       });
     }
-    await this.page.goto(route);
-    await this.page.waitForLoadState('domcontentloaded');
+  }
+
+  private async findButtonByLabel(label: string) {
+    const labels = await this.page.locator('button:visible').evaluateAll((elements) => elements.map((element) => (element.getAttribute('aria-label') || element.getAttribute('title') || element.textContent || '').replace(/\s+/g, ' ').trim()));
+    const index = labels.indexOf(label);
+    return index === -1 ? null : this.page.locator('button:visible').nth(index);
+  }
+
+  private async dismissSafeDialog(): Promise<void> {
+    const dialog = this.page.locator('[role="dialog"][aria-modal="true"]:visible').last();
+    if (!(await dialog.isVisible({ timeout: 250 }).catch(() => false))) return;
+
+    const heading = compact(await dialog.locator('h1, h2, h3').first().textContent().catch(() => null));
+    const buttons = await dialog.getByRole('button').evaluateAll((elements) => elements.map((element) => (element.getAttribute('aria-label') || element.textContent || '').replace(/\s+/g, ' ').trim()));
+    console.log(`[HUMAN DIALOG] ${heading || '(untitled)'}; buttons: ${buttons.join(' | ') || '(none)'}`);
+
+    const dismiss = dialog.getByRole('button', { name: /^(?:cancel|not now|close(?:\b.*)?)$/i }).first();
+    if (!(await dismiss.isVisible().catch(() => false))) {
+      throw new Error(`Modal dialog "${heading || 'untitled'}" has no safe Cancel, Close, or Not now action.`);
+    }
+    await dismiss.click({ timeout: 2000 });
+    await expect(dialog).toBeHidden({ timeout: 2000 });
   }
 
   async capture(label: string): Promise<void> {
