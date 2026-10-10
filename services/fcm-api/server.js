@@ -260,24 +260,26 @@ async function extractDocumentText(attachment, kind) {
   const downloaded = await supabase.storage.from(attachment.storage_bucket).download(attachment.storage_path);
   if (downloaded.error || !downloaded.data) throw new Error('attachment_download_failed');
   const bytes = Buffer.from(await downloaded.data.arrayBuffer());
-  if (kind === 'text') return bytes.toString('utf8').slice(0, 60_000);
+  const sourceSha256 = crypto.createHash('sha256').update(bytes).digest('hex');
+  if (kind === 'text') return { text: bytes.toString('utf8').slice(0, 60_000), source_sha256: sourceSha256, provider: 'direct-text' };
   const work = await fs.mkdtemp(path.join(os.tmpdir(), 'fcm-doc-'));
   const sourcePath = path.join(work, `source.${kind === 'image' ? 'img' : kind}`);
   try {
     await fs.writeFile(sourcePath, bytes, { mode: 0o600 });
     if (kind === 'pdf') {
       const { stdout } = await execFileAsync('pdftotext', ['-layout', '-l', '30', sourcePath, '-'], { timeout: 90_000, maxBuffer: 16 * 1024 * 1024 });
-      return String(stdout || '').slice(0, 60_000);
+      return { text: String(stdout || '').slice(0, 60_000), source_sha256: sourceSha256, provider: 'pdftotext-layout' };
     }
     if (kind === 'docx') {
       const { stdout } = await execFileAsync('unzip', ['-p', sourcePath, 'word/document.xml'], { timeout: 60_000, maxBuffer: 32 * 1024 * 1024 });
-      return docxXmlToText(stdout).slice(0, 60_000);
+      return { text: docxXmlToText(stdout).slice(0, 60_000), source_sha256: sourceSha256, provider: 'docx-xml' };
     }
     if (kind === 'image') {
       const variants = await Promise.all([6, 11].map((mode) => tesseractText(sourcePath, mode)));
       return {
         text: (variants[0] || variants[1] || '').slice(0, 60_000),
         variants: variants.map((value) => value.slice(0, 60_000)),
+        source_sha256: sourceSha256,
         provider: 'tesseract-5-ensemble-psm6-psm11',
       };
     }

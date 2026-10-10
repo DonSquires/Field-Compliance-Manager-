@@ -257,6 +257,18 @@ Gate: each high-risk identifier in prose resolves to a structured evidence
 field with equal normalized value and sufficient authority, or the turn fails
 to review.
 
+**Implemented 2026-10-11 for the document-identity adapter.**
+`perception_evidence_envelopes` records the immutable source hash and versioned
+source/model/derivative receipts; `perception_evidence_fields` keeps candidates,
+locations, conflicts and current authority; `perception_evidence_reviews` is
+the append-only human decision history; and `perception_model_calibrations`
+holds versioned evaluation receipts. NZTA document OCR now writes this envelope
+replay-safely, and the deterministic chat verifier blocks plate claims that
+exceed the structured authority. Raw receipt reads and review are
+administrator-only until Phase C supplies domain-specific task-entitlement
+policies. CCTV and Desktop adapters remain Phase C/D work; their existing
+domain tables are not replaced.
+
 ### Phase C — perception adapters
 
 - Bring ALPR, face candidates, person tracking, vehicle attributes, smoke,

@@ -12,6 +12,20 @@ interface StudioMessage {
   created_at: string;
 }
 
+interface PerceptionEvidenceReceipt {
+  id: string;
+  domain: string;
+  schema_version: number;
+  status: string;
+  created_at: string;
+  fields: Array<{
+    field_key: string;
+    normalized_value: string | null;
+    authority_state: string;
+    review_required: boolean;
+  }>;
+}
+
 interface StudioAttachment {
   id: string;
   file_name: string;
@@ -91,6 +105,9 @@ function sourceVerification(attachment: StudioAttachment) {
     status: String(plate.status ?? 'manual_review_required'),
     value: typeof plate.value === 'string' ? plate.value : null,
     candidates,
+    envelopeId: typeof structured.perception_envelope_id === 'string'
+      ? structured.perception_envelope_id
+      : typeof payload?.perception_envelope_id === 'string' ? payload.perception_envelope_id : null,
   };
 }
 
@@ -122,12 +139,15 @@ export function BobStudio({
   const [selectedMediaId, setSelectedMediaId] = useState<string | null>(null);
   const [mediaUrl, setMediaUrl] = useState<string | null>(null);
   const [mediaError, setMediaError] = useState<string | null>(null);
+  const [evidenceReceipts, setEvidenceReceipts] = useState<Record<string, PerceptionEvidenceReceipt>>({});
+  const [evidenceReceiptError, setEvidenceReceiptError] = useState<string | null>(null);
   const [notice, setNotice] = useState<string | null>(null);
 
   const assistantMessages = useMemo(() => messages.filter((message) => message.role === 'assistant').slice().reverse(), [messages]);
   const diagrams = useMemo(() => extractMermaidDiagrams(messages), [messages]);
   const mediaAttachments = useMemo(() => attachments.filter(isMediaAttachment), [attachments]);
   const sourceVerifications = useMemo(() => attachments.map(sourceVerification).filter(Boolean) as NonNullable<ReturnType<typeof sourceVerification>>[], [attachments]);
+  const evidenceEnvelopeIds = useMemo(() => sourceVerifications.map((item) => item.envelopeId).filter(Boolean) as string[], [sourceVerifications]);
   const selectedDocument = assistantMessages.find((message) => message.id === selectedMessageId) ?? assistantMessages[0] ?? null;
   const selectedDiagram = diagrams.find((diagram) => diagram.id === selectedDiagramId) ?? diagrams[0] ?? null;
   const selectedMedia = mediaAttachments.find((attachment) => attachment.id === selectedMediaId) ?? mediaAttachments[0] ?? null;
@@ -163,6 +183,46 @@ export function BobStudio({
       .catch((error: unknown) => { if (!cancelled) setMediaError(error instanceof Error ? error.message : 'Media preview could not be opened.'); });
     return () => { cancelled = true; };
   }, [selectedMedia]);
+
+  useEffect(() => {
+    let cancelled = false;
+    setEvidenceReceiptError(null);
+    if (!evidenceEnvelopeIds.length) {
+      setEvidenceReceipts({});
+      return;
+    }
+    const load = async () => {
+      let envelopeQuery = supabase
+        .from('perception_evidence_envelopes')
+        .select('id,domain,schema_version,status,created_at')
+        .in('id', evidenceEnvelopeIds);
+      if (organizationId) envelopeQuery = envelopeQuery.eq('organization_id', organizationId);
+      const [{ data: envelopes, error: envelopeError }, { data: fields, error: fieldsError }] = await Promise.all([
+        envelopeQuery,
+        supabase
+          .from('perception_evidence_fields')
+          .select('envelope_id,field_key,normalized_value,authority_state,review_required')
+          .in('envelope_id', evidenceEnvelopeIds),
+      ]);
+      if (cancelled) return;
+      const error = envelopeError || fieldsError;
+      if (error) {
+        setEvidenceReceipts({});
+        setEvidenceReceiptError(error.message);
+        return;
+      }
+      const next = Object.fromEntries((envelopes || []).map((envelope) => [
+        envelope.id,
+        {
+          ...envelope,
+          fields: (fields || []).filter((field) => field.envelope_id === envelope.id),
+        },
+      ])) as Record<string, PerceptionEvidenceReceipt>;
+      setEvidenceReceipts(next);
+    };
+    void load();
+    return () => { cancelled = true; };
+  }, [evidenceEnvelopeIds, organizationId]);
 
   const startDocument = (kind: DocumentKind) => {
     setDocumentKind(kind);
@@ -233,7 +293,12 @@ export function BobStudio({
             </header>
             {sourceVerifications.length > 0 && <section className="bob-studio-source-verification" aria-label="Source field verification">
               <div><AlertTriangle size={16} /><span><strong>Source verification</strong><small>These are field-level OCR results, separate from Bob's response confidence.</small></span></div>
-              <ul>{sourceVerifications.map((item) => <li key={`${item.fileName}-${item.documentKind}`}><strong>{item.fileName}</strong><span>{item.value ? <>Plate candidate <b>{item.value}</b> has OCR consensus, but the NZTA source still requires administrator comparison.</> : <>Plate is <b>not verified</b>{item.candidates.length ? `; OCR candidates: ${item.candidates.join(', ')}` : ''}. The draft must show [TO CONFIRM].</>}</span></li>)}</ul>
+              {evidenceReceiptError && <p role="alert">The shared evidence receipt could not be loaded: {evidenceReceiptError}</p>}
+              <ul>{sourceVerifications.map((item) => {
+                const receipt = item.envelopeId ? evidenceReceipts[item.envelopeId] : null;
+                const plateField = receipt?.fields.find((field) => field.field_key === 'vehicle.plate_number');
+                return <li key={`${item.fileName}-${item.documentKind}`}><strong>{item.fileName}</strong><span>{item.value ? <>Plate candidate <b>{item.value}</b> has OCR consensus, but the NZTA source still requires administrator comparison.</> : <>Plate is <b>not verified</b>{item.candidates.length ? `; OCR candidates: ${item.candidates.join(', ')}` : ''}. The draft must show [TO CONFIRM].</>}</span>{receipt && <small>Evidence receipt v{receipt.schema_version} · {receipt.status.replaceAll('_', ' ')} · field authority {plateField?.authority_state.replaceAll('_', ' ') ?? 'not recorded'}</small>}</li>;
+              })}</ul>
             </section>}
             {assistantMessages.length > 1 && <label className="bob-document-version"><span>Draft version</span><select value={selectedDocument?.id ?? ''} onChange={(event) => setSelectedMessageId(event.target.value)}>{assistantMessages.map((message) => <option key={message.id} value={message.id}>{new Date(message.created_at).toLocaleString([], { day: 'numeric', month: 'short', hour: '2-digit', minute: '2-digit' })}</option>)}</select></label>}
             {selectedDocument ? <article className="bob-document-sheet"><BobMarkdown content={selectedDocument.content} /></article> : <div className="bob-studio-empty"><ClipboardList size={28} /><strong>Choose a document type to brief Bob.</strong><p>Attach the RFQ, contract, policy, report example, or source evidence first when the draft depends on existing text.</p><button type="button" onClick={() => onPrompt(preset.prompt)}>Brief Bob</button></div>}

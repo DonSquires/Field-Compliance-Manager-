@@ -8,3 +8,5 @@
 .bob-studio-source-verification ul{display:grid;gap:5px;margin:0;padding-left:24px}
 .bob-studio-source-verification li{display:grid;gap:2px}
 .bob-studio-source-verification li span{line-height:1.45}
+.bob-studio-source-verification li small{color:#745e2a;line-height:1.4}
+.bob-studio-source-verification>p{margin:0;color:#8b2f2a;line-height:1.4}

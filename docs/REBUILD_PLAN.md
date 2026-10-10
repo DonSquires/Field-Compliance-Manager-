@@ -388,6 +388,13 @@ destructive bulk operations).
    generated prose must equal a structured field with sufficient authority, or
    the turn returns review-required rather than a confident answer.
 
+Phase B document-identity slice shipped 2026-10-11: the shared versioned
+perception envelope, field candidates, calibration receipts and append-only
+review history are live; NZTA OCR writes replay-safe source/model receipts; and
+the deterministic verifier blocks unsupported plate claims. Raw candidate
+reads are administrator-only pending the domain-specific task-entitlement
+policies delivered with each Phase C adapter.
+
 **Gate:** live `bob_messages` show no context-losing fallbacks; a Builder job
 runs implement → verify → repair without human touch and stops cleanly at
 `release_ready`; egress proven per rank; Atlas `exercised` is populated from

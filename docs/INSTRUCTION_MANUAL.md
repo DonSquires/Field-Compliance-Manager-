@@ -35,6 +35,12 @@ Field Compliance Manager (FCM) is an enterprise SaaS platform designed to replac
      High-risk identifiers that lack deterministic evidence are displayed as
      `[TO CONFIRM]` and cannot enter canonical proposals. Identity, legal,
      enforcement and commercial truth requires an attributable human decision.
+     Shared receipts live in `perception_evidence_envelopes`, candidate fields
+     in `perception_evidence_fields`, model evaluation evidence in
+     `perception_model_calibrations`, and append-only human decisions in
+     `perception_evidence_reviews`. Raw candidates are currently
+     administrator-only; domain adapters must add the proper task-entitlement
+     policy before widening access.
    - **Self-Heal Boundary:** Bob may reproduce, edit, test, independently
      verify, repair and prepare a draft release in an isolated worker. Schema,
      auth/RLS, secrets, protected-branch merge, deployment and destructive bulk

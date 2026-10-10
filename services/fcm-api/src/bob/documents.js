@@ -89,6 +89,66 @@ function structuredExtractionFor(file) {
   };
 }
 
+function buildPerceptionEnvelopePayload(file) {
+  const structured = file?.structured_extraction;
+  if (!structured || structured.document_kind !== 'nzta_mvr_record' || !/^[0-9a-f]{64}$/.test(String(file.source_sha256 || ''))) return null;
+  const plate = structured.identifier_verification?.plate_number;
+  const candidates = Array.isArray(plate?.candidates) ? plate.candidates : [];
+  const conflicts = candidates.map((candidate) => candidate.value).filter(Boolean);
+  const fields = candidates.length
+    ? candidates.map((candidate, index) => ({
+        field_key: 'vehicle.plate_number',
+        candidate_ordinal: index,
+        value_type: 'identifier',
+        candidate_value: candidate.value,
+        normalized_value: candidate.value,
+        candidate_payload: {
+          occurrences: candidate.occurrences,
+          variant_count: candidate.variant_count,
+          valid_shape: candidate.valid_shape,
+          score: candidate.score,
+        },
+        source_locations: (candidate.source_kinds || []).map((source) => ({ source, variant_count: candidate.variant_count })),
+        consensus_rule: plate.rule,
+        conflicts: conflicts.filter((value) => value !== candidate.value),
+        authority_state: plate.status === 'verified_candidate' && plate.value === candidate.value
+          ? 'verified_candidate'
+          : candidate.valid_shape ? 'candidate' : 'insufficient',
+        review_required: true,
+      }))
+    : [{
+        field_key: 'vehicle.plate_number',
+        candidate_ordinal: 0,
+        value_type: 'identifier',
+        candidate_payload: { status: 'no_candidate' },
+        source_locations: [],
+        consensus_rule: plate?.rule ?? 'ocr_consensus_required',
+        conflicts: [],
+        authority_state: 'insufficient',
+        review_required: true,
+      }];
+  return {
+    schema_version: 1,
+    domain: 'document_identity',
+    source_kind: 'document',
+    source_sha256: file.source_sha256,
+    status: 'manual_review_required',
+    source_receipt: {
+      attachment_id: file.id,
+      file_name: file.name,
+      file_kind: file.kind,
+      ocr_variant_count: Array.isArray(file.variants) ? file.variants.length : 1,
+    },
+    model_receipt: {
+      provider: file.provider ?? 'unknown',
+      calibrated: false,
+      purpose: 'candidate_extraction',
+    },
+    derivative_receipts: [],
+    fields,
+  };
+}
+
 function plateVerificationFor(structuredFiles) {
   const verifications = structuredFiles
     .filter((file) => file?.structured_extraction?.document_kind === 'nzta_mvr_record')
@@ -166,7 +226,14 @@ function createDocumentReader({ supabase, gateway, extract }) {
       const variants = typeof extraction === 'object' && Array.isArray(extraction?.variants)
         ? extraction.variants.map((value) => String(value || '').trim()).filter(Boolean)
         : [text].filter(Boolean);
-      const file = { ...base, readable: Boolean(text), text, variants, provider: typeof extraction === 'object' ? extraction?.provider ?? null : null };
+      const file = {
+        ...base,
+        readable: Boolean(text),
+        text,
+        variants,
+        provider: typeof extraction === 'object' ? extraction?.provider ?? null : null,
+        source_sha256: typeof extraction === 'object' ? extraction?.source_sha256 ?? null : null,
+      };
       return { ...file, structured_extraction: kind === 'image' ? structuredExtractionFor(file) : null };
     } catch (error) {
       return { ...base, error: error instanceof Error ? error.message : 'extract_failed' };
@@ -184,6 +251,20 @@ function createDocumentReader({ supabase, gateway, extract }) {
           ? `NZTA source detected. Plate candidate ${plate.value} has OCR consensus; administrator source review is still required.`
           : `NZTA source detected. Plate could not be verified from OCR${plate?.candidates?.length ? `; candidates: ${plate.candidates.map((candidate) => candidate.value).join(', ')}` : ''}.`
         : file.readable ? file.text.slice(0, 240).replace(/\s+/g, ' ') : file.error || 'No readable text was extracted.';
+      const envelopePayload = buildPerceptionEnvelopePayload(file);
+      if (envelopePayload) {
+        const idempotencyKey = `bob-attachment:${file.id}:nzta-mvr:v1:${file.source_sha256}`;
+        const { data: envelopeId, error: envelopeError } = await supabase.rpc('record_perception_evidence_envelope', {
+          p_attachment_id: file.id,
+          p_idempotency_key: idempotencyKey,
+          p_payload: envelopePayload,
+        });
+        if (envelopeError) errors.push({ id: file.id, stage: 'evidence_envelope', error: envelopeError.message });
+        else if (typeof envelopeId === 'string') {
+          file.perception_envelope_id = envelopeId;
+          file.structured_extraction.perception_envelope_id = envelopeId;
+        }
+      }
       const { error } = await supabase.from('bob_attachments').update({
         processing_state: processingState,
         extraction_summary: summary,
@@ -191,6 +272,7 @@ function createDocumentReader({ supabase, gateway, extract }) {
           ...(file.existing_payload && typeof file.existing_payload === 'object' ? file.existing_payload : {}),
           provider: file.provider ?? null,
           structured_extraction: file.structured_extraction ?? null,
+          perception_envelope_id: file.perception_envelope_id ?? null,
         },
         confidence: null,
       }).eq('id', file.id).eq('conversation_id', conversationId);
@@ -253,6 +335,7 @@ function createDocumentReader({ supabase, gateway, extract }) {
 
 module.exports = {
   buildMessages,
+  buildPerceptionEnvelopePayload,
   createDocumentReader,
   docxXmlToText,
   fileKind,
