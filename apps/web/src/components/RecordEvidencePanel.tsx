@@ -40,12 +40,40 @@ export const RecordEvidencePanel: React.FC<Props> = ({ recordKind, recordId, org
   const load = useCallback(async () => {
     setLoading(true);
     setError(null);
-    const base = supabase.from('evidence_items').select('id,storage_path,captured_at,sha256_hash,metadata').order('captured_at', { ascending: false });
+    const base = supabase.from('evidence_items').select('id,storage_path,captured_at,sha256_hash,metadata').eq('organization_id', organizationId).order('captured_at', { ascending: false });
     const { data, error: queryError } = recordKind === 'location_event'
       ? await base.eq('location_event_id', recordId)
       : await base.eq('metadata->>observation_id', recordId);
     if (queryError) { setError(describe(queryError)); setLoading(false); return; }
-    const rows = (data ?? []) as EvidenceRow[];
+    const rows = [...(data ?? [])] as EvidenceRow[];
+    if (recordKind === 'observation') {
+      const supporting = await supabase
+        .from('observation_supporting_evidence')
+        .select('id,storage_path,captured_at,notes')
+        .eq('organization_id', organizationId)
+        .eq('observation_id', recordId)
+        .eq('evidence_kind', 'external_photo')
+        .order('captured_at', { ascending: false });
+      if (supporting.error) { setError(describe(supporting.error)); setLoading(false); return; }
+      const paths = [...new Set((supporting.data ?? []).map((item) => item.storage_path).filter((path): path is string => Boolean(path)))];
+      const linked = paths.length
+        ? await supabase.from('evidence_items').select('id,storage_path,captured_at,sha256_hash,metadata').eq('organization_id', organizationId).in('storage_path', paths)
+        : { data: [], error: null };
+      if (linked.error) { setError(describe(linked.error)); setLoading(false); return; }
+      const linkedByPath = new Map(((linked.data ?? []) as EvidenceRow[]).map((item) => [item.storage_path, item]));
+      for (const support of supporting.data ?? []) {
+        const evidence = support.storage_path ? linkedByPath.get(support.storage_path) : null;
+        const candidate: EvidenceRow = evidence ?? {
+          id: support.id,
+          storage_path: support.storage_path,
+          captured_at: support.captured_at,
+          sha256_hash: null,
+          metadata: support.notes ? { description: support.notes, provenance: 'external' } : { provenance: 'external' },
+        };
+        if (!rows.some((item) => item.storage_path === candidate.storage_path)) rows.push(candidate);
+      }
+      rows.sort((left, right) => Date.parse(right.captured_at) - Date.parse(left.captured_at));
+    }
     setItems(rows);
     const signed: Record<string, string> = {};
     await Promise.all(rows.filter((row) => row.storage_path).map(async (row) => {
@@ -54,7 +82,7 @@ export const RecordEvidencePanel: React.FC<Props> = ({ recordKind, recordId, org
     }));
     setUrls(signed);
     setLoading(false);
-  }, [recordId, recordKind]);
+  }, [organizationId, recordId, recordKind]);
 
   useEffect(() => { void load(); }, [load]);
 

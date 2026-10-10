@@ -116,6 +116,11 @@
   color: #fff !important;
   cursor: pointer;
 }
+.identity-records-result-summary {
+  margin: -5px 22px 14px;
+  color: #526d64;
+  font-size: 12px;
+}
 .identity-records-layout {
   display: grid;
   grid-template-columns: 300px minmax(0, 1fr);
@@ -411,6 +416,84 @@
   align-items: center;
   gap: 7px;
 }
+.identity-vehicle-history > p {
+  color: #526d64;
+}
+.identity-vehicle-summary {
+  display: grid;
+  grid-template-columns: repeat(4, minmax(0, 1fr));
+  gap: 8px;
+  margin: 12px 0;
+}
+.identity-vehicle-summary > div {
+  display: grid;
+  gap: 4px;
+  padding: 10px;
+  border: 1px solid #d2dfda;
+  background: #f6faf8;
+}
+.identity-vehicle-summary span {
+  color: #60736d;
+  font-size: 11px;
+  text-transform: uppercase;
+}
+.identity-vehicle-activity {
+  display: grid;
+  gap: 10px;
+  margin: 14px 0 0;
+  padding: 0;
+  list-style: none;
+}
+.identity-vehicle-activity > li {
+  padding: 12px;
+  border: 1px solid #cad8d3;
+  background: #fff;
+}
+.identity-vehicle-activity header {
+  display: flex;
+  justify-content: space-between;
+  gap: 12px;
+  padding: 0;
+  border: 0;
+}
+.identity-vehicle-activity header span,
+.identity-vehicle-activity > li > small {
+  color: #60736d;
+  font-size: 12px;
+}
+.identity-vehicle-activity p {
+  white-space: pre-wrap;
+}
+.identity-vehicle-evidence {
+  display: grid;
+  grid-template-columns: repeat(auto-fill, minmax(150px, 1fr));
+  gap: 10px;
+  margin-top: 12px;
+}
+.identity-vehicle-evidence article {
+  display: grid;
+  gap: 5px;
+}
+.identity-vehicle-evidence img {
+  display: block;
+  width: 100%;
+  aspect-ratio: 4 / 3;
+  object-fit: cover;
+  border: 1px solid #cad8d3;
+  border-radius: 4px;
+  background: #edf3f1;
+}
+.identity-vehicle-evidence article > span {
+  display: grid;
+  place-items: center;
+  min-height: 90px;
+  border: 1px solid #cad8d3;
+  color: #60736d;
+}
+.identity-vehicle-evidence small {
+  overflow-wrap: anywhere;
+  color: #526d64;
+}
 .identity-document-review footer {
   display: flex;
   justify-content: flex-end;
@@ -550,5 +633,11 @@
   }
   .identity-records-fields .is-wide {
     grid-column: auto;
+  }
+  .identity-vehicle-summary {
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+  }
+  .identity-vehicle-activity header {
+    display: grid;
   }
 }

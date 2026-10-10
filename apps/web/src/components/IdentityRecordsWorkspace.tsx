@@ -43,6 +43,34 @@ type VehicleRecord = {
   wof_expiry: string | null;
   cof_expiry: string | null;
   notes: string | null;
+  observation_count: number;
+  evidence_count: number;
+  first_seen_at: string | null;
+  last_seen_at: string | null;
+  source_kinds: string[];
+};
+
+type VehicleActivityEvidence = {
+  id: string;
+  storage_path: string | null;
+  captured_at: string;
+  sha256_hash: string | null;
+  description: string | null;
+  original_name: string | null;
+  source_note: string | null;
+};
+
+type VehicleActivity = {
+  observation_id: string;
+  organization_id: string;
+  observed_at: string;
+  source_kind: string;
+  place_name: string;
+  officer_notes: string | null;
+  source_document_name: string | null;
+  source_reference: string | null;
+  source_locator: string | null;
+  evidence_items: VehicleActivityEvidence[];
 };
 
 type VehicleIdentityCheck = {
@@ -99,6 +127,7 @@ type Registry = {
   people: PersonRecord[];
   vehicles: VehicleRecord[];
   documents: IdentityDocument[];
+  vehicle_total: number;
 };
 type IncidentOption = {
   id: string;
@@ -470,6 +499,7 @@ export function IdentityRecordsWorkspace({
     people: [],
     vehicles: [],
     documents: [],
+    vehicle_total: 0,
   });
   const [search, setSearch] = useState("");
   const [selectedPersonId, setSelectedPersonId] = useState<string | null>(null);
@@ -491,6 +521,10 @@ export function IdentityRecordsWorkspace({
   const [vehicleIdentityCheckUrl, setVehicleIdentityCheckUrl] = useState<
     string | null
   >(null);
+  const [vehicleActivity, setVehicleActivity] = useState<VehicleActivity[]>([]);
+  const [vehicleActivityUrls, setVehicleActivityUrls] = useState<
+    Record<string, string>
+  >({});
   const [reason, setReason] = useState("");
   const [documentKind, setDocumentKind] = useState("driver_licence");
   const [documentFiles, setDocumentFiles] = useState<File[]>([]);
@@ -526,7 +560,7 @@ export function IdentityRecordsWorkspace({
           supabase.rpc("get_identity_registry", {
             p_organization_id: organizationId,
             p_search: term.trim() || null,
-            p_limit: 150,
+            p_limit: 250,
           }),
           supabase
             .from("incidents")
@@ -544,6 +578,7 @@ export function IdentityRecordsWorkspace({
           people: value?.people ?? [],
           vehicles: value?.vehicles ?? [],
           documents: value?.documents ?? [],
+          vehicle_total: value?.vehicle_total ?? 0,
         };
         setRegistry(nextRegistry);
         setIncidents((incidentResult.data ?? []) as IncidentOption[]);
@@ -579,18 +614,30 @@ export function IdentityRecordsWorkspace({
     setVehicle(record ? vehicleForm(record) : EMPTY_VEHICLE);
     setVehicleIdentityChecks([]);
     setVehicleIdentityCheckUrl(null);
+    setVehicleActivity([]);
+    setVehicleActivityUrls({});
     setReason("");
     if (!record) return;
-    const checks = await supabase.rpc("get_vehicle_identity_checks", {
-      p_organization_id: organizationId,
-      p_canonical_vehicle_id: record.id,
-    });
-    if (checks.error) {
-      setError(checks.error.message);
+    const [checks, activity] = await Promise.all([
+      supabase.rpc("get_vehicle_identity_checks", {
+        p_organization_id: organizationId,
+        p_canonical_vehicle_id: record.id,
+      }),
+      supabase.rpc("get_identity_vehicle_activity", {
+        p_organization_id: organizationId,
+        p_canonical_vehicle_id: record.id,
+        p_limit: 200,
+      }),
+    ]);
+    const activityError = checks.error ?? activity.error;
+    if (activityError) {
+      setError(activityError.message);
       return;
     }
     const rows = (checks.data ?? []) as VehicleIdentityCheck[];
     setVehicleIdentityChecks(rows);
+    const activityRows = (activity.data ?? []) as VehicleActivity[];
+    setVehicleActivity(activityRows);
     const latest = rows[0];
     if (latest?.storage_bucket && latest.storage_path) {
       const signed = await supabase.storage
@@ -598,6 +645,24 @@ export function IdentityRecordsWorkspace({
         .createSignedUrl(latest.storage_path, 600);
       if (!signed.error) setVehicleIdentityCheckUrl(signed.data.signedUrl);
     }
+    const evidence = activityRows.flatMap((item) => item.evidence_items ?? []);
+    const signedEvidence = await Promise.all(
+      evidence
+        .filter((item) => item.storage_path)
+        .map(async (item) => {
+          const signed = await supabase.storage
+            .from("bob-uploads")
+            .createSignedUrl(item.storage_path as string, 900);
+          return signed.error ? null : [item.id, signed.data.signedUrl] as const;
+        }),
+    );
+    setVehicleActivityUrls(
+      Object.fromEntries(
+        signedEvidence.filter(
+          (entry): entry is readonly [string, string] => entry !== null,
+        ),
+      ),
+    );
   };
 
   const savePerson = async (event: FormEvent) => {
@@ -1007,6 +1072,9 @@ export function IdentityRecordsWorkspace({
   const selectedPersonIsVerified =
     selectedPerson?.review_state === "verified" &&
     selectedPerson.canonical_review_state === "verified";
+  const selectedVehicleRecord = registry.vehicles.find(
+    (record) => record.id === selectedVehicleId,
+  );
 
   useEffect(() => {
     if (!selectedCanonicalPersonId || !selectedPersonIsVerified) {
@@ -1201,6 +1269,16 @@ export function IdentityRecordsWorkspace({
           />
           <button type="submit">Search</button>
         </form>
+        {!loading && mode === "vehicles" && registry.vehicle_total > 0 && (
+          <p className="identity-records-result-summary" role="status">
+            Showing {registry.vehicles.length.toLocaleString("en-NZ")} of{" "}
+            {registry.vehicle_total.toLocaleString("en-NZ")} canonical vehicles
+            evidenced by this organization and its operational clients.
+            {registry.vehicle_total > registry.vehicles.length
+              ? " Search by plate to find records outside this most-recent list."
+              : ""}
+          </p>
+        )}
         <div className="identity-records-layout">
           <aside className="identity-records-list">
             <button
@@ -1262,6 +1340,13 @@ export function IdentityRecordsWorkspace({
                     {[record.make, record.model, record.colour]
                       .filter(Boolean)
                       .join(" · ") || "Details not recorded"}
+                  </small>
+                  <small>
+                    {record.observation_count.toLocaleString("en-NZ")} approved{" "}
+                    observation{record.observation_count === 1 ? "" : "s"}
+                    {record.evidence_count
+                      ? ` · ${record.evidence_count.toLocaleString("en-NZ")} photo${record.evidence_count === 1 ? "" : "s"}`
+                      : ""}
                   </small>
                 </button>
               ))
@@ -1922,6 +2007,125 @@ export function IdentityRecordsWorkspace({
                   <Save size={15} />
                   {busy === "vehicle" ? "Saving" : "Save vehicle"}
                 </button>
+                {selectedVehicleId && (
+                  <section className="identity-records-section identity-vehicle-history">
+                    <h3>Approved observation history</h3>
+                    <p>
+                      Human-authored patrol records and CCTV review notes are
+                      valid observations. Their original notes, place, source,
+                      and matched photos remain attached to the client-owned
+                      observation.
+                    </p>
+                    {selectedVehicleRecord && (
+                      <div className="identity-vehicle-summary">
+                        <div>
+                          <span>Observations</span>
+                          <strong>
+                            {selectedVehicleRecord.observation_count.toLocaleString(
+                              "en-NZ",
+                            )}
+                          </strong>
+                        </div>
+                        <div>
+                          <span>Photos</span>
+                          <strong>
+                            {selectedVehicleRecord.evidence_count.toLocaleString(
+                              "en-NZ",
+                            )}
+                          </strong>
+                        </div>
+                        <div>
+                          <span>First seen</span>
+                          <strong>
+                            {selectedVehicleRecord.first_seen_at
+                              ? new Date(
+                                  selectedVehicleRecord.first_seen_at,
+                                ).toLocaleDateString("en-NZ")
+                              : "Not recorded"}
+                          </strong>
+                        </div>
+                        <div>
+                          <span>Last seen</span>
+                          <strong>
+                            {selectedVehicleRecord.last_seen_at
+                              ? new Date(
+                                  selectedVehicleRecord.last_seen_at,
+                                ).toLocaleDateString("en-NZ")
+                              : "Not recorded"}
+                          </strong>
+                        </div>
+                      </div>
+                    )}
+                    {vehicleActivity.length === 0 ? (
+                      <p>No observation history is linked to this vehicle.</p>
+                    ) : (
+                      <ol className="identity-vehicle-activity">
+                        {vehicleActivity.map((activity) => (
+                          <li key={activity.observation_id}>
+                            <header>
+                              <strong>{activity.source_kind}</strong>
+                              <span>
+                                {new Date(activity.observed_at).toLocaleString(
+                                  "en-NZ",
+                                )}{" "}
+                                · {activity.place_name}
+                              </span>
+                            </header>
+                            {activity.officer_notes && (
+                              <p>{activity.officer_notes}</p>
+                            )}
+                            {(activity.source_document_name ||
+                              activity.source_locator) && (
+                              <small>
+                                Source:{" "}
+                                {activity.source_document_name ||
+                                  "approved working file"}
+                                {activity.source_locator
+                                  ? ` · ${activity.source_locator}`
+                                  : ""}
+                              </small>
+                            )}
+                            {activity.evidence_items.length > 0 && (
+                              <div className="identity-vehicle-evidence">
+                                {activity.evidence_items.map((evidence) => (
+                                  <article key={evidence.id}>
+                                    {vehicleActivityUrls[evidence.id] ? (
+                                      <a
+                                        href={vehicleActivityUrls[evidence.id]}
+                                        target="_blank"
+                                        rel="noreferrer"
+                                      >
+                                        <img
+                                          src={
+                                            vehicleActivityUrls[evidence.id]
+                                          }
+                                          alt={
+                                            evidence.description ||
+                                            `Approved source photo for ${vehicle.plate_number}`
+                                          }
+                                          loading="lazy"
+                                        />
+                                      </a>
+                                    ) : (
+                                      <span>Private photo</span>
+                                    )}
+                                    <small>
+                                      {evidence.original_name || "Source photo"}{" "}
+                                      ·{" "}
+                                      {new Date(
+                                        evidence.captured_at,
+                                      ).toLocaleString("en-NZ")}
+                                    </small>
+                                  </article>
+                                ))}
+                              </div>
+                            )}
+                          </li>
+                        ))}
+                      </ol>
+                    )}
+                  </section>
+                )}
                 {selectedVehicleId && (
                   <section className="identity-records-section">
                     <h3>NZTA identity checks</h3>
