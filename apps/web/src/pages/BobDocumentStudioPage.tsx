@@ -8,6 +8,7 @@ import { useAuth } from '../context/AuthContext';
 import { supabase } from '../lib/supabase';
 import { GeneratedArtifactActions } from '../components/GeneratedArtifactActions';
 import './BobDocumentStudioPage.css';
+import './BobDocumentStudioSourceReview.css';
 
 type ReferenceResult = {
   catalog_entry_id: string;
@@ -23,13 +24,30 @@ type ReferenceResult = {
 type SaveState = 'idle' | 'saving' | 'saved' | 'reviewing' | 'needs_review' | 'approved' | 'error';
 type OutputFormat = 'print' | 'docx';
 type DraftSummary = { id: string; title: string; updatedAt: string; versionId: string; status: string; html: string; text: string; documentType: string; sourceChannel: string; currentScope: string; authorable: boolean };
+type SourcePromotionProposal = { id: string; document_version_id: string; target_type: string; status: string; proposed_payload: Record<string, unknown>; source_map: Record<string, unknown>; created_at: string; review_reason: string | null };
+type SourceClassification = { privacy_class: string; confidence: number | null; rationale: string | null; contains_pii: boolean; contains_operational_security: boolean; contains_financial_data: boolean; contains_legal_privilege: boolean; classifier_source: string; reviewed_at: string | null; created_at: string };
+type SourceProposalTarget = 'crm_agreement' | 'site_brief' | 'credential' | 'finance_reconciliation' | 'hr_case' | 'investigation_link';
 type BrandAsset = { id: string; label: string; asset_kind: string; variant: string; status: string; asset_url: string | null; storage_bucket: string | null; storage_path: string | null; alt_text: string | null };
 type OutputReceipt = { id: string; status: string; output_format: OutputFormat | 'pdf'; sha256: string | null; storage_bucket: string | null; storage_path: string | null };
 const FILE_SPACES = ['Organisation', 'Contracts', 'Sites and Operations', 'HR and People', 'Finance', 'Evidence', 'Investigations', 'Bob Intake', 'Generated Outputs'];
 
+function fileSpaceForDraft(draft: DraftSummary): string {
+  const name = draft.title.toLowerCase();
+  if (draft.authorable && draft.sourceChannel === 'system_generated') return 'Generated Outputs';
+  if (draft.currentScope === 'quarantined') return 'Bob Intake';
+  if (/contract|agreement|terms|proposal|rfq/.test(name)) return 'Contracts';
+  if (/hr|employment|discip|credential|certificate/.test(name)) return 'HR and People';
+  if (/invoice|finance|cost|expense|pay/.test(name)) return 'Finance';
+  if (/cctv|evidence|incident|report|photo|video/.test(name)) return 'Evidence';
+  if (/site|patrol|assignment|attendance|safety/.test(name)) return 'Sites and Operations';
+  return 'Organisation';
+}
+
 export default function BobDocumentStudioPage() {
   const navigate = useNavigate();
   const [searchParams] = useSearchParams();
+  const requestedDocumentId = searchParams.get('document');
+  const requestedVersionId = searchParams.get('version');
   const { profile } = useAuth();
   const [title, setTitle] = useState('Untitled Bob document');
   const [documentType, setDocumentType] = useState('report');
@@ -57,6 +75,15 @@ export default function BobDocumentStudioPage() {
   const [fileSpace, setFileSpace] = useState('Bob Intake');
   const [fileSearch, setFileSearch] = useState('');
   const [selectedFile, setSelectedFile] = useState<DraftSummary | null>(null);
+  const [sourceProposals, setSourceProposals] = useState<SourcePromotionProposal[]>([]);
+  const [sourceProposalReasons, setSourceProposalReasons] = useState<Record<string, string>>({});
+  const [sourceProposalBusyId, setSourceProposalBusyId] = useState<string | null>(null);
+  const [sourceClassification, setSourceClassification] = useState<SourceClassification | null>(null);
+  const [sourceOcrRequired, setSourceOcrRequired] = useState(false);
+  const [classificationForm, setClassificationForm] = useState({ privacyClass: 'tenant_sensitive', containsPii: false, containsOperationalSecurity: false, containsFinancialData: false, containsLegalPrivilege: false, reason: '' });
+  const [classificationBusy, setClassificationBusy] = useState(false);
+  const [proposalTarget, setProposalTarget] = useState<SourceProposalTarget>('crm_agreement');
+  const [proposalBusy, setProposalBusy] = useState(false);
   const editor = useEditor({
     extensions: [
       StarterKit,
@@ -239,16 +266,26 @@ export default function BobDocumentStudioPage() {
     if (!profile?.organizationId) return;
     let active = true;
     setDraftsLoading(true);
-    void supabase.from('documents')
-      .select('id,original_filename,updated_at,source_channel,current_scope,document_versions(id,extracted_text,metadata_json,created_at)')
+    const select = 'id,original_filename,updated_at,source_channel,current_scope,document_versions(id,extracted_text,metadata_json,created_at)';
+    const recentDocuments = supabase.from('documents')
+      .select(select)
       .or(`organization_id.eq.${profile.organizationId},organization_id.is.null`)
       .order('updated_at', { ascending: false })
-      .limit(20)
-      .then(({ data }) => {
+      .limit(20);
+    const requestedDocument = requestedDocumentId
+      ? supabase.from('documents').select(select).eq('id', requestedDocumentId).maybeSingle()
+      : Promise.resolve({ data: null });
+    void Promise.all([recentDocuments, requestedDocument])
+      .then(([recentResponse, requestedResponse]) => {
         if (!active) return;
-        const rows = (data as Array<{ id: string; original_filename: string; updated_at: string; source_channel: string; current_scope: string; document_versions?: Array<{ id: string; extracted_text: string | null; metadata_json: Record<string, unknown>; created_at: string }> }> ?? []);
+        const rows = (recentResponse.data as Array<{ id: string; original_filename: string; updated_at: string; source_channel: string; current_scope: string; document_versions?: Array<{ id: string; extracted_text: string | null; metadata_json: Record<string, unknown>; created_at: string }> }> ?? []);
+        const requestedRow = requestedResponse.data as typeof rows[number] | null;
+        if (requestedRow && !rows.some((row) => row.id === requestedRow.id)) rows.unshift(requestedRow);
         setDrafts(rows.flatMap((row) => {
-          const version = [...(row.document_versions ?? [])].sort((left, right) => right.created_at.localeCompare(left.created_at))[0];
+          const versions = [...(row.document_versions ?? [])].sort((left, right) => right.created_at.localeCompare(left.created_at));
+          const version = row.id === requestedDocumentId && requestedVersionId
+            ? versions.find((item) => item.id === requestedVersionId)
+            : versions[0];
           if (!version) return [];
           const metadata = version.metadata_json ?? {};
           return [{
@@ -268,7 +305,7 @@ export default function BobDocumentStudioPage() {
         setDraftsLoading(false);
       });
     return () => { active = false; };
-  }, [profile?.organizationId]);
+  }, [profile?.organizationId, requestedDocumentId, requestedVersionId]);
 
   const searchReferences = async () => {
     if (!referenceQuery.trim()) return;
@@ -414,6 +451,192 @@ export default function BobDocumentStudioPage() {
     setNotice(`Resumed ${draft.status.replaceAll('_', ' ')} draft. Review its source and state before continuing.`);
   };
 
+  useEffect(() => {
+    if (!requestedDocumentId || !profile?.organizationId || !editor) return;
+    if (selectedFile?.id === requestedDocumentId && (!requestedVersionId || selectedFile.versionId === requestedVersionId)) return;
+    let active = true;
+
+    const openRequestedDocument = async () => {
+      const existingDraft = drafts.find((draft) => draft.id === requestedDocumentId && (!requestedVersionId || draft.versionId === requestedVersionId));
+      if (existingDraft) {
+        setFileSpace(fileSpaceForDraft(existingDraft));
+        resumeDraft(existingDraft);
+        return;
+      }
+
+      const { data, error } = await supabase.from('documents')
+        .select('id,original_filename,updated_at,source_channel,current_scope,document_versions(id,extracted_text,metadata_json,created_at)')
+        .eq('id', requestedDocumentId)
+        .maybeSingle();
+      if (!active) return;
+      if (error || !data) {
+        setNotice(error?.message ?? 'The requested document is not available in this organization.');
+        return;
+      }
+      const versions = (data.document_versions ?? []) as Array<{ id: string; extracted_text: string | null; metadata_json: Record<string, unknown>; created_at: string }>;
+      const version = requestedVersionId
+        ? versions.find((item) => item.id === requestedVersionId)
+        : [...versions].sort((left, right) => right.created_at.localeCompare(left.created_at))[0];
+      if (!version) {
+        setNotice('The requested document version is no longer available.');
+        return;
+      }
+      const metadata = version.metadata_json ?? {};
+      const draft: DraftSummary = {
+        id: data.id,
+        title: String(metadata.title ?? data.original_filename.replace(/\.html$/i, '')),
+        updatedAt: data.updated_at,
+        versionId: version.id,
+        status: String(metadata.authoring_status ?? 'draft'),
+        html: String(metadata.authoring_html ?? `<p>${version.extracted_text ?? ''}</p>`),
+        text: version.extracted_text ?? '',
+        documentType: String(metadata.document_type ?? 'custom'),
+        sourceChannel: data.source_channel,
+        currentScope: data.current_scope,
+        authorable: data.source_channel === 'system_generated' && Boolean(metadata.authoring_html),
+      };
+      setDrafts((current) => [draft, ...current.filter((item) => item.id !== draft.id)]);
+      setFileSpace(fileSpaceForDraft(draft));
+      resumeDraft(draft);
+    };
+
+    void openRequestedDocument();
+    return () => { active = false; };
+  }, [drafts, editor, profile?.organizationId, requestedDocumentId, requestedVersionId, selectedFile]);
+
+  useEffect(() => {
+    const versionId = selectedFile?.versionId;
+    if (!versionId) {
+      setSourceProposals([]);
+      setSourceProposalReasons({});
+      return undefined;
+    }
+    let active = true;
+    void supabase.from('document_promotion_proposals')
+      .select('id,document_version_id,target_type,status,proposed_payload,source_map,created_at,review_reason')
+      .eq('document_version_id', versionId)
+      .order('created_at', { ascending: false })
+      .then(({ data, error }) => {
+        if (!active) return;
+        if (error) {
+          setSourceProposals([]);
+          setNotice(error.message);
+        } else setSourceProposals((data as SourcePromotionProposal[]) ?? []);
+      });
+    return () => { active = false; };
+  }, [selectedFile?.versionId]);
+
+  useEffect(() => {
+    const versionId = selectedFile?.versionId;
+    if (!versionId) {
+      setSourceClassification(null);
+      setSourceOcrRequired(false);
+      return undefined;
+    }
+    let active = true;
+    void supabase.from('document_versions')
+      .select('id,ocr_required,document_classifications(privacy_class,confidence,rationale,contains_pii,contains_operational_security,contains_financial_data,contains_legal_privilege,classifier_source,reviewed_at,created_at)')
+      .eq('id', versionId)
+      .maybeSingle()
+      .then(({ data, error }) => {
+        if (!active) return;
+        if (error) {
+          setNotice(error.message);
+          return;
+        }
+        const classifications = (data?.document_classifications ?? []) as SourceClassification[];
+        const latest = [...classifications].sort((left, right) => right.created_at.localeCompare(left.created_at))[0] ?? null;
+        setSourceClassification(latest);
+        setSourceOcrRequired(data?.ocr_required === true);
+        setClassificationForm({
+          privacyClass: latest?.privacy_class ?? 'tenant_sensitive',
+          containsPii: latest?.contains_pii ?? false,
+          containsOperationalSecurity: latest?.contains_operational_security ?? false,
+          containsFinancialData: latest?.contains_financial_data ?? false,
+          containsLegalPrivilege: latest?.contains_legal_privilege ?? false,
+          reason: '',
+        });
+      });
+    return () => { active = false; };
+  }, [selectedFile?.versionId]);
+
+  const canReviewSourceDocuments = ['grand_master', 'master', 'admin'].includes(profile?.role ?? '');
+  const reviewSourceClassification = async (event: React.FormEvent) => {
+    event.preventDefault();
+    if (!selectedFile || !canReviewSourceDocuments || !classificationForm.reason.trim()) return;
+    setClassificationBusy(true);
+    setNotice(null);
+    const { data, error } = await supabase.rpc('review_document_classification', {
+      p_document_version_id: selectedFile.versionId,
+      p_privacy_class: classificationForm.privacyClass,
+      p_contains_pii: classificationForm.containsPii,
+      p_contains_operational_security: classificationForm.containsOperationalSecurity,
+      p_contains_financial_data: classificationForm.containsFinancialData,
+      p_contains_legal_privilege: classificationForm.containsLegalPrivilege,
+      p_reason: classificationForm.reason.trim(),
+    });
+    if (error) setNotice(error.message);
+    else {
+      const review = (Array.isArray(data) ? data[0] : data) as SourceClassification | null;
+      if (review) setSourceClassification(review);
+      setClassificationForm((current) => ({ ...current, reason: '' }));
+      setNotice('Classification review recorded for this source version.');
+    }
+    setClassificationBusy(false);
+  };
+
+  const promoteSelectedDocument = async () => {
+    if (!selectedFile || !canReviewSourceDocuments || sourceOcrRequired || !sourceClassification?.reviewed_at || !sourceClassification.privacy_class) return;
+    setClassificationBusy(true);
+    setNotice(null);
+    const { data, error } = await supabase.functions.invoke('bob-document-promote', {
+      body: { document_version_id: selectedFile.versionId, target_scope: 'tenant_reference', metadata: { title: selectedFile.title } },
+    });
+    if (error) setNotice(error.message);
+    else if (!data?.success) setNotice(data?.error ?? 'Document promotion was not completed.');
+    else {
+      setSelectedFile((current) => current?.id === selectedFile.id ? { ...current, currentScope: 'tenant_reference' } : current);
+      setNotice(`${selectedFile.title} promoted to the tenant reference library.`);
+    }
+    setClassificationBusy(false);
+  };
+
+  const prepareSourceProposal = async () => {
+    if (!selectedFile || !canReviewSourceDocuments || sourceOcrRequired || !sourceClassification?.reviewed_at) return;
+    if (sourceProposals.some((proposal) => proposal.target_type === proposalTarget && ['proposed', 'approved', 'applied'].includes(proposal.status))) return;
+    setProposalBusy(true);
+    setNotice(null);
+    const excerpt = selectedFile.text.trim().slice(0, 1200) || null;
+    const { data, error } = await supabase.rpc('propose_document_promotion', {
+      p_document_version_id: selectedFile.versionId,
+      p_target_type: proposalTarget,
+      p_proposed_payload: { title: selectedFile.title, document_type: proposalTarget, extracted_summary: excerpt },
+      p_source_map: { document_id: selectedFile.id, document_version_id: selectedFile.versionId, source_excerpt: excerpt },
+    });
+    if (error) setNotice(error.message);
+    else if (data) {
+      const proposal = data as SourcePromotionProposal;
+      setSourceProposals((current) => [proposal, ...current.filter((item) => item.id !== proposal.id)]);
+      setNotice('Proposal prepared from this source. Review and decision stay with this document.');
+    }
+    setProposalBusy(false);
+  };
+
+  const reviewSourceProposal = async (proposal: SourcePromotionProposal, decision: 'approved' | 'rejected') => {
+    const reason = sourceProposalReasons[proposal.id]?.trim();
+    if (!reason || proposal.status !== 'proposed') return;
+    setSourceProposalBusyId(proposal.id);
+    setNotice(null);
+    const { error } = await supabase.rpc('review_document_promotion_proposal', { p_proposal_id: proposal.id, p_decision: decision, p_reason: reason });
+    if (error) setNotice(error.message);
+    else {
+      setSourceProposals((current) => current.map((item) => item.id === proposal.id ? { ...item, status: decision, review_reason: reason } : item));
+      setSourceProposalReasons((current) => ({ ...current, [proposal.id]: '' }));
+      setNotice(decision === 'approved' ? 'Proposal approved with a review receipt. No target business record was created.' : 'Proposal rejected with a review receipt.');
+    }
+    setSourceProposalBusyId(null);
+  };
+
   const unconfirmedMatches = (editor?.getText().match(/\[TO CONFIRM\]/g) || []).length;
 
   const jumpToNextUnconfirmed = () => {
@@ -426,18 +649,7 @@ export default function BobDocumentStudioPage() {
     }
   };
 
-  const fileSpaceFor = (draft: DraftSummary) => {
-    const name = draft.title.toLowerCase();
-    if (draft.authorable && draft.sourceChannel === 'system_generated') return 'Generated Outputs';
-    if (draft.currentScope === 'quarantined') return 'Bob Intake';
-    if (/contract|agreement|terms|proposal|rfq/.test(name)) return 'Contracts';
-    if (/hr|employment|discip|credential|certificate/.test(name)) return 'HR and People';
-    if (/invoice|finance|cost|expense|pay/.test(name)) return 'Finance';
-    if (/cctv|evidence|incident|report|photo|video/.test(name)) return 'Evidence';
-    if (/site|patrol|assignment|attendance|safety/.test(name)) return 'Sites and Operations';
-    return 'Organisation';
-  };
-  const visibleDrafts = drafts.filter((draft) => fileSpaceFor(draft) === fileSpace && (!fileSearch.trim() || draft.title.toLowerCase().includes(fileSearch.trim().toLowerCase())));
+  const visibleDrafts = drafts.filter((draft) => fileSpaceForDraft(draft) === fileSpace && (!fileSearch.trim() || draft.title.toLowerCase().includes(fileSearch.trim().toLowerCase())));
 
   return (
     <main className="bob-document-page">
@@ -464,7 +676,25 @@ export default function BobDocumentStudioPage() {
           <div className="bob-document-drafts" aria-label="Document files">
             {draftsLoading ? <p>Loading files…</p> : visibleDrafts.length === 0 ? <p>No files in this space.</p> : visibleDrafts.map((draft) => <button type="button" key={draft.id} className={selectedFile?.id === draft.id ? 'is-selected' : ''} onClick={() => resumeDraft(draft)}><strong>{draft.title}</strong><small>{draft.authorable ? draft.status.replaceAll('_', ' ') : `${draft.currentScope.replaceAll('_', ' ')} · inspect`}</small></button>)}
           </div>
-          {selectedFile && <section className="bob-file-inspector" aria-label="Selected file details"><strong>{selectedFile.title}</strong><dl><div><dt>State</dt><dd>{selectedFile.status.replaceAll('_', ' ')}</dd></div><div><dt>Scope</dt><dd>{selectedFile.currentScope.replaceAll('_', ' ')}</dd></div><div><dt>Source</dt><dd>{selectedFile.sourceChannel.replaceAll('_', ' ')}</dd></div></dl>{selectedFile.authorable ? <button type="button" onClick={() => resumeDraft(selectedFile)}>Resume draft</button> : <button type="button" onClick={() => navigate(`/admin/files?document=${encodeURIComponent(selectedFile.id)}`)}>Open in Files workspace</button>}</section>}
+          {selectedFile && <section className="bob-file-inspector" aria-label="Selected file details"><strong>{selectedFile.title}</strong><dl><div><dt>State</dt><dd>{selectedFile.status.replaceAll('_', ' ')}</dd></div><div><dt>Scope</dt><dd>{selectedFile.currentScope.replaceAll('_', ' ')}</dd></div><div><dt>Source</dt><dd>{selectedFile.sourceChannel.replaceAll('_', ' ')}</dd></div></dl>{selectedFile.authorable ? <button type="button" onClick={() => resumeDraft(selectedFile)}>Resume draft</button> : <button type="button" onClick={() => navigate(`/admin/files?document=${encodeURIComponent(selectedFile.id)}`)}>Open in Files workspace</button>}{selectedFile.text && <details className="bob-source-preview"><summary>Source text preview</summary><p>{selectedFile.text.slice(0, 1600)}</p></details>}</section>}
+          {selectedFile && <section className="bob-source-governance" aria-label="Source classification and promotion">
+            <div className="bob-document-section-heading"><span>Source review</span><small>{sourceClassification?.reviewed_at ? 'Human reviewed' : 'Review required'}</small></div>
+            <p>Classification, tenant-library promotion, and domain proposals stay attached to this source version.</p>
+            {sourceOcrRequired && <p className="bob-source-governance-warning" role="status">OCR is required before this document can be promoted or proposed.</p>}
+            {sourceClassification && <div className="bob-source-classification-summary"><strong>{sourceClassification.privacy_class.replaceAll('_', ' ')}</strong>{sourceClassification.contains_pii && <span>PII</span>}{sourceClassification.contains_operational_security && <span>Operational security</span>}{sourceClassification.contains_financial_data && <span>Financial data</span>}{sourceClassification.contains_legal_privilege && <span>Legal privilege</span>}<small>{sourceClassification.rationale ?? 'No classification rationale recorded.'}</small></div>}
+            {canReviewSourceDocuments ? <>
+              <form className="bob-source-classification-form" onSubmit={reviewSourceClassification}>
+                <label><span>Privacy class</span><select value={classificationForm.privacyClass} onChange={(event) => setClassificationForm((current) => ({ ...current, privacyClass: event.target.value }))}><option value="public">Public</option><option value="internal_non_sensitive">Internal non-sensitive</option><option value="tenant_sensitive">Tenant sensitive</option><option value="restricted">Restricted</option></select></label>
+                <div className="bob-source-classification-flags"><label><input type="checkbox" checked={classificationForm.containsPii} onChange={(event) => setClassificationForm((current) => ({ ...current, containsPii: event.target.checked }))} /><span>Contains PII</span></label><label><input type="checkbox" checked={classificationForm.containsOperationalSecurity} onChange={(event) => setClassificationForm((current) => ({ ...current, containsOperationalSecurity: event.target.checked }))} /><span>Operational security</span></label><label><input type="checkbox" checked={classificationForm.containsFinancialData} onChange={(event) => setClassificationForm((current) => ({ ...current, containsFinancialData: event.target.checked }))} /><span>Financial data</span></label><label><input type="checkbox" checked={classificationForm.containsLegalPrivilege} onChange={(event) => setClassificationForm((current) => ({ ...current, containsLegalPrivilege: event.target.checked }))} /><span>Legal privilege</span></label></div>
+                <label><span>Classification review reason</span><textarea required rows={3} value={classificationForm.reason} onChange={(event) => setClassificationForm((current) => ({ ...current, reason: event.target.value }))} placeholder="Explain the source and why this classification is appropriate." /></label>
+                <button type="submit" disabled={classificationBusy || !classificationForm.reason.trim()}>{classificationBusy ? 'Recording…' : 'Record classification review'}</button>
+              </form>
+              <button type="button" disabled={classificationBusy || sourceOcrRequired || !sourceClassification?.reviewed_at} onClick={() => void promoteSelectedDocument()}>{classificationBusy ? 'Working…' : 'Promote to tenant library'}</button>
+              <label className="bob-source-proposal-target"><span>Domain proposal target</span><select value={proposalTarget} onChange={(event) => setProposalTarget(event.target.value as SourceProposalTarget)}><option value="crm_agreement">CRM agreement</option><option value="site_brief">Site brief</option><option value="credential">Credential</option><option value="finance_reconciliation">Finance reconciliation</option><option value="hr_case">HR case</option><option value="investigation_link">Investigation link</option></select></label>
+              <button type="button" disabled={proposalBusy || sourceOcrRequired || !sourceClassification?.reviewed_at || sourceProposals.some((proposal) => proposal.target_type === proposalTarget && ['proposed', 'approved', 'applied'].includes(proposal.status))} onClick={() => void prepareSourceProposal()}>{proposalBusy ? 'Preparing…' : 'Prepare domain proposal'}</button>
+            </> : <p>Classification and promotion decisions require an organisation administrator.</p>}
+          </section>}
+          {sourceProposals.length > 0 && <section className="bob-source-proposals" aria-label="Proposals for selected document"><div className="bob-document-section-heading"><span>Domain proposals</span><small>{sourceProposals.filter((proposal) => proposal.status === 'proposed').length} awaiting review</small></div>{sourceProposals.map((proposal) => <article className="bob-source-proposal" key={proposal.id}><div className="bob-source-proposal-heading"><strong>{proposal.target_type.replaceAll('_', ' ')}</strong><span>{proposal.status}</span></div><details><summary>Proposed fields</summary><pre>{JSON.stringify(proposal.proposed_payload, null, 2)}</pre></details>{typeof proposal.source_map.source_excerpt === 'string' && <details><summary>Source excerpt</summary><p>{proposal.source_map.source_excerpt}</p></details>}{proposal.status === 'proposed' ? <><label><span>Review reason</span><textarea rows={3} required value={sourceProposalReasons[proposal.id] ?? ''} onChange={(event) => setSourceProposalReasons((current) => ({ ...current, [proposal.id]: event.target.value }))} placeholder="Explain what source evidence supports this decision and what remains uncertain." /></label><div className="bob-source-proposal-actions"><button type="button" className="bob-document-reject" disabled={sourceProposalBusyId === proposal.id || !sourceProposalReasons[proposal.id]?.trim()} onClick={() => void reviewSourceProposal(proposal, 'rejected')}>Reject proposal</button><button type="button" className="bob-document-review" disabled={sourceProposalBusyId === proposal.id || !sourceProposalReasons[proposal.id]?.trim()} onClick={() => void reviewSourceProposal(proposal, 'approved')}>{sourceProposalBusyId === proposal.id ? 'Recording…' : 'Approve proposal'}</button></div></> : <p className="bob-source-proposal-boundary">This review records a proposal decision only; it has not created an authoritative {proposal.target_type.replaceAll('_', ' ')} record.</p>}</article>)}</section>}
           <div className="bob-document-section-heading"><span>Document setup</span></div>
           {sourceContext && <div className="bob-source-context" role="status" aria-label="Source context for document"><span className="bob-source-type">{sourceContext.type.replace('_', ' ').toUpperCase()}</span><strong>{sourceContext.label}</strong><p className="bob-source-prompt">{sourceContext.prompt}</p></div>}
           <label htmlFor="bob-document-title">Title<input id="bob-document-title" aria-label="Document title" value={title} onChange={(event) => setTitle(event.target.value)} /></label>

@@ -1,0 +1,133 @@
+.bob-source-preview,
+.bob-source-proposals {
+  margin-top: 10px;
+  padding: 10px;
+  border: 1px solid #b9d8d0;
+  border-radius: 6px;
+  color: #315a58;
+  background: #f3faf7;
+  font-size: 12px;
+}
+
+.bob-source-preview summary,
+.bob-source-proposal details summary {
+  color: #24544e;
+  font-weight: 750;
+  cursor: pointer;
+}
+
+.bob-source-preview p,
+.bob-source-proposal details p {
+  max-height: 180px;
+  overflow: auto;
+  margin: 8px 0 0;
+  white-space: pre-wrap;
+  overflow-wrap: anywhere;
+  line-height: 1.5;
+}
+
+.bob-source-proposals > .bob-document-section-heading {
+  margin: 0 0 8px;
+}
+
+.bob-source-proposal {
+  display: grid;
+  gap: 9px;
+  padding: 10px 0;
+  border-top: 1px solid #c8ddd7;
+}
+
+.bob-source-proposal-heading {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  justify-content: space-between;
+  gap: 6px;
+  color: #173b36;
+  text-transform: capitalize;
+}
+
+.bob-source-proposal-heading > span {
+  padding: 3px 7px;
+  border: 1px solid #a9c7bf;
+  border-radius: 4px;
+  background: #e8f4ef;
+  font-size: 11px;
+}
+
+.bob-source-proposal details {
+  min-width: 0;
+  padding: 8px;
+  border: 1px solid #d0e0db;
+  border-radius: 5px;
+  background: #fff;
+}
+
+.bob-source-proposal pre {
+  max-height: 220px;
+  overflow: auto;
+  margin: 8px 0 0;
+  white-space: pre-wrap;
+  overflow-wrap: anywhere;
+  color: #334b49;
+  font: 11px/1.5 ui-monospace, SFMono-Regular, Consolas, monospace;
+}
+
+.bob-source-proposal label {
+  display: grid;
+  gap: 5px;
+  color: #315a58;
+  font-size: 12px;
+  font-weight: 700;
+}
+
+.bob-source-proposal textarea {
+  width: 100%;
+  min-height: 72px;
+  resize: vertical;
+  padding: 8px;
+  border: 1px solid #a9c7bf;
+  border-radius: 5px;
+  color: #173b36;
+  background: #fff;
+  font: inherit;
+}
+
+.bob-source-proposal-actions {
+  display: flex;
+  flex-wrap: wrap;
+  justify-content: flex-end;
+  gap: 7px;
+}
+
+.bob-source-proposal-actions button {
+  min-height: 34px;
+  padding: 0 10px;
+  border: 1px solid #7da69b;
+  border-radius: 5px;
+  color: #214b45;
+  background: #e7f4ef;
+  font-size: 12px;
+  font-weight: 750;
+  cursor: pointer;
+}
+
+.bob-source-proposal-actions button.bob-document-reject {
+  border-color: #b77777;
+  color: #713b3b;
+  background: #faeeee;
+}
+
+.bob-source-proposal-actions button:disabled {
+  opacity: 0.48;
+  cursor: not-allowed;
+}
+
+.bob-source-proposal-boundary {
+  margin: 0;
+  padding: 8px;
+  border-left: 3px solid #6b9b91;
+  color: #315a58;
+  background: #e8f4ef;
+  line-height: 1.45;
+}

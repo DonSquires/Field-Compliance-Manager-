@@ -3,6 +3,7 @@ import { resolve } from 'node:path';
 import { describe, expect, it } from 'vitest';
 
 const source = readFileSync(resolve(process.cwd(), 'src/pages/ApprovalsActivityPage.tsx'), 'utf8');
+const studioSource = readFileSync(resolve(process.cwd(), 'src/pages/BobDocumentStudioPage.tsx'), 'utf8');
 
 describe('governed approvals workbench', () => {
   it('loads tree-scoped activity through the canonical RPC', () => {
@@ -56,11 +57,15 @@ describe('governed approvals workbench', () => {
     expect(source).not.toContain('Decision authority</dt><dd>');
   });
 
-  it('promotes classified document versions through the tenant-scoped edge function', () => {
-    expect(source).toContain("functions.invoke('bob-document-promote'");
-    expect(source).toContain('document_version_id: document.version_id');
-    expect(source).toContain("target_scope: 'tenant_reference'");
-    expect(source).not.toMatch(/from\('(documents|document_versions|document_classifications)'\)[\s\S]{0,240}\.(insert|update|upsert|delete)\(/);
+  it('routes reference-library review to the exact source document instead of deciding centrally', () => {
+    expect(source).toContain('Open source review');
+    expect(source).toContain('document=${encodeURIComponent(document.document_id)}&version=${encodeURIComponent(document.version_id)}');
+    expect(source).not.toContain('Review classification');
+    expect(source).not.toContain('Promote to tenant library');
+    expect(studioSource).toContain("functions.invoke('bob-document-promote'");
+    expect(studioSource).toContain('document_version_id: selectedFile.versionId');
+    expect(studioSource).toContain("target_scope: 'tenant_reference'");
+    expect(studioSource).not.toMatch(/from\('(documents|document_versions|document_classifications)'\)[\s\S]{0,240}\.(insert|update|upsert|delete)\(/);
   });
 
   it('shows field-level extraction evidence and sensitive-data flags before promotion', () => {
@@ -72,25 +77,30 @@ describe('governed approvals workbench', () => {
     expect(source).toContain('Human reviewed');
   });
 
-  it('records human classification review through the governed RPC', () => {
-    expect(source).toContain("rpc('review_document_classification'");
-    expect(source).toContain('p_reason: classificationForm.reason.trim()');
-    expect(source).toContain('Record classification review');
-    expect(source).not.toMatch(/from\('document_classifications'\)[\s\S]{0,240}\.(insert|update|upsert|delete)\(/);
+  it('records human classification review in Studio through the governed RPC', () => {
+    expect(studioSource).toContain("rpc('review_document_classification'");
+    expect(studioSource).toContain('p_reason: classificationForm.reason.trim()');
+    expect(studioSource).toContain('Record classification review');
+    expect(studioSource).not.toMatch(/from\('document_classifications'\)[\s\S]{0,240}\.(insert|update|upsert|delete)\(/);
+    expect(source).not.toContain("rpc('review_document_classification'");
   });
 
   it('prepares contract proposals without writing authoritative CRM records', () => {
-    expect(source).toContain("rpc('propose_document_promotion'");
-    expect(source).toContain("type: 'crm_agreement'");
-    expect(source).toContain('Prepare CRM agreement proposal');
+    expect(studioSource).toContain("rpc('propose_document_promotion'");
+    expect(studioSource).toContain("'crm_agreement'");
+    expect(studioSource).toContain('Prepare domain proposal');
+    expect(source).not.toContain("rpc('propose_document_promotion'");
     expect(source).not.toContain("rpc('manage_crm_agreement_setup'");
   });
 
-  it('reviews domain proposals through the governed decision RPC', () => {
-    expect(source).toContain("rpc('review_document_promotion_proposal'");
-    expect(source).toContain('p_decision: proposalDecision');
-    expect(source).toContain('Approve proposal');
-    expect(source).toContain('Reject proposal');
+  it('reviews domain proposals in Studio through the governed decision RPC', () => {
+    expect(studioSource).toContain("rpc('review_document_promotion_proposal'");
+    expect(studioSource).toContain('p_decision: decision');
+    expect(studioSource).toContain('Approve proposal');
+    expect(studioSource).toContain('Reject proposal');
+    expect(source).not.toContain("rpc('review_document_promotion_proposal'");
+    expect(source).not.toContain('Approve proposal');
+    expect(source).not.toContain('Reject proposal');
   });
 
   it('does not imply CRM execution from proposal approval', () => {

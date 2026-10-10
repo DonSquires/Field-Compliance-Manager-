@@ -306,6 +306,7 @@
 
 .approvals-queue,
 .approvals-detail {
+  min-width: 0;
   min-height: 440px;
   padding: 15px;
   border: 1px solid #2b3d50;
@@ -323,9 +324,28 @@
 
 .approvals-list {
   display: grid;
+  min-width: 0;
   gap: 5px;
   margin-top: 12px;
 }
+
+.approvals-list > article {
+  display: grid;
+  min-width: 0;
+  gap: 8px;
+  padding: 12px;
+  border: 1px solid #293d4e;
+  border-radius: 6px;
+  background: #0d1926;
+  overflow-wrap: anywhere;
+}
+
+.approvals-list > article > * { min-width: 0; }
+.approvals-list > article strong,
+.approvals-list > article small,
+.approvals-list > article span,
+.approvals-list > article p { max-width: 100%; white-space: normal; overflow-wrap: anywhere; }
+.approvals-list > article pre { max-width: 100%; overflow: auto; white-space: pre-wrap; overflow-wrap: anywhere; }
 
 .approvals-list > button {
   display: grid;
@@ -354,20 +374,22 @@
   gap: 3px;
 }
 
-.approvals-list strong,
-.approvals-list small,
-.approvals-list span,
-.approvals-list time {
+.approvals-list > button strong,
+.approvals-list > button small,
+.approvals-list > button span,
+.approvals-list > button time {
   overflow: hidden;
   text-overflow: ellipsis;
   white-space: nowrap;
 }
 
-.approvals-list strong { font-size: 12px; }
-.approvals-list small { color: #788fa0; font-size: 12px; }
+.approvals-list > button strong,
+.approvals-list > article strong { font-size: 12px; }
+.approvals-list > button small,
+.approvals-list > article small { color: #788fa0; font-size: 12px; }
 .approvals-list > button > div:nth-of-type(2) { justify-items: end; }
-.approvals-list span,
-.approvals-list time { max-width: 140px; color: #8195a5; font-size: 12px; }
+.approvals-list > button span,
+.approvals-list > button time { max-width: 140px; color: #8195a5; font-size: 12px; }
 .approvals-list > button > svg { color: #61788a; }
 
 .approvals-status-mark {
@@ -520,6 +542,8 @@
 .approvals-outcome.is-applied { color: #bcebd2; border-color: #35614d; background: #0d291f; }
 
 .approvals-actions {
+  flex-wrap: wrap;
+  min-width: 0;
   justify-content: flex-end;
   margin-top: 14px;
   padding-top: 12px;
@@ -528,6 +552,8 @@
 
 .approvals-actions button,
 .approvals-dialog-actions button {
+  max-width: 100%;
+  white-space: normal;
   display: flex;
   align-items: center;
   justify-content: center;
