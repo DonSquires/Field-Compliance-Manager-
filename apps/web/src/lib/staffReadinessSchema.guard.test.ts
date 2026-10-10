@@ -3,11 +3,14 @@ import { resolve } from 'node:path';
 import { describe, expect, it } from 'vitest';
 
 const sql = readFileSync(resolve(process.cwd(), '../../supabase/migrations/20260830137000_govern_staff_readiness.sql'), 'utf8');
+const startDateReadinessSql = readFileSync(resolve(process.cwd(), '../../supabase/migrations/20261010110000_require_staff_start_date_for_readiness.sql'), 'utf8');
 const schema = readFileSync(resolve(process.cwd(), '../../supabase/schema.sql'), 'utf8');
 
 describe('governed staff readiness', () => {
   it('derives hard blockers from identity, employment, and field credentials', () => {
     expect(sql).toContain("up.deactivated_at is not null");
+    expect(startDateReadinessSql).toContain("WHEN sp.start_date IS NULL THEN 'missing_start_date'");
+    expect(startDateReadinessSql).toContain("THEN 'Employment start date is not set'");
     expect(sql).toContain("sp.end_date is not null and sp.end_date<current_date");
     expect(sql).toContain('No verified current credential');
   });

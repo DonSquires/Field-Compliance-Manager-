@@ -109,6 +109,40 @@ test('a rejected payroll-role write is shown without changing the authorization 
   await expect(staffCard.getByText('Officer', { exact: true })).toBeVisible();
 });
 
+test('missing employment start date blocks the work-readiness review flow', async ({ page }) => {
+  let readinessPayload: Record<string, unknown> | null = null;
+  await page.route('**/rest/v1/staff_profiles*', async (route) => {
+    const select = new URL(route.request().url()).searchParams.get('select') ?? '';
+    if (!select.includes('end_date')) { await route.fallback(); return; }
+    await route.fulfill({ status: 200, contentType: 'application/json', body: JSON.stringify([
+      { id: '22222222-2222-4222-8222-222222222222', user_id: '22222222-2222-4222-8222-222222222222', employment_type: 'permanent', start_date: '2025-02-03', end_date: null, work_ready: true, role_code: null },
+      { id: '2f2f2f2f-2222-4222-8222-222222222222', user_id: '2f2f2f2f-2222-4222-8222-222222222222', employment_type: 'casual', start_date: null, end_date: null, work_ready: false, role_code: null },
+    ]) });
+  });
+  await page.route('**/rest/v1/rpc/get_staff_readiness_assessment', async (route) => await route.fulfill({ status: 200, contentType: 'application/json', body: JSON.stringify([
+    { staff_id: '22222222-2222-4222-8222-222222222222', user_id: '22222222-2222-4222-8222-222222222222', work_ready: true, identity_status: 'active', employment_status: 'current', credential_status: 'current', training_status: 'clear', blockers: [] },
+    { staff_id: '2f2f2f2f-2222-4222-8222-222222222222', user_id: '2f2f2f2f-2222-4222-8222-222222222222', work_ready: false, identity_status: 'active', employment_status: 'missing_start_date', credential_status: 'current', training_status: 'clear', blockers: ['Employment start date is not set'] },
+  ]) }));
+  await page.route('**/rest/v1/rpc/set_staff_work_readiness', async (route) => {
+    readinessPayload = JSON.parse(route.request().postData() ?? '{}') as Record<string, unknown>;
+    await route.fulfill({ status: 400, contentType: 'application/json', body: JSON.stringify({ code: 'P0001', message: 'Staff member is not work ready: Employment start date is not set' }) });
+  });
+
+  await signInAsAdmin(page, '/admin/people-hr');
+  const staffCard = page.locator('.contact-card', { has: page.getByRole('heading', { name: 'Jordan Lee' }) });
+  await expect(staffCard.getByText('Missing start date', { exact: true })).toBeVisible();
+  await expect(staffCard.getByText('Employment start date is not set')).toBeVisible();
+  await staffCard.getByRole('button', { name: 'Mark work ready' }).click();
+
+  const readinessDialog = page.getByRole('dialog', { name: 'Mark work ready?' });
+  await readinessDialog.getByLabel('Readiness review notes').fill('Synthetic test: employment start date is missing.');
+  await readinessDialog.getByRole('button', { name: 'Confirm readiness' }).click();
+
+  await expect(page.getByRole('alert')).toContainText('Staff member is not work ready: Employment start date is not set');
+  await expect(staffCard.getByText('Not work ready', { exact: true })).toBeVisible();
+  expect(readinessPayload).toMatchObject({ p_staff_id: '2f2f2f2f-2222-4222-8222-222222222222', p_expected_work_ready: false, p_work_ready: true, p_review_notes: 'Synthetic test: employment start date is missing.' });
+});
+
 test('admin officer sees only the People & HR work needed for daily service administration', async ({ page }) => {
   await page.addInitScript(() => window.sessionStorage.setItem('fcm.admin_officer.portal', 'admin'));
   await installSupabaseFixtures(page, { adminRole: 'admin_officer' });
