@@ -2,7 +2,7 @@ const assert = require('node:assert/strict');
 const test = require('node:test');
 
 test('PDF text selects Latin subsets per character and visibly replaces unsupported glyphs', async () => {
-  const { pdfTextFontRuns } = await import('../supabase/functions/_shared/pdf-text-fonts.ts');
+  const { pdfTextFontRuns } = await import('../supabase/functions/_shared/pdf-text-fonts.mjs');
   const latinFont = { name: 'latin' };
   const latinExtendedFont = { name: 'latin-ext' };
   const latinCodePoints = new Set(Array.from({ length: 128 }, (_, codePoint) => codePoint));
@@ -20,7 +20,7 @@ test('PDF text selects Latin subsets per character and visibly replaces unsuppor
 });
 
 test('PDF wrapping measures glyph widths and preserves long words and extended characters', async () => {
-  const { pdfTextWidth, wrapPdfText } = await import('../supabase/functions/_shared/pdf-text-fonts.ts');
+  const { pdfTextWidth, wrapPdfText } = await import('../supabase/functions/_shared/pdf-text-fonts.mjs');
   const makeFont = (name) => ({
     name,
     widthOfTextAtSize: (text) => Array.from(text).length,

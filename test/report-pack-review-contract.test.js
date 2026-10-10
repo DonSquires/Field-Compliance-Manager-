@@ -41,8 +41,8 @@ test('PDF previews include editorial content and cannot overwrite an issued arti
   assert.match(pdf, /report-packs\/\$\{pack\.id\}\/\$\{checksum\}\.pdf/);
   assert.match(migration, /v_pack\.status not in \('draft', 'generated'\)/);
   assert.doesNotMatch(pdf, /\['generated', 'sent'\]/);
-  assert.match(pdf, /registerFontkit\(fontkit\)/);
-  assert.match(pdf, /noto-sans-latin-ext-400-normal\.woff/);
+  assert.match(pdf, /embedPdfNotoFonts\(pdf\)/);
+  assert.match(pdf, /pdfTextFontRuns/);
   assert.match(pdf, /p_expected_updated_at: pack\.updated_at/);
   assert.match(pdf, /rpc\('record_report_pack_pdf'/);
   assert.match(pdf, /agreementName: reportAgreementName\(pack\)/);
