@@ -29,6 +29,16 @@ Field Compliance Manager (FCM) is an enterprise SaaS platform designed to replac
 4. **Bob Dual-Mode AI Integration**:
    - **Heuristic Field Copilot:** Integrated into all portals via a simple, voice/panel interface ("Ship's Computer") for contextual field assistance, hazard alerts, shift debriefs, and evidence drafting.
    - **Advanced Owner/Grand-Master Studio:** A multi-media/multi-ability studio allowing owners and grand-masters to work directly with Bob inside the platform to build, extend, test, and release app capabilities safely via disposable worker containers (`bob-control-plane-server.js`).
+   - **Evidence Compiler:** OCR, ALPR, vision, enhancement and document services
+     produce structured candidates, conflicts and provenance before a language
+     model interprets them. Response confidence is not field verification.
+     High-risk identifiers that lack deterministic evidence are displayed as
+     `[TO CONFIRM]` and cannot enter canonical proposals. Identity, legal,
+     enforcement and commercial truth requires an attributable human decision.
+   - **Self-Heal Boundary:** Bob may reproduce, edit, test, independently
+     verify, repair and prepare a draft release in an isolated worker. Schema,
+     auth/RLS, secrets, protected-branch merge, deployment and destructive bulk
+     effects still require a human to turn the key.
 
 ---
 

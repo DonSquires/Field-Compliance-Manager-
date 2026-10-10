@@ -104,6 +104,16 @@ read verification → bounded web research → smallest discriminating next chec
 not `exercised` (live `bob_capability_map` has **0** rows marked exercised — the
 column is unpopulated, so treat every "exercised" claim as unproven).
 
+Bob's internal architecture is an **evidence compiler**. Deterministic
+perception services produce candidates, conflicts and receipts; the model
+interprets them; Guardian enforces disclosure and effect gates; the human
+decides identity, legal, enforcement and commercial truth. A generative model
+must not originate or silently transform a high-risk identifier. Response
+confidence, field confidence, evidence sufficiency and human approval are
+different claims and must remain visibly separate. The implementation contract
+and staged gates are in
+[Bob enterprise agent architecture](../BOB_ENTERPRISE_AGENT_ARCHITECTURE.md).
+
 ## 6. Cockpit direction
 
 Bob is engine *and* autopilot with three modes — MANUAL (excellent without Bob),

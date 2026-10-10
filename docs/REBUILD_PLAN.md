@@ -376,6 +376,17 @@ destructive bulk operations).
 5. Cockpit primitives: who-is-flying indicator, takeback, result-in-habitat.
 6. Re-create the RunPod QA endpoint and run `full-page-audit` on Bob's
    infrastructure.
+7. Compile every document and media perception path into the shared evidence
+   contract in
+   [Bob enterprise agent architecture](BOB_ENTERPRISE_AGENT_ARCHITECTURE.md):
+   deterministic
+   candidates and conflicts, immutable-source/derivative receipts, typed
+   confidence, human review state and guarded canonical promotion. Start with
+   NZTA/plate OCR, then CCTV/ALPR, face candidates, person tracking, vehicle
+   attributes, smoke/noise/biosecurity and Desktop V2.
+8. Add verifier-level claim-to-evidence checks: every high-risk identifier in
+   generated prose must equal a structured field with sufficient authority, or
+   the turn returns review-required rather than a confident answer.
 
 **Gate:** live `bob_messages` show no context-losing fallbacks; a Builder job
 runs implement → verify → repair without human touch and stops cleanly at

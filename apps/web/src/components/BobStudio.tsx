@@ -1,5 +1,5 @@
 import { useEffect, useMemo, useState } from 'react';
-import { AudioLines, CheckCircle2, ClipboardList, Copy, Download, FileText, GitBranch, Image as ImageIcon, Paperclip, Sparkles, Video } from 'lucide-react';
+import { AlertTriangle, AudioLines, CheckCircle2, ClipboardList, Copy, Download, FileText, GitBranch, Image as ImageIcon, Paperclip, Sparkles, Video } from 'lucide-react';
 import { supabase } from '../lib/supabase';
 import { BobMarkdown } from './BobMarkdown';
 import { BobMermaidDiagram } from './BobMermaidDiagram';
@@ -18,6 +18,7 @@ interface StudioAttachment {
   file_type: string;
   processing_state: string;
   extraction_summary: string | null;
+  extraction_payload?: Record<string, unknown> | null;
   confidence: number | null;
   storage_bucket?: string | null;
   storage_path?: string | null;
@@ -69,6 +70,30 @@ function safeFilename(value: string) {
   return value.toLowerCase().replace(/[^a-z0-9]+/g, '-').replace(/^-|-$/g, '') || 'bob-document';
 }
 
+function sourceVerification(attachment: StudioAttachment) {
+  const payload = attachment.extraction_payload;
+  const structured = payload && typeof payload.structured_extraction === 'object' && payload.structured_extraction
+    ? payload.structured_extraction as Record<string, unknown>
+    : null;
+  const identifierVerification = structured && typeof structured.identifier_verification === 'object' && structured.identifier_verification
+    ? structured.identifier_verification as Record<string, unknown>
+    : null;
+  const plate = identifierVerification && typeof identifierVerification.plate_number === 'object' && identifierVerification.plate_number
+    ? identifierVerification.plate_number as Record<string, unknown>
+    : null;
+  if (!structured || !plate) return null;
+  const candidates = Array.isArray(plate.candidates)
+    ? plate.candidates.map((candidate) => candidate && typeof candidate === 'object' ? String((candidate as Record<string, unknown>).value ?? '') : '').filter(Boolean)
+    : [];
+  return {
+    fileName: attachment.file_name,
+    documentKind: String(structured.document_kind ?? 'source document').replaceAll('_', ' '),
+    status: String(plate.status ?? 'manual_review_required'),
+    value: typeof plate.value === 'string' ? plate.value : null,
+    candidates,
+  };
+}
+
 export function extractMermaidDiagrams(messages: StudioMessage[]) {
   return messages
     .filter((message) => message.role === 'assistant')
@@ -102,6 +127,7 @@ export function BobStudio({
   const assistantMessages = useMemo(() => messages.filter((message) => message.role === 'assistant').slice().reverse(), [messages]);
   const diagrams = useMemo(() => extractMermaidDiagrams(messages), [messages]);
   const mediaAttachments = useMemo(() => attachments.filter(isMediaAttachment), [attachments]);
+  const sourceVerifications = useMemo(() => attachments.map(sourceVerification).filter(Boolean) as NonNullable<ReturnType<typeof sourceVerification>>[], [attachments]);
   const selectedDocument = assistantMessages.find((message) => message.id === selectedMessageId) ?? assistantMessages[0] ?? null;
   const selectedDiagram = diagrams.find((diagram) => diagram.id === selectedDiagramId) ?? diagrams[0] ?? null;
   const selectedMedia = mediaAttachments.find((attachment) => attachment.id === selectedMediaId) ?? mediaAttachments[0] ?? null;
@@ -205,6 +231,10 @@ export function BobStudio({
                 <button type="button" onClick={downloadDocument} disabled={!selectedDocument?.content}><Download size={14} /> Download</button>
               </div>
             </header>
+            {sourceVerifications.length > 0 && <section className="bob-studio-source-verification" aria-label="Source field verification">
+              <div><AlertTriangle size={16} /><span><strong>Source verification</strong><small>These are field-level OCR results, separate from Bob's response confidence.</small></span></div>
+              <ul>{sourceVerifications.map((item) => <li key={`${item.fileName}-${item.documentKind}`}><strong>{item.fileName}</strong><span>{item.value ? <>Plate candidate <b>{item.value}</b> has OCR consensus, but the NZTA source still requires administrator comparison.</> : <>Plate is <b>not verified</b>{item.candidates.length ? `; OCR candidates: ${item.candidates.join(', ')}` : ''}. The draft must show [TO CONFIRM].</>}</span></li>)}</ul>
+            </section>}
             {assistantMessages.length > 1 && <label className="bob-document-version"><span>Draft version</span><select value={selectedDocument?.id ?? ''} onChange={(event) => setSelectedMessageId(event.target.value)}>{assistantMessages.map((message) => <option key={message.id} value={message.id}>{new Date(message.created_at).toLocaleString([], { day: 'numeric', month: 'short', hour: '2-digit', minute: '2-digit' })}</option>)}</select></label>}
             {selectedDocument ? <article className="bob-document-sheet"><BobMarkdown content={selectedDocument.content} /></article> : <div className="bob-studio-empty"><ClipboardList size={28} /><strong>Choose a document type to brief Bob.</strong><p>Attach the RFQ, contract, policy, report example, or source evidence first when the draft depends on existing text.</p><button type="button" onClick={() => onPrompt(preset.prompt)}>Brief Bob</button></div>}
           </section>
