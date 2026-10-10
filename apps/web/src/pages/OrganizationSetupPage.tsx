@@ -11,15 +11,16 @@
 import React, { useEffect, useState, useCallback, useMemo } from 'react';
 import L from 'leaflet';
 import 'leaflet/dist/leaflet.css';
-import { Building2, GitBranch, MapPin, Package, Ruler, ScrollText } from 'lucide-react';
+import { Building2, GitBranch, MapPin, Package, Ruler, ScrollText, ShieldCheck } from 'lucide-react';
 import { useAuth } from '../context/AuthContext';
 import { supabase } from '../lib/supabase';
 import { addLinzBaseLayers } from '../lib/mapPreferences';
 import { PLATFORM_MODULE_BY_KEY, type PlatformModuleKey } from '../config/platformModuleManifest';
+import OrganizationComplianceSection from '../components/OrganizationComplianceSection';
 import './PageStyles.css';
 import './OrganizationSetupPage.css';
 
-interface OrgProfile {
+export interface OrgProfile {
   id: string;
   name: string;
   organization_type: string;
@@ -28,6 +29,18 @@ interface OrgProfile {
   contact_phone: string | null;
   billing_email: string | null;
   billing_address: string | null;
+  legal_name: string | null;
+  trading_name: string | null;
+  nzbn: string | null;
+  company_registration_number: string | null;
+  corporate_status: string | null;
+  corporate_status_as_of: string | null;
+  nzbn_entity_type: string | null;
+  registered_office: string | null;
+  postal_address: string | null;
+  website_url: string | null;
+  corporate_profile_source: string | null;
+  corporate_profile_verification_status: string;
   enforcement_workflow_mode: string;
   jurisdiction_verification: string;
   jurisdiction_geom: GeoJSON.GeoJsonObject | null;
@@ -116,7 +129,7 @@ const OrganizationSetupPage: React.FC = () => {
         supabase
           .from('organizations')
           .select(
-            'id, name, organization_type, parent_organization_id, contact_email, contact_phone, billing_email, billing_address, enforcement_workflow_mode, jurisdiction_verification, jurisdiction_geom, status, updated_at'
+            'id, name, organization_type, parent_organization_id, contact_email, contact_phone, billing_email, billing_address, legal_name, trading_name, nzbn, company_registration_number, corporate_status, corporate_status_as_of, nzbn_entity_type, registered_office, postal_address, website_url, corporate_profile_source, corporate_profile_verification_status, enforcement_workflow_mode, jurisdiction_verification, jurisdiction_geom, status, updated_at'
           )
           .eq('id', orgId)
           .single(),
@@ -346,6 +359,12 @@ const OrganizationSetupPage: React.FC = () => {
   }
 
   const detailsComplete = Boolean(org.contact_email && org.contact_phone);
+  const corporateProfileComplete = Boolean(
+    org.legal_name
+    && org.nzbn
+    && org.company_registration_number
+    && org.corporate_profile_verification_status === 'verified'
+  );
   const zoneOverrides = geofenceConfig.filter((g) => g.zone_type !== null);
   const customDistanceCount = geofenceConfig.filter((g) => g.zone_type === null).length;
 
@@ -368,6 +387,7 @@ const OrganizationSetupPage: React.FC = () => {
 
       <nav className="org-settings-checklist" aria-label="Setup overview">
         <a href="#org-details" className={detailsComplete ? 'is-done' : 'is-todo'}><Building2 size={16} /><span><strong>Company details</strong><small>{detailsComplete ? 'Complete' : 'Add a contact email and phone'}</small></span></a>
+        {!isBranch && <a href="#org-compliance" className={corporateProfileComplete ? 'is-done' : 'is-todo'}><ShieldCheck size={16} /><span><strong>Legal and compliance</strong><small>{corporateProfileComplete ? 'Company identity verified' : 'Review legal identity and evidence'}</small></span></a>}
         {!isBranch && <a href="#org-branches" className={activeBranches.length ? 'is-done' : 'is-neutral'}><GitBranch size={16} /><span><strong>Branches</strong><small>{activeBranches.length ? `${activeBranches.length} active` : 'Optional'}</small></span></a>}
         <a href="#org-modules" className={enabledModuleKeys.size ? 'is-done' : 'is-todo'}><Package size={16} /><span><strong>Modules in use</strong><small>{enabledModuleKeys.size} on · {modules.length - enabledModuleKeys.size} off</small></span></a>
         <a href="#org-distances" className="is-neutral"><Ruler size={16} /><span><strong>Location accuracy</strong><small>{customDistanceCount ? `${customDistanceCount} custom distance${customDistanceCount === 1 ? '' : 's'}` : 'Using platform defaults'}</small></span></a>
@@ -411,6 +431,8 @@ const OrganizationSetupPage: React.FC = () => {
           </div>
         </form>
       </section>
+
+      {!isBranch && <OrganizationComplianceSection org={org} onOrgChange={setOrg} />}
 
       {!isBranch && (
         <section className="reports-section org-settings-section" id="org-branches" aria-labelledby="org-branches-title">
