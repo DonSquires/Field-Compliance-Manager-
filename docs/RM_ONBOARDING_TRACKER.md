@@ -1719,3 +1719,18 @@ created, updated, published, or deleted.
   workbooks (114 unresolved rows). Source references use the neutral local
   alias, workbook manifests retain sheet/row provenance, and no monetary,
   identity, quote, invoice, or credential row was promoted.
+- Added shared tender-document provenance and a governed
+  `attach_tender_document(...)` RPC through migration
+  `20261010095840_tender_document_provenance.sql`. Tender attachments now carry
+  tenant scope, source hash/reference, optional canonical document linkage, and
+  an explicit unreviewed/accepted/rejected state. Direct browser table writes
+  remain blocked.
+- Attached three private Health NZ RFP artefacts to tender
+  `c62d3ebd-2766-48ce-9f96-07c235ab8ecf`: the original `0018709.zip`, the
+  current official Attachment A DOCX, and its PDF preview. Each attachment
+  carries a SHA-256 hash and neutral local-corpus source reference and remains
+  unreviewed. The CRM account workspace now lists these attachments and opens
+  them through signed storage links.
+- Tender attachment verification: live count is 3; schema/Atlas regenerated
+  after the migration; the production web build passed; root governance tests
+  passed 5/5; and the migration ledger contains 555 unique versions.
