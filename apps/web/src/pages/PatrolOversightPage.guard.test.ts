@@ -20,6 +20,15 @@ describe('admin patrol evidence oversight', () => {
     for (const value of ['Checkpoint evidence', 'Within checkpoint', 'GPS accuracy', 'Evidence ID', 'shift_stop_id']) expect(page).toContain(value);
   });
 
+  it('uses the selected site or zone and offers wider evidence periods', () => {
+    expect(page).toContain("const { selectedSite, selectedZone } = useServiceRelationships();");
+    expect(page).toContain("checkpoints[visit.checkpoint_id]?.client_site_id === selectedSite.id");
+    expect(page).toContain("checkpoints[visit.checkpoint_id]?.zone_id === selectedZone.id");
+    expect(page).toContain('type EvidencePeriodDays = 7 | 30 | 90;');
+    expect(page).toContain('activeCheckpointCount');
+    expect(page).toContain('No checkpoint visits were recorded in the last ${periodDays} days.');
+  });
+
   it('makes the dormant unscoped stop completion RPC service-only', () => {
     expect(migration).toContain('revoke all on function public.complete_shift_stop(uuid,text,double precision,double precision) from public,anon,authenticated');
     expect(migration).toContain('grant execute on function public.complete_shift_stop(uuid,text,double precision,double precision) to service_role');
