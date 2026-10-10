@@ -378,6 +378,39 @@
 .identity-document-source a {
   color: #fff;
 }
+
+.identity-records-section {
+  margin-top: 22px;
+  padding-top: 18px;
+  border-top: 1px solid #d8e3df;
+}
+
+.identity-records-section > .identity-source-marker {
+  display: flex;
+  gap: 10px;
+  align-items: flex-start;
+  padding: 12px;
+  border: 1px solid #b9d5ca;
+  background: #f3faf7;
+}
+
+.identity-records-section > .identity-source-marker p {
+  margin: 4px 0 0;
+}
+
+.identity-records-actions {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 10px;
+  margin: 12px 0;
+}
+
+.identity-records-actions a,
+.identity-records-actions button {
+  display: inline-flex;
+  align-items: center;
+  gap: 7px;
+}
 .identity-document-review footer {
   display: flex;
   justify-content: flex-end;

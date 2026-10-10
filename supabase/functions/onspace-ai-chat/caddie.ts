@@ -85,8 +85,8 @@ const TOOL_REGISTRY = {
     effect_class: 'internal_observation'
   },
   understand_documents: {
-    purpose: 'Read ALL files the user uploaded in this conversation TOGETHER and explain them / answer about them / relate them (e.g. "add this client from these 3 docs", "how many files did I upload", "what do these say"). Use this whenever there are one or more uploaded documents/images to read or reason across.',
-    governance: 'read-only; advisory; writes nothing',
+    purpose: 'Read ALL files the user uploaded in this conversation TOGETHER and explain them / answer about them / relate them (e.g. "add this client from these 3 docs", "how many files did I upload", "what do these say"). Use this whenever there are one or more uploaded documents/images to read or reason across. For an NZTA Motor Vehicle Register screenshot, identify it as source-time private identity evidence, extract only review candidates (query time, registered person, plate/VIN, vehicle and registration/WoF/CoF details), and direct the administrator to People & Access → Identity records → NZTA Motor Vehicle Register query result for source comparison and approval. Never call OCR output a completed check and never claim the person–vehicle association is still current.',
+    governance: 'read-only; advisory; writes nothing; NZTA OCR remains provisional until governed human approval',
     effect_class: 'internal_observation'
   },
   plan_import: {

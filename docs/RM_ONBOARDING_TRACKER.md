@@ -52,6 +52,40 @@ turn beats false completeness.
   primary mobile controls remain visible, neither viewport has page-level
   horizontal overflow, and Overview emits no welfare/zone request failure.
 
+## NZTA HISTORICAL PROVENANCE AND PERSON RECORDS (2026-10-10)
+
+- Confirmed the R&M corpus contains a strong NZTA source pack under
+  `RemSec - Documents/NZTA` and supporting staff records under `RemSec -
+  Documents/Staff Details`.
+- This material is valid as historical provenance for person/vehicle canonical
+  records, including registration, training, compliance, and staff credential
+  evidence, but it is not a current access entitlement or live authority check.
+- Owner ruling: a person or vehicle record may be assembled or enriched from NZTA
+  MVR provenance only when the source is documented and human-reviewed. The
+  `nzta_mvr_sourced` flag remains historical provenance only and must not be used
+  to infer legal authority, current permission, or live operating status.
+- This aligns with the FCM identity model and the requirement to keep NZTA as
+  source evidence rather than current power. It is a safe, governed way to
+  promote a real R&M person record set without fabricating authority or silently
+  importing unverified current access terms.
+- Implemented the governed NZTA MVR workflow in migration `20261010204538`.
+  Bob/local OCR now proposes source-time registered-person and vehicle facts,
+  but only an organization administrator can approve them after comparing the
+  private source image and explicitly confirming the person-vehicle match.
+- A completed approval now updates the audited canonical person and vehicle,
+  records the check in `vehicle_identity_checks`, links the tenant person,
+  canonical person, canonical vehicle, identity document, and evidence item,
+  and exposes the same private source through short-lived signed access from
+  both record contexts. The source-time disclaimer remains visible.
+- Live rollback verification passed the fail-closed confirmation check,
+  evidence linkage, canonical updates, verified-person state, and administrator
+  retrieval. The verification also exposed and repaired two shared database
+  defects: the missing JSON object-length helper (`20261010205741`) and the
+  canonical vehicle compliance-source constraint (`20261010205847`).
+- Live schema truth and Atlas were refreshed after all three migrations.
+  Focused OCR/migration tests passed 10/10, UI governance guards passed 4/4,
+  the web production build passed, and all 564 migration versions are unique.
+
 ## HUMAN-AUTHORED SUBJECT AND EVIDENCE INTEGRATION (2026-10-11)
 
 - Recorded the owner ruling that a human-authored report is sufficient

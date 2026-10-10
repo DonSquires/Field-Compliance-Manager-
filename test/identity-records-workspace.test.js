@@ -11,6 +11,9 @@ const deterministicTypesMigration = read('supabase/migrations/20260927020000_det
 const canonicalIncidentMigration = read('supabase/migrations/20260927030000_canonical_staff_and_incident_people.sql');
 const incidentEvidenceMigration = read('supabase/migrations/20260927040000_incident_identity_evidence_workflow.sql');
 const identityResolutionMigration = read('supabase/migrations/20260927051000_resolve_identity_to_existing_person.sql');
+const nztaIdentityMigration = read('supabase/migrations/20261010204538_govern_nzta_mvr_identity_checks.sql');
+const vehicleJsonMigration = read('supabase/migrations/20261010205741_fix_identity_vehicle_jsonb_object_length.sql');
+const nztaComplianceSourceMigration = read('supabase/migrations/20261010205847_allow_nzta_mvr_vehicle_compliance_source.sql');
 const api = read('services/fcm-api/server.js');
 const dockerfile = read('services/fcm-api/Dockerfile');
 const inferenceEdge = read('supabase/functions/bob-inference/index.ts');
@@ -25,6 +28,7 @@ test('identity OCR proposes editable driver, firearms, and security licence fiel
   assert.deepEqual(extractIdentityFields('DRIVER LICENCE\nName: Jane Citizen\nLicence No: AB123456\nDate of Birth: 04/05/1990\nExpiry Date: 01/02/2030', 'driver_licence'), {
     display_name: 'Jane Citizen', date_of_birth: '1990-05-04', expiry_date: '2030-02-01', driver_licence_number: 'AB123456',
   });
+
   assert.equal(extractIdentityFields('FIREARMS LICENCE\nName: Jamie Example\nLicence Number: Z1234567', 'firearms_licence').firearms_licence_number, 'Z1234567');
   assert.deepEqual(extractIdentityFields('PRIVATE SECURITY PERSONNEL BADGE\nName: Jamie Example\nCertificate of Approval Number: TEST-1234\nExpiry 24-07-2030\nPSG CC SC ST RPA', 'security_licence'), {
     display_name: 'Jamie Example', expiry_date: '2030-07-24', security_licence_number: 'TEST-1234',
@@ -37,6 +41,57 @@ test('identity OCR proposes editable driver, firearms, and security licence fiel
   assert.equal(isoDate('04/05/90'), '1990-05-04');
   assert.equal(isoDate('04/05/26'), '2026-05-04');
   assert.equal(isoDate('31/02/2030'), null);
+});
+
+test('NZTA MVR screenshots produce source-time person and vehicle review candidates', () => {
+  const fields = extractIdentityFields(
+    [
+      'Current details query results',
+      '06/10/2026 09:18:08',
+      '2009 Mazda Demio Hatchback',
+      'Plate: ABC123',
+      'VIN: TESTVIN123456789',
+      'Current registered person: Example Holdings Limited',
+      'Vehicle type: Passenger Car/Van',
+      'Chassis number: TEST-CHASSIS',
+      'Colour: Silver',
+      'Engine no: TEST-ENGINE',
+      'Fuel type: Petrol',
+      'Expiry date of last WOF: 23/12/2026',
+      'Registration status: Active',
+      'Licence expiry date: 28/09/2027',
+    ].join('\n'),
+    'nzta_mvr_record',
+  );
+  assert.deepEqual(fields, {
+    display_name: 'Example Holdings Limited',
+    plate_number: 'ABC123',
+    vin: 'TESTVIN123456789',
+    query_completed_at: '2026-10-06T09:18:08',
+    vehicle_year: '2009',
+    vehicle_make: 'Mazda',
+    vehicle_model: 'Demio',
+    vehicle_body_type: 'Hatchback',
+    vehicle_colour: 'Silver',
+    chassis_number: 'TEST-CHASSIS',
+    engine_number: 'TEST-ENGINE',
+    fuel_type: 'Petrol',
+    registration_status: 'Active',
+    rego_expiry: '2027-09-28',
+    wof_expiry: '2026-12-23',
+  });
+  assert.match(nztaIdentityMigration, /CREATE TABLE public\.vehicle_identity_checks/);
+  assert.match(nztaIdentityMigration, /review_nzta_mvr_identity_evidence/);
+  assert.match(nztaIdentityMigration, /person_vehicle_match_confirmed/);
+  assert.match(nztaIdentityMigration, /compliance_source = 'nzta_mvr'/);
+  assert.match(nztaIdentityMigration, /get_vehicle_identity_checks/);
+  assert.match(nztaIdentityMigration, /ENABLE ROW LEVEL SECURITY/);
+  assert.match(nztaIdentityMigration, /REVOKE ALL ON TABLE public\.vehicle_identity_checks FROM PUBLIC, anon, authenticated/);
+  assert.match(vehicleJsonMigration, /CREATE OR REPLACE FUNCTION public\.jsonb_object_length/);
+  assert.match(vehicleJsonMigration, /FROM jsonb_object_keys/);
+  assert.match(vehicleJsonMigration, /REVOKE ALL ON FUNCTION public\.jsonb_object_length/);
+  assert.match(nztaComplianceSourceMigration, /canonical_vehicles_compliance_source_check/);
+  assert.match(nztaComplianceSourceMigration, /'nzta_mvr'::text/);
 });
 
 test('identity registry writes are administrator-only, audited, and review-gated', () => {

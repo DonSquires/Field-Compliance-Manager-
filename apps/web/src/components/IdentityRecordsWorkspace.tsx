@@ -45,6 +45,23 @@ type VehicleRecord = {
   notes: string | null;
 };
 
+type VehicleIdentityCheck = {
+  check_id: string;
+  checked_at: string;
+  relationship: string;
+  person_record_id: string;
+  canonical_person_id: string;
+  display_name: string | null;
+  identity_document_id: string;
+  evidence_item_id: string | null;
+  source_authority: string;
+  vehicle_snapshot: Record<string, unknown>;
+  storage_bucket: string | null;
+  storage_path: string | null;
+  file_name: string | null;
+  reviewed_at: string;
+};
+
 type IdentityDocument = {
   id: string;
   person_record_id: string;
@@ -137,6 +154,22 @@ type PersonForm = {
   issuing_authority: string;
   authorized_activities: string;
   notes: string;
+  plate_number: string;
+  vin: string;
+  chassis_number: string;
+  engine_number: string;
+  query_completed_at: string;
+  vehicle_year: string;
+  vehicle_make: string;
+  vehicle_model: string;
+  vehicle_colour: string;
+  vehicle_body_type: string;
+  fuel_type: string;
+  registration_status: string;
+  rego_expiry: string;
+  wof_expiry: string;
+  cof_expiry: string;
+  person_vehicle_match_confirmed: boolean;
 };
 type VehicleForm = {
   plate_number: string;
@@ -173,6 +206,22 @@ const EMPTY_PERSON: PersonForm = {
   issuing_authority: "",
   authorized_activities: "",
   notes: "",
+  plate_number: "",
+  vin: "",
+  chassis_number: "",
+  engine_number: "",
+  query_completed_at: "",
+  vehicle_year: "",
+  vehicle_make: "",
+  vehicle_model: "",
+  vehicle_colour: "",
+  vehicle_body_type: "",
+  fuel_type: "",
+  registration_status: "",
+  rego_expiry: "",
+  wof_expiry: "",
+  cof_expiry: "",
+  person_vehicle_match_confirmed: false,
 };
 const EMPTY_VEHICLE: VehicleForm = {
   plate_number: "",
@@ -250,6 +299,14 @@ const FALLBACK_DOCUMENT_TYPES: DocumentTypeDefinition[] = [
     canonical_destination: "staff_credentials",
     staff_credential_type: "biosecurity_warrant",
     default_authorized_activities: ["Biosecurity officer"],
+  },
+  {
+    document_kind: "nzta_mvr_record",
+    display_name: "NZTA Motor Vehicle Register query result",
+    category: "identity",
+    canonical_destination: "person_records",
+    staff_credential_type: null,
+    default_authorized_activities: [],
   },
   {
     document_kind: "passport",
@@ -342,6 +399,22 @@ function personForm(person: PersonRecord): PersonForm {
     issuing_authority: "",
     authorized_activities: "",
     notes: value("notes"),
+    plate_number: "",
+    vin: "",
+    chassis_number: "",
+    engine_number: "",
+    query_completed_at: "",
+    vehicle_year: "",
+    vehicle_make: "",
+    vehicle_model: "",
+    vehicle_colour: "",
+    vehicle_body_type: "",
+    fuel_type: "",
+    registration_status: "",
+    rego_expiry: "",
+    wof_expiry: "",
+    cof_expiry: "",
+    person_vehicle_match_confirmed: false,
   };
 }
 
@@ -361,7 +434,11 @@ function proposedPersonForm(
     if (documentKind === "security_licence")
       values.security_licence_expiry = proposed.expiry_date;
   }
-  return { ...current, ...values } as PersonForm;
+  return {
+    ...current,
+    ...values,
+    person_vehicle_match_confirmed: false,
+  } as PersonForm;
 }
 
 function vehicleForm(vehicle: VehicleRecord): VehicleForm {
@@ -408,6 +485,12 @@ export function IdentityRecordsWorkspace({
     PersonInterestFlag["alert_level"]
   >("medium");
   const [vehicle, setVehicle] = useState<VehicleForm>(EMPTY_VEHICLE);
+  const [vehicleIdentityChecks, setVehicleIdentityChecks] = useState<
+    VehicleIdentityCheck[]
+  >([]);
+  const [vehicleIdentityCheckUrl, setVehicleIdentityCheckUrl] = useState<
+    string | null
+  >(null);
   const [reason, setReason] = useState("");
   const [documentKind, setDocumentKind] = useState("driver_licence");
   const [documentFiles, setDocumentFiles] = useState<File[]>([]);
@@ -491,10 +574,30 @@ export function IdentityRecordsWorkspace({
     setIncidentIdentityNotes("");
   };
 
-  const selectVehicle = (record: VehicleRecord | null) => {
+  const selectVehicle = async (record: VehicleRecord | null) => {
     setSelectedVehicleId(record?.id ?? null);
     setVehicle(record ? vehicleForm(record) : EMPTY_VEHICLE);
+    setVehicleIdentityChecks([]);
+    setVehicleIdentityCheckUrl(null);
     setReason("");
+    if (!record) return;
+    const checks = await supabase.rpc("get_vehicle_identity_checks", {
+      p_organization_id: organizationId,
+      p_canonical_vehicle_id: record.id,
+    });
+    if (checks.error) {
+      setError(checks.error.message);
+      return;
+    }
+    const rows = (checks.data ?? []) as VehicleIdentityCheck[];
+    setVehicleIdentityChecks(rows);
+    const latest = rows[0];
+    if (latest?.storage_bucket && latest.storage_path) {
+      const signed = await supabase.storage
+        .from(latest.storage_bucket)
+        .createSignedUrl(latest.storage_path, 600);
+      if (!signed.error) setVehicleIdentityCheckUrl(signed.data.signedUrl);
+    }
   };
 
   const savePerson = async (event: FormEvent) => {
@@ -772,12 +875,25 @@ export function IdentityRecordsWorkspace({
     setBusy(`review-${action}`);
     setError(null);
     setNotice(null);
+    const approvedFields =
+      action === "approve"
+        ? {
+            ...documentFields,
+            query_completed_at:
+              selectedDocument.document_kind === "nzta_mvr_record" &&
+              documentFields.query_completed_at
+                ? new Date(documentFields.query_completed_at).toISOString()
+                : documentFields.query_completed_at,
+          }
+        : {};
     const { data: reviewResult, error: reviewError } = await supabase.rpc(
-      "review_canonical_identity_evidence",
+      selectedDocument.document_kind === "nzta_mvr_record"
+        ? "review_nzta_mvr_identity_evidence"
+        : "review_canonical_identity_evidence",
       {
         p_identity_document_id: selectedDocument.id,
         p_action: action,
-        p_approved_fields: action === "approve" ? documentFields : {},
+        p_approved_fields: approvedFields,
         p_review_notes: documentReviewNote.trim(),
       },
     );
@@ -785,7 +901,7 @@ export function IdentityRecordsWorkspace({
     else {
       setNotice(
         action === "approve"
-          ? `Identity evidence approved.${reviewResult?.identity_verified ? " Identity details are verified." : " This evidence type does not verify identity details."}${["driver_licence", "firearms_licence", "security_licence"].includes(selectedDocument.document_kind) ? (reviewResult?.current_credential_updated ? " Current licence details were updated." : " Historical licence retained without replacing current details.") : ""}${reviewResult?.staff_verification_required ? " An unverified credential handoff is ready in People & HR → Credentials." : ""}${reviewResult?.face_candidate_enrolled ? " One face candidate is now active." : " No face candidate was enrolled."}`
+          ? `${selectedDocument.document_kind === "nzta_mvr_record" ? "NZTA check approved and linked to the canonical person and vehicle." : `Identity evidence approved.${reviewResult?.identity_verified ? " Identity details are verified." : " This evidence type does not verify identity details."}`}${["driver_licence", "firearms_licence", "security_licence"].includes(selectedDocument.document_kind) ? (reviewResult?.current_credential_updated ? " Current licence details were updated." : " Historical licence retained without replacing current details.") : ""}${reviewResult?.staff_verification_required ? " An unverified credential handoff is ready in People & HR → Credentials." : ""}${reviewResult?.face_candidate_enrolled ? " One face candidate is now active." : selectedDocument.document_kind === "nzta_mvr_record" ? "" : " No face candidate was enrolled."}`
           : "Identity evidence rejected. Its face template was removed.",
       );
       setSelectedDocument(null);
@@ -1806,6 +1922,79 @@ export function IdentityRecordsWorkspace({
                   <Save size={15} />
                   {busy === "vehicle" ? "Saving" : "Save vehicle"}
                 </button>
+                {selectedVehicleId && (
+                  <section className="identity-records-section">
+                    <h3>NZTA identity checks</h3>
+                    {vehicleIdentityChecks.length === 0 ? (
+                      <p>
+                        No approved NZTA Motor Vehicle Register source is linked
+                        to this canonical vehicle.
+                      </p>
+                    ) : (
+                      <>
+                        <div className="identity-source-marker">
+                          <ShieldCheck size={16} aria-hidden="true" />
+                          <div>
+                            <strong>NZTA check completed</strong>
+                            <p>
+                              {new Date(
+                                vehicleIdentityChecks[0].checked_at,
+                              ).toLocaleString("en-NZ")}{" "}
+                              · linked to{" "}
+                              {vehicleIdentityChecks[0].display_name ||
+                                "canonical person"}
+                            </p>
+                            <p>
+                              Historical source-time association; current
+                              registered-person status requires a new governed
+                              check.
+                            </p>
+                          </div>
+                        </div>
+                        <div className="identity-records-actions">
+                          <button
+                            type="button"
+                            onClick={() => {
+                              const linked = registry.people.find(
+                                (personRecord) =>
+                                  personRecord.person_record_id ===
+                                  vehicleIdentityChecks[0].person_record_id,
+                              );
+                              if (linked) {
+                                setMode("people");
+                                selectPerson(linked);
+                              }
+                            }}
+                          >
+                            <UserRound size={15} />
+                            Open linked person
+                          </button>
+                          {vehicleIdentityCheckUrl && (
+                            <a
+                              href={vehicleIdentityCheckUrl}
+                              target="_blank"
+                              rel="noreferrer"
+                            >
+                              <FileBadge size={15} />
+                              Open private NZTA source
+                            </a>
+                          )}
+                        </div>
+                        {vehicleIdentityCheckUrl &&
+                          vehicleIdentityChecks[0].file_name
+                            ?.toLowerCase()
+                            .match(/\.(png|jpe?g|webp|bmp|tiff?)$/) && (
+                            <div className="identity-document-source">
+                              <img
+                                src={vehicleIdentityCheckUrl}
+                                alt="Private NZTA Motor Vehicle Register source"
+                              />
+                            </div>
+                          )}
+                      </>
+                    )}
+                  </section>
+                )}
               </form>
             )}
           </main>
@@ -1895,6 +2084,126 @@ export function IdentityRecordsWorkspace({
                       }
                     />
                   </label>
+                  {selectedDocument.document_kind === "nzta_mvr_record" && (
+                    <>
+                      <div className="identity-source-marker is-wide">
+                        <strong>NZTA source-time verification</strong>
+                        <p>
+                          Compare every value below with the private source
+                          image. Approval records the check time and historical
+                          person–vehicle association, not current ownership.
+                        </p>
+                      </div>
+                      {[
+                        ["plate_number", "Plate"],
+                        ["vin", "VIN"],
+                        ["chassis_number", "Chassis number"],
+                        ["engine_number", "Engine number"],
+                        ["vehicle_year", "Year"],
+                        ["vehicle_make", "Make"],
+                        ["vehicle_model", "Model"],
+                        ["vehicle_colour", "Colour"],
+                        ["vehicle_body_type", "Body type"],
+                        ["fuel_type", "Fuel type"],
+                        ["registration_status", "Registration status"],
+                      ].map(([field, label]) => (
+                        <label key={field}>
+                          <span>{label}</span>
+                          <input
+                            type={field === "vehicle_year" ? "number" : "text"}
+                            disabled={
+                              selectedDocument.review_state !==
+                              "manual_review_required"
+                            }
+                            value={String(
+                              documentFields[field as keyof PersonForm] ?? "",
+                            )}
+                            onChange={(event) =>
+                              setDocumentFields({
+                                ...documentFields,
+                                [field]:
+                                  field === "plate_number" ||
+                                  field === "vin" ||
+                                  field === "chassis_number" ||
+                                  field === "engine_number"
+                                    ? event.target.value.toUpperCase()
+                                    : event.target.value,
+                              })
+                            }
+                          />
+                        </label>
+                      ))}
+                      <label>
+                        <span>NZTA query completed</span>
+                        <input
+                          type="datetime-local"
+                          disabled={
+                            selectedDocument.review_state !==
+                            "manual_review_required"
+                          }
+                          value={documentFields.query_completed_at
+                            .replace("Z", "")
+                            .slice(0, 19)}
+                          onChange={(event) =>
+                            setDocumentFields({
+                              ...documentFields,
+                              query_completed_at: event.target.value,
+                            })
+                          }
+                        />
+                      </label>
+                      {[
+                        ["rego_expiry", "Registration expiry"],
+                        ["wof_expiry", "WoF expiry"],
+                        ["cof_expiry", "CoF expiry"],
+                      ].map(([field, label]) => (
+                        <label key={field}>
+                          <span>{label}</span>
+                          <input
+                            type="date"
+                            disabled={
+                              selectedDocument.review_state !==
+                              "manual_review_required"
+                            }
+                            value={String(
+                              documentFields[field as keyof PersonForm] ?? "",
+                            )}
+                            onChange={(event) =>
+                              setDocumentFields({
+                                ...documentFields,
+                                [field]: event.target.value,
+                              })
+                            }
+                          />
+                        </label>
+                      ))}
+                      <div className="identity-source-marker is-wide">
+                        <label>
+                          <input
+                            type="checkbox"
+                            disabled={
+                              selectedDocument.review_state !==
+                              "manual_review_required"
+                            }
+                            checked={
+                              documentFields.person_vehicle_match_confirmed
+                            }
+                            onChange={(event) =>
+                              setDocumentFields({
+                                ...documentFields,
+                                person_vehicle_match_confirmed:
+                                  event.target.checked,
+                              })
+                            }
+                          />
+                          <span>
+                            I compared the private source and confirm it links
+                            this person to this vehicle at the query time
+                          </span>
+                        </label>
+                      </div>
+                    </>
+                  )}
                   <label>
                     <span>Driver licence number</span>
                     <input
@@ -2324,10 +2633,19 @@ export function IdentityRecordsWorkspace({
                       type="button"
                       className="identity-records-primary"
                       onClick={() => void reviewDocument("approve")}
-                      disabled={busy !== null || !documentReviewNote.trim()}
+                      disabled={
+                        busy !== null ||
+                        !documentReviewNote.trim() ||
+                        (selectedDocument.document_kind === "nzta_mvr_record" &&
+                          (!documentFields.person_vehicle_match_confirmed ||
+                            !documentFields.plate_number ||
+                            !documentFields.query_completed_at))
+                      }
                     >
                       <CheckCircle2 size={15} />
-                      Approve and update person
+                      {selectedDocument.document_kind === "nzta_mvr_record"
+                        ? "Approve NZTA check and update records"
+                        : "Approve and update person"}
                     </button>
                   </>
                 ) : (
