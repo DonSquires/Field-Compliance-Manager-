@@ -33,8 +33,9 @@ interface BreachAlert {
 interface Observation {
   id: string;
   observed_at: string;
-  plate_number: string;
-  officer_id: string;
+  plate_number: string | null;
+  officer_id: string | null;
+  subject_kind: 'vehicle' | 'person' | 'mixed' | 'place' | 'other';
   is_compliant: boolean | null;
   compliance_reason: string | null;
   zone_id: string | null;
@@ -273,7 +274,7 @@ const ReportsHubPage: React.FC = () => {
           : activeZoneIds && activeZoneIds.length > 0
           ? supabase
               .from('observations')
-              .select('id, observed_at, plate_number, officer_id, is_compliant, compliance_reason, zone_id')
+              .select('id, observed_at, plate_number, officer_id, subject_kind, is_compliant, compliance_reason, zone_id')
               .in('zone_id', activeZoneIds)
               .gte('observed_at', dateRange.start)
               .lt('observed_at', timestampEndExclusive)
@@ -282,7 +283,7 @@ const ReportsHubPage: React.FC = () => {
               ? Promise.resolve({ data: [], error: null })
           : supabase
               .from('observations')
-              .select('id, observed_at, plate_number, officer_id, is_compliant, compliance_reason, zone_id')
+              .select('id, observed_at, plate_number, officer_id, subject_kind, is_compliant, compliance_reason, zone_id')
               .eq('organization_id', profile.organizationId)
               .gte('observed_at', dateRange.start)
               .lt('observed_at', timestampEndExclusive)
@@ -618,7 +619,7 @@ const ReportsHubPage: React.FC = () => {
                 observations.slice(0, 10).map((obs) => (
                   <tr key={obs.id}>
                     <td>{new Date(obs.observed_at).toLocaleString()}</td>
-                    <td>{obs.plate_number}</td>
+                    <td>{obs.plate_number || (obs.subject_kind === 'person' ? 'Person observation' : 'Non-vehicle observation')}</td>
                     <td>
                       {complianceLabel(obs.is_compliant)}
                     </td>
