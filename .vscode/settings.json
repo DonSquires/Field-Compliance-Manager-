@@ -2,6 +2,8 @@
   // Edge functions are Deno, not Node: hand them to the Deno language server so the built-in
   // TypeScript server stops reporting `Deno`, https imports and implicit any across supabase/functions.
   "deno.enablePaths": ["./supabase/functions"],
+  // This shared release engine is Node CommonJS, so keep it on the built-in JS/TS language service.
+  "deno.disablePaths": ["./supabase/functions/_shared/builder-release-engineer.js"],
   "deno.lint": true,
   "[choicescript]": {
     "editor.quickSuggestions": {

@@ -1,4 +1,5 @@
 import { expect, type Page, type TestInfo } from '@playwright/test';
+import { isWriteOrDestructiveAction } from '../src/lib/humanTestActionPolicy';
 
 export type HumanFindingSeverity = 'info' | 'warning' | 'error';
 
@@ -25,7 +26,6 @@ const SAFE_SAMPLE_VALUES: Record<string, string> = {
   number: '1',
 };
 
-const UNSAFE_ACTION = /^(delete|remove|destroy|approve|reject|resolve|acknowledge|submit|save|create|sign out|log out|logout|publish|send|apply|confirm|assign|claim|complete|finish|activate|deactivate|retry)/i;
 const RESOURCE_INTENSIVE_ADMIN_ROUTES = new Set(['Client Portfolios']);
 
 function now(): string {
@@ -199,7 +199,7 @@ export class HumanTestSession {
     const candidate = this.page.getByRole('button', { name: label }).or(this.page.getByRole('link', { name: label })).first();
     if (!(await candidate.isVisible({ timeout: 1500 }).catch(() => false))) return false;
     const name = compact(await candidate.textContent()) || String(label);
-    if (UNSAFE_ACTION.test(name)) {
+    if (isWriteOrDestructiveAction(name)) {
       console.log(`[HUMAN SKIP] Unsafe action: ${name}`);
       return false;
     }
@@ -235,7 +235,7 @@ export class HumanTestSession {
     for (let index = 0; index < count; index += 1) {
       const item = navItems.nth(index);
       const label = compact(await item.textContent());
-      if (!label || UNSAFE_ACTION.test(label)) continue;
+      if (!label || isWriteOrDestructiveAction(label)) continue;
       if (RESOURCE_INTENSIVE_ADMIN_ROUTES.has(label)) {
         this.findings.push({ severity: 'warning', message: `${label} was not opened during the broad navigation sweep because it is resource-intensive in the constrained browser runner.`, url: this.page.url(), step: 'admin navigation' });
         console.log(`[HUMAN NAV] skipped resource-intensive route: ${label}`);
@@ -253,7 +253,7 @@ export class HumanTestSession {
     for (let index = 0; index < tabCount; index += 1) {
       const tab = tabs.nth(index);
       const label = compact(await tab.textContent());
-      if (!label || UNSAFE_ACTION.test(label)) continue;
+      if (!label || isWriteOrDestructiveAction(label)) continue;
       await tab.click();
       await this.page.waitForTimeout(150);
       await this.observe(`tab: ${label}`);
@@ -279,7 +279,7 @@ export class HumanTestSession {
       const candidate = candidates.nth(button.index);
       const currentLabel = (await candidate.textContent().catch(() => null) ?? '').replace(/\s+/g, ' ').trim();
       const label = button.label || currentLabel || `button-${button.index}`;
-      if (!label || UNSAFE_ACTION.test(label)) {
+      if (!label || isWriteOrDestructiveAction(label)) {
         console.log(`[HUMAN BUTTON SKIP] ${route} #${button.index} ${label || '(unnamed)'}: write/destructive action requires governed evidence`);
         continue;
       }
@@ -345,12 +345,15 @@ export class HumanTestSession {
   }
 
   private async visibleControls(): Promise<Array<{ kind: string; label: string; disabled: boolean; action: 'safe' | 'write-or-destructive' }>> {
-    return this.page.locator('button:visible, a:visible, input:visible, textarea:visible, select:visible').evaluateAll((elements) => elements.map((element) => {
+    const controls = await this.page.locator('button:visible, a:visible, input:visible, textarea:visible, select:visible').evaluateAll((elements) => elements.map((element) => {
       const control = element as HTMLInputElement;
       const parentLabel = element.closest('label')?.textContent ?? '';
       const label = (element.getAttribute('aria-label') || element.getAttribute('title') || element.textContent || control.placeholder || parentLabel).replace(/\s+/g, ' ').trim();
-      const action = /^(delete|remove|destroy|approve|reject|resolve|acknowledge|submit|save|create|sign out|log out|logout|publish|send|apply|confirm|assign|claim|complete|finish|activate|deactivate|retry)/i.test(label) ? 'write-or-destructive' : 'safe';
-      return { kind: element.tagName.toLowerCase(), label, disabled: Boolean(control.disabled), action };
+      return { kind: element.tagName.toLowerCase(), label, disabled: Boolean(control.disabled) };
+    }));
+    return controls.map((control) => ({
+      ...control,
+      action: isWriteOrDestructiveAction(control.label) ? 'write-or-destructive' : 'safe',
     }));
   }
 }

@@ -11,6 +11,9 @@ test('house map separates LINZ source geometry from runtime geofence decisions',
   await signInAsAdmin(page, '/admin/locations');
 
   await expect(page.getByRole('heading', { name: 'Locations', exact: true })).toBeVisible();
+  const placeTitle = page.locator('.site-card h3').filter({ hasText: 'Civic Events House' });
+  await expect(placeTitle).toBeVisible();
+  expect(await placeTitle.evaluate((element) => element.scrollWidth <= element.clientWidth + 1)).toBe(true);
   const map = page.getByRole('region', { name: 'Map for Civic Events House' });
   await expect(map.getByText('2 verified place boundaries')).toBeVisible();
   await expect(map.getByText('1 Site or work area need review')).toBeVisible();

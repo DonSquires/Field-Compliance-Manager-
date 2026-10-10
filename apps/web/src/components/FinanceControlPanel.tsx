@@ -8,7 +8,8 @@ import './FinanceControlPanel.css';
 type Period = { id: string; name: string; status: string };
 type TaxPeriod = { id: string; period_start: string; period_end: string; status: string; net_tax_due: number };
 type Agreement = { id: string; name: string };
-type Shift = { id: string; service_type: string; scheduled_start: string; status: string; officer_user_id: string | null };
+type Shift = { id: string; service_type: string; scheduled_start: string; status: string; officer_user_id: string | null; service_agreement_location_id: string | null; service_agreement_module_id: string | null; work_unit_id: string | null };
+type AgreementLink = { id: string; service_agreement_id: string };
 type ProfitabilityRow = { service_agreement_id: string; estimated_total_cost: number; actual_total_cost: number; estimated_vehicle: number; actual_vehicle: number; client_invoice_total: number; net_profit: number | null };
 
 export function FinanceControlPanel() {
@@ -17,6 +18,8 @@ export function FinanceControlPanel() {
   const [taxPeriods, setTaxPeriods] = useState<TaxPeriod[]>([]);
   const [agreements, setAgreements] = useState<Agreement[]>([]);
   const [shifts, setShifts] = useState<Shift[]>([]);
+  const [locationAgreementByLink, setLocationAgreementByLink] = useState<Record<string, string>>({});
+  const [moduleAgreementByLink, setModuleAgreementByLink] = useState<Record<string, string>>({});
   const [profitability, setProfitability] = useState<ProfitabilityRow[]>([]);
   const [periodId, setPeriodId] = useState('');
   const [taxPeriodId, setTaxPeriodId] = useState('');
@@ -26,7 +29,7 @@ export function FinanceControlPanel() {
   const [costPick, setCostPick] = useState('');
   const [quantity, setQuantity] = useState('1');
   const [unitCost, setUnitCost] = useState('0');
-  const [sourceReference, setSourceReference] = useState('E2E browser finance control');
+  const [sourceReference, setSourceReference] = useState('');
   const [periodName, setPeriodName] = useState('September 2026 money check');
   const [periodStart, setPeriodStart] = useState('2026-09-01');
   const [periodEnd, setPeriodEnd] = useState('2026-09-30');
@@ -50,17 +53,40 @@ export function FinanceControlPanel() {
       supabase.from('finance_pl_periods').select('id,name,status').eq('organization_id', profile.organizationId).in('status', ['draft', 'locked']).order('period_end', { ascending: false }),
       supabase.from('finance_tax_periods').select('id,period_start,period_end,status,net_tax_due').eq('organization_id', profile.organizationId).in('status', ['open', 'prepared']).order('period_end', { ascending: false }),
       supabase.from('service_agreements').select('id,name').eq('provider_organization_id', profile.organizationId).eq('invitation_status', 'accepted').order('name'),
-      supabase.from('shifts').select('id,service_type,scheduled_start,status,officer_user_id').eq('organization_id', profile.organizationId).in('status', ['accepted', 'in_progress']).order('scheduled_start', { ascending: false }).limit(50),
+      supabase.from('shifts').select('id,service_type,scheduled_start,status,officer_user_id,service_agreement_location_id,service_agreement_module_id,work_unit_id').eq('organization_id', profile.organizationId).in('status', ['accepted', 'in_progress']).order('scheduled_start', { ascending: false }).limit(50),
     ]);
-    if (periodResponse.error || taxResponse.error || agreementResponse.error || shiftResponse.error) setError(periodResponse.error?.message ?? taxResponse.error?.message ?? agreementResponse.error?.message ?? shiftResponse.error?.message ?? 'Finance controls could not be loaded.');
-    else {
-      const nextPeriods = (periodResponse.data as Period[]) ?? [];
-      const nextTaxPeriods = (taxResponse.data as TaxPeriod[]) ?? [];
-      const nextAgreements = (agreementResponse.data as Agreement[]) ?? [];
-      const nextShifts = (shiftResponse.data as Shift[]) ?? [];
-      setPeriods(nextPeriods); setTaxPeriods(nextTaxPeriods); setAgreements(nextAgreements); setShifts(nextShifts);
-      setPeriodId((current) => current || nextPeriods[0]?.id || ''); setTaxPeriodId((current) => current || nextTaxPeriods[0]?.id || ''); setAgreementId((current) => current || nextAgreements[0]?.id || '');
+    const baseFailure = periodResponse.error ?? taxResponse.error ?? agreementResponse.error ?? shiftResponse.error;
+    if (baseFailure) {
+      setError(baseFailure.message);
+      setLoading(false);
+      return;
     }
+
+    const nextPeriods = (periodResponse.data as Period[]) ?? [];
+    const nextTaxPeriods = (taxResponse.data as TaxPeriod[]) ?? [];
+    const nextAgreements = (agreementResponse.data as Agreement[]) ?? [];
+    const nextShifts = (shiftResponse.data as Shift[]) ?? [];
+    const locationLinkIds = [...new Set(nextShifts.map((shift) => shift.service_agreement_location_id).filter((id): id is string => Boolean(id)))];
+    const moduleLinkIds = [...new Set(nextShifts.map((shift) => shift.service_agreement_module_id).filter((id): id is string => Boolean(id)))];
+    const [locationLinks, moduleLinks] = await Promise.all([
+      locationLinkIds.length
+        ? supabase.from('service_agreement_locations').select('id,service_agreement_id').in('id', locationLinkIds)
+        : Promise.resolve({ data: [] as AgreementLink[], error: null }),
+      moduleLinkIds.length
+        ? supabase.from('service_agreement_modules').select('id,service_agreement_id').in('id', moduleLinkIds)
+        : Promise.resolve({ data: [] as AgreementLink[], error: null }),
+    ]);
+    const linkFailure = locationLinks.error ?? moduleLinks.error;
+    if (linkFailure) {
+      setError(`Shift agreement links could not be verified: ${linkFailure.message}`);
+      setLoading(false);
+      return;
+    }
+    const visibleAgreementIds = new Set(nextAgreements.map((agreement) => agreement.id));
+    setLocationAgreementByLink(Object.fromEntries(((locationLinks.data as AgreementLink[]) ?? []).filter((link) => visibleAgreementIds.has(link.service_agreement_id)).map((link) => [link.id, link.service_agreement_id])));
+    setModuleAgreementByLink(Object.fromEntries(((moduleLinks.data as AgreementLink[]) ?? []).filter((link) => visibleAgreementIds.has(link.service_agreement_id)).map((link) => [link.id, link.service_agreement_id])));
+    setPeriods(nextPeriods); setTaxPeriods(nextTaxPeriods); setAgreements(nextAgreements); setShifts(nextShifts);
+    setPeriodId((current) => current || nextPeriods[0]?.id || ''); setTaxPeriodId((current) => current || nextTaxPeriods[0]?.id || ''); setAgreementId((current) => nextAgreements.some((agreement) => agreement.id === current) ? current : '');
     setLoading(false);
   }, [profile?.organizationId]);
 
@@ -70,7 +96,9 @@ export function FinanceControlPanel() {
     setSaving(true); setError(null); setNotice(null);
     let message = '';
     if (action === 'cost') {
-      const { error: actionError } = await supabase.rpc('record_finance_service_cost', { p_pl_period_id: periodId, p_service_agreement_id: agreementId, p_cost_type: costType, p_quantity: Number(quantity), p_unit_cost: Number(unitCost), p_source_document_type: 'manual', p_source_reference: sourceReference.trim() || 'Browser finance control', p_shift_id: selectedShiftId || null });
+      if (!sourceReference.trim()) { setError('Enter a source reference before recording this cost.'); setSaving(false); return; }
+      if (shiftAttributionError) { setError(shiftAttributionError); setSaving(false); return; }
+      const { error: actionError } = await supabase.rpc('record_finance_service_cost', { p_pl_period_id: periodId, p_service_agreement_id: agreementId, p_cost_type: costType, p_quantity: Number(quantity), p_unit_cost: Number(unitCost), p_source_document_type: 'manual', p_source_reference: sourceReference.trim(), p_work_unit_id: selectedShift?.work_unit_id ?? null, p_shift_id: selectedShiftId || null });
       if (actionError) { setError(actionError.message); setSaving(false); return; }
       message = 'Job cost saved with an audit receipt.';
       setCostPick('');
@@ -110,7 +138,38 @@ export function FinanceControlPanel() {
     setSaving(false);
   };
 
+  const selectedShift = shifts.find((shift) => shift.id === selectedShiftId) ?? null;
+  const selectedShiftLinkIds = selectedShift ? [selectedShift.service_agreement_location_id, selectedShift.service_agreement_module_id].filter((id): id is string => Boolean(id)) : [];
+  const selectedShiftAgreementIds = selectedShift ? [...new Set([
+    selectedShift.service_agreement_location_id ? locationAgreementByLink[selectedShift.service_agreement_location_id] : null,
+    selectedShift.service_agreement_module_id ? moduleAgreementByLink[selectedShift.service_agreement_module_id] : null,
+  ].filter((id): id is string => Boolean(id)))] : [];
+  const selectedShiftLinkUnresolved = Boolean(
+    (selectedShift?.service_agreement_location_id && !locationAgreementByLink[selectedShift.service_agreement_location_id])
+    || (selectedShift?.service_agreement_module_id && !moduleAgreementByLink[selectedShift.service_agreement_module_id])
+  );
+  const selectedShiftAgreementConflict = selectedShiftAgreementIds.length > 1;
+  const selectedShiftAgreementId = selectedShiftAgreementIds.length === 1 ? selectedShiftAgreementIds[0] : null;
+  const shiftAttributionError = selectedShiftLinkUnresolved
+    ? 'The selected shift has a service link that could not be verified. Refresh before recording this cost.'
+    : selectedShiftAgreementConflict
+      ? 'The selected shift has conflicting agreement links. Resolve its work attribution before recording this cost.'
+      : selectedShiftAgreementId && agreementId !== selectedShiftAgreementId
+        ? 'Select the customer agreement linked to this shift before recording its cost.'
+        : null;
+  const shiftNeedsManualAgreement = Boolean(selectedShift && selectedShiftLinkIds.length === 0);
   const labourNeedsShift = costType === 'labour' && shifts.length > 0 && !selectedShiftId;
+  const sourceReferenceMissing = !sourceReference.trim();
+
+  useEffect(() => {
+    if (!selectedShift) return;
+    const nextAgreementId = selectedShiftAgreementId ?? '';
+    if (agreementId !== nextAgreementId) setAgreementId(nextAgreementId);
+  }, [agreementId, selectedShift, selectedShiftAgreementId]);
+
+  useEffect(() => {
+    setSourceReference('');
+  }, [selectedShiftId]);
 
   if (loading) return <section className="finance-control-panel" aria-busy="true"><header><LockKeyhole size={18} /><div><p>Owner approvals</p><h2 id="finance-control-heading">Finance control centre</h2><span>Add job costs, prepare tax numbers, and finish a monthly money check. Nothing here touches your bank or IRD.</span></div></header><p className="finance-control-message is-loading">Loading finance controls...</p></section>;
   if (error && !profile?.organizationId) return <section className="finance-control-panel" aria-labelledby="finance-control-heading"><header><LockKeyhole size={18} /><div><p>Owner approvals</p><h2 id="finance-control-heading">Finance control centre</h2><span>Add job costs, prepare tax numbers, and finish a monthly money check. Nothing here touches your bank or IRD.</span></div></header><p className="finance-control-message is-error" role="alert"><CircleAlert size={14} />{error}</p></section>;
@@ -119,6 +178,10 @@ export function FinanceControlPanel() {
     <header><LockKeyhole size={18} /><div><p>Owner approvals</p><h2 id="finance-control-heading">Finance control centre</h2><span>Add job costs, prepare tax numbers, and finish a monthly money check. Nothing here touches your bank or IRD.</span></div></header>
     {error && <p className="finance-control-message is-error" role="alert"><CircleAlert size={14} />{error}</p>}
     {notice && <p className="finance-control-message is-success" role="status"><CheckCircle2 size={14} />{notice}</p>}
+    {selectedShiftAgreementId && <p className="finance-control-message" role="status">Customer agreement follows the selected shift: {agreements.find((agreement) => agreement.id === selectedShiftAgreementId)?.name ?? 'verified contract'}.</p>}
+    {shiftAttributionError && <p className="finance-control-message is-error" role="alert">{shiftAttributionError}</p>}
+    {shiftNeedsManualAgreement && <p className="finance-control-shift-warning" role="note">This shift has no single contract link. Choose the agreement deliberately and cite the cost source.</p>}
+    {sourceReferenceMissing && <p className="finance-control-shift-warning" role="note">A source reference is required before any cost can be recorded.</p>}
     <div className="finance-control-grid">
       <div><h3>Create or choose a monthly money check</h3><label><span>Name</span><input value={periodName} onChange={(event) => setPeriodName(event.target.value)} /></label><div className="finance-control-row"><label><span>Start</span><input type="date" value={periodStart} onChange={(event) => setPeriodStart(event.target.value)} /></label><label><span>End</span><input type="date" value={periodEnd} onChange={(event) => setPeriodEnd(event.target.value)} /></label></div><button type="button" className="btn btn-secondary" disabled={saving || !periodName.trim()} onClick={() => void createPeriod()}>Create draft money check</button><label><span>Money check</span><select value={periodId} onChange={(event) => setPeriodId(event.target.value)}><option value="">Choose a money check</option>{periods.map((period, idx) => <option key={`pl-select-${period.id || idx}`} value={period.id}>{period.name} · {period.status}</option>)}</select></label><h3>Add a job cost</h3><label><span>Customer agreement</span><select value={agreementId} onChange={(event) => setAgreementId(event.target.value)}><option value="">Select agreement</option>{agreements.map((agreement, idx) => <option key={`agreement-select-${agreement.id || idx}`} value={agreement.id}>{agreement.name}</option>)}</select></label><label><span>Which shift</span><select value={selectedShiftId} onChange={(event) => setSelectedShiftId(event.target.value)}><option value="">Not tied to a shift</option>{shifts.map((shift, idx) => <option key={`shift-select-${shift.id || idx}`} value={shift.id}>{new Date(shift.scheduled_start).toLocaleString('en-NZ')} · {shift.service_type.replaceAll('_', ' ')} · {shift.status}{shift.officer_user_id ? ' · officer assigned' : ''}</option>)}</select></label>{labourNeedsShift && <small className="finance-control-shift-warning">Choose the officer's shift before saving a wage cost.</small>}<PriceListPicker id="job-cost-price-list" label="Pick from your price list (optional)" organizationIds={profile?.organizationId ? [profile.organizationId] : []} value={costPick} onSelect={(selection, token) => { setCostPick(token); if (!selection) return; setCostType(selection.costType); if (selection.unitCost !== null) setUnitCost(selection.unitCost.toFixed(2)); setSourceReference(selection.description); }} /><div className="finance-control-row"><label><span>Cost type</span><select value={costType} onChange={(event) => setCostType(event.target.value)}><option value="labour">Wages</option><option value="vehicle">Vehicle</option><option value="materials">Materials</option><option value="equipment">Equipment</option><option value="overhead">Overhead</option><option value="depreciation">Depreciation</option><option value="other">Other</option></select></label><label><span>How many</span><input type="number" min="0.001" step="0.001" value={quantity} onChange={(event) => setQuantity(event.target.value)} /></label><label><span>Cost each</span><input type="number" min="0" step="0.01" value={unitCost} onChange={(event) => setUnitCost(event.target.value)} /></label></div><label><span>Where this number came from</span><input value={sourceReference} onChange={(event) => setSourceReference(event.target.value)} /></label><button type="button" className="btn btn-primary" disabled={saving || !periodId || !agreementId || labourNeedsShift} onClick={() => void runAction('cost')}>Save job cost</button></div>
       <div><h3>Prepare tax numbers</h3><div className="finance-control-row"><label><span>Start</span><input type="date" value={taxStart} onChange={(event) => setTaxStart(event.target.value)} /></label><label><span>End</span><input type="date" value={taxEnd} onChange={(event) => setTaxEnd(event.target.value)} /></label><label><span>Due to IRD</span><input type="date" value={taxDue} onChange={(event) => setTaxDue(event.target.value)} /></label></div><button type="button" className="btn btn-secondary" disabled={saving} onClick={() => void createTaxPeriod()}>Create tax period</button><label><span>Tax period</span><select value={taxPeriodId} onChange={(event) => setTaxPeriodId(event.target.value)}><option value="">Choose a tax period</option>{taxPeriods.map((period, idx) => <option key={`tax-select-${period.id || idx}`} value={period.id}>{period.period_start} to {period.period_end} · {period.status}</option>)}</select></label><button type="button" className="btn btn-secondary" disabled={saving || !taxPeriodId} onClick={() => void runAction('tax')}>Work out tax to set aside</button><small>This only prepares the numbers. Nothing is filed or paid.</small></div>
