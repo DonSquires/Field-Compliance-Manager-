@@ -57,16 +57,25 @@ test('still recognition produces provisional face and ALPR review candidates wit
     source: {
       success: true,
       people: [{ confidence: 0.91, bbox: { x: 10, y: 20, width: 30, height: 80 } }],
-      faces: [{ confidence: 0.88, bbox: { x: 14, y: 22, width: 20, height: 20 }, embedding: sourceFaceEmbedding }],
+      faces: [{
+        confidence: 0.88, bbox: { x: 14, y: 22, width: 20, height: 20 }, embedding: sourceFaceEmbedding,
+        detector_confidence: 0.91, face_crop_width_px: 20, alignment_basis: 'deterministic_upscaled_crop',
+        face_detector_model: 'face_detection_yunet_2023mar.onnx', face_embedding_model: 'face_recognition_sface_2021dec.onnx',
+      }],
       vehicles: [{ confidence: 0.95, bbox: { x: 100, y: 100, width: 200, height: 120 }, attributes: { vehicle_colour: 'white', vehicle_type: 'ute' } }],
       alpr: { success: true, plate: 'ABC123', confidence: 0.9 },
     },
     enhanced: { success: true, faces: [{ embedding: Array(128).fill(0.2) }], alpr: { success: true, plate: 'ABC128', confidence: 0.7 } },
-  }, { capturedAt: '2026-09-26T01:02:03.000Z', frameSha256: 'a'.repeat(64) });
+  }, { capturedAt: '2026-09-26T01:02:03.000Z', frameSha256: 'a'.repeat(64), provider: 'laptop_gpu' });
   const person = observations.find((item) => item.entity_kind === 'person');
   const vehicle = observations.find((item) => item.entity_kind === 'vehicle');
   assert.deepEqual(person.candidate_embedding, sourceFaceEmbedding);
   assert.equal(person.attributes.face_basis, 'authoritative_source');
+  assert.equal(person.attributes.face_detector_confidence, 0.91);
+  assert.equal(person.attributes.face_alignment_basis, 'deterministic_upscaled_crop');
+  assert.equal(person.attributes.face_detector_model, 'face_detection_yunet_2023mar.onnx');
+  assert.equal(person.attributes.face_embedding_model, 'face_recognition_sface_2021dec.onnx');
+  assert.equal(person.attributes.face_provider, 'laptop_gpu');
   assert.equal(vehicle.candidate_plate, 'ABC123');
   assert.equal(vehicle.attributes.plate_basis, 'authoritative_source');
   assert.equal(vehicle.attributes.review_required, true);
@@ -280,8 +289,11 @@ test('watcher records observations and timeline marks through the P2 RPCs before
   assert.ok(recordIndex > 0 && derivativeIndex > recordIndex, 'derivatives are built only after observation rows exist');
   assert.match(watcherSource, /supabase\.rpc\('record_cctv_observation_derivatives'/);
   assert.match(watcherSource, /supabase\.rpc\('record_cctv_alpr_perception_envelopes', \{ p_job_id: job\.id \}\)/);
+  assert.match(watcherSource, /supabase\.rpc\('record_cctv_person_perception_envelopes', \{ p_job_id: job\.id \}\)/);
   const sharedEvidenceIndex = watcherSource.indexOf('await recordSharedAlprEvidence(job);', derivativeIndex);
   assert.ok(sharedEvidenceIndex > derivativeIndex, 'the shared ALPR receipt is compiled after derivative evidence is stored');
+  const sharedPersonEvidenceIndex = watcherSource.indexOf('await recordSharedPersonEvidence(job);', sharedEvidenceIndex);
+  assert.ok(sharedPersonEvidenceIndex > sharedEvidenceIndex, 'the shared person receipt is compiled after derivative and ALPR receipts');
   assert.match(watcherSource, /callLaptopEnhancement\(fusedBytes/);
   assert.match(watcherSource, /callRunpodEnhancement\(fusedBytes/);
   assert.match(watcherSource, /select\('source_event_id'\).*?\.neq\('review_state', 'superseded'\)/);

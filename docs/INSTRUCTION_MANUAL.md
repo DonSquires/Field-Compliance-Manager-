@@ -47,6 +47,12 @@ Field Compliance Manager (FCM) is an enterprise SaaS platform designed to replac
      temporal consensus and disagreements remain visible. Machine consensus
      never removes review; the existing CCTV observation review is the one
      human decision mirrored into shared authority and append-only history.
+    - **CCTV person/face receipts:** Shared receipts contain source custody,
+     presence, face model/provider/crop provenance and a pseudonymous portfolio
+     candidate, but never raw biometric vectors or candidate identity lists.
+     Face similarity stays provisional until relevant-condition and
+     demographic calibration exists. Only an explicit human CCTV identity
+     link can create a human-approved identity reference.
    - **Self-Heal Boundary:** Bob may reproduce, edit, test, independently
      verify, repair and prepare a draft release in an isolated worker. Schema,
      auth/RLS, secrets, protected-branch merge, deployment and destructive bulk

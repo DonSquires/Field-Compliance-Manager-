@@ -7,6 +7,7 @@ const read = (file) => fs.readFileSync(path.join(__dirname, '..', file), 'utf8')
 const watcher = read('services/vision/vision_job_watcher.js');
 const derivativeHelpers = read('services/vision/observation_derivatives.js');
 const inference = read('services/fcm-inference/app.py');
+const runpodHandler = read('services/fcm-inference/runpod_handler.py');
 const superResolution = read('services/fcm-inference/super_resolution.py');
 const models = read('services/fcm-inference/download_models.py');
 const migration = read('supabase/migrations/20260925140000_cctv_observation_derivatives.sql');
@@ -54,6 +55,16 @@ test('the enhancement model is pinned, checksummed, GPU-aware and explicitly gen
   assert.match(inference, /@app\.post\("\/infer\/enhance"\)/);
   assert.match(inference, /"source": _infer_frame\(image, tasks\)/);
   assert.match(inference, /"enhanced": _infer_frame\(enhanced, tasks\)/);
+});
+
+test('face candidates carry model and crop provenance on both inference paths', () => {
+  assert.match(inference, /"detector_confidence": round\(float\(detection\[-1\]\), 6\)/);
+  assert.match(inference, /"face_crop_width_px": box_width/);
+  assert.match(inference, /"alignment_basis": alignment_basis/);
+  assert.match(inference, /"face_detector_model": YUNET_MODEL_PATH\.name/);
+  assert.match(inference, /"face_embedding_model": SFACE_MODEL_PATH\.name/);
+  assert.match(runpodHandler, /_face_sync/);
+  assert.doesNotMatch(runpodHandler, /detector, recognizer = _face_models\(\)/);
 });
 
 test('derivatives are bounded, private, evidence-scoped and persisted only through the service writer', () => {
