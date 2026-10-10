@@ -1,4 +1,5 @@
 import { expect, test } from '@playwright/test';
+import { randomUUID } from 'node:crypto';
 import { installSupabaseFixtures, monitorBrowserErrors, signInAsAdmin } from './fixtures';
 
 test.beforeEach(async ({ page }) => {
@@ -65,6 +66,59 @@ test('administrator sends a non-field identity invitation', async ({ page }) => 
   await invite.getByRole('button', { name: 'Send invitation' }).click();
   await expect(page.getByRole('status')).toContainText('Invitation sent to tama@fcm.test');
   await expect(page.getByText('Tama Ropata', { exact: true })).toBeVisible();
+  expect(errors, errors.join('\n')).toEqual([]);
+});
+
+test('administrator creates a test login manually without sending an invitation', async ({ page }) => {
+  const errors = monitorBrowserErrors(page);
+  const initialPassword = `Synthetic-${randomUUID()}!`;
+  let submitted: { preauthenticated: boolean; passwordProvided: boolean; email: string; role: string; staff: unknown; branch_authorisations: unknown } | null = null;
+  await page.route('**/rest/v1/organizations**', async (route) => {
+    if (route.request().url().includes('organization_type=eq.branch')) {
+      await route.fulfill({ contentType: 'application/json', body: JSON.stringify([{ id: '41414141-4141-4141-8141-414141414141', name: 'Northern Branch' }]) });
+    } else await route.fallback();
+  });
+  await page.route('**/functions/v1/create-user', async (route) => {
+    const payload = JSON.parse(route.request().postData() ?? '{}') as Record<string, unknown>;
+    submitted = {
+      preauthenticated: payload.preauthenticated === true,
+      passwordProvided: typeof payload.password === 'string' && payload.password === initialPassword,
+      email: String(payload.email),
+      role: String(payload.role),
+      staff: payload.staff,
+      branch_authorisations: payload.branch_authorisations,
+    };
+    await route.fulfill({ status: 200, contentType: 'application/json', body: JSON.stringify({ success: true, invitation_sent: false, preauthenticated: true, user_id: '56565656-5656-4656-8656-565656565656', staff_id: '57575757-5757-4757-8757-575757575757' }) });
+  });
+
+  await signInAsAdmin(page, '/admin/users');
+  await page.getByRole('button', { name: 'Invite user' }).click();
+  const form = page.locator('form.identity-invite-form');
+  await form.getByRole('button', { name: 'Create login manually' }).click();
+  await expect(form.getByText(/without email verification or an invitation/)).toBeVisible();
+  await form.getByLabel('Display name').fill('Synthetic Test Officer');
+  await form.getByLabel('Email address').fill(`manual-${randomUUID()}@fcm.test`);
+  await form.getByLabel('Role').selectOption('officer');
+  await form.getByRole('switch', { name: 'Link to HR' }).check();
+  await form.getByRole('switch', { name: 'Link to rostering' }).check();
+  await form.getByLabel('Delivery branch').selectOption('41414141-4141-4141-8141-414141414141');
+  await form.getByLabel('Initial password', { exact: true }).fill(initialPassword);
+  await form.getByLabel('Confirm initial password', { exact: true }).fill(`${initialPassword}mismatch`);
+  await expect(form.getByRole('button', { name: 'Create login', exact: true })).toBeDisabled();
+  await form.getByLabel('Confirm initial password', { exact: true }).fill(initialPassword);
+  const request = page.waitForRequest('**/functions/v1/create-user');
+  await form.getByRole('button', { name: 'Create login', exact: true }).click();
+  await request;
+
+  await expect(page.getByRole('status')).toContainText('without sending an invitation');
+  expect(submitted).toMatchObject({
+    preauthenticated: true,
+    passwordProvided: true,
+    email: expect.stringMatching(/^manual-[0-9a-f-]+@fcm\.test$/i),
+    role: 'officer',
+    staff: { employment_type: 'permanent', work_ready: false },
+    branch_authorisations: [{ branch_org_id: '41414141-4141-4141-8141-414141414141', role_at_branch: 'officer', module_access: [], can_be_rostered: false }],
+  });
   expect(errors, errors.join('\n')).toEqual([]);
 });
 

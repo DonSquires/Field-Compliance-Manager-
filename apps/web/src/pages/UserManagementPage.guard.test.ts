@@ -29,6 +29,15 @@ describe('enterprise identity console', () => {
     expect(source).toContain('data.invitation_sent === false');
   });
 
+  it('keeps manual login creation explicit, password-confirmed, and restricted to elevated admins', () => {
+    expect(source).toContain('const canPreauthenticate = canManageIdentityRecords;');
+    expect(source).toContain('preauthenticated: manualProvisioning');
+    expect(source).toContain('initialPassword !== confirmInitialPassword');
+    expect(source).toContain('data.preauthenticated !== true');
+    expect(source).toContain('without email verification or an invitation');
+    expect(source).toContain("setInitialPassword('')");
+  });
+
   it('names the row action for what it edits, so changing a person is discoverable', () => {
     expect(source).toContain('Edit user');
     expect(source).not.toContain('<span>Manage access</span>');

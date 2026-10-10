@@ -29,6 +29,7 @@ interface AuditRow {
 
 type StatusFilter = 'all' | 'active' | 'deactivated';
 type LifecycleAction = 'deactivate' | 'reactivate';
+type ProvisioningMode = 'invite' | 'manual';
 
 const UserManagementPage: React.FC = () => {
   const { profile, operatingOrganizationId, operatingOrganizations } = useAuth();
@@ -41,6 +42,9 @@ const UserManagementPage: React.FC = () => {
   const [search, setSearch] = useState('');
   const [statusFilter, setStatusFilter] = useState<StatusFilter>('all');
   const [showInvite, setShowInvite] = useState(false);
+  const [provisioningMode, setProvisioningMode] = useState<ProvisioningMode>('invite');
+  const [initialPassword, setInitialPassword] = useState('');
+  const [confirmInitialPassword, setConfirmInitialPassword] = useState('');
   const [inviteForm, setInviteForm] = useState({ email: '', displayName: '', role: 'officer' as AppRole, employmentType: 'permanent', presetKey: '', linkHR: false, linkRoster: false, branchId: '' });
   const [inviteBranches, setInviteBranches] = useState<Array<{ id: string; name: string }>>([]);
   const [lifecycle, setLifecycle] = useState<{ user: UserRow; action: LifecycleAction } | null>(null);
@@ -55,6 +59,22 @@ const UserManagementPage: React.FC = () => {
   const directInviteRoles = assignableRoles;
   const isFieldInvite = ['officer', 'admin_officer'].includes(inviteForm.role);
   const canManageIdentityRecords = ['grand_master', 'master', 'admin'].includes(profile?.role ?? 'unknown');
+  const canPreauthenticate = canManageIdentityRecords;
+
+  const closeProvisioningForm = () => {
+    setShowInvite(false);
+    setProvisioningMode('invite');
+    setInitialPassword('');
+    setConfirmInitialPassword('');
+  };
+
+  const selectProvisioningMode = (mode: ProvisioningMode) => {
+    if (mode === 'manual' && !canPreauthenticate) return;
+    setProvisioningMode(mode);
+    setInitialPassword('');
+    setConfirmInitialPassword('');
+    setError(null);
+  };
 
   const loadIdentity = useCallback(async () => {
     const operatingBranchId = operatingOrganizationId ?? profile?.organizationId;
@@ -124,6 +144,16 @@ const UserManagementPage: React.FC = () => {
   const inviteUser = async (event: React.FormEvent) => {
     event.preventDefault();
     if (!profile?.organizationId || !directInviteRoles.includes(inviteForm.role) || busyId === 'invite') return;
+    const manualProvisioning = provisioningMode === 'manual';
+    if (manualProvisioning && !canPreauthenticate) return;
+    if (manualProvisioning && initialPassword.length < 8) {
+      setError('Initial password must be at least 8 characters.');
+      return;
+    }
+    if (manualProvisioning && initialPassword !== confirmInitialPassword) {
+      setError('Initial passwords do not match.');
+      return;
+    }
     if (isFieldInvite && inviteForm.linkRoster && !inviteBranches.some((branch) => branch.id === inviteForm.branchId)) {
       setError('Choose an authorized delivery branch before linking rostering.');
       return;
@@ -138,6 +168,8 @@ const UserManagementPage: React.FC = () => {
           display_name: inviteForm.displayName.trim(),
           role: inviteForm.role,
           organization_id: profile.organizationId,
+          preauthenticated: manualProvisioning,
+          ...(manualProvisioning ? { password: initialPassword } : {}),
           staff: isFieldInvite && inviteForm.linkHR ? { employment_type: inviteForm.employmentType, work_ready: false } : undefined,
           branch_authorisations: isFieldInvite && inviteForm.linkRoster ? [{ branch_org_id: inviteForm.branchId, role_at_branch: inviteForm.role, module_access: [], can_be_rostered: false }] : undefined,
           access_preset_key: ['grand_master', 'master', 'admin', 'admin_officer'].includes(inviteForm.role) ? inviteForm.presetKey || undefined : undefined,
@@ -147,14 +179,20 @@ const UserManagementPage: React.FC = () => {
         const response = 'context' in invokeError && invokeError.context instanceof Response ? await invokeError.context.json().catch(() => null) : null;
         throw new Error(response?.error ?? invokeError.message);
       }
-      if (!data?.success || data.invitation_sent === false) throw new Error(data?.error ?? 'No invitation was sent. Open the existing user profile and resend its invitation.');
-      setNotice(`Invitation sent to ${inviteForm.email.trim()}.`);
+      if (!data?.success || (manualProvisioning && (data.preauthenticated !== true || data.invitation_sent !== false)) || (!manualProvisioning && data.invitation_sent === false)) {
+        throw new Error(data?.error ?? (manualProvisioning ? 'The account was not created without an invitation.' : 'No invitation was sent. Open the existing user profile and resend its invitation.'));
+      }
+      setNotice(manualProvisioning
+        ? `Login created for ${inviteForm.email.trim()} without sending an invitation. Share the initial password through a separate secure channel and ask the user to change it immediately.`
+        : `Invitation sent to ${inviteForm.email.trim()}.`);
       setInviteForm({ email: '', displayName: '', role: 'officer', employmentType: 'permanent', presetKey: '', linkHR: false, linkRoster: false, branchId: '' });
-      setShowInvite(false);
+      closeProvisioningForm();
       await loadIdentity();
     } catch (inviteError) {
       setError(inviteError instanceof Error ? inviteError.message : 'The invitation could not be sent.');
     } finally {
+      setInitialPassword('');
+      setConfirmInitialPassword('');
       setBusyId(null);
     }
   };
@@ -212,7 +250,7 @@ const UserManagementPage: React.FC = () => {
     <div className="identity-page">
       <header className="identity-heading">
         <div><span>Administration</span><h1>Identity and access</h1><p>Manage staff identity and access for the selected operating branch.</p></div>
-        <div className="identity-heading-actions">{canManageIdentityRecords && <button type="button" onClick={() => setShowIdentityRecords(true)}><ContactRound size={17} /> Identity records</button>}<button type="button" className="identity-invite-button" onClick={() => setShowInvite((open) => !open)}><MailPlus size={17} /> Invite user</button></div>
+        <div className="identity-heading-actions">{canManageIdentityRecords && <button type="button" onClick={() => setShowIdentityRecords(true)}><ContactRound size={17} /> Identity records</button>}<button type="button" className="identity-invite-button" onClick={() => showInvite ? closeProvisioningForm() : setShowInvite(true)}><MailPlus size={17} /> Invite user</button></div>
       </header>
 
       <section className="identity-summary" aria-label="Account summary">
@@ -227,20 +265,31 @@ const UserManagementPage: React.FC = () => {
 
       {showInvite && (
         <form className="identity-invite-form" onSubmit={inviteUser}>
-          <div className="identity-panel-heading"><div><span>Provision account</span><h2>Invite a user</h2></div><button type="button" onClick={() => setShowInvite(false)} title="Close invite form"><X size={18} /></button></div>
+          <div className="identity-panel-heading"><div><span>Provision account</span><h2>{provisioningMode === 'manual' ? 'Create login' : 'Invite a user'}</h2></div><button type="button" onClick={closeProvisioningForm} title="Close account form"><X size={18} /></button></div>
+          <div className="identity-provisioning-mode" role="group" aria-label="Provisioning method">
+            <button type="button" aria-pressed={provisioningMode === 'invite'} onClick={() => selectProvisioningMode('invite')}>Invite by email</button>
+            {canPreauthenticate && <button type="button" aria-pressed={provisioningMode === 'manual'} onClick={() => selectProvisioningMode('manual')}>Create login manually</button>}
+          </div>
           <div className="identity-form-grid">
             <label><span>Display name</span><input required value={inviteForm.displayName} onChange={(event) => setInviteForm((form) => ({ ...form, displayName: event.target.value }))} /></label>
             <label><span>Email address</span><input type="email" required value={inviteForm.email} onChange={(event) => setInviteForm((form) => ({ ...form, email: event.target.value }))} /></label>
             <label><span>Role</span><select value={inviteForm.role} onChange={(event) => setInviteForm((form) => ({ ...form, role: event.target.value as AppRole }))}>{directInviteRoles.map((role) => <option value={role} key={role}>{IDENTITY_ROLE_LABEL[role]}</option>)}</select></label>
             {['grand_master', 'master', 'admin', 'admin_officer'].includes(inviteForm.role) && <label><span>Access preset</span><select value={inviteForm.presetKey} onChange={(event) => setInviteForm((form) => ({ ...form, presetKey: event.target.value }))}><option value="">Assign after invitation</option>{presets.map((preset) => <option value={preset.key} key={preset.id}>{preset.name}</option>)}</select></label>}
           </div>
+          {provisioningMode === 'manual' && <>
+            <p className="identity-provisioning-warning" role="note">This creates a confirmed login without email verification or an invitation. Use only for a test identity or an address verified through another approved process. Share the initial password separately and ask the user to change it immediately.</p>
+            <div className="identity-form-grid">
+              <label><span>Initial password</span><input type="password" autoComplete="new-password" minLength={8} required value={initialPassword} onChange={(event) => setInitialPassword(event.target.value)} /></label>
+              <label><span>Confirm initial password</span><input type="password" autoComplete="new-password" minLength={8} required value={confirmInitialPassword} onChange={(event) => setConfirmInitialPassword(event.target.value)} /></label>
+            </div>
+          </>}
           {isFieldInvite && <div className="identity-form-grid">
             <label><span>Link to HR</span><input type="checkbox" role="switch" checked={inviteForm.linkHR} onChange={(event) => setInviteForm((form) => ({ ...form, linkHR: event.target.checked }))} /></label>
             {inviteForm.linkHR && <label><span>Employment type</span><select value={inviteForm.employmentType} onChange={(event) => setInviteForm((form) => ({ ...form, employmentType: event.target.value }))}><option value="permanent">Permanent</option><option value="casual">Casual</option><option value="contractor">Contractor</option></select></label>}
             <label><span>Link to rostering</span><input type="checkbox" role="switch" checked={inviteForm.linkRoster} onChange={(event) => setInviteForm((form) => ({ ...form, linkRoster: event.target.checked }))} /></label>
             {inviteForm.linkRoster && <label><span>Delivery branch</span><select required value={inviteForm.branchId} onChange={(event) => setInviteForm((form) => ({ ...form, branchId: event.target.value }))}><option value="">Select branch</option>{inviteBranches.map((branch) => <option key={branch.id} value={branch.id}>{branch.name}</option>)}</select></label>}
           </div>}
-          <div className="identity-form-footer"><span>Account invitation does not mark staff work-ready.</span><button type="submit" disabled={busyId === 'invite'}>{busyId === 'invite' ? <RefreshCw size={16} className="is-spinning" /> : <MailPlus size={16} />}{busyId === 'invite' ? 'Sending' : 'Send invitation'}</button></div>
+          <div className="identity-form-footer"><span>{provisioningMode === 'manual' ? 'Creating a login does not mark staff work-ready.' : 'Account invitation does not mark staff work-ready.'}</span><button type="submit" disabled={busyId === 'invite' || (provisioningMode === 'manual' && (initialPassword.length < 8 || initialPassword !== confirmInitialPassword))}>{busyId === 'invite' ? <RefreshCw size={16} className="is-spinning" /> : provisioningMode === 'manual' ? <UserCheck size={16} /> : <MailPlus size={16} />}{busyId === 'invite' ? provisioningMode === 'manual' ? 'Creating' : 'Sending' : provisioningMode === 'manual' ? 'Create login' : 'Send invitation'}</button></div>
         </form>
       )}
 

@@ -166,6 +166,46 @@
   padding: 16px;
 }
 
+.identity-provisioning-mode {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 3px;
+  width: fit-content;
+  max-width: 100%;
+  padding: 3px;
+  border: 1px solid #31485a;
+  border-radius: 6px;
+  background: #07111c;
+}
+
+.identity-provisioning-mode button {
+  min-height: 36px;
+  padding: 0 12px;
+  border: 1px solid transparent;
+  border-radius: 4px;
+  color: #a9bac7;
+  background: transparent;
+  font-size: 12px;
+  font-weight: 700;
+  cursor: pointer;
+}
+
+.identity-provisioning-mode button[aria-pressed="true"] {
+  border-color: #37645e;
+  color: #d6f5ee;
+  background: #18352f;
+}
+
+.identity-provisioning-warning {
+  margin: 0;
+  padding: 10px 12px;
+  border-left: 3px solid #d7a94c;
+  color: #e1cf9f;
+  background: #211d12;
+  font-size: 12px;
+  line-height: 1.5;
+}
+
 .identity-panel-heading h2 {
   margin: 3px 0 0;
   font-size: 15px;
