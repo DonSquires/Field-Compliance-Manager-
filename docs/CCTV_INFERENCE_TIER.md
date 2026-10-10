@@ -73,6 +73,17 @@ source/enhanced hashes, model/provider, fusion/enhancement receipts and recognit
 video/frame stays authoritative. Real-ESRGAN output is labelled generative/interpretive and always requires
 human confirmation.
 
+The worker then projects each plated `cctv_entity_observations` row into the shared
+perception spine with `record_cctv_alpr_perception_envelopes`. The projection is
+one replay-safe `cctv_alpr` envelope per observation and source hash; it does not
+replace CCTV custody, derivatives or review. `verified_candidate` requires
+reviewable evidence, a crop at least 48 px wide, minimum character confidence
+of 0.55, temporal consensus, source/enhanced agreement and no conflicting plate.
+Every machine result remains review-required. The existing
+`review_cctv_entity_observation` decision is projected into the shared field and
+append-only review receipt, so there is one human authority rather than a second
+independent approval path.
+
 ## 3. Detection rules (`services/fcm-inference/detector.py`)
 
 * **Model pick.** `DETECTOR_MODEL=auto` chooses `DETECTOR_MODEL_GPU` (large-704) when a CUDA provider *and*

@@ -275,6 +275,18 @@ domain tables are not replaced.
   noise and biosecurity under the shared contract.
 - Establish module-specific quality floors and human decision ladders.
 
+**First adapter implemented 2026-10-11: CCTV ALPR.** Each plated CCTV entity
+observation now compiles replay-safely into a `cctv_alpr` envelope after
+source/enhanced derivatives are stored. The receipt preserves the original
+evidence hash, frame location, raw/corrected OCR, model/provider provenance,
+minimum character confidence, crop width, temporal consensus, derivative
+hashes and conflicts. Machine verification requires every CCTV ALPR quality
+gate; disagreement remains a candidate for review. The existing CCTV
+observation decision is the sole human authority and is mirrored into the
+shared append-only review history. Raw access remains administrator-only until
+a task-entitlement policy is separately designed and tested. Face, person,
+vehicle-attribute and vertical-module adapters remain Phase C work.
+
 Gate: source/enhanced disagreement and threshold failures never auto-promote.
 
 ### Phase D — Desktop V2 and offline operation

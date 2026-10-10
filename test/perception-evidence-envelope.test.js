@@ -17,6 +17,14 @@ const validationMigration = fs.readFileSync(
   path.join(__dirname, '..', 'supabase', 'migrations', '20261010225539_harden_perception_envelope_payload_validation.sql'),
   'utf8',
 );
+const cctvAlprMigration = fs.readFileSync(
+  path.join(__dirname, '..', 'supabase', 'migrations', '20261010230154_cctv_alpr_perception_envelope_adapter.sql'),
+  'utf8',
+);
+const cctvAlprGateMigration = fs.readFileSync(
+  path.join(__dirname, '..', 'supabase', 'migrations', '20261010230747_fix_cctv_alpr_service_role_gate.sql'),
+  'utf8',
+);
 
 test('shared perception evidence schema is versioned, tenant-scoped, indexed, and review-gated', () => {
   for (const table of [
@@ -65,4 +73,30 @@ test('writer rejects missing or empty candidate arrays before recording an envel
   assert.match(validationMigration, /jsonb_typeof\(p_payload->'fields'\) IS DISTINCT FROM 'array'/);
   assert.match(validationMigration, /jsonb_array_length\(p_payload->'fields'\) = 0/);
   assert.match(validationMigration, /REVOKE ALL ON FUNCTION public\.record_perception_evidence_envelope_unchecked\(uuid,text,jsonb\)[\s\S]*service_role/);
+});
+
+test('CCTV ALPR projection preserves custody and fails closed around weak or conflicting recognition', () => {
+  assert.match(cctvAlprMigration, /FUNCTION public\.record_cctv_alpr_perception_envelopes\(p_job_id uuid\)/);
+  assert.match(cctvAlprMigration, /CCTV source custody SHA-256 is required/);
+  assert.match(cctvAlprMigration, /cctv-alpr:' \|\| v_observation\.id::text \|\| ':v1:'/);
+  assert.match(cctvAlprMigration, /v_evidence_quality = 'insufficient'/);
+  assert.match(cctvAlprMigration, /plate_width_px'\)::integer, 0\) < 48/);
+  assert.match(cctvAlprMigration, /v_temporal_consensus[\s\S]*v_agreement[\s\S]*v_char_confidence, 0\) >= 0\.55/);
+  assert.match(cctvAlprMigration, /'differs_from_temporal_candidate'/);
+  assert.match(cctvAlprMigration, /'vehicle\.plate_number'/);
+  assert.match(cctvAlprMigration, /v_conflicts, v_authority, true/);
+  assert.match(cctvAlprGateMigration, /auth\.role\(\) <> 'service_role'/);
+  assert.match(cctvAlprGateMigration, /record_cctv_alpr_perception_envelopes_unchecked/);
+  assert.match(cctvAlprGateMigration, /REVOKE ALL ON FUNCTION public\.record_cctv_alpr_perception_envelopes_unchecked\(uuid\)[\s\S]*service_role/);
+  assert.match(cctvAlprGateMigration, /REVOKE ALL ON FUNCTION public\.record_cctv_alpr_perception_envelopes\(uuid\)[\s\S]*GRANT EXECUTE[\s\S]*service_role/);
+});
+
+test('CCTV observation review remains the single human authority for shared ALPR fields', () => {
+  assert.match(cctvAlprMigration, /FUNCTION public\.sync_cctv_alpr_perception_review\(\)/);
+  assert.match(cctvAlprMigration, /CREATE TRIGGER sync_cctv_alpr_perception_review_trigger/);
+  assert.match(cctvAlprMigration, /NEW\.review_state = 'accepted'[\s\S]*v_next_authority := 'human_approved'/);
+  assert.match(cctvAlprMigration, /INSERT INTO public\.perception_evidence_reviews/);
+  assert.match(cctvAlprMigration, /'cctv_entity_observation_id', NEW\.id/);
+  assert.match(cctvAlprMigration, /NEW\.reviewed_by/);
+  assert.match(cctvAlprMigration, /NEW\.review_state = 'superseded'[\s\S]*authority_state = 'superseded'/);
 });
