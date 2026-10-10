@@ -789,6 +789,13 @@ function stillEntityObservations(recognition, context = {}) {
         bbox: vehicle.bbox || vehicle.detection?.bbox || plate?.plate_bbox || null,
         colour: attributes.vehicle_colour || attributes.colour || null,
         body_type: attributes.vehicle_type || attributes.body_type || null,
+        attribute_confidence: confidence(attributes.vehicle_attribute_confidence),
+        colour_confidence: confidence(attributes.vehicle_colour_confidence),
+        body_type_confidence: confidence(attributes.vehicle_type_confidence),
+        vehicle_attribute_model: attributes.vehicle_model_name || attributes.vehicle_attribute_model || null,
+        vehicle_attribute_status: attributes.vehicle_attribute_status || null,
+        vehicle_crop_status: attributes.vehicle_crop_status || null,
+        vehicle_attribute_source: attributes.inference_provider || attributes.vehicle_attribute_source || null,
         vehicle_basis: vehicles.basis,
         plate_basis: plate ? (sourcePlate ? 'authoritative_source' : 'enhanced_candidate') : null,
         plate_confidence: confidence(plate?.confidence),
@@ -1086,6 +1093,13 @@ async function recordSharedPersonEvidence(job) {
   return data;
 }
 
+async function recordSharedVehicleAttributeEvidence(job) {
+  const { data, error } = await supabase.rpc('record_cctv_vehicle_attribute_perception_envelopes', { p_job_id: job.id });
+  if (error) throw new Error(`shared vehicle attribute evidence persistence failed: ${error.message}`);
+  log('shared_vehicle_attribute_evidence_recorded', { job_id: job.id, ...data });
+  return data;
+}
+
 async function normaliseStillJpeg(sourcePath, outputPath) {
   await execFileAsync('ffmpeg', ['-y', '-v', 'error', '-i', sourcePath, '-frames:v', '1', '-q:v', '2', outputPath], { timeout: 120_000, maxBuffer: 4 * 1024 * 1024 });
   return fs.readFile(outputPath);
@@ -1184,6 +1198,7 @@ async function processStillEvidence(job, evidence) {
   await recordObservationDerivatives(job, derivatives);
   await recordSharedAlprEvidence(job);
   await recordSharedPersonEvidence(job);
+  await recordSharedVehicleAttributeEvidence(job);
   if (provider === 'laptop_gpu' || provider === 'runpod_fallback') {
     await recordInferenceUsage(job, { frames_sampled: 1, frames_recognised: 1, frames_sent: 1, gpu_calls: 1, gpu_ms: Number(answer?.gpu_elapsed_ms) || 0 });
   }
@@ -1512,6 +1527,7 @@ async function processOne() {
     await recordObservationDerivatives(job, observationDerivatives);
     await recordSharedAlprEvidence(job);
     await recordSharedPersonEvidence(job);
+    await recordSharedVehicleAttributeEvidence(job);
     const gpuDerivatives = observationDerivatives.filter((derivative) => derivative.provider === 'laptop_gpu' || derivative.provider === 'runpod_fallback');
     if (observationDerivatives.length) await recordInferenceUsage(job, {
       frames_sampled: 0, frames_recognised: observationDerivatives.length,

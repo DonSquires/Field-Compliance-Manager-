@@ -53,6 +53,12 @@ Field Compliance Manager (FCM) is an enterprise SaaS platform designed to replac
      Face similarity stays provisional until relevant-condition and
      demographic calibration exists. Only an explicit human CCTV identity
      link can create a human-approved identity reference.
+    - **CCTV vehicle attributes:** The vehicle review card shows make, model,
+     colour, body type, year, source and model confidence when available.
+     Confirm only what the evidence supports, correct any wrong field, or
+     dismiss the candidates. Accepting a plate links vehicle identity but does
+     not promote visual attributes. Only this explicit attribute review can
+     update the canonical vehicle, and every decision is attributable.
    - **Self-Heal Boundary:** Bob may reproduce, edit, test, independently
      verify, repair and prepare a draft release in an isolated worker. Schema,
      auth/RLS, secrets, protected-branch merge, deployment and destructive bulk

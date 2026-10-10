@@ -37,6 +37,7 @@ import {
   ticksFor,
   timeToX,
   timelineBounds,
+  vehicleAttributeCandidateFrom,
   vehicleVisionHintFrom,
   weaponHintFrom,
   xToTime,
@@ -161,6 +162,64 @@ describe('recordings browser', () => {
     expect(vehicleVisionHintFrom(dismissed)).toEqual({ make: 'Toyota', model: 'Hilux', reviewed: true });
     const corrected = observation({ attributes: { make: 'Ford', model: 'Ranger', make_model_source: 'human_confirmed', make_model_review: { status: 'corrected' } } });
     expect(vehicleVisionHintFrom(corrected)).toBeNull();
+  });
+
+  it('keeps trained vehicle attributes visible as governed candidates with their source and confidence', () => {
+    const candidate = observation({
+      attributes: {
+        colour: 'white',
+        body_type: 'van',
+        attribute_confidence: 0.81,
+        vehicle_attribute_source: 'openvino_vehicle_attributes_0039',
+      },
+    });
+    expect(vehicleAttributeCandidateFrom(candidate)).toEqual({
+      make: null,
+      model: null,
+      colour: 'white',
+      bodyType: 'van',
+      year: null,
+      reviewed: false,
+      reviewStatus: null,
+      source: 'openvino_vehicle_attributes_0039',
+      confidence: 0.81,
+    });
+  });
+
+  it('marks the complete vehicle attribute candidate as reviewed without treating it as machine-verified', () => {
+    const candidate = observation({
+      attributes: {
+        make: 'Ford',
+        model: 'Ranger',
+        colour: 'blue',
+        body_type: 'utility',
+        year: 2022,
+        vehicle_attribute_source: 'human_confirmed',
+        make_model_review: { status: 'corrected', reviewed_fields: ['make', 'model', 'colour', 'body_type', 'year'] },
+      },
+    });
+    expect(vehicleAttributeCandidateFrom(candidate)).toMatchObject({
+      make: 'Ford',
+      model: 'Ranger',
+      colour: 'blue',
+      bodyType: 'utility',
+      year: 2022,
+      reviewed: true,
+      reviewStatus: 'corrected',
+      source: 'human_confirmed',
+    });
+  });
+
+  it('keeps legacy make/model-only review receipts open when colour or body type still needs review', () => {
+    const candidate = observation({
+      attributes: {
+        make: 'Toyota',
+        model: 'Hilux',
+        colour: 'white',
+        make_model_review: { status: 'confirmed' },
+      },
+    });
+    expect(vehicleAttributeCandidateFrom(candidate)?.reviewed).toBe(false);
   });
 
   it('flags a clip as a busy scene when it has unusually many distinct people or vehicles, without adding to alerts', () => {

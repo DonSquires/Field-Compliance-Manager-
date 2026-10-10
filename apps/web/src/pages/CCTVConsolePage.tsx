@@ -79,7 +79,7 @@ import {
   previousClipBefore,
   timelineBounds,
   toObservation,
-  vehicleVisionHintFrom,
+  vehicleAttributeCandidateFrom,
   weaponHintFrom,
   zoomView,
   GRID_LAYOUTS,
@@ -227,6 +227,9 @@ const CCTVConsolePage: React.FC = () => {
   const [correctingVehicleId, setCorrectingVehicleId] = useState<string | null>(null);
   const [correctMake, setCorrectMake] = useState('');
   const [correctModel, setCorrectModel] = useState('');
+  const [correctColour, setCorrectColour] = useState('');
+  const [correctBodyType, setCorrectBodyType] = useState('');
+  const [correctYear, setCorrectYear] = useState('');
   const [showKeys, setShowKeys] = useState(false);
   const [thumbUrls, setThumbUrls] = useState<Record<string, string>>({});
   const [bookmarkDraft, setBookmarkDraft] = useState<BookmarkDraft | null>(null);
@@ -852,6 +855,15 @@ const CCTVConsolePage: React.FC = () => {
   };
 
   const runVehicleAttributeReview = async (observation: ConsoleObservation, action: 'confirm' | 'correct' | 'reject') => {
+    if (action === 'correct' && !correctMake.trim() && !correctModel.trim() && !correctColour.trim() && !correctBodyType.trim() && !correctYear.trim()) {
+      setReviewMessage('Enter at least one corrected vehicle attribute.');
+      return;
+    }
+    const year = correctYear.trim() ? Number(correctYear) : null;
+    if (year !== null && (!Number.isInteger(year) || year < 1886 || year > new Date().getFullYear() + 2)) {
+      setReviewMessage('Enter a valid four-digit vehicle year.');
+      return;
+    }
     setReviewBusy(`${observation.id}:attrs:${action}`);
     setReviewMessage(null);
     const { error: attrError } = await supabase.rpc('confirm_cctv_vehicle_attributes', {
@@ -859,6 +871,9 @@ const CCTVConsolePage: React.FC = () => {
       p_action: action,
       p_make: action === 'correct' ? correctMake.trim() || null : null,
       p_model: action === 'correct' ? correctModel.trim() || null : null,
+      p_colour: action === 'correct' ? correctColour.trim() || null : null,
+      p_body_type: action === 'correct' ? correctBodyType.trim() || null : null,
+      p_year: action === 'correct' ? year : null,
       p_notes: notes.trim() || null,
     });
     setReviewBusy(null);
@@ -866,8 +881,11 @@ const CCTVConsolePage: React.FC = () => {
     setCorrectingVehicleId(null);
     setCorrectMake('');
     setCorrectModel('');
+    setCorrectColour('');
+    setCorrectBodyType('');
+    setCorrectYear('');
     if (observation.importId) void loadImportDetail(observation.importId);
-    setReviewMessage(action === 'reject' ? 'AI suggestion dismissed.' : action === 'correct' ? 'Correction saved to the vehicle record.' : 'Confirmed and saved to the vehicle record.');
+    setReviewMessage(action === 'reject' ? 'Vehicle attribute candidates dismissed.' : action === 'correct' ? 'Corrected attributes saved to the vehicle record.' : 'Vehicle attributes confirmed and saved.');
   };
 
   const runWeaponHintReview = async (observation: ConsoleObservation, status: 'confirmed' | 'dismissed') => {
@@ -1269,23 +1287,33 @@ const CCTVConsolePage: React.FC = () => {
                               {observation.attributes.plate_confidence ? <div><dt>plate read</dt><dd>{Math.round(Number(observation.attributes.plate_confidence) * 100)}%</dd></div> : null}
                             </dl>
                             {(() => {
-                              const hint = vehicleVisionHintFrom(observation);
+                              const hint = vehicleAttributeCandidateFrom(observation);
                               if (!hint) return null;
-                              const label = [hint.make, hint.model].filter(Boolean).join(' ');
+                              const label = [
+                                [hint.make, hint.model].filter(Boolean).join(' '),
+                                hint.colour,
+                                hint.bodyType,
+                                hint.year,
+                              ].filter(Boolean).join(' · ');
                               const busyPrefix = `${observation.id}:attrs:`;
                               return (
                                 <div className="cctv-entity__ai-hint-block">
-                                  <p className="cctv-entity__ai-hint" title="Self-hosted vision-LLM guess, not a verified registry lookup - confirm before relying on it.">
-                                    AI suggestion (unverified): {label}
+                                  <p className="cctv-entity__ai-hint" title="Machine-derived vehicle attributes remain provisional until a human confirms or corrects them.">
+                                    Vehicle attribute candidate: {label}
+                                    {hint.confidence !== null ? ` · ${Math.round(hint.confidence * 100)}% confidence` : ''}
+                                    {hint.source ? ` · ${hint.source}` : ' · source not recorded'}
                                   </p>
                                   {!hint.reviewed ? (
                                     correctingVehicleId === observation.id ? (
                                       <div className="cctv-entity__ai-hint-correct">
                                         <label className="cctv-entity__field">Make <input value={correctMake} onChange={(event) => setCorrectMake(event.target.value)} placeholder={hint.make ?? 'e.g. Toyota'} /></label>
                                         <label className="cctv-entity__field">Model <input value={correctModel} onChange={(event) => setCorrectModel(event.target.value)} placeholder={hint.model ?? 'e.g. Hilux'} /></label>
+                                        <label className="cctv-entity__field">Colour <input value={correctColour} onChange={(event) => setCorrectColour(event.target.value)} placeholder={hint.colour ?? 'e.g. white'} /></label>
+                                        <label className="cctv-entity__field">Body type <input value={correctBodyType} onChange={(event) => setCorrectBodyType(event.target.value)} placeholder={hint.bodyType ?? 'e.g. van'} /></label>
+                                        <label className="cctv-entity__field">Year <input type="number" value={correctYear} onChange={(event) => setCorrectYear(event.target.value)} placeholder={hint.year ? String(hint.year) : 'e.g. 2022'} /></label>
                                         <div className="cctv-entity__actions">
-                                          <button type="button" className="page-action is-primary" disabled={reviewBusy !== null || (!correctMake.trim() && !correctModel.trim())} onClick={() => void runVehicleAttributeReview(observation, 'correct')}><Check size={14} aria-hidden="true" /> Save correction</button>
-                                          <button type="button" className="page-action" disabled={reviewBusy !== null} onClick={() => { setCorrectingVehicleId(null); setCorrectMake(''); setCorrectModel(''); }}>Cancel</button>
+                                          <button type="button" className="page-action is-primary" disabled={reviewBusy !== null || (!correctMake.trim() && !correctModel.trim() && !correctColour.trim() && !correctBodyType.trim() && !correctYear.trim())} onClick={() => void runVehicleAttributeReview(observation, 'correct')}><Check size={14} aria-hidden="true" /> Save correction</button>
+                                          <button type="button" className="page-action" disabled={reviewBusy !== null} onClick={() => { setCorrectingVehicleId(null); setCorrectMake(''); setCorrectModel(''); setCorrectColour(''); setCorrectBodyType(''); setCorrectYear(''); }}>Cancel</button>
                                         </div>
                                       </div>
                                     ) : (
@@ -1296,7 +1324,7 @@ const CCTVConsolePage: React.FC = () => {
                                       </div>
                                     )
                                   ) : (
-                                    <small className="cctv-console__muted">Reviewed.</small>
+                                    <small className="cctv-console__muted">Reviewed: {hint.reviewStatus?.replace(/_/g, ' ') || 'complete'}.</small>
                                   )}
                                 </div>
                               );

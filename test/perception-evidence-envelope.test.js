@@ -29,6 +29,26 @@ const cctvPersonMigration = fs.readFileSync(
   path.join(__dirname, '..', 'supabase', 'migrations', '20261010231809_cctv_person_face_perception_envelope_adapter.sql'),
   'utf8',
 );
+const cctvVehicleAttributeMigration = fs.readFileSync(
+  path.join(__dirname, '..', 'supabase', 'migrations', '20261010232800_cctv_vehicle_attribute_perception_adapter.sql'),
+  'utf8',
+);
+const cctvConsolePage = fs.readFileSync(
+  path.join(__dirname, '..', 'apps', 'web', 'src', 'pages', 'CCTVConsolePage.tsx'),
+  'utf8',
+);
+const cctvTriagePage = fs.readFileSync(
+  path.join(__dirname, '..', 'apps', 'web', 'src', 'pages', 'CCTVTriagePage.tsx'),
+  'utf8',
+);
+const cctvVehicleOverloadCleanupMigration = fs.readFileSync(
+  path.join(__dirname, '..', 'supabase', 'migrations', '20261010233723_remove_legacy_vehicle_attribute_review_overload.sql'),
+  'utf8',
+);
+const cctvVehicleAuthorizationMigration = fs.readFileSync(
+  path.join(__dirname, '..', 'supabase', 'migrations', '20261010234051_fix_vehicle_attribute_review_authorization.sql'),
+  'utf8',
+);
 
 test('shared perception evidence schema is versioned, tenant-scoped, indexed, and review-gated', () => {
   for (const table of [
@@ -129,4 +149,44 @@ test('existing person observation review is the only authority that can approve 
   assert.match(cctvPersonMigration, /v_observation\.reviewed_by/);
   assert.match(cctvPersonMigration, /CREATE TRIGGER sync_cctv_person_perception_review_trigger/);
   assert.match(cctvPersonMigration, /REVOKE ALL ON FUNCTION public\.apply_cctv_person_review_to_perception\(uuid\)[\s\S]*service_role/);
+});
+
+test('CCTV vehicle attribute receipts preserve trained and heuristic provenance without appearance embeddings', () => {
+  assert.match(cctvVehicleAttributeMigration, /FUNCTION public\.record_cctv_vehicle_attribute_perception_envelopes\(p_job_id uuid\)/);
+  assert.match(cctvVehicleAttributeMigration, /cctv-vehicle-attributes:' \|\| v_observation\.id::text/);
+  for (const key of ['make', 'model', 'colour', 'body_type', 'year']) {
+    assert.match(cctvVehicleAttributeMigration, new RegExp(`'vehicle\\.${key}'`));
+  }
+  assert.match(cctvVehicleAttributeMigration, /openvino_vehicle_attributes_0039/);
+  assert.match(cctvVehicleAttributeMigration, /unverified_vision_llm_hint_human_review_required_v1/);
+  assert.match(cctvVehicleAttributeMigration, /legacy_or_heuristic_vehicle_attribute_human_review_required_v1/);
+  assert.match(cctvVehicleAttributeMigration, /'appearance_embedding_included', false/);
+  assert.doesNotMatch(cctvVehicleAttributeMigration, /\bappearance_embedding\b|\bappearance_vec\b/);
+  assert.match(cctvVehicleAttributeMigration, /REVOKE ALL ON FUNCTION public\.record_cctv_vehicle_attribute_perception_envelopes\(uuid\)[\s\S]*GRANT EXECUTE[\s\S]*service_role/);
+});
+
+test('vehicle identity acceptance cannot seed unreviewed attributes and explicit review controls canonical promotion', () => {
+  assert.match(cctvVehicleAttributeMigration, /p_source_table = 'cctv_entity_observations' THEN NULL ELSE p_make/);
+  assert.match(cctvVehicleAttributeMigration, /p_source_table = 'cctv_entity_observations' THEN NULL ELSE p_colour/);
+  assert.match(cctvVehicleAttributeMigration, /FUNCTION public\.confirm_cctv_vehicle_attributes\(/);
+  assert.match(cctvVehicleAttributeMigration, /p_colour text DEFAULT NULL/);
+  assert.match(cctvVehicleAttributeMigration, /p_body_type text DEFAULT NULL/);
+  assert.match(cctvVehicleAttributeMigration, /p_year integer DEFAULT NULL/);
+  assert.match(cctvVehicleAttributeMigration, /SET make = coalesce\(v_final_make, make\)[\s\S]*body_type = coalesce\(v_final_body_type, body_type\)[\s\S]*year = coalesce\(v_final_year, year\)/);
+  assert.match(cctvVehicleAttributeMigration, /explicit_human_vehicle_attribute_correction_v1/);
+  assert.match(cctvVehicleAttributeMigration, /INSERT INTO public\.perception_evidence_reviews/);
+  assert.match(cctvVehicleOverloadCleanupMigration, /DROP FUNCTION IF EXISTS public\.confirm_cctv_vehicle_attributes\(uuid, text, text, text, text\)/);
+  assert.match(cctvVehicleAuthorizationMigration, /public\.is_admin_for_org\(v_org\)/);
+});
+
+test('both CCTV review surfaces submit the complete governed vehicle attribute payload', () => {
+  for (const source of [cctvConsolePage, cctvTriagePage]) {
+    assert.match(source, /vehicleAttributeCandidateFrom/);
+    assert.match(source, /p_make:/);
+    assert.match(source, /p_model:/);
+    assert.match(source, /p_colour:/);
+    assert.match(source, /p_body_type:/);
+    assert.match(source, /p_year:/);
+    assert.match(source, /human review required|remain provisional/i);
+  }
 });

@@ -175,6 +175,16 @@ registration; the console's enhancement/zoom gets the located box.
 
 * RunPod `infer_batch` (`runpod_handler.py`) now returns `alpr` and `face` blocks per frame in addition to
   the triage; `ping` returns the full health payload including providers.
+* **Vehicle-attribute evidence.** The worker preserves OpenVINO colour/type
+  confidence, model/provider, crop and inference status instead of flattening
+  them into an unlabelled observation. Make/model from the vision LLM remains
+  `vision_llm_hint_unverified`; heuristic colour/type remains distinguishable
+  from `openvino_vehicle_attributes_0039`. All five supported fields (make,
+  model, colour, body type and year) enter `cctv_vehicle_attributes` receipts
+  as review-required candidates. Plate acceptance establishes vehicle identity
+  only. Only `confirm_cctv_vehicle_attributes` may promote reviewed attributes
+  to `canonical_vehicles`, and a correction preserves the original machine
+  candidate as superseded evidence.
 * **Where the work runs (owner ruling 2026-09-20, GPU cost).** `services/vision/vision_job_watcher.js`
   runs under `VISION_INFERENCE_POLICY`: `vps_first` (default) — the VPS `/infer/detect` triages every
   sampled frame and RunPod is asked only about frames the VPS left unanswered; `vps_only` never calls
