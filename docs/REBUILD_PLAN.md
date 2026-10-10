@@ -415,6 +415,17 @@ approves presence; only an explicit human person link/new-person action creates
 a human-approved shared identity reference. Vehicle attributes and
 vertical-module adapters remain.
 
+Phase C CCTV vehicle-attribute slice shipped 2026-10-11: make, model, colour,
+body type and year now retain per-field provenance in replay-safe shared
+receipts. Trained OpenVINO colour/type, heuristic fallback and vision-LLM
+make/model sources remain distinguishable and always require human review.
+Plate acceptance now creates or links vehicle identity without seeding visual
+attributes. The dedicated attribute review is the only canonical promotion
+path and records corrections without erasing the original candidate. The live
+backfill recorded 190 envelopes from 177 jobs and replayed all 190
+idempotently. Smoke, noise, biosecurity and other vertical-module adapters
+remain.
+
 **Gate:** live `bob_messages` show no context-losing fallbacks; a Builder job
 runs implement → verify → repair without human touch and stops cleanly at
 `release_ready`; egress proven per rank; Atlas `exercised` is populated from

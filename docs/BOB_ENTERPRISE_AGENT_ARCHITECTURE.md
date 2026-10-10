@@ -299,6 +299,18 @@ only human authority; a shared identity reference is created only from an
 explicit human link/new-identity action. Vehicle attributes and vertical-module
 adapters remain Phase C work.
 
+**Third adapter implemented 2026-10-11: CCTV vehicle attributes.** Make, model,
+colour, body type and year now compile into replay-safe shared receipts with
+source/frame custody, model/provider, crop, per-field confidence and derivative
+hashes. Trained OpenVINO colour/type, heuristic fallbacks and unverified
+vision-LLM make/model remain visibly distinct candidates; none can become
+machine-verified or canonical. Plate identity acceptance no longer seeds any
+visual attribute. The dedicated human vehicle-attribute review is the sole
+promotion path and records confirmation, correction or rejection in the shared
+append-only review history. Historical replay recorded 190 envelopes from 177
+jobs; a second pass replayed all 190 without duplication. Vertical-module
+adapters remain Phase C work.
+
 Gate: source/enhanced disagreement and threshold failures never auto-promote.
 
 ### Phase D — Desktop V2 and offline operation

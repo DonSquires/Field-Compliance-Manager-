@@ -16,7 +16,7 @@ import {
   isWeakInferenceCandidate,
   OBSERVATION_SELECT,
   toObservation,
-  vehicleVisionHintFrom,
+  vehicleAttributeCandidateFrom,
   weaponHintFrom,
   type ConsoleFailure,
   type ConsoleObservation,
@@ -77,6 +77,9 @@ const CCTVTriagePage: React.FC = () => {
   const [correctingVehicleId, setCorrectingVehicleId] = useState<string | null>(null);
   const [correctMake, setCorrectMake] = useState('');
   const [correctModel, setCorrectModel] = useState('');
+  const [correctColour, setCorrectColour] = useState('');
+  const [correctBodyType, setCorrectBodyType] = useState('');
+  const [correctYear, setCorrectYear] = useState('');
   const [originalDerivativeStill, setOriginalDerivativeStill] = useState<string | null>(null);
   const [enhancedStill, setEnhancedStill] = useState<string | null>(null);
 
@@ -229,6 +232,15 @@ const CCTVTriagePage: React.FC = () => {
   }, [newName, newPlate, notes, patchObservation, load]);
 
   const runVehicleAttributeReview = useCallback(async (observation: ConsoleObservation, action: 'confirm' | 'correct' | 'reject') => {
+    if (action === 'correct' && !correctMake.trim() && !correctModel.trim() && !correctColour.trim() && !correctBodyType.trim() && !correctYear.trim()) {
+      setReviewMessage('Enter at least one corrected vehicle attribute.');
+      return;
+    }
+    const year = correctYear.trim() ? Number(correctYear) : null;
+    if (year !== null && (!Number.isInteger(year) || year < 1886 || year > new Date().getFullYear() + 2)) {
+      setReviewMessage('Enter a valid four-digit vehicle year.');
+      return;
+    }
     setReviewBusy(`${observation.id}:attrs:${action}`);
     setReviewMessage(null);
     const { data, error: attrError } = await supabase.rpc('confirm_cctv_vehicle_attributes', {
@@ -236,6 +248,9 @@ const CCTVTriagePage: React.FC = () => {
       p_action: action,
       p_make: action === 'correct' ? correctMake.trim() || null : null,
       p_model: action === 'correct' ? correctModel.trim() || null : null,
+      p_colour: action === 'correct' ? correctColour.trim() || null : null,
+      p_body_type: action === 'correct' ? correctBodyType.trim() || null : null,
+      p_year: action === 'correct' ? year : null,
       p_notes: notes.trim() || null,
     });
     setReviewBusy(null);
@@ -245,8 +260,11 @@ const CCTVTriagePage: React.FC = () => {
     setCorrectingVehicleId(null);
     setCorrectMake('');
     setCorrectModel('');
-    setReviewMessage(action === 'reject' ? 'AI suggestion dismissed.' : action === 'correct' ? 'Correction saved to the vehicle record.' : 'Confirmed and saved to the vehicle record.');
-  }, [correctMake, correctModel, notes, patchObservation]);
+    setCorrectColour('');
+    setCorrectBodyType('');
+    setCorrectYear('');
+    setReviewMessage(action === 'reject' ? 'Vehicle attribute candidates dismissed.' : action === 'correct' ? 'Corrected attributes saved to the vehicle record.' : 'Vehicle attributes confirmed and saved.');
+  }, [correctBodyType, correctColour, correctMake, correctModel, correctYear, notes, patchObservation]);
 
   const runWeaponHintReview = useCallback(async (observation: ConsoleObservation, status: 'confirmed' | 'dismissed') => {
     setReviewBusy(`${observation.id}:weapon:${status}`);
@@ -390,20 +408,32 @@ const CCTVTriagePage: React.FC = () => {
                     {selected.attributes.plate_confidence ? <div><dt>plate read</dt><dd>{Math.round(Number(selected.attributes.plate_confidence) * 100)}%</dd></div> : null}
                   </dl>
                   {(() => {
-                    const hint = vehicleVisionHintFrom(selected);
+                    const hint = vehicleAttributeCandidateFrom(selected);
                     if (!hint) return null;
-                    const label = [hint.make, hint.model].filter(Boolean).join(' ');
+                    const label = [
+                      [hint.make, hint.model].filter(Boolean).join(' '),
+                      hint.colour,
+                      hint.bodyType,
+                      hint.year,
+                    ].filter(Boolean).join(' · ');
                     return (
                       <div className="cctv-entity__ai-hint-block">
-                        <p className="cctv-entity__ai-hint" title="Self-hosted vision-LLM guess, not a verified registry lookup - confirm before relying on it.">AI suggestion (unverified): {label}</p>
+                        <p className="cctv-entity__ai-hint" title="Machine-derived vehicle attributes remain provisional until a human confirms or corrects them.">
+                          Vehicle attribute candidate: {label}
+                          {hint.confidence !== null ? ` · ${Math.round(hint.confidence * 100)}% confidence` : ''}
+                          {hint.source ? ` · ${hint.source}` : ' · source not recorded'}
+                        </p>
                         {!hint.reviewed ? (
                           correctingVehicleId === selected.id ? (
                             <div className="cctv-entity__ai-hint-correct">
                               <label className="cctv-entity__field">Make <input value={correctMake} onChange={(event) => setCorrectMake(event.target.value)} placeholder={hint.make ?? 'e.g. Toyota'} /></label>
                               <label className="cctv-entity__field">Model <input value={correctModel} onChange={(event) => setCorrectModel(event.target.value)} placeholder={hint.model ?? 'e.g. Hilux'} /></label>
+                              <label className="cctv-entity__field">Colour <input value={correctColour} onChange={(event) => setCorrectColour(event.target.value)} placeholder={hint.colour ?? 'e.g. white'} /></label>
+                              <label className="cctv-entity__field">Body type <input value={correctBodyType} onChange={(event) => setCorrectBodyType(event.target.value)} placeholder={hint.bodyType ?? 'e.g. van'} /></label>
+                              <label className="cctv-entity__field">Year <input type="number" value={correctYear} onChange={(event) => setCorrectYear(event.target.value)} placeholder={hint.year ? String(hint.year) : 'e.g. 2022'} /></label>
                               <div className="cctv-entity__actions">
-                                <button type="button" className="page-action is-primary" disabled={reviewBusy !== null || (!correctMake.trim() && !correctModel.trim())} onClick={() => void runVehicleAttributeReview(selected, 'correct')}><Check size={14} aria-hidden="true" /> Save correction</button>
-                                <button type="button" className="page-action" disabled={reviewBusy !== null} onClick={() => { setCorrectingVehicleId(null); setCorrectMake(''); setCorrectModel(''); }}>Cancel</button>
+                                <button type="button" className="page-action is-primary" disabled={reviewBusy !== null || (!correctMake.trim() && !correctModel.trim() && !correctColour.trim() && !correctBodyType.trim() && !correctYear.trim())} onClick={() => void runVehicleAttributeReview(selected, 'correct')}><Check size={14} aria-hidden="true" /> Save correction</button>
+                                <button type="button" className="page-action" disabled={reviewBusy !== null} onClick={() => { setCorrectingVehicleId(null); setCorrectMake(''); setCorrectModel(''); setCorrectColour(''); setCorrectBodyType(''); setCorrectYear(''); }}>Cancel</button>
                               </div>
                             </div>
                           ) : (
@@ -413,7 +443,7 @@ const CCTVTriagePage: React.FC = () => {
                               <button type="button" className="page-action is-danger" disabled={reviewBusy !== null} onClick={() => void runVehicleAttributeReview(selected, 'reject')}><X size={14} aria-hidden="true" /> Dismiss</button>
                             </div>
                           )
-                        ) : <small className="cctv-console__muted">Reviewed.</small>}
+                        ) : <small className="cctv-console__muted">Reviewed: {hint.reviewStatus?.replace(/_/g, ' ') || 'complete'}.</small>}
                       </div>
                     );
                   })()}

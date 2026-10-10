@@ -290,10 +290,15 @@ test('watcher records observations and timeline marks through the P2 RPCs before
   assert.match(watcherSource, /supabase\.rpc\('record_cctv_observation_derivatives'/);
   assert.match(watcherSource, /supabase\.rpc\('record_cctv_alpr_perception_envelopes', \{ p_job_id: job\.id \}\)/);
   assert.match(watcherSource, /supabase\.rpc\('record_cctv_person_perception_envelopes', \{ p_job_id: job\.id \}\)/);
+  assert.match(watcherSource, /supabase\.rpc\('record_cctv_vehicle_attribute_perception_envelopes', \{ p_job_id: job\.id \}\)/);
   const sharedEvidenceIndex = watcherSource.indexOf('await recordSharedAlprEvidence(job);', derivativeIndex);
   assert.ok(sharedEvidenceIndex > derivativeIndex, 'the shared ALPR receipt is compiled after derivative evidence is stored');
   const sharedPersonEvidenceIndex = watcherSource.indexOf('await recordSharedPersonEvidence(job);', sharedEvidenceIndex);
   assert.ok(sharedPersonEvidenceIndex > sharedEvidenceIndex, 'the shared person receipt is compiled after derivative and ALPR receipts');
+  const sharedVehicleEvidenceIndex = watcherSource.indexOf('await recordSharedVehicleAttributeEvidence(job);', sharedPersonEvidenceIndex);
+  assert.ok(sharedVehicleEvidenceIndex > sharedPersonEvidenceIndex, 'the shared vehicle attribute receipt is compiled after derivative, ALPR and person receipts');
+  assert.match(watcherSource, /attribute_confidence: confidence\(attributes\.vehicle_attribute_confidence\)/);
+  assert.match(watcherSource, /vehicle_attribute_model: attributes\.vehicle_model_name/);
   assert.match(watcherSource, /callLaptopEnhancement\(fusedBytes/);
   assert.match(watcherSource, /callRunpodEnhancement\(fusedBytes/);
   assert.match(watcherSource, /select\('source_event_id'\).*?\.neq\('review_state', 'superseded'\)/);

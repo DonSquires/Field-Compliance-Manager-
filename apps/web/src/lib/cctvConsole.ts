@@ -220,6 +220,56 @@ export function vehicleVisionHintFrom(observation: ConsoleObservation): VehicleV
   return { make, model, reviewed };
 }
 
+export type VehicleAttributeCandidate = {
+  make: string | null;
+  model: string | null;
+  colour: string | null;
+  bodyType: string | null;
+  year: number | null;
+  reviewed: boolean;
+  reviewStatus: string | null;
+  source: string | null;
+  confidence: number | null;
+};
+
+export function vehicleAttributeCandidateFrom(observation: ConsoleObservation): VehicleAttributeCandidate | null {
+  if (observation.kind !== 'vehicle') return null;
+  const text = (key: string) => typeof observation.attributes[key] === 'string' && String(observation.attributes[key]).trim()
+    ? String(observation.attributes[key]).trim()
+    : null;
+  const yearValue = Number(observation.attributes.year);
+  const year = Number.isInteger(yearValue) && yearValue >= 1886 ? yearValue : null;
+  const make = text('make');
+  const model = text('model');
+  const colour = text('colour');
+  const bodyType = text('body_type');
+  if (!make && !model && !colour && !bodyType && !year) return null;
+  const review = observation.attributes.make_model_review;
+  const reviewRecord = review && typeof review === 'object' ? review as Record<string, unknown> : null;
+  const candidateFields = [
+    make ? 'make' : null,
+    model ? 'model' : null,
+    colour ? 'colour' : null,
+    bodyType ? 'body_type' : null,
+    year ? 'year' : null,
+  ].filter((value): value is string => Boolean(value));
+  const reviewedFields = Array.isArray(reviewRecord?.reviewed_fields)
+    ? reviewRecord.reviewed_fields.filter((value): value is string => typeof value === 'string')
+    : ['make', 'model'];
+  const confidenceValue = Number(observation.attributes.attribute_confidence);
+  return {
+    make,
+    model,
+    colour,
+    bodyType,
+    year,
+    reviewed: Boolean(reviewRecord?.status) && candidateFields.every((field) => reviewedFields.includes(field)),
+    reviewStatus: typeof reviewRecord?.status === 'string' ? reviewRecord.status : null,
+    source: text('vehicle_attribute_source') || text('inference_provider') || text('make_model_source'),
+    confidence: Number.isFinite(confidenceValue) ? confidenceValue : null,
+  };
+}
+
 export function inferenceReviewLabel(observation: ConsoleObservation): string {
   const frameCount = Math.max(1, Number(observation.attributes.frame_count) || 1);
   const confidence = observation.confidence === null ? 'confidence not reported' : `${Math.round(observation.confidence * 100)}%`;
