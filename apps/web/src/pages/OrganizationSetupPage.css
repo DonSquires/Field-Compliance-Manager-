@@ -29,6 +29,36 @@
 .org-settings-empty { padding: 18px; }
 .org-settings-empty p { margin: 0; }
 
+/* Company-level legal identity and renewal evidence. */
+.org-compliance-summary { display: grid; grid-template-columns: repeat(4, minmax(120px, 1fr)); gap: 8px; }
+.org-compliance-summary > div { display: grid; gap: 2px; padding: 12px 14px; border: 1px solid var(--color-border); border-radius: var(--radius-md, 8px); background: var(--color-bg-elevated); }
+.org-compliance-summary strong { font-size: 22px; line-height: 1; }
+.org-compliance-summary span { color: var(--color-text-muted); font-size: 12px; }
+.org-compliance-summary .is-warning { border-left: 3px solid var(--color-warning); }
+.org-compliance-summary .is-danger { border-left: 3px solid var(--color-danger); }
+.org-corporate-form, .org-compliance-form { padding: 14px; border: 1px solid var(--color-border); border-radius: var(--radius-md, 8px); background: var(--color-bg-secondary); }
+.org-compliance-subheading { display: flex; flex-wrap: wrap; align-items: flex-start; justify-content: space-between; gap: 10px 16px; }
+.org-compliance-subheading > div { display: grid; gap: 3px; }
+.org-compliance-subheading h3 { margin: 0; font-size: 15px; }
+.org-compliance-subheading p { margin: 0; color: var(--color-text-muted); font-size: 12px; line-height: 1.4; }
+.org-compliance-list { display: grid; gap: 8px; margin: 0; padding: 0; list-style: none; }
+.org-compliance-card { display: grid; grid-template-columns: auto minmax(0, 1fr) auto; align-items: center; gap: 12px; padding: 12px 14px; border: 1px solid var(--color-border); border-left: 3px solid var(--color-success); border-radius: var(--radius-md, 8px); background: var(--color-bg-elevated); }
+.org-compliance-card.expiry-due { border-left-color: var(--color-warning); }
+.org-compliance-card.expiry-expired { border-left-color: var(--color-danger); }
+.org-compliance-card-icon { display: grid; place-items: center; color: var(--color-text-muted); }
+.org-compliance-card-body { display: grid; gap: 3px; min-width: 0; }
+.org-compliance-card-body > div { display: flex; flex-wrap: wrap; align-items: baseline; gap: 6px 10px; }
+.org-compliance-card-body h4 { margin: 0; font-size: 14px; }
+.org-compliance-card-body span { color: var(--color-text-muted); font-size: 10px; font-weight: 800; letter-spacing: 0.04em; text-transform: uppercase; }
+.org-compliance-card-body p, .org-compliance-card-body small { margin: 0; color: var(--color-text-muted); font-size: 12px; line-height: 1.4; overflow-wrap: anywhere; }
+.org-compliance-card-actions { display: flex; flex-wrap: wrap; justify-content: flex-end; gap: 7px; }
+
+@media (max-width: 760px) {
+  .org-compliance-summary { grid-template-columns: repeat(2, minmax(120px, 1fr)); }
+  .org-compliance-card { grid-template-columns: auto minmax(0, 1fr); }
+  .org-compliance-card-actions { grid-column: 1 / -1; justify-content: flex-start; }
+}
+
 /* One-of choices as cards with a plain explanation, not a bare select. */
 .org-settings-choice { display: grid; gap: 8px; margin: 0; padding: 0; border: 0; min-width: 0; }
 .org-settings-choice legend { padding: 0; margin-bottom: 4px; color: var(--color-text-secondary); font-size: 12px; font-weight: 700; }

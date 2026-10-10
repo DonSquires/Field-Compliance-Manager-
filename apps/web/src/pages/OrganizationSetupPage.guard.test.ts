@@ -55,4 +55,10 @@ describe('governed organization profile setup', () => {
     expect(source).toContain('Boundary source unavailable for: ${unavailable}');
     expect(source).toContain('No council boundary matched: ${unmatched}');
   });
+
+  it('keeps root-organization legal and compliance evidence on a governed shared surface', () => {
+    expect(source).toContain('<OrganizationComplianceSection org={org} onOrgChange={setOrg} />');
+    expect(source).toContain("org.corporate_profile_verification_status === 'verified'");
+    expect(source).toContain('{!isBranch && <OrganizationComplianceSection');
+  });
 });

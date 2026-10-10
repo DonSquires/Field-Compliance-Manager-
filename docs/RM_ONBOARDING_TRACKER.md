@@ -1604,6 +1604,64 @@ created, updated, published, or deleted.
   and targeted Reports Hub and roster repeat-date E2E flows pass on desktop and
   mobile.
 
+## RFQ 0018709 readiness and company compliance (2026-10-10)
+
+- Added a shared, tenant-scoped organisation compliance register through
+  `20261010092045_organization_compliance_register.sql`. It owns company
+  licences, insurance, policies, certifications, and prequalifications with
+  source dates, expiry, replacement history, human verification, RLS, audited
+  replay-safe RPCs, and optimistic-concurrency checks. This is platform
+  capability for every provider, not an R&M-only fork.
+- Organisation Settings now separates operational contact details from legal
+  identity and compliance evidence. Root-organisation masters can review
+  canonical company/entity status values, source evidence, expiry states, and
+  explicit verification actions. Branches do not get a second legal identity.
+- Live R&M company identity corrected and staged for human verification:
+  display/trading name `R & M Security and Investigations`, legal name
+  `R & M Security & Investigations Limited`, company number `6961033`, NZBN
+  retained, registry status `registered`, entity type `company`, registered
+  office/postal address and billing contact populated from the source workbook.
+  GST identity was added to `finance_tax_identity` with `owner_review`; GST
+  basis and filing frequency remain unset rather than guessed.
+- Seeded 12 current, **unverified** organisation-compliance records: PSPLA
+  company licence, three liability-insurance entries, six H&S/policy records,
+  IMPAQ prequalification, and the 8 March 2022 Nelson Marlborough Health
+  contractor prequalification (96%, very-low-risk/accepted at that assessment
+  date). No record was called verified merely because it appeared in a
+  workbook.
+- Created one `in_review` tender workspace for Health New Zealand RFP 0018709,
+  due 6 November 2026, with the four-district scope, 69,643.62 indicative
+  annual hours, term/options, and governed Part 6A mobilisation assumption.
+  `client_organization_id` remains null: no single deduplicated live Health New
+  Zealand root organisation was available, so the import did not invent one.
+  Tender-document attachment remains an Atlas gap (`tender_documents` is
+  present but not wired).
+- Reconciled the 17-row source COA register without silent identity creation.
+  Nine source rows had defensible live staff-profile matches and were imported
+  as unverified `certificate_of_authority` evidence; two of those are expired
+  as at 10 October 2026. Rob Crawford has a live master identity but no staff
+  profile, six source officers have no live identity, and Cheryl/Sheryl Murray
+  remains ambiguous. None was force-linked or created, and no role, personal
+  contact, employment date/type, or work-ready state was inferred.
+- Every one of the 23 existing staff profiles now has an onboarding ledger.
+  Twenty-two newly created ledgers are blocked at `identity` with the actual
+  missing evidence listed; the pre-existing ledger was preserved. Live
+  verification remains zero verified COAs and zero work-ready staff.
+- Verification passed: compliance migration guard tests 3/3, Organisation
+  Settings guard tests 11/11, migration-version check 553 unique migrations,
+  and the production web build. Live aggregate verification returned 12
+  current/0 verified organisation records, 9 total/0 verified COAs, 23
+  onboarding ledgers, 0 work-ready staff, 1 tax identity, and 1 Health NZ
+  tender.
+- Post-deploy honesty gap: the live schema migration was applied and recorded,
+  but this shell could not regenerate `supabase/schema.sql` or refresh Atlas.
+  `schema-snapshot-live.mjs` had no approved access-token environment, the CLI
+  dump required unavailable Docker, and `atlas-refresh.js --apply` had no
+  service-role key. The failed CLI dump briefly truncated the snapshot; it was
+  restored byte-for-byte from HEAD. The migration is authoritative until an
+  approved credential-bearing environment regenerates the live snapshot and
+  refreshes Atlas. Do not claim the new surface is Atlas-wired before that.
+
 ## Conventions established / reusable
 
 - Live SQL via the Supabase Management API (`SUPABASE_ACCESS_TOKEN`, from
@@ -1625,3 +1683,39 @@ created, updated, published, or deleted.
 - After creating a migration file, actually apply-and-verify it in the same
   turn — a mid-session topic change is enough to leave a real migration file
   committed but never run against the live database.
+
+## R&M corpus registration and governed intake (2026-10-10)
+
+- Owner confirmed that `Cheryl Murray` and the historical `Sheryl Murray`
+  patrol-log identity are the same person. The existing live user/profile UUID
+  was retained, its display name was corrected to Cheryl Murray, and both names
+  remain source aliases. Cheryl's source COA was added as unverified evidence.
+  This brings the staged staff COA total to 10, with zero verified; no work-ready
+  decision was inferred.
+- Regenerated `supabase/schema.sql` from the live catalogue using only the
+  approved Supabase credential classes in the laptop-worker environment, then
+  refreshed Atlas from the live schema and current code. The refresh reported
+  31 capabilities and 71 edges refreshed, with 53 stale entities/edges retired.
+  This resolves the credential-blocked snapshot/Atlas gap recorded in the RFQ
+  checkpoint above; `wired` remains the strongest Atlas claim because
+  `exercised` is not populated.
+- A complete read-only inventory of the R&M corpus found 140,826 files
+  (881,231,835,825 bytes) with zero scan errors. It classified 5,618 documents,
+  8,672 structured-data files, 91,207 images, 4,167 standard media files, 950
+  archives, 29,056 quarantined artifacts, and 1,090 unclassified/gap files.
+  Recorder formats, executables, databases, incomplete downloads, shortcuts,
+  and diagnostics remain quarantined; inventory is not promotion.
+- Added the shared `local_folder` document-reference kind through migration
+  `20261010094927_local_document_reference_sources.sql`. R&M's approved corpus
+  is registered as the provisional, tenant-sensitive source
+  `local://rm/remsec-documents`; the workstation's absolute path is deliberately
+  not exposed through the app.
+- Uploaded three R&M brand candidates to private tenant storage and registered
+  them as pending organisation brand assets: the full logo, horizontal
+  wordmark, and forest/padlock symbol. No variant was approved automatically.
+- Staged hash-deduplicated, review-only import previews for 104 readable XLSX
+  workbooks with no parse failures: 69 finance workbooks (19,968 unresolved
+  rows), 33 quote/proposal workbooks (452 unresolved rows), and two staff
+  workbooks (114 unresolved rows). Source references use the neutral local
+  alias, workbook manifests retain sheet/row provenance, and no monetary,
+  identity, quote, invoice, or credential row was promoted.
