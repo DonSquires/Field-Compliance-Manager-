@@ -16,6 +16,37 @@ actually work with a working org and its data and operations." Extended-scope,
 multi-session task — take as many turns as needed; real, verified progress each
 turn beats false completeness.
 
+## APPROVED VEHICLE HISTORY AND IDENTITY RECORDS (2026-10-11)
+
+- Recorded the owner ruling that plate mentions in the already-reviewed R&M
+  patrol and CCTV working files are approved observations for this initial
+  import. They do not require a second approval gate, but they retain the
+  client/place owner, full note, source file/hash/sheet/row, timestamp,
+  promotion actor, and audit receipt.
+- Promoted all remaining approved plate mentions: 2,639 new structured
+  observations, 2,822 canonical source links, 956 distinct plates, 2,008
+  CCTV-derived observations, and 2,639 audit receipts. Existing exact
+  observations were linked instead of duplicated. Verification found zero
+  approved note mentions left unprocessed.
+- Rebuilt the Identity Records vehicle path so R&M administrators can see
+  client-owned vehicles through accepted operational relationships without
+  changing record ownership. Vehicle cards now expose observation/evidence
+  totals and first/last seen dates; record detail exposes approved notes,
+  place/time/source provenance, activity history, and signed private photos.
+- Matched 2,136 corpus photos to structured observations using the plate plus
+  source-local filename date/time within a strict 15-minute tolerance. The 42
+  ambiguous matches remain held; 19,518 filename-structured photos without a
+  qualifying observation remain unmatched rather than guessed.
+- Identical bytes are now reused as one organization evidence item and linked
+  independently to each observation. The 2,136 source matches reduce to 2,116
+  unique observation/hash pairs. A complete replay uploaded zero objects,
+  reused all 2,136 matches, found every supporting link already present,
+  created no audit receipts, and left zero duplicate support keys.
+- Migration `20261010214725` and its rollback behavior test prove hash reuse,
+  two-observation linkage, activity retrieval, audit, and replay safety. The
+  Reports evidence panel also follows supporting-evidence links, so reused
+  photos remain visible outside Identity Records.
+
 ## REPORTING WORKSPACE AND FORESTRY PHOTO WAVE 1 (2026-10-11)
 
 - Reworked Reports around the operational decision flow: selected agreement and

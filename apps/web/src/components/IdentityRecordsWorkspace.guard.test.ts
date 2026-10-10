@@ -14,6 +14,10 @@ const flagMigration = readFileSync(
   resolve(process.cwd(), "../../supabase/migrations/20260916100000_safety_warnings_and_plate_registry_read.sql"),
   "utf8",
 );
+const approvedVehicleMigration = readFileSync(
+  resolve(process.cwd(), "../../supabase/migrations/20261010213204_promote_approved_vehicle_mentions.sql"),
+  "utf8",
+);
 
 describe("identity person-of-interest workflow", () => {
   it("persists the NZTA source checkbox as historical provenance, not authority", () => {
@@ -33,6 +37,21 @@ describe("identity person-of-interest workflow", () => {
     expect(workspace).toContain(
       "Historical source-time association; current",
     );
+  });
+
+  it("shows approved working-file observations and private photos on canonical vehicles", () => {
+    expect(workspace).toContain('"get_identity_vehicle_activity"');
+    expect(workspace).toContain("Approved observation history");
+    expect(workspace).toContain("Human-authored patrol records and CCTV review notes are");
+    expect(workspace).toContain("vehicleActivityUrls");
+    expect(workspace).toContain("canonical vehicles");
+    expect(approvedVehicleMigration).toContain("promote_approved_rnm_vehicle_mentions");
+    expect(approvedVehicleMigration).toContain("'approved_in_working_file'");
+    expect(approvedVehicleMigration).toContain("'rm_approved_note_plate:'");
+    expect(approvedVehicleMigration).toContain(
+      "observation.canonical_vehicle_id = vehicle.id",
+    );
+    expect(approvedVehicleMigration).toContain("get_identity_vehicle_activity");
   });
 
   it("flags only verified canonical people through the scoped audited RPC", () => {
