@@ -16,6 +16,45 @@ actually work with a working org and its data and operations." Extended-scope,
 multi-session task — take as many turns as needed; real, verified progress each
 turn beats false completeness.
 
+## HUMAN-AUTHORED SUBJECT AND EVIDENCE INTEGRATION (2026-10-11)
+
+- Recorded the owner ruling that a human-authored report is sufficient
+  provenance for the reported observation itself. A person/vehicle mention,
+  suspicious activity record, or issued notice does not require a second human
+  to verify that the report was made. This does not prove an allegation, infer
+  an unstated identity, merge ambiguous people, or create enforcement authority.
+- Proved the existing NCC patrol import is replay-safe against its real active
+  workbook: 95 valid plate observations matched live records and zero new rows
+  were proposed for the correct NCC client organization.
+- Attached five exact source-matched NCC photos to three observations. The live
+  result is five private, hash-addressed, non-court-ready evidence items, five
+  observation-evidence links, and five audit receipts. Replaying an attachment
+  left all counts unchanged.
+- Repaired two production evidence-contract defects: external historical photos
+  no longer fail the inference-watermark trigger, and `external_photo` is now an
+  allowed supporting-evidence kind. External records remain non-court-ready.
+- Removed the vehicle-only schema fiction from the observation spine:
+  human-authored person/place/other observations no longer need fabricated
+  plates or fabricated FCM officer identities. Source author, file, governed
+  local reference, SHA-256, locator, subject kind, and deterministic import key
+  are preserved.
+- Added the governed, audited, replay-safe
+  `import_human_authored_trespass_notice` path. It creates a tenant-scoped
+  person record in manual identity review, its canonical projection, a genuine
+  person observation, the linked notice, and one audit receipt atomically.
+- Promoted the first high-confidence notice wave from the restricted corpus:
+  11 notices, 11 person observations, 11 canonical-person projections, and 11
+  audit receipts. OneFortyOne owns eight records (three explicitly issued,
+  five lifecycle drafts); Tasman Pine Forests owns three drafts. Templates,
+  unserved copies, ambiguous shared scans, and client-unresolved records were
+  held rather than guessed.
+- CRM account overview now reports live observation and evidence counts.
+  Client/report/list surfaces render person and other non-vehicle observations
+  without assuming a plate or linked user account.
+- Regenerated `supabase/schema.sql` from the live catalog and refreshed Atlas
+  after applying migrations `20261010191817`, `20261010192005`,
+  `20261010192110`, `20261010192429`, and `20261010192744`.
+
 ## ACTIVE-LOG RECONCILIATION (2026-10-09)
 
 - Read-only reconciliation confirmed the active client organizations already

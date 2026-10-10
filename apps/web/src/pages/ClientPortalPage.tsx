@@ -27,7 +27,8 @@ import './ClientPortalPage.css';
 
 interface ClientObservation {
   id: string;
-  plate_number: string;
+  plate_number: string | null;
+  subject_kind: 'vehicle' | 'person' | 'mixed' | 'place' | 'other';
   module_key: string;
   compliance_status: 'compliant' | 'at_risk' | 'breach' | 'breach_exempt' | 'unknown' | null;
   compliance_reason: string | null;
@@ -119,7 +120,7 @@ export function ClientPortalPage({ page }: { page: ClientPortalPage }) {
             if (!locationFilters) return Promise.resolve({ data: [], error: null });
             return supabase
               .from('observations')
-              .select('id, plate_number, module_key, compliance_status, compliance_reason, observed_at, site_id, zone_id')
+              .select('id, plate_number, subject_kind, module_key, compliance_status, compliance_reason, observed_at, site_id, zone_id')
               .eq('client_org_id', profile.organizationId)
               .or(locationFilters)
               .order('observed_at', { ascending: false })
@@ -366,7 +367,7 @@ export function ClientPortalPage({ page }: { page: ClientPortalPage }) {
               {observations.map((observation) => (
                 <article key={observation.id}>
                   <span className={`client-status-mark status-${observation.compliance_status ?? 'unknown'}`} />
-                  <div><strong>{observation.plate_number}</strong><small>{observation.module_key.replace(/_/g, ' ')}</small></div>
+                  <div><strong>{observation.plate_number || (observation.subject_kind === 'person' ? 'Person observation' : 'Non-vehicle observation')}</strong><small>{observation.module_key.replace(/_/g, ' ')}</small></div>
                   <div><strong>{formatComplianceReason(observation.compliance_reason) || (observation.compliance_status ?? 'Review required').replace(/_/g, ' ')}</strong><small>{locationName(observation, relationships.selectedAgreementSites, relationships.selectedAgreementZones)}</small></div>
                   <time dateTime={observation.observed_at}>{new Date(observation.observed_at).toLocaleString('en-NZ', { day: 'numeric', month: 'short', hour: '2-digit', minute: '2-digit' })}</time>
                 </article>

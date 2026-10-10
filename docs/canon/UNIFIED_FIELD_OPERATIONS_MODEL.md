@@ -102,6 +102,19 @@ Suspicious vehicle / person can **promote** into canonical entity intelligence
 > the existing profile. A model never asserts a known name, marks a profile
 > verified, or creates an enforcement consequence.
 
+> **Owner ruling 2026-10-11 — human-authored operational records are
+> observations.** A person or vehicle mentioned in a report, patrol log,
+> incident entry, suspicion record, or issued trespass notice is a valid
+> observation because a human recorded what they saw, received, or issued. It
+> does not require a second human verification step before entering the
+> observation and evidence spines. Explicit source identifiers such as a stated
+> name, registration plate, notice recipient, source job number, date, place,
+> and author may create or link the corresponding tenant projection and
+> canonical entity with full provenance. This ruling does not turn an
+> allegation into a proved fact, infer an unstated identity, merge ambiguous
+> people, or authorize an enforcement consequence: observation type, source
+> wording, confidence, allegation/status, and notice state must remain distinct.
+
 ### Specialty tools (plug-ins)
 
 Activated by place-capability ∩ assignment-grant. Two verdict styles + static:

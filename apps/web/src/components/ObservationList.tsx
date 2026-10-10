@@ -13,7 +13,9 @@ import React, { useMemo } from 'react';
 
 export interface ObservationRecord {
   id: string;
-  plate_number: string;
+  plate_number: string | null;
+  person_label?: string | null;
+  subject_kind?: 'vehicle' | 'person' | 'mixed' | 'place' | 'other';
   is_compliant: boolean | null;
   compliance_reason: string | null;
   nights_this_zone: number | null;
@@ -43,7 +45,7 @@ export const ObservationList: React.FC<ObservationListProps> = ({
     return observations.filter((obs) => {
       if (filter === 'breach' && obs.is_compliant !== false) return false;
       if (filter === 'compliant' && obs.is_compliant !== true) return false;
-      if (plateFilter && !obs.plate_number.includes(plateFilter.toUpperCase())) return false;
+      if (plateFilter && !obs.plate_number?.includes(plateFilter.toUpperCase())) return false;
       return true;
     });
   }, [observations, filter, plateFilter]);
@@ -124,7 +126,7 @@ export const ObservationList: React.FC<ObservationListProps> = ({
             <thead>
               <tr style={{ backgroundColor: 'var(--color-bg-secondary)', borderBottom: '2px solid var(--color-border)' }}>
                 <th style={{ padding: 'var(--space-3) var(--space-4)', textAlign: 'left', fontWeight: 'var(--font-bold)', fontSize: 'var(--text-xs)', color: 'var(--color-text-primary)' }}>
-                  Plate
+                  Subject
                 </th>
                 <th style={{ padding: 'var(--space-3) var(--space-4)', textAlign: 'left', fontWeight: 'var(--font-bold)', fontSize: 'var(--text-xs)', color: 'var(--color-text-primary)' }}>
                   Status
@@ -155,7 +157,7 @@ export const ObservationList: React.FC<ObservationListProps> = ({
                     }}
                   >
                     <td style={{ padding: 'var(--space-3) var(--space-4)', fontFamily: 'var(--font-mono)', fontWeight: 'var(--font-semibold)', color: 'var(--color-text-primary)' }}>
-                      {obs.plate_number}
+                      {obs.plate_number || obs.person_label || (obs.subject_kind === 'person' ? 'Person observation' : 'Non-vehicle observation')}
                     </td>
                     <td style={{ padding: 'var(--space-3) var(--space-4)' }}>
                       <div
