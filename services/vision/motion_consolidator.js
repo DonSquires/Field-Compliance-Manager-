@@ -312,6 +312,7 @@ async function consolidateFaces(frames, options = {}) {
             track.bestBboxArea = bboxArea;
             track.bestFrame = frame;
             track.bestBbox = bbox;
+            track.bestFace = detectedFace;
           }
         } else {
           // Gap exceeded: this person left and returned!
@@ -328,6 +329,7 @@ async function consolidateFaces(frames, options = {}) {
             frameCount: 1,
             bestFrame: frame,
             bestBbox: bbox,
+            bestFace: detectedFace,
             bestBboxArea: bbox ? (bbox.width || 0) * (bbox.height || 0) : 0,
             similarityScore: highestSim,
           };
@@ -352,6 +354,7 @@ async function consolidateFaces(frames, options = {}) {
             frameCount: 1,
             bestFrame: frame,
             bestBbox: bbox,
+            bestFace: detectedFace,
             bestBboxArea: bbox ? (bbox.width || 0) * (bbox.height || 0) : 0,
             similarityScore: 1.0,
           },
@@ -408,6 +411,12 @@ async function consolidateFaces(frames, options = {}) {
       best_bbox: tr.bestBbox,
       thumbnail,
       face_embedding: Array.isArray(tr.faceEmbedding) ? tr.faceEmbedding : null,
+      face_provider: tr.bestFrame?.face?.provider || null,
+      face_detector_model: tr.bestFace?.face_detector_model || null,
+      face_embedding_model: tr.bestFace?.face_embedding_model || null,
+      face_detector_confidence: clamp01(tr.bestFace?.detector_confidence),
+      face_crop_width_px: Number.isFinite(Number(tr.bestFace?.face_crop_width_px)) ? Number(tr.bestFace.face_crop_width_px) : null,
+      face_alignment_basis: tr.bestFace?.alignment_basis || null,
       review_state: 'manual_review_required',
     });
   }
@@ -916,6 +925,9 @@ function buildEntityObservations(summary, context = {}) {
         bbox: event.best_bbox, frame_count: event.frame_count, upper_body_colour: event.attributes?.upper_body_colour, lower_body_colour: event.attributes?.lower_body_colour,
         visible_head_region: event.attributes?.visible_head_region?.colour, gait: event.gait_signature?.state === 'provisional_motion_signature' ? event.gait_signature : null,
         face_event_id: face?.event_id, face_visit_count: face?.visit_count, appearance_embedding_model: event.appearance_embedding_model,
+        face_provider: face?.face_provider, face_detector_model: face?.face_detector_model, face_embedding_model: face?.face_embedding_model,
+        face_detector_confidence: face?.face_detector_confidence, face_crop_width_px: face?.face_crop_width_px,
+        face_alignment_basis: face?.face_alignment_basis,
         weapon_hint: event.weapon_hint,
         review_candidate_basis: reviewCandidateBasis(event, Boolean(face)),
       }),
@@ -934,7 +946,12 @@ function buildEntityObservations(summary, context = {}) {
       candidate_embedding: face.face_embedding,
       model_confidence: null,
       quality_state: 'clear',
-      attributes: stripNulls({ bbox: face.best_bbox, frame_count: face.frame_count, visit_count: face.visit_count, face_only: true }),
+      attributes: stripNulls({
+        bbox: face.best_bbox, frame_count: face.frame_count, visit_count: face.visit_count, face_only: true,
+        face_provider: face.face_provider, face_detector_model: face.face_detector_model, face_embedding_model: face.face_embedding_model,
+        face_detector_confidence: face.face_detector_confidence, face_crop_width_px: face.face_crop_width_px,
+        face_alignment_basis: face.face_alignment_basis,
+      }),
       frame_sha256: face.best_frame_hash || null,
       thumbnail: face.thumbnail || null,
     });

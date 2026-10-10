@@ -891,10 +891,12 @@ def _face_sync(image: np.ndarray) -> list[dict[str, Any]]:
     results: list[dict[str, Any]] = []
     for index, detection in enumerate(detections if detections is not None else []):
         align_image, align_detection = image, detection
+        alignment_basis = "authoritative_source"
         if 0 < detection[2] < MIN_FACE_CROP_WIDTH:
             enhanced = _upscale_face_region(image, detection, detector)
             if enhanced is not None:
                 align_image, align_detection = enhanced
+                alignment_basis = "deterministic_upscaled_crop"
                 detector.setInputSize((width, height))  # restore before this detector is reused for the next face/request
         aligned = recognizer.alignCrop(align_image, align_detection)
         embedding = recognizer.feature(aligned)
@@ -910,6 +912,11 @@ def _face_sync(image: np.ndarray) -> list[dict[str, Any]]:
             "bbox": {"x": x, "y": y, "width": box_width, "height": box_height},
             "embedding": [round(float(value), 7) for value in vector],
             "embedding_dimension": int(vector.size),
+            "detector_confidence": round(float(detection[-1]), 6),
+            "face_crop_width_px": box_width,
+            "alignment_basis": alignment_basis,
+            "face_detector_model": YUNET_MODEL_PATH.name,
+            "face_embedding_model": SFACE_MODEL_PATH.name,
             "candidate_person_record_id": None,
             "review_state": "manual_review_required",
         })

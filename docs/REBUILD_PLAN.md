@@ -403,7 +403,17 @@ consensus remain inspectable. Weak or conflicting reads cannot become verified
 candidates. `cctv_entity_observations.review_state` remains the single human
 decision and is projected into shared authority and review receipts. Raw access
 remains administrator-only pending a separately tested CCTV task-entitlement
-policy. Face/person, vehicle-attribute and vertical-module adapters remain.
+policy. Vehicle-attribute and vertical-module adapters remain.
+
+Phase C CCTV person/face slice shipped 2026-10-11: source/frame custody,
+presence, face-detection provenance and pseudonymous portfolio evidence now
+compile into the shared envelope. Raw face/appearance templates, candidate
+names and identity lists remain in the governed CCTV biometric store and are
+not duplicated. Machine face similarity remains provisional because
+relevant-condition and demographic calibration is absent. Existing CCTV review
+approves presence; only an explicit human person link/new-person action creates
+a human-approved shared identity reference. Vehicle attributes and
+vertical-module adapters remain.
 
 **Gate:** live `bob_messages` show no context-losing fallbacks; a Builder job
 runs implement → verify → repair without human touch and stops cleanly at

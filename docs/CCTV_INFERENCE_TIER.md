@@ -84,6 +84,20 @@ Every machine result remains review-required. The existing
 append-only review receipt, so there is one human authority rather than a second
 independent approval path.
 
+Person observations follow the same projection boundary through
+`record_cctv_person_perception_envelopes`. A `cctv_person` envelope records
+source/frame hashes, place and time, detector/provider/model names, crop width,
+deterministic alignment basis, quality, presence, face-detected state and a
+pseudonymous portfolio candidate. It records only portfolio candidate count and
+top similarity—not candidate names or identities. Raw face and appearance
+embeddings remain exclusively in the existing biometric-governance columns and
+never enter the shared envelope. Face similarity cannot become a
+`verified_candidate`: relevant-condition and demographic calibration is still
+absent. The existing person-observation review can approve presence/face
+detection, while `person.identity_reference` is emitted only after an explicit
+human `link_person`/`new_person` identity action. Provisional portfolio evidence
+is then superseded rather than promoted.
+
 ## 3. Detection rules (`services/fcm-inference/detector.py`)
 
 * **Model pick.** `DETECTOR_MODEL=auto` chooses `DETECTOR_MODEL_GPU` (large-704) when a CUDA provider *and*

@@ -10,7 +10,7 @@ import runpod
 from app import (
     MODELS_DIR,
     _detect_people,
-    _face_models,
+    _face_sync,
     _health_payload,
     _infer_plate_from_image,
     _infer_vehicle_attributes,
@@ -146,18 +146,7 @@ def _infer_alpr_if_requested(image: np.ndarray) -> dict[str, Any]:
 
 def _infer_face_if_requested(image: np.ndarray) -> dict[str, Any]:
     try:
-        detector, recognizer = _face_models()
-        height, width = image.shape[:2]
-        detector.setInputSize((width, height))
-        _, detections = detector.detect(image)
-        faces = []
-        for index, detection in enumerate(detections if detections is not None else []):
-            aligned = recognizer.alignCrop(image, detection)
-            vector = np.asarray(recognizer.feature(aligned), dtype=np.float32).reshape(-1)
-            norm = float(np.linalg.norm(vector))
-            if not np.isfinite(vector).all() or norm == 0: continue
-            vector /= norm
-            faces.append({"subject_label": f"Unidentified subject #{index + 1}", "face_index": index, "bbox": {"x": float(detection[0]), "y": float(detection[1]), "width": float(detection[2]), "height": float(detection[3])}, "embedding": [round(float(value), 7) for value in vector], "review_state": "manual_review_required"})
+        faces = _face_sync(image)
         return {"state": "candidate", "result": {"success": True, "faces": faces, "identity_resolution": "manual_review_required"}, "review_required": True}
     except Exception as error:
         return {"state": "unavailable", "reason": str(error), "review_required": True}

@@ -25,6 +25,10 @@ const cctvAlprGateMigration = fs.readFileSync(
   path.join(__dirname, '..', 'supabase', 'migrations', '20261010230747_fix_cctv_alpr_service_role_gate.sql'),
   'utf8',
 );
+const cctvPersonMigration = fs.readFileSync(
+  path.join(__dirname, '..', 'supabase', 'migrations', '20261010231809_cctv_person_face_perception_envelope_adapter.sql'),
+  'utf8',
+);
 
 test('shared perception evidence schema is versioned, tenant-scoped, indexed, and review-gated', () => {
   for (const table of [
@@ -99,4 +103,30 @@ test('CCTV observation review remains the single human authority for shared ALPR
   assert.match(cctvAlprMigration, /'cctv_entity_observation_id', NEW\.id/);
   assert.match(cctvAlprMigration, /NEW\.reviewed_by/);
   assert.match(cctvAlprMigration, /NEW\.review_state = 'superseded'[\s\S]*authority_state = 'superseded'/);
+});
+
+test('CCTV person receipts preserve provenance without copying biometric templates or candidate identities', () => {
+  assert.match(cctvPersonMigration, /FUNCTION public\.record_cctv_person_perception_envelopes\(p_job_id uuid\)/);
+  assert.match(cctvPersonMigration, /CCTV source custody SHA-256 is required before person evidence/);
+  assert.match(cctvPersonMigration, /'person\.presence'/);
+  assert.match(cctvPersonMigration, /'person\.face_detected'/);
+  assert.match(cctvPersonMigration, /'person\.portfolio_candidate'/);
+  assert.match(cctvPersonMigration, /'biometric_template_included', false/);
+  assert.match(cctvPersonMigration, /'biometric_templates_copied', false/);
+  assert.match(cctvPersonMigration, /human_review_required_no_tenant_face_calibration_v1/);
+  assert.doesNotMatch(cctvPersonMigration, /\bface_vec\b|\bappearance_vec\b|\bcandidate_embedding\b|\bappearance_embedding\b/);
+  assert.doesNotMatch(cctvPersonMigration, /portfolio_candidates->|display_name/);
+  assert.match(cctvPersonMigration, /REVOKE ALL ON FUNCTION public\.record_cctv_person_perception_envelopes\(uuid\)[\s\S]*GRANT EXECUTE[\s\S]*service_role/);
+});
+
+test('existing person observation review is the only authority that can approve a shared identity', () => {
+  assert.match(cctvPersonMigration, /FUNCTION public\.apply_cctv_person_review_to_perception\(p_observation_id uuid\)/);
+  assert.match(cctvPersonMigration, /portfolio_state IN \('linked', 'new_identity'\)/);
+  assert.match(cctvPersonMigration, /'person\.identity_reference'/);
+  assert.match(cctvPersonMigration, /'explicit_human_cctv_identity_link_v1'/);
+  assert.match(cctvPersonMigration, /v_target_authority := 'human_approved'/);
+  assert.match(cctvPersonMigration, /INSERT INTO public\.perception_evidence_reviews/);
+  assert.match(cctvPersonMigration, /v_observation\.reviewed_by/);
+  assert.match(cctvPersonMigration, /CREATE TRIGGER sync_cctv_person_perception_review_trigger/);
+  assert.match(cctvPersonMigration, /REVOKE ALL ON FUNCTION public\.apply_cctv_person_review_to_perception\(uuid\)[\s\S]*service_role/);
 });

@@ -284,8 +284,20 @@ hashes and conflicts. Machine verification requires every CCTV ALPR quality
 gate; disagreement remains a candidate for review. The existing CCTV
 observation decision is the sole human authority and is mirrored into the
 shared append-only review history. Raw access remains administrator-only until
-a task-entitlement policy is separately designed and tested. Face, person,
-vehicle-attribute and vertical-module adapters remain Phase C work.
+a task-entitlement policy is separately designed and tested. Vehicle-attribute
+and vertical-module adapters remain Phase C work.
+
+**Second adapter implemented 2026-10-11: CCTV person and face evidence.**
+Person-presence, face-detected and pseudonymous portfolio candidates now compile
+into replay-safe shared receipts without copying face or appearance embeddings,
+candidate identity names or raw candidate records. New inference carries the
+face provider, pinned detector/embedding model names, detector confidence, crop
+width and deterministic alignment basis. Machine similarity is never
+`verified_candidate` because relevant-condition and demographic calibration has
+not been completed. The existing CCTV person-observation review remains the
+only human authority; a shared identity reference is created only from an
+explicit human link/new-identity action. Vehicle attributes and vertical-module
+adapters remain Phase C work.
 
 Gate: source/enhanced disagreement and threshold failures never auto-promote.
 

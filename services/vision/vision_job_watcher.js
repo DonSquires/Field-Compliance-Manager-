@@ -752,6 +752,12 @@ function stillEntityObservations(recognition, context = {}) {
         bbox: person.bbox || face.bbox || null,
         face_detected: Boolean(Object.keys(face).length),
         face_basis: Object.keys(face).length ? faces.basis : null,
+        face_provider: Object.keys(face).length ? (face.provider || (faces.basis === 'authoritative_source' ? source.face?.provider : enhanced.face?.provider) || context.provider || null) : null,
+        face_detector_model: face.face_detector_model || null,
+        face_embedding_model: face.face_embedding_model || null,
+        face_detector_confidence: confidence(face.detector_confidence),
+        face_crop_width_px: Number.isFinite(Number(face.face_crop_width_px)) ? Number(face.face_crop_width_px) : null,
+        face_alignment_basis: face.alignment_basis || null,
         person_basis: Object.keys(person).length ? people.basis : null,
         appearance_embedding_model: person?.attributes?.appearance_embedding_model || null,
         authority: 'provisional',
@@ -1073,6 +1079,13 @@ async function recordSharedAlprEvidence(job) {
   return data;
 }
 
+async function recordSharedPersonEvidence(job) {
+  const { data, error } = await supabase.rpc('record_cctv_person_perception_envelopes', { p_job_id: job.id });
+  if (error) throw new Error(`shared person evidence persistence failed: ${error.message}`);
+  log('shared_person_evidence_recorded', { job_id: job.id, ...data });
+  return data;
+}
+
 async function normaliseStillJpeg(sourcePath, outputPath) {
   await execFileAsync('ffmpeg', ['-y', '-v', 'error', '-i', sourcePath, '-frames:v', '1', '-q:v', '2', outputPath], { timeout: 120_000, maxBuffer: 4 * 1024 * 1024 });
   return fs.readFile(outputPath);
@@ -1115,7 +1128,7 @@ async function processStillEvidence(job, evidence) {
   };
   const comparison = recognitionComparison(recognition?.source, recognition?.enhanced);
   const capturedAt = evidence.metadata?.recorded_start_at || evidence.captured_at || new Date().toISOString();
-  const observations = stillEntityObservations(recognition, { capturedAt, frameSha256 });
+  const observations = stillEntityObservations(recognition, { capturedAt, frameSha256, provider });
 
   await updateProgress(job, 'persisting_result', { percent: 75, label: 'Saving photo observations and review copies' });
   if (observations.length) {
@@ -1170,6 +1183,7 @@ async function processStillEvidence(job, evidence) {
   }));
   await recordObservationDerivatives(job, derivatives);
   await recordSharedAlprEvidence(job);
+  await recordSharedPersonEvidence(job);
   if (provider === 'laptop_gpu' || provider === 'runpod_fallback') {
     await recordInferenceUsage(job, { frames_sampled: 1, frames_recognised: 1, frames_sent: 1, gpu_calls: 1, gpu_ms: Number(answer?.gpu_elapsed_ms) || 0 });
   }
@@ -1497,6 +1511,7 @@ async function processOne() {
     const observationDerivatives = await buildObservationDerivatives(job, evidence, summary);
     await recordObservationDerivatives(job, observationDerivatives);
     await recordSharedAlprEvidence(job);
+    await recordSharedPersonEvidence(job);
     const gpuDerivatives = observationDerivatives.filter((derivative) => derivative.provider === 'laptop_gpu' || derivative.provider === 'runpod_fallback');
     if (observationDerivatives.length) await recordInferenceUsage(job, {
       frames_sampled: 0, frames_recognised: observationDerivatives.length,
