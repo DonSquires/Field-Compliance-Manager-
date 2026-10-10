@@ -28,7 +28,7 @@ const {
   isoDate,
   resolveNztaPlateFromOcr,
 } = require('../services/fcm-api/src/bob/identityDocument');
-const { guardPlateLines, guardProposedEntities, structuredExtractionFor } = require('../services/fcm-api/src/bob/documents');
+const { buildPerceptionEnvelopePayload, guardPlateLines, guardProposedEntities, structuredExtractionFor } = require('../services/fcm-api/src/bob/documents');
 
 test('identity OCR proposes editable driver, firearms, and security licence fields', () => {
   assert.deepEqual(extractIdentityFields('DRIVER LICENCE\nName: Jane Citizen\nLicence No: AB123456\nDate of Birth: 04/05/1990\nExpiry Date: 01/02/2030', 'driver_licence'), {
@@ -137,6 +137,35 @@ test('NZTA plate uncertainty remains explicit instead of becoming a confident id
   assert.equal(guardPlateLines('Plate: 11739', [{ structured_extraction: structured }]), 'Plate: [TO CONFIRM]');
   assert.equal(guardPlateLines('The vehicle associated with 11739 was returned.', [{ structured_extraction: structured }]), 'The vehicle associated with [TO CONFIRM] was returned.');
   assert.deepEqual(guardProposedEntities({ plate_number: '11739' }, [{ structured_extraction: structured }]), {});
+});
+
+test('NZTA structured extraction compiles into a versioned shared evidence envelope', () => {
+  const sourceSha256 = 'ab'.repeat(32);
+  const structured = structuredExtractionFor({
+    text: 'Current details query results\nCurrent registered person details\nShow the results for plate/VIN\nJJJ739\nPlate: JJJ739\nPlate type: Standard',
+    variants: [
+      'Current details query results\nCurrent registered person details\nShow the results for plate/VIN\nJJJ739\nPlate: JJJ739\nPlate type: Standard',
+      'Current details query results\nCurrent registered person details\nShow the results for plate/VIN\nJJJ739\nPlate: JJJ739\nPlate type: Standard',
+    ],
+  });
+  const payload = buildPerceptionEnvelopePayload({
+    id: '11111111-1111-4111-8111-111111111111',
+    name: 'nzta.png',
+    kind: 'image',
+    variants: ['one', 'two'],
+    provider: 'tesseract-5-ensemble-psm6-psm11',
+    source_sha256: sourceSha256,
+    structured_extraction: structured,
+  });
+  assert.equal(payload.schema_version, 1);
+  assert.equal(payload.domain, 'document_identity');
+  assert.equal(payload.source_sha256, sourceSha256);
+  assert.equal(payload.status, 'manual_review_required');
+  assert.equal(payload.model_receipt.calibrated, false);
+  assert.equal(payload.fields[0].field_key, 'vehicle.plate_number');
+  assert.equal(payload.fields[0].normalized_value, 'JJJ739');
+  assert.equal(payload.fields[0].authority_state, 'verified_candidate');
+  assert.equal(payload.fields[0].review_required, true);
 });
 
 test('identity registry writes are administrator-only, audited, and review-gated', () => {

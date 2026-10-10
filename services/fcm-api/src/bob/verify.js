@@ -56,6 +56,45 @@ function normalizeQuestionText(text) {
   return String(text || '').toLowerCase().replace(/[^a-z0-9\s]/g, ' ').replace(/\s+/g, ' ').trim();
 }
 
+function escapeRegex(value) {
+  return String(value || '').replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
+}
+
+function evidenceIdentifierMismatch(reply, input) {
+  const structured = [];
+  const seen = new Set();
+  const visit = (value) => {
+    if (!value || typeof value !== 'object' || seen.has(value)) return;
+    seen.add(value);
+    if (value.document_kind === 'nzta_mvr_record' && value.identifier_verification) structured.push(value);
+    if (Array.isArray(value)) value.forEach(visit);
+    else Object.values(value).forEach(visit);
+  };
+  visit(input?.taskState?.last_tool_result);
+  visit(input?.taskState?.steps_taken);
+  visit(input?.last_tool_result);
+  if (!structured.length) return null;
+  const text = String(reply || '').toUpperCase();
+  const labelled = [...text.matchAll(/\b(?:PLATE(?: NUMBER)?|REGISTRATION PLATE|REGO)\s*[:#-]\s*([A-Z0-9-]{3,12})/g)].map((match) => match[1]);
+  for (const item of structured) {
+    const plate = item.identifier_verification?.plate_number;
+    if (!plate) continue;
+    const candidates = (Array.isArray(plate.candidates) ? plate.candidates : []).map((candidate) => String(candidate?.value || '').toUpperCase()).filter(Boolean);
+    if (plate.status !== 'verified_candidate' || !plate.value) {
+      if (labelled.length || candidates.some((candidate) => new RegExp(`\\b${escapeRegex(candidate)}\\b`).test(text))) {
+        return 'The reply states an NZTA plate identifier even though the field evidence requires manual review.';
+      }
+      continue;
+    }
+    const verified = String(plate.value).toUpperCase();
+    if (labelled.some((value) => value !== verified)
+      || candidates.some((candidate) => candidate !== verified && new RegExp(`\\b${escapeRegex(candidate)}\\b`).test(text))) {
+      return `The reply plate does not match the verified evidence candidate ${verified}.`;
+    }
+  }
+  return null;
+}
+
 /**
  * Mechanical fix for the one arg-shape mistake the planner keeps making:
  * query_records lookup terms placed beside "query" instead of inside args.args.
@@ -96,6 +135,10 @@ function runDeterministicChecks(decision, input) {
   }
   if (SQL_ERROR_RE.test(reply)) {
     issues.push({ code: 'sql_error_leak', severity: 'block', note: 'The reply exposes a database error message. Classify the error internally and either self-correct the lookup or ask one plain question.' });
+  }
+  const identifierMismatch = userFacing ? evidenceIdentifierMismatch(reply, input) : null;
+  if (identifierMismatch) {
+    issues.push({ code: 'identifier_evidence_mismatch', severity: 'block', note: identifierMismatch });
   }
   if (userFacing) {
     const questionLines = countQuestionLines(reply);

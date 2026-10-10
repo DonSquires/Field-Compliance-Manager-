@@ -158,6 +158,46 @@ test('deterministic checks catch questionnaires, re-asks after a blanket answer,
   assert.ok(rejected.some((issue) => issue.code === 'tool_not_in_catalogue'));
 });
 
+test('deterministic verifier blocks plate claims that exceed structured evidence authority', () => {
+  const manualReview = {
+    taskState: {
+      last_tool_result: {
+        files: [{
+          structured_extraction: {
+            document_kind: 'nzta_mvr_record',
+            identifier_verification: {
+              plate_number: { status: 'manual_review_required', value: null, candidates: [{ value: '11739' }] },
+            },
+          },
+        }],
+      },
+    },
+  };
+  assert.ok(runDeterministicChecks(
+    { action: 'answer', reply: 'Plate: 11739', questions: [], args: {} },
+    manualReview,
+  ).some((issue) => issue.code === 'identifier_evidence_mismatch' && issue.severity === 'block'));
+  assert.equal(runDeterministicChecks(
+    { action: 'answer', reply: 'Plate: [TO CONFIRM]', questions: [], args: {} },
+    manualReview,
+  ).some((issue) => issue.code === 'identifier_evidence_mismatch'), false);
+
+  const verified = structuredClone(manualReview);
+  verified.taskState.last_tool_result.files[0].structured_extraction.identifier_verification.plate_number = {
+    status: 'verified_candidate',
+    value: 'JJJ739',
+    candidates: [{ value: 'JJJ739' }, { value: '11739' }],
+  };
+  assert.ok(runDeterministicChecks(
+    { action: 'answer', reply: 'The record shows plate 11739.', questions: [], args: {} },
+    verified,
+  ).some((issue) => issue.code === 'identifier_evidence_mismatch'));
+  assert.equal(runDeterministicChecks(
+    { action: 'answer', reply: 'Plate: JJJ739', questions: [], args: {} },
+    verified,
+  ).some((issue) => issue.code === 'identifier_evidence_mismatch'), false);
+});
+
 test('autoRepairArgs nests stray query_records lookup terms and scrubReply strips leaks', () => {
   const repaired = autoRepairArgs('query_records', { query: 'find_org', name: 'LINZ' });
   assert.deepEqual(repaired, { args: { query: 'find_org', args: { name: 'LINZ' } }, repaired: true });
