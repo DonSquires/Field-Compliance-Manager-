@@ -1361,6 +1361,45 @@ function computeEgressForbiddenSet(caps, meta) {
     tier0IdentitySurfaced
   };
 }
+function attachGuidedProposalWorkflow(meta) {
+  if (!meta || typeof meta !== 'object') return;
+  const proposalIds = [
+    typeof meta.action_id === 'string' ? meta.action_id : null,
+    typeof meta.org_action_id === 'string' ? meta.org_action_id : null,
+    ...Array.isArray(meta.site_action_ids) ? meta.site_action_ids.filter((id)=>typeof id === 'string') : []
+  ].filter(Boolean);
+  if (!proposalIds.length) return;
+
+  if (!Array.isArray(meta.navigation_actions) || meta.navigation_actions.length === 0) {
+    const firstId = proposalIds[0];
+    meta.navigation_actions = [{
+      label: proposalIds.length === 1 ? 'Review and apply proposal' : `Review ${proposalIds.length} proposals`,
+      path: `/admin/approvals?actionId=${encodeURIComponent(firstId)}&source=bob`
+    }];
+  }
+  if (!Array.isArray(meta.workflow_steps) || meta.workflow_steps.length === 0) {
+    meta.workflow_steps = [
+      {
+        id: 'prepared',
+        label: proposalIds.length === 1 ? 'Proposal prepared' : `${proposalIds.length} proposals prepared`,
+        status: 'completed',
+        detail: 'Bob recorded the proposed change and its reasoning.'
+      },
+      {
+        id: 'review',
+        label: 'Human review',
+        status: 'current',
+        detail: 'Open the exact action to inspect, approve, amend, or reject it.'
+      },
+      {
+        id: 'apply',
+        label: 'Apply and verify',
+        status: 'pending',
+        detail: 'The governed executor writes the record and returns a receipt only after approval.'
+      }
+    ];
+  }
+}
 /** @deprecated Use generateToolCatalogue() from caddie.ts instead. Retained for CI grep. */ function _buildToolCatalogue(caps) {
   const all = [
     {
@@ -11264,6 +11303,7 @@ serve(async (req)=>{
     // #292 gate (b): deterministic output-sweep — apply the egress sweep to
     // the final reply using the caller's scope + turn data. This is the
     // BACKSTOP; the primary control is #302 (gate a).
+    attachGuidedProposalWorkflow(result.meta);
     const { reply, safetyAlerts, forbiddenSetApplied, tier0IdentitySurfaced } = applyEgressSweep(stripInternal(result.reply), caps, result.meta);
     // ── Phase 1 Slice 1 (#333): derive disclosure tier from egress signals ──
     const disclosureTier = conductorDeriveDisclosureTier({

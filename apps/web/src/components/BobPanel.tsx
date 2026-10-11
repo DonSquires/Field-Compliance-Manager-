@@ -1198,6 +1198,7 @@ export const BobPanel: React.FC<BobPanelProps> = ({ open, onClose, context, mode
                   <div className="bob-message-body">
                     {m.role === 'assistant' && <AgentMetadata message={m} />}
                     <div className="bob-message-content">{m.role === 'assistant' ? <BobMarkdown content={m.content} /> : m.content}</div>
+                    {m.role === 'assistant' && <WorkflowProgress message={m} />}
                     {m.role === 'assistant' && <AnswerChoices message={m} disabled={sending} onAnswer={(answer) => void handleSend(null, answer)} />}
                     {m.role === 'assistant' && <NavigationActions message={m} />}
                     <footer><time dateTime={m.created_at}>{new Date(m.created_at).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })}</time>{m.role === 'assistant' && <button type="button" onClick={() => void speakMessage(m)} disabled={speakingMessageId !== null} title="Listen to this reply" aria-label="Listen to this reply"><Volume2 size={13} />{speakingMessageId === m.id ? 'Speaking' : <span className="sr-only">Listen to this reply</span>}</button>}{supersededBy ? <span className="bob-superseded"><AlertTriangle size={12} /> Superseded by correction</span> : m.flagged && <span className="bob-flagged"><AlertTriangle size={12} /> Review required</span>}{correctionOf && <span className="bob-correction"><ShieldCheck size={12} /> Audit correction</span>}</footer>
@@ -1748,6 +1749,34 @@ function NavigationActions({ message }: { message: BobMessage }) {
     ));
   if (!actions.length) return null;
   return <div className="bob-navigation-actions" aria-label="Open Bob destination">{actions.map((action) => <a key={`${action.label}:${action.path}`} href={action.path}>{action.label}</a>)}</div>;
+}
+
+function WorkflowProgress({ message }: { message: BobMessage }) {
+  const steps = asArray(message.metadata?.workflow_steps)
+    .map((value) => value && typeof value === 'object' ? value as Record<string, unknown> : null)
+    .map((value, index) => value ? {
+      id: asString(value.id) ?? `step-${index + 1}`,
+      label: asString(value.label),
+      detail: asString(value.detail),
+      status: ['completed', 'current', 'pending', 'blocked'].includes(asString(value.status) ?? '')
+        ? asString(value.status) as 'completed' | 'current' | 'pending' | 'blocked'
+        : 'pending',
+    } : null)
+    .filter((value): value is { id: string; label: string; detail: string | null; status: 'completed' | 'current' | 'pending' | 'blocked' } => Boolean(value?.label));
+  if (!steps.length) return null;
+  return (
+    <section className="bob-workflow-progress" aria-label="Bob workflow progress">
+      <strong>Workflow progress</strong>
+      <ol>
+        {steps.map((step) => (
+          <li key={step.id} className={`state-${step.status}`}>
+            <span aria-hidden="true">{step.status === 'completed' ? <CheckCircle2 size={14} /> : step.status === 'current' ? <Clock3 size={14} /> : <ListChecks size={14} />}</span>
+            <div><b>{step.label}</b>{step.detail && <small>{step.detail}</small>}</div>
+          </li>
+        ))}
+      </ol>
+    </section>
+  );
 }
 
 function OperationalCards({ message }: { message: BobMessage }) {

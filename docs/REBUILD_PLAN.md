@@ -701,6 +701,25 @@ System-wide Bob acceptance gate shipped 2026-10-11:
     document receipts now explain that references are rank-protected instead of
     presenting unexplained `[id]` placeholders.
 
+  Guided app-operation bridge implemented 2026-10-11:
+
+  - **Before:** Bob could file governed record proposals and the approval
+    workbench could approve/apply them, but the chat stopped at prose telling
+    the user to find the approval surface. The action was not preselected and
+    the user could not see a persistent before/during/after workflow in the
+    conversation.
+  - **During:** successful proposal metadata now carries an exact tenant-safe
+    `/admin/approvals?actionId=...` destination and a persistent three-stage
+    workflow (`Proposal prepared` → `Human review` → `Apply and verify`). The
+    approvals workbench consumes the action ID, opens the Decisions area,
+    preselects the exact action, and retains the canonical `can_decide` check,
+    required reasoning, and separate approve/apply executor.
+  - **After:** Bob can visibly walk a user from a chat request to the precise
+    review screen and its real buttons without pretending that navigation is a
+    database write or bypassing rank. Application still occurs only through
+    `bob-proposal-approver` / the governed executor, and the resulting record
+    receipt remains visible in the approval activity.
+
   **Gate:** live `bob_messages` show no context-losing fallbacks; a Builder job
   runs implement → verify → repair without human touch and stops cleanly at
   `release_ready`; egress proven per rank; Atlas `exercised` is populated from

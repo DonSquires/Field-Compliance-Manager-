@@ -229,6 +229,38 @@ describe('BobPanel', () => {
     expect(screen.getByRole('link', { name: 'Open document studio' }).getAttribute('href')).toBe('/admin/document-studio?sourceType=company&sourceId=org-1');
   });
 
+  it('shows a persistent guided workflow and exact approval destination for governed writes', async () => {
+    messageHistory = [{
+      id: 'message-proposal',
+      role: 'assistant',
+      content: 'I prepared the reversible change for review.',
+      confidence: 0.9,
+      flagged: false,
+      created_at: '2026-10-11T06:00:00.000Z',
+      metadata: {
+        action_id: '11111111-1111-4111-8111-111111111111',
+        workflow_steps: [
+          { id: 'prepared', label: 'Proposal prepared', status: 'completed', detail: 'Bob recorded the proposed change.' },
+          { id: 'review', label: 'Human review', status: 'current', detail: 'Inspect and decide.' },
+          { id: 'apply', label: 'Apply and verify', status: 'pending', detail: 'Write through the governed executor.' },
+        ],
+        navigation_actions: [{
+          label: 'Review and apply proposal',
+          path: '/admin/approvals?actionId=11111111-1111-4111-8111-111111111111&source=bob',
+        }],
+      },
+    }];
+
+    render(<BobPanel open onClose={() => undefined} />);
+
+    expect(await screen.findByRole('region', { name: 'Bob workflow progress' })).toBeTruthy();
+    expect(screen.getByText('Proposal prepared')).toBeTruthy();
+    expect(screen.getByText('Human review')).toBeTruthy();
+    expect(screen.getByText('Apply and verify')).toBeTruthy();
+    expect(screen.getByRole('link', { name: 'Review and apply proposal' }).getAttribute('href'))
+      .toBe('/admin/approvals?actionId=11111111-1111-4111-8111-111111111111&source=bob');
+  });
+
   it('distinguishes a superseded reply from its append-only audit correction', async () => {
     messageHistory = [
       {

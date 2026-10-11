@@ -1,6 +1,6 @@
 type ApprovalWorkArea = 'actions' | 'documents' | 'plans';
-import React, { useCallback, useEffect, useMemo, useState } from 'react';
-import { useNavigate } from 'react-router-dom';
+import React, { useCallback, useEffect, useMemo, useRef, useState } from 'react';
+import { useNavigate, useSearchParams } from 'react-router-dom';
 import { AlertTriangle, CheckCircle2, ChevronRight, Clock3, FileCheck2, Filter, History, ListChecks, RefreshCw, Search, ShieldCheck, X, XCircle } from 'lucide-react';
 import { formatGovernedPayload } from '../lib/governedPayload';
 import { useAuth } from '../context/AuthContext';
@@ -153,6 +153,9 @@ function statusClass(status: ActionStatus): string {
 
 const ApprovalsActivityPage: React.FC = () => {
   const navigate = useNavigate();
+  const [searchParams] = useSearchParams();
+  const requestedActionId = searchParams.get('actionId');
+  const deepLinkAnnouncedRef = useRef(false);
   const { operatingOrganizationId, profile } = useAuth();
   const [rows, setRows] = useState<ApprovalRow[]>([]);
   const [plans, setPlans] = useState<JobPlanRow[]>([]);
@@ -160,8 +163,8 @@ const ApprovalsActivityPage: React.FC = () => {
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
   const [notice, setNotice] = useState<string | null>(null);
-  const [filter, setFilter] = useState<StatusFilter>('pending');
-    const [reviewArea, setReviewArea] = useState<ApprovalWorkArea>('actions');
+  const [filter, setFilter] = useState<StatusFilter>(() => requestedActionId ? 'all' : 'pending');
+  const [reviewArea, setReviewArea] = useState<ApprovalWorkArea>('actions');
   const [search, setSearch] = useState('');
   const [selectedId, setSelectedId] = useState<string | null>(null);
   const [decision, setDecision] = useState<'approve' | 'reject' | null>(null);
@@ -347,8 +350,23 @@ const ApprovalsActivityPage: React.FC = () => {
   }, [filter, rows, search]);
 
   useEffect(() => {
-    setSelectedId((current) => current && visibleRows.some((row) => row.id === current) ? current : visibleRows[0]?.id ?? null);
-  }, [visibleRows]);
+    setSelectedId((current) => {
+      if (requestedActionId && visibleRows.some((row) => row.id === requestedActionId)) return requestedActionId;
+      return current && visibleRows.some((row) => row.id === current) ? current : visibleRows[0]?.id ?? null;
+    });
+  }, [requestedActionId, visibleRows]);
+
+  useEffect(() => {
+    if (loading || !requestedActionId || deepLinkAnnouncedRef.current) return;
+    deepLinkAnnouncedRef.current = true;
+    const requested = rows.find((row) => row.id === requestedActionId);
+    if (!requested) {
+      setError('The Bob action in this link is not available in your current organisation or role.');
+      return;
+    }
+    setReviewArea('actions');
+    setNotice('Bob opened the exact governed action. Review the evidence and choose whether to approve, amend, or reject it.');
+  }, [loading, requestedActionId, rows]);
 
   const selected = rows.find((row) => row.id === selectedId) ?? null;
   const pendingCount = rows.filter((row) => isPendingAction(row.status)).length;

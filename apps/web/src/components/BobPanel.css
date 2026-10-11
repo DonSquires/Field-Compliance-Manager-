@@ -1227,6 +1227,73 @@
   background: #173b39;
 }
 
+.bob-workflow-progress {
+  display: grid;
+  gap: 8px;
+  margin-top: 10px;
+  padding: 10px;
+  border: 1px solid #3d5b68;
+  border-radius: 7px;
+  background: #0b1b27;
+}
+
+.bob-workflow-progress > strong {
+  color: #d9eaf1;
+  font-size: 12px;
+}
+
+.bob-workflow-progress ol {
+  display: grid;
+  gap: 7px;
+  margin: 0;
+  padding: 0;
+  list-style: none;
+}
+
+.bob-workflow-progress li {
+  display: grid;
+  grid-template-columns: 18px minmax(0, 1fr);
+  gap: 7px;
+  color: #90a6b4;
+}
+
+.bob-workflow-progress li > span {
+  display: grid;
+  place-items: start center;
+  padding-top: 2px;
+}
+
+.bob-workflow-progress li div {
+  display: grid;
+  gap: 2px;
+}
+
+.bob-workflow-progress li b {
+  color: #c8d9e2;
+  font-size: 12px;
+}
+
+.bob-workflow-progress li small {
+  color: #90a6b4;
+  font-size: 12px;
+  line-height: 1.4;
+}
+
+.bob-workflow-progress li.state-completed,
+.bob-workflow-progress li.state-completed b {
+  color: #8fe2d8;
+}
+
+.bob-workflow-progress li.state-current,
+.bob-workflow-progress li.state-current b {
+  color: #f2cf83;
+}
+
+.bob-workflow-progress li.state-blocked,
+.bob-workflow-progress li.state-blocked b {
+  color: #ff9b8f;
+}
+
 .bob-message.is-superseded .bob-message-body {
   border-color: rgba(184, 84, 77, .82);
   background: #29191d;

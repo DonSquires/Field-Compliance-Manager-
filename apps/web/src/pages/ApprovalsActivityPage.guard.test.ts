@@ -42,6 +42,15 @@ describe('governed approvals workbench', () => {
     expect(source).toContain('required rows={4}');
   });
 
+  it('opens Bob deep links on the exact governed action without widening authority', () => {
+    expect(source).toContain('useSearchParams');
+    expect(source).toContain("searchParams.get('actionId')");
+    expect(source).toContain("requestedActionId ? 'all' : 'pending'");
+    expect(source).toContain('row.id === requestedActionId');
+    expect(source).toContain('selected.can_decide');
+    expect(source).toContain('not available in your current organisation or role');
+  });
+
   it('sanitizes payload display and surfaces apply failures honestly', () => {
     expect(source).toContain('formatGovernedPayload');
     expect(source).toContain('response?.apply_error');
