@@ -46,3 +46,19 @@ test('mobile smoke evidence time and source confirmation follow the captured evi
   assert.match(source, /setImageBase64\(null\);[\s\S]*?setSourceConfirmed\(false\);[\s\S]*?assessedAt\.current = null/);
   assert.doesNotMatch(source, /useRef\(new Date\(\)\.toISOString\(\)\)/);
 });
+
+test('mobile smoke keeps a durable governed Bob receipt after submission', () => {
+  assert.match(source, /type SmokeSubmissionReceipt/);
+  assert.match(source, /received_at\?: string/);
+  assert.match(source, /evidence_state\?: string/);
+  assert.match(source, /confidence\?: number \| null/);
+  assert.match(source, /reasoning\?: string \| null/);
+  assert.match(source, /provider\?: string \| null/);
+  assert.match(source, /model\?: string \| null/);
+  assert.match(source, /setLastReceipt\(\{/);
+  assert.match(source, /Bob visible-image candidate/);
+  assert.match(source, /This remains the operational and legal record\. Bob did not change it\./);
+  assert.match(source, /No machine candidate was used as a fallback/);
+  assert.match(source, /A supervisor reviews the photo classification separately from the officer action and workflow outcome/);
+  assert.match(source, /Start another smoke assessment/);
+});

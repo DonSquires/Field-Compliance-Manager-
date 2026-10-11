@@ -453,8 +453,11 @@ supports replace/remove, sends separate officer notes, names every outstanding
 requirement, uses glove-safe controls and repeats the machine-authority boundary
 before the officer confirms the source. Evidence time is bound to successful
 photo capture rather than form mount, and changing the observed address, source
-type or photo revokes the previous source confirmation. Production presently has
-four legacy assessments but no evidence links;
+type or photo revokes the previous source confirmation. After submission, the
+mobile surface retains a durable receipt that separates the officer's legal and
+operational record from Bob's candidate, confidence, reasoning and model
+provenance, including an explicit unavailable state and supervisor-review next
+action. Production presently has four legacy assessments but no evidence links;
 two replay attempts for each returned `missing_evidence_link`, while a
 nonexistent assessment raised the missing-record guard. This contradicts the
 historical assumption that every assessment could be projected, so the records

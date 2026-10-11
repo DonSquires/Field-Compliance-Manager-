@@ -8,6 +8,27 @@ type SmokeSourceType = 'domestic_solid_fuel' | 'industrial' | 'vehicle_exhaust' 
 type ComplaintSource = 'neighbour' | 'council_hotline' | 'self_report' | 'other';
 type Severity = 'low' | 'moderate' | 'high' | 'critical';
 type ActionTaken = 'no_action' | 'verbal_warning' | 'abatement_notice' | 'infringement_notice' | 'prosecution_referral';
+type SmokeClassificationReceipt = {
+  status?: string;
+  classification?: string | null;
+  confidence?: number | null;
+  reasoning?: string | null;
+  provider?: string | null;
+  model?: string | null;
+  prompt_version?: string | null;
+  failure_reason?: string | null;
+};
+type SmokeSubmissionReceipt = {
+  assessmentId: string;
+  receivedAt: string;
+  reviewState: string;
+  evidenceState: string;
+  isOutOfHours: boolean;
+  officerAction: ActionTaken;
+  officerSource: SmokeSourceType;
+  classification: SmokeClassificationReceipt;
+  perception?: { recorded?: number; replayed?: number; skipped?: string } | null;
+};
 
 export function OfficerSmokeControlPanel({ shiftId }: Props) {
   const [open, setOpen] = useState(false);
@@ -25,6 +46,7 @@ export function OfficerSmokeControlPanel({ shiftId }: Props) {
   const [imageUri, setImageUri] = useState<string | null>(null);
   const [imageBase64, setImageBase64] = useState<string | null>(null);
   const [imageCapturedAt, setImageCapturedAt] = useState<string | null>(null);
+  const [lastReceipt, setLastReceipt] = useState<SmokeSubmissionReceipt | null>(null);
   const [busy, setBusy] = useState(false);
   const requestId = useRef(crypto.randomUUID());
   const assessedAt = useRef<string | null>(null);
@@ -67,9 +89,12 @@ export function OfficerSmokeControlPanel({ shiftId }: Props) {
       const { data, error } = await supabase.functions.invoke<{
         success?: boolean;
         assessment_id?: string;
+        received_at?: string;
+        evidence_state?: string;
         review_state?: string;
         is_out_of_hours?: boolean;
-        classification?: { classification?: string };
+        classification?: SmokeClassificationReceipt;
+        perception?: { recorded?: number; replayed?: number; skipped?: string };
         error?: string;
       }>('submit-smoke-assessment', {
         body: {
@@ -95,11 +120,20 @@ export function OfficerSmokeControlPanel({ shiftId }: Props) {
         throw error ?? new Error(data?.error || 'Smoke assessment was not confirmed.');
       }
 
+      setLastReceipt({
+        assessmentId: data.assessment_id,
+        receivedAt: data.received_at ?? new Date().toISOString(),
+        reviewState: data.review_state ?? 'submitted',
+        evidenceState: data.evidence_state ?? 'received',
+        isOutOfHours: Boolean(data.is_out_of_hours),
+        officerAction: actionTaken,
+        officerSource: smokeSourceType,
+        classification: data.classification ?? { status: 'unavailable' },
+        perception: data.perception ?? null,
+      });
       Alert.alert(
         'Assessment confirmed',
-        `Receipt ${data.assessment_id.slice(0, 8)}. Review state: ${data.review_state ?? 'submitted'}.${
-          data.is_out_of_hours ? ' Out-of-hours coverage.' : ''
-        }${data.classification?.classification ? ` Bob candidate: ${data.classification.classification}; human review required.` : ' Photo classification unavailable; human review required.'}`
+        `Receipt ${data.assessment_id.slice(0, 8)} was saved. Bob's visible-image candidate requires human review.`
       );
 
       setAddress('');
@@ -124,9 +158,79 @@ export function OfficerSmokeControlPanel({ shiftId }: Props) {
 
   return (
     <View style={styles.panel}>
-      <Pressable onPress={() => setOpen((value) => !value)} style={styles.trigger}>
-        <Text style={styles.triggerText}>{open ? 'Close smoke assessment' : 'Smoke complaint assessment'}</Text>
+      <Pressable
+        accessibilityRole="button"
+        onPress={() => {
+          if (open) setOpen(false);
+          else {
+            setLastReceipt(null);
+            setOpen(true);
+          }
+        }}
+        style={styles.trigger}
+      >
+        <Text style={styles.triggerText}>{open ? 'Close smoke assessment' : lastReceipt ? 'Start another smoke assessment' : 'Smoke complaint assessment'}</Text>
       </Pressable>
+
+      {lastReceipt && !open && (
+        <View accessibilityLiveRegion="polite" style={styles.receipt}>
+          <View style={styles.receiptHeader}>
+            <View>
+              <Text style={styles.receiptKicker}>Assessment received</Text>
+              <Text style={styles.receiptTitle}>Receipt {lastReceipt.assessmentId.slice(0, 8)}</Text>
+            </View>
+            <Text style={styles.receiptStatus}>{lastReceipt.reviewState.replace(/_/g, ' ')}</Text>
+          </View>
+          <Text style={styles.receiptMeta}>
+            {new Date(lastReceipt.receivedAt).toLocaleString()} · Evidence {lastReceipt.evidenceState.replace(/_/g, ' ')}
+            {lastReceipt.isOutOfHours ? ' · Out-of-hours coverage' : ''}
+          </Text>
+
+          <View style={styles.authorityCard}>
+            <Text style={styles.authorityLabel}>Officer record</Text>
+            <Text style={styles.authorityValue}>Source: {lastReceipt.officerSource.replace(/_/g, ' ')}</Text>
+            <Text style={styles.authorityValue}>Action: {lastReceipt.officerAction.replace(/_/g, ' ')}</Text>
+            <Text style={styles.helpText}>This remains the operational and legal record. Bob did not change it.</Text>
+          </View>
+
+          <View style={styles.bobCard}>
+            <Text style={styles.authorityLabel}>Bob visible-image candidate</Text>
+            {lastReceipt.classification.status === 'available' && lastReceipt.classification.classification ? (
+              <>
+                <Text style={styles.bobCandidate}>
+                  {lastReceipt.classification.classification}
+                  {typeof lastReceipt.classification.confidence === 'number'
+                    ? ` · ${Math.round(lastReceipt.classification.confidence * 100)}% confidence`
+                    : ''}
+                </Text>
+                {lastReceipt.classification.reasoning ? <Text style={styles.helpText}>{lastReceipt.classification.reasoning}</Text> : null}
+                {(lastReceipt.classification.provider || lastReceipt.classification.model) ? (
+                  <Text style={styles.receiptMeta}>
+                    Model: {[lastReceipt.classification.provider, lastReceipt.classification.model].filter(Boolean).join(' / ')}
+                  </Text>
+                ) : null}
+              </>
+            ) : (
+              <>
+                <Text style={styles.bobCandidate}>Classification unavailable</Text>
+                <Text style={styles.helpText}>
+                  The assessment and evidence were saved. No machine candidate was used as a fallback.
+                </Text>
+              </>
+            )}
+            <Text style={styles.authorityWarning}>
+              Human review required. Bob cannot establish a breach, legal basis, notice, or enforcement action from this photo.
+            </Text>
+          </View>
+
+          <View style={styles.nextAction}>
+            <Text style={styles.nextActionTitle}>Safe next action</Text>
+            <Text style={styles.helpText}>
+              A supervisor reviews the photo classification separately from the officer action and workflow outcome.
+            </Text>
+          </View>
+        </View>
+      )}
 
       {open && (
         <View style={styles.form}>
@@ -271,6 +375,20 @@ const styles = StyleSheet.create({
   panel: { gap: 8 },
   trigger: { minHeight: 44, alignItems: 'center', justifyContent: 'center', borderRadius: 5, borderWidth: 1, borderColor: '#3a5364' },
   triggerText: { color: '#a7cce7', fontSize: 13, fontWeight: '800' },
+  receipt: { gap: 10, borderWidth: 1, borderColor: '#47776f', borderRadius: 8, backgroundColor: '#0a1c1b', padding: 12 },
+  receiptHeader: { flexDirection: 'row', alignItems: 'flex-start', justifyContent: 'space-between', gap: 10 },
+  receiptKicker: { color: '#7dd3c7', fontSize: 11, fontWeight: '800', textTransform: 'uppercase' },
+  receiptTitle: { color: '#eef6f7', fontSize: 17, fontWeight: '800', marginTop: 2 },
+  receiptStatus: { color: '#dce8eb', fontSize: 11, fontWeight: '800', textTransform: 'capitalize', borderWidth: 1, borderColor: '#47776f', borderRadius: 12, paddingHorizontal: 8, paddingVertical: 4 },
+  receiptMeta: { color: '#9eb2bf', fontSize: 11, lineHeight: 16 },
+  authorityCard: { gap: 4, borderWidth: 1, borderColor: '#355164', borderRadius: 6, backgroundColor: '#0b1926', padding: 10 },
+  bobCard: { gap: 5, borderWidth: 1, borderColor: '#665a3d', borderRadius: 6, backgroundColor: '#201b11', padding: 10 },
+  authorityLabel: { color: '#a7cce7', fontSize: 11, fontWeight: '800', textTransform: 'uppercase' },
+  authorityValue: { color: '#eef6f7', fontSize: 13, fontWeight: '700', textTransform: 'capitalize' },
+  bobCandidate: { color: '#fff3cf', fontSize: 14, fontWeight: '800', textTransform: 'capitalize' },
+  authorityWarning: { color: '#f2c979', fontSize: 12, lineHeight: 17, fontWeight: '700' },
+  nextAction: { gap: 3, borderLeftWidth: 3, borderLeftColor: '#7dd3c7', paddingLeft: 9 },
+  nextActionTitle: { color: '#eef6f7', fontSize: 12, fontWeight: '800' },
   form: { gap: 9, borderWidth: 1, borderColor: '#30485b', borderRadius: 8, backgroundColor: '#0b1926', padding: 12 },
   title: { color: '#eef6f7', fontSize: 17, fontWeight: '800' },
   sectionLabel: { color: '#88a2b5', fontSize: 12, fontWeight: '700', marginTop: 4 },

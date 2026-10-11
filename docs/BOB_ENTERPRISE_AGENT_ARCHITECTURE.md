@@ -337,7 +337,12 @@ and safe next actions. Desktop and mobile Chromium acceptance runs passed
 without browser errors. All four legacy assessments lack evidence links; two
 replays per record failed closed as `missing_evidence_link`, and a nonexistent
 record raised `Smoke assessment is missing`, so no historical envelope was
-fabricated.
+fabricated. The mobile officer surface retains the governed submission receipt
+after success and visibly separates the officer's source/action record from
+Bob's advisory candidate, confidence, reasoning and model provenance. A missing
+classification is shown as unavailable rather than replaced with a
+success-shaped fallback, and the only named next step is separate supervisor
+review.
 
 **Sixth adapter implemented 2026-10-11: noise photo classification.** The
 governed officer submission requires a private source/equipment evidence photo
