@@ -36,6 +36,9 @@ export function BobMermaidDiagram({ chart, title = 'Bob diagram' }: { chart: str
           startOnLoad: false,
           securityLevel: 'strict',
           theme: 'dark',
+          flowchart: {
+            htmlLabels: false,
+          },
           themeVariables: {
             background: '#07111c',
             primaryColor: '#123a44',

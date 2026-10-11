@@ -691,9 +691,12 @@ System-wide Bob acceptance gate shipped 2026-10-11:
     persisted conversation-scoped document with Copy/Download actions. The
     acceptance pass also found and repaired two presentation defects: checking
     a live durable request could show `Failed/paused` beside `running`, and a
-    large Mermaid graph was scaled below readable size. Active durable states
-    now take precedence over stale transport messages, and diagrams retain a
-    readable native width inside the scrollable Studio canvas. Non-admiral
+    large Mermaid graph was scaled below readable size. Native labels were also
+    lost because the secure SVG sanitizer correctly removes `foreignObject`
+    elements. Active durable states now take precedence over stale transport
+    messages, and diagrams retain a readable native width inside the scrollable
+    Studio canvas while Mermaid emits sanitizer-safe SVG text labels.
+    Non-admiral
     document receipts now explain that references are rank-protected instead of
     presenting unexplained `[id]` placeholders.
 
