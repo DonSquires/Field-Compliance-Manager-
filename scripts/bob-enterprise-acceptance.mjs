@@ -139,14 +139,20 @@ export const enterpriseDomains = Object.freeze([
   {
     id: 'exercise_calibration',
     label: 'Invocation evidence and model calibration',
-    state: 'gap',
+    state: 'partial',
     authority: 'Exercise and calibration must come from invocation receipts, not wiring claims',
     evidence: [
       'supabase/migrations/20261010224625_shared_perception_evidence_envelope.sql',
       'scripts/atlas-refresh.js',
+      'scripts/atlas-exercise-evidence.mjs',
+      'scripts/perception-calibration-report.mjs',
     ],
-    tests: ['test/perception-evidence-envelope.test.js', 'test/atlas-calibration.test.js'],
-    gap: 'Atlas exercised remains unpopulated and there is no cross-domain accuracy/overturn dashboard.',
+    tests: [
+      'test/perception-evidence-envelope.test.js',
+      'test/atlas-calibration.test.js',
+      'test/atlas-exercise-evidence.test.js',
+    ],
+    gap: 'Exercise is now proven from invocation receipts (118 capabilities from 11,289 observations), but perception_model_calibrations is still empty, no field carries a calibrated confidence, and every domain sits below the 30-decision review floor, so no accuracy rate may be published.',
   },
 ]);
 

@@ -235,6 +235,56 @@ from accepted invocation telemetry and include:
 Weak `references` edges are not reads or writes. A UI claim is live only when a
 real schema/edge-function path and an invocation receipt support it.
 
+### 9.1 Implemented: invocation-derived exercise (2026-09)
+
+`scripts/atlas-exercise-evidence.mjs` (`npm run atlas:exercise`, `--apply` to
+write) closes the exercise half of Phase F. It reads seven live invocation
+sources — `bob_event_log`, `audit_log`, `builder_model_runs`,
+`builder_worker_runs`, `bob_task_runs`, `bob_job_runs` and the perception
+evidence tables — and resolves each receipt to a capability row.
+
+Tool-to-edge-function resolution is **parsed at runtime** from the authoritative
+`toolToEdgeFn` map in `supabase/functions/onspace-ai-chat/caddie.ts` rather than
+duplicated, so the two cannot drift. Conductor-inline tools resolve to
+`onspace-ai-chat` because they execute in the conductor's own dispatch switch.
+
+Doctrine encoded in the script:
+
+- `exercised = true` is written **only** where a counted invocation receipt
+  resolves to a capability;
+- `exercised = false` is **never** written — absence of evidence is not evidence
+  of absence, so unproven rows stay `null`;
+- evidence that resolves to no capability is reported as unresolved, never
+  silently dropped;
+- only the `exercised` column is patched. `scripts/atlas-refresh.js` always
+  rewrites `notes` and `refresh_source`, so writing those here would cause
+  perpetual churn between the two scripts.
+
+Live result: **0 → 118 capabilities exercised** from 11,289 invocation
+observations, with 0 unresolved evidence keys. Replay is idempotent, and a
+subsequent static Atlas refresh was verified to preserve all 118 claims.
+
+This work surfaced a real defect: `cancel_builder_job` is a registered,
+admiral-gated conductor-inline tool but had no `toolToEdgeFn` entry, making it
+invisible to terrain and exercise mapping. It is now mapped.
+
+### 9.2 Still open: calibration
+
+`scripts/perception-calibration-report.mjs` (`npm run bob:calibration-report`)
+measures what the live review receipts actually support. As of the first run it
+reports, and refuses to publish an accuracy rate because:
+
+- `perception_model_calibrations` is empty — no model has a versioned
+  evaluation receipt;
+- no field carries a `calibrated_confidence`, so raw model confidence must not
+  be presented as a probability of correctness;
+- every domain sits below the 30-decision reviewed-sample floor
+  (`cctv_vehicle_attributes` 4, `cctv_person` 25, `cctv_alpr` 6).
+
+Across 705 candidate fields there are 35 human decisions (5.0% coverage): 29
+upheld and 6 overturned. That 17.1% overturn figure is recorded as indicative
+only and is explicitly **not** a published accuracy number.
+
 ## 10. Delivery sequence and acceptance gates
 
 ### Phase A — identifier safety
@@ -380,12 +430,17 @@ touch inside the worker, but every protected action remains blocked.
 
 ### Phase F — exercise and calibration
 
-- Invocation-derived Atlas exercise data.
+- Invocation-derived Atlas exercise data. **Implemented** — see section 9.1;
+  live result 0 → 118 exercised capabilities.
 - Accuracy, false-positive, false-negative, conflict and human-overturn
-  dashboards split by model, environment and domain.
+  dashboards split by model, environment and domain. **Outstanding** — the
+  measurement script exists (section 9.2) and currently reports that the
+  reviewed sample and calibration records cannot support any published rate.
 
 Gate: no production-readiness or accuracy claim is made without a versioned
-evaluation set and reproducible results.
+evaluation set and reproducible results. This gate is presently **unmet by
+design**, and the calibration report says so explicitly rather than inferring a
+rate from 35 decisions.
 
 ### Enterprise acceptance command
 
@@ -405,16 +460,19 @@ evaluation set and reproducible results.
 
 The machine-readable inventory and runner live in
 `scripts/bob-enterprise-acceptance.mjs`. Its current result is five implemented
-domains, three partial domains and two explicit gaps. Partial work is:
+domains, four partial domains and one explicit gap. Partial work is:
 
 1. parking/freedom-camping shared-envelope projection and calibrated multi-visit
    ambiguity receipts;
 2. Desktop V2 signed local model manifests, offline receipts and conflict
-   reconciliation; and
-3. consistent who-is-flying, takeback and result-in-habitat UX across modules.
+   reconciliation;
+3. consistent who-is-flying, takeback and result-in-habitat UX across modules;
+   and
+4. exercise/calibration — exercise is now proven from invocation receipts, but
+   calibration records, calibrated confidences and a sufficient reviewed sample
+   are all still missing.
 
-The declared gaps are the access-control perception adapter and
-invocation-derived exercise/calibration dashboards. `npm run
+The one remaining full gap is the access-control perception adapter. `npm run
 bob:enterprise-readiness:strict` therefore fails intentionally until every
 declared partial/gap has acceptance evidence. Grandmaster remains a
 server-owned caller rank under ONE BOB; it is not a client-selectable BobPanel

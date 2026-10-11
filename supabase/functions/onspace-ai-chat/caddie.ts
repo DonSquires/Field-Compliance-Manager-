@@ -653,6 +653,10 @@ const TOOL_REGISTRY = {
     //   inline logic, not a separate 'bob-confirm-import' edge function
     //   (which does not exist).
     confirm_import: 'onspace-ai-chat',
+    // cancel_builder_job: conductor-inline; index.ts dispatches it in its own
+    //   switch and calls the caller-scoped builder_cancel_job RPC. There is no
+    //   separate 'bob-cancel-builder-job' edge function.
+    cancel_builder_job: 'onspace-ai-chat',
     // read_bob_chat: conductor calls callFn('bob-repo-search', { action:
     //   'read_bob_chat' }) — routed through bob-repo-search, not a separate
     //   'bob-read-bob-chat' edge function (which does not exist).
