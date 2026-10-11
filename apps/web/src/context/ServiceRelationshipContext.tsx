@@ -62,6 +62,7 @@ interface ServiceRelationshipContextValue {
   selectedAgreementSites: ServiceLocationSite[];
   selectedAgreementZones: ServiceLocationZone[];
   loading: boolean;
+  loadedOrganizationId: string | null;
   error: string | null;
   locationStatus: 'idle' | 'locating' | 'resolved' | 'outside_geofence' | 'unavailable';
   currentCoordinates: { lat: number; lng: number } | null;
@@ -89,6 +90,7 @@ const ServiceRelationshipContext = createContext<ServiceRelationshipContextValue
   selectedAgreementSites: [],
   selectedAgreementZones: [],
   loading: true,
+  loadedOrganizationId: null,
   error: null,
   locationStatus: 'idle',
   currentCoordinates: null,
@@ -114,6 +116,7 @@ export function ServiceRelationshipProvider({ children }: { children: ReactNode 
   const selectedSiteId = selectedPlaceIds.siteId;
   const selectedZoneId = selectedPlaceIds.zoneId;
   const [loading, setLoading] = useState(true);
+  const [loadedOrganizationId, setLoadedOrganizationId] = useState<string | null>(null);
   const [error, setError] = useState<string | null>(null);
   const [locationStatus, setLocationStatus] = useState<ServiceRelationshipContextValue['locationStatus']>('idle');
   const [currentCoordinates, setCurrentCoordinates] = useState<{ lat: number; lng: number } | null>(null);
@@ -125,6 +128,7 @@ export function ServiceRelationshipProvider({ children }: { children: ReactNode 
 
   const refetch = useCallback(async () => {
     if (!profile?.organizationId) {
+      setLoadedOrganizationId(null);
       setAgreements([]);
       setSites([]);
       setZones([]);
@@ -137,6 +141,7 @@ export function ServiceRelationshipProvider({ children }: { children: ReactNode 
 
     try {
       setLoading(true);
+      setLoadedOrganizationId(null);
       setError(null);
 
       // Agreements are held at branch level (Model A): an employer-organisation user also works within its branches' agreements.
@@ -256,6 +261,7 @@ export function ServiceRelationshipProvider({ children }: { children: ReactNode 
         if (zoneId) return { siteId: null, zoneId };
         return { siteId: linkedSites.find((site) => nextSiteIds.has(site.id))?.id ?? null, zoneId: null };
       });
+      setLoadedOrganizationId(profile.organizationId);
     } catch (err) {
       console.error('Failed to load service relationship context:', err);
       setError(err instanceof Error ? err.message : 'Failed to load service relationship context');
@@ -396,6 +402,7 @@ export function ServiceRelationshipProvider({ children }: { children: ReactNode 
     selectedAgreementSites,
     selectedAgreementZones,
     loading,
+    loadedOrganizationId,
     error,
     locationStatus,
     currentCoordinates,
@@ -421,7 +428,7 @@ export function ServiceRelationshipProvider({ children }: { children: ReactNode 
     selectZone: (zoneId) => {
       setSelectedPlaceIds({ siteId: null, zoneId });
     },
-  }), [agreements, sites, zones, agreementLocationLinks, selectedAgreementId, selectedSiteId, selectedZoneId, selectedAgreement, selectedSite, selectedZone, selectedAgreementSites, selectedAgreementZones, loading, error, locationStatus, currentCoordinates, currentAddress, geofenceResolution, locationError, locationMode, refetch]);
+  }), [agreements, sites, zones, agreementLocationLinks, selectedAgreementId, selectedSiteId, selectedZoneId, selectedAgreement, selectedSite, selectedZone, selectedAgreementSites, selectedAgreementZones, loading, loadedOrganizationId, error, locationStatus, currentCoordinates, currentAddress, geofenceResolution, locationError, locationMode, refetch]);
 
   return <ServiceRelationshipContext.Provider value={value}>{children}</ServiceRelationshipContext.Provider>;
 }

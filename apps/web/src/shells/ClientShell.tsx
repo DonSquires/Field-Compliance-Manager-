@@ -44,8 +44,14 @@ export function ClientShell() {
   }, [navigate, routeSegment]);
 
   useEffect(() => {
-    if (!relationships.loading && !allowedPages.has(activePage)) navigate('/client', { replace: true });
-  }, [activePage, allowedPages, navigate, relationships.loading]);
+    if (profile?.organizationId
+        && relationships.loadedOrganizationId === profile.organizationId
+        && !relationships.loading
+        && !relationships.error
+        && !allowedPages.has(activePage)) {
+      navigate('/client', { replace: true });
+    }
+  }, [activePage, allowedPages, navigate, profile?.organizationId, relationships.error, relationships.loadedOrganizationId, relationships.loading]);
 
   if (!profile) return <div className="client-shell-loading">Loading client portal</div>;
 

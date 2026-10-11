@@ -75,6 +75,24 @@ test('a full-module viewer can read operational pages but cannot open disabled f
   }
 });
 
+test('a client administrator can open invoices when finance visibility is enabled', async ({ page }) => {
+  await installClientPortalFixtures(page, { mode: 'transparency_only', financeEnabled: true, role: 'client_admin' });
+  await signInAsClient(page, '/client/finance');
+
+  await expect(page.getByRole('navigation', { name: 'Client portal' }).getByRole('button', { name: 'Invoices' })).toBeVisible();
+  await expect(page.getByText('No invoices are available for this agreement.')).toBeVisible();
+  expect(page).toHaveURL(/\/client\/finance$/);
+});
+
+test('a scan-only client can open the explicitly unreconstructed scan route', async ({ page }) => {
+  await installClientPortalFixtures(page, { mode: 'scan_only', role: 'client_viewer' });
+  await signInAsClient(page, '/client/scan');
+
+  await expect(page.getByRole('navigation', { name: 'Client portal' }).getByRole('button', { name: 'Scan access' })).toBeVisible();
+  await expect(page.getByText('Client scan access is not yet rebuilt')).toBeVisible();
+  expect(page).toHaveURL(/\/client\/scan$/);
+});
+
 test('a client reads the frozen scope and source details of a published custom report', async ({ page }) => {
   const browserErrors = monitorBrowserErrors(page);
   await installClientPortalFixtures(page, { reportsEnabled: true, role: 'client_admin' });
