@@ -62,6 +62,9 @@ test('Bob can create a governed conversation-scoped document draft', () => {
   assert.match(conductor, /scopesRefusalAwayFromDraft/);
   assert.match(conductor, /detectExplicitWriteRefusal\(message, chosenTool\)/);
   assert.match(conductor, /WRITE_CAPABLE_TOOLS[\s\S]*create_document_draft/);
+  assert.match(conductor, /studio_artifact_type: 'document'/);
+  assert.match(conductor, /studio_artifact_title: title/);
+  assert.match(conductor, /studio_artifact_content: authoredText/);
   assert.match(documentDraftEndpoint, /sourceType === 'custom'/);
   assert.match(documentDraftEndpoint, /create_bob_document_draft/);
   assert.match(documentDraftEndpoint, /submit_bob_document_for_review/);

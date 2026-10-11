@@ -1750,6 +1750,105 @@
   cursor: pointer;
 }
 
+.bob-conversation-media {
+  display: grid;
+  gap: 8px;
+  margin: 0 14px;
+  padding: 10px;
+  border: 1px solid rgba(74, 116, 133, .72);
+  border-radius: 12px;
+  background: #0a1b29;
+}
+
+.bob-conversation-media > header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 10px;
+}
+
+.bob-conversation-media > header span {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  color: #dce8ef;
+  font-size: 12px;
+  font-weight: 800;
+}
+
+.bob-conversation-media > header button {
+  min-height: 28px;
+  padding: 0 9px;
+  border: 1px solid #47756f;
+  border-radius: 999px;
+  color: #d6fff8;
+  background: #12312f;
+  font: inherit;
+  font-size: 12px;
+  font-weight: 800;
+  cursor: pointer;
+}
+
+.bob-conversation-media > div {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(130px, 1fr));
+  gap: 8px;
+}
+
+.bob-conversation-media figure {
+  min-width: 0;
+  margin: 0;
+  overflow: hidden;
+  border: 1px solid #294052;
+  border-radius: 9px;
+  background: #07111c;
+}
+
+.bob-conversation-media figure a {
+  display: block;
+}
+
+.bob-conversation-media img,
+.bob-media-placeholder {
+  width: 100%;
+  height: 96px;
+  object-fit: cover;
+  background: #050d15;
+}
+
+.bob-media-placeholder {
+  display: grid;
+  place-content: center;
+  justify-items: center;
+  gap: 5px;
+  color: #8fa5b3;
+  font-size: 12px;
+  text-align: center;
+}
+
+.bob-conversation-media figcaption {
+  display: grid;
+  gap: 2px;
+  padding: 7px 8px;
+}
+
+.bob-conversation-media figcaption strong,
+.bob-conversation-media figcaption span {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.bob-conversation-media figcaption strong {
+  color: #dce8ef;
+  font-size: 12px;
+}
+
+.bob-conversation-media figcaption span {
+  color: #8fa5b3;
+  font-size: 12px;
+}
+
 .bob-quick-actions {
   padding: 10px 14px 0;
   gap: 7px;

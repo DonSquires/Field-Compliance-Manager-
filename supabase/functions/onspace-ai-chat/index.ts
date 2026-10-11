@@ -4876,6 +4876,13 @@ async function execCreateDocumentDraft(authHeader, args) {
     };
   }
   const references = Array.isArray(args.references) ? args.references.slice(0, 25) : [];
+  const studioDocumentKind = [
+    'capability_statement',
+    'rfq_response',
+    'employment_contract',
+    'report_design',
+    'custom_document'
+  ].includes(documentType) ? documentType : 'custom_document';
   const r = await callFn('bob-agentic-document-draft', authHeader, {
     sourceType: 'custom',
     title,
@@ -4898,6 +4905,10 @@ async function execCreateDocumentDraft(authHeader, args) {
       document_id: draft.document_id,
       document_version_id: draft.document_version_id,
       review_status: draft.status ?? 'pending_review',
+      studio_artifact_type: 'document',
+      studio_document_kind: studioDocumentKind,
+      studio_artifact_title: title,
+      studio_artifact_content: authoredText,
       navigation_actions: [{
         label: 'Open draft in Document Studio',
         path: `/admin/document-studio?documentId=${encodeURIComponent(draft.document_id)}&versionId=${encodeURIComponent(draft.document_version_id)}`

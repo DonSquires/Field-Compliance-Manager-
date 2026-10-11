@@ -7,9 +7,13 @@ const chat = fs.readFileSync('supabase/functions/onspace-ai-chat/index.ts', 'utf
 const caddie = fs.readFileSync('supabase/functions/onspace-ai-chat/caddie.ts', 'utf8');
 const planner = require('../services/fcm-api/src/bob/planPrompt.js');
 
+const stripTypeAnnotations = (source) => source
+  .replace(/([A-Za-z_$][\w$]*)\s*:\s*(?:string\|string\[\]|string\[\]|string|number|boolean|unknown|any|Array<[^>]+>|Record<[^>]+>)(?=\s*(?:,|\)|=>))/g, '$1')
+  .replace(/:\s*(?:string\|string\[\]|string\[\]|string|number|boolean|unknown|any|Array<[^>]+>|Record<[^>]+>)/g, '');
+
 const historySource = chat.slice(chat.indexOf('async function loadHistory('), chat.indexOf('// Bob\'s per-user memory', chat.indexOf('async function loadHistory(')));
 assert.ok(historySource.startsWith('async function loadHistory('));
-const loadHistory = vm.runInNewContext(`${historySource}\nloadHistory`);
+const loadHistory = vm.runInNewContext(`${stripTypeAnnotations(historySource)}\nloadHistory`);
 const proposal = { job_id: '12345678-1234-1234-1234-123456789abc', title: 'Fix build', reason: 'No longer needed', user_id: 'owner', conversation_id: 'thread' };
 const assistant = (metadata) => ({ role: 'assistant', content: 'preview', metadata });
 const cancel = (outcome) => assistant({ tool: 'cancel_builder_job', outcome, pending_builder_cancellation: proposal });
@@ -40,12 +44,10 @@ test('a tied-timestamp USER row after the newest ASSISTANT proposal does not hid
   assert.equal((await recover([request, preview])).pending.kind, 'builder_cancellation_pending');
 });
 
-const branch = chat.slice(chat.indexOf("case 'cancel_builder_job':"), chat.indexOf("case 'laptop_shell':"))
-  .replace('const toolMeta = (outcome: string)', 'const toolMeta = (outcome)');
+const branch = stripTypeAnnotations(chat.slice(chat.indexOf("case 'cancel_builder_job':"), chat.indexOf("case 'laptop_shell':")));
 const matcherStart = chat.indexOf('    const builderCancellationDecision = ');
 assert.ok(matcherStart >= 0);
-const matcher = chat.slice(matcherStart, chat.indexOf('    /** Dispatch a single tool', matcherStart))
-  .replace('(text: string)', '(text)');
+const matcher = stripTypeAnnotations(chat.slice(matcherStart, chat.indexOf('    /** Dispatch a single tool', matcherStart)));
 const routeStart = chat.indexOf("    if (pending?.kind === 'builder_cancellation_pending' && builderCancellationDecision(message)) {");
 assert.ok(routeStart >= 0);
 const route = chat.slice(routeStart, chat.indexOf('    // ── Plan call', routeStart));

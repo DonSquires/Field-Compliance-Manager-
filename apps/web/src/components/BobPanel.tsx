@@ -18,7 +18,7 @@
  */
 
 import React, { useEffect, useMemo, useRef, useState, useCallback } from 'react';
-import { AlertTriangle, Archive, ArchiveRestore, Ban, Bot, CheckCircle2, Clock3, FileSearch, FileUp, ListChecks, Maximize2, Mic, Minimize2, Paperclip, PanelLeft, PanelRight, Pencil, Pin, PinOff, Plus, RefreshCw, Search, Send, ShieldCheck, Sparkles, TerminalSquare, Volume2, X } from 'lucide-react';
+import { AlertTriangle, Archive, ArchiveRestore, Ban, Bot, CheckCircle2, Clock3, FileSearch, FileUp, Image as ImageIcon, ListChecks, Maximize2, Mic, Minimize2, Paperclip, PanelLeft, PanelRight, Pencil, Pin, PinOff, Plus, RefreshCw, Search, Send, ShieldCheck, Sparkles, TerminalSquare, Volume2, X } from 'lucide-react';
 import { useAuth } from '../context/AuthContext';
 import { supabase } from '../lib/supabase';
 import { Upload } from 'tus-js-client';
@@ -81,6 +81,8 @@ interface BobAttachmentRecord {
   extraction_payload: Record<string, unknown> | null;
   confidence: number | null;
   created_at: string;
+  source_type?: string | null;
+  source_url?: string | null;
 }
 
 interface BobSessionSummary {
@@ -242,7 +244,7 @@ export const BobPanel: React.FC<BobPanelProps> = ({ open, onClose, context, mode
   const loadAttachments = useCallback(async (convId: string) => {
     const { data, error: attachmentErr } = await supabase
       .from('bob_attachments')
-      .select('id, file_name, file_type, file_size_bytes, storage_bucket, storage_path, processing_state, extraction_summary, extraction_payload, confidence, created_at')
+      .select('id, file_name, file_type, file_size_bytes, storage_bucket, storage_path, processing_state, extraction_summary, extraction_payload, confidence, created_at, source_type, source_url')
       .eq('conversation_id', convId)
       .order('created_at', { ascending: true });
 
@@ -987,9 +989,33 @@ export const BobPanel: React.FC<BobPanelProps> = ({ open, onClose, context, mode
   const openStudioWithPrompt = (prompt: string, promptContext?: StudioPromptContext) => {
     setWorkspaceExpanded(true);
     setStudioOpen(true);
+    setSidebarOpen(false);
+    setContextPanelOpen(false);
     studioPromptContextRef.current = promptContext ?? null;
     setInput(prompt);
     focusComposer();
+  };
+
+  const toggleStudio = () => {
+    if (studioOpen) {
+      setStudioOpen(false);
+      return;
+    }
+    setWorkspaceExpanded(true);
+    setStudioOpen(true);
+    setSidebarOpen(false);
+    setContextPanelOpen(false);
+  };
+
+  const toggleWorkspace = () => {
+    if (workspaceExpanded) {
+      setWorkspaceExpanded(false);
+      setStudioOpen(false);
+      setSidebarOpen(false);
+      setContextPanelOpen(false);
+      return;
+    }
+    setWorkspaceExpanded(true);
   };
 
   if (!open) return null;
@@ -1038,8 +1064,8 @@ export const BobPanel: React.FC<BobPanelProps> = ({ open, onClose, context, mode
           {!sidebarOpen && <button type="button" className="bob-icon-button" onClick={() => void startNewConversation()} disabled={loading || sending} title="New chat" aria-label="New chat"><Plus size={17} /></button>}
           <button type="button" className="bob-icon-button" onClick={() => setSidebarOpen(current => !current)} title={sidebarOpen ? 'Hide sessions' : 'Show sessions'} aria-label={sidebarOpen ? 'Hide sessions' : 'Show sessions'} aria-expanded={sidebarOpen}><PanelLeft size={17} /></button>
           <button type="button" className="bob-icon-button" onClick={() => setContextPanelOpen(current => !current)} title={contextPanelOpen ? 'Hide context panel' : 'Show context panel'} aria-label={contextPanelOpen ? 'Hide context panel' : 'Show context panel'} aria-expanded={contextPanelOpen}><PanelRight size={17} /></button>
-          <button type="button" className="bob-workspace-toggle" onClick={() => setStudioOpen(current => !current)} title={studioOpen ? 'Hide document studio' : 'Open document studio'} aria-label={studioOpen ? 'Hide document studio' : 'Open document studio'} aria-expanded={studioOpen}><Sparkles size={16} /><span>Studio</span></button>
-          <button type="button" className="bob-workspace-toggle" onClick={() => setWorkspaceExpanded(current => !current)} title={workspaceExpanded ? 'Use compact panel' : 'Open full workspace'} aria-label={workspaceExpanded ? 'Use compact panel' : 'Open full workspace'}>{workspaceExpanded ? <Minimize2 size={16} /> : <Maximize2 size={16} />}<span>{workspaceExpanded ? 'Compact' : 'Expand'}</span></button>
+          <button type="button" className="bob-workspace-toggle" onClick={toggleStudio} title={studioOpen ? 'Hide document studio' : 'Open document studio'} aria-label={studioOpen ? 'Hide document studio' : 'Open document studio'} aria-expanded={studioOpen}><Sparkles size={16} /><span>Studio</span></button>
+          <button type="button" className="bob-workspace-toggle" onClick={toggleWorkspace} title={workspaceExpanded ? 'Use compact panel' : 'Open full workspace'} aria-label={workspaceExpanded ? 'Use compact panel' : 'Open full workspace'}>{workspaceExpanded ? <Minimize2 size={16} /> : <Maximize2 size={16} />}<span>{workspaceExpanded ? 'Compact' : 'Expand'}</span></button>
           <button type="button" className="bob-close-button" onClick={onClose} title="Close Bob" aria-label="Close Bob"><X size={16} /><span>Close</span></button>
         </div>
       </header>
@@ -1153,11 +1179,19 @@ export const BobPanel: React.FC<BobPanelProps> = ({ open, onClose, context, mode
           </div>
 
           {attachments.length > 0 && (
-            <div className="bob-attachment-strip" aria-label="Evidence processing summary">
-              <Paperclip size={13} />
-              <span>{attachments.length} source file{attachments.length === 1 ? '' : 's'} in this session</span>
-              <button type="button" onClick={() => { setContextPanelOpen(true); setContextTab('files'); }}>Review files</button>
-            </div>
+            <>
+              <ConversationMediaGallery attachments={attachments} onOpenStudio={() => {
+                setWorkspaceExpanded(true);
+                setStudioOpen(true);
+                setSidebarOpen(false);
+                setContextPanelOpen(false);
+              }} />
+              <div className="bob-attachment-strip" aria-label="Evidence processing summary">
+                <Paperclip size={13} />
+                <span>{attachments.length} source file{attachments.length === 1 ? '' : 's'} in this session</span>
+                <button type="button" onClick={() => { setStudioOpen(false); setContextPanelOpen(true); setContextTab('files'); }}>Review files</button>
+              </div>
+            </>
           )}
 
           {pendingFiles.length > 0 && (
@@ -1311,6 +1345,58 @@ function attachmentStateLabel(state: string) {
   if (state === 'failed') return 'Failed';
   if (state === 'manual_review_required') return 'Needs review';
   return state.replaceAll('_', ' ');
+}
+
+function ConversationMediaGallery({ attachments, onOpenStudio }: { attachments: BobAttachmentRecord[]; onOpenStudio: () => void }) {
+  const images = useMemo(() => attachments.filter(attachment => attachment.file_type.startsWith('image/') && attachment.storage_path).slice(-6), [attachments]);
+  const [previews, setPreviews] = useState<Record<string, { url?: string; error?: string }>>({});
+
+  useEffect(() => {
+    let cancelled = false;
+    if (!images.length) {
+      setPreviews({});
+      return;
+    }
+
+    void Promise.all(images.map(async (attachment) => {
+      const bucket = attachment.storage_bucket || 'bob-uploads';
+      try {
+        const { data, error } = await supabase.storage.from(bucket).createSignedUrl(attachment.storage_path!, 3600);
+        return [attachment.id, error ? { error: error.message } : { url: data?.signedUrl }] as const;
+      } catch (error) {
+        return [attachment.id, { error: error instanceof Error ? error.message : 'Preview unavailable' }] as const;
+      }
+    })).then((entries) => {
+      if (!cancelled) setPreviews(Object.fromEntries(entries));
+    });
+
+    return () => { cancelled = true; };
+  }, [images]);
+
+  if (!images.length) return null;
+
+  return (
+    <section className="bob-conversation-media" aria-label="Source images in this conversation">
+      <header>
+        <span><ImageIcon size={14} /> Source images</span>
+        <button type="button" onClick={onOpenStudio}>Open media studio</button>
+      </header>
+      <div>
+        {images.map((attachment) => {
+          const preview = previews[attachment.id];
+          const provenance = attachment.source_type === 'url' ? 'External source' : 'Original upload';
+          return (
+            <figure key={attachment.id}>
+              {preview?.url
+                ? <a href={preview.url} target="_blank" rel="noreferrer noopener" aria-label={`Open full-size ${attachment.file_name}`}><img src={preview.url} alt={attachment.file_name} loading="lazy" /></a>
+                : <div className="bob-media-placeholder" role={preview?.error ? 'alert' : 'status'}><ImageIcon size={20} /><span>{preview?.error ? 'Preview unavailable' : 'Opening private preview...'}</span></div>}
+              <figcaption><strong>{attachment.file_name}</strong><span>{provenance} · {attachmentStateLabel(attachment.processing_state)}</span></figcaption>
+            </figure>
+          );
+        })}
+      </div>
+    </section>
+  );
 }
 
 function sessionGroupLabel(updatedAt: string) {

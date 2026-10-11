@@ -89,6 +89,16 @@ function safeFilename(value: string) {
   return value.toLowerCase().replace(/[^a-z0-9]+/g, '-').replace(/^-|-$/g, '') || 'bob-document';
 }
 
+function studioDocumentContent(message: StudioMessage | null) {
+  const content = message?.metadata?.studio_artifact_content;
+  return typeof content === 'string' && content.trim() ? content : message?.content ?? '';
+}
+
+function studioDocumentTitle(message: StudioMessage | null) {
+  const title = message?.metadata?.studio_artifact_title;
+  return typeof title === 'string' && title.trim() ? title : 'Latest Bob draft';
+}
+
 function sourceVerification(attachment: StudioAttachment) {
   const payload = attachment.extraction_payload;
   const structured = payload && typeof payload.structured_extraction === 'object' && payload.structured_extraction
@@ -241,18 +251,20 @@ export function BobStudio({
   };
 
   const copyDocument = async () => {
-    if (!selectedDocument?.content) return;
+    const content = studioDocumentContent(selectedDocument);
+    if (!content) return;
     if (!navigator.clipboard?.writeText) {
       setNotice('Clipboard is unavailable in this browser.');
       return;
     }
-    await navigator.clipboard.writeText(selectedDocument.content);
+    await navigator.clipboard.writeText(content);
     setNotice('Draft copied to the clipboard.');
   };
 
   const downloadDocument = () => {
-    if (!selectedDocument?.content || typeof URL.createObjectURL !== 'function') return;
-    const blob = new Blob([selectedDocument.content], { type: 'text/markdown;charset=utf-8' });
+    const content = studioDocumentContent(selectedDocument);
+    if (!content || typeof URL.createObjectURL !== 'function') return;
+    const blob = new Blob([content], { type: 'text/markdown;charset=utf-8' });
     const url = URL.createObjectURL(blob);
     const anchor = document.createElement('a');
     anchor.href = url;
@@ -295,10 +307,10 @@ export function BobStudio({
           </aside>
           <section className="bob-document-stage" aria-label="Document preview">
             <header>
-              <div><span>{preset.shortLabel}</span><h3>{selectedDocument ? 'Latest Bob draft' : preset.label}</h3><p>{preset.note}</p></div>
+              <div><span>{preset.shortLabel}</span><h3>{selectedDocument ? studioDocumentTitle(selectedDocument) : preset.label}</h3><p>{preset.note}</p></div>
               <div>
-                <button type="button" onClick={() => void copyDocument()} disabled={!selectedDocument?.content}><Copy size={14} /> Copy</button>
-                <button type="button" onClick={downloadDocument} disabled={!selectedDocument?.content}><Download size={14} /> Download</button>
+                <button type="button" onClick={() => void copyDocument()} disabled={!studioDocumentContent(selectedDocument)}><Copy size={14} /> Copy</button>
+                <button type="button" onClick={downloadDocument} disabled={!studioDocumentContent(selectedDocument)}><Download size={14} /> Download</button>
               </div>
             </header>
             {sourceVerifications.length > 0 && <section className="bob-studio-source-verification" aria-label="Source field verification">
@@ -311,7 +323,7 @@ export function BobStudio({
               })}</ul>
             </section>}
             {activeDocuments.length > 1 && <label className="bob-document-version"><span>Draft version</span><select value={selectedDocument?.id ?? ''} onChange={(event) => setSelectedMessageId(event.target.value)}>{activeDocuments.map((message) => <option key={message.id} value={message.id}>{new Date(message.created_at).toLocaleString([], { day: 'numeric', month: 'short', hour: '2-digit', minute: '2-digit' })}</option>)}</select></label>}
-            {selectedDocument ? <article className="bob-document-sheet"><BobMarkdown content={selectedDocument.content} /></article> : <div className="bob-studio-empty"><ClipboardList size={28} /><strong>No {preset.label.toLowerCase()} draft yet.</strong><p>Attach the RFQ, contract, policy, report example, or source evidence first when the draft depends on existing text.</p><button type="button" onClick={() => onPrompt(preset.prompt, { artifactType: 'document', documentKind })}>Brief Bob</button></div>}
+            {selectedDocument ? <article className="bob-document-sheet"><BobMarkdown content={studioDocumentContent(selectedDocument)} /></article> : <div className="bob-studio-empty"><ClipboardList size={28} /><strong>No {preset.label.toLowerCase()} draft yet.</strong><p>Attach the RFQ, contract, policy, report example, or source evidence first when the draft depends on existing text.</p><button type="button" onClick={() => onPrompt(preset.prompt, { artifactType: 'document', documentKind })}>Brief Bob</button></div>}
           </section>
         </div>
       )}

@@ -877,8 +877,10 @@ describe('BobPanel', () => {
   });
 
   it('opens a full-page studio for documents, diagrams, and media without forcing side panes open', async () => {
+    setViewport(1440);
     render(<BobPanel open onClose={() => undefined} />);
 
+    expect(await screen.findByLabelText('Bob sessions')).toBeTruthy();
     fireEvent.click(await screen.findByLabelText('Open document studio'));
 
     expect(await screen.findByLabelText('Bob studio')).toBeTruthy();
@@ -902,6 +904,23 @@ describe('BobPanel', () => {
         }),
       }),
     })));
+  });
+
+  it('expands compact mode when Studio opens and closes incidental side panes', async () => {
+    setViewport(1440);
+    render(<BobPanel open onClose={() => undefined} />);
+
+    fireEvent.click(await screen.findByLabelText('Use compact panel'));
+    expect(screen.getByLabelText('Open full workspace')).toBeTruthy();
+    fireEvent.click(screen.getByLabelText('Show context panel'));
+    expect(screen.getByLabelText('Bob context panel')).toBeTruthy();
+
+    fireEvent.click(screen.getByLabelText('Open document studio'));
+
+    expect(await screen.findByLabelText('Bob studio')).toBeTruthy();
+    expect(screen.getByLabelText('Use compact panel')).toBeTruthy();
+    expect(screen.queryByLabelText('Bob context panel')).toBeNull();
+    expect(screen.queryByLabelText('Bob sessions')).toBeNull();
   });
 
   it('shows only explicitly typed Studio artifacts instead of treating ordinary replies as drafts', async () => {
@@ -979,6 +998,51 @@ describe('BobPanel', () => {
     const image = await screen.findByAltText('site-photo.jpg');
     expect(image.getAttribute('src')).toBe('https://signed.example/site-photo.jpg');
     expect(storageApi.createSignedUrl).toHaveBeenCalledWith('org/org-1/bob/conversation-1/site-photo.jpg', 3600);
+  });
+
+  it('shows private source images directly in the conversation with provenance and a full-size action', async () => {
+    attachmentHistory = [{
+      id: 'att-image', file_name: 'site-photo.jpg', file_type: 'image/jpeg', file_size_bytes: 900,
+      storage_bucket: 'bob-uploads', storage_path: 'org/org-1/bob/conversation-1/site-photo.jpg',
+      processing_state: 'extracted', extraction_summary: 'Detected site frontage.', confidence: 0.84,
+      source_type: 'upload', source_url: null, created_at: '2026-09-02T06:01:00.000Z',
+    }];
+
+    render(<BobPanel open onClose={() => undefined} />);
+
+    const image = await screen.findByAltText('site-photo.jpg');
+    expect(image.getAttribute('src')).toBe('https://signed.example/bob-media.jpg');
+    expect(screen.getByText('Original upload · Extracted')).toBeTruthy();
+    expect(screen.getByRole('link', { name: 'Open full-size site-photo.jpg' }).getAttribute('href')).toBe('https://signed.example/bob-media.jpg');
+    fireEvent.click(screen.getByRole('button', { name: 'Open media studio' }));
+    expect(await screen.findByLabelText('Bob studio')).toBeTruthy();
+    expect(screen.queryByLabelText('Bob sessions')).toBeNull();
+    expect(screen.queryByLabelText('Bob context panel')).toBeNull();
+  });
+
+  it('renders governed persisted draft content in Studio instead of the creation receipt', async () => {
+    messageHistory = [{
+      id: 'message-draft', role: 'assistant', flagged: false, confidence: null,
+      created_at: '2026-10-11T06:00:00.000Z',
+      content: 'Created **Runtime acceptance** as a conversation-scoped draft.',
+      metadata: {
+        studio_artifact_type: 'document',
+        studio_document_kind: 'custom_document',
+        studio_artifact_title: 'Runtime acceptance',
+        studio_artifact_content: '# Runtime acceptance\n\nVerified recovery evidence.',
+        document_id: 'document-1',
+        document_version_id: 'version-1',
+      },
+    }];
+
+    render(<BobPanel open onClose={() => undefined} />);
+    fireEvent.click(await screen.findByLabelText('Open document studio'));
+    fireEvent.click(screen.getByRole('button', { name: /Custom document/ }));
+
+    const studio = await screen.findByLabelText('Bob studio');
+    expect(within(studio).getAllByText('Runtime acceptance')).toHaveLength(2);
+    expect(within(studio).getByText('Verified recovery evidence.')).toBeTruthy();
+    expect(within(studio).queryByText(/Created Runtime acceptance as a conversation-scoped draft/)).toBeNull();
   });
 
   it('keeps the native file input hidden and the composer anchored', () => {

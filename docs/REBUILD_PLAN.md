@@ -663,6 +663,29 @@ System-wide Bob acceptance gate shipped 2026-10-11:
     destination. Publication, output, signing, and business-record promotion
     remain separate human-reviewed effects.
 
+  Owner/grandmaster Bob workspace acceptance implemented 2026-10-11:
+
+  - **Before:** live owner acceptance found that Studio could report itself open
+    while remaining hidden in compact mode. Expanding it preserved incidental
+    side panes, compressing chat, Studio, and context into three narrow columns.
+    Private source images were listed as a file count rather than shown in the
+    conversation, and a successfully persisted document still appeared as
+    `Documents 0` because Studio knew only prompt-originated artifact metadata.
+  - **During:** the Studio control now expands the workspace and closes session
+    and context panes; returning to compact mode closes those full-workspace
+    surfaces. Conversation images use short-lived signed URLs, show source
+    provenance and processing state, and provide an accessible full-size
+    action. Successful `create_document_draft` receipts now carry the exact
+    governed artifact title, type, and authored text already submitted to the
+    document RPC.
+  - **After:** chat can show private source-image thumbnails without exposing a
+    storage object publicly; Studio is a deliberate two-surface workspace
+    rather than an accidental three-pane squeeze; and persisted document drafts
+    appear as Studio artifacts whose preview is the authored draft rather than
+    the creation receipt. Desktop and mobile Playwright acceptance, 40 focused
+    component tests, conductor contracts, TypeScript, and the production web
+    build pass.
+
   **Gate:** live `bob_messages` show no context-losing fallbacks; a Builder job
   runs implement → verify → repair without human touch and stops cleanly at
   `release_ready`; egress proven per rank; Atlas `exercised` is populated from
