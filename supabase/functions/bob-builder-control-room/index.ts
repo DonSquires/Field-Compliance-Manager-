@@ -129,6 +129,26 @@ serve(async req => {
     return json({ atlas_refresh: result.payload });
   }
 
+  if (action === 'human_test_start' || action === 'human_test_status') {
+    if (!CONTROL_PLANE_URL || !CONTROL_PLANE_TOKEN) return json({ error: 'Builder execution host is unavailable' }, 503);
+    const mode = body.mode === 'live' ? 'live' : 'fixture';
+    if (mode === 'live' && role !== 'grand_master') return json({ error: 'Live human testing is restricted to grand master' }, 403);
+    const runId = typeof body.run_id === 'string' && /^[0-9a-f-]{36}$/i.test(body.run_id) ? body.run_id : null;
+    const result = action === 'human_test_start'
+      ? await relay('/api/bob/human-tests', 'POST', {
+          mode,
+          scope: 'full',
+          requested_by: user.id,
+        })
+      : await relay(runId ? `/api/bob/human-tests/${runId}` : '/api/bob/human-tests/latest', 'GET');
+    const run = result.payload.run && typeof result.payload.run === 'object'
+      ? result.payload.run as Record<string, unknown>
+      : null;
+    await audit(profile.organization_id, result.ok ? action : `${action}_failed`, runId);
+    if (!result.ok || !run) return json({ error: failureDetail(result.payload) ?? 'Human-test run is unavailable' }, result.status);
+    return json({ run, existing: result.payload.existing === true }, result.status);
+  }
+
   // Bob's terminal on the owner's laptop (owner instruction 2026-09-26). Grand master only: the laptop
   // is the owner's personal machine, reached over Tailscale, and switched on/off by the owner. The
   // command has already been shown to and confirmed by the owner in chat; the control plane applies

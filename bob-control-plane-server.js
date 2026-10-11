@@ -22,6 +22,7 @@ const { fileSha256, listRepositoryTree, readRepositoryFile, searchRepository } =
 const { autopilotTick, listAutopilotJobs, listPendingApprovals } = require('./builder-autopilot');
 const { laptopStatus, runLaptopCommand, laptopConfig, loadLaptopLink, mergeLaptopLink, describeLink } = require('./bob-laptop-shell');
 const { createBranchWorkspace, commitVerifiedPatch, publishWorkspaceBranch, createGiteaPullRequest, workspacePathForBranch, createGitHubPullRequest, ensureSourceCheckout, githubAuthHeader, githubRepoUrl, resolveRemoteHead, redactGitError } = require('./builder-branch-workspace');
+const { executeWorker } = require('./worker-executor');
 
 // Route failures used to be swallowed into a bare 409; keep a short redacted reason so the
 // operator (and Bob's self-heal loop) can act without a shell on the host.
@@ -130,6 +131,7 @@ const maxRequestBytes = 1024 * 1024;
 const jobs = new Map();
 const deliveries = new Set();
 const audit = [];
+const humanTestRuns = new Map();
 let activeLease = null;
 
 function saveState() {
@@ -137,7 +139,8 @@ function saveState() {
   const state = {
     jobs: [...jobs.values()],
     deliveries: [...deliveries],
-    audit
+    audit,
+    humanTestRuns: [...humanTestRuns.values()]
   };
   const temporary = `${stateFile}.tmp`;
   fs.writeFileSync(temporary, JSON.stringify(state, null, 2));
@@ -150,6 +153,12 @@ function loadState() {
     for (const job of state.jobs || []) jobs.set(job.id, job);
     for (const delivery of state.deliveries || []) deliveries.add(delivery);
     audit.push(...(state.audit || []));
+    for (const persisted of state.humanTestRuns || []) {
+      const run = persisted.status === 'queued' || persisted.status === 'running'
+        ? { ...persisted, status: 'interrupted', completed_at: new Date().toISOString(), error: 'Control plane restarted before the human test completed.' }
+        : persisted;
+      humanTestRuns.set(run.id, run);
+    }
   } catch (error) {
     if (error.code !== 'ENOENT') throw error;
   }
@@ -191,6 +200,118 @@ function repositoryAllowed(repository) {
 function boundedStringArray(value, maximum = 100) {
   if (!Array.isArray(value)) return [];
   return [...new Set(value.filter(item => typeof item === 'string').map(item => item.trim()).filter(Boolean))].slice(0, maximum);
+}
+
+function safeHumanTestRun(run) {
+  if (!run) return null;
+  return {
+    id: run.id,
+    mode: run.mode,
+    scope: run.scope,
+    status: run.status,
+    source_sha: run.source_sha,
+    requested_by: run.requested_by,
+    created_at: run.created_at,
+    started_at: run.started_at,
+    completed_at: run.completed_at,
+    exit_code: run.exit_code,
+    error: run.error,
+    summary: run.summary,
+    artifacts: run.artifacts || []
+  };
+}
+
+function listHumanTestArtifacts(rootDir, relativeDir = '', rows = []) {
+  if (!fs.existsSync(rootDir) || rows.length >= 100) return rows;
+  for (const entry of fs.readdirSync(path.join(rootDir, relativeDir), { withFileTypes: true })) {
+    if (rows.length >= 100) break;
+    const relativePath = path.join(relativeDir, entry.name);
+    if (entry.isDirectory()) listHumanTestArtifacts(rootDir, relativePath, rows);
+    else {
+      const stat = fs.statSync(path.join(rootDir, relativePath));
+      rows.push({ path: relativePath.replace(/\\/g, '/'), size_bytes: stat.size });
+    }
+  }
+  return rows;
+}
+
+function humanTestSummary(result) {
+  const output = `${result.stdout || ''}\n${result.stderr || ''}`;
+  const matches = [...output.matchAll(/(\d+)\s+(passed|failed|skipped)/g)];
+  return {
+    passed: Number(matches.find(match => match[2] === 'passed')?.[1] || 0),
+    failed: Number(matches.find(match => match[2] === 'failed')?.[1] || 0),
+    skipped: Number(matches.find(match => match[2] === 'skipped')?.[1] || 0)
+  };
+}
+
+async function startHumanTestRun({ mode, scope, requestedBy }) {
+  const active = [...humanTestRuns.values()].find(run => run.status === 'queued' || run.status === 'running');
+  if (active) return { existing: true, run: safeHumanTestRun(active) };
+  if (!builderWorkerImage) throw new BuilderStepError(503, 'Human-test worker image is unavailable');
+  const source = repositoryReadTarget();
+  const id = crypto.randomUUID();
+  const now = new Date().toISOString();
+  const artifactDir = path.join(stateDir, 'human-test-runs', id);
+  const run = {
+    id,
+    mode,
+    scope,
+    status: 'queued',
+    source_sha: source.sha,
+    requested_by: requestedBy,
+    created_at: now,
+    started_at: null,
+    completed_at: null,
+    exit_code: null,
+    error: null,
+    summary: null,
+    artifacts: []
+  };
+  humanTestRuns.set(id, run);
+  saveState();
+  setImmediate(async () => {
+    run.status = 'running';
+    run.started_at = new Date().toISOString();
+    saveState();
+    try {
+      fs.mkdirSync(artifactDir, { recursive: true });
+      const result = await executeWorker({
+        image: builderWorkerImage,
+        sourceDir: source.sourceDir,
+        artifactDir,
+        profile: mode === 'live' ? 'human-qa-live' : 'human-qa',
+        timeoutMs: Math.min(Math.max(Number(process.env.BOB_HUMAN_TEST_TIMEOUT_MS) || 45 * 60_000, 5 * 60_000), 60 * 60_000),
+        memory: process.env.BOB_HUMAN_TEST_MEMORY || '2g',
+        cpus: process.env.BOB_HUMAN_TEST_CPUS || '2',
+        pidsLimit: Number(process.env.BOB_HUMAN_TEST_PIDS_LIMIT || 256),
+        environment: {
+          HUMAN_TEST_LIVE: mode === 'live' ? 'true' : 'false'
+        }
+      });
+      run.status = result.status;
+      run.exit_code = result.exitCode;
+      run.summary = humanTestSummary(result);
+      fs.writeFileSync(path.join(artifactDir, 'human-test-receipt.json'), JSON.stringify({
+        run_id: id,
+        mode,
+        scope,
+        source_sha: source.sha,
+        result: { status: result.status, exit_code: result.exitCode, profile: result.profile },
+        summary: run.summary
+      }, null, 2), { mode: 0o600 });
+      run.artifacts = listHumanTestArtifacts(artifactDir);
+    } catch (error) {
+      run.status = 'failed';
+      run.error = failureDetail(error);
+    } finally {
+      run.completed_at = new Date().toISOString();
+      saveState();
+      record(requestedBy || 'bob', 'human_test.completed', id, { mode, scope, status: run.status, source_sha: source.sha });
+    }
+  });
+  record(requestedBy || 'bob', 'human_test.started', id, { mode, scope, source_sha: source.sha });
+  return { existing: false, run: safeHumanTestRun(run) };
 }
 
 async function builderRuntimeContext(body, source = { sourceDir: assessmentRoot, targetSha: null }) {
@@ -640,6 +761,32 @@ async function route(req, res, body) {
     } catch {
       return json(res, 503, { error: 'Atlas refresh failed' });
     }
+  }
+
+  if (req.method === 'POST' && url.pathname === '/api/bob/human-tests') {
+    const mode = body?.mode === 'live' ? 'live' : 'fixture';
+    const scope = 'full';
+    const requestedBy = typeof body?.requested_by === 'string' ? body.requested_by.slice(0, 120) : 'bob';
+    if (mode === 'live' && (!process.env.HUMAN_TEST_BASE_URL || !process.env.GRANDMASTER_TEST_EMAIL || !process.env.GRANDMASTER_TEST_PASSWORD)) {
+      return json(res, 409, { error: 'Dedicated live human-test identity and target URL are not configured' });
+    }
+    try {
+      const started = await startHumanTestRun({ mode, scope, requestedBy });
+      return json(res, started.existing ? 200 : 202, started);
+    } catch (error) {
+      return json(res, error.status || 503, { error: failureDetail(error) });
+    }
+  }
+
+  if (req.method === 'GET' && url.pathname === '/api/bob/human-tests/latest') {
+    const latest = [...humanTestRuns.values()].sort((left, right) => String(right.created_at).localeCompare(String(left.created_at)))[0];
+    return latest ? json(res, 200, { run: safeHumanTestRun(latest) }) : json(res, 404, { error: 'No human-test run exists' });
+  }
+
+  const humanTestMatch = url.pathname.match(/^\/api\/bob\/human-tests\/([0-9a-f-]+)$/i);
+  if (req.method === 'GET' && humanTestMatch) {
+    const run = humanTestRuns.get(humanTestMatch[1]);
+    return run ? json(res, 200, { run: safeHumanTestRun(run) }) : json(res, 404, { error: 'Human-test run was not found' });
   }
 
   if (req.method === 'POST' && url.pathname === '/jobs') {

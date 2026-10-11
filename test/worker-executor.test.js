@@ -20,6 +20,8 @@ test('worker profiles use fixed commands', () => {
   assert.deepEqual(workerCommand('assessment'), ['node', '/opt/bob/assessment-manifest.js', '/workspace', '/artifacts/system-assessment.json']);
   assert.deepEqual(workerCommand('test'), ['npm', 'test']);
   assert.deepEqual(workerCommand('build'), ['npm', 'run', 'build']);
+  assert.match(workerCommand('human-qa').at(-1), /dr-bob-human-test\.spec\.ts --workers=4/);
+  assert.match(workerCommand('human-qa-live').at(-1), /dr-bob-human-test\.spec\.ts --workers=1/);
   assert.deepEqual(workerCommand('full-page-audit').slice(0, 3), ['sh', '-lc', 'set -eu; npm test; npm run check:css; cp -a /opt/bob/web-node_modules/. /workspace/apps/web/node_modules/; cd /workspace/apps/web; PATH=/workspace/apps/web/node_modules/.bin:$PATH npm run lint; PATH=/workspace/apps/web/node_modules/.bin:$PATH npm test -- --reporter=dot; PATH=/workspace/apps/web/node_modules/.bin:$PATH npm run build; PATH=/workspace/apps/web/node_modules/.bin:$PATH PLAYWRIGHT_OUTPUT_DIR=/artifacts/test-results PLAYWRIGHT_HTML_OUTPUT_DIR=/artifacts/playwright-report playwright test e2e/dr-bob-human-test.spec.ts --workers=1']);
   assert.deepEqual(workerCommand('frontend-verify'), [
     'node', '/opt/bob/frontend-worker.js', '/workspace', '/artifacts/input.patch', '/artifacts'
@@ -102,6 +104,19 @@ test('full page audit mounts disposable browser dependencies', () => {
   assert.ok(args.includes('--network=none'));
   assert.ok(args.includes('--tmpfs=/workspace/apps/web/node_modules:rw,exec,nosuid,size=512m,uid=1000,gid=1000,mode=0755'));
   assert.equal(args.some(value => value.includes('docker.sock')), false);
+});
+
+test('human QA mode is explicitly forwarded to the isolated worker', () => {
+  const args = dockerArguments({
+    image: 'fcm/bob-worker:test',
+    sourceDir: '/tmp/source',
+    artifactDir: '/tmp/artifacts',
+    profile: 'human-qa-live',
+    environment: { HUMAN_TEST_LIVE: 'true', HUMAN_TEST_BASE_URL: 'https://example.test' }
+  });
+  assert.ok(args.includes('HUMAN_TEST_LIVE=true'));
+  assert.ok(args.includes('HUMAN_TEST_BASE_URL=https://example.test'));
+  assert.ok(args.includes('--network=bridge'));
 });
 
 test('frontend verification executes only in disposable tmpfs while source remains read-only', () => {

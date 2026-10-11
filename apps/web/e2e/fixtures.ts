@@ -217,6 +217,16 @@ export async function installSupabaseFixtures(page: Page, options: { officerModu
       return;
     }
     if (table === 'resolve_active_rules') { await route.fulfill(fulfillJson([{ organization_id: ORG_ID, module_key: 'dispatch', enabled: true, active_zone_id: null, active_site_id: null, resolution_status: 'resolved', policy_status: 'active' }])); return; }
+    if (table === 'get_officer_static_post') {
+      await route.fulfill(fulfillJson({
+        shift: { id: '73737373-7373-4373-8373-737373737373', status: 'accepted', scheduled_start: '2026-08-31T08:00:00.000Z', scheduled_end: '2026-08-31T16:00:00.000Z', notes: 'Monitor the public entrance and loading access.' },
+        stop: { id: '74747474-7474-4474-8474-747474747474', status: 'pending', sla_arrive_by: '2026-08-31T08:00:00.000Z', actual_arrived_at: null, actual_departed_at: null, officer_notes: null },
+        module: { id: '75757575-7575-4575-8575-757575757575', status: 'pending', started_at: null, completed_at: null },
+        place: { id: '42424242-4242-4242-8242-424242424242', name: 'Civic Events Centre', address: '1 Civic Square, Nelson', risk_level: 'medium', site_brief: 'Maintain a visible presence and record handover notes.', access_instructions: 'Use the staff entrance and report to facilities.', hs_notes: 'Keep the loading lane clear.' },
+        attendance_evidence: { arrival: null, departure: null },
+      }));
+      return;
+    }
     if (table === 'user_profiles') {
       const select = url.searchParams.get('select') ?? '';
       const identityQuery = select.includes('module_access') || select.includes('updated_at');

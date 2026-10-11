@@ -169,6 +169,29 @@ test('Builder runtime routes require the admin token and fixed server configurat
   assert.equal(deniedContext.response.status, 401);
   const deniedRefresh = await request('POST', '/api/bob/builder/atlas/refresh', {});
   assert.equal(deniedRefresh.response.status, 401);
+  const deniedHumanTest = await request('POST', '/api/bob/human-tests', {});
+  assert.equal(deniedHumanTest.response.status, 401);
+});
+
+test('human-test routes require a configured worker and return durable status receipts', async () => {
+  const headers = { authorization: ['Bearer', adminToken].join(' ') };
+  const missing = await request('GET', '/api/bob/human-tests/latest', undefined, {
+    ...headers
+  });
+  assert.equal(missing.response.status, 404);
+  assert.deepEqual(missing.body, { error: 'No human-test run exists' });
+
+  const unavailable = await request('POST', '/api/bob/human-tests', { mode: 'fixture' }, {
+    ...headers
+  });
+  assert.equal(unavailable.response.status, 503);
+  assert.equal(unavailable.body.error, 'Human-test worker image is unavailable');
+
+  const liveWithoutIdentity = await request('POST', '/api/bob/human-tests', { mode: 'live' }, {
+    ...headers
+  });
+  assert.equal(liveWithoutIdentity.response.status, 409);
+  assert.equal(liveWithoutIdentity.body.error, 'Dedicated live human-test identity and target URL are not configured');
 });
 
 test('job creation rejects repositories outside the allowlist', async () => {

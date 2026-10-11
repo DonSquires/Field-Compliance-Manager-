@@ -5,7 +5,7 @@ const WORKER_PROFILES = Object.freeze({
   test: Object.freeze(['npm', 'test']),
   build: Object.freeze(['npm', 'run', 'build']),
   lint: Object.freeze(['npm', 'run', 'lint']),
-  'human-qa': Object.freeze(['sh', '-lc', 'cp -a /opt/bob/web-node_modules/. /workspace/apps/web/node_modules/ && cd /workspace/apps/web && PATH=/workspace/apps/web/node_modules/.bin:$PATH PLAYWRIGHT_OUTPUT_DIR=/artifacts/test-results PLAYWRIGHT_HTML_OUTPUT_DIR=/artifacts/playwright-report playwright test e2e/dr-bob-human-test.spec.ts --workers=1']),
+  'human-qa': Object.freeze(['sh', '-lc', 'cp -a /opt/bob/web-node_modules/. /workspace/apps/web/node_modules/ && cd /workspace/apps/web && PATH=/workspace/apps/web/node_modules/.bin:$PATH PLAYWRIGHT_OUTPUT_DIR=/artifacts/test-results PLAYWRIGHT_HTML_OUTPUT_DIR=/artifacts/playwright-report playwright test e2e/dr-bob-human-test.spec.ts --workers=4']),
   'human-qa-live': Object.freeze(['sh', '-lc', 'cp -a /opt/bob/web-node_modules/. /workspace/apps/web/node_modules/ && cd /workspace/apps/web && PATH=/workspace/apps/web/node_modules/.bin:$PATH PLAYWRIGHT_OUTPUT_DIR=/artifacts/test-results PLAYWRIGHT_HTML_OUTPUT_DIR=/artifacts/playwright-report playwright test e2e/dr-bob-human-test.spec.ts --workers=1']),
   'full-page-audit': Object.freeze(['sh', '-lc', 'set -eu; npm test; npm run check:css; cp -a /opt/bob/web-node_modules/. /workspace/apps/web/node_modules/; cd /workspace/apps/web; PATH=/workspace/apps/web/node_modules/.bin:$PATH npm run lint; PATH=/workspace/apps/web/node_modules/.bin:$PATH npm test -- --reporter=dot; PATH=/workspace/apps/web/node_modules/.bin:$PATH npm run build; PATH=/workspace/apps/web/node_modules/.bin:$PATH PLAYWRIGHT_OUTPUT_DIR=/artifacts/test-results PLAYWRIGHT_HTML_OUTPUT_DIR=/artifacts/playwright-report playwright test e2e/dr-bob-human-test.spec.ts --workers=1']),
   'frontend-verify': Object.freeze(['node', '/opt/bob/frontend-worker.js', '/workspace', '/artifacts/input.patch', '/artifacts']),
@@ -72,7 +72,8 @@ function executeWorker(options, { spawnImpl = spawn } = {}) {
     HUMAN_TEST_LIVE: process.env.HUMAN_TEST_LIVE,
     HUMAN_TEST_BASE_URL: process.env.HUMAN_TEST_BASE_URL,
     GRANDMASTER_TEST_EMAIL: process.env.GRANDMASTER_TEST_EMAIL,
-    GRANDMASTER_TEST_PASSWORD: process.env.GRANDMASTER_TEST_PASSWORD
+    GRANDMASTER_TEST_PASSWORD: process.env.GRANDMASTER_TEST_PASSWORD,
+    ...(options.environment || {})
   } });
   return new Promise((resolve, reject) => {
     const child = spawnImpl('docker', args, { stdio: ['ignore', 'pipe', 'pipe'] });

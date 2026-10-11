@@ -63,6 +63,10 @@ test('Atlas refresh extracts concrete entities and Supabase calls without test n
       supabase.rpc('get_alpha');
     `);
     write(root, 'scripts/seed-rm-forestry-roster-history.mjs', '// ATLAS CALLS: get_alpha');
+    write(root, 'bob-control-plane-server.js', `
+      supabase.rpc('update_alpha');
+      supabase.from('alpha').select('id');
+    `);
     write(root, 'apps/web/src/pages/TestPage.test.tsx', `supabase.from('test_noise').select('*');`);
 
     const manifest = collectAtlasRefresh(root);
@@ -82,6 +86,8 @@ test('Atlas refresh extracts concrete entities and Supabase calls without test n
     assert.ok(manifest.edges.some(row => row.source_name === 'mobile/components/TestPanel' && row.target_type === 'edge_function' && row.target_name === 'ping'));
     assert.ok(manifest.edges.some(row => row.source_name === 'apps/sd-card-bridge-v2/src/main' && row.target_type === 'rpc' && row.target_name === 'get_alpha'));
     assert.ok(manifest.edges.some(row => row.source_name === 'scripts/seed-rm-forestry-roster-history' && row.target_type === 'rpc' && row.target_name === 'get_alpha'));
+    assert.ok(manifest.edges.some(row => row.source_name === 'bob-control-plane-server' && row.target_type === 'rpc' && row.target_name === 'update_alpha'));
+    assert.ok(manifest.edges.some(row => row.source_name === 'bob-control-plane-server' && row.target_type === 'table' && row.target_name === 'alpha'));
     assert.ok(manifest.edges.some(row => row.source_type === 'rpc' && row.source_name === 'get_alpha' && row.target_name === 'alpha' && row.edge_kind === 'reads'));
     assert.ok(manifest.edges.some(row => row.source_type === 'rpc' && row.source_name === 'update_alpha' && row.target_name === 'alpha' && row.edge_kind === 'writes'));
     assert.ok(manifest.edges.some(row => row.source_type === 'rpc' && row.source_name === 'wrap_alpha' && row.target_type === 'rpc' && row.target_name === 'get_alpha' && row.edge_kind === 'calls'));
@@ -89,6 +95,28 @@ test('Atlas refresh extracts concrete entities and Supabase calls without test n
     assert.equal(manifest.edges.some(row => row.target_name === 'if'), false);
     assert.equal(manifest.edges.some(row => row.target_name === 'test_noise'), false);
     assert.equal(manifest.capabilities.every(row => row.exercised === null), true);
+  } finally {
+    fs.rmSync(root, { recursive: true, force: true });
+  }
+});
+
+test('Atlas DDL inventory ignores CREATE statements inside SQL string literals', () => {
+  const root = fs.mkdtempSync(path.join(os.tmpdir(), 'atlas-refresh-ddl-'));
+  try {
+    write(root, 'supabase/schema.sql', `
+      CREATE TABLE public.real_table (id uuid);
+      CREATE OR REPLACE FUNCTION public.rls_auto_enable() RETURNS event_trigger
+      LANGUAGE plpgsql AS $$
+      BEGIN
+        EXECUTE 'CREATE TABLE AS';
+      END;
+      $$;
+    `);
+
+    const manifest = collectAtlasRefresh(root);
+
+    assert.equal(manifest.capabilities.some(row => row.entity_type === 'table' && row.entity_name === 'real_table'), true);
+    assert.equal(manifest.capabilities.some(row => row.entity_type === 'table' && row.entity_name === 'AS'), false);
   } finally {
     fs.rmSync(root, { recursive: true, force: true });
   }

@@ -275,6 +275,11 @@ const TOOL_REGISTRY = {
     governance: 'WRITE-draft; admiral only; human-confirms-before-creation; output is a DRAFT GitHub PR; Bob NEVER merges or deploys',
     effect_class: 'draft_governed_write'
   },
+  run_human_test: {
+    purpose: "Start or inspect a durable Dr Bob human-browser test with a real control-plane receipt. Use { action: \"start\", mode?: \"fixture\"|\"live\" } to start the bounded full browser suite, or { action: \"status\", run_id?: \"UUID\" } to inspect a known run (without run_id, the latest run is returned). Never say a test is running unless this tool returns a queued/running run with an ID. A live run requires the dedicated configured test identity; Bob never borrows a person's browser session or credentials.",
+    governance: 'read-only diagnostic execution; admiral only; durable run receipt required; live mode uses dedicated test identity only',
+    effect_class: 'admin_diagnostic_substrate_action'
+  },
   cancel_builder_job: {
     purpose: "Cancel one Builder job by exact job ID or exact title, with a non-empty reason. Args: { job_id?: \"UUID\", title?: \"exact title\", reason: \"why cancel\" }. First turn uses the Builder control-room list to show the exact job ID, title, and reason as a preview; a separate affirmative turn is required before calling builder_cancel_job as the requesting user. Duplicate titles require an ID; never cancel on an ambiguous or missing match.",
     governance: 'WRITE-direct; admiral only; human-confirms-before-cancellation; caller-scoped RPC',
@@ -648,6 +653,7 @@ const TOOL_REGISTRY = {
     review_merge_request: 'bob-review-merge-request',
     dispatch_flow: 'bob-dispatch-flow',
     create_builder_job: 'bob-builder-control-room',
+    run_human_test: 'bob-builder-control-room',
     laptop_shell: 'bob-builder-control-room',
     check_proposals: 'bob-check-proposals',
     generic_write: 'bob-upsert-generic',

@@ -11,6 +11,26 @@ npm run test:e2e:human
 
 The default run uses the existing Supabase fixtures. It covers the admin shell and officer entry point on the configured desktop and mobile Playwright projects.
 
+## Run through Bob
+
+An admiral can ask Bob to start a Dr Bob human test. Bob calls the governed
+Builder control room, which starts the existing browser worker against a
+commit-pinned checkout and immediately returns a durable run ID. The run is
+persisted through control-plane restarts with one of these states:
+`queued`, `running`, `succeeded`, `failed`, `timeout`, or `interrupted`.
+
+Bob may say a review is running only when the control plane returns a real run
+ID in `queued` or `running` state. Asking for the human-test status returns that
+run, its pinned source SHA, pass/fail/skip counts, and the retained artifact
+inventory. A second start request while a run is active returns the existing
+receipt instead of creating duplicate work.
+
+Fixture-backed runs use a bounded four-worker browser pool. Live runs remain
+serial and require `HUMAN_TEST_BASE_URL` plus the dedicated
+`GRANDMASTER_TEST_EMAIL` and `GRANDMASTER_TEST_PASSWORD` test identity. Bob
+does not retrieve or reuse an arbitrary user's password, token, browser
+session, or MFA factor.
+
 ## Run against the deployed app
 
 ```bash
@@ -72,6 +92,8 @@ The runner treats browser errors and failed interactions as failures. The fixtur
 - `apps/web/e2e/human-test-runner.ts` contains the reusable session, evidence capture, safe-action policy, and report generation.
 - `apps/web/e2e/dr-bob-human-test.spec.ts` drives the admin and officer journeys.
 - `apps/web/run-manual-walkthroughs.sh` lists and documents the manual suites.
+- `bob-control-plane-server.js` persists asynchronous run receipts and retained artifact metadata.
+- `worker-executor.js` owns the isolated fixture and live worker profiles.
 
 This complements workflow-specific tests such as the CRM, welfare, and dispatch walkthroughs. The workflow tests verify known data contracts; this human test verifies that a person can actually see and move through the product.
 

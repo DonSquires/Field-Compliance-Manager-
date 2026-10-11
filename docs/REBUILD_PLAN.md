@@ -56,6 +56,18 @@ dependencies/environment, privacy, safety, legal, identity, enforcement,
 finance, payroll, and evidential work remain Grandmaster-gated. Expansion
 beyond eight changed files also stops at the gate.
 
+Dr Bob acceptance finding 2026-10-12: Bob answered a combined Atlas, schema,
+and human-test request after running only one paginated Atlas query, while the
+Builder UI correctly showed that no work was running. The repaired path gives
+Bob a governed `run_human_test` tool backed by the existing isolated browser
+worker and a persisted control-plane receipt. Start and status responses carry
+the run ID, pinned source SHA, lifecycle state, counts, and artifact inventory;
+Bob may not use "running" or "ongoing" language without that receipt. Atlas gap
+generation was also corrected to include production JavaScript at the
+repository root and to ignore DDL-like SQL string literals. An Atlas `unwired`
+classification remains a static-map finding, not proof of a broken feature,
+until schema and caller evidence agree.
+
 Runtime acceptance 2026-10-11: the laptop vision watcher now writes an
 independent liveness heartbeat and its Docker health check terminates only a
 stale watcher process so `restart: unless-stopped` can recover it. Acceptance

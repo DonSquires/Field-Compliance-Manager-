@@ -747,6 +747,7 @@ const LOOP_CONTINUABLE_READ_TOOLS = new Set([
   'self_audit',
   'review_merge_request',
   'read_bob_chat',
+  'query_atlas',
   'assess_system'
 ]);
 // ── WRITE-CAPABLE TOOLS — authoritative list (#125) ──────────────────────────
@@ -4275,6 +4276,53 @@ async function execAssessSystem(authHeader, caps) {
     }
   };
 }
+
+async function execHumanTest(authHeader, caps, toolArgs) {
+  if (caps.tier !== 'admiral') return {
+    reply: 'Dr Bob human testing is restricted to the admiral.',
+    meta: { tool: 'run_human_test', outcome: 'forbidden' }
+  };
+  const action = toolArgs.action === 'status' ? 'human_test_status' : 'human_test_start';
+  const mode = toolArgs.mode === 'live' ? 'live' : 'fixture';
+  const runId = typeof toolArgs.run_id === 'string' ? toolArgs.run_id.trim() : '';
+  const response = await callFn('bob-builder-control-room', authHeader, {
+    action,
+    mode,
+    ...(runId ? { run_id: runId } : {})
+  });
+  const responseData = response.data as Record<string, unknown>;
+  const run = responseData.run && typeof responseData.run === 'object'
+    ? responseData.run as Record<string, unknown>
+    : null;
+  if (!response.ok || !run) return {
+    reply: `I could not ${action === 'human_test_start' ? 'start' : 'inspect'} the Dr Bob human test (${responseData.error ?? response.status}).`,
+    meta: { tool: 'run_human_test', outcome: 'failed', action }
+  };
+  const status = String(run.status ?? 'unknown');
+  const id = String(run.id ?? '');
+  const summary = run.summary && typeof run.summary === 'object' ? run.summary as Record<string, unknown> : {};
+  const artifacts = Array.isArray(run.artifacts) ? run.artifacts : [];
+  const running = status === 'queued' || status === 'running';
+  const reply = running
+    ? `Dr Bob human-test run ${id} is ${status}. This is a durable control-plane receipt, not an inferred background status.`
+    : `Dr Bob human-test run ${id} is ${status}: ${Number(summary.passed ?? 0)} passed, ${Number(summary.failed ?? 0)} failed, ${Number(summary.skipped ?? 0)} skipped. ${artifacts.length} artifacts were retained.`;
+  return {
+    reply,
+    meta: {
+      tool: 'run_human_test',
+      outcome: running ? 'in_progress' : status,
+      action,
+      run_id: id,
+      status,
+      source_sha: run.source_sha ?? null,
+      passed: Number(summary.passed ?? 0),
+      failed: Number(summary.failed ?? 0),
+      skipped: Number(summary.skipped ?? 0),
+      artifact_count: artifacts.length
+    }
+  };
+}
+
 async function execReadIssues(authHeader, caps, toolArgs) {
   if (caps.tier !== 'admiral') return {
     reply: 'Reading issues is restricted to the admiral.',
@@ -8984,6 +9032,8 @@ serve(async (req)=>{
           return execQueryAtlas(authHeader, caps, toolArgs);
         case 'assess_system':
           return execAssessSystem(authHeader, caps);
+        case 'run_human_test':
+          return execHumanTest(authHeader, caps, toolArgs);
         case 'read_issues':
           return execReadIssues(authHeader, caps, toolArgs);
         case 'write_self_memory':
@@ -9781,6 +9831,17 @@ serve(async (req)=>{
         ...args,
         action: requestedAtlasAction,
         limit: 25
+      };
+    }
+    const explicitHumanTestRequest = caps.tier === 'admiral'
+      && /\b(?:human test|dr\.?\s*bob|browser test|human-browser)\b/i.test(message)
+      && /\b(?:run|start|execute|status|progress|check|inspect)\b/i.test(message);
+    if (normAction === 'answer' && explicitHumanTestRequest) {
+      normAction = 'use_tool';
+      chosenTool = 'run_human_test';
+      args = {
+        action: /\b(?:status|progress|check|inspect)\b/i.test(message) ? 'status' : 'start',
+        mode: /\blive\b/i.test(message) ? 'live' : 'fixture'
       };
     }
     // PILLAR H: plan_received event (fires for ALL requests, FIRST plan only per owner decision)

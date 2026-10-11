@@ -21,6 +21,10 @@ describe('officer static guarding post', () => {
 
   it('uses governed read and attendance RPCs without direct stop mutation', () => {
     expect(page).toContain("supabase.rpc('get_officer_static_post'");
+    expect(page).toContain('const next = parseStaticPost(data)');
+    expect(page).toContain('Static post data was incomplete');
+    expect(page).not.toContain('p_zone_ids:');
+    expect(page).not.toContain("p_module_key: 'site_guard'");
     expect(page).toContain("supabase.rpc('manage_officer_static_post'");
     expect(page).not.toMatch(/from\('shift_stops'\)[\s\S]{0,300}\.(insert|update|delete)\(/);
     expect(page).toContain('p_gps_accuracy_metres: position.accuracy');

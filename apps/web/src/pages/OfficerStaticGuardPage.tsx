@@ -23,6 +23,46 @@ interface StaticPostReceipt {
   handover_recorded: boolean;
 }
 
+function isRecord(value: unknown): value is Record<string, unknown> {
+  return Boolean(value) && typeof value === 'object' && !Array.isArray(value);
+}
+
+function isString(value: unknown): value is string {
+  return typeof value === 'string' && value.trim().length > 0;
+}
+
+function isNullableString(value: unknown): value is string | null {
+  return value === null || typeof value === 'string';
+}
+
+function isStoredReceipt(value: unknown): value is StaticPostReceipt | null {
+  if (value === null) return true;
+  return isRecord(value)
+    && isString(value.reference)
+    && (value.action === 'arrive' || value.action === 'depart')
+    && isString(value.occurred_at)
+    && isString(value.gps_result)
+    && isString(value.timing_status)
+    && (value.dwell_minutes === null || typeof value.dwell_minutes === 'number')
+    && typeof value.handover_recorded === 'boolean';
+}
+
+function isStaticPost(value: unknown): value is StaticPost {
+  if (!isRecord(value) || !isRecord(value.shift) || !isRecord(value.stop) || !isRecord(value.module) || !isRecord(value.place) || !isRecord(value.attendance_evidence)) return false;
+  const { shift, stop, module, place, attendance_evidence: evidence } = value;
+  return isString(shift.id) && isString(shift.status) && isString(shift.scheduled_start) && isString(shift.scheduled_end) && isNullableString(shift.notes)
+    && isString(stop.id) && isString(stop.status) && isString(stop.sla_arrive_by) && isNullableString(stop.actual_arrived_at) && isNullableString(stop.actual_departed_at) && isNullableString(stop.officer_notes)
+    && isString(module.id) && isString(module.status) && isNullableString(module.started_at) && isNullableString(module.completed_at)
+    && isString(place.id) && isString(place.name) && isNullableString(place.address) && isNullableString(place.risk_level) && isNullableString(place.site_brief) && isNullableString(place.access_instructions) && isNullableString(place.hs_notes)
+    && isStoredReceipt(evidence.arrival) && isStoredReceipt(evidence.departure);
+}
+
+function parseStaticPost(value: unknown): StaticPost | null {
+  if (value === null) return null;
+  if (!isStaticPost(value)) throw new Error('Static post data was incomplete. Refresh the page or contact operations.');
+  return value;
+}
+
 function requireReceipt(data: unknown, expectedAction: StaticPostReceipt['action']): StaticPostReceipt {
   const receipt = data as Partial<StaticPostReceipt> | null;
   if (!receipt?.reference || receipt.action !== expectedAction || !receipt.occurred_at || !receipt.gps_result || !receipt.timing_status) {
@@ -58,23 +98,22 @@ export default function OfficerStaticGuardPage() {
   const [error, setError] = useState<string | null>(null);
   const [receipt, setReceipt] = useState<StaticPostReceipt | null>(null);
   const [pendingRequests] = useState<Record<'arrive' | 'depart', string | null>>({ arrive: null, depart: null });
+  const contextLabel = moduleContext.governingJurisdictionName
+    ?? (selectedAgreementZones.length > 0 ? `${selectedAgreementZones.length} agreement area${selectedAgreementZones.length === 1 ? '' : 's'}` : null);
 
   const load = useCallback(async () => {
     try {
       setLoading(true);setError(null);
-      const activeZoneIds = selectedAgreementZones.length > 0 ? selectedAgreementZones.map((zone) => zone.id) : null;
       const { data, error: rpcError } = await supabase.rpc('get_officer_static_post', {
         p_shift_id: null,
-        p_zone_ids: activeZoneIds,
-        p_module_key: 'site_guard',
       });
       if (rpcError) throw rpcError;
-      const next = data as StaticPost | null;
+      const next = parseStaticPost(data);
       setPost(next);setNotes(next?.stop.officer_notes ?? '');
     } catch (loadError) {
       setError(errorMessage(loadError, 'Static post could not be loaded.'));
     } finally { setLoading(false); }
-  }, [selectedAgreementZones]);
+  }, []);
 
   useEffect(() => { void load(); }, [load]);
 
@@ -109,7 +148,7 @@ export default function OfficerStaticGuardPage() {
 
   if (loading) return <div className="static-post-loading"><RefreshCw size={20} className="is-spinning" /> Loading static post</div>;
   return <main className="static-post-page">
-    <header className="static-post-header"><div><span>Static guarding</span><h1>Assigned post</h1><p>Site instructions, attendance, and handover for your current assignment.</p></div><button type="button" onClick={() => void load()} title="Refresh static post"><RefreshCw size={18} /><span className="sr-only">Refresh static post</span></button></header>
+    <header className="static-post-header"><div><span>Static guarding</span><h1>Assigned post</h1><p>Site instructions, attendance, and handover for your current assignment.{contextLabel ? ` Working context: ${contextLabel}.` : ''}</p></div><button type="button" onClick={() => void load()} title="Refresh static post"><RefreshCw size={18} /><span className="sr-only">Refresh static post</span></button></header>
     {error && <div className="static-post-message is-error" role="alert"><AlertTriangle size={18} />{error}</div>}
     {receipt && <div className="static-post-message is-success" role="status"><CheckCircle2 size={18} /><span><strong>{receipt.action === 'arrive' ? 'Arrival' : 'Departure'} recorded</strong> at {formatDateTime(receipt.occurred_at)}. Receipt {receipt.reference}; GPS {receipt.gps_result}; timing {receipt.timing_status.replaceAll('_', ' ')}{receipt.dwell_minutes !== null ? `; dwell ${receipt.dwell_minutes} minutes` : ''}.</span></div>}
     {!post ? <section className="static-post-empty"><ShieldCheck size={28} /><h2>No active static post</h2><p>Accepted static guarding assignments appear here when their contract and site are active.</p></section> : <>

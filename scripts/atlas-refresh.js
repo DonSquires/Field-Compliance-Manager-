@@ -4,10 +4,6 @@ const path = require('node:path');
 const OWNER_MARKER = '[repo-atlas-refresh:v1]';
 const BATCH_SIZE = 250;
 const MAX_RETIREMENTS = 100;
-const ROOT_SOURCE_FILES = [
-  'supabase-workflow-client.js',
-  'scripts/seed-rm-forestry-roster-history.mjs'
-];
 const MANAGED_SOURCES = [
   'apps/web/src/pages/RosterOperationsPage.tsx',
   'apps/web/src/pages/OfficerSchedulePage.tsx',
@@ -165,6 +161,13 @@ function isSourceFile(file) {
     && !/\.(?:test|spec)\.[jt]sx?$/.test(file);
 }
 
+function rootSourceFiles(rootDir) {
+  return fs.readdirSync(rootDir, { withFileTypes: true })
+    .filter(entry => entry.isFile() && isSourceFile(entry.name))
+    .map(entry => entry.name)
+    .sort();
+}
+
 function sourceIdentity(file) {
   const edgeFunction = file.match(/^supabase\/functions\/([^/]+)\/index\.ts$/);
   if (edgeFunction && edgeFunction[1] !== '_shared') {
@@ -296,9 +299,9 @@ function collectDdlEntities(rootDir) {
   ];
   const tables = new Set();
   const rpcs = new Set();
-  const tablePattern = /CREATE\s+TABLE(?:\s+IF\s+NOT\s+EXISTS)?\s+(?:"?public"?\.)?"?([a-zA-Z_][a-zA-Z0-9_]*)"?/gi;
-  const viewPattern = /CREATE(?:\s+OR\s+REPLACE)?\s+(?:MATERIALIZED\s+)?VIEW\s+(?:"?public"?\.)?"?([a-zA-Z_][a-zA-Z0-9_]*)"?/gi;
-  const functionPattern = /CREATE(?:\s+OR\s+REPLACE)?\s+FUNCTION\s+(?:"?public"?\.)?"?([a-zA-Z_][a-zA-Z0-9_]*)"?/gi;
+  const tablePattern = /(?:^|;)[ \t]*CREATE\s+TABLE(?:\s+IF\s+NOT\s+EXISTS)?\s+(?:"?public"?\.)?"?([a-zA-Z_][a-zA-Z0-9_]*)"?/gim;
+  const viewPattern = /(?:^|;)[ \t]*CREATE(?:\s+OR\s+REPLACE)?\s+(?:MATERIALIZED\s+)?VIEW\s+(?:"?public"?\.)?"?([a-zA-Z_][a-zA-Z0-9_]*)"?/gim;
+  const functionPattern = /(?:^|;)[ \t]*CREATE(?:\s+OR\s+REPLACE)?\s+FUNCTION\s+(?:"?public"?\.)?"?([a-zA-Z_][a-zA-Z0-9_]*)"?/gim;
 
   for (const file of files) {
     const content = fs.existsSync(path.join(rootDir, file)) ? fs.readFileSync(path.join(rootDir, file), 'utf8') : '';
@@ -388,7 +391,8 @@ function collectSourceEdges(rootDir, knownEntities) {
     ...walkFiles(rootDir, 'apps/sd-card-bridge-v2/src'),
     ...walkFiles(rootDir, 'supabase/functions'),
     ...walkFiles(rootDir, 'services'),
-    ...ROOT_SOURCE_FILES.filter(file => fs.existsSync(path.join(rootDir, file)))
+    ...rootSourceFiles(rootDir),
+    ...walkFiles(rootDir, 'scripts')
   ].filter(isSourceFile);
   const edges = new Map();
   const add = (source, targetType, targetName, edgeKind, file, context) => {
@@ -493,7 +497,10 @@ function collectAtlasRefresh(rootDir = process.cwd()) {
     ...walkFiles(rootDir, 'apps/web/src'),
     ...walkFiles(rootDir, 'apps/mobile/src'),
     ...walkFiles(rootDir, 'apps/sd-card-bridge-v2/src'),
-    ...walkFiles(rootDir, 'supabase/functions')
+    ...walkFiles(rootDir, 'supabase/functions'),
+    ...walkFiles(rootDir, 'services'),
+    ...rootSourceFiles(rootDir),
+    ...walkFiles(rootDir, 'scripts')
   ].sort();
   const edgeFunctions = new Set(
     walkFiles(rootDir, 'supabase/functions')
