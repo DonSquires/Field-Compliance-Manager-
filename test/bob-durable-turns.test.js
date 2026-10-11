@@ -8,6 +8,10 @@ const migration = fs.readFileSync(
   path.join(root, 'supabase/migrations/20261011035917_bob_durable_turn_runs.sql'),
   'utf8',
 );
+const queueMigration = fs.readFileSync(
+  path.join(root, 'supabase/migrations/20261011043559_queue_bob_turn_execution.sql'),
+  'utf8',
+);
 const conductor = fs.readFileSync(
   path.join(root, 'supabase/functions/onspace-ai-chat/index.ts'),
   'utf8',
@@ -36,6 +40,17 @@ test('Bob conductor rejects cross-user conversations and deduplicates durable tu
   assert.match(conductor, /operation === 'status' \|\| operation === 'cancel'/);
 });
 
+test('Bob queues browser turns and claims background execution exactly once', () => {
+  assert.match(queueMigration, /status in \('queued', 'running', 'cancel_requested', 'completed', 'failed', 'cancelled'\)/i);
+  assert.match(queueMigration, /where status = 'queued'/i);
+  assert.match(conductor, /operation === 'enqueue' \? 'queued' : 'running'/);
+  assert.match(conductor, /X-Bob-Background-Token/);
+  assert.match(conductor, /EdgeRuntime\?: \{ waitUntil/);
+  assert.match(conductor, /body: JSON\.stringify\(\{ \.\.\.body, operation: 'execute' \}\)/);
+  assert.match(conductor, /\.eq\('status', 'queued'\)[\s\S]*transitionedRun/);
+  assert.match(conductor, /return json\(\{ accepted: true, turn_run: publicTurnRun\(claimedRun\) \}, 202\)/);
+});
+
 test('Bob cancellation is cooperative and checked before planning, tools and loop steps', () => {
   assert.match(conductor, /cancelAtBoundary\('planning'\)/);
   assert.match(conductor, /cancelAtBoundary\('tool execution'\)/);
@@ -46,9 +61,11 @@ test('Bob cancellation is cooperative and checked before planning, tools and loo
 
 test('Bob panel sends a stable request id and offers reconciliation instead of blind retry', () => {
   assert.match(panel, /const requestId = crypto\.randomUUID\(\)/);
+  assert.match(panel, /operation: 'enqueue'/);
   assert.match(panel, /request_id: requestId/);
   assert.match(panel, /operation: 'status'/);
   assert.match(panel, /operation: 'cancel'/);
+  assert.match(panel, /window\.setInterval\(\(\) => void poll\(\), 4_000\)/);
   assert.match(panel, /Check status/);
   assert.match(panel, /Request cancellation/);
   assert.match(panel, /durable run prevents duplicate work/);

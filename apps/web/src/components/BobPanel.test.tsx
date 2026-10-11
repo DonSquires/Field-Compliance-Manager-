@@ -165,6 +165,7 @@ describe('BobPanel', () => {
     await waitFor(() => {
       expect(mockInvoke).toHaveBeenCalledWith('onspace-ai-chat', {
         body: {
+          operation: 'enqueue',
           message: 'Check the site status',
           conversation_id: 'conversation-1',
           request_id: expect.any(String),
@@ -301,6 +302,66 @@ describe('BobPanel', () => {
     expect(screen.getByText('Waiting for Bob')).toBeTruthy();
 
     resolveInvoke({ data: { reply: 'done' }, error: null });
+  });
+
+  it('queues a turn and automatically replaces it with the durable reply', async () => {
+    mockInvoke.mockImplementation((_name: string, options?: { body?: Record<string, unknown> }) => {
+      const operation = options?.body?.operation;
+      if (operation === 'enqueue') {
+        return Promise.resolve({
+          data: {
+            accepted: true,
+            turn_run: {
+              request_id: options?.body?.request_id,
+              status: 'queued',
+              started_at: '2026-10-11T04:00:00.000Z',
+              heartbeat_at: '2026-10-11T04:00:00.000Z',
+              completed_at: null,
+              error_code: null,
+            },
+          },
+          error: null,
+        });
+      }
+      if (operation === 'status') {
+        messageHistory = [{
+          id: 'message-durable',
+          role: 'assistant',
+          content: 'Durable reply ready',
+          confidence: 0.9,
+          flagged: false,
+          created_at: '2026-10-11T04:00:04.000Z',
+          metadata: {},
+        }];
+        return Promise.resolve({
+          data: {
+            turn_run: {
+              request_id: options?.body?.request_id,
+              status: 'completed',
+              started_at: '2026-10-11T04:00:00.000Z',
+              heartbeat_at: '2026-10-11T04:00:04.000Z',
+              completed_at: '2026-10-11T04:00:04.000Z',
+              error_code: null,
+            },
+          },
+          error: null,
+        });
+      }
+      return Promise.resolve({ data: null, error: null });
+    });
+
+    render(<BobPanel open onClose={() => undefined} />);
+
+    fireEvent.change(await screen.findByPlaceholderText('Ask Bob to plan, inspect, explain, or prepare a proposal'), { target: { value: 'Check the durable queue' } });
+    fireEvent.click(screen.getByRole('button', { name: 'Send' }));
+
+    expect(await screen.findByText('Durable reply ready')).toBeTruthy();
+    expect(mockInvoke).toHaveBeenCalledWith('onspace-ai-chat', expect.objectContaining({
+      body: expect.objectContaining({ operation: 'enqueue' }),
+    }));
+    expect(mockInvoke).toHaveBeenCalledWith('onspace-ai-chat', expect.objectContaining({
+      body: expect.objectContaining({ operation: 'status' }),
+    }));
   });
 
   it('surfaces a recoverable timeout when Bob does not return', async () => {

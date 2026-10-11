@@ -112,7 +112,7 @@ interface BobGovernedAction {
   created_at: string;
 }
 
-type BobTurnStatus = 'running' | 'cancel_requested' | 'completed' | 'failed' | 'cancelled';
+type BobTurnStatus = 'queued' | 'running' | 'cancel_requested' | 'completed' | 'failed' | 'cancelled';
 
 interface BobTurnRun {
   request_id: string;
@@ -128,6 +128,7 @@ interface ActiveBobTurn {
   status: BobTurnStatus;
   message: string;
   startedAt: string;
+  accepted: boolean;
 }
 
 type ContextTab = 'context' | 'files' | 'actions' | 'audit';
@@ -754,7 +755,7 @@ export const BobPanel: React.FC<BobPanelProps> = ({ open, onClose, context, mode
   };
 
   const cancelActiveTurn = async () => {
-    if (!activeTurn || !conversationId || sending || activeTurn.status !== 'running') return;
+    if (!activeTurn || !conversationId || sending || !['queued', 'running'].includes(activeTurn.status)) return;
     setSending(true);
     setActivityPhase('refreshing');
     setError(null);
@@ -782,7 +783,7 @@ export const BobPanel: React.FC<BobPanelProps> = ({ open, onClose, context, mode
   };
 
   const restoreActiveTurnPrompt = () => {
-    if (!activeTurn || activeTurn.status === 'running' || activeTurn.status === 'cancel_requested') return;
+    if (!activeTurn || ['queued', 'running', 'cancel_requested'].includes(activeTurn.status)) return;
     setInput(activeTurn.message);
     setActiveTurn(null);
     setError(null);
@@ -793,7 +794,7 @@ export const BobPanel: React.FC<BobPanelProps> = ({ open, onClose, context, mode
     e?.preventDefault();
     const message = (override ?? (input.trim() || voiceTranscript.trim())).trim();
     if ((!message && pendingFiles.length === 0) || !conversationId || sending) return;
-    if (activeTurn?.status === 'running' || activeTurn?.status === 'cancel_requested') {
+    if (activeTurn && ['queued', 'running', 'cancel_requested'].includes(activeTurn.status)) {
       setError('This conversation already has a durable Bob request in progress. Check or cancel it before sending another turn.');
       return;
     }
@@ -814,12 +815,19 @@ export const BobPanel: React.FC<BobPanelProps> = ({ open, onClose, context, mode
     try {
       const attachments = await uploadPendingFiles(conversationId);
       setActivityPhase('waiting');
-      setActiveTurn({ requestId, status: 'running', message: message || 'Please review the attached file(s).', startedAt: new Date().toISOString() });
+      setActiveTurn({
+        requestId,
+        status: 'queued',
+        message: message || 'Please review the attached file(s).',
+        startedAt: new Date().toISOString(),
+        accepted: false,
+      });
       // ATLAS CALLS: onspace-ai-chat (persists both user + assistant messages server-side)
       const { data, error: fnError } = await new Promise<Awaited<ReturnType<typeof supabase.functions.invoke<{ reply?: unknown }>>>>((resolve, reject) => {
         const timeout = window.setTimeout(() => reject(new Error(BOB_REQUEST_TIMEOUT_MESSAGE)), BOB_REQUEST_TIMEOUT_MS);
         supabase.functions.invoke<{ reply?: unknown }>('onspace-ai-chat', {
           body: {
+            operation: 'enqueue',
             message: message || 'Please review the attached file(s).',
             conversation_id: conversationId,
             request_id: requestId,
@@ -838,8 +846,10 @@ export const BobPanel: React.FC<BobPanelProps> = ({ open, onClose, context, mode
       if (fnError) throw fnError;
       if (data && typeof data === 'object' && 'turn_run' in data && (data as { turn_run?: BobTurnRun }).turn_run?.status !== 'completed' && !('reply' in data)) {
         const turnRun = (data as { turn_run: BobTurnRun }).turn_run;
-        setActiveTurn(current => current ? { ...current, status: turnRun.status, startedAt: turnRun.started_at } : current);
-        setError('This Bob request is already in progress. Check its durable status instead of resending it.');
+        setActiveTurn(current => current
+          ? { ...current, status: turnRun.status, startedAt: turnRun.started_at, accepted: true }
+          : current);
+        setError(null);
         return;
       }
 
@@ -886,6 +896,58 @@ export const BobPanel: React.FC<BobPanelProps> = ({ open, onClose, context, mode
       setSending(false);
     }
   };
+
+  useEffect(() => {
+    if (!open || !conversationId || !activeTurn?.accepted || !['queued', 'running', 'cancel_requested'].includes(activeTurn.status)) return;
+
+    let stopped = false;
+    let polling = false;
+    const poll = async () => {
+      if (polling) return;
+      polling = true;
+      try {
+        const { data, error: statusError } = await supabase.functions.invoke<{ turn_run?: BobTurnRun }>('onspace-ai-chat', {
+          body: {
+            operation: 'status',
+            request_id: activeTurn.requestId,
+            conversation_id: conversationId,
+            context: { ...(context ?? {}), agent_mode: mode },
+          },
+        });
+        if (stopped || statusError || !data?.turn_run) return;
+
+        const nextStatus = data.turn_run.status;
+        if (nextStatus === 'completed') {
+          await selectSession(conversationId);
+          if (!stopped) {
+            setActiveTurn(null);
+            setError(null);
+          }
+          return;
+        }
+
+        setActiveTurn(current => current?.requestId === activeTurn.requestId
+          ? { ...current, status: nextStatus, startedAt: data.turn_run!.started_at }
+          : current);
+        if (nextStatus === 'failed' || nextStatus === 'cancelled') {
+          if (!stopped) {
+            setError(nextStatus === 'cancelled'
+              ? 'The request was cancelled. Restore the prompt only if you want to start a new request.'
+              : 'The durable Bob request failed. Restore the prompt to retry with a new request ID.');
+          }
+        }
+      } finally {
+        polling = false;
+      }
+    };
+
+    void poll();
+    const interval = window.setInterval(() => void poll(), 4_000);
+    return () => {
+      stopped = true;
+      window.clearInterval(interval);
+    };
+  }, [activeTurn?.accepted, activeTurn?.requestId, activeTurn?.status, context, conversationId, mode, open, selectSession]);
 
   const focusComposer = () => {
     window.requestAnimationFrame(() => composerRef.current?.focus());
@@ -1002,7 +1064,7 @@ export const BobPanel: React.FC<BobPanelProps> = ({ open, onClose, context, mode
                 <button type="button" onClick={() => void reconcileActiveTurn()} disabled={sending}>
                   <RefreshCw size={14} /> Check status
                 </button>
-                {activeTurn.status === 'running' && (
+                {(activeTurn.status === 'queued' || activeTurn.status === 'running') && (
                   <button type="button" onClick={() => void cancelActiveTurn()} disabled={sending}>
                     <Ban size={14} /> Request cancellation
                   </button>

@@ -557,9 +557,28 @@ System-wide Bob acceptance gate shipped 2026-10-11:
   server-owned rank, not exposed as an ungoverned client-selected Bob
   personality.
 
-**Gate:** live `bob_messages` show no context-losing fallbacks; a Builder job
-runs implement → verify → repair without human touch and stops cleanly at
-`release_ready`; egress proven per rank; Atlas `exercised` is populated from
+  Durable chat execution slice implemented in source 2026-10-11:
+
+  - **Before:** the browser held the `onspace-ai-chat` request open while the
+    planner, verifier and tools ran. A glass test returned correctly but remained
+    on “Waiting for Bob” for about two minutes, near the hosted Edge Function
+    request-idle ceiling.
+  - **During:** `bob_turn_runs` now supports `queued`; the browser sends
+    `operation: enqueue`; the Conductor returns `202 Accepted`, dispatches one
+    protected background execution, and atomically claims only the matching
+    queued run. The UI polls every four seconds and supports queued or running
+    cancellation without resubmitting the prompt.
+  - **After:** completed runs refresh the canonical persisted transcript.
+    Failed or cancelled runs remain explicit and recoverable. The original
+    caller JWT, organization, conversation, workspace, rank and effect gates
+    remain binding during background execution.
+  - **Evidence state:** focused durable-turn and BobPanel tests plus web
+    TypeScript pass. Live deployment and a measured glass test are still required
+    before this slice is called deployed or latency-corrected.
+
+  **Gate:** live `bob_messages` show no context-losing fallbacks; a Builder job
+  runs implement → verify → repair without human touch and stops cleanly at
+  `release_ready`; egress proven per rank; Atlas `exercised` is populated from
 evidence, not asserted.
 
 ## 10. Enterprise hardening (parallel track)

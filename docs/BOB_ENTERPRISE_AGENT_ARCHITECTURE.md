@@ -200,6 +200,21 @@ Desktop capability presence is not wiring, and wiring is not exercise.
   glass-proven states.
 - Provide cancellation, rollback recommendation and durable receipts.
 
+### Durable chat execution
+
+- A browser turn receives a tenant-scoped durable request ID before planning.
+- The conductor records the turn as `queued`, returns `202 Accepted`, and
+  claims the queued run exactly once for background execution.
+- The client polls the durable run rather than holding one long HTTP request or
+  blindly resending after a timeout.
+- Queued requests cancel immediately. Running requests use cooperative
+  cancellation at planner and tool boundaries.
+- Completion replaces optimistic UI content from the canonical
+  `bob_messages` transcript. Failure remains visible and recoverable.
+- A request ID cannot be reused for different input, and status/cancellation
+  remain scoped to the originating user, organization, conversation and
+  workspace.
+
 ## 8. Self-heal and Grandmaster build loop
 
 Self-heal is evidence-led repair, not direct production mutation:

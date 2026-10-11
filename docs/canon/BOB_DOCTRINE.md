@@ -98,6 +98,14 @@ RLS remains the hard backstop underneath. In this repo the mechanism is
 | Memory | request → `bob_messages` → `bob_context_memory` → `bob_knowledge_cards` → `bob_learning_memory`; `bob_self_memory` is Bob's own diary; growth is human-judged | same tables live; `bob_self_memory` present; knowledge cards never written from chat |
 | Build/ops | `bob-review-merge-request`, `bob-read-issues`, Gitea/GitLab MR flow | Builder control plane (`bob-control-plane-server.js`, `worker-executor.js`, `builder_*` tables, `builder_approvals`), Gitea PRs, no merge/deploy authority |
 
+Chat turns use a durable asynchronous handoff. The browser creates one
+tenant-scoped request ID; the Conductor records `queued`, returns an immediate
+acknowledgement, and claims that queued run once for background execution.
+Clients reconcile from `bob_turn_runs` and the canonical `bob_messages`
+transcript instead of resending work when a network request is slow. This is a
+reliability mechanism, not new authority: the same caller JWT, organization,
+conversation, rank, egress and effect gates apply during background execution.
+
 Bob's evidence order is fixed: human observation → schema/Atlas inspection → live
 read verification → bounded web research → smallest discriminating next check
 (`AGENTS.md`). Atlas `flow_reach` and `fk_reach` are never conflated; `wired` is
