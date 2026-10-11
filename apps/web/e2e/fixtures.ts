@@ -53,7 +53,7 @@ function fulfillJson(body: unknown, headers: Record<string, string> = {}) {
 
 export const DESKTOP_PROMPT_KEY = `fcm:desktop-download-prompt-v2-dismissed:${ADMIN_ID}`;
 
-export async function installSupabaseFixtures(page: Page, options: { officerModules?: string[]; adminRole?: 'grand_master' | 'master' | 'admin' | 'admin_officer' | 'nzscv_monitor' } = {}): Promise<void> {
+export async function installSupabaseFixtures(page: Page, options: { officerModules?: string[]; adminRole?: 'grand_master' | 'master' | 'admin' | 'admin_officer' | 'nzscv_monitor' | 'scan_operator' } = {}): Promise<void> {
   await page.clock.install({ time: new Date('2026-08-29T12:00:00.000Z') });
   // Bob's verifier runs this suite in a container with no network: an external resource the app
   // loads (fonts, tiles) would surface as ERR_INTERNET_DISCONNECTED console errors and fail the

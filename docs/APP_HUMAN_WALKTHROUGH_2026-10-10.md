@@ -38,17 +38,17 @@ Status: in progress
 - [x] Reports & Accountability page controls: Reports and available report/review/publish tabs.
 - [x] Investigations & Evidence page controls: File System and Investigations; registration/move/source-open were guarded and separately lifecycle-tested.
 - [x] Organisation & Settings non-Bob controls: Access Rules, Organisation Settings, Modules/Subscriptions, E2E Testing, Test Data, Platform Overview, Subscribers, Module Pricing, Provider Billing.
-- [ ] Builder and Bob/Document Studio: deferred while another agent owns substantial Bob-associated work; resume only after coordination.
+- [ ] Builder and Bob/Document Studio: Bob Panel modal/focus/keyboard/return-focus passed desktop/mobile; Document Studio source families, brand readiness, and synthetic review deep link passed desktop/mobile; Builder historical-job screen passed desktop/mobile. Still open: source upload/register→extract→classify→proposal→target apply→receipt lifecycle, Builder create/approval/release workflow, and bounded safe-control walk after the rebuild.
 
 ## 3. Officer and Client Surfaces
 
 - [x] Officer safe-button groups: self-service, dispatch/patrol, and specialty modules passed desktop/mobile; guarded writes were skipped. `/officer/bob` was omitted; standalone specialty launchers were logged as concurrent-owner skips because their `ModuleShell` mounts the rebuilt Bob panel.
-- [ ] Officer shell states: standby, active shift/home, module selector, and module portal; safety, online/offline, account and notification chrome. Bob routes/panel and standalone destinations remain deferred until rebuild handoff.
+- [ ] Officer shell states: standby, active shift/home, module selector, and module portal; safety, online/offline, account and notification chrome. Officer Bob route and standalone specialty launchers still need direct post-rebuild verification; Admin Bob Panel is now covered.
 - [x] Officer module selector (focused responsive E2E): card content/action bounds stay inside each card; core Patrol no longer offers unsupported standalone navigation; registered Freedom Camping standalone route opens correctly.
 - [x] Client portal (synthetic): Overview and Service Delivered, scan-only route denial, published report scope/provenance, invite acceptance, and client-admin people management.
 - [ ] Client access matrix: viewer/admin roles across transparency-only, full-modules and scan-only agreements; reports/finance enabled and disabled. Full-module viewer denial of finance/reports/people now passes desktop/mobile; client-admin full-module controls pass the safe-button group. Remaining: explicit finance-enabled/disabled route pairs and scan-only role variants.
 - [x] Public dispute guest workflow: grounds-required validation, endpoint payload, receipt, and mobile overflow passed synthetic desktop/mobile E2E. Client invite acceptance and officer scan flows have separate synthetic lifecycle coverage.
-- [ ] Public/role-router entry-point matrix: direct invite/capability-share links, scan role denial/entry, and remaining public routes still need reconciliation.
+- [ ] Public/role-router entry-point matrix: capability-share invite sign-in gate and governed acceptance, plus scan_operator entry and admin role redirect, pass synthetic desktop/mobile E2Es. Remaining: direct client invitation callback variants, scan-enabled agreement access and entitlement-denied states, and route reconciliation.
 
 ## 4. Synthetic End-to-End Business Processes
 
@@ -116,6 +116,8 @@ Status: in progress
 - Officer page-owned safe-button groups passed desktop/mobile: self-service, dispatch/patrol, and specialties, 6 Playwright runs total; 0 genuine request failures or human-runner errors. Writes remained policy-skipped. Bob route omitted; standalone specialty launchers are explicitly deferred because `ModuleShell` currently mounts the Bob panel during rebuild.
 - Public dispute workflow passed 2/2 desktop/mobile synthetic E2Es: guest route, grounds-required disabled state, `submit-dispute` request shape, success receipt, and mobile overflow. This verifies the UI-to-endpoint contract, not live persistence.
 - Full-module client viewer access check passed 2/2 desktop/mobile: site/observation reads remain visible; finance, reports, and people direct routes return to overview; viewer never gets People navigation.
+- Bob rebuild re-check started after owner handoff: Bob Panel dialog semantics, initial/focus-trap/return focus, Studio open state, and mobile layout passed; Document Studio source-family/brand readiness and draft-review deep link passed; Builder historical-job resilience passed. These do not yet constitute the full source-to-target document lifecycle or Builder approval/release acceptance.
+- Public role-router entry checks passed 6/6 desktop/mobile: unauthenticated capability-share invite presents sign-in, signed-in client accepts through the RPC with its token, scan_operator reaches `/scan`, and admin role is redirected to the Admin Hub. Scan data-write and agreement entitlement matrix remain covered separately/open.
 - Bob rebuild re-check memory is recorded in `/memories/repo/fcm-human-walkthrough.md`: Admin/Officer/standalone entry points, panel modal/focus/keyboard behavior, Document Studio lifecycle and Atlas/schema/RLS, Bob/Builder safe-control groups, prior transient parse/runtime errors, and screenshot/console review. Do not resume those checks until the concurrent owner confirms handoff.
 - Owner-reported Deno Language Server error (`deno.cache` command registered twice) is an editor-extension startup issue; CLI Deno checks remain the runtime validation path. No app/runtime failure is inferred from it.
 - Full safe-button sweep remains incomplete; earlier Admin runs stalled in File System and one long shared-shell pass was interrupted. Page-route human observations completed, but every page-owned button/modal is not yet individually accounted for.
