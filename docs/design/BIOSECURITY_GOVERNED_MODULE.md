@@ -1,7 +1,7 @@
 # Biosecurity Governed Module Design
 
 Date: 2026-09-03
-Status: proposed implementation contract
+Status: implemented; photo-perception adapter verified 2026-10-11
 
 ## Decision
 
@@ -64,7 +64,8 @@ Failure fields:
 5. Generate a watermark containing capture time, source/place context, officer ID, request ID, and watermark version. Upload original and watermarked assets, calculate SHA-256 digests, and retain the custody metadata.
 6. Run classification as a bounded enrichment step. Classification failure does not erase stored evidence; it returns `unavailable` and opens supervisor review rather than asserting an unverified species.
 7. Invoke a dedicated SECURITY DEFINER receipt RPC. In one transaction it inserts the assessment, inserts `evidence_items`, writes an ordered `biosecurity_assessment_evidence` link, projects legacy `photo_urls` during migration, appends `audit_log`, and saves the exact response in `officer_command_requests`.
-8. Return the stored receipt. Retries after a timeout read the command row and return the same assessment/evidence IDs.
+8. Compile an available structured classification into the shared perception envelope through the service-only writer. Writer failure is explicit after the authoritative receipt; retrying the same client request repairs the missing projection without duplicating the assessment.
+9. Return the stored receipt. Retries after a timeout read the command row and return the same assessment/evidence IDs.
 
 ## Schema Changes
 
@@ -77,6 +78,42 @@ Keep existing assessment columns additive and preserve the current protected-lan
 - A uniqueness constraint on `officer_command_requests` for organization, command type, and request ID, after checking current production data for duplicates.
 
 `photo_urls` remains as a compatibility projection while existing readers migrate to the link table. It is not the source of truth for new capture paths.
+
+## Photo Perception and Review
+
+The deployed `biosecurity_photo` adapter preserves the complete classifier
+receipt (candidate, details, reasoning, confidence, classifier, provider,
+model, and prompt version) and compiles species, density, and threat-level
+candidates into the shared perception envelope. Machine output remains
+`candidate` or `insufficient`; it never becomes `human_approved` by confidence
+alone.
+
+`review_biosecurity_photo_classification` is the only field-level authority.
+An organization administrator may confirm, correct, or reject the candidate
+with required notes. Corrections preserve the machine candidate as
+`superseded`, append an attributable review receipt, and project only the
+approved species/density to the assessment. The review function does not
+change notice or MPI referral fields. Operational triage through
+`manage_biosecurity_assessment_review` remains a separate workflow decision.
+
+The oversight page signs private `scans` evidence for 15 minutes and presents
+the image, custody state, candidate fields, typed machine confidence, model
+receipt, and separate classification/workflow controls. Missing or unavailable
+classification remains visibly review-required rather than becoming a
+success-shaped fallback.
+
+### Verified production state, 2026-10-11
+
+- **Before:** two assessments and one linked evidence item existed. The linked
+  legacy item had no canonical SHA-256 or watermarked SHA-256 value.
+- **During:** the service-only writer was invoked twice for that link. Both
+  calls returned `missing_source_hash`; no envelope or field authority was
+  created. A nonexistent assessment was rejected.
+- **After:** structured assessment columns and the review/writer RPCs are live,
+  Atlas reports the biosecurity command and shared writer path as present and
+  wired, and Atlas still makes no `exercised` claim. Eligible future
+  submissions can compile replay-safely; the legacy item remains an explicit
+  custody-repair gap.
 
 ## Governance and System Integration
 

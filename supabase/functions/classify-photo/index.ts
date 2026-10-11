@@ -203,6 +203,9 @@ Provide your response in JSON format:
   "reasoning": "<brief explanation>"
 }`
     };
+    if (!(body.module in prompts)) return json({
+      error: 'module is not supported'
+    }, 400);
     const systemPrompt = prompts[body.module];
     const userMessage = body.context ? `Additional context: ${body.context}\n\nPhoto URL: ${body.photo_url}` : `Photo URL: ${body.photo_url}`;
     // ── Call apps/api Bob vision endpoint ────────────────────────────────────
@@ -246,7 +249,22 @@ Provide your response in JSON format:
       const jsonMatch = jsonStr.match(/```(?:json)?\s*([\s\S]*?)```/);
       if (jsonMatch) jsonStr = jsonMatch[1].trim();
       const result = JSON.parse(jsonStr);
-      return json(result);
+      if (!result || typeof result !== 'object'
+          || typeof result.classification !== 'string'
+          || typeof result.confidence !== 'number'
+          || result.confidence < 0
+          || result.confidence > 1
+          || !result.details
+          || typeof result.details !== 'object') {
+        return json({ error: 'Classification response did not match the governed evidence contract' }, 502);
+      }
+      return json({
+        ...result,
+        classifier: 'bob_vision',
+        provider: typeof data.provider === 'string' ? data.provider : null,
+        model: typeof data.model === 'string' ? data.model : null,
+        prompt_version: `${body.module}_photo_v1`
+      });
     } catch (parseErr) {
       console.error('[classify-photo] Failed to parse Bob response:', parseErr);
       // Return raw response if JSON parsing fails

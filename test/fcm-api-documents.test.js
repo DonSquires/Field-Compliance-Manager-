@@ -7,7 +7,8 @@ const { createDocumentReader, docxXmlToText, fileKind } = require('../services/f
 function fakeSupabase(rows) {
   const query = {
     select() { return query; }, eq() { return query; }, neq() { return query; }, order() { return query; },
-    in() { return query; }, limit() { return Promise.resolve({ data: rows, error: null }); },
+    in() { return query; }, update() { return query; },
+    limit() { return Promise.resolve({ data: rows, error: null }); },
   };
   return { from: () => query };
 }

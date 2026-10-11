@@ -311,6 +311,18 @@ append-only review history. Historical replay recorded 190 envelopes from 177
 jobs; a second pass replayed all 190 without duplication. Vertical-module
 adapters remain Phase C work.
 
+**Fourth adapter implemented 2026-10-11: biosecurity photo classification.**
+The governed submission now retains structured classifier provenance and
+compiles species, density and threat-level candidates into `biosecurity_photo`
+envelopes only when source custody is valid. Machine output remains advisory.
+An explicit administrator review confirms, corrects or rejects fields and
+appends shared review receipts; assessment workflow triage remains separate.
+The oversight UI signs private evidence for short-lived display and shows
+candidate confidence, model provenance and human authority state. The one
+legacy linked evidence item fails closed as `missing_source_hash` on replay, so
+no envelope is fabricated until custody is repaired. Smoke and noise adapters
+remain Phase C work.
+
 Gate: source/enhanced disagreement and threshold failures never auto-promote.
 
 ### Phase D — Desktop V2 and offline operation

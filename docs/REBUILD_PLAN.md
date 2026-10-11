@@ -423,8 +423,19 @@ Plate acceptance now creates or links vehicle identity without seeding visual
 attributes. The dedicated attribute review is the only canonical promotion
 path and records corrections without erasing the original candidate. The live
 backfill recorded 190 envelopes from 177 jobs and replayed all 190
-idempotently. Smoke, noise, biosecurity and other vertical-module adapters
-remain.
+idempotently. Smoke, noise and other vertical-module adapters remain.
+
+Phase C biosecurity-photo slice shipped 2026-10-11: the governed submission
+retains structured classifier details, reasoning, confidence and model receipt,
+then compiles species, density and threat-level candidates into replay-safe
+shared evidence. Machine inference cannot confirm species or mutate notices or
+MPI referrals. An explicit administrator field review is distinct from
+operational workflow triage and preserves corrected machine candidates as
+superseded evidence. The oversight surface now signs and displays private photo
+evidence with custody and authority state. Production verification found one
+legacy evidence link without a custody hash; two replay attempts both failed
+closed as `missing_source_hash`, with no fabricated envelope. Smoke, noise and
+other vertical-module adapters remain.
 
 **Gate:** live `bob_messages` show no context-losing fallbacks; a Builder job
 runs implement → verify → repair without human touch and stops cleanly at
