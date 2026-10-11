@@ -24,27 +24,34 @@ export function OfficerSmokeControlPanel({ shiftId }: Props) {
   const [sourceConfirmed, setSourceConfirmed] = useState(false);
   const [imageUri, setImageUri] = useState<string | null>(null);
   const [imageBase64, setImageBase64] = useState<string | null>(null);
+  const [imageCapturedAt, setImageCapturedAt] = useState<string | null>(null);
   const [busy, setBusy] = useState(false);
   const requestId = useRef(crypto.randomUUID());
-  const assessedAt = useRef(new Date().toISOString());
+  const assessedAt = useRef<string | null>(null);
 
   const pickOrTakePhoto = async (source: 'camera' | 'library') => {
     try {
       const captured = await captureEvidencePhoto(source);
+      const capturedAt = new Date().toISOString();
       setImageUri(captured.uri);
       setImageBase64(captured.base64);
+      setImageCapturedAt(capturedAt);
+      setSourceConfirmed(false);
+      assessedAt.current = capturedAt;
     } catch (err) {
       Alert.alert('Evidence photo error', err instanceof Error ? err.message : 'Photo evidence capture failed.');
     }
   };
 
   const actionNeedsNotice = actionTaken === 'abatement_notice' || actionTaken === 'infringement_notice';
+  const canConfirmSource = Boolean(address.trim()) && Boolean(imageBase64);
 
   const valid = Boolean(address.trim()) &&
     Boolean(sceneDescription.trim()) &&
     (!actionNeedsNotice || Boolean(noticeNumber.trim())) &&
     sourceConfirmed &&
-    Boolean(imageBase64);
+    Boolean(imageBase64) &&
+    Boolean(assessedAt.current);
   const outstanding = [
     !address.trim() && 'observed address',
     !sceneDescription.trim() && 'scene description',
@@ -54,7 +61,7 @@ export function OfficerSmokeControlPanel({ shiftId }: Props) {
   ].filter(Boolean) as string[];
 
   const submit = async () => {
-    if (!supabase || !valid || !imageBase64) return;
+    if (!supabase || !valid || !imageBase64 || !assessedAt.current) return;
     setBusy(true);
     try {
       const { data, error } = await supabase.functions.invoke<{
@@ -104,8 +111,9 @@ export function OfficerSmokeControlPanel({ shiftId }: Props) {
       setSourceConfirmed(false);
       setImageUri(null);
       setImageBase64(null);
+      setImageCapturedAt(null);
       requestId.current = crypto.randomUUID();
-      assessedAt.current = new Date().toISOString();
+      assessedAt.current = null;
       setOpen(false);
     } catch (err) {
       Alert.alert('Assessment not confirmed', err instanceof Error ? err.message : 'Smoke assessment submission failed.');
@@ -133,6 +141,9 @@ export function OfficerSmokeControlPanel({ shiftId }: Props) {
               <Image source={{ uri: imageUri }} accessibilityLabel="Captured smoke evidence" style={styles.photoPreview} />
               <View style={styles.photoReceiptText}>
                 <Text style={styles.photoReceiptTitle}>Evidence photo ready</Text>
+                <Text style={styles.photoTimestamp}>
+                  Captured {imageCapturedAt ? new Date(imageCapturedAt).toLocaleString() : 'just now'}
+                </Text>
                 <Text style={styles.helpText}>It will be watermarked, hashed, and stored privately when submitted.</Text>
               </View>
               <Pressable
@@ -141,6 +152,9 @@ export function OfficerSmokeControlPanel({ shiftId }: Props) {
                 onPress={() => {
                   setImageUri(null);
                   setImageBase64(null);
+                  setImageCapturedAt(null);
+                  setSourceConfirmed(false);
+                  assessedAt.current = null;
                 }}
                 style={styles.removePhoto}
               >
@@ -157,13 +171,30 @@ export function OfficerSmokeControlPanel({ shiftId }: Props) {
             </Pressable>
           </View>
 
-          <TextInput accessibilityLabel="Observed smoke address" value={address} onChangeText={setAddress} placeholder="Observed smoke address *" placeholderTextColor="#718197" style={styles.input} />
+          <TextInput
+            accessibilityLabel="Observed smoke address"
+            value={address}
+            onChangeText={(value) => {
+              setAddress(value);
+              setSourceConfirmed(false);
+            }}
+            placeholder="Observed smoke address *"
+            placeholderTextColor="#718197"
+            style={styles.input}
+          />
           <TextInput accessibilityLabel="Complainant address" value={complaintAddress} onChangeText={setComplaintAddress} placeholder="Complainant address (if different)" placeholderTextColor="#718197" style={styles.input} />
 
           <Text style={styles.sectionLabel}>Smoke Source Type</Text>
           <View style={styles.options}>
             {(['domestic_solid_fuel', 'industrial', 'vehicle_exhaust', 'agricultural', 'nuisance_burning', 'unknown'] as SmokeSourceType[]).map((val) => (
-              <Pressable key={val} onPress={() => setSmokeSourceType(val)} style={[styles.option, smokeSourceType === val && styles.optionActive]}>
+              <Pressable
+                key={val}
+                onPress={() => {
+                  setSmokeSourceType(val);
+                  setSourceConfirmed(false);
+                }}
+                style={[styles.option, smokeSourceType === val && styles.optionActive]}
+              >
                 <Text style={styles.optionText}>{val.replace(/_/g, ' ')}</Text>
               </Pressable>
             ))}
@@ -203,8 +234,18 @@ export function OfficerSmokeControlPanel({ shiftId }: Props) {
           <TextInput accessibilityLabel="Scene description" value={sceneDescription} onChangeText={setSceneDescription} placeholder="Scene description / visibility / smell *" placeholderTextColor="#718197" multiline style={[styles.input, styles.textarea]} />
           <TextInput accessibilityLabel="Officer notes" value={notes} onChangeText={setNotes} placeholder="Officer notes / context for supervisor" placeholderTextColor="#718197" multiline style={[styles.input, styles.textarea]} />
 
-          <Text style={styles.helpText}>Confirm only when you personally established the visible source at this place.</Text>
-          <Pressable accessibilityRole="checkbox" accessibilityState={{ checked: sourceConfirmed }} onPress={() => setSourceConfirmed((value) => !value)} style={[styles.followUp, sourceConfirmed && styles.optionActive]}>
+          <Text style={styles.helpText}>
+            {canConfirmSource
+              ? 'Confirm only when you personally established the visible source at this place and the photo represents that observation.'
+              : 'Enter the observed address and capture its evidence photo before confirming the source.'}
+          </Text>
+          <Pressable
+            accessibilityRole="checkbox"
+            accessibilityState={{ checked: sourceConfirmed, disabled: !canConfirmSource }}
+            disabled={!canConfirmSource}
+            onPress={() => setSourceConfirmed((value) => !value)}
+            style={[styles.followUp, sourceConfirmed && styles.optionActive, !canConfirmSource && styles.disabled]}
+          >
             <Text style={styles.optionText}>{sourceConfirmed ? 'Observed source confirmed ✓' : 'Confirm the observed source at this place'}</Text>
           </Pressable>
 
@@ -238,6 +279,7 @@ const styles = StyleSheet.create({
   photoPreview: { width: '100%', height: 180, borderRadius: 6, backgroundColor: '#02070b', resizeMode: 'cover' },
   photoReceiptText: { gap: 3 },
   photoReceiptTitle: { color: '#eef6f7', fontSize: 13, fontWeight: '800' },
+  photoTimestamp: { color: '#85c7bd', fontSize: 11, fontWeight: '700' },
   removePhoto: { minHeight: 44, alignItems: 'center', justifyContent: 'center', borderWidth: 1, borderColor: '#8f6570', borderRadius: 5 },
   removePhotoText: { color: '#f1c7cf', fontSize: 12, fontWeight: '800' },
   options: { flexDirection: 'row', flexWrap: 'wrap', gap: 6 },
