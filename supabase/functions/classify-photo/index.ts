@@ -16,7 +16,7 @@
  *   Body:
  *     {
  *       photo_url: string,          // Signed URL to photo in Supabase Storage
- *       module: 'biosecurity' | 'smoke' | 'noise' | 'parking',
+ *       module: 'biosecurity' | 'smoke' | 'noise' | 'parking' | 'access_control',
  *       context?: string,           // Additional context (location, prior observations)
  *     }
  *
@@ -48,6 +48,15 @@ const SUPABASE_SERVICE_ROLE_KEY = Deno.env.get('SUPABASE_SERVICE_ROLE_KEY') ?? '
 const API_URL = Deno.env.get('FCM_API_URL') ?? Deno.env.get('API_URL') ?? Deno.env.get('RAILWAY_API_URL') ?? '';
 const API_TOKEN = Deno.env.get('FCM_API_TOKEN') ?? Deno.env.get('API_TOKEN') ?? Deno.env.get('RAILWAY_API_TOKEN') ?? '';
 const supabase = createClient(SUPABASE_URL, SUPABASE_SERVICE_ROLE_KEY);
+
+type PhotoModule = 'profile_photo' | 'biosecurity' | 'smoke' | 'noise' | 'access_control' | 'parking';
+
+type ClassifyPhotoBody = {
+  photo_url?: string;
+  module?: PhotoModule;
+  context?: string;
+};
+
 serve(async (req)=>{
   if (req.method === 'OPTIONS') {
     return new Response('ok', {
@@ -58,7 +67,7 @@ serve(async (req)=>{
       }
     });
   }
-  const json = (body, status = 200)=>new Response(JSON.stringify(body), {
+  const json = (body: unknown, status = 200)=>new Response(JSON.stringify(body), {
       status,
       headers: {
         'Content-Type': 'application/json',
@@ -80,7 +89,7 @@ serve(async (req)=>{
       }, 401);
     }
     // ── Parse request body ────────────────────────────────────────────────────
-    const body = await req.json();
+    const body = await req.json() as ClassifyPhotoBody;
     if (!body.photo_url?.trim()) return json({
       error: 'photo_url is required'
     }, 400);
@@ -94,7 +103,7 @@ serve(async (req)=>{
       }, 503);
     }
     // ── Build module-specific prompt ──────────────────────────────────────────
-    const prompts = {
+    const prompts: Record<PhotoModule, string> = {
       profile_photo: `You are a strict photo validator for a professional security company staff ID system.
 
 Your ONLY job is to determine if this photo is suitable as a professional staff profile photo.
@@ -188,6 +197,36 @@ Provide your response in JSON format:
   },
   "reasoning": "<brief explanation>"
 }`,
+      access_control: `You are an evidence classifier for a physical access-control encounter.
+
+Describe only what is visibly present in the image:
+1. Whether the primary visible subject is a person, vehicle, mixed scene, or unknown
+2. Whether a person is visible
+3. Whether a face is visible enough for a human reviewer to inspect
+4. Whether a credential, pass, badge, or permit appears visible
+5. Whether a vehicle is visible
+
+Hard limits:
+- Do not identify or name any person.
+- Do not match a face, body, vehicle, credential, or plate to a canonical record.
+- Do not decide whether entry should be granted or refused.
+- Do not infer that a visible credential is valid.
+- Do not recommend an access decision or enforcement action.
+- If the image is ambiguous, use "unknown" and lower confidence.
+
+Respond ONLY with this exact JSON format:
+{
+  "classification": "<person|vehicle|mixed|unknown>",
+  "confidence": <0-1>,
+  "details": {
+    "subject_kind": "<person|vehicle|mixed|unknown>",
+    "person_present": true or false,
+    "face_visible": true or false,
+    "credential_visible": true or false,
+    "vehicle_present": true or false
+  },
+  "reasoning": "<one sentence describing only visible evidence>"
+}`,
       parking: `You are a parking enforcement officer analyzing a photo for vehicle identification.
 
 Analyze this photo and identify:
@@ -207,7 +246,7 @@ Provide your response in JSON format:
   "reasoning": "<brief explanation>"
 }`
     };
-    if (!(body.module in prompts)) return json({
+    if (!body.module || !(body.module in prompts)) return json({
       error: 'module is not supported'
     }, 400);
     const systemPrompt = prompts[body.module];

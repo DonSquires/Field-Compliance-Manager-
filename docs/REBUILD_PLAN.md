@@ -372,7 +372,9 @@ destructive bulk operations).
    from chat stay behind `isGovernanceLocked` until a separate ruling names the
    write classes.
 4. Populate `bob_capability_map.exercised` from real invocation evidence
-   (edge-function logs, `bob_event_log`, RPC stats); today it is 0 everywhere.
+   (edge-function logs, `bob_event_log`, RPC stats). **Implemented 2026-10-11:**
+   118 capabilities are supported by 11,289 invocation observations; static
+   refresh preserves rather than invents those claims.
 5. Cockpit primitives: who-is-flying indicator, takeback, result-in-habitat.
 6. Re-create the RunPod QA endpoint and run `full-page-audit` on Bob's
    infrastructure.
@@ -492,6 +494,48 @@ gap is therefore explicit: historical rows remain usable as legacy operational
 records but cannot be represented as hash-backed photo evidence, and no missing
 complaint place, media or envelope is fabricated.
 
+Phase C access-control slice implemented in source 2026-10-11:
+
+- **Before:** physical access control existed in agreements, zones, module
+  profiles and seeded customer configuration, but the visible “Access rules”
+  page administered staff permissions rather than field access events. There
+  was no typed officer event, shared perception adapter, officer field route or
+  mobile capture workflow.
+- **During:** the new service-only receipt validates actor, module and canonical
+  place authority; writes a tenant-scoped access event, location projection,
+  evidence custody links and audit receipt. A separate pre-decision endpoint
+  uses deterministic local face, person/body, vehicle and plate inference plus
+  the existing organization-scoped portfolio matcher to rank possible people
+  and vehicles. Web and mobile show the probe beside available reference or
+  prior-sighting images before the officer records the outcome. The durable
+  receipt reruns recognition independently rather than trusting browser-supplied
+  candidates, strips embeddings and projects ranked matches as review-required
+  candidates. Optional photos preserve original and watermarked derivatives
+  with separate hashes, and recognition failure remains explicit rather than
+  inventing a fallback.
+- **After:** source contracts, web/mobile TypeScript, both Deno functions and
+  the production web build pass. Bob may discover and rank likely identities or
+  vehicles, but cannot confirm identity, validate a credential, decide
+  entitlement or grant entry. A disposable Supabase Postgres database on the
+  private Tailscale VPS route loaded the live schema snapshot and protected
+  migration and passed executable checks for receipt/perception replay,
+  evidence custody, person/vehicle candidate projection, RLS, grants and
+  indexes. That run found and corrected an ambiguous PL/pgSQL `id` reference
+  and an invalid perception `value_type`. The migration and both access
+  functions were then deployed through the linked Supabase project; the live
+  migration ledger, Data API exposure and unauthenticated 401 boundary were
+  verified, and `supabase/schema.sql` was regenerated from the live catalog.
+  Deployment checks then found missing Edge Function inference bindings and an
+  older VPS image without `/infer/enhance`. The project secrets were bound to
+  the authenticated public inference endpoint; the old image was tagged for
+  rollback; and only `fcm-inference` was rebuilt and recreated through the
+  private Tailscale route. Docker health, public HTTPS health, OpenAPI route
+  presence and authenticated route validation pass. A role-specific image
+  workflow is not yet glass-proven because no dedicated access-control test
+  identity is configured, and a real user's credentials were not used as a
+  substitute. Offline mobile event replay, calibrated tenant matching and
+  dedicated-test-identity acceptance remain intentionally open.
+
 System-wide Bob acceptance gate shipped 2026-10-11:
 
 - **Before:** Bob's domain checks existed as separate suites, so a plate guard,
@@ -501,14 +545,17 @@ System-wide Bob acceptance gate shipped 2026-10-11:
   `JJJ739`/`11739` regression directly, verifies every declared implementation
   and test path, and runs representative cross-domain tests. The inventory
   records each subsystem's authority boundary and present state.
-- **After:** the current result is five implemented domains, three partial and
-  two gaps. Access-control recognition has no shared perception adapter, Atlas
-  exercise/calibration remains absent, parking/freedom-camping projection,
-  Desktop V2 offline receipts/reconciliation and cockpit UX are partial. The
-  strict command fails while those declarations remain, so the repository
-  cannot honestly claim complete enterprise Bob readiness yet. Grandmaster is
-  retained as an authenticated server-owned rank, not exposed as an
-  ungoverned client-selected Bob personality.
+- **After:** the current result is five implemented domains, five partial and
+  no full gaps. Access control now has a source-complete field/evidence slice
+  but still requires protected deployment, disposable-database proof, offline
+  sync and calibrated tenant matching. Parking/freedom-camping projection,
+  Desktop V2 offline receipts/reconciliation, cockpit UX and perception
+  calibration also remain partial. Atlas exercise is now backed by invocation
+  evidence rather than static inspection. The strict command fails while those
+  declarations remain, so the repository cannot honestly claim complete
+  enterprise Bob readiness yet. Grandmaster is retained as an authenticated
+  server-owned rank, not exposed as an ungoverned client-selected Bob
+  personality.
 
 **Gate:** live `bob_messages` show no context-losing fallbacks; a Builder job
 runs implement → verify → repair without human touch and stops cleanly at

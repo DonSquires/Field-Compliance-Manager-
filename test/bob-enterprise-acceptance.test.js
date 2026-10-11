@@ -44,7 +44,7 @@ test('strict enterprise acceptance fails while declared architecture gaps remain
     encoding: 'utf8',
   });
   assert.equal(result.status, 3, result.stderr || result.stdout);
-  assert.match(result.stdout, /\[GAP\] Access-control recognition and entitlement/);
+  assert.match(result.stdout, /\[PARTIAL\] Access-control recognition and entitlement/);
   // Exercise is now proven from invocation receipts, so this domain is no
   // longer a full gap; calibration keeps it short of complete.
   assert.match(result.stdout, /\[PARTIAL\] Invocation evidence and model calibration/);

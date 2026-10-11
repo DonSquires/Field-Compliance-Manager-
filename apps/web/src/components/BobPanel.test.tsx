@@ -34,6 +34,7 @@ vi.mock('../lib/supabase', () => ({
 describe('BobPanel', () => {
   afterEach(() => {
     vi.unstubAllGlobals();
+    vi.useRealTimers();
   });
 
   const setViewport = (width: number) => {
@@ -166,6 +167,7 @@ describe('BobPanel', () => {
         body: {
           message: 'Check the site status',
           conversation_id: 'conversation-1',
+          request_id: expect.any(String),
           attachments: [],
           context: {
             agreement: { id: 'agreement-1', name: 'Site Service Agreement' },
@@ -299,6 +301,59 @@ describe('BobPanel', () => {
     expect(screen.getByText('Waiting for Bob')).toBeTruthy();
 
     resolveInvoke({ data: { reply: 'done' }, error: null });
+  });
+
+  it('surfaces a recoverable timeout when Bob does not return', async () => {
+    mockInvoke.mockImplementation((_name: string, options?: { body?: Record<string, unknown> }) => {
+      if (options?.body?.operation === 'cancel') {
+        return Promise.resolve({
+          data: {
+            turn_run: {
+              request_id: options.body.request_id,
+              status: 'cancel_requested',
+              started_at: '2026-10-11T04:00:00.000Z',
+              heartbeat_at: '2026-10-11T04:02:00.000Z',
+              completed_at: null,
+              error_code: null,
+            },
+          },
+          error: null,
+        });
+      }
+      return new Promise(() => undefined);
+    });
+    const realSetTimeout = window.setTimeout;
+    vi.spyOn(window, 'setTimeout').mockImplementation(((handler: TimerHandler, timeout?: number, ...args: unknown[]) => {
+      if (timeout === 120_000) {
+        if (typeof handler === 'function') handler(...args);
+        return 0;
+      }
+      return realSetTimeout(handler, timeout, ...args);
+    }) as typeof window.setTimeout);
+
+    render(<BobPanel open onClose={() => undefined} />);
+
+    fireEvent.change(await screen.findByPlaceholderText('Ask Bob to plan, inspect, explain, or prepare a proposal'), { target: { value: 'Inspect the selected CCTV item' } });
+    fireEvent.click(screen.getByRole('button', { name: 'Send' }));
+
+    expect((await screen.findByRole('alert')).textContent).toContain(
+      'Bob is still working after 120 seconds. Check this request before retrying; the durable run prevents duplicate work.',
+    );
+    expect(screen.getByRole('button', { name: 'Check status' })).toBeTruthy();
+    expect(screen.getByRole('button', { name: 'Request cancellation' })).toBeTruthy();
+
+    fireEvent.click(screen.getByRole('button', { name: 'Request cancellation' }));
+
+    await waitFor(() => {
+      expect(mockInvoke).toHaveBeenCalledWith('onspace-ai-chat', expect.objectContaining({
+        body: expect.objectContaining({
+          operation: 'cancel',
+          request_id: expect.any(String),
+          conversation_id: 'conversation-1',
+        }),
+      }));
+      expect(screen.getByRole('alert').textContent).toContain('Cancellation is requested.');
+    });
   });
 
   it('renders durable evidence processing states from bob_attachments', async () => {

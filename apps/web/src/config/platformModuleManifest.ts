@@ -8,6 +8,7 @@ export type PlatformModuleKey =
   | 'noise_control'
   | 'biosecurity'
   | 'smoke_complaints'
+  | 'access_control'
   | 'static_guarding'
   | 'crm'
   | 'rostering'

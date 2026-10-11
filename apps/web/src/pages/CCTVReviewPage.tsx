@@ -1876,6 +1876,39 @@ export const CCTVReviewPage: React.FC<CCTVReviewPageProps> = ({ initialFilter = 
                           <button type="button" className="cctv-btn-dismiss" disabled={observationSaving === veh.event_id} onClick={() => void recordObservationState(veh.event_id, 'vehicle', 'uncertain')}>Uncertain</button>
                           <button type="button" className="cctv-btn-dismiss" disabled={observationSaving === veh.event_id} onClick={() => void recordObservationState(veh.event_id, 'vehicle', 'rejected')}>Reject</button>
                         </div>
+
+                        {(() => {
+                          const candidateMatches = observationRecords
+                            .find((observation) => observation.kind === 'vehicle' && observation.sourceEventId === veh.event_id)
+                            ?.candidates
+                            .filter((candidate) =>
+                              candidate.canonical_vehicle_id !== (reviewEventStates[veh.event_id]?.linked_vehicle_id ?? ''),
+                            )
+                            .sort((left, right) => (right.score ?? 0) - (left.score ?? 0))
+                            .slice(0, 3);
+
+                          return candidateMatches?.length ? (
+                            <div className="cctv-candidate-list">
+                              <strong>Possible vehicle matches for human review</strong>
+                              {candidateMatches.map((candidate) => (
+                                <div key={`${candidate.match_kind}-${candidate.match_id}`} className="cctv-candidate-row">
+                                  {candidate.thumbnail ? (
+                                    <img src={candidate.thumbnail} alt={`${candidate.display_name || candidate.plate_number || 'Vehicle'} comparison reference`} />
+                                  ) : (
+                                    <span className="cctv-candidate-no-thumb"><Car size={14} /></span>
+                                  )}
+                                  <span className="cctv-candidate-copy">
+                                    <b>{candidate.display_name || candidate.plate_number || 'Prior vehicle observation'}</b>
+                                    <small>
+                                      {Math.round((candidate.score ?? 0) * 100)}% similarity · {statusLabel(candidate.basis || 'visual_similarity')}
+                                    </small>
+                                  </span>
+                                </div>
+                              ))}
+                            </div>
+                          ) : null;
+                        })()}
+
                         <div className="cctv-identity-editor cctv-vehicle-link-editor">
                           <label>
                             Incident link

@@ -51,7 +51,7 @@ assert.ok(routeStart >= 0);
 const route = chat.slice(routeStart, chat.indexOf('    // ── Plan call', routeStart));
 const makeFlow = vm.runInNewContext(`(env) => {
   const { caps, pending, user, conversationId, message, callFn, authHeader, createClient,
-    persist, admin, orgId, startTime, json, buildStructuredResponse } = env;
+    persist, admin, orgId, startTime, json, respond, buildStructuredResponse } = env;
   ${matcher}
   const dispatchTool = async (tool, toolArgs) => {
     switch (tool) {
@@ -92,6 +92,7 @@ test('a tied-timestamp preview followed by yes uses the cancellation route, not 
     },
     persist: async (_admin, _orgId, _conversationId, turns) => { savedTurns.push(turns); events.push('persist'); },
     json: (result) => result,
+    respond: (result) => result,
     buildStructuredResponse: (result) => result,
   };
   const preview = await makeFlow(env).dispatchTool('cancel_builder_job', { job_id: proposal.job_id, reason: proposal.reason });
@@ -143,6 +144,7 @@ test('pending Builder cancellation consumes only bounded confirmation and declin
           assert.equal(turns[1].metadata.outcome, expected);
         },
         json: (result) => result,
+        respond: (result) => result,
         buildStructuredResponse: (result) => result,
       };
       const result = await makeFlow(env).confirm();
@@ -210,7 +212,7 @@ test('preview, caller RPC, immediate consumption and deterministic routing remai
   assert.match(immediate, /builderCancellationDecision\(message\)/);
   assert.match(immediate, /dispatchTool\('cancel_builder_job', \{\}/);
   assert.match(immediate, /await persist\(admin, orgId, conversationId, \[/);
-  assert.match(immediate, /return json\(buildStructuredResponse\(/);
+  assert.match(immediate, /return respond\(buildStructuredResponse\(/);
   assert.match(chat, /pending\.builder_cancellation\?\.user_id === user\.id && pending\.builder_cancellation\?\.conversation_id === conversationId\) \{\s*decision = \{ action: 'use_tool', tool: 'cancel_builder_job', args: \{\} \}/);
   assert.match(caddie, /cancel_builder_job: \{/);
   assert.match(planner.buildPendingBlock({ kind: 'builder_cancellation_pending', builder_cancellation: proposal }), /RESUME — BUILDER CANCELLATION AWAITING CONFIRMATION:[\s\S]*cancel_builder_job/);

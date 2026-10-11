@@ -72,11 +72,20 @@ export const enterpriseDomains = Object.freeze([
   {
     id: 'access_control',
     label: 'Access-control recognition and entitlement',
-    state: 'gap',
+    state: 'partial',
     authority: 'Entitlement engine remains authoritative; recognition must never grant access directly',
-    evidence: ['apps/web/src/pages/AccessControlPage.tsx', 'docs/canon/ACCESS_MODEL.md'],
-    tests: ['test/operational-only-location-access.test.js'],
-    gap: 'No domain-specific perception adapter yet compiles recognition candidates into the shared evidence contract.',
+    evidence: [
+      'supabase/migrations/20261011021250_access_control_evidence_adapter.sql',
+      'supabase/functions/submit-access-control-event/index.ts',
+      'apps/web/src/pages/OfficerAccessControlPage.tsx',
+      'apps/mobile/src/components/OfficerAccessControlPanel.tsx',
+      'docs/canon/ACCESS_MODEL.md',
+    ],
+    tests: [
+      'test/access-control-perception.test.js',
+      'test/operational-only-location-access.test.js',
+    ],
+    gap: 'The typed event, field UX, custody path, and bounded visible-image adapter are implemented, but the protected migration and edge function are not deployed, no calibrated tenant face/credential matching is connected, and offline access-event sync is not yet available.',
   },
   {
     id: 'environmental',

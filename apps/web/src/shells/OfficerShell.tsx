@@ -88,11 +88,12 @@ const OfficerHomePage = React.lazy(() => import('../pages/OfficerHomePage').then
 const OfficerSchedulePage = React.lazy(() => import('../pages/OfficerSchedulePage'));
 const OfficerDebriefPage = React.lazy(() => import('../pages/OfficerDebriefPage'));
 const OfficerStaticGuardPage = React.lazy(() => import('../pages/OfficerStaticGuardPage'));
+const OfficerAccessControlPage = React.lazy(() => import('../pages/OfficerAccessControlPage'));
 const BobWorkspacePage = React.lazy(() => import('../pages/BobWorkspacePage'));
 
 type ActiveModule =
   | 'freedom_camping' | 'parking' | 'noise_control' | 'biosecurity' | 'smoke_control'
-  | 'site_guard' | 'ems' | 'patrol' | 'report' | 'leave' | 'timesheet' | 'schedule'
+  | 'site_guard' | 'access_control' | 'ems' | 'patrol' | 'report' | 'leave' | 'timesheet' | 'schedule'
   | 'overnight_verification' | 'checkpoint_scan' | 'map' | 'dispatch' | 'debrief'
   | 'vehicle_lookup' | 'credentials' | 'bob' | 'modules' | 'workshop' | null;
 
@@ -453,6 +454,8 @@ const OfficerShell: React.FC = () => {
         return <OfficerOvernightVerificationPage />;
       case 'site_guard':
         return <OfficerStaticGuardPage />;
+      case 'access_control':
+        return <OfficerAccessControlPage />;
       case 'ems':
         return <OfficerFieldReportPage />;
       case 'debrief':

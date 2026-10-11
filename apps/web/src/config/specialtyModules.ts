@@ -1,5 +1,5 @@
 import type { LucideIcon } from 'lucide-react';
-import { Activity, Car, Shield, Tent, Volume2, Wind } from 'lucide-react';
+import { Activity, Car, KeyRound, Shield, Tent, Volume2, Wind } from 'lucide-react';
 
 export type SpecialtyModuleKey =
   | 'freedom_camping'
@@ -7,6 +7,7 @@ export type SpecialtyModuleKey =
   | 'noise_control'
   | 'biosecurity'
   | 'smoke_complaints'
+  | 'access_control'
   | 'static_guarding';
 
 export interface SpecialtyModuleDefinition {
@@ -24,6 +25,7 @@ export const SPECIALTY_MODULES: readonly SpecialtyModuleDefinition[] = [
   { key: 'noise_control', integratedKey: 'noise_control', label: 'Noise Control', description: 'Assessments and notices', icon: Volume2, standalonePath: '/modules/noise_control' },
   { key: 'biosecurity', integratedKey: 'biosecurity', label: 'Biosecurity', description: 'Inspections and compliance evidence', icon: Activity, standalonePath: '/modules/biosecurity' },
   { key: 'smoke_complaints', integratedKey: 'smoke_control', label: 'Smoke Control', description: 'Complaints and field outcomes', icon: Wind, standalonePath: '/modules/smoke_complaints' },
+  { key: 'access_control', integratedKey: 'access_control', label: 'Access Control', description: 'Entry, credential, visitor, and door-security events', icon: KeyRound, standalonePath: '/modules/access_control' },
   { key: 'static_guarding', integratedKey: 'site_guard', label: 'Static Guarding', description: 'Checkpoints and site security', icon: Shield, standalonePath: '/modules/static_guarding' },
 ];
 

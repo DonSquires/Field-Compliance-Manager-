@@ -145,9 +145,11 @@ export const SHARED_MODULE_PROFILES = [
     key: 'access_control',
     label: 'Access Control',
     profile: SITE_ONLY('boundary', {
-      kind: null,
-      key: null
-    }, false, false, [])
+      kind: 'recognize',
+      key: 'access_subject'
+    }, false, false, [
+      'access_control_events'
+    ])
   },
   // ems: INFRA, not SITE_ONLY. RULED (owner, 2026-08-19): EMS is an independent
   // asset management system for each PERSON in each branch, across the whole

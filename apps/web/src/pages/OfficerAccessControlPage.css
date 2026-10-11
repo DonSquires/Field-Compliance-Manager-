@@ -1,0 +1,325 @@
+.access-control-officer {
+  display: grid;
+  gap: var(--spacing-4);
+}
+
+.access-authority-banner,
+.access-submit-note {
+  display: flex;
+  gap: var(--spacing-3);
+  align-items: flex-start;
+  padding: var(--spacing-4);
+  border: 1px solid var(--color-accent-silver);
+  border-radius: var(--radius-md);
+  background: var(--color-bg-surface);
+}
+
+.access-authority-banner div {
+  display: grid;
+  gap: var(--spacing-1);
+}
+
+.access-authority-banner span,
+.access-submit-note span {
+  color: var(--color-text-secondary);
+}
+
+.access-place-options {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(220px, 1fr));
+  gap: var(--spacing-3);
+}
+
+.access-place-options button {
+  min-height: var(--touch-target-officer);
+  padding: var(--spacing-3);
+  border: 1px solid var(--color-accent-silver);
+  border-radius: var(--radius-md);
+  background: var(--color-bg-surface);
+  color: var(--color-text-primary);
+  text-align: left;
+  display: grid;
+  gap: var(--spacing-1);
+}
+
+.access-place-options button.is-selected {
+  border-color: var(--color-brand-primary);
+  box-shadow: 0 0 0 1px var(--color-brand-primary);
+}
+
+.access-place-options span {
+  color: var(--color-text-secondary);
+  font-size: var(--font-size-label);
+}
+
+.access-event-form,
+.access-receipt {
+  display: grid;
+  gap: var(--spacing-4);
+  padding: var(--spacing-4);
+  border: 1px solid var(--color-accent-silver);
+  border-radius: var(--radius-lg);
+  background: var(--color-bg-surface);
+}
+
+.access-event-form > header span,
+.access-receipt header span {
+  color: var(--color-accent-silver-light);
+  font-size: 11px;
+  font-weight: 700;
+  text-transform: uppercase;
+}
+
+.access-event-form label {
+  display: grid;
+  gap: var(--spacing-2);
+}
+
+.access-event-form label > span {
+  font-weight: 600;
+}
+
+.access-event-form input,
+.access-event-form select,
+.access-event-form textarea {
+  width: 100%;
+  min-height: var(--touch-target-officer);
+  padding: var(--spacing-3);
+  border: 1px solid var(--color-accent-silver);
+  border-radius: var(--radius-md);
+  background: var(--color-bg-base);
+  color: var(--color-text-primary);
+}
+
+.access-event-form textarea {
+  min-height: 112px;
+  resize: vertical;
+}
+
+.access-form-grid {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: var(--spacing-3);
+}
+
+.access-evidence-capture {
+  display: grid;
+  gap: var(--spacing-3);
+  padding: var(--spacing-4);
+  border: 1px dashed var(--color-accent-silver);
+  border-radius: var(--radius-md);
+}
+
+.access-evidence-capture p {
+  color: var(--color-text-secondary);
+}
+
+.access-photo-preview {
+  display: grid;
+  grid-template-columns: minmax(0, 180px) 1fr;
+  align-items: start;
+  gap: var(--spacing-3);
+}
+
+.access-photo-preview img {
+  width: 100%;
+  max-height: 180px;
+  object-fit: cover;
+  border-radius: var(--radius-md);
+}
+
+.access-photo-preview button {
+  min-height: var(--touch-target-officer);
+  justify-self: start;
+}
+
+.access-receipt header {
+  display: flex;
+  align-items: center;
+  gap: var(--spacing-3);
+}
+
+.access-receipt dl {
+  display: grid;
+  grid-template-columns: repeat(3, minmax(0, 1fr));
+  gap: var(--spacing-3);
+  margin: 0;
+}
+
+.access-receipt dl div,
+.access-receipt-authority,
+.access-receipt-bob {
+  padding: var(--spacing-3);
+  border-radius: var(--radius-md);
+  background: var(--color-bg-elevated);
+}
+
+.access-receipt dt {
+  color: var(--color-text-secondary);
+  font-size: var(--font-size-label);
+}
+
+.access-receipt dd {
+  margin: var(--spacing-1) 0 0;
+  font-weight: 700;
+}
+
+.access-receipt-bob {
+  display: grid;
+  gap: var(--spacing-2);
+}
+
+.access-receipt-bob em {
+  color: var(--color-status-watch);
+  font-style: normal;
+  font-weight: 600;
+}
+
+.access-recognition-comparison {
+  display: grid;
+  gap: var(--spacing-3);
+  padding: var(--spacing-3);
+  border: 1px solid var(--color-accent-silver);
+  border-radius: var(--radius-md);
+  background: var(--color-bg-base);
+}
+
+.access-recognition-comparison > header,
+.access-recognition-results article > header {
+  display: flex;
+  justify-content: space-between;
+  align-items: start;
+  gap: var(--spacing-3);
+}
+
+.access-recognition-comparison > header span,
+.access-recognition-probe > span,
+.access-recognition-results article > header span {
+  color: var(--color-text-secondary);
+  font-size: var(--font-size-label);
+}
+
+.access-recognition-comparison > header h3 {
+  margin: var(--spacing-1) 0 0;
+}
+
+.access-recognition-layout {
+  display: grid;
+  grid-template-columns: minmax(180px, 0.7fr) minmax(0, 1.3fr);
+  gap: var(--spacing-3);
+}
+
+.access-recognition-probe,
+.access-recognition-results,
+.access-recognition-results article,
+.access-recognition-candidates {
+  display: grid;
+  gap: var(--spacing-2);
+}
+
+.access-recognition-probe img {
+  width: 100%;
+  max-height: 320px;
+  object-fit: contain;
+  border-radius: var(--radius-md);
+  background: #05070a;
+}
+
+.access-recognition-results article {
+  padding: var(--spacing-3);
+  border: 1px solid var(--color-accent-silver);
+  border-radius: var(--radius-md);
+}
+
+.access-recognition-candidate {
+  display: grid;
+  grid-template-columns: 76px minmax(0, 1fr);
+  align-items: center;
+  gap: var(--spacing-3);
+  padding: var(--spacing-2);
+  border-radius: var(--radius-sm);
+  background: var(--color-bg-elevated);
+}
+
+.access-recognition-candidate img,
+.access-recognition-placeholder {
+  width: 76px;
+  height: 76px;
+  border-radius: var(--radius-sm);
+}
+
+.access-recognition-candidate img {
+  object-fit: cover;
+}
+
+.access-recognition-placeholder {
+  display: grid;
+  place-items: center;
+  background: var(--color-bg-surface);
+  color: var(--color-text-secondary);
+  font-size: 10px;
+  font-weight: 700;
+}
+
+.access-recognition-candidate div:last-child {
+  display: grid;
+  gap: var(--spacing-1);
+}
+
+.access-recognition-candidate span,
+.access-recognition-candidate small,
+.access-recognition-comparison > p {
+  color: var(--color-text-secondary);
+}
+
+.access-recognition-comparison > em {
+  color: var(--color-status-watch);
+  font-style: normal;
+  font-weight: 600;
+}
+
+.access-event-list {
+  display: grid;
+  gap: var(--spacing-3);
+}
+
+.access-event-list article {
+  padding: var(--spacing-3);
+  border: 1px solid var(--color-accent-silver);
+  border-radius: var(--radius-md);
+  background: var(--color-bg-surface);
+}
+
+.access-event-list article header {
+  display: flex;
+  justify-content: space-between;
+  gap: var(--spacing-3);
+}
+
+.access-event-list small {
+  color: var(--color-text-secondary);
+}
+
+@media (max-width: 720px) {
+  .access-form-grid,
+  .access-receipt dl {
+    grid-template-columns: 1fr;
+  }
+
+  .access-photo-preview {
+    grid-template-columns: 1fr;
+  }
+
+  .access-recognition-layout {
+    grid-template-columns: 1fr;
+  }
+
+  .access-recognition-comparison > header,
+  .access-recognition-results article > header {
+    display: grid;
+  }
+
+  .access-event-list article header {
+    display: grid;
+  }
+}

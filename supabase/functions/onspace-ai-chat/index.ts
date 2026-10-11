@@ -146,6 +146,7 @@ const BOB_INFERENCE_SECRET = Deno.env.get('BOB_INFERENCE_SECRET') ?? '';
   if (body.attachments !== undefined && !Array.isArray(body.attachments)) errors.push('attachments must be an array');
   // request_id must be a string if present
   if (body.request_id !== undefined && typeof body.request_id !== 'string') errors.push('request_id must be a string');
+  if (body.operation !== undefined && !['run', 'status', 'cancel'].includes(body.operation)) errors.push('operation must be run, status, or cancel');
   // UI context is descriptive only; it never grants tools or authority.
   if (body.context !== undefined && (!body.context || typeof body.context !== 'object' || Array.isArray(body.context))) errors.push('context must be an object');
   return {
@@ -760,6 +761,50 @@ function json(body, status = 200) {
       'Content-Type': 'application/json'
     }
   });
+}
+const UUID_PATTERN = /^[0-9a-f]{8}-[0-9a-f]{4}-[1-8][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i;
+
+type BobTurnStatus = 'running' | 'cancel_requested' | 'completed' | 'failed' | 'cancelled';
+interface BobTurnRunRow {
+  id?: string;
+  request_id: string;
+  request_fingerprint?: string;
+  status: BobTurnStatus;
+  started_at: string;
+  heartbeat_at: string;
+  completed_at: string | null;
+  error_code: string | null;
+  response_payload?: Record<string, unknown> | null;
+}
+
+async function fingerprintTurnRequest(message: string, attachments: unknown[], agentMode: string) {
+  const normalizedAttachments = (Array.isArray(attachments) ? attachments : []).map((value)=>{
+    const attachment = value && typeof value === 'object' && !Array.isArray(value) ? value as Record<string, unknown> : {};
+    return {
+      name: String(attachment.name ?? ''),
+      storage_bucket: String(attachment.storage_bucket ?? ''),
+      storage_path: String(attachment.storage_path ?? ''),
+      size: Number(attachment.size ?? attachment.file_size_bytes ?? 0)
+    };
+  });
+  const source = JSON.stringify({
+    message: String(message ?? '').trim(),
+    attachments: normalizedAttachments,
+    agent_mode: agentMode === 'builder' ? 'builder' : 'operations'
+  });
+  const digest = await crypto.subtle.digest('SHA-256', new TextEncoder().encode(source));
+  return Array.from(new Uint8Array(digest)).map((value)=>value.toString(16).padStart(2, '0')).join('');
+}
+
+function publicTurnRun(row: BobTurnRunRow) {
+  return {
+    request_id: row.request_id,
+    status: row.status,
+    started_at: row.started_at,
+    heartbeat_at: row.heartbeat_at,
+    completed_at: row.completed_at,
+    error_code: row.error_code
+  };
 }
 // ── GeoJSON boundary validation (#125 two-turn fix) ──────────────────────────
 // A boundary must be a real GeoJSON geometry (Polygon or MultiPolygon with
@@ -6164,6 +6209,25 @@ serve(async (req)=>{
   const startTime = Date.now();
   let failureStage = 'request_start';
   let debugModeForError = false;
+  let turnRunAdmin: { from: (table: string) => any } | null = null;
+  let turnRunId: string | null = null;
+  const respond = async (body: Record<string, unknown>, status = 200, terminalStatus: BobTurnStatus = 'completed', errorCode: string | null = null)=>{
+    if (turnRunAdmin && turnRunId) {
+      const completedAt = new Date().toISOString();
+      const { error: finishError } = await turnRunAdmin.from('bob_turn_runs').update({
+        status: terminalStatus,
+        response_payload: body,
+        error_code: errorCode,
+        heartbeat_at: completedAt,
+        completed_at: completedAt,
+        updated_at: completedAt
+      }).eq('id', turnRunId);
+      if (finishError) {
+        console.error(`[conductor][turn-run] failed to finalize run ${turnRunId}: ${finishError.message}`);
+      }
+    }
+    return json(body, status);
+  };
   try {
     failureStage = 'auth_setup';
     const authHeader = req.headers.get('Authorization') ?? '';
@@ -6219,6 +6283,7 @@ serve(async (req)=>{
     const attachments = Array.isArray(body.attachments) ? body.attachments : [];
     const conversationId = body.conversation_id ?? undefined;
     const requestId = body.request_id ?? undefined;
+    const operation = body.operation ?? 'run';
     const agentWorkspaceContext = safeAgentWorkspaceContext(body.context);
     // ── PILLAR H: Event log context — mutable counters for this turn ──────
     // step_index is incremented BEFORE each logEvent call so every step gets
@@ -6257,21 +6322,138 @@ serve(async (req)=>{
     // the row here so every code path that reaches a propose_* dispatch has a
     // valid conversation to reference. Uses ON CONFLICT DO NOTHING so it is
     // safe to call on every request (idempotent).
-    if (conversationId && orgId && user.id) {
-      const { error: convErr } = await admin.from('bob_conversations').upsert({
+    if (!conversationId || !orgId || !user.id) {
+      return json({ error: 'A tenant-scoped conversation is required.' }, 400);
+    }
+    const { data: existingConversation, error: conversationLookupError } = await admin
+      .from('bob_conversations')
+      .select('id, organization_id, user_id, module_key')
+      .eq('id', conversationId)
+      .maybeSingle();
+    if (conversationLookupError) throw conversationLookupError;
+    if (existingConversation &&
+        (existingConversation.organization_id !== orgId ||
+         existingConversation.user_id !== user.id ||
+         existingConversation.module_key !== agentWorkspaceContext.agent_mode)) {
+      console.warn(`[conductor][conversation] rejected out-of-scope conversation ${conversationId}`);
+      return json({ error: 'Conversation is not available in this organization and workspace.' }, 403);
+    }
+    if (!existingConversation) {
+      const { error: convErr } = await admin.from('bob_conversations').insert({
         id: conversationId,
         organization_id: orgId,
         user_id: user.id,
         module_key: agentWorkspaceContext.agent_mode,
         title: agentWorkspaceContext.agent_mode === 'builder' ? 'Bob Builder' : 'Bob Operations'
-      }, {
-        onConflict: 'id',
-        ignoreDuplicates: true
       });
-      if (convErr) {
-        console.warn(`[conductor] ensure conversation row failed (non-fatal): ${convErr.message}`);
-      }
+      if (convErr) throw convErr;
     }
+
+    if (!requestId || !UUID_PATTERN.test(requestId)) {
+      return json({ error: 'A valid request_id UUID is required.' }, 400);
+    }
+
+    if (operation === 'status' || operation === 'cancel') {
+      const { data: currentRun, error: runLookupError } = await admin
+        .from('bob_turn_runs')
+        .select('id, request_id, status, started_at, heartbeat_at, completed_at, error_code, response_payload')
+        .eq('organization_id', orgId)
+        .eq('conversation_id', conversationId)
+        .eq('user_id', user.id)
+        .eq('request_id', requestId)
+        .maybeSingle();
+      if (runLookupError) throw runLookupError;
+      if (!currentRun) return json({ error: 'Bob request was not found.' }, 404);
+
+      if (operation === 'cancel' && currentRun.status === 'running') {
+        const now = new Date().toISOString();
+        const { data: cancelledRun, error: cancelError } = await admin
+          .from('bob_turn_runs')
+          .update({ status: 'cancel_requested', heartbeat_at: now, updated_at: now })
+          .eq('id', currentRun.id)
+          .eq('status', 'running')
+          .select('request_id, status, started_at, heartbeat_at, completed_at, error_code')
+          .single();
+        if (cancelError) throw cancelError;
+        return json({ turn_run: publicTurnRun(cancelledRun) }, 202);
+      }
+
+      return json({
+        turn_run: publicTurnRun(currentRun),
+        ...(currentRun.status === 'completed' && currentRun.response_payload
+          ? { response: currentRun.response_payload }
+          : {})
+      });
+    }
+
+    const requestFingerprint = await fingerprintTurnRequest(message, attachments, agentWorkspaceContext.agent_mode);
+    const now = new Date().toISOString();
+    const { data: insertedRun, error: insertRunError } = await admin
+      .from('bob_turn_runs')
+      .insert({
+        organization_id: orgId,
+        conversation_id: conversationId,
+        user_id: user.id,
+        request_id: requestId,
+        request_fingerprint: requestFingerprint,
+        status: 'running',
+        started_at: now,
+        heartbeat_at: now,
+        updated_at: now
+      })
+      .select('id, request_id, request_fingerprint, status, started_at, heartbeat_at, completed_at, error_code, response_payload')
+      .maybeSingle();
+
+    const claimedRun = insertedRun;
+    if (insertRunError?.code === '23505') {
+      const { data: priorRun, error: priorRunError } = await admin
+        .from('bob_turn_runs')
+        .select('id, request_id, request_fingerprint, status, started_at, heartbeat_at, completed_at, error_code, response_payload')
+        .eq('organization_id', orgId)
+        .eq('conversation_id', conversationId)
+        .eq('user_id', user.id)
+        .eq('request_id', requestId)
+        .single();
+      if (priorRunError) throw priorRunError;
+      if (priorRun.request_fingerprint !== requestFingerprint) {
+        return json({ error: 'request_id was already used for different Bob input.' }, 409);
+      }
+      if (priorRun.status === 'completed' && priorRun.response_payload) {
+        return json({ ...priorRun.response_payload, replayed: true, turn_run: publicTurnRun(priorRun) });
+      }
+      return json({ turn_run: publicTurnRun(priorRun) }, priorRun.status === 'running' || priorRun.status === 'cancel_requested' ? 202 : 409);
+    }
+    if (insertRunError) throw insertRunError;
+    if (!claimedRun) throw new Error('Bob turn run could not be claimed.');
+    turnRunAdmin = admin;
+    turnRunId = claimedRun.id;
+
+    const cancellationRequested = async ()=>{
+      const { data: state, error: stateError } = await admin
+        .from('bob_turn_runs')
+        .select('status')
+        .eq('id', turnRunId)
+        .single();
+      if (stateError) throw stateError;
+      return state.status === 'cancel_requested';
+    };
+
+    const cancelAtBoundary = async (boundary: string)=>{
+      if (!await cancellationRequested()) return null;
+      const cancelReply = `Cancelled before ${boundary}. No further Bob tools or governed actions were started.`;
+      await persist(admin, orgId, conversationId, [
+        { role: 'user', content: message || 'Cancel this request.', metadata: { intent: 'user', request_id: requestId } },
+        { role: 'assistant', content: cancelReply, metadata: { intent: 'request_cancelled', route_selected: 'cancelled', request_id: requestId } }
+      ]);
+      const structured = buildStructuredResponse({
+        reply: cancelReply,
+        route: 'cancelled',
+        startTime,
+        meta: { intent: 'request_cancelled', cancellation_boundary: boundary, request_id: requestId },
+        degraded: true
+      });
+      return respond(structured, 200, 'cancelled');
+    };
     // ── OPT-IN RAW DIAGNOSTICS (CI/test use only) ───────────────────────────
     // When the caller sends { "debug": true } in the request body, the response
     // includes a "_diagnostics" object containing the raw planner decision, full
@@ -6377,7 +6559,7 @@ serve(async (req)=>{
           }
         }
       ]);
-      return json(structured);
+      return respond(structured);
     }
     // Minimal deterministic fast-paths (trivial canned replies, NOT tool routing).
     // Only fire on a BARE greeting (nothing substantive after it) — otherwise a
@@ -6401,7 +6583,7 @@ serve(async (req)=>{
           intent: 'config_error'
         }
       });
-      return json(structured, 200);
+      return respond(structured, 200);
     }
     let knowledge = '';
     let knowledgeCards = [];
@@ -8793,7 +8975,7 @@ serve(async (req)=>{
         { role: 'user', content: message },
         { role: 'assistant', content: result.reply, metadata: result.meta }
       ]);
-      return json(buildStructuredResponse({
+      return respond(buildStructuredResponse({
         reply: result.reply, route: 'tool', startTime,
         meta: { intent: 'conductor', planned_tool: 'cancel_builder_job', ...result.meta }
       }));
@@ -8871,6 +9053,8 @@ serve(async (req)=>{
       // Bob autopilot outcomes to relay to this person before anything else (see planPrompt COMPLETED WORK).
       completed_work: completedWork.length ? completedWork : undefined
     };
+    const cancelledBeforePlan = await cancelAtBoundary('planning');
+    if (cancelledBeforePlan) return cancelledBeforePlan;
     const plan = await callPlan(planPayload);
     if (plan.ok && completedWork.length) {
       for (const item of completedWork) {
@@ -8903,7 +9087,7 @@ serve(async (req)=>{
           intent: 'plan_failed'
         }
       });
-      return json(structured, 200);
+      return respond(structured, 200);
     }
     let decision = plan.data ?? {};
     // Resume a stored cancellation deterministically; the model cannot supply the target.
@@ -9334,7 +9518,7 @@ serve(async (req)=>{
               meta: welfareBlockedMeta,
               disclosureTier: welfareDisclosure
             });
-            return json(structured);
+            return respond(structured);
           }
         }
       }
@@ -9432,7 +9616,7 @@ serve(async (req)=>{
             }
           };
         }
-        return json(structured);
+        return respond(structured);
       }
     }
     // Step 4: Generic write-refusal path (no welfare context).
@@ -9520,7 +9704,7 @@ serve(async (req)=>{
           }
         };
       }
-      return json(structured);
+      return respond(structured);
     }
     // ── CONDUCTOR ENFORCEMENT GATE (#337, docs/enforcement-architecture.md §4.2) ──
     // Post-selection, pre-effect seam: the planner has selected a tool (chosenTool).
@@ -9592,7 +9776,7 @@ serve(async (req)=>{
         meta: blockedMeta,
         disclosureTier: enfDisclosure
       });
-      return json(structured);
+      return respond(structured);
     }
     // ══════════════════════════════════════════════════════════════════════════
     // PILLAR F — Explicit Introspection Action (#141, Phase 1)
@@ -9652,7 +9836,7 @@ serve(async (req)=>{
           startTime,
           meta: noSlotMeta
         });
-        return json(structured);
+        return respond(structured);
       }
       const activeSlotKey = freshFacts.active_slot;
       const activeSlot = freshFacts.slots[activeSlotKey];
@@ -9698,7 +9882,7 @@ serve(async (req)=>{
           startTime,
           meta: unsupportedMeta
         });
-        return json(structured);
+        return respond(structured);
       }
       // Build the introspect payload using the pure helper
       const introspectResult = buildIntrospectPayload(activeSlot, inferredActionType);
@@ -9752,7 +9936,7 @@ serve(async (req)=>{
         startTime,
         meta: introspectMeta
       });
-      return json(structured);
+      return respond(structured);
     }
     // ── LAYER 3.5 — Bob chose to ASK ────────────────────────────────────────
     if (normAction === 'ask') {
@@ -9805,7 +9989,7 @@ serve(async (req)=>{
           },
           disclosureTier: askDisclosure
         });
-        return json(structured);
+        return respond(structured);
       }
     }
     // ── v2 CONTRACT: Governance lock — no direct writes from chat path ─────
@@ -9850,9 +10034,11 @@ serve(async (req)=>{
           }
         }
       ]);
-      return json(structured);
+      return respond(structured);
     }
     // ── LAYER 4 — execute the chosen tool (governed), or answer directly ─────
+    const cancelledBeforeTool = await cancelAtBoundary('tool execution');
+    if (cancelledBeforeTool) return cancelledBeforeTool;
     // TASK CONTINUITY: Claim the current pending step before dispatch
     const claimResult = await startToolExecution(admin, taskLedger, chosenTool || 'unknown_tool');
     if (claimResult.success && taskLedger) {
@@ -10167,6 +10353,8 @@ serve(async (req)=>{
       const BUDGET_PAUSE_MS = EDGE_BUDGET_MS - BUDGET_RESERVE_MS; // 115s
       // Observe->continue: re-plan with the tool result as task_state.
       while(stepCount < BOB_LOOP_MAX_STEPS){
+        const cancelledDuringLoop = await cancelAtBoundary(`reasoning step ${stepCount + 1}`);
+        if (cancelledDuringLoop) return cancelledDuringLoop;
         // ── BUDGET-AWARE PAUSE (pre-step check) ──────────────────────────────
         // Check elapsed time BEFORE starting the next step. If we are within
         // BUDGET_RESERVE_MS of the hard limit, pause here cleanly rather than
@@ -10241,7 +10429,7 @@ serve(async (req)=>{
             },
             disclosureTier: pauseDisclosure
           });
-          return json(pauseStructured);
+          return respond(pauseStructured);
         }
         // PILLAR H: loop_continued event (fires for ALL requests in the loop)
         await emitEvent("loop_continued", {
@@ -10378,7 +10566,7 @@ serve(async (req)=>{
               },
               disclosureTier: loopAskDisclosure
             });
-            return json(structured);
+            return respond(structured);
           }
           // Empty ask = treat as answer, fall through to break.
           decision = nextDecision;
@@ -10971,7 +11159,7 @@ serve(async (req)=>{
         }
       };
     }
-    return json(structured);
+    return respond(structured);
   } catch (err) {
     console.error(`[conductor] error stage=${failureStage}:`, err);
     const _errMsg = err instanceof Error ? err.message : String(err);
@@ -10987,10 +11175,10 @@ serve(async (req)=>{
       },
       degraded: true
     });
-    return json({
+    return respond({
       ...structured,
       error: 'Conductor error',
       ...(debugModeForError ? { _diagnostics: { failure_stage: failureStage } } : {})
-    }, 500);
+    }, 500, 'failed', 'conductor_error');
   }
 });

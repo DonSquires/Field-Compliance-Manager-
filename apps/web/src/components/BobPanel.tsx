@@ -18,7 +18,7 @@
  */
 
 import React, { useEffect, useMemo, useRef, useState, useCallback } from 'react';
-import { AlertTriangle, Archive, ArchiveRestore, Bot, CheckCircle2, Clock3, FileSearch, FileUp, ListChecks, Maximize2, Mic, Minimize2, Paperclip, PanelLeft, PanelRight, Pencil, Pin, PinOff, Plus, Search, Send, ShieldCheck, Sparkles, TerminalSquare, Volume2, X } from 'lucide-react';
+import { AlertTriangle, Archive, ArchiveRestore, Ban, Bot, CheckCircle2, Clock3, FileSearch, FileUp, ListChecks, Maximize2, Mic, Minimize2, Paperclip, PanelLeft, PanelRight, Pencil, Pin, PinOff, Plus, RefreshCw, Search, Send, ShieldCheck, Sparkles, TerminalSquare, Volume2, X } from 'lucide-react';
 import { useAuth } from '../context/AuthContext';
 import { supabase } from '../lib/supabase';
 import { Upload } from 'tus-js-client';
@@ -30,6 +30,8 @@ const MAX_BOB_UPLOAD_BYTES = 128 * 1024 * 1024 * 1024;
 const RESUMABLE_UPLOAD_THRESHOLD = 8 * 1024 * 1024;
 const RESUMABLE_CHUNK_BYTES = 6 * 1024 * 1024;
 const ACCEPTED_BOB_UPLOAD_LABEL = 'Any file type up to 128 GB each';
+const BOB_REQUEST_TIMEOUT_MS = 120_000;
+const BOB_REQUEST_TIMEOUT_MESSAGE = 'Bob is still working after 120 seconds. Check this request before retrying; the durable run prevents duplicate work.';
 
 interface BobMessage {
   id: string;
@@ -108,6 +110,24 @@ interface BobGovernedAction {
   bob_reasoning: string | null;
   error_message: string | null;
   created_at: string;
+}
+
+type BobTurnStatus = 'running' | 'cancel_requested' | 'completed' | 'failed' | 'cancelled';
+
+interface BobTurnRun {
+  request_id: string;
+  status: BobTurnStatus;
+  started_at: string;
+  heartbeat_at: string;
+  completed_at: string | null;
+  error_code: string | null;
+}
+
+interface ActiveBobTurn {
+  requestId: string;
+  status: BobTurnStatus;
+  message: string;
+  startedAt: string;
 }
 
 type ContextTab = 'context' | 'files' | 'actions' | 'audit';
@@ -192,6 +212,7 @@ export const BobPanel: React.FC<BobPanelProps> = ({ open, onClose, context, mode
   const [voiceTranscript, setVoiceTranscript] = useState('');
   const [speakingMessageId, setSpeakingMessageId] = useState<string | null>(null);
   const [error, setError] = useState<string | null>(null);
+  const [activeTurn, setActiveTurn] = useState<ActiveBobTurn | null>(null);
   const [workspaceExpanded, setWorkspaceExpanded] = useState(true);
   const [studioOpen, setStudioOpen] = useState(false);
   const scrollRef = useRef<HTMLDivElement>(null);
@@ -688,12 +709,97 @@ export const BobPanel: React.FC<BobPanelProps> = ({ open, onClose, context, mode
     }
   };
 
+  const reconcileActiveTurn = async () => {
+    if (!activeTurn || !conversationId || sending) return;
+    setSending(true);
+    setActivityPhase('refreshing');
+    setError(null);
+    try {
+      const { data, error: statusError } = await supabase.functions.invoke<{
+        turn_run?: BobTurnRun;
+        response?: { reply?: unknown };
+      }>('onspace-ai-chat', {
+        body: {
+          operation: 'status',
+          request_id: activeTurn.requestId,
+          conversation_id: conversationId,
+          context: { ...(context ?? {}), agent_mode: mode },
+        },
+      });
+      if (statusError) throw statusError;
+      if (!data?.turn_run) throw new Error('Bob did not return a durable request status.');
+
+      const nextStatus = data.turn_run.status;
+      setActiveTurn(current => current ? { ...current, status: nextStatus, startedAt: data.turn_run?.started_at ?? current.startedAt } : current);
+      if (nextStatus === 'completed') {
+        await selectSession(conversationId);
+        setActiveTurn(null);
+        setError(null);
+      } else if (nextStatus === 'running') {
+        setError('Bob is still working on this request. You can check again or request cancellation; do not resend it.');
+      } else if (nextStatus === 'cancel_requested') {
+        setError('Cancellation is requested. Bob will stop at the next safe conductor boundary.');
+      } else {
+        await selectSession(conversationId);
+        setError(nextStatus === 'cancelled'
+          ? 'The request was cancelled before further work started. You can restore the prompt and retry as a new request.'
+          : 'The durable Bob request failed. Restore the prompt to retry with a new request ID.');
+      }
+    } catch (err) {
+      setError(err instanceof Error ? err.message : 'Bob request status could not be checked.');
+    } finally {
+      setActivityPhase('idle');
+      setSending(false);
+    }
+  };
+
+  const cancelActiveTurn = async () => {
+    if (!activeTurn || !conversationId || sending || activeTurn.status !== 'running') return;
+    setSending(true);
+    setActivityPhase('refreshing');
+    setError(null);
+    try {
+      const { data, error: cancelError } = await supabase.functions.invoke<{ turn_run?: BobTurnRun }>('onspace-ai-chat', {
+        body: {
+          operation: 'cancel',
+          request_id: activeTurn.requestId,
+          conversation_id: conversationId,
+          context: { ...(context ?? {}), agent_mode: mode },
+        },
+      });
+      if (cancelError) throw cancelError;
+      if (!data?.turn_run) throw new Error('Bob did not acknowledge the cancellation request.');
+      setActiveTurn(current => current ? { ...current, status: data.turn_run!.status } : current);
+      setError(data.turn_run.status === 'cancel_requested'
+        ? 'Cancellation is requested. Bob will stop before the next planner or tool boundary.'
+        : `Bob request is already ${data.turn_run.status.replaceAll('_', ' ')}.`);
+    } catch (err) {
+      setError(err instanceof Error ? err.message : 'Bob request cancellation could not be submitted.');
+    } finally {
+      setActivityPhase('idle');
+      setSending(false);
+    }
+  };
+
+  const restoreActiveTurnPrompt = () => {
+    if (!activeTurn || activeTurn.status === 'running' || activeTurn.status === 'cancel_requested') return;
+    setInput(activeTurn.message);
+    setActiveTurn(null);
+    setError(null);
+    focusComposer();
+  };
+
   const handleSend = async (e: React.FormEvent | null, override?: string) => {
     e?.preventDefault();
     const message = (override ?? (input.trim() || voiceTranscript.trim())).trim();
     if ((!message && pendingFiles.length === 0) || !conversationId || sending) return;
+    if (activeTurn?.status === 'running' || activeTurn?.status === 'cancel_requested') {
+      setError('This conversation already has a durable Bob request in progress. Check or cancel it before sending another turn.');
+      return;
+    }
 
     const optimisticId = `optimistic-${Date.now()}`;
+    const requestId = crypto.randomUUID();
     const attachmentNames = pendingFiles.map(item => item.file.name);
     setMessages((prev) => [
       ...prev,
@@ -708,19 +814,36 @@ export const BobPanel: React.FC<BobPanelProps> = ({ open, onClose, context, mode
     try {
       const attachments = await uploadPendingFiles(conversationId);
       setActivityPhase('waiting');
+      setActiveTurn({ requestId, status: 'running', message: message || 'Please review the attached file(s).', startedAt: new Date().toISOString() });
       // ATLAS CALLS: onspace-ai-chat (persists both user + assistant messages server-side)
-      const { data, error: fnError } = await supabase.functions.invoke('onspace-ai-chat', {
-        body: {
-          message: message || 'Please review the attached file(s).',
-          conversation_id: conversationId,
-          attachments,
-          context: { ...(context ?? {}), agent_mode: mode },
-        },
+      const { data, error: fnError } = await new Promise<Awaited<ReturnType<typeof supabase.functions.invoke<{ reply?: unknown }>>>>((resolve, reject) => {
+        const timeout = window.setTimeout(() => reject(new Error(BOB_REQUEST_TIMEOUT_MESSAGE)), BOB_REQUEST_TIMEOUT_MS);
+        supabase.functions.invoke<{ reply?: unknown }>('onspace-ai-chat', {
+          body: {
+            message: message || 'Please review the attached file(s).',
+            conversation_id: conversationId,
+            request_id: requestId,
+            attachments,
+            context: { ...(context ?? {}), agent_mode: mode },
+          },
+        }).then((result) => {
+          window.clearTimeout(timeout);
+          resolve(result);
+        }, (invokeError) => {
+          window.clearTimeout(timeout);
+          reject(invokeError);
+        });
       });
 
       if (fnError) throw fnError;
+      if (data && typeof data === 'object' && 'turn_run' in data && (data as { turn_run?: BobTurnRun }).turn_run?.status !== 'completed' && !('reply' in data)) {
+        const turnRun = (data as { turn_run: BobTurnRun }).turn_run;
+        setActiveTurn(current => current ? { ...current, status: turnRun.status, startedAt: turnRun.started_at } : current);
+        setError('This Bob request is already in progress. Check its durable status instead of resending it.');
+        return;
+      }
 
-  setActivityPhase('refreshing');
+      setActivityPhase('refreshing');
       // Refresh from bob_messages so we show the server-persisted, canonical thread
       const { data: history, error: historyErr } = await supabase
         .from('bob_messages')
@@ -752,8 +875,12 @@ export const BobPanel: React.FC<BobPanelProps> = ({ open, onClose, context, mode
         await Promise.all([loadAttachments(conversationId), loadAuditEvents(conversationId), loadGovernedActions(conversationId)]);
         setPendingFiles([]);
       }
+      setActiveTurn(null);
     } catch (err) {
-      setError(err instanceof Error ? err.message : 'Bob could not respond. Try again.');
+      const messageText = err instanceof Error ? err.message : 'Bob could not respond.';
+      setError(messageText === BOB_REQUEST_TIMEOUT_MESSAGE
+        ? BOB_REQUEST_TIMEOUT_MESSAGE
+        : `${messageText} Check the durable request status before retrying.`);
     } finally {
       setActivityPhase('idle');
       setSending(false);
@@ -861,6 +988,32 @@ export const BobPanel: React.FC<BobPanelProps> = ({ open, onClose, context, mode
 
           {error && (
             <div className="bob-panel-error" role="alert"><AlertTriangle size={15} /> {error}</div>
+          )}
+          {activeTurn && (
+            <section className={`bob-turn-recovery is-${activeTurn.status}`} aria-label="Bob request recovery">
+              <div>
+                <Clock3 size={16} />
+                <span>
+                  <strong>{activeTurn.status.replaceAll('_', ' ')}</strong>
+                  <small>Request {activeTurn.requestId.slice(0, 8)} · started {new Date(activeTurn.startedAt).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })}</small>
+                </span>
+              </div>
+              <div className="bob-turn-recovery-actions">
+                <button type="button" onClick={() => void reconcileActiveTurn()} disabled={sending}>
+                  <RefreshCw size={14} /> Check status
+                </button>
+                {activeTurn.status === 'running' && (
+                  <button type="button" onClick={() => void cancelActiveTurn()} disabled={sending}>
+                    <Ban size={14} /> Request cancellation
+                  </button>
+                )}
+                {(activeTurn.status === 'failed' || activeTurn.status === 'cancelled') && (
+                  <button type="button" onClick={restoreActiveTurnPrompt} disabled={sending}>
+                    <Pencil size={14} /> Restore prompt
+                  </button>
+                )}
+              </div>
+            </section>
           )}
 
           <BobActivityTimeline phase={activityPhase} sending={sending} loading={loading} pendingFiles={pendingFiles} />

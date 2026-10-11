@@ -460,21 +460,51 @@ rate from 35 decisions.
 
 The machine-readable inventory and runner live in
 `scripts/bob-enterprise-acceptance.mjs`. Its current result is five implemented
-domains, four partial domains and one explicit gap. Partial work is:
+domains, five partial domains and no full gaps. Partial work is:
 
 1. parking/freedom-camping shared-envelope projection and calibrated multi-visit
    ambiguity receipts;
-2. Desktop V2 signed local model manifests, offline receipts and conflict
+2. access-control deployment, disposable-database validation, offline event
+   sync and calibrated, purpose-bound tenant face/credential matching;
+3. Desktop V2 signed local model manifests, offline receipts and conflict
    reconciliation;
-3. consistent who-is-flying, takeback and result-in-habitat UX across modules;
+4. consistent who-is-flying, takeback and result-in-habitat UX across modules;
    and
-4. exercise/calibration — exercise is now proven from invocation receipts, but
+5. exercise/calibration — exercise is now proven from invocation receipts, but
    calibration records, calibrated confidences and a sufficient reviewed sample
    are all still missing.
 
-The one remaining full gap is the access-control perception adapter. `npm run
-bob:enterprise-readiness:strict` therefore fails intentionally until every
-declared partial/gap has acceptance evidence. Grandmaster remains a
+The access-control source vertical now has a typed tenant event, custody links,
+service-only receipt and perception projection, deterministic multimodal
+recognition, and officer-first web/mobile workflows. Before the officer records
+an outcome, face, person/body, vehicle and plate probes may rank organization-
+scoped possible matches and show the probe beside available reference or prior-
+sighting images. Discovery is not confirmation: the officer remains responsible
+for identity, credential validity and the access decision, and recognition
+cannot grant entry. The durable receipt independently reruns recognition from
+the preserved image, excludes embeddings from client and stored receipts, and
+projects ranked matches as review-required `candidate` fields rather than
+canonical identities.
+
+Contract, web/mobile TypeScript, Deno and production web-build checks pass. A
+disposable Supabase Postgres database on the private Tailscale VPS route loaded
+the live schema snapshot and migration, then exercised receipt/perception
+idempotency, evidence custody, person/vehicle candidate projection, RLS, grants
+and indexes. That execution found and corrected an ambiguous PL/pgSQL `id`
+reference and an invalid perception `value_type`. The protected migration and
+both access functions were then deployed through the linked Supabase project;
+the migration ledger, Data API exposure and unauthenticated 401 boundary were
+verified, and `supabase/schema.sql` was regenerated from the live catalog.
+Deployment verification then found missing Edge Function inference bindings
+and an older VPS image without `/infer/enhance`; the project secrets were bound
+to the authenticated public inference endpoint, the previous image was tagged
+for rollback, and only `fcm-inference` was rebuilt/recreated through the private
+Tailscale route. Docker health, public HTTPS health, OpenAPI route presence and
+authenticated route validation now pass. A real role-specific image workflow
+is not yet glass-proven because no dedicated access-control test identity is
+configured, and real-user credentials were not used as a substitute. `npm run
+bob:enterprise-readiness:strict` therefore still fails intentionally while any
+declared partial lacks its acceptance evidence. Grandmaster remains a
 server-owned caller rank under ONE BOB; it is not a client-selectable BobPanel
 mode and cannot grant Builder or operational authority.
 

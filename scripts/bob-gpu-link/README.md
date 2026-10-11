@@ -90,6 +90,65 @@ curl -s -H "Authorization: Bearer $API_TOKEN" http://127.0.0.1:3001/api/bob/heal
 node scripts/bob-gpu-link/ollama-bench.mjs http://127.0.0.1:11434 qwen2.5-coder:7b
 ```
 
+### Tested laptop-to-VPS Docker route
+
+Verified 2026-10-11 from `fcm-gpu-laptop` (`100.114.240.13`) to `fcm-vps`
+(`100.85.95.104`):
+
+- Tailscale reported both peers online.
+- Batch-mode SSH succeeded as the existing deployment user with
+  `~/.ssh/fcm-vps-deploy`; no password or token was printed.
+- The remote Docker server answered and reported the FCM API, Bob control
+  plane, inference, vision watcher, worker, Ollama and Gitea containers.
+- Bob control-plane health reported the laptop shell enabled/configured, the
+  GPU workstation healthy, and VPS Ollama healthy.
+
+Use the checked wrapper from Windows:
+
+```powershell
+# SSH + Docker + control-plane + inference health
+.\scripts\bob-vps-docker.ps1
+
+# Docker inventory
+.\scripts\bob-vps-docker.ps1 -Action Docker
+
+# An explicit remote diagnostic or validation command
+.\scripts\bob-vps-docker.ps1 -Action Command -Command 'docker logs --tail 50 fcm-inference'
+```
+
+The wrapper defaults to the private Tailscale address and refuses a non-tailnet
+IPv4 target. It contains no credentials; it uses the existing deployment key.
+It is the fallback validation path when Docker Desktop on the laptop is
+unhealthy. Migration application, production deployment, secret changes and
+other protected effects still require an explicit approved invocation; private
+network reachability is not permission to bypass those gates.
+
+### Updating the VPS inference image through the private route
+
+Verified 2026-10-11 while adding `/infer/enhance` for access recognition:
+
+1. Archive only the tracked `services/fcm-inference` source and copy it to a
+   specifically named `/tmp` workspace over the deployment SSH key.
+2. Tag the current `fcm/fcm-inference:local` image with its immutable image ID
+   as a rollback image before rebuilding.
+3. Build the CPU image in the staged workspace.
+4. Recreate only `fcm-inference` from `/srv/fcm/current` with the existing
+   `/opt/fcm/.env` and the explicit Compose project name:
+
+```powershell
+.\scripts\bob-vps-docker.ps1 -Action Command -Command `
+  'cd /srv/fcm/current && docker compose -p fcm --env-file /opt/fcm/.env -f docker-compose.full.yml up -d --force-recreate --no-deps --no-build fcm-inference'
+```
+
+The explicit `-p fcm` is required because `/srv/fcm/current` is a symlink;
+without it Compose derives a second project name and conflicts with the
+existing `fcm-inference` container. After recreation, require Docker health,
+public HTTPS `/health`, OpenAPI presence for every required route, and an
+authenticated validation request before cleanup. Supabase Edge Functions use
+the public HTTPS inference endpoint with `INFERENCE_SERVICE_URL` and
+`INFERENCE_API_KEY` project secrets; never copy the Docker-only
+`http://fcm-inference:3000` URL into cloud secrets.
+
 ## Tuning (control plane env, `/var/lib/bob/control-plane.env`)
 
 - `BOB_BUILDER_ROUTE_AUTHOR` / `_REVIEW` / `_ANALYSIS` / `_LOCAL` /

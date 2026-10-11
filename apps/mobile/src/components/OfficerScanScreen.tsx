@@ -31,6 +31,7 @@ import { OfficerVehicleLookup } from './OfficerVehicleLookup';
 import { OfficerBiosecurityPanel } from './OfficerBiosecurityPanel';
 import { OfficerNoiseControlPanel } from './OfficerNoiseControlPanel';
 import { OfficerSmokeControlPanel } from './OfficerSmokeControlPanel';
+import { OfficerAccessControlPanel } from './OfficerAccessControlPanel';
 import { registerOfficerDeviceToken, unregisterOfficerDeviceToken } from '../lib/officerNotifications';
 import { userFacingError } from '../lib/userFacingError';
 
@@ -149,6 +150,7 @@ export function OfficerScanScreen({ onSignOut, officerId, organizationId, shiftI
       <OfficerBiosecurityPanel shiftId={shiftId} />
       <OfficerNoiseControlPanel shiftId={shiftId} />
       <OfficerSmokeControlPanel shiftId={shiftId} />
+      <OfficerAccessControlPanel shiftId={shiftId} />
     </CollapsibleSection>
     <CollapsibleSection title="My work">
       <OfficerLeavePanel officerId={officerId} />
