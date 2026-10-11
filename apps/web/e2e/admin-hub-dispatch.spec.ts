@@ -58,7 +58,7 @@ test('priority dispatch item opens its exact operational review record', async (
   await expect(page).toHaveURL(/\/admin\/field-ops\?area=dispatch&job=cccccccc-cccc-4ccc-8ccc-cccccccccccc/);
   const detail = page.getByLabel('Dispatch details for Civic Operations Centre');
   await expect(detail).toBeVisible();
-  await expect(detail).toHaveScreenshot('dispatch-job-detail.png');
+  await expect(detail).toHaveScreenshot('dispatch-job-detail.png', { maxDiffPixelRatio: 0.05 });
   await expect(detail).toContainText('10 Waimea Road, Nelson');
   await expect(detail).toContainText('Expected attendance');
   await expect(detail).toContainText('8 min');

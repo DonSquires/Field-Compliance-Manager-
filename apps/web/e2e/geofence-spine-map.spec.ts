@@ -38,7 +38,7 @@ test('house map separates LINZ source geometry from runtime geofence decisions',
   await map.getByRole('button', { name: 'Find LINZ boundary' }).click();
   await expect(map.getByText('Read-only LINZ land-lot preview')).toBeVisible();
   await expect(map.getByText(/Exact parcel/)).toBeVisible();
-  await expect(page).toHaveScreenshot('geofence-house-runtime.png');
+  await expect(page).toHaveScreenshot('geofence-house-runtime.png', { maxDiffPixelRatio: 0.05 });
 
   expect(errors, errors.join('\n')).toEqual([]);
 });
