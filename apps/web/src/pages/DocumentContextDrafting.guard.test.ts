@@ -39,7 +39,7 @@ describe('context-driven document drafting', () => {
   it('keeps agentic drafting scoped and human-approved', () => {
     expect(studioSource).toContain("searchParams.get('auto') !== '1'");
     expect(studioSource).toContain("functions.invoke('bob-agentic-document-draft'");
-    expect(agenticFunctionSource).toContain("['site', 'cctv', 'breach', 'notice', 'debrief']");
+    expect(agenticFunctionSource).toContain("['site', 'cctv', 'breach', 'notice', 'debrief', 'custom']");
     expect(agenticFunctionSource).toContain("eq('organization_id', profile.organization_id)");
     expect(agenticFunctionSource).toContain("submit_bob_document_for_review");
     expect(agenticFunctionSource).not.toContain('request_bob_document_output');
