@@ -9,6 +9,8 @@
     "atlas:refresh:dry-run": "node scripts/atlas-refresh.js",
     "bob:refresh-capability-map": "npm run atlas:refresh",
     "atlas:check": "npm run calibrate && node scripts/atlas-graph.js && npm run atlas:manifest",
+    "bob:enterprise-readiness": "node scripts/bob-enterprise-acceptance.mjs --run-tests",
+    "bob:enterprise-readiness:strict": "node scripts/bob-enterprise-acceptance.mjs --run-tests --strict",
     "sample:manifest": "node scripts/sample-data-manifest.js",
     "rm:inventory": "node scripts/rm-corpus-inventory.mjs",
     "verify:bob-document-pdf:live": "node scripts/verify-bob-document-pdf-live.js",
