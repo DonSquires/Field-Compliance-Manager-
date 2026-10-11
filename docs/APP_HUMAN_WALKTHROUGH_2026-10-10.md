@@ -44,6 +44,7 @@ Status: in progress
 ## 3. Officer and Client Surfaces
 
 - [x] Officer safe-button groups: self-service, dispatch/patrol, and specialty modules passed desktop/mobile; guarded writes were skipped. `/officer/bob` route and standalone `ModuleShell` Bob launcher were separately exercised with modal/focus checks on desktop/mobile.
+- [x] Synthetic route inventory: Dr. Bob observes all 23 listed Officer shell routes and 27 selected Admin routes on desktop/mobile; a manifest-driven entitlement E2E verifies all seven standalone specialty routes render Officer page content. Route observers do not execute guarded writes; complete app-wide route reconciliation remains open.
 - [ ] Officer shell states: standby, active shift/home, module selector, and module portal; safety, online/offline, account and notification chrome. Admin/Officer Bob routes and standalone specialty Bob launcher pass focused modal/focus checks on desktop/mobile; remaining shell-state coverage is open.
 - [x] Officer module selector (focused responsive E2E): card content/action bounds stay inside each card; core Patrol no longer offers unsupported standalone navigation; registered Freedom Camping standalone route opens correctly.
 - [x] Client portal (synthetic): Overview and Service Delivered, scan-only route denial, published report scope/provenance, invite acceptance, and client-admin people management.

@@ -144,16 +144,26 @@ test.describe("Dr. Bob's human browser test", () => {
 
   test('observes every officer module route without executing writes', async ({ page }, testInfo) => {
     const session = new HumanTestSession(page, testInfo);
-    await installSupabaseFixtures(page);
+    const enabledModules = ['dispatch', 'patrol', 'static_guarding', 'site_guard', 'welfare', 'freedom_camping', 'parking_enforcement', 'parking', 'noise_control', 'biosecurity', 'smoke_complaints', 'smoke_control', 'access_control', 'workshop', 'ems', 'overnight_verification', 'checkpoint_scan'];
+    await installSupabaseFixtures(page, { officerModules: enabledModules });
+    await page.route('**/rest/v1/rpc/get_officer_static_post', async (route) => {
+      await route.fulfill({ status: 200, contentType: 'application/json', body: 'null' });
+    });
+    await page.route('**/rest/v1/user_profiles*', async (route) => {
+      const query = new URL(route.request().url()).searchParams;
+      if (query.get('id') !== 'eq.22222222-2222-4222-8222-222222222222') return route.fallback();
+      await route.fulfill({ status: 200, contentType: 'application/json', body: JSON.stringify([{ id: '22222222-2222-4222-8222-222222222222', display_name: 'Ana Ngata', email: 'ana@fcm.test', role: 'officer', organization_id: '33333333-3333-4333-8333-333333333333', module_access: enabledModules }]) });
+    });
     await signInAsOfficer(page, '/officer/schedule');
     await session.observe('officer shell before module catalog');
 
-    const modules = [
+    const moduleRoutes = [
       'schedule', 'report', 'leave', 'timesheet', 'credentials', 'vehicle_lookup',
       'noise_control', 'parking', 'dispatch', 'biosecurity', 'freedom_camping',
-      'overnight_verification', 'site_guard', 'debrief', 'map', 'patrol', 'bob', 'modules',
+      'overnight_verification', 'site_guard', 'access_control', 'workshop', 'ems',
+      'checkpoint_scan', 'smoke_control', 'debrief', 'map', 'patrol', 'bob', 'modules',
     ];
-    for (const module of modules) {
+    for (const module of moduleRoutes) {
       await session.step(`observe officer module: ${module}`, async () => {
         await page.goto(`/officer/${module}`);
         await page.waitForLoadState('domcontentloaded');

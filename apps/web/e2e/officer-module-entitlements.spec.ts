@@ -1,5 +1,6 @@
 import { expect, test } from '@playwright/test';
 import { installSupabaseFixtures, monitorBrowserErrors, signInAsAdmin, signInAsOfficer } from './fixtures';
+import { SPECIALTY_MODULES } from '../src/config/specialtyModules';
 
 test('officer module directory requires both a direct grant and organisation entitlement', async ({ page }) => {
   const browserErrors = monitorBrowserErrors(page);
@@ -66,4 +67,31 @@ test('the standalone access-control route does not expose officer event entry to
 
   await expect(page.getByText('Access-control event entry is not available in the Admin portal.')).toBeVisible();
   await expect(page.getByRole('button', { name: 'Capture access evidence' })).toHaveCount(0);
+});
+
+test('every advertised standalone specialty route renders officer page content', async ({ page }) => {
+  await installSupabaseFixtures(page, {
+    officerModules: SPECIALTY_MODULES.map((module) => module.integratedKey),
+  });
+  await page.route('**/rest/v1/rpc/resolve_active_rules', async (route) => {
+    await route.fulfill({
+      status: 200,
+      contentType: 'application/json',
+      body: JSON.stringify(SPECIALTY_MODULES.map((module) => ({
+        organization_id: '33333333-3333-4333-8333-333333333333',
+        module_key: module.key,
+        enabled: true,
+      }))),
+    });
+  });
+  await page.route('**/rest/v1/rpc/get_officer_static_post', async (route) => {
+    await route.fulfill({ status: 200, contentType: 'application/json', body: 'null' });
+  });
+  await signInAsOfficer(page, SPECIALTY_MODULES[0].standalonePath);
+
+  for (const module of SPECIALTY_MODULES) {
+    await page.goto(module.standalonePath);
+    await expect(page.locator('.module-shell-title').getByText(module.label, { exact: true })).toBeVisible();
+    await expect(page.locator('.module-shell-content').getByRole('heading').first()).toBeVisible();
+  }
 });
