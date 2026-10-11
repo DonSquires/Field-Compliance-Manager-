@@ -8,6 +8,13 @@ detailed backlogs (`ENTERPRISE_SAAS_TODO.md`, `PROTOTYPE_GAP_AUDIT.md`,
 Completion language is strict, as in the lineage: **merged ≠ deployed ≠
 glass-proven.** A workstream item is done only when its evidence gate is met.
 
+Live acceptance finding 2026-10-11: an owner build request successfully ran
+repository and Atlas inspection but then stopped at a future-tense prose plan.
+The conductor now converts that narrow post-evidence outcome into the existing
+two-turn `create_builder_job` proposal. Rank enforcement, separate human
+confirmation, isolated execution, draft-PR output, and the protected
+merge/deploy boundary remain unchanged.
+
 Owner ruling 2026-09-15: **Field Compliance Manager is the only product we are
 building.** GitLab, FreedomCamp-Manager / FreedomCamp-Manager-App, Onspace
 previews, and other historical repos are legacy/reference evidence only. Keep

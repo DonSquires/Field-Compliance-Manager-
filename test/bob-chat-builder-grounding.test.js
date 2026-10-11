@@ -66,3 +66,11 @@ test('the create_builder_job proposal replaces an ungrounded draft with the owne
   assert.match(branch, /so I have used your own words as the brief/);
   assert.match(branch, /grounding: \{ grounded: bjGrounding\.grounded, overlap: Number\(bjGrounding\.overlap\.toFixed\(2\)\), replaced_with_owner_words: !bjGrounding\.grounded \}/);
 });
+
+test('an explicit owner build request cannot stop at a prose plan after evidence gathering', () => {
+  const loop = chat.slice(chat.indexOf('const nextPlan = await callPlan('), chat.indexOf('// ASK halts the loop'));
+  assert.match(loop, /explicitBuilderCreationRequest\(message\)/);
+  assert.match(loop, /tool: 'create_builder_job'/);
+  assert.match(loop, /Evidence gathered before proposal:/);
+  assert.match(loop, /open only a draft pull request\. Do not merge or deploy\./);
+});

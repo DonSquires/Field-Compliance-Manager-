@@ -7614,6 +7614,15 @@ serve(async (req)=>{
       if (/^(?:no|stop|don't|leave it)[.!\s]*$/i.test(answer)) return 'decline';
       return null;
     };
+    const explicitBuilderCreationRequest = (text: string) => {
+      const normalized = canon(text);
+      if (!normalized) return false;
+      if (/\b(?:plan only|explain only|review only|do not (?:create|open|start)|dont (?:create|open|start)|without (?:creating|opening|starting))\b/.test(normalized)) return false;
+      const asksForBuilder = /\b(?:builder(?: job)?|draft (?:pull request|pr)|self[- ]heal|app design\/build agent)\b/.test(normalized);
+      const asksForImplementation = /\b(?:build|implement|fix|repair|change|redesign|refactor|add|create)\b/.test(normalized);
+      const namesBuildTarget = /\b(?:app|application|code|repository|repo|ui|ux|panel|page|component|function|test|accessibility)\b/.test(normalized);
+      return asksForBuilder && asksForImplementation && namesBuildTarget;
+    };
     /** Dispatch a single tool and return { reply, meta }. Pure execution, no persistence. */ const dispatchTool = async (tool, toolArgs, d)=>{
       // Geofence carry-forward (!752): if the planner chose propose_freedom_camping_zone
       // but did not re-supply the geometry (a terse "Confirmed" after a resolve turn),
@@ -10706,8 +10715,36 @@ serve(async (req)=>{
           console.error(`[conductor][loop] plan failed at step ${stepCount + 1}, returning best answer so far`);
           break;
         }
-        const nextDecision = nextPlan.data ?? {};
-        const next = parsePlanDecision(nextDecision);
+        let nextDecision = nextPlan.data ?? {};
+        let next = parsePlanDecision(nextDecision);
+        // An explicit owner build request must not end with future-tense prose
+        // after Bob has gathered repository or Atlas evidence. Convert only that
+        // premature answer into the existing two-turn Builder proposal.
+        if (caps.tier === 'admiral' && next.normAction === 'answer' && explicitBuilderCreationRequest(message)) {
+          const requestBrief = String(message ?? '').trim();
+          const firstSentence = requestBrief.replace(/\s+/g, ' ').split(/(?<=[.!?])\s/)[0];
+          const evidenceSummary = loopSteps
+            .map((step) => `${step.tool}: ${step.result_summary.slice(0, 500)}`)
+            .join('\n');
+          nextDecision = {
+            ...nextDecision,
+            action: 'use_tool',
+            tool: 'create_builder_job',
+            args: {
+              title: (firstSentence || 'Implement the requested FCM change').slice(0, 160),
+              task_description: [
+                requestBrief,
+                '',
+                'Evidence gathered before proposal:',
+                evidenceSummary,
+                '',
+                'Acceptance: implement the requested bounded change, add focused tests, preserve existing behavior, run the relevant verification, and open only a draft pull request. Do not merge or deploy.'
+              ].join('\n').slice(0, 12000)
+            },
+            reasoning: nextDecision.reasoning ?? 'Repository and Atlas inspection completed; prepare the governed Builder proposal requested by the owner.'
+          };
+          next = parsePlanDecision(nextDecision);
+        }
         // DELEGATE inside the loop: the subagents run as ONE loop step and their
         // findings ride into the next plan call as task_state.subagent_results.
         if (next.normAction === 'delegate') {
