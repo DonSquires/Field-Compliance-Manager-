@@ -207,6 +207,36 @@ describe('BobPanel', () => {
     expect(screen.getByText('Review the affected files before proposing a change.')).toBeTruthy();
   });
 
+  it('distinguishes a superseded reply from its append-only audit correction', async () => {
+    messageHistory = [
+      {
+        id: 'message-incorrect',
+        role: 'assistant',
+        content: 'Plate: 11739',
+        confidence: 1,
+        flagged: true,
+        created_at: '2026-10-11T04:00:00.000Z',
+        metadata: { superseded_by_message_id: 'message-correction' },
+      },
+      {
+        id: 'message-correction',
+        role: 'assistant',
+        content: 'Correction: Plate JJJ739',
+        confidence: null,
+        flagged: false,
+        created_at: '2026-10-11T04:01:00.000Z',
+        metadata: { outcome: 'correction', correction_of_message_id: 'message-incorrect' },
+      },
+    ];
+
+    render(<BobPanel open onClose={() => undefined} />);
+
+    expect(await screen.findByText('Superseded by correction')).toBeTruthy();
+    expect(screen.getByText('Audit correction')).toBeTruthy();
+    expect(screen.getByText(/Plate: 11739/)).toBeTruthy();
+    expect(screen.getByText(/Correction: Plate JJJ739/)).toBeTruthy();
+  });
+
   it('restores an active durable turn when the conversation is reopened', async () => {
     let resolveStatus: (value: { data: { turn_run: Record<string, unknown> }; error: null }) => void = () => undefined;
     mockInvoke.mockImplementation((_name: string, options?: { body?: Record<string, unknown> }) => {

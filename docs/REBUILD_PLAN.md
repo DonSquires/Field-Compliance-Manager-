@@ -584,6 +584,21 @@ System-wide Bob acceptance gate shipped 2026-10-11:
     security advisor reported no finding related to `bob_turn_runs`; its broader
     pre-existing findings remain an enterprise-hardening backlog.
 
+  Historical false-plate correction slice implemented 2026-10-11:
+
+  - **Before:** one persisted Bob reply presented `11739` as a verified plate
+    even though the supplied NZTA source showed `JJJ739`. Live read verification
+    found no `11739` or `JJJ739` row in canonical vehicles, tenant vehicles or
+    vehicle observations, so the false reply had not been promoted.
+  - **During:** migration `20261011050735` keeps the original reply for audit,
+    flags it, appends one source-grounded correction, and links both messages
+    through metadata. The bounded migration is idempotent and creates no vehicle
+    identity record.
+  - **After:** BobPanel labels the original **Superseded by correction** and the
+    appended message **Audit correction**. The correction requires source-image
+    comparison before identity promotion. Focused BobPanel tests, TypeScript,
+    the full 1,051-test repository suite and the production web build pass.
+
   **Gate:** live `bob_messages` show no context-losing fallbacks; a Builder job
   runs implement → verify → repair without human touch and stops cleanly at
   `release_ready`; egress proven per rank; Atlas `exercised` is populated from

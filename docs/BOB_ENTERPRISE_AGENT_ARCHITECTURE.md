@@ -92,6 +92,14 @@ unverified plate proposals, persists structured review state, and labels the
 UI's percentage as **Response confidence**. This reduces one known failure
 mode; it is not completion of the architecture.
 
+The historical bad reply is also repaired without erasing audit history. The
+original remains visible but is flagged and linked to an append-only correction
+that states the source shows `JJJ739`, rejects `11739`, and requires source
+comparison before identity promotion. BobPanel labels the two records
+**Superseded by correction** and **Audit correction**. The idempotent,
+timestamp-bounded repair creates no canonical vehicle, tenant vehicle or
+observation.
+
 ## 3. Runtime roles and authority
 
 | Role | Responsibility | Must not do |

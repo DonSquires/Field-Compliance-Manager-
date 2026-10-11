@@ -1123,17 +1123,20 @@ export const BobPanel: React.FC<BobPanelProps> = ({ open, onClose, context, mode
                 <p className="bob-composer-hint">{ACCEPTED_BOB_UPLOAD_LABEL}. Attach with the paperclip or drop files onto this panel.</p>
               </div>
             ) : (
-              messages.map((m) => (
-                <article key={m.id} className={`bob-message role-${m.role}`}>
+              messages.map((m) => {
+                const supersededBy = asString(m.metadata?.superseded_by_message_id);
+                const correctionOf = asString(m.metadata?.correction_of_message_id);
+                return (
+                <article key={m.id} className={`bob-message role-${m.role}${supersededBy ? ' is-superseded' : ''}${correctionOf ? ' is-correction' : ''}`}>
                   {m.role !== 'user' && <span className="bob-message-avatar"><Bot size={14} /></span>}
                   <div className="bob-message-body">
                     {m.role === 'assistant' && <AgentMetadata message={m} />}
                     <div className="bob-message-content">{m.role === 'assistant' ? <BobMarkdown content={m.content} /> : m.content}</div>
                     {m.role === 'assistant' && <AnswerChoices message={m} disabled={sending} onAnswer={(answer) => void handleSend(null, answer)} />}
-                    <footer><time dateTime={m.created_at}>{new Date(m.created_at).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })}</time>{m.role === 'assistant' && <button type="button" onClick={() => void speakMessage(m)} disabled={speakingMessageId !== null} title="Listen to this reply" aria-label="Listen to this reply"><Volume2 size={13} />{speakingMessageId === m.id ? 'Speaking' : <span className="sr-only">Listen to this reply</span>}</button>}{m.flagged && <span className="bob-flagged"><AlertTriangle size={12} /> Review required</span>}</footer>
+                    <footer><time dateTime={m.created_at}>{new Date(m.created_at).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })}</time>{m.role === 'assistant' && <button type="button" onClick={() => void speakMessage(m)} disabled={speakingMessageId !== null} title="Listen to this reply" aria-label="Listen to this reply"><Volume2 size={13} />{speakingMessageId === m.id ? 'Speaking' : <span className="sr-only">Listen to this reply</span>}</button>}{supersededBy ? <span className="bob-superseded"><AlertTriangle size={12} /> Superseded by correction</span> : m.flagged && <span className="bob-flagged"><AlertTriangle size={12} /> Review required</span>}{correctionOf && <span className="bob-correction"><ShieldCheck size={12} /> Audit correction</span>}</footer>
                   </div>
                 </article>
-              ))
+              )})
             )}
           </div>
 
