@@ -35,6 +35,8 @@ test('release lane skips migrations already in the live ledger, and a hand deplo
   const deploy = fs.readFileSync(path.resolve(__dirname, '../scripts/bob-vps-deploy.sh'), 'utf8').replace(/\r\n/g, '\n');
   assert.equal(bashSyntax(deploy).status, 0);
   assert.match(deploy, /> \/var\/lib\/bob\/release-lane\/deployed_sha/);
+  assert.match(deploy, /git bundle create .*refs\/remotes\/origin\/main/);
+  assert.match(deploy, /git fetch -q .*refs\/remotes\/origin\/main:refs\/bundles/);
   // A control-plane restart mid-run would discard the author's turns: the lane waits for the next tick.
   assert.match(lane, /builder_model_runs\?select=id&status=in\.\(running,queued\)/);
   assert.match(lane, /deferred \$\{HEAD_SHA:0:8\}: a Bob model run is in flight/);
