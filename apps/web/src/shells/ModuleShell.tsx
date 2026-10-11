@@ -16,6 +16,7 @@ const OfficerFreedomCampingPage = React.lazy(() => import('../pages/OfficerFreed
 const OfficerParkingPage = React.lazy(() => import('../pages/OfficerParkingPage'));
 const OfficerNoiseControlPage = React.lazy(() => import('../pages/OfficerNoiseControlPage'));
 const OfficerBiosecurityPage = React.lazy(() => import('../pages/OfficerBiosecurityPage'));
+const OfficerAccessControlPage = React.lazy(() => import('../pages/OfficerAccessControlPage'));
 const SmokeControlPage = React.lazy(() => import('../pages/modules/SmokeControlPage'));
 const OfficerStaticGuardPage = React.lazy(() => import('../pages/OfficerStaticGuardPage'));
 const BreachReviewPage = React.lazy(() => import('../pages/BreachReviewPage'));
@@ -40,6 +41,9 @@ function renderModule(moduleKey: string, adminView: boolean) {
     case 'parking_enforcement': return adminView ? <ParkingOversightPage /> : <OfficerParkingPage />;
     case 'noise_control': return adminView ? <NoiseControlOversightPage /> : <OfficerNoiseControlPage />;
     case 'biosecurity': return adminView ? <BiosecurityOversightPage /> : <OfficerBiosecurityPage />;
+    case 'access_control': return adminView
+      ? <div className="module-shell-access-state" role="status"><strong>Access-control event entry is not available in the Admin portal.</strong><span>This field workflow requires an active officer profile.</span></div>
+      : <OfficerAccessControlPage />;
     case 'smoke_complaints':
     case 'smoke_control': return <SmokeControlPage />;
     case 'static_guarding': return <OfficerStaticGuardPage />;
@@ -67,7 +71,8 @@ export function ModuleShell() {
   const adminView = ['grand_master', 'master', 'admin'].includes(profile?.role ?? '')
     || (profile?.role === 'admin_officer' && typeof sessionStorage !== 'undefined' && sessionStorage.getItem('fcm.admin_officer.portal') === 'admin');
   const label = moduleDefinition?.label;
-  const allowed = status !== 'loading'
+  const checkingAccess = status === 'loading' || moduleContext.loading;
+  const allowed = !checkingAccess
     && Boolean(moduleDefinition)
     && (!moduleContext.loading && moduleContext.moduleKey === canonicalKey ? moduleContext.enabled : isModuleEnabled(canonicalKey));
   const availableModules = SPECIALTY_MODULES.filter((module) => {
@@ -78,8 +83,8 @@ export function ModuleShell() {
   useEffect(() => { setLocationMode(adminView ? 'manual' : 'gps'); }, [adminView, setLocationMode]);
 
   useEffect(() => {
-    if (status !== 'loading' && !allowed) navigate('/officer', { replace: true });
-  }, [allowed, navigate, status]);
+    if (!checkingAccess && !allowed) navigate('/officer', { replace: true });
+  }, [allowed, checkingAccess, navigate]);
 
   const bobContext = useMemo(() => ({
     activeModule: canonicalKey,
@@ -93,7 +98,7 @@ export function ModuleShell() {
     moduleGateStatus: status,
   }), [moduleKey, profile?.role, safety.activeAlert, safety.status, selectedAgreement, selectedSite, selectedZone, shift, status]);
 
-  if (status === 'loading') return <div className="module-shell-access-state"><strong>Checking module access</strong><span>Verifying your organization entitlement.</span></div>;
+  if (checkingAccess) return <div className="module-shell-access-state"><strong>Checking module access</strong><span>Verifying your organization and agreement access.</span></div>;
   if (!label || !allowed) return <div className="module-shell-access-state"><strong>Module unavailable</strong><span>This module is not enabled for your current organization or role.</span><button type="button" onClick={() => navigate('/officer')}>Return to field operations</button></div>;
 
   return (

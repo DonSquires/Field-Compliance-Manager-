@@ -13,12 +13,16 @@ describe('standalone module shell contract', () => {
     expect(shell).toContain("case 'parking_enforcement'");
     expect(shell).toContain("case 'noise_control'");
     expect(shell).toContain("case 'biosecurity'");
+    expect(shell).toContain("case 'access_control'");
+    expect(shell).toContain('OfficerAccessControlPage');
+    expect(shell).toContain('Access-control event entry is not available in the Admin portal.');
     expect(shell).toContain('ParkingOversightPage');
     expect(shell).toContain('adminView');
     expect(shell).toContain("sessionStorage.getItem('fcm.admin_officer.portal') === 'admin'");
     expect(shell).toContain('useEnabledModules');
     expect(shell).toContain('BobPanel');
-    expect(shell).toContain("status !== 'loading'");
+    expect(shell).toContain("const checkingAccess = status === 'loading' || moduleContext.loading");
+    expect(shell).toContain('if (!checkingAccess && !allowed)');
     expect(shell).toContain('Module unavailable');
     expect(manifest).toContain('standalonePath');
     expect(manifest).toContain("key: 'freedom_camping'");

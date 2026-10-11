@@ -1,5 +1,5 @@
 import { expect, test } from '@playwright/test';
-import { installSupabaseFixtures, monitorBrowserErrors, signInAsOfficer } from './fixtures';
+import { installSupabaseFixtures, monitorBrowserErrors, signInAsAdmin, signInAsOfficer } from './fixtures';
 
 test('officer module directory requires both a direct grant and organisation entitlement', async ({ page }) => {
   const browserErrors = monitorBrowserErrors(page);
@@ -42,4 +42,28 @@ test('enabled module cards keep actions in bounds and expose standalone routes o
   await expect(page).toHaveURL(/\/modules\/freedom_camping$/);
   await expect(page.getByText('Standalone module')).toBeVisible();
   expect(browserErrors, browserErrors.join('\n')).toEqual([]);
+});
+
+test('the standalone access-control route renders its wired officer workflow', async ({ page }) => {
+  await installSupabaseFixtures(page, { officerModules: ['access_control'] });
+  await page.route('**/rest/v1/rpc/resolve_active_rules', async (route) => {
+    await route.fulfill({ status: 200, contentType: 'application/json', body: JSON.stringify([{ organization_id: '33333333-3333-4333-8333-333333333333', module_key: 'access_control', enabled: true }]) });
+  });
+  await signInAsOfficer(page, '/modules/access_control');
+
+  await expect(page.getByText('Standalone module')).toBeVisible();
+  await expect(page.getByRole('heading', { name: 'Access control', exact: true })).toBeVisible();
+  await expect(page.getByRole('region', { name: 'Access-control authority' })).toBeVisible();
+});
+
+test('the standalone access-control route does not expose officer event entry to admins', async ({ page }) => {
+  await installSupabaseFixtures(page);
+  await page.route('**/rest/v1/rpc/resolve_active_rules', async (route) => {
+    await route.fulfill({ status: 200, contentType: 'application/json', body: JSON.stringify([{ organization_id: '33333333-3333-4333-8333-333333333333', module_key: 'access_control', enabled: true }]) });
+  });
+  await signInAsAdmin(page, '/admin/hub');
+  await page.goto('/modules/access_control');
+
+  await expect(page.getByText('Access-control event entry is not available in the Admin portal.')).toBeVisible();
+  await expect(page.getByRole('button', { name: 'Capture access evidence' })).toHaveCount(0);
 });

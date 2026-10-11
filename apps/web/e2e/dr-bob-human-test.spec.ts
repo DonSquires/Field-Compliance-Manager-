@@ -217,11 +217,11 @@ test.describe("Dr. Bob's human browser test", () => {
     });
   }
 
-  const officerAuditModules = ['dispatch', 'patrol', 'static_guarding', 'welfare', 'freedom_camping', 'parking_enforcement', 'noise_control', 'biosecurity', 'smoke_complaints', 'workshop', 'cctv', 'ems', 'overnight_verification', 'checkpoint_scan'];
+  const officerAuditModules = ['dispatch', 'patrol', 'static_guarding', 'welfare', 'freedom_camping', 'parking_enforcement', 'noise_control', 'biosecurity', 'smoke_complaints', 'access_control', 'workshop', 'cctv', 'ems', 'overnight_verification', 'checkpoint_scan'];
   const officerControlGroups = [
     { name: 'Self-service', routes: ['/officer/schedule', '/officer/report', '/officer/leave', '/officer/timesheet', '/officer/credentials', '/officer/vehicle_lookup', '/officer/modules'] },
     { name: 'Dispatch and patrol', routes: ['/officer/dispatch', '/officer/patrol', '/officer/site_guard', '/officer/debrief', '/officer/map', '/officer/overnight_verification', '/officer/checkpoint_scan'] },
-    { name: 'Specialty modules', routes: ['/officer/noise_control', '/officer/parking', '/officer/biosecurity', '/officer/freedom_camping', '/officer/smoke_control', '/officer/ems', '/officer/workshop'] },
+    { name: 'Specialty modules', routes: ['/officer/noise_control', '/officer/parking', '/officer/biosecurity', '/officer/freedom_camping', '/officer/smoke_control', '/officer/access_control', '/officer/ems', '/officer/workshop'] },
   ];
   for (const group of officerControlGroups) {
     test(`follows safe Officer controls: ${group.name}`, async ({ page }, testInfo) => {
