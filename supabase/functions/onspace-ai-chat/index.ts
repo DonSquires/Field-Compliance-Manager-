@@ -345,6 +345,7 @@ function safeAgentWorkspaceContext(value) {
         'resolve_address',
         'inventory_document_source',
         'confirm_import',
+        'create_document_draft',
         'sql_read',
         'repo_search',
         'web_research',
@@ -356,6 +357,7 @@ function safeAgentWorkspaceContext(value) {
         'create_builder_job',
         'cancel_builder_job',
         'laptop_shell',
+        'create_document_draft',
         'review_merge_request',
         'config_error',
         'plan_failed',
@@ -647,7 +649,8 @@ function budgetKnowledgeCards(cards) {
     'propose_rate_rule',
     'propose_zone_patrol_stop',
     'promote_action',
-    'confirm_import'
+    'confirm_import',
+    'create_document_draft'
   ]);
   // Direct write tools that must NEVER execute from chat path
   const directWriteTools = new Set([
@@ -768,6 +771,7 @@ const WRITE_CAPABLE_TOOLS = new Set([
   'cancel_builder_job',
   // laptop_shell runs a PowerShell command on the owner's laptop — write-capable (it acts on a real machine).
   'laptop_shell',
+  'create_document_draft',
   // C5 stage 1b (#243): generic_write is write-capable, so the explicit
   // write-refusal guard must cover it too (an in-message "don't write" blocks it).
   'generic_write'
@@ -963,7 +967,7 @@ async function resolveUserCapabilities(supabase, role, orgId, userId = null) {
   ];
   if (canCompareData) allowedTools.push('client_site_compare', 'query_records', 'scv_lookup', 'site_risk', 'resolve_point_context', 'document_search', 'resolve_geofence');
   if (canInspectSchema) allowedTools.push('schema_inspect');
-  if (canIngest) allowedTools.push('ingest_document', 'plan_import', 'plan_patrol_import', 'perceive_media', 'confirm_import', 'inventory_document_source');
+  if (canIngest) allowedTools.push('ingest_document', 'plan_import', 'plan_patrol_import', 'perceive_media', 'confirm_import', 'inventory_document_source', 'create_document_draft');
   if (canPromote) allowedTools.push('promote_action', 'propose_client_onboarding', 'propose_corporate_profile', 'propose_freedom_camping_zone', 'propose_zone_patrol_stop', 'propose_patrol_route_assignment', 'propose_patrol_route_service_area', 'propose_roster_fill', 'propose_roster_rollback', 'propose_rate_rule', 'propose_staff_onboarding', 'propose_site_risk', 'propose_freedom_camping_org_strategy');
   if (tier !== 'guest') allowedTools.push('perceive_media', 'web_research');
   if (canCompareData) allowedTools.push('fetch_bylaw_source');
@@ -1537,6 +1541,7 @@ function computeEgressForbiddenSet(caps, meta) {
     t.tool === 'resolve_point_context' && caps.canCompareData ||
     t.tool === 'document_search' && caps.canCompareData ||
     t.tool === 'inventory_document_source' && caps.canIngest ||
+    t.tool === 'create_document_draft' && caps.canIngest ||
     t.tool === 'propose_corporate_profile' && caps.canPromote ||
     t.tool === 'propose_client_root_org' && caps.tier === 'admiral' ||
     // same gate as every single-action propose_* tool; a plan approval is the
@@ -4837,6 +4842,52 @@ async function execInventoryDocumentSource(authHeader, args) {
       intent: active ? 'clarifying_questions' : undefined,
       answer_options: active ? ['Check inventory status', 'Cancel inventory'] : ['Open Files workspace'],
       navigation_actions: [{ label: 'Open Files workspace', path: `/admin/files${run?.id ? `?sourceRun=${encodeURIComponent(run.id)}` : ''}` }]
+    }
+  };
+}
+async function execCreateDocumentDraft(authHeader, args) {
+  const title = String(args.title ?? '').trim().slice(0, 220);
+  const documentType = String(args.document_type ?? 'custom').trim().slice(0, 80);
+  const authoredText = String(args.authored_text ?? '').trim();
+  if (!title || !authoredText) {
+    return {
+      reply: 'I need both a document title and draft content before I can create the governed draft.',
+      meta: { tool: 'create_document_draft', outcome: 'need_params' }
+    };
+  }
+  if (authoredText.length > 50_000) {
+    return {
+      reply: 'That draft exceeds the 50,000-character governed limit. Split it into smaller documents before I persist it.',
+      meta: { tool: 'create_document_draft', outcome: 'too_large' }
+    };
+  }
+  const references = Array.isArray(args.references) ? args.references.slice(0, 25) : [];
+  const r = await callFn('bob-agentic-document-draft', authHeader, {
+    sourceType: 'custom',
+    title,
+    documentType,
+    authoredText,
+    references
+  });
+  const draft = r.data?.draft;
+  if (!r.ok || !draft?.document_id || !draft?.document_version_id) {
+    return {
+      reply: `I could not persist the document draft${r.data?.error ? ` (${r.data.error})` : ''}. No document ID was claimed.`,
+      meta: { tool: 'create_document_draft', outcome: 'failed' }
+    };
+  }
+  return {
+    reply: `Created **${title}** as a conversation-scoped draft and submitted it for human review.\n\nDocument ID: \`${draft.document_id}\`\nVersion ID: \`${draft.document_version_id}\`\n\nNo business record was promoted.`,
+    meta: {
+      tool: 'create_document_draft',
+      outcome: 'created',
+      document_id: draft.document_id,
+      document_version_id: draft.document_version_id,
+      review_status: draft.status ?? 'pending_review',
+      navigation_actions: [{
+        label: 'Open draft in Document Studio',
+        path: `/admin/document-studio?documentId=${encodeURIComponent(draft.document_id)}&versionId=${encodeURIComponent(draft.document_version_id)}`
+      }]
     }
   };
 }
@@ -8515,6 +8566,8 @@ serve(async (req)=>{
           return execDocumentSearch(authHeader, toolArgs);
         case 'inventory_document_source':
           return execInventoryDocumentSource(authHeader, toolArgs);
+        case 'create_document_draft':
+          return execCreateDocumentDraft(authHeader, toolArgs);
         case 'propose_site_risk':
           return execProposeSiteRisk(authHeader, caps, toolArgs);
         case 'propose_patrol_route_service_area':
@@ -11150,6 +11203,7 @@ serve(async (req)=>{
       'resolve_geofence',
       'resolve_address',
       'inventory_document_source',
+      'create_document_draft',
       'confirm_import',
       'sql_read',
       'repo_search',

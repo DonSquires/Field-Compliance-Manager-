@@ -632,6 +632,19 @@ System-wide Bob acceptance gate shipped 2026-10-11:
     for Bob's writer/creator lanes; no business truth is promoted by inventory
     itself, and consequential writes continue through governed proposals.
 
+  Governed chat document creation slice implemented 2026-10-11:
+
+  - **Before:** live acceptance proved Bob could inventory, investigate, reason,
+    and plan, but a request to persist a custom draft was refused because the
+    chat catalogue exposed no document-create tool.
+  - **During:** exposed the existing audited `create_bob_document_draft` and
+    `submit_bob_document_for_review` path as `create_document_draft`, with
+    administrator scope, explicit-write refusal enforcement, title/type/content
+    caps, escaped HTML, and conversation-only scope.
+  - **After:** Bob can return verified document/version IDs and a safe Studio
+    destination. Publication, output, signing, and business-record promotion
+    remain separate human-reviewed effects.
+
   **Gate:** live `bob_messages` show no context-losing fallbacks; a Builder job
   runs implement → verify → repair without human touch and stops cleanly at
   `release_ready`; egress proven per rank; Atlas `exercised` is populated from

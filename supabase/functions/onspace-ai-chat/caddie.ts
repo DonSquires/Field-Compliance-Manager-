@@ -129,6 +129,11 @@ const TOOL_REGISTRY = {
     governance: 'read-only source access; tenant-scoped; approved alias only; writes manifest/checkpoint receipts but never promotes business records',
     effect_class: 'internal_observation'
   },
+  create_document_draft: {
+    purpose: 'CREATE and persist a conversation-scoped document draft in the organization Files workspace, then submit it for human review. Use for plans, reports, proposals, SOPs, RFQ responses, and custom documents. Args: { title, document_type?, authored_text, references? }.',
+    governance: 'WRITE-draft; organization-scoped; creates a reversible draft only; human review required before output or promotion',
+    effect_class: 'draft_governed_write'
+  },
   propose_site_risk: {
     purpose: 'PROPOSE an updated site risk rating from a site assessment. Creates a pending approval only; it never changes the rating directly. Args: { site_id, risk_level? }.',
     governance: 'WRITE-draft; needs approval',
@@ -606,6 +611,7 @@ const TOOL_REGISTRY = {
     resolve_point_context: 'resolve-point-context',
     document_search: 'bob-document-search',
     inventory_document_source: 'bob-document-source-ingestion',
+    create_document_draft: 'bob-agentic-document-draft',
     propose_site_risk: 'bob-propose-site-risk',
     propose_patrol_route_service_area: 'bob-propose-patrol-route-service-area',
     propose_corporate_profile: 'bob-propose-corporate-profile',

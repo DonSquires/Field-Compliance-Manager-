@@ -255,6 +255,10 @@ Desktop capability presence is not wiring, and wiring is not exercise.
 - Inventory never creates canonical CRM, HR, finance, identity, investigation,
   agreement, or evidence records. Supported manifest entries feed Bob's
   existing extraction, compare, proposal, and governed execution lanes.
+- Bob may create conversation-scoped document drafts directly through
+  `create_bob_document_draft`; the tool returns the persisted document/version
+  IDs and immediately submits the draft for human review. It cannot publish,
+  sign, output, or promote the draft.
 
 ## 8. Self-heal and Grandmaster build loop
 

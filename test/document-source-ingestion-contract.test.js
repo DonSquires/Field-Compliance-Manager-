@@ -8,6 +8,7 @@ const compose = fs.readFileSync('docker-compose.laptop-worker.yml', 'utf8');
 const caddie = fs.readFileSync('supabase/functions/onspace-ai-chat/caddie.ts', 'utf8');
 const conductor = fs.readFileSync('supabase/functions/onspace-ai-chat/index.ts', 'utf8');
 const endpoint = fs.readFileSync('supabase/functions/bob-document-source-ingestion/index.ts', 'utf8');
+const documentDraftEndpoint = fs.readFileSync('supabase/functions/bob-agentic-document-draft/index.ts', 'utf8');
 const filesPage = fs.readFileSync('apps/web/src/pages/FileSystemPage.tsx', 'utf8');
 
 test('document source runs are tenant-scoped, resumable, and service-written', () => {
@@ -48,4 +49,17 @@ test('Bob and the Files workspace expose the governed inventory', () => {
   assert.match(endpoint, /\.eq\('organization_id', profile\.organization_id\)/);
   assert.match(filesPage, /Bob document inventory/);
   assert.match(filesPage, /Business records are created only through the separate governed promotion lane/);
+});
+
+test('Bob can create a governed conversation-scoped document draft', () => {
+  assert.match(caddie, /create_document_draft/);
+  assert.match(caddie, /bob-agentic-document-draft/);
+  assert.match(conductor, /case 'create_document_draft'/);
+  assert.match(conductor, /execCreateDocumentDraft/);
+  assert.match(conductor, /WRITE_CAPABLE_TOOLS[\s\S]*create_document_draft/);
+  assert.match(documentDraftEndpoint, /sourceType === 'custom'/);
+  assert.match(documentDraftEndpoint, /create_bob_document_draft/);
+  assert.match(documentDraftEndpoint, /submit_bob_document_for_review/);
+  assert.match(documentDraftEndpoint, /customText\.length > 50_000/);
+  assert.match(documentDraftEndpoint, /No business record was promoted|Human verification is required/);
 });

@@ -34,7 +34,10 @@ serve(async (request) => {
     const body = await request.json().catch(() => ({}));
     const sourceType = String(body.sourceType ?? '').trim().toLowerCase();
     const sourceId = String(body.sourceId ?? '').trim();
-    if (!['site', 'cctv', 'breach', 'notice', 'debrief'].includes(sourceType) || !sourceId) return json({ error: 'sourceType and sourceId are required' }, 422);
+    if (!['site', 'cctv', 'breach', 'notice', 'debrief', 'custom'].includes(sourceType)) {
+      return json({ error: 'A supported sourceType is required' }, 422);
+    }
+    if (sourceType !== 'custom' && !sourceId) return json({ error: 'sourceId is required for source-backed drafts' }, 422);
 
     const admin = createClient(SUPABASE_URL, SUPABASE_SERVICE_ROLE_KEY);
     const { data: profile, error: profileError } = await admin.from('user_profiles').select('organization_id,role').eq('id', user.id).single();
@@ -46,7 +49,23 @@ serve(async (request) => {
     let heading = '';
     let facts = '';
     let referenceMetadata: Array<Record<string, unknown>> = [];
-    if (sourceType === 'site') {
+    if (sourceType === 'custom') {
+      title = String(body.title ?? '').trim().slice(0, 220);
+      documentType = String(body.documentType ?? 'custom').trim().toLowerCase().replace(/[^a-z0-9_-]+/g, '_').slice(0, 80);
+      const customText = String(body.authoredText ?? '').trim();
+      if (!title) return json({ error: 'A title is required for a custom draft' }, 422);
+      if (!customText) return json({ error: 'Document content is required for a custom draft' }, 422);
+      if (customText.length > 50_000) return json({ error: 'Custom draft content exceeds 50,000 characters' }, 422);
+      heading = title;
+      facts = customText;
+      referenceMetadata = Array.isArray(body.references)
+        ? body.references.slice(0, 25).map((reference: Record<string, unknown>) => ({
+            source_type: String(reference?.source_type ?? 'conversation').slice(0, 80),
+            source_id: String(reference?.source_id ?? '').slice(0, 200),
+            title: String(reference?.title ?? 'Conversation evidence').slice(0, 220),
+          }))
+        : [];
+    } else if (sourceType === 'site') {
       const { data: geography, error: geographyError } = await caller.rpc('get_crm_operational_geography');
       if (geographyError) return json({ error: `Site context could not be authorised: ${geographyError.message}` }, 403);
       const authorizedSite = ((geography as { sites?: Array<{ id: string }> } | null)?.sites ?? []).find((site) => site.id === sourceId);
@@ -85,7 +104,9 @@ serve(async (request) => {
       referenceMetadata = [{ source_type: 'breach_alert', source_id: alert.id, title: 'Breach alert' }];
     }
 
-    const authoredText = `${heading}\n\nSource facts\n${facts}\n\nAnalysis and required controls\n[TO CONFIRM]\n\nRecommended next action\n[TO CONFIRM]\n\nHuman review checklist\n- Verify every source fact\n- Resolve all [TO CONFIRM] fields\n- Confirm owner, deadline, and approval boundary`;
+    const authoredText = sourceType === 'custom'
+      ? facts
+      : `${heading}\n\nSource facts\n${facts}\n\nAnalysis and required controls\n[TO CONFIRM]\n\nRecommended next action\n[TO CONFIRM]\n\nHuman review checklist\n- Verify every source fact\n- Resolve all [TO CONFIRM] fields\n- Confirm owner, deadline, and approval boundary`;
     const authoredHtml = authoredText.split('\n').map((line) => line.trim() ? `<p>${escapeHtml(line)}</p>` : '<p></p>').join('');
     const { data: draft, error: draftError } = await caller.rpc('create_bob_document_draft', {
       p_title: title,
@@ -99,7 +120,9 @@ serve(async (request) => {
     const { data: review, error: reviewError } = await caller.rpc('submit_bob_document_for_review', {
       p_document_id: draft.document_id,
       p_document_version_id: draft.document_version_id,
-      p_review_reason: 'Automatically prepared from source context. Human verification is required before approval or output.',
+      p_review_reason: sourceType === 'custom'
+        ? 'Prepared by Bob from the current conversation. Human verification is required before approval, output, or promotion.'
+        : 'Automatically prepared from source context. Human verification is required before approval or output.',
     });
     if (reviewError) return json({ error: reviewError.message, draft }, 500);
     return json({ ok: true, draft: { ...draft, ...review, title, document_type: documentType, authored_html: authoredHtml, authored_text: authoredText, references: referenceMetadata } });
