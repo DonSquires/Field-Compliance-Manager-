@@ -52,6 +52,7 @@ for target in "$@"; do
     control-plane)
       "${SSH[@]}" "set -euo pipefail; cd /srv/fcm/releases/$SHA
         DOCKER_GID=999 docker compose -f deploy/bob-control-plane/docker-compose.yml build -q bob-control-plane
+        DOCKER_GID=999 docker compose -f deploy/bob-control-plane/docker-compose.yml rm -sf bob-control-plane >/dev/null
         DOCKER_GID=999 docker compose -f deploy/bob-control-plane/docker-compose.yml up -d --force-recreate bob-control-plane >/dev/null
         for i in \$(seq 1 20); do sleep 2; curl -sf http://172.16.0.1:8091/health >/tmp/cp-health.json && break; done
         node -e 'const h=require(\"/tmp/cp-health.json\"); if (h.autopilot === undefined || !h.modelProviders) { console.error(\"health is missing expected fields - wrong build?\", JSON.stringify(h)); process.exit(1); } console.log(\"control-plane ok:\", JSON.stringify({autopilot:h.autopilot, gpu:h.modelProviders.gpu_workstation, laptopShell:h.laptopShell}))'" ;;
