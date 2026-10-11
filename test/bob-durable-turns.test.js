@@ -44,10 +44,10 @@ test('Bob queues browser turns and claims background execution exactly once', ()
   assert.match(queueMigration, /status in \('queued', 'running', 'cancel_requested', 'completed', 'failed', 'cancelled'\)/i);
   assert.match(queueMigration, /where status = 'queued'/i);
   assert.match(conductor, /operation === 'enqueue' \? 'queued' : 'running'/);
-  assert.match(conductor, /X-Bob-Background-Token/);
   assert.match(conductor, /EdgeRuntime\?: \{ waitUntil/);
-  assert.match(conductor, /body: JSON\.stringify\(\{ \.\.\.body, operation: 'execute' \}\)/);
-  assert.match(conductor, /\.eq\('status', 'queued'\)[\s\S]*transitionedRun/);
+  assert.match(conductor, /const executeClaimedTurn = async \(\) =>/);
+  assert.match(conductor, /\.update\(\{ status: 'running'[\s\S]*\.eq\('status', 'queued'\)/);
+  assert.match(conductor, /runtime\.waitUntil\(backgroundTask\)/);
   assert.match(conductor, /return json\(\{ accepted: true, turn_run: publicTurnRun\(claimedRun\) \}, 202\)/);
 });
 

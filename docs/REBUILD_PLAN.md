@@ -572,9 +572,14 @@ System-wide Bob acceptance gate shipped 2026-10-11:
     Failed or cancelled runs remain explicit and recoverable. The original
     caller JWT, organization, conversation, workspace, rank and effect gates
     remain binding during background execution.
-  - **Evidence state:** focused durable-turn and BobPanel tests plus web
-    TypeScript pass. Live deployment and a measured glass test are still required
-    before this slice is called deployed or latency-corrected.
+  - **Evidence state:** migration `20261011043559` and `onspace-ai-chat` are live;
+    the schema snapshot and Atlas were refreshed. Focused durable-turn and
+    BobPanel tests, full repository tests, web TypeScript and the production build
+    pass. Two consecutive browser glass runs returned control immediately,
+    showed the durable run progressing independently, automatically refreshed the
+    transcript, and completed successfully in 35.627 s and 34.675 s. The live
+    security advisor reported no finding related to `bob_turn_runs`; its broader
+    pre-existing findings remain an enterprise-hardening backlog.
 
   **Gate:** live `bob_messages` show no context-losing fallbacks; a Builder job
   runs implement → verify → repair without human touch and stops cleanly at

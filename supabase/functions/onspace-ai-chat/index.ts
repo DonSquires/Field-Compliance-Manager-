@@ -84,7 +84,6 @@ const SUPABASE_SERVICE_KEY = Deno.env.get('SUPABASE_SERVICE_ROLE_KEY') ?? '';
 const SUPABASE_ANON_KEY = Deno.env.get('SUPABASE_ANON_KEY') ?? '';
 const BOB_INFERENCE_URL = Deno.env.get('BOB_INFERENCE_URL') ?? '';
 const BOB_INFERENCE_SECRET = Deno.env.get('BOB_INFERENCE_SECRET') ?? '';
-const BOB_BACKGROUND_TOKEN = Deno.env.get('API_TOKEN') ?? '';
 /**
  * Derive disclosure_tier from conductor egress signals.
  * Inline mirror of deriveDisclosureTier (packages/shared/src/disclosureTier.ts).
@@ -147,8 +146,8 @@ const BOB_BACKGROUND_TOKEN = Deno.env.get('API_TOKEN') ?? '';
   if (body.attachments !== undefined && !Array.isArray(body.attachments)) errors.push('attachments must be an array');
   // request_id must be a string if present
   if (body.request_id !== undefined && typeof body.request_id !== 'string') errors.push('request_id must be a string');
-  if (body.operation !== undefined && !['run', 'enqueue', 'execute', 'status', 'cancel'].includes(body.operation)) {
-    errors.push('operation must be run, enqueue, execute, status, or cancel');
+  if (body.operation !== undefined && !['run', 'enqueue', 'status', 'cancel'].includes(body.operation)) {
+    errors.push('operation must be run, enqueue, status, or cancel');
   }
   // UI context is descriptive only; it never grants tools or authority.
   if (body.context !== undefined && (!body.context || typeof body.context !== 'object' || Array.isArray(body.context))) errors.push('context must be an object');
@@ -6288,10 +6287,6 @@ serve(async (req)=>{
     const requestId = body.request_id ?? undefined;
     const operation = body.operation ?? 'run';
     const agentWorkspaceContext = safeAgentWorkspaceContext(body.context);
-    if (operation === 'execute' &&
-        (!BOB_BACKGROUND_TOKEN || req.headers.get('X-Bob-Background-Token') !== BOB_BACKGROUND_TOKEN)) {
-      return json({ error: 'Background execution is not available to this caller.' }, 403);
-    }
     // ── PILLAR H: Event log context — mutable counters for this turn ──────
     // step_index is incremented BEFORE each logEvent call so every step gets
     // a unique, monotonically increasing position within the turn.
@@ -6419,9 +6414,24 @@ serve(async (req)=>{
 
     const requestFingerprint = await fingerprintTurnRequest(message, attachments, agentWorkspaceContext.agent_mode);
     const now = new Date().toISOString();
-    let claimedRun: BobTurnRunRow | null = null;
+    const { data: insertedRun, error: insertRunError } = await admin
+      .from('bob_turn_runs')
+      .insert({
+        organization_id: orgId,
+        conversation_id: conversationId,
+        user_id: user.id,
+        request_id: requestId,
+        request_fingerprint: requestFingerprint,
+        status: operation === 'enqueue' ? 'queued' : 'running',
+        started_at: now,
+        heartbeat_at: now,
+        updated_at: now
+      })
+      .select('id, request_id, request_fingerprint, status, started_at, heartbeat_at, completed_at, error_code, response_payload')
+      .maybeSingle();
 
-    if (operation === 'execute') {
+    let claimedRun: BobTurnRunRow | null = insertedRun;
+    if (insertRunError?.code === '23505') {
       const { data: priorRun, error: priorRunError } = await admin
         .from('bob_turn_runs')
         .select('id, request_id, request_fingerprint, status, started_at, heartbeat_at, completed_at, error_code, response_payload')
@@ -6429,166 +6439,42 @@ serve(async (req)=>{
         .eq('conversation_id', conversationId)
         .eq('user_id', user.id)
         .eq('request_id', requestId)
-        .maybeSingle();
+        .single();
       if (priorRunError) throw priorRunError;
-      if (!priorRun) return json({ error: 'Queued Bob request was not found.' }, 404);
       if (priorRun.request_fingerprint !== requestFingerprint) {
         return json({ error: 'request_id was already used for different Bob input.' }, 409);
       }
       if (priorRun.status === 'completed' && priorRun.response_payload) {
         return json({ ...priorRun.response_payload, replayed: true, turn_run: publicTurnRun(priorRun) });
       }
-      if (priorRun.status !== 'queued') {
-        return json(
-          { turn_run: publicTurnRun(priorRun) },
-          priorRun.status === 'running' || priorRun.status === 'cancel_requested' ? 202 : 409,
-        );
-      }
-      const { data: transitionedRun, error: transitionError } = await admin
-        .from('bob_turn_runs')
-        .update({ status: 'running', heartbeat_at: now, updated_at: now })
-        .eq('id', priorRun.id)
-        .eq('status', 'queued')
-        .select('id, request_id, request_fingerprint, status, started_at, heartbeat_at, completed_at, error_code, response_payload')
-        .maybeSingle();
-      if (transitionError) throw transitionError;
-      if (!transitionedRun) {
-        const { data: currentRun, error: currentRunError } = await admin
-          .from('bob_turn_runs')
-          .select('id, request_id, status, started_at, heartbeat_at, completed_at, error_code')
-          .eq('id', priorRun.id)
-          .single();
-        if (currentRunError) throw currentRunError;
-        return json({ turn_run: publicTurnRun(currentRun) }, 202);
-      }
-      claimedRun = transitionedRun;
-    } else {
-      const { data: insertedRun, error: insertRunError } = await admin
-        .from('bob_turn_runs')
-        .insert({
-          organization_id: orgId,
-          conversation_id: conversationId,
-          user_id: user.id,
-          request_id: requestId,
-          request_fingerprint: requestFingerprint,
-          status: operation === 'enqueue' ? 'queued' : 'running',
-          started_at: now,
-          heartbeat_at: now,
-          updated_at: now
-        })
-        .select('id, request_id, request_fingerprint, status, started_at, heartbeat_at, completed_at, error_code, response_payload')
-        .maybeSingle();
-
-      claimedRun = insertedRun;
-      if (insertRunError?.code === '23505') {
-        const { data: priorRun, error: priorRunError } = await admin
-          .from('bob_turn_runs')
-          .select('id, request_id, request_fingerprint, status, started_at, heartbeat_at, completed_at, error_code, response_payload')
-          .eq('organization_id', orgId)
-          .eq('conversation_id', conversationId)
-          .eq('user_id', user.id)
-          .eq('request_id', requestId)
-          .single();
-        if (priorRunError) throw priorRunError;
-        if (priorRun.request_fingerprint !== requestFingerprint) {
-          return json({ error: 'request_id was already used for different Bob input.' }, 409);
-        }
-        if (priorRun.status === 'completed' && priorRun.response_payload) {
-          return json({ ...priorRun.response_payload, replayed: true, turn_run: publicTurnRun(priorRun) });
-        }
-        return json(
-          { turn_run: publicTurnRun(priorRun) },
-          ['queued', 'running', 'cancel_requested'].includes(priorRun.status) ? 202 : 409,
-        );
-      }
-      if (insertRunError) throw insertRunError;
+      return json(
+        { turn_run: publicTurnRun(priorRun) },
+        ['queued', 'running', 'cancel_requested'].includes(priorRun.status) ? 202 : 409,
+      );
     }
+    if (insertRunError) throw insertRunError;
     if (!claimedRun?.id) throw new Error('Bob turn run could not be claimed.');
 
-    if (operation === 'enqueue') {
-      if (!BOB_BACKGROUND_TOKEN) {
-        const completedAt = new Date().toISOString();
-        await admin
+    const executeClaimedTurn = async () => {
+      if (operation === 'enqueue') {
+        const claimedAt = new Date().toISOString();
+        const { data: transitionedRun, error: transitionError } = await admin
           .from('bob_turn_runs')
-          .update({
-            status: 'failed',
-            error_code: 'background_dispatch_not_configured',
-            heartbeat_at: completedAt,
-            completed_at: completedAt,
-            updated_at: completedAt,
-          })
-          .eq('id', claimedRun.id)
-          .eq('status', 'queued');
-        return json({ error: 'Bob background execution is not configured.' }, 503);
+          .update({ status: 'running', heartbeat_at: claimedAt, updated_at: claimedAt })
+          .eq('id', claimedRun!.id)
+          .eq('status', 'queued')
+          .select('id, request_id, request_fingerprint, status, started_at, heartbeat_at, completed_at, error_code, response_payload')
+          .maybeSingle();
+        if (transitionError) throw transitionError;
+        if (!transitionedRun) return json({ turn_run: publicTurnRun(claimedRun!) }, 202);
+        claimedRun = transitionedRun;
       }
 
-      const runtime = (globalThis as typeof globalThis & {
-        EdgeRuntime?: { waitUntil(promise: Promise<unknown>): void };
-      }).EdgeRuntime;
-      if (!runtime) {
-        const completedAt = new Date().toISOString();
-        await admin
-          .from('bob_turn_runs')
-          .update({
-            status: 'failed',
-            error_code: 'background_runtime_unavailable',
-            heartbeat_at: completedAt,
-            completed_at: completedAt,
-            updated_at: completedAt,
-          })
-          .eq('id', claimedRun.id)
-          .eq('status', 'queued');
-        return json({ error: 'Bob background execution is unavailable.' }, 503);
-      }
+      turnRunAdmin = admin;
+      turnRunId = claimedRun!.id ?? null;
+      if (!turnRunId) throw new Error('Bob turn run lost its durable identifier.');
 
-      const backgroundTask = fetch(`${SUPABASE_URL}/functions/v1/onspace-ai-chat`, {
-        method: 'POST',
-        headers: {
-          'Content-Type': 'application/json',
-          'Authorization': authHeader,
-          'apikey': SUPABASE_ANON_KEY,
-          'X-Bob-Background-Token': BOB_BACKGROUND_TOKEN,
-        },
-        body: JSON.stringify({ ...body, operation: 'execute' }),
-      }).then(async (response)=>{
-        if (response.ok || response.status === 202) return;
-        const responseText = await response.text();
-        console.error(`[conductor][background] execution failed status=${response.status}: ${responseText.slice(0, 300)}`);
-        const completedAt = new Date().toISOString();
-        await admin
-          .from('bob_turn_runs')
-          .update({
-            status: 'failed',
-            error_code: 'background_execution_failed',
-            heartbeat_at: completedAt,
-            completed_at: completedAt,
-            updated_at: completedAt,
-          })
-          .eq('id', claimedRun!.id)
-          .in('status', ['queued', 'running']);
-      }).catch(async (backgroundError)=>{
-        console.error('[conductor][background] dispatch failed:', backgroundError);
-        const completedAt = new Date().toISOString();
-        await admin
-          .from('bob_turn_runs')
-          .update({
-            status: 'failed',
-            error_code: 'background_dispatch_failed',
-            heartbeat_at: completedAt,
-            completed_at: completedAt,
-            updated_at: completedAt,
-          })
-          .eq('id', claimedRun!.id)
-          .in('status', ['queued', 'running']);
-      });
-      runtime.waitUntil(backgroundTask);
-      return json({ accepted: true, turn_run: publicTurnRun(claimedRun) }, 202);
-    }
-
-    turnRunAdmin = admin;
-    turnRunId = claimedRun.id;
-
-    const cancellationRequested = async ()=>{
+      const cancellationRequested = async ()=>{
       const { data: state, error: stateError } = await admin
         .from('bob_turn_runs')
         .select('status')
@@ -6596,7 +6482,7 @@ serve(async (req)=>{
         .single();
       if (stateError) throw stateError;
       return state.status === 'cancel_requested';
-    };
+      };
 
     const cancelAtBoundary = async (boundary: string)=>{
       if (!await cancellationRequested()) return null;
@@ -11319,7 +11205,49 @@ serve(async (req)=>{
         }
       };
     }
-    return respond(structured);
+      return respond(structured);
+    };
+
+    if (operation === 'enqueue') {
+      const runtime = (globalThis as typeof globalThis & {
+        EdgeRuntime?: { waitUntil(promise: Promise<unknown>): void };
+      }).EdgeRuntime;
+      if (!runtime) {
+        const completedAt = new Date().toISOString();
+        await admin
+          .from('bob_turn_runs')
+          .update({
+            status: 'failed',
+            error_code: 'background_runtime_unavailable',
+            heartbeat_at: completedAt,
+            completed_at: completedAt,
+            updated_at: completedAt,
+          })
+          .eq('id', claimedRun.id)
+          .eq('status', 'queued');
+        return json({ error: 'Bob background execution is unavailable.' }, 503);
+      }
+
+      const backgroundTask = executeClaimedTurn().catch(async (backgroundError)=>{
+        console.error('[conductor][background] execution failed:', backgroundError);
+        const completedAt = new Date().toISOString();
+        await admin
+          .from('bob_turn_runs')
+          .update({
+            status: 'failed',
+            error_code: `background_${failureStage}`.slice(0, 120),
+            heartbeat_at: completedAt,
+            completed_at: completedAt,
+            updated_at: completedAt,
+          })
+          .eq('id', claimedRun!.id)
+          .in('status', ['queued', 'running', 'cancel_requested']);
+      });
+      runtime.waitUntil(backgroundTask);
+      return json({ accepted: true, turn_run: publicTurnRun(claimedRun) }, 202);
+    }
+
+    return await executeClaimedTurn();
   } catch (err) {
     console.error(`[conductor] error stage=${failureStage}:`, err);
     const _errMsg = err instanceof Error ? err.message : String(err);
