@@ -980,7 +980,8 @@ async function resolveUserCapabilities(supabase, role, orgId, userId = null) {
     'understand_document',
     'understand_documents',
     'describe_image',
-    'retrieve_knowledge'
+    'retrieve_knowledge',
+    'navigate_app'
   ];
   if (canCompareData) allowedTools.push('client_site_compare', 'query_records', 'scv_lookup', 'site_risk', 'resolve_point_context', 'document_search', 'resolve_geofence');
   if (canInspectSchema) allowedTools.push('schema_inspect');
@@ -1379,6 +1380,54 @@ function attachGuidedProposalWorkflow(meta) {
       label: proposalIds.length === 1 ? 'Review and apply proposal' : `Review ${proposalIds.length} proposals`,
       path: `/admin/approvals?actionId=${encodeURIComponent(firstId)}&source=bob`
     }];
+  }
+
+  const APP_DESTINATIONS: Record<string, { label: string; path: string; job: string }> = {
+    approvals: { label: 'Open Approvals', path: '/admin/approvals', job: 'review governed proposals and receipts' },
+    builder: { label: 'Open Builder control room', path: '/admin/builder', job: 'follow repository repair and build work' },
+    clients: { label: 'Open Client Portfolios', path: '/admin/crm', job: 'work with clients, agreements, contacts, and delivery context' },
+    dispatch: { label: 'Open Dispatch console', path: '/admin/field-ops?area=dispatch', job: 'dispatch and monitor field work' },
+    documents: { label: 'Open Document Studio', path: '/admin/document-studio', job: 'create and review documents and Studio artifacts' },
+    field_reports: { label: 'Open Field reports', path: '/admin/field-ops?area=field-reports', job: 'review reports from field operations' },
+    finance: { label: 'Open Finance home', path: '/admin/finance-bureau', job: 'work with finance, costing, pricing, and commercial readiness' },
+    investigations: { label: 'Open Investigations', path: '/admin/investigations', job: 'investigate linked records and observations' },
+    locations: { label: 'Open Location Houses', path: '/admin/locations', job: 'work with operational places and their layers' },
+    organization_settings: { label: 'Open Organisation Settings', path: '/admin/org-setup', job: 'configure the active organization' },
+    people: { label: 'Open People, Pay & HR', path: '/admin/people-hr', job: 'work with staff, readiness, credentials, leave, and HR' },
+    reports: { label: 'Open Reports', path: '/admin/reports', job: 'review operational and compliance reporting' },
+    roster: { label: 'Open Schedules & Rosters', path: '/admin/roster', job: 'schedule staff and manage roster coverage' },
+    sites: { label: 'Open Site Workspaces', path: '/admin/site-360', job: 'work with a place, agreement, work, evidence, and audit context' },
+    users: { label: 'Open People & Access', path: '/admin/users', job: 'manage user access through governed identity workflows' },
+    zones: { label: 'Open Zone Facets', path: '/admin/zones', job: 'work with zones and geofenced operational rules' }
+  };
+
+  function execNavigateApp(args: Record<string, unknown>) {
+    const requested = String(args.destination ?? '').trim().toLowerCase().replace(/[\s-]+/g, '_');
+    const destination = APP_DESTINATIONS[requested];
+    if (!destination) {
+      return {
+        reply: `I need a supported workspace destination. I can open: ${Object.keys(APP_DESTINATIONS).join(', ')}.`,
+        meta: {
+          tool: 'navigate_app',
+          outcome: 'need_destination',
+          answer_options: ['Open Schedules & Rosters', 'Open People, Pay & HR', 'Open Organisation Settings', 'Open Approvals']
+        }
+      };
+    }
+    const context = typeof args.context === 'string' ? args.context.trim().slice(0, 500) : '';
+    return {
+      reply: `${destination.label}. The page will apply your current role, organisation, and module access.${context ? ` I will carry this job context: ${context}` : ''}`,
+      meta: {
+        tool: 'navigate_app',
+        outcome: 'ready',
+        navigation_actions: [{ label: destination.label, path: destination.path }],
+        workflow_steps: [
+          { id: 'destination', label: destination.label, status: 'current', detail: destination.job },
+          { id: 'inspect', label: 'Inspect the live page context', status: 'pending', detail: 'Bob uses the selected organisation and the records visible on that page.' },
+          { id: 'act', label: 'Prepare or perform the governed action', status: 'pending', detail: 'Writes use the page workflow or a specific proposal tool and return an auditable receipt.' }
+        ]
+      }
+    };
   }
   if (!Array.isArray(meta.workflow_steps) || meta.workflow_steps.length === 0) {
     meta.workflow_steps = [
@@ -4909,7 +4958,8 @@ async function execCreateDocumentDraft(authHeader, args) {
   const title = String(args.title ?? '').trim().slice(0, 220);
   const documentType = String(args.document_type ?? 'custom').trim().slice(0, 80);
   const authoredText = String(args.authored_text ?? '').trim();
-  if (!title || !authoredText) {
+  const sourceType = String(args.source_type ?? 'custom').trim().toLowerCase() === 'rm_rfq' ? 'rm_rfq' : 'custom';
+  if (!title || (sourceType !== 'rm_rfq' && !authoredText)) {
     return {
       reply: 'I need both a document title and draft content before I can create the governed draft.',
       meta: { tool: 'create_document_draft', outcome: 'need_params' }
@@ -4930,11 +4980,12 @@ async function execCreateDocumentDraft(authHeader, args) {
     'custom_document'
   ].includes(documentType) ? documentType : 'custom_document';
   const r = await callFn('bob-agentic-document-draft', authHeader, {
-    sourceType: 'custom',
+    sourceType,
     title,
     documentType,
     authoredText,
-    references
+    references,
+    manifestEntryIds: Array.isArray(args.manifest_entry_ids) ? args.manifest_entry_ids : undefined
   });
   const draft = r.data?.draft;
   if (!r.ok || !draft?.document_id || !draft?.document_version_id) {
@@ -7849,7 +7900,14 @@ serve(async (req)=>{
           'Evidence gathered before proposal:',
           evidenceSummary,
           '',
-          'Acceptance: implement the requested bounded change, add focused tests, preserve existing behavior, run the relevant verification, and open only a draft pull request. Do not merge or deploy.'
+          'Required verification contract:',
+          '- Before / during / after: state expected versus present permissions, source records, visible controls, requests/RPCs, policy checks, writes, audit events, persisted receipts, downstream screens, reports, and the next actor.',
+          '- Schema + Atlas: cross-check supabase/schema.sql and live Atlas capability/direct edges/blast radius. Keep flow_reach separate from fk_reach; treat references-only edges as weak evidence and never claim exercised without invocation evidence.',
+          '- Dr Bob + tests: run the smallest relevant assessment, focused tests, lint/type-check/build, isolated worker re-verification, security review, and independent code review.',
+          '- Human glass: exercise the affected role, route, responsive behavior, accessibility, loading, empty, error, permission, success, and safe-next-action states with Playwright or the human-test runner.',
+          '- Release: publish only with complete receipts. Non-evidential work may auto-merge only when the owner off-switch is enabled and every gate passes; evidential/protected work waits for a person. After deployment, verify production, refresh Atlas, and refresh/check the live schema snapshot when migrations changed.',
+          '',
+          'Acceptance: implement the requested bounded change, add focused regression coverage, preserve intended behavior, and report exact job, commit, verification, review, pull-request, merge, deployment, Atlas, schema, and glass receipts without inventing success.'
         ].join('\n').slice(0, 12000)
       };
     };
@@ -8997,10 +9055,11 @@ serve(async (req)=>{
             };
           }
         // create_builder_job: Bob's self-heal/build lane in the GitHub repo — ADMIRAL ONLY.
-        // Two-turn: PROPOSE the brief (meta carries pending_builder_job), then on a
-        // human affirmative (pending.kind='builder_job_pending') create the job via
-        // bob-builder-control-room (caller's JWT, same role checks) and start the
-        // bounded runner. Output is a DRAFT GitHub PR; nothing merges or deploys.
+        // Normal path: PROPOSE the brief (meta carries pending_builder_job), then on a
+        // human affirmative create the job. An explicit owner self-heal instruction may
+        // create it in the same turn only after governed friction triage returned a
+        // repair route. Eligible non-evidential work may auto-merge under the owner's
+        // env-gated ruling; protected/evidential paths still wait for a person.
         case 'create_builder_job':
           {
             if (caps.tier !== 'admiral') {
@@ -9049,7 +9108,10 @@ serve(async (req)=>{
                 }
               };
             }
-            if (!storedJob) {
+            const confirmedByTriage = toolArgs.owner_instruction_confirmed === true
+              && typeof toolArgs.source_friction_packet_id === 'string'
+              && explicitBuilderCreationRequest(message);
+            if (!storedJob && !confirmedByTriage) {
               return {
                 reply: [
                   'I have composed a Builder job for the GitHub repository. Please review before I open it:',
@@ -9062,7 +9124,7 @@ serve(async (req)=>{
                   bjDescription.slice(0, 4000),
                   bjDescription.length > 4000 ? `\n[... ${bjDescription.length - 4000} more chars ...]` : '',
                   '',
-                  'The job pins the current `main` commit, works on its own `bob/job-…` branch, runs tests, an isolated re-verification, a security scan and an independent review, then opens a draft pull request for human review. Bob does not merge protected branches or deploy production.',
+                  'The job pins the current `main` commit, works on its own `bob/job-…` branch, runs tests, isolated re-verification, a security scan and an independent review, then opens a pull request. Eligible non-evidential work may auto-merge only under the owner-controlled release switch; protected or evidential work waits for a person. Deployment remains a separate release-lane receipt.',
                   '',
                   'Say **yes** or **go ahead** to open it, or tell me what to change in the brief.'
                 ].filter(Boolean).join('\n'),
@@ -9148,12 +9210,12 @@ serve(async (req)=>{
             });
             const runNote = started.ok
               ? (bjAutopilot
-                ? 'I am on it: I will work the change through in an isolated copy of the code, run the tests, have an independent reviewer and a security scan check it, and open a pull request. That takes a while (usually 10–20 minutes). I will tell you here when it is ready or if I get stuck.'
+                ? 'I am on it: I will work the change through in an isolated copy of the code, run the tests and glass checks, have an independent reviewer and a security scan check it, and open a pull request. Eligible non-evidential work can then auto-merge through the owner-controlled switch and enter the separate release lane. That takes a while (usually 10–20 minutes). I will tell you here when it is ready, live, or blocked.'
                 : 'The Builder is working now — research → implementation in an isolated worktree → tests → independent code and security review — at full reasoning effort, so this takes minutes, not seconds.')
               : `The job is created; the runner did not start automatically (${[started.data?.error ?? started.status, started.data?.detail].filter(Boolean).map(String).join(': ').slice(0, 200)}), so start it from the Builder control room.`;
             return {
               reply: bjAutopilot
-                ? `Started **${bjTitle}** (pinned to commit \`${String(bjJob.target_sha ?? '').slice(0, 10)}\`). ${runNote} If every check passes, Builder opens a draft pull request for human review. Bob does not merge protected branches or deploy production. My report here will state the verified result and any blocker.`
+                ? `Started **${bjTitle}** (pinned to commit \`${String(bjJob.target_sha ?? '').slice(0, 10)}\`). ${runNote} Protected and evidential changes never auto-merge. I will report the separate verification, pull-request, merge, deployment, Atlas/schema, and glass receipts without treating one as proof of another.`
                 : `Builder job **${bjTitle}** is open in the GitHub repository at commit \`${String(bjJob.target_sha ?? '').slice(0, 10)}\`. ${runNote} When it is ready you will get a **DRAFT pull request** to review — I will not merge or deploy it. Track it under Platform & Settings → Builder.`,
               meta: {
                 tool: 'create_builder_job',
@@ -9163,7 +9225,15 @@ serve(async (req)=>{
                 target_sha: bjJob.target_sha ?? null,
                 runner_started: Boolean(started.ok),
                 autopilot: bjAutopilot,
-                autopilot_error: typeof created.data.autopilot_error === 'string' ? created.data.autopilot_error : undefined
+                autopilot_error: typeof created.data.autopilot_error === 'string' ? created.data.autopilot_error : undefined,
+                source_friction_packet_id: confirmedByTriage ? toolArgs.source_friction_packet_id : undefined,
+                navigation_actions: [{ label: 'Open Builder control room', path: '/admin/builder' }],
+                workflow_steps: [
+                  { id: 'triage', label: 'Defect evidence triaged', status: confirmedByTriage ? 'completed' : 'pending', detail: confirmedByTriage ? 'A governed friction packet supplied the repair evidence.' : 'The owner supplied the build brief directly.' },
+                  { id: 'builder', label: 'Builder job created', status: 'completed', detail: `Job ${bjJob.id} is pinned to ${String(bjJob.target_sha ?? '').slice(0, 10)}.` },
+                  { id: 'verify', label: 'Implement and independently verify', status: 'current', detail: 'Builder runs the specification, isolated implementation, tests, security scan, code review, and release evidence.' },
+                  { id: 'release', label: 'Merge, deploy, and prove in the glass', status: 'pending', detail: 'Only eligible non-evidential work auto-merges; release and post-release receipts must still prove success.' }
+                ]
               }
             };
           }
@@ -9350,6 +9420,8 @@ serve(async (req)=>{
               stage: 'c5_stage_1b'
             }
           };
+        case 'navigate_app':
+          return execNavigateApp(toolArgs);
         case 'understand_documents':
           return execUnderstandDocuments(conversationId, message);
         case 'web_research':
@@ -10954,7 +11026,23 @@ serve(async (req)=>{
         // An explicit owner build request must not end with future-tense prose
         // after Bob has gathered repository or Atlas evidence. Convert only that
         // premature answer into the existing two-turn Builder proposal.
-        if (caps.tier === 'admiral' && next.normAction === 'answer' && explicitBuilderCreationRequest(message)) {
+        if (caps.tier === 'admiral'
+          && result.meta.tool === 'triage_friction'
+          && result.meta.repair_ready === true
+          && explicitBuilderCreationRequest(message)) {
+          nextDecision = {
+            ...nextDecision,
+            action: 'use_tool',
+            tool: 'create_builder_job',
+            args: {
+              ...builderJobArgsFromEvidence(message, loopSteps),
+              owner_instruction_confirmed: true,
+              source_friction_packet_id: result.meta.packet_id
+            },
+            reasoning: 'The owner explicitly requested self-healing and the governed triage packet confirmed a repair route; create the Builder receipt now.'
+          };
+          next = parsePlanDecision(nextDecision);
+        } else if (caps.tier === 'admiral' && next.normAction === 'answer' && explicitBuilderCreationRequest(message)) {
           nextDecision = {
             ...nextDecision,
             action: 'use_tool',

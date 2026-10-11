@@ -45,6 +45,11 @@ test('release lane skips migrations already in the live ledger, and a hand deplo
   assert.match(lane, /builder-data-path-gate\\\.js\|builder-ts-delta-gate\\\.js/);
   assert.match(lane, /has '\^deploy\/bob-vps\/nginx\/' && TARGETS\+=\(nginx\)/);
   assert.match(lane, /nginx -t/);
+  assert.match(lane, /node scripts\/atlas-refresh\.js --apply/);
+  assert.match(lane, /node scripts\/atlas-exercise-evidence\.mjs --apply/);
+  assert.match(lane, /Atlas exercise evidence failed/);
+  assert.match(lane, /node scripts\/schema-snapshot-live\.mjs --project-ref "\$SUPABASE_PROJECT_REF" --out "\$live_schema"/);
+  assert.match(lane, /live schema snapshot differs from committed supabase\/schema\.sql/);
 });
 
 test('every control-plane path the edge functions relay is allowed through the public nginx site', () => {

@@ -116,6 +116,9 @@ function executeBackendPatch({ sourceDir, patchPath, artifactDir, workDir = '/wo
   if (patchApplied && checks.every(check => check.status === 0) && changedTests.length) {
     checks.push(run('node', ['--test', ...changedTests], workDir, TEST_TIMEOUT_MS));
   }
+  if (patchApplied && checks.every(check => check.status === 0)) {
+    checks.push(run('node', ['scripts/atlas-refresh.js'], workDir, TEST_TIMEOUT_MS));
+  }
   // Data-path gate: a caller-scoped read of a service-role-only table is a feature that can never
   // show data (job 79b4c08f). schema.sql in the pinned tree is the truth it is checked against.
   let dataPath = { checked: false, findings: [] };

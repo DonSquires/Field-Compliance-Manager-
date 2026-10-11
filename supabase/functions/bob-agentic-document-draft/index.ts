@@ -34,10 +34,10 @@ serve(async (request) => {
     const body = await request.json().catch(() => ({}));
     const sourceType = String(body.sourceType ?? '').trim().toLowerCase();
     const sourceId = String(body.sourceId ?? '').trim();
-    if (!['site', 'cctv', 'breach', 'notice', 'debrief', 'custom'].includes(sourceType)) {
+    if (!['site', 'cctv', 'breach', 'notice', 'debrief', 'custom', 'rm_rfq'].includes(sourceType)) {
       return json({ error: 'A supported sourceType is required' }, 422);
     }
-    if (sourceType !== 'custom' && !sourceId) return json({ error: 'sourceId is required for source-backed drafts' }, 422);
+    if (sourceType !== 'custom' && sourceType !== 'rm_rfq' && !sourceId) return json({ error: 'sourceId is required for source-backed drafts' }, 422);
 
     const admin = createClient(SUPABASE_URL, SUPABASE_SERVICE_ROLE_KEY);
     const { data: profile, error: profileError } = await admin.from('user_profiles').select('organization_id,role').eq('id', user.id).single();
@@ -49,7 +49,76 @@ serve(async (request) => {
     let heading = '';
     let facts = '';
     let referenceMetadata: Array<Record<string, unknown>> = [];
-    if (sourceType === 'custom') {
+    if (sourceType === 'rm_rfq') {
+      const requestedEntryIds = Array.isArray(body.manifestEntryIds)
+        ? body.manifestEntryIds.map((value: unknown) => Number(value)).filter((value: number) => Number.isInteger(value) && value > 0).slice(0, 50)
+        : [];
+      const { data: source } = await admin
+        .from('document_reference_sources')
+        .select('id,label')
+        .eq('organization_id', profile.organization_id)
+        .eq('source_kind', 'local_folder')
+        .eq('approval_status', 'approved')
+        .eq('is_active', true)
+        .order('created_at')
+        .limit(1)
+        .maybeSingle();
+      if (!source) return json({ error: 'No approved local R&M document source is registered' }, 404);
+      const { data: run } = await admin
+        .from('document_source_ingestion_runs')
+        .select('id,source_id,requested_at,status')
+        .eq('organization_id', profile.organization_id)
+        .eq('source_id', source.id)
+        .eq('status', 'completed')
+        .order('requested_at', { ascending: false })
+        .limit(1)
+        .maybeSingle();
+      if (!run) return json({ error: 'Run the approved R&M document-source inventory before creating an RFQ draft' }, 409);
+
+      let entriesQuery = admin
+        .from('document_source_manifest_entries')
+        .select('id,run_id,source_id,relative_path,file_name,extension,size_bytes,modified_at,sha256,capability_status,sensitivity,disposition,extraction_status,document_id')
+        .eq('organization_id', profile.organization_id)
+        .eq('run_id', run.id)
+        .neq('capability_status', 'exclude')
+        .neq('disposition', 'quarantined')
+        .or('relative_path.ilike.%Quotes/%,relative_path.ilike.%CRM/Hospitals/%,relative_path.ilike.%RFQ%');
+      if (requestedEntryIds.length) entriesQuery = entriesQuery.in('id', requestedEntryIds);
+      const { data: entries, error: entriesError } = await entriesQuery.order('relative_path').limit(50);
+      if (entriesError) return json({ error: entriesError.message }, 400);
+      if (!entries?.length) return json({ error: 'No eligible RFQ source entries were found in the approved R&M corpus' }, 404);
+
+      title = String(body.title ?? 'R&M RFQ response draft').trim().slice(0, 220) || 'R&M RFQ response draft';
+      documentType = 'rfq_response';
+      heading = title;
+      const suppliedText = String(body.authoredText ?? '').trim();
+      const sourceRegister = entries.map((entry) => `- ${entry.relative_path} | sha256=${entry.sha256 ?? '[HASH NOT AVAILABLE]'} | capability=${entry.capability_status} | extraction=${entry.extraction_status}`).join('\n');
+      facts = suppliedText || [
+        heading,
+        '',
+        'Source-backed draft register',
+        sourceRegister,
+        '',
+        'Response content',
+        '[HUMAN INPUT REQUIRED: Insert the RFQ-specific response using only verified source evidence.]',
+        '',
+        '[HUMAN INPUT REQUIRED: Confirm the RFQ reference, issuing entity, closing date, service locations, quantities/hours, pricing/GST, validity, insurance requirements, authorised signatory, and submission method.]',
+      ].join('\n');
+      referenceMetadata = entries.map((entry) => ({
+        source_type: 'document_source_manifest_entry',
+        source_id: String(entry.id),
+        source_entry_id: entry.id,
+        run_id: entry.run_id,
+        source_id_alias: entry.source_id,
+        relative_path: entry.relative_path,
+        file_name: entry.file_name,
+        sha256: entry.sha256,
+        capability_status: entry.capability_status,
+        extraction_status: entry.extraction_status,
+        document_id: entry.document_id,
+        title: entry.file_name,
+      }));
+    } else if (sourceType === 'custom') {
       title = String(body.title ?? '').trim().slice(0, 220);
       documentType = String(body.documentType ?? 'custom').trim().toLowerCase().replace(/[^a-z0-9_-]+/g, '_').slice(0, 80);
       const customText = String(body.authoredText ?? '').trim();
@@ -104,7 +173,7 @@ serve(async (request) => {
       referenceMetadata = [{ source_type: 'breach_alert', source_id: alert.id, title: 'Breach alert' }];
     }
 
-    const authoredText = sourceType === 'custom'
+    const authoredText = sourceType === 'custom' || sourceType === 'rm_rfq'
       ? facts
       : `${heading}\n\nSource facts\n${facts}\n\nAnalysis and required controls\n[TO CONFIRM]\n\nRecommended next action\n[TO CONFIRM]\n\nHuman review checklist\n- Verify every source fact\n- Resolve all [TO CONFIRM] fields\n- Confirm owner, deadline, and approval boundary`;
     const authoredHtml = authoredText.split('\n').map((line) => line.trim() ? `<p>${escapeHtml(line)}</p>` : '<p></p>').join('');

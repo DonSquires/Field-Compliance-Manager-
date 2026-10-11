@@ -1,8 +1,10 @@
 // Bob autopilot: finishes Builder jobs the owner asked for in chat, the way a coding
 // agent finishes a task — clear the gates on the requester's recorded instruction,
 // keep the bounded runner moving, publish the verified branch, open the pull
-// request, and leave a plain-language report for Bob to relay. It never merges,
-// deploys, or touches protected paths (those stay human; docs/canon/BOB_DOCTRINE.md §9).
+// request, and leave a plain-language report for Bob to relay. Eligible
+// non-evidential work can carry the owner-controlled auto-merge marker; the
+// GitHub bridge merges it and the separate release lane deploys it. This process
+// never merges protected/evidential paths or treats publication as deployment.
 // Owner ruling 2026-09-26: human approval is required for evidential work — a gate on a
 // job that touches evidential paths is never cleared by the autopilot; it waits for a person.
 const { runBuilderUntilPause, loadBuilderRuntimeSnapshot, implementationRuns } = require('./builder-runtime-coordinator');
@@ -24,6 +26,53 @@ function describeFiles(files) {
   const list = Array.isArray(files) ? files.filter(Boolean) : [];
   if (!list.length) return 'no files';
   return list.length <= 6 ? list.join(', ') : `${list.slice(0, 6).join(', ')} and ${list.length - 6} more`;
+}
+
+function evaluateVerificationContract({ changedFiles, specification, verification, verifyRun }) {
+  const files = Array.isArray(changedFiles) ? changedFiles : [];
+  const reports = Array.isArray(verification) ? verification : verification ? [verification] : [];
+  const commands = reports.flatMap((report) => Array.isArray(report?.commands)
+    ? report.commands
+    : Array.isArray(report?.checks) ? report.checks : []);
+  const passingCommands = commands.filter((command) => command?.status === 0);
+  const webChanged = files.some((file) => file.startsWith('apps/web/'));
+  const backendChanged = files.some((file) => !file.startsWith('apps/web/'));
+  const workflow = specification?.workflow_verification;
+  const terrain = specification?.terrain_verification;
+  const human = specification?.human_acceptance;
+  const hasSpecificationContract = ['before', 'during', 'after'].every((phase) => Array.isArray(workflow?.[phase]) && workflow[phase].length > 0)
+    && Array.isArray(terrain?.schema_checks) && terrain.schema_checks.length > 0
+    && Array.isArray(terrain?.atlas_capability_checks) && terrain.atlas_capability_checks.length > 0
+    && Array.isArray(terrain?.flow_reach_checks) && terrain.flow_reach_checks.length > 0
+    && typeof human?.role === 'string' && human.role.trim()
+    && typeof human?.route === 'string' && human.route.trim()
+    && Array.isArray(human?.steps) && human.steps.length > 0;
+  const glassVerified = !webChanged || passingCommands.some((command) => /\b(?:test:e2e|playwright)\b/i.test(String(command.command ?? '')));
+  const atlasVerified = passingCommands.some((command) => /scripts\/atlas-refresh\.js/i.test(String(command.command ?? '')));
+  const schemaVerified = !backendChanged || reports.some((report) => report?.data_path?.checked === true)
+    || passingCommands.some((command) => /schema|data-path gate/i.test(String(command.command ?? '')));
+  const workerVerified = Boolean(verifyRun) && reports.length > 0 && reports.every((report) => report?.succeeded === true);
+  const failures = [];
+  if (!hasSpecificationContract) failures.push('product specification is missing before/during/after, schema/Atlas, flow reach, or human-glass acceptance evidence');
+  if (!workerVerified) failures.push('isolated worker verification evidence is incomplete');
+  if (!atlasVerified) failures.push('repository-derived Atlas refresh evidence is missing');
+  if (!glassVerified) failures.push('web changes did not pass the targeted Playwright glass check');
+  if (!schemaVerified) failures.push('backend changes did not record a schema/data-path check');
+  return {
+    passed: failures.length === 0,
+    failures,
+    worker_verified: workerVerified,
+    atlas_verified: atlasVerified,
+    glass_verified: glassVerified,
+    schema_verified: schemaVerified,
+    specification_contract: hasSpecificationContract,
+    human_acceptance: hasSpecificationContract ? {
+      role: human.role,
+      route: human.route,
+      job_to_be_done: human.job_to_be_done,
+      expected_visible_result: human.expected_visible_result
+    } : null
+  };
 }
 
 /**
@@ -48,18 +97,32 @@ async function collectEvidence({ supabase, snapshot }) {
   const security = finalOf('security_review', new Set([stepId('security_review')])).at(-1) || null;
   const review = finalOf('code_review', new Set([stepId('code_review')])).at(-1) || null;
   const releaseNotes = finalOf('release_notes').at(-1) || null;
+  const productSpecification = finalOf('product_specification').at(-1) || null;
+  const verificationArtifact = verifyRun
+    ? snapshot.artifacts.find((a) => Array.isArray(verifyRun.output_artifact_ids)
+      && verifyRun.output_artifact_ids.includes(a.id)
+      && a.artifact_type === 'build_logs')
+    : null;
 
-  const [author, manifestRows, securityReport, reviewReport, release] = await Promise.all([
+  const [author, manifestRows, securityReport, reviewReport, release, specification, verification] = await Promise.all([
     authorArtifact ? download(authorArtifact) : null,
     manifest ? download(manifest) : null,
     security ? download(security) : null,
     review ? download(review) : null,
     releaseNotes ? download(releaseNotes) : null,
+    productSpecification ? download(productSpecification) : null,
+    verificationArtifact ? download(verificationArtifact) : null,
   ]);
   const envelope = author && typeof author === 'object' && typeof author.patch === 'string' ? author : (typeof author === 'string' ? unwrapPatchArtifact(author).envelope : null);
   const changedFiles = Array.isArray(manifestRows) ? manifestRows.map((row) => row?.path).filter(Boolean) : (envelope?.changed_files ?? []);
   const verifiedRuns = Array.isArray(envelope?.verified_runs) ? envelope.verified_runs.filter((r) => r && typeof r.command === 'string') : [];
   const passingTests = verifiedRuns.filter((r) => /^node --test\b/.test(r.command) && r.exit_code === 0).map((r) => plain(r.command, 160));
+  const verificationContract = evaluateVerificationContract({
+    changedFiles,
+    specification: specification && typeof specification === 'object' ? specification : null,
+    verification: verification && typeof verification === 'object' ? verification : null,
+    verifyRun
+  });
   return {
     verifyRun,
     validatedPatchId: validatedPatch?.id ?? null,
@@ -83,6 +146,7 @@ async function collectEvidence({ supabase, snapshot }) {
       model: null,
     } : null,
     releaseNotes: release && typeof release === 'object' ? { notes: Array.isArray(release.release_notes) ? release.release_notes.map((t) => plain(t, 300)) : [], risks: Array.isArray(release.known_risks) ? release.known_risks.map((t) => plain(t, 300)) : [] } : null,
+    verificationContract,
   };
 }
 
@@ -96,6 +160,7 @@ function composeReport({ job, evidence, pullRequestUrl, state, reason, hold, rep
     if (evidence.testsRun.length) checks.push(`Bob ran ${evidence.testsRun.length === 1 ? 'the test' : `${evidence.testsRun.length} test commands`} himself and they passed (${evidence.testsRun.slice(0, 3).join('; ')})`);
     else if (evidence.testsNotRunReason) checks.push(`Bob could not run tests here (${evidence.testsNotRunReason})`);
     if (evidence.verifyRun) checks.push('an isolated worker re-applied the change from scratch and it passed');
+    if (evidence.verificationContract?.passed) checks.push('the before/during/after, schema/Atlas, data-path and human-glass contract is complete');
     if (evidence.security) checks.push(evidence.security.passed ? 'the security scan found nothing' : 'the security scan raised findings (see the pull request)');
     if (evidence.review?.verdict) checks.push(`an independent AI reviewer (a different model from the author) said "${evidence.review.verdict}"${evidence.review.summary ? `: ${evidence.review.summary}` : ''}`);
     if (checks.length) lines.push(`How it was checked: ${checks.join('; ')}.`);
@@ -157,6 +222,9 @@ function automergeEligible({ job, evidence, env = process.env }) {
   if (String(env.BOB_AUTOPILOT_AUTOMERGE || '').toLowerCase() !== 'true') return { ok: false, reason: 'auto-merge is off (BOB_AUTOPILOT_AUTOMERGE)' };
   if (!job?.autopilot_requested_by) return { ok: false, reason: 'not requested by a person in chat' };
   if (!evidence?.verifyRun) return { ok: false, reason: 'no independent worker verification' };
+  if (evidence.verificationContract?.passed !== true) {
+    return { ok: false, reason: `verification contract incomplete: ${(evidence.verificationContract?.failures || ['missing evidence']).slice(0, 2).join('; ')}` };
+  }
   if (evidence.security?.passed !== true) return { ok: false, reason: 'security scan did not pass' };
   const review = evidence.review;
   if (review?.verdict !== 'passed') return { ok: false, reason: 'independent review did not pass' };
@@ -181,6 +249,10 @@ function composePullRequestBody({ job, evidence, branchName, headSha, automerge 
   if (evidence.verifyRun) md.push(`- Independent worker (\`${evidence.verifyRun.profile}\`) re-applied the patch in an isolated container: **passed**`);
   if (evidence.security) md.push(`- Security scan: **${evidence.security.passed ? 'passed' : 'findings'}**${evidence.security.counts ? ` (critical ${evidence.security.counts.critical ?? 0}, high ${evidence.security.counts.high ?? 0}, medium ${evidence.security.counts.medium ?? 0}, low ${evidence.security.counts.low ?? 0})` : ''}`);
   if (evidence.review?.verdict) md.push(`- Independent AI code review (different model from the author): **${evidence.review.verdict}** — ${evidence.review.summary || 'no summary'}`);
+  if (evidence.verificationContract) {
+    md.push(`- Verification contract: **${evidence.verificationContract.passed ? 'passed' : 'incomplete'}** (worker ${evidence.verificationContract.worker_verified ? 'passed' : 'missing'}, Atlas ${evidence.verificationContract.atlas_verified ? 'passed' : 'missing'}, schema/data path ${evidence.verificationContract.schema_verified ? 'passed' : 'missing'}, human glass ${evidence.verificationContract.glass_verified ? 'passed' : 'missing'})`);
+    for (const failure of evidence.verificationContract.failures || []) md.push(`  - ${failure}`);
+  }
   if (evidence.releaseNotes?.notes?.length) { md.push(''); md.push('## Release notes'); for (const note of evidence.releaseNotes.notes) md.push(`- ${note}`); }
   if (evidence.releaseNotes?.risks?.length) { md.push(''); md.push('## Known risks'); for (const risk of evidence.releaseNotes.risks) md.push(`- ${risk}`); }
   if (evidence.rollbackNotes.length) { md.push(''); md.push('## Rollback'); for (const note of evidence.rollbackNotes) md.push(`- ${note}`); }
@@ -499,4 +571,4 @@ async function listPendingApprovals(supabase, jobId) {
   return data || [];
 }
 
-module.exports = { AUTOMERGE_MARK, automergeEligible, autopilotTick, baselineBlock, collectEvidence, composeReport, composePullRequestBody, evidentialHold, isRepairJob, isReopenedJob, listAutopilotJobs, listPendingApprovals, repairJobFor, TERMINAL, GATES };
+module.exports = { AUTOMERGE_MARK, automergeEligible, autopilotTick, baselineBlock, collectEvidence, composeReport, composePullRequestBody, evaluateVerificationContract, evidentialHold, isRepairJob, isReopenedJob, listAutopilotJobs, listPendingApprovals, repairJobFor, TERMINAL, GATES };

@@ -85,7 +85,21 @@ test('an explicit owner build request cannot fall through to synthesis at the ev
   assert.match(postLoop, /chosenTool = 'create_builder_job'/);
   assert.match(postLoop, /result = await dispatchTool\(chosenTool, args, decision\)/);
   assert.match(chat, /Evidence gathered before proposal:/);
-  assert.match(chat, /open only a draft pull request\. Do not merge or deploy\./);
+  assert.match(chat, /Required verification contract:/);
+  assert.match(chat, /Keep flow_reach separate from fk_reach/);
+  assert.match(chat, /refresh Atlas, and refresh\/check the live schema snapshot/);
+});
+
+test('an explicit self-heal request turns a confirmed friction route into a real Builder receipt', () => {
+  const loop = chat.slice(chat.indexOf('const nextPlan = await callPlan('), chat.indexOf('// ASK halts the loop'));
+  assert.match(loop, /result\.meta\.tool === 'triage_friction'/);
+  assert.match(loop, /result\.meta\.repair_ready === true/);
+  assert.match(loop, /owner_instruction_confirmed: true/);
+  assert.match(loop, /source_friction_packet_id: result\.meta\.packet_id/);
+  const builder = chat.slice(chat.indexOf("case 'create_builder_job':"), chat.indexOf("case 'cancel_builder_job':"));
+  assert.match(builder, /const confirmedByTriage = toolArgs\.owner_instruction_confirmed === true/);
+  assert.match(builder, /navigation_actions: \[\{ label: 'Open Builder control room'/);
+  assert.match(builder, /label: 'Merge, deploy, and prove in the glass'/);
 });
 
 test('the exact live owner request is recognised as Builder creation intent', () => {

@@ -18,6 +18,26 @@ function validSpecification() {
     non_functional_requirements: [{ id: 'NFR-1', requirement: 'Preserve tenant isolation' }],
     data_model_proposal: [{ entity: 'approval', purpose: 'record decisions', relationships: ['belongs to job'] }],
     acceptance_criteria: [{ id: 'AC-1', criterion: 'Unauthorized users cannot decide' }],
+    workflow_verification: {
+      before: ['authorized administrator has pending approvals'],
+      during: ['decision RPC checks organization scope and shows progress'],
+      after: ['receipt and downstream status show the persisted decision']
+    },
+    terrain_verification: {
+      schema_checks: ['confirm the approval writer and policy in supabase/schema.sql'],
+      atlas_capability_checks: ['confirm the approval capability is present and wired'],
+      flow_reach_checks: ['confirm the page calls the governed decision RPC'],
+      fk_reach_checks: ['record approval-to-job FK adjacency separately'],
+      weak_reference_checks: []
+    },
+    human_acceptance: {
+      role: 'administrator',
+      route: '/admin/approvals',
+      job_to_be_done: 'review and decide a pending action',
+      steps: ['open the action', 'review evidence', 'approve or reject'],
+      expected_visible_result: 'the decision receipt and next state are visible',
+      required_states: ['loading', 'permission', 'success', 'safe_next_action']
+    },
     unresolved_questions: [],
     assumptions: []
   };
@@ -49,6 +69,7 @@ test('Product Analyst prompt requires grounded JSON and unresolved unknowns', ()
 
   assert.match(prompt.systemPrompt, /Never invent/);
   assert.match(prompt.systemPrompt, /unresolved_questions/);
+  assert.match(prompt.systemPrompt, /flow reach separate from structural FK reach/);
   assert.equal(JSON.parse(prompt.userPrompt).task, 'Build a governed approval queue');
   assert.equal(JSON.parse(prompt.userPrompt).repository_context.build_map.file_count, 0);
 });
@@ -63,6 +84,9 @@ test('Product Analyst parser rejects malformed or incomplete output', () => {
   assert.throws(() => parseProductSpecification(JSON.stringify({
     ...validSpecification(), acceptance_criteria: []
   })), /must not be empty/);
+  assert.throws(() => parseProductSpecification(JSON.stringify({
+    ...validSpecification(), workflow_verification: { before: [], during: ['x'], after: ['y'] }
+  })), /workflow_verification.before/);
 });
 
 test('Product Analyst routes complex analysis through the governed model runner', async () => {

@@ -23,9 +23,10 @@ test('Bob Operations preserves capped page context and Studio artifact provenanc
   assert.match(source, /studio_document_kind: agentWorkspaceContext\.studio_document_kind/);
 });
 
-test('Bob proposals provide clickable choices and never claim merge or deployment authority', () => {
+test('Bob proposals provide clickable choices and state the owner-controlled merge and release boundaries', () => {
   assert.match(source, /answer_options: \['Yes, open the Builder job', 'No, cancel', 'Change the brief'\]/);
   assert.match(source, /answer_options: \['Yes, run this command', 'No, cancel', 'Change the command'\]/);
-  assert.match(source, /Bob does not merge protected branches or deploy production/);
+  assert.match(source, /Protected and evidential changes never auto-merge/);
+  assert.match(source, /Deployment remains a separate release-lane receipt/);
   assert.doesNotMatch(source, /I merge it myself and the release lane puts it live/);
 });

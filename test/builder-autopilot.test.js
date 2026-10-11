@@ -1,7 +1,26 @@
 const assert = require('node:assert/strict');
 const test = require('node:test');
 
-const { autopilotTick, baselineBlock, composeReport, composePullRequestBody, collectEvidence, repairJobFor, isRepairJob } = require('../builder-autopilot');
+const { autopilotTick, baselineBlock, composeReport, composePullRequestBody, collectEvidence, evaluateVerificationContract, repairJobFor, isRepairJob } = require('../builder-autopilot');
+
+const verificationSpecification = {
+  workflow_verification: { before: ['preconditions'], during: ['requests and visible states'], after: ['receipt and downstream state'] },
+  terrain_verification: {
+    schema_checks: ['schema writer'],
+    atlas_capability_checks: ['capability state'],
+    flow_reach_checks: ['proven call edge'],
+    fk_reach_checks: [],
+    weak_reference_checks: []
+  },
+  human_acceptance: {
+    role: 'administrator',
+    route: '/admin/builder',
+    job_to_be_done: 'verify the change',
+    steps: ['open the affected workflow'],
+    expected_visible_result: 'the corrected state is visible',
+    required_states: ['success']
+  }
+};
 
 // Minimal Supabase stand-in for loadBuilderRuntimeSnapshot + storage downloads.
 function fakeSupabase({ job, steps = [], artifacts = [], workerRuns = [], objects = {} }) {
@@ -75,6 +94,7 @@ function releaseReadyFixture() {
   const org = '56710c19-d604-4767-9ad8-9c5863b4ceb7';
   const job = { id: 'job-4', organization_id: org, status: 'release_ready', autopilot_state: 'driving', title: "Accept 'go for it' as a yes", task_description: 'brief', target_sha: 'd'.repeat(40), workspace_pull_request_url: null };
   const steps = [
+    { id: 's-product', step_id: 'product_analysis', builder_mode: 'product_analyst', status: 'completed' },
     { id: 's-backend', step_id: 'backend_implementation', builder_mode: 'backend_engineer', status: 'completed' },
     { id: 's-security', step_id: 'security_review', builder_mode: 'qa_security_reviewer', status: 'completed' },
     { id: 's-review', step_id: 'code_review', builder_mode: 'code_reviewer', status: 'completed' },
@@ -82,17 +102,21 @@ function releaseReadyFixture() {
   ];
   const loc = (name) => `supabase_storage://builder-artifacts/${org}/job-4/${name}`;
   const artifacts = [
+    { id: 'spec', step_id: 's-product', artifact_type: 'product_specification', status: 'final', storage_location: loc('spec.json') },
     { id: 'proposal', step_id: 's-backend', artifact_type: 'code_implementation', status: 'final', storage_location: loc('proposal.json') },
     { id: 'validated', step_id: 's-backend', artifact_type: 'code_implementation', status: 'final', storage_location: loc('validated.patch') },
     { id: 'manifest', step_id: 's-backend', artifact_type: 'changed_file_manifest', status: 'final', storage_location: loc('changed-files.json') },
+    { id: 'verification', step_id: 's-backend', artifact_type: 'build_logs', status: 'final', storage_location: loc('verification.json') },
     { id: 'security', step_id: 's-security', artifact_type: 'security_review', status: 'final', storage_location: loc('security.json') },
     { id: 'review', step_id: 's-review', artifact_type: 'code_review', status: 'final', storage_location: loc('review.json') },
     { id: 'notes', step_id: 's-release', artifact_type: 'release_notes', status: 'final', storage_location: loc('notes.json') },
   ];
   const workerRuns = [{ id: 'run-ok', step_id: 's-backend', status: 'completed', profile: 'backend-verify', patch_artifact_id: 'proposal', output_artifact_ids: ['verification', 'validated', 'manifest'] }];
   const objects = {
+    [`${org}/job-4/spec.json`]: JSON.stringify(verificationSpecification),
     [`${org}/job-4/proposal.json`]: JSON.stringify({ summary: "Added 'go for it' and 'yes please' to the blanket-affirmative check so Bob stops re-asking.", patch: 'diff --git a/x b/x\n', changed_files: ['services/fcm-api/src/bob/verify.js'], tests: ['node --test test/fcm-api-bob-planner.test.js'], rollback_notes: ['Revert the pull request.'], follow_ups: ['I could not run the wider chat suite here.'] }),
     [`${org}/job-4/changed-files.json`]: JSON.stringify([{ path: 'services/fcm-api/src/bob/verify.js' }, { path: 'test/fcm-api-bob-planner.test.js' }]),
+    [`${org}/job-4/verification.json`]: JSON.stringify({ succeeded: true, data_path: { checked: true }, checks: [{ command: 'data-path gate: caller-scoped reads vs row-level security (supabase/schema.sql)', status: 0 }, { command: 'node scripts/atlas-refresh.js', status: 0 }] }),
     [`${org}/job-4/security.json`]: JSON.stringify({ passed: true, counts: { critical: 0, high: 0, medium: 0, low: 0 } }),
     [`${org}/job-4/review.json`]: JSON.stringify({ verdict: 'passed', summary: 'Narrow regex change with tests; no auth or data exposure.', findings: [] }),
     [`${org}/job-4/notes.json`]: JSON.stringify({ release_notes: ['Bob accepts more ways of saying yes.'], known_risks: [] }),
@@ -205,7 +229,7 @@ test('a job the independent reviewer blocked is re-opened with the findings fold
 test('auto-merge is env-gated and narrow: every independent check clean, requested in chat, nothing evidential; the PR body carries the marker and the report says so', async () => {
   const { automergeEligible, AUTOMERGE_MARK } = require('../builder-autopilot');
   const job = { id: 'job-am', autopilot_requested_by: 'user-1', title: 'Fix', target_sha: 'a'.repeat(40), task_description: 'brief' };
-  const clean = { verifyRun: { profile: 'backend-verify' }, security: { passed: true, counts: {} }, review: { verdict: 'passed', summary: 'checked the data path', findings: 1, findingList: [{ severity: 'low', file: 'x', message: 'nit' }], testGaps: ['none named'] }, changedFiles: ['services/fcm-api/src/bob/verify.js'], testsRun: [], followUps: [], rollbackNotes: [], summary: 's' };
+  const clean = { verifyRun: { profile: 'backend-verify' }, verificationContract: { passed: true, failures: [], worker_verified: true, atlas_verified: true, glass_verified: true, schema_verified: true }, security: { passed: true, counts: {} }, review: { verdict: 'passed', summary: 'checked the data path', findings: 1, findingList: [{ severity: 'low', file: 'x', message: 'nit' }], testGaps: ['none named'] }, changedFiles: ['services/fcm-api/src/bob/verify.js'], testsRun: [], followUps: [], rollbackNotes: [], summary: 's' };
   assert.equal(automergeEligible({ job, evidence: clean, env: {} }).ok, false, 'off by default');
   const on = { BOB_AUTOPILOT_AUTOMERGE: 'true' };
   assert.equal(automergeEligible({ job, evidence: clean, env: on }).ok, true);
@@ -213,6 +237,7 @@ test('auto-merge is env-gated and narrow: every independent check clean, request
   assert.equal(automergeEligible({ job, evidence: { ...clean, verifyRun: null }, env: on }).ok, false, 'no worker verification');
   assert.equal(automergeEligible({ job, evidence: { ...clean, security: { passed: false } }, env: on }).ok, false, 'security findings');
   assert.equal(automergeEligible({ job, evidence: { ...clean, review: { ...clean.review, verdict: 'blocked' } }, env: on }).ok, false, 'review blocked');
+  assert.equal(automergeEligible({ job, evidence: { ...clean, verificationContract: { passed: false, failures: ['glass missing'] } }, env: on }).ok, false, 'verification contract incomplete');
   assert.equal(automergeEligible({ job, evidence: { ...clean, review: { ...clean.review, findingList: [{ severity: 'high', file: 'x', message: 'bad' }] } }, env: on }).ok, false, 'a high finding on a passed review still blocks');
   assert.match(automergeEligible({ job, evidence: { ...clean, changedFiles: ['apps/mobile/src/screens/Evidence.tsx'] }, env: on }).reason, /evidential paths need a person/);
   const eligible = automergeEligible({ job, evidence: clean, env: on });
@@ -223,6 +248,34 @@ test('auto-merge is env-gated and narrow: every independent check clean, request
   const report = composeReport({ job, evidence: clean, pullRequestUrl: 'https://git.example/pulls/1', state: 'published', automerge: eligible });
   assert.match(report.text, /Bob will merge this himself within about ten minutes/);
   assert.match(composeReport({ job, evidence: clean, pullRequestUrl: 'u', state: 'published' }).text, /Nothing is live yet/);
+});
+
+test('verification contract requires product, schema/data-path, and human-glass evidence', () => {
+  const backend = evaluateVerificationContract({
+    changedFiles: ['supabase/functions/example/index.ts'],
+    specification: verificationSpecification,
+    verification: { succeeded: true, data_path: { checked: true }, checks: [{ command: 'node scripts/atlas-refresh.js', status: 0 }] },
+    verifyRun: { profile: 'backend-verify' }
+  });
+  assert.equal(backend.passed, true);
+
+  const web = evaluateVerificationContract({
+    changedFiles: ['apps/web/src/pages/ExamplePage.tsx'],
+    specification: verificationSpecification,
+    verification: { succeeded: true, commands: [{ command: 'npm run test:e2e --prefix apps/web', status: 0 }, { command: 'node scripts/atlas-refresh.js', status: 0 }] },
+    verifyRun: { profile: 'frontend-verify' }
+  });
+  assert.equal(web.passed, true);
+
+  const missing = evaluateVerificationContract({
+    changedFiles: ['apps/web/src/pages/ExamplePage.tsx'],
+    specification: {},
+    verification: { succeeded: true, commands: [] },
+    verifyRun: { profile: 'frontend-verify' }
+  });
+  assert.equal(missing.passed, false);
+  assert.match(missing.failures.join(' '), /product specification/);
+  assert.match(missing.failures.join(' '), /Playwright/);
 });
 
 test('report and pull-request composers degrade honestly when evidence is thin', () => {

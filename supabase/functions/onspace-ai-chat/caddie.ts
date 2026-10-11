@@ -49,6 +49,11 @@ const TOOL_REGISTRY = {
     governance: 'read-only',
     effect_class: 'internal_observation'
   },
+  navigate_app: {
+    purpose: 'Open or offer the exact FCM workspace for the user job in ordinary language. Args: { destination, context? }. Use destination values from the bounded app registry (approvals, builder, clients, dispatch, documents, field_reports, finance, investigations, locations, organization_settings, people, reports, roster, sites, users, zones). This changes no business data; the destination page still enforces role and module access.',
+    governance: 'UI navigation only; role and module gates remain authoritative',
+    effect_class: 'internal_observation'
+  },
   schema_inspect: {
     purpose: 'Read live table structure to reason about where data belongs or answer schema questions.',
     governance: 'read-only; structural only',
@@ -130,7 +135,7 @@ const TOOL_REGISTRY = {
     effect_class: 'internal_observation'
   },
   create_document_draft: {
-    purpose: 'CREATE and persist a conversation-scoped document draft in the organization Files workspace, then submit it for human review. Use for plans, reports, proposals, SOPs, RFQ responses, and custom documents. Args: { title, document_type?, authored_text, references? }.',
+    purpose: 'CREATE and persist a conversation-scoped document draft in the organization Files workspace, then submit it for human review. Use for plans, reports, proposals, SOPs, RFQ responses, and custom documents. For an R&M RFQ use sourceType "rm_rfq", optionally manifestEntryIds, and authoredText; the server binds references to the latest completed approved local-source inventory. Args: { title, document_type?, authored_text?, references?, sourceType?, manifestEntryIds? }.',
     governance: 'WRITE-draft; organization-scoped; creates a reversible draft only; human review required before output or promotion',
     effect_class: 'draft_governed_write'
   },
@@ -690,6 +695,8 @@ const TOOL_REGISTRY = {
     write_bob_chat: 'onspace-ai-chat',
     // retrieve_knowledge: inline via retrieveKnowledgeTraced() — no callFn.
     retrieve_knowledge: 'onspace-ai-chat',
+    // navigate_app: inline bounded destination registry; no data write.
+    navigate_app: 'onspace-ai-chat',
     // understand_documents: inline via callInference() — no callFn.
     understand_documents: 'onspace-ai-chat'
   };

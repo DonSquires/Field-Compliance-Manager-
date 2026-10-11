@@ -65,6 +65,13 @@ function brief(snapshot) {
 }
 
 const sleep = (ms) => new Promise((resolve) => setTimeout(resolve, ms));
+const HUMAN_APPROVAL_TYPES = new Set(['specification_review', 'release_approval']);
+function requireOk(out, action) {
+  if (!out || Number(out.status) >= 400 || Number(out.status) < 200) {
+    throw new Error(`${action} failed (${out?.status ?? 'no status'}): ${out?.error ?? JSON.stringify(out).slice(0, 300)}`);
+  }
+  return out;
+}
 const [cmd, ...args] = process.argv.slice(2);
 
 if (cmd === 'create') {
@@ -101,7 +108,11 @@ if (cmd === 'create') {
     if (['release_ready', 'deployed', 'failed', 'cancelled'].includes(status)) break;
     const pendingApproval = (snap.approvals ?? []).find((a) => a.status === 'pending');
     if (pendingApproval) {
+      if (!HUMAN_APPROVAL_TYPES.has(pendingApproval.approval_type)) {
+        throw new Error(`Refusing to approve unexpected Builder gate: ${pendingApproval.approval_type ?? 'unknown'}`);
+      }
       const decided = await room({ action: 'decide_approval', job_id: jobId, approval_id: pendingApproval.id, decision: 'approved', comment: 'Human test driver: brief confirmed by the owner in chat; specification approved to let the agentic lane implement, test, and review.' });
+      requireOk(decided, `approve ${pendingApproval.approval_type}`);
       console.log('approval', pendingApproval.approval_type, decided.status, decided.error ?? 'approved');
       await sleep(3000);
       continue;
@@ -112,11 +123,21 @@ if (cmd === 'create') {
   }
 } else if (cmd === 'publish') {
   const [jobId, artifactId] = args;
+  if (!jobId || !artifactId) throw new Error('publish requires a job id and final verified patch artifact id');
   for (const step of [{ action: 'create_workspace' }, { action: 'commit_verified_patch', artifact_id: artifactId }, { action: 'publish_workspace' }, { action: 'create_pull_request' }]) {
     const out = await room({ action: step.action, job_id: jobId, ...(step.artifact_id ? { artifact_id: step.artifact_id } : {}) });
+    requireOk(out, step.action);
     console.log(step.action, out.status, JSON.stringify(out).slice(0, 300));
-    if (out.status >= 400) break;
   }
+  const final = requireOk(await room({ action: 'get', job_id: jobId }), 'get published Builder job');
+  const job = final.job ?? {};
+  if (!job.workspace_head_sha || !job.workspace_published_head_sha || !job.workspace_pull_request_head_sha) {
+    throw new Error('Builder publish completed without workspace, published, and pull-request head SHAs');
+  }
+  if (job.workspace_head_sha !== job.workspace_published_head_sha || job.workspace_published_head_sha !== job.workspace_pull_request_head_sha) {
+    throw new Error(`Builder SHA mismatch: workspace=${job.workspace_head_sha} published=${job.workspace_published_head_sha} pr=${job.workspace_pull_request_head_sha}`);
+  }
+  console.log(`publish verified: commit=${job.workspace_head_sha} pr=${job.workspace_pull_request_url ?? 'missing URL'}`);
 } else if (cmd === 'chat') {
   // One chat turn as the dedicated test identity, exactly as BobPanel sends it. Proves the
   // autopilot report relay: Bob must lead with any unreported outcome for this person.

@@ -4,7 +4,7 @@ const {
 } = require('./builder-model-adapter');
 const { fitRepositoryContext } = require('./builder-repository-context');
 
-const PRODUCT_ANALYST_PROMPT_VERSION = 'product-analyst-v2';
+const PRODUCT_ANALYST_PROMPT_VERSION = 'product-analyst-v3';
 
 const PRODUCT_SPEC_SCHEMA = Object.freeze({
   type: 'object',
@@ -16,6 +16,9 @@ const PRODUCT_SPEC_SCHEMA = Object.freeze({
     'non_functional_requirements',
     'data_model_proposal',
     'acceptance_criteria',
+    'workflow_verification',
+    'terrain_verification',
+    'human_acceptance',
     'unresolved_questions',
     'assumptions'
   ]
@@ -82,6 +85,9 @@ function buildProductAnalystPrompt({ taskDescription, repositoryContext, constra
     'Produce a grounded implementation specification, not code.',
     'Use only the supplied task and repository context.',
     'Never invent schema, users, integrations, policies, or completed behavior.',
+    'Describe expected versus present behavior before, during, and after the workflow.',
+    'Require schema and Atlas checks, keeping proven flow reach separate from structural FK reach and treating references-only edges as weak evidence.',
+    'Define a responsive, accessible human-glass acceptance route for the affected role, including loading, empty, error, permission, success, and safe-next-action states that apply.',
     'Put every unknown that affects implementation in unresolved_questions.',
     'Return one JSON object matching the supplied schema, with no markdown fence.'
   ].join(' ');
@@ -97,6 +103,26 @@ function buildProductAnalystPrompt({ taskDescription, repositoryContext, constra
       non_functional_requirements: [{ id: 'NFR-1', requirement: 'string' }],
       data_model_proposal: [{ entity: 'string', purpose: 'string', relationships: ['string'] }],
       acceptance_criteria: [{ id: 'AC-1', criterion: 'string' }],
+      workflow_verification: {
+        before: ['precondition, permission, source record, configuration, route, or initial data check'],
+        during: ['visible control, request/RPC, policy, write, audit, loading, error, or transition check'],
+        after: ['persisted record, receipt, derived state, notification, downstream screen, report, or next-actor check']
+      },
+      terrain_verification: {
+        schema_checks: ['table, column, function, trigger, policy, or real writer to verify'],
+        atlas_capability_checks: ['present/wired capability to verify without claiming exercised'],
+        flow_reach_checks: ['reads/writes/calls/invokes path to verify'],
+        fk_reach_checks: ['structural FK adjacency to keep separate from proven flow'],
+        weak_reference_checks: ['references-only claim that needs stronger source evidence']
+      },
+      human_acceptance: {
+        role: 'string',
+        route: 'string',
+        job_to_be_done: 'string',
+        steps: ['string'],
+        expected_visible_result: 'string',
+        required_states: ['loading|empty|error|permission|success|safe_next_action']
+      },
       unresolved_questions: ['string'],
       assumptions: ['string']
     }
@@ -123,11 +149,36 @@ function parseProductSpecification(content) {
   if (!specification.product_brief || typeof specification.product_brief !== 'object') {
     throw new Error('product_brief is required');
   }
-  for (const key of PRODUCT_SPEC_SCHEMA.required.filter(key => key !== 'product_brief')) {
+  for (const key of PRODUCT_SPEC_SCHEMA.required.filter(key => !['product_brief', 'workflow_verification', 'terrain_verification', 'human_acceptance'].includes(key))) {
     requireArray(specification, key);
   }
   if (specification.acceptance_criteria.length === 0) {
     throw new Error('acceptance_criteria must not be empty');
+  }
+  for (const phase of ['before', 'during', 'after']) {
+    if (!Array.isArray(specification.workflow_verification?.[phase]) || specification.workflow_verification[phase].length === 0) {
+      throw new Error(`workflow_verification.${phase} must be a non-empty array`);
+    }
+  }
+  for (const key of ['schema_checks', 'atlas_capability_checks', 'flow_reach_checks', 'fk_reach_checks', 'weak_reference_checks']) {
+    if (!Array.isArray(specification.terrain_verification?.[key])) {
+      throw new Error(`terrain_verification.${key} must be an array`);
+    }
+  }
+  if (specification.terrain_verification.schema_checks.length === 0
+      || specification.terrain_verification.atlas_capability_checks.length === 0
+      || specification.terrain_verification.flow_reach_checks.length === 0) {
+    throw new Error('terrain verification must include schema, Atlas capability, and proven flow checks');
+  }
+  const acceptance = specification.human_acceptance;
+  if (!acceptance || typeof acceptance !== 'object'
+      || !boundedString(acceptance.role, 200)
+      || !boundedString(acceptance.route, 500)
+      || !boundedString(acceptance.job_to_be_done, 1000)
+      || !boundedString(acceptance.expected_visible_result, 2000)
+      || !Array.isArray(acceptance.steps) || acceptance.steps.length === 0
+      || !Array.isArray(acceptance.required_states) || acceptance.required_states.length === 0) {
+    throw new Error('human_acceptance must define role, route, job, steps, visible result, and required states');
   }
   return specification;
 }

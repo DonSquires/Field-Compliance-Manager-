@@ -27,6 +27,23 @@ two-turn `create_builder_job` proposal. Rank enforcement, separate human
 confirmation, isolated execution, draft-PR output, and the protected
 merge/deploy boundary remain unchanged.
 
+RFQ drafting hardening 2026-10-11: Bob's generic document-draft tool now has an
+R&M-specific `rm_rfq` source mode. It binds the draft to the latest completed
+inventory run for the caller's approved local-folder source, limits references
+to eligible RFQ/proposal paths, preserves manifest IDs, run IDs, relative paths,
+hashes, capability and extraction status, and always leaves unresolved
+`[HUMAN INPUT REQUIRED: ...]` fields under the existing human-review gate.
+Inventory is still metadata, not extraction; Bob must not represent an
+unextracted manifest entry as verified source content.
+
+Release acceptance hardening 2026-10-11: the Builder human-test driver now
+refuses unexpected approval types, fails on any unsuccessful workspace/commit/
+publish/PR response, and verifies that workspace, published, and pull-request
+head SHAs are identical. The protected release lane now refreshes Atlas
+exercise evidence after the normal Atlas wiring refresh and blocks the lane if
+that runtime-evidence refresh fails. These receipts prove the gates; they do
+not grant Bob unattended merge or deployment authority.
+
 Runtime acceptance 2026-10-11: the laptop vision watcher now writes an
 independent liveness heartbeat and its Docker health check terminates only a
 stale watcher process so `restart: unless-stopped` can recover it. Acceptance
@@ -738,6 +755,41 @@ System-wide Bob acceptance gate shipped 2026-10-11:
     state; the conductor admits the exact `action_id` and source page path as
     descriptive context only. A repeated read-only question must therefore
     identify the selected action rather than an unrelated prior Studio draft.
+
+  Autonomous repair and visible-operation bridge implemented 2026-10-11:
+
+  - **Before:** a high-confidence `bob_friction_packets` route stopped at
+    “repair ready,” so the user still needed to restate the request and confirm
+    a separate Builder proposal. Builder could verify, review, auto-merge
+    eligible non-evidential work, and release it, but the product specification
+    did not require the repository-wide before/during/after, schema/Atlas, and
+    human-glass evidence used by the app canon. Post-release Atlas/schema truth
+    was also a manual follow-up. Ordinary navigation was a handful of
+    one-off links rather than a bounded Bob capability.
+  - **During:** when the platform owner explicitly asks Bob to fix/self-heal an
+    app/code problem and `triage_friction` returns a repair route, the Conductor
+    deterministically creates the existing governed Builder job in the same
+    turn, preserving the friction packet ID and returning the real job/pinned
+    commit receipt. This shortcut cannot be model-spoofed: it requires admiral
+    rank, an explicit repair/build request in the human message, and the packet
+    emitted by the triage function. Builder specifications now require
+    expected-versus-present evidence for before/during/after, schema checks,
+    Atlas capability and proven flow checks with FK/weak-reference separation,
+    and a role/route/job-specific human acceptance path. Auto-merge now also
+    requires the actual isolated worker log to prove the relevant schema/data
+    path and targeted Playwright glass check. The release lane refreshes live
+    Atlas after every code/schema release and, after migrations, regenerates a
+    live-catalog snapshot and blocks completion if it disagrees with committed
+    `supabase/schema.sql`.
+  - **After:** Bob returns a visible four-stage repair progress card and an
+    exact Builder destination. The new inline `navigate_app` capability maps
+    ordinary-language destinations to bounded admin routes for rostering,
+    people/HR, clients, dispatch, finance, reports, documents, places, settings,
+    approvals, and Builder; the destination page remains authoritative for
+    role and module access, and business writes still use specific governed
+    workflows. “Triage routed,” “Builder created,” “verified,” “merged,”
+    “deployed,” “Atlas refreshed,” “schema checked,” and “glass-proven” remain
+    separate receipt states.
 
   **Gate:** live `bob_messages` show no context-losing fallbacks; a Builder job
   runs implement → verify → repair without human touch and stops cleanly at

@@ -212,7 +212,40 @@ for target in "${TARGETS[@]:-}"; do
   esac
 done
 
-# 5. Record. The live pointer moves only when everything succeeded, so a partial release is retried
+# 5. Refresh the two post-release truth surfaces. Atlas is refreshed after every
+# code/schema release. A migration also produces a fresh live-catalog schema
+# snapshot and proves that the committed snapshot matches live object truth
+# (volatile generation/ledger headers are excluded from the comparison).
+if [[ -n "$CHANGED" ]]; then
+  if [[ -z "${SUPABASE_URL:-}" || -z "${SUPABASE_SERVICE_ROLE_KEY:-}" ]]; then
+    fail_note "post-release Atlas refresh blocked: server-side Supabase credentials are not configured"; OK=false
+  elif node scripts/atlas-refresh.js --apply >"$STATE_DIR/atlas-$SHA8.out" 2>"$STATE_DIR/atlas-$SHA8.err"; then
+    RESULTS+=("live Atlas refreshed at $SHA8")
+    if node scripts/atlas-exercise-evidence.mjs --apply >"$STATE_DIR/atlas-exercise-$SHA8.out" 2>"$STATE_DIR/atlas-exercise-$SHA8.err"; then
+      RESULTS+=("Atlas exercise evidence refreshed at $SHA8")
+    else
+      fail_note "post-release Atlas exercise evidence failed: $(tail -c 300 "$STATE_DIR/atlas-exercise-$SHA8.err")"; OK=false
+    fi
+  else
+    fail_note "post-release Atlas refresh failed: $(tail -c 300 "$STATE_DIR/atlas-$SHA8.err")"; OK=false
+  fi
+fi
+
+if [[ -n "$NEW_MIGRATIONS" ]]; then
+  : "${SUPABASE_ACCESS_TOKEN:?SUPABASE_ACCESS_TOKEN is required for the live schema snapshot}"
+  live_schema="$STATE_DIR/schema-$SHA8.sql"
+  if SUPABASE_ACCESS_TOKEN="$SUPABASE_ACCESS_TOKEN" node scripts/schema-snapshot-live.mjs --project-ref "$SUPABASE_PROJECT_REF" --out "$live_schema" >"$STATE_DIR/schema-$SHA8.out" 2>"$STATE_DIR/schema-$SHA8.err"; then
+    if diff -u <(grep -vE '^-- (project:|applied_migrations:)' supabase/schema.sql) <(grep -vE '^-- (project:|applied_migrations:)' "$live_schema") >"$STATE_DIR/schema-$SHA8.diff"; then
+      RESULTS+=("live schema snapshot refreshed and matches the committed catalog at $SHA8")
+    else
+      fail_note "live schema snapshot differs from committed supabase/schema.sql after migration; release requires a catalog refresh commit"; OK=false
+    fi
+  else
+    fail_note "live schema snapshot refresh failed: $(tail -c 300 "$STATE_DIR/schema-$SHA8.err")"; OK=false
+  fi
+fi
+
+# 6. Record. The live pointer moves only when everything succeeded, so a partial release is retried
 #    (idempotent steps) rather than forgotten.
 if $OK; then printf '%s\n' "$HEAD_SHA" > "$DEPLOYED_FILE"; fi
 node -e '

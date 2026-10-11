@@ -189,6 +189,9 @@ function executeFrontendPatch({ sourceDir, patchPath, artifactDir, workDir = '/w
         break;
       }
     }
+    if (commands.every(command => command.status === 0)) {
+      commands.push(run('node', ['scripts/atlas-refresh.js'], { cwd: workDir }));
+    }
   }
 
   const succeeded = commands.every(command => command.status === 0);

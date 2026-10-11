@@ -89,6 +89,17 @@ test('page friction is routed through the bounded triage organ without claiming 
   assert.match(chat, /This confirms routing, not that a repair has started/);
 });
 
+test('visible app navigation is bounded to known role-gated destinations', () => {
+  assert.match(caddie, /navigate_app: \{/);
+  assert.match(caddie, /navigate_app: 'onspace-ai-chat'/);
+  assert.match(chat, /const APP_DESTINATIONS:/);
+  assert.match(chat, /roster: \{ label: 'Open Schedules & Rosters', path: '\/admin\/roster'/);
+  assert.match(chat, /organization_settings: \{ label: 'Open Organisation Settings', path: '\/admin\/org-setup'/);
+  assert.match(chat, /case 'navigate_app':/);
+  assert.match(chat, /navigation_actions: \[\{ label: destination\.label, path: destination\.path \}\]/);
+  assert.match(chat, /The page will apply your current role, organisation, and module access/);
+});
+
 test('corporate profiles are Caddie-routed pending proposals', () => {
   assert.match(caddie, /propose_corporate_profile: \{/);
   assert.match(caddie, /'bob-propose-corporate-profile'/);
