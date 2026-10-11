@@ -15,7 +15,7 @@
  * - Integration: BobPanel, NotificationsBell, PortalSwitcher, UniversalSearch
  */
 
-import React, { useEffect, useState, useCallback, useMemo } from 'react';
+import React, { useEffect, useState, useCallback, useMemo, useRef } from 'react';
 import { useLocation, useNavigate } from 'react-router-dom';
 import { NotificationCenter, type NotificationRecord } from '../components/NotificationCenter';
 import { resolveNotificationDestination } from '../lib/notificationNavigation';
@@ -348,7 +348,18 @@ const AdminShell: React.FC = () => {
   const [isMobile, setIsMobile] = useState(window.innerWidth < 768);
   const [accessNotice, setAccessNotice] = useState<string | null>(null);
   const [showDesktopDownload, setShowDesktopDownload] = useState(false);
+  const wasBobRouteRef = useRef(location.pathname === '/admin/bob');
   useEffect(() => { setLocationMode('manual'); }, [setLocationMode]);
+  useEffect(() => {
+    const isBobRoute = location.pathname === '/admin/bob';
+    if (wasBobRouteRef.current && !isBobRoute) {
+      window.requestAnimationFrame(() => {
+        const launchers = Array.from(document.querySelectorAll<HTMLButtonElement>('[aria-label="Open Bob command center"]'));
+        launchers.find((launcher) => launcher.getClientRects().length > 0)?.focus();
+      });
+    }
+    wasBobRouteRef.current = isBobRoute;
+  }, [location.pathname]);
   const dismissDesktopDownload = () => {
     if (profile?.id) window.localStorage.setItem(`fcm:desktop-download-prompt-v2-dismissed:${profile.id}`, '1');
     setShowDesktopDownload(false);

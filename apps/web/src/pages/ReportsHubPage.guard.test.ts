@@ -8,7 +8,8 @@ const migration = readFileSync(resolve(process.cwd(), '../../supabase/migrations
 
 describe('governed monthly report pack generation', () => {
   it('fails closed when organisation context is unavailable', () => {
-    expect(page).toContain("if (!profile?.organizationId) {");
+    expect(page).toContain('const organizationId = operatingOrganizationId ?? profile?.organizationId ?? null;');
+    expect(page).toContain('if (!organizationId) {');
     expect(page).toContain("setError('Organisation access could not be confirmed. Reports are unavailable.');");
     expect(page).toContain('setLoading(false);');
   });
@@ -62,7 +63,7 @@ describe('governed monthly report pack generation', () => {
   });
 
   it('keeps Freedom Camping summaries behind the organisation module entitlement', () => {
-    expect(page).toContain("useEnabledModules(profile?.organizationId)");
+    expect(page).toContain('useEnabledModules(organizationId)');
     expect(page).toContain("isModuleEnabled('freedom_camping')");
     expect(page).toContain('!freedomCampingEnabled\n          ? Promise.resolve({ data: [], error: null })');
     expect(page).toContain('{freedomCampingEnabled && <div className="kpi-card">');

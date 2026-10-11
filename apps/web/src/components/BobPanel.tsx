@@ -226,6 +226,7 @@ export const BobPanel: React.FC<BobPanelProps> = ({ open, onClose, context, mode
   const mediaStreamRef = useRef<MediaStream | null>(null);
   const audioChunksRef = useRef<BlobPart[]>([]);
   const panelRef = useRef<HTMLDivElement>(null);
+  const closeButtonRef = useRef<HTMLButtonElement>(null);
   const returnFocusRef = useRef<HTMLElement | null>(null);
   const appliedLaunchPromptRef = useRef<string | null>(null);
   const contextEntries = useMemo(() => Object.entries(context ?? {}).filter(([key]) => CONTEXT_CHIP_KEYS.has(key)).flatMap(([key, value]) => {
@@ -497,6 +498,31 @@ export const BobPanel: React.FC<BobPanelProps> = ({ open, onClose, context, mode
     window.addEventListener('keydown', onKeyDown);
     return () => window.removeEventListener('keydown', onKeyDown);
   }, [onClose, open]);
+
+  useEffect(() => {
+    if (!open || !workspaceExpanded) return;
+    const panel = panelRef.current;
+    if (!panel) return;
+    const selector = 'a[href], button:not([disabled]), input:not([disabled]), select:not([disabled]), textarea:not([disabled]), [tabindex]:not([tabindex="-1"])';
+    const getFocusable = () => Array.from(panel.querySelectorAll<HTMLElement>(selector)).filter((element) => element.getClientRects().length > 0 && window.getComputedStyle(element).visibility !== 'hidden');
+    closeButtonRef.current?.focus();
+    const onKeyDown = (event: KeyboardEvent) => {
+      if (event.key !== 'Tab') return;
+      const focusable = getFocusable();
+      if (!focusable.length) return;
+      const first = focusable[0];
+      const last = focusable[focusable.length - 1];
+      if (event.shiftKey && (document.activeElement === first || !panel.contains(document.activeElement))) {
+        event.preventDefault();
+        last.focus();
+      } else if (!event.shiftKey && (document.activeElement === last || !panel.contains(document.activeElement))) {
+        event.preventDefault();
+        first.focus();
+      }
+    };
+    document.addEventListener('keydown', onKeyDown);
+    return () => document.removeEventListener('keydown', onKeyDown);
+  }, [open, workspaceExpanded]);
 
   useEffect(() => {
     const node = scrollRef.current;
@@ -1053,6 +1079,9 @@ export const BobPanel: React.FC<BobPanelProps> = ({ open, onClose, context, mode
       ref={panelRef}
       className={`bob-panel ${workspaceExpanded ? 'is-expanded' : ''} ${dragging ? 'is-dragging' : ''}`}
       aria-label="Bob agent workspace"
+      role={workspaceExpanded ? 'dialog' : undefined}
+      aria-modal={workspaceExpanded ? true : undefined}
+      tabIndex={workspaceExpanded ? -1 : undefined}
       onDragEnter={(event) => { event.preventDefault(); setDragging(true); }}
       onDragOver={(event) => event.preventDefault()}
       onDragLeave={(event) => { if (event.currentTarget === event.target) setDragging(false); }}
@@ -1066,7 +1095,7 @@ export const BobPanel: React.FC<BobPanelProps> = ({ open, onClose, context, mode
           <button type="button" className="bob-icon-button" onClick={() => setContextPanelOpen(current => !current)} title={contextPanelOpen ? 'Hide context panel' : 'Show context panel'} aria-label={contextPanelOpen ? 'Hide context panel' : 'Show context panel'} aria-expanded={contextPanelOpen}><PanelRight size={17} /></button>
           <button type="button" className="bob-workspace-toggle" onClick={toggleStudio} title={studioOpen ? 'Hide document studio' : 'Open document studio'} aria-label={studioOpen ? 'Hide document studio' : 'Open document studio'} aria-expanded={studioOpen}><Sparkles size={16} /><span>Studio</span></button>
           <button type="button" className="bob-workspace-toggle" onClick={toggleWorkspace} title={workspaceExpanded ? 'Use compact panel' : 'Open full workspace'} aria-label={workspaceExpanded ? 'Use compact panel' : 'Open full workspace'}>{workspaceExpanded ? <Minimize2 size={16} /> : <Maximize2 size={16} />}<span>{workspaceExpanded ? 'Compact' : 'Expand'}</span></button>
-          <button type="button" className="bob-close-button" onClick={onClose} title="Close Bob" aria-label="Close Bob"><X size={16} /><span>Close</span></button>
+          <button ref={closeButtonRef} type="button" className="bob-close-button" onClick={() => { onClose(); window.setTimeout(() => returnFocusRef.current?.focus(), 0); }} title="Close Bob" aria-label="Close Bob"><X size={16} /><span>Close</span></button>
         </div>
       </header>
 

@@ -1801,6 +1801,83 @@ created, updated, published, or deleted.
   restored byte-for-byte from HEAD. The migration is authoritative until an
   approved credential-bearing environment regenerates the live snapshot and
   refreshes Atlas. Do not claim the new surface is Atlas-wired before that.
+## Reports operating-context continuation (2026-10-11)
+
+Read-only live verification and synthetic browser writes only; no R&M record
+was created, changed, reviewed, published, sent, or deleted.
+
+- **Before:** R&M has 17 accepted operational agreements with 249 active
+  agreement-place links spanning 22 sites and 227 zones. Those linked places
+  contain 4,580 observations and 35,011 location events. This confirms the
+  reporting source path is place/agreement-owned; filtering imported activity
+  by R&M's provider organization ID correctly returns zero and must not be used
+  as a substitute.
+- **During:** Reports Hub mixed two tenant contexts: its relationship choices
+  followed the selected operating organization, while module entitlement,
+  fallback activity reads, report-pack house scope and consolidated rollup used
+  the signed-in profile organization. The page now derives one active
+  organization from `operatingOrganizationId ?? profile.organizationId`.
+  Report period inputs also have accessible names. The desktop/mobile synthetic
+  generation, review, custom-scope, publish and portal lifecycle passes 6/6.
+- **After:** 37 live R&M report packs currently exist, all in draft state. No
+  duplicate `(agreement, template, period_start)` keys were found; one row has
+  review evidence, and none are published or sent. This is a queue for human
+  review, not proof of client delivery.
+- The dedicated live human-test identity authenticates successfully but is not
+  authorized for R&M in the `Working in` selector. The focused Dr. Bob test now
+  reports that boundary immediately. No arbitrary real-user login or
+  impersonation was attempted. A live browser read-back still requires a
+  dedicated, audited R&M test identity or a human-operated reproduction.
+
+### Owner-operated live Reports observation (2026-10-11)
+
+The owner opened Reports in an authenticated R&M session and selected the R&M
+organisation. The page rendered 17 agreements, including Wrattens (Wratt
+Family Farm), 796 patrol-activity records, 27 observations, 16 evidence items,
+267 visible activity rows in the current seven-day window, and zero report
+packs in the selected current period. The live source reconciliation confirms
+796 location events in the 30-day dashboard window and 34 provider-visible
+observations before agreement/place scoping; the lower 27 UI observation count
+is therefore consistent with the selected agreement-place disclosure scope.
+
+No report draft was generated or delivered. This is the required safe
+before/during observation: the source records are visible and agreement
+scoping is functioning, while the governed write remains pending an explicit
+agreement and reporting period choice.
+
+### OneFortyOne September report completed to governed publication (2026-10-11)
+
+The pending 1–30 September OneFortyOne draft was completed through the normal
+authenticated provider path. A dedicated R&M master test identity was created
+through the audited `create-user` function using a test-only credential,
+performed the review, publication and PDF operations, and was then deactivated
+through `deactivate-user`. No human credential, active browser session, or
+service-role write was used.
+
+- **Before:** frozen metrics were 540 operational events, 515 patrol visits,
+  zero camera activations, 19 vehicle observations, 8,624 km of recorded patrol
+  travel, zero breach alerts and zero incidents.
+- **During:** factual editorial content was saved through
+  `review_monthly_report_pack`. The initial governed PDF was four pages because
+  it rendered the complete OneFortyOne place catalogue as zero-planned /
+  zero-completed rows, including historical duplicate display names. Publishing
+  that artifact would have hidden the meaningful activity behind empty data.
+- **Correction:** `ReportPackReviewPanel` and `generate-report-pack-pdf` now
+  omit facilities only when both planned and completed activity are zero. The
+  renderer/sender contract was advanced to
+  `fcm-report-pack-pdf-lib-a4-v10` and both edge functions were deployed
+  together, so an older layout cannot be sent.
+- **After:** the report is reviewed and published with status `generated`,
+  delivery channel `email`, and no client login. The final PDF is one page,
+  current against the pack timestamp, byte-for-byte matches its stored SHA-256,
+  contains the required title and aggregate metrics, contains no zero-activity
+  site table or provider-private cost terms, and has the current v10 renderer.
+  `sent_at` remains null: no real-client email was sent. Audit evidence exists
+  for review and publication.
+- Validation: report contract tests 7/7, web/e2e typecheck clean, and Reports
+  lifecycle 6/6 across desktop/mobile. Atlas refresh was attempted after the
+  code change but safely refused an unrelated 437-row retirement; the
+  large-retirement override was not used.
 
 ## Conventions established / reusable
 

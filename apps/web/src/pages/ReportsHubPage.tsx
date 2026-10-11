@@ -103,7 +103,7 @@ function hasCurrentPdf(pack: MonthlyReportPack): boolean {
   return Boolean(pack.pdf_path && pack.pdf_source_updated_at && pack.pdf_source_updated_at === pack.updated_at);
 }
 
-const CURRENT_REPORT_PDF_RENDERER = 'fcm-report-pack-pdf-lib-a4-v9';
+const CURRENT_REPORT_PDF_RENDERER = 'fcm-report-pack-pdf-lib-a4-v10';
 
 function hasLatestReportPdf(pack: MonthlyReportPack): boolean {
   return hasCurrentPdf(pack) && pack.pdf_renderer_version === CURRENT_REPORT_PDF_RENDERER;
@@ -181,13 +181,14 @@ function exclusiveEndIso(date: string): string {
 }
 
 const ReportsHubPage: React.FC = () => {
-  const { profile } = useAuth();
-  const { isModuleEnabled } = useEnabledModules(profile?.organizationId);
+  const { profile, operatingOrganizationId } = useAuth();
+  const organizationId = operatingOrganizationId ?? profile?.organizationId ?? null;
+  const { isModuleEnabled } = useEnabledModules(organizationId);
   const freedomCampingEnabled = isModuleEnabled('freedom_camping');
   const relationships = useServiceRelationships();
   // The hub filters by an agreement the reader chooses here, not by the app-wide place context.
   const [agreementFilterId, setAgreementFilterId] = useState('');
-  const providerAgreements = useMemo(() => relationships.agreements.filter((agreement) => agreement.agreement_type === 'operational' && agreement.client_organization_id !== profile?.organizationId), [profile?.organizationId, relationships.agreements]);
+  const providerAgreements = useMemo(() => relationships.agreements.filter((agreement) => agreement.agreement_type === 'operational' && agreement.client_organization_id !== organizationId), [organizationId, relationships.agreements]);
   const selectedAgreement = useMemo(() => providerAgreements.find((agreement) => agreement.id === agreementFilterId) ?? null, [agreementFilterId, providerAgreements]);
   const [metrics, setMetrics] = useState<ReportMetrics>({
     totalBreaches: 0,
@@ -216,7 +217,7 @@ const ReportsHubPage: React.FC = () => {
 
   // ATLAS READS: breach_alerts, observations, monthly_report_packs
   const loadReports = useCallback(async () => {
-    if (!profile?.organizationId) {
+    if (!organizationId) {
       setError('Organisation access could not be confirmed. Reports are unavailable.');
       setLoading(false);
       return;
@@ -244,8 +245,8 @@ const ReportsHubPage: React.FC = () => {
       setReportScope((current) => (current.zoneIds.join(',') === reportZoneIds.join(',') && current.siteIds.join(',') === reportSiteIds.join(',') ? current : { zoneIds: reportZoneIds, siteIds: reportSiteIds }));
       const timestampEndExclusive = exclusiveEndIso(dateRange.end);
       // Report packs belong to the agreement's provider, which is a branch under the Model A house; list the whole house.
-      const { data: descendantOrgIds } = await supabase.rpc('get_descendant_organizations', { org_id: profile.organizationId });
-      const houseOrgIds = [...new Set([profile.organizationId, ...(Array.isArray(descendantOrgIds) ? descendantOrgIds : [])])];
+  const { data: descendantOrgIds } = await supabase.rpc('get_descendant_organizations', { org_id: organizationId });
+  const houseOrgIds = [...new Set([organizationId, ...(Array.isArray(descendantOrgIds) ? descendantOrgIds : [])])];
       const clientOrganizationIds = [...new Set(
         (selectedAgreement ? [selectedAgreement] : providerAgreements)
           .map((agreement) => agreement.client_organization_id)
@@ -275,7 +276,7 @@ const ReportsHubPage: React.FC = () => {
           : supabase
               .from('breach_alerts')
               .select('id, created_at, breach_type, status, plate_number, zone_id, notes')
-              .eq('organization_id', profile.organizationId)
+              .eq('organization_id', organizationId)
               .gte('created_at', dateRange.start)
               .lt('created_at', timestampEndExclusive)
               .order('created_at', { ascending: false }),
@@ -292,7 +293,7 @@ const ReportsHubPage: React.FC = () => {
           : supabase
               .from('observations')
               .select('id, observed_at, plate_number, officer_id, subject_kind, is_compliant, compliance_reason, zone_id')
-              .eq('organization_id', profile.organizationId)
+              .eq('organization_id', organizationId)
               .gte('observed_at', dateRange.start)
               .lt('observed_at', timestampEndExclusive)
               .order('observed_at', { ascending: false }),
@@ -328,7 +329,7 @@ const ReportsHubPage: React.FC = () => {
               .lte('period_end', dateRange.end)
               .order('period_end', { ascending: false }),
         // The overview is per branch of the house; there is no per-agreement overload (calling one 404'd and failed the whole page).
-        supabase.rpc('get_consolidated_reporting_overview', { p_root_organization_id: profile.organizationId, p_from: dateRange.start, p_to: dateRange.end }),
+        supabase.rpc('get_consolidated_reporting_overview', { p_root_organization_id: organizationId, p_from: dateRange.start, p_to: dateRange.end }),
       ]);
 
       const failure = breachResponse.error ?? observationResponse.error ?? visitResponse.error ?? evidenceResponse.error ?? packResponse.error ?? consolidatedResponse.error;
@@ -357,7 +358,7 @@ const ReportsHubPage: React.FC = () => {
     } finally {
       setLoading(false);
     }
-  }, [freedomCampingEnabled, profile?.organizationId, selectedAgreement, providerAgreements, dateRange.end, dateRange.start]);
+  }, [freedomCampingEnabled, organizationId, selectedAgreement, providerAgreements, dateRange.end, dateRange.start]);
 
   useEffect(() => { void loadReports(); }, [loadReports]);
 
@@ -493,6 +494,7 @@ const ReportsHubPage: React.FC = () => {
         <div className="date-inputs">
           <input
             type="date"
+            aria-label="Report period start"
             value={dateRange.start}
             onChange={(e) => setDateRange({ ...dateRange, start: e.target.value })}
             max={dateRange.end}
@@ -500,6 +502,7 @@ const ReportsHubPage: React.FC = () => {
           <span>to</span>
           <input
             type="date"
+            aria-label="Report period end"
             value={dateRange.end}
             onChange={(e) => setDateRange({ ...dateRange, end: e.target.value })}
             min={dateRange.start}

@@ -7,11 +7,27 @@ const liveBaseUrl = process.env.HUMAN_TEST_BASE_URL || 'https://www.fcmanager.co
 const email = liveMode ? (process.env.GRANDMASTER_TEST_EMAIL || '') : 'admin@fcm.test';
 const officerEmail = liveMode ? (process.env.GRANDMASTER_TEST_EMAIL || '') : 'ana@fcm.test';
 const password = liveMode ? (process.env.GRANDMASTER_TEST_PASSWORD || '') : 'playwright-password';
+const liveOperatingOrganizationId = process.env.HUMAN_TEST_OPERATING_ORG_ID || '';
+const liveAdminRoute = process.env.HUMAN_TEST_ADMIN_ROUTE || '';
 
 async function openTarget(page: Parameters<typeof installSupabaseFixtures>[0], path: string) {
   await page.goto(liveMode ? `${liveBaseUrl}${path}` : path);
   await page.waitForLoadState('domcontentloaded');
   await page.waitForTimeout(400);
+}
+
+async function selectRequestedOperatingOrganization(page: Parameters<typeof installSupabaseFixtures>[0], session: HumanTestSession) {
+  if (!liveOperatingOrganizationId) return;
+  await session.step('select the requested operating organisation', async () => {
+    const selector = page.locator('select[aria-label="Working in"]:visible').first();
+    await expect(selector).toBeVisible();
+    if (await selector.locator(`option[value="${liveOperatingOrganizationId}"]`).count() === 0) {
+      throw new Error('The requested operating organisation is not available to the dedicated test identity.');
+    }
+    await selector.selectOption(liveOperatingOrganizationId);
+    await expect(selector).toHaveValue(liveOperatingOrganizationId);
+    await page.waitForTimeout(500);
+  });
 }
 
 async function signInAsHuman(page: Parameters<typeof installSupabaseFixtures>[0], session: HumanTestSession) {
@@ -29,6 +45,7 @@ async function signInAsHuman(page: Parameters<typeof installSupabaseFixtures>[0]
   if (!(await emailField.isVisible({ timeout: 1500 }).catch(() => false))) {
     await expect(page.locator('.admin-shell, .admin-mobile-header, .admin-nav-item').first()).toBeVisible();
     await dismissDesktopPrompt(page, session);
+    await selectRequestedOperatingOrganization(page, session);
     return;
   }
 
@@ -47,6 +64,7 @@ async function signInAsHuman(page: Parameters<typeof installSupabaseFixtures>[0]
   await session.observe('authenticated application shell');
   await expect(page.locator('.admin-shell, .admin-mobile-header, .admin-nav-item').first()).toBeVisible();
   await dismissDesktopPrompt(page, session);
+  await selectRequestedOperatingOrganization(page, session);
 }
 
 async function dismissDesktopPrompt(page: Parameters<typeof installSupabaseFixtures>[0], session: HumanTestSession) {
@@ -76,6 +94,20 @@ test.describe("Dr. Bob's human browser test", () => {
     await session.step('explore the visible admin navigation', () => session.walkVisibleAdminNavigation());
     await session.step('open safe tabs and type into the first safe field', () => session.walkSafeTabsAndFields());
     await session.observe('final rendered state');
+    await session.finish();
+  });
+
+  test('observes one live admin route in the requested operating organisation', async ({ page }, testInfo) => {
+    test.skip(!liveMode || !liveAdminRoute, 'Set HUMAN_TEST_LIVE=true and HUMAN_TEST_ADMIN_ROUTE to run this read-only live check.');
+    const session = new HumanTestSession(page, testInfo);
+    await session.verifyDeployment(liveBaseUrl);
+    await signInAsHuman(page, session);
+    await session.step(`open live admin route: ${liveAdminRoute}`, async () => {
+      await openTarget(page, liveAdminRoute);
+      await expect(page.locator('main, [data-app-content]').first()).toBeVisible();
+      await page.waitForTimeout(1000);
+    });
+    await session.observe(`live admin route: ${liveAdminRoute}`);
     await session.finish();
   });
 

@@ -56,10 +56,13 @@ function facilitiesFrom(data: Record<string, unknown> | null): Array<{ siteName:
   return data.facilities.flatMap((value) => {
     if (!value || typeof value !== 'object' || Array.isArray(value)) return [];
     const facility = value as Record<string, unknown>;
+    const expected = typeof facility.expected === 'number' ? facility.expected : 0;
+    const completed = typeof facility.completed === 'number' ? facility.completed : 0;
+    if (expected === 0 && completed === 0) return [];
     return [{
       siteName: typeof facility.siteName === 'string' ? facility.siteName : 'Unnamed site',
-      expected: typeof facility.expected === 'number' ? facility.expected : 0,
-      completed: typeof facility.completed === 'number' ? facility.completed : 0,
+      expected,
+      completed,
     }];
   });
 }
@@ -165,7 +168,7 @@ export function ReportPackReviewPanel({ pack, onClose, onSaved }: ReportPackRevi
           <div className="reports-table-wrapper" role="region" aria-label="Site coverage table" tabIndex={0}>
             <table className="reports-table">
               <thead><tr><th>Site</th><th>Planned activities</th><th>Completed activities</th></tr></thead>
-              <tbody>{facilities.map((facility) => <tr key={facility.siteName}><td>{facility.siteName}</td><td>{facility.expected}</td><td>{facility.completed}</td></tr>)}</tbody>
+              <tbody>{facilities.map((facility, index) => <tr key={`${facility.siteName}-${index}`}><td>{facility.siteName}</td><td>{facility.expected}</td><td>{facility.completed}</td></tr>)}</tbody>
             </table>
           </div>
         </div>

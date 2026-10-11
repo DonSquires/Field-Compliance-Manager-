@@ -17,7 +17,7 @@ test('report-pack PDFs expose source snapshot provenance and scope', () => {
 });
 
 test('monthly PDFs render agreement-scoped activity sections without provider-wide totals', () => {
-  assert.match(source, /'fcm-report-pack-pdf-lib-a4-v9'/);
+  assert.match(source, /'fcm-report-pack-pdf-lib-a4-v10'/);
   assert.match(source, /embedPdfNotoFonts\(pdf\)/);
   assert.doesNotMatch(source, /noto-sans-[^'" ]+\.woff/);
   assert.doesNotMatch(source, /pdf\.embedFont\(/);

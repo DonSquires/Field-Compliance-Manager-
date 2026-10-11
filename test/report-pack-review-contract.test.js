@@ -55,6 +55,8 @@ test('PDF previews include editorial content and cannot overwrite an issued arti
   assert.match(pdf, /remove\(\[pack\.pdf_path\]\)/);
   assert.match(pdf, /widthOfTextAtSize/);
   assert.doesNotMatch(pdf, /truncateCodePoints/);
+  assert.match(pdf, /return expected !== 0 \|\| completed !== 0/);
+  assert.match(send, /fcm-report-pack-pdf-lib-a4-v10/);
 });
 
 test('monthly client email summaries exclude provider-wide incident and alert totals', () => {
@@ -88,6 +90,8 @@ test('monthly report snapshots include agreement-place activity aggregates witho
   assert.match(reviewPanel, /numberFrom\(pack\.data, 'vehicleObservations'\)/);
   assert.match(reviewPanel, /SLA in progress/);
   assert.match(reviewPanel, /facilitiesFrom\(pack\.data\)/);
+  assert.match(reviewPanel, /if \(expected === 0 && completed === 0\) return \[\]/);
+  assert.match(reviewPanel, /key=\{`\$\{facility\.siteName\}-\$\{index\}`\}/);
   assert.doesNotMatch(reviewPanel, /Incidents|Checkpoint visits|Breach alerts|incidentsTotal|checkpointVisits|breachAlerts/);
 });
 

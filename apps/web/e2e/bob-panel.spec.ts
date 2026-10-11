@@ -13,11 +13,21 @@ test('administrator opens and dismisses the governed Bob workspace accessibly', 
   await expect(page).toHaveURL(/\/admin\/bob$/);
   const panel = page.getByLabel('Bob agent workspace');
   await expect(panel).toBeVisible();
+  await expect(page.getByRole('dialog', { name: 'Bob agent workspace' })).toBeVisible();
+  await expect(panel).toHaveAttribute('aria-modal', 'true');
   await expect(panel.getByText('Governed session')).toBeVisible();
   await expect(panel.locator('.bob-context')).toHaveCount(0);
   await expect(panel.getByRole('button', { name: 'Plan work' })).toBeVisible();
   await expect(panel.getByRole('button', { name: 'Start voice capture' })).toBeVisible();
   await expect(panel.getByRole('button', { name: 'Close Bob' })).toBeVisible();
+  await expect(panel.getByRole('button', { name: 'Close Bob' })).toBeFocused();
+  const focusable = panel.locator('a[href]:visible, button:not([disabled]):visible, input:not([disabled]):visible, select:not([disabled]):visible, textarea:not([disabled]):visible, [tabindex]:not([tabindex="-1"]):visible');
+  await focusable.first().focus();
+  await page.keyboard.press('Shift+Tab');
+  await expect(focusable.last()).toBeFocused();
+  await page.keyboard.press('Tab');
+  await expect(focusable.first()).toBeFocused();
+  await panel.getByRole('button', { name: 'Close Bob' }).focus();
   await expect(panel).toHaveClass(/is-expanded/);
   const isMobile = await page.evaluate(() => window.innerWidth < 1100);
   if (isMobile) {
@@ -53,6 +63,7 @@ test('administrator opens and dismisses the governed Bob workspace accessibly', 
   await page.keyboard.press('Escape');
   await expect(panel).toBeHidden();
   await expect(page).toHaveURL(/\/admin\/hub$/);
+  await expect(opener).toBeFocused();
   expect(await page.evaluate(() => document.documentElement.scrollWidth <= window.innerWidth)).toBe(true);
   expect(browserErrors, browserErrors.join('\n')).toEqual([]);
 });

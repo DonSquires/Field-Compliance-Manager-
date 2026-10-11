@@ -11,7 +11,7 @@ import { pdfTextFontRuns } from '../_shared/pdf-text-fonts.ts';
 const url = Deno.env.get('SUPABASE_URL') ?? '';
 const serviceKey = Deno.env.get('SUPABASE_SERVICE_ROLE_KEY') ?? '';
 const anonKey = Deno.env.get('SUPABASE_ANON_KEY') ?? '';
-const rendererVersion = 'fcm-report-pack-pdf-lib-a4-v9';
+const rendererVersion = 'fcm-report-pack-pdf-lib-a4-v10';
 const cors = { 'Access-Control-Allow-Origin': '*', 'Access-Control-Allow-Headers': 'authorization, x-client-info, apikey, content-type' };
 const json = (body: unknown, status = 200) => new Response(JSON.stringify(body), { status, headers: { ...cors, 'Content-Type': 'application/json' } });
 const sha256 = async (bytes: Uint8Array) => Array.from(new Uint8Array(await crypto.subtle.digest('SHA-256', Uint8Array.from(bytes).buffer))).map((value) => value.toString(16).padStart(2, '0')).join('');
@@ -211,7 +211,13 @@ async function renderPdf({ templateTitle, agreementName, period, packId, snapsho
     draw(`Patrol travel: ${format(number('patrolTravelKm'), 1)} km`);
 
     const facilities = Array.isArray(snapshot.facilities)
-      ? snapshot.facilities.filter((value): value is Record<string, unknown> => Boolean(value) && typeof value === 'object' && !Array.isArray(value))
+      ? snapshot.facilities.filter((value): value is Record<string, unknown> => {
+        if (!value || typeof value !== 'object' || Array.isArray(value)) return false;
+        const facility = value as Record<string, unknown>;
+        const expected = typeof facility.expected === 'number' ? facility.expected : 0;
+        const completed = typeof facility.completed === 'number' ? facility.completed : 0;
+        return expected !== 0 || completed !== 0;
+      })
       : [];
     if (facilities.length) {
       drawSection('Site Coverage');

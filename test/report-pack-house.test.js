@@ -20,7 +20,7 @@ test('the reports hub filters by an agreement the reader chooses, lists the whol
   assert.match(hub, /\.in\('organization_id', houseOrgIds\)/);
   // Agreement selection scopes generation through the validated three-argument overload.
   assert.match(hub, /p_service_agreement_id: selectedAgreement\?\.id \?\? null/);
-  assert.match(hub, /supabase\.rpc\('get_consolidated_reporting_overview', \{ p_root_organization_id: profile\.organizationId, p_from: dateRange\.start, p_to: dateRange\.end \}\)/);
+  assert.match(hub, /supabase\.rpc\('get_consolidated_reporting_overview', \{ p_root_organization_id: organizationId, p_from: dateRange\.start, p_to: dateRange\.end \}\)/);
   // PostgREST embeds a to-one relation as an object
   assert.match(hub, /\(Array\.isArray\(pack\.agreement\) \? pack\.agreement\[0\]\?\.name : pack\.agreement\?\.name\) \?\? 'Service agreement'/);
 });
