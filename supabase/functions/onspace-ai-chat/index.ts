@@ -1326,6 +1326,10 @@ function computeEgressForbiddenSet(caps, meta) {
   // UUID redaction backstop (#96): non-admiral tiers never see raw UUIDs.
   if (caps.tier !== 'admiral') {
     out = out.replace(/[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}/gi, '[id]');
+    out = out.replace(
+      /Document ID:\s*`\[id\]`\s*\nVersion ID:\s*`\[id\]`/gi,
+      'Document and version references are protected at your current rank. Use the verified Studio action below.',
+    );
   }
   // #322 Tier 3 text fallback: prepend a plain-text safety notice so the
   // warning is visible even before the UI renders the structured badge.

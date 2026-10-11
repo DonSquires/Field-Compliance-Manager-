@@ -485,6 +485,21 @@ describe('BobPanel', () => {
 
   it('surfaces a recoverable timeout when Bob does not return', async () => {
     mockInvoke.mockImplementation((_name: string, options?: { body?: Record<string, unknown> }) => {
+      if (options?.body?.operation === 'status') {
+        return Promise.resolve({
+          data: {
+            turn_run: {
+              request_id: options.body.request_id,
+              status: 'running',
+              started_at: '2026-10-11T04:00:00.000Z',
+              heartbeat_at: '2026-10-11T04:02:00.000Z',
+              completed_at: null,
+              error_code: null,
+            },
+          },
+          error: null,
+        });
+      }
       if (options?.body?.operation === 'cancel') {
         return Promise.resolve({
           data: {
@@ -522,6 +537,14 @@ describe('BobPanel', () => {
     expect(screen.getByRole('button', { name: 'Check status' })).toBeTruthy();
     expect(screen.getByRole('button', { name: 'Request cancellation' })).toBeTruthy();
 
+    fireEvent.click(screen.getByRole('button', { name: 'Check status' }));
+
+    await waitFor(() => {
+      expect(screen.getByText('Working')).toBeTruthy();
+      expect(screen.queryByText('Failed/paused')).toBeNull();
+      expect(screen.queryByRole('alert')).toBeNull();
+    });
+
     fireEvent.click(screen.getByRole('button', { name: 'Request cancellation' }));
 
     await waitFor(() => {
@@ -532,7 +555,8 @@ describe('BobPanel', () => {
           conversation_id: 'conversation-1',
         }),
       }));
-      expect(screen.getByRole('alert').textContent).toContain('Cancellation is requested.');
+      expect(screen.getByText('Cancellation requested')).toBeTruthy();
+      expect(screen.getByText(/next safe conductor boundary/)).toBeTruthy();
     });
   });
 

@@ -240,7 +240,7 @@ export const BobPanel: React.FC<BobPanelProps> = ({ open, onClose, context, mode
   }).slice(0, 4), [context]);
   const drawerContextEntries = useMemo(() => Object.entries(context ?? {}).filter((entry): entry is [string, string | number] =>
     typeof entry[1] === 'string' || typeof entry[1] === 'number').map(([key, value]) => [key, String(value)] as [string, string]).slice(0, 12), [context]);
-  const workState = derivePanelWorkState({ loading, sending, error, input, messages, pendingFiles, attachments });
+  const workState = derivePanelWorkState({ loading, sending, error, input, messages, pendingFiles, attachments, activeTurn });
 
   const loadAttachments = useCallback(async (convId: string) => {
     const { data, error: attachmentErr } = await supabase
@@ -788,9 +788,9 @@ export const BobPanel: React.FC<BobPanelProps> = ({ open, onClose, context, mode
         setActiveTurn(null);
         setError(null);
       } else if (nextStatus === 'running') {
-        setError('Bob is still working on this request. You can check again or request cancellation; do not resend it.');
+        setError(null);
       } else if (nextStatus === 'cancel_requested') {
-        setError('Cancellation is requested. Bob will stop at the next safe conductor boundary.');
+        setError(null);
       } else {
         await selectSession(conversationId);
         setError(nextStatus === 'cancelled'
@@ -1300,7 +1300,13 @@ export const BobPanel: React.FC<BobPanelProps> = ({ open, onClose, context, mode
   );
 };
 
-function derivePanelWorkState(input: { loading: boolean; sending: boolean; error: string | null; input: string; messages: BobMessage[]; pendingFiles: PendingBobFile[]; attachments: BobAttachmentRecord[] }): WorkState {
+function derivePanelWorkState(input: { loading: boolean; sending: boolean; error: string | null; input: string; messages: BobMessage[]; pendingFiles: PendingBobFile[]; attachments: BobAttachmentRecord[]; activeTurn: ActiveBobTurn | null }): WorkState {
+  if (input.activeTurn?.status === 'queued' || input.activeTurn?.status === 'running') {
+    return { tone: 'working', label: 'Working', detail: 'Bob is processing the durable request. Check status for a receipt or request cancellation; do not resend it.' };
+  }
+  if (input.activeTurn?.status === 'cancel_requested') {
+    return { tone: 'waiting', label: 'Cancellation requested', detail: 'Bob will stop at the next safe conductor boundary. The request remains visible until the final receipt arrives.' };
+  }
   if (input.error) return { tone: 'failed', label: 'Failed/paused', detail: `The last operation did not complete: ${input.error}. Check the message and try again.` };
   if (input.pendingFiles.some(file => file.status === 'uploading')) return { tone: 'using-data', label: 'Using app data', detail: 'Uploading evidence to private storage and registering it for Bob.' };
   if (input.pendingFiles.some(file => file.status === 'failed')) return { tone: 'failed', label: 'Failed/paused', detail: 'One or more files failed to upload. Remove the failed file or try again.' };

@@ -50,6 +50,12 @@ export function BobMermaidDiagram({ chart, title = 'Bob diagram' }: { chart: str
         const { svg } = await mermaid.render(`bob-diagram-${reactId}`, chart);
         const safeSvg = sanitizeSvg(svg);
         if (!safeSvg) throw new Error('Diagram renderer returned no SVG.');
+        const viewBoxWidth = Number(safeSvg.getAttribute('viewBox')?.trim().split(/\s+/)[2]);
+        if (Number.isFinite(viewBoxWidth) && viewBoxWidth > 0) {
+          safeSvg.style.width = `${Math.max(viewBoxWidth, 640)}px`;
+          safeSvg.style.height = 'auto';
+          safeSvg.style.maxWidth = 'none';
+        }
         if (!cancelled && hostRef.current) hostRef.current.replaceChildren(document.importNode(safeSvg, true));
       } catch (renderError) {
         if (!cancelled) setError(renderError instanceof Error ? renderError.message : 'Diagram could not be rendered.');

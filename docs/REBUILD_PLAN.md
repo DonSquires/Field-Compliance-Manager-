@@ -685,6 +685,17 @@ System-wide Bob acceptance gate shipped 2026-10-11:
     the creation receipt. Desktop and mobile Playwright acceptance, 40 focused
     component tests, conductor contracts, TypeScript, and the production web
     build pass.
+  - **Live R&M continuation:** the approved local source completed with 140,826
+    discovered files and zero failures. Chat rendered a private source image;
+    Studio rendered that media, a generated Mermaid diagram, and a newly
+    persisted conversation-scoped document with Copy/Download actions. The
+    acceptance pass also found and repaired two presentation defects: checking
+    a live durable request could show `Failed/paused` beside `running`, and a
+    large Mermaid graph was scaled below readable size. Active durable states
+    now take precedence over stale transport messages, and diagrams retain a
+    readable native width inside the scrollable Studio canvas. Non-admiral
+    document receipts now explain that references are rank-protected instead of
+    presenting unexplained `[id]` placeholders.
 
   **Gate:** live `bob_messages` show no context-losing fallbacks; a Builder job
   runs implement → verify → repair without human touch and stops cleanly at
