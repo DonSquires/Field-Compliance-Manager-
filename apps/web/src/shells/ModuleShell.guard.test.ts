@@ -1,6 +1,7 @@
 import { describe, expect, it } from 'vitest';
 import { readFileSync } from 'node:fs';
 import { resolve } from 'node:path';
+import { SPECIALTY_MODULES } from '../config/specialtyModules';
 
 const shell = readFileSync(resolve(process.cwd(), 'src/shells/ModuleShell.tsx'), 'utf8');
 const router = readFileSync(resolve(process.cwd(), 'src/routing/RoleRouter.tsx'), 'utf8');
@@ -35,5 +36,11 @@ describe('standalone module shell contract', () => {
     expect(router).toContain("path.startsWith('/modules/')");
     expect(router).toContain('path="/modules/:moduleKey"');
     expect(officerShell).toContain('Open standalone app');
+  });
+
+  it('renders every specialty module that advertises a standalone path', () => {
+    for (const module of SPECIALTY_MODULES) {
+      expect(shell, `${module.key} has a standalone path but no ModuleShell renderer`).toContain(`case '${module.key}'`);
+    }
   });
 });
