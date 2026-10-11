@@ -453,7 +453,35 @@ two replay attempts for each returned `missing_evidence_link`, while a
 nonexistent assessment raised the missing-record guard. This contradicts the
 historical assumption that every assessment could be projected, so the records
 remain visible as a custody gap rather than receiving fabricated envelopes.
-Noise and other remaining vertical-module adapters remain.
+Other remaining vertical-module adapters remain.
+
+Phase C noise-photo slice shipped 2026-10-11:
+
+- **Before:** the officer must have an active entitled profile, select the
+  source place, preserve any complaint/harmed-party place already held by the
+  dispatch job, and capture a private source/equipment evidence photo. The photo
+  is supporting visual evidence only; it cannot supply an acoustic reading.
+- **During:** the caller-context receipt retains the two-place, GPS, H&S,
+  Police, matrix, action and notice gates. Original and watermarked evidence are
+  hashed and privately stored before a service-only, replay-safe projection
+  creates visible-source, equipment and visual-activity candidates. Invalid
+  classifier output now fails explicitly rather than returning a
+  success-shaped `unknown`.
+- **After:** photo classification, the officer's acoustic/legal decision and
+  workflow review remain separate attributable actions. Human photo review may
+  confirm, correct or reject candidates but cannot change matrix scores,
+  enforcement action, notice or END fields. The responsive oversight register
+  uses practical narrow-screen cards, short-lived evidence links and full-width
+  safe actions; desktop/mobile Chromium capture and review passed without
+  browser errors.
+
+Production has 76 legacy noise assessments, zero governed evidence links and
+zero `noise_photo` envelopes. Two replay attempts per assessment returned
+`missing_evidence_link`, the counts remained unchanged, and a nonexistent
+assessment raised `Noise assessment is missing`. The expected-versus-present
+gap is therefore explicit: historical rows remain usable as legacy operational
+records but cannot be represented as hash-backed photo evidence, and no missing
+complaint place, media or envelope is fabricated.
 
 **Gate:** live `bob_messages` show no context-losing fallbacks; a Builder job
 runs implement → verify → repair without human touch and stops cleanly at

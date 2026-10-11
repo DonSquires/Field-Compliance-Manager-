@@ -321,7 +321,7 @@ The oversight UI signs private evidence for short-lived display and shows
 candidate confidence, model provenance and human authority state. The one
 legacy linked evidence item fails closed as `missing_source_hash` on replay, so
 no envelope is fabricated until custody is repaired. Smoke and noise adapters
-remain Phase C work.
+were completed in the following slices.
 
 **Fifth adapter implemented 2026-10-11: smoke photo classification.** The
 governed officer receipt now preserves explicit source confirmation, notes and
@@ -337,7 +337,23 @@ and safe next actions. Desktop and mobile Chromium acceptance runs passed
 without browser errors. All four legacy assessments lack evidence links; two
 replays per record failed closed as `missing_evidence_link`, and a nonexistent
 record raised `Smoke assessment is missing`, so no historical envelope was
-fabricated. Noise remains Phase C work.
+fabricated.
+
+**Sixth adapter implemented 2026-10-11: noise photo classification.** The
+governed officer submission requires a private source/equipment evidence photo
+while preserving the two-place complaint model and the officer's acoustic
+matrix as the only statutory decision path. The service-only projection creates
+advisory visible-source, equipment and visual-activity candidates in
+`noise_photo` envelopes; a photograph cannot measure noise, estimate decibels,
+determine excessive noise or authorize enforcement. Administrator photo review
+is separate from acoustic, legal and workflow review, retains corrections as
+append-only receipts, and cannot mutate matrix scores, action or notice fields.
+The responsive oversight register uses cards at narrow widths and signs private
+evidence for 15 minutes. Desktop and mobile Chromium capture/review acceptance
+passed without browser errors. All 76 legacy assessments lack governed evidence
+links; two replays per record returned `missing_evidence_link`, a nonexistent
+record raised `Noise assessment is missing`, and no historical envelope was
+fabricated.
 
 Gate: source/enhanced disagreement and threshold failures never auto-promote.
 

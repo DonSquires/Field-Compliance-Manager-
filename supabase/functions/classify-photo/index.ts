@@ -172,15 +172,19 @@ Provide your response in JSON format:
 Analyze this photo and identify:
 1. Noise source type (music equipment, machinery, construction, animals, vehicle)
 2. Equipment type if visible
-3. Estimated noise level category
+3. A visual-only apparent activity level
+
+You cannot hear or measure noise from a photograph. Do not decide whether noise
+is excessive, do not estimate decibels, and do not recommend enforcement.
 
 Provide your response in JSON format:
 {
   "classification": "<noise source type>",
   "confidence": <0-1>,
   "details": {
+    "source_type": "<music_equipment|machinery|construction|animal|vehicle|unknown>",
     "equipment_type": "<description>",
-    "estimated_level": "<low|moderate|high|excessive>"
+    "estimated_level": "<inactive|low_visual_activity|moderate_visual_activity|high_visual_activity|unknown>"
   },
   "reasoning": "<brief explanation>"
 }`,
@@ -267,13 +271,7 @@ Provide your response in JSON format:
       });
     } catch (parseErr) {
       console.error('[classify-photo] Failed to parse Bob response:', parseErr);
-      // Return raw response if JSON parsing fails
-      return json({
-        classification: 'unknown',
-        confidence: 0,
-        details: {},
-        reasoning: data.reply
-      });
+      return json({ error: 'Classification service returned invalid structured output' }, 502);
     }
   } catch (err) {
     console.error('[classify-photo] unexpected error:', err);

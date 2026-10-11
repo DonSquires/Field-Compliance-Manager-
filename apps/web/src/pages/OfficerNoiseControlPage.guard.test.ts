@@ -35,10 +35,12 @@ describe('officer noise control — two-place job flow', () => {
   });
 
   it('submits the assessment with the job so both places derive server-side, and states the position rule', () => {
-    expect(page).toContain("rpc('submit_officer_noise_assessment'");
-    expect(page).toContain('p_dispatch_job_id: selectedJob?.id ?? null');
-    expect(page).not.toContain('p_complainant_site_id');
-    expect(page).not.toContain('p_complaint_address');
+    expect(page).toContain("'submit-noise-assessment'");
+    expect(page).toContain('dispatch_job_id: selectedJob?.id ?? null');
+    expect(page).not.toContain('complainant_site_id:');
+    expect(page).not.toContain('complaint_address:');
+    expect(page).toContain('image_base64: imageBase64');
+    expect(page).toContain('A photo cannot measure noise or determine whether it is excessive.');
     expect(page).toContain('the report states the distance, never the complainant');
     expect(page).toContain('Public position as near the complainant as possible');
   });

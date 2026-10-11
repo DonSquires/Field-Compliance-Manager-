@@ -235,7 +235,7 @@ async function main() {
   const summary = { tables: tables.length, views: views.length, functions: fnDefs.length, enums: enums.length, composites: composites.length, domains: domains.length, sequences: sequences.length, constraints: constraints.length, indexes: indexes.length, triggers: triggers.length, policies: policies.length, rls_tables: tables.filter((t) => t.relrowsecurity).length };
   emit(`-- summary: ${JSON.stringify(summary)}`);
   fs.mkdirSync(path.dirname(OUT), { recursive: true });
-  fs.writeFileSync(OUT, `${out.join('\n')}\n`);
+  fs.writeFileSync(OUT, `${out.join('\n').replace(/[ \t]+$/gm, '')}\n`);
   console.log(JSON.stringify({ out: OUT, bytes: fs.statSync(OUT).size, ...summary }));
 }
 

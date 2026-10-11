@@ -16,6 +16,17 @@ describe('governed noise review return', () => {
     expect(admin).not.toMatch(/from\('noise_assessments'\)[\s\S]{0,300}\.update\(/);
   });
 
+  it('separates photo interpretation from acoustic, legal, and workflow authority', () => {
+    expect(admin).toContain("rpc('review_noise_photo_classification'");
+    expect(admin).toContain('Review photo');
+    expect(admin).toContain('A photo cannot measure noise, set the matrix, determine excessive noise, or authorize enforcement.');
+    expect(admin).toContain("createSignedUrl(path, 900)");
+    expect(admin).toContain('Acoustic matrix and legal action were unchanged');
+    expect(officer).toContain("'submit-noise-assessment'");
+    expect(officer).toContain('image_base64: imageBase64');
+    expect(officer).toContain('The officer matrix remains authoritative');
+  });
+
   it('generates court-ready evidence packages through the edge function', () => {
     expect(admin).toContain("supabase.functions.invoke<{ evidence_package_url?: string }>('generate-noise-evidence-package'");
     expect(admin).toContain('assessment_id: assessment.id');
