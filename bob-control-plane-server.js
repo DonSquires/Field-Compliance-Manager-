@@ -282,9 +282,9 @@ async function startHumanTestRun({ mode, scope, requestedBy }) {
         artifactDir,
         profile: mode === 'live' ? 'human-qa-live' : 'human-qa',
         timeoutMs: Math.min(Math.max(Number(process.env.BOB_HUMAN_TEST_TIMEOUT_MS) || 45 * 60_000, 5 * 60_000), 60 * 60_000),
-        memory: process.env.BOB_HUMAN_TEST_MEMORY || (mode === 'live' ? '2g' : '4g'),
+        memory: process.env.BOB_HUMAN_TEST_MEMORY || (mode === 'live' ? '2g' : '8g'),
         cpus: process.env.BOB_HUMAN_TEST_CPUS || (mode === 'live' ? '2' : '4'),
-        pidsLimit: Number(process.env.BOB_HUMAN_TEST_PIDS_LIMIT || (mode === 'live' ? 256 : 512)),
+        pidsLimit: Number(process.env.BOB_HUMAN_TEST_PIDS_LIMIT || (mode === 'live' ? 256 : 1024)),
         environment: mode === 'live'
           ? {
               HUMAN_TEST_LIVE: 'true',

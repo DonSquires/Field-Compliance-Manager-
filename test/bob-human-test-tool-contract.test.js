@@ -28,3 +28,9 @@ test('live human testing requires the dedicated configured test identity', () =>
   assert.match(controlPlane, /Dedicated live human-test identity and target URL are not configured/);
   assert.match(controlRoom, /Live human testing is restricted to grand master/);
 });
+
+test('fixture human testing has a bounded browser-sized resource profile', () => {
+  assert.match(controlPlane, /mode === 'live' \? '2g' : '8g'/);
+  assert.match(controlPlane, /mode === 'live' \? 256 : 1024/);
+  assert.match(controlPlane, /mode === 'live'[\s\S]*GRANDMASTER_TEST_PASSWORD[\s\S]*: \{ HUMAN_TEST_LIVE: 'false' \}/);
+});
