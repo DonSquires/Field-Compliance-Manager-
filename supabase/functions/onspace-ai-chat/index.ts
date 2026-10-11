@@ -7615,7 +7615,11 @@ serve(async (req)=>{
       return null;
     };
     const explicitBuilderCreationRequest = (text: string) => {
-      const normalized = canon(text);
+      const normalized = String(text ?? '')
+        .toLowerCase()
+        .replace(/[^a-z0-9/ -]+/g, ' ')
+        .replace(/\s+/g, ' ')
+        .trim();
       if (!normalized) return false;
       if (/\b(?:plan only|explain only|review only|do not (?:create|open|start)|dont (?:create|open|start)|without (?:creating|opening|starting))\b/.test(normalized)) return false;
       const asksForBuilder = /\b(?:builder(?: job)?|draft (?:pull request|pr)|self[- ]heal|app design(?:\/| )build agent)\b/.test(normalized);

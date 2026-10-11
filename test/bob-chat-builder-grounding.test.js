@@ -12,6 +12,11 @@ const source = chat.slice(start, chat.indexOf('    const builderCancellationDeci
   .replace(/\(text: string\)/g, '(text)')
   .replace(/\[\] as string\[\]/g, '[]');
 const builderBriefGrounding = vm.runInNewContext(`(() => { ${source} return builderBriefGrounding; })()`);
+const builderIntentStart = chat.indexOf('    const explicitBuilderCreationRequest = ');
+assert.ok(builderIntentStart >= 0);
+const builderIntentSource = chat.slice(builderIntentStart, chat.indexOf('    const builderJobArgsFromEvidence = ', builderIntentStart))
+  .replace('(text: string)', '(text)');
+const explicitBuilderCreationRequest = vm.runInNewContext(`(() => { ${builderIntentSource} return explicitBuilderCreationRequest; })()`);
 
 const request = "In Bob's chat, whenever Bob asks me a question or proposes something that needs my confirmation — a Builder job proposal, a laptop command, a cancellation — show tappable choice buttons under his message, for example 'Yes, run it' / 'Change it' / 'No'. Server side, in supabase/functions/onspace-ai-chat/index.ts, include meta.options on every proposed outcome; client side, in apps/web/src/components/BobPanel.tsx, render metadata.options as accessible buttons. Add component tests.";
 
@@ -81,4 +86,14 @@ test('an explicit owner build request cannot fall through to synthesis at the ev
   assert.match(postLoop, /result = await dispatchTool\(chosenTool, args, decision\)/);
   assert.match(chat, /Evidence gathered before proposal:/);
   assert.match(chat, /open only a draft pull request\. Do not merge or deploy\./);
+});
+
+test('the exact live owner request is recognised as Builder creation intent', () => {
+  const request = 'Act as the Grandmaster app design/build agent. Design and implement one bounded accessibility improvement in the Bob panel: make durable run status changes clearly announced to screen readers, with focused tests and no unrelated UI changes. First inspect the current implementation and Atlas/schema impact, then create an isolated Builder job, implement and test the change, and prepare a draft pull request. Do not merge a protected branch, deploy production, or claim success without receipts. If a human confirmation is required, show selectable confirmation buttons.';
+  assert.equal(explicitBuilderCreationRequest(request), true);
+});
+
+test('Builder intent guard respects explicit plan-only and no-create instructions', () => {
+  assert.equal(explicitBuilderCreationRequest('Plan only: explain how the Builder job would fix the Bob panel.'), false);
+  assert.equal(explicitBuilderCreationRequest('Review the app code but do not create or open a Builder job.'), false);
 });
