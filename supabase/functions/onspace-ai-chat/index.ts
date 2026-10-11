@@ -193,6 +193,7 @@ function safeAgentWorkspaceContext(value) {
     return {
       agent_mode: agentMode,
       page: text('page', 100),
+      page_path: text('pagePath', 200),
       workspace: text('workspace', 120),
       operating_model: text('operating_model', 200),
       active_module: text('activeModule', 100),
@@ -211,6 +212,8 @@ function safeAgentWorkspaceContext(value) {
       zone_id: text('zoneId', 80),
       work_unit_id: text('workUnitId', 80),
       handoff_id: text('handoffId', 80),
+      action_id: text('actionId', 80),
+      proposal_source: text('proposalSource', 40),
       module_gate_status: text('moduleGateStatus', 80),
       agreement: safeEntity(source.agreement),
       site: safeEntity(source.site),

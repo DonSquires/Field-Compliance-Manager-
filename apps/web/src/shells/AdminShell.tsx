@@ -544,6 +544,43 @@ const AdminShell: React.FC = () => {
   }, [navigateToFieldOps, navigateToPage]);
 
   const workflowContext = useMemo(() => readWorkflowContext(location.search), [location.search]);
+  const bobContext = useMemo(() => {
+    const routeSearch = new URLSearchParams(location.search);
+    return {
+      page: activePage,
+      pagePath: location.pathname,
+      actionId: routeSearch.get('actionId'),
+      proposalSource: routeSearch.get('source'),
+      crmTab,
+      rosterTab,
+      fieldOpsSubArea,
+      reportsTab,
+      orgName,
+      role: profile?.role,
+      accountId: workflowContext.accountId,
+      agreementId: workflowContext.agreementId,
+      ledgerId: workflowContext.ledgerId,
+      locationId: workflowContext.locationId,
+      siteId: workflowContext.siteId,
+      zoneId: workflowContext.zoneId,
+      workUnitId: workflowContext.workUnitId,
+      handoffId: workflowContext.handoffId,
+      agreement: selectedAgreement,
+      site: selectedSite,
+      zone: selectedZone,
+      agreements: agreements.slice(0, 10),
+      sites: sites.slice(0, 10),
+      zones: zones.slice(0, 10),
+    };
+  }, [activePage, location.pathname, location.search, crmTab, rosterTab, fieldOpsSubArea, reportsTab, orgName, profile?.role, workflowContext, selectedAgreement, selectedSite, selectedZone, agreements, sites, zones]);
+  const openBobCommandCenter = useCallback(() => {
+    navigate('/admin/bob', {
+      state: {
+        bobSourceContext: bobContext,
+        bobReturnPath: `${location.pathname}${location.search}`,
+      },
+    });
+  }, [bobContext, location.pathname, location.search, navigate]);
 
   const visibleWorkspaces = Object.entries(NAVIGATION_MAP)
     .filter(([, items]) => items.some((item) => canAccessAdminPage(item.id, profile?.role, () => true)))
@@ -551,7 +588,8 @@ const AdminShell: React.FC = () => {
   const activeWorkspace = visibleWorkspaces.find((workspace) => workspace.items.some((item) => item.id === activePage))
     ?? visibleWorkspaces.find((workspace) => workspace.items.length > 0);
   const openWorkspaceItem = (item: WorkspaceItem) => {
-    if (item.area) navigateToFieldOps(item.area);
+    if (item.id === 'bob') openBobCommandCenter();
+    else if (item.area) navigateToFieldOps(item.area);
     else navigateToPage(item.id, workflowContext);
   };
   const isWorkspaceItemActive = (item: WorkspaceItem) => item.id === activePage
@@ -566,7 +604,7 @@ const AdminShell: React.FC = () => {
     const destination = resolveNotificationDestination(profile?.role ?? 'unknown', notification);
     if (!destination) return false;
     if (destination.kind === 'bob') {
-      setBobOpen(true);
+      openBobCommandCenter();
       return true;
     }
     if (destination.kind === 'admin_field_ops') {
@@ -590,31 +628,7 @@ const AdminShell: React.FC = () => {
       return true;
     }
     return false;
-  }, [navigate, navigateToFieldOps, navigateToPage, profile?.role]);
-
-  const bobContext = useMemo(() => ({
-    page: activePage,
-    crmTab,
-    rosterTab,
-    fieldOpsSubArea,
-    reportsTab,
-    orgName,
-    role: profile?.role,
-    accountId: workflowContext.accountId,
-    agreementId: workflowContext.agreementId,
-    ledgerId: workflowContext.ledgerId,
-    locationId: workflowContext.locationId,
-    siteId: workflowContext.siteId,
-    zoneId: workflowContext.zoneId,
-    workUnitId: workflowContext.workUnitId,
-    handoffId: workflowContext.handoffId,
-    agreement: selectedAgreement,
-    site: selectedSite,
-    zone: selectedZone,
-    agreements: agreements.slice(0, 10),
-    sites: sites.slice(0, 10),
-    zones: zones.slice(0, 10),
-  }), [activePage, crmTab, rosterTab, fieldOpsSubArea, reportsTab, orgName, profile?.role, workflowContext, selectedAgreement, selectedSite, selectedZone, agreements, sites, zones]);
+  }, [navigate, navigateToFieldOps, navigateToPage, openBobCommandCenter, profile?.role]);
 
   const renderPage = useCallback(() => {
     switch (activePage) {
@@ -807,7 +821,7 @@ const AdminShell: React.FC = () => {
               {isFieldOpsAreaEnabled('vehicle-search') && <button type="button" className="admin-top-search" onClick={() => navigateToFieldOps('vehicle-search')} aria-label="Open vehicle search">
                 <Search size={17} aria-hidden="true" /><span>Vehicle search</span>
               </button>}
-              <button type="button" className="admin-shell-icon" onClick={() => navigateToPage('bob')} title="Open Bob command center" aria-label="Open Bob command center" aria-expanded={bobOpen}>
+              <button type="button" className="admin-shell-icon" onClick={openBobCommandCenter} title="Open Bob command center" aria-label="Open Bob command center" aria-expanded={bobOpen}>
                 <Bot size={19} aria-hidden="true" /><span className="sr-only">{bobOpen ? 'Bob assistant is open' : 'Open Bob assistant'}</span>
               </button>
               <button type="button" className="admin-shell-icon" onClick={() => void signOut()} title="Sign out" aria-label="Sign out"><LogOut size={19} aria-hidden="true" /></button>
@@ -859,7 +873,7 @@ const AdminShell: React.FC = () => {
           {operatingOrganizations.length > 0 && <label className="admin-operating-selector"><span>Working in</span><select value={operatingOrganizationId ?? ''} onChange={(event) => setOperatingOrganization(event.target.value)} aria-label="Working in">{operatingOrganizations.map((context) => <option value={context.organizationId} key={context.organizationId}>{context.organizationName}{context.authorityBasis === 'organisation_home' ? ' (organisation)' : context.authorityBasis === 'corporate_oversight' ? ' (branch)' : ''}</option>)}</select></label>}
           <NotificationCenter onNavigate={navigateFromNotification} />
           <HelpInstructions context={activePage} role={profile?.role} />
-          <button type="button" className="admin-shell-icon" onClick={() => navigateToPage('bob')} title="Open Bob command center" aria-label="Open Bob command center" aria-expanded={bobOpen}>
+          <button type="button" className="admin-shell-icon" onClick={openBobCommandCenter} title="Open Bob command center" aria-label="Open Bob command center" aria-expanded={bobOpen}>
             <Bot size={19} aria-hidden="true" /><span className="sr-only">{bobOpen ? 'Bob assistant is open' : 'Open Bob assistant'}</span>
           </button>
           <button type="button" className="admin-shell-icon" onClick={() => void signOut()} title="Sign out" aria-label="Sign out"><LogOut size={19} aria-hidden="true" /></button>

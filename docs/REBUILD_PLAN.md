@@ -719,6 +719,13 @@ System-wide Bob acceptance gate shipped 2026-10-11:
     database write or bypassing rank. Application still occurs only through
     `bob-proposal-approver` / the governed executor, and the resulting record
     receipt remains visible in the approval activity.
+  - Live R&M acceptance found and corrected a separate context-handoff defect:
+    opening Bob from a selected approval routed to the command-centre page and
+    replaced the source page with generic `page: bob` context. The command
+    centre now carries a sanitized source snapshot and return path in router
+    state; the conductor admits the exact `action_id` and source page path as
+    descriptive context only. A repeated read-only question must therefore
+    identify the selected action rather than an unrelated prior Studio draft.
 
   **Gate:** live `bob_messages` show no context-losing fallbacks; a Builder job
   runs implement → verify → repair without human touch and stops cleanly at

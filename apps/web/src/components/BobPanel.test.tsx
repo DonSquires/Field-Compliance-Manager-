@@ -157,6 +157,9 @@ describe('BobPanel', () => {
         open
         onClose={() => undefined}
         context={{
+          page: 'approvals',
+          pagePath: '/admin/approvals',
+          actionId: 'action-1',
           agreement: { id: 'agreement-1', name: 'Site Service Agreement' },
           site: { id: 'site-1', name: 'North Plant' },
           zone: { id: 'zone-1', name: 'Zone A' },
@@ -183,6 +186,9 @@ describe('BobPanel', () => {
           request_id: expect.any(String),
           attachments: [],
           context: {
+            page: 'approvals',
+            pagePath: '/admin/approvals',
+            actionId: 'action-1',
             agreement: { id: 'agreement-1', name: 'Site Service Agreement' },
             site: { id: 'site-1', name: 'North Plant' },
             zone: { id: 'zone-1', name: 'Zone A' },

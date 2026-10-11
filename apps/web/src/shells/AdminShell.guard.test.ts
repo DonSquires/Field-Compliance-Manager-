@@ -87,6 +87,14 @@ describe('AdminShell access and routing boundaries', () => {
     expect(source).not.toContain("label={sidebarCollapsed ? '' : item.label}");
   });
 
+  it('carries the exact source-page context into Bob and returns to that page', () => {
+    expect(source).toContain("actionId: routeSearch.get('actionId')");
+    expect(source).toContain('bobSourceContext: bobContext');
+    expect(source).toContain("bobReturnPath: `${location.pathname}${location.search}`");
+    expect(source).toContain('onClick={openBobCommandCenter}');
+    expect(source).toContain("if (item.id === 'bob') openBobCommandCenter()");
+  });
+
   it('persists field operations subareas in the URL', () => {
     expect(source).toContain('FIELD_OPS_AREAS');
     expect(source).toContain('new URLSearchParams(location.search)');
