@@ -3,7 +3,7 @@ const fs = require('node:fs');
 const os = require('node:os');
 const path = require('node:path');
 const test = require('node:test');
-const { dockerArguments, redact, workerCommand } = require('../worker-executor');
+const { dockerArguments, redact, summarizeHumanTest, workerCommand } = require('../worker-executor');
 const { validatePatchText, changedFilesFromPatch, executeFrontendPatch, frontendVerificationCommands, targetedE2eSpecs, E2E_SMOKE_SPECS, redactLog, VERIFICATION_ENV } = require('../frontend-worker');
 
 function writeNpmStub(binDir, source) {
@@ -136,6 +136,16 @@ test('fixture human QA does not receive live identity variables', () => {
   assert.equal(args.includes('GRANDMASTER_TEST_EMAIL'), false);
   assert.equal(args.includes('GRANDMASTER_TEST_PASSWORD'), false);
   assert.ok(args.includes('--tmpfs=/tmp:rw,noexec,nosuid,size=1024m'));
+});
+
+test('human QA summary uses Playwright totals instead of request diagnostics', () => {
+  const stdout = [
+    '[HUMAN REQUEST SUMMARY] 0 failed requests (0 unique)',
+    '  5 failed',
+    '  2 skipped',
+    '  35 passed (18.1m)'
+  ].join('\n');
+  assert.deepEqual(summarizeHumanTest({ stdout, stderr: '' }), { passed: 35, failed: 5, skipped: 2 });
 });
 
 test('frontend verification executes only in disposable tmpfs while source remains read-only', () => {

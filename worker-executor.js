@@ -99,6 +99,14 @@ function executeWorker(options, { spawnImpl = spawn } = {}) {
   });
 }
 
+function summarizeHumanTest(result) {
+  const output = `${result.stdout || ''}\n${result.stderr || ''}`;
+  const matches = [...output.matchAll(/^\s*(\d+)\s+(passed|failed|skipped)(?:\s|$)/gm)];
+  const summary = { passed: 0, failed: 0, skipped: 0 };
+  for (const match of matches) summary[match[2]] = Number(match[1]);
+  return summary;
+}
+
 function redact(value) {
   return value
     .replace(/authorization\s*[:=]\s*Bearer\s+[^\s,;]+/gi, 'authorization=[REDACTED]')
@@ -106,4 +114,4 @@ function redact(value) {
     .replace(/(sk-[A-Za-z0-9_-]+)/g, '[REDACTED]');
 }
 
-module.exports = { WORKER_PROFILES, dockerArguments, executeWorker, hostPath, redact, workerCommand };
+module.exports = { WORKER_PROFILES, dockerArguments, executeWorker, hostPath, redact, summarizeHumanTest, workerCommand };

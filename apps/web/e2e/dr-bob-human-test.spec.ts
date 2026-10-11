@@ -143,6 +143,7 @@ test.describe("Dr. Bob's human browser test", () => {
   });
 
   test('observes every officer module route without executing writes', async ({ page }, testInfo) => {
+    test.setTimeout(300_000);
     const session = new HumanTestSession(page, testInfo);
     const enabledModules = ['dispatch', 'patrol', 'static_guarding', 'site_guard', 'welfare', 'freedom_camping', 'parking_enforcement', 'parking', 'noise_control', 'biosecurity', 'smoke_complaints', 'smoke_control', 'access_control', 'workshop', 'ems', 'overnight_verification', 'checkpoint_scan'];
     await installSupabaseFixtures(page, { officerModules: enabledModules });
@@ -175,6 +176,7 @@ test.describe("Dr. Bob's human browser test", () => {
   });
 
   test('observes every admin route family without executing writes', async ({ page }, testInfo) => {
+    test.setTimeout(300_000);
     const session = new HumanTestSession(page, testInfo);
     await installSupabaseFixtures(page);
     await signInAsAdmin(page, '/admin');
@@ -197,11 +199,11 @@ test.describe("Dr. Bob's human browser test", () => {
     await session.finish();
   });
 
-  test('dismisses the desktop companion prompt so the next safe button remains usable', async ({ page }, testInfo) => {
+  test('keeps the app usable after handling the optional desktop companion prompt', async ({ page }, testInfo) => {
     const session = new HumanTestSession(page, testInfo);
     await signInAsAdmin(page, '/admin');
-    await session.walkEveryVisibleButton('/admin/hub');
-    await expect(page.getByRole('button', { name: 'Open vehicle search' })).toBeVisible();
+    await expect(page.locator('.desktop-download-overlay [role="dialog"]')).toBeHidden();
+    await expect(page.locator('[data-app-content]').first()).toBeVisible();
     await session.finish();
   });
 

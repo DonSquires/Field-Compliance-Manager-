@@ -22,7 +22,7 @@ const { fileSha256, listRepositoryTree, readRepositoryFile, searchRepository } =
 const { autopilotTick, listAutopilotJobs, listPendingApprovals } = require('./builder-autopilot');
 const { laptopStatus, runLaptopCommand, laptopConfig, loadLaptopLink, mergeLaptopLink, describeLink } = require('./bob-laptop-shell');
 const { createBranchWorkspace, commitVerifiedPatch, publishWorkspaceBranch, createGiteaPullRequest, workspacePathForBranch, createGitHubPullRequest, ensureSourceCheckout, githubAuthHeader, githubRepoUrl, resolveRemoteHead, redactGitError } = require('./builder-branch-workspace');
-const { executeWorker } = require('./worker-executor');
+const { executeWorker, summarizeHumanTest } = require('./worker-executor');
 
 // Route failures used to be swallowed into a bare 409; keep a short redacted reason so the
 // operator (and Bob's self-heal loop) can act without a shell on the host.
@@ -235,16 +235,6 @@ function listHumanTestArtifacts(rootDir, relativeDir = '', rows = []) {
   return rows;
 }
 
-function humanTestSummary(result) {
-  const output = `${result.stdout || ''}\n${result.stderr || ''}`;
-  const matches = [...output.matchAll(/(\d+)\s+(passed|failed|skipped)/g)];
-  return {
-    passed: Number(matches.find(match => match[2] === 'passed')?.[1] || 0),
-    failed: Number(matches.find(match => match[2] === 'failed')?.[1] || 0),
-    skipped: Number(matches.find(match => match[2] === 'skipped')?.[1] || 0)
-  };
-}
-
 async function startHumanTestRun({ mode, scope, requestedBy }) {
   const active = [...humanTestRuns.values()].find(run => run.status === 'queued' || run.status === 'running');
   if (active) return { existing: true, run: safeHumanTestRun(active) };
@@ -296,7 +286,7 @@ async function startHumanTestRun({ mode, scope, requestedBy }) {
       });
       run.status = result.status;
       run.exit_code = result.exitCode;
-      run.summary = humanTestSummary(result);
+      run.summary = summarizeHumanTest(result);
       fs.writeFileSync(path.join(artifactDir, 'human-test-output.log'), `${result.stdout || ''}\n${result.stderr || ''}`, { mode: 0o600 });
       fs.writeFileSync(path.join(artifactDir, 'human-test-receipt.json'), JSON.stringify({
         run_id: id,
