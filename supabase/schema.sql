@@ -4723,7 +4723,7 @@ CREATE OR REPLACE FUNCTION "public"."bob_atlas_gap_report"("p_limit" integer DEF
     c.notes,
     c.retirement_status
   from public.bob_capability_map c
-  where c.retirement_status <> 'retired'
+  where c.retirement_status = 'live'
     and c.present = true
     and (coalesce(p_include_columns, false) or c.entity_type <> 'column')
     and (
@@ -4740,7 +4740,7 @@ $$;
 ALTER FUNCTION "public"."bob_atlas_gap_report"("p_limit" integer, "p_offset" integer, "p_include_columns" boolean, "p_include_unknown_exercise" boolean) OWNER TO "postgres";
 
 
-COMMENT ON FUNCTION "public"."bob_atlas_gap_report"("p_limit" integer, "p_offset" integer, "p_include_columns" boolean, "p_include_unknown_exercise" boolean) IS 'Atlas operational gaps: present but unwired or explicitly unexercised non-retired capabilities. Columns and unknown exercise state are opt-in diagnostics because static refresh cannot infer runtime execution.';
+COMMENT ON FUNCTION "public"."bob_atlas_gap_report"("p_limit" integer, "p_offset" integer, "p_include_columns" boolean, "p_include_unknown_exercise" boolean) IS 'Atlas operational gaps: live, present, but unwired or explicitly unexercised capabilities. Columns and unknown exercise state are opt-in diagnostics because static refresh cannot infer runtime execution.';
 
 
 
