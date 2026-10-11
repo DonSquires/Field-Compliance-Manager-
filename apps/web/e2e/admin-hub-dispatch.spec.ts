@@ -50,7 +50,7 @@ test('priority dispatch item opens its exact operational review record', async (
   });
   await page.route('**/rest/v1/dispatch_jobs**', async (route) => await route.fulfill({ contentType: 'application/json', body: JSON.stringify([dispatchJob]) }));
   await signInAsAdmin(page, '/admin/hub');
-  await expect(page.getByText(/CCTV processing is organization-wide/)).toBeVisible();
+  await expect(page.getByText(/Welfare and CCTV processing are organization-wide/)).toBeVisible();
   const queueItem = page.getByRole('button', { name: /Alarm response.*SLA due/i });
   await expect(queueItem).toBeVisible();
   await expect(page).toHaveScreenshot('admin-hub-first-viewport.png');

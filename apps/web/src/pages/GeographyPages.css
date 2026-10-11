@@ -5,12 +5,24 @@
 
 .geography-page .site-card,
 .zone-detail-page .site-card {
+  display: grid;
+  gap: 4px;
+  width: 100%;
+  min-width: 0;
   max-width: 100%;
+  box-sizing: border-box;
   overflow: hidden;
 }
 
+.geography-page .site-card h3,
+.zone-detail-page .site-card h3,
 .geography-page .site-address,
 .zone-detail-page .site-address {
+  display: block;
+  min-width: 0;
+  max-width: 100%;
+  margin: 0;
+  white-space: normal;
   overflow-wrap: anywhere;
 }
 
