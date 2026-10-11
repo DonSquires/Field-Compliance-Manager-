@@ -70,6 +70,9 @@ services:
       VISION_WORKER_CONCURRENCY: "1"
       VISION_MAX_CLASSIFICATION_FRAMES: "120"
       VISION_MAX_OBSERVATION_DERIVATIVES: "8"
+      VISION_WATCHER_HEALTH_PATH: /tmp/fcm-vision-watcher-health
+      VISION_WATCHER_HEALTH_INTERVAL_MS: "10000"
+      VISION_WATCHER_HEALTH_MAX_AGE_MS: "90000"
       # This machine already runs its own Ollama (native, GPU-capable) for other work - reuse it via Docker
       # Desktop's host gateway instead of adding a second dockerized instance or a Tailscale hop to the VPS.
       OLLAMA_VISION_URL: "${OLLAMA_VISION_URL:-http://host.docker.internal:11434}"
@@ -81,6 +84,12 @@ services:
     depends_on:
       fcm-inference:
         condition: service_healthy
+    healthcheck:
+      test: ["CMD", "node", "watcher_healthcheck.js"]
+      interval: 30s
+      timeout: 5s
+      retries: 1
+      start_period: 45s
     networks: [fcm-laptop-net]
 
   fcm-document-source-worker:

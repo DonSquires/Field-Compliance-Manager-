@@ -11,7 +11,7 @@ const workerId = process.env.DOCUMENT_SOURCE_WORKER_ID?.trim() || `document-sour
 const pollMs = boundedInteger(process.env.DOCUMENT_SOURCE_POLL_MS, 10_000, 1_000, 60_000);
 const batchSize = boundedInteger(process.env.DOCUMENT_SOURCE_BATCH_SIZE, 250, 25, 1_000);
 const hashLimitBytes = boundedInteger(process.env.DOCUMENT_SOURCE_HASH_LIMIT_BYTES, 104_857_600, 1_048_576, 1_073_741_824);
-const leaseSeconds = boundedInteger(process.env.DOCUMENT_SOURCE_LEASE_SECONDS, 180, 30, 600);
+const leaseSeconds = boundedInteger(process.env.DOCUMENT_SOURCE_LEASE_SECONDS, 600, 30, 600);
 
 const supportedExtensions = new Set(['.csv', '.docx', '.md', '.pdf', '.tsv', '.txt', '.xls', '.xlsx']);
 const partialExtensions = new Set([
@@ -179,7 +179,7 @@ function classifyFile(relativePath, sizeBytes) {
       disposition: 'inventory_only',
       sensitivity: restricted ? 'restricted' : 'tenant_sensitive',
       extractionStatus: 'not_started',
-      hashEligible: sizeBytes <= hashLimitBytes,
+      hashEligible: false,
     };
   }
   return {
@@ -192,11 +192,14 @@ function classifyFile(relativePath, sizeBytes) {
   };
 }
 
-async function hashFile(absolutePath) {
+async function hashFile(absolutePath, onProgress) {
   const hash = createHash('sha256');
   await new Promise((resolve, reject) => {
     const stream = createReadStream(absolutePath);
-    stream.on('data', (chunk) => hash.update(chunk));
+    stream.on('data', (chunk) => {
+      hash.update(chunk);
+      onProgress?.();
+    });
     stream.on('error', reject);
     stream.on('end', resolve);
   });
@@ -278,7 +281,19 @@ async function inventory(run) {
       const classification = classifyFile(relativeNativePath, fileStats.size);
       let sha256 = null;
       if (classification.hashEligible) {
-        sha256 = await hashFile(absolutePath);
+        let lastLeaseRenewal = Date.now();
+        let leaseRenewal = Promise.resolve();
+        sha256 = await hashFile(absolutePath, () => {
+          if (Date.now() - lastLeaseRenewal < 30_000) return;
+          lastLeaseRenewal = Date.now();
+          leaseRenewal = leaseRenewal.then(async () => {
+            run = await patchRun(run, {
+              heartbeat_at: new Date().toISOString(),
+              lease_expires_at: new Date(Date.now() + leaseSeconds * 1_000).toISOString(),
+            });
+          });
+        });
+        await leaseRenewal;
         counts.hashed += 1;
         if (seenHashes.has(sha256)) counts.duplicate += 1;
         else seenHashes.add(sha256);

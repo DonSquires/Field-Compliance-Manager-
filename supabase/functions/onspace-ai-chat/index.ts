@@ -795,9 +795,23 @@ const WRITE_CAPABLE_TOOLS = new Set([
 //
 // The patterns below are deliberately conservative (high-precision, moderate
 // recall) to avoid false positives on legitimate write requests.
-function detectExplicitWriteRefusal(message) {
+function detectExplicitWriteRefusal(message, selectedTool = '') {
   if (!message || !message.trim()) return false;
   const lower = message.toLowerCase();
+  // A caller may explicitly request a reversible conversation draft while
+  // separately forbidding canonical/business writes, Builder work, promotion,
+  // merge, or deployment. That is a scoped consequence boundary, not a refusal
+  // of the requested draft itself.
+  if (selectedTool === 'create_document_draft') {
+    const requestsDraft = /\bcreate_document_draft\b/i.test(lower)
+      || /\b(create|persist|save|prepare)\b[^.!?\n]{0,80}\b(conversation-scoped\s+)?(document\s+)?draft\b/i.test(lower);
+    const scopesRefusalAwayFromDraft = /\b(do\s+not|don['\u2019]?t)\b[^.!?\n]{0,120}\b(business|canonical|tenant)\s+(record|records|data)\b/i.test(lower)
+      || /\b(do\s+not|don['\u2019]?t)\b[^.!?\n]{0,120}\b(builder\s+job|merge|deploy|promote|promotion)\b/i.test(lower);
+    const refusesDraft = /\b(do\s+not|don['\u2019]?t)\s+(create|persist|save|write)\b[^.!?\n]{0,60}\b(document\s+)?draft\b/i.test(lower);
+    const refusesAllAction = /\b(report|reasoning)\s+only\b/i.test(lower)
+      || /\b(don['\u2019]?t\s+(do\s+anything|take\s+any\s+action)|no\s+action)\b/i.test(lower);
+    if (requestsDraft && scopesRefusalAwayFromDraft && !refusesDraft && !refusesAllAction) return false;
+  }
   // Pattern 1: "do not propose/file/write/action/submit" (with common variants)
   // Matches: "do not propose this", "don't file anything", "do not write",
   //          "don't action it", "do not submit", "don't propose to the bell"
@@ -9534,7 +9548,7 @@ serve(async (req)=>{
     // Step 1: Extract welfare context from request metadata if present.
     const welfareCtx = typeof body?.welfare_context === 'object' && body.welfare_context !== null ? body.welfare_context : null;
     // Step 2: Detect explicit write-refusal (hold).
-    const userExplicitlyRefusedWrite = detectExplicitWriteRefusal(message);
+    const userExplicitlyRefusedWrite = detectExplicitWriteRefusal(message, chosenTool);
     // Step 3: Welfare seam evaluation — runs BEFORE generic write-refusal when
     // welfare context is present or the planner selected a safety-signal action.
     {

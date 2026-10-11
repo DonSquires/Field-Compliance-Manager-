@@ -67,6 +67,8 @@ const LOCAL_VEHICLE_INFERENCE = process.env.VISION_LOCAL_VEHICLE_INFERENCE !== '
 const LOCAL_PEOPLE_INFERENCE = process.env.VISION_LOCAL_PEOPLE_INFERENCE !== 'false';
 // /infer/detect on the VPS (person + vehicle + animal triage in one call) when RunPod returned nothing for a frame.
 const LOCAL_DETECT_INFERENCE = process.env.VISION_LOCAL_DETECT_INFERENCE !== 'false';
+const WATCHER_HEALTH_PATH = path.resolve(process.env.VISION_WATCHER_HEALTH_PATH || '/tmp/fcm-vision-watcher-health');
+const WATCHER_HEALTH_INTERVAL_MS = Math.max(5_000, Number(process.env.VISION_WATCHER_HEALTH_INTERVAL_MS || 10_000));
 let runpodUnavailableUntil = 0;
 let localGpuUnavailableUntil = 0;
 
@@ -80,6 +82,10 @@ const supabase = createClient(SUPABASE_URL, SUPABASE_SERVICE_ROLE_KEY, {
 
 function log(event, fields = {}) {
   console.log(JSON.stringify({ at: new Date().toISOString(), event, ...fields }));
+}
+
+async function writeWatcherHealth() {
+  await fs.writeFile(WATCHER_HEALTH_PATH, new Date().toISOString(), { mode: 0o600 });
 }
 
 function safeVideoPath(storagePath) {
@@ -1569,6 +1575,11 @@ async function processOne() {
 
 async function main() {
   log('watcher_started', { poll_interval_ms: POLL_INTERVAL_MS, worker_concurrency: WORKER_CONCURRENCY, extractor: EXTRACTOR_PATH });
+  await writeWatcherHealth();
+  const healthTimer = setInterval(() => {
+    writeWatcherHealth().catch((error) => log('watcher_health_write_failed', { error: error.message }));
+  }, WATCHER_HEALTH_INTERVAL_MS);
+  healthTimer.unref?.();
   const workerLoop = async (workerIndex) => {
     while (true) {
       log('worker_poll', { worker_index: workerIndex });

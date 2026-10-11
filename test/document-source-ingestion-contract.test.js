@@ -30,6 +30,7 @@ test('laptop worker resolves one alias and never promotes source files', () => {
   assert.match(worker, /source\.location_ref !== sourceAlias/);
   assert.match(worker, /relative_path: relativePath/);
   assert.match(worker, /hashLimitBytes/);
+  assert.match(worker, /capabilityStatus: 'partial'[\s\S]*?hashEligible: false/);
   assert.match(worker, /capability_status: classification\.capabilityStatus/);
   assert.match(worker, /disposition: classification\.disposition/);
   assert.match(worker, /cancel_requested/);
@@ -56,6 +57,10 @@ test('Bob can create a governed conversation-scoped document draft', () => {
   assert.match(caddie, /bob-agentic-document-draft/);
   assert.match(conductor, /case 'create_document_draft'/);
   assert.match(conductor, /execCreateDocumentDraft/);
+  assert.match(conductor, /detectExplicitWriteRefusal\(message, selectedTool = ''\)/);
+  assert.match(conductor, /selectedTool === 'create_document_draft'/);
+  assert.match(conductor, /scopesRefusalAwayFromDraft/);
+  assert.match(conductor, /detectExplicitWriteRefusal\(message, chosenTool\)/);
   assert.match(conductor, /WRITE_CAPABLE_TOOLS[\s\S]*create_document_draft/);
   assert.match(documentDraftEndpoint, /sourceType === 'custom'/);
   assert.match(documentDraftEndpoint, /create_bob_document_draft/);

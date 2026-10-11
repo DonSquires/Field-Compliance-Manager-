@@ -15,6 +15,17 @@ two-turn `create_builder_job` proposal. Rank enforcement, separate human
 confirmation, isolated execution, draft-PR output, and the protected
 merge/deploy boundary remain unchanged.
 
+Runtime acceptance 2026-10-11: the laptop vision watcher now writes an
+independent liveness heartbeat and its Docker health check terminates only a
+stale watcher process so `restart: unless-stopped` can recover it. Acceptance
+forced both a watcher process crash and a stale heartbeat; each restarted in
+one second and returned healthy. Live Bob acceptance also found and repaired
+two false-stop paths: a scoped "do not write canonical business records"
+boundary no longer blocks an explicitly requested conversation-only document
+draft, and Builder autopilot recognizes the worker's `baseline: repository red
+at the pinned commit` receipt as a repairable red-main condition. Canonical
+promotion, protected merge, and deployment authority remain unchanged.
+
 Owner ruling 2026-09-15: **Field Compliance Manager is the only product we are
 building.** GitLab, FreedomCamp-Manager / FreedomCamp-Manager-App, Onspace
 previews, and other historical repos are legacy/reference evidence only. Keep

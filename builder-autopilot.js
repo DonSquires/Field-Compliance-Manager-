@@ -219,7 +219,7 @@ const REPAIR_TITLE_PREFIX = 'Repair main: ';
 /** A block whose cause is the repository being red at the pinned commit (not the job's own change). */
 function baselineBlock(reason) {
   const text = String(reason ?? '');
-  const match = text.match(/repository red at the pinned commit:\s*(.+)$/is);
+  const match = text.match(/(?:baseline:\s*)?repository red at the pinned commit:\s*(.+)$/is);
   if (!match) return null;
   const detail = match[1].trim();
   const files = [...new Set((detail.match(/[\w./-]+\.(?:test|spec|guard\.test)\.[cm]?[jt]sx?/g) || []))].slice(0, 8);

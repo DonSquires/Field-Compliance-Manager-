@@ -298,6 +298,7 @@ test('a job blocked by a red main opens a repair job for the same requester inst
   const detail = 'repository red at the pinned commit: npm run test --prefix apps/web -- --pool=threads also fails on the pinned commit without this patch (the repository is red at the target commit: src/pages/FinanceBureauPage.guard.test.ts, src/pages/NzscvSupplierPage.guard.test.ts); not caused by this change';
   const baseline = baselineBlock(detail);
   assert.deepEqual(baseline.files, ['src/pages/FinanceBureauPage.guard.test.ts', 'src/pages/NzscvSupplierPage.guard.test.ts']);
+  assert.deepEqual(baselineBlock(`baseline: ${detail}`), baseline);
   assert.equal(baselineBlock('backend_implementation failed 6 times (ceiling 6)'), null);
   const job = { id: 'job-r', organization_id: 'org-1', project_id: 'proj-1', status: 'implementation_pending', autopilot_state: 'driving', autopilot_requested_by: 'user-1', autopilot_conversation_id: 'conv-1', title: 'Add Cancel control', task_description: 'brief', frontend_required: true, backend_required: false, target_sha: 'c'.repeat(40) };
   const repairSpec = repairJobFor(job, baseline);

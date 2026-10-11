@@ -5,6 +5,8 @@ const test = require('node:test');
 
 const read = (file) => fs.readFileSync(path.join(__dirname, '..', file), 'utf8');
 const watcher = read('services/vision/vision_job_watcher.js');
+const watcherHealthcheck = read('services/vision/watcher_healthcheck.js');
+const visionDockerfile = read('services/vision/Dockerfile');
 const derivativeHelpers = read('services/vision/observation_derivatives.js');
 const inference = read('services/fcm-inference/app.py');
 const runpodHandler = read('services/fcm-inference/runpod_handler.py');
@@ -45,6 +47,18 @@ test('laptop GPU is primary, VPS CPU is resilient, and RunPod is final fallback'
   assert.match(laptopCompose, /LAPTOP_WORKER_ENV_FILE:-\.\/deploy\/laptop-worker\/laptop-worker\.env/);
   assert.match(laptopUpdater, /health\.cuda -ne \$true/);
   assert.match(laptopUpdater, /health\.super_resolution\.state -ne 'ready'/);
+});
+
+test('the laptop vision watcher reports liveness and restarts after a stale heartbeat', () => {
+  assert.match(watcher, /VISION_WATCHER_HEALTH_PATH/);
+  assert.match(watcher, /writeWatcherHealth/);
+  assert.match(watcher, /WATCHER_HEALTH_INTERVAL_MS/);
+  assert.match(watcherHealthcheck, /VISION_WATCHER_HEALTH_MAX_AGE_MS/);
+  assert.match(watcherHealthcheck, /vision_job_watcher\.js/);
+  assert.match(watcherHealthcheck, /process\.kill\(pid, 'SIGTERM'\)/);
+  assert.match(visionDockerfile, /watcher_healthcheck\.js/);
+  assert.match(laptopCompose, /test: \["CMD", "node", "watcher_healthcheck\.js"\]/);
+  assert.match(laptopCompose, /restart: unless-stopped/);
 });
 
 test('the enhancement model is pinned, checksummed, GPU-aware and explicitly generative', () => {
