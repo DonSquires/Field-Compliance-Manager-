@@ -1,11 +1,18 @@
 import { useEffect, useId, useRef, useState } from 'react';
 
-function sanitizeSvg(svgText: string): SVGSVGElement | null {
+export function sanitizeSvg(svgText: string): SVGSVGElement | null {
   const parsed = new DOMParser().parseFromString(svgText, 'image/svg+xml');
   const svg = parsed.documentElement;
   if (!(svg instanceof SVGSVGElement)) return null;
 
-  svg.querySelectorAll('script, foreignObject, iframe, object, embed').forEach((node) => node.remove());
+  svg.querySelectorAll('script, iframe, object, embed').forEach((node) => node.remove());
+  svg.querySelectorAll('foreignObject *').forEach((node) => {
+    if (!['div', 'span', 'p', 'br'].includes(node.localName.toLowerCase())) {
+      node.replaceWith(document.createTextNode(node.textContent ?? ''));
+      return;
+    }
+    node.removeAttribute('style');
+  });
   svg.querySelectorAll('*').forEach((node) => {
     for (const attribute of Array.from(node.attributes)) {
       const name = attribute.name.toLowerCase();
@@ -37,7 +44,7 @@ export function BobMermaidDiagram({ chart, title = 'Bob diagram' }: { chart: str
           securityLevel: 'strict',
           theme: 'dark',
           flowchart: {
-            htmlLabels: false,
+            htmlLabels: true,
           },
           themeVariables: {
             background: '#07111c',
