@@ -16,11 +16,11 @@ test('human button walkthrough visits duplicate labels and records guarded actio
   expect(session.steps.map((step) => step.name)).toEqual([
     'button /officer/modules #0: Open detail',
     'button /officer/modules #1: Open detail',
+    'button /officer/modules #3: Open standalone app',
+    'button /officer/modules #4: Open Bob workspace',
   ]);
   expect(session.skippedActions).toEqual([
     { route: '/officer/modules', index: 2, label: 'End access', reason: 'write-or-destructive' },
-    { route: '/officer/modules', index: 3, label: 'Open standalone app', reason: 'concurrent-owner' },
-    { route: '/officer/modules', index: 4, label: 'Open Bob workspace', reason: 'concurrent-owner' },
   ]);
 });
 

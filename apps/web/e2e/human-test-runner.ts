@@ -23,11 +23,8 @@ interface HumanSkippedAction {
   route: string;
   index: number;
   label: string;
-  reason: 'write-or-destructive' | 'disabled' | 'covered-by-modal' | 'not-present-after-route-restore' | 'concurrent-owner';
+  reason: 'write-or-destructive' | 'disabled' | 'covered-by-modal' | 'not-present-after-route-restore';
 }
-
-const CONCURRENT_OWNER_CONTROLS = /\b(?:bob|document studio|builder)\b/i;
-const CONCURRENT_OWNER_DESTINATIONS = new Set(['/officer/modules']);
 
 const SAFE_SAMPLE_VALUES: Record<string, string> = {
   search: 'Civic Events',
@@ -298,12 +295,6 @@ export class HumanTestSession {
       const indexedButton = candidates.nth(button.index);
       const currentLabel = (await indexedButton.textContent().catch(() => null) ?? '').replace(/\s+/g, ' ').trim();
       const label = button.label || currentLabel || `button-${button.index}`;
-      if (CONCURRENT_OWNER_CONTROLS.test(label)
-          || (CONCURRENT_OWNER_DESTINATIONS.has(route) && /^open standalone app$/i.test(label))) {
-        this.skippedActions.push({ route, index: button.index, label, reason: 'concurrent-owner' });
-        console.log(`[HUMAN BUTTON SKIP] ${route} #${button.index} ${label}: surface is under active work by a concurrent owner`);
-        continue;
-      }
       if (isWriteOrDestructiveAction(label)) {
         this.skippedActions.push({ route, index: button.index, label, reason: 'write-or-destructive' });
         console.log(`[HUMAN BUTTON SKIP] ${route} #${button.index} ${label || '(unnamed)'}: write/destructive action requires governed evidence`);
