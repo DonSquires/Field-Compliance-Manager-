@@ -6,7 +6,7 @@ import { supabase } from '../lib/supabase';
 type Props = { shiftId: string | null };
 type SmokeSourceType = 'domestic_solid_fuel' | 'industrial' | 'vehicle_exhaust' | 'agricultural' | 'nuisance_burning' | 'unknown';
 type ComplaintSource = 'neighbour' | 'council_hotline' | 'self_report' | 'other';
-type Severity = 'low' | 'medium' | 'high' | 'critical';
+type Severity = 'low' | 'moderate' | 'high' | 'critical';
 type ActionTaken = 'no_action' | 'verbal_warning' | 'abatement_notice' | 'infringement_notice' | 'prosecution_referral';
 
 export function OfficerSmokeControlPanel({ shiftId }: Props) {
@@ -15,11 +15,12 @@ export function OfficerSmokeControlPanel({ shiftId }: Props) {
   const [complaintAddress, setComplaintAddress] = useState('');
   const [smokeSourceType, setSmokeSourceType] = useState<SmokeSourceType>('domestic_solid_fuel');
   const [complaintSource, setComplaintSource] = useState<ComplaintSource>('neighbour');
-  const [severity, setSeverity] = useState<Severity>('medium');
+  const [severity, setSeverity] = useState<Severity>('moderate');
   const [actionTaken, setActionTaken] = useState<ActionTaken>('no_action');
   const [noticeNumber, setNoticeNumber] = useState('');
   const [sceneDescription, setSceneDescription] = useState('');
   const [followUpRequired, setFollowUpRequired] = useState(false);
+  const [sourceConfirmed, setSourceConfirmed] = useState(false);
   const [imageBase64, setImageBase64] = useState<string | null>(null);
   const [busy, setBusy] = useState(false);
   const requestId = useRef(crypto.randomUUID());
@@ -38,6 +39,7 @@ export function OfficerSmokeControlPanel({ shiftId }: Props) {
 
   const valid = Boolean(address.trim()) &&
     (!actionNeedsNotice || Boolean(noticeNumber.trim())) &&
+    sourceConfirmed &&
     Boolean(imageBase64);
 
   const submit = async () => {
@@ -64,6 +66,7 @@ export function OfficerSmokeControlPanel({ shiftId }: Props) {
           notice_number: noticeNumber.trim() || null,
           scene_description: sceneDescription.trim() || null,
           follow_up_required: followUpRequired,
+          source_confirmed: sourceConfirmed,
           shift_id: shiftId,
           image_base64: imageBase64,
         },
@@ -77,7 +80,7 @@ export function OfficerSmokeControlPanel({ shiftId }: Props) {
         'Assessment confirmed',
         `Receipt ${data.assessment_id.slice(0, 8)}. Review state: ${data.review_state ?? 'submitted'}.${
           data.is_out_of_hours ? ' Out-of-hours coverage.' : ''
-        }`
+        }${data.classification?.classification ? ` Bob candidate: ${data.classification.classification}; human review required.` : ' Photo classification unavailable; human review required.'}`
       );
 
       setAddress('');
@@ -85,6 +88,7 @@ export function OfficerSmokeControlPanel({ shiftId }: Props) {
       setNoticeNumber('');
       setSceneDescription('');
       setFollowUpRequired(false);
+      setSourceConfirmed(false);
       setImageBase64(null);
       requestId.current = crypto.randomUUID();
       assessedAt.current = new Date().toISOString();
@@ -139,7 +143,7 @@ export function OfficerSmokeControlPanel({ shiftId }: Props) {
 
           <Text style={styles.sectionLabel}>Severity</Text>
           <View style={styles.options}>
-            {(['low', 'medium', 'high', 'critical'] as Severity[]).map((val) => (
+            {(['low', 'moderate', 'high', 'critical'] as Severity[]).map((val) => (
               <Pressable key={val} onPress={() => setSeverity(val)} style={[styles.option, severity === val && styles.optionActive]}>
                 <Text style={styles.optionText}>{val}</Text>
               </Pressable>
@@ -160,6 +164,10 @@ export function OfficerSmokeControlPanel({ shiftId }: Props) {
           )}
 
           <TextInput value={sceneDescription} onChangeText={setSceneDescription} placeholder="Scene description / visibility / smell notes" placeholderTextColor="#718197" multiline style={[styles.input, styles.textarea]} />
+
+          <Pressable onPress={() => setSourceConfirmed((value) => !value)} style={[styles.followUp, sourceConfirmed && styles.optionActive]}>
+            <Text style={styles.optionText}>{sourceConfirmed ? 'Observed source confirmed ✓' : 'Confirm the observed source at this place'}</Text>
+          </Pressable>
 
           <Pressable onPress={() => setFollowUpRequired((v) => !v)} style={styles.followUp}>
             <Text style={styles.optionText}>{followUpRequired ? '✓ Follow-up required' : 'No follow-up required'}</Text>

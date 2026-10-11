@@ -10,6 +10,7 @@ const CORS = {
   'Access-Control-Allow-Origin': '*',
   'Access-Control-Allow-Headers': 'authorization, x-client-info, apikey, content-type',
 };
+const serviceSupabase = createClient(SUPABASE_URL, SUPABASE_SERVICE_ROLE_KEY);
 
 function json(body: unknown, status = 200) {
   return new Response(JSON.stringify(body), { status, headers: { ...CORS, 'Content-Type': 'application/json' } });
@@ -65,13 +66,16 @@ serve(async (request) => {
     const address = String(body.address ?? '').trim();
     const smokeSourceType = String(body.smoke_source_type ?? 'domestic_solid_fuel').trim();
     const complaintSource = String(body.complaint_source ?? 'neighbour').trim();
-    const severity = String(body.severity ?? 'medium').trim();
+    const severity = String(body.severity ?? 'moderate').trim();
     const actionTaken = String(body.action_taken ?? 'no_action').trim();
     const noticeNumber = String(body.notice_number ?? '').trim();
+    const sourceConfirmed = body.source_confirmed === true;
+    const notes = String(body.notes ?? '').trim();
     const imageBase64Input = body.image_base64;
 
     if (!clientRequestId) return json({ error: 'client_request_id is required' }, 400);
     if (!address) return json({ error: 'Observed smoke location address is required' }, 400);
+    if (!sourceConfirmed) return json({ error: 'Officer must confirm the observed smoke source' }, 400);
     if (['abatement_notice', 'infringement_notice'].includes(actionTaken) && !noticeNumber) {
       return json({ error: 'Notice number is required for statutory abatement or infringement notices' }, 400);
     }
@@ -153,6 +157,7 @@ serve(async (request) => {
       provider?: string | null;
       model?: string | null;
       prompt_version?: string;
+      failure_reason?: string;
     } = { status: 'unavailable' };
 
     if (processedEvidence.length > 0) {
@@ -179,12 +184,20 @@ serve(async (request) => {
             };
           }
         }
-      } catch {
-        classificationResult = { status: 'unavailable' };
+      } catch (classificationError) {
+        console.error('Smoke photo classification failed', classificationError);
+        classificationResult = {
+          status: 'unavailable',
+          classifier: 'bob_vision',
+          prompt_version: 'smoke_photo_v1',
+          failure_reason: classificationError instanceof Error
+            ? classificationError.message
+            : 'Smoke photo classification failed',
+        };
       }
     }
 
-    const { data: receiptRows, error: receiptErr } = await supabase.rpc('submit_smoke_assessment_receipt', {
+    const { data: receiptRows, error: receiptErr } = await supabase.rpc('submit_smoke_assessment_receipt_v2', {
       p_client_request_id: clientRequestId,
       p_assessed_at: assessedAt,
       p_smoke_source_type: smokeSourceType,
@@ -192,6 +205,8 @@ serve(async (request) => {
       p_severity: severity,
       p_action_taken: actionTaken,
       p_scene_description: body.scene_description || null,
+      p_notes: notes || null,
+      p_source_confirmed: sourceConfirmed,
       p_address: address,
       p_complaint_address: body.complaint_address || null,
       p_complainant_site_id: body.complainant_site_id || null,
@@ -210,6 +225,14 @@ serve(async (request) => {
 
     const receipt = Array.isArray(receiptRows) ? receiptRows[0] : receiptRows;
     if (!receipt?.id) throw new Error('Smoke assessment receipt could not be confirmed');
+    const { data: perception, error: perceptionError } = await serviceSupabase.rpc(
+      'record_smoke_photo_perception_envelope',
+      {
+        p_assessment_id: receipt.id,
+        p_classification: classificationResult,
+      },
+    );
+    if (perceptionError) throw new Error(`Smoke perception receipt failed: ${perceptionError.message}`);
 
     return json({
       success: true,
@@ -221,6 +244,7 @@ serve(async (request) => {
       is_out_of_hours: isOutOfHours,
       evidence: processedEvidence,
       classification: classificationResult,
+      perception,
     });
   } catch (err) {
     return json({ error: err instanceof Error ? err.message : 'Smoke assessment could not be submitted' }, 500);

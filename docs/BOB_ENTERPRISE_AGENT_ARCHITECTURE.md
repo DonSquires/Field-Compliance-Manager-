@@ -323,6 +323,22 @@ legacy linked evidence item fails closed as `missing_source_hash` on replay, so
 no envelope is fabricated until custody is repaired. Smoke and noise adapters
 remain Phase C work.
 
+**Fifth adapter implemented 2026-10-11: smoke photo classification.** The
+governed officer receipt now preserves explicit source confirmation, notes and
+structured classifier provenance before the service-only projection compiles
+visible source, visual severity and visibility-impact candidates into
+`smoke_photo` envelopes. Machine output cannot establish a statutory breach,
+legal basis, notice or workflow closure. Separate administrator controls govern
+photo classification, legal/operational action and workflow review; corrections
+retain the original candidate as superseded evidence and append an attributable
+review receipt. The responsive oversight UI signs private evidence for 15
+minutes and exposes custody, model provenance, typed confidence, officer notes
+and safe next actions. Desktop and mobile Chromium acceptance runs passed
+without browser errors. All four legacy assessments lack evidence links; two
+replays per record failed closed as `missing_evidence_link`, and a nonexistent
+record raised `Smoke assessment is missing`, so no historical envelope was
+fabricated. Noise remains Phase C work.
+
 Gate: source/enhanced disagreement and threshold failures never auto-promote.
 
 ### Phase D — Desktop V2 and offline operation

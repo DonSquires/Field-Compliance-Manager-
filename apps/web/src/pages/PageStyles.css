@@ -946,6 +946,24 @@
   border-color: var(--color-primary, #1d4ed8);
 }
 
+.smoke-control-page .site-card {
+  display: grid;
+  gap: var(--spacing-1, 4px);
+  min-width: 0;
+}
+
+.smoke-control-page .site-card h3,
+.smoke-control-page .site-card p {
+  display: block;
+  min-width: 0;
+  margin: 0;
+  overflow-wrap: anywhere;
+}
+
+.smoke-control-page .assessment-history {
+  margin-top: var(--spacing-4, 16px);
+}
+
 .session-header,
 .details-header {
   display: flex;
@@ -977,6 +995,117 @@
   border: 1px solid var(--color-border, #334155);
   border-radius: 8px;
   padding: 12px;
+}
+
+.smoke-review-card {
+  display: grid;
+  gap: var(--spacing-3, 12px);
+}
+
+.smoke-status-stack {
+  display: flex;
+  align-items: flex-end;
+  flex-direction: column;
+  gap: var(--spacing-2, 8px);
+}
+
+.smoke-review-layout {
+  display: grid;
+  grid-template-columns: minmax(220px, 32%) minmax(0, 1fr);
+  gap: var(--spacing-4, 16px);
+}
+
+.smoke-evidence-panel {
+  display: grid;
+  align-content: start;
+  gap: var(--spacing-2, 8px);
+}
+
+.smoke-evidence-panel img,
+.smoke-evidence-missing {
+  width: 100%;
+  min-height: 190px;
+  max-height: 380px;
+  object-fit: contain;
+  border: 1px solid var(--color-border, #334155);
+  border-radius: var(--radius-md, 8px);
+  background: var(--color-bg-elevated, #08111f);
+}
+
+.smoke-evidence-missing {
+  display: grid;
+  place-items: center;
+  padding: var(--spacing-4, 16px);
+  color: var(--color-text-secondary, #94a3b8);
+  text-align: center;
+}
+
+.smoke-review-content,
+.smoke-classifier-panel,
+.smoke-decision-panel,
+.smoke-workflow-panel,
+.smoke-review-form {
+  display: grid;
+  gap: var(--spacing-3, 12px);
+}
+
+.smoke-classifier-panel,
+.smoke-decision-panel,
+.smoke-workflow-panel {
+  padding: var(--spacing-3, 12px);
+  border: 1px solid var(--color-border, #334155);
+  border-radius: var(--radius-md, 8px);
+  background: var(--color-bg-elevated, #08111f);
+}
+
+.smoke-panel-heading,
+.smoke-button-row {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  flex-wrap: wrap;
+  gap: var(--spacing-2, 8px);
+}
+
+.smoke-panel-heading span,
+.smoke-evidence-panel small,
+.smoke-classifier-panel small {
+  color: var(--color-text-secondary, #94a3b8);
+}
+
+.smoke-facts {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: var(--spacing-2, 8px);
+  margin: 0;
+}
+
+.smoke-facts div,
+.smoke-review-form label {
+  display: grid;
+  gap: var(--spacing-1, 4px);
+}
+
+.smoke-facts dt {
+  color: var(--color-text-secondary, #94a3b8);
+  font-size: var(--font-size-label, 13px);
+}
+
+.smoke-facts dd {
+  margin: 0;
+  color: var(--color-text-primary, #f8fafc);
+  overflow-wrap: anywhere;
+}
+
+@media (max-width: 760px) {
+  .smoke-review-layout,
+  .smoke-facts {
+    grid-template-columns: 1fr;
+  }
+
+  .smoke-status-stack {
+    align-items: flex-start;
+  }
 }
 
 .assessment-header {

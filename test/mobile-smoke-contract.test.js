@@ -16,4 +16,8 @@ test('mobile smoke control panel retains photo evidence and notice validation', 
   assert.match(source, /captureEvidencePhoto/);
   assert.match(source, /actionNeedsNotice.*noticeNumber/);
   assert.match(source, /Smoke assessment was not confirmed/);
+  assert.match(source, /source_confirmed: sourceConfirmed/);
+  assert.match(source, /sourceConfirmed &&/);
+  assert.match(source, /'moderate'/);
+  assert.doesNotMatch(source, /'medium'/);
 });
