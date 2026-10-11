@@ -1,0 +1,113 @@
+# App Human Walkthrough TODO
+
+Audit owner: GitHub Copilot with Dr. Bob human-test evidence
+Started: 2026-10-10
+Code baseline: `1ea421701`
+Status: in progress
+
+## Safety and Evidence Rules
+
+- Use fixture-backed Playwright and synthetic identities/data first. Never create test records in the R&M tenant or promote repository sample documents into business records.
+- Live walkthroughs are read-only and require the dedicated test identity plus deployment freshness check. Never use a real person's credentials or expose secrets in reports.
+- For every completed workflow, record **Before / During / After**: actor and tenant context, source records and permissions; controls, requests/RPCs, policies and errors; persisted synthetic result/receipt, audit/downstream effect, and next owner.
+- For shared entities, record Atlas capability state and `reads`/`writes`/`calls`/`invokes`/`secured_by` edges, then compare with the owning migration and `supabase/schema.sql`. Keep proven flow reach separate from FK reach and weak references.
+- Classify each finding as UX, caller contract, schema/migration drift, deployment drift, authorization/RLS, unwired, unexercised, or unknown. Deduplicate before proposing an issue.
+
+## 1. Baseline and Coverage
+
+- [x] Read repository, human-test, UX, credential, issue-triage, sample-corpus, and Atlas safety requirements.
+- [x] Inventory top-level Admin workspaces, Officer module routes, and Client portal pages.
+- [x] Run Dr. Bob fixture-backed route observation on desktop and mobile; inspect report summary, screenshots, console and HTTP findings.
+- [ ] Visually triage UX warnings by affected route and separate genuine harm from heuristic/intentional choices.
+- [ ] Run the safe-button walkthrough on desktop and mobile; account for every skipped write/destructive control by mapping it to a dedicated synthetic workflow test. All non-Bob Admin and Officer groups are complete; Bob/Builder remain deferred, and Client mode coverage remains open.
+- [ ] Reconcile the runner's route list with current workspace/module navigation; report direct-route pages missing from navigation and navigation items without routes.
+
+## 2. Admin Workspaces
+
+- [x] Mission Control safe-button pass: Overview and Approvals at desktop/mobile; state-changing actions were recorded as skips and are covered only by separate synthetic lifecycle tests.
+- [ ] Mission Control full process and live persistence/read-back.
+- [x] Field Operations page controls: landing, Dispatch, Patrol, Live Map, Officer Timeline, Welfare Alerts, Breach Review, Vehicle Search, Observation Search, Field Reports, Debrief Follow-up, Parking, Noise, Biosecurity, Smoke Control, all CCTV console/triage/review/library/import subareas, Site Workspaces, Location Houses, Zone Facets, Geofence Workbench, Workshop.
+- [x] Field Operations core safe-button pass: Field Operations/Dispatch/Patrol/Live Map/Field Reports/Officer Timeline/Welfare/Breach/Vehicle/Observation/Follow-up, 57 desktop + 156 mobile steps, zero actionable errors; mutation controls recorded as skips.
+- [x] Field-specialty safe-button pass: Parking, Noise, Biosecurity, Smoke Control on desktop/mobile, zero genuine request failures or human-runner errors; mutations remain skipped for their dedicated lifecycle E2Es.
+- [x] CCTV safe-button pass: Console, triage, review, library, import on desktop/mobile; no actionable errors or findings, governed writes/downloads remain guarded.
+- [x] Site/Location/Zone safe-button pass: Site Workspaces, Location Houses, Zone Facets on desktop/mobile; 44 desktop + 71 mobile steps, zero genuine failures/findings.
+- [x] Geofence/Workshop safe-button pass: 20 desktop + 38 mobile steps, zero findings/errors; LINZ lookups are recorded as specialized-read skips and governed boundary saves remain skipped.
+- [x] Workforce page controls: Schedules & Rosters, People/Pay/HR, Work Units & Coverage, People & Access.
+- [x] Clients & Delivery page controls: Client Portfolios, Agreements & Services, Client Setup, Onboarding, Handoffs.
+- [x] Finance page controls: Finance Home, Business Money, Connections, Costing, Pricing, Pay/Charge Rules; bank/IRD/payments remained guarded.
+- [x] Reports & Accountability page controls: Reports and available report/review/publish tabs.
+- [x] Investigations & Evidence page controls: File System and Investigations; registration/move/source-open were guarded and separately lifecycle-tested.
+- [x] Organisation & Settings non-Bob controls: Access Rules, Organisation Settings, Modules/Subscriptions, E2E Testing, Test Data, Platform Overview, Subscribers, Module Pricing, Provider Billing.
+- [ ] Builder and Bob/Document Studio: deferred while another agent owns substantial Bob-associated work; resume only after coordination.
+
+## 3. Officer and Client Surfaces
+
+- [x] Officer safe-button groups: self-service, dispatch/patrol, and specialty modules passed desktop/mobile; guarded writes were skipped. `/officer/bob` was omitted; standalone specialty launchers were logged as concurrent-owner skips because their `ModuleShell` mounts the rebuilt Bob panel.
+- [ ] Officer shell states: standby, active shift/home, module selector, and module portal; safety, online/offline, account and notification chrome. Bob routes/panel and standalone destinations remain deferred until rebuild handoff.
+- [x] Officer module selector (focused responsive E2E): card content/action bounds stay inside each card; core Patrol no longer offers unsupported standalone navigation; registered Freedom Camping standalone route opens correctly.
+- [x] Client portal (synthetic): Overview and Service Delivered, scan-only route denial, published report scope/provenance, invite acceptance, and client-admin people management.
+- [ ] Client access matrix: viewer/admin roles across transparency-only, full-modules and scan-only agreements; reports/finance enabled and disabled. Full-module viewer denial of finance/reports/people now passes desktop/mobile; client-admin full-module controls pass the safe-button group. Remaining: explicit finance-enabled/disabled route pairs and scan-only role variants.
+- [x] Public dispute guest workflow: grounds-required validation, endpoint payload, receipt, and mobile overflow passed synthetic desktop/mobile E2E. Client invite acceptance and officer scan flows have separate synthetic lifecycle coverage.
+- [ ] Public/role-router entry-point matrix: direct invite/capability-share links, scan role denial/entry, and remaining public routes still need reconciliation.
+
+## 4. Synthetic End-to-End Business Processes
+
+- [x] Client onboarding (synthetic browser lifecycle): prospect activation, readiness owner handoff, primary-client invitation, and activation handoff completion.
+- [x] Agreement/site setup (synthetic browser lifecycle): add covered place, configure a service module, inspect readiness blockers, open the owning boundary workflow.
+- [x] Patrol/dispatch chain (synthetic browser lifecycle): build the agreement-place patrol run, verify client delivery aggregation, and complete/route officer dispatch work.
+- [ ] Live read-back and cross-page persistence for the same governed record chain; current E2Es stub PostgREST/RPC responses and do not share a real record across tests.
+- [x] People and rostering (synthetic desktop/mobile lifecycle): identity/HR/readiness, credentials, coverage finalization, work units, roster rules/publishing, officer schedule/shift start-stop, timesheet submit/review/correction, and leave.
+- [x] Field operations (synthetic desktop/mobile lifecycle): dispatch handoff, patrol/checkpoint attendance and place scoping, field report/receipt, debrief, follow-up, breach outcome, and specialty parking/noise/biosecurity/smoke/static-guard/overnight paths.
+- [x] Safety workflow (synthetic): welfare alert acknowledge/resolve, static guard arrival receipt, and officer safety states. [ ] Live role/tenant read-back, identity grants/branch authority matrix, and revocation verification remain open.
+- [ ] Documents: upload/register → extraction/source preview → human classification → source-linked proposal → approval/rejection → separate target-specific apply → receipt/audit/read-back.
+- [x] Finance (synthetic): owner brief/readiness, cost calculation, fuel median suggestion, cost attribution, branch rate-rule create/filter, completed-work draft invoice. Provider bank/IRD connection and payment submission were not performed.
+- [x] Reporting (synthetic): report source preview, custom snapshot review, publish, portal display of frozen source scope and client-visible delivery. Generated artifact download/hash paths remain to be walked.
+
+## 5. Atlas, Schema, and UI/UX Gaps
+
+- [ ] For each process, capture its canonical tables/RPCs/functions, live Atlas edges and authorization boundary; identify mismatches, missing callers and unexercised paths.
+- [ ] Compare expected/present/missing/contradictory behavior before, during and after each process, including receipts, audit events, notifications and downstream views.
+- [ ] Review desktop/mobile screenshots for overflow/clipping, hierarchy, accessible names, labels, contrast, small text, dialog semantics, loading/empty/error/permission/success states and next safe actions.
+- [ ] Identify missing pages, affordances, role states or process handoffs; distinguish confirmed defects from intentional decisions/recommendations.
+
+## 6. Findings, Fixes, and Closeout
+
+- [ ] Record each reproducible finding with sanitized route, role class, before/during/after evidence, Atlas/schema path, risk and smallest discriminating check.
+- [ ] Fix confirmed defects in the owning abstraction; add a focused regression test and rerun the affected human workflow at desktop/mobile.
+- [ ] Deduplicate actionable findings against existing issues before creating any issue; do not publish sensitive source data.
+- [ ] Refresh Atlas after code/schema truth changes using the scoped generated refresh; do not hand-edit Atlas edges.
+- [ ] Publish a completion report with covered sections/processes, test evidence, unresolved blockers, intentional design questions, known gaps and next-owner actions.
+
+## Current Progress
+
+- Baseline policy and inventory are reviewed; the desktop/mobile route observation is complete, while button and lifecycle walks remain pending.
+- Dr. Bob fixture route observation: 4 desktop/mobile runs passed, 0 browser errors, 184 screenshot artifacts, 378 UX heuristic findings. Repeated small-text warnings and the Bob-panel fixed-overlay warning require visual/intent review; no production data was used.
+- Human-test safety gap fixed locally: access termination/revocation, on/off toggles, SOS/check-in, scan, leave/request, clock, move/rename/copy, and other state-changing controls are guarded; focused policy tests pass 29/29. Duplicate same-label controls are visited independently and intentional skips are recorded; the runner contract passes.
+- Human-walker code validation: E2E TypeScript lint passes; action-policy and affected feature guards pass 48/48 (the expanded officer/file safety cases have since passed 29/29). The corrected exhaustive Admin button sweep remains blocked/stalled at File System and is not marked complete.
+- The previous combined role walk was terminated after exposing overlapping Officer module-card controls and invalid core-module standalone links. Both are now fixed in OfficerShell; card geometry/destination tests pass 4/4 at desktop/mobile.
+- Human button walker now scopes to page-owned `[data-app-content]` controls; shared shell navigation is covered separately. Repeated-label, write-skip, Back-only dialog, and real-route reset regression tests pass. Route-cancelled requests are retained separately from genuine failures.
+- Core process suite: 26 synthetic E2Es pass across desktop/mobile after refreshing only visually reviewed snapshots for the current light Admin shell. These are independent fixtures, not shared live persistence proof.
+- People/Rostering suite: 112 desktop/mobile E2Es passed after fixing two stale/ambiguous test assumptions (page-local HR Rostering/Open Shifts controls; scoped timesheet form-hint note) and refreshing only inspected Officer schedule dialog snapshots. No live staff, shifts, timesheets, or leave records were written.
+- Field Operations/Safety suite: 80 desktop/mobile E2Es passed after fixing the no-complaint noise test to choose an allowed verbal warning, mocking optional LINZ reverse lookup for static guard, and refreshing only inspected patrol-stop/report/debrief form snapshots. No live field evidence or safety records were written.
+- Commercial/Document suite: 72 desktop/mobile E2Es passed across CRM/onboarding/agreement/handoff/geography/patrol-run, client portal, finance, reports, and document Studio/proposals. Finance provider authorization was not attempted.
+- CRM/File System suite: 22 desktop/mobile E2Es passed after fixing the quote module header overlap and File System mobile grid/intrinsic-width overflow. Folder move, file registration/import review, source open, and quote→accepted agreement were synthetic fixture writes only.
+- CRM quote and activity mobile fixes: quote table inclusion column no longer collides with Module; CRM activity cards stack at phone width so follow-up date text remains readable.
+- Geofence Workbench desktop hit-target defect confirmed and fixed: four filter buttons used three `1fr` tracks with auto minimum sizing; the queue overflowed its 360px track by 45px and the detail panel intercepted “All.” Responsive `minmax(0,1fr)` tracks plus `min-width:0` fixed it; the queue filter and proposal/checkpoint lifecycle pass 2/2 desktop/mobile.
+- Welfare manual-walkthrough warning classified as a test heuristic: it queried the first text matching “resolver,” which was the queue summary “Resolved in view,” not the selected alert's resolved_by actor. Schema/UI include the actual actor read; no app defect concluded from that warning.
+- Atlas baseline (read-only, live): core organization/agreement/place/staff/shift/dispatch/evidence/document tables are present and wired; `exercised` is null. At depth 3, upstream proven flow reach is 1,221 for `service_agreements`, 225 for `shifts`, 126 for `dispatch_jobs`, 53 for `documents`, and 22 for `patrol_checkpoint_visits`. Agreement consumers span CRM, onboarding, roster/HR, dispatch, finance, reports, client portal, approvals, and document Studio. FK reach was not counted as flow evidence.
+- Requested Atlas/schema preflight before further work: rechecked 212 direct live-code edges across CRM, workforce, dispatch, patrol, File System, and Geofence surfaces; reviewed RLS on org/site/zone/agreement/dispatch/document/checkpoint tables and SECURITY DEFINER authorization/audit paths for `propose_boundary`, `accept_boundary_proposal`, `get_geofence_review_queue`, `finalize_shift_coverage`, and `create_crm_draft_quote_for_provider`. No migration/schema discrepancy found in those paths. Current Bob Studio/Panel diagnostics show no editor errors; Vite logs from concurrent Bob edits had transient duplicate declarations/JSX parse/runtime exceptions, so Bob validation is deferred to its owner.
+- Confirmed and fixed: the mobile operating-spine Finance shortcut routed to CRM instead of Finance Home; the expanded Bob workspace lacked modal/focus semantics and did not restore focus after its route unmounted the launcher. The Finance navigation regression and Bob modal/focus tests pass at the applicable viewports.
+- Additional confirmed responsive/navigation fixes: File System list/detail layout stacks on mobile and wraps long source names; CRM quote headers no longer collide and activity follow-up text stacks at phone width; Geofence queue filter tracks no longer overflow into the detail pane; Officer module cards remain bounded. Focused workflow/geometry assertions are in place and passing except the broad safe-button run noted below.
+- Admin safe-button route audit is split into bounded groups. Mission Control, Field Operations core, Field specialties, CCTV, Site/Location/Zone, Geofence/Workshop, Clients/Workforce, Finance/Records, and non-Bob Platform Settings passed desktop/mobile. Builder and Bob are deliberately deferred; navigation-caused `net::ERR_ABORTED` requests are separately reported.
+- Clients & Workforce safe-button group passed desktop/mobile: 83 desktop and 163 mobile actions/steps, zero genuine failed requests, UX findings, or errors. State-changing controls are recorded as skips and mapped to the lifecycle E2Es above.
+- Finance/Reports/Records safe-button group passed desktop/mobile: 46 desktop and 127 mobile actions/steps, zero genuine failed requests, UX findings, or errors. Bank/IRD authorization and payment controls remain excluded.
+- Site/Location/Zone safe-button group passed desktop/mobile: 44 desktop and 71 mobile steps; Geofence/Workshop passed 20 desktop and 38 mobile steps. LINZ lookups are treated as specialized read paths, not generic route actions.
+- Non-Bob Platform Settings safe-button group passed desktop/mobile: 96 desktop and 177 mobile steps, zero genuine failures/findings; mutations remained guarded.
+- Officer page-owned safe-button groups passed desktop/mobile: self-service, dispatch/patrol, and specialties, 6 Playwright runs total; 0 genuine request failures or human-runner errors. Writes remained policy-skipped. Bob route omitted; standalone specialty launchers are explicitly deferred because `ModuleShell` currently mounts the Bob panel during rebuild.
+- Public dispute workflow passed 2/2 desktop/mobile synthetic E2Es: guest route, grounds-required disabled state, `submit-dispute` request shape, success receipt, and mobile overflow. This verifies the UI-to-endpoint contract, not live persistence.
+- Full-module client viewer access check passed 2/2 desktop/mobile: site/observation reads remain visible; finance, reports, and people direct routes return to overview; viewer never gets People navigation.
+- Bob rebuild re-check memory is recorded in `/memories/repo/fcm-human-walkthrough.md`: Admin/Officer/standalone entry points, panel modal/focus/keyboard behavior, Document Studio lifecycle and Atlas/schema/RLS, Bob/Builder safe-control groups, prior transient parse/runtime errors, and screenshot/console review. Do not resume those checks until the concurrent owner confirms handoff.
+- Owner-reported Deno Language Server error (`deno.cache` command registered twice) is an editor-extension startup issue; CLI Deno checks remain the runtime validation path. No app/runtime failure is inferred from it.
+- Full safe-button sweep remains incomplete; earlier Admin runs stalled in File System and one long shared-shell pass was interrupted. Page-route human observations completed, but every page-owned button/modal is not yet individually accounted for.
+- Live persistence/read-back for the same record chain, full client access matrix, generated artifact open/download, and visual-warning triage remain outstanding.
+- No live tenant writes, migrations, promotions, deployment changes, or issue creation are authorized by this checklist.

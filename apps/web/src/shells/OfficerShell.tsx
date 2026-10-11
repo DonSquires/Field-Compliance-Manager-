@@ -471,14 +471,14 @@ const OfficerShell: React.FC = () => {
                   const meta = MODULE_METADATA[mod];
                   if (!meta) return null;
                   const Icon = meta.icon;
+                  const standaloneModule = SPECIALTY_MODULES.find((module) => module.key === mod || module.integratedKey === mod);
                   return (
                     <article className="officer-module-card" key={mod}>
                       <button type="button" className="officer-module-card-main" onClick={() => navigateToModule(mod as ActiveModule)}>
-                        <span><Icon size={21} /></span>
-                        <strong>{meta.label}</strong>
-                        <small>{meta.description}</small>
+                        <span className="officer-module-icon"><Icon size={21} /></span>
+                        <span className="officer-module-card-copy"><strong>{meta.label}</strong><small>{meta.description}</small></span>
                       </button>
-                      <button type="button" className="officer-module-card-standalone" onClick={() => navigate(SPECIALTY_MODULES.find((module) => module.key === mod || module.integratedKey === mod)?.standalonePath ?? `/modules/${mod}`)}>Open standalone app</button>
+                      {standaloneModule && <button type="button" className="officer-module-card-standalone" onClick={() => navigate(standaloneModule.standalonePath)}>Open standalone app</button>}
                     </article>
                   );
                 })}

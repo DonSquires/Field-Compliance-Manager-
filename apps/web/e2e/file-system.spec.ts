@@ -14,6 +14,16 @@ test('administrator searches, reviews, and opens a source document', async ({ pa
   await expect(page.getByText('Company records', { exact: true })).toBeVisible();
   await expect(page.getByText('Health & safety', { exact: true })).toBeVisible();
   expect(await page.evaluate(() => document.documentElement.scrollWidth <= window.innerWidth)).toBe(true);
+  if ((page.viewportSize()?.width ?? 0) < 560) {
+    const overflows = await page.locator('.file-system-header, .file-system-header p, .file-system-intake article, .file-system-intake article strong, .file-system-intake article small, .file-system-layout, .file-system-list, .file-system-detail').evaluateAll((elements) => elements.flatMap((element) => {
+      const rect = element.getBoundingClientRect();
+      const parent = element.parentElement?.getBoundingClientRect();
+      return parent && (rect.left < parent.left - 1 || rect.right > parent.right + 1 || element.scrollWidth > element.clientWidth + 1)
+        ? [{ selector: element.className || element.tagName, left: Math.round(rect.left), right: Math.round(rect.right), width: Math.round(rect.width), clientWidth: element.clientWidth, scrollWidth: element.scrollWidth, parentWidth: Math.round(parent.width) }]
+        : [];
+    }));
+    expect(overflows).toEqual([]);
+  }
   await expect(page).toHaveScreenshot('file-explorer-home.png');
   await expect(page.getByText('sample-data-2026-09-08')).toHaveCount(0);
   await expect(page.getByText('Vehicle Log (1).csv')).toHaveCount(0);

@@ -347,10 +347,13 @@
 }
 
 .officer-module-card:hover { border-color: #568d87; }
-.officer-module-card-main { width: 100%; }
-.officer-module-card-standalone { min-height: 28px !important; padding: 0 8px !important; border: 1px solid #315969 !important; border-radius: 5px !important; color: #9ee0c2 !important; background: #10292a !important; font-size: 10px !important; font-weight: 800; text-align: center !important; }
+.officer-module-card-main { width: 100%; min-width: 0; }
+.officer-module-card-copy { display: grid; flex: 1 1 auto; min-width: 0; }
+.officer-module-card-copy strong,
+.officer-module-card-copy small { overflow-wrap: anywhere; }
+.officer-module-card-standalone { box-sizing: border-box; width: 100%; min-width: 0; min-height: 28px !important; justify-content: center; padding: 4px 8px !important; border: 1px solid #315969 !important; border-radius: 5px !important; color: #9ee0c2 !important; background: #10292a !important; font-size: 12px !important; font-weight: 800; line-height: 1.25; text-align: center !important; white-space: normal; overflow-wrap: anywhere; }
 
-.officer-module-grid button span {
+.officer-module-card-main > .officer-module-icon {
   display: grid;
   place-items: center;
   width: 36px;

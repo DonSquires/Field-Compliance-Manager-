@@ -214,8 +214,8 @@ test('people and HR decisions are governed and operational', async ({ page }) =>
 
 test('administrator finalizes an officer coverage claim into roster ownership', async ({ page }) => {
   const errors=monitorBrowserErrors(page);await signInAsAdmin(page,'/admin/people-hr');
-  await page.getByRole('button',{name:'Rostering'}).click();
-  await page.getByRole('button',{name:'Open Shifts'}).click();
+  await page.locator('.crm-branch-filter').getByRole('button',{name:'Rostering', exact:true}).click();
+  await page.locator('.roster-hr-tab-list').getByRole('button',{name:'Open Shifts', exact:true}).click();
   const claim=page.getByText('Claimed festival patrol').locator('..').locator('..');
   await expect(claim).toContainText('claimed by Ana Ngata');
   await claim.getByRole('button',{name:'Finalize assignment'}).click();

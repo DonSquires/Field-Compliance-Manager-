@@ -14,6 +14,11 @@ test('officer static guard confirms arrival only after a complete governed recei
   await page.context().grantPermissions(['geolocation']);
   await page.context().setGeolocation({ latitude: -41.274, longitude: 173.283 });
   await installOfficerScheduleFixtures(page);
+  await page.route('**/functions/v1/linz-lookup', async (route) => route.fulfill({
+    status: 200,
+    contentType: 'application/json',
+    body: JSON.stringify({ candidates: [] }),
+  }));
   await page.route('**/rest/v1/rpc/get_officer_static_post', async (route) => route.fulfill({ status: 200, contentType: 'application/json', body: JSON.stringify(staticPost) }));
   await page.route('**/rest/v1/rpc/manage_officer_static_post', async (route) => {
     const payload = JSON.parse(route.request().postData() ?? '{}');

@@ -15,6 +15,7 @@ describe('operating spine ribbon', () => {
     expect(source).toContain("page: 'locations'");
     expect(source).toContain("page: 'people-hr'");
     expect(source).toContain("page: 'field-ops'");
+    expect(source).toContain("id: 'finance', label: 'Finance', context: 'Rates & billing', icon: WalletCards, page: 'finance-bureau'");
     expect(source).not.toContain("from('");
     expect(source).not.toContain('.rpc(');
   });

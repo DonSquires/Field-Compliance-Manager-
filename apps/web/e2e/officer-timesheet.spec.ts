@@ -67,7 +67,7 @@ test('a period already covered by a sent timesheet cannot be sent twice', async 
     await route.fulfill({ status: 200, contentType: 'application/json', body: JSON.stringify([{ id: '38383838-3838-4838-8838-383838383838', period_start: '2026-08-24', period_end: '2026-08-30', scheduled_hours: 40, actual_hours: 39, overtime_hours: 0, status: 'submitted', review_notes: null, approved_at: null }]) });
   });
   await signInAsOfficer(page, '/officer/timesheet');
-  await expect(page.getByRole('note')).toContainText('You already sent a timesheet covering Mon, 24 Aug – Sun, 30 Aug (waiting for review). Pick dates outside it.');
+  await expect(page.locator('.form-hint[role="note"]')).toContainText('You already sent a timesheet covering Mon, 24 Aug – Sun, 30 Aug (waiting for review). Pick dates outside it.');
   await expect(page.getByRole('button', { name: 'Send for approval' })).toBeDisabled();
   await expect(page.locator('.status-badge').filter({ hasText: 'Waiting for review' })).toBeVisible();
 });

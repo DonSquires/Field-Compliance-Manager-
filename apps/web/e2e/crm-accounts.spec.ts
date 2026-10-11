@@ -33,6 +33,16 @@ test('CRM account context and governed quote creation are operational', async ({
   await expect(dialog.getByLabel('Quote title')).toHaveValue(/Civic Events Limited - .* proposal/);
   await dialog.getByLabel('Target margin %').fill('24'); await dialog.getByLabel('Commercial notes').fill('Initial static guarding proposal.');
   await dialog.getByLabel('Include static_guarding').check();
+    const proposalHeaders = dialog.locator('.crm-proposal-module-row.is-header > span');
+  if ((page.viewportSize()?.width ?? 0) <= 760) {
+      await expect(proposalHeaders.first()).toBeHidden();
+  } else {
+    const includeHeader = await proposalHeaders.nth(0).boundingBox();
+    const moduleHeader = await proposalHeaders.nth(1).boundingBox();
+    expect(includeHeader).not.toBeNull();
+    expect(moduleHeader).not.toBeNull();
+    expect(includeHeader!.x + includeHeader!.width).toBeLessThanOrEqual(moduleHeader!.x);
+  }
   await expect(dialog).toHaveScreenshot('crm-draft-quote.png'); await dialog.getByRole('button', { name: 'Create draft quote' }).click();
   await expect(page.getByText('Draft quote created for Civic Events Limited. Add explicit pricing lines before review.')).toBeVisible();
   const pricing = page.getByRole('dialog', { name: /Price Civic Events Limited - .* proposal/ });
@@ -159,6 +169,12 @@ test('account team manages contacts, follow-up activity, and receivables', async
   await workspace.getByLabel('Follow up at').fill('2026-09-02T10:00');
   await workspace.getByRole('button', { name: 'Record activity' }).click();
   await expect(workspace.getByText('Mobilisation review')).toBeVisible();
+  if ((page.viewportSize()?.width ?? 0) <= 760) {
+    const activityCard = workspace.locator('.crm-activity-list article').filter({ hasText: 'Mobilisation review' });
+    const activityColumns = await activityCard.evaluate((element) => getComputedStyle(element).gridTemplateColumns.split(' ').length);
+    expect(activityColumns).toBe(1);
+    expect(await activityCard.locator('.crm-follow-up').evaluate((element) => element.scrollWidth <= element.clientWidth + 1)).toBe(true);
+  }
   await expect(workspace).toHaveScreenshot('crm-account-workspace.png');
   await workspace.getByRole('button', { name: 'Close client portfolio' }).click();
 

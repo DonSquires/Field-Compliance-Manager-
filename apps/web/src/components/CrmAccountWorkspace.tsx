@@ -14,6 +14,7 @@ import { OperationalPlaceManager } from './OperationalPlaceManager';
 import { GeneratedArtifactActions } from './GeneratedArtifactActions';
 import type { EditableCrmOrganization } from './CrmOrganizationDialog';
 import './CrmAccountWorkspace.css';
+import './CrmAccountWorkspaceResponsive.css';
 
 export interface CrmWorkspaceAccount {
   id: string;

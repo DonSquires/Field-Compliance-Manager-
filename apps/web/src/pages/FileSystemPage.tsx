@@ -9,6 +9,7 @@ import { supabase } from '../lib/supabase';
 import { ShellLayout } from '../layouts/ShellLayout';
 import './PageStyles.css';
 import './FileSystemPage.css';
+import './FileSystemResponsive.css';
 
 interface DocumentRow {
   id: string;

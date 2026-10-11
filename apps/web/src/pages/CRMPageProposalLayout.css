@@ -1,0 +1,9 @@
+.crm-proposal-module-row {
+  grid-template-columns: 72px minmax(140px, 1fr) minmax(210px, 1.4fr) minmax(160px, 1fr);
+}
+
+@media (max-width: 760px) {
+  .crm-proposal-module-row {
+    grid-template-columns: 28px minmax(0, 1fr);
+  }
+}

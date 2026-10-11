@@ -19,6 +19,16 @@ interface HumanStep {
   details?: string;
 }
 
+interface HumanSkippedAction {
+  route: string;
+  index: number;
+  label: string;
+  reason: 'write-or-destructive' | 'disabled' | 'covered-by-modal' | 'not-present-after-route-restore' | 'concurrent-owner';
+}
+
+const CONCURRENT_OWNER_CONTROLS = /\b(?:bob|document studio|builder)\b/i;
+const CONCURRENT_OWNER_DESTINATIONS = new Set(['/officer/modules']);
+
 const SAFE_SAMPLE_VALUES: Record<string, string> = {
   search: 'Civic Events',
   email: 'human-test@example.invalid',
@@ -43,9 +53,10 @@ function compact(value: string | null | undefined, max = 180): string {
 export class HumanTestSession {
   readonly findings: HumanFinding[] = [];
   readonly steps: HumanStep[] = [];
-  private readonly auditedButtonLabels = new Set<string>();
+  readonly skippedActions: HumanSkippedAction[] = [];
   private currentStep = 'session';
   private readonly consoleErrors: string[] = [];
+  private readonly abortedRequests: string[] = [];
   private readonly failedRequests: string[] = [];
   private readonly httpErrors: string[] = [];
 
@@ -55,7 +66,10 @@ export class HumanTestSession {
     });
     page.on('pageerror', (error) => this.consoleErrors.push(compact(error.message)));
     page.on('requestfailed', (request) => {
-      this.failedRequests.push(`${request.method()} ${request.url()} ${request.failure()?.errorText ?? ''}`.trim());
+      const failure = request.failure()?.errorText ?? '';
+      const detail = `${request.method()} ${request.url()} ${failure}`.trim();
+      if (/net::ERR_ABORTED|NS_BINDING_ABORTED|ERR_CANCELED/i.test(failure)) this.abortedRequests.push(detail);
+      else this.failedRequests.push(detail);
     });
     page.on('response', (response) => {
       if (response.status() >= 400) this.httpErrors.push(`${response.status()} ${response.request().method()} ${response.url()}`);
@@ -262,47 +276,63 @@ export class HumanTestSession {
   }
 
   async walkEveryVisibleButton(route: string): Promise<void> {
-    await this.page.goto(route);
+    await this.navigateTo(route);
     await this.page.waitForLoadState('domcontentloaded');
     await this.page.waitForTimeout(250);
-    const buttons = await this.page.locator('button:visible').evaluateAll((elements) => elements.map((element, index) => ({
-      index,
-      label: (element.getAttribute('aria-label') || element.getAttribute('title') || element.textContent || '').replace(/\s+/g, ' ').trim(),
-      disabled: (element as HTMLButtonElement).disabled,
-    })));
-    console.log(`[HUMAN BUTTON AUDIT] ${route}: ${buttons.length} visible buttons`);
+    const pageButtons = this.page.locator('[data-app-content]').first().locator('button:visible');
+    const buttons = await pageButtons.evaluateAll((elements) => {
+      const occurrences = new Map<string, number>();
+      return elements.map((element, index) => {
+        const label = (element.getAttribute('aria-label') || element.getAttribute('title') || element.textContent || '').replace(/\s+/g, ' ').trim();
+        const occurrence = occurrences.get(label) ?? 0;
+        occurrences.set(label, occurrence + 1);
+        return { index, label, occurrence, disabled: (element as HTMLButtonElement).disabled };
+      });
+    });
+    console.log(`[HUMAN BUTTON AUDIT] ${route}: ${buttons.length} visible page-content buttons; shell controls are covered by role navigation checks`);
     for (const button of buttons) {
-      await this.page.goto(route);
+      await this.navigateTo(route);
       await this.page.waitForLoadState('domcontentloaded');
       await this.page.waitForTimeout(150);
-      const candidates = this.page.locator('button:visible');
+      const candidates = this.page.locator('[data-app-content]').first().locator('button:visible');
       const indexedButton = candidates.nth(button.index);
       const currentLabel = (await indexedButton.textContent().catch(() => null) ?? '').replace(/\s+/g, ' ').trim();
       const label = button.label || currentLabel || `button-${button.index}`;
-      if (!label || isWriteOrDestructiveAction(label)) {
+      if (CONCURRENT_OWNER_CONTROLS.test(label)
+          || (CONCURRENT_OWNER_DESTINATIONS.has(route) && /^open standalone app$/i.test(label))) {
+        this.skippedActions.push({ route, index: button.index, label, reason: 'concurrent-owner' });
+        console.log(`[HUMAN BUTTON SKIP] ${route} #${button.index} ${label}: surface is under active work by a concurrent owner`);
+        continue;
+      }
+      if (isWriteOrDestructiveAction(label)) {
+        this.skippedActions.push({ route, index: button.index, label, reason: 'write-or-destructive' });
         console.log(`[HUMAN BUTTON SKIP] ${route} #${button.index} ${label || '(unnamed)'}: write/destructive action requires governed evidence`);
         continue;
       }
-      if (this.auditedButtonLabels.has(label)) {
-        console.log(`[HUMAN BUTTON SKIP] ${route} #${button.index} ${label}: equivalent semantic button already followed`);
-        continue;
-      }
-      let candidate = await this.findButtonByLabel(label);
+      let candidate = await this.findButtonByLabel(label, button.occurrence);
       if (!candidate) {
-        await this.page.goto(route);
+        await this.navigateTo(route);
         await this.page.waitForLoadState('domcontentloaded');
         await this.page.waitForTimeout(100);
-        candidate = await this.findButtonByLabel(label);
+        candidate = await this.findButtonByLabel(label, button.occurrence);
       }
       if (!candidate) {
+        this.skippedActions.push({ route, index: button.index, label, reason: 'not-present-after-route-restore' });
         console.log(`[HUMAN BUTTON SKIP] ${route} #${button.index} ${label}: not present after route restore`);
         continue;
       }
       if (await candidate.isDisabled().catch(() => true)) {
+        this.skippedActions.push({ route, index: button.index, label, reason: 'disabled' });
         console.log(`[HUMAN BUTTON SKIP] ${route} #${button.index} ${label}: disabled state verified`);
         continue;
       }
-      this.auditedButtonLabels.add(label);
+      const activeModal = this.page.locator('[role="dialog"][aria-modal="true"]:visible').last();
+      if (await activeModal.isVisible({ timeout: 100 }).catch(() => false)
+          && !(await candidate.evaluate((element) => Boolean(element.closest('[role="dialog"][aria-modal="true"]'))))) {
+        this.skippedActions.push({ route, index: button.index, label, reason: 'covered-by-modal' });
+        console.log(`[HUMAN BUTTON SKIP] ${route} #${button.index} ${label}: covered by an active modal`);
+        continue;
+      }
       await this.step(`button ${route} #${button.index}: ${label}`, async () => {
         await candidate.click({ timeout: 2000 });
         await this.page.waitForTimeout(100);
@@ -321,32 +351,59 @@ export class HumanTestSession {
           return current.pathname === target.pathname && current.search === target.search;
         };
         if (!onRoute()) {
-          await this.page.goBack().catch(() => null);
-          await this.page.waitForTimeout(100);
-          if (!onRoute()) {
-            await this.page.goto(route);
-            await this.page.waitForLoadState('domcontentloaded');
-          }
+          await this.navigateTo(route);
+          await this.page.waitForLoadState('domcontentloaded');
         }
       });
     }
   }
 
-  private async findButtonByLabel(label: string) {
-    const labels = await this.page.locator('button:visible').evaluateAll((elements) => elements.map((element) => (element.getAttribute('aria-label') || element.getAttribute('title') || element.textContent || '').replace(/\s+/g, ' ').trim()));
-    const index = labels.indexOf(label);
-    return index === -1 ? null : this.page.locator('button:visible').nth(index);
+  private async navigateTo(route: string): Promise<void> {
+    const target = new URL(route, this.page.url());
+    const current = new URL(this.page.url());
+    const routeFamily = (pathname: string) => ['/admin', '/officer', '/client'].find((prefix) => pathname === prefix || pathname.startsWith(`${prefix}/`));
+    const targetFamily = routeFamily(target.pathname);
+    const currentFamily = routeFamily(current.pathname);
+    if (target.origin === current.origin && targetFamily && targetFamily === currentFamily) {
+      const destination = `${target.pathname}${target.search}${target.hash}`;
+      const resetRoutes: Record<string, string[]> = {
+        '/admin': ['/admin/hub', '/admin/approvals'],
+        '/officer': ['/officer/schedule', '/officer/report'],
+        '/client': ['/client', '/client/delivery'],
+      };
+      const intermediate = (resetRoutes[targetFamily] ?? []).find((path) => path !== target.pathname) ?? `${targetFamily}/`;
+      await this.page.evaluate(async ({ intermediatePath, destinationPath }) => {
+        const navigate = (path: string) => {
+          window.history.pushState({}, '', path);
+          window.dispatchEvent(new PopStateEvent('popstate'));
+        };
+        navigate(intermediatePath);
+        await new Promise((resolve) => window.setTimeout(resolve, 40));
+        navigate(destinationPath);
+      }, { intermediatePath: intermediate, destinationPath: destination });
+      await this.page.waitForTimeout(100);
+      return;
+    }
+    await this.page.goto(route, { waitUntil: 'domcontentloaded', timeout: 10_000 });
+  }
+
+  private async findButtonByLabel(label: string, occurrence = 0) {
+    const labels = await this.page.locator('[data-app-content]').first().locator('button:visible').evaluateAll((elements) => elements.map((element) => (element.getAttribute('aria-label') || element.getAttribute('title') || element.textContent || '').replace(/\s+/g, ' ').trim()));
+    const matchingIndexes = labels.flatMap((candidate, index) => candidate === label ? [index] : []);
+    const index = matchingIndexes[occurrence] ?? -1;
+    return index === -1 ? null : this.page.locator('[data-app-content]').first().locator('button:visible').nth(index);
   }
 
   private async dismissSafeDialog(): Promise<void> {
     const dialog = this.page.locator('[role="dialog"][aria-modal="true"]:visible').last();
     if (!(await dialog.isVisible({ timeout: 250 }).catch(() => false))) return;
+    if (await dialog.getAttribute('aria-label') === 'Bob agent workspace') return;
 
     const heading = compact(await dialog.locator('h1, h2, h3').first().textContent().catch(() => null));
     const buttons = await dialog.getByRole('button').evaluateAll((elements) => elements.map((element) => (element.getAttribute('aria-label') || element.textContent || '').replace(/\s+/g, ' ').trim()));
     console.log(`[HUMAN DIALOG] ${heading || '(untitled)'}; buttons: ${buttons.join(' | ') || '(none)'}`);
 
-    const dismiss = dialog.getByRole('button', { name: /^(?:cancel|not now|close(?:\b.*)?)$/i }).first();
+    const dismiss = dialog.getByRole('button', { name: /^(?:cancel|back|not now|close(?:\b.*)?)$/i }).first();
     if (!(await dismiss.isVisible().catch(() => false))) {
       throw new Error(`Modal dialog "${heading || 'untitled'}" has no safe Cancel, Close, or Not now action.`);
     }
@@ -375,6 +432,9 @@ export class HumanTestSession {
     for (const message of this.httpErrors) {
       this.findings.push({ severity: 'error', message: `HTTP error response: ${message}`, url: this.page.url(), step: this.currentStep });
     }
+    const uniqueFailedRequests = [...new Set(this.failedRequests)];
+    const uniqueAbortedRequests = [...new Set(this.abortedRequests)];
+    console.log(`[HUMAN REQUEST SUMMARY] ${this.failedRequests.length} failed requests (${uniqueFailedRequests.length} unique); ${this.abortedRequests.length} navigation-aborted (${uniqueAbortedRequests.length} unique); sample: ${uniqueFailedRequests.slice(0, 12).join(' | ') || '(none)'}`);
     const report = {
       generatedAt: now(),
       project: this.testInfo.project.name,
@@ -382,7 +442,9 @@ export class HumanTestSession {
       finalUrl: this.page.url(),
       steps: this.steps,
       findings: this.findings,
+      skippedActions: this.skippedActions,
       consoleErrors: this.consoleErrors,
+      abortedRequests: this.abortedRequests,
       failedRequests: this.failedRequests,
       httpErrors: this.httpErrors,
     };

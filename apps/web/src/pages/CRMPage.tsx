@@ -29,6 +29,7 @@ import { PriceListPicker } from '../components/PriceListPicker';
 import { BomTemplateQuoteAdder } from '../components/BomTemplateQuoteAdder';
 import './PageStyles.css';
 import './CRMPage.css';
+import './CRMPageProposalLayout.css';
 
 interface Organization {
   id: string;

@@ -1,5 +1,5 @@
 import { expect, test } from '@playwright/test';
-import { installOfficerScheduleFixtures, installSupabaseFixtures, signInAsAdmin, signInAsOfficer } from './fixtures';
+import { installClientPortalFixtures, installOfficerScheduleFixtures, installSupabaseFixtures, signInAsAdmin, signInAsClient, signInAsOfficer } from './fixtures';
 import { HumanTestSession } from './human-test-runner';
 
 const liveMode = process.env.HUMAN_TEST_LIVE === 'true';
@@ -17,6 +17,7 @@ async function openTarget(page: Parameters<typeof installSupabaseFixtures>[0], p
 async function signInAsHuman(page: Parameters<typeof installSupabaseFixtures>[0], session: HumanTestSession) {
   if (!liveMode) {
     await signInAsAdmin(page, '/admin');
+    await expect(page.locator('.admin-shell, .admin-mobile-header, .admin-nav-item').first()).toBeVisible();
     await session.observe('authenticated application shell');
     await dismissDesktopPrompt(page, session);
     return;
@@ -162,19 +163,67 @@ test.describe("Dr. Bob's human browser test", () => {
     await session.finish();
   });
 
-  test('follows every safe button across every page route', async ({ page }, testInfo) => {
+  const adminButtonRouteGroups = [
+    { name: 'Mission Control', routes: ['/admin/hub', '/admin/approvals'] },
+    { name: 'Field Operations core', routes: ['/admin/field-ops', '/admin/field-ops?area=dispatch', '/admin/field-ops?area=patrol', '/admin/field-ops?area=live-map', '/admin/field-ops?area=field-reports', '/admin/field-ops?area=officer-activity', '/admin/field-ops?area=welfare-alerts', '/admin/field-ops?area=breach-review', '/admin/field-ops?area=vehicle-search', '/admin/field-ops?area=observation-search', '/admin/field-ops?area=debrief-followup'] },
+    { name: 'Field specialties', routes: ['/admin/field-ops?area=parking', '/admin/field-ops?area=noise-control', '/admin/field-ops?area=biosecurity', '/admin/field-ops?area=smoke-control'] },
+    { name: 'Video evidence', routes: ['/admin/field-ops?area=cctv-console', '/admin/field-ops?area=cctv-triage', '/admin/field-ops?area=cctv-review', '/admin/field-ops?area=cctv-library', '/admin/field-ops?area=cctv-import'] },
+    { name: 'Site and location workspaces', routes: ['/admin/site-360', '/admin/locations', '/admin/zones'] },
+    { name: 'Geofence and Workshop', routes: ['/admin/sites', '/admin/workshop'] },
+    { name: 'Clients and workforce', routes: ['/admin/crm', '/admin/relationships', '/admin/client-setup', '/admin/onboarding', '/admin/handoffs', '/admin/roster', '/admin/people-hr', '/admin/roster-targets', '/admin/users'] },
+    { name: 'Finance reports and records', routes: ['/admin/finance-bureau', '/admin/finance-money', '/admin/finance-connections', '/admin/finance-costing', '/admin/finance-pricing', '/admin/rate-rules', '/admin/reports', '/admin/files', '/admin/investigations'] },
+    { name: 'Platform settings', routes: ['/admin/access-control', '/admin/org-setup', '/admin/module-subscriptions', '/admin/testing', '/admin/test-data', '/admin/platform', '/admin/platform-subscribers', '/admin/platform-catalog', '/admin/platform-subscriptions'] },
+    { name: 'Builder and Bob', routes: ['/admin/builder', '/admin/bob', '/admin/document-studio'] },
+  ];
+  for (const group of adminButtonRouteGroups) {
+    test(`follows safe Admin controls: ${group.name}`, async ({ page }, testInfo) => {
+      test.setTimeout(420_000);
+      const session = new HumanTestSession(page, testInfo);
+      await signInAsHuman(page, session);
+      for (const route of group.routes) await session.walkEveryVisibleButton(route);
+      await session.finish();
+    });
+  }
+
+  const officerAuditModules = ['dispatch', 'patrol', 'static_guarding', 'welfare', 'freedom_camping', 'parking_enforcement', 'noise_control', 'biosecurity', 'smoke_complaints', 'workshop', 'cctv', 'ems', 'overnight_verification', 'checkpoint_scan'];
+  const officerControlGroups = [
+    { name: 'Self-service', routes: ['/officer/schedule', '/officer/report', '/officer/leave', '/officer/timesheet', '/officer/credentials', '/officer/vehicle_lookup', '/officer/modules'] },
+    { name: 'Dispatch and patrol', routes: ['/officer/dispatch', '/officer/patrol', '/officer/site_guard', '/officer/debrief', '/officer/map', '/officer/overnight_verification', '/officer/checkpoint_scan'] },
+    { name: 'Specialty modules', routes: ['/officer/noise_control', '/officer/parking', '/officer/biosecurity', '/officer/freedom_camping', '/officer/smoke_control', '/officer/ems', '/officer/workshop'] },
+  ];
+  for (const group of officerControlGroups) {
+    test(`follows safe Officer controls: ${group.name}`, async ({ page }, testInfo) => {
+      test.setTimeout(420_000);
+      await installSupabaseFixtures(page, { officerModules: officerAuditModules });
+      await page.route('**/rest/v1/user_profiles*', async (route) => {
+        const query = new URL(route.request().url()).searchParams;
+        if (query.get('id') !== 'eq.22222222-2222-4222-8222-222222222222') return route.fallback();
+        await route.fulfill({ status: 200, contentType: 'application/json', body: JSON.stringify([{ id: '22222222-2222-4222-8222-222222222222', display_name: 'Ana Ngata', email: 'ana@fcm.test', role: 'officer', organization_id: '33333333-3333-4333-8333-333333333333', module_access: officerAuditModules }]) });
+      });
+      const session = new HumanTestSession(page, testInfo);
+      await signInAsOfficer(page, '/officer/schedule');
+      for (const route of group.routes) await session.walkEveryVisibleButton(route);
+      await session.finish();
+    });
+  }
+
+  test('follows safe client controls across full-module agreement pages', async ({ page }, testInfo) => {
     test.setTimeout(900_000);
     const session = new HumanTestSession(page, testInfo);
-    await signInAsHuman(page, session);
-    const adminRoutes = [
-      '/admin/hub', '/admin/approvals', '/admin/field-ops', '/admin/reports', '/admin/files',
-      '/admin/investigations', '/admin/sites', '/admin/locations', '/admin/zones', '/admin/users',
-      '/admin/access-control', '/admin/org-setup', '/admin/module-subscriptions', '/admin/relationships',
-      '/admin/onboarding', '/admin/handoffs', '/admin/finance-bureau', '/admin/finance-connections',
-      '/admin/finance-money', '/admin/finance-costing', '/admin/finance-pricing', '/admin/rate-rules',
-      '/admin/roster', '/admin/people-hr', '/admin/roster-targets', '/admin/bob', '/admin/document-studio',
-    ];
-    for (const route of adminRoutes) await session.walkEveryVisibleButton(route);
+    await installClientPortalFixtures(page, { mode: 'full_modules', reportsEnabled: true, financeEnabled: true, role: 'client_admin' });
+    await signInAsClient(page);
+    for (const route of ['/client', '/client/delivery', '/client/sites', '/client/observations', '/client/reports', '/client/finance', '/client/people']) {
+      await session.walkEveryVisibleButton(route);
+    }
+    await session.finish();
+  });
+
+  test('follows safe client controls for a scan-only agreement', async ({ page }, testInfo) => {
+    test.setTimeout(120_000);
+    const session = new HumanTestSession(page, testInfo);
+    await installClientPortalFixtures(page, { mode: 'scan_only', role: 'client_viewer' });
+    await signInAsClient(page, '/client');
+    await session.walkEveryVisibleButton('/client/scan');
     await session.finish();
   });
 });

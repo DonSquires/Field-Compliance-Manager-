@@ -31,7 +31,7 @@ export function OperatingSpineRibbon({
     { id: 'roster', label: 'Roster', context: 'Coverage & availability', icon: CalendarDays, page: 'roster' },
     { id: 'dispatch', label: 'Dispatch', context: 'Live response', icon: Radio, page: 'field-ops' },
     { id: 'compliance', label: 'Evidence', context: 'Field outcomes', icon: ClipboardCheck, page: 'field-ops' },
-    { id: 'finance', label: 'Finance', context: 'Rates & billing', icon: WalletCards, page: 'crm' },
+    { id: 'finance', label: 'Finance', context: 'Rates & billing', icon: WalletCards, page: 'finance-bureau' },
     { id: 'reports', label: 'Reports', context: 'Accountability', icon: FileBarChart, page: 'reports' },
   ];
 

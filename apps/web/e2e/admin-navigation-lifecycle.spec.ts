@@ -56,6 +56,18 @@ test('admin navigation groups client delivery and finance in the order work happ
   expect(errors, errors.join('\n')).toEqual([]);
 });
 
+test('mobile Finance operating-spine control opens Finance Home', async ({ page }) => {
+  test.skip((page.viewportSize()?.width ?? 0) >= 768, 'Desktop Admin uses the workspace sidebar; the operating-spine ribbon is mobile-only.');
+  const errors = monitorBrowserErrors(page);
+  await signInAsAdmin(page, '/admin/crm');
+  const financeControl = page.getByRole('navigation', { name: 'Operating spine' }).getByRole('button', { name: 'Finance Rates & billing' });
+  await expect(financeControl).toBeVisible();
+  await financeControl.click();
+  await expect(page).toHaveURL(/\/admin\/finance-bureau$/);
+  await expect(page.getByRole('heading', { name: 'What would you like to do?' })).toBeVisible();
+  expect(errors, errors.join('\n')).toEqual([]);
+});
+
 test('Field Operations navigation exposes enabled areas and explains disabled direct routes', async ({ page }) => {
   const errors = monitorBrowserErrors(page);
   await page.route('**/rest/v1/organization_modules**', async (route) => {

@@ -18,14 +18,14 @@ test('officer noise assessment captures the evidence-package measurement and sou
       p_volume_score: 3,
       p_time_score: 1,
       p_tone_score: 2,
-      p_action_taken: 'direction_notice',
+      p_action_taken: 'verbal_warning',
     });
     submittedNoise = {
       id: 'abababab-abab-4bab-8bab-abababababab',
       noise_source: 'Amplified music',
       decibel_reading: null,
       prior_notice_count: 0,
-      action_taken: 'direction_notice',
+      action_taken: 'verbal_warning',
       scene_description: 'Music is plainly audible at the street boundary.',
       assessed_at: '2026-08-30T09:30:00.000Z',
       review_status: 'open',
@@ -46,13 +46,13 @@ test('officer noise assessment captures the evidence-package measurement and sou
   });
 
   await signInAsOfficer(page, '/officer/noise_control');
-  await page.getByRole('button', { name: /New Assessment/ }).click();
+  await page.getByRole('button', { name: /Officer-initiated assessment/ }).click();
   await page.getByLabel('Noise source', { exact: true }).fill('Amplified music');
   await page.getByLabel('Noise source address').fill('65 Tipahi Street, Nelson South');
   await page.getByLabel('Volume score').selectOption('3');
   await page.getByLabel('Bass / tone score').selectOption('2');
   await page.getByLabel('Scene description').fill('Music is plainly audible at the street boundary.');
-  await page.getByLabel('Action taken').selectOption('direction_notice');
+  await page.getByLabel('Action taken').selectOption('verbal_warning');
   await expect(page.getByRole('button', { name: 'Submit Assessment' })).toBeDisabled();
   await page.getByText('H&S pre-visit check completed', { exact: true }).click();
   await page.getByRole('button', { name: 'Submit Assessment' }).click();

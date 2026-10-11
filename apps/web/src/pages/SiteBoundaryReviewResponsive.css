@@ -1,0 +1,18 @@
+.boundary-queue,
+.boundary-tools,
+.boundary-search,
+.boundary-filters {
+  min-width: 0;
+}
+
+.boundary-search input {
+  min-width: 0;
+}
+
+.boundary-filters {
+  grid-template-columns: repeat(4, minmax(0, 1fr));
+}
+
+.boundary-filters.workbench-filters {
+  grid-template-columns: repeat(4, minmax(0, 1fr));
+}

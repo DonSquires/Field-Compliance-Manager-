@@ -20,6 +20,14 @@ test('operations proposes, inspects and verifies a site boundary through the geo
   await expect(page.getByText('unresolved_no_geofence')).toBeVisible();
   await expect(page.getByLabel('Boundary map for North Pavilion')).toBeVisible();
   await expect(page.getByRole('button', { name: 'Suggest boundary from LINZ' })).toBeEnabled();
+  const queueFilters = page.getByRole('group', { name: 'Geofence queue filter' });
+  const queueGeometry = await page.locator('.boundary-queue').evaluate((element) => ({ clientWidth: element.clientWidth, scrollWidth: element.scrollWidth }));
+  const queueWidth = await page.locator('.boundary-queue').evaluate((element) => ({ clientWidth: element.clientWidth, scrollWidth: element.scrollWidth }));
+  expect(queueWidth.scrollWidth).toBeLessThanOrEqual(queueWidth.clientWidth + 1);
+  await queueFilters.getByRole('button', { name: 'All', exact: true }).click();
+  await expect(queueFilters.getByRole('button', { name: 'All', exact: true })).toHaveClass(/is-active/);
+  await expect(page.getByLabel('Boundary map for North Pavilion')).toBeVisible();
+  await queueFilters.getByRole('button', { name: 'Attention', exact: true }).click();
 
   await page.getByRole('tab', { name: 'Point + radius' }).click();
   const propose = page.getByRole('region', { name: 'Propose a boundary' });

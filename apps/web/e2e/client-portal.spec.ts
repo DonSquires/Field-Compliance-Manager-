@@ -59,6 +59,22 @@ test('the delivery view is not offered on a scan-only agreement, and the URL doe
   await expect(page.locator('.client-overview-panel').filter({ hasText: 'Presence at your places' })).toHaveCount(0);
 });
 
+test('a full-module viewer can read operational pages but cannot open disabled finance, reports, or people routes', async ({ page }) => {
+  await installClientPortalFixtures(page, { mode: 'full_modules', reportsEnabled: false, financeEnabled: false, role: 'client_viewer' });
+  await signInAsClient(page, '/client/sites');
+  const navigation = page.getByRole('navigation', { name: 'Client portal' });
+  await expect(navigation.getByRole('button', { name: 'Sites and zones' })).toBeVisible();
+  await expect(navigation.getByRole('button', { name: 'Observations' })).toBeVisible();
+  await expect(navigation.getByRole('button', { name: 'Invoices' })).toHaveCount(0);
+  await expect(navigation.getByRole('button', { name: 'Reports' })).toHaveCount(0);
+  await expect(navigation.getByRole('button', { name: 'Your people' })).toHaveCount(0);
+
+  for (const route of ['/client/finance', '/client/reports', '/client/people']) {
+    await page.goto(route);
+    await expect(page).toHaveURL(/\/client$/);
+  }
+});
+
 test('a client reads the frozen scope and source details of a published custom report', async ({ page }) => {
   const browserErrors = monitorBrowserErrors(page);
   await installClientPortalFixtures(page, { reportsEnabled: true, role: 'client_admin' });

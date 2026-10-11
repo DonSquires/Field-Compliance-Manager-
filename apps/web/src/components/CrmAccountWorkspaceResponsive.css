@@ -1,0 +1,21 @@
+@media (max-width: 560px) {
+  .crm-activity-list article {
+    grid-template-columns: minmax(0, 1fr);
+    gap: 8px;
+  }
+
+  .crm-activity-kind {
+    justify-self: start;
+    min-width: 66px;
+  }
+
+  .crm-activity-list article header {
+    align-items: flex-start;
+    flex-wrap: wrap;
+  }
+
+  .crm-follow-up {
+    flex-wrap: wrap;
+    overflow-wrap: anywhere;
+  }
+}

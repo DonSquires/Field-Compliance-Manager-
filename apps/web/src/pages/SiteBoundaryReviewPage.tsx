@@ -9,6 +9,7 @@ import { resolveAddressCandidates, type AddressCandidate } from '../lib/location
 import { addLinzBaseLayers, rememberViewport, restoreViewportOr } from '../lib/mapPreferences';
 import { ShellLayout } from '../layouts/ShellLayout';
 import './SiteBoundaryReviewPage.css';
+import './SiteBoundaryReviewResponsive.css';
 import './SiteBoundaryVisualReview.css';
 
 // Geofence Workbench (GEOFENCE_PRINCIPLES P1/P2, Q2, Q6): every boundary from every
