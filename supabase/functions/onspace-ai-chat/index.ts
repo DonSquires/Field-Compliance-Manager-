@@ -4162,12 +4162,39 @@ async function execQueryAtlas(authHeader, caps, toolArgs) {
       }
     };
   }
-  const r = await callFn('bob-query-atlas', authHeader, {
-    action,
-    filter: String(toolArgs.filter ?? '').trim() || undefined,
-    limit: Math.min(Math.max(typeof toolArgs.limit === 'number' ? toolArgs.limit : 100, 1), 100),
-    offset: Math.max(typeof toolArgs.offset === 'number' ? toolArgs.offset : 0, 0)
-  });
+  const filter = String(toolArgs.filter ?? '').trim() || undefined;
+  const requestedLimit = Math.min(Math.max(typeof toolArgs.limit === 'number' ? toolArgs.limit : 100, 1), 500);
+  const initialOffset = Math.max(typeof toolArgs.offset === 'number' ? toolArgs.offset : 0, 0);
+  const scanAll = action === 'gap_report' || action === 'expectation_report';
+  const pages = [];
+  let offset = initialOffset;
+  let nextOffset = null;
+  const maxScanRows = scanAll ? 2000 : requestedLimit;
+  do {
+    const page = await callFn('bob-query-atlas', authHeader, {
+      action,
+      filter,
+      limit: scanAll ? requestedLimit : Math.min(requestedLimit, 100),
+      offset
+    });
+    if (!page.ok || page.data?.ok === false) return {
+      reply: `I could not query the Atlas (${page.data?.error ?? page.status}).`,
+      meta: { tool: 'query_atlas', outcome: 'failed', action }
+    };
+    pages.push(...(Array.isArray(page.data?.results) ? page.data.results : []));
+    nextOffset = page.data?.next_offset ?? null;
+    if (!scanAll || nextOffset === null || pages.length >= maxScanRows) break;
+    offset = nextOffset;
+  } while (true);
+  const r = {
+    ok: true,
+    data: {
+      results: pages,
+      offset: initialOffset,
+      next_offset: nextOffset !== null && pages.length >= maxScanRows ? nextOffset : null,
+      total: scanAll && nextOffset === null ? pages.length : null
+    }
+  };
   if (!r.ok || r.data?.ok === false) return {
     reply: `I could not query the Atlas (${r.data?.error ?? r.status}).`,
     meta: {
@@ -4191,15 +4218,23 @@ async function execQueryAtlas(authHeader, caps, toolArgs) {
       counts[value] = (counts[value] ?? 0) + 1;
       return counts;
     }, {})).map(([value, count])=>`${count} ${value}`).join(', ');
+  const sample = (key) => results
+    .map((row) => String(row[key] ?? '').trim())
+    .filter(Boolean)
+    .slice(0, 12)
+    .join(', ');
+  const scanLabel = scanAll
+    ? r.data?.next_offset === null ? 'complete bounded scan' : 'partial bounded scan'
+    : 'current page';
   const summary = action === 'gap_report'
-    ? `I found ${results.length} Atlas gaps in this page: ${countsBy('gap_kind')}. They are grouped as ${countsBy('entity_type')}.`
+    ? `I found ${results.length} Atlas gaps in a ${scanLabel}: ${countsBy('gap_kind')}. They are grouped as ${countsBy('entity_type')}. Sample entities: ${sample('entity_name') || 'none'}.`
     : action === 'expectation_report'
-      ? `I evaluated ${results.length} Atlas expectations: ${countsBy('expectation_status')}.`
+      ? `I evaluated ${results.length} Atlas expectations in a ${scanLabel}: ${countsBy('expectation_status')}.`
       : action === 'terrain_edges'
-        ? `I found ${results.length} live terrain edges in this page: ${countsBy('edge_kind')}.`
-        : `I found ${results.length} capability entries in this page: ${countsBy('entity_type')}.`;
+        ? `I found ${results.length} live terrain edges in the current page: ${countsBy('edge_kind')}.`
+        : `I found ${results.length} capability entries in the current page: ${countsBy('entity_type')}.`;
   return {
-    reply: `${summary}${r.data?.next_offset !== null && r.data?.next_offset !== undefined ? ` More results are available from offset ${r.data.next_offset}.` : ''}`,
+    reply: `${summary}${r.data?.next_offset !== null && r.data?.next_offset !== undefined ? ` The scan is bounded at ${maxScanRows} rows; continue from offset ${r.data.next_offset} for the remainder.` : ''}`,
     meta: {
       tool: 'query_atlas',
       outcome: 'ok',
