@@ -1,6 +1,6 @@
 import { useRef, useState } from 'react';
 import { ActivityIndicator, Alert, Pressable, StyleSheet, Text, TextInput, View } from 'react-native';
-import { captureCoordinates } from '../lib/officerScan';
+import { captureCoordinates, captureEvidencePhoto } from '../lib/officerScan';
 import { supabase } from '../lib/supabase';
 
 type Props = { shiftId: string | null };
@@ -21,6 +21,7 @@ export function OfficerNoiseControlPanel({ shiftId }: Props) {
   const [policePresent, setPolicePresent] = useState(false);
   const [sceneDescription, setSceneDescription] = useState('');
   const [followUpRequired, setFollowUpRequired] = useState(false);
+  const [imageBase64, setImageBase64] = useState<string | null>(null);
   const [busy, setBusy] = useState(false);
   const requestId = useRef(crypto.randomUUID());
   const assessedAt = useRef(new Date().toISOString());
@@ -38,7 +39,17 @@ export function OfficerNoiseControlPanel({ shiftId }: Props) {
 
   const valid = Boolean(noiseSourceAddress.trim()) &&
     Boolean(noiseSource) &&
+    Boolean(imageBase64) &&
     (!actionNeedsNotice || Boolean(noticeNumber.trim()));
+
+  const pickOrTakePhoto = async (source: 'camera' | 'library') => {
+    try {
+      const captured = await captureEvidencePhoto(source);
+      setImageBase64(captured.base64);
+    } catch (err) {
+      Alert.alert('Evidence photo error', err instanceof Error ? err.message : 'Photo evidence capture failed.');
+    }
+  };
 
   const submit = async () => {
     if (!supabase || !valid) return;
@@ -49,33 +60,42 @@ export function OfficerNoiseControlPanel({ shiftId }: Props) {
 
       const timeScore = getCurrentTimeScore();
 
-      const { data, error } = await supabase.rpc('submit_officer_noise_assessment', {
-        p_client_request_id: requestId.current,
-        p_assessed_at: assessedAt.current,
-        p_noise_source: noiseSource,
-        p_noise_source_address: noiseSourceAddress.trim(),
-        p_action_taken: actionTaken,
-        p_volume_score: volumeScore,
-        p_time_score: timeScore,
-        p_tone_score: toneScore,
-        p_complaint_address: complaintAddress.trim() || null,
-        p_notice_number: noticeNumber.trim() || null,
-        p_occupant_name: occupantName.trim() || null,
-        p_police_requested: policeRequested,
-        p_police_present: policePresent,
-        p_scene_description: sceneDescription.trim() || null,
-        p_follow_up_required: followUpRequired,
-        p_shift_id: shiftId,
-        p_gps_lat: coordinates?.lat ?? null,
-        p_gps_lng: coordinates?.lng ?? null,
+      const { data, error } = await supabase.functions.invoke<{
+        assessment_id?: string;
+        matrix_total?: number;
+        classification?: { classification?: string };
+        error?: string;
+      }>('submit-noise-assessment', {
+        body: {
+          client_request_id: requestId.current,
+          assessed_at: assessedAt.current,
+          noise_source: noiseSource,
+          noise_source_address: noiseSourceAddress.trim(),
+          action_taken: actionTaken,
+          volume_score: volumeScore,
+          time_score: timeScore,
+          tone_score: toneScore,
+          complaint_address: complaintAddress.trim() || null,
+          notice_number: noticeNumber.trim() || null,
+          occupant_name: occupantName.trim() || null,
+          police_requested: policeRequested,
+          police_present: policePresent,
+          scene_description: sceneDescription.trim() || null,
+          follow_up_required: followUpRequired,
+          shift_id: shiftId,
+          gps_lat: coordinates?.lat ?? null,
+          gps_lng: coordinates?.lng ?? null,
+          image_base64: imageBase64,
+        },
       });
 
-      const receipt = (data as Array<{ id: string; matrix_total: number }> | null)?.[0];
-      if (error || !receipt?.id) throw error ?? new Error('Noise assessment receipt was not confirmed.');
+      if (error || data?.error || !data?.assessment_id) {
+        throw error ?? new Error(data?.error || 'Noise assessment receipt was not confirmed.');
+      }
 
       Alert.alert(
         'Assessment confirmed',
-        `Receipt ${receipt.id.slice(0, 8)}. Matrix Score: ${receipt.matrix_total ?? (volumeScore + timeScore + toneScore)}.`
+        `Receipt ${data.assessment_id.slice(0, 8)}. Matrix score: ${data.matrix_total ?? (volumeScore + timeScore + toneScore)}. Bob photo candidate: ${data.classification?.classification ?? 'unavailable'}; human review required.`
       );
 
       setNoiseSourceAddress('');
@@ -86,6 +106,7 @@ export function OfficerNoiseControlPanel({ shiftId }: Props) {
       setPoliceRequested(false);
       setPolicePresent(false);
       setFollowUpRequired(false);
+      setImageBase64(null);
       requestId.current = crypto.randomUUID();
       assessedAt.current = new Date().toISOString();
       setOpen(false);
@@ -105,6 +126,17 @@ export function OfficerNoiseControlPanel({ shiftId }: Props) {
       {open && (
         <View style={styles.form}>
           <Text style={styles.title}>Noise Control Assessment</Text>
+
+          <Text style={styles.sectionLabel}>Noise Source Evidence Photo</Text>
+          <Text style={styles.helpText}>Required for source/equipment review. A photo cannot measure noise or determine whether it is excessive.</Text>
+          <View style={styles.options}>
+            <Pressable onPress={() => pickOrTakePhoto('camera')} style={[styles.option, Boolean(imageBase64) && styles.optionActive]}>
+              <Text style={styles.optionText}>{imageBase64 ? 'Photo Captured ✓' : 'Take Evidence Photo'}</Text>
+            </Pressable>
+            <Pressable onPress={() => pickOrTakePhoto('library')} style={styles.option}>
+              <Text style={styles.optionText}>Choose from Gallery</Text>
+            </Pressable>
+          </View>
 
           <TextInput value={noiseSourceAddress} onChangeText={setNoiseSourceAddress} placeholder="Noise source address *" placeholderTextColor="#718197" style={styles.input} />
 
@@ -181,6 +213,7 @@ const styles = StyleSheet.create({
   form: { gap: 9, borderWidth: 1, borderColor: '#30485b', borderRadius: 8, backgroundColor: '#0b1926', padding: 12 },
   title: { color: '#eef6f7', fontSize: 17, fontWeight: '800' },
   sectionLabel: { color: '#88a2b5', fontSize: 12, fontWeight: '700', marginTop: 4 },
+  helpText: { color: '#aebdce', fontSize: 12, lineHeight: 17 },
   options: { flexDirection: 'row', flexWrap: 'wrap', gap: 6 },
   option: { minHeight: 34, alignItems: 'center', justifyContent: 'center', borderWidth: 1, borderColor: '#3a5364', borderRadius: 5, paddingHorizontal: 9 },
   optionActive: { borderColor: '#7dd3c7', backgroundColor: '#10302e' },

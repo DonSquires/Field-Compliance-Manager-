@@ -10,22 +10,23 @@ test('officer noise assessment captures the evidence-package measurement and sou
   const browserErrors = monitorBrowserErrors(page);
   let submittedNoise: Record<string, unknown> | null = null;
 
-  await page.route('**/rest/v1/rpc/submit_officer_noise_assessment', async (route) => {
+  await page.route('**/functions/v1/submit-noise-assessment', async (route) => {
     const payload = JSON.parse(route.request().postData() ?? '{}');
     expect(payload).toMatchObject({
-      p_noise_source: 'Amplified music',
-      p_noise_source_address: '65 Tipahi Street, Nelson South',
-      p_volume_score: 3,
-      p_time_score: 1,
-      p_tone_score: 2,
-      p_action_taken: 'verbal_warning',
+      noise_source: 'Amplified music',
+      noise_source_address: '65 Tipahi Street, Nelson South',
+      volume_score: 3,
+      time_score: 1,
+      tone_score: 2,
+      action_taken: 'abatement_notice',
     });
+    expect(typeof payload.image_base64).toBe('string');
     submittedNoise = {
       id: 'abababab-abab-4bab-8bab-abababababab',
       noise_source: 'Amplified music',
       decibel_reading: null,
       prior_notice_count: 0,
-      action_taken: 'verbal_warning',
+      action_taken: 'abatement_notice',
       scene_description: 'Music is plainly audible at the street boundary.',
       assessed_at: '2026-08-30T09:30:00.000Z',
       review_status: 'open',
@@ -36,7 +37,13 @@ test('officer noise assessment captures the evidence-package measurement and sou
     await route.fulfill({
       status: 200,
       contentType: 'application/json',
-      body: JSON.stringify([{ id: 'abababab-abab-4bab-8bab-abababababab', matrix_total: 6, review_status: 'open' }]),
+      body: JSON.stringify({
+        success: true,
+        assessment_id: 'abababab-abab-4bab-8bab-abababababab',
+        matrix_total: 6,
+        review_status: 'open',
+        classification: { classification: 'music equipment' },
+      }),
     });
   });
 
@@ -46,13 +53,15 @@ test('officer noise assessment captures the evidence-package measurement and sou
   });
 
   await signInAsOfficer(page, '/officer/noise_control');
-  await page.getByRole('button', { name: /Officer-initiated assessment/ }).click();
+  await page.getByRole('button', { name: /\+ Officer-initiated assessment/ }).click();
+  await page.locator('#noise-evidence-photo').setInputFiles('node_modules/leaflet/dist/images/marker-icon.png');
   await page.getByLabel('Noise source', { exact: true }).fill('Amplified music');
   await page.getByLabel('Noise source address').fill('65 Tipahi Street, Nelson South');
   await page.getByLabel('Volume score').selectOption('3');
   await page.getByLabel('Bass / tone score').selectOption('2');
   await page.getByLabel('Scene description').fill('Music is plainly audible at the street boundary.');
-  await page.getByLabel('Action taken').selectOption('verbal_warning');
+  await page.getByLabel('Action taken').selectOption('abatement_notice');
+  await page.getByLabel('END number').fill('END-2026-0042');
   await expect(page.getByRole('button', { name: 'Submit Assessment' })).toBeDisabled();
   await page.getByText('H&S pre-visit check completed', { exact: true }).click();
   await page.getByRole('button', { name: 'Submit Assessment' }).click();

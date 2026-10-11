@@ -10,7 +10,7 @@
  * through the audited RPC and is not kept in page state beyond the reveal.
  */
 
-import React, { useCallback, useEffect, useMemo, useState } from 'react';
+import React, { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { CheckCircle2, Crosshair, MapPin, Phone, RefreshCw, Search, ShieldAlert } from 'lucide-react';
 import { useLocation } from 'react-router-dom';
 import { useAuth } from '../context/AuthContext';
@@ -19,6 +19,7 @@ import { useActiveModuleContext } from '../hooks/useActiveModuleContext';
 import { useActiveShift } from '../hooks/useActiveShift';
 import { ACTIVE_DISPATCH_JOB_STATUSES } from '../lib/dispatchStatus';
 import { resolveAddressCandidates, resolveAddressForCoordinates } from '../lib/locationAddress';
+import { imageFileToBase64 } from '../lib/officerScan';
 import { supabase } from '../lib/supabase';
 import './PageStyles.css';
 import './OfficerNoiseControlPage.css';
@@ -144,6 +145,10 @@ const OfficerNoiseControlPage: React.FC = () => {
   const [gps, setGps] = useState<Gps>(IDLE_GPS);
   const [arrivalGps, setArrivalGps] = useState<Gps>(IDLE_GPS);
   const [bwcReference, setBwcReference] = useState('');
+  const [imageBase64, setImageBase64] = useState<string | null>(null);
+  const [imagePreviewUrl, setImagePreviewUrl] = useState<string | null>(null);
+  const [preparingImage, setPreparingImage] = useState(false);
+  const fileInputRef = useRef<HTMLInputElement>(null);
   const [addressResolution, setAddressResolution] = useState<{ status: 'idle' | 'resolving' | 'resolved' | 'unavailable'; message: string | null }>({ status: 'idle', message: null });
   const [contact, setContact] = useState({ mode: 'phone', summary: '' });
   const [revealedContact, setRevealedContact] = useState<RevealedContact>(null);
@@ -165,7 +170,7 @@ const OfficerNoiseControlPage: React.FC = () => {
   const statutoryNumberMissing = isStatutory && !form.end_number.trim() && !form.notice_number.trim();
   const endWithoutComplaint = form.action_taken === 'direction_notice' && !selectedJob;
   const seizureWithoutPolice = form.action_taken === 'equipment_seized' && !form.police_present;
-  const canSubmit = Boolean(form.noise_source.trim() && form.noise_source_address.trim() && form.scene_description.trim() && form.volume_score !== '' && form.hs_checklist_completed) && !statutoryNumberMissing && !endWithoutComplaint && !seizureWithoutPolice;
+  const canSubmit = Boolean(form.noise_source.trim() && form.noise_source_address.trim() && form.scene_description.trim() && form.volume_score !== '' && form.hs_checklist_completed && imageBase64) && !statutoryNumberMissing && !endWithoutComplaint && !seizureWithoutPolice;
 
   const particularsPeriod = particulars.periodHours.trim() === '' ? null : Number(particulars.periodHours);
   const particularsPeriodInvalid = particularsPeriod !== null && (!Number.isInteger(particularsPeriod) || particularsPeriod < 1 || particularsPeriod > endCapHours);
@@ -385,40 +390,82 @@ const OfficerNoiseControlPage: React.FC = () => {
     } catch { /* GPS evidence is retained even when address resolution is unavailable. */ }
   });
 
+  useEffect(() => () => {
+    if (imagePreviewUrl) URL.revokeObjectURL(imagePreviewUrl);
+  }, [imagePreviewUrl]);
+
+  const captureEvidence = async (event: React.ChangeEvent<HTMLInputElement>) => {
+    const file = event.target.files?.[0];
+    if (!file) return;
+    setPreparingImage(true);
+    setError(null);
+    try {
+      if (imagePreviewUrl) URL.revokeObjectURL(imagePreviewUrl);
+      setImagePreviewUrl(URL.createObjectURL(file));
+      setImageBase64(await imageFileToBase64(file));
+    } catch (captureError) {
+      setImagePreviewUrl(null);
+      setImageBase64(null);
+      setError(captureError instanceof Error ? captureError.message : 'Noise evidence photo could not be prepared.');
+    } finally {
+      setPreparingImage(false);
+    }
+  };
+
+  const clearEvidence = () => {
+    if (imagePreviewUrl) URL.revokeObjectURL(imagePreviewUrl);
+    setImagePreviewUrl(null);
+    setImageBase64(null);
+    if (fileInputRef.current) fileInputRef.current.value = '';
+  };
+
   const handleSubmit = (e: React.FormEvent) => {
     e.preventDefault();
-    if (!profile?.id || !profile?.organizationId) return;
+    if (!profile?.id || !profile?.organizationId || !imageBase64) return;
     const submittedAction = form.action_taken;
     void runCommand('submit', async () => {
-      // ATLAS WRITES: submit_officer_noise_assessment
-      const { data, error: err } = await supabase.rpc('submit_officer_noise_assessment', {
-        p_client_request_id: crypto.randomUUID(),
-        p_assessed_at: new Date().toISOString(),
-        p_noise_source: form.noise_source.trim(),
-        p_noise_source_address: form.noise_source_address.trim(),
-        p_action_taken: form.action_taken,
-        p_volume_score: Number(volumeScore) || 0,
-        p_time_score: volumeScore === 0 ? 1 : currentTimeScore(),
-        p_tone_score: volumeScore === 0 ? 0 : Number(form.tone_score),
-        p_notice_number: form.notice_number.trim() || null,
-        p_end_number: form.end_number.trim() || null,
-        p_occupant_name: form.occupant_name.trim() || null,
-        p_police_requested: form.police_requested,
-        p_police_present: form.police_present,
-        p_scene_description: form.scene_description.trim() || null,
-        p_follow_up_required: form.follow_up_required,
-        p_shift_id: activeShift?.id ?? selectedJob?.shift_id ?? null,
-        p_dispatch_job_id: selectedJob?.id ?? null,
-        p_gps_lat: gps.lat,
-        p_gps_lng: gps.lng,
+      // ATLAS WRITES: submit-noise-assessment
+      const { data, error: err } = await supabase.functions.invoke<{
+        assessment_id?: string;
+        matrix_total?: number;
+        review_status?: string;
+        classification?: { classification?: string };
+        error?: string;
+      }>('submit-noise-assessment', {
+        body: {
+          client_request_id: crypto.randomUUID(),
+          assessed_at: new Date().toISOString(),
+          noise_source: form.noise_source.trim(),
+          noise_source_address: form.noise_source_address.trim(),
+          action_taken: form.action_taken,
+          volume_score: Number(volumeScore) || 0,
+          time_score: volumeScore === 0 ? 1 : currentTimeScore(),
+          tone_score: volumeScore === 0 ? 0 : Number(form.tone_score),
+          notice_number: form.notice_number.trim() || null,
+          end_number: form.end_number.trim() || null,
+          occupant_name: form.occupant_name.trim() || null,
+          police_requested: form.police_requested,
+          police_present: form.police_present,
+          scene_description: form.scene_description.trim() || null,
+          follow_up_required: form.follow_up_required,
+          shift_id: activeShift?.id ?? selectedJob?.shift_id ?? null,
+          dispatch_job_id: selectedJob?.id ?? null,
+          gps_lat: gps.lat,
+          gps_lng: gps.lng,
+          image_base64: imageBase64,
+        },
       });
-      const receipt = (data as Array<{ id: string }> | null)?.[0];
-      if (err || !receipt?.id) throw err ?? new Error('Noise assessment receipt was not confirmed.');
+      if (err || data?.error || !data?.assessment_id) {
+        throw err ?? new Error(data?.error || 'Noise assessment receipt was not confirmed.');
+      }
       setForm(EMPTY_FORM);
       setGps(IDLE_GPS);
+      clearEvidence();
       setShowForm(false);
-      if (DIRECTION_ACTIONS.includes(submittedAction) && selectedJob) setParticulars({ ...EMPTY_PARTICULARS, assessmentId: receipt.id });
-      setNotice(submittedAction === 'direction_notice' ? 'Assessment recorded. The excessive noise direction binds this place for the period in the council rule (statutory maximum 8 days). Now record how it was given.' : 'Assessment recorded.');
+      if (DIRECTION_ACTIONS.includes(submittedAction) && selectedJob) setParticulars({ ...EMPTY_PARTICULARS, assessmentId: data.assessment_id });
+      setNotice(submittedAction === 'direction_notice'
+        ? 'Assessment and photo evidence recorded. The excessive noise direction binds this place for the council-rule period (statutory maximum 8 days). Now record how it was given.'
+        : `Assessment and photo evidence recorded. Bob photo candidate: ${data.classification?.classification ?? 'unavailable'}; human review required. The officer matrix remains authoritative.`);
       await Promise.all([loadAssessments(), loadJobDetail(selectedJob)]);
     });
   };
@@ -616,6 +663,13 @@ const OfficerNoiseControlPage: React.FC = () => {
 
       {showForm && (
         <form className="assessment-form" onSubmit={handleSubmit}>
+          <div className="form-group noise-evidence-capture">
+            <label htmlFor="noise-evidence-photo">Noise source evidence photo</label>
+            <p className="form-hint">Required for custody and source/equipment review. A photo cannot measure noise or determine whether it is excessive.</p>
+            <input ref={fileInputRef} id="noise-evidence-photo" type="file" accept="image/*" capture="environment" onChange={(event) => void captureEvidence(event)} />
+            {preparingImage && <p role="status">Preparing private evidence...</p>}
+            {imagePreviewUrl && <div className="noise-evidence-preview"><img src={imagePreviewUrl} alt="Noise source evidence preview" /><button type="button" className="btn btn-sm btn-secondary" onClick={clearEvidence}>Remove photo</button></div>}
+          </div>
           <div className="form-row">
             <div className="form-group">
               <label htmlFor="noise-decibels">Decibel reading</label>
