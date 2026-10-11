@@ -41,11 +41,13 @@ interface BobMessage {
   metadata: Record<string, unknown>;
 }
 
+type BobMode = 'operations' | 'builder';
+
 interface BobPanelProps {
   open: boolean;
   onClose: () => void;
   context?: Record<string, unknown>;
-  mode?: 'operations' | 'builder';
+  mode?: BobMode;
   launchPrompt?: string | null;
 }
 
@@ -770,17 +772,33 @@ export const BobPanel: React.FC<BobPanelProps> = ({ open, onClose, context, mode
 
   if (!open) return null;
 
-  const quickActions = mode === 'builder'
-    ? [
-      { label: 'Inspect job', prompt: 'Inspect the selected Builder job and propose the next implementation step.' },
-      { label: 'Plan implementation', prompt: 'Create an implementation plan with affected files, verification steps, and unknowns.' },
-      { label: 'Review evidence', prompt: 'Review the current artifacts and explain the next safe repair or build action.' },
-    ]
-    : [
-      { label: 'Summarize context', prompt: 'Summarize the current context and identify the next safe action.' },
-      { label: 'Plan work', prompt: 'Create a step-by-step plan with unknowns and approval gates.' },
-      { label: 'Review risk', prompt: 'Check this surface for risks, missing evidence, and tests.' },
-    ];
+  const modeConfig: Record<BobMode, { label: string; badge: string; headline: string; subhead: string; placeholder: string; quickActions: Array<{ label: string; prompt: string }> }> = {
+    operations: {
+      label: 'Bob Operations',
+      badge: 'Governed session',
+      headline: 'What are we working on?',
+      subhead: 'Ask for a plan, a draft, a check on live records, or drop files for Bob to read.',
+      placeholder: 'Ask Bob to plan, inspect, explain, or prepare a proposal',
+      quickActions: [
+        { label: 'Summarize context', prompt: 'Summarize the current context and identify the next safe action.' },
+        { label: 'Plan work', prompt: 'Create a step-by-step plan with unknowns and approval gates.' },
+        { label: 'Review risk', prompt: 'Check this surface for risks, missing evidence, and tests.' },
+      ],
+    },
+    builder: {
+      label: 'Bob Builder',
+      badge: 'Governed build lane',
+      headline: 'What should we build?',
+      subhead: 'Describe the change and Bob plans, implements, verifies, and opens a draft pull request for review.',
+      placeholder: 'Describe what you want to build, change, or fix',
+      quickActions: [
+        { label: 'Inspect job', prompt: 'Inspect the selected Builder job and propose the next implementation step.' },
+        { label: 'Plan implementation', prompt: 'Create an implementation plan with affected files, verification steps, and unknowns.' },
+        { label: 'Review evidence', prompt: 'Review the current artifacts and explain the next safe repair or build action.' },
+      ],
+    },
+  };
+  const currentModeConfig = modeConfig[mode] ?? modeConfig.operations;
 
   return (
     <div
@@ -793,7 +811,7 @@ export const BobPanel: React.FC<BobPanelProps> = ({ open, onClose, context, mode
       onDrop={(event) => { event.preventDefault(); setDragging(false); addFiles(event.dataTransfer.files); }}
     >
       <header className="bob-panel-header">
-        <div className="bob-panel-identity"><span><Bot size={18} /></span><div><strong>{mode === 'builder' ? 'Bob Builder' : 'Bob Operations'}</strong><small><ShieldCheck size={12} /> Governed session</small></div></div>
+        <div className="bob-panel-identity"><span><Bot size={18} /></span><div><strong>{currentModeConfig.label}</strong><small><ShieldCheck size={12} /> {currentModeConfig.badge}</small></div></div>
         <div className="bob-panel-header-actions">
           {!sidebarOpen && <button type="button" className="bob-icon-button" onClick={() => void startNewConversation()} disabled={loading || sending} title="New chat" aria-label="New chat"><Plus size={17} /></button>}
           <button type="button" className="bob-icon-button" onClick={() => setSidebarOpen(current => !current)} title={sidebarOpen ? 'Hide sessions' : 'Show sessions'} aria-label={sidebarOpen ? 'Hide sessions' : 'Show sessions'} aria-expanded={sidebarOpen}><PanelLeft size={17} /></button>
@@ -854,10 +872,10 @@ export const BobPanel: React.FC<BobPanelProps> = ({ open, onClose, context, mode
             ) : messages.length === 0 ? (
               <div className="bob-empty-state">
                 <Bot size={24} />
-                <strong>{mode === 'builder' ? 'What should we build?' : 'What are we working on?'}</strong>
-                <p>{mode === 'builder' ? 'Describe the change and Bob plans, implements, verifies, and opens a draft pull request for review.' : 'Ask for a plan, a draft, a check on live records, or drop files for Bob to read.'}</p>
+                <strong>{currentModeConfig.headline}</strong>
+                <p>{currentModeConfig.subhead}</p>
                 <div className="bob-quick-actions" aria-label="Quick actions">
-                  {quickActions.map(action => (
+                  {currentModeConfig.quickActions.map(action => (
                     <button key={action.label} type="button" onClick={() => { setInput(action.prompt); focusComposer(); }} disabled={sending}>{action.label}</button>
                   ))}
                   {mode === 'operations' && <>
@@ -910,7 +928,7 @@ export const BobPanel: React.FC<BobPanelProps> = ({ open, onClose, context, mode
               ref={composerRef}
               value={input}
               onChange={(e) => setInput(e.target.value)}
-              placeholder={mode === 'builder' ? 'Describe what you want to build, change, or fix' : 'Ask Bob to plan, inspect, explain, or prepare a proposal'}
+              placeholder={currentModeConfig.placeholder}
               disabled={sending || !conversationId}
               rows={3}
             />

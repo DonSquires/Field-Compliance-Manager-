@@ -492,6 +492,24 @@ gap is therefore explicit: historical rows remain usable as legacy operational
 records but cannot be represented as hash-backed photo evidence, and no missing
 complaint place, media or envelope is fabricated.
 
+System-wide Bob acceptance gate shipped 2026-10-11:
+
+- **Before:** Bob's domain checks existed as separate suites, so a plate guard,
+  CCTV adapter, Desktop V2 rule or Builder ceiling could regress without one
+  named release check proving the whole agent boundary.
+- **During:** `npm run bob:enterprise-readiness` now executes the original
+  `JJJ739`/`11739` regression directly, verifies every declared implementation
+  and test path, and runs representative cross-domain tests. The inventory
+  records each subsystem's authority boundary and present state.
+- **After:** the current result is five implemented domains, three partial and
+  two gaps. Access-control recognition has no shared perception adapter, Atlas
+  exercise/calibration remains absent, parking/freedom-camping projection,
+  Desktop V2 offline receipts/reconciliation and cockpit UX are partial. The
+  strict command fails while those declarations remain, so the repository
+  cannot honestly claim complete enterprise Bob readiness yet. Grandmaster is
+  retained as an authenticated server-owned rank, not exposed as an
+  ungoverned client-selected Bob personality.
+
 **Gate:** live `bob_messages` show no context-losing fallbacks; a Builder job
 runs implement → verify → repair without human touch and stops cleanly at
 `release_ready`; egress proven per rank; Atlas `exercised` is populated from

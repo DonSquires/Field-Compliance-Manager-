@@ -387,6 +387,39 @@ touch inside the worker, but every protected action remains blocked.
 Gate: no production-readiness or accuracy claim is made without a versioned
 evaluation set and reproducible results.
 
+### Enterprise acceptance command
+
+`npm run bob:enterprise-readiness` is the cross-domain Bob release gate. It:
+
+- executes the original `JJJ739` versus `11739` failure as a direct acceptance
+  check, including structured consensus, generated prose and proposed
+  canonical entities;
+- verifies that every declared implementation, authority document and
+  acceptance test still exists;
+- runs representative tests across Guardian/orchestration, document identity,
+  CCTV/ALPR, enhancement, person/face, vehicle attributes, parking/freedom
+  camping, access, smoke/noise/biosecurity, Desktop V2 and Builder/self-heal;
+  and
+- reports the present implementation state without promoting a known gap to a
+  success-shaped result.
+
+The machine-readable inventory and runner live in
+`scripts/bob-enterprise-acceptance.mjs`. Its current result is five implemented
+domains, three partial domains and two explicit gaps. Partial work is:
+
+1. parking/freedom-camping shared-envelope projection and calibrated multi-visit
+   ambiguity receipts;
+2. Desktop V2 signed local model manifests, offline receipts and conflict
+   reconciliation; and
+3. consistent who-is-flying, takeback and result-in-habitat UX across modules.
+
+The declared gaps are the access-control perception adapter and
+invocation-derived exercise/calibration dashboards. `npm run
+bob:enterprise-readiness:strict` therefore fails intentionally until every
+declared partial/gap has acceptance evidence. Grandmaster remains a
+server-owned caller rank under ONE BOB; it is not a client-selectable BobPanel
+mode and cannot grant Builder or operational authority.
+
 ## 11. Non-negotiable acceptance rules
 
 - Original evidence is authoritative and immutable.
