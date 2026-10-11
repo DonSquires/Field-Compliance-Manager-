@@ -282,12 +282,17 @@ async function startHumanTestRun({ mode, scope, requestedBy }) {
         artifactDir,
         profile: mode === 'live' ? 'human-qa-live' : 'human-qa',
         timeoutMs: Math.min(Math.max(Number(process.env.BOB_HUMAN_TEST_TIMEOUT_MS) || 45 * 60_000, 5 * 60_000), 60 * 60_000),
-        memory: process.env.BOB_HUMAN_TEST_MEMORY || '2g',
-        cpus: process.env.BOB_HUMAN_TEST_CPUS || '2',
-        pidsLimit: Number(process.env.BOB_HUMAN_TEST_PIDS_LIMIT || 256),
-        environment: {
-          HUMAN_TEST_LIVE: mode === 'live' ? 'true' : 'false'
-        }
+        memory: process.env.BOB_HUMAN_TEST_MEMORY || (mode === 'live' ? '2g' : '4g'),
+        cpus: process.env.BOB_HUMAN_TEST_CPUS || (mode === 'live' ? '2' : '4'),
+        pidsLimit: Number(process.env.BOB_HUMAN_TEST_PIDS_LIMIT || (mode === 'live' ? 256 : 512)),
+        environment: mode === 'live'
+          ? {
+              HUMAN_TEST_LIVE: 'true',
+              HUMAN_TEST_BASE_URL: process.env.HUMAN_TEST_BASE_URL,
+              GRANDMASTER_TEST_EMAIL: process.env.GRANDMASTER_TEST_EMAIL,
+              GRANDMASTER_TEST_PASSWORD: process.env.GRANDMASTER_TEST_PASSWORD
+            }
+          : { HUMAN_TEST_LIVE: 'false' }
       });
       run.status = result.status;
       run.exit_code = result.exitCode;

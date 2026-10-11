@@ -102,21 +102,39 @@ test('full page audit mounts disposable browser dependencies', () => {
     profile: 'full-page-audit'
   });
   assert.ok(args.includes('--network=none'));
-  assert.ok(args.includes('--tmpfs=/workspace/apps/web/node_modules:rw,exec,nosuid,size=512m,uid=1000,gid=1000,mode=0755'));
+  assert.ok(args.includes('--tmpfs=/tmp:rw,noexec,nosuid,size=1024m'));
+  assert.ok(args.includes('--tmpfs=/workspace/apps/web/node_modules:rw,exec,nosuid,size=768m,uid=1000,gid=1000,mode=0755'));
   assert.equal(args.some(value => value.includes('docker.sock')), false);
 });
 
-test('human QA mode is explicitly forwarded to the isolated worker', () => {
+test('human QA forwards only named environment variables without putting values in process arguments', () => {
   const args = dockerArguments({
     image: 'fcm/bob-worker:test',
     sourceDir: '/tmp/source',
     artifactDir: '/tmp/artifacts',
     profile: 'human-qa-live',
-    environment: { HUMAN_TEST_LIVE: 'true', HUMAN_TEST_BASE_URL: 'https://example.test' }
+    environment: { HUMAN_TEST_LIVE: 'true', HUMAN_TEST_BASE_URL: 'https://example.test', GRANDMASTER_TEST_PASSWORD: 'not-in-argv' }
   });
-  assert.ok(args.includes('HUMAN_TEST_LIVE=true'));
-  assert.ok(args.includes('HUMAN_TEST_BASE_URL=https://example.test'));
+  assert.deepEqual(args.filter((value, index) => args[index - 1] === '--env'), [
+    'HUMAN_TEST_LIVE', 'HUMAN_TEST_BASE_URL', 'GRANDMASTER_TEST_PASSWORD'
+  ]);
+  assert.equal(args.some(value => value.includes('https://example.test') || value.includes('not-in-argv')), false);
   assert.ok(args.includes('--network=bridge'));
+});
+
+test('fixture human QA does not receive live identity variables', () => {
+  const args = dockerArguments({
+    image: 'fcm/bob-worker:test',
+    sourceDir: '/tmp/source',
+    artifactDir: '/tmp/artifacts',
+    profile: 'human-qa',
+    environment: { HUMAN_TEST_LIVE: 'false' }
+  });
+  assert.ok(args.includes('HUMAN_TEST_LIVE'));
+  assert.equal(args.includes('HUMAN_TEST_BASE_URL'), false);
+  assert.equal(args.includes('GRANDMASTER_TEST_EMAIL'), false);
+  assert.equal(args.includes('GRANDMASTER_TEST_PASSWORD'), false);
+  assert.ok(args.includes('--tmpfs=/tmp:rw,noexec,nosuid,size=1024m'));
 });
 
 test('frontend verification executes only in disposable tmpfs while source remains read-only', () => {

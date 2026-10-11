@@ -36,6 +36,7 @@ function dockerArguments({ image, sourceDir, artifactDir, profile, memory = '2g'
   const command = workerCommand(profile);
   const sourceMount = hostPath(sourceDir, env);
   const artifactMount = hostPath(artifactDir, env);
+  const browserProfile = profile === 'human-qa' || profile === 'human-qa-live' || profile === 'full-page-audit';
   const args = [
     'run', '--rm', '--init',
     profile === 'human-qa-live' ? '--network=bridge' : '--network=none',
@@ -46,15 +47,15 @@ function dockerArguments({ image, sourceDir, artifactDir, profile, memory = '2g'
     `--memory=${memory}`,
     `--cpus=${cpus}`,
     `--pids-limit=${pidsLimit}`,
-    '--tmpfs=/tmp:rw,noexec,nosuid,size=64m',
+    `--tmpfs=/tmp:rw,noexec,nosuid,size=${browserProfile ? '1024m' : '64m'}`,
   ];
   if (profile === 'frontend-verify' || profile === 'backend-verify') {
     args.push(`--tmpfs=/work:rw,exec,nosuid,size=${profile === 'frontend-verify' ? '2048m' : '1024m'}`);
   }
-  if (profile === 'human-qa' || profile === 'human-qa-live' || profile === 'full-page-audit') {
-    args.push('--tmpfs=/workspace/apps/web/node_modules:rw,exec,nosuid,size=512m,uid=1000,gid=1000,mode=0755');
+  if (browserProfile) {
+    args.push('--tmpfs=/workspace/apps/web/node_modules:rw,exec,nosuid,size=768m,uid=1000,gid=1000,mode=0755');
     for (const key of ['HUMAN_TEST_LIVE', 'HUMAN_TEST_BASE_URL', 'GRANDMASTER_TEST_EMAIL', 'GRANDMASTER_TEST_PASSWORD']) {
-      if (environment[key]) args.push('--env', `${key}=${environment[key]}`);
+      if (environment[key]) args.push('--env', key);
     }
   }
   args.push(
@@ -68,15 +69,13 @@ function dockerArguments({ image, sourceDir, artifactDir, profile, memory = '2g'
 
 function executeWorker(options, { spawnImpl = spawn } = {}) {
   const timeoutMs = options.timeoutMs || 10 * 60 * 1000;
-  const args = dockerArguments({ ...options, environment: {
-    HUMAN_TEST_LIVE: process.env.HUMAN_TEST_LIVE,
-    HUMAN_TEST_BASE_URL: process.env.HUMAN_TEST_BASE_URL,
-    GRANDMASTER_TEST_EMAIL: process.env.GRANDMASTER_TEST_EMAIL,
-    GRANDMASTER_TEST_PASSWORD: process.env.GRANDMASTER_TEST_PASSWORD,
-    ...(options.environment || {})
-  } });
+  const environment = options.environment || {};
+  const args = dockerArguments({ ...options, environment });
   return new Promise((resolve, reject) => {
-    const child = spawnImpl('docker', args, { stdio: ['ignore', 'pipe', 'pipe'] });
+    const child = spawnImpl('docker', args, {
+      stdio: ['ignore', 'pipe', 'pipe'],
+      env: { ...process.env, ...environment }
+    });
     let stdout = '';
     let stderr = '';
     let timedOut = false;
