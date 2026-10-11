@@ -81,7 +81,7 @@ test('shared classifier validates modules, shape, confidence, and identifies its
 
 test('smoke receipt RPC executes in caller context and retains structured classifier evidence', () => {
   assert.match(smokeSubmit, /global: \{ headers: \{ Authorization: authorization \} \}/);
-  assert.match(smokeSubmit, /rpc\('submit_smoke_assessment_receipt'/);
+  assert.match(smokeSubmit, /rpc\('submit_smoke_assessment_receipt_v2'/);
   assert.match(smokeSubmit, /reasoning: classData\.reasoning/);
   assert.match(smokeSubmit, /prompt_version: classData\.prompt_version/);
 });

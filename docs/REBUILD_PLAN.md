@@ -437,6 +437,24 @@ legacy evidence link without a custody hash; two replay attempts both failed
 closed as `missing_source_hash`, with no fabricated envelope. Smoke, noise and
 other vertical-module adapters remain.
 
+Phase C smoke-photo slice shipped 2026-10-11: before capture, an officer must
+select the source place, confirm the observed source and provide any notice
+number required by the chosen legal action. During capture, the caller-context
+receipt preserves notes and structured model provenance while the service-only
+projection creates advisory visible-source, visual-severity and
+visibility-impact candidates only from hash-backed evidence. After capture,
+photo classification, legal/operational action and workflow review remain
+separate attributable decisions; machine inference cannot establish a breach,
+notice, legal basis or closure. The responsive oversight surface shows
+short-lived private evidence, custody, officer notes, confidence and model
+provenance, and desktop/mobile Chromium acceptance passed without browser
+errors. Production presently has four legacy assessments but no evidence links;
+two replay attempts for each returned `missing_evidence_link`, while a
+nonexistent assessment raised the missing-record guard. This contradicts the
+historical assumption that every assessment could be projected, so the records
+remain visible as a custody gap rather than receiving fabricated envelopes.
+Noise and other remaining vertical-module adapters remain.
+
 **Gate:** live `bob_messages` show no context-losing fallbacks; a Builder job
 runs implement → verify → repair without human touch and stops cleanly at
 `release_ready`; egress proven per rank; Atlas `exercised` is populated from
