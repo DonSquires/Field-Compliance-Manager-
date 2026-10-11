@@ -71,6 +71,14 @@ test('an explicit owner build request cannot stop at a prose plan after evidence
   const loop = chat.slice(chat.indexOf('const nextPlan = await callPlan('), chat.indexOf('// ASK halts the loop'));
   assert.match(loop, /explicitBuilderCreationRequest\(message\)/);
   assert.match(loop, /tool: 'create_builder_job'/);
-  assert.match(loop, /Evidence gathered before proposal:/);
-  assert.match(loop, /open only a draft pull request\. Do not merge or deploy\./);
+  assert.match(loop, /builderJobArgsFromEvidence\(message, loopSteps\)/);
+});
+
+test('an explicit owner build request cannot fall through to synthesis at the evidence step cap', () => {
+  const postLoop = chat.slice(chat.indexOf('// Step cap reached:'), chat.indexOf('// END REASONING LOOP'));
+  assert.match(postLoop, /LOOP_CONTINUABLE_READ_TOOLS\.has\(chosenTool\).*explicitBuilderCreationRequest\(message\)/s);
+  assert.match(postLoop, /chosenTool = 'create_builder_job'/);
+  assert.match(postLoop, /result = await dispatchTool\(chosenTool, args, decision\)/);
+  assert.match(chat, /Evidence gathered before proposal:/);
+  assert.match(chat, /open only a draft pull request\. Do not merge or deploy\./);
 });

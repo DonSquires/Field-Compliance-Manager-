@@ -7618,10 +7618,28 @@ serve(async (req)=>{
       const normalized = canon(text);
       if (!normalized) return false;
       if (/\b(?:plan only|explain only|review only|do not (?:create|open|start)|dont (?:create|open|start)|without (?:creating|opening|starting))\b/.test(normalized)) return false;
-      const asksForBuilder = /\b(?:builder(?: job)?|draft (?:pull request|pr)|self[- ]heal|app design\/build agent)\b/.test(normalized);
+      const asksForBuilder = /\b(?:builder(?: job)?|draft (?:pull request|pr)|self[- ]heal|app design(?:\/| )build agent)\b/.test(normalized);
       const asksForImplementation = /\b(?:build|implement|fix|repair|change|redesign|refactor|add|create)\b/.test(normalized);
       const namesBuildTarget = /\b(?:app|application|code|repository|repo|ui|ux|panel|page|component|function|test|accessibility)\b/.test(normalized);
       return asksForBuilder && asksForImplementation && namesBuildTarget;
+    };
+    const builderJobArgsFromEvidence = (text: string, evidenceSteps: Array<{ tool: string; result_summary: string }>) => {
+      const requestBrief = String(text ?? '').trim();
+      const firstSentence = requestBrief.replace(/\s+/g, ' ').split(/(?<=[.!?])\s/)[0];
+      const evidenceSummary = evidenceSteps
+        .map((step) => `${step.tool}: ${step.result_summary.slice(0, 500)}`)
+        .join('\n');
+      return {
+        title: (firstSentence || 'Implement the requested FCM change').slice(0, 160),
+        task_description: [
+          requestBrief,
+          '',
+          'Evidence gathered before proposal:',
+          evidenceSummary,
+          '',
+          'Acceptance: implement the requested bounded change, add focused tests, preserve existing behavior, run the relevant verification, and open only a draft pull request. Do not merge or deploy.'
+        ].join('\n').slice(0, 12000)
+      };
     };
     /** Dispatch a single tool and return { reply, meta }. Pure execution, no persistence. */ const dispatchTool = async (tool, toolArgs, d)=>{
       // Geofence carry-forward (!752): if the planner chose propose_freedom_camping_zone
@@ -10721,26 +10739,11 @@ serve(async (req)=>{
         // after Bob has gathered repository or Atlas evidence. Convert only that
         // premature answer into the existing two-turn Builder proposal.
         if (caps.tier === 'admiral' && next.normAction === 'answer' && explicitBuilderCreationRequest(message)) {
-          const requestBrief = String(message ?? '').trim();
-          const firstSentence = requestBrief.replace(/\s+/g, ' ').split(/(?<=[.!?])\s/)[0];
-          const evidenceSummary = loopSteps
-            .map((step) => `${step.tool}: ${step.result_summary.slice(0, 500)}`)
-            .join('\n');
           nextDecision = {
             ...nextDecision,
             action: 'use_tool',
             tool: 'create_builder_job',
-            args: {
-              title: (firstSentence || 'Implement the requested FCM change').slice(0, 160),
-              task_description: [
-                requestBrief,
-                '',
-                'Evidence gathered before proposal:',
-                evidenceSummary,
-                '',
-                'Acceptance: implement the requested bounded change, add focused tests, preserve existing behavior, run the relevant verification, and open only a draft pull request. Do not merge or deploy.'
-              ].join('\n').slice(0, 12000)
-            },
+            args: builderJobArgsFromEvidence(message, loopSteps),
             reasoning: nextDecision.reasoning ?? 'Repository and Atlas inspection completed; prepare the governed Builder proposal requested by the owner.'
           };
           next = parsePlanDecision(nextDecision);
@@ -11091,6 +11094,30 @@ serve(async (req)=>{
           result_summary: s.result_summary
         }));
       result.meta.loop_step_count = stepCount;
+      // A step-cap or anti-repeat halt is not permission to discard an explicit
+      // owner request to build. After evidence gathering, enter the same
+      // governed proposal path instead of synthesising another future-tense
+      // recommendation. This still returns before job creation for confirmation.
+      if (caps.tier === 'admiral' && chosenTool && LOOP_CONTINUABLE_READ_TOOLS.has(chosenTool) && explicitBuilderCreationRequest(message)) {
+        const proposalArgs = builderJobArgsFromEvidence(message, loopSteps);
+        decision = {
+          ...decision,
+          action: 'use_tool',
+          tool: 'create_builder_job',
+          args: proposalArgs,
+          reasoning: decision.reasoning ?? 'Evidence gathering completed; prepare the governed Builder proposal requested by the owner.'
+        };
+        chosenTool = 'create_builder_job';
+        args = proposalArgs;
+        result = await dispatchTool(chosenTool, args, decision);
+        result.meta.loop_steps = loopSteps.map((s)=>({
+            step: s.step,
+            tool: s.tool,
+            outcome: s.outcome,
+            result_summary: s.result_summary
+          }));
+        result.meta.loop_step_count = stepCount;
+      }
     }
     // ══════════════════════════════════════════════════════════════════════════
     // END REASONING LOOP
