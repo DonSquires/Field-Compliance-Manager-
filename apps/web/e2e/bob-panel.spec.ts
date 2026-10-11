@@ -1,5 +1,5 @@
 import { expect, test } from '@playwright/test';
-import { installSupabaseFixtures, monitorBrowserErrors, signInAsAdmin } from './fixtures';
+import { installSupabaseFixtures, monitorBrowserErrors, signInAsAdmin, signInAsOfficer } from './fixtures';
 
 test.beforeEach(async ({ page }) => {
   await installSupabaseFixtures(page);
@@ -66,4 +66,20 @@ test('administrator opens and dismisses the governed Bob workspace accessibly', 
   await expect(opener).toBeFocused();
   expect(await page.evaluate(() => document.documentElement.scrollWidth <= window.innerWidth)).toBe(true);
   expect(browserErrors, browserErrors.join('\n')).toEqual([]);
+});
+
+test('an officer can open and dismiss Bob from a standalone specialty module', async ({ page }) => {
+  await installSupabaseFixtures(page, { officerModules: ['freedom_camping'] });
+  await signInAsOfficer(page, '/modules/freedom_camping');
+  await expect(page.getByText('Freedom Camping', { exact: true })).toBeVisible();
+
+  const opener = page.getByRole('button', { name: 'Open Bob assistant' });
+  await opener.click();
+  const panel = page.getByLabel('Bob agent workspace');
+  await expect(page.getByRole('dialog', { name: 'Bob agent workspace' })).toBeVisible();
+  await expect(panel).toHaveAttribute('aria-modal', 'true');
+  await expect(panel.getByRole('button', { name: 'Close Bob' })).toBeFocused();
+  await page.keyboard.press('Escape');
+  await expect(panel).toBeHidden();
+  await expect(opener).toBeFocused();
 });
