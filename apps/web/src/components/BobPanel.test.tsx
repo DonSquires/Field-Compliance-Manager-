@@ -15,6 +15,7 @@ let attachmentHistory: Array<Record<string, unknown>> = [];
 let conversationList: Array<Record<string, unknown>> = [];
 let auditHistory: Array<Record<string, unknown>> = [];
 let governedActionHistory: Array<Record<string, unknown>> = [];
+let turnRunHistory: Array<Record<string, unknown>> = [];
 let profileRole = 'grand_master';
 
 vi.mock('../context/AuthContext', () => ({
@@ -50,6 +51,7 @@ describe('BobPanel', () => {
     conversationList = [];
     auditHistory = [];
     governedActionHistory = [];
+    turnRunHistory = [];
     profileRole = 'grand_master';
 
     mockFrom.mockImplementation((table: string) => {
@@ -120,6 +122,16 @@ describe('BobPanel', () => {
           limit: async () => ({ data: governedActionHistory, error: null }),
         };
         return { select: () => actionQuery };
+      }
+
+      if (table === 'bob_turn_runs') {
+        const runQuery = {
+          eq: () => runQuery,
+          in: () => runQuery,
+          order: () => runQuery,
+          limit: async () => ({ data: turnRunHistory, error: null }),
+        };
+        return { select: () => runQuery };
       }
 
       return {
@@ -193,6 +205,61 @@ describe('BobPanel', () => {
     expect(await screen.findByText('repo search')).toBeTruthy();
     expect(screen.getByText('Response confidence 80%')).toBeTruthy();
     expect(screen.getByText('Review the affected files before proposing a change.')).toBeTruthy();
+  });
+
+  it('restores an active durable turn when the conversation is reopened', async () => {
+    let resolveStatus: (value: { data: { turn_run: Record<string, unknown> }; error: null }) => void = () => undefined;
+    mockInvoke.mockImplementation((_name: string, options?: { body?: Record<string, unknown> }) => {
+      if (options?.body?.operation === 'status') {
+        return new Promise(resolve => { resolveStatus = resolve; });
+      }
+      return Promise.resolve({ data: null, error: null });
+    });
+    turnRunHistory = [{
+      request_id: '12345678-1234-4234-8234-123456789abc',
+      status: 'running',
+      started_at: '2026-10-11T04:00:00.000Z',
+      heartbeat_at: '2026-10-11T04:00:04.000Z',
+      completed_at: null,
+      error_code: null,
+    }];
+
+    render(<BobPanel open onClose={() => undefined} />);
+
+    expect(await screen.findByText('running')).toBeTruthy();
+    expect(screen.getByText(/Request 12345678/)).toBeTruthy();
+    expect(screen.getByRole('button', { name: 'Request cancellation' })).toBeTruthy();
+
+    messageHistory = [{
+      id: 'message-restored',
+      role: 'assistant',
+      content: 'Restored durable reply',
+      confidence: 0.9,
+      flagged: false,
+      created_at: '2026-10-11T04:00:08.000Z',
+      metadata: {},
+    }];
+    await act(async () => {
+      resolveStatus({
+        data: {
+          turn_run: {
+            ...turnRunHistory[0],
+            status: 'completed',
+            heartbeat_at: '2026-10-11T04:00:08.000Z',
+            completed_at: '2026-10-11T04:00:08.000Z',
+          },
+        },
+        error: null,
+      });
+    });
+
+    expect(await screen.findByText('Restored durable reply')).toBeTruthy();
+    expect(mockInvoke).toHaveBeenCalledWith('onspace-ai-chat', expect.objectContaining({
+      body: expect.objectContaining({ operation: 'status', request_id: '12345678-1234-4234-8234-123456789abc' }),
+    }));
+    expect(mockInvoke).not.toHaveBeenCalledWith('onspace-ai-chat', expect.objectContaining({
+      body: expect.objectContaining({ operation: 'enqueue' }),
+    }));
   });
 
   it('answers a clarifying question by clicking a supplied option instead of retyping it', async () => {

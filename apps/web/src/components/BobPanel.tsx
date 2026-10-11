@@ -289,6 +289,26 @@ export const BobPanel: React.FC<BobPanelProps> = ({ open, onClose, context, mode
     setSessions((data as BobSessionSummary[]) ?? []);
   }, [mode, profile?.organizationId, profile?.id]);
 
+  const loadActiveTurn = useCallback(async (convId: string) => {
+    const { data, error: runError } = await supabase
+      .from('bob_turn_runs')
+      .select('request_id, status, started_at, heartbeat_at, completed_at, error_code')
+      .eq('conversation_id', convId)
+      .in('status', ['queued', 'running', 'cancel_requested'])
+      .order('created_at', { ascending: false })
+      .limit(1);
+    if (runError) throw runError;
+
+    const restoredRun = (data as BobTurnRun[] | null)?.[0];
+    setActiveTurn(restoredRun ? {
+      requestId: restoredRun.request_id,
+      status: restoredRun.status,
+      message: '',
+      startedAt: restoredRun.started_at,
+      accepted: true,
+    } : null);
+  }, []);
+
   const selectSession = useCallback(async (convId: string) => {
     try {
       setLoading(true);
@@ -297,14 +317,15 @@ export const BobPanel: React.FC<BobPanelProps> = ({ open, onClose, context, mode
       setConversationId(convId);
       setPendingFiles([]);
 
-      const { data: history, error: historyErr } = await supabase
+      const historyResult = await supabase
         .from('bob_messages')
         .select('id, role, content, confidence, flagged, created_at, metadata')
         .eq('conversation_id', convId)
         .order('created_at', { ascending: true });
 
-      if (historyErr) throw historyErr;
-      setMessages((history as BobMessage[]) || []);
+      if (historyResult.error) throw historyResult.error;
+      setMessages((historyResult.data as BobMessage[]) || []);
+      await loadActiveTurn(convId);
       await loadAttachments(convId);
       await loadAuditEvents(convId);
       await loadGovernedActions(convId);
@@ -314,7 +335,7 @@ export const BobPanel: React.FC<BobPanelProps> = ({ open, onClose, context, mode
       setActivityPhase('idle');
       setLoading(false);
     }
-  }, [loadAttachments, loadAuditEvents, loadGovernedActions]);
+  }, [loadActiveTurn, loadAttachments, loadAuditEvents, loadGovernedActions]);
 
   const renameSession = useCallback(async (convId: string, title: string) => {
     const trimmed = title.trim();
@@ -435,6 +456,7 @@ export const BobPanel: React.FC<BobPanelProps> = ({ open, onClose, context, mode
 
       if (historyErr) throw historyErr;
       setMessages((history as BobMessage[]) || []);
+      await loadActiveTurn(convId);
       await loadAttachments(convId);
       await loadAuditEvents(convId);
       await loadGovernedActions(convId);
@@ -445,7 +467,7 @@ export const BobPanel: React.FC<BobPanelProps> = ({ open, onClose, context, mode
       setActivityPhase('idle');
       setLoading(false);
     }
-  }, [mode, profile?.organizationId, profile?.id, loadAttachments, loadAuditEvents, loadGovernedActions, loadSessions]);
+  }, [mode, profile?.organizationId, profile?.id, loadActiveTurn, loadAttachments, loadAuditEvents, loadGovernedActions, loadSessions]);
 
   useEffect(() => {
     if (open) loadConversation();

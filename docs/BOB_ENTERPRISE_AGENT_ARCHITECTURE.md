@@ -207,6 +207,9 @@ Desktop capability presence is not wiring, and wiring is not exercise.
   claims the queued run exactly once for background execution.
 - The client polls the durable run rather than holding one long HTTP request or
   blindly resending after a timeout.
+- Opening or reopening a conversation restores its newest queued, running or
+  cancellation-requested run and resumes polling without enqueueing duplicate
+  work.
 - Queued requests cancel immediately. Running requests use cooperative
   cancellation at planner and tool boundaries.
 - Completion replaces optimistic UI content from the canonical
