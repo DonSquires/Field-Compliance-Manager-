@@ -448,7 +448,11 @@ separate attributable decisions; machine inference cannot establish a breach,
 notice, legal basis or closure. The responsive oversight surface shows
 short-lived private evidence, custody, officer notes, confidence and model
 provenance, and desktop/mobile Chromium acceptance passed without browser
-errors. Production presently has four legacy assessments but no evidence links;
+errors. The mobile field surface now shows the captured image before submission,
+supports replace/remove, sends separate officer notes, names every outstanding
+requirement, uses glove-safe controls and repeats the machine-authority boundary
+before the officer confirms the source. Production presently has four legacy
+assessments but no evidence links;
 two replay attempts for each returned `missing_evidence_link`, while a
 nonexistent assessment raised the missing-record guard. This contradicts the
 historical assumption that every assessment could be projected, so the records

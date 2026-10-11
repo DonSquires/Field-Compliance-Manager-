@@ -14,10 +14,22 @@ test('mobile smoke control panel uses only the governed submit-smoke-assessment 
 
 test('mobile smoke control panel retains photo evidence and notice validation', () => {
   assert.match(source, /captureEvidencePhoto/);
+  assert.match(source, /<Image[\s\S]*Captured smoke evidence/);
+  assert.match(source, /Remove captured smoke evidence/);
   assert.match(source, /actionNeedsNotice.*noticeNumber/);
   assert.match(source, /Smoke assessment was not confirmed/);
   assert.match(source, /source_confirmed: sourceConfirmed/);
+  assert.match(source, /notes: notes\.trim\(\) \|\| null/);
   assert.match(source, /sourceConfirmed &&/);
+  assert.match(source, /Boolean\(sceneDescription\.trim\(\)\)/);
   assert.match(source, /'moderate'/);
   assert.doesNotMatch(source, /'medium'/);
+});
+
+test('mobile smoke control panel states machine authority and blocked requirements explicitly', () => {
+  assert.match(source, /cannot establish a breach, legal basis, notice, or enforcement action/);
+  assert.match(source, /Still needed:/);
+  assert.match(source, /accessibilityLiveRegion="polite"/);
+  assert.match(source, /accessibilityRole="checkbox"/);
+  assert.match(source, /minHeight: 44/);
 });

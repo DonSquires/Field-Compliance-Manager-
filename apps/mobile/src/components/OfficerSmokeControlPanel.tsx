@@ -1,5 +1,5 @@
 import { useRef, useState } from 'react';
-import { ActivityIndicator, Alert, Pressable, StyleSheet, Text, TextInput, View } from 'react-native';
+import { ActivityIndicator, Alert, Image, Pressable, StyleSheet, Text, TextInput, View } from 'react-native';
 import { captureEvidencePhoto } from '../lib/officerScan';
 import { supabase } from '../lib/supabase';
 
@@ -19,8 +19,10 @@ export function OfficerSmokeControlPanel({ shiftId }: Props) {
   const [actionTaken, setActionTaken] = useState<ActionTaken>('no_action');
   const [noticeNumber, setNoticeNumber] = useState('');
   const [sceneDescription, setSceneDescription] = useState('');
+  const [notes, setNotes] = useState('');
   const [followUpRequired, setFollowUpRequired] = useState(false);
   const [sourceConfirmed, setSourceConfirmed] = useState(false);
+  const [imageUri, setImageUri] = useState<string | null>(null);
   const [imageBase64, setImageBase64] = useState<string | null>(null);
   const [busy, setBusy] = useState(false);
   const requestId = useRef(crypto.randomUUID());
@@ -29,6 +31,7 @@ export function OfficerSmokeControlPanel({ shiftId }: Props) {
   const pickOrTakePhoto = async (source: 'camera' | 'library') => {
     try {
       const captured = await captureEvidencePhoto(source);
+      setImageUri(captured.uri);
       setImageBase64(captured.base64);
     } catch (err) {
       Alert.alert('Evidence photo error', err instanceof Error ? err.message : 'Photo evidence capture failed.');
@@ -38,9 +41,17 @@ export function OfficerSmokeControlPanel({ shiftId }: Props) {
   const actionNeedsNotice = actionTaken === 'abatement_notice' || actionTaken === 'infringement_notice';
 
   const valid = Boolean(address.trim()) &&
+    Boolean(sceneDescription.trim()) &&
     (!actionNeedsNotice || Boolean(noticeNumber.trim())) &&
     sourceConfirmed &&
     Boolean(imageBase64);
+  const outstanding = [
+    !address.trim() && 'observed address',
+    !sceneDescription.trim() && 'scene description',
+    !sourceConfirmed && 'source confirmation',
+    !imageBase64 && 'evidence photo',
+    actionNeedsNotice && !noticeNumber.trim() && 'notice number',
+  ].filter(Boolean) as string[];
 
   const submit = async () => {
     if (!supabase || !valid || !imageBase64) return;
@@ -65,6 +76,7 @@ export function OfficerSmokeControlPanel({ shiftId }: Props) {
           action_taken: actionTaken,
           notice_number: noticeNumber.trim() || null,
           scene_description: sceneDescription.trim() || null,
+          notes: notes.trim() || null,
           follow_up_required: followUpRequired,
           source_confirmed: sourceConfirmed,
           shift_id: shiftId,
@@ -87,8 +99,10 @@ export function OfficerSmokeControlPanel({ shiftId }: Props) {
       setComplaintAddress('');
       setNoticeNumber('');
       setSceneDescription('');
+      setNotes('');
       setFollowUpRequired(false);
       setSourceConfirmed(false);
+      setImageUri(null);
       setImageBase64(null);
       requestId.current = crypto.randomUUID();
       assessedAt.current = new Date().toISOString();
@@ -111,17 +125,40 @@ export function OfficerSmokeControlPanel({ shiftId }: Props) {
           <Text style={styles.title}>Smoke Complaint Assessment</Text>
 
           <Text style={styles.sectionLabel}>Smoke Evidence Photo</Text>
+          <Text style={styles.helpText}>
+            Required supporting evidence. Bob may describe visible smoke or a possible source, but cannot establish a breach, legal basis, notice, or enforcement action.
+          </Text>
+          {imageUri && (
+            <View style={styles.photoReceipt}>
+              <Image source={{ uri: imageUri }} accessibilityLabel="Captured smoke evidence" style={styles.photoPreview} />
+              <View style={styles.photoReceiptText}>
+                <Text style={styles.photoReceiptTitle}>Evidence photo ready</Text>
+                <Text style={styles.helpText}>It will be watermarked, hashed, and stored privately when submitted.</Text>
+              </View>
+              <Pressable
+                accessibilityRole="button"
+                accessibilityLabel="Remove captured smoke evidence"
+                onPress={() => {
+                  setImageUri(null);
+                  setImageBase64(null);
+                }}
+                style={styles.removePhoto}
+              >
+                <Text style={styles.removePhotoText}>Remove</Text>
+              </Pressable>
+            </View>
+          )}
           <View style={styles.options}>
-            <Pressable onPress={() => pickOrTakePhoto('camera')} style={[styles.option, Boolean(imageBase64) && styles.optionActive]}>
-              <Text style={styles.optionText}>{imageBase64 ? 'Photo Captured ✓' : 'Take Evidence Photo'}</Text>
+            <Pressable accessibilityRole="button" onPress={() => pickOrTakePhoto('camera')} style={[styles.option, Boolean(imageBase64) && styles.optionActive]}>
+              <Text style={styles.optionText}>{imageBase64 ? 'Replace with Camera' : 'Take Evidence Photo'}</Text>
             </Pressable>
-            <Pressable onPress={() => pickOrTakePhoto('library')} style={styles.option}>
-              <Text style={styles.optionText}>Choose from Gallery</Text>
+            <Pressable accessibilityRole="button" onPress={() => pickOrTakePhoto('library')} style={styles.option}>
+              <Text style={styles.optionText}>{imageBase64 ? 'Replace from Gallery' : 'Choose from Gallery'}</Text>
             </Pressable>
           </View>
 
-          <TextInput value={address} onChangeText={setAddress} placeholder="Observed smoke address *" placeholderTextColor="#718197" style={styles.input} />
-          <TextInput value={complaintAddress} onChangeText={setComplaintAddress} placeholder="Complainant address (if different)" placeholderTextColor="#718197" style={styles.input} />
+          <TextInput accessibilityLabel="Observed smoke address" value={address} onChangeText={setAddress} placeholder="Observed smoke address *" placeholderTextColor="#718197" style={styles.input} />
+          <TextInput accessibilityLabel="Complainant address" value={complaintAddress} onChangeText={setComplaintAddress} placeholder="Complainant address (if different)" placeholderTextColor="#718197" style={styles.input} />
 
           <Text style={styles.sectionLabel}>Smoke Source Type</Text>
           <View style={styles.options}>
@@ -160,20 +197,27 @@ export function OfficerSmokeControlPanel({ shiftId }: Props) {
           </View>
 
           {actionNeedsNotice && (
-            <TextInput value={noticeNumber} onChangeText={setNoticeNumber} placeholder="Abatement / Infringement Notice number *" placeholderTextColor="#718197" style={styles.input} />
+            <TextInput accessibilityLabel="Notice number" value={noticeNumber} onChangeText={setNoticeNumber} placeholder="Abatement / Infringement Notice number *" placeholderTextColor="#718197" style={styles.input} />
           )}
 
-          <TextInput value={sceneDescription} onChangeText={setSceneDescription} placeholder="Scene description / visibility / smell notes" placeholderTextColor="#718197" multiline style={[styles.input, styles.textarea]} />
+          <TextInput accessibilityLabel="Scene description" value={sceneDescription} onChangeText={setSceneDescription} placeholder="Scene description / visibility / smell *" placeholderTextColor="#718197" multiline style={[styles.input, styles.textarea]} />
+          <TextInput accessibilityLabel="Officer notes" value={notes} onChangeText={setNotes} placeholder="Officer notes / context for supervisor" placeholderTextColor="#718197" multiline style={[styles.input, styles.textarea]} />
 
-          <Pressable onPress={() => setSourceConfirmed((value) => !value)} style={[styles.followUp, sourceConfirmed && styles.optionActive]}>
+          <Text style={styles.helpText}>Confirm only when you personally established the visible source at this place.</Text>
+          <Pressable accessibilityRole="checkbox" accessibilityState={{ checked: sourceConfirmed }} onPress={() => setSourceConfirmed((value) => !value)} style={[styles.followUp, sourceConfirmed && styles.optionActive]}>
             <Text style={styles.optionText}>{sourceConfirmed ? 'Observed source confirmed ✓' : 'Confirm the observed source at this place'}</Text>
           </Pressable>
 
-          <Pressable onPress={() => setFollowUpRequired((v) => !v)} style={styles.followUp}>
+          <Pressable accessibilityRole="checkbox" accessibilityState={{ checked: followUpRequired }} onPress={() => setFollowUpRequired((v) => !v)} style={[styles.followUp, followUpRequired && styles.optionActive]}>
             <Text style={styles.optionText}>{followUpRequired ? '✓ Follow-up required' : 'No follow-up required'}</Text>
           </Pressable>
 
-          <Pressable disabled={!valid || busy} onPress={submit} style={[styles.submit, (!valid || busy) && styles.disabled]}>
+          {!valid && (
+            <Text accessibilityLiveRegion="polite" style={styles.requirements}>
+              Still needed: {outstanding.join(', ')}.
+            </Text>
+          )}
+          <Pressable accessibilityRole="button" accessibilityState={{ disabled: !valid || busy }} disabled={!valid || busy} onPress={submit} style={[styles.submit, (!valid || busy) && styles.disabled]}>
             {busy ? <ActivityIndicator color="#04211e" /> : <Text style={styles.submitText}>Submit Smoke Assessment</Text>}
           </Pressable>
         </View>
@@ -184,18 +228,26 @@ export function OfficerSmokeControlPanel({ shiftId }: Props) {
 
 const styles = StyleSheet.create({
   panel: { gap: 8 },
-  trigger: { minHeight: 42, alignItems: 'center', justifyContent: 'center', borderRadius: 5, borderWidth: 1, borderColor: '#3a5364' },
+  trigger: { minHeight: 44, alignItems: 'center', justifyContent: 'center', borderRadius: 5, borderWidth: 1, borderColor: '#3a5364' },
   triggerText: { color: '#a7cce7', fontSize: 13, fontWeight: '800' },
   form: { gap: 9, borderWidth: 1, borderColor: '#30485b', borderRadius: 8, backgroundColor: '#0b1926', padding: 12 },
   title: { color: '#eef6f7', fontSize: 17, fontWeight: '800' },
   sectionLabel: { color: '#88a2b5', fontSize: 12, fontWeight: '700', marginTop: 4 },
+  helpText: { color: '#aebdce', fontSize: 12, lineHeight: 17 },
+  photoReceipt: { gap: 9, borderWidth: 1, borderColor: '#3a5364', borderRadius: 8, backgroundColor: '#07111b', padding: 9 },
+  photoPreview: { width: '100%', height: 180, borderRadius: 6, backgroundColor: '#02070b', resizeMode: 'cover' },
+  photoReceiptText: { gap: 3 },
+  photoReceiptTitle: { color: '#eef6f7', fontSize: 13, fontWeight: '800' },
+  removePhoto: { minHeight: 44, alignItems: 'center', justifyContent: 'center', borderWidth: 1, borderColor: '#8f6570', borderRadius: 5 },
+  removePhotoText: { color: '#f1c7cf', fontSize: 12, fontWeight: '800' },
   options: { flexDirection: 'row', flexWrap: 'wrap', gap: 6 },
-  option: { minHeight: 34, alignItems: 'center', justifyContent: 'center', borderWidth: 1, borderColor: '#3a5364', borderRadius: 5, paddingHorizontal: 9 },
+  option: { minHeight: 44, alignItems: 'center', justifyContent: 'center', borderWidth: 1, borderColor: '#3a5364', borderRadius: 5, paddingHorizontal: 11 },
   optionActive: { borderColor: '#7dd3c7', backgroundColor: '#10302e' },
   optionText: { color: '#dce8eb', fontSize: 11, fontWeight: '700', textTransform: 'capitalize' },
   input: { minHeight: 42, borderWidth: 1, borderColor: '#3a5364', borderRadius: 5, color: '#eef6f7', padding: 9, textAlignVertical: 'top' },
   textarea: { minHeight: 70 },
-  followUp: { minHeight: 38, justifyContent: 'center' },
+  followUp: { minHeight: 44, justifyContent: 'center', borderWidth: 1, borderColor: '#3a5364', borderRadius: 5, paddingHorizontal: 11 },
+  requirements: { color: '#f2c979', fontSize: 12, lineHeight: 17 },
   submit: { minHeight: 44, alignItems: 'center', justifyContent: 'center', borderRadius: 5, backgroundColor: '#7dd3c7' },
   submitText: { color: '#04211e', fontSize: 13, fontWeight: '800' },
   disabled: { opacity: 0.45 },
