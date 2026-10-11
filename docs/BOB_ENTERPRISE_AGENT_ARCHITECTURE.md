@@ -226,6 +226,20 @@ Desktop capability presence is not wiring, and wiring is not exercise.
   remain scoped to the originating user, organization, conversation and
   workspace.
 
+### Page context, decisions, and Studio artifacts
+
+- Operations requests carry a capped allowlist of the current page, workflow
+  tab, selected agreement/place entities, and their IDs. Client-supplied context
+  remains descriptive and never grants rank, data access, or tool authority.
+- Clarifying and two-turn proposal messages persist selectable answer options.
+  A blocked action may also carry a safe relative in-app destination so the
+  user can open the correct verification workspace instead of retyping a route.
+- Studio displays only assistant messages explicitly marked as document or
+  diagram artifacts. Ordinary chat answers, errors, and blocked effects remain
+  in the transcript and cannot masquerade as RFQ, contract, or report drafts.
+- Artifact metadata records the Studio type, document kind, and sanitized page
+  context that grounded the request.
+
 ## 8. Self-heal and Grandmaster build loop
 
 Self-heal is evidence-led repair, not direct production mutation:

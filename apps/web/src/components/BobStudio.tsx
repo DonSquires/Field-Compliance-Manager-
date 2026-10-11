@@ -10,6 +10,7 @@ interface StudioMessage {
   role: 'user' | 'assistant' | 'system';
   content: string;
   created_at: string;
+  metadata?: Record<string, unknown>;
 }
 
 interface PerceptionEvidenceReceipt {
@@ -40,6 +41,10 @@ interface StudioAttachment {
 
 type StudioTab = 'document' | 'diagram' | 'media';
 type DocumentKind = 'capability_statement' | 'rfq_response' | 'employment_contract' | 'report_design' | 'custom_document';
+export interface StudioPromptContext {
+  artifactType: 'document' | 'diagram';
+  documentKind?: DocumentKind;
+}
 
 const DOCUMENT_PRESETS: Record<DocumentKind, { label: string; shortLabel: string; prompt: string; note: string }> = {
   capability_statement: {
@@ -113,7 +118,7 @@ function sourceVerification(attachment: StudioAttachment) {
 
 export function extractMermaidDiagrams(messages: StudioMessage[]) {
   return messages
-    .filter((message) => message.role === 'assistant')
+    .filter((message) => message.role === 'assistant' && message.metadata?.studio_artifact_type === 'diagram')
     .flatMap((message) => [...message.content.matchAll(/```mermaid\s*([\s\S]*?)```/gi)]
       .map((match, index) => ({ id: `${message.id}-${index}`, chart: match[1].trim(), createdAt: message.created_at })))
     .reverse();
@@ -128,7 +133,7 @@ export function BobStudio({
 }: {
   messages: StudioMessage[];
   attachments: StudioAttachment[];
-  onPrompt: (prompt: string) => void;
+  onPrompt: (prompt: string, context: StudioPromptContext) => void;
   onAttach: () => void;
   organizationId?: string | null;
 }) {
@@ -143,20 +148,25 @@ export function BobStudio({
   const [evidenceReceiptError, setEvidenceReceiptError] = useState<string | null>(null);
   const [notice, setNotice] = useState<string | null>(null);
 
-  const assistantMessages = useMemo(() => messages.filter((message) => message.role === 'assistant').slice().reverse(), [messages]);
+  const documentArtifacts = useMemo(() => messages
+    .filter((message) => message.role === 'assistant' && message.metadata?.studio_artifact_type === 'document')
+    .slice()
+    .reverse(), [messages]);
+  const activeDocuments = useMemo(() => documentArtifacts
+    .filter((message) => message.metadata?.studio_document_kind === documentKind), [documentArtifacts, documentKind]);
   const diagrams = useMemo(() => extractMermaidDiagrams(messages), [messages]);
   const mediaAttachments = useMemo(() => attachments.filter(isMediaAttachment), [attachments]);
   const sourceVerifications = useMemo(() => attachments.map(sourceVerification).filter(Boolean) as NonNullable<ReturnType<typeof sourceVerification>>[], [attachments]);
   const evidenceEnvelopeIds = useMemo(() => sourceVerifications.map((item) => item.envelopeId).filter(Boolean) as string[], [sourceVerifications]);
-  const selectedDocument = assistantMessages.find((message) => message.id === selectedMessageId) ?? assistantMessages[0] ?? null;
+  const selectedDocument = activeDocuments.find((message) => message.id === selectedMessageId) ?? activeDocuments[0] ?? null;
   const selectedDiagram = diagrams.find((diagram) => diagram.id === selectedDiagramId) ?? diagrams[0] ?? null;
   const selectedMedia = mediaAttachments.find((attachment) => attachment.id === selectedMediaId) ?? mediaAttachments[0] ?? null;
   const preset = DOCUMENT_PRESETS[documentKind];
 
   useEffect(() => {
-    if (selectedMessageId && assistantMessages.some((message) => message.id === selectedMessageId)) return;
-    setSelectedMessageId(assistantMessages[0]?.id ?? null);
-  }, [assistantMessages, selectedMessageId]);
+    if (selectedMessageId && activeDocuments.some((message) => message.id === selectedMessageId)) return;
+    setSelectedMessageId(activeDocuments[0]?.id ?? null);
+  }, [activeDocuments, selectedMessageId]);
 
   useEffect(() => {
     if (selectedDiagramId && diagrams.some((diagram) => diagram.id === selectedDiagramId)) return;
@@ -227,7 +237,7 @@ export function BobStudio({
   const startDocument = (kind: DocumentKind) => {
     setDocumentKind(kind);
     setTab('document');
-    onPrompt(DOCUMENT_PRESETS[kind].prompt);
+    onPrompt(DOCUMENT_PRESETS[kind].prompt, { artifactType: 'document', documentKind: kind });
   };
 
   const copyDocument = async () => {
@@ -253,7 +263,7 @@ export function BobStudio({
   };
 
   const tabs: Array<{ id: StudioTab; label: string; count: number }> = [
-    { id: 'document', label: 'Documents', count: assistantMessages.length },
+    { id: 'document', label: 'Documents', count: documentArtifacts.length },
     { id: 'diagram', label: 'Diagrams', count: diagrams.length },
     { id: 'media', label: 'Media', count: mediaAttachments.length },
   ];
@@ -300,8 +310,8 @@ export function BobStudio({
                 return <li key={`${item.fileName}-${item.documentKind}`}><strong>{item.fileName}</strong><span>{item.value ? <>Plate candidate <b>{item.value}</b> has OCR consensus, but the NZTA source still requires administrator comparison.</> : <>Plate is <b>not verified</b>{item.candidates.length ? `; OCR candidates: ${item.candidates.join(', ')}` : ''}. The draft must show [TO CONFIRM].</>}</span>{receipt && <small>Evidence receipt v{receipt.schema_version} · {receipt.status.replaceAll('_', ' ')} · field authority {plateField?.authority_state.replaceAll('_', ' ') ?? 'not recorded'}</small>}</li>;
               })}</ul>
             </section>}
-            {assistantMessages.length > 1 && <label className="bob-document-version"><span>Draft version</span><select value={selectedDocument?.id ?? ''} onChange={(event) => setSelectedMessageId(event.target.value)}>{assistantMessages.map((message) => <option key={message.id} value={message.id}>{new Date(message.created_at).toLocaleString([], { day: 'numeric', month: 'short', hour: '2-digit', minute: '2-digit' })}</option>)}</select></label>}
-            {selectedDocument ? <article className="bob-document-sheet"><BobMarkdown content={selectedDocument.content} /></article> : <div className="bob-studio-empty"><ClipboardList size={28} /><strong>Choose a document type to brief Bob.</strong><p>Attach the RFQ, contract, policy, report example, or source evidence first when the draft depends on existing text.</p><button type="button" onClick={() => onPrompt(preset.prompt)}>Brief Bob</button></div>}
+            {activeDocuments.length > 1 && <label className="bob-document-version"><span>Draft version</span><select value={selectedDocument?.id ?? ''} onChange={(event) => setSelectedMessageId(event.target.value)}>{activeDocuments.map((message) => <option key={message.id} value={message.id}>{new Date(message.created_at).toLocaleString([], { day: 'numeric', month: 'short', hour: '2-digit', minute: '2-digit' })}</option>)}</select></label>}
+            {selectedDocument ? <article className="bob-document-sheet"><BobMarkdown content={selectedDocument.content} /></article> : <div className="bob-studio-empty"><ClipboardList size={28} /><strong>No {preset.label.toLowerCase()} draft yet.</strong><p>Attach the RFQ, contract, policy, report example, or source evidence first when the draft depends on existing text.</p><button type="button" onClick={() => onPrompt(preset.prompt, { artifactType: 'document', documentKind })}>Brief Bob</button></div>}
           </section>
         </div>
       )}
@@ -309,10 +319,10 @@ export function BobStudio({
       {tab === 'diagram' && (
         <div className="bob-studio-diagram-layout">
           {selectedDiagram ? <>
-            {diagrams.length > 1 && <div className="bob-studio-version-row"><label><span>Diagram version</span><select value={selectedDiagram.id} onChange={(event) => setSelectedDiagramId(event.target.value)}>{diagrams.map((diagram) => <option key={diagram.id} value={diagram.id}>{new Date(diagram.createdAt).toLocaleString([], { day: 'numeric', month: 'short', hour: '2-digit', minute: '2-digit' })}</option>)}</select></label><button type="button" onClick={() => onPrompt('Create a revised Mermaid diagram from the latest draft. Return only one mermaid code block and preserve unknowns as named nodes.')}><GitBranch size={14} /> Revise</button></div>}
+            {diagrams.length > 1 && <div className="bob-studio-version-row"><label><span>Diagram version</span><select value={selectedDiagram.id} onChange={(event) => setSelectedDiagramId(event.target.value)}>{diagrams.map((diagram) => <option key={diagram.id} value={diagram.id}>{new Date(diagram.createdAt).toLocaleString([], { day: 'numeric', month: 'short', hour: '2-digit', minute: '2-digit' })}</option>)}</select></label><button type="button" onClick={() => onPrompt('Create a revised Mermaid diagram from the latest draft. Return only one mermaid code block and preserve unknowns as named nodes.', { artifactType: 'diagram' })}><GitBranch size={14} /> Revise</button></div>}
             <BobMermaidDiagram chart={selectedDiagram.chart} title="Bob generated diagram" />
             <details className="bob-diagram-source"><summary>Diagram source</summary><pre>{selectedDiagram.chart}</pre></details>
-          </> : <div className="bob-studio-empty"><GitBranch size={28} /><strong>No diagram yet.</strong><p>Ask Bob for a process map, accountability chart, site flow, data model, or operating sequence.</p><button type="button" onClick={() => onPrompt('Create a Mermaid diagram for the current context. Return only one mermaid code block. Use clear nodes, named decision points, and mark unknowns explicitly instead of inventing links.')}>Draft diagram</button></div>}
+          </> : <div className="bob-studio-empty"><GitBranch size={28} /><strong>No diagram yet.</strong><p>Ask Bob for a process map, accountability chart, site flow, data model, or operating sequence.</p><button type="button" onClick={() => onPrompt('Create a Mermaid diagram for the current context. Return only one mermaid code block. Use clear nodes, named decision points, and mark unknowns explicitly instead of inventing links.', { artifactType: 'diagram' })}>Draft diagram</button></div>}
         </div>
       )}
 

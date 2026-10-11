@@ -1,7 +1,7 @@
 import { readFileSync } from 'node:fs';
 import { resolve } from 'node:path';
 import { describe, expect, it, vi, beforeEach, afterEach } from 'vitest';
-import { act, fireEvent, render, screen, waitFor } from '@testing-library/react';
+import { act, fireEvent, render, screen, waitFor, within } from '@testing-library/react';
 import { BobPanel } from './BobPanel';
 import { extractMermaidDiagrams } from './BobStudio';
 
@@ -205,6 +205,28 @@ describe('BobPanel', () => {
     expect(await screen.findByText('repo search')).toBeTruthy();
     expect(screen.getByText('Response confidence 80%')).toBeTruthy();
     expect(screen.getByText('Review the affected files before proposing a change.')).toBeTruthy();
+  });
+
+  it('renders selectable recovery choices and a safe pre-seeded destination for blocked work', async () => {
+    messageHistory = [{
+      id: 'message-blocked',
+      role: 'assistant',
+      content: 'The laptop inventory requires owner access.',
+      confidence: null,
+      flagged: false,
+      created_at: '2026-10-11T06:00:00.000Z',
+      metadata: {
+        intent: 'effect_blocked_by_conductor',
+        answer_options: ['Use attached files instead', 'Explain the required owner access'],
+        navigation_actions: [{ label: 'Open document studio', path: '/admin/document-studio?sourceType=company&sourceId=org-1' }],
+      },
+    }];
+
+    render(<BobPanel open onClose={() => undefined} />);
+
+    expect(await screen.findByRole('button', { name: 'Use attached files instead' })).toBeTruthy();
+    expect(screen.getByRole('button', { name: 'Explain the required owner access' })).toBeTruthy();
+    expect(screen.getByRole('link', { name: 'Open document studio' }).getAttribute('href')).toBe('/admin/document-studio?sourceType=company&sourceId=org-1');
   });
 
   it('distinguishes a superseded reply from its append-only audit correction', async () => {
@@ -871,14 +893,55 @@ describe('BobPanel', () => {
 
     fireEvent.click(screen.getByRole('button', { name: /RFQ response/ }));
     expect(screen.getByPlaceholderText('Ask Bob to plan, inspect, explain, or prepare a proposal')).toHaveProperty('value', expect.stringContaining('Draft an RFQ response'));
+    fireEvent.click(screen.getByRole('button', { name: 'Send' }));
+    await waitFor(() => expect(mockInvoke).toHaveBeenCalledWith('onspace-ai-chat', expect.objectContaining({
+      body: expect.objectContaining({
+        context: expect.objectContaining({
+          studio_artifact_type: 'document',
+          studio_document_kind: 'rfq_response',
+        }),
+      }),
+    })));
   });
 
-  it('extracts Mermaid diagrams from Bob responses for studio rendering', () => {
+  it('shows only explicitly typed Studio artifacts instead of treating ordinary replies as drafts', async () => {
+    messageHistory = [
+      {
+        id: 'message-chat',
+        role: 'assistant',
+        flagged: false,
+        confidence: null,
+        created_at: '2026-09-02T05:59:00.000Z',
+        content: 'This is an ordinary chat answer.',
+        metadata: {},
+      },
+      {
+        id: 'message-rfq',
+        role: 'assistant',
+        flagged: false,
+        confidence: null,
+        created_at: '2026-09-02T06:00:00.000Z',
+        content: '# Grounded RFQ draft',
+        metadata: { studio_artifact_type: 'document', studio_document_kind: 'rfq_response' },
+      },
+    ];
+
+    render(<BobPanel open onClose={() => undefined} />);
+    fireEvent.click(await screen.findByLabelText('Open document studio'));
+
+    const studio = await screen.findByLabelText('Bob studio');
+    expect(within(studio).getByText('Grounded RFQ draft')).toBeTruthy();
+    expect(within(studio).queryByText('This is an ordinary chat answer.')).toBeNull();
+    expect(within(studio).getByRole('tab', { name: 'Documents 1' })).toBeTruthy();
+  });
+
+  it('extracts explicitly typed Mermaid diagrams from Bob responses for studio rendering', () => {
     const diagrams = extractMermaidDiagrams([{
       id: 'message-1',
       role: 'assistant',
       created_at: '2026-09-02T06:00:00.000Z',
       content: '### Flow\n\n```mermaid\nflowchart LR\n  Intake --> Review\n  Review --> Publish\n```',
+      metadata: { studio_artifact_type: 'diagram' },
     }]);
 
     expect(diagrams).toHaveLength(1);

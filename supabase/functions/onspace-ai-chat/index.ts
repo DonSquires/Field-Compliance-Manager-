@@ -160,7 +160,68 @@ function safeAgentWorkspaceContext(value) {
   const source = value && typeof value === 'object' && !Array.isArray(value) ? value : {};
   const text = (key, maximum = 200) => typeof source[key] === 'string' ? source[key].slice(0, maximum) : null;
   const agentMode = source.agent_mode === 'builder' ? 'builder' : 'operations';
-  if (agentMode !== 'builder') return { agent_mode: agentMode };
+  if (agentMode !== 'builder') {
+    const safeEntity = (value)=>{
+      if (!value || typeof value !== 'object' || Array.isArray(value)) return null;
+      const allowed = [
+        'id',
+        'name',
+        'title',
+        'status',
+        'type',
+        'module_key',
+        'client_name'
+      ];
+      return Object.fromEntries(allowed.flatMap((key)=>{
+        const raw = value[key];
+        if (typeof raw === 'string') return [
+          [
+            key,
+            raw.slice(0, 300)
+          ]
+        ];
+        if (typeof raw === 'number' && Number.isFinite(raw) || typeof raw === 'boolean') return [
+          [
+            key,
+            raw
+          ]
+        ];
+        return [];
+      }));
+    };
+    const safeEntityList = (key)=>Array.isArray(source[key]) ? source[key].slice(0, 10).map(safeEntity).filter(Boolean) : [];
+    return {
+      agent_mode: agentMode,
+      page: text('page', 100),
+      workspace: text('workspace', 120),
+      operating_model: text('operating_model', 200),
+      active_module: text('activeModule', 100),
+      officer_state: text('officerState', 80),
+      welfare_status: text('welfareStatus', 80),
+      crm_tab: text('crmTab', 80),
+      roster_tab: text('rosterTab', 80),
+      field_ops_sub_area: text('fieldOpsSubArea', 100),
+      reports_tab: text('reportsTab', 80),
+      organization_name: text('orgName', 200),
+      account_id: text('accountId', 80),
+      agreement_id: text('agreementId', 80),
+      ledger_id: text('ledgerId', 80),
+      location_id: text('locationId', 80),
+      site_id: text('siteId', 80),
+      zone_id: text('zoneId', 80),
+      work_unit_id: text('workUnitId', 80),
+      handoff_id: text('handoffId', 80),
+      module_gate_status: text('moduleGateStatus', 80),
+      agreement: safeEntity(source.agreement),
+      site: safeEntity(source.site),
+      zone: safeEntity(source.zone),
+      agreements: safeEntityList('agreements'),
+      sites: safeEntityList('sites'),
+      zones: safeEntityList('zones'),
+      studio_artifact_type: source.studio_artifact_type === 'document' || source.studio_artifact_type === 'diagram' ? source.studio_artifact_type : null,
+      studio_document_kind: text('studio_document_kind', 80)
+    };
+  }
   return {
     agent_mode: agentMode,
     builder_job_title: text('job_title'),
@@ -8642,13 +8703,15 @@ serve(async (req)=>{
                   bjDescription.slice(0, 4000),
                   bjDescription.length > 4000 ? `\n[... ${bjDescription.length - 4000} more chars ...]` : '',
                   '',
-                  'The job pins the current `main` commit, works on its own `bob/job-…` branch, runs tests, an isolated re-verification, a security scan and an independent review, then opens a pull request. When every one of those checks passes and nothing evidential is touched, I merge it myself and the release lane puts it live (owner ruling 2026-09-27); otherwise it waits as a draft for a person. I report either way.',
+                  'The job pins the current `main` commit, works on its own `bob/job-…` branch, runs tests, an isolated re-verification, a security scan and an independent review, then opens a draft pull request for human review. Bob does not merge protected branches or deploy production.',
                   '',
                   'Say **yes** or **go ahead** to open it, or tell me what to change in the brief.'
                 ].filter(Boolean).join('\n'),
                 meta: {
                   tool: 'create_builder_job',
                   outcome: 'proposed',
+                  intent: 'clarifying_questions',
+                  answer_options: ['Yes, open the Builder job', 'No, cancel', 'Change the brief'],
                   grounding: { grounded: bjGrounding.grounded, overlap: Number(bjGrounding.overlap.toFixed(2)), replaced_with_owner_words: !bjGrounding.grounded },
                   pending_builder_job: {
                     title: bjTitle,
@@ -8731,7 +8794,7 @@ serve(async (req)=>{
               : `The job is created; the runner did not start automatically (${[started.data?.error ?? started.status, started.data?.detail].filter(Boolean).map(String).join(': ').slice(0, 200)}), so start it from the Builder control room.`;
             return {
               reply: bjAutopilot
-                ? `Started **${bjTitle}** (pinned to commit \`${String(bjJob.target_sha ?? '').slice(0, 10)}\`). ${runNote} If every check passes and nothing evidential is involved, I merge it myself and the release lane puts it live; otherwise it waits as a draft pull request for a person. My report here will say which.`
+                ? `Started **${bjTitle}** (pinned to commit \`${String(bjJob.target_sha ?? '').slice(0, 10)}\`). ${runNote} If every check passes, Builder opens a draft pull request for human review. Bob does not merge protected branches or deploy production. My report here will state the verified result and any blocker.`
                 : `Builder job **${bjTitle}** is open in the GitHub repository at commit \`${String(bjJob.target_sha ?? '').slice(0, 10)}\`. ${runNote} When it is ready you will get a **DRAFT pull request** to review — I will not merge or deploy it. Track it under Platform & Settings → Builder.`,
               meta: {
                 tool: 'create_builder_job',
@@ -8814,7 +8877,13 @@ serve(async (req)=>{
                   '',
                   'It runs as you, over the private Tailscale link, with a time limit, and I will show you what came back. Say **yes** to run it, or tell me what to change. (Your laptop\'s Bob switch: `laptop-tailscale.ps1 -Deny` turns me off entirely.)'
                 ].join('\n'),
-                meta: { tool: 'laptop_shell', outcome: 'proposed', pending_laptop_command: { command: lsCommand, purpose: lsPurpose } }
+                meta: {
+                  tool: 'laptop_shell',
+                  outcome: 'proposed',
+                  intent: 'clarifying_questions',
+                  answer_options: ['Yes, run this command', 'No, cancel', 'Change the command'],
+                  pending_laptop_command: { command: lsCommand, purpose: lsPurpose }
+                }
               };
             }
             const ran = await callFn('bob-builder-control-room', authHeader, { action: 'laptop_run', command: lsCommand, purpose: lsPurpose, conversation_id: conversationId ?? null });
@@ -9785,7 +9854,17 @@ serve(async (req)=>{
         blocked_tool: chosenTool,
         effect_class: effectClass,
         enforcement_reason: 'caller_rank_insufficient',
-        reasoning: decision.reasoning ?? null
+        reasoning: decision.reasoning ?? null,
+        answer_options: chosenTool === 'laptop_shell'
+          ? ['Use attached files instead', 'Explain the required owner access']
+          : chosenTool === 'create_builder_job'
+            ? ['Open Builder control room', 'Explain the required owner access']
+            : ['Explain the required access'],
+        navigation_actions: chosenTool === 'laptop_shell'
+          ? [{ label: 'Open document studio', path: `/admin/document-studio${orgId ? `?sourceType=company&sourceId=${encodeURIComponent(orgId)}` : ''}` }]
+          : chosenTool === 'create_builder_job'
+            ? [{ label: 'Open Builder control room', path: '/admin/builder' }]
+            : []
       };
       const { reply: enforcedReply, safetyAlerts: enforcedAlerts, forbiddenSetApplied: enfForbidden, tier0IdentitySurfaced: enfTier0 } = applyEgressSweep(blockedReply, caps, blockedMeta);
       const enfDisclosure = conductorDeriveDisclosureTier({
@@ -9811,7 +9890,9 @@ serve(async (req)=>{
             intent: 'effect_blocked_by_conductor',
             route_selected: 'answer',
             blocked_tool: chosenTool,
-            effect_class: effectClass
+            effect_class: effectClass,
+            answer_options: blockedMeta.answer_options,
+            navigation_actions: blockedMeta.navigation_actions
           }
         }
       ]);
@@ -11113,6 +11194,11 @@ serve(async (req)=>{
             confidence: decision.confidence ?? null,
             ...planTrace(decision),
             ...result.meta,
+            agent_context: agentWorkspaceContext,
+            ...agentWorkspaceContext.studio_artifact_type ? {
+              studio_artifact_type: agentWorkspaceContext.studio_artifact_type,
+              studio_document_kind: agentWorkspaceContext.studio_document_kind
+            } : {},
             ...documentQa ? {
               document_qa: documentQa
             } : {}

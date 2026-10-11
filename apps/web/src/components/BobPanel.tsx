@@ -23,7 +23,7 @@ import { useAuth } from '../context/AuthContext';
 import { supabase } from '../lib/supabase';
 import { Upload } from 'tus-js-client';
 import { BobMarkdown } from './BobMarkdown';
-import { BobStudio } from './BobStudio';
+import { BobStudio, type StudioPromptContext } from './BobStudio';
 import './BobPanel.css';
 
 const MAX_BOB_UPLOAD_BYTES = 128 * 1024 * 1024 * 1024;
@@ -216,6 +216,7 @@ export const BobPanel: React.FC<BobPanelProps> = ({ open, onClose, context, mode
   const [activeTurn, setActiveTurn] = useState<ActiveBobTurn | null>(null);
   const [workspaceExpanded, setWorkspaceExpanded] = useState(true);
   const [studioOpen, setStudioOpen] = useState(false);
+  const studioPromptContextRef = useRef<StudioPromptContext | null>(null);
   const scrollRef = useRef<HTMLDivElement>(null);
   const composerRef = useRef<HTMLTextAreaElement>(null);
   const fileInputRef = useRef<HTMLInputElement>(null);
@@ -854,7 +855,14 @@ export const BobPanel: React.FC<BobPanelProps> = ({ open, onClose, context, mode
             conversation_id: conversationId,
             request_id: requestId,
             attachments,
-            context: { ...(context ?? {}), agent_mode: mode },
+            context: {
+              ...(context ?? {}),
+              agent_mode: mode,
+              ...(studioPromptContextRef.current ? {
+                studio_artifact_type: studioPromptContextRef.current.artifactType,
+                studio_document_kind: studioPromptContextRef.current.documentKind,
+              } : {}),
+            },
           },
         }).then((result) => {
           window.clearTimeout(timeout);
@@ -866,6 +874,7 @@ export const BobPanel: React.FC<BobPanelProps> = ({ open, onClose, context, mode
       });
 
       if (fnError) throw fnError;
+      studioPromptContextRef.current = null;
       if (data && typeof data === 'object' && 'turn_run' in data && (data as { turn_run?: BobTurnRun }).turn_run?.status !== 'completed' && !('reply' in data)) {
         const turnRun = (data as { turn_run: BobTurnRun }).turn_run;
         setActiveTurn(current => current
@@ -975,8 +984,10 @@ export const BobPanel: React.FC<BobPanelProps> = ({ open, onClose, context, mode
     window.requestAnimationFrame(() => composerRef.current?.focus());
   };
 
-  const openStudioWithPrompt = (prompt: string) => {
+  const openStudioWithPrompt = (prompt: string, promptContext?: StudioPromptContext) => {
     setWorkspaceExpanded(true);
+    setStudioOpen(true);
+    studioPromptContextRef.current = promptContext ?? null;
     setInput(prompt);
     focusComposer();
   };
@@ -1116,8 +1127,8 @@ export const BobPanel: React.FC<BobPanelProps> = ({ open, onClose, context, mode
                     <button key={action.label} type="button" onClick={() => { setInput(action.prompt); focusComposer(); }} disabled={sending}>{action.label}</button>
                   ))}
                   {mode === 'operations' && <>
-                    <button type="button" onClick={() => openStudioWithPrompt('Draft a document using the current context and attached source files. Use clear headings, fill only evidence-backed fields, mark unknowns as [TO CONFIRM], and finish with a human-review checklist.')} disabled={sending}>Document studio</button>
-                    <button type="button" onClick={() => openStudioWithPrompt('Create a Mermaid diagram for the current context. Return only one mermaid code block. Use clear nodes, named decision points, and mark unknowns explicitly instead of inventing links.')} disabled={sending}>Diagram studio</button>
+                    <button type="button" onClick={() => openStudioWithPrompt('Draft a document using the current context and attached source files. Use clear headings, fill only evidence-backed fields, mark unknowns as [TO CONFIRM], and finish with a human-review checklist.', { artifactType: 'document', documentKind: 'custom_document' })} disabled={sending}>Document studio</button>
+                    <button type="button" onClick={() => openStudioWithPrompt('Create a Mermaid diagram for the current context. Return only one mermaid code block. Use clear nodes, named decision points, and mark unknowns explicitly instead of inventing links.', { artifactType: 'diagram' })} disabled={sending}>Diagram studio</button>
                   </>}
                 </div>
                 <p className="bob-composer-hint">{ACCEPTED_BOB_UPLOAD_LABEL}. Attach with the paperclip or drop files onto this panel.</p>
@@ -1133,6 +1144,7 @@ export const BobPanel: React.FC<BobPanelProps> = ({ open, onClose, context, mode
                     {m.role === 'assistant' && <AgentMetadata message={m} />}
                     <div className="bob-message-content">{m.role === 'assistant' ? <BobMarkdown content={m.content} /> : m.content}</div>
                     {m.role === 'assistant' && <AnswerChoices message={m} disabled={sending} onAnswer={(answer) => void handleSend(null, answer)} />}
+                    {m.role === 'assistant' && <NavigationActions message={m} />}
                     <footer><time dateTime={m.created_at}>{new Date(m.created_at).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })}</time>{m.role === 'assistant' && <button type="button" onClick={() => void speakMessage(m)} disabled={speakingMessageId !== null} title="Listen to this reply" aria-label="Listen to this reply"><Volume2 size={13} />{speakingMessageId === m.id ? 'Speaking' : <span className="sr-only">Listen to this reply</span>}</button>}{supersededBy ? <span className="bob-superseded"><AlertTriangle size={12} /> Superseded by correction</span> : m.flagged && <span className="bob-flagged"><AlertTriangle size={12} /> Review required</span>}{correctionOf && <span className="bob-correction"><ShieldCheck size={12} /> Audit correction</span>}</footer>
                   </div>
                 </article>
@@ -1204,7 +1216,7 @@ export const BobPanel: React.FC<BobPanelProps> = ({ open, onClose, context, mode
           </form>
         </div>
 
-        {workspaceExpanded && studioOpen && <BobStudio messages={messages} attachments={attachments} organizationId={profile?.organizationId ?? null} onPrompt={(prompt) => { setInput(prompt); focusComposer(); }} onAttach={() => fileInputRef.current?.click()} />}
+        {workspaceExpanded && studioOpen && <BobStudio messages={messages} attachments={attachments} organizationId={profile?.organizationId ?? null} onPrompt={(prompt, promptContext) => { studioPromptContextRef.current = promptContext; setInput(prompt); focusComposer(); }} onAttach={() => fileInputRef.current?.click()} />}
 
         {workspaceExpanded && contextPanelOpen && <div className="bob-pane-divider is-right" role="separator" aria-orientation="vertical" aria-label="Resize context pane" onPointerDown={(event) => beginPaneResize('right', event)} />}
         {contextPanelOpen && (
@@ -1589,8 +1601,8 @@ function classifyMessageState(message: BobMessage): WorkState {
 // Bob's clarifying questions are answered by clicking, not by retyping what he already guessed.
 function AnswerChoices({ message, onAnswer, disabled }: { message: BobMessage; onAnswer: (answer: string) => void; disabled: boolean }) {
   const metadata = message.metadata ?? {};
-  if (asString(metadata.intent) !== 'clarifying_questions') return null;
   const supplied = asArray(metadata.answer_options).map(asString).filter(Boolean) as string[];
+  if (asString(metadata.intent) !== 'clarifying_questions' && supplied.length === 0) return null;
   const bestGuess = asString(metadata.best_guess);
   const choices = supplied.length ? supplied : bestGuess ? [bestGuess] : [];
   if (!choices.length) return null;
@@ -1601,6 +1613,20 @@ function AnswerChoices({ message, onAnswer, disabled }: { message: BobMessage; o
       ))}
     </div>
   );
+}
+
+function NavigationActions({ message }: { message: BobMessage }) {
+  const actions = asArray(message.metadata?.navigation_actions)
+    .map((value) => value && typeof value === 'object' ? value as Record<string, unknown> : null)
+    .map((value) => value ? { label: asString(value.label), path: asString(value.path) } : null)
+    .filter((value): value is { label: string; path: string } => Boolean(
+      value?.label
+      && value.path
+      && value.path.startsWith('/')
+      && !value.path.startsWith('//')
+    ));
+  if (!actions.length) return null;
+  return <div className="bob-navigation-actions" aria-label="Open Bob destination">{actions.map((action) => <a key={`${action.label}:${action.path}`} href={action.path}>{action.label}</a>)}</div>;
 }
 
 function OperationalCards({ message }: { message: BobMessage }) {

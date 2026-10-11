@@ -1203,6 +1203,30 @@
   color: #8fe2d8;
 }
 
+.bob-navigation-actions {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px;
+  margin-top: 9px;
+}
+
+.bob-navigation-actions a {
+  padding: 6px 9px;
+  border: 1px solid #3d766f;
+  border-radius: 6px;
+  color: #bff7ef;
+  background: #102b2b;
+  font-size: 12px;
+  font-weight: 700;
+  text-decoration: none;
+}
+
+.bob-navigation-actions a:focus-visible,
+.bob-navigation-actions a:hover {
+  border-color: #8fe2d8;
+  background: #173b39;
+}
+
 .bob-message.is-superseded .bob-message-body {
   border-color: rgba(184, 84, 77, .82);
   background: #29191d;

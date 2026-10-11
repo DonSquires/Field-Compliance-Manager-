@@ -599,6 +599,24 @@ System-wide Bob acceptance gate shipped 2026-10-11:
     comparison before identity promotion. Focused BobPanel tests, TypeScript,
     the full 1,051-test repository suite and the production web build pass.
 
+  Page-context and Studio truth slice implemented 2026-10-11:
+
+  - **Before:** the browser supplied agreement, site, zone, workflow and page
+    context, but the Operations conductor discarded every field except
+    `agent_mode`. Studio treated every assistant reply, including a rank-block
+    message, as a version of the selected RFQ/document type. Two-turn laptop
+    and Builder proposals asked for yes/no only in prose.
+  - **During:** Operations context now passes through a capped allowlist of
+    page/workflow identifiers and safe entity summaries. Studio requests add an
+    explicit artifact type and document kind, and the conductor persists those
+    fields with the sanitized agent context. Proposal and blocked-action
+    metadata carries selectable options and safe relative navigation actions.
+  - **After:** Bob can reason from the page context already supplied by the app;
+    Studio excludes ordinary answers and failures; confirmation choices render
+    as buttons; blocked document work can open the pre-seeded document Studio.
+    Builder receipts now state the protected truth: Bob creates a draft pull
+    request but does not merge protected branches or deploy production.
+
   **Gate:** live `bob_messages` show no context-losing fallbacks; a Builder job
   runs implement → verify → repair without human touch and stops cleanly at
   `release_ready`; egress proven per rank; Atlas `exercised` is populated from
