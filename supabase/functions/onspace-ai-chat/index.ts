@@ -5196,6 +5196,9 @@ async function execTriageFriction(
     error?: string;
     route?: string;
     triage?: string;
+    repair_risk?: string;
+    automation_status?: string;
+    builder_job_id?: string | null;
   } | null;
   if (!result.ok || !data?.packet_id) {
     return {
@@ -5211,9 +5214,24 @@ async function execTriageFriction(
       : route === 'answer_user'
         ? 'I recorded the friction and classified it as a guidance issue rather than a confirmed defect.'
         : 'I recorded the evidence and escalated it for platform-owner review.';
-  const workState = caps.tier === 'admiral' && (route === 'self_heal_apparatus' || route === 'dispatch_flow')
-    ? ' The repair is ready to be turned into a Builder job, but work has not started until that job has a receipt.'
-    : ' This confirms routing, not that a repair has started; I will only say it is being worked on after there is a Builder job receipt.';
+  const automationStatus = String(data.automation_status ?? 'not_eligible');
+  const routineQueued = data.repair_risk === 'routine' && ['queued', 'claimed'].includes(automationStatus);
+  const builderStarted = automationStatus === 'builder_started' && Boolean(data.builder_job_id);
+  const workState = automationStatus === 'published'
+    ? ` Builder job ${data.builder_job_id ?? 'receipt pending'} has published the verified repair branch for the governed merge and release lane; deployment is not yet confirmed.`
+    : automationStatus === 'completed'
+      ? ` Builder job ${data.builder_job_id ?? 'receipt pending'} completed the repair and release workflow.`
+      : automationStatus === 'awaiting_grandmaster'
+        ? ' The repair crossed a protected or significant boundary and is paused for Grandmaster review.'
+        : automationStatus === 'failed'
+          ? ' The automatic repair lane stopped with a recorded failure; it is not fixed and needs investigation.'
+          : builderStarted
+            ? ` Builder job ${data.builder_job_id} has started the routine repair.`
+    : routineQueued
+      ? ' This is a routine repair and has entered Bob’s automatic Builder queue. Work is queued, not yet started; a Builder receipt will identify the job.'
+      : data.repair_risk === 'significant' || data.repair_risk === 'protected'
+        ? ' The change is significant or protected and requires Grandmaster review before Builder work starts.'
+        : ' This confirms routing, not that a repair has started; I will only say it is being worked on after there is a Builder job receipt.';
   return {
     reply: `${routeMessage}${workState}`,
     meta: {
@@ -5222,7 +5240,11 @@ async function execTriageFriction(
       packet_id: data.packet_id,
       triage: data.triage ?? null,
       route,
-      repair_ready: caps.tier === 'admiral' && (route === 'self_heal_apparatus' || route === 'dispatch_flow')
+      repair_risk: data.repair_risk ?? 'unknown',
+      automation_status: automationStatus,
+      builder_job_id: data.builder_job_id ?? null,
+      repair_ready: routineQueued || builderStarted || automationStatus === 'published' || automationStatus === 'completed'
+        || (caps.tier === 'admiral' && (route === 'self_heal_apparatus' || route === 'dispatch_flow'))
     }
   };
 }

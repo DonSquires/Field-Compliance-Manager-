@@ -88,6 +88,18 @@ RLS remains the hard backstop underneath. In this repo the mechanism is
   ops. Bob may *draft* them (an MR, a proposal artifact) — humans review, merge
   and deploy. Autonomy v1 is locked to "a human turns the key"; no unattended
   poll-and-act.
+- **Routine self-heal ruling (owner, 2026-10-12).** Bob continuously accepts
+  bounded, redacted runtime-friction receipts from signed-in users. A
+  deterministic classifier may automatically open and drive a Builder repair
+  only when the packet is a high-confidence software bug, has no privacy,
+  safety, legal, identity, enforcement, finance, evidential, schema, auth,
+  dependency, environment, redesign, new-build, or other stop-line signal.
+  The repair remains bounded to the smallest corrective patch and must pass the
+  normal isolated worker, independent review, Atlas/schema/data-path, and
+  human-glass verification contract. If the specification expands, protected
+  files appear, or more than eight files change, the automation pauses for
+  Grandmaster review. Routine automation is authority to repair a defect, not
+  authority to invent a capability.
 - **Legal, identity-critical, enforcement and commercial truth is human-decided.**
   Bob explains verdicts, finds missing evidence, drafts wording, prepares
   proposals; a person signs (the fire-control key in `PRODUCT_DESIGN.md` §7.2).

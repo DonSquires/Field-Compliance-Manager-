@@ -59,6 +59,7 @@ import { useEnabledModules } from '../hooks/useEnabledModules';
 import { getModuleAccessMessage } from '../lib/moduleAccessMessage';
 import { supabase } from '../lib/supabase';
 import { useServiceRelationships } from '../context/ServiceRelationshipContext';
+import { reportMonitoredError } from '../lib/bobFrictionMonitor';
 import { BobPanel } from '../components/BobPanel';
 import { WorkflowRail } from '../components/WorkflowRail';
 import { OperatingSpineRibbon } from '../components/OperatingSpineRibbon';
@@ -312,6 +313,11 @@ class LazyPageRecovery extends React.Component<{ pageKey: string; children: Reac
   }
 
   componentDidCatch(error: Error) {
+    void reportMonitoredError({
+      kind: /failed to fetch dynamically imported module|importing a module script failed|chunkloaderror/i.test(error.message) ? 'render_failure' : 'exception',
+      name: error.name,
+      message: error.message,
+    });
     const isChunkFailure = /failed to fetch dynamically imported module|importing a module script failed|chunkloaderror/i.test(error.message);
     const reloadKey = `fcm:lazy-page-reload:${window.location.pathname}${window.location.search}`;
     if (isChunkFailure && !window.sessionStorage.getItem(reloadKey)) {

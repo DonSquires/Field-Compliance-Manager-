@@ -155,8 +155,8 @@ const TOOL_REGISTRY = {
     effect_class: 'draft_governed_write'
   },
   triage_friction: {
-    purpose: 'Record and classify a reproducible app bug, UX gap, or data problem using bounded before/during/expected evidence. Use when the user reports that the current page failed or contradicts its promised behavior. Never claim repair work has started unless a Builder job receipt exists. Args: { page, module?, user_intent, expected_outcome, error_kind?, error_message?, failed_request_fn?, failed_request_route?, failed_request_status?, recent_actions? }.',
-    governance: 'tenant-scoped diagnostic intake; redacted evidence only; routing is not proof of repair',
+    purpose: 'Record and classify a reproducible app bug, UX gap, or data problem using bounded before/during/expected evidence. High-confidence, non-protected routine runtime defects enter the automatic Builder queue; redesign, new builds, protected paths, consequential surfaces, and uncertain failures require Grandmaster review. Never claim repair work has started unless a Builder job receipt exists. Args: { page, module?, user_intent, expected_outcome, error_kind?, error_message?, failed_request_fn?, failed_request_route?, failed_request_status?, recent_actions? }.',
+    governance: 'tenant-scoped diagnostic intake; redacted evidence only; routine queue is automatic but Builder verification and protected-path holds still apply',
     effect_class: 'admin_diagnostic_substrate_action'
   },
   propose_corporate_profile: {

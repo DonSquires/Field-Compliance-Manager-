@@ -480,6 +480,7 @@ const ALLOWED_TOP_FIELDS = new Set([
   if (triage === 'unknown') {
     return 'grand_master_bell';
   }
+
   // misunderstanding -> answer_user
   if (triage === 'misunderstanding') {
     return 'answer_user';
@@ -498,4 +499,37 @@ const ALLOWED_TOP_FIELDS = new Set([
     return 'self_heal_apparatus';
   }
   return 'grand_master_bell';
+}
+
+/**
+ * Classify the consequence of starting repair work. This is deliberately
+ * narrower than bug triage: only a high-confidence, non-consequential software
+ * fault is routine. New capability, redesign, protected-path, privacy, safety,
+ * legal, financial, identity, enforcement, and uncertain work stays human-led.
+ */
+export function classifyRepairRisk(envelope, stopLineHit, triage, confidence, route) {
+  if (stopLineHit !== null) return 'protected';
+  if (triage !== 'bug' || route !== 'dispatch_flow' || (confidence ?? -1) < 0.85) return 'unknown';
+
+  const text = JSON.stringify(envelope).toLowerCase();
+  const protectedTerms = [
+    'privacy', 'tenant', 'cross-org', 'cross_org', 'entitlement', 'safety', 'hswa',
+    'legal', 'evidence', 'enforcement', 'notice', 'prosecution', 'identity', 'auth',
+    'rls', 'permission', 'payroll', 'finance', 'payment', 'invoice', 'migration',
+    'schema', 'database', 'dependency', 'environment', 'secret', 'credential'
+  ];
+  if (protectedTerms.some((term) => text.includes(term))) return 'protected';
+
+  const significantTerms = [
+    'redesign', 'new build', 'new feature', 'new module', 'new workflow',
+    'architecture', 'replace the page', 'rebuild the page', 'invent'
+  ];
+  if (significantTerms.some((term) => text.includes(term))) return 'significant';
+
+  const errorKind = String(envelope?.during?.error?.kind ?? '').toLowerCase();
+  const status = Number(envelope?.during?.failed_request?.status ?? 0);
+  const routineError = ['exception', 'render_failure', 'unhandled_rejection'].includes(errorKind)
+    || status === 404
+    || status >= 500;
+  return routineError ? 'routine' : 'unknown';
 }

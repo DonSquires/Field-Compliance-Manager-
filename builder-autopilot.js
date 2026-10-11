@@ -22,6 +22,43 @@ function plain(value, cap = 600) {
   return String(value ?? '').replace(/\s+/g, ' ').trim().slice(0, cap);
 }
 
+const SIGNIFICANT_ROUTINE_TERMS = [
+  /\bredesign\b/i,
+  /\bnew (?:build|feature|module|workflow|capability)\b/i,
+  /\barchitecture\b/i,
+  /\brebuild (?:the )?(?:page|module|system)\b/i,
+  /\b(?:schema|migration|rls|authentication|authorization)\b/i,
+  /\b(?:dependency|environment|credential|secret)\b/i,
+];
+
+function routineRepairHold({ job, approval, evidence }) {
+  if (job?.autopilot_source !== 'routine_monitor') return null;
+  if (job.repair_risk !== 'routine') {
+    return { gate: approval.approval_type, files: [], reasons: ['repair is no longer classified as routine'] };
+  }
+  const scopeText = [
+    job.title,
+    job.task_description,
+    evidence?.productSpecification ? JSON.stringify(evidence.productSpecification) : '',
+  ].join('\n');
+  const significant = SIGNIFICANT_ROUTINE_TERMS.find((pattern) => pattern.test(scopeText));
+  if (significant) {
+    return {
+      gate: approval.approval_type,
+      files: [],
+      reasons: [`repair scope expanded beyond a basic fix (${significant.source})`],
+    };
+  }
+  if (approval.approval_type === 'release_approval' && (evidence?.changedFiles?.length ?? 0) > 8) {
+    return {
+      gate: approval.approval_type,
+      files: evidence.changedFiles,
+      reasons: ['routine repair changed more than eight files'],
+    };
+  }
+  return null;
+}
+
 function describeFiles(files) {
   const list = Array.isArray(files) ? files.filter(Boolean) : [];
   if (!list.length) return 'no files';
@@ -147,6 +184,7 @@ async function collectEvidence({ supabase, snapshot }) {
     } : null,
     releaseNotes: release && typeof release === 'object' ? { notes: Array.isArray(release.release_notes) ? release.release_notes.map((t) => plain(t, 300)) : [], risks: Array.isArray(release.known_risks) ? release.known_risks.map((t) => plain(t, 300)) : [] } : null,
     verificationContract,
+    productSpecification: specification && typeof specification === 'object' ? specification : null,
   };
 }
 
@@ -189,8 +227,14 @@ function composeReport({ job, evidence, pullRequestUrl, state, reason, hold, rep
     lines.push(`Why: ${plain(reason, 500)}.`);
     lines.push('What you can do: tell Bob "try the repair again", or ask him to explain what is failing in plain terms. Nothing was published.');
   } else if (state === 'awaiting_human') {
-    lines.push(`Needs your approval: "${plain(job.title, 160)}" touches evidential work, so Bob has paused at ${GATE_LABEL[hold?.gate] ?? 'an approval gate'}.`);
-    lines.push(`What is evidential here: ${describeFiles(hold?.files)}.`);
+    if (job.autopilot_source === 'routine_monitor') {
+      lines.push(`Needs Grandmaster review: "${plain(job.title, 160)}" crossed the routine-repair boundary, so Bob has paused at ${GATE_LABEL[hold?.gate] ?? 'an approval gate'}.`);
+      if (hold?.files?.length) lines.push(`Protected or expanded files: ${describeFiles(hold.files)}.`);
+    } else {
+      lines.push(`Needs your approval: "${plain(job.title, 160)}" touches evidential work, so Bob has paused at ${GATE_LABEL[hold?.gate] ?? 'an approval gate'}.`);
+      lines.push(`What is evidential here: ${describeFiles(hold?.files)}.`);
+    }
+    if (hold?.reasons?.length) lines.push(`Why it stopped: ${hold.reasons.join('; ')}.`);
     if (evidence?.summary) lines.push(`What Bob has done so far: ${evidence.summary}`);
     if (evidence?.review?.verdict) lines.push(`An independent AI reviewer (a different model from the author) said "${evidence.review.verdict}"${evidence.review.summary ? `: ${evidence.review.summary}` : ''}.`);
     lines.push('What to do: open Platform & Settings → Builder → this job → Approvals and approve or decline with a note. Bob continues only after your decision; nothing is published or merged before then.');
@@ -278,7 +322,7 @@ function evidentialHold({ job, approval, evidence }) {
   const mentioned = evidentialMentions(`${job.title ?? ''}\n${job.task_description ?? ''}`);
   const changed = approval.approval_type === 'release_approval' ? evidentialPathsIn(evidence?.changedFiles) : [];
   const files = [...new Set([...changed, ...mentioned])].sort();
-  return files.length ? { gate: approval.approval_type, files } : null;
+  return files.length ? { gate: approval.approval_type, files, reasons: ['protected or evidential paths are involved'] } : null;
 }
 
 /**
@@ -466,9 +510,12 @@ async function autopilotTick({ supabase, jobs, actions, log = () => {} }) {
             const snapshot = await loadBuilderRuntimeSnapshot(supabase, job.id).catch(() => null);
             evidence = snapshot ? await collectEvidence({ supabase, snapshot }).catch(() => null) : null;
           }
-          hold = hold || evidentialHold({ job, approval, evidence });
+          hold = hold || routineRepairHold({ job, approval, evidence }) || evidentialHold({ job, approval, evidence });
           if (hold) continue;
-          await actions.approve(approval.id, `Cleared by Bob autopilot: the requester asked for this change in chat (conversation ${job.autopilot_conversation_id ?? 'n/a'}). ${approval.approval_type === 'release_approval' ? 'Publishing the branch as a pull request for human review; no merge or deployment.' : 'Proceeding to implementation on the approved brief.'} No evidential paths are involved.`);
+          const authority = job.autopilot_source === 'routine_monitor'
+            ? `the monitored defect ${job.source_friction_packet_id ?? 'n/a'} was deterministically classified as a routine repair`
+            : `the requester asked for this change in chat (conversation ${job.autopilot_conversation_id ?? 'n/a'})`;
+          await actions.approve(approval.id, `Cleared by Bob autopilot: ${authority}. ${approval.approval_type === 'release_approval' ? 'Publishing the verified branch; protected scope would have stopped here.' : 'Proceeding to implementation on the bounded brief.'} No evidential paths are involved.`);
           cleared += 1;
           log({ job: job.id, cleared: approval.approval_type });
         }
@@ -544,7 +591,7 @@ async function autopilotTick({ supabase, jobs, actions, log = () => {} }) {
 async function listAutopilotJobs(supabase, limit = 5) {
   const { data, error } = await supabase
     .from('builder_jobs')
-    .select('id, organization_id, project_id, title, description, task_description, status, target_sha, last_error, frontend_required, backend_required, code_review_mode, workspace_branch, workspace_head_sha, workspace_published_head_sha, workspace_pull_request_url, autopilot_requested_by, autopilot_conversation_id, autopilot_state, autopilot_report, autopilot_updated_at')
+    .select('id, organization_id, project_id, title, description, task_description, status, target_sha, last_error, frontend_required, backend_required, code_review_mode, workspace_branch, workspace_head_sha, workspace_published_head_sha, workspace_pull_request_url, autopilot_requested_by, autopilot_conversation_id, autopilot_source, source_friction_packet_id, repair_risk, autopilot_state, autopilot_report, autopilot_updated_at')
     .not('autopilot_requested_by', 'is', null)
     .in('autopilot_state', ['driving', 'awaiting_human'])
     .order('autopilot_updated_at', { ascending: true })
@@ -553,7 +600,7 @@ async function listAutopilotJobs(supabase, limit = 5) {
   // Jobs parked behind a repair of main are re-checked each tick until the repair lands or fails.
   const { data: waiting, error: waitingError } = await supabase
     .from('builder_jobs')
-    .select('id, organization_id, project_id, title, description, task_description, status, target_sha, last_error, frontend_required, backend_required, code_review_mode, workspace_branch, workspace_head_sha, workspace_published_head_sha, workspace_pull_request_url, autopilot_requested_by, autopilot_conversation_id, autopilot_state, autopilot_report, autopilot_updated_at')
+    .select('id, organization_id, project_id, title, description, task_description, status, target_sha, last_error, frontend_required, backend_required, code_review_mode, workspace_branch, workspace_head_sha, workspace_published_head_sha, workspace_pull_request_url, autopilot_requested_by, autopilot_conversation_id, autopilot_source, source_friction_packet_id, repair_risk, autopilot_state, autopilot_report, autopilot_updated_at')
     .not('autopilot_requested_by', 'is', null)
     .eq('autopilot_state', 'blocked')
     .not('autopilot_report->>repair_job_id', 'is', null)
@@ -571,4 +618,4 @@ async function listPendingApprovals(supabase, jobId) {
   return data || [];
 }
 
-module.exports = { AUTOMERGE_MARK, automergeEligible, autopilotTick, baselineBlock, collectEvidence, composeReport, composePullRequestBody, evaluateVerificationContract, evidentialHold, isRepairJob, isReopenedJob, listAutopilotJobs, listPendingApprovals, repairJobFor, TERMINAL, GATES };
+module.exports = { AUTOMERGE_MARK, automergeEligible, autopilotTick, baselineBlock, collectEvidence, composeReport, composePullRequestBody, evaluateVerificationContract, evidentialHold, routineRepairHold, isRepairJob, isReopenedJob, listAutopilotJobs, listPendingApprovals, repairJobFor, TERMINAL, GATES };

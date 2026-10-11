@@ -341,12 +341,107 @@ async function runBuilderJobBounded(jobId, body = {}) {
 // Bob autopilot: every tick, move the jobs the owner asked for in chat one step closer to a
 // reviewed pull request. Human-only paths (merge, deploy, protected files) are untouched.
 const autopilotEnabled = process.env.BOB_BUILDER_AUTOPILOT !== 'false';
+const routineRepairEnabled = process.env.BOB_ROUTINE_SELF_HEAL !== 'false';
 const autopilotIntervalMs = Math.max(15_000, Number(process.env.BOB_BUILDER_AUTOPILOT_INTERVAL_MS) || 60_000);
 let autopilotBusy = false;
+
+async function routineBuilderProject() {
+  let query = builderSupabase
+    .from('builder_projects')
+    .select('id,organization_id,gitea_owner,gitea_repo')
+    .eq('status', 'active');
+  if (giteaOwner) query = query.eq('gitea_owner', giteaOwner);
+  if (giteaRepo) query = query.eq('gitea_repo', giteaRepo);
+  const { data, error } = await query.limit(2);
+  if (error || !Array.isArray(data) || data.length !== 1) {
+    throw new Error('routine self-heal requires exactly one active Builder project for this repository');
+  }
+  return data[0];
+}
+
+function routineRepairBrief(packet) {
+  const envelope = packet.envelope && typeof packet.envelope === 'object' ? packet.envelope : {};
+  const before = envelope.before && typeof envelope.before === 'object' ? envelope.before : {};
+  const during = envelope.during && typeof envelope.during === 'object' ? envelope.during : {};
+  const expected = envelope.expected && typeof envelope.expected === 'object' ? envelope.expected : {};
+  const error = during.error && typeof during.error === 'object' ? during.error : {};
+  const failed = during.failed_request && typeof during.failed_request === 'object' ? during.failed_request : {};
+  return [
+    `Goal: repair the routine monitored defect recorded in friction packet ${packet.id}.`,
+    `Before: page ${String(before.page || 'unknown').slice(0, 500)}; module ${String(before.module || 'unknown').slice(0, 120)}; user intended ${String(expected.user_intent || 'continue the workflow').slice(0, 1000)}.`,
+    `During: ${String(error.kind || 'runtime_error').slice(0, 80)} — ${String(error.message || 'unhandled application error').slice(0, 500)}${failed.status ? `; request ${String(failed.fn || failed.route || 'unknown').slice(0, 200)} returned ${Number(failed.status)}` : ''}.`,
+    `After: ${String(expected.expected_outcome || 'the workflow remains usable and exposes an explicit recoverable state').slice(0, 1000)}.`,
+    'Required investigation: read canon, query Atlas capability/direct edges/blast radius, cross-check supabase/schema.sql, and identify the smallest root-cause fix.',
+    'Required verification: targeted tests, independent review, before/during/after data-path evidence, Atlas refresh, schema/data-path check, and human-glass acceptance for any web change.',
+    'Routine boundary: make the smallest corrective patch only. Do not redesign, add a feature/module/workflow, change architecture, add or alter migrations/schema/RLS/auth, change dependencies/environment/secrets, or touch legal, safety, identity, enforcement, finance, payroll, or evidential truth. If any such work is necessary, stop and escalate for Grandmaster review.',
+    `Triage basis: ${JSON.stringify(packet.basis || {}).slice(0, 1800)}.`,
+  ].join('\n');
+}
+
+async function startRoutineRepairs() {
+  if (!routineRepairEnabled) return [];
+  const project = await routineBuilderProject();
+  const { sha } = builderRepositoryHead('main');
+  const { data: packets, error: claimError } = await builderSupabase.rpc('builder_claim_routine_repairs', { _limit: 3 });
+  if (claimError) throw new Error(`routine repair queue could not be claimed: ${claimError.message}`);
+  if (!Array.isArray(packets) || !packets.length) return [];
+  const outcomes = [];
+  for (const packet of packets) {
+    let createdJobId = null;
+    let boundSuccessfully = false;
+    try {
+      const page = String(packet.envelope?.before?.page || 'application error').replace(/\s+/g, ' ').slice(0, 120);
+      const { data: created, error } = await builderSupabase.rpc('builder_create_job_v2', {
+        _organization_id: project.organization_id,
+        _project_id: project.id,
+        _title: `Routine repair: ${page}`.slice(0, 200),
+        _task_description: routineRepairBrief(packet).slice(0, 12000),
+        _target_sha: sha,
+        _branch_name: 'main',
+        _description: `Opened automatically from monitored friction packet ${packet.id}.`,
+        _frontend_required: true,
+        _backend_required: Boolean(packet.envelope?.during?.failed_request),
+        _code_review_mode: 'independent_ai',
+        _task_run_id: null,
+        _requested_action: 'prepare_change',
+        _target_environment: 'development',
+      });
+      if (error || !created?.id) throw new Error(error?.message || 'Builder job was not returned');
+      createdJobId = created.id;
+      const { data: boundJob, error: bindError } = await builderSupabase.rpc('builder_bind_routine_repair', {
+        _job_id: created.id,
+        _packet_id: packet.id,
+      });
+      if (bindError || !boundJob?.id) throw new Error(bindError?.message || 'routine repair could not be bound');
+      boundSuccessfully = true;
+      record('autopilot', 'builder.routine_repair.started', boundJob.id, { packet_id: packet.id, page });
+      outcomes.push({ packet: packet.id, job: boundJob.id, outcome: 'started' });
+    } catch (error) {
+      const detail = String(error instanceof Error ? error.message : error).replace(/[\r\n]+/g, ' ').slice(0, 300);
+      if (createdJobId && !boundSuccessfully) {
+        await builderSupabase.from('builder_jobs').update({
+          status: 'cancelled',
+          last_error: 'Routine repair intake failed before policy binding.',
+          updated_at: new Date().toISOString(),
+        }).eq('id', createdJobId).is('source_friction_packet_id', null);
+      }
+      await builderSupabase.from('bob_friction_packets').update({
+        automation_status: packet.automation_attempt_count >= 5 ? 'failed' : 'queued',
+        automation_error_redacted: detail,
+        automation_updated_at: new Date().toISOString(),
+      }).eq('id', packet.id).eq('automation_status', 'claimed');
+      record('autopilot', 'builder.routine_repair.failed', packet.id, { error: detail });
+      outcomes.push({ packet: packet.id, outcome: 'failed', error: detail });
+    }
+  }
+  return outcomes;
+}
+
 async function autopilotOnce() {
   if (autopilotBusy || !builderSupabase || !modelGatewayToken || !builderWorkerImage) return [];
   autopilotBusy = true;
   try {
+    await startRoutineRepairs();
     const jobs = await listAutopilotJobs(builderSupabase);
     if (!jobs.length) return [];
     return await autopilotTick({
@@ -356,7 +451,7 @@ async function autopilotOnce() {
       actions: {
         listPending: (jobId) => listPendingApprovals(builderSupabase, jobId),
         approve: async (approvalId, comment) => {
-          const { error } = await builderSupabase.rpc('builder_autopilot_decide_approval', { _approval_id: approvalId, _comment: comment });
+          const { error } = await builderSupabase.rpc('builder_autopilot_decide_approval_guarded', { _approval_id: approvalId, _comment: comment });
           if (error) throw new Error(`gate could not be cleared: ${error.message}`);
         },
         run: async (jobId) => {
@@ -374,6 +469,28 @@ async function autopilotOnce() {
         record: async (jobId, state, report) => {
           const { error } = await builderSupabase.rpc('builder_autopilot_record', { _job_id: jobId, _state: state, _report: report });
           if (error) throw new Error(`autopilot outcome could not be recorded: ${error.message}`);
+          const { data: routineJob, error: routineJobError } = await builderSupabase
+            .from('builder_jobs')
+            .select('autopilot_source,source_friction_packet_id')
+            .eq('id', jobId)
+            .maybeSingle();
+          if (routineJobError) throw new Error(`routine repair provenance could not be read: ${routineJobError.message}`);
+          if (routineJob?.autopilot_source === 'routine_monitor' && routineJob.source_friction_packet_id) {
+            const automationStatus = state === 'published'
+              ? 'published'
+              : state === 'done'
+                ? 'completed'
+              : state === 'awaiting_human'
+                ? 'awaiting_grandmaster'
+                : state === 'blocked'
+                  ? 'failed'
+                  : 'builder_started';
+            const { error: packetStatusError } = await builderSupabase.from('bob_friction_packets').update({
+              automation_status: automationStatus,
+              automation_updated_at: new Date().toISOString(),
+            }).eq('id', routineJob.source_friction_packet_id);
+            if (packetStatusError) throw new Error(`routine repair status could not be recorded: ${packetStatusError.message}`);
+          }
         },
         // Self-heal (owner ruling 2026-09-27): a job blocked by a red main opens a repair job bound to the
         // same requester, and is re-opened on current main once the repair has landed.

@@ -44,6 +44,18 @@ exercise evidence after the normal Atlas wiring refresh and blocks the lane if
 that runtime-evidence refresh fails. These receipts prove the gates; they do
 not grant Bob unattended merge or deployment authority.
 
+Owner ruling 2026-10-12: routine self-heal is monitored and automatic rather
+than admiral-initiated. Signed-in web runtime errors and unhandled rejections
+produce bounded, redacted before/during/after friction packets. Only
+high-confidence software bugs with no stop-line or protected/consequential
+signals enter the routine Builder queue. The control plane claims them,
+commit-pins a Builder job, runs the existing verification/review/autopilot
+lane, and may auto-merge only under the existing clean non-evidential marker.
+Redesigns, new builds, new capabilities, migrations/schema/RLS/auth,
+dependencies/environment, privacy, safety, legal, identity, enforcement,
+finance, payroll, and evidential work remain Grandmaster-gated. Expansion
+beyond eight changed files also stops at the gate.
+
 Runtime acceptance 2026-10-11: the laptop vision watcher now writes an
 independent liveness heartbeat and its Docker health check terminates only a
 stale watcher process so `restart: unless-stopped` can recover it. Acceptance

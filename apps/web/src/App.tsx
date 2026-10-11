@@ -1,3 +1,4 @@
+import { useEffect } from 'react';
 import { BrowserRouter, Routes, Route, Navigate } from 'react-router-dom';
 import { AuthProvider, useAuth } from './context/AuthContext';
 import { ServiceRelationshipProvider } from './context/ServiceRelationshipContext';
@@ -5,6 +6,16 @@ import { RoleRouter } from './routing/RoleRouter';
 import LoginPage from './pages/LoginPage';
 import PublicDisputePage from './pages/PublicDisputePage';
 import AcceptCapabilityShareInvitePage from './pages/AcceptCapabilityShareInvitePage';
+import { installBobFrictionMonitor } from './lib/bobFrictionMonitor';
+
+function RuntimeFrictionMonitor() {
+  const { hasSession } = useAuth();
+  useEffect(() => {
+    if (!hasSession) return;
+    return installBobFrictionMonitor();
+  }, [hasSession]);
+  return null;
+}
 
 function AuthGate() {
   const { profile, hasSession, recoveryMode, loading } = useAuth();
@@ -35,6 +46,7 @@ export function App() {
     <AuthProvider>
       <ServiceRelationshipProvider>
         <BrowserRouter>
+          <RuntimeFrictionMonitor />
           <Routes>
             <Route path="/dispute" element={<PublicDisputePage />} />
             <Route path="/invite/capability/:token" element={<AcceptCapabilityShareInvitePage />} />

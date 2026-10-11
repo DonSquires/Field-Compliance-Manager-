@@ -1,7 +1,7 @@
 const assert = require('node:assert/strict');
 const test = require('node:test');
 
-const { autopilotTick, baselineBlock, composeReport, composePullRequestBody, collectEvidence, evaluateVerificationContract, repairJobFor, isRepairJob } = require('../builder-autopilot');
+const { autopilotTick, baselineBlock, composeReport, composePullRequestBody, collectEvidence, evaluateVerificationContract, repairJobFor, routineRepairHold, isRepairJob } = require('../builder-autopilot');
 
 const verificationSpecification = {
   workflow_verification: { before: ['preconditions'], during: ['requests and visible states'], after: ['receipt and downstream state'] },
@@ -63,6 +63,28 @@ test('autopilot clears a pending gate on the requester\'s behalf and does nothin
   assert.equal(actions.calls[1][0], 'approve');
   assert.match(actions.calls[1][2], /asked for this change in chat \(conversation conv-1\)/);
   assert.ok(!actions.calls.some(([name]) => name === 'run' || name === 'publish'));
+});
+
+test('routine monitor clears a bounded basic fix but holds redesign or broad patches', () => {
+  const approval = { approval_type: 'specification_review' };
+  const routine = {
+    id: 'routine-job',
+    autopilot_source: 'routine_monitor',
+    repair_risk: 'routine',
+    title: 'Routine repair: reports',
+    task_description: 'Fix the render failure with the smallest corrective patch.',
+  };
+  assert.equal(routineRepairHold({ job: routine, approval, evidence: null }), null);
+  assert.match(
+    routineRepairHold({ job: { ...routine, task_description: 'Redesign the reports page' }, approval, evidence: null }).reasons[0],
+    /expanded beyond a basic fix/,
+  );
+  const release = routineRepairHold({
+    job: routine,
+    approval: { approval_type: 'release_approval' },
+    evidence: { changedFiles: Array.from({ length: 9 }, (_, index) => `file-${index}.ts`) },
+  });
+  assert.match(release.reasons[0], /more than eight files/);
 });
 
 test('autopilot runs the bounded runner for a working job and blocks when the attempt ceiling is hit', async () => {

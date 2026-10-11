@@ -14,7 +14,7 @@
  * Plan:   docs/proposals/BOB_TRIAGE_REPORT_PLAN.md
  */ import { serve } from 'https://deno.land/std@0.168.0/http/server.ts';
 import { createClient } from 'https://esm.sh/@supabase/supabase-js@2';
-import { validateAndRedactEnvelope, screenStopLines, classifyByRules, classifyByModel, deriveRoute, SUPPORTED_SCHEMA_VERSIONS } from './triage-logic.ts';
+import { validateAndRedactEnvelope, screenStopLines, classifyByRules, classifyByModel, deriveRoute, classifyRepairRisk, SUPPORTED_SCHEMA_VERSIONS } from './triage-logic.ts';
 // ---------------------------------------------------------------------------
 // Environment
 // ---------------------------------------------------------------------------
@@ -112,7 +112,7 @@ serve(async (req)=>{
     // ── 3. Idempotency check FIRST (section 2e) — before any branching on
     // schema version, so a retry of ANY envelope (supported or not) returns the
     // existing packet instead of double-persisting or re-classifying. ──
-    const { data: existingPacket } = await admin.from('bob_friction_packets').select('id, triage, basis, confidence, route, stop_line_hit, truth_state, redaction').eq('organization_id', orgId).eq('client_packet_key', clientPacketKey).maybeSingle();
+    const { data: existingPacket } = await admin.from('bob_friction_packets').select('id, triage, basis, confidence, route, stop_line_hit, truth_state, redaction, repair_risk, automation_status, builder_job_id').eq('organization_id', orgId).eq('client_packet_key', clientPacketKey).maybeSingle();
     if (existingPacket) {
       // Return existing verdict, no re-classify, no duplicate persist
       return json({
@@ -123,7 +123,10 @@ serve(async (req)=>{
         stop_line_hit: existingPacket.stop_line_hit,
         truth_state: existingPacket.truth_state,
         packet_id: existingPacket.id,
-        redaction: existingPacket.redaction
+        redaction: existingPacket.redaction,
+        repair_risk: existingPacket.repair_risk,
+        automation_status: existingPacket.automation_status,
+        builder_job_id: existingPacket.builder_job_id
       });
     }
     // ── 4. Validate + redact envelope (section 2c, defence-in-depth) ──
@@ -137,6 +140,8 @@ serve(async (req)=>{
       // envelope (never the raw input) so the event is auditable without storing
       // out-of-contract data. Check the insert result like the main path.
       const packetId = crypto.randomUUID();
+      const repairRisk = 'protected';
+      const automationStatus = 'awaiting_grandmaster';
       const verdict = {
         triage: 'unknown',
         basis: {
@@ -150,7 +155,10 @@ serve(async (req)=>{
         stop_line_hit: null,
         truth_state: 'inferred',
         packet_id: packetId,
-        redaction
+        redaction,
+        repair_risk: repairRisk,
+        automation_status: automationStatus,
+        builder_job_id: null
       };
       const { error: unsupInsertErr } = await admin.from('bob_friction_packets').insert({
         id: packetId,
@@ -164,7 +172,9 @@ serve(async (req)=>{
         route: verdict.route,
         stop_line_hit: verdict.stop_line_hit,
         truth_state: verdict.truth_state,
-        redaction: verdict.redaction
+        redaction: verdict.redaction,
+        repair_risk: verdict.repair_risk,
+        automation_status: verdict.automation_status
       });
       if (unsupInsertErr) {
         console.error('[bob-triage-report] persist error (unsupported version):', unsupInsertErr);
@@ -209,6 +219,12 @@ serve(async (req)=>{
       console.error('[bob-triage-report] INVARIANT VIOLATION: stop_line_hit set but route was ' + route + ' — forcing grand_master_bell');
       route = 'grand_master_bell';
     }
+    const repairRisk = classifyRepairRisk(envelope, stopLine.hit, classification.triage, classification.confidence, route);
+    const automationStatus = repairRisk === 'routine'
+      ? 'queued'
+      : repairRisk === 'significant' || repairRisk === 'protected'
+        ? 'awaiting_grandmaster'
+        : 'not_eligible';
     // ── 9. Build verdict ──
     const packetId = crypto.randomUUID();
     const verdict = {
@@ -219,7 +235,10 @@ serve(async (req)=>{
       stop_line_hit: stopLine.hit,
       truth_state: 'inferred',
       packet_id: packetId,
-      redaction
+      redaction,
+      repair_risk: repairRisk,
+      automation_status: automationStatus,
+      builder_job_id: null
     };
     // ── 10. Persist the packet (immutable envelope + outcome fields) ──
     const { error: insertErr } = await admin.from('bob_friction_packets').insert({
@@ -234,7 +253,9 @@ serve(async (req)=>{
       route: verdict.route,
       stop_line_hit: verdict.stop_line_hit,
       truth_state: verdict.truth_state,
-      redaction: verdict.redaction
+      redaction: verdict.redaction,
+      repair_risk: verdict.repair_risk,
+      automation_status: verdict.automation_status
     });
     if (insertErr) {
       console.error('[bob-triage-report] persist error:', insertErr);
