@@ -30,4 +30,11 @@ describe('organization compliance governance', () => {
     expect(source).toContain('p_replaces_record_id');
     expect(source).not.toMatch(/\.delete\(/);
   });
+
+  it('normalizes database timestamps before rendering HTML date inputs', () => {
+    expect(source).toContain('function dateInputValue(value: string | null)');
+    expect(source).toContain('value={dateInputValue(corporate.corporate_status_as_of)}');
+    expect(source).toContain('effective_date: dateInputValue(record.effective_date)');
+    expect(source).toContain('source_as_of: dateInputValue(record.source_as_of)');
+  });
 });

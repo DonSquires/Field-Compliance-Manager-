@@ -67,6 +67,12 @@ function formatDate(value: string | null): string {
   return new Intl.DateTimeFormat('en-NZ', { dateStyle: 'medium' }).format(new Date(`${value}T00:00:00`));
 }
 
+function dateInputValue(value: string | null): string {
+  if (!value) return '';
+  const match = value.match(/^\d{4}-\d{2}-\d{2}/);
+  return match?.[0] ?? '';
+}
+
 function expiryState(expiryDate: string | null): 'expired' | 'due' | 'current' | 'none' {
   if (!expiryDate) return 'none';
   const remaining = Math.ceil((new Date(`${expiryDate}T23:59:59`).getTime() - Date.now()) / 86_400_000);
@@ -183,12 +189,12 @@ const OrganizationComplianceSection: React.FC<{
       name: record.name,
       reference_number: record.reference_number ?? '',
       issuer: record.issuer ?? '',
-      effective_date: record.effective_date ?? '',
-      expiry_date: record.expiry_date ?? '',
+      effective_date: dateInputValue(record.effective_date),
+      expiry_date: dateInputValue(record.expiry_date),
       coverage_amount: record.coverage_amount?.toString() ?? '',
       currency: record.currency,
       source_name: record.source_name,
-      source_as_of: record.source_as_of,
+      source_as_of: dateInputValue(record.source_as_of),
       source_notes: record.source_notes ?? '',
       replaces_record_id: '',
     });
@@ -304,7 +310,7 @@ const OrganizationComplianceSection: React.FC<{
               <option value="unknown">Unknown</option>
             </select>
           </div>
-          <div className="form-group"><label htmlFor="org-corporate-status-date">Status checked on</label><input id="org-corporate-status-date" type="date" value={corporate.corporate_status_as_of ?? ''} onChange={(event) => setCorporate({ ...corporate, corporate_status_as_of: event.target.value })} /></div>
+          <div className="form-group"><label htmlFor="org-corporate-status-date">Status checked on</label><input id="org-corporate-status-date" type="date" value={dateInputValue(corporate.corporate_status_as_of)} onChange={(event) => setCorporate({ ...corporate, corporate_status_as_of: event.target.value })} /></div>
           <div className="form-group"><label htmlFor="org-website">Website</label><input id="org-website" type="url" placeholder="https://" value={corporate.website_url ?? ''} onChange={(event) => setCorporate({ ...corporate, website_url: event.target.value })} /></div>
         </div>
         <div className="form-row">
