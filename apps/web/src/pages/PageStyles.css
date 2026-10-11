@@ -818,6 +818,95 @@
   margin-top: 4px;
 }
 
+.biosecurity-review-layout {
+  display: grid;
+  grid-template-columns: minmax(220px, 32%) 1fr;
+  gap: 16px;
+  margin-top: 12px;
+}
+
+.biosecurity-evidence-panel {
+  display: grid;
+  align-content: start;
+  gap: 6px;
+}
+
+.biosecurity-evidence-panel img,
+.biosecurity-evidence-missing {
+  width: 100%;
+  min-height: 180px;
+  max-height: 360px;
+  object-fit: contain;
+  border: 1px solid var(--color-border, #334155);
+  border-radius: 8px;
+  background: var(--color-bg-elevated, #08111f);
+}
+
+.biosecurity-evidence-missing {
+  display: grid;
+  place-items: center;
+  padding: 16px;
+  color: var(--color-text-secondary, #94a3b8);
+}
+
+.biosecurity-classifier-panel,
+.biosecurity-workflow-panel {
+  display: grid;
+  gap: 10px;
+  margin-top: 12px;
+  padding: 12px;
+  border: 1px solid var(--color-border, #334155);
+  border-radius: 8px;
+  background: var(--color-bg-elevated, #08111f);
+}
+
+.biosecurity-panel-heading,
+.biosecurity-button-row {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  flex-wrap: wrap;
+  gap: 8px;
+}
+
+.biosecurity-classifier-panel dl {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 8px;
+  margin: 0;
+}
+
+.biosecurity-classifier-panel dl div,
+.biosecurity-review-form {
+  display: grid;
+  gap: 4px;
+}
+
+.biosecurity-classifier-panel dt {
+  color: var(--color-text-secondary, #94a3b8);
+  font-size: 12px;
+}
+
+.biosecurity-classifier-panel dd {
+  margin: 0;
+  color: var(--color-text-primary, #f8fafc);
+}
+
+.biosecurity-review-form label {
+  display: grid;
+  gap: 4px;
+}
+
+@media (max-width: 720px) {
+  .biosecurity-review-layout {
+    grid-template-columns: 1fr;
+  }
+
+  .biosecurity-classifier-panel dl {
+    grid-template-columns: 1fr;
+  }
+}
+
 .patrol-layout,
 .smoke-layout {
   display: grid;

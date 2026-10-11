@@ -11,6 +11,7 @@ const CORS = {
   'Access-Control-Allow-Origin': '*',
   'Access-Control-Allow-Headers': 'authorization, x-client-info, apikey, content-type',
 };
+const serviceSupabase = createClient(SUPABASE_URL, SUPABASE_SERVICE_ROLE_KEY);
 
 function json(body: unknown, status = 200) {
   return new Response(JSON.stringify(body), { status, headers: { ...CORS, 'Content-Type': 'application/json' } });
@@ -156,7 +157,17 @@ serve(async (request) => {
       });
     }
 
-    let classificationResult: { status?: string; classification?: string; confidence?: number; species_name?: string } = { status: 'unavailable' };
+    let classificationResult: {
+      status?: string;
+      classification?: string | null;
+      confidence?: number | null;
+      details?: Record<string, unknown>;
+      reasoning?: string | null;
+      classifier?: string;
+      provider?: string | null;
+      model?: string | null;
+      prompt_version?: string;
+    } = { status: 'unavailable' };
 
     if (processedEvidence.length > 0) {
       try {
@@ -173,7 +184,12 @@ serve(async (request) => {
               status: classData.error ? 'unavailable' : 'available',
               classification: classData.classification ?? null,
               confidence: classData.confidence ?? null,
-              species_name: classData.details?.species_name ?? speciesName,
+              details: classData.details ?? {},
+              reasoning: classData.reasoning ?? null,
+              classifier: classData.classifier ?? 'bob_vision',
+              provider: classData.provider ?? null,
+              model: classData.model ?? null,
+              prompt_version: classData.prompt_version ?? 'biosecurity_photo_v1',
             };
           }
         }
@@ -205,6 +221,14 @@ serve(async (request) => {
 
     const receipt = Array.isArray(receiptRows) ? receiptRows[0] : receiptRows;
     if (!receipt?.id) throw new Error('Biosecurity assessment receipt could not be confirmed');
+    const { data: perception, error: perceptionError } = await serviceSupabase.rpc(
+      'record_biosecurity_photo_perception_envelope',
+      {
+        p_assessment_id: receipt.id,
+        p_classification: classificationResult,
+      },
+    );
+    if (perceptionError) throw new Error(`Biosecurity perception receipt failed: ${perceptionError.message}`);
 
     return json({
       success: true,
@@ -215,6 +239,7 @@ serve(async (request) => {
       review_state: receipt.review_state,
       evidence: processedEvidence,
       classification: classificationResult,
+      perception,
     });
   } catch (err) {
     console.error('[submit-biosecurity-assessment] failed:', err);

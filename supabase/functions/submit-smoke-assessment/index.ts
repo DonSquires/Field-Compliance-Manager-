@@ -53,7 +53,9 @@ serve(async (request) => {
 
   const authorization = request.headers.get('Authorization') ?? '';
   const token = authorization.replace('Bearer ', '').trim();
-  const supabase = createClient(SUPABASE_URL, SUPABASE_SERVICE_ROLE_KEY);
+  const supabase = createClient(SUPABASE_URL, SUPABASE_SERVICE_ROLE_KEY, {
+    global: { headers: { Authorization: authorization } },
+  });
   const { data: { user }, error: authError } = await supabase.auth.getUser(token);
   if (authError || !user) return json({ error: 'Unauthorized' }, 401);
 
@@ -141,7 +143,17 @@ serve(async (request) => {
       });
     }
 
-    let classificationResult: { status?: string; classification?: string; confidence?: number } = { status: 'unavailable' };
+    let classificationResult: {
+      status?: string;
+      classification?: string | null;
+      confidence?: number | null;
+      details?: Record<string, unknown>;
+      reasoning?: string | null;
+      classifier?: string;
+      provider?: string | null;
+      model?: string | null;
+      prompt_version?: string;
+    } = { status: 'unavailable' };
 
     if (processedEvidence.length > 0) {
       try {
@@ -158,6 +170,12 @@ serve(async (request) => {
               status: classData.error ? 'unavailable' : 'available',
               classification: classData.classification ?? null,
               confidence: classData.confidence ?? null,
+              details: classData.details ?? {},
+              reasoning: classData.reasoning ?? null,
+              classifier: classData.classifier ?? 'bob_vision',
+              provider: classData.provider ?? null,
+              model: classData.model ?? null,
+              prompt_version: classData.prompt_version ?? 'smoke_photo_v1',
             };
           }
         }
