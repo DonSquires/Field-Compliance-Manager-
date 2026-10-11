@@ -144,6 +144,16 @@ const TOOL_REGISTRY = {
     governance: 'WRITE-draft; needs approval; exact route ID required',
     effect_class: 'draft_governed_write'
   },
+  propose_org_jurisdiction: {
+    purpose: 'PROPOSE the selected organization service area from canonical New Zealand Territorial Authority names. Creates a pending approval only; routing cannot use it until approval and visual verification. Args: { organization_id, district_names, reasoning? }.',
+    governance: 'WRITE-draft; own operating organization only; needs approval and visual verification',
+    effect_class: 'draft_governed_write'
+  },
+  triage_friction: {
+    purpose: 'Record and classify a reproducible app bug, UX gap, or data problem using bounded before/during/expected evidence. Use when the user reports that the current page failed or contradicts its promised behavior. Never claim repair work has started unless a Builder job receipt exists. Args: { page, module?, user_intent, expected_outcome, error_kind?, error_message?, failed_request_fn?, failed_request_route?, failed_request_status?, recent_actions? }.',
+    governance: 'tenant-scoped diagnostic intake; redacted evidence only; routing is not proof of repair',
+    effect_class: 'admin_diagnostic_substrate_action'
+  },
   propose_corporate_profile: {
     purpose: 'PROPOSE a verified corporate profile for an explicitly resolved organization, including company standing and public officer records. Requires source-backed information and creates a pending approval only. Args: { organization_id, company_registration_number?, nzbn?, corporate_status?, corporate_status_as_of?, officers?, reasoning? }.',
     governance: 'WRITE-draft; needs approval; explicit organization ID; never submit residential addresses',
@@ -614,6 +624,8 @@ const TOOL_REGISTRY = {
     create_document_draft: 'bob-agentic-document-draft',
     propose_site_risk: 'bob-propose-site-risk',
     propose_patrol_route_service_area: 'bob-propose-patrol-route-service-area',
+    propose_org_jurisdiction: 'bob-propose-org-jurisdiction',
+    triage_friction: 'bob-triage-report',
     propose_corporate_profile: 'bob-propose-corporate-profile',
     propose_client_root_org: 'bob-propose-client-root-org',
     plan_import: 'bob-plan-import',

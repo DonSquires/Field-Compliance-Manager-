@@ -77,8 +77,6 @@ const EXTRA_MODULE_LABELS: Record<string, { label: string; description: string }
   bob_assistant: { label: 'Bob assistant', description: 'The in-app AI assistant' },
 };
 
-const TERRITORIAL_AUTHORITIES = ['Auckland', 'Ashburton District', 'Buller District', 'Carterton District', 'Central Hawke\'s Bay District', 'Central Otago District', 'Chatham Islands Territory', 'Christchurch City', 'Clutha District', 'Dunedin City', 'Far North District', 'Gisborne District', 'Gore District', 'Greater Wellington', 'Grey District', 'Hamilton City', 'Hastings District', 'Hauraki District', 'Hawke\'s Bay Region', 'Horowhenua District', 'Hurunui District', 'Invercargill City', 'Kaikoura District', 'Kaipara District', 'Kapiti Coast District', 'Kawerau District', 'Mackenzie District', 'Manawatu District', 'Marlborough District', 'Masterton District', 'Matamata-Piako District', 'Napier City', 'Nelson City', 'New Plymouth District', 'Northland Region', 'Opotiki District', 'Otorohanga District', 'Palmerston North City', 'Porirua City', 'Queenstown-Lakes District', 'Rangitikei District', 'Rotorua District', 'Selwyn District', 'South Taranaki District', 'South Waikato District', 'South Wairarapa District', 'Southland District', 'Stratford District', 'Tararua District', 'Tasman District', 'Taupo District', 'Tauranga City', 'Thames-Coromandel District', 'Timaru District', 'Upper Hutt City', 'Waikato District', 'Waikato Region', 'Waimakariri District', 'Waimate District', 'Waipa District', 'Wairoa District', 'Waitaki District', 'Waitomo District', 'Wellington City', 'Western Bay of Plenty District', 'Westland District', 'Whakatane District', 'Whanganui District', 'Whangarei District'];
-
 function moduleLabel(key: string): { label: string; description: string } {
   const manifest = PLATFORM_MODULE_BY_KEY[key as PlatformModuleKey];
   if (manifest) return { label: manifest.label, description: manifest.description };
@@ -105,10 +103,12 @@ const OrganizationSetupPage: React.FC = () => {
   const [error, setError] = useState<string | null>(null);
   const [notice, setNotice] = useState<string | null>(null);
   const [jurisdictionNames, setJurisdictionNames] = useState<string[]>([]);
+  const [territorialAuthorities, setTerritorialAuthorities] = useState<string[]>([]);
   const [jurisdictionSearch, setJurisdictionSearch] = useState('');
   const [jurisdictionPreview, setJurisdictionPreview] = useState<GeoJSON.GeoJsonObject | null>(null);
   const [jurisdictionPreviewLoading, setJurisdictionPreviewLoading] = useState(false);
   const [jurisdictionPreviewMessage, setJurisdictionPreviewMessage] = useState<string | null>(null);
+  const [jurisdictionProposalLoading, setJurisdictionProposalLoading] = useState(false);
 
   const isBranch = org?.organization_type === 'branch';
 
@@ -125,7 +125,7 @@ const OrganizationSetupPage: React.FC = () => {
       setLoading(true);
       setError(null);
 
-      const [orgRes, modulesRes, branchesRes, templatesRes, geofenceRes] = await Promise.all([
+      const [orgRes, modulesRes, branchesRes, templatesRes, geofenceRes, authoritiesRes] = await Promise.all([
         supabase
           .from('organizations')
           .select(
@@ -143,6 +143,10 @@ const OrganizationSetupPage: React.FC = () => {
           .from('org_geofence_config')
           .select('id, config_key, config_value, zone_type')
           .eq('organization_id', orgId),
+        supabase
+          .from('canonical_ta_names')
+          .select('ta_name')
+          .order('ta_name'),
       ]);
 
       if (orgRes.error) throw orgRes.error;
@@ -150,12 +154,14 @@ const OrganizationSetupPage: React.FC = () => {
       if (branchesRes.error) throw branchesRes.error;
       if (templatesRes.error) throw templatesRes.error;
       if (geofenceRes.error) throw geofenceRes.error;
+      if (authoritiesRes.error) throw authoritiesRes.error;
 
       setOrg(orgRes.data as OrgProfile);
       setModules((modulesRes.data as ModuleRow[]) || []);
       setBranches(((branchesRes.data as Array<BranchRow & { organization_type: string }>) || []).filter((row) => row.organization_type === 'branch'));
       setTemplates((templatesRes.data as NoticeTemplate[]) || []);
       setGeofenceConfig((geofenceRes.data as GeofenceConfigRow[]) || []);
+      setTerritorialAuthorities((authoritiesRes.data ?? []).map((row) => String(row.ta_name)));
       const resolvedEntries = await Promise.all(GEOFENCE_KEYS.map(async (key) => {
         const { data, error: resolutionError } = await supabase.rpc('get_org_geofence_config', {
           p_org_id: orgId,
@@ -183,8 +189,8 @@ const OrganizationSetupPage: React.FC = () => {
   const filteredAuthorities = useMemo(() => {
     const q = jurisdictionSearch.trim().toLowerCase();
     if (!q) return [];
-    return TERRITORIAL_AUTHORITIES.filter((name) => name.toLowerCase().includes(q) && !jurisdictionNames.includes(name)).slice(0, 8);
-  }, [jurisdictionNames, jurisdictionSearch]);
+    return territorialAuthorities.filter((name) => name.toLowerCase().includes(q) && !jurisdictionNames.includes(name)).slice(0, 8);
+  }, [jurisdictionNames, jurisdictionSearch, territorialAuthorities]);
 
   const handleSaveProfile = async (e: React.FormEvent) => {
     e.preventDefault();
@@ -334,6 +340,30 @@ const OrganizationSetupPage: React.FC = () => {
       setJurisdictionPreviewMessage(`Boundary preview loaded for ${jurisdictionNames.join(', ')}. Nothing has been saved yet — Bob sends it to Approvals when you are ready.`);
     }
     setJurisdictionPreviewLoading(false);
+  };
+
+  const proposeJurisdiction = async () => {
+    if (!org || !jurisdictionPreview || jurisdictionNames.length === 0) return;
+    try {
+      setJurisdictionProposalLoading(true);
+      setError(null);
+      setNotice(null);
+      const { data, error: proposalError } = await supabase.functions.invoke('bob-propose-org-jurisdiction', {
+        body: {
+          organization_id: org.id,
+          district_names: jurisdictionNames,
+          reasoning: `Set ${org.name}'s service area from the previewed council boundaries: ${jurisdictionNames.join(', ')}.`,
+        },
+      });
+      if (proposalError) throw proposalError;
+      if (!data?.success) throw new Error(data?.error ?? 'The service-area proposal was not created');
+      setNotice(data.note ?? 'Service area sent to Approvals.');
+      setJurisdictionPreviewMessage('Boundary preview retained. The proposal is waiting in Approvals; routing will not use it until a person approves and visually verifies it.');
+    } catch (err) {
+      setError(err instanceof Error ? err.message : 'Failed to send the service area to Approvals');
+    } finally {
+      setJurisdictionProposalLoading(false);
+    }
   };
 
   if (loading) {
@@ -579,6 +609,9 @@ const OrganizationSetupPage: React.FC = () => {
           )}
           <div className="org-settings-actions">
             <button type="submit" className="btn btn-secondary" disabled={jurisdictionPreviewLoading || jurisdictionNames.length === 0}>{jurisdictionPreviewLoading ? 'Loading boundary…' : 'Preview boundary'}</button>
+            <button type="button" className="btn btn-primary" onClick={proposeJurisdiction} disabled={jurisdictionProposalLoading || !jurisdictionPreview}>
+              {jurisdictionProposalLoading ? 'Sending to Approvals…' : 'Send to Approvals'}
+            </button>
           </div>
         </form>
         {jurisdictionPreviewMessage && <div className={`organization-jurisdiction-message ${jurisdictionPreview ? 'is-success' : 'is-error'}`} role="status">{jurisdictionPreviewMessage}</div>}

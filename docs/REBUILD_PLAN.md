@@ -8,6 +8,18 @@ detailed backlogs (`ENTERPRISE_SAAS_TODO.md`, `PROTOTYPE_GAP_AUDIT.md`,
 Completion language is strict, as in the lineage: **merged ≠ deployed ≠
 glass-proven.** A workstream item is done only when its evidence gate is met.
 
+Live service-area finding 2026-10-11: R&M organisation settings could preview a
+canonical council boundary, then told the user Bob would send it to Approvals
+"when you are ready", but exposed no submission action. The page also carried a
+hardcoded council-name list despite the geofence ruling that canonical
+Territorial Authority names come from the live reference table. The repaired
+flow reads `canonical_ta_names`, keeps preview read-only, and creates a pending
+`set_org_jurisdiction` action through `bob-propose-org-jurisdiction`; approval,
+execution, and visual verification remain separate. Bob's previously unwired
+friction-triage organ is now available through the Conductor so a page-level
+contradiction can be recorded and routed, while Bob explicitly distinguishes
+"reported/routed" from "being worked on" until a Builder job receipt exists.
+
 Live acceptance finding 2026-10-11: an owner build request successfully ran
 repository and Atlas inspection but then stopped at a future-tense prose plan.
 The conductor now converts that narrow post-evidence outcome into the existing

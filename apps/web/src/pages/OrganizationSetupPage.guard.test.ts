@@ -56,6 +56,15 @@ describe('governed organization profile setup', () => {
     expect(source).toContain('No council boundary matched: ${unmatched}');
   });
 
+  it('loads canonical council names and sends the preview through the governed approval producer', () => {
+    expect(source).toContain(".from('canonical_ta_names')");
+    expect(source).toContain(".select('ta_name')");
+    expect(source).not.toContain('const TERRITORIAL_AUTHORITIES =');
+    expect(source).toContain("supabase.functions.invoke('bob-propose-org-jurisdiction'");
+    expect(source).toContain('Send to Approvals');
+    expect(source).toContain('disabled={jurisdictionProposalLoading || !jurisdictionPreview}');
+  });
+
   it('keeps root-organization legal and compliance evidence on a governed shared surface', () => {
     expect(source).toContain('<OrganizationComplianceSection org={org} onOrgChange={setOrg} />');
     expect(source).toContain("org.corporate_profile_verification_status === 'verified'");

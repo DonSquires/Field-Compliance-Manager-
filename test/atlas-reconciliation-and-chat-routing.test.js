@@ -71,6 +71,24 @@ test('patrol route service areas are Caddie-routed governed proposals', () => {
   assert.match(chat, /case 'propose_patrol_route_service_area':/);
 });
 
+test('organization service areas are Caddie-routed governed proposals', () => {
+  assert.match(caddie, /propose_org_jurisdiction: \{/);
+  assert.match(caddie, /propose_org_jurisdiction: 'bob-propose-org-jurisdiction'/);
+  assert.match(chat, /async function execProposeOrgJurisdiction/);
+  assert.match(chat, /callFn\('bob-propose-org-jurisdiction', authHeader/);
+  assert.match(chat, /case 'propose_org_jurisdiction':/);
+});
+
+test('page friction is routed through the bounded triage organ without claiming a repair receipt', () => {
+  assert.match(caddie, /triage_friction: \{/);
+  assert.match(caddie, /triage_friction: 'bob-triage-report'/);
+  assert.match(chat, /async function execTriageFriction/);
+  assert.match(chat, /callFn\('bob-triage-report', authHeader/);
+  assert.match(chat, /case 'triage_friction':/);
+  assert.match(chat, /work has not started until that job has a receipt/);
+  assert.match(chat, /This confirms routing, not that a repair has started/);
+});
+
 test('corporate profiles are Caddie-routed pending proposals', () => {
   assert.match(caddie, /propose_corporate_profile: \{/);
   assert.match(caddie, /'bob-propose-corporate-profile'/);

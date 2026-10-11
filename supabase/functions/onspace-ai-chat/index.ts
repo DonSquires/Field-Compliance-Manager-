@@ -985,8 +985,8 @@ async function resolveUserCapabilities(supabase, role, orgId, userId = null) {
   if (canCompareData) allowedTools.push('client_site_compare', 'query_records', 'scv_lookup', 'site_risk', 'resolve_point_context', 'document_search', 'resolve_geofence');
   if (canInspectSchema) allowedTools.push('schema_inspect');
   if (canIngest) allowedTools.push('ingest_document', 'plan_import', 'plan_patrol_import', 'perceive_media', 'confirm_import', 'inventory_document_source', 'create_document_draft');
-  if (canPromote) allowedTools.push('promote_action', 'propose_client_onboarding', 'propose_corporate_profile', 'propose_freedom_camping_zone', 'propose_zone_patrol_stop', 'propose_patrol_route_assignment', 'propose_patrol_route_service_area', 'propose_roster_fill', 'propose_roster_rollback', 'propose_rate_rule', 'propose_staff_onboarding', 'propose_site_risk', 'propose_freedom_camping_org_strategy');
-  if (tier !== 'guest') allowedTools.push('perceive_media', 'web_research');
+  if (canPromote) allowedTools.push('promote_action', 'propose_client_onboarding', 'propose_corporate_profile', 'propose_freedom_camping_zone', 'propose_zone_patrol_stop', 'propose_patrol_route_assignment', 'propose_patrol_route_service_area', 'propose_org_jurisdiction', 'propose_roster_fill', 'propose_roster_rollback', 'propose_rate_rule', 'propose_staff_onboarding', 'propose_site_risk', 'propose_freedom_camping_org_strategy');
+  if (tier !== 'guest') allowedTools.push('perceive_media', 'web_research', 'triage_friction');
   if (canCompareData) allowedTools.push('fetch_bylaw_source');
   if (canWrite || canIngest || canPromote) allowedTools.push('job_runner');
   // sql_read: admiral unrestricted, captain+commander org-scoped.
@@ -5038,6 +5038,143 @@ async function execProposePatrolRouteServiceArea(authHeader, caps, args) {
     meta: { tool: 'propose_patrol_route_service_area', outcome: 'ok', action_id: r.data.action_id ?? null }
   };
 }
+
+async function execProposeOrgJurisdiction(
+  authHeader: string,
+  caps: { canPromote?: boolean },
+  args: Record<string, unknown>
+) {
+  if (!caps.canPromote) {
+    return {
+      reply: 'Setting an organization service area needs an admin, master, or grand master.',
+      meta: { tool: 'propose_org_jurisdiction', outcome: 'forbidden' }
+    };
+  }
+  const organizationId = typeof args.organization_id === 'string' ? args.organization_id.trim() : '';
+  const districtNames = Array.isArray(args.district_names)
+    ? args.district_names.map((name: unknown) => String(name).trim()).filter(Boolean)
+    : [];
+  if (!organizationId || districtNames.length === 0) {
+    return {
+      reply: 'I need the exact organization and at least one council area before I can prepare the service-area proposal.',
+      meta: { tool: 'propose_org_jurisdiction', outcome: 'need_organization_or_districts' }
+    };
+  }
+  const result = await callFn('bob-propose-org-jurisdiction', authHeader, {
+    organization_id: organizationId,
+    district_names: districtNames,
+    reasoning: args.reasoning
+  });
+  const data = result.data as { success?: boolean; error?: string; note?: string; action_id?: string } | null;
+  if (!result.ok || !data?.success) {
+    return {
+      reply: String(data?.error ?? 'I could not prepare the organization service-area proposal right now.'),
+      meta: { tool: 'propose_org_jurisdiction', outcome: 'failed' }
+    };
+  }
+  return {
+    reply: String(data.note ?? 'The organization service-area proposal is ready in Approvals.'),
+    meta: {
+      tool: 'propose_org_jurisdiction',
+      outcome: 'ok',
+      action_id: data.action_id ?? null
+    }
+  };
+}
+
+async function execTriageFriction(
+  authHeader: string,
+  caps: { tier?: string },
+  conversationId: string,
+  args: Record<string, unknown>
+) {
+  if (caps.tier === 'guest') {
+    return {
+      reply: 'Sign in before reporting an app problem so I can keep the evidence scoped to your organization.',
+      meta: { tool: 'triage_friction', outcome: 'forbidden' }
+    };
+  }
+  const page = typeof args.page === 'string' ? args.page.trim() : '';
+  const userIntent = typeof args.user_intent === 'string' ? args.user_intent.trim() : '';
+  const expectedOutcome = typeof args.expected_outcome === 'string' ? args.expected_outcome.trim() : '';
+  if (!page || !userIntent || !expectedOutcome) {
+    return {
+      reply: 'I need the page, what you were trying to do, and what should have happened before I can file a reliable repair report.',
+      meta: { tool: 'triage_friction', outcome: 'need_evidence' }
+    };
+  }
+  const errorMessage = typeof args.error_message === 'string' && args.error_message.trim()
+    ? args.error_message.trim()
+    : 'The page behavior contradicts its promised workflow.';
+  const envelope = {
+    schema_version: '1',
+    before: {
+      page,
+      module: typeof args.module === 'string' ? args.module : undefined,
+      recent_actions: Array.isArray(args.recent_actions)
+        ? args.recent_actions.map((action: unknown) => String(action)).slice(0, 20)
+        : []
+    },
+    during: {
+      error: {
+        kind: typeof args.error_kind === 'string' ? args.error_kind : 'workflow_contradiction',
+        message: errorMessage
+      },
+      ...((args.failed_request_fn || args.failed_request_route || args.failed_request_status) ? {
+        failed_request: {
+          fn: typeof args.failed_request_fn === 'string' ? args.failed_request_fn : undefined,
+          route: typeof args.failed_request_route === 'string' ? args.failed_request_route : undefined,
+          status: Number.isFinite(Number(args.failed_request_status)) ? Number(args.failed_request_status) : undefined
+        }
+      } : {})
+    },
+    expected: {
+      user_intent: userIntent,
+      expected_outcome: expectedOutcome
+    }
+  };
+  const packetSeed = JSON.stringify([conversationId, page, userIntent, expectedOutcome, errorMessage]);
+  const digest = await crypto.subtle.digest('SHA-256', new TextEncoder().encode(packetSeed));
+  const clientPacketKey = `chat:${Array.from(new Uint8Array(digest)).map((byte) => byte.toString(16).padStart(2, '0')).join('').slice(0, 40)}`;
+  const result = await callFn('bob-triage-report', authHeader, {
+    client_packet_key: clientPacketKey,
+    envelope
+  });
+  const data = result.data as {
+    packet_id?: string;
+    error?: string;
+    route?: string;
+    triage?: string;
+  } | null;
+  if (!result.ok || !data?.packet_id) {
+    return {
+      reply: String(data?.error ?? 'I could not file the repair report. The problem has not been routed.'),
+      meta: { tool: 'triage_friction', outcome: 'failed' }
+    };
+  }
+  const route = String(data.route ?? 'grand_master_bell');
+  const routeMessage = route === 'self_heal_apparatus'
+    ? 'I recorded the evidence and routed it to the self-heal review queue.'
+    : route === 'dispatch_flow'
+      ? 'I recorded this as a high-confidence defect and routed it to the engineering dispatch queue.'
+      : route === 'answer_user'
+        ? 'I recorded the friction and classified it as a guidance issue rather than a confirmed defect.'
+        : 'I recorded the evidence and escalated it for platform-owner review.';
+  const workState = caps.tier === 'admiral' && (route === 'self_heal_apparatus' || route === 'dispatch_flow')
+    ? ' The repair is ready to be turned into a Builder job, but work has not started until that job has a receipt.'
+    : ' This confirms routing, not that a repair has started; I will only say it is being worked on after there is a Builder job receipt.';
+  return {
+    reply: `${routeMessage}${workState}`,
+    meta: {
+      tool: 'triage_friction',
+      outcome: 'recorded',
+      packet_id: data.packet_id,
+      triage: data.triage ?? null,
+      route,
+      repair_ready: caps.tier === 'admiral' && (route === 'self_heal_apparatus' || route === 'dispatch_flow')
+    }
+  };
+}
 async function execProposeCorporateProfile(authHeader, caps, args) {
   if (!caps.canPromote) return {
     reply: 'Preparing a corporate-profile proposal needs an admin, master, or grand master.',
@@ -8674,6 +8811,10 @@ serve(async (req)=>{
           return execProposeSiteRisk(authHeader, caps, toolArgs);
         case 'propose_patrol_route_service_area':
           return execProposePatrolRouteServiceArea(authHeader, caps, toolArgs);
+        case 'propose_org_jurisdiction':
+          return execProposeOrgJurisdiction(authHeader, caps, toolArgs);
+        case 'triage_friction':
+          return execTriageFriction(authHeader, caps, conversationId, toolArgs);
         case 'propose_corporate_profile':
           return execProposeCorporateProfile(authHeader, caps, toolArgs);
         case 'propose_client_root_org':
