@@ -124,6 +124,11 @@ const TOOL_REGISTRY = {
     governance: 'read-only; tenant-scoped; restricted material is limited by the document service',
     effect_class: 'internal_observation'
   },
+  inventory_document_source: {
+    purpose: 'Start or inspect a durable read-only inventory of the organization approved local document source. Use this instead of laptop_shell for corpus discovery. Args: { action?: "start"|"status"|"cancel", source_id?, run_id? }.',
+    governance: 'read-only source access; tenant-scoped; approved alias only; writes manifest/checkpoint receipts but never promotes business records',
+    effect_class: 'internal_observation'
+  },
   propose_site_risk: {
     purpose: 'PROPOSE an updated site risk rating from a site assessment. Creates a pending approval only; it never changes the rating directly. Args: { site_id, risk_level? }.',
     governance: 'WRITE-draft; needs approval',
@@ -600,6 +605,7 @@ const TOOL_REGISTRY = {
     site_risk: 'bob-site-risk',
     resolve_point_context: 'resolve-point-context',
     document_search: 'bob-document-search',
+    inventory_document_source: 'bob-document-source-ingestion',
     propose_site_risk: 'bob-propose-site-risk',
     propose_patrol_route_service_area: 'bob-propose-patrol-route-service-area',
     propose_corporate_profile: 'bob-propose-corporate-profile',

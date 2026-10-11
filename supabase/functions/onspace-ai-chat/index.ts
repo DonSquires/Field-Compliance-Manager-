@@ -343,6 +343,7 @@ function safeAgentWorkspaceContext(value) {
         'propose_zone_patrol_stop',
         'resolve_geofence',
         'resolve_address',
+        'inventory_document_source',
         'confirm_import',
         'sql_read',
         'repo_search',
@@ -962,7 +963,7 @@ async function resolveUserCapabilities(supabase, role, orgId, userId = null) {
   ];
   if (canCompareData) allowedTools.push('client_site_compare', 'query_records', 'scv_lookup', 'site_risk', 'resolve_point_context', 'document_search', 'resolve_geofence');
   if (canInspectSchema) allowedTools.push('schema_inspect');
-  if (canIngest) allowedTools.push('ingest_document', 'plan_import', 'plan_patrol_import', 'perceive_media', 'confirm_import');
+  if (canIngest) allowedTools.push('ingest_document', 'plan_import', 'plan_patrol_import', 'perceive_media', 'confirm_import', 'inventory_document_source');
   if (canPromote) allowedTools.push('promote_action', 'propose_client_onboarding', 'propose_corporate_profile', 'propose_freedom_camping_zone', 'propose_zone_patrol_stop', 'propose_patrol_route_assignment', 'propose_patrol_route_service_area', 'propose_roster_fill', 'propose_roster_rollback', 'propose_rate_rule', 'propose_staff_onboarding', 'propose_site_risk', 'propose_freedom_camping_org_strategy');
   if (tier !== 'guest') allowedTools.push('perceive_media', 'web_research');
   if (canCompareData) allowedTools.push('fetch_bylaw_source');
@@ -1535,6 +1536,7 @@ function computeEgressForbiddenSet(caps, meta) {
     t.tool === 'site_risk' && caps.canCompareData ||
     t.tool === 'resolve_point_context' && caps.canCompareData ||
     t.tool === 'document_search' && caps.canCompareData ||
+    t.tool === 'inventory_document_source' && caps.canIngest ||
     t.tool === 'propose_corporate_profile' && caps.canPromote ||
     t.tool === 'propose_client_root_org' && caps.tier === 'admiral' ||
     // same gate as every single-action propose_* tool; a plan approval is the
@@ -4778,6 +4780,65 @@ async function execDocumentSearch(authHeader, args) {
   if (!r.ok || !r.data?.success) return { reply: 'I could not search the approved document library right now.', meta: { tool: 'document_search', outcome: 'failed' } };
   const results = Array.isArray(r.data.results) ? r.data.results : [];
   return { reply: results.length ? `I found ${results.length} approved document match${results.length === 1 ? '' : 'es'}.` : 'I found no approved documents matching that search.', meta: { tool: 'document_search', outcome: 'ok', count: results.length } };
+}
+async function execInventoryDocumentSource(authHeader, args) {
+  const action = ['start', 'status', 'cancel'].includes(String(args.action)) ? String(args.action) : 'start';
+  const r = await callFn('bob-document-source-ingestion', authHeader, {
+    action,
+    source_id: typeof args.source_id === 'string' ? args.source_id : undefined,
+    run_id: typeof args.run_id === 'string' ? args.run_id : undefined,
+    client_request_id: crypto.randomUUID()
+  });
+  const sources = Array.isArray(r.data?.sources) ? r.data.sources : [];
+  if (!r.ok || !r.data?.success) {
+    if (sources.length) {
+      return {
+        reply: `More than one approved document source is available. Choose which source to inventory: ${sources.map((source)=>source.label).join(', ')}.`,
+        meta: {
+          tool: 'inventory_document_source',
+          outcome: 'choose_source',
+          intent: 'clarifying_questions',
+          answer_options: sources.map((source)=>`Inventory ${source.label}`)
+        }
+      };
+    }
+    return {
+      reply: `I could not ${action} the document-source inventory${r.data?.error ? ` (${r.data.error})` : ''}. No business records were changed.`,
+      meta: { tool: 'inventory_document_source', outcome: 'failed' }
+    };
+  }
+  const run = r.data.run;
+  const counts = {
+    discovered: Number(run?.discovered_count ?? 0),
+    hashed: Number(run?.hashed_count ?? 0),
+    duplicates: Number(run?.duplicate_count ?? 0),
+    supported: Number(run?.supported_count ?? 0),
+    partial: Number(run?.partial_count ?? 0),
+    gaps: Number(run?.gap_count ?? 0),
+    excluded: Number(run?.excluded_count ?? 0),
+    quarantined: Number(run?.quarantined_count ?? 0),
+    failed: Number(run?.failed_count ?? 0)
+  };
+  const summary = `${counts.discovered} discovered, ${counts.hashed} hashed, ${counts.duplicates} duplicates, ${counts.supported} supported, ${counts.partial} partial, ${counts.gaps} gaps, ${counts.excluded} excluded, ${counts.quarantined} quarantined, ${counts.failed} failed`;
+  const active = ['queued', 'running', 'cancel_requested'].includes(String(run?.status));
+  const reply = action === 'cancel'
+    ? `The read-only document inventory is ${run?.status}. Current receipt: ${summary}.`
+    : action === 'status'
+      ? `The read-only document inventory is **${run?.status ?? 'not started'}**. Current receipt: ${summary}.`
+      : `Started the approved source as a durable read-only inventory. It is **${run?.status}**. No source file or business record is changed by this stage. Current receipt: ${summary}.`;
+  return {
+    reply,
+    meta: {
+      tool: 'inventory_document_source',
+      outcome: action === 'cancel' ? 'cancelled_or_requested' : 'ok',
+      document_source_run_id: run?.id ?? null,
+      document_source_run_status: run?.status ?? null,
+      counts,
+      intent: active ? 'clarifying_questions' : undefined,
+      answer_options: active ? ['Check inventory status', 'Cancel inventory'] : ['Open Files workspace'],
+      navigation_actions: [{ label: 'Open Files workspace', path: `/admin/files${run?.id ? `?sourceRun=${encodeURIComponent(run.id)}` : ''}` }]
+    }
+  };
 }
 async function execProposeSiteRisk(authHeader, caps, args) {
   if (!caps.canPromote) return {
@@ -8452,6 +8513,8 @@ serve(async (req)=>{
           return execResolvePointContext(authHeader, caps, orgId, toolArgs);
         case 'document_search':
           return execDocumentSearch(authHeader, toolArgs);
+        case 'inventory_document_source':
+          return execInventoryDocumentSource(authHeader, toolArgs);
         case 'propose_site_risk':
           return execProposeSiteRisk(authHeader, caps, toolArgs);
         case 'propose_patrol_route_service_area':
@@ -11086,6 +11149,7 @@ serve(async (req)=>{
       'propose_zone_patrol_stop',
       'resolve_geofence',
       'resolve_address',
+      'inventory_document_source',
       'confirm_import',
       'sql_read',
       'repo_search',

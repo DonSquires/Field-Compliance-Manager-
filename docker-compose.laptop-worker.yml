@@ -83,6 +83,21 @@ services:
         condition: service_healthy
     networks: [fcm-laptop-net]
 
+  fcm-document-source-worker:
+    build: ./services/document-source-worker
+    image: fcm/document-source-worker:local
+    container_name: fcm-document-source-worker-laptop
+    restart: unless-stopped
+    init: true
+    env_file: "${LAPTOP_WORKER_ENV_FILE:-./deploy/laptop-worker/laptop-worker.env}"
+    environment:
+      DOCUMENT_SOURCE_ROOT: /sources/primary
+      BOB_DOCUMENT_SOURCE_ALIAS: ${BOB_DOCUMENT_SOURCE_ALIAS:?BOB_DOCUMENT_SOURCE_ALIAS is required}
+      DOCUMENT_SOURCE_WORKER_ID: owner-laptop-primary
+    volumes:
+      - "${BOB_DOCUMENT_ROOT_PATH:?BOB_DOCUMENT_ROOT_PATH is required}:/sources/primary:ro"
+    networks: [fcm-laptop-net]
+
 networks:
   fcm-laptop-net:
 

@@ -18,3 +18,71 @@
 .file-system-list,.file-system-detail{color:#243845}
 .file-explorer-workspace{display:grid;grid-template-columns:minmax(220px,280px) minmax(0,1fr);gap:14px;min-width:0}.file-explorer-content{display:grid;align-content:start;gap:12px;min-width:0}.file-explorer-location{display:flex;align-items:end;justify-content:space-between;gap:12px;padding-bottom:9px;border-bottom:1px solid #d7d0c4}.file-explorer-location>div{display:grid;gap:2px;min-width:0}.file-explorer-location span{overflow:hidden;color:#60717c;font-size:12px;text-overflow:ellipsis;white-space:nowrap}.file-explorer-location h2{margin:0;color:#18364b;font-size:18px}.file-explorer-location small{color:#60717c;font-size:12px;white-space:nowrap}.file-system-detail-actions{display:flex;flex-wrap:wrap;justify-content:flex-end;gap:7px}.file-system-dialog-backdrop{position:fixed;inset:0;z-index:95;display:grid;place-items:center;padding:18px;background:rgba(2,8,14,.78);backdrop-filter:blur(3px)}.file-system-dialog{display:grid;gap:14px;width:min(440px,100%);padding:18px;border:1px solid #426078;border-radius:8px;color:#e9f2f5;background:#0b1825;box-shadow:0 24px 70px rgba(0,0,0,.45)}.file-system-dialog header{display:flex;align-items:start;justify-content:space-between;gap:12px}.file-system-dialog header>div{display:grid;gap:3px;min-width:0}.file-system-dialog header span{color:#8dd9e6;font-size:12px;font-weight:800;text-transform:uppercase}.file-system-dialog h2{margin:0;overflow-wrap:anywhere;font-size:18px}.file-system-dialog header button{display:grid;place-items:center;width:32px;height:32px;border:1px solid #426078;border-radius:5px;color:#c8d8df;background:#102332;cursor:pointer}.file-system-dialog label{display:grid;gap:6px;color:#b6c8d0;font-size:12px;font-weight:800}.file-system-dialog input,.file-system-dialog select{width:100%;box-sizing:border-box;min-height:40px;padding:8px 10px;border:1px solid #426078;border-radius:5px;color:#edf6fa;background:#07111b;font:inherit}.file-system-dialog footer{display:flex;justify-content:flex-end;gap:8px}.file-system-dialog footer button{display:inline-flex;align-items:center;justify-content:center;gap:7px;min-height:38px;padding:0 12px;border:1px solid #426078;border-radius:5px;color:#c8d8df;background:#102332;font-weight:800;cursor:pointer}.file-system-dialog footer button.is-primary{border-color:#14766f;color:#fff;background:#14766f}.file-system-dialog footer button:disabled{opacity:.5;cursor:default}@media(max-width:900px){.file-explorer-workspace{grid-template-columns:1fr}.file-explorer-location{align-items:start}}@media(max-width:560px){.file-system-dialog-backdrop{align-items:end;padding:10px}.file-system-dialog footer button{flex:1}.file-system-detail-actions{justify-content:flex-start}}
 .file-explorer-workspace{display:grid;grid-template-columns:minmax(220px,280px) minmax(0,1fr);gap:14px;min-width:0}.file-explorer-content{display:grid;align-content:start;gap:12px;min-width:0}.file-explorer-location{display:flex;align-items:end;justify-content:space-between;gap:12px;padding-bottom:9px;border-bottom:1px solid #d7d0c4}.file-explorer-location>div{display:grid;gap:2px;min-width:0}.file-explorer-location span{overflow:hidden;color:#60717c;font-size:12px;text-overflow:ellipsis;white-space:nowrap}.file-explorer-location h2{margin:0;color:#18364b;font-size:18px}.file-explorer-location small{color:#60717c;font-size:12px;white-space:nowrap}.file-system-detail-actions{display:flex;flex-wrap:wrap;justify-content:flex-end;gap:7px}.file-system-dialog-backdrop{position:fixed;inset:0;z-index:95;display:grid;place-items:center;padding:18px;background:rgba(2,8,14,.78);backdrop-filter:blur(3px)}.file-system-dialog{display:grid;gap:14px;width:min(440px,100%);padding:18px;border:1px solid #426078;border-radius:8px;color:#e9f2f5;background:#0b1825;box-shadow:0 24px 70px rgba(0,0,0,.45)}.file-system-dialog header{display:flex;align-items:start;justify-content:space-between;gap:12px}.file-system-dialog header>div{display:grid;gap:3px;min-width:0}.file-system-dialog header span{color:#8dd9e6;font-size:12px;font-weight:800;text-transform:uppercase}.file-system-dialog h2{margin:0;overflow-wrap:anywhere;font-size:18px}.file-system-dialog header button{display:grid;place-items:center;width:32px;height:32px;border:1px solid #426078;border-radius:5px;color:#c8d8df;background:#102332;cursor:pointer}.file-system-dialog label{display:grid;gap:6px;color:#b6c8d0;font-size:12px;font-weight:800}.file-system-dialog input,.file-system-dialog select{width:100%;box-sizing:border-box;min-height:40px;padding:8px 10px;border:1px solid #426078;border-radius:5px;color:#edf6fa;background:#07111b;font:inherit}.file-system-dialog footer{display:flex;justify-content:flex-end;gap:8px}.file-system-dialog footer button{display:inline-flex;align-items:center;justify-content:center;gap:7px;min-height:38px;padding:0 12px;border:1px solid #426078;border-radius:5px;color:#c8d8df;background:#102332;font-weight:800;cursor:pointer}.file-system-dialog footer button.is-primary{border-color:#14766f;color:#fff;background:#14766f}.file-system-dialog footer button:disabled{opacity:.5;cursor:default}@media(max-width:900px){.file-explorer-workspace{grid-template-columns:1fr}.file-explorer-location{align-items:start}}@media(max-width:560px){.file-system-dialog-backdrop{align-items:end;padding:10px}.file-system-dialog footer button{flex:1}.file-system-detail-actions{justify-content:flex-start}}
+.file-system-source-runs {
+  display: grid;
+  gap: 1rem;
+  margin: 1rem 0;
+  padding: 1rem;
+  border: 1px solid #d7d0c4;
+  border-radius: 0.75rem;
+  background: #f7fbf8;
+}
+
+.file-system-source-runs-heading {
+  display: flex;
+  align-items: flex-start;
+  justify-content: space-between;
+  gap: 1rem;
+}
+
+.file-system-source-runs-heading h2,
+.file-system-source-runs-heading p {
+  margin: 0.25rem 0 0;
+}
+
+.file-system-source-run-list {
+  display: grid;
+  gap: 0.75rem;
+}
+
+.file-system-source-run-list article {
+  display: grid;
+  gap: 0.75rem;
+  padding: 0.85rem;
+  border: 1px solid #d7d0c4;
+  border-radius: 0.65rem;
+}
+
+.file-system-source-run-list article.is-selected {
+  border-color: #14766f;
+  box-shadow: 0 0 0 1px #14766f;
+}
+
+.file-system-source-run-list dl {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(7rem, 1fr));
+  gap: 0.5rem;
+  margin: 0;
+}
+
+.file-system-source-run-list dl div {
+  display: grid;
+  gap: 0.15rem;
+}
+
+.file-system-source-run-list dt {
+  color: #60717c;
+  font-size: 0.75rem;
+}
+
+.file-system-source-run-list dd {
+  margin: 0;
+  font-weight: 700;
+}
+
+@media (max-width: 720px) {
+  .file-system-source-runs-heading {
+    align-items: stretch;
+    flex-direction: column;
+  }
+}

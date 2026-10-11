@@ -617,6 +617,21 @@ System-wide Bob acceptance gate shipped 2026-10-11:
     Builder receipts now state the protected truth: Bob creates a draft pull
     request but does not merge protected branches or deploy production.
 
+  Organization-bound document source slice implemented 2026-10-11:
+
+  - **Before:** the R&M corpus had an approved tenant-bound local source alias,
+    but Atlas showed no reader/writer flow. The only live laptop capability was
+    an admiral-only exact-command shell, unsuitable for a resumable 140,000-file
+    corpus. Browser upload could not safely carry approximately 881 GB.
+  - **During:** added a durable source-run queue with lease/cancel semantics,
+    relative-path-only manifest entries, capability/sensitivity/quarantine
+    classification, bounded hashing and deduplication receipts. Added a
+    read-only laptop worker, Bob tool, and Files-workspace progress UI.
+  - **After:** admin/master callers can ask Bob to inventory the approved source
+    without arbitrary shell authority. The result is a staged evidence manifest
+    for Bob's writer/creator lanes; no business truth is promoted by inventory
+    itself, and consequential writes continue through governed proposals.
+
   **Gate:** live `bob_messages` show no context-losing fallbacks; a Builder job
   runs implement → verify → repair without human touch and stops cleanly at
   `release_ready`; egress proven per rank; Atlas `exercised` is populated from

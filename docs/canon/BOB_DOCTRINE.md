@@ -65,6 +65,14 @@ RLS remains the hard backstop underneath. In this repo the mechanism is
 
 ## 4. Autonomy: impact tier × readiness × rank × protected floor
 
+- **Reader / Writer / Creator ruling (owner, 2026-10-11).** Bob is not a
+  read-only adviser. Within the caller's rank and organization he must be able
+  to read approved sources and app context, write low-risk reversible records
+  through governed actions, and create draft documents, entities, workflows,
+  modules, and Builder changes. The consequence boundary still applies:
+  legal, HR, identity-critical, enforcement, commercial commitments and
+  protected release paths require the appropriate human key. A read-only
+  inventory is a staging phase for writer/creator proposals, not the end state.
 - **Impact tiers** (reconciled 2026-07-25): **LOW** — Bob prepares, the bell
   notifies, a human confirms in context (earned readiness may make it
   `auto_in_context`, still a visible confirm). **MEDIUM** — surface confirm, no
@@ -97,6 +105,7 @@ RLS remains the hard backstop underneath. In this repo the mechanism is
 | Working subagents | Duo flows (GitLab) | planner `delegate` → conductor `runSubagents` (read-only tools via `dispatchTool`) + VPS `/api/bob/subagent` |
 | Memory | request → `bob_messages` → `bob_context_memory` → `bob_knowledge_cards` → `bob_learning_memory`; `bob_self_memory` is Bob's own diary; growth is human-judged | same tables live; `bob_self_memory` present; knowledge cards never written from chat |
 | Build/ops | `bob-review-merge-request`, `bob-read-issues`, Gitea/GitLab MR flow | Builder control plane (`bob-control-plane-server.js`, `worker-executor.js`, `builder_*` tables, `builder_approvals`), Gitea PRs, no merge/deploy authority |
+| Local document source | — | approved tenant-bound `document_reference_sources` alias → durable `document_source_ingestion_runs` → read-only laptop worker manifest → governed extraction/comparison/promotion tools |
 
 Chat turns use a durable asynchronous handoff. The browser creates one
 tenant-scoped request ID; the Conductor records `queued`, returns an immediate

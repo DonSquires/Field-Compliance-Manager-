@@ -35,7 +35,7 @@ function New-LaptopDeploymentEnv {
     }
   }
 
-  $requiredNames = @('SUPABASE_URL', 'SUPABASE_SERVICE_ROLE_KEY', 'WORKLOAD_SIGNING_SECRET', 'VISION_INGESTION_URL', 'LAPTOP_INFERENCE_API_KEY')
+  $requiredNames = @('SUPABASE_URL', 'SUPABASE_SERVICE_ROLE_KEY', 'WORKLOAD_SIGNING_SECRET', 'VISION_INGESTION_URL', 'LAPTOP_INFERENCE_API_KEY', 'BOB_DOCUMENT_SOURCE_ALIAS', 'BOB_DOCUMENT_ROOT_PATH')
   $missingNames = @($requiredNames | Where-Object { -not $values.ContainsKey($_) -or [string]::IsNullOrWhiteSpace($values[$_]) })
   if ($missingNames.Count -gt 0) { throw "Laptop worker env is missing required settings: $($missingNames -join ', ')" }
 
@@ -94,11 +94,11 @@ try {
   $revision = (git -C $releaseRoot rev-parse --short HEAD).Trim()
   $env:LAPTOP_WORKER_ENV_FILE = $deploymentEnvFile
   $composeArgs = @('compose', '--project-name', $composeProject, '--env-file', $deploymentEnvFile, '-f', $composeFile)
-  & docker @composeArgs build --pull fcm-inference fcm-vision-watcher
+  & docker @composeArgs build --pull fcm-inference fcm-vision-watcher fcm-document-source-worker
   if ($LASTEXITCODE -ne 0) { throw 'The laptop GPU inference or watcher image did not build.' }
   $started = $false
   for ($attempt = 1; $attempt -le 3; $attempt++) {
-    & docker @composeArgs up -d --force-recreate --wait fcm-inference fcm-vision-watcher
+    & docker @composeArgs up -d --force-recreate --wait fcm-inference fcm-vision-watcher fcm-document-source-worker
     if ($LASTEXITCODE -eq 0) { $started = $true; break }
     if ($attempt -lt 3) {
       $delaySeconds = 15 * $attempt
@@ -106,18 +106,20 @@ try {
       Start-Sleep -Seconds $delaySeconds
     }
   }
-  if (-not $started) { throw 'The laptop GPU inference/watcher pair did not restart cleanly after three attempts.' }
+  if (-not $started) { throw 'The laptop worker services did not restart cleanly after three attempts.' }
 
   $inferenceState = (Get-DockerContainerInspect -ContainerName 'fcm-inference-laptop').State.Status
   $state = (Get-DockerContainerInspect -ContainerName 'fcm-vision-watcher-laptop').State.Status
+  $documentSourceState = (Get-DockerContainerInspect -ContainerName 'fcm-document-source-worker-laptop').State.Status
   if ($inferenceState -ne 'running') { throw "The laptop GPU inference service is $inferenceState after deployment." }
   if ($state -ne 'running') { throw "The laptop watcher is $state after deployment." }
+  if ($documentSourceState -ne 'running') { throw "The laptop document source worker is $documentSourceState after deployment." }
   $healthJson = docker exec fcm-inference-laptop python -c "import json,urllib.request; print(json.dumps(json.load(urllib.request.urlopen('http://127.0.0.1:3000/health'))))"
   if ($LASTEXITCODE -ne 0) { throw 'The laptop inference health endpoint did not answer.' }
   $health = $healthJson | ConvertFrom-Json
   if ($health.cuda -ne $true) { throw "Laptop inference is not using CUDA ($($health.detector_provider))." }
   if ($health.super_resolution.state -ne 'ready') { throw "Laptop super-resolution model is $($health.super_resolution.state), not ready." }
-  Write-Host "Laptop CCTV GPU inference and watcher are running at revision $revision"
+  Write-Host "Laptop CCTV GPU inference, watcher, and document source worker are running at revision $revision"
   & docker @composeArgs logs --tail 20 fcm-vision-watcher
 } finally {
   if ($hadWorkerEnvFile) {

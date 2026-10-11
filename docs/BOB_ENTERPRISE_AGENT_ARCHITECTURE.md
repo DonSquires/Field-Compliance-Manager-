@@ -240,6 +240,22 @@ Desktop capability presence is not wiring, and wiring is not exercise.
 - Artifact metadata records the Studio type, document kind, and sanitized page
   context that grounded the request.
 
+### Organization-bound local document sources
+
+- An approved `document_reference_sources` row names a neutral local-folder
+  alias. The app and database never store or disclose the workstation's
+  absolute root path.
+- `document_source_ingestion_runs` provides a tenant/requester-bound durable
+  queue, lease, cancellation, checkpoints, redacted errors, and before/during/
+  after receipts.
+- The laptop worker resolves only its configured alias and mounts the source
+  read-only. Manifest rows store relative path, size, modified version,
+  capability class, sensitivity, quarantine disposition, and a bounded hash
+  where available.
+- Inventory never creates canonical CRM, HR, finance, identity, investigation,
+  agreement, or evidence records. Supported manifest entries feed Bob's
+  existing extraction, compare, proposal, and governed execution lanes.
+
 ## 8. Self-heal and Grandmaster build loop
 
 Self-heal is evidence-led repair, not direct production mutation:

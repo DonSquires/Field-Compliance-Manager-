@@ -120,6 +120,26 @@ interface NoticeArtifactRow {
   storage_path: string | null;
 }
 
+interface DocumentSourceRun {
+  id: string;
+  status: 'queued' | 'running' | 'cancel_requested' | 'cancelled' | 'completed' | 'failed';
+  phase: string;
+  discovered_count: number;
+  hashed_count: number;
+  duplicate_count: number;
+  supported_count: number;
+  partial_count: number;
+  gap_count: number;
+  excluded_count: number;
+  quarantined_count: number;
+  failed_count: number;
+  requested_at: string;
+  heartbeat_at: string | null;
+  completed_at: string | null;
+  error_detail_redacted: string | null;
+  document_reference_sources?: { label: string } | Array<{ label: string }> | null;
+}
+
 type FileFilter = 'all' | 'quarantined' | 'tenant_reference' | 'tenant' | 'global_reference';
 type OutputStatusFilter = 'all' | 'requested' | 'generating' | 'ready' | 'failed' | 'revoked';
 type OutputFormatFilter = 'all' | 'pdf' | 'print' | 'docx';
@@ -210,6 +230,8 @@ const FileSystemPage: React.FC = () => {
   const [uploadingFile, setUploadingFile] = useState(false);
   const [generatedOutputs, setGeneratedOutputs] = useState<GeneratedOutputRow[]>([]);
   const [noticeArtifacts, setNoticeArtifacts] = useState<NoticeArtifactRow[]>([]);
+  const [documentSourceRuns, setDocumentSourceRuns] = useState<DocumentSourceRun[]>([]);
+  const [documentSourceAction, setDocumentSourceAction] = useState(false);
   const [outputStatus, setOutputStatus] = useState<OutputStatusFilter>('all');
   const [outputFormat, setOutputFormat] = useState<OutputFormatFilter>('all');
   const organizationId = operatingOrganizationId ?? profile?.organizationId ?? null;
@@ -224,13 +246,14 @@ const FileSystemPage: React.FC = () => {
     }
     setLoading(true);
     setError(null);
-    const [{ data, error: loadError }, { data: intakeData, error: intakeError }, { data: batchData, error: batchError }, { data: outputData, error: outputError }, { data: vacateData, error: vacateError }, { data: infringementData, error: infringementError }, { data: treeData, error: treeError }] = await Promise.all([
+    const [{ data, error: loadError }, { data: intakeData, error: intakeError }, { data: batchData, error: batchError }, { data: outputData, error: outputError }, { data: vacateData, error: vacateError }, { data: infringementData, error: infringementError }, { data: sourceRunData, error: sourceRunError }, { data: treeData, error: treeError }] = await Promise.all([
       supabase.from('documents').select('id,attachment_id,storage_bucket,storage_object_ref,original_filename,mime_type,sha256,uploaded_by,source_channel,organization_id,current_scope,created_at,updated_at').or(`organization_id.eq.${organizationId},organization_id.is.null`).order('updated_at', { ascending: false }).limit(250),
       supabase.from('bob_attachments').select('id,file_name,file_type,file_size_bytes,processing_state,created_at').eq('processing_state', 'pending').order('created_at', { ascending: false }).limit(50),
       supabase.from('file_import_batches').select('id,batch_name,source_file,parser,status,source_sha256,duplicate_of_batch_id,row_count,duplicate_count,unresolved_count,manifest_json,schema_json,created_at').order('created_at', { ascending: false }).limit(50),
       supabase.from('bob_generated_document_outputs').select('id,document_id,document_version_id,output_format,status,mime_type,renderer_version,sha256,storage_bucket,storage_path,requested_by,approved_by,approved_at,created_at,generated_at,documents(original_filename,source_channel,current_scope),document_versions(version_label,metadata_json)').eq('organization_id', organizationId).order('created_at', { ascending: false }).limit(100),
       supabase.from('notices_to_vacate').select('id,plate_number,status,issued_at,pdf_url').eq('organization_id', organizationId).order('issued_at', { ascending: false }).limit(100),
       supabase.from('infringement_notices').select('id,notice_number,plate_number,status,issued_at,pdf_url').eq('organization_id', organizationId).order('issued_at', { ascending: false }).limit(100),
+      supabase.from('document_source_ingestion_runs').select('id,status,phase,discovered_count,hashed_count,duplicate_count,supported_count,partial_count,gap_count,excluded_count,quarantined_count,failed_count,requested_at,heartbeat_at,completed_at,error_detail_redacted,document_reference_sources(label)').eq('organization_id', organizationId).order('requested_at', { ascending: false }).limit(5),
       supabase.rpc('get_file_explorer_tree', { p_organization_id: organizationId }),
     ]);
     if (loadError || intakeError || outputError || vacateError || infringementError || treeError) setError(loadError?.message ?? intakeError?.message ?? outputError?.message ?? vacateError?.message ?? infringementError?.message ?? treeError?.message ?? 'Files could not be loaded.');
@@ -243,6 +266,7 @@ const FileSystemPage: React.FC = () => {
       setImportBatches(batches);
       setSelectedBatchId((current) => current && batches.some((batch) => batch.id === current) ? current : batches[0]?.id ?? null);
       setGeneratedOutputs((outputData as GeneratedOutputRow[]) ?? []);
+      setDocumentSourceRuns((sourceRunData as DocumentSourceRun[]) ?? []);
       const nextTree = (treeData as FileExplorerTreeData | null) ?? EMPTY_FILE_TREE;
       setFileTree(nextTree);
       setSelectedSpaceId((current) => current && nextTree.spaces.some((item) => item.id === current) ? current : null);
@@ -251,10 +275,22 @@ const FileSystemPage: React.FC = () => {
         ...((vacateData as Array<{ id: string; plate_number: string; status: string; issued_at: string; pdf_url: string | null }> | null) ?? []).map((notice) => ({ ...notice, kind: 'notice_to_vacate' as const, label: 'Notice to vacate', notice_number: null, storage_path: notice.pdf_url })),
         ...((infringementData as Array<{ id: string; notice_number: string; plate_number: string; status: string; issued_at: string; pdf_url: string | null }> | null) ?? []).map((notice) => ({ ...notice, kind: 'infringement' as const, label: 'Infringement notice', storage_path: notice.pdf_url })),
       ].sort((left, right) => right.issued_at.localeCompare(left.issued_at)));
-      if (batchError) setNotice('Review batch history is unavailable until the file import migration is deployed.');
+      if (batchError || sourceRunError) setNotice('Some import or source-inventory history is unavailable until its migration is deployed.');
     }
     setLoading(false);
   }, [operatingOrganizationId, profile?.organizationId]);
+
+  const requestDocumentSourceAction = async (action: 'start' | 'cancel', runId?: string) => {
+    setDocumentSourceAction(true); setError(null); setNotice(null);
+    const { data, error: actionError } = await supabase.functions.invoke('bob-document-source-ingestion', {
+      body: { action, run_id: runId },
+    });
+    if (actionError) setError(actionError.message);
+    else if ((data as { error?: string } | null)?.error) setError((data as { error: string }).error);
+    else setNotice(action === 'start' ? 'Read-only document source inventory requested.' : 'Document source inventory cancellation requested.');
+    setDocumentSourceAction(false);
+    await loadDocuments();
+  };
 
   const registerAttachment = async (attachment: IntakeAttachment) => {
     setNotice(null); setError(null);
@@ -538,6 +574,10 @@ const FileSystemPage: React.FC = () => {
     <header className="file-system-header"><div><span>Organisation workspace / Files</span><h1>File system</h1><p>Find source documents, inspect provenance, and review extracted versions before anything becomes an authoritative record.</p></div><div className="file-system-header-actions"><label className="file-system-human-upload"><Upload size={17} />{uploadingFile ? 'Uploading...' : 'Upload source file'}<input type="file" aria-label="Upload source file" disabled={uploadingFile} onChange={(event) => { const file = event.target.files?.[0]; if (file) void uploadHumanIntakeFile(file); event.currentTarget.value = ''; }} /></label><button type="button" onClick={() => navigate('/admin/approvals')}><ShieldCheck size={17} />Review promotions</button><button type="button" onClick={() => void loadDocuments()} disabled={loading}><RefreshCw size={17} className={loading ? 'is-spinning' : ''} />Refresh</button></div></header>
     {error && <div className="file-system-message is-error" role="alert"><span>{error}</span><button type="button" title="Dismiss" onClick={() => setError(null)} aria-label="Dismiss error"><X size={16} /></button></div>}
     {notice && <div className="file-system-message is-success" role="status"><ShieldCheck size={16} /><span>{notice}</span><button type="button" title="Dismiss" onClick={() => setNotice(null)} aria-label="Dismiss notice"><X size={16} /></button></div>}
+    {canManageFolders && <section className="file-system-source-runs" aria-label="Approved local source inventory">
+      <div className="file-system-source-runs-heading"><div><span>Approved local source</span><h2>Bob document inventory</h2><p>Read-only enumeration, capability classification, bounded hashing, and quarantine receipts. Business records are created only through the separate governed promotion lane.</p></div><button type="button" onClick={() => void requestDocumentSourceAction('start')} disabled={documentSourceAction || documentSourceRuns.some((run) => ['queued', 'running', 'cancel_requested'].includes(run.status))}><FolderPlus size={17} />{documentSourceAction ? 'Working' : 'Start inventory'}</button></div>
+      {documentSourceRuns.length === 0 ? <p className="file-system-muted">No source inventory has been requested.</p> : <div className="file-system-source-run-list">{documentSourceRuns.map((run) => { const source = relationOne(run.document_reference_sources); const active = ['queued', 'running', 'cancel_requested'].includes(run.status); return <article key={run.id} className={searchParams.get('sourceRun') === run.id ? 'is-selected' : ''}><div><strong>{source?.label ?? 'Approved source'}</strong><span>{run.status.replaceAll('_', ' ')} · {run.phase}</span><small>Requested {new Date(run.requested_at).toLocaleString('en-NZ')}{run.heartbeat_at ? ` · Last receipt ${new Date(run.heartbeat_at).toLocaleTimeString('en-NZ')}` : ''}</small></div><dl><div><dt>Discovered</dt><dd>{run.discovered_count.toLocaleString()}</dd></div><div><dt>Hashed</dt><dd>{run.hashed_count.toLocaleString()}</dd></div><div><dt>Duplicates</dt><dd>{run.duplicate_count.toLocaleString()}</dd></div><div><dt>Supported</dt><dd>{run.supported_count.toLocaleString()}</dd></div><div><dt>Partial</dt><dd>{run.partial_count.toLocaleString()}</dd></div><div><dt>Gaps</dt><dd>{run.gap_count.toLocaleString()}</dd></div><div><dt>Excluded</dt><dd>{run.excluded_count.toLocaleString()}</dd></div><div><dt>Quarantined</dt><dd>{run.quarantined_count.toLocaleString()}</dd></div></dl>{run.error_detail_redacted && <p role="alert">{run.error_detail_redacted}</p>}{active && <button type="button" onClick={() => void requestDocumentSourceAction('cancel', run.id)} disabled={documentSourceAction}>Cancel inventory</button>}</article>; })}</div>}
+    </section>}
     <details className="file-system-import-tools">
       <summary><span>Structured data imports</span><small>{importBatches.length} review batch{importBatches.length === 1 ? '' : 'es'}</small></summary>
       <section className="file-system-intake" aria-label="Structured data import preview">
