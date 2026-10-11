@@ -128,9 +128,10 @@ test('fixture human QA does not receive live identity variables', () => {
     sourceDir: '/tmp/source',
     artifactDir: '/tmp/artifacts',
     profile: 'human-qa',
-    environment: { HUMAN_TEST_LIVE: 'false' }
+    environment: { HUMAN_TEST_LIVE: 'false', E2E_OFFLINE: '1' }
   });
   assert.ok(args.includes('HUMAN_TEST_LIVE'));
+  assert.ok(args.includes('E2E_OFFLINE'));
   assert.equal(args.includes('HUMAN_TEST_BASE_URL'), false);
   assert.equal(args.includes('GRANDMASTER_TEST_EMAIL'), false);
   assert.equal(args.includes('GRANDMASTER_TEST_PASSWORD'), false);

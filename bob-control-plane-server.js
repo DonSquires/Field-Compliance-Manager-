@@ -292,11 +292,12 @@ async function startHumanTestRun({ mode, scope, requestedBy }) {
               GRANDMASTER_TEST_EMAIL: process.env.GRANDMASTER_TEST_EMAIL,
               GRANDMASTER_TEST_PASSWORD: process.env.GRANDMASTER_TEST_PASSWORD
             }
-          : { HUMAN_TEST_LIVE: 'false' }
+          : { HUMAN_TEST_LIVE: 'false', E2E_OFFLINE: '1' }
       });
       run.status = result.status;
       run.exit_code = result.exitCode;
       run.summary = humanTestSummary(result);
+      fs.writeFileSync(path.join(artifactDir, 'human-test-output.log'), `${result.stdout || ''}\n${result.stderr || ''}`, { mode: 0o600 });
       fs.writeFileSync(path.join(artifactDir, 'human-test-receipt.json'), JSON.stringify({
         run_id: id,
         mode,

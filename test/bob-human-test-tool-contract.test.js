@@ -20,6 +20,7 @@ test('Bob human testing is backed by durable control-plane start and status rece
   assert.match(controlPlane, /humanTestRuns: \[\.\.\.humanTestRuns\.values\(\)\]/);
   assert.match(controlPlane, /\/api\/bob\/human-tests\/latest/);
   assert.match(controlPlane, /human-test-receipt\.json/);
+  assert.match(controlPlane, /human-test-output\.log/);
 });
 
 test('live human testing requires the dedicated configured test identity', () => {
@@ -32,5 +33,5 @@ test('live human testing requires the dedicated configured test identity', () =>
 test('fixture human testing has a bounded browser-sized resource profile', () => {
   assert.match(controlPlane, /mode === 'live' \? '2g' : '8g'/);
   assert.match(controlPlane, /mode === 'live' \? 256 : 1024/);
-  assert.match(controlPlane, /mode === 'live'[\s\S]*GRANDMASTER_TEST_PASSWORD[\s\S]*: \{ HUMAN_TEST_LIVE: 'false' \}/);
+  assert.match(controlPlane, /mode === 'live'[\s\S]*GRANDMASTER_TEST_PASSWORD[\s\S]*: \{ HUMAN_TEST_LIVE: 'false', E2E_OFFLINE: '1' \}/);
 });
