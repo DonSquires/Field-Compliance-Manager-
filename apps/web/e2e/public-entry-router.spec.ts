@@ -25,9 +25,17 @@ test('a signed-in client accepts the capability-share token through the governed
 
 test('scan operators enter the scan station but admins are redirected to their role portal', async ({ page }) => {
   await installSupabaseFixtures(page, { adminRole: 'scan_operator' });
+  await page.route('**/rest/v1/service_agreement_modules*', async (route) => {
+    await route.fulfill({
+      status: 200,
+      contentType: 'application/json',
+      body: JSON.stringify([{ service_agreement_id: '24242424-2424-4424-8424-242424242424', module_key: 'freedom_camping', enabled: true, standalone_scan_enabled: true }]),
+    });
+  });
   await signInAsAdmin(page, '/scan');
   await expect(page).toHaveURL(/\/scan$/);
-  await expect(page.getByText('No standalone scan module is enabled', { exact: true })).toBeVisible();
+  await expect(page.getByRole('heading', { name: 'Vehicle scan' })).toBeVisible();
+  await expect(page.getByRole('button', { name: /Capture vehicle.*rear camera/i })).toBeVisible();
 
   await page.evaluate(() => {
     window.localStorage.clear();
