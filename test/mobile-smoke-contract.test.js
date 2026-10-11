@@ -33,3 +33,16 @@ test('mobile smoke control panel states machine authority and blocked requiremen
   assert.match(source, /accessibilityRole="checkbox"/);
   assert.match(source, /minHeight: 44/);
 });
+
+test('mobile smoke evidence time and source confirmation follow the captured evidence', () => {
+  assert.match(source, /const capturedAt = new Date\(\)\.toISOString\(\)/);
+  assert.match(source, /assessedAt\.current = capturedAt/);
+  assert.match(source, /setImageCapturedAt\(capturedAt\)/);
+  assert.match(source, /Captured \{imageCapturedAt/);
+  assert.match(source, /const canConfirmSource = Boolean\(address\.trim\(\)\) && Boolean\(imageBase64\)/);
+  assert.match(source, /disabled=\{!canConfirmSource\}/);
+  assert.match(source, /setAddress\(value\);[\s\S]*?setSourceConfirmed\(false\)/);
+  assert.match(source, /setSmokeSourceType\(val\);[\s\S]*?setSourceConfirmed\(false\)/);
+  assert.match(source, /setImageBase64\(null\);[\s\S]*?setSourceConfirmed\(false\);[\s\S]*?assessedAt\.current = null/);
+  assert.doesNotMatch(source, /useRef\(new Date\(\)\.toISOString\(\)\)/);
+});
