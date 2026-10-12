@@ -101,6 +101,11 @@ test('failure path detection runs before evidence truncation drops the Vitest he
   assert.equal(failure.stdout.length <= 8000, true);
 });
 
+test('worker errors are retained in a bounded summary when no test path is reported', () => {
+  const failure = summarizeFailure({ status: 'failed', exitCode: 1, stdout: 'npm run build\nError: browser binary not found\n', stderr: '' });
+  assert.match(failure.summary, /browser binary not found/);
+});
+
 test('main-health Builder RPC binds bot provenance without inventing a human requester', () => {
   const migration = fs.readFileSync(path.resolve(__dirname, '../supabase/migrations/20261012045502_bob_main_health_repairs.sql'), 'utf8');
   assert.match(migration, /builder_open_main_health_repair/);

@@ -10,12 +10,14 @@ function summarizeFailure(result) {
   const stdout = String(result?.stdout || '').slice(-8000);
   const stderr = String(result?.stderr || '').slice(-4000);
   const output = `${stdout}\n${stderr}`;
-  const assertions = output.split(/\r?\n/).filter((line) => /AssertionError|Test Files\s|\bfailed\b/i.test(line)).slice(-20);
+  const allLines = fullOutput.split(/\r?\n/);
+  const assertions = allLines.filter((line) => /AssertionError|Test Files\s|\bfailed\b/i.test(line)).slice(-20);
+  const diagnostics = allLines.filter((line) => /\b(error|enoent|eacces|not found|timed out|timeout|cannot|failed)\b/i.test(line)).slice(-30);
   return {
     profile: result?.profile || 'main-health',
     exit_code: Number.isInteger(result?.exitCode) ? result.exitCode : null,
     failing_tests: failingTests,
-    summary: (failingTests.length ? failingTests : assertions).join('\n').slice(-3000),
+    summary: (failingTests.length ? failingTests : assertions.length ? assertions : diagnostics).join('\n').slice(-3000),
     stdout,
     stderr,
   };
