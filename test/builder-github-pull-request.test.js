@@ -75,11 +75,17 @@ test('GitHub adapter opens verified PRs and exposes only the guarded direct merg
 
 test('GitHub credentials travel as a per-invocation header, never inside a remote URL', () => {
   assert.equal(workspace.githubRepoUrl('DonSquires', 'Field-Compliance-Manager-'), 'https://github.com/DonSquires/Field-Compliance-Manager-.git');
+  assert.equal(workspace.githubSshRepoUrl('DonSquires', 'Field-Compliance-Manager-'), 'git@github.com:DonSquires/Field-Compliance-Manager-.git');
   assert.throws(() => workspace.githubRepoUrl('Don/Squires', 'x'), /coordinates are invalid/);
+  assert.throws(() => workspace.githubSshRepoUrl('Don/Squires', 'x'), /coordinates are invalid/);
   assert.equal(workspace.githubAuthHeader('tok'), `Authorization: Basic ${Buffer.from('x-access-token:tok').toString('base64')}`);
   assert.throws(() => workspace.githubAuthHeader(''), /GitHub token is not configured/);
   assert.match(adapter, /http\.extraheader=\$\{pushAuthHeader\}/);
   assert.match(adapter, /credential-free URL/);
+  assert.match(adapter, /GIT_SSH_COMMAND: sshCommand/);
+  assert.match(controlPlane, /BOB_GITHUB_ACCESS_TOKEN \|\| process\.env\.GITHUB_API_TOKEN/);
+  assert.match(controlPlane, /BOB_GITHUB_SSH_KEY_FILE/);
+  assert.match(controlPlane, /BOB_GITHUB_KNOWN_HOSTS_FILE/);
   assert.throws(() => workspace.publishWorkspaceBranch({ workspacePath: '/nonexistent', branchName: 'feature/x', expectedHeadSha: 'a'.repeat(40), pushUrl: 'https://user:tok@github.com/o/r.git' }), /Builder workspace branch is invalid|credential-free URL/);
 });
 
@@ -96,14 +102,18 @@ test('a failing git command never echoes an auth header or embedded credential',
 
 test('control plane routes publication and pull requests by git host and keeps git available in the image', () => {
   assert.match(controlPlane, /const builderGitHost = 'github'/);
-  assert.match(controlPlane, /const builderSourceConfigured = Boolean\(githubToken && githubOwner && githubRepo\)/);
-  // The source host is GitHub only; pushes use a per-invocation header, never .git/config credentials.
-  assert.match(controlPlane, /publishWorkspaceBranch\(\{ workspacePath, branchName: job\.workspace_branch, expectedHeadSha: job\.workspace_head_sha, pushUrl: target\.repoUrl, pushAuthHeader: target\.authHeader \}\)/);
+  assert.match(controlPlane, /BOB_GITHUB_ACCESS_TOKEN \|\| process\.env\.GITHUB_API_TOKEN/);
+  assert.match(controlPlane, /BOB_GITHUB_SSH_KEY_FILE/);
+  assert.match(controlPlane, /BOB_GITHUB_KNOWN_HOSTS_FILE/);
+  assert.match(controlPlane, /const builderSourceConfigured = Boolean\(\(githubSshConfigured \|\| builderApiConfigured\)/);
+  // Git transport uses the deployed SSH identity; PR operations require a separate durable API token.
+  assert.match(controlPlane, /publishWorkspaceBranch\(\{ workspacePath, branchName: job\.workspace_branch, expectedHeadSha: job\.workspace_head_sha, pushUrl: target\.repoUrl, pushAuthHeader: target\.authHeader, sshCommand: target\.sshCommand \}\)/);
   assert.match(controlPlane, /builderGitHost === 'github'\s*\?\s*await createGitHubPullRequest/);
   assert.match(controlPlane, /mergeGitHubPullRequest\(\{ number: pullRequest\.number/);
   assert.match(controlPlane, /mainHealthEnabled/);
   assert.match(controlPlane, /\/api\/bob\/builder\/repository\/head/);
-  assert.match(controlPlane, /ensureSourceCheckout\(\{ sourceDir: builderSourceDir, repoUrl: target\.repoUrl, authHeader: target\.authHeader, sha: targetSha \}\)/);
+  assert.match(controlPlane, /const sourceDir = selectBuilderSourceDir\(target\.repoUrl\)/);
+  assert.match(controlPlane, /ensureSourceCheckout\(\{ sourceDir, repoUrl: target\.repoUrl, authHeader: target\.authHeader, sshCommand: target\.sshCommand, sha: targetSha \}\)/);
   // Git work never starts from the image copy (it has no .git); assessment reads may.
   assert.doesNotMatch(controlPlane, /createBranchWorkspace\(\{ sourceDir: assessmentRoot/);
   assert.match(dockerfile, /apk add --no-cache git/);

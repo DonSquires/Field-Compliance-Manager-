@@ -2,6 +2,7 @@ const http = require('http');
 const crypto = require('crypto');
 const fs = require('fs');
 const path = require('path');
+const { execFileSync } = require('node:child_process');
 // Node's fetch gives up waiting for response headers after five minutes; a model run on the VPS CPU
 // (and the gateway call that wraps it) can take longer. One dispatcher with the model budget for all.
 {
@@ -21,7 +22,7 @@ const { loadBuilderRuntimeSnapshot, advanceBuilderJob, runBuilderUntilPause, rec
 const { fileSha256, listRepositoryTree, readRepositoryFile, searchRepository } = require('./builder-repository-read');
 const { autopilotTick, listAutopilotJobs, listPendingApprovals } = require('./builder-autopilot');
 const { laptopStatus, runLaptopCommand, laptopConfig, loadLaptopLink, mergeLaptopLink, describeLink } = require('./bob-laptop-shell');
-const { createBranchWorkspace, commitVerifiedPatch, publishWorkspaceBranch, createGiteaPullRequest, workspacePathForBranch, createGitHubPullRequest, mergeGitHubPullRequest, ensureSourceCheckout, githubAuthHeader, githubRepoUrl, resolveRemoteHead, redactGitError } = require('./builder-branch-workspace');
+const { createBranchWorkspace, commitVerifiedPatch, publishWorkspaceBranch, createGiteaPullRequest, workspacePathForBranch, createGitHubPullRequest, mergeGitHubPullRequest, ensureSourceCheckout, githubAuthHeader, githubRepoUrl, githubSshRepoUrl, resolveRemoteHead, redactGitError } = require('./builder-branch-workspace');
 const { executeWorker, summarizeHumanTest } = require('./worker-executor');
 const { createMainHealthMonitor } = require('./bob-main-health');
 
@@ -65,15 +66,23 @@ const giteaToken = process.env.GITEA_TOKEN || '';
 const giteaOwner = process.env.GITEA_OWNER || '';
 const giteaRepo = process.env.GITEA_REPO || '';
 const giteaUsername = process.env.GITEA_USERNAME || '';
-// GitHub is the single target build; Gitea stays available as the mirror host.
-// Without a GitHub token the Builder publishes to Gitea and the
-// bob-builder-bridge GitHub Action carries bob/job-* branches to GitHub as draft PRs.
-const githubToken = process.env.GITHUB_TOKEN || '';
-const githubOwner = process.env.GITHUB_OWNER || '';
-const githubRepo = process.env.GITHUB_REPO || '';
+// GitHub is the only source host. SSH deploy-key auth is for Git transport;
+// PR/review APIs require a separate durable token in the VPS environment.
+const githubToken = process.env.BOB_GITHUB_ACCESS_TOKEN || process.env.GITHUB_API_TOKEN || '';
+const githubOwner = process.env.GITHUB_OWNER || 'DonSquires';
+const githubRepo = process.env.GITHUB_REPO || 'Field-Compliance-Manager-';
 const builderGitHost = 'github';
-const builderSourceConfigured = Boolean(githubToken && githubOwner && githubRepo);
-const builderSourceDir = process.env.BOB_BUILDER_SOURCE_DIR || path.join(stateDir, 'builder-source');
+const githubSshKeyFile = path.resolve(process.env.BOB_GITHUB_SSH_KEY_FILE || '/data/github/bob-fcm-main');
+const githubKnownHostsFile = path.resolve(process.env.BOB_GITHUB_KNOWN_HOSTS_FILE || '/data/github/known_hosts');
+const githubSshConfigured = fs.existsSync(githubSshKeyFile) && fs.existsSync(githubKnownHostsFile)
+  && /^[A-Za-z0-9_./-]+$/.test(githubSshKeyFile)
+  && /^[A-Za-z0-9_./-]+$/.test(githubKnownHostsFile);
+const githubSshCommand = githubSshConfigured
+  ? `ssh -i ${githubSshKeyFile} -o IdentitiesOnly=yes -o UserKnownHostsFile=${githubKnownHostsFile} -o StrictHostKeyChecking=yes -o BatchMode=yes`
+  : null;
+const builderApiConfigured = Boolean(githubToken && githubOwner && githubRepo);
+const builderSourceConfigured = Boolean((githubSshConfigured || builderApiConfigured) && githubOwner && githubRepo);
+let builderSourceDir = process.env.BOB_BUILDER_SOURCE_DIR || path.join(stateDir, 'builder-source');
 
 function giteaRepoUrl() {
   if (!giteaBaseUrl || !giteaOwner || !giteaRepo) throw new Error('Builder Gitea repository is not configured');
@@ -87,9 +96,29 @@ function giteaGitAuthHeader() {
 }
 
 function builderGitTarget() {
-  return builderGitHost === 'github'
-    ? { host: 'github', repoUrl: githubRepoUrl(githubOwner, githubRepo), authHeader: githubAuthHeader(githubToken) }
-    : { host: 'gitea', repoUrl: giteaRepoUrl(), authHeader: giteaGitAuthHeader() };
+  return {
+    host: 'github',
+    repoUrl: githubSshConfigured ? githubSshRepoUrl(githubOwner, githubRepo) : githubRepoUrl(githubOwner, githubRepo),
+    authHeader: githubSshConfigured || !githubToken ? null : githubAuthHeader(githubToken),
+    sshCommand: githubSshCommand,
+  };
+}
+
+function selectBuilderSourceDir(repoUrl) {
+  if (!fs.existsSync(path.join(builderSourceDir, '.git'))) return builderSourceDir;
+  let currentRemote = '';
+  try { currentRemote = execFileSync('git', ['remote', 'get-url', 'origin'], { cwd: builderSourceDir, encoding: 'utf8', stdio: ['ignore', 'pipe', 'ignore'] }).trim(); } catch {}
+  if (currentRemote === repoUrl) return builderSourceDir;
+
+  const githubSourceDir = process.env.BOB_GITHUB_BUILDER_SOURCE_DIR
+    || path.join(path.dirname(builderSourceDir), `${path.basename(builderSourceDir)}-github`);
+  if (fs.existsSync(path.join(githubSourceDir, '.git'))) {
+    let githubRemote = '';
+    try { githubRemote = execFileSync('git', ['remote', 'get-url', 'origin'], { cwd: githubSourceDir, encoding: 'utf8', stdio: ['ignore', 'pipe', 'ignore'] }).trim(); } catch {}
+    if (githubRemote !== repoUrl) throw new Error('GitHub Builder source path points at an unexpected repository');
+  }
+  builderSourceDir = githubSourceDir;
+  return builderSourceDir;
 }
 
 // Where git work (worktrees, commits, pushes) starts from: a real clone kept at
@@ -97,12 +126,13 @@ function builderGitTarget() {
 // only read for assessment.
 function builderGitSource(targetSha) {
   const target = builderGitTarget();
-  return ensureSourceCheckout({ sourceDir: builderSourceDir, repoUrl: target.repoUrl, authHeader: target.authHeader, sha: targetSha }).sourceDir;
+  const sourceDir = selectBuilderSourceDir(target.repoUrl);
+  return ensureSourceCheckout({ sourceDir, repoUrl: target.repoUrl, authHeader: target.authHeader, sshCommand: target.sshCommand, sha: targetSha }).sourceDir;
 }
 
 function builderRepositoryHead(ref = 'main') {
   const target = builderGitTarget();
-  return { host: target.host, ref, sha: resolveRemoteHead({ repoUrl: target.repoUrl, authHeader: target.authHeader, ref }) };
+  return { host: target.host, ref, sha: resolveRemoteHead({ repoUrl: target.repoUrl, authHeader: target.authHeader, sshCommand: target.sshCommand, ref }) };
 }
 
 // Read-only repository views for Bob's chat tools: pinned to main's head (re-resolved at most
@@ -428,7 +458,7 @@ async function publishBuilderBranch(jobId) {
   if (job.workspace_published_head_sha === job.workspace_head_sha) return { branch: job.workspace_branch, head: job.workspace_head_sha, existing: true };
   const workspacePath = workspacePathForBranch(builderWorkspaceRoot, job.workspace_branch);
   const target = builderGitTarget();
-  const publication = publishWorkspaceBranch({ workspacePath, branchName: job.workspace_branch, expectedHeadSha: job.workspace_head_sha, pushUrl: target.repoUrl, pushAuthHeader: target.authHeader });
+  const publication = publishWorkspaceBranch({ workspacePath, branchName: job.workspace_branch, expectedHeadSha: job.workspace_head_sha, pushUrl: target.repoUrl, pushAuthHeader: target.authHeader, sshCommand: target.sshCommand });
   const { data: updated, error } = await builderSupabase.rpc('builder_record_workspace_publication', { _job_id: job.id, _expected_head_sha: publication.head });
   if (error || !updated) throw new BuilderStepError(409, 'Builder branch publication could not be recorded');
   return { branch: publication.branchName, head: publication.head, existing: false };
@@ -490,7 +520,7 @@ async function routineBuilderProject() {
 const mainHealthEnabled = autopilotEnabled
   && process.env.BOB_MAIN_HEALTH !== 'false'
   && builderGitHost === 'github'
-  && Boolean(builderSupabase && modelGatewayToken && builderWorkerImage && builderSourceConfigured);
+  && Boolean(builderSupabase && modelGatewayToken && builderWorkerImage && builderSourceConfigured && builderApiConfigured);
 
 function mainHealthState(sha) {
   return mainHealthRuns.get(sha) ?? null;
@@ -641,7 +671,7 @@ async function startRoutineRepairs() {
 }
 
 async function autopilotOnce() {
-  if (autopilotBusy || !builderSupabase || !modelGatewayToken || !builderWorkerImage || !builderSourceConfigured) return [];
+  if (autopilotBusy || !builderSupabase || !modelGatewayToken || !builderWorkerImage || !builderSourceConfigured || !builderApiConfigured) return [];
   autopilotBusy = true;
   try {
     if (mainHealthEnabled) await mainHealthMonitor.tick();
@@ -812,7 +842,7 @@ async function route(req, res, body) {
     const laptopLink = await loadLaptopLink(builderSupabase).catch(() => null);
     const laptop = laptopConfig(mergeLaptopLink(process.env, laptopLink));
     const latestMainHealth = [...mainHealthRuns.values()].sort((left, right) => String(right.checked_at || right.started_at).localeCompare(String(left.checked_at || left.started_at)))[0] ?? null;
-    return json(res, 200, { status: 'ok', service: 'bob-control-plane', activeLease: Boolean(activeLease), builderGitHost, builderSourceConfigured, autopilot: autopilotEnabled && Boolean(builderSupabase && modelGatewayToken && builderWorkerImage && builderSourceConfigured), autopilotIntervalMs, mainHealth: { enabled: mainHealthEnabled, sourceHost: builderGitHost, latest: latestMainHealth ? { sha: latestMainHealth.sha, status: latestMainHealth.status, job_id: latestMainHealth.job_id ?? null, checked_at: latestMainHealth.checked_at ?? null } : null }, runningBuilderJobs: runningBuilderJobs.size, modelProviders: Object.fromEntries(Object.entries(providers).map(([name, p]) => [name, { configured: p.configured, healthy: p.healthy, ready_model: p.ready_model }])), laptopShell: { enabled: laptop.enabled, configured: laptop.configured, host: laptop.host || null, ssh_allowed: laptopLink ? laptopLink.ssh_allowed === true : null } });
+    return json(res, 200, { status: 'ok', service: 'bob-control-plane', activeLease: Boolean(activeLease), builderGitHost, builderSourceConfigured, builderApiConfigured, builderSshConfigured: Boolean(githubSshCommand), autopilot: autopilotEnabled && Boolean(builderSupabase && modelGatewayToken && builderWorkerImage && builderSourceConfigured && builderApiConfigured), autopilotIntervalMs, mainHealth: { enabled: mainHealthEnabled, sourceHost: builderGitHost, latest: latestMainHealth ? { sha: latestMainHealth.sha, status: latestMainHealth.status, job_id: latestMainHealth.job_id ?? null, checked_at: latestMainHealth.checked_at ?? null } : null }, runningBuilderJobs: runningBuilderJobs.size, modelProviders: Object.fromEntries(Object.entries(providers).map(([name, p]) => [name, { configured: p.configured, healthy: p.healthy, ready_model: p.ready_model }])), laptopShell: { enabled: laptop.enabled, configured: laptop.configured, host: laptop.host || null, ssh_allowed: laptopLink ? laptopLink.ssh_allowed === true : null } });
   }
   if (req.method === 'GET' && url.pathname === '/api/bob/builder/model-health') {
     if (!modelGatewayAuthorized(req) && !authorized(req)) return json(res, 401, { error: 'model gateway unauthorized' });

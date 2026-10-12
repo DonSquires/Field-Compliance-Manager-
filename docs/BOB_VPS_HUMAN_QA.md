@@ -18,13 +18,19 @@ endpoint as `mainHealth.latest`. Timeouts, worker launch errors, or a moved
 `main` SHA are retried/discarded; they do not classify the repository as red.
 
 To activate this loop, the VPS control-plane environment must have the durable
-direct-GitHub configuration `GITHUB_TOKEN`, `GITHUB_OWNER=DonSquires`,
+direct-GitHub configuration `BOB_GITHUB_ACCESS_TOKEN`, `GITHUB_OWNER=DonSquires`,
 `GITHUB_REPO=Field-Compliance-Manager-`, and `BOB_AUTOPILOT_AUTOMERGE=true`, in
 addition to the existing Supabase, model gateway, and worker image settings.
-The token belongs only in `/var/lib/bob/control-plane.env`; never put it in the
-repository, a prompt, a test artifact, or a browser. `/health` must report
-`builderGitHost: github`, `builderSourceConfigured: true`, and
-`mainHealth.enabled: true` before the loop is considered active.
+The Git deploy key is installed at `/var/lib/bob/github/bob-fcm-main` and its
+GitHub host key is pinned in `/var/lib/bob/github/known_hosts`. The separate
+`BOB_GITHUB_ACCESS_TOKEN` grants the VPS PR API access. Add both values as
+Codespace secrets; after adding them, reopen the Codespace so they are injected,
+then run `scripts/bob-vps-enable-github-main-health.sh` once. That script
+validates both access paths, transfers the API token over SSH stdin, deploys the
+control plane, and checks its health receipt. Tokens are never printed. `/health`
+must report `builderGitHost: github`, `builderSshConfigured: true`,
+`builderApiConfigured: true`, and `mainHealth.enabled: true` before the loop is
+considered active.
 
 ## Automatic Repair Boundary
 

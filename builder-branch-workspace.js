@@ -24,6 +24,10 @@ function git(directory, args, options = {}) {
   }
 }
 
+function sshOptions(sshCommand) {
+  return sshCommand ? { env: { ...process.env, GIT_SSH_COMMAND: sshCommand } } : {};
+}
+
 function branchNameForJob(jobId) {
   const normalized = String(jobId ?? '').toLowerCase().replace(/[^a-z0-9]/g, '');
   if (normalized.length < 8) throw new Error('Builder job id is invalid');
@@ -103,21 +107,22 @@ function commitVerifiedPatch({ workspacePath, branchName, patch, message, body =
   }
 }
 
-function publishWorkspaceBranch({ workspacePath, branchName, expectedHeadSha, pushUrl = null, pushAuthHeader = null }) {
+function publishWorkspaceBranch({ workspacePath, branchName, expectedHeadSha, pushUrl = null, pushAuthHeader = null, sshCommand = null }) {
   if (!branchName.startsWith(BRANCH_PREFIX) || git(workspacePath, ['branch', '--show-current']) !== branchName) throw new Error('Builder workspace branch is invalid');
   if (git(workspacePath, ['status', '--porcelain', '--untracked-files=normal'])) throw new Error('Builder workspace must be clean before publication');
   const head = git(workspacePath, ['rev-parse', 'HEAD']);
   if (head !== expectedHeadSha) throw new Error('Builder workspace head is stale');
   if (pushUrl) {
-    // Credentials travel as a per-invocation header, never inside the URL or .git/config.
-    // Plain http is only ever the compose-internal Gitea address; GitHub is always https.
-    if (!/^https?:\/\/[^\s@]+$/.test(String(pushUrl))) throw new Error('Builder push URL must be a credential-free URL');
-    git(workspacePath, [...(pushAuthHeader ? ['-c', `http.extraheader=${pushAuthHeader}`] : []), 'push', pushUrl, `HEAD:refs/heads/${branchName}`]);
+    // Credentials travel per invocation, never inside the remote URL or .git/config.
+    const credentialFreeHttp = /^https?:\/\/[^\s@]+$/.test(String(pushUrl));
+    const credentialFreeGithubSsh = /^git@github\.com:[A-Za-z0-9_.-]+\/[A-Za-z0-9_.-]+\.git$/.test(String(pushUrl));
+    if (!credentialFreeHttp && !credentialFreeGithubSsh) throw new Error('Builder push URL must be a credential-free URL');
+    git(workspacePath, [...(pushAuthHeader ? ['-c', `http.extraheader=${pushAuthHeader}`] : []), 'push', pushUrl, `HEAD:refs/heads/${branchName}`], sshOptions(sshCommand));
     return { branchName, head, remote: pushUrl };
   }
   const remote = git(workspacePath, ['remote', 'get-url', 'origin']);
   if (!remote) throw new Error('Builder workspace has no origin remote');
-  git(workspacePath, ['push', 'origin', `HEAD:refs/heads/${branchName}`]);
+  git(workspacePath, ['push', 'origin', `HEAD:refs/heads/${branchName}`], sshOptions(sshCommand));
   return { branchName, head, remote };
 }
 
@@ -136,27 +141,33 @@ function githubRepoUrl(owner, repo) {
   return `https://github.com/${owner}/${repo}.git`;
 }
 
-function resolveRemoteHead({ repoUrl, authHeader = null, ref = 'main', cwd = os.tmpdir() }) {
+function githubSshRepoUrl(owner, repo) {
+  if (!/^[A-Za-z0-9_.-]+$/.test(String(owner)) || !/^[A-Za-z0-9_.-]+$/.test(String(repo))) throw new Error('GitHub repository coordinates are invalid');
+  return `git@github.com:${owner}/${repo}.git`;
+}
+
+function resolveRemoteHead({ repoUrl, authHeader = null, sshCommand = null, ref = 'main', cwd = os.tmpdir() }) {
   if (!/^[A-Za-z0-9_./-]+$/.test(String(ref))) throw new Error('Git ref is invalid');
-  const output = git(cwd, [...(authHeader ? ['-c', `http.extraheader=${authHeader}`] : []), 'ls-remote', repoUrl, `refs/heads/${ref}`]);
+  const output = git(cwd, [...(authHeader ? ['-c', `http.extraheader=${authHeader}`] : []), 'ls-remote', repoUrl, `refs/heads/${ref}`], sshOptions(sshCommand));
   const sha = output.split(/\s+/)[0] || '';
   if (!/^[a-f0-9]{40}$/i.test(sha)) throw new Error(`Remote ref ${ref} could not be resolved`);
   return sha;
 }
 
 /** Keep a persistent, detached checkout of the repository at exactly `sha` (clone on first use). */
-function ensureSourceCheckout({ sourceDir, repoUrl, authHeader = null, sha }) {
+function ensureSourceCheckout({ sourceDir, repoUrl, authHeader = null, sshCommand = null, sha }) {
   if (!/^[a-f0-9]{40}$/i.test(String(sha ?? ''))) throw new Error('Builder target SHA must be a full Git SHA');
   const authArgs = authHeader ? ['-c', `http.extraheader=${authHeader}`] : [];
+  const transportOptions = sshOptions(sshCommand);
   fs.mkdirSync(path.dirname(path.resolve(sourceDir)), { recursive: true, mode: 0o700 });
   if (!fs.existsSync(path.join(sourceDir, '.git'))) {
-    git(path.dirname(path.resolve(sourceDir)), [...authArgs, 'clone', '--no-checkout', repoUrl, path.resolve(sourceDir)]);
+    git(path.dirname(path.resolve(sourceDir)), [...authArgs, 'clone', '--no-checkout', repoUrl, path.resolve(sourceDir)], transportOptions);
   }
   if (git(sourceDir, ['remote', 'get-url', 'origin']) !== repoUrl) throw new Error('Builder source checkout points at an unexpected repository');
   try {
     git(sourceDir, ['cat-file', '-e', `${sha}^{commit}`]);
   } catch {
-    git(sourceDir, [...authArgs, 'fetch', '--prune', 'origin', '+refs/heads/*:refs/remotes/origin/*']);
+    git(sourceDir, [...authArgs, 'fetch', '--prune', 'origin', '+refs/heads/*:refs/remotes/origin/*'], transportOptions);
   }
   git(sourceDir, ['checkout', '--detach', '--force', sha]);
   git(sourceDir, ['clean', '-fdx']);
@@ -248,4 +259,4 @@ function publicGiteaUrl(url, { baseUrl, publicBaseUrl }) {
   return url;
 }
 
-module.exports = { BRANCH_PREFIX, BUILDER_NAME, BUILDER_EMAIL, branchNameForJob, workspacePathForBranch, createBranchWorkspace, commitVerifiedPatch, publishWorkspaceBranch, giteaRepositoryPath, createGiteaPullRequest, publicGiteaUrl, verifySnapshot, githubAuthHeader, githubRepoUrl, resolveRemoteHead, ensureSourceCheckout, createGitHubPullRequest, mergeGitHubPullRequest, redactGitError };
+module.exports = { BRANCH_PREFIX, BUILDER_NAME, BUILDER_EMAIL, branchNameForJob, workspacePathForBranch, createBranchWorkspace, commitVerifiedPatch, publishWorkspaceBranch, giteaRepositoryPath, createGiteaPullRequest, publicGiteaUrl, verifySnapshot, githubAuthHeader, githubRepoUrl, githubSshRepoUrl, resolveRemoteHead, ensureSourceCheckout, createGitHubPullRequest, mergeGitHubPullRequest, redactGitError };
