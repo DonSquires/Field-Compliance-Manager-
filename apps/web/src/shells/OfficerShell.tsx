@@ -222,16 +222,14 @@ const OfficerShell: React.FC = () => {
     }
     setActiveModule(module);
 
-    if (!activeShift && !module) {
-      setOfficerState('standby');
-    } else if (activeShift && !module) {
-      setOfficerState('home');
-    } else if (grantedModules.length > 1 && !module) {
+    if (module === 'modules') {
       setOfficerState('selector');
     } else if (module) {
       setOfficerState('portal');
-    } else {
+    } else if (activeShift) {
       setOfficerState('home');
+    } else {
+      setOfficerState('standby');
     }
   }, [location.pathname, activeShift, grantedModules, moduleStatus, canAccessOfficerModule, moduleFromUrl, navigate]);
 
@@ -305,7 +303,7 @@ const OfficerShell: React.FC = () => {
 
   // Navigate to module
   const navigateToModule = useCallback((module: ActiveModule) => {
-    if (module === null || module === 'modules') {
+    if (module === null) {
       navigate('/officer');
       setActiveModule(null);
       return;

@@ -23,6 +23,7 @@
 }
 
 .officer-shell-brand {
+  flex-shrink: 0;
   display: flex;
   align-items: center;
   gap: 10px;
@@ -79,6 +80,7 @@
 
 .officer-shell-tools {
   display: flex;
+  flex-shrink: 1;
   align-items: center;
   gap: 8px;
 }
@@ -391,6 +393,16 @@
 @media (max-width: 620px) {
   .officer-shell-header {
     padding: 0 10px;
+    gap: 8px;
+  }
+
+  .officer-shell-tools {
+    gap: 5px;
+  }
+
+  .officer-connectivity-chip {
+    padding: 0 6px;
+    font-size: 11px;
   }
 
   .officer-shell-brand strong {
@@ -418,9 +430,18 @@
   }
 }
 
-@media (max-width: 410px) {
+@media (max-width: 480px) {
+  .officer-shell-header {
+    gap: 6px;
+  }
+
   .officer-shell-brand strong {
-    max-width: 112px;
+    max-width: 90px;
+  }
+
+  .officer-shell-tools {
+    flex-shrink: 0;
+    gap: 3px;
   }
 
   .officer-safety-chip {
@@ -429,6 +450,9 @@
   }
 
   .officer-safety-chip small,
+  .officer-safety-chip span + small,
+  .help-instructions-trigger,
+  .officer-offer-count,
   .officer-shell-brand small {
     display: none;
   }
