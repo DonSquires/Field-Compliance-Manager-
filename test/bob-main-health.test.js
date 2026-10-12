@@ -73,6 +73,17 @@ test('failure summaries identify test paths and never exceed the evidence budget
   assert.equal(failure.stderr.length <= 4000, true);
 });
 
+test('failure path detection runs before evidence truncation drops the Vitest header', () => {
+  const failure = summarizeFailure({
+    status: 'failed',
+    exitCode: 1,
+    stdout: ' FAIL src/pages/DocumentContextDrafting.guard.test.ts > long failure\n' + 'diff detail\n'.repeat(5000),
+    stderr: '',
+  });
+  assert.deepEqual(failure.failing_tests, ['src/pages/DocumentContextDrafting.guard.test.ts']);
+  assert.equal(failure.stdout.length <= 8000, true);
+});
+
 test('main-health Builder RPC binds bot provenance without inventing a human requester', () => {
   const migration = fs.readFileSync(path.resolve(__dirname, '../supabase/migrations/20261012045502_bob_main_health_repairs.sql'), 'utf8');
   assert.match(migration, /builder_open_main_health_repair/);

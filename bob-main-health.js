@@ -2,10 +2,14 @@ const SHA_RE = /^[a-f0-9]{40}$/i;
 const RUNNING_TIMEOUT_MS = 30 * 60 * 1000;
 
 function summarizeFailure(result) {
+  const fullOutput = `${String(result?.stdout || '')}\n${String(result?.stderr || '')}`;
+  const failingTests = [...new Set([
+    ...[...fullOutput.matchAll(/(?:FAIL|✖|✘|×)\s+([^\s:>]+)/g)].map((match) => match[1]),
+    ...[...fullOutput.matchAll(/^\s*\d+\)\s+(?:\[[^\]]+\]\s+›\s+)?([^\r\n]+?\.(?:spec|test)\.tsx?)(?::|\s|$)/gm)].map((match) => match[1]),
+  ])].slice(0, 20);
   const stdout = String(result?.stdout || '').slice(-8000);
   const stderr = String(result?.stderr || '').slice(-4000);
   const output = `${stdout}\n${stderr}`;
-  const failingTests = [...new Set([...output.matchAll(/(?:FAIL|✖|×)\s+([^\s]+)/g)].map((match) => match[1]))].slice(0, 20);
   const assertions = output.split(/\r?\n/).filter((line) => /AssertionError|Test Files\s|\bfailed\b/i.test(line)).slice(-20);
   return {
     profile: result?.profile || 'main-health',
