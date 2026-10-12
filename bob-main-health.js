@@ -2,7 +2,8 @@ const SHA_RE = /^[a-f0-9]{40}$/i;
 const RUNNING_TIMEOUT_MS = 30 * 60 * 1000;
 
 function summarizeFailure(result) {
-  const fullOutput = `${String(result?.stdout || '')}\n${String(result?.stderr || '')}`;
+  const fullOutput = `${String(result?.stdout || '')}\n${String(result?.stderr || '')}`
+    .replace(/\u001B\[[0-?]*[ -/]*[@-~]/g, '');
   const failingTests = [...new Set([
     ...[...fullOutput.matchAll(/(?:FAIL|✖|✘|×)\s+([^\s:>]+)/g)].map((match) => match[1]),
     ...[...fullOutput.matchAll(/^\s*\d+\)\s+(?:\[[^\]]+\]\s+›\s+)?([^\r\n]+?\.(?:spec|test)\.tsx?)(?::|\s|$)/gm)].map((match) => match[1]),

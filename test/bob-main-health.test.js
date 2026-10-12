@@ -101,6 +101,16 @@ test('failure path detection runs before evidence truncation drops the Vitest he
   assert.equal(failure.stdout.length <= 8000, true);
 });
 
+test('failure path detection strips ANSI color codes from Vitest output', () => {
+  const failure = summarizeFailure({
+    status: 'failed',
+    exitCode: 1,
+    stdout: '\u001b[31mFAIL\u001b[39m  \u001b[22m\u001b[49msrc/pages/DocumentContextDrafting.guard.test.ts\u001b[22m',
+    stderr: '',
+  });
+  assert.deepEqual(failure.failing_tests, ['src/pages/DocumentContextDrafting.guard.test.ts']);
+});
+
 test('worker errors are retained in a bounded summary when no test path is reported', () => {
   const failure = summarizeFailure({ status: 'failed', exitCode: 1, stdout: 'npm run build\nError: browser binary not found\n', stderr: '' });
   assert.match(failure.summary, /browser binary not found/);
