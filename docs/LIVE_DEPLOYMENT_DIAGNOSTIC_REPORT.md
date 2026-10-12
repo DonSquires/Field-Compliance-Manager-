@@ -228,7 +228,7 @@ npm run test:manual-walkthroughs
    - Shell & Entitlements (20+ phases)
 
 ### 5. **LONG-TERM** — Integrate Into CI
-   - Add to `.github/workflows/web-ui-quality.yml`
+   - Superseded by the 2026-10-12 owner ruling: Bob's VPS owns verification; GitHub Actions are not used.
    - Run after every merge to detect regressions
    - Compare console output across builds
 

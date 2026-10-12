@@ -9,8 +9,10 @@ function fixture(patchLines) {
   const root = fs.mkdtempSync(path.join(os.tmpdir(), 'backend-worker-'));
   const sourceDir = path.join(root, 'source');
   const artifactDir = path.join(root, 'artifacts');
+  fs.mkdirSync(path.join(sourceDir, 'scripts'), { recursive: true });
   fs.mkdirSync(path.join(sourceDir, 'supabase/functions/_shared'), { recursive: true });
   fs.mkdirSync(artifactDir);
+  fs.writeFileSync(path.join(sourceDir, 'scripts/atlas-refresh.js'), 'process.exit(0);\n');
   fs.writeFileSync(path.join(sourceDir, 'supabase/functions/_shared/example.js'), 'module.exports = 1;\n');
   fs.writeFileSync(path.join(sourceDir, '.env'), 'SECRET=not-copied\n');
   fs.writeFileSync(path.join(artifactDir, 'input.patch'), patchLines.join('\n'));

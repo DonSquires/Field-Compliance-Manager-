@@ -1,51 +1,54 @@
-# Bob VPS Human QA Worker
+# Bob VPS Verification and Human QA
 
-The full human/visual browser suite runs through Bob's existing VPS worker
-executor. It does not replace the builder worker, the control plane, or RunPod.
+GitHub is the canonical source repository only. It runs no CI, agent, mirror, or
+release workflow. Bob's control plane on the VPS owns routine verification and
+the bounded repair loop.
 
-## Responsibilities
+## Main-Health Loop
 
-- GitHub Actions: bounded CI smoke suite.
-- Bob VPS: full Playwright human/visual suite and evidence artifacts.
-- RunPod: model/inference workloads only.
+On its existing autopilot tick, Bob resolves the current GitHub `main` SHA and,
+once per SHA, runs an isolated `main-health` worker against a read-only checkout:
 
-RunPod may be enabled as a separate scale-to-zero overflow/visual-analysis
-worker using `runpod-qa-worker/`. It is optional and must not be treated as the
-inference endpoint. See that worker's README for the signed job contract and
-deployment boundary.
+- Web production build.
+- Full web Vitest unit and source-guard suite.
+- Bounded Playwright smoke suite with offline fixtures.
 
-## Worker profile
+The run receipt is persisted by SHA and exposed at the control plane `/health`
+endpoint as `mainHealth.latest`. Timeouts, worker launch errors, or a moved
+`main` SHA are retried/discarded; they do not classify the repository as red.
 
-The `human-qa` profile uses the existing `Dockerfile.worker` Playwright image:
+To activate this loop, the VPS control-plane environment must have the durable
+direct-GitHub configuration `GITHUB_TOKEN`, `GITHUB_OWNER=DonSquires`,
+`GITHUB_REPO=Field-Compliance-Manager-`, and `BOB_AUTOPILOT_AUTOMERGE=true`, in
+addition to the existing Supabase, model gateway, and worker image settings.
+The token belongs only in `/var/lib/bob/control-plane.env`; never put it in the
+repository, a prompt, a test artifact, or a browser. `/health` must report
+`builderGitHost: github`, `builderSourceConfigured: true`, and
+`mainHealth.enabled: true` before the loop is considered active.
 
-```bash
-BOB_WORKER_PROFILE=human-qa
-BOB_WORKER_IMAGE=mcr.microsoft.com/playwright:v1.62.1-jammy
-```
+## Automatic Repair Boundary
 
-The worker:
+When pinned checks fail with one to eight web source-guard test files, Bob opens
+an idempotent, bot-attributed Builder job bound to the failed SHA and exact test
+file allowlist. It does not assign a human requester. Bob diagnoses each guard
+against the current app source and live schema, runs the checks again, and uses
+independent code/security review. Only a patch touching those recorded test
+files can pass the routine release gate and be merged by Bob through the direct
+GitHub API at the verified head SHA. The workflow uses no GitHub Action.
 
-- runs the full `apps/web` Playwright matrix;
-- uses fixture-backed tests by default, so it needs no external network;
-- keeps the source bind mount read-only;
-- keeps Docker network access disabled;
-- writes screenshots, traces, JSON reports, and the HTML report to `/artifacts`;
-- returns through the existing Bob lease/artifact API;
-- is bounded by the existing worker timeout, memory, CPU, and PID limits.
+Changes outside that allowlist, protected/evidential paths, failed independent
+checks, a missing receipt, or changed GitHub head stop the automated merge.
+The verified work remains a reviewable Builder result; no deployment is
+inferred from a merge receipt.
 
-## Job invocation
+## Human/Visual QA
 
-Create an approved Bob worker job with `profile=human-qa`, an exact repository
-commit, and a writable artifact directory. The existing `bob-runner.js` then
-picks up the lease and calls `worker-executor.js`; no new daemon or port is
-introduced.
+The `human-qa` worker runs the fixture-backed Playwright walkthrough and stores
+screenshots, traces, JSON reports, and HTML reports under its artifact directory.
+The source bind mount is read-only, networking is disabled, and the worker is
+bounded by timeout, memory, CPU, and PID limits. Live tests use only a dedicated
+test identity and never receive service-role, GitHub, Vercel, or Supabase
+management credentials.
 
-For live deployment tests, use a separate approved job with the dedicated test
-identity and deployment freshness preflight. Do not put service-role, Vercel,
-Codespaces, or user credentials into the browser worker environment.
-
-## Why the split exists
-
-The full suite is intentionally exploratory and produces more evidence than a
-merge gate needs. Keeping it on the VPS avoids GitHub Actions minute/time-limit
-pressure while preserving the fast smoke gate in `.github/workflows/web-ui-quality.yml`.
+RunPod is optional for model/inference or visual-analysis workloads. It is not
+the verification controller and is not needed for the main-health loop.

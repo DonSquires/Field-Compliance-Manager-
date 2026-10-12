@@ -73,7 +73,7 @@ npx playwright test e2e/crm-portfolio-manual-walkthrough.spec.ts
 npx playwright show-report
 ```
 
-### CI integration (GitHub Actions)
+### Bob VPS Verification
 ```bash
 npm run build
 npx playwright test e2e/*manual-walkthrough*.spec.ts
@@ -138,7 +138,7 @@ npx playwright test --ui
 
 ### Short-term (this sprint):
 1. Create remaining 3 test suites (Roster-HR, Field Ops, Shells)
-2. Integrate into CI (add to `.github/workflows/web-ui-quality.yml`)
+2. Superseded by the 2026-10-12 owner ruling: Bob's VPS owns verification; GitHub Actions are not used.
 3. Set output baseline (log comparison across builds)
 
 ### Long-term:

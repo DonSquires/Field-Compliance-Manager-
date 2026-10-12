@@ -31,7 +31,7 @@ test('GitHub and Gitea pull-request URLs are both accepted as review records, no
   assert.match(hostsMigration, /GRANT EXECUTE ON FUNCTION public\.builder_record_workspace_pull_request\(uuid,text,text\) TO service_role/);
 });
 
-test('GitHub adapter opens DRAFT pull requests only after the pushed branch matches the verified head', async () => {
+test('GitHub adapter opens verified PRs and exposes only the guarded direct merge helper', async () => {
   const repo = fs.mkdtempSync(path.join(os.tmpdir(), 'bob-gh-adapter-'));
   const git = (args) => execFileSync('git', args, { cwd: repo, encoding: 'utf8', stdio: ['ignore', 'pipe', 'pipe'] }).trim();
   git(['init', '-q', '-b', 'main']);
@@ -67,7 +67,9 @@ test('GitHub adapter opens DRAFT pull requests only after the pushed branch matc
     workspace.createGitHubPullRequest({ workspacePath: repo, branchName: 'feature/x', expectedHeadSha: head, title: 't', body: 'b', githubToken: 'ghp_test', owner: 'o', repo: 'r', fetchImpl }),
     /Builder workspace branch is invalid/
   );
-  assert.doesNotMatch(adapter, /merge_method|\/merge['"`]/);
+  assert.match(adapter, /async function mergeGitHubPullRequest/);
+  assert.match(adapter, /pullRequest\.data\?\.head\?\.sha !== expectedHeadSha/);
+  assert.match(adapter, /pullRequest\.data\?\.base\?\.ref !== 'main'/);
   fs.rmSync(repo, { recursive: true, force: true });
 });
 
@@ -93,13 +95,15 @@ test('a failing git command never echoes an auth header or embedded credential',
 });
 
 test('control plane routes publication and pull requests by git host and keeps git available in the image', () => {
-  assert.match(controlPlane, /const builderGitHost = process\.env\.BUILDER_GIT_HOST \|\| \(githubToken && githubOwner && githubRepo \? 'github' : 'gitea'\)/);
-  // Both hosts publish from a real clone with a per-invocation auth header; nothing is stored in .git/config.
+  assert.match(controlPlane, /const builderGitHost = 'github'/);
+  assert.match(controlPlane, /const builderSourceConfigured = Boolean\(githubToken && githubOwner && githubRepo\)/);
+  // The source host is GitHub only; pushes use a per-invocation header, never .git/config credentials.
   assert.match(controlPlane, /publishWorkspaceBranch\(\{ workspacePath, branchName: job\.workspace_branch, expectedHeadSha: job\.workspace_head_sha, pushUrl: target\.repoUrl, pushAuthHeader: target\.authHeader \}\)/);
   assert.match(controlPlane, /builderGitHost === 'github'\s*\?\s*await createGitHubPullRequest/);
+  assert.match(controlPlane, /mergeGitHubPullRequest\(\{ number: pullRequest\.number/);
+  assert.match(controlPlane, /mainHealthEnabled/);
   assert.match(controlPlane, /\/api\/bob\/builder\/repository\/head/);
   assert.match(controlPlane, /ensureSourceCheckout\(\{ sourceDir: builderSourceDir, repoUrl: target\.repoUrl, authHeader: target\.authHeader, sha: targetSha \}\)/);
-  assert.match(controlPlane, /function giteaGitAuthHeader\(\)/);
   // Git work never starts from the image copy (it has no .git); assessment reads may.
   assert.doesNotMatch(controlPlane, /createBranchWorkspace\(\{ sourceDir: assessmentRoot/);
   assert.match(dockerfile, /apk add --no-cache git/);

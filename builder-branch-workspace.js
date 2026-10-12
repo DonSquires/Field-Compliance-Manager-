@@ -194,6 +194,22 @@ async function createGitHubPullRequest({ workspacePath, branchName, expectedHead
   return { branchName, head: expectedHeadSha, url: created.data.html_url, number: created.data.number ?? null, draft: true };
 }
 
+async function mergeGitHubPullRequest({ number, expectedHeadSha, githubToken, owner, repo, fetchImpl = globalThis.fetch }) {
+  if (!Number.isInteger(Number(number)) || Number(number) < 1) throw new Error('GitHub pull request number is invalid');
+  if (!/^[a-f0-9]{40}$/i.test(String(expectedHeadSha || ''))) throw new Error('GitHub pull request head is invalid');
+  if (!githubToken || !owner || !repo || typeof fetchImpl !== 'function') throw new Error('Builder GitHub integration is not configured');
+  githubRepoUrl(owner, repo);
+  const repoPath = `/repos/${encodeURIComponent(owner)}/${encodeURIComponent(repo)}`;
+  const pullRequest = await githubApi({ fetchImpl, githubToken, method: 'GET', urlPath: `${repoPath}/pulls/${Number(number)}` });
+  if (!pullRequest.ok || pullRequest.data?.state !== 'open' || pullRequest.data?.draft === true
+      || pullRequest.data?.head?.sha !== expectedHeadSha || pullRequest.data?.base?.ref !== 'main') {
+    throw new Error('GitHub pull request is not the verified open main-targeted change');
+  }
+  const merged = await githubApi({ fetchImpl, githubToken, method: 'PUT', urlPath: `${repoPath}/pulls/${Number(number)}/merge`, body: { sha: expectedHeadSha, merge_method: 'squash' } });
+  if (!merged.ok || merged.data?.merged !== true) throw new Error('GitHub did not merge the verified pull request');
+  return { number: Number(number), sha: merged.data.sha ?? expectedHeadSha, merged_at: merged.data.merged_at ?? null };
+}
+
 function giteaRepositoryPath(remote) {
   const httpsMatch = String(remote).match(/^https?:\/\/[^/]+\/([^/]+\/[^/]+?)(?:\.git)?\/?$/);
   const sshUrlMatch = String(remote).match(/^ssh:\/\/[^@\s]+@[^/\s]+\/([^/]+\/[^/]+?)(?:\.git)?\/?$/);
@@ -232,4 +248,4 @@ function publicGiteaUrl(url, { baseUrl, publicBaseUrl }) {
   return url;
 }
 
-module.exports = { BRANCH_PREFIX, BUILDER_NAME, BUILDER_EMAIL, branchNameForJob, workspacePathForBranch, createBranchWorkspace, commitVerifiedPatch, publishWorkspaceBranch, giteaRepositoryPath, createGiteaPullRequest, publicGiteaUrl, verifySnapshot, githubAuthHeader, githubRepoUrl, resolveRemoteHead, ensureSourceCheckout, createGitHubPullRequest, redactGitError };
+module.exports = { BRANCH_PREFIX, BUILDER_NAME, BUILDER_EMAIL, branchNameForJob, workspacePathForBranch, createBranchWorkspace, commitVerifiedPatch, publishWorkspaceBranch, giteaRepositoryPath, createGiteaPullRequest, publicGiteaUrl, verifySnapshot, githubAuthHeader, githubRepoUrl, resolveRemoteHead, ensureSourceCheckout, createGitHubPullRequest, mergeGitHubPullRequest, redactGitError };

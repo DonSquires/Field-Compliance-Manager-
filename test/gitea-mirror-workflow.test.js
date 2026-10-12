@@ -1,20 +1,13 @@
 const assert = require('node:assert/strict');
-const { readFileSync } = require('node:fs');
+const { existsSync, readdirSync } = require('node:fs');
 const { resolve } = require('node:path');
 const test = require('node:test');
 
-const workflow = readFileSync(resolve(__dirname, '../.github/workflows/mirror-to-gitea.yml'), 'utf8');
+const workflowsDirectory = resolve(__dirname, '../.github/workflows');
 
-test('Gitea mirror follows GitHub main and refuses divergent history', () => {
-  assert.match(workflow, /branches: \[main\]/);
-  assert.match(workflow, /GITEA_MIRROR_USERNAME: \$\{\{ secrets\.GITEA_MIRROR_USERNAME \}\}/);
-  assert.match(workflow, /GITEA_MIRROR_TOKEN: \$\{\{ secrets\.GITEA_MIRROR_TOKEN \}\}/);
-  assert.match(workflow, /http\.https:\/\/git\.fcmanager\.co\.nz\/\.extraheader "Authorization: Basic \$auth"/);
-  assert.match(workflow, /echo "::add-mask::\$auth"/);
-  assert.doesNotMatch(workflow, /https:\/\/\$\{GITEA_MIRROR_USERNAME\}:\$\{GITEA_MIRROR_TOKEN\}@/);
-  assert.match(workflow, /git fetch gitea main/);
-  assert.match(workflow, /git merge-base --is-ancestor "\$GITEA_MAIN" HEAD/);
-  assert.match(workflow, /refusing to overwrite mirror history/);
-  assert.match(workflow, /git push gitea HEAD:refs\/heads\/main/);
-  assert.doesNotMatch(workflow, /git push .*--force/);
+test('GitHub is the source host only; no GitHub Actions workflows run', () => {
+  const workflowFiles = existsSync(workflowsDirectory)
+    ? readdirSync(workflowsDirectory).filter((file) => /\.ya?ml$/i.test(file))
+    : [];
+  assert.deepEqual(workflowFiles, []);
 });

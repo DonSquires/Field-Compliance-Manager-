@@ -4,7 +4,7 @@ const os = require('node:os');
 const path = require('node:path');
 const { execFileSync } = require('node:child_process');
 const test = require('node:test');
-const { branchNameForJob, createBranchWorkspace, commitVerifiedPatch, publishWorkspaceBranch, createGiteaPullRequest } = require('../builder-branch-workspace');
+const { branchNameForJob, createBranchWorkspace, commitVerifiedPatch, publishWorkspaceBranch, createGiteaPullRequest, mergeGitHubPullRequest } = require('../builder-branch-workspace');
 
 const patch = ['diff --git a/apps/web/src/example.ts b/apps/web/src/example.ts', '--- a/apps/web/src/example.ts', '+++ b/apps/web/src/example.ts', '@@ -1 +1 @@', '-export const value = 1;', '+export const value = 2;', ''].join('\n');
 
@@ -151,4 +151,43 @@ test('Builder opens a human-review-only pull request through the configured Gite
     assert.equal(publicGiteaUrl('https://gitea.internal/o/r/pulls/1', { baseUrl: 'https://gitea.internal', publicBaseUrl: '' }), 'https://gitea.internal/o/r/pulls/1');
     assert.equal(publicGiteaUrl('https://elsewhere.example/o/r/pulls/1', { baseUrl: 'https://gitea.internal', publicBaseUrl: 'https://git.fcmanager.co.nz' }), 'https://elsewhere.example/o/r/pulls/1');
   } finally { fs.rmSync(repo.root, { recursive: true, force: true }); }
+});
+
+test('Bob merges only the exact open, non-draft GitHub PR targeting main', async () => {
+  const sha = 'a'.repeat(40);
+  const requests = [];
+  const fetchImpl = async (url, init) => {
+    requests.push({ url, init });
+    if (init.method === 'GET') return { ok: true, json: async () => ({ state: 'open', draft: false, head: { sha }, base: { ref: 'main' } }) };
+    return { ok: true, json: async () => ({ merged: true, sha: 'b'.repeat(40), merged_at: '2026-10-12T05:00:00Z' }) };
+  };
+  const merged = await mergeGitHubPullRequest({ number: 17, expectedHeadSha: sha, githubToken: 'token', owner: 'owner', repo: 'repo', fetchImpl });
+  assert.deepEqual(merged, { number: 17, sha: 'b'.repeat(40), merged_at: '2026-10-12T05:00:00Z' });
+  assert.equal(requests[0].url, 'https://api.github.com/repos/owner/repo/pulls/17');
+  assert.equal(requests[1].url, 'https://api.github.com/repos/owner/repo/pulls/17/merge');
+  assert.deepEqual(JSON.parse(requests[1].init.body), { sha, merge_method: 'squash' });
+});
+
+test('Bob refuses a draft, changed-head, closed, or non-main GitHub pull request', async () => {
+  const sha = 'a'.repeat(40);
+  for (const pullRequest of [
+    { state: 'open', draft: true, head: { sha }, base: { ref: 'main' } },
+    { state: 'open', draft: false, head: { sha: 'b'.repeat(40) }, base: { ref: 'main' } },
+    { state: 'closed', draft: false, head: { sha }, base: { ref: 'main' } },
+    { state: 'open', draft: false, head: { sha }, base: { ref: 'release' } },
+  ]) {
+    let mergeRequested = false;
+    await assert.rejects(mergeGitHubPullRequest({
+      number: 17,
+      expectedHeadSha: sha,
+      githubToken: 'token',
+      owner: 'owner',
+      repo: 'repo',
+      fetchImpl: async (_url, init) => {
+        if (init.method === 'PUT') mergeRequested = true;
+        return { ok: true, json: async () => pullRequest };
+      },
+    }), /not the verified open main-targeted change/);
+    assert.equal(mergeRequested, false);
+  }
 });

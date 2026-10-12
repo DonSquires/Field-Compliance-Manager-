@@ -87,6 +87,32 @@ test('routine monitor clears a bounded basic fix but holds redesign or broad pat
   assert.match(release.reasons[0], /more than eight files/);
 });
 
+test('main-monitor repairs stay inside the failing guard-test set', () => {
+  const job = {
+    autopilot_source: 'main_monitor',
+    repair_risk: 'routine',
+    title: 'Repair red main tests',
+    task_description: 'Correct stale source-contract assertions; inspect schema but do not change it.',
+    source_main_health_files: ['apps/web/src/lib/example.guard.test.ts'],
+  };
+  const approval = { approval_type: 'release_approval' };
+  assert.equal(routineRepairHold({
+    job,
+    approval,
+    evidence: { changedFiles: ['apps/web/src/lib/example.guard.test.ts'] },
+  }), null);
+  assert.match(routineRepairHold({
+    job,
+    approval,
+    evidence: { changedFiles: ['apps/web/src/lib/example.guard.test.ts', 'apps/web/src/lib/example.ts'] },
+  }).reasons[0], /outside the recorded failing test set/);
+  assert.match(routineRepairHold({
+    job: { ...job, source_main_health_files: [] },
+    approval,
+    evidence: { changedFiles: [] },
+  }).reasons[0], /outside the recorded failing test set/);
+});
+
 test('autopilot runs the bounded runner for a working job and blocks when the attempt ceiling is hit', async () => {
   const job = { id: 'job-2', status: 'implementation_pending', autopilot_state: 'driving', title: 'Fix', target_sha: 'b'.repeat(40) };
   const running = actionsRecorder({ run: { paused: true, reason: 'action_limit' } });
@@ -175,6 +201,18 @@ test('autopilot publishes a release-ready job with an explanatory pull request a
   assert.equal(report.security_passed, true);
 });
 
+test('autopilot records a directly merged main-health repair as complete', async () => {
+  const { job, supabase } = releaseReadyFixture();
+  const actions = actionsRecorder();
+  actions.publish = async () => ({ pullRequestUrl: 'https://github.com/owner/repo/pull/17', merged: true, mergeSha: 'e'.repeat(40) });
+  const outcomes = await autopilotTick({ supabase, jobs: [job], actions });
+  assert.deepEqual(outcomes, [{ job: 'job-4', outcome: 'merged', url: 'https://github.com/owner/repo/pull/17' }]);
+  const recorded = actions.calls.find(([name]) => name === 'record');
+  assert.equal(recorded[2], 'done');
+  assert.equal(recorded[3].merged, true);
+  assert.match(recorded[3].text, /Bob repaired the failing checks/);
+});
+
 test('autopilot records a blocked report for a job that ended terminally without a pull request', async () => {
   const job = { id: 'job-5', status: 'failed', last_error: 'Independent AI review retry limit reached', autopilot_state: 'driving', title: 'Fix', target_sha: 'e'.repeat(40) };
   const actions = actionsRecorder();
@@ -256,6 +294,21 @@ test('auto-merge is env-gated and narrow: every independent check clean, request
   const on = { BOB_AUTOPILOT_AUTOMERGE: 'true' };
   assert.equal(automergeEligible({ job, evidence: clean, env: on }).ok, true);
   assert.equal(automergeEligible({ job: { ...job, autopilot_requested_by: null }, evidence: clean, env: on }).ok, false, 'not asked for in chat');
+  const mainHealthJob = {
+    ...job,
+    autopilot_requested_by: null,
+    autopilot_source: 'main_monitor',
+    repair_risk: 'routine',
+    source_main_health_files: ['apps/web/src/lib/example.guard.test.ts'],
+  };
+  const mainHealthEvidence = {
+    ...clean,
+    verifyRun: { profile: 'main-health' },
+    changedFiles: ['apps/web/src/lib/example.guard.test.ts'],
+  };
+  assert.equal(automergeEligible({ job: mainHealthJob, evidence: mainHealthEvidence, env: on }).ok, true, 'bounded main-health repair is eligible without a human requester');
+  assert.match(automergeEligible({ job: mainHealthJob, evidence: { ...mainHealthEvidence, changedFiles: [...mainHealthEvidence.changedFiles, 'apps/web/src/lib/example.ts'] }, env: on }).reason, /outside the failing source-guard set/);
+  assert.equal(automergeEligible({ job: { ...mainHealthJob, source_main_health_files: [] }, evidence: mainHealthEvidence, env: on }).ok, false, 'missing failing-file provenance blocks auto-merge');
   assert.equal(automergeEligible({ job, evidence: { ...clean, verifyRun: null }, env: on }).ok, false, 'no worker verification');
   assert.equal(automergeEligible({ job, evidence: { ...clean, security: { passed: false } }, env: on }).ok, false, 'security findings');
   assert.equal(automergeEligible({ job, evidence: { ...clean, review: { ...clean.review, verdict: 'blocked' } }, env: on }).ok, false, 'review blocked');
@@ -270,6 +323,7 @@ test('auto-merge is env-gated and narrow: every independent check clean, request
   const report = composeReport({ job, evidence: clean, pullRequestUrl: 'https://git.example/pulls/1', state: 'published', automerge: eligible });
   assert.match(report.text, /Bob will merge this himself within about ten minutes/);
   assert.match(composeReport({ job, evidence: clean, pullRequestUrl: 'u', state: 'published' }).text, /Nothing is live yet/);
+  assert.match(composeReport({ job: mainHealthJob, evidence: mainHealthEvidence, pullRequestUrl: 'https://github.com/org/repo/pull/1', state: 'merged' }).text, /Bob repaired the failing checks/);
 });
 
 test('verification contract requires product, schema/data-path, and human-glass evidence', () => {
@@ -479,4 +533,35 @@ test('at the attempt ceiling a job pinned behind main is re-opened once on curre
   const outcome = await autopilotTick({ supabase: fakeSupabase({ job: reopened }), jobs: [reopened], actions: again });
   assert.equal(outcome[0].outcome, 'blocked');
   assert.match(again.calls.find(([name]) => name === 'record')[3].text, /What you can do: tell Bob "try again"/);
+});
+
+test('main-monitor jobs preserve their non-human provenance when reopened on a new main SHA', async () => {
+  const job = {
+    id: 'main-health-job',
+    organization_id: 'org-1',
+    project_id: 'proj-1',
+    status: 'implementation_pending',
+    autopilot_state: 'driving',
+    autopilot_source: 'main_monitor',
+    autopilot_requested_by: null,
+    source_main_health_sha: 'a'.repeat(40),
+    source_main_health_files: ['apps/web/src/lib/example.guard.test.ts'],
+    title: 'Repair main guard test',
+    task_description: 'Fix the stale assertion.',
+    frontend_required: true,
+    backend_required: false,
+    target_sha: 'a'.repeat(40),
+  };
+  const actions = actionsRecorder({ run: { paused: true, reason: 'blocked', detail: 'repository red at the pinned commit: apps/web/src/lib/example.guard.test.ts' } });
+  actions.mainHead = async () => 'b'.repeat(40);
+  const opened = [];
+  actions.createJob = async (spec) => { opened.push(spec); return { id: 'main-health-job-retry' }; };
+
+  assert.deepEqual(await autopilotTick({ supabase: fakeSupabase({ job }), jobs: [job], actions }), [
+    { job: 'main-health-job', outcome: 'resumed', resumed_as: 'main-health-job-retry' },
+  ]);
+  assert.equal(opened[0].requestedBy, null);
+  assert.equal(opened[0].autopilotSource, 'main_monitor');
+  assert.equal(opened[0].sourceMainHealthSha, 'a'.repeat(40));
+  assert.deepEqual(opened[0].sourceMainHealthFiles, ['apps/web/src/lib/example.guard.test.ts']);
 });

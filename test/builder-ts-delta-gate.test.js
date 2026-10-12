@@ -56,8 +56,10 @@ test('backend worker fails a TypeScript patch that introduces an undefined name 
   const root = fs.mkdtempSync(path.join(os.tmpdir(), 'ts-delta-gate-'));
   const sourceDir = path.join(root, 'source');
   const artifactDir = path.join(root, 'artifacts');
+  fs.mkdirSync(path.join(sourceDir, 'scripts'), { recursive: true });
   fs.mkdirSync(path.join(sourceDir, 'supabase/functions/chat'), { recursive: true });
   fs.mkdirSync(artifactDir);
+  fs.writeFileSync(path.join(sourceDir, 'scripts/atlas-refresh.js'), 'process.exit(0);\n');
   fs.writeFileSync(path.join(sourceDir, 'supabase/functions/chat/index.ts'), DENO_FILE_BEFORE);
   const patch = [
     'diff --git a/supabase/functions/chat/index.ts b/supabase/functions/chat/index.ts',

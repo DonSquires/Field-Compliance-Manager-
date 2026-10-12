@@ -21,8 +21,9 @@ const { loadBuilderRuntimeSnapshot, advanceBuilderJob, runBuilderUntilPause, rec
 const { fileSha256, listRepositoryTree, readRepositoryFile, searchRepository } = require('./builder-repository-read');
 const { autopilotTick, listAutopilotJobs, listPendingApprovals } = require('./builder-autopilot');
 const { laptopStatus, runLaptopCommand, laptopConfig, loadLaptopLink, mergeLaptopLink, describeLink } = require('./bob-laptop-shell');
-const { createBranchWorkspace, commitVerifiedPatch, publishWorkspaceBranch, createGiteaPullRequest, workspacePathForBranch, createGitHubPullRequest, ensureSourceCheckout, githubAuthHeader, githubRepoUrl, resolveRemoteHead, redactGitError } = require('./builder-branch-workspace');
+const { createBranchWorkspace, commitVerifiedPatch, publishWorkspaceBranch, createGiteaPullRequest, workspacePathForBranch, createGitHubPullRequest, mergeGitHubPullRequest, ensureSourceCheckout, githubAuthHeader, githubRepoUrl, resolveRemoteHead, redactGitError } = require('./builder-branch-workspace');
 const { executeWorker, summarizeHumanTest } = require('./worker-executor');
+const { createMainHealthMonitor } = require('./bob-main-health');
 
 // Route failures used to be swallowed into a bare 409; keep a short redacted reason so the
 // operator (and Bob's self-heal loop) can act without a shell on the host.
@@ -70,7 +71,8 @@ const giteaUsername = process.env.GITEA_USERNAME || '';
 const githubToken = process.env.GITHUB_TOKEN || '';
 const githubOwner = process.env.GITHUB_OWNER || '';
 const githubRepo = process.env.GITHUB_REPO || '';
-const builderGitHost = process.env.BUILDER_GIT_HOST || (githubToken && githubOwner && githubRepo ? 'github' : 'gitea');
+const builderGitHost = 'github';
+const builderSourceConfigured = Boolean(githubToken && githubOwner && githubRepo);
 const builderSourceDir = process.env.BOB_BUILDER_SOURCE_DIR || path.join(stateDir, 'builder-source');
 
 function giteaRepoUrl() {
@@ -132,6 +134,7 @@ const jobs = new Map();
 const deliveries = new Set();
 const audit = [];
 const humanTestRuns = new Map();
+const mainHealthRuns = new Map();
 let activeLease = null;
 
 function saveState() {
@@ -140,7 +143,8 @@ function saveState() {
     jobs: [...jobs.values()],
     deliveries: [...deliveries],
     audit,
-    humanTestRuns: [...humanTestRuns.values()]
+    humanTestRuns: [...humanTestRuns.values()],
+    mainHealthRuns: [...mainHealthRuns.values()]
   };
   const temporary = `${stateFile}.tmp`;
   fs.writeFileSync(temporary, JSON.stringify(state, null, 2));
@@ -158,6 +162,11 @@ function loadState() {
         ? { ...persisted, status: 'interrupted', completed_at: new Date().toISOString(), error: 'Control plane restarted before the human test completed.' }
         : persisted;
       humanTestRuns.set(run.id, run);
+    }
+    for (const persisted of state.mainHealthRuns || []) {
+      mainHealthRuns.set(persisted.sha, persisted.status === 'running'
+        ? { ...persisted, status: 'retry', error: 'Control plane restarted during main-health verification.' }
+        : persisted);
     }
   } catch (error) {
     if (error.code !== 'ENOENT') throw error;
@@ -429,14 +438,14 @@ function defaultPullRequestBody(job) {
   return `## Bob Builder review\n\nVerified Builder workspace branch: \`${job.workspace_branch}\`\n\nPinned commit: \`${job.workspace_head_sha}\`\n\nThis pull request is for human review only. It does not authorize a merge or deployment.`;
 }
 
-async function openBuilderPullRequest(jobId, bodyFor = null) {
+async function openBuilderPullRequest(jobId, bodyFor = null, { draft = true } = {}) {
   const { data: job } = await builderSupabase.from('builder_jobs').select('id,title,workspace_branch,workspace_head_sha,workspace_published_head_sha,workspace_pull_request_head_sha,workspace_pull_request_url').eq('id', jobId).single();
   if (!job?.workspace_branch || !job.workspace_head_sha || job.workspace_published_head_sha !== job.workspace_head_sha) throw new BuilderStepError(409, 'Published Builder workspace is required');
   if (job.workspace_pull_request_head_sha === job.workspace_head_sha && job.workspace_pull_request_url) return { branchName: job.workspace_branch, head: job.workspace_head_sha, url: job.workspace_pull_request_url, existing: true };
   const workspacePath = workspacePathForBranch(builderWorkspaceRoot, job.workspace_branch);
   const reviewBody = typeof bodyFor === 'function' ? bodyFor(job.workspace_branch, job.workspace_head_sha) : defaultPullRequestBody(job);
   const pullRequest = builderGitHost === 'github'
-    ? await createGitHubPullRequest({ workspacePath, branchName: job.workspace_branch, expectedHeadSha: job.workspace_head_sha, title: `Bob Builder: ${job.title}`, body: reviewBody, githubToken, owner: githubOwner, repo: githubRepo })
+    ? await createGitHubPullRequest({ workspacePath, branchName: job.workspace_branch, expectedHeadSha: job.workspace_head_sha, title: `Bob Builder: ${job.title}`, body: reviewBody, githubToken, owner: githubOwner, repo: githubRepo, draft })
     : await createGiteaPullRequest({ workspacePath, branchName: job.workspace_branch, expectedHeadSha: job.workspace_head_sha, title: `Bob Builder: ${job.title}`, body: reviewBody, giteaBaseUrl, giteaToken, owner: giteaOwner, repo: giteaRepo });
   const { data: updated, error } = await builderSupabase.rpc('builder_record_workspace_pull_request', { _job_id: job.id, _expected_head_sha: pullRequest.head, _pull_request_url: pullRequest.url });
   if (error || !updated) throw new BuilderStepError(409, 'Builder pull request could not be recorded');
@@ -467,14 +476,91 @@ async function routineBuilderProject() {
     .from('builder_projects')
     .select('id,organization_id,gitea_owner,gitea_repo')
     .eq('status', 'active');
-  if (giteaOwner) query = query.eq('gitea_owner', giteaOwner);
-  if (giteaRepo) query = query.eq('gitea_repo', giteaRepo);
+  const projectOwner = builderGitHost === 'github' ? githubOwner : giteaOwner;
+  const projectRepo = builderGitHost === 'github' ? githubRepo : giteaRepo;
+  if (projectOwner) query = query.eq('gitea_owner', projectOwner);
+  if (projectRepo) query = query.eq('gitea_repo', projectRepo);
   const { data, error } = await query.limit(2);
   if (error || !Array.isArray(data) || data.length !== 1) {
     throw new Error('routine self-heal requires exactly one active Builder project for this repository');
   }
   return data[0];
 }
+
+const mainHealthEnabled = autopilotEnabled
+  && process.env.BOB_MAIN_HEALTH !== 'false'
+  && builderGitHost === 'github'
+  && Boolean(builderSupabase && modelGatewayToken && builderWorkerImage && builderSourceConfigured);
+
+function mainHealthState(sha) {
+  return mainHealthRuns.get(sha) ?? null;
+}
+
+function saveMainHealthState(state) {
+  mainHealthRuns.set(state.sha, state);
+  saveState();
+}
+
+function mainHealthRepairBrief({ sha, failure }) {
+  const failingFiles = failure.failing_tests.map((file) => file.startsWith('apps/web/') ? file : `apps/web/${file}`);
+  return [
+    `Goal: repair only the failing web source-guard tests reported by Bob's isolated main-health run at ${sha}.`,
+    `Before: the repository is pinned to ${sha}; the main-health worker ran the web build, full Vitest unit/source-guard suite, and CI Playwright smoke suite against a read-only checkout.`,
+    `During: the main-health worker exited ${failure.exit_code}; failing guard tests: ${failingFiles.join(', ')}.`,
+    `Failure evidence (redacted and bounded):\n${failure.summary || 'See the bounded worker output below.'}\n${failure.stdout}\n${failure.stderr}`.slice(0, 9000),
+    'Required diagnosis: read each failing guard test and the current implementation/schema it asserts. Determine whether the expectation is stale or the product behavior regressed; do not weaken a guard unless schema/source evidence proves the guard itself is obsolete.',
+    'Required verification: rerun the isolated main-health checks, independent code review, security review, and Atlas refresh. Preserve the exact tested main SHA and failing-test file set.',
+    'Scope: only the recorded failing `apps/web/src/**/*.guard.test.ts` or `.guard.test.tsx` files may change for unattended release. Do not delete tests, alter application behavior, schema/RLS/auth, dependencies, environment, legal/safety/identity/enforcement/finance/payroll/evidential code, or add features. Any scope expansion stops for Grandmaster review.',
+    'After: open a draft pull request with the test receipts; the control plane does not merge or deploy this repair.',
+  ].join('\n');
+}
+
+async function openMainHealthRepair({ sha, failure }) {
+  const failingFiles = [...new Set(failure.failing_tests.map((file) => file.startsWith('apps/web/') ? file : `apps/web/${file}`))].slice(0, 8);
+  const guardFilePattern = /^apps\/web\/src\/[A-Za-z0-9_./-]+\.guard\.test\.tsx?$/;
+  if (!failingFiles.length || failingFiles.some((file) => !guardFilePattern.test(file) || file.includes('..'))) {
+    throw new Error('main-health failure is outside the bounded source-guard repair scope');
+  }
+  if (builderRepositoryHead('main').sha !== sha) throw new Error('main moved before the repair job could be opened');
+  const project = await routineBuilderProject();
+  const { data: job, error } = await builderSupabase.rpc('builder_open_main_health_repair', {
+    _organization_id: project.organization_id,
+    _project_id: project.id,
+    _health_sha: sha,
+    _target_sha: sha,
+    _title: `Repair ${failingFiles.length} failing main guard test${failingFiles.length === 1 ? '' : 's'}`,
+    _task_description: mainHealthRepairBrief({ sha, failure }),
+    _failed_files: failingFiles,
+    _parent_job_id: null,
+  });
+  if (error || !job?.id) throw new Error(`main-health repair job could not be opened: ${error?.message || 'no job returned'}`);
+  record('autopilot', 'builder.main_health_repair.started', job.id, { health_sha: sha, failed_files: failingFiles });
+  return { id: job.id };
+}
+
+const mainHealthMonitor = createMainHealthMonitor({
+  getMainSha: () => builderRepositoryHead('main').sha,
+  runChecks: async ({ sha }) => {
+    const source = builderGitSource(sha);
+    const artifactDir = path.join(stateDir, 'main-health-runs', sha);
+    fs.mkdirSync(artifactDir, { recursive: true, mode: 0o700 });
+    return executeWorker({
+      image: builderWorkerImage,
+      sourceDir: source,
+      artifactDir,
+      profile: 'main-health',
+      timeoutMs: Math.min(Math.max(Number(process.env.BOB_MAIN_HEALTH_TIMEOUT_MS) || 30 * 60_000, 5 * 60_000), 45 * 60_000),
+      memory: process.env.BOB_MAIN_HEALTH_MEMORY || '8g',
+      cpus: process.env.BOB_MAIN_HEALTH_CPUS || '4',
+      pidsLimit: Number(process.env.BOB_MAIN_HEALTH_PIDS_LIMIT || 1024),
+      environment: { E2E_OFFLINE: '1' },
+    });
+  },
+  openRepair: openMainHealthRepair,
+  readState: async (sha) => mainHealthState(sha),
+  writeState: async (state) => saveMainHealthState(state),
+  log: (entry) => record('autopilot', 'builder.main_health', entry.sha || 'main', entry),
+});
 
 function routineRepairBrief(packet) {
   const envelope = packet.envelope && typeof packet.envelope === 'object' ? packet.envelope : {};
@@ -555,9 +641,10 @@ async function startRoutineRepairs() {
 }
 
 async function autopilotOnce() {
-  if (autopilotBusy || !builderSupabase || !modelGatewayToken || !builderWorkerImage) return [];
+  if (autopilotBusy || !builderSupabase || !modelGatewayToken || !builderWorkerImage || !builderSourceConfigured) return [];
   autopilotBusy = true;
   try {
+    if (mainHealthEnabled) await mainHealthMonitor.tick();
     await startRoutineRepairs();
     const jobs = await listAutopilotJobs(builderSupabase);
     if (!jobs.length) return [];
@@ -575,13 +662,17 @@ async function autopilotOnce() {
           const started = await runBuilderJobBounded(jobId, { maxActions: 8 });
           return started.skipped ? started : await started.execution;
         },
-        publish: async ({ job, validatedPatchId, bodyFor }) => {
+        publish: async ({ job, validatedPatchId, bodyFor, automerge }) => {
           await bindBuilderWorkspace(job.id);
           const { data: fresh } = await builderSupabase.from('builder_jobs').select('workspace_head_sha,workspace_branch,target_sha').eq('id', job.id).single();
           if (fresh?.workspace_head_sha === fresh?.target_sha) await commitBuilderPatch(job.id, validatedPatchId);
           await publishBuilderBranch(job.id);
-          const pullRequest = await openBuilderPullRequest(job.id, bodyFor);
-          return { pullRequestUrl: pullRequest.url };
+          const pullRequest = await openBuilderPullRequest(job.id, bodyFor, { draft: automerge?.ok !== true });
+          if (automerge?.ok && builderGitHost === 'github') {
+            const merge = await mergeGitHubPullRequest({ number: pullRequest.number, expectedHeadSha: pullRequest.head, githubToken, owner: githubOwner, repo: githubRepo });
+            return { pullRequestUrl: pullRequest.url, merged: true, mergeSha: merge.sha };
+          }
+          return { pullRequestUrl: pullRequest.url, merged: false };
         },
         record: async (jobId, state, report) => {
           const { error } = await builderSupabase.rpc('builder_autopilot_record', { _job_id: jobId, _state: state, _report: report });
@@ -613,6 +704,24 @@ async function autopilotOnce() {
         // same requester, and is re-opened on current main once the repair has landed.
         createJob: async (input) => {
           const { sha } = builderRepositoryHead('main');
+          if (input.autopilotSource === 'main_monitor') {
+            if (!input.sourceMainHealthSha || !Array.isArray(input.sourceMainHealthFiles) || !input.sourceMainHealthFiles.length) {
+              throw new Error('main-health follow-up is missing its source SHA or failed-test allowlist');
+            }
+            const { data: repair, error: repairError } = await builderSupabase.rpc('builder_open_main_health_repair', {
+              _organization_id: input.organizationId,
+              _project_id: input.projectId,
+              _health_sha: input.sourceMainHealthSha,
+              _target_sha: sha,
+              _title: String(input.title).slice(0, 200),
+              _task_description: String(input.taskDescription).slice(0, 12000),
+              _failed_files: input.sourceMainHealthFiles,
+              _parent_job_id: input.parentJobId ?? null,
+            });
+            if (repairError || !repair?.id) throw new Error(`main-health follow-up could not be opened: ${repairError?.message || 'no job returned'}`);
+            record('autopilot', 'builder.main_health_repair.reopened', repair.id, { parent: input.parentJobId ?? null, health_sha: input.sourceMainHealthSha });
+            return repair;
+          }
           const { data: created, error } = await builderSupabase.rpc('builder_create_job_v2', {
             _organization_id: input.organizationId,
             _project_id: input.projectId,
@@ -702,7 +811,8 @@ async function route(req, res, body) {
     const providers = await modelHealth(modelGatewayConfig).catch(() => ({}));
     const laptopLink = await loadLaptopLink(builderSupabase).catch(() => null);
     const laptop = laptopConfig(mergeLaptopLink(process.env, laptopLink));
-    return json(res, 200, { status: 'ok', service: 'bob-control-plane', activeLease: Boolean(activeLease), builderGitHost, builderSourceConfigured: builderGitHost === 'github' ? Boolean(githubToken && githubOwner && githubRepo) : Boolean(giteaBaseUrl && giteaToken && giteaOwner && giteaRepo), autopilot: autopilotEnabled && Boolean(builderSupabase && modelGatewayToken && builderWorkerImage), autopilotIntervalMs, runningBuilderJobs: runningBuilderJobs.size, modelProviders: Object.fromEntries(Object.entries(providers).map(([name, p]) => [name, { configured: p.configured, healthy: p.healthy, ready_model: p.ready_model }])), laptopShell: { enabled: laptop.enabled, configured: laptop.configured, host: laptop.host || null, ssh_allowed: laptopLink ? laptopLink.ssh_allowed === true : null } });
+    const latestMainHealth = [...mainHealthRuns.values()].sort((left, right) => String(right.checked_at || right.started_at).localeCompare(String(left.checked_at || left.started_at)))[0] ?? null;
+    return json(res, 200, { status: 'ok', service: 'bob-control-plane', activeLease: Boolean(activeLease), builderGitHost, builderSourceConfigured, autopilot: autopilotEnabled && Boolean(builderSupabase && modelGatewayToken && builderWorkerImage && builderSourceConfigured), autopilotIntervalMs, mainHealth: { enabled: mainHealthEnabled, sourceHost: builderGitHost, latest: latestMainHealth ? { sha: latestMainHealth.sha, status: latestMainHealth.status, job_id: latestMainHealth.job_id ?? null, checked_at: latestMainHealth.checked_at ?? null } : null }, runningBuilderJobs: runningBuilderJobs.size, modelProviders: Object.fromEntries(Object.entries(providers).map(([name, p]) => [name, { configured: p.configured, healthy: p.healthy, ready_model: p.ready_model }])), laptopShell: { enabled: laptop.enabled, configured: laptop.configured, host: laptop.host || null, ssh_allowed: laptopLink ? laptopLink.ssh_allowed === true : null } });
   }
   if (req.method === 'GET' && url.pathname === '/api/bob/builder/model-health') {
     if (!modelGatewayAuthorized(req) && !authorized(req)) return json(res, 401, { error: 'model gateway unauthorized' });

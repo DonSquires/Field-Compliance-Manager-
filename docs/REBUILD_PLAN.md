@@ -56,6 +56,15 @@ dependencies/environment, privacy, safety, legal, identity, enforcement,
 finance, payroll, and evidential work remain Grandmaster-gated. Expansion
 beyond eight changed files also stops at the gate.
 
+Owner ruling 2026-10-12: GitHub is the source repository only; no GitHub Actions
+CI, coding agent, Gitea mirror, or release workflow runs. Bob's VPS directly
+polls the pinned GitHub `main` SHA, runs the isolated web build/unit/source-guard
+and Playwright smoke checks, and opens bounded Builder repair jobs for
+test-only baseline failures. Auto-merge requires the existing clean
+non-evidential gate plus the exact failing-guard allowlist. The VPS remains
+fail-closed until its durable GitHub write credential and repository identity
+are configured; no ephemeral Codespaces token may be persisted or repurposed.
+
 Dr Bob acceptance finding 2026-10-12: Bob answered a combined Atlas, schema,
 and human-test request after running only one paginated Atlas query, while the
 Builder UI correctly showed that no work was running. The repaired path gives

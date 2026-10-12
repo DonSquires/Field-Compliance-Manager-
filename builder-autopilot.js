@@ -32,7 +32,7 @@ const SIGNIFICANT_ROUTINE_TERMS = [
 ];
 
 function routineRepairHold({ job, approval, evidence }) {
-  if (job?.autopilot_source !== 'routine_monitor') return null;
+  if (!['routine_monitor', 'main_monitor'].includes(job?.autopilot_source)) return null;
   if (job.repair_risk !== 'routine') {
     return { gate: approval.approval_type, files: [], reasons: ['repair is no longer classified as routine'] };
   }
@@ -41,7 +41,9 @@ function routineRepairHold({ job, approval, evidence }) {
     job.task_description,
     evidence?.productSpecification ? JSON.stringify(evidence.productSpecification) : '',
   ].join('\n');
-  const significant = SIGNIFICANT_ROUTINE_TERMS.find((pattern) => pattern.test(scopeText));
+  const significant = job.autopilot_source === 'main_monitor'
+    ? null
+    : SIGNIFICANT_ROUTINE_TERMS.find((pattern) => pattern.test(scopeText));
   if (significant) {
     return {
       gate: approval.approval_type,
@@ -55,6 +57,17 @@ function routineRepairHold({ job, approval, evidence }) {
       files: evidence.changedFiles,
       reasons: ['routine repair changed more than eight files'],
     };
+  }
+  if (job.autopilot_source === 'main_monitor' && approval.approval_type === 'release_approval') {
+    const expectedFiles = Array.isArray(job.source_main_health_files) ? job.source_main_health_files : [];
+    const unexpectedFiles = (evidence?.changedFiles ?? []).filter((file) => !expectedFiles.includes(file));
+    if (!expectedFiles.length || unexpectedFiles.length) {
+      return {
+        gate: approval.approval_type,
+        files: unexpectedFiles,
+        reasons: ['main-health repair changed files outside the recorded failing test set'],
+      };
+    }
   }
   return null;
 }
@@ -190,7 +203,12 @@ async function collectEvidence({ supabase, snapshot }) {
 
 function composeReport({ job, evidence, pullRequestUrl, state, reason, hold, repair, resumedAs, automerge = null }) {
   const lines = [];
-  if (state === 'published') {
+  if (state === 'merged') {
+    lines.push(`Done: Bob repaired the failing checks in "${plain(job.title, 160)}" and merged the verified change.`);
+    if (evidence?.changedFiles?.length) lines.push(`Files changed: ${describeFiles(evidence.changedFiles)}.`);
+    if (evidence?.testsRun?.length) lines.push(`Bob ran and passed: ${evidence.testsRun.slice(0, 3).join('; ')}.`);
+    if (pullRequestUrl) lines.push(`Repository review receipt: ${pullRequestUrl}`);
+  } else if (state === 'published') {
     lines.push(`Done: "${plain(job.title, 160)}" is built, checked, and waiting for review.`);
     if (evidence.summary) lines.push(`What changed: ${evidence.summary}`);
     lines.push(`Files touched: ${describeFiles(evidence.changedFiles)}.`);
@@ -227,7 +245,7 @@ function composeReport({ job, evidence, pullRequestUrl, state, reason, hold, rep
     lines.push(`Why: ${plain(reason, 500)}.`);
     lines.push('What you can do: tell Bob "try the repair again", or ask him to explain what is failing in plain terms. Nothing was published.');
   } else if (state === 'awaiting_human') {
-    if (job.autopilot_source === 'routine_monitor') {
+    if (job.autopilot_source === 'routine_monitor' || job.autopilot_source === 'main_monitor') {
       lines.push(`Needs Grandmaster review: "${plain(job.title, 160)}" crossed the routine-repair boundary, so Bob has paused at ${GATE_LABEL[hold?.gate] ?? 'an approval gate'}.`);
       if (hold?.files?.length) lines.push(`Protected or expanded files: ${describeFiles(hold.files)}.`);
     } else {
@@ -264,7 +282,12 @@ const AUTOMERGE_MARK = '<!-- bob-automerge: yes -->';
 
 function automergeEligible({ job, evidence, env = process.env }) {
   if (String(env.BOB_AUTOPILOT_AUTOMERGE || '').toLowerCase() !== 'true') return { ok: false, reason: 'auto-merge is off (BOB_AUTOPILOT_AUTOMERGE)' };
-  if (!job?.autopilot_requested_by) return { ok: false, reason: 'not requested by a person in chat' };
+  const expectedMainHealthFiles = Array.isArray(job?.source_main_health_files) ? job.source_main_health_files : [];
+  const mainHealthRepair = job?.autopilot_source === 'main_monitor'
+    && job?.repair_risk === 'routine'
+    && expectedMainHealthFiles.length > 0
+    && expectedMainHealthFiles.every((file) => /^apps\/web\/src\/[A-Za-z0-9_./-]+\.guard\.test\.tsx?$/.test(file) && !file.includes('..'));
+  if (!job?.autopilot_requested_by && !mainHealthRepair) return { ok: false, reason: 'not requested by a person in chat or a bounded main-health repair' };
   if (!evidence?.verifyRun) return { ok: false, reason: 'no independent worker verification' };
   if (evidence.verificationContract?.passed !== true) {
     return { ok: false, reason: `verification contract incomplete: ${(evidence.verificationContract?.failures || ['missing evidence']).slice(0, 2).join('; ')}` };
@@ -275,6 +298,9 @@ function automergeEligible({ job, evidence, env = process.env }) {
   if ((review.findingList || []).some((f) => ['critical', 'high'].includes(f.severity))) return { ok: false, reason: 'review has critical/high findings' };
   const files = evidence.changedFiles || [];
   if (!files.length) return { ok: false, reason: 'no changed files' };
+  if (mainHealthRepair && (files.length > 8 || files.some((file) => !expectedMainHealthFiles.includes(file)))) {
+    return { ok: false, reason: 'main-health repair changed files outside the failing source-guard set' };
+  }
   const evidential = evidentialPathsIn(files);
   if (evidential.length) return { ok: false, reason: `evidential paths need a person: ${evidential.slice(0, 3).join(', ')}` };
   return { ok: true, reason: 'worker-verified, security clean, independent review passed, no evidential paths' };
@@ -417,6 +443,9 @@ function repairJobFor(job, baseline) {
     codeReviewMode: 'independent_ai',
     requestedBy: job.autopilot_requested_by,
     conversationId: job.autopilot_conversation_id ?? null,
+    autopilotSource: job.autopilot_source === 'main_monitor' ? 'main_monitor' : null,
+    sourceMainHealthSha: job.source_main_health_sha ?? null,
+    sourceMainHealthFiles: job.source_main_health_files ?? [],
   };
 }
 
@@ -433,6 +462,9 @@ function reopenSpec(job) {
     codeReviewMode: job.code_review_mode || 'independent_ai',
     requestedBy: job.autopilot_requested_by,
     conversationId: job.autopilot_conversation_id ?? null,
+    autopilotSource: job.autopilot_source === 'main_monitor' ? 'main_monitor' : null,
+    sourceMainHealthSha: job.source_main_health_sha ?? null,
+    sourceMainHealthFiles: job.source_main_health_files ?? [],
   };
 }
 
@@ -514,6 +546,8 @@ async function autopilotTick({ supabase, jobs, actions, log = () => {} }) {
           if (hold) continue;
           const authority = job.autopilot_source === 'routine_monitor'
             ? `the monitored defect ${job.source_friction_packet_id ?? 'n/a'} was deterministically classified as a routine repair`
+            : job.autopilot_source === 'main_monitor'
+              ? `the pinned main-health check ${job.source_main_health_sha ?? 'n/a'} failed only in its recorded test-guard set`
             : `the requester asked for this change in chat (conversation ${job.autopilot_conversation_id ?? 'n/a'})`;
           await actions.approve(approval.id, `Cleared by Bob autopilot: ${authority}. ${approval.approval_type === 'release_approval' ? 'Publishing the verified branch; protected scope would have stopped here.' : 'Proceeding to implementation on the bounded brief.'} No evidential paths are involved.`);
           cleared += 1;
@@ -542,10 +576,11 @@ async function autopilotTick({ supabase, jobs, actions, log = () => {} }) {
         const evidence = await collectEvidence({ supabase, snapshot });
         if (!evidence.validatedPatchId) throw new Error('no verified patch artifact to publish');
         const automerge = automergeEligible({ job, evidence });
-        const published = await actions.publish({ job, evidence, validatedPatchId: evidence.validatedPatchId, bodyFor: (branchName, headSha) => composePullRequestBody({ job, evidence, branchName, headSha, automerge }) });
-        await actions.record(job.id, 'published', { ...composeReport({ job, evidence, pullRequestUrl: published.pullRequestUrl, state: 'published', automerge }), automerge: automerge.ok });
-        log({ job: job.id, published: published.pullRequestUrl });
-        outcomes.push({ job: job.id, outcome: 'published', url: published.pullRequestUrl });
+        const published = await actions.publish({ job, evidence, validatedPatchId: evidence.validatedPatchId, automerge, bodyFor: (branchName, headSha) => composePullRequestBody({ job, evidence, branchName, headSha, automerge }) });
+        const state = published.merged === true ? 'merged' : 'published';
+        await actions.record(job.id, published.merged === true ? 'done' : 'published', { ...composeReport({ job, evidence, pullRequestUrl: published.pullRequestUrl, state, automerge }), automerge: automerge.ok, merged: published.merged === true });
+        log({ job: job.id, [state]: published.pullRequestUrl });
+        outcomes.push({ job: job.id, outcome: state, url: published.pullRequestUrl });
         continue;
       }
       const run = await actions.run(job.id);
@@ -591,8 +626,8 @@ async function autopilotTick({ supabase, jobs, actions, log = () => {} }) {
 async function listAutopilotJobs(supabase, limit = 5) {
   const { data, error } = await supabase
     .from('builder_jobs')
-    .select('id, organization_id, project_id, title, description, task_description, status, target_sha, last_error, frontend_required, backend_required, code_review_mode, workspace_branch, workspace_head_sha, workspace_published_head_sha, workspace_pull_request_url, autopilot_requested_by, autopilot_conversation_id, autopilot_source, source_friction_packet_id, repair_risk, autopilot_state, autopilot_report, autopilot_updated_at')
-    .not('autopilot_requested_by', 'is', null)
+    .select('id, organization_id, project_id, title, description, task_description, status, target_sha, last_error, frontend_required, backend_required, code_review_mode, workspace_branch, workspace_head_sha, workspace_published_head_sha, workspace_pull_request_url, autopilot_requested_by, autopilot_conversation_id, autopilot_source, source_friction_packet_id, source_main_health_sha, source_main_health_files, repair_risk, autopilot_state, autopilot_report, autopilot_updated_at')
+    .or('autopilot_requested_by.not.is.null,autopilot_source.eq.main_monitor')
     .in('autopilot_state', ['driving', 'awaiting_human'])
     .order('autopilot_updated_at', { ascending: true })
     .limit(limit);
@@ -600,8 +635,8 @@ async function listAutopilotJobs(supabase, limit = 5) {
   // Jobs parked behind a repair of main are re-checked each tick until the repair lands or fails.
   const { data: waiting, error: waitingError } = await supabase
     .from('builder_jobs')
-    .select('id, organization_id, project_id, title, description, task_description, status, target_sha, last_error, frontend_required, backend_required, code_review_mode, workspace_branch, workspace_head_sha, workspace_published_head_sha, workspace_pull_request_url, autopilot_requested_by, autopilot_conversation_id, autopilot_source, source_friction_packet_id, repair_risk, autopilot_state, autopilot_report, autopilot_updated_at')
-    .not('autopilot_requested_by', 'is', null)
+    .select('id, organization_id, project_id, title, description, task_description, status, target_sha, last_error, frontend_required, backend_required, code_review_mode, workspace_branch, workspace_head_sha, workspace_published_head_sha, workspace_pull_request_url, autopilot_requested_by, autopilot_conversation_id, autopilot_source, source_friction_packet_id, source_main_health_sha, source_main_health_files, repair_risk, autopilot_state, autopilot_report, autopilot_updated_at')
+    .or('autopilot_requested_by.not.is.null,autopilot_source.eq.main_monitor')
     .eq('autopilot_state', 'blocked')
     .not('autopilot_report->>repair_job_id', 'is', null)
     .is('autopilot_report->>resumed_as_job_id', null)

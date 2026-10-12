@@ -7,10 +7,11 @@ phases that are a secret swap, not a rebuild.
 
 ## What the installer is today
 
-- `apps/sd-card-bridge-v2` (Tauri 2, NSIS, `installMode: currentUser`), built by
-  `.github/workflows/release-sd-card-bridge-v2.yml` on `windows-latest`, published as a GitHub
-  pre-release and copied to Supabase Storage `desktop-releases/v2/<version>/FCM-Desktop-V2-Setup.exe`,
-  which is what the web download prompt points at (`AdminShell.tsx`, `DESKTOP_V2_VERSION`).
+- `apps/sd-card-bridge-v2` (Tauri 2, NSIS, `installMode: currentUser`), built on
+  the controlled Windows release workstation and copied to Supabase Storage
+  `desktop-releases/v2/<version>/FCM-Desktop-V2-Setup.exe`, which is what the web
+  download prompt points at (`AdminShell.tsx`, `DESKTOP_V2_VERSION`). GitHub is
+  the source host only; it does not build or publish releases.
 - Reading a Dahua DHFS card means opening `\\.\PhysicalDriveN` raw, so the app itself must run as
   administrator; the installer does not need elevation.
 - Field lesson (0.1.7): endpoint security reacts to what an unsigned binary *does*. Spawning PowerShell
@@ -20,7 +21,7 @@ phases that are a secret swap, not a rebuild.
 
 ## Phase 0 — integrity you can check (done, free)
 
-The release workflow now:
+The controlled release process now:
 
 1. Computes the installer's SHA-256 and publishes `SHA256SUMS` and `manifest.json` (version, hash, size,
    git SHA, build time, whether/by whom it is signed, and the exact `certutil` command to verify) next to
@@ -138,7 +139,7 @@ What it buys:
   **Trusted Publishers** (and **Trusted Root**, since it is self-issued), or an AppLocker / WDAC
   publisher rule allows it. The `.cer` is published at `desktop-releases/v2/FCM-Desktop-Signing.cer`.
 - The private key is only ever in Vault (encrypted at rest, service-role reads audited) and the owner's
-  offline copy. GitHub Actions holds neither the key nor a Supabase credential.
+  offline copy. No GitHub workflow receives signing material or a Supabase credential.
 
 What it does not buy: Microsoft SmartScreen reputation. Unmanaged machines still see "Windows protected
 your PC" until Phase 2. That is stated in the release notes and in the download prompt rather than hidden.

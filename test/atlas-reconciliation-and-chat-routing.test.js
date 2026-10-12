@@ -85,7 +85,7 @@ test('page friction is routed through the bounded triage organ without claiming 
   assert.match(chat, /async function execTriageFriction/);
   assert.match(chat, /callFn\('bob-triage-report', authHeader/);
   assert.match(chat, /case 'triage_friction':/);
-  assert.match(chat, /work has not started until that job has a receipt/);
+  assert.match(chat, /Work is queued, not yet started; a Builder receipt will identify the job/);
   assert.match(chat, /This confirms routing, not that a repair has started/);
 });
 

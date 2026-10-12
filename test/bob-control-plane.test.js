@@ -39,6 +39,10 @@ test.before(async () => {
       BOB_ADMIN_TOKEN: adminToken,
       BOB_RUNNER_TOKEN: runnerToken,
       BOB_MODEL_GATEWAY_TOKEN: modelGatewayToken,
+      BUILDER_GIT_HOST: 'gitea',
+      GITHUB_TOKEN: '',
+      GITHUB_OWNER: '',
+      GITHUB_REPO: '',
       BOB_ASSESSMENT_ROOT: root,
       GITEA_WEBHOOK_SECRET: webhookSecret,
       BOB_ALLOWED_REPOSITORIES: 'example/app',
@@ -68,7 +72,7 @@ test('health is public and reports the control plane', async () => {
   // Health names the git host Bob's Builder lane publishes to; secrets never appear, only whether the host is configured.
   // Autopilot reads false here: the test server has no Supabase, model gateway, or worker image.
   const { modelProviders, laptopShell, ...rest } = body;
-  assert.deepEqual(rest, { status: 'ok', service: 'bob-control-plane', activeLease: false, builderGitHost: 'gitea', builderSourceConfigured: false, autopilot: false, autopilotIntervalMs: 60_000, runningBuilderJobs: 0 });
+  assert.deepEqual(rest, { status: 'ok', service: 'bob-control-plane', activeLease: false, builderGitHost: 'github', builderSourceConfigured: false, autopilot: false, autopilotIntervalMs: 60_000, mainHealth: { enabled: false, sourceHost: 'github', latest: null }, runningBuilderJobs: 0 });
   // Bob's laptop terminal is off unless the owner-side env enables it; health never carries the user or key path.
   assert.deepEqual(laptopShell, { enabled: false, configured: false, host: null, ssh_allowed: null });
   // Provider health names Bob's own compute first and never carries secrets or URLs.

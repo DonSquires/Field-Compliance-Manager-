@@ -97,15 +97,17 @@ The runner treats browser errors and failed interactions as failures. The fixtur
 
 This complements workflow-specific tests such as the CRM, welfare, and dispatch walkthroughs. The workflow tests verify known data contracts; this human test verifies that a person can actually see and move through the product.
 
-## CI versus Bob ownership
+## Bob-Owned Verification
 
-GitHub Actions runs the bounded `npm run test:e2e:ci-smoke` suite so every push
-gets fast coverage of shell/navigation, dispatch, geofence, module entitlement,
-and automation contracts. It does not run the entire 55-spec browser matrix.
+Bob's VPS polls the GitHub main SHA, runs the web build, full unit/source-guard
+suite, and bounded Playwright smoke suite in an isolated worker, then records a
+durable result per SHA. On a red baseline, Bob opens a constrained Builder
+repair, verifies and reviews it, and automatically merges only the approved
+low-risk test-only case. GitHub is the source host; it runs no CI or agent
+workflows.
 
-Bob owns the expansive human/visual pass, which is intentionally slower and
-produces screenshots, UX findings, HTTP evidence, traces, and before/during/after
-workflow reports:
+Bob also owns the expansive human/visual pass, which produces screenshots, UX
+findings, HTTP evidence, traces, and before/during/after workflow reports:
 
 ```bash
 cd apps/web
