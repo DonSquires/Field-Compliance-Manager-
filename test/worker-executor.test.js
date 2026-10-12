@@ -22,7 +22,7 @@ test('worker profiles use fixed commands', () => {
   assert.deepEqual(workerCommand('build'), ['npm', 'run', 'build']);
   assert.match(workerCommand('human-qa').at(-1), /dr-bob-human-test\.spec\.ts --workers=4/);
   assert.match(workerCommand('human-qa-live').at(-1), /dr-bob-human-test\.spec\.ts --workers=1/);
-  assert.match(workerCommand('main-health').at(-1), /npm run build -- --outDir=\/tmp\/bob-main-health-dist;.*npm test -- --run;.*npm run test:e2e:ci-smoke/);
+  assert.match(workerCommand('main-health').at(-1), /npm run lint;.*vite build --outDir=\/tmp\/bob-main-health-dist;.*npm test -- --run;.*npm run test:e2e:ci-smoke/);
   assert.deepEqual(workerCommand('full-page-audit').slice(0, 3), ['sh', '-lc', 'set -eu; npm test; npm run check:css; cp -a /opt/bob/web-node_modules/. /workspace/apps/web/node_modules/; cd /workspace/apps/web; PATH=/workspace/apps/web/node_modules/.bin:$PATH npm run lint; PATH=/workspace/apps/web/node_modules/.bin:$PATH npm test -- --reporter=dot; PATH=/workspace/apps/web/node_modules/.bin:$PATH npm run build; PATH=/workspace/apps/web/node_modules/.bin:$PATH PLAYWRIGHT_OUTPUT_DIR=/artifacts/test-results PLAYWRIGHT_HTML_OUTPUT_DIR=/artifacts/playwright-report playwright test e2e/dr-bob-human-test.spec.ts --workers=1']);
   assert.deepEqual(workerCommand('frontend-verify'), [
     'node', '/opt/bob/frontend-worker.js', '/workspace', '/artifacts/input.patch', '/artifacts'
