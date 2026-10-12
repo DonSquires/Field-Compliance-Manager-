@@ -101,6 +101,37 @@ interface BuilderContextSnapshot {
 
 const plainWords = (value: unknown, fallback = 'Not recorded') => typeof value === 'string' && value.trim() ? value.replaceAll('_', ' ') : fallback;
 
+const PROMPT_TEMPLATES = [
+  {
+    label: '🚀 New Feature',
+    title: 'Build feature: [Feature name]',
+    prompt: 'Goal: Build a new feature for [Feature name].\n\nUser intent: [Describe what the user wants to accomplish in plain English].\n\nRequirements:\n- Create UI components following FCM enterprise design\n- Connect to Supabase schema / RPCs\n- Include empty, loading, error, and permission states\n\nVerification:\n- Add unit and guard tests ensuring 100% test pass rate',
+    frontend: true,
+    backend: false,
+  },
+  {
+    label: '🐛 Fix Defect',
+    title: 'Fix issue: [Issue summary]',
+    prompt: 'Goal: Fix the issue observed in [Component or page name].\n\nSymptom: [Describe the unexpected behavior or error message].\nExpected: [Describe the expected behavior].\n\nRoot cause diagnosis: [Identify which files/functions are implicated].\n\nVerification: Run relevant tests and verify the fix does not regress related surfaces.',
+    frontend: true,
+    backend: true,
+  },
+  {
+    label: '🎨 UI/UX Vibe',
+    title: 'Enhance UX: [Page or workflow name]',
+    prompt: 'Goal: Enhance the UI/UX for [Page or workflow name] using natural language design.\n\nImprovements:\n- Add intuitive filtering, search, and state transitions\n- Improve accessibility, contrast, and responsive layout\n- Follow FCM design tokens and enterprise SaaS UX training standards',
+    frontend: true,
+    backend: false,
+  },
+  {
+    label: '🛡️ Self-Heal',
+    title: 'Repair tests: [Test file or area]',
+    prompt: 'Goal: Repair failing test or guard assertions in [test file].\n\nDiagnosis: Check if the test expectation is stale vs current implementation or if code regressed.\nAction: Update the assertion or fix code to match canonical schema/Atlas truth.\nVerification: Confirm all tests pass.',
+    frontend: true,
+    backend: false,
+  },
+];
+
 const BuilderControlRoomPage: React.FC = () => {
   const [projects, setProjects] = useState<BuilderProject[]>([]);
   const [jobs, setJobs] = useState<BuilderJob[]>([]);
@@ -246,9 +277,19 @@ const BuilderControlRoomPage: React.FC = () => {
 
   const completedSteps = snapshot?.steps.filter(step => ['completed', 'skipped'].includes(step.status)).length ?? 0;
 
+  const applyTemplate = (tpl: typeof PROMPT_TEMPLATES[number]) => {
+    setForm(current => ({
+      ...current,
+      title: tpl.title,
+      taskDescription: tpl.prompt,
+      frontendRequired: tpl.frontend,
+      backendRequired: tpl.backend,
+    }));
+  };
+
   const createJob = async (event: React.FormEvent) => {
     event.preventDefault();
-    if (!selectedProject || !form.title.trim() || !form.taskDescription.trim() || !form.targetSha.trim()) return;
+    if (!selectedProject || !form.title.trim() || !form.taskDescription.trim()) return;
     if (!form.frontendRequired && !form.backendRequired) {
       setError('Select at least one implementation scope.');
       return;
@@ -258,7 +299,8 @@ const BuilderControlRoomPage: React.FC = () => {
     try {
       const data = await invoke({
         action: 'create', organization_id: selectedProject.organization_id, project_id: selectedProject.id,
-        title: form.title.trim(), task_description: form.taskDescription.trim(), target_sha: form.targetSha.trim().toLowerCase(),
+        title: form.title.trim(), task_description: form.taskDescription.trim(),
+        target_sha: form.targetSha.trim().toLowerCase() || 'main',
         branch_name: form.branchName.trim() || 'main', frontend_required: form.frontendRequired,
         backend_required: form.backendRequired, code_review_mode: form.codeReviewMode,
         requested_action: form.requestedAction, target_environment: form.targetEnvironment,
@@ -519,11 +561,13 @@ const BuilderControlRoomPage: React.FC = () => {
           </div>
 
           {loading ? <div className="builder-empty"><RefreshCw size={18} className="is-spinning" /> Loading jobs</div> : filteredJobs.length === 0 ? <div className="builder-empty"><Workflow size={19} /> {jobs.length === 0 ? 'No Builder jobs' : 'No jobs matching filter'}</div> : (
-            <div className="builder-list">{filteredJobs.map(job => (
+            <div className="builder-list">{filteredJobs.map(job => {
+              const jobIndex = jobs.length - jobs.findIndex(j => j.id === job.id);
+              return (
               <button type="button" key={job.id} className={selectedId === job.id ? 'is-selected' : ''} onClick={() => setSelectedId(job.id)}>
                 <span className={`builder-state state-${job.status}`} />
                 <div>
-                  <strong>{job.title}</strong>
+                  <strong><span className="builder-job-num">#{jobIndex}</span>{job.title}</strong>
                   <div className="builder-job-tags">
                     {String(job.title).toLowerCase().startsWith('repair') && (
                       <span className="builder-tag tag-self-heal">Self-heal</span>
@@ -544,7 +588,7 @@ const BuilderControlRoomPage: React.FC = () => {
                 <div><span>{plainWords(job.status, 'Unknown status')}</span><time>{new Date(job.updated_at).toLocaleDateString()}</time></div>
                 <ChevronRight size={16} />
               </button>
-            ))}</div>
+            );})}</div>
           )}
         </section>
 
@@ -559,6 +603,23 @@ const BuilderControlRoomPage: React.FC = () => {
               <span>{plainWords(selectedJob.requested_action)} for {plainWords(selectedJob.target_environment)}</span>
               <span>{completedSteps}/{snapshot.steps.length} steps satisfied</span>
             </div>
+            {snapshot && (
+              <div className="builder-pipeline-bar" aria-label="Autonomous agent pipeline">
+                <span className={`builder-pipeline-node ${snapshot.steps.find(s => s.step_id === 'product_analysis')?.status === 'completed' ? 'is-complete' : selectedJob.current_step_name === 'product_analysis' ? 'is-active' : ''}`}>1. Analyst</span>
+                <span className="builder-pipeline-arrow">→</span>
+                <span className={`builder-pipeline-node ${snapshot.steps.find(s => s.step_id === 'ui_design')?.status === 'completed' ? 'is-complete' : selectedJob.current_step_name === 'ui_design' ? 'is-active' : ''}`}>2. Design</span>
+                <span className="builder-pipeline-arrow">→</span>
+                <span className={`builder-pipeline-node ${snapshot.steps.some(s => ['frontend_implementation', 'backend_implementation'].includes(s.step_id) && s.status === 'completed') ? 'is-complete' : ['frontend_implementation', 'backend_implementation'].includes(selectedJob.current_step_name || '') ? 'is-active' : ''}`}>3. Engineer</span>
+                <span className="builder-pipeline-arrow">→</span>
+                <span className={`builder-pipeline-node ${snapshot.steps.find(s => s.step_id === 'test_suite')?.status === 'completed' ? 'is-complete' : selectedJob.current_step_name === 'test_suite' ? 'is-active' : ''}`}>4. Verify</span>
+                <span className="builder-pipeline-arrow">→</span>
+                <span className={`builder-pipeline-node ${snapshot.steps.find(s => s.step_id === 'security_review')?.status === 'completed' ? 'is-complete' : selectedJob.current_step_name === 'security_review' ? 'is-active' : ''}`}>5. Security</span>
+                <span className="builder-pipeline-arrow">→</span>
+                <span className={`builder-pipeline-node ${snapshot.steps.find(s => s.step_id === 'code_review')?.status === 'completed' ? 'is-complete' : selectedJob.current_step_name === 'code_review' ? 'is-active' : ''}`}>6. Review</span>
+                <span className="builder-pipeline-arrow">→</span>
+                <span className={`builder-pipeline-node ${['release_ready', 'deployed'].includes(selectedJob.status) ? 'is-complete' : selectedJob.current_step_name === 'release_prep' ? 'is-active' : ''}`}>7. Release</span>
+              </div>
+            )}
             {selectedJob.last_error && <div className="builder-inline-error"><AlertTriangle size={15} /> {selectedJob.last_error}</div>}
             <section className="builder-workbench" aria-label="Builder job workspace">
               <nav className="builder-workbench-tabs" aria-label="Builder workspace views">
@@ -613,9 +674,25 @@ const BuilderControlRoomPage: React.FC = () => {
       {showCreate && <div className="builder-modal-backdrop" role="presentation"><form className="builder-modal" onSubmit={createJob}>
         <div className="builder-panel-heading"><div><span>New build</span><h2>Create Builder job</h2></div><button type="button" onClick={() => setShowCreate(false)}><X size={16} /></button></div>
         <label>Project<select value={form.projectId} onChange={event => setForm({ ...form, projectId: event.target.value })} required>{projects.map(project => <option value={project.id} key={project.id}>{project.name} · {project.gitea_owner}/{project.gitea_repo}</option>)}</select></label>
-        <label>Title<input value={form.title} onChange={event => setForm({ ...form, title: event.target.value })} maxLength={200} required /></label>
-        <label>Task description<textarea value={form.taskDescription} onChange={event => setForm({ ...form, taskDescription: event.target.value })} maxLength={12000} rows={5} required /></label>
-        <div className="builder-field-row"><label>Branch<input value={form.branchName} onChange={event => setForm({ ...form, branchName: event.target.value })} /></label><label>Target commit SHA<input value={form.targetSha} onChange={event => setForm({ ...form, targetSha: event.target.value })} pattern="[a-fA-F0-9]{40}" required /></label></div>
+        <div className="builder-templates-header"><span>Prompt Starters (Natural Language)</span></div>
+        <div className="builder-templates">
+          {PROMPT_TEMPLATES.map(tpl => (
+            <button
+              type="button"
+              key={tpl.label}
+              className="builder-template-chip"
+              onClick={() => applyTemplate(tpl)}
+            >
+              {tpl.label}
+            </button>
+          ))}
+        </div>
+        <label>Title<input value={form.title} onChange={event => setForm({ ...form, title: event.target.value })} maxLength={200} placeholder="e.g. Build feature: Custom report builder" required /></label>
+        <label>Task description<textarea value={form.taskDescription} onChange={event => setForm({ ...form, taskDescription: event.target.value })} maxLength={12000} rows={5} placeholder="Describe the desired feature, bug fix, or UI change in plain English..." required /></label>
+        <div className="builder-prompt-guide">
+          <strong>Natural Language Coding:</strong> Describe what you want in plain English. Bob plans the specification, designs the interface, writes code, verifies in an isolated worker, and runs independent security and code reviews.
+        </div>
+        <div className="builder-field-row"><label>Branch<input value={form.branchName} onChange={event => setForm({ ...form, branchName: event.target.value })} /></label><label>Target commit SHA<input value={form.targetSha} onChange={event => setForm({ ...form, targetSha: event.target.value })} placeholder="Auto (HEAD of main)" /></label></div>
         <div className="builder-field-row"><label>Requested action<select value={form.requestedAction} onChange={event => setForm({ ...form, requestedAction: event.target.value as RequestedAction })}><option value="prepare_change">Prepare change</option><option value="prepare_release">Prepare release</option></select></label><label>Target environment<select value={form.targetEnvironment} onChange={event => { const targetEnvironment = event.target.value as TargetEnvironment; setForm({ ...form, targetEnvironment, requestedAction: targetEnvironment === 'production' ? 'prepare_release' : form.requestedAction, codeReviewMode: targetEnvironment === 'production' ? 'human' : form.codeReviewMode }); }}><option value="development">Development</option><option value="staging">Staging</option><option value="production">Production</option></select></label></div>
         <fieldset><legend>Implementation scope</legend><label><input type="checkbox" checked={form.frontendRequired} onChange={event => setForm({ ...form, frontendRequired: event.target.checked })} /> Frontend</label><label><input type="checkbox" checked={form.backendRequired} onChange={event => setForm({ ...form, backendRequired: event.target.checked })} /> Backend</label></fieldset>
         <label>Optional code review<select value={form.codeReviewMode} onChange={event => setForm({ ...form, codeReviewMode: event.target.value as ReviewMode })} disabled={form.targetEnvironment === 'production'}><option value="none">None</option><option value="human">Human reviewer</option><option value="independent_ai">Independent AI reviewer</option></select></label>
