@@ -1,5 +1,5 @@
 import React, { useCallback, useEffect, useMemo, useState } from 'react';
-import { AlertTriangle, Bot, CheckCircle2, ChevronRight, CircleStop, Clock3, Database, FileCode2, FolderTree, MessageSquareText, Play, Plus, RefreshCw, ShieldCheck, TerminalSquare, Workflow, X } from 'lucide-react';
+import { AlertTriangle, Bot, CheckCircle2, ChevronRight, CircleStop, Clock3, Database, FileCode2, FolderTree, MessageSquareText, Play, Plus, RefreshCw, Search, ShieldCheck, TerminalSquare, Workflow, X } from 'lucide-react';
 import { BobPanel } from '../components/BobPanel';
 import { supabase } from '../lib/supabase';
 import './BuilderControlRoomPage.css';
@@ -8,6 +8,8 @@ type ReviewMode = 'none' | 'human' | 'independent_ai';
 type RequestedAction = 'prepare_change' | 'prepare_release';
 type TargetEnvironment = 'development' | 'staging' | 'production';
 type WorkspaceView = 'task' | 'evidence' | 'execution' | 'context';
+type JobFilterTab = 'all' | 'issues' | 'active' | 'awaiting' | 'completed' | 'failed' | 'cancelled';
+type ScopeFilter = 'all' | 'frontend' | 'backend' | 'fullstack';
 
 interface BuilderProject {
   id: string;
@@ -122,6 +124,9 @@ const BuilderControlRoomPage: React.FC = () => {
   const [artifactLoading, setArtifactLoading] = useState(false);
   const [followupTask, setFollowupTask] = useState('');
   const [cancellationReason, setCancellationReason] = useState('');
+  const [activeTab, setActiveTab] = useState<JobFilterTab>('all');
+  const [searchQuery, setSearchQuery] = useState('');
+  const [scopeFilter, setScopeFilter] = useState<ScopeFilter>('all');
   const [form, setForm] = useState({
     projectId: '', title: '', taskDescription: '', targetSha: '', branchName: 'main',
     frontendRequired: true, backendRequired: false, codeReviewMode: 'human' as ReviewMode,
@@ -193,6 +198,52 @@ const BuilderControlRoomPage: React.FC = () => {
   const selectedProject = projects.find(project => project.id === form.projectId) ?? null;
   const pendingJobs = jobs.filter(job => !['release_ready', 'deployed', 'failed', 'cancelled'].includes(job.status)).length;
   const approvalJobs = jobs.filter(job => !['deployed', 'failed', 'cancelled'].includes(job.status) && (['specification_ready', 'approval_pending'].includes(job.status) || (job.status === 'testing' && job.code_review_mode === 'human' && job.code_review_status === 'pending'))).length;
+  const completedJobs = jobs.filter(job => ['deployed', 'release_ready'].includes(job.status)).length;
+  const failedJobs = jobs.filter(job => job.status === 'failed').length;
+  const cancelledJobs = jobs.filter(job => job.status === 'cancelled').length;
+  const issueJobs = jobs.filter(job => String(job.title).toLowerCase().startsWith('repair') || Boolean(job.last_error)).length;
+
+  const filteredJobs = useMemo(() => {
+    return jobs.filter(job => {
+      // 1. Tab filter
+      if (activeTab === 'issues') {
+        const isRepair = String(job.title).toLowerCase().startsWith('repair') || Boolean(job.last_error);
+        if (!isRepair) return false;
+      } else if (activeTab === 'active') {
+        if (['release_ready', 'deployed', 'failed', 'cancelled'].includes(job.status)) return false;
+      } else if (activeTab === 'awaiting') {
+        const isAwaiting = !['deployed', 'failed', 'cancelled'].includes(job.status) &&
+          (['specification_ready', 'approval_pending'].includes(job.status) ||
+          (job.status === 'testing' && job.code_review_mode === 'human' && job.code_review_status === 'pending'));
+        if (!isAwaiting) return false;
+      } else if (activeTab === 'completed') {
+        if (!['deployed', 'release_ready'].includes(job.status)) return false;
+      } else if (activeTab === 'failed') {
+        if (job.status !== 'failed') return false;
+      } else if (activeTab === 'cancelled') {
+        if (job.status !== 'cancelled') return false;
+      }
+
+      // 2. Scope filter
+      if (scopeFilter === 'frontend' && (!job.frontend_required || job.backend_required)) return false;
+      if (scopeFilter === 'backend' && (!job.backend_required || job.frontend_required)) return false;
+      if (scopeFilter === 'fullstack' && (!job.frontend_required || !job.backend_required)) return false;
+
+      // 3. Search query
+      if (searchQuery.trim()) {
+        const q = searchQuery.toLowerCase().trim();
+        const matchesTitle = String(job.title).toLowerCase().includes(q);
+        const matchesStep = String(job.current_step_name || '').toLowerCase().includes(q);
+        const matchesStatus = String(job.status).toLowerCase().includes(q);
+        const matchesError = String(job.last_error || '').toLowerCase().includes(q);
+        const matchesSha = String(job.target_sha || '').toLowerCase().includes(q);
+        if (!matchesTitle && !matchesStep && !matchesStatus && !matchesError && !matchesSha) return false;
+      }
+
+      return true;
+    });
+  }, [jobs, activeTab, scopeFilter, searchQuery]);
+
   const completedSteps = snapshot?.steps.filter(step => ['completed', 'skipped'].includes(step.status)).length ?? 0;
 
   const createJob = async (event: React.FormEvent) => {
@@ -409,11 +460,87 @@ const BuilderControlRoomPage: React.FC = () => {
       <div className="builder-layout">
         <section className="builder-queue">
           <div className="builder-panel-heading"><div><span>Queue</span><h2>Build jobs</h2></div><Bot size={18} /></div>
-          {loading ? <div className="builder-empty"><RefreshCw size={18} className="is-spinning" /> Loading jobs</div> : jobs.length === 0 ? <div className="builder-empty"><Workflow size={19} /> No Builder jobs</div> : (
-            <div className="builder-list">{jobs.map(job => (
+
+          <nav className="builder-tabs-nav" aria-label="Job filter tabs">
+            <button type="button" className={`builder-tab-btn ${activeTab === 'all' ? 'is-active' : ''}`} onClick={() => setActiveTab('all')}>
+              All <span className="builder-tab-count">{jobs.length}</span>
+            </button>
+            <button type="button" className={`builder-tab-btn ${activeTab === 'issues' ? 'is-active' : ''}`} onClick={() => setActiveTab('issues')}>
+              Issues <span className="builder-tab-count">{issueJobs}</span>
+            </button>
+            <button type="button" className={`builder-tab-btn ${activeTab === 'active' ? 'is-active' : ''}`} onClick={() => setActiveTab('active')}>
+              Active <span className="builder-tab-count">{pendingJobs}</span>
+            </button>
+            <button type="button" className={`builder-tab-btn ${activeTab === 'awaiting' ? 'is-active' : ''}`} onClick={() => setActiveTab('awaiting')}>
+              Awaiting <span className="builder-tab-count">{approvalJobs}</span>
+            </button>
+            <button type="button" className={`builder-tab-btn ${activeTab === 'completed' ? 'is-active' : ''}`} onClick={() => setActiveTab('completed')}>
+              Completed <span className="builder-tab-count">{completedJobs}</span>
+            </button>
+            <button type="button" className={`builder-tab-btn ${activeTab === 'failed' ? 'is-active' : ''}`} onClick={() => setActiveTab('failed')}>
+              Failed <span className="builder-tab-count">{failedJobs}</span>
+            </button>
+            <button type="button" className={`builder-tab-btn ${activeTab === 'cancelled' ? 'is-active' : ''}`} onClick={() => setActiveTab('cancelled')}>
+              Cancelled <span className="builder-tab-count">{cancelledJobs}</span>
+            </button>
+          </nav>
+
+          <div className="builder-toolbar">
+            <div className="builder-search-box">
+              <Search size={14} aria-hidden="true" />
+              <input
+                type="text"
+                value={searchQuery}
+                onChange={e => setSearchQuery(e.target.value)}
+                placeholder="Filter by title, commit, or error…"
+                aria-label="Filter jobs"
+              />
+              {searchQuery && (
+                <button type="button" className="builder-clear-btn" onClick={() => setSearchQuery('')} aria-label="Clear filter">
+                  <X size={12} />
+                </button>
+              )}
+            </div>
+            <select
+              className="builder-scope-select"
+              value={scopeFilter}
+              onChange={e => setScopeFilter(e.target.value as ScopeFilter)}
+              aria-label="Filter by implementation scope"
+            >
+              <option value="all">All scopes</option>
+              <option value="frontend">Frontend only</option>
+              <option value="backend">Backend only</option>
+              <option value="fullstack">Fullstack</option>
+            </select>
+          </div>
+
+          <div className="builder-list-summary">
+            Showing {filteredJobs.length} of {jobs.length} jobs
+          </div>
+
+          {loading ? <div className="builder-empty"><RefreshCw size={18} className="is-spinning" /> Loading jobs</div> : filteredJobs.length === 0 ? <div className="builder-empty"><Workflow size={19} /> {jobs.length === 0 ? 'No Builder jobs' : 'No jobs matching filter'}</div> : (
+            <div className="builder-list">{filteredJobs.map(job => (
               <button type="button" key={job.id} className={selectedId === job.id ? 'is-selected' : ''} onClick={() => setSelectedId(job.id)}>
                 <span className={`builder-state state-${job.status}`} />
-                <div><strong>{job.title}</strong><small>{job.current_step_name ?? 'Awaiting first step'}</small></div>
+                <div>
+                  <strong>{job.title}</strong>
+                  <div className="builder-job-tags">
+                    {String(job.title).toLowerCase().startsWith('repair') && (
+                      <span className="builder-tag tag-self-heal">Self-heal</span>
+                    )}
+                    {Boolean(job.last_error) && job.status === 'failed' && (
+                      <span className="builder-tag tag-issue">Issue</span>
+                    )}
+                    {job.frontend_required && job.backend_required ? (
+                      <span className="builder-tag tag-build">Fullstack</span>
+                    ) : job.frontend_required ? (
+                      <span className="builder-tag tag-build">Frontend</span>
+                    ) : (
+                      <span className="builder-tag tag-build">Backend</span>
+                    )}
+                  </div>
+                  <small>{job.current_step_name ?? 'Awaiting first step'}</small>
+                </div>
                 <div><span>{plainWords(job.status, 'Unknown status')}</span><time>{new Date(job.updated_at).toLocaleDateString()}</time></div>
                 <ChevronRight size={16} />
               </button>
