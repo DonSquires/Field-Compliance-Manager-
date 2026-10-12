@@ -191,8 +191,8 @@ const BuilderControlRoomPage: React.FC = () => {
   useEffect(() => { if (selectedId) { void loadSnapshot(selectedId); void loadContext(selectedId); } else { setSnapshot(null); setContextSnapshot(null); } }, [selectedId, loadSnapshot, loadContext]);
 
   const selectedProject = projects.find(project => project.id === form.projectId) ?? null;
-  const pendingJobs = jobs.filter(job => !['release_ready', 'failed', 'cancelled'].includes(job.status)).length;
-  const approvalJobs = jobs.filter(job => ['specification_ready', 'approval_pending'].includes(job.status) || job.code_review_status === 'pending').length;
+  const pendingJobs = jobs.filter(job => !['release_ready', 'deployed', 'failed', 'cancelled'].includes(job.status)).length;
+  const approvalJobs = jobs.filter(job => !['deployed', 'failed', 'cancelled'].includes(job.status) && (['specification_ready', 'approval_pending'].includes(job.status) || (job.status === 'testing' && job.code_review_mode === 'human' && job.code_review_status === 'pending'))).length;
   const completedSteps = snapshot?.steps.filter(step => ['completed', 'skipped'].includes(step.status)).length ?? 0;
 
   const createJob = async (event: React.FormEvent) => {
