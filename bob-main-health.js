@@ -55,10 +55,14 @@ function createMainHealthMonitor({ getMainSha, runChecks, openRepair, readState,
         log({ sha, outcome: 'passed' });
         return { sha, outcome: 'passed' };
       }
-      if (result?.status !== 'failed' || !Number.isInteger(result.exitCode) || result.exitCode === 0) {
-        state = { sha, status: 'retry', checked_at: new Date(now()).toISOString(), error: String(result?.status || 'worker did not complete') };
+      const infrastructureExitCodes = new Set([125, 126, 127, 137, 143]);
+      if (result?.status !== 'failed' || !Number.isInteger(result.exitCode) || result.exitCode === 0 || infrastructureExitCodes.has(result.exitCode)) {
+        const error = infrastructureExitCodes.has(result?.exitCode)
+          ? `worker infrastructure exited ${result.exitCode}`
+          : String(result?.status || 'worker did not complete');
+        state = { sha, status: 'retry', checked_at: new Date(now()).toISOString(), error };
         await writeState(state);
-        log({ sha, outcome: 'retry', status: result?.status ?? null });
+        log({ sha, outcome: 'retry', status: result?.status ?? null, exit_code: result?.exitCode ?? null });
         return { sha, outcome: 'retry' };
       }
 

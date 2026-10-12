@@ -60,10 +60,12 @@ test('a check for a SHA that moved during execution is discarded without opening
 });
 
 test('timeouts and worker launch failures retry without classifying main as broken', async () => {
-  const { monitor, calls, states } = harness({ result: { status: 'timeout', exitCode: null } });
-  assert.deepEqual(await monitor.tick(), { sha: SHA_A, outcome: 'retry' });
-  assert.equal(calls.repairs, 0);
-  assert.equal(states.get(SHA_A).status, 'retry');
+  for (const result of [{ status: 'timeout', exitCode: null }, { status: 'failed', exitCode: 125 }]) {
+    const { monitor, calls, states } = harness({ result });
+    assert.deepEqual(await monitor.tick(), { sha: SHA_A, outcome: 'retry' });
+    assert.equal(calls.repairs, 0);
+    assert.equal(states.get(SHA_A).status, 'retry');
+  }
 });
 
 test('a rejected repair intake persists only bounded parsed test paths for diagnosis', async () => {

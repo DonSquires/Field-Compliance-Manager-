@@ -22,7 +22,7 @@ test('worker profiles use fixed commands', () => {
   assert.deepEqual(workerCommand('build'), ['npm', 'run', 'build']);
   assert.match(workerCommand('human-qa').at(-1), /dr-bob-human-test\.spec\.ts --workers=4/);
   assert.match(workerCommand('human-qa-live').at(-1), /dr-bob-human-test\.spec\.ts --workers=1/);
-  assert.match(workerCommand('main-health').at(-1), /npm run build;.*npm test -- --run;.*npm run test:e2e:ci-smoke/);
+  assert.match(workerCommand('main-health').at(-1), /npm run build -- --outDir=\/tmp\/bob-main-health-dist;.*npm test -- --run;.*npm run test:e2e:ci-smoke/);
   assert.deepEqual(workerCommand('full-page-audit').slice(0, 3), ['sh', '-lc', 'set -eu; npm test; npm run check:css; cp -a /opt/bob/web-node_modules/. /workspace/apps/web/node_modules/; cd /workspace/apps/web; PATH=/workspace/apps/web/node_modules/.bin:$PATH npm run lint; PATH=/workspace/apps/web/node_modules/.bin:$PATH npm test -- --reporter=dot; PATH=/workspace/apps/web/node_modules/.bin:$PATH npm run build; PATH=/workspace/apps/web/node_modules/.bin:$PATH PLAYWRIGHT_OUTPUT_DIR=/artifacts/test-results PLAYWRIGHT_HTML_OUTPUT_DIR=/artifacts/playwright-report playwright test e2e/dr-bob-human-test.spec.ts --workers=1']);
   assert.deepEqual(workerCommand('frontend-verify'), [
     'node', '/opt/bob/frontend-worker.js', '/workspace', '/artifacts/input.patch', '/artifacts'
@@ -119,7 +119,7 @@ test('main health checks run offline in the isolated read-only browser worker', 
   assert.ok(args.includes('--network=none'));
   assert.ok(args.includes('--read-only'));
   assert.ok(args.includes('--tmpfs=/workspace/apps/web/node_modules:rw,exec,nosuid,size=768m,uid=1000,gid=1000,mode=0755'));
-  assert.ok(args.includes('--tmpfs=/workspace/apps/web/dist:rw,exec,nosuid,size=512m,uid=1000,gid=1000,mode=0755'));
+  assert.equal(args.some((value) => value.includes('/workspace/apps/web/dist')), false);
   assert.ok(args.includes('type=bind,src=/tmp/source,dst=/workspace,readonly'));
   assert.equal(args.some((value) => value.includes('docker.sock')), false);
 });
