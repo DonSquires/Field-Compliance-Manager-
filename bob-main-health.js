@@ -28,6 +28,7 @@ function createMainHealthMonitor({ getMainSha, runChecks, openRepair, readState,
     if (inFlight) return { outcome: 'busy' };
     inFlight = true;
     let state = null;
+    let failureEvidence = null;
     try {
       const sha = await getMainSha();
       if (typeof sha !== 'string' || !SHA_RE.test(sha)) throw new Error('main health received an invalid repository SHA');
@@ -61,22 +62,24 @@ function createMainHealthMonitor({ getMainSha, runChecks, openRepair, readState,
         return { sha, outcome: 'retry' };
       }
 
-      const failure = summarizeFailure(result);
-      const repair = await openRepair({ sha, failure });
+      failureEvidence = summarizeFailure(result);
+      const repair = await openRepair({ sha, failure: failureEvidence });
       if (!repair?.id) throw new Error('main health repair job was not returned');
-      state = { sha, status: 'repair_opened', checked_at: new Date(now()).toISOString(), job_id: repair.id };
+      state = { sha, status: 'repair_opened', checked_at: new Date(now()).toISOString(), job_id: repair.id, failing_tests: failureEvidence.failing_tests };
       await writeState(state);
-      log({ sha, outcome: 'repair_opened', job_id: repair.id, failing_tests: failure.failing_tests });
-      return { sha, outcome: 'repair_opened', job_id: repair.id, failing_tests: failure.failing_tests };
+      log({ sha, outcome: 'repair_opened', job_id: repair.id, failing_tests: failureEvidence.failing_tests });
+      return { sha, outcome: 'repair_opened', job_id: repair.id, failing_tests: failureEvidence.failing_tests };
     } catch (error) {
       const retryState = {
         sha: state?.sha ?? null,
         status: 'retry',
         checked_at: new Date(now()).toISOString(),
         error: String(error instanceof Error ? error.message : error).replace(/[\r\n]+/g, ' ').slice(0, 300),
+        failing_tests: failureEvidence?.failing_tests ?? [],
+        failure_summary: failureEvidence?.summary ?? '',
       };
       if (retryState.sha) await writeState(retryState).catch(() => {});
-      log({ sha: retryState.sha, outcome: 'error', error: retryState.error });
+      log({ sha: retryState.sha, outcome: 'error', error: retryState.error, failing_tests: retryState.failing_tests });
       return { sha: retryState.sha, outcome: 'retry', error: retryState.error };
     } finally {
       inFlight = false;

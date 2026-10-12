@@ -66,6 +66,21 @@ test('timeouts and worker launch failures retry without classifying main as brok
   assert.equal(states.get(SHA_A).status, 'retry');
 });
 
+test('a rejected repair intake persists only bounded parsed test paths for diagnosis', async () => {
+  const states = new Map();
+  const monitor = createMainHealthMonitor({
+    getMainSha: async () => SHA_A,
+    runChecks: async () => ({ status: 'failed', exitCode: 1, stdout: 'FAIL src/pages/example.guard.test.ts\n' + 'large diff '.repeat(2000) }),
+    openRepair: async () => { throw new Error('repair intake rejected'); },
+    readState: async (sha) => states.get(sha) ?? null,
+    writeState: async (state) => states.set(state.sha, state),
+  });
+  const outcome = await monitor.tick();
+  assert.equal(outcome.outcome, 'retry');
+  assert.deepEqual(states.get(SHA_A).failing_tests, ['src/pages/example.guard.test.ts']);
+  assert.equal(states.get(SHA_A).failure_summary.length <= 3000, true);
+});
+
 test('failure summaries identify test paths and never exceed the evidence budget', () => {
   const failure = summarizeFailure({ status: 'failed', exitCode: 1, stdout: 'FAIL src/a.test.ts\n'.repeat(1000), stderr: 'AssertionError\n'.repeat(1000) });
   assert.deepEqual(failure.failing_tests, ['src/a.test.ts']);

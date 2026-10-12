@@ -549,7 +549,7 @@ async function openMainHealthRepair({ sha, failure }) {
   const failingFiles = [...new Set(failure.failing_tests.map((file) => file.startsWith('apps/web/') ? file : `apps/web/${file}`))].slice(0, 8);
   const guardFilePattern = /^apps\/web\/src\/[A-Za-z0-9_./-]+\.guard\.test\.tsx?$/;
   if (!failingFiles.length || failingFiles.some((file) => !guardFilePattern.test(file) || file.includes('..'))) {
-    throw new Error('main-health failure is outside the bounded source-guard repair scope');
+    throw new Error(`main-health failure is outside the bounded source-guard repair scope; parsed=${failingFiles.join(',').slice(0, 240) || 'none'}`);
   }
   if (builderRepositoryHead('main').sha !== sha) throw new Error('main moved before the repair job could be opened');
   const project = await routineBuilderProject();
