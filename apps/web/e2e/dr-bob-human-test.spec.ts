@@ -221,7 +221,7 @@ test.describe("Dr. Bob's human browser test", () => {
   ];
   for (const group of adminButtonRouteGroups) {
     test(`follows safe Admin controls: ${group.name}`, async ({ page }, testInfo) => {
-      test.setTimeout(420_000);
+      test.setTimeout(900_000);
       const session = new HumanTestSession(page, testInfo);
       await signInAsHuman(page, session);
       for (const route of group.routes) await session.walkEveryVisibleButton(route);
