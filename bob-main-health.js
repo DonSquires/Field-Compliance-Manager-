@@ -7,7 +7,7 @@ function summarizeFailure(result) {
   const failingTests = [...new Set([
     ...[...fullOutput.matchAll(/(?:FAIL|✖|✘|×)\s+([^\s:>]+)/g)].map((match) => match[1]),
     ...[...fullOutput.matchAll(/^\s*\d+\)\s+(?:\[[^\]]+\]\s+›\s+)?([^\r\n]+?\.(?:spec|test)\.tsx?)(?::|\s|$)/gm)].map((match) => match[1]),
-  ])].slice(0, 20);
+  ])].filter((file) => /\.(?:guard\.)?test\.tsx?$|\.spec\.tsx?$/i.test(file)).slice(0, 20);
   const stdout = String(result?.stdout || '').slice(-8000);
   const stderr = String(result?.stderr || '').slice(-4000);
   const output = `${stdout}\n${stderr}`;

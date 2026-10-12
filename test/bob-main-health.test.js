@@ -111,6 +111,16 @@ test('failure path detection strips ANSI color codes from Vitest output', () => 
   assert.deepEqual(failure.failing_tests, ['src/pages/DocumentContextDrafting.guard.test.ts']);
 });
 
+test('Vitest failure titles are not classified as file paths', () => {
+  const failure = summarizeFailure({
+    status: 'failed',
+    exitCode: 1,
+    stdout: 'FAIL src/pages/DocumentContextDrafting.guard.test.ts > keeps drafting\n× keeps drafting\n',
+    stderr: '',
+  });
+  assert.deepEqual(failure.failing_tests, ['src/pages/DocumentContextDrafting.guard.test.ts']);
+});
+
 test('worker errors are retained in a bounded summary when no test path is reported', () => {
   const failure = summarizeFailure({ status: 'failed', exitCode: 1, stdout: 'npm run build\nError: browser binary not found\n', stderr: '' });
   assert.match(failure.summary, /browser binary not found/);
