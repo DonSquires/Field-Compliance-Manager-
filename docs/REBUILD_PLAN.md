@@ -115,6 +115,12 @@ instructions now enter Builder immediately; a short affirmative resumes the
 most recent substantial build request. Builder owns repository, Atlas/schema,
 research, implementation, test, review, and release evidence. Explicit Atlas,
 schema, and Dr Bob commands retain their dedicated read/test routes.
+Live acceptance then exposed that the natural confirmation "Yes, open the
+Builder job and proceed autonomously" was narrower than the accepted bare
+"yes" pattern and fell back into web research. Builder continuation now accepts
+bounded natural approval wording while rejecting qualifications such as
+"but do not open it"; the substantial request still comes from conversation
+history rather than the approval text.
 
 Natural-language Builder acceptance hardening 2026-10-13: Bob's deterministic
 post-evidence Builder fallback now recognises ordinary owner language such as

@@ -8004,6 +8004,7 @@ serve(async (req)=>{
         || /\b(?:add|implement|fix|repair|change|redesign|refactor)\b.{0,100}\b(?:code|repository|repo|ui|ux|panel|page|component|function|test|accessibility|workflow)\b/.test(normalized);
       return (asksForBuilder || naturalAppBuild) && asksForImplementation && namesBuildTarget;
     };
+    const continuesBuilderRequest = (text: string) => /^(?:yes|yep|yeah|proceed|continue|go ahead|do it|carry on)(?:,?\s+(?:(?:please|open|create|start|run|the|this|that|builder|job|and|proceed|continue|autonomously|now|it)\s*)+)?[.!]*$/i.test(String(text ?? '').trim());
     const builderModeForRequest = (text: string) => {
       const normalized = String(text ?? '').toLowerCase();
       if (/\b(?:self[- ]heal|repair|fix|failing test|broken|regression|error|bug)\b/.test(normalized)) return 'autonomous_self_heal';
@@ -9969,10 +9970,9 @@ serve(async (req)=>{
       ...history.filter((entry) => entry.role === 'user').map((entry) => String(entry.content ?? '')).reverse()
     ].find((entry) => explicitBuilderCreationRequest(entry));
     const currentIsBuilderRequest = explicitBuilderCreationRequest(message);
-    const continuesBuilderRequest = /^(?:proceed|continue|go ahead|yes(?:,?\s+(?:please|do it|continue|proceed))?|do it|carry on)\b[.! ]*$/i.test(String(message ?? '').trim());
     if (caps.tier === 'admiral'
       && recentBuilderRequest
-      && (currentIsBuilderRequest || (continuesBuilderRequest
+      && (currentIsBuilderRequest || (continuesBuilderRequest(message)
         && !explicitHumanTestRequest
         && !explicitAtlasRequest
         && !explicitSchemaRequest))) {

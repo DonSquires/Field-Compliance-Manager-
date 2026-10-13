@@ -19,6 +19,7 @@ const builderIntentSource = chat.slice(builderIntentStart, chat.indexOf('    con
   .replace('(text: string, fallbackFrontend = false, fallbackBackend = true)', '(text, fallbackFrontend = false, fallbackBackend = true)');
 const explicitBuilderCreationRequest = vm.runInNewContext(`(() => { ${builderIntentSource} return explicitBuilderCreationRequest; })()`);
 const builderLanesForOwnerRequest = vm.runInNewContext(`(() => { ${builderIntentSource} return builderLanesForOwnerRequest; })()`);
+const continuesBuilderRequest = vm.runInNewContext(`(() => { ${builderIntentSource} return continuesBuilderRequest; })()`);
 
 const request = "In Bob's chat, whenever Bob asks me a question or proposes something that needs my confirmation — a Builder job proposal, a laptop command, a cancellation — show tappable choice buttons under his message, for example 'Yes, run it' / 'Change it' / 'No'. Server side, in supabase/functions/onspace-ai-chat/index.ts, include meta.options on every proposed outcome; client side, in apps/web/src/components/BobPanel.tsx, render metadata.options as accessible buttons. Add component tests.";
 
@@ -89,8 +90,16 @@ test('an explicit owner build enters the durable Builder before chat evidence lo
   assert.match(chat, /admit it to the durable Builder runtime instead of spending the chat-turn budget/);
   const admission = chat.slice(chat.indexOf('const recentBuilderRequest = '), chat.indexOf('// PILLAR H: plan_received'));
   assert.match(admission, /const currentIsBuilderRequest = explicitBuilderCreationRequest\(message\)/);
-  assert.match(admission, /currentIsBuilderRequest \|\| \(continuesBuilderRequest/);
-  assert.match(admission, /continuesBuilderRequest[\s\S]*!explicitHumanTestRequest[\s\S]*!explicitAtlasRequest[\s\S]*!explicitSchemaRequest/);
+  assert.match(admission, /currentIsBuilderRequest \|\| \(continuesBuilderRequest\(message\)/);
+  assert.match(admission, /continuesBuilderRequest\(message\)[\s\S]*!explicitHumanTestRequest[\s\S]*!explicitAtlasRequest[\s\S]*!explicitSchemaRequest/);
+});
+
+test('natural Builder proposal approvals resume the substantial request', () => {
+  assert.equal(continuesBuilderRequest('yes'), true);
+  assert.equal(continuesBuilderRequest('Yes, open the Builder job and proceed autonomously.'), true);
+  assert.equal(continuesBuilderRequest('Go ahead and start this Builder job now.'), true);
+  assert.equal(continuesBuilderRequest('Yes, but do not open it.'), false);
+  assert.equal(continuesBuilderRequest('Can you explain the proposal first?'), false);
 });
 
 test('Codespaces-like Builder and vibe-coding workspace requests are software-build intent', () => {
