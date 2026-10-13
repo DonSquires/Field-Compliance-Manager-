@@ -102,6 +102,12 @@ function planBuilderAction(snapshot) {
     const release = byStep(snapshot, 'release_prep');
     if (stepIsRunnable(release)) return { type: 'run_release', step: release };
   }
+  // A step still marked running is work in flight, not a dead end. In-process steps
+  // (product analysis, UX design) never register a builder_worker_runs row, so the
+  // worker check above cannot see them. Reporting `blocked` here is terminal:
+  // listAutopilotJobs only re-selects driving/awaiting_human jobs, so a tick that
+  // lands while an in-process step is running would park the job forever.
+  if (snapshot.steps.some((step) => step?.status === 'running')) return { type: 'waiting_for_worker' };
   return { type: 'blocked', status: job.status };
 }
 

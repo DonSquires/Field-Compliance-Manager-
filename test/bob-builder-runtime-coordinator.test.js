@@ -51,6 +51,18 @@ test('runtime never retries a failed step unless durable state marks it retryabl
   assert.equal(planBuilderAction(state).type, 'run_product_analysis');
 });
 
+// Live 2026-10-13 (job e52e7122): an autopilot tick landed while in-process product
+// analysis was running. In-process steps register no builder_worker_runs row, so the
+// planner fell through to `blocked` — and because listAutopilotJobs only re-selects
+// driving/awaiting_human jobs, the job was parked forever even though the step then
+// completed normally. Work in flight must read as waiting, never as a dead end.
+test('a step still running is work in flight, not a blocked job, even with no worker run row', () => {
+  const state = snapshot('analysis_pending');
+  state.steps.find(step => step.step_id === 'product_analysis').status = 'running';
+  assert.deepEqual(state.workerRuns, []);
+  assert.equal(planBuilderAction(state).type, 'waiting_for_worker');
+});
+
 test('runtime stops re-launching a retryable step once its persisted attempt count reaches the ceiling', async () => {
   const { MAX_STEP_ATTEMPTS } = require('../builder-runtime-coordinator');
   const state = snapshot('implementation_pending');
