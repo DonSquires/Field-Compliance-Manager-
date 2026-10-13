@@ -9955,6 +9955,35 @@ serve(async (req)=>{
         ...(requestedSha ? { expected_sha: requestedSha } : {})
       };
     }
+    // An explicit owner build belongs in the durable Builder runtime immediately.
+    // Keeping it in the chat evidence loop can spend the entire Edge budget on one
+    // repository search, then ask the owner to "continue" and repeat that search.
+    // Builder itself owns repository/Atlas/schema inspection, research, iteration,
+    // tests, review, and release receipts. A short affirmative resumes the most
+    // recent substantial build request instead of becoming a new empty brief.
+    const recentBuilderRequest = [
+      String(message ?? ''),
+      ...history.filter((entry) => entry.role === 'user').map((entry) => String(entry.content ?? '')).reverse()
+    ].find((entry) => explicitBuilderCreationRequest(entry));
+    const continuesBuilderRequest = /^(?:proceed|continue|go ahead|yes(?:,?\s+(?:please|do it|continue|proceed))?|do it|carry on)\b[.! ]*$/i.test(String(message ?? '').trim());
+    if (caps.tier === 'admiral'
+      && recentBuilderRequest
+      && (explicitBuilderCreationRequest(message) || continuesBuilderRequest)
+      && !explicitHumanTestRequest
+      && !explicitAtlasRequest
+      && !explicitSchemaRequest) {
+      const builderArgs = builderJobArgsFromEvidence(recentBuilderRequest, []);
+      decision = {
+        ...decision,
+        action: 'use_tool',
+        tool: 'create_builder_job',
+        args: builderArgs,
+        reasoning: 'The owner explicitly requested a software build; admit it to the durable Builder runtime instead of spending the chat-turn budget on implementation research.'
+      };
+      normAction = 'use_tool';
+      chosenTool = 'create_builder_job';
+      args = builderArgs;
+    }
     // PILLAR H: plan_received event (fires for ALL requests, FIRST plan only per owner decision)
     await emitEvent("plan_received", {
       action: String(decision.action ?? ""),

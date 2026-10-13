@@ -80,6 +80,19 @@ test('an explicit owner build request cannot stop at a prose plan after evidence
   assert.match(loop, /builderJobArgsFromEvidence\(message, loopSteps\)/);
 });
 
+test('an explicit owner build enters the durable Builder before chat evidence loops can exhaust the turn', () => {
+  assert.match(chat, /const recentBuilderRequest = \[/);
+  assert.match(chat, /history\.filter\(\(entry\) => entry\.role === 'user'\)/);
+  assert.match(chat, /const continuesBuilderRequest =/);
+  assert.match(chat, /explicitBuilderCreationRequest\(message\) \|\| continuesBuilderRequest/);
+  assert.match(chat, /const builderArgs = builderJobArgsFromEvidence\(recentBuilderRequest, \[\]\)/);
+  assert.match(chat, /admit it to the durable Builder runtime instead of spending the chat-turn budget/);
+  const admission = chat.slice(chat.indexOf('const recentBuilderRequest = '), chat.indexOf('// PILLAR H: plan_received'));
+  assert.match(admission, /!explicitHumanTestRequest/);
+  assert.match(admission, /!explicitAtlasRequest/);
+  assert.match(admission, /!explicitSchemaRequest/);
+});
+
 test('explicit Atlas and schema audits cannot escape into web research or omit schema', () => {
   assert.match(chat, /if \(explicitAtlasRequest && chosenTool !== 'query_atlas'\)/);
   assert.match(chat, /else if \(explicitSchemaRequest && chosenTool !== 'schema_inspect'\)/);

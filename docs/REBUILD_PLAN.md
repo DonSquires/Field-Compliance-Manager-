@@ -106,6 +106,16 @@ least four usable HTTPS source URLs in the durable brief, and retries job
 creation in the same turn. Failure to obtain four sources remains a truthful
 block rather than invented provenance.
 
+Builder chat admission hardening 2026-10-13: a live Codespaces-like Builder
+request selected repository search correctly, but that one read consumed the
+Edge turn budget. Bob then asked the owner to continue and repeated the same
+search on the next turn because implementation research was being performed in
+chat instead of in the durable Builder runtime. Explicit admiral software-build
+instructions now enter Builder immediately; a short affirmative resumes the
+most recent substantial build request. Builder owns repository, Atlas/schema,
+research, implementation, test, review, and release evidence. Explicit Atlas,
+schema, and Dr Bob commands retain their dedicated read/test routes.
+
 Natural-language Builder acceptance hardening 2026-10-13: Bob's deterministic
 post-evidence Builder fallback now recognises ordinary owner language such as
 "build me an app", "add a page", "make this workflow work", and "fix the UI",
