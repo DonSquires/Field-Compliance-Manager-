@@ -19,7 +19,7 @@ create table "public"."bob_app_map_edges" (
     ((edge_kind = ANY (ARRAY['reads'::text, 'writes'::text, 'calls'::text, 'invokes'::text, 'imports'::text, 'references'::text, 'fk_references'::text, 'triggers'::text,
     'secured_by'::text]))),
   constraint "bob_app_map_edges_evidence_class_check"
-    check ((evidence_class = ANY (ARRAY['live-code'::text, 'live-schema'::text, 'exercised-records'::text, 'authored-expectation'::text, 'inferred-gap'::text]))),
+    check ((evidence_class = ANY (ARRAY['live-code'::text, 'live-schema'::text, 'exercised-records'::text, 'authored-expectation'::text, 'inferred-gap'::text, 'declared-external-contract'::text]))),
   constraint "bob_app_map_edges_pkey" primary key (id),
   constraint "bob_app_map_edges_refresh_source_check" check ((refresh_source = ANY (ARRAY['ci_generator'::text, 'manual_seed'::text, 'schema_fk'::text]))),
   constraint "bob_app_map_edges_retirement_status_check" check ((retirement_status = ANY (ARRAY['live'::text, 'legacy'::text, 'retired'::text]))),

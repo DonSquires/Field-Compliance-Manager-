@@ -48,6 +48,8 @@ const InvestigationPage: React.FC = () => {
   const [priority, setPriority] = useState('high');
   const [slaMinutes, setSlaMinutes] = useState('1440');
   const [instructions, setInstructions] = useState('');
+  const [eventType, setEventType] = useState('case_note');
+  const [eventDescription, setEventDescription] = useState('');
   const [loading, setLoading] = useState(true);
   const [saving, setSaving] = useState(false);
   const [notice, setNotice] = useState<string | null>(null);
@@ -149,6 +151,25 @@ const InvestigationPage: React.FC = () => {
     setSaving(false);
   }
 
+  async function addTimelineEvent(event: React.FormEvent) {
+    event.preventDefault();
+    if (!investigation || !eventType.trim() || !eventDescription.trim()) return;
+    setSaving(true); setError(null); setNotice(null);
+    const { error: eventError } = await supabase.rpc('add_investigation_event', {
+      p_investigation_id: investigation.id,
+      p_event_type: eventType.trim(),
+      p_description: eventDescription.trim(),
+      p_occurred_at: null,
+    });
+    if (eventError) setError(eventError.message);
+    else {
+      setEventDescription('');
+      setNotice('Investigation timeline event recorded.');
+      await load();
+    }
+    setSaving(false);
+  }
+
   if (!investigationId) {
     if (listLoading) return <div className="page-container"><div className="loading-state"><RefreshCw className="is-spinning" /> Loading investigations</div></div>;
     return <div className="page-container">
@@ -168,7 +189,7 @@ const InvestigationPage: React.FC = () => {
     {error && <div className="alert alert-error" role="alert">{error}</div>}
     <section className="reports-section"><h2>Investigation overview</h2><p>{investigation.summary ?? 'No summary recorded.'}</p><p><strong>{investigation.investigation_type}</strong> · {investigation.priority} · {investigation.status} · opened {new Date(investigation.opened_at).toLocaleString('en-NZ')}</p></section>
     <section className="reports-section"><h2>Linked evidence and records</h2>{links.length === 0 ? <p>No records linked yet.</p> : <div className="contacts-list">{links.map((link) => <article className="contact-card" key={link.id}><div className="contact-header"><strong>{link.entity_type} · {link.link_role}</strong><small>{new Date(link.linked_at).toLocaleString('en-NZ')}</small></div><p>{link.entity_id}</p><span>{link.link_reason}</span></article>)}</div>}</section>
-    <section className="reports-section"><h2>Timeline</h2>{events.length === 0 ? <p>No timeline events recorded.</p> : <div className="contacts-list">{events.map((event) => <article className="contact-card" key={event.id}><strong>{event.event_type}</strong><p>{event.description}</p><small>{new Date(event.created_at).toLocaleString('en-NZ')}</small></article>)}</div>}</section>
+    <section className="reports-section"><h2>Timeline</h2><form onSubmit={addTimelineEvent} className="crm-form-grid"><label><span>Event type</span><select value={eventType} onChange={(event) => setEventType(event.target.value)}><option value="case_note">Case note</option><option value="contact">Contact or call</option><option value="correspondence">Correspondence received</option><option value="decision">Investigation decision</option><option value="evidence_review">Evidence review</option></select></label><label className="is-wide"><span>Timeline note</span><textarea required rows={3} maxLength={4000} value={eventDescription} onChange={(event) => setEventDescription(event.target.value)} placeholder="Record what happened, what was learned, and the next action" /></label><button type="submit" disabled={saving || !eventDescription.trim()}><ClipboardPlus size={16} />{saving ? 'Recording event' : 'Add timeline event'}</button></form>{events.length === 0 ? <p>No timeline events recorded.</p> : <div className="contacts-list">{events.map((event) => <article className="contact-card" key={event.id}><strong>{event.event_type}</strong><p>{event.description}</p><small>{new Date(event.created_at).toLocaleString('en-NZ')}</small></article>)}</div>}</section>
     <section className="reports-section"><h2>Investigation dispatch jobs</h2>{jobs.length === 0 ? <p>No investigation dispatch jobs yet.</p> : <div className="contacts-list">{jobs.map((job) => <article className="contact-card" key={job.id}><div className="contact-header"><strong>{job.origin_type} · {job.status}</strong><small>{job.id}</small></div><p>{job.briefing_notes ?? 'No briefing instructions recorded.'}</p>{job.status === 'pending' && <label><span>Assign to officer</span><select value={job.assigned_officer_id ?? ''} onChange={(event) => void assignJob(job.id, event.target.value)} disabled={saving}><option value="">Select officer</option>{officers.map((officer) => <option key={officer.id} value={officer.id}>{officer.display_name ?? officer.email ?? officer.id}</option>)}</select></label>}</article>)}</div>}</section>
     <section className="reports-section"><h2>Investigation follow-up dispatch</h2><p>This is an investigation-origin job. Its dispatch lifecycle remains standard, but the job is linked back to this matter and its officer report should be linked here when completed.</p><form onSubmit={createFollowUp} className="crm-form-grid"><label><span>Agreement</span><select required value={agreementId} onChange={(e) => setAgreementId(e.target.value)}><option value="">Select agreement</option>{agreements.map((item) => <option value={item.id} key={item.id}>{item.name}</option>)}</select></label><label><span>Site</span><select required value={siteId} onChange={(e) => setSiteId(e.target.value)}><option value="">Select site</option>{sites.map((item) => <option value={item.id} key={item.id}>{item.name} · {item.address ?? 'Address not recorded'}</option>)}</select></label><label><span>Officer queue</span><select value={officerId} onChange={(e) => setOfficerId(e.target.value)}><option value="">Leave in general queue</option>{officers.map((item) => <option value={item.id} key={item.id}>{item.display_name ?? item.email ?? item.id}</option>)}</select></label><label><span>Job type</span><input value={jobType} onChange={(e) => setJobType(e.target.value)} /></label><label><span>Priority</span><select value={priority} onChange={(e) => setPriority(e.target.value)}><option value="low">Low</option><option value="normal">Normal</option><option value="high">High</option><option value="urgent">Urgent</option></select></label><label><span>SLA minutes</span><input type="number" min="1" max="1440" value={slaMinutes} onChange={(e) => setSlaMinutes(e.target.value)} /></label><label className="is-wide"><span>Officer instructions</span><textarea required rows={4} value={instructions} onChange={(e) => setInstructions(e.target.value)} placeholder="What must be checked, captured, and reported on re-attendance" /></label><button type="submit" disabled={saving || !agreementId || !siteId || !instructions.trim()}><Send size={16} />{saving ? 'Creating follow-up job' : 'Create investigation follow-up job'}</button></form></section>
   </div>;

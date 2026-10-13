@@ -1,14 +1,14 @@
+import { authorizePlatformDiagnostic } from '../_shared/platformDiagnosticAuth.ts';
+
 const FN = 'bob-ptt-view';
 const BASE = Deno.env.get('PTT_RELAY_BASE_URL') || Deno.env.get('STACK_RELAY_BASE_URL');
 const TOKEN = Deno.env.get('PTT_RELAY_TOKEN') || Deno.env.get('STACK_RELAY_TOKEN');
 const SUPABASE_URL = Deno.env.get('SUPABASE_URL');
 const RAW = Deno.env.get('SUPABASE_SECRET_KEYS');
-if (!BASE) throw new Error('PTT_RELAY_BASE_URL or STACK_RELAY_BASE_URL is required');
-if (!TOKEN) throw new Error('PTT_RELAY_TOKEN or STACK_RELAY_TOKEN is required');
+const SERVICE_ROLE_KEY = Deno.env.get('SUPABASE_SERVICE_ROLE_KEY');
 if (!SUPABASE_URL) throw new Error('SUPABASE_URL is required');
-if (!RAW) throw new Error('SUPABASE_SECRET_KEYS is required');
-const SB = JSON.parse(RAW).default;
-if (!SB) throw new Error('SUPABASE_SECRET_KEYS.default is required');
+const SB = RAW ? JSON.parse(RAW).default : SERVICE_ROLE_KEY;
+if (!SB) throw new Error('A Supabase service key is required');
 function json(s, b) {
   return new Response(JSON.stringify(b), {
     status: s,
@@ -24,40 +24,55 @@ function rt(req) {
   const i = a.indexOf(FN);
   return i >= 0 ? '/' + a.slice(i + 1).join('/') : p;
 }
-function claims(req) {
-  const h = req.headers.get('authorization') || '';
-  if (!h.startsWith('Bearer ')) return null;
-  try {
-    return JSON.parse(atob(h.slice(7).split('.')[1].replace(/-/g, '+').replace(/_/g, '/')));
-  } catch  {
-    return null;
+function redactValue(value) {
+  if (value == null) return value;
+  if (typeof value === 'string') {
+    return value
+      .replace(/\b[A-Z0-9._%+-]+@[A-Z0-9.-]+\.[A-Z]{2,}\b/gi, '[REDACTED_EMAIL]')
+      .replace(/\b(?:\d{1,3}\.){3}\d{1,3}\b/g, '[REDACTED_IP]');
   }
+  if (Array.isArray(value)) return value.slice(0, 50).map(redactValue);
+  if (typeof value === 'object') {
+    const out = {};
+    for (const [key, item] of Object.entries(value)) {
+      out[key] = /(token|password|secret|authorization|phone|email|user|member)/i.test(key)
+        ? '[REDACTED]'
+        : redactValue(item);
+    }
+    return out;
+  }
+  return value;
 }
-function isBob(c) {
-  return c?.app_metadata?.role === 'bob' || Array.isArray(c?.app_metadata?.roles) && c.app_metadata.roles.includes('bob');
-}
-async function audit(req, ep, res) {
-  const c = claims(req);
-  await fetch(`${SUPABASE_URL}/rest/v1/audit_log`, {
+async function audit(actorId, ep, res) {
+  const response = await fetch(`${SUPABASE_URL}/rest/v1/audit_log`, {
     method: 'POST',
     headers: {
       apikey: SB,
+      authorization: `Bearer ${SB}`,
       'content-type': 'application/json',
       prefer: 'return=minimal'
     },
     body: JSON.stringify({
+      actor_user_id: actorId,
       action: FN,
-      entity_type: 'integration',
-      entity_id: 'ptt',
-      change_summary: JSON.stringify({
+      target_table: 'edge_function',
+      metadata: {
+        target: 'ptt',
         endpoint: ep,
-        result: res,
-        actor: c?.sub ?? null
-      })
+        result: res
+      }
     })
-  }).catch(()=>{});
+  });
+  if (!response.ok) throw new Error(`Audit write failed (${response.status})`);
 }
 async function relay(path) {
+  if (!BASE || !TOKEN) return {
+    ok: false,
+    status: 503,
+    body: {
+      code: 'NO_RELAY'
+    }
+  };
   const r = await fetch(`${BASE}${path}`, {
     headers: {
       authorization: `Bearer ${TOKEN}`
@@ -81,8 +96,8 @@ Deno.serve(async (req)=>{
   if (req.method === 'OPTIONS') return new Response(null, {
     status: 204
   });
-  const c = claims(req);
-  if (!c || !isBob(c)) return json(403, {
+  const caller = await authorizePlatformDiagnostic(req, true);
+  if (!caller) return json(403, {
     ok: false,
     code: 'FORBIDDEN'
   });
@@ -92,13 +107,17 @@ Deno.serve(async (req)=>{
   });
   const ep = rt(req);
   try {
-    if (ep === '/health') return json(200, {
-      ok: true,
-      service: FN
-    });
+    if (ep === '/health') {
+      await audit(caller.user.id, ep, 'ok');
+      return json(200, {
+        ok: true,
+        service: FN,
+        relayConfigured: Boolean(BASE && TOKEN)
+      });
+    }
     if (ep === '/connections') {
       const x = await relay('/connections');
-      await audit(req, ep, x.ok ? 'ok' : 'error');
+      await audit(caller.user.id, ep, x.ok ? 'ok' : 'error');
       return json(x.status, {
         ok: x.ok,
         data: {
@@ -109,15 +128,15 @@ Deno.serve(async (req)=>{
     }
     if (ep === '/rooms') {
       const x = await relay('/rooms');
-      await audit(req, ep, x.ok ? 'ok' : 'error');
+      await audit(caller.user.id, ep, x.ok ? 'ok' : 'error');
       return json(x.status, {
         ok: x.ok,
-        data: (x.body?.rooms ?? []).slice(0, 50)
+        data: redactValue((x.body?.rooms ?? []).slice(0, 50))
       });
     }
     if (ep === '/turn/status') {
       const x = await relay('/turn/status');
-      await audit(req, ep, x.ok ? 'ok' : 'error');
+      await audit(caller.user.id, ep, x.ok ? 'ok' : 'error');
       return json(x.status, {
         ok: x.ok,
         data: {
@@ -131,18 +150,18 @@ Deno.serve(async (req)=>{
     }
     if (ep === '/recent-errors') {
       const x = await relay('/recent-errors');
-      await audit(req, ep, x.ok ? 'ok' : 'error');
+      await audit(caller.user.id, ep, x.ok ? 'ok' : 'error');
       return json(x.status, {
         ok: x.ok,
-        data: (x.body?.errors ?? []).slice(0, 30)
+        data: redactValue((x.body?.errors ?? []).slice(0, 30))
       });
     }
     return json(404, {
       ok: false,
       code: 'NOT_FOUND'
     });
-  } catch  {
-    await audit(req, ep, 'error');
+  } catch (error) {
+    console.error(`[${FN}] diagnostic failed`, error);
     return json(500, {
       ok: false,
       code: 'INTERNAL_ERROR'

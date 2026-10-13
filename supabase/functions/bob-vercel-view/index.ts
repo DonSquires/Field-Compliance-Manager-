@@ -1,3 +1,5 @@
+import { authorizePlatformDiagnostic } from '../_shared/platformDiagnosticAuth.ts';
+
 const FN = 'bob-vercel-view';
 const MAX_BODY = 64_000;
 const VERCEL_TOKEN = Deno.env.get('VERCEL_TOKEN');
@@ -18,6 +20,23 @@ function json(status, body) {
     }
   });
 }
+function redactValue(value) {
+  if (value == null) return value;
+  if (typeof value === 'string') {
+    return value.replace(/(bearer\s+)[^\s]+/gi, '$1[REDACTED]');
+  }
+  if (Array.isArray(value)) return value.slice(0, 100).map(redactValue);
+  if (typeof value === 'object') {
+    const out = {};
+    for (const [key, item] of Object.entries(value)) {
+      out[key] = /(token|password|secret|authorization|credential|value)/i.test(key)
+        ? '[REDACTED]'
+        : redactValue(item);
+    }
+    return out;
+  }
+  return value;
+}
 function routeOf(req) {
   const p = new URL(req.url).pathname;
   const a = p.split('/').filter(Boolean);
@@ -25,38 +44,27 @@ function routeOf(req) {
   const i = a.indexOf(FN);
   return i >= 0 ? '/' + a.slice(i + 1).join('/') : p;
 }
-function claims(req) {
-  const h = req.headers.get('authorization') || '';
-  if (!h.startsWith('Bearer ')) return null;
-  try {
-    return JSON.parse(atob(h.slice(7).split('.')[1].replace(/-/g, '+').replace(/_/g, '/')));
-  } catch  {
-    return null;
-  }
-}
-function isBob(c) {
-  return c?.app_metadata?.role === 'bob' || Array.isArray(c?.app_metadata?.roles) && c.app_metadata.roles.includes('bob');
-}
-async function audit(req, endpoint, result) {
-  const c = claims(req);
-  await fetch(`${SUPABASE_URL}/rest/v1/audit_log`, {
+async function audit(actorId, endpoint, result) {
+  const response = await fetch(`${SUPABASE_URL}/rest/v1/audit_log`, {
     method: 'POST',
     headers: {
       apikey: SUPABASE_SECRET_KEY,
+      authorization: `Bearer ${SUPABASE_SECRET_KEY}`,
       'content-type': 'application/json',
       prefer: 'return=minimal'
     },
     body: JSON.stringify({
+      actor_user_id: actorId,
       action: FN,
-      entity_type: 'integration',
-      entity_id: 'vercel',
-      change_summary: JSON.stringify({
+      target_table: 'edge_function',
+      metadata: {
+        target: 'vercel',
         endpoint,
-        result,
-        actor: c?.sub ?? null
-      })
+        result
+      }
     })
-  }).catch(()=>{});
+  });
+  if (!response.ok) throw new Error(`Audit write failed (${response.status})`);
 }
 async function vc(path) {
   const u = `https://api.vercel.com${path}${path.includes('?') ? '&' : '?'}teamId=${encodeURIComponent(VERCEL_TEAM_ID)}`;
@@ -87,8 +95,8 @@ Deno.serve(async (req)=>{
     ok: false,
     code: 'PAYLOAD_TOO_LARGE'
   });
-  const c = claims(req);
-  if (!c || !isBob(c)) return json(403, {
+  const caller = await authorizePlatformDiagnostic(req, true);
+  if (!caller) return json(403, {
     ok: false,
     code: 'FORBIDDEN'
   });
@@ -98,40 +106,43 @@ Deno.serve(async (req)=>{
     code: 'METHOD_NOT_ALLOWED'
   });
   try {
-    if (route === '/health') return json(200, {
-      ok: true,
-      service: FN
-    });
+    if (route === '/health') {
+      await audit(caller.user.id, route, 'ok');
+      return json(200, {
+        ok: true,
+        service: FN
+      });
+    }
     if (route === '/projects') {
       const x = await vc('/v9/projects?limit=50');
-      await audit(req, route, x.ok ? 'ok' : 'error');
+      await audit(caller.user.id, route, x.ok ? 'ok' : 'error');
       return json(x.status, {
         ok: x.ok,
-        data: x.body?.projects ?? []
+        data: redactValue(x.body?.projects ?? [])
       });
     }
     if (route === '/deployments') {
       const x = await vc('/v6/deployments?limit=30');
-      await audit(req, route, x.ok ? 'ok' : 'error');
+      await audit(caller.user.id, route, x.ok ? 'ok' : 'error');
       return json(x.status, {
         ok: x.ok,
-        data: x.body?.deployments ?? []
+        data: redactValue(x.body?.deployments ?? [])
       });
     }
     if (route === '/deployments/failed') {
       const x = await vc('/v6/deployments?limit=30&state=ERROR');
-      await audit(req, route, x.ok ? 'ok' : 'error');
+      await audit(caller.user.id, route, x.ok ? 'ok' : 'error');
       return json(x.status, {
         ok: x.ok,
-        data: x.body?.deployments ?? []
+        data: redactValue(x.body?.deployments ?? [])
       });
     }
     if (route === '/domains') {
       const x = await vc('/v5/domains?limit=50');
-      await audit(req, route, x.ok ? 'ok' : 'error');
+      await audit(caller.user.id, route, x.ok ? 'ok' : 'error');
       return json(x.status, {
         ok: x.ok,
-        data: x.body?.domains ?? []
+        data: redactValue(x.body?.domains ?? [])
       });
     }
     if (route === '/environment-variable-names') {
@@ -147,7 +158,7 @@ Deno.serve(async (req)=>{
           target: e.target ?? [],
           type: e.type ?? 'encrypted'
         }));
-      await audit(req, route, x.ok ? 'ok' : 'error');
+      await audit(caller.user.id, route, x.ok ? 'ok' : 'error');
       return json(x.status, {
         ok: x.ok,
         data: names
@@ -157,8 +168,8 @@ Deno.serve(async (req)=>{
       ok: false,
       code: 'NOT_FOUND'
     });
-  } catch  {
-    await audit(req, route, 'error');
+  } catch (error) {
+    console.error(`[${FN}] diagnostic failed`, error);
     return json(500, {
       ok: false,
       code: 'INTERNAL_ERROR'

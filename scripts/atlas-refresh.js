@@ -1,5 +1,6 @@
 const fs = require('node:fs');
 const path = require('node:path');
+const { execFileSync } = require('node:child_process');
 
 const OWNER_MARKER = '[repo-atlas-refresh:v1]';
 const BATCH_SIZE = 250;
@@ -293,21 +294,24 @@ function collectManagedAtlas(rootDir = process.cwd()) {
 }
 
 function collectDdlEntities(rootDir) {
-  const files = [
-    'supabase/schema.sql',
-    ...walkFiles(rootDir, 'supabase/migrations').filter(file => file.endsWith('.sql'))
-  ];
+  const files = ['supabase/schema.sql'];
   const tables = new Set();
   const rpcs = new Set();
-  const tablePattern = /(?:^|;)[ \t]*CREATE\s+TABLE(?:\s+IF\s+NOT\s+EXISTS)?\s+(?:"?public"?\.)?"?([a-zA-Z_][a-zA-Z0-9_]*)"?/gim;
-  const viewPattern = /(?:^|;)[ \t]*CREATE(?:\s+OR\s+REPLACE)?\s+(?:MATERIALIZED\s+)?VIEW\s+(?:"?public"?\.)?"?([a-zA-Z_][a-zA-Z0-9_]*)"?/gim;
-  const functionPattern = /(?:^|;)[ \t]*CREATE(?:\s+OR\s+REPLACE)?\s+FUNCTION\s+(?:"?public"?\.)?"?([a-zA-Z_][a-zA-Z0-9_]*)"?/gim;
+  const tablePattern = /(?:^|;)[ \t]*CREATE\s+TABLE(?:\s+IF\s+NOT\s+EXISTS)?\s+(?:(?:"?([a-zA-Z_][a-zA-Z0-9_]*)"?\.)?)"?([a-zA-Z_][a-zA-Z0-9_]*)"?/gim;
+  const viewPattern = /(?:^|;)[ \t]*CREATE(?:\s+OR\s+REPLACE)?\s+(?:MATERIALIZED\s+)?VIEW\s+(?:(?:"?([a-zA-Z_][a-zA-Z0-9_]*)"?\.)?)"?([a-zA-Z_][a-zA-Z0-9_]*)"?/gim;
+  const functionPattern = /(?:^|;)[ \t]*CREATE(?:\s+OR\s+REPLACE)?\s+FUNCTION\s+(?:(?:"?([a-zA-Z_][a-zA-Z0-9_]*)"?\.)?)"?([a-zA-Z_][a-zA-Z0-9_]*)"?/gim;
+  const collectPublicNames = (content, pattern, target) => {
+    for (const match of content.matchAll(pattern)) {
+      const schema = match[1]?.toLowerCase();
+      if (!schema || schema === 'public') target.add(match[2]);
+    }
+  };
 
   for (const file of files) {
     const content = fs.existsSync(path.join(rootDir, file)) ? fs.readFileSync(path.join(rootDir, file), 'utf8') : '';
-    for (const match of content.matchAll(tablePattern)) tables.add(match[1]);
-    for (const match of content.matchAll(viewPattern)) tables.add(match[1]);
-    for (const match of content.matchAll(functionPattern)) rpcs.add(match[1]);
+    collectPublicNames(content, tablePattern, tables);
+    collectPublicNames(content, viewPattern, tables);
+    collectPublicNames(content, functionPattern, rpcs);
   }
   return { tables, rpcs };
 }
@@ -315,8 +319,8 @@ function collectDdlEntities(rootDir) {
 function collectSqlFunctionEdges(rootDir) {
   const schemaFile = 'supabase/schema.sql';
   const files = [
-    schemaFile,
-    ...walkFiles(rootDir, 'supabase/migrations').filter(file => file.endsWith('.sql')).sort()
+    ...walkFiles(rootDir, 'supabase/schemas').filter(file => file.endsWith('.sql')).sort(),
+    schemaFile
   ];
   const latestFunctions = new Map();
   const functionPattern = /CREATE(?:\s+OR\s+REPLACE)?\s+FUNCTION\s+(?:(?:"?(public|ops)"?)\.)?"?([a-zA-Z_][a-zA-Z0-9_]*)"?[\s\S]*?AS\s+\$([a-zA-Z0-9_]*)\$([\s\S]*?)\$\3\$\s*;/gi;
@@ -328,10 +332,10 @@ function collectSqlFunctionEdges(rootDir) {
   }
 
   const edges = new Map();
-  const add = (rpcName, targetType, targetName, kind, file, context) => {
+  const add = (sourceName, targetType, targetName, kind, file, context, sourceType = 'rpc') => {
     const edge = {
-      source_type: 'rpc',
-      source_name: rpcName,
+      source_type: sourceType,
+      source_name: sourceName,
       target_type: targetType,
       target_name: targetName,
       edge_kind: kind,
@@ -358,12 +362,17 @@ function collectSqlFunctionEdges(rootDir) {
         add(rpcName, 'rpc', match[1], 'calls', definition.file, `SQL calls public.${match[1]}`);
       }
     }
+    for (const match of definition.body.matchAll(/(?:^|[^\w.])"?([a-zA-Z_][a-zA-Z0-9_]*)"?\s*\(/g)) {
+      if (match[1] !== rpcName && latestFunctions.has(match[1])) {
+        add(rpcName, 'rpc', match[1], 'calls', definition.file, `SQL calls ${match[1]} through function search_path`);
+      }
+    }
     for (const match of definition.body.matchAll(/\/functions\/v1\/([a-zA-Z0-9_-]+)/g)) {
       add(rpcName, 'edge_function', match[1], 'calls', definition.file, `SQL HTTP call to ${match[1]}`);
     }
   }
   const schema = fs.existsSync(path.join(rootDir, schemaFile)) ? fs.readFileSync(path.join(rootDir, schemaFile), 'utf8') : '';
-  for (const trigger of schema.matchAll(/CREATE TRIGGER\s+"?[a-zA-Z0-9_]+"?[\s\S]*?\s+ON\s+public\."?([a-zA-Z_][a-zA-Z0-9_]*)"?[\s\S]*?EXECUTE FUNCTION\s+public\."?([a-zA-Z_][a-zA-Z0-9_]*)"?\s*\(/gi)) {
+  for (const trigger of schema.matchAll(/CREATE TRIGGER\s+"?[a-zA-Z0-9_]+"?[\s\S]*?\s+ON\s+(?:"?public"?\.)"?([a-zA-Z_][a-zA-Z0-9_]*)"?[\s\S]*?EXECUTE FUNCTION\s+(?:"?public"?\.)"?([a-zA-Z_][a-zA-Z0-9_]*)"?\s*\(/gi)) {
     if (latestFunctions.has(trigger[2])) {
       const edge = {
         source_type: 'table',
@@ -380,6 +389,22 @@ function collectSqlFunctionEdges(rootDir) {
       };
       edges.set(edgeKey(edge), edge);
     }
+  }
+  const addReferencedFunctions = (tableName, definition, edgeKind, context) => {
+    const referenced = new Set();
+    for (const match of definition.matchAll(/\bpublic\."?([a-zA-Z_][a-zA-Z0-9_]*)"?\s*\(/gi)) referenced.add(match[1]);
+    for (const match of definition.matchAll(/(?:^|[^\w.])"?([a-zA-Z_][a-zA-Z0-9_]*)"?\s*\(/g)) referenced.add(match[1]);
+    for (const functionName of referenced) {
+      if (!latestFunctions.has(functionName)) continue;
+      add(tableName, 'rpc', functionName, edgeKind, schemaFile, context, 'table');
+    }
+  };
+  const schemaStatements = schema.split(/;\s*(?:\r?\n|$)/);
+  for (const statement of schemaStatements) {
+    const policy = statement.match(/^\s*CREATE POLICY\s+(?:"[^"]+"|[a-zA-Z_][a-zA-Z0-9_]*)\s+ON\s+(?:"?public"?\.)"?([a-zA-Z_][a-zA-Z0-9_]*)"?([\s\S]*)$/i);
+    if (policy) addReferencedFunctions(policy[1], policy[2], 'secured_by', 'PostgreSQL row-level security policy');
+    const constraint = statement.match(/^\s*ALTER TABLE(?:\s+ONLY)?\s+(?:"?public"?\.)"?([a-zA-Z_][a-zA-Z0-9_]*)"?([\s\S]*\bADD CONSTRAINT\b[\s\S]*\bCHECK\s*\([\s\S]*\))\s*$/i);
+    if (constraint) addReferencedFunctions(constraint[1], constraint[2], 'calls', 'PostgreSQL check constraint');
   }
   return [...edges.values()];
 }
@@ -430,14 +455,14 @@ function collectSourceEdges(rootDir, knownEntities) {
     ...walkFiles(rootDir, 'scripts')
   ].filter(isSourceFile);
   const edges = new Map();
-  const add = (source, targetType, targetName, edgeKind, file, context) => {
+  const add = (source, targetType, targetName, edgeKind, file, context, evidenceClass = 'live-code') => {
     if (!targetName || targetName === 'if') return;
     const edge = {
       ...source,
       target_type: targetType,
       target_name: targetName,
       edge_kind: edgeKind,
-      evidence_class: 'live-code',
+      evidence_class: evidenceClass,
       retirement_status: 'live',
       source_file: file,
       migration_name: null,
@@ -451,6 +476,19 @@ function collectSourceEdges(rootDir, knownEntities) {
     const content = fs.readFileSync(path.join(rootDir, file), 'utf8');
     const source = sourceIdentity(file);
     const dynamicCallTargets = new Map();
+    if (source.source_type === 'edge_function') {
+      for (const match of content.matchAll(/ATLAS\s+EXTERNAL\s+CALLER:\s*([a-zA-Z0-9_-]+)/gi)) {
+        add(
+          { source_type: 'feature', source_name: match[1] },
+          'edge_function',
+          source.source_name,
+          'invokes',
+          file,
+          `declared external caller: ${match[1]}`,
+          'declared-external-contract'
+        );
+      }
+    }
     for (const assignment of content.matchAll(/\bconst\s+([a-zA-Z_][a-zA-Z0-9_]*)\s*=\s*[^;\n]*?['"]([a-zA-Z0-9_-]+)['"][^;\n]*?['"]([a-zA-Z0-9_-]+)['"]/g)) {
       dynamicCallTargets.set(assignment[1], [assignment[2], assignment[3]].filter((name) => knownEntities.edgeFunctions.has(name)));
     }
@@ -504,6 +542,11 @@ function collectSourceEdges(rootDir, knownEntities) {
         add(source, 'edge_function', match[1], 'calls', file, `fetch('/functions/v1/${match[1]}')`);
       }
     }
+    for (const match of content.matchAll(/new URL\(\s*(?:`[^`]*\/functions\/v1\/|['"][^'"]*\/functions\/v1\/)([a-zA-Z0-9_-]+)/g)) {
+      if (knownEntities.edgeFunctions.has(match[1])) {
+        add(source, 'edge_function', match[1], 'calls', file, `new URL('/functions/v1/${match[1]}')`);
+      }
+    }
     for (const match of content.matchAll(/\bfetch\(\s*([a-zA-Z_][a-zA-Z0-9_]*)\s*,/g)) {
       const target = functionUrlTargets.get(match[1]);
       if (target) add(source, 'edge_function', target, 'calls', file, `fetch(${match[1]})`);
@@ -524,6 +567,25 @@ function collectSourceEdges(rootDir, knownEntities) {
     }
   }
   return [...edges.values()].sort((left, right) => edgeKey(left).localeCompare(edgeKey(right)));
+}
+
+function resolveSourceRevision(rootDir = process.cwd()) {
+  const read = (args) => {
+    try {
+      const value = execFileSync('git', args, { cwd: rootDir, encoding: 'utf8', stdio: ['ignore', 'pipe', 'ignore'] }).trim();
+      return value || null;
+    } catch {
+      return null;
+    }
+  };
+  const explicitCommit = process.env.ATLAS_REFRESH_SOURCE_COMMIT;
+  const dirty = !explicitCommit && Boolean(read(['status', '--porcelain', '--untracked-files=no']));
+  const commit = explicitCommit || (dirty ? null : read(['rev-parse', 'HEAD']));
+  const branch = process.env.ATLAS_REFRESH_SOURCE_BRANCH || read(['rev-parse', '--abbrev-ref', 'HEAD']);
+  return {
+    source_commit: commit && /^[0-9a-f]{7,40}$/i.test(commit) ? commit : null,
+    source_branch: branch && branch !== 'HEAD' ? branch : null
+  };
 }
 
 function collectAtlasRefresh(rootDir = process.cwd()) {
@@ -579,15 +641,21 @@ function collectAtlasRefresh(rootDir = process.cwd()) {
   }
   const edges = [...edgesByKey.values()].sort((left, right) => edgeKey(left).localeCompare(edgeKey(right)));
   const callersByTarget = new Map();
+  const externalFeatureSources = new Set();
   for (const edge of edges) {
     const key = `${edge.target_type}\u0000${edge.target_name}`;
     if (!callersByTarget.has(key)) callersByTarget.set(key, new Set());
     callersByTarget.get(key).add(edge.source_name);
+    if (edge.source_type === 'feature' && edge.evidence_class === 'declared-external-contract') {
+      externalFeatureSources.add(edge.source_name);
+    }
   }
   const capabilities = [];
   const addCapabilities = (entityType, names) => {
     for (const entityName of [...names].sort()) {
-      const callers = [...(callersByTarget.get(`${entityType}\u0000${entityName}`) || [])].sort();
+      const callers = [...(callersByTarget.get(`${entityType}\u0000${entityName}`) || [])];
+      if (entityType === 'feature' && externalFeatureSources.has(entityName)) callers.push('declared external contract');
+      callers.sort();
       capabilities.push({
         entity_type: entityType,
         entity_name: entityName,
@@ -604,11 +672,17 @@ function collectAtlasRefresh(rootDir = process.cwd()) {
   addCapabilities('table', tables);
   addCapabilities('rpc', rpcs);
   addCapabilities('edge_function', edgeFunctions);
-  addCapabilities('feature', new Set(edges.filter((edge) => edge.target_type === 'feature').map((edge) => edge.target_name)));
+  addCapabilities('feature', new Set(edges.flatMap((edge) => [
+    ...(edge.source_type === 'feature' ? [edge.source_name] : []),
+    ...(edge.target_type === 'feature' ? [edge.target_name] : [])
+  ])));
 
+  const revision = resolveSourceRevision(rootDir);
   return {
     generated_at: new Date().toISOString(),
     generator: OWNER_MARKER,
+    source_commit: revision.source_commit,
+    source_branch: revision.source_branch,
     repository_files: repositoryFiles,
     capabilities: capabilities.sort((left, right) => capabilityKey(left).localeCompare(capabilityKey(right))),
     edges
@@ -684,6 +758,23 @@ function buildRefreshPlan(manifest, existingCapabilities, existingEdges) {
   return plan;
 }
 
+function scopeRefreshPlan(plan, existingCapabilities, existingEdges, entityNames) {
+  const names = new Set(entityNames);
+  if (!names.size) return plan;
+  const scopedCapabilityIds = new Set(existingCapabilities
+    .filter(row => names.has(row.entity_name))
+    .map(row => row.id));
+  const scopedEdgeIds = new Set(existingEdges
+    .filter(row => names.has(row.source_name) || names.has(row.target_name))
+    .map(row => row.id));
+  return {
+    capabilityUpserts: plan.capabilityUpserts.filter(row => names.has(row.entity_name)),
+    edgeUpserts: plan.edgeUpserts.filter(row => names.has(row.source_name) || names.has(row.target_name)),
+    capabilityRetireIds: plan.capabilityRetireIds.filter(id => scopedCapabilityIds.has(id)),
+    edgeRetireIds: plan.edgeRetireIds.filter(id => scopedEdgeIds.has(id))
+  };
+}
+
 async function fetchAll(baseUrl, serviceKey, table, select) {
   const rows = [];
   for (let offset = 0; ; offset += 1000) {
@@ -740,13 +831,55 @@ async function retireRows(baseUrl, serviceKey, table, ids) {
   }
 }
 
-async function applyAtlasRefresh(manifest, { baseUrl, serviceKey, allowLargeRetirement = false, retireStale = true }) {
+async function recordRefreshRun(baseUrl, serviceKey, manifest, plan) {
+  const row = {
+    source_commit: manifest.source_commit ?? null,
+    source_branch: manifest.source_branch ?? null,
+    generated_at: manifest.generated_at ?? new Date().toISOString(),
+    capability_total: manifest.capabilities.length,
+    edge_total: manifest.edges.length,
+    capability_upserts: plan.capabilityUpserts.length,
+    edge_upserts: plan.edgeUpserts.length,
+    retired_total: plan.capabilityRetireIds.length + plan.edgeRetireIds.length,
+    refresh_source: 'ci_generator'
+  };
+  const response = await fetch(`${baseUrl}/rest/v1/bob_atlas_refresh_runs`, {
+    method: 'POST',
+    headers: {
+      apikey: serviceKey,
+      Authorization: `Bearer ${serviceKey}`,
+      'Content-Type': 'application/json',
+      Prefer: 'return=minimal'
+    },
+    body: JSON.stringify([row])
+  });
+  if (!response.ok) {
+    // Provenance is additive: never fail a truthful map refresh because the
+    // ledger migration has not been applied to this environment yet.
+    console.warn(`Atlas refresh provenance not recorded (${response.status}); apply the bob_atlas_refresh_runs migration so Bob can see map freshness.`);
+    return false;
+  }
+  return true;
+}
+
+async function applyAtlasRefresh(manifest, {
+  baseUrl,
+  serviceKey,
+  allowLargeRetirement = false,
+  retireStale = true,
+  scopeEntityNames = []
+}) {
   if (!baseUrl || !serviceKey) throw new Error('SUPABASE_URL and SUPABASE_SERVICE_ROLE_KEY are required');
   const [existingCapabilities, existingEdges] = await Promise.all([
     fetchAll(baseUrl, serviceKey, 'bob_capability_map', 'id,entity_type,entity_name,present,wired,exercised,caller_summary,notes,refresh_source,retirement_status'),
     fetchAll(baseUrl, serviceKey, 'bob_app_map_edges', 'id,source_type,source_name,target_type,target_name,edge_kind,evidence_class,source_file,migration_name,caller_context,refresh_source,retirement_status')
   ]);
-  const plan = buildRefreshPlan(manifest, existingCapabilities, existingEdges);
+  const plan = scopeRefreshPlan(
+    buildRefreshPlan(manifest, existingCapabilities, existingEdges),
+    existingCapabilities,
+    existingEdges,
+    scopeEntityNames
+  );
   const retirementCount = plan.capabilityRetireIds.length + plan.edgeRetireIds.length;
   if (retireStale && retirementCount > MAX_RETIREMENTS && !allowLargeRetirement) {
     throw new Error(`Refusing to retire ${retirementCount} Atlas rows without --allow-large-retirement`);
@@ -757,14 +890,13 @@ async function applyAtlasRefresh(manifest, { baseUrl, serviceKey, allowLargeReti
   if (retireStale) {
     await retireRows(baseUrl, serviceKey, 'bob_capability_map', plan.capabilityRetireIds);
     await retireRows(baseUrl, serviceKey, 'bob_app_map_edges', plan.edgeRetireIds);
-    return plan;
+  } else {
+    plan.skippedRetirements = retirementCount;
+    plan.capabilityRetireIds = [];
+    plan.edgeRetireIds = [];
   }
-  return {
-    ...plan,
-    skippedRetirements: retirementCount,
-    capabilityRetireIds: [],
-    edgeRetireIds: []
-  };
+  plan.runRecorded = await recordRefreshRun(baseUrl, serviceKey, manifest, plan);
+  return plan;
 }
 
 function writeManifest(rootDir, manifest, outputDir = process.env.ATLAS_REFRESH_OUTPUT_DIR || path.join(rootDir, '.bob')) {
@@ -774,21 +906,26 @@ function writeManifest(rootDir, manifest, outputDir = process.env.ATLAS_REFRESH_
 
 async function main() {
   const args = new Set(process.argv.slice(2));
+  const scopeArg = [...args].find(arg => arg.startsWith('--scope-entities='));
+  const scopeEntityNames = scopeArg
+    ? scopeArg.slice('--scope-entities='.length).split(',').map(value => value.trim()).filter(Boolean)
+    : [];
   const rootDir = process.cwd();
   const manifest = collectAtlasRefresh(rootDir);
   writeManifest(rootDir, manifest);
   if (!args.has('--apply')) {
-    console.log(`Atlas refresh manifest: ${manifest.capabilities.length} capabilities, ${manifest.edges.length} edges (dry run)`);
+    console.log(`Atlas refresh manifest: ${manifest.capabilities.length} capabilities, ${manifest.edges.length} edges (dry run) @ ${manifest.source_commit ?? 'unknown commit'}`);
     return;
   }
   const plan = await applyAtlasRefresh(manifest, {
     baseUrl: process.env.SUPABASE_URL,
     serviceKey: process.env.SUPABASE_SERVICE_ROLE_KEY,
     allowLargeRetirement: args.has('--allow-large-retirement'),
-    retireStale: !args.has('--upsert-only')
+    retireStale: !args.has('--upsert-only'),
+    scopeEntityNames
   });
   const skipped = plan.skippedRetirements ? `, ${plan.skippedRetirements} stale rows left unchanged` : '';
-  console.log(`Atlas refreshed: ${plan.capabilityUpserts.length} capabilities, ${plan.edgeUpserts.length} edges, ${plan.capabilityRetireIds.length + plan.edgeRetireIds.length} retired${skipped}`);
+  console.log(`Atlas refreshed: ${plan.capabilityUpserts.length} capabilities, ${plan.edgeUpserts.length} edges, ${plan.capabilityRetireIds.length + plan.edgeRetireIds.length} retired${skipped} @ ${manifest.source_commit ?? 'unknown commit'}${plan.runRecorded ? '' : ' (provenance not recorded)'}`);
 }
 
 if (require.main === module) {
@@ -805,6 +942,8 @@ module.exports = {
   collectSchemaForeignKeyEdges,
   staleGeneratedEdgeIds,
   collectAtlasRefresh,
+  resolveSourceRevision,
   buildRefreshPlan,
+  scopeRefreshPlan,
   applyAtlasRefresh
 };

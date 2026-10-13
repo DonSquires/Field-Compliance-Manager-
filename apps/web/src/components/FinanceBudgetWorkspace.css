@@ -1,0 +1,37 @@
+.finance-budget-workspace { display: grid; gap: 1rem; margin-top: 1.5rem; }
+.finance-budget-workspace > header { display: flex; justify-content: space-between; gap: 1rem; align-items: flex-start; }
+.finance-budget-workspace > header p { margin: 0; color: var(--color-primary, #245f54); font-size: .78rem; font-weight: 700; text-transform: uppercase; letter-spacing: .06em; }
+.finance-budget-workspace > header h2 { margin: .2rem 0; }
+.finance-budget-workspace > header span { color: var(--color-text-secondary, #59636e); }
+.finance-budget-message { display: flex; align-items: center; gap: .5rem; margin: 0; padding: .75rem 1rem; border-radius: .6rem; }
+.finance-budget-message.is-error { background: #fff1f0; color: #9f2923; }
+.finance-budget-message.is-success { background: #edf8f3; color: #185c48; }
+.finance-budget-grid { display: grid; grid-template-columns: minmax(16rem, .75fr) minmax(18rem, 1.25fr); gap: 1rem; }
+.finance-budget-panel, .finance-budget-detail { display: grid; gap: .8rem; padding: 1rem; background: var(--color-surface, #fff); border: 1px solid var(--color-border, #d9dfe5); border-radius: .75rem; }
+.finance-budget-panel h3, .finance-budget-detail h3 { margin: 0; }
+.finance-budget-panel label, .finance-budget-line-form label { display: grid; gap: .35rem; }
+.finance-budget-panel input, .finance-budget-line-form input, .finance-budget-line-form select { min-height: 2.5rem; padding: .55rem .7rem; border: 1px solid var(--color-border, #cbd3da); border-radius: .45rem; background: var(--color-surface, #fff); color: inherit; }
+.finance-budget-register { display: grid; gap: .45rem; }
+.finance-budget-register button { display: flex; justify-content: space-between; gap: .75rem; align-items: center; padding: .7rem; border: 1px solid var(--color-border, #d9dfe5); border-radius: .5rem; background: transparent; color: inherit; text-align: left; }
+.finance-budget-register button.is-selected { border-color: var(--color-primary, #245f54); background: #edf8f3; }
+.finance-budget-register span { display: grid; gap: .15rem; }
+.finance-budget-register small { color: var(--color-text-secondary, #66717c); }
+.finance-budget-register em, .finance-budget-detail-heading > span { font-style: normal; text-transform: capitalize; font-size: .78rem; font-weight: 700; }
+.finance-budget-detail-heading { display: flex; justify-content: space-between; gap: 1rem; align-items: center; }
+.finance-budget-detail-heading p { margin: .2rem 0 0; color: var(--color-text-secondary, #66717c); }
+.finance-budget-lines { display: grid; gap: .35rem; }
+.finance-budget-lines > div { display: grid; grid-template-columns: 1fr 1fr auto; gap: .75rem; align-items: center; padding: .65rem; border-bottom: 1px solid var(--color-border, #e2e6ea); }
+.finance-budget-lines small { grid-column: 1 / -1; color: var(--color-text-secondary, #66717c); }
+.finance-budget-line-form { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: .75rem; padding-top: .75rem; border-top: 1px solid var(--color-border, #e2e6ea); }
+.finance-budget-line-form button { align-self: end; }
+.finance-budget-confirm { padding: 1rem; border: 1px solid #d8b34a; border-radius: .6rem; background: #fff9e8; }
+.finance-budget-confirm p { margin: .35rem 0 .8rem; }
+.finance-budget-confirm > div { display: flex; justify-content: flex-end; gap: .6rem; }
+.finance-budget-variance { display: grid; grid-template-columns: minmax(14rem, 1fr) minmax(12rem, auto) auto; gap: .75rem; align-items: end; padding: 1rem; border-radius: .6rem; background: #edf5fb; }
+.finance-budget-variance p { margin: .25rem 0 0; color: var(--color-text-secondary, #66717c); }
+.finance-budget-variance select { min-height: 2.5rem; padding: .55rem .7rem; border: 1px solid var(--color-border, #cbd3da); border-radius: .45rem; background: var(--color-surface, #fff); color: inherit; }
+@media (max-width: 760px) {
+  .finance-budget-grid, .finance-budget-line-form, .finance-budget-variance { grid-template-columns: 1fr; }
+  .finance-budget-workspace > header, .finance-budget-detail-heading { align-items: stretch; flex-direction: column; }
+  .finance-budget-lines > div { grid-template-columns: 1fr auto; }
+}

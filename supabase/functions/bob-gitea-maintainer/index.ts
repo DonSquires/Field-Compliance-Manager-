@@ -1,3 +1,5 @@
+import { authorizePlatformDiagnostic } from '../_shared/platformDiagnosticAuth.ts';
+
 const FN = 'bob-gitea-maintainer';
 const ALLOWED_REPO = {
   owner: 'Iron-Eagle-Security-Ltd',
@@ -75,25 +77,27 @@ function redactObject(v) {
 async function audit(req, endpoint, target, result, code) {
   const claims = parseClaims(req);
   const row = {
+    actor_user_id: claims?.sub ?? null,
     action: FN,
-    entity_type: 'integration',
-    entity_id: target,
-    change_summary: JSON.stringify({
+    target_table: 'edge_function',
+    metadata: {
+      target,
       endpoint,
       result,
-      code,
-      actor: claims?.sub ?? null
-    })
+      code
+    }
   };
-  await fetch(`${SUPABASE_URL}/rest/v1/audit_log`, {
+  const response = await fetch(`${SUPABASE_URL}/rest/v1/audit_log`, {
     method: 'POST',
     headers: {
       'apikey': SUPABASE_SECRET_KEY,
+      'authorization': `Bearer ${SUPABASE_SECRET_KEY}`,
       'content-type': 'application/json',
       'prefer': 'return=minimal'
     },
     body: JSON.stringify(row)
-  }).catch(()=>{});
+  });
+  if (!response.ok) throw new Error(`Audit write failed (${response.status})`);
 }
 async function gitea(path, init = {}) {
   const res = await fetch(`${GITEA_BASE_URL}${path}`, {
@@ -123,17 +127,32 @@ Deno.serve(async (req)=>{
   if (req.method === 'OPTIONS') return new Response(null, {
     status: 204
   });
-  const claims = parseClaims(req);
-  if (!claims || !isBobRole(claims)) return json(403, {
+  const caller = await authorizePlatformDiagnostic(req, true);
+  if (!caller) return json(403, {
     ok: false,
     code: 'FORBIDDEN'
   });
   const route = routeOf(req);
   const method = req.method.toUpperCase();
-  if (method === 'GET' && route === '/health') return json(200, {
-    ok: true,
-    service: FN
+  if (method !== 'GET' && caller.role !== 'bob') return json(403, {
+    ok: false,
+    code: 'WRITE_REQUIRES_GOVERNED_BOB_IDENTITY'
   });
+  if (method === 'GET' && route === '/health') {
+    try {
+      await audit(req, route, 'gitea', 'ok', '200');
+    } catch (error) {
+      console.error(`[${FN}] audit failed`, error);
+      return json(500, {
+        ok: false,
+        code: 'AUDIT_FAILED'
+      });
+    }
+    return json(200, {
+      ok: true,
+      service: FN
+    });
+  }
   const safeRead = new Set([
     '/repos',
     '/repo',
@@ -316,8 +335,17 @@ Deno.serve(async (req)=>{
       ok: false,
       code: 'NOT_FOUND'
     });
-  } catch  {
-    await audit(req, route, `${owner}/${repo}`, 'error', '500');
+  } catch (error) {
+    console.error(`[${FN}] request failed`, error);
+    try {
+      await audit(req, route, `${owner}/${repo}`, 'error', '500');
+    } catch (auditError) {
+      console.error(`[${FN}] failure audit failed`, auditError);
+      return json(500, {
+        ok: false,
+        code: 'AUDIT_FAILED'
+      });
+    }
     return json(500, {
       ok: false,
       code: 'INTERNAL_ERROR'

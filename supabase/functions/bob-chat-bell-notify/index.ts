@@ -8,20 +8,15 @@
  * is that Bell write. It does not gate anything; it is a notification only.
  *
  * POST /functions/v1/bob-chat-bell-notify
- * Body: {
- *   author: 'bob' | 'duo',        // who just wrote the entry
- *   summary: string,               // short plain-language summary of what was said
- *   entry_date?: string,           // date tag from the BOB_CHAT.md entry (dedup key)
- *   organization_id?: string,      // defaults to the Iron Eagle owner org
- *   severity?: 'info' | 'warning' | 'critical',
- *   is_concern?: boolean,          // true if this is Bob flagging a code/system/
- *                                  // pipeline/wiring issue rather than routine chat
- * }
+ * Body supports two internal events:
+ *   { event: 'conversation_complete', organization_id, recipient_user_id,
+ *     conversation_id, request_id }
+ *   { event?: 'notepad_entry', author: 'bob' | 'duo', summary, entry_date?,
+ *     organization_id?, severity?, is_concern? }
  *
- * Writes one row to `notifications` via enqueue_notification() (migration
- * 0068), category='system', recipient_role='grand_master' so it surfaces in
- * the existing NotificationsBell UI. Idempotent on (author, entry_date) via
- * dedup_key — re-running for the same entry never double-notifies.
+ * Writes one row via enqueue_notification(). Conversation completion is
+ * personal, tenant-scoped, navigable to the exact durable conversation, and
+ * idempotent on request_id. Legacy notepad entries remain owner-role notices.
  *
  * Auth: service-role only. Called from CI (bob:notify-duo) and, in future,
  * directly from bob-inference when Bob writes to BOB_CHAT.md mid-session.
@@ -61,6 +56,50 @@ serve(async (req)=>{
   }
   try {
     const body = await req.json().catch(()=>({}));
+    const event = String(body.event ?? 'notepad_entry').trim();
+    const admin = createClient(SUPABASE_URL, SUPABASE_SERVICE_ROLE_KEY);
+
+    if (event === 'conversation_complete') {
+      const orgId = String(body.organization_id ?? '').trim();
+      const recipientUserId = String(body.recipient_user_id ?? '').trim();
+      const conversationId = String(body.conversation_id ?? '').trim();
+      const requestId = String(body.request_id ?? '').trim();
+      if (!orgId || !recipientUserId || !conversationId || !requestId) {
+        return json({
+          error: 'conversation_complete requires organization_id, recipient_user_id, conversation_id, and request_id'
+        }, 400);
+      }
+      const { data: notificationId, error } = await admin.rpc('enqueue_notification', {
+        p_organization_id: orgId,
+        p_category: 'bob_conversation',
+        p_title: 'Bob finished your request',
+        p_body: 'Open Bob to review the response and its evidence.',
+        p_severity: 'info',
+        p_recipient_user_id: recipientUserId,
+        p_recipient_role: null,
+        p_link_page: 'bob_chat',
+        p_link_payload: {
+          conversation_id: conversationId,
+          request_id: requestId
+        },
+        p_dedup_key: `bob_conversation:${conversationId}:${requestId}`
+      });
+      if (error) {
+        console.error('[bob-chat-bell-notify] conversation notification failed:', error.message);
+        return json({ ok: false, error: error.message }, 500);
+      }
+      console.log(`[bob-chat-bell-notify] conversation complete request_id=${requestId} notification_id=${notificationId}`);
+      return json({
+        ok: true,
+        event,
+        notification_id: notificationId,
+        dedup_key: `bob_conversation:${conversationId}:${requestId}`
+      });
+    }
+
+    if (event !== 'notepad_entry') {
+      return json({ error: "event must be 'conversation_complete' or 'notepad_entry'" }, 400);
+    }
     const author = String(body.author ?? '').trim().toLowerCase();
     const summary = String(body.summary ?? '').trim();
     if (author !== 'bob' && author !== 'duo') {
@@ -71,7 +110,6 @@ serve(async (req)=>{
     if (!summary) return json({
       error: 'summary is required'
     }, 400);
-    const admin = createClient(SUPABASE_URL, SUPABASE_SERVICE_ROLE_KEY);
     const entryDate = String(body.entry_date ?? new Date().toISOString().slice(0, 16));
     const orgId = String(body.organization_id ?? DEFAULT_ORG_ID);
     const severity = body.severity ?? (body.is_concern ? 'warning' : 'info');

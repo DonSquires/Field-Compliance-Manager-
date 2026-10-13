@@ -1,3 +1,5 @@
+import { authorizePlatformDiagnostic } from '../_shared/platformDiagnosticAuth.ts';
+
 const FN = 'bob-email-view';
 const MAILGUN_API_KEY = Deno.env.get('MAILGUN_API_KEY');
 const RESEND_API_KEY = Deno.env.get('RESEND_API_KEY');
@@ -26,38 +28,45 @@ function route(req) {
   const i = a.indexOf(FN);
   return i >= 0 ? '/' + a.slice(i + 1).join('/') : p;
 }
-function claims(req) {
-  const h = req.headers.get('authorization') || '';
-  if (!h.startsWith('Bearer ')) return null;
-  try {
-    return JSON.parse(atob(h.slice(7).split('.')[1].replace(/-/g, '+').replace(/_/g, '/')));
-  } catch  {
-    return null;
+function redactEmail(value) {
+  return String(value ?? '').replace(/\b[A-Z0-9._%+-]+@([A-Z0-9.-]+\.[A-Z]{2,})\b/gi, '[redacted]@$1');
+}
+function redactValue(value) {
+  if (value == null) return value;
+  if (typeof value === 'string') return redactEmail(value);
+  if (Array.isArray(value)) return value.slice(0, 50).map(redactValue);
+  if (typeof value === 'object') {
+    const out = {};
+    for (const [key, item] of Object.entries(value)) {
+      out[key] = /(token|password|secret|authorization|api[_-]?key|credential)/i.test(key)
+        ? '[REDACTED]'
+        : redactValue(item);
+    }
+    return out;
   }
+  return value;
 }
-function isBob(c) {
-  return c?.app_metadata?.role === 'bob' || Array.isArray(c?.app_metadata?.roles) && c.app_metadata.roles.includes('bob');
-}
-async function audit(req, ep, res) {
-  const c = claims(req);
-  await fetch(`${SUPABASE_URL}/rest/v1/audit_log`, {
+async function audit(actorId, ep, res) {
+  const response = await fetch(`${SUPABASE_URL}/rest/v1/audit_log`, {
     method: 'POST',
     headers: {
       apikey: SB,
+      authorization: `Bearer ${SB}`,
       'content-type': 'application/json',
       prefer: 'return=minimal'
     },
     body: JSON.stringify({
+      actor_user_id: actorId,
       action: FN,
-      entity_type: 'integration',
-      entity_id: 'email',
-      change_summary: JSON.stringify({
+      target_table: 'edge_function',
+      metadata: {
+        target: 'email',
         endpoint: ep,
-        result: res,
-        actor: c?.sub ?? null
-      })
+        result: res
+      }
     })
-  }).catch(()=>{});
+  });
+  if (!response.ok) throw new Error(`Audit write failed (${response.status})`);
 }
 async function relay(path) {
   if (!RELAY_BASE || !RELAY_TOKEN) return {
@@ -110,8 +119,8 @@ Deno.serve(async (req)=>{
   if (req.method === 'OPTIONS') return new Response(null, {
     status: 204
   });
-  const c = claims(req);
-  if (!c || !isBob(c)) return json(403, {
+  const caller = await authorizePlatformDiagnostic(req, true);
+  if (!caller) return json(403, {
     ok: false,
     code: 'FORBIDDEN'
   });
@@ -120,16 +129,24 @@ Deno.serve(async (req)=>{
     code: 'METHOD_NOT_ALLOWED'
   });
   const ep = route(req);
+  const allowed = new Set(['/health', '/domains', '/delivery/recent', '/inbound/status', '/logs/recent']);
+  if (!allowed.has(ep)) return json(404, {
+    ok: false,
+    code: 'NOT_FOUND'
+  });
   try {
-    if (ep === '/health') return json(200, {
-      ok: true,
-      service: FN,
-      provider: RESEND_API_KEY ? 'resend' : MAILGUN_API_KEY ? 'mailgun' : AWS_ACCESS_KEY_ID && AWS_SECRET_ACCESS_KEY ? 'ses' : 'relay'
-    });
+    if (ep === '/health') {
+      await audit(caller.user.id, ep, 'ok');
+      return json(200, {
+        ok: true,
+        service: FN,
+        provider: RESEND_API_KEY ? 'resend' : MAILGUN_API_KEY ? 'mailgun' : AWS_ACCESS_KEY_ID && AWS_SECRET_ACCESS_KEY ? 'ses' : 'relay'
+      });
+    }
     if (RESEND_API_KEY) {
       if (ep === '/domains') {
         const x = await fromResend('domains');
-        await audit(req, ep, x.ok ? 'ok' : 'error');
+        await audit(caller.user.id, ep, x.ok ? 'ok' : 'error');
         return json(x.status, {
           ok: x.ok,
           data: (x.body?.data ?? []).map((d)=>({
@@ -142,21 +159,19 @@ Deno.serve(async (req)=>{
       }
       if (ep === '/delivery/recent') {
         const x = await fromResend('emails?limit=20');
-        await audit(req, ep, x.ok ? 'ok' : 'error');
+        await audit(caller.user.id, ep, x.ok ? 'ok' : 'error');
         return json(x.status, {
           ok: x.ok,
           data: (x.body?.data ?? []).map((m)=>({
               id: m.id,
               created_at: m.created_at,
-              to: m.to,
-              from: m.from,
-              subject: m.subject,
+              recipients: Array.isArray(m.to) ? m.to.length : m.to ? 1 : 0,
               status: m.last_event
             }))
         });
       }
       if (ep === '/inbound/status') {
-        await audit(req, ep, 'ok');
+        await audit(caller.user.id, ep, 'ok');
         return json(200, {
           ok: true,
           data: {
@@ -167,7 +182,7 @@ Deno.serve(async (req)=>{
       }
       if (ep === '/logs/recent') {
         const x = await fromResend('emails?limit=20');
-        await audit(req, ep, x.ok ? 'ok' : 'error');
+        await audit(caller.user.id, ep, x.ok ? 'ok' : 'error');
         return json(x.status, {
           ok: x.ok,
           data: (x.body?.data ?? []).map((m)=>({
@@ -179,17 +194,17 @@ Deno.serve(async (req)=>{
       }
     }
     const y = await relay(ep);
-    await audit(req, ep, y.ok ? 'ok' : 'error');
+    await audit(caller.user.id, ep, y.ok ? 'ok' : 'error');
     if (!y.ok) return json(y.status, {
       ok: false,
       code: 'UPSTREAM_UNAVAILABLE'
     });
     return json(200, {
       ok: true,
-      data: y.body
+      data: redactValue(y.body)
     });
-  } catch  {
-    await audit(req, ep, 'error');
+  } catch (error) {
+    console.error(`[${FN}] diagnostic failed`, error);
     return json(500, {
       ok: false,
       code: 'INTERNAL_ERROR'

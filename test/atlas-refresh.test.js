@@ -11,7 +11,8 @@ const {
   collectSchemaForeignKeyEdges,
   staleGeneratedEdgeIds,
   collectAtlasRefresh,
-  buildRefreshPlan
+  buildRefreshPlan,
+  scopeRefreshPlan
 } = require('../scripts/atlas-refresh');
 
 test('Atlas refresh can place its local manifest outside a read-only source checkout', () => {
@@ -19,7 +20,37 @@ test('Atlas refresh can place its local manifest outside a read-only source chec
   assert.match(source, /ATLAS_REFRESH_OUTPUT_DIR \|\| path\.join\(rootDir, '\.bob'\)/);
   assert.match(source, /retireStale: !args\.has\('--upsert-only'\)/);
   assert.match(source, /if \(retireStale\) \{[\s\S]*retireRows\(baseUrl, serviceKey, 'bob_capability_map'/);
-  assert.match(source, /skippedRetirements: retirementCount/);
+  assert.match(source, /skippedRetirements\s*=\s*retirementCount/);
+  assert.match(source, /status', '--porcelain', '--untracked-files=no'/);
+  assert.match(source, /dirty \? null : read\(\['rev-parse', 'HEAD'\]\)/);
+});
+
+test('scoped Atlas refresh preserves unrelated concurrent terrain', () => {
+  const existingCapabilities = [
+    { id: 'cap-diagnostic', entity_name: 'bob-email-view' },
+    { id: 'cap-builder', entity_name: 'builder_jobs' }
+  ];
+  const existingEdges = [
+    { id: 'edge-diagnostic', source_name: 'onspace-ai-chat', target_name: 'bob-email-view' },
+    { id: 'edge-builder', source_name: 'bob-control-plane-server', target_name: 'builder_jobs' }
+  ];
+  const scoped = scopeRefreshPlan({
+    capabilityUpserts: [
+      { entity_name: 'bob-email-view' },
+      { entity_name: 'builder_jobs' }
+    ],
+    edgeUpserts: [
+      { source_name: 'onspace-ai-chat', target_name: 'bob-email-view' },
+      { source_name: 'bob-control-plane-server', target_name: 'builder_jobs' }
+    ],
+    capabilityRetireIds: ['cap-diagnostic', 'cap-builder'],
+    edgeRetireIds: ['edge-diagnostic', 'edge-builder']
+  }, existingCapabilities, existingEdges, ['bob-email-view']);
+
+  assert.deepEqual(scoped.capabilityUpserts.map(row => row.entity_name), ['bob-email-view']);
+  assert.deepEqual(scoped.edgeUpserts.map(row => row.target_name), ['bob-email-view']);
+  assert.deepEqual(scoped.capabilityRetireIds, ['cap-diagnostic']);
+  assert.deepEqual(scoped.edgeRetireIds, ['edge-diagnostic']);
 });
 
 function write(root, relativePath, content) {
@@ -49,11 +80,48 @@ test('Atlas refresh extracts concrete entities and Supabase calls without test n
         RETURN NEW;
       END;
       $$;
+      CREATE OR REPLACE FUNCTION public.wrap_alpha_unqualified() RETURNS jsonb LANGUAGE sql AS $$
+        SELECT get_alpha();
+      $$;
+      CREATE OR REPLACE FUNCTION public.can_read_alpha() RETURNS boolean LANGUAGE sql AS $$
+        SELECT true;
+      $$;
+      CREATE OR REPLACE FUNCTION "public"."touch_alpha"() RETURNS trigger LANGUAGE plpgsql AS $$
+      BEGIN
+        RETURN NEW;
+      END;
+      $$;
       CREATE TRIGGER "guard_alpha_trigger" BEFORE UPDATE ON public."alpha"
         FOR EACH ROW EXECUTE FUNCTION public."guard_alpha"();
+      CREATE TRIGGER "alpha_touch" BEFORE UPDATE ON "public"."alpha"
+        FOR EACH ROW EXECUTE FUNCTION "public"."touch_alpha"();
+      CREATE POLICY "alpha_read" ON "public"."alpha" FOR SELECT
+        USING ("public"."can_read_alpha"());
+      CREATE OR REPLACE FUNCTION private.internal_only() RETURNS void LANGUAGE sql AS $$
+        SELECT NULL;
+      $$;
     `);
-    write(root, 'supabase/functions/ping/index.ts', 'fetch(`${SUPABASE_URL}/functions/v1/echo`);');
+    write(root, 'supabase/functions/ping/index.ts', `
+      fetch(\`${'${SUPABASE_URL}'}/functions/v1/echo\`);
+      const url = new URL(\`${'${SUPABASE_URL}'}/functions/v1/diagnostic-view/health\`);
+      fetch(url);
+    `);
     write(root, 'supabase/functions/echo/index.ts', 'Deno.serve(() => new Response("ok"));');
+    write(root, 'supabase/functions/diagnostic-view/index.ts', 'Deno.serve(() => new Response("ok"));');
+    write(root, 'supabase/functions/scheduled-sync/index.ts', 'Deno.serve(() => new Response("ok"));');
+    write(root, 'supabase/functions/external-callback/index.ts', `
+      // ATLAS EXTERNAL CALLER: upstream-provider
+      Deno.serve(() => new Response("ok"));
+    `);
+    write(root, 'supabase/schemas/ops/functions/enqueue_scheduled_sync.sql', `
+      CREATE OR REPLACE FUNCTION ops.enqueue_scheduled_sync() RETURNS bigint
+      LANGUAGE plpgsql AS $function$
+      BEGIN
+        PERFORM net.http_post(url := 'https://example.test/functions/v1/scheduled-sync');
+        RETURN 1;
+      END;
+      $function$;
+    `);
     write(root, 'apps/web/src/pages/TestPage.tsx', `
       supabase.from('alpha').select('id');
       supabase.from('alpha').update({ active: true }).eq('id', id);
@@ -84,15 +152,25 @@ test('Atlas refresh extracts concrete entities and Supabase calls without test n
 
     assert.ok(manifest.capabilities.some(row => row.entity_type === 'table' && row.entity_name === 'alpha'));
     assert.ok(manifest.capabilities.some(row => row.entity_type === 'rpc' && row.entity_name === 'get_alpha'));
+    assert.equal(manifest.capabilities.some(row => row.entity_type === 'rpc' && row.entity_name === 'private'), false);
+    assert.equal(manifest.capabilities.some(row => row.entity_type === 'rpc' && row.entity_name === 'internal_only'), false);
+    assert.equal(manifest.capabilities.some(row => row.entity_type === 'rpc' && row.entity_name === 'ops'), false);
     assert.ok(manifest.capabilities.some(row => row.entity_type === 'edge_function' && row.entity_name === 'ping'));
     assert.ok(manifest.capabilities.some(row => row.entity_type === 'edge_function' && row.entity_name === 'echo'));
+    assert.ok(manifest.capabilities.some(row => row.entity_type === 'edge_function' && row.entity_name === 'diagnostic-view' && row.wired));
+    assert.ok(manifest.capabilities.some(row => row.entity_type === 'edge_function' && row.entity_name === 'scheduled-sync' && row.wired));
+    assert.ok(manifest.capabilities.some(row => row.entity_type === 'edge_function' && row.entity_name === 'external-callback' && row.wired));
+    assert.ok(manifest.capabilities.some(row => row.entity_type === 'feature' && row.entity_name === 'upstream-provider' && row.wired));
     assert.ok(manifest.edges.some(row => row.source_name === 'pages/TestPage' && row.target_name === 'alpha' && row.edge_kind === 'reads'));
     assert.ok(manifest.edges.some(row => row.source_name === 'pages/TestPage' && row.target_name === 'alpha' && row.edge_kind === 'writes'));
     assert.ok(manifest.edges.some(row => row.target_type === 'rpc' && row.target_name === 'get_alpha'));
     assert.ok(manifest.edges.some(row => row.target_type === 'rpc' && row.target_name === 'update_alpha'));
     assert.ok(manifest.edges.some(row => row.target_type === 'edge_function' && row.target_name === 'ping'));
     assert.ok(manifest.edges.some(row => row.target_type === 'edge_function' && row.target_name === 'echo'));
+    assert.ok(manifest.edges.some(row => row.target_type === 'edge_function' && row.target_name === 'diagnostic-view' && row.edge_kind === 'calls'));
     assert.ok(manifest.edges.some(row => row.source_name === 'ping' && row.target_type === 'edge_function' && row.target_name === 'echo'));
+    assert.ok(manifest.edges.some(row => row.source_name === 'enqueue_scheduled_sync' && row.target_type === 'edge_function' && row.target_name === 'scheduled-sync' && row.source_file === 'supabase/schemas/ops/functions/enqueue_scheduled_sync.sql'));
+    assert.ok(manifest.edges.some(row => row.source_type === 'feature' && row.source_name === 'upstream-provider' && row.target_type === 'edge_function' && row.target_name === 'external-callback' && row.edge_kind === 'invokes' && row.evidence_class === 'declared-external-contract'));
     assert.ok(manifest.edges.some(row => row.source_name === 'mobile/components/TestPanel' && row.target_name === 'alpha' && row.edge_kind === 'reads'));
     assert.ok(manifest.edges.some(row => row.source_name === 'mobile/components/TestPanel' && row.target_type === 'edge_function' && row.target_name === 'ping'));
     assert.ok(manifest.edges.some(row => row.source_name === 'apps/sd-card-bridge-v2/src/main' && row.target_type === 'rpc' && row.target_name === 'get_alpha'));
@@ -104,6 +182,11 @@ test('Atlas refresh extracts concrete entities and Supabase calls without test n
     assert.ok(manifest.edges.some(row => row.source_type === 'rpc' && row.source_name === 'wrap_alpha' && row.target_type === 'rpc' && row.target_name === 'get_alpha' && row.edge_kind === 'calls'));
     assert.ok(manifest.edges.some(row => row.source_type === 'table' && row.source_name === 'alpha' && row.target_type === 'rpc' && row.target_name === 'guard_alpha' && row.edge_kind === 'triggers'));
     assert.equal(manifest.capabilities.find(row => row.entity_name === 'guard_alpha').wired, true);
+    assert.ok(manifest.edges.some(row => row.source_type === 'rpc' && row.source_name === 'wrap_alpha_unqualified' && row.target_type === 'rpc' && row.target_name === 'get_alpha' && row.edge_kind === 'calls'));
+    assert.ok(manifest.edges.some(row => row.source_type === 'table' && row.source_name === 'alpha' && row.target_type === 'rpc' && row.target_name === 'can_read_alpha' && row.edge_kind === 'secured_by'));
+    assert.ok(manifest.capabilities.some(row => row.entity_type === 'rpc' && row.entity_name === 'can_read_alpha' && row.wired));
+    assert.ok(manifest.edges.some(row => row.source_type === 'table' && row.source_name === 'alpha' && row.target_type === 'rpc' && row.target_name === 'touch_alpha' && row.edge_kind === 'triggers'));
+    assert.ok(manifest.capabilities.some(row => row.entity_type === 'rpc' && row.entity_name === 'touch_alpha' && row.wired));
     assert.equal(manifest.edges.some(row => row.source_name === 'wrap_alpha' && row.target_type === 'table' && row.target_name === 'get_alpha'), false);
     assert.equal(manifest.edges.some(row => row.target_name === 'if'), false);
     assert.equal(manifest.edges.some(row => row.target_name === 'test_noise'), false);
@@ -161,11 +244,21 @@ test('Atlas DDL inventory ignores CREATE statements inside SQL string literals',
       END;
       $$;
     `);
+    write(root, 'supabase/migrations/20260101000000_historical_only.sql', `
+      CREATE TABLE public.retired_table (id uuid);
+      CREATE FUNCTION public.retired_rpc() RETURNS void LANGUAGE sql AS $$ SELECT NULL; $$;
+    `);
+    write(root, 'supabase/schemas/public/tables/planned_table.sql', `
+      CREATE TABLE public.planned_table (id uuid);
+    `);
 
     const manifest = collectAtlasRefresh(root);
 
     assert.equal(manifest.capabilities.some(row => row.entity_type === 'table' && row.entity_name === 'real_table'), true);
     assert.equal(manifest.capabilities.some(row => row.entity_type === 'table' && row.entity_name === 'AS'), false);
+    assert.equal(manifest.capabilities.some(row => row.entity_type === 'table' && row.entity_name === 'retired_table'), false);
+    assert.equal(manifest.capabilities.some(row => row.entity_type === 'rpc' && row.entity_name === 'retired_rpc'), false);
+    assert.equal(manifest.capabilities.some(row => row.entity_type === 'table' && row.entity_name === 'planned_table'), false);
   } finally {
     fs.rmSync(root, { recursive: true, force: true });
   }

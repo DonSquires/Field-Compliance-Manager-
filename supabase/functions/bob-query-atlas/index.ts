@@ -1,6 +1,6 @@
 import { serve } from 'https://deno.land/std@0.168.0/http/server.ts';
 import { createClient } from 'https://esm.sh/@supabase/supabase-js@2';
-import { OWNER_EMAILS } from '../_shared/auth.ts';
+import { CAN_SQL, OWNER_EMAILS } from '../_shared/auth.ts';
 const SUPABASE_URL = Deno.env.get('SUPABASE_URL') ?? '';
 const SUPABASE_SERVICE_ROLE_KEY = Deno.env.get('SUPABASE_SERVICE_ROLE_KEY') ?? '';
 const SUPABASE_ANON_KEY = Deno.env.get('SUPABASE_ANON_KEY') ?? '';
@@ -15,6 +15,63 @@ const json = (b, s = 200)=>new Response(JSON.stringify(b), {
       'Content-Type': 'application/json'
     }
   });
+async function readAtlasStatus(admin, expectedCommit = '') {
+  const [capabilities, edges] = await Promise.all([
+    admin.from('bob_capability_map')
+      .select('last_refreshed_at, refresh_source', { count: 'exact' })
+      .eq('retirement_status', 'live')
+      .order('last_refreshed_at', { ascending: false })
+      .limit(1),
+    admin.from('bob_app_map_edges')
+      .select('last_refreshed_at, refresh_source', { count: 'exact' })
+      .eq('retirement_status', 'live')
+      .order('last_refreshed_at', { ascending: false })
+      .limit(1)
+  ]);
+  if (capabilities.error || edges.error) {
+    throw new Error(capabilities.error?.message ?? edges.error?.message ?? 'Atlas freshness could not be read');
+  }
+  // Provenance ledger is additive. If the migration is not applied yet, say so
+  // rather than implying the map is current.
+  const run = await admin.from('bob_atlas_refresh_runs')
+    .select('source_commit, source_branch, refreshed_at, capability_total, edge_total, retired_total')
+    .order('refreshed_at', { ascending: false })
+    .limit(1);
+  const latestRun = run.error ? null : run.data?.[0] ?? null;
+  const sourceCommit = latestRun?.source_commit ?? null;
+  const expected = String(expectedCommit ?? '').trim();
+  let sourceParity = 'unknown';
+  let note = '';
+  if (run.error) {
+    note = 'Atlas provenance ledger is unavailable (bob_atlas_refresh_runs not applied). Treat this map as unverified and confirm against repo_search before calling it current.';
+  } else if (!sourceCommit) {
+    note = 'Atlas rows exist but no refresh run recorded a source commit. Re-run scripts/atlas-refresh.js --apply to restore provenance.';
+  } else if (!expected) {
+    sourceParity = 'unverified';
+    note = `Atlas was generated from commit ${sourceCommit}. Pass expected_commit (the commit you are reasoning about) to get a parity verdict instead of a bare commit id.`;
+  } else if (expected === sourceCommit || sourceCommit.startsWith(expected) || expected.startsWith(sourceCommit)) {
+    sourceParity = 'current';
+    note = `Atlas matches commit ${sourceCommit}. Map and repository agree.`;
+  } else {
+    sourceParity = 'stale';
+    note = `Atlas was generated from ${sourceCommit} but you asked about ${expected}. The map predates the code; re-run the refresh before trusting gap or blast-radius answers.`;
+  }
+  return {
+    capability_count: capabilities.count ?? null,
+    edge_count: edges.count ?? null,
+    capability_last_refreshed_at: capabilities.data?.[0]?.last_refreshed_at ?? null,
+    edge_last_refreshed_at: edges.data?.[0]?.last_refreshed_at ?? null,
+    capability_refresh_source: capabilities.data?.[0]?.refresh_source ?? null,
+    edge_refresh_source: edges.data?.[0]?.refresh_source ?? null,
+    source_commit: sourceCommit,
+    source_branch: latestRun?.source_branch ?? null,
+    last_refresh_run_at: latestRun?.refreshed_at ?? null,
+    expected_commit: expected || null,
+    source_commit_recorded: Boolean(sourceCommit),
+    source_parity: sourceParity,
+    note
+  };
+}
 serve(async (req)=>{
   if (req.method === 'OPTIONS') return new Response('ok', {
     headers: CORS
@@ -41,14 +98,23 @@ serve(async (req)=>{
     const admin = createClient(SUPABASE_URL, SUPABASE_SERVICE_ROLE_KEY);
     const { data: profile } = await admin.from('user_profiles').select('role').eq('id', user.id).single();
     const isOwner = OWNER_EMAILS.has((user.email ?? '').toLowerCase().trim());
-    if (!isOwner && String(profile?.role ?? '') !== 'grand_master') return json({
-      error: 'Forbidden: admiral only'
+    const role = String(profile?.role ?? '');
+    if (!isOwner && !CAN_SQL.has(role)) return json({
+      error: 'Forbidden: Atlas inspection requires an admin diagnostic role'
     }, 403);
     const body = await req.json();
     const action = String(body.action ?? 'capability_map').trim();
     const filter = String(body.filter ?? '').trim();
     const limit = Math.min(Math.max(Number(body.limit ?? 100), 1), 500);
     const offset = Math.min(Math.max(Number(body.offset ?? 0), 0), 100_000);
+    const atlasStatus = await readAtlasStatus(admin, body.expected_commit);
+    if (action === 'status') {
+      return json({
+        ok: true,
+        action,
+        atlas_status: atlasStatus
+      });
+    }
     if (action === 'capability_map') {
       let q = admin.from('bob_capability_map').select('entity_type, entity_name, present, wired, exercised, notes, refresh_source, retirement_status', { count: 'exact' }).order('entity_type').order('entity_name').range(offset, offset + limit - 1);
       if (filter) q = q.ilike('entity_name', `%${filter}%`);
@@ -63,6 +129,7 @@ serve(async (req)=>{
         total: count ?? null,
         offset,
         next_offset: count !== null && offset + (data ?? []).length < count ? offset + (data ?? []).length : null,
+        atlas_status: atlasStatus,
         results: data ?? []
       });
     }
@@ -80,6 +147,7 @@ serve(async (req)=>{
         total: count ?? null,
         offset,
         next_offset: count !== null && offset + (data ?? []).length < count ? offset + (data ?? []).length : null,
+        atlas_status: atlasStatus,
         results: data ?? []
       });
     }
@@ -100,6 +168,7 @@ serve(async (req)=>{
         total: null,
         offset,
         next_offset: (data ?? []).length === limit ? offset + (data ?? []).length : null,
+        atlas_status: atlasStatus,
         results: data ?? []
       });
     }
@@ -118,6 +187,7 @@ serve(async (req)=>{
         total: null,
         offset,
         next_offset: (data ?? []).length === limit ? offset + (data ?? []).length : null,
+        atlas_status: atlasStatus,
         results: data ?? []
       });
     }
@@ -182,12 +252,13 @@ serve(async (req)=>{
         max_depth: maxDepth,
         requested_max_depth: requestedMaxDepth,
         note: `flow_reach = proven data-flow (writes/reads/calls/invokes). fk_reach = structural RELATION only (undirected); never read an FK link as a data-flow path. FK traversal is capped at depth ${maxDepth} to stay within the statement budget.`,
+        atlas_status: atlasStatus,
         flow_reach: flowRows,
         fk_reach: fkData ?? []
       });
     }
     return json({
-      error: `Unknown action '${action}'. Valid: capability_map, terrain_edges, gap_report, expectation_report, blast_radius`
+      error: `Unknown action '${action}'. Valid: status, capability_map, terrain_edges, gap_report, expectation_report, blast_radius`
     }, 422);
   } catch (err) {
     console.error('[bob-query-atlas]', err);
