@@ -9898,7 +9898,10 @@ serve(async (req)=>{
     const explicitAtlasRequest = caps.tier === 'admiral'
       && /\b(?:atlas|terrain|capability map|gap report|blast radius)\b/i.test(message)
       && /\b(?:query|check|inspect|use|explain|triage|show|look)\b/i.test(message);
-    if (normAction === 'answer' && explicitAtlasRequest) {
+    const explicitSchemaRequest = caps.tier === 'admiral'
+      && /\b(?:schema|table structure|database structure|columns?|relationships?)\b/i.test(message)
+      && /\b(?:query|check|inspect|use|explain|triage|show|look|find)\b/i.test(message);
+    if (explicitAtlasRequest && chosenTool !== 'query_atlas') {
       const requestedAtlasAction = /\bexpectation(?:s| report)?\b/i.test(message)
         ? 'expectation_report'
         : /\bgap(?:s| report)?\b/i.test(message)
@@ -9913,6 +9916,10 @@ serve(async (req)=>{
         action: requestedAtlasAction,
         limit: 25
       };
+    } else if (explicitSchemaRequest && chosenTool !== 'schema_inspect') {
+      normAction = 'use_tool';
+      chosenTool = 'schema_inspect';
+      args = { include_relationships: false };
     }
     const explicitHumanTestRequest = caps.tier === 'admiral'
       && /\b(?:human test|dr\.?\s*bob|browser test|human-browser)\b/i.test(message)
@@ -10832,6 +10839,56 @@ serve(async (req)=>{
       };
     }
 
+    // If the planner attempted Builder before gathering research that the
+    // owner's brief explicitly requires, recover the substantial build request
+    // from this turn or recent history, perform governed research now, and retry
+    // job creation with the source URLs embedded in the durable brief. This is
+    // the reverse half of the web-research -> Builder handoff below.
+    if (caps.tier === 'admiral'
+      && chosenTool === 'create_builder_job'
+      && result.meta.outcome === 'need_research') {
+      const researchRequest = [String(message || ''), ...history.filter((entry) => entry.role === 'user').map((entry) => String(entry.content || '')).reverse()]
+        .find((entry) => explicitBuilderCreationRequest(entry) && /\b(?:web research|internet|online research|public sources?|inspiration from|inspired by|use the internet|other apps)\b/i.test(entry));
+      if (researchRequest) {
+        const researchSteps = [];
+        const firstResearch = await execWebResearch(authHeader, researchRequest);
+        if (firstResearch.meta.outcome === 'ok') researchSteps.push({ tool: 'web_research', result_summary: firstResearch.reply });
+        if (Number(firstResearch.meta.source_count || 0) < 4) {
+          const followUp = await execWebResearch(authHeader, `${researchRequest}\nFocus the follow-up on professional prompt-to-code and AI app-builder workspace patterns, implementation progress, evidence, review, and safe release controls.`);
+          if (followUp.meta.outcome === 'ok') researchSteps.push({ tool: 'web_research', result_summary: followUp.reply });
+        }
+        const researchUrls = [...new Set(researchSteps.flatMap((step) => step.result_summary.match(/https:\/\/[^\s<>()\]\["']+/g) ?? []).map((url) => url.replace(/[.,;:!?]+$/, '')))];
+        if (researchUrls.length >= 4) {
+          const proposalArgs = builderJobArgsFromEvidence(researchRequest, researchSteps);
+          decision = {
+            ...decision,
+            action: 'use_tool',
+            tool: 'create_builder_job',
+            args: proposalArgs,
+            reasoning: 'Builder required governed public-source provenance, so Bob gathered it and retried the owner-authorized job without another proceed turn.'
+          };
+          chosenTool = 'create_builder_job';
+          args = proposalArgs;
+          result = await dispatchTool(chosenTool, args, decision);
+          result.meta.research_attempts = researchSteps.length;
+          result.meta.research_source_count = researchUrls.length;
+          if (result.meta.outcome !== 'need_research') {
+            result.reply = `Governed web research completed and ${researchUrls.length} public source URLs were carried into the Builder brief.\n\n${result.reply}`;
+          }
+        } else {
+          result = {
+            reply: `I completed governed web research but found only ${researchUrls.length} usable public source URLs; the four-source Builder provenance gate remains blocked. I have not opened or misrepresented a job.`,
+            meta: {
+              tool: 'create_builder_job',
+              outcome: 'need_research',
+              source_count: researchUrls.length,
+              research_attempts: researchSteps.length
+            }
+          };
+        }
+      }
+    }
+
     // TASK CONTINUITY: Mark the step completed/failed/blocked based on result
     const finishResult = await finishToolExecution(admin, taskLedger, chosenTool || 'unknown_tool', result);
     if (finishResult.success && finishResult.updatedSteps) {
@@ -11257,6 +11314,18 @@ serve(async (req)=>{
         }
         let nextDecision = nextPlan.data ?? {};
         let next = parsePlanDecision(nextDecision);
+        const atlasCompleted = loopSteps.some((step) => step.tool === 'query_atlas' && step.outcome === 'ok');
+        const schemaCompleted = loopSteps.some((step) => step.tool === 'schema_inspect' && step.outcome === 'ok');
+        if (explicitAtlasRequest && explicitSchemaRequest && atlasCompleted && !schemaCompleted) {
+          nextDecision = {
+            ...nextDecision,
+            action: 'use_tool',
+            tool: 'schema_inspect',
+            args: { include_relationships: false },
+            reasoning: 'The owner explicitly requested Atlas and schema evidence; Atlas is complete, so inspect the live schema before synthesis.'
+          };
+          next = parsePlanDecision(nextDecision);
+        }
         // An explicit owner build request must not end with future-tense prose
         // after Bob has gathered repository or Atlas evidence. Convert only that
         // premature answer into the existing two-turn Builder proposal.

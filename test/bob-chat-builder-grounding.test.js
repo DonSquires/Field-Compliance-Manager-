@@ -80,6 +80,22 @@ test('an explicit owner build request cannot stop at a prose plan after evidence
   assert.match(loop, /builderJobArgsFromEvidence\(message, loopSteps\)/);
 });
 
+test('explicit Atlas and schema audits cannot escape into web research or omit schema', () => {
+  assert.match(chat, /if \(explicitAtlasRequest && chosenTool !== 'query_atlas'\)/);
+  assert.match(chat, /else if \(explicitSchemaRequest && chosenTool !== 'schema_inspect'\)/);
+  assert.match(chat, /explicitAtlasRequest && explicitSchemaRequest && atlasCompleted && !schemaCompleted/);
+  assert.match(chat, /tool: 'schema_inspect'/);
+});
+
+test('a research-gated Builder attempt performs the missing research and retries without another proceed turn', () => {
+  assert.match(chat, /chosenTool === 'create_builder_job'\s*&& result\.meta\.outcome === 'need_research'/);
+  assert.match(chat, /history\.filter\(\(entry\) => entry\.role === 'user'\)/);
+  assert.match(chat, /const firstResearch = await execWebResearch\(authHeader, researchRequest\)/);
+  assert.match(chat, /if \(researchUrls\.length >= 4\)/);
+  assert.match(chat, /Builder required governed public-source provenance/);
+  assert.match(chat, /result = await dispatchTool\(chosenTool, args, decision\)/);
+});
+
 test('an explicit owner build request cannot fall through to synthesis at the evidence step cap', () => {
   const postLoop = chat.slice(chat.indexOf('// Step cap reached:'), chat.indexOf('// END REASONING LOOP'));
   assert.match(postLoop, /LOOP_CONTINUABLE_READ_TOOLS\.has\(chosenTool\).*explicitBuilderCreationRequest\(message\)/s);

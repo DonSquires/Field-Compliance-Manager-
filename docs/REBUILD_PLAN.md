@@ -93,6 +93,19 @@ audit event. Eligible auto-merged jobs remain in release verification until an
 exact-SHA GitHub Production deployment succeeds and the approved live URL
 responds; only then can the job be recorded as deployed.
 
+Bob evidence-routing hardening 2026-10-13: subsequent live turns showed two
+remaining one-way transitions. An explicit Atlas-and-schema UI gap audit could
+escape into generic web research and synthesize after Atlas without reading the
+schema. A research-driven Builder request could also hit the four-source gate,
+then repeat the same `create_builder_job` failure on "research", "proceed", and
+other continuation turns. Explicit Atlas/schema requests now override unrelated
+planner tools and deterministically chain Atlas into schema before synthesis.
+When Builder reports missing research, Bob recovers the substantial owner build
+request from recent history, performs bounded governed web research, embeds at
+least four usable HTTPS source URLs in the durable brief, and retries job
+creation in the same turn. Failure to obtain four sources remains a truthful
+block rather than invented provenance.
+
 Natural-language Builder acceptance hardening 2026-10-13: Bob's deterministic
 post-evidence Builder fallback now recognises ordinary owner language such as
 "build me an app", "add a page", "make this workflow work", and "fix the UI",
