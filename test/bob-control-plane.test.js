@@ -101,6 +101,15 @@ test('main-health verification runs independently of owner Builder jobs', () => 
   assert.doesNotMatch(source, /await mainHealthMonitor\.tick\(\)/);
 });
 
+test('startup recovers model steps interrupted by a control-plane restart before autopilot planning', () => {
+  const source = fs.readFileSync(path.join(root, 'bob-control-plane-server.js'), 'utf8');
+  assert.match(source, /const controlPlaneStartedAt = new Date\(\)\.toISOString\(\)/);
+  assert.match(source, /function recoverInterruptedModelSteps\(\)/);
+  assert.match(source, /\.eq\('status', 'running'\)\s*\.lt\('started_at', controlPlaneStartedAt\)/);
+  assert.match(source, /builder_abort_model_step/);
+  assert.match(source, /await startInterruptedModelRecovery\(\);\s*startMainHealthCheck\(\)/);
+});
+
 test('assessment is authenticated and read-only', async () => {
   const denied = await request('GET', '/assessment');
   assert.equal(denied.response.status, 401);

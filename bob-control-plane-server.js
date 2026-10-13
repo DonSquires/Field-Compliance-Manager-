@@ -32,6 +32,7 @@ function failureDetail(error) {
   return redactGitError(String(error instanceof Error ? error.message : error)).slice(0, 300);
 }
 
+const controlPlaneStartedAt = new Date().toISOString();
 const port = Number(process.env.PORT || 8080);
 const webhookSecret = process.env.GITEA_WEBHOOK_SECRET || '';
 const adminToken = process.env.BOB_ADMIN_TOKEN || '';
@@ -501,6 +502,7 @@ const routineRepairEnabled = process.env.BOB_ROUTINE_SELF_HEAL !== 'false';
 const autopilotIntervalMs = Math.max(15_000, Number(process.env.BOB_BUILDER_AUTOPILOT_INTERVAL_MS) || 60_000);
 let autopilotBusy = false;
 let mainHealthInFlight = null;
+let interruptedModelRecoveryPromise = null;
 
 async function routineBuilderProject() {
   let query = builderSupabase
@@ -592,6 +594,52 @@ const mainHealthMonitor = createMainHealthMonitor({
   writeState: async (state) => saveMainHealthState(state),
   log: (entry) => record('autopilot', 'builder.main_health', entry.sha || 'main', entry),
 });
+
+async function recoverInterruptedModelSteps() {
+  const { data: runs, error } = await builderSupabase
+    .from('builder_model_runs')
+    .select('id,job_id,step_id,started_at')
+    .eq('status', 'running')
+    .lt('started_at', controlPlaneStartedAt)
+    .limit(100);
+  if (error) throw new Error(`interrupted model runs could not be listed: ${error.message}`);
+  let recovered = 0;
+  for (const run of runs || []) {
+    const reason = 'control plane restarted before the model reported';
+    const { data: claimed, error: claimError } = await builderSupabase
+      .from('builder_model_runs')
+      .update({ status: 'failed', completed_at: new Date().toISOString(), error: reason })
+      .eq('id', run.id)
+      .eq('status', 'running')
+      .select('id')
+      .maybeSingle();
+    if (claimError) throw new Error(`interrupted model run could not be claimed: ${claimError.message}`);
+    if (!claimed) continue;
+    const { error: abortError } = await builderSupabase.rpc('builder_abort_model_step', {
+      _job_id: run.job_id,
+      _step_id: run.step_id,
+      _reason: reason,
+    });
+    if (abortError) {
+      record('autopilot', 'builder.model_recovery.failed', run.job_id, { step_id: run.step_id, error: abortError.message.slice(0, 300) });
+      continue;
+    }
+    recovered += 1;
+    record('autopilot', 'builder.model_recovery.completed', run.job_id, { step_id: run.step_id, model_run_id: run.id });
+  }
+  return recovered;
+}
+
+function startInterruptedModelRecovery() {
+  if (!interruptedModelRecoveryPromise) {
+    interruptedModelRecoveryPromise = recoverInterruptedModelSteps().catch((error) => {
+      interruptedModelRecoveryPromise = null;
+      record('autopilot', 'builder.model_recovery.failed', 'startup', { error: String(error instanceof Error ? error.message : error).slice(0, 300) });
+      throw error;
+    });
+  }
+  return interruptedModelRecoveryPromise;
+}
 
 function startMainHealthCheck() {
   if (!mainHealthEnabled || mainHealthInFlight) return mainHealthInFlight;
@@ -689,6 +737,7 @@ async function autopilotOnce() {
   if (autopilotBusy || !builderSupabase || !modelGatewayToken || !builderWorkerImage || !builderSourceConfigured || !builderApiConfigured) return [];
   autopilotBusy = true;
   try {
+    await startInterruptedModelRecovery();
     startMainHealthCheck();
     await startRoutineRepairs();
     const jobs = await listAutopilotJobs(builderSupabase);
@@ -1210,6 +1259,7 @@ server.requestTimeout = Math.min(Number(process.env.BOB_MODEL_TIMEOUT_MS || 6000
 server.keepAliveTimeout = 65000;
 server.listen(port, '0.0.0.0', () => console.log(`bob-control-plane listening on ${port}`));
 if (autopilotEnabled && builderSupabase) {
+  startInterruptedModelRecovery().catch(() => {});
   // This process is the only verifier runner: anything still 'running' at startup was orphaned by
   // the restart and would otherwise hold its job until the lease ran out (job 72edc782: 33 minutes).
   recoverExpiredWorkerRuns(builderSupabase, console, { includeActive: true, reason: 'control plane restarted before the verifier reported' })

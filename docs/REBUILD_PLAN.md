@@ -122,6 +122,15 @@ self-heal and owner Builder jobs continue through their existing bounded
 governance paths. This is concurrency only: it does not weaken health checks,
 verification, review, merge, deployment, or protected-path gates.
 
+Builder restart acceptance 2026-10-13: the same monitored redesign exposed a
+second orphan class. A control-plane deployment landed after product analysis
+claimed its durable step but before the model returned, leaving both the model
+run and the step permanently `running`; only isolated worker leases had restart
+recovery. On startup the control plane now claims model runs that predate the
+new process, records them as interrupted, returns analyst/designer steps to the
+existing retryable failure path, and completes that recovery before autopilot
+planning. Active model work started by the current process is not touched.
+
 Runtime acceptance 2026-10-11: the laptop vision watcher now writes an
 independent liveness heartbeat and its Docker health check terminates only a
 stale watcher process so `restart: unless-stopped` can recover it. Acceptance
