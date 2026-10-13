@@ -24,7 +24,7 @@ test('release lane fetches with gc off and logs the real, token-free fetch error
   assert.match(source, /GIT_CONFIG_KEY_1=safe\.directory GIT_CONFIG_VALUE_1="\$RELEASES_DIR\/\*"/);
 });
 
-test('release lane skips migrations already in the live ledger, and a hand deploy moves its live pointer', () => {
+test('release lane skips applied migrations and exclusively owns its live pointer', () => {
   const lane = fs.readFileSync(SCRIPT, 'utf8').replace(/\r\n/g, '\n');
   const ledgerCheck = lane.indexOf("select version from supabase_migrations.schema_migrations where version = '${version}'");
   const destructiveCheck = lane.indexOf('contains destructive SQL');
@@ -34,7 +34,8 @@ test('release lane skips migrations already in the live ledger, and a hand deplo
 
   const deploy = fs.readFileSync(path.resolve(__dirname, '../scripts/bob-vps-deploy.sh'), 'utf8').replace(/\r\n/g, '\n');
   assert.equal(bashSyntax(deploy).status, 0);
-  assert.match(deploy, /> \/var\/lib\/bob\/release-lane\/deployed_sha/);
+  assert.doesNotMatch(deploy, /> \/var\/lib\/bob\/release-lane\/deployed_sha/);
+  assert.match(deploy, /governed release\s*#?\s*lane owns the repository-wide pointer/i);
   assert.match(deploy, /git bundle create .*refs\/remotes\/origin\/main/);
   assert.match(deploy, /git fetch -q .*refs\/remotes\/origin\/main:refs\/bundles/);
   assert.match(deploy, /docker compose -f deploy\/bob-control-plane\/docker-compose\.yml rm -sf bob-control-plane/);
@@ -45,7 +46,8 @@ test('release lane skips migrations already in the live ledger, and a hand deplo
   assert.match(lane, /builder-data-path-gate\\\.js\|builder-ts-delta-gate\\\.js/);
   assert.match(lane, /has '\^deploy\/bob-vps\/nginx\/' && TARGETS\+=\(nginx\)/);
   assert.match(lane, /nginx -t/);
-  assert.match(lane, /node scripts\/atlas-refresh\.js --apply/);
+  assert.match(lane, /node scripts\/atlas-refresh\.js --apply --upsert-only/);
+  assert.match(lane, /stale generated evidence retained for reconciliation/);
   assert.match(lane, /node scripts\/atlas-exercise-evidence\.mjs --apply/);
   assert.match(lane, /Atlas exercise evidence failed/);
   assert.match(lane, /node scripts\/schema-snapshot-live\.mjs --project-ref "\$SUPABASE_PROJECT_REF" --out "\$live_schema"/);

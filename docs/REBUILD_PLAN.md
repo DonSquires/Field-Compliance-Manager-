@@ -177,6 +177,15 @@ one nearest path per node. Weak references remain queryable as terrain evidence
 but no longer contaminate FK blast radius. Atlas trigger extraction also
 accepts quoted trigger names, so Builder's release and review evidence gates
 are recognized as wired by their live table triggers.
+The same release exposed a receipt-integrity gap: the targeted VPS deploy helper
+advanced the repository-wide release pointer even when it rebuilt only one
+service, potentially hiding pending migrations or edge functions. Targeted
+deploys no longer move that pointer; only the governed release lane may do so
+after every classified target and truth-surface check succeeds. Until the
+separately recorded generated-edge retirement debt is reconciled, post-release
+Atlas refreshes use explicit upsert-only mode and report that stale generated
+evidence remains rather than either deleting it or blocking truthful new
+evidence.
 
 Natural-language Builder acceptance hardening 2026-10-13: Bob's deterministic
 post-evidence Builder fallback now recognises ordinary owner language such as

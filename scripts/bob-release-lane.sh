@@ -219,8 +219,8 @@ done
 if [[ -n "$CHANGED" ]]; then
   if [[ -z "${SUPABASE_URL:-}" || -z "${SUPABASE_SERVICE_ROLE_KEY:-}" ]]; then
     fail_note "post-release Atlas refresh blocked: server-side Supabase credentials are not configured"; OK=false
-  elif node scripts/atlas-refresh.js --apply >"$STATE_DIR/atlas-$SHA8.out" 2>"$STATE_DIR/atlas-$SHA8.err"; then
-    RESULTS+=("live Atlas refreshed at $SHA8")
+  elif node scripts/atlas-refresh.js --apply --upsert-only >"$STATE_DIR/atlas-$SHA8.out" 2>"$STATE_DIR/atlas-$SHA8.err"; then
+    RESULTS+=("live Atlas refreshed upsert-only at $SHA8; stale generated evidence retained for reconciliation")
     if node scripts/atlas-exercise-evidence.mjs --apply >"$STATE_DIR/atlas-exercise-$SHA8.out" 2>"$STATE_DIR/atlas-exercise-$SHA8.err"; then
       RESULTS+=("Atlas exercise evidence refreshed at $SHA8")
     else

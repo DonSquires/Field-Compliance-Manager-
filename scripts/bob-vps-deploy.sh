@@ -76,9 +76,9 @@ for target in "$@"; do
   esac
 done
 
-# A hand deploy moves the release lane's live pointer too, or its next run re-releases what is
-# already live (and plans migrations that were applied by hand).
-"${SSH[@]}" "mkdir -p /var/lib/bob/release-lane && printf '%s\n' '$HEAD_SHA' > /var/lib/bob/release-lane/deployed_sha"
+# This helper can deploy only a subset of a commit's targets. The governed release
+# lane owns the repository-wide pointer and advances it only after every required
+# migration, function, service, Atlas refresh, and schema check succeeds.
 
 # Keep the four newest releases (by mtime); other agents' non-worktree dirs are left alone.
 "${SSH[@]}" 'cd /root/field-compliance-manager && for d in $(ls -t /srv/fcm/releases | tail -n +5); do git worktree remove --force "/srv/fcm/releases/$d" 2>/dev/null && echo "pruned release $d" || true; done'
