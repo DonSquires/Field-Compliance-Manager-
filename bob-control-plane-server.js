@@ -500,6 +500,7 @@ const autopilotEnabled = process.env.BOB_BUILDER_AUTOPILOT !== 'false';
 const routineRepairEnabled = process.env.BOB_ROUTINE_SELF_HEAL !== 'false';
 const autopilotIntervalMs = Math.max(15_000, Number(process.env.BOB_BUILDER_AUTOPILOT_INTERVAL_MS) || 60_000);
 let autopilotBusy = false;
+let mainHealthInFlight = null;
 
 async function routineBuilderProject() {
   let query = builderSupabase
@@ -592,6 +593,20 @@ const mainHealthMonitor = createMainHealthMonitor({
   log: (entry) => record('autopilot', 'builder.main_health', entry.sha || 'main', entry),
 });
 
+function startMainHealthCheck() {
+  if (!mainHealthEnabled || mainHealthInFlight) return mainHealthInFlight;
+  mainHealthInFlight = mainHealthMonitor.tick()
+    .catch((error) => {
+      record('autopilot', 'builder.main_health.failed', 'main', {
+        error: String(error instanceof Error ? error.message : error).slice(0, 300),
+      });
+    })
+    .finally(() => {
+      mainHealthInFlight = null;
+    });
+  return mainHealthInFlight;
+}
+
 function routineRepairBrief(packet) {
   const envelope = packet.envelope && typeof packet.envelope === 'object' ? packet.envelope : {};
   const before = envelope.before && typeof envelope.before === 'object' ? envelope.before : {};
@@ -674,7 +689,7 @@ async function autopilotOnce() {
   if (autopilotBusy || !builderSupabase || !modelGatewayToken || !builderWorkerImage || !builderSourceConfigured || !builderApiConfigured) return [];
   autopilotBusy = true;
   try {
-    if (mainHealthEnabled) await mainHealthMonitor.tick();
+    startMainHealthCheck();
     await startRoutineRepairs();
     const jobs = await listAutopilotJobs(builderSupabase);
     if (!jobs.length) return [];

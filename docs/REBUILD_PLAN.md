@@ -112,6 +112,16 @@ fork or a protected/consequential boundary. Merge, deployment, migrations,
 auth/RLS, dependencies/environment, and evidential work retain their separate
 human key.
 
+Builder concurrency acceptance 2026-10-13: monitoring a live owner-requested
+Builder redesign found that the control plane awaited the entire isolated
+main-health suite before listing or advancing owner Builder jobs. A new source
+SHA or control-plane restart could therefore leave a valid autopilot job at
+intake for up to the 30-minute health timeout. Main-health now runs as an
+independent single-flight lane with explicit failure recording, while routine
+self-heal and owner Builder jobs continue through their existing bounded
+governance paths. This is concurrency only: it does not weaken health checks,
+verification, review, merge, deployment, or protected-path gates.
+
 Runtime acceptance 2026-10-11: the laptop vision watcher now writes an
 independent liveness heartbeat and its Docker health check terminates only a
 stale watcher process so `restart: unless-stopped` can recover it. Acceptance

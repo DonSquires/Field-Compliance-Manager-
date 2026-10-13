@@ -92,6 +92,15 @@ test('control-plane source has a bounded stale Builder lease recovery path', () 
   assert.match(source, /clearStaleBuilderRun\(jobId\)/);
 });
 
+test('main-health verification runs independently of owner Builder jobs', () => {
+  const source = fs.readFileSync(path.join(root, 'bob-control-plane-server.js'), 'utf8');
+  assert.match(source, /let mainHealthInFlight = null/);
+  assert.match(source, /function startMainHealthCheck\(\)/);
+  assert.match(source, /if \(!mainHealthEnabled \|\| mainHealthInFlight\) return mainHealthInFlight/);
+  assert.match(source, /startMainHealthCheck\(\);\s*await startRoutineRepairs\(\)/);
+  assert.doesNotMatch(source, /await mainHealthMonitor\.tick\(\)/);
+});
+
 test('assessment is authenticated and read-only', async () => {
   const denied = await request('GET', '/assessment');
   assert.equal(denied.response.status, 401);
