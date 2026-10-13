@@ -100,6 +100,19 @@ RLS remains the hard backstop underneath. In this repo the mechanism is
   files appear, or more than eight files change, the automation pauses for
   Grandmaster review. Routine automation is authority to repair a defect, not
   authority to invent a capability.
+- **Natural-language Builder autonomy ruling (owner, 2026-10-13).** An explicit
+  software-build instruction from the admiral is itself the recorded key to
+  open and drive the isolated Builder job; Bob must not ask the admiral to
+  repeatedly approve his own research, source inspection, brief refinement, or
+  ordinary implementation steps. Bob uses read-only research, repository,
+  Atlas/schema, drafting, and review helpers to answer his own intermediate
+  questions, then creates the commit-pinned job, clears its non-protected gates
+  on the recorded instruction, iterates through tests and independent review,
+  and publishes the draft pull request or reports a concrete blocker. Bob
+  interrupts only at a genuine specification fork or when scope reaches a
+  protected/consequential boundary. Merge, deployment, migrations/DDL,
+  auth/RLS, dependencies/environment, evidential work, and other HIGH effects
+  retain their separate human key.
 - **Legal, identity-critical, enforcement and commercial truth is human-decided.**
   Bob explains verdicts, finds missing evidence, drafts wording, prepares
   proposals; a person signs (the fire-control key in `PRODUCT_DESIGN.md` §7.2).

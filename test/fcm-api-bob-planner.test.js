@@ -79,7 +79,7 @@ test('planner teaches natural-language app building to use the governed Builder 
   });
   assert.match(prompt, /BUILD \/ SELF-HEAL/);
   assert.match(prompt, /build me an app/);
-  assert.match(prompt, /DRAFT GitHub pull request/);
+  assert.match(prompt, /draft-PR publication/);
   assert.match(prompt, /never merge, deploy, apply migrations/);
 });
 
@@ -111,6 +111,7 @@ test('natural-language Builder work advances from web research to source inspect
     },
   });
   assert.equal(afterSource.tool, 'create_builder_job');
+  assert.equal(afterSource.args.owner_instruction_confirmed, true);
   assert.match(afterSource.args.task_description, /BuilderControlRoomPage\.tsx/);
   assert.match(afterSource.args.task_description, /protected human gates/);
 });
@@ -147,6 +148,7 @@ test('a terse proceed recovers the original build request and completed subagent
   input.taskState.subagent_results[0].steps[1] = { tool: 'repo_search', outcome: 'ok', result_summary: 'BuilderControlRoomPage.tsx owns the current workspace.' };
   const proposal = enforceBuilderProgression({ action: 'delegate', tool: null, args: {}, reply: 'Delegating again.' }, input);
   assert.equal(proposal.tool, 'create_builder_job');
+  assert.equal(proposal.args.owner_instruction_confirmed, true);
   assert.equal(proposal.args.title, original);
   assert.match(proposal.args.task_description, /BuilderControlRoomPage\.tsx/);
   assert.doesNotMatch(proposal.args.task_description, /\nproceed\n/);
@@ -167,6 +169,7 @@ test('a proceed after a persisted web-research receipt becomes a source-inspecti
     },
   );
   assert.equal(decision.tool, 'create_builder_job');
+  assert.equal(decision.args.owner_instruction_confirmed, true);
   assert.equal(decision.args.title, original);
   assert.match(decision.args.task_description, /Inspect apps\/web\/src\/pages\/BuilderControlRoomPage\.tsx/);
   assert.match(decision.args.task_description, /web_research: Professional operations-console patterns/);

@@ -128,6 +128,7 @@ function builderProposalArgs(input) {
     frontend_required: true,
     backend_required: false,
     code_review_mode: 'independent_ai',
+    owner_instruction_confirmed: true,
   };
 }
 

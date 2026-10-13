@@ -111,6 +111,15 @@ test('natural-language Builder jobs carry an explicit app, coding, or self-heal 
   assert.match(builderJobArgsFromEvidence('Build me a patrol handover app', []).task_description, /Builder mode: no_code_app_generation/);
   assert.match(builderJobArgsFromEvidence('Add an API-backed handover page', []).task_description, /Builder mode: chat_to_code/);
   assert.match(builderJobArgsFromEvidence('Repair the failing Builder test', []).task_description, /Builder mode: autonomous_self_heal/);
+  assert.equal(builderJobArgsFromEvidence('Build me a patrol handover app', []).owner_instruction_confirmed, true);
+});
+
+test('an explicit owner build instruction opens the autonomous job without a second confirmation turn', () => {
+  const builder = chat.slice(chat.indexOf("case 'create_builder_job':"), chat.indexOf("case 'cancel_builder_job':"));
+  assert.match(builder, /const confirmedByOwnerInstruction = toolArgs\.owner_instruction_confirmed === true/);
+  assert.match(builder, /bjRecentRequests\.some\(\(request\) => explicitBuilderCreationRequest/);
+  assert.match(builder, /!storedJob && !confirmedByTriage && !confirmedByOwnerInstruction/);
+  assert.match(builder, /autopilot: true/);
 });
 
 test('the exact live owner request is recognised as Builder creation intent', () => {

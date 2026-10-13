@@ -103,6 +103,15 @@ software request from the conversation, counts successful research subagent
 steps as evidence, rejects vague or `not_found` repository searches, and
 normalizes premature Builder calls into the actual job argument contract.
 
+Owner ruling 2026-10-13: an admiral's explicit natural-language software-build
+instruction authorizes Bob to research, inspect, refine, open, and drive the
+isolated Builder job without repeated human "proceed" turns. Bob answers his
+intermediate questions with read-only research, repository, Atlas/schema,
+drafting, and review helpers. He interrupts only for a genuine specification
+fork or a protected/consequential boundary. Merge, deployment, migrations,
+auth/RLS, dependencies/environment, and evidential work retain their separate
+human key.
+
 Runtime acceptance 2026-10-11: the laptop vision watcher now writes an
 independent liveness heartbeat and its Docker health check terminates only a
 stale watcher process so `restart: unless-stopped` can recover it. Acceptance

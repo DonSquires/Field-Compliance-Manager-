@@ -8011,6 +8011,7 @@ serve(async (req)=>{
       const builderMode = builderModeForRequest(requestBrief);
       return {
         title: (firstSentence || 'Implement the requested FCM change').slice(0, 160),
+        owner_instruction_confirmed: true,
         task_description: [
           `Builder mode: ${builderMode}`,
           builderMode === 'no_code_app_generation'
@@ -9237,7 +9238,9 @@ serve(async (req)=>{
             const confirmedByTriage = toolArgs.owner_instruction_confirmed === true
               && typeof toolArgs.source_friction_packet_id === 'string'
               && explicitBuilderCreationRequest(message);
-            if (!storedJob && !confirmedByTriage) {
+            const confirmedByOwnerInstruction = toolArgs.owner_instruction_confirmed === true
+              && bjRecentRequests.some((request) => explicitBuilderCreationRequest(String(request ?? '')));
+            if (!storedJob && !confirmedByTriage && !confirmedByOwnerInstruction) {
               return {
                 reply: [
                   'I have composed a Builder job for the GitHub repository. Please review before I open it:',
