@@ -192,6 +192,11 @@ GitHub deploy key. It now prefers direct GitHub SSH with strict host-key
 checking and uses Gitea only as an explicit fallback when that GitHub identity
 is unavailable. Release admission no longer depends on mirror lag or a
 provider-specific HTTPS token header.
+Migration application used `supabase migration repair --linked`, but isolated
+release worktrees intentionally carry no local link metadata. SQL could
+therefore apply while its version stayed absent from the migration ledger.
+Release now repairs by explicit project ref and treats a repair failure as a
+failed receipt instead of logging a warning that could permit false success.
 
 Natural-language Builder acceptance hardening 2026-10-13: Bob's deterministic
 post-evidence Builder fallback now recognises ordinary owner language such as

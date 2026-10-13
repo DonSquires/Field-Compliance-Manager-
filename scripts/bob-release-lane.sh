@@ -161,8 +161,12 @@ if [[ -n "$NEW_MIGRATIONS" ]]; then
     code="$(curl -s -o "$STATE_DIR/migration-$version.out" -w '%{http_code}' -X POST "https://api.supabase.com/v1/projects/${SUPABASE_PROJECT_REF}/database/query" \
       -H "Authorization: Bearer ${SUPABASE_ACCESS_TOKEN}" -H 'Content-Type: application/json' --data-binary "$body")"
     if [[ "$code" =~ ^2 ]]; then
-      npx --yes supabase migration repair --status applied "$version" --linked --yes >/dev/null 2>&1 || log "ledger repair for $version failed (applied, not recorded)"
-      RESULTS+=("migration $version applied")
+      if SUPABASE_ACCESS_TOKEN="$SUPABASE_ACCESS_TOKEN" npx --yes supabase migration repair --status applied "$version" --project-ref "$SUPABASE_PROJECT_REF" --yes >"$STATE_DIR/migration-$version-repair.out" 2>"$STATE_DIR/migration-$version-repair.err"; then
+        RESULTS+=("migration $version applied and ledgered")
+      else
+        fail_note "migration $version applied but ledger repair failed: $(tail -c 300 "$STATE_DIR/migration-$version-repair.err")"
+        OK=false
+      fi
     else
       fail_note "migration $version failed (HTTP $code): $(head -c 300 "$STATE_DIR/migration-$version.out")"; OK=false
     fi

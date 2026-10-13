@@ -37,6 +37,8 @@ test('release lane skips applied migrations and exclusively owns its live pointe
   assert.ok(ledgerCheck > 0, 'the ledger is consulted per migration');
   assert.ok(ledgerCheck < destructiveCheck, 'an applied migration is skipped before any content check runs on it');
   assert.match(lane, /already applied, skipped/);
+  assert.match(lane, /migration repair --status applied "\$version" --project-ref "\$SUPABASE_PROJECT_REF"/);
+  assert.match(lane, /applied but ledger repair failed/);
 
   const deploy = fs.readFileSync(path.resolve(__dirname, '../scripts/bob-vps-deploy.sh'), 'utf8').replace(/\r\n/g, '\n');
   assert.equal(bashSyntax(deploy).status, 0);
