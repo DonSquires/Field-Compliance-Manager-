@@ -121,6 +121,12 @@ Builder job and proceed autonomously" was narrower than the accepted bare
 bounded natural approval wording while rejecting qualifications such as
 "but do not open it"; the substantial request still comes from conversation
 history rather than the approval text.
+Corrective live acceptance also exposed that "complete and verify this
+redesign" was not classified as implementation intent. That caused web research
+instead of Builder admission and later made a short "fix this" nudge replace
+the substantial brief. `complete` and `finish` now participate in the same
+software-target guard as build, fix, and redesign, so the original corrective
+brief remains the durable job source.
 
 Natural-language Builder acceptance hardening 2026-10-13: Bob's deterministic
 post-evidence Builder fallback now recognises ordinary owner language such as

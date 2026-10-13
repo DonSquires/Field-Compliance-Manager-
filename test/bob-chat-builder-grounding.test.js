@@ -188,6 +188,8 @@ test('ordinary app-builder language is recognised without the internal Builder t
   assert.equal(explicitBuilderCreationRequest('Add an accessible page for reviewing welfare alerts and wire the existing workflow through it.'), true);
   assert.equal(explicitBuilderCreationRequest('Fix the broken Bob panel and add a regression test for the durable run status.'), true);
   assert.equal(explicitBuilderCreationRequest('Make this workflow work on mobile and keep the existing approval path.'), true);
+  assert.equal(explicitBuilderCreationRequest('Complete and verify the structural Bob chat and Builder Studio redesign.'), true);
+  assert.equal(explicitBuilderCreationRequest('Finish this UI redesign and run its tests.'), true);
 });
 
 test('Builder intent guard respects explicit plan-only and no-create instructions', () => {
