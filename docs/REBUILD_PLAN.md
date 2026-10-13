@@ -186,6 +186,12 @@ separately recorded generated-edge retirement debt is reconciled, post-release
 Atlas refreshes use explicit upsert-only mode and report that stale generated
 evidence remains rather than either deleting it or blocking truthful new
 evidence.
+The release lane also still fetched the historical Gitea mirror even though
+GitHub `main` is authoritative and the control plane already had a pinned
+GitHub deploy key. It now prefers direct GitHub SSH with strict host-key
+checking and uses Gitea only as an explicit fallback when that GitHub identity
+is unavailable. Release admission no longer depends on mirror lag or a
+provider-specific HTTPS token header.
 
 Natural-language Builder acceptance hardening 2026-10-13: Bob's deterministic
 post-evidence Builder fallback now recognises ordinary owner language such as

@@ -3,7 +3,7 @@
 # the owner gives guidance, Bob does the coding; nobody is asked to deploy by hand).
 #
 # Runs on the VPS host from a systemd timer (deploy/bob-release-lane/). Each tick:
-#   1. fetches main from the Gitea mirror (HTTPS + token; the mirror trails GitHub by ~1-2 min),
+#   1. fetches authoritative GitHub main through Bob's pinned deploy key (Gitea is fallback only),
 #   2. compares it with the last release this lane put live,
 #   3. classifies the changed paths into targets (migrations, edge functions, control plane,
 #      fcm-api, worker image; the web app deploys itself through Vercel),
@@ -46,16 +46,33 @@ mkdir -p "$STATE_DIR"
 LOG="$STATE_DIR/release-lane.log"
 log() { printf '%s %s\n' "$(date -u +%Y-%m-%dT%H:%M:%SZ)" "$*" | tee -a "$LOG" >&2; }
 
-: "${GITEA_BASE_URL:?GITEA_BASE_URL is required}"; : "${GITEA_OWNER:?}"; : "${GITEA_REPO:?}"; : "${GITEA_TOKEN:?}"
-# The control-plane env names Gitea by its docker-network hostname; the host reaches it by its public URL.
-GITEA_URL="${GITEA_PUBLIC_URL:-$GITEA_BASE_URL}"
-REMOTE_URL="${GITEA_URL%/}/${GITEA_OWNER}/${GITEA_REPO}.git"
+GITHUB_SSH_KEY="${BOB_RELEASE_GITHUB_SSH_KEY_FILE:-/var/lib/bob/github/bob-fcm-main}"
+GITHUB_KNOWN_HOSTS="${BOB_RELEASE_GITHUB_KNOWN_HOSTS_FILE:-/var/lib/bob/github/known_hosts}"
+FETCH_ENV=()
+FETCH_CONFIG=(-c gc.auto=0)
+if [[ -n "${GITHUB_OWNER:-}" && -n "${GITHUB_REPO:-}" && -r "$GITHUB_SSH_KEY" && -s "$GITHUB_KNOWN_HOSTS" ]]; then
+  REMOTE_URL="git@github.com:${GITHUB_OWNER}/${GITHUB_REPO}.git"
+  FETCH_ENV=(env GIT_SSH_COMMAND="ssh -i $GITHUB_SSH_KEY -o IdentitiesOnly=yes -o UserKnownHostsFile=$GITHUB_KNOWN_HOSTS -o StrictHostKeyChecking=yes -o BatchMode=yes -o ConnectTimeout=10")
+else
+  : "${GITEA_BASE_URL:?GITEA_BASE_URL is required when GitHub SSH is unavailable}"
+  : "${GITEA_OWNER:?}"
+  : "${GITEA_REPO:?}"
+  : "${GITEA_TOKEN:?}"
+  GITEA_URL="${GITEA_PUBLIC_URL:-$GITEA_BASE_URL}"
+  REMOTE_URL="${GITEA_URL%/}/${GITEA_OWNER}/${GITEA_REPO}.git"
+  FETCH_CONFIG+=(-c "http.extraheader=Authorization: token ${GITEA_TOKEN}")
+fi
 
 # 1. What is main now? Housekeeping is not the lane's job: a stale .git/gc.log from a pruned worktree
 # made every fetch's auto-gc exit non-zero for 12 hours and the lane logged "mirror unreachable" each
 # time (2026-09-27). Fetch with gc off, and log the real (token-free) reason.
-fetch_err="$(git -C "$REPO_DIR" -c gc.auto=0 -c "http.extraheader=Authorization: token ${GITEA_TOKEN}" fetch -q "$REMOTE_URL" "+refs/heads/main:refs/remotes/release-lane/main" 2>&1 >/dev/null)" \
-  || { log "fetch failed: $(printf '%s' "$fetch_err" | sed -e "s/${GITEA_TOKEN}/<token>/g" | tr '\n' ' ' | cut -c1-300)"; exit 0; }
+fetch_err="$("${FETCH_ENV[@]}" git -C "$REPO_DIR" "${FETCH_CONFIG[@]}" fetch -q "$REMOTE_URL" "+refs/heads/main:refs/remotes/release-lane/main" 2>&1 >/dev/null)" \
+  || {
+    safe_fetch_err="$fetch_err"
+    [[ -z "${GITEA_TOKEN:-}" ]] || safe_fetch_err="${safe_fetch_err//${GITEA_TOKEN}/<token>}"
+    log "fetch failed: $(printf '%s' "$safe_fetch_err" | tr '\n' ' ' | cut -c1-300)"
+    exit 0
+  }
 HEAD_SHA="$(git -C "$REPO_DIR" rev-parse refs/remotes/release-lane/main)"
 
 # 2. What is live? (bootstrap: the newest release worktree the deploy script left behind)

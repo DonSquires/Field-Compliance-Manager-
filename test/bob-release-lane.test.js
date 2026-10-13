@@ -11,14 +11,20 @@ const bashSyntax = (source) => spawnSync('bash', ['-n'], { input: source.replace
 // after every `git fetch` exit non-zero; the lane read that as "mirror unreachable" for 12 hours
 // while main had moved. The lane must not run housekeeping inside its fetch, and must log the
 // real reason (without the token) when the fetch does fail.
-test('release lane fetches with gc off and logs the real, token-free fetch error', () => {
+test('release lane prefers authoritative GitHub SSH and keeps a token-safe Gitea fallback', () => {
   const source = fs.readFileSync(SCRIPT, 'utf8').replace(/\r\n/g, '\n');
   assert.equal(bashSyntax(source).status, 0, 'bash -n');
-  const fetchLine = source.split('\n').find((line) => /fetch -q "\$REMOTE_URL"/.test(line));
+  const fetchLine = source.split('\n').find((line) => /git -C "\$REPO_DIR".*fetch -q "\$REMOTE_URL"/.test(line));
   assert.ok(fetchLine, 'the main fetch is present');
-  assert.match(fetchLine, /-c gc\.auto=0/);
+  assert.match(fetchLine, /"\$\{FETCH_CONFIG\[@\]\}"/);
+  assert.match(source, /REMOTE_URL="git@github\.com:\$\{GITHUB_OWNER\}\/\$\{GITHUB_REPO\}\.git"/);
+  assert.match(source, /GIT_SSH_COMMAND="ssh -i \$GITHUB_SSH_KEY/);
+  assert.match(source, /StrictHostKeyChecking=yes/);
+  assert.match(source, /FETCH_CONFIG=\(-c gc\.auto=0\)/);
+  assert.match(source, /GITEA_BASE_URL is required when GitHub SSH is unavailable/);
+  assert.match(source, /http\.extraheader=Authorization: token \$\{GITEA_TOKEN\}/);
   assert.doesNotMatch(source, /log "fetch failed: mirror unreachable"/);
-  assert.match(source, /fetch failed: \$\(printf '%s' "\$fetch_err" \| sed -e "s\/\$\{GITEA_TOKEN\}\/<token>\/g"/);
+  assert.match(source, /safe_fetch_err="\$\{safe_fetch_err\/\/\$\{GITEA_TOKEN\}\/<token>\}"/);
   // systemd gives root no HOME, so the global safe.directory is invisible; the script must carry its own.
   assert.match(source, /GIT_CONFIG_KEY_0=safe\.directory GIT_CONFIG_VALUE_0="\$REPO_DIR"/);
   assert.match(source, /GIT_CONFIG_KEY_1=safe\.directory GIT_CONFIG_VALUE_1="\$RELEASES_DIR\/\*"/);
