@@ -276,7 +276,7 @@ const TOOL_REGISTRY = {
     effect_class: 'draft_governed_write'
   },
   run_human_test: {
-    purpose: "Start or inspect a durable Dr Bob human-browser test with a real control-plane receipt. Use { action: \"start\", mode?: \"fixture\"|\"live\" } to start the bounded full browser suite, or { action: \"status\", run_id?: \"UUID\" } to inspect a known run (without run_id, the latest run is returned). Never say a test is running unless this tool returns a queued/running run with an ID. A live run requires the dedicated configured test identity; Bob never borrows a person's browser session or credentials.",
+    purpose: "Start or inspect a durable Dr Bob human-browser test with a real control-plane receipt. Use { action: \"start\", mode?: \"fixture\"|\"live\"|\"suite\", expected_sha?: \"40-character Git SHA\", target_route?: \"/admin/...\" } to start fixture QA, read-only live QA, or the governed fixture-then-live sequence. Use { action: \"status\", run_id?: \"UUID\" } to inspect a known run (without run_id, the latest run is returned). Never substitute web research or prose for an explicit request to run Dr Bob. Never say a test is running unless this tool returns a queued/running run with an ID. Live and suite runs require the dedicated configured test identity and exact deployment-SHA preflight; Bob never borrows a person's browser session or credentials.",
     governance: 'read-only diagnostic execution; admiral only; durable run receipt required; live mode uses dedicated test identity only',
     effect_class: 'admin_diagnostic_substrate_action'
   },

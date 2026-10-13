@@ -77,6 +77,22 @@ repository root and to ignore DDL-like SQL string literals. An Atlas `unwired`
 classification remains a static-map finding, not proof of a broken feature,
 until schema and caller evidence agree.
 
+Dr Bob dispatch and self-heal truth hardening 2026-10-13: an explicit owner
+instruction to run fixture-backed and live Dr Bob testing selected web research
+instead of the already-wired `run_human_test` tool because the deterministic
+guard corrected only plain-answer planner outcomes. The same instruction
+contained words such as "inspect" and "status accuracy", which could also
+misclassify a leading "Run Dr Bob" command as a status query. Explicit Dr Bob
+requests now override unrelated planner tools, start verbs take precedence,
+and one durable `suite` receipt runs fixture QA before read-only live QA against
+an exact expected GitHub/Vercel SHA and optional approved route. Separately, a
+failed main-health repair was displayed as deployed despite having no commit,
+published branch, pull request, merge, deployment, or live receipt. The control
+plane now corrects such invalid self-heal terminal states to failed with an
+audit event. Eligible auto-merged jobs remain in release verification until an
+exact-SHA GitHub Production deployment succeeds and the approved live URL
+responds; only then can the job be recorded as deployed.
+
 Natural-language Builder acceptance hardening 2026-10-13: Bob's deterministic
 post-evidence Builder fallback now recognises ordinary owner language such as
 "build me an app", "add a page", "make this workflow work", and "fix the UI",

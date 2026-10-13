@@ -25,6 +25,13 @@ run, its pinned source SHA, pass/fail/skip counts, and the retained artifact
 inventory. A second start request while a run is active returns the existing
 receipt instead of creating duplicate work.
 
+An explicit instruction to run Dr Bob is deterministically dispatched to this
+tool even if the planner proposes research or prose instead. `suite` mode runs
+the fixture-backed phase first and, only if it passes, runs the read-only live
+phase under the same durable run ID. The request can pin a 40-character
+`expected_sha` and an approved admin route such as `/admin/builder`; a source
+SHA mismatch fails before a browser worker starts.
+
 Fixture-backed runs use a bounded four-worker browser pool. Live runs remain
 serial and require `HUMAN_TEST_BASE_URL` plus the dedicated
 `GRANDMASTER_TEST_EMAIL` and `GRANDMASTER_TEST_PASSWORD` test identity. Bob
@@ -52,6 +59,10 @@ checks the target production deployment state and compares its Git SHA with
 `HUMAN_TEST_REQUIRE_DEPLOYMENT_MATCH=true` when a stale deployment must block
 the test rather than produce a warning. Vercel credentials never enter the
 browser context.
+
+Bob's governed live and suite dispatch requires those Vercel settings and sets
+`HUMAN_TEST_REQUIRE_DEPLOYMENT_MATCH=true`. A missing preflight, stale SHA, or
+failed fixture phase is a failed run, not a warning-shaped success.
 
 ## Evidence
 

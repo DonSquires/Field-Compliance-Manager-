@@ -21,6 +21,14 @@ test('Bob human testing is backed by durable control-plane start and status rece
   assert.match(controlPlane, /\/api\/bob\/human-tests\/latest/);
   assert.match(controlPlane, /human-test-receipt\.json/);
   assert.match(controlPlane, /human-test-output\.log/);
+  assert.match(conductor, /if \(explicitHumanTestRequest\)/);
+  assert.doesNotMatch(conductor, /normAction === 'answer' && explicitHumanTestRequest/);
+  assert.match(conductor, /requestsStart \? 'start' : 'status'/);
+  assert.match(conductor, /mode: requestsFixtureAndLive \? 'suite'/);
+  assert.match(conductor, /expected_sha: requestedSha/);
+  assert.match(conductor, /target_route: '\/admin\/builder'/);
+  assert.match(controlPlane, /const phaseModes = mode === 'suite' \? \['fixture', 'live'\]/);
+  assert.match(controlPlane, /HUMAN_TEST_REQUIRE_DEPLOYMENT_MATCH: 'true'/);
 });
 
 test('live human testing requires the dedicated configured test identity', () => {
@@ -31,7 +39,17 @@ test('live human testing requires the dedicated configured test identity', () =>
 });
 
 test('fixture human testing has a bounded browser-sized resource profile', () => {
-  assert.match(controlPlane, /mode === 'live' \? '2g' : '8g'/);
-  assert.match(controlPlane, /mode === 'live' \? 256 : 1024/);
-  assert.match(controlPlane, /mode === 'live'[\s\S]*GRANDMASTER_TEST_PASSWORD[\s\S]*: \{ HUMAN_TEST_LIVE: 'false', E2E_OFFLINE: '1' \}/);
+  assert.match(controlPlane, /phaseMode === 'live' \? '2g' : '8g'/);
+  assert.match(controlPlane, /phaseMode === 'live' \? 256 : 1024/);
+  assert.match(controlPlane, /phaseMode === 'live'[\s\S]*GRANDMASTER_TEST_PASSWORD[\s\S]*: \{ HUMAN_TEST_LIVE: 'false', E2E_OFFLINE: '1' \}/);
+});
+
+test('self-heal deployment truth requires merge, production, and live receipts', () => {
+  assert.match(controlPlane, /function hasVerifiedSelfHealDeployment/);
+  assert.match(controlPlane, /deployment\?\.status === 'success'/);
+  assert.match(controlPlane, /deployment\?\.live_verified === true/);
+  assert.match(controlPlane, /reconcileInvalidSelfHealDeployments/);
+  assert.match(controlPlane, /builder\.self_heal\.false_deployment_corrected/);
+  assert.match(controlPlane, /verifyGitHubProductionRelease/);
+  assert.match(controlPlane, /event_type: 'job_deployed'/);
 });

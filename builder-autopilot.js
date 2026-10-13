@@ -203,7 +203,10 @@ async function collectEvidence({ supabase, snapshot }) {
 
 function composeReport({ job, evidence, pullRequestUrl, state, reason, hold, repair, resumedAs, automerge = null }) {
   const lines = [];
-  if (state === 'merged') {
+  if (state === 'deployed') {
+    lines.push(`Live: Bob built, independently verified, merged, deployed, and checked "${plain(job.title, 160)}" in production.`);
+    if (pullRequestUrl) lines.push(`Repository receipt: ${pullRequestUrl}`);
+  } else if (state === 'merged') {
     lines.push(`Done: Bob repaired the failing checks in "${plain(job.title, 160)}" and merged the verified change.`);
     if (evidence?.changedFiles?.length) lines.push(`Files changed: ${describeFiles(evidence.changedFiles)}.`);
     if (evidence?.testsRun?.length) lines.push(`Bob ran and passed: ${evidence.testsRun.slice(0, 3).join('; ')}.`);
@@ -564,6 +567,31 @@ async function autopilotTick({ supabase, jobs, actions, log = () => {} }) {
       }
       if (job.status === 'release_ready') {
         if (job.workspace_pull_request_url) {
+          if (job.autopilot_state === 'published' && job.autopilot_report?.merged === true && typeof actions.verifyRelease === 'function') {
+            const release = await actions.verifyRelease(job);
+            if (release.status === 'pending') {
+              outcomes.push({ job: job.id, outcome: 'deploying', merge_sha: job.autopilot_report?.merge_sha ?? null });
+              continue;
+            }
+            if (release.status !== 'success') {
+              if (typeof actions.fail === 'function') await actions.fail(job.id, release.error || 'Production deployment verification failed');
+              await actions.record(job.id, 'blocked', composeReport({ job, state: 'blocked', reason: release.error || 'Production deployment verification failed' }));
+              outcomes.push({ job: job.id, outcome: 'blocked', reason: release.error });
+              continue;
+            }
+            if (typeof actions.markDeployed === 'function') await actions.markDeployed(job.id, release);
+            const snapshot = await loadBuilderRuntimeSnapshot(supabase, job.id);
+            const evidence = await collectEvidence({ supabase, snapshot });
+            const report = {
+              ...composeReport({ job, evidence, pullRequestUrl: job.workspace_pull_request_url, state: 'deployed' }),
+              merged: true,
+              merge_sha: job.autopilot_report?.merge_sha,
+              deployment: release,
+            };
+            await actions.record(job.id, 'done', report);
+            outcomes.push({ job: job.id, outcome: 'deployed', url: release.target_url });
+            continue;
+          }
           if (job.autopilot_state !== 'published') {
             const snapshot = await loadBuilderRuntimeSnapshot(supabase, job.id);
             const evidence = await collectEvidence({ supabase, snapshot });
@@ -578,7 +606,7 @@ async function autopilotTick({ supabase, jobs, actions, log = () => {} }) {
         const automerge = automergeEligible({ job, evidence });
         const published = await actions.publish({ job, evidence, validatedPatchId: evidence.validatedPatchId, automerge, bodyFor: (branchName, headSha) => composePullRequestBody({ job, evidence, branchName, headSha, automerge }) });
         const state = published.merged === true ? 'merged' : 'published';
-        await actions.record(job.id, published.merged === true ? 'done' : 'published', { ...composeReport({ job, evidence, pullRequestUrl: published.pullRequestUrl, state, automerge }), automerge: automerge.ok, merged: published.merged === true });
+        await actions.record(job.id, 'published', { ...composeReport({ job, evidence, pullRequestUrl: published.pullRequestUrl, state, automerge }), automerge: automerge.ok, merged: published.merged === true, merge_sha: published.mergeSha ?? null });
         log({ job: job.id, [state]: published.pullRequestUrl });
         outcomes.push({ job: job.id, outcome: state, url: published.pullRequestUrl });
         continue;
@@ -629,7 +657,7 @@ async function listAutopilotJobs(supabase, limit = 5) {
     .from('builder_jobs')
     .select('id, organization_id, project_id, title, description, task_description, status, target_sha, last_error, frontend_required, backend_required, code_review_mode, workspace_branch, workspace_head_sha, workspace_published_head_sha, workspace_pull_request_url, autopilot_requested_by, autopilot_conversation_id, autopilot_source, source_friction_packet_id, source_main_health_sha, source_main_health_files, repair_risk, autopilot_state, autopilot_report, autopilot_updated_at')
     .or('autopilot_requested_by.not.is.null,autopilot_source.eq.main_monitor')
-    .in('autopilot_state', ['driving', 'awaiting_human'])
+    .in('autopilot_state', ['driving', 'awaiting_human', 'published'])
     .order('autopilot_updated_at', { ascending: true })
     .limit(limit);
   if (error) throw new Error('autopilot jobs could not be listed');

@@ -28,6 +28,22 @@ cp deploy/bob-vps/human-qa.env.example /srv/fcm/.env
 chmod 600 /srv/fcm/.env
 ```
 
+Dr Bob live and fixture-then-live human testing also requires these values in
+the control-plane environment:
+
+```text
+HUMAN_TEST_BASE_URL=https://www.fcmanager.co.nz
+GRANDMASTER_TEST_EMAIL=<dedicated test identity>
+GRANDMASTER_TEST_PASSWORD=<dedicated test identity secret>
+VERCEL_TOKEN=<server-side deployment viewer token>
+VERCEL_PROJECT_ID=<approved FCM web project id>
+VERCEL_TEAM_ID=<optional owning team id>
+```
+
+They are passed only to the isolated live QA process, never to browser
+JavaScript, prompts, reports, or command arguments. A suite run binds the source
+checkout, Vercel deployment, and live test to one expected GitHub SHA.
+
 Populate `BOB_RUNNER_TOKEN` directly on the VPS. Do not commit the populated
 file or place user credentials in it.
 

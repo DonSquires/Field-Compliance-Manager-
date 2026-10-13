@@ -212,9 +212,52 @@ test('autopilot records a directly merged main-health repair as complete', async
   const outcomes = await autopilotTick({ supabase, jobs: [job], actions });
   assert.deepEqual(outcomes, [{ job: 'job-4', outcome: 'merged', url: 'https://github.com/owner/repo/pull/17' }]);
   const recorded = actions.calls.find(([name]) => name === 'record');
-  assert.equal(recorded[2], 'done');
+  assert.equal(recorded[2], 'published');
   assert.equal(recorded[3].merged, true);
+  assert.equal(recorded[3].merge_sha, 'e'.repeat(40));
   assert.match(recorded[3].text, /Bob repaired the failing checks/);
+});
+
+test('autopilot marks a merged job deployed only after production and live verification', async () => {
+  const { job, supabase } = releaseReadyFixture();
+  Object.assign(job, {
+    autopilot_state: 'published',
+    workspace_pull_request_url: 'https://github.com/owner/repo/pull/17',
+    autopilot_report: { merged: true, merge_sha: 'e'.repeat(40) },
+  });
+  const actions = actionsRecorder();
+  actions.verifyRelease = async () => ({
+    status: 'success',
+    source_sha: 'e'.repeat(40),
+    target_url: 'https://app.example.test',
+    live_verified: true,
+  });
+  actions.markDeployed = async (jobId, release) => { actions.calls.push(['markDeployed', jobId, release]); };
+  const outcomes = await autopilotTick({ supabase, jobs: [job], actions });
+  assert.deepEqual(outcomes, [{ job: 'job-4', outcome: 'deployed', url: 'https://app.example.test' }]);
+  assert.ok(actions.calls.some(([name]) => name === 'markDeployed'));
+  const recorded = actions.calls.find(([name]) => name === 'record');
+  assert.equal(recorded[2], 'done');
+  assert.equal(recorded[3].deployment.live_verified, true);
+  assert.match(recorded[3].text, /^Live: Bob built, independently verified, merged, deployed, and checked/);
+});
+
+test('autopilot keeps a merged job pending until production deployment exists', async () => {
+  const job = {
+    id: 'job-pending-release',
+    status: 'release_ready',
+    autopilot_state: 'published',
+    workspace_pull_request_url: 'https://github.com/owner/repo/pull/18',
+    autopilot_report: { merged: true, merge_sha: 'f'.repeat(40) },
+  };
+  const actions = actionsRecorder();
+  actions.verifyRelease = async () => ({ status: 'pending' });
+  assert.deepEqual(await autopilotTick({ supabase: fakeSupabase({ job }), jobs: [job], actions }), [{
+    job: 'job-pending-release',
+    outcome: 'deploying',
+    merge_sha: 'f'.repeat(40),
+  }]);
+  assert.ok(!actions.calls.some(([name]) => name === 'record' || name === 'fail'));
 });
 
 test('autopilot records a blocked report for a job that ended terminally without a pull request', async () => {

@@ -130,12 +130,22 @@ test('human QA forwards only named environment variables without putting values 
     sourceDir: '/tmp/source',
     artifactDir: '/tmp/artifacts',
     profile: 'human-qa-live',
-    environment: { HUMAN_TEST_LIVE: 'true', HUMAN_TEST_BASE_URL: 'https://example.test', GRANDMASTER_TEST_PASSWORD: 'not-in-argv' }
+    environment: {
+      HUMAN_TEST_LIVE: 'true',
+      HUMAN_TEST_BASE_URL: 'https://example.test',
+      HUMAN_TEST_EXPECTED_SHA: 'a'.repeat(40),
+      HUMAN_TEST_REQUIRE_DEPLOYMENT_MATCH: 'true',
+      HUMAN_TEST_ADMIN_ROUTE: '/admin/builder',
+      GRANDMASTER_TEST_PASSWORD: 'not-in-argv',
+      VERCEL_PROJECT_ID: 'project-id',
+    }
   });
   assert.deepEqual(args.filter((value, index) => args[index - 1] === '--env'), [
-    'HUMAN_TEST_LIVE', 'HUMAN_TEST_BASE_URL', 'GRANDMASTER_TEST_PASSWORD'
+    'HUMAN_TEST_LIVE', 'HUMAN_TEST_BASE_URL', 'HUMAN_TEST_EXPECTED_SHA',
+    'HUMAN_TEST_REQUIRE_DEPLOYMENT_MATCH', 'HUMAN_TEST_ADMIN_ROUTE',
+    'GRANDMASTER_TEST_PASSWORD', 'VERCEL_PROJECT_ID'
   ]);
-  assert.equal(args.some(value => value.includes('https://example.test') || value.includes('not-in-argv')), false);
+  assert.equal(args.some(value => value.includes('https://example.test') || value.includes('not-in-argv') || value.includes('project-id')), false);
   assert.ok(args.includes('--network=bridge'));
 });
 

@@ -4283,11 +4283,19 @@ async function execHumanTest(authHeader, caps, toolArgs) {
     meta: { tool: 'run_human_test', outcome: 'forbidden' }
   };
   const action = toolArgs.action === 'status' ? 'human_test_status' : 'human_test_start';
-  const mode = toolArgs.mode === 'live' ? 'live' : 'fixture';
+  const mode = toolArgs.mode === 'suite' ? 'suite' : toolArgs.mode === 'live' ? 'live' : 'fixture';
+  const expectedSha = typeof toolArgs.expected_sha === 'string' && /^[a-f0-9]{40}$/i.test(toolArgs.expected_sha.trim())
+    ? toolArgs.expected_sha.trim().toLowerCase()
+    : '';
+  const targetRoute = typeof toolArgs.target_route === 'string' && /^\/[A-Za-z0-9/_-]*$/.test(toolArgs.target_route.trim())
+    ? toolArgs.target_route.trim()
+    : '';
   const runId = typeof toolArgs.run_id === 'string' ? toolArgs.run_id.trim() : '';
   const response = await callFn('bob-builder-control-room', authHeader, {
     action,
     mode,
+    ...(expectedSha ? { expected_sha: expectedSha } : {}),
+    ...(targetRoute ? { target_route: targetRoute } : {}),
     ...(runId ? { run_id: runId } : {})
   });
   const responseData = response.data as Record<string, unknown>;
@@ -9909,12 +9917,20 @@ serve(async (req)=>{
     const explicitHumanTestRequest = caps.tier === 'admiral'
       && /\b(?:human test|dr\.?\s*bob|browser test|human-browser)\b/i.test(message)
       && /\b(?:run|start|execute|status|progress|check|inspect)\b/i.test(message);
-    if (normAction === 'answer' && explicitHumanTestRequest) {
+    if (explicitHumanTestRequest) {
+      const requestedSha = message.match(/\b[a-f0-9]{40}\b/i)?.[0]?.toLowerCase();
+      const requestedRunId = message.match(/\b[0-9a-f]{8}-[0-9a-f]{4}-[1-5][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}\b/i)?.[0]?.toLowerCase();
+      const requestsFixtureAndLive = /\bfixture(?:-backed)?\b[\s\S]{0,500}\blive\b/i.test(message)
+        || /\blive\b[\s\S]{0,500}\bfixture(?:-backed)?\b/i.test(message);
+      const requestsStart = /\b(?:run|start|execute)\b/i.test(message);
       normAction = 'use_tool';
       chosenTool = 'run_human_test';
       args = {
-        action: /\b(?:status|progress|check|inspect)\b/i.test(message) ? 'status' : 'start',
-        mode: /\blive\b/i.test(message) ? 'live' : 'fixture'
+        action: requestsStart ? 'start' : 'status',
+        mode: requestsFixtureAndLive ? 'suite' : /\blive\b/i.test(message) ? 'live' : 'fixture',
+        ...(/\bBuilder Control Room\b/i.test(message) ? { target_route: '/admin/builder' } : {}),
+        ...(!requestsStart && requestedRunId ? { run_id: requestedRunId } : {}),
+        ...(requestedSha ? { expected_sha: requestedSha } : {})
       };
     }
     // PILLAR H: plan_received event (fires for ALL requests, FIRST plan only per owner decision)

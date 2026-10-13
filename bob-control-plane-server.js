@@ -136,6 +136,55 @@ function builderRepositoryHead(ref = 'main') {
   return { host: target.host, ref, sha: resolveRemoteHead({ repoUrl: target.repoUrl, authHeader: target.authHeader, sshCommand: target.sshCommand, ref }) };
 }
 
+async function verifyGitHubProductionRelease(mergeSha) {
+  if (!/^[a-f0-9]{40}$/i.test(String(mergeSha || ''))) {
+    return { status: 'failed', error: 'Verified merge SHA is missing' };
+  }
+  const headers = {
+    Authorization: `Bearer ${githubToken}`,
+    Accept: 'application/vnd.github+json',
+    'X-GitHub-Api-Version': '2022-11-28',
+    'User-Agent': 'bob-builder-release-verifier',
+  };
+  const repoPath = `/repos/${encodeURIComponent(githubOwner)}/${encodeURIComponent(githubRepo)}`;
+  const deploymentsResponse = await fetch(`https://api.github.com${repoPath}/deployments?sha=${mergeSha}&environment=Production&per_page=10`, { headers });
+  if (!deploymentsResponse.ok) {
+    return { status: 'pending', error: `GitHub deployment lookup returned HTTP ${deploymentsResponse.status}` };
+  }
+  const deployments = await deploymentsResponse.json();
+  if (!Array.isArray(deployments) || !deployments.length) return { status: 'pending' };
+  for (const deployment of deployments) {
+    const statusesResponse = await fetch(`https://api.github.com${repoPath}/deployments/${deployment.id}/statuses?per_page=20`, { headers });
+    if (!statusesResponse.ok) continue;
+    const statuses = await statusesResponse.json();
+    const latest = Array.isArray(statuses) ? statuses[0] : null;
+    if (latest?.state === 'success') {
+      const liveUrl = String(process.env.HUMAN_TEST_BASE_URL || latest.target_url || '').trim();
+      if (!/^https:\/\//.test(liveUrl)) return { status: 'failed', error: 'Production deployment succeeded without an approved live URL' };
+      try {
+        const liveResponse = await fetch(liveUrl, { method: 'HEAD', redirect: 'follow' });
+        if (!liveResponse.ok) return { status: 'pending', error: `Live URL returned HTTP ${liveResponse.status}` };
+      } catch (error) {
+        return { status: 'pending', error: `Live URL verification failed: ${failureDetail(error)}` };
+      }
+      return {
+        status: 'success',
+        source_sha: mergeSha,
+        deployment_id: deployment.id,
+        deployment_status_id: latest.id ?? null,
+        target_url: liveUrl,
+        provider_url: latest.target_url ?? null,
+        verified_at: new Date().toISOString(),
+        live_verified: true,
+      };
+    }
+    if (latest && ['failure', 'error', 'inactive'].includes(latest.state)) {
+      return { status: 'failed', error: latest.description || `Production deployment ended as ${latest.state}` };
+    }
+  }
+  return { status: 'pending' };
+}
+
 // Read-only repository views for Bob's chat tools: pinned to main's head (re-resolved at most
 // once a minute) and served from the shared checkout's object database.
 const repositoryReadCache = { at: 0, sha: null, sourceDir: null };
@@ -250,6 +299,7 @@ function safeHumanTestRun(run) {
     scope: run.scope,
     status: run.status,
     source_sha: run.source_sha,
+    target_route: run.target_route || null,
     requested_by: run.requested_by,
     created_at: run.created_at,
     started_at: run.started_at,
@@ -257,6 +307,7 @@ function safeHumanTestRun(run) {
     exit_code: run.exit_code,
     error: run.error,
     summary: run.summary,
+    phases: run.phases || [],
     artifacts: run.artifacts || []
   };
 }
@@ -275,11 +326,22 @@ function listHumanTestArtifacts(rootDir, relativeDir = '', rows = []) {
   return rows;
 }
 
-async function startHumanTestRun({ mode, scope, requestedBy }) {
+function combineHumanTestSummaries(phases) {
+  return phases.reduce((summary, phase) => ({
+    passed: summary.passed + Number(phase.summary?.passed || 0),
+    failed: summary.failed + Number(phase.summary?.failed || 0),
+    skipped: summary.skipped + Number(phase.summary?.skipped || 0),
+  }), { passed: 0, failed: 0, skipped: 0 });
+}
+
+async function startHumanTestRun({ mode, scope, requestedBy, expectedSha = null, targetRoute = null }) {
   const active = [...humanTestRuns.values()].find(run => run.status === 'queued' || run.status === 'running');
   if (active) return { existing: true, run: safeHumanTestRun(active) };
   if (!builderWorkerImage) throw new BuilderStepError(503, 'Human-test worker image is unavailable');
   const source = repositoryReadTarget();
+  if (expectedSha && source.sha !== expectedSha) {
+    throw new BuilderStepError(409, `Human-test source SHA does not match the requested deployment (${source.sha.slice(0, 12)} != ${expectedSha.slice(0, 12)})`);
+  }
   const id = crypto.randomUUID();
   const now = new Date().toISOString();
   const artifactDir = path.join(stateDir, 'human-test-runs', id);
@@ -289,6 +351,7 @@ async function startHumanTestRun({ mode, scope, requestedBy }) {
     scope,
     status: 'queued',
     source_sha: source.sha,
+    target_route: targetRoute,
     requested_by: requestedBy,
     created_at: now,
     started_at: null,
@@ -296,6 +359,7 @@ async function startHumanTestRun({ mode, scope, requestedBy }) {
     exit_code: null,
     error: null,
     summary: null,
+    phases: [],
     artifacts: []
   };
   humanTestRuns.set(id, run);
@@ -306,35 +370,61 @@ async function startHumanTestRun({ mode, scope, requestedBy }) {
     saveState();
     try {
       fs.mkdirSync(artifactDir, { recursive: true });
-      const result = await executeWorker({
-        image: builderWorkerImage,
-        sourceDir: source.sourceDir,
-        artifactDir,
-        profile: mode === 'live' ? 'human-qa-live' : 'human-qa',
-        timeoutMs: Math.min(Math.max(Number(process.env.BOB_HUMAN_TEST_TIMEOUT_MS) || 45 * 60_000, 5 * 60_000), 60 * 60_000),
-        memory: process.env.BOB_HUMAN_TEST_MEMORY || (mode === 'live' ? '2g' : '8g'),
-        cpus: process.env.BOB_HUMAN_TEST_CPUS || (mode === 'live' ? '2' : '4'),
-        pidsLimit: Number(process.env.BOB_HUMAN_TEST_PIDS_LIMIT || (mode === 'live' ? 256 : 1024)),
-        environment: mode === 'live'
-          ? {
-              HUMAN_TEST_LIVE: 'true',
-              HUMAN_TEST_BASE_URL: process.env.HUMAN_TEST_BASE_URL,
-              GRANDMASTER_TEST_EMAIL: process.env.GRANDMASTER_TEST_EMAIL,
-              GRANDMASTER_TEST_PASSWORD: process.env.GRANDMASTER_TEST_PASSWORD
-            }
-          : { HUMAN_TEST_LIVE: 'false', E2E_OFFLINE: '1' }
-      });
-      run.status = result.status;
-      run.exit_code = result.exitCode;
-      run.summary = summarizeHumanTest(result);
-      fs.writeFileSync(path.join(artifactDir, 'human-test-output.log'), `${result.stdout || ''}\n${result.stderr || ''}`, { mode: 0o600 });
+      const phaseModes = mode === 'suite' ? ['fixture', 'live'] : [mode];
+      const phaseLogs = [];
+      for (const phaseMode of phaseModes) {
+        const phaseDir = path.join(artifactDir, phaseMode);
+        fs.mkdirSync(phaseDir, { recursive: true });
+        const result = await executeWorker({
+          image: builderWorkerImage,
+          sourceDir: source.sourceDir,
+          artifactDir: phaseDir,
+          profile: phaseMode === 'live' ? 'human-qa-live' : 'human-qa',
+          timeoutMs: Math.min(Math.max(Number(process.env.BOB_HUMAN_TEST_TIMEOUT_MS) || 45 * 60_000, 5 * 60_000), 60 * 60_000),
+          memory: process.env.BOB_HUMAN_TEST_MEMORY || (phaseMode === 'live' ? '2g' : '8g'),
+          cpus: process.env.BOB_HUMAN_TEST_CPUS || (phaseMode === 'live' ? '2' : '4'),
+          pidsLimit: Number(process.env.BOB_HUMAN_TEST_PIDS_LIMIT || (phaseMode === 'live' ? 256 : 1024)),
+          environment: phaseMode === 'live'
+            ? {
+                HUMAN_TEST_LIVE: 'true',
+                HUMAN_TEST_BASE_URL: process.env.HUMAN_TEST_BASE_URL,
+                HUMAN_TEST_EXPECTED_SHA: expectedSha || source.sha,
+                HUMAN_TEST_REQUIRE_DEPLOYMENT_MATCH: 'true',
+                HUMAN_TEST_ADMIN_ROUTE: targetRoute,
+                GRANDMASTER_TEST_EMAIL: process.env.GRANDMASTER_TEST_EMAIL,
+                GRANDMASTER_TEST_PASSWORD: process.env.GRANDMASTER_TEST_PASSWORD,
+                VERCEL_TOKEN: process.env.VERCEL_TOKEN,
+                VERCEL_PROJECT_ID: process.env.VERCEL_PROJECT_ID,
+                VERCEL_TEAM_ID: process.env.VERCEL_TEAM_ID,
+              }
+            : { HUMAN_TEST_LIVE: 'false', E2E_OFFLINE: '1' }
+        });
+        const phase = {
+          mode: phaseMode,
+          status: result.status,
+          exit_code: result.exitCode,
+          summary: summarizeHumanTest(result),
+        };
+        run.phases.push(phase);
+        phaseLogs.push(`===== ${phaseMode.toUpperCase()} =====\n${result.stdout || ''}\n${result.stderr || ''}`);
+        saveState();
+        if (result.status !== 'succeeded') break;
+      }
+      run.summary = combineHumanTestSummaries(run.phases);
+      const failedPhase = run.phases.find(phase => phase.status !== 'succeeded');
+      run.status = failedPhase ? failedPhase.status : 'succeeded';
+      run.exit_code = failedPhase?.exit_code ?? 0;
+      fs.writeFileSync(path.join(artifactDir, 'human-test-output.log'), `${phaseLogs.join('\n')}\n`, { mode: 0o600 });
       fs.writeFileSync(path.join(artifactDir, 'human-test-receipt.json'), JSON.stringify({
         run_id: id,
         mode,
         scope,
         source_sha: source.sha,
-        result: { status: result.status, exit_code: result.exitCode, profile: result.profile },
-        summary: run.summary
+        expected_sha: expectedSha || source.sha,
+        target_route: targetRoute,
+        result: { status: run.status, exit_code: run.exit_code },
+        summary: run.summary,
+        phases: run.phases,
       }, null, 2), { mode: 0o600 });
       run.artifacts = listHumanTestArtifacts(artifactDir);
     } catch (error) {
@@ -770,6 +860,59 @@ async function startRoutineRepairs() {
   return outcomes;
 }
 
+function hasVerifiedSelfHealDeployment(job) {
+  const report = job?.autopilot_report;
+  const deployment = report?.deployment;
+  return Boolean(
+    job?.workspace_pull_request_url
+    && /^[a-f0-9]{40}$/i.test(String(report?.merge_sha || ''))
+    && report?.merged === true
+    && deployment?.status === 'success'
+    && deployment?.live_verified === true
+    && deployment?.source_sha === report.merge_sha
+  );
+}
+
+async function reconcileInvalidSelfHealDeployments() {
+  const { data, error } = await builderSupabase
+    .from('builder_jobs')
+    .select('id,organization_id,title,status,autopilot_source,autopilot_report,workspace_pull_request_url')
+    .eq('status', 'deployed')
+    .in('autopilot_source', ['main_monitor', 'routine_monitor'])
+    .limit(20);
+  if (error) throw new Error(`self-heal deployment states could not be checked: ${error.message}`);
+  for (const job of data || []) {
+    if (hasVerifiedSelfHealDeployment(job)) continue;
+    const reason = 'Self-heal job was labelled deployed without verified pull-request, merge, production deployment, and live receipts.';
+    const { error: updateError } = await builderSupabase
+      .from('builder_jobs')
+      .update({
+        status: 'failed',
+        autopilot_state: 'blocked',
+        last_error: reason,
+        autopilot_report: {
+          ...(job.autopilot_report && typeof job.autopilot_report === 'object' ? job.autopilot_report : {}),
+          headline: `Corrected false deployment status for "${String(job.title || 'self-heal job').slice(0, 160)}".`,
+          text: `${reason} No code publication is inferred.`,
+          deployment_reconciled_at: new Date().toISOString(),
+        },
+        updated_at: new Date().toISOString(),
+      })
+      .eq('id', job.id)
+      .eq('status', 'deployed');
+    if (updateError) throw new Error(`invalid self-heal deployment could not be corrected: ${updateError.message}`);
+    await builderSupabase.from('builder_audit_events').insert({
+      organization_id: job.organization_id,
+      job_id: job.id,
+      event_type: 'job_failed',
+      actor_type: 'bot',
+      new_value: { status: 'failed', reason: 'missing_release_receipts' },
+      change_summary: reason,
+    });
+    record('autopilot', 'builder.self_heal.false_deployment_corrected', job.id, {});
+  }
+}
+
 async function autopilotOnce() {
   if (autopilotBusy || !builderSupabase || !modelGatewayToken || !builderWorkerImage || !builderSourceConfigured || !builderApiConfigured) return [];
   autopilotBusy = true;
@@ -777,6 +920,7 @@ async function autopilotOnce() {
     await startInterruptedModelRecovery();
     startMainHealthCheck();
     await startRoutineRepairs();
+    await reconcileInvalidSelfHealDeployments();
     const jobs = await listAutopilotJobs(builderSupabase);
     if (!jobs.length) return [];
     return await autopilotTick({
@@ -804,6 +948,36 @@ async function autopilotOnce() {
             return { pullRequestUrl: pullRequest.url, merged: true, mergeSha: merge.sha };
           }
           return { pullRequestUrl: pullRequest.url, merged: false };
+        },
+        verifyRelease: async (job) => verifyGitHubProductionRelease(job.autopilot_report?.merge_sha),
+        markDeployed: async (jobId, deployment) => {
+          if (deployment?.status !== 'success' || deployment?.live_verified !== true || !/^[a-f0-9]{40}$/i.test(String(deployment?.source_sha || ''))) {
+            throw new Error('Builder deployment receipt is incomplete');
+          }
+          const { data: current, error: readError } = await builderSupabase
+            .from('builder_jobs')
+            .select('id,organization_id,status,workspace_pull_request_url,autopilot_report')
+            .eq('id', jobId)
+            .single();
+          if (readError || !current?.id || current.status !== 'release_ready' || !current.workspace_pull_request_url
+              || current.autopilot_report?.merged !== true || current.autopilot_report?.merge_sha !== deployment.source_sha) {
+            throw new Error('Builder job is not the verified merged release');
+          }
+          const { error: updateError } = await builderSupabase
+            .from('builder_jobs')
+            .update({ status: 'deployed', current_step_name: 'release_prep', last_error: null, updated_at: new Date().toISOString() })
+            .eq('id', jobId)
+            .eq('status', 'release_ready');
+          if (updateError) throw new Error(`Builder deployment could not be recorded: ${updateError.message}`);
+          const { error: auditError } = await builderSupabase.from('builder_audit_events').insert({
+            organization_id: current.organization_id,
+            job_id: jobId,
+            event_type: 'job_deployed',
+            actor_type: 'bot',
+            new_value: deployment,
+            change_summary: 'Verified GitHub merge, successful Production deployment, and responsive live URL recorded',
+          });
+          if (auditError) throw new Error(`Builder deployment audit could not be recorded: ${auditError.message}`);
         },
         record: async (jobId, state, report) => {
           const { error } = await builderSupabase.rpc('builder_autopilot_record', { _job_id: jobId, _state: state, _report: report });
@@ -1013,14 +1187,20 @@ async function route(req, res, body) {
   }
 
   if (req.method === 'POST' && url.pathname === '/api/bob/human-tests') {
-    const mode = body?.mode === 'live' ? 'live' : 'fixture';
+    const mode = body?.mode === 'suite' ? 'suite' : body?.mode === 'live' ? 'live' : 'fixture';
     const scope = 'full';
     const requestedBy = typeof body?.requested_by === 'string' ? body.requested_by.slice(0, 120) : 'bob';
-    if (mode === 'live' && (!process.env.HUMAN_TEST_BASE_URL || !process.env.GRANDMASTER_TEST_EMAIL || !process.env.GRANDMASTER_TEST_PASSWORD)) {
+    const expectedSha = typeof body?.expected_sha === 'string' && /^[a-f0-9]{40}$/i.test(body.expected_sha)
+      ? body.expected_sha.toLowerCase()
+      : null;
+    const targetRoute = typeof body?.target_route === 'string' && /^\/[A-Za-z0-9/_-]*$/.test(body.target_route)
+      ? body.target_route
+      : null;
+    if ((mode === 'live' || mode === 'suite') && (!process.env.HUMAN_TEST_BASE_URL || !process.env.GRANDMASTER_TEST_EMAIL || !process.env.GRANDMASTER_TEST_PASSWORD || !process.env.VERCEL_TOKEN || !process.env.VERCEL_PROJECT_ID)) {
       return json(res, 409, { error: 'Dedicated live human-test identity and target URL are not configured' });
     }
     try {
-      const started = await startHumanTestRun({ mode, scope, requestedBy });
+      const started = await startHumanTestRun({ mode, scope, requestedBy, expectedSha, targetRoute });
       return json(res, started.existing ? 200 : 202, started);
     } catch (error) {
       return json(res, error.status || 503, { error: failureDetail(error) });

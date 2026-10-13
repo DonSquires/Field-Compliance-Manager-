@@ -131,14 +131,22 @@ serve(async req => {
 
   if (action === 'human_test_start' || action === 'human_test_status') {
     if (!CONTROL_PLANE_URL || !CONTROL_PLANE_TOKEN) return json({ error: 'Builder execution host is unavailable' }, 503);
-    const mode = body.mode === 'live' ? 'live' : 'fixture';
-    if (mode === 'live' && role !== 'grand_master') return json({ error: 'Live human testing is restricted to grand master' }, 403);
+    const mode = body.mode === 'suite' ? 'suite' : body.mode === 'live' ? 'live' : 'fixture';
+    if ((mode === 'live' || mode === 'suite') && role !== 'grand_master') return json({ error: 'Live human testing is restricted to grand master' }, 403);
+    const expectedSha = typeof body.expected_sha === 'string' && /^[a-f0-9]{40}$/i.test(body.expected_sha.trim())
+      ? body.expected_sha.trim().toLowerCase()
+      : null;
+    const targetRoute = typeof body.target_route === 'string' && /^\/[A-Za-z0-9/_-]*$/.test(body.target_route.trim())
+      ? body.target_route.trim()
+      : null;
     const runId = typeof body.run_id === 'string' && /^[0-9a-f-]{36}$/i.test(body.run_id) ? body.run_id : null;
     const result = action === 'human_test_start'
       ? await relay('/api/bob/human-tests', 'POST', {
           mode,
           scope: 'full',
           requested_by: user.id,
+          ...(expectedSha ? { expected_sha: expectedSha } : {}),
+          ...(targetRoute ? { target_route: targetRoute } : {}),
         })
       : await relay(runId ? `/api/bob/human-tests/${runId}` : '/api/bob/human-tests/latest', 'GET');
     const run = result.payload.run && typeof result.payload.run === 'object'
