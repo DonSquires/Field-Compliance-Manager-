@@ -9913,7 +9913,7 @@ serve(async (req)=>{
             'builder_model_runs',
             'builder_worker_runs'
           ],
-          include_relationships: true
+          include_relationships: false
         }
       : { include_relationships: false };
     if (explicitAtlasRequest && chosenTool !== 'query_atlas') {
