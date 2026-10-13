@@ -18,6 +18,7 @@ const builderIntentSource = chat.slice(builderIntentStart, chat.indexOf('    con
   .replace(/\(text: string\)/g, '(text)')
   .replace('(text: string, fallbackFrontend = false, fallbackBackend = true)', '(text, fallbackFrontend = false, fallbackBackend = true)');
 const explicitBuilderCreationRequest = vm.runInNewContext(`(() => { ${builderIntentSource} return explicitBuilderCreationRequest; })()`);
+const builderLanesForOwnerRequest = vm.runInNewContext(`(() => { ${builderIntentSource} return builderLanesForOwnerRequest; })()`);
 
 const request = "In Bob's chat, whenever Bob asks me a question or proposes something that needs my confirmation — a Builder job proposal, a laptop command, a cancellation — show tappable choice buttons under his message, for example 'Yes, run it' / 'Change it' / 'No'. Server side, in supabase/functions/onspace-ai-chat/index.ts, include meta.options on every proposed outcome; client side, in apps/web/src/components/BobPanel.tsx, render metadata.options as accessible buttons. Add component tests.";
 
@@ -97,6 +98,10 @@ test('Codespaces-like Builder and vibe-coding workspace requests are software-bu
   assert.equal(explicitBuilderCreationRequest('Redesign Bob Builder as a fully functioning Codespaces-like coding workspace.'), true);
   assert.equal(explicitBuilderCreationRequest('Design the Bob Builder vibe coding agent from scratch.'), true);
   assert.equal(explicitBuilderCreationRequest('Explain how a generic system works.'), false);
+  assert.deepEqual(
+    JSON.parse(JSON.stringify(builderLanesForOwnerRequest('Design Bob Builder as a fully functioning Codespaces-like vibe coding system.'))),
+    { frontend: true, backend: true },
+  );
 });
 
 test('explicit Atlas and schema audits cannot escape into web research or omit schema', () => {

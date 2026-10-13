@@ -8020,6 +8020,9 @@ serve(async (req)=>{
         frontend: paths.some((path) => path.startsWith('apps/web/')),
         backend: paths.some((path) => !path.startsWith('apps/web/'))
       };
+      if (/\b(?:codespaces?|coding (?:system|workspace|agent)|developer (?:environment|workspace)|vibe coding)\b/i.test(ownerText)) {
+        return { frontend: true, backend: true };
+      }
       const frontend = /\b(?:ui|ux|page|panel|component|screen|web app|frontend|css|react|tsx|website|portal)\b/i.test(ownerText);
       const backend = /\b(?:backend|api|rpc|schema|database|supabase|edge function|server|service|worker|migration|auth|rls)\b/i.test(ownerText);
       if (frontend || backend) return { frontend, backend };
