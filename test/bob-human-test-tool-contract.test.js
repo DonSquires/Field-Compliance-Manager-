@@ -51,5 +51,6 @@ test('self-heal deployment truth requires merge, production, and live receipts',
   assert.match(controlPlane, /reconcileInvalidSelfHealDeployments/);
   assert.match(controlPlane, /builder\.self_heal\.false_deployment_corrected/);
   assert.match(controlPlane, /verifyGitHubProductionRelease/);
-  assert.match(controlPlane, /event_type: 'job_deployed'/);
+  assert.match(controlPlane, /event_type: 'job_status_changed'/);
+  assert.match(controlPlane, /false deployment correction audit could not be recorded/);
 });

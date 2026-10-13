@@ -901,14 +901,15 @@ async function reconcileInvalidSelfHealDeployments() {
       .eq('id', job.id)
       .eq('status', 'deployed');
     if (updateError) throw new Error(`invalid self-heal deployment could not be corrected: ${updateError.message}`);
-    await builderSupabase.from('builder_audit_events').insert({
+    const { error: auditError } = await builderSupabase.from('builder_audit_events').insert({
       organization_id: job.organization_id,
       job_id: job.id,
-      event_type: 'job_failed',
+      event_type: 'job_status_changed',
       actor_type: 'bot',
       new_value: { status: 'failed', reason: 'missing_release_receipts' },
       change_summary: reason,
     });
+    if (auditError) throw new Error(`false deployment correction audit could not be recorded: ${auditError.message}`);
     record('autopilot', 'builder.self_heal.false_deployment_corrected', job.id, {});
   }
 }
@@ -972,7 +973,7 @@ async function autopilotOnce() {
           const { error: auditError } = await builderSupabase.from('builder_audit_events').insert({
             organization_id: current.organization_id,
             job_id: jobId,
-            event_type: 'job_deployed',
+            event_type: 'job_status_changed',
             actor_type: 'bot',
             new_value: deployment,
             change_summary: 'Verified GitHub merge, successful Production deployment, and responsive live URL recorded',
