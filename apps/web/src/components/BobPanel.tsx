@@ -1066,6 +1066,9 @@ export const BobPanel: React.FC<BobPanelProps> = ({ open, onClose, context, mode
       subhead: 'Describe the change and Bob plans, implements, verifies, and opens a draft pull request for review.',
       placeholder: 'Describe what you want to build, change, or fix',
       quickActions: [
+        { label: 'Build an app', prompt: 'Build me a small app or workflow from this plain-language goal: [describe the user, job to be done, and outcome].' },
+        { label: 'Change code', prompt: 'Add or change this page, component, workflow, or API: [describe the intended behaviour and acceptance test].' },
+        { label: 'Self-heal', prompt: 'Repair this reproducible software problem: [describe the failure, where it appears, and the expected result].' },
         { label: 'Inspect job', prompt: 'Inspect the selected Builder job and propose the next implementation step.' },
         { label: 'Plan implementation', prompt: 'Create an implementation plan with affected files, verification steps, and unknowns.' },
         { label: 'Review evidence', prompt: 'Review the current artifacts and explain the next safe repair or build action.' },

@@ -15,7 +15,7 @@ const builderBriefGrounding = vm.runInNewContext(`(() => { ${source} return buil
 const builderIntentStart = chat.indexOf('    const explicitBuilderCreationRequest = ');
 assert.ok(builderIntentStart >= 0);
 const builderIntentSource = chat.slice(builderIntentStart, chat.indexOf('    const builderJobArgsFromEvidence = ', builderIntentStart))
-  .replace('(text: string)', '(text)');
+  .replace(/\(text: string\)/g, '(text)');
 const explicitBuilderCreationRequest = vm.runInNewContext(`(() => { ${builderIntentSource} return explicitBuilderCreationRequest; })()`);
 
 const request = "In Bob's chat, whenever Bob asks me a question or proposes something that needs my confirmation — a Builder job proposal, a laptop command, a cancellation — show tappable choice buttons under his message, for example 'Yes, run it' / 'Change it' / 'No'. Server side, in supabase/functions/onspace-ai-chat/index.ts, include meta.options on every proposed outcome; client side, in apps/web/src/components/BobPanel.tsx, render metadata.options as accessible buttons. Add component tests.";
@@ -100,6 +100,17 @@ test('an explicit self-heal request turns a confirmed friction route into a real
   assert.match(builder, /const confirmedByTriage = toolArgs\.owner_instruction_confirmed === true/);
   assert.match(builder, /navigation_actions: \[\{ label: 'Open Builder control room'/);
   assert.match(builder, /label: 'Merge, deploy, and prove in the glass'/);
+});
+
+test('natural-language Builder jobs carry an explicit app, coding, or self-heal mode contract', () => {
+  const argsStart = chat.indexOf('    const builderModeForRequest = ');
+  const argsSource = chat.slice(argsStart, chat.indexOf('/** Dispatch a single tool', argsStart))
+    .replace('(text: string, evidenceSteps: Array<{ tool: string; result_summary: string }>)', '(text, evidenceSteps)')
+    .replace(/\(text: string\)/g, '(text)');
+  const builderJobArgsFromEvidence = vm.runInNewContext(`(() => { ${argsSource} return builderJobArgsFromEvidence; })()`);
+  assert.match(builderJobArgsFromEvidence('Build me a patrol handover app', []).task_description, /Builder mode: no_code_app_generation/);
+  assert.match(builderJobArgsFromEvidence('Add an API-backed handover page', []).task_description, /Builder mode: chat_to_code/);
+  assert.match(builderJobArgsFromEvidence('Repair the failing Builder test', []).task_description, /Builder mode: autonomous_self_heal/);
 });
 
 test('the exact live owner request is recognised as Builder creation intent', () => {

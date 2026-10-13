@@ -7987,14 +7987,20 @@ serve(async (req)=>{
       if (!normalized) return false;
       if (/\b(?:plan only|explain only|review only|do not (?:create|open|start)|dont (?:create|open|start)|without (?:creating|opening|starting))\b/.test(normalized)) return false;
       const asksForBuilder = /\b(?:builder(?: job)?|draft (?:pull request|pr)|self[- ]heal|app design(?:\/| )build agent)\b/.test(normalized);
-      const asksForImplementation = /\b(?:build|implement|fix|repair|change|redesign|refactor|add|create|make|develop|ship)\b/.test(normalized);
+      const asksForImplementation = /\b(?:build|implement|fix|repair|change|redesign|refactor|add|create|make|develop|design|generate|prototype|ship)\b/.test(normalized);
       const namesBuildTarget = /\b(?:app|application|code|repository|repo|ui|ux|panel|page|component|function|test|accessibility|feature|workflow|module|screen|website|portal)\b/.test(normalized);
       // Owners should not have to know Bob's internal "Builder" term. Ordinary
       // app-building language is still a governed Builder request when it names
       // a software surface or workflow rather than a business record.
-      const naturalAppBuild = /\b(?:build|create|make|develop|ship)\b.{0,100}\b(?:app|application|feature|workflow|module|screen|page|component|website|portal)\b/.test(normalized)
+      const naturalAppBuild = /\b(?:build|create|make|develop|design|generate|prototype|ship)\b.{0,100}\b(?:app|application|feature|workflow|module|screen|page|component|website|portal)\b/.test(normalized)
         || /\b(?:add|implement|fix|repair|change|redesign|refactor)\b.{0,100}\b(?:code|repository|repo|ui|ux|panel|page|component|function|test|accessibility|workflow)\b/.test(normalized);
       return (asksForBuilder || naturalAppBuild) && asksForImplementation && namesBuildTarget;
+    };
+    const builderModeForRequest = (text: string) => {
+      const normalized = String(text ?? '').toLowerCase();
+      if (/\b(?:self[- ]heal|repair|fix|failing test|broken|regression|error|bug)\b/.test(normalized)) return 'autonomous_self_heal';
+      if (/\b(?:app|application|portal|website|prototype)\b/.test(normalized) && /\b(?:build|create|make|develop|design|generate|prototype)\b/.test(normalized)) return 'no_code_app_generation';
+      return 'chat_to_code';
     };
     const builderJobArgsFromEvidence = (text: string, evidenceSteps: Array<{ tool: string; result_summary: string }>) => {
       const requestBrief = String(text ?? '').trim();
@@ -8002,9 +8008,17 @@ serve(async (req)=>{
       const evidenceSummary = evidenceSteps
         .map((step) => `${step.tool}: ${step.result_summary.slice(0, 500)}`)
         .join('\n');
+      const builderMode = builderModeForRequest(requestBrief);
       return {
         title: (firstSentence || 'Implement the requested FCM change').slice(0, 160),
         task_description: [
+          `Builder mode: ${builderMode}`,
+          builderMode === 'no_code_app_generation'
+            ? 'Translate the owner’s plain-language product goal into a bounded app slice: propose the user/role/job-to-be-done, schema-backed information architecture, responsive UI states, governed data path, and acceptance evidence before implementation.'
+            : builderMode === 'chat_to_code'
+              ? 'Translate the owner’s plain-language request into source changes: inspect the existing code and schema, preserve shared spines, implement the smallest coherent patch, and return a draft pull request with exact verification receipts.'
+              : 'Treat this as a bounded repair: reproduce the reported failure, identify the smallest safe cause, repair only the affected surface, and stop for human review if the scope expands or a protected/evidential path appears.',
+          'Autonomy contract: the isolated Builder worker may inspect, edit, test, iterate, and independently review this job. It may not merge, deploy, apply migrations, change auth/RLS/dependencies/environment, or invent an unrequested capability.',
           requestBrief,
           '',
           'Evidence gathered before proposal:',
