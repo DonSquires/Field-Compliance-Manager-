@@ -8005,6 +8005,18 @@ serve(async (req)=>{
     const builderRepositoryPaths = (text: string) => String(text ?? '')
       .replace(/https?:\/\/[^\s<>()]+/gi, ' ')
       .match(/\b(?:apps|supabase|services|scripts|test|docs|deploy)\/[\w./-]+/g) ?? [];
+    const builderLanesForOwnerRequest = (text: string, fallbackFrontend = false, fallbackBackend = true) => {
+      const ownerText = String(text ?? '');
+      const paths = builderRepositoryPaths(ownerText);
+      if (paths.length) return {
+        frontend: paths.some((path) => path.startsWith('apps/web/')),
+        backend: paths.some((path) => !path.startsWith('apps/web/'))
+      };
+      const frontend = /\b(?:ui|ux|page|panel|component|screen|web app|frontend|css|react|tsx|website|portal)\b/i.test(ownerText);
+      const backend = /\b(?:backend|api|rpc|schema|database|supabase|edge function|server|service|worker|migration|auth|rls)\b/i.test(ownerText);
+      if (frontend || backend) return { frontend, backend };
+      return { frontend: fallbackFrontend, backend: fallbackBackend };
+    };
     const builderJobArgsFromEvidence = (text: string, evidenceSteps: Array<{ tool: string; result_summary: string }>) => {
       const requestBrief = String(text ?? '').trim();
       const firstSentence = requestBrief.replace(/\s+/g, ' ').split(/(?<=[.!?])\s/)[0];
@@ -9239,10 +9251,9 @@ serve(async (req)=>{
               bjDescription = `${ownWords.slice(0, 11000)}\n\nAcceptance: the change does what this brief says, existing tests pass, and new tests cover the change.`;
               bjGroundingNote = `_The drafted brief did not match what you asked (${bjGrounding.missing_paths.length ? `it dropped ${bjGrounding.missing_paths.slice(0, 2).join(', ')}` : `${Math.round(bjGrounding.overlap * 100)}% of your words`}), so I have used your own words as the brief._`;
             }
-            // Self-heal spans the repository (backend lane); the web lane joins only when the brief is about the app UI.
-            // Paths named in the brief are evidence and win over the model's guess: the web lane edits only
-            // apps/web/, so a mobile screen (apps/mobile) or anything else is backend-lane work even when the
-            // words say "component"/"screen" (job 958829bd was scoped frontend-only and could not touch it).
+            // Lane selection is consequence-bearing scope. Use the owner's words and owner-named paths,
+            // never planner prose or delegated research: those may mention docs/ or URL fragments that are
+            // evidence, not permission to edit another lane.
             const bjText = `${bjTitle} ${bjDescription}`;
             const bjResearchRequired = /\b(?:web research|internet|online research|public sources?|inspiration from|inspired by|use the internet|other apps)\b/i.test(bjText);
             const bjResearchUrls = [...new Set((bjText.match(/https:\/\/[^\s<>()\]\["']+/g) ?? []).map((url) => url.replace(/[.,;:!?]+$/, '')))];
@@ -9252,12 +9263,18 @@ serve(async (req)=>{
                 meta: { tool: 'create_builder_job', outcome: 'need_research', required_sources: 4, supplied_sources: bjResearchUrls.length }
               };
             }
-            const bjPaths = builderRepositoryPaths(bjText);
-            const bjWebPaths = bjPaths.filter((p)=>p.startsWith('apps/web/'));
-            const bjOtherPaths = bjPaths.filter((p)=>!p.startsWith('apps/web/'));
-            const bjMentionsWeb = /\b(ui|page|panel|component|screen|web app|frontend|apps\/web|css|react|tsx)\b/i.test(bjText);
-            const bjFrontend = bjPaths.length ? bjWebPaths.length > 0 : typeof toolArgs.frontend_required === 'boolean' ? toolArgs.frontend_required : storedJob ? storedJob.frontend_required === true : bjMentionsWeb;
-            const bjBackend = bjPaths.length ? bjOtherPaths.length > 0 : typeof toolArgs.backend_required === 'boolean' ? toolArgs.backend_required : storedJob ? storedJob.backend_required !== false : true;
+            const ownerScopeText = storedJob
+              ? `${storedJob.title || ''} ${storedJob.task_description || ''}`
+              : String(bjGrounding.source || message || '');
+            const fallbackFrontend = storedJob
+              ? storedJob.frontend_required === true
+              : typeof toolArgs.frontend_required === 'boolean' ? toolArgs.frontend_required : false;
+            const fallbackBackend = storedJob
+              ? storedJob.backend_required !== false
+              : typeof toolArgs.backend_required === 'boolean' ? toolArgs.backend_required : true;
+            const bjLanes = builderLanesForOwnerRequest(ownerScopeText, fallbackFrontend, fallbackBackend);
+            const bjFrontend = bjLanes.frontend;
+            const bjBackend = bjLanes.backend;
             const bjReviewRaw = String(toolArgs.code_review_mode ?? storedJob?.code_review_mode ?? 'independent_ai');
             const bjReview = bjReviewRaw === 'human' ? 'human' : 'independent_ai';
             if (!bjTitle || bjDescription.length < 40) {

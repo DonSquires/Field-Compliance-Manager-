@@ -15,7 +15,8 @@ const builderBriefGrounding = vm.runInNewContext(`(() => { ${source} return buil
 const builderIntentStart = chat.indexOf('    const explicitBuilderCreationRequest = ');
 assert.ok(builderIntentStart >= 0);
 const builderIntentSource = chat.slice(builderIntentStart, chat.indexOf('    const builderJobArgsFromEvidence = ', builderIntentStart))
-  .replace(/\(text: string\)/g, '(text)');
+  .replace(/\(text: string\)/g, '(text)')
+  .replace('(text: string, fallbackFrontend = false, fallbackBackend = true)', '(text, fallbackFrontend = false, fallbackBackend = true)');
 const explicitBuilderCreationRequest = vm.runInNewContext(`(() => { ${builderIntentSource} return explicitBuilderCreationRequest; })()`);
 
 const request = "In Bob's chat, whenever Bob asks me a question or proposes something that needs my confirmation — a Builder job proposal, a laptop command, a cancellation — show tappable choice buttons under his message, for example 'Yes, run it' / 'Change it' / 'No'. Server side, in supabase/functions/onspace-ai-chat/index.ts, include meta.options on every proposed outcome; client side, in apps/web/src/components/BobPanel.tsx, render metadata.options as accessible buttons. Add component tests.";
@@ -106,6 +107,7 @@ test('natural-language Builder jobs carry an explicit app, coding, or self-heal 
   const argsStart = chat.indexOf('    const builderModeForRequest = ');
   const argsSource = chat.slice(argsStart, chat.indexOf('/** Dispatch a single tool', argsStart))
     .replace('(text: string, evidenceSteps: Array<{ tool: string; result_summary: string }>)', '(text, evidenceSteps)')
+    .replace('(text: string, fallbackFrontend = false, fallbackBackend = true)', '(text, fallbackFrontend = false, fallbackBackend = true)')
     .replace(/\(text: string\)/g, '(text)');
   const builderJobArgsFromEvidence = vm.runInNewContext(`(() => { ${argsSource} return builderJobArgsFromEvidence; })()`);
   assert.match(builderJobArgsFromEvidence('Build me a patrol handover app', []).task_description, /Builder mode: no_code_app_generation/);
@@ -144,13 +146,18 @@ test('research URLs cannot be mistaken for repository paths when Builder chooses
   const pathsStart = chat.indexOf('    const builderRepositoryPaths = ');
   assert.ok(pathsStart >= 0);
   const pathsSource = chat.slice(pathsStart, chat.indexOf('    const builderJobArgsFromEvidence = ', pathsStart))
-    .replace('(text: string)', '(text)');
+    .replace('(text: string)', '(text)')
+    .replace('(text: string, fallbackFrontend = false, fallbackBackend = true)', '(text, fallbackFrontend = false, fallbackBackend = true)');
   const builderRepositoryPaths = vm.runInNewContext(`(() => { ${pathsSource} return builderRepositoryPaths; })()`);
+  const builderLanesForOwnerRequest = vm.runInNewContext(`(() => { ${pathsSource} return builderLanesForOwnerRequest; })()`);
   assert.deepEqual([...builderRepositoryPaths('Research https://example.com/ai-apps/ui-patterns for this UI redesign')], []);
   assert.deepEqual([...builderRepositoryPaths('Change apps/web/src/pages/BuilderControlRoomPage.tsx and test/builder.test.js')], [
     'apps/web/src/pages/BuilderControlRoomPage.tsx',
     'test/builder.test.js'
   ]);
+  assert.deepEqual({ ...builderLanesForOwnerRequest('redesign the Bob Builder system UI UX') }, { frontend: true, backend: false });
+  assert.deepEqual({ ...builderLanesForOwnerRequest('change the Builder API and schema') }, { frontend: false, backend: true });
+  assert.deepEqual({ ...builderLanesForOwnerRequest('update the Builder UI and API') }, { frontend: true, backend: true });
 });
 
 test('research-driven Builder jobs preserve provenance and cannot open without four sources', () => {

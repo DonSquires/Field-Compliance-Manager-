@@ -153,6 +153,10 @@ permission constant, Tailwind-like token set, generic approval state, and mobile
 accordion. Pinned `PRODUCT_DESIGN.md`, `tokens.css`, and Builder AdminShell evidence
 now enter design context. UX validation rejects unsupplied routes, access boundaries,
 components and tokens, plus unresolved questions already answered by that evidence.
+A subsequent planner variation inserted repository-research `docs/` paths into the
+brief and again selected backend-only work. Builder lane scope is now derived only
+from the owner's words and owner-named paths; planner prose, delegated findings,
+and research URLs cannot authorize or suppress frontend/backend work.
 
 Builder restart acceptance 2026-10-13: the same monitored redesign exposed a
 second orphan class. A control-plane deployment landed after product analysis
