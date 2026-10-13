@@ -170,4 +170,8 @@ test('explicit owner redesign research continues into Builder without another hu
   assert.match(chat, /result\.meta\.research_attempts = researchSteps\.length/);
   assert.match(chat, /LOOP_CONTINUABLE_READ_TOOLS\.has\(chosenTool\) \|\| chosenTool === 'web_research'/);
   assert.match(chat, /builderJobArgsFromEvidence\(message, loopSteps\)/);
+  assert.match(chat, /const delegatedWebResearch = subagentRunsThisTurn\.filter/);
+  assert.match(chat, /step\?\.tool === 'web_research' && step\?\.outcome === 'ok'/);
+  assert.match(chat, /example\\\.com/);
+  assert.match(chat, /Governed web research supplied by Bob’s research subagent/);
 });

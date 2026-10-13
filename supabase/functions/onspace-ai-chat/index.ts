@@ -9209,6 +9209,24 @@ serve(async (req)=>{
             const storedJob = pending && pending.kind === 'builder_job_pending' && pending.builder_job ? pending.builder_job : null;
             let bjTitle = String(toolArgs.title ?? storedJob?.title ?? '').trim().slice(0, 200);
             let bjDescription = String(toolArgs.task_description ?? toolArgs.brief ?? storedJob?.task_description ?? '').trim().slice(0, 12000);
+            const delegatedWebResearch = subagentRunsThisTurn.filter((run) => Array.isArray(run.steps)
+              && run.steps.some((step) => step?.tool === 'web_research' && step?.outcome === 'ok'));
+            const delegatedResearchUrls = [...new Set(delegatedWebResearch
+              .flatMap((run) => Array.isArray(run.sources) ? run.sources : [])
+              .filter((url) => /^https:\/\//i.test(String(url)) && !/^https:\/\/example\.com\//i.test(String(url))))].slice(0, 8);
+            if (delegatedResearchUrls.length) {
+              const delegatedFindings = delegatedWebResearch
+                .map((run) => String(run.findings_preview || '').trim().slice(0, 1500))
+                .filter(Boolean)
+                .join('\n');
+              bjDescription = [
+                bjDescription,
+                '',
+                'Governed web research supplied by Bob’s research subagent:',
+                ...delegatedResearchUrls.map((url) => `- ${url}`),
+                delegatedFindings ? `Observed research summary:\n${delegatedFindings}` : ''
+              ].filter(Boolean).join('\n').slice(0, 12000);
+            }
             // A small in-house planner once proposed its prompt's own example brief ("Zone 123 at Client XYZ")
             // for a request about chat buttons, and the owner's yes opened it (job b2ce9660, 2026-09-27). A brief
             // that is not about what the person said is replaced by their words, and the proposal says so.

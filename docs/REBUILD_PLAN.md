@@ -143,6 +143,10 @@ fresh retest then exposed the alternate `repo_search` → in-loop `web_research`
 route ending in synthesized design prose. The explicit-owner-build completion
 bridge now accepts that researched read route too (with the same bounded follow-up
 and source gate) without adding web research to the general autonomous allowlist.
+The following run reached Builder but showed `supplied_sources: 0` even though a
+research subagent had returned six public sources: planner arguments had dropped
+the delegated evidence. Job creation now preserves bounded findings and non-example
+URLs from successful delegated `web_research` steps before applying the same gate.
 
 Builder restart acceptance 2026-10-13: the same monitored redesign exposed a
 second orphan class. A control-plane deployment landed after product analysis
