@@ -136,6 +136,13 @@ test('a terse proceed recovers the original build request and completed subagent
   const afterProceed = enforceBuilderProgression({ action: 'answer', tool: null, args: {}, reply: 'More prose.' }, input);
   assert.equal(afterProceed.tool, 'repo_search');
   assert.deepEqual(afterProceed.args, { action: 'search', query: 'BuilderControlRoomPage|BobPanel|builder' });
+  assert.equal(
+    enforceBuilderProgression(
+      { action: 'answer', tool: null, args: {}, reply: 'More prose.' },
+      { ...input, history: [{ role: 'user', content: 'redesign the bob buider system ui ux using the internet for inspiration' }] },
+    ).args.query,
+    'BuilderControlRoomPage|BobPanel|builder',
+  );
 
   input.taskState.subagent_results[0].steps[1] = { tool: 'repo_search', outcome: 'ok', result_summary: 'BuilderControlRoomPage.tsx owns the current workspace.' };
   const proposal = enforceBuilderProgression({ action: 'delegate', tool: null, args: {}, reply: 'Delegating again.' }, input);

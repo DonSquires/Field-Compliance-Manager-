@@ -49,7 +49,7 @@ function delegableTools(tools) {
 
 function builderSearchQuery(message) {
   const text = String(message || '');
-  if (/\bbuilder\b/i.test(text)) return 'BuilderControlRoomPage|BobPanel|builder';
+  if (/\bbui(?:l)?der\b/i.test(text)) return 'BuilderControlRoomPage|BobPanel|builder';
   const paths = text.match(/\b(?:apps|services|supabase|scripts|test)\/[\w./-]+/g);
   if (paths && paths.length) return [...new Set(paths)].slice(0, 4).join('|');
   const stop = new Set(['please', 'build', 'create', 'make', 'develop', 'design', 'redesign', 'generate', 'implement', 'change', 'improve', 'system', 'using', 'with', 'from', 'this', 'that', 'more']);
