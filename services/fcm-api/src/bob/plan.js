@@ -57,10 +57,41 @@ function builderSearchQuery(message) {
   return terms.join('|') || 'BuilderControlRoomPage|BobPanel';
 }
 
+function builderRequestText(input) {
+  const current = String(input.message || '').trim();
+  if (isCodeRequest(current)) return current;
+  const goal = String(input.taskState?.goal || '').trim();
+  if (isCodeRequest(goal)) return goal;
+  const history = Array.isArray(input.history) ? input.history : [];
+  for (let index = history.length - 1; index >= 0; index--) {
+    const item = history[index];
+    const content = item && item.role === 'user' ? String(item.content || '').trim() : '';
+    if (isCodeRequest(content)) return content;
+  }
+  return current;
+}
+
+function builderEvidence(input) {
+  const taskState = input.taskState && typeof input.taskState === 'object' ? input.taskState : {};
+  const steps = Array.isArray(taskState.steps_taken) ? taskState.steps_taken : [];
+  const subagents = Array.isArray(taskState.subagent_results) ? taskState.subagent_results : [];
+  const flattened = [...steps];
+  for (const agent of subagents) {
+    const agentSteps = Array.isArray(agent?.steps) ? agent.steps : [];
+    for (const step of agentSteps) flattened.push({ ...step, result_summary: step.result_summary || agent.findings || agent.findings_preview });
+  }
+  const completed = (tool) => flattened.some((step) => step?.tool === tool && !['not_found', 'empty', 'error', 'failed'].includes(String(step.outcome || '').toLowerCase()));
+  return {
+    steps: flattened,
+    researched: completed('web_research'),
+    sourceInspected: completed('repo_search'),
+  };
+}
+
 function builderProposalArgs(input) {
-  const message = String(input.message || '').trim();
-  const steps = Array.isArray(input.taskState?.steps_taken) ? input.taskState.steps_taken : [];
-  const evidence = steps
+  const message = builderRequestText(input);
+  const evidenceState = builderEvidence(input);
+  const evidence = evidenceState.steps
     .filter((step) => step && typeof step.tool === 'string')
     .map((step) => `${step.tool}: ${String(step.result_summary || step.outcome || 'completed').slice(0, 700)}`)
     .join('\n');
@@ -89,24 +120,38 @@ function builderProposalArgs(input) {
 
 function enforceBuilderProgression(decision, input) {
   const tools = new Set((input.tools || []).map((tool) => tool && tool.tool).filter(Boolean));
-  if (!tools.has('create_builder_job') || !isCodeRequest(input.message)) return decision;
-  const steps = Array.isArray(input.taskState?.steps_taken) ? input.taskState.steps_taken : [];
-  const used = new Set(steps.map((step) => step && step.tool).filter(Boolean));
+  const request = builderRequestText(input);
+  if (!tools.has('create_builder_job') || !isCodeRequest(request)) return decision;
+  const evidence = builderEvidence(input);
+  const used = new Set(evidence.steps.map((step) => step && step.tool).filter(Boolean));
   const repeatedRead = decision.action === 'use_tool' && used.has(decision.tool);
+  const asksForResearch = /\b(?:internet|online|web|research|inspiration|inspire|other apps?|examples?)\b/i.test(request);
 
-  if (used.has('web_research') && !used.has('repo_search') && tools.has('repo_search') && (repeatedRead || decision.action === 'answer')) {
+  if (asksForResearch && !evidence.researched && tools.has('web_research') && ['answer', 'use_tool'].includes(decision.action) && decision.tool !== 'web_research') {
+    return {
+      ...decision,
+      action: 'use_tool',
+      tool: 'web_research',
+      args: {},
+      reply: 'I am gathering current professional product patterns before changing the existing Builder interface.',
+      reasoning: 'The owner explicitly requested external inspiration; gather that evidence before source inspection and implementation.',
+      route_selected: 'web_research',
+    };
+  }
+
+  if (!evidence.sourceInspected && tools.has('repo_search') && (evidence.researched || decision.action === 'answer' || decision.tool === 'create_builder_job' || repeatedRead)) {
     return {
       ...decision,
       action: 'use_tool',
       tool: 'repo_search',
-      args: { action: 'search', query: builderSearchQuery(input.message) },
+      args: { action: 'search', query: builderSearchQuery(request) },
       reply: 'I have the external design evidence. I am now inspecting the existing Builder source and tests so the redesign brief is grounded in the real system.',
       reasoning: 'Advance the natural-language Builder request from completed external research to repository evidence instead of repeating the same research step.',
       route_selected: 'repo_search',
     };
   }
 
-  if (used.has('repo_search') && (repeatedRead || decision.action === 'answer')) {
+  if (evidence.sourceInspected && (repeatedRead || decision.action === 'answer' || decision.action === 'delegate' || decision.tool === 'create_builder_job')) {
     return {
       ...decision,
       action: 'use_tool',
@@ -286,4 +331,4 @@ async function planTurn(body, { gateway, now = Date.now, logger = console, env =
   };
 }
 
-module.exports = { DELEGABLE_TOOL_RE, authorEffort, builderProposalArgs, builderSearchQuery, delegableTools, enforceBuilderProgression, planTurn, readBody, runPlannerOnce };
+module.exports = { DELEGABLE_TOOL_RE, authorEffort, builderEvidence, builderProposalArgs, builderRequestText, builderSearchQuery, delegableTools, enforceBuilderProgression, planTurn, readBody, runPlannerOnce };

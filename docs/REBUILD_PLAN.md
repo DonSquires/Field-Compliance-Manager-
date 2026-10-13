@@ -98,7 +98,10 @@ advancing. The VPS planner now deterministically advances a grounded software
 request from completed web research to repository inspection, then from source
 evidence to the existing two-turn `create_builder_job` proposal. This guard does
 not skip evidence, confirmation, isolated execution, review, or protected
-release gates.
+release gates. A terse follow-up such as "proceed" now recovers the original
+software request from the conversation, counts successful research subagent
+steps as evidence, rejects vague or `not_found` repository searches, and
+normalizes premature Builder calls into the actual job argument contract.
 
 Runtime acceptance 2026-10-11: the laptop vision watcher now writes an
 independent liveness heartbeat and its Docker health check terminates only a

@@ -77,42 +77,72 @@ test('planner teaches natural-language app building to use the governed Builder 
     message: 'Build me an app for patrol handovers',
     tools: [{ tool: 'repo_search', purpose: 'inspect source' }, { tool: 'create_builder_job', purpose: 'open a governed Builder job' }],
   });
-
-  test('natural-language Builder work advances from web research to source inspection to a job proposal', () => {
-    const tools = [
-      { tool: 'web_research' },
-      { tool: 'repo_search' },
-      { tool: 'create_builder_job' },
-    ];
-    const message = 'Please redesign the Bob Builder system UI UX to be a more professional vibe-focused system, using the internet and other apps for inspiration.';
-    const repeatedResearch = { action: 'use_tool', tool: 'web_research', args: {}, reply: 'researching', route_selected: 'web_research' };
-    const afterResearch = enforceBuilderProgression(repeatedResearch, {
-      message,
-      tools,
-      taskState: { steps_taken: [{ tool: 'web_research', result_summary: 'Professional task-first design patterns.' }] },
-    });
-    assert.equal(afterResearch.tool, 'repo_search');
-    assert.deepEqual(afterResearch.args, { action: 'search', query: 'BuilderControlRoomPage|BobPanel|builder' });
-
-    const stoppedAtProse = { action: 'answer', tool: null, args: {}, reply: 'Here are some ideas.', route_selected: 'answer' };
-    const afterSource = enforceBuilderProgression(stoppedAtProse, {
-      message,
-      tools,
-      taskState: {
-        steps_taken: [
-          { tool: 'web_research', result_summary: 'Professional task-first design patterns.' },
-          { tool: 'repo_search', result_summary: 'BuilderControlRoomPage.tsx and CSS own the current Builder UI.' },
-        ],
-      },
-    });
-    assert.equal(afterSource.tool, 'create_builder_job');
-    assert.match(afterSource.args.task_description, /BuilderControlRoomPage\.tsx/);
-    assert.match(afterSource.args.task_description, /protected human gates/);
-  });
   assert.match(prompt, /BUILD \/ SELF-HEAL/);
   assert.match(prompt, /build me an app/);
   assert.match(prompt, /DRAFT GitHub pull request/);
   assert.match(prompt, /never merge, deploy, apply migrations/);
+});
+
+test('natural-language Builder work advances from web research to source inspection to a job proposal', () => {
+  const tools = [
+    { tool: 'web_research' },
+    { tool: 'repo_search' },
+    { tool: 'create_builder_job' },
+  ];
+  const message = 'Please redesign the Bob Builder system UI UX to be a more professional vibe-focused system, using the internet and other apps for inspiration.';
+  const repeatedResearch = { action: 'use_tool', tool: 'web_research', args: {}, reply: 'researching', route_selected: 'web_research' };
+  const afterResearch = enforceBuilderProgression(repeatedResearch, {
+    message,
+    tools,
+    taskState: { steps_taken: [{ tool: 'web_research', result_summary: 'Professional task-first design patterns.' }] },
+  });
+  assert.equal(afterResearch.tool, 'repo_search');
+  assert.deepEqual(afterResearch.args, { action: 'search', query: 'BuilderControlRoomPage|BobPanel|builder' });
+
+  const stoppedAtProse = { action: 'answer', tool: null, args: {}, reply: 'Here are some ideas.', route_selected: 'answer' };
+  const afterSource = enforceBuilderProgression(stoppedAtProse, {
+    message,
+    tools,
+    taskState: {
+      steps_taken: [
+        { tool: 'web_research', result_summary: 'Professional task-first design patterns.' },
+        { tool: 'repo_search', result_summary: 'BuilderControlRoomPage.tsx and CSS own the current Builder UI.' },
+      ],
+    },
+  });
+  assert.equal(afterSource.tool, 'create_builder_job');
+  assert.match(afterSource.args.task_description, /BuilderControlRoomPage\.tsx/);
+  assert.match(afterSource.args.task_description, /protected human gates/);
+});
+
+test('a terse proceed recovers the original build request and completed subagent research', () => {
+  const original = 'Please redesign the Bob Builder system UI UX to be a more professional vibe-focused system, using the internet and other apps for inspiration.';
+  const tools = [{ tool: 'web_research' }, { tool: 'repo_search' }, { tool: 'create_builder_job' }];
+  const input = {
+    message: 'proceed',
+    history: [{ role: 'user', content: original }, { role: 'assistant', content: 'Here is a design direction.' }],
+    tools,
+    taskState: {
+      subagent_results: [{
+        role: 'research',
+        findings: 'Professional task-first design patterns.',
+        steps: [
+          { tool: 'web_research', outcome: 'ok' },
+          { tool: 'repo_search', outcome: 'not_found' },
+        ],
+      }],
+    },
+  };
+  const afterProceed = enforceBuilderProgression({ action: 'answer', tool: null, args: {}, reply: 'More prose.' }, input);
+  assert.equal(afterProceed.tool, 'repo_search');
+  assert.deepEqual(afterProceed.args, { action: 'search', query: 'BuilderControlRoomPage|BobPanel|builder' });
+
+  input.taskState.subagent_results[0].steps[1] = { tool: 'repo_search', outcome: 'ok', result_summary: 'BuilderControlRoomPage.tsx owns the current workspace.' };
+  const proposal = enforceBuilderProgression({ action: 'delegate', tool: null, args: {}, reply: 'Delegating again.' }, input);
+  assert.equal(proposal.tool, 'create_builder_job');
+  assert.equal(proposal.args.title, original);
+  assert.match(proposal.args.task_description, /BuilderControlRoomPage\.tsx/);
+  assert.doesNotMatch(proposal.args.task_description, /\nproceed\n/);
 });
 
 test('planner is told which files are already in the session and never to ask for them again', () => {
