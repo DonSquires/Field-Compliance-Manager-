@@ -9,7 +9,7 @@ const { execFileSync } = require('node:child_process');
 
 const policy = require('../builder-path-policy');
 const gateway = require('../builder-model-gateway');
-const { runAgenticEngineer, parseToolCall, RUN_ALLOWLIST, buildProposal, createTools, composeRunNote, classifyNoChange, outlineLines, readingMap, taskPacket, DEFAULT_LIMITS } = require('../builder-agentic-engineer');
+const { runAgenticEngineer, parseToolCall, RUN_ALLOWLIST, buildProposal, createTools, composeRunNote, classifyNoChange, outlineLines, readingMap, requiredChangedFilesFromTask, taskPacket, DEFAULT_LIMITS } = require('../builder-agentic-engineer');
 
 test('path policy: protected paths are refused on every lane, lanes split at apps/web', () => {
   for (const file of ['.github/workflows/ci.yml', 'deploy/bob-vps/compose.yml', 'Dockerfile', 'services/fcm-api/Dockerfile', 'docker-compose.full.yml', 'package.json', 'apps/web/package-lock.json', '.env', 'apps/web/.env.production', 'supabase/schema.sql', 'apps/web/src/context/AuthContext.tsx', 'supabase/functions/_shared/auth.ts', 'certs/site.pem', '../etc/passwd', 'a/../../b']) {
@@ -71,11 +71,44 @@ test('tool-call parsing tolerates fences and prose; run allowlist is narrow', ()
   const allowed = (cmd) => RUN_ALLOWLIST.some((pattern) => pattern.test(cmd));
   assert.equal(allowed('node --test test/fcm-api-bob-planner.test.js'), true);
   assert.equal(allowed('node --check services/fcm-api/server.js'), true);
+  assert.equal(allowed('npm run lint --prefix apps/web'), true);
+  assert.equal(allowed('npm run build --prefix apps/web'), true);
+  assert.equal(allowed('npm run test --prefix apps/web -- src/components/BobPanel.test.tsx'), true);
+  assert.equal(allowed('npm run test --prefix apps/web -- --pool=threads --maxWorkers=1 --reporter=dot'), true);
+  assert.equal(allowed('npm run test --prefix apps/web -- src/x.test.tsx; curl bad.example'), false);
   assert.equal(allowed('git diff --stat'), true);
   assert.equal(allowed('rm -rf /'), false);
   assert.equal(allowed('node -e "process.exit(1)"'), false);
   assert.equal(allowed('npm install left-pad'), false);
   assert.equal(allowed('git push origin main'), false);
+});
+
+test('required source scope and admitted partial handoffs fail closed', () => {
+  const repo = makeRepo();
+  const workspaceRoot = path.join(repo.root, 'workspaces');
+  const { createBranchWorkspace } = require('../builder-branch-workspace');
+  const ws = createBranchWorkspace({ sourceDir: repo.source, workspaceRoot, jobId: 'accedeaccedeaccedeaccede', targetSha: repo.sha });
+  const tools = createTools({ workspacePath: ws.workspacePath, repoRoot: repo.source, lane: 'frontend', supabase: null, limits: DEFAULT_LIMITS, log() {} });
+  fs.writeFileSync(path.join(ws.workspacePath, 'apps/web/src/app.tsx'), 'export const a = 2;\n');
+  const required = requiredChangedFilesFromTask('Required source scope: apps/web/src/app.tsx, apps/web/src/layout.css, and related tests.', 'frontend');
+  assert.deepEqual(required, ['apps/web/src/app.tsx', 'apps/web/src/layout.css']);
+  const partial = buildProposal({
+    workspacePath: ws.workspacePath,
+    lane: 'frontend',
+    tools,
+    requiredFiles: required,
+    args: { summary: 'Implemented the first structural slice but did not complete the required layout.', tests: [], follow_ups: ['Complete layout.css'] }
+  });
+  assert.match(partial.error, /summary admits the required implementation is incomplete/);
+  const missing = buildProposal({
+    workspacePath: ws.workspacePath,
+    lane: 'frontend',
+    tools,
+    requiredFiles: required,
+    args: { summary: 'Implemented the complete responsive workspace and verified the resulting diff.', tests: [] }
+  });
+  assert.match(missing.error, /required source scope was not implemented: apps\/web\/src\/layout\.css/);
+  fs.rmSync(repo.root, { recursive: true, force: true });
 });
 
 function makeRepo() {

@@ -38,12 +38,14 @@ const DEFAULT_LIMITS = Object.freeze({
   maxPatchBytes: 2 * 1024 * 1024,
 });
 
-// Commands Bob may run inside his worktree. Verification the worker image owns
-// (web build/tests) is not duplicated here; the handoff runs it independently.
+// The independent worker repeats web verification; bounded checks here let Bob
+// repair failures before handing the patch to that verifier.
 const RUN_ALLOWLIST = [
   /^node --test( test\/[A-Za-z0-9_.\-*]+\.test\.js)*$/,
   /^node --check [A-Za-z0-9_./-]+\.(?:js|mjs|cjs)$/,
   /^node -e "require\('\.\/[A-Za-z0-9_./-]+'\)"$/,
+  /^npm run (?:lint|build) --prefix apps\/web$/,
+  /^npm run test --prefix apps\/web -- [A-Za-z0-9_./*=\- ]+$/,
   /^git (?:status|diff|log|show|blame)(?: [A-Za-z0-9_./=@^~:*-]+)*$/,
 ];
 const SKIP_DIRS = new Set(['node_modules', '.git', 'dist', 'build', 'target', '.next', 'coverage']);
@@ -176,13 +178,13 @@ function systemPrompt({ lane, limits }) {
     '- replace_in_file {path, old_text, new_text, all?}   PREFERRED EDIT: replace one exact occurrence of old_text (copy it verbatim from read_file, several lines is fine) with new_text; all=true replaces every occurrence. Fails safely when the text is missing or ambiguous.',
     '- apply_patch {diff}                     apply a unified diff (git apply); hunk counts must be exact — use replace_in_file instead when unsure',
     '- delete_file {path}                     delete a file',
-    `- run {command}                          allowed: node --test [test files], node --check <file>, git status/diff/log/show/blame (timeout ${Math.round(limits.runTimeoutMs / 60000)} min); chain allowed commands with && (stops at the first failure)`,
+    `- run {command}                          allowed: node --test [test files], node --check <file>, bounded apps/web test/lint/build commands, git status/diff/log/show/blame (timeout ${Math.round(limits.runTimeoutMs / 60000)} min); chain allowed commands with && (stops at the first failure)`,
     '- read_canon {}                          AGENTS.md + docs/canon/README.md + docs/canon/BOB_DOCTRINE.md (bounded)',
     '- read_notes {limit?}                    your persistent builder notes (lessons from earlier jobs); the 10 most recent are already in your task packet',
     '- write_note {text}                      leave a durable lesson for future jobs (short, factual, no secrets)',
     '- finish {summary, tests, rollback_notes, follow_ups?, tests_not_run_reason?, lessons?}   hand over: your worktree diff becomes the reviewed patch. A change that touches tests is refused unless a `node --test` run passed in this session (or tests_not_run_reason says plainly why none could). lessons: up to 3 short, generalisable facts about this codebase or these tools that would save a future job time (or omit).',
     '',
-    `Budget: ${limits.maxTurns} tool turns / ${Math.round(limits.wallBudgetMs / 60000)} minutes. Pace it: spend at most about a third of the turns reading before you start editing; you will be told when the budget is running low. Do not repeat identical calls. Large files: outline first, then targeted reads — a task that names a 10,000-line file is still a 60-turn task. When the full change will not fit, land the smallest correct, tested slice and list the rest under follow_ups; running out of turns with nothing edited is a failure, not a safe outcome. If the task is impossible, unsafe, or requires a protected path, finish with an empty change set and explain plainly in the summary what a human must do.`,
+    `Budget: ${limits.maxTurns} tool turns / ${Math.round(limits.wallBudgetMs / 60000)} minutes. Pace it: spend at most about a third of the turns reading before you start editing; you will be told when the budget is running low. Do not repeat identical calls. Large files: outline first, then targeted reads — a task that names a 10,000-line file is still a 60-turn task. Requirements labelled must, required, or acceptance may not be deferred to follow_ups: complete and verify them before finish. follow_ups are only for optional improvements outside the approved acceptance contract. Running out of turns with an admitted partial change is a failure, not a successful handoff. If the task is impossible, unsafe, or requires a protected path, finish with an empty change set and explain plainly in the summary what a human must do.`,
   ].join('\n');
 }
 
@@ -373,7 +375,7 @@ function createTools({ workspacePath, repoRoot, lane, supabase, limits, log }) {
   const runs = [];
   const run = (command) => {
     const text = String(command ?? '').trim();
-    if (!RUN_ALLOWLIST.some((pattern) => pattern.test(text))) return { error: 'command not allowed; allowed forms: node --test [test/<file>.test.js …], node --check <file>, git status|diff|log|show|blame' };
+    if (!RUN_ALLOWLIST.some((pattern) => pattern.test(text))) return { error: 'command not allowed; allowed forms: node --test [test/<file>.test.js …], node --check <file>, bounded apps/web test/lint/build commands, git status|diff|log|show|blame' };
     const argv = text.match(/"[^"]*"|\S+/g).map((part) => part.replace(/^"|"$/g, ''));
     const started = Date.now();
     // A nested `node --test` inherits the parent test-runner context and misreports; give the child a clean runner env.
@@ -605,7 +607,13 @@ function createTools({ workspacePath, repoRoot, lane, supabase, limits, log }) {
   };
 }
 
-function buildProposal({ workspacePath, lane, tools, args }) {
+function requiredChangedFilesFromTask(taskDescription, lane) {
+  const line = String(taskDescription ?? '').match(/required source scope:\s*([^\n]+)/i)?.[1] ?? '';
+  const paths = [...new Set(line.match(/\b(?:apps|supabase|services|scripts|test|docs|deploy)\/[\w./-]+/g) ?? [])];
+  return paths.filter((file) => laneAllows(lane, file)).sort();
+}
+
+function buildProposal({ workspacePath, lane, tools, args, requiredFiles = [] }) {
   git(workspacePath, ['add', '-A', '--', '.']);
   const files = git(workspacePath, ['diff', '--cached', '--name-only']).split('\n').filter(Boolean).sort();
   if (!files.length) return { error: 'finish refused: no changes in the worktree. Implement the change first, or finish with an explanation only by setting args.no_change_reason.' };
@@ -621,10 +629,17 @@ function buildProposal({ workspacePath, lane, tools, args }) {
   if (/GIT binary patch|Binary files .* differ/m.test(patch)) return { error: 'finish refused: binary changes are not allowed' };
   const summary = String(args.summary ?? '').trim();
   if (summary.length < 20) return { error: 'finish refused: summary must explain the change (what, why, how verified)' };
+  if (/\b(?:did not|could not|unable to)\s+(?:fully\s+)?(?:complete|implement)\b|\bfirst (?:structural )?slice\b|\bpartial (?:implementation|slice)\b/i.test(summary)) {
+    return { error: 'finish refused: the summary admits the required implementation is incomplete. Complete the acceptance contract before handoff; do not defer required work to follow_ups.' };
+  }
+  const missingRequiredFiles = requiredFiles.filter((file) => !files.includes(file));
+  if (missingRequiredFiles.length) {
+    return { error: `finish refused: required source scope was not implemented: ${missingRequiredFiles.join(', ')}. Complete those required files before handoff.` };
+  }
   // Truth Protocol at the gate: a change that touches tests (or that the brief asked to test) must come with a
   // passing `node --test` run from THIS session, or an explicit reason why none could run. Claims are not evidence.
   const sessionRuns = typeof tools.__runs === 'function' ? tools.__runs() : [];
-  const passingTestRuns = sessionRuns.filter((r) => /^node --test\b/.test(r.command) && r.exit_code === 0);
+  const passingTestRuns = sessionRuns.filter((r) => /^(?:node --test\b|npm run test --prefix apps\/web -- )/.test(r.command) && r.exit_code === 0);
   const touchesTests = files.some((file) => /^test\/|\.test\.(?:[cm]?js|tsx?)$/.test(file));
   const testsNotRunReason = String(args.tests_not_run_reason ?? '').trim();
   if (touchesTests && !passingTestRuns.length && !testsNotRunReason) {
@@ -639,7 +654,7 @@ function buildProposal({ workspacePath, lane, tools, args }) {
     edge_functions: [...new Set(files.filter((file) => /^supabase\/functions\/(?!_shared\/)[^/]+\//.test(file)).map((file) => file.split('/')[2]))].sort(),
     tests,
     // What actually ran, from the tool log (command + exit code), so reviewers need not trust the summary.
-    verified_runs: sessionRuns.filter((r) => /^node --(test|check)\b/.test(r.command)).slice(-20),
+    verified_runs: sessionRuns.filter((r) => /^(?:node --(?:test|check)\b|npm run (?:test|lint|build) --prefix apps\/web\b)/.test(r.command)).slice(-20),
     tests_not_run_reason: testsNotRunReason || undefined,
     rollback_notes: Array.isArray(args.rollback_notes) && args.rollback_notes.length ? args.rollback_notes.map(String).slice(0, 10) : ['Revert the pull request; no live data, migrations, or deployments are applied by this change.'],
     follow_ups: Array.isArray(args.follow_ups) ? args.follow_ups.map(String).slice(0, 10) : [],
@@ -869,7 +884,13 @@ async function runAgenticEngineer({
         outcome = { ok: false, no_change: true, budget_exhausted: budgetExhausted, error: reason, summary: String(args.summary ?? '') };
         break;
       }
-      const built = buildProposal({ workspacePath, lane, tools, args });
+      const built = buildProposal({
+        workspacePath,
+        lane,
+        tools,
+        args,
+        requiredFiles: requiredChangedFilesFromTask(job.task_description, lane)
+      });
       if (built.error) {
         log({ turn: turns, finish_refused: built.error });
         messages.push({ role: 'user', content: JSON.stringify({ tool_result: { error: built.error } }) });
@@ -919,7 +940,13 @@ async function runAgenticEngineer({
       const args = call.args && typeof call.args === 'object' ? call.args : {};
       lessons = Array.isArray(args.lessons) ? args.lessons : lessons;
       log({ turn: turns + 1, grace_finish: true, tool: 'finish' });
-      const built = buildProposal({ workspacePath, lane, tools, args });
+      const built = buildProposal({
+        workspacePath,
+        lane,
+        tools,
+        args,
+        requiredFiles: requiredChangedFilesFromTask(job.task_description, lane)
+      });
       if (built.error) log({ turn: turns + 1, finish_refused: built.error });
       else outcome = { ok: true, proposal: built.proposal, model: response.data?.model };
     } else {
@@ -972,4 +999,4 @@ async function runAgenticEngineer({
   };
 }
 
-module.exports = { DEFAULT_LIMITS, PROMPT_VERSION, RUN_ALLOWLIST, buildOpeningPacket, buildProposal, classifyNoChange, compactMessages, composeRunNote, createTools, outlineLines, parseToolCall, readingMap, runAgenticEngineer, systemPrompt, taskPacket };
+module.exports = { DEFAULT_LIMITS, PROMPT_VERSION, RUN_ALLOWLIST, buildOpeningPacket, buildProposal, classifyNoChange, compactMessages, composeRunNote, createTools, outlineLines, parseToolCall, readingMap, requiredChangedFilesFromTask, runAgenticEngineer, systemPrompt, taskPacket };

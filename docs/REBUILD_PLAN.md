@@ -127,6 +127,13 @@ instead of Builder admission and later made a short "fix this" nudge replace
 the substantial brief. `complete` and `finish` now participate in the same
 software-target guard as build, fix, and redesign, so the original corrective
 brief remains the durable job source.
+The subsequent implementation artifact called itself a first slice, omitted
+required owner files and responsive styles, ran no web checks, and deferred the
+accepted redesign to follow-ups. Agentic Builder now refuses summaries that
+admit required work is incomplete, enforces paths explicitly labelled
+`Required source scope`, permits bounded web test/lint/build commands inside the
+isolated worktree, and reserves follow-ups for optional work outside the
+approved acceptance contract.
 
 Natural-language Builder acceptance hardening 2026-10-13: Bob's deterministic
 post-evidence Builder fallback now recognises ordinary owner language such as
