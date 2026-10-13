@@ -93,6 +93,12 @@ test('an explicit owner build enters the durable Builder before chat evidence lo
   assert.match(admission, /!explicitSchemaRequest/);
 });
 
+test('Codespaces-like Builder and vibe-coding workspace requests are software-build intent', () => {
+  assert.equal(explicitBuilderCreationRequest('Redesign Bob Builder as a fully functioning Codespaces-like coding workspace.'), true);
+  assert.equal(explicitBuilderCreationRequest('Design the Bob Builder vibe coding agent from scratch.'), true);
+  assert.equal(explicitBuilderCreationRequest('Explain how a generic system works.'), false);
+});
+
 test('explicit Atlas and schema audits cannot escape into web research or omit schema', () => {
   assert.match(chat, /if \(explicitAtlasRequest && chosenTool !== 'query_atlas'\)/);
   assert.match(chat, /else if \(explicitSchemaRequest && chosenTool !== 'schema_inspect'\)/);
