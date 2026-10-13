@@ -5,7 +5,7 @@ const {
 } = require('./builder-model-adapter');
 const { fitRepositoryContext } = require('./builder-repository-context');
 
-const UX_DESIGNER_PROMPT_VERSION = 'ux-designer-v4';
+const UX_DESIGNER_PROMPT_VERSION = 'ux-designer-v5';
 
 const UX_DESIGN_SCHEMA = Object.freeze({
   type: 'object',
@@ -159,6 +159,16 @@ function parseUxDesignPlan(content, { repositoryContext = {}, enforceRepositoryE
   if (enforceRepositoryEvidence && context.relevant_components.length
       && !plan.component_inventory.some(entry => entry && context.relevant_components.includes(entry.component))) {
     throw new Error('component_inventory must include at least one owner component supplied by repository evidence');
+  }
+  for (const group of ['color', 'spacing']) {
+    if (!Array.isArray(plan.design_tokens[group])) continue;
+    plan.design_tokens[group] = [...new Set(plan.design_tokens[group].map((value) => {
+      if (typeof value !== 'string') return value;
+      const exact = value.trim();
+      if (allowedTokens.has(exact)) return exact;
+      const referenced = [...new Set(exact.match(/--[a-z0-9-]+/gi) || [])];
+      return referenced.length === 1 && allowedTokens.has(referenced[0]) ? referenced[0] : exact;
+    }))];
   }
   const usedTokens = [...(Array.isArray(plan.design_tokens.color) ? plan.design_tokens.color : []), ...(Array.isArray(plan.design_tokens.spacing) ? plan.design_tokens.spacing : [])];
   if (allowedTokens.size && (usedTokens.length === 0 || usedTokens.some(value => !allowedTokens.has(value)))) {

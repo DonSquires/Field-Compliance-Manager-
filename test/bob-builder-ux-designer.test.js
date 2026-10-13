@@ -66,6 +66,16 @@ test('UX Designer rejects invented routes, access boundaries, tokens, and alread
     design_tokens: { color: ['--color-bg-base', '--color-text-primary'], spacing: ['--touch-target-admin'] }
   };
   assert.deepEqual(parseUxDesignPlan(JSON.stringify(grounded), { repositoryContext: context, enforceRepositoryEvidence: true }), grounded);
+  assert.deepEqual(
+    parseUxDesignPlan(JSON.stringify({
+      ...grounded,
+      design_tokens: {
+        color: ['var(--color-bg-base)', '--color-text-primary — primary copy'],
+        spacing: ['var(--touch-target-admin)']
+      }
+    }), { repositoryContext: context, enforceRepositoryEvidence: true }).design_tokens,
+    grounded.design_tokens
+  );
   assert.throws(() => parseUxDesignPlan(JSON.stringify({ ...grounded, route_map: [] }), { repositoryContext: context, enforceRepositoryEvidence: true }), /must include the supplied route/);
   assert.throws(() => parseUxDesignPlan(JSON.stringify({ ...grounded, route_map: [{ route: '/builder/control-room', purpose: 'invented', access: ['AUTHORIZED_BUILDER_OPERATOR'] }] }), { repositoryContext: context, enforceRepositoryEvidence: true }), /route or page identifier/);
   assert.deepEqual(

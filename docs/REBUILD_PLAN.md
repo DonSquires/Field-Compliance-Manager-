@@ -194,9 +194,11 @@ reserved for light or restricted work. Autonomous admission reuses an active
 same-owner/same-project/same-title job even when research changes the detailed
 brief, and unrecoverable attempt-ceiling blocks finalize the job as failed
 before recording the plain-language report. Product and UX prompts expose exact
-source/token allowlists to reduce avoidable validator retries. This shortens the
-lane without skipping specification, repository grounding, verification,
-independent review, or protected release gates.
+source/token allowlists to reduce avoidable validator retries. The UX validator
+also normalizes a single proven canonical token written in CSS `var(--token)`
+syntax or with an explanatory label; unknown or multiple token references still
+fail. This shortens the lane without skipping specification, repository
+grounding, verification, independent review, or protected release gates.
 
 Runtime acceptance 2026-10-11: the laptop vision watcher now writes an
 independent liveness heartbeat and its Docker health check terminates only a
