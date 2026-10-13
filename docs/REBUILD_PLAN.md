@@ -135,6 +135,10 @@ instead of continuing the explicit build instruction. An owner-invoked research
 build now makes at most one bounded follow-up when fewer than four safe sources
 resolve and carries the combined evidence straight into Builder; it does not
 weaken the source gate or permit autonomous research without the owner's request.
+The next live job exposed a URL/path collision: a researched `/ai-apps/` URL was
+read as a repository `apps/` path and incorrectly selected a backend-only lane.
+Repository-lane inference now strips public URLs before recognizing source paths,
+so research evidence cannot suppress the requested UI design/frontend stages.
 
 Builder restart acceptance 2026-10-13: the same monitored redesign exposed a
 second orphan class. A control-plane deployment landed after product analysis

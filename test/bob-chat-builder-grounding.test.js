@@ -140,6 +140,19 @@ test('Builder intent guard respects explicit plan-only and no-create instruction
   assert.equal(explicitBuilderCreationRequest('Create a client record for the new patrol customer.'), false);
 });
 
+test('research URLs cannot be mistaken for repository paths when Builder chooses implementation lanes', () => {
+  const pathsStart = chat.indexOf('    const builderRepositoryPaths = ');
+  assert.ok(pathsStart >= 0);
+  const pathsSource = chat.slice(pathsStart, chat.indexOf('    const builderJobArgsFromEvidence = ', pathsStart))
+    .replace('(text: string)', '(text)');
+  const builderRepositoryPaths = vm.runInNewContext(`(() => { ${pathsSource} return builderRepositoryPaths; })()`);
+  assert.deepEqual([...builderRepositoryPaths('Research https://example.com/ai-apps/ui-patterns for this UI redesign')], []);
+  assert.deepEqual([...builderRepositoryPaths('Change apps/web/src/pages/BuilderControlRoomPage.tsx and test/builder.test.js')], [
+    'apps/web/src/pages/BuilderControlRoomPage.tsx',
+    'test/builder.test.js'
+  ]);
+});
+
 test('research-driven Builder jobs preserve provenance and cannot open without four sources', () => {
   assert.match(chat, /step\.tool === 'web_research' \|\| step\.tool === 'delegate' \? 3500 : 500/);
   assert.match(chat, /Research source URLs supplied to Product Analyst/);

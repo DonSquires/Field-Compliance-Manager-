@@ -8002,6 +8002,9 @@ serve(async (req)=>{
       if (/\b(?:app|application|portal|website|prototype)\b/.test(normalized) && /\b(?:build|create|make|develop|design|generate|prototype)\b/.test(normalized)) return 'no_code_app_generation';
       return 'chat_to_code';
     };
+    const builderRepositoryPaths = (text: string) => String(text ?? '')
+      .replace(/https?:\/\/[^\s<>()]+/gi, ' ')
+      .match(/\b(?:apps|supabase|services|scripts|test|docs|deploy)\/[\w./-]+/g) ?? [];
     const builderJobArgsFromEvidence = (text: string, evidenceSteps: Array<{ tool: string; result_summary: string }>) => {
       const requestBrief = String(text ?? '').trim();
       const firstSentence = requestBrief.replace(/\s+/g, ' ').split(/(?<=[.!?])\s/)[0];
@@ -9231,7 +9234,7 @@ serve(async (req)=>{
                 meta: { tool: 'create_builder_job', outcome: 'need_research', required_sources: 4, supplied_sources: bjResearchUrls.length }
               };
             }
-            const bjPaths = bjText.match(/\b(?:apps|supabase|services|scripts|test|docs|deploy)\/[\w./-]+/g) ?? [];
+            const bjPaths = builderRepositoryPaths(bjText);
             const bjWebPaths = bjPaths.filter((p)=>p.startsWith('apps/web/'));
             const bjOtherPaths = bjPaths.filter((p)=>!p.startsWith('apps/web/'));
             const bjMentionsWeb = /\b(ui|page|panel|component|screen|web app|frontend|apps\/web|css|react|tsx)\b/i.test(bjText);
