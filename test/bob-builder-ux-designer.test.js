@@ -68,7 +68,17 @@ test('UX Designer rejects invented routes, access boundaries, tokens, and alread
   assert.deepEqual(parseUxDesignPlan(JSON.stringify(grounded), { repositoryContext: context, enforceRepositoryEvidence: true }), grounded);
   assert.throws(() => parseUxDesignPlan(JSON.stringify({ ...grounded, route_map: [] }), { repositoryContext: context, enforceRepositoryEvidence: true }), /must include the supplied route/);
   assert.throws(() => parseUxDesignPlan(JSON.stringify({ ...grounded, route_map: [{ route: '/builder/control-room', purpose: 'invented', access: ['AUTHORIZED_BUILDER_OPERATOR'] }] }), { repositoryContext: context, enforceRepositoryEvidence: true }), /route or page identifier/);
-  assert.throws(() => parseUxDesignPlan(JSON.stringify({ ...grounded, component_inventory: [{ component: 'EvidenceRail', responsibility: 'invented' }] }), { repositoryContext: context, enforceRepositoryEvidence: true }), /component not supplied/);
+  assert.deepEqual(
+    parseUxDesignPlan(JSON.stringify({
+      ...grounded,
+      component_inventory: [
+        ...grounded.component_inventory,
+        { component: 'EvidenceRail', responsibility: 'Proposed presentation subcomponent' }
+      ]
+    }), { repositoryContext: context, enforceRepositoryEvidence: true }).component_inventory.length,
+    2
+  );
+  assert.throws(() => parseUxDesignPlan(JSON.stringify({ ...grounded, component_inventory: [{ component: 'EvidenceRail', responsibility: 'Proposed presentation subcomponent' }] }), { repositoryContext: context, enforceRepositoryEvidence: true }), /must include at least one owner component/);
   assert.throws(() => parseUxDesignPlan(JSON.stringify({ ...grounded, design_tokens: { color: ['neutral-900'], spacing: ['spacing-1'] } }), { repositoryContext: context, enforceRepositoryEvidence: true }), /exact canonical tokens/);
   assert.throws(() => parseUxDesignPlan(JSON.stringify({ ...grounded, unresolved_questions: ['What is the exact route path?'] }), { repositoryContext: context, enforceRepositoryEvidence: true }), /repeats ownership/);
 });

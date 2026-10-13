@@ -383,7 +383,11 @@ async function executeSingleModelRun({ supabase, modelRequest, gateway, validate
       idempotency_key: modelRequest.idempotency_key,
       input_artifact_ids: modelRequest.input_artifact_ids,
       status: 'running',
-      started_at: startedAt
+      started_at: startedAt,
+      completed_at: null,
+      error: null,
+      output_artifact_ids: [],
+      usage_metadata: {}
     }, { onConflict: 'idempotency_key' })
     .select('id')
     .single();

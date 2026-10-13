@@ -156,8 +156,8 @@ function parseUxDesignPlan(content, { repositoryContext = {}, enforceRepositoryE
     }
   }
   if (enforceRepositoryEvidence && context.relevant_components.length
-      && plan.component_inventory.some(entry => !entry || !context.relevant_components.includes(entry.component))) {
-    throw new Error('component_inventory contains a component not supplied by repository evidence');
+      && !plan.component_inventory.some(entry => entry && context.relevant_components.includes(entry.component))) {
+    throw new Error('component_inventory must include at least one owner component supplied by repository evidence');
   }
   const usedTokens = [...(Array.isArray(plan.design_tokens.color) ? plan.design_tokens.color : []), ...(Array.isArray(plan.design_tokens.spacing) ? plan.design_tokens.spacing : [])];
   if (allowedTokens.size && (usedTokens.length === 0 || usedTokens.some(value => !allowedTokens.has(value)))) {

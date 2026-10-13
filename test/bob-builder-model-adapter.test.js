@@ -234,6 +234,11 @@ test('model execution records usage and output artifacts', async () => {
 
   assert.equal(result.ok, true);
   assert.deepEqual(result.data.output_artifact_ids, ['artifact-1']);
+  const runningWrite = mock.writes.find(write => write.type === 'upsert');
+  assert.equal(runningWrite.value.completed_at, null);
+  assert.equal(runningWrite.value.error, null);
+  assert.deepEqual(runningWrite.value.output_artifact_ids, []);
+  assert.deepEqual(runningWrite.value.usage_metadata, {});
   assert.equal(mock.storageWrites[0].type, 'upload');
   const rpc = mock.writes.find(write => write.type === 'rpc');
   assert.equal(rpc.args._artifact_type, 'product_specification');

@@ -115,7 +115,7 @@ test('UX design receives pinned canonical tokens and Builder route/access eviden
   assert.match(source, /function collectPinnedDesignContext\(source\)/);
   assert.match(source, /docs\/canon\/PRODUCT_DESIGN\.md/);
   assert.match(source, /apps\/web\/src\/styles\/tokens\.css/);
-  assert.match(source, /AdminShell page id \"builder\"/);
+  assert.match(source, /existing_routes: \['AdminShell page id "builder"'\]/);
   assert.match(source, /platform-only AdminShell page/);
   assert.match(source, /\.\.\.collectPinnedDesignContext\(source\)/);
 });

@@ -162,6 +162,13 @@ grounded validation closure referenced `prompts.context` while the prompt bindin
 was singular, so all three providers produced output but failed on an undefined
 identifier. The callback now uses the actual prompt context and its regression
 test invokes the callback, rather than merely asserting that it was supplied.
+The corrected callback then exposed two false-negative evidence checks: models
+preserved the AdminShell `builder` identifier but omitted its explanatory suffix,
+and proposed presentation subcomponents alongside the proven owner component.
+Route evidence is now a concise exact identifier; component plans must include a
+proven owner but may propose bounded subcomponents. Reused model-run rows also
+clear stale terminal timestamps, errors, outputs, and usage when they re-enter
+`running`, so the control room does not display contradictory lifecycle evidence.
 
 Builder restart acceptance 2026-10-13: the same monitored redesign exposed a
 second orphan class. A control-plane deployment landed after product analysis

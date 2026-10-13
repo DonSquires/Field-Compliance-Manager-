@@ -372,7 +372,7 @@ function collectPinnedDesignContext(source) {
     design_tokens: designTokens,
     ...(builderSurface ? {
       relevant_components: ['BuilderControlRoomPage', 'BuilderControlRoomPage.css', 'AdminShell', 'BobPanel'],
-      existing_routes: ['AdminShell page id "builder" (renders BuilderControlRoomPage; no standalone URL is established)'],
+      existing_routes: ['AdminShell page id "builder"'],
       existing_access_boundaries: ['platform-only AdminShell page'],
       viewport_requirements: ['desktop and mobile', 'admin controls use --touch-target-admin']
     } : {})
