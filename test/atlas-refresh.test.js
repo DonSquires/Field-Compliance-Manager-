@@ -8,6 +8,7 @@ const {
   OWNER_MARKER,
   collectComponentEdges,
   collectManagedAtlas,
+  collectSchemaForeignKeyEdges,
   staleGeneratedEdgeIds,
   collectAtlasRefresh,
   buildRefreshPlan
@@ -16,6 +17,9 @@ const {
 test('Atlas refresh can place its local manifest outside a read-only source checkout', () => {
   const source = fs.readFileSync(path.resolve(__dirname, '../scripts/atlas-refresh.js'), 'utf8');
   assert.match(source, /ATLAS_REFRESH_OUTPUT_DIR \|\| path\.join\(rootDir, '\.bob'\)/);
+  assert.match(source, /retireStale: !args\.has\('--upsert-only'\)/);
+  assert.match(source, /if \(retireStale\) \{[\s\S]*retireRows\(baseUrl, serviceKey, 'bob_capability_map'/);
+  assert.match(source, /skippedRetirements: retirementCount/);
 });
 
 function write(root, relativePath, content) {
@@ -40,6 +44,13 @@ test('Atlas refresh extracts concrete entities and Supabase calls without test n
       CREATE OR REPLACE FUNCTION public.wrap_alpha() RETURNS jsonb LANGUAGE sql AS $$
         SELECT * FROM public.get_alpha();
       $$;
+      CREATE OR REPLACE FUNCTION public.guard_alpha() RETURNS trigger LANGUAGE plpgsql AS $$
+      BEGIN
+        RETURN NEW;
+      END;
+      $$;
+      CREATE TRIGGER "guard_alpha_trigger" BEFORE UPDATE ON public."alpha"
+        FOR EACH ROW EXECUTE FUNCTION public."guard_alpha"();
     `);
     write(root, 'supabase/functions/ping/index.ts', 'fetch(`${SUPABASE_URL}/functions/v1/echo`);');
     write(root, 'supabase/functions/echo/index.ts', 'Deno.serve(() => new Response("ok"));');
@@ -91,10 +102,48 @@ test('Atlas refresh extracts concrete entities and Supabase calls without test n
     assert.ok(manifest.edges.some(row => row.source_type === 'rpc' && row.source_name === 'get_alpha' && row.target_name === 'alpha' && row.edge_kind === 'reads'));
     assert.ok(manifest.edges.some(row => row.source_type === 'rpc' && row.source_name === 'update_alpha' && row.target_name === 'alpha' && row.edge_kind === 'writes'));
     assert.ok(manifest.edges.some(row => row.source_type === 'rpc' && row.source_name === 'wrap_alpha' && row.target_type === 'rpc' && row.target_name === 'get_alpha' && row.edge_kind === 'calls'));
+    assert.ok(manifest.edges.some(row => row.source_type === 'table' && row.source_name === 'alpha' && row.target_type === 'rpc' && row.target_name === 'guard_alpha' && row.edge_kind === 'triggers'));
+    assert.equal(manifest.capabilities.find(row => row.entity_name === 'guard_alpha').wired, true);
     assert.equal(manifest.edges.some(row => row.source_name === 'wrap_alpha' && row.target_type === 'table' && row.target_name === 'get_alpha'), false);
     assert.equal(manifest.edges.some(row => row.target_name === 'if'), false);
     assert.equal(manifest.edges.some(row => row.target_name === 'test_noise'), false);
     assert.equal(manifest.capabilities.every(row => row.exercised === null), true);
+  } finally {
+    fs.rmSync(root, { recursive: true, force: true });
+  }
+});
+
+test('Atlas refresh keeps schema foreign keys separate from proven flow edges', () => {
+  const root = fs.mkdtempSync(path.join(os.tmpdir(), 'atlas-refresh-fk-'));
+  try {
+    write(root, 'supabase/schema.sql', `
+      CREATE TABLE public.parent_records (id uuid primary key);
+      CREATE TABLE public.inline_children (
+        id uuid primary key,
+        parent_id uuid REFERENCES public.parent_records(id)
+      );
+      CREATE TABLE public.alter_children (id uuid primary key, parent_id uuid);
+      ALTER TABLE ONLY public.alter_children
+        ADD CONSTRAINT alter_children_parent_id_fkey
+        FOREIGN KEY (parent_id) REFERENCES public.parent_records(id) ON DELETE CASCADE;
+    `);
+
+    const edges = collectSchemaForeignKeyEdges(root);
+    assert.ok(edges.some((edge) => edge.source_name === 'inline_children'
+      && edge.target_name === 'parent_records'
+      && edge.edge_kind === 'fk_references'));
+    assert.ok(edges.some((edge) => edge.source_name === 'alter_children'
+      && edge.target_name === 'parent_records'
+      && edge.edge_kind === 'fk_references'));
+    assert.equal(edges.every((edge) => edge.evidence_class === 'live-schema'), true);
+
+    const manifest = collectAtlasRefresh(root);
+    assert.ok(manifest.edges.some((edge) => edge.source_name === 'alter_children'
+      && edge.target_name === 'parent_records'
+      && edge.edge_kind === 'fk_references'));
+    assert.equal(manifest.edges.some((edge) => edge.source_name === 'alter_children'
+      && edge.target_name === 'parent_records'
+      && ['reads', 'writes'].includes(edge.edge_kind)), false);
   } finally {
     fs.rmSync(root, { recursive: true, force: true });
   }

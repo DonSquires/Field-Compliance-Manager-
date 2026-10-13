@@ -19,3 +19,10 @@ test('autonomous Builder admission reuses an active owner request after research
 test('manual Builder admission retains exact-brief bounded deduplication', () => {
   assert.match(controlRoom, /duplicateQuery = duplicateQuery\.eq\('task_description', taskDescription\)\.gte\('created_at', duplicateSince\)/);
 });
+
+test('run relay preserves accepted and already-running preflight receipts', () => {
+  assert.match(controlRoom, /accepted: result\.payload\.accepted/);
+  assert.match(controlRoom, /already_running: result\.payload\.already_running/);
+  assert.match(controlRoom, /started_at: result\.payload\.started_at/);
+  assert.match(controlRoom, /}, result\.status\)/);
+});

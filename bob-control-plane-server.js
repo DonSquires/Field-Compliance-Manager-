@@ -547,6 +547,18 @@ async function resolveBuilderSourceDir(jobId) {
 // One Builder run per job at a time; runs continue after the HTTP caller has gone.
 const runningBuilderJobs = new Map();
 const staleBuilderRunMs = Math.max(5 * 60_000, Number(process.env.BOB_BUILDER_STALE_RUN_MS) || 45 * 60_000);
+const builderPreflightTimeoutMs = Math.max(30_000, Number(process.env.BOB_BUILDER_PREFLIGHT_TIMEOUT_MS) || 120_000);
+
+function boundedPreflight(promise, label) {
+  let timer;
+  return Promise.race([
+    promise,
+    new Promise((_, reject) => {
+      timer = setTimeout(() => reject(new Error(`${label} timed out after ${builderPreflightTimeoutMs}ms`)), builderPreflightTimeoutMs);
+      timer.unref?.();
+    }),
+  ]).finally(() => clearTimeout(timer));
+}
 
 function clearStaleBuilderRun(jobId, now = Date.now()) {
   const startedAt = runningBuilderJobs.get(jobId);
@@ -630,13 +642,17 @@ async function openBuilderPullRequest(jobId, bodyFor = null, { draft = true } = 
 async function runBuilderJobBounded(jobId, body = {}) {
   clearStaleBuilderRun(jobId);
   if (runningBuilderJobs.has(jobId)) return { skipped: true, already_running: true, started_at: runningBuilderJobs.get(jobId) };
-  const context = await builderRuntimeContext(body, await resolveBuilderSourceDir(jobId));
-  const execution = runBuilderUntilPause({ supabase: builderSupabase, gateway: builderGateway, jobId, context, maxActions: body.maxActions })
+  const startedAt = new Date().toISOString();
+  runningBuilderJobs.set(jobId, startedAt);
+  const execution = (async () => {
+    const source = await boundedPreflight(resolveBuilderSourceDir(jobId), 'Builder source resolution');
+    const context = await boundedPreflight(builderRuntimeContext(body, source), 'Builder runtime context');
+    return runBuilderUntilPause({ supabase: builderSupabase, gateway: builderGateway, jobId, context, maxActions: body.maxActions });
+  })()
     .then((outcome) => { record('builder', 'builder.run.paused', jobId, { reason: outcome.reason, detail: outcome.detail ?? null, actions: outcome.history?.length ?? 0 }); return outcome; })
     .catch((error) => { record('builder', 'builder.run.failed', jobId, { error: String(error instanceof Error ? error.message : error).slice(0, 300) }); return { paused: true, reason: 'error', detail: String(error instanceof Error ? error.message : error).slice(0, 300) }; })
     .finally(() => runningBuilderJobs.delete(jobId));
-  runningBuilderJobs.set(jobId, new Date().toISOString());
-  return { execution };
+  return { execution, started_at: startedAt };
 }
 
 // Bob autopilot: every tick, move the jobs the owner asked for in chat one step closer to a

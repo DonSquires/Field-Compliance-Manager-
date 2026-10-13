@@ -148,6 +148,35 @@ Oversized reads now preserve the real numbered head and tail, identify the
 exact omitted range, and direct the engineer to search or read that range.
 Failed exact replacements likewise direct it to a real nearby symbol and
 verbatim source instead of another guessed edit.
+The governed E2E creation helper also no longer assumes every diagnostic job is
+backend-only: operators can explicitly select frontend and backend lanes, and
+the helper refuses a zero-lane job. This keeps a planner outage from forcing a
+UI repair into the wrong implementation lane.
+The next live run exposed an invisible preflight: repository/live-context
+assembly happened before the per-job in-flight marker and before the HTTP
+response, so a slow preflight looked like an unclaimed implementation step and
+allowed concurrent callers into the same gap. The control plane now registers
+the lease first, returns acceptance immediately, bounds source/context
+preflight, and the edge relay preserves accepted/already-running/start receipts.
+The accompanying Atlas audit found strong upstream Builder flow but zero
+Builder FK reach despite 32 live schema foreign keys. Atlas refresh previously
+generated table/RPC/code flow and trigger edges but no schema FK edges. It now
+emits `fk_references` from the live schema as structural evidence only, keeping
+those edges separate from `reads`, `writes`, `calls`, and `invokes`.
+The first live apply also exposed 4,113 unrelated historical generated rows
+eligible for retirement, 4,093 from old schema-flow identities. The existing
+large-retirement stop correctly refused that write. Refresh now has an explicit
+upsert-only mode that updates current capability/edge truth while leaving every
+stale row unchanged; it reports the skipped retirement count rather than
+pretending reconciliation completed.
+Once FK edges were present, the live `bob_atlas_fk_reach` RPC expanded to the
+REST 10,000-row ceiling because it traversed weak `references` edges as if they
+were FKs and returned the same node through many paths. The replacement RPC is
+restricted to `fk_references`, retains per-path cycle protection, and returns
+one nearest path per node. Weak references remain queryable as terrain evidence
+but no longer contaminate FK blast radius. Atlas trigger extraction also
+accepts quoted trigger names, so Builder's release and review evidence gates
+are recognized as wired by their live table triggers.
 
 Natural-language Builder acceptance hardening 2026-10-13: Bob's deterministic
 post-evidence Builder fallback now recognises ordinary owner language such as

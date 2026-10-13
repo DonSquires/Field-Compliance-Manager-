@@ -416,7 +416,17 @@ serve(async req => {
     const snapshot = result.payload.snapshot && typeof result.payload.snapshot === 'object'
       ? safeSnapshot(result.payload.snapshot as Record<string, unknown>)
       : null;
-    return json({ advanced: result.payload.advanced, paused: result.payload.paused, reason: result.payload.reason, action: result.payload.action, history: result.payload.history, snapshot });
+    return json({
+      accepted: result.payload.accepted,
+      already_running: result.payload.already_running,
+      started_at: result.payload.started_at,
+      advanced: result.payload.advanced,
+      paused: result.payload.paused,
+      reason: result.payload.reason,
+      action: result.payload.action,
+      history: result.payload.history,
+      snapshot,
+    }, result.status);
   }
 
   return json({ error: 'Unsupported Builder action' }, 400);

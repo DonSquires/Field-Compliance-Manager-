@@ -24,6 +24,21 @@ test('the session cache path is unchanged', () => {
   assert.match(source, /const CACHE = '\/tmp\/\.fcm-builder-e2e-session\.json';/);
 });
 
+test('create can explicitly select frontend and backend implementation lanes', () => {
+  assert.match(source, /E2E_FRONTEND_REQUIRED/);
+  assert.match(source, /E2E_BACKEND_REQUIRED/);
+  assert.match(source, /create requires at least one implementation lane/);
+  assert.match(source, /frontend_required: frontendRequired/);
+  assert.match(source, /backend_required: backendRequired/);
+});
+
+test('run exposes one bounded coordinator response for diagnostics', () => {
+  assert.match(source, /cmd === 'run'/);
+  assert.match(source, /action: 'run', job_id: args\[0\], max_actions: Number\(args\[1\] \|\| 1\)/);
+  assert.match(source, /already_running=.*runtime\.already_running/);
+  assert.match(source, /action=.*runtime\.action\?\.type/);
+});
+
 test('recovery does not log credentials, tokens, headers, or session objects', () => {
   assert.doesNotMatch(source.slice(source.indexOf('async function session('), source.indexOf('function brief(')), /\bconsole\.\w+\s*\(/);
   const logStatements = source.split('\n').filter((line) => /\bconsole\.(?:log|error|warn|debug|info)\s*\(/.test(line)).join('\n');

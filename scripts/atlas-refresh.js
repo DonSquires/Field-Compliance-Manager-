@@ -363,7 +363,7 @@ function collectSqlFunctionEdges(rootDir) {
     }
   }
   const schema = fs.existsSync(path.join(rootDir, schemaFile)) ? fs.readFileSync(path.join(rootDir, schemaFile), 'utf8') : '';
-  for (const trigger of schema.matchAll(/CREATE TRIGGER\s+[a-zA-Z0-9_]+[\s\S]*?\s+ON\s+public\."?([a-zA-Z_][a-zA-Z0-9_]*)"?[\s\S]*?EXECUTE FUNCTION\s+public\."?([a-zA-Z_][a-zA-Z0-9_]*)"?\s*\(/gi)) {
+  for (const trigger of schema.matchAll(/CREATE TRIGGER\s+"?[a-zA-Z0-9_]+"?[\s\S]*?\s+ON\s+public\."?([a-zA-Z_][a-zA-Z0-9_]*)"?[\s\S]*?EXECUTE FUNCTION\s+public\."?([a-zA-Z_][a-zA-Z0-9_]*)"?\s*\(/gi)) {
     if (latestFunctions.has(trigger[2])) {
       const edge = {
         source_type: 'table',
@@ -379,6 +379,41 @@ function collectSqlFunctionEdges(rootDir) {
         refresh_source: 'ci_generator'
       };
       edges.set(edgeKey(edge), edge);
+    }
+  }
+  return [...edges.values()];
+}
+
+function collectSchemaForeignKeyEdges(rootDir) {
+  const schemaFile = 'supabase/schema.sql';
+  const schemaPath = path.join(rootDir, schemaFile);
+  if (!fs.existsSync(schemaPath)) return [];
+  const schema = fs.readFileSync(schemaPath, 'utf8');
+  const edges = new Map();
+  const add = (sourceName, targetName, context) => {
+    if (!sourceName || !targetName) return;
+    const edge = {
+      source_type: 'table',
+      source_name: sourceName,
+      target_type: 'table',
+      target_name: targetName,
+      edge_kind: 'fk_references',
+      evidence_class: 'live-schema',
+      retirement_status: 'live',
+      source_file: schemaFile,
+      migration_name: null,
+      caller_context: `${OWNER_MARKER} ${context}`,
+      refresh_source: 'ci_generator'
+    };
+    edges.set(edgeKey(edge), edge);
+  };
+
+  for (const match of schema.matchAll(/ALTER TABLE ONLY\s+(?:"?public"?\.)?"?([a-zA-Z_][a-zA-Z0-9_]*)"?[\s\S]*?ADD CONSTRAINT\s+"?([a-zA-Z_][a-zA-Z0-9_]*)"?\s+FOREIGN KEY\s*\([^)]*\)\s+REFERENCES\s+(?:"?public"?\.)?"?([a-zA-Z_][a-zA-Z0-9_]*)"?\s*\(/gi)) {
+    add(match[1], match[3], `schema foreign key ${match[2]}`);
+  }
+  for (const match of schema.matchAll(/CREATE TABLE(?:\s+IF\s+NOT\s+EXISTS)?\s+(?:"?public"?\.)?"?([a-zA-Z_][a-zA-Z0-9_]*)"?\s*\(([\s\S]*?)\)\s*;/gi)) {
+    for (const reference of match[2].matchAll(/(?:FOREIGN KEY\s*\([^)]*\)\s+)?REFERENCES\s+(?:"?public"?\.)?"?([a-zA-Z_][a-zA-Z0-9_]*)"?\s*\(/gi)) {
+      add(match[1], reference[1], 'inline schema foreign key');
     }
   }
   return [...edges.values()];
@@ -509,7 +544,9 @@ function collectAtlasRefresh(rootDir = process.cwd()) {
   );
   const sourceEdges = collectSourceEdges(rootDir, { tables, rpcs, edgeFunctions });
   const edgesByKey = new Map();
-  for (const edge of [...sourceEdges, ...collectSqlFunctionEdges(rootDir)]) edgesByKey.set(edgeKey(edge), edge);
+  for (const edge of [...sourceEdges, ...collectSqlFunctionEdges(rootDir), ...collectSchemaForeignKeyEdges(rootDir)]) {
+    edgesByKey.set(edgeKey(edge), edge);
+  }
   const addDerivedFeature = (sourceName, featureName, sourceFile, context) => {
     const edge = {
       source_type: 'rpc',
@@ -703,7 +740,7 @@ async function retireRows(baseUrl, serviceKey, table, ids) {
   }
 }
 
-async function applyAtlasRefresh(manifest, { baseUrl, serviceKey, allowLargeRetirement = false }) {
+async function applyAtlasRefresh(manifest, { baseUrl, serviceKey, allowLargeRetirement = false, retireStale = true }) {
   if (!baseUrl || !serviceKey) throw new Error('SUPABASE_URL and SUPABASE_SERVICE_ROLE_KEY are required');
   const [existingCapabilities, existingEdges] = await Promise.all([
     fetchAll(baseUrl, serviceKey, 'bob_capability_map', 'id,entity_type,entity_name,present,wired,exercised,caller_summary,notes,refresh_source,retirement_status'),
@@ -711,15 +748,23 @@ async function applyAtlasRefresh(manifest, { baseUrl, serviceKey, allowLargeReti
   ]);
   const plan = buildRefreshPlan(manifest, existingCapabilities, existingEdges);
   const retirementCount = plan.capabilityRetireIds.length + plan.edgeRetireIds.length;
-  if (retirementCount > MAX_RETIREMENTS && !allowLargeRetirement) {
+  if (retireStale && retirementCount > MAX_RETIREMENTS && !allowLargeRetirement) {
     throw new Error(`Refusing to retire ${retirementCount} Atlas rows without --allow-large-retirement`);
   }
 
   await writeBatches(baseUrl, serviceKey, 'bob_capability_map', plan.capabilityUpserts, 'entity_type,entity_name');
   await writeBatches(baseUrl, serviceKey, 'bob_app_map_edges', plan.edgeUpserts, 'source_type,source_name,target_type,target_name,edge_kind,source_file');
-  await retireRows(baseUrl, serviceKey, 'bob_capability_map', plan.capabilityRetireIds);
-  await retireRows(baseUrl, serviceKey, 'bob_app_map_edges', plan.edgeRetireIds);
-  return plan;
+  if (retireStale) {
+    await retireRows(baseUrl, serviceKey, 'bob_capability_map', plan.capabilityRetireIds);
+    await retireRows(baseUrl, serviceKey, 'bob_app_map_edges', plan.edgeRetireIds);
+    return plan;
+  }
+  return {
+    ...plan,
+    skippedRetirements: retirementCount,
+    capabilityRetireIds: [],
+    edgeRetireIds: []
+  };
 }
 
 function writeManifest(rootDir, manifest, outputDir = process.env.ATLAS_REFRESH_OUTPUT_DIR || path.join(rootDir, '.bob')) {
@@ -739,9 +784,11 @@ async function main() {
   const plan = await applyAtlasRefresh(manifest, {
     baseUrl: process.env.SUPABASE_URL,
     serviceKey: process.env.SUPABASE_SERVICE_ROLE_KEY,
-    allowLargeRetirement: args.has('--allow-large-retirement')
+    allowLargeRetirement: args.has('--allow-large-retirement'),
+    retireStale: !args.has('--upsert-only')
   });
-  console.log(`Atlas refreshed: ${plan.capabilityUpserts.length} capabilities, ${plan.edgeUpserts.length} edges, ${plan.capabilityRetireIds.length + plan.edgeRetireIds.length} retired`);
+  const skipped = plan.skippedRetirements ? `, ${plan.skippedRetirements} stale rows left unchanged` : '';
+  console.log(`Atlas refreshed: ${plan.capabilityUpserts.length} capabilities, ${plan.edgeUpserts.length} edges, ${plan.capabilityRetireIds.length + plan.edgeRetireIds.length} retired${skipped}`);
 }
 
 if (require.main === module) {
@@ -755,6 +802,7 @@ module.exports = {
   OWNER_MARKER,
   collectComponentEdges,
   collectManagedAtlas,
+  collectSchemaForeignKeyEdges,
   staleGeneratedEdgeIds,
   collectAtlasRefresh,
   buildRefreshPlan,
