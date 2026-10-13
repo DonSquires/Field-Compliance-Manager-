@@ -334,13 +334,30 @@ function combineHumanTestSummaries(phases) {
   }), { passed: 0, failed: 0, skipped: 0 });
 }
 
+function repositoryTreeSha(sourceDir, sha, treePath) {
+  if (!/^[a-f0-9]{40}$/i.test(String(sha || '')) || !/^[A-Za-z0-9_./-]+$/.test(String(treePath || ''))) return null;
+  try {
+    return execFileSync('git', ['rev-parse', `${sha}:${treePath}`], {
+      cwd: sourceDir,
+      encoding: 'utf8',
+      stdio: ['ignore', 'pipe', 'ignore'],
+    }).trim();
+  } catch {
+    return null;
+  }
+}
+
 async function startHumanTestRun({ mode, scope, requestedBy, expectedSha = null, targetRoute = null }) {
   const active = [...humanTestRuns.values()].find(run => run.status === 'queued' || run.status === 'running');
   if (active) return { existing: true, run: safeHumanTestRun(active) };
   if (!builderWorkerImage) throw new BuilderStepError(503, 'Human-test worker image is unavailable');
   const source = repositoryReadTarget();
   if (expectedSha && source.sha !== expectedSha) {
-    throw new BuilderStepError(409, `Human-test source SHA does not match the requested deployment (${source.sha.slice(0, 12)} != ${expectedSha.slice(0, 12)})`);
+    const sourceWebTree = repositoryTreeSha(source.sourceDir, source.sha, 'apps/web');
+    const deployedWebTree = repositoryTreeSha(source.sourceDir, expectedSha, 'apps/web');
+    if (!sourceWebTree || !deployedWebTree || sourceWebTree !== deployedWebTree) {
+      throw new BuilderStepError(409, `Human-test source web tree does not match the requested deployment (${source.sha.slice(0, 12)} != ${expectedSha.slice(0, 12)})`);
+    }
   }
   const id = crypto.randomUUID();
   const now = new Date().toISOString();

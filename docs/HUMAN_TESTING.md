@@ -30,7 +30,10 @@ tool even if the planner proposes research or prose instead. `suite` mode runs
 the fixture-backed phase first and, only if it passes, runs the read-only live
 phase under the same durable run ID. The request can pin a 40-character
 `expected_sha` and an approved admin route such as `/admin/builder`; a source
-SHA mismatch fails before a browser worker starts.
+SHA mismatch fails before a browser worker starts unless the newer source and
+deployed commits have the exact same `apps/web` Git tree. This permits
+server-only Bob commits without pretending they changed the deployed web
+artifact.
 
 Fixture-backed runs use a bounded four-worker browser pool. Live runs remain
 serial and require `HUMAN_TEST_BASE_URL` plus the dedicated
