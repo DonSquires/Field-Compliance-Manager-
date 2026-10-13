@@ -197,8 +197,11 @@ before recording the plain-language report. Product and UX prompts expose exact
 source/token allowlists to reduce avoidable validator retries. The UX validator
 also normalizes a single proven canonical token written in CSS `var(--token)`
 syntax or with an explanatory label; unknown or multiple token references still
-fail. This shortens the lane without skipping specification, repository
-grounding, verification, independent review, or protected release gates.
+fail. Because the current canonical file has no spacing scale, the prompt now
+explicitly permits an empty spacing-token selection instead of implying that
+the designer must invent one. This shortens the lane without skipping
+specification, repository grounding, verification, independent review, or
+protected release gates.
 
 Runtime acceptance 2026-10-11: the laptop vision watcher now writes an
 independent liveness heartbeat and its Docker health check terminates only a

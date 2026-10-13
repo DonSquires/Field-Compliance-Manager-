@@ -5,7 +5,7 @@ const {
 } = require('./builder-model-adapter');
 const { fitRepositoryContext } = require('./builder-repository-context');
 
-const UX_DESIGNER_PROMPT_VERSION = 'ux-designer-v5';
+const UX_DESIGNER_PROMPT_VERSION = 'ux-designer-v6';
 
 const UX_DESIGN_SCHEMA = Object.freeze({
   type: 'object',
@@ -79,12 +79,14 @@ function buildUxDesignerPrompt({ specification, repositoryContext }) {
     throw new Error('approved specification is required');
   }
   const context = fitRepositoryContext(normalizeDesignContext(repositoryContext), JSON.stringify(specification));
+  const allowedSpacingTokens = context.design_tokens.filter((token) => /(?:space|gap|padding|margin|radius)/i.test(token));
   const systemPrompt = [
     'You are the UX/UI Designer for Field Compliance Manager.',
     'Design from the approved product specification and supplied repository context.',
     'Do not invent product behavior, routes, schema, permissions, or capabilities.',
     'Reuse only design tokens supplied in repository_context.design_tokens; never translate them into Tailwind-style or invented names.',
     'In design_tokens, copy bare token names exactly as supplied (for example --color-bg-base), without var(...), labels, values, or explanatory prose.',
+    'The design_tokens.spacing array may be empty when token_constraints.allowed_spacing_tokens is empty; never invent a spacing scale to fill it.',
     'Resolve ownership, navigation, access, and design-system questions from supplied repository evidence rather than repeating them as unresolved.',
     'Cover desktop and mobile behavior, accessibility, and loading, empty, error, and success states.',
     'route_map lists only exact identifiers supplied in repository_context.existing_routes; for a component-only change with no supplied route it is an empty array — never invent a route to fill it.',
@@ -97,6 +99,10 @@ function buildUxDesignerPrompt({ specification, repositoryContext }) {
     userPrompt: JSON.stringify({
       approved_specification: specification,
       repository_context: context,
+      token_constraints: {
+        allowed_tokens: context.design_tokens,
+        allowed_spacing_tokens: allowedSpacingTokens
+      },
       required_output: {
         information_architecture: [{ area: 'string', purpose: 'string' }],
         route_map: [{ route: 'string', purpose: 'string', access: ['string'] }],
@@ -171,8 +177,10 @@ function parseUxDesignPlan(content, { repositoryContext = {}, enforceRepositoryE
     }))];
   }
   const usedTokens = [...(Array.isArray(plan.design_tokens.color) ? plan.design_tokens.color : []), ...(Array.isArray(plan.design_tokens.spacing) ? plan.design_tokens.spacing : [])];
-  if (allowedTokens.size && (usedTokens.length === 0 || usedTokens.some(value => !allowedTokens.has(value)))) {
-    throw new Error('design_tokens must use only exact canonical tokens supplied by repository evidence');
+  const invalidTokens = usedTokens.filter(value => !allowedTokens.has(value));
+  if (allowedTokens.size && (usedTokens.length === 0 || invalidTokens.length > 0)) {
+    const detail = invalidTokens.length ? `; invalid: ${invalidTokens.slice(0, 12).join(', ')}` : '';
+    throw new Error(`design_tokens must use only exact canonical tokens supplied by repository evidence${detail}`);
   }
   if ((allowedRoutes.size || allowedTokens.size || context.relevant_components.length)
       && plan.unresolved_questions.some(value => /(?:route|page path|component.*owner|true owner|design system|theme token|token set|access gate|role.*gate)/i.test(String(value)))) {
