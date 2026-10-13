@@ -38,6 +38,7 @@ test('UX Designer prompt carries approved specification and forbids invented beh
   assert.match(prompt.systemPrompt, /Do not invent/);
   assert.match(prompt.systemPrompt, /exact identifiers supplied in repository_context\.existing_routes/);
   assert.match(prompt.systemPrompt, /only design tokens supplied in repository_context\.design_tokens/);
+  assert.match(prompt.systemPrompt, /at least one exact owner name from repository_context\.relevant_components/);
   assert.equal(JSON.parse(prompt.userPrompt).approved_specification.product_brief.outcome, 'Governed approvals');
   assert.equal(JSON.parse(prompt.userPrompt).repository_context.build_map.file_count, 2);
   assert.equal(JSON.parse(prompt.userPrompt).repository_context.live_context.atlas.capability_count, 2);
@@ -91,6 +92,13 @@ test('UX Designer rejects invented routes, access boundaries, tokens, and alread
       ]
     }), { repositoryContext: context, enforceRepositoryEvidence: true }).component_inventory.length,
     2
+  );
+  assert.equal(
+    parseUxDesignPlan(JSON.stringify({
+      ...grounded,
+      component_inventory: [{ component: 'apps/web/src/pages/BuilderControlRoomPage.tsx', responsibility: 'Existing Builder owner surface' }]
+    }), { repositoryContext: context, enforceRepositoryEvidence: true }).component_inventory[0].component,
+    'apps/web/src/pages/BuilderControlRoomPage.tsx'
   );
   assert.throws(() => parseUxDesignPlan(JSON.stringify({ ...grounded, component_inventory: [{ component: 'EvidenceRail', responsibility: 'Proposed presentation subcomponent' }] }), { repositoryContext: context, enforceRepositoryEvidence: true }), /must include at least one owner component/);
   assert.throws(() => parseUxDesignPlan(JSON.stringify({ ...grounded, design_tokens: { color: ['neutral-900'], spacing: ['spacing-1'] } }), { repositoryContext: context, enforceRepositoryEvidence: true }), /exact canonical tokens/);

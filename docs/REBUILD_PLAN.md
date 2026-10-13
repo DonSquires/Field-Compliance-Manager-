@@ -134,6 +134,12 @@ admit required work is incomplete, enforces paths explicitly labelled
 `Required source scope`, permits bounded web test/lint/build commands inside the
 isolated worktree, and reserves follow-ups for optional work outside the
 approved acceptance contract.
+The next live UX pass exposed a representation mismatch at the same grounding
+gate: repository evidence named `BuilderControlRoomPage`, while a valid design
+could name its full source path. UX validation now requires the prompt to carry
+at least one supplied owner explicitly and treats exact owner names and
+path/basename equivalents as the same grounded component; invented-only
+inventories still fail.
 
 Natural-language Builder acceptance hardening 2026-10-13: Bob's deterministic
 post-evidence Builder fallback now recognises ordinary owner language such as

@@ -5,7 +5,7 @@ const {
 } = require('./builder-model-adapter');
 const { fitRepositoryContext } = require('./builder-repository-context');
 
-const UX_DESIGNER_PROMPT_VERSION = 'ux-designer-v6';
+const UX_DESIGNER_PROMPT_VERSION = 'ux-designer-v7';
 
 const UX_DESIGN_SCHEMA = Object.freeze({
   type: 'object',
@@ -88,6 +88,7 @@ function buildUxDesignerPrompt({ specification, repositoryContext }) {
     'In design_tokens, copy bare token names exactly as supplied (for example --color-bg-base), without var(...), labels, values, or explanatory prose.',
     'The design_tokens.spacing array may be empty when token_constraints.allowed_spacing_tokens is empty; never invent a spacing scale to fill it.',
     'Resolve ownership, navigation, access, and design-system questions from supplied repository evidence rather than repeating them as unresolved.',
+    'component_inventory must include at least one exact owner name from repository_context.relevant_components when that list is non-empty; proposed subcomponents may be added after that grounded owner.',
     'Cover desktop and mobile behavior, accessibility, and loading, empty, error, and success states.',
     'route_map lists only exact identifiers supplied in repository_context.existing_routes; for a component-only change with no supplied route it is an empty array — never invent a route to fill it.',
     'route_map access values use only repository_context.existing_access_boundaries.',
@@ -162,8 +163,13 @@ function parseUxDesignPlan(content, { repositoryContext = {}, enforceRepositoryE
       throw new Error('route_map contains an access boundary not supplied by repository evidence');
     }
   }
+  const componentIdentity = (value) => String(value ?? '').trim().replace(/\\/g, '/').split('/').at(-1).replace(/\.(?:tsx?|jsx?|css)$/i, '').toLowerCase();
+  const ownerComponents = new Set(context.relevant_components.flatMap(value => [String(value).trim().toLowerCase(), componentIdentity(value)]));
   if (enforceRepositoryEvidence && context.relevant_components.length
-      && !plan.component_inventory.some(entry => entry && context.relevant_components.includes(entry.component))) {
+      && !plan.component_inventory.some(entry => entry && (
+        ownerComponents.has(String(entry.component ?? '').trim().toLowerCase())
+        || ownerComponents.has(componentIdentity(entry.component))
+      ))) {
     throw new Error('component_inventory must include at least one owner component supplied by repository evidence');
   }
   for (const group of ['color', 'spacing']) {
