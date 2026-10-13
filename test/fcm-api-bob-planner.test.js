@@ -152,6 +152,26 @@ test('a terse proceed recovers the original build request and completed subagent
   assert.doesNotMatch(proposal.args.task_description, /\nproceed\n/);
 });
 
+test('a proceed after a persisted web-research receipt becomes a source-inspection Builder proposal', () => {
+  const original = 'please redesign the bob buider system ui ux to be a more profestinal vibe focused system, use the internet and other apps to get insperation';
+  const decision = enforceBuilderProgression(
+    { action: 'use_tool', tool: 'web_research', args: {}, reply: 'Researching again.' },
+    {
+      message: 'proceed',
+      history: [
+        { role: 'user', content: original },
+        { role: 'assistant', content: 'Professional operations-console patterns and accessibility guidance.', metadata: { tool: 'web_research', outcome: 'ok' } },
+      ],
+      tools: [{ tool: 'web_research' }, { tool: 'repo_search' }, { tool: 'create_builder_job' }],
+      taskState: null,
+    },
+  );
+  assert.equal(decision.tool, 'create_builder_job');
+  assert.equal(decision.args.title, original);
+  assert.match(decision.args.task_description, /Inspect apps\/web\/src\/pages\/BuilderControlRoomPage\.tsx/);
+  assert.match(decision.args.task_description, /web_research: Professional operations-console patterns/);
+});
+
 test('planner is told which files are already in the session and never to ask for them again', () => {
   const prompt = buildPlannerPrompt({
     message: 'can you print it in this chat',

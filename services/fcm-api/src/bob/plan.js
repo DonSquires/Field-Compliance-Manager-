@@ -80,11 +80,23 @@ function builderEvidence(input) {
     const agentSteps = Array.isArray(agent?.steps) ? agent.steps : [];
     for (const step of agentSteps) flattened.push({ ...step, result_summary: step.result_summary || agent.findings || agent.findings_preview });
   }
+  const history = Array.isArray(input.history) ? input.history : [];
+  for (const item of history) {
+    const tool = item?.metadata?.tool;
+    if (item?.role !== 'assistant' || typeof tool !== 'string') continue;
+    flattened.push({
+      tool,
+      outcome: item.metadata?.outcome || 'ok',
+      result_summary: String(item.content || '').slice(0, 700),
+      historical: true,
+    });
+  }
   const completed = (tool) => flattened.some((step) => step?.tool === tool && !['not_found', 'empty', 'error', 'failed'].includes(String(step.outcome || '').toLowerCase()));
   return {
     steps: flattened,
     researched: completed('web_research'),
     sourceInspected: completed('repo_search'),
+    historicalResearch: flattened.some((step) => step?.tool === 'web_research' && step.historical === true && !['not_found', 'empty', 'error', 'failed'].includes(String(step.outcome || '').toLowerCase())),
   };
 }
 
@@ -106,12 +118,13 @@ function builderProposalArgs(input) {
       evidence || 'No evidence summary was returned; inspect the named surface before editing.',
       '',
       'Required delivery contract:',
+      /\bbui(?:l)?der\b/i.test(message) ? '- Inspect apps/web/src/pages/BuilderControlRoomPage.tsx, BuilderControlRoomPage.css, BobPanel.tsx, and their guard/Playwright tests before editing; replace these initial targets only when repository evidence identifies the true owner.' : null,
       '- Preserve Bob Builder job, step, approval, artifact, worker-run, review, and draft-pull-request truth.',
       '- Verify the affected user role and job-to-be-done before, during, and after the change.',
       '- Cross-check schema and Atlas; keep proven flow reach separate from FK adjacency and weak references.',
       '- Add focused unit/guard and desktop/mobile human-browser coverage for loading, empty, error, permission, active, success, and safe-next-action states.',
       '- Keep merge, deployment, migrations, auth/RLS, dependencies, environment, and evidential changes behind their protected human gates.',
-    ].join('\n').slice(0, 12000),
+    ].filter(Boolean).join('\n').slice(0, 12000),
     frontend_required: true,
     backend_required: false,
     code_review_mode: 'independent_ai',
@@ -126,6 +139,7 @@ function enforceBuilderProgression(decision, input) {
   const used = new Set(evidence.steps.map((step) => step && step.tool).filter(Boolean));
   const repeatedRead = decision.action === 'use_tool' && used.has(decision.tool);
   const asksForResearch = /\b(?:internet|online|web|research|inspiration|inspire|other apps?|examples?)\b/i.test(request);
+  const followupAffirmative = /^\s*(?:proceed|go ahead|go for it|yes|yes please|do it|continue|approved|confirmed|ok|okay)\s*[.!]*\s*$/i.test(String(input.message || ''));
 
   if (asksForResearch && !evidence.researched && tools.has('web_research') && ['answer', 'use_tool'].includes(decision.action) && decision.tool !== 'web_research') {
     return {
@@ -136,6 +150,18 @@ function enforceBuilderProgression(decision, input) {
       reply: 'I am gathering current professional product patterns before changing the existing Builder interface.',
       reasoning: 'The owner explicitly requested external inspiration; gather that evidence before source inspection and implementation.',
       route_selected: 'web_research',
+    };
+  }
+
+  if (followupAffirmative && evidence.historicalResearch && !evidence.sourceInspected) {
+    return {
+      ...decision,
+      action: 'use_tool',
+      tool: 'create_builder_job',
+      args: builderProposalArgs(input),
+      reply: 'I have the external design evidence from the previous turn. I am preparing the governed Builder job, with source inspection required before any edit, for your confirmation.',
+      reasoning: 'Carry the approved natural-language build request across turns and create the durable Builder proposal instead of repeating research or returning another design narrative.',
+      route_selected: 'create_builder_job',
     };
   }
 
