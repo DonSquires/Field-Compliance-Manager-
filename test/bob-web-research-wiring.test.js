@@ -7,7 +7,7 @@ const source = fs.readFileSync(path.resolve(__dirname, '../supabase/functions/on
 const research = fs.readFileSync(path.resolve(__dirname, '../supabase/functions/bob-web-research/index.ts'), 'utf8');
 
 test('Bob web research passes bounded redacted source evidence to reasoning', () => {
-  assert.match(source, /const evidence = sources\.slice\(0, 5\)/);
+  assert.match(source, /const evidence = sources\.slice\(0, 8\)/);
   assert.match(source, /String\(source\.excerpt \|\| ''\)\.slice\(0, 1500\)/);
   assert.match(source, /Web research returned no safe sources/);
   assert.match(source, /source_count: sources\.length/);

@@ -129,7 +129,12 @@ patterns. Research-driven natural-language jobs now preserve bounded research
 output and source URLs in the durable brief, cannot open with fewer than four
 sources, and require Product Analyst to return structured publisher, observation,
 and applicability evidence using only supplied URLs. This is provenance, not
-authority for a write; unsupported or invented sources fail validation.
+authority for a write; unsupported or invented sources fail validation. A live
+owner retest then found that a three-source result ended in another question
+instead of continuing the explicit build instruction. An owner-invoked research
+build now makes at most one bounded follow-up when fewer than four safe sources
+resolve and carries the combined evidence straight into Builder; it does not
+weaken the source gate or permit autonomous research without the owner's request.
 
 Builder restart acceptance 2026-10-13: the same monitored redesign exposed a
 second orphan class. A control-plane deployment landed after product analysis

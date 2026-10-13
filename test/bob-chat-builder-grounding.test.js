@@ -147,3 +147,12 @@ test('research-driven Builder jobs preserve provenance and cannot open without f
   assert.match(chat, /bjResearchUrls\.length < 4/);
   assert.match(chat, /outcome: 'need_research'/);
 });
+
+test('explicit owner redesign research continues into Builder without another human turn', () => {
+  assert.match(chat, /max_results: 8/);
+  assert.match(chat, /sources\.slice\(0, 8\)/);
+  assert.match(chat, /chosenTool === 'web_research'[\s\S]*explicitBuilderCreationRequest\(message\)/);
+  assert.match(chat, /Number\(result\.meta\.source_count \|\| 0\) < 4/);
+  assert.match(chat, /const proposalArgs = builderJobArgsFromEvidence\(message, researchSteps\)/);
+  assert.match(chat, /result\.meta\.research_attempts = researchSteps\.length/);
+});

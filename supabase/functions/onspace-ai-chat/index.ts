@@ -6637,7 +6637,7 @@ async function execWebResearch(authHeader, message) {
   const r = await callFn('bob-web-research', authHeader, {
     query: message,
     human_invoked: true,
-    max_results: 5,
+    max_results: 8,
     urls: urls.length ? urls : undefined
   });
   if (!r.ok) return {
@@ -6655,7 +6655,7 @@ async function execWebResearch(authHeader, message) {
       outcome: 'empty'
     }
   };
-  const evidence = sources.slice(0, 5).map((source, index) => [
+  const evidence = sources.slice(0, 8).map((source, index) => [
     `${index + 1}. ${String(source.title || source.url).slice(0, 200)}`,
     `URL: ${String(source.url || '').slice(0, 1000)}`,
     `Trust: ${Number(source.trust ?? 0)}`,
@@ -10789,6 +10789,33 @@ serve(async (req)=>{
     } else if (taskLedger) {
       // Non-fatal: step finish failed but loop proceeds with stale ledger
       console.warn('[conductor][task-continuity] step finish failed (non-fatal), loop will proceed with stale checkpoint');
+    }
+
+    // An owner who explicitly asks Bob to build from internet inspiration has already
+    // authorized this bounded research. Carry its evidence directly into Builder instead
+    // of returning another "what should I focus on?" turn. If the first search yields too
+    // few safe sources, make one narrower follow-up; the four-source creation gate remains.
+    if (caps.tier === 'admiral'
+      && chosenTool === 'web_research'
+      && result.meta.outcome === 'ok'
+      && explicitBuilderCreationRequest(message)) {
+      const researchSteps = [{ tool: 'web_research', result_summary: result.reply }];
+      if (Number(result.meta.source_count || 0) < 4) {
+        const followUp = await execWebResearch(authHeader, `${message}\nFocus the follow-up on professional prompt-to-code and AI app-builder workspace patterns, implementation progress, evidence, review, and safe release controls.`);
+        if (followUp.meta.outcome === 'ok') researchSteps.push({ tool: 'web_research', result_summary: followUp.reply });
+      }
+      const proposalArgs = builderJobArgsFromEvidence(message, researchSteps);
+      decision = {
+        ...decision,
+        action: 'use_tool',
+        tool: 'create_builder_job',
+        args: proposalArgs,
+        reasoning: 'The owner explicitly requested the redesign and web inspiration; carry the governed source evidence into an autonomous Builder job.'
+      };
+      chosenTool = 'create_builder_job';
+      args = proposalArgs;
+      result = await dispatchTool(chosenTool, args, decision);
+      result.meta.research_attempts = researchSteps.length;
     }
 
     // PILLAR H: tool_outcome event (all propose_* paths — Phase 2)
