@@ -72,6 +72,17 @@ test('planner prompt exposes drafting discipline, one-question rule, and delegat
   assert.equal(messages[2].role, 'assistant');
 });
 
+test('planner teaches natural-language app building to use the governed Builder lane', () => {
+  const prompt = buildPlannerPrompt({
+    message: 'Build me an app for patrol handovers',
+    tools: [{ tool: 'repo_search', purpose: 'inspect source' }, { tool: 'create_builder_job', purpose: 'open a governed Builder job' }],
+  });
+  assert.match(prompt, /BUILD \/ SELF-HEAL/);
+  assert.match(prompt, /build me an app/);
+  assert.match(prompt, /DRAFT GitHub pull request/);
+  assert.match(prompt, /never merge, deploy, apply migrations/);
+});
+
 test('planner is told which files are already in the session and never to ask for them again', () => {
   const prompt = buildPlannerPrompt({
     message: 'can you print it in this chat',

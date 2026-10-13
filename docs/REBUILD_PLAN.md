@@ -77,6 +77,14 @@ repository root and to ignore DDL-like SQL string literals. An Atlas `unwired`
 classification remains a static-map finding, not proof of a broken feature,
 until schema and caller evidence agree.
 
+Natural-language Builder acceptance hardening 2026-10-13: Bob's deterministic
+post-evidence Builder fallback now recognises ordinary owner language such as
+"build me an app", "add a page", "make this workflow work", and "fix the UI",
+without requiring the owner to know Bob's internal Builder term. Business-record
+creation remains outside this software-build classifier. The same evidence,
+confirmation, isolated worker, review, protected merge/deploy, and receipt
+gates remain unchanged.
+
 Runtime acceptance 2026-10-11: the laptop vision watcher now writes an
 independent liveness heartbeat and its Docker health check terminates only a
 stale watcher process so `restart: unless-stopped` can recover it. Acceptance

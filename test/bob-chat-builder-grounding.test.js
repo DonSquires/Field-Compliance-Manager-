@@ -107,7 +107,15 @@ test('the exact live owner request is recognised as Builder creation intent', ()
   assert.equal(explicitBuilderCreationRequest(request), true);
 });
 
+test('ordinary app-builder language is recognised without the internal Builder term', () => {
+  assert.equal(explicitBuilderCreationRequest('Build me a small app for tracking patrol handovers with a mobile page and focused tests.'), true);
+  assert.equal(explicitBuilderCreationRequest('Add an accessible page for reviewing welfare alerts and wire the existing workflow through it.'), true);
+  assert.equal(explicitBuilderCreationRequest('Fix the broken Bob panel and add a regression test for the durable run status.'), true);
+  assert.equal(explicitBuilderCreationRequest('Make this workflow work on mobile and keep the existing approval path.'), true);
+});
+
 test('Builder intent guard respects explicit plan-only and no-create instructions', () => {
   assert.equal(explicitBuilderCreationRequest('Plan only: explain how the Builder job would fix the Bob panel.'), false);
   assert.equal(explicitBuilderCreationRequest('Review the app code but do not create or open a Builder job.'), false);
+  assert.equal(explicitBuilderCreationRequest('Create a client record for the new patrol customer.'), false);
 });

@@ -7987,9 +7987,14 @@ serve(async (req)=>{
       if (!normalized) return false;
       if (/\b(?:plan only|explain only|review only|do not (?:create|open|start)|dont (?:create|open|start)|without (?:creating|opening|starting))\b/.test(normalized)) return false;
       const asksForBuilder = /\b(?:builder(?: job)?|draft (?:pull request|pr)|self[- ]heal|app design(?:\/| )build agent)\b/.test(normalized);
-      const asksForImplementation = /\b(?:build|implement|fix|repair|change|redesign|refactor|add|create)\b/.test(normalized);
-      const namesBuildTarget = /\b(?:app|application|code|repository|repo|ui|ux|panel|page|component|function|test|accessibility)\b/.test(normalized);
-      return asksForBuilder && asksForImplementation && namesBuildTarget;
+      const asksForImplementation = /\b(?:build|implement|fix|repair|change|redesign|refactor|add|create|make|develop|ship)\b/.test(normalized);
+      const namesBuildTarget = /\b(?:app|application|code|repository|repo|ui|ux|panel|page|component|function|test|accessibility|feature|workflow|module|screen|website|portal)\b/.test(normalized);
+      // Owners should not have to know Bob's internal "Builder" term. Ordinary
+      // app-building language is still a governed Builder request when it names
+      // a software surface or workflow rather than a business record.
+      const naturalAppBuild = /\b(?:build|create|make|develop|ship)\b.{0,100}\b(?:app|application|feature|workflow|module|screen|page|component|website|portal)\b/.test(normalized)
+        || /\b(?:add|implement|fix|repair|change|redesign|refactor)\b.{0,100}\b(?:code|repository|repo|ui|ux|panel|page|component|function|test|accessibility|workflow)\b/.test(normalized);
+      return (asksForBuilder || naturalAppBuild) && asksForImplementation && namesBuildTarget;
     };
     const builderJobArgsFromEvidence = (text: string, evidenceSteps: Array<{ tool: string; result_summary: string }>) => {
       const requestBrief = String(text ?? '').trim();
