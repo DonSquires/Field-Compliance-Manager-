@@ -48,7 +48,7 @@ effective — the author makes 30–60 calls per job, the reviewer one, so the m
 tier authors and the full tier reviews; `gpt-6-sol` at `xhigh` emptied the
 account in an afternoon). Builder routing is separate from Bob's conversational lane. Use
 `BOB_BUILDER_ROUTE_ANALYSIS=openai,gpu_workstation`,
-`BOB_BUILDER_ROUTE_AUTHOR=gpu_workstation,openai`, and
+`BOB_BUILDER_ROUTE_AUTHOR=openai,gpu_workstation`, and
 `BOB_BUILDER_ROUTE_REVIEW=openai,gpu_workstation`. The VPS CPU is reserved for
 `BOB_BUILDER_ROUTE_LOCAL` and `BOB_BUILDER_ROUTE_RESTRICTED`; it must not make a
 simple unrestricted build wait through a long CPU timeout before escalation.

@@ -118,7 +118,7 @@ const LAPTOP_OFF = Object.freeze({
 });
 const LAPTOP_ON = Object.freeze({ ...LAPTOP_OFF, gpu_workstation: { configured: true, healthy: true, models: ['qwen2.5-coder:7b'], ready_model: 'qwen2.5-coder:7b' } });
 
-test('the author works in-house first and escalates to OpenAI only when the local model is stuck', async () => {
+test('an operator can explicitly select GPU-first authoring and it escalates directly to OpenAI', async () => {
   const repo = makeRepo();
   const workspaceRoot = path.join(repo.root, 'workspaces');
   const job = { id: 'e5ca1a7ee5ca1a7ee5ca1a7ee5ca1a7e', organization_id: '00000000-0000-0000-0000-000000000001', target_sha: repo.sha, title: 'sum subtracts', task_description: 'fix sum' };
@@ -139,7 +139,15 @@ test('the author works in-house first and escalates to OpenAI only when the loca
     ];
     return { ok: true, status: 200, data: { content: JSON.stringify(script[Math.min(openaiTurn - 1, script.length - 1)]), model: 'gpt-5.4' } };
   };
-  const result = await runAgenticEngineer({ supabase: null, gateway: { gatewayUrl: 'http://gw', apiToken: 't' }, job, step, lane: 'backend', sourceDir: repo.source, workspaceRoot, repoRoot: repo.source, callModel, limits: { ...DEFAULT_LIMITS, maxTurns: 10 }, providerHealth: LAPTOP_ON });
+  const previousAuthorRoute = process.env.BOB_BUILDER_ROUTE_AUTHOR;
+  process.env.BOB_BUILDER_ROUTE_AUTHOR = 'gpu_workstation,openai';
+  let result;
+  try {
+    result = await runAgenticEngineer({ supabase: null, gateway: { gatewayUrl: 'http://gw', apiToken: 't' }, job, step, lane: 'backend', sourceDir: repo.source, workspaceRoot, repoRoot: repo.source, callModel, limits: { ...DEFAULT_LIMITS, maxTurns: 10 }, providerHealth: LAPTOP_ON });
+  } finally {
+    if (previousAuthorRoute === undefined) delete process.env.BOB_BUILDER_ROUTE_AUTHOR;
+    else process.env.BOB_BUILDER_ROUTE_AUTHOR = previousAuthorRoute;
+  }
   assert.equal(result.ok, true, JSON.stringify(result.error));
   // A window overflow compacts the transcript hard and retries the laptop once; the second overflow
   // escalates directly to the strong provider instead of waiting on the VPS CPU.
@@ -152,7 +160,14 @@ test('the author works in-house first and escalates to OpenAI only when the loca
   assert.equal(result.routing.escalated, true);
   // Resuming past the failed local provider skips it entirely on the next attempt.
   const seen2 = [];
-  const result2 = await runAgenticEngineer({ supabase: null, gateway: { gatewayUrl: 'http://gw', apiToken: 't' }, job: { ...job, id: 'e5ca1a7ee5ca1a7ee5ca1a7ee5ca1a7f' }, step, lane: 'backend', sourceDir: repo.source, workspaceRoot, repoRoot: repo.source, callModel: async ({ modelRequest }) => { seen2.push(modelRequest.provider); return { ok: true, status: 200, data: { content: JSON.stringify({ tool: 'finish', args: { summary: 'x', no_change_reason: 'nothing to do here really' } }), model: 'gpt-5.4' } }; }, limits: { ...DEFAULT_LIMITS, maxTurns: 3 }, providerHealth: LAPTOP_ON, startAfterProvider: 'gpu_workstation' });
+  process.env.BOB_BUILDER_ROUTE_AUTHOR = 'gpu_workstation,openai';
+  let result2;
+  try {
+    result2 = await runAgenticEngineer({ supabase: null, gateway: { gatewayUrl: 'http://gw', apiToken: 't' }, job: { ...job, id: 'e5ca1a7ee5ca1a7ee5ca1a7ee5ca1a7f' }, step, lane: 'backend', sourceDir: repo.source, workspaceRoot, repoRoot: repo.source, callModel: async ({ modelRequest }) => { seen2.push(modelRequest.provider); return { ok: true, status: 200, data: { content: JSON.stringify({ tool: 'finish', args: { summary: 'x', no_change_reason: 'nothing to do here really' } }), model: 'gpt-5.4' } }; }, limits: { ...DEFAULT_LIMITS, maxTurns: 3 }, providerHealth: LAPTOP_ON, startAfterProvider: 'gpu_workstation' });
+  } finally {
+    if (previousAuthorRoute === undefined) delete process.env.BOB_BUILDER_ROUTE_AUTHOR;
+    else process.env.BOB_BUILDER_ROUTE_AUTHOR = previousAuthorRoute;
+  }
   assert.deepEqual(seen2, ['openai']);
   assert.equal(result2.no_change, true);
   fs.rmSync(repo.root, { recursive: true, force: true });

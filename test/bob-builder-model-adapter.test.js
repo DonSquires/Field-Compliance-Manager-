@@ -33,13 +33,13 @@ test('model routing keeps low-risk preprocessing in-house first', () => {
 
 test('model routing is in-house first with OpenAI as the outsourced fallback, per workload class', () => {
   assert.deepEqual(routeBuilderModel({ workloadKind: 'architecture' }).chain, ['openai', 'gpu_workstation'], 'structured Builder stages use the strongest predictable provider first');
-  assert.deepEqual(routeBuilderModel({ workloadKind: 'backend_implementation' }).chain, ['gpu_workstation', 'openai'], 'coding uses the workstation GPU first without waiting on the VPS CPU');
+  assert.deepEqual(routeBuilderModel({ workloadKind: 'backend_implementation' }).chain, ['openai', 'gpu_workstation'], 'unrestricted coding uses the strongest predictable provider first');
   assert.equal(routeBuilderModel({ workloadKind: 'backend_implementation' }).reason, 'in_house_first_author');
   assert.deepEqual(routeBuilderModel({ workloadKind: 'independent_code_review' }).chain, ['openai', 'gpu_workstation'], 'the independent check goes to the strongest reviewer first');
   assert.deepEqual(routeBuilderModel({ workloadKind: 'independent_code_review', env: { BOB_BUILDER_ROUTE_REVIEW: 'gpu_workstation,ollama,openai' } }).chain, ['gpu_workstation', 'ollama', 'openai'], 'operators can opt the VPS back in');
   // Operators can pin a class to OpenAI (or anything else) without a code change.
   assert.deepEqual(routeBuilderModel({ workloadKind: 'backend_implementation', env: { BOB_BUILDER_ROUTE_AUTHOR: 'openai' } }).chain, ['openai']);
-  assert.deepEqual(routeBuilderModel({ workloadKind: 'backend_implementation', env: { BOB_BUILDER_ROUTE_AUTHOR: 'nonsense' } }).chain, ['gpu_workstation', 'openai'], 'unknown providers fall back to the default chain');
+  assert.deepEqual(routeBuilderModel({ workloadKind: 'backend_implementation', env: { BOB_BUILDER_ROUTE_AUTHOR: 'nonsense' } }).chain, ['openai', 'gpu_workstation'], 'unknown providers fall back to the default chain');
 });
 
 test('model routing keeps restricted data local regardless of workload', () => {

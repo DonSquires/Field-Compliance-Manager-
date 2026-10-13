@@ -188,9 +188,9 @@ The 30B VPS attempt repeatedly consumed the full seven-minute timeout, the
 available workstation 8B repeatedly failed the four-source structured contract,
 and the strong provider completed an equivalent specification in about one
 minute. Builder now has workload-specific compute independent of chat:
-structured analysis/review use the strong provider then workstation GPU,
-agentic authoring uses workstation GPU then the strong provider, and VPS CPU is
-reserved for light or restricted work. Autonomous admission reuses an active
+structured analysis, agentic authoring, and review use the strong provider then
+workstation GPU, and VPS CPU is reserved for light or restricted work.
+Autonomous admission reuses an active
 same-owner/same-project/same-title job even when research changes the detailed
 brief, and unrecoverable attempt-ceiling blocks finalize the job as failed
 before recording the plain-language report. Product and UX prompts expose exact

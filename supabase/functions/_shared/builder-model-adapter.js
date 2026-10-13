@@ -42,12 +42,12 @@ function parseChain(raw, fallback) {
 // acceptance on 2026-10-13 showed the VPS 30B timing out after seven minutes and the laptop 8B
 // repeatedly failing the research/UX schemas, while the strong provider completed the same
 // structured stage in about a minute. Keep the chains env-tunable, but make the safe fast path the
-// default: strong structured work, GPU-first coding, and no VPS CPU in either heavy path.
+// default: strong unrestricted work, GPU fallback, and no VPS CPU in either heavy path.
 function routingChains(env = process.env) {
   return {
     restricted: parseChain(env.BOB_BUILDER_ROUTE_RESTRICTED, [PROVIDERS.OLLAMA, PROVIDERS.GPU_WORKSTATION]),
     local: parseChain(env.BOB_BUILDER_ROUTE_LOCAL, [PROVIDERS.GPU_WORKSTATION, PROVIDERS.OLLAMA, PROVIDERS.OPENAI]),
-    author: parseChain(env.BOB_BUILDER_ROUTE_AUTHOR, [PROVIDERS.GPU_WORKSTATION, PROVIDERS.OPENAI]),
+    author: parseChain(env.BOB_BUILDER_ROUTE_AUTHOR, [PROVIDERS.OPENAI, PROVIDERS.GPU_WORKSTATION]),
     review: parseChain(env.BOB_BUILDER_ROUTE_REVIEW, [PROVIDERS.OPENAI, PROVIDERS.GPU_WORKSTATION]),
     analysis: parseChain(env.BOB_BUILDER_ROUTE_ANALYSIS, [PROVIDERS.OPENAI, PROVIDERS.GPU_WORKSTATION])
   };

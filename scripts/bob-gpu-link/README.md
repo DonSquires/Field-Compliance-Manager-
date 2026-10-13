@@ -12,7 +12,7 @@ the work, so the cost split is auditable (`builder_model_runs.provider`).
 |---|---|---|---|
 | Chat planner / drafting, synthesis | laptop GPU (`qwen2.5-coder:7b`) | — | OpenAI (`gpt-5.4`) |
 | Chat verifier (critic), research subagents | laptop GPU (`qwen2.5:7b`, never the planner's model) | — | OpenAI (`gpt-5.4-mini`) |
-| Builder author (writes the code) | laptop GPU (`qwen2.5-coder:*`) | — | OpenAI (`gpt-6-sol`) |
+| Builder author (writes the code) | OpenAI (`gpt-6-sol`) | laptop GPU (`qwen2.5-coder:*`) | — |
 | Builder independent reviewer | OpenAI (`gpt-5.6-sol`) | laptop GPU | — |
 | Builder analyst / UX / release notes | OpenAI (`gpt-6-sol`) | laptop GPU | — |
 | Light / restricted-data work (classification, summaries) | laptop GPU | VPS Ollama (`llama3.1:8b`, CPU) | OpenAI (never for restricted data) |
@@ -155,7 +155,8 @@ the public HTTPS inference endpoint with `INFERENCE_SERVICE_URL` and
   `_RESTRICTED` — comma-separated provider chains (`gpu_workstation`,
   `ollama`, `openai`). Keep unrestricted analysis/review strong-first, authoring
   GPU-first, and VPS Ollama out of those heavy chains. Restricted data never
-  includes `openai`.
+  includes `openai`. Unrestricted analysis, authoring, and review use the strong
+  provider first; the workstation GPU is the fallback.
 - `BOB_GPU_MODELS`, `BOB_OLLAMA_MODELS` — allowlists, best model first.
 - `BOB_GPU_NUM_CTX` (default 32768), `BOB_OLLAMA_NUM_CTX` (default 16384) —
   a prompt that will not fit is sent onward instead of being truncated.
