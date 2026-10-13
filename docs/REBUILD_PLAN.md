@@ -138,7 +138,11 @@ weaken the source gate or permit autonomous research without the owner's request
 The next live job exposed a URL/path collision: a researched `/ai-apps/` URL was
 read as a repository `apps/` path and incorrectly selected a backend-only lane.
 Repository-lane inference now strips public URLs before recognizing source paths,
-so research evidence cannot suppress the requested UI design/frontend stages.
+so research evidence cannot suppress the requested UI design/frontend stages. A
+fresh retest then exposed the alternate `repo_search` → in-loop `web_research`
+route ending in synthesized design prose. The explicit-owner-build completion
+bridge now accepts that researched read route too (with the same bounded follow-up
+and source gate) without adding web research to the general autonomous allowlist.
 
 Builder restart acceptance 2026-10-13: the same monitored redesign exposed a
 second orphan class. A control-plane deployment landed after product analysis

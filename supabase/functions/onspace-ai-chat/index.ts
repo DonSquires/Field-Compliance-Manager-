@@ -11585,7 +11585,23 @@ serve(async (req)=>{
       // owner request to build. After evidence gathering, enter the same
       // governed proposal path instead of synthesising another future-tense
       // recommendation. This still returns before job creation for confirmation.
-      if (caps.tier === 'admiral' && chosenTool && LOOP_CONTINUABLE_READ_TOOLS.has(chosenTool) && explicitBuilderCreationRequest(message)) {
+      if (caps.tier === 'admiral'
+        && chosenTool
+        && (LOOP_CONTINUABLE_READ_TOOLS.has(chosenTool) || chosenTool === 'web_research')
+        && explicitBuilderCreationRequest(message)) {
+        if (chosenTool === 'web_research' && Number(result.meta.source_count || 0) < 4) {
+          const followUp = await execWebResearch(authHeader, `${message}\nFocus the follow-up on professional prompt-to-code and AI app-builder workspace patterns, implementation progress, evidence, review, and safe release controls.`);
+          if (followUp.meta.outcome === 'ok') {
+            loopSteps.push({
+              step: loopSteps.length + 1,
+              tool: 'web_research',
+              args: { purpose: 'complete explicitly requested Builder research provenance' },
+              outcome: 'ok',
+              result_summary: sliceWithTruncationDisclosure(followUp.reply, LOOP_STEP_SUMMARY_BUDGET, 'research follow-up'),
+              meta: { source_count: Number(followUp.meta.source_count || 0), internal: true }
+            });
+          }
+        }
         const proposalArgs = builderJobArgsFromEvidence(message, loopSteps);
         decision = {
           ...decision,

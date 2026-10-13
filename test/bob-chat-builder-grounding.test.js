@@ -168,4 +168,6 @@ test('explicit owner redesign research continues into Builder without another hu
   assert.match(chat, /Number\(result\.meta\.source_count \|\| 0\) < 4/);
   assert.match(chat, /const proposalArgs = builderJobArgsFromEvidence\(message, researchSteps\)/);
   assert.match(chat, /result\.meta\.research_attempts = researchSteps\.length/);
+  assert.match(chat, /LOOP_CONTINUABLE_READ_TOOLS\.has\(chosenTool\) \|\| chosenTool === 'web_research'/);
+  assert.match(chat, /builderJobArgsFromEvidence\(message, loopSteps\)/);
 });
