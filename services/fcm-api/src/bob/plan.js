@@ -47,6 +47,80 @@ function delegableTools(tools) {
   return tools.map((t) => t.tool).filter((name) => DELEGABLE_TOOL_RE.test(name));
 }
 
+function builderSearchQuery(message) {
+  const text = String(message || '');
+  if (/\bbuilder\b/i.test(text)) return 'BuilderControlRoomPage|BobPanel|builder';
+  const paths = text.match(/\b(?:apps|services|supabase|scripts|test)\/[\w./-]+/g);
+  if (paths && paths.length) return [...new Set(paths)].slice(0, 4).join('|');
+  const stop = new Set(['please', 'build', 'create', 'make', 'develop', 'design', 'redesign', 'generate', 'implement', 'change', 'improve', 'system', 'using', 'with', 'from', 'this', 'that', 'more']);
+  const terms = [...new Set(text.toLowerCase().match(/[a-z][a-z0-9_-]{3,}/g) || [])].filter((term) => !stop.has(term)).slice(0, 4);
+  return terms.join('|') || 'BuilderControlRoomPage|BobPanel';
+}
+
+function builderProposalArgs(input) {
+  const message = String(input.message || '').trim();
+  const steps = Array.isArray(input.taskState?.steps_taken) ? input.taskState.steps_taken : [];
+  const evidence = steps
+    .filter((step) => step && typeof step.tool === 'string')
+    .map((step) => `${step.tool}: ${String(step.result_summary || step.outcome || 'completed').slice(0, 700)}`)
+    .join('\n');
+  const title = message.replace(/\s+/g, ' ').split(/(?<=[.!?])\s/)[0].slice(0, 160) || 'Implement the requested FCM change';
+  return {
+    title,
+    task_description: [
+      'Builder mode: chat_to_code',
+      message,
+      '',
+      'Evidence gathered before proposal:',
+      evidence || 'No evidence summary was returned; inspect the named surface before editing.',
+      '',
+      'Required delivery contract:',
+      '- Preserve Bob Builder job, step, approval, artifact, worker-run, review, and draft-pull-request truth.',
+      '- Verify the affected user role and job-to-be-done before, during, and after the change.',
+      '- Cross-check schema and Atlas; keep proven flow reach separate from FK adjacency and weak references.',
+      '- Add focused unit/guard and desktop/mobile human-browser coverage for loading, empty, error, permission, active, success, and safe-next-action states.',
+      '- Keep merge, deployment, migrations, auth/RLS, dependencies, environment, and evidential changes behind their protected human gates.',
+    ].join('\n').slice(0, 12000),
+    frontend_required: true,
+    backend_required: false,
+    code_review_mode: 'independent_ai',
+  };
+}
+
+function enforceBuilderProgression(decision, input) {
+  const tools = new Set((input.tools || []).map((tool) => tool && tool.tool).filter(Boolean));
+  if (!tools.has('create_builder_job') || !isCodeRequest(input.message)) return decision;
+  const steps = Array.isArray(input.taskState?.steps_taken) ? input.taskState.steps_taken : [];
+  const used = new Set(steps.map((step) => step && step.tool).filter(Boolean));
+  const repeatedRead = decision.action === 'use_tool' && used.has(decision.tool);
+
+  if (used.has('web_research') && !used.has('repo_search') && tools.has('repo_search') && (repeatedRead || decision.action === 'answer')) {
+    return {
+      ...decision,
+      action: 'use_tool',
+      tool: 'repo_search',
+      args: { action: 'search', query: builderSearchQuery(input.message) },
+      reply: 'I have the external design evidence. I am now inspecting the existing Builder source and tests so the redesign brief is grounded in the real system.',
+      reasoning: 'Advance the natural-language Builder request from completed external research to repository evidence instead of repeating the same research step.',
+      route_selected: 'repo_search',
+    };
+  }
+
+  if (used.has('repo_search') && (repeatedRead || decision.action === 'answer')) {
+    return {
+      ...decision,
+      action: 'use_tool',
+      tool: 'create_builder_job',
+      args: builderProposalArgs(input),
+      reply: 'I have grounded the redesign in external design evidence and the existing Builder source. I am preparing the governed Builder job for your confirmation.',
+      reasoning: 'Evidence gathering is complete; advance to the governed two-turn Builder proposal instead of stopping at prose.',
+      route_selected: 'create_builder_job',
+    };
+  }
+
+  return decision;
+}
+
 async function runPlannerOnce(gateway, input, { reviewerNotes = [], timeoutMs, role = 'planner', chain } = {}) {
   const messages = buildPlannerMessages({ ...input, reviewerNotes });
   const completion = await gateway.chatJson(role, messages, { timeoutMs, reasoningEffort: authorEffort(input), ...(chain ? { chain } : {}) });
@@ -175,6 +249,8 @@ async function planTurn(body, { gateway, now = Date.now, logger = console, env =
     }
   }
 
+  decision = enforceBuilderProgression(decision, input);
+
   const authorPass = passes[0];
   return {
     status: 200,
@@ -210,4 +286,4 @@ async function planTurn(body, { gateway, now = Date.now, logger = console, env =
   };
 }
 
-module.exports = { DELEGABLE_TOOL_RE, authorEffort, delegableTools, planTurn, readBody, runPlannerOnce };
+module.exports = { DELEGABLE_TOOL_RE, authorEffort, builderProposalArgs, builderSearchQuery, delegableTools, enforceBuilderProgression, planTurn, readBody, runPlannerOnce };

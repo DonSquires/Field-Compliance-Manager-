@@ -90,6 +90,16 @@ Business-record creation remains outside this software-build classifier. The
 same evidence, confirmation, isolated worker, review, protected merge/deploy,
 and receipt gates remain unchanged.
 
+Live Builder-monitoring finding 2026-10-13: a plain-language request to research
+and redesign Bob Builder stopped at generic UI/UX prose and created no Builder
+receipt. After the planner was trained on the three Builder modes, the in-house
+model correctly selected web research but repeated the same tool instead of
+advancing. The VPS planner now deterministically advances a grounded software
+request from completed web research to repository inspection, then from source
+evidence to the existing two-turn `create_builder_job` proposal. This guard does
+not skip evidence, confirmation, isolated execution, review, or protected
+release gates.
+
 Runtime acceptance 2026-10-11: the laptop vision watcher now writes an
 independent liveness heartbeat and its Docker health check terminates only a
 stale watcher process so `restart: unless-stopped` can recover it. Acceptance

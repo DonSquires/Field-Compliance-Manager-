@@ -6,7 +6,7 @@ const assert = require('node:assert/strict');
 const { buildPendingBlock, buildPlannerPrompt, buildPlannerMessages, buildTaskStateBlock, buildMemoryBlock, buildRulingsAndNotesBlock, sliceWithDisclosure } = require('../services/fcm-api/src/bob/planPrompt');
 const { normalizeDecision, parsePlanContent } = require('../services/fcm-api/src/bob/planParse');
 const { autoRepairArgs, runDeterministicChecks, scrubReply, parseCriticContent } = require('../services/fcm-api/src/bob/verify');
-const { planTurn } = require('../services/fcm-api/src/bob/plan');
+const { enforceBuilderProgression, planTurn } = require('../services/fcm-api/src/bob/plan');
 const { createModelGateway, isReasoningModel, paramsUnsupportedError } = require('../services/fcm-api/src/bob/modelGateway');
 
 const TOOLS = [
@@ -76,6 +76,38 @@ test('planner teaches natural-language app building to use the governed Builder 
   const prompt = buildPlannerPrompt({
     message: 'Build me an app for patrol handovers',
     tools: [{ tool: 'repo_search', purpose: 'inspect source' }, { tool: 'create_builder_job', purpose: 'open a governed Builder job' }],
+  });
+
+  test('natural-language Builder work advances from web research to source inspection to a job proposal', () => {
+    const tools = [
+      { tool: 'web_research' },
+      { tool: 'repo_search' },
+      { tool: 'create_builder_job' },
+    ];
+    const message = 'Please redesign the Bob Builder system UI UX to be a more professional vibe-focused system, using the internet and other apps for inspiration.';
+    const repeatedResearch = { action: 'use_tool', tool: 'web_research', args: {}, reply: 'researching', route_selected: 'web_research' };
+    const afterResearch = enforceBuilderProgression(repeatedResearch, {
+      message,
+      tools,
+      taskState: { steps_taken: [{ tool: 'web_research', result_summary: 'Professional task-first design patterns.' }] },
+    });
+    assert.equal(afterResearch.tool, 'repo_search');
+    assert.deepEqual(afterResearch.args, { action: 'search', query: 'BuilderControlRoomPage|BobPanel|builder' });
+
+    const stoppedAtProse = { action: 'answer', tool: null, args: {}, reply: 'Here are some ideas.', route_selected: 'answer' };
+    const afterSource = enforceBuilderProgression(stoppedAtProse, {
+      message,
+      tools,
+      taskState: {
+        steps_taken: [
+          { tool: 'web_research', result_summary: 'Professional task-first design patterns.' },
+          { tool: 'repo_search', result_summary: 'BuilderControlRoomPage.tsx and CSS own the current Builder UI.' },
+        ],
+      },
+    });
+    assert.equal(afterSource.tool, 'create_builder_job');
+    assert.match(afterSource.args.task_description, /BuilderControlRoomPage\.tsx/);
+    assert.match(afterSource.args.task_description, /protected human gates/);
   });
   assert.match(prompt, /BUILD \/ SELF-HEAL/);
   assert.match(prompt, /build me an app/);

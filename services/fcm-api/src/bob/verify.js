@@ -21,13 +21,14 @@ const ANNOUNCED_DRAFT_RE = /\b(here is|here's|below is|i have (drafted|prepared|
 const MIN_DRAFT_REPLY_WORDS = 150;
 // A request about the code: names a source path, a PR, or asks to fix/change a crash, bug, test, function…
 const CODE_REQUEST_RE = /(\b[\w./-]+\.(?:m?js|c?js|tsx?|sql|py|ps1|json|ya?ml)\b|\b(?:PR|pull request) #?\d+|\b(?:fix|debug|patch|repair|investigate|update|change|refactor|implement|rewrite)\b[\s\S]{0,200}\b(?:crash|bug|error|exception|typeerror|failing|test|function|script|component|migration|endpoint|edge function|tool|handler|regex|check|query|table|column|policy|rpc)\b)/i;
+const NATURAL_BUILD_RE = /\b(?:build|create|make|develop|design|redesign|generate|prototype|implement|refactor|fix|repair|change|improve)\b[\s\S]{0,160}\b(?:app|application|builder|code|repository|repo|ui|ux|page|panel|component|feature|workflow|module|screen|website|portal|system)\b/i;
 // …or names a code identifier: camelCase (loadHistory), snake_case (created_at), a call (persist()).
 // Case-sensitive on purpose; under /i the camelCase branch matched every word. Live 2026-09-27: a bug
 // report naming loadHistory, persist() and created_at (no file path) went to the 7B planner, which narrated.
 const CODE_IDENTIFIER_RE = /(\b[a-z]+[A-Z][A-Za-z0-9]*\b|\b[a-z][a-z0-9]*_[a-z0-9_]+\b|\b\w+\(\))/;
 function isCodeRequest(message) {
   const text = String(message || '');
-  return CODE_REQUEST_RE.test(text) || CODE_IDENTIFIER_RE.test(text);
+  return CODE_REQUEST_RE.test(text) || NATURAL_BUILD_RE.test(text) || CODE_IDENTIFIER_RE.test(text);
 }
 // A reply that only narrates a procedure ("I will…", "we should…") and takes no step, or ends by asking for approval of the approach.
 const PROCEDURE_ONLY_RE = /\b(I will|I'll|I would|I am going to|I'm going to|first,? I|we should|we need to|you should|the fix is to|to improve|to fix (?:it|this),? we)\b/i;
