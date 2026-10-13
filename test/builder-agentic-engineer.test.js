@@ -654,13 +654,37 @@ test('replace_in_file edits by exact text, refuses ambiguity, hints at whitespac
   assert.equal(ok.replaced, 1);
   assert.match(fs.readFileSync(path.join(ws.workspacePath, 'lib/sum.js'), 'utf8'), /a \+ b/);
   assert.deepEqual(tools.__changedFiles(), ['lib/sum.js']);
-  assert.match(tools.replace_in_file({ path: 'lib/sum.js', old_text: 'not here at all', new_text: 'x' }).error, /old_text not found/);
+  assert.match(tools.replace_in_file({ path: 'lib/sum.js', old_text: 'not here at all', new_text: 'x' }).error, /old_text not found[\s\S]*use search[\s\S]*read_file/);
   assert.match(tools.replace_in_file({ path: 'lib/sum.js', old_text: 'a  +  b', new_text: 'x' }).error, /different whitespace/);
   fs.writeFileSync(path.join(ws.workspacePath, 'lib/sum.js'), 'const x = 1;\nconst x = 1;\n');
   assert.match(tools.replace_in_file({ path: 'lib/sum.js', old_text: 'const x = 1;', new_text: 'const y = 2;' }).error, /occurs 2 times/);
   assert.equal(tools.replace_in_file({ path: 'lib/sum.js', old_text: 'const x = 1;', new_text: 'const y = 2;', all: true }).replaced, 2);
   assert.match(tools.replace_in_file({ path: 'package.json', old_text: '{', new_text: '[' }).error, /refused/);
   assert.match(tools.replace_in_file({ path: 'lib/missing.js', old_text: 'a', new_text: 'b' }).error, /not found: lib\/missing\.js/);
+});
+
+test('oversized file reads preserve real head and tail with an exact omitted range', () => {
+  const repo = makeRepo();
+  const workspaceRoot = path.join(repo.root, 'workspaces');
+  const { createBranchWorkspace } = require('../builder-branch-workspace');
+  const ws = createBranchWorkspace({ sourceDir: repo.source, workspaceRoot, jobId: 'feedfacefeedfacefeedfacefeedface', targetSha: repo.sha });
+  const largePath = path.join(ws.workspacePath, 'lib', 'large.js');
+  fs.writeFileSync(largePath, Array.from({ length: 240 }, (_, index) => `const line${index + 1} = ${index + 1};`).join('\n'));
+  const tools = createTools({
+    workspacePath: ws.workspacePath,
+    repoRoot: repo.source,
+    lane: 'backend',
+    supabase: null,
+    limits: { ...DEFAULT_LIMITS, readCapChars: 1200 },
+    log() {},
+  });
+
+  const result = tools.read_file({ path: 'lib/large.js' });
+  assert.match(result.content, /^1: const line1 = 1;/);
+  assert.match(result.content, /240: const line240 = 240;$/);
+  assert.match(result.content, /\[OMITTED: lib\/large\.js lines \d+-\d+\./);
+  assert.ok(result.omitted_range.start_line < result.omitted_range.end_line);
+  fs.rmSync(repo.root, { recursive: true, force: true });
 });
 
 test('the engineer paces its budget and gets one grace turn to finish when edits exist at the limit', async () => {

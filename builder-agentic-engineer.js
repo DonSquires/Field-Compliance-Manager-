@@ -64,6 +64,43 @@ function clip(text, cap, label = 'output') {
   return `${value.slice(0, cap)}\n[TRUNCATED: ${label} was ${value.length} chars; showing the first ${cap}. Narrow the request to see the rest.]`;
 }
 
+function boundedNumberedLines(lines, start, end, cap, label) {
+  const numbered = lines.slice(start - 1, end).map((line, index) => `${start + index}: ${line}`);
+  const full = numbered.join('\n');
+  if (full.length <= cap) return { content: full, omitted_range: null };
+
+  const headBudget = Math.floor(cap * 0.55);
+  const tailBudget = Math.floor(cap * 0.35);
+  const head = [];
+  const tail = [];
+  let headChars = 0;
+  let tailChars = 0;
+  let headCount = 0;
+  let tailCount = 0;
+
+  for (const line of numbered) {
+    if (headChars + line.length + 1 > headBudget) break;
+    head.push(line);
+    headChars += line.length + 1;
+    headCount++;
+  }
+  for (let index = numbered.length - 1; index >= headCount; index--) {
+    const line = numbered[index];
+    if (tailChars + line.length + 1 > tailBudget) break;
+    tail.unshift(line);
+    tailChars += line.length + 1;
+    tailCount++;
+  }
+
+  const omittedStart = start + headCount;
+  const omittedEnd = end - tailCount;
+  const marker = `[OMITTED: ${label} lines ${omittedStart}-${omittedEnd}. The real head and tail are shown; use search or read_file with that narrower range for the omitted body.]`;
+  return {
+    content: [...head, marker, ...tail].join('\n'),
+    omitted_range: { start_line: omittedStart, end_line: omittedEnd },
+  };
+}
+
 function parseToolCall(content) {
   const raw = String(content ?? '').trim();
   const attempt = (text) => {
@@ -169,7 +206,7 @@ function systemPrompt({ lane, limits }) {
     '',
     'TOOLS (one call per turn; reply with ONLY a JSON object {"thought": string, "tool": string, "args": object}):',
     '- list_dir {path}                        list a directory (node_modules/.git skipped)',
-    `- read_file {path, start_line?, end_line?}   read a text file (max ${limits.readCapChars} chars per call)`,
+    `- read_file {path, start_line?, end_line?}   read a text file (max ${limits.readCapChars} chars per call). An oversized range returns the real head AND tail with the omitted line range named; never invent the omitted body — search it or request that range.`,
     '- outline {path, pattern?}              declaration index of one file: every function/const/class/type/case/SQL object with its line number (pattern narrows it). USE THIS FIRST on any file over ~800 lines, then read_file only the ranges you need — never walk a big file window by window.',
     '- search {query, path?, regex?, context?}   git grep across the worktree (path = pathspec, e.g. "supabase/functions"); regex defaults to false; context = lines of surrounding code per hit (0-8) so a hit often needs no follow-up read',
     '- git_log {path?, limit?}               recent commits (optionally for a path)',
@@ -451,8 +488,8 @@ function createTools({ workspacePath, repoRoot, lane, supabase, limits, log }) {
       const lines = buffer.toString('utf8').split('\n');
       const start = Math.max(1, Number(start_line) || 1);
       const end = Math.min(lines.length, Number(end_line) || lines.length);
-      const slice = lines.slice(start - 1, end).map((line, index) => `${start + index}: ${line}`).join('\n');
-      return { path: normalized, total_lines: lines.length, start_line: start, end_line: end, content: clip(slice, limits.readCapChars, `${normalized} lines ${start}-${end}`) };
+      const bounded = boundedNumberedLines(lines, start, end, limits.readCapChars, normalized);
+      return { path: normalized, total_lines: lines.length, start_line: start, end_line: end, content: bounded.content, omitted_range: bounded.omitted_range ?? undefined };
     },
     outline({ path: file, pattern }) {
       const { normalized, absolute } = resolveInside(workspacePath, file);
@@ -516,7 +553,9 @@ function createTools({ workspacePath, repoRoot, lane, supabase, limits, log }) {
         // A near miss is almost always whitespace; say so instead of making the model guess.
         const collapsed = (s) => s.replace(/\s+/g, ' ').trim();
         const hint = collapsed(current).includes(collapsed(old_text)) ? ' (the text exists with different whitespace/indentation - copy it exactly as read_file shows it)' : '';
-        return { error: `old_text not found in ${normalized}${hint}` };
+        return {
+          error: `old_text not found in ${normalized}${hint}. Do not retry guessed source text: use search for a real nearby symbol/class, then read_file that exact line range and copy old_text verbatim.`,
+        };
       }
       if (occurrences > 1 && !all) return { error: `old_text occurs ${occurrences} times in ${normalized}; include more surrounding lines to make it unique, or pass all=true` };
       const updated = all ? current.split(old_text).join(new_text) : current.replace(old_text, () => new_text);

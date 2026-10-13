@@ -140,6 +140,14 @@ could name its full source path. UX validation now requires the prompt to carry
 at least one supplied owner explicitly and treats exact owner names and
 path/basename equivalents as the same grounded component; invented-only
 inventories still fail.
+The first job on those gates then opened the real 1,843-line `BobPanel.tsx`,
+but an unbounded `read_file` result retained only its first character-limited
+chunk. The render tree at the end disappeared, so the local model repeatedly
+guessed an obsolete toy component and every exact edit failed safely.
+Oversized reads now preserve the real numbered head and tail, identify the
+exact omitted range, and direct the engineer to search or read that range.
+Failed exact replacements likewise direct it to a real nearby symbol and
+verbatim source instead of another guessed edit.
 
 Natural-language Builder acceptance hardening 2026-10-13: Bob's deterministic
 post-evidence Builder fallback now recognises ordinary owner language such as
