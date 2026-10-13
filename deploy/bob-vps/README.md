@@ -53,7 +53,13 @@ account in an afternoon). Builder routing is separate from Bob's conversational 
 `BOB_BUILDER_ROUTE_LOCAL` and `BOB_BUILDER_ROUTE_RESTRICTED`; it must not make a
 simple unrestricted build wait through a long CPU timeout before escalation.
 `GITEA_USERNAME` + `GITEA_TOKEN` (scopes `write:repository,write:issue,read:user`),
-and the worker image `fcm/bob-worker:current` built as below. Bob autopilot
+or the GitHub publication credentials used by this deployment. For GitHub
+publication, set `BOB_BUILDER_GIT_NAME` and `BOB_BUILDER_GIT_EMAIL` to the
+verified name and email (the account's `id+login@users.noreply.github.com` form
+is supported). The Builder refuses to create a GitHub commit without the
+explicit email, because an unverified author causes Vercel to reject the
+preview before the app is built. The worker image `fcm/bob-worker:current`
+built as below. Bob autopilot
 (`builder-autopilot.js`) runs inside the control plane whenever those are set:
 `BOB_BUILDER_AUTOPILOT=false` disables it, `BOB_BUILDER_AUTOPILOT_INTERVAL_MS`
 (default 60000) sets the tick, `BOB_BUILDER_REVIEWER_MODEL` picks the

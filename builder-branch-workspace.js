@@ -8,6 +8,18 @@ const BRANCH_PREFIX = 'bob/job-';
 const BUILDER_NAME = 'Bob Builder';
 const BUILDER_EMAIL = 'bob-builder@fieldcompliance.local';
 
+function builderCommitIdentity({ requireVerified = false } = {}) {
+  const name = String(process.env.BOB_BUILDER_GIT_NAME || BUILDER_NAME).trim();
+  const email = String(process.env.BOB_BUILDER_GIT_EMAIL || BUILDER_EMAIL).trim();
+  if (!name || !email || !/^[^@\s]+@[^@\s]+\.[^@\s]+$/.test(email)) {
+    throw new Error('Builder commit identity is invalid');
+  }
+  if (requireVerified && !process.env.BOB_BUILDER_GIT_EMAIL) {
+    throw new Error('BOB_BUILDER_GIT_EMAIL must be configured to a verified GitHub email before publication');
+  }
+  return { name, email };
+}
+
 function redactGitError(message) {
   return String(message || '').replace(/Authorization:\s*(Basic|Bearer|token)\s+\S+/gi, 'Authorization: [redacted]').replace(/https?:\/\/[^\s/@]+:[^\s/@]+@/gi, 'https://[redacted]@');
 }
@@ -75,7 +87,7 @@ function createBranchWorkspace({ sourceDir, workspaceRoot, jobId, targetSha, bra
   return { branchName, workspacePath, head: git(workspacePath, ['rev-parse', 'HEAD']), existing: false };
 }
 
-function commitVerifiedPatch({ workspacePath, branchName, patch, message, body = '', push = false }) {
+function commitVerifiedPatch({ workspacePath, branchName, patch, message, body = '', push = false, requireVerifiedIdentity = false }) {
   if (!branchName.startsWith(BRANCH_PREFIX) || git(workspacePath, ['branch', '--show-current']) !== branchName) throw new Error('Builder workspace branch is invalid');
   if (git(workspacePath, ['status', '--porcelain', '--untracked-files=normal'])) throw new Error('Builder workspace must be clean before applying a patch');
   // The lane worker has already verified this patch; the commit step enforces path safety and the protected paths, not the lane fence.
@@ -91,7 +103,8 @@ function commitVerifiedPatch({ workspacePath, branchName, patch, message, body =
     git(workspacePath, ['apply', '--index', '--whitespace=error-all', patchPath]);
     const actualFiles = changedFilesFromPatch(git(workspacePath, ['diff', '--cached', '--binary']));
     if (JSON.stringify(actualFiles) !== JSON.stringify(changedFiles)) throw new Error('Applied patch files do not match its declared manifest');
-    git(workspacePath, ['-c', `user.name=${BUILDER_NAME}`, '-c', `user.email=${BUILDER_EMAIL}`, 'commit', '-m', String(message || 'Bob Builder verified change').slice(0, 200), ...(body ? ['-m', String(body).slice(0, 2000)] : [])]);
+    const identity = builderCommitIdentity({ requireVerified: requireVerifiedIdentity });
+    git(workspacePath, ['-c', `user.name=${identity.name}`, '-c', `user.email=${identity.email}`, 'commit', '-m', String(message || 'Bob Builder verified change').slice(0, 200), ...(body ? ['-m', String(body).slice(0, 2000)] : [])]);
     const commitSha = git(workspacePath, ['rev-parse', 'HEAD']);
     if (push) git(workspacePath, ['push', 'origin', branchName]);
     return { branchName, commitSha, changedFiles, pushed: push };
@@ -259,4 +272,4 @@ function publicGiteaUrl(url, { baseUrl, publicBaseUrl }) {
   return url;
 }
 
-module.exports = { BRANCH_PREFIX, BUILDER_NAME, BUILDER_EMAIL, branchNameForJob, workspacePathForBranch, createBranchWorkspace, commitVerifiedPatch, publishWorkspaceBranch, giteaRepositoryPath, createGiteaPullRequest, publicGiteaUrl, verifySnapshot, githubAuthHeader, githubRepoUrl, githubSshRepoUrl, resolveRemoteHead, ensureSourceCheckout, createGitHubPullRequest, mergeGitHubPullRequest, redactGitError };
+module.exports = { BRANCH_PREFIX, BUILDER_NAME, BUILDER_EMAIL, builderCommitIdentity, branchNameForJob, workspacePathForBranch, createBranchWorkspace, commitVerifiedPatch, publishWorkspaceBranch, giteaRepositoryPath, createGiteaPullRequest, publicGiteaUrl, verifySnapshot, githubAuthHeader, githubRepoUrl, githubSshRepoUrl, resolveRemoteHead, ensureSourceCheckout, createGitHubPullRequest, mergeGitHubPullRequest, redactGitError };

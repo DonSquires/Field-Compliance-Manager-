@@ -477,7 +477,14 @@ async function commitBuilderPatch(jobId, artifactId) {
   // interrupted commit step is restored to it and the verified patch is applied again.
   const workspace = createBranchWorkspace({ sourceDir: builderSourceDir, workspaceRoot: builderWorkspaceRoot, jobId: job.id, targetSha: job.workspace_head_sha, branchName: job.workspace_branch, recoverInterrupted: true });
   // The subject is what GitHub shows as the PR title when the bridge cannot read the Gitea PR (PR #20 read "Bob Builder: <artifact id>").
-  const commit = commitVerifiedPatch({ workspacePath: workspace.workspacePath, branchName: workspace.branchName, patch, message: `Bob Builder: ${String(job.title || 'verified change').trim()}`, body: `Builder job ${job.id}\nVerified patch artifact ${artifact.id}\nPinned to ${job.target_sha}` });
+  const commit = commitVerifiedPatch({
+    workspacePath: workspace.workspacePath,
+    branchName: workspace.branchName,
+    patch,
+    message: `Bob Builder: ${String(job.title || 'verified change').trim()}`,
+    body: `Builder job ${job.id}\nVerified patch artifact ${artifact.id}\nPinned to ${job.target_sha}`,
+    requireVerifiedIdentity: builderGitHost === 'github',
+  });
   const { data: updated, error: recordError } = await builderSupabase.rpc('builder_record_workspace_commit', { _job_id: job.id, _expected_head_sha: job.workspace_head_sha, _commit_sha: commit.commitSha });
   if (recordError || !updated) throw new BuilderStepError(409, 'Builder workspace commit could not be recorded');
   return { branch: commit.branchName, head: commit.commitSha, changedFiles: commit.changedFiles };

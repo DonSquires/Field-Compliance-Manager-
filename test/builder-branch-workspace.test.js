@@ -4,7 +4,7 @@ const os = require('node:os');
 const path = require('node:path');
 const { execFileSync } = require('node:child_process');
 const test = require('node:test');
-const { branchNameForJob, createBranchWorkspace, commitVerifiedPatch, publishWorkspaceBranch, createGiteaPullRequest, mergeGitHubPullRequest } = require('../builder-branch-workspace');
+const { branchNameForJob, builderCommitIdentity, createBranchWorkspace, commitVerifiedPatch, publishWorkspaceBranch, createGiteaPullRequest, mergeGitHubPullRequest } = require('../builder-branch-workspace');
 
 const patch = ['diff --git a/apps/web/src/example.ts b/apps/web/src/example.ts', '--- a/apps/web/src/example.ts', '+++ b/apps/web/src/example.ts', '@@ -1 +1 @@', '-export const value = 1;', '+export const value = 2;', ''].join('\n');
 
@@ -16,6 +16,27 @@ function fixture() {
   git(root, ['init', '-q']); git(root, ['config', 'user.name', 'Fixture']); git(root, ['config', 'user.email', 'fixture@example.com']); git(root, ['add', '.']); git(root, ['commit', '-qm', 'fixture']);
   return { root, sha: git(root, ['rev-parse', 'HEAD']), workspaceRoot: path.join(root, '.builder-workspaces') };
 }
+
+test('Builder can require an explicitly configured verified GitHub commit identity', () => {
+  const previousName = process.env.BOB_BUILDER_GIT_NAME;
+  const previousEmail = process.env.BOB_BUILDER_GIT_EMAIL;
+  try {
+    delete process.env.BOB_BUILDER_GIT_NAME;
+    delete process.env.BOB_BUILDER_GIT_EMAIL;
+    assert.throws(() => builderCommitIdentity({ requireVerified: true }), /BOB_BUILDER_GIT_EMAIL/);
+    process.env.BOB_BUILDER_GIT_NAME = 'Don Squires';
+    process.env.BOB_BUILDER_GIT_EMAIL = '256263525+DonSquires@users.noreply.github.com';
+    assert.deepEqual(builderCommitIdentity({ requireVerified: true }), {
+      name: 'Don Squires',
+      email: '256263525+DonSquires@users.noreply.github.com',
+    });
+  } finally {
+    if (previousName === undefined) delete process.env.BOB_BUILDER_GIT_NAME;
+    else process.env.BOB_BUILDER_GIT_NAME = previousName;
+    if (previousEmail === undefined) delete process.env.BOB_BUILDER_GIT_EMAIL;
+    else process.env.BOB_BUILDER_GIT_EMAIL = previousEmail;
+  }
+});
 
 test('Builder branch workspace is pinned, isolated, and commits only validated patches', () => {
   const repo = fixture();
