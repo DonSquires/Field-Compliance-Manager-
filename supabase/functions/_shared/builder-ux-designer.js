@@ -274,7 +274,7 @@ async function runUxDesigner({
     supabase,
     gateway,
     modelRequest,
-    validateOutput: (content) => parseUxDesignPlan(content, { repositoryContext: prompts.context, enforceRepositoryEvidence: true })
+    validateOutput: (content) => parseUxDesignPlan(content, { repositoryContext: prompt.context, enforceRepositoryEvidence: true })
   });
   if (!result.ok) {
     await abortStep(supabase, { jobId: job.id, stepId: step.id, reason: `ux design: ${result.error || 'model run failed'}` });

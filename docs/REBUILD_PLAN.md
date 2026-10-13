@@ -157,6 +157,11 @@ A subsequent planner variation inserted repository-research `docs/` paths into t
 brief and again selected backend-only work. Builder lane scope is now derived only
 from the owner's words and owner-named paths; planner prose, delegated findings,
 and research URLs cannot authorize or suppress frontend/backend work.
+Live UX acceptance then exposed a validator wiring regression: the repository-
+grounded validation closure referenced `prompts.context` while the prompt binding
+was singular, so all three providers produced output but failed on an undefined
+identifier. The callback now uses the actual prompt context and its regression
+test invokes the callback, rather than merely asserting that it was supplied.
 
 Builder restart acceptance 2026-10-13: the same monitored redesign exposed a
 second orphan class. A control-plane deployment landed after product analysis

@@ -75,14 +75,26 @@ test('UX Designer rejects invented routes, access boundaries, tokens, and alread
 
 test('UX Designer uses approved specification artifact as model provenance', async () => {
   let captured;
-  const plan = validDesignPlan();
+  const route = 'AdminShell page id "builder"';
+  const access = 'platform-only AdminShell page';
+  const plan = {
+    ...validDesignPlan(),
+    route_map: [{ route, purpose: 'Builder workspace', access: [access] }],
+    component_inventory: [{ component: 'BuilderControlRoomPage', responsibility: 'Existing Builder owner surface' }],
+    design_tokens: { color: ['--color-bg-base', '--color-text-primary'], spacing: ['--touch-target-admin'] }
+  };
   const result = await runUxDesigner({
     supabase: {},
     gateway: {},
     job: { id: 'job-1', organization_id: 'org-1' },
     step: { id: 'step-2', builder_mode: 'ux_designer' },
     specificationArtifact: { id: 'artifact-spec', artifact_type: 'product_specification', status: 'final' },
-    repositoryContext: {},
+    repositoryContext: {
+      relevant_components: ['BuilderControlRoomPage'],
+      existing_routes: [route],
+      existing_access_boundaries: [access],
+      design_tokens: ['--color-bg-base', '--color-text-primary', '--touch-target-admin']
+    },
     loadSpecification: async () => ({
       artifact: { id: 'artifact-spec' },
       specification: { product_brief: { outcome: 'Governed approvals' }, acceptance_criteria: [{ id: 'AC-1' }] }
@@ -100,6 +112,7 @@ test('UX Designer uses approved specification artifact as model provenance', asy
   assert.equal(captured.modelRequest.provider, 'gpu_workstation');
   assert.equal(captured.modelRequest.prompt_version, UX_DESIGNER_PROMPT_VERSION);
   assert.deepEqual(captured.modelRequest.input_artifact_ids, ['artifact-spec']);
+  assert.deepEqual(captured.validateOutput(JSON.stringify(plan)), plan);
   assert.equal(result.job.status, 'implementation_pending');
   assert.deepEqual(result.design_plan, plan);
 });
