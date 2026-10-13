@@ -9901,6 +9901,21 @@ serve(async (req)=>{
     const explicitSchemaRequest = caps.tier === 'admiral'
       && /\b(?:schema|table structure|database structure|columns?|relationships?)\b/i.test(message)
       && /\b(?:query|check|inspect|use|explain|triage|show|look|find)\b/i.test(message);
+    const explicitSchemaArgs = /\b(?:ui|ux|builder|coding workspace|control room)\b/i.test(message)
+      ? {
+          tables: [
+            'builder_projects',
+            'builder_jobs',
+            'builder_job_steps',
+            'builder_artifacts',
+            'builder_approvals',
+            'builder_audit_events',
+            'builder_model_runs',
+            'builder_worker_runs'
+          ],
+          include_relationships: true
+        }
+      : { include_relationships: false };
     if (explicitAtlasRequest && chosenTool !== 'query_atlas') {
       const requestedAtlasAction = /\bexpectation(?:s| report)?\b/i.test(message)
         ? 'expectation_report'
@@ -9919,7 +9934,7 @@ serve(async (req)=>{
     } else if (explicitSchemaRequest && chosenTool !== 'schema_inspect') {
       normAction = 'use_tool';
       chosenTool = 'schema_inspect';
-      args = { include_relationships: false };
+      args = explicitSchemaArgs;
     }
     const explicitHumanTestRequest = caps.tier === 'admiral'
       && /\b(?:human test|dr\.?\s*bob|browser test|human-browser)\b/i.test(message)
@@ -11321,7 +11336,7 @@ serve(async (req)=>{
             ...nextDecision,
             action: 'use_tool',
             tool: 'schema_inspect',
-            args: { include_relationships: false },
+            args: explicitSchemaArgs,
             reasoning: 'The owner explicitly requested Atlas and schema evidence; Atlas is complete, so inspect the live schema before synthesis.'
           };
           next = parsePlanDecision(nextDecision);

@@ -84,6 +84,8 @@ test('explicit Atlas and schema audits cannot escape into web research or omit s
   assert.match(chat, /if \(explicitAtlasRequest && chosenTool !== 'query_atlas'\)/);
   assert.match(chat, /else if \(explicitSchemaRequest && chosenTool !== 'schema_inspect'\)/);
   assert.match(chat, /explicitAtlasRequest && explicitSchemaRequest && atlasCompleted && !schemaCompleted/);
+  assert.match(chat, /'builder_jobs',[\s\S]*'builder_worker_runs'/);
+  assert.match(chat, /args: explicitSchemaArgs/);
   assert.match(chat, /tool: 'schema_inspect'/);
 });
 

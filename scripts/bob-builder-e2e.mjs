@@ -143,7 +143,8 @@ if (cmd === 'create') {
   // autopilot report relay: Bob must lead with any unreported outcome for this person.
   const s = await session();
   const rest = (path, init = {}) => fetch(`${SUPABASE_URL}/rest/v1/${path}`, { ...init, headers: { apikey: s.anon, Authorization: `Bearer ${s.access_token}`, 'Content-Type': 'application/json', Prefer: 'return=representation', ...(init.headers ?? {}) } });
-  const profile = await (await rest('user_profiles?select=id,organization_id&limit=1')).json();
+  const authenticatedUserId = JSON.parse(Buffer.from(s.access_token.split('.')[1], 'base64url').toString('utf8')).sub;
+  const profile = await (await rest(`user_profiles?select=id,organization_id&id=eq.${encodeURIComponent(authenticatedUserId)}&limit=1`)).json();
   const { id: userId, organization_id: organizationId } = profile[0];
   const agentMode = process.env.E2E_AGENT_MODE === 'operations' ? 'operations' : 'builder';
   // E2E_CONVERSATION=<id> continues an earlier turn (e.g. answering "yes" to a composed brief).
@@ -155,10 +156,41 @@ if (cmd === 'create') {
   const r = await fetch(`${SUPABASE_URL}/functions/v1/onspace-ai-chat`, { method: 'POST', headers: { apikey: s.anon, Authorization: `Bearer ${s.access_token}`, 'Content-Type': 'application/json' }, body: JSON.stringify({ operation: 'enqueue', request_id: crypto.randomUUID(), message: args.join(' ') || 'Hi Bob — anything to report?', conversation_id: conversationId, attachments: [], context: { agent_mode: agentMode, organization_id: organizationId } }) });
   const text = await r.text();
   let data; try { data = JSON.parse(text); } catch { data = { raw: text.slice(0, 500) }; }
+  if (r.status === 202 && data.turn_run?.request_id) {
+    for (let attempt = 0; attempt < 60; attempt++) {
+      await sleep(2_500);
+      const statusResponse = await fetch(`${SUPABASE_URL}/functions/v1/onspace-ai-chat`, {
+        method: 'POST',
+        headers: { apikey: s.anon, Authorization: `Bearer ${s.access_token}`, 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          operation: 'status',
+          request_id: data.turn_run.request_id,
+          conversation_id: conversationId,
+          context: { agent_mode: agentMode, organization_id: organizationId },
+        }),
+      });
+      const statusData = await statusResponse.json();
+      if (statusData.turn_run?.status === 'completed') {
+        const messages = await (await rest(`bob_messages?select=content,metadata&conversation_id=eq.${encodeURIComponent(conversationId)}&role=eq.assistant&order=created_at.desc&limit=1`)).json();
+        data = { reply: messages[0]?.content, meta: messages[0]?.metadata, turn_run: statusData.turn_run };
+        break;
+      }
+      if (['failed', 'cancelled'].includes(statusData.turn_run?.status)) {
+        data = statusData;
+        break;
+      }
+    }
+  }
   console.log('status', r.status, 'conversation', conversationId);
   console.log('--- reply ---');
   console.log(String(data.reply ?? data.message ?? data.raw ?? JSON.stringify(data)).slice(0, 4000));
-  if (data.meta) console.log('--- meta ---', JSON.stringify({ intent: data.meta.intent, route: data.meta.route_selected, verification: data.meta.verification?.status }).slice(0, 400));
+  if (data.meta) console.log('--- meta ---', JSON.stringify({
+    intent: data.meta.intent,
+    route: data.meta.route_selected,
+    planned_tool: data.meta.planned_tool,
+    reasoning_steps: data.meta.reasoning_steps,
+    verification: data.meta.verification?.status,
+  }).slice(0, 1600));
 } else {
   console.log('usage: create <title> <description> | follow <job_id> | publish <job_id> <artifact_id> | show <job_id> | cancel <job_id> "<reason>" | approve <job_id> "<comment>" | chat <message>');
   process.exit(2);
