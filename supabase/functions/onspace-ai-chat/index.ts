@@ -9968,13 +9968,14 @@ serve(async (req)=>{
       String(message ?? ''),
       ...history.filter((entry) => entry.role === 'user').map((entry) => String(entry.content ?? '')).reverse()
     ].find((entry) => explicitBuilderCreationRequest(entry));
+    const currentIsBuilderRequest = explicitBuilderCreationRequest(message);
     const continuesBuilderRequest = /^(?:proceed|continue|go ahead|yes(?:,?\s+(?:please|do it|continue|proceed))?|do it|carry on)\b[.! ]*$/i.test(String(message ?? '').trim());
     if (caps.tier === 'admiral'
       && recentBuilderRequest
-      && (explicitBuilderCreationRequest(message) || continuesBuilderRequest)
-      && !explicitHumanTestRequest
-      && !explicitAtlasRequest
-      && !explicitSchemaRequest) {
+      && (currentIsBuilderRequest || (continuesBuilderRequest
+        && !explicitHumanTestRequest
+        && !explicitAtlasRequest
+        && !explicitSchemaRequest))) {
       const builderArgs = builderJobArgsFromEvidence(recentBuilderRequest, []);
       decision = {
         ...decision,

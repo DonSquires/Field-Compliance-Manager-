@@ -85,13 +85,12 @@ test('an explicit owner build enters the durable Builder before chat evidence lo
   assert.match(chat, /const recentBuilderRequest = \[/);
   assert.match(chat, /history\.filter\(\(entry\) => entry\.role === 'user'\)/);
   assert.match(chat, /const continuesBuilderRequest =/);
-  assert.match(chat, /explicitBuilderCreationRequest\(message\) \|\| continuesBuilderRequest/);
   assert.match(chat, /const builderArgs = builderJobArgsFromEvidence\(recentBuilderRequest, \[\]\)/);
   assert.match(chat, /admit it to the durable Builder runtime instead of spending the chat-turn budget/);
   const admission = chat.slice(chat.indexOf('const recentBuilderRequest = '), chat.indexOf('// PILLAR H: plan_received'));
-  assert.match(admission, /!explicitHumanTestRequest/);
-  assert.match(admission, /!explicitAtlasRequest/);
-  assert.match(admission, /!explicitSchemaRequest/);
+  assert.match(admission, /const currentIsBuilderRequest = explicitBuilderCreationRequest\(message\)/);
+  assert.match(admission, /currentIsBuilderRequest \|\| \(continuesBuilderRequest/);
+  assert.match(admission, /continuesBuilderRequest[\s\S]*!explicitHumanTestRequest[\s\S]*!explicitAtlasRequest[\s\S]*!explicitSchemaRequest/);
 });
 
 test('Codespaces-like Builder and vibe-coding workspace requests are software-build intent', () => {
@@ -101,6 +100,10 @@ test('Codespaces-like Builder and vibe-coding workspace requests are software-bu
   assert.deepEqual(
     JSON.parse(JSON.stringify(builderLanesForOwnerRequest('Design Bob Builder as a fully functioning Codespaces-like vibe coding system.'))),
     { frontend: true, backend: true },
+  );
+  assert.equal(
+    explicitBuilderCreationRequest('Redesign and fix the Bob chat page and Builder Studio. Inspect Atlas and schema, then run Dr Bob human tests.'),
+    true,
   );
 });
 
