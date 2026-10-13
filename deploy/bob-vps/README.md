@@ -46,10 +46,12 @@ The agentic Builder lane needs, in `/var/lib/bob/control-plane.env`:
 `BOB_BUILDER_REVIEWER_MODEL=gpt-5.4` (owner ruling 2026-09-27: cheaper but
 effective — the author makes 30–60 calls per job, the reviewer one, so the mini
 tier authors and the full tier reviews; `gpt-6-sol` at `xhigh` emptied the
-account in an afternoon). In-house first: `BOB_BUILDER_ROUTE_AUTHOR|REVIEW|ANALYSIS=ollama,gpu_workstation,openai`
-with `BOB_OLLAMA_MODELS=qwen3-coder:30b,gpt-oss:20b,...` (the VPS authors on the
-MoE coder and reviews on gpt-oss, a different model family) and
-`BOB_OLLAMA_NUM_CTX=40960`; OpenAI is the last resort.
+account in an afternoon). Builder routing is separate from Bob's conversational lane. Use
+`BOB_BUILDER_ROUTE_ANALYSIS=openai,gpu_workstation`,
+`BOB_BUILDER_ROUTE_AUTHOR=gpu_workstation,openai`, and
+`BOB_BUILDER_ROUTE_REVIEW=openai,gpu_workstation`. The VPS CPU is reserved for
+`BOB_BUILDER_ROUTE_LOCAL` and `BOB_BUILDER_ROUTE_RESTRICTED`; it must not make a
+simple unrestricted build wait through a long CPU timeout before escalation.
 `GITEA_USERNAME` + `GITEA_TOKEN` (scopes `write:repository,write:issue,read:user`),
 and the worker image `fcm/bob-worker:current` built as below. Bob autopilot
 (`builder-autopilot.js`) runs inside the control plane whenever those are set:

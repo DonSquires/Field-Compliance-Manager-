@@ -5,7 +5,7 @@ const {
 } = require('./builder-model-adapter');
 const { fitRepositoryContext } = require('./builder-repository-context');
 
-const UX_DESIGNER_PROMPT_VERSION = 'ux-designer-v3';
+const UX_DESIGNER_PROMPT_VERSION = 'ux-designer-v4';
 
 const UX_DESIGN_SCHEMA = Object.freeze({
   type: 'object',
@@ -84,6 +84,7 @@ function buildUxDesignerPrompt({ specification, repositoryContext }) {
     'Design from the approved product specification and supplied repository context.',
     'Do not invent product behavior, routes, schema, permissions, or capabilities.',
     'Reuse only design tokens supplied in repository_context.design_tokens; never translate them into Tailwind-style or invented names.',
+    'In design_tokens, copy bare token names exactly as supplied (for example --color-bg-base), without var(...), labels, values, or explanatory prose.',
     'Resolve ownership, navigation, access, and design-system questions from supplied repository evidence rather than repeating them as unresolved.',
     'Cover desktop and mobile behavior, accessibility, and loading, empty, error, and success states.',
     'route_map lists only exact identifiers supplied in repository_context.existing_routes; for a component-only change with no supplied route it is an empty array — never invent a route to fill it.',

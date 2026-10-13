@@ -142,8 +142,7 @@ test('Backend Engineer routes approved specification and source through governed
         return { ok: true, validated_output: validated, artifact: { id: 'patch-1' } };
       }
     });
-    // In-house first: the author chain starts on the laptop GPU and falls back to OpenAI when stuck.
-    assert.deepEqual(captured.modelRequest.chain, ['gpu_workstation', 'ollama', 'openai']);
+    assert.deepEqual(captured.modelRequest.chain, ['gpu_workstation', 'openai']);
     assert.equal(captured.modelRequest.provider, 'gpu_workstation');
     assert.equal(captured.modelRequest.prompt_version, BACKEND_ENGINEER_PROMPT_VERSION);
     assert.deepEqual(captured.modelRequest.input_artifact_ids, ['spec-1']);

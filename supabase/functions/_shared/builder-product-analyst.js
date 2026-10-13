@@ -4,7 +4,7 @@ const {
 } = require('./builder-model-adapter');
 const { fitRepositoryContext } = require('./builder-repository-context');
 
-const PRODUCT_ANALYST_PROMPT_VERSION = 'product-analyst-v4';
+const PRODUCT_ANALYST_PROMPT_VERSION = 'product-analyst-v5';
 
 const PRODUCT_SPEC_SCHEMA = Object.freeze({
   type: 'object',
@@ -87,6 +87,8 @@ function buildProductAnalystPrompt({ taskDescription, repositoryContext, constra
   const task = boundedString(taskDescription, 12000);
   if (!task) throw new Error('taskDescription is required');
   const context = fitRepositoryContext(normalizeRepositoryContext(repositoryContext), task);
+  const researchRequired = researchEvidenceRequired(task);
+  const researchUrls = researchRequired ? suppliedResearchUrls(task) : [];
   const safeConstraints = Array.isArray(constraints)
     ? constraints.filter(value => typeof value === 'string').slice(0, 100)
     : [];
@@ -101,12 +103,18 @@ function buildProductAnalystPrompt({ taskDescription, repositoryContext, constra
     'Define a responsive, accessible human-glass acceptance route for the affected role, including loading, empty, error, permission, success, and safe-next-action states that apply.',
     'Put every unknown that affects implementation in unresolved_questions.',
     'When research is required, cite only URLs supplied in the task; record the exact observed pattern and how it applies, never invent a source or claim browsing.',
+    'When supplied_research_urls is non-empty, copy at least the first four exact URLs into research_evidence and provide every required field for each.',
     'Return one JSON object matching the supplied schema, with no markdown fence.'
   ].join(' ');
   const userPrompt = JSON.stringify({
     task,
     repository_context: context,
     constraints: safeConstraints,
+    research_requirements: {
+      required: researchRequired,
+      minimum_sources: researchRequired ? 4 : 0,
+      supplied_research_urls: researchUrls
+    },
     required_output: {
       product_brief: { problem: 'string', outcome: 'string', scope: ['string'] },
       user_roles: [{ role: 'string', needs: ['string'] }],

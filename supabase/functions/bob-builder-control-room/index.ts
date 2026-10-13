@@ -206,15 +206,23 @@ serve(async req => {
     if (!project) return json({ error: 'Builder project is unavailable' }, 404);
     const title = typeof body.title === 'string' ? body.title.slice(0, 200) : '';
     const taskDescription = typeof body.task_description === 'string' ? body.task_description.slice(0, 12000) : '';
-    // Idempotent create: the same brief submitted twice within a few minutes (a chat retry, a driver whose
-    // output was hidden) returns the job already underway instead of paying for a second run.
+    // Idempotent create: an autonomous owner request already being driven wins even when a later
+    // research pass enriches its brief. Manual submissions retain the narrower exact-brief window.
     const duplicateSince = new Date(Date.now() - 15 * 60 * 1000).toISOString();
-    const { data: duplicate } = await admin.from('builder_jobs')
+    let duplicateQuery = admin.from('builder_jobs')
       .select('*')
-      .eq('organization_id', requestedOrgId).eq('project_id', projectId).eq('title', title).eq('task_description', taskDescription)
-      .gte('created_at', duplicateSince)
-      .not('status', 'in', '("deployed","failed","cancelled")')
-      .order('created_at', { ascending: false }).limit(1).maybeSingle();
+      .eq('organization_id', requestedOrgId)
+      .eq('project_id', projectId)
+      .eq('title', title)
+      .not('status', 'in', '("release_ready","deployed","failed","cancelled")');
+    if (body.autopilot === true) {
+      duplicateQuery = duplicateQuery
+        .eq('autopilot_requested_by', user.id)
+        .in('autopilot_state', ['driving', 'awaiting_human']);
+    } else {
+      duplicateQuery = duplicateQuery.eq('task_description', taskDescription).gte('created_at', duplicateSince);
+    }
+    const { data: duplicate } = await duplicateQuery.order('created_at', { ascending: false }).limit(1).maybeSingle();
     if (duplicate) {
       await audit(requestedOrgId, 'duplicate_returned', String(duplicate.id));
       return json({ job: safeJob(duplicate as Record<string, unknown>), duplicate: true, autopilot: Boolean((duplicate as Record<string, unknown>).autopilot_requested_by) }, 200);

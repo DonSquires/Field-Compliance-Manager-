@@ -609,6 +609,7 @@ async function autopilotTick({ supabase, jobs, actions, log = () => {} }) {
           outcomes.push({ job: job.id, outcome: 'repairing', repair_job: repair.id });
           continue;
         }
+        if (typeof actions.fail === 'function') await actions.fail(job.id, blockedReason);
         await actions.record(job.id, 'blocked', composeReport({ job, evidence: evidence || { changedFiles: [], testsRun: [], followUps: [], rollbackNotes: [] }, state: 'blocked', reason: blockedReason }));
         outcomes.push({ job: job.id, outcome: 'blocked', reason: blockedReason });
         continue;

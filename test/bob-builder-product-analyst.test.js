@@ -75,6 +75,24 @@ test('Product Analyst prompt requires grounded JSON and unresolved unknowns', ()
   assert.match(prompt.systemPrompt, /flow reach separate from structural FK reach/);
   assert.equal(JSON.parse(prompt.userPrompt).task, 'Build a governed approval queue');
   assert.equal(JSON.parse(prompt.userPrompt).repository_context.build_map.file_count, 0);
+  assert.deepEqual(JSON.parse(prompt.userPrompt).research_requirements, {
+    required: false,
+    minimum_sources: 0,
+    supplied_research_urls: []
+  });
+});
+
+test('Product Analyst prompt makes the required source allowlist explicit', () => {
+  const urls = ['https://example.com/a', 'https://example.com/b', 'https://example.com/c', 'https://example.com/d'];
+  const prompt = buildProductAnalystPrompt({
+    taskDescription: `Use internet research for this redesign. Sources: ${urls.join(' ')}`,
+    repositoryContext: { repository: 'owner/repo' }
+  });
+  assert.deepEqual(JSON.parse(prompt.userPrompt).research_requirements, {
+    required: true,
+    minimum_sources: 4,
+    supplied_research_urls: urls
+  });
 });
 
 test('Product Analyst parser accepts the complete specification contract', () => {
@@ -123,9 +141,8 @@ test('Product Analyst routes complex analysis through the governed model runner'
     completeAnalysis: async (_supabase, input) => ({ success: true, approval: { id: 'approval-1', ...input } })
   });
 
-  // In-house first: analysis work tries the laptop GPU, then OpenAI.
-  assert.deepEqual(captured.modelRequest.chain, ['gpu_workstation', 'ollama', 'openai']);
-  assert.equal(captured.modelRequest.provider, 'gpu_workstation');
+  assert.deepEqual(captured.modelRequest.chain, ['openai', 'gpu_workstation']);
+  assert.equal(captured.modelRequest.provider, 'openai');
   assert.equal(captured.modelRequest.prompt_version, PRODUCT_ANALYST_PROMPT_VERSION);
   assert.deepEqual(captured.validateOutput(JSON.stringify(specification)), specification);
   assert.deepEqual(result.specification, specification);

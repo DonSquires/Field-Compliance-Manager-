@@ -824,6 +824,18 @@ async function autopilotOnce() {
             if (packetStatusError) throw new Error(`routine repair status could not be recorded: ${packetStatusError.message}`);
           }
         },
+        fail: async (jobId, reason) => {
+          const { error } = await builderSupabase
+            .from('builder_jobs')
+            .update({
+              status: 'failed',
+              last_error: String(reason || 'Builder could not continue').slice(0, 2000),
+              updated_at: new Date().toISOString(),
+            })
+            .eq('id', jobId)
+            .not('status', 'in', '("deployed","failed","cancelled")');
+          if (error) throw new Error(`blocked Builder job could not be finalized: ${error.message}`);
+        },
         // Self-heal (owner ruling 2026-09-27): a job blocked by a red main opens a repair job bound to the
         // same requester, and is re-opened on current main once the repair has landed.
         createJob: async (input) => {

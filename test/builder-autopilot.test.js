@@ -51,6 +51,7 @@ function actionsRecorder(overrides = {}) {
     approve: async (id, comment) => { calls.push(['approve', id, comment]); },
     run: async (jobId) => { calls.push(['run', jobId]); return overrides.run ?? { paused: true, reason: 'waiting_for_human' }; },
     publish: async ({ job, validatedPatchId, bodyFor }) => { calls.push(['publish', job.id, validatedPatchId, bodyFor('bob/job-x', 'deadbeef')]); return { pullRequestUrl: 'https://git.example/pulls/9' }; },
+    fail: async (jobId, reason) => { calls.push(['fail', jobId, reason]); },
     record: async (jobId, state, report) => { calls.push(['record', jobId, state, report]); },
   };
 }
@@ -121,6 +122,9 @@ test('autopilot runs the bounded runner for a working job and blocks when the at
   ceiling.mainHead = async () => job.target_sha;
   const outcomes = await autopilotTick({ supabase: fakeSupabase({ job }), jobs: [job], actions: ceiling });
   assert.equal(outcomes[0].outcome, 'blocked');
+  const failed = ceiling.calls.find(([name]) => name === 'fail');
+  assert.equal(failed[1], 'job-2');
+  assert.match(failed[2], /failed 6 times/);
   const recorded = ceiling.calls.find(([name]) => name === 'record');
   assert.equal(recorded[2], 'blocked');
   assert.match(recorded[3].text, /^Stopped: Bob could not finish "Fix" on his own\./);

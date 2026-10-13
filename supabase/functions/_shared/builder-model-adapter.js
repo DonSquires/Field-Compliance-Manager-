@@ -36,23 +36,20 @@ function parseChain(raw, fallback) {
   return list.length ? list : fallback;
 }
 
-// Owner ruling 2026-09-26: Bob works on his own compute (laptop GPU, then the VPS) and only
-// outsources to OpenAI when he is stuck — unreachable, too small for the prompt, or failing.
-// Restricted data never leaves the house. Chains are env-tunable per workload class.
-// The VPS (CPU, 8B models) carries light and restricted work only: live, it reviewed a patch as
-// `{"verdict":"passed","summary":""}` — a rubber stamp is worse than an outsourced review.
-// Review 2026-09-27 (job 79b4c08f): the laptop 7B also rubber-stamped — it passed a patch whose
-// lookup read a service-role-only table with the caller's client, with the author's summary as its
-// own and no findings. The independent review is the owner's only code check (the owner does not
-// read code), so it is the one workload that goes to the strongest reviewer first and falls back
-// in-house; BOB_BUILDER_ROUTE_REVIEW still overrides.
+// Builder has a different latency and quality contract from Bob's conversational lane. The VPS
+// CPU remains available for light and restricted work, but unrestricted structured analysis,
+// authoring, and review must not spend a full local timeout there before escalating. Live UI-build
+// acceptance on 2026-10-13 showed the VPS 30B timing out after seven minutes and the laptop 8B
+// repeatedly failing the research/UX schemas, while the strong provider completed the same
+// structured stage in about a minute. Keep the chains env-tunable, but make the safe fast path the
+// default: strong structured work, GPU-first coding, and no VPS CPU in either heavy path.
 function routingChains(env = process.env) {
   return {
     restricted: parseChain(env.BOB_BUILDER_ROUTE_RESTRICTED, [PROVIDERS.OLLAMA, PROVIDERS.GPU_WORKSTATION]),
     local: parseChain(env.BOB_BUILDER_ROUTE_LOCAL, [PROVIDERS.GPU_WORKSTATION, PROVIDERS.OLLAMA, PROVIDERS.OPENAI]),
-    author: parseChain(env.BOB_BUILDER_ROUTE_AUTHOR, [PROVIDERS.GPU_WORKSTATION, PROVIDERS.OLLAMA, PROVIDERS.OPENAI]),
-    review: parseChain(env.BOB_BUILDER_ROUTE_REVIEW, [PROVIDERS.OPENAI, PROVIDERS.OLLAMA, PROVIDERS.GPU_WORKSTATION]),
-    analysis: parseChain(env.BOB_BUILDER_ROUTE_ANALYSIS, [PROVIDERS.GPU_WORKSTATION, PROVIDERS.OLLAMA, PROVIDERS.OPENAI])
+    author: parseChain(env.BOB_BUILDER_ROUTE_AUTHOR, [PROVIDERS.GPU_WORKSTATION, PROVIDERS.OPENAI]),
+    review: parseChain(env.BOB_BUILDER_ROUTE_REVIEW, [PROVIDERS.OPENAI, PROVIDERS.GPU_WORKSTATION]),
+    analysis: parseChain(env.BOB_BUILDER_ROUTE_ANALYSIS, [PROVIDERS.OPENAI, PROVIDERS.GPU_WORKSTATION])
   };
 }
 
