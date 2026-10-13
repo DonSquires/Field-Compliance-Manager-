@@ -36,6 +36,8 @@ test('UX Designer prompt carries approved specification and forbids invented beh
 
   assert.match(prompt.systemPrompt, /approved product specification/);
   assert.match(prompt.systemPrompt, /Do not invent/);
+  assert.match(prompt.systemPrompt, /exact identifiers supplied in repository_context\.existing_routes/);
+  assert.match(prompt.systemPrompt, /only design tokens supplied in repository_context\.design_tokens/);
   assert.equal(JSON.parse(prompt.userPrompt).approved_specification.product_brief.outcome, 'Governed approvals');
   assert.equal(JSON.parse(prompt.userPrompt).repository_context.build_map.file_count, 2);
   assert.equal(JSON.parse(prompt.userPrompt).repository_context.live_context.atlas.capability_count, 2);
@@ -48,6 +50,27 @@ test('UX Designer parser enforces complete responsive and accessibility output',
   assert.deepEqual(parseUxDesignPlan(JSON.stringify({ ...plan, route_map: [] })).route_map, []);
   assert.throws(() => parseUxDesignPlan(JSON.stringify({ ...plan, component_inventory: [] })), /component_inventory must not be empty/);
   assert.throws(() => parseUxDesignPlan(JSON.stringify({ ...plan, accessibility_requirements: 'none' })), /must be an array/);
+});
+
+test('UX Designer rejects invented routes, access boundaries, tokens, and already-resolved questions', () => {
+  const context = {
+    relevant_components: ['BuilderControlRoomPage'],
+    existing_routes: ['AdminShell page id "builder" (renders BuilderControlRoomPage; no standalone URL is established)'],
+    existing_access_boundaries: ['platform-only AdminShell page'],
+    design_tokens: ['--color-bg-base', '--color-text-primary', '--touch-target-admin']
+  };
+  const grounded = {
+    ...validDesignPlan(),
+    route_map: [{ route: context.existing_routes[0], purpose: 'Builder workspace', access: [context.existing_access_boundaries[0]] }],
+    component_inventory: [{ component: 'BuilderControlRoomPage', responsibility: 'Existing Builder owner surface' }],
+    design_tokens: { color: ['--color-bg-base', '--color-text-primary'], spacing: ['--touch-target-admin'] }
+  };
+  assert.deepEqual(parseUxDesignPlan(JSON.stringify(grounded), { repositoryContext: context, enforceRepositoryEvidence: true }), grounded);
+  assert.throws(() => parseUxDesignPlan(JSON.stringify({ ...grounded, route_map: [] }), { repositoryContext: context, enforceRepositoryEvidence: true }), /must include the supplied route/);
+  assert.throws(() => parseUxDesignPlan(JSON.stringify({ ...grounded, route_map: [{ route: '/builder/control-room', purpose: 'invented', access: ['AUTHORIZED_BUILDER_OPERATOR'] }] }), { repositoryContext: context, enforceRepositoryEvidence: true }), /route or page identifier/);
+  assert.throws(() => parseUxDesignPlan(JSON.stringify({ ...grounded, component_inventory: [{ component: 'EvidenceRail', responsibility: 'invented' }] }), { repositoryContext: context, enforceRepositoryEvidence: true }), /component not supplied/);
+  assert.throws(() => parseUxDesignPlan(JSON.stringify({ ...grounded, design_tokens: { color: ['neutral-900'], spacing: ['spacing-1'] } }), { repositoryContext: context, enforceRepositoryEvidence: true }), /exact canonical tokens/);
+  assert.throws(() => parseUxDesignPlan(JSON.stringify({ ...grounded, unresolved_questions: ['What is the exact route path?'] }), { repositoryContext: context, enforceRepositoryEvidence: true }), /repeats ownership/);
 });
 
 test('UX Designer uses approved specification artifact as model provenance', async () => {

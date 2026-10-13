@@ -350,6 +350,35 @@ async function startHumanTestRun({ mode, scope, requestedBy }) {
   return { existing: false, run: safeHumanTestRun(run) };
 }
 
+function collectPinnedDesignContext(source) {
+  if (!source.targetSha) return {};
+  const gitSourceDir = source.gitSourceDir || source.sourceDir;
+  const read = (filePath, maximum) => {
+    try { return readRepositoryFile({ sourceDir: gitSourceDir, sha: source.targetSha, path: filePath }).content.slice(0, maximum); }
+    catch { return ''; }
+  };
+  const productDesign = read('docs/canon/PRODUCT_DESIGN.md', 8_000);
+  const tokenCss = read('apps/web/src/styles/tokens.css', 8_000);
+  const designTokens = [...new Set(tokenCss.match(/--[a-z0-9-]+(?=\s*:)/gi) || [])];
+  const task = String(source.taskDescription || source.title || '');
+  const builderSurface = /\bbob builder\b|\bbuilder control(?:-| )room\b|BuilderControlRoomPage/i.test(task);
+  return {
+    existing_design_system: [
+      'Canonical source: docs/canon/PRODUCT_DESIGN.md',
+      productDesign,
+      'Canonical token source: apps/web/src/styles/tokens.css',
+      tokenCss
+    ].join('\n').slice(0, 12_000),
+    design_tokens: designTokens,
+    ...(builderSurface ? {
+      relevant_components: ['BuilderControlRoomPage', 'BuilderControlRoomPage.css', 'AdminShell', 'BobPanel'],
+      existing_routes: ['AdminShell page id "builder" (renders BuilderControlRoomPage; no standalone URL is established)'],
+      existing_access_boundaries: ['platform-only AdminShell page'],
+      viewport_requirements: ['desktop and mobile', 'admin controls use --touch-target-admin']
+    } : {})
+  };
+}
+
 async function builderRuntimeContext(body, source = { sourceDir: assessmentRoot, targetSha: null }) {
   const buildMap = source.targetSha ? collectRepositoryContext(source) : null;
   const liveContext = builderSupabase ? await collectBuilderLiveContext(builderSupabase) : null;
@@ -375,6 +404,7 @@ async function builderRuntimeContext(body, source = { sourceDir: assessmentRoot,
     },
     designContext: {
       ...(body.designContext && typeof body.designContext === 'object' ? body.designContext : {}),
+      ...collectPinnedDesignContext(source),
       build_map: buildMap,
       live_context: liveContext
     }
@@ -392,19 +422,19 @@ function refreshAtlas() {
 }
 
 async function resolveBuilderSourceDir(jobId) {
-  const { data: job, error } = await builderSupabase.from('builder_jobs').select('id,workspace_branch,workspace_head_sha,target_sha').eq('id', jobId).single();
+  const { data: job, error } = await builderSupabase.from('builder_jobs').select('id,title,task_description,workspace_branch,workspace_head_sha,target_sha').eq('id', jobId).single();
   if (error || !job?.target_sha) throw new Error('Builder job source is unavailable');
   if (!job.workspace_branch) {
     // No bound workspace yet: work from the job's own worktree at the pinned commit
     // (the image copy has no .git). The workspace route later binds this same branch.
     const gitSourceDir = builderGitSource(job.target_sha);
     const workspace = createBranchWorkspace({ sourceDir: gitSourceDir, workspaceRoot: builderWorkspaceRoot, jobId: job.id, targetSha: job.target_sha, recoverInterrupted: true });
-    return { sourceDir: workspace.workspacePath, gitSourceDir, targetSha: job.target_sha };
+    return { sourceDir: workspace.workspacePath, gitSourceDir, targetSha: job.target_sha, title: job.title, taskDescription: job.task_description };
   }
   const sourceDir = workspacePathForBranch(builderWorkspaceRoot, job.workspace_branch);
   if (!fs.existsSync(sourceDir)) throw new Error('Builder workspace is unavailable');
   if (job.workspace_head_sha !== job.target_sha) throw new Error('Builder job does not match its workspace head');
-  return { sourceDir, gitSourceDir: builderSourceDir, targetSha: job.target_sha };
+  return { sourceDir, gitSourceDir: builderSourceDir, targetSha: job.target_sha, title: job.title, taskDescription: job.task_description };
 }
 
 // One Builder run per job at a time; runs continue after the HTTP caller has gone.

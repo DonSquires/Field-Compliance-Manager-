@@ -110,6 +110,16 @@ test('startup recovers model steps interrupted by a control-plane restart before
   assert.match(source, /await startInterruptedModelRecovery\(\);\s*startMainHealthCheck\(\)/);
 });
 
+test('UX design receives pinned canonical tokens and Builder route/access evidence', () => {
+  const source = fs.readFileSync(path.join(root, 'bob-control-plane-server.js'), 'utf8');
+  assert.match(source, /function collectPinnedDesignContext\(source\)/);
+  assert.match(source, /docs\/canon\/PRODUCT_DESIGN\.md/);
+  assert.match(source, /apps\/web\/src\/styles\/tokens\.css/);
+  assert.match(source, /AdminShell page id \"builder\"/);
+  assert.match(source, /platform-only AdminShell page/);
+  assert.match(source, /\.\.\.collectPinnedDesignContext\(source\)/);
+});
+
 test('assessment is authenticated and read-only', async () => {
   const denied = await request('GET', '/assessment');
   assert.equal(denied.response.status, 401);

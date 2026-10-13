@@ -147,6 +147,12 @@ The following run reached Builder but showed `supplied_sources: 0` even though a
 research subagent had returned six public sources: planner arguments had dropped
 the delegated evidence. Job creation now preserves bounded findings and non-example
 URLs from successful delegated `web_research` steps before applying the same gate.
+The first fully sourced job then exposed a UX-grounding gap: the designer received
+a file map but not canonical token or navigation evidence, and invented a route,
+permission constant, Tailwind-like token set, generic approval state, and mobile
+accordion. Pinned `PRODUCT_DESIGN.md`, `tokens.css`, and Builder AdminShell evidence
+now enter design context. UX validation rejects unsupplied routes, access boundaries,
+components and tokens, plus unresolved questions already answered by that evidence.
 
 Builder restart acceptance 2026-10-13: the same monitored redesign exposed a
 second orphan class. A control-plane deployment landed after product analysis

@@ -5,7 +5,7 @@ const {
 } = require('./builder-model-adapter');
 const { fitRepositoryContext } = require('./builder-repository-context');
 
-const UX_DESIGNER_PROMPT_VERSION = 'ux-designer-v2';
+const UX_DESIGNER_PROMPT_VERSION = 'ux-designer-v3';
 
 const UX_DESIGN_SCHEMA = Object.freeze({
   type: 'object',
@@ -43,6 +43,12 @@ function normalizeDesignContext(context = {}) {
     existing_routes: Array.isArray(context.existing_routes)
       ? context.existing_routes.filter(value => typeof value === 'string').slice(0, 200)
       : [],
+    existing_access_boundaries: Array.isArray(context.existing_access_boundaries)
+      ? context.existing_access_boundaries.filter(value => typeof value === 'string').slice(0, 50)
+      : [],
+    design_tokens: Array.isArray(context.design_tokens)
+      ? context.design_tokens.filter(value => typeof value === 'string' && /^--[a-z0-9-]+$/i.test(value)).slice(0, 200)
+      : [],
     viewport_requirements: Array.isArray(context.viewport_requirements)
       ? context.viewport_requirements.filter(value => typeof value === 'string').slice(0, 20)
       : [],
@@ -77,13 +83,16 @@ function buildUxDesignerPrompt({ specification, repositoryContext }) {
     'You are the UX/UI Designer for Field Compliance Manager.',
     'Design from the approved product specification and supplied repository context.',
     'Do not invent product behavior, routes, schema, permissions, or capabilities.',
-    'Reuse the existing design system and components where they satisfy the approved requirements.',
+    'Reuse only design tokens supplied in repository_context.design_tokens; never translate them into Tailwind-style or invented names.',
+    'Resolve ownership, navigation, access, and design-system questions from supplied repository evidence rather than repeating them as unresolved.',
     'Cover desktop and mobile behavior, accessibility, and loading, empty, error, and success states.',
-    'route_map lists the web routes the change touches; for a change inside one component or a native mobile screen with no route it is an empty array — never invent a route to fill it.',
+    'route_map lists only exact identifiers supplied in repository_context.existing_routes; for a component-only change with no supplied route it is an empty array — never invent a route to fill it.',
+    'route_map access values use only repository_context.existing_access_boundaries.',
     'Return one JSON object matching the supplied schema, with no markdown fence.'
   ].join(' ');
   return {
     systemPrompt,
+    context,
     userPrompt: JSON.stringify({
       approved_specification: specification,
       repository_context: context,
@@ -102,7 +111,7 @@ function buildUxDesignerPrompt({ specification, repositoryContext }) {
   };
 }
 
-function parseUxDesignPlan(content) {
+function parseUxDesignPlan(content, { repositoryContext = {}, enforceRepositoryEvidence = false } = {}) {
   if (typeof content !== 'string' || !content.trim()) throw new Error('UX design plan is empty');
   const normalized = content.trim().replace(/^```(?:json)?\s*/i, '').replace(/\s*```$/, '');
   let plan;
@@ -131,6 +140,33 @@ function parseUxDesignPlan(content) {
     }
   }
   if (!plan.design_tokens || typeof plan.design_tokens !== 'object') throw new Error('design_tokens is required');
+  const context = normalizeDesignContext(repositoryContext);
+  const allowedRoutes = new Set(context.existing_routes);
+  const allowedAccess = new Set(context.existing_access_boundaries);
+  const allowedTokens = new Set(context.design_tokens);
+  if (enforceRepositoryEvidence && allowedRoutes.size && plan.route_map.length === 0) {
+    throw new Error('route_map must include the supplied route or page identifier for this routed surface');
+  }
+  if (enforceRepositoryEvidence) for (const entry of plan.route_map) {
+    if (!entry || typeof entry.route !== 'string' || !allowedRoutes.has(entry.route)) {
+      throw new Error('route_map contains a route or page identifier not supplied by repository evidence');
+    }
+    if (!Array.isArray(entry.access) || entry.access.some(value => !allowedAccess.has(value))) {
+      throw new Error('route_map contains an access boundary not supplied by repository evidence');
+    }
+  }
+  if (enforceRepositoryEvidence && context.relevant_components.length
+      && plan.component_inventory.some(entry => !entry || !context.relevant_components.includes(entry.component))) {
+    throw new Error('component_inventory contains a component not supplied by repository evidence');
+  }
+  const usedTokens = [...(Array.isArray(plan.design_tokens.color) ? plan.design_tokens.color : []), ...(Array.isArray(plan.design_tokens.spacing) ? plan.design_tokens.spacing : [])];
+  if (allowedTokens.size && (usedTokens.length === 0 || usedTokens.some(value => !allowedTokens.has(value)))) {
+    throw new Error('design_tokens must use only exact canonical tokens supplied by repository evidence');
+  }
+  if ((allowedRoutes.size || allowedTokens.size || context.relevant_components.length)
+      && plan.unresolved_questions.some(value => /(?:route|page path|component.*owner|true owner|design system|theme token|token set|access gate|role.*gate)/i.test(String(value)))) {
+    throw new Error('unresolved_questions repeats ownership, route, access, or token facts supplied by repository evidence');
+  }
   return plan;
 }
 
@@ -238,7 +274,7 @@ async function runUxDesigner({
     supabase,
     gateway,
     modelRequest,
-    validateOutput: parseUxDesignPlan
+    validateOutput: (content) => parseUxDesignPlan(content, { repositoryContext: prompts.context, enforceRepositoryEvidence: true })
   });
   if (!result.ok) {
     await abortStep(supabase, { jobId: job.id, stepId: step.id, reason: `ux design: ${result.error || 'model run failed'}` });
