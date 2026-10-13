@@ -4,7 +4,7 @@ const {
 } = require('./builder-model-adapter');
 const { fitRepositoryContext } = require('./builder-repository-context');
 
-const PRODUCT_ANALYST_PROMPT_VERSION = 'product-analyst-v3';
+const PRODUCT_ANALYST_PROMPT_VERSION = 'product-analyst-v4';
 
 const PRODUCT_SPEC_SCHEMA = Object.freeze({
   type: 'object',
@@ -19,6 +19,7 @@ const PRODUCT_SPEC_SCHEMA = Object.freeze({
     'workflow_verification',
     'terrain_verification',
     'human_acceptance',
+    'research_evidence',
     'unresolved_questions',
     'assumptions'
   ]
@@ -72,6 +73,16 @@ function normalizeRepositoryContext(context = {}) {
   };
 }
 
+function researchEvidenceRequired(taskDescription) {
+  return /\b(?:web research|internet|online research|public sources?|inspiration from|inspired by|current (?:standards?|patterns?|guidance))\b/i.test(String(taskDescription || ''));
+}
+
+function suppliedResearchUrls(taskDescription) {
+  return [...new Set(String(taskDescription || '').match(/https:\/\/[^\s<>()\]\["']+/g) || [])]
+    .map((url) => url.replace(/[.,;:!?]+$/, ''))
+    .slice(0, 10);
+}
+
 function buildProductAnalystPrompt({ taskDescription, repositoryContext, constraints = [] }) {
   const task = boundedString(taskDescription, 12000);
   if (!task) throw new Error('taskDescription is required');
@@ -89,6 +100,7 @@ function buildProductAnalystPrompt({ taskDescription, repositoryContext, constra
     'Require schema and Atlas checks, keeping proven flow reach separate from structural FK reach and treating references-only edges as weak evidence.',
     'Define a responsive, accessible human-glass acceptance route for the affected role, including loading, empty, error, permission, success, and safe-next-action states that apply.',
     'Put every unknown that affects implementation in unresolved_questions.',
+    'When research is required, cite only URLs supplied in the task; record the exact observed pattern and how it applies, never invent a source or claim browsing.',
     'Return one JSON object matching the supplied schema, with no markdown fence.'
   ].join(' ');
   const userPrompt = JSON.stringify({
@@ -123,6 +135,7 @@ function buildProductAnalystPrompt({ taskDescription, repositoryContext, constra
         expected_visible_result: 'string',
         required_states: ['loading|empty|error|permission|success|safe_next_action']
       },
+      research_evidence: [{ url: 'supplied https URL', publisher: 'string', observed_pattern: 'exact sourced observation', applicability: 'bounded design implication' }],
       unresolved_questions: ['string'],
       assumptions: ['string']
     }
@@ -134,7 +147,7 @@ function requireArray(specification, key) {
   if (!Array.isArray(specification[key])) throw new Error(`${key} must be an array`);
 }
 
-function parseProductSpecification(content) {
+function parseProductSpecification(content, { requiredResearchUrls = [], researchRequired = false } = {}) {
   if (typeof content !== 'string' || !content.trim()) throw new Error('product specification is empty');
   const normalized = content.trim().replace(/^```(?:json)?\s*/i, '').replace(/\s*```$/, '');
   let specification;
@@ -169,6 +182,18 @@ function parseProductSpecification(content) {
       || specification.terrain_verification.atlas_capability_checks.length === 0
       || specification.terrain_verification.flow_reach_checks.length === 0) {
     throw new Error('terrain verification must include schema, Atlas capability, and proven flow checks');
+  }
+  const allowedResearchUrls = new Set(requiredResearchUrls);
+  if (researchRequired) {
+    if (allowedResearchUrls.size < 4) throw new Error('research-required task must supply at least four source URLs');
+    if (specification.research_evidence.length < 4) throw new Error('research_evidence must cite at least four supplied sources');
+    for (const evidence of specification.research_evidence) {
+      const url = boundedString(evidence?.url, 2000).replace(/[.,;:!?]+$/, '');
+      if (!url || !allowedResearchUrls.has(url)) throw new Error('research_evidence contains a URL that was not supplied in the task');
+      if (!boundedString(evidence?.publisher, 300) || !boundedString(evidence?.observed_pattern, 2000) || !boundedString(evidence?.applicability, 2000)) {
+        throw new Error('research_evidence must include publisher, observed_pattern, and applicability');
+      }
+    }
   }
   const acceptance = specification.human_acceptance;
   if (!acceptance || typeof acceptance !== 'object'
@@ -228,6 +253,8 @@ async function runProductAnalyst({
   const abort = abortStep || require('./builder-ux-designer').abortModelStep;
   const started = await startAnalysis(supabase, job.id, step.id);
   if (!started.success) return { ok: false, status: 409, error: started.error };
+  const researchRequired = researchEvidenceRequired(job.task_description);
+  const requiredResearchUrls = researchRequired ? suppliedResearchUrls(job.task_description) : [];
   const prompts = buildProductAnalystPrompt({
     taskDescription: job.task_description,
     repositoryContext,
@@ -250,7 +277,7 @@ async function runProductAnalyst({
     supabase,
     gateway,
     modelRequest,
-    validateOutput: parseProductSpecification
+    validateOutput: (content) => parseProductSpecification(content, { requiredResearchUrls, researchRequired })
   });
   if (!result.ok) {
     await abort(supabase, { jobId: job.id, stepId: step.id, reason: `product analysis: ${result.error || 'model run failed'}` });
@@ -291,6 +318,8 @@ module.exports = {
   PRODUCT_ANALYST_PROMPT_VERSION,
   PRODUCT_SPEC_SCHEMA,
   normalizeRepositoryContext,
+  researchEvidenceRequired,
+  suppliedResearchUrls,
   buildProductAnalystPrompt,
   parseProductSpecification,
   startProductAnalysis,

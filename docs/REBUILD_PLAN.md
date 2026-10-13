@@ -122,6 +122,15 @@ self-heal and owner Builder jobs continue through their existing bounded
 governance paths. This is concurrency only: it does not weaken health checks,
 verification, review, merge, deployment, or protected-path gates.
 
+Builder research-provenance acceptance 2026-10-13: monitoring the Builder
+control-room redesign rejected a second product specification before design
+because it named “research integration” but carried zero source URLs or observed
+patterns. Research-driven natural-language jobs now preserve bounded research
+output and source URLs in the durable brief, cannot open with fewer than four
+sources, and require Product Analyst to return structured publisher, observation,
+and applicability evidence using only supplied URLs. This is provenance, not
+authority for a write; unsupported or invented sources fail validation.
+
 Builder restart acceptance 2026-10-13: the same monitored redesign exposed a
 second orphan class. A control-plane deployment landed after product analysis
 claimed its durable step but before the model returned, leaving both the model

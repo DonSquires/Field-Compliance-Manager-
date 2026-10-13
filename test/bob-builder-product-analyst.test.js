@@ -4,6 +4,8 @@ const test = require('node:test');
 const {
   PRODUCT_ANALYST_PROMPT_VERSION,
   normalizeRepositoryContext,
+  researchEvidenceRequired,
+  suppliedResearchUrls,
   buildProductAnalystPrompt,
   parseProductSpecification,
   runProductAnalyst
@@ -30,6 +32,7 @@ function validSpecification() {
       fk_reach_checks: ['record approval-to-job FK adjacency separately'],
       weak_reference_checks: []
     },
+    research_evidence: [],
     human_acceptance: {
       role: 'administrator',
       route: '/admin/approvals',
@@ -78,6 +81,20 @@ test('Product Analyst parser accepts the complete specification contract', () =>
   assert.deepEqual(parseProductSpecification(JSON.stringify(validSpecification())), validSpecification());
 });
 
+test('Product Analyst requires supplied provenance for research-driven work', () => {
+  const urls = ['https://example.com/a', 'https://example.com/b', 'https://example.com/c', 'https://example.com/d'];
+  assert.equal(researchEvidenceRequired('Use internet research and app inspiration'), true);
+  assert.deepEqual(suppliedResearchUrls(`Sources: ${urls.join(' ')}`), urls);
+  assert.throws(() => parseProductSpecification(JSON.stringify(validSpecification()), { researchRequired: true, requiredResearchUrls: urls }), /cite at least four/);
+  const specification = {
+    ...validSpecification(),
+    research_evidence: urls.map((url, index) => ({ url, publisher: `Publisher ${index}`, observed_pattern: 'A sourced queue pattern', applicability: 'Use only for the Builder queue hierarchy' }))
+  };
+  assert.deepEqual(parseProductSpecification(JSON.stringify(specification), { researchRequired: true, requiredResearchUrls: urls }), specification);
+  specification.research_evidence[0].url = 'https://invented.example/source';
+  assert.throws(() => parseProductSpecification(JSON.stringify(specification), { researchRequired: true, requiredResearchUrls: urls }), /was not supplied/);
+});
+
 test('Product Analyst parser rejects malformed or incomplete output', () => {
   assert.throws(() => parseProductSpecification('not json'), /valid JSON/);
   assert.throws(() => parseProductSpecification(JSON.stringify({ product_brief: {} })), /must be an array/);
@@ -110,7 +127,7 @@ test('Product Analyst routes complex analysis through the governed model runner'
   assert.deepEqual(captured.modelRequest.chain, ['gpu_workstation', 'ollama', 'openai']);
   assert.equal(captured.modelRequest.provider, 'gpu_workstation');
   assert.equal(captured.modelRequest.prompt_version, PRODUCT_ANALYST_PROMPT_VERSION);
-  assert.equal(captured.validateOutput, parseProductSpecification);
+  assert.deepEqual(captured.validateOutput(JSON.stringify(specification)), specification);
   assert.deepEqual(result.specification, specification);
   assert.equal(result.approval.id, 'approval-1');
 });

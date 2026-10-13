@@ -8006,8 +8006,12 @@ serve(async (req)=>{
       const requestBrief = String(text ?? '').trim();
       const firstSentence = requestBrief.replace(/\s+/g, ' ').split(/(?<=[.!?])\s/)[0];
       const evidenceSummary = evidenceSteps
-        .map((step) => `${step.tool}: ${step.result_summary.slice(0, 500)}`)
+        .map((step) => `${step.tool}: ${step.result_summary.slice(0, step.tool === 'web_research' || step.tool === 'delegate' ? 3500 : 500)}`)
         .join('\n');
+      const researchUrls = [...new Set(evidenceSteps
+        .filter((step) => step.tool === 'web_research' || step.tool === 'delegate')
+        .flatMap((step) => String(step.result_summary).match(/https:\/\/[^\s<>()\]\["']+/g) ?? [])
+        .map((url) => url.replace(/[.,;:!?]+$/, '')))].slice(0, 8);
       const builderMode = builderModeForRequest(requestBrief);
       return {
         title: (firstSentence || 'Implement the requested FCM change').slice(0, 160),
@@ -8023,6 +8027,7 @@ serve(async (req)=>{
           requestBrief,
           '',
           'Evidence gathered before proposal:',
+          researchUrls.length ? `Research source URLs supplied to Product Analyst (cite only these):\n${researchUrls.map((url) => `- ${url}`).join('\n')}` : '',
           evidenceSummary,
           '',
           'Required verification contract:',
@@ -9218,6 +9223,14 @@ serve(async (req)=>{
             // apps/web/, so a mobile screen (apps/mobile) or anything else is backend-lane work even when the
             // words say "component"/"screen" (job 958829bd was scoped frontend-only and could not touch it).
             const bjText = `${bjTitle} ${bjDescription}`;
+            const bjResearchRequired = /\b(?:web research|internet|online research|public sources?|inspiration from|inspired by|use the internet|other apps)\b/i.test(bjText);
+            const bjResearchUrls = [...new Set((bjText.match(/https:\/\/[^\s<>()\]\["']+/g) ?? []).map((url) => url.replace(/[.,;:!?]+$/, '')))];
+            if (bjResearchRequired && bjResearchUrls.length < 4) {
+              return {
+                reply: 'I did not open the Builder job because the requested external inspiration is not yet backed by at least four public source URLs. I need to complete governed web research first rather than let Product Analyst invent provenance.',
+                meta: { tool: 'create_builder_job', outcome: 'need_research', required_sources: 4, supplied_sources: bjResearchUrls.length }
+              };
+            }
             const bjPaths = bjText.match(/\b(?:apps|supabase|services|scripts|test|docs|deploy)\/[\w./-]+/g) ?? [];
             const bjWebPaths = bjPaths.filter((p)=>p.startsWith('apps/web/'));
             const bjOtherPaths = bjPaths.filter((p)=>!p.startsWith('apps/web/'));

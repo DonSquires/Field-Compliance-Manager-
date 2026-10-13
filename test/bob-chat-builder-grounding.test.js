@@ -139,3 +139,11 @@ test('Builder intent guard respects explicit plan-only and no-create instruction
   assert.equal(explicitBuilderCreationRequest('Review the app code but do not create or open a Builder job.'), false);
   assert.equal(explicitBuilderCreationRequest('Create a client record for the new patrol customer.'), false);
 });
+
+test('research-driven Builder jobs preserve provenance and cannot open without four sources', () => {
+  assert.match(chat, /step\.tool === 'web_research' \|\| step\.tool === 'delegate' \? 3500 : 500/);
+  assert.match(chat, /Research source URLs supplied to Product Analyst/);
+  assert.match(chat, /bjResearchRequired/);
+  assert.match(chat, /bjResearchUrls\.length < 4/);
+  assert.match(chat, /outcome: 'need_research'/);
+});
