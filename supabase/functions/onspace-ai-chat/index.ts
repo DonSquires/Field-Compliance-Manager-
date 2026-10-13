@@ -992,7 +992,9 @@ async function resolveUserCapabilities(supabase, role, orgId, userId = null) {
   if (canCompareData) allowedTools.push('fetch_bylaw_source');
   if (canWrite || canIngest || canPromote) allowedTools.push('job_runner');
   // sql_read: admiral unrestricted, captain+commander org-scoped.
-  if (tier === 'admiral') allowedTools.push('sql_read', 'repo_search', 'check_proposals', 'self_audit', 'write_self_memory', 'read_self_memory', 'query_atlas', 'read_issues', 'propose_client_root_org');
+  if (tier === 'admiral' || tier === 'captain' || tier === 'commander') allowedTools.push('query_atlas');
+  if (tier === 'admiral' || tier === 'captain' || tier === 'commander') allowedTools.push('inspect_platform_services');
+  if (tier === 'admiral') allowedTools.push('sql_read', 'repo_search', 'check_proposals', 'self_audit', 'write_self_memory', 'read_self_memory', 'read_issues', 'propose_client_root_org');
   else if (tier === 'captain' || tier === 'commander') allowedTools.push('sql_read', 'check_proposals');
   else if (tier === 'officer' || tier === 'ensign') allowedTools.push('check_proposals');
   // C2 (issue #3): resolve the caller's area x level matrix for this org. Admiral
@@ -1675,7 +1677,10 @@ function attachGuidedProposalWorkflow(meta) {
     t.tool === 'review_merge_request' && caps.tier === 'admiral' || // read_bob_chat is Bob's notepad read (tail + unanswered scan) — ADMIRAL ONLY.
     t.tool === 'read_bob_chat' && caps.tier === 'admiral' || // assess_system is read-only whole-build assessment — ADMIRAL ONLY.
     t.tool === 'assess_system' && caps.tier === 'admiral' || // write_bob_chat is Bob's append-only notepad write — ADMIRAL ONLY.
-    t.tool === 'write_bob_chat' && caps.tier === 'admiral' || t.tool === 'query_atlas' && caps.tier === 'admiral' || t.tool === 'read_issues' && caps.tier === 'admiral' || // write_self_memory is Bob's direct-write to his own memory — ADMIRAL ONLY.
+    t.tool === 'write_bob_chat' && caps.tier === 'admiral' ||
+    t.tool === 'query_atlas' && (caps.tier === 'admiral' || caps.tier === 'captain' || caps.tier === 'commander') ||
+    t.tool === 'inspect_platform_services' && (caps.tier === 'admiral' || caps.tier === 'captain' || caps.tier === 'commander') ||
+    t.tool === 'read_issues' && caps.tier === 'admiral' || // write_self_memory is Bob's direct-write to his own memory — ADMIRAL ONLY.
     t.tool === 'write_self_memory' && caps.tier === 'admiral' || // read_self_memory is Bob's read of his own memory — ADMIRAL ONLY.
     t.tool === 'read_self_memory' && caps.tier === 'admiral' || // dispatch_flow dispatches a governed Duo coding flow — ADMIRAL ONLY.
     t.tool === 'dispatch_flow' && caps.tier === 'admiral' || // create_builder_job opens a GitHub self-heal/build job (DRAFT PR) — ADMIRAL ONLY.
@@ -1753,15 +1758,23 @@ const _PLAN_REASONING_EFFORT = Deno.env.get('OPENAI_PLAN_REASONING_EFFORT') ?? '
 const _OPENAI_TIMEOUT_MS = parseInt(Deno.env.get('OPENAI_TIMEOUT_MS') ?? '55000', 10);
 const _PLAN_TEMPERATURE = parseFloat(Deno.env.get('BOB_PLAN_TEMPERATURE') ?? '0.6');
 // ── Small helpers ────────────────────────────────────────────────────────────
-async function callFn(fnName, authHeader, payload) {
-  const res = await fetch(`${SUPABASE_URL}/functions/v1/${fnName}`, {
-    method: 'POST',
-    headers: {
-      'Content-Type': 'application/json',
-      'Authorization': authHeader
-    },
-    body: JSON.stringify(payload)
-  });
+async function callFn(fnName, authHeader, payload, timeoutMs = 25_000) {
+  const controller = new AbortController();
+  const timeout = setTimeout(()=>controller.abort(), timeoutMs);
+  let res;
+  try {
+    res = await fetch(`${SUPABASE_URL}/functions/v1/${fnName}`, {
+      method: 'POST',
+      headers: {
+        'Content-Type': 'application/json',
+        'Authorization': authHeader
+      },
+      body: JSON.stringify(payload),
+      signal: controller.signal
+    });
+  } finally {
+    clearTimeout(timeout);
+  }
   const text = await res.text();
   let data = {};
   try {
@@ -1776,6 +1789,50 @@ async function callFn(fnName, authHeader, payload) {
     status: res.status,
     data
   };
+}
+async function callPlatformDiagnostic(
+  authHeader: string,
+  service: string,
+  route: string,
+  query: Record<string, unknown> = {}
+) {
+  let url;
+  if (service === 'email') {
+    url = new URL(`${SUPABASE_URL}/functions/v1/bob-email-view${route}`);
+  } else if (service === 'ptt') {
+    url = new URL(`${SUPABASE_URL}/functions/v1/bob-ptt-view${route}`);
+  } else if (service === 'vercel') {
+    url = new URL(`${SUPABASE_URL}/functions/v1/bob-vercel-view${route}`);
+  } else if (service === 'gitea') {
+    url = new URL(`${SUPABASE_URL}/functions/v1/bob-gitea-maintainer${route}`);
+  } else {
+    throw new Error(`Unsupported platform diagnostic service: ${service}`);
+  }
+  for (const [key, value] of Object.entries(query)) {
+    if (value !== undefined && value !== null && String(value).trim()) {
+      url.searchParams.set(key, String(value));
+    }
+  }
+  const controller = new AbortController();
+  const timeout = setTimeout(()=>controller.abort(), 15_000);
+  let response;
+  try {
+    response = await fetch(url, {
+      method: 'GET',
+      headers: { Authorization: authHeader },
+      signal: controller.signal
+    });
+  } finally {
+    clearTimeout(timeout);
+  }
+  const text = await response.text();
+  let data: Record<string, unknown> = {};
+  try {
+    data = text ? JSON.parse(text) : {};
+  } catch {
+    data = { raw: text.slice(0, 500) };
+  }
+  return { ok: response.ok, status: response.status, data };
 }
 // callInference: routes non-plan actions (embed, understand_documents, media,
 // knowledge retrieval) through bob-inference → VPS. Those paths need the VPS
@@ -4115,17 +4172,129 @@ async function execReviewMergeRequest(authHeader, caps, args) {
     }
   };
 }
-// ADMIRAL-ONLY append-only write to Bob's private notepad (docs/bob/BOB_CHAT.md).
-// Calls bob-repo-search with action='write_bob_chat'. Hard-scoped to one file.
+async function execInspectPlatformServices(
+  authHeader: string,
+  caps: { tier: string },
+  toolArgs: Record<string, unknown>
+) {
+  if (caps.tier !== 'admiral' && caps.tier !== 'captain' && caps.tier !== 'commander') return {
+    reply: 'Platform-service diagnostics are restricted to admin diagnostic roles.',
+    meta: { tool: 'inspect_platform_services', outcome: 'forbidden' }
+  };
+  const action = String(toolArgs.action ?? '').trim();
+  const routes: Record<string, readonly [string, string]> = {
+    email_health: ['email', '/health'],
+    email_domains: ['email', '/domains'],
+    email_delivery_recent: ['email', '/delivery/recent'],
+    email_inbound_status: ['email', '/inbound/status'],
+    email_logs_recent: ['email', '/logs/recent'],
+    ptt_health: ['ptt', '/health'],
+    ptt_connections: ['ptt', '/connections'],
+    ptt_rooms: ['ptt', '/rooms'],
+    ptt_turn_status: ['ptt', '/turn/status'],
+    ptt_recent_errors: ['ptt', '/recent-errors'],
+    vercel_health: ['vercel', '/health'],
+    vercel_projects: ['vercel', '/projects'],
+    vercel_deployments: ['vercel', '/deployments'],
+    vercel_failed_deployments: ['vercel', '/deployments/failed'],
+    vercel_domains: ['vercel', '/domains'],
+    vercel_environment_variable_names: ['vercel', '/environment-variable-names'],
+    gitea_health: ['gitea', '/health'],
+    gitea_repository: ['gitea', '/repo'],
+    gitea_branches: ['gitea', '/branches'],
+    gitea_file: ['gitea', '/file'],
+    gitea_commits: ['gitea', '/commits'],
+    gitea_pulls: ['gitea', '/pulls'],
+    gitea_issues: ['gitea', '/issues'],
+    gitea_actions_status: ['gitea', '/actions/status']
+  };
+  const target = routes[action];
+  if (!target) return {
+    reply: `Unknown platform diagnostic action '${action}'.`,
+    meta: { tool: 'inspect_platform_services', outcome: 'invalid_action', action }
+  };
+  if (action === 'vercel_environment_variable_names' && !String(toolArgs.project_id ?? '').trim()) {
+    return {
+      reply: 'vercel_environment_variable_names requires project_id.',
+      meta: { tool: 'inspect_platform_services', outcome: 'invalid_input', action }
+    };
+  }
+  if (action === 'gitea_file' && !String(toolArgs.path ?? '').trim()) {
+    return {
+      reply: 'gitea_file requires path.',
+      meta: { tool: 'inspect_platform_services', outcome: 'invalid_input', action }
+    };
+  }
+  const service = target[0];
+  const query = service === 'gitea'
+    ? {
+        owner: 'Iron-Eagle-Security-Ltd',
+        repo: 'field-compliance-manager',
+        branch: String(toolArgs.branch ?? 'main').trim() || 'main',
+        path: String(toolArgs.path ?? '').trim() || undefined
+      }
+    : service === 'vercel'
+      ? { projectId: String(toolArgs.project_id ?? '').trim() || undefined }
+      : {};
+  let result;
+  try {
+    result = await callPlatformDiagnostic(authHeader, service, target[1], query);
+  } catch (error) {
+    const message = error instanceof Error && error.name === 'AbortError'
+      ? 'diagnostic timed out'
+      : 'diagnostic request failed';
+    return {
+      reply: `The ${action} ${message}.`,
+      meta: { tool: 'inspect_platform_services', outcome: 'failed', action }
+    };
+  }
+  if (!result.ok || result.data.ok === false) return {
+    reply: `The ${action} diagnostic failed (${String(result.data.code ?? result.status)}).`,
+    meta: {
+      tool: 'inspect_platform_services',
+      outcome: 'failed',
+      action,
+      status: result.status
+    }
+  };
+  return {
+    reply: `[INTERNAL: Read-only, audited ${action} platform diagnostic. Treat this as current service evidence, not permission to mutate or deploy.]\n${JSON.stringify(result.data.data ?? result.data).slice(0, 40000)}`,
+    meta: {
+      tool: 'inspect_platform_services',
+      outcome: 'ok',
+      action,
+      service,
+      internal: true
+    }
+  };
+}
 async function execQueryAtlas(authHeader, caps, toolArgs) {
-  if (caps.tier !== 'admiral') return {
-    reply: 'Querying the Atlas is restricted to the admiral.',
+  if (caps.tier !== 'admiral' && caps.tier !== 'captain' && caps.tier !== 'commander') return {
+    reply: 'Querying the Atlas is restricted to admin diagnostic roles.',
     meta: {
       tool: 'query_atlas',
       outcome: 'forbidden'
     }
   };
   const action = String(toolArgs.action ?? 'capability_map').trim();
+  if (action === 'status') {
+    const statusResult = await callFn('bob-query-atlas', authHeader, { action });
+    if (!statusResult.ok || statusResult.data?.ok === false) return {
+      reply: `I could not read Atlas freshness (${statusResult.data?.error ?? statusResult.status}).`,
+      meta: { tool: 'query_atlas', outcome: 'failed', action }
+    };
+    const status = statusResult.data?.atlas_status ?? {};
+    return {
+      reply: `[INTERNAL: Atlas status. Capabilities: ${status.capability_count ?? 'unknown'}; live edges: ${status.edge_count ?? 'unknown'}; latest capability refresh: ${status.capability_last_refreshed_at ?? 'unknown'}; latest edge refresh: ${status.edge_last_refreshed_at ?? 'unknown'}; source parity: ${status.source_parity ?? 'unknown'}. ${status.note ?? 'Do not claim Atlas is current without source-parity evidence.'}]`,
+      meta: {
+        tool: 'query_atlas',
+        outcome: 'ok',
+        action,
+        atlas_status: status,
+        internal: true
+      }
+    };
+  }
   // blast_radius has a different arg + response shape from the one-hop reads:
   // it needs a node (from_type/from_name) and returns two SEPARATE sections
   // (flow_reach, fk_reach). Forward its args and render both sections.
@@ -4151,14 +4320,16 @@ async function execQueryAtlas(authHeader, caps, toolArgs) {
       entity_type: toolArgs.from_type,
       entity_name: toolArgs.from_name
     };
+    const atlasStatus = br.data?.atlas_status ?? null;
     return {
-      reply: `[INTERNAL: Atlas blast_radius from ${origin.entity_type}:${origin.entity_name} (direction=${br.data?.direction ?? 'downstream'}, max_depth=${br.data?.max_depth ?? 4}, requested_max_depth=${br.data?.requested_max_depth ?? br.data?.max_depth ?? 4}). Reason over these two DISTINCT sections and NEVER conflate them: FLOW_REACH is proven data-flow (writes/reads/calls/invokes); FK_REACH is a structural RELATION only (undirected) and must NOT be reported as a data-flow path. Report to the human in plain language what touching this node affects, keeping flow vs structural distinct.]\n\nFLOW_REACH (${flow.length}): ${JSON.stringify(flow).slice(0, 40000)}\n\nFK_REACH (${fk.length}): ${JSON.stringify(fk).slice(0, 40000)}`,
+      reply: `[INTERNAL: Atlas blast_radius from ${origin.entity_type}:${origin.entity_name} (direction=${br.data?.direction ?? 'downstream'}, max_depth=${br.data?.max_depth ?? 4}, requested_max_depth=${br.data?.requested_max_depth ?? br.data?.max_depth ?? 4}, source_parity=${atlasStatus?.source_parity ?? 'unknown'}). Reason over these two DISTINCT sections and NEVER conflate them: FLOW_REACH is proven data-flow (writes/reads/calls/invokes); FK_REACH is a structural RELATION only (undirected) and must NOT be reported as a data-flow path. Do not call this current when source parity is unknown. Report to the human in plain language what touching this node affects, keeping flow vs structural distinct.]\n\nFLOW_REACH (${flow.length}): ${JSON.stringify(flow).slice(0, 40000)}\n\nFK_REACH (${fk.length}): ${JSON.stringify(fk).slice(0, 40000)}`,
       meta: {
         tool: 'query_atlas',
         outcome: 'ok',
         action,
         flow_count: flow.length,
         fk_count: fk.length,
+        atlas_status: atlasStatus,
         internal: true
       }
     };
@@ -4168,6 +4339,7 @@ async function execQueryAtlas(authHeader, caps, toolArgs) {
   const initialOffset = Math.max(typeof toolArgs.offset === 'number' ? toolArgs.offset : 0, 0);
   const scanAll = action === 'gap_report' || action === 'expectation_report';
   const pages = [];
+  let atlasStatus = null;
   let offset = initialOffset;
   let nextOffset = null;
   const maxScanRows = scanAll ? 2000 : requestedLimit;
@@ -4182,6 +4354,7 @@ async function execQueryAtlas(authHeader, caps, toolArgs) {
       reply: `I could not query the Atlas (${page.data?.error ?? page.status}).`,
       meta: { tool: 'query_atlas', outcome: 'failed', action }
     };
+    if (!atlasStatus && page.data?.atlas_status) atlasStatus = page.data.atlas_status;
     pages.push(...(Array.isArray(page.data?.results) ? page.data.results : []));
     nextOffset = page.data?.next_offset ?? null;
     if (!scanAll || nextOffset === null || pages.length >= maxScanRows) break;
@@ -4235,7 +4408,7 @@ async function execQueryAtlas(authHeader, caps, toolArgs) {
         ? `I found ${results.length} live terrain edges in the current page: ${countsBy('edge_kind')}.`
         : `I found ${results.length} capability entries in the current page: ${countsBy('entity_type')}.`;
   return {
-    reply: `${summary}${r.data?.next_offset !== null && r.data?.next_offset !== undefined ? ` The scan is bounded at ${maxScanRows} rows; continue from offset ${r.data.next_offset} for the remainder.` : ''}`,
+    reply: `${summary}${r.data?.next_offset !== null && r.data?.next_offset !== undefined ? ` The scan is bounded at ${maxScanRows} rows; continue from offset ${r.data.next_offset} for the remainder.` : ''}${atlasStatus?.source_parity === 'unknown' ? ' Atlas source parity is unknown; compare this with current repo evidence before calling the result current.' : ''}`,
     meta: {
       tool: 'query_atlas',
       outcome: 'ok',
@@ -4244,6 +4417,7 @@ async function execQueryAtlas(authHeader, caps, toolArgs) {
       total: r.data?.total ?? null,
       offset: r.data?.offset ?? 0,
       next_offset: r.data?.next_offset ?? null,
+      atlas_status: atlasStatus,
       internal: true
     }
   };
@@ -6758,12 +6932,56 @@ serve(async (req)=>{
   let debugModeForError = false;
   let turnRunAdmin: { from: (table: string) => any } | null = null;
   let turnRunId: string | null = null;
+  let turnNotificationContext: {
+    organizationId: string;
+    recipientUserId: string;
+    conversationId: string;
+    requestId: string;
+  } | null = null;
   const respond = async (body: Record<string, unknown>, status = 200, terminalStatus: BobTurnStatus = 'completed', errorCode: string | null = null)=>{
+    let responseBody = body;
+    if (terminalStatus === 'completed' && turnNotificationContext) {
+      // ATLAS CALLS: bob-chat-bell-notify
+      const notification = await callFn(
+        'bob-chat-bell-notify',
+        `Bearer ${SUPABASE_SERVICE_KEY}`,
+        {
+          event: 'conversation_complete',
+          organization_id: turnNotificationContext.organizationId,
+          recipient_user_id: turnNotificationContext.recipientUserId,
+          conversation_id: turnNotificationContext.conversationId,
+          request_id: turnNotificationContext.requestId
+        },
+        5_000
+      ).catch((notificationError)=>({
+        ok: false,
+        status: 0,
+        data: {
+          error: notificationError instanceof Error ? notificationError.message : String(notificationError)
+        }
+      }));
+      const delivery = notification.ok && notification.data?.ok !== false
+        ? {
+            status: 'delivered',
+            notification_id: notification.data?.notification_id ?? null
+          }
+        : {
+            status: 'failed',
+            error: String(notification.data?.error ?? `HTTP ${notification.status}`)
+          };
+      if (delivery.status === 'failed') {
+        console.error(`[conductor][notification] completion delivery failed for request ${turnNotificationContext.requestId}: ${delivery.error}`);
+      }
+      responseBody = {
+        ...body,
+        notification_delivery: delivery
+      };
+    }
     if (turnRunAdmin && turnRunId) {
       const completedAt = new Date().toISOString();
       const { error: finishError } = await turnRunAdmin.from('bob_turn_runs').update({
         status: terminalStatus,
-        response_payload: body,
+        response_payload: responseBody,
         error_code: errorCode,
         heartbeat_at: completedAt,
         completed_at: completedAt,
@@ -6773,7 +6991,7 @@ serve(async (req)=>{
         console.error(`[conductor][turn-run] failed to finalize run ${turnRunId}: ${finishError.message}`);
       }
     }
-    return json(body, status);
+    return json(responseBody, status);
   };
   try {
     failureStage = 'auth_setup';
@@ -7018,6 +7236,12 @@ serve(async (req)=>{
       turnRunAdmin = admin;
       turnRunId = claimedRun!.id ?? null;
       if (!turnRunId) throw new Error('Bob turn run lost its durable identifier.');
+      turnNotificationContext = {
+        organizationId: orgId,
+        recipientUserId: user.id,
+        conversationId,
+        requestId: claimedRun!.request_id
+      };
 
       const cancellationRequested = async ()=>{
       const { data: state, error: stateError } = await admin
@@ -9082,6 +9306,8 @@ serve(async (req)=>{
           return execWriteBobChat(authHeader, caps, toolArgs);
         case 'query_atlas':
           return execQueryAtlas(authHeader, caps, toolArgs);
+        case 'inspect_platform_services':
+          return execInspectPlatformServices(authHeader, caps, toolArgs);
         case 'assess_system':
           return execAssessSystem(authHeader, caps);
         case 'run_human_test':
@@ -9898,6 +10124,28 @@ serve(async (req)=>{
         next_action: normAction,
         next_tool: chosenTool ?? null
       });
+    }
+    const atlasDiagnosticTier = caps.tier === 'admiral' || caps.tier === 'captain' || caps.tier === 'commander';
+    const explicitAtlasRequest = atlasDiagnosticTier
+      && /\b(?:atlas|terrain|capability map|gap report|blast radius)\b/i.test(message)
+      && /\b(?:query|check|inspect|use|explain|triage|show|look)\b/i.test(message);
+    const explicitReadOnlyAtlasRequest = explicitAtlasRequest
+      && (/\bread[- ]only\b/i.test(message) || /\bdo not (?:create|propose|open|run) (?:a )?builder\b/i.test(message));
+    if (explicitAtlasRequest && (normAction === 'answer' || explicitReadOnlyAtlasRequest) && chosenTool !== 'query_atlas') {
+      const requestedAtlasAction = /\bexpectation(?:s| report)?\b/i.test(message)
+        ? 'expectation_report'
+        : /\bgap(?:s| report)?\b/i.test(message)
+          ? 'gap_report'
+          : /\bterrain|edge(?:s)?\b/i.test(message)
+            ? 'terrain_edges'
+            : 'capability_map';
+      normAction = 'use_tool';
+      chosenTool = 'query_atlas';
+      args = {
+        ...args,
+        action: requestedAtlasAction,
+        limit: 25
+      };
     }
     const explicitAtlasRequest = caps.tier === 'admiral'
       && /\b(?:atlas|terrain|capability map|gap report|blast radius)\b/i.test(message)
@@ -11105,7 +11353,7 @@ serve(async (req)=>{
     // Intermediate steps are recorded in metadata.loop_steps for observability
     // but do NOT change the persistence schema (no new migration).
     // ══════════════════════════════════════════════════════════════════════════
-    if (BOB_LOOP_ENABLED && chosenTool && LOOP_CONTINUABLE_READ_TOOLS.has(chosenTool)) {
+    if (BOB_LOOP_ENABLED && chosenTool && LOOP_CONTINUABLE_READ_TOOLS.has(chosenTool) && !explicitReadOnlyAtlasRequest) {
       // ── BUG-1 FIX: acyclic meta snapshots ──────────────────────────────────
       // Each LoopStep must store a PLAIN, ACYCLIC snapshot of the tool result's
       // meta — never the live `result.meta` object. Storing the live reference

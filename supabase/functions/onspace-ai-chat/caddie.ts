@@ -302,8 +302,13 @@ const TOOL_REGISTRY = {
   },
   // ── !1403 "Bob full-access v2" family (#329) ──────────────────────────────
   query_atlas: {
-    purpose: 'Query your own terrain graph to know what is wired, reachable, and exercised in the build. Know the whole before the part. Actions: (1) capability_map - list entities with present/wired/exercised flags; args { action, filter?, limit?, offset? }. (2) terrain_edges - list live edges touching a node; args { action, filter?, limit?, offset? }. (3) gap_report - run a bounded complete scan of dormant/never-run entities; args { action, limit? }. (4) expectation_report - evaluate authored required/prohibited paths against live flow terrain; args { action, limit? }. These two report actions aggregate pages automatically up to a bounded limit; report a scan as complete only when no next_offset remains. (5) blast_radius - IMPACT / RIPPLE: from a node, what does touching it reach across the build (glass to core). Use this to answer "if we change X, what is affected". Args { action: "blast_radius", from_type, from_name, direction? (downstream|upstream|both; default downstream), max_depth? (1-20, default 8) }. Returns TWO SEPARATE sections: flow_reach (proven data-flow: writes/reads/calls/invokes) and fk_reach (structural RELATION only, undirected). NEVER report an fk_reach link as a data-flow path - they are different truths.',
+    purpose: 'Query your own terrain graph to know what is wired, reachable, and exercised in the build. Know the whole before the part. Start with (1) status - report Atlas row counts, latest refresh timestamps, and whether source-commit parity is provable. If source_parity is unknown, compare Atlas with current repo_search or assess_system evidence before calling it current. Other actions: (2) capability_map - list entities with present/wired/exercised flags; args { action, filter?, limit?, offset? }. (3) terrain_edges - list live edges touching a node; args { action, filter?, limit?, offset? }. (4) gap_report - run a bounded complete scan of dormant/never-run entities; args { action, limit? }. (5) expectation_report - evaluate authored required/prohibited paths against live flow terrain; args { action, limit? }. These two report actions aggregate pages automatically up to a bounded limit; report a scan as complete only when no next_offset remains. (6) blast_radius - IMPACT / RIPPLE: from a node, what does touching it reach across the build (glass to core). Use this to answer "if we change X, what is affected". Args { action: "blast_radius", from_type, from_name, direction? (downstream|upstream|both; default downstream), max_depth? (1-20, default 8) }. Returns TWO SEPARATE sections: flow_reach (proven data-flow: writes/reads/calls/invokes) and fk_reach (structural RELATION only, undirected). NEVER report an fk_reach link as a data-flow path - they are different truths.',
     governance: 'read-only; bob_capability_map + bob_app_map_edges',
+    effect_class: 'admin_diagnostic_substrate_action'
+  },
+  inspect_platform_services: {
+    purpose: 'Inspect the approved platform services through bounded read-only diagnostics. Admin diagnostic roles only. Actions: email_health, email_domains, email_delivery_recent, email_inbound_status, email_logs_recent; ptt_health, ptt_connections, ptt_rooms, ptt_turn_status, ptt_recent_errors; vercel_health, vercel_projects, vercel_deployments, vercel_failed_deployments, vercel_domains, vercel_environment_variable_names (requires project_id); gitea_health, gitea_repository, gitea_branches, gitea_file (requires path), gitea_commits, gitea_pulls, gitea_issues, gitea_actions_status. Optional branch defaults to main. This tool never performs a Gitea write, never returns secret values, and must report upstream unavailable/error states honestly.',
+    governance: 'read-only; admiral/captain/commander; audited; redacted platform diagnostics; no repository writes',
     effect_class: 'admin_diagnostic_substrate_action'
   },
   assess_system: {
@@ -390,6 +395,12 @@ const TOOL_REGISTRY = {
   if (effectClass === 'admin_diagnostic_substrate_action') {
     // sql_read: admiral, captain, commander only
     if (tool === 'sql_read') {
+      return caps.tier === 'admiral' || caps.tier === 'captain' || caps.tier === 'commander';
+    }
+    if (tool === 'query_atlas') {
+      return caps.tier === 'admiral' || caps.tier === 'captain' || caps.tier === 'commander';
+    }
+    if (tool === 'inspect_platform_services') {
       return caps.tier === 'admiral' || caps.tier === 'captain' || caps.tier === 'commander';
     }
     // All other admin/diagnostic tools: admiral only
@@ -674,6 +685,7 @@ const TOOL_REGISTRY = {
     // !1403 "Bob full-access v2" family (#329) — each dispatches to its own
     // edge function, verified at source against the conductor's callFn() calls:
     query_atlas: 'bob-query-atlas',
+    inspect_platform_services: 'onspace-ai-chat',
     assess_system: 'bob-vps-view',
     read_issues: 'bob-read-issues',
     read_self_memory: 'bob-self-memory-read',

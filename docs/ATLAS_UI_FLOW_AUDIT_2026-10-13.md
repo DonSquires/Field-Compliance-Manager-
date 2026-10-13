@@ -11,15 +11,15 @@ notifications, registering proven external caller contracts, wiring the
 bounded platform diagnostic family, closing the finance callers, calibrating
 the test-only synthetic seed, retiring four obsolete edge functions, and
 correcting trigger, RLS, schema-scope, cron-contract, and historical-migration
-false negatives, the current dry run reports 1,376 capabilities, 6,107 edges,
-and 206 capabilities with no detected inbound edge: 1 edge function, 135 RPCs,
-and 70 tables. The latest full live refresh records 212 gaps: 1 edge function,
-141 RPCs, and 70 tables. The six additional source-wired RPCs are the finance
-budget lifecycle, post-approval variance calculation, payment receipt, and
-investigation timeline commands. They are validated locally but not yet
-deployed because no Vercel credential is available in the authorised local
-environment files. Neither inventory claims runtime exercise for newly wired
-capabilities.
+false negatives and integrating current `main`, the release dry run reports
+1,376 capabilities, 7,306 edges, and 190 capabilities with no detected inbound
+edge: 1 edge function, 133 RPCs, and 56 tables. The latest pre-release live
+refresh records 212 gaps. The release source includes the finance budget
+lifecycle, post-approval variance and cost-centre calculations, payment
+receipt, and investigation timeline commands, together with other current-main
+terrain additions. Neither inventory claims runtime exercise for newly wired
+capabilities; live counts must be refreshed from the clean pushed commit after
+deployment.
 
 Evidence used:
 
@@ -207,9 +207,8 @@ out, so no gap is called exercised from that attempt.
 3. **Exercise cost-centre roll calculation with live finance data.** Confirm
    repeated execution preserves one row per organisation, P&L period, and cost
    centre and refreshes the persisted totals.
-4. **Deploy and exercise the six new web callers.** Source wiring is proven,
-   but the live Atlas must remain six RPCs behind until the web deployment is
-   authorised and runtime receipts exist.
+4. **Deploy and exercise the new web callers.** Source wiring is proven, but
+   runtime exercise requires the production deployment and live R&M receipts.
 5. **Standardise high-volume Roster/HR lists first.** Use one shared query,
    filter, result-count, empty/error, and saved-view contract rather than adding
    page-specific controls.
