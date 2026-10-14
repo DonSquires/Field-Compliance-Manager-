@@ -33932,51 +33932,6 @@ export type Database = {
         }
         Returns: Json
       }
-      activate_provider_branch: {
-        Args: {
-          p_branch_organization_id: string
-          p_expected_updated_at: string
-        }
-        Returns: {
-          account_notes: string | null
-          account_owner_user_id: string | null
-          active: boolean
-          billing_address: string | null
-          billing_email: string | null
-          client_request_id: string | null
-          company_registration_number: string | null
-          contact_email: string | null
-          contact_phone: string | null
-          corporate_profile_verified_at: string | null
-          corporate_profile_verified_by: string | null
-          corporate_status: string | null
-          corporate_status_as_of: string | null
-          created_at: string
-          discoverable: boolean
-          enforcement_workflow_mode: string
-          external_refs: Json
-          id: string
-          jurisdiction_geom: unknown
-          jurisdiction_verification: string
-          jurisdiction_verified_at: string | null
-          jurisdiction_verified_by: string | null
-          logo_url: string | null
-          name: string
-          nzbn: string | null
-          nzbn_entity_type: string | null
-          organization_level: number | null
-          organization_type: string
-          parent_organization_id: string | null
-          status: string
-          updated_at: string
-        }
-        SetofOptions: {
-          from: "*"
-          to: "organizations"
-          isOneToOne: true
-          isSetofReturn: false
-        }
-      }
       add_crm_invoice_line: {
         Args: {
           p_client_request_id: string

@@ -661,3 +661,24 @@ remains unpopulated.
   loaded for the selected operating organization without an alert and retained
   New work unit, Add workplace and Add cost centre controls. No workplace, cost
   centre or work unit was created merely to manufacture exercise evidence.
+
+### Closure log — superseded provider-branch activation
+
+- Atlas showed `activate_provider_branch` as present but unwired. The older
+  authority activated a provider branch only from `prospect`, but the governed
+  Organization settings path now creates branches active immediately through
+  retry-safe `create_provider_branch` and never creates that prospect state.
+- Before retirement, the database exposed two contradictory branch lifecycle
+  authorities even though only one had a reachable before/during/after flow.
+  A technical caller could discover the stale transition and bypass the
+  current creation receipt and module-inheritance path.
+- The stale activation RPC and generated type entry were removed. Historical
+  migration evidence remains immutable. Active branch creation still requires
+  an authorized administrator, a client request ID, a unique live branch name,
+  and inherits the parent provider's enabled modules. Governed archival and
+  operating-organization refresh remain unchanged.
+- Twelve focused web guards and the historical migration test passed, along
+  with the production web build. The regenerated live snapshot reports 818
+  functions. Atlas dry-run moved 159 -> 158 bounded gaps: 1 edge function, 102
+  RPCs and 55 tables. This is authority cleanup, not successful exercise
+  evidence.
