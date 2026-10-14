@@ -91,9 +91,13 @@ fi
 
 # 3. Classify.
 CHANGED="$(git -C "$REPO_DIR" diff --name-only "$DEPLOYED_SHA" "$HEAD_SHA")"
+DEPLOYABLE_CHANGED="$(git -C "$REPO_DIR" diff --name-only --diff-filter=ACMRT "$DEPLOYED_SHA" "$HEAD_SHA")"
 NEW_MIGRATIONS="$(git -C "$REPO_DIR" diff --name-only --diff-filter=A "$DEPLOYED_SHA" "$HEAD_SHA" -- 'supabase/migrations/*.sql' | sort || true)"
-FUNCTIONS="$(printf '%s\n' "$CHANGED" | sed -n 's#^supabase/functions/\([^_][^/]*\)/.*#\1#p' | sort -u || true)"
-SHARED_CHANGED="$(printf '%s\n' "$CHANGED" | grep -E '^supabase/functions/_shared/' || true)"
+# Deleted function directories are not deployment candidates. Supabase returns a misleading
+# "Entrypoint path does not exist" for them and used to hold the whole release pointer back even
+# when the names were already absent remotely (live release 7f2031bf, 2026-10-14).
+FUNCTIONS="$(printf '%s\n' "$DEPLOYABLE_CHANGED" | sed -n 's#^supabase/functions/\([^_][^/]*\)/.*#\1#p' | sort -u || true)"
+SHARED_CHANGED="$(printf '%s\n' "$DEPLOYABLE_CHANGED" | grep -E '^supabase/functions/_shared/' || true)"
 if [[ -n "$SHARED_CHANGED" ]]; then
   # A shared module changed: every function that imports it is affected.
   for shared in $SHARED_CHANGED; do

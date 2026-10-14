@@ -37,6 +37,9 @@ test('release lane skips applied migrations and exclusively owns its live pointe
   assert.ok(ledgerCheck > 0, 'the ledger is consulted per migration');
   assert.ok(ledgerCheck < destructiveCheck, 'an applied migration is skipped before any content check runs on it');
   assert.match(lane, /already applied, skipped/);
+  assert.match(lane, /DEPLOYABLE_CHANGED=.*--diff-filter=ACMRT/);
+  assert.match(lane, /FUNCTIONS=.*"\$DEPLOYABLE_CHANGED"/);
+  assert.match(lane, /SHARED_CHANGED=.*"\$DEPLOYABLE_CHANGED"/);
   assert.match(lane, /migration repair --status applied "\$version" --project-ref "\$SUPABASE_PROJECT_REF"/);
   assert.match(lane, /applied but ledger repair failed/);
 
