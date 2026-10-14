@@ -26,6 +26,8 @@ interface BreakEntitlement { worked_hours: number; rest_breaks_required: number;
 interface ActiveBreak { id: string; shift_id: string; break_type: 'rest' | 'meal'; started_at: string; }
 interface SwapOfficer { id: string; label: string; }
 interface PendingSwap { id: string; original_shift_id: string; status: string; }
+interface OnCallPeriod { id: string; period_type: string; starts_at: string; ends_at: string; flat_rate: number | null; status: string; notes: string | null; }
+interface OvertimeOffer { id: string; roster_slot_id: string; seniority_position: number; status: string; expires_at: string; }
 
 interface RosterSlot { id: string; work_unit_id: string; scheduled_start: string; scheduled_end: string; status: string; linked_shift_id: string | null; notes: string | null; }
 interface WorkUnit { id: string; name: string; work_unit_type: 'patrol' | 'static' | 'internal'; service_type: string; }
@@ -106,6 +108,10 @@ const OfficerSchedulePage: React.FC = () => {
   const [pendingSwaps, setPendingSwaps] = useState<PendingSwap[]>([]);
   const [cancelSwap, setCancelSwap] = useState<PendingSwap | null>(null);
   const [cancelSwapReason, setCancelSwapReason] = useState('');
+  const [onCallPeriods, setOnCallPeriods] = useState<OnCallPeriod[]>([]);
+  const [overtimeOffers, setOvertimeOffers] = useState<OvertimeOffer[]>([]);
+  const [workResponse, setWorkResponse] = useState<{ kind: 'on_call' | 'overtime'; id: string; expectedStatus: string; response: 'accepted' | 'declined'; title: string } | null>(null);
+  const [workDeclineReason, setWorkDeclineReason] = useState('');
 
   const loadSchedule = useCallback(async () => {
     if (!profile?.id || !profile.organizationId) {
@@ -113,18 +119,21 @@ const OfficerSchedulePage: React.FC = () => {
       setSlots([]);
       setWorkUnits([]);
       setCoverage([]);
+      setOnCallPeriods([]);
+      setOvertimeOffers([]);
       setError('Organisation access could not be confirmed. Schedule data is unavailable.');
       setLoading(false);
       return;
     }
     setLoading(true);
     setError(null);
-    const [shiftResponse, coverageResponse, staffResponse, officerResponse, swapResponse] = await Promise.all([
+    const [shiftResponse, coverageResponse, staffResponse, officerResponse, swapResponse, onCallResponse] = await Promise.all([
       supabase.from('shifts').select('id, service_type, scheduled_start, scheduled_end, status, notes, shift_health, total_stops, ended_reason').eq('officer_user_id', profile.id).gte('scheduled_end', new Date().toISOString()).neq('status', 'cancelled').order('scheduled_start', { ascending: true }).limit(40),
       supabase.from('shift_coverage_requests').select('id, shift_date, start_time, end_time, required_staff_count, urgency, notes, site:site_id(name)').eq('organization_id', profile.organizationId).eq('status', 'open').gte('shift_date', localDateIso()).order('shift_date', { ascending: true }).order('start_time', { ascending: true }),
       supabase.from('staff_profiles').select('id').eq('organization_id', profile.organizationId).or(`user_id.eq.${profile.id},id.eq.${profile.id}`).limit(1).maybeSingle(),
       supabase.from('staff_profiles').select('id,user_id,work_ready').eq('organization_id', profile.organizationId).eq('work_ready', true),
       supabase.from('shift_swaps').select('id,original_shift_id,status').eq('requested_by', profile.id).eq('status', 'pending'),
+      supabase.from('on_call_periods').select('id,period_type,starts_at,ends_at,flat_rate,status,notes').eq('officer_user_id', profile.id).eq('status', 'pending').gte('ends_at', new Date().toISOString()).order('starts_at').limit(20),
     ]);
     setPendingSwaps((swapResponse.data as PendingSwap[]) ?? []);
     const candidateRows = Array.isArray(officerResponse.data) ? officerResponse.data as Array<{ id: string; user_id: string | null; work_ready: boolean }> : [];
@@ -133,6 +142,7 @@ const OfficerSchedulePage: React.FC = () => {
     const userLabels = new Map(((userResponse.data as Array<{ id: string; display_name: string | null; email: string | null }> | null) ?? []).map((user) => [user.id, user.display_name || user.email || user.id]));
     setSwapOfficers(candidateRows.filter((row) => row.user_id && row.user_id !== profile.id).map((row) => ({ id: row.id, label: userLabels.get(row.user_id as string) ?? row.id })));
     setAssigned((shiftResponse.data as AssignedShift[]) ?? []);
+    setOnCallPeriods((onCallResponse.data as OnCallPeriod[]) ?? []);
     const activeShift = ((shiftResponse.data as AssignedShift[]) ?? []).find((shift) => shift.status === 'in_progress');
     if (activeShift) {
       const [entitlementResponse, breakResponse] = await Promise.all([
@@ -146,17 +156,21 @@ const OfficerSchedulePage: React.FC = () => {
     const staffId = (staffResponse.data as { id: string } | null)?.id;
     let slotError: { message: string } | null = null;
     if (staffId) {
-      const slotResponse = await supabase.from('roster_slots').select('id, work_unit_id, scheduled_start, scheduled_end, status, linked_shift_id, notes').eq('staff_id', staffId).gte('scheduled_end', new Date().toISOString()).neq('status', 'cancelled').order('scheduled_start').limit(40);
+      const [slotResponse, overtimeResponse] = await Promise.all([
+        supabase.from('roster_slots').select('id, work_unit_id, scheduled_start, scheduled_end, status, linked_shift_id, notes').eq('staff_id', staffId).gte('scheduled_end', new Date().toISOString()).neq('status', 'cancelled').order('scheduled_start').limit(40),
+        supabase.from('overtime_offers').select('id,roster_slot_id,seniority_position,status,expires_at').eq('staff_id', staffId).eq('status', 'offered').gte('expires_at', new Date().toISOString()).order('expires_at').limit(20),
+      ]);
       const rows = (slotResponse.data as RosterSlot[]) ?? [];
       setSlots(rows);
-      slotError = slotResponse.error;
+      setOvertimeOffers((overtimeResponse.data as OvertimeOffer[]) ?? []);
+      slotError = slotResponse.error ?? overtimeResponse.error;
       const ids = Array.from(new Set(rows.map((slot) => slot.work_unit_id)));
       if (ids.length) {
         const unitsResponse = await supabase.from('roster_work_units').select('id, name, work_unit_type, service_type').in('id', ids);
         setWorkUnits((unitsResponse.data as WorkUnit[]) ?? []);
         slotError = slotError ?? unitsResponse.error;
       } else setWorkUnits([]);
-    } else { setSlots([]); setWorkUnits([]); }
+    } else { setSlots([]); setWorkUnits([]); setOvertimeOffers([]); }
     setCoverage(((coverageResponse.data as Array<Omit<CoverageRequest, 'site'> & { site: { name: string } | Array<{ name: string }> | null }>) ?? []).map((request) => ({
       ...request,
       site: Array.isArray(request.site) ? request.site[0] ?? null : request.site,
@@ -165,6 +179,7 @@ const OfficerSchedulePage: React.FC = () => {
       ['assigned shifts', shiftResponse.error],
       ['open coverage', coverageResponse.error],
       ['your roster profile', staffResponse.error],
+      ['on-call assignments', onCallResponse.error],
       ['roster slots', slotError],
     ]);
     if (failure) setError(failure);
@@ -248,6 +263,31 @@ const OfficerSchedulePage: React.FC = () => {
     setBreakSaving(false);
   };
 
+  const respondToAdditionalWork = async (event: React.FormEvent) => {
+    event.preventDefault();
+    if (!workResponse) return;
+    setClaiming(true);
+    setError(null);
+    setNotice(null);
+    const args = {
+      p_expected_status: workResponse.expectedStatus,
+      p_response: workResponse.response,
+      p_decline_reason: workResponse.response === 'declined' ? workDeclineReason.trim() : null,
+    };
+    const { data, error: responseError } = workResponse.kind === 'on_call'
+      ? await supabase.rpc('respond_to_on_call_period', { ...args, p_period_id: workResponse.id })
+      : await supabase.rpc('respond_to_overtime_offer', { ...args, p_offer_id: workResponse.id });
+    if (responseError || !data) {
+      setError(responseError?.message ?? 'Your response receipt was not confirmed.');
+    } else {
+      setNotice(`${workResponse.title} ${workResponse.response === 'accepted' ? 'accepted' : 'declined with your reason recorded'}.`);
+      setWorkResponse(null);
+      setWorkDeclineReason('');
+      await loadSchedule();
+    }
+    setClaiming(false);
+  };
+
   const currentPosition = () => new Promise<{ lat: number | null; lng: number | null }>((resolve) => {
     if (!navigator.geolocation) { resolve({ lat: null, lng: null }); return; }
     navigator.geolocation.getCurrentPosition((position) => resolve({ lat: position.coords.latitude, lng: position.coords.longitude }), () => resolve({ lat: null, lng: null }), { enableHighAccuracy: true, timeout: 5000, maximumAge: 30000 });
@@ -288,6 +328,8 @@ const OfficerSchedulePage: React.FC = () => {
       {notice && <div className="officer-schedule-message is-success" role="status"><CheckCircle2 size={17} /><span>{notice}</span><button type="button" onClick={() => setNotice(null)} title="Dismiss"><X size={16} /></button></div>}
       {responseReceipt && <section className="officer-schedule-receipt" aria-label="Roster response recorded"><div><span>Roster response recorded</span><strong>{responseReceipt.slotStatus.replaceAll('_',' ')}</strong><small>Roster slot {responseReceipt.slotId.slice(0,8)}{responseReceipt.shiftId ? ` · field shift ${responseReceipt.shiftId.slice(0,8)} ${responseReceipt.shiftStatus?.replaceAll('_',' ') ?? ''}` : ' · internal work, no field shift'}</small></div><button type="button" onClick={() => setResponseReceipt(null)} title="Dismiss receipt"><X size={16}/></button></section>}
 
+      {(onCallPeriods.length > 0 || overtimeOffers.length > 0) && <section className="officer-additional-work" aria-labelledby="additional-work-title"><div><span>Response required</span><h2 id="additional-work-title">On-call and overtime offers</h2><p>Accept only work you can cover. Declines require a reason so the roster team can safely offer it elsewhere.</p></div>{onCallPeriods.map((period) => <article key={period.id}><div><strong>{period.period_type.replaceAll('_', ' ')} on-call</strong><small>{formatDate(period.starts_at)}, {formatTime(period.starts_at)} - {formatDate(period.ends_at)}, {formatTime(period.ends_at)}{period.flat_rate != null ? ` · $${Number(period.flat_rate).toFixed(2)} flat rate` : ''}{period.notes ? ` · ${period.notes}` : ''}</small></div><div><button type="button" onClick={() => setWorkResponse({ kind: 'on_call', id: period.id, expectedStatus: period.status, response: 'declined', title: 'On-call period' })}>Decline</button><button type="button" onClick={() => setWorkResponse({ kind: 'on_call', id: period.id, expectedStatus: period.status, response: 'accepted', title: 'On-call period' })}>Accept</button></div></article>)}{overtimeOffers.map((offer) => { const slot = slots.find((item) => item.id === offer.roster_slot_id); const unit = workUnits.find((item) => item.id === slot?.work_unit_id); return <article key={offer.id}><div><strong>Overtime offer{unit ? ` · ${unit.name}` : ''}</strong><small>{slot ? `${formatDate(slot.scheduled_start)}, ${formatTime(slot.scheduled_start)} - ${formatTime(slot.scheduled_end)} · ` : ''}Seniority position {offer.seniority_position} · respond before {formatTime(offer.expires_at)}</small></div><div><button type="button" onClick={() => setWorkResponse({ kind: 'overtime', id: offer.id, expectedStatus: offer.status, response: 'declined', title: 'Overtime offer' })}>Decline</button><button type="button" onClick={() => setWorkResponse({ kind: 'overtime', id: offer.id, expectedStatus: offer.status, response: 'accepted', title: 'Overtime offer' })}>Accept</button></div></article>; })}</section>}
+
       <section className="officer-schedule-next"><div><span>{nextShiftHeading}</span><strong>{nextShift ? formatDate(nextShift.scheduled_start) : 'No confirmed shift'}</strong><small>{nextShift ? `${formatTime(nextShift.scheduled_start)} - ${formatTime(nextShift.scheduled_end)} · ${nextAssignmentLabel?.replaceAll('_', ' ')}` : 'Open shifts you can pick up are listed below.'}</small></div><CalendarDays size={24} /></section>
 
       <div className="officer-schedule-tabs" role="tablist" aria-label="Schedule views"><button type="button" role="tab" aria-selected={view === 'assigned'} className={view === 'assigned' ? 'is-active' : ''} onClick={() => setView('assigned')}>Assigned <span>{assigned.length + workforceSlots.length}</span></button><button type="button" role="tab" aria-selected={view === 'coverage'} className={view === 'coverage' ? 'is-active' : ''} onClick={() => setView('coverage')}>Open coverage <span>{coverage.length}</span></button></div>
@@ -299,6 +341,7 @@ const OfficerSchedulePage: React.FC = () => {
         </div>
       ) : coverage.length === 0 ? <div className="officer-schedule-empty"><ShieldCheck size={23} />No open coverage right now</div> : <div className="officer-schedule-list">{coverage.map((request) => <article className={`officer-coverage urgency-${request.urgency}`} key={request.id}><div className="officer-schedule-date"><strong>{formatDate(`${request.shift_date}T00:00:00`)}</strong><span>{request.start_time.slice(0, 5)} - {request.end_time.slice(0, 5)}</span></div><div><strong>{request.site?.name ?? 'Location to be confirmed'}</strong><small><Users size={13} /> {request.required_staff_count} needed{request.notes ? ` · ${request.notes}` : ''}</small></div><span>{request.urgency}</span><button type="button" onClick={() => setSelectedCoverage(request)}>Review claim</button></article>)}</div>}
 
+      {workResponse && <div className="officer-schedule-dialog-backdrop"><form className="officer-schedule-dialog" role="dialog" aria-modal="true" aria-labelledby="additional-work-response-title" onSubmit={respondToAdditionalWork}><header><div><span>Additional work</span><h2 id="additional-work-response-title">{workResponse.response === 'accepted' ? `Accept ${workResponse.title.toLowerCase()}?` : `Decline ${workResponse.title.toLowerCase()}?`}</h2></div><button type="button" onClick={() => { setWorkResponse(null); setWorkDeclineReason(''); }} title="Close"><X size={18}/></button></header><p>{workResponse.response === 'accepted' ? 'This confirms the assignment to the roster team. Check the dates and availability before continuing.' : 'Tell the roster team why you cannot cover this work so they can make a safe replacement decision.'}</p>{workResponse.response === 'declined' && <label><span>Decline reason</span><textarea required rows={4} value={workDeclineReason} onChange={(event) => setWorkDeclineReason(event.target.value)} /></label>}<div className="officer-schedule-dialog-actions"><button type="button" onClick={() => { setWorkResponse(null); setWorkDeclineReason(''); }}>Back</button><button type="submit" disabled={claiming || (workResponse.response === 'declined' && !workDeclineReason.trim())}>{claiming ? 'Saving...' : workResponse.response === 'accepted' ? 'Confirm acceptance' : 'Confirm decline'}</button></div></form></div>}
       {selectedCoverage && <div className="officer-schedule-dialog-backdrop"><div className="officer-schedule-dialog" role="dialog" aria-modal="true" aria-labelledby="coverage-claim-title"><header><div><span>Coverage commitment</span><h2 id="coverage-claim-title">Claim this shift?</h2></div><button type="button" onClick={() => setSelectedCoverage(null)} title="Close"><X size={18} /></button></header><dl><div><dt>Date</dt><dd>{formatDate(`${selectedCoverage.shift_date}T00:00:00`)}</dd></div><div><dt>Time</dt><dd>{selectedCoverage.start_time.slice(0, 5)} - {selectedCoverage.end_time.slice(0, 5)}</dd></div><div><dt>Location</dt><dd><MapPin size={14} />{selectedCoverage.site?.name ?? 'To be confirmed'}</dd></div><div><dt>Urgency</dt><dd>{selectedCoverage.urgency}</dd></div></dl>{selectedCoverage.notes && <p>{selectedCoverage.notes}</p>}<div className="officer-schedule-dialog-actions"><button type="button" onClick={() => setSelectedCoverage(null)}>Cancel</button><button type="button" onClick={() => void confirmClaim()} disabled={claiming}>{claiming ? <><RefreshCw size={16} className="is-spinning" />Confirming</> : <><CheckCircle2 size={16} />Confirm claim</>}</button></div></div></div>}
       {endingShift && <EndShiftDialog shiftId={endingShift.id} shiftStatus={endingShift.status} serviceType={endingShift.service_type} onClose={() => setEndingShift(null)} onNavigate={(destination) => endShiftDestination(destination, endingShift)} onEnded={async ({ completed_at }) => { setEndingShift(null); setNotice(`Shift ended at ${new Date(completed_at).toLocaleTimeString('en-NZ', { hour: '2-digit', minute: '2-digit' })}. Record your worked time on the timesheet when you are ready.`); await loadSchedule(); }} />}
       {startAdvisory && <div className="officer-schedule-dialog-backdrop"><div className="officer-schedule-dialog" role="dialog" aria-modal="true" aria-labelledby="start-advisory-title"><header><div><span>Before you start</span><h2 id="start-advisory-title">{startAdvisory.stillOn ? "You're still on another shift" : startAdvisory.position.status === 'no_gps' ? 'No GPS position' : `You're not at ${startAdvisory.position.place_name ?? 'the shift location'}`}</h2></div><button type="button" onClick={() => setStartAdvisory(null)} title="Close"><X size={18} /></button></header>{startAdvisory.stillOn && <p>Your {startAdvisory.stillOn.service_type.replaceAll('_', ' ')} shift ({formatDate(startAdvisory.stillOn.scheduled_start)}, {formatTime(startAdvisory.stillOn.scheduled_start)} - {formatTime(startAdvisory.stillOn.scheduled_end)}) is still in progress. You can only be on one shift at a time, so starting this one ends it now. Anything still open on it — stops, tasks, the debrief — goes on record as left open. If you meant to finish it properly, choose Not yet and use End shift.</p>}{(startAdvisory.position.status === 'off_site' || startAdvisory.position.status === 'no_gps') && <p>{startAdvisory.position.status === 'no_gps' ? 'Your location could not be read, so the start will be recorded without a position. Turn location on if you can, or start anyway and say where you are.' : `You are ${describeDistance(startAdvisory.position.distance_m)} from ${startAdvisory.position.place_name ?? 'the shift location'}${startAdvisory.position.route_shift ? ' (the nearest stop on this run)' : ''}. You can still start; the start is recorded as away from site and your supervisor can see that. If there is a reason, say so.`}</p>}{(startAdvisory.position.status === 'off_site' || startAdvisory.position.status === 'no_gps') && <label><span>Reason (optional)</span><textarea rows={3} value={startAdvisory.reason} onChange={(event) => setStartAdvisory({ ...startAdvisory, reason: event.target.value })} placeholder="e.g. Starting from the depot, travelling to site now" /></label>}<div className="officer-schedule-dialog-actions"><button type="button" onClick={() => setStartAdvisory(null)}>Not yet</button><button type="button" disabled={startingShiftId === startAdvisory.shift.id} onClick={() => { setStartingShiftId(startAdvisory.shift.id); void submitStart(startAdvisory.shift, startAdvisory.coords, startAdvisory.reason.trim() || null).finally(() => setStartingShiftId(null)); }}>{startAdvisory.stillOn ? 'End it and start this one' : 'Start anyway'}</button></div></div></div>}
