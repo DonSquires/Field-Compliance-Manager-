@@ -294,7 +294,17 @@ async function executeBuilderAction({ snapshot, action, supabase, gateway, conte
     if (error) throw new Error('Backend-only job could not advance');
     return { success: true, job: data };
   }
-  if (action.type === 'run_product_analysis') return run.product({ ...common, repositoryContext: context.repositoryContext, constraints: context.constraints, requestedFromUsers: context.requestedFromUsers });
+  if (action.type === 'run_product_analysis') {
+    const priorFailure = action.step.status === 'failed' && action.step.error
+      ? `Correct the previous Product Analyst validation failure without weakening repository grounding: ${String(action.step.error).replace(/\s+/g, ' ').slice(0, 1200)}`
+      : null;
+    return run.product({
+      ...common,
+      repositoryContext: context.repositoryContext,
+      constraints: [...(Array.isArray(context.constraints) ? context.constraints : []), ...(priorFailure ? [priorFailure] : [])],
+      requestedFromUsers: context.requestedFromUsers
+    });
+  }
   if (action.type === 'run_ux_design') return run.ux({ ...common, specificationArtifact: artifactsFor(snapshot, 'product_analysis', 'product_specification').at(-1), repositoryContext: context.designContext });
   if (action.type === 'run_frontend') {
     const agentic = AGENTIC_ENABLED && context.workspaceRoot && !handlers.frontend;

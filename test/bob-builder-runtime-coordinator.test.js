@@ -98,6 +98,28 @@ test('runtime advances exactly one planned action', async () => {
   assert.deepEqual(calls, ['product_analysis']);
 });
 
+test('a Product Analyst retry receives its bounded validation failure as a correction constraint', async () => {
+  const state = snapshot('analysis_pending');
+  const product = state.steps.find(step => step.step_id === 'product_analysis');
+  product.status = 'failed';
+  product.retryable = true;
+  product.error = `data_model_proposal invented bob_job_run ${'x'.repeat(2000)}`;
+  let captured;
+
+  const result = await advanceBuilderJob({
+    supabase: {}, gateway: {}, jobId: 'job-1',
+    context: { repositoryContext: {}, constraints: ['Preserve current contracts'] },
+    loadSnapshot: async () => state,
+    handlers: { product: async input => { captured = input; return { ok: true }; } }
+  });
+
+  assert.equal(result.advanced, true);
+  assert.equal(captured.constraints[0], 'Preserve current contracts');
+  assert.match(captured.constraints[1], /^Correct the previous Product Analyst validation failure/);
+  assert.match(captured.constraints[1], /bob_job_run/);
+  assert.ok(captured.constraints[1].length <= 1300, 'prior failure is bounded before entering the model prompt');
+});
+
 test('agentic runtime reloads after each action and stops at a human gate', async () => {
   const states = [snapshot('intake'), snapshot('specification_ready')];
   let index = 0;

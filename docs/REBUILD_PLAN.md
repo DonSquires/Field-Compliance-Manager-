@@ -244,6 +244,12 @@ when a changed shared Builder module had no Edge Function importers, an empty
 `grep -v` inside command substitution returned status 1 and `set -e` terminated
 the lane before it wrote a plan. Empty importer sets are valid for
 control-plane-only modules; the merge now uses a zero-safe empty-line filter.
+The next live Product Analyst run proved the semantic gate by rejecting
+`BobPanel` as a proposed data entity, but also exposed that service-driven
+retries repeated the same prompt without the validation reason. Retry actions
+now append the bounded prior failure as an explicit correction constraint, so
+Bob can self-correct without weakening the gate or relying on a human to rewrite
+the brief.
 
 Natural-language Builder acceptance hardening 2026-10-13: Bob's deterministic
 post-evidence Builder fallback now recognises ordinary owner language such as
