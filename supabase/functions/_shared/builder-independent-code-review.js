@@ -1,3 +1,4 @@
+const crypto = require('node:crypto');
 const {
   buildModelRunRequest,
   executeBuilderModelRun
@@ -5,7 +6,8 @@ const {
 const { downloadVerifiedArtifact } = require('../../../builder-frontend-handoff');
 const { unwrapPatchArtifact } = require('./builder-patch-envelope');
 
-const INDEPENDENT_CODE_REVIEW_PROMPT_VERSION = 'independent-code-review-v3';
+const INDEPENDENT_CODE_REVIEW_PROMPT_VERSION = 'independent-code-review-v4';
+const MAX_REVIEW_EVIDENCE_CHARS = 48_000;
 
 // The exact shape the validator accepts; json_object mode does not enforce `required`, and the
 // first live reviewer (gpt-5.4-mini, job 3a4a2d06) omitted the two list fields and failed the job.
@@ -13,6 +15,37 @@ const REVIEW_OUTPUT_CONTRACT = 'Return exactly this JSON object and nothing else
 
 function artifactList(value) {
   return Array.isArray(value) ? value : value ? [value] : [];
+}
+
+function diagnosticTail(value, limit = 600) {
+  const normalized = String(value ?? '')
+    .replace(/\u001b\[[0-9;]*m/g, '')
+    .replace(/\r/g, '')
+    .trim();
+  if (!normalized) return null;
+  return normalized.length <= limit ? normalized : `...${normalized.slice(-limit)}`;
+}
+
+function summarizeBuildLog(bytes) {
+  const parsed = JSON.parse(bytes.toString('utf8'));
+  const commands = Array.isArray(parsed?.commands) ? parsed.commands : [];
+  return {
+    artifact_sha256: crypto.createHash('sha256').update(bytes).digest('hex'),
+    artifact_bytes: bytes.length,
+    succeeded: parsed?.succeeded === true,
+    baseline_failure: parsed?.baseline_failure === true,
+    baseline_reason: diagnosticTail(parsed?.baseline_reason, 800),
+    commands: commands.slice(0, 30).map(command => ({
+      command: String(command?.command ?? '').slice(0, 1000),
+      exit_code: Number.isInteger(command?.status) ? command.status : null,
+      error: diagnosticTail(command?.error, 600),
+      stdout_tail: diagnosticTail(command?.stdout),
+      stderr_tail: diagnosticTail(command?.stderr)
+    })),
+    e2e_selection: parsed?.e2e_selection && typeof parsed.e2e_selection === 'object'
+      ? parsed.e2e_selection
+      : null
+  };
 }
 
 // Live job 79b4c08f (2026-09-27): the in-house 7B reviewer "passed" a patch whose lookup read a
@@ -123,7 +156,7 @@ async function loadCodeReviewEvidence({ supabase, job, artifacts }) {
     patches: unwrapped.map(item => item.patch),
     author_summaries: unwrapped.map(item => (item.envelope && typeof item.envelope.summary === 'string' ? item.envelope.summary.slice(0, 4000) : null)),
     manifests: manifests.map(manifest => JSON.parse(manifest.bytes.toString('utf8'))),
-    buildLogs: buildLogs.map(log => JSON.parse(log.bytes.toString('utf8'))),
+    buildLogs: buildLogs.map(log => summarizeBuildLog(log.bytes)),
     security: JSON.parse(security.bytes.toString('utf8')),
     ...(previousReview ? { previous_review: previousReview } : {})
   };
@@ -236,6 +269,10 @@ async function runIndependentCodeReview({
     inputArtifactIds: artifactIds,
     outputSchema: { type: 'object', required: ['verdict', 'summary', 'findings', 'test_gaps', 'residual_risks'] }
   });
+  if (modelRequest.request.user_prompt.length > MAX_REVIEW_EVIDENCE_CHARS) {
+    await abortReview(supabase, job.id, step.id, 'Independent review evidence exceeds its bounded prompt budget');
+    return { ok: false, status: 413, error: 'independent review evidence exceeds its bounded prompt budget', review: null };
+  }
   const avoidIdentities = await loadAuthors(supabase, job.id);
   const validateOutput = (content) => parseIndependentCodeReview(content, { authorSummaries: evidence.author_summaries, addedLines: addedLineCount(evidence.patches) });
   let result = await executeModelRun({ supabase, gateway, modelRequest, validateOutput, avoidIdentities });
@@ -272,7 +309,9 @@ async function runIndependentCodeReview({
 
 module.exports = {
   INDEPENDENT_CODE_REVIEW_PROMPT_VERSION,
+  MAX_REVIEW_EVIDENCE_CHARS,
   artifactList,
+  summarizeBuildLog,
   parseIndependentCodeReview,
   loadPreviousReview,
   loadCodeReviewEvidence,

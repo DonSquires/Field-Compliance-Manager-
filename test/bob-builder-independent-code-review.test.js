@@ -2,8 +2,10 @@ const assert = require('node:assert/strict');
 const test = require('node:test');
 
 const {
+  MAX_REVIEW_EVIDENCE_CHARS,
   parseIndependentCodeReview,
-  runIndependentCodeReview
+  runIndependentCodeReview,
+  summarizeBuildLog
 } = require('../supabase/functions/_shared/builder-independent-code-review');
 
 function report() {
@@ -25,6 +27,32 @@ test('independent reviewer parser requires structured severity findings', () => 
   assert.deepEqual(parseIndependentCodeReview(JSON.stringify(minimal)), { ...minimal, test_gaps: [], residual_risks: [] });
   assert.throws(() => parseIndependentCodeReview(JSON.stringify({ ...report(), test_gaps: 'none' })), /test_gaps must be an array/);
   assert.throws(() => parseIndependentCodeReview(JSON.stringify({ ...report(), findings: undefined })), /findings must be an array/);
+});
+
+test('independent reviewer replaces verbose verification output with bounded digest-bound receipts', () => {
+  const bytes = Buffer.from(JSON.stringify({
+    succeeded: true,
+    commands: [{
+      command: 'npm run test --prefix apps/web',
+      status: 0,
+      stdout: `start\n${'x'.repeat(20_000)}\n42 tests passed`,
+      stderr: `warning\n${'y'.repeat(20_000)}\nnon-failing diagnostic`,
+      error: null
+    }],
+    baseline_failure: false,
+    e2e_selection: { targeted: ['e2e/builder-control-room.spec.ts'], project: 'desktop-chromium' }
+  }));
+
+  const summary = summarizeBuildLog(bytes);
+  assert.equal(summary.succeeded, true);
+  assert.equal(summary.artifact_bytes, bytes.length);
+  assert.match(summary.artifact_sha256, /^[a-f0-9]{64}$/);
+  assert.equal(summary.commands[0].exit_code, 0);
+  assert.ok(summary.commands[0].stdout_tail.length <= 603);
+  assert.match(summary.commands[0].stdout_tail, /42 tests passed$/);
+  assert.ok(summary.commands[0].stderr_tail.length <= 603);
+  assert.match(summary.commands[0].stderr_tail, /non-failing diagnostic$/);
+  assert.ok(JSON.stringify(summary).length < 3_000);
 });
 
 test('a review that restates the author or reports nothing on a substantive patch is rejected (live job 79b4c08f: 7B reviewer passed a dead data path)', async () => {
@@ -121,12 +149,32 @@ test('independent reviewer states the exact output contract and repairs once on 
     completeReview: async () => ({ success: true, job: { status: 'security_review', code_review_status: 'passed' } }),
     abortReview: async () => { aborted = true; return { success: true }; }
   });
+
   assert.equal(requests.length, 2);
   assert.match(requests[0].request.system_prompt, /"test_gaps": \[string\]/);
   assert.match(requests[1].request.system_prompt, /previous reply was rejected: model output failed validation: test_gaps must be an array/);
   assert.equal(requests[1].idempotency_key, `${requests[0].idempotency_key}::repair`);
   assert.equal(aborted, false);
   assert.equal(result.job.code_review_status, 'passed');
+});
+
+test('independent reviewer aborts before dispatch when evidence still exceeds its hard prompt budget', async () => {
+  let dispatched = false;
+  let abortReason = null;
+  const result = await runIndependentCodeReview({
+    supabase: {}, gateway: {},
+    job: { id: 'job-oversize', organization_id: 'org-1', target_sha: 'sha-1', code_review_mode: 'independent_ai' },
+    step: { id: 'review-step', step_id: 'code_review', builder_mode: 'code_reviewer' },
+    artifacts: { patch: { id: 'patch-1' }, manifest: { id: 'manifest-1' }, buildLogs: { id: 'logs-1' }, security: { id: 'security-1' } },
+    reviewerModelName: 'reviewer-model',
+    loadEvidence: async () => ({ patches: ['x'.repeat(MAX_REVIEW_EVIDENCE_CHARS + 1)], author_summaries: [] }),
+    startReview: async () => ({ success: true }),
+    executeModelRun: async () => { dispatched = true; return {}; },
+    abortReview: async (_client, _job, _step, reason) => { abortReason = reason; return { success: true }; }
+  });
+  assert.equal(result.status, 413);
+  assert.equal(dispatched, false);
+  assert.match(abortReason, /bounded prompt budget/);
 });
 
 test('independent reviewer uses a distinct configured model and cannot approve release', async () => {

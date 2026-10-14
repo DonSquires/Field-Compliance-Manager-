@@ -407,6 +407,18 @@ the receipt on success or failure. The stale-run threshold is also bounded
 below by the configured wall budget plus one full model turn and recovery
 headroom, so valid long work cannot be mistaken for an abandoned lease.
 
+Builder reviewer context-fit acceptance 2026-10-15: resumed redesign job
+`6573c083-6d6f-4245-b6b3-95b0d6c294ba` completed frontend implementation,
+isolated lint/build/tests, and the independent static security review, then
+failed independent code review because its evidence packet copied a 117 KB
+verification log into the 24,576-token GPU context. `independent-code-review-v4`
+keeps the exact verified patches, manifests, and security report, but converts
+each build log to a digest-bound receipt containing its SHA-256, byte count,
+commands, exit codes, bounded diagnostic tails, baseline state, and E2E
+selection. A hard 48,000-character evidence limit aborts before provider
+dispatch if the remaining packet still cannot fit; review evidence is compacted
+rather than weakening the independent review or silently truncating the patch.
+
 Runtime acceptance 2026-10-11: the laptop vision watcher now writes an
 independent liveness heartbeat and its Docker health check terminates only a
 stale watcher process so `restart: unless-stopped` can recover it. Acceptance
