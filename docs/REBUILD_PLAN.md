@@ -427,7 +427,7 @@ small; the continuation removed an unused TSX stub and preserved those five
 lines. This was a truthful and technically valid patch against a weak approved
 specification, not the requested professional workspace redesign. Autopilot was
 parked before workspace creation, publication, merge, or deployment.
-`product-analyst-v8` now emits machine-readable delivery requirements with
+`product-analyst-v8` introduced machine-readable delivery requirements with
 observable outcomes, evidence, and repository-grounded source scope. Broad
 UI/UX redesigns fail specification validation unless at least five delivery
 requirements and five acceptance criteria cover workspace hierarchy,
@@ -438,6 +438,12 @@ then refuses handoff until every approved delivery requirement has completed
 evidence naming a changed file from that requirement's own source scope. Passing
 tests and reviews remain necessary, but can no longer substitute for delivering
 the approved observable outcomes.
+Live retry acceptance then exposed that repository-context normalization could
+slice an exact owner-named source file from a repository inventory before the
+relevance fitter ran, causing a grounded delivery scope to be rejected as
+unknown. `product-analyst-v9` accepts a syntactically safe exact source path
+when it is present either in fitted repository evidence or byte-for-byte in the
+owner's task; unnamed paths still fail closed.
 
 Runtime acceptance 2026-10-11: the laptop vision watcher now writes an
 independent liveness heartbeat and its Docker health check terminates only a

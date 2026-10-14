@@ -184,6 +184,30 @@ test('Product Analyst rejects invented backend terrain and product integrations 
   );
 });
 
+test('Product Analyst accepts exact source paths named by the owner brief when fitted context omits them', () => {
+  const specification = {
+    ...validSpecification(),
+    delivery_requirements: [{
+      id: 'DR-1',
+      outcome: 'Builder receipts remain visible',
+      evidence: 'Component test and human review',
+      source_scope: ['apps/web/src/pages/BuilderControlRoomPage.tsx']
+    }]
+  };
+  const repositoryContext = {
+    relevant_files: ['apps/web/src/components/BobPanel.tsx'],
+    build_map: { tracked_files: ['apps/web/src/components/BobPanel.tsx'], schema: {} }
+  };
+  assert.doesNotThrow(() => validateRepositoryGrounding(specification, {
+    repositoryContext,
+    taskDescription: 'Required source scope: apps/web/src/pages/BuilderControlRoomPage.tsx'
+  }));
+  assert.throws(() => validateRepositoryGrounding(specification, {
+    repositoryContext,
+    taskDescription: 'Redesign the Builder workspace'
+  }), /source_scope was not supplied by repository evidence/);
+});
+
 test('Product Analyst parser rejects malformed or incomplete output', () => {
   assert.throws(() => parseProductSpecification('not json'), /valid JSON/);
   assert.throws(() => parseProductSpecification(JSON.stringify({ product_brief: {} })), /must be an array/);
