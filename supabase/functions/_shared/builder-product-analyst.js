@@ -4,7 +4,7 @@ const {
 } = require('./builder-model-adapter');
 const { fitRepositoryContext } = require('./builder-repository-context');
 
-const PRODUCT_ANALYST_PROMPT_VERSION = 'product-analyst-v5';
+const PRODUCT_ANALYST_PROMPT_VERSION = 'product-analyst-v6';
 
 const PRODUCT_SPEC_SCHEMA = Object.freeze({
   type: 'object',
@@ -83,6 +83,69 @@ function suppliedResearchUrls(taskDescription) {
     .slice(0, 10);
 }
 
+function specificationStrings(value, path = [], output = []) {
+  if (typeof value === 'string') {
+    output.push({ path: path.join('.'), value });
+  } else if (Array.isArray(value)) {
+    value.forEach((item, index) => specificationStrings(item, [...path, String(index)], output));
+  } else if (value && typeof value === 'object') {
+    Object.entries(value).forEach(([key, item]) => specificationStrings(item, [...path, key], output));
+  }
+  return output;
+}
+
+function validateRepositoryGrounding(specification, { repositoryContext = {}, taskDescription = '' } = {}) {
+  const context = repositoryContext && typeof repositoryContext === 'object' ? repositoryContext : {};
+  const buildMap = context.build_map && typeof context.build_map === 'object' ? context.build_map : {};
+  const schema = buildMap.schema && typeof buildMap.schema === 'object' ? buildMap.schema : {};
+  const schemaEntities = new Set([
+    ...(Array.isArray(schema.tables) ? schema.tables : []),
+    ...(Array.isArray(schema.views) ? schema.views : []),
+    ...(Array.isArray(schema.functions) ? schema.functions : [])
+  ].filter(value => typeof value === 'string').map(value => value.toLowerCase()));
+  const knownCapabilities = new Set((Array.isArray(context.known_capabilities) ? context.known_capabilities : [])
+    .filter(value => typeof value === 'string')
+    .map(value => value.toLowerCase()));
+  const task = String(taskDescription || '');
+  const taskLower = task.toLowerCase();
+  const forbidsNewBackend = /\bfrontend-only\b|\bdo not invent (?:schema|apis?)\b|\bwithout (?:new|inventing) (?:routes?|apis?|schema)\b/i.test(task);
+  const neutralEntities = new Set(['none', 'no new entity', 'no new entities', 'existing frontend state', 'existing ui state']);
+
+  if (forbidsNewBackend) {
+    for (const proposal of specification.data_model_proposal || []) {
+      const entity = boundedString(proposal?.entity, 300).toLowerCase();
+      if (entity && !neutralEntities.has(entity) && !schemaEntities.has(entity)) {
+        throw new Error(`data_model_proposal contains an entity not supplied by repository schema: ${entity}`);
+      }
+      const relationships = Array.isArray(proposal?.relationships) ? proposal.relationships : [];
+      for (const relationship of relationships) {
+        const invented = String(relationship).match(/\b(?:fk|rpc|table|column|function)_[a-z0-9_]+\b/gi) || [];
+        const unknown = invented.find(identifier => !schemaEntities.has(identifier.toLowerCase()) && !taskLower.includes(identifier.toLowerCase()));
+        if (unknown) throw new Error(`data_model_proposal contains a relationship identifier not supplied by repository evidence: ${unknown}`);
+      }
+    }
+  }
+
+  for (const check of specification.terrain_verification?.atlas_capability_checks || []) {
+    const identifiers = String(check).match(/\b(?:bob|builder)[_-][a-z0-9_-]+\b/gi) || [];
+    const unknown = identifiers.find(identifier => !knownCapabilities.has(identifier.toLowerCase()) && !taskLower.includes(identifier.toLowerCase()));
+    if (unknown) throw new Error(`terrain_verification names an Atlas capability not supplied by repository evidence: ${unknown}`);
+  }
+
+  const inspirationOnly = /\b(?:patterns? only|bounded inspiration|for inspiration)\b/i.test(task)
+    || /\brather than copying\b/i.test(task);
+  if (inspirationOnly) {
+    for (const item of specificationStrings(specification)) {
+      if (item.path.startsWith('research_evidence.')) continue;
+      const claimsIntegration = /\b(?:integrat(?:e|ion)|embed|connect)\b/i.test(item.value);
+      const namesExternalProduct = /\b(?:github copilot|codespaces|visual studio code|vs code|v0|vercel)\b/i.test(item.value);
+      if (claimsIntegration && namesExternalProduct) {
+        throw new Error('product specification turns an inspiration source into an unrequested product integration');
+      }
+    }
+  }
+}
+
 function buildProductAnalystPrompt({ taskDescription, repositoryContext, constraints = [] }) {
   const task = boundedString(taskDescription, 12000);
   if (!task) throw new Error('taskDescription is required');
@@ -103,6 +166,9 @@ function buildProductAnalystPrompt({ taskDescription, repositoryContext, constra
     'Define a responsive, accessible human-glass acceptance route for the affected role, including loading, empty, error, permission, success, and safe-next-action states that apply.',
     'Put every unknown that affects implementation in unresolved_questions.',
     'When research is required, cite only URLs supplied in the task; record the exact observed pattern and how it applies, never invent a source or claim browsing.',
+    'Research products are design evidence only unless the task explicitly requests an integration; never turn inspiration into a dependency, API, or product integration.',
+    'Every proposed data entity, relationship identifier, named Atlas capability, route, API, and integration must exist in the supplied repository evidence or be quoted explicitly by the task.',
+    'For frontend-only work that forbids new schema or APIs, use an existing schema entity or state clearly that no new data entity is proposed.',
     'When supplied_research_urls is non-empty, copy at least the first four exact URLs into research_evidence and provide every required field for each.',
     'Return one JSON object matching the supplied schema, with no markdown fence.'
   ].join(' ');
@@ -155,7 +221,12 @@ function requireArray(specification, key) {
   if (!Array.isArray(specification[key])) throw new Error(`${key} must be an array`);
 }
 
-function parseProductSpecification(content, { requiredResearchUrls = [], researchRequired = false } = {}) {
+function parseProductSpecification(content, {
+  requiredResearchUrls = [],
+  researchRequired = false,
+  repositoryContext = null,
+  taskDescription = ''
+} = {}) {
   if (typeof content !== 'string' || !content.trim()) throw new Error('product specification is empty');
   const normalized = content.trim().replace(/^```(?:json)?\s*/i, '').replace(/\s*```$/, '');
   let specification;
@@ -213,6 +284,7 @@ function parseProductSpecification(content, { requiredResearchUrls = [], researc
       || !Array.isArray(acceptance.required_states) || acceptance.required_states.length === 0) {
     throw new Error('human_acceptance must define role, route, job, steps, visible result, and required states');
   }
+  if (repositoryContext) validateRepositoryGrounding(specification, { repositoryContext, taskDescription });
   return specification;
 }
 
@@ -285,7 +357,12 @@ async function runProductAnalyst({
     supabase,
     gateway,
     modelRequest,
-    validateOutput: (content) => parseProductSpecification(content, { requiredResearchUrls, researchRequired })
+    validateOutput: (content) => parseProductSpecification(content, {
+      requiredResearchUrls,
+      researchRequired,
+      repositoryContext: prompts.context,
+      taskDescription: job.task_description
+    })
   });
   if (!result.ok) {
     await abort(supabase, { jobId: job.id, stepId: step.id, reason: `product analysis: ${result.error || 'model run failed'}` });
@@ -328,6 +405,7 @@ module.exports = {
   normalizeRepositoryContext,
   researchEvidenceRequired,
   suppliedResearchUrls,
+  validateRepositoryGrounding,
   buildProductAnalystPrompt,
   parseProductSpecification,
   startProductAnalysis,

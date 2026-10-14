@@ -6,6 +6,7 @@ const {
   normalizeRepositoryContext,
   researchEvidenceRequired,
   suppliedResearchUrls,
+  validateRepositoryGrounding,
   buildProductAnalystPrompt,
   parseProductSpecification,
   runProductAnalyst
@@ -111,6 +112,63 @@ test('Product Analyst requires supplied provenance for research-driven work', ()
   assert.deepEqual(parseProductSpecification(JSON.stringify(specification), { researchRequired: true, requiredResearchUrls: urls }), specification);
   specification.research_evidence[0].url = 'https://invented.example/source';
   assert.throws(() => parseProductSpecification(JSON.stringify(specification), { researchRequired: true, requiredResearchUrls: urls }), /was not supplied/);
+});
+
+test('Product Analyst rejects invented backend terrain and product integrations in frontend-only redesigns', () => {
+  const specification = {
+    ...validSpecification(),
+    data_model_proposal: [{
+      entity: 'bob_job_run',
+      purpose: 'invented workflow state',
+      relationships: ['fk_to_atlas_schema']
+    }],
+    terrain_verification: {
+      ...validSpecification().terrain_verification,
+      atlas_capability_checks: ['Verify bob-job-plan-create is wired']
+    },
+    functional_requirements: [{
+      id: 'FR-1',
+      requirement: 'Enable pull request review with GitHub Copilot integration',
+      priority: 'must'
+    }]
+  };
+  const repositoryContext = {
+    build_map: {
+      schema: {
+        tables: ['builder_jobs'],
+        views: [],
+        functions: ['builder_create_job_v2']
+      }
+    },
+    known_capabilities: []
+  };
+  const taskDescription = 'Frontend-only redesign. Use GitHub Copilot for bounded inspiration rather than copying it. Do not invent schema or APIs.';
+
+  assert.throws(
+    () => validateRepositoryGrounding(specification, { repositoryContext, taskDescription }),
+    /entity not supplied by repository schema/
+  );
+
+  specification.data_model_proposal = [{
+    entity: 'builder_jobs',
+    purpose: 'display existing job state',
+    relationships: []
+  }];
+  assert.throws(
+    () => validateRepositoryGrounding(specification, { repositoryContext, taskDescription }),
+    /Atlas capability not supplied/
+  );
+
+  specification.terrain_verification.atlas_capability_checks = ['Verify the existing Builder job capability without inventing a name'];
+  assert.throws(
+    () => validateRepositoryGrounding(specification, { repositoryContext, taskDescription }),
+    /unrequested product integration/
+  );
+
+  specification.functional_requirements[0].requirement = 'Use the supplied review pattern to improve the existing Builder receipt hierarchy';
+  assert.doesNotThrow(
+    () => validateRepositoryGrounding(specification, { repositoryContext, taskDescription })
+  );
 });
 
 test('Product Analyst parser rejects malformed or incomplete output', () => {

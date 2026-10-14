@@ -230,6 +230,16 @@ not permit. The three legacy entities are retired together rather than wired
 artificially. Aggregate review, canonical approvals, worker audit records, and
 fixed verification environment remain active.
 
+Product-analysis grounding correction 2026-10-14: a provenance-backed Builder
+redesign correctly cited four supplied primary sources but still passed
+structural validation while inventing a `bob_job_run` entity, fictional FK and
+Atlas capability names, real-time schema editing, and a GitHub Copilot
+integration. The approval gate prevented those claims from reaching
+implementation. Product Analyst v6 now treats research products as evidence
+only unless integration is explicitly requested and validates frontend-only
+data proposals, relationship identifiers, and named Bob/Builder capabilities
+against the supplied repository/schema context before requesting approval.
+
 Natural-language Builder acceptance hardening 2026-10-13: Bob's deterministic
 post-evidence Builder fallback now recognises ordinary owner language such as
 "build me an app", "add a page", "make this workflow work", and "fix the UI",
