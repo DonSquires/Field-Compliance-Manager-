@@ -682,3 +682,8 @@ remains unpopulated.
   functions. Atlas dry-run moved 159 -> 158 bounded gaps: 1 edge function, 102
   RPCs and 55 tables. This is authority cleanup, not successful exercise
   evidence.
+- Authenticated production verification used the dedicated `admin_officer`
+  session after release commit `a8f67b1c` reached `main`. Organization settings
+  loaded without an alert, showed the existing Head Office branch as active,
+  retained Archive, and retained the Add branch form with its module-inheritance
+  explanation. No branch was created or archived for testing.
