@@ -707,3 +707,8 @@ remains unpopulated.
   the regenerated live snapshot reports 817 functions. Atlas dry-run moved
   158 -> 157 bounded gaps: 1 edge function, 101 RPCs and 55 tables. Exercise
   remains unclaimed because this closure removed a duplicate authority.
+- Authenticated production verification used the dedicated `admin_officer`
+  session after release commit `a6df14a0` reached `main`. Organization settings
+  reloaded in the root provider workspace without an alert and retained the
+  enabled Save details action. No profile field was changed merely to
+  manufacture exercise evidence.
