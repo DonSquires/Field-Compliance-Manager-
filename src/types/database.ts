@@ -45714,14 +45714,6 @@ export type Database = {
         }
         Returns: Json
       }
-      submit_noise_assessment: {
-        Args: { p_client_request_id: string; p_payload: Json }
-        Returns: {
-          assessed_at: string
-          assessment_id: string
-          created: boolean
-        }[]
-      }
       submit_officer_field_report: {
         Args: {
           p_address?: string
@@ -45795,21 +45787,6 @@ export type Database = {
           review_status: string
         }[]
       }
-      submit_officer_timesheet: {
-        Args: {
-          p_actual_hours: number
-          p_client_event_id: string
-          p_notes?: string
-          p_overtime_hours?: number
-          p_period_end: string
-          p_period_start: string
-        }
-        Returns: {
-          created: boolean
-          id: string
-          submitted_at: string
-        }[]
-      }
       submit_officer_timesheet_from_work: {
         Args: {
           p_adjustment_hours?: number
@@ -45841,14 +45818,6 @@ export type Database = {
           created: boolean
           id: string
           submitted_at: string
-        }[]
-      }
-      submit_smoke_assessment: {
-        Args: { p_client_request_id: string; p_payload: Json }
-        Returns: {
-          assessed_at: string
-          assessment_id: string
-          created: boolean
         }[]
       }
       submit_smoke_assessment_receipt: {

@@ -324,6 +324,18 @@ function collectSqlFunctionEdges(rootDir) {
   ];
   const latestFunctions = new Map();
   const functionPattern = /CREATE(?:\s+OR\s+REPLACE)?\s+FUNCTION\s+(?:(?:"?(public|ops)"?)\.)?"?([a-zA-Z_][a-zA-Z0-9_]*)"?[\s\S]*?AS\s+\$([a-zA-Z0-9_]*)\$([\s\S]*?)\$\3\$\s*;/gi;
+  // The live snapshot only dumps the public schema, so ops-schema scheduler
+  // functions exist nowhere but their migrations. Collect those first and only
+  // when ops-qualified: an unqualified sweep of every migration would resurrect
+  // public functions that have since been dropped, and schema.sql must stay the
+  // authority for anything it does contain.
+  for (const file of walkFiles(rootDir, 'supabase/migrations').filter(file => file.endsWith('.sql')).sort()) {
+    const content = fs.readFileSync(path.join(rootDir, file), 'utf8');
+    for (const match of content.matchAll(functionPattern)) {
+      if (match[1]?.toLowerCase() !== 'ops') continue;
+      latestFunctions.set(match[2], { body: match[4], file });
+    }
+  }
   for (const file of files) {
     const content = fs.existsSync(path.join(rootDir, file)) ? fs.readFileSync(path.join(rootDir, file), 'utf8') : '';
     for (const match of content.matchAll(functionPattern)) {

@@ -5,7 +5,7 @@ Status: implemented; photo-perception adapter verified 2026-10-11
 
 ## Decision
 
-Implement biosecurity assessment capture as one authenticated, idempotent edge-function command named `submit-biosecurity-assessment`. The command owns admission, evidence custody, database receipt, and audit. Web and mobile call this command; neither writes `biosecurity_assessments` or calls `capture-environmental-evidence` directly.
+Implement biosecurity assessment capture as one authenticated, idempotent edge-function command named `submit-biosecurity-assessment`. The command owns admission, evidence custody, database receipt, and audit. Web and mobile call this command; neither writes `biosecurity_assessments` directly. (The former `capture-environmental-evidence` command was retired once this one took over evidence custody.)
 
 A server-side command is the selected boundary because a SQL RPC cannot atomically control object storage, watermarking, and image inference. The command uses a database receipt transaction for the authoritative record and a deterministic evidence path based on the organization and client request ID. It returns success only after the assessment, its evidence record, and audit event have committed.
 

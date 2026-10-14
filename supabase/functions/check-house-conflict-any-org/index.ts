@@ -42,7 +42,7 @@
  *
  * WRITES NOTHING. No bob_agentic_actions, no executor chain, no migration.
  *
- * Mirrors the auth + service-role SHAPE of bob-propose-place-org-from-parcel
+ * Uses the standard admin-read auth SHAPE for this repository
  * (JWT via anon-key caller client → auth.getUser(); read user_profiles.role;
  * admin client uses SUPABASE_SERVICE_ROLE_KEY; CORS/preflight/JSON helpers).
  */ import { serve } from 'https://deno.land/std@0.168.0/http/server.ts';

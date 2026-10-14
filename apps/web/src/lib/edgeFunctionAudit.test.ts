@@ -36,7 +36,6 @@ const generateParkingNoticeSource = readFileSync(
 );
 const photoEvidenceFunctionSources = [
   processOfficerScanSource,
-  readFileSync(resolve(process.cwd(), '../../supabase/functions/capture-environmental-evidence/index.ts'), 'utf8'),
   readFileSync(resolve(process.cwd(), '../../supabase/functions/submit-biosecurity-assessment/index.ts'), 'utf8'),
   readFileSync(resolve(process.cwd(), '../../supabase/functions/submit-smoke-assessment/index.ts'), 'utf8'),
 ];

@@ -227,3 +227,80 @@ out, so no gap is called exercised from that attempt.
   job and organisation relationship, and inspect supported statuses before
   designing the recovery path; if there are no supported records, retire the
   endpoint instead.
+
+## Closure log — 2026-10-14
+
+Bounded gap count moved 185 -> 178. Every entry below was deployed to `main`,
+verified in the production bundle, and re-registered in live Atlas from the
+exact pushed commit. None of them is claimed as `exercised`: Atlas records
+runtime exercise only from invocation telemetry, and `bob_capability_map.exercised`
+remains unpopulated.
+
+### Closed as genuine missing wiring
+
+- **Patrol session lifecycle** (`start_patrol_session`,
+  `record_patrol_checkpoint_visit`, `complete_patrol_session`) — commit `b06798c8`.
+  `PatrolPage.tsx` was not merely unwired, it was a second and wrong authority:
+  route checkpoints were written into `checkpoint_id` instead of
+  `route_checkpoint_id`, so a route patrol could never satisfy the mandatory
+  checkpoint rule; starting a patrol was a raw insert with no idempotency;
+  proximity and accuracy were adjudicated client-side with a manual fallback
+  that accepted a visit with no GPS at all; and completion was a raw update that
+  skipped the mandatory checkpoint check and wrote no audit row. The page now
+  routes all three steps through the governed RPCs, and the superseded
+  client-side adjudication in `lib/checkpointVisit.ts` was retired.
+- **Shift asset custody** (`assign_shift_asset`, `return_shift_asset`) — commit
+  `1290318a`. A genuinely missing surface rather than a stale one: the RPCs had a
+  schema guard test and no UI at all. Officers can now sign out available
+  vehicles and equipment against the active shift and file a return condition
+  report; the receipt states whether the asset went back to the available pool or
+  to maintenance.
+
+### Closed as superseded, by retirement rather than wiring
+
+- `submit_officer_timesheet` -> `submit_officer_timesheet_from_work`
+- `submit_noise_assessment` -> `submit_officer_noise_assessment_v2`
+- `submit_smoke_assessment` -> `submit_smoke_assessment_receipt_v2`
+
+  Migration `20261014120000_retire_superseded_submission_rpcs.sql`. All three
+  were dead `SECURITY DEFINER` functions still granted to `authenticated`, so
+  each remained a second unaudited writer for a table that already had a
+  governed authority. `submit_officer_timesheet` was the sharpest: it accepted
+  typed `p_actual_hours` up to 744 and inserted a `submitted` timesheet with no
+  `timesheet_work_entries` provenance, which is exactly the self-reporting the
+  successor exists to prevent. Verified before drop: no application caller, no
+  Edge Function caller, no other database function referencing the names.
+  Guarded by `apps/web/src/lib/retiredSubmissionRpcs.guard.test.ts`.
+
+### Corrected Atlas under-reporting
+
+- The generator read SQL function bodies only from `supabase/schemas/**` and
+  `supabase/schema.sql`. The live snapshot dumps the public schema only, so
+  `ops`-schema scheduler functions existed nowhere but their migrations and
+  their `net.http_post` calls to Edge Functions were invisible to blast radius.
+  `collectSqlFunctionEdges` now also reads `supabase/migrations/**`, but only
+  keeps `ops`-qualified definitions — an unqualified sweep would resurrect
+  public functions that have since been dropped, and `schema.sql` must stay the
+  authority for anything it does contain. Three real edges appeared:
+  `enqueue_welfare_escalation_tick -> welfare-escalation-tick`,
+  `enqueue_credential_expiry_notifications -> notify-credential-expiry`, and
+  `enqueue_canonical_ta_refresh -> bob-refresh-canonical-ta-names`. This also
+  fixes the long-failing `atlas-calibration` test "Atlas refresh derives Ops
+  scheduler HTTP calls to edge functions".
+
+### Stale references cleaned up
+
+- `edgeFunctionAudit.test.ts` still read the retired
+  `capture-environmental-evidence` function source, which failed the whole web
+  suite at collection time. Removed, along with the stale mentions in
+  `docs/design/BIOSECURITY_GOVERNED_MODULE.md` and the
+  `check-house-conflict-any-org` header comment.
+
+### Known remaining debt
+
+- `src/types/database.ts` is stale: it is missing both
+  `submit_officer_noise_assessment_v2` and `submit_smoke_assessment_receipt_v2`,
+  and a current `supabase gen types` run differs from it by roughly 7,500 lines.
+  The retired entries were removed surgically rather than regenerating, because
+  a wholesale replacement would be an unreviewable diff in the same change as a
+  live function drop. Regenerating it deserves its own change.
