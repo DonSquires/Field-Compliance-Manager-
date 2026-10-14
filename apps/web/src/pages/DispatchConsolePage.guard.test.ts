@@ -149,6 +149,17 @@ describe('dispatch agreement and creation boundary', () => {
     expect(source).toContain('Response timing updated with an audit receipt.');
     expect(source).not.toMatch(/from\('dispatch_jobs'\)[\s\S]{0,200}\.update\(/);
   });
+
+  it('supports governed roster-independent handoff to a named officer', () => {
+    expect(source).toContain("supabase.rpc('queue_dispatch_job_for_officer'");
+    expect(source).toContain("supabase.rpc('get_manageable_user_identities'");
+    expect(source).toContain("from('roster_work_units').select('id,name,service_type')");
+    expect(source).toContain('p_officer_user_id: formDirectOfficerId');
+    expect(source).toContain('p_work_unit_id: directWorkUnit!.id');
+    expect(source).toContain('p_module_key: directWorkUnit!.serviceType');
+    expect(source).toContain('They must start or already have an in-progress shift before recording attendance.');
+    expect(source).toContain('Direct officer queueing requires an agreement-linked site.');
+  });
 });
 describe('noise complaint intake — two places, protected identity', () => {
   it('captures the complainant place and identity only for noise jobs and only through the governed RPC', () => {

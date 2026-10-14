@@ -114,6 +114,17 @@ interface ResourceUnit {
   gpsRecordedAt: string | null;
 }
 
+interface DirectOfficer {
+  id: string;
+  displayName: string;
+}
+
+interface DispatchWorkUnit {
+  id: string;
+  name: string;
+  serviceType: string;
+}
+
 interface ShiftStop {
   id: string;
   shiftId: string;
@@ -266,6 +277,10 @@ const DispatchConsolePage: React.FC = () => {
   const [resolvedLocation, setResolvedLocation] = useState<{ label: string; lat: number; lng: number } | null>(null);
   const [formShiftId, setFormShiftId] = useState<string>('');
   const [formResourceId, setFormResourceId] = useState<string>('');
+  const [formDirectOfficerId, setFormDirectOfficerId] = useState('');
+  const [formWorkUnitId, setFormWorkUnitId] = useState('');
+  const [directOfficers, setDirectOfficers] = useState<DirectOfficer[]>([]);
+  const [dispatchWorkUnits, setDispatchWorkUnits] = useState<DispatchWorkUnit[]>([]);
   const [formSlaMinutes, setFormSlaMinutes] = useState(15);
   const [formNotes, setFormNotes] = useState('');
   const [formAlarmIntakeChannel, setFormAlarmIntakeChannel] = useState<AlarmIntakeChannel>('phone');
@@ -315,7 +330,7 @@ const DispatchConsolePage: React.FC = () => {
       if (!background) setLoading(true);
       const activeZoneIds = selectedAgreementZones.length > 0 ? selectedAgreementZones.map((zone) => zone.id) : null;
 
-      const [shiftsRes, jobsRes, resourcesRes, selectedJobRes] = await Promise.all([
+      const [shiftsRes, jobsRes, resourcesRes, selectedJobRes, officersRes, workUnitsRes] = await Promise.all([
         activeZoneIds && activeZoneIds.length > 0
           ? supabase
               .from('shifts')
@@ -348,9 +363,11 @@ const DispatchConsolePage: React.FC = () => {
         requestedJobId
           ? supabase.from('dispatch_jobs').select('*, site:client_site_id(name, address, hs_notes, access_instructions), zone:zone_id(name, zone_type), resource:dispatch_resource_id(name)').eq('id', requestedJobId).eq('organization_id', operatingBranchId).maybeSingle()
           : Promise.resolve({ data: null, error: null }),
+        supabase.rpc('get_manageable_user_identities', { p_operating_organization_id: operatingBranchId }),
+        supabase.from('roster_work_units').select('id,name,service_type').eq('organization_id', operatingBranchId).eq('active', true).order('name'),
       ]);
 
-      const phaseErrors = [shiftsRes.error, jobsRes.error, resourcesRes.error, selectedJobRes.error].filter(Boolean);
+      const phaseErrors = [shiftsRes.error, jobsRes.error, resourcesRes.error, selectedJobRes.error, officersRes.error, workUnitsRes.error].filter(Boolean);
       if (phaseErrors.length) {
         throw new Error(phaseErrors.map((phaseError) => phaseError?.message).join(' · '));
       }
@@ -448,6 +465,15 @@ const DispatchConsolePage: React.FC = () => {
           });
         }));
       }
+      setDirectOfficers(
+        ((officersRes.data as Array<{ id: string; display_name: string | null; email: string | null; role: string; deactivated_at: string | null }> | null) ?? [])
+          .filter((officer) => !officer.deactivated_at && ['officer', 'admin_officer'].includes(officer.role))
+          .map((officer) => ({ id: officer.id, displayName: officer.display_name || officer.email || 'Officer' })),
+      );
+      setDispatchWorkUnits(
+        ((workUnitsRes.data as Array<{ id: string; name: string; service_type: string }> | null) ?? [])
+          .map((unit) => ({ id: unit.id, name: unit.name, serviceType: unit.service_type })),
+      );
     } catch (err) {
       console.error('Failed to load Phase A:', err);
       setError(err instanceof Error ? err.message : 'Failed to load dispatch operations');
@@ -600,11 +626,32 @@ const DispatchConsolePage: React.FC = () => {
       if (relationshipLoading) throw new Error('Service agreement access is still loading.');
       if (relationshipError) throw new Error(`Service agreement access could not be verified: ${relationshipError}`);
       if (!selectedAgreement) throw new Error('Select a service agreement before creating a dispatch job.');
+      const directWorkUnit = dispatchWorkUnits.find((unit) => unit.id === formWorkUnitId);
+      if (formDirectOfficerId && (!formSiteId || formZoneId || isNewIncidentLocation)) {
+        throw new Error('Direct officer queueing requires an agreement-linked site. Use the ordinary queue for a zone or provisional incident location.');
+      }
+      if (formDirectOfficerId && !directWorkUnit) {
+        throw new Error('Choose the work unit that authorizes this direct officer job.');
+      }
       const briefingNotes = formJobType === 'alarm_response'
         ? `[Alarm ${ALARM_SIGNAL_TYPES.find((type) => type.id === formAlarmSignalType)?.label.toLowerCase() ?? formAlarmSignalType}, received ${new Date(formAlarmReceivedAt).toLocaleString('en-NZ')} by ${ALARM_INTAKE_CHANNELS.find((channel) => channel.id === formAlarmIntakeChannel)?.label.toLowerCase() ?? formAlarmIntakeChannel}]${formNotes.trim() ? `\n${formNotes.trim()}` : ''}`
         : formNotes || null;
 
-      const response = isNewIncidentLocation
+      const response = formDirectOfficerId
+        ? await supabase.rpc('queue_dispatch_job_for_officer', {
+            p_organization_id: operatingBranchId,
+            p_service_agreement_id: selectedAgreement.id,
+            p_client_site_id: formSiteId,
+            p_client_request_id: formRequestId,
+            p_officer_user_id: formDirectOfficerId,
+            p_work_unit_id: directWorkUnit!.id,
+            p_module_key: directWorkUnit!.serviceType,
+            p_job_type: formJobType,
+            p_priority: schemaDispatchJobPriority(formPriority),
+            p_sla_minutes: formSlaMinutes,
+            p_briefing_notes: briefingNotes,
+          })
+        : isNewIncidentLocation
         ? await supabase.rpc('create_dispatch_intake_job', {
             p_organization_id: operatingBranchId, p_service_agreement_id: selectedAgreement.id, p_client_request_id: formRequestId,
             p_job_type: formJobType, p_priority: schemaDispatchJobPriority(formPriority), p_sla_minutes: formSlaMinutes,
@@ -670,6 +717,8 @@ const DispatchConsolePage: React.FC = () => {
       setResolvedLocation(null);
       setFormShiftId('');
       setFormResourceId('');
+      setFormDirectOfficerId('');
+      setFormWorkUnitId('');
       setFormSlaMinutes(15);
       setFormNotes('');
       setFormAlarmIntakeChannel('phone');
@@ -691,7 +740,7 @@ const DispatchConsolePage: React.FC = () => {
     } finally {
       setSaving(false);
     }
-  }, [operatingBranchId, relationshipLoading, relationshipError, selectedAgreement, formRequestId, formJobType, formPriority, formSiteId, formZoneId, isNewIncidentLocation, resolvedLocation, formShiftId, formResourceId, formSlaMinutes, formNotes, loadPhaseA, formComplainantAddress, resolvedComplainant, formComplainantSiteId, formComplainantName, formComplainantPhone, formComplainantNotes, formAlarmIntakeChannel, formAlarmSignalType, formAlarmReceivedAt]);
+  }, [operatingBranchId, relationshipLoading, relationshipError, selectedAgreement, formRequestId, formJobType, formPriority, formSiteId, formZoneId, isNewIncidentLocation, resolvedLocation, formShiftId, formResourceId, formDirectOfficerId, formWorkUnitId, dispatchWorkUnits, formSlaMinutes, formNotes, loadPhaseA, formComplainantAddress, resolvedComplainant, formComplainantSiteId, formComplainantName, formComplainantPhone, formComplainantNotes, formAlarmIntakeChannel, formAlarmSignalType, formAlarmReceivedAt]);
 
   const resolveComplainantLocation = useCallback(async () => {
     try {
@@ -1112,24 +1161,53 @@ const DispatchConsolePage: React.FC = () => {
       )}
 
       <div className="dispatch-console-form-field">
-        <label className="dispatch-console-form-label">Dispatch Resource</label>
-        <select value={formResourceId} onChange={(e) => assignResource(e.target.value)}>
-          <option value="">Leave in unassigned queue</option>
-          {assignableResources.map((resource) => (
-            <option key={resource.id} value={resource.id}>
-              {resource.callsign ? `${resource.callsign} · ` : ''}{resource.name}
-            </option>
-          ))}
+        <label className="dispatch-console-form-label">Queue directly to an officer</label>
+        <select
+          value={formDirectOfficerId}
+          onChange={(event) => {
+            setFormDirectOfficerId(event.target.value);
+            if (event.target.value) {
+              setFormResourceId('');
+              setFormShiftId('');
+            } else setFormWorkUnitId('');
+          }}
+        >
+          <option value="">No direct officer handoff</option>
+          {directOfficers.map((officer) => <option key={officer.id} value={officer.id}>{officer.displayName}</option>)}
         </select>
-        {formResourceId && !formShiftId && <div className="dispatch-console-inline-error">No active matching shift is available for this resource.</div>}
-        {positionError && <div className="dispatch-console-inline-warning" role="status">{positionError}</div>}
-        {nearestUnit && (formResourceId === nearestUnit.resourceId ? (
-          <div className="dispatch-console-form-note" role="status">{nearestUnit.label} is the closest available unit with a GPS fix from the last 5 minutes ({nearestUnit.distanceKm.toFixed(1)} km straight-line).</div>
-        ) : (
-          <div className="dispatch-console-form-note" role="status">Closest available unit with a recent GPS fix: {nearestUnit.label} · {nearestUnit.distanceKm.toFixed(1)} km straight-line. <button type="button" className="btn btn-sm btn-secondary" onClick={() => assignResource(nearestUnit.resourceId)}><MapPin size={14} aria-hidden="true" /> Assign nearest</button></div>
-        ))}
-        {!nearestUnit && !formResourceId && (formSiteId || resolvedLocation) && <div className="dispatch-console-form-note" role="status">No proximity suggestion: a mapped place centre and a unit GPS fix from the last 5 minutes are needed. You can assign manually or leave the job unassigned.</div>}
+        {formDirectOfficerId && (
+          <>
+            <label className="dispatch-console-form-label" htmlFor="dispatch-work-unit">Authorizing work unit</label>
+            <select id="dispatch-work-unit" value={formWorkUnitId} onChange={(event) => setFormWorkUnitId(event.target.value)}>
+              <option value="">Choose an active work unit...</option>
+              {dispatchWorkUnits.map((unit) => <option key={unit.id} value={unit.id}>{unit.name} · {unit.serviceType.replaceAll('_', ' ')}</option>)}
+            </select>
+            <div className="dispatch-console-form-note">The officer receives this job immediately. They must start or already have an in-progress shift before recording attendance. Direct handoff is available only for an agreement-linked site.</div>
+          </>
+        )}
       </div>
+
+      {!formDirectOfficerId && (
+        <div className="dispatch-console-form-field">
+          <label className="dispatch-console-form-label">Dispatch Resource</label>
+          <select value={formResourceId} onChange={(e) => assignResource(e.target.value)}>
+            <option value="">Leave in unassigned queue</option>
+            {assignableResources.map((resource) => (
+              <option key={resource.id} value={resource.id}>
+                {resource.callsign ? `${resource.callsign} · ` : ''}{resource.name}
+              </option>
+            ))}
+          </select>
+          {formResourceId && !formShiftId && <div className="dispatch-console-inline-error">No active matching shift is available for this resource.</div>}
+          {positionError && <div className="dispatch-console-inline-warning" role="status">{positionError}</div>}
+          {nearestUnit && (formResourceId === nearestUnit.resourceId ? (
+            <div className="dispatch-console-form-note" role="status">{nearestUnit.label} is the closest available unit with a GPS fix from the last 5 minutes ({nearestUnit.distanceKm.toFixed(1)} km straight-line).</div>
+          ) : (
+            <div className="dispatch-console-form-note" role="status">Closest available unit with a recent GPS fix: {nearestUnit.label} · {nearestUnit.distanceKm.toFixed(1)} km straight-line. <button type="button" className="btn btn-sm btn-secondary" onClick={() => assignResource(nearestUnit.resourceId)}><MapPin size={14} aria-hidden="true" /> Assign nearest</button></div>
+          ))}
+          {!nearestUnit && !formResourceId && (formSiteId || resolvedLocation) && <div className="dispatch-console-form-note" role="status">No proximity suggestion: a mapped place centre and a unit GPS fix from the last 5 minutes are needed. You can assign manually or leave the job unassigned.</div>}
+        </div>
+      )}
 
       <div className="dispatch-console-form-field">
         <label className="dispatch-console-form-label">SLA Minutes</label>
@@ -1157,7 +1235,7 @@ const DispatchConsolePage: React.FC = () => {
           type="button"
           className="dispatch-console-primary-button"
           onClick={handleCreateJob}
-          disabled={saving || !selectedAgreement || selectedAgreement.provider_organization_id !== operatingBranchId || (!formSiteId && !formZoneId && !resolvedLocation) || (formJobType === 'alarm_response' && !formAlarmReceivedAt) || (Boolean(formResourceId) && !formShiftId)}
+          disabled={saving || !selectedAgreement || selectedAgreement.provider_organization_id !== operatingBranchId || (!formSiteId && !formZoneId && !resolvedLocation) || (formJobType === 'alarm_response' && !formAlarmReceivedAt) || (Boolean(formResourceId) && !formShiftId) || (Boolean(formDirectOfficerId) && (!formWorkUnitId || !formSiteId || Boolean(formZoneId) || isNewIncidentLocation))}
         >
           Create
         </button>

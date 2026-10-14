@@ -388,3 +388,27 @@ remains unpopulated.
   55 tables. The capability is now `wired=true`; runtime exercise remains
   unclaimed until a governed live job can be changed without fabricating an
   operational event.
+
+### Closure log — direct officer dispatch handoff
+
+- `queue_dispatch_job_for_officer` was the server authority for urgent,
+  roster-independent handoff, and the officer queue already read jobs assigned
+  through `assigned_officer_id`, but the dispatch console had no caller. An
+  administrator therefore could not originate the handoff that the officer
+  experience was designed to receive.
+- The new-job workflow now loads manageable active officers and active roster
+  work units in the operating branch. Before submission, the dispatcher must
+  choose both the officer and the authorizing work unit; direct handoff is
+  deliberately limited to an agreement-linked Site because the RPC does not
+  accept a Zone or provisional incident location.
+- During submission, the work unit's schema-backed `service_type` becomes the
+  job module key, the existing client request ID protects retries, and the RPC
+  verifies administrator, agreement, officer and work-unit authority. Resource
+  assignment is mutually exclusive with direct officer handoff.
+- After success, the job appears in the named officer's dispatch queue. The UI
+  states the remaining safety boundary explicitly: the officer must start or
+  already hold an in-progress shift before the governed attendance action can
+  create a stop and record GPS/geofence evidence.
+- Atlas dry-run moved 173 -> 172 bounded gaps: 1 edge function, 116 RPCs and
+  55 tables. Runtime exercise remains unclaimed because creating a live
+  dispatch job without a real operational event would be false evidence.
