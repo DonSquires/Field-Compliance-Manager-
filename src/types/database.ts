@@ -36940,24 +36940,6 @@ export type Database = {
           isSetofReturn: false
         }
       }
-      create_cost_centre: {
-        Args: { p_code: string; p_name: string }
-        Returns: {
-          active: boolean
-          code: string
-          created_at: string
-          created_by: string | null
-          id: string
-          name: string
-          organization_id: string
-        }
-        SetofOptions: {
-          from: "*"
-          to: "cost_centres"
-          isOneToOne: true
-          isSetofReturn: false
-        }
-      }
       create_crm_account_activity: {
         Args: {
           p_account_organization_id: string
@@ -37531,24 +37513,6 @@ export type Database = {
           route_name: string
           skipped_places: number
         }[]
-      }
-      create_organization_workplace: {
-        Args: { p_address?: string; p_name: string }
-        Returns: {
-          active: boolean
-          address: string | null
-          created_at: string
-          created_by: string | null
-          id: string
-          name: string
-          organization_id: string
-        }
-        SetofOptions: {
-          from: "*"
-          to: "organization_workplaces"
-          isOneToOne: true
-          isSetofReturn: false
-        }
       }
       create_payroll_export_batch: {
         Args: {

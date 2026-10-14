@@ -632,3 +632,27 @@ remains unpopulated.
   Generate from agreement available. No Review lines control was shown because
   no draft invoice exists, and no invoice or line was created for testing.
   Live Atlas reports both line RPCs as wired with exercise unclaimed.
+
+### Closure log — superseded roster-target setup authorities
+
+- Atlas showed `create_cost_centre` and `create_organization_workplace` as
+  present but unwired. Schema and source inspection confirmed that both were
+  older home-organization-only writers superseded by
+  `create_operating_cost_centre` and
+  `create_operating_organization_workplace`.
+- Before retirement, callers could still discover and invoke duplicate setup
+  authorities that did not accept the selected operating organization. The
+  active Roster Targets flow already used the branch-aware replacements, which
+  enforce both operating authority and organization administration before
+  writing the same canonical tables.
+- During the change, only the two superseded functions were dropped. Their
+  generated type entries and obsolete E2E handlers were removed while the
+  operating replacements remained in the page, types, fixtures and live
+  schema. `create_roster_work_unit` and `create_roster_slot` were deliberately
+  preserved because they still have live database and application callers.
+- After retirement, nine focused guards passed, including explicit checks that
+  the operating UI path remains and the still-wired roster writers survive.
+  The production web build passed. The regenerated live snapshot reports 819
+  functions, and Atlas dry-run moved 161 -> 159 bounded gaps: 1 edge function,
+  103 RPCs and 55 tables. No user-visible behavior was removed and no runtime
+  exercise claim was created by this authority cleanup.
