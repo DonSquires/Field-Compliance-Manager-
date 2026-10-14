@@ -30,6 +30,16 @@ describe('governed CRM accounts', () => {
     expect(page).not.toMatch(/\.from\(["']quote_lines["']\)\.insert/);
   });
 
+  it('edits draft quote lines through the governed replay-safe correction RPC', () => {
+    expect(page).toMatch(/supabase\.rpc\(["']update_crm_quote_line["']/);
+    expect(page).toContain('updateLineRequestId.current');
+    expect(page).toContain('Edit provider unit cost');
+    expect(page).toContain('Edit client unit charge');
+    expect(page).toContain('Save line');
+    expect(page).toContain('cancelQuoteLineEdit');
+    expect(page).not.toMatch(/\.from\(["']quote_lines["']\)\.update/);
+  });
+
   it('sends and accepts or declines only through the governed lifecycle RPC', () => {
     expect(page).toMatch(/\.rpc\(["']manage_crm_quote["']/);
     expect(page).toContain('Confirm acceptance');

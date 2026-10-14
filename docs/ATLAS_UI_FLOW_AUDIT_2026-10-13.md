@@ -818,3 +818,34 @@ remains unpopulated.
   passed, the production web build passed, and the regenerated live snapshot
   reports 811 functions. Atlas dry-run moved 152 -> 151 bounded gaps:
   1 edge function, 95 RPCs and 55 tables. Exercise remains unclaimed.
+
+### Closure log — governed CRM quote-line correction
+
+- Atlas showed `update_crm_quote_line` present but unwired while the same draft
+  pricing dialog already wired add and remove. Before this change, an
+  administrator correcting a description, quantity, cost, or charge had to
+  remove and reconstruct the line, losing its stable identity and making a
+  routine pricing correction look like deletion and replacement.
+- The live function already locked the quote, checked provider administration
+  and expected draft status, bounded commercial values, retained the line ID,
+  recalculated quote totals, and wrote an audit event. Its request ID was only
+  descriptive, however: replay could repeat the update and audit event, and the
+  audit metadata recorded only the new values.
+- The function now uses a partial unique audit-receipt index and checks the
+  request ID under the quote lock. The first correction returns
+  `updated=true`; a replay returns the current totals with `updated=false`.
+  Audit evidence records previous and resulting description, quantity, cost,
+  and charge.
+- During editing, the draft quote UI exposes explicit Edit, Cancel, and Save
+  actions. Only the dimensions supported by the governed correction authority
+  are editable. Kind and scope stay unchanged, errors remain visible, controls
+  lock while saving, and the server-confirmed totals and success receipt are
+  shown after persistence.
+- After saving, the line reloads under the same ID and the CRM summary reloads.
+  Desktop and mobile Playwright checks passed the cancel and save paths, 26
+  focused guards passed, the production build passed, and a live rollback-only
+  database check proved first-use and replay behavior without retaining any
+  business or audit change. The live snapshot remains at 811 functions and now
+  reports 719 indexes. Atlas dry-run moves 151 -> 150 bounded gaps:
+  1 edge function, 94 RPCs and 55 tables. Exercise remains unclaimed because
+  the successful database invocation was rolled back.

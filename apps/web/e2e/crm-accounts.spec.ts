@@ -62,6 +62,43 @@ test('CRM account context and governed quote creation are operational', async ({
   await expect(page).toHaveURL(/\/admin\/relationships\?account=40404040-4040-4040-8040-404040404040&agreement=46464646-4646-4646-8646-464646464646$/);await expect(page.getByRole('heading', { name: 'Civic Events Compliance Services', exact: true })).toBeVisible(); expect(errors, errors.join('\n')).toEqual([]);
 });
 
+test('a draft quote line can be corrected without removing its identity', async ({ page }) => {
+  const errors = monitorBrowserErrors(page);
+  await signInAsAdmin(page, '/admin/crm');
+  await page.locator('#crm-account-40404040-4040-4040-8040-404040404040').click();
+  const workspace = page.getByRole('dialog', { name: 'Civic Events Limited' });
+  await workspace.getByRole('button', { name: 'Places 1' }).click();
+  await workspace.getByRole('button', { name: 'Create proposal' }).click();
+  const createDialog = page.getByRole('dialog', { name: /New quote for Civic Events Limited/ });
+  await createDialog.getByLabel('Include static_guarding').check();
+  await createDialog.getByRole('button', { name: 'Create draft quote' }).click();
+
+  const pricing = page.getByRole('dialog', { name: /Price Civic Events Limited - .* proposal/ });
+  await pricing.getByLabel('Quantity').fill('8');
+  await pricing.getByLabel('Provider unit cost').fill('35');
+  await pricing.getByLabel('Client unit charge').fill('52.5');
+  await pricing.getByRole('button', { name: 'Add pricing line' }).click();
+  await expect(pricing.getByText('Service labour')).toBeVisible();
+
+  await pricing.getByRole('button', { name: 'Edit' }).click();
+  await pricing.getByLabel('Edit line description').fill('Discarded correction');
+  await pricing.getByRole('button', { name: 'Cancel' }).click();
+  await expect(pricing.getByText('Service labour')).toBeVisible();
+  await expect(pricing.getByText('Discarded correction')).toHaveCount(0);
+
+  await pricing.getByRole('button', { name: 'Edit' }).click();
+  await pricing.getByLabel('Edit line description').fill('Service labour - revised');
+  await pricing.getByLabel('Edit provider unit cost').fill('38');
+  await pricing.getByLabel('Edit client unit charge').fill('57');
+  await pricing.getByRole('button', { name: 'Save line' }).click();
+
+  await expect(page.getByText(/Pricing line updated on Civic Events Limited/)).toBeVisible();
+  await expect(pricing.getByText('Service labour - revised')).toBeVisible();
+  await expect(pricing.getByText('Total cost $304.00')).toBeVisible();
+  await expect(pricing.getByText('Total charge $524.40')).toBeVisible();
+  expect(errors, errors.join('\n')).toEqual([]);
+});
+
 test('a quote can be raised as a variation of the client\'s existing agreement', async ({ page }) => {
   const errors = monitorBrowserErrors(page);
   const agreementQueries: string[] = [];

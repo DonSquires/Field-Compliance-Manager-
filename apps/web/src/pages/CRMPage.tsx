@@ -92,6 +92,15 @@ interface PricingQuote {
   variedAgreementName?: string | null;
 }
 
+interface QuoteLine {
+  id: string;
+  kind: string;
+  description: string;
+  quantity: number;
+  unit_cost: number;
+  unit_charge: number;
+}
+
 interface AgreementRow extends ServiceAgreement {
   counterparty_name: string;
   counterparty_type: string;
@@ -253,12 +262,20 @@ const CRMPage: React.FC<{ onNavigate?: NavigateWithContext }> = ({ onNavigate = 
   const [invoiceReadiness, setInvoiceReadiness] = useState<InvoiceReadiness | null>(null);
   const [invoiceReadinessLoading, setInvoiceReadinessLoading] = useState(false);
   const [selectedAgreementId, setSelectedAgreementId] = useState('');
-  const [quoteLines, setQuoteLines] = useState<Array<{ id: string; kind: string; description: string; quantity: number; unit_cost: number; unit_charge: number }>>([]);
+  const [quoteLines, setQuoteLines] = useState<QuoteLine[]>([]);
+  const [editingQuoteLine, setEditingQuoteLine] = useState<QuoteLine | null>(null);
+  const [editLineForm, setEditLineForm] = useState({
+    description: '',
+    quantity: '',
+    unitCost: '',
+    unitCharge: '',
+  });
   const [organizationDialog, setOrganizationDialog] = useState<EditableCrmOrganization | 'create' | null>(null);
   const [siteAccount, setSiteAccount] = useState<{ id: string; name: string } | null>(null);
   const openedContextAccountId = useRef<string | null>(null);
   const quoteRequestId = useRef(crypto.randomUUID());
   const lineRequestId = useRef(crypto.randomUUID());
+  const updateLineRequestId = useRef(crypto.randomUUID());
 
   useEffect(() => {
     if (!requestedAccountId) {
@@ -483,8 +500,12 @@ const CRMPage: React.FC<{ onNavigate?: NavigateWithContext }> = ({ onNavigate = 
   }, [loadCrm]);
 
   const loadQuoteLines = useCallback(async (quoteId: string) => {
-    const { data } = await supabase.from('quote_lines').select('id,kind,description,quantity,unit_cost,unit_charge').eq('quote_id', quoteId).order('created_at', { ascending: true });
-    setQuoteLines((data as any) ?? []);
+    const { data, error } = await supabase.from('quote_lines').select('id,kind,description,quantity,unit_cost,unit_charge').eq('quote_id', quoteId).order('created_at', { ascending: true });
+    if (error) {
+      setState((current) => ({ ...current, error: error.message }));
+      return;
+    }
+    setQuoteLines((data as QuoteLine[]) ?? []);
   }, []);
 
   const loadProposalServiceScopes = useCallback(async (quote: PricingQuote) => {
@@ -524,6 +545,7 @@ const CRMPage: React.FC<{ onNavigate?: NavigateWithContext }> = ({ onNavigate = 
       void loadProposalServiceScopes(pricingQuote);
     } else {
       setQuoteLines([]);
+      setEditingQuoteLine(null);
       setProposalServiceScopes([]);
       setProposalScopePlaces([]);
     }
@@ -601,6 +623,62 @@ const CRMPage: React.FC<{ onNavigate?: NavigateWithContext }> = ({ onNavigate = 
       }
       setNotice('Quote line removed.');
       await loadQuoteLines(pricingQuote.id);
+    }
+    setQuoteSaving(false);
+  };
+
+  const editQuoteLine = (line: QuoteLine) => {
+    setEditingQuoteLine(line);
+    setEditLineForm({
+      description: line.description,
+      quantity: String(line.quantity),
+      unitCost: String(line.unit_cost),
+      unitCharge: String(line.unit_charge),
+    });
+    updateLineRequestId.current = crypto.randomUUID();
+    setState((current) => ({ ...current, error: null }));
+    setNotice(null);
+  };
+
+  const cancelQuoteLineEdit = () => {
+    setEditingQuoteLine(null);
+    updateLineRequestId.current = crypto.randomUUID();
+  };
+
+  const updateQuoteLine = async () => {
+    if (!pricingQuote || !editingQuoteLine) return;
+    setQuoteSaving(true);
+    setState((current) => ({ ...current, error: null }));
+    const { data, error } = await supabase.rpc('update_crm_quote_line', {
+      p_client_request_id: updateLineRequestId.current,
+      p_quote_id: pricingQuote.id,
+      p_line_id: editingQuoteLine.id,
+      p_expected_status: pricingQuote.status,
+      p_description: editLineForm.description.trim(),
+      p_quantity: Number(editLineForm.quantity),
+      p_unit_cost: Number(editLineForm.unitCost),
+      p_unit_charge: Number(editLineForm.unitCharge),
+    });
+    const receipt = Array.isArray(data) ? data[0] : data;
+    if (error || !receipt) {
+      setState((current) => ({
+        ...current,
+        error: error?.message ?? 'Quote line update receipt was not confirmed.',
+      }));
+    } else {
+      setPricingReceipt({
+        totalCost: Number(receipt.total_cost),
+        totalCharge: Number(receipt.total_charge),
+      });
+      setNotice(
+        receipt.updated
+          ? `Pricing line updated on ${pricingQuote.title}.`
+          : `That pricing line update was already saved on ${pricingQuote.title}.`,
+      );
+      setEditingQuoteLine(null);
+      updateLineRequestId.current = crypto.randomUUID();
+      await loadQuoteLines(pricingQuote.id);
+      await loadCrm();
     }
     setQuoteSaving(false);
   };
@@ -908,6 +986,24 @@ const CRMPage: React.FC<{ onNavigate?: NavigateWithContext }> = ({ onNavigate = 
     setQuoteSaving(false);
   };
 
+  const editQuantity = Number(editLineForm.quantity);
+  const editUnitCost = Number(editLineForm.unitCost);
+  const editUnitCharge = Number(editLineForm.unitCharge);
+  const editLineValuesValid =
+    editLineForm.description.trim().length > 0 &&
+    editLineForm.quantity !== '' &&
+    Number.isFinite(editQuantity) &&
+    editQuantity > 0 &&
+    editQuantity <= 100000 &&
+    editLineForm.unitCost !== '' &&
+    Number.isFinite(editUnitCost) &&
+    editUnitCost >= 0 &&
+    editUnitCost <= 1000000 &&
+    editLineForm.unitCharge !== '' &&
+    Number.isFinite(editUnitCharge) &&
+    editUnitCharge >= 0 &&
+    editUnitCharge <= 1000000;
+
   const pricingDialog = pricingQuote ? (
     <div className="crm-quote-backdrop">
       <form
@@ -957,10 +1053,82 @@ const CRMPage: React.FC<{ onNavigate?: NavigateWithContext }> = ({ onNavigate = 
           <div className="crm-quote-lines-list" style={{ marginBottom: '1rem', border: '1px solid var(--border-color, #e2e8f0)', borderRadius: '6px', padding: '0.5rem' }}>
             <strong style={{ fontSize: '0.85rem', display: 'block', marginBottom: '0.5rem' }}>Existing quote lines ({quoteLines.length}):</strong>
             {quoteLines.map((line) => (
-              <div key={line.id} style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', fontSize: '0.85rem', padding: '0.25rem 0', borderBottom: '1px border-subtle' }}>
-                <span><strong>[{line.kind}]</strong> {line.description} — {line.quantity} × ${Number(line.unit_charge).toFixed(2)}</span>
-                {pricingQuote.status === 'draft' && (
-                  <button type="button" className="btn btn-sm btn-secondary" style={{ color: 'var(--danger-color, #e53e3e)', padding: '0.1rem 0.4rem', fontSize: '0.75rem' }} disabled={quoteSaving} onClick={() => void removeQuoteLine(line.id)}>Remove</button>
+              <div key={line.id} className="crm-quote-line">
+                {editingQuoteLine?.id === line.id ? (
+                  <div className="crm-quote-line-editor">
+                    <strong>Edit {line.kind} line</strong>
+                    <label>
+                      <span>Description</span>
+                      <input
+                        aria-label="Edit line description"
+                        value={editLineForm.description}
+                        onChange={(event) => setEditLineForm({ ...editLineForm, description: event.target.value })}
+                      />
+                    </label>
+                    <div>
+                      <label>
+                        <span>Quantity</span>
+                        <input
+                          aria-label="Edit line quantity"
+                          type="number"
+                          min="0.01"
+                          max="100000"
+                          step="0.01"
+                          value={editLineForm.quantity}
+                          onChange={(event) => setEditLineForm({ ...editLineForm, quantity: event.target.value })}
+                        />
+                      </label>
+                      <label>
+                        <span>Provider unit cost</span>
+                        <input
+                          aria-label="Edit provider unit cost"
+                          type="number"
+                          min="0"
+                          max="1000000"
+                          step="0.01"
+                          value={editLineForm.unitCost}
+                          onChange={(event) => setEditLineForm({ ...editLineForm, unitCost: event.target.value })}
+                        />
+                      </label>
+                      <label>
+                        <span>Client unit charge</span>
+                        <input
+                          aria-label="Edit client unit charge"
+                          type="number"
+                          min="0"
+                          max="1000000"
+                          step="0.01"
+                          value={editLineForm.unitCharge}
+                          onChange={(event) => setEditLineForm({ ...editLineForm, unitCharge: event.target.value })}
+                        />
+                      </label>
+                    </div>
+                    <p>Line kind and scope remain unchanged. Remove and recreate the line only when those dimensions are wrong.</p>
+                    <span className="crm-quote-line-actions">
+                      <button type="button" className="btn btn-sm btn-secondary" disabled={quoteSaving} onClick={cancelQuoteLineEdit}>Cancel</button>
+                      <button
+                        type="button"
+                        className="btn btn-sm btn-primary"
+                        disabled={
+                          quoteSaving ||
+                          !editLineValuesValid
+                        }
+                        onClick={() => void updateQuoteLine()}
+                      >
+                        {quoteSaving ? 'Saving' : 'Save line'}
+                      </button>
+                    </span>
+                  </div>
+                ) : (
+                  <>
+                    <span><strong>[{line.kind}]</strong> {line.description} — {line.quantity} × ${Number(line.unit_charge).toFixed(2)}</span>
+                    {pricingQuote.status === 'draft' && (
+                      <span className="crm-quote-line-actions">
+                        <button type="button" className="btn btn-sm btn-secondary" disabled={quoteSaving || editingQuoteLine !== null} onClick={() => editQuoteLine(line)}>Edit</button>
+                        <button type="button" className="btn btn-sm btn-secondary is-danger" disabled={quoteSaving || editingQuoteLine !== null} onClick={() => void removeQuoteLine(line.id)}>Remove</button>
+                      </span>
+                    )}
+                  </>
                 )}
               </div>
             ))}
