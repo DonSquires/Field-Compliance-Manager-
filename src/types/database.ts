@@ -16902,6 +16902,7 @@ export type Database = {
       }
       invoice_line_items: {
         Row: {
+          client_request_id: string | null
           created_at: string
           created_by: string | null
           description: string
@@ -16915,6 +16916,7 @@ export type Database = {
           item_type: string
           line_number: number
           line_order_index: number | null
+          line_source: string
           line_total: number
           organization_id: string | null
           quantity: number
@@ -16930,6 +16932,7 @@ export type Database = {
           work_unit_id: string | null
         }
         Insert: {
+          client_request_id?: string | null
           created_at?: string
           created_by?: string | null
           description: string
@@ -16943,6 +16946,7 @@ export type Database = {
           item_type?: string
           line_number: number
           line_order_index?: number | null
+          line_source?: string
           line_total: number
           organization_id?: string | null
           quantity?: number
@@ -16958,6 +16962,7 @@ export type Database = {
           work_unit_id?: string | null
         }
         Update: {
+          client_request_id?: string | null
           created_at?: string
           created_by?: string | null
           description?: string
@@ -16971,6 +16976,7 @@ export type Database = {
           item_type?: string
           line_number?: number
           line_order_index?: number | null
+          line_source?: string
           line_total?: number
           organization_id?: string | null
           quantity?: number

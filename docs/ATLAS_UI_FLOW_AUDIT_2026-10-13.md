@@ -589,3 +589,40 @@ remains unpopulated.
   cost line, posting or audit event was created. Atlas reports
   `post_finance_timesheet_labour_cost` as present and wired; exercise remains
   unclaimed.
+
+### Closure log — draft invoice line review
+
+- Atlas showed `add_crm_invoice_line` and `remove_crm_invoice_line` as present
+  but unwired while Accounts receivable offered Send, payment and void actions
+  without a line-review task. The operator could not inspect or safely adjust
+  a generated draft before delivery.
+- Before exposure, add retries could create duplicate charges because
+  `client_request_id` was recorded only in audit metadata. Removal could also
+  delete a completed-work invoice line while its workshop, dispatch, patrol or
+  service-cost source remained stamped with that line ID, permanently
+  stranding the source as already invoiced. Quantity, price and description
+  bounds were incomplete.
+- Invoice lines now carry explicit `generated` or `manual` provenance and an
+  optional request identity. A partial unique index makes one manual add
+  request map to one line, while audit lookup prevents a removed request from
+  silently recreating a different line. Server bounds protect description,
+  quantity, price and numeric total. Manual lines snapshot 15% NZ GST fields,
+  creator and request provenance.
+- Only retry-safe manual lines may be removed. Generated operational-evidence
+  lines are immutable in the draft; administrators must correct the source
+  work or void the draft rather than sever its audit chain. Removal retries
+  return the already-completed receipt, and both authorities recalculate the
+  invoice header while holding its row lock.
+- Accounts receivable now exposes Review lines for draft invoices. The dialog
+  loads persisted lines, distinguishes Operational evidence from Manual
+  adjustment, keeps generated rows visibly locked, and requires a confirmation
+  before removing a manual row. Add and remove actions use only the governed
+  RPCs with stable request IDs; loading, empty, error, success and responsive
+  states are explicit.
+- A scoped admin-officer aggregate found zero invoices and zero invoice lines
+  in the current organisation, so no business record required migration or
+  could be truthfully exercised. Both RPCs were safely probed with missing
+  invoice identities and rejected the calls without writing. Fourteen focused
+  CRM guards passed across three files, the production web build passed, and
+  Atlas dry-run moved 163 -> 161 bounded gaps: 1 edge function, 105 RPCs and
+  55 tables. Successful runtime exercise remains unclaimed.
