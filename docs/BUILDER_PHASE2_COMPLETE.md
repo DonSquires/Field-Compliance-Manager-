@@ -12,7 +12,7 @@ This session extended the Field Compliance Manager with a production-ready **Bui
 
 ### 1. Database Schema (`20260829060000_builder_job_system.sql`)
 
-**8 core tables, organization-scoped, RLS-protected, no orphans:**
+**8 active core tables, organization-scoped, RLS-protected, no orphans:**
 
 | Table | Purpose | Key Fields |
 |-------|---------|-----------|
@@ -22,8 +22,12 @@ This session extended the Field Compliance Manager with a production-ready **Bui
 | `builder_artifacts` | Immutable outputs | artifact_type (spec, UI plan, code, tests, security report, release notes), checksum |
 | `builder_approvals` | Human gates | approval_type, triggered_at_status, approved_by user, responded_at |
 | `builder_audit_events` | Decision trail | event_type, actor, previous_value, new_value (immutable log) |
-| `builder_protected_variables` | Env var allowlist | variable_name, value_is_secret, requires_approval, allowed_in_modes |
 | `builder_worker_runs` | Execution logs | command, exit_code, secrets_redacted_count, resource usage |
+| `builder_model_runs` | Governed model execution | provider, prompt version, artifact lineage, usage |
+
+The unused `builder_protected_variables` prototype was retired on 2026-10-14.
+Current workers use fixed, isolated profiles and do not accept tenant-configured
+environment-variable injection.
 
 **Design Doctrine Compliance:**
 - ✓ Parent before child: org → project → job → step → artifact (no orphans)
@@ -144,7 +148,7 @@ Artifact Capture:
 
 ### With Build-Plan.md Doctrine
 
-1. ✓ **Reference vs operational:** `builder_protected_variables` is reference; `builder_job_steps` is operational
+1. ✓ **Fixed profile vs operational:** worker environment is fixed in code; `builder_job_steps` records operational state
 2. ✓ **Additive schema:** No destructive migrations; all columns versioned by created_at
 3. ✓ **Live schema is authority:** RLS enforces service_role only; migrations describe intent
 4. ✓ **Provenance travels with record:** `builder_audit_events` immutable log with actor, timestamp, old/new values

@@ -799,11 +799,13 @@ test('the opening packet is fitted to a local model window: the build map keeps 
   const job = { id: 'j', title: 'Tappable options in BobPanel', task_description: 'Render metadata.options in apps/web/src/components/BobPanel.tsx; history is in bob_conversations.', target_sha: 'a'.repeat(40) };
   const liveContext = { big: 'y'.repeat(50_000) };
   const opening = buildOpeningPacket({ job, lane: 'frontend', specification: { product_brief: { problem: 'p' } }, uxPlan: null, rawRepositoryContext, liveContext, notes: [], previousFailure: null, hints: null, previousAttempt: null, seeded: null });
-  assert.ok(opening.packet.length <= 60_000, `packet ${opening.packet.length} chars`);
+  assert.ok(opening.packet.length <= 28_000, `packet ${opening.packet.length} chars`);
   assert.equal(opening.repositoryContext.build_map.tracked_files[0], 'apps/web/src/components/BobPanel.tsx');
   assert.equal(opening.repositoryContext.build_map.schema.tables[0], 'bob_conversations');
   assert.ok(opening.liveContext.truncated_live_context, 'oversized live context is trimmed');
-  // System prompt + packet fit the laptop window (24576 tokens at 4 chars/token, 85% usable) and the VPS window.
+  // Reserve the real local output budget and tokenizer headroom instead of assuming
+  // the entire context window is available for the opening prompt.
   const total = systemPrompt({ lane: 'frontend', limits: DEFAULT_LIMITS }).length + opening.packet.length;
-  assert.ok(total / 4 <= 24576 * 0.85, `system+packet ${total} chars`);
+  const promptBudgetChars = (24576 - 8192 - 512) * 3;
+  assert.ok(total <= promptBudgetChars * 0.8, `system+packet ${total} chars`);
 });

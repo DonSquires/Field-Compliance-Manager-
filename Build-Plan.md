@@ -177,11 +177,13 @@ Human approval is mandatory before merging protected branches, production deploy
 - `builder_artifacts`
 - `builder_approvals`
 - `builder_audit_events`
-- `builder_protected_variables`
 - `builder_worker_runs`
 - `builder_model_runs`
 
 Every entity must be organization-scoped and protected by server-side authorization.
+Builder workers use fixed, isolated execution profiles and do not accept
+tenant-configured environment-variable injection. The unused
+`builder_protected_variables` prototype was retired on 2026-10-14.
 
 ## Model routing
 

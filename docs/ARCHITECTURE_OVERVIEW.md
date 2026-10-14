@@ -151,7 +151,7 @@ FCM product architecture and domain ownership are defined in [FCM_PLATFORM_ARCHI
 
 | Principle | Implementation | Verified? |
 |-----------|----------------|-----------|
-| Reference vs Operational | `builder_protected_variables` (ref) ← → `builder_job_steps` (ops) | ✓ |
+| Fixed worker profiles vs Operational | Networkless, fixed-profile workers ← → `builder_job_steps` (ops); no tenant environment injection | ✓ |
 | Additive Schema Change | All migrations append; no destructive alterations; versioning via created_at | ✓ |
 | Live Schema is Authority | RLS enforces service_role only; migrations describe intent not mandate | ✓ |
 | Provenance Travels with Record | `builder_audit_events`: actor_user_id, timestamp, old_value, new_value immutable | ✓ |

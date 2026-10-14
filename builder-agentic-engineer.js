@@ -24,7 +24,7 @@ const { isProtectedPath, laneAllows, protectedReason, isMigrationPath, normalize
 const { buildModelRunRequest, callModelGateway, persistModelArtifact, fetchModelHealth, selectProviders, providerRequest } = require('./supabase/functions/_shared/builder-model-adapter');
 const { collectRepositoryContext, fitRepositoryContext } = require('./supabase/functions/_shared/builder-repository-context');
 
-const PROMPT_VERSION = 'agentic-engineer-v2';
+const PROMPT_VERSION = 'agentic-engineer-v3';
 const DEFAULT_LIMITS = Object.freeze({
   maxTurns: Math.max(4, Number(process.env.BOB_BUILDER_AGENT_TURNS || 60)),
   wallBudgetMs: Math.max(5 * 60_000, Number(process.env.BOB_BUILDER_AGENT_BUDGET_MS || 45 * 60_000)),
@@ -256,7 +256,7 @@ function taskPacket(input) {
 // the unfitted build map alone (2000 paths, every schema name) blew past the 40k-token VPS window and every
 // in-house provider was skipped on a 413 (job c00059ca, 2026-09-27). Fit the build map to the task, cap the
 // live context, and shrink until system prompt plus packet fits the laptop's 24k window as well.
-function buildOpeningPacket({ job, lane, specification, uxPlan, rawRepositoryContext, liveContext, notes, previousFailure, hints, previousAttempt, seeded, budgetChars = Number(process.env.BOB_BUILDER_PACKET_MAX_CHARS || 48_000) }) {
+function buildOpeningPacket({ job, lane, specification, uxPlan, rawRepositoryContext, liveContext, notes, previousFailure, hints, previousAttempt, seeded, budgetChars = Number(process.env.BOB_BUILDER_PACKET_MAX_CHARS || 28_000) }) {
   const taskText = `${job.title ?? ''} ${job.task_description ?? ''} ${JSON.stringify(specification ?? '')}`;
   const liveText = liveContext ? JSON.stringify(liveContext) : '';
   const boundedLiveContext = !liveContext ? null : liveText.length <= 12_000 ? liveContext : { truncated_live_context: `${liveText.slice(0, 12_000)}…`, note: 'live context trimmed to fit the model window' };

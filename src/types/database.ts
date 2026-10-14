@@ -4599,79 +4599,6 @@ export type Database = {
           },
         ]
       }
-      builder_protected_variables: {
-        Row: {
-          allowed_in_modes: string[]
-          approval_status: string | null
-          approved_by: string | null
-          created_at: string
-          created_by: string | null
-          default_value: string | null
-          description: string | null
-          id: string
-          organization_id: string
-          requires_approval: boolean | null
-          updated_at: string
-          value_is_secret: boolean
-          variable_category: string
-          variable_name: string
-        }
-        Insert: {
-          allowed_in_modes: string[]
-          approval_status?: string | null
-          approved_by?: string | null
-          created_at?: string
-          created_by?: string | null
-          default_value?: string | null
-          description?: string | null
-          id?: string
-          organization_id: string
-          requires_approval?: boolean | null
-          updated_at?: string
-          value_is_secret?: boolean
-          variable_category: string
-          variable_name: string
-        }
-        Update: {
-          allowed_in_modes?: string[]
-          approval_status?: string | null
-          approved_by?: string | null
-          created_at?: string
-          created_by?: string | null
-          default_value?: string | null
-          description?: string | null
-          id?: string
-          organization_id?: string
-          requires_approval?: boolean | null
-          updated_at?: string
-          value_is_secret?: boolean
-          variable_category?: string
-          variable_name?: string
-        }
-        Relationships: [
-          {
-            foreignKeyName: "builder_protected_variables_organization_id_fkey"
-            columns: ["organization_id"]
-            isOneToOne: false
-            referencedRelation: "crm_account_health"
-            referencedColumns: ["organization_id"]
-          },
-          {
-            foreignKeyName: "builder_protected_variables_organization_id_fkey"
-            columns: ["organization_id"]
-            isOneToOne: false
-            referencedRelation: "crm_account_list"
-            referencedColumns: ["id"]
-          },
-          {
-            foreignKeyName: "builder_protected_variables_organization_id_fkey"
-            columns: ["organization_id"]
-            isOneToOne: false
-            referencedRelation: "organizations"
-            referencedColumns: ["id"]
-          },
-        ]
-      }
       builder_worker_runs: {
         Row: {
           command: string
@@ -35114,17 +35041,6 @@ export type Database = {
         }
         Returns: Json
       }
-      builder_claim_security_review: {
-        Args: {
-          _expected_target_sha: string
-          _frontend_worker_run_id: string
-          _job_id: string
-          _runner_id: string
-          _security_step_id: string
-          _timeout_seconds?: number
-        }
-        Returns: Json
-      }
       builder_complete_independent_code_review: {
         Args: {
           _job_id: string
@@ -38903,33 +38819,6 @@ export type Database = {
           status: string
           work_derived_hours: number
           work_summary: Json
-        }[]
-      }
-      get_builder_approvals_activity: {
-        Args: {
-          p_approval_types?: string[]
-          p_limit?: number
-          p_offset?: number
-          p_statuses?: string[]
-        }
-        Returns: {
-          approval_comment: string
-          approval_type: string
-          can_decide: boolean
-          decided_by: string
-          decided_by_name: string
-          id: string
-          job_id: string
-          job_title: string
-          org_name: string
-          organization_id: string
-          project_name: string
-          repository: string
-          requested_at: string
-          responded_at: string
-          reviewed_artifacts: Json
-          status: string
-          target_sha: string
         }[]
       }
       get_callout_pay_summary: {

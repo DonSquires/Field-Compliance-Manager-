@@ -197,6 +197,24 @@ release worktrees intentionally carry no local link metadata. SQL could
 therefore apply while its version stayed absent from the migration ledger.
 Release now repairs by explicit project ref and treats a repair failure as a
 failed receipt instead of logging a warning that could permit false success.
+Builder redesign acceptance then exposed a separate local-model admission gap:
+the agentic engineer capped its task packet without reserving the system prompt,
+the model's output budget, or tokenizer headroom. A packet described as fitting
+the 24,576-token GPU window could therefore be rejected before the first tool
+turn, and six retries repeated the identical impossible request. The opening
+packet now uses the smallest deployed GPU budget with the real 8,192-token
+output reservation and conservative tokenizer headroom; later source reading
+remains tool-driven and line-bounded rather than embedded wholesale.
+Builder legacy reconciliation 2026-10-14: live Atlas/schema inspection found
+three present-but-unwired prototype interfaces. The single-frontend
+`builder_claim_security_review` RPC is superseded by the live aggregate review
+claim used by `builder-security-handoff.js`; `get_builder_approvals_activity`
+is superseded by the canonical `get_approvals_activity` workbench query; and
+the empty `builder_protected_variables` table described tenant-configured
+environment injection that fixed-profile, networkless workers intentionally do
+not permit. The three legacy entities are retired together rather than wired
+artificially. Aggregate review, canonical approvals, worker audit records, and
+fixed verification environment remain active.
 
 Natural-language Builder acceptance hardening 2026-10-13: Bob's deterministic
 post-evidence Builder fallback now recognises ordinary owner language such as
