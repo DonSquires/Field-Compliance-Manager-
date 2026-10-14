@@ -115,6 +115,10 @@ const OfficerSchedulePage: React.FC = () => {
   const [overtimeOffers, setOvertimeOffers] = useState<OvertimeOffer[]>([]);
   const [workResponse, setWorkResponse] = useState<{ kind: 'on_call' | 'overtime'; id: string; expectedStatus: string; response: 'accepted' | 'declined'; title: string } | null>(null);
   const [workDeclineReason, setWorkDeclineReason] = useState('');
+  const [adHocWorkUnits, setAdHocWorkUnits] = useState<WorkUnit[]>([]);
+  const [adHocWorkUnitId, setAdHocWorkUnitId] = useState('');
+  const [adHocNotes, setAdHocNotes] = useState('');
+  const [startingAdHoc, setStartingAdHoc] = useState(false);
   const [activeShiftId, setActiveShiftId] = useState<string | null>(null);
   const [shiftAssets, setShiftAssets] = useState<ShiftAssetLink[]>([]);
   const [availableAssets, setAvailableAssets] = useState<AssetSummary[]>([]);
@@ -134,6 +138,8 @@ const OfficerSchedulePage: React.FC = () => {
       setCoverage([]);
       setOnCallPeriods([]);
       setOvertimeOffers([]);
+      setAdHocWorkUnits([]);
+      setAdHocWorkUnitId('');
       setActiveShiftId(null);
       setShiftAssets([]);
       setAvailableAssets([]);
@@ -143,13 +149,14 @@ const OfficerSchedulePage: React.FC = () => {
     }
     setLoading(true);
     setError(null);
-    const [shiftResponse, coverageResponse, staffResponse, officerResponse, swapResponse, onCallResponse] = await Promise.all([
+    const [shiftResponse, coverageResponse, staffResponse, officerResponse, swapResponse, onCallResponse, adHocUnitsResponse] = await Promise.all([
       supabase.from('shifts').select('id, service_type, scheduled_start, scheduled_end, status, notes, shift_health, total_stops, ended_reason').eq('officer_user_id', profile.id).gte('scheduled_end', new Date().toISOString()).neq('status', 'cancelled').order('scheduled_start', { ascending: true }).limit(40),
       supabase.from('shift_coverage_requests').select('id, shift_date, start_time, end_time, required_staff_count, urgency, notes, site:site_id(name)').eq('organization_id', profile.organizationId).eq('status', 'open').gte('shift_date', localDateIso()).order('shift_date', { ascending: true }).order('start_time', { ascending: true }),
       supabase.from('staff_profiles').select('id').eq('organization_id', profile.organizationId).or(`user_id.eq.${profile.id},id.eq.${profile.id}`).limit(1).maybeSingle(),
       supabase.from('staff_profiles').select('id,user_id,work_ready').eq('organization_id', profile.organizationId).eq('work_ready', true),
       supabase.from('shift_swaps').select('id,original_shift_id,status').eq('requested_by', profile.id).eq('status', 'pending'),
       supabase.from('on_call_periods').select('id,period_type,starts_at,ends_at,flat_rate,status,notes').eq('officer_user_id', profile.id).eq('status', 'pending').gte('ends_at', new Date().toISOString()).order('starts_at').limit(20),
+      supabase.from('roster_work_units').select('id, name, work_unit_type, service_type').eq('organization_id', profile.organizationId).eq('active', true).order('name').limit(100),
     ]);
     setPendingSwaps((swapResponse.data as PendingSwap[]) ?? []);
     const candidateRows = Array.isArray(officerResponse.data) ? officerResponse.data as Array<{ id: string; user_id: string | null; work_ready: boolean }> : [];
@@ -159,6 +166,8 @@ const OfficerSchedulePage: React.FC = () => {
     setSwapOfficers(candidateRows.filter((row) => row.user_id && row.user_id !== profile.id).map((row) => ({ id: row.id, label: userLabels.get(row.user_id as string) ?? row.id })));
     setAssigned((shiftResponse.data as AssignedShift[]) ?? []);
     setOnCallPeriods((onCallResponse.data as OnCallPeriod[]) ?? []);
+    setAdHocWorkUnits((adHocUnitsResponse.data as WorkUnit[]) ?? []);
+    if (!adHocUnitsResponse.data?.some((unit: { id: string }) => unit.id === adHocWorkUnitId)) setAdHocWorkUnitId('');
     const activeShift = ((shiftResponse.data as AssignedShift[]) ?? []).find((shift) => shift.status === 'in_progress');
     let assetError: { message: string } | null = null;
     if (activeShift) {
@@ -206,6 +215,7 @@ const OfficerSchedulePage: React.FC = () => {
       ['open coverage', coverageResponse.error],
       ['your roster profile', staffResponse.error],
       ['on-call assignments', onCallResponse.error],
+      ['available work units', adHocUnitsResponse.error],
       ['shift equipment', assetError],
       ['roster slots', slotError],
     ]);
@@ -324,6 +334,30 @@ const OfficerSchedulePage: React.FC = () => {
     setAssetSaving(false);
   };
 
+  const startAdHocShift = async (event: React.FormEvent) => {
+    event.preventDefault();
+    const unit = adHocWorkUnits.find((candidate) => candidate.id === adHocWorkUnitId);
+    if (!unit) {
+      setError('Choose the work unit for this unscheduled shift.');
+      return;
+    }
+    setStartingAdHoc(true); setError(null); setNotice(null);
+    const { data, error: startError } = await supabase.rpc('start_ad_hoc_officer_shift', {
+      p_work_unit_id: unit.id,
+      p_module_key: unit.service_type,
+      p_notes: adHocNotes.trim() || null,
+    });
+    if (startError || !data) {
+      setError(describeLoadFailures([['unscheduled shift start', startError]]) ?? 'The unscheduled shift was not started.');
+    } else {
+      setNotice(`${unit.name} shift started now. Record your work as you go, then use End shift when you are finished.`);
+      setAdHocWorkUnitId('');
+      setAdHocNotes('');
+      await loadSchedule();
+    }
+    setStartingAdHoc(false);
+  };
+
   const respondToAdditionalWork = async (event: React.FormEvent) => {    event.preventDefault();
     if (!workResponse) return;
     setClaiming(true);
@@ -388,6 +422,7 @@ const OfficerSchedulePage: React.FC = () => {
       {notice && <div className="officer-schedule-message is-success" role="status"><CheckCircle2 size={17} /><span>{notice}</span><button type="button" onClick={() => setNotice(null)} title="Dismiss"><X size={16} /></button></div>}
       {responseReceipt && <section className="officer-schedule-receipt" aria-label="Roster response recorded"><div><span>Roster response recorded</span><strong>{responseReceipt.slotStatus.replaceAll('_',' ')}</strong><small>Roster slot {responseReceipt.slotId.slice(0,8)}{responseReceipt.shiftId ? ` · field shift ${responseReceipt.shiftId.slice(0,8)} ${responseReceipt.shiftStatus?.replaceAll('_',' ') ?? ''}` : ' · internal work, no field shift'}</small></div><button type="button" onClick={() => setResponseReceipt(null)} title="Dismiss receipt"><X size={16}/></button></section>}
 
+      {!activeShiftId && adHocWorkUnits.length > 0 && <section className="officer-ad-hoc-shift" aria-labelledby="ad-hoc-shift-title"><div><span>Unscheduled work</span><h2 id="ad-hoc-shift-title">Start a shift now</h2><p>Use this only when your supervisor has asked you to begin work that is not on your roster. You can only have one active shift.</p></div><form onSubmit={startAdHocShift}><label htmlFor="ad-hoc-work-unit">Work unit</label><select id="ad-hoc-work-unit" value={adHocWorkUnitId} onChange={(event) => setAdHocWorkUnitId(event.target.value)} disabled={startingAdHoc}><option value="">Choose the work you are starting</option>{adHocWorkUnits.map((unit) => <option key={unit.id} value={unit.id}>{unit.name} · {unit.service_type.replaceAll('_', ' ')}</option>)}</select><label htmlFor="ad-hoc-notes">Context for the roster record <span>(optional)</span></label><textarea id="ad-hoc-notes" rows={2} value={adHocNotes} onChange={(event) => setAdHocNotes(event.target.value)} disabled={startingAdHoc} placeholder="Who asked you to start, or what needs attention?" /><button type="submit" disabled={startingAdHoc || !adHocWorkUnitId}>{startingAdHoc ? 'Starting…' : 'Start unscheduled shift'}</button></form></section>}
       {(onCallPeriods.length > 0 || overtimeOffers.length > 0) && <section className="officer-additional-work" aria-labelledby="additional-work-title"><div><span>Response required</span><h2 id="additional-work-title">On-call and overtime offers</h2><p>Accept only work you can cover. Declines require a reason so the roster team can safely offer it elsewhere.</p></div>{onCallPeriods.map((period) => <article key={period.id}><div><strong>{period.period_type.replaceAll('_', ' ')} on-call</strong><small>{formatDate(period.starts_at)}, {formatTime(period.starts_at)} - {formatDate(period.ends_at)}, {formatTime(period.ends_at)}{period.flat_rate != null ? ` · $${Number(period.flat_rate).toFixed(2)} flat rate` : ''}{period.notes ? ` · ${period.notes}` : ''}</small></div><div><button type="button" onClick={() => setWorkResponse({ kind: 'on_call', id: period.id, expectedStatus: period.status, response: 'declined', title: 'On-call period' })}>Decline</button><button type="button" onClick={() => setWorkResponse({ kind: 'on_call', id: period.id, expectedStatus: period.status, response: 'accepted', title: 'On-call period' })}>Accept</button></div></article>)}{overtimeOffers.map((offer) => { const slot = slots.find((item) => item.id === offer.roster_slot_id); const unit = workUnits.find((item) => item.id === slot?.work_unit_id); return <article key={offer.id}><div><strong>Overtime offer{unit ? ` · ${unit.name}` : ''}</strong><small>{slot ? `${formatDate(slot.scheduled_start)}, ${formatTime(slot.scheduled_start)} - ${formatTime(slot.scheduled_end)} · ` : ''}Seniority position {offer.seniority_position} · respond before {formatTime(offer.expires_at)}</small></div><div><button type="button" onClick={() => setWorkResponse({ kind: 'overtime', id: offer.id, expectedStatus: offer.status, response: 'declined', title: 'Overtime offer' })}>Decline</button><button type="button" onClick={() => setWorkResponse({ kind: 'overtime', id: offer.id, expectedStatus: offer.status, response: 'accepted', title: 'Overtime offer' })}>Accept</button></div></article>; })}</section>}
       {activeShiftId && <section className="officer-shift-assets" aria-labelledby="shift-assets-title"><div><span>On this shift</span><h2 id="shift-assets-title">Vehicles and equipment</h2><p>Sign out what you are carrying, and hand it back with its condition so the next officer knows what they are getting.</p></div>{shiftAssets.length === 0 ? <p className="officer-shift-assets-empty">Nothing signed out to this shift yet.</p> : shiftAssets.map((link) => <article key={link.id}><div><strong>{link.asset?.name ?? 'Unnamed asset'}</strong><small>{[link.asset?.asset_type.replaceAll('_', ' '), link.asset?.registration, link.asset?.serial_number].filter(Boolean).join(' · ') || 'No identifiers recorded'} · signed out {formatTime(link.assigned_at)}</small></div><button type="button" onClick={() => { setReturningAsset(link); setReturnCondition('good'); setReturnOdometer(''); setReturnFuel(''); setReturnDefects(''); }}>Return</button></article>)}{availableAssets.length === 0 ? <p className="officer-shift-assets-empty">No equipment is currently available to sign out.</p> : <div className="officer-shift-assets-assign"><label htmlFor="officer-asset-select">Sign out equipment</label><select id="officer-asset-select" value={assetToAssign} onChange={(event) => setAssetToAssign(event.target.value)} disabled={assetSaving}><option value="">Choose a vehicle or item</option>{availableAssets.map((asset) => <option key={asset.id} value={asset.id}>{asset.name} · {asset.asset_type.replaceAll('_', ' ')}{asset.registration ? ` · ${asset.registration}` : ''}</option>)}</select><button type="button" onClick={() => void assignAsset()} disabled={assetSaving || !assetToAssign}>{assetSaving ? 'Working…' : 'Sign out'}</button></div>}</section>}
 

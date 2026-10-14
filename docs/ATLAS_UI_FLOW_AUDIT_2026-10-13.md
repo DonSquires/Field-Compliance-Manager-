@@ -304,3 +304,17 @@ remains unpopulated.
   The retired entries were removed surgically rather than regenerating, because
   a wholesale replacement would be an unreviewable diff in the same change as a
   live function drop. Regenerating it deserves its own change.
+
+### Closure log — officer unscheduled shift
+
+- `start_ad_hoc_officer_shift` now has a real caller in
+  `OfficerSchedulePage.tsx`. Officers can choose an active organisation work
+  unit, record who asked them to begin and why, and start an unscheduled shift
+  through the governed RPC. The page only shows this action when no shift is
+  already in progress, and completion continues through the existing
+  debrief/readiness/`complete_officer_shift` path rather than creating a
+  second stop authority.
+- Atlas moved 178 -> 177 bounded gaps. The capability is `wired=true`; it is
+  not claimed as `exercised`. The supplied runtime credential authenticated as
+  `grand_master`, not `officer` or `admin_officer`, so no live shift was created
+  under an unauthorised test role.
