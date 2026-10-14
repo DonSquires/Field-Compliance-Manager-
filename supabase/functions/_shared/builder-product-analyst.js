@@ -4,7 +4,7 @@ const {
 } = require('./builder-model-adapter');
 const { fitRepositoryContext } = require('./builder-repository-context');
 
-const PRODUCT_ANALYST_PROMPT_VERSION = 'product-analyst-v12';
+const PRODUCT_ANALYST_PROMPT_VERSION = 'product-analyst-v13';
 
 const PRODUCT_SPEC_SCHEMA = Object.freeze({
   type: 'object',
@@ -82,6 +82,12 @@ function suppliedResearchUrls(taskDescription) {
   return [...new Set(String(taskDescription || '').match(/https:\/\/[^\s<>()\]\["']+/g) || [])]
     .map((url) => url.replace(/[.,;:!?]+$/, ''))
     .slice(0, 10);
+}
+
+function requiredSourceScope(taskDescription) {
+  const line = String(taskDescription || '').match(/required source scope:\s*([^\n]+)/i)?.[1] || '';
+  return [...new Set((line.match(/\b(?:apps|supabase|services|scripts|test|docs)\/[\w./-]+/g) || [])
+    .map(file => file.replace(/[.,;:!?]+$/, '')))];
 }
 
 function isBroadUiRedesign(taskDescription) {
@@ -165,6 +171,7 @@ function validateRepositoryGrounding(specification, { repositoryContext = {}, ta
     .map(value => value.toLowerCase()));
   const task = String(taskDescription || '');
   const taskLower = task.toLowerCase();
+  const requiredScope = requiredSourceScope(task);
   const forbidsNewBackend = /\bfrontend-only\b|\bdo not invent (?:schema|apis?)\b|\bwithout (?:new|inventing) (?:routes?|apis?|schema)\b/i.test(task);
   const neutralEntities = new Set(['none', 'no new entity', 'no new entities', 'existing frontend state', 'existing ui state']);
   const trackedFiles = new Set([
@@ -178,6 +185,9 @@ function validateRepositoryGrounding(specification, { repositoryContext = {}, ta
     for (const file of requirement.source_scope || []) {
       if (!/^(?:apps|supabase|services|scripts|test|docs)\/[\w./-]+$/.test(file)) {
         throw new Error(`delivery requirement source_scope is not a repository path: ${file}`);
+      }
+      if (requiredScope.length > 0 && !requiredScope.includes(file)) {
+        throw new Error(`delivery requirement source_scope is outside the task's required source scope: ${file}`);
       }
       if (trackedFiles.size > 0 && !trackedFiles.has(file) && !taskSourcePaths.has(file)) {
         throw new Error(`delivery requirement source_scope was not supplied by repository evidence: ${file}`);
@@ -230,6 +240,7 @@ function buildProductAnalystPrompt({ taskDescription, repositoryContext, constra
   const researchRequired = researchEvidenceRequired(task);
   const researchUrls = researchRequired ? suppliedResearchUrls(task) : [];
   const broadUiRedesign = isBroadUiRedesign(task);
+  const taskRequiredSourceScope = requiredSourceScope(task);
   const forbidsNewBackend = /\bfrontend-only\b|\bdo not (?:create or )?propose (?:any )?(?:database|schema|rpc|api)\b|\bdo not invent (?:schema|apis?)\b|\bwithout (?:new|inventing) (?:routes?|apis?|schema)\b/i.test(task);
   const safeConstraints = Array.isArray(constraints)
     ? constraints.filter(value => typeof value === 'string').slice(0, 100)
@@ -244,6 +255,7 @@ function buildProductAnalystPrompt({ taskDescription, repositoryContext, constra
     'Require schema and Atlas checks, keeping proven flow reach separate from structural FK reach and treating references-only edges as weak evidence.',
     'Define a responsive, accessible human-glass acceptance route for the affected role, including loading, empty, error, permission, success, and safe-next-action states that apply.',
     'Turn the approved scope into delivery_requirements: observable outcomes with exact evidence and repository-grounded source_scope. These are the engineer handoff contract, not optional aspirations.',
+    'When required_source_scope is non-empty, every delivery requirement source_scope entry must be copied from that exact allowlist; do not add manifests, tests, application files, or documentation outside it.',
     'For a broad UI/UX redesign, follow broad_ui_redesign_delivery_contract exactly. Copy each required category into observable delivery requirement outcomes/evidence, including the literal state words loading, empty, error, permission, and success. Do not summarize those states as "all states" or "required states".',
     'Put every unknown that affects implementation in unresolved_questions.',
     'When research is required, cite only URLs supplied in the task; record the exact observed pattern and how it applies, never invent a source or claim browsing.',
@@ -264,7 +276,8 @@ function buildProductAnalystPrompt({ taskDescription, repositoryContext, constra
     },
     scope_contract: {
       frontend_only_no_new_backend: forbidsNewBackend,
-      data_model_proposal_must_be_empty: forbidsNewBackend
+      data_model_proposal_must_be_empty: forbidsNewBackend,
+      required_source_scope: taskRequiredSourceScope
     },
     broad_ui_redesign_delivery_contract: broadUiRedesign ? {
       minimum_delivery_requirements: 5,
@@ -505,6 +518,7 @@ module.exports = {
   normalizeRepositoryContext,
   researchEvidenceRequired,
   suppliedResearchUrls,
+  requiredSourceScope,
   isBroadUiRedesign,
   validateDeliveryRequirements,
   validateRepositoryGrounding,

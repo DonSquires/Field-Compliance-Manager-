@@ -464,6 +464,13 @@ period, so `FinanceBureauPage.guard.test.ts.` did not equal the grounded
 `FinanceBureauPage.guard.test.ts`. `product-analyst-v12` strips trailing prose
 punctuation from task-extracted repository paths before exact comparison;
 interior path characters and the safe repository-prefix check remain strict.
+The next bounded main-health repair then added `package.json` to a one-file
+guard-test delivery scope even though the repair brief supplied a required
+source scope. `product-analyst-v13` extracts that exact allowlist into the
+machine-readable scope contract and rejects any delivery requirement that adds
+another file. This keeps automated main-health self-heal inside its proven
+failing-guard boundary rather than letting analysis expand into application or
+dependency terrain.
 
 Runtime acceptance 2026-10-11: the laptop vision watcher now writes an
 independent liveness heartbeat and its Docker health check terminates only a

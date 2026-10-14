@@ -6,6 +6,7 @@ const {
   normalizeRepositoryContext,
   researchEvidenceRequired,
   suppliedResearchUrls,
+  requiredSourceScope,
   isBroadUiRedesign,
   validateDeliveryRequirements,
   validateRepositoryGrounding,
@@ -95,7 +96,8 @@ test('Product Analyst frontend-only prompt requires an empty data model proposal
   const request = JSON.parse(prompt.userPrompt);
   assert.deepEqual(request.scope_contract, {
     frontend_only_no_new_backend: true,
-    data_model_proposal_must_be_empty: true
+    data_model_proposal_must_be_empty: true,
+    required_source_scope: []
   });
   assert.deepEqual(request.required_output.data_model_proposal, []);
 });
@@ -120,6 +122,30 @@ test('Product Analyst prompt exposes the exact broad redesign delivery contract'
     source_scope_rule: 'Use only exact repository paths supplied by repository_context or named byte-for-byte in the task.'
   });
   assert.match(prompt.systemPrompt, /literal state words loading, empty, error, permission, and success/);
+});
+
+test('Product Analyst constrains delivery requirements to required source scope', () => {
+  const taskDescription = 'Repair the guard.\nRequired source scope: apps/web/src/pages/FinanceBureauPage.guard.test.ts.';
+  assert.deepEqual(requiredSourceScope(taskDescription), ['apps/web/src/pages/FinanceBureauPage.guard.test.ts']);
+  const prompt = buildProductAnalystPrompt({
+    taskDescription,
+    repositoryContext: { build_map: { tracked_files: ['apps/web/src/pages/FinanceBureauPage.guard.test.ts', 'apps/web/src/pages/FinanceBureauPage.tsx'] } }
+  });
+  assert.deepEqual(JSON.parse(prompt.userPrompt).scope_contract.required_source_scope, ['apps/web/src/pages/FinanceBureauPage.guard.test.ts']);
+
+  const specification = {
+    ...validSpecification(),
+    delivery_requirements: [{
+      id: 'DR-1',
+      outcome: 'Repair the failing guard',
+      evidence: 'The guard test passes',
+      source_scope: ['apps/web/src/pages/FinanceBureauPage.tsx']
+    }]
+  };
+  assert.throws(() => validateRepositoryGrounding(specification, {
+    repositoryContext: { build_map: { tracked_files: ['apps/web/src/pages/FinanceBureauPage.guard.test.ts', 'apps/web/src/pages/FinanceBureauPage.tsx'], schema: {} } },
+    taskDescription
+  }), /outside the task's required source scope/);
 });
 
 test('Product Analyst prompt makes the required source allowlist explicit', () => {
