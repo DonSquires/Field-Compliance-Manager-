@@ -4,7 +4,7 @@ const {
 } = require('./builder-model-adapter');
 const { fitRepositoryContext } = require('./builder-repository-context');
 
-const PRODUCT_ANALYST_PROMPT_VERSION = 'product-analyst-v6';
+const PRODUCT_ANALYST_PROMPT_VERSION = 'product-analyst-v7';
 
 const PRODUCT_SPEC_SCHEMA = Object.freeze({
   type: 'object',
@@ -112,6 +112,9 @@ function validateRepositoryGrounding(specification, { repositoryContext = {}, ta
   const neutralEntities = new Set(['none', 'no new entity', 'no new entities', 'existing frontend state', 'existing ui state']);
 
   if (forbidsNewBackend) {
+    if ((specification.data_model_proposal || []).length > 0) {
+      throw new Error('data_model_proposal must be empty for frontend-only work that forbids backend changes');
+    }
     for (const proposal of specification.data_model_proposal || []) {
       const entity = boundedString(proposal?.entity, 300).toLowerCase();
       if (entity && !neutralEntities.has(entity) && !schemaEntities.has(entity)) {
@@ -152,6 +155,7 @@ function buildProductAnalystPrompt({ taskDescription, repositoryContext, constra
   const context = fitRepositoryContext(normalizeRepositoryContext(repositoryContext), task);
   const researchRequired = researchEvidenceRequired(task);
   const researchUrls = researchRequired ? suppliedResearchUrls(task) : [];
+  const forbidsNewBackend = /\bfrontend-only\b|\bdo not (?:create or )?propose (?:any )?(?:database|schema|rpc|api)\b|\bdo not invent (?:schema|apis?)\b|\bwithout (?:new|inventing) (?:routes?|apis?|schema)\b/i.test(task);
   const safeConstraints = Array.isArray(constraints)
     ? constraints.filter(value => typeof value === 'string').slice(0, 100)
     : [];
@@ -181,13 +185,17 @@ function buildProductAnalystPrompt({ taskDescription, repositoryContext, constra
       minimum_sources: researchRequired ? 4 : 0,
       supplied_research_urls: researchUrls
     },
+    scope_contract: {
+      frontend_only_no_new_backend: forbidsNewBackend,
+      data_model_proposal_must_be_empty: forbidsNewBackend
+    },
     required_output: {
       product_brief: { problem: 'string', outcome: 'string', scope: ['string'] },
       user_roles: [{ role: 'string', needs: ['string'] }],
       user_journeys: [{ actor: 'string', goal: 'string', steps: ['string'] }],
       functional_requirements: [{ id: 'FR-1', requirement: 'string', priority: 'must|should|could' }],
       non_functional_requirements: [{ id: 'NFR-1', requirement: 'string' }],
-      data_model_proposal: [{ entity: 'string', purpose: 'string', relationships: ['string'] }],
+      data_model_proposal: forbidsNewBackend ? [] : [{ entity: 'existing repository entity name', purpose: 'string', relationships: ['existing repository relationship'] }],
       acceptance_criteria: [{ id: 'AC-1', criterion: 'string' }],
       workflow_verification: {
         before: ['precondition, permission, source record, configuration, route, or initial data check'],

@@ -81,6 +81,20 @@ test('Product Analyst prompt requires grounded JSON and unresolved unknowns', ()
     minimum_sources: 0,
     supplied_research_urls: []
   });
+  assert.equal(JSON.parse(prompt.userPrompt).scope_contract.frontend_only_no_new_backend, false);
+});
+
+test('Product Analyst frontend-only prompt requires an empty data model proposal', () => {
+  const prompt = buildProductAnalystPrompt({
+    taskDescription: 'Frontend-only redesign. Do not create or propose any database entity, RPC, route, or API.',
+    repositoryContext: { repository: 'owner/repo' }
+  });
+  const request = JSON.parse(prompt.userPrompt);
+  assert.deepEqual(request.scope_contract, {
+    frontend_only_no_new_backend: true,
+    data_model_proposal_must_be_empty: true
+  });
+  assert.deepEqual(request.required_output.data_model_proposal, []);
 });
 
 test('Product Analyst prompt makes the required source allowlist explicit', () => {
@@ -146,14 +160,10 @@ test('Product Analyst rejects invented backend terrain and product integrations 
 
   assert.throws(
     () => validateRepositoryGrounding(specification, { repositoryContext, taskDescription }),
-    /entity not supplied by repository schema/
+    /must be empty for frontend-only work/
   );
 
-  specification.data_model_proposal = [{
-    entity: 'builder_jobs',
-    purpose: 'display existing job state',
-    relationships: []
-  }];
+  specification.data_model_proposal = [];
   assert.throws(
     () => validateRepositoryGrounding(specification, { repositoryContext, taskDescription }),
     /Atlas capability not supplied/

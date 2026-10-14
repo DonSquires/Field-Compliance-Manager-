@@ -249,7 +249,11 @@ The next live Product Analyst run proved the semantic gate by rejecting
 retries repeated the same prompt without the validation reason. Retry actions
 now append the bounded prior failure as an explicit correction constraint, so
 Bob can self-correct without weakening the gate or relying on a human to rewrite
-the brief.
+the brief. A second attempt still proposed `BobPanel` because the concrete JSON
+example required one data-model object while the prose required no new entity;
+Product Analyst v7 removes that contradiction. Frontend-only/no-backend briefs
+now receive an explicit scope contract and an empty `data_model_proposal`
+shape, which the validator also enforces.
 
 Natural-language Builder acceptance hardening 2026-10-13: Bob's deterministic
 post-evidence Builder fallback now recognises ordinary owner language such as
