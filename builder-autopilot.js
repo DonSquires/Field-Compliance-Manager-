@@ -592,7 +592,11 @@ async function autopilotTick({ supabase, jobs, actions, log = () => {} }) {
             outcomes.push({ job: job.id, outcome: 'deployed', url: release.target_url });
             continue;
           }
-          if (job.autopilot_state !== 'published') {
+          const interruptedAutomerge = job.autopilot_report?.merged !== true && (
+            job.autopilot_report?.automerge === true
+            || (job.autopilot_source === 'main_monitor' && job.autopilot_report?.automerge == null)
+          );
+          if (job.autopilot_state !== 'published' || interruptedAutomerge) {
             const snapshot = await loadBuilderRuntimeSnapshot(supabase, job.id);
             const evidence = await collectEvidence({ supabase, snapshot });
             if (!evidence.validatedPatchId) throw new Error('no verified patch artifact to reconcile');

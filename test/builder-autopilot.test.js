@@ -222,6 +222,9 @@ test('autopilot resumes an interrupted eligible publication instead of parking i
   const { job, supabase } = releaseReadyFixture();
   Object.assign(job, {
     autopilot_requested_by: 'user-1',
+    autopilot_source: 'main_monitor',
+    autopilot_state: 'published',
+    autopilot_report: { merged: false },
     workspace_pull_request_url: 'https://github.com/owner/repo/pull/26',
   });
   const actions = actionsRecorder();

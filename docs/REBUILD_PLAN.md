@@ -17,7 +17,9 @@ making an interrupted merge unrecoverable. Eligible changes now open ready for
 review, exact-head draft pull requests are promoted before guarded squash
 merge, recorded pull-request numbers are recovered from the durable URL, and
 an interrupted publication re-evaluates the full evidence contract before it
-may resume. Ineligible work remains draft-only and cannot merge.
+may resume. Legacy bounded main-health receipts that recorded publication
+without a merge decision are reconciled once and receive an explicit decision.
+Ineligible work remains draft-only and cannot merge.
 
 Live service-area finding 2026-10-11: R&M organisation settings could preview a
 canonical council boundary, then told the user Bob would send it to Approvals
