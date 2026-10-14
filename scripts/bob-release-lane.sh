@@ -103,7 +103,7 @@ if [[ -n "$SHARED_CHANGED" ]]; then
   for shared in $SHARED_CHANGED; do
     base="$(basename "$shared")"
     importers="$(git -C "$REPO_DIR" grep -l -e "_shared/${base}" "$HEAD_SHA" -- 'supabase/functions/*/index.ts' 2>/dev/null | sed -n 's#^[0-9a-f]*:supabase/functions/\([^/]*\)/index.ts#\1#p' || true)"
-    FUNCTIONS="$(printf '%s\n%s\n' "$FUNCTIONS" "$importers" | grep -v '^$' | sort -u)"
+    FUNCTIONS="$(printf '%s\n%s\n' "$FUNCTIONS" "$importers" | sed '/^$/d' | sort -u)"
   done
 fi
 has() { printf '%s\n' "$CHANGED" | grep -qE "$1"; }

@@ -239,6 +239,11 @@ implementation. Product Analyst v6 now treats research products as evidence
 only unless integration is explicitly requested and validates frontend-only
 data proposals, relationship identifiers, and named Bob/Builder capabilities
 against the supplied repository/schema context before requesting approval.
+The first v6 release also exposed a release-classification shell edge case:
+when a changed shared Builder module had no Edge Function importers, an empty
+`grep -v` inside command substitution returned status 1 and `set -e` terminated
+the lane before it wrote a plan. Empty importer sets are valid for
+control-plane-only modules; the merge now uses a zero-safe empty-line filter.
 
 Natural-language Builder acceptance hardening 2026-10-13: Bob's deterministic
 post-evidence Builder fallback now recognises ordinary owner language such as

@@ -40,6 +40,8 @@ test('release lane skips applied migrations and exclusively owns its live pointe
   assert.match(lane, /DEPLOYABLE_CHANGED=.*--diff-filter=ACMRT/);
   assert.match(lane, /FUNCTIONS=.*"\$DEPLOYABLE_CHANGED"/);
   assert.match(lane, /SHARED_CHANGED=.*"\$DEPLOYABLE_CHANGED"/);
+  assert.match(lane, /FUNCTIONS=.*sed '\/\^\$\/d' \| sort -u/);
+  assert.doesNotMatch(lane, /FUNCTIONS=.*grep -v '\^\$'/);
   assert.match(lane, /migration repair --status applied "\$version" --project-ref "\$SUPABASE_PROJECT_REF"/);
   assert.match(lane, /applied but ledger repair failed/);
 
