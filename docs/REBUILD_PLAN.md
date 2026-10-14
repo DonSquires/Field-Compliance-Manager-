@@ -444,6 +444,12 @@ relevance fitter ran, causing a grounded delivery scope to be rejected as
 unknown. `product-analyst-v9` accepts a syntactically safe exact source path
 when it is present either in fitted repository evidence or byte-for-byte in the
 owner's task; unnamed paths still fail closed.
+The next live v9 output covered the workspace hierarchy but used a grounded
+paraphrase rather than the validator's exact phrase "information hierarchy".
+`product-analyst-v10` accepts bounded semantic equivalents (`hierarchy`,
+`workspace`, `composition`, `layout`, `navigation`, or `primary action`) for
+that one required category; the other four categories, five-delivery minimum,
+source-scope grounding, and engineer evidence gate remain unchanged.
 
 Runtime acceptance 2026-10-11: the laptop vision watcher now writes an
 independent liveness heartbeat and its Docker health check terminates only a

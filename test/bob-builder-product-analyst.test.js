@@ -238,7 +238,7 @@ test('Product Analyst rejects generic acceptance for a broad UI redesign', () =>
     ...validSpecification(),
     acceptance_criteria: Array.from({ length: 5 }, (_, index) => ({ id: `AC-${index + 1}`, criterion: `Observable criterion ${index + 1}` })),
     delivery_requirements: [
-      { id: 'DR-1', outcome: 'Information hierarchy and workspace composition make the primary action clear', evidence: 'Human glass review', source_scope: ['apps/web/src/pages/BuilderControlRoomPage.tsx'] },
+      { id: 'DR-1', outcome: 'A coherent enterprise workspace groups conversation and Studio controls', evidence: 'Human glass review', source_scope: ['apps/web/src/pages/BuilderControlRoomPage.tsx'] },
       { id: 'DR-2', outcome: 'Responsive desktop and mobile breakpoints preserve context', evidence: 'Desktop and mobile browser checks', source_scope: ['apps/web/src/pages/BuilderControlRoomPage.css'] },
       { id: 'DR-3', outcome: 'Accessible keyboard focus and screen reader labels meet WCAG', evidence: 'Keyboard and accessibility checks', source_scope: ['apps/web/src/components/BobStudio.tsx'] },
       { id: 'DR-4', outcome: 'Loading, empty, error, permission, and success states provide a safe next action', evidence: 'State-focused component tests', source_scope: ['apps/web/src/components/BobStudio.tsx'] },

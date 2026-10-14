@@ -4,7 +4,7 @@ const {
 } = require('./builder-model-adapter');
 const { fitRepositoryContext } = require('./builder-repository-context');
 
-const PRODUCT_ANALYST_PROMPT_VERSION = 'product-analyst-v9';
+const PRODUCT_ANALYST_PROMPT_VERSION = 'product-analyst-v10';
 
 const PRODUCT_SPEC_SCHEMA = Object.freeze({
   type: 'object',
@@ -114,7 +114,7 @@ function validateDeliveryRequirements(specification, taskDescription) {
   }
   const deliveryText = requirements.map(requirement => `${requirement.outcome} ${requirement.evidence}`).join(' ');
   const requiredConcerns = [
-    ['information hierarchy or workspace composition', /\b(?:information hierarchy|workspace composition|layout|navigation|primary action)\b/i],
+    ['information hierarchy or workspace composition', /\b(?:hierarch\w*|workspace|composition|layout|navigation|primary action)\b/i],
     ['responsive desktop and mobile behavior', /\b(?:responsive|mobile|desktop|breakpoint)\b/i],
     ['accessibility and keyboard behavior', /\b(?:accessib|keyboard|focus|screen reader|wcag)\b/i],
     ['loading, empty, error, permission, and success states', /\bloading\b/i, /\bempty\b/i, /\berror\b/i, /\bpermission\b/i, /\bsuccess\b/i],
