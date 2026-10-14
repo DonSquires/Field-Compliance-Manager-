@@ -456,3 +456,10 @@ remains unpopulated.
   grants. Atlas dry-run moved 172 -> 169 bounded gaps: 1 edge function, 113
   RPCs and 55 tables. All three RPCs are now `wired=true`; no runtime exercise
   is claimed because no operational record was fabricated for verification.
+- Authenticated production verification used the dedicated `admin_officer`
+  test identity and the Admin Portal. The deployed workspace rendered its
+  projection boundary, receive queue and publish form without an alert. The
+  live organisation had zero active incoming handoffs and five source-event
+  choices including the placeholder; no policy, handoff or receipt was
+  created or changed. Live Atlas was seeded from commit `9c966dc2` and
+  confirmed the three RPCs as wired with `exercised` still unclaimed.
