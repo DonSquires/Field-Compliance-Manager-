@@ -536,3 +536,11 @@ remains unpopulated.
   bounded gaps: 1 edge function, 108 RPCs and 55 tables. The two RPCs are now
   statically wired; runtime exercise remains unclaimed because no finance
   record was fabricated.
+- Authenticated production verification used the dedicated `admin_officer`
+  session on the deployed money route. The reconciliation region rendered
+  without an alert, reported zero eligible incoming bank credits and zero
+  receipt candidates, and kept confirmation disabled. This agrees with the
+  pre-change live aggregate diagnostic. No transaction, receipt, match or
+  audit event was fabricated for verification. Live Atlas was refreshed from
+  release commit `8e07e4ed`; both RPCs report `present=true`, `wired=true` and
+  `exercised=null`.
