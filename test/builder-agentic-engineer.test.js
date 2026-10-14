@@ -9,7 +9,7 @@ const { execFileSync } = require('node:child_process');
 
 const policy = require('../builder-path-policy');
 const gateway = require('../builder-model-gateway');
-const { runAgenticEngineer, parseToolCall, RUN_ALLOWLIST, buildProposal, createTools, composeRunNote, classifyNoChange, outlineLines, readingMap, requiredChangedFilesFromTask, taskPacket, DEFAULT_LIMITS } = require('../builder-agentic-engineer');
+const { runAgenticEngineer, parseToolCall, RUN_ALLOWLIST, buildProposal, createTools, composeRunNote, classifyNoChange, finishAgenticReceipt, heartbeatAgenticReceipt, outlineLines, readingMap, requiredChangedFilesFromTask, startAgenticReceipt, taskPacket, DEFAULT_LIMITS } = require('../builder-agentic-engineer');
 
 test('path policy: protected paths are refused on every lane, lanes split at apps/web', () => {
   for (const file of ['.github/workflows/ci.yml', 'deploy/bob-vps/compose.yml', 'Dockerfile', 'services/fcm-api/Dockerfile', 'docker-compose.full.yml', 'package.json', 'apps/web/package-lock.json', '.env', 'apps/web/.env.production', 'supabase/schema.sql', 'apps/web/src/context/AuthContext.tsx', 'supabase/functions/_shared/auth.ts', 'certs/site.pem', '../etc/passwd', 'a/../../b']) {
@@ -81,6 +81,39 @@ test('tool-call parsing tolerates fences and prose; run allowlist is narrow', ()
   assert.equal(allowed('node -e "process.exit(1)"'), false);
   assert.equal(allowed('npm install left-pad'), false);
   assert.equal(allowed('git push origin main'), false);
+});
+
+test('agentic author records a durable session and per-turn heartbeat before final provenance', async () => {
+  const writes = [];
+  const query = {
+    select() { return this; },
+    single: async () => ({ data: { id: 'run-session' }, error: null }),
+    eq: async () => ({ data: null, error: null })
+  };
+  const supabase = {
+    from(table) {
+      assert.equal(table, 'builder_model_runs');
+      return {
+        upsert(value, options) { writes.push({ operation: 'upsert', value, options }); return query; },
+        update(value) { writes.push({ operation: 'update', value }); return query; }
+      };
+    }
+  };
+  const request = {
+    organization_id: 'org-1', job_id: 'job-1', step_id: 'step-1', provider: 'openai', model_name: 'gpt-5.4',
+    prompt_version: 'agentic-engineer-v3', idempotency_key: 'author-key', input_artifact_ids: [], request: {}, chain: ['openai']
+  };
+
+  const receipt = await startAgenticReceipt(supabase, request, { provider: 'gpu_workstation', model: 'qwen3:8b' });
+  await heartbeatAgenticReceipt(supabase, receipt, { provider: 'gpu_workstation', model: 'qwen3:8b', turn: 2, changedFileCount: 1 });
+  await finishAgenticReceipt(supabase, receipt, { ok: true, turns: 3, usage: { output_tokens: 40 } });
+
+  assert.equal(receipt, 'run-session');
+  assert.equal(writes[0].value.status, 'running');
+  assert.equal(writes[0].value.idempotency_key, 'author-key::agentic-session');
+  assert.deepEqual(writes[1].value.usage_metadata, { phase: 'authoring', turn: 2, changed_file_count: 1 });
+  assert.equal(writes[2].value.status, 'completed');
+  assert.deepEqual(writes[2].value.usage_metadata, { output_tokens: 40, phase: 'authored', turns: 3 });
 });
 
 test('required source scope and admitted partial handoffs fail closed', () => {
@@ -771,8 +804,20 @@ test('every run leaves a factual note in bob_self_memory (builder_note) and the 
   const inserted = [];
   const rows = [{ memory_text: 'earlier lesson: tests live under test/', created_at: '2026-09-26T00:00:00Z' }];
   const table = { select() { return this; }, eq() { return this; }, order() { return this; }, async limit() { return { data: rows, error: null }; }, async insert(row) { inserted.push(row); return { error: null }; } };
+  let lastModelRun = null;
+  const modelRuns = {
+    upsert(row) { lastModelRun = row; return this; },
+    update() { return this; },
+    select() { return this; },
+    async single() {
+      return lastModelRun?.idempotency_key?.endsWith('::agentic-session')
+        ? { data: { id: 'session-note' }, error: null }
+        : { data: null, error: { message: 'stub' } };
+    },
+    async eq() { return { data: null, error: null }; }
+  };
   const other = { upsert() { return this; }, select() { return this; }, async single() { return { data: null, error: { message: 'stub' } }; } };
-  const supabase = { from(name) { return name === 'bob_self_memory' ? table : other; }, rpc: async () => ({ data: null, error: null }) };
+  const supabase = { from(name) { return name === 'bob_self_memory' ? table : name === 'builder_model_runs' ? modelRuns : other; }, rpc: async () => ({ data: null, error: null }) };
   let packet = null;
   const callModel = async ({ modelRequest }) => {
     packet = packet || modelRequest.request.messages[1].content;

@@ -390,6 +390,22 @@ explicit byte-for-byte contract, and the runtime adds the bounded prior
 validation error as a mandatory correction constraint on failed UX retries.
 Repository grounding remains strict: the repair teaches the next attempt what
 failed instead of accepting an invented URL, route, access boundary, or page.
+The resumed job `6573c083-6d6f-4245-b6b3-95b0d6c294ba` then proved the repair:
+v7 failed its first UX attempt on the same paraphrase, v8 received that failure
+and completed the grounded design on attempt two.
+
+Builder agentic-lifecycle acceptance 2026-10-15: that resumed job exposed a
+separate false-idle and duplicate-run risk during frontend implementation. The
+live agent budget was four hours with 25-minute model turns, but the in-memory
+run lease expired after 45 minutes and no `builder_model_runs` receipt existed
+until the entire author loop ended. A valid engineer therefore appeared
+`pending` for hours, could be killed by a release without an in-flight receipt,
+and could be duplicated after the short lease expired. Agentic Engineer now
+creates a durable running session before its first turn, heartbeats the active
+provider/model, turn number, and changed-file count on every turn, and closes
+the receipt on success or failure. The stale-run threshold is also bounded
+below by the configured wall budget plus one full model turn and recovery
+headroom, so valid long work cannot be mistaken for an abandoned lease.
 
 Runtime acceptance 2026-10-11: the laptop vision watcher now writes an
 independent liveness heartbeat and its Docker health check terminates only a

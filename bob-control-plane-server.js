@@ -546,7 +546,15 @@ async function resolveBuilderSourceDir(jobId) {
 
 // One Builder run per job at a time; runs continue after the HTTP caller has gone.
 const runningBuilderJobs = new Map();
-const staleBuilderRunMs = Math.max(5 * 60_000, Number(process.env.BOB_BUILDER_STALE_RUN_MS) || 45 * 60_000);
+const agenticWallBudgetMs = Math.max(5 * 60_000, Number(process.env.BOB_BUILDER_AGENT_BUDGET_MS) || 45 * 60_000);
+const agenticTurnTimeoutMs = Math.max(30_000, Number(process.env.BOB_BUILDER_TURN_TIMEOUT_MS) || 420_000);
+// A legitimate agentic run can outlive the old 45-minute lease. Clearing it while its model turn
+// is still active launches a second engineer against the same job and worktree.
+const staleBuilderRunMs = Math.max(
+  5 * 60_000,
+  Number(process.env.BOB_BUILDER_STALE_RUN_MS) || 45 * 60_000,
+  agenticWallBudgetMs + agenticTurnTimeoutMs + 5 * 60_000
+);
 const builderPreflightTimeoutMs = Math.max(30_000, Number(process.env.BOB_BUILDER_PREFLIGHT_TIMEOUT_MS) || 120_000);
 
 function boundedPreflight(promise, label) {

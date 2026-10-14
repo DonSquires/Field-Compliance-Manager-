@@ -745,6 +745,53 @@ async function recordRun({ supabase, modelRequest, content, model, usage, artifa
   return { artifact: persisted.artifact, model_run_id: modelRun.id };
 }
 
+async function startAgenticReceipt(supabase, modelRequest, provider) {
+  if (!supabase) return null;
+  const startedAt = new Date().toISOString();
+  const request = providerRequest(modelRequest, provider, null);
+  const { data, error } = await supabase.from('builder_model_runs').upsert({
+    organization_id: modelRequest.organization_id,
+    job_id: modelRequest.job_id,
+    step_id: modelRequest.step_id,
+    provider: request.provider,
+    model_name: request.model_name || 'provider_default',
+    prompt_version: modelRequest.prompt_version,
+    idempotency_key: `${modelRequest.idempotency_key}::agentic-session`,
+    input_artifact_ids: modelRequest.input_artifact_ids,
+    status: 'running',
+    started_at: startedAt,
+    completed_at: null,
+    error: null,
+    usage_metadata: { phase: 'authoring', turn: 0, changed_file_count: 0 }
+  }, { onConflict: 'idempotency_key' }).select('id').single();
+  if (error || !data?.id) throw new Error('agentic run provenance could not be started');
+  return data.id;
+}
+
+async function heartbeatAgenticReceipt(supabase, receiptId, { provider, model, turn, changedFileCount }) {
+  if (!supabase || !receiptId) return;
+  const { error } = await supabase.from('builder_model_runs').update({
+    provider,
+    model_name: model || 'provider_default',
+    status: 'running',
+    updated_at: new Date().toISOString(),
+    usage_metadata: { phase: 'authoring', turn, changed_file_count: changedFileCount }
+  }).eq('id', receiptId);
+  if (error) throw new Error('agentic run provenance heartbeat failed');
+}
+
+async function finishAgenticReceipt(supabase, receiptId, { ok, turns, usage, error }) {
+  if (!supabase || !receiptId) return;
+  const { error: updateError } = await supabase.from('builder_model_runs').update({
+    status: ok ? 'completed' : 'failed',
+    completed_at: new Date().toISOString(),
+    updated_at: new Date().toISOString(),
+    error: ok ? null : String(error || 'agentic author failed').slice(0, 500),
+    usage_metadata: { ...usage, phase: ok ? 'authored' : 'failed', turns }
+  }).eq('id', receiptId);
+  if (updateError) throw new Error('agentic run provenance could not be completed');
+}
+
 /**
  * Run the agentic engineer for one implementation step. Returns the same shape
  * the one-shot engineers return ({ ok, patch_artifact, proposal }) so the
@@ -847,6 +894,7 @@ async function runAgenticEngineer({
   }
   let active = 0;
   const activeRequest = () => providerRequest(baseRequest, candidates[active], null);
+  const agenticReceiptId = await startAgenticReceipt(supabase, baseRequest, candidates[active]);
   const escalate = (reason) => {
     if (active + 1 >= candidates.length) return false;
     active += 1;
@@ -864,6 +912,12 @@ async function runAgenticEngineer({
   while (turns < limits.maxTurns && now() - started < limits.wallBudgetMs) {
     turns++;
     const base = activeRequest();
+    await heartbeatAgenticReceipt(supabase, agenticReceiptId, {
+      provider: base.provider,
+      model: base.model_name,
+      turn: turns,
+      changedFileCount: tools.__changedFiles().length
+    });
     const isOpenAI = candidates[active].provider === 'openai';
     const activeHealth = health?.[candidates[active].provider] || {};
     const localContext = activeHealth.num_ctx;
@@ -1020,6 +1074,7 @@ async function runAgenticEngineer({
   // leaves a factual note itself; the next job reads it in `your_recent_notes`.
   const note = composeRunNote({ job, lane, outcome, transcript, turns, provider: candidates[active].provider, model: authorModel, lessons });
   if (note) await tools.write_note({ text: note }).catch(() => ({}));
+  await finishAgenticReceipt(supabase, agenticReceiptId, { ok: outcome.ok, turns, usage, error: outcome.error });
 
   return {
     ok: outcome.ok,
@@ -1038,4 +1093,4 @@ async function runAgenticEngineer({
   };
 }
 
-module.exports = { DEFAULT_LIMITS, PROMPT_VERSION, RUN_ALLOWLIST, buildOpeningPacket, buildProposal, classifyNoChange, compactMessages, composeRunNote, createTools, outlineLines, parseToolCall, readingMap, requiredChangedFilesFromTask, runAgenticEngineer, systemPrompt, taskPacket };
+module.exports = { DEFAULT_LIMITS, PROMPT_VERSION, RUN_ALLOWLIST, buildOpeningPacket, buildProposal, classifyNoChange, compactMessages, composeRunNote, createTools, finishAgenticReceipt, heartbeatAgenticReceipt, outlineLines, parseToolCall, readingMap, requiredChangedFilesFromTask, runAgenticEngineer, startAgenticReceipt, systemPrompt, taskPacket };

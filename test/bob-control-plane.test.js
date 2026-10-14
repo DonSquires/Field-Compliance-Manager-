@@ -88,6 +88,7 @@ test('health is public and reports the control plane', async () => {
 test('control-plane source has a bounded stale Builder lease recovery path', () => {
   const source = fs.readFileSync(path.join(root, 'bob-control-plane-server.js'), 'utf8');
   assert.match(source, /BOB_BUILDER_STALE_RUN_MS/);
+  assert.match(source, /agenticWallBudgetMs \+ agenticTurnTimeoutMs \+ 5 \* 60_000/);
   assert.match(source, /BOB_BUILDER_PREFLIGHT_TIMEOUT_MS/);
   assert.match(source, /builder\.run\.stale_lease_cleared/);
   assert.match(source, /clearStaleBuilderRun\(jobId\)/);
