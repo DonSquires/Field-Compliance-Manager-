@@ -2,6 +2,7 @@ import React, { useCallback, useEffect, useState } from 'react';
 import {
   AlertTriangle,
   ArrowRight,
+  ArrowRightLeft,
   Car,
   Camera,
   FileSearch,
@@ -23,7 +24,7 @@ import { useActiveModuleContext } from '../hooks/useActiveModuleContext';
 import { supabase } from '../lib/supabase';
 import './FieldOperationsPage.css';
 
-type FieldOpsArea = 'dispatch' | 'patrol' | 'live-map' | 'officer-activity' | 'welfare-alerts' | 'breach-review' | 'vehicle-search' | 'observation-search' | 'field-reports' | 'cctv-console' | 'cctv-triage' | 'cctv-review' | 'cctv-library' | 'cctv-import' | 'debrief-followup';
+type FieldOpsArea = 'dispatch' | 'patrol' | 'live-map' | 'officer-activity' | 'welfare-alerts' | 'breach-review' | 'vehicle-search' | 'observation-search' | 'field-reports' | 'operational-continuity' | 'cctv-console' | 'cctv-triage' | 'cctv-review' | 'cctv-library' | 'cctv-import' | 'debrief-followup';
 
 interface FieldOperationsPageProps {
   onNavigate: (area: FieldOpsArea) => void;
@@ -73,6 +74,7 @@ const WORKFLOWS: FieldWorkflow[] = [
   { area: 'patrol', label: 'Patrol evidence', detail: 'Review checkpoint visits, proximity, and exceptions', icon: Route, tone: 'green', group: 'review', roles: OPERATIONS_ROLES, moduleKeys: ['patrol', 'static_guarding'] },
   { area: 'field-reports', label: 'Field reports', detail: 'Triage submitted reports and required follow-up', icon: FileWarning, tone: 'amber', group: 'respond', roles: OPERATIONS_ROLES, metric: 'reportFollowUp' },
   { area: 'debrief-followup', label: 'Debrief follow-up', detail: 'Own safety, equipment, and handover actions', icon: FileWarning, tone: 'amber', group: 'respond', roles: OPERATIONS_ROLES },
+  { area: 'operational-continuity', label: 'Operational continuity', detail: 'Publish and acknowledge safe client/provider handoffs', icon: ArrowRightLeft, tone: 'teal', group: 'respond', roles: OPERATIONS_ROLES },
   { area: 'cctv-console', label: 'CCTV & video', detail: 'Playback, observations, imports, processing jobs, and evidence exports', icon: Camera, tone: 'slate', group: 'review', roles: OPERATIONS_ROLES, moduleKeys: ['cctv'] },
   { area: 'breach-review', label: 'Breach review', detail: 'Assess compliance alerts and record governed outcomes', icon: ShieldAlert, tone: 'red', group: 'review', roles: OPERATIONS_ROLES, moduleKeys: ['freedom_camping', 'parking_enforcement'] },
   { area: 'vehicle-search', label: 'Vehicle intelligence', detail: 'Search vehicle, observation, and compliance history', icon: Car, tone: 'blue', group: 'review', roles: OPERATIONS_ROLES, moduleKeys: ['freedom_camping', 'parking_enforcement'] },

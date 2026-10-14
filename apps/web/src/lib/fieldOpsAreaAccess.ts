@@ -1,8 +1,8 @@
-export type FieldOpsSubArea = 'landing' | 'dispatch' | 'patrol' | 'live-map' | 'officer-activity' | 'welfare-alerts' | 'breach-review' | 'vehicle-search' | 'observation-search' | 'field-reports' | 'cctv-console' | 'cctv-triage' | 'cctv-review' | 'cctv-library' | 'cctv-import' | 'debrief-followup' | 'parking' | 'noise-control' | 'biosecurity' | 'smoke-control';
+export type FieldOpsSubArea = 'landing' | 'dispatch' | 'patrol' | 'live-map' | 'officer-activity' | 'welfare-alerts' | 'breach-review' | 'vehicle-search' | 'observation-search' | 'field-reports' | 'operational-continuity' | 'cctv-console' | 'cctv-triage' | 'cctv-review' | 'cctv-library' | 'cctv-import' | 'debrief-followup' | 'parking' | 'noise-control' | 'biosecurity' | 'smoke-control';
 
 export const FIELD_OPS_AREAS: ReadonlySet<FieldOpsSubArea> = new Set([
   'landing', 'dispatch', 'patrol', 'live-map', 'officer-activity', 'welfare-alerts', 'breach-review', 'vehicle-search',
-  'field-reports', 'observation-search', 'cctv-console', 'cctv-triage', 'cctv-review', 'cctv-library', 'cctv-import', 'parking', 'noise-control', 'biosecurity', 'smoke-control',
+  'field-reports', 'operational-continuity', 'observation-search', 'cctv-console', 'cctv-triage', 'cctv-review', 'cctv-library', 'cctv-import', 'parking', 'noise-control', 'biosecurity', 'smoke-control',
   'debrief-followup',
 ]);
 

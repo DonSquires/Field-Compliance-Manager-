@@ -73,6 +73,58 @@ interface WorkUnit {
   service_agreement_module_id: string | null;
 }
 
+interface ContinuityPolicy {
+  id: string;
+  service_agreement_location_id: string;
+  service_agreement_module_id: string;
+  continuity_mode: 'none' | 'handoff_only' | 'live_read' | 'live_read_and_receive';
+  client_coverage_start: string | null;
+  client_coverage_end: string | null;
+  provider_coverage_start: string | null;
+  provider_coverage_end: string | null;
+  share_active_cases: boolean;
+  share_open_tasks: boolean;
+  share_recent_history_hours: number;
+  share_attachments_mode: 'none' | 'redacted' | 'selected_only';
+  share_presence_mode: 'none' | 'on_duty_only';
+  require_handoff_ack: boolean;
+  continuity_retention_hours: number;
+}
+
+interface ContinuityForm {
+  locationId: string;
+  moduleId: string;
+  mode: ContinuityPolicy['continuity_mode'];
+  clientStart: string;
+  clientEnd: string;
+  providerStart: string;
+  providerEnd: string;
+  shareActiveCases: boolean;
+  shareOpenTasks: boolean;
+  historyHours: number;
+  attachmentsMode: ContinuityPolicy['share_attachments_mode'];
+  presenceMode: ContinuityPolicy['share_presence_mode'];
+  requireAck: boolean;
+  retentionHours: number;
+}
+
+const emptyContinuityForm: ContinuityForm = {
+  locationId: '',
+  moduleId: '',
+  mode: 'none',
+  clientStart: '',
+  clientEnd: '',
+  providerStart: '',
+  providerEnd: '',
+  shareActiveCases: false,
+  shareOpenTasks: false,
+  historyHours: 24,
+  attachmentsMode: 'none',
+  presenceMode: 'none',
+  requireAck: true,
+  retentionHours: 24,
+};
+
 export function CrmOperationalWorkPanel({
   agreement,
   sites,
@@ -90,17 +142,20 @@ export function CrmOperationalWorkPanel({
   const [workUnits, setWorkUnits] = useState<WorkUnit[]>([]);
   const [schedules, setSchedules] = useState<DeliverySchedule[]>([]);
   const [configLinks, setConfigLinks] = useState<PatrolConfigLink[]>([]);
+  const [continuityPolicies, setContinuityPolicies] = useState<ContinuityPolicy[]>([]);
   const [buildingRun, setBuildingRun] = useState(false);
+  const [savingContinuity, setSavingContinuity] = useState(false);
   const [loading, setLoading] = useState(true);
   const [saving, setSaving] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [notice, setNotice] = useState<string | null>(null);
   const [showForm, setShowForm] = useState(false);
   const [form, setForm] = useState({ name: '', type: 'static' as 'static' | 'patrol', locationId: '', moduleId: '', routeId: '' });
+  const [continuityForm, setContinuityForm] = useState<ContinuityForm>(emptyContinuityForm);
 
   const load = useCallback(async () => {
     if (agreement.agreement_type !== 'operational') {
-      setLocations([]); setModules([]); setRoutes([]); setWorkUnits([]); setSchedules([]); setConfigLinks([]); setLoading(false);
+      setLocations([]); setModules([]); setRoutes([]); setWorkUnits([]); setSchedules([]); setConfigLinks([]); setContinuityPolicies([]); setLoading(false);
       return;
     }
     setLoading(true); setError(null);
@@ -125,20 +180,25 @@ export function CrmOperationalWorkPanel({
     const configResponse = scheduleKeys.length
       ? await supabase.from('client_site_patrol_config').select('id,proposal_scope_schedule_id,patrol_route_id').in('proposal_scope_schedule_id', scheduleKeys).eq('active', true)
       : { data: [] as PatrolConfigLink[], error: null };
-    const failures = [locationResponse.error, moduleResponse.error, routeResponse.error, unitResponse.error, scheduleResponse.error, configResponse.error].filter(Boolean);
+    const locationIds = ((locationResponse.data as AgreementLocation[]) ?? []).map((location) => location.id);
+    const continuityResponse = locationIds.length
+      ? await supabase.from('service_agreement_continuity_policies').select('id,service_agreement_location_id,service_agreement_module_id,continuity_mode,client_coverage_start,client_coverage_end,provider_coverage_start,provider_coverage_end,share_active_cases,share_open_tasks,share_recent_history_hours,share_attachments_mode,share_presence_mode,require_handoff_ack,continuity_retention_hours').in('service_agreement_location_id', locationIds)
+      : { data: [] as ContinuityPolicy[], error: null };
+    const failures = [locationResponse.error, moduleResponse.error, routeResponse.error, unitResponse.error, scheduleResponse.error, configResponse.error, continuityResponse.error].filter(Boolean);
     if (failures.length) setError(failures[0]?.message ?? 'Operational work evidence could not be loaded.');
     const nextLocations = (locationResponse.data as AgreementLocation[]) ?? [];
     const nextModules = (moduleResponse.data as AgreementModule[]) ?? [];
     const nextRoutes = (routeResponse.data as PatrolRoute[]) ?? [];
-    const locationIds = new Set(nextLocations.map((location) => location.id));
+    const locationIdSet = new Set(nextLocations.map((location) => location.id));
     const routeIds = new Set(nextRoutes.map((route) => route.id));
     setLocations(nextLocations);
     setModules(nextModules);
     setRoutes(nextRoutes);
     setSchedules(scheduleRows);
     setConfigLinks((configResponse.data as PatrolConfigLink[]) ?? []);
+    setContinuityPolicies((continuityResponse.data as ContinuityPolicy[]) ?? []);
     setWorkUnits(((unitResponse.data as WorkUnit[]) ?? []).filter((unit) =>
-      (unit.service_agreement_location_id && locationIds.has(unit.service_agreement_location_id)) ||
+      (unit.service_agreement_location_id && locationIdSet.has(unit.service_agreement_location_id)) ||
       (unit.patrol_route_id && routeIds.has(unit.patrol_route_id))
     ));
     setForm((current) => ({
@@ -146,6 +206,11 @@ export function CrmOperationalWorkPanel({
       locationId: nextLocations.some((location) => location.id === current.locationId) ? current.locationId : (nextLocations[0]?.id ?? ''),
       moduleId: nextModules.some((module) => module.id === current.moduleId) ? current.moduleId : (nextModules.find((module) => module.module_key === 'static_guarding')?.id ?? nextModules[0]?.id ?? ''),
       routeId: nextRoutes.some((route) => route.id === current.routeId) ? current.routeId : (nextRoutes[0]?.id ?? ''),
+    }));
+    setContinuityForm((current) => ({
+      ...current,
+      locationId: nextLocations.some((location) => location.id === current.locationId) ? current.locationId : (nextLocations[0]?.id ?? ''),
+      moduleId: nextModules.some((module) => module.id === current.moduleId) ? current.moduleId : (nextModules[0]?.id ?? ''),
     }));
     setLoading(false);
   }, [agreement.agreement_type, agreement.id, agreement.invitation_status, agreement.provider_organization_id]);
@@ -226,6 +291,80 @@ export function CrmOperationalWorkPanel({
     setSaving(false);
   };
 
+  const editContinuityPair = (locationId: string, moduleId: string) => {
+    const policy = continuityPolicies.find((candidate) =>
+      candidate.service_agreement_location_id === locationId
+      && candidate.service_agreement_module_id === moduleId
+    );
+    setContinuityForm(policy ? {
+      locationId,
+      moduleId,
+      mode: policy.continuity_mode,
+      clientStart: policy.client_coverage_start?.slice(0, 5) ?? '',
+      clientEnd: policy.client_coverage_end?.slice(0, 5) ?? '',
+      providerStart: policy.provider_coverage_start?.slice(0, 5) ?? '',
+      providerEnd: policy.provider_coverage_end?.slice(0, 5) ?? '',
+      shareActiveCases: policy.share_active_cases,
+      shareOpenTasks: policy.share_open_tasks,
+      historyHours: policy.share_recent_history_hours,
+      attachmentsMode: policy.share_attachments_mode,
+      presenceMode: policy.share_presence_mode,
+      requireAck: policy.require_handoff_ack,
+      retentionHours: policy.continuity_retention_hours,
+    } : { ...emptyContinuityForm, locationId, moduleId });
+    setError(null);
+    setNotice(null);
+  };
+
+  const saveContinuityPolicy = async (event: FormEvent) => {
+    event.preventDefault();
+    if (!continuityForm.locationId || !continuityForm.moduleId) {
+      setError('Choose the agreement place and module before saving continuity.');
+      return;
+    }
+    if (Boolean(continuityForm.clientStart) !== Boolean(continuityForm.clientEnd)
+      || Boolean(continuityForm.providerStart) !== Boolean(continuityForm.providerEnd)) {
+      setError('Each coverage window needs both a start and an end, or neither for all-day coverage.');
+      return;
+    }
+    if (!Number.isInteger(continuityForm.historyHours)
+      || continuityForm.historyHours < 1
+      || continuityForm.historyHours > 168
+      || !Number.isInteger(continuityForm.retentionHours)
+      || continuityForm.retentionHours < 1
+      || continuityForm.retentionHours > 168) {
+      setError('History and handoff retention must each be a whole number from 1 to 168 hours.');
+      return;
+    }
+    setSavingContinuity(true);
+    setError(null);
+    setNotice(null);
+    const { error: saveError } = await supabase.rpc('manage_service_agreement_continuity_policy', {
+      p_service_agreement_location_id: continuityForm.locationId,
+      p_service_agreement_module_id: continuityForm.moduleId,
+      p_continuity_mode: continuityForm.mode,
+      p_client_coverage_start: continuityForm.clientStart || null,
+      p_client_coverage_end: continuityForm.clientEnd || null,
+      p_provider_coverage_start: continuityForm.providerStart || null,
+      p_provider_coverage_end: continuityForm.providerEnd || null,
+      p_share_active_cases: continuityForm.shareActiveCases,
+      p_share_open_tasks: continuityForm.shareOpenTasks,
+      p_share_recent_history_hours: continuityForm.historyHours,
+      p_share_attachments_mode: continuityForm.attachmentsMode,
+      p_share_presence_mode: continuityForm.presenceMode,
+      p_require_handoff_ack: continuityForm.requireAck,
+      p_continuity_retention_hours: continuityForm.retentionHours,
+    });
+    if (saveError) setError(saveError.message);
+    else {
+      const location = locations.find((candidate) => candidate.id === continuityForm.locationId);
+      const module = modules.find((candidate) => candidate.id === continuityForm.moduleId);
+      setNotice(`Continuity for ${location ? placeName(location) : 'this place'} · ${module?.module_key.replaceAll('_', ' ') ?? 'module'} is saved with an audit receipt.`);
+      await load();
+    }
+    setSavingContinuity(false);
+  };
+
   if (agreement.agreement_type !== 'operational') return null;
 
   return <section className="crm-operational-work" aria-label={`Operational work for ${agreement.name}`}>
@@ -270,6 +409,85 @@ export function CrmOperationalWorkPanel({
             </div>
           </li>
         </ol>
+      </section>
+
+      <section className="crm-continuity-policy" aria-label={`Operational continuity for ${agreement.name}`}>
+        <header>
+          <div>
+            <span>Shared operational continuity</span>
+            <strong>Define what can cross the provider/client boundary</strong>
+            <p>The source record stays with its authoring organisation. This policy permits only a time-bounded safe handoff for one agreement place and module.</p>
+          </div>
+        </header>
+        {locations.length === 0 || modules.length === 0 ? (
+          <p className="crm-workspace-subtle">Link at least one active place and enable one agreement module before continuity can be configured.</p>
+        ) : (
+          <form onSubmit={saveContinuityPolicy}>
+            <label>
+              <span>Agreement place</span>
+              <select value={continuityForm.locationId} onChange={(event) => editContinuityPair(event.target.value, continuityForm.moduleId)}>
+                {locations.map((location) => <option key={location.id} value={location.id}>{placeName(location)}</option>)}
+              </select>
+            </label>
+            <label>
+              <span>Module</span>
+              <select value={continuityForm.moduleId} onChange={(event) => editContinuityPair(continuityForm.locationId, event.target.value)}>
+                {modules.map((module) => <option key={module.id} value={module.id}>{module.module_key.replaceAll('_', ' ')}</option>)}
+              </select>
+            </label>
+            <label>
+              <span>Continuity mode</span>
+              <select value={continuityForm.mode} onChange={(event) => setContinuityForm((current) => ({ ...current, mode: event.target.value as ContinuityForm['mode'] }))}>
+                <option value="none">Off</option>
+                <option value="handoff_only">Handoff acknowledgement only</option>
+                <option value="live_read">Publish safe live handoffs</option>
+                <option value="live_read_and_receive">Publish and receive safe live handoffs</option>
+              </select>
+            </label>
+            <div className="crm-continuity-window">
+              <strong>Provider coverage (NZ time)</strong>
+              <input type="time" aria-label="Provider coverage starts" value={continuityForm.providerStart} onChange={(event) => setContinuityForm((current) => ({ ...current, providerStart: event.target.value }))} />
+              <input type="time" aria-label="Provider coverage ends" value={continuityForm.providerEnd} onChange={(event) => setContinuityForm((current) => ({ ...current, providerEnd: event.target.value }))} />
+            </div>
+            <div className="crm-continuity-window">
+              <strong>Client coverage (NZ time)</strong>
+              <input type="time" aria-label="Client coverage starts" value={continuityForm.clientStart} onChange={(event) => setContinuityForm((current) => ({ ...current, clientStart: event.target.value }))} />
+              <input type="time" aria-label="Client coverage ends" value={continuityForm.clientEnd} onChange={(event) => setContinuityForm((current) => ({ ...current, clientEnd: event.target.value }))} />
+            </div>
+            <label>
+              <span>Recent history (hours)</span>
+              <input type="number" min={1} max={168} value={continuityForm.historyHours} onChange={(event) => setContinuityForm((current) => ({ ...current, historyHours: Number(event.target.value) }))} />
+            </label>
+            <label>
+              <span>Handoff retention (hours)</span>
+              <input type="number" min={1} max={168} value={continuityForm.retentionHours} onChange={(event) => setContinuityForm((current) => ({ ...current, retentionHours: Number(event.target.value) }))} />
+            </label>
+            <label>
+              <span>Attachment sharing</span>
+              <select value={continuityForm.attachmentsMode} onChange={(event) => setContinuityForm((current) => ({ ...current, attachmentsMode: event.target.value as ContinuityForm['attachmentsMode'] }))}>
+                <option value="none">No attachments</option>
+                <option value="redacted">Redacted attachments</option>
+                <option value="selected_only">Selected attachments only</option>
+              </select>
+            </label>
+            <label>
+              <span>Presence sharing</span>
+              <select value={continuityForm.presenceMode} onChange={(event) => setContinuityForm((current) => ({ ...current, presenceMode: event.target.value as ContinuityForm['presenceMode'] }))}>
+                <option value="none">No presence</option>
+                <option value="on_duty_only">On-duty state only</option>
+              </select>
+            </label>
+            <div className="crm-continuity-checks">
+              <label><input type="checkbox" checked={continuityForm.shareActiveCases} onChange={(event) => setContinuityForm((current) => ({ ...current, shareActiveCases: event.target.checked }))} />Active cases</label>
+              <label><input type="checkbox" checked={continuityForm.shareOpenTasks} onChange={(event) => setContinuityForm((current) => ({ ...current, shareOpenTasks: event.target.checked }))} />Open tasks</label>
+              <label><input type="checkbox" checked={continuityForm.requireAck} onChange={(event) => setContinuityForm((current) => ({ ...current, requireAck: event.target.checked }))} />Require acknowledgement</label>
+            </div>
+            <footer>
+              <span>{continuityPolicies.length} configured {continuityPolicies.length === 1 ? 'pair' : 'pairs'} on this agreement.</span>
+              <button type="submit" className="btn btn-sm btn-primary" disabled={savingContinuity}>{savingContinuity ? 'Saving…' : 'Save continuity policy'}</button>
+            </footer>
+          </form>
+        )}
       </section>
       {workUnits.length === 0 ? <p className="crm-workspace-subtle"><ClipboardList size={14} /> No rosterable work unit is linked to this agreement or provider route yet.</p> : <div className="crm-operational-work-list">{workUnits.map((unit) => <article key={unit.id}><Route size={15} /><div><strong>{unit.name}</strong><span>{unit.work_unit_type.replace('_', ' ')} · {unit.service_type.replaceAll('_', ' ')}</span></div><em>{unit.active ? 'Active' : 'Inactive'}</em></article>)}</div>}
       {showForm && <form className="crm-operational-work-form" onSubmit={createWorkUnit}>

@@ -419,3 +419,40 @@ remains unpopulated.
   creating or altering a dispatch job. The same deployed chunk contains the
   response-timing RPC and controls; there was no active job on which a timing
   change could be truthfully exercised.
+
+### Closure log — shared operational continuity
+
+- The schema already held the provider/client continuity contract, immutable
+  handoff projection and receipt model, but none of its three governed RPCs
+  had an application caller. Policy setup, safe publication and recipient
+  acknowledgement therefore existed as detached database capabilities rather
+  than a task a person could complete.
+- Before exposing that path, the acknowledgement authority was hardened. A
+  first acknowledgement now requires an active, unexpired handoff. An optional
+  continuation event must belong to the recipient organisation, use the same
+  module, match the exact Site or Zone, and occur after the source event.
+  Idempotent retries still return their original immutable receipt. Execute
+  access is explicitly revoked from `PUBLIC` and `anon`.
+- Agreement operational setup now owns continuity policy configuration. The
+  administrator selects an accepted agreement location and enabled module,
+  then configures mode, provider/client NZ-time coverage, retention, case/task
+  sharing, attachment/presence disclosure and acknowledgement requirements.
+  Complete coverage windows and bounded hour values are validated before the
+  policy RPC is called; the page never writes the policy table directly.
+- Field Operations now contains a shared Operational continuity workspace.
+  During publication, an operator chooses a real recent location event,
+  supplies the safe summary and disclosure flags, and submits through
+  `publish_location_event_continuity` with a request ID retained across
+  retries. The UI states that the source record remains owned by its authoring
+  organisation.
+- Recipients see only active, unexpired handoffs and any immutable receipt.
+  Acknowledgement can include notes and an eligible continuation event. The UI
+  filters that optional link by recipient, module, exact Site/Zone and time;
+  the hardened RPC repeats those checks as the security boundary. After
+  success the queue reloads server state, while outgoing publications remain
+  visible to their authoring organisation.
+- Focused guards passed (19 assertions across four files), the production web
+  build passed, and the regenerated live schema proves the hardening body and
+  grants. Atlas dry-run moved 172 -> 169 bounded gaps: 1 edge function, 113
+  RPCs and 55 tables. All three RPCs are now `wired=true`; no runtime exercise
+  is claimed because no operational record was fabricated for verification.

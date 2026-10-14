@@ -116,6 +116,7 @@ const VehicleSearchPage = React.lazy(() => import('../pages/VehicleSearchPage'))
 const FieldReportsPage = React.lazy(() => import('../pages/FieldReportsPage'));
 const InvestigationPage = React.lazy(() => import('../pages/InvestigationPage'));
 const FieldOperationsPage = React.lazy(() => import('../pages/FieldOperationsPage'));
+const OperationalContinuityPage = React.lazy(() => import('../pages/OperationalContinuityPage'));
 const ParkingOversightPage = React.lazy(() => import('../pages/ParkingOversightPage'));
 const NoiseControlOversightPage = React.lazy(() => import('../pages/NoiseControlOversightPage'));
 const BiosecurityOversightPage = React.lazy(() => import('../pages/BiosecurityOversightPage'));
@@ -216,6 +217,7 @@ const NAVIGATION_MAP: Record<string, WorkspaceItem[]> = {
     { id: 'field-ops', label: 'Patrol operations', icon: Route, area: 'patrol' },
     { id: 'field-ops', label: 'Live map', icon: MapPin, area: 'live-map' },
     { id: 'field-ops', label: 'Field reports', icon: ClipboardCheck, area: 'field-reports' },
+    { id: 'field-ops', label: 'Operational continuity', icon: Handshake, area: 'operational-continuity' },
     { id: 'field-ops', label: 'Video evidence', icon: FolderOpen, area: 'cctv-console' },
     { id: 'site-360', label: 'Site Workspaces', icon: Building2 },
     { id: 'locations', label: 'Location Houses', icon: MapPin },
@@ -684,6 +686,8 @@ const AdminShell: React.FC = () => {
             return <ObservationSearchPage />;
           case 'field-reports':
             return <FieldReportsPage />;
+          case 'operational-continuity':
+            return <OperationalContinuityPage />;
           case 'cctv-console':
             return <CCTVConsolePage />;
           case 'cctv-triage':

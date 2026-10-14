@@ -5,6 +5,7 @@ describe('Field Operations area entitlement', () => {
   it('keeps shared workflows available without inventing a module gate', () => {
     expect(canAccessFieldOpsArea('landing', () => false)).toBe(true);
     expect(canAccessFieldOpsArea('field-reports', () => false)).toBe(true);
+    expect(canAccessFieldOpsArea('operational-continuity', () => false)).toBe(true);
     expect(canAccessFieldOpsArea('debrief-followup', () => false)).toBe(true);
     expect(canAccessFieldOpsArea('officer-activity', () => false)).toBe(true);
   });
@@ -23,6 +24,7 @@ describe('Field Operations area entitlement', () => {
 
   it('recognizes only implemented Field Operations sub-areas', () => {
     expect(isFieldOpsSubArea('dispatch')).toBe(true);
+    expect(isFieldOpsSubArea('operational-continuity')).toBe(true);
     expect(isFieldOpsSubArea('unregistered-tool')).toBe(false);
     expect(isFieldOpsSubArea(null)).toBe(false);
   });

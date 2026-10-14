@@ -11,6 +11,24 @@ describe('patrol run from an accepted agreement', () => {
     expect(source).toContain("schedule.capability_key !== 'alarm_response'");
   });
 
+  describe('agreement-scoped operational continuity', () => {
+    it('loads the governed policy for an agreement location and module', () => {
+      expect(source).toContain("from('service_agreement_continuity_policies').select(");
+      expect(source).toContain("from('service_agreement_locations').select(");
+      expect(source).toContain("from('service_agreement_modules').select(");
+    });
+
+    it('saves complete coverage and disclosure settings through the RPC', () => {
+      expect(source).toContain("supabase.rpc('manage_service_agreement_continuity_policy'");
+      expect(source).toContain('p_service_agreement_location_id: continuityForm.locationId');
+      expect(source).toContain('p_service_agreement_module_id: continuityForm.moduleId');
+      expect(source).toContain('p_share_attachments_mode: continuityForm.attachmentsMode');
+      expect(source).toContain('Each coverage window needs both a start and an end');
+      expect(source).toContain('History and handoff retention must each be a whole number from 1 to 168 hours.');
+      expect(source).not.toMatch(/from\('service_agreement_continuity_policies'\)[\s\S]{0,300}\.(insert|update|upsert)\(/);
+    });
+  });
+
   it('builds the run through the governed RPC and says what happens next', () => {
     expect(source).toContain("supabase.rpc('create_patrol_route_from_agreement'");
     expect(source).toContain('p_service_agreement_id: agreement.id');
