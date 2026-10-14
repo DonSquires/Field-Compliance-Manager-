@@ -38921,25 +38921,6 @@ export type Database = {
           organization_type: string
         }[]
       }
-      get_crm_site_boundary_queue: {
-        Args: never
-        Returns: {
-          account_name: string
-          account_organization_id: string
-          active: boolean
-          address: string
-          boundary_geojson: Json
-          boundary_status: string
-          boundary_verification: string
-          boundary_verified_at: string
-          gps_lat: number
-          gps_lng: number
-          has_boundary: boolean
-          site_id: string
-          site_name: string
-          site_type: string
-        }[]
-      }
       get_descendant_organizations: {
         Args: { org_id: string }
         Returns: string[]
@@ -40464,25 +40445,6 @@ export type Database = {
           isOneToOne: true
           isSetofReturn: false
         }
-      }
-      manage_crm_site_boundary: {
-        Args: {
-          p_action: string
-          p_center_lat?: number
-          p_center_lng?: number
-          p_expected_verification: string
-          p_radius_m?: number
-          p_site_id: string
-        }
-        Returns: {
-          area_m2: number
-          boundary_status: string
-          boundary_verification: string
-          boundary_verified_at: string
-          gps_lat: number
-          gps_lng: number
-          site_id: string
-        }[]
       }
       manage_crm_site_profile: {
         Args: {

@@ -768,3 +768,22 @@ remains unpopulated.
   Bounded calls with nonexistent IDs confirmed both retired writers return
   function-not-found and an authenticated call to `set_zone_geometry` returns
   permission denied. No geometry or decision was changed.
+
+### Closure log — superseded CRM boundary review
+
+- Atlas showed both `get_crm_site_boundary_queue` and
+  `manage_crm_site_boundary` as present but unwired. They formed an older
+  CRM-only review surface that could directly install a point-radius boundary
+  or verify it without the current proposal decision ledger.
+- Geofence Workbench now reads the unified `get_geofence_review_queue` across
+  sites and zones. Every human geometry source is staged through
+  `propose_boundary`; the map shows current versus proposed geometry; acceptance
+  or rejection records the decision; verification remains an explicit human
+  confirmation.
+- The obsolete CRM queue and mutator were dropped together, and their generated
+  type entries removed. The historical migration remains as lineage, while the
+  live schema and UI now expose one queue and one mutation authority.
+- Twenty focused web guards and all 29 Atlas generator tests passed. The
+  production web build passed, and the regenerated live snapshot reports 812
+  functions. Atlas dry-run moved 154 -> 152 bounded gaps: 1 edge function,
+  96 RPCs and 55 tables. Exercise remains unclaimed.
