@@ -45921,55 +45921,6 @@ export type Database = {
           isSetofReturn: false
         }
       }
-      update_organization_profile: {
-        Args: {
-          p_billing_address: string
-          p_billing_email: string
-          p_contact_email: string
-          p_contact_phone: string
-          p_enforcement_workflow_mode: string
-          p_expected_updated_at: string
-        }
-        Returns: {
-          account_notes: string | null
-          account_owner_user_id: string | null
-          active: boolean
-          billing_address: string | null
-          billing_email: string | null
-          client_request_id: string | null
-          company_registration_number: string | null
-          contact_email: string | null
-          contact_phone: string | null
-          corporate_profile_verified_at: string | null
-          corporate_profile_verified_by: string | null
-          corporate_status: string | null
-          corporate_status_as_of: string | null
-          created_at: string
-          discoverable: boolean
-          enforcement_workflow_mode: string
-          external_refs: Json
-          id: string
-          jurisdiction_geom: unknown
-          jurisdiction_verification: string
-          jurisdiction_verified_at: string | null
-          jurisdiction_verified_by: string | null
-          logo_url: string | null
-          name: string
-          nzbn: string | null
-          nzbn_entity_type: string | null
-          organization_level: number | null
-          organization_type: string
-          parent_organization_id: string | null
-          status: string
-          updated_at: string
-        }
-        SetofOptions: {
-          from: "*"
-          to: "organizations"
-          isOneToOne: true
-          isSetofReturn: false
-        }
-      }
       update_roster_slot: {
         Args: {
           p_expected_status: string

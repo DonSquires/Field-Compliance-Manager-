@@ -687,3 +687,23 @@ remains unpopulated.
   loaded without an alert, showed the existing Head Office branch as active,
   retained Archive, and retained the Add branch form with its module-inheritance
   explanation. No branch was created or archived for testing.
+
+### Closure log — superseded organization-profile update
+
+- Atlas showed `update_organization_profile` as present but unwired. Terrain
+  inspection confirmed that it still wrote `organizations` and `audit_log`,
+  but no page, Edge Function, script or database function called it.
+- Before retirement, this RPC silently selected the actor's home organization.
+  That contradicted the operating-workspace model: an administrator viewing an
+  authorized root provider or branch must update the explicitly selected
+  organization, not an implicit home record.
+- Organization settings already uses `update_operating_branch_profile`. That
+  authority accepts the selected operating organization, verifies both
+  operating access and administration, supports owner, service-provider and
+  branch organizations, locks the row, checks `updated_at`, validates the
+  workflow mode, and writes audit evidence.
+- The home-organization-only RPC, generated type and obsolete E2E handler were
+  removed. Fifteen focused guards passed, the production web build passed, and
+  the regenerated live snapshot reports 817 functions. Atlas dry-run moved
+  158 -> 157 bounded gaps: 1 edge function, 101 RPCs and 55 tables. Exercise
+  remains unclaimed because this closure removed a duplicate authority.
