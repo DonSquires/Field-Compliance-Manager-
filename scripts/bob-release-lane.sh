@@ -104,6 +104,7 @@ if [[ -n "$SHARED_CHANGED" ]]; then
 fi
 has() { printf '%s\n' "$CHANGED" | grep -qE "$1"; }
 TARGETS=()
+has '^(scripts/bob-release-lane\.sh|deploy/bob-release-lane/)' && TARGETS+=(release-lane)
 has '^(bob-control-plane-server\.js|builder-[a-z-]+\.js|bob-laptop-shell\.js|supabase-workflow-client\.js|package(-lock)?\.json|Dockerfile|deploy/bob-control-plane/|supabase/functions/_shared/builder-)' && TARGETS+=(control-plane)
 has '^services/fcm-api/' && TARGETS+=(fcm-api)
 has '^(Dockerfile\.worker|frontend-worker\.js|backend-worker\.js|security-worker\.js|worker-executor\.js|builder-verification-outcome\.js|builder-path-policy\.js|builder-data-path-gate\.js|builder-ts-delta-gate\.js|assessment-manifest\.js|apps/web/package(-lock)?\.json)' && TARGETS+=(worker-image)
@@ -196,6 +197,14 @@ rollback() {
 
 for target in "${TARGETS[@]:-}"; do
   case "$target" in
+    release-lane)
+      if install -m 700 scripts/bob-release-lane.sh /srv/fcm/release-lane/bob-release-lane.sh \
+         && install -m 644 deploy/bob-release-lane/bob-release-lane.service /etc/systemd/system/bob-release-lane.service \
+         && install -m 644 deploy/bob-release-lane/bob-release-lane.timer /etc/systemd/system/bob-release-lane.timer \
+         && systemctl daemon-reload \
+         && systemctl enable bob-release-lane.timer >/dev/null; then
+        RESULTS+=("release lane installed at $SHA8; next timer tick uses this revision")
+      else OK=false; fail_note "release lane install failed"; fi ;;
     control-plane)
       if DOCKER_GID=999 docker compose -f deploy/bob-control-plane/docker-compose.yml build -q bob-control-plane \
          && DOCKER_GID=999 docker compose -f deploy/bob-control-plane/docker-compose.yml up -d --force-recreate bob-control-plane >/dev/null; then

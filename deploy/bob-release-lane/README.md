@@ -5,7 +5,7 @@ nobody is asked to deploy by hand. This lane closes the last gap after a pull re
 
 `scripts/bob-release-lane.sh` runs on the VPS host from a systemd timer every 5 minutes:
 
-1. fetches `main` from the Gitea mirror (trails GitHub by 1–2 minutes),
+1. fetches authoritative GitHub `main` through a pinned deploy key and strict host-key checking (the historical Gitea mirror is fallback only),
 2. compares it with the last release the lane put live (`/var/lib/bob/release-lane/deployed_sha`;
    bootstrapped from the newest `/srv/fcm/releases/<sha>` worktree),
 3. classifies the changed paths into targets — new `supabase/migrations/*.sql`, changed edge
@@ -30,8 +30,11 @@ systemctl daemon-reload && systemctl enable --now bob-release-lane.timer
 ```
 
 The script itself is copied, not symlinked, so a broken commit cannot change the lane that is
-about to deploy it; update the copy deliberately after reviewing the diff. Switch to live with
-`BOB_RELEASE_MODE=live` once the proving series has passed and the dry-run plans have been read.
+about to deploy it. The first reviewed installation is deliberate; after that, a change to the
+lane script or its systemd units is a classified `release-lane` target. The current run installs
+that reviewed revision for the next timer tick without rewriting its own in-flight process.
+Switch to live with `BOB_RELEASE_MODE=live` once the proving series has passed and the dry-run
+plans have been read.
 
 ## What stays with a person
 

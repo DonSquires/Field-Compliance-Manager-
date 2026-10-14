@@ -205,6 +205,15 @@ turn, and six retries repeated the identical impossible request. The opening
 packet now uses the smallest deployed GPU budget with the real 8,192-token
 output reservation and conservative tokenizer headroom; later source reading
 remains tool-driven and line-bounded rather than embedded wholesale.
+Release-lane self-update correction 2026-10-14: the repository contained the
+GitHub-authoritative fetch fix, but the VPS executes a deliberately copied
+release script and that installed copy still fetched the historical Gitea
+mirror. It therefore observed a stale, non-descendant SHA and truthfully
+refused every release for more than two hours. The release classifier now owns
+a `release-lane` target: a reviewed script or unit change installs the new copy
+for the next timer tick without mutating the in-flight process. The pinned
+GitHub deploy key remains authoritative and Gitea remains fallback only.
+
 Builder legacy reconciliation 2026-10-14: live Atlas/schema inspection found
 three present-but-unwired prototype interfaces. The single-frontend
 `builder_claim_security_review` RPC is superseded by the live aggregate review

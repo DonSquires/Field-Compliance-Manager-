@@ -50,6 +50,10 @@ test('release lane skips applied migrations and exclusively owns its live pointe
   // A control-plane restart mid-run would discard the author's turns: the lane waits for the next tick.
   assert.match(lane, /builder_model_runs\?select=id&status=in\.\(running,queued\)/);
   assert.match(lane, /deferred \$\{HEAD_SHA:0:8\}: a Bob model run is in flight/);
+  // The installed lane is a deliberate copy, so a reviewed lane change must replace it for the next tick.
+  assert.match(lane, /has '\^\(scripts\/bob-release-lane\\\.sh\|deploy\/bob-release-lane\/\)' && TARGETS\+=\(release-lane\)/);
+  assert.match(lane, /install -m 700 scripts\/bob-release-lane\.sh \/srv\/fcm\/release-lane\/bob-release-lane\.sh/);
+  assert.match(lane, /systemctl daemon-reload/);
   // The gates the worker image carries rebuild it when they change.
   assert.match(lane, /builder-data-path-gate\\\.js\|builder-ts-delta-gate\\\.js/);
   assert.match(lane, /has '\^deploy\/bob-vps\/nginx\/' && TARGETS\+=\(nginx\)/);
