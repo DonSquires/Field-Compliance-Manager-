@@ -16,9 +16,9 @@ describe('Finance Bureau', () => {
   });
 
   it('is a dedicated provider workspace alongside the reusable rate book', () => {
-    expect(page).toContain('Your materials and equipment price list, and the discount plans customers actually see.');
+    expect(page).toContain('Your materials and equipment price list, and approved discount reference plans for quoting.');
     expect(page).toContain('<PriceBookPanel organizationId={profile?.organizationId ?? null} />');
-    expect(page).toContain('Hourly and per-km rates live in Pay and charge rules');
+    expect(page).toContain('Hourly and per-km rates live in Pay and charge rules; accepted quotes keep a locked copy of the prices used.');
     expect(shell).toContain("'finance-bureau'");
     expect(shell).toContain('Finance home');
     expect(shell).toContain("<FinanceBureauPage onOpenBob={(prompt) => { setBobLaunchPrompt(prompt); setBobOpen(true); }} onNavigate={navigateFinance} />");
