@@ -48,8 +48,10 @@ test('dispatcher reorders a pending stop and amends the selected shift with expl
     { id: '34343434-3434-4434-8434-343434343432', stop_order: 2, name: 'Library', updated_at: '2026-08-30T08:45:00.000Z' },
     { id: targetStopId, stop_order: 3, name: 'Civic Centre', updated_at: '2026-08-30T08:45:00.000Z' },
   ];
-  let stopActionRequest: Record<string, unknown> | null = null;
-  let shiftActionRequest: Record<string, unknown> | null = null;
+  const actionRequests: {
+    stop?: Record<string, unknown>;
+    shift?: Record<string, unknown>;
+  } = {};
 
   await page.route('**/rest/v1/shifts**', async (route) => route.fulfill({ contentType: 'application/json', body: JSON.stringify([{
     id: shiftId,
@@ -83,7 +85,7 @@ test('dispatcher reorders a pending stop and amends the selected shift with expl
     }))),
   }));
   await page.route('**/rest/v1/rpc/manage_shift_stop', async (route) => {
-    stopActionRequest = route.request().postDataJSON() as Record<string, unknown>;
+    actionRequests.stop = route.request().postDataJSON() as Record<string, unknown>;
     const previousOrder = stops.find((stop) => stop.id === targetStopId)?.stop_order ?? 3;
     for (const stop of stops) {
       if (stop.id === targetStopId) stop.stop_order = 1;
@@ -99,8 +101,8 @@ test('dispatcher reorders a pending stop and amends the selected shift with expl
     }) });
   });
   await page.route('**/rest/v1/rpc/manage_active_shift', async (route) => {
-    shiftActionRequest = route.request().postDataJSON() as Record<string, unknown>;
-    shiftNotes = String(shiftActionRequest.p_notes);
+    actionRequests.shift = route.request().postDataJSON() as Record<string, unknown>;
+    shiftNotes = String(actionRequests.shift.p_notes);
     shiftUpdatedAt = '2026-08-30T09:32:00.000Z';
     await route.fulfill({ contentType: 'application/json', body: JSON.stringify({
       replayed: false,
@@ -122,7 +124,7 @@ test('dispatcher reorders a pending stop and amends the selected shift with expl
   await stopAction.getByRole('button', { name: 'Confirm change stop position' }).click();
   await expect(page.getByText('Stop moved from position 3 to 1 with an audit receipt.')).toBeVisible();
   await expect(page.locator('.dispatch-stop-card').filter({ hasText: 'Civic Centre' })).toContainText('#1');
-  expect(stopActionRequest).toMatchObject({
+  expect(actionRequests.stop).toMatchObject({
     p_stop_id: targetStopId,
     p_expected_status: 'pending',
     p_expected_updated_at: '2026-08-30T08:45:00.000Z',
@@ -130,7 +132,7 @@ test('dispatcher reorders a pending stop and amends the selected shift with expl
     p_new_order: 1,
     p_reason: 'Respond to the revised priority order from control.',
   });
-  expect(stopActionRequest?.p_client_request_id).toMatch(/^[0-9a-f-]{36}$/);
+  expect(actionRequests.stop?.p_client_request_id).toMatch(/^[0-9a-f-]{36}$/);
 
   const mobileSections = page.getByRole('tablist', { name: 'Dispatch console sections' });
   if (await mobileSections.isVisible()) await mobileSections.getByRole('button', { name: 'Shifts', exact: true }).click();
@@ -140,7 +142,7 @@ test('dispatcher reorders a pending stop and amends the selected shift with expl
   await shiftAction.getByLabel('Operational reason').fill('Match the live route order confirmed by control.');
   await shiftAction.getByRole('button', { name: 'Confirm amend shift' }).click();
   await expect(page.getByText('Shift notes updated with an audit receipt.')).toBeVisible();
-  expect(shiftActionRequest).toMatchObject({
+  expect(actionRequests.shift).toMatchObject({
     p_shift_id: shiftId,
     p_expected_status: 'in_progress',
     p_expected_updated_at: '2026-08-30T08:45:00.000Z',
@@ -148,7 +150,7 @@ test('dispatcher reorders a pending stop and amends the selected shift with expl
     p_notes: 'Northern run via the Civic Centre first.',
     p_reason: 'Match the live route order confirmed by control.',
   });
-  expect(shiftActionRequest?.p_client_request_id).toMatch(/^[0-9a-f-]{36}$/);
+  expect(actionRequests.shift?.p_client_request_id).toMatch(/^[0-9a-f-]{36}$/);
   expect(browserErrors, browserErrors.join('\n')).toEqual([]);
 });
 

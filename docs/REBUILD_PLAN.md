@@ -8,6 +8,15 @@ detailed backlogs (`ENTERPRISE_SAAS_TODO.md`, `PROTOTYPE_GAP_AUDIT.md`,
 Completion language is strict, as in the lineage: **merged ≠ deployed ≠
 glass-proven.** A workstream item is done only when its evidence gate is met.
 
+Dispatch main-health repair 2026-10-15: after the Finance guard repair merged,
+the full health compiler exposed Playwright request captures narrowed to
+`never` because their assignments occur inside route callbacks. Request
+captures now use a stable object container. The now-runnable browser case then
+proved the two long run-sheet footer actions overflowed the Shift Stops grid
+column and were covered by Active Jobs. The footer is a bounded two-column
+grid with wrapping labels, collapses to one column on mobile, and its parent
+grid item may shrink without painting controls into a sibling column.
+
 Builder publication recovery 2026-10-15: a bounded main-health repair passed
 worker verification, security review, and independent review, then opened a
 GitHub pull request carrying the auto-merge marker but left it as a draft. The

@@ -107,6 +107,7 @@
   display: flex;
   flex-direction: column;
   gap: 0.75rem;
+  min-width: 0;
   min-height: 0;
   padding: 0.75rem;
   background: var(--color-bg-secondary);
@@ -547,13 +548,14 @@
 }
 
 .dispatch-runsheet-action__footer {
-  display: flex;
-  justify-content: flex-end;
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
   gap: 0.5rem;
 }
 
 .dispatch-runsheet-action__footer button {
   min-height: 36px;
+  white-space: normal;
 }
 
 .dispatch-runsheet-action__footer button[type='submit'] {
@@ -576,7 +578,7 @@
   }
 
   .dispatch-runsheet-action__footer {
-    flex-direction: column-reverse;
+    grid-template-columns: 1fr;
   }
 
   .dispatch-runsheet-action__footer button {
