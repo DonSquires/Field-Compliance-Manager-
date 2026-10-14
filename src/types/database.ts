@@ -7566,68 +7566,6 @@ export type Database = {
           },
         ]
       }
-      crm_activity_log: {
-        Row: {
-          activity_type: string
-          actor_id: string | null
-          body: string | null
-          created_at: string
-          follow_up_at: string | null
-          id: string
-          organization_id: string
-          subject: string
-        }
-        Insert: {
-          activity_type?: string
-          actor_id?: string | null
-          body?: string | null
-          created_at?: string
-          follow_up_at?: string | null
-          id?: string
-          organization_id: string
-          subject: string
-        }
-        Update: {
-          activity_type?: string
-          actor_id?: string | null
-          body?: string | null
-          created_at?: string
-          follow_up_at?: string | null
-          id?: string
-          organization_id?: string
-          subject?: string
-        }
-        Relationships: [
-          {
-            foreignKeyName: "crm_activity_log_actor_id_fkey"
-            columns: ["actor_id"]
-            isOneToOne: false
-            referencedRelation: "user_profiles"
-            referencedColumns: ["id"]
-          },
-          {
-            foreignKeyName: "crm_activity_log_organization_id_fkey"
-            columns: ["organization_id"]
-            isOneToOne: false
-            referencedRelation: "crm_account_health"
-            referencedColumns: ["organization_id"]
-          },
-          {
-            foreignKeyName: "crm_activity_log_organization_id_fkey"
-            columns: ["organization_id"]
-            isOneToOne: false
-            referencedRelation: "crm_account_list"
-            referencedColumns: ["id"]
-          },
-          {
-            foreignKeyName: "crm_activity_log_organization_id_fkey"
-            columns: ["organization_id"]
-            isOneToOne: false
-            referencedRelation: "organizations"
-            referencedColumns: ["id"]
-          },
-        ]
-      }
       crm_commercial_settings: {
         Row: {
           base_rate_per_hour: number | null

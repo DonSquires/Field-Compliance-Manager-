@@ -222,7 +222,6 @@ const READ_ONLY_TABLES = new Set([
   // audit / security logs (append-only system-of-record; never Bob-written)
   'audit_log',
   'user_management_audit',
-  'crm_activity_log',
   'key_audit_settings',
   'officer_gps_log',
   // raw import/seed staging (governed ingest owns these, not the upsert executor)

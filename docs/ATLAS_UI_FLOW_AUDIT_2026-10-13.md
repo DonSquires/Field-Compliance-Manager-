@@ -1067,3 +1067,48 @@ remains unpopulated.
   `CrmAgreementObligationsPanel`, with concrete proof-table reads/writes and
   `exercised=null`; the existing proof table moves the bounded gap count
   146 -> 145. Runtime exercise remains unclaimed.
+
+### Closure log — report-PDF policy wiring and duplicate CRM activity retirement
+
+- The Trackforce-inspired delivery/version-history check found that FCM already
+  has the relevant human workflow: report packs are reviewed, published, sent,
+  exposed in the client portal and retained with current-PDF provenance.
+  `can_read_current_report_pack_pdf` nevertheless appeared as an unwired RPC
+  because the public-only schema snapshot cannot contain the live
+  `storage.objects` policy that calls it.
+- Live policy inspection proved that `bob_uploads_select` invokes the helper,
+  and the existing custom-report SQL contract tests already verify current,
+  stale, deleted and client-readable PDF cases. The correct closure was Atlas
+  policy-call detection, not a second download button or a duplicate delivery
+  page.
+- Atlas now replays create/drop policy events for managed non-public schemas in
+  migration order, keeps only the latest definition for each policy, and emits
+  `secured_by` edges for referenced public functions. A regression fixture
+  proves that the current `storage.objects` policy wires its helper while the
+  function referenced only by a superseded policy remains unwired.
+- The same gap trace identified `crm_activity_log` as an empty legacy duplicate.
+  It had no reads or writes, only weak string references in three generic
+  ingestion deny lists. The live CRM account workspace and governed creation
+  and follow-up RPCs use `crm_account_activities`, which retains provider,
+  account, agreement, replay, outcome and completion provenance that the old
+  table lacked.
+- Retirement is fail-closed: the migration refuses to drop
+  `crm_activity_log` if an environment contains any row. The linked project had
+  zero rows, so the duplicate table, its five policies, four constraints and
+  stale generated type were removed. The three deny lists no longer carry a
+  name for a table that does not exist; the canonical activity model was not
+  changed.
+- Before the cleanup, supervisors already used the existing report review and
+  delivery UI, while the storage policy protected current PDFs invisibly.
+  During access, the policy continues to permit only the object referenced by
+  the caller-readable current report-pack row. After report edits, stale PDF
+  objects remain unreadable until the governed renderer records a new current
+  artifact. This preserves the useful Trackforce chain-of-custody pattern
+  without adding an unsupported parallel report authority.
+- The linked retirement migration is applied. The regenerated live catalogue
+  reports 398 tables, 813 functions, 726 indexes and 898 policies. The
+  production web build, 29 Atlas generator tests, database lint and live
+  table/policy verification pass. Atlas dry-run reports
+  `can_read_current_report_pack_pdf` wired from `storage.objects`,
+  `exercised=null`, and no `crm_activity_log` capability. Bounded gaps move
+  145 -> 143: 1 Edge Function, 89 RPCs and 53 tables.

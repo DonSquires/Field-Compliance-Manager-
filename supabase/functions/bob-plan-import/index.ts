@@ -91,7 +91,6 @@ const NON_TARGET_TABLES = new Set([
   'staff_branch_authorisations',
   'audit_log',
   'user_management_audit',
-  'crm_activity_log',
   'key_audit_settings',
   'officer_gps_log'
 ]);

@@ -402,13 +402,13 @@ function collectSqlFunctionEdges(rootDir) {
       edges.set(edgeKey(edge), edge);
     }
   }
-  const addReferencedFunctions = (tableName, definition, edgeKind, context) => {
+  const addReferencedFunctions = (tableName, definition, edgeKind, context, sourceFile = schemaFile) => {
     const referenced = new Set();
     for (const match of definition.matchAll(/\bpublic\."?([a-zA-Z_][a-zA-Z0-9_]*)"?\s*\(/gi)) referenced.add(match[1]);
     for (const match of definition.matchAll(/(?:^|[^\w.])"?([a-zA-Z_][a-zA-Z0-9_]*)"?\s*\(/g)) referenced.add(match[1]);
     for (const functionName of referenced) {
       if (!latestFunctions.has(functionName)) continue;
-      add(tableName, 'rpc', functionName, edgeKind, schemaFile, context, 'table');
+      add(tableName, 'rpc', functionName, edgeKind, sourceFile, context, 'table');
     }
   };
   const schemaStatements = schema.split(/;\s*(?:\r?\n|$)/);
@@ -417,6 +417,39 @@ function collectSqlFunctionEdges(rootDir) {
     if (policy) addReferencedFunctions(policy[1], policy[2], 'secured_by', 'PostgreSQL row-level security policy');
     const constraint = statement.match(/^\s*ALTER TABLE(?:\s+ONLY)?\s+(?:"?public"?\.)"?([a-zA-Z_][a-zA-Z0-9_]*)"?([\s\S]*\bADD CONSTRAINT\b[\s\S]*\bCHECK\s*\([\s\S]*\))\s*$/i);
     if (constraint) addReferencedFunctions(constraint[1], constraint[2], 'calls', 'PostgreSQL check constraint');
+  }
+
+  // The live snapshot intentionally includes only public, so current policies
+  // on managed schemas such as storage exist only in migrations. Replay policy
+  // create/drop events in migration order and retain only the latest definition.
+  const externalPolicies = new Map();
+  const policyEventPattern = /(DROP|CREATE)\s+POLICY(?:\s+IF\s+EXISTS)?\s+"?([a-zA-Z_][a-zA-Z0-9_]*)"?\s+ON\s+"?([a-zA-Z_][a-zA-Z0-9_]*)"?\."?([a-zA-Z_][a-zA-Z0-9_]*)"?/gi;
+  for (const file of walkFiles(rootDir, 'supabase/migrations').filter(file => file.endsWith('.sql')).sort()) {
+    const content = fs.readFileSync(path.join(rootDir, file), 'utf8');
+    for (const event of content.matchAll(policyEventPattern)) {
+      if (event[3].toLowerCase() === 'public') continue;
+      const key = `${event[3].toLowerCase()}.${event[4].toLowerCase()}:${event[2].toLowerCase()}`;
+      if (event[1].toUpperCase() === 'DROP') {
+        externalPolicies.delete(key);
+        continue;
+      }
+      const tail = content.slice(event.index ?? 0);
+      const boundary = tail.match(/\$[a-zA-Z0-9_]+\$\s*;|;\s*(?:\r?\n|$)/);
+      externalPolicies.set(key, {
+        tableName: `${event[3]}.${event[4]}`,
+        definition: boundary?.index == null ? tail.slice(0, 6000) : tail.slice(0, boundary.index),
+        file
+      });
+    }
+  }
+  for (const policy of externalPolicies.values()) {
+    addReferencedFunctions(
+      policy.tableName,
+      policy.definition,
+      'secured_by',
+      `PostgreSQL row-level security policy on ${policy.tableName}`,
+      policy.file
+    );
   }
   return [...edges.values()];
 }

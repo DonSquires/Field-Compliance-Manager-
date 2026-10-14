@@ -86,6 +86,12 @@ test('Atlas refresh extracts concrete entities and Supabase calls without test n
       CREATE OR REPLACE FUNCTION public.can_read_alpha() RETURNS boolean LANGUAGE sql AS $$
         SELECT true;
       $$;
+      CREATE OR REPLACE FUNCTION public.can_read_storage_file(p_name text) RETURNS boolean LANGUAGE sql AS $$
+        SELECT true;
+      $$;
+      CREATE OR REPLACE FUNCTION public.can_read_stale_file(p_name text) RETURNS boolean LANGUAGE sql AS $$
+        SELECT true;
+      $$;
       CREATE OR REPLACE FUNCTION "public"."touch_alpha"() RETURNS trigger LANGUAGE plpgsql AS $$
       BEGIN
         RETURN NEW;
@@ -100,6 +106,21 @@ test('Atlas refresh extracts concrete entities and Supabase calls without test n
       CREATE OR REPLACE FUNCTION private.internal_only() RETURNS void LANGUAGE sql AS $$
         SELECT NULL;
       $$;
+    `);
+    write(root, 'supabase/migrations/20260101000000_old_storage_policy.sql', `
+      CREATE POLICY bob_uploads_select ON storage.objects
+        FOR SELECT USING (public.can_read_stale_file(storage.objects.name));
+    `);
+    write(root, 'supabase/migrations/20260102000000_current_storage_policy.sql', `
+      DO $storage_policy$
+      BEGIN
+        EXECUTE 'drop policy if exists bob_uploads_select on storage.objects';
+        EXECUTE $select_policy$
+          CREATE POLICY bob_uploads_select ON storage.objects
+            FOR SELECT USING (public.can_read_storage_file(storage.objects.name))
+        $select_policy$;
+      END
+      $storage_policy$;
     `);
     write(root, 'supabase/functions/ping/index.ts', `
       fetch(\`${'${SUPABASE_URL}'}/functions/v1/echo\`);
@@ -185,6 +206,10 @@ test('Atlas refresh extracts concrete entities and Supabase calls without test n
     assert.ok(manifest.edges.some(row => row.source_type === 'rpc' && row.source_name === 'wrap_alpha_unqualified' && row.target_type === 'rpc' && row.target_name === 'get_alpha' && row.edge_kind === 'calls'));
     assert.ok(manifest.edges.some(row => row.source_type === 'table' && row.source_name === 'alpha' && row.target_type === 'rpc' && row.target_name === 'can_read_alpha' && row.edge_kind === 'secured_by'));
     assert.ok(manifest.capabilities.some(row => row.entity_type === 'rpc' && row.entity_name === 'can_read_alpha' && row.wired));
+    assert.ok(manifest.edges.some(row => row.source_type === 'table' && row.source_name === 'storage.objects' && row.target_type === 'rpc' && row.target_name === 'can_read_storage_file' && row.edge_kind === 'secured_by' && row.source_file === 'supabase/migrations/20260102000000_current_storage_policy.sql'));
+    assert.ok(manifest.capabilities.some(row => row.entity_type === 'rpc' && row.entity_name === 'can_read_storage_file' && row.wired));
+    assert.equal(manifest.edges.some(row => row.target_type === 'rpc' && row.target_name === 'can_read_stale_file'), false);
+    assert.equal(manifest.capabilities.find(row => row.entity_name === 'can_read_stale_file').wired, false);
     assert.ok(manifest.edges.some(row => row.source_type === 'table' && row.source_name === 'alpha' && row.target_type === 'rpc' && row.target_name === 'touch_alpha' && row.edge_kind === 'triggers'));
     assert.ok(manifest.capabilities.some(row => row.entity_type === 'rpc' && row.entity_name === 'touch_alpha' && row.wired));
     assert.equal(manifest.edges.some(row => row.source_name === 'wrap_alpha' && row.target_type === 'table' && row.target_name === 'get_alpha'), false);
