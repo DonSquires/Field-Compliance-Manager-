@@ -366,3 +366,25 @@ remains unpopulated.
 - Atlas dry-run moved 175 -> 174 bounded gaps: 1 edge function, 118 RPCs and
   55 tables. This is a retirement closure, not a claim that a new user action
   was exercised.
+
+### Closure log — dispatch response timing
+
+- `manage_dispatch_job_timing` existed as a governed, audited RPC but had no
+  caller. Dispatchers could see a job's response target, respond-by timestamp,
+  expected attendance and timing source, but could not correct any of them
+  when the operational plan changed.
+- The existing job-detail dialog now owns the missing action. Before the
+  change, it loads the current values and locks completed or cancelled jobs.
+  During the change, it constrains response targets to 1-1,440 minutes and
+  expected attendance to 1-240 minutes, records an allowed timing source, and
+  requires a human reason. The RPC uses the displayed status as an optimistic
+  concurrency check.
+- After success, the dialog reloads server state, the new absolute
+  `sla_respond_by` and attendance expectation are visible to dispatch, and the
+  operator receives confirmation that an audit receipt was written. Server
+  failures remain visible in the dialog rather than being presented as a
+  successful update.
+- Atlas dry-run moved 174 -> 173 bounded gaps: 1 edge function, 117 RPCs and
+  55 tables. The capability is now `wired=true`; runtime exercise remains
+  unclaimed until a governed live job can be changed without fabricating an
+  operational event.

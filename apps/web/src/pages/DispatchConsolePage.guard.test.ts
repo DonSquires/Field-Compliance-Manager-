@@ -139,6 +139,16 @@ describe('dispatch agreement and creation boundary', () => {
     expect(source).toContain("operatorAction('shift', 'cancel')");
     expect(source).toContain('supabase.rpc(rpc, payload)');
   });
+
+  it('updates response and attendance timing through the governed authority', () => {
+    expect(source).toContain("supabase.rpc('manage_dispatch_job_timing'");
+    expect(source).toContain('p_expected_status: selectedJob.status');
+    expect(source).toContain('p_sla_minutes: jobSlaMinutes');
+    expect(source).toContain('p_expected_dwell_minutes: jobDwellMinutes');
+    expect(source).toContain('Explain why the response timing is changing.');
+    expect(source).toContain('Response timing updated with an audit receipt.');
+    expect(source).not.toMatch(/from\('dispatch_jobs'\)[\s\S]{0,200}\.update\(/);
+  });
 });
 describe('noise complaint intake — two places, protected identity', () => {
   it('captures the complainant place and identity only for noise jobs and only through the governed RPC', () => {

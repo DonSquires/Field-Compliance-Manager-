@@ -248,6 +248,10 @@ const DispatchConsolePage: React.FC = () => {
   const [jobDetailId, setJobDetailId] = useState<string | null>(requestedJobId);
   const [jobActionReason, setJobActionReason] = useState('');
   const [jobResourceId, setJobResourceId] = useState('');
+  const [jobSlaMinutes, setJobSlaMinutes] = useState(15);
+  const [jobDwellMinutes, setJobDwellMinutes] = useState(5);
+  const [jobTimingSource, setJobTimingSource] = useState('dispatcher_override');
+  const [jobTimingReason, setJobTimingReason] = useState('');
   const [selectedStopId, setSelectedStopId] = useState<string | null>(null);
   const [shiftStops, setShiftStops] = useState<ShiftStop[]>([]);
   const [stopsLoading, setStopsLoading] = useState(false);
@@ -809,7 +813,19 @@ const DispatchConsolePage: React.FC = () => {
   };
 
   const selectedJob = jobs.find((job) => job.id === jobDetailId) ?? null;
-  const openJobDetail = (jobId: string) => { setJobDetailId(jobId); setJobActionReason(''); setJobResourceId(''); setError(null); };
+  const jobTimingLocked = selectedJob ? ['completed', 'cancelled'].includes(selectedJob.status) : true;
+  const openJobDetail = (jobId: string) => {
+    const job = jobs.find((candidate) => candidate.id === jobId);
+    setJobDetailId(jobId);
+    setJobActionReason('');
+    setJobResourceId('');
+    setJobSlaMinutes(job?.slaMinutes ?? 15);
+    setJobDwellMinutes(job?.expectedDwellMinutes ?? 5);
+    setJobTimingSource(job?.timingSource ?? 'dispatcher_override');
+    setJobTimingReason('');
+    setError(null);
+    setNotice(null);
+  };
   const closeJobDetail = () => setJobDetailId(null);
   const manageJobFromDetail = async (action: 'amend' | 'reassign' | 'escalate' | 'cancel') => {
     if (!selectedJob || !jobActionReason.trim()) { setError('Write a short reason before changing this job.'); return; }
@@ -825,6 +841,42 @@ const DispatchConsolePage: React.FC = () => {
       closeJobDetail();
       const outcome = action === 'cancel' ? 'cancelled' : action === 'reassign' ? 'reallocated' : action === 'escalate' ? 'escalated' : 'updated';
       setNotice(`Job ${outcome} with an audit receipt.`);
+      await loadPhaseA();
+    }
+    setOperatorBusy(false);
+  };
+  const manageJobTiming = async () => {
+    if (!selectedJob) return;
+    if (jobTimingLocked) {
+      setError('Response timing cannot change after a job is completed or cancelled.');
+      return;
+    }
+    if (!Number.isInteger(jobSlaMinutes) || jobSlaMinutes < 1 || jobSlaMinutes > 1440) {
+      setError('Response target must be a whole number from 1 to 1,440 minutes.');
+      return;
+    }
+    if (!Number.isInteger(jobDwellMinutes) || jobDwellMinutes < 1 || jobDwellMinutes > 240) {
+      setError('Expected attendance must be a whole number from 1 to 240 minutes.');
+      return;
+    }
+    if (!jobTimingReason.trim()) {
+      setError('Explain why the response timing is changing.');
+      return;
+    }
+    setOperatorBusy(true);
+    setError(null);
+    const { error: timingError } = await supabase.rpc('manage_dispatch_job_timing', {
+      p_job_id: selectedJob.id,
+      p_expected_status: selectedJob.status,
+      p_sla_minutes: jobSlaMinutes,
+      p_expected_dwell_minutes: jobDwellMinutes,
+      p_timing_source: jobTimingSource,
+      p_reason: jobTimingReason.trim(),
+    });
+    if (timingError) setError(timingError.message);
+    else {
+      setNotice('Response timing updated with an audit receipt.');
+      setJobTimingReason('');
       await loadPhaseA();
     }
     setOperatorBusy(false);
@@ -855,6 +907,7 @@ const DispatchConsolePage: React.FC = () => {
         </header>
 
         {error && <div className="dispatch-console-error-box" role="alert">{error}</div>}
+        {notice && <div className="dispatch-console-inline-success" role="status">{notice}</div>}
 
         <div className="dispatch-job-dialog-grid">
           <div><strong>Status</strong><span>{JOB_STATUS_LABELS[selectedJob.status]}{selectedJob.slaBreached ? ' · response time breached' : ''}</span></div>
@@ -885,6 +938,38 @@ const DispatchConsolePage: React.FC = () => {
           {selectedJob.briefingNotes && <p><strong>Briefing</strong>{selectedJob.briefingNotes}</p>}
           {selectedJob.accessInstructions && <p><strong>Access</strong>{selectedJob.accessInstructions}</p>}
           {selectedJob.safetyNotes && <p className="is-safety"><strong>Safety</strong>{selectedJob.safetyNotes}</p>}
+        </section>
+
+        <section className="dispatch-job-dialog-actions dispatch-job-timing-actions">
+          <h3>Response timing</h3>
+          <p className="dispatch-console-form-note">Adjust the response target or expected attendance only when the operational plan changes. The reason is retained in the audit receipt.</p>
+          {jobTimingLocked && <p className="dispatch-console-form-note" role="status">This job is closed. Its response timing is retained as part of the completed record.</p>}
+          <div className="dispatch-job-timing-grid">
+            <label>
+              <span>Respond within (minutes)</span>
+              <input type="number" min={1} max={1440} step={1} value={jobSlaMinutes} onChange={(event) => setJobSlaMinutes(Number(event.target.value))} disabled={operatorBusy || jobTimingLocked} />
+            </label>
+            <label>
+              <span>Expected attendance (minutes)</span>
+              <input type="number" min={1} max={240} step={1} value={jobDwellMinutes} onChange={(event) => setJobDwellMinutes(Number(event.target.value))} disabled={operatorBusy || jobTimingLocked} />
+            </label>
+            <label>
+              <span>Timing source</span>
+              <select value={jobTimingSource} onChange={(event) => setJobTimingSource(event.target.value)} disabled={operatorBusy || jobTimingLocked}>
+                <option value="dispatcher_override">Dispatcher override</option>
+                <option value="site_service">Site service setting</option>
+                <option value="patrol_schedule">Patrol schedule</option>
+                <option value="bob_pattern">Bob pattern recommendation</option>
+              </select>
+            </label>
+          </div>
+          <label>
+            <span>Reason for timing change</span>
+            <textarea value={jobTimingReason} onChange={(event) => setJobTimingReason(event.target.value)} placeholder="What changed in the operational plan?" rows={2} disabled={operatorBusy || jobTimingLocked} />
+          </label>
+          <div>
+            <button type="button" className="btn btn-secondary" disabled={operatorBusy || jobTimingLocked} onClick={() => void manageJobTiming()}>Update response timing</button>
+          </div>
         </section>
 
         <section className="dispatch-job-dialog-actions">
