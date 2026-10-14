@@ -1006,3 +1006,64 @@ remains unpopulated.
   timestamp behavior for both functions without retaining the temporary shift,
   stops or audit events. Atlas dry-run moves 148 -> 146 bounded gaps:
   1 edge function, 90 RPCs and 55 tables. Runtime exercise remains unclaimed.
+
+### Closure log — reviewed contract evidence register
+
+- Atlas showed `obligation_proof_artifacts` present but unwired. Dispatch
+  contained only a TypeScript reference; there was no real read, write or UI
+  task. Live verification found zero proof links, one active requirement marked
+  as needing proof but carrying no evidence type, five completed
+  agreement-linked stops, 74 GPS rows, and zero GPS rows linked to a shift.
+  The legacy requirement is therefore shown as a configuration gap rather than
+  silently corrected, and isolated coordinates are not relabelled as a GPS
+  track.
+- Before the change, authenticated callers retained broad direct table grants.
+  A link had no request identity, correction state, source-time snapshot or
+  governed withdrawal path. The table could accept an arbitrary source table
+  and record ID without proving organization, agreement, covered Site,
+  completion state or evidence compatibility.
+- The table now carries an organization-scoped replay identity, active or
+  withdrawn review state, source snapshot, update timestamp, reviewer,
+  withdrawal reason and correction timestamps. One active source can satisfy a
+  requirement only once; a withdrawn link remains in history and may be
+  replaced after a new review. Direct browser grants are removed.
+- Before attachment, `get_crm_obligation_proof_register` returns linked history
+  and only eligible completed work. Timestamp evidence requires server-recorded
+  arrival and departure on a stop whose shift uses an active location link for
+  the same accepted operational agreement and whose Site matches the
+  requirement scope. GPS-track evidence additionally requires at least two
+  officer GPS points linked to the shift and captured inside the stop window.
+  Photo, report, signature, other and legacy untyped requirements remain
+  visibly unavailable until their owning source workflow exists.
+- During review, the provider administrator opens Evidence register beside the
+  requirement, sees the expected evidence type, current chain, eligible
+  completed work, Site, officer and times, adds an optional review note and
+  confirms the link. This adapts Trackforce’s useful supervisor activity and
+  delivery-history pattern while keeping FCM’s agreement, place, shift and
+  evidence spines authoritative. It does not copy a dense global activity grid
+  or imply that all field activity proves every contract requirement.
+- `manage_crm_obligation_proof` locks and revalidates the requirement and source
+  on every attachment, requires provider administration and an accepted
+  operational agreement, rejects unsupported proof types, and writes an audit
+  receipt. Replays return the original result. Withdrawal requires the expected
+  update timestamp and a reason, preserves the original link, records the
+  correcting administrator and reloads the persisted chain.
+- Ten focused guards, the production build, 29 Atlas generator tests and the
+  complete desktop/mobile link-and-withdraw workflow pass. Both linked
+  migrations are applied; the first regenerated live schema reported 813
+  functions and 725
+  indexes. Follow-up advisor hardening added covering reviewer indexes and
+  removed the dead direct-table policies, bringing the final index count to
+  727 and policy count to 903. Rollback-only live verification proved attach,
+  attach replay, withdrawal and withdrawal replay without retaining an
+  obligation, proof link or audit event. Database lint reported no finding for
+  either new function.
+  Advisor warnings for authenticated security-definer execution are
+  intentional: the UI must invoke both RPCs and each function enforces its
+  provider-admin check. The no-policy RLS notice is also intentional because
+  browser table grants are revoked; zero-use index notices are expected while
+  the live proof table remains empty.
+  Atlas dry-run derives both RPCs as present and wired to
+  `CrmAgreementObligationsPanel`, with concrete proof-table reads/writes and
+  `exercised=null`; the existing proof table moves the bounded gap count
+  146 -> 145. Runtime exercise remains unclaimed.

@@ -235,6 +235,206 @@
 	background: #33211f;
 }
 
+.agreement-proof-register {
+	display: grid;
+	gap: 12px;
+	grid-column: 1 / -1;
+	padding: 12px;
+	border: 1px solid #355466;
+	border-radius: 5px;
+	background: #08141e;
+}
+
+.agreement-proof-register > header {
+	display: flex;
+	align-items: flex-start;
+	justify-content: space-between;
+	gap: 12px;
+}
+
+.agreement-proof-register > header > div {
+	display: grid;
+	gap: 3px;
+}
+
+.agreement-proof-register > header span,
+.agreement-proof-loading,
+.agreement-proof-empty {
+	color: #91a5b0;
+	font-size: 12px;
+	line-height: 1.45;
+}
+
+.agreement-proof-register > header button,
+.agreement-proof-section article > button,
+.agreement-proof-withdraw button {
+	display: inline-flex;
+	align-items: center;
+	justify-content: center;
+	gap: 6px;
+	min-height: 32px;
+	padding: 0 10px;
+	border: 1px solid #3a6672;
+	border-radius: 4px;
+	color: #d8f4f2;
+	background: #173a43;
+	font-size: 12px;
+	font-weight: 800;
+	cursor: pointer;
+}
+
+.agreement-proof-register button:disabled {
+	cursor: not-allowed;
+	opacity: .55;
+}
+
+.agreement-proof-loading {
+	display: flex;
+	align-items: center;
+	gap: 7px;
+	padding: 12px;
+}
+
+.agreement-proof-readiness {
+	display: grid;
+	gap: 3px;
+	padding: 10px 12px;
+	border-left: 3px solid #4e8e82;
+	color: #d9eee9;
+	background: #15302b;
+	font-size: 12px;
+}
+
+.agreement-proof-readiness.is-configuration_required,
+.agreement-proof-readiness.is-source_workflow_unavailable {
+	border-left-color: #d2a957;
+	color: #eadbb2;
+	background: #302817;
+}
+
+.agreement-proof-readiness.is-not_required {
+	border-left-color: #70818b;
+	color: #c4ced3;
+	background: #202b31;
+}
+
+.agreement-proof-readiness span {
+	line-height: 1.45;
+}
+
+.agreement-proof-section {
+	display: grid;
+	gap: 8px;
+}
+
+.agreement-proof-section h4 {
+	display: flex;
+	align-items: center;
+	gap: 7px;
+	margin: 0;
+	color: #dce9ed;
+	font-size: 13px;
+}
+
+.agreement-proof-section h4 span {
+	padding: 2px 6px;
+	border-radius: 10px;
+	color: #9bb0ba;
+	background: #20303a;
+	font-size: 10px;
+}
+
+.agreement-proof-section > article {
+	display: grid;
+	grid-template-columns: minmax(0, 1fr) auto;
+	gap: 8px 12px;
+	padding: 10px;
+	border: 1px solid #293f4f;
+	border-radius: 4px;
+	background: #0d1c27;
+}
+
+.agreement-proof-section > article.is-withdrawn {
+	border-style: dashed;
+	opacity: .75;
+}
+
+.agreement-proof-section > article > div:first-child {
+	display: grid;
+	gap: 3px;
+}
+
+.agreement-proof-section > article span,
+.agreement-proof-section > article small,
+.agreement-proof-section > article p {
+	color: #91a5b0;
+	font-size: 11px;
+	line-height: 1.4;
+}
+
+.agreement-proof-section > article p {
+	grid-column: 1 / -1;
+	margin: 0;
+}
+
+.agreement-proof-status {
+	align-self: start;
+	padding: 3px 6px;
+	border-radius: 3px;
+	font-size: 10px !important;
+	font-weight: 850;
+	text-transform: uppercase;
+}
+
+.agreement-proof-status.is-active {
+	color: #bff5e5;
+	background: #1b473a;
+}
+
+.agreement-proof-status.is-withdrawn {
+	color: #d3c4c2;
+	background: #3b2e2c;
+}
+
+.agreement-proof-note,
+.agreement-proof-withdraw label {
+	display: grid;
+	gap: 4px;
+	grid-column: 1 / -1;
+	color: #91a5b0;
+	font-size: 11px;
+}
+
+.agreement-proof-note input,
+.agreement-proof-withdraw input {
+	width: 100%;
+	min-height: 33px;
+	padding: 6px 8px;
+	border: 1px solid #395465;
+	border-radius: 4px;
+	color: #eef6f8;
+	background: #071119;
+	font: inherit;
+}
+
+.agreement-proof-section article > .agreement-proof-withdraw-trigger,
+.agreement-proof-section article .agreement-proof-withdraw button.is-danger {
+	border-color: #6a5150;
+	color: #e8c1bd;
+	background: #33211f;
+}
+
+.agreement-proof-withdraw {
+	display: flex;
+	flex-wrap: wrap;
+	gap: 7px;
+	grid-column: 1 / -1;
+}
+
+.agreement-proof-withdraw label {
+	flex: 1 1 100%;
+}
+
 @media (max-width: 680px) {
 	.agreement-section-heading {
 		align-items: stretch;
@@ -268,6 +468,32 @@
 
 	.agreement-obligation-actions button {
 		width: 100%;
+	}
+
+	.agreement-proof-register {
+		grid-column: auto;
+	}
+
+	.agreement-proof-register > header {
+		align-items: stretch;
+		flex-direction: column;
+	}
+
+	.agreement-proof-register > header button,
+	.agreement-proof-section > article > button,
+	.agreement-proof-withdraw button {
+		width: 100%;
+	}
+
+	.agreement-proof-section > article {
+		grid-template-columns: minmax(0, 1fr);
+	}
+
+	.agreement-proof-status,
+	.agreement-proof-section > article p,
+	.agreement-proof-note,
+	.agreement-proof-withdraw {
+		grid-column: auto;
 	}
 
 	.agreement-obligation-form footer {

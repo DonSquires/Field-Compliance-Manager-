@@ -1,5 +1,5 @@
-import { useRef, useState } from 'react';
-import { AlertTriangle, CheckCircle2, Plus, X } from 'lucide-react';
+import { useCallback, useEffect, useRef, useState } from 'react';
+import { AlertTriangle, CheckCircle2, Link2, Plus, RefreshCw, X } from 'lucide-react';
 import { supabase } from '../lib/supabase';
 import './CrmAgreementObligationsPanel.css';
 
@@ -39,6 +39,46 @@ interface ObligationForm {
   escalationContact: string;
   cadencePeriod: 'shift' | 'day' | 'week' | 'month';
   cadenceCount: string;
+}
+
+interface ProofArtifact {
+  id: string;
+  artifact_type: string;
+  captured_at: string;
+  notes: string | null;
+  status: 'active' | 'withdrawn';
+  created_at: string;
+  updated_at: string;
+  created_by_name: string;
+  withdrawn_at: string | null;
+  withdrawn_by_name: string | null;
+  withdrawal_reason: string | null;
+  metadata: {
+    site_name?: string;
+    officer_name?: string;
+    arrived_at?: string;
+    departed_at?: string;
+    gps_point_count?: number;
+  };
+}
+
+interface EligibleProofSource {
+  source_record_id: string;
+  site_name: string;
+  officer_name: string;
+  arrived_at: string;
+  departed_at: string;
+  artifact_type: string;
+  gps_point_count: number;
+}
+
+interface ProofRegister {
+  obligation_id: string;
+  required_artifact_type: AgreementObligation['proof_artifact_type'];
+  readiness: 'not_required' | 'configuration_required' | 'ready' | 'source_workflow_unavailable';
+  readiness_message: string;
+  artifacts: ProofArtifact[];
+  eligible_sources: EligibleProofSource[];
 }
 
 const emptyForm: ObligationForm = {
@@ -89,6 +129,7 @@ export function CrmAgreementObligationsPanel({
   const [form, setForm] = useState<ObligationForm>(emptyForm);
   const [saving, setSaving] = useState(false);
   const [deactivatingId, setDeactivatingId] = useState<string | null>(null);
+  const [evidenceId, setEvidenceId] = useState<string | null>(null);
   const [error, setError] = useState<string | null>(null);
   const [notice, setNotice] = useState<string | null>(null);
   const requestId = useRef(crypto.randomUUID());
@@ -130,6 +171,7 @@ export function CrmAgreementObligationsPanel({
     setError(null);
     setNotice(null);
     setDeactivatingId(null);
+    setEvidenceId(null);
     requestId.current = crypto.randomUUID();
   };
 
@@ -243,15 +285,128 @@ export function CrmAgreementObligationsPanel({
         : null;
       const proofLabel = obligation.proof_artifact_type === 'gps_track'
         ? 'GPS track'
-        : obligation.proof_artifact_type?.replaceAll('_', ' ');
+        : obligation.proof_artifact_type?.replaceAll('_', ' ') ?? 'Evidence type not configured';
       return <article key={obligation.id} className={obligation.active ? '' : 'is-inactive'} aria-label={`${obligation.obligation_code} ${obligation.active ? 'active' : 'inactive'}`}>
         <div><span>{obligationLabels[obligation.obligation_type]}</span><strong>{obligation.obligation_code}</strong><p>{obligation.description}</p><small>{siteName}{cadence ? ` · ${cadence}` : ''}{obligation.sla_target_minutes ? ` · ${obligation.sla_target_minutes} minute target` : ''}{obligation.requires_proof ? ` · ${proofLabel} proof required` : ''}</small></div>
         <span className={`agreement-obligation-state ${obligation.active ? 'is-active' : ''}`}>{obligation.active ? 'Active' : 'Inactive'}</span>
         <div className="agreement-obligation-actions">
           <button type="button" disabled={saving} onClick={() => startEdit(obligation)}>{obligation.active ? 'Edit' : 'Edit and reactivate'}</button>
+          {obligation.requires_proof && <button type="button" disabled={saving} onClick={() => setEvidenceId(evidenceId === obligation.id ? null : obligation.id)}><Link2 size={14} />{evidenceId === obligation.id ? 'Close evidence' : 'Evidence register'}</button>}
           {obligation.active && (deactivatingId === obligation.id ? <><button type="button" className="is-danger" disabled={saving} onClick={() => void deactivate(obligation)}>Confirm deactivate</button><button type="button" disabled={saving} onClick={() => setDeactivatingId(null)}>Cancel</button></> : <button type="button" className="is-danger" disabled={saving} onClick={() => setDeactivatingId(obligation.id)}>Deactivate</button>)}
         </div>
+        {evidenceId === obligation.id && <ObligationEvidenceRegister obligation={obligation} />}
       </article>;
     })}</div>}
   </section>;
+}
+
+function ObligationEvidenceRegister({ obligation }: { obligation: AgreementObligation }) {
+  const [register, setRegister] = useState<ProofRegister | null>(null);
+  const [loading, setLoading] = useState(true);
+  const [busyId, setBusyId] = useState<string | null>(null);
+  const [notes, setNotes] = useState<Record<string, string>>({});
+  const [withdrawId, setWithdrawId] = useState<string | null>(null);
+  const [withdrawalReason, setWithdrawalReason] = useState('');
+  const [error, setError] = useState<string | null>(null);
+  const [notice, setNotice] = useState<string | null>(null);
+
+  const load = useCallback(async () => {
+    setLoading(true);
+    setError(null);
+    const { data, error: loadError } = await supabase.rpc('get_crm_obligation_proof_register', {
+      p_obligation_id: obligation.id,
+    });
+    if (loadError) setError(loadError.message);
+    else setRegister(data as ProofRegister);
+    setLoading(false);
+  }, [obligation.id]);
+
+  useEffect(() => { void load(); }, [load]);
+
+  const attach = async (source: EligibleProofSource) => {
+    setBusyId(source.source_record_id);
+    setError(null);
+    setNotice(null);
+    const { error: attachError } = await supabase.rpc('manage_crm_obligation_proof', {
+      p_action: 'attach_shift_stop',
+      p_obligation_id: obligation.id,
+      p_client_request_id: crypto.randomUUID(),
+      p_source_record_id: source.source_record_id,
+      p_artifact_id: null,
+      p_expected_updated_at: null,
+      p_notes: notes[source.source_record_id]?.trim() || null,
+      p_withdrawal_reason: null,
+    });
+    if (attachError) setError(attachError.message);
+    else {
+      setNotice('Evidence linked with a review receipt.');
+      await load();
+    }
+    setBusyId(null);
+  };
+
+  const withdraw = async (artifact: ProofArtifact) => {
+    setBusyId(artifact.id);
+    setError(null);
+    setNotice(null);
+    const { error: withdrawError } = await supabase.rpc('manage_crm_obligation_proof', {
+      p_action: 'withdraw',
+      p_obligation_id: obligation.id,
+      p_client_request_id: crypto.randomUUID(),
+      p_source_record_id: null,
+      p_artifact_id: artifact.id,
+      p_expected_updated_at: artifact.updated_at,
+      p_notes: null,
+      p_withdrawal_reason: withdrawalReason.trim(),
+    });
+    if (withdrawError) setError(withdrawError.message);
+    else {
+      setNotice('Evidence link withdrawn. Its history remains in the register.');
+      setWithdrawId(null);
+      setWithdrawalReason('');
+      await load();
+    }
+    setBusyId(null);
+  };
+
+  return <section className="agreement-proof-register" aria-label={`${obligation.obligation_code} evidence register`}>
+    <header>
+      <div><strong>Evidence register</strong><span>Review completed work before linking it to this contract requirement.</span></div>
+      <button type="button" disabled={loading} onClick={() => void load()}><RefreshCw size={14} className={loading ? 'is-spinning' : ''} />Refresh</button>
+    </header>
+    {error && <div className="agreement-obligation-message is-error" role="alert"><AlertTriangle size={15} />{error}</div>}
+    {notice && <div className="agreement-obligation-message is-success" role="status"><CheckCircle2 size={15} />{notice}</div>}
+    {loading ? <div className="agreement-proof-loading"><RefreshCw size={16} className="is-spinning" />Loading evidence chain</div> : register && <>
+      <div className={`agreement-proof-readiness is-${register.readiness}`}>
+        <strong>{register.readiness === 'ready' ? 'Source check ready' : register.readiness === 'configuration_required' ? 'Configuration required' : register.readiness === 'not_required' ? 'Evidence not required' : 'Source workflow unavailable'}</strong>
+        <span>{register.readiness_message}</span>
+      </div>
+      <div className="agreement-proof-section">
+        <h4>Linked evidence <span>{register.artifacts.filter((artifact) => artifact.status === 'active').length} active</span></h4>
+        {register.artifacts.length === 0 ? <p className="agreement-proof-empty">No evidence has been linked. The requirement remains unproven.</p> : register.artifacts.map((artifact) => <article key={artifact.id} className={artifact.status === 'withdrawn' ? 'is-withdrawn' : ''}>
+          <div><strong>{proofArtifactLabel(artifact.artifact_type)}</strong><span>{artifact.metadata.site_name ?? 'Covered Site'} · {formatEvidenceTime(artifact.captured_at)}</span><small>Linked by {artifact.created_by_name} on {formatEvidenceTime(artifact.created_at)}{artifact.notes ? ` · ${artifact.notes}` : ''}</small></div>
+          <span className={`agreement-proof-status is-${artifact.status}`}>{artifact.status}</span>
+          {artifact.status === 'withdrawn' ? <p>Withdrawn by {artifact.withdrawn_by_name ?? 'a provider administrator'} on {artifact.withdrawn_at ? formatEvidenceTime(artifact.withdrawn_at) : 'an unknown date'} · {artifact.withdrawal_reason}</p> : withdrawId === artifact.id ? <div className="agreement-proof-withdraw"><label><span>Why is this link incorrect?</span><input value={withdrawalReason} onChange={(event) => setWithdrawalReason(event.target.value)} placeholder="Wrong requirement or source record" /></label><button type="button" className="is-danger" disabled={busyId === artifact.id || withdrawalReason.trim().length < 5} onClick={() => void withdraw(artifact)}>Confirm withdrawal</button><button type="button" disabled={busyId === artifact.id} onClick={() => { setWithdrawId(null); setWithdrawalReason(''); }}>Cancel</button></div> : <button type="button" className="is-danger agreement-proof-withdraw-trigger" onClick={() => setWithdrawId(artifact.id)}>Withdraw link</button>}
+        </article>)}
+      </div>
+      <div className="agreement-proof-section">
+        <h4>Eligible completed work <span>{register.eligible_sources.length}</span></h4>
+        {register.readiness !== 'ready' ? <p className="agreement-proof-empty">Resolve the source check above before linking evidence.</p> : register.eligible_sources.length === 0 ? <p className="agreement-proof-empty">No unlinked completed work currently satisfies the agreement, Site, and evidence checks.</p> : register.eligible_sources.map((source) => <article key={source.source_record_id}>
+          <div><strong>{source.site_name}</strong><span>{source.officer_name} · {formatEvidenceTime(source.arrived_at)} to {formatEvidenceTime(source.departed_at)}</span><small>{source.artifact_type === 'gps_track' ? `${source.gps_point_count} shift-linked GPS points` : 'Server-recorded arrival and departure'}</small></div>
+          <label className="agreement-proof-note"><span>Review note (optional)</span><input value={notes[source.source_record_id] ?? ''} onChange={(event) => setNotes((current) => ({ ...current, [source.source_record_id]: event.target.value }))} placeholder="Why this work proves the requirement" /></label>
+          <button type="button" disabled={busyId === source.source_record_id} onClick={() => void attach(source)}>{busyId === source.source_record_id ? 'Linking…' : 'Link evidence'}</button>
+        </article>)}
+      </div>
+    </>}
+  </section>;
+}
+
+function formatEvidenceTime(value: string): string {
+  return new Date(value).toLocaleString('en-NZ', { dateStyle: 'medium', timeStyle: 'short' });
+}
+
+function proofArtifactLabel(value: string): string {
+  if (value === 'gps_track') return 'GPS track';
+  if (value === 'arrival_timestamp') return 'Completed stop timestamp';
+  return value.replaceAll('_', ' ');
 }

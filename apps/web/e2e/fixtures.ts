@@ -101,6 +101,17 @@ export async function installSupabaseFixtures(page: Page, options: { officerModu
   const agreementSiteLinks = new Map<string, string>([['42424242-4242-4242-8242-424242424242', 'active']]);
   const agreementModules = new Map<string, { enabled: boolean; sla_minutes: number | null; allows_client_submission: boolean; allows_auto_dispatch: boolean }>([['static_guarding', { enabled: true, sla_minutes: 30, allows_client_submission: false, allows_auto_dispatch: false }]]);
   const agreementObligations: Array<Record<string, any>> = [];
+  const agreementProofArtifacts: Array<Record<string, any>> = [];
+  const eligibleAgreementProofSource = {
+    source_table: 'shift_stops',
+    source_record_id: '52525252-5252-4252-8252-525252525252',
+    site_name: 'Civic Events Centre',
+    officer_name: 'Ana Ngata',
+    arrived_at: '2026-08-31T08:30:00.000Z',
+    departed_at: '2026-08-31T08:45:00.000Z',
+    artifact_type: 'arrival_timestamp',
+    gps_point_count: 0,
+  };
   const boundaryHistory: Array<Record<string, unknown>> = [{ id: '68686868-6868-4868-8868-686868686868', entity_type: 'location_zone', entity_id: '66666666-6666-4666-8666-666666666666', boundary_source: 'council_gis', verification_state: 'verified', changed_via: 'verification', change_reason: 'Operations administrator verified the council boundary on the map', version: 3, created_at: '2026-08-29T03:00:00.000Z', has_boundary: true }, { id: '58585858-5858-4858-8858-585858585858', entity_type: 'client_site', entity_id: '42424242-4242-4242-8242-424242424242', boundary_source: 'authoritative_import', verification_state: 'verified', changed_via: 'verification', change_reason: 'Boundary verified via visual map confirmation', version: 2, created_at: '2026-08-20T03:00:00.000Z', has_boundary: true }];
   const boundaryProposals: Array<Record<string, any>> = [];
   // Tier 4 checkpoints: the two existing rows sit at the Civic Events Centre; the workbench places new ones.
@@ -318,6 +329,32 @@ export async function installSupabaseFixtures(page: Page, options: { officerModu
     if (table === 'find_crm_organization_candidates') { const payload = JSON.parse(request.postData() ?? '{}'); const query = String(payload.p_query ?? '').toLowerCase(); const nzbn = String(payload.p_nzbn ?? '').replace(/\D/g, ''); const matches = crmOrganizations.filter((organization) => String(organization.name).toLowerCase().includes(query) || (nzbn && String(organization.nzbn ?? '') === nzbn)).map((organization) => ({ id: organization.id, name: organization.name, organization_type: organization.organization_type, status: organization.status, nzbn: organization.nzbn, parent_organization_id: organization.parent_organization_id, match_reason: nzbn && organization.nzbn === nzbn ? 'Exact NZBN' : String(organization.name).toLowerCase() === query ? 'Exact name' : 'Similar name', manageable: true })); await route.fulfill(fulfillJson(matches)); return; }
     if (table === 'find_crm_site_candidates') { const payload = JSON.parse(request.postData() ?? '{}'); const query = String(payload.p_query ?? '').toLowerCase(); const address = String(payload.p_address ?? '').toLowerCase().replace(/[^a-z0-9]+/g, ''); const matches = crmSites.filter((site) => site.client_organization_id === payload.p_account_organization_id && (String(site.name).toLowerCase().includes(query) || (address && String(site.address).toLowerCase().replace(/[^a-z0-9]+/g, '') === address))).map((site) => ({ ...site, match_reason: address && String(site.address).toLowerCase().replace(/[^a-z0-9]+/g, '') === address ? 'Exact address' : 'Similar site' })); await route.fulfill(fulfillJson(matches)); return; }
     if (table === 'get_crm_agreement_setup') { await route.fulfill(fulfillJson({ agreement: { id: '24242424-2424-4424-8424-242424242424', name: 'Civic Events Compliance Services', client_organization_id: '40404040-4040-4040-8040-404040404040', invitation_status: 'accepted', enabled_modules: [...agreementModules].filter(([, settings]) => settings.enabled).map(([key]) => key), client_portal_reports_enabled: false, monthly_report_template_code: null, client_portal_finance_enabled: false }, sites: crmSites.filter((site) => site.client_organization_id === '40404040-4040-4040-8040-404040404040').map((site) => ({ ...site, linked: agreementSiteLinks.has(String(site.id)), link_status: agreementSiteLinks.get(String(site.id)) ?? null })), zones: [], modules: ['freedom_camping', 'parking_enforcement', 'static_guarding'].map((module_key) => ({ module_key, enabled: agreementModules.get(module_key)?.enabled ?? false, sla_minutes: agreementModules.get(module_key)?.sla_minutes ?? null, allows_client_submission: agreementModules.get(module_key)?.allows_client_submission ?? false, allows_auto_dispatch: agreementModules.get(module_key)?.allows_auto_dispatch ?? false })), report_templates: [], obligations: agreementObligations })); return; }
+    if (table === 'get_crm_obligation_proof_register') {
+      const payload = JSON.parse(request.postData() ?? '{}');
+      const obligation = agreementObligations.find((item) => item.id === payload.p_obligation_id);
+      const artifacts = agreementProofArtifacts.filter((item) => item.obligation_id === payload.p_obligation_id);
+      const activeSourceLinked = artifacts.some((item) => item.status === 'active' && item.source_record_id === eligibleAgreementProofSource.source_record_id);
+      const requiredType = obligation?.proof_artifact_type ?? null;
+      const readiness = !obligation?.requires_proof ? 'not_required' : !requiredType ? 'configuration_required' : ['timestamp', 'gps_track'].includes(requiredType) ? 'ready' : 'source_workflow_unavailable';
+      const readinessMessage = readiness === 'ready'
+        ? requiredType === 'timestamp'
+          ? 'Completed, contract-aligned stops can provide timestamp evidence.'
+          : 'Only completed stops with at least two shift-linked GPS points can provide a GPS track.'
+        : readiness === 'configuration_required'
+          ? 'Choose a required evidence type before linking field evidence.'
+          : readiness === 'not_required'
+            ? 'This contract requirement does not require evidence.'
+            : `The ${String(requiredType).replaceAll('_', ' ')} evidence workflow is not wired to this register yet.`;
+      await route.fulfill(fulfillJson({
+        obligation_id: payload.p_obligation_id,
+        required_artifact_type: requiredType,
+        readiness,
+        readiness_message: readinessMessage,
+        artifacts,
+        eligible_sources: readiness === 'ready' && requiredType === 'timestamp' && !activeSourceLinked ? [eligibleAgreementProofSource] : [],
+      }));
+      return;
+    }
     if (table === 'get_crm_enterprise_readiness') { await route.fulfill(fulfillJson({ agreement_id: '24242424-2424-4424-8424-242424242424', invitation_status: 'accepted', ready: false, dimensions: [{ key: 'coverage', label: 'Covered places', status: 'ready', detail: '2 active location links', owner: 'Account administration', destination: 'relationships' }, { key: 'boundary', label: 'Boundary evidence', status: 'blocked', detail: 'Every covered place needs authoritative verified geometry', owner: 'Operations administration', destination: 'sites' }, { key: 'modules', label: 'Service scope', status: 'ready', detail: '2 enabled service modules', owner: 'Account administration', destination: 'relationships' }, { key: 'billing', label: 'Commercial rates', status: 'ready', detail: 'A positive agreement or covered-place rate is recorded', owner: 'Commercial administration', destination: 'crm' }, { key: 'operations', label: 'Operational work', status: 'ready', detail: '1 active attributed work unit', owner: 'Roster administration', destination: 'roster-targets' }, { key: 'reporting', label: 'Reporting delivery', status: 'blocked', detail: 'Client reporting is enabled without a valid monthly template', owner: 'Reporting administration', destination: 'reports' }] })); return; }
     if (table === 'get_crm_operational_geography') { await route.fulfill(fulfillJson({ locations: [{ id: '65656565-6565-4565-8565-656565656565', organization_id: '40404040-4040-4040-8040-404040404040', name: 'Civic Events House', address: '1 Civic Square', suburb: 'Nelson', postcode: '7010', notes: 'Contracted client place.' }], sites: crmSites.filter((site) => site.location_id === '65656565-6565-4565-8565-656565656565'), zones: geoZones })); return; }
     if (table === 'get_crm_operational_place_editor') { await route.fulfill(fulfillJson({ location: { id: '65656565-6565-4565-8565-656565656565', name: 'Civic Events House', organization_id: '40404040-4040-4040-8040-404040404040' }, sites: crmSites, zones: geoZones, modules: [{ module_key: 'patrol', display_name: 'Patrol' }, { module_key: 'static_guarding', display_name: 'Static Guarding' }, { module_key: 'parking_enforcement', display_name: 'Parking Enforcement' }], closures: operationalClosures })); return; }
@@ -418,6 +455,35 @@ export async function installSupabaseFixtures(page: Page, options: { officerModu
     if (table === 'create_crm_site') { const payload = JSON.parse(request.postData() ?? '{}'); const row = { id: '57575757-5757-4757-8757-575757575757', name: payload.p_name, address: payload.p_address, organization_id: payload.p_account_organization_id, client_organization_id: payload.p_account_organization_id, site_type: payload.p_site_type, active: true, boundary_status: 'provisional', boundary_verification: 'unverified', created: true }; crmSites.push(row); await route.fulfill(fulfillJson([row])); return; }
     if (table === 'manage_crm_agreement_setup') { const payload = JSON.parse(request.postData() ?? '{}'); if (payload.p_action === 'link_site') agreementSiteLinks.set(payload.p_site_id, 'active'); else if (payload.p_action === 'unlink_site') agreementSiteLinks.set(payload.p_site_id, 'ended'); else if (payload.p_action === 'set_module') agreementModules.set(payload.p_module_key, { enabled: payload.p_enabled, sla_minutes: payload.p_sla_minutes, allows_client_submission: payload.p_allows_client_submission, allows_auto_dispatch: payload.p_allows_auto_dispatch }); await route.fulfill(fulfillJson({ agreement_id: payload.p_agreement_id, action: payload.p_action, enabled_modules: [...agreementModules].filter(([, settings]) => settings.enabled).map(([key]) => key) })); return; }
     if (table === 'manage_crm_agreement_obligation') { const payload = JSON.parse(request.postData() ?? '{}'); let obligation = agreementObligations.find((item) => item.id === payload.p_obligation_id); if (!obligation) { obligation = { id: '23232323-2323-4323-8323-232323232323', service_agreement_id: payload.p_agreement_id, created_at: '2026-08-31T10:00:00.000Z' }; agreementObligations.push(obligation); } if (payload.p_action === 'deactivate') Object.assign(obligation, { active: false, updated_at: '2026-08-31T10:03:00.000Z' }); else Object.assign(obligation, { obligation_code: payload.p_obligation_code, obligation_type: payload.p_obligation_type, description: payload.p_description, sla_target_minutes: payload.p_sla_target_minutes, requires_proof: payload.p_requires_proof, proof_artifact_type: payload.p_proof_artifact_type, escalation_minutes: payload.p_escalation_minutes, escalation_contact: payload.p_escalation_contact, site_id: payload.p_site_id, frequency_rule: payload.p_frequency_rule, active: true, updated_at: '2026-08-31T10:02:00.000Z' }); await route.fulfill(fulfillJson(obligation)); return; }
+    if (table === 'manage_crm_obligation_proof') {
+      const payload = JSON.parse(request.postData() ?? '{}');
+      if (payload.p_action === 'attach_shift_stop') {
+        const artifact = {
+          id: '54545454-5454-4454-8454-545454545455',
+          obligation_id: payload.p_obligation_id,
+          artifact_type: 'arrival_timestamp',
+          source_table: 'shift_stops',
+          source_record_id: payload.p_source_record_id,
+          captured_at: eligibleAgreementProofSource.departed_at,
+          notes: payload.p_notes,
+          status: 'active',
+          created_at: '2026-08-31T10:03:00.000Z',
+          updated_at: '2026-08-31T10:03:00.000Z',
+          created_by_name: 'Morgan Reed',
+          withdrawn_at: null,
+          withdrawn_by_name: null,
+          withdrawal_reason: null,
+          metadata: { site_name: eligibleAgreementProofSource.site_name, officer_name: eligibleAgreementProofSource.officer_name, arrived_at: eligibleAgreementProofSource.arrived_at, departed_at: eligibleAgreementProofSource.departed_at, gps_point_count: 0 },
+        };
+        agreementProofArtifacts.push(artifact);
+        await route.fulfill(fulfillJson({ action: payload.p_action, artifact_id: artifact.id, status: 'active', replayed: false }));
+      } else {
+        const artifact = agreementProofArtifacts.find((item) => item.id === payload.p_artifact_id);
+        if (artifact) Object.assign(artifact, { status: 'withdrawn', withdrawn_at: '2026-08-31T10:04:00.000Z', withdrawn_by_name: 'Morgan Reed', withdrawal_reason: payload.p_withdrawal_reason, updated_at: '2026-08-31T10:04:00.000Z' });
+        await route.fulfill(fulfillJson({ action: payload.p_action, artifact_id: payload.p_artifact_id, status: 'withdrawn', replayed: false }));
+      }
+      return;
+    }
     if (table === 'manage_crm_onboarding_stage' || table === 'manage_crm_onboarding_workflow') { const payload = JSON.parse(request.postData() ?? '{}'); const row = onboardingRows.find((item) => item.account_organization_id === payload.p_account_organization_id); if (row) { const previousStage = row.current_stage; row.current_stage = payload.p_stage; row.ledger_status = payload.p_stage === 'review' ? 'ready' : 'in_progress'; row.version += 1; row.target_live_at = payload.p_target_live_at ?? row.target_live_at; row.assigned_to = payload.p_assigned_to ?? row.assigned_to; row.assigned_name = row.assigned_to ? 'Morgan Reed' : null; row.stage_note = payload.p_note ?? row.stage_note; onboardingEvents.unshift({ event_id: crypto.randomUUID(), account_organization_id: row.account_organization_id, event_type: 'workflow_updated', from_stage: previousStage, to_stage: row.current_stage, ledger_status: row.ledger_status, assigned_to: row.assigned_to, assigned_name: row.assigned_name, note: row.stage_note, actor_user_id: ADMIN_ID, actor_name: 'Morgan Reed', ledger_version: row.version, created_at: '2026-08-31T10:02:00.000Z' }); } await route.fulfill(fulfillJson(row)); return; }
     if (table === 'manage_crm_activation_handoff_task') { const payload = JSON.parse(request.postData() ?? '{}'); const handoff = activationHandoffs.find((item) => item.handoff_id === payload.p_handoff_id); const task = handoff?.tasks.find((item: Record<string, unknown>) => item.task_id === payload.p_task_id); if (handoff && task) { task.status = payload.p_complete ? 'completed' : 'pending'; task.completion_note = payload.p_note; task.completed_at = payload.p_complete ? '2026-08-31T10:05:00.000Z' : null; task.completed_by_name = payload.p_complete ? 'Morgan Reed' : null; handoff.version += 1; handoff.handoff_status = handoff.tasks.every((item: Record<string, unknown>) => item.status === 'completed') ? 'completed' : 'open'; } await route.fulfill(fulfillJson(handoff)); return; }
     if (table === 'activate_crm_account') { const payload = JSON.parse(request.postData() ?? '{}'); const row = onboardingRows.find((item) => item.account_organization_id === payload.p_account_organization_id); if (row) row.activated = true; await route.fulfill(fulfillJson({ account_organization_id: payload.p_account_organization_id, organization_status: 'active', ledger_status: 'activated', activated_at: '2026-08-31T10:05:00.000Z' })); return; }

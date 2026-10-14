@@ -19649,38 +19649,59 @@ export type Database = {
         Row: {
           artifact_type: string
           captured_at: string
+          client_request_id: string
           created_at: string
           created_by: string | null
           id: string
+          metadata: Json
           notes: string | null
           obligation_id: string
           organization_id: string
           source_record_id: string | null
           source_table: string | null
+          status: string
+          updated_at: string
+          withdrawal_reason: string | null
+          withdrawn_at: string | null
+          withdrawn_by: string | null
         }
         Insert: {
           artifact_type: string
           captured_at?: string
+          client_request_id: string
           created_at?: string
           created_by?: string | null
           id?: string
+          metadata?: Json
           notes?: string | null
           obligation_id: string
           organization_id: string
           source_record_id?: string | null
           source_table?: string | null
+          status?: string
+          updated_at?: string
+          withdrawal_reason?: string | null
+          withdrawn_at?: string | null
+          withdrawn_by?: string | null
         }
         Update: {
           artifact_type?: string
           captured_at?: string
+          client_request_id?: string
           created_at?: string
           created_by?: string | null
           id?: string
+          metadata?: Json
           notes?: string | null
           obligation_id?: string
           organization_id?: string
           source_record_id?: string | null
           source_table?: string | null
+          status?: string
+          updated_at?: string
+          withdrawal_reason?: string | null
+          withdrawn_at?: string | null
+          withdrawn_by?: string | null
         }
         Relationships: [
           {
@@ -19716,6 +19737,13 @@ export type Database = {
             columns: ["organization_id"]
             isOneToOne: false
             referencedRelation: "organizations"
+            referencedColumns: ["id"]
+          },
+          {
+            foreignKeyName: "obligation_proof_artifacts_withdrawn_by_fkey"
+            columns: ["withdrawn_by"]
+            isOneToOne: false
+            referencedRelation: "user_profiles"
             referencedColumns: ["id"]
           },
         ]
@@ -38764,6 +38792,10 @@ export type Database = {
         Args: { p_agreement_id: string }
         Returns: Json
       }
+      get_crm_obligation_proof_register: {
+        Args: { p_obligation_id: string }
+        Returns: Json
+      }
       get_crm_enterprise_readiness: {
         Args: { p_agreement_id: string }
         Returns: Json
@@ -39754,6 +39786,19 @@ export type Database = {
           p_requires_proof?: boolean
           p_site_id?: string
           p_sla_target_minutes?: number
+        }
+        Returns: Json
+      }
+      manage_crm_obligation_proof: {
+        Args: {
+          p_action: string
+          p_artifact_id?: string
+          p_client_request_id: string
+          p_expected_updated_at?: string
+          p_notes?: string
+          p_obligation_id: string
+          p_source_record_id?: string
+          p_withdrawal_reason?: string
         }
         Returns: Json
       }

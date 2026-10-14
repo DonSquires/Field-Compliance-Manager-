@@ -93,3 +93,44 @@ test('provider governs measurable contract requirements without implying automat
   await expect(dialog.getByRole('button', { name: /Requirements 0/ })).toBeVisible();
   expect(errors, errors.join('\n')).toEqual([]);
 });
+
+test('provider reviews, links, and withdraws contract evidence without erasing history', async ({ page }) => {
+  const errors = monitorBrowserErrors(page);
+  await signInAsAdmin(page, '/admin/relationships');
+
+  const relationship = page.getByText('Civic Events Compliance Services', { exact: true }).locator('..').locator('..').locator('..');
+  await relationship.getByRole('button', { name: 'Configure agreement' }).click();
+  const dialog = page.getByRole('dialog', { name: 'Civic Events Compliance Services' });
+  await dialog.getByRole('button', { name: /Requirements 0/ }).click();
+
+  await dialog.getByRole('button', { name: 'Add requirement' }).click();
+  await dialog.getByLabel('Requirement code').fill('CHECK.ENTRY');
+  await dialog.getByLabel('Requirement type').selectOption('compliance_check');
+  await dialog.getByLabel('Covered Site').selectOption('42424242-4242-4242-8242-424242424242');
+  await dialog.getByLabel('Requirement description').fill('Record a verified attendance timestamp for the entry check.');
+  await dialog.getByText('Evidence is required').click();
+  await dialog.getByLabel('Required evidence').selectOption('timestamp');
+  await dialog.getByRole('button', { name: 'Save requirement' }).click();
+
+  const requirement = dialog.getByRole('article', { name: 'CHECK.ENTRY active' });
+  await requirement.getByRole('button', { name: 'Evidence register' }).click();
+  const evidence = requirement.getByRole('region', { name: 'CHECK.ENTRY evidence register' });
+  await expect(evidence.getByText('Source check ready')).toBeVisible();
+  await expect(evidence.getByText('Server-recorded arrival and departure')).toBeVisible();
+  await expect(evidence).toContainText('Ana Ngata');
+
+  await evidence.getByLabel('Review note (optional)').fill('Reviewed against the contracted entry check.');
+  await evidence.getByRole('button', { name: 'Link evidence' }).click();
+  await expect(evidence.getByRole('status')).toContainText('Evidence linked with a review receipt');
+  await expect(evidence.getByRole('heading', { name: /Linked evidence/ })).toContainText('1 active');
+  await expect(evidence.getByText('Completed stop timestamp')).toBeVisible();
+  await expect(evidence.getByText('No unlinked completed work currently satisfies')).toBeVisible();
+
+  await evidence.getByRole('button', { name: 'Withdraw link' }).click();
+  await evidence.getByLabel('Why is this link incorrect?').fill('Linked to the wrong contract requirement.');
+  await evidence.getByRole('button', { name: 'Confirm withdrawal' }).click();
+  await expect(evidence.getByRole('status')).toContainText('Evidence link withdrawn');
+  await expect(evidence.getByText(/Withdrawn by Morgan Reed/)).toContainText('Linked to the wrong contract requirement.');
+  await expect(evidence.getByRole('heading', { name: /Linked evidence/ })).toContainText('0 active');
+  expect(errors, errors.join('\n')).toEqual([]);
+});
