@@ -889,3 +889,72 @@ remains unpopulated.
   rollback-only database check proved first-use, replay and expected-state
   conflict behavior without retaining the temporary tender, schedule, quote
   association or audit event. Runtime exercise remains unclaimed.
+
+### External design evidence — TrackTik guarding suite demo
+
+- Source: TrackTik, “Power front-line security with the world’s leading
+  solution,” hosted by Consensus,
+  `https://play.goconsensus.com/b44186f57?demo=604c13a1-e9b0-4903-8de4-d42d9fdb6b3b`,
+  4:43 video, retrieved 2026-10-15. The review used the on-page product
+  demonstration and its auto-generated subtitle track; no proprietary asset
+  or implementation was copied.
+- Useful observed pattern: desktop configuration establishes Sites, schedules,
+  workflows and report templates before the officer acts. The mobile surface
+  then foregrounds patrols, checkpoints, acknowledged instructions,
+  messaging, emergency contacts and safety actions rather than presenting an
+  unrelated feature catalog.
+- Useful observed pattern: submitted field reports enter a supervisor activity
+  feed immediately, remain available in a consolidated operations register,
+  and preserve delivery, edit and previous-version history. Patrol tours expose
+  checkpoint completion and in-progress status to supervisors.
+- FCM adaptation: keep the requirement beside its owning organization,
+  accepted agreement and covered Site; show the current state and next safe
+  action; use explicit success receipts; preserve audit evidence; progressively
+  disclose configuration details. Continue developing live field progress and
+  report-delivery/version history through FCM’s existing work, evidence and
+  reporting spines.
+- Rejected pattern: do not reproduce the demo’s icon-heavy dense desktop table,
+  mobile feature-tile hierarchy, or implied universal automation. FCM must say
+  which contract records actually drive an operational process and which are
+  retained only as governed requirements.
+
+### Closure log — governed agreement obligations
+
+- Atlas showed `manage_crm_agreement_obligation` present but unwired. The live
+  function could create, update and deactivate measurable requirements for an
+  accepted operational agreement, but no human surface called it. A scoped
+  R&M aggregate found one accepted operational agreement and zero obligations,
+  so the gap was visible as absent contract configuration rather than hidden
+  behind existing records.
+- Before this change, requests had no replay identity. A retried create could
+  collide on its code, while a retried update or deactivation failed the
+  optimistic timestamp check after its own first success. Audit metadata
+  retained only the resulting code and active state. Patrol-frequency JSON was
+  accepted without a defined cadence shape.
+- The authority now locks the owning agreement, requires provider
+  administration and accepted operational status, and checks a unique
+  organization-scoped request receipt before optimistic concurrency. A replay
+  returns the persisted obligation. The server validates active covered Sites,
+  proof types and a positive patrol count per shift, day, week or month. Audit
+  evidence retains the request identity plus previous and resulting contract
+  dimensions. `PUBLIC` and `anon` remain unable to execute the
+  security-definer function.
+- During agreement setup, administrators now use a labelled Requirements
+  section beside Covered places, Service modules, Reporting and Client
+  sharing. They can capture a stable code, type, description, covered Site,
+  SLA, proof, escalation and patrol cadence; edit or reactivate an existing
+  requirement; and explicitly confirm deactivation. Loading, empty, error,
+  success, editing and inactive states are visible, and the five-section
+  navigation becomes a readable two-column control grid on mobile.
+- The UI states the automation boundary before entry and again for each type.
+  Obligations do not create shifts, patrol stops, reports, notifications or
+  officer post orders. Response requirements can be associated with downstream
+  SLA evidence where work already carries an SLA; patrol cadence and report
+  delivery remain contract requirements until their owning roster/report
+  engines explicitly consume them.
+- Five focused guards, the production build, 29 Atlas generator tests and the
+  complete desktop/mobile create-confirm-cancel-deactivate workflow passed.
+  The live schema remains at 811 functions and now reports 721 indexes.
+  Rollback-only live verification proved save, replay, stale-state conflict and
+  deactivation replay without retaining an R&M obligation or audit event.
+  Runtime exercise remains unclaimed.

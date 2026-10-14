@@ -39773,6 +39773,7 @@ export type Database = {
         Args: {
           p_action: string
           p_agreement_id: string
+          p_client_request_id: string
           p_description?: string
           p_escalation_contact?: string
           p_escalation_minutes?: number

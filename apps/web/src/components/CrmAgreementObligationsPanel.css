@@ -1,0 +1,280 @@
+.agreement-obligations {
+	display: grid;
+	gap: 12px;
+}
+
+.agreement-section-heading > button,
+.agreement-obligation-form footer button,
+.agreement-obligation-actions button {
+	display: inline-flex;
+	align-items: center;
+	justify-content: center;
+	gap: 6px;
+	min-height: 34px;
+	padding: 0 11px;
+	border: 1px solid #39766b;
+	border-radius: 4px;
+	color: #dcfff7;
+	background: #173f38;
+	font-size: 12px;
+	font-weight: 850;
+	cursor: pointer;
+}
+
+.agreement-obligation-boundary {
+	display: grid;
+	gap: 3px;
+	padding: 10px 12px;
+	border-left: 3px solid #d2a957;
+	color: #d8c28f;
+	background: #302817;
+	font-size: 12px;
+}
+
+.agreement-obligation-boundary span {
+	color: #c7b98f;
+	line-height: 1.45;
+}
+
+.agreement-obligation-message {
+	display: flex;
+	align-items: center;
+	gap: 7px;
+	padding: 9px 11px;
+	border-radius: 4px;
+	font-size: 12px;
+}
+
+.agreement-obligation-message.is-error {
+	color: #ffd5cf;
+	background: #43221f;
+}
+
+.agreement-obligation-message.is-success {
+	color: #c9f4e9;
+	background: #15372f;
+}
+
+.agreement-obligation-form {
+	padding: 12px;
+	border: 1px solid #356052;
+	border-radius: 6px;
+	background: #10231f;
+}
+
+.agreement-obligation-form > header {
+	display: flex;
+	justify-content: space-between;
+	gap: 12px;
+	margin-bottom: 12px;
+}
+
+.agreement-obligation-form > header div {
+	display: grid;
+	gap: 3px;
+}
+
+.agreement-obligation-form > header span {
+	color: #91a9a2;
+	font-size: 12px;
+	line-height: 1.4;
+}
+
+.agreement-obligation-form > header button {
+	display: grid;
+	place-items: center;
+	width: 32px;
+	height: 32px;
+	border: 1px solid #3a5365;
+	border-radius: 4px;
+	color: #bdcbd3;
+	background: #132532;
+	cursor: pointer;
+}
+
+.agreement-obligation-grid {
+	display: grid;
+	grid-template-columns: repeat(2, minmax(0, 1fr));
+	gap: 10px;
+}
+
+.agreement-obligation-grid label {
+	display: grid;
+	gap: 5px;
+	color: #91a5b0;
+	font-size: 12px;
+}
+
+.agreement-obligation-grid label > span {
+	font-weight: 800;
+}
+
+.agreement-obligation-grid input:not([type=checkbox]),
+.agreement-obligation-grid select,
+.agreement-obligation-grid textarea {
+	width: 100%;
+	min-height: 35px;
+	padding: 7px 9px;
+	border: 1px solid #395465;
+	border-radius: 4px;
+	color: #eef6f8;
+	background: #071119;
+	font: inherit;
+}
+
+.agreement-obligation-grid .is-wide {
+	grid-column: 1 / -1;
+}
+
+.agreement-obligation-check {
+	display: flex !important;
+	flex-direction: row;
+	align-items: center;
+	align-self: end;
+	min-height: 35px;
+}
+
+.agreement-obligation-check input {
+	width: 16px;
+	height: 16px;
+}
+
+.agreement-obligation-form footer {
+	display: flex;
+	justify-content: flex-end;
+	gap: 8px;
+	margin-top: 12px;
+	padding-top: 10px;
+	border-top: 1px solid #294238;
+}
+
+.agreement-obligation-form footer button:first-child {
+	border-color: #3a5365;
+	color: #bdcbd3;
+	background: #132532;
+}
+
+.agreement-obligation-form button:disabled,
+.agreement-obligation-actions button:disabled {
+	cursor: not-allowed;
+	opacity: .55;
+}
+
+.agreement-obligation-list {
+	display: grid;
+	gap: 8px;
+}
+
+.agreement-obligation-list article {
+	display: grid;
+	grid-template-columns: minmax(0, 1fr) auto;
+	gap: 10px 14px;
+	padding: 12px;
+	border: 1px solid #293f4f;
+	border-radius: 6px;
+	background: #0d1c27;
+}
+
+.agreement-obligation-list article.is-inactive {
+	opacity: .7;
+}
+
+.agreement-obligation-list article > div:first-child {
+	display: grid;
+	gap: 3px;
+}
+
+.agreement-obligation-list article > div:first-child > span {
+	color: #70c8b9;
+	font-size: 11px;
+	font-weight: 850;
+	text-transform: uppercase;
+}
+
+.agreement-obligation-list article p {
+	margin: 2px 0;
+	color: #c3d0d6;
+	font-size: 12px;
+	line-height: 1.45;
+}
+
+.agreement-obligation-list article small {
+	color: #8ea3af;
+	font-size: 12px;
+}
+
+.agreement-obligation-state {
+	align-self: start;
+	padding: 4px 7px;
+	border-radius: 3px;
+	color: #aaafb3;
+	background: #2b3338;
+	font-size: 11px;
+	font-weight: 800;
+}
+
+.agreement-obligation-state.is-active {
+	color: #bff5e5;
+	background: #1b473a;
+}
+
+.agreement-obligation-actions {
+	display: flex;
+	flex-wrap: wrap;
+	gap: 7px;
+	grid-column: 1 / -1;
+}
+
+.agreement-obligation-actions button {
+	min-height: 31px;
+}
+
+.agreement-obligation-actions button.is-danger {
+	border-color: #6a5150;
+	color: #e8c1bd;
+	background: #33211f;
+}
+
+@media (max-width: 680px) {
+	.agreement-section-heading {
+		align-items: stretch;
+		flex-direction: column;
+	}
+
+	.agreement-section-heading > button {
+		width: 100%;
+	}
+
+	.agreement-obligation-grid {
+		grid-template-columns: 1fr;
+	}
+
+	.agreement-obligation-grid .is-wide {
+		grid-column: auto;
+	}
+
+	.agreement-obligation-list article {
+		grid-template-columns: minmax(0, 1fr);
+	}
+
+	.agreement-obligation-state {
+		justify-self: start;
+	}
+
+	.agreement-obligation-actions {
+		grid-column: auto;
+		flex-direction: column;
+	}
+
+	.agreement-obligation-actions button {
+		width: 100%;
+	}
+
+	.agreement-obligation-form footer {
+		flex-direction: column-reverse;
+	}
+
+	.agreement-obligation-form footer button {
+		width: 100%;
+	}
+}

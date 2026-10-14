@@ -53,3 +53,43 @@ test('provider reviews evidence-backed readiness and opens the owning workflow',
   await expect(page.getByRole('heading', { name: 'Geofence workbench' })).toBeVisible();
   expect(errors, errors.join('\n')).toEqual([]);
 });
+
+test('provider governs measurable contract requirements without implying automatic work', async ({ page }) => {
+  const errors = monitorBrowserErrors(page);
+  await signInAsAdmin(page, '/admin/relationships');
+
+  const relationship = page.getByText('Civic Events Compliance Services', { exact: true }).locator('..').locator('..').locator('..');
+  await relationship.getByRole('button', { name: 'Configure agreement' }).click();
+  const dialog = page.getByRole('dialog', { name: 'Civic Events Compliance Services' });
+  await dialog.getByRole('button', { name: /Requirements 0/ }).click();
+
+  await expect(dialog.getByText(/do not create shifts, patrol stops, reports, notifications, or officer post orders/i)).toBeVisible();
+  await dialog.getByRole('button', { name: 'Add requirement' }).click();
+  await dialog.getByLabel('Requirement code').fill('PATROL.DAILY');
+  await dialog.getByLabel('Requirement type').selectOption('patrol_frequency');
+  await expect(dialog.getByText('It does not create roster work or patrol stops.')).toBeVisible();
+  await dialog.getByLabel('Covered Site').selectOption('42424242-4242-4242-8242-424242424242');
+  await dialog.getByLabel('Minimum patrols').fill('2');
+  await dialog.getByLabel('Cadence').selectOption('day');
+  await dialog.getByLabel('Requirement description').fill('Complete two documented patrols during each contracted day.');
+  await dialog.getByText('Evidence is required').click();
+  await dialog.getByLabel('Required evidence').selectOption('gps_track');
+  await dialog.getByLabel('Escalate after, minutes').fill('30');
+  await dialog.getByRole('button', { name: 'Save requirement' }).click();
+
+  await expect(dialog.getByRole('status')).toContainText('Contract requirement added with an audit receipt');
+  const requirement = dialog.getByRole('article', { name: 'PATROL.DAILY active' });
+  await expect(requirement).toContainText('2 per day');
+  await expect(requirement).toContainText('GPS track proof required');
+  await expect(dialog.getByRole('button', { name: /Requirements 1/ })).toBeVisible();
+
+  await requirement.getByRole('button', { name: 'Deactivate' }).click();
+  await expect(requirement.getByRole('button', { name: 'Confirm deactivate' })).toBeVisible();
+  await requirement.getByRole('button', { name: 'Cancel' }).click();
+  await expect(requirement.getByRole('button', { name: 'Deactivate' })).toBeVisible();
+  await requirement.getByRole('button', { name: 'Deactivate' }).click();
+  await requirement.getByRole('button', { name: 'Confirm deactivate' }).click();
+  await expect(dialog.getByRole('article', { name: 'PATROL.DAILY inactive' })).toBeVisible();
+  await expect(dialog.getByRole('button', { name: /Requirements 0/ })).toBeVisible();
+  expect(errors, errors.join('\n')).toEqual([]);
+});
