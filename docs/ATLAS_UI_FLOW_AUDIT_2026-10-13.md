@@ -736,3 +736,28 @@ remains unpopulated.
   completion authority resolved and rejected the request as `Shift not found`;
   the retired bypass signature returned PostgREST function-not-found. Both
   probes were write-free, and neither is counted as successful exercise.
+
+### Closure log — direct boundary writers and low-level setter privileges
+
+- Atlas showed `save_site_boundary` and `save_zone_boundary` as present but
+  unwired. Source and terrain inspection found no caller; both directly changed
+  live geometry and wrote history outside the canonical proposal decision.
+- Before retirement, these writers could leave verification state inconsistent
+  with changed geometry. The zone writer also trusted caller-supplied zone and
+  organization IDs without an access predicate. This contradicted the canon:
+  every geometry change resets verification, stages as a proposal, is drawn for
+  a person, and reaches live state only through acceptance.
+- The direct RPCs, generated types and unused declarative remnants were
+  removed. Site Boundary Review and Location House Map still use
+  `propose_boundary`, `accept_boundary_proposal`, and explicit
+  `verify_boundary`; accepted proposals continue through the low-level geometry
+  setters with provenance and history.
+- Validation exposed a coupled privilege defect: both `set_zone_geometry`
+  overloads were executable by `PUBLIC`, `anon`, and `authenticated`, and stale
+  declarative sources claimed the same for the site setter. A follow-up live
+  migration now revokes browser execution from all three low-level setters and
+  grants only `service_role`; the declarative evidence was aligned.
+- Twenty-three focused boundary guards passed, the production web build passed,
+  and the live snapshot reports 814 functions with no public/anonymous/
+  authenticated setter grants. Atlas dry-run moved 156 -> 154 bounded gaps:
+  1 edge function, 98 RPCs and 55 tables. Exercise remains unclaimed.

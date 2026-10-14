@@ -81,8 +81,12 @@ BEGIN
 END;
 $function$;
 
+revoke all
+  on function "public"."set_site_geometry"(uuid, jsonb, double precision, double precision, double precision, text, uuid, text)
+  from public, "anon", "authenticated";
+
 grant execute
   on function "public"."set_site_geometry"(uuid, jsonb, double precision, double precision, double precision, text, uuid, text)
-  to public, "anon", "authenticated", "postgres", "service_role";
+  to "postgres", "service_role";
 
 comment on function "public"."set_site_geometry"(uuid, jsonb, double precision, double precision, double precision, text, uuid, text) is 'Writes client_sites.boundary (GeoJSON polygon with ST_MakeValid, or a buffered provisional point) and center_point = ST_Centroid(boundary). Returns area in m^2. Records a history row with real provenance. Phase 1+4 geofence redesign (#226).';

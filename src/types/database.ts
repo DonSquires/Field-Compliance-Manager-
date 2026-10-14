@@ -44359,26 +44359,6 @@ export type Database = {
         }
         Returns: Json
       }
-      save_site_boundary: {
-        Args: {
-          p_centroid_lat: number
-          p_centroid_lng: number
-          p_geojson: string
-          p_org_id: string
-          p_site_id: string
-        }
-        Returns: undefined
-      }
-      save_zone_boundary: {
-        Args: {
-          p_centroid_lat: number
-          p_centroid_lng: number
-          p_geojson: string
-          p_org_id: string
-          p_zone_id: string
-        }
-        Returns: number
-      }
       schedule_court_appearance: {
         Args: {
           p_appearance_type: string

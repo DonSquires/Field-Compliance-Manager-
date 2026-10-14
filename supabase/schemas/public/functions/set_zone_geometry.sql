@@ -146,11 +146,21 @@ BEGIN
 END;
 $function$;
 
+revoke all
+  on function "public"."set_zone_geometry"(uuid, double precision, double precision, double precision, text, uuid, text)
+  from public, "anon", "authenticated";
+
+revoke all
+  on function "public"."set_zone_geometry"(uuid, jsonb, text, uuid, text)
+  from public, "anon", "authenticated";
+
 grant execute
   on function "public"."set_zone_geometry"(uuid, double precision, double precision, double precision, text, uuid, text)
-  to public, "anon", "authenticated", "postgres", "service_role";
+  to "postgres", "service_role";
 
-grant execute on function "public"."set_zone_geometry"(uuid, jsonb, text, uuid, text) to public, "anon", "authenticated", "postgres", "service_role";
+grant execute
+  on function "public"."set_zone_geometry"(uuid, jsonb, text, uuid, text)
+  to "postgres", "service_role";
 
 comment on function "public"."set_zone_geometry"(uuid, double precision, double precision, double precision, text, uuid, text) is 'Writes a provisional circular boundary from a GPS point + radius (NZTM2000 metric buffer, wrapped as MultiPolygon) and returns its area (m^2). Records a history row with real provenance. Phase 1+4 geofence redesign (#226).';
 
