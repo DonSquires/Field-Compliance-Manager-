@@ -82,7 +82,7 @@ test('GitHub adapter opens eligible PRs ready and recovers an interrupted draft 
   git(['-c', 'user.name=t', '-c', 'user.email=t@example.com', 'commit', '--allow-empty', '-q', '-m', 'fix']);
   const head = git(['rev-parse', 'HEAD']);
   const calls = [];
-  const pull = { state: 'open', draft: true, head: { sha: head }, base: { ref: 'main' } };
+  const pull = { node_id: 'PR_kwDOTest', state: 'open', draft: true, head: { sha: head }, base: { ref: 'main' } };
   const fetchImpl = async (url, init) => {
     calls.push({ url, init });
     if (url.endsWith('/git/ref/heads/bob%2Fjob-automerge1')) return { ok: true, status: 200, json: async () => ({ object: { sha: head } }) };
@@ -91,7 +91,12 @@ test('GitHub adapter opens eligible PRs ready and recovers an interrupted draft 
       return { ok: true, status: 201, json: async () => ({ html_url: 'https://github.com/DonSquires/Field-Compliance-Manager-/pull/43', number: 43 }) };
     }
     if (url.endsWith('/pulls/43') && init.method === 'GET') return { ok: true, status: 200, json: async () => pull };
-    if (url.endsWith('/pulls/43/ready_for_review')) return { ok: true, status: 200, json: async () => ({ ...pull, draft: false }) };
+    if (url.endsWith('/graphql')) {
+      const body = JSON.parse(init.body);
+      assert.equal(body.variables.pullRequestId, pull.node_id);
+      assert.match(body.query, /markPullRequestReadyForReview/);
+      return { ok: true, status: 200, json: async () => ({ data: { markPullRequestReadyForReview: { pullRequest: { isDraft: false, headRefOid: head, baseRefName: 'main', state: 'OPEN' } } } }) };
+    }
     if (url.endsWith('/pulls/43/merge')) return { ok: true, status: 200, json: async () => ({ merged: true, sha: 'f'.repeat(40) }) };
     throw new Error(`unexpected ${init.method} ${url}`);
   };
@@ -99,7 +104,7 @@ test('GitHub adapter opens eligible PRs ready and recovers an interrupted draft 
   assert.equal(created.draft, false);
   const merged = await workspace.mergeGitHubPullRequest({ number: 43, expectedHeadSha: head, githubToken: 'ghp_test', owner: 'DonSquires', repo: 'Field-Compliance-Manager-', fetchImpl });
   assert.equal(merged.sha, 'f'.repeat(40));
-  assert.ok(calls.some(({ url }) => url.endsWith('/pulls/43/ready_for_review')));
+  assert.ok(calls.some(({ url }) => url.endsWith('/graphql')));
   fs.rmSync(repo, { recursive: true, force: true });
 });
 

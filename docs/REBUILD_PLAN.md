@@ -21,7 +21,10 @@ may resume. Legacy bounded main-health receipts that recorded publication
 without a merge decision are reconciled once and receive an explicit decision.
 Release-ready reconciliation and deployment verification are processed before
 long model-generating work so an older analysis job cannot starve an already
-verified merge receipt. Ineligible work remains draft-only and cannot merge.
+verified merge receipt. Interrupted drafts are promoted with GitHub's
+node-bound `markPullRequestReadyForReview` GraphQL mutation, not an unsupported
+REST-shaped route, then rechecked for exact head, main base, and open state.
+Ineligible work remains draft-only and cannot merge.
 
 Live service-area finding 2026-10-11: R&M organisation settings could preview a
 canonical council boundary, then told the user Bob would send it to Approvals

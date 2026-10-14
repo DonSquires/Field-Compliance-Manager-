@@ -204,6 +204,22 @@ async function githubApi({ fetchImpl, githubToken, method, urlPath, body }) {
   return { ok: response.ok, status: response.status, data };
 }
 
+async function githubGraphql({ fetchImpl, githubToken, query, variables }) {
+  const response = await fetchImpl('https://api.github.com/graphql', {
+    method: 'POST',
+    headers: {
+      Authorization: ['Bearer', githubToken].join(' '),
+      Accept: 'application/vnd.github+json',
+      'X-GitHub-Api-Version': '2022-11-28',
+      'User-Agent': 'bob-builder',
+      'Content-Type': 'application/json'
+    },
+    body: JSON.stringify({ query, variables })
+  });
+  const data = await response.json().catch(() => ({}));
+  return { ok: response.ok && !data?.errors?.length, status: response.status, data };
+}
+
 async function createGitHubPullRequest({ workspacePath, branchName, expectedHeadSha, title, body, githubToken, owner, repo, base = 'main', draft = true, fetchImpl = globalThis.fetch }) {
   if (!branchName.startsWith(BRANCH_PREFIX) || git(workspacePath, ['branch', '--show-current']) !== branchName) throw new Error('Builder workspace branch is invalid');
   if (git(workspacePath, ['status', '--porcelain', '--untracked-files=normal'])) throw new Error('Builder workspace must be clean before opening a pull request');
@@ -231,8 +247,18 @@ async function mergeGitHubPullRequest({ number, expectedHeadSha, githubToken, ow
     throw new Error('GitHub pull request is not the verified open main-targeted change');
   }
   if (pullRequest.data?.draft === true) {
-    const ready = await githubApi({ fetchImpl, githubToken, method: 'POST', urlPath: `${pullPath}/ready_for_review` });
-    if (!ready.ok || ready.data?.draft === true || ready.data?.head?.sha !== expectedHeadSha || ready.data?.base?.ref !== 'main') {
+    if (typeof pullRequest.data?.node_id !== 'string' || !pullRequest.data.node_id) {
+      throw new Error('GitHub pull request node identity is unavailable');
+    }
+    const ready = await githubGraphql({
+      fetchImpl,
+      githubToken,
+      query: 'mutation MarkPullRequestReady($pullRequestId: ID!) { markPullRequestReadyForReview(input: { pullRequestId: $pullRequestId }) { pullRequest { isDraft headRefOid baseRefName state } } }',
+      variables: { pullRequestId: pullRequest.data.node_id }
+    });
+    const readyPull = ready.data?.data?.markPullRequestReadyForReview?.pullRequest;
+    if (!ready.ok || readyPull?.isDraft === true || readyPull?.state !== 'OPEN'
+        || readyPull?.headRefOid !== expectedHeadSha || readyPull?.baseRefName !== 'main') {
       throw new Error('GitHub pull request could not be marked ready for verified merge');
     }
   }
