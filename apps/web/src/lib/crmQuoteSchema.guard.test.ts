@@ -23,6 +23,7 @@ describe('governed CRM quote creation', () => {
     expect(sql).toContain("'crm_draft_quote_created'");
     expect(sql).toContain('revoke all on function public.accept_quote(uuid) from public,anon');
     expect(sql).toContain('revoke insert,update,delete on public.quotes');
-    expect(schema).toMatch(/CREATE (OR REPLACE )?FUNCTION "public"\."create_crm_draft_quote"/);
+    expect(schema).toMatch(/CREATE (OR REPLACE )?FUNCTION "public"\."create_crm_draft_quote_for_provider"/);
+    expect(schema).not.toMatch(/CREATE (OR REPLACE )?FUNCTION "public"\."create_crm_draft_quote"/);
   });
 });

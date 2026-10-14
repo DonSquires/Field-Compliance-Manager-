@@ -794,3 +794,27 @@ remains unpopulated.
   successfully invoked the unified review queue without reporting record data,
   while both retired CRM signatures returned function-not-found. No boundary
   decision or geometry was changed.
+
+### Closure log — implicit CRM draft quote creation
+
+- Atlas showed `create_crm_draft_quote` as present but unwired. It inferred the
+  operating provider from the actor's home profile, while the current CRM page
+  calls `create_crm_draft_quote_for_provider` with the administrator's selected
+  and authorised operating provider.
+- Before retirement, the duplicate authority could not preserve branch
+  accountability, governed prospect eligibility, or the link between an
+  agreement and its variation. Its presence also left two apparently valid
+  ways to begin the same customer proposal.
+- During current quote creation, the UI carries one retry identity and the
+  selected operating-provider ID into the provider-aware function. That
+  function checks organization access and provider type, validates prospect or
+  active-client eligibility, validates agreement variations, creates only a
+  draft, and records provider-attributed audit evidence.
+- After creation, the existing draft remains the sole retry result for that
+  provider and request ID. Quote-line authoring, proposal configuration, send,
+  acceptance and agreement creation continue from that same draft.
+- The implicit function, generated type and obsolete E2E fallback were removed.
+  Historical migration evidence remains. Twenty-three focused CRM guards
+  passed, the production web build passed, and the regenerated live snapshot
+  reports 811 functions. Atlas dry-run moved 152 -> 151 bounded gaps:
+  1 edge function, 95 RPCs and 55 tables. Exercise remains unclaimed.

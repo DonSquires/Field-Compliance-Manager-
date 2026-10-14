@@ -36932,52 +36932,6 @@ export type Database = {
           isSetofReturn: false
         }
       }
-      create_crm_draft_quote: {
-        Args: {
-          p_client_org_id: string
-          p_client_request_id: string
-          p_notes?: string
-          p_target_margin_pct?: number
-          p_title: string
-          p_valid_until?: string
-        }
-        Returns: {
-          accepted_at: string | null
-          accepted_by: string | null
-          client_name: string | null
-          client_org_id: string | null
-          client_request_id: string | null
-          created_at: string
-          created_by: string | null
-          currency: string
-          discount_amount: number
-          discount_pct: number
-          discount_schedule_id: string | null
-          gst_amount: number
-          gst_rate: number
-          id: string
-          notes: string | null
-          platform_fee_treatment: string
-          provider_org_id: string
-          service_agreement_id: string | null
-          status: string
-          subtotal_charge: number
-          target_margin_pct: number
-          tender_id: string | null
-          title: string
-          total_charge: number
-          total_cost: number
-          updated_at: string
-          updated_by: string | null
-          valid_until: string | null
-        }
-        SetofOptions: {
-          from: "*"
-          to: "quotes"
-          isOneToOne: true
-          isSetofReturn: false
-        }
-      }
       create_crm_draft_quote_for_provider: {
         Args: {
           p_client_org_id: string
