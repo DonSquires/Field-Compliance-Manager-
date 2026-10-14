@@ -336,3 +336,12 @@ remains unpopulated.
   actual start/end times; adjourned, cancelled and excused outcomes remain
   explicit rather than being hidden as deletion.
 - Atlas moved 177 -> 175 bounded gaps. Both capabilities are `wired=true`.
+- The deployed workflow was exercised across both roles: the `grand_master`
+  test identity scheduled an explicitly labelled non-real appearance for the
+  dedicated `admin_officer` identity, and that officer recorded it as
+  `cancelled`. The persisted row is cancelled with reference `ATLAS-VERIFY`;
+  audit actions are `court_appearance_scheduled` and
+  `court_appearance_outcome_recorded`. This also confirms the intended
+  separation: `admin_officer` cannot schedule because scheduling requires an
+  active roster administrator, but can record the outcome of an appearance
+  assigned to them.
