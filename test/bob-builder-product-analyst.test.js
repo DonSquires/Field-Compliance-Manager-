@@ -100,6 +100,28 @@ test('Product Analyst frontend-only prompt requires an empty data model proposal
   assert.deepEqual(request.required_output.data_model_proposal, []);
 });
 
+test('Product Analyst prompt exposes the exact broad redesign delivery contract', () => {
+  const prompt = buildProductAnalystPrompt({
+    taskDescription: 'Redesign the Builder workspace UI and UX as a professional interface',
+    repositoryContext: { repository: 'owner/repo' }
+  });
+  const request = JSON.parse(prompt.userPrompt);
+  assert.deepEqual(request.broad_ui_redesign_delivery_contract, {
+    minimum_delivery_requirements: 5,
+    minimum_acceptance_criteria: 5,
+    required_categories: [
+      'information hierarchy or workspace composition',
+      'responsive desktop and mobile behavior',
+      'accessibility and keyboard behavior',
+      'loading, empty, error, permission, and success states',
+      'operational status, evidence, or receipt visibility'
+    ],
+    required_human_acceptance_states: ['loading', 'empty', 'error', 'permission', 'success', 'safe_next_action'],
+    source_scope_rule: 'Use only exact repository paths supplied by repository_context or named byte-for-byte in the task.'
+  });
+  assert.match(prompt.systemPrompt, /literal state words loading, empty, error, permission, and success/);
+});
+
 test('Product Analyst prompt makes the required source allowlist explicit', () => {
   const urls = ['https://example.com/a', 'https://example.com/b', 'https://example.com/c', 'https://example.com/d'];
   const prompt = buildProductAnalystPrompt({

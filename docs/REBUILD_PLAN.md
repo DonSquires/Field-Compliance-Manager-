@@ -450,6 +450,14 @@ paraphrase rather than the validator's exact phrase "information hierarchy".
 `workspace`, `composition`, `layout`, `navigation`, or `primary action`) for
 that one required category; the other four categories, five-delivery minimum,
 source-scope grounding, and engineer evidence gate remain unchanged.
+Repeated live v10 analysis then showed strong-model outputs summarizing the
+required interface states as a generic state requirement instead of naming
+`loading`, `empty`, `error`, `permission`, and `success` inside the delivery
+contract. `product-analyst-v11` exposes the complete broad-redesign validator
+contract as machine-readable prompt input, including minimum counts, exact
+category language, all human-acceptance states, and the source-scope rule.
+Validation remains unchanged; the prompt now teaches the exact contract it
+already enforces.
 
 Runtime acceptance 2026-10-11: the laptop vision watcher now writes an
 independent liveness heartbeat and its Docker health check terminates only a

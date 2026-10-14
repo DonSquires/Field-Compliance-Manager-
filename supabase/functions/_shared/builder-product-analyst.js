@@ -4,7 +4,7 @@ const {
 } = require('./builder-model-adapter');
 const { fitRepositoryContext } = require('./builder-repository-context');
 
-const PRODUCT_ANALYST_PROMPT_VERSION = 'product-analyst-v10';
+const PRODUCT_ANALYST_PROMPT_VERSION = 'product-analyst-v11';
 
 const PRODUCT_SPEC_SCHEMA = Object.freeze({
   type: 'object',
@@ -228,6 +228,7 @@ function buildProductAnalystPrompt({ taskDescription, repositoryContext, constra
   const context = fitRepositoryContext(normalizeRepositoryContext(repositoryContext), task);
   const researchRequired = researchEvidenceRequired(task);
   const researchUrls = researchRequired ? suppliedResearchUrls(task) : [];
+  const broadUiRedesign = isBroadUiRedesign(task);
   const forbidsNewBackend = /\bfrontend-only\b|\bdo not (?:create or )?propose (?:any )?(?:database|schema|rpc|api)\b|\bdo not invent (?:schema|apis?)\b|\bwithout (?:new|inventing) (?:routes?|apis?|schema)\b/i.test(task);
   const safeConstraints = Array.isArray(constraints)
     ? constraints.filter(value => typeof value === 'string').slice(0, 100)
@@ -242,7 +243,7 @@ function buildProductAnalystPrompt({ taskDescription, repositoryContext, constra
     'Require schema and Atlas checks, keeping proven flow reach separate from structural FK reach and treating references-only edges as weak evidence.',
     'Define a responsive, accessible human-glass acceptance route for the affected role, including loading, empty, error, permission, success, and safe-next-action states that apply.',
     'Turn the approved scope into delivery_requirements: observable outcomes with exact evidence and repository-grounded source_scope. These are the engineer handoff contract, not optional aspirations.',
-    'For a broad UI/UX redesign, define at least five delivery requirements and five measurable acceptance criteria covering information hierarchy/workspace composition, responsive desktop/mobile behavior, accessibility/keyboard behavior, loading/empty/error/permission/success states, and operational status/evidence/receipt visibility.',
+    'For a broad UI/UX redesign, follow broad_ui_redesign_delivery_contract exactly. Copy each required category into observable delivery requirement outcomes/evidence, including the literal state words loading, empty, error, permission, and success. Do not summarize those states as "all states" or "required states".',
     'Put every unknown that affects implementation in unresolved_questions.',
     'When research is required, cite only URLs supplied in the task; record the exact observed pattern and how it applies, never invent a source or claim browsing.',
     'Research products are design evidence only unless the task explicitly requests an integration; never turn inspiration into a dependency, API, or product integration.',
@@ -264,6 +265,19 @@ function buildProductAnalystPrompt({ taskDescription, repositoryContext, constra
       frontend_only_no_new_backend: forbidsNewBackend,
       data_model_proposal_must_be_empty: forbidsNewBackend
     },
+    broad_ui_redesign_delivery_contract: broadUiRedesign ? {
+      minimum_delivery_requirements: 5,
+      minimum_acceptance_criteria: 5,
+      required_categories: [
+        'information hierarchy or workspace composition',
+        'responsive desktop and mobile behavior',
+        'accessibility and keyboard behavior',
+        'loading, empty, error, permission, and success states',
+        'operational status, evidence, or receipt visibility'
+      ],
+      required_human_acceptance_states: ['loading', 'empty', 'error', 'permission', 'success', 'safe_next_action'],
+      source_scope_rule: 'Use only exact repository paths supplied by repository_context or named byte-for-byte in the task.'
+    } : null,
     required_output: {
       product_brief: { problem: 'string', outcome: 'string', scope: ['string'] },
       user_roles: [{ role: 'string', needs: ['string'] }],
