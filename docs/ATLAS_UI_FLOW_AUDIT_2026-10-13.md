@@ -731,3 +731,8 @@ remains unpopulated.
   regenerated live snapshot reports 816 functions. Atlas dry-run moved
   157 -> 156 bounded gaps: 1 edge function, 100 RPCs and 55 tables. Exercise
   remains unclaimed because no real shift was completed for testing.
+- Production verification after release commit `b43d6d6a` used the dedicated
+  `admin_officer` test identity with nonexistent shift IDs. The governed
+  completion authority resolved and rejected the request as `Shift not found`;
+  the retired bypass signature returned PostgREST function-not-found. Both
+  probes were write-free, and neither is counted as successful exercise.
