@@ -9,7 +9,7 @@ const { execFileSync } = require('node:child_process');
 
 const policy = require('../builder-path-policy');
 const gateway = require('../builder-model-gateway');
-const { runAgenticEngineer, parseToolCall, RUN_ALLOWLIST, buildProposal, createTools, composeRunNote, classifyNoChange, finishAgenticReceipt, heartbeatAgenticReceipt, outlineLines, readingMap, requiredChangedFilesFromTask, startAgenticReceipt, taskPacket, DEFAULT_LIMITS } = require('../builder-agentic-engineer');
+const { runAgenticEngineer, parseToolCall, RUN_ALLOWLIST, buildProposal, createTools, composeRunNote, classifyNoChange, finishAgenticReceipt, heartbeatAgenticReceipt, outlineLines, readingMap, requiredChangedFilesFromTask, startAgenticReceipt, taskPacket, validateAcceptanceEvidence, DEFAULT_LIMITS } = require('../builder-agentic-engineer');
 
 test('path policy: protected paths are refused on every lane, lanes split at apps/web', () => {
   for (const file of ['.github/workflows/ci.yml', 'deploy/bob-vps/compose.yml', 'Dockerfile', 'services/fcm-api/Dockerfile', 'docker-compose.full.yml', 'package.json', 'apps/web/package-lock.json', '.env', 'apps/web/.env.production', 'supabase/schema.sql', 'apps/web/src/context/AuthContext.tsx', 'supabase/functions/_shared/auth.ts', 'certs/site.pem', '../etc/passwd', 'a/../../b']) {
@@ -132,6 +132,64 @@ test('required source scope and admitted partial handoffs fail closed', () => {
     requiredFiles: required,
     args: { summary: 'Implemented the first structural slice but did not complete the required layout.', tests: [], follow_ups: ['Complete layout.css'] }
   });
+
+  test('approved delivery requirements require changed-file acceptance evidence', () => {
+    const specification = {
+      delivery_requirements: [
+        { id: 'DR-1', outcome: 'Responsive workspace', evidence: 'Mobile check', source_scope: ['apps/web/src/layout.css'] },
+        { id: 'DR-2', outcome: 'Visible receipts', evidence: 'Human check', source_scope: ['apps/web/src/app.tsx'] }
+      ]
+    };
+    const files = ['apps/web/src/app.tsx', 'apps/web/src/layout.css'];
+    assert.match(
+      validateAcceptanceEvidence({ args: {}, specification, files }),
+      /DR-1 has no completed acceptance evidence/
+    );
+    assert.match(
+      validateAcceptanceEvidence({
+        args: {
+          acceptance_evidence: [
+            { requirement_id: 'DR-1', status: 'completed', evidence: 'Implemented responsive rules' },
+            { requirement_id: 'DR-2', status: 'completed', evidence: 'apps/web/src/app.tsx renders receipts' }
+          ]
+        },
+        specification,
+        files
+      }),
+      /DR-1 evidence does not name its changed source_scope file/
+    );
+    assert.equal(
+      validateAcceptanceEvidence({
+        args: {
+          acceptance_evidence: [
+            { requirement_id: 'DR-1', status: 'completed', evidence: 'apps/web/src/layout.css implements responsive rules' },
+            { requirement_id: 'DR-2', status: 'completed', evidence: 'app.tsx renders verification receipts' }
+          ]
+        },
+        specification,
+        files
+      }),
+      null
+    );
+    assert.match(
+      validateAcceptanceEvidence({
+        args: {
+          acceptance_evidence: [
+            { requirement_id: 'DR-1', status: 'completed', evidence: 'apps/web/src/layout.css implements responsive rules' },
+            { requirement_id: 'DR-2', status: 'completed', evidence: 'apps/web/src/app.tsx renders verification receipts' }
+          ]
+        },
+        specification: {
+          delivery_requirements: [
+            ...specification.delivery_requirements.slice(0, 1),
+            { ...specification.delivery_requirements[1], source_scope: ['apps/web/src/other.tsx'] }
+          ]
+        },
+        files
+      }),
+      /DR-2 did not change any approved source_scope file/
+    );
+  });
   assert.match(partial.error, /summary admits the required implementation is incomplete/);
   const missing = buildProposal({
     workspacePath: ws.workspacePath,
@@ -141,6 +199,31 @@ test('required source scope and admitted partial handoffs fail closed', () => {
     args: { summary: 'Implemented the complete responsive workspace and verified the resulting diff.', tests: [] }
   });
   assert.match(missing.error, /required source scope was not implemented: apps\/web\/src\/layout\.css/);
+  fs.writeFileSync(path.join(ws.workspacePath, 'apps/web/src/layout.css'), '.layout { display: grid; }\n');
+  const complete = buildProposal({
+    workspacePath: ws.workspacePath,
+    lane: 'frontend',
+    tools,
+    requiredFiles: required,
+    specification: {
+      delivery_requirements: [
+        { id: 'DR-1', outcome: 'Responsive workspace', evidence: 'Mobile check', source_scope: ['apps/web/src/layout.css'] },
+        { id: 'DR-2', outcome: 'Updated application', evidence: 'Component check', source_scope: ['apps/web/src/app.tsx'] }
+      ]
+    },
+    args: {
+      summary: 'Implemented the complete responsive workspace and verified the resulting diff.',
+      tests: [],
+      acceptance_evidence: [
+        { requirement_id: 'DR-1', status: 'completed', evidence: 'apps/web/src/layout.css provides the layout' },
+        { requirement_id: 'DR-2', status: 'completed', evidence: 'apps/web/src/app.tsx provides the updated application' }
+      ]
+    }
+  });
+  assert.deepEqual(complete.proposal.acceptance_evidence, [
+    { requirement_id: 'DR-1', status: 'completed', evidence: 'apps/web/src/layout.css provides the layout' },
+    { requirement_id: 'DR-2', status: 'completed', evidence: 'apps/web/src/app.tsx provides the updated application' }
+  ]);
   fs.rmSync(repo.root, { recursive: true, force: true });
 });
 

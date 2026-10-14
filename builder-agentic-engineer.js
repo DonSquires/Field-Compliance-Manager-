@@ -24,7 +24,7 @@ const { isProtectedPath, laneAllows, protectedReason, isMigrationPath, normalize
 const { buildModelRunRequest, callModelGateway, persistModelArtifact, fetchModelHealth, selectProviders, providerRequest } = require('./supabase/functions/_shared/builder-model-adapter');
 const { collectRepositoryContext, fitRepositoryContext } = require('./supabase/functions/_shared/builder-repository-context');
 
-const PROMPT_VERSION = 'agentic-engineer-v3';
+const PROMPT_VERSION = 'agentic-engineer-v4';
 const DEFAULT_LIMITS = Object.freeze({
   maxTurns: Math.max(4, Number(process.env.BOB_BUILDER_AGENT_TURNS || 60)),
   wallBudgetMs: Math.max(5 * 60_000, Number(process.env.BOB_BUILDER_AGENT_BUDGET_MS || 45 * 60_000)),
@@ -219,7 +219,7 @@ function systemPrompt({ lane, limits }) {
     '- read_canon {}                          AGENTS.md + docs/canon/README.md + docs/canon/BOB_DOCTRINE.md (bounded)',
     '- read_notes {limit?}                    your persistent builder notes (lessons from earlier jobs); the 10 most recent are already in your task packet',
     '- write_note {text}                      leave a durable lesson for future jobs (short, factual, no secrets)',
-    '- finish {summary, tests, rollback_notes, follow_ups?, tests_not_run_reason?, lessons?}   hand over: your worktree diff becomes the reviewed patch. A change that touches tests is refused unless a `node --test` run passed in this session (or tests_not_run_reason says plainly why none could). lessons: up to 3 short, generalisable facts about this codebase or these tools that would save a future job time (or omit).',
+    '- finish {summary, tests, rollback_notes, acceptance_evidence, follow_ups?, tests_not_run_reason?, lessons?}   hand over: your worktree diff becomes the reviewed patch. acceptance_evidence must contain one {requirement_id, status:"completed", evidence} entry for every approved delivery requirement; evidence must name a changed source file that implements the outcome. A change that touches tests is refused unless a `node --test` run passed in this session (or tests_not_run_reason says plainly why none could). lessons: up to 3 short, generalisable facts about this codebase or these tools that would save a future job time (or omit).',
     '',
     `Budget: ${limits.maxTurns} tool turns / ${Math.round(limits.wallBudgetMs / 60000)} minutes. Pace it: spend at most about a third of the turns reading before you start editing; you will be told when the budget is running low. Do not repeat identical calls. Large files: outline first, then targeted reads — a task that names a 10,000-line file is still a 60-turn task. Requirements labelled must, required, or acceptance may not be deferred to follow_ups: complete and verify them before finish. follow_ups are only for optional improvements outside the approved acceptance contract. Running out of turns with an admitted partial change is a failure, not a successful handoff. If the task is impossible, unsafe, or requires a protected path, finish with an empty change set and explain plainly in the summary what a human must do.`,
   ].join('\n');
@@ -652,7 +652,35 @@ function requiredChangedFilesFromTask(taskDescription, lane) {
   return paths.filter((file) => laneAllows(lane, file)).sort();
 }
 
-function buildProposal({ workspacePath, lane, tools, args, requiredFiles = [] }) {
+function validateAcceptanceEvidence({ args, specification, files }) {
+  const requirements = Array.isArray(specification?.delivery_requirements)
+    ? specification.delivery_requirements
+    : [];
+  if (!requirements.length) return null;
+  const evidence = Array.isArray(args.acceptance_evidence) ? args.acceptance_evidence : [];
+  const byId = new Map(evidence.map(entry => [String(entry?.requirement_id || '').trim(), entry]));
+  for (const requirement of requirements) {
+    const id = String(requirement?.id || '').trim();
+    const entry = byId.get(id);
+    if (!entry || entry.status !== 'completed') {
+      return `finish refused: delivery requirement ${id || '(missing id)'} has no completed acceptance evidence. Implement and verify every approved delivery requirement before handoff.`;
+    }
+    const proof = String(entry.evidence || '').trim();
+    if (!proof) return `finish refused: delivery requirement ${id} has no evidence. Name the changed source file and the observable proof.`;
+    const sourceScope = Array.isArray(requirement.source_scope) ? requirement.source_scope.map(String) : [];
+    const implementedFiles = files.filter(file => sourceScope.includes(file));
+    if (!implementedFiles.length) {
+      return `finish refused: delivery requirement ${id} did not change any approved source_scope file (${sourceScope.join(', ')}). Implement the outcome in its approved scope before handoff.`;
+    }
+    const namesImplementedFile = implementedFiles.some(file => proof.includes(file) || proof.includes(path.basename(file)));
+    if (!namesImplementedFile) {
+      return `finish refused: delivery requirement ${id} evidence does not name its changed source_scope file. Evidence must identify where this outcome was implemented.`;
+    }
+  }
+  return null;
+}
+
+function buildProposal({ workspacePath, lane, tools, args, requiredFiles = [], specification = null }) {
   git(workspacePath, ['add', '-A', '--', '.']);
   const files = git(workspacePath, ['diff', '--cached', '--name-only']).split('\n').filter(Boolean).sort();
   if (!files.length) return { error: 'finish refused: no changes in the worktree. Implement the change first, or finish with an explanation only by setting args.no_change_reason.' };
@@ -675,6 +703,8 @@ function buildProposal({ workspacePath, lane, tools, args, requiredFiles = [] })
   if (missingRequiredFiles.length) {
     return { error: `finish refused: required source scope was not implemented: ${missingRequiredFiles.join(', ')}. Complete those required files before handoff.` };
   }
+  const acceptanceError = validateAcceptanceEvidence({ args, specification, files });
+  if (acceptanceError) return { error: acceptanceError };
   // Truth Protocol at the gate: a change that touches tests (or that the brief asked to test) must come with a
   // passing `node --test` run from THIS session, or an explicit reason why none could run. Claims are not evidence.
   const sessionRuns = typeof tools.__runs === 'function' ? tools.__runs() : [];
@@ -692,6 +722,13 @@ function buildProposal({ workspacePath, lane, tools, args, requiredFiles = [] })
     database_migrations: files.filter((file) => file.startsWith('supabase/migrations/')),
     edge_functions: [...new Set(files.filter((file) => /^supabase\/functions\/(?!_shared\/)[^/]+\//.test(file)).map((file) => file.split('/')[2]))].sort(),
     tests,
+    acceptance_evidence: Array.isArray(args.acceptance_evidence)
+      ? args.acceptance_evidence.map(entry => ({
+        requirement_id: String(entry?.requirement_id || '').trim(),
+        status: entry?.status,
+        evidence: String(entry?.evidence || '').trim()
+      })).slice(0, 100)
+      : [],
     // What actually ran, from the tool log (command + exit code), so reviewers need not trust the summary.
     verified_runs: sessionRuns.filter((r) => /^(?:node --(?:test|check)\b|npm run (?:test|lint|build) --prefix apps\/web\b)/.test(r.command)).slice(-20),
     tests_not_run_reason: testsNotRunReason || undefined,
@@ -982,7 +1019,8 @@ async function runAgenticEngineer({
         lane,
         tools,
         args,
-        requiredFiles: requiredChangedFilesFromTask(job.task_description, lane)
+        requiredFiles: requiredChangedFilesFromTask(job.task_description, lane),
+        specification
       });
       if (built.error) {
         log({ turn: turns, finish_refused: built.error });
@@ -1038,7 +1076,8 @@ async function runAgenticEngineer({
         lane,
         tools,
         args,
-        requiredFiles: requiredChangedFilesFromTask(job.task_description, lane)
+        requiredFiles: requiredChangedFilesFromTask(job.task_description, lane),
+        specification
       });
       if (built.error) log({ turn: turns + 1, finish_refused: built.error });
       else outcome = { ok: true, proposal: built.proposal, model: response.data?.model };
@@ -1093,4 +1132,4 @@ async function runAgenticEngineer({
   };
 }
 
-module.exports = { DEFAULT_LIMITS, PROMPT_VERSION, RUN_ALLOWLIST, buildOpeningPacket, buildProposal, classifyNoChange, compactMessages, composeRunNote, createTools, finishAgenticReceipt, heartbeatAgenticReceipt, outlineLines, parseToolCall, readingMap, requiredChangedFilesFromTask, runAgenticEngineer, startAgenticReceipt, systemPrompt, taskPacket };
+module.exports = { DEFAULT_LIMITS, PROMPT_VERSION, RUN_ALLOWLIST, buildOpeningPacket, buildProposal, classifyNoChange, compactMessages, composeRunNote, createTools, finishAgenticReceipt, heartbeatAgenticReceipt, outlineLines, parseToolCall, readingMap, requiredChangedFilesFromTask, runAgenticEngineer, startAgenticReceipt, systemPrompt, taskPacket, validateAcceptanceEvidence };

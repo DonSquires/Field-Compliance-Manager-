@@ -6,6 +6,8 @@ const {
   normalizeRepositoryContext,
   researchEvidenceRequired,
   suppliedResearchUrls,
+  isBroadUiRedesign,
+  validateDeliveryRequirements,
   validateRepositoryGrounding,
   buildProductAnalystPrompt,
   parseProductSpecification,
@@ -19,6 +21,7 @@ function validSpecification() {
     user_journeys: [{ actor: 'administrator', goal: 'approve a change', steps: ['open queue', 'review', 'decide'] }],
     functional_requirements: [{ id: 'FR-1', requirement: 'Display pending approvals', priority: 'must' }],
     non_functional_requirements: [{ id: 'NFR-1', requirement: 'Preserve tenant isolation' }],
+    delivery_requirements: [{ id: 'DR-1', outcome: 'Pending approvals are visibly grouped by status', evidence: 'Component test and human review show the grouped queue', source_scope: ['apps/web/src/pages/ApprovalsPage.tsx'] }],
     data_model_proposal: [{ entity: 'approval', purpose: 'record decisions', relationships: ['belongs to job'] }],
     acceptance_criteria: [{ id: 'AC-1', criterion: 'Unauthorized users cannot decide' }],
     workflow_verification: {
@@ -192,6 +195,47 @@ test('Product Analyst parser rejects malformed or incomplete output', () => {
   })), /workflow_verification.before/);
 });
 
+test('Product Analyst rejects generic acceptance for a broad UI redesign', () => {
+  const taskDescription = 'Redesign the Builder workspace UI and UX to be a professional enterprise interface';
+  assert.equal(isBroadUiRedesign(taskDescription), true);
+  const generic = {
+    ...validSpecification(),
+    acceptance_criteria: [
+      { id: 'AC-1', criterion: 'Tests pass' },
+      { id: 'AC-2', criterion: 'WCAG passes' }
+    ]
+  };
+  assert.throws(
+    () => validateDeliveryRequirements(generic, taskDescription),
+    /at least five delivery requirements and five measurable acceptance criteria/
+  );
+
+  const complete = {
+    ...validSpecification(),
+    acceptance_criteria: Array.from({ length: 5 }, (_, index) => ({ id: `AC-${index + 1}`, criterion: `Observable criterion ${index + 1}` })),
+    delivery_requirements: [
+      { id: 'DR-1', outcome: 'Information hierarchy and workspace composition make the primary action clear', evidence: 'Human glass review', source_scope: ['apps/web/src/pages/BuilderControlRoomPage.tsx'] },
+      { id: 'DR-2', outcome: 'Responsive desktop and mobile breakpoints preserve context', evidence: 'Desktop and mobile browser checks', source_scope: ['apps/web/src/pages/BuilderControlRoomPage.css'] },
+      { id: 'DR-3', outcome: 'Accessible keyboard focus and screen reader labels meet WCAG', evidence: 'Keyboard and accessibility checks', source_scope: ['apps/web/src/components/BobStudio.tsx'] },
+      { id: 'DR-4', outcome: 'Loading, empty, error, permission, and success states provide a safe next action', evidence: 'State-focused component tests', source_scope: ['apps/web/src/components/BobStudio.tsx'] },
+      { id: 'DR-5', outcome: 'Job progress status and verification receipt evidence stay visible', evidence: 'Human glass review of operational receipts', source_scope: ['apps/web/src/pages/BuilderControlRoomPage.tsx'] }
+    ],
+    human_acceptance: {
+      ...validSpecification().human_acceptance,
+      required_states: ['loading', 'empty', 'error', 'permission', 'success', 'safe_next_action']
+    }
+  };
+  assert.doesNotThrow(() => validateDeliveryRequirements(complete, taskDescription));
+  complete.delivery_requirements = complete.delivery_requirements.map(requirement => ({
+    ...requirement,
+    source_scope: ['apps/web/src/pages/BuilderControlRoomPage.css']
+  }));
+  assert.throws(
+    () => validateDeliveryRequirements(complete, taskDescription),
+    /at least three source files including behavioral UI code and styling/
+  );
+});
+
 test('Product Analyst routes complex analysis through the governed model runner', async () => {
   let captured;
   const specification = validSpecification();
@@ -200,7 +244,7 @@ test('Product Analyst routes complex analysis through the governed model runner'
     gateway: { gatewayUrl: 'https://control.example', apiToken: 'token' },
     job: { id: 'job-1', organization_id: 'org-1', task_description: 'Build approvals' },
     step: { id: 'step-1', builder_mode: 'product_analyst' },
-    repositoryContext: { repository: 'owner/repo', relevant_files: ['src/App.tsx'] },
+    repositoryContext: { repository: 'owner/repo', relevant_files: ['src/App.tsx', 'apps/web/src/pages/ApprovalsPage.tsx'] },
     startAnalysis: async () => ({ success: true }),
     executeModelRun: async input => {
       captured = input;

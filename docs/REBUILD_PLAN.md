@@ -419,6 +419,26 @@ selection. A hard 48,000-character evidence limit aborts before provider
 dispatch if the remaining packet still cannot fit; review evidence is compacted
 rather than weakening the independent review or silently truncating the patch.
 
+Builder delivery-contract acceptance 2026-10-15: continuation job
+`b023f045-4e53-44d2-ac11-9f567be68c66` passed isolated verification, security,
+and independent review, but its verified result was only five CSS token
+substitutions across three files. The original seeded artifact was equally
+small; the continuation removed an unused TSX stub and preserved those five
+lines. This was a truthful and technically valid patch against a weak approved
+specification, not the requested professional workspace redesign. Autopilot was
+parked before workspace creation, publication, merge, or deployment.
+`product-analyst-v8` now emits machine-readable delivery requirements with
+observable outcomes, evidence, and repository-grounded source scope. Broad
+UI/UX redesigns fail specification validation unless at least five delivery
+requirements and five acceptance criteria cover workspace hierarchy,
+desktop/mobile behavior, accessibility/keyboard behavior, all required
+interface states, and operational status/evidence visibility across at least
+three source files including UI behavior and styling. `agentic-engineer-v4`
+then refuses handoff until every approved delivery requirement has completed
+evidence naming a changed file from that requirement's own source scope. Passing
+tests and reviews remain necessary, but can no longer substitute for delivering
+the approved observable outcomes.
+
 Runtime acceptance 2026-10-11: the laptop vision watcher now writes an
 independent liveness heartbeat and its Docker health check terminates only a
 stale watcher process so `restart: unless-stopped` can recover it. Acceptance

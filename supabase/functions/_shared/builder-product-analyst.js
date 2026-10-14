@@ -4,7 +4,7 @@ const {
 } = require('./builder-model-adapter');
 const { fitRepositoryContext } = require('./builder-repository-context');
 
-const PRODUCT_ANALYST_PROMPT_VERSION = 'product-analyst-v7';
+const PRODUCT_ANALYST_PROMPT_VERSION = 'product-analyst-v8';
 
 const PRODUCT_SPEC_SCHEMA = Object.freeze({
   type: 'object',
@@ -14,6 +14,7 @@ const PRODUCT_SPEC_SCHEMA = Object.freeze({
     'user_journeys',
     'functional_requirements',
     'non_functional_requirements',
+    'delivery_requirements',
     'data_model_proposal',
     'acceptance_criteria',
     'workflow_verification',
@@ -83,6 +84,62 @@ function suppliedResearchUrls(taskDescription) {
     .slice(0, 10);
 }
 
+function isBroadUiRedesign(taskDescription) {
+  const task = String(taskDescription || '');
+  return /\b(?:redesign|rebuild|design from scratch|professional(?:ise|ize)?)\b/i.test(task)
+    && /\b(?:ui|ux|user experience|workspace|studio|chat|page|interface)\b/i.test(task);
+}
+
+function validateDeliveryRequirements(specification, taskDescription) {
+  const requirements = specification.delivery_requirements;
+  if (!Array.isArray(requirements) || requirements.length === 0) {
+    throw new Error('delivery_requirements must be a non-empty array');
+  }
+  const ids = new Set();
+  for (const requirement of requirements) {
+    const id = boundedString(requirement?.id, 100);
+    if (!id || ids.has(id)) throw new Error('delivery_requirements must have unique non-empty ids');
+    ids.add(id);
+    if (!boundedString(requirement?.outcome, 2000)
+        || !boundedString(requirement?.evidence, 2000)
+        || !Array.isArray(requirement?.source_scope)
+        || requirement.source_scope.length === 0
+        || requirement.source_scope.some(value => !boundedString(value, 500))) {
+      throw new Error('each delivery requirement must define outcome, evidence, and non-empty source_scope');
+    }
+  }
+  if (!isBroadUiRedesign(taskDescription)) return;
+  if (requirements.length < 5 || specification.acceptance_criteria.length < 5) {
+    throw new Error('broad UI/UX redesigns require at least five delivery requirements and five measurable acceptance criteria');
+  }
+  const deliveryText = requirements.map(requirement => `${requirement.outcome} ${requirement.evidence}`).join(' ');
+  const requiredConcerns = [
+    ['information hierarchy or workspace composition', /\b(?:information hierarchy|workspace composition|layout|navigation|primary action)\b/i],
+    ['responsive desktop and mobile behavior', /\b(?:responsive|mobile|desktop|breakpoint)\b/i],
+    ['accessibility and keyboard behavior', /\b(?:accessib|keyboard|focus|screen reader|wcag)\b/i],
+    ['loading, empty, error, permission, and success states', /\bloading\b/i, /\bempty\b/i, /\berror\b/i, /\bpermission\b/i, /\bsuccess\b/i],
+    ['operational status, evidence, or receipt visibility', /\b(?:status|evidence|receipt|deployment|verification|job progress)\b/i]
+  ];
+  const missing = requiredConcerns
+    .filter(([, ...patterns]) => patterns.some(pattern => !pattern.test(deliveryText)))
+    .map(([label]) => label);
+  if (missing.length) {
+    throw new Error(`broad UI/UX redesign delivery requirements are missing: ${missing.join('; ')}`);
+  }
+  const requiredStates = new Set(specification.human_acceptance?.required_states || []);
+  const missingStates = ['loading', 'empty', 'error', 'permission', 'success', 'safe_next_action']
+    .filter(state => !requiredStates.has(state));
+  if (missingStates.length) {
+    throw new Error(`broad UI/UX redesign human acceptance is missing required states: ${missingStates.join(', ')}`);
+  }
+  const sourceScope = [...new Set(requirements.flatMap(requirement => requirement.source_scope))];
+  if (sourceScope.length < 3
+      || !sourceScope.some(file => /\.(?:tsx|jsx)$/.test(file))
+      || !sourceScope.some(file => /\.css$/.test(file))) {
+    throw new Error('broad UI/UX redesign delivery requirements must identify at least three source files including behavioral UI code and styling');
+  }
+}
+
 function specificationStrings(value, path = [], output = []) {
   if (typeof value === 'string') {
     output.push({ path: path.join('.'), value });
@@ -110,6 +167,21 @@ function validateRepositoryGrounding(specification, { repositoryContext = {}, ta
   const taskLower = task.toLowerCase();
   const forbidsNewBackend = /\bfrontend-only\b|\bdo not invent (?:schema|apis?)\b|\bwithout (?:new|inventing) (?:routes?|apis?|schema)\b/i.test(task);
   const neutralEntities = new Set(['none', 'no new entity', 'no new entities', 'existing frontend state', 'existing ui state']);
+  const trackedFiles = new Set([
+    ...(Array.isArray(buildMap.tracked_files) ? buildMap.tracked_files : []),
+    ...(Array.isArray(context.relevant_files) ? context.relevant_files : [])
+  ]);
+
+  for (const requirement of specification.delivery_requirements || []) {
+    for (const file of requirement.source_scope || []) {
+      if (!/^(?:apps|supabase|services|scripts|test|docs)\/[\w./-]+$/.test(file)) {
+        throw new Error(`delivery requirement source_scope is not a repository path: ${file}`);
+      }
+      if (trackedFiles.size > 0 && !trackedFiles.has(file)) {
+        throw new Error(`delivery requirement source_scope was not supplied by repository evidence: ${file}`);
+      }
+    }
+  }
 
   if (forbidsNewBackend) {
     if ((specification.data_model_proposal || []).length > 0) {
@@ -168,6 +240,8 @@ function buildProductAnalystPrompt({ taskDescription, repositoryContext, constra
     'Describe expected versus present behavior before, during, and after the workflow.',
     'Require schema and Atlas checks, keeping proven flow reach separate from structural FK reach and treating references-only edges as weak evidence.',
     'Define a responsive, accessible human-glass acceptance route for the affected role, including loading, empty, error, permission, success, and safe-next-action states that apply.',
+    'Turn the approved scope into delivery_requirements: observable outcomes with exact evidence and repository-grounded source_scope. These are the engineer handoff contract, not optional aspirations.',
+    'For a broad UI/UX redesign, define at least five delivery requirements and five measurable acceptance criteria covering information hierarchy/workspace composition, responsive desktop/mobile behavior, accessibility/keyboard behavior, loading/empty/error/permission/success states, and operational status/evidence/receipt visibility.',
     'Put every unknown that affects implementation in unresolved_questions.',
     'When research is required, cite only URLs supplied in the task; record the exact observed pattern and how it applies, never invent a source or claim browsing.',
     'Research products are design evidence only unless the task explicitly requests an integration; never turn inspiration into a dependency, API, or product integration.',
@@ -195,6 +269,7 @@ function buildProductAnalystPrompt({ taskDescription, repositoryContext, constra
       user_journeys: [{ actor: 'string', goal: 'string', steps: ['string'] }],
       functional_requirements: [{ id: 'FR-1', requirement: 'string', priority: 'must|should|could' }],
       non_functional_requirements: [{ id: 'NFR-1', requirement: 'string' }],
+      delivery_requirements: [{ id: 'DR-1', outcome: 'observable completed behavior', evidence: 'specific test or human-visible proof', source_scope: ['existing repository file or component supplied by repository evidence'] }],
       data_model_proposal: forbidsNewBackend ? [] : [{ entity: 'existing repository entity name', purpose: 'string', relationships: ['existing repository relationship'] }],
       acceptance_criteria: [{ id: 'AC-1', criterion: 'string' }],
       workflow_verification: {
@@ -255,6 +330,7 @@ function parseProductSpecification(content, {
   if (specification.acceptance_criteria.length === 0) {
     throw new Error('acceptance_criteria must not be empty');
   }
+  validateDeliveryRequirements(specification, taskDescription);
   for (const phase of ['before', 'during', 'after']) {
     if (!Array.isArray(specification.workflow_verification?.[phase]) || specification.workflow_verification[phase].length === 0) {
       throw new Error(`workflow_verification.${phase} must be a non-empty array`);
@@ -413,6 +489,8 @@ module.exports = {
   normalizeRepositoryContext,
   researchEvidenceRequired,
   suppliedResearchUrls,
+  isBroadUiRedesign,
+  validateDeliveryRequirements,
   validateRepositoryGrounding,
   buildProductAnalystPrompt,
   parseProductSpecification,
