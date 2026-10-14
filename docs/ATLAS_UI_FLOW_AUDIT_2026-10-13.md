@@ -544,3 +544,41 @@ remains unpopulated.
   audit event was fabricated for verification. Live Atlas was refreshed from
   release commit `8e07e4ed`; both RPCs report `present=true`, `wired=true` and
   `exercised=null`.
+
+### Closure log — approved-timesheet labour cost
+
+- Atlas showed `post_finance_timesheet_labour_cost` as present but unwired.
+  The schema could turn an approved timesheet into an actual service cost, but
+  finance administrators had no task surface for reviewing the attribution
+  and invoking that authority.
+- Before exposure, the RPC accepted any same-tenant agreement and any open
+  P&L period supplied by its caller. It did not prove that the agreement came
+  from the timesheet's shift, that location and module links agreed, that the
+  accounting period contained the work dates, or that optional work-unit and
+  cost-centre attribution belonged to the same operational path. A scoped
+  admin-officer aggregate found one approved/paid timesheet already accounted
+  for and no unposted approved shift timesheet to mutate.
+- The hardened RPC now serialises by timesheet, locks the approved source,
+  requires one governed shift for the same staff member, derives the accepted
+  operational agreement from active shift location/module links, and rejects
+  conflicting contract links. The selected P&L period must remain open and
+  contain the complete work period. Service type, work unit and active
+  cost-centre attribution are rechecked server-side; idempotent retries can
+  only return a posting with the same accounting attribution.
+- The money page now includes an Actual labour costs workspace. It lists
+  approved or paid shift timesheets that have not been posted, resolves their
+  shift agreement and applicable hourly pay rule, and offers only containing
+  draft/locked periods. Missing agreement or rate evidence is shown as a
+  blocked state rather than creating a zero-cost line. The browser invokes the
+  governed RPC and never inserts service costs or labour postings directly.
+- After success, one service-cost line and one unique posting preserve the
+  shift, agreement, work unit, hours, rate rule and accounting-period
+  snapshot, followed by an audit event and a reload of persisted state.
+  Existing deliberate support for unresolved rates remains in the database
+  authority for non-UI governed callers, while this human workflow requires a
+  resolved rate before confirmation.
+- The migration was applied to the linked project and the live schema snapshot
+  regenerated. Fifteen focused finance guards passed across three files, the
+  production web build passed, and the Atlas dry-run moved 164 -> 163 bounded
+  gaps: 1 edge function, 107 RPCs and 55 tables. Runtime exercise remains
+  unclaimed because no finance record was fabricated.
