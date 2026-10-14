@@ -204,7 +204,7 @@ async function githubApi({ fetchImpl, githubToken, method, urlPath, body }) {
   return { ok: response.ok, status: response.status, data };
 }
 
-async function createGitHubPullRequest({ workspacePath, branchName, expectedHeadSha, title, body, githubToken, owner, repo, base = 'main', fetchImpl = globalThis.fetch }) {
+async function createGitHubPullRequest({ workspacePath, branchName, expectedHeadSha, title, body, githubToken, owner, repo, base = 'main', draft = true, fetchImpl = globalThis.fetch }) {
   if (!branchName.startsWith(BRANCH_PREFIX) || git(workspacePath, ['branch', '--show-current']) !== branchName) throw new Error('Builder workspace branch is invalid');
   if (git(workspacePath, ['status', '--porcelain', '--untracked-files=normal'])) throw new Error('Builder workspace must be clean before opening a pull request');
   if (git(workspacePath, ['rev-parse', 'HEAD']) !== expectedHeadSha) throw new Error('Builder workspace head is stale');
@@ -213,9 +213,9 @@ async function createGitHubPullRequest({ workspacePath, branchName, expectedHead
   const repoPath = `/repos/${encodeURIComponent(owner)}/${encodeURIComponent(repo)}`;
   const ref = await githubApi({ fetchImpl, githubToken, method: 'GET', urlPath: `${repoPath}/git/ref/heads/${encodeURIComponent(branchName)}` });
   if (!ref.ok || ref.data?.object?.sha !== expectedHeadSha) throw new Error('Published GitHub branch does not match the verified head');
-  const created = await githubApi({ fetchImpl, githubToken, method: 'POST', urlPath: `${repoPath}/pulls`, body: { base, head: branchName, title: String(title).slice(0, 200), body: String(body).slice(0, 10000), draft: true, maintainer_can_modify: true } });
+  const created = await githubApi({ fetchImpl, githubToken, method: 'POST', urlPath: `${repoPath}/pulls`, body: { base, head: branchName, title: String(title).slice(0, 200), body: String(body).slice(0, 10000), draft: draft === true, maintainer_can_modify: true } });
   if (!created.ok || typeof created.data?.html_url !== 'string' || !/^https:\/\/github\.com\/[^/\s]+\/[^/\s]+\/pull\/\d+$/.test(created.data.html_url)) throw new Error('GitHub pull request creation failed');
-  return { branchName, head: expectedHeadSha, url: created.data.html_url, number: created.data.number ?? null, draft: true };
+  return { branchName, head: expectedHeadSha, url: created.data.html_url, number: created.data.number ?? null, draft: draft === true };
 }
 
 async function mergeGitHubPullRequest({ number, expectedHeadSha, githubToken, owner, repo, fetchImpl = globalThis.fetch }) {
@@ -224,10 +224,17 @@ async function mergeGitHubPullRequest({ number, expectedHeadSha, githubToken, ow
   if (!githubToken || !owner || !repo || typeof fetchImpl !== 'function') throw new Error('Builder GitHub integration is not configured');
   githubRepoUrl(owner, repo);
   const repoPath = `/repos/${encodeURIComponent(owner)}/${encodeURIComponent(repo)}`;
-  const pullRequest = await githubApi({ fetchImpl, githubToken, method: 'GET', urlPath: `${repoPath}/pulls/${Number(number)}` });
-  if (!pullRequest.ok || pullRequest.data?.state !== 'open' || pullRequest.data?.draft === true
+  const pullPath = `${repoPath}/pulls/${Number(number)}`;
+  const pullRequest = await githubApi({ fetchImpl, githubToken, method: 'GET', urlPath: pullPath });
+  if (!pullRequest.ok || pullRequest.data?.state !== 'open'
       || pullRequest.data?.head?.sha !== expectedHeadSha || pullRequest.data?.base?.ref !== 'main') {
     throw new Error('GitHub pull request is not the verified open main-targeted change');
+  }
+  if (pullRequest.data?.draft === true) {
+    const ready = await githubApi({ fetchImpl, githubToken, method: 'POST', urlPath: `${pullPath}/ready_for_review` });
+    if (!ready.ok || ready.data?.draft === true || ready.data?.head?.sha !== expectedHeadSha || ready.data?.base?.ref !== 'main') {
+      throw new Error('GitHub pull request could not be marked ready for verified merge');
+    }
   }
   const merged = await githubApi({ fetchImpl, githubToken, method: 'PUT', urlPath: `${repoPath}/pulls/${Number(number)}/merge`, body: { sha: expectedHeadSha, merge_method: 'squash' } });
   if (!merged.ok || merged.data?.merged !== true) throw new Error('GitHub did not merge the verified pull request');

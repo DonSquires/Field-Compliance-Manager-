@@ -73,6 +73,36 @@ test('GitHub adapter opens verified PRs and exposes only the guarded direct merg
   fs.rmSync(repo, { recursive: true, force: true });
 });
 
+test('GitHub adapter opens eligible PRs ready and recovers an interrupted draft before merging', async () => {
+  const repo = fs.mkdtempSync(path.join(os.tmpdir(), 'bob-gh-automerge-'));
+  const git = (args) => execFileSync('git', args, { cwd: repo, encoding: 'utf8', stdio: ['ignore', 'pipe', 'pipe'] }).trim();
+  git(['init', '-q', '-b', 'main']);
+  git(['-c', 'user.name=t', '-c', 'user.email=t@example.com', 'commit', '--allow-empty', '-q', '-m', 'base']);
+  git(['checkout', '-q', '-b', 'bob/job-automerge1']);
+  git(['-c', 'user.name=t', '-c', 'user.email=t@example.com', 'commit', '--allow-empty', '-q', '-m', 'fix']);
+  const head = git(['rev-parse', 'HEAD']);
+  const calls = [];
+  const pull = { state: 'open', draft: true, head: { sha: head }, base: { ref: 'main' } };
+  const fetchImpl = async (url, init) => {
+    calls.push({ url, init });
+    if (url.endsWith('/git/ref/heads/bob%2Fjob-automerge1')) return { ok: true, status: 200, json: async () => ({ object: { sha: head } }) };
+    if (url.endsWith('/pulls') && init.method === 'POST') {
+      assert.equal(JSON.parse(init.body).draft, false);
+      return { ok: true, status: 201, json: async () => ({ html_url: 'https://github.com/DonSquires/Field-Compliance-Manager-/pull/43', number: 43 }) };
+    }
+    if (url.endsWith('/pulls/43') && init.method === 'GET') return { ok: true, status: 200, json: async () => pull };
+    if (url.endsWith('/pulls/43/ready_for_review')) return { ok: true, status: 200, json: async () => ({ ...pull, draft: false }) };
+    if (url.endsWith('/pulls/43/merge')) return { ok: true, status: 200, json: async () => ({ merged: true, sha: 'f'.repeat(40) }) };
+    throw new Error(`unexpected ${init.method} ${url}`);
+  };
+  const created = await workspace.createGitHubPullRequest({ workspacePath: repo, branchName: 'bob/job-automerge1', expectedHeadSha: head, title: 'Bob Builder: fix', body: 'review', githubToken: 'ghp_test', owner: 'DonSquires', repo: 'Field-Compliance-Manager-', draft: false, fetchImpl });
+  assert.equal(created.draft, false);
+  const merged = await workspace.mergeGitHubPullRequest({ number: 43, expectedHeadSha: head, githubToken: 'ghp_test', owner: 'DonSquires', repo: 'Field-Compliance-Manager-', fetchImpl });
+  assert.equal(merged.sha, 'f'.repeat(40));
+  assert.ok(calls.some(({ url }) => url.endsWith('/pulls/43/ready_for_review')));
+  fs.rmSync(repo, { recursive: true, force: true });
+});
+
 test('GitHub credentials travel as a per-invocation header, never inside a remote URL', () => {
   assert.equal(workspace.githubRepoUrl('DonSquires', 'Field-Compliance-Manager-'), 'https://github.com/DonSquires/Field-Compliance-Manager-.git');
   assert.equal(workspace.githubSshRepoUrl('DonSquires', 'Field-Compliance-Manager-'), 'git@github.com:DonSquires/Field-Compliance-Manager-.git');

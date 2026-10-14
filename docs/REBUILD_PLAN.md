@@ -8,6 +8,17 @@ detailed backlogs (`ENTERPRISE_SAAS_TODO.md`, `PROTOTYPE_GAP_AUDIT.md`,
 Completion language is strict, as in the lineage: **merged ≠ deployed ≠
 glass-proven.** A workstream item is done only when its evidence gate is met.
 
+Builder publication recovery 2026-10-15: a bounded main-health repair passed
+worker verification, security review, and independent review, then opened a
+GitHub pull request carrying the auto-merge marker but left it as a draft. The
+GitHub adapter had ignored the caller's reviewed `draft` decision and the
+autopilot treated any recorded pull-request URL as publication completion,
+making an interrupted merge unrecoverable. Eligible changes now open ready for
+review, exact-head draft pull requests are promoted before guarded squash
+merge, recorded pull-request numbers are recovered from the durable URL, and
+an interrupted publication re-evaluates the full evidence contract before it
+may resume. Ineligible work remains draft-only and cannot merge.
+
 Live service-area finding 2026-10-11: R&M organisation settings could preview a
 canonical council boundary, then told the user Bob would send it to Approvals
 "when you are ready", but exposed no submission action. The page also carried a

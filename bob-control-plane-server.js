@@ -636,7 +636,13 @@ function defaultPullRequestBody(job) {
 async function openBuilderPullRequest(jobId, bodyFor = null, { draft = true } = {}) {
   const { data: job } = await builderSupabase.from('builder_jobs').select('id,title,workspace_branch,workspace_head_sha,workspace_published_head_sha,workspace_pull_request_head_sha,workspace_pull_request_url').eq('id', jobId).single();
   if (!job?.workspace_branch || !job.workspace_head_sha || job.workspace_published_head_sha !== job.workspace_head_sha) throw new BuilderStepError(409, 'Published Builder workspace is required');
-  if (job.workspace_pull_request_head_sha === job.workspace_head_sha && job.workspace_pull_request_url) return { branchName: job.workspace_branch, head: job.workspace_head_sha, url: job.workspace_pull_request_url, existing: true };
+  if (job.workspace_pull_request_head_sha === job.workspace_head_sha && job.workspace_pull_request_url) {
+    const number = builderGitHost === 'github'
+      ? Number(job.workspace_pull_request_url.match(/\/pull\/(\d+)$/)?.[1] || 0)
+      : null;
+    if (builderGitHost === 'github' && number < 1) throw new BuilderStepError(409, 'Recorded Builder pull request URL is invalid');
+    return { branchName: job.workspace_branch, head: job.workspace_head_sha, url: job.workspace_pull_request_url, number, existing: true };
+  }
   const workspacePath = workspacePathForBranch(builderWorkspaceRoot, job.workspace_branch);
   const reviewBody = typeof bodyFor === 'function' ? bodyFor(job.workspace_branch, job.workspace_head_sha) : defaultPullRequestBody(job);
   const pullRequest = builderGitHost === 'github'

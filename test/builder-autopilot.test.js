@@ -218,6 +218,35 @@ test('autopilot records a directly merged main-health repair as complete', async
   assert.match(recorded[3].text, /Bob repaired the failing checks/);
 });
 
+test('autopilot resumes an interrupted eligible publication instead of parking its recorded PR', async () => {
+  const { job, supabase } = releaseReadyFixture();
+  Object.assign(job, {
+    autopilot_requested_by: 'user-1',
+    workspace_pull_request_url: 'https://github.com/owner/repo/pull/26',
+  });
+  const actions = actionsRecorder();
+  actions.publish = async ({ validatedPatchId, automerge }) => {
+    actions.calls.push(['publish', job.id, validatedPatchId, automerge]);
+    return { pullRequestUrl: job.workspace_pull_request_url, merged: true, mergeSha: 'e'.repeat(40) };
+  };
+  const previous = process.env.BOB_AUTOPILOT_AUTOMERGE;
+  process.env.BOB_AUTOPILOT_AUTOMERGE = 'true';
+  let outcomes;
+  try {
+    outcomes = await autopilotTick({ supabase, jobs: [job], actions });
+  } finally {
+    if (previous === undefined) delete process.env.BOB_AUTOPILOT_AUTOMERGE;
+    else process.env.BOB_AUTOPILOT_AUTOMERGE = previous;
+  }
+  assert.deepEqual(outcomes, [{ job: 'job-4', outcome: 'merged', url: job.workspace_pull_request_url }]);
+  const publish = actions.calls.find(([name]) => name === 'publish');
+  assert.equal(publish[2], 'validated');
+  assert.equal(publish[3].ok, true);
+  const recorded = actions.calls.find(([name]) => name === 'record');
+  assert.equal(recorded[3].merged, true);
+  assert.equal(recorded[3].merge_sha, 'e'.repeat(40));
+});
+
 test('autopilot marks a merged job deployed only after production and live verification', async () => {
   const { job, supabase } = releaseReadyFixture();
   Object.assign(job, {

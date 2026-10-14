@@ -189,10 +189,9 @@ test('Bob merges only the exact open, non-draft GitHub PR targeting main', async
   assert.deepEqual(JSON.parse(requests[1].init.body), { sha, merge_method: 'squash' });
 });
 
-test('Bob refuses a draft, changed-head, closed, or non-main GitHub pull request', async () => {
+test('Bob refuses a changed-head, closed, or non-main GitHub pull request', async () => {
   const sha = 'a'.repeat(40);
   for (const pullRequest of [
-    { state: 'open', draft: true, head: { sha }, base: { ref: 'main' } },
     { state: 'open', draft: false, head: { sha: 'b'.repeat(40) }, base: { ref: 'main' } },
     { state: 'closed', draft: false, head: { sha }, base: { ref: 'main' } },
     { state: 'open', draft: false, head: { sha }, base: { ref: 'release' } },

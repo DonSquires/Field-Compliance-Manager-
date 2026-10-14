@@ -595,7 +595,13 @@ async function autopilotTick({ supabase, jobs, actions, log = () => {} }) {
           if (job.autopilot_state !== 'published') {
             const snapshot = await loadBuilderRuntimeSnapshot(supabase, job.id);
             const evidence = await collectEvidence({ supabase, snapshot });
-            await actions.record(job.id, 'published', composeReport({ job, evidence, pullRequestUrl: job.workspace_pull_request_url, state: 'published' }));
+            if (!evidence.validatedPatchId) throw new Error('no verified patch artifact to reconcile');
+            const automerge = automergeEligible({ job, evidence });
+            const published = await actions.publish({ job, evidence, validatedPatchId: evidence.validatedPatchId, automerge, bodyFor: (branchName, headSha) => composePullRequestBody({ job, evidence, branchName, headSha, automerge }) });
+            const state = published.merged === true ? 'merged' : 'published';
+            await actions.record(job.id, 'published', { ...composeReport({ job, evidence, pullRequestUrl: published.pullRequestUrl, state, automerge }), automerge: automerge.ok, merged: published.merged === true, merge_sha: published.mergeSha ?? null });
+            outcomes.push({ job: job.id, outcome: state, url: published.pullRequestUrl });
+            continue;
           }
           outcomes.push({ job: job.id, outcome: 'published' });
           continue;
