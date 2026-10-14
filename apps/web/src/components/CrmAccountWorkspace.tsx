@@ -42,7 +42,7 @@ function hasCurrentReportPdf(pack: ReportPackRow): boolean {
   return Boolean(pack.pdf_path && pack.pdf_source_updated_at === pack.updated_at
     && (pack.status === 'sent' || pack.pdf_renderer_version === CURRENT_REPORT_PDF_RENDERER));
 }
-interface QuoteRow { id: string; title: string; status: string; total_charge: number; created_at: string; service_agreement_id: string | null; }
+interface QuoteRow { id: string; title: string; status: string; total_charge: number; created_at: string; service_agreement_id: string | null; provider_org_id: string; tender_id: string | null; discount_schedule_id: string | null; }
 export type WorkspaceQuote = QuoteRow;
 interface InvoiceRow { id: string; invoice_number: string; status: string; total_amount: number; due_date: string; }
 interface RateRuleRow { id: string; name: string; rate_type: string; amount: number; service_type: string | null; active: boolean; }
@@ -164,7 +164,7 @@ export function CrmAccountWorkspace({ account, onClose, onNavigate, onOpenAccoun
       supabase.from('organization_modules').select('id,module_key,enabled').eq('organization_id', account.id).order('module_key'),
       supabase.from('org_geofence_config').select('config_key,config_value,zone_type').eq('organization_id', account.id).order('config_key'),
       supabase.from('monthly_report_packs').select('id,template_code,period_start,period_end,status,updated_at,pdf_path,pdf_renderer_version,pdf_source_updated_at').eq('organization_id', account.id).order('period_start', { ascending: false }).limit(24),
-      supabase.from('quotes').select('id,title,status,total_charge,created_at,service_agreement_id').eq('client_org_id', account.id).order('created_at', { ascending: false }).limit(24),
+      supabase.from('quotes').select('id,title,status,total_charge,created_at,service_agreement_id,provider_org_id,tender_id,discount_schedule_id').eq('client_org_id', account.id).order('created_at', { ascending: false }).limit(24),
       supabase.from('invoices').select('id,invoice_number,status,total_amount,due_date').eq('client_organization_id', account.id).order('due_date', { ascending: false }).limit(24),
       supabase.from('rate_rules').select('id,name,rate_type,amount,service_type,active').eq('client_org_id', account.id).eq('rule_kind', 'billing').order('name'),
       supabase.from('tenders').select('id,title,status,estimated_value,due_date').or(`organization_id.eq.${account.id},client_organization_id.eq.${account.id}`).order('due_date', { ascending: false }).limit(24),

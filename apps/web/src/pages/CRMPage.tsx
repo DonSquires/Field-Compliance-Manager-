@@ -88,8 +88,25 @@ interface PricingQuote {
   title: string;
   status: string;
   client: AccountRow;
+  providerOrgId: string;
+  tenderId: string | null;
+  discountScheduleId: string | null;
   /** Set when the quote varies an existing agreement rather than creating one. */
   variedAgreementName?: string | null;
+}
+
+interface CommercialTender {
+  id: string;
+  title: string;
+  status: string;
+  due_date: string | null;
+}
+
+interface CommercialDiscountSchedule {
+  id: string;
+  name: string;
+  effective_from: string;
+  effective_to: string | null;
 }
 
 interface QuoteLine {
@@ -264,6 +281,10 @@ const CRMPage: React.FC<{ onNavigate?: NavigateWithContext }> = ({ onNavigate = 
   const [selectedAgreementId, setSelectedAgreementId] = useState('');
   const [quoteLines, setQuoteLines] = useState<QuoteLine[]>([]);
   const [editingQuoteLine, setEditingQuoteLine] = useState<QuoteLine | null>(null);
+  const [commercialTenders, setCommercialTenders] = useState<CommercialTender[]>([]);
+  const [commercialDiscountSchedules, setCommercialDiscountSchedules] = useState<CommercialDiscountSchedule[]>([]);
+  const [commercialSourcesLoading, setCommercialSourcesLoading] = useState(false);
+  const [commercialSourceForm, setCommercialSourceForm] = useState({ tenderId: '', discountScheduleId: '' });
   const [editLineForm, setEditLineForm] = useState({
     description: '',
     quantity: '',
@@ -276,6 +297,7 @@ const CRMPage: React.FC<{ onNavigate?: NavigateWithContext }> = ({ onNavigate = 
   const quoteRequestId = useRef(crypto.randomUUID());
   const lineRequestId = useRef(crypto.randomUUID());
   const updateLineRequestId = useRef(crypto.randomUUID());
+  const commercialSourceRequestId = useRef(crypto.randomUUID());
 
   useEffect(() => {
     if (!requestedAccountId) {
@@ -539,17 +561,55 @@ const CRMPage: React.FC<{ onNavigate?: NavigateWithContext }> = ({ onNavigate = 
     setProposalScheduleForm((current) => ({ ...current, scopeId: scopeIds.includes(current.scopeId) ? current.scopeId : (scopeIds[0] ?? '') }));
   }, []);
 
+  const loadCommercialSources = useCallback(async (quote: PricingQuote) => {
+    setCommercialSourcesLoading(true);
+    const today = new Date().toISOString().slice(0, 10);
+    const [tenderResponse, scheduleResponse] = await Promise.all([
+      supabase
+        .from('tenders')
+        .select('id,title,status,due_date')
+        .eq('organization_id', quote.providerOrgId)
+        .eq('client_organization_id', quote.client.id)
+        .in('status', ['in_review', 'submitted', 'awarded'])
+        .order('due_date', { ascending: false }),
+      supabase
+        .from('commercial_discount_schedules')
+        .select('id,name,effective_from,effective_to')
+        .eq('provider_organization_id', quote.providerOrgId)
+        .eq('status', 'active')
+        .lte('effective_from', today)
+        .or(`effective_to.is.null,effective_to.gte.${today}`)
+        .order('name'),
+    ]);
+    const loadError = tenderResponse.error ?? scheduleResponse.error;
+    if (loadError) {
+      setState((current) => ({ ...current, error: `Commercial basis could not be loaded: ${loadError.message}` }));
+    } else {
+      setCommercialTenders((tenderResponse.data as CommercialTender[]) ?? []);
+      setCommercialDiscountSchedules((scheduleResponse.data as CommercialDiscountSchedule[]) ?? []);
+      setCommercialSourceForm({
+        tenderId: quote.tenderId ?? '',
+        discountScheduleId: quote.discountScheduleId ?? '',
+      });
+    }
+    setCommercialSourcesLoading(false);
+  }, []);
+
   useEffect(() => {
     if (pricingQuote) {
       void loadQuoteLines(pricingQuote.id);
       void loadProposalServiceScopes(pricingQuote);
+      void loadCommercialSources(pricingQuote);
     } else {
       setQuoteLines([]);
       setEditingQuoteLine(null);
+      setCommercialTenders([]);
+      setCommercialDiscountSchedules([]);
+      setCommercialSourceForm({ tenderId: '', discountScheduleId: '' });
       setProposalServiceScopes([]);
       setProposalScopePlaces([]);
     }
-  }, [pricingQuote, loadProposalServiceScopes, loadQuoteLines]);
+  }, [pricingQuote, loadCommercialSources, loadProposalServiceScopes, loadQuoteLines]);
 
   const addProposalServiceScope = async () => {
     if (!pricingQuote || !proposalScopeForm.moduleKey || !proposalScopeForm.placeId) return;
@@ -683,6 +743,36 @@ const CRMPage: React.FC<{ onNavigate?: NavigateWithContext }> = ({ onNavigate = 
     setQuoteSaving(false);
   };
 
+  const saveCommercialBasis = async () => {
+    if (!pricingQuote) return;
+    setQuoteSaving(true);
+    setState((current) => ({ ...current, error: null }));
+    const { data, error } = await supabase.rpc('manage_crm_quote_commercial_source', {
+      p_client_request_id: commercialSourceRequestId.current,
+      p_quote_id: pricingQuote.id,
+      p_expected_status: pricingQuote.status,
+      p_tender_id: commercialSourceForm.tenderId || null,
+      p_discount_schedule_id: commercialSourceForm.discountScheduleId || null,
+    });
+    if (error || !data) {
+      setState((current) => ({
+        ...current,
+        error: error?.message ?? 'Commercial basis receipt was not confirmed.',
+      }));
+    } else {
+      const quote = data as { tender_id: string | null; discount_schedule_id: string | null };
+      setPricingQuote((current) => current ? {
+        ...current,
+        tenderId: quote.tender_id,
+        discountScheduleId: quote.discount_schedule_id,
+      } : current);
+      setNotice(`Commercial basis saved for ${pricingQuote.title}. Quote line charges were not changed.`);
+      commercialSourceRequestId.current = crypto.randomUUID();
+      await loadCrm();
+    }
+    setQuoteSaving(false);
+  };
+
   const generateInvoiceFromAgreement = async (e: React.FormEvent) => {
     e.preventDefault();
     if (!selectedAgreementId || invoiceReadiness?.source === 'missing') return;
@@ -787,7 +877,7 @@ const CRMPage: React.FC<{ onNavigate?: NavigateWithContext }> = ({ onNavigate = 
         error: error?.message ?? 'Draft quote receipt was not confirmed.',
       }));
     else {
-      const quote = data as { id: string; title: string; status: string };
+      const quote = data as { id: string; title: string; status: string; provider_org_id: string; tender_id: string | null; discount_schedule_id: string | null };
       setNotice(
         variedAgreement
           ? `Draft variation created for ${variedAgreement.name}. Add the new places, services, and prices, then send it for acceptance.`
@@ -842,7 +932,16 @@ const CRMPage: React.FC<{ onNavigate?: NavigateWithContext }> = ({ onNavigate = 
         }
       }
       setQuotedModuleKeys(proposalModules.map((module) => module.moduleKey));
-      setPricingQuote({ ...quote, client: quoteClient, variedAgreementName: variedAgreement?.name ?? null });
+      setPricingQuote({
+        id: quote.id,
+        title: quote.title,
+        status: quote.status,
+        client: quoteClient,
+        providerOrgId: quote.provider_org_id,
+        tenderId: quote.tender_id,
+        discountScheduleId: quote.discount_schedule_id,
+        variedAgreementName: variedAgreement?.name ?? null,
+      });
       setLineForm({
         kind: 'labour',
         description: 'Service labour',
@@ -909,7 +1008,17 @@ const CRMPage: React.FC<{ onNavigate?: NavigateWithContext }> = ({ onNavigate = 
       variedAgreementName = (data as { name: string } | null)?.name ?? null;
     }
     setQuoteAction(null);
-    setPricingQuote({ id: quote.id, title: quote.title, status: quote.status, client: sourceAccount, variedAgreementName });
+    setQuoteOperatingProviderId(quote.provider_org_id);
+    setPricingQuote({
+      id: quote.id,
+      title: quote.title,
+      status: quote.status,
+      client: sourceAccount,
+      providerOrgId: quote.provider_org_id,
+      tenderId: quote.tender_id,
+      discountScheduleId: quote.discount_schedule_id,
+      variedAgreementName,
+    });
   };
 
   const manageQuote = async (event: React.FormEvent) => {
@@ -1003,6 +1112,10 @@ const CRMPage: React.FC<{ onNavigate?: NavigateWithContext }> = ({ onNavigate = 
     Number.isFinite(editUnitCharge) &&
     editUnitCharge >= 0 &&
     editUnitCharge <= 1000000;
+  const commercialBasisDirty = pricingQuote ? (
+    commercialSourceForm.tenderId !== (pricingQuote.tenderId ?? '') ||
+    commercialSourceForm.discountScheduleId !== (pricingQuote.discountScheduleId ?? '')
+  ) : false;
 
   const pricingDialog = pricingQuote ? (
     <div className="crm-quote-backdrop">
@@ -1040,6 +1153,66 @@ const CRMPage: React.FC<{ onNavigate?: NavigateWithContext }> = ({ onNavigate = 
               <strong>${pricingReceipt.totalCharge.toFixed(2)}</strong>
             </span>
           </div>
+        )}
+        {pricingQuote.status === 'draft' && (
+          <section className="crm-quote-package crm-commercial-basis" aria-labelledby="commercial-basis-title">
+            <div>
+              <span>Commercial provenance</span>
+              <h3 id="commercial-basis-title">Commercial basis</h3>
+            </div>
+            <p>
+              Link the approved tender or discount plan consulted when pricing this draft.
+              This records the source and does not change quote line charges or totals.
+            </p>
+            {commercialSourcesLoading ? (
+              <p role="status">Loading eligible commercial sources…</p>
+            ) : (
+              <div className="crm-commercial-basis-controls">
+                <label>
+                  <span>Tender source</span>
+                  <select
+                    aria-label="Tender source"
+                    value={commercialSourceForm.tenderId}
+                    onChange={(event) => setCommercialSourceForm({ ...commercialSourceForm, tenderId: event.target.value })}
+                  >
+                    <option value="">No tender linked</option>
+                    {commercialTenders.map((tender) => (
+                      <option key={tender.id} value={tender.id}>
+                        {tender.title} · {tender.status.replaceAll('_', ' ')}
+                        {tender.due_date ? ` · due ${new Date(tender.due_date).toLocaleDateString()}` : ''}
+                      </option>
+                    ))}
+                  </select>
+                  {commercialTenders.length === 0 && <small>No eligible in-review, submitted, or awarded tender is available for this client.</small>}
+                </label>
+                <label>
+                  <span>Approved discount plan</span>
+                  <select
+                    aria-label="Approved discount plan"
+                    value={commercialSourceForm.discountScheduleId}
+                    onChange={(event) => setCommercialSourceForm({ ...commercialSourceForm, discountScheduleId: event.target.value })}
+                  >
+                    <option value="">No discount plan linked</option>
+                    {commercialDiscountSchedules.map((schedule) => (
+                      <option key={schedule.id} value={schedule.id}>
+                        {schedule.name} · effective {new Date(schedule.effective_from).toLocaleDateString()}
+                        {schedule.effective_to ? ` to ${new Date(schedule.effective_to).toLocaleDateString()}` : ''}
+                      </option>
+                    ))}
+                  </select>
+                  {commercialDiscountSchedules.length === 0 && <small>No active provider discount plan is effective today.</small>}
+                </label>
+                <button
+                  type="button"
+                  className="btn btn-secondary"
+                  disabled={quoteSaving || !commercialBasisDirty}
+                  onClick={() => void saveCommercialBasis()}
+                >
+                  {quoteSaving ? 'Saving…' : 'Save commercial basis'}
+                </button>
+              </div>
+            )}
+          </section>
         )}
         {pricingQuote.status === 'draft' && <section className="crm-quote-package crm-proposed-places" aria-labelledby="proposal-places-title"><div><span>Pre-acceptance place capture</span><h3 id="proposal-places-title">Proposed Sites and Zones</h3></div><p>Capture the place this proposal covers. It remains draft-only until acceptance creates the governed operational Site or Zone, where boundary verification is still required.</p>{proposalPlaces.length > 0 && <div className="crm-account-register is-compact" role="table" aria-label="Draft proposed places"><div className="crm-account-register-row is-header" role="row"><span>Place</span><span>Address</span><span>Kind</span></div>{proposalPlaces.map((place) => <div key={place.id} className="crm-account-register-row is-static" role="row"><strong>{place.name}<small>{formatModuleLabel(place.module_key)} | {place.geometry_source.replaceAll('_', ' ')}</small></strong><span>{place.address}</span><span>{place.place_kind}</span></div>)}</div>}{quotedModuleKeys.length === 0 ? <p>Select a quoted module before capturing a proposed place.</p> : <div className="crm-proposed-place-form"><label><span>Place kind</span><select value={proposalPlaceForm.kind} onChange={(event) => setProposalPlaceForm({ ...proposalPlaceForm, kind: event.target.value as 'site' | 'zone' })}><option value="site">Site</option><option value="zone">Zone</option></select></label><label><span>Quoted module</span><select value={proposalPlaceForm.moduleKey} onChange={(event) => setProposalPlaceForm({ ...proposalPlaceForm, moduleKey: event.target.value })}>{quotedModuleKeys.map((moduleKey) => <option key={moduleKey} value={moduleKey}>{formatModuleLabel(moduleKey)}</option>)}</select></label><label><span>{proposalPlaceForm.kind === 'site' ? 'Site type' : 'Zone type'}</span><select value={proposalPlaceForm.kind === 'site' ? proposalPlaceForm.siteType : proposalPlaceForm.zoneType} onChange={(event) => proposalPlaceForm.kind === 'site' ? setProposalPlaceForm({ ...proposalPlaceForm, siteType: event.target.value }) : setProposalPlaceForm({ ...proposalPlaceForm, zoneType: event.target.value })}>{proposalPlaceForm.kind === 'site' ? <><option value="commercial_premises">Commercial premises</option><option value="government_facility">Government facility</option><option value="public_space">Public space</option><option value="other">Other</option></> : <><option value="general">General operational area</option><option value="patrol_route">Patrol route</option><option value="noise_control">Noise control</option><option value="parking">Parking</option><option value="freedom_camping">Freedom camping</option></>}</select></label><label><span>Place name</span><input value={proposalPlaceForm.name} onChange={(event) => setProposalPlaceForm({ ...proposalPlaceForm, name: event.target.value })} placeholder="Named site or operational area" /></label><label className="crm-proposed-place-address"><span>Address or place description</span><input value={proposalPlaceForm.address} onChange={(event) => setProposalPlaceForm({ ...proposalPlaceForm, address: event.target.value })} placeholder="Street address or identifiable place description" /></label><label><span>Source</span><select value={proposalPlaceForm.geometrySource} onChange={(event) => setProposalPlaceForm({ ...proposalPlaceForm, geometrySource: event.target.value })}><option value="manual">Manual entry</option><option value="document">Source document</option><option value="map_pin">Map pin</option><option value="linz_address">LINZ address</option><option value="linz_parcel">LINZ parcel</option></select></label><button type="button" className="btn btn-secondary" disabled={quoteSaving || !proposalPlaceForm.name.trim() || !proposalPlaceForm.address.trim()} onClick={() => void addProposalPlace()}>Capture proposed place</button></div>}</section>}
         {pricingQuote.status === 'draft' && <section className="crm-quote-package" aria-labelledby="proposal-scope-title">

@@ -40145,7 +40145,9 @@ export type Database = {
       }
       manage_crm_quote_commercial_source: {
         Args: {
+          p_client_request_id: string
           p_discount_schedule_id?: string
+          p_expected_status: string
           p_quote_id: string
           p_tender_id?: string
         }

@@ -74,6 +74,12 @@ test('a draft quote line can be corrected without removing its identity', async 
   await createDialog.getByRole('button', { name: 'Create draft quote' }).click();
 
   const pricing = page.getByRole('dialog', { name: /Price Civic Events Limited - .* proposal/ });
+  await expect(pricing.getByText('This records the source and does not change quote line charges or totals.')).toBeVisible();
+  await pricing.getByLabel('Tender source').selectOption('47474747-4747-4747-8747-474747474747');
+  await pricing.getByLabel('Approved discount plan').selectOption('49494949-4949-4949-8949-494949494949');
+  await pricing.getByRole('button', { name: 'Save commercial basis' }).click();
+  await expect(page.getByText(/Commercial basis saved.*Quote line charges were not changed/)).toBeVisible();
+  await expect(pricing.getByRole('button', { name: 'Save commercial basis' })).toBeDisabled();
   await pricing.getByLabel('Quantity').fill('8');
   await pricing.getByLabel('Provider unit cost').fill('35');
   await pricing.getByLabel('Client unit charge').fill('52.5');

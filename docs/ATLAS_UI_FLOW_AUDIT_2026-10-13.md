@@ -849,3 +849,43 @@ remains unpopulated.
   reports 719 indexes. Atlas dry-run moves 151 -> 150 bounded gaps:
   1 edge function, 94 RPCs and 55 tables. Exercise remains unclaimed because
   the successful database invocation was rolled back.
+
+### Closure log — CRM quote commercial provenance
+
+- Atlas showed `manage_crm_quote_commercial_source` present but unwired. The
+  function could associate a draft quote with an eligible tender and active
+  provider discount schedule, but no human task surface called it. The schema
+  trace also found an important boundary: the association is provenance only.
+  Quote totals are recalculated from quote lines and `quotes.discount_pct`; the
+  selected schedule's scoped percentage or fixed-amount rules are not executed
+  by this function.
+- Before this change, the function had no request receipt or expected-state
+  guard and its audit event retained only the resulting IDs. A retry could
+  emit duplicate evidence, and an administrator could not see or maintain the
+  provenance from the quote task.
+- The authority now locks the quote, checks the caller's provider
+  administration and expected draft status, validates that the tender belongs
+  to the quote provider and client, and validates that the schedule is active
+  and effective. A partial unique audit-receipt index makes changed-state
+  retries safe. Audit metadata retains previous and resulting tender and
+  schedule IDs. Execute remains revoked from `PUBLIC` and `anon`.
+- During draft pricing, a compact Commercial basis section loads only eligible
+  tender sources and currently effective provider plans. It uses labelled
+  controls, stacks on mobile, disables unchanged saves, and says explicitly
+  that linking provenance does not change quote-line charges or totals. This
+  adapts the useful Trackforce pattern of keeping source instructions and the
+  next accountable action inside the active task, without copying icon-heavy
+  navigation or creating a parallel commercial workspace. The Finance Bureau
+  wording now describes schedules as approved reference terms and no longer
+  claims that their rules are automatically reflected in customer totals.
+- After persistence, the server-confirmed source IDs remain on the same quote,
+  the task reports that prices were unchanged, and reopening the quote reloads
+  the provider and source context. Discount-rule execution remains a separate
+  model gap; the UI does not imply that configured percentage, fixed-amount,
+  module, Site or Zone rules have been applied.
+- Twenty-seven focused guards, the production web build, and desktop/mobile
+  Playwright workflow checks passed. The linked migration was applied and the
+  live schema snapshot remains at 811 functions, with 720 indexes. A
+  rollback-only database check proved first-use, replay and expected-state
+  conflict behavior without retaining the temporary tender, schedule, quote
+  association or audit event. Runtime exercise remains unclaimed.

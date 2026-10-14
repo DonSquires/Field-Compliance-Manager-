@@ -5,6 +5,7 @@ import { describe, expect, it } from 'vitest';
 const page = readFileSync(resolve(process.cwd(), 'src/pages/CRMPage.tsx'), 'utf8');
 const workspace = readFileSync(resolve(process.cwd(), 'src/components/CrmAccountWorkspace.tsx'), 'utf8');
 const organizationDialog = readFileSync(resolve(process.cwd(), 'src/components/CrmOrganizationDialog.tsx'), 'utf8');
+const financeBureau = readFileSync(resolve(process.cwd(), 'src/pages/FinanceBureauPage.tsx'), 'utf8');
 
 describe('governed CRM accounts', () => {
   it('loads account context in batches including real primary contacts', () => {
@@ -38,6 +39,17 @@ describe('governed CRM accounts', () => {
     expect(page).toContain('Save line');
     expect(page).toContain('cancelQuoteLineEdit');
     expect(page).not.toMatch(/\.from\(["']quote_lines["']\)\.update/);
+  });
+
+  it('links eligible commercial provenance without claiming to change quote prices', () => {
+    expect(page).toMatch(/supabase\.rpc\(["']manage_crm_quote_commercial_source["']/);
+    expect(page).toContain('commercialSourceRequestId.current');
+    expect(page).toContain('Commercial basis');
+    expect(page).toContain('does not change quote line charges or totals');
+    expect(page).toContain('Quote line charges were not changed');
+    expect(financeBureau).toContain('rules are not automatically applied to quote totals');
+    expect(financeBureau).not.toContain('discount plans customers actually see');
+    expect(page).not.toMatch(/\.from\(["']quotes["']\)\.update/);
   });
 
   it('sends and accepts or declines only through the governed lifecycle RPC', () => {
