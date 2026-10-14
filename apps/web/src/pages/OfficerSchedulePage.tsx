@@ -27,7 +27,10 @@ interface ActiveBreak { id: string; shift_id: string; break_type: 'rest' | 'meal
 interface SwapOfficer { id: string; label: string; }
 interface PendingSwap { id: string; original_shift_id: string; status: string; }
 interface OnCallPeriod { id: string; period_type: string; starts_at: string; ends_at: string; flat_rate: number | null; status: string; notes: string | null; }
-interface OvertimeOffer { id: string; roster_slot_id: string; seniority_position: number; status: string; expires_at: string; }
+interface AssetSummary { id: string; name: string; asset_type: string; registration: string | null; serial_number: string | null; }
+interface ShiftAssetLink { id: string; asset_id: string; assigned_at: string; asset: AssetSummary | null; }
+type AssetCondition = 'good' | 'minor_issue' | 'major_issue' | 'unserviceable';
+type AssetFuelLevel = '' | 'full' | 'three_quarter' | 'half' | 'quarter' | 'empty';interface OvertimeOffer { id: string; roster_slot_id: string; seniority_position: number; status: string; expires_at: string; }
 
 interface RosterSlot { id: string; work_unit_id: string; scheduled_start: string; scheduled_end: string; status: string; linked_shift_id: string | null; notes: string | null; }
 interface WorkUnit { id: string; name: string; work_unit_type: 'patrol' | 'static' | 'internal'; service_type: string; }
@@ -112,6 +115,16 @@ const OfficerSchedulePage: React.FC = () => {
   const [overtimeOffers, setOvertimeOffers] = useState<OvertimeOffer[]>([]);
   const [workResponse, setWorkResponse] = useState<{ kind: 'on_call' | 'overtime'; id: string; expectedStatus: string; response: 'accepted' | 'declined'; title: string } | null>(null);
   const [workDeclineReason, setWorkDeclineReason] = useState('');
+  const [activeShiftId, setActiveShiftId] = useState<string | null>(null);
+  const [shiftAssets, setShiftAssets] = useState<ShiftAssetLink[]>([]);
+  const [availableAssets, setAvailableAssets] = useState<AssetSummary[]>([]);
+  const [assetToAssign, setAssetToAssign] = useState('');
+  const [assetSaving, setAssetSaving] = useState(false);
+  const [returningAsset, setReturningAsset] = useState<ShiftAssetLink | null>(null);
+  const [returnCondition, setReturnCondition] = useState<AssetCondition>('good');
+  const [returnOdometer, setReturnOdometer] = useState('');
+  const [returnFuel, setReturnFuel] = useState<AssetFuelLevel>('');
+  const [returnDefects, setReturnDefects] = useState('');
 
   const loadSchedule = useCallback(async () => {
     if (!profile?.id || !profile.organizationId) {
@@ -121,6 +134,9 @@ const OfficerSchedulePage: React.FC = () => {
       setCoverage([]);
       setOnCallPeriods([]);
       setOvertimeOffers([]);
+      setActiveShiftId(null);
+      setShiftAssets([]);
+      setAvailableAssets([]);
       setError('Organisation access could not be confirmed. Schedule data is unavailable.');
       setLoading(false);
       return;
@@ -144,15 +160,25 @@ const OfficerSchedulePage: React.FC = () => {
     setAssigned((shiftResponse.data as AssignedShift[]) ?? []);
     setOnCallPeriods((onCallResponse.data as OnCallPeriod[]) ?? []);
     const activeShift = ((shiftResponse.data as AssignedShift[]) ?? []).find((shift) => shift.status === 'in_progress');
+    let assetError: { message: string } | null = null;
     if (activeShift) {
-      const [entitlementResponse, breakResponse] = await Promise.all([
+      const [entitlementResponse, breakResponse, assetResponse, availableResponse] = await Promise.all([
         supabase.rpc('get_shift_break_entitlement', { p_shift_id: activeShift.id }),
         supabase.from('shift_breaks').select('id, shift_id, break_type, started_at').eq('shift_id', activeShift.id).is('ended_at', null).maybeSingle(),
+        supabase.from('shift_assets').select('id, asset_id, assigned_at, asset:asset_id(id, name, asset_type, registration, serial_number)').eq('shift_id', activeShift.id).is('returned_at', null).order('assigned_at'),
+        supabase.from('assets').select('id, name, asset_type, registration, serial_number').eq('organization_id', profile.organizationId).eq('status', 'available').order('asset_type').order('name').limit(100),
       ]);
       const entitlement = (Array.isArray(entitlementResponse.data) ? entitlementResponse.data[0] : entitlementResponse.data) as BreakEntitlement | null;
       if (entitlement) setBreakEntitlement({ [activeShift.id]: entitlement });
       setActiveBreak((breakResponse.data as ActiveBreak | null) ?? null);
-    } else { setActiveBreak(null); setBreakEntitlement({}); }
+      setActiveShiftId(activeShift.id);
+      setShiftAssets(((assetResponse.data as Array<Omit<ShiftAssetLink, 'asset'> & { asset: AssetSummary | AssetSummary[] | null }>) ?? []).map((link) => ({
+        ...link,
+        asset: Array.isArray(link.asset) ? link.asset[0] ?? null : link.asset,
+      })));
+      setAvailableAssets((availableResponse.data as AssetSummary[]) ?? []);
+      assetError = assetResponse.error ?? availableResponse.error;
+    } else { setActiveBreak(null); setBreakEntitlement({}); setActiveShiftId(null); setShiftAssets([]); setAvailableAssets([]); }
     const staffId = (staffResponse.data as { id: string } | null)?.id;
     let slotError: { message: string } | null = null;
     if (staffId) {
@@ -180,6 +206,7 @@ const OfficerSchedulePage: React.FC = () => {
       ['open coverage', coverageResponse.error],
       ['your roster profile', staffResponse.error],
       ['on-call assignments', onCallResponse.error],
+      ['shift equipment', assetError],
       ['roster slots', slotError],
     ]);
     if (failure) setError(failure);
@@ -263,8 +290,41 @@ const OfficerSchedulePage: React.FC = () => {
     setBreakSaving(false);
   };
 
-  const respondToAdditionalWork = async (event: React.FormEvent) => {
+  const assignAsset = async () => {
+    if (!activeShiftId || !assetToAssign) return;
+    setAssetSaving(true); setError(null); setNotice(null);
+    const { error: assignError } = await supabase.rpc('assign_shift_asset', { p_client_request_id: crypto.randomUUID(), p_shift_id: activeShiftId, p_asset_id: assetToAssign });
+    if (assignError) setError(describeLoadFailures([['equipment sign-out', assignError]]) ?? 'Equipment could not be signed out.');
+    else { setNotice('Equipment signed out to your shift.'); setAssetToAssign(''); await loadSchedule(); }
+    setAssetSaving(false);
+  };
+
+  const confirmReturnAsset = async (event: React.FormEvent) => {
     event.preventDefault();
+    if (!returningAsset) return;
+    const odometer = returnOdometer.trim() ? Number(returnOdometer.trim()) : null;
+    if (odometer !== null && (!Number.isFinite(odometer) || odometer < 0)) { setError('Odometer reading must be a whole number of kilometres.'); return; }
+    if (returnCondition !== 'good' && !returnDefects.trim()) { setError('Describe the fault so the workshop knows what to look at.'); return; }
+    setAssetSaving(true); setError(null); setNotice(null);
+    const { error: returnError } = await supabase.rpc('return_shift_asset', {
+      p_link_id: returningAsset.id,
+      p_condition: returnCondition,
+      p_odometer_reading: odometer === null ? null : Math.round(odometer),
+      p_fuel_level: returnFuel || null,
+      p_defects_noted: returnDefects.trim() || null,
+    });
+    if (returnError) setError(describeLoadFailures([['equipment return', returnError]]) ?? 'Equipment return could not be confirmed.');
+    else {
+      setNotice(returnCondition === 'major_issue' || returnCondition === 'unserviceable'
+        ? `${returningAsset.asset?.name ?? 'Equipment'} returned and sent to maintenance.`
+        : `${returningAsset.asset?.name ?? 'Equipment'} returned and back in the available pool.`);
+      setReturningAsset(null); setReturnCondition('good'); setReturnOdometer(''); setReturnFuel(''); setReturnDefects('');
+      await loadSchedule();
+    }
+    setAssetSaving(false);
+  };
+
+  const respondToAdditionalWork = async (event: React.FormEvent) => {    event.preventDefault();
     if (!workResponse) return;
     setClaiming(true);
     setError(null);
@@ -329,6 +389,7 @@ const OfficerSchedulePage: React.FC = () => {
       {responseReceipt && <section className="officer-schedule-receipt" aria-label="Roster response recorded"><div><span>Roster response recorded</span><strong>{responseReceipt.slotStatus.replaceAll('_',' ')}</strong><small>Roster slot {responseReceipt.slotId.slice(0,8)}{responseReceipt.shiftId ? ` · field shift ${responseReceipt.shiftId.slice(0,8)} ${responseReceipt.shiftStatus?.replaceAll('_',' ') ?? ''}` : ' · internal work, no field shift'}</small></div><button type="button" onClick={() => setResponseReceipt(null)} title="Dismiss receipt"><X size={16}/></button></section>}
 
       {(onCallPeriods.length > 0 || overtimeOffers.length > 0) && <section className="officer-additional-work" aria-labelledby="additional-work-title"><div><span>Response required</span><h2 id="additional-work-title">On-call and overtime offers</h2><p>Accept only work you can cover. Declines require a reason so the roster team can safely offer it elsewhere.</p></div>{onCallPeriods.map((period) => <article key={period.id}><div><strong>{period.period_type.replaceAll('_', ' ')} on-call</strong><small>{formatDate(period.starts_at)}, {formatTime(period.starts_at)} - {formatDate(period.ends_at)}, {formatTime(period.ends_at)}{period.flat_rate != null ? ` · $${Number(period.flat_rate).toFixed(2)} flat rate` : ''}{period.notes ? ` · ${period.notes}` : ''}</small></div><div><button type="button" onClick={() => setWorkResponse({ kind: 'on_call', id: period.id, expectedStatus: period.status, response: 'declined', title: 'On-call period' })}>Decline</button><button type="button" onClick={() => setWorkResponse({ kind: 'on_call', id: period.id, expectedStatus: period.status, response: 'accepted', title: 'On-call period' })}>Accept</button></div></article>)}{overtimeOffers.map((offer) => { const slot = slots.find((item) => item.id === offer.roster_slot_id); const unit = workUnits.find((item) => item.id === slot?.work_unit_id); return <article key={offer.id}><div><strong>Overtime offer{unit ? ` · ${unit.name}` : ''}</strong><small>{slot ? `${formatDate(slot.scheduled_start)}, ${formatTime(slot.scheduled_start)} - ${formatTime(slot.scheduled_end)} · ` : ''}Seniority position {offer.seniority_position} · respond before {formatTime(offer.expires_at)}</small></div><div><button type="button" onClick={() => setWorkResponse({ kind: 'overtime', id: offer.id, expectedStatus: offer.status, response: 'declined', title: 'Overtime offer' })}>Decline</button><button type="button" onClick={() => setWorkResponse({ kind: 'overtime', id: offer.id, expectedStatus: offer.status, response: 'accepted', title: 'Overtime offer' })}>Accept</button></div></article>; })}</section>}
+      {activeShiftId && <section className="officer-shift-assets" aria-labelledby="shift-assets-title"><div><span>On this shift</span><h2 id="shift-assets-title">Vehicles and equipment</h2><p>Sign out what you are carrying, and hand it back with its condition so the next officer knows what they are getting.</p></div>{shiftAssets.length === 0 ? <p className="officer-shift-assets-empty">Nothing signed out to this shift yet.</p> : shiftAssets.map((link) => <article key={link.id}><div><strong>{link.asset?.name ?? 'Unnamed asset'}</strong><small>{[link.asset?.asset_type.replaceAll('_', ' '), link.asset?.registration, link.asset?.serial_number].filter(Boolean).join(' · ') || 'No identifiers recorded'} · signed out {formatTime(link.assigned_at)}</small></div><button type="button" onClick={() => { setReturningAsset(link); setReturnCondition('good'); setReturnOdometer(''); setReturnFuel(''); setReturnDefects(''); }}>Return</button></article>)}{availableAssets.length === 0 ? <p className="officer-shift-assets-empty">No equipment is currently available to sign out.</p> : <div className="officer-shift-assets-assign"><label htmlFor="officer-asset-select">Sign out equipment</label><select id="officer-asset-select" value={assetToAssign} onChange={(event) => setAssetToAssign(event.target.value)} disabled={assetSaving}><option value="">Choose a vehicle or item</option>{availableAssets.map((asset) => <option key={asset.id} value={asset.id}>{asset.name} · {asset.asset_type.replaceAll('_', ' ')}{asset.registration ? ` · ${asset.registration}` : ''}</option>)}</select><button type="button" onClick={() => void assignAsset()} disabled={assetSaving || !assetToAssign}>{assetSaving ? 'Working…' : 'Sign out'}</button></div>}</section>}
 
       <section className="officer-schedule-next"><div><span>{nextShiftHeading}</span><strong>{nextShift ? formatDate(nextShift.scheduled_start) : 'No confirmed shift'}</strong><small>{nextShift ? `${formatTime(nextShift.scheduled_start)} - ${formatTime(nextShift.scheduled_end)} · ${nextAssignmentLabel?.replaceAll('_', ' ')}` : 'Open shifts you can pick up are listed below.'}</small></div><CalendarDays size={24} /></section>
 
@@ -340,6 +401,8 @@ const OfficerSchedulePage: React.FC = () => {
           {workforceSlots.map((slot) => { const unit = workUnits.find((item) => item.id === slot.work_unit_id); return <article id={`officer-roster-slot-${slot.id}`} className={`officer-assigned-shift officer-internal-slot ${slot.id===requestedSlotId?'is-context-focus':''}`} key={slot.id}><div className="officer-schedule-date"><strong>{formatDate(slot.scheduled_start)}</strong><span>{formatTime(slot.scheduled_start)} - {formatTime(slot.scheduled_end)}</span></div><div><strong>{unit?.name ?? 'Internal assignment'}</strong><small>{unit?.service_type.replaceAll('_', ' ')}{slot.notes ? ` · ${slot.notes}` : ''}</small></div><span className={`status-${slot.status}`}>{slot.status}</span>{slot.status === 'published' && <ScheduleResponseActions onRespond={(response) => setResponding({ slot, response })} />}</article>; })}
         </div>
       ) : coverage.length === 0 ? <div className="officer-schedule-empty"><ShieldCheck size={23} />No open coverage right now</div> : <div className="officer-schedule-list">{coverage.map((request) => <article className={`officer-coverage urgency-${request.urgency}`} key={request.id}><div className="officer-schedule-date"><strong>{formatDate(`${request.shift_date}T00:00:00`)}</strong><span>{request.start_time.slice(0, 5)} - {request.end_time.slice(0, 5)}</span></div><div><strong>{request.site?.name ?? 'Location to be confirmed'}</strong><small><Users size={13} /> {request.required_staff_count} needed{request.notes ? ` · ${request.notes}` : ''}</small></div><span>{request.urgency}</span><button type="button" onClick={() => setSelectedCoverage(request)}>Review claim</button></article>)}</div>}
+
+      {returningAsset && <div className="officer-schedule-dialog-backdrop"><form className="officer-schedule-dialog" role="dialog" aria-modal="true" aria-labelledby="asset-return-title" onSubmit={confirmReturnAsset}><header><div><span>Equipment</span><h2 id="asset-return-title">Return {returningAsset.asset?.name ?? 'equipment'}</h2></div><button type="button" onClick={() => setReturningAsset(null)} title="Close"><X size={18}/></button></header><p>This records a post-shift check against the item. Anything worse than a minor issue sends it to maintenance instead of back into the available pool.</p><label><span>Condition</span><select value={returnCondition} onChange={(event) => setReturnCondition(event.target.value as AssetCondition)}><option value="good">Good — ready for the next shift</option><option value="minor_issue">Minor issue — still usable</option><option value="major_issue">Major issue — send to maintenance</option><option value="unserviceable">Unserviceable — do not issue</option></select></label><label><span>Odometer reading (km, optional)</span><input type="number" min="0" step="1" inputMode="numeric" value={returnOdometer} onChange={(event) => setReturnOdometer(event.target.value)} /></label><label><span>Fuel level (optional)</span><select value={returnFuel} onChange={(event) => setReturnFuel(event.target.value as AssetFuelLevel)}><option value="">Not applicable</option><option value="full">Full</option><option value="three_quarter">Three quarters</option><option value="half">Half</option><option value="quarter">Quarter</option><option value="empty">Empty</option></select></label><label><span>Defects or damage{returnCondition === 'good' ? ' (optional)' : ''}</span><textarea rows={3} required={returnCondition !== 'good'} value={returnDefects} onChange={(event) => setReturnDefects(event.target.value)} /></label><div className="officer-schedule-dialog-actions"><button type="button" onClick={() => setReturningAsset(null)}>Back</button><button type="submit" disabled={assetSaving}>{assetSaving ? 'Saving...' : 'Confirm return'}</button></div></form></div>}
 
       {workResponse && <div className="officer-schedule-dialog-backdrop"><form className="officer-schedule-dialog" role="dialog" aria-modal="true" aria-labelledby="additional-work-response-title" onSubmit={respondToAdditionalWork}><header><div><span>Additional work</span><h2 id="additional-work-response-title">{workResponse.response === 'accepted' ? `Accept ${workResponse.title.toLowerCase()}?` : `Decline ${workResponse.title.toLowerCase()}?`}</h2></div><button type="button" onClick={() => { setWorkResponse(null); setWorkDeclineReason(''); }} title="Close"><X size={18}/></button></header><p>{workResponse.response === 'accepted' ? 'This confirms the assignment to the roster team. Check the dates and availability before continuing.' : 'Tell the roster team why you cannot cover this work so they can make a safe replacement decision.'}</p>{workResponse.response === 'declined' && <label><span>Decline reason</span><textarea required rows={4} value={workDeclineReason} onChange={(event) => setWorkDeclineReason(event.target.value)} /></label>}<div className="officer-schedule-dialog-actions"><button type="button" onClick={() => { setWorkResponse(null); setWorkDeclineReason(''); }}>Back</button><button type="submit" disabled={claiming || (workResponse.response === 'declined' && !workDeclineReason.trim())}>{claiming ? 'Saving...' : workResponse.response === 'accepted' ? 'Confirm acceptance' : 'Confirm decline'}</button></div></form></div>}
       {selectedCoverage && <div className="officer-schedule-dialog-backdrop"><div className="officer-schedule-dialog" role="dialog" aria-modal="true" aria-labelledby="coverage-claim-title"><header><div><span>Coverage commitment</span><h2 id="coverage-claim-title">Claim this shift?</h2></div><button type="button" onClick={() => setSelectedCoverage(null)} title="Close"><X size={18} /></button></header><dl><div><dt>Date</dt><dd>{formatDate(`${selectedCoverage.shift_date}T00:00:00`)}</dd></div><div><dt>Time</dt><dd>{selectedCoverage.start_time.slice(0, 5)} - {selectedCoverage.end_time.slice(0, 5)}</dd></div><div><dt>Location</dt><dd><MapPin size={14} />{selectedCoverage.site?.name ?? 'To be confirmed'}</dd></div><div><dt>Urgency</dt><dd>{selectedCoverage.urgency}</dd></div></dl>{selectedCoverage.notes && <p>{selectedCoverage.notes}</p>}<div className="officer-schedule-dialog-actions"><button type="button" onClick={() => setSelectedCoverage(null)}>Cancel</button><button type="button" onClick={() => void confirmClaim()} disabled={claiming}>{claiming ? <><RefreshCw size={16} className="is-spinning" />Confirming</> : <><CheckCircle2 size={16} />Confirm claim</>}</button></div></div></div>}
