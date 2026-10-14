@@ -582,3 +582,10 @@ remains unpopulated.
   production web build passed, and the Atlas dry-run moved 164 -> 163 bounded
   gaps: 1 edge function, 107 RPCs and 55 tables. Runtime exercise remains
   unclaimed because no finance record was fabricated.
+- Authenticated production verification used the dedicated `admin_officer`
+  session after Vercel deployed release commit `7bf38100`. The Actual labour
+  costs region rendered without an alert, reported that no approved shift
+  timesheets were waiting, and kept the posting action disabled. No timesheet,
+  cost line, posting or audit event was created. Atlas reports
+  `post_finance_timesheet_labour_cost` as present and wired; exercise remains
+  unclaimed.
