@@ -4,7 +4,7 @@ const {
 } = require('./builder-model-adapter');
 const { fitRepositoryContext } = require('./builder-repository-context');
 
-const PRODUCT_ANALYST_PROMPT_VERSION = 'product-analyst-v11';
+const PRODUCT_ANALYST_PROMPT_VERSION = 'product-analyst-v12';
 
 const PRODUCT_SPEC_SCHEMA = Object.freeze({
   type: 'object',
@@ -171,7 +171,8 @@ function validateRepositoryGrounding(specification, { repositoryContext = {}, ta
     ...(Array.isArray(buildMap.tracked_files) ? buildMap.tracked_files : []),
     ...(Array.isArray(context.relevant_files) ? context.relevant_files : [])
   ]);
-  const taskSourcePaths = new Set(task.match(/\b(?:apps|supabase|services|scripts|test|docs)\/[\w./-]+/g) || []);
+  const taskSourcePaths = new Set((task.match(/\b(?:apps|supabase|services|scripts|test|docs)\/[\w./-]+/g) || [])
+    .map(file => file.replace(/[.,;:!?]+$/, '')));
 
   for (const requirement of specification.delivery_requirements || []) {
     for (const file of requirement.source_scope || []) {

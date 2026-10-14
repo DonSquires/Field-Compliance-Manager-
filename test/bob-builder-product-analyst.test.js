@@ -222,7 +222,7 @@ test('Product Analyst accepts exact source paths named by the owner brief when f
   };
   assert.doesNotThrow(() => validateRepositoryGrounding(specification, {
     repositoryContext,
-    taskDescription: 'Required source scope: apps/web/src/pages/BuilderControlRoomPage.tsx'
+    taskDescription: 'Required source scope: apps/web/src/pages/BuilderControlRoomPage.tsx.'
   }));
   assert.throws(() => validateRepositoryGrounding(specification, {
     repositoryContext,

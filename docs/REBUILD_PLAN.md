@@ -458,6 +458,12 @@ contract as machine-readable prompt input, including minimum counts, exact
 category language, all human-acceptance states, and the source-scope rule.
 Validation remains unchanged; the prompt now teaches the exact contract it
 already enforces.
+Main-health self-heal acceptance then exposed that an exact owner/task-named
+source path at the end of a sentence was extracted with the sentence's trailing
+period, so `FinanceBureauPage.guard.test.ts.` did not equal the grounded
+`FinanceBureauPage.guard.test.ts`. `product-analyst-v12` strips trailing prose
+punctuation from task-extracted repository paths before exact comparison;
+interior path characters and the safe repository-prefix check remain strict.
 
 Runtime acceptance 2026-10-11: the laptop vision watcher now writes an
 independent liveness heartbeat and its Docker health check terminates only a
