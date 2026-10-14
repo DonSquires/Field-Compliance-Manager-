@@ -37,6 +37,121 @@ test('dispatcher keeps the selected run sheet current as patrol stops advance', 
   await expect(shift).toContainText('1/1 stops');
 });
 
+test('dispatcher reorders a pending stop and amends the selected shift with explicit receipts', async ({ page }) => {
+  const browserErrors = monitorBrowserErrors(page);
+  const shiftId = '12121212-1212-4212-8212-121212121212';
+  const targetStopId = '34343434-3434-4434-8434-343434343433';
+  let shiftUpdatedAt = '2026-08-30T08:45:00.000Z';
+  let shiftNotes = 'Northern run';
+  const stops = [
+    { id: '34343434-3434-4434-8434-343434343431', stop_order: 1, name: 'Depot Gate', updated_at: '2026-08-30T08:45:00.000Z' },
+    { id: '34343434-3434-4434-8434-343434343432', stop_order: 2, name: 'Library', updated_at: '2026-08-30T08:45:00.000Z' },
+    { id: targetStopId, stop_order: 3, name: 'Civic Centre', updated_at: '2026-08-30T08:45:00.000Z' },
+  ];
+  let stopActionRequest: Record<string, unknown> | null = null;
+  let shiftActionRequest: Record<string, unknown> | null = null;
+
+  await page.route('**/rest/v1/shifts**', async (route) => route.fulfill({ contentType: 'application/json', body: JSON.stringify([{
+    id: shiftId,
+    officer_user_id: '22222222-2222-4222-8222-222222222222',
+    officer: { display_name: 'Patrol Test Officer' },
+    route: { name: 'Northern Run', route_code: 'N-01' },
+    scheduled_start: '2026-08-29T20:00:00.000Z',
+    scheduled_end: '2026-08-30T04:00:00.000Z',
+    actual_start: '2026-08-29T20:02:00.000Z',
+    status: 'in_progress',
+    shift_health: 'on_track',
+    notes: shiftNotes,
+    total_stops: 3,
+    completed_stops: 0,
+    updated_at: shiftUpdatedAt,
+  }]) }));
+  await page.route('**/rest/v1/shift_stops**', async (route) => route.fulfill({
+    contentType: 'application/json',
+    body: JSON.stringify([...stops].sort((left, right) => left.stop_order - right.stop_order).map((stop) => ({
+      id: stop.id,
+      shift_id: shiftId,
+      stop_order: stop.stop_order,
+      site_id: '42424242-4242-4242-8242-424242424242',
+      zone_id: null,
+      site: { name: stop.name },
+      zone: null,
+      status: 'pending',
+      actual_arrived_at: null,
+      actual_departed_at: null,
+      updated_at: stop.updated_at,
+    }))),
+  }));
+  await page.route('**/rest/v1/rpc/manage_shift_stop', async (route) => {
+    stopActionRequest = route.request().postDataJSON() as Record<string, unknown>;
+    const previousOrder = stops.find((stop) => stop.id === targetStopId)?.stop_order ?? 3;
+    for (const stop of stops) {
+      if (stop.id === targetStopId) stop.stop_order = 1;
+      else if (stop.stop_order < previousOrder) stop.stop_order += 1;
+      stop.updated_at = '2026-08-30T09:31:00.000Z';
+    }
+    await route.fulfill({ contentType: 'application/json', body: JSON.stringify({
+      replayed: false,
+      action: 'reorder',
+      target_id: targetStopId,
+      previous: { stop_order: previousOrder },
+      resulting: { stop_order: 1 },
+    }) });
+  });
+  await page.route('**/rest/v1/rpc/manage_active_shift', async (route) => {
+    shiftActionRequest = route.request().postDataJSON() as Record<string, unknown>;
+    shiftNotes = String(shiftActionRequest.p_notes);
+    shiftUpdatedAt = '2026-08-30T09:32:00.000Z';
+    await route.fulfill({ contentType: 'application/json', body: JSON.stringify({
+      replayed: false,
+      action: 'amend',
+      target_id: shiftId,
+      previous: { notes: 'Northern run' },
+      resulting: { notes: shiftNotes },
+    }) });
+  });
+
+  await signInAsAdmin(page, '/admin/field-ops?area=dispatch');
+  await page.getByRole('button', { name: /Patrol Test Officer/ }).click();
+  await page.locator('.dispatch-stop-card').filter({ hasText: 'Civic Centre' }).click();
+  await page.getByRole('button', { name: 'Change position' }).click();
+  const stopAction = page.getByRole('form', { name: 'Change stop position' });
+  await expect(stopAction).toContainText('writes a before-and-after audit receipt');
+  await stopAction.getByLabel('New route position').selectOption('1');
+  await stopAction.getByLabel('Operational reason').fill('Respond to the revised priority order from control.');
+  await stopAction.getByRole('button', { name: 'Confirm change stop position' }).click();
+  await expect(page.getByText('Stop moved from position 3 to 1 with an audit receipt.')).toBeVisible();
+  await expect(page.locator('.dispatch-stop-card').filter({ hasText: 'Civic Centre' })).toContainText('#1');
+  expect(stopActionRequest).toMatchObject({
+    p_stop_id: targetStopId,
+    p_expected_status: 'pending',
+    p_expected_updated_at: '2026-08-30T08:45:00.000Z',
+    p_action: 'reorder',
+    p_new_order: 1,
+    p_reason: 'Respond to the revised priority order from control.',
+  });
+  expect(stopActionRequest?.p_client_request_id).toMatch(/^[0-9a-f-]{36}$/);
+
+  const mobileSections = page.getByRole('tablist', { name: 'Dispatch console sections' });
+  if (await mobileSections.isVisible()) await mobileSections.getByRole('button', { name: 'Shifts', exact: true }).click();
+  await page.getByRole('button', { name: 'Amend shift' }).click();
+  const shiftAction = page.getByRole('form', { name: 'Amend shift' });
+  await shiftAction.getByLabel('Updated shift note').fill('Northern run via the Civic Centre first.');
+  await shiftAction.getByLabel('Operational reason').fill('Match the live route order confirmed by control.');
+  await shiftAction.getByRole('button', { name: 'Confirm amend shift' }).click();
+  await expect(page.getByText('Shift notes updated with an audit receipt.')).toBeVisible();
+  expect(shiftActionRequest).toMatchObject({
+    p_shift_id: shiftId,
+    p_expected_status: 'in_progress',
+    p_expected_updated_at: '2026-08-30T08:45:00.000Z',
+    p_action: 'amend',
+    p_notes: 'Northern run via the Civic Centre first.',
+    p_reason: 'Match the live route order confirmed by control.',
+  });
+  expect(shiftActionRequest?.p_client_request_id).toMatch(/^[0-9a-f-]{36}$/);
+  expect(browserErrors, browserErrors.join('\n')).toEqual([]);
+});
+
 test('priority dispatch item opens its exact operational review record', async ({ page }) => {
   const browserErrors = monitorBrowserErrors(page);
   const dispatchJob = {

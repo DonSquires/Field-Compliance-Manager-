@@ -39520,46 +39520,14 @@ export type Database = {
       manage_active_shift: {
         Args: {
           p_action: string
+          p_client_request_id: string
           p_expected_status: string
+          p_expected_updated_at: string
           p_notes?: string
           p_reason?: string
           p_shift_id: string
         }
-        Returns: {
-          actual_end: string | null
-          actual_start: string | null
-          completed_stops: number
-          created_at: string
-          external_refs: Json
-          generated_at: string | null
-          id: string
-          location_id: string | null
-          module_key: string | null
-          notes: string | null
-          officer_user_id: string
-          organization_id: string
-          osrm_matrix_cached_at: string | null
-          patrol_route_id: string | null
-          roster_slot_id: string | null
-          scheduled_end: string
-          scheduled_start: string
-          service_agreement_location_id: string | null
-          service_agreement_module_id: string | null
-          service_type: string
-          shift_health: string | null
-          shift_origin: string
-          status: string
-          total_stops: number
-          updated_at: string
-          work_unit_id: string | null
-          zone_id: string | null
-        }
-        SetofOptions: {
-          from: "*"
-          to: "shifts"
-          isOneToOne: true
-          isSetofReturn: false
-        }
+        Returns: Json
       }
       manage_asset: {
         Args: {
@@ -41444,57 +41412,14 @@ export type Database = {
       manage_shift_stop: {
         Args: {
           p_action: string
+          p_client_request_id: string
           p_expected_status: string
+          p_expected_updated_at: string
           p_new_order?: number
           p_reason?: string
           p_stop_id: string
         }
-        Returns: {
-          actual_arrived_at: string | null
-          actual_departed_at: string | null
-          arrival_distance_m: number | null
-          arrival_verification: string | null
-          arrived_gps_accuracy: number | null
-          arrived_gps_lat: number | null
-          arrived_gps_lng: number | null
-          bwc_reference: string | null
-          created_at: string
-          departed_gps_lat: number | null
-          departed_gps_lng: number | null
-          dispatch_job_id: string | null
-          estimated_arrival_at: string | null
-          estimated_departure_at: string | null
-          external_dispatch_id: string | null
-          external_refs: Json
-          id: string
-          is_adhoc: boolean
-          module_key: string
-          officer_instructions: string | null
-          officer_notes: string | null
-          organization_id: string
-          patrol_config_id: string | null
-          place_role: string
-          required_dwell_minutes: number
-          shift_id: string
-          site_id: string | null
-          sla_arrive_by: string
-          sla_depart_by: string | null
-          sla_status: string
-          sla_window_open: string | null
-          status: string
-          stop_order: number
-          travel_distance_metres: number | null
-          travel_time_seconds: number | null
-          updated_at: string
-          visit_number: number
-          zone_id: string | null
-        }
-        SetofOptions: {
-          from: "*"
-          to: "shift_stops"
-          isOneToOne: true
-          isSetofReturn: false
-        }
+        Returns: Json
       }
       manage_shift_template: {
         Args: {

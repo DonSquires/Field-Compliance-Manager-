@@ -57,6 +57,9 @@ interface ActiveShift {
   shiftHealth: 'on_track' | 'at_risk' | 'critical' | 'breached';
   totalStops: number;
   completedStops: number;
+  actualStart?: string;
+  notes?: string;
+  updatedAt: string;
   officerGpsLat?: number;
   officerGpsLng?: number;
   officerLastSeen?: string;
@@ -130,9 +133,27 @@ interface ShiftStop {
   shiftId: string;
   sequence: number;
   siteName: string;
+  updatedAt: string;
   arrival?: string;
   departure?: string;
   status: StopStatus;
+}
+
+type RunsheetAction =
+  | 'amend'
+  | 'escalate'
+  | 'cancel_shift'
+  | 'reorder'
+  | 'skip'
+  | 'cancel_stop';
+
+interface RunsheetActionDraft {
+  target: 'shift' | 'stop';
+  action: RunsheetAction;
+  clientRequestId: string;
+  reason: string;
+  notes: string;
+  newOrder: number | null;
 }
 
 const JOB_STATUS_LABELS: Record<JobStatus, string> = { pending: 'Waiting to dispatch', pending_approval: 'Waiting for approval', dispatched: 'Dispatched', acknowledged: 'Acknowledged', en_route: 'On the way', on_scene: 'On site', completed: 'Completed', cancelled: 'Cancelled' };
@@ -300,6 +321,7 @@ const DispatchConsolePage: React.FC = () => {
   const [saving, setSaving] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [operatorBusy, setOperatorBusy] = useState(false);
+  const [runsheetAction, setRunsheetAction] = useState<RunsheetActionDraft | null>(null);
 
   // State: Phase D (Billing rates)
   const [billingRules, setBillingRules] = useState<DispatchBillingRule[]>([]);
@@ -387,6 +409,9 @@ const DispatchConsolePage: React.FC = () => {
           shiftHealth: schemaShiftHealth(s.shift_health ?? 'on_track'),
           totalStops: s.total_stops ?? 0,
           completedStops: s.completed_stops ?? 0,
+          actualStart: s.actual_start ?? undefined,
+          notes: s.notes ?? undefined,
+          updatedAt: s.updated_at,
         }));
         setActiveShifts(formatted);
       }
@@ -521,7 +546,7 @@ const DispatchConsolePage: React.FC = () => {
 
       const { data, error } = await supabase
         .from('shift_stops')
-        .select('id, shift_id, stop_order, site_id, zone_id, status, actual_arrived_at, actual_departed_at, site:site_id(name), zone:zone_id(name)')
+        .select('id, shift_id, stop_order, site_id, zone_id, status, actual_arrived_at, actual_departed_at, updated_at, site:site_id(name), zone:zone_id(name)')
         .eq('shift_id', shiftId)
         .order('stop_order');
 
@@ -532,6 +557,7 @@ const DispatchConsolePage: React.FC = () => {
           shiftId: row.shift_id,
           sequence: row.stop_order,
           siteName: (Array.isArray(row.site) ? row.site[0]?.name : row.site?.name) ?? (Array.isArray(row.zone) ? row.zone[0]?.name : row.zone?.name) ?? 'Place unavailable',
+          updatedAt: row.updated_at,
           arrival: row.actual_arrived_at,
           departure: row.actual_departed_at,
           status: row.status,
@@ -833,11 +859,17 @@ const DispatchConsolePage: React.FC = () => {
     (shiftId: string) => {
       setSelectedShiftId(shiftId);
       setSelectedStopId(null);
+      setRunsheetAction(null);
       loadPhaseB(shiftId);
       if (isMobile) setMobileTab('stops');
     },
     [loadPhaseB, isMobile]
   );
+
+  const handleSelectStop = useCallback((stopId: string) => {
+    setSelectedStopId(stopId);
+    setRunsheetAction(null);
+  }, []);
 
   const handleSelectPlace = useCallback((place: string) => {
     const [kind, id] = place.split(':', 2);
@@ -845,21 +877,204 @@ const DispatchConsolePage: React.FC = () => {
     setFormZoneId(kind === 'zone' ? id : '');
   }, []);
 
-  const operatorAction = async (target: 'stop' | 'shift', action: string) => {
-    const reason = window.prompt(`Reason for ${action.replaceAll('_', ' ')}:`)?.trim();
-    if (!reason) return;
-    const targetId = target === 'stop' ? selectedStopId : selectedShiftId;
-    if (!targetId) return;
-    setOperatorBusy(true); setError(null);
-    const currentStatus = target === 'stop' ? shiftStops.find((stop) => stop.id === targetId)?.status : activeShifts.find((shift) => shift.id === targetId)?.status;
-    const rpc = target === 'stop' ? 'manage_shift_stop' : 'manage_active_shift';
-    const payload = target === 'stop'
-      ? { p_stop_id: targetId, p_expected_status: currentStatus, p_action: action, p_new_order: null, p_reason: reason }
-      : { p_shift_id: targetId, p_expected_status: currentStatus, p_action: action, p_notes: null, p_reason: reason };
-    const { error: actionError } = await supabase.rpc(rpc, payload);
-    if (actionError) setError(actionError.message); else { await loadPhaseA(); if (selectedShiftId) await loadPhaseB(selectedShiftId); }
+  const selectedShift = activeShifts.find((shift) => shift.id === selectedShiftId) ?? null;
+  const selectedStop = shiftStops.find((stop) => stop.id === selectedStopId) ?? null;
+
+  const openRunsheetAction = (target: 'shift' | 'stop', action: RunsheetAction) => {
+    const notes = target === 'shift' && action === 'amend' ? selectedShift?.notes ?? '' : '';
+    setRunsheetAction({
+      target,
+      action,
+      clientRequestId: crypto.randomUUID(),
+      reason: '',
+      notes,
+      newOrder: target === 'stop' && action === 'reorder' ? selectedStop?.sequence ?? null : null,
+    });
+    setError(null);
+    setNotice(null);
+  };
+
+  const closeRunsheetAction = () => {
+    if (!operatorBusy) setRunsheetAction(null);
+  };
+
+  const submitRunsheetAction = async (event: React.FormEvent<HTMLFormElement>) => {
+    event.preventDefault();
+    if (!runsheetAction || !runsheetAction.reason.trim()) {
+      setError('Write a short operational reason before changing the run sheet.');
+      return;
+    }
+    if (runsheetAction.target === 'stop' && runsheetAction.action === 'reorder') {
+      if (!selectedStop || !runsheetAction.newOrder || runsheetAction.newOrder === selectedStop.sequence) {
+        setError('Choose a different route position for this stop.');
+        return;
+      }
+    }
+    if (runsheetAction.target === 'shift' && runsheetAction.action === 'amend' && !runsheetAction.notes.trim()) {
+      setError('Write the updated shift note.');
+      return;
+    }
+
+    setOperatorBusy(true);
+    setError(null);
+
+    if (runsheetAction.target === 'stop') {
+      if (!selectedStop) {
+        setError('The selected stop is no longer available.');
+        setOperatorBusy(false);
+        return;
+      }
+      const action = runsheetAction.action === 'cancel_stop' ? 'cancel' : runsheetAction.action;
+      // ATLAS CALLS: manage_shift_stop (replay-safe route change with audit receipt)
+      const { data, error: actionError } = await supabase.rpc('manage_shift_stop', {
+        p_client_request_id: runsheetAction.clientRequestId,
+        p_stop_id: selectedStop.id,
+        p_expected_status: selectedStop.status,
+        p_expected_updated_at: selectedStop.updatedAt,
+        p_action: action,
+        p_new_order: action === 'reorder' ? runsheetAction.newOrder : null,
+        p_reason: runsheetAction.reason.trim(),
+      });
+      if (actionError) setError(actionError.message);
+      else {
+        const replayed = Boolean((data as { replayed?: boolean } | null)?.replayed);
+        const outcome = action === 'reorder'
+          ? `moved from position ${selectedStop.sequence} to ${runsheetAction.newOrder}`
+          : action === 'skip' ? 'marked skipped' : 'cancelled';
+        setNotice(`Stop ${outcome} with an audit receipt${replayed ? ' (replayed safely)' : ''}.`);
+        setRunsheetAction(null);
+        await loadPhaseB(selectedStop.shiftId);
+      }
+    } else {
+      if (!selectedShift) {
+        setError('The selected shift is no longer available.');
+        setOperatorBusy(false);
+        return;
+      }
+      const action = runsheetAction.action === 'cancel_shift' ? 'cancel' : runsheetAction.action;
+      // ATLAS CALLS: manage_active_shift (replay-safe shift control with audit receipt)
+      const { data, error: actionError } = await supabase.rpc('manage_active_shift', {
+        p_client_request_id: runsheetAction.clientRequestId,
+        p_shift_id: selectedShift.id,
+        p_expected_status: selectedShift.status,
+        p_expected_updated_at: selectedShift.updatedAt,
+        p_action: action,
+        p_notes: action === 'amend' ? runsheetAction.notes.trim() : null,
+        p_reason: runsheetAction.reason.trim(),
+      });
+      if (actionError) setError(actionError.message);
+      else {
+        const replayed = Boolean((data as { replayed?: boolean } | null)?.replayed);
+        const outcome = action === 'amend' ? 'notes updated' : action === 'escalate' ? 'attendance escalated' : 'cancelled';
+        setNotice(`Shift ${outcome} with an audit receipt${replayed ? ' (replayed safely)' : ''}.`);
+        setRunsheetAction(null);
+        await loadPhaseA();
+        if (action === 'cancel') {
+          setSelectedShiftId(null);
+          setSelectedStopId(null);
+          setShiftStops([]);
+        } else {
+          await loadPhaseB(selectedShift.id);
+        }
+      }
+    }
     setOperatorBusy(false);
   };
+
+  const runsheetActionLabel = runsheetAction?.action === 'amend'
+    ? 'Amend shift'
+    : runsheetAction?.action === 'escalate'
+      ? 'Escalate attendance'
+      : runsheetAction?.action === 'cancel_shift'
+        ? 'Cancel shift'
+        : runsheetAction?.action === 'reorder'
+          ? 'Change stop position'
+          : runsheetAction?.action === 'skip'
+            ? 'Skip stop'
+            : 'Cancel stop';
+
+  const renderRunsheetAction = (target: 'shift' | 'stop') => {
+    if (!runsheetAction || runsheetAction.target !== target) return null;
+    return (
+      <form className="dispatch-runsheet-action" aria-label={runsheetActionLabel} onSubmit={(event) => void submitRunsheetAction(event)}>
+        <div className="dispatch-runsheet-action__heading">
+          <div>
+            <strong>{runsheetActionLabel}</strong>
+            <span>{target === 'shift' ? selectedShift?.officerName : selectedStop?.siteName}</span>
+          </div>
+          <button type="button" className="dispatch-runsheet-action__close" onClick={closeRunsheetAction} disabled={operatorBusy} aria-label={`Close ${runsheetActionLabel}`}>Close</button>
+        </div>
+        {runsheetAction.action === 'reorder' && (
+          <label>
+            <span>New route position</span>
+            <select
+              value={runsheetAction.newOrder ?? ''}
+              onChange={(event) => setRunsheetAction((current) => current ? { ...current, newOrder: Number(event.target.value) } : current)}
+              disabled={operatorBusy}
+            >
+              {shiftStops.map((stop, index) => <option key={stop.id} value={index + 1}>Position {index + 1}{stop.id === selectedStop?.id ? ' (current)' : ''}</option>)}
+            </select>
+          </label>
+        )}
+        {runsheetAction.action === 'amend' && (
+          <label>
+            <span>Updated shift note</span>
+            <textarea
+              value={runsheetAction.notes}
+              maxLength={4000}
+              rows={3}
+              onChange={(event) => setRunsheetAction((current) => current ? { ...current, notes: event.target.value } : current)}
+              disabled={operatorBusy}
+            />
+          </label>
+        )}
+        <label>
+          <span>Operational reason</span>
+          <textarea
+            value={runsheetAction.reason}
+            maxLength={1000}
+            rows={2}
+            onChange={(event) => setRunsheetAction((current) => current ? { ...current, reason: event.target.value } : current)}
+            placeholder="Why is this change necessary?"
+            disabled={operatorBusy}
+          />
+        </label>
+        <p>This changes the live officer run sheet and writes a before-and-after audit receipt. It does not rewrite completed attendance.</p>
+        <div className="dispatch-runsheet-action__footer">
+          <button type="button" onClick={closeRunsheetAction} disabled={operatorBusy}>Keep current run sheet</button>
+          <button type="submit" disabled={operatorBusy}>{operatorBusy ? 'Applying change' : `Confirm ${runsheetActionLabel.toLowerCase()}`}</button>
+        </div>
+      </form>
+    );
+  };
+
+  const shiftOperatorPanel = selectedShift && (
+    <div className="dispatch-operator-actions">
+      <strong>Selected shift · {selectedShift.officerName}</strong>
+      <span>{selectedShift.status.replaceAll('_', ' ')} · {selectedShift.completedStops}/{selectedShift.totalStops} stops complete</span>
+      <div>
+        <button type="button" onClick={() => openRunsheetAction('shift', 'amend')} disabled={operatorBusy}>Amend shift</button>
+        <button type="button" onClick={() => openRunsheetAction('shift', 'escalate')} disabled={operatorBusy}>Escalate attendance</button>
+        <button type="button" onClick={() => openRunsheetAction('shift', 'cancel_shift')} disabled={operatorBusy || Boolean(selectedShift.actualStart)}>Cancel shift</button>
+      </div>
+      {selectedShift.actualStart && <small>A started shift cannot be cancelled. Amend its note or escalate attendance instead.</small>}
+      {renderRunsheetAction('shift')}
+    </div>
+  );
+
+  const stopOperatorPanel = selectedStop && (
+    <div className="dispatch-operator-actions">
+      <strong>Selected stop · {selectedStop.siteName}</strong>
+      <span>Position {selectedStop.sequence} · {shiftStopStatusLabel(selectedStop.status)}</span>
+      <div>
+        <button type="button" onClick={() => openRunsheetAction('stop', 'reorder')} disabled={operatorBusy || selectedStop.status !== 'pending'}>Change position</button>
+        <button type="button" onClick={() => openRunsheetAction('stop', 'skip')} disabled={operatorBusy || Boolean(selectedStop.arrival) || ['completed', 'skipped', 'cancelled'].includes(selectedStop.status)}>Skip stop</button>
+        <button type="button" onClick={() => openRunsheetAction('stop', 'cancel_stop')} disabled={operatorBusy || Boolean(selectedStop.arrival) || ['completed', 'skipped', 'cancelled'].includes(selectedStop.status)}>Cancel stop</button>
+      </div>
+      {selectedStop.arrival && <small>Attendance has already started at this place, so its route position and closure state are preserved.</small>}
+      {renderRunsheetAction('stop')}
+    </div>
+  );
 
   const selectedJob = jobs.find((job) => job.id === jobDetailId) ?? null;
   const jobTimingLocked = selectedJob ? ['completed', 'cancelled'].includes(selectedJob.status) : true;
@@ -1303,6 +1518,7 @@ const DispatchConsolePage: React.FC = () => {
                     />
                   ))
                 )}
+                {shiftOperatorPanel}
               </div>
             )}
 
@@ -1313,8 +1529,9 @@ const DispatchConsolePage: React.FC = () => {
                 ) : shiftStops.length === 0 ? (
                   <div className="dispatch-console-empty-state">Select a shift to view stops</div>
                 ) : (
-                  shiftStops.map((stop) => <StopCard key={stop.id} stop={stop} selected={stop.id === selectedStopId} onSelect={() => setSelectedStopId(stop.id)} />)
+                  shiftStops.map((stop) => <StopCard key={stop.id} stop={stop} selected={stop.id === selectedStopId} onSelect={() => handleSelectStop(stop.id)} />)
                 )}
+                {stopOperatorPanel}
               </div>
             )}
 
@@ -1390,7 +1607,7 @@ const DispatchConsolePage: React.FC = () => {
               ))}
             </div>
           )}
-          {selectedShiftId && <div className="dispatch-operator-actions"><strong>Selected shift</strong><div><button type="button" onClick={() => void operatorAction('shift', 'amend')} disabled={operatorBusy}>Amend shift</button><button type="button" onClick={() => void operatorAction('shift', 'escalate')} disabled={operatorBusy}>Escalate attendance</button><button type="button" onClick={() => void operatorAction('shift', 'cancel')} disabled={operatorBusy}>Cancel shift</button></div></div>}
+          {shiftOperatorPanel}
         </div>
 
         <div className="dispatch-console-column">
@@ -1405,11 +1622,11 @@ const DispatchConsolePage: React.FC = () => {
           ) : (
             <div className="dispatch-console-list">
               {shiftStops.map((stop) => (
-                <StopCard key={stop.id} stop={stop} selected={stop.id === selectedStopId} onSelect={() => setSelectedStopId(stop.id)} />
+                <StopCard key={stop.id} stop={stop} selected={stop.id === selectedStopId} onSelect={() => handleSelectStop(stop.id)} />
               ))}
             </div>
           )}
-          {selectedStopId && <div className="dispatch-operator-actions"><strong>Selected stop</strong><div><button type="button" onClick={() => void operatorAction('stop', 'reorder')} disabled={operatorBusy}>Change position</button><button type="button" onClick={() => void operatorAction('stop', 'skip')} disabled={operatorBusy}>Skip stop</button><button type="button" onClick={() => void operatorAction('stop', 'cancel')} disabled={operatorBusy}>Cancel stop</button></div></div>}
+          {stopOperatorPanel}
         </div>
 
         <div className="dispatch-console-column">

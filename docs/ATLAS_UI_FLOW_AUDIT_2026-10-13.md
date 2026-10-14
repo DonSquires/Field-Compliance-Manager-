@@ -958,3 +958,51 @@ remains unpopulated.
   Rollback-only live verification proved save, replay, stale-state conflict and
   deactivation replay without retaining an R&M obligation or audit event.
   Runtime exercise remains unclaimed.
+
+### Closure log — accountable dispatch runsheet changes
+
+- Atlas showed `manage_active_shift` and `manage_shift_stop` as present but
+  unwired. Source inspection disproved the simple interpretation: Dispatch did
+  call both functions, but selected the RPC name through a runtime variable, so
+  the generated terrain could not prove either caller.
+- The UI trace found a real task-completion defect behind that mapping gap.
+  “Change position” always sent `p_new_order = null`, so the server rejected
+  every reorder. “Amend shift” collected only a reason and sent no amended
+  note. Both actions used browser prompts, exposed no before/after context, and
+  produced no visible success receipt.
+- Before the change, the database locked only the selected stop and changed its
+  number without resequencing sibling stops. Concurrent route edits could
+  deadlock or leave duplicate route positions. Status-only optimistic checks
+  did not protect a second edit when the first edit left status unchanged, and
+  successful retries produced another mutation and audit event.
+- The hardened authorities require a request ID, expected status and expected
+  update timestamp. Stop changes lock the whole route in stable
+  `stop_order, id` order, move intervening stops up or down, then place the
+  selected stop. Attended and closed stops remain immutable. Shift changes
+  reject terminal records, require real notes for amendment, and preserve the
+  existing rule that a started shift cannot be cancelled.
+- Both functions check their audit receipt before stale-state rejection, so a
+  completed request can be retried safely. Audit metadata records previous and
+  resulting status, health, notes, route position and update timestamp.
+  Execution is revoked from `PUBLIC` and `anon`; authenticated callers still
+  pass the function’s organization-admin check.
+- During the task, the dispatcher now selects the current shift or stop, sees
+  its status and progress, chooses the explicit change, supplies a route
+  position or updated shift note plus an operational reason, and confirms in a
+  responsive inline panel. The panel states that it changes the officer’s live
+  run sheet, preserves completed attendance, and writes a before/after receipt.
+  This adapts Trackforce’s useful “current tour + accountable next action”
+  pattern without creating a second runsheet authority or copying its dense
+  action-column layout.
+- After a server-confirmed change, Dispatch refreshes the route and shows the
+  exact outcome. Mobile now renders the same selected-shift and selected-stop
+  controls inside its Shifts and Stops tabs; the first mobile acceptance run
+  exposed that the old mobile branch omitted operator actions entirely, and the
+  product path was corrected rather than weakening the test.
+- Seven focused guards, the production build, and the complete desktop/mobile
+  reorder-plus-amend workflow pass. The linked migration is applied; the live
+  schema remains at 811 functions and now reports 722 indexes. Rollback-only
+  live verification proved route resequencing, first-use, replay and stale
+  timestamp behavior for both functions without retaining the temporary shift,
+  stops or audit events. Atlas dry-run moves 148 -> 146 bounded gaps:
+  1 edge function, 90 RPCs and 55 tables. Runtime exercise remains unclaimed.
