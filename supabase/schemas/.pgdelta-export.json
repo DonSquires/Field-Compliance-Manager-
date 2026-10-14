@@ -104,7 +104,6 @@
     "public/functions/patrol_stop_module_keys.sql",
     "public/functions/point_in_zone.sql",
     "public/functions/promote_document_to_reference_library.sql",
-    "public/functions/record_sla_arrival.sql",
     "public/functions/refresh_canonical_ta_names.sql",
     "public/functions/resolve_access_basis.sql",
     "public/functions/resolve_access_basis_batch.sql",

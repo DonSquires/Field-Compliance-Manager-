@@ -345,3 +345,24 @@ remains unpopulated.
   separation: `admin_officer` cannot schedule because scheduling requires an
   active roster administrator, but can record the outcome of an appearance
   assigned to them.
+
+### Closure log — superseded direct SLA arrival
+
+- `record_sla_arrival` was not a missing screen or action. It was an uncalled
+  second authority that accepted an SLA clock ID and timestamp directly,
+  carried no shift, dispatch, GPS, geofence or officer-command receipt, and
+  remained executable through `PUBLIC` and `anon`.
+- Before arrival, `dispatch_job_create_sla_clock` creates the running clock
+  from the dispatch job and its SLA target. During arrival,
+  `arrive_at_dispatch_place` records the officer's in-progress shift,
+  idempotent command, place attendance and GPS/geofence result; the standard
+  dispatcher transition can also stamp the job's `on_scene_at`. After either
+  governed path, `trg_dispatch_job_close_sla_clock` computes elapsed minutes
+  and the met/breached verdict from that persisted job state.
+- Migration `20261014130000_retire_superseded_sla_arrival.sql` dropped the
+  detached writer. The live schema snapshot proves the function and its broad
+  grants are gone while both arrival authorities, SLA-clock creation and the
+  closing trigger remain.
+- Atlas dry-run moved 175 -> 174 bounded gaps: 1 edge function, 118 RPCs and
+  55 tables. This is a retirement closure, not a claim that a new user action
+  was exercised.

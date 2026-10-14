@@ -253,7 +253,9 @@ Toggle/stage: define many bands (staged), one band (flat), or a single 100% band
 - **Alarm (SLA 45):** e.g. `+10min->25%`, `+30min->50%`, `+60min->100%`. (25% off if ~10 late; free if very late.)
 - **Noise (SLA 60):** `+1min->100%` — anything past 60 is non-billable. (single 100% band.)
 - **Patrol:** attendance-gated (missed = $0); expressible as "no completion -> 100%" to stay uniform.
-Computation uses EXISTING evidence + timestamps: `sla_clocks`, dispatch `*_at`, `record_sla_arrival` (actual attendance time vs alarm/despatch DTS).
+Computation uses EXISTING evidence + timestamps: `sla_clocks`, dispatch `*_at`,
+`arrive_at_dispatch_place`, and the trigger-owned SLA-clock closure (actual
+attendance time vs alarm/despatch DTS).
 
 ### BILLING BUREAUS (WILSAR-style charge-rate schemes) — the rate engine
 A **billing bureau** = a named, reusable charge-rate scheme you ASSIGN sites/clients to (FS

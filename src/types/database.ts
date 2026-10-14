@@ -43121,10 +43121,6 @@ export type Database = {
           transmission_id: string
         }[]
       }
-      record_sla_arrival: {
-        Args: { p_arrived_at?: string; p_clock_id: string }
-        Returns: string
-      }
       recover_stale_cctv_inference_jobs: { Args: never; Returns: number }
       refresh_canonical_ta_names: {
         Args: { p_names: string[]; p_source?: string }
