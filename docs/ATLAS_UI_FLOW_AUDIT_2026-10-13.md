@@ -498,3 +498,41 @@ remains unpopulated.
   `SELECT`/`PERFORM`/`LATERAL` SQL in source scripts, and its dry-run moved 169
   -> 166 bounded gaps: 1 edge function, 110 RPCs and 55 tables. No live patrol
   file was applied, so runtime exercise remains unclaimed.
+
+### Closure log — finance payment reconciliation
+
+- Atlas exposed `match_finance_bank_statement_line` and
+  `match_finance_external_bank_transaction` as present but unwired. The money
+  dashboard could show imported bank activity and customer receipts, but a
+  finance administrator had no governed task surface for joining the two.
+- Before this change, either RPC could rematch a bank movement, reuse one
+  receipt across the statement and connected-bank sources, or match excluded
+  or disputed state. The original statement RPC also treated debit and credit
+  amounts alike. A scoped live aggregate check found no statement lines,
+  external transactions, payment receipts or duplicate matches in the current
+  R&M organisation, so the authority could be hardened without rewriting
+  business records.
+- The database now serialises on the receipt identity, locks both source rows,
+  retains same-match retries as idempotent, rejects stale states, and prevents
+  receipt reuse within or across the two import paths. Partial unique indexes
+  backstop each source table. Only incoming credits with an exact amount may
+  be matched. Both security-definer RPCs retain authenticated/service-role
+  execution while `PUBLIC` and `anon` are explicitly revoked.
+- During reconciliation, the new money-page workspace loads only the active
+  organisation's unmatched/review credits and pending/unmatched receipts. The
+  administrator selects a bank credit, sees only exact-amount candidates and
+  confirms through the governed RPC. Loading, permission, empty, error,
+  success and concurrent-change retry states are explicit; the browser never
+  writes any reconciliation table directly.
+- After success, the bank movement and receipt are marked matched in one
+  transaction, reconciliation provenance is recorded on the receipt, an audit
+  event is emitted, and the workspace reloads persisted server state. Outgoing
+  money, disputed receipts and already-consumed records remain outside the
+  action.
+- Both migrations were applied to the linked project and
+  `supabase/schema.sql` was regenerated from the live catalog. Thirteen
+  focused finance guards passed across three files, the production web build
+  passed, and `git diff --check` was clean. Atlas dry-run moved 166 -> 164
+  bounded gaps: 1 edge function, 108 RPCs and 55 tables. The two RPCs are now
+  statically wired; runtime exercise remains unclaimed because no finance
+  record was fabricated.
