@@ -31,17 +31,25 @@ function validDesignPlan() {
 test('UX Designer prompt carries approved specification and forbids invented behavior', () => {
   const prompt = buildUxDesignerPrompt({
     specification: { product_brief: { outcome: 'Governed approvals' }, acceptance_criteria: [{ id: 'AC-1' }] },
-    repositoryContext: { existing_design_system: 'PageStyles.css variables', relevant_components: ['ApprovalList'], build_map: { target_sha: 'a'.repeat(64), file_count: 2, tracked_files: ['apps/web/src/App.tsx'], secret_files_excluded: true }, live_context: { atlas: { capability_count: 2 }, live_data: { scope: 'aggregate row counts only' } } }
+    repositoryContext: { existing_design_system: 'PageStyles.css variables', relevant_components: ['ApprovalList'], existing_routes: ['AdminShell page id "builder"'], existing_access_boundaries: ['platform-only AdminShell page'], build_map: { target_sha: 'a'.repeat(64), file_count: 2, tracked_files: ['apps/web/src/App.tsx'], secret_files_excluded: true }, live_context: { atlas: { capability_count: 2 }, live_data: { scope: 'aggregate row counts only' } } },
+    constraints: ['Correct the previous route_map validation failure']
   });
 
   assert.match(prompt.systemPrompt, /approved product specification/);
   assert.match(prompt.systemPrompt, /Do not invent/);
   assert.match(prompt.systemPrompt, /exact identifiers supplied in repository_context\.existing_routes/);
+  assert.match(prompt.systemPrompt, /byte-for-byte from route_contract/);
+  assert.match(prompt.systemPrompt, /correction_constraints as mandatory corrections/);
   assert.match(prompt.systemPrompt, /only design tokens supplied in repository_context\.design_tokens/);
   assert.match(prompt.systemPrompt, /at least one exact owner name from repository_context\.relevant_components/);
   assert.equal(JSON.parse(prompt.userPrompt).approved_specification.product_brief.outcome, 'Governed approvals');
   assert.equal(JSON.parse(prompt.userPrompt).repository_context.build_map.file_count, 2);
   assert.equal(JSON.parse(prompt.userPrompt).repository_context.live_context.atlas.capability_count, 2);
+  assert.deepEqual(JSON.parse(prompt.userPrompt).route_contract, {
+    allowed_routes: ['AdminShell page id "builder"'],
+    allowed_access: ['platform-only AdminShell page']
+  });
+  assert.deepEqual(JSON.parse(prompt.userPrompt).correction_constraints, ['Correct the previous route_map validation failure']);
   assert.deepEqual(JSON.parse(prompt.userPrompt).token_constraints, {
     allowed_tokens: [],
     allowed_spacing_tokens: []

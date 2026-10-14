@@ -305,7 +305,17 @@ async function executeBuilderAction({ snapshot, action, supabase, gateway, conte
       requestedFromUsers: context.requestedFromUsers
     });
   }
-  if (action.type === 'run_ux_design') return run.ux({ ...common, specificationArtifact: artifactsFor(snapshot, 'product_analysis', 'product_specification').at(-1), repositoryContext: context.designContext });
+  if (action.type === 'run_ux_design') {
+    const priorFailure = action.step.status === 'failed' && action.step.error
+      ? `Correct the previous UX Designer validation failure without weakening repository grounding: ${String(action.step.error).replace(/\s+/g, ' ').slice(0, 1200)}`
+      : null;
+    return run.ux({
+      ...common,
+      specificationArtifact: artifactsFor(snapshot, 'product_analysis', 'product_specification').at(-1),
+      repositoryContext: context.designContext,
+      constraints: priorFailure ? [priorFailure] : []
+    });
+  }
   if (action.type === 'run_frontend') {
     const agentic = AGENTIC_ENABLED && context.workspaceRoot && !handlers.frontend;
     const generator = agentic ? agenticGenerator('frontend', context) : undefined;

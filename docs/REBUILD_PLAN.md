@@ -368,8 +368,8 @@ and the strong provider completed an equivalent specification in about one
 minute. Builder now has workload-specific compute independent of chat:
 structured analysis, agentic authoring, and review use the strong provider then
 workstation GPU, and VPS CPU is reserved for light or restricted work.
-Autonomous admission reuses an active
-same-owner/same-project/same-title job even when research changes the detailed
+Autonomous admission reuses an active same-owner/same-project/same-title job
+even when research changes the detailed
 brief, and unrecoverable attempt-ceiling blocks finalize the job as failed
 before recording the plain-language report. Product and UX prompts expose exact
 source/token allowlists to reduce avoidable validator retries. The UX validator
@@ -380,6 +380,16 @@ explicitly permits an empty spacing-token selection instead of implying that
 the designer must invent one. This shortens the lane without skipping
 specification, repository grounding, verification, independent review, or
 protected release gates.
+
+Builder UX self-healing acceptance 2026-10-15: redesign job
+`ffbb648e-0a37-4694-83eb-f9efab037a1b` correctly rejected three UX plans that
+paraphrased the supplied AdminShell page identifier, but every retry received
+the same prompt and therefore repeated the same route-grounding failure.
+`ux-designer-v8` now exposes the allowed route and access identifiers as an
+explicit byte-for-byte contract, and the runtime adds the bounded prior
+validation error as a mandatory correction constraint on failed UX retries.
+Repository grounding remains strict: the repair teaches the next attempt what
+failed instead of accepting an invented URL, route, access boundary, or page.
 
 Runtime acceptance 2026-10-11: the laptop vision watcher now writes an
 independent liveness heartbeat and its Docker health check terminates only a

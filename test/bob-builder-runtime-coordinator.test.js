@@ -120,6 +120,33 @@ test('a Product Analyst retry receives its bounded validation failure as a corre
   assert.ok(captured.constraints[1].length <= 1300, 'prior failure is bounded before entering the model prompt');
 });
 
+test('a UX Designer retry receives its bounded validation failure as a correction constraint', async () => {
+  const state = snapshot('design_pending');
+  const ux = state.steps.find(step => step.step_id === 'ui_design');
+  ux.status = 'failed';
+  ux.retryable = true;
+  ux.error = `route_map contains /invented ${'x'.repeat(2000)}`;
+  state.artifacts.push({
+    id: 'artifact-spec',
+    step_id: 'product_analysis',
+    artifact_type: 'product_specification',
+    status: 'final'
+  });
+  let captured;
+
+  const result = await advanceBuilderJob({
+    supabase: {}, gateway: {}, jobId: 'job-1',
+    context: { designContext: {} },
+    loadSnapshot: async () => state,
+    handlers: { ux: async input => { captured = input; return { ok: true }; } }
+  });
+
+  assert.equal(result.advanced, true);
+  assert.match(captured.constraints[0], /^Correct the previous UX Designer validation failure/);
+  assert.match(captured.constraints[0], /route_map contains \/invented/);
+  assert.ok(captured.constraints[0].length <= 1300, 'prior failure is bounded before entering the model prompt');
+});
+
 test('agentic runtime reloads after each action and stops at a human gate', async () => {
   const states = [snapshot('intake'), snapshot('specification_ready')];
   let index = 0;

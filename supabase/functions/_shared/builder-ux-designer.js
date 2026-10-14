@@ -5,7 +5,7 @@ const {
 } = require('./builder-model-adapter');
 const { fitRepositoryContext } = require('./builder-repository-context');
 
-const UX_DESIGNER_PROMPT_VERSION = 'ux-designer-v7';
+const UX_DESIGNER_PROMPT_VERSION = 'ux-designer-v8';
 
 const UX_DESIGN_SCHEMA = Object.freeze({
   type: 'object',
@@ -74,7 +74,7 @@ function normalizeDesignContext(context = {}) {
   };
 }
 
-function buildUxDesignerPrompt({ specification, repositoryContext }) {
+function buildUxDesignerPrompt({ specification, repositoryContext, constraints = [] }) {
   if (!specification || typeof specification !== 'object' || Array.isArray(specification)) {
     throw new Error('approved specification is required');
   }
@@ -91,7 +91,9 @@ function buildUxDesignerPrompt({ specification, repositoryContext }) {
     'component_inventory must include at least one exact owner name from repository_context.relevant_components when that list is non-empty; proposed subcomponents may be added after that grounded owner.',
     'Cover desktop and mobile behavior, accessibility, and loading, empty, error, and success states.',
     'route_map lists only exact identifiers supplied in repository_context.existing_routes; for a component-only change with no supplied route it is an empty array — never invent a route to fill it.',
+    'Copy every route_map.route and route_map.access value byte-for-byte from route_contract.allowed_routes and route_contract.allowed_access; do not shorten, paraphrase, or convert a page identifier into a URL.',
     'route_map access values use only repository_context.existing_access_boundaries.',
+    'Treat correction_constraints as mandatory corrections from prior validation attempts; correct the output rather than weakening or discussing the constraint.',
     'Return one JSON object matching the supplied schema, with no markdown fence.'
   ].join(' ');
   return {
@@ -104,6 +106,13 @@ function buildUxDesignerPrompt({ specification, repositoryContext }) {
         allowed_tokens: context.design_tokens,
         allowed_spacing_tokens: allowedSpacingTokens
       },
+      route_contract: {
+        allowed_routes: context.existing_routes,
+        allowed_access: context.existing_access_boundaries
+      },
+      correction_constraints: Array.isArray(constraints)
+        ? constraints.filter(value => typeof value === 'string' && value.trim()).slice(0, 20)
+        : [],
       required_output: {
         information_architecture: [{ area: 'string', purpose: 'string' }],
         route_map: [{ route: 'string', purpose: 'string', access: ['string'] }],
@@ -266,6 +275,7 @@ async function runUxDesigner({
   step,
   specificationArtifact,
   repositoryContext,
+  constraints = [],
   executeModelRun = executeBuilderModelRun,
   startDesign = startUxDesign,
   completeDesign = completeUxDesign,
@@ -280,7 +290,7 @@ async function runUxDesigner({
     throw new Error('a final product specification artifact is required');
   }
   const loaded = await loadSpecification(supabase, specificationArtifact.id, job.id);
-  const prompt = buildUxDesignerPrompt({ specification: loaded.specification, repositoryContext });
+  const prompt = buildUxDesignerPrompt({ specification: loaded.specification, repositoryContext, constraints });
   const started = await startDesign(supabase, job.id, step.id, specificationArtifact.id);
   if (!started.success) return { ok: false, status: 409, error: started.error };
   const modelRequest = buildModelRunRequest({
