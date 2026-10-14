@@ -656,3 +656,8 @@ remains unpopulated.
   functions, and Atlas dry-run moved 161 -> 159 bounded gaps: 1 edge function,
   103 RPCs and 55 tables. No user-visible behavior was removed and no runtime
   exercise claim was created by this authority cleanup.
+- Authenticated production verification used the dedicated `admin_officer`
+  session after release commit `28e61cb0` reached `main`. Work Units & Coverage
+  loaded for the selected operating organization without an alert and retained
+  New work unit, Add workplace and Add cost centre controls. No workplace, cost
+  centre or work unit was created merely to manufacture exercise evidence.
