@@ -20,8 +20,16 @@ const builderIntentSource = chat.slice(builderIntentStart, chat.indexOf('    con
 const explicitBuilderCreationRequest = vm.runInNewContext(`(() => { ${builderIntentSource} return explicitBuilderCreationRequest; })()`);
 const builderLanesForOwnerRequest = vm.runInNewContext(`(() => { ${builderIntentSource} return builderLanesForOwnerRequest; })()`);
 const continuesBuilderRequest = vm.runInNewContext(`(() => { ${builderIntentSource} return continuesBuilderRequest; })()`);
+const builderProposalDecision = vm.runInNewContext(`(() => { ${builderIntentSource} return builderProposalDecision; })()`);
 
 const request = "In Bob's chat, whenever Bob asks me a question or proposes something that needs my confirmation — a Builder job proposal, a laptop command, a cancellation — show tappable choice buttons under his message, for example 'Yes, run it' / 'Change it' / 'No'. Server side, in supabase/functions/onspace-ai-chat/index.ts, include meta.options on every proposed outcome; client side, in apps/web/src/components/BobPanel.tsx, render metadata.options as accessible buttons. Add component tests.";
+
+test('Builder proposal confirmation rejects negative and ambiguous answers', () => {
+  assert.equal(builderProposalDecision('No, cancel'), 'decline');
+  assert.equal(builderProposalDecision('cancel'), 'decline');
+  assert.equal(builderProposalDecision('change the brief'), null);
+  assert.equal(builderProposalDecision('yes, open the Builder job'), 'confirm');
+});
 
 test('a brief copied from the planner prompt example is not grounded in the request (job b2ce9660)', () => {
   const fabricated = "Fix Freedom Camping Zone Classification. The council has requested a review of the classification for Zone 123 at Client XYZ. The current classification is 'prohibited', but the council wants to change it to 'restricted'. The zone requires an SCV certificate for entry.";
@@ -170,11 +178,11 @@ test('natural-language Builder jobs carry an explicit app, coding, or self-heal 
   assert.equal(builderJobArgsFromEvidence('Build me a patrol handover app', []).owner_instruction_confirmed, true);
 });
 
-test('an explicit owner build instruction opens the autonomous job without a second confirmation turn', () => {
+test('an explicit owner build instruction proposes before opening the autonomous job', () => {
   const builder = chat.slice(chat.indexOf("case 'create_builder_job':"), chat.indexOf("case 'cancel_builder_job':"));
-  assert.match(builder, /const confirmedByOwnerInstruction = toolArgs\.owner_instruction_confirmed === true/);
-  assert.match(builder, /bjRecentRequests\.some\(\(request\) => explicitBuilderCreationRequest/);
-  assert.match(builder, /!storedJob && !confirmedByTriage && !confirmedByOwnerInstruction/);
+  assert.match(builder, /const proposalDecision = storedJob \? builderProposalDecision\(message\) : null/);
+  assert.match(builder, /\(!storedJob \|\| proposalDecision !== 'confirm'\) && !confirmedByTriage/);
+  assert.match(builder, /outcome: 'proposed'/);
   assert.match(builder, /autopilot: true/);
 });
 
@@ -196,13 +204,15 @@ test('Builder intent guard respects explicit plan-only and no-create instruction
   assert.equal(explicitBuilderCreationRequest('Plan only: explain how the Builder job would fix the Bob panel.'), false);
   assert.equal(explicitBuilderCreationRequest('Review the app code but do not create or open a Builder job.'), false);
   assert.equal(explicitBuilderCreationRequest('Create a client record for the new patrol customer.'), false);
+  assert.equal(explicitBuilderCreationRequest('Run an Atlas gap scan, diagnose the cause, and recommend the next workstream.'), false);
+  assert.equal(explicitBuilderCreationRequest('Fix the Bob panel component and add a focused test.'), true);
 });
 
 test('research URLs cannot be mistaken for repository paths when Builder chooses implementation lanes', () => {
   const pathsStart = chat.indexOf('    const builderRepositoryPaths = ');
   assert.ok(pathsStart >= 0);
   const pathsSource = chat.slice(pathsStart, chat.indexOf('    const builderJobArgsFromEvidence = ', pathsStart))
-    .replace('(text: string)', '(text)')
+    .replace(/\(text: string\)/g, '(text)')
     .replace('(text: string, fallbackFrontend = false, fallbackBackend = true)', '(text, fallbackFrontend = false, fallbackBackend = true)');
   const builderRepositoryPaths = vm.runInNewContext(`(() => { ${pathsSource} return builderRepositoryPaths; })()`);
   const builderLanesForOwnerRequest = vm.runInNewContext(`(() => { ${pathsSource} return builderLanesForOwnerRequest; })()`);

@@ -124,13 +124,29 @@ RLS remains the hard backstop underneath. In this repo the mechanism is
 | Conductor — turn gate, tool dispatch, egress, task/memory state | `onspace-ai-chat` + `resolveUserCapabilities`/`gateTool`/`redactOutgoing` | `supabase/functions/onspace-ai-chat/index.ts` (`isToolEffectPermitted`, `applyEgressSweep`, `persist`, `emitEvent`) |
 | Caddie — tool catalogue from Atlas-wired capability; describes, never selects | `caddie.ts` `TOOL_REGISTRY` + caddie cards | `supabase/functions/onspace-ai-chat/caddie.ts` (`generateToolCatalogue`) |
 | Oracle — truth-state of turn, caller, candidate effect, proof grade, safety | welfare seam | `conductor-oracle.ts`, `conductor-welfare-seam.ts` |
-| Atlas — capability map, terrain edges, gap report, blast radius | `bob-query-atlas` (admiral) | `bob-query-atlas`, `bob_capability_map`, `bob_app_map_edges`, `scripts/atlas-refresh.js` |
+| Atlas — capability map, terrain edges, gap report, blast radius | `bob-query-atlas` (admiral/captain/commander; read-only) | `bob-query-atlas`, `bob_capability_map`, `bob_app_map_edges`, `scripts/atlas-refresh.js` |
 | Planner | `apps/api/src/bobPlan.ts` (23 routes) → conductor cross-checks | VPS `/api/bob/plan` via `callPlan` → `services/fcm-api/src/bob/plan.js` (prompt `planPrompt.js`, model routing `modelGateway.js`); `bob-inference` fallback |
 | Verifier (chat lane) | — | `services/fcm-api/src/bob/verify.js`: deterministic checks + independent critic (different model), recommend-only; author repairs once |
 | Working subagents | Duo flows (GitLab) | planner `delegate` → conductor `runSubagents` (read-only tools via `dispatchTool`) + VPS `/api/bob/subagent` |
 | Memory | request → `bob_messages` → `bob_context_memory` → `bob_knowledge_cards` → `bob_learning_memory`; `bob_self_memory` is Bob's own diary; growth is human-judged | same tables live; `bob_self_memory` present; knowledge cards never written from chat |
 | Build/ops | `bob-review-merge-request`, `bob-read-issues`, Gitea/GitLab MR flow | Builder control plane (`bob-control-plane-server.js`, `worker-executor.js`, `builder_*` tables, `builder_approvals`), Gitea PRs, no merge/deploy authority |
 | Local document source | — | approved tenant-bound `document_reference_sources` alias → durable `document_source_ingestion_runs` → read-only laptop worker manifest → governed extraction/comparison/promotion tools |
+
+Owner ruling 2026-10-13: Atlas is Bob's read-only map of his own build, not a
+tenant business-record disclosure. Admiral, captain, and commander sessions may
+inspect Atlas so Bob can diagnose wiring and gap state. This does not widen
+business-data access, governed effects, Builder merge/deploy authority, or the
+human approval boundary.
+
+Owner ruling 2026-10-13: Bob's agentic conversation and Bob Builder may share
+one chat surface, but they are separate execution lanes. Technical questions,
+Atlas inspection, diagnosis, review, gap ranking, and recommendations remain
+in the agentic/read lane. Discovering a defect is not permission to open or
+propose a Builder job. Builder becomes eligible only when the current human
+message explicitly requests implementation or explicitly asks to use Builder,
+and creation still requires a separate unambiguous affirmative. `No`,
+`No, cancel`, `cancel`, `stop`, `not now`, and `change the brief` never confirm
+Builder creation.
 
 Chat turns use a durable asynchronous handoff. The browser creates one
 tenant-scoped request ID; the Conductor records `queued`, returns an immediate

@@ -8253,6 +8253,16 @@ serve(async (req)=>{
       if (frontend || backend) return { frontend, backend };
       return { frontend: fallbackFrontend, backend: fallbackBackend };
     };
+    const builderProposalDecision = (text: string) => {
+      const normalized = String(text ?? '')
+        .toLowerCase()
+        .replace(/[^a-z0-9' ]+/g, ' ')
+        .replace(/\s+/g, ' ')
+        .trim();
+      if (/^(?:no(?: cancel)?|cancel|cancel it|stop|don't|do not|leave it|not now)$/.test(normalized)) return 'decline';
+      if (/^(?:yes(?: please)?|yes open the builder job|go ahead|open it|start it|proceed|confirm|do it)$/.test(normalized)) return 'confirm';
+      return null;
+    };
     const builderJobArgsFromEvidence = (text: string, evidenceSteps: Array<{ tool: string; result_summary: string }>) => {
       const requestBrief = String(text ?? '').trim();
       const firstSentence = requestBrief.replace(/\s+/g, ' ').split(/(?<=[.!?])\s/)[0];
@@ -9457,6 +9467,25 @@ serve(async (req)=>{
               };
             }
             const storedJob = pending && pending.kind === 'builder_job_pending' && pending.builder_job ? pending.builder_job : null;
+            const proposalDecision = storedJob ? builderProposalDecision(message) : null;
+            if (storedJob && proposalDecision === 'decline') {
+              return {
+                reply: 'Cancelled. I did not open the Builder job.',
+                meta: {
+                  tool: 'create_builder_job',
+                  outcome: 'cancelled'
+                }
+              };
+            }
+            if (!storedJob && !explicitBuilderCreationRequest(message) && toolArgs.owner_instruction_confirmed !== true) {
+              return {
+                reply: 'I have kept this in the diagnostic/agentic lane. I did not open or propose a Builder job because you did not explicitly ask me to implement a code change.',
+                meta: {
+                  tool: 'create_builder_job',
+                  outcome: 'builder_not_requested'
+                }
+              };
+            }
             let bjTitle = String(toolArgs.title ?? storedJob?.title ?? '').trim().slice(0, 200);
             let bjDescription = String(toolArgs.task_description ?? toolArgs.brief ?? storedJob?.task_description ?? '').trim().slice(0, 12000);
             const delegatedWebResearch = subagentRunsThisTurn.filter((run) => Array.isArray(run.steps)
@@ -9527,9 +9556,7 @@ serve(async (req)=>{
             const confirmedByTriage = toolArgs.owner_instruction_confirmed === true
               && typeof toolArgs.source_friction_packet_id === 'string'
               && explicitBuilderCreationRequest(message);
-            const confirmedByOwnerInstruction = toolArgs.owner_instruction_confirmed === true
-              && bjRecentRequests.some((request) => explicitBuilderCreationRequest(String(request ?? '')));
-            if (!storedJob && !confirmedByTriage && !confirmedByOwnerInstruction) {
+            if ((!storedJob || proposalDecision !== 'confirm') && !confirmedByTriage) {
               return {
                 reply: [
                   'I have composed a Builder job for the GitHub repository. Please review before I open it:',
