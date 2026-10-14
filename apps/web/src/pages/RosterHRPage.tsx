@@ -250,11 +250,15 @@ interface CourtRow {
   officer_user_id: string;
   court_name: string;
   case_reference: string | null;
+  subpoena_reference: string | null;
   appearance_type: string;
   scheduled_at: string;
   estimated_hours: number;
   status: string;
   is_overtime: boolean;
+  actual_start: string | null;
+  actual_end: string | null;
+  outcome: string | null;
 }
 
 const TABS: { id: RosterTab; label: string }[] = [
@@ -394,6 +398,9 @@ const RosterHRPage: React.FC = () => {
   const [callouts, setCallouts] = useState<CalloutRow[]>([]);
   const [calloutPaySummaries, setCalloutPaySummaries] = useState<Record<string, CalloutPaySummary>>({});
   const [courtAppearances, setCourtAppearances] = useState<CourtRow[]>([]);
+  const [courtForm, setCourtForm] = useState({ officerId: '', courtName: '', appearanceType: 'hearing', scheduledAt: '', estimatedHours: '2', caseReference: '', subpoenaReference: '', notes: '' });
+  const [courtOutcome, setCourtOutcome] = useState<{ appearance: CourtRow; status: 'attended' | 'adjourned' | 'cancelled' | 'excused'; actualStart: string; actualEnd: string; outcome: string } | null>(null);
+  const courtRequestId = useRef(crypto.randomUUID());
   const [assetCheck, setAssetCheck] = useState<{ asset: AssetRow; condition: string; odometer: string; fuel: string; defects: string } | null>(null);
   const [payrollExport, setPayrollExport] = useState<{ from: string; to: string } | null>(null);
   const [onboardingAction, setOnboardingAction] = useState<{ staffId: string; ledgerId?: string; version?: number; nextStage?: string; name: string; note: string } | null>(null);
@@ -514,7 +521,7 @@ const RosterHRPage: React.FC = () => {
           supabase.from('assets').select('id,asset_type,name,registration,make,model,status,assigned_to,last_inspection_date,next_inspection_date').eq('organization_id', orgId).order('asset_type').order('name'),
           supabase.from('on_call_periods').select('id,officer_user_id,period_type,starts_at,ends_at,flat_rate,status').eq('organization_id', orgId).order('starts_at', { ascending: false }).limit(50),
           supabase.from('callout_shifts').select('id,on_call_period_id,officer_user_id,status,minimum_pay_hours,callout_received_at,work_started_at,work_ended_at').eq('organization_id', orgId).order('callout_received_at', { ascending: false }).limit(50),
-          supabase.from('court_appearances').select('id,officer_user_id,court_name,case_reference,appearance_type,scheduled_at,estimated_hours,status,is_overtime').eq('organization_id', orgId).order('scheduled_at', { ascending: false }).limit(50),
+          supabase.from('court_appearances').select('id,officer_user_id,court_name,case_reference,subpoena_reference,appearance_type,scheduled_at,estimated_hours,status,is_overtime,actual_start,actual_end,outcome').eq('organization_id', orgId).order('scheduled_at', { ascending: false }).limit(50),
           supabase.rpc('get_staff_onboarding_readiness', { p_organization_id: orgId }),
           supabase.from('recruitment_vacancies').select('id,title,employment_type,location_summary,status,opens_on,closes_on').eq('organization_id', orgId).order('created_at', { ascending: false }),
           supabase.from('recruitment_candidates').select('id,vacancy_id,first_name,last_name,email,stage,status,offer_role,offer_employment_type,offer_start_date').eq('organization_id', orgId).order('created_at', { ascending: false }),
@@ -954,6 +961,70 @@ const RosterHRPage: React.FC = () => {
     });
     if (createError) setError(createError.message);
     else { setNotice('On-call period created and sent to the officer for acceptance.'); setOnCallForm({ officerId: '', type: 'standard', startsAt: '', endsAt: '', flatRate: '', notes: '' }); await loadAll(); }
+    setSaving(false);
+  };
+
+  const scheduleCourtAppearance = async (event: React.FormEvent) => {
+    event.preventDefault();
+    const estimatedHours = Number(courtForm.estimatedHours);
+    if (!courtForm.officerId || !courtForm.courtName.trim() || !courtForm.scheduledAt || !Number.isFinite(estimatedHours) || estimatedHours <= 0 || estimatedHours > 24) {
+      setError('Choose an officer, court, valid date and an estimated duration between 0 and 24 hours.');
+      return;
+    }
+    setSaving(true); setError(null); setNotice(null);
+    const { data, error: courtError } = await supabase.rpc('schedule_court_appearance', {
+      p_client_request_id: courtRequestId.current,
+      p_officer_user_id: courtForm.officerId,
+      p_court_name: courtForm.courtName.trim(),
+      p_appearance_type: courtForm.appearanceType,
+      p_scheduled_at: new Date(courtForm.scheduledAt).toISOString(),
+      p_estimated_hours: estimatedHours,
+      p_enforcement_case_id: null,
+      p_case_reference: courtForm.caseReference.trim() || null,
+      p_subpoena_reference: courtForm.subpoenaReference.trim() || null,
+      p_notes: courtForm.notes.trim() || null,
+    });
+    if (courtError || !data) {
+      setError(courtError?.message ?? 'The court appearance receipt was not confirmed.');
+    } else {
+      const appearance = (Array.isArray(data) ? data[0] : data) as CourtRow;
+      setNotice(`Court appearance scheduled for ${staffNames[appearance.officer_user_id] ?? 'the officer'}${appearance.is_overtime ? ' and marked as overtime' : ''}.`);
+      courtRequestId.current = crypto.randomUUID();
+      setCourtForm({ officerId: '', courtName: '', appearanceType: 'hearing', scheduledAt: '', estimatedHours: '2', caseReference: '', subpoenaReference: '', notes: '' });
+      await loadAll();
+    }
+    setSaving(false);
+  };
+
+  const recordCourtOutcome = async (event: React.FormEvent) => {
+    event.preventDefault();
+    if (!courtOutcome) return;
+    if (courtOutcome.status === 'attended' && (!courtOutcome.actualStart || !courtOutcome.actualEnd)) {
+      setError('Attended appearances require actual start and end times.');
+      return;
+    }
+    const actualStart = courtOutcome.actualStart ? new Date(courtOutcome.actualStart) : null;
+    const actualEnd = courtOutcome.actualEnd ? new Date(courtOutcome.actualEnd) : null;
+    if (actualStart && actualEnd && actualEnd <= actualStart) {
+      setError('The court appearance end time must be after its start time.');
+      return;
+    }
+    setSaving(true); setError(null); setNotice(null);
+    const { data, error: outcomeError } = await supabase.rpc('record_court_appearance_outcome', {
+      p_appearance_id: courtOutcome.appearance.id,
+      p_expected_status: courtOutcome.appearance.status,
+      p_status: courtOutcome.status,
+      p_actual_start: actualStart?.toISOString() ?? null,
+      p_actual_end: actualEnd?.toISOString() ?? null,
+      p_outcome: courtOutcome.outcome.trim() || null,
+    });
+    if (outcomeError || !data) {
+      setError(outcomeError?.message ?? 'The court appearance outcome receipt was not confirmed.');
+    } else {
+      setNotice(`Court appearance marked ${courtOutcome.status}. Actual time and outcome are now on the roster record.`);
+      setCourtOutcome(null);
+      await loadAll();
+    }
     setSaving(false);
   };
 
@@ -2088,6 +2159,14 @@ const RosterHRPage: React.FC = () => {
       {tab === 'court' && (
         <section className="reports-section">
           <h2>Court Appearances ({courtAppearances.length})</h2>
+          <form className="assessment-form" onSubmit={scheduleCourtAppearance}>
+            <p>Schedule hearings and tribunal work against the officer's roster. The server identifies work outside a rostered slot as overtime and notifies the officer.</p>
+            <div className="form-row"><label><span>Officer</span><select required value={courtForm.officerId} onChange={(event) => setCourtForm({ ...courtForm, officerId: event.target.value })}><option value="">Select active officer</option>{staff.filter((person) => ['officer', 'admin_officer'].includes(person.role) && person.work_ready !== false).map((person) => <option value={person.id} key={person.id}>{person.display_name ?? person.email ?? person.id}</option>)}</select></label><label><span>Court or tribunal</span><input required value={courtForm.courtName} onChange={(event) => setCourtForm({ ...courtForm, courtName: event.target.value })} placeholder="e.g. Nelson District Court" /></label></div>
+            <div className="form-row"><label><span>Appearance type</span><select value={courtForm.appearanceType} onChange={(event) => setCourtForm({ ...courtForm, appearanceType: event.target.value })}><option value="hearing">Hearing</option><option value="trial">Trial</option><option value="deposition">Deposition</option><option value="tribunal">Tribunal</option><option value="mediation">Mediation</option><option value="other">Other</option></select></label><label><span>Scheduled for</span><input type="datetime-local" required value={courtForm.scheduledAt} onChange={(event) => setCourtForm({ ...courtForm, scheduledAt: event.target.value })} /></label><label><span>Estimated hours</span><input type="number" min="0.25" max="24" step="0.25" required value={courtForm.estimatedHours} onChange={(event) => setCourtForm({ ...courtForm, estimatedHours: event.target.value })} /></label></div>
+            <div className="form-row"><label><span>Case reference</span><input value={courtForm.caseReference} onChange={(event) => setCourtForm({ ...courtForm, caseReference: event.target.value })} /></label><label><span>Subpoena reference</span><input value={courtForm.subpoenaReference} onChange={(event) => setCourtForm({ ...courtForm, subpoenaReference: event.target.value })} /></label></div>
+            <label><span>Instructions or preparation notes</span><textarea rows={3} value={courtForm.notes} onChange={(event) => setCourtForm({ ...courtForm, notes: event.target.value })} /></label>
+            <button type="submit" className="btn btn-primary" disabled={saving}>{saving ? 'Scheduling' : 'Schedule court appearance'}</button>
+          </form>
           <div className="contacts-list">
             {courtAppearances.length === 0 ? (
               <div className="empty-state"><p>No court appearances scheduled.</p></div>
@@ -2104,14 +2183,19 @@ const RosterHRPage: React.FC = () => {
                       {new Date(c.scheduled_at).toLocaleString('en-NZ')} · est. {c.estimated_hours}h
                       {c.is_overtime ? ' · overtime' : ''}
                       {c.case_reference ? ` · ${c.case_reference}` : ''}
+                      {c.subpoena_reference ? ` · subpoena ${c.subpoena_reference}` : ''}
                     </p>
+                    {c.actual_start && <p className="contact-meta">Attended {new Date(c.actual_start).toLocaleString('en-NZ')}{c.actual_end ? ` – ${new Date(c.actual_end).toLocaleString('en-NZ')}` : ''}{c.outcome ? ` · ${c.outcome}` : ''}</p>}
                   </div>
+                  {c.status === 'scheduled' && <button type="button" className="btn btn-sm btn-secondary" disabled={saving} onClick={() => setCourtOutcome({ appearance: c, status: 'attended', actualStart: '', actualEnd: '', outcome: '' })}>Record outcome</button>}
                 </div>
               ))
             )}
           </div>
         </section>
       )}
+
+      {courtOutcome && <div className="hr-review-backdrop"><form className="hr-review-dialog" role="dialog" aria-modal="true" aria-labelledby="court-outcome-title" onSubmit={recordCourtOutcome}><header><div><span>Court record</span><h2 id="court-outcome-title">Record appearance outcome</h2></div><button type="button" onClick={() => setCourtOutcome(null)} aria-label="Close court outcome">×</button></header><p>{staffNames[courtOutcome.appearance.officer_user_id] ?? 'Officer'} · {courtOutcome.appearance.appearance_type} at {courtOutcome.appearance.court_name}. The saved outcome becomes roster, overtime and audit evidence.</p><label><span>Outcome status</span><select value={courtOutcome.status} onChange={(event) => setCourtOutcome({ ...courtOutcome, status: event.target.value as 'attended' | 'adjourned' | 'cancelled' | 'excused' })}><option value="attended">Attended</option><option value="adjourned">Adjourned</option><option value="cancelled">Cancelled</option><option value="excused">Excused</option></select></label>{courtOutcome.status === 'attended' && <div className="form-row"><label><span>Actual start</span><input type="datetime-local" required value={courtOutcome.actualStart} onChange={(event) => setCourtOutcome({ ...courtOutcome, actualStart: event.target.value })} /></label><label><span>Actual end</span><input type="datetime-local" required value={courtOutcome.actualEnd} onChange={(event) => setCourtOutcome({ ...courtOutcome, actualEnd: event.target.value })} /></label></div>}<label><span>Outcome or next step</span><textarea rows={4} value={courtOutcome.outcome} onChange={(event) => setCourtOutcome({ ...courtOutcome, outcome: event.target.value })} placeholder="Decision, adjournment date, evidence requested, or why the officer was excused" /></label><footer><button type="button" className="btn btn-secondary" onClick={() => setCourtOutcome(null)}>Cancel</button><button type="submit" className="btn btn-primary" disabled={saving}>{saving ? 'Saving' : 'Record outcome'}</button></footer></form></div>}
 
       {assetCheck && <div className="hr-review-backdrop"><form className="hr-review-dialog" role="dialog" aria-modal="true" aria-labelledby="asset-check-title" onSubmit={handleAssetCheck}><header><div><span>Fleet evidence</span><h2 id="asset-check-title">Record check</h2></div><button type="button" onClick={() => setAssetCheck(null)} aria-label="Close asset check">×</button></header><p>{assetCheck.asset.name}{assetCheck.asset.registration ? ` · ${assetCheck.asset.registration}` : ''}. Major issues move the asset to maintenance and alert administrators.</p><label><span>Condition</span><select value={assetCheck.condition} onChange={(e) => setAssetCheck({ ...assetCheck, condition: e.target.value })}><option value="good">Good</option><option value="minor_issue">Minor issue</option><option value="major_issue">Major issue</option><option value="unserviceable">Unserviceable</option></select></label>{assetCheck.asset.asset_type === 'vehicle' && <div className="form-row"><label><span>Odometer</span><input type="number" min={0} value={assetCheck.odometer} onChange={(e) => setAssetCheck({ ...assetCheck, odometer: e.target.value })} /></label><label><span>Fuel level</span><select value={assetCheck.fuel} onChange={(e) => setAssetCheck({ ...assetCheck, fuel: e.target.value })}><option value="">Not recorded</option><option value="full">Full</option><option value="three_quarter">Three quarter</option><option value="half">Half</option><option value="quarter">Quarter</option><option value="empty">Empty</option></select></label></div>}<label><span>Defects noted</span><textarea rows={3} value={assetCheck.defects} onChange={(e) => setAssetCheck({ ...assetCheck, defects: e.target.value })} /></label><footer><button type="button" className="btn btn-secondary" onClick={() => setAssetCheck(null)}>Cancel</button><button type="submit" className="btn btn-primary" disabled={saving}>{saving ? 'Saving' : 'Record check'}</button></footer></form></div>}
 

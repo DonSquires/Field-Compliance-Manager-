@@ -315,6 +315,24 @@ remains unpopulated.
   debrief/readiness/`complete_officer_shift` path rather than creating a
   second stop authority.
 - Atlas moved 178 -> 177 bounded gaps. The capability is `wired=true`; it is
-  not claimed as `exercised`. The supplied runtime credential authenticated as
-  `grand_master`, not `officer` or `admin_officer`, so no live shift was created
-  under an unauthorised test role.
+  live and has direct invocation evidence. The dedicated `admin_officer` test
+  identity completed start -> debrief -> governed completion; the persisted
+  shift has `shift_origin=ad_hoc`, `status=completed`, an end timestamp, and
+  `officer_ad_hoc_shift_started` plus `officer_shift_completed` audit actions.
+  `bob_capability_map.exercised` remains empty because the current exercise
+  evidence pipeline maps audited table writes but does not yet map RPC names;
+  this report records the invocation without falsifying that Atlas field.
+
+### Closure log — court appearance lifecycle
+
+- `schedule_court_appearance` and `record_court_appearance_outcome` now have
+  real callers in the existing Roster HR Court tab. The tab previously read
+  `court_appearances` but could neither create nor close one.
+- Roster administrators can schedule a hearing, trial, deposition, tribunal,
+  mediation or other appearance; the server determines whether it falls
+  outside a rostered slot, records overtime, notifies the officer, deduplicates
+  retries and audits the receipt. Scheduled appearances expose a governed
+  outcome action with expected-state concurrency. Attended outcomes require
+  actual start/end times; adjourned, cancelled and excused outcomes remain
+  explicit rather than being hidden as deletion.
+- Atlas moved 177 -> 175 bounded gaps. Both capabilities are `wired=true`.

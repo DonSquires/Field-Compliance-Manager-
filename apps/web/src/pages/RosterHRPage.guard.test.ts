@@ -78,6 +78,22 @@ describe('governed HR administration', () => {
     expect(page).not.toMatch(/from\('on_call_periods'\)[\s\S]{0,220}\.(insert|update|upsert|delete)\(/);
   });
 
+  it('schedules court appearances through the idempotent roster RPC', () => {
+    expect(page).toContain("supabase.rpc('schedule_court_appearance'");
+    expect(page).toContain('p_client_request_id: courtRequestId.current');
+    expect(page).toContain('courtRequestId.current = crypto.randomUUID()');
+    expect(page).toContain('marked as overtime');
+    expect(page).not.toMatch(/from\('court_appearances'\)[\s\S]{0,220}\.(insert|update|upsert|delete)\(/);
+  });
+
+  it('records court outcomes through the expected-state RPC', () => {
+    expect(page).toContain("supabase.rpc('record_court_appearance_outcome'");
+    expect(page).toContain('p_expected_status: courtOutcome.appearance.status');
+    expect(page).toContain("courtOutcome.status === 'attended'");
+    expect(page).toContain('end time must be after its start time');
+    expect(page).toContain('The saved outcome becomes roster, overtime and audit evidence.');
+  });
+
   it('uses governed coverage creation and reasoned review', () => {
     expect(page).toContain("supabase.rpc('create_shift_coverage_request'");
     expect(page).not.toContain(".from('shift_coverage_requests').insert");
