@@ -626,3 +626,9 @@ remains unpopulated.
   CRM guards passed across three files, the production web build passed, and
   Atlas dry-run moved 163 -> 161 bounded gaps: 1 edge function, 105 RPCs and
   55 tables. Successful runtime exercise remains unclaimed.
+- Authenticated production verification used the dedicated `admin_officer`
+  session after Vercel deployed release commit `a394b344`. Accounts receivable
+  rendered without an alert, showed the truthful no-invoices state, and kept
+  Generate from agreement available. No Review lines control was shown because
+  no draft invoice exists, and no invoice or line was created for testing.
+  Live Atlas reports both line RPCs as wired with exercise unclaimed.
