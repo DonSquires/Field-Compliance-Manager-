@@ -1,14 +1,14 @@
 #!/usr/bin/env node
 /*
  * Parses a raw R&M patrol-log CSV (exported via .tmp-xlsx-to-csv.ps1 from the
- * client's raw DATA sheet) into a resolved JSON batch, then imports it:
+ * client's raw DATA sheet) into a governed review batch:
  *   - Rows with a resolvable officer (Patroller matches a known R&M
  *     user_profiles.display_name) AND a plate (Reg column, or extracted from
  *     Comments) go to `public.observations` (vehicle-plate-sighting table).
  *   - Everything else (literal "Camera", unresolved patroller names, no
  *     plate) goes to `public.location_events` via create_location_event().
- * Idempotent: every row is keyed by `rm_patrol_import:{client_code}:{Job}` as
- * external_ref/external_refs so a re-run does not duplicate.
+ * Idempotent: the source/configuration identity freezes the review batch and
+ * every row is keyed by `rm_patrol_import:{client_code}:{Job}`.
  *
  *   node scripts/import-patrol-log.mjs --csv <path> --org-id <uuid> --client-code <code>
  *     --zone-map-file <path-to-json> [--source-label <file>] [--source-hash <sha256>]
@@ -21,11 +21,12 @@ import { execFileSync } from 'node:child_process';
 import { mkdtempSync, rmSync, writeFileSync } from 'node:fs';
 import { createHash } from 'node:crypto';
 import { tmpdir } from 'node:os';
-import { join } from 'node:path';
+import { basename, join } from 'node:path';
 
 const PROJECT_REF = 'dotczcyyzgabmtmnglqj';
 const PROVIDER_ORG_ID = 'e96d71c9-28a6-4d4a-b0f3-1c4ecdaa9c13'; // R&M Security and Investigations
-const ACTOR_ID = '1b02ab97-8611-40ab-a3a0-b5c74589db58';
+const ACTOR_ID = 'f1c00000-0000-4000-8000-000000000001'; // Dedicated non-login import identity
+const SOURCE_PROFILE = 'rm_patrol_log';
 const args = process.argv.slice(2);
 const flag = (name) => { const i = args.indexOf(name); return i !== -1 ? args[i + 1] : null; };
 const mode = args.includes('--apply') ? 'apply' : 'dry-run';
@@ -41,9 +42,10 @@ const sourceSheet = flag('--source-sheet');
 const sourceFirstRow = Number(flag('--source-first-row') ?? 2);
 const zoneMap = zoneMapFile ? JSON.parse(readFileSync(zoneMapFile, 'utf8')) : JSON.parse(flag('--zone-map') ?? '{}');
 const token = process.env.FIELD_COMPLIANCE_CODESPACE;
-if (!token && !useSupabaseCli) { console.error('FIELD_COMPLIANCE_CODESPACE or --use-supabase-cli is required'); process.exit(1); }
+if (mode === 'apply' && !token && !useSupabaseCli) { console.error('FIELD_COMPLIANCE_CODESPACE or --use-supabase-cli is required for --apply'); process.exit(1); }
 if (!csvPath || !orgId || !clientCode) { console.error('Usage: --csv <path> --org-id <uuid> --client-code <code> --zone-map-file <path> [--dry-run|--apply]'); process.exit(1); }
 if (sourceHash && !/^[a-f0-9]{64}$/i.test(sourceHash)) { console.error('--source-hash must be a SHA-256 hex digest'); process.exit(1); }
+if (!/^[0-9a-f-]{36}$/i.test(orgId)) { console.error('--org-id must be a UUID'); process.exit(1); }
 if (!Number.isInteger(sourceFirstRow) || sourceFirstRow < 1) { console.error('--source-first-row must be a positive integer'); process.exit(1); }
 
 // R&M's own known officers (created 2026-09-23 on owner instruction). Extend
@@ -147,6 +149,14 @@ function extractPlates(text) {
 }
 
 const raw = readFileSync(csvPath, 'utf8');
+const computedSourceHash = createHash('sha256').update(raw).digest('hex');
+if (sourceHash && sourceHash.toLowerCase() !== computedSourceHash) {
+  console.error('--source-hash does not match the CSV bytes');
+  process.exit(1);
+}
+const immutableSourceHash = computedSourceHash;
+const immutableSourceLabel = sourceLabel || basename(csvPath);
+const immutableSourceSheet = sourceSheet || 'DATA';
 const table = parseCsv(raw).filter((r) => r.length > 1);
 // Header cells sometimes carry a leading BOM and/or extra/embedded whitespace (e.g. NCC's
 // "24hr\nTime", Taylors' "Log  no" with a double space) - normalize both before matching.
@@ -213,8 +223,10 @@ for (const [rowIndex, r] of table.slice(1).entries()) {
   seenExternalRefs.add(externalRef);
   const payload = {
     source: 'rm_patrol_log_import', client_code: clientCode, job_number: job || null,
-    source_file: sourceLabel || null, source_sha256: sourceHash || null,
-    source_sheet: sourceSheet || null, source_row: sourceSheet ? sourceFirstRow + rowIndex : null,
+    source_file: immutableSourceLabel, source_sha256: immutableSourceHash,
+    source_sheet: immutableSourceSheet, source_row: sourceFirstRow + rowIndex,
+    classification_profile: SOURCE_PROFILE,
+    job_kms: r[col.jobKms] || null,
     ...(includeNarratives ? {
       comments: comments || null,
       issue: (r[col.issue] ?? '').trim() || null,
@@ -244,93 +256,15 @@ for (const [rowIndex, r] of table.slice(1).entries()) {
 
 console.log(`Parsed ${table.length - 1} rows (${skipped} skipped: no date; ${skippedNoZone} skipped: no resolvable zone via Reserve/Location; ${skippedDuplicate} skipped: duplicate external reference): ${observationsBatch.length} -> observations, ${eventsBatch.length} -> location_events`);
 
-// Large logs (thousands of rows, verbose free-text comments) can produce a combined JSON
-// payload the Management API rejects as "request entity too large" in one request - chunk
-// both batches into fixed-size slices and run one transaction per chunk, summing results.
 const CHUNK_SIZE = 300;
 function chunk(arr, size) { const out = []; for (let i = 0; i < arr.length; i += size) out.push(arr.slice(i, i + size)); return out; }
+const derivativeHash = createHash('sha256').update(JSON.stringify({ observations: observationsBatch, events: eventsBatch })).digest('hex');
+for (const row of [...observationsBatch, ...eventsBatch]) row.payload.derivative_sha256 = derivativeHash;
 const obsChunks = chunk(observationsBatch, CHUNK_SIZE);
 const evtChunks = chunk(eventsBatch, CHUNK_SIZE);
 const totalChunks = Math.max(obsChunks.length, evtChunks.length, 1);
 
-async function runChunk(obsSlice, evtSlice) {
-  const data = { org_id: orgId, client_code: clientCode, include_narratives: includeNarratives, observations: obsSlice, events: evtSlice };
-  const json = JSON.stringify(data);
-  if (json.includes('$json$')) throw new Error('data must not contain the $json$ delimiter');
-  const body = `
-CREATE TEMP TABLE IF NOT EXISTS _import_counts (obs_inserted int, obs_skipped int, obs_updated int, evt_inserted int, evt_skipped int, evt_updated int);
-DO $import$
-DECLARE
-  v_data jsonb := $json$${json}$json$::jsonb;
-  v_org uuid := (v_data->>'org_id')::uuid;
-  v_obs jsonb; v_evt jsonb; v_plate text; v_vehicle_id uuid; v_obs_count integer := 0; v_evt_count integer := 0; v_evt_skip integer := 0; v_obs_skip integer := 0; v_obs_updated integer := 0; v_evt_updated integer := 0; v_rows integer := 0;
-BEGIN
-  FOR v_obs IN SELECT * FROM jsonb_array_elements(v_data->'observations') LOOP
-    IF EXISTS (SELECT 1 FROM public.observations WHERE organization_id = v_org AND external_refs->>'external_ref' = v_obs->>'external_ref') THEN
-      IF coalesce((v_data->>'include_narratives')::boolean, false) THEN
-        UPDATE public.observations
-        SET officer_notes = coalesce(nullif(v_obs->>'officer_notes', ''), officer_notes),
-            external_refs = coalesce(external_refs, '{}'::jsonb) || jsonb_build_object('import', v_obs->'payload'),
-            distance_km = CASE WHEN v_obs->>'distance_km' ~ '^[0-9]+([.][0-9]+)?$' THEN (v_obs->>'distance_km')::numeric ELSE distance_km END
-        WHERE organization_id = v_org AND external_refs->>'external_ref' = v_obs->>'external_ref';
-        GET DIAGNOSTICS v_rows = ROW_COUNT;
-        v_obs_updated := v_obs_updated + v_rows;
-      ELSE
-        v_obs_skip := v_obs_skip + 1;
-      END IF;
-      CONTINUE;
-    END IF;
-    v_plate := v_obs->>'plate';
-    SELECT id INTO v_vehicle_id FROM public.canonical_vehicles WHERE upper(plate_number) = upper(v_plate) LIMIT 1;
-    IF v_vehicle_id IS NULL THEN
-      INSERT INTO public.canonical_vehicles (plate_number, compliance_source)
-      VALUES (v_plate, 'canonical') RETURNING id INTO v_vehicle_id;
-    END IF;
-        INSERT INTO public.observations (organization_id, officer_id, plate_number, zone_id, site_id, observed_at, module_key, canonical_vehicle_id, officer_notes, plate_source, external_refs, distance_km)
-    VALUES (v_org, (v_obs->>'officer_id')::uuid, v_plate, NULLIF(v_obs->>'zone_id','')::uuid, NULLIF(v_obs->>'site_id','')::uuid, (v_obs->>'occurred_at')::timestamptz, 'patrol', v_vehicle_id, v_obs->>'officer_notes', 'manual',
-            jsonb_build_object('external_ref', v_obs->>'external_ref', 'import', v_obs->'payload'),
-          CASE WHEN v_obs->>'distance_km' ~ '^[0-9]+([.][0-9]+)?$' THEN (v_obs->>'distance_km')::numeric ELSE NULL END);
-    v_obs_count := v_obs_count + 1;
-  END LOOP;
-
-  FOR v_evt IN SELECT * FROM jsonb_array_elements(v_data->'events') LOOP
-    IF EXISTS (SELECT 1 FROM public.location_events WHERE organization_id = v_org AND external_ref = v_evt->>'external_ref') THEN
-      IF coalesce((v_data->>'include_narratives')::boolean, false) THEN
-        UPDATE public.location_events
-        SET payload = coalesce(payload, '{}'::jsonb) || coalesce(v_evt->'payload', '{}'::jsonb),
-            distance_km = CASE WHEN v_evt->>'distance_km' ~ '^[0-9]+([.][0-9]+)?$' THEN (v_evt->>'distance_km')::numeric ELSE distance_km END
-        WHERE organization_id = v_org AND external_ref = v_evt->>'external_ref';
-        GET DIAGNOSTICS v_rows = ROW_COUNT;
-        v_evt_updated := v_evt_updated + v_rows;
-      ELSE
-        v_evt_skip := v_evt_skip + 1;
-      END IF;
-      CONTINUE;
-    END IF;
-    PERFORM public.create_location_event(
-      p_organization_id => v_org, p_event_type => v_evt->>'event_type', p_client_site_id => NULLIF(v_evt->>'site_id','')::uuid, p_zone_id => NULLIF(v_evt->>'zone_id','')::uuid,
-      p_module_key => 'patrol', p_occurred_at => (v_evt->>'occurred_at')::timestamptz, p_status => v_evt->>'status',
-      p_source => 'rm_patrol_log_import', p_external_ref => v_evt->>'external_ref', p_payload => v_evt->'payload',
-      p_observed_entity_type => v_evt->>'observed_entity_type', p_observed_entity_id => NULLIF(v_evt->>'observed_entity_id','')::uuid,
-      p_provider_organization_id => '${PROVIDER_ORG_ID}'::uuid, p_client_organization_id => v_org
-    );
-    -- create_location_event has no distance_km param (shared RPC, not extended for this) - set it directly after insert.
-    IF v_evt->>'distance_km' ~ '^[0-9]+([.][0-9]+)?$' THEN
-      UPDATE public.location_events SET distance_km = (v_evt->>'distance_km')::numeric
-      WHERE organization_id = v_org AND external_ref = v_evt->>'external_ref';
-    END IF;
-    v_evt_count := v_evt_count + 1;
-  END LOOP;
-
-  RAISE NOTICE 'observations_inserted=% observations_skipped=% observations_updated=% events_inserted=% events_skipped=% events_updated=%', v_obs_count, v_obs_skip, v_obs_updated, v_evt_count, v_evt_skip, v_evt_updated;
-  INSERT INTO _import_counts VALUES (v_obs_count, v_obs_skip, v_obs_updated, v_evt_count, v_evt_skip, v_evt_updated);
-END
-$import$;
-SELECT * FROM (SELECT obs_inserted, obs_skipped, obs_updated, evt_inserted, evt_skipped, evt_updated FROM _import_counts ORDER BY ctid DESC LIMIT 1) t;
-`;
-  const sql = `BEGIN;
-set local request.jwt.claim.sub = '${ACTOR_ID}';
-${body}${mode === 'apply' ? 'COMMIT;' : 'ROLLBACK;'}`;
+async function runSql(sql) {
   if (useSupabaseCli) {
     const tempDir = mkdtempSync(join(tmpdir(), 'fcm-patrol-import-'));
     const sqlFile = join(tempDir, 'chunk.sql');
@@ -356,14 +290,132 @@ ${body}${mode === 'apply' ? 'COMMIT;' : 'ROLLBACK;'}`;
   return JSON.parse(text)[0];
 }
 
-const totals = { obs_inserted: 0, obs_skipped: 0, obs_updated: 0, evt_inserted: 0, evt_skipped: 0, evt_updated: 0 };
+function encodedJson(value) {
+  return Buffer.from(JSON.stringify(value), 'utf8').toString('base64');
+}
+
+const manifest = {
+  idempotency_key: createHash('sha256').update(`${PROVIDER_ORG_ID}:${orgId}:${immutableSourceHash}:${derivativeHash}`).digest('hex'),
+  source_profile: SOURCE_PROFILE,
+  target_client_organization_id: orgId,
+  derivative_sha256: derivativeHash,
+  expected_proposal_count: 0,
+  include_narratives: includeNarratives,
+};
+const schema = {
+  headers: header,
+  resolved_mappings: header.map((sourceColumn) => ({
+    source_column: sourceColumn,
+    target_entity: 'patrol_import_source',
+    target_field: sourceColumn.toLowerCase().replace(/[^a-z0-9]+/g, '_').replace(/^_|_$/g, ''),
+  })),
+};
+
+if (mode === 'dry-run') {
+  console.log(JSON.stringify({
+    mode,
+    source_file: immutableSourceLabel,
+    source_sha256: immutableSourceHash,
+    derivative_sha256: derivativeHash,
+    row_count: table.length - 1,
+    duplicate_count: skippedDuplicate,
+    unresolved_count: skippedNoZone,
+    observation_candidates: observationsBatch.length,
+    event_candidates: eventsBatch.length,
+    proposed_consequential_writes: 0,
+    next_status_on_apply: 'needs_review',
+  }));
+  process.exit(0);
+}
+
+const beginData = encodedJson({
+  provider_organization_id: PROVIDER_ORG_ID,
+  client_organization_id: orgId,
+  batch_name: `${clientCode} patrol log - ${immutableSourceLabel}`,
+  source_file: immutableSourceLabel,
+  source_sha256: immutableSourceHash,
+  parser: 'scripts/import-patrol-log.mjs',
+  manifest,
+  schema,
+  row_count: table.length - 1,
+  duplicate_count: skippedDuplicate,
+  unresolved_count: skippedNoZone,
+});
+const beginRow = await runSql(`
+BEGIN;
+SET LOCAL request.jwt.claim.sub = '${ACTOR_ID}';
+WITH args AS (SELECT convert_from(decode('${beginData}','base64'),'UTF8')::jsonb AS value)
+SELECT row_to_json(batch) AS batch
+FROM args, LATERAL public.begin_patrol_import_batch(
+  (value->>'provider_organization_id')::uuid,
+  (value->>'client_organization_id')::uuid,
+  value->>'batch_name',
+  value->>'source_file',
+  value->>'source_sha256',
+  value->>'parser',
+  value->'manifest',
+  value->'schema',
+  (value->>'row_count')::integer,
+  (value->>'duplicate_count')::integer,
+  (value->>'unresolved_count')::integer
+) batch;
+COMMIT;`);
+const batch = beginRow?.batch ?? beginRow?.rows?.[0]?.batch;
+if (!batch?.id) throw new Error('Governed import batch creation was not confirmed');
+
+const totals = {
+  obs_inserted: 0,
+  obs_matched: 0,
+  evt_inserted: 0,
+  evt_matched: 0,
+  proposal_candidates: 0,
+  proposals_inserted: 0,
+  proposals_existing: 0,
+};
 for (let i = 0; i < totalChunks; i += 1) {
   const obsSlice = obsChunks[i] ?? [];
   const evtSlice = evtChunks[i] ?? [];
   if (!obsSlice.length && !evtSlice.length) continue;
   console.log(`chunk ${i + 1}/${totalChunks}: ${obsSlice.length} observations, ${evtSlice.length} events`);
-  const row = await runChunk(obsSlice, evtSlice);
-  for (const key of Object.keys(totals)) totals[key] += Number(row[key] ?? 0);
+  const chunkData = encodedJson({ batch_id: batch.id, observations: obsSlice, events: evtSlice, proposals: [] });
+  const row = await runSql(`
+BEGIN;
+SET LOCAL request.jwt.claim.sub = '${ACTOR_ID}';
+WITH args AS (SELECT convert_from(decode('${chunkData}','base64'),'UTF8')::jsonb AS value)
+SELECT staged.*
+FROM args, LATERAL public.stage_patrol_import_chunk(
+  (value->>'batch_id')::uuid,
+  '${PROVIDER_ORG_ID}'::uuid,
+  '${orgId}'::uuid,
+  value->'observations',
+  value->'events',
+  value->'proposals'
+) staged;
+COMMIT;`);
+  const staged = row?.rows?.[0] ?? row;
+  if (!staged) throw new Error(`Governed staging result was not returned for chunk ${i + 1}`);
+  for (const key of Object.keys(totals)) totals[key] += Number(staged[key] ?? 0);
 }
-console.log(`${mode}: ${clientCode} patrol log import`);
-console.log(JSON.stringify(totals));
+
+const receipt = {
+  ...totals,
+  source_sha256: immutableSourceHash,
+  derivative_sha256: derivativeHash,
+  direct_workshop_writes: 0,
+  direct_finance_writes: 0,
+};
+const finalizeData = encodedJson({ batch_id: batch.id, receipt });
+const finalRow = await runSql(`
+BEGIN;
+SET LOCAL request.jwt.claim.sub = '${ACTOR_ID}';
+WITH args AS (SELECT convert_from(decode('${finalizeData}','base64'),'UTF8')::jsonb AS value)
+SELECT row_to_json(batch) AS batch
+FROM args, LATERAL public.finalize_patrol_import_batch(
+  (value->>'batch_id')::uuid,
+  value->'receipt'
+) batch;
+COMMIT;`);
+const finalized = finalRow?.batch ?? finalRow?.rows?.[0]?.batch;
+if (finalized?.status !== 'needs_review') throw new Error('Governed import batch did not reach needs_review');
+console.log(`apply: ${clientCode} patrol log staged for human review`);
+console.log(JSON.stringify({ batch_id: batch.id, status: finalized.status, ...totals }));

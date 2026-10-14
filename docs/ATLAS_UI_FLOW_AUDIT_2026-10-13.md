@@ -463,3 +463,38 @@ remains unpopulated.
   choices including the placeholder; no policy, handoff or receipt was
   created or changed. Live Atlas was seeded from commit `9c966dc2` and
   confirmed the three RPCs as wired with `exercised` still unclaimed.
+
+### Closure log — governed patrol-log import
+
+- Atlas exposed three unwired RPCs for the patrol import lifecycle:
+  `begin_patrol_import_batch`, `stage_patrol_import_chunk` and
+  `finalize_patrol_import_batch`. The operational script predated those
+  authorities and still used privileged SQL to insert or update observations,
+  location events and canonical vehicles directly. That made the script a
+  stale second authority rather than evidence that the RPCs were dormant.
+- Before the change, an apply could bypass the frozen source identity,
+  contracted-place checks, importer ownership checks, immutable provenance
+  conflict handling, review batch and consequential-write receipt. Its
+  hard-coded actor was also the earlier human identity rather than the
+  dedicated non-login import profile established by the live schema.
+- The script now computes and verifies the source SHA-256, records source
+  file/sheet/row provenance, computes a derivative hash, binds the configured
+  import classification profile, and builds a frozen idempotency identity.
+  Local dry-run parses and reports candidate/unresolved counts without
+  contacting the database or writing any record.
+- During apply, the dedicated import identity starts one governed batch,
+  stages bounded chunks through the contract-scoped RPC, and records inserted
+  versus matched evidence. No direct evidence-table mutation remains in the
+  runner. The final receipt explicitly proves zero direct workshop or finance
+  writes.
+- After successful staging, the final RPC must return `needs_review`; the
+  existing File System review surface remains the human checkpoint before any
+  consequential row proposal can be promoted. A failed or partial run retains
+  the same frozen source/configuration identity for safe retry rather than
+  silently starting a different import.
+- Script syntax checks, ten focused guards and a generated one-row local
+  dry-run passed. The dry-run classified the unresolved test place without a
+  database call. Atlas now recognises known RPCs invoked through
+  `SELECT`/`PERFORM`/`LATERAL` SQL in source scripts, and its dry-run moved 169
+  -> 166 bounded gaps: 1 edge function, 110 RPCs and 55 tables. No live patrol
+  file was applied, so runtime exercise remains unclaimed.
