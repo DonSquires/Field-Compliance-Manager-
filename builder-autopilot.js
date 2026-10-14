@@ -382,6 +382,13 @@ function isReopenedJob(job) {
   return String(job?.description ?? '').startsWith(REOPEN_MARK);
 }
 
+function orderAutopilotJobs(jobs) {
+  return [...jobs].sort((left, right) => {
+    const priority = (job) => job?.status === 'release_ready' ? 0 : GATES.has(job?.status) ? 1 : 2;
+    return priority(left) - priority(right);
+  });
+}
+
 // The independent reviewer blocked the change. That is the normal author -> review -> revise loop
 // of a coding agent, not a stop: the same brief goes again with the reviewer's findings folded in,
 // at most REVIEW_ROUNDS times per brief (job 019d2088, 2026-09-27: a correct high finding —
@@ -498,7 +505,7 @@ async function resumeAfterRepair({ supabase, job, actions, log }) {
 
 async function autopilotTick({ supabase, jobs, actions, log = () => {} }) {
   const outcomes = [];
-  for (const job of jobs) {
+  for (const job of orderAutopilotJobs(jobs)) {
     try {
       // Waiting on a repair of main (owner ruling 2026-09-27: Bob does the coding; nobody is asked to fix main).
       if (job.autopilot_state === 'blocked' && job.autopilot_report?.repair_job_id && !job.autopilot_report?.resumed_as_job_id && !job.autopilot_report?.repair_outcome) {
@@ -692,4 +699,4 @@ async function listPendingApprovals(supabase, jobId) {
   return data || [];
 }
 
-module.exports = { AUTOMERGE_MARK, automergeEligible, autopilotTick, baselineBlock, collectEvidence, composeReport, composePullRequestBody, evaluateVerificationContract, evidentialHold, routineRepairHold, isRepairJob, isReopenedJob, listAutopilotJobs, listPendingApprovals, repairJobFor, TERMINAL, GATES };
+module.exports = { AUTOMERGE_MARK, automergeEligible, autopilotTick, baselineBlock, collectEvidence, composeReport, composePullRequestBody, evaluateVerificationContract, evidentialHold, routineRepairHold, isRepairJob, isReopenedJob, listAutopilotJobs, listPendingApprovals, orderAutopilotJobs, repairJobFor, TERMINAL, GATES };

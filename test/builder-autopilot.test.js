@@ -1,7 +1,7 @@
 const assert = require('node:assert/strict');
 const test = require('node:test');
 
-const { autopilotTick, baselineBlock, composeReport, composePullRequestBody, collectEvidence, evaluateVerificationContract, repairJobFor, routineRepairHold, isRepairJob } = require('../builder-autopilot');
+const { autopilotTick, baselineBlock, composeReport, composePullRequestBody, collectEvidence, evaluateVerificationContract, orderAutopilotJobs, repairJobFor, routineRepairHold, isRepairJob } = require('../builder-autopilot');
 
 const verificationSpecification = {
   workflow_verification: { before: ['preconditions'], during: ['requests and visible states'], after: ['receipt and downstream state'] },
@@ -55,6 +55,17 @@ function actionsRecorder(overrides = {}) {
     record: async (jobId, state, report) => { calls.push(['record', jobId, state, report]); },
   };
 }
+
+test('autopilot prioritizes release reconciliation ahead of long model work', () => {
+  const jobs = [
+    { id: 'analysis', status: 'analysis_pending' },
+    { id: 'gate', status: 'specification_ready' },
+    { id: 'release', status: 'release_ready' },
+    { id: 'implementation', status: 'implementation_pending' },
+  ];
+  assert.deepEqual(orderAutopilotJobs(jobs).map(({ id }) => id), ['release', 'gate', 'analysis', 'implementation']);
+  assert.deepEqual(jobs.map(({ id }) => id), ['analysis', 'gate', 'release', 'implementation'], 'the caller-owned queue is not mutated');
+});
 
 test('autopilot clears a pending gate on the requester\'s behalf and does nothing else that tick', async () => {
   const job = { id: 'job-1', status: 'specification_ready', autopilot_state: 'driving', autopilot_conversation_id: 'conv-1', title: 'Fix', target_sha: 'a'.repeat(40) };
