@@ -761,3 +761,10 @@ remains unpopulated.
   and the live snapshot reports 814 functions with no public/anonymous/
   authenticated setter grants. Atlas dry-run moved 156 -> 154 bounded gaps:
   1 edge function, 98 RPCs and 55 tables. Exercise remains unclaimed.
+- Authenticated production verification after release commit `1e20b41b` opened
+  Geofence workbench on an existing site without an alert. The UI showed the
+  pending proposal, current/proposed map distinction, inspection confirmation,
+  and Accept/Reject decision controls; no direct-save action was present.
+  Bounded calls with nonexistent IDs confirmed both retired writers return
+  function-not-found and an authenticated call to `set_zone_geometry` returns
+  permission denied. No geometry or decision was changed.
