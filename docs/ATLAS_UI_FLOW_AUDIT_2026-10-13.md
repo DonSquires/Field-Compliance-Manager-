@@ -712,3 +712,22 @@ remains unpopulated.
   reloaded in the root provider workspace without an alert and retained the
   enabled Save details action. No profile field was changed merely to
   manufacture exercise evidence.
+
+### Closure log — unsafe officer shift-stop bypass
+
+- Atlas showed `stop_officer_shift` as present but unwired. It was not a
+  harmless duplicate: the function could mark any owned in-progress shift
+  complete without requiring its debrief, terminal stops and module tasks,
+  closed dispatch jobs, resolved welfare alerts, or linked roster-slot update.
+- The officer home and debrief flows already converge on `EndShiftDialog`.
+  Before completion, that dialog loads `get_shift_end_readiness`, exposes the
+  exact remaining work and safe next actions, records a missing debrief, and
+  calls `complete_officer_shift` with expected-state concurrency protection.
+- `complete_officer_shift` rechecks every condition under the shift lock,
+  records advisory end-position evidence, completes linked roster state, and
+  writes the canonical `officer_shift_completed` audit event. The bypass RPC
+  and generated type were removed; historical migration evidence remains.
+- Thirteen focused guards passed and the production web build passed. The
+  regenerated live snapshot reports 816 functions. Atlas dry-run moved
+  157 -> 156 bounded gaps: 1 edge function, 100 RPCs and 55 tables. Exercise
+  remains unclaimed because no real shift was completed for testing.

@@ -45562,44 +45562,6 @@ export type Database = {
           isSetofReturn: false
         }
       }
-      stop_officer_shift: {
-        Args: { p_notes?: string; p_shift_id: string }
-        Returns: {
-          actual_end: string | null
-          actual_start: string | null
-          completed_stops: number
-          created_at: string
-          external_refs: Json
-          generated_at: string | null
-          id: string
-          location_id: string | null
-          module_key: string | null
-          notes: string | null
-          officer_user_id: string
-          organization_id: string
-          osrm_matrix_cached_at: string | null
-          patrol_route_id: string | null
-          roster_slot_id: string | null
-          scheduled_end: string
-          scheduled_start: string
-          service_agreement_location_id: string | null
-          service_agreement_module_id: string | null
-          service_type: string
-          shift_health: string | null
-          shift_origin: string
-          status: string
-          total_stops: number
-          updated_at: string
-          work_unit_id: string | null
-          zone_id: string | null
-        }
-        SetofOptions: {
-          from: "*"
-          to: "shifts"
-          isOneToOne: true
-          isSetofReturn: false
-        }
-      }
       submit_biosecurity_assessment_receipt: {
         Args: {
           p_action_taken?: string
