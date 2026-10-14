@@ -6,12 +6,17 @@
  * - patrols (session: shift_id, zone_id, status in_progress/completed, started_at, ended_at)
  * - patrol_checkpoints & patrol_route_checkpoints (checkpoint definitions)
  * - patrol_checkpoint_visits (proof of attendance, GPS coordinates, scan method, notes)
+ *
+ * The patrol lifecycle is governed server-side. This page never writes those
+ * tables directly; it calls start_patrol_session, record_patrol_checkpoint_visit
+ * and complete_patrol_session, which enforce assignment, GPS proximity and
+ * accuracy, mandatory-checkpoint completion, idempotency and audit logging.
  */
 
 import React, { useState, useEffect, useCallback } from 'react';
 import { useAuth } from '../context/AuthContext';
 import { supabase } from '../lib/supabase';
-import { countCompletedCheckpoints, evaluateCheckpointVisit, mapCheckpointVisitScanMethod } from '../lib/checkpointVisit';
+import { countCompletedCheckpoints } from '../lib/checkpointVisit';
 import { OfficerPatrolStops } from '../components/OfficerPatrolStops';
 import './PageStyles.css';
 
@@ -30,6 +35,7 @@ interface Shift {
 
 interface Checkpoint {
   id: string;
+  kind: 'route' | 'site';
   name: string;
   description: string | null;
   qr_code?: string | null;
@@ -41,7 +47,8 @@ interface Checkpoint {
 
 interface CheckpointVisit {
   id?: string;
-  checkpoint_id: string;
+  checkpoint_id?: string | null;
+  route_checkpoint_id?: string | null;
   visited_at: string;
   scan_method?: string;
   notes?: string | null;
@@ -69,6 +76,11 @@ const PatrolPage: React.FC = () => {
   const [activeCheckpointId, setActiveCheckpointId] = useState<string | null>(null);
   const [visitNotes, setVisitNotes] = useState('');
   const [recordingVisit, setRecordingVisit] = useState(false);
+  const [startingPatrol, setStartingPatrol] = useState(false);
+  const [completingPatrol, setCompletingPatrol] = useState(false);
+  const [confirmingCompletion, setConfirmingCompletion] = useState(false);
+  const [completionNotes, setCompletionNotes] = useState('');
+  const [notice, setNotice] = useState<string | null>(null);
   const [elapsedMinutes, setElapsedMinutes] = useState(0);
 
   // ATLAS READS: patrol_checkpoints, patrol_route_checkpoints
@@ -88,6 +100,7 @@ const PatrolPage: React.FC = () => {
           if (routeCheckpoints && routeCheckpoints.length > 0) {
             return routeCheckpoints.map((c) => ({
               id: c.id,
+              kind: 'route' as const,
               name: c.name,
               description: c.description,
               qr_code: c.qr_code_data,
@@ -110,7 +123,7 @@ const PatrolPage: React.FC = () => {
             .order('name', { ascending: true });
 
           if (zoneCheckpoints && zoneCheckpoints.length > 0) {
-            return zoneCheckpoints;
+            return zoneCheckpoints.map((c) => ({ ...c, kind: 'site' as const }));
           }
         }
 
@@ -123,7 +136,7 @@ const PatrolPage: React.FC = () => {
           .order('name', { ascending: true })
           .limit(20);
 
-        return orgCheckpoints || [];
+        return (orgCheckpoints || []).map((c) => ({ ...c, kind: 'site' as const }));
       } catch (err) {
         console.error('Failed to load checkpoints:', err);
         return [];
@@ -136,7 +149,7 @@ const PatrolPage: React.FC = () => {
     // ATLAS READS: patrol_checkpoint_visits
     const { data, error: err } = await supabase
       .from('patrol_checkpoint_visits')
-      .select('id, checkpoint_id, visited_at, scan_method, notes')
+      .select('id, checkpoint_id, route_checkpoint_id, visited_at, scan_method, notes')
       .eq('patrol_id', patrolId)
       .order('visited_at', { ascending: true });
 
@@ -269,126 +282,104 @@ const PatrolPage: React.FC = () => {
   }, [session?.started_at, session?.status]);
 
   const startPatrol = async () => {
-    if (!session || !profile?.organizationId || !profile?.id) return;
+    if (!session || startingPatrol) return;
 
     try {
-      const now = new Date().toISOString();
-      // ATLAS WRITES: patrols
-      const { data, error: insertErr } = await supabase
-        .from('patrols')
-        .insert([
-          {
-            organization_id: profile.organizationId,
-            shift_id: session.shift.id,
-            officer_user_id: profile.id,
-            zone_id: session.shift.zone_id,
-            status: 'in_progress',
-            started_at: now,
-          },
-        ])
-        .select('id, status, started_at')
-        .single();
+      setStartingPatrol(true);
+      setError(null);
+      setNotice(null);
 
-      if (insertErr) throw insertErr;
+      // ATLAS CALLS: start_patrol_session (validates assignment, idempotent, audited)
+      const { data, error: startErr } = await supabase.rpc('start_patrol_session', {
+        p_shift_id: session.shift.id,
+      });
 
+      if (startErr) throw startErr;
+
+      const patrol = (Array.isArray(data) ? data[0] : data) as
+        | { id: string; status: string; started_at: string }
+        | null;
+      if (!patrol?.id) throw new Error('Patrol session could not be opened. Please try again.');
+
+      const visits = await loadVisits(patrol.id);
       setSession({
         ...session,
-        id: data.id,
-        status: 'in_progress',
-        started_at: data.started_at,
+        id: patrol.id,
+        status: patrol.status as PatrolSession['status'],
+        started_at: patrol.started_at,
+        visits,
       });
     } catch (err) {
       setError(err instanceof Error ? err.message : 'Failed to start patrol');
+    } finally {
+      setStartingPatrol(false);
     }
   };
 
-  const visitCheckpoint = async (checkpointId: string) => {
-    if (!session || !session.id || !profile?.organizationId || !profile?.id) return;
+  const requestPosition = () =>
+    new Promise<GeolocationPosition>((resolve, reject) => {
+      if (typeof navigator === 'undefined' || !('geolocation' in navigator)) {
+        reject(new Error('This device cannot provide GPS, which is required to prove attendance at a checkpoint.'));
+        return;
+      }
+      navigator.geolocation.getCurrentPosition(resolve, (positionError) => {
+        reject(
+          new Error(
+            positionError.code === positionError.PERMISSION_DENIED
+              ? 'Location permission is blocked. Allow location access to record a checkpoint visit.'
+              : 'A GPS fix could not be obtained. Move to open sky and try again.'
+          )
+        );
+      }, { timeout: 10000, enableHighAccuracy: true });
+    });
+
+  const visitCheckpoint = async (checkpoint: Checkpoint) => {
+    if (!session?.id || recordingVisit) return;
 
     try {
       setRecordingVisit(true);
       setError(null);
+      setNotice(null);
 
-      let lat: number | null = null;
-      let lng: number | null = null;
-      let gpsPrecisionMetres: number | null = null;
+      const position = await requestPosition();
 
-      // Attempt GPS capture if browser geolocation available
-      if (typeof navigator !== 'undefined' && 'geolocation' in navigator) {
-        try {
-          const pos = await new Promise<GeolocationPosition>((res, rej) => {
-            navigator.geolocation.getCurrentPosition(res, rej, { timeout: 4000, enableHighAccuracy: true });
-          });
-          lat = pos.coords.latitude;
-          lng = pos.coords.longitude;
-          gpsPrecisionMetres = pos.coords.accuracy ?? null;
-        } catch {
-          // GPS optional for manual visit confirmation
-        }
-      }
-
-      const checkpoint = session.checkpoints.find((item) => item.id === checkpointId);
-      const evaluation = evaluateCheckpointVisit({
-        checkpointLat: checkpoint?.gps_lat ?? null,
-        checkpointLng: checkpoint?.gps_lng ?? null,
-        officerLat: lat,
-        officerLng: lng,
-        checkpointRadiusMetres: checkpoint?.radius_meters ?? 0,
-        gpsPrecisionMetres,
-        allowManualFallback: true,
+      // ATLAS CALLS: record_patrol_checkpoint_visit
+      // Proximity, accuracy and duplicate suppression are enforced server-side.
+      const { data, error: visitErr } = await supabase.rpc('record_patrol_checkpoint_visit', {
+        p_patrol_id: session.id,
+        p_checkpoint_kind: checkpoint.kind,
+        p_checkpoint_id: checkpoint.id,
+        p_gps_lat: position.coords.latitude,
+        p_gps_lng: position.coords.longitude,
+        p_gps_accuracy: position.coords.accuracy,
+        p_notes: visitNotes.trim() || null,
       });
-
-      const recordedNotes = [
-        visitNotes.trim(),
-        evaluation.reason === 'gps_missing_manual_allowed'
-          ? 'Manual visit approved: GPS unavailable and manual fallback was allowed.'
-          : evaluation.reason === 'gps_inaccurate'
-            ? 'GPS not accepted: position accuracy was worse than the checkpoint radius.'
-            : evaluation.reason === 'gps_outside_radius'
-              ? `GPS outside checkpoint radius (${evaluation.distanceMetres?.toFixed(1) ?? 'n/a'} m).`
-              : undefined,
-      ].filter(Boolean).join(' ') || null;
-
-      const scanMethod = mapCheckpointVisitScanMethod({
-        mode: evaluation.mode,
-        accepted: evaluation.accepted,
-      });
-
-      if (!evaluation.accepted) {
-        throw new Error(
-          evaluation.reason === 'gps_inaccurate'
-            ? 'GPS accuracy is too poor for this checkpoint.'
-            : 'GPS position is outside the checkpoint radius.'
-        );
-      }
-
-      // ATLAS WRITES: patrol_checkpoint_visits
-      const { data, error: visitErr } = await supabase
-        .from('patrol_checkpoint_visits')
-        .insert([
-          {
-            organization_id: profile.organizationId,
-            patrol_id: session.id,
-            checkpoint_id: checkpointId,
-            officer_user_id: profile.id,
-            scan_method: scanMethod,
-            gps_lat: lat,
-            gps_lng: lng,
-            gps_accuracy: gpsPrecisionMetres,
-            gps_distance_from_checkpoint: evaluation.distanceMetres,
-            within_radius: evaluation.withinRadius,
-            notes: recordedNotes,
-          },
-        ])
-        .select('id, checkpoint_id, visited_at, scan_method, notes')
-        .single();
 
       if (visitErr) throw visitErr;
 
+      const result = (Array.isArray(data) ? data[0] : data) as
+        | { visit_id: string; created: boolean; visited_at: string; scan_method: string; notes: string | null }
+        | null;
+      if (!result?.visit_id) throw new Error('The checkpoint visit was not recorded. Please try again.');
+
+      const recorded: CheckpointVisit = {
+        id: result.visit_id,
+        checkpoint_id: checkpoint.kind === 'site' ? checkpoint.id : null,
+        route_checkpoint_id: checkpoint.kind === 'route' ? checkpoint.id : null,
+        visited_at: result.visited_at,
+        scan_method: result.scan_method,
+        notes: result.notes,
+      };
+
       setSession({
         ...session,
-        visits: [...session.visits, data as CheckpointVisit],
+        visits: [...session.visits.filter((v) => v.id !== recorded.id), recorded],
       });
+      setNotice(
+        result.created
+          ? `Checkpoint "${checkpoint.name}" recorded.`
+          : `Checkpoint "${checkpoint.name}" was already recorded for this patrol.`
+      );
       setActiveCheckpointId(null);
       setVisitNotes('');
     } catch (err) {
@@ -399,21 +390,37 @@ const PatrolPage: React.FC = () => {
   };
 
   const completePatrol = async () => {
-    if (!session || !session.id) return;
+    if (!session?.id || completingPatrol) return;
 
     try {
-      const now = new Date().toISOString();
-      // ATLAS WRITES: patrols
-      const { error: updateErr } = await supabase
-        .from('patrols')
-        .update({ status: 'completed', ended_at: now })
-        .eq('id', session.id);
+      setCompletingPatrol(true);
+      setError(null);
+      setNotice(null);
 
-      if (updateErr) throw updateErr;
+      // ATLAS CALLS: complete_patrol_session (enforces mandatory checkpoints, audited)
+      const { data, error: completeErr } = await supabase.rpc('complete_patrol_session', {
+        p_patrol_id: session.id,
+        p_notes: completionNotes.trim() || null,
+      });
 
-      setSession({ ...session, status: 'completed', ended_at: now });
+      if (completeErr) throw completeErr;
+
+      const patrol = (Array.isArray(data) ? data[0] : data) as
+        | { id: string; status: string; ended_at: string | null }
+        | null;
+      if (!patrol?.id) throw new Error('The patrol session was not closed. Please try again.');
+
+      setSession({
+        ...session,
+        status: patrol.status as PatrolSession['status'],
+        ended_at: patrol.ended_at,
+      });
+      setConfirmingCompletion(false);
+      setCompletionNotes('');
     } catch (err) {
       setError(err instanceof Error ? err.message : 'Failed to complete patrol');
+    } finally {
+      setCompletingPatrol(false);
     }
   };
 
@@ -445,6 +452,15 @@ const PatrolPage: React.FC = () => {
             ×
           </button>
           {error}
+        </div>
+      )}
+
+      {notice && (
+        <div className="alert alert-success" role="status">
+          <button className="alert-close" onClick={() => setNotice(null)} aria-label="Close notification">
+            ×
+          </button>
+          {notice}
         </div>
       )}
 
@@ -535,8 +551,13 @@ const PatrolPage: React.FC = () => {
 
               {!session.id && (
                 <div style={{ marginTop: '16px' }}>
-                  <button className="btn btn-primary" style={{ padding: '12px 24px', fontSize: '15px' }} onClick={startPatrol}>
-                    ▶️ Start Patrol Session
+                  <button
+                    className="btn btn-primary"
+                    style={{ padding: '12px 24px', fontSize: '15px' }}
+                    onClick={startPatrol}
+                    disabled={startingPatrol}
+                  >
+                    {startingPatrol ? 'Starting…' : '▶️ Start Patrol Session'}
                   </button>
                 </div>
               )}
@@ -554,7 +575,11 @@ const PatrolPage: React.FC = () => {
                   ) : (
                     <div className="checkpoints-list">
                       {session.checkpoints.map((checkpoint, idx) => {
-                        const visit = session.visits.find((v) => v.checkpoint_id === checkpoint.id);
+                        const visit = session.visits.find((v) =>
+                          checkpoint.kind === 'route'
+                            ? v.route_checkpoint_id === checkpoint.id
+                            : v.checkpoint_id === checkpoint.id
+                        );
                         const isSelected = activeCheckpointId === checkpoint.id;
 
                         return (
@@ -604,11 +629,15 @@ const PatrolPage: React.FC = () => {
                                     onChange={(e) => setVisitNotes(e.target.value)}
                                   />
                                 </div>
+                                <p style={{ margin: '6px 0 0 0', fontSize: '11px', color: 'var(--color-text-secondary)' }}>
+                                  Your location is captured and checked against this checkpoint. You must be inside
+                                  the checkpoint radius for the visit to be accepted.
+                                </p>
                                 <div style={{ display: 'flex', gap: '8px', marginTop: '8px' }}>
                                   <button
                                     className="btn btn-primary btn-sm"
                                     disabled={recordingVisit}
-                                    onClick={() => visitCheckpoint(checkpoint.id)}
+                                    onClick={() => visitCheckpoint(checkpoint)}
                                   >
                                     {recordingVisit ? 'Recording…' : '✓ Confirm & Record Visit'}
                                   </button>
@@ -637,9 +666,43 @@ const PatrolPage: React.FC = () => {
                   )}
 
                   <div style={{ marginTop: '24px' }}>
-                    <button className="btn btn-primary btn-block" onClick={completePatrol}>
-                      Complete Patrol Session
-                    </button>
+                    {confirmingCompletion ? (
+                      <div style={{ padding: '12px', background: 'var(--color-bg-primary)', borderRadius: '8px', border: '1px solid var(--color-border)' }}>
+                        <h4 style={{ margin: '0 0 4px 0', fontSize: '14px' }}>Complete this patrol session?</h4>
+                        <p style={{ margin: '0 0 10px 0', fontSize: '12px', color: 'var(--color-text-secondary)' }}>
+                          {completedCount} of {totalCount} checkpoints recorded. Mandatory checkpoints must be
+                          recorded before the session can close.
+                        </p>
+                        <div className="form-group">
+                          <label style={{ fontSize: '11px' }}>Closing notes (optional)</label>
+                          <input
+                            type="text"
+                            placeholder="e.g. Route completed, no incidents to report"
+                            value={completionNotes}
+                            onChange={(e) => setCompletionNotes(e.target.value)}
+                          />
+                        </div>
+                        <div style={{ display: 'flex', gap: '8px', marginTop: '8px' }}>
+                          <button className="btn btn-primary btn-sm" disabled={completingPatrol} onClick={completePatrol}>
+                            {completingPatrol ? 'Completing…' : 'Confirm & Complete'}
+                          </button>
+                          <button
+                            className="btn btn-secondary btn-sm"
+                            disabled={completingPatrol}
+                            onClick={() => {
+                              setConfirmingCompletion(false);
+                              setCompletionNotes('');
+                            }}
+                          >
+                            Keep patrolling
+                          </button>
+                        </div>
+                      </div>
+                    ) : (
+                      <button className="btn btn-primary btn-block" onClick={() => setConfirmingCompletion(true)}>
+                        Complete Patrol Session
+                      </button>
+                    )}
                   </div>
                 </div>
               )}
@@ -649,7 +712,7 @@ const PatrolPage: React.FC = () => {
                   <div className="success-icon" style={{ color: 'var(--color-success)' }}>✓</div>
                   <h3 style={{ margin: '8px 0' }}>Patrol Completed</h3>
                   <p style={{ margin: '0 0 8px 0', color: 'var(--color-text-secondary)', fontSize: '14px' }}>
-                    {session.visits.length} of {session.checkpoints.length} checkpoints visited.
+                    {completedCount} of {totalCount} checkpoints visited.
                   </p>
                   {session.ended_at && (
                     <div style={{ fontSize: '12px', color: 'var(--color-text-muted)' }}>
