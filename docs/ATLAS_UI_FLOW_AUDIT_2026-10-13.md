@@ -412,3 +412,10 @@ remains unpopulated.
 - Atlas dry-run moved 173 -> 172 bounded gaps: 1 edge function, 116 RPCs and
   55 tables. Runtime exercise remains unclaimed because creating a live
   dispatch job without a real operational event would be false evidence.
+- Production verification in the authenticated R&M console confirmed the
+  deployed direct-officer picker, the active work-unit picker (three current
+  choices), the shift/attendance boundary copy, and the disabled Create state
+  before a Site and work unit are selected. The form was cancelled without
+  creating or altering a dispatch job. The same deployed chunk contains the
+  response-timing RPC and controls; there was no active job on which a timing
+  change could be truthfully exercised.
