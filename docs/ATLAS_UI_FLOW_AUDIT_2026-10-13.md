@@ -787,3 +787,10 @@ remains unpopulated.
   production web build passed, and the regenerated live snapshot reports 812
   functions. Atlas dry-run moved 154 -> 152 bounded gaps: 1 edge function,
   96 RPCs and 55 tables. Exercise remains unclaimed.
+- Authenticated production verification after release commit `77a393db`
+  reloaded Geofence Workbench twice. The pending proposal and Accept/Reject
+  controls remained present with no UI alert; a one-off Leaflet reload error
+  did not recur on the discriminating second reload. A bounded API check
+  successfully invoked the unified review queue without reporting record data,
+  while both retired CRM signatures returned function-not-found. No boundary
+  decision or geometry was changed.
