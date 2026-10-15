@@ -10,6 +10,7 @@ type TargetEnvironment = 'development' | 'staging' | 'production';
 type WorkspaceView = 'task' | 'evidence' | 'execution' | 'context';
 type JobFilterTab = 'all' | 'issues' | 'active' | 'awaiting' | 'completed' | 'failed' | 'cancelled';
 type ScopeFilter = 'all' | 'frontend' | 'backend' | 'fullstack';
+type MobileWorkspaceView = 'queue' | 'workbench' | 'agent';
 
 interface BuilderProject {
   id: string;
@@ -41,6 +42,8 @@ interface BuilderJob {
   code_review_mode?: ReviewMode | null;
   code_review_status: string;
   last_error: string | null;
+  autopilot_state?: string | null;
+  autopilot_report?: Record<string, unknown> | null;
   created_at: string;
   updated_at: string;
 }
@@ -103,6 +106,32 @@ const plainWords = (value: unknown, fallback = 'Not recorded') => typeof value =
 const NON_ACTIONABLE_ISSUE_STATUSES = new Set(['release_ready', 'deployed', 'failed', 'cancelled']);
 const isActionableIssue = (job: BuilderJob) => !NON_ACTIONABLE_ISSUE_STATUSES.has(job.status)
   && (String(job.title).toLowerCase().startsWith('repair') || Boolean(job.last_error));
+const asRecord = (value: unknown) => value && typeof value === 'object' && !Array.isArray(value) ? value as Record<string, unknown> : null;
+const asText = (value: unknown) => typeof value === 'string' && value.trim() ? value.trim() : null;
+
+function builderDeliveryTruth(job: BuilderJob) {
+  const report = asRecord(job.autopilot_report);
+  const deployment = asRecord(report?.deployment);
+  const mergeSha = asText(report?.merge_sha);
+  const sourceSha = asText(deployment?.source_sha);
+  const exactReceipt = report?.merged === true
+    && deployment?.status === 'success'
+    && deployment?.live_verified === true
+    && Boolean(mergeSha && sourceSha === mergeSha);
+  if (exactReceipt) return { label: 'Live verified', detail: `Production ${sourceSha!.slice(0, 12)} matches the merged commit.`, tone: 'complete' };
+  if (job.status === 'release_ready') return { label: 'Ready, not live', detail: 'Verification passed, but merge and Production receipts are still separate.', tone: 'waiting' };
+  if (job.workspace_pull_request_url) return { label: 'Review opened', detail: 'A pull request exists; that is not deployment proof.', tone: 'working' };
+  return { label: 'Not deployed', detail: 'No exact merge and Production receipt is recorded for this job.', tone: 'idle' };
+}
+
+function builderNextAction(job: BuilderJob, snapshot: BuilderSnapshot) {
+  if (snapshot.approvals.some(approval => approval.status === 'pending')) return 'Review the immutable evidence and decide the pending approval.';
+  if (job.last_error) return 'Inspect the blocker and ask Bob to propose the smallest evidence-backed recovery.';
+  if (job.status === 'deployed') return 'Review the exact deployment receipt and start a follow-up only if more work is needed.';
+  if (job.status === 'release_ready') return 'Verify the pull request, merge decision, and separate Production receipt.';
+  if (!job.workspace_branch) return 'Let Bob advance the plan, or create the isolated workspace when implementation is ready.';
+  return 'Run to the next governed gate and review the resulting files, tests, and findings.';
+}
 
 const PROMPT_TEMPLATES = [
   {
@@ -152,7 +181,8 @@ const BuilderControlRoomPage: React.FC = () => {
   const [reviewerModel, setReviewerModel] = useState('');
   const [approvalComment, setApprovalComment] = useState('');
   const [workspaceView, setWorkspaceView] = useState<WorkspaceView>('task');
-  const [bobOpen, setBobOpen] = useState(false);
+  const [bobOpen, setBobOpen] = useState(true);
+  const [mobileWorkspaceView, setMobileWorkspaceView] = useState<MobileWorkspaceView>('queue');
   const [selectedArtifactId, setSelectedArtifactId] = useState<string | null>(null);
   const [artifactContent, setArtifactContent] = useState<{ id: string; content: string; checksum: string | null } | null>(null);
   const [artifactLoading, setArtifactLoading] = useState(false);
@@ -479,14 +509,18 @@ const BuilderControlRoomPage: React.FC = () => {
   };
 
   const selectedJob = useMemo(() => snapshot?.job?.id === selectedId ? snapshot.job : jobs.find(job => job.id === selectedId) ?? null, [jobs, selectedId, snapshot]);
+  const deliveryTruth = selectedJob ? builderDeliveryTruth(selectedJob) : null;
+  const nextSafeAction = selectedJob && snapshot ? builderNextAction(selectedJob, snapshot) : 'Select a job or describe new work to Bob Builder.';
+  const pendingApprovalCount = snapshot?.approvals.filter(approval => approval.status === 'pending').length ?? 0;
+  const failedStepCount = snapshot?.steps.filter(step => step.status === 'failed' || step.status === 'blocked').length ?? 0;
 
   return (
-    <div className="builder-page">
+    <div className={`builder-page ${bobOpen ? 'has-agent-dock' : 'is-agent-hidden'}`}>
       <header className="builder-heading">
         <div><span>Bob build system</span><h1>Builder control room</h1><p>Run governed implementation work to the next evidence or approval boundary.</p></div>
         <div className="builder-heading-actions">
           <button type="button" onClick={() => void loadList()} disabled={loading}><RefreshCw size={16} className={loading ? 'is-spinning' : ''} /> Refresh</button>
-          <button type="button" onClick={() => setBobOpen(true)} title="Ask Bob about the selected Builder job"><MessageSquareText size={16} /> Ask Bob</button>
+          <button type="button" onClick={() => { setBobOpen(current => !current); setMobileWorkspaceView('agent'); }} title={bobOpen ? 'Hide the docked Bob Builder agent' : 'Open the docked Bob Builder agent'} aria-pressed={bobOpen}><MessageSquareText size={16} /> {bobOpen ? 'Hide agent' : 'Open agent'}</button>
           <button type="button" className="is-primary" onClick={() => setShowCreate(true)}><Plus size={16} /> New job</button>
         </div>
       </header>
@@ -501,8 +535,14 @@ const BuilderControlRoomPage: React.FC = () => {
       {error && <div className="builder-message is-error" role="alert"><AlertTriangle size={17} /><span>{error}</span><button type="button" onClick={() => setError(null)}><X size={15} /></button></div>}
       {notice && <div className="builder-message" role="status"><CheckCircle2 size={17} /><span>{notice}</span><button type="button" onClick={() => setNotice(null)}><X size={15} /></button></div>}
 
+      <nav className="builder-mobile-switcher" aria-label="Builder workspace panels">
+        <button type="button" className={mobileWorkspaceView === 'queue' ? 'is-active' : ''} onClick={() => setMobileWorkspaceView('queue')} aria-pressed={mobileWorkspaceView === 'queue'}><Workflow size={15} /> Jobs</button>
+        <button type="button" className={mobileWorkspaceView === 'workbench' ? 'is-active' : ''} onClick={() => setMobileWorkspaceView('workbench')} aria-pressed={mobileWorkspaceView === 'workbench'}><FileCode2 size={15} /> Workbench</button>
+        <button type="button" className={mobileWorkspaceView === 'agent' ? 'is-active' : ''} onClick={() => { setBobOpen(true); setMobileWorkspaceView('agent'); }} aria-pressed={mobileWorkspaceView === 'agent'}><MessageSquareText size={15} /> Bob Builder</button>
+      </nav>
+
       <div className="builder-layout">
-        <section className="builder-queue">
+        <section className={`builder-queue ${mobileWorkspaceView === 'queue' ? 'is-mobile-active' : ''}`}>
           <div className="builder-panel-heading"><div><span>Queue</span><h2>Build jobs</h2></div><Bot size={18} /></div>
 
           <nav className="builder-tabs-nav" aria-label="Job filter tabs">
@@ -566,7 +606,7 @@ const BuilderControlRoomPage: React.FC = () => {
             <div className="builder-list">{filteredJobs.map(job => {
               const jobIndex = jobs.length - jobs.findIndex(j => j.id === job.id);
               return (
-              <button type="button" key={job.id} className={selectedId === job.id ? 'is-selected' : ''} onClick={() => setSelectedId(job.id)}>
+              <button type="button" key={job.id} className={selectedId === job.id ? 'is-selected' : ''} onClick={() => { setSelectedId(job.id); setMobileWorkspaceView('workbench'); }}>
                 <span className={`builder-state state-${job.status}`} />
                 <div>
                   <strong><span className="builder-job-num">#{jobIndex}</span>{job.title}</strong>
@@ -594,7 +634,7 @@ const BuilderControlRoomPage: React.FC = () => {
           )}
         </section>
 
-        <section className="builder-detail">
+        <section className={`builder-detail ${mobileWorkspaceView === 'workbench' ? 'is-mobile-active' : ''}`}>
           {!selectedJob || !snapshot ? <div className="builder-empty"><FileCode2 size={20} /> Select a job to inspect</div> : <>
             <div className="builder-panel-heading"><div><span>Execution</span><h2>{selectedJob.title}</h2></div><span className={`builder-status state-${selectedJob.status}`}>{plainWords(selectedJob.status, 'Unknown status')}</span></div>
             <div className="builder-job-meta">
@@ -622,18 +662,40 @@ const BuilderControlRoomPage: React.FC = () => {
                 <span className={`builder-pipeline-node ${['release_ready', 'deployed'].includes(selectedJob.status) ? 'is-complete' : selectedJob.current_step_name === 'release_prep' ? 'is-active' : ''}`}>7. Release</span>
               </div>
             )}
+            <section className="builder-truth-grid" aria-label="Current build truth">
+              <div>
+                <span>Current activity</span>
+                <strong>{plainWords(selectedJob.current_step_name, plainWords(selectedJob.status))}</strong>
+                <small>{completedSteps}/{snapshot.steps.length} governed steps satisfied</small>
+              </div>
+              <div className={pendingApprovalCount || failedStepCount || selectedJob.last_error ? 'is-attention' : ''}>
+                <span>Questions and blockers</span>
+                <strong>{pendingApprovalCount ? `${pendingApprovalCount} approval${pendingApprovalCount === 1 ? '' : 's'} waiting` : failedStepCount ? `${failedStepCount} blocked step${failedStepCount === 1 ? '' : 's'}` : selectedJob.last_error ? 'Recovery needed' : 'No open blocker'}</strong>
+                <small>{selectedJob.code_review_status === 'pending' ? 'Review findings are still pending.' : `Code review: ${plainWords(selectedJob.code_review_status)}`}</small>
+              </div>
+              <div className={`is-${deliveryTruth?.tone ?? 'idle'}`}>
+                <span>Deployment truth</span>
+                <strong>{deliveryTruth?.label}</strong>
+                <small>{deliveryTruth?.detail}</small>
+              </div>
+              <div>
+                <span>Next safe action</span>
+                <strong>{nextSafeAction}</strong>
+                <small>Bob may prepare and verify; protected decisions stay visible here.</small>
+              </div>
+            </section>
             {selectedJob.last_error && <div className="builder-inline-error"><AlertTriangle size={15} /> {selectedJob.last_error}</div>}
             <section className="builder-workbench" aria-label="Builder job workspace">
               <nav className="builder-workbench-tabs" aria-label="Builder workspace views">
-                <button type="button" className={workspaceView === 'task' ? 'is-active' : ''} aria-current={workspaceView === 'task' ? 'page' : undefined} onClick={() => setWorkspaceView('task')}><FileCode2 size={15} /> Task</button>
-                <button type="button" className={workspaceView === 'evidence' ? 'is-active' : ''} aria-current={workspaceView === 'evidence' ? 'page' : undefined} onClick={() => setWorkspaceView('evidence')}><FolderTree size={15} /> Evidence</button>
-                <button type="button" className={workspaceView === 'execution' ? 'is-active' : ''} aria-current={workspaceView === 'execution' ? 'page' : undefined} onClick={() => setWorkspaceView('execution')}><TerminalSquare size={15} /> Execution</button>
-                <button type="button" className={workspaceView === 'context' ? 'is-active' : ''} aria-current={workspaceView === 'context' ? 'page' : undefined} onClick={() => setWorkspaceView('context')}><Database size={15} /> Context</button>
+                <button type="button" className={workspaceView === 'task' ? 'is-active' : ''} aria-current={workspaceView === 'task' ? 'page' : undefined} onClick={() => setWorkspaceView('task')}><FileCode2 size={15} /> Plan</button>
+                <button type="button" className={workspaceView === 'evidence' ? 'is-active' : ''} aria-current={workspaceView === 'evidence' ? 'page' : undefined} onClick={() => setWorkspaceView('evidence')}><FolderTree size={15} /> Files &amp; changes</button>
+                <button type="button" className={workspaceView === 'execution' ? 'is-active' : ''} aria-current={workspaceView === 'execution' ? 'page' : undefined} onClick={() => setWorkspaceView('execution')}><TerminalSquare size={15} /> Terminal &amp; tests</button>
+                <button type="button" className={workspaceView === 'context' ? 'is-active' : ''} aria-current={workspaceView === 'context' ? 'page' : undefined} onClick={() => setWorkspaceView('context')}><Database size={15} /> Preview &amp; release</button>
               </nav>
-              {workspaceView === 'task' && <div className="builder-workbench-content"><span>Immutable task brief</span><pre>{selectedJob.task_description || 'No task description was retained for this job.'}</pre></div>}
-              {workspaceView === 'evidence' && <div className="builder-workbench-content"><span>Verified artifacts</span>{snapshot.artifacts.length === 0 ? <p>No artifacts have been produced yet.</p> : <><ul className="builder-workbench-artifacts">{snapshot.artifacts.map(artifact => <li key={artifact.id}><button type="button" className={selectedArtifactId === artifact.id ? 'is-selected' : ''} onClick={() => void openArtifact(artifact)} disabled={artifactLoading}><FileCode2 size={15} /><div><strong>{plainWords(artifact.artifact_type)}</strong><small>{artifact.status} · {artifact.content_size_bytes ?? 0} bytes</small></div><code>{artifact.checksum?.slice(0, 12) ?? 'No checksum'}</code></button>{selectedJob.workspace_branch && artifact.status === 'final' && artifact.artifact_type === 'code_implementation' && <button type="button" className="builder-commit-patch" onClick={() => void commitVerifiedPatch(artifact)} disabled={Boolean(busy)}>Commit verified patch</button>}</li>)}</ul>{artifactLoading && <p>Loading verified artifact...</p>}{artifactContent && <pre className="builder-artifact-preview" aria-label="Selected artifact content">{artifactContent.content}</pre>}</>}</div>}
-              {workspaceView === 'execution' && <div className="builder-workbench-content"><span>Durable execution timeline</span><ol className="builder-workbench-runs">{snapshot.workerRuns.length === 0 ? <li>No worker run has started.</li> : snapshot.workerRuns.map(run => <li key={run.id}><TerminalSquare size={15} /><div><strong>{run.profile}</strong><small>{run.status}{run.exit_code == null ? '' : ` · exit ${run.exit_code}`}</small></div><code>{run.target_sha?.slice(0, 12) ?? 'No commit'}</code></li>)}</ol></div>}
-              {workspaceView === 'context' && <div className="builder-workbench-content"><span>Commit-pinned build and live evidence</span>{contextLoading ? <p>Loading Builder context...</p> : !contextSnapshot ? <p>Context is unavailable.</p> : <><p>{contextSnapshot.build_map.file_count} tracked files and {contextSnapshot.build_map.schema.tables.length} schema tables. Atlas has {contextSnapshot.live_context.atlas.capability_count} capabilities and {contextSnapshot.live_context.atlas.edge_count} live edges; {contextSnapshot.live_context.atlas.wired_capability_count} are wired and {contextSnapshot.live_context.atlas.exercised_capability_count} are exercised.</p><ul className="builder-workbench-runs">{contextSnapshot.live_context.live_data.tables.map(row => <li key={row.table}><Database size={15} /><div><strong>{row.table.replaceAll('_', ' ')}</strong><small>Aggregate live row count</small></div><code>{row.available ? row.count ?? 0 : 'Unavailable'}</code></li>)}</ul><button type="button" onClick={() => void refreshAtlas()} disabled={Boolean(busy)}><RefreshCw size={15} className={busy === 'atlas-refresh' ? 'is-spinning' : ''} /> Refresh Atlas</button></>}</div>}
+              {workspaceView === 'task' && <div className="builder-workbench-content"><span>Plan and immutable task brief</span><pre>{selectedJob.task_description || 'No task description was retained for this job.'}</pre></div>}
+              {workspaceView === 'evidence' && <div className="builder-workbench-content"><span>Verified files, changes, and review artifacts</span>{snapshot.artifacts.length === 0 ? <p>No artifacts have been produced yet.</p> : <><ul className="builder-workbench-artifacts">{snapshot.artifacts.map(artifact => <li key={artifact.id}><button type="button" className={selectedArtifactId === artifact.id ? 'is-selected' : ''} onClick={() => void openArtifact(artifact)} disabled={artifactLoading}><FileCode2 size={15} /><div><strong>{plainWords(artifact.artifact_type)}</strong><small>{artifact.status} · {artifact.content_size_bytes ?? 0} bytes</small></div><code>{artifact.checksum?.slice(0, 12) ?? 'No checksum'}</code></button>{selectedJob.workspace_branch && artifact.status === 'final' && artifact.artifact_type === 'code_implementation' && <button type="button" className="builder-commit-patch" onClick={() => void commitVerifiedPatch(artifact)} disabled={Boolean(busy)}>Commit verified patch</button>}</li>)}</ul>{artifactLoading && <p>Loading verified artifact...</p>}{artifactContent && <pre className="builder-artifact-preview" aria-label="Selected artifact content">{artifactContent.content}</pre>}</>}</div>}
+              {workspaceView === 'execution' && <div className="builder-workbench-content"><span>Terminal, tests, and durable worker output</span><ol className="builder-workbench-runs">{snapshot.workerRuns.length === 0 ? <li>No worker run has started.</li> : snapshot.workerRuns.map(run => <li key={run.id}><TerminalSquare size={15} /><div><strong>{run.profile}</strong><small>{run.status}{run.exit_code == null ? '' : ` · exit ${run.exit_code}`}</small></div><code>{run.target_sha?.slice(0, 12) ?? 'No commit'}</code></li>)}</ol></div>}
+              {workspaceView === 'context' && <div className="builder-workbench-content"><span>Preview, workspace context, and exact release truth</span><p><strong>{deliveryTruth?.label}.</strong> {deliveryTruth?.detail}</p>{selectedJob.workspace_pull_request_url && <p><a href={selectedJob.workspace_pull_request_url} target="_blank" rel="noreferrer noopener">Open the recorded pull request</a></p>}{contextLoading ? <p>Loading Builder context...</p> : !contextSnapshot ? <p>Context is unavailable.</p> : <><p>{contextSnapshot.build_map.file_count} tracked files and {contextSnapshot.build_map.schema.tables.length} schema tables. Atlas has {contextSnapshot.live_context.atlas.capability_count} capabilities and {contextSnapshot.live_context.atlas.edge_count} live edges; {contextSnapshot.live_context.atlas.wired_capability_count} are wired and {contextSnapshot.live_context.atlas.exercised_capability_count} are exercised.</p><ul className="builder-workbench-runs">{contextSnapshot.live_context.live_data.tables.map(row => <li key={row.table}><Database size={15} /><div><strong>{row.table.replaceAll('_', ' ')}</strong><small>Aggregate live row count</small></div><code>{row.available ? row.count ?? 0 : 'Unavailable'}</code></li>)}</ul><button type="button" onClick={() => void refreshAtlas()} disabled={Boolean(busy)}><RefreshCw size={15} className={busy === 'atlas-refresh' ? 'is-spinning' : ''} /> Refresh Atlas</button></>}</div>}
             </section>
             <div className="builder-steps">{snapshot.steps.map(step => (
               <div key={step.id} className={`builder-step state-${step.status}`}>
@@ -671,6 +733,26 @@ const BuilderControlRoomPage: React.FC = () => {
             {!['deployed', 'failed', 'cancelled'].includes(selectedJob.status) && <section className="builder-followup builder-cancel" aria-label="Cancel Builder job"><label>Cancellation reason<textarea value={cancellationReason} onChange={event => setCancellationReason(event.target.value)} rows={3} required disabled={Boolean(busy)} /></label><button type="button" className="is-danger" onClick={() => void cancelJob()} disabled={Boolean(busy) || !cancellationReason.trim()}><CircleStop size={15} /> {busy === 'cancel' ? 'Cancelling…' : 'Cancel job'}</button></section>}
           </>}
         </section>
+        {bobOpen && (
+          <aside className={`builder-agent-dock ${mobileWorkspaceView === 'agent' ? 'is-mobile-active' : ''}`} aria-label="Dedicated Bob Builder agent">
+            <BobPanel
+              open
+              presentation="docked"
+              onClose={() => { setBobOpen(false); setMobileWorkspaceView(selectedJob ? 'workbench' : 'queue'); }}
+              mode="builder"
+              context={{
+                surface: 'builder_control_room',
+                job_id: selectedJob?.id ?? null,
+                job_title: selectedJob?.title ?? null,
+                target_sha: selectedJob?.target_sha ?? null,
+                requested_action: selectedJob?.requested_action ?? null,
+                target_environment: selectedJob?.target_environment ?? null,
+                job_status: selectedJob?.status ?? null,
+                workspace_view: workspaceView,
+              }}
+            />
+          </aside>
+        )}
       </div>
 
       {showCreate && <div className="builder-modal-backdrop" role="presentation"><form className="builder-modal" onSubmit={createJob}>
@@ -700,21 +782,6 @@ const BuilderControlRoomPage: React.FC = () => {
         <label>Optional code review<select value={form.codeReviewMode} onChange={event => setForm({ ...form, codeReviewMode: event.target.value as ReviewMode })} disabled={form.targetEnvironment === 'production'}><option value="none">None</option><option value="human">Human reviewer</option><option value="independent_ai">Independent AI reviewer</option></select></label>
         <div className="builder-modal-actions"><button type="button" onClick={() => setShowCreate(false)}>Cancel</button><button type="submit" className="is-primary" disabled={busy === 'create' || projects.length === 0}>{busy === 'create' ? 'Creating…' : 'Create job'}</button></div>
       </form></div>}
-      <BobPanel
-        open={bobOpen}
-        onClose={() => setBobOpen(false)}
-        mode="builder"
-        context={{
-          surface: 'builder_control_room',
-          job_id: selectedJob?.id ?? null,
-          job_title: selectedJob?.title ?? null,
-          target_sha: selectedJob?.target_sha ?? null,
-          requested_action: selectedJob?.requested_action ?? null,
-          target_environment: selectedJob?.target_environment ?? null,
-          job_status: selectedJob?.status ?? null,
-          workspace_view: workspaceView,
-        }}
-      />
     </div>
   );
 };

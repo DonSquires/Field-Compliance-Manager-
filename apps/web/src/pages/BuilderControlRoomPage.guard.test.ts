@@ -43,10 +43,10 @@ describe('Builder control room boundary', () => {
     expect(source).toContain('Evidence unavailable');
     expect(source).toContain('disabled={!evidenceComplete');
     expect(source).toContain('Builder job workspace');
-    expect(source).toContain('Immutable task brief');
-    expect(source).toContain('Verified artifacts');
-    expect(source).toContain('Durable execution timeline');
-    expect(source).toContain('Commit-pinned build and live evidence');
+    expect(source).toContain('Plan and immutable task brief');
+    expect(source).toContain('Verified files, changes, and review artifacts');
+    expect(source).toContain('Terminal, tests, and durable worker output');
+    expect(source).toContain('Preview, workspace context, and exact release truth');
     expect(source).toContain("action: 'context_snapshot'");
     expect(source).toContain("action: 'refresh_atlas'");
     expect(source).toContain('Refresh Atlas');
@@ -65,7 +65,21 @@ describe('Builder control room boundary', () => {
     expect(source).toContain('Continue build');
     expect(source).toContain('<BobPanel');
     expect(source).toContain('mode="builder"');
+    expect(source).toContain('presentation="docked"');
     expect(source).toContain("surface: 'builder_control_room'");
+  });
+
+  it('composes a VS Code-style docked desktop and mobile workspace without hiding the workbench', () => {
+    expect(source).toContain('aria-label="Builder workspace panels"');
+    expect(source).toContain("type MobileWorkspaceView = 'queue' | 'workbench' | 'agent'");
+    expect(source).toContain('aria-label="Dedicated Bob Builder agent"');
+    expect(source).toContain('aria-label="Current build truth"');
+    expect(source).toContain('Questions and blockers');
+    expect(source).toContain('Deployment truth');
+    expect(source).toContain('Next safe action');
+    expect(source).toContain('Files &amp; changes');
+    expect(source).toContain('Terminal &amp; tests');
+    expect(source).toContain('Preview &amp; release');
   });
 
   it('renders partial historical jobs without calling string methods on missing fields', () => {

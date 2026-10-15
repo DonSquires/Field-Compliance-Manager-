@@ -44,6 +44,7 @@ interface BobMessage {
 }
 
 type BobMode = 'operations' | 'builder';
+type BobPanelPresentation = 'floating' | 'docked';
 
 interface BobPanelProps {
   open: boolean;
@@ -51,6 +52,7 @@ interface BobPanelProps {
   context?: Record<string, unknown>;
   mode?: BobMode;
   launchPrompt?: string | null;
+  presentation?: BobPanelPresentation;
 }
 
 interface PendingBobFile {
@@ -184,7 +186,7 @@ function formatContextEntry(key: string, value: string): [string, string] {
   return [label, readable];
 }
 
-export const BobPanel: React.FC<BobPanelProps> = ({ open, onClose, context, mode = 'operations', launchPrompt = null }) => {
+export const BobPanel: React.FC<BobPanelProps> = ({ open, onClose, context, mode = 'operations', launchPrompt = null, presentation = 'floating' }) => {
   const { profile } = useAuth();
   const [conversationId, setConversationId] = useState<string | null>(null);
   const [messages, setMessages] = useState<BobMessage[]>([]);
@@ -862,6 +864,7 @@ export const BobPanel: React.FC<BobPanelProps> = ({ open, onClose, context, mode
     setSending(true);
     setActivityPhase('preparing');
     setError(null);
+    let durableRequestStarted = false;
 
     try {
       const attachments = await uploadPendingFiles(conversationId);
@@ -873,6 +876,7 @@ export const BobPanel: React.FC<BobPanelProps> = ({ open, onClose, context, mode
         startedAt: new Date().toISOString(),
         accepted: false,
       });
+      durableRequestStarted = true;
       // ATLAS CALLS: onspace-ai-chat (persists both user + assistant messages server-side)
       const { data, error: fnError } = await new Promise<Awaited<ReturnType<typeof supabase.functions.invoke<{ reply?: unknown }>>>>((resolve, reject) => {
         const timeout = window.setTimeout(() => reject(new Error(BOB_REQUEST_TIMEOUT_MESSAGE)), BOB_REQUEST_TIMEOUT_MS);
@@ -949,7 +953,9 @@ export const BobPanel: React.FC<BobPanelProps> = ({ open, onClose, context, mode
       const messageText = err instanceof Error ? err.message : 'Bob could not respond.';
       setError(messageText === BOB_REQUEST_TIMEOUT_MESSAGE
         ? BOB_REQUEST_TIMEOUT_MESSAGE
-        : `${messageText} Check the durable request status before retrying.`);
+        : durableRequestStarted
+          ? `Request delivery was not confirmed. Check durable request ${requestId.slice(0, 8)} before retrying; do not resend while it is queued or running.`
+          : messageText);
     } finally {
       setActivityPhase('idle');
       setSending(false);
@@ -1045,6 +1051,7 @@ export const BobPanel: React.FC<BobPanelProps> = ({ open, onClose, context, mode
   };
 
   if (!open) return null;
+  const docked = presentation === 'docked';
 
   const modeConfig: Record<BobMode, { label: string; badge: string; headline: string; subhead: string; placeholder: string; quickActions: Array<{ label: string; prompt: string }> }> = {
     operations: {
@@ -1063,14 +1070,14 @@ export const BobPanel: React.FC<BobPanelProps> = ({ open, onClose, context, mode
       label: 'Bob Builder',
       badge: 'Governed build lane',
       headline: 'What should we build?',
-      subhead: 'Describe the change and Bob plans, implements, verifies, and opens a draft pull request for review.',
+      subhead: 'Give Bob the goal, constraints, and evidence. He plans the change, codes the workspace, verifies it, and keeps the review trail intact.',
       placeholder: 'Describe what you want to build, change, or fix',
       quickActions: [
-        { label: 'Build an app', prompt: 'Build me a small app or workflow from this plain-language goal: [describe the user, job to be done, and outcome].' },
-        { label: 'Change code', prompt: 'Add or change this page, component, workflow, or API: [describe the intended behaviour and acceptance test].' },
+        { label: 'Build an app', prompt: 'Design and build a small app or workflow from this goal: [describe the user, job to be done, and acceptance criteria].' },
+        { label: 'Refine the UI', prompt: 'Improve this page or workflow for a more professional, calmer enterprise feel: [describe the user journey and the problem to fix].' },
         { label: 'Self-heal', prompt: 'Repair this reproducible software problem: [describe the failure, where it appears, and the expected result].' },
-        { label: 'Inspect job', prompt: 'Inspect the selected Builder job and propose the next implementation step.' },
-        { label: 'Plan implementation', prompt: 'Create an implementation plan with affected files, verification steps, and unknowns.' },
+        { label: 'Inspect job', prompt: 'Inspect the selected Builder job and propose the next implementation step with risks, affected files, and verification.' },
+        { label: 'Plan implementation', prompt: 'Create an implementation plan with affected files, verification steps, unknowns, and safe approval checks.' },
         { label: 'Review evidence', prompt: 'Review the current artifacts and explain the next safe repair or build action.' },
       ],
     },
@@ -1080,11 +1087,11 @@ export const BobPanel: React.FC<BobPanelProps> = ({ open, onClose, context, mode
   return (
     <div
       ref={panelRef}
-      className={`bob-panel ${workspaceExpanded ? 'is-expanded' : ''} ${dragging ? 'is-dragging' : ''}`}
-      aria-label="Bob agent workspace"
-      role={workspaceExpanded ? 'dialog' : undefined}
-      aria-modal={workspaceExpanded ? true : undefined}
-      tabIndex={workspaceExpanded ? -1 : undefined}
+      className={`bob-panel ${mode === 'builder' ? 'is-builder-mode' : ''} ${docked ? 'is-docked' : ''} ${workspaceExpanded && !docked ? 'is-expanded' : ''} ${dragging ? 'is-dragging' : ''}`}
+      aria-label={docked ? 'Bob Builder coding agent' : 'Bob agent workspace'}
+      role={docked ? 'complementary' : workspaceExpanded ? 'dialog' : undefined}
+      aria-modal={!docked && workspaceExpanded ? true : undefined}
+      tabIndex={!docked && workspaceExpanded ? -1 : undefined}
       onDragEnter={(event) => { event.preventDefault(); setDragging(true); }}
       onDragOver={(event) => event.preventDefault()}
       onDragLeave={(event) => { if (event.currentTarget === event.target) setDragging(false); }}
@@ -1096,9 +1103,9 @@ export const BobPanel: React.FC<BobPanelProps> = ({ open, onClose, context, mode
           {!sidebarOpen && <button type="button" className="bob-icon-button" onClick={() => void startNewConversation()} disabled={loading || sending} title="New chat" aria-label="New chat"><Plus size={17} /></button>}
           <button type="button" className="bob-icon-button" onClick={() => setSidebarOpen(current => !current)} title={sidebarOpen ? 'Hide sessions' : 'Show sessions'} aria-label={sidebarOpen ? 'Hide sessions' : 'Show sessions'} aria-expanded={sidebarOpen}><PanelLeft size={17} /></button>
           <button type="button" className="bob-icon-button" onClick={() => setContextPanelOpen(current => !current)} title={contextPanelOpen ? 'Hide context panel' : 'Show context panel'} aria-label={contextPanelOpen ? 'Hide context panel' : 'Show context panel'} aria-expanded={contextPanelOpen}><PanelRight size={17} /></button>
-          <button type="button" className="bob-workspace-toggle" onClick={toggleStudio} title={studioOpen ? 'Hide document studio' : 'Open document studio'} aria-label={studioOpen ? 'Hide document studio' : 'Open document studio'} aria-expanded={studioOpen}><Sparkles size={16} /><span>Studio</span></button>
-          <button type="button" className="bob-workspace-toggle" onClick={toggleWorkspace} title={workspaceExpanded ? 'Use compact panel' : 'Open full workspace'} aria-label={workspaceExpanded ? 'Use compact panel' : 'Open full workspace'}>{workspaceExpanded ? <Minimize2 size={16} /> : <Maximize2 size={16} />}<span>{workspaceExpanded ? 'Compact' : 'Expand'}</span></button>
-          <button ref={closeButtonRef} type="button" className="bob-close-button" onClick={() => { onClose(); window.setTimeout(() => returnFocusRef.current?.focus(), 0); }} title="Close Bob" aria-label="Close Bob"><X size={16} /><span>Close</span></button>
+          {!docked && <button type="button" className="bob-workspace-toggle" onClick={toggleStudio} title={studioOpen ? 'Hide document studio' : 'Open document studio'} aria-label={studioOpen ? 'Hide document studio' : 'Open document studio'} aria-expanded={studioOpen}><Sparkles size={16} /><span>Studio</span></button>}
+          {!docked && <button type="button" className="bob-workspace-toggle" onClick={toggleWorkspace} title={workspaceExpanded ? 'Use compact panel' : 'Open full workspace'} aria-label={workspaceExpanded ? 'Use compact panel' : 'Open full workspace'}>{workspaceExpanded ? <Minimize2 size={16} /> : <Maximize2 size={16} />}<span>{workspaceExpanded ? 'Compact' : 'Expand'}</span></button>}
+          <button ref={closeButtonRef} type="button" className="bob-close-button" onClick={() => { onClose(); window.setTimeout(() => returnFocusRef.current?.focus(), 0); }} title={docked ? 'Hide Bob Builder' : 'Close Bob'} aria-label={docked ? 'Hide Bob Builder' : 'Close Bob'}><X size={16} /><span>{docked ? 'Hide' : 'Close'}</span></button>
         </div>
       </header>
 
@@ -1131,7 +1138,7 @@ export const BobPanel: React.FC<BobPanelProps> = ({ open, onClose, context, mode
           />
         )}
 
-        {workspaceExpanded && sidebarOpen && <div className="bob-pane-divider is-left" role="separator" aria-orientation="vertical" aria-label="Resize sessions pane" onPointerDown={(event) => beginPaneResize('left', event)} />}
+        {workspaceExpanded && !docked && sidebarOpen && <div className="bob-pane-divider is-left" role="separator" aria-orientation="vertical" aria-label="Resize sessions pane" onPointerDown={(event) => beginPaneResize('left', event)} />}
 
         <div className="bob-main-pane">
           {contextEntries.length > 0 && <div className="bob-context" aria-label="Active context"><FileSearch size={15} /><div>{contextEntries.map(([key, value], index) => <span key={`${key}-${index}`}><b>{key.replaceAll('_', ' ')}</b>{String(value)}</span>)}</div></div>}
@@ -1283,9 +1290,9 @@ export const BobPanel: React.FC<BobPanelProps> = ({ open, onClose, context, mode
           </form>
         </div>
 
-        {workspaceExpanded && studioOpen && <BobStudio messages={messages} attachments={attachments} organizationId={profile?.organizationId ?? null} onPrompt={(prompt, promptContext) => { studioPromptContextRef.current = promptContext; setInput(prompt); focusComposer(); }} onAttach={() => fileInputRef.current?.click()} />}
+        {workspaceExpanded && !docked && studioOpen && <BobStudio messages={messages} attachments={attachments} organizationId={profile?.organizationId ?? null} onPrompt={(prompt, promptContext) => { studioPromptContextRef.current = promptContext; setInput(prompt); focusComposer(); }} onAttach={() => fileInputRef.current?.click()} />}
 
-        {workspaceExpanded && contextPanelOpen && <div className="bob-pane-divider is-right" role="separator" aria-orientation="vertical" aria-label="Resize context pane" onPointerDown={(event) => beginPaneResize('right', event)} />}
+        {workspaceExpanded && !docked && contextPanelOpen && <div className="bob-pane-divider is-right" role="separator" aria-orientation="vertical" aria-label="Resize context pane" onPointerDown={(event) => beginPaneResize('right', event)} />}
         {contextPanelOpen && (
           <ContextPanel
             tab={contextTab}

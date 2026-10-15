@@ -8,6 +8,23 @@ detailed backlogs (`ENTERPRISE_SAAS_TODO.md`, `PROTOTYPE_GAP_AUDIT.md`,
 Completion language is strict, as in the lineage: **merged ≠ deployed ≠
 glass-proven.** A workstream item is done only when its evidence gate is met.
 
+Builder coding-workspace integration 2026-10-15: the Builder Control Room now
+presents the existing governed build system as one accessible coding workspace
+rather than opening Bob over the workbench as a floating modal. Desktop uses
+three persistent lanes for the job queue, selected-job workbench, and dedicated
+Bob Builder agent; medium layouts dock the agent below the workbench, and
+mobile users switch explicitly among Jobs, Workbench, and Bob Builder. The
+workbench exposes plan, files and changes, terminal and test output, preview
+and release evidence, current activity, questions and blockers, review state,
+exact deployment truth, and the next safe action. This is a presentation and
+information-architecture change, not a trust-boundary bypass: browser turns
+still use the authenticated durable `onspace-ai-chat` path, and Builder
+records/actions still use `bob-builder-control-room`, preserving tenant scope,
+permissions, audit, idempotency, approvals, GitHub evidence, and exact-SHA
+release receipts. Ambiguous client delivery failures now direct the owner to
+check the already-created durable request before resending instead of implying
+that a model quota or provider timeout proves the Edge Function failed.
+
 Builder queue hygiene 2026-10-15: durable outcomes and queue status had drifted
 apart. Jobs already recorded `autopilot_state=done`, plus old main-health
 repairs superseded by a passing current-main receipt, still appeared active.

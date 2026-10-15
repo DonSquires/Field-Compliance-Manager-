@@ -928,6 +928,18 @@ describe('BobPanel', () => {
     expect(mockFrom).toHaveBeenCalledWith('bob_conversations');
   });
 
+  it('renders Builder as an embedded coding agent without modal or expansion controls', async () => {
+    const onClose = vi.fn();
+    render(<BobPanel open mode="builder" presentation="docked" onClose={onClose} context={{ job_title: 'Mobile field reporting' }} />);
+
+    const agent = await screen.findByRole('complementary', { name: 'Bob Builder coding agent' });
+    expect(agent.getAttribute('aria-modal')).toBeNull();
+    expect(screen.queryByRole('button', { name: 'Open full workspace' })).toBeNull();
+    expect(screen.queryByRole('button', { name: 'Open document studio' })).toBeNull();
+    fireEvent.click(screen.getByRole('button', { name: 'Hide Bob Builder' }));
+    expect(onClose).toHaveBeenCalledTimes(1);
+  });
+
   it('shows an explicit close button and dismisses the workspace', async () => {
     const onClose = vi.fn();
     render(<BobPanel open onClose={onClose} />);
