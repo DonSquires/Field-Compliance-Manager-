@@ -13,13 +13,30 @@ import fs from 'node:fs';
 import path from 'node:path';
 import process from 'node:process';
 import { fileURLToPath } from 'node:url';
+import atlasCron from './lib/atlas-cron.cjs';
 
 const BASE_URL = process.env.SUPABASE_URL;
 const SERVICE_KEY = process.env.SUPABASE_SERVICE_ROLE_KEY;
+const MANAGEMENT_TOKEN = process.env.SUPABASE_ACCESS_TOKEN ?? process.env.FIELD_COMPLIANCE_CODESPACE;
+const PROJECT_REF = process.env.SUPABASE_PROJECT_REF
+  ?? (BASE_URL ? new URL(BASE_URL).hostname.split('.')[0] : null);
 const PAGE_SIZE = 1000;
+const { extractScheduledRpcName } = atlasCron;
 
 const ROOT = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '..');
 export const TOOL_ROUTING_SOURCE = 'supabase/functions/onspace-ai-chat/caddie.ts';
+export const CRON_RUN_EVIDENCE_SQL = `
+  SELECT DISTINCT ON (j.jobid)
+    j.jobname,
+    d.command,
+    d.start_time AS invoked_at
+  FROM cron.job j
+  JOIN cron.job_run_details d ON d.jobid = j.jobid
+  WHERE j.active = true
+    AND d.status = 'succeeded'
+    AND d.command = j.command
+  ORDER BY j.jobid, d.start_time DESC
+`;
 
 /**
  * The conductor owns the authoritative tool -> edge function routing table.
@@ -165,6 +182,37 @@ async function fetchAll(table, select) {
   return rows;
 }
 
+async function managementSql(query) {
+  if (!MANAGEMENT_TOKEN || !PROJECT_REF) return null;
+  const response = await fetch(`https://api.supabase.com/v1/projects/${PROJECT_REF}/database/query`, {
+    method: 'POST',
+    headers: {
+      Authorization: `Bearer ${MANAGEMENT_TOKEN}`,
+      'Content-Type': 'application/json',
+    },
+    body: JSON.stringify({ query }),
+  });
+  if (!response.ok) {
+    throw new Error(`Management SQL failed: ${response.status} ${await response.text()}`);
+  }
+  return response.json();
+}
+
+export function cronRowsToObservations(rows) {
+  return rows.flatMap((row) => {
+    const rpcName = extractScheduledRpcName(row.command);
+    if (!rpcName || !row.jobname || !row.invoked_at) return [];
+    return [{
+      sourceId: 'pg_cron_run',
+      basis: 'An active pg_cron schedule has a successful database run receipt for this RPC.',
+      entityType: 'rpc',
+      key: row.jobname,
+      at: row.invoked_at,
+      candidateNames: [rpcName],
+    }];
+  });
+}
+
 export function buildExercisePlan(capabilities, observations) {
   const byKey = new Map();
   for (const capability of capabilities) {
@@ -261,6 +309,29 @@ async function collectObservations() {
     sourceStats.push({ source_id: source.id, table: source.table, rows_read: rows.length, observations: used, error });
   }
 
+  const cronStat = {
+    source_id: 'pg_cron_run',
+    source: 'Management API read of cron.job and cron.job_run_details',
+    rows_read: 0,
+    observations: 0,
+    error: null,
+    skipped: null,
+  };
+  if (!MANAGEMENT_TOKEN || !PROJECT_REF) {
+    cronStat.skipped = 'SUPABASE_ACCESS_TOKEN or FIELD_COMPLIANCE_CODESPACE is not available';
+  } else {
+    try {
+      const rows = await managementSql(CRON_RUN_EVIDENCE_SQL);
+      const cronObservations = cronRowsToObservations(Array.isArray(rows) ? rows : []);
+      cronStat.rows_read = Array.isArray(rows) ? rows.length : 0;
+      cronStat.observations = cronObservations.length;
+      observations.push(...cronObservations);
+    } catch (cause) {
+      cronStat.error = cause.message;
+    }
+  }
+  sourceStats.push(cronStat);
+
   return { observations, sourceStats };
 }
 
@@ -320,7 +391,11 @@ async function main() {
   } else {
     console.log('Atlas exercise evidence');
     for (const stat of sourceStats) {
-      const detail = stat.error ? `ERROR ${stat.error}` : `${stat.rows_read} rows -> ${stat.observations} observations`;
+      const detail = stat.error
+        ? `ERROR ${stat.error}`
+        : stat.skipped
+          ? `SKIPPED ${stat.skipped}`
+          : `${stat.rows_read} rows -> ${stat.observations} observations`;
       console.log(`  ${stat.source_id}: ${detail}`);
     }
     console.log(`Exercised capabilities proven by invocation: ${report.exercised_entities}`);

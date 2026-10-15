@@ -1494,3 +1494,46 @@ remains unpopulated.
   Atlas dry-run records `pages/OrganizationSetupPage -calls-> rpc
   manage_notice_template` and moves bounded gaps 127 -> 126: 0 Edge Functions,
   74 RPCs and 52 tables.
+
+### Closure log - scheduled field-work and retention exercise evidence
+
+- The next Trackforce-style exception check found a map defect rather than a
+  missing screen. `sweep_missed_field_work` already implements the required
+  background road: it identifies late starts, contracted visits beyond their
+  arrive-by time, shifts that ended without attendance, and active shifts
+  running long; updates shift/stop facts; notifies the officer and branch
+  administrators; and writes audit evidence. Atlas showed the RPC as unwired
+  because its caller is `pg_cron`, not a page, Edge Function, trigger, or RPC
+  that the static generator previously understood.
+- Before: the live schedule was active every five minutes as
+  `missed-field-work-sweep-every-5m`, but Atlas presented the operational
+  safeguard as a gap. The same blind spot affected the active daily CCTV
+  biometric-retention sweep. Closing either by adding a manual UI button would
+  have duplicated the authority and weakened automatic exception handling.
+- During: Atlas now derives current scheduler caller edges from ordered
+  `cron.schedule`/`cron.schedule_in_database` declarations and removes a job
+  when a later explicit unschedule is the final declaration. The runtime
+  exercise collector separately reads active jobs and their latest successful
+  `cron.job_run_details` receipt through the governed read-only Management API.
+  Static schedules prove `wired`; only successful run receipts prove
+  `exercised`.
+- After: live Atlas records
+  `scheduler/missed-field-work-sweep-every-5m -calls->
+  sweep_missed_field_work` and
+  `scheduler/cctv-biometric-template-expiry-daily -calls->
+  expire_cctv_biometric_templates`. Both RPCs are `wired=true` and
+  `exercised=true`. The missed-work job's twenty sampled runs all succeeded,
+  including the 20:50 NZDT run on 2026-10-15. Thirty-day redacted evidence
+  includes seven late-start audit events, eighteen missed-shift audit events,
+  and corresponding officer/supervisor notification receipts; no personal
+  record values were exported.
+- This adopts Trackforce's useful unattended exception-monitoring and immediate
+  supervisor-visibility pattern without inventing a second operations queue.
+  Officers still use their schedule, supervisors use the roster exception
+  workflow and notifications, and clients receive the existing service
+  delivery truth. The scheduler is the road, not another product surface.
+- Focused scheduler parsing and exercise-evidence tests pass. The scoped live
+  Atlas refresh wrote two scheduler features and two caller edges; runtime
+  calibration promoted exactly the two RPCs backed by successful cron
+  receipts. Bounded gaps move 126 -> 124: 0 Edge Functions, 72 RPCs and 52
+  tables.

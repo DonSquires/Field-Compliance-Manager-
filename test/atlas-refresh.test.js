@@ -9,11 +9,85 @@ const {
   collectComponentEdges,
   collectManagedAtlas,
   collectSchemaForeignKeyEdges,
+  collectCronSchedulerEdges,
   staleGeneratedEdgeIds,
   collectAtlasRefresh,
   buildRefreshPlan,
   scopeRefreshPlan
 } = require('../scripts/atlas-refresh');
+const { extractCronOperations, extractScheduledRpcName } = require('../scripts/lib/atlas-cron.cjs');
+
+test('pg_cron declarations expose the current scheduled RPC caller', () => {
+  const operations = extractCronOperations(`
+    SELECT jobid INTO v_job_id FROM cron.job WHERE jobname = 'field-sweep' LIMIT 1;
+    IF v_job_id IS NOT NULL THEN PERFORM cron.unschedule(v_job_id); END IF;
+    PERFORM cron.schedule_in_database(
+      'field-sweep',
+      '*/5 * * * *',
+      'select public.sweep_field_work();',
+      'postgres',
+      NULL,
+      TRUE
+    );
+  `);
+
+  assert.deepEqual(operations.map(({ kind, jobName }) => ({ kind, jobName })), [
+    { kind: 'unschedule', jobName: 'field-sweep' },
+    { kind: 'schedule', jobName: 'field-sweep' },
+  ]);
+  assert.equal(extractScheduledRpcName(operations[1].command), 'sweep_field_work');
+});
+
+test('Atlas refresh treats the latest live pg_cron declaration as a real caller', () => {
+  const root = fs.mkdtempSync(path.join(os.tmpdir(), 'atlas-cron-'));
+  try {
+    write(root, 'supabase/schema.sql', `
+      CREATE OR REPLACE FUNCTION public.sweep_field_work() RETURNS jsonb
+      LANGUAGE sql AS $$ SELECT '{}'::jsonb $$;
+      CREATE OR REPLACE FUNCTION public.retired_sweep() RETURNS jsonb
+      LANGUAGE sql AS $$ SELECT '{}'::jsonb $$;
+    `);
+    write(root, 'supabase/migrations/20260101000000_schedule.sql', `
+      SELECT cron.schedule_in_database(
+        'field-sweep',
+        '*/5 * * * *',
+        'select public.sweep_field_work();',
+        'postgres',
+        NULL,
+        TRUE
+      );
+      SELECT cron.schedule_in_database(
+        'retired-sweep',
+        '0 * * * *',
+        'select public.retired_sweep();',
+        'postgres',
+        NULL,
+        TRUE
+      );
+    `);
+    write(root, 'supabase/migrations/20260102000000_retire.sql', `
+      SELECT jobid INTO v_job_id FROM cron.job WHERE jobname = 'retired-sweep' LIMIT 1;
+      PERFORM cron.unschedule(v_job_id);
+    `);
+
+    const edges = collectCronSchedulerEdges(root, {
+      tables: new Set(),
+      rpcs: new Set(['sweep_field_work', 'retired_sweep']),
+    });
+
+    assert.deepEqual(edges.map((edge) => ({
+      source_name: edge.source_name,
+      target_name: edge.target_name,
+      edge_kind: edge.edge_kind,
+    })), [{
+      source_name: 'scheduler/field-sweep',
+      target_name: 'sweep_field_work',
+      edge_kind: 'calls',
+    }]);
+  } finally {
+    fs.rmSync(root, { recursive: true, force: true });
+  }
+});
 
 test('Atlas refresh can place its local manifest outside a read-only source checkout', () => {
   const source = fs.readFileSync(path.resolve(__dirname, '../scripts/atlas-refresh.js'), 'utf8');
