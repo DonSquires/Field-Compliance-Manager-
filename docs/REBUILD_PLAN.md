@@ -15,7 +15,13 @@ Bob now retires those workspace-free rows atomically through an audited
 service-role RPC, cancels their pending approvals, and preserves their reports
 as history. Active model/worker runs, workspaces, pull requests, and legitimate
 human gates are stop lines. Unowned manual jobs receive a seven-day quiet
-period before they qualify as inactive orphans; nothing is deleted.
+period before they qualify as inactive orphans; nothing is deleted. The first
+live reconciliation retained all 82 historical rows while reducing Active from
+17 to 0 and Awaiting from 4 to 0: 14 policy-eligible rows retired
+automatically, five recent exceptions retired under the owner's explicit
+cleanup instruction, and terminal-job pending approvals fell from five to
+zero. The resulting history is 65 cancelled, 13 deployed, three failed, and
+one historical release-ready record.
 
 Main-health snapshot isolation 2026-10-15: an exact-SHA guard repair passed
 targeted and full local suites but failed intermittently in Bob's worker. The
