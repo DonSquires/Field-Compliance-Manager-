@@ -151,6 +151,106 @@
 	background: #102a2a;
 }
 
+.targets-unit-actions {
+	display: grid;
+	grid-template-columns: 1fr 1fr;
+	gap: 7px;
+}
+
+.targets-page .targets-unit-actions button {
+	display: inline-flex;
+	align-items: center;
+	justify-content: center;
+	gap: 6px;
+	min-height: 34px;
+	padding: 0 10px;
+	border: 1px solid #40576b;
+	border-radius: 6px;
+	color: #b3c4d3;
+	background: #101d2a;
+	font-size: 12px;
+	font-weight: 800;
+	white-space: nowrap;
+	cursor: pointer;
+}
+
+.targets-page .targets-unit-actions button.is-primary {
+	border: 0;
+	color: #eafff2;
+	background: #276044;
+}
+
+.targets-dialog-note,
+.targets-skill-impact {
+	margin: 13px 0 0;
+	color: #9aabba;
+	font-size: 13px;
+	line-height: 1.5;
+}
+
+.targets-dialog-note strong {
+	color: #e5edf4;
+}
+
+.targets-skill-picker {
+	display: grid;
+	gap: 7px;
+	margin: 14px 0 0;
+	padding: 12px;
+	border: 1px solid #30475a;
+	border-radius: 7px;
+	background: #0d1b29;
+}
+
+.targets-skill-picker legend {
+	padding: 0 6px;
+	color: #7dd3c7;
+	font-size: 12px;
+	font-weight: 850;
+	text-transform: uppercase;
+}
+
+.targets-skill-picker > p {
+	margin: 0 0 3px;
+	color: #91a3b4;
+	font-size: 12px;
+	line-height: 1.45;
+}
+
+.targets-dialog .targets-skill-picker label {
+	display: grid;
+	grid-template-columns: auto minmax(0, 1fr);
+	align-items: center;
+	gap: 9px;
+	margin: 0;
+	padding: 9px 10px;
+	border: 1px solid #2c4053;
+	border-radius: 6px;
+	background: #101e2c;
+	cursor: pointer;
+}
+
+.targets-dialog .targets-skill-picker input {
+	width: 18px;
+	height: 18px;
+	margin: 0;
+}
+
+.targets-skill-picker label > span {
+	display: grid;
+	gap: 2px;
+}
+
+.targets-skill-picker strong {
+	color: #dce6ee;
+	font-size: 13px;
+}
+
+.targets-skill-picker small {
+	color: #8196a8;
+	font-size: 12px;
+}
+
 @media (max-width: 650px) {
 	.targets-page .targets-list article {
 		grid-template-columns: auto minmax(0, 1fr);
@@ -161,8 +261,9 @@
 		padding-left: 48px;
 	}
 
-	.targets-page .targets-list article > button {
+	.targets-page .targets-unit-actions {
 		grid-column: 1 / -1;
+		grid-template-columns: 1fr;
 		width: 100%;
 	}
 }

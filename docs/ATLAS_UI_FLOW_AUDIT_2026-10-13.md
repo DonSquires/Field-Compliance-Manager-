@@ -1300,3 +1300,44 @@ remains unpopulated.
   replay and cross-staff rejection with zero retained test records. Atlas
   dry-run wires all three RPCs, keeps `exercised=null`, and moves bounded gaps
   133 -> 130: 0 Edge Functions, 78 RPCs and 52 tables.
+
+### Closure log — governed work-unit skill preparation
+
+- Atlas showed `manage_roster_work_unit_skill_ids` as present but unwired while
+  Roster Targets still called the older free-text requirement authority.
+  Existing work units had no skill IDs or names, and the live organization had
+  no catalog skills or staff-skill assignments, so replacing the authority did
+  not reinterpret existing business requirements.
+- Before: an administrator could enter comma-separated skill names only while
+  creating a work unit. Existing units had no correction path, names were not
+  bound to the organization skill catalog, and a failed follow-up call left the
+  unit created without clearly reporting that partial result.
+- During: creation and the new **Required skills** action use active canonical
+  skill IDs. The dialog explains the assignment gate, keeps site induction in
+  People, Pay & HR, offers **Keep current requirements** as a safe exit, and
+  shows an honest governed destination when the organization has no catalog
+  skills. The RPC serializes a client request, replays its audit receipt,
+  checks the expected work-unit timestamp, locks the work unit, and rejects
+  unknown, inactive or foreign-organization skill IDs instead of silently
+  filtering them.
+- After: the RPC persists canonical IDs and their names projection, advances
+  `updated_at`, and records previous and resulting requirements plus the full
+  record snapshot in `audit_log`. Roster Targets reloads the persisted unit and
+  reports an explicit audit-receipt success. Existing assignment enforcement
+  continues to reject new or changed assignments when the selected staff
+  member lacks a current qualifying skill.
+- This applies Trackforce's useful desktop preparation sequence: configure the
+  capability required for work before deploying a person into the field, make
+  the gate visible to supervisors, and retain a durable correction receipt. It
+  does not copy a parallel credential model or conflate organization-wide
+  qualifications with place-specific induction.
+- The linked migration is applied and the regenerated live catalogue has 398
+  tables and 813 functions. Thirteen focused roster guards, the production
+  build, web and E2E type-checks, four desktop/mobile Playwright workflows,
+  linked database lint, migration uniqueness, and 66 Atlas generator tests
+  pass. Rollback-only live verification proved save, same-request replay,
+  stale-state rejection, invalid-skill rejection and clearing requirements,
+  with zero retained test catalog or audit rows. Atlas dry-run wires
+  `manage_roster_work_unit_skill_ids` to `pages/RosterTargetsPage`, keeps
+  `exercised=null`, and moves bounded gaps 130 -> 129: 0 Edge Functions,
+  77 RPCs and 52 tables.

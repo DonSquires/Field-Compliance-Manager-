@@ -1,5 +1,5 @@
 import React, { useCallback, useEffect, useMemo, useState } from 'react';
-import { AlertTriangle, Building2, CheckCircle2, MapPin, Plus, RefreshCw, Route, Search, Shield, Users, X } from 'lucide-react';
+import { AlertTriangle, Building2, CheckCircle2, MapPin, Plus, RefreshCw, Route, Search, Settings2, Shield, Users, X } from 'lucide-react';
 import { useLocation, useNavigate } from 'react-router-dom';
 import { useAuth } from '../context/AuthContext';
 import { supabase } from '../lib/supabase';
@@ -26,7 +26,9 @@ interface Unit {
   workplace_id: string | null;
   team_id: string | null;
   cost_centre_id: string | null;
+  required_skill_ids: string[];
   required_skill_names: string[];
+  updated_at: string;
 }
 interface Option {
   id: string;
@@ -44,6 +46,16 @@ interface Module {
   service_agreement_id: string;
   module_key: string;
 }
+interface RosterSkill {
+  id: string;
+  skill_name: string;
+  skill_category: string | null;
+}
+interface SkillDialog {
+  unit: Unit;
+  selectedIds: string[];
+  requestId: string;
+}
 const RosterTargetsPage: React.FC = () => {
   const { profile, operatingOrganizationId } = useAuth();
   const location = useLocation();
@@ -58,11 +70,13 @@ const RosterTargetsPage: React.FC = () => {
   const [workplaces, setWorkplaces] = useState<Option[]>([]);
   const [teams, setTeams] = useState<Option[]>([]);
   const [costs, setCosts] = useState<Array<Option & { code: string }>>([]);
+  const [skills, setSkills] = useState<RosterSkill[]>([]);
   const [search, setSearch] = useState('');
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
   const [notice, setNotice] = useState<string | null>(null);
   const [dialog, setDialog] = useState<'unit' | 'workplace' | 'cost' | null>(null);
+  const [skillDialog, setSkillDialog] = useState<SkillDialog | null>(null);
   const [busy, setBusy] = useState(false);
   const [type, setType] = useState<UnitType>('patrol');
   const [form, setForm] = useState({
@@ -76,7 +90,7 @@ const RosterTargetsPage: React.FC = () => {
     costId: '',
     address: '',
     code: '',
-    requiredSkills: '',
+    requiredSkillIds: [] as string[],
   });
   const load = useCallback(async () => {
     const org = operatingOrganizationId ?? profile?.organizationId;
@@ -87,8 +101,8 @@ const RosterTargetsPage: React.FC = () => {
     }
     setLoading(true);
     setError(null);
-    const responses = await Promise.all([supabase.from('roster_work_units').select('id,name,work_unit_type,service_type,active,patrol_route_id,service_agreement_location_id,service_agreement_module_id,workplace_id,team_id,cost_centre_id,required_skill_names').eq('organization_id', org).order('name'), supabase.from('patrol_routes').select('id,name').eq('organization_id', org).eq('is_active', true).order('name'), supabase.from('service_agreement_locations').select('id,service_agreement_id,site_id,zone_id').eq('status', 'active'), supabase.from('service_agreement_modules').select('id,service_agreement_id,module_key').eq('enabled', true).eq('module_key', 'static_guarding'), supabase.from('client_sites').select('id,name,boundary_verification').eq('active', true), supabase.from('location_zones').select('id,name').eq('is_active', true), supabase.from('organization_workplaces').select('id,name').eq('organization_id', org).eq('active', true).order('name'), supabase.from('teams').select('id,name').eq('organization_id', org).eq('status', 'active').order('name'), supabase.from('cost_centres').select('id,code,name').eq('organization_id', org).eq('active', true).order('code')]);
-    const [a, b, c, d, e, f, g, h, i] = responses;
+    const responses = await Promise.all([supabase.from('roster_work_units').select('id,name,work_unit_type,service_type,active,patrol_route_id,service_agreement_location_id,service_agreement_module_id,workplace_id,team_id,cost_centre_id,required_skill_ids,required_skill_names,updated_at').eq('organization_id', org).order('name'), supabase.from('patrol_routes').select('id,name').eq('organization_id', org).eq('is_active', true).order('name'), supabase.from('service_agreement_locations').select('id,service_agreement_id,site_id,zone_id').eq('status', 'active'), supabase.from('service_agreement_modules').select('id,service_agreement_id,module_key').eq('enabled', true).eq('module_key', 'static_guarding'), supabase.from('client_sites').select('id,name,boundary_verification').eq('active', true), supabase.from('location_zones').select('id,name').eq('is_active', true), supabase.from('organization_workplaces').select('id,name').eq('organization_id', org).eq('active', true).order('name'), supabase.from('teams').select('id,name').eq('organization_id', org).eq('status', 'active').order('name'), supabase.from('cost_centres').select('id,code,name').eq('organization_id', org).eq('active', true).order('code'), supabase.from('roster_skill_catalog').select('id,skill_name,skill_category').eq('organization_id', org).eq('active', true).order('skill_name')]);
+    const [a, b, c, d, e, f, g, h, i, j] = responses;
     setUnits((a.data as Unit[]) ?? []);
     setRoutes((b.data as Option[]) ?? []);
     setLocations((c.data as AgreementLocation[]) ?? []);
@@ -98,6 +112,7 @@ const RosterTargetsPage: React.FC = () => {
     setWorkplaces((g.data as Option[]) ?? []);
     setTeams((h.data as Option[]) ?? []);
     setCosts((i.data as Array<Option & { code: string }>) ?? []);
+    setSkills((j.data as RosterSkill[]) ?? []);
     const failures = responses.filter((r) => r.error).map((r) => r.error?.message);
     if (failures.length) setError(failures.join(' · '));
     setLoading(false);
@@ -128,40 +143,96 @@ const RosterTargetsPage: React.FC = () => {
       costId: '',
       address: '',
       code: '',
-      requiredSkills: '',
+      requiredSkillIds: [],
     });
   const createUnit = async (e: React.FormEvent) => {
     e.preventDefault();
     setBusy(true);
     setError(null);
     const activeOperatingOrganizationId = operatingOrganizationId ?? profile?.organizationId;
-    if (!activeOperatingOrganizationId) return;
-    const { data, error: rpcError } = await supabase.rpc('create_operating_roster_work_unit', {
-      p_operating_organization_id: activeOperatingOrganizationId,
-      p_name: form.name,
-      p_work_unit_type: type,
-      p_service_type: form.serviceType,
-      p_patrol_route_id: type === 'patrol' ? form.routeId : null,
-      p_service_agreement_location_id: type === 'static' ? form.locationId : null,
-      p_service_agreement_module_id: type === 'static' ? form.moduleId : null,
-      p_workplace_id: type === 'internal' ? form.workplaceId : null,
-      p_team_id: type === 'internal' && form.teamId ? form.teamId : null,
-      p_cost_centre_id: type === 'internal' && form.costId ? form.costId : null,
-    });
-    if (rpcError || !data) setError(rpcError?.message ?? 'Work unit creation was not confirmed.');
-    else {
-      const createdUnit = Array.isArray(data) ? data[0] : data;
-      const requiredSkills = form.requiredSkills.split(',').map((skill) => skill.trim()).filter(Boolean);
-      if (requiredSkills.length && createdUnit?.id) {
-        const { error: skillError } = await supabase.rpc('manage_roster_work_unit_skill_requirements', { p_work_unit_id: createdUnit.id, p_required_skill_names: requiredSkills });
-        if (skillError) { setError(skillError.message); setBusy(false); return; }
+    if (!activeOperatingOrganizationId) {
+      setError('Organisation access could not be confirmed. Work unit creation is unavailable.');
+      setBusy(false);
+      return;
+    }
+    try {
+      const { data, error: rpcError } = await supabase.rpc('create_operating_roster_work_unit', {
+        p_operating_organization_id: activeOperatingOrganizationId,
+        p_name: form.name,
+        p_work_unit_type: type,
+        p_service_type: form.serviceType,
+        p_patrol_route_id: type === 'patrol' ? form.routeId : null,
+        p_service_agreement_location_id: type === 'static' ? form.locationId : null,
+        p_service_agreement_module_id: type === 'static' ? form.moduleId : null,
+        p_workplace_id: type === 'internal' ? form.workplaceId : null,
+        p_team_id: type === 'internal' && form.teamId ? form.teamId : null,
+        p_cost_centre_id: type === 'internal' && form.costId ? form.costId : null,
+      });
+      if (rpcError || !data) {
+        setError(rpcError?.message ?? 'Work unit creation was not confirmed.');
+        return;
       }
-      setNotice(`${workUnitTypeLabel(type)} “${form.name}” created. You can roster shifts against it now.`);
+      const createdUnit = (Array.isArray(data) ? data[0] : data) as Unit;
+      if (form.requiredSkillIds.length) {
+        if (!createdUnit?.id || !createdUnit.updated_at) {
+          setError('The work unit was created, but its required skills could not be confirmed. Open Required skills on its card to finish setup.');
+          setDialog(null);
+          reset();
+          await load();
+          return;
+        }
+        const { error: skillError } = await supabase.rpc('manage_roster_work_unit_skill_ids', {
+          p_client_request_id: crypto.randomUUID(),
+          p_work_unit_id: createdUnit.id,
+          p_expected_updated_at: createdUnit.updated_at,
+          p_required_skill_ids: form.requiredSkillIds,
+        });
+        if (skillError) {
+          setError(`The work unit was created, but its required skills were not saved: ${skillError.message} Open Required skills on its card to finish setup.`);
+          setDialog(null);
+          reset();
+          await load();
+          return;
+        }
+      }
+      setNotice(form.requiredSkillIds.length
+        ? `${workUnitTypeLabel(type)} “${form.name}” created with required skills. Staff must hold them before assignment.`
+        : `${workUnitTypeLabel(type)} “${form.name}” created. You can roster shifts against it now.`);
       setDialog(null);
       reset();
       await load();
+    } catch (caught) {
+      setError(caught instanceof Error ? caught.message : 'Work unit creation failed before it could be confirmed.');
+    } finally {
+      setBusy(false);
     }
-    setBusy(false);
+  };
+  const toggleSkill = (skillId: string, selectedIds: string[]) =>
+    selectedIds.includes(skillId) ? selectedIds.filter((id) => id !== skillId) : [...selectedIds, skillId];
+  const saveSkillRequirements = async (event: React.FormEvent) => {
+    event.preventDefault();
+    if (!skillDialog) return;
+    setBusy(true);
+    setError(null);
+    try {
+      const { error: skillError } = await supabase.rpc('manage_roster_work_unit_skill_ids', {
+        p_client_request_id: skillDialog.requestId,
+        p_work_unit_id: skillDialog.unit.id,
+        p_expected_updated_at: skillDialog.unit.updated_at,
+        p_required_skill_ids: skillDialog.selectedIds,
+      });
+      if (skillError) {
+        setError(skillError.message);
+        return;
+      }
+      setNotice('Required skills updated with an audit receipt. New and changed roster assignments now require current staff skills.');
+      setSkillDialog(null);
+      await load();
+    } catch (caught) {
+      setError(caught instanceof Error ? caught.message : 'Required skills could not be saved.');
+    } finally {
+      setBusy(false);
+    }
   };
   const createReference = async (e: React.FormEvent) => {
     e.preventDefault();
@@ -330,17 +401,67 @@ const RosterTargetsPage: React.FC = () => {
                         )
                       : [names.get(unit.workplace_id ?? ''), names.get(unit.team_id ?? ''), names.get(unit.cost_centre_id ?? '')].filter(Boolean).join(' · ')}
                 </small>
-                    {unit.required_skill_names?.length > 0 && <small>Required skills: {unit.required_skill_names.join(', ')}</small>}
+                    <small>{unit.required_skill_names?.length > 0 ? `Required skills: ${unit.required_skill_names.join(', ')}` : 'No required skills configured'}</small>
                     {attendanceBlocker(unit) && <small className="targets-unit-warning" role="note"><AlertTriangle size={13} aria-hidden="true" /> {attendanceBlocker(unit)}</small>}
               </div>
-              <button className={workflowContext.workUnitId === unit.id ? 'is-primary' : ''} onClick={() => rosterUnit(unit)} aria-label={`Roster shifts for ${unit.name}`}>
-                <Plus size={15} />
-                {workflowContext.workUnitId === unit.id ? 'Create assignment' : 'Roster it'}
-              </button>
+              <div className="targets-unit-actions">
+                <button type="button" onClick={() => setSkillDialog({ unit, selectedIds: unit.required_skill_ids ?? [], requestId: crypto.randomUUID() })} aria-label={`Configure required skills for ${unit.name}`}>
+                  <Settings2 size={15} />
+                  Required skills
+                </button>
+                <button type="button" className={workflowContext.workUnitId === unit.id ? 'is-primary' : ''} onClick={() => rosterUnit(unit)} aria-label={`Roster shifts for ${unit.name}`}>
+                  <Plus size={15} />
+                  {workflowContext.workUnitId === unit.id ? 'Create assignment' : 'Roster it'}
+                </button>
+              </div>
             </article>
           ))
         )}
       </section>
+      {skillDialog && (
+        <div className="targets-dialog-backdrop">
+          <form className="targets-dialog targets-skill-dialog" onSubmit={saveSkillRequirements} role="dialog" aria-modal="true" aria-labelledby="work-unit-skills-title">
+            <header>
+              <div>
+                <span>Deployment readiness</span>
+                <h2 id="work-unit-skills-title">Required skills</h2>
+              </div>
+              <button type="button" onClick={() => setSkillDialog(null)} aria-label="Close required skills">
+                <X />
+              </button>
+            </header>
+            <p className="targets-dialog-note"><strong>{skillDialog.unit.name}</strong> may only be assigned to staff who hold every selected current skill. Site inductions remain separate in People, Pay &amp; HR.</p>
+            {skills.length ? (
+              <fieldset className="targets-skill-picker">
+                <legend>Organisation skill catalog</legend>
+                {skills.map((skill) => (
+                  <label key={skill.id}>
+                    <input
+                      type="checkbox"
+                      checked={skillDialog.selectedIds.includes(skill.id)}
+                      onChange={() => setSkillDialog({ ...skillDialog, selectedIds: toggleSkill(skill.id, skillDialog.selectedIds) })}
+                    />
+                    <span><strong>{skill.skill_name}</strong>{skill.skill_category && <small>{skill.skill_category}</small>}</span>
+                  </label>
+                ))}
+              </fieldset>
+            ) : (
+              <div className="targets-prereq" role="status">
+                <strong>No active skills are configured.</strong>
+                <p>Create the organisation’s reusable skill catalog in People, Pay &amp; HR before requiring skills here.</p>
+                <button type="button" onClick={() => navigate('/admin/people-hr')}>Open People, Pay &amp; HR</button>
+              </div>
+            )}
+            <p className="targets-skill-impact">{skillDialog.selectedIds.length
+              ? `${skillDialog.selectedIds.length} required ${skillDialog.selectedIds.length === 1 ? 'skill' : 'skills'}. New and changed assignments will be refused unless the staff member holds all of them.`
+              : 'No required skills. This work unit will not add a skill gate to roster assignment.'}</p>
+            <footer>
+              <button type="button" onClick={() => setSkillDialog(null)}>Keep current requirements</button>
+              <button type="submit" disabled={busy}>{busy ? 'Saving…' : 'Save required skills'}</button>
+            </footer>
+          </form>
+        </div>
+      )}
       {dialog === 'unit' && (
         <div className="targets-dialog-backdrop">
           <form className="targets-dialog" onSubmit={createUnit} role="dialog" aria-modal="true" aria-labelledby="unit-title">
@@ -382,10 +503,28 @@ const RosterTargetsPage: React.FC = () => {
               </datalist>
               <small>Used for reports and pay rules. Pick a suggestion or type your own.</small>
             </label>
-            <label>
-              <span>Required skills (comma-separated)</span>
-              <input value={form.requiredSkills} onChange={(e) => setForm({ ...form, requiredSkills: e.target.value })} placeholder="e.g. First aid, radio operations" />
-            </label>
+            {skills.length ? (
+              <fieldset className="targets-skill-picker">
+                <legend>Required skills</legend>
+                <p>Select only skills every assigned staff member must hold. You can change this later from the work-unit card.</p>
+                {skills.map((skill) => (
+                  <label key={skill.id}>
+                    <input
+                      type="checkbox"
+                      checked={form.requiredSkillIds.includes(skill.id)}
+                      onChange={() => setForm({ ...form, requiredSkillIds: toggleSkill(skill.id, form.requiredSkillIds) })}
+                    />
+                    <span><strong>{skill.skill_name}</strong>{skill.skill_category && <small>{skill.skill_category}</small>}</span>
+                  </label>
+                ))}
+              </fieldset>
+            ) : (
+              <div className="targets-prereq" role="status">
+                <strong>No active skills are configured.</strong>
+                <p>You can create this work unit now, then set up reusable skills in People, Pay &amp; HR before adding assignment requirements.</p>
+                <button type="button" onClick={() => navigate('/admin/people-hr')}>Open People, Pay &amp; HR</button>
+              </div>
+            )}
             {type === 'patrol' && (routes.length === 0 ? (
               <div className="targets-prereq" role="status">
                 <strong>No patrol runs to pick from yet.</strong>

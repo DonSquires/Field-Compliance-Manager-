@@ -10,7 +10,7 @@ export type Database = {
   // Allows to automatically instantiate createClient with right options
   // instead of createClient<Database, { PostgrestVersion: 'XX' }>(URL, KEY)
   __InternalSupabase: {
-    PostgrestVersion: "14.5"
+    PostgrestVersion: "14.15"
   }
   graphql_public: {
     Tables: {
@@ -258,6 +258,220 @@ export type Database = {
         }
         Relationships: []
       }
+      access_control_event_evidence: {
+        Row: {
+          access_control_event_id: string
+          created_at: string
+          evidence_item_id: string
+          id: string
+          ordinal: number
+          organization_id: string
+          purpose: string
+        }
+        Insert: {
+          access_control_event_id: string
+          created_at?: string
+          evidence_item_id: string
+          id?: string
+          ordinal?: number
+          organization_id: string
+          purpose?: string
+        }
+        Update: {
+          access_control_event_id?: string
+          created_at?: string
+          evidence_item_id?: string
+          id?: string
+          ordinal?: number
+          organization_id?: string
+          purpose?: string
+        }
+        Relationships: [
+          {
+            foreignKeyName: "access_control_event_evidence_access_control_event_id_fkey"
+            columns: ["access_control_event_id"]
+            isOneToOne: false
+            referencedRelation: "access_control_events"
+            referencedColumns: ["id"]
+          },
+          {
+            foreignKeyName: "access_control_event_evidence_evidence_item_id_fkey"
+            columns: ["evidence_item_id"]
+            isOneToOne: false
+            referencedRelation: "evidence_items"
+            referencedColumns: ["id"]
+          },
+          {
+            foreignKeyName: "access_control_event_evidence_organization_id_fkey"
+            columns: ["organization_id"]
+            isOneToOne: false
+            referencedRelation: "crm_account_health"
+            referencedColumns: ["organization_id"]
+          },
+          {
+            foreignKeyName: "access_control_event_evidence_organization_id_fkey"
+            columns: ["organization_id"]
+            isOneToOne: false
+            referencedRelation: "crm_account_list"
+            referencedColumns: ["id"]
+          },
+          {
+            foreignKeyName: "access_control_event_evidence_organization_id_fkey"
+            columns: ["organization_id"]
+            isOneToOne: false
+            referencedRelation: "organizations"
+            referencedColumns: ["id"]
+          },
+        ]
+      }
+      access_control_events: {
+        Row: {
+          claimed_identity: string | null
+          client_request_id: string
+          created_at: string
+          credential_reference: string | null
+          decision_basis: string
+          event_kind: string
+          evidence_state: string
+          geofence_context: Json
+          gps_lat: number | null
+          gps_lng: number | null
+          id: string
+          location_event_id: string | null
+          notes: string | null
+          observed_at: string
+          officer_decision: string
+          officer_user_id: string
+          organization_id: string
+          received_at: string
+          recognition_review_state: string
+          recognition_summary: Json
+          shift_id: string | null
+          site_id: string | null
+          subject_kind: string
+          updated_at: string
+          zone_id: string | null
+        }
+        Insert: {
+          claimed_identity?: string | null
+          client_request_id: string
+          created_at?: string
+          credential_reference?: string | null
+          decision_basis: string
+          event_kind: string
+          evidence_state?: string
+          geofence_context?: Json
+          gps_lat?: number | null
+          gps_lng?: number | null
+          id?: string
+          location_event_id?: string | null
+          notes?: string | null
+          observed_at: string
+          officer_decision: string
+          officer_user_id: string
+          organization_id: string
+          received_at?: string
+          recognition_review_state?: string
+          recognition_summary?: Json
+          shift_id?: string | null
+          site_id?: string | null
+          subject_kind: string
+          updated_at?: string
+          zone_id?: string | null
+        }
+        Update: {
+          claimed_identity?: string | null
+          client_request_id?: string
+          created_at?: string
+          credential_reference?: string | null
+          decision_basis?: string
+          event_kind?: string
+          evidence_state?: string
+          geofence_context?: Json
+          gps_lat?: number | null
+          gps_lng?: number | null
+          id?: string
+          location_event_id?: string | null
+          notes?: string | null
+          observed_at?: string
+          officer_decision?: string
+          officer_user_id?: string
+          organization_id?: string
+          received_at?: string
+          recognition_review_state?: string
+          recognition_summary?: Json
+          shift_id?: string | null
+          site_id?: string | null
+          subject_kind?: string
+          updated_at?: string
+          zone_id?: string | null
+        }
+        Relationships: [
+          {
+            foreignKeyName: "access_control_events_location_event_id_fkey"
+            columns: ["location_event_id"]
+            isOneToOne: false
+            referencedRelation: "location_events"
+            referencedColumns: ["id"]
+          },
+          {
+            foreignKeyName: "access_control_events_officer_user_id_fkey"
+            columns: ["officer_user_id"]
+            isOneToOne: false
+            referencedRelation: "user_profiles"
+            referencedColumns: ["id"]
+          },
+          {
+            foreignKeyName: "access_control_events_organization_id_fkey"
+            columns: ["organization_id"]
+            isOneToOne: false
+            referencedRelation: "crm_account_health"
+            referencedColumns: ["organization_id"]
+          },
+          {
+            foreignKeyName: "access_control_events_organization_id_fkey"
+            columns: ["organization_id"]
+            isOneToOne: false
+            referencedRelation: "crm_account_list"
+            referencedColumns: ["id"]
+          },
+          {
+            foreignKeyName: "access_control_events_organization_id_fkey"
+            columns: ["organization_id"]
+            isOneToOne: false
+            referencedRelation: "organizations"
+            referencedColumns: ["id"]
+          },
+          {
+            foreignKeyName: "access_control_events_shift_id_fkey"
+            columns: ["shift_id"]
+            isOneToOne: false
+            referencedRelation: "shifts"
+            referencedColumns: ["id"]
+          },
+          {
+            foreignKeyName: "access_control_events_site_id_fkey"
+            columns: ["site_id"]
+            isOneToOne: false
+            referencedRelation: "client_sites"
+            referencedColumns: ["id"]
+          },
+          {
+            foreignKeyName: "access_control_events_zone_id_fkey"
+            columns: ["zone_id"]
+            isOneToOne: false
+            referencedRelation: "location_zones"
+            referencedColumns: ["id"]
+          },
+          {
+            foreignKeyName: "access_control_events_zone_id_fkey"
+            columns: ["zone_id"]
+            isOneToOne: false
+            referencedRelation: "module_rule_index_view"
+            referencedColumns: ["zone_id"]
+          },
+        ]
+      }
       access_presets: {
         Row: {
           created_at: string
@@ -410,11 +624,13 @@ export type Database = {
           created_at: string
           dispatch_job_id: string | null
           id: string
+          intake_channel: string | null
           location_name: string | null
           notes: string | null
           organization_id: string
           panel_id: string | null
           received_at: string
+          recorded_by: string | null
           signal_type: string
           site_id: string | null
           zone_name: string | null
@@ -425,11 +641,13 @@ export type Database = {
           created_at?: string
           dispatch_job_id?: string | null
           id?: string
+          intake_channel?: string | null
           location_name?: string | null
           notes?: string | null
           organization_id: string
           panel_id?: string | null
           received_at?: string
+          recorded_by?: string | null
           signal_type: string
           site_id?: string | null
           zone_name?: string | null
@@ -440,11 +658,13 @@ export type Database = {
           created_at?: string
           dispatch_job_id?: string | null
           id?: string
+          intake_channel?: string | null
           location_name?: string | null
           notes?: string | null
           organization_id?: string
           panel_id?: string | null
           received_at?: string
+          recorded_by?: string | null
           signal_type?: string
           site_id?: string | null
           zone_name?: string | null
@@ -924,6 +1144,8 @@ export type Database = {
           action_taken: string | null
           assessed_at: string
           assigned_reviewer_id: string | null
+          biosecurity_ai_analysis: Json | null
+          biosecurity_ai_review: Json | null
           bob_checklist: Json
           bob_classification: string | null
           bob_confidence: number | null
@@ -969,12 +1191,15 @@ export type Database = {
           species_name: string | null
           species_review_decision: string
           status: string
+          updated_at: string
         }
         Insert: {
           action?: string | null
           action_taken?: string | null
           assessed_at?: string
           assigned_reviewer_id?: string | null
+          biosecurity_ai_analysis?: Json | null
+          biosecurity_ai_review?: Json | null
           bob_checklist?: Json
           bob_classification?: string | null
           bob_confidence?: number | null
@@ -1020,12 +1245,15 @@ export type Database = {
           species_name?: string | null
           species_review_decision?: string
           status?: string
+          updated_at?: string
         }
         Update: {
           action?: string | null
           action_taken?: string | null
           assessed_at?: string
           assigned_reviewer_id?: string | null
+          biosecurity_ai_analysis?: Json | null
+          biosecurity_ai_review?: Json | null
           bob_checklist?: Json
           bob_classification?: string | null
           bob_confidence?: number | null
@@ -1071,6 +1299,7 @@ export type Database = {
           species_name?: string | null
           species_review_decision?: string
           status?: string
+          updated_at?: string
         }
         Relationships: [
           {
@@ -1426,6 +1655,51 @@ export type Database = {
           target_name?: string
           target_type?: string
           updated_at?: string
+        }
+        Relationships: []
+      }
+      bob_atlas_refresh_runs: {
+        Row: {
+          capability_total: number
+          capability_upserts: number
+          created_at: string
+          edge_total: number
+          edge_upserts: number
+          generated_at: string
+          id: string
+          refresh_source: string
+          refreshed_at: string
+          retired_total: number
+          source_branch: string | null
+          source_commit: string | null
+        }
+        Insert: {
+          capability_total?: number
+          capability_upserts?: number
+          created_at?: string
+          edge_total?: number
+          edge_upserts?: number
+          generated_at?: string
+          id?: string
+          refresh_source?: string
+          refreshed_at?: string
+          retired_total?: number
+          source_branch?: string | null
+          source_commit?: string | null
+        }
+        Update: {
+          capability_total?: number
+          capability_upserts?: number
+          created_at?: string
+          edge_total?: number
+          edge_upserts?: number
+          generated_at?: string
+          id?: string
+          refresh_source?: string
+          refreshed_at?: string
+          retired_total?: number
+          source_branch?: string | null
+          source_commit?: string | null
         }
         Relationships: []
       }
@@ -1935,7 +2209,12 @@ export type Database = {
       }
       bob_friction_packets: {
         Row: {
+          automation_attempt_count: number
+          automation_error_redacted: string | null
+          automation_status: string
+          automation_updated_at: string
           basis: Json
+          builder_job_id: string | null
           client_packet_key: string
           confidence: number | null
           created_at: string
@@ -1944,6 +2223,7 @@ export type Database = {
           id: string
           organization_id: string
           redaction: Json
+          repair_risk: string
           retention_cutoff: string | null
           route: string | null
           stop_line_hit: string | null
@@ -1952,7 +2232,12 @@ export type Database = {
           user_id: string
         }
         Insert: {
+          automation_attempt_count?: number
+          automation_error_redacted?: string | null
+          automation_status?: string
+          automation_updated_at?: string
           basis?: Json
+          builder_job_id?: string | null
           client_packet_key: string
           confidence?: number | null
           created_at?: string
@@ -1961,6 +2246,7 @@ export type Database = {
           id?: string
           organization_id: string
           redaction?: Json
+          repair_risk?: string
           retention_cutoff?: string | null
           route?: string | null
           stop_line_hit?: string | null
@@ -1969,7 +2255,12 @@ export type Database = {
           user_id: string
         }
         Update: {
+          automation_attempt_count?: number
+          automation_error_redacted?: string | null
+          automation_status?: string
+          automation_updated_at?: string
           basis?: Json
+          builder_job_id?: string | null
           client_packet_key?: string
           confidence?: number | null
           created_at?: string
@@ -1978,6 +2269,7 @@ export type Database = {
           id?: string
           organization_id?: string
           redaction?: Json
+          repair_risk?: string
           retention_cutoff?: string | null
           route?: string | null
           stop_line_hit?: string | null
@@ -1986,6 +2278,13 @@ export type Database = {
           user_id?: string
         }
         Relationships: [
+          {
+            foreignKeyName: "bob_friction_packets_builder_job_id_fkey"
+            columns: ["builder_job_id"]
+            isOneToOne: false
+            referencedRelation: "builder_jobs"
+            referencedColumns: ["id"]
+          },
           {
             foreignKeyName: "bob_friction_packets_organization_id_fkey"
             columns: ["organization_id"]
@@ -2475,6 +2774,54 @@ export type Database = {
             referencedColumns: ["id"]
           },
         ]
+      }
+      bob_laptop_link: {
+        Row: {
+          created_at: string
+          gpu: string | null
+          host_name: string
+          id: string
+          ollama_host: string | null
+          ollama_models: string[]
+          reported_at: string
+          script_version: string | null
+          ssh_allowed: boolean
+          ssh_port: number
+          tailscale_ip: unknown
+          updated_at: string
+          windows_user: string
+        }
+        Insert: {
+          created_at?: string
+          gpu?: string | null
+          host_name: string
+          id?: string
+          ollama_host?: string | null
+          ollama_models?: string[]
+          reported_at?: string
+          script_version?: string | null
+          ssh_allowed?: boolean
+          ssh_port?: number
+          tailscale_ip: unknown
+          updated_at?: string
+          windows_user: string
+        }
+        Update: {
+          created_at?: string
+          gpu?: string | null
+          host_name?: string
+          id?: string
+          ollama_host?: string | null
+          ollama_models?: string[]
+          reported_at?: string
+          script_version?: string | null
+          ssh_allowed?: boolean
+          ssh_port?: number
+          tailscale_ip?: unknown
+          updated_at?: string
+          windows_user?: string
+        }
+        Relationships: []
       }
       bob_learning_memory: {
         Row: {
@@ -3593,6 +3940,86 @@ export type Database = {
           },
         ]
       }
+      bob_turn_runs: {
+        Row: {
+          completed_at: string | null
+          conversation_id: string
+          created_at: string
+          error_code: string | null
+          heartbeat_at: string
+          id: string
+          organization_id: string
+          request_fingerprint: string
+          request_id: string
+          response_payload: Json | null
+          started_at: string
+          status: string
+          updated_at: string
+          user_id: string
+        }
+        Insert: {
+          completed_at?: string | null
+          conversation_id: string
+          created_at?: string
+          error_code?: string | null
+          heartbeat_at?: string
+          id?: string
+          organization_id: string
+          request_fingerprint: string
+          request_id: string
+          response_payload?: Json | null
+          started_at?: string
+          status?: string
+          updated_at?: string
+          user_id: string
+        }
+        Update: {
+          completed_at?: string | null
+          conversation_id?: string
+          created_at?: string
+          error_code?: string | null
+          heartbeat_at?: string
+          id?: string
+          organization_id?: string
+          request_fingerprint?: string
+          request_id?: string
+          response_payload?: Json | null
+          started_at?: string
+          status?: string
+          updated_at?: string
+          user_id?: string
+        }
+        Relationships: [
+          {
+            foreignKeyName: "bob_turn_runs_conversation_id_fkey"
+            columns: ["conversation_id"]
+            isOneToOne: false
+            referencedRelation: "bob_conversations"
+            referencedColumns: ["id"]
+          },
+          {
+            foreignKeyName: "bob_turn_runs_organization_id_fkey"
+            columns: ["organization_id"]
+            isOneToOne: false
+            referencedRelation: "crm_account_health"
+            referencedColumns: ["organization_id"]
+          },
+          {
+            foreignKeyName: "bob_turn_runs_organization_id_fkey"
+            columns: ["organization_id"]
+            isOneToOne: false
+            referencedRelation: "crm_account_list"
+            referencedColumns: ["id"]
+          },
+          {
+            foreignKeyName: "bob_turn_runs_organization_id_fkey"
+            columns: ["organization_id"]
+            isOneToOne: false
+            referencedRelation: "organizations"
+            referencedColumns: ["id"]
+          },
+        ]
+      }
       boundary_proposals: {
         Row: {
           address_candidate: Json | null
@@ -4275,6 +4702,13 @@ export type Database = {
       builder_jobs: {
         Row: {
           approval_required_at: string[] | null
+          autopilot_conversation_id: string | null
+          autopilot_report: Json | null
+          autopilot_reported_at: string | null
+          autopilot_requested_by: string | null
+          autopilot_source: string | null
+          autopilot_state: string | null
+          autopilot_updated_at: string | null
           backend_required: boolean
           branch_name: string | null
           code_review_artifact_id: string | null
@@ -4292,7 +4726,11 @@ export type Database = {
           organization_id: string
           parent_job_id: string | null
           project_id: string
+          repair_risk: string | null
           requested_action: string
+          source_friction_packet_id: string | null
+          source_main_health_files: string[] | null
+          source_main_health_sha: string | null
           status: string
           target_environment: string
           target_sha: string | null
@@ -4312,6 +4750,13 @@ export type Database = {
         }
         Insert: {
           approval_required_at?: string[] | null
+          autopilot_conversation_id?: string | null
+          autopilot_report?: Json | null
+          autopilot_reported_at?: string | null
+          autopilot_requested_by?: string | null
+          autopilot_source?: string | null
+          autopilot_state?: string | null
+          autopilot_updated_at?: string | null
           backend_required?: boolean
           branch_name?: string | null
           code_review_artifact_id?: string | null
@@ -4329,7 +4774,11 @@ export type Database = {
           organization_id: string
           parent_job_id?: string | null
           project_id: string
+          repair_risk?: string | null
           requested_action?: string
+          source_friction_packet_id?: string | null
+          source_main_health_files?: string[] | null
+          source_main_health_sha?: string | null
           status?: string
           target_environment?: string
           target_sha?: string | null
@@ -4349,6 +4798,13 @@ export type Database = {
         }
         Update: {
           approval_required_at?: string[] | null
+          autopilot_conversation_id?: string | null
+          autopilot_report?: Json | null
+          autopilot_reported_at?: string | null
+          autopilot_requested_by?: string | null
+          autopilot_source?: string | null
+          autopilot_state?: string | null
+          autopilot_updated_at?: string | null
           backend_required?: boolean
           branch_name?: string | null
           code_review_artifact_id?: string | null
@@ -4366,7 +4822,11 @@ export type Database = {
           organization_id?: string
           parent_job_id?: string | null
           project_id?: string
+          repair_risk?: string | null
           requested_action?: string
+          source_friction_packet_id?: string | null
+          source_main_health_files?: string[] | null
+          source_main_health_sha?: string | null
           status?: string
           target_environment?: string
           target_sha?: string | null
@@ -4425,6 +4885,13 @@ export type Database = {
             columns: ["project_id"]
             isOneToOne: false
             referencedRelation: "builder_projects"
+            referencedColumns: ["id"]
+          },
+          {
+            foreignKeyName: "builder_jobs_source_friction_packet_id_fkey"
+            columns: ["source_friction_packet_id"]
+            isOneToOne: false
+            referencedRelation: "bob_friction_packets"
             referencedColumns: ["id"]
           },
           {
@@ -4924,7 +5391,11 @@ export type Database = {
         Row: {
           canonical_key: string
           created_at: string
+          date_of_birth: string | null
           display_name: string | null
+          homeless_notes: string | null
+          homeless_status: string
+          homeless_verified_at: string | null
           id: string
           merged_into_id: string | null
           metadata: Json
@@ -4936,7 +5407,11 @@ export type Database = {
         Insert: {
           canonical_key: string
           created_at?: string
+          date_of_birth?: string | null
           display_name?: string | null
+          homeless_notes?: string | null
+          homeless_status?: string
+          homeless_verified_at?: string | null
           id?: string
           merged_into_id?: string | null
           metadata?: Json
@@ -4948,7 +5423,11 @@ export type Database = {
         Update: {
           canonical_key?: string
           created_at?: string
+          date_of_birth?: string | null
           display_name?: string | null
+          homeless_notes?: string | null
+          homeless_status?: string
+          homeless_verified_at?: string | null
           id?: string
           merged_into_id?: string | null
           metadata?: Json
@@ -4963,6 +5442,13 @@ export type Database = {
             columns: ["merged_into_id"]
             isOneToOne: false
             referencedRelation: "canonical_people"
+            referencedColumns: ["id"]
+          },
+          {
+            foreignKeyName: "canonical_people_merged_into_id_fkey"
+            columns: ["merged_into_id"]
+            isOneToOne: false
+            referencedRelation: "canonical_person_public"
             referencedColumns: ["id"]
           },
         ]
@@ -5004,6 +5490,13 @@ export type Database = {
             columns: ["canonical_person_id"]
             isOneToOne: false
             referencedRelation: "canonical_people"
+            referencedColumns: ["id"]
+          },
+          {
+            foreignKeyName: "canonical_person_links_canonical_person_id_fkey"
+            columns: ["canonical_person_id"]
+            isOneToOne: false
+            referencedRelation: "canonical_person_public"
             referencedColumns: ["id"]
           },
           {
@@ -5330,6 +5823,7 @@ export type Database = {
       canonical_vehicles: {
         Row: {
           body_type: string | null
+          chassis_number: string | null
           cof_expiry: string | null
           cof_status: string | null
           colour: string | null
@@ -5337,6 +5831,7 @@ export type Database = {
           compliance_source: string | null
           created_at: string
           embedding_quality: number | null
+          engine_number: string | null
           fuel_type: string | null
           homeless_notes: string | null
           homeless_status: string
@@ -5346,17 +5841,20 @@ export type Database = {
           make: string | null
           model: string | null
           motorweb_enriched_at: string | null
+          org_notes: Json
           plate_number: string
           registered_owner_name: string | null
           rego_expiry: string | null
           rego_status: string | null
           updated_at: string
+          vin: string | null
           wof_expiry: string | null
           wof_status: string | null
           year: number | null
         }
         Insert: {
           body_type?: string | null
+          chassis_number?: string | null
           cof_expiry?: string | null
           cof_status?: string | null
           colour?: string | null
@@ -5364,6 +5862,7 @@ export type Database = {
           compliance_source?: string | null
           created_at?: string
           embedding_quality?: number | null
+          engine_number?: string | null
           fuel_type?: string | null
           homeless_notes?: string | null
           homeless_status?: string
@@ -5373,17 +5872,20 @@ export type Database = {
           make?: string | null
           model?: string | null
           motorweb_enriched_at?: string | null
+          org_notes?: Json
           plate_number: string
           registered_owner_name?: string | null
           rego_expiry?: string | null
           rego_status?: string | null
           updated_at?: string
+          vin?: string | null
           wof_expiry?: string | null
           wof_status?: string | null
           year?: number | null
         }
         Update: {
           body_type?: string | null
+          chassis_number?: string | null
           cof_expiry?: string | null
           cof_status?: string | null
           colour?: string | null
@@ -5391,6 +5893,7 @@ export type Database = {
           compliance_source?: string | null
           created_at?: string
           embedding_quality?: number | null
+          engine_number?: string | null
           fuel_type?: string | null
           homeless_notes?: string | null
           homeless_status?: string
@@ -5400,11 +5903,13 @@ export type Database = {
           make?: string | null
           model?: string | null
           motorweb_enriched_at?: string | null
+          org_notes?: Json
           plate_number?: string
           registered_owner_name?: string | null
           rego_expiry?: string | null
           rego_status?: string | null
           updated_at?: string
+          vin?: string | null
           wof_expiry?: string | null
           wof_status?: string | null
           year?: number | null
@@ -5707,6 +6212,13 @@ export type Database = {
             columns: ["canonical_person_id"]
             isOneToOne: false
             referencedRelation: "canonical_people"
+            referencedColumns: ["id"]
+          },
+          {
+            foreignKeyName: "cctv_entity_observations_canonical_person_id_fkey"
+            columns: ["canonical_person_id"]
+            isOneToOne: false
+            referencedRelation: "canonical_person_public"
             referencedColumns: ["id"]
           },
           {
@@ -6213,6 +6725,267 @@ export type Database = {
           },
         ]
       }
+      cctv_inference_budgets: {
+        Row: {
+          daily_frame_budget: number
+          organization_id: string
+          reason: string | null
+          set_at: string
+          set_by: string | null
+        }
+        Insert: {
+          daily_frame_budget: number
+          organization_id: string
+          reason?: string | null
+          set_at?: string
+          set_by?: string | null
+        }
+        Update: {
+          daily_frame_budget?: number
+          organization_id?: string
+          reason?: string | null
+          set_at?: string
+          set_by?: string | null
+        }
+        Relationships: [
+          {
+            foreignKeyName: "cctv_inference_budgets_organization_id_fkey"
+            columns: ["organization_id"]
+            isOneToOne: true
+            referencedRelation: "crm_account_health"
+            referencedColumns: ["organization_id"]
+          },
+          {
+            foreignKeyName: "cctv_inference_budgets_organization_id_fkey"
+            columns: ["organization_id"]
+            isOneToOne: true
+            referencedRelation: "crm_account_list"
+            referencedColumns: ["id"]
+          },
+          {
+            foreignKeyName: "cctv_inference_budgets_organization_id_fkey"
+            columns: ["organization_id"]
+            isOneToOne: true
+            referencedRelation: "organizations"
+            referencedColumns: ["id"]
+          },
+        ]
+      }
+      cctv_media_upload_claims: {
+        Row: {
+          cctv_import_id: string
+          claimed_at: string
+          claimed_by: string | null
+          evidence_item_id: string | null
+          evidence_kind: string
+          expires_at: string
+          id: string
+          organization_id: string
+          registered_at: string | null
+          sha256: string
+          status: string
+          storage_path: string
+        }
+        Insert: {
+          cctv_import_id: string
+          claimed_at?: string
+          claimed_by?: string | null
+          evidence_item_id?: string | null
+          evidence_kind: string
+          expires_at?: string
+          id?: string
+          organization_id: string
+          registered_at?: string | null
+          sha256: string
+          status?: string
+          storage_path: string
+        }
+        Update: {
+          cctv_import_id?: string
+          claimed_at?: string
+          claimed_by?: string | null
+          evidence_item_id?: string | null
+          evidence_kind?: string
+          expires_at?: string
+          id?: string
+          organization_id?: string
+          registered_at?: string | null
+          sha256?: string
+          status?: string
+          storage_path?: string
+        }
+        Relationships: [
+          {
+            foreignKeyName: "cctv_media_upload_claims_cctv_import_id_fkey"
+            columns: ["cctv_import_id"]
+            isOneToOne: false
+            referencedRelation: "cctv_imports"
+            referencedColumns: ["id"]
+          },
+          {
+            foreignKeyName: "cctv_media_upload_claims_claimed_by_fkey"
+            columns: ["claimed_by"]
+            isOneToOne: false
+            referencedRelation: "user_profiles"
+            referencedColumns: ["id"]
+          },
+          {
+            foreignKeyName: "cctv_media_upload_claims_evidence_item_id_fkey"
+            columns: ["evidence_item_id"]
+            isOneToOne: false
+            referencedRelation: "evidence_items"
+            referencedColumns: ["id"]
+          },
+          {
+            foreignKeyName: "cctv_media_upload_claims_organization_id_fkey"
+            columns: ["organization_id"]
+            isOneToOne: false
+            referencedRelation: "crm_account_health"
+            referencedColumns: ["organization_id"]
+          },
+          {
+            foreignKeyName: "cctv_media_upload_claims_organization_id_fkey"
+            columns: ["organization_id"]
+            isOneToOne: false
+            referencedRelation: "crm_account_list"
+            referencedColumns: ["id"]
+          },
+          {
+            foreignKeyName: "cctv_media_upload_claims_organization_id_fkey"
+            columns: ["organization_id"]
+            isOneToOne: false
+            referencedRelation: "organizations"
+            referencedColumns: ["id"]
+          },
+        ]
+      }
+      cctv_observation_derivatives: {
+        Row: {
+          created_at: string
+          enhanced_bucket: string
+          enhanced_path: string
+          enhanced_sha256: string
+          enhancement_profile: string
+          enhancement_receipt: Json
+          entity_kind: string
+          evidence_item_id: string
+          fusion_receipt: Json
+          generative: boolean
+          id: string
+          inference_job_id: string
+          observation_id: string
+          organization_id: string
+          original_bucket: string
+          original_path: string
+          original_sha256: string
+          provider: string
+          recognition_comparison: Json
+          recognition_results: Json
+          review_required: boolean
+          source_event_id: string
+          source_frame_hash: string | null
+          source_frames: Json
+          updated_at: string
+        }
+        Insert: {
+          created_at?: string
+          enhanced_bucket: string
+          enhanced_path: string
+          enhanced_sha256: string
+          enhancement_profile: string
+          enhancement_receipt?: Json
+          entity_kind: string
+          evidence_item_id: string
+          fusion_receipt?: Json
+          generative?: boolean
+          id?: string
+          inference_job_id: string
+          observation_id: string
+          organization_id: string
+          original_bucket: string
+          original_path: string
+          original_sha256: string
+          provider: string
+          recognition_comparison?: Json
+          recognition_results?: Json
+          review_required?: boolean
+          source_event_id: string
+          source_frame_hash?: string | null
+          source_frames?: Json
+          updated_at?: string
+        }
+        Update: {
+          created_at?: string
+          enhanced_bucket?: string
+          enhanced_path?: string
+          enhanced_sha256?: string
+          enhancement_profile?: string
+          enhancement_receipt?: Json
+          entity_kind?: string
+          evidence_item_id?: string
+          fusion_receipt?: Json
+          generative?: boolean
+          id?: string
+          inference_job_id?: string
+          observation_id?: string
+          organization_id?: string
+          original_bucket?: string
+          original_path?: string
+          original_sha256?: string
+          provider?: string
+          recognition_comparison?: Json
+          recognition_results?: Json
+          review_required?: boolean
+          source_event_id?: string
+          source_frame_hash?: string | null
+          source_frames?: Json
+          updated_at?: string
+        }
+        Relationships: [
+          {
+            foreignKeyName: "cctv_observation_derivatives_evidence_item_id_fkey"
+            columns: ["evidence_item_id"]
+            isOneToOne: false
+            referencedRelation: "evidence_items"
+            referencedColumns: ["id"]
+          },
+          {
+            foreignKeyName: "cctv_observation_derivatives_inference_job_id_fkey"
+            columns: ["inference_job_id"]
+            isOneToOne: false
+            referencedRelation: "inference_jobs"
+            referencedColumns: ["id"]
+          },
+          {
+            foreignKeyName: "cctv_observation_derivatives_observation_id_fkey"
+            columns: ["observation_id"]
+            isOneToOne: false
+            referencedRelation: "cctv_entity_observations"
+            referencedColumns: ["id"]
+          },
+          {
+            foreignKeyName: "cctv_observation_derivatives_organization_id_fkey"
+            columns: ["organization_id"]
+            isOneToOne: false
+            referencedRelation: "crm_account_health"
+            referencedColumns: ["organization_id"]
+          },
+          {
+            foreignKeyName: "cctv_observation_derivatives_organization_id_fkey"
+            columns: ["organization_id"]
+            isOneToOne: false
+            referencedRelation: "crm_account_list"
+            referencedColumns: ["id"]
+          },
+          {
+            foreignKeyName: "cctv_observation_derivatives_organization_id_fkey"
+            columns: ["organization_id"]
+            isOneToOne: false
+            referencedRelation: "organizations"
+            referencedColumns: ["id"]
+          },
+        ]
+      }
       cctv_report_receipts: {
         Row: {
           batch_id: string | null
@@ -6605,6 +7378,7 @@ export type Database = {
           active_days: number[]
           active_months: number[]
           created_at: string
+          delivery_schedule_id: string | null
           dwell_minutes: number
           id: string
           min_gap_between_visits_minutes: number
@@ -6632,6 +7406,7 @@ export type Database = {
           active_days?: number[]
           active_months?: number[]
           created_at?: string
+          delivery_schedule_id?: string | null
           dwell_minutes?: number
           id?: string
           min_gap_between_visits_minutes?: number
@@ -6659,6 +7434,7 @@ export type Database = {
           active_days?: number[]
           active_months?: number[]
           created_at?: string
+          delivery_schedule_id?: string | null
           dwell_minutes?: number
           id?: string
           min_gap_between_visits_minutes?: number
@@ -6682,6 +7458,13 @@ export type Database = {
           zone_id?: string | null
         }
         Relationships: [
+          {
+            foreignKeyName: "client_site_patrol_config_delivery_schedule_id_fkey"
+            columns: ["delivery_schedule_id"]
+            isOneToOne: false
+            referencedRelation: "service_agreement_delivery_schedules"
+            referencedColumns: ["id"]
+          },
           {
             foreignKeyName: "client_site_patrol_config_organization_id_fkey"
             columns: ["organization_id"]
@@ -9019,6 +9802,7 @@ export type Database = {
           status: string
           timing_source: string
           work_unit_id: string | null
+          zone_id: string | null
         }
         Insert: {
           acknowledged_at?: string | null
@@ -9060,6 +9844,7 @@ export type Database = {
           status?: string
           timing_source?: string
           work_unit_id?: string | null
+          zone_id?: string | null
         }
         Update: {
           acknowledged_at?: string | null
@@ -9101,6 +9886,7 @@ export type Database = {
           status?: string
           timing_source?: string
           work_unit_id?: string | null
+          zone_id?: string | null
         }
         Relationships: [
           {
@@ -9136,6 +9922,13 @@ export type Database = {
             columns: ["investigation_id"]
             isOneToOne: false
             referencedRelation: "investigations"
+            referencedColumns: ["id"]
+          },
+          {
+            foreignKeyName: "dispatch_jobs_investigation_id_fkey"
+            columns: ["investigation_id"]
+            isOneToOne: false
+            referencedRelation: "investigations_summary"
             referencedColumns: ["id"]
           },
           {
@@ -9186,6 +9979,20 @@ export type Database = {
             isOneToOne: false
             referencedRelation: "roster_work_units"
             referencedColumns: ["id"]
+          },
+          {
+            foreignKeyName: "dispatch_jobs_zone_id_fkey"
+            columns: ["zone_id"]
+            isOneToOne: false
+            referencedRelation: "location_zones"
+            referencedColumns: ["id"]
+          },
+          {
+            foreignKeyName: "dispatch_jobs_zone_id_fkey"
+            columns: ["zone_id"]
+            isOneToOne: false
+            referencedRelation: "module_rule_index_view"
+            referencedColumns: ["zone_id"]
           },
         ]
       }
@@ -9441,6 +10248,95 @@ export type Database = {
           },
         ]
       }
+      document_placements: {
+        Row: {
+          client_request_id: string | null
+          document_id: string
+          folder_id: string | null
+          id: string
+          is_primary: boolean
+          organization_id: string
+          placed_at: string
+          placed_by: string | null
+          removed_at: string | null
+          space_id: string
+        }
+        Insert: {
+          client_request_id?: string | null
+          document_id: string
+          folder_id?: string | null
+          id?: string
+          is_primary?: boolean
+          organization_id: string
+          placed_at?: string
+          placed_by?: string | null
+          removed_at?: string | null
+          space_id: string
+        }
+        Update: {
+          client_request_id?: string | null
+          document_id?: string
+          folder_id?: string | null
+          id?: string
+          is_primary?: boolean
+          organization_id?: string
+          placed_at?: string
+          placed_by?: string | null
+          removed_at?: string | null
+          space_id?: string
+        }
+        Relationships: [
+          {
+            foreignKeyName: "document_placements_document_id_fkey"
+            columns: ["document_id"]
+            isOneToOne: false
+            referencedRelation: "documents"
+            referencedColumns: ["id"]
+          },
+          {
+            foreignKeyName: "document_placements_folder_id_fkey"
+            columns: ["folder_id"]
+            isOneToOne: false
+            referencedRelation: "file_folders"
+            referencedColumns: ["id"]
+          },
+          {
+            foreignKeyName: "document_placements_organization_id_fkey"
+            columns: ["organization_id"]
+            isOneToOne: false
+            referencedRelation: "crm_account_health"
+            referencedColumns: ["organization_id"]
+          },
+          {
+            foreignKeyName: "document_placements_organization_id_fkey"
+            columns: ["organization_id"]
+            isOneToOne: false
+            referencedRelation: "crm_account_list"
+            referencedColumns: ["id"]
+          },
+          {
+            foreignKeyName: "document_placements_organization_id_fkey"
+            columns: ["organization_id"]
+            isOneToOne: false
+            referencedRelation: "organizations"
+            referencedColumns: ["id"]
+          },
+          {
+            foreignKeyName: "document_placements_placed_by_fkey"
+            columns: ["placed_by"]
+            isOneToOne: false
+            referencedRelation: "user_profiles"
+            referencedColumns: ["id"]
+          },
+          {
+            foreignKeyName: "document_placements_space_id_fkey"
+            columns: ["space_id"]
+            isOneToOne: false
+            referencedRelation: "file_spaces"
+            referencedColumns: ["id"]
+          },
+        ]
+      }
       document_promotion_proposals: {
         Row: {
           applied_at: string | null
@@ -9604,6 +10500,316 @@ export type Database = {
             columns: ["organization_id"]
             isOneToOne: false
             referencedRelation: "organizations"
+            referencedColumns: ["id"]
+          },
+        ]
+      }
+      document_source_ingestion_runs: {
+        Row: {
+          client_request_id: string
+          completed_at: string | null
+          cursor_json: Json
+          discovered_count: number
+          duplicate_count: number
+          error_code: string | null
+          error_detail_redacted: string | null
+          excluded_count: number
+          failed_count: number
+          gap_count: number
+          hashed_count: number
+          heartbeat_at: string | null
+          id: string
+          lease_expires_at: string | null
+          lease_token: string | null
+          mode: string
+          organization_id: string
+          partial_count: number
+          phase: string
+          quarantined_count: number
+          requested_at: string
+          requested_by: string
+          source_id: string
+          started_at: string | null
+          status: string
+          supported_count: number
+          updated_at: string
+          worker_id: string | null
+        }
+        Insert: {
+          client_request_id: string
+          completed_at?: string | null
+          cursor_json?: Json
+          discovered_count?: number
+          duplicate_count?: number
+          error_code?: string | null
+          error_detail_redacted?: string | null
+          excluded_count?: number
+          failed_count?: number
+          gap_count?: number
+          hashed_count?: number
+          heartbeat_at?: string | null
+          id?: string
+          lease_expires_at?: string | null
+          lease_token?: string | null
+          mode?: string
+          organization_id: string
+          partial_count?: number
+          phase?: string
+          quarantined_count?: number
+          requested_at?: string
+          requested_by: string
+          source_id: string
+          started_at?: string | null
+          status?: string
+          supported_count?: number
+          updated_at?: string
+          worker_id?: string | null
+        }
+        Update: {
+          client_request_id?: string
+          completed_at?: string | null
+          cursor_json?: Json
+          discovered_count?: number
+          duplicate_count?: number
+          error_code?: string | null
+          error_detail_redacted?: string | null
+          excluded_count?: number
+          failed_count?: number
+          gap_count?: number
+          hashed_count?: number
+          heartbeat_at?: string | null
+          id?: string
+          lease_expires_at?: string | null
+          lease_token?: string | null
+          mode?: string
+          organization_id?: string
+          partial_count?: number
+          phase?: string
+          quarantined_count?: number
+          requested_at?: string
+          requested_by?: string
+          source_id?: string
+          started_at?: string | null
+          status?: string
+          supported_count?: number
+          updated_at?: string
+          worker_id?: string | null
+        }
+        Relationships: [
+          {
+            foreignKeyName: "document_source_ingestion_runs_organization_id_fkey"
+            columns: ["organization_id"]
+            isOneToOne: false
+            referencedRelation: "crm_account_health"
+            referencedColumns: ["organization_id"]
+          },
+          {
+            foreignKeyName: "document_source_ingestion_runs_organization_id_fkey"
+            columns: ["organization_id"]
+            isOneToOne: false
+            referencedRelation: "crm_account_list"
+            referencedColumns: ["id"]
+          },
+          {
+            foreignKeyName: "document_source_ingestion_runs_organization_id_fkey"
+            columns: ["organization_id"]
+            isOneToOne: false
+            referencedRelation: "organizations"
+            referencedColumns: ["id"]
+          },
+          {
+            foreignKeyName: "document_source_ingestion_runs_requested_by_fkey"
+            columns: ["requested_by"]
+            isOneToOne: false
+            referencedRelation: "user_profiles"
+            referencedColumns: ["id"]
+          },
+          {
+            foreignKeyName: "document_source_ingestion_runs_source_id_fkey"
+            columns: ["source_id"]
+            isOneToOne: false
+            referencedRelation: "document_reference_sources"
+            referencedColumns: ["id"]
+          },
+        ]
+      }
+      document_source_manifest_entries: {
+        Row: {
+          capability_status: string
+          created_at: string
+          disposition: string
+          document_id: string | null
+          duplicate_of_entry_id: number | null
+          error_code: string | null
+          extension: string | null
+          extraction_status: string
+          file_name: string
+          id: number
+          metadata_json: Json
+          modified_at: string | null
+          organization_id: string
+          relative_path: string
+          run_id: string
+          sensitivity: string
+          sha256: string | null
+          size_bytes: number
+          source_id: string
+          updated_at: string
+        }
+        Insert: {
+          capability_status?: string
+          created_at?: string
+          disposition?: string
+          document_id?: string | null
+          duplicate_of_entry_id?: number | null
+          error_code?: string | null
+          extension?: string | null
+          extraction_status?: string
+          file_name: string
+          id?: never
+          metadata_json?: Json
+          modified_at?: string | null
+          organization_id: string
+          relative_path: string
+          run_id: string
+          sensitivity?: string
+          sha256?: string | null
+          size_bytes: number
+          source_id: string
+          updated_at?: string
+        }
+        Update: {
+          capability_status?: string
+          created_at?: string
+          disposition?: string
+          document_id?: string | null
+          duplicate_of_entry_id?: number | null
+          error_code?: string | null
+          extension?: string | null
+          extraction_status?: string
+          file_name?: string
+          id?: never
+          metadata_json?: Json
+          modified_at?: string | null
+          organization_id?: string
+          relative_path?: string
+          run_id?: string
+          sensitivity?: string
+          sha256?: string | null
+          size_bytes?: number
+          source_id?: string
+          updated_at?: string
+        }
+        Relationships: [
+          {
+            foreignKeyName: "document_source_manifest_entries_document_id_fkey"
+            columns: ["document_id"]
+            isOneToOne: false
+            referencedRelation: "documents"
+            referencedColumns: ["id"]
+          },
+          {
+            foreignKeyName: "document_source_manifest_entries_duplicate_of_entry_id_fkey"
+            columns: ["duplicate_of_entry_id"]
+            isOneToOne: false
+            referencedRelation: "document_source_manifest_entries"
+            referencedColumns: ["id"]
+          },
+          {
+            foreignKeyName: "document_source_manifest_entries_organization_id_fkey"
+            columns: ["organization_id"]
+            isOneToOne: false
+            referencedRelation: "crm_account_health"
+            referencedColumns: ["organization_id"]
+          },
+          {
+            foreignKeyName: "document_source_manifest_entries_organization_id_fkey"
+            columns: ["organization_id"]
+            isOneToOne: false
+            referencedRelation: "crm_account_list"
+            referencedColumns: ["id"]
+          },
+          {
+            foreignKeyName: "document_source_manifest_entries_organization_id_fkey"
+            columns: ["organization_id"]
+            isOneToOne: false
+            referencedRelation: "organizations"
+            referencedColumns: ["id"]
+          },
+          {
+            foreignKeyName: "document_source_manifest_entries_run_id_fkey"
+            columns: ["run_id"]
+            isOneToOne: false
+            referencedRelation: "document_source_ingestion_runs"
+            referencedColumns: ["id"]
+          },
+          {
+            foreignKeyName: "document_source_manifest_entries_source_id_fkey"
+            columns: ["source_id"]
+            isOneToOne: false
+            referencedRelation: "document_reference_sources"
+            referencedColumns: ["id"]
+          },
+        ]
+      }
+      document_source_run_events: {
+        Row: {
+          counts_json: Json
+          created_at: string
+          event_type: string
+          id: number
+          message_redacted: string | null
+          organization_id: string
+          phase: string | null
+          run_id: string
+        }
+        Insert: {
+          counts_json?: Json
+          created_at?: string
+          event_type: string
+          id?: never
+          message_redacted?: string | null
+          organization_id: string
+          phase?: string | null
+          run_id: string
+        }
+        Update: {
+          counts_json?: Json
+          created_at?: string
+          event_type?: string
+          id?: never
+          message_redacted?: string | null
+          organization_id?: string
+          phase?: string | null
+          run_id?: string
+        }
+        Relationships: [
+          {
+            foreignKeyName: "document_source_run_events_organization_id_fkey"
+            columns: ["organization_id"]
+            isOneToOne: false
+            referencedRelation: "crm_account_health"
+            referencedColumns: ["organization_id"]
+          },
+          {
+            foreignKeyName: "document_source_run_events_organization_id_fkey"
+            columns: ["organization_id"]
+            isOneToOne: false
+            referencedRelation: "crm_account_list"
+            referencedColumns: ["id"]
+          },
+          {
+            foreignKeyName: "document_source_run_events_organization_id_fkey"
+            columns: ["organization_id"]
+            isOneToOne: false
+            referencedRelation: "organizations"
+            referencedColumns: ["id"]
+          },
+          {
+            foreignKeyName: "document_source_run_events_run_id_fkey"
+            columns: ["run_id"]
+            isOneToOne: false
+            referencedRelation: "document_source_ingestion_runs"
             referencedColumns: ["id"]
           },
         ]
@@ -10260,7 +11466,14 @@ export type Database = {
             foreignKeyName: "ems_devices_person_id_fkey"
             columns: ["person_id"]
             isOneToOne: false
-            referencedRelation: "persons"
+            referencedRelation: "canonical_people"
+            referencedColumns: ["id"]
+          },
+          {
+            foreignKeyName: "ems_devices_person_id_fkey"
+            columns: ["person_id"]
+            isOneToOne: false
+            referencedRelation: "canonical_person_public"
             referencedColumns: ["id"]
           },
         ]
@@ -11113,6 +12326,106 @@ export type Database = {
           },
         ]
       }
+      file_folders: {
+        Row: {
+          active: boolean
+          client_request_id: string | null
+          created_at: string
+          created_by: string | null
+          entity_id: string | null
+          entity_type: string | null
+          folder_key: string
+          folder_kind: string
+          id: string
+          name: string
+          organization_id: string
+          parent_folder_id: string | null
+          policy_json: Json
+          sort_order: number
+          space_id: string
+          updated_at: string
+        }
+        Insert: {
+          active?: boolean
+          client_request_id?: string | null
+          created_at?: string
+          created_by?: string | null
+          entity_id?: string | null
+          entity_type?: string | null
+          folder_key: string
+          folder_kind?: string
+          id?: string
+          name: string
+          organization_id: string
+          parent_folder_id?: string | null
+          policy_json?: Json
+          sort_order?: number
+          space_id: string
+          updated_at?: string
+        }
+        Update: {
+          active?: boolean
+          client_request_id?: string | null
+          created_at?: string
+          created_by?: string | null
+          entity_id?: string | null
+          entity_type?: string | null
+          folder_key?: string
+          folder_kind?: string
+          id?: string
+          name?: string
+          organization_id?: string
+          parent_folder_id?: string | null
+          policy_json?: Json
+          sort_order?: number
+          space_id?: string
+          updated_at?: string
+        }
+        Relationships: [
+          {
+            foreignKeyName: "file_folders_created_by_fkey"
+            columns: ["created_by"]
+            isOneToOne: false
+            referencedRelation: "user_profiles"
+            referencedColumns: ["id"]
+          },
+          {
+            foreignKeyName: "file_folders_organization_id_fkey"
+            columns: ["organization_id"]
+            isOneToOne: false
+            referencedRelation: "crm_account_health"
+            referencedColumns: ["organization_id"]
+          },
+          {
+            foreignKeyName: "file_folders_organization_id_fkey"
+            columns: ["organization_id"]
+            isOneToOne: false
+            referencedRelation: "crm_account_list"
+            referencedColumns: ["id"]
+          },
+          {
+            foreignKeyName: "file_folders_organization_id_fkey"
+            columns: ["organization_id"]
+            isOneToOne: false
+            referencedRelation: "organizations"
+            referencedColumns: ["id"]
+          },
+          {
+            foreignKeyName: "file_folders_parent_folder_id_fkey"
+            columns: ["parent_folder_id"]
+            isOneToOne: false
+            referencedRelation: "file_folders"
+            referencedColumns: ["id"]
+          },
+          {
+            foreignKeyName: "file_folders_space_id_fkey"
+            columns: ["space_id"]
+            isOneToOne: false
+            referencedRelation: "file_spaces"
+            referencedColumns: ["id"]
+          },
+        ]
+      }
       file_import_batches: {
         Row: {
           batch_name: string
@@ -11299,6 +12612,173 @@ export type Database = {
             columns: ["reviewed_by"]
             isOneToOne: false
             referencedRelation: "user_profiles"
+            referencedColumns: ["id"]
+          },
+        ]
+      }
+      file_import_row_proposals: {
+        Row: {
+          applied_at: string | null
+          applied_target_id: string | null
+          batch_id: string
+          confidence: number | null
+          created_at: string
+          created_by: string | null
+          id: string
+          organization_id: string
+          proposed_payload: Json
+          review_reason: string | null
+          reviewed_at: string | null
+          reviewed_by: string | null
+          source_record_key: string
+          source_row_number: number | null
+          source_values: Json
+          status: string
+          target_type: string
+          updated_at: string
+        }
+        Insert: {
+          applied_at?: string | null
+          applied_target_id?: string | null
+          batch_id: string
+          confidence?: number | null
+          created_at?: string
+          created_by?: string | null
+          id?: string
+          organization_id: string
+          proposed_payload?: Json
+          review_reason?: string | null
+          reviewed_at?: string | null
+          reviewed_by?: string | null
+          source_record_key: string
+          source_row_number?: number | null
+          source_values?: Json
+          status?: string
+          target_type: string
+          updated_at?: string
+        }
+        Update: {
+          applied_at?: string | null
+          applied_target_id?: string | null
+          batch_id?: string
+          confidence?: number | null
+          created_at?: string
+          created_by?: string | null
+          id?: string
+          organization_id?: string
+          proposed_payload?: Json
+          review_reason?: string | null
+          reviewed_at?: string | null
+          reviewed_by?: string | null
+          source_record_key?: string
+          source_row_number?: number | null
+          source_values?: Json
+          status?: string
+          target_type?: string
+          updated_at?: string
+        }
+        Relationships: [
+          {
+            foreignKeyName: "file_import_row_proposals_batch_id_fkey"
+            columns: ["batch_id"]
+            isOneToOne: false
+            referencedRelation: "file_import_batches"
+            referencedColumns: ["id"]
+          },
+          {
+            foreignKeyName: "file_import_row_proposals_created_by_fkey"
+            columns: ["created_by"]
+            isOneToOne: false
+            referencedRelation: "user_profiles"
+            referencedColumns: ["id"]
+          },
+          {
+            foreignKeyName: "file_import_row_proposals_organization_id_fkey"
+            columns: ["organization_id"]
+            isOneToOne: false
+            referencedRelation: "crm_account_health"
+            referencedColumns: ["organization_id"]
+          },
+          {
+            foreignKeyName: "file_import_row_proposals_organization_id_fkey"
+            columns: ["organization_id"]
+            isOneToOne: false
+            referencedRelation: "crm_account_list"
+            referencedColumns: ["id"]
+          },
+          {
+            foreignKeyName: "file_import_row_proposals_organization_id_fkey"
+            columns: ["organization_id"]
+            isOneToOne: false
+            referencedRelation: "organizations"
+            referencedColumns: ["id"]
+          },
+          {
+            foreignKeyName: "file_import_row_proposals_reviewed_by_fkey"
+            columns: ["reviewed_by"]
+            isOneToOne: false
+            referencedRelation: "user_profiles"
+            referencedColumns: ["id"]
+          },
+        ]
+      }
+      file_spaces: {
+        Row: {
+          active: boolean
+          created_at: string
+          default_retention_class: string | null
+          id: string
+          name: string
+          organization_id: string
+          sensitivity: string
+          sort_order: number
+          space_key: string
+          updated_at: string
+        }
+        Insert: {
+          active?: boolean
+          created_at?: string
+          default_retention_class?: string | null
+          id?: string
+          name: string
+          organization_id: string
+          sensitivity?: string
+          sort_order?: number
+          space_key: string
+          updated_at?: string
+        }
+        Update: {
+          active?: boolean
+          created_at?: string
+          default_retention_class?: string | null
+          id?: string
+          name?: string
+          organization_id?: string
+          sensitivity?: string
+          sort_order?: number
+          space_key?: string
+          updated_at?: string
+        }
+        Relationships: [
+          {
+            foreignKeyName: "file_spaces_organization_id_fkey"
+            columns: ["organization_id"]
+            isOneToOne: false
+            referencedRelation: "crm_account_health"
+            referencedColumns: ["organization_id"]
+          },
+          {
+            foreignKeyName: "file_spaces_organization_id_fkey"
+            columns: ["organization_id"]
+            isOneToOne: false
+            referencedRelation: "crm_account_list"
+            referencedColumns: ["id"]
+          },
+          {
+            foreignKeyName: "file_spaces_organization_id_fkey"
+            columns: ["organization_id"]
+            isOneToOne: false
+            referencedRelation: "organizations"
             referencedColumns: ["id"]
           },
         ]
@@ -13188,6 +14668,13 @@ export type Database = {
             referencedColumns: ["id"]
           },
           {
+            foreignKeyName: "finance_inventory_transactions_investigation_id_fkey"
+            columns: ["investigation_id"]
+            isOneToOne: false
+            referencedRelation: "investigations_summary"
+            referencedColumns: ["id"]
+          },
+          {
             foreignKeyName: "finance_inventory_transactions_item_id_fkey"
             columns: ["item_id"]
             isOneToOne: false
@@ -14189,6 +15676,13 @@ export type Database = {
             referencedColumns: ["id"]
           },
           {
+            foreignKeyName: "finance_service_costs_investigation_id_fkey"
+            columns: ["investigation_id"]
+            isOneToOne: false
+            referencedRelation: "investigations_summary"
+            referencedColumns: ["id"]
+          },
+          {
             foreignKeyName: "finance_service_costs_invoice_line_item_id_fkey"
             columns: ["invoice_line_item_id"]
             isOneToOne: false
@@ -14338,6 +15832,13 @@ export type Database = {
             columns: ["investigation_id"]
             isOneToOne: false
             referencedRelation: "investigations"
+            referencedColumns: ["id"]
+          },
+          {
+            foreignKeyName: "finance_service_item_consumption_investigation_id_fkey"
+            columns: ["investigation_id"]
+            isOneToOne: false
+            referencedRelation: "investigations_summary"
             referencedColumns: ["id"]
           },
           {
@@ -15319,6 +16820,164 @@ export type Database = {
         }
         Relationships: []
       }
+      fuel_price_observations: {
+        Row: {
+          created_at: string
+          created_by: string | null
+          fuel_type: string
+          id: string
+          observed_on: string
+          organization_id: string
+          price_per_litre: number
+          source_hash: string | null
+          source_id: string | null
+          source_name: string
+          source_published_at: string | null
+          source_reference: string | null
+          source_url: string
+        }
+        Insert: {
+          created_at?: string
+          created_by?: string | null
+          fuel_type: string
+          id?: string
+          observed_on: string
+          organization_id: string
+          price_per_litre: number
+          source_hash?: string | null
+          source_id?: string | null
+          source_name: string
+          source_published_at?: string | null
+          source_reference?: string | null
+          source_url: string
+        }
+        Update: {
+          created_at?: string
+          created_by?: string | null
+          fuel_type?: string
+          id?: string
+          observed_on?: string
+          organization_id?: string
+          price_per_litre?: number
+          source_hash?: string | null
+          source_id?: string | null
+          source_name?: string
+          source_published_at?: string | null
+          source_reference?: string | null
+          source_url?: string
+        }
+        Relationships: [
+          {
+            foreignKeyName: "fuel_price_observations_created_by_fkey"
+            columns: ["created_by"]
+            isOneToOne: false
+            referencedRelation: "user_profiles"
+            referencedColumns: ["id"]
+          },
+          {
+            foreignKeyName: "fuel_price_observations_organization_id_fkey"
+            columns: ["organization_id"]
+            isOneToOne: false
+            referencedRelation: "crm_account_health"
+            referencedColumns: ["organization_id"]
+          },
+          {
+            foreignKeyName: "fuel_price_observations_organization_id_fkey"
+            columns: ["organization_id"]
+            isOneToOne: false
+            referencedRelation: "crm_account_list"
+            referencedColumns: ["id"]
+          },
+          {
+            foreignKeyName: "fuel_price_observations_organization_id_fkey"
+            columns: ["organization_id"]
+            isOneToOne: false
+            referencedRelation: "organizations"
+            referencedColumns: ["id"]
+          },
+          {
+            foreignKeyName: "fuel_price_observations_source_id_fkey"
+            columns: ["source_id"]
+            isOneToOne: false
+            referencedRelation: "fuel_price_sources"
+            referencedColumns: ["id"]
+          },
+        ]
+      }
+      fuel_price_sources: {
+        Row: {
+          active: boolean
+          approved_at: string
+          approved_by: string | null
+          created_at: string
+          fuel_type: string
+          id: string
+          name: string
+          organization_id: string
+          refresh_guidance: string | null
+          retired_at: string | null
+          source_url: string
+          updated_at: string
+        }
+        Insert: {
+          active?: boolean
+          approved_at?: string
+          approved_by?: string | null
+          created_at?: string
+          fuel_type: string
+          id?: string
+          name: string
+          organization_id: string
+          refresh_guidance?: string | null
+          retired_at?: string | null
+          source_url: string
+          updated_at?: string
+        }
+        Update: {
+          active?: boolean
+          approved_at?: string
+          approved_by?: string | null
+          created_at?: string
+          fuel_type?: string
+          id?: string
+          name?: string
+          organization_id?: string
+          refresh_guidance?: string | null
+          retired_at?: string | null
+          source_url?: string
+          updated_at?: string
+        }
+        Relationships: [
+          {
+            foreignKeyName: "fuel_price_sources_approved_by_fkey"
+            columns: ["approved_by"]
+            isOneToOne: false
+            referencedRelation: "user_profiles"
+            referencedColumns: ["id"]
+          },
+          {
+            foreignKeyName: "fuel_price_sources_organization_id_fkey"
+            columns: ["organization_id"]
+            isOneToOne: false
+            referencedRelation: "crm_account_health"
+            referencedColumns: ["organization_id"]
+          },
+          {
+            foreignKeyName: "fuel_price_sources_organization_id_fkey"
+            columns: ["organization_id"]
+            isOneToOne: false
+            referencedRelation: "crm_account_list"
+            referencedColumns: ["id"]
+          },
+          {
+            foreignKeyName: "fuel_price_sources_organization_id_fkey"
+            columns: ["organization_id"]
+            isOneToOne: false
+            referencedRelation: "organizations"
+            referencedColumns: ["id"]
+          },
+        ]
+      }
       geo_source_registry: {
         Row: {
           agency_id: string
@@ -15692,6 +17351,51 @@ export type Database = {
           },
         ]
       }
+      identity_document_type_definitions: {
+        Row: {
+          active: boolean
+          canonical_destination: string
+          category: string
+          default_authorized_activities: string[]
+          display_name: string
+          display_order: number
+          document_kind: string
+          extraction_rules: Json
+          staff_credential_type: string | null
+          strong_identity: boolean
+          supports_face_enrollment: boolean
+          updated_at: string
+        }
+        Insert: {
+          active?: boolean
+          canonical_destination: string
+          category: string
+          default_authorized_activities?: string[]
+          display_name: string
+          display_order: number
+          document_kind: string
+          extraction_rules?: Json
+          staff_credential_type?: string | null
+          strong_identity?: boolean
+          supports_face_enrollment?: boolean
+          updated_at?: string
+        }
+        Update: {
+          active?: boolean
+          canonical_destination?: string
+          category?: string
+          default_authorized_activities?: string[]
+          display_name?: string
+          display_order?: number
+          document_kind?: string
+          extraction_rules?: Json
+          staff_credential_type?: string | null
+          strong_identity?: boolean
+          supports_face_enrollment?: boolean
+          updated_at?: string
+        }
+        Relationships: []
+      }
       import_code_reference: {
         Row: {
           code_norm: string
@@ -15846,6 +17550,91 @@ export type Database = {
           },
         ]
       }
+      import_person_aliases: {
+        Row: {
+          active: boolean
+          alias_norm: string
+          alias_value: string
+          created_at: string
+          created_by: string | null
+          id: string
+          organization_id: string
+          provenance: Json
+          source_profile: string
+          updated_at: string
+          user_profile_id: string
+        }
+        Insert: {
+          active?: boolean
+          alias_norm: string
+          alias_value: string
+          created_at?: string
+          created_by?: string | null
+          id?: string
+          organization_id: string
+          provenance?: Json
+          source_profile: string
+          updated_at?: string
+          user_profile_id: string
+        }
+        Update: {
+          active?: boolean
+          alias_norm?: string
+          alias_value?: string
+          created_at?: string
+          created_by?: string | null
+          id?: string
+          organization_id?: string
+          provenance?: Json
+          source_profile?: string
+          updated_at?: string
+          user_profile_id?: string
+        }
+        Relationships: [
+          {
+            foreignKeyName: "import_person_aliases_created_by_fkey"
+            columns: ["created_by"]
+            isOneToOne: false
+            referencedRelation: "user_profiles"
+            referencedColumns: ["id"]
+          },
+          {
+            foreignKeyName: "import_person_aliases_organization_id_fkey"
+            columns: ["organization_id"]
+            isOneToOne: false
+            referencedRelation: "crm_account_health"
+            referencedColumns: ["organization_id"]
+          },
+          {
+            foreignKeyName: "import_person_aliases_organization_id_fkey"
+            columns: ["organization_id"]
+            isOneToOne: false
+            referencedRelation: "crm_account_list"
+            referencedColumns: ["id"]
+          },
+          {
+            foreignKeyName: "import_person_aliases_organization_id_fkey"
+            columns: ["organization_id"]
+            isOneToOne: false
+            referencedRelation: "organizations"
+            referencedColumns: ["id"]
+          },
+          {
+            foreignKeyName: "import_person_aliases_profile_fkey"
+            columns: ["organization_id", "source_profile"]
+            isOneToOne: false
+            referencedRelation: "import_source_profiles"
+            referencedColumns: ["organization_id", "profile_code"]
+          },
+          {
+            foreignKeyName: "import_person_aliases_user_profile_id_fkey"
+            columns: ["user_profile_id"]
+            isOneToOne: false
+            referencedRelation: "user_profiles"
+            referencedColumns: ["id"]
+          },
+        ]
+      }
       import_place_aliases: {
         Row: {
           alias_kind: string
@@ -15947,6 +17736,172 @@ export type Database = {
           },
         ]
       }
+      import_source_profiles: {
+        Row: {
+          active: boolean
+          column_mappings: Json
+          created_at: string
+          created_by: string | null
+          id: string
+          import_actor_id: string | null
+          name: string
+          organization_id: string
+          parser: string
+          profile_code: string
+          target_mappings: Json
+          updated_at: string
+        }
+        Insert: {
+          active?: boolean
+          column_mappings?: Json
+          created_at?: string
+          created_by?: string | null
+          id?: string
+          import_actor_id?: string | null
+          name: string
+          organization_id: string
+          parser: string
+          profile_code: string
+          target_mappings?: Json
+          updated_at?: string
+        }
+        Update: {
+          active?: boolean
+          column_mappings?: Json
+          created_at?: string
+          created_by?: string | null
+          id?: string
+          import_actor_id?: string | null
+          name?: string
+          organization_id?: string
+          parser?: string
+          profile_code?: string
+          target_mappings?: Json
+          updated_at?: string
+        }
+        Relationships: [
+          {
+            foreignKeyName: "import_source_profiles_created_by_fkey"
+            columns: ["created_by"]
+            isOneToOne: false
+            referencedRelation: "user_profiles"
+            referencedColumns: ["id"]
+          },
+          {
+            foreignKeyName: "import_source_profiles_import_actor_id_fkey"
+            columns: ["import_actor_id"]
+            isOneToOne: false
+            referencedRelation: "user_profiles"
+            referencedColumns: ["id"]
+          },
+          {
+            foreignKeyName: "import_source_profiles_organization_id_fkey"
+            columns: ["organization_id"]
+            isOneToOne: false
+            referencedRelation: "crm_account_health"
+            referencedColumns: ["organization_id"]
+          },
+          {
+            foreignKeyName: "import_source_profiles_organization_id_fkey"
+            columns: ["organization_id"]
+            isOneToOne: false
+            referencedRelation: "crm_account_list"
+            referencedColumns: ["id"]
+          },
+          {
+            foreignKeyName: "import_source_profiles_organization_id_fkey"
+            columns: ["organization_id"]
+            isOneToOne: false
+            referencedRelation: "organizations"
+            referencedColumns: ["id"]
+          },
+        ]
+      }
+      import_value_classification_rules: {
+        Row: {
+          active: boolean
+          conditions: Json
+          created_at: string
+          created_by: string | null
+          id: string
+          organization_id: string
+          priority: number
+          rule_code: string
+          source_profile: string
+          target_code_id: string
+          updated_at: string
+        }
+        Insert: {
+          active?: boolean
+          conditions?: Json
+          created_at?: string
+          created_by?: string | null
+          id?: string
+          organization_id: string
+          priority?: number
+          rule_code: string
+          source_profile: string
+          target_code_id: string
+          updated_at?: string
+        }
+        Update: {
+          active?: boolean
+          conditions?: Json
+          created_at?: string
+          created_by?: string | null
+          id?: string
+          organization_id?: string
+          priority?: number
+          rule_code?: string
+          source_profile?: string
+          target_code_id?: string
+          updated_at?: string
+        }
+        Relationships: [
+          {
+            foreignKeyName: "import_value_classification_rules_created_by_fkey"
+            columns: ["created_by"]
+            isOneToOne: false
+            referencedRelation: "user_profiles"
+            referencedColumns: ["id"]
+          },
+          {
+            foreignKeyName: "import_value_classification_rules_organization_id_fkey"
+            columns: ["organization_id"]
+            isOneToOne: false
+            referencedRelation: "crm_account_health"
+            referencedColumns: ["organization_id"]
+          },
+          {
+            foreignKeyName: "import_value_classification_rules_organization_id_fkey"
+            columns: ["organization_id"]
+            isOneToOne: false
+            referencedRelation: "crm_account_list"
+            referencedColumns: ["id"]
+          },
+          {
+            foreignKeyName: "import_value_classification_rules_organization_id_fkey"
+            columns: ["organization_id"]
+            isOneToOne: false
+            referencedRelation: "organizations"
+            referencedColumns: ["id"]
+          },
+          {
+            foreignKeyName: "import_value_classification_rules_profile_fkey"
+            columns: ["organization_id", "source_profile"]
+            isOneToOne: false
+            referencedRelation: "import_source_profiles"
+            referencedColumns: ["organization_id", "profile_code"]
+          },
+          {
+            foreignKeyName: "import_value_classification_rules_target_code_id_fkey"
+            columns: ["target_code_id"]
+            isOneToOne: false
+            referencedRelation: "reference_codes"
+            referencedColumns: ["id"]
+          },
+        ]
+      }
       incident_attachments: {
         Row: {
           attachment_kind: string
@@ -16006,6 +17961,125 @@ export type Database = {
             columns: ["organization_id"]
             isOneToOne: false
             referencedRelation: "organizations"
+            referencedColumns: ["id"]
+          },
+        ]
+      }
+      incident_person_links: {
+        Row: {
+          canonical_person_id: string
+          created_at: string
+          id: string
+          identity_document_id: string | null
+          incident_id: string
+          involvement_role: string
+          notes: string | null
+          organization_id: string
+          person_record_id: string | null
+          recorded_by: string | null
+          source_kind: string
+          staff_profile_id: string | null
+          updated_at: string
+        }
+        Insert: {
+          canonical_person_id: string
+          created_at?: string
+          id?: string
+          identity_document_id?: string | null
+          incident_id: string
+          involvement_role: string
+          notes?: string | null
+          organization_id: string
+          person_record_id?: string | null
+          recorded_by?: string | null
+          source_kind: string
+          staff_profile_id?: string | null
+          updated_at?: string
+        }
+        Update: {
+          canonical_person_id?: string
+          created_at?: string
+          id?: string
+          identity_document_id?: string | null
+          incident_id?: string
+          involvement_role?: string
+          notes?: string | null
+          organization_id?: string
+          person_record_id?: string | null
+          recorded_by?: string | null
+          source_kind?: string
+          staff_profile_id?: string | null
+          updated_at?: string
+        }
+        Relationships: [
+          {
+            foreignKeyName: "incident_person_links_canonical_person_id_fkey"
+            columns: ["canonical_person_id"]
+            isOneToOne: false
+            referencedRelation: "canonical_people"
+            referencedColumns: ["id"]
+          },
+          {
+            foreignKeyName: "incident_person_links_canonical_person_id_fkey"
+            columns: ["canonical_person_id"]
+            isOneToOne: false
+            referencedRelation: "canonical_person_public"
+            referencedColumns: ["id"]
+          },
+          {
+            foreignKeyName: "incident_person_links_identity_document_id_fkey"
+            columns: ["identity_document_id"]
+            isOneToOne: false
+            referencedRelation: "person_identity_documents"
+            referencedColumns: ["id"]
+          },
+          {
+            foreignKeyName: "incident_person_links_incident_id_fkey"
+            columns: ["incident_id"]
+            isOneToOne: false
+            referencedRelation: "incidents"
+            referencedColumns: ["id"]
+          },
+          {
+            foreignKeyName: "incident_person_links_organization_id_fkey"
+            columns: ["organization_id"]
+            isOneToOne: false
+            referencedRelation: "crm_account_health"
+            referencedColumns: ["organization_id"]
+          },
+          {
+            foreignKeyName: "incident_person_links_organization_id_fkey"
+            columns: ["organization_id"]
+            isOneToOne: false
+            referencedRelation: "crm_account_list"
+            referencedColumns: ["id"]
+          },
+          {
+            foreignKeyName: "incident_person_links_organization_id_fkey"
+            columns: ["organization_id"]
+            isOneToOne: false
+            referencedRelation: "organizations"
+            referencedColumns: ["id"]
+          },
+          {
+            foreignKeyName: "incident_person_links_person_record_id_fkey"
+            columns: ["person_record_id"]
+            isOneToOne: false
+            referencedRelation: "person_records"
+            referencedColumns: ["id"]
+          },
+          {
+            foreignKeyName: "incident_person_links_recorded_by_fkey"
+            columns: ["recorded_by"]
+            isOneToOne: false
+            referencedRelation: "user_profiles"
+            referencedColumns: ["id"]
+          },
+          {
+            foreignKeyName: "incident_person_links_staff_profile_id_fkey"
+            columns: ["staff_profile_id"]
+            isOneToOne: false
+            referencedRelation: "staff_profiles"
             referencedColumns: ["id"]
           },
         ]
@@ -16101,6 +18175,13 @@ export type Database = {
             columns: ["investigation_id"]
             isOneToOne: false
             referencedRelation: "investigations"
+            referencedColumns: ["id"]
+          },
+          {
+            foreignKeyName: "incidents_investigation_id_fkey"
+            columns: ["investigation_id"]
+            isOneToOne: false
+            referencedRelation: "investigations_summary"
             referencedColumns: ["id"]
           },
           {
@@ -16542,6 +18623,13 @@ export type Database = {
             referencedColumns: ["id"]
           },
           {
+            foreignKeyName: "investigation_events_investigation_id_fkey"
+            columns: ["investigation_id"]
+            isOneToOne: false
+            referencedRelation: "investigations_summary"
+            referencedColumns: ["id"]
+          },
+          {
             foreignKeyName: "investigation_events_organization_id_fkey"
             columns: ["organization_id"]
             isOneToOne: false
@@ -16604,6 +18692,13 @@ export type Database = {
             columns: ["investigation_id"]
             isOneToOne: false
             referencedRelation: "investigations"
+            referencedColumns: ["id"]
+          },
+          {
+            foreignKeyName: "investigation_links_investigation_id_fkey"
+            columns: ["investigation_id"]
+            isOneToOne: false
+            referencedRelation: "investigations_summary"
             referencedColumns: ["id"]
           },
           {
@@ -17689,6 +19784,7 @@ export type Database = {
           client_site_id: string | null
           created_at: string
           created_by: string | null
+          distance_km: number | null
           event_type: string
           external_ref: string | null
           id: string
@@ -17709,6 +19805,7 @@ export type Database = {
           client_site_id?: string | null
           created_at?: string
           created_by?: string | null
+          distance_km?: number | null
           event_type: string
           external_ref?: string | null
           id?: string
@@ -17729,6 +19826,7 @@ export type Database = {
           client_site_id?: string | null
           created_at?: string
           created_by?: string | null
+          distance_km?: number | null
           event_type?: string
           external_ref?: string | null
           id?: string
@@ -17748,6 +19846,13 @@ export type Database = {
             columns: ["canonical_person_id"]
             isOneToOne: false
             referencedRelation: "canonical_people"
+            referencedColumns: ["id"]
+          },
+          {
+            foreignKeyName: "location_events_canonical_person_id_fkey"
+            columns: ["canonical_person_id"]
+            isOneToOne: false
+            referencedRelation: "canonical_person_public"
             referencedColumns: ["id"]
           },
           {
@@ -17991,6 +20096,7 @@ export type Database = {
           nightly_limit_monthly: number | null
           onsite_profile: string
           organization_id: string
+          parent_zone_id: string | null
           parking_disabled_multiplier: number
           parking_limit_set_at: string | null
           parking_limit_set_by: string | null
@@ -18034,6 +20140,7 @@ export type Database = {
           nightly_limit_monthly?: number | null
           onsite_profile?: string
           organization_id: string
+          parent_zone_id?: string | null
           parking_disabled_multiplier?: number
           parking_limit_set_at?: string | null
           parking_limit_set_by?: string | null
@@ -18077,6 +20184,7 @@ export type Database = {
           nightly_limit_monthly?: number | null
           onsite_profile?: string
           organization_id?: string
+          parent_zone_id?: string | null
           parking_disabled_multiplier?: number
           parking_limit_set_at?: string | null
           parking_limit_set_by?: string | null
@@ -18155,6 +20263,20 @@ export type Database = {
             isOneToOne: false
             referencedRelation: "organizations"
             referencedColumns: ["id"]
+          },
+          {
+            foreignKeyName: "location_zones_parent_zone_id_fkey"
+            columns: ["parent_zone_id"]
+            isOneToOne: false
+            referencedRelation: "location_zones"
+            referencedColumns: ["id"]
+          },
+          {
+            foreignKeyName: "location_zones_parent_zone_id_fkey"
+            columns: ["parent_zone_id"]
+            isOneToOne: false
+            referencedRelation: "module_rule_index_view"
+            referencedColumns: ["zone_id"]
           },
           {
             foreignKeyName: "location_zones_parking_limit_set_by_fkey"
@@ -18377,7 +20499,12 @@ export type Database = {
         Row: {
           created_at: string
           data: Json | null
+          delivery_attempt_id: string | null
+          delivery_channel: string | null
           delivery_error: string | null
+          delivery_recipient: string | null
+          delivery_started_at: string | null
+          editorial: Json
           generated_at: string | null
           generated_by: string | null
           id: string
@@ -18386,8 +20513,15 @@ export type Database = {
           pdf_path: string | null
           pdf_renderer_version: string | null
           pdf_sha256: string | null
+          pdf_source_updated_at: string | null
           period_end: string
           period_start: string
+          published_at: string | null
+          published_by: string | null
+          report_kind: string
+          report_scope: Json
+          reviewed_at: string | null
+          reviewed_by: string | null
           sent_at: string | null
           sent_to: string | null
           service_agreement_id: string
@@ -18398,7 +20532,12 @@ export type Database = {
         Insert: {
           created_at?: string
           data?: Json | null
+          delivery_attempt_id?: string | null
+          delivery_channel?: string | null
           delivery_error?: string | null
+          delivery_recipient?: string | null
+          delivery_started_at?: string | null
+          editorial?: Json
           generated_at?: string | null
           generated_by?: string | null
           id?: string
@@ -18407,8 +20546,15 @@ export type Database = {
           pdf_path?: string | null
           pdf_renderer_version?: string | null
           pdf_sha256?: string | null
+          pdf_source_updated_at?: string | null
           period_end: string
           period_start: string
+          published_at?: string | null
+          published_by?: string | null
+          report_kind?: string
+          report_scope?: Json
+          reviewed_at?: string | null
+          reviewed_by?: string | null
           sent_at?: string | null
           sent_to?: string | null
           service_agreement_id: string
@@ -18419,7 +20565,12 @@ export type Database = {
         Update: {
           created_at?: string
           data?: Json | null
+          delivery_attempt_id?: string | null
+          delivery_channel?: string | null
           delivery_error?: string | null
+          delivery_recipient?: string | null
+          delivery_started_at?: string | null
+          editorial?: Json
           generated_at?: string | null
           generated_by?: string | null
           id?: string
@@ -18428,8 +20579,15 @@ export type Database = {
           pdf_path?: string | null
           pdf_renderer_version?: string | null
           pdf_sha256?: string | null
+          pdf_source_updated_at?: string | null
           period_end?: string
           period_start?: string
+          published_at?: string | null
+          published_by?: string | null
+          report_kind?: string
+          report_scope?: Json
+          reviewed_at?: string | null
+          reviewed_by?: string | null
           sent_at?: string | null
           sent_to?: string | null
           service_agreement_id?: string
@@ -18467,10 +20625,90 @@ export type Database = {
             referencedColumns: ["id"]
           },
           {
+            foreignKeyName: "monthly_report_packs_published_by_fkey"
+            columns: ["published_by"]
+            isOneToOne: false
+            referencedRelation: "user_profiles"
+            referencedColumns: ["id"]
+          },
+          {
+            foreignKeyName: "monthly_report_packs_reviewed_by_fkey"
+            columns: ["reviewed_by"]
+            isOneToOne: false
+            referencedRelation: "user_profiles"
+            referencedColumns: ["id"]
+          },
+          {
             foreignKeyName: "monthly_report_packs_service_agreement_id_fkey"
             columns: ["service_agreement_id"]
             isOneToOne: false
             referencedRelation: "service_agreements"
+            referencedColumns: ["id"]
+          },
+        ]
+      }
+      noise_assessment_evidence: {
+        Row: {
+          created_at: string
+          evidence_item_id: string
+          id: string
+          noise_assessment_id: string
+          ordinal: number
+          organization_id: string
+          purpose: string
+        }
+        Insert: {
+          created_at?: string
+          evidence_item_id: string
+          id?: string
+          noise_assessment_id: string
+          ordinal?: number
+          organization_id: string
+          purpose?: string
+        }
+        Update: {
+          created_at?: string
+          evidence_item_id?: string
+          id?: string
+          noise_assessment_id?: string
+          ordinal?: number
+          organization_id?: string
+          purpose?: string
+        }
+        Relationships: [
+          {
+            foreignKeyName: "noise_assessment_evidence_evidence_item_id_fkey"
+            columns: ["evidence_item_id"]
+            isOneToOne: false
+            referencedRelation: "evidence_items"
+            referencedColumns: ["id"]
+          },
+          {
+            foreignKeyName: "noise_assessment_evidence_noise_assessment_id_fkey"
+            columns: ["noise_assessment_id"]
+            isOneToOne: false
+            referencedRelation: "noise_assessments"
+            referencedColumns: ["id"]
+          },
+          {
+            foreignKeyName: "noise_assessment_evidence_organization_id_fkey"
+            columns: ["organization_id"]
+            isOneToOne: false
+            referencedRelation: "crm_account_health"
+            referencedColumns: ["organization_id"]
+          },
+          {
+            foreignKeyName: "noise_assessment_evidence_organization_id_fkey"
+            columns: ["organization_id"]
+            isOneToOne: false
+            referencedRelation: "crm_account_list"
+            referencedColumns: ["id"]
+          },
+          {
+            foreignKeyName: "noise_assessment_evidence_organization_id_fkey"
+            columns: ["organization_id"]
+            isOneToOne: false
+            referencedRelation: "organizations"
             referencedColumns: ["id"]
           },
         ]
@@ -18525,6 +20763,8 @@ export type Database = {
           job_number: string | null
           location_id: string | null
           matrix_total: number | null
+          noise_ai_analysis: Json | null
+          noise_ai_review: Json | null
           noise_source: string | null
           noise_source_address: string | null
           noise_source_gps_lat: number | null
@@ -18566,6 +20806,7 @@ export type Database = {
           time_of_day: string | null
           time_score: number | null
           tone_score: number | null
+          updated_at: string
           visit_number_tonight: number
           volume_score: number | null
         }
@@ -18618,6 +20859,8 @@ export type Database = {
           job_number?: string | null
           location_id?: string | null
           matrix_total?: number | null
+          noise_ai_analysis?: Json | null
+          noise_ai_review?: Json | null
           noise_source?: string | null
           noise_source_address?: string | null
           noise_source_gps_lat?: number | null
@@ -18659,6 +20902,7 @@ export type Database = {
           time_of_day?: string | null
           time_score?: number | null
           tone_score?: number | null
+          updated_at?: string
           visit_number_tonight?: number
           volume_score?: number | null
         }
@@ -18711,6 +20955,8 @@ export type Database = {
           job_number?: string | null
           location_id?: string | null
           matrix_total?: number | null
+          noise_ai_analysis?: Json | null
+          noise_ai_review?: Json | null
           noise_source?: string | null
           noise_source_address?: string | null
           noise_source_gps_lat?: number | null
@@ -18752,6 +20998,7 @@ export type Database = {
           time_of_day?: string | null
           time_score?: number | null
           tone_score?: number | null
+          updated_at?: string
           visit_number_tonight?: number
           volume_score?: number | null
         }
@@ -19220,14 +21467,21 @@ export type Database = {
           created_at: string
           fine_amount: number | null
           id: string
+          import_key: string | null
           issued_at: string | null
           legal_basis: string | null
           location_id: string | null
+          metadata: Json
           notice_number: string | null
           notice_type: string
+          observation_id: string | null
           officer_user_id: string | null
           organization_id: string
           person_id: string | null
+          source_author: string | null
+          source_document_name: string | null
+          source_reference: string | null
+          source_sha256: string | null
           status: string
           vehicle_id: string | null
         }
@@ -19239,14 +21493,21 @@ export type Database = {
           created_at?: string
           fine_amount?: number | null
           id?: string
+          import_key?: string | null
           issued_at?: string | null
           legal_basis?: string | null
           location_id?: string | null
+          metadata?: Json
           notice_number?: string | null
           notice_type: string
+          observation_id?: string | null
           officer_user_id?: string | null
           organization_id: string
           person_id?: string | null
+          source_author?: string | null
+          source_document_name?: string | null
+          source_reference?: string | null
+          source_sha256?: string | null
           status?: string
           vehicle_id?: string | null
         }
@@ -19258,14 +21519,21 @@ export type Database = {
           created_at?: string
           fine_amount?: number | null
           id?: string
+          import_key?: string | null
           issued_at?: string | null
           legal_basis?: string | null
           location_id?: string | null
+          metadata?: Json
           notice_number?: string | null
           notice_type?: string
+          observation_id?: string | null
           officer_user_id?: string | null
           organization_id?: string
           person_id?: string | null
+          source_author?: string | null
+          source_document_name?: string | null
+          source_reference?: string | null
+          source_sha256?: string | null
           status?: string
           vehicle_id?: string | null
         }
@@ -19275,6 +21543,13 @@ export type Database = {
             columns: ["breach_id"]
             isOneToOne: false
             referencedRelation: "breach_records"
+            referencedColumns: ["id"]
+          },
+          {
+            foreignKeyName: "notices_observation_id_fkey"
+            columns: ["observation_id"]
+            isOneToOne: false
+            referencedRelation: "observations"
             referencedColumns: ["id"]
           },
           {
@@ -19309,7 +21584,14 @@ export type Database = {
             foreignKeyName: "notices_person_id_fkey"
             columns: ["person_id"]
             isOneToOne: false
-            referencedRelation: "persons"
+            referencedRelation: "canonical_people"
+            referencedColumns: ["id"]
+          },
+          {
+            foreignKeyName: "notices_person_id_fkey"
+            columns: ["person_id"]
+            isOneToOne: false
+            referencedRelation: "canonical_person_public"
             referencedColumns: ["id"]
           },
           {
@@ -19816,6 +22098,7 @@ export type Database = {
           created_at: string
           detection_bbox: Json | null
           detection_confidence: number | null
+          distance_km: number | null
           embedding: Json | null
           embedding_quality: number | null
           enforcement_exempt: boolean
@@ -19826,6 +22109,7 @@ export type Database = {
           gps_lng: number | null
           gps_point: unknown
           id: string
+          import_key: string | null
           incident_id: string | null
           is_compliant: boolean | null
           is_homeless: boolean
@@ -19839,7 +22123,7 @@ export type Database = {
           nights_this_month: number | null
           nights_this_zone: number | null
           observed_at: string
-          officer_id: string
+          officer_id: string | null
           officer_notes: string | null
           officer_notes_updated_at: string | null
           offline_queued: boolean
@@ -19851,18 +22135,24 @@ export type Database = {
           photo_url: string | null
           photo_watermark_text: string | null
           plate_confidence: number | null
-          plate_number: string
+          plate_number: string | null
           plate_source: string | null
           previous_observation_id: string | null
+          reported_by_name: string | null
           retention_hold: boolean
           retention_hold_days: number | null
           retention_reason: string | null
           retention_until: string | null
           scv_certificate_number: string | null
           site_id: string | null
+          source_document_name: string | null
+          source_locator: string | null
+          source_reference: string | null
+          source_sha256: string | null
           sticker_color: string | null
           sticker_detection_confidence: number | null
           sticker_presence: boolean | null
+          subject_kind: string
           synced_at: string | null
           vehicle_colour: string | null
           vehicle_make: string | null
@@ -19882,6 +22172,7 @@ export type Database = {
           created_at?: string
           detection_bbox?: Json | null
           detection_confidence?: number | null
+          distance_km?: number | null
           embedding?: Json | null
           embedding_quality?: number | null
           enforcement_exempt?: boolean
@@ -19892,6 +22183,7 @@ export type Database = {
           gps_lng?: number | null
           gps_point?: unknown
           id?: string
+          import_key?: string | null
           incident_id?: string | null
           is_compliant?: boolean | null
           is_homeless?: boolean
@@ -19905,7 +22197,7 @@ export type Database = {
           nights_this_month?: number | null
           nights_this_zone?: number | null
           observed_at?: string
-          officer_id: string
+          officer_id?: string | null
           officer_notes?: string | null
           officer_notes_updated_at?: string | null
           offline_queued?: boolean
@@ -19917,18 +22209,24 @@ export type Database = {
           photo_url?: string | null
           photo_watermark_text?: string | null
           plate_confidence?: number | null
-          plate_number: string
+          plate_number?: string | null
           plate_source?: string | null
           previous_observation_id?: string | null
+          reported_by_name?: string | null
           retention_hold?: boolean
           retention_hold_days?: number | null
           retention_reason?: string | null
           retention_until?: string | null
           scv_certificate_number?: string | null
           site_id?: string | null
+          source_document_name?: string | null
+          source_locator?: string | null
+          source_reference?: string | null
+          source_sha256?: string | null
           sticker_color?: string | null
           sticker_detection_confidence?: number | null
           sticker_presence?: boolean | null
+          subject_kind?: string
           synced_at?: string | null
           vehicle_colour?: string | null
           vehicle_make?: string | null
@@ -19948,6 +22246,7 @@ export type Database = {
           created_at?: string
           detection_bbox?: Json | null
           detection_confidence?: number | null
+          distance_km?: number | null
           embedding?: Json | null
           embedding_quality?: number | null
           enforcement_exempt?: boolean
@@ -19958,6 +22257,7 @@ export type Database = {
           gps_lng?: number | null
           gps_point?: unknown
           id?: string
+          import_key?: string | null
           incident_id?: string | null
           is_compliant?: boolean | null
           is_homeless?: boolean
@@ -19971,7 +22271,7 @@ export type Database = {
           nights_this_month?: number | null
           nights_this_zone?: number | null
           observed_at?: string
-          officer_id?: string
+          officer_id?: string | null
           officer_notes?: string | null
           officer_notes_updated_at?: string | null
           offline_queued?: boolean
@@ -19983,18 +22283,24 @@ export type Database = {
           photo_url?: string | null
           photo_watermark_text?: string | null
           plate_confidence?: number | null
-          plate_number?: string
+          plate_number?: string | null
           plate_source?: string | null
           previous_observation_id?: string | null
+          reported_by_name?: string | null
           retention_hold?: boolean
           retention_hold_days?: number | null
           retention_reason?: string | null
           retention_until?: string | null
           scv_certificate_number?: string | null
           site_id?: string | null
+          source_document_name?: string | null
+          source_locator?: string | null
+          source_reference?: string | null
+          source_sha256?: string | null
           sticker_color?: string | null
           sticker_detection_confidence?: number | null
           sticker_presence?: boolean | null
+          subject_kind?: string
           synced_at?: string | null
           vehicle_colour?: string | null
           vehicle_make?: string | null
@@ -20009,6 +22315,13 @@ export type Database = {
             columns: ["canonical_person_id"]
             isOneToOne: false
             referencedRelation: "canonical_people"
+            referencedColumns: ["id"]
+          },
+          {
+            foreignKeyName: "observations_canonical_person_id_fkey"
+            columns: ["canonical_person_id"]
+            isOneToOne: false
+            referencedRelation: "canonical_person_public"
             referencedColumns: ["id"]
           },
           {
@@ -20460,6 +22773,13 @@ export type Database = {
             columns: ["investigation_id"]
             isOneToOne: false
             referencedRelation: "investigations"
+            referencedColumns: ["id"]
+          },
+          {
+            foreignKeyName: "officer_field_reports_investigation_id_fkey"
+            columns: ["investigation_id"]
+            isOneToOne: false
+            referencedRelation: "investigations_summary"
             referencedColumns: ["id"]
           },
           {
@@ -21739,6 +24059,147 @@ export type Database = {
           },
         ]
       }
+      organization_compliance_records: {
+        Row: {
+          client_request_id: string | null
+          coverage_amount: number | null
+          created_at: string
+          created_by: string | null
+          currency: string
+          effective_date: string | null
+          evidence_document_id: string | null
+          expiry_date: string | null
+          id: string
+          issuer: string | null
+          name: string
+          organization_id: string
+          record_type: string
+          reference_number: string | null
+          replaces_record_id: string | null
+          review_notes: string | null
+          source_as_of: string
+          source_name: string
+          source_notes: string | null
+          status: string
+          updated_at: string
+          updated_by: string | null
+          verification_status: string
+          verified_at: string | null
+          verified_by: string | null
+        }
+        Insert: {
+          client_request_id?: string | null
+          coverage_amount?: number | null
+          created_at?: string
+          created_by?: string | null
+          currency?: string
+          effective_date?: string | null
+          evidence_document_id?: string | null
+          expiry_date?: string | null
+          id?: string
+          issuer?: string | null
+          name: string
+          organization_id: string
+          record_type: string
+          reference_number?: string | null
+          replaces_record_id?: string | null
+          review_notes?: string | null
+          source_as_of: string
+          source_name: string
+          source_notes?: string | null
+          status?: string
+          updated_at?: string
+          updated_by?: string | null
+          verification_status?: string
+          verified_at?: string | null
+          verified_by?: string | null
+        }
+        Update: {
+          client_request_id?: string | null
+          coverage_amount?: number | null
+          created_at?: string
+          created_by?: string | null
+          currency?: string
+          effective_date?: string | null
+          evidence_document_id?: string | null
+          expiry_date?: string | null
+          id?: string
+          issuer?: string | null
+          name?: string
+          organization_id?: string
+          record_type?: string
+          reference_number?: string | null
+          replaces_record_id?: string | null
+          review_notes?: string | null
+          source_as_of?: string
+          source_name?: string
+          source_notes?: string | null
+          status?: string
+          updated_at?: string
+          updated_by?: string | null
+          verification_status?: string
+          verified_at?: string | null
+          verified_by?: string | null
+        }
+        Relationships: [
+          {
+            foreignKeyName: "organization_compliance_records_created_by_fkey"
+            columns: ["created_by"]
+            isOneToOne: false
+            referencedRelation: "user_profiles"
+            referencedColumns: ["id"]
+          },
+          {
+            foreignKeyName: "organization_compliance_records_evidence_document_id_fkey"
+            columns: ["evidence_document_id"]
+            isOneToOne: false
+            referencedRelation: "documents"
+            referencedColumns: ["id"]
+          },
+          {
+            foreignKeyName: "organization_compliance_records_organization_id_fkey"
+            columns: ["organization_id"]
+            isOneToOne: false
+            referencedRelation: "crm_account_health"
+            referencedColumns: ["organization_id"]
+          },
+          {
+            foreignKeyName: "organization_compliance_records_organization_id_fkey"
+            columns: ["organization_id"]
+            isOneToOne: false
+            referencedRelation: "crm_account_list"
+            referencedColumns: ["id"]
+          },
+          {
+            foreignKeyName: "organization_compliance_records_organization_id_fkey"
+            columns: ["organization_id"]
+            isOneToOne: false
+            referencedRelation: "organizations"
+            referencedColumns: ["id"]
+          },
+          {
+            foreignKeyName: "organization_compliance_records_replaces_record_id_fkey"
+            columns: ["replaces_record_id"]
+            isOneToOne: false
+            referencedRelation: "organization_compliance_records"
+            referencedColumns: ["id"]
+          },
+          {
+            foreignKeyName: "organization_compliance_records_updated_by_fkey"
+            columns: ["updated_by"]
+            isOneToOne: false
+            referencedRelation: "user_profiles"
+            referencedColumns: ["id"]
+          },
+          {
+            foreignKeyName: "organization_compliance_records_verified_by_fkey"
+            columns: ["verified_by"]
+            isOneToOne: false
+            referencedRelation: "user_profiles"
+            referencedColumns: ["id"]
+          },
+        ]
+      }
       organization_fatigue_rules: {
         Row: {
           enforced: boolean
@@ -21904,6 +24365,8 @@ export type Database = {
           company_registration_number: string | null
           contact_email: string | null
           contact_phone: string | null
+          corporate_profile_source: string | null
+          corporate_profile_verification_status: string
           corporate_profile_verified_at: string | null
           corporate_profile_verified_by: string | null
           corporate_status: string | null
@@ -21917,6 +24380,7 @@ export type Database = {
           jurisdiction_verification: string
           jurisdiction_verified_at: string | null
           jurisdiction_verified_by: string | null
+          legal_name: string | null
           logo_url: string | null
           name: string
           nzbn: string | null
@@ -21924,8 +24388,12 @@ export type Database = {
           organization_level: number | null
           organization_type: string
           parent_organization_id: string | null
+          postal_address: string | null
+          registered_office: string | null
           status: string
+          trading_name: string | null
           updated_at: string
+          website_url: string | null
         }
         Insert: {
           account_notes?: string | null
@@ -21937,6 +24405,8 @@ export type Database = {
           company_registration_number?: string | null
           contact_email?: string | null
           contact_phone?: string | null
+          corporate_profile_source?: string | null
+          corporate_profile_verification_status?: string
           corporate_profile_verified_at?: string | null
           corporate_profile_verified_by?: string | null
           corporate_status?: string | null
@@ -21950,6 +24420,7 @@ export type Database = {
           jurisdiction_verification?: string
           jurisdiction_verified_at?: string | null
           jurisdiction_verified_by?: string | null
+          legal_name?: string | null
           logo_url?: string | null
           name: string
           nzbn?: string | null
@@ -21957,8 +24428,12 @@ export type Database = {
           organization_level?: number | null
           organization_type: string
           parent_organization_id?: string | null
+          postal_address?: string | null
+          registered_office?: string | null
           status?: string
+          trading_name?: string | null
           updated_at?: string
+          website_url?: string | null
         }
         Update: {
           account_notes?: string | null
@@ -21970,6 +24445,8 @@ export type Database = {
           company_registration_number?: string | null
           contact_email?: string | null
           contact_phone?: string | null
+          corporate_profile_source?: string | null
+          corporate_profile_verification_status?: string
           corporate_profile_verified_at?: string | null
           corporate_profile_verified_by?: string | null
           corporate_status?: string | null
@@ -21983,6 +24460,7 @@ export type Database = {
           jurisdiction_verification?: string
           jurisdiction_verified_at?: string | null
           jurisdiction_verified_by?: string | null
+          legal_name?: string | null
           logo_url?: string | null
           name?: string
           nzbn?: string | null
@@ -21990,8 +24468,12 @@ export type Database = {
           organization_level?: number | null
           organization_type?: string
           parent_organization_id?: string | null
+          postal_address?: string | null
+          registered_office?: string | null
           status?: string
+          trading_name?: string | null
           updated_at?: string
+          website_url?: string | null
         }
         Relationships: [
           {
@@ -23427,6 +25909,156 @@ export type Database = {
           },
         ]
       }
+      patrol_stop_charge_lines: {
+        Row: {
+          base_amount: number | null
+          client_organization_id: string | null
+          created_at: string
+          description: string
+          discount_amount: number
+          discount_pct: number
+          id: string
+          invoice_line_item_id: string | null
+          line_total: number | null
+          module_key: string
+          organization_id: string
+          quantity: number
+          rate_rule_id: string | null
+          service_agreement_id: string | null
+          service_type: string
+          shift_id: string
+          shift_stop_id: string
+          sla_over_by_minutes: number
+          status: string
+          unit_rate: number | null
+          updated_at: string
+        }
+        Insert: {
+          base_amount?: number | null
+          client_organization_id?: string | null
+          created_at?: string
+          description: string
+          discount_amount?: number
+          discount_pct?: number
+          id?: string
+          invoice_line_item_id?: string | null
+          line_total?: number | null
+          module_key: string
+          organization_id: string
+          quantity?: number
+          rate_rule_id?: string | null
+          service_agreement_id?: string | null
+          service_type: string
+          shift_id: string
+          shift_stop_id: string
+          sla_over_by_minutes?: number
+          status: string
+          unit_rate?: number | null
+          updated_at?: string
+        }
+        Update: {
+          base_amount?: number | null
+          client_organization_id?: string | null
+          created_at?: string
+          description?: string
+          discount_amount?: number
+          discount_pct?: number
+          id?: string
+          invoice_line_item_id?: string | null
+          line_total?: number | null
+          module_key?: string
+          organization_id?: string
+          quantity?: number
+          rate_rule_id?: string | null
+          service_agreement_id?: string | null
+          service_type?: string
+          shift_id?: string
+          shift_stop_id?: string
+          sla_over_by_minutes?: number
+          status?: string
+          unit_rate?: number | null
+          updated_at?: string
+        }
+        Relationships: [
+          {
+            foreignKeyName: "patrol_stop_charge_lines_client_organization_id_fkey"
+            columns: ["client_organization_id"]
+            isOneToOne: false
+            referencedRelation: "crm_account_health"
+            referencedColumns: ["organization_id"]
+          },
+          {
+            foreignKeyName: "patrol_stop_charge_lines_client_organization_id_fkey"
+            columns: ["client_organization_id"]
+            isOneToOne: false
+            referencedRelation: "crm_account_list"
+            referencedColumns: ["id"]
+          },
+          {
+            foreignKeyName: "patrol_stop_charge_lines_client_organization_id_fkey"
+            columns: ["client_organization_id"]
+            isOneToOne: false
+            referencedRelation: "organizations"
+            referencedColumns: ["id"]
+          },
+          {
+            foreignKeyName: "patrol_stop_charge_lines_invoice_line_item_id_fkey"
+            columns: ["invoice_line_item_id"]
+            isOneToOne: false
+            referencedRelation: "invoice_line_items"
+            referencedColumns: ["id"]
+          },
+          {
+            foreignKeyName: "patrol_stop_charge_lines_organization_id_fkey"
+            columns: ["organization_id"]
+            isOneToOne: false
+            referencedRelation: "crm_account_health"
+            referencedColumns: ["organization_id"]
+          },
+          {
+            foreignKeyName: "patrol_stop_charge_lines_organization_id_fkey"
+            columns: ["organization_id"]
+            isOneToOne: false
+            referencedRelation: "crm_account_list"
+            referencedColumns: ["id"]
+          },
+          {
+            foreignKeyName: "patrol_stop_charge_lines_organization_id_fkey"
+            columns: ["organization_id"]
+            isOneToOne: false
+            referencedRelation: "organizations"
+            referencedColumns: ["id"]
+          },
+          {
+            foreignKeyName: "patrol_stop_charge_lines_rate_rule_id_fkey"
+            columns: ["rate_rule_id"]
+            isOneToOne: false
+            referencedRelation: "rate_rules"
+            referencedColumns: ["id"]
+          },
+          {
+            foreignKeyName: "patrol_stop_charge_lines_service_agreement_id_fkey"
+            columns: ["service_agreement_id"]
+            isOneToOne: false
+            referencedRelation: "service_agreements"
+            referencedColumns: ["id"]
+          },
+          {
+            foreignKeyName: "patrol_stop_charge_lines_shift_id_fkey"
+            columns: ["shift_id"]
+            isOneToOne: false
+            referencedRelation: "shifts"
+            referencedColumns: ["id"]
+          },
+          {
+            foreignKeyName: "patrol_stop_charge_lines_shift_stop_id_fkey"
+            columns: ["shift_stop_id"]
+            isOneToOne: true
+            referencedRelation: "shift_stops"
+            referencedColumns: ["id"]
+          },
+        ]
+      }
       patrols: {
         Row: {
           created_at: string
@@ -23691,6 +26323,379 @@ export type Database = {
           },
         ]
       }
+      perception_evidence_envelopes: {
+        Row: {
+          attachment_id: string | null
+          calibration_id: string | null
+          created_at: string
+          derivative_receipts: Json
+          domain: string
+          evidence_item_id: string | null
+          id: string
+          idempotency_key: string
+          inference_job_id: string | null
+          inference_result_id: string | null
+          model_receipt: Json
+          organization_id: string
+          schema_version: number
+          source_kind: string
+          source_receipt: Json
+          source_sha256: string
+          status: string
+          updated_at: string
+        }
+        Insert: {
+          attachment_id?: string | null
+          calibration_id?: string | null
+          created_at?: string
+          derivative_receipts?: Json
+          domain: string
+          evidence_item_id?: string | null
+          id?: string
+          idempotency_key: string
+          inference_job_id?: string | null
+          inference_result_id?: string | null
+          model_receipt?: Json
+          organization_id: string
+          schema_version?: number
+          source_kind: string
+          source_receipt?: Json
+          source_sha256: string
+          status?: string
+          updated_at?: string
+        }
+        Update: {
+          attachment_id?: string | null
+          calibration_id?: string | null
+          created_at?: string
+          derivative_receipts?: Json
+          domain?: string
+          evidence_item_id?: string | null
+          id?: string
+          idempotency_key?: string
+          inference_job_id?: string | null
+          inference_result_id?: string | null
+          model_receipt?: Json
+          organization_id?: string
+          schema_version?: number
+          source_kind?: string
+          source_receipt?: Json
+          source_sha256?: string
+          status?: string
+          updated_at?: string
+        }
+        Relationships: [
+          {
+            foreignKeyName: "perception_evidence_envelopes_attachment_id_fkey"
+            columns: ["attachment_id"]
+            isOneToOne: false
+            referencedRelation: "bob_attachments"
+            referencedColumns: ["id"]
+          },
+          {
+            foreignKeyName: "perception_evidence_envelopes_calibration_id_fkey"
+            columns: ["calibration_id"]
+            isOneToOne: false
+            referencedRelation: "perception_model_calibrations"
+            referencedColumns: ["id"]
+          },
+          {
+            foreignKeyName: "perception_evidence_envelopes_evidence_item_id_fkey"
+            columns: ["evidence_item_id"]
+            isOneToOne: false
+            referencedRelation: "evidence_items"
+            referencedColumns: ["id"]
+          },
+          {
+            foreignKeyName: "perception_evidence_envelopes_inference_job_id_fkey"
+            columns: ["inference_job_id"]
+            isOneToOne: false
+            referencedRelation: "inference_jobs"
+            referencedColumns: ["id"]
+          },
+          {
+            foreignKeyName: "perception_evidence_envelopes_inference_result_id_fkey"
+            columns: ["inference_result_id"]
+            isOneToOne: false
+            referencedRelation: "inference_results"
+            referencedColumns: ["id"]
+          },
+          {
+            foreignKeyName: "perception_evidence_envelopes_organization_id_fkey"
+            columns: ["organization_id"]
+            isOneToOne: false
+            referencedRelation: "crm_account_health"
+            referencedColumns: ["organization_id"]
+          },
+          {
+            foreignKeyName: "perception_evidence_envelopes_organization_id_fkey"
+            columns: ["organization_id"]
+            isOneToOne: false
+            referencedRelation: "crm_account_list"
+            referencedColumns: ["id"]
+          },
+          {
+            foreignKeyName: "perception_evidence_envelopes_organization_id_fkey"
+            columns: ["organization_id"]
+            isOneToOne: false
+            referencedRelation: "organizations"
+            referencedColumns: ["id"]
+          },
+        ]
+      }
+      perception_evidence_fields: {
+        Row: {
+          authority_state: string
+          calibrated_confidence: number | null
+          candidate_ordinal: number
+          candidate_payload: Json
+          candidate_value: string | null
+          character_confidences: Json
+          conflicts: Json
+          consensus_rule: string | null
+          created_at: string
+          envelope_id: string
+          field_key: string
+          id: string
+          normalized_value: string | null
+          organization_id: string
+          raw_confidence: number | null
+          review_required: boolean
+          source_locations: Json
+          updated_at: string
+          value_type: string
+        }
+        Insert: {
+          authority_state?: string
+          calibrated_confidence?: number | null
+          candidate_ordinal?: number
+          candidate_payload?: Json
+          candidate_value?: string | null
+          character_confidences?: Json
+          conflicts?: Json
+          consensus_rule?: string | null
+          created_at?: string
+          envelope_id: string
+          field_key: string
+          id?: string
+          normalized_value?: string | null
+          organization_id: string
+          raw_confidence?: number | null
+          review_required?: boolean
+          source_locations?: Json
+          updated_at?: string
+          value_type: string
+        }
+        Update: {
+          authority_state?: string
+          calibrated_confidence?: number | null
+          candidate_ordinal?: number
+          candidate_payload?: Json
+          candidate_value?: string | null
+          character_confidences?: Json
+          conflicts?: Json
+          consensus_rule?: string | null
+          created_at?: string
+          envelope_id?: string
+          field_key?: string
+          id?: string
+          normalized_value?: string | null
+          organization_id?: string
+          raw_confidence?: number | null
+          review_required?: boolean
+          source_locations?: Json
+          updated_at?: string
+          value_type?: string
+        }
+        Relationships: [
+          {
+            foreignKeyName: "perception_evidence_fields_envelope_id_fkey"
+            columns: ["envelope_id"]
+            isOneToOne: false
+            referencedRelation: "perception_evidence_envelopes"
+            referencedColumns: ["id"]
+          },
+          {
+            foreignKeyName: "perception_evidence_fields_organization_id_fkey"
+            columns: ["organization_id"]
+            isOneToOne: false
+            referencedRelation: "crm_account_health"
+            referencedColumns: ["organization_id"]
+          },
+          {
+            foreignKeyName: "perception_evidence_fields_organization_id_fkey"
+            columns: ["organization_id"]
+            isOneToOne: false
+            referencedRelation: "crm_account_list"
+            referencedColumns: ["id"]
+          },
+          {
+            foreignKeyName: "perception_evidence_fields_organization_id_fkey"
+            columns: ["organization_id"]
+            isOneToOne: false
+            referencedRelation: "organizations"
+            referencedColumns: ["id"]
+          },
+        ]
+      }
+      perception_evidence_reviews: {
+        Row: {
+          canonical_reference: Json
+          decided_at: string
+          decided_by: string
+          decision: string
+          field_id: string
+          id: string
+          next_authority_state: string
+          organization_id: string
+          previous_authority_state: string
+          reviewer_notes: string | null
+        }
+        Insert: {
+          canonical_reference?: Json
+          decided_at?: string
+          decided_by: string
+          decision: string
+          field_id: string
+          id?: string
+          next_authority_state: string
+          organization_id: string
+          previous_authority_state: string
+          reviewer_notes?: string | null
+        }
+        Update: {
+          canonical_reference?: Json
+          decided_at?: string
+          decided_by?: string
+          decision?: string
+          field_id?: string
+          id?: string
+          next_authority_state?: string
+          organization_id?: string
+          previous_authority_state?: string
+          reviewer_notes?: string | null
+        }
+        Relationships: [
+          {
+            foreignKeyName: "perception_evidence_reviews_decided_by_fkey"
+            columns: ["decided_by"]
+            isOneToOne: false
+            referencedRelation: "user_profiles"
+            referencedColumns: ["id"]
+          },
+          {
+            foreignKeyName: "perception_evidence_reviews_field_id_fkey"
+            columns: ["field_id"]
+            isOneToOne: false
+            referencedRelation: "perception_evidence_fields"
+            referencedColumns: ["id"]
+          },
+          {
+            foreignKeyName: "perception_evidence_reviews_organization_id_fkey"
+            columns: ["organization_id"]
+            isOneToOne: false
+            referencedRelation: "crm_account_health"
+            referencedColumns: ["organization_id"]
+          },
+          {
+            foreignKeyName: "perception_evidence_reviews_organization_id_fkey"
+            columns: ["organization_id"]
+            isOneToOne: false
+            referencedRelation: "crm_account_list"
+            referencedColumns: ["id"]
+          },
+          {
+            foreignKeyName: "perception_evidence_reviews_organization_id_fkey"
+            columns: ["organization_id"]
+            isOneToOne: false
+            referencedRelation: "organizations"
+            referencedColumns: ["id"]
+          },
+        ]
+      }
+      perception_model_calibrations: {
+        Row: {
+          approved_by: string | null
+          calibrated_at: string
+          created_at: string
+          domain: string
+          evaluation_set_ref: string
+          expires_at: string | null
+          id: string
+          manifest_sha256: string
+          metrics: Json
+          model_name: string
+          model_version: string
+          organization_id: string | null
+          provider: string
+          sample_count: number
+          status: string
+        }
+        Insert: {
+          approved_by?: string | null
+          calibrated_at: string
+          created_at?: string
+          domain: string
+          evaluation_set_ref: string
+          expires_at?: string | null
+          id?: string
+          manifest_sha256: string
+          metrics?: Json
+          model_name: string
+          model_version: string
+          organization_id?: string | null
+          provider: string
+          sample_count: number
+          status?: string
+        }
+        Update: {
+          approved_by?: string | null
+          calibrated_at?: string
+          created_at?: string
+          domain?: string
+          evaluation_set_ref?: string
+          expires_at?: string | null
+          id?: string
+          manifest_sha256?: string
+          metrics?: Json
+          model_name?: string
+          model_version?: string
+          organization_id?: string | null
+          provider?: string
+          sample_count?: number
+          status?: string
+        }
+        Relationships: [
+          {
+            foreignKeyName: "perception_model_calibrations_approved_by_fkey"
+            columns: ["approved_by"]
+            isOneToOne: false
+            referencedRelation: "user_profiles"
+            referencedColumns: ["id"]
+          },
+          {
+            foreignKeyName: "perception_model_calibrations_organization_id_fkey"
+            columns: ["organization_id"]
+            isOneToOne: false
+            referencedRelation: "crm_account_health"
+            referencedColumns: ["organization_id"]
+          },
+          {
+            foreignKeyName: "perception_model_calibrations_organization_id_fkey"
+            columns: ["organization_id"]
+            isOneToOne: false
+            referencedRelation: "crm_account_list"
+            referencedColumns: ["id"]
+          },
+          {
+            foreignKeyName: "perception_model_calibrations_organization_id_fkey"
+            columns: ["organization_id"]
+            isOneToOne: false
+            referencedRelation: "organizations"
+            referencedColumns: ["id"]
+          },
+        ]
+      }
       performance_review_cycles: {
         Row: {
           created_at: string
@@ -23853,35 +26858,167 @@ export type Database = {
           },
         ]
       }
+      person_face_templates: {
+        Row: {
+          approved_at: string
+          approved_by: string | null
+          confidence: number | null
+          face_vec: string
+          id: string
+          identity_document_id: string | null
+          model: string
+          organization_id: string
+          person_record_id: string
+          retention_reason: string
+          source_kind: string
+          source_ref: string
+        }
+        Insert: {
+          approved_at?: string
+          approved_by?: string | null
+          confidence?: number | null
+          face_vec: string
+          id?: string
+          identity_document_id?: string | null
+          model?: string
+          organization_id: string
+          person_record_id: string
+          retention_reason: string
+          source_kind?: string
+          source_ref: string
+        }
+        Update: {
+          approved_at?: string
+          approved_by?: string | null
+          confidence?: number | null
+          face_vec?: string
+          id?: string
+          identity_document_id?: string | null
+          model?: string
+          organization_id?: string
+          person_record_id?: string
+          retention_reason?: string
+          source_kind?: string
+          source_ref?: string
+        }
+        Relationships: [
+          {
+            foreignKeyName: "person_face_templates_approved_by_fkey"
+            columns: ["approved_by"]
+            isOneToOne: false
+            referencedRelation: "user_profiles"
+            referencedColumns: ["id"]
+          },
+          {
+            foreignKeyName: "person_face_templates_identity_document_id_fkey"
+            columns: ["identity_document_id"]
+            isOneToOne: true
+            referencedRelation: "person_identity_documents"
+            referencedColumns: ["id"]
+          },
+          {
+            foreignKeyName: "person_face_templates_organization_id_fkey"
+            columns: ["organization_id"]
+            isOneToOne: false
+            referencedRelation: "crm_account_health"
+            referencedColumns: ["organization_id"]
+          },
+          {
+            foreignKeyName: "person_face_templates_organization_id_fkey"
+            columns: ["organization_id"]
+            isOneToOne: false
+            referencedRelation: "crm_account_list"
+            referencedColumns: ["id"]
+          },
+          {
+            foreignKeyName: "person_face_templates_organization_id_fkey"
+            columns: ["organization_id"]
+            isOneToOne: false
+            referencedRelation: "organizations"
+            referencedColumns: ["id"]
+          },
+          {
+            foreignKeyName: "person_face_templates_person_record_id_fkey"
+            columns: ["person_record_id"]
+            isOneToOne: false
+            referencedRelation: "person_records"
+            referencedColumns: ["id"]
+          },
+        ]
+      }
       person_identity_documents: {
         Row: {
+          attachment_id: string | null
+          created_at: string
+          created_by: string | null
           document_kind: string | null
           evidence_item_id: string | null
           extracted_fields: Json
+          face_confidence: number | null
+          face_count: number
           id: string
           id_photo_storage_path: string | null
+          organization_id: string | null
           person_record_id: string | null
+          review_notes: string | null
           review_state: string
+          reviewed_at: string | null
+          reviewed_by: string | null
+          updated_at: string
         }
         Insert: {
+          attachment_id?: string | null
+          created_at?: string
+          created_by?: string | null
           document_kind?: string | null
           evidence_item_id?: string | null
           extracted_fields?: Json
+          face_confidence?: number | null
+          face_count?: number
           id?: string
           id_photo_storage_path?: string | null
+          organization_id?: string | null
           person_record_id?: string | null
+          review_notes?: string | null
           review_state?: string
+          reviewed_at?: string | null
+          reviewed_by?: string | null
+          updated_at?: string
         }
         Update: {
+          attachment_id?: string | null
+          created_at?: string
+          created_by?: string | null
           document_kind?: string | null
           evidence_item_id?: string | null
           extracted_fields?: Json
+          face_confidence?: number | null
+          face_count?: number
           id?: string
           id_photo_storage_path?: string | null
+          organization_id?: string | null
           person_record_id?: string | null
+          review_notes?: string | null
           review_state?: string
+          reviewed_at?: string | null
+          reviewed_by?: string | null
+          updated_at?: string
         }
         Relationships: [
+          {
+            foreignKeyName: "person_identity_documents_attachment_id_fkey"
+            columns: ["attachment_id"]
+            isOneToOne: false
+            referencedRelation: "bob_attachments"
+            referencedColumns: ["id"]
+          },
+          {
+            foreignKeyName: "person_identity_documents_created_by_fkey"
+            columns: ["created_by"]
+            isOneToOne: false
+            referencedRelation: "user_profiles"
+            referencedColumns: ["id"]
+          },
           {
             foreignKeyName: "person_identity_documents_evidence_item_id_fkey"
             columns: ["evidence_item_id"]
@@ -23890,7 +27027,98 @@ export type Database = {
             referencedColumns: ["id"]
           },
           {
+            foreignKeyName: "person_identity_documents_organization_id_fkey"
+            columns: ["organization_id"]
+            isOneToOne: false
+            referencedRelation: "crm_account_health"
+            referencedColumns: ["organization_id"]
+          },
+          {
+            foreignKeyName: "person_identity_documents_organization_id_fkey"
+            columns: ["organization_id"]
+            isOneToOne: false
+            referencedRelation: "crm_account_list"
+            referencedColumns: ["id"]
+          },
+          {
+            foreignKeyName: "person_identity_documents_organization_id_fkey"
+            columns: ["organization_id"]
+            isOneToOne: false
+            referencedRelation: "organizations"
+            referencedColumns: ["id"]
+          },
+          {
             foreignKeyName: "person_identity_documents_person_record_id_fkey"
+            columns: ["person_record_id"]
+            isOneToOne: false
+            referencedRelation: "person_records"
+            referencedColumns: ["id"]
+          },
+          {
+            foreignKeyName: "person_identity_documents_reviewed_by_fkey"
+            columns: ["reviewed_by"]
+            isOneToOne: false
+            referencedRelation: "user_profiles"
+            referencedColumns: ["id"]
+          },
+        ]
+      }
+      person_identity_face_proposals: {
+        Row: {
+          confidence: number | null
+          created_at: string
+          face_vec: string
+          identity_document_id: string
+          organization_id: string
+          person_record_id: string
+        }
+        Insert: {
+          confidence?: number | null
+          created_at?: string
+          face_vec: string
+          identity_document_id: string
+          organization_id: string
+          person_record_id: string
+        }
+        Update: {
+          confidence?: number | null
+          created_at?: string
+          face_vec?: string
+          identity_document_id?: string
+          organization_id?: string
+          person_record_id?: string
+        }
+        Relationships: [
+          {
+            foreignKeyName: "person_identity_face_proposals_identity_document_id_fkey"
+            columns: ["identity_document_id"]
+            isOneToOne: true
+            referencedRelation: "person_identity_documents"
+            referencedColumns: ["id"]
+          },
+          {
+            foreignKeyName: "person_identity_face_proposals_organization_id_fkey"
+            columns: ["organization_id"]
+            isOneToOne: false
+            referencedRelation: "crm_account_health"
+            referencedColumns: ["organization_id"]
+          },
+          {
+            foreignKeyName: "person_identity_face_proposals_organization_id_fkey"
+            columns: ["organization_id"]
+            isOneToOne: false
+            referencedRelation: "crm_account_list"
+            referencedColumns: ["id"]
+          },
+          {
+            foreignKeyName: "person_identity_face_proposals_organization_id_fkey"
+            columns: ["organization_id"]
+            isOneToOne: false
+            referencedRelation: "organizations"
+            referencedColumns: ["id"]
+          },
+          {
+            foreignKeyName: "person_identity_face_proposals_person_record_id_fkey"
             columns: ["person_record_id"]
             isOneToOne: false
             referencedRelation: "person_records"
@@ -23995,7 +27223,14 @@ export type Database = {
             foreignKeyName: "person_interactions_person_id_fkey"
             columns: ["person_id"]
             isOneToOne: false
-            referencedRelation: "persons"
+            referencedRelation: "canonical_people"
+            referencedColumns: ["id"]
+          },
+          {
+            foreignKeyName: "person_interactions_person_id_fkey"
+            columns: ["person_id"]
+            isOneToOne: false
+            referencedRelation: "canonical_person_public"
             referencedColumns: ["id"]
           },
           {
@@ -24011,6 +27246,240 @@ export type Database = {
             isOneToOne: false
             referencedRelation: "module_rule_index_view"
             referencedColumns: ["zone_id"]
+          },
+        ]
+      }
+      person_permit_vehicles: {
+        Row: {
+          canonical_vehicle_id: string
+          created_at: string
+          id: string
+          organization_id: string
+          permit_id: string
+        }
+        Insert: {
+          canonical_vehicle_id: string
+          created_at?: string
+          id?: string
+          organization_id: string
+          permit_id: string
+        }
+        Update: {
+          canonical_vehicle_id?: string
+          created_at?: string
+          id?: string
+          organization_id?: string
+          permit_id?: string
+        }
+        Relationships: [
+          {
+            foreignKeyName: "person_permit_vehicles_canonical_vehicle_id_fkey"
+            columns: ["canonical_vehicle_id"]
+            isOneToOne: false
+            referencedRelation: "canonical_vehicle_public"
+            referencedColumns: ["id"]
+          },
+          {
+            foreignKeyName: "person_permit_vehicles_canonical_vehicle_id_fkey"
+            columns: ["canonical_vehicle_id"]
+            isOneToOne: false
+            referencedRelation: "canonical_vehicles"
+            referencedColumns: ["id"]
+          },
+          {
+            foreignKeyName: "person_permit_vehicles_organization_id_fkey"
+            columns: ["organization_id"]
+            isOneToOne: false
+            referencedRelation: "crm_account_health"
+            referencedColumns: ["organization_id"]
+          },
+          {
+            foreignKeyName: "person_permit_vehicles_organization_id_fkey"
+            columns: ["organization_id"]
+            isOneToOne: false
+            referencedRelation: "crm_account_list"
+            referencedColumns: ["id"]
+          },
+          {
+            foreignKeyName: "person_permit_vehicles_organization_id_fkey"
+            columns: ["organization_id"]
+            isOneToOne: false
+            referencedRelation: "organizations"
+            referencedColumns: ["id"]
+          },
+          {
+            foreignKeyName: "person_permit_vehicles_permit_id_fkey"
+            columns: ["permit_id"]
+            isOneToOne: false
+            referencedRelation: "person_permits"
+            referencedColumns: ["id"]
+          },
+          {
+            foreignKeyName: "person_permit_vehicles_permit_id_fkey"
+            columns: ["permit_id"]
+            isOneToOne: false
+            referencedRelation: "person_permits_fieldwork"
+            referencedColumns: ["id"]
+          },
+        ]
+      }
+      person_permits: {
+        Row: {
+          activities: string[] | null
+          address_text: string | null
+          applicant_type: string | null
+          canonical_person_id: string
+          chainsaw_safety_equipment: boolean | null
+          client_organization_id: string | null
+          company_name: string | null
+          compliance_checked_at: string | null
+          compliance_source: string | null
+          conditions: string | null
+          contact_email: string | null
+          contact_phone: string | null
+          created_at: string
+          created_by: string | null
+          date_from: string | null
+          date_to: string | null
+          firearm_confirm: boolean | null
+          firearm_licence_number: string | null
+          firearm_licence_valid: boolean | null
+          forest_areas: string[] | null
+          hunting_season: string | null
+          id: string
+          keys_issued: boolean | null
+          organization_id: string
+          permit_number: string
+          permit_type: string | null
+          source_document: string | null
+          status: string
+          updated_at: string
+        }
+        Insert: {
+          activities?: string[] | null
+          address_text?: string | null
+          applicant_type?: string | null
+          canonical_person_id: string
+          chainsaw_safety_equipment?: boolean | null
+          client_organization_id?: string | null
+          company_name?: string | null
+          compliance_checked_at?: string | null
+          compliance_source?: string | null
+          conditions?: string | null
+          contact_email?: string | null
+          contact_phone?: string | null
+          created_at?: string
+          created_by?: string | null
+          date_from?: string | null
+          date_to?: string | null
+          firearm_confirm?: boolean | null
+          firearm_licence_number?: string | null
+          firearm_licence_valid?: boolean | null
+          forest_areas?: string[] | null
+          hunting_season?: string | null
+          id?: string
+          keys_issued?: boolean | null
+          organization_id: string
+          permit_number: string
+          permit_type?: string | null
+          source_document?: string | null
+          status?: string
+          updated_at?: string
+        }
+        Update: {
+          activities?: string[] | null
+          address_text?: string | null
+          applicant_type?: string | null
+          canonical_person_id?: string
+          chainsaw_safety_equipment?: boolean | null
+          client_organization_id?: string | null
+          company_name?: string | null
+          compliance_checked_at?: string | null
+          compliance_source?: string | null
+          conditions?: string | null
+          contact_email?: string | null
+          contact_phone?: string | null
+          created_at?: string
+          created_by?: string | null
+          date_from?: string | null
+          date_to?: string | null
+          firearm_confirm?: boolean | null
+          firearm_licence_number?: string | null
+          firearm_licence_valid?: boolean | null
+          forest_areas?: string[] | null
+          hunting_season?: string | null
+          id?: string
+          keys_issued?: boolean | null
+          organization_id?: string
+          permit_number?: string
+          permit_type?: string | null
+          source_document?: string | null
+          status?: string
+          updated_at?: string
+        }
+        Relationships: [
+          {
+            foreignKeyName: "person_permits_canonical_person_id_fkey"
+            columns: ["canonical_person_id"]
+            isOneToOne: false
+            referencedRelation: "canonical_people"
+            referencedColumns: ["id"]
+          },
+          {
+            foreignKeyName: "person_permits_canonical_person_id_fkey"
+            columns: ["canonical_person_id"]
+            isOneToOne: false
+            referencedRelation: "canonical_person_public"
+            referencedColumns: ["id"]
+          },
+          {
+            foreignKeyName: "person_permits_client_organization_id_fkey"
+            columns: ["client_organization_id"]
+            isOneToOne: false
+            referencedRelation: "crm_account_health"
+            referencedColumns: ["organization_id"]
+          },
+          {
+            foreignKeyName: "person_permits_client_organization_id_fkey"
+            columns: ["client_organization_id"]
+            isOneToOne: false
+            referencedRelation: "crm_account_list"
+            referencedColumns: ["id"]
+          },
+          {
+            foreignKeyName: "person_permits_client_organization_id_fkey"
+            columns: ["client_organization_id"]
+            isOneToOne: false
+            referencedRelation: "organizations"
+            referencedColumns: ["id"]
+          },
+          {
+            foreignKeyName: "person_permits_created_by_fkey"
+            columns: ["created_by"]
+            isOneToOne: false
+            referencedRelation: "user_profiles"
+            referencedColumns: ["id"]
+          },
+          {
+            foreignKeyName: "person_permits_organization_id_fkey"
+            columns: ["organization_id"]
+            isOneToOne: false
+            referencedRelation: "crm_account_health"
+            referencedColumns: ["organization_id"]
+          },
+          {
+            foreignKeyName: "person_permits_organization_id_fkey"
+            columns: ["organization_id"]
+            isOneToOne: false
+            referencedRelation: "crm_account_list"
+            referencedColumns: ["id"]
+          },
+          {
+            foreignKeyName: "person_permits_organization_id_fkey"
+            columns: ["organization_id"]
+            isOneToOne: false
+            referencedRelation: "organizations"
+            referencedColumns: ["id"]
           },
         ]
       }
@@ -24124,7 +27593,14 @@ export type Database = {
             foreignKeyName: "person_vehicle_links_person_id_fkey"
             columns: ["person_id"]
             isOneToOne: false
-            referencedRelation: "persons"
+            referencedRelation: "canonical_people"
+            referencedColumns: ["id"]
+          },
+          {
+            foreignKeyName: "person_vehicle_links_person_id_fkey"
+            columns: ["person_id"]
+            isOneToOne: false
+            referencedRelation: "canonical_person_public"
             referencedColumns: ["id"]
           },
           {
@@ -24132,80 +27608,6 @@ export type Database = {
             columns: ["vehicle_id"]
             isOneToOne: false
             referencedRelation: "vehicles"
-            referencedColumns: ["id"]
-          },
-        ]
-      }
-      persons: {
-        Row: {
-          created_at: string
-          date_of_birth: string | null
-          display_name: string | null
-          homeless_notes: string | null
-          homeless_status: string
-          homeless_verified_at: string | null
-          id: string
-          organization_id: string | null
-          person_record_id: string | null
-          updated_at: string
-          welfare_flag: boolean
-          welfare_notes: string | null
-        }
-        Insert: {
-          created_at?: string
-          date_of_birth?: string | null
-          display_name?: string | null
-          homeless_notes?: string | null
-          homeless_status?: string
-          homeless_verified_at?: string | null
-          id?: string
-          organization_id?: string | null
-          person_record_id?: string | null
-          updated_at?: string
-          welfare_flag?: boolean
-          welfare_notes?: string | null
-        }
-        Update: {
-          created_at?: string
-          date_of_birth?: string | null
-          display_name?: string | null
-          homeless_notes?: string | null
-          homeless_status?: string
-          homeless_verified_at?: string | null
-          id?: string
-          organization_id?: string | null
-          person_record_id?: string | null
-          updated_at?: string
-          welfare_flag?: boolean
-          welfare_notes?: string | null
-        }
-        Relationships: [
-          {
-            foreignKeyName: "persons_organization_id_fkey"
-            columns: ["organization_id"]
-            isOneToOne: false
-            referencedRelation: "crm_account_health"
-            referencedColumns: ["organization_id"]
-          },
-          {
-            foreignKeyName: "persons_organization_id_fkey"
-            columns: ["organization_id"]
-            isOneToOne: false
-            referencedRelation: "crm_account_list"
-            referencedColumns: ["id"]
-          },
-          {
-            foreignKeyName: "persons_organization_id_fkey"
-            columns: ["organization_id"]
-            isOneToOne: false
-            referencedRelation: "organizations"
-            referencedColumns: ["id"]
-          },
-          {
-            foreignKeyName: "persons_person_record_id_fkey"
-            columns: ["person_record_id"]
-            isOneToOne: false
-            referencedRelation: "person_records"
             referencedColumns: ["id"]
           },
         ]
@@ -25934,6 +29336,42 @@ export type Database = {
           },
         ]
       }
+      reference_code_templates: {
+        Row: {
+          code: string
+          code_type: string
+          created_at: string
+          description: string | null
+          external_refs: Json
+          is_active: boolean
+          name: string
+          sort_order: number
+          updated_at: string
+        }
+        Insert: {
+          code: string
+          code_type: string
+          created_at?: string
+          description?: string | null
+          external_refs?: Json
+          is_active?: boolean
+          name: string
+          sort_order?: number
+          updated_at?: string
+        }
+        Update: {
+          code?: string
+          code_type?: string
+          created_at?: string
+          description?: string | null
+          external_refs?: Json
+          is_active?: boolean
+          name?: string
+          sort_order?: number
+          updated_at?: string
+        }
+        Relationships: []
+      }
       reference_codes: {
         Row: {
           code: string
@@ -26362,6 +29800,7 @@ export type Database = {
           client_request_id: string
           created_at: string
           created_by: string | null
+          external_refs: Json
           id: string
           linked_shift_id: string | null
           notes: string | null
@@ -26377,6 +29816,7 @@ export type Database = {
           client_request_id: string
           created_at?: string
           created_by?: string | null
+          external_refs?: Json
           id?: string
           linked_shift_id?: string | null
           notes?: string | null
@@ -26392,6 +29832,7 @@ export type Database = {
           client_request_id?: string
           created_at?: string
           created_by?: string | null
+          external_refs?: Json
           id?: string
           linked_shift_id?: string | null
           notes?: string | null
@@ -26519,6 +29960,7 @@ export type Database = {
           cost_centre_id: string | null
           created_at: string
           created_by: string | null
+          external_refs: Json
           id: string
           name: string
           organization_id: string
@@ -26538,6 +29980,7 @@ export type Database = {
           cost_centre_id?: string | null
           created_at?: string
           created_by?: string | null
+          external_refs?: Json
           id?: string
           name: string
           organization_id: string
@@ -26557,6 +30000,7 @@ export type Database = {
           cost_centre_id?: string | null
           created_at?: string
           created_by?: string | null
+          external_refs?: Json
           id?: string
           name?: string
           organization_id?: string
@@ -28299,6 +31743,7 @@ export type Database = {
           actual_start?: string | null
           completed_stops?: number
           created_at?: string
+          ended_reason?: string | null
           external_refs?: Json
           generated_at?: string | null
           id?: string
@@ -28319,7 +31764,6 @@ export type Database = {
           shift_origin?: string
           status?: string
           superseded_by_shift_id?: string | null
-          ended_reason?: string | null
           total_stops?: number
           updated_at?: string
           work_unit_id?: string | null
@@ -28330,6 +31774,7 @@ export type Database = {
           actual_start?: string | null
           completed_stops?: number
           created_at?: string
+          ended_reason?: string | null
           external_refs?: Json
           generated_at?: string | null
           id?: string
@@ -28350,7 +31795,6 @@ export type Database = {
           shift_origin?: string
           status?: string
           superseded_by_shift_id?: string | null
-          ended_reason?: string | null
           total_stops?: number
           updated_at?: string
           work_unit_id?: string | null
@@ -28418,6 +31862,13 @@ export type Database = {
             columns: ["service_agreement_module_id"]
             isOneToOne: false
             referencedRelation: "service_agreement_modules"
+            referencedColumns: ["id"]
+          },
+          {
+            foreignKeyName: "shifts_superseded_by_shift_id_fkey"
+            columns: ["superseded_by_shift_id"]
+            isOneToOne: false
+            referencedRelation: "shifts"
             referencedColumns: ["id"]
           },
           {
@@ -28898,31 +32349,43 @@ export type Database = {
       }
       sla_discount_bands: {
         Row: {
+          active: boolean
           created_at: string
           discount_pct: number
           id: string
+          module_key: string | null
           organization_id: string
           over_by_minutes_max: number | null
           over_by_minutes_min: number
           service_type: string | null
+          updated_at: string
+          updated_by: string | null
         }
         Insert: {
+          active?: boolean
           created_at?: string
           discount_pct: number
           id?: string
+          module_key?: string | null
           organization_id: string
           over_by_minutes_max?: number | null
           over_by_minutes_min: number
           service_type?: string | null
+          updated_at?: string
+          updated_by?: string | null
         }
         Update: {
+          active?: boolean
           created_at?: string
           discount_pct?: number
           id?: string
+          module_key?: string | null
           organization_id?: string
           over_by_minutes_max?: number | null
           over_by_minutes_min?: number
           service_type?: string | null
+          updated_at?: string
+          updated_by?: string | null
         }
         Relationships: [
           {
@@ -29056,10 +32519,12 @@ export type Database = {
           site_id: string | null
           smoke_ai_analysis: Json | null
           smoke_ai_analyzed_at: string | null
+          smoke_ai_review: Json | null
           smoke_source: string | null
           smoke_source_type: string | null
           source_confirmed: boolean
           status: string
+          updated_at: string
         }
         Insert: {
           action?: string | null
@@ -29102,10 +32567,12 @@ export type Database = {
           site_id?: string | null
           smoke_ai_analysis?: Json | null
           smoke_ai_analyzed_at?: string | null
+          smoke_ai_review?: Json | null
           smoke_source?: string | null
           smoke_source_type?: string | null
           source_confirmed?: boolean
           status?: string
+          updated_at?: string
         }
         Update: {
           action?: string | null
@@ -29148,10 +32615,12 @@ export type Database = {
           site_id?: string | null
           smoke_ai_analysis?: Json | null
           smoke_ai_analyzed_at?: string | null
+          smoke_ai_review?: Json | null
           smoke_source?: string | null
           smoke_source_type?: string | null
           source_confirmed?: boolean
           status?: string
+          updated_at?: string
         }
         Relationships: [
           {
@@ -30673,6 +34142,13 @@ export type Database = {
           document_name: string
           document_type: string | null
           id: string
+          organization_id: string
+          review_status: string
+          reviewed_at: string | null
+          reviewed_by: string | null
+          source_document_id: string | null
+          source_reference: string | null
+          source_sha256: string | null
           storage_path: string
           tender_id: string
           uploaded_by: string | null
@@ -30682,6 +34158,13 @@ export type Database = {
           document_name: string
           document_type?: string | null
           id?: string
+          organization_id: string
+          review_status?: string
+          reviewed_at?: string | null
+          reviewed_by?: string | null
+          source_document_id?: string | null
+          source_reference?: string | null
+          source_sha256?: string | null
           storage_path: string
           tender_id: string
           uploaded_by?: string | null
@@ -30691,11 +34174,53 @@ export type Database = {
           document_name?: string
           document_type?: string | null
           id?: string
+          organization_id?: string
+          review_status?: string
+          reviewed_at?: string | null
+          reviewed_by?: string | null
+          source_document_id?: string | null
+          source_reference?: string | null
+          source_sha256?: string | null
           storage_path?: string
           tender_id?: string
           uploaded_by?: string | null
         }
         Relationships: [
+          {
+            foreignKeyName: "tender_documents_organization_id_fkey"
+            columns: ["organization_id"]
+            isOneToOne: false
+            referencedRelation: "crm_account_health"
+            referencedColumns: ["organization_id"]
+          },
+          {
+            foreignKeyName: "tender_documents_organization_id_fkey"
+            columns: ["organization_id"]
+            isOneToOne: false
+            referencedRelation: "crm_account_list"
+            referencedColumns: ["id"]
+          },
+          {
+            foreignKeyName: "tender_documents_organization_id_fkey"
+            columns: ["organization_id"]
+            isOneToOne: false
+            referencedRelation: "organizations"
+            referencedColumns: ["id"]
+          },
+          {
+            foreignKeyName: "tender_documents_reviewed_by_fkey"
+            columns: ["reviewed_by"]
+            isOneToOne: false
+            referencedRelation: "user_profiles"
+            referencedColumns: ["id"]
+          },
+          {
+            foreignKeyName: "tender_documents_source_document_id_fkey"
+            columns: ["source_document_id"]
+            isOneToOne: false
+            referencedRelation: "documents"
+            referencedColumns: ["id"]
+          },
           {
             foreignKeyName: "tender_documents_tender_id_fkey"
             columns: ["tender_id"]
@@ -31257,6 +34782,135 @@ export type Database = {
             columns: ["organization_id"]
             isOneToOne: false
             referencedRelation: "organizations"
+            referencedColumns: ["id"]
+          },
+        ]
+      }
+      vehicle_identity_checks: {
+        Row: {
+          canonical_person_id: string
+          canonical_vehicle_id: string
+          checked_at: string
+          created_at: string
+          evidence_item_id: string | null
+          id: string
+          identity_document_id: string
+          organization_id: string
+          person_record_id: string
+          relationship: string
+          reviewed_at: string
+          reviewed_by: string
+          source_authority: string
+          vehicle_snapshot: Json
+        }
+        Insert: {
+          canonical_person_id: string
+          canonical_vehicle_id: string
+          checked_at: string
+          created_at?: string
+          evidence_item_id?: string | null
+          id?: string
+          identity_document_id: string
+          organization_id: string
+          person_record_id: string
+          relationship?: string
+          reviewed_at?: string
+          reviewed_by: string
+          source_authority?: string
+          vehicle_snapshot?: Json
+        }
+        Update: {
+          canonical_person_id?: string
+          canonical_vehicle_id?: string
+          checked_at?: string
+          created_at?: string
+          evidence_item_id?: string | null
+          id?: string
+          identity_document_id?: string
+          organization_id?: string
+          person_record_id?: string
+          relationship?: string
+          reviewed_at?: string
+          reviewed_by?: string
+          source_authority?: string
+          vehicle_snapshot?: Json
+        }
+        Relationships: [
+          {
+            foreignKeyName: "vehicle_identity_checks_canonical_person_id_fkey"
+            columns: ["canonical_person_id"]
+            isOneToOne: false
+            referencedRelation: "canonical_people"
+            referencedColumns: ["id"]
+          },
+          {
+            foreignKeyName: "vehicle_identity_checks_canonical_person_id_fkey"
+            columns: ["canonical_person_id"]
+            isOneToOne: false
+            referencedRelation: "canonical_person_public"
+            referencedColumns: ["id"]
+          },
+          {
+            foreignKeyName: "vehicle_identity_checks_canonical_vehicle_id_fkey"
+            columns: ["canonical_vehicle_id"]
+            isOneToOne: false
+            referencedRelation: "canonical_vehicle_public"
+            referencedColumns: ["id"]
+          },
+          {
+            foreignKeyName: "vehicle_identity_checks_canonical_vehicle_id_fkey"
+            columns: ["canonical_vehicle_id"]
+            isOneToOne: false
+            referencedRelation: "canonical_vehicles"
+            referencedColumns: ["id"]
+          },
+          {
+            foreignKeyName: "vehicle_identity_checks_evidence_item_id_fkey"
+            columns: ["evidence_item_id"]
+            isOneToOne: false
+            referencedRelation: "evidence_items"
+            referencedColumns: ["id"]
+          },
+          {
+            foreignKeyName: "vehicle_identity_checks_identity_document_id_fkey"
+            columns: ["identity_document_id"]
+            isOneToOne: true
+            referencedRelation: "person_identity_documents"
+            referencedColumns: ["id"]
+          },
+          {
+            foreignKeyName: "vehicle_identity_checks_organization_id_fkey"
+            columns: ["organization_id"]
+            isOneToOne: false
+            referencedRelation: "crm_account_health"
+            referencedColumns: ["organization_id"]
+          },
+          {
+            foreignKeyName: "vehicle_identity_checks_organization_id_fkey"
+            columns: ["organization_id"]
+            isOneToOne: false
+            referencedRelation: "crm_account_list"
+            referencedColumns: ["id"]
+          },
+          {
+            foreignKeyName: "vehicle_identity_checks_organization_id_fkey"
+            columns: ["organization_id"]
+            isOneToOne: false
+            referencedRelation: "organizations"
+            referencedColumns: ["id"]
+          },
+          {
+            foreignKeyName: "vehicle_identity_checks_person_record_id_fkey"
+            columns: ["person_record_id"]
+            isOneToOne: false
+            referencedRelation: "person_records"
+            referencedColumns: ["id"]
+          },
+          {
+            foreignKeyName: "vehicle_identity_checks_reviewed_by_fkey"
+            columns: ["reviewed_by"]
+            isOneToOne: false
+            referencedRelation: "user_profiles"
             referencedColumns: ["id"]
           },
         ]
@@ -32402,6 +36056,9 @@ export type Database = {
           title: string
           updated_at: string
           updated_by: string | null
+          work_activity_code_id: string | null
+          work_subject_code_id: string | null
+          zone_id: string | null
         }
         Insert: {
           asset_id?: string | null
@@ -32428,6 +36085,9 @@ export type Database = {
           title: string
           updated_at?: string
           updated_by?: string | null
+          work_activity_code_id?: string | null
+          work_subject_code_id?: string | null
+          zone_id?: string | null
         }
         Update: {
           asset_id?: string | null
@@ -32454,6 +36114,9 @@ export type Database = {
           title?: string
           updated_at?: string
           updated_by?: string | null
+          work_activity_code_id?: string | null
+          work_subject_code_id?: string | null
+          zone_id?: string | null
         }
         Relationships: [
           {
@@ -32553,6 +36216,34 @@ export type Database = {
             isOneToOne: false
             referencedRelation: "user_profiles"
             referencedColumns: ["id"]
+          },
+          {
+            foreignKeyName: "workshop_work_orders_work_activity_code_id_fkey"
+            columns: ["work_activity_code_id"]
+            isOneToOne: false
+            referencedRelation: "reference_codes"
+            referencedColumns: ["id"]
+          },
+          {
+            foreignKeyName: "workshop_work_orders_work_subject_code_id_fkey"
+            columns: ["work_subject_code_id"]
+            isOneToOne: false
+            referencedRelation: "reference_codes"
+            referencedColumns: ["id"]
+          },
+          {
+            foreignKeyName: "workshop_work_orders_zone_id_fkey"
+            columns: ["zone_id"]
+            isOneToOne: false
+            referencedRelation: "location_zones"
+            referencedColumns: ["id"]
+          },
+          {
+            foreignKeyName: "workshop_work_orders_zone_id_fkey"
+            columns: ["zone_id"]
+            isOneToOne: false
+            referencedRelation: "module_rule_index_view"
+            referencedColumns: ["zone_id"]
           },
         ]
       }
@@ -32952,6 +36643,42 @@ export type Database = {
       }
     }
     Views: {
+      canonical_person_public: {
+        Row: {
+          canonical_key: string | null
+          created_at: string | null
+          display_name: string | null
+          homeless_status: string | null
+          id: string | null
+          normalized_name: string | null
+          review_state: string | null
+          status: string | null
+          updated_at: string | null
+        }
+        Insert: {
+          canonical_key?: string | null
+          created_at?: string | null
+          display_name?: string | null
+          homeless_status?: string | null
+          id?: string | null
+          normalized_name?: string | null
+          review_state?: string | null
+          status?: string | null
+          updated_at?: string | null
+        }
+        Update: {
+          canonical_key?: string | null
+          created_at?: string | null
+          display_name?: string | null
+          homeless_status?: string | null
+          id?: string | null
+          normalized_name?: string | null
+          review_state?: string | null
+          status?: string | null
+          updated_at?: string | null
+        }
+        Relationships: []
+      }
       canonical_scv_public: {
         Row: {
           certificate_number: string | null
@@ -33249,6 +36976,80 @@ export type Database = {
           zone_id: string | null
         }
         Relationships: []
+      }
+      investigations_summary: {
+        Row: {
+          closed_at: string | null
+          id: string | null
+          investigation_reference: string | null
+          investigation_type: string | null
+          lead_user_id: string | null
+          legal_hold: boolean | null
+          opened_at: string | null
+          organization_id: string | null
+          priority: string | null
+          resolved_at: string | null
+          status: string | null
+          title: string | null
+        }
+        Insert: {
+          closed_at?: string | null
+          id?: string | null
+          investigation_reference?: string | null
+          investigation_type?: string | null
+          lead_user_id?: string | null
+          legal_hold?: boolean | null
+          opened_at?: string | null
+          organization_id?: string | null
+          priority?: string | null
+          resolved_at?: string | null
+          status?: string | null
+          title?: string | null
+        }
+        Update: {
+          closed_at?: string | null
+          id?: string | null
+          investigation_reference?: string | null
+          investigation_type?: string | null
+          lead_user_id?: string | null
+          legal_hold?: boolean | null
+          opened_at?: string | null
+          organization_id?: string | null
+          priority?: string | null
+          resolved_at?: string | null
+          status?: string | null
+          title?: string | null
+        }
+        Relationships: [
+          {
+            foreignKeyName: "investigations_lead_user_id_fkey"
+            columns: ["lead_user_id"]
+            isOneToOne: false
+            referencedRelation: "user_profiles"
+            referencedColumns: ["id"]
+          },
+          {
+            foreignKeyName: "investigations_organization_id_fkey"
+            columns: ["organization_id"]
+            isOneToOne: false
+            referencedRelation: "crm_account_health"
+            referencedColumns: ["organization_id"]
+          },
+          {
+            foreignKeyName: "investigations_organization_id_fkey"
+            columns: ["organization_id"]
+            isOneToOne: false
+            referencedRelation: "crm_account_list"
+            referencedColumns: ["id"]
+          },
+          {
+            foreignKeyName: "investigations_organization_id_fkey"
+            columns: ["organization_id"]
+            isOneToOne: false
+            referencedRelation: "organizations"
+            referencedColumns: ["id"]
+          },
+        ]
       }
       location_visibility_for_viewer: {
         Row: {
@@ -33551,6 +37352,106 @@ export type Database = {
         }
         Relationships: []
       }
+      patrol_travel_km_summary: {
+        Row: {
+          month: string | null
+          officer_id: string | null
+          organization_id: string | null
+          site_id: string | null
+          total_distance_km: number | null
+          visit_count: number | null
+          zone_id: string | null
+        }
+        Relationships: []
+      }
+      person_permits_fieldwork: {
+        Row: {
+          activities: string[] | null
+          address_text: string | null
+          applicant_type: string | null
+          canonical_person_id: string | null
+          chainsaw_safety_equipment: boolean | null
+          client_organization_id: string | null
+          company_name: string | null
+          compliance_checked_at: string | null
+          compliance_source: string | null
+          conditions: string | null
+          contact_email: string | null
+          contact_phone: string | null
+          date_from: string | null
+          date_to: string | null
+          firearm_confirm: boolean | null
+          firearm_licence_valid: boolean | null
+          forest_areas: string[] | null
+          holder_name: string | null
+          hunting_season: string | null
+          id: string | null
+          keys_issued: boolean | null
+          organization_id: string | null
+          permit_number: string | null
+          permit_type: string | null
+          status: string | null
+          vehicle_plates: string[] | null
+        }
+        Relationships: [
+          {
+            foreignKeyName: "person_permits_canonical_person_id_fkey"
+            columns: ["canonical_person_id"]
+            isOneToOne: false
+            referencedRelation: "canonical_people"
+            referencedColumns: ["id"]
+          },
+          {
+            foreignKeyName: "person_permits_canonical_person_id_fkey"
+            columns: ["canonical_person_id"]
+            isOneToOne: false
+            referencedRelation: "canonical_person_public"
+            referencedColumns: ["id"]
+          },
+          {
+            foreignKeyName: "person_permits_client_organization_id_fkey"
+            columns: ["client_organization_id"]
+            isOneToOne: false
+            referencedRelation: "crm_account_health"
+            referencedColumns: ["organization_id"]
+          },
+          {
+            foreignKeyName: "person_permits_client_organization_id_fkey"
+            columns: ["client_organization_id"]
+            isOneToOne: false
+            referencedRelation: "crm_account_list"
+            referencedColumns: ["id"]
+          },
+          {
+            foreignKeyName: "person_permits_client_organization_id_fkey"
+            columns: ["client_organization_id"]
+            isOneToOne: false
+            referencedRelation: "organizations"
+            referencedColumns: ["id"]
+          },
+          {
+            foreignKeyName: "person_permits_organization_id_fkey"
+            columns: ["organization_id"]
+            isOneToOne: false
+            referencedRelation: "crm_account_health"
+            referencedColumns: ["organization_id"]
+          },
+          {
+            foreignKeyName: "person_permits_organization_id_fkey"
+            columns: ["organization_id"]
+            isOneToOne: false
+            referencedRelation: "crm_account_list"
+            referencedColumns: ["id"]
+          },
+          {
+            foreignKeyName: "person_permits_organization_id_fkey"
+            columns: ["organization_id"]
+            isOneToOne: false
+            referencedRelation: "organizations"
+            referencedColumns: ["id"]
+          },
+        ]
+      }
       v_service_agreement_readiness: {
         Row: {
           agreement_locations: number | null
@@ -33621,6 +37522,14 @@ export type Database = {
           title: string | null
           uninvoiced_total: number | null
           updated_at: string | null
+          work_activity_code: string | null
+          work_activity_code_id: string | null
+          work_activity_name: string | null
+          work_subject_code: string | null
+          work_subject_code_id: string | null
+          work_subject_name: string | null
+          zone_id: string | null
+          zone_name: string | null
         }
         Relationships: [
           {
@@ -33706,6 +37615,34 @@ export type Database = {
             isOneToOne: false
             referencedRelation: "service_agreements"
             referencedColumns: ["id"]
+          },
+          {
+            foreignKeyName: "workshop_work_orders_work_activity_code_id_fkey"
+            columns: ["work_activity_code_id"]
+            isOneToOne: false
+            referencedRelation: "reference_codes"
+            referencedColumns: ["id"]
+          },
+          {
+            foreignKeyName: "workshop_work_orders_work_subject_code_id_fkey"
+            columns: ["work_subject_code_id"]
+            isOneToOne: false
+            referencedRelation: "reference_codes"
+            referencedColumns: ["id"]
+          },
+          {
+            foreignKeyName: "workshop_work_orders_zone_id_fkey"
+            columns: ["zone_id"]
+            isOneToOne: false
+            referencedRelation: "location_zones"
+            referencedColumns: ["id"]
+          },
+          {
+            foreignKeyName: "workshop_work_orders_zone_id_fkey"
+            columns: ["zone_id"]
+            isOneToOne: false
+            referencedRelation: "module_rule_index_view"
+            referencedColumns: ["zone_id"]
           },
         ]
       }
@@ -33856,6 +37793,7 @@ export type Database = {
           isSetofReturn: false
         }
       }
+      accept_client_invitation: { Args: never; Returns: Json }
       accept_quote: { Args: { p_quote_id: string }; Returns: string }
       acknowledge_operational_continuity_item: {
         Args: {
@@ -33939,6 +37877,25 @@ export type Database = {
           total_cost: number
         }[]
       }
+      add_crm_quote_lines_from_bom_template: {
+        Args: {
+          p_client_request_id: string
+          p_expected_status: string
+          p_quote_id: string
+          p_site_id?: string
+          p_template_id: string
+        }
+        Returns: {
+          discount_amount: number
+          gst_amount: number
+          lines_added: number
+          lines_needing_price: number
+          quote_id: string
+          subtotal_charge: number
+          total_charge: number
+          total_cost: number
+        }[]
+      }
       add_finance_budget_line: {
         Args: {
           p_budget_amount: number
@@ -33965,6 +37922,31 @@ export type Database = {
         SetofOptions: {
           from: "*"
           to: "finance_budget_lines"
+          isOneToOne: true
+          isSetofReturn: false
+        }
+      }
+      add_investigation_event: {
+        Args: {
+          p_description: string
+          p_event_type: string
+          p_investigation_id: string
+          p_occurred_at?: string
+        }
+        Returns: {
+          created_at: string
+          created_by: string
+          description: string
+          event_type: string
+          id: string
+          investigation_id: string
+          organization_id: string
+          source_id: string | null
+          source_table: string | null
+        }
+        SetofOptions: {
+          from: "*"
+          to: "investigation_events"
           isOneToOne: true
           isSetofReturn: false
         }
@@ -34045,10 +38027,6 @@ export type Database = {
             Returns: string
           }
       address_match_key: { Args: { p_address: string }; Returns: string }
-      agreement_service_delivery: {
-        Args: { p_agreement_id: string; p_period_end: string; p_period_start: string }
-        Returns: Json
-      }
       advance_dispatch_job_status: {
         Args: {
           p_expected_status: string
@@ -34090,6 +38068,9 @@ export type Database = {
           title: string
           updated_at: string
           updated_by: string | null
+          work_activity_code_id: string | null
+          work_subject_code_id: string | null
+          zone_id: string | null
         }
         SetofOptions: {
           from: "*"
@@ -34097,6 +38078,18 @@ export type Database = {
           isOneToOne: true
           isSetofReturn: false
         }
+      }
+      agreement_service_delivery: {
+        Args: {
+          p_agreement_id: string
+          p_period_end: string
+          p_period_start: string
+        }
+        Returns: Json
+      }
+      apply_biosecurity_photo_review_to_perception: {
+        Args: { p_assessment_id: string }
+        Returns: undefined
       }
       apply_bob_rate_rule_proposal: {
         Args: { p_action_id: string }
@@ -34112,6 +38105,18 @@ export type Database = {
       apply_bob_staff_onboarding_proposal: {
         Args: { p_action_id: string }
         Returns: string
+      }
+      apply_cctv_person_review_to_perception: {
+        Args: { p_observation_id: string }
+        Returns: undefined
+      }
+      apply_cctv_vehicle_attribute_review_to_perception: {
+        Args: { p_observation_id: string }
+        Returns: undefined
+      }
+      apply_cctv_vehicle_attribute_review_to_perception_unchecked: {
+        Args: { p_observation_id: string }
+        Returns: undefined
       }
       apply_credential_promotion_proposal: {
         Args: {
@@ -34130,21 +38135,6 @@ export type Database = {
           proposal_id: string
         }[]
       }
-      apply_deputy_roster_import: {
-        Args: {
-          p_client_request_id: string
-          p_leave?: Json
-          p_locations?: Json
-          p_manifest?: Json
-          p_operating_organization_id: string
-          p_people?: Json
-          p_row_count: number
-          p_slots?: Json
-          p_source_file: string
-          p_source_sha256: string
-        }
-        Returns: Json
-      }
       apply_crm_agreement_promotion_proposal: {
         Args: {
           p_client_organization_id: string
@@ -34160,6 +38150,21 @@ export type Database = {
           created: boolean
           proposal_id: string
         }[]
+      }
+      apply_deputy_roster_import: {
+        Args: {
+          p_client_request_id: string
+          p_leave?: Json
+          p_locations?: Json
+          p_manifest?: Json
+          p_operating_organization_id: string
+          p_people?: Json
+          p_row_count: number
+          p_slots?: Json
+          p_source_file: string
+          p_source_sha256: string
+        }
+        Returns: Json
       }
       apply_finance_reconciliation_proposal: {
         Args: {
@@ -34179,6 +38184,21 @@ export type Database = {
           invoice_id: string
           proposal_id: string
         }[]
+      }
+      apply_historical_roster_assignment_import: {
+        Args: {
+          p_assignments: Json
+          p_client_organization_id: string
+          p_client_request_id: string
+          p_field_route_by_officer?: Json
+          p_field_source_codes?: string[]
+          p_organization_id: string
+          p_remove_prior_projection?: boolean
+          p_source_file: string
+          p_source_sha256: string
+          p_unresolved_values?: Json
+        }
+        Returns: Json
       }
       apply_hr_document_promotion_proposal: {
         Args: {
@@ -34335,6 +38355,8 @@ export type Database = {
           company_registration_number: string | null
           contact_email: string | null
           contact_phone: string | null
+          corporate_profile_source: string | null
+          corporate_profile_verification_status: string
           corporate_profile_verified_at: string | null
           corporate_profile_verified_by: string | null
           corporate_status: string | null
@@ -34348,6 +38370,7 @@ export type Database = {
           jurisdiction_verification: string
           jurisdiction_verified_at: string | null
           jurisdiction_verified_by: string | null
+          legal_name: string | null
           logo_url: string | null
           name: string
           nzbn: string | null
@@ -34355,8 +38378,12 @@ export type Database = {
           organization_level: number | null
           organization_type: string
           parent_organization_id: string | null
+          postal_address: string | null
+          registered_office: string | null
           status: string
+          trading_name: string | null
           updated_at: string
+          website_url: string | null
         }
         SetofOptions: {
           from: "*"
@@ -34427,6 +38454,7 @@ export type Database = {
           status: string
           timing_source: string
           work_unit_id: string | null
+          zone_id: string | null
         }
         SetofOptions: {
           from: "*"
@@ -34559,6 +38587,61 @@ export type Database = {
           isSetofReturn: false
         }
       }
+      attach_external_photo_to_record: {
+        Args: {
+          p_captured_at?: string
+          p_description?: string
+          p_original_name?: string
+          p_record_id: string
+          p_record_kind: string
+          p_sha256: string
+          p_source_note?: string
+          p_storage_path: string
+        }
+        Returns: string
+      }
+      attach_incident_identity_proposal: {
+        Args: {
+          p_actor_user_id: string
+          p_identity_document_id: string
+          p_incident_id: string
+          p_person_record_id: string
+        }
+        Returns: undefined
+      }
+      attach_tender_document: {
+        Args: {
+          p_document_name: string
+          p_document_type: string
+          p_source_document_id?: string
+          p_source_reference?: string
+          p_source_sha256?: string
+          p_storage_path: string
+          p_tender_id: string
+        }
+        Returns: {
+          created_at: string
+          document_name: string
+          document_type: string | null
+          id: string
+          organization_id: string
+          review_status: string
+          reviewed_at: string | null
+          reviewed_by: string | null
+          source_document_id: string | null
+          source_reference: string | null
+          source_sha256: string | null
+          storage_path: string
+          tender_id: string
+          uploaded_by: string | null
+        }
+        SetofOptions: {
+          from: "*"
+          to: "tender_documents"
+          isOneToOne: true
+          isSetofReturn: false
+        }
+      }
       batch_publish_roster_slots: {
         Args: {
           p_client_request_id: string
@@ -34571,6 +38654,174 @@ export type Database = {
           materialized_count: number
           published_count: number
         }[]
+      }
+      begin_patrol_import_batch: {
+        Args: {
+          p_batch_name: string
+          p_client_organization_id: string
+          p_duplicate_count: number
+          p_manifest_json: Json
+          p_parser: string
+          p_provider_organization_id: string
+          p_row_count: number
+          p_schema_json: Json
+          p_source_file: string
+          p_source_sha256: string
+          p_unresolved_count: number
+        }
+        Returns: {
+          batch_name: string
+          created_at: string
+          created_by: string
+          duplicate_count: number
+          duplicate_of_batch_id: string | null
+          id: string
+          manifest_json: Json
+          organization_id: string
+          parser: string
+          review_reason: string | null
+          reviewed_at: string | null
+          reviewed_by: string | null
+          row_count: number
+          schema_json: Json
+          source_file: string
+          source_sha256: string | null
+          status: string
+          unresolved_count: number
+          updated_at: string
+        }
+        SetofOptions: {
+          from: "*"
+          to: "file_import_batches"
+          isOneToOne: true
+          isSetofReturn: false
+        }
+      }
+      begin_patrol_import_batch_identity_bound_unfrozen: {
+        Args: {
+          p_batch_name: string
+          p_client_organization_id: string
+          p_duplicate_count: number
+          p_manifest_json: Json
+          p_parser: string
+          p_provider_organization_id: string
+          p_row_count: number
+          p_schema_json: Json
+          p_source_file: string
+          p_source_sha256: string
+          p_unresolved_count: number
+        }
+        Returns: {
+          batch_name: string
+          created_at: string
+          created_by: string
+          duplicate_count: number
+          duplicate_of_batch_id: string | null
+          id: string
+          manifest_json: Json
+          organization_id: string
+          parser: string
+          review_reason: string | null
+          reviewed_at: string | null
+          reviewed_by: string | null
+          row_count: number
+          schema_json: Json
+          source_file: string
+          source_sha256: string | null
+          status: string
+          unresolved_count: number
+          updated_at: string
+        }
+        SetofOptions: {
+          from: "*"
+          to: "file_import_batches"
+          isOneToOne: true
+          isSetofReturn: false
+        }
+      }
+      begin_patrol_import_batch_provenance_unchecked: {
+        Args: {
+          p_batch_name: string
+          p_client_organization_id: string
+          p_duplicate_count: number
+          p_manifest_json: Json
+          p_parser: string
+          p_provider_organization_id: string
+          p_row_count: number
+          p_schema_json: Json
+          p_source_file: string
+          p_source_sha256: string
+          p_unresolved_count: number
+        }
+        Returns: {
+          batch_name: string
+          created_at: string
+          created_by: string
+          duplicate_count: number
+          duplicate_of_batch_id: string | null
+          id: string
+          manifest_json: Json
+          organization_id: string
+          parser: string
+          review_reason: string | null
+          reviewed_at: string | null
+          reviewed_by: string | null
+          row_count: number
+          schema_json: Json
+          source_file: string
+          source_sha256: string | null
+          status: string
+          unresolved_count: number
+          updated_at: string
+        }
+        SetofOptions: {
+          from: "*"
+          to: "file_import_batches"
+          isOneToOne: true
+          isSetofReturn: false
+        }
+      }
+      begin_patrol_import_batch_unvalidated: {
+        Args: {
+          p_batch_name: string
+          p_client_organization_id: string
+          p_duplicate_count: number
+          p_manifest_json: Json
+          p_parser: string
+          p_provider_organization_id: string
+          p_row_count: number
+          p_schema_json: Json
+          p_source_file: string
+          p_source_sha256: string
+          p_unresolved_count: number
+        }
+        Returns: {
+          batch_name: string
+          created_at: string
+          created_by: string
+          duplicate_count: number
+          duplicate_of_batch_id: string | null
+          id: string
+          manifest_json: Json
+          organization_id: string
+          parser: string
+          review_reason: string | null
+          reviewed_at: string | null
+          reviewed_by: string | null
+          row_count: number
+          schema_json: Json
+          source_file: string
+          source_sha256: string | null
+          status: string
+          unresolved_count: number
+          updated_at: string
+        }
+        SetofOptions: {
+          from: "*"
+          to: "file_import_batches"
+          isOneToOne: true
+          isSetofReturn: false
+        }
       }
       bob_atlas_expectation_report: {
         Args: { p_limit?: number; p_offset?: number }
@@ -34741,6 +38992,13 @@ export type Database = {
         Args: { _job_id: string; _reason: string; _step_id: string }
         Returns: {
           approval_required_at: string[] | null
+          autopilot_conversation_id: string | null
+          autopilot_report: Json | null
+          autopilot_reported_at: string | null
+          autopilot_requested_by: string | null
+          autopilot_source: string | null
+          autopilot_state: string | null
+          autopilot_updated_at: string | null
           backend_required: boolean
           branch_name: string | null
           code_review_artifact_id: string | null
@@ -34758,7 +39016,11 @@ export type Database = {
           organization_id: string
           parent_job_id: string | null
           project_id: string
+          repair_risk: string | null
           requested_action: string
+          source_friction_packet_id: string | null
+          source_main_health_files: string[] | null
+          source_main_health_sha: string | null
           status: string
           target_environment: string
           target_sha: string | null
@@ -34783,10 +39045,49 @@ export type Database = {
           isSetofReturn: false
         }
       }
+      builder_abort_model_step: {
+        Args: { _job_id: string; _reason: string; _step_id: string }
+        Returns: {
+          artifact_ids: string[] | null
+          attempt_count: number | null
+          blocked_dependencies: string[] | null
+          blocked_reason: string | null
+          builder_mode: string
+          completed_at: string | null
+          created_at: string
+          error: string | null
+          evidence_refs: Json | null
+          id: string
+          input_context: Json | null
+          job_id: string
+          model_name: string | null
+          model_provider: string | null
+          ordinal_position: number
+          result_summary: string | null
+          retryable: boolean | null
+          started_at: string | null
+          status: string
+          step_id: string
+          updated_at: string
+        }
+        SetofOptions: {
+          from: "*"
+          to: "builder_job_steps"
+          isOneToOne: true
+          isSetofReturn: false
+        }
+      }
       builder_abort_release_preparation: {
         Args: { _job_id: string; _reason: string; _step_id: string }
         Returns: {
           approval_required_at: string[] | null
+          autopilot_conversation_id: string | null
+          autopilot_report: Json | null
+          autopilot_reported_at: string | null
+          autopilot_requested_by: string | null
+          autopilot_source: string | null
+          autopilot_state: string | null
+          autopilot_updated_at: string | null
           backend_required: boolean
           branch_name: string | null
           code_review_artifact_id: string | null
@@ -34804,7 +39105,11 @@ export type Database = {
           organization_id: string
           parent_job_id: string | null
           project_id: string
+          repair_risk: string | null
           requested_action: string
+          source_friction_packet_id: string | null
+          source_main_health_files: string[] | null
+          source_main_health_sha: string | null
           status: string
           target_environment: string
           target_sha: string | null
@@ -34833,6 +39138,13 @@ export type Database = {
         Args: { _lease_token: string; _reason: string; _run_id: string }
         Returns: {
           approval_required_at: string[] | null
+          autopilot_conversation_id: string | null
+          autopilot_report: Json | null
+          autopilot_reported_at: string | null
+          autopilot_requested_by: string | null
+          autopilot_source: string | null
+          autopilot_state: string | null
+          autopilot_updated_at: string | null
           backend_required: boolean
           branch_name: string | null
           code_review_artifact_id: string | null
@@ -34850,7 +39162,11 @@ export type Database = {
           organization_id: string
           parent_job_id: string | null
           project_id: string
+          repair_risk: string | null
           requested_action: string
+          source_friction_packet_id: string | null
+          source_main_health_files: string[] | null
+          source_main_health_sha: string | null
           status: string
           target_environment: string
           target_sha: string | null
@@ -34885,14 +39201,21 @@ export type Database = {
         }
         Returns: Json
       }
-      builder_bind_workspace: {
+      builder_autopilot_bind: {
         Args: {
+          _conversation_id?: string
           _job_id: string
-          _workspace_branch: string
-          _workspace_head_sha: string
+          _requested_by: string
         }
         Returns: {
           approval_required_at: string[] | null
+          autopilot_conversation_id: string | null
+          autopilot_report: Json | null
+          autopilot_reported_at: string | null
+          autopilot_requested_by: string | null
+          autopilot_source: string | null
+          autopilot_state: string | null
+          autopilot_updated_at: string | null
           backend_required: boolean
           branch_name: string | null
           code_review_artifact_id: string | null
@@ -34910,7 +39233,11 @@ export type Database = {
           organization_id: string
           parent_job_id: string | null
           project_id: string
+          repair_risk: string | null
           requested_action: string
+          source_friction_packet_id: string | null
+          source_main_health_files: string[] | null
+          source_main_health_sha: string | null
           status: string
           target_environment: string
           target_sha: string | null
@@ -34935,6 +39262,357 @@ export type Database = {
           isSetofReturn: false
         }
       }
+      builder_autopilot_decide_approval: {
+        Args: { _approval_id: string; _comment?: string }
+        Returns: {
+          approval_required_at: string[] | null
+          autopilot_conversation_id: string | null
+          autopilot_report: Json | null
+          autopilot_reported_at: string | null
+          autopilot_requested_by: string | null
+          autopilot_source: string | null
+          autopilot_state: string | null
+          autopilot_updated_at: string | null
+          backend_required: boolean
+          branch_name: string | null
+          code_review_artifact_id: string | null
+          code_review_mode: string
+          code_review_status: string
+          created_at: string
+          created_by: string | null
+          current_step_index: number | null
+          current_step_name: string | null
+          description: string | null
+          error_count: number | null
+          frontend_required: boolean
+          id: string
+          last_error: string | null
+          organization_id: string
+          parent_job_id: string | null
+          project_id: string
+          repair_risk: string | null
+          requested_action: string
+          source_friction_packet_id: string | null
+          source_main_health_files: string[] | null
+          source_main_health_sha: string | null
+          status: string
+          target_environment: string
+          target_sha: string | null
+          task_description: string | null
+          task_run_id: string | null
+          title: string
+          total_steps: number | null
+          updated_at: string
+          workspace_branch: string | null
+          workspace_created_at: string | null
+          workspace_head_sha: string | null
+          workspace_published_at: string | null
+          workspace_published_head_sha: string | null
+          workspace_pull_request_created_at: string | null
+          workspace_pull_request_head_sha: string | null
+          workspace_pull_request_url: string | null
+        }
+        SetofOptions: {
+          from: "*"
+          to: "builder_jobs"
+          isOneToOne: true
+          isSetofReturn: false
+        }
+      }
+      builder_autopilot_decide_approval_guarded: {
+        Args: { _approval_id: string; _comment?: string }
+        Returns: {
+          approval_required_at: string[] | null
+          autopilot_conversation_id: string | null
+          autopilot_report: Json | null
+          autopilot_reported_at: string | null
+          autopilot_requested_by: string | null
+          autopilot_source: string | null
+          autopilot_state: string | null
+          autopilot_updated_at: string | null
+          backend_required: boolean
+          branch_name: string | null
+          code_review_artifact_id: string | null
+          code_review_mode: string
+          code_review_status: string
+          created_at: string
+          created_by: string | null
+          current_step_index: number | null
+          current_step_name: string | null
+          description: string | null
+          error_count: number | null
+          frontend_required: boolean
+          id: string
+          last_error: string | null
+          organization_id: string
+          parent_job_id: string | null
+          project_id: string
+          repair_risk: string | null
+          requested_action: string
+          source_friction_packet_id: string | null
+          source_main_health_files: string[] | null
+          source_main_health_sha: string | null
+          status: string
+          target_environment: string
+          target_sha: string | null
+          task_description: string | null
+          task_run_id: string | null
+          title: string
+          total_steps: number | null
+          updated_at: string
+          workspace_branch: string | null
+          workspace_created_at: string | null
+          workspace_head_sha: string | null
+          workspace_published_at: string | null
+          workspace_published_head_sha: string | null
+          workspace_pull_request_created_at: string | null
+          workspace_pull_request_head_sha: string | null
+          workspace_pull_request_url: string | null
+        }
+        SetofOptions: {
+          from: "*"
+          to: "builder_jobs"
+          isOneToOne: true
+          isSetofReturn: false
+        }
+      }
+      builder_autopilot_mark_reported: {
+        Args: { _job_id: string }
+        Returns: undefined
+      }
+      builder_autopilot_record: {
+        Args: { _job_id: string; _report?: Json; _state: string }
+        Returns: {
+          approval_required_at: string[] | null
+          autopilot_conversation_id: string | null
+          autopilot_report: Json | null
+          autopilot_reported_at: string | null
+          autopilot_requested_by: string | null
+          autopilot_source: string | null
+          autopilot_state: string | null
+          autopilot_updated_at: string | null
+          backend_required: boolean
+          branch_name: string | null
+          code_review_artifact_id: string | null
+          code_review_mode: string
+          code_review_status: string
+          created_at: string
+          created_by: string | null
+          current_step_index: number | null
+          current_step_name: string | null
+          description: string | null
+          error_count: number | null
+          frontend_required: boolean
+          id: string
+          last_error: string | null
+          organization_id: string
+          parent_job_id: string | null
+          project_id: string
+          repair_risk: string | null
+          requested_action: string
+          source_friction_packet_id: string | null
+          source_main_health_files: string[] | null
+          source_main_health_sha: string | null
+          status: string
+          target_environment: string
+          target_sha: string | null
+          task_description: string | null
+          task_run_id: string | null
+          title: string
+          total_steps: number | null
+          updated_at: string
+          workspace_branch: string | null
+          workspace_created_at: string | null
+          workspace_head_sha: string | null
+          workspace_published_at: string | null
+          workspace_published_head_sha: string | null
+          workspace_pull_request_created_at: string | null
+          workspace_pull_request_head_sha: string | null
+          workspace_pull_request_url: string | null
+        }
+        SetofOptions: {
+          from: "*"
+          to: "builder_jobs"
+          isOneToOne: true
+          isSetofReturn: false
+        }
+      }
+      builder_bind_routine_repair: {
+        Args: { _job_id: string; _packet_id: string }
+        Returns: {
+          approval_required_at: string[] | null
+          autopilot_conversation_id: string | null
+          autopilot_report: Json | null
+          autopilot_reported_at: string | null
+          autopilot_requested_by: string | null
+          autopilot_source: string | null
+          autopilot_state: string | null
+          autopilot_updated_at: string | null
+          backend_required: boolean
+          branch_name: string | null
+          code_review_artifact_id: string | null
+          code_review_mode: string
+          code_review_status: string
+          created_at: string
+          created_by: string | null
+          current_step_index: number | null
+          current_step_name: string | null
+          description: string | null
+          error_count: number | null
+          frontend_required: boolean
+          id: string
+          last_error: string | null
+          organization_id: string
+          parent_job_id: string | null
+          project_id: string
+          repair_risk: string | null
+          requested_action: string
+          source_friction_packet_id: string | null
+          source_main_health_files: string[] | null
+          source_main_health_sha: string | null
+          status: string
+          target_environment: string
+          target_sha: string | null
+          task_description: string | null
+          task_run_id: string | null
+          title: string
+          total_steps: number | null
+          updated_at: string
+          workspace_branch: string | null
+          workspace_created_at: string | null
+          workspace_head_sha: string | null
+          workspace_published_at: string | null
+          workspace_published_head_sha: string | null
+          workspace_pull_request_created_at: string | null
+          workspace_pull_request_head_sha: string | null
+          workspace_pull_request_url: string | null
+        }
+        SetofOptions: {
+          from: "*"
+          to: "builder_jobs"
+          isOneToOne: true
+          isSetofReturn: false
+        }
+      }
+      builder_bind_workspace: {
+        Args: {
+          _job_id: string
+          _workspace_branch: string
+          _workspace_head_sha: string
+        }
+        Returns: {
+          approval_required_at: string[] | null
+          autopilot_conversation_id: string | null
+          autopilot_report: Json | null
+          autopilot_reported_at: string | null
+          autopilot_requested_by: string | null
+          autopilot_source: string | null
+          autopilot_state: string | null
+          autopilot_updated_at: string | null
+          backend_required: boolean
+          branch_name: string | null
+          code_review_artifact_id: string | null
+          code_review_mode: string
+          code_review_status: string
+          created_at: string
+          created_by: string | null
+          current_step_index: number | null
+          current_step_name: string | null
+          description: string | null
+          error_count: number | null
+          frontend_required: boolean
+          id: string
+          last_error: string | null
+          organization_id: string
+          parent_job_id: string | null
+          project_id: string
+          repair_risk: string | null
+          requested_action: string
+          source_friction_packet_id: string | null
+          source_main_health_files: string[] | null
+          source_main_health_sha: string | null
+          status: string
+          target_environment: string
+          target_sha: string | null
+          task_description: string | null
+          task_run_id: string | null
+          title: string
+          total_steps: number | null
+          updated_at: string
+          workspace_branch: string | null
+          workspace_created_at: string | null
+          workspace_head_sha: string | null
+          workspace_published_at: string | null
+          workspace_published_head_sha: string | null
+          workspace_pull_request_created_at: string | null
+          workspace_pull_request_head_sha: string | null
+          workspace_pull_request_url: string | null
+        }
+        SetofOptions: {
+          from: "*"
+          to: "builder_jobs"
+          isOneToOne: true
+          isSetofReturn: false
+        }
+      }
+      builder_cancel_job: {
+        Args: { _job_id: string; _reason: string }
+        Returns: {
+          approval_required_at: string[] | null
+          autopilot_conversation_id: string | null
+          autopilot_report: Json | null
+          autopilot_reported_at: string | null
+          autopilot_requested_by: string | null
+          autopilot_source: string | null
+          autopilot_state: string | null
+          autopilot_updated_at: string | null
+          backend_required: boolean
+          branch_name: string | null
+          code_review_artifact_id: string | null
+          code_review_mode: string
+          code_review_status: string
+          created_at: string
+          created_by: string | null
+          current_step_index: number | null
+          current_step_name: string | null
+          description: string | null
+          error_count: number | null
+          frontend_required: boolean
+          id: string
+          last_error: string | null
+          organization_id: string
+          parent_job_id: string | null
+          project_id: string
+          repair_risk: string | null
+          requested_action: string
+          source_friction_packet_id: string | null
+          source_main_health_files: string[] | null
+          source_main_health_sha: string | null
+          status: string
+          target_environment: string
+          target_sha: string | null
+          task_description: string | null
+          task_run_id: string | null
+          title: string
+          total_steps: number | null
+          updated_at: string
+          workspace_branch: string | null
+          workspace_created_at: string | null
+          workspace_head_sha: string | null
+          workspace_published_at: string | null
+          workspace_published_head_sha: string | null
+          workspace_pull_request_created_at: string | null
+          workspace_pull_request_head_sha: string | null
+          workspace_pull_request_url: string | null
+        }
+        SetofOptions: {
+          from: "*"
+          to: "builder_jobs"
+          isOneToOne: true
+          isSetofReturn: false
+        }
+      }
+      builder_cancel_terminal_approvals: { Args: never; Returns: number }
       builder_claim_aggregate_security_review: {
         Args: {
           _expected_target_sha: string
@@ -34968,6 +39646,38 @@ export type Database = {
         }
         Returns: Json
       }
+      builder_claim_routine_repairs: {
+        Args: { _limit?: number }
+        Returns: {
+          automation_attempt_count: number
+          automation_error_redacted: string | null
+          automation_status: string
+          automation_updated_at: string
+          basis: Json
+          builder_job_id: string | null
+          client_packet_key: string
+          confidence: number | null
+          created_at: string
+          disposition: string
+          envelope: Json
+          id: string
+          organization_id: string
+          redaction: Json
+          repair_risk: string
+          retention_cutoff: string | null
+          route: string | null
+          stop_line_hit: string | null
+          triage: string | null
+          truth_state: string
+          user_id: string
+        }[]
+        SetofOptions: {
+          from: "*"
+          to: "bob_friction_packets"
+          isOneToOne: false
+          isSetofReturn: true
+        }
+      }
       builder_complete_independent_code_review: {
         Args: {
           _job_id: string
@@ -34978,6 +39688,13 @@ export type Database = {
         }
         Returns: {
           approval_required_at: string[] | null
+          autopilot_conversation_id: string | null
+          autopilot_report: Json | null
+          autopilot_reported_at: string | null
+          autopilot_requested_by: string | null
+          autopilot_source: string | null
+          autopilot_state: string | null
+          autopilot_updated_at: string | null
           backend_required: boolean
           branch_name: string | null
           code_review_artifact_id: string | null
@@ -34995,7 +39712,11 @@ export type Database = {
           organization_id: string
           parent_job_id: string | null
           project_id: string
+          repair_risk: string | null
           requested_action: string
+          source_friction_packet_id: string | null
+          source_main_health_files: string[] | null
+          source_main_health_sha: string | null
           status: string
           target_environment: string
           target_sha: string | null
@@ -35099,6 +39820,13 @@ export type Database = {
         }
         Returns: {
           approval_required_at: string[] | null
+          autopilot_conversation_id: string | null
+          autopilot_report: Json | null
+          autopilot_reported_at: string | null
+          autopilot_requested_by: string | null
+          autopilot_source: string | null
+          autopilot_state: string | null
+          autopilot_updated_at: string | null
           backend_required: boolean
           branch_name: string | null
           code_review_artifact_id: string | null
@@ -35116,7 +39844,11 @@ export type Database = {
           organization_id: string
           parent_job_id: string | null
           project_id: string
+          repair_risk: string | null
           requested_action: string
+          source_friction_packet_id: string | null
+          source_main_health_files: string[] | null
+          source_main_health_sha: string | null
           status: string
           target_environment: string
           target_sha: string | null
@@ -35145,6 +39877,13 @@ export type Database = {
         Args: { _job_id: string }
         Returns: {
           approval_required_at: string[] | null
+          autopilot_conversation_id: string | null
+          autopilot_report: Json | null
+          autopilot_reported_at: string | null
+          autopilot_requested_by: string | null
+          autopilot_source: string | null
+          autopilot_state: string | null
+          autopilot_updated_at: string | null
           backend_required: boolean
           branch_name: string | null
           code_review_artifact_id: string | null
@@ -35162,7 +39901,11 @@ export type Database = {
           organization_id: string
           parent_job_id: string | null
           project_id: string
+          repair_risk: string | null
           requested_action: string
+          source_friction_packet_id: string | null
+          source_main_health_files: string[] | null
+          source_main_health_sha: string | null
           status: string
           target_environment: string
           target_sha: string | null
@@ -35198,6 +39941,13 @@ export type Database = {
         }
         Returns: {
           approval_required_at: string[] | null
+          autopilot_conversation_id: string | null
+          autopilot_report: Json | null
+          autopilot_reported_at: string | null
+          autopilot_requested_by: string | null
+          autopilot_source: string | null
+          autopilot_state: string | null
+          autopilot_updated_at: string | null
           backend_required: boolean
           branch_name: string | null
           code_review_artifact_id: string | null
@@ -35215,7 +39965,11 @@ export type Database = {
           organization_id: string
           parent_job_id: string | null
           project_id: string
+          repair_risk: string | null
           requested_action: string
+          source_friction_packet_id: string | null
+          source_main_health_files: string[] | null
+          source_main_health_sha: string | null
           status: string
           target_environment: string
           target_sha: string | null
@@ -35256,6 +40010,13 @@ export type Database = {
         }
         Returns: {
           approval_required_at: string[] | null
+          autopilot_conversation_id: string | null
+          autopilot_report: Json | null
+          autopilot_reported_at: string | null
+          autopilot_requested_by: string | null
+          autopilot_source: string | null
+          autopilot_state: string | null
+          autopilot_updated_at: string | null
           backend_required: boolean
           branch_name: string | null
           code_review_artifact_id: string | null
@@ -35273,7 +40034,11 @@ export type Database = {
           organization_id: string
           parent_job_id: string | null
           project_id: string
+          repair_risk: string | null
           requested_action: string
+          source_friction_packet_id: string | null
+          source_main_health_files: string[] | null
+          source_main_health_sha: string | null
           status: string
           target_environment: string
           target_sha: string | null
@@ -35316,6 +40081,13 @@ export type Database = {
         }
         Returns: {
           approval_required_at: string[] | null
+          autopilot_conversation_id: string | null
+          autopilot_report: Json | null
+          autopilot_reported_at: string | null
+          autopilot_requested_by: string | null
+          autopilot_source: string | null
+          autopilot_state: string | null
+          autopilot_updated_at: string | null
           backend_required: boolean
           branch_name: string | null
           code_review_artifact_id: string | null
@@ -35333,7 +40105,11 @@ export type Database = {
           organization_id: string
           parent_job_id: string | null
           project_id: string
+          repair_risk: string | null
           requested_action: string
+          source_friction_packet_id: string | null
+          source_main_health_files: string[] | null
+          source_main_health_sha: string | null
           status: string
           target_environment: string
           target_sha: string | null
@@ -35362,6 +40138,13 @@ export type Database = {
         Args: { _approval_id: string; _comment?: string; _decision: string }
         Returns: {
           approval_required_at: string[] | null
+          autopilot_conversation_id: string | null
+          autopilot_report: Json | null
+          autopilot_reported_at: string | null
+          autopilot_requested_by: string | null
+          autopilot_source: string | null
+          autopilot_state: string | null
+          autopilot_updated_at: string | null
           backend_required: boolean
           branch_name: string | null
           code_review_artifact_id: string | null
@@ -35379,7 +40162,11 @@ export type Database = {
           organization_id: string
           parent_job_id: string | null
           project_id: string
+          repair_risk: string | null
           requested_action: string
+          source_friction_packet_id: string | null
+          source_main_health_files: string[] | null
+          source_main_health_sha: string | null
           status: string
           target_environment: string
           target_sha: string | null
@@ -35408,6 +40195,13 @@ export type Database = {
         Args: { _approval_id: string; _comment?: string; _decision: string }
         Returns: {
           approval_required_at: string[] | null
+          autopilot_conversation_id: string | null
+          autopilot_report: Json | null
+          autopilot_reported_at: string | null
+          autopilot_requested_by: string | null
+          autopilot_source: string | null
+          autopilot_state: string | null
+          autopilot_updated_at: string | null
           backend_required: boolean
           branch_name: string | null
           code_review_artifact_id: string | null
@@ -35425,7 +40219,11 @@ export type Database = {
           organization_id: string
           parent_job_id: string | null
           project_id: string
+          repair_risk: string | null
           requested_action: string
+          source_friction_packet_id: string | null
+          source_main_health_files: string[] | null
+          source_main_health_sha: string | null
           status: string
           target_environment: string
           target_sha: string | null
@@ -35495,6 +40293,13 @@ export type Database = {
         }
         Returns: {
           approval_required_at: string[] | null
+          autopilot_conversation_id: string | null
+          autopilot_report: Json | null
+          autopilot_reported_at: string | null
+          autopilot_requested_by: string | null
+          autopilot_source: string | null
+          autopilot_state: string | null
+          autopilot_updated_at: string | null
           backend_required: boolean
           branch_name: string | null
           code_review_artifact_id: string | null
@@ -35512,7 +40317,11 @@ export type Database = {
           organization_id: string
           parent_job_id: string | null
           project_id: string
+          repair_risk: string | null
           requested_action: string
+          source_friction_packet_id: string | null
+          source_main_health_files: string[] | null
+          source_main_health_sha: string | null
           status: string
           target_environment: string
           target_sha: string | null
@@ -35547,6 +40356,13 @@ export type Database = {
         }
         Returns: {
           approval_required_at: string[] | null
+          autopilot_conversation_id: string | null
+          autopilot_report: Json | null
+          autopilot_reported_at: string | null
+          autopilot_requested_by: string | null
+          autopilot_source: string | null
+          autopilot_state: string | null
+          autopilot_updated_at: string | null
           backend_required: boolean
           branch_name: string | null
           code_review_artifact_id: string | null
@@ -35564,7 +40380,11 @@ export type Database = {
           organization_id: string
           parent_job_id: string | null
           project_id: string
+          repair_risk: string | null
           requested_action: string
+          source_friction_packet_id: string | null
+          source_main_health_files: string[] | null
+          source_main_health_sha: string | null
           status: string
           target_environment: string
           target_sha: string | null
@@ -35601,6 +40421,13 @@ export type Database = {
         }
         Returns: {
           approval_required_at: string[] | null
+          autopilot_conversation_id: string | null
+          autopilot_report: Json | null
+          autopilot_reported_at: string | null
+          autopilot_requested_by: string | null
+          autopilot_source: string | null
+          autopilot_state: string | null
+          autopilot_updated_at: string | null
           backend_required: boolean
           branch_name: string | null
           code_review_artifact_id: string | null
@@ -35618,7 +40445,11 @@ export type Database = {
           organization_id: string
           parent_job_id: string | null
           project_id: string
+          repair_risk: string | null
           requested_action: string
+          source_friction_packet_id: string | null
+          source_main_health_files: string[] | null
+          source_main_health_sha: string | null
           status: string
           target_environment: string
           target_sha: string | null
@@ -35651,14 +40482,26 @@ export type Database = {
         Args: { _lease_token: string; _run_id: string }
         Returns: Json
       }
-      builder_record_workspace_commit: {
+      builder_open_main_health_repair: {
         Args: {
-          _commit_sha: string
-          _expected_head_sha: string
-          _job_id: string
+          _failed_files: string[]
+          _health_sha: string
+          _organization_id: string
+          _parent_job_id?: string
+          _project_id: string
+          _target_sha: string
+          _task_description: string
+          _title: string
         }
         Returns: {
           approval_required_at: string[] | null
+          autopilot_conversation_id: string | null
+          autopilot_report: Json | null
+          autopilot_reported_at: string | null
+          autopilot_requested_by: string | null
+          autopilot_source: string | null
+          autopilot_state: string | null
+          autopilot_updated_at: string | null
           backend_required: boolean
           branch_name: string | null
           code_review_artifact_id: string | null
@@ -35676,7 +40519,109 @@ export type Database = {
           organization_id: string
           parent_job_id: string | null
           project_id: string
+          repair_risk: string | null
           requested_action: string
+          source_friction_packet_id: string | null
+          source_main_health_files: string[] | null
+          source_main_health_sha: string | null
+          status: string
+          target_environment: string
+          target_sha: string | null
+          task_description: string | null
+          task_run_id: string | null
+          title: string
+          total_steps: number | null
+          updated_at: string
+          workspace_branch: string | null
+          workspace_created_at: string | null
+          workspace_head_sha: string | null
+          workspace_published_at: string | null
+          workspace_published_head_sha: string | null
+          workspace_pull_request_created_at: string | null
+          workspace_pull_request_head_sha: string | null
+          workspace_pull_request_url: string | null
+        }
+        SetofOptions: {
+          from: "*"
+          to: "builder_jobs"
+          isOneToOne: true
+          isSetofReturn: false
+        }
+      }
+      builder_record_generation_failure: {
+        Args: {
+          _job_id: string
+          _reason: string
+          _retryable?: boolean
+          _step_id: string
+        }
+        Returns: {
+          artifact_ids: string[] | null
+          attempt_count: number | null
+          blocked_dependencies: string[] | null
+          blocked_reason: string | null
+          builder_mode: string
+          completed_at: string | null
+          created_at: string
+          error: string | null
+          evidence_refs: Json | null
+          id: string
+          input_context: Json | null
+          job_id: string
+          model_name: string | null
+          model_provider: string | null
+          ordinal_position: number
+          result_summary: string | null
+          retryable: boolean | null
+          started_at: string | null
+          status: string
+          step_id: string
+          updated_at: string
+        }
+        SetofOptions: {
+          from: "*"
+          to: "builder_job_steps"
+          isOneToOne: true
+          isSetofReturn: false
+        }
+      }
+      builder_record_workspace_commit: {
+        Args: {
+          _commit_sha: string
+          _expected_head_sha: string
+          _job_id: string
+        }
+        Returns: {
+          approval_required_at: string[] | null
+          autopilot_conversation_id: string | null
+          autopilot_report: Json | null
+          autopilot_reported_at: string | null
+          autopilot_requested_by: string | null
+          autopilot_source: string | null
+          autopilot_state: string | null
+          autopilot_updated_at: string | null
+          backend_required: boolean
+          branch_name: string | null
+          code_review_artifact_id: string | null
+          code_review_mode: string
+          code_review_status: string
+          created_at: string
+          created_by: string | null
+          current_step_index: number | null
+          current_step_name: string | null
+          description: string | null
+          error_count: number | null
+          frontend_required: boolean
+          id: string
+          last_error: string | null
+          organization_id: string
+          parent_job_id: string | null
+          project_id: string
+          repair_risk: string | null
+          requested_action: string
+          source_friction_packet_id: string | null
+          source_main_health_files: string[] | null
+          source_main_health_sha: string | null
           status: string
           target_environment: string
           target_sha: string | null
@@ -35705,6 +40650,13 @@ export type Database = {
         Args: { _expected_head_sha: string; _job_id: string }
         Returns: {
           approval_required_at: string[] | null
+          autopilot_conversation_id: string | null
+          autopilot_report: Json | null
+          autopilot_reported_at: string | null
+          autopilot_requested_by: string | null
+          autopilot_source: string | null
+          autopilot_state: string | null
+          autopilot_updated_at: string | null
           backend_required: boolean
           branch_name: string | null
           code_review_artifact_id: string | null
@@ -35722,7 +40674,11 @@ export type Database = {
           organization_id: string
           parent_job_id: string | null
           project_id: string
+          repair_risk: string | null
           requested_action: string
+          source_friction_packet_id: string | null
+          source_main_health_files: string[] | null
+          source_main_health_sha: string | null
           status: string
           target_environment: string
           target_sha: string | null
@@ -35755,6 +40711,13 @@ export type Database = {
         }
         Returns: {
           approval_required_at: string[] | null
+          autopilot_conversation_id: string | null
+          autopilot_report: Json | null
+          autopilot_reported_at: string | null
+          autopilot_requested_by: string | null
+          autopilot_source: string | null
+          autopilot_state: string | null
+          autopilot_updated_at: string | null
           backend_required: boolean
           branch_name: string | null
           code_review_artifact_id: string | null
@@ -35772,7 +40735,11 @@ export type Database = {
           organization_id: string
           parent_job_id: string | null
           project_id: string
+          repair_risk: string | null
           requested_action: string
+          source_friction_packet_id: string | null
+          source_main_health_files: string[] | null
+          source_main_health_sha: string | null
           status: string
           target_environment: string
           target_sha: string | null
@@ -35798,6 +40765,10 @@ export type Database = {
         }
       }
       builder_recover_expired_security_review: { Args: never; Returns: number }
+      builder_recover_expired_worker_runs: {
+        Args: { _include_active?: boolean; _reason?: string }
+        Returns: number
+      }
       builder_register_release_artifact: {
         Args: {
           _artifact_type: string
@@ -36020,10 +40991,22 @@ export type Database = {
           isSetofReturn: false
         }
       }
-      builder_set_code_review_policy: {
-        Args: { _job_id: string; _mode: string }
+      builder_retire_stale_job: {
+        Args: {
+          _details?: Json
+          _job_id: string
+          _outcome: string
+          _reason: string
+        }
         Returns: {
           approval_required_at: string[] | null
+          autopilot_conversation_id: string | null
+          autopilot_report: Json | null
+          autopilot_reported_at: string | null
+          autopilot_requested_by: string | null
+          autopilot_source: string | null
+          autopilot_state: string | null
+          autopilot_updated_at: string | null
           backend_required: boolean
           branch_name: string | null
           code_review_artifact_id: string | null
@@ -36041,7 +41024,68 @@ export type Database = {
           organization_id: string
           parent_job_id: string | null
           project_id: string
+          repair_risk: string | null
           requested_action: string
+          source_friction_packet_id: string | null
+          source_main_health_files: string[] | null
+          source_main_health_sha: string | null
+          status: string
+          target_environment: string
+          target_sha: string | null
+          task_description: string | null
+          task_run_id: string | null
+          title: string
+          total_steps: number | null
+          updated_at: string
+          workspace_branch: string | null
+          workspace_created_at: string | null
+          workspace_head_sha: string | null
+          workspace_published_at: string | null
+          workspace_published_head_sha: string | null
+          workspace_pull_request_created_at: string | null
+          workspace_pull_request_head_sha: string | null
+          workspace_pull_request_url: string | null
+        }
+        SetofOptions: {
+          from: "*"
+          to: "builder_jobs"
+          isOneToOne: true
+          isSetofReturn: false
+        }
+      }
+      builder_set_code_review_policy: {
+        Args: { _job_id: string; _mode: string }
+        Returns: {
+          approval_required_at: string[] | null
+          autopilot_conversation_id: string | null
+          autopilot_report: Json | null
+          autopilot_reported_at: string | null
+          autopilot_requested_by: string | null
+          autopilot_source: string | null
+          autopilot_state: string | null
+          autopilot_updated_at: string | null
+          backend_required: boolean
+          branch_name: string | null
+          code_review_artifact_id: string | null
+          code_review_mode: string
+          code_review_status: string
+          created_at: string
+          created_by: string | null
+          current_step_index: number | null
+          current_step_name: string | null
+          description: string | null
+          error_count: number | null
+          frontend_required: boolean
+          id: string
+          last_error: string | null
+          organization_id: string
+          parent_job_id: string | null
+          project_id: string
+          repair_risk: string | null
+          requested_action: string
+          source_friction_packet_id: string | null
+          source_main_health_files: string[] | null
+          source_main_health_sha: string | null
           status: string
           target_environment: string
           target_sha: string | null
@@ -36075,6 +41119,13 @@ export type Database = {
         }
         Returns: {
           approval_required_at: string[] | null
+          autopilot_conversation_id: string | null
+          autopilot_report: Json | null
+          autopilot_reported_at: string | null
+          autopilot_requested_by: string | null
+          autopilot_source: string | null
+          autopilot_state: string | null
+          autopilot_updated_at: string | null
           backend_required: boolean
           branch_name: string | null
           code_review_artifact_id: string | null
@@ -36092,7 +41143,11 @@ export type Database = {
           organization_id: string
           parent_job_id: string | null
           project_id: string
+          repair_risk: string | null
           requested_action: string
+          source_friction_packet_id: string | null
+          source_main_health_files: string[] | null
+          source_main_health_sha: string | null
           status: string
           target_environment: string
           target_sha: string | null
@@ -36331,6 +41386,54 @@ export type Database = {
         Args: { p_action_org_id: string; p_user_id: string }
         Returns: boolean
       }
+      can_manage_r_and_m_identity: { Args: never; Returns: boolean }
+      can_read_current_report_pack_pdf: {
+        Args: { p_object_name: string }
+        Returns: boolean
+      }
+      can_record_incident_person: {
+        Args: { p_actor?: string; p_incident_id: string }
+        Returns: boolean
+      }
+      cancel_document_source_ingestion: {
+        Args: { p_run_id: string }
+        Returns: {
+          client_request_id: string
+          completed_at: string | null
+          cursor_json: Json
+          discovered_count: number
+          duplicate_count: number
+          error_code: string | null
+          error_detail_redacted: string | null
+          excluded_count: number
+          failed_count: number
+          gap_count: number
+          hashed_count: number
+          heartbeat_at: string | null
+          id: string
+          lease_expires_at: string | null
+          lease_token: string | null
+          mode: string
+          organization_id: string
+          partial_count: number
+          phase: string
+          quarantined_count: number
+          requested_at: string
+          requested_by: string
+          source_id: string
+          started_at: string | null
+          status: string
+          supported_count: number
+          updated_at: string
+          worker_id: string | null
+        }
+        SetofOptions: {
+          from: "*"
+          to: "document_source_ingestion_runs"
+          isOneToOne: true
+          isSetofReturn: false
+        }
+      }
       cancel_shift_swap: {
         Args: { p_expected_status: string; p_reason: string; p_swap_id: string }
         Returns: {
@@ -36412,9 +41515,43 @@ export type Database = {
           isSetofReturn: false
         }
       }
+      cctv_bbox_is_stationary: {
+        Args: { p_left: Json; p_right: Json }
+        Returns: boolean
+      }
+      cctv_biometric_governance: {
+        Args: { p_organization_id: string }
+        Returns: Json
+      }
+      cctv_compact_event_array: {
+        Args: { p_events: Json; p_job_id: string; p_kind: string }
+        Returns: Json
+      }
+      cctv_compact_motion_result: {
+        Args: { p_job_id: string; p_result: Json }
+        Returns: Json
+      }
+      cctv_evidence_custody: { Args: { p_evidence_id: string }; Returns: Json }
+      cctv_inference_budget_check: {
+        Args: { p_organization_id: string }
+        Returns: Json
+      }
+      cctv_inference_default_daily_frames: { Args: never; Returns: number }
+      cctv_inference_frames_used_today: {
+        Args: { p_organization_id: string }
+        Returns: number
+      }
+      cctv_inference_usage: {
+        Args: { p_days?: number; p_organization_id: string }
+        Returns: Json
+      }
       cctv_jsonb_to_vector: {
         Args: { p_dims: number; p_embedding: Json }
         Returns: string
+      }
+      cctv_strip_candidate_images: {
+        Args: { p_candidates: Json }
+        Returns: Json
       }
       check_invite_rate_limit: {
         Args: { p_caller_id: string; p_target_org_id: string }
@@ -36447,6 +41584,45 @@ export type Database = {
           status: string
         }[]
       }
+      claim_document_source_ingestion: {
+        Args: { p_lease_seconds?: number; p_worker_id: string }
+        Returns: {
+          client_request_id: string
+          completed_at: string | null
+          cursor_json: Json
+          discovered_count: number
+          duplicate_count: number
+          error_code: string | null
+          error_detail_redacted: string | null
+          excluded_count: number
+          failed_count: number
+          gap_count: number
+          hashed_count: number
+          heartbeat_at: string | null
+          id: string
+          lease_expires_at: string | null
+          lease_token: string | null
+          mode: string
+          organization_id: string
+          partial_count: number
+          phase: string
+          quarantined_count: number
+          requested_at: string
+          requested_by: string
+          source_id: string
+          started_at: string | null
+          status: string
+          supported_count: number
+          updated_at: string
+          worker_id: string | null
+        }
+        SetofOptions: {
+          from: "*"
+          to: "document_source_ingestion_runs"
+          isOneToOne: true
+          isSetofReturn: false
+        }
+      }
       claim_first_org_user: {
         Args: {
           p_display_name: string
@@ -36456,6 +41632,16 @@ export type Database = {
           p_user_id: string
         }
         Returns: undefined
+      }
+      claim_report_pack_email_delivery: {
+        Args: {
+          p_actor_user_id: string
+          p_delivery_attempt_id: string
+          p_expected_updated_at: string
+          p_pack_id: string
+          p_requested_recipient?: string
+        }
+        Returns: Json
       }
       claim_shift_coverage: {
         Args: { p_expected_status?: string; p_request_id: string }
@@ -36534,9 +41720,35 @@ export type Database = {
           zone_id: string
         }[]
       }
+      coalesce_cctv_stationary_vehicle_observations: {
+        Args: { p_job_id: string }
+        Returns: number
+      }
+      compact_cctv_inference_results: {
+        Args: { p_limit?: number }
+        Returns: Json
+      }
+      compact_cctv_observation_thumbnail: {
+        Args: {
+          p_compacted_bytes: number
+          p_observation_id: string
+          p_original_bytes: number
+          p_thumbnail: string
+        }
+        Returns: boolean
+      }
       compare_boundaries_hausdorff: {
         Args: { p_geojson_a: string; p_geojson_b: string }
         Returns: number
+      }
+      complete_cctv_still_inference: {
+        Args: {
+          p_evidence_id: string
+          p_job_id: string
+          p_org_id: string
+          p_result: Json
+        }
+        Returns: string
       }
       complete_crm_follow_up: {
         Args: {
@@ -36603,7 +41815,12 @@ export type Database = {
         Returns: string
       }
       complete_officer_shift: {
-        Args: { p_expected_status: string; p_gps_lat?: number | null; p_gps_lng?: number | null; p_shift_id: string }
+        Args: {
+          p_expected_status: string
+          p_gps_lat?: number
+          p_gps_lng?: number
+          p_shift_id: string
+        }
         Returns: {
           completed_at: string
           shift_id: string
@@ -36685,6 +41902,114 @@ export type Database = {
           p_to_lng: number
         }
         Returns: number
+      }
+      confirm_cctv_vehicle_attributes: {
+        Args: {
+          p_action: string
+          p_body_type?: string
+          p_colour?: string
+          p_make?: string
+          p_model?: string
+          p_notes?: string
+          p_observation_id: string
+          p_request_id?: string
+          p_year?: number
+        }
+        Returns: {
+          animal_type: string | null
+          appearance_embedding: Json | null
+          appearance_vec: string | null
+          attributes: Json
+          candidate_embedding: Json | null
+          candidate_label: string | null
+          candidate_plate: string | null
+          canonical_person_id: string | null
+          canonical_place_id: string | null
+          canonical_vehicle_id: string | null
+          cctv_import_id: string | null
+          created_at: string
+          entity_kind: string
+          evidence_item_id: string
+          face_vec: string | null
+          frame_sha256: string | null
+          id: string
+          inference_job_id: string
+          is_pest: boolean | null
+          location_id: string | null
+          model_confidence: number | null
+          observed_at: string
+          observed_to: string | null
+          organization_id: string
+          person_record_id: string | null
+          portfolio_candidates: Json
+          portfolio_key: string | null
+          portfolio_state: string
+          quality_state: string
+          review_notes: string | null
+          review_state: string
+          reviewed_at: string | null
+          reviewed_by: string | null
+          site_id: string | null
+          source_event_id: string
+          species_confidence: number | null
+          thumbnail: string | null
+          zone_id: string | null
+        }
+        SetofOptions: {
+          from: "*"
+          to: "cctv_entity_observations"
+          isOneToOne: true
+          isSetofReturn: false
+        }
+      }
+      confirm_cctv_weapon_hint: {
+        Args: { p_notes?: string; p_observation_id: string; p_status: string }
+        Returns: {
+          animal_type: string | null
+          appearance_embedding: Json | null
+          appearance_vec: string | null
+          attributes: Json
+          candidate_embedding: Json | null
+          candidate_label: string | null
+          candidate_plate: string | null
+          canonical_person_id: string | null
+          canonical_place_id: string | null
+          canonical_vehicle_id: string | null
+          cctv_import_id: string | null
+          created_at: string
+          entity_kind: string
+          evidence_item_id: string
+          face_vec: string | null
+          frame_sha256: string | null
+          id: string
+          inference_job_id: string
+          is_pest: boolean | null
+          location_id: string | null
+          model_confidence: number | null
+          observed_at: string
+          observed_to: string | null
+          organization_id: string
+          person_record_id: string | null
+          portfolio_candidates: Json
+          portfolio_key: string | null
+          portfolio_state: string
+          quality_state: string
+          review_notes: string | null
+          review_state: string
+          reviewed_at: string | null
+          reviewed_by: string | null
+          site_id: string | null
+          source_event_id: string
+          species_confidence: number | null
+          thumbnail: string | null
+          zone_id: string | null
+        }
+        SetofOptions: {
+          from: "*"
+          to: "cctv_entity_observations"
+          isOneToOne: true
+          isSetofReturn: false
+        }
       }
       consume_bob_signing_nonce: {
         Args: { p_expires_at: string; p_nonce: string }
@@ -37012,6 +42337,27 @@ export type Database = {
           status: string
         }[]
       }
+      create_dispatch_job_for_place: {
+        Args: {
+          p_briefing_notes?: string
+          p_client_request_id: string
+          p_client_site_id: string
+          p_dispatch_resource_id?: string
+          p_job_type: string
+          p_organization_id: string
+          p_priority: string
+          p_service_agreement_id: string
+          p_shift_id?: string
+          p_sla_minutes: number
+          p_zone_id: string
+        }
+        Returns: {
+          created: boolean
+          id: string
+          sla_respond_by: string
+          status: string
+        }[]
+      }
       create_event_context_snapshot: {
         Args: {
           p_authority_snapshot?: Json
@@ -37052,6 +42398,39 @@ export type Database = {
         SetofOptions: {
           from: "*"
           to: "event_context_snapshots"
+          isOneToOne: true
+          isSetofReturn: false
+        }
+      }
+      create_file_folder: {
+        Args: {
+          p_client_request_id: string
+          p_name: string
+          p_organization_id: string
+          p_parent_folder_id: string
+          p_space_id: string
+        }
+        Returns: {
+          active: boolean
+          client_request_id: string | null
+          created_at: string
+          created_by: string | null
+          entity_id: string | null
+          entity_type: string | null
+          folder_key: string
+          folder_kind: string
+          id: string
+          name: string
+          organization_id: string
+          parent_folder_id: string | null
+          policy_json: Json
+          sort_order: number
+          space_id: string
+          updated_at: string
+        }
+        SetofOptions: {
+          from: "*"
+          to: "file_folders"
           isOneToOne: true
           isSetofReturn: false
         }
@@ -37354,6 +42733,7 @@ export type Database = {
           cost_centre_id: string | null
           created_at: string
           created_by: string | null
+          external_refs: Json
           id: string
           name: string
           organization_id: string
@@ -37379,6 +42759,7 @@ export type Database = {
         Args: {
           p_client_request_id: string
           p_name?: string
+          p_operating_organization_id?: string
           p_service_agreement_id: string
         }
         Returns: {
@@ -37452,6 +42833,8 @@ export type Database = {
           company_registration_number: string | null
           contact_email: string | null
           contact_phone: string | null
+          corporate_profile_source: string | null
+          corporate_profile_verification_status: string
           corporate_profile_verified_at: string | null
           corporate_profile_verified_by: string | null
           corporate_status: string | null
@@ -37465,6 +42848,7 @@ export type Database = {
           jurisdiction_verification: string
           jurisdiction_verified_at: string | null
           jurisdiction_verified_by: string | null
+          legal_name: string | null
           logo_url: string | null
           name: string
           nzbn: string | null
@@ -37472,8 +42856,12 @@ export type Database = {
           organization_level: number | null
           organization_type: string
           parent_organization_id: string | null
+          postal_address: string | null
+          registered_office: string | null
           status: string
+          trading_name: string | null
           updated_at: string
+          website_url: string | null
         }
         SetofOptions: {
           from: "*"
@@ -37544,6 +42932,7 @@ export type Database = {
           actual_start: string | null
           completed_stops: number
           created_at: string
+          ended_reason: string | null
           external_refs: Json
           generated_at: string | null
           id: string
@@ -37563,6 +42952,7 @@ export type Database = {
           shift_health: string | null
           shift_origin: string
           status: string
+          superseded_by_shift_id: string | null
           total_stops: number
           updated_at: string
           work_unit_id: string | null
@@ -37589,6 +42979,7 @@ export type Database = {
           client_request_id: string
           created_at: string
           created_by: string | null
+          external_refs: Json
           id: string
           linked_shift_id: string | null
           notes: string | null
@@ -37624,6 +43015,7 @@ export type Database = {
           cost_centre_id: string | null
           created_at: string
           created_by: string | null
+          external_refs: Json
           id: string
           name: string
           organization_id: string
@@ -37683,21 +43075,133 @@ export type Database = {
           isSetofReturn: false
         }
       }
-      create_workshop_work_order: {
+      create_workshop_work_order:
+        | {
+            Args: {
+              p_asset_id?: string
+              p_assigned_user_id?: string
+              p_bom_template_id?: string
+              p_client_organization_id?: string
+              p_client_request_id: string
+              p_client_site_id?: string
+              p_description?: string
+              p_inventory_location_id?: string
+              p_kind: string
+              p_organization_id: string
+              p_scheduled_for?: string
+              p_service_agreement_id?: string
+              p_title: string
+              p_zone_id?: string
+            }
+            Returns: {
+              asset_id: string | null
+              assigned_user_id: string | null
+              bom_template_id: string | null
+              cancelled_at: string | null
+              client_organization_id: string | null
+              client_request_id: string
+              client_site_id: string | null
+              completed_at: string | null
+              completion_note: string | null
+              created_at: string
+              created_by: string | null
+              description: string | null
+              id: string
+              inventory_location_id: string | null
+              kind: string
+              order_number: string
+              organization_id: string
+              scheduled_for: string | null
+              service_agreement_id: string | null
+              started_at: string | null
+              status: string
+              title: string
+              updated_at: string
+              updated_by: string | null
+              work_activity_code_id: string | null
+              work_subject_code_id: string | null
+              zone_id: string | null
+            }
+            SetofOptions: {
+              from: "*"
+              to: "workshop_work_orders"
+              isOneToOne: true
+              isSetofReturn: false
+            }
+          }
+        | {
+            Args: {
+              p_asset_id?: string
+              p_assigned_user_id?: string
+              p_bom_template_id?: string
+              p_client_organization_id?: string
+              p_client_request_id: string
+              p_client_site_id?: string
+              p_description?: string
+              p_inventory_location_id?: string
+              p_kind: string
+              p_organization_id: string
+              p_scheduled_for?: string
+              p_service_agreement_id?: string
+              p_title: string
+              p_work_activity_code_id: string
+              p_work_subject_code_id: string
+              p_zone_id?: string
+            }
+            Returns: {
+              asset_id: string | null
+              assigned_user_id: string | null
+              bom_template_id: string | null
+              cancelled_at: string | null
+              client_organization_id: string | null
+              client_request_id: string
+              client_site_id: string | null
+              completed_at: string | null
+              completion_note: string | null
+              created_at: string
+              created_by: string | null
+              description: string | null
+              id: string
+              inventory_location_id: string | null
+              kind: string
+              order_number: string
+              organization_id: string
+              scheduled_for: string | null
+              service_agreement_id: string | null
+              started_at: string | null
+              status: string
+              title: string
+              updated_at: string
+              updated_by: string | null
+              work_activity_code_id: string | null
+              work_subject_code_id: string | null
+              zone_id: string | null
+            }
+            SetofOptions: {
+              from: "*"
+              to: "workshop_work_orders"
+              isOneToOne: true
+              isSetofReturn: false
+            }
+          }
+      create_workshop_work_order_classified_core: {
         Args: {
-          p_asset_id?: string
-          p_assigned_user_id?: string
-          p_bom_template_id?: string
-          p_client_organization_id?: string
+          p_asset_id: string
+          p_assigned_user_id: string
+          p_bom_template_id: string
+          p_client_organization_id: string
           p_client_request_id: string
-          p_client_site_id?: string
-          p_description?: string
-          p_inventory_location_id?: string
+          p_client_site_id: string
+          p_description: string
+          p_inventory_location_id: string
           p_kind: string
           p_organization_id: string
-          p_scheduled_for?: string
-          p_service_agreement_id?: string
+          p_scheduled_for: string
+          p_service_agreement_id: string
           p_title: string
+          p_work_activity_code_id: string
+          p_work_subject_code_id: string
+          p_zone_id: string
         }
         Returns: {
           asset_id: string | null
@@ -37724,6 +43228,119 @@ export type Database = {
           title: string
           updated_at: string
           updated_by: string | null
+          work_activity_code_id: string | null
+          work_subject_code_id: string | null
+          zone_id: string | null
+        }
+        SetofOptions: {
+          from: "*"
+          to: "workshop_work_orders"
+          isOneToOne: true
+          isSetofReturn: false
+        }
+      }
+      create_workshop_work_order_classified_core_agreement_scoped: {
+        Args: {
+          p_asset_id: string
+          p_assigned_user_id: string
+          p_bom_template_id: string
+          p_client_organization_id: string
+          p_client_request_id: string
+          p_client_site_id: string
+          p_description: string
+          p_inventory_location_id: string
+          p_kind: string
+          p_organization_id: string
+          p_scheduled_for: string
+          p_service_agreement_id: string
+          p_title: string
+          p_work_activity_code_id: string
+          p_work_subject_code_id: string
+          p_zone_id: string
+        }
+        Returns: {
+          asset_id: string | null
+          assigned_user_id: string | null
+          bom_template_id: string | null
+          cancelled_at: string | null
+          client_organization_id: string | null
+          client_request_id: string
+          client_site_id: string | null
+          completed_at: string | null
+          completion_note: string | null
+          created_at: string
+          created_by: string | null
+          description: string | null
+          id: string
+          inventory_location_id: string | null
+          kind: string
+          order_number: string
+          organization_id: string
+          scheduled_for: string | null
+          service_agreement_id: string | null
+          started_at: string | null
+          status: string
+          title: string
+          updated_at: string
+          updated_by: string | null
+          work_activity_code_id: string | null
+          work_subject_code_id: string | null
+          zone_id: string | null
+        }
+        SetofOptions: {
+          from: "*"
+          to: "workshop_work_orders"
+          isOneToOne: true
+          isSetofReturn: false
+        }
+      }
+      create_workshop_work_order_classified_core_unchecked: {
+        Args: {
+          p_asset_id: string
+          p_assigned_user_id: string
+          p_bom_template_id: string
+          p_client_organization_id: string
+          p_client_request_id: string
+          p_client_site_id: string
+          p_description: string
+          p_inventory_location_id: string
+          p_kind: string
+          p_organization_id: string
+          p_scheduled_for: string
+          p_service_agreement_id: string
+          p_title: string
+          p_work_activity_code_id: string
+          p_work_subject_code_id: string
+          p_zone_id: string
+        }
+        Returns: {
+          asset_id: string | null
+          assigned_user_id: string | null
+          bom_template_id: string | null
+          cancelled_at: string | null
+          client_organization_id: string | null
+          client_request_id: string
+          client_site_id: string | null
+          completed_at: string | null
+          completion_note: string | null
+          created_at: string
+          created_by: string | null
+          description: string | null
+          id: string
+          inventory_location_id: string | null
+          kind: string
+          order_number: string
+          organization_id: string
+          scheduled_for: string | null
+          service_agreement_id: string | null
+          started_at: string | null
+          status: string
+          title: string
+          updated_at: string
+          updated_by: string | null
+          work_activity_code_id: string | null
+          work_subject_code_id: string | null
+          zone_id: string | null
         }
         SetofOptions: {
           from: "*"
@@ -37791,6 +43408,7 @@ export type Database = {
           created_at: string
           detection_bbox: Json | null
           detection_confidence: number | null
+          distance_km: number | null
           embedding: Json | null
           embedding_quality: number | null
           enforcement_exempt: boolean
@@ -37801,6 +43419,7 @@ export type Database = {
           gps_lng: number | null
           gps_point: unknown
           id: string
+          import_key: string | null
           incident_id: string | null
           is_compliant: boolean | null
           is_homeless: boolean
@@ -37814,7 +43433,7 @@ export type Database = {
           nights_this_month: number | null
           nights_this_zone: number | null
           observed_at: string
-          officer_id: string
+          officer_id: string | null
           officer_notes: string | null
           officer_notes_updated_at: string | null
           offline_queued: boolean
@@ -37826,18 +43445,24 @@ export type Database = {
           photo_url: string | null
           photo_watermark_text: string | null
           plate_confidence: number | null
-          plate_number: string
+          plate_number: string | null
           plate_source: string | null
           previous_observation_id: string | null
+          reported_by_name: string | null
           retention_hold: boolean
           retention_hold_days: number | null
           retention_reason: string | null
           retention_until: string | null
           scv_certificate_number: string | null
           site_id: string | null
+          source_document_name: string | null
+          source_locator: string | null
+          source_reference: string | null
+          source_sha256: string | null
           sticker_color: string | null
           sticker_detection_confidence: number | null
           sticker_presence: boolean | null
+          subject_kind: string
           synced_at: string | null
           vehicle_colour: string | null
           vehicle_make: string | null
@@ -37898,7 +43523,31 @@ export type Database = {
           target_table: string
         }[]
       }
+      custom_report_source_snapshot: {
+        Args: {
+          p_end_ts: string
+          p_has_entity_scope: boolean
+          p_person_ids: string[]
+          p_provider_organization_id: string
+          p_sections: string[]
+          p_service_agreement_id: string
+          p_site_ids: string[]
+          p_start_ts: string
+          p_vehicle_ids: string[]
+          p_zone_ids: string[]
+        }
+        Returns: Json
+      }
       daitch_mokotoff: { Args: { "": string }; Returns: string[] }
+      defer_cctv_inference_job: {
+        Args: {
+          p_job_id: string
+          p_lease_token: string
+          p_not_before_seconds?: number
+          p_reason: string
+        }
+        Returns: boolean
+      }
       depart_dispatch_place: {
         Args: {
           p_client_request_id: string
@@ -37914,6 +43563,7 @@ export type Database = {
           stop_id: string
         }[]
       }
+      desktop_signing_material: { Args: never; Returns: Json }
       disablelongtransactions: { Args: never; Returns: string }
       dmetaphone: { Args: { "": string }; Returns: string }
       dmetaphone_alt: { Args: { "": string }; Returns: string }
@@ -37973,6 +43623,37 @@ export type Database = {
           isSetofReturn: false
         }
       }
+      end_service_agreement: {
+        Args: { p_agreement_id: string; p_ends_on: string; p_reason: string }
+        Returns: {
+          agreement_type: string
+          allows_auto_dispatch: boolean
+          allows_client_submission: boolean
+          client_organization_id: string
+          client_portal_access_mode: string | null
+          client_portal_finance_enabled: boolean
+          client_portal_reports_enabled: boolean
+          created_at: string
+          default_share_actual_cost: boolean
+          default_share_contract_price: boolean
+          enabled_modules: string[] | null
+          ends_on: string | null
+          external_refs: Json
+          id: string
+          invitation_status: string
+          monthly_report_template_code: string | null
+          name: string
+          provider_organization_id: string
+          starts_on: string | null
+          visibility_policy: Json
+        }
+        SetofOptions: {
+          from: "*"
+          to: "service_agreements"
+          isOneToOne: true
+          isSetofReturn: false
+        }
+      }
       end_shift_break: {
         Args: { p_break_id: string; p_notes?: string }
         Returns: {
@@ -38013,6 +43694,13 @@ export type Database = {
       ensure_canonical_person_for_record: {
         Args: { p_person_record_id: string }
         Returns: string
+      }
+      ensure_canonical_person_for_staff: {
+        Args: { p_staff_profile_id: string }
+        Returns: {
+          canonical_person_id: string
+          person_record_id: string
+        }[]
       }
       ensure_canonical_place: {
         Args: {
@@ -38059,11 +43747,18 @@ export type Database = {
           person_record_id: string
         }[]
       }
-      equals: { Args: { geom1: unknown; geom2: unknown }; Returns: boolean }
-      evaluate_shift_start_position: {
-        Args: { p_gps_lat?: number | null; p_gps_lng?: number | null; p_shift_id: string }
+      ensure_crm_client_agreement: {
+        Args: {
+          p_account_organization_id: string
+          p_provider_organization_id?: string
+        }
         Returns: Json
       }
+      ensure_file_organization_tree: {
+        Args: { p_organization_id: string }
+        Returns: undefined
+      }
+      equals: { Args: { geom1: unknown; geom2: unknown }; Returns: boolean }
       evaluate_parking_compliance: {
         Args: {
           p_is_disabled_bay?: boolean
@@ -38074,9 +43769,29 @@ export type Database = {
         }
         Returns: Json
       }
+      evaluate_shift_start_position: {
+        Args: { p_gps_lat: number; p_gps_lng: number; p_shift_id: string }
+        Returns: Json
+      }
+      expire_cctv_biometric_templates: {
+        Args: {
+          p_limit?: number
+          p_organization_id?: string
+          p_retention?: string
+        }
+        Returns: Json
+      }
       face_embedding_cosine: {
         Args: { p_left: Json; p_right: Json }
         Returns: number
+      }
+      file_restricted_access_allowed: {
+        Args: { p_organization_id: string }
+        Returns: boolean
+      }
+      file_space_access_allowed: {
+        Args: { p_organization_id: string; p_sensitivity: string }
+        Returns: boolean
       }
       finalize_biosecurity_photo_inference: {
         Args: {
@@ -38093,6 +43808,8 @@ export type Database = {
           action_taken: string | null
           assessed_at: string
           assigned_reviewer_id: string | null
+          biosecurity_ai_analysis: Json | null
+          biosecurity_ai_review: Json | null
           bob_checklist: Json
           bob_classification: string | null
           bob_confidence: number | null
@@ -38138,6 +43855,7 @@ export type Database = {
           species_name: string | null
           species_review_decision: string
           status: string
+          updated_at: string
         }
         SetofOptions: {
           from: "*"
@@ -38145,6 +43863,77 @@ export type Database = {
           isOneToOne: true
           isSetofReturn: false
         }
+      }
+      finalize_patrol_import_batch: {
+        Args: { p_batch_id: string; p_receipt: Json }
+        Returns: {
+          batch_name: string
+          created_at: string
+          created_by: string
+          duplicate_count: number
+          duplicate_of_batch_id: string | null
+          id: string
+          manifest_json: Json
+          organization_id: string
+          parser: string
+          review_reason: string | null
+          reviewed_at: string | null
+          reviewed_by: string | null
+          row_count: number
+          schema_json: Json
+          source_file: string
+          source_sha256: string | null
+          status: string
+          unresolved_count: number
+          updated_at: string
+        }
+        SetofOptions: {
+          from: "*"
+          to: "file_import_batches"
+          isOneToOne: true
+          isSetofReturn: false
+        }
+      }
+      finalize_patrol_import_batch_unvalidated: {
+        Args: { p_batch_id: string; p_receipt: Json }
+        Returns: {
+          batch_name: string
+          created_at: string
+          created_by: string
+          duplicate_count: number
+          duplicate_of_batch_id: string | null
+          id: string
+          manifest_json: Json
+          organization_id: string
+          parser: string
+          review_reason: string | null
+          reviewed_at: string | null
+          reviewed_by: string | null
+          row_count: number
+          schema_json: Json
+          source_file: string
+          source_sha256: string | null
+          status: string
+          unresolved_count: number
+          updated_at: string
+        }
+        SetofOptions: {
+          from: "*"
+          to: "file_import_batches"
+          isOneToOne: true
+          isSetofReturn: false
+        }
+      }
+      finalize_report_pack_email_delivery: {
+        Args: {
+          p_actor_user_id?: string
+          p_delivery_attempt_id: string
+          p_error?: string
+          p_outcome: string
+          p_pack_id: string
+          p_sent_to?: string
+        }
+        Returns: Json
       }
       finalize_shift_coverage: {
         Args: {
@@ -38210,10 +43999,12 @@ export type Database = {
           site_id: string | null
           smoke_ai_analysis: Json | null
           smoke_ai_analyzed_at: string | null
+          smoke_ai_review: Json | null
           smoke_source: string | null
           smoke_source_type: string | null
           source_confirmed: boolean
           status: string
+          updated_at: string
         }
         SetofOptions: {
           from: "*"
@@ -38236,7 +44027,9 @@ export type Database = {
           basis: string
           canonical_place_id: string
           canonical_vehicle_id: string
+          cctv_import_id: string
           display_name: string
+          evidence_item_id: string
           last_seen_at: string
           match_id: string
           match_kind: string
@@ -38245,6 +44038,7 @@ export type Database = {
           plate_number: string
           portfolio_key: string
           score: number
+          thumbnail: string
         }[]
       }
       find_crm_location_candidates: {
@@ -38295,6 +44089,10 @@ export type Database = {
           name: string
           site_type: string
         }[]
+      }
+      find_existing_cctv_media_by_hash: {
+        Args: { p_evidence_kind: string; p_import_id: string; p_sha256: string }
+        Returns: Json
       }
       find_existing_site_for_address: {
         Args: {
@@ -38370,10 +44168,33 @@ export type Database = {
           isSetofReturn: false
         }
       }
-      generate_due_report_packs: {
-        Args: { p_period_end: string; p_period_start: string }
-        Returns: number
+      generate_custom_report_pack: {
+        Args: {
+          p_period_end: string
+          p_period_start: string
+          p_person_ids: string[]
+          p_sections: string[]
+          p_service_agreement_id: string
+          p_site_ids: string[]
+          p_title: string
+          p_vehicle_ids: string[]
+          p_zone_ids: string[]
+        }
+        Returns: Json
       }
+      generate_due_report_packs:
+        | {
+            Args: { p_period_end: string; p_period_start: string }
+            Returns: number
+          }
+        | {
+            Args: {
+              p_period_end: string
+              p_period_start: string
+              p_service_agreement_id: string
+            }
+            Returns: number
+          }
       generate_noise_job_number: { Args: never; Returns: string }
       generate_officer_activity_evidence_export: {
         Args: {
@@ -38537,7 +44358,11 @@ export type Database = {
       }
       geomfromewkt: { Args: { "": string }; Returns: unknown }
       get_agreement_service_delivery: {
-        Args: { p_agreement_id: string; p_period_end: string; p_period_start: string }
+        Args: {
+          p_agreement_id: string
+          p_period_end: string
+          p_period_start: string
+        }
         Returns: Json
       }
       get_approvals_activity: {
@@ -38681,6 +44506,38 @@ export type Database = {
         Args: { p_batch_id: string; p_organization_id: string }
         Returns: Json
       }
+      get_cctv_console_import_detail: {
+        Args: { p_import_id: string }
+        Returns: Json
+      }
+      get_cctv_face_observation_links: {
+        Args: { p_evidence_item_id: string; p_organization_id: string }
+        Returns: {
+          id: string
+          metadata: Json
+          person_record_id: string
+        }[]
+      }
+      get_cctv_oversized_thumbnails: {
+        Args: { p_limit?: number }
+        Returns: {
+          observation_id: string
+          thumbnail: string
+        }[]
+      }
+      get_cctv_review_person_records: {
+        Args: { p_organization_id: string }
+        Returns: {
+          display_name: string
+          id: string
+          metadata: Json
+          review_state: string
+        }[]
+      }
+      get_cctv_vehicle_note: {
+        Args: { p_observation_id: string }
+        Returns: string
+      }
       get_consolidated_commercial_overview: {
         Args: { p_from?: string; p_root_organization_id: string; p_to?: string }
         Returns: {
@@ -38730,12 +44587,12 @@ export type Database = {
         Args: { p_agreement_id: string }
         Returns: Json
       }
-      get_crm_obligation_proof_register: {
-        Args: { p_obligation_id: string }
-        Returns: Json
-      }
       get_crm_enterprise_readiness: {
         Args: { p_agreement_id: string }
+        Returns: Json
+      }
+      get_crm_obligation_proof_register: {
+        Args: { p_obligation_id: string }
         Returns: Json
       }
       get_crm_onboarding_assignees: {
@@ -38793,6 +44650,7 @@ export type Database = {
           agreement_name: string
           assigned_name: string
           assigned_to: string
+          client_user_count: number
           current_stage: string
           days_open: number
           has_primary_contact: boolean
@@ -38845,12 +44703,24 @@ export type Database = {
           organization_type: string
         }[]
       }
+      get_custom_report_scope_options: {
+        Args: {
+          p_period_end: string
+          p_period_start: string
+          p_service_agreement_id: string
+        }
+        Returns: Json
+      }
       get_descendant_organizations: {
         Args: { org_id: string }
         Returns: string[]
       }
       get_dispatch_job_protected_party: {
         Args: { p_dispatch_job_id: string; p_party_role?: string }
+        Returns: Json
+      }
+      get_file_explorer_tree: {
+        Args: { p_organization_id: string }
         Returns: Json
       }
       get_finance_owner_brief: { Args: never; Returns: Json }
@@ -38884,6 +44754,90 @@ export type Database = {
           zone_type: string
         }[]
       }
+      get_identity_document_types: {
+        Args: never
+        Returns: {
+          active: boolean
+          canonical_destination: string
+          category: string
+          default_authorized_activities: string[]
+          display_name: string
+          display_order: number
+          document_kind: string
+          extraction_rules: Json
+          staff_credential_type: string | null
+          strong_identity: boolean
+          supports_face_enrollment: boolean
+          updated_at: string
+        }[]
+        SetofOptions: {
+          from: "*"
+          to: "identity_document_type_definitions"
+          isOneToOne: false
+          isSetofReturn: true
+        }
+      }
+      get_identity_registry: {
+        Args: { p_limit?: number; p_organization_id: string; p_search?: string }
+        Returns: Json
+      }
+      get_identity_resolution_candidates: {
+        Args: { p_identity_document_id: string }
+        Returns: {
+          approved_identity_document_count: number
+          basis: string
+          cctv_sighting_count: number
+          confidence_label: string
+          display_name: string
+          incident_count: number
+          last_seen_at: string
+          person_record_id: string
+          review_state: string
+          score: number
+          staff_profile_id: string
+        }[]
+      }
+      get_identity_vehicle_activity: {
+        Args: {
+          p_canonical_vehicle_id: string
+          p_limit?: number
+          p_organization_id: string
+        }
+        Returns: {
+          evidence_items: Json
+          observation_id: string
+          observed_at: string
+          officer_notes: string
+          organization_id: string
+          place_name: string
+          source_document_name: string
+          source_kind: string
+          source_locator: string
+          source_reference: string
+        }[]
+      }
+      get_incident_people: {
+        Args: { p_incident_id: string }
+        Returns: {
+          canonical_person_id: string
+          created_at: string
+          display_name: string
+          involvement_role: string
+          link_id: string
+          person_record_id: string
+          review_state: string
+          source_kind: string
+          staff_profile_id: string
+        }[]
+      }
+      get_live_officer_positions: {
+        Args: {
+          p_organization_id: string
+          p_since_minutes?: number
+          p_zone_ids?: string[]
+        }
+        Returns: Json
+      }
       get_manageable_user_identities: {
         Args: { p_operating_organization_id: string }
         Returns: {
@@ -38895,6 +44849,24 @@ export type Database = {
           phone: string
           role: string
           updated_at: string
+        }[]
+      }
+      get_median_fuel_price: {
+        Args: {
+          p_as_at?: string
+          p_fuel_type: string
+          p_months?: number
+          p_organization_id: string
+        }
+        Returns: {
+          fuel_type: string
+          latest_observed_on: string
+          median_price_per_litre: number
+          observation_count: number
+          source_names: string[]
+          source_urls: string[]
+          window_end: string
+          window_start: string
         }[]
       }
       get_my_pending_proposals: {
@@ -38916,6 +44888,10 @@ export type Database = {
       }
       get_noise_attendance_report: {
         Args: { p_dispatch_job_id: string }
+        Returns: Json
+      }
+      get_nzscv_supplier_dashboard: {
+        Args: { p_limit?: number; p_offset?: number; p_search?: string }
         Returns: Json
       }
       get_officer_activity_timeline: {
@@ -39091,10 +45067,6 @@ export type Database = {
           requested_id: string
         }[]
       }
-      get_shift_end_readiness: {
-        Args: { p_shift_id: string }
-        Returns: Json
-      }
       get_shift_break_entitlement: {
         Args: { p_shift_id: string }
         Returns: {
@@ -39106,6 +45078,7 @@ export type Database = {
           worked_hours: number
         }[]
       }
+      get_shift_end_readiness: { Args: { p_shift_id: string }; Returns: Json }
       get_site_induction_state: {
         Args: { p_service_agreement_location_id: string; p_staff_id: string }
         Returns: {
@@ -39179,6 +45152,39 @@ export type Database = {
           work_status: string
         }[]
       }
+      get_vehicle_identity_checks: {
+        Args: { p_canonical_vehicle_id: string; p_organization_id: string }
+        Returns: {
+          canonical_person_id: string
+          check_id: string
+          checked_at: string
+          display_name: string
+          evidence_item_id: string
+          file_name: string
+          identity_document_id: string
+          person_record_id: string
+          relationship: string
+          reviewed_at: string
+          source_authority: string
+          storage_bucket: string
+          storage_path: string
+          vehicle_snapshot: Json
+        }[]
+      }
+      get_vehicle_subject_details_for_agreement: {
+        Args: { p_plate: string; p_service_agreement_id: string }
+        Returns: {
+          body_type: string
+          canonical_vehicle_id: string
+          colour: string
+          fuel_type: string
+          make: string
+          model: string
+          owner_identified: boolean
+          plate: string
+          year: number
+        }[]
+      }
       gettransactionid: { Args: never; Returns: unknown }
       grant_branch_area_access: {
         Args: {
@@ -39220,9 +45226,34 @@ export type Database = {
         }
         Returns: boolean
       }
+      identity_actor_can_admin: {
+        Args: { p_actor_user_id: string; p_organization_id: string }
+        Returns: boolean
+      }
       identity_role_level: { Args: { p_role: string }; Returns: number }
       import_approved_freedom_places: {
         Args: { p_places: Json }
+        Returns: Json
+      }
+      import_human_authored_trespass_notice: {
+        Args: {
+          p_import_key: string
+          p_issued_at: string
+          p_legal_basis?: string
+          p_location_id?: string
+          p_narrative?: string
+          p_notice_number?: string
+          p_organization_id: string
+          p_site_id?: string
+          p_source_author?: string
+          p_source_document_name: string
+          p_source_locator?: string
+          p_source_reference: string
+          p_source_sha256: string
+          p_status: string
+          p_subject_display_name: string
+          p_zone_id?: string
+        }
         Returns: Json
       }
       insert_adhoc_stop: {
@@ -39278,6 +45309,14 @@ export type Database = {
       is_master_for_org: { Args: { p_org_id: string }; Returns: boolean }
       is_master_or_above: { Args: never; Returns: boolean }
       is_platform_owner: { Args: { p_user_id: string }; Returns: boolean }
+      is_report_provider_custodian_for_org: {
+        Args: { p_target_organization_id: string }
+        Returns: boolean
+      }
+      is_tenant_import_admin: {
+        Args: { p_organization_id: string }
+        Returns: boolean
+      }
       is_zone_closed: {
         Args: { p_at?: string; p_zone_id: string }
         Returns: Json
@@ -39327,10 +45366,12 @@ export type Database = {
         Returns: {
           generated_at: string
           observation_count: number
+          provenance: Json
           report_id: string
           sha256: string
         }[]
       }
+      jsonb_object_length: { Args: { p_value: Json }; Returns: number }
       link_investigation_entity: {
         Args: {
           p_entity_id: string
@@ -39360,6 +45401,7 @@ export type Database = {
       link_observation_entities: {
         Args: {
           p_canonical_vehicle_id?: string
+          p_identity_basis?: string
           p_incident_id?: string
           p_location_id?: string
           p_observation_id: string
@@ -39379,6 +45421,7 @@ export type Database = {
           created_at: string
           detection_bbox: Json | null
           detection_confidence: number | null
+          distance_km: number | null
           embedding: Json | null
           embedding_quality: number | null
           enforcement_exempt: boolean
@@ -39389,6 +45432,7 @@ export type Database = {
           gps_lng: number | null
           gps_point: unknown
           id: string
+          import_key: string | null
           incident_id: string | null
           is_compliant: boolean | null
           is_homeless: boolean
@@ -39402,7 +45446,7 @@ export type Database = {
           nights_this_month: number | null
           nights_this_zone: number | null
           observed_at: string
-          officer_id: string
+          officer_id: string | null
           officer_notes: string | null
           officer_notes_updated_at: string | null
           offline_queued: boolean
@@ -39414,18 +45458,24 @@ export type Database = {
           photo_url: string | null
           photo_watermark_text: string | null
           plate_confidence: number | null
-          plate_number: string
+          plate_number: string | null
           plate_source: string | null
           previous_observation_id: string | null
+          reported_by_name: string | null
           retention_hold: boolean
           retention_hold_days: number | null
           retention_reason: string | null
           retention_until: string | null
           scv_certificate_number: string | null
           site_id: string | null
+          source_document_name: string | null
+          source_locator: string | null
+          source_reference: string | null
+          source_sha256: string | null
           sticker_color: string | null
           sticker_detection_confidence: number | null
           sticker_presence: boolean | null
+          subject_kind: string
           synced_at: string | null
           vehicle_colour: string | null
           vehicle_make: string | null
@@ -39449,6 +45499,121 @@ export type Database = {
           id: string
           organization_id: string
           role: string
+        }[]
+      }
+      list_person_subject_history_for_agreement: {
+        Args: {
+          p_canonical_person_id: string
+          p_limit?: number
+          p_service_agreement_id: string
+        }
+        Returns: {
+          evidence_item_id: string
+          note: string
+          observed_at: string
+          organization_id: string
+          place_id: string
+          plate: string
+          record_id: string
+          source: string
+        }[]
+      }
+      list_repeat_person_subjects_for_agreement: {
+        Args: {
+          p_from?: string
+          p_limit?: number
+          p_min_sightings?: number
+          p_offset?: number
+          p_service_agreement_id: string
+          p_to?: string
+        }
+        Returns: {
+          canonical_person_id: string
+          cctv_sightings: number
+          display_name: string
+          first_seen: string
+          last_seen: string
+          patrol_sightings: number
+          places: number
+          sightings: number
+          total_count: number
+        }[]
+      }
+      list_repeat_vehicle_subjects_for_agreement: {
+        Args: {
+          p_from?: string
+          p_limit?: number
+          p_min_sightings?: number
+          p_offset?: number
+          p_service_agreement_id: string
+          p_to?: string
+        }
+        Returns: {
+          cctv_sightings: number
+          first_seen: string
+          last_seen: string
+          officers: number
+          owner_identified: boolean
+          patrol_sightings: number
+          places: number
+          plate: string
+          sightings: number
+          total_count: number
+        }[]
+      }
+      list_unlinked_plate_mentions_for_agreement: {
+        Args: {
+          p_from?: string
+          p_limit?: number
+          p_offset?: number
+          p_service_agreement_id: string
+          p_to?: string
+        }
+        Returns: {
+          first_seen: string
+          last_seen: string
+          mentions: number
+          plate: string
+          total_count: number
+        }[]
+      }
+      list_vehicle_subject_history_for_agreement: {
+        Args: {
+          p_limit?: number
+          p_plate: string
+          p_service_agreement_id: string
+        }
+        Returns: {
+          canonical_vehicle_id: string
+          compliance_reason: string
+          compliance_status: string
+          evidence_item_id: string
+          note: string
+          observed_at: string
+          officer_id: string
+          organization_id: string
+          photo_url: string
+          place_id: string
+          record_id: string
+          source: string
+        }[]
+      }
+      list_vehicle_subject_identifications: {
+        Args: { p_plate: string; p_service_agreement_id: string }
+        Returns: {
+          canonical_person_id: string
+          display_name: string
+          identification_basis: string
+          linked_at: string
+          person_record_id: string
+        }[]
+      }
+      list_verified_person_projections_for_organization: {
+        Args: { p_organization_id: string }
+        Returns: {
+          canonical_person_id: string
+          display_name: string
+          id: string
         }[]
       }
       lock_cctv_evidence: {
@@ -39690,6 +45855,26 @@ export type Database = {
           isSetofReturn: false
         }
       }
+      manage_crm_agreement_delivery_schedule: {
+        Args: {
+          p_action: string
+          p_active_days?: number[]
+          p_agreement_id: string
+          p_client_request_id: string
+          p_dwell_minutes?: number
+          p_min_gap_between_visits_minutes?: number
+          p_module_key?: string
+          p_officer_instructions?: string
+          p_operating_organization_id?: string
+          p_schedule_id?: string
+          p_site_id?: string
+          p_visits_per_shift?: number
+          p_window_end?: string
+          p_window_start?: string
+          p_zone_id?: string
+        }
+        Returns: Json
+      }
       manage_crm_agreement_finance: {
         Args: {
           p_agreement_id: string
@@ -39715,19 +45900,6 @@ export type Database = {
           p_requires_proof?: boolean
           p_site_id?: string
           p_sla_target_minutes?: number
-        }
-        Returns: Json
-      }
-      manage_crm_obligation_proof: {
-        Args: {
-          p_action: string
-          p_artifact_id?: string
-          p_client_request_id: string
-          p_expected_updated_at?: string
-          p_notes?: string
-          p_obligation_id: string
-          p_source_record_id?: string
-          p_withdrawal_reason?: string
         }
         Returns: Json
       }
@@ -39895,6 +46067,19 @@ export type Database = {
           isSetofReturn: false
         }
       }
+      manage_crm_obligation_proof: {
+        Args: {
+          p_action: string
+          p_artifact_id?: string
+          p_client_request_id: string
+          p_expected_updated_at?: string
+          p_notes?: string
+          p_obligation_id: string
+          p_source_record_id?: string
+          p_withdrawal_reason?: string
+        }
+        Returns: Json
+      }
       manage_crm_onboarding_stage: {
         Args: {
           p_account_organization_id: string
@@ -39983,6 +46168,8 @@ export type Database = {
           company_registration_number: string | null
           contact_email: string | null
           contact_phone: string | null
+          corporate_profile_source: string | null
+          corporate_profile_verification_status: string
           corporate_profile_verified_at: string | null
           corporate_profile_verified_by: string | null
           corporate_status: string | null
@@ -39996,6 +46183,7 @@ export type Database = {
           jurisdiction_verification: string
           jurisdiction_verified_at: string | null
           jurisdiction_verified_by: string | null
+          legal_name: string | null
           logo_url: string | null
           name: string
           nzbn: string | null
@@ -40003,8 +46191,12 @@ export type Database = {
           organization_level: number | null
           organization_type: string
           parent_organization_id: string | null
+          postal_address: string | null
+          registered_office: string | null
           status: string
+          trading_name: string | null
           updated_at: string
+          website_url: string | null
         }
         SetofOptions: {
           from: "*"
@@ -40032,6 +46224,8 @@ export type Database = {
           company_registration_number: string | null
           contact_email: string | null
           contact_phone: string | null
+          corporate_profile_source: string | null
+          corporate_profile_verification_status: string
           corporate_profile_verified_at: string | null
           corporate_profile_verified_by: string | null
           corporate_status: string | null
@@ -40045,6 +46239,7 @@ export type Database = {
           jurisdiction_verification: string
           jurisdiction_verified_at: string | null
           jurisdiction_verified_by: string | null
+          legal_name: string | null
           logo_url: string | null
           name: string
           nzbn: string | null
@@ -40052,8 +46247,12 @@ export type Database = {
           organization_level: number | null
           organization_type: string
           parent_organization_id: string | null
+          postal_address: string | null
+          registered_office: string | null
           status: string
+          trading_name: string | null
           updated_at: string
+          website_url: string | null
         }
         SetofOptions: {
           from: "*"
@@ -40445,6 +46644,7 @@ export type Database = {
           nightly_limit_monthly: number | null
           onsite_profile: string
           organization_id: string
+          parent_zone_id: string | null
           parking_disabled_multiplier: number
           parking_limit_set_at: string | null
           parking_limit_set_by: string | null
@@ -40566,6 +46766,7 @@ export type Database = {
           status: string
           timing_source: string
           work_unit_id: string | null
+          zone_id: string | null
         }
         SetofOptions: {
           from: "*"
@@ -40653,6 +46854,38 @@ export type Database = {
         }
         Returns: Json
       }
+      manage_fuel_price_source: {
+        Args: {
+          p_action: string
+          p_client_request_id: string
+          p_fuel_type?: string
+          p_name?: string
+          p_organization_id: string
+          p_refresh_guidance?: string
+          p_source_id?: string
+          p_source_url?: string
+        }
+        Returns: {
+          active: boolean
+          approved_at: string
+          approved_by: string | null
+          created_at: string
+          fuel_type: string
+          id: string
+          name: string
+          organization_id: string
+          refresh_guidance: string | null
+          retired_at: string | null
+          source_url: string
+          updated_at: string
+        }
+        SetofOptions: {
+          from: "*"
+          to: "fuel_price_sources"
+          isOneToOne: true
+          isSetofReturn: false
+        }
+      }
       manage_hr_case: {
         Args: {
           p_action: string
@@ -40689,6 +46922,36 @@ export type Database = {
           isOneToOne: true
           isSetofReturn: false
         }
+      }
+      manage_identity_person: {
+        Args: {
+          p_action: string
+          p_fields: Json
+          p_organization_id: string
+          p_person_record_id: string
+          p_reason: string
+        }
+        Returns: Json
+      }
+      manage_identity_person_record: {
+        Args: {
+          p_action: string
+          p_fields: Json
+          p_organization_id: string
+          p_person_record_id: string
+          p_reason: string
+        }
+        Returns: Json
+      }
+      manage_identity_vehicle: {
+        Args: {
+          p_fields: Json
+          p_organization_id: string
+          p_plate: string
+          p_reason: string
+          p_vehicle_id: string
+        }
+        Returns: Json
       }
       manage_location_module_assignment: {
         Args: {
@@ -40821,8 +47084,8 @@ export type Database = {
           p_priority?: number
           p_rate_rule_id?: string
           p_rate_type?: string
-          p_rule_kind?: string
           p_role_code?: string
+          p_rule_kind?: string
           p_service_type?: string
           p_site_id?: string
           p_zone_id?: string
@@ -40867,35 +47130,6 @@ export type Database = {
           isSetofReturn: false
         }
       }
-      manage_pay_role_code: {
-        Args: {
-          p_action: string
-          p_code?: string
-          p_name?: string
-          p_role_code_id?: string
-        }
-        Returns: {
-          code: string
-          code_type: string
-          created_at: string
-          created_by: string | null
-          description: string | null
-          external_refs: Json
-          id: string
-          is_active: boolean
-          item_category: string | null
-          name: string
-          organization_id: string
-          parent_code: string | null
-          region_code: string | null
-          service_type: string | null
-          sort_order: number
-          unit: string | null
-          updated_at: string
-          updated_by: string | null
-          default_rate: number | null
-        }
-      }
       manage_org_printer_settings: {
         Args: {
           p_connection_type: string
@@ -40903,6 +47137,29 @@ export type Database = {
           p_paper_width: string
         }
         Returns: Json
+      }
+      manage_organization_fatigue_rules: {
+        Args: {
+          p_enforced?: boolean
+          p_max_consecutive_days: number
+          p_max_hours_per_week: number
+          p_min_rest_hours_between_shifts: number
+          p_organization_id: string
+        }
+        Returns: {
+          enforced: boolean
+          max_consecutive_days: number
+          max_hours_per_week: number
+          min_rest_hours_between_shifts: number
+          organization_id: string
+          updated_at: string
+        }
+        SetofOptions: {
+          from: "*"
+          to: "organization_fatigue_rules"
+          isOneToOne: true
+          isSetofReturn: false
+        }
       }
       manage_parking_zone_rule: {
         Args: {
@@ -40941,6 +47198,7 @@ export type Database = {
           nightly_limit_monthly: number | null
           onsite_profile: string
           organization_id: string
+          parent_zone_id: string | null
           parking_disabled_multiplier: number
           parking_limit_set_at: string | null
           parking_limit_set_by: string | null
@@ -40990,6 +47248,72 @@ export type Database = {
           name: string
           radius_meters: number
         }[]
+      }
+      manage_patrol_sla_discount_band: {
+        Args: {
+          p_action: string
+          p_band_id?: string
+          p_discount_pct?: number
+          p_expected_updated_at?: string
+          p_organization_id: string
+          p_over_by_minutes_max?: number
+          p_over_by_minutes_min?: number
+          p_service_type?: string
+        }
+        Returns: {
+          active: boolean
+          created_at: string
+          discount_pct: number
+          id: string
+          module_key: string | null
+          organization_id: string
+          over_by_minutes_max: number | null
+          over_by_minutes_min: number
+          service_type: string | null
+          updated_at: string
+          updated_by: string | null
+        }
+        SetofOptions: {
+          from: "*"
+          to: "sla_discount_bands"
+          isOneToOne: true
+          isSetofReturn: false
+        }
+      }
+      manage_pay_role_code: {
+        Args: {
+          p_action: string
+          p_code?: string
+          p_name?: string
+          p_role_code_id?: string
+        }
+        Returns: {
+          code: string
+          code_type: string
+          created_at: string
+          created_by: string | null
+          default_rate: number | null
+          description: string | null
+          external_refs: Json
+          id: string
+          is_active: boolean
+          item_category: string | null
+          name: string
+          organization_id: string
+          parent_code: string | null
+          region_code: string | null
+          service_type: string | null
+          sort_order: number
+          unit: string | null
+          updated_at: string
+          updated_by: string | null
+        }
+        SetofOptions: {
+          from: "*"
+          to: "reference_codes"
+          isOneToOne: true
+          isSetofReturn: false
+        }
       }
       manage_performance_review_cycle: {
         Args: {
@@ -41283,40 +47607,18 @@ export type Database = {
         }[]
       }
       manage_roster_work_unit_skill_ids: {
-        Args: { p_required_skill_ids: string[]; p_work_unit_id: string }
+        Args: {
+          p_client_request_id: string
+          p_expected_updated_at: string
+          p_required_skill_ids: string[]
+          p_work_unit_id: string
+        }
         Returns: {
           active: boolean
           cost_centre_id: string | null
           created_at: string
           created_by: string | null
-          id: string
-          name: string
-          organization_id: string
-          patrol_route_id: string | null
-          required_skill_ids: string[]
-          required_skill_names: string[]
-          service_agreement_location_id: string | null
-          service_agreement_module_id: string | null
-          service_type: string
-          team_id: string | null
-          updated_at: string
-          work_unit_type: string
-          workplace_id: string | null
-        }
-        SetofOptions: {
-          from: "*"
-          to: "roster_work_units"
-          isOneToOne: true
-          isSetofReturn: false
-        }
-      }
-      manage_roster_work_unit_skill_requirements: {
-        Args: { p_required_skill_names: string[]; p_work_unit_id: string }
-        Returns: {
-          active: boolean
-          cost_centre_id: string | null
-          created_at: string
-          created_by: string | null
+          external_refs: Json
           id: string
           name: string
           organization_id: string
@@ -41488,10 +47790,12 @@ export type Database = {
           site_id: string | null
           smoke_ai_analysis: Json | null
           smoke_ai_analyzed_at: string | null
+          smoke_ai_review: Json | null
           smoke_source: string | null
           smoke_source_type: string | null
           source_confirmed: boolean
           status: string
+          updated_at: string
         }
         SetofOptions: {
           from: "*"
@@ -41687,6 +47991,66 @@ export type Database = {
           isSetofReturn: false
         }
       }
+      manage_zone_active_schedule: {
+        Args: {
+          p_days?: number[]
+          p_end?: string
+          p_expected_version: number
+          p_months?: number[]
+          p_start?: string
+          p_zone_id: string
+        }
+        Returns: {
+          active_schedule: Json | null
+          boundary: unknown
+          boundary_status: string
+          boundary_verification: string
+          boundary_verified_at: string | null
+          boundary_verified_by: string | null
+          bylaw_clause: string | null
+          bylaw_source_url: string | null
+          center_point: unknown
+          configuration_version: number
+          created_at: string
+          despatch_zone_code: string | null
+          enforcement_workflow_override: string | null
+          external_ref: string | null
+          id: string
+          internal_client_ref: string | null
+          is_active: boolean
+          is_adhoc: boolean
+          jurisdiction_rule_set_id: string | null
+          location_id: string
+          metadata: Json
+          module_key: string
+          name: string
+          nightly_limit_consecutive: number | null
+          nightly_limit_monthly: number | null
+          onsite_profile: string
+          organization_id: string
+          parent_zone_id: string | null
+          parking_disabled_multiplier: number
+          parking_limit_set_at: string | null
+          parking_limit_set_by: string | null
+          parking_limit_source: string | null
+          parking_signage_photo_url: string | null
+          parking_time_limit_minutes: number | null
+          radius_meters: number | null
+          repeat_stay_radius_m: number | null
+          repeat_stay_window_nights: number | null
+          rule_overrides: Json | null
+          rule_type: string
+          scv_exempts_restriction: boolean
+          scv_required: boolean
+          zone_type: string
+        }
+        SetofOptions: {
+          from: "*"
+          to: "location_zones"
+          isOneToOne: true
+          isSetofReturn: false
+        }
+      }
       match_finance_bank_statement_line: {
         Args: { p_payment_receipt_id: string; p_statement_line_id: string }
         Returns: {
@@ -41745,6 +48109,33 @@ export type Database = {
       merge_canonical_place: {
         Args: { p_from: string; p_into: string }
         Returns: undefined
+      }
+      move_document_to_folder: {
+        Args: {
+          p_client_request_id: string
+          p_document_id: string
+          p_folder_id: string
+          p_organization_id: string
+          p_space_id: string
+        }
+        Returns: {
+          client_request_id: string | null
+          document_id: string
+          folder_id: string | null
+          id: string
+          is_primary: boolean
+          organization_id: string
+          placed_at: string
+          placed_by: string | null
+          removed_at: string | null
+          space_id: string
+        }
+        SetofOptions: {
+          from: "*"
+          to: "document_placements"
+          isOneToOne: true
+          isSetofReturn: false
+        }
       }
       my_entitled_org_ids: { Args: never; Returns: string[] }
       my_entitled_org_ids_for_user: {
@@ -41828,6 +48219,19 @@ export type Database = {
       patrol_stop_module_keys: {
         Args: { p_stop_id: string }
         Returns: string[]
+      }
+      patrol_window_bounds: {
+        Args: {
+          p_shift_date: string
+          p_shift_end: string
+          p_shift_start: string
+          p_window_end: string
+          p_window_start: string
+        }
+        Returns: {
+          window_close: string
+          window_open: string
+        }[]
       }
       platform_list_subscribers: {
         Args: never
@@ -41958,6 +48362,15 @@ export type Database = {
       }
       postgis_version: { Args: never; Returns: string }
       postgis_wagyu_version: { Args: never; Returns: string }
+      prepare_cctv_media_upload: {
+        Args: {
+          p_evidence_kind: string
+          p_import_id: string
+          p_sha256: string
+          p_storage_path: string
+        }
+        Returns: Json
+      }
       prepare_crm_client_invitation: {
         Args: { p_account_organization_id: string }
         Returns: Json
@@ -42057,8 +48470,13 @@ export type Database = {
           unassigned_count: number
         }[]
       }
-      preview_work_unit_coverage: {
-        Args: { p_shift_date: string; p_work_unit_id: string }
+      preview_roster_assignment: {
+        Args: {
+          p_exclude_slot_id?: string
+          p_scheduled_end: string
+          p_scheduled_start: string
+          p_staff_id: string
+        }
         Returns: Json
       }
       preview_roster_from_templates: {
@@ -42073,6 +48491,30 @@ export type Database = {
           new_slots: number
           templates_applied: number
         }[]
+      }
+      preview_work_unit_coverage: {
+        Args: {
+          p_scheduled_end?: string
+          p_scheduled_start?: string
+          p_shift_date: string
+          p_work_unit_id: string
+        }
+        Returns: Json
+      }
+      project_historical_patrol_roster: {
+        Args: {
+          p_client_organization_id: string
+          p_client_request_id: string
+          p_link_missing_agreement_locations?: boolean
+          p_provider_organization_id: string
+          p_routes: Json
+          p_source_codes: string[]
+        }
+        Returns: Json
+      }
+      promote_approved_rnm_vehicle_mentions: {
+        Args: { p_provider_organization_id: string }
+        Returns: Json
       }
       promote_document_to_reference_library: {
         Args: {
@@ -42261,6 +48703,38 @@ export type Database = {
           triggered_at: string
         }[]
       }
+      raise_scoped_person_interest_flag: {
+        Args: {
+          p_alert_level: string
+          p_canonical_person_id: string
+          p_client_request_id: string
+          p_organization_id: string
+          p_reason: string
+        }
+        Returns: {
+          active: boolean
+          alert_level: string | null
+          client_request_id: string | null
+          created_at: string
+          entity_id: string
+          entity_type: string
+          flag_type: string
+          hazard_class: string | null
+          id: string
+          organization_id: string
+          raised_at: string
+          raised_by: string | null
+          reason: string | null
+          resolved_at: string | null
+          resolved_by: string | null
+        }
+        SetofOptions: {
+          from: "*"
+          to: "entity_flags"
+          isOneToOne: true
+          isSetofReturn: false
+        }
+      }
       reassign_roster_slot: {
         Args: {
           p_expected_status: string
@@ -42283,6 +48757,10 @@ export type Database = {
           scanned_rows: number
           unresolved_rows: number
         }[]
+      }
+      record_access_control_perception_envelope: {
+        Args: { p_access_control_event_id: string }
+        Returns: Json
       }
       record_akahu_import: {
         Args: {
@@ -42320,6 +48798,76 @@ export type Database = {
           isSetofReturn: false
         }
       }
+      record_alarm_signal: {
+        Args: {
+          p_account_number?: string
+          p_dispatch_job_id: string
+          p_intake_channel: string
+          p_notes?: string
+          p_panel_id?: string
+          p_received_at: string
+          p_signal_type: string
+          p_zone_name?: string
+          p_zone_number?: string
+        }
+        Returns: {
+          account_number: string | null
+          created_at: string
+          dispatch_job_id: string | null
+          id: string
+          intake_channel: string | null
+          location_name: string | null
+          notes: string | null
+          organization_id: string
+          panel_id: string | null
+          received_at: string
+          recorded_by: string | null
+          signal_type: string
+          site_id: string | null
+          zone_name: string | null
+          zone_number: string | null
+        }
+        SetofOptions: {
+          from: "*"
+          to: "alarm_events"
+          isOneToOne: true
+          isSetofReturn: false
+        }
+      }
+      record_approved_fuel_price_observation: {
+        Args: {
+          p_client_request_id: string
+          p_observed_on: string
+          p_organization_id: string
+          p_price_per_litre: number
+          p_source_hash?: string
+          p_source_id: string
+          p_source_published_at?: string
+          p_source_reference?: string
+          p_source_url: string
+        }
+        Returns: {
+          created_at: string
+          created_by: string | null
+          fuel_type: string
+          id: string
+          observed_on: string
+          organization_id: string
+          price_per_litre: number
+          source_hash: string | null
+          source_id: string | null
+          source_name: string
+          source_published_at: string | null
+          source_reference: string | null
+          source_url: string
+        }
+        SetofOptions: {
+          from: "*"
+          to: "fuel_price_observations"
+          isOneToOne: true
+          isSetofReturn: false
+        }
+      }
       record_asset_check: {
         Args: {
           p_action_required?: string
@@ -42350,6 +48898,14 @@ export type Database = {
           isOneToOne: true
           isSetofReturn: false
         }
+      }
+      record_biosecurity_photo_perception_envelope: {
+        Args: { p_assessment_id: string; p_classification: Json }
+        Returns: Json
+      }
+      record_biosecurity_photo_perception_envelope_v1_unchecked: {
+        Args: { p_assessment_id: string; p_classification: Json }
+        Returns: Json
       }
       record_callout_milestone: {
         Args: {
@@ -42382,6 +48938,14 @@ export type Database = {
           isOneToOne: true
           isSetofReturn: false
         }
+      }
+      record_cctv_alpr_perception_envelopes: {
+        Args: { p_job_id: string }
+        Returns: Json
+      }
+      record_cctv_alpr_perception_envelopes_unchecked: {
+        Args: { p_job_id: string }
+        Returns: Json
       }
       record_cctv_device_events: {
         Args: { p_events: Json; p_import_id: string }
@@ -42438,6 +49002,27 @@ export type Database = {
           isOneToOne: true
           isSetofReturn: false
         }
+      }
+      record_cctv_inference_usage: {
+        Args: { p_job_id: string; p_usage: Json }
+        Returns: Json
+      }
+      record_cctv_integrity_check: {
+        Args: {
+          p_checked_by?: string
+          p_evidence_id: string
+          p_sha256_observed: string
+          p_size_bytes?: number
+        }
+        Returns: Json
+      }
+      record_cctv_observation_derivatives: {
+        Args: { p_derivatives: Json; p_job_id: string }
+        Returns: number
+      }
+      record_cctv_person_perception_envelopes: {
+        Args: { p_job_id: string }
+        Returns: Json
       }
       record_cctv_review_decision: {
         Args: {
@@ -42542,9 +49127,23 @@ export type Database = {
           isSetofReturn: false
         }
       }
+      record_cctv_scene_synopsis: {
+        Args: {
+          p_evidence_id: string
+          p_job_id: string
+          p_metadata?: Json
+          p_organization_id: string
+          p_summary: string
+        }
+        Returns: string
+      }
       record_cctv_source_hash: {
         Args: { p_evidence_id: string; p_sha256: string; p_size_bytes?: number }
         Returns: boolean
+      }
+      record_cctv_vehicle_attribute_perception_envelopes: {
+        Args: { p_job_id: string }
+        Returns: Json
       }
       record_court_appearance_outcome: {
         Args: {
@@ -42710,6 +49309,53 @@ export type Database = {
           isSetofReturn: false
         }
       }
+      record_fuel_price_observation: {
+        Args: {
+          p_client_request_id: string
+          p_fuel_type: string
+          p_observed_on: string
+          p_organization_id: string
+          p_price_per_litre: number
+          p_source_hash?: string
+          p_source_name: string
+          p_source_published_at?: string
+          p_source_reference?: string
+          p_source_url: string
+        }
+        Returns: {
+          created_at: string
+          created_by: string | null
+          fuel_type: string
+          id: string
+          observed_on: string
+          organization_id: string
+          price_per_litre: number
+          source_hash: string | null
+          source_id: string | null
+          source_name: string
+          source_published_at: string | null
+          source_reference: string | null
+          source_url: string
+        }
+        SetofOptions: {
+          from: "*"
+          to: "fuel_price_observations"
+          isOneToOne: true
+          isSetofReturn: false
+        }
+      }
+      record_incident_person_identity: {
+        Args: {
+          p_display_name?: string
+          p_identity_document_id?: string
+          p_incident_id: string
+          p_involvement_role: string
+          p_notes: string
+          p_person_record_id?: string
+          p_staff_profile_id?: string
+        }
+        Returns: Json
+      }
       record_job_party_interaction: {
         Args: {
           p_client_request_id: string
@@ -42746,6 +49392,10 @@ export type Database = {
           end_recipient_role: string
           entry_notice_left: boolean
         }[]
+      }
+      record_noise_photo_perception_envelope: {
+        Args: { p_assessment_id: string; p_classification: Json }
+        Returns: Json
       }
       record_officer_breadcrumb: {
         Args: {
@@ -42849,6 +49499,22 @@ export type Database = {
           isSetofReturn: false
         }
       }
+      record_perception_evidence_envelope: {
+        Args: {
+          p_attachment_id: string
+          p_idempotency_key: string
+          p_payload: Json
+        }
+        Returns: string
+      }
+      record_perception_evidence_envelope_unchecked: {
+        Args: {
+          p_attachment_id: string
+          p_idempotency_key: string
+          p_payload: Json
+        }
+        Returns: string
+      }
       record_radio_transcript_segment: {
         Args: {
           p_confidence?: number
@@ -42862,6 +49528,42 @@ export type Database = {
           segment_id: string
           sequence: number
           transmission_id: string
+        }[]
+      }
+      record_report_pack_pdf: {
+        Args: {
+          p_actor_user_id: string
+          p_expected_updated_at: string
+          p_pack_id: string
+          p_pdf_path: string
+          p_pdf_sha256: string
+          p_renderer_version: string
+        }
+        Returns: Json
+      }
+      record_smoke_photo_perception_envelope: {
+        Args: { p_assessment_id: string; p_classification: Json }
+        Returns: Json
+      }
+      record_staff_credential: {
+        Args: {
+          p_authorized_activities?: string[]
+          p_client_request_id: string
+          p_credential_number?: string
+          p_credential_type: string
+          p_evidence_notes?: string
+          p_expiry_date?: string
+          p_issued_date?: string
+          p_issuing_authority?: string
+          p_staff_id: string
+          p_verified?: boolean
+        }
+        Returns: {
+          created: boolean
+          credential_id: string
+          staff_id: string
+          verified: boolean
+          verified_at: string
         }[]
       }
       recover_stale_cctv_inference_jobs: { Args: never; Returns: number }
@@ -42880,6 +49582,22 @@ export type Database = {
         Args: { p_attachment_id: string }
         Returns: string
       }
+      register_cctv_import_photo: {
+        Args: {
+          p_capture_time_source?: string
+          p_captured_at?: string
+          p_content_type?: string
+          p_file_name: string
+          p_file_size_bytes: number
+          p_height?: number
+          p_import_id: string
+          p_sha256?: string
+          p_source_ref?: string
+          p_storage_path: string
+          p_width?: number
+        }
+        Returns: Json
+      }
       register_cctv_import_video: {
         Args: {
           p_content_type?: string
@@ -42891,6 +49609,21 @@ export type Database = {
           p_sha256?: string
           p_source_ref?: string
           p_storage_path: string
+        }
+        Returns: Json
+      }
+      register_deterministic_identity_document_proposal: {
+        Args: {
+          p_actor_user_id: string
+          p_attachment_id: string
+          p_document_kind: string
+          p_face_confidence?: number
+          p_face_count?: number
+          p_face_embedding?: Json
+          p_organization_id: string
+          p_person_record_id: string
+          p_proposed_fields: Json
+          p_sha256: string
         }
         Returns: Json
       }
@@ -42925,6 +49658,34 @@ export type Database = {
           sha256_hash: string
           storage_path: string
         }[]
+      }
+      register_identity_document_proposal: {
+        Args: {
+          p_actor_user_id: string
+          p_attachment_id: string
+          p_document_kind: string
+          p_face_confidence?: number
+          p_face_count?: number
+          p_face_embedding?: Json
+          p_organization_id: string
+          p_person_record_id: string
+          p_proposed_fields: Json
+          p_sha256: string
+        }
+        Returns: Json
+      }
+      register_incident_identity_attachment: {
+        Args: {
+          p_attachment_id: string
+          p_document_kind: string
+          p_file_name: string
+          p_file_size_bytes: number
+          p_file_type: string
+          p_incident_id: string
+          p_person_record_id: string
+          p_storage_path: string
+        }
+        Returns: Json
       }
       register_officer_device_token: {
         Args: {
@@ -43018,27 +49779,6 @@ export type Database = {
           total_cost: number
         }[]
       }
-      record_staff_credential: {
-        Args: {
-          p_authorized_activities?: string[]
-          p_client_request_id: string
-          p_credential_number?: string | null
-          p_credential_type: string
-          p_evidence_notes?: string | null
-          p_expiry_date?: string | null
-          p_issued_date?: string | null
-          p_issuing_authority?: string | null
-          p_staff_id: string
-          p_verified?: boolean
-        }
-        Returns: {
-          created: boolean
-          credential_id: string
-          staff_id: string
-          verified: boolean
-          verified_at: string | null
-        }[]
-      }
       remove_workshop_work_order_line: {
         Args: { p_line_id: string; p_work_order_id: string }
         Returns: undefined
@@ -43073,6 +49813,10 @@ export type Database = {
           leave_conflict_count: number
           skipped_conflict_count: number
         }[]
+      }
+      report_provider_custodian_for_actor: {
+        Args: { p_actor_user_id: string; p_target_organization_id: string }
+        Returns: boolean
       }
       request_anz_bank_connection: {
         Args: {
@@ -43146,6 +49890,49 @@ export type Database = {
         SetofOptions: {
           from: "*"
           to: "bob_generated_document_outputs"
+          isOneToOne: true
+          isSetofReturn: false
+        }
+      }
+      request_document_source_ingestion: {
+        Args: {
+          p_client_request_id: string
+          p_mode?: string
+          p_source_id: string
+        }
+        Returns: {
+          client_request_id: string
+          completed_at: string | null
+          cursor_json: Json
+          discovered_count: number
+          duplicate_count: number
+          error_code: string | null
+          error_detail_redacted: string | null
+          excluded_count: number
+          failed_count: number
+          gap_count: number
+          hashed_count: number
+          heartbeat_at: string | null
+          id: string
+          lease_expires_at: string | null
+          lease_token: string | null
+          mode: string
+          organization_id: string
+          partial_count: number
+          phase: string
+          quarantined_count: number
+          requested_at: string
+          requested_by: string
+          source_id: string
+          started_at: string | null
+          status: string
+          supported_count: number
+          updated_at: string
+          worker_id: string | null
+        }
+        SetofOptions: {
+          from: "*"
+          to: "document_source_ingestion_runs"
           isOneToOne: true
           isSetofReturn: false
         }
@@ -43402,6 +50189,14 @@ export type Database = {
         Args: { p_entity_id: string; p_entity_type: string }
         Returns: Record<string, unknown>
       }
+      resolve_identity_document_person: {
+        Args: {
+          p_identity_document_id: string
+          p_resolution_reason: string
+          p_target_person_record_id: string
+        }
+        Returns: Json
+      }
       resolve_location_visibility: {
         Args: { p_sal_id: string; p_viewing_org_id: string }
         Returns: {
@@ -43441,6 +50236,29 @@ export type Database = {
           site_id: string
         }[]
       }
+      resolve_operational_context_authorized: {
+        Args: {
+          p_at?: string
+          p_lat: number
+          p_lng: number
+          p_module_key?: string
+          p_org_id: string
+        }
+        Returns: {
+          client_org_id: string
+          effective_rules: Json
+          governing_jurisdiction_id: string
+          governing_jurisdiction_name: string
+          governor_overlap_flag: boolean
+          in_operating_bounds: boolean
+          matched_module_key: string
+          matched_zone_id: string
+          on_site: boolean
+          out_of_bounds_district: string
+          resolution_status: string
+          site_id: string
+        }[]
+      }
       resolve_or_create_dispatch_place_site: {
         Args: {
           p_actor?: string
@@ -43457,6 +50275,74 @@ export type Database = {
           site_created: boolean
           site_id: string
         }[]
+      }
+      resolve_org_invitation: {
+        Args: { p_target_organization_id: string }
+        Returns: Json
+      }
+      resolve_patrol_stop_charge_line: {
+        Args: { p_charge_line_id: string; p_client_request_id: string }
+        Returns: {
+          base_amount: number | null
+          client_organization_id: string | null
+          created_at: string
+          description: string
+          discount_amount: number
+          discount_pct: number
+          id: string
+          invoice_line_item_id: string | null
+          line_total: number | null
+          module_key: string
+          organization_id: string
+          quantity: number
+          rate_rule_id: string | null
+          service_agreement_id: string | null
+          service_type: string
+          shift_id: string
+          shift_stop_id: string
+          sla_over_by_minutes: number
+          status: string
+          unit_rate: number | null
+          updated_at: string
+        }
+        SetofOptions: {
+          from: "*"
+          to: "patrol_stop_charge_lines"
+          isOneToOne: true
+          isSetofReturn: false
+        }
+      }
+      resolve_patrol_stop_charge_line_internal: {
+        Args: { p_stop_id: string }
+        Returns: {
+          base_amount: number | null
+          client_organization_id: string | null
+          created_at: string
+          description: string
+          discount_amount: number
+          discount_pct: number
+          id: string
+          invoice_line_item_id: string | null
+          line_total: number | null
+          module_key: string
+          organization_id: string
+          quantity: number
+          rate_rule_id: string | null
+          service_agreement_id: string | null
+          service_type: string
+          shift_id: string
+          shift_stop_id: string
+          sla_over_by_minutes: number
+          status: string
+          unit_rate: number | null
+          updated_at: string
+        }
+        SetofOptions: {
+          from: "*"
+          to: "patrol_stop_charge_lines"
+          isOneToOne: true
+          isSetofReturn: false
+        }
       }
       resolve_rate_rule: {
         Args: {
@@ -43627,6 +50513,76 @@ export type Database = {
           isSetofReturn: false
         }
       }
+      review_biosecurity_photo_classification: {
+        Args: {
+          p_action: string
+          p_assessment_id: string
+          p_density_estimate?: string
+          p_notes?: string
+          p_request_id?: string
+          p_species_name?: string
+        }
+        Returns: {
+          action: string | null
+          action_taken: string | null
+          assessed_at: string
+          assigned_reviewer_id: string | null
+          biosecurity_ai_analysis: Json | null
+          biosecurity_ai_review: Json | null
+          bob_checklist: Json
+          bob_classification: string | null
+          bob_confidence: number | null
+          bob_recommendation: string | null
+          bob_species_confirmed: boolean | null
+          bob_species_id: string | null
+          client_request_id: string | null
+          confirmed_species_name: string | null
+          created_at: string
+          density_estimate: string | null
+          dispatch_job_id: string | null
+          evidence_state: string
+          follow_up_required: boolean
+          id: string
+          land_use_context: string | null
+          location_id: string | null
+          location_name: string | null
+          mpi_referral_number: string | null
+          notes: string | null
+          notice_number: string | null
+          officer_id: string | null
+          officer_name: string | null
+          officer_user_id: string | null
+          organization_id: string
+          photo_url: string | null
+          photo_urls: Json | null
+          protected_land_address: string | null
+          protected_land_site_id: string | null
+          review_due_at: string | null
+          review_notes: string | null
+          review_priority: string
+          review_state: string
+          review_status: string
+          review_version: number
+          reviewed_at: string | null
+          reviewed_by: string | null
+          scene_description: string | null
+          seed_head_present: boolean | null
+          shift_id: string | null
+          site_id: string | null
+          species_confirmed: boolean
+          species_identified: string | null
+          species_name: string | null
+          species_review_decision: string
+          status: string
+          updated_at: string
+        }
+        SetofOptions: {
+          from: "*"
+          to: "biosecurity_assessments"
+          isOneToOne: true
+          isSetofReturn: false
+        }
+      }
       review_bob_document_draft: {
         Args: {
           p_decision: string
@@ -43713,6 +50669,15 @@ export type Database = {
           isSetofReturn: false
         }
       }
+      review_canonical_identity_evidence: {
+        Args: {
+          p_action: string
+          p_approved_fields?: Json
+          p_identity_document_id: string
+          p_review_notes?: string
+        }
+        Returns: Json
+      }
       review_cctv_entity_observation: {
         Args: {
           p_action: string
@@ -43768,6 +50733,15 @@ export type Database = {
           isOneToOne: true
           isSetofReturn: false
         }
+      }
+      review_deterministic_identity_evidence: {
+        Args: {
+          p_action: string
+          p_approved_fields?: Json
+          p_identity_document_id: string
+          p_review_notes?: string
+        }
+        Returns: Json
       }
       review_dispatch_job_pay_line: {
         Args: {
@@ -43914,6 +50888,53 @@ export type Database = {
           isSetofReturn: false
         }
       }
+      review_file_import_row_proposal: {
+        Args: { p_decision: string; p_proposal_id: string; p_reason: string }
+        Returns: {
+          applied_at: string | null
+          applied_target_id: string | null
+          batch_id: string
+          confidence: number | null
+          created_at: string
+          created_by: string | null
+          id: string
+          organization_id: string
+          proposed_payload: Json
+          review_reason: string | null
+          reviewed_at: string | null
+          reviewed_by: string | null
+          source_record_key: string
+          source_row_number: number | null
+          source_values: Json
+          status: string
+          target_type: string
+          updated_at: string
+        }
+        SetofOptions: {
+          from: "*"
+          to: "file_import_row_proposals"
+          isOneToOne: true
+          isSetofReturn: false
+        }
+      }
+      review_identity_document: {
+        Args: {
+          p_action: string
+          p_approved_fields?: Json
+          p_identity_document_id: string
+          p_review_notes?: string
+        }
+        Returns: Json
+      }
+      review_identity_evidence: {
+        Args: {
+          p_action: string
+          p_approved_fields?: Json
+          p_identity_document_id: string
+          p_review_notes?: string
+        }
+        Returns: Json
+      }
       review_leave_request: {
         Args: {
           p_decision: string
@@ -43947,6 +50968,38 @@ export type Database = {
           isOneToOne: true
           isSetofReturn: false
         }
+      }
+      review_monthly_report_pack: {
+        Args: {
+          p_action?: string
+          p_client_notes?: string
+          p_executive_summary?: string
+          p_expected_updated_at: string
+          p_follow_up?: string
+          p_pack_id: string
+          p_title?: string
+        }
+        Returns: Json
+      }
+      review_noise_photo_classification: {
+        Args: {
+          p_action: string
+          p_assessment_id: string
+          p_equipment_candidate: string
+          p_level_candidate: string
+          p_notes: string
+          p_source_candidate: string
+        }
+        Returns: Json
+      }
+      review_nzta_mvr_identity_evidence: {
+        Args: {
+          p_action: string
+          p_approved_fields?: Json
+          p_identity_document_id: string
+          p_review_notes?: string
+        }
+        Returns: Json
       }
       review_officer_field_report: {
         Args: {
@@ -44022,6 +51075,135 @@ export type Database = {
           isSetofReturn: false
         }
       }
+      review_organization_compliance_record: {
+        Args: {
+          p_decision: string
+          p_expected_updated_at: string
+          p_record_id: string
+          p_review_notes?: string
+        }
+        Returns: {
+          client_request_id: string | null
+          coverage_amount: number | null
+          created_at: string
+          created_by: string | null
+          currency: string
+          effective_date: string | null
+          evidence_document_id: string | null
+          expiry_date: string | null
+          id: string
+          issuer: string | null
+          name: string
+          organization_id: string
+          record_type: string
+          reference_number: string | null
+          replaces_record_id: string | null
+          review_notes: string | null
+          source_as_of: string
+          source_name: string
+          source_notes: string | null
+          status: string
+          updated_at: string
+          updated_by: string | null
+          verification_status: string
+          verified_at: string | null
+          verified_by: string | null
+        }
+        SetofOptions: {
+          from: "*"
+          to: "organization_compliance_records"
+          isOneToOne: true
+          isSetofReturn: false
+        }
+      }
+      review_organization_corporate_profile: {
+        Args: {
+          p_decision: string
+          p_expected_updated_at: string
+          p_organization_id: string
+        }
+        Returns: {
+          account_notes: string | null
+          account_owner_user_id: string | null
+          active: boolean
+          billing_address: string | null
+          billing_email: string | null
+          client_request_id: string | null
+          company_registration_number: string | null
+          contact_email: string | null
+          contact_phone: string | null
+          corporate_profile_source: string | null
+          corporate_profile_verification_status: string
+          corporate_profile_verified_at: string | null
+          corporate_profile_verified_by: string | null
+          corporate_status: string | null
+          corporate_status_as_of: string | null
+          created_at: string
+          discoverable: boolean
+          enforcement_workflow_mode: string
+          external_refs: Json
+          id: string
+          jurisdiction_geom: unknown
+          jurisdiction_verification: string
+          jurisdiction_verified_at: string | null
+          jurisdiction_verified_by: string | null
+          legal_name: string | null
+          logo_url: string | null
+          name: string
+          nzbn: string | null
+          nzbn_entity_type: string | null
+          organization_level: number | null
+          organization_type: string
+          parent_organization_id: string | null
+          postal_address: string | null
+          registered_office: string | null
+          status: string
+          trading_name: string | null
+          updated_at: string
+          website_url: string | null
+        }
+        SetofOptions: {
+          from: "*"
+          to: "organizations"
+          isOneToOne: true
+          isSetofReturn: false
+        }
+      }
+      review_perception_evidence_field: {
+        Args: {
+          p_canonical_reference?: Json
+          p_decision: string
+          p_field_id: string
+          p_reviewer_notes?: string
+        }
+        Returns: {
+          authority_state: string
+          calibrated_confidence: number | null
+          candidate_ordinal: number
+          candidate_payload: Json
+          candidate_value: string | null
+          character_confidences: Json
+          conflicts: Json
+          consensus_rule: string | null
+          created_at: string
+          envelope_id: string
+          field_key: string
+          id: string
+          normalized_value: string | null
+          organization_id: string
+          raw_confidence: number | null
+          review_required: boolean
+          source_locations: Json
+          updated_at: string
+          value_type: string
+        }
+        SetofOptions: {
+          from: "*"
+          to: "perception_evidence_fields"
+          isOneToOne: true
+          isSetofReturn: false
+        }
+      }
       review_shift_swap: {
         Args: {
           p_client_request_id: string
@@ -44053,6 +51235,16 @@ export type Database = {
           isOneToOne: true
           isSetofReturn: false
         }
+      }
+      review_smoke_photo_classification: {
+        Args: {
+          p_action: string
+          p_assessment_id: string
+          p_notes: string
+          p_severity: string
+          p_smoke_source_type: string
+        }
+        Returns: Json
       }
       review_timesheet: {
         Args: {
@@ -44106,6 +51298,20 @@ export type Database = {
         Args: { p_agreement_id: string; p_site_id: string; p_zone_id: string }
         Returns: boolean
       }
+      roster_assignment_load: {
+        Args: {
+          p_exclude_slot_id?: string
+          p_scheduled_end: string
+          p_scheduled_start: string
+          p_staff_id: string
+        }
+        Returns: {
+          consecutive_days: number
+          rest_hours: number
+          week_hours: number
+          week_start: string
+        }[]
+      }
       roster_place_geofence_state: {
         Args: { p_site_id: string; p_zone_id: string }
         Returns: string
@@ -44136,6 +51342,8 @@ export type Database = {
           company_registration_number: string | null
           contact_email: string | null
           contact_phone: string | null
+          corporate_profile_source: string | null
+          corporate_profile_verification_status: string
           corporate_profile_verified_at: string | null
           corporate_profile_verified_by: string | null
           corporate_status: string | null
@@ -44149,6 +51357,7 @@ export type Database = {
           jurisdiction_verification: string
           jurisdiction_verified_at: string | null
           jurisdiction_verified_by: string | null
+          legal_name: string | null
           logo_url: string | null
           name: string
           nzbn: string | null
@@ -44156,8 +51365,12 @@ export type Database = {
           organization_level: number | null
           organization_type: string
           parent_organization_id: string | null
+          postal_address: string | null
+          registered_office: string | null
           status: string
+          trading_name: string | null
           updated_at: string
+          website_url: string | null
         }
         SetofOptions: {
           from: "*"
@@ -44176,6 +51389,60 @@ export type Database = {
           p_tax_agent_name?: string
         }
         Returns: Json
+      }
+      save_organization_compliance_record: {
+        Args: {
+          p_client_request_id: string
+          p_coverage_amount: number
+          p_currency: string
+          p_effective_date: string
+          p_evidence_document_id: string
+          p_expected_updated_at: string
+          p_expiry_date: string
+          p_issuer: string
+          p_name: string
+          p_organization_id: string
+          p_record_id: string
+          p_record_type: string
+          p_reference_number: string
+          p_replaces_record_id: string
+          p_source_as_of: string
+          p_source_name: string
+          p_source_notes: string
+        }
+        Returns: {
+          client_request_id: string | null
+          coverage_amount: number | null
+          created_at: string
+          created_by: string | null
+          currency: string
+          effective_date: string | null
+          evidence_document_id: string | null
+          expiry_date: string | null
+          id: string
+          issuer: string | null
+          name: string
+          organization_id: string
+          record_type: string
+          reference_number: string | null
+          replaces_record_id: string | null
+          review_notes: string | null
+          source_as_of: string
+          source_name: string
+          source_notes: string | null
+          status: string
+          updated_at: string
+          updated_by: string | null
+          verification_status: string
+          verified_at: string | null
+          verified_by: string | null
+        }
+        SetofOptions: {
+          from: "*"
+          to: "organization_compliance_records"
+          isOneToOne: true
+          isSetofReturn: false
+        }
       }
       schedule_court_appearance: {
         Args: {
@@ -44283,6 +51550,8 @@ export type Database = {
           observed_at: string
           officer_notes: string
           organization_id: string
+          person_category: string
+          person_homeless_status: string
           person_id: string
           person_label: string
           photo_url: string
@@ -44290,6 +51559,7 @@ export type Database = {
           poi: boolean
           site_id: string
           site_name: string
+          vehicle_homeless_status: string
           vehicle_id: string
           vehicle_label: string
           zone_id: string
@@ -44306,6 +51576,10 @@ export type Database = {
           p_provider_organization_id: string
         }
         Returns: Json
+      }
+      seed_org_reference_code_defaults: {
+        Args: { p_organization_id: string }
+        Returns: undefined
       }
       set_cctv_import_manifest: {
         Args: { p_import_id: string; p_manifest: Json; p_status?: string }
@@ -44342,6 +51616,30 @@ export type Database = {
           isSetofReturn: false
         }
       }
+      set_cctv_inference_budget: {
+        Args: {
+          p_daily_frame_budget: number
+          p_organization_id: string
+          p_reason?: string
+        }
+        Returns: {
+          daily_frame_budget: number
+          organization_id: string
+          reason: string | null
+          set_at: string
+          set_by: string | null
+        }
+        SetofOptions: {
+          from: "*"
+          to: "cctv_inference_budgets"
+          isOneToOne: true
+          isSetofReturn: false
+        }
+      }
+      set_cctv_playback_copy: {
+        Args: { p_evidence_id: string; p_playback: Json }
+        Returns: boolean
+      }
       set_crm_quote_proposal_work_model: {
         Args: { p_module_key: string; p_quote_id: string; p_work_model: string }
         Returns: {
@@ -44363,6 +51661,10 @@ export type Database = {
           isOneToOne: true
           isSetofReturn: false
         }
+      }
+      set_desktop_signing_material: {
+        Args: { p_note?: string; p_password: string; p_pfx_base64: string }
+        Returns: Json
       }
       set_dispatch_job_harmed_party: {
         Args: {
@@ -45176,6 +52478,63 @@ export type Database = {
         }
         Returns: boolean
       }
+      stage_patrol_import_chunk: {
+        Args: {
+          p_batch_id: string
+          p_client_organization_id: string
+          p_events: Json
+          p_observations: Json
+          p_proposals: Json
+          p_provider_organization_id: string
+        }
+        Returns: {
+          evt_inserted: number
+          evt_matched: number
+          obs_inserted: number
+          obs_matched: number
+          proposal_candidates: number
+          proposals_existing: number
+          proposals_inserted: number
+        }[]
+      }
+      stage_patrol_import_chunk_contract_scoped: {
+        Args: {
+          p_batch_id: string
+          p_client_organization_id: string
+          p_events: Json
+          p_observations: Json
+          p_proposals: Json
+          p_provider_organization_id: string
+        }
+        Returns: {
+          evt_inserted: number
+          evt_matched: number
+          obs_inserted: number
+          obs_matched: number
+          proposal_candidates: number
+          proposals_existing: number
+          proposals_inserted: number
+        }[]
+      }
+      stage_patrol_import_chunk_unlocked: {
+        Args: {
+          p_batch_id: string
+          p_client_organization_id: string
+          p_events: Json
+          p_observations: Json
+          p_proposals: Json
+          p_provider_organization_id: string
+        }
+        Returns: {
+          evt_inserted: number
+          evt_matched: number
+          obs_inserted: number
+          obs_matched: number
+          proposal_candidates: number
+          proposals_existing: number
+          proposals_inserted: number
+        }[]
+      }
       start_ad_hoc_officer_shift: {
         Args: {
           p_location_id?: string
@@ -45189,6 +52548,7 @@ export type Database = {
           actual_start: string | null
           completed_stops: number
           created_at: string
+          ended_reason: string | null
           external_refs: Json
           generated_at: string | null
           id: string
@@ -45208,6 +52568,7 @@ export type Database = {
           shift_health: string | null
           shift_origin: string
           status: string
+          superseded_by_shift_id: string | null
           total_stops: number
           updated_at: string
           work_unit_id: string | null
@@ -45266,22 +52627,22 @@ export type Database = {
         Args: {
           p_client_request_id: string
           p_expected_status: string
-          p_gps_lat?: number | null
-          p_gps_lng?: number | null
-          p_off_site_reason?: string | null
+          p_gps_lat?: number
+          p_gps_lng?: number
+          p_off_site_reason?: string
           p_shift_id: string
         }
         Returns: {
           created: boolean
-          distance_m: number | null
-          place_name: string | null
-          position_status: string | null
+          distance_m: number
+          place_name: string
+          position_status: string
           shift_id: string
           shift_status: string
           started_at: string
-          superseded_service_type: string | null
-          superseded_shift_id: string | null
-          superseded_started_at: string | null
+          superseded_service_type: string
+          superseded_shift_id: string
+          superseded_started_at: string
         }[]
       }
       start_patrol_session: {
@@ -45360,6 +52721,36 @@ export type Database = {
           isSetofReturn: false
         }
       }
+      submit_access_control_event_receipt: {
+        Args: {
+          p_actor_user_id: string
+          p_claimed_identity: string
+          p_client_request_id: string
+          p_credential_reference: string
+          p_decision_basis: string
+          p_event_kind: string
+          p_evidence_items: Json
+          p_geofence_context: Json
+          p_gps_lat: number
+          p_gps_lng: number
+          p_notes: string
+          p_observed_at: string
+          p_officer_decision: string
+          p_recognition: Json
+          p_shift_id: string
+          p_site_id: string
+          p_subject_kind: string
+          p_zone_id: string
+        }
+        Returns: {
+          created: boolean
+          evidence_state: string
+          geofence_status: string
+          id: string
+          received_at: string
+          recognition_review_state: string
+        }[]
+      }
       submit_biosecurity_assessment_receipt: {
         Args: {
           p_action_taken?: string
@@ -45395,30 +52786,57 @@ export type Database = {
         }
         Returns: Json
       }
-      submit_officer_field_report: {
-        Args: {
-          p_address?: string
-          p_client_event_id: string
-          p_description: string
-          p_follow_up_notes?: string
-          p_follow_up_required?: boolean
-          p_gps_lat?: number
-          p_gps_lng?: number
-          p_immediate_action?: string
-          p_location_name?: string
-          p_report_type: Database["public"]["Enums"]["report_type"]
-          p_reported_at: string
-          p_severity: Database["public"]["Enums"]["report_severity"]
-          p_shift_id?: string
-          p_title: string
-        }
-        Returns: {
-          created: boolean
-          id: string
-          received_at: string
-          shift_id: string
-        }[]
-      }
+      submit_officer_field_report:
+        | {
+            Args: {
+              p_address?: string
+              p_client_event_id: string
+              p_description: string
+              p_follow_up_notes?: string
+              p_follow_up_required?: boolean
+              p_gps_lat?: number
+              p_gps_lng?: number
+              p_immediate_action?: string
+              p_location_name?: string
+              p_report_type: Database["public"]["Enums"]["report_type"]
+              p_reported_at: string
+              p_severity: Database["public"]["Enums"]["report_severity"]
+              p_shift_id?: string
+              p_title: string
+            }
+            Returns: {
+              created: boolean
+              id: string
+              received_at: string
+              shift_id: string
+            }[]
+          }
+        | {
+            Args: {
+              p_address?: string
+              p_client_event_id: string
+              p_description: string
+              p_follow_up_notes?: string
+              p_follow_up_required?: boolean
+              p_gps_lat?: number
+              p_gps_lng?: number
+              p_immediate_action?: string
+              p_location_name?: string
+              p_report_type: Database["public"]["Enums"]["report_type"]
+              p_reported_at: string
+              p_severity: Database["public"]["Enums"]["report_severity"]
+              p_shift_id?: string
+              p_site_id?: string
+              p_title: string
+              p_zone_id?: string
+            }
+            Returns: {
+              created: boolean
+              id: string
+              received_at: string
+              shift_id: string
+            }[]
+          }
       submit_officer_leave_request: {
         Args: {
           p_client_event_id: string
@@ -45462,6 +52880,44 @@ export type Database = {
         }
         Returns: {
           created: boolean
+          id: string
+          matrix_total: number
+          received_at: string
+          review_status: string
+        }[]
+      }
+      submit_officer_noise_assessment_v2: {
+        Args: {
+          p_action_taken?: string
+          p_assessed_at: string
+          p_classification?: Json
+          p_client_request_id: string
+          p_complainant_site_id?: string
+          p_complaint_address?: string
+          p_dispatch_job_id?: string
+          p_end_number?: string
+          p_evidence_items?: Json
+          p_follow_up_required?: boolean
+          p_gps_lat?: number
+          p_gps_lng?: number
+          p_incident_report_text?: string
+          p_is_large_event_or_commercial?: boolean
+          p_noise_source: string
+          p_noise_source_address: string
+          p_notice_number?: string
+          p_occupant_dob?: string
+          p_occupant_name?: string
+          p_police_present?: boolean
+          p_police_requested?: boolean
+          p_scene_description?: string
+          p_shift_id?: string
+          p_time_score?: number
+          p_tone_score?: number
+          p_volume_score?: number
+        }
+        Returns: {
+          created: boolean
+          evidence_state: string
           id: string
           matrix_total: number
           received_at: string
@@ -45531,6 +52987,43 @@ export type Database = {
           review_state: string
         }[]
       }
+      submit_smoke_assessment_receipt_v2: {
+        Args: {
+          p_action_taken?: string
+          p_address?: string
+          p_assessed_at: string
+          p_classification?: Json
+          p_client_request_id: string
+          p_complainant_site_id?: string
+          p_complaint_address?: string
+          p_complaint_source?: string
+          p_dispatch_job_id?: string
+          p_evidence_items?: Json
+          p_follow_up_required?: boolean
+          p_is_out_of_hours?: boolean
+          p_legal_basis?: string
+          p_notes?: string
+          p_notice_number?: string
+          p_scene_description?: string
+          p_severity?: string
+          p_shift_id?: string
+          p_site_id?: string
+          p_smoke_source_type?: string
+          p_source_confirmed?: boolean
+        }
+        Returns: {
+          created: boolean
+          evidence_state: string
+          id: string
+          received_at: string
+          review_state: string
+        }[]
+      }
+      sweep_missed_field_work: {
+        Args: { p_grace_minutes?: number; p_now?: string }
+        Returns: Json
+      }
+      sync_my_profile_email: { Args: never; Returns: string }
       test_bob_signing_config: { Args: never; Returns: Json }
       text_soundex: { Args: { "": string }; Returns: string }
       timesheet_dispatch_pay_review_blocker: {
@@ -45562,6 +53055,55 @@ export type Database = {
           p_observation_id: string
           p_profile_details?: Json
         }
+        Returns: {
+          animal_type: string | null
+          appearance_embedding: Json | null
+          appearance_vec: string | null
+          attributes: Json
+          candidate_embedding: Json | null
+          candidate_label: string | null
+          candidate_plate: string | null
+          canonical_person_id: string | null
+          canonical_place_id: string | null
+          canonical_vehicle_id: string | null
+          cctv_import_id: string | null
+          created_at: string
+          entity_kind: string
+          evidence_item_id: string
+          face_vec: string | null
+          frame_sha256: string | null
+          id: string
+          inference_job_id: string
+          is_pest: boolean | null
+          location_id: string | null
+          model_confidence: number | null
+          observed_at: string
+          observed_to: string | null
+          organization_id: string
+          person_record_id: string | null
+          portfolio_candidates: Json
+          portfolio_key: string | null
+          portfolio_state: string
+          quality_state: string
+          review_notes: string | null
+          review_state: string
+          reviewed_at: string | null
+          reviewed_by: string | null
+          site_id: string | null
+          source_event_id: string
+          species_confidence: number | null
+          thumbnail: string | null
+          zone_id: string | null
+        }
+        SetofOptions: {
+          from: "*"
+          to: "cctv_entity_observations"
+          isOneToOne: true
+          isSetofReturn: false
+        }
+      }
+      update_cctv_vehicle_notes: {
+        Args: { p_notes: string; p_observation_id: string }
         Returns: {
           animal_type: string | null
           appearance_embedding: Json | null
@@ -45651,6 +53193,8 @@ export type Database = {
           company_registration_number: string | null
           contact_email: string | null
           contact_phone: string | null
+          corporate_profile_source: string | null
+          corporate_profile_verification_status: string
           corporate_profile_verified_at: string | null
           corporate_profile_verified_by: string | null
           corporate_status: string | null
@@ -45664,6 +53208,7 @@ export type Database = {
           jurisdiction_verification: string
           jurisdiction_verified_at: string | null
           jurisdiction_verified_by: string | null
+          legal_name: string | null
           logo_url: string | null
           name: string
           nzbn: string | null
@@ -45671,8 +53216,75 @@ export type Database = {
           organization_level: number | null
           organization_type: string
           parent_organization_id: string | null
+          postal_address: string | null
+          registered_office: string | null
           status: string
+          trading_name: string | null
           updated_at: string
+          website_url: string | null
+        }
+        SetofOptions: {
+          from: "*"
+          to: "organizations"
+          isOneToOne: true
+          isSetofReturn: false
+        }
+      }
+      update_organization_corporate_profile: {
+        Args: {
+          p_company_registration_number: string
+          p_corporate_profile_source: string
+          p_corporate_status: string
+          p_corporate_status_as_of: string
+          p_expected_updated_at: string
+          p_legal_name: string
+          p_nzbn: string
+          p_nzbn_entity_type: string
+          p_organization_id: string
+          p_postal_address: string
+          p_registered_office: string
+          p_trading_name: string
+          p_website_url: string
+        }
+        Returns: {
+          account_notes: string | null
+          account_owner_user_id: string | null
+          active: boolean
+          billing_address: string | null
+          billing_email: string | null
+          client_request_id: string | null
+          company_registration_number: string | null
+          contact_email: string | null
+          contact_phone: string | null
+          corporate_profile_source: string | null
+          corporate_profile_verification_status: string
+          corporate_profile_verified_at: string | null
+          corporate_profile_verified_by: string | null
+          corporate_status: string | null
+          corporate_status_as_of: string | null
+          created_at: string
+          discoverable: boolean
+          enforcement_workflow_mode: string
+          external_refs: Json
+          id: string
+          jurisdiction_geom: unknown
+          jurisdiction_verification: string
+          jurisdiction_verified_at: string | null
+          jurisdiction_verified_by: string | null
+          legal_name: string | null
+          logo_url: string | null
+          name: string
+          nzbn: string | null
+          nzbn_entity_type: string | null
+          organization_level: number | null
+          organization_type: string
+          parent_organization_id: string | null
+          postal_address: string | null
+          registered_office: string | null
+          status: string
+          trading_name: string | null
+          updated_at: string
+          website_url: string | null
         }
         SetofOptions: {
           from: "*"
@@ -45694,6 +53306,7 @@ export type Database = {
           client_request_id: string
           created_at: string
           created_by: string | null
+          external_refs: Json
           id: string
           linked_shift_id: string | null
           notes: string | null
@@ -45719,6 +53332,17 @@ export type Database = {
           new_srid_in: number
           schema_name: string
           table_name: string
+        }
+        Returns: string
+      }
+      upsert_file_entity_folder: {
+        Args: {
+          p_entity_id: string
+          p_entity_type: string
+          p_name: string
+          p_organization_id: string
+          p_parent_key: string
+          p_space_key: string
         }
         Returns: string
       }
@@ -45754,6 +53378,10 @@ export type Database = {
       verify_boundary: {
         Args: { p_entity_id: string; p_entity_type: string }
         Returns: boolean
+      }
+      verify_cctv_report_receipt: {
+        Args: { p_receipt_id: string; p_sha256?: string }
+        Returns: Json
       }
       wf_approve_job: {
         Args: {

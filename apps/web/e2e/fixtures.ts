@@ -138,10 +138,14 @@ export async function installSupabaseFixtures(page: Page, options: { officerModu
   const identityAudit: Array<Record<string, unknown>> = [];
   const workplaces = [{ id: '16161616-1616-4616-8616-161616161616', name: 'Operations Centre' }];
   const costCentres = [{ id: '17171717-1717-4717-8717-171717171717', code: 'OPS-01', name: 'Field Operations' }];
-  const workUnits = [
-    { id: '18181818-1818-4818-8818-181818181818', name: 'North District Patrol', work_unit_type: 'patrol', service_type: 'patrol', active: true, patrol_route_id: '19191919-1919-4919-8919-191919191919', service_agreement_location_id: null, service_agreement_module_id: null, workplace_id: null, team_id: null, cost_centre_id: null },
-    { id: '20202020-2020-4020-8020-202020202020', name: 'Civic Centre Static Post', work_unit_type: 'static', service_type: 'static_guarding', active: true, patrol_route_id: null, service_agreement_location_id: '21212121-2121-4121-8121-212121212121', service_agreement_module_id: '22222222-2222-4222-8222-222222222229', workplace_id: null, team_id: null, cost_centre_id: null },
-    { id: '23232323-2323-4323-8323-232323232323', name: 'Roster Administration', work_unit_type: 'internal', service_type: 'administration', active: true, patrol_route_id: null, service_agreement_location_id: null, service_agreement_module_id: null, workplace_id: workplaces[0].id, team_id: null, cost_centre_id: costCentres[0].id },
+  const rosterSkillCatalog = [
+    { id: '87878787-8787-4787-8787-878787878787', skill_name: 'First aid', skill_category: 'Safety', active: true },
+    { id: '88888888-8888-4888-8888-888888888888', skill_name: 'Radio operations', skill_category: 'Communications', active: true },
+  ];
+  const workUnits: Array<Record<string, unknown> & { id: string; required_skill_ids: string[]; required_skill_names: string[]; updated_at: string }> = [
+    { id: '18181818-1818-4818-8818-181818181818', name: 'North District Patrol', work_unit_type: 'patrol', service_type: 'patrol', active: true, patrol_route_id: '19191919-1919-4919-8919-191919191919', service_agreement_location_id: null, service_agreement_module_id: null, workplace_id: null, team_id: null, cost_centre_id: null, required_skill_ids: [], required_skill_names: [], updated_at: '2026-08-30T09:00:00.000Z' },
+    { id: '20202020-2020-4020-8020-202020202020', name: 'Civic Centre Static Post', work_unit_type: 'static', service_type: 'static_guarding', active: true, patrol_route_id: null, service_agreement_location_id: '21212121-2121-4121-8121-212121212121', service_agreement_module_id: '22222222-2222-4222-8222-222222222229', workplace_id: null, team_id: null, cost_centre_id: null, required_skill_ids: [], required_skill_names: [], updated_at: '2026-08-30T09:00:00.000Z' },
+    { id: '23232323-2323-4323-8323-232323232323', name: 'Roster Administration', work_unit_type: 'internal', service_type: 'administration', active: true, patrol_route_id: null, service_agreement_location_id: null, service_agreement_module_id: null, workplace_id: workplaces[0].id, team_id: null, cost_centre_id: costCentres[0].id, required_skill_ids: [], required_skill_names: [], updated_at: '2026-08-30T09:00:00.000Z' },
   ];
   const rateRules: Array<Record<string, unknown>> = [];
   const sampleDocuments = [{
@@ -411,6 +415,7 @@ export async function installSupabaseFixtures(page: Page, options: { officerModu
       return;
     }
     if (table === 'roster_work_units') { await route.fulfill(fulfillJson(workUnits)); return; }
+    if (table === 'roster_skill_catalog') { await route.fulfill(fulfillJson(rosterSkillCatalog)); return; }
     if (table === 'roster_slots') { await route.fulfill(fulfillJson([{ id: '32323232-3232-4232-8232-323232323232', work_unit_id: '23232323-2323-4323-8323-232323232323', staff_id: adminSlotStaffId, scheduled_start: '2026-08-28T21:00:00.000Z', scheduled_end: '2026-08-29T01:00:00.000Z', status: adminSlotStatus, linked_shift_id: null, notes: 'Roster administration' }])); return; }
     if (table === 'patrol_routes') { await route.fulfill(fulfillJson([{ id: '19191919-1919-4919-8919-191919191919', name: 'North District Patrol' }])); return; }
     if (table === 'service_agreement_locations') { await route.fulfill(fulfillJson([{ id: '21212121-2121-4121-8121-212121212121', service_agreement_id: '24242424-2424-4424-8424-242424242424', site_id: '25252525-2525-4525-8525-252525252525', zone_id: null }])); return; }
@@ -422,8 +427,18 @@ export async function installSupabaseFixtures(page: Page, options: { officerModu
     if (table === 'organization_workplaces') { await route.fulfill(fulfillJson(workplaces)); return; }
     if (table === 'teams') { await route.fulfill(fulfillJson([{ id: '26262626-2626-4626-8626-262626262626', name: 'Operations Support' }])); return; }
     if (table === 'cost_centres') { await route.fulfill(fulfillJson(costCentres)); return; }
-    if (table === 'create_roster_work_unit') { const row = { id: '29292929-2929-4929-8929-292929292929', name: 'Head Office Administration', work_unit_type: 'internal', service_type: 'administration', active: true, patrol_route_id: null, service_agreement_location_id: null, service_agreement_module_id: null, workplace_id: '27272727-2727-4727-8727-272727272727', team_id: null, cost_centre_id: '28282828-2828-4828-8828-282828282828' }; workUnits.push(row); await route.fulfill(fulfillJson(row)); return; }
-    if (table === 'create_operating_roster_work_unit') { const payload = JSON.parse(request.postData() ?? '{}'); const row = { id: '29292929-2929-4929-8929-292929292929', name: payload.p_name, work_unit_type: payload.p_work_unit_type, service_type: payload.p_service_type, active: true, patrol_route_id: payload.p_patrol_route_id, service_agreement_location_id: payload.p_service_agreement_location_id, service_agreement_module_id: payload.p_service_agreement_module_id, workplace_id: payload.p_workplace_id, team_id: payload.p_team_id, cost_centre_id: payload.p_cost_centre_id }; workUnits.push(row); await route.fulfill(fulfillJson(row)); return; }
+    if (table === 'create_roster_work_unit') { const row = { id: '29292929-2929-4929-8929-292929292929', name: 'Head Office Administration', work_unit_type: 'internal', service_type: 'administration', active: true, patrol_route_id: null, service_agreement_location_id: null, service_agreement_module_id: null, workplace_id: '27272727-2727-4727-8727-272727272727', team_id: null, cost_centre_id: '28282828-2828-4828-8828-282828282828', required_skill_ids: [], required_skill_names: [], updated_at: '2026-08-30T09:30:00.000Z' }; workUnits.push(row); await route.fulfill(fulfillJson(row)); return; }
+    if (table === 'create_operating_roster_work_unit') { const payload = JSON.parse(request.postData() ?? '{}'); const row = { id: '29292929-2929-4929-8929-292929292929', name: payload.p_name, work_unit_type: payload.p_work_unit_type, service_type: payload.p_service_type, active: true, patrol_route_id: payload.p_patrol_route_id, service_agreement_location_id: payload.p_service_agreement_location_id, service_agreement_module_id: payload.p_service_agreement_module_id, workplace_id: payload.p_workplace_id, team_id: payload.p_team_id, cost_centre_id: payload.p_cost_centre_id, required_skill_ids: [], required_skill_names: [], updated_at: '2026-08-30T09:30:00.000Z' }; workUnits.push(row); await route.fulfill(fulfillJson(row)); return; }
+    if (table === 'manage_roster_work_unit_skill_ids') {
+      const payload = JSON.parse(request.postData() ?? '{}');
+      const unit = workUnits.find((candidate) => candidate.id === payload.p_work_unit_id);
+      if (!unit) { await route.fulfill({ ...fulfillJson({ message: 'Work unit not found' }), status: 400 }); return; }
+      unit.required_skill_ids = payload.p_required_skill_ids ?? [];
+      unit.required_skill_names = rosterSkillCatalog.filter((skill) => unit.required_skill_ids.includes(skill.id)).map((skill) => skill.skill_name).sort();
+      unit.updated_at = '2026-08-30T09:31:00.000Z';
+      await route.fulfill(fulfillJson(unit));
+      return;
+    }
     if (table === 'create_operating_organization_workplace') { const payload = JSON.parse(request.postData() ?? '{}'); const row = { id: '27272727-2727-4727-8727-272727272727', name: payload.p_name }; workplaces.push(row); await route.fulfill(fulfillJson(row)); return; }
     if (table === 'create_operating_cost_centre') { const payload = JSON.parse(request.postData() ?? '{}'); const row = { id: '28282828-2828-4828-8828-282828282828', code: payload.p_code, name: payload.p_name }; costCentres.push(row); await route.fulfill(fulfillJson(row)); return; }
     if (table === 'create_roster_slot') { await route.fulfill(fulfillJson({ id: '30303030-3030-4030-8030-303030303030', status: 'published' })); return; }
