@@ -100,6 +100,9 @@ interface BuilderContextSnapshot {
 }
 
 const plainWords = (value: unknown, fallback = 'Not recorded') => typeof value === 'string' && value.trim() ? value.replaceAll('_', ' ') : fallback;
+const NON_ACTIONABLE_ISSUE_STATUSES = new Set(['release_ready', 'deployed', 'failed', 'cancelled']);
+const isActionableIssue = (job: BuilderJob) => !NON_ACTIONABLE_ISSUE_STATUSES.has(job.status)
+  && (String(job.title).toLowerCase().startsWith('repair') || Boolean(job.last_error));
 
 const PROMPT_TEMPLATES = [
   {
@@ -232,14 +235,13 @@ const BuilderControlRoomPage: React.FC = () => {
   const completedJobs = jobs.filter(job => ['deployed', 'release_ready'].includes(job.status)).length;
   const failedJobs = jobs.filter(job => job.status === 'failed').length;
   const cancelledJobs = jobs.filter(job => job.status === 'cancelled').length;
-  const issueJobs = jobs.filter(job => String(job.title).toLowerCase().startsWith('repair') || Boolean(job.last_error)).length;
+  const issueJobs = jobs.filter(isActionableIssue).length;
 
   const filteredJobs = useMemo(() => {
     return jobs.filter(job => {
       // 1. Tab filter
       if (activeTab === 'issues') {
-        const isRepair = String(job.title).toLowerCase().startsWith('repair') || Boolean(job.last_error);
-        if (!isRepair) return false;
+        if (!isActionableIssue(job)) return false;
       } else if (activeTab === 'active') {
         if (['release_ready', 'deployed', 'failed', 'cancelled'].includes(job.status)) return false;
       } else if (activeTab === 'awaiting') {
@@ -507,7 +509,7 @@ const BuilderControlRoomPage: React.FC = () => {
             <button type="button" className={`builder-tab-btn ${activeTab === 'all' ? 'is-active' : ''}`} onClick={() => setActiveTab('all')}>
               All <span className="builder-tab-count">{jobs.length}</span>
             </button>
-            <button type="button" className={`builder-tab-btn ${activeTab === 'issues' ? 'is-active' : ''}`} onClick={() => setActiveTab('issues')}>
+            <button type="button" className={`builder-tab-btn ${activeTab === 'issues' ? 'is-active' : ''}`} onClick={() => setActiveTab('issues')} title="Unresolved repair work and errors only">
               Issues <span className="builder-tab-count">{issueJobs}</span>
             </button>
             <button type="button" className={`builder-tab-btn ${activeTab === 'active' ? 'is-active' : ''}`} onClick={() => setActiveTab('active')}>
@@ -560,7 +562,7 @@ const BuilderControlRoomPage: React.FC = () => {
             Showing {filteredJobs.length} of {jobs.length} jobs
           </div>
 
-          {loading ? <div className="builder-empty"><RefreshCw size={18} className="is-spinning" /> Loading jobs</div> : filteredJobs.length === 0 ? <div className="builder-empty"><Workflow size={19} /> {jobs.length === 0 ? 'No Builder jobs' : 'No jobs matching filter'}</div> : (
+          {loading ? <div className="builder-empty"><RefreshCw size={18} className="is-spinning" /> Loading jobs</div> : filteredJobs.length === 0 ? <div className="builder-empty"><Workflow size={19} /> {jobs.length === 0 ? 'No Builder jobs' : activeTab === 'issues' ? 'No actionable issues' : 'No jobs matching filter'}</div> : (
             <div className="builder-list">{filteredJobs.map(job => {
               const jobIndex = jobs.length - jobs.findIndex(j => j.id === job.id);
               return (

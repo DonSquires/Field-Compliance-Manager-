@@ -21,7 +21,10 @@ live reconciliation retained all 82 historical rows while reducing Active from
 automatically, five recent exceptions retired under the owner's explicit
 cleanup instruction, and terminal-job pending approvals fell from five to
 zero. The resulting history is 65 cancelled, 13 deployed, three failed, and
-one historical release-ready record.
+one historical release-ready record. The Control Room Issues tab now means
+unresolved, actionable repair/error work; release-ready, deployed, failed, and
+cancelled history remains available in its own status tabs without inflating
+the issue count.
 
 Main-health snapshot isolation 2026-10-15: an exact-SHA guard repair passed
 targeted and full local suites but failed intermittently in Bob's worker. The

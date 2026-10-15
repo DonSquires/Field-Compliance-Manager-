@@ -75,6 +75,13 @@ describe('Builder control room boundary', () => {
     expect(source).toContain('{plainWords(selectedJob.requested_action)} for {plainWords(selectedJob.target_environment)}');
   });
 
+  it('counts only unresolved work as an issue and keeps terminal history in its own tabs', () => {
+    expect(source).toContain("const NON_ACTIONABLE_ISSUE_STATUSES = new Set(['release_ready', 'deployed', 'failed', 'cancelled'])");
+    expect(source).toContain('const issueJobs = jobs.filter(isActionableIssue).length');
+    expect(source).toContain('if (!isActionableIssue(job)) return false');
+    expect(source).toContain('No actionable issues');
+  });
+
   it('offers confirmed, reasoned cancellation only for active selected jobs and refreshes on success', () => {
     expect(source).toContain("!['deployed', 'failed', 'cancelled'].includes(selectedJob.status)");
     expect(source).toContain('Cancellation reason<textarea');
