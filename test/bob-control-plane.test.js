@@ -106,6 +106,15 @@ test('main-health verification runs independently of owner Builder jobs', () => 
   assert.match(source, /createDetachedWorkspace\(\{[\s\S]*workspaceRoot: path\.join\(builderWorkspaceRoot, 'main-health'\),[\s\S]*targetSha: sha/);
 });
 
+test('control plane retires stale Builder jobs without touching active execution or workspaces', () => {
+  const source = fs.readFileSync(path.join(root, 'bob-control-plane-server.js'), 'utf8');
+  assert.match(source, /async function reconcileStaleBuilderJobs\(\)/);
+  assert.match(source, /jobHygieneDecision\(job,/);
+  assert.match(source, /builder_retire_stale_job/);
+  assert.match(source, /builder_cancel_terminal_approvals/);
+  assert.match(source, /await reconcileInvalidSelfHealDeployments\(\);\s*await reconcileStaleBuilderJobs\(\)/);
+});
+
 test('startup recovers model steps interrupted by a control-plane restart before autopilot planning', () => {
   const source = fs.readFileSync(path.join(root, 'bob-control-plane-server.js'), 'utf8');
   assert.match(source, /const controlPlaneStartedAt = new Date\(\)\.toISOString\(\)/);

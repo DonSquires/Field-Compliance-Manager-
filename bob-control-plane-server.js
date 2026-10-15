@@ -25,6 +25,7 @@ const { laptopStatus, runLaptopCommand, laptopConfig, loadLaptopLink, mergeLapto
 const { createBranchWorkspace, createDetachedWorkspace, commitVerifiedPatch, publishWorkspaceBranch, createGiteaPullRequest, workspacePathForBranch, createGitHubPullRequest, mergeGitHubPullRequest, ensureSourceCheckout, githubAuthHeader, githubRepoUrl, githubSshRepoUrl, resolveRemoteHead, redactGitError } = require('./builder-branch-workspace');
 const { executeWorker, summarizeHumanTest } = require('./worker-executor');
 const { createMainHealthMonitor } = require('./bob-main-health');
+const { TERMINAL_STATUSES: BUILDER_TERMINAL_STATUSES, jobHygieneDecision } = require('./builder-job-hygiene');
 
 // Route failures used to be swallowed into a bare 409; keep a short redacted reason so the
 // operator (and Bob's self-heal loop) can act without a shell on the host.
@@ -966,6 +967,68 @@ async function reconcileInvalidSelfHealDeployments() {
   }
 }
 
+async function reconcileStaleBuilderJobs() {
+  const { data: terminalApprovalCount, error: terminalApprovalError } = await builderSupabase.rpc('builder_cancel_terminal_approvals');
+  if (terminalApprovalError) throw new Error(`terminal Builder approvals could not be reconciled: ${terminalApprovalError.message}`);
+  if (Number(terminalApprovalCount) > 0) {
+    record('autopilot', 'builder.housekeeping.approvals_cancelled', 'builder', { count: Number(terminalApprovalCount) });
+  }
+  const currentMainSha = builderRepositoryHead('main').sha;
+  const currentMainHealthPassed = mainHealthState(currentMainSha)?.status === 'passed';
+  const activeStatuses = [
+    'intake', 'analysis_pending', 'specification_ready', 'design_pending',
+    'implementation_pending', 'building', 'testing', 'security_review',
+    'approval_pending', 'release_ready',
+  ];
+  const { data: jobs, error } = await builderSupabase
+    .from('builder_jobs')
+    .select('id,status,created_at,updated_at,workspace_branch,workspace_pull_request_url,autopilot_requested_by,autopilot_source,autopilot_state,source_main_health_sha')
+    .in('status', activeStatuses)
+    .order('updated_at', { ascending: true })
+    .limit(100);
+  if (error) throw new Error(`stale Builder jobs could not be listed: ${error.message}`);
+  if (!jobs?.length) return 0;
+
+  const jobIds = jobs.map((job) => job.id);
+  const [modelRuns, workerRuns, approvals] = await Promise.all([
+    builderSupabase.from('builder_model_runs').select('job_id').in('job_id', jobIds).in('status', ['pending', 'running']),
+    builderSupabase.from('builder_worker_runs').select('job_id').in('job_id', jobIds).in('status', ['pending', 'running']),
+    builderSupabase.from('builder_approvals').select('job_id').in('job_id', jobIds).eq('status', 'pending'),
+  ]);
+  if (modelRuns.error) throw new Error(`active Builder model runs could not be listed: ${modelRuns.error.message}`);
+  if (workerRuns.error) throw new Error(`active Builder worker runs could not be listed: ${workerRuns.error.message}`);
+  if (approvals.error) throw new Error(`pending Builder approvals could not be listed: ${approvals.error.message}`);
+  const activeExecution = new Set([...(modelRuns.data || []), ...(workerRuns.data || [])].map((row) => row.job_id));
+  const pendingApprovals = new Set((approvals.data || []).map((row) => row.job_id));
+
+  let retired = 0;
+  for (const job of jobs) {
+    const decision = jobHygieneDecision(job, {
+      currentMainSha,
+      currentMainHealthPassed,
+      activeExecution: activeExecution.has(job.id),
+      pendingApproval: pendingApprovals.has(job.id),
+    });
+    if (!decision) continue;
+    const { data: updated, error: retireError } = await builderSupabase.rpc('builder_retire_stale_job', {
+      _job_id: job.id,
+      _reason: decision.reason,
+      _outcome: decision.outcome,
+      _details: {
+        current_main_sha: currentMainSha,
+        current_main_health_passed: currentMainHealthPassed,
+        source_main_health_sha: job.source_main_health_sha ?? null,
+      },
+    });
+    if (retireError) throw new Error(`stale Builder job ${job.id} could not be retired: ${retireError.message}`);
+    if (updated?.status === 'cancelled') {
+      retired += 1;
+      record('autopilot', 'builder.housekeeping.retired', job.id, { outcome: decision.outcome });
+    }
+  }
+  return retired;
+}
+
 async function autopilotOnce() {
   if (autopilotBusy || !builderSupabase || !modelGatewayToken || !builderWorkerImage || !builderSourceConfigured || !builderApiConfigured) return [];
   autopilotBusy = true;
@@ -974,6 +1037,7 @@ async function autopilotOnce() {
     startMainHealthCheck();
     await startRoutineRepairs();
     await reconcileInvalidSelfHealDeployments();
+    await reconcileStaleBuilderJobs();
     const jobs = await listAutopilotJobs(builderSupabase);
     if (!jobs.length) return [];
     return await autopilotTick({
@@ -1035,6 +1099,27 @@ async function autopilotOnce() {
         record: async (jobId, state, report) => {
           const { error } = await builderSupabase.rpc('builder_autopilot_record', { _job_id: jobId, _state: state, _report: report });
           if (error) throw new Error(`autopilot outcome could not be recorded: ${error.message}`);
+          if (state === 'done') {
+            const { data: current, error: currentError } = await builderSupabase
+              .from('builder_jobs')
+              .select('id,status,workspace_branch,workspace_pull_request_url')
+              .eq('id', jobId)
+              .single();
+            if (currentError) throw new Error(`completed Builder job could not be checked: ${currentError.message}`);
+            if (!BUILDER_TERMINAL_STATUSES.has(current.status) && !current.workspace_branch && !current.workspace_pull_request_url) {
+              const reason = String(report?.reason || report?.text || 'Bob completed or superseded this job.')
+                .replace(/\s+/g, ' ')
+                .trim()
+                .slice(0, 2000);
+              const { error: retireError } = await builderSupabase.rpc('builder_retire_stale_job', {
+                _job_id: jobId,
+                _reason: reason,
+                _outcome: 'completed_autopilot',
+                _details: { report_state: report?.state ?? null, repair_outcome: report?.repair_outcome ?? null },
+              });
+              if (retireError) throw new Error(`completed Builder job could not be retired: ${retireError.message}`);
+            }
+          }
           const { data: routineJob, error: routineJobError } = await builderSupabase
             .from('builder_jobs')
             .select('autopilot_source,source_friction_packet_id')

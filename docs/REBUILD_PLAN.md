@@ -8,6 +8,15 @@ detailed backlogs (`ENTERPRISE_SAAS_TODO.md`, `PROTOTYPE_GAP_AUDIT.md`,
 Completion language is strict, as in the lineage: **merged ≠ deployed ≠
 glass-proven.** A workstream item is done only when its evidence gate is met.
 
+Builder queue hygiene 2026-10-15: durable outcomes and queue status had drifted
+apart. Jobs already recorded `autopilot_state=done`, plus old main-health
+repairs superseded by a passing current-main receipt, still appeared active.
+Bob now retires those workspace-free rows atomically through an audited
+service-role RPC, cancels their pending approvals, and preserves their reports
+as history. Active model/worker runs, workspaces, pull requests, and legitimate
+human gates are stop lines. Unowned manual jobs receive a seven-day quiet
+period before they qualify as inactive orphans; nothing is deleted.
+
 Main-health snapshot isolation 2026-10-15: an exact-SHA guard repair passed
 targeted and full local suites but failed intermittently in Bob's worker. The
 worker mounted the shared Builder checkout read-only; another job could still
