@@ -8,6 +8,19 @@ detailed backlogs (`ENTERPRISE_SAAS_TODO.md`, `PROTOTYPE_GAP_AUDIT.md`,
 Completion language is strict, as in the lineage: **merged ≠ deployed ≠
 glass-proven.** A workstream item is done only when its evidence gate is met.
 
+Release identity incident 2026-10-15: two concurrent agent commits reached
+`main` with the local author `don@squires.local`, which is not associated with
+the verified Vercel/GitHub owner account. Vercel correctly blocked both
+deployments before build; the already-published Builder workspace remained
+live and was not damaged. Release identity is now an explicit agent contract:
+commits intended for `main` must use
+`256263525+DonSquires@users.noreply.github.com`, and Bob's isolated publisher
+continues to fail closed when its verified identity is unavailable. A
+canonical release commit is required after an unverified commit has landed so
+the complete current tree can be deployed without weakening Vercel
+protection. This keeps concurrent app work from blocking Bob's progress while
+preserving exact-SHA release evidence.
+
 Builder coding-workspace integration 2026-10-15: the Builder Control Room now
 presents the existing governed build system as one accessible coding workspace
 rather than opening Bob over the workbench as a floating modal. Desktop uses

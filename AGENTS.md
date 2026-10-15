@@ -19,6 +19,26 @@ design: a change to a shared table, hook, or component can ripple across
 surfaces that were never the direct target of the edit. Treat it as a graph,
 not a flat app, and check the graph before editing shared terrain.
 
+## Release identity is part of the delivery contract
+
+This repository deploys `main` to Vercel from GitHub. Vercel's protected
+deployment lane rejects commits whose author is not associated with the
+verified owner account. Before creating or pushing a commit intended for
+`main`, every agent must use the verified GitHub identity:
+
+```bash
+git config user.name "Don Squires"
+git config user.email "256263525+DonSquires@users.noreply.github.com"
+git show -s --format='%an <%ae>%n%cn <%ce>' HEAD
+```
+
+Do not use local placeholders such as `don@squires.local`. A commit that is
+already on `main` cannot be repaired by changing repository files afterward;
+create the next release commit with the verified identity so the complete tree
+can deploy. Bob Builder's isolated publication lane must fail closed when its
+verified identity is not configured; never weaken Vercel protection or bypass
+the GitHub release path.
+
 **Single target build (owner ruling, 2026-09-15).** Field Compliance Manager is
 the only product being built in this repository. GitLab, FreedomCamp-Manager /
 FreedomCamp-Manager-App, Onspace previews, and other historical repos are
