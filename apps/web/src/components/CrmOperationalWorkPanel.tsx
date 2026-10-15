@@ -62,6 +62,37 @@ interface PatrolRoute {
   organization_id?: string;
 }
 
+interface LocationHouse {
+  id: string;
+  name: string;
+}
+
+interface ModuleAssignment {
+  id: string;
+  location_id: string;
+  module_key: string;
+  service_agreement_id: string;
+  enabled: boolean;
+  effective_from: string;
+  effective_to: string | null;
+  updated_at: string;
+}
+
+interface ToolsetForm {
+  locationId: string;
+  moduleKey: string;
+  enabled: boolean;
+  effectiveFrom: string;
+  effectiveTo: string;
+  expectedUpdatedAt: string | null;
+}
+
+const describeAssignment = (assignment: ModuleAssignment | undefined) => {
+  if (!assignment) return 'Not set at this place';
+  const window = assignment.effective_to ? `${assignment.effective_from} to ${assignment.effective_to}` : `from ${assignment.effective_from}`;
+  return assignment.enabled ? `On ${window}` : `Off ${window}`;
+};
+
 interface WorkUnit {
   id: string;
   name: string;
@@ -143,6 +174,10 @@ export function CrmOperationalWorkPanel({
   const [schedules, setSchedules] = useState<DeliverySchedule[]>([]);
   const [configLinks, setConfigLinks] = useState<PatrolConfigLink[]>([]);
   const [continuityPolicies, setContinuityPolicies] = useState<ContinuityPolicy[]>([]);
+  const [houses, setHouses] = useState<LocationHouse[]>([]);
+  const [assignments, setAssignments] = useState<ModuleAssignment[]>([]);
+  const [toolsetForm, setToolsetForm] = useState<ToolsetForm | null>(null);
+  const [savingToolset, setSavingToolset] = useState(false);
   const [buildingRun, setBuildingRun] = useState(false);
   const [savingContinuity, setSavingContinuity] = useState(false);
   const [loading, setLoading] = useState(true);
@@ -155,7 +190,7 @@ export function CrmOperationalWorkPanel({
 
   const load = useCallback(async () => {
     if (agreement.agreement_type !== 'operational') {
-      setLocations([]); setModules([]); setRoutes([]); setWorkUnits([]); setSchedules([]); setConfigLinks([]); setContinuityPolicies([]); setLoading(false);
+      setLocations([]); setModules([]); setRoutes([]); setWorkUnits([]); setSchedules([]); setConfigLinks([]); setContinuityPolicies([]); setHouses([]); setAssignments([]); setLoading(false);
       return;
     }
     setLoading(true); setError(null);
@@ -184,7 +219,23 @@ export function CrmOperationalWorkPanel({
     const continuityResponse = locationIds.length
       ? await supabase.from('service_agreement_continuity_policies').select('id,service_agreement_location_id,service_agreement_module_id,continuity_mode,client_coverage_start,client_coverage_end,provider_coverage_start,provider_coverage_end,share_active_cases,share_open_tasks,share_recent_history_hours,share_attachments_mode,share_presence_mode,require_handoff_ack,continuity_retention_hours').in('service_agreement_location_id', locationIds)
       : { data: [] as ContinuityPolicy[], error: null };
-    const failures = [locationResponse.error, moduleResponse.error, routeResponse.error, unitResponse.error, scheduleResponse.error, configResponse.error, continuityResponse.error].filter(Boolean);
+    // ATLAS READS: client_sites.location_id / location_zones.location_id — the Location house behind each agreement facet
+    const facetSiteIds = ((locationResponse.data as AgreementLocation[]) ?? []).map((location) => location.site_id).filter((id): id is string => Boolean(id));
+    const facetZoneIds = ((locationResponse.data as AgreementLocation[]) ?? []).map((location) => location.zone_id).filter((id): id is string => Boolean(id));
+    const [facetSiteResponse, facetZoneResponse] = await Promise.all([
+      facetSiteIds.length ? supabase.from('client_sites').select('id,location_id').in('id', facetSiteIds) : Promise.resolve({ data: [] as { id: string; location_id: string | null }[], error: null }),
+      facetZoneIds.length ? supabase.from('location_zones').select('id,location_id').in('id', facetZoneIds) : Promise.resolve({ data: [] as { id: string; location_id: string | null }[], error: null }),
+    ]);
+    const houseIdList = Array.from(new Set([
+      ...((facetSiteResponse.data as { location_id: string | null }[]) ?? []).map((row) => row.location_id),
+      ...((facetZoneResponse.data as { location_id: string | null }[]) ?? []).map((row) => row.location_id),
+    ].filter((id): id is string => Boolean(id))));
+    // ATLAS READS: locations, location_module_assignments — which toolset runs at which house under this agreement
+    const [houseResponse, assignmentResponse] = await Promise.all([
+      houseIdList.length ? supabase.from('locations').select('id,name').in('id', houseIdList).order('name') : Promise.resolve({ data: [] as LocationHouse[], error: null }),
+      houseIdList.length ? supabase.from('location_module_assignments').select('id,location_id,module_key,service_agreement_id,enabled,effective_from,effective_to,updated_at').eq('service_agreement_id', agreement.id).in('location_id', houseIdList) : Promise.resolve({ data: [] as ModuleAssignment[], error: null }),
+    ]);
+    const failures = [locationResponse.error, moduleResponse.error, routeResponse.error, unitResponse.error, scheduleResponse.error, configResponse.error, continuityResponse.error, facetSiteResponse.error, facetZoneResponse.error, houseResponse.error, assignmentResponse.error].filter(Boolean);
     if (failures.length) setError(failures[0]?.message ?? 'Operational work evidence could not be loaded.');
     const nextLocations = (locationResponse.data as AgreementLocation[]) ?? [];
     const nextModules = (moduleResponse.data as AgreementModule[]) ?? [];
@@ -197,6 +248,9 @@ export function CrmOperationalWorkPanel({
     setSchedules(scheduleRows);
     setConfigLinks((configResponse.data as PatrolConfigLink[]) ?? []);
     setContinuityPolicies((continuityResponse.data as ContinuityPolicy[]) ?? []);
+    setHouses((houseResponse.data as LocationHouse[]) ?? []);
+    setAssignments((assignmentResponse.data as ModuleAssignment[]) ?? []);
+    setToolsetForm(null);
     setWorkUnits(((unitResponse.data as WorkUnit[]) ?? []).filter((unit) =>
       (unit.service_agreement_location_id && locationIdSet.has(unit.service_agreement_location_id)) ||
       (unit.patrol_route_id && routeIds.has(unit.patrol_route_id))
@@ -291,8 +345,61 @@ export function CrmOperationalWorkPanel({
     setSaving(false);
   };
 
-  const editContinuityPair = (locationId: string, moduleId: string) => {
-    const policy = continuityPolicies.find((candidate) =>
+  const agreementModuleKeys = useMemo(
+    () => Array.from(new Set(modules.map((module) => module.module_key))).sort(),
+    [modules],
+  );
+  const assignmentFor = useCallback(
+    (locationId: string, moduleKey: string) => assignments.find((row) => row.location_id === locationId && row.module_key === moduleKey),
+    [assignments],
+  );
+
+  const openToolset = (locationId: string, moduleKey: string) => {
+    const existing = assignmentFor(locationId, moduleKey);
+    setToolsetForm({
+      locationId,
+      moduleKey,
+      enabled: existing ? !existing.enabled : true,
+      effectiveFrom: existing?.effective_from ?? new Date().toISOString().slice(0, 10),
+      effectiveTo: existing?.effective_to ?? '',
+      expectedUpdatedAt: existing?.updated_at ?? null,
+    });
+    setError(null);
+    setNotice(null);
+  };
+
+  const saveToolset = async (event: FormEvent) => {
+    event.preventDefault();
+    if (!toolsetForm) return;
+    if (toolsetForm.effectiveTo && toolsetForm.effectiveTo < toolsetForm.effectiveFrom) {
+      setError('The end date cannot be before the start date.');
+      return;
+    }
+    setSavingToolset(true); setError(null); setNotice(null);
+    // ATLAS WRITES: manage_location_module_assignment (replay-safe, optimistic, audited per-place toolset)
+    const { data, error: saveError } = await supabase.rpc('manage_location_module_assignment', {
+      p_client_request_id: crypto.randomUUID(),
+      p_location_id: toolsetForm.locationId,
+      p_service_agreement_id: agreement.id,
+      p_module_key: toolsetForm.moduleKey,
+      p_expected_updated_at: toolsetForm.expectedUpdatedAt,
+      p_enabled: toolsetForm.enabled,
+      p_effective_from: toolsetForm.effectiveFrom,
+      p_effective_to: toolsetForm.effectiveTo || null,
+    });
+    const saved = (Array.isArray(data) ? data[0] : data) as ModuleAssignment | null;
+    if (saveError || !saved) setError(saveError?.message ?? 'The module change at this place was not confirmed.');
+    else {
+      const houseName = houses.find((house) => house.id === toolsetForm.locationId)?.name ?? 'this place';
+      setNotice(`${toolsetForm.moduleKey.replaceAll('_', ' ')} is now ${saved.enabled ? 'on' : 'off'} at ${houseName}, ${describeAssignment(saved).toLowerCase()}. An audit receipt was recorded. Next: officers at this place see this toolset on their next shift.`);
+      setToolsetForm(null);
+      await load();
+      await onChanged?.();
+    }
+    setSavingToolset(false);
+  };
+
+  const editContinuityPair = (locationId: string, moduleId: string) => {    const policy = continuityPolicies.find((candidate) =>
       candidate.service_agreement_location_id === locationId
       && candidate.service_agreement_module_id === moduleId
     );
@@ -487,6 +594,45 @@ export function CrmOperationalWorkPanel({
               <button type="submit" className="btn btn-sm btn-primary" disabled={savingContinuity}>{savingContinuity ? 'Saving…' : 'Save continuity policy'}</button>
             </footer>
           </form>
+        )}
+      </section>
+
+      <section className="crm-place-toolsets" aria-label={`Modules at each place for ${agreement.name}`}>
+        <header>
+          <div>
+            <span>Modules at each place</span>
+            <strong>Decide which toolset runs at which Location house</strong>
+            <p>A module enabled on the agreement is still a choice at every place. Turn it on where officers should carry it, and off where they should not, before anyone is deployed.</p>
+          </div>
+        </header>
+        {houses.length === 0 || agreementModuleKeys.length === 0 ? (
+          <p className="crm-workspace-subtle">{houses.length === 0 ? 'No Location house is reachable from this agreement yet. Link an active Site or Zone facet first.' : 'No module is enabled on this agreement yet. Use Configure coverage and modules first.'}</p>
+        ) : (
+          <ul className="crm-place-toolset-list">
+            {houses.map((house) => <li key={house.id}>
+              <strong><MapPinned size={14} aria-hidden="true" /> {house.name}</strong>
+              <ul>
+                {agreementModuleKeys.map((moduleKey) => {
+                  const assignment = assignmentFor(house.id, moduleKey);
+                  const isEditing = toolsetForm?.locationId === house.id && toolsetForm.moduleKey === moduleKey;
+                  return <li key={moduleKey} className={assignment?.enabled ? 'is-on' : assignment ? 'is-off' : 'is-unset'}>
+                    <span>{moduleKey.replaceAll('_', ' ')}</span>
+                    <em>{describeAssignment(assignment)}</em>
+                    {isEditing ? null : <button type="button" className="btn btn-sm btn-secondary" onClick={() => openToolset(house.id, moduleKey)}>{assignment ? (assignment.enabled ? 'Turn off at this place' : 'Turn on at this place') : 'Set at this place'}</button>}
+                    {isEditing && toolsetForm && <form className="crm-place-toolset-form" onSubmit={saveToolset}>
+                      <p>{toolsetForm.enabled ? `Turn ${moduleKey.replaceAll('_', ' ')} on at ${house.name}.` : `Turn ${moduleKey.replaceAll('_', ' ')} off at ${house.name}.`} Officers working this place will see the change on their next shift.</p>
+                      <label><span>Starts</span><input type="date" required value={toolsetForm.effectiveFrom} onChange={(changeEvent) => setToolsetForm((current) => current && { ...current, effectiveFrom: changeEvent.target.value })} /></label>
+                      <label><span>Ends (optional)</span><input type="date" value={toolsetForm.effectiveTo} onChange={(changeEvent) => setToolsetForm((current) => current && { ...current, effectiveTo: changeEvent.target.value })} /></label>
+                      <footer>
+                        <button type="button" className="btn btn-sm btn-secondary" onClick={() => setToolsetForm(null)} disabled={savingToolset}>Keep current setting</button>
+                        <button type="submit" className="btn btn-sm btn-primary" disabled={savingToolset}>{savingToolset ? 'Saving…' : toolsetForm.enabled ? 'Confirm turn on' : 'Confirm turn off'}</button>
+                      </footer>
+                    </form>}
+                  </li>;
+                })}
+              </ul>
+            </li>)}
+          </ul>
         )}
       </section>
       {workUnits.length === 0 ? <p className="crm-workspace-subtle"><ClipboardList size={14} /> No rosterable work unit is linked to this agreement or provider route yet.</p> : <div className="crm-operational-work-list">{workUnits.map((unit) => <article key={unit.id}><Route size={15} /><div><strong>{unit.name}</strong><span>{unit.work_unit_type.replace('_', ' ')} · {unit.service_type.replaceAll('_', ' ')}</span></div><em>{unit.active ? 'Active' : 'Inactive'}</em></article>)}</div>}

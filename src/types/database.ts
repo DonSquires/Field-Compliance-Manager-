@@ -46955,9 +46955,11 @@ export type Database = {
       }
       manage_location_module_assignment: {
         Args: {
-          p_effective_from?: string
-          p_effective_to?: string
-          p_enabled?: boolean
+          p_client_request_id: string
+          p_effective_from: string
+          p_effective_to: string | null
+          p_enabled: boolean
+          p_expected_updated_at: string | null
           p_location_id: string
           p_module_key: string
           p_service_agreement_id: string

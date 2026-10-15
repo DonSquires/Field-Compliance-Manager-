@@ -1341,3 +1341,54 @@ remains unpopulated.
   `manage_roster_work_unit_skill_ids` to `pages/RosterTargetsPage`, keeps
   `exercised=null`, and moves bounded gaps 130 -> 129: 0 Edge Functions,
   77 RPCs and 52 tables.
+
+### Closure log - governed per-place toolset assignment
+
+- Atlas showed `manage_location_module_assignment` as present but unwired, and
+  a source sweep confirmed the gap was total: no web surface, no edge function
+  and no other RPC referenced `location_module_assignments` anywhere. The two
+  live rows were seeded with a null `created_by`, so no person had ever made
+  this decision in the product. Canon's sentence - a guard on a place for a
+  shift, with a toolset - had no toolset step.
+- Before: a provider administrator could enable a module on the agreement and
+  link Site or Zone facets, but could not say which toolset actually runs at
+  which Location house. The only writer was also unsafe to wire: a retried
+  submit silently re-wrote the effective window, and two administrators could
+  clobber each other's dates without either being told.
+- During: the operational work panel resolves the Location house behind each
+  active agreement facet, reads the current assignment per house and per
+  agreement-enabled module, and shows one of three honest states - on for a
+  window, off for a window, or not set at this place. The action is explicit
+  (`Turn on at this place` / `Turn off at this place`), states what the change
+  means for officers, and offers `Keep current setting` as a safe exit. The
+  replacement RPC serializes a client request, replays its audit receipt,
+  requires the expected `updated_at`, and keeps every pre-existing containment
+  check: accepted and in-term agreement, provider administrator, module
+  enabled on the agreement, house owned by the client organisation, and an
+  active Site or Zone facet under that house.
+- After: the assignment carries the acting user in `created_by`, advances
+  `updated_at`, and writes previous and resulting enablement, the effective
+  window and the full record snapshot to `audit_log` against the client
+  organisation. The panel reloads from the persisted row and reports an
+  audit-receipt success that names the next actor.
+- This applies Trackforce's useful configure-before-deploy sequence: settle the
+  toolset for a place before anyone is sent there, keep the decision visible
+  and reversible to a supervisor, and leave a durable receipt. It does not copy
+  a device-centric module model; the place, the agreement and the client
+  organisation stay the anchor.
+- The linked migration is applied and the regenerated live catalogue has 398
+  tables and 813 functions. Fourteen focused guards, the production build, web
+  and E2E type-checks, migration uniqueness across 627 migrations, 29 Atlas
+  generator tests, and linked database lint pass with no finding against the
+  new function. Rollback-only live verification against a throwaway test
+  identity - never a real person's account - proved save, same-request replay
+  with a single audit row, reuse-for-a-different-module rejection, stale-state
+  rejection, ungoverned-module rejection, reversed-window rejection and
+  non-administrator rejection, with zero retained profiles, assignments or
+  audit rows after rollback.
+- Honesty note: that verification was rolled back, so it is not production
+  invocation evidence. Atlas keeps `exercised=null` for this RPC; `wired` is
+  the strongest claim available. Atlas dry-run records
+  `components/CrmOperationalWorkPanel -calls-> rpc
+  manage_location_module_assignment` and moves bounded gaps 129 -> 128: 0 Edge
+  Functions, 76 RPCs and 52 tables.

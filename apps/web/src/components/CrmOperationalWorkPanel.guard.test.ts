@@ -29,8 +29,38 @@ describe('patrol run from an accepted agreement', () => {
     });
   });
 
-  it('builds the run through the governed RPC and says what happens next', () => {
-    expect(source).toContain("supabase.rpc('create_patrol_route_from_agreement'");
+  describe('per-place toolset assignment', () => {
+    it('resolves the Location house behind each agreement facet and reads its assignments', () => {
+      expect(source).toContain(".from('client_sites').select('id,location_id')");
+      expect(source).toContain(".from('location_zones').select('id,location_id')");
+      expect(source).toContain(".from('locations').select('id,name')");
+      expect(source).toContain(".from('location_module_assignments').select('id,location_id,module_key,service_agreement_id,enabled,effective_from,effective_to,updated_at')");
+    });
+
+    it('writes only through the governed replay-safe optimistic RPC', () => {
+      expect(source).toContain("supabase.rpc('manage_location_module_assignment'");
+      expect(source).toContain('p_client_request_id: crypto.randomUUID()');
+      expect(source).toContain('p_expected_updated_at: toolsetForm.expectedUpdatedAt');
+      expect(source).toContain('p_service_agreement_id: agreement.id');
+      expect(source).not.toMatch(/from\('location_module_assignments'\)[\s\S]{0,300}\.(insert|update|upsert|delete)\(/);
+    });
+
+    it('confirms the change, offers a safe exit, and gives an audit receipt', () => {
+      expect(source).toContain('Keep current setting');
+      expect(source).toContain("'Confirm turn on'");
+      expect(source).toContain("'Confirm turn off'");
+      expect(source).toContain('An audit receipt was recorded. Next: officers at this place see this toolset on their next shift.');
+      expect(source).toContain('The end date cannot be before the start date.');
+    });
+
+    it('states honestly when a place or module is missing instead of showing an empty grid', () => {
+      expect(source).toContain('No Location house is reachable from this agreement yet. Link an active Site or Zone facet first.');
+      expect(source).toContain('No module is enabled on this agreement yet. Use Configure coverage and modules first.');
+      expect(source).toContain("'Not set at this place'");
+    });
+  });
+
+  it('builds the run through the governed RPC and says what happens next', () => {    expect(source).toContain("supabase.rpc('create_patrol_route_from_agreement'");
     expect(source).toContain('p_service_agreement_id: agreement.id');
     expect(source).toContain('Next: add a work unit so it can be rostered.');
     expect(source).not.toMatch(/from\('patrol_routes'\)[\s\S]{0,120}\.insert\(/);
