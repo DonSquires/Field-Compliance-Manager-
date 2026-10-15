@@ -38,6 +38,10 @@ permissions, audit, idempotency, approvals, GitHub evidence, and exact-SHA
 release receipts. Ambiguous client delivery failures now direct the owner to
 check the already-created durable request before resending instead of implying
 that a model quota or provider timeout proves the Edge Function failed.
+An unresolved queued or running request keeps the composer locked and offers
+only status and cancellation. The panel unlocks only after the authenticated
+status/cancel path confirms Bob has no record of that request ID; it then
+offers `Restore prompt` and never a resend or retry-delivery action.
 
 Builder queue hygiene 2026-10-15: durable outcomes and queue status had drifted
 apart. Jobs already recorded `autopilot_state=done`, plus old main-health

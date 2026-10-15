@@ -521,7 +521,7 @@ describe('BobPanel', () => {
     }));
   });
 
-  it('unlocks an undelivered turn instead of leaving it queued forever, and retries with the same request ID', async () => {
+  it('unlocks an undelivered turn only after the server confirms it has no record, without offering a resend', async () => {
     let enqueueCalls = 0;
     const enqueuedRequestIds: unknown[] = [];
     mockInvoke.mockImplementation((_name: string, options?: { body?: Record<string, unknown> }) => {
@@ -561,17 +561,19 @@ describe('BobPanel', () => {
     fireEvent.click(screen.getByRole('button', { name: 'Send' }));
 
     expect(await screen.findByText('Not delivered')).toBeTruthy();
-    expect((await screen.findByRole('alert')).textContent).toContain('Bob never received this request');
+    expect((await screen.findByRole('alert')).textContent).toContain('Bob has no record of this request');
     expect(screen.queryByRole('button', { name: 'Request cancellation' })).toBeNull();
     expect(screen.getByRole('button', { name: 'Restore prompt' })).toBeTruthy();
 
-    fireEvent.click(screen.getByRole('button', { name: 'Retry delivery' }));
+    expect(screen.queryByRole('button', { name: /retry|resend/i })).toBeNull();
+    expect(document.body.textContent ?? '').not.toMatch(/retry delivery|resend/i);
+    expect(enqueueCalls).toBe(1);
 
-    await waitFor(() => {
-      expect(enqueueCalls).toBe(2);
-      expect(screen.getByText('Working')).toBeTruthy();
-    });
-    expect(enqueuedRequestIds[1]).toBe(enqueuedRequestIds[0]);
+    fireEvent.click(screen.getByRole('button', { name: 'Restore prompt' }));
+    expect((screen.getByPlaceholderText('Ask Bob to plan, inspect, explain, or prepare a proposal') as HTMLTextAreaElement).value).toBe('Redesign the Builder studio');
+    expect(screen.queryByText('Not delivered')).toBeNull();
+    expect(enqueueCalls).toBe(1);
+    expect(enqueuedRequestIds).toHaveLength(1);
   });
 
   it('surfaces a recoverable timeout when Bob does not return', async () => {
