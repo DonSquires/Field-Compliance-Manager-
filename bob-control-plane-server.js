@@ -624,7 +624,15 @@ async function publishBuilderBranch(jobId) {
   if (job.workspace_published_head_sha === job.workspace_head_sha) return { branch: job.workspace_branch, head: job.workspace_head_sha, existing: true };
   const workspacePath = workspacePathForBranch(builderWorkspaceRoot, job.workspace_branch);
   const target = builderGitTarget();
-  const publication = publishWorkspaceBranch({ workspacePath, branchName: job.workspace_branch, expectedHeadSha: job.workspace_head_sha, pushUrl: target.repoUrl, pushAuthHeader: target.authHeader, sshCommand: target.sshCommand });
+  const publication = publishWorkspaceBranch({
+    workspacePath,
+    branchName: job.workspace_branch,
+    expectedHeadSha: job.workspace_head_sha,
+    pushUrl: target.repoUrl,
+    pushAuthHeader: target.authHeader,
+    sshCommand: target.sshCommand,
+    requireVerifiedIdentity: builderGitHost === 'github',
+  });
   const { data: updated, error } = await builderSupabase.rpc('builder_record_workspace_publication', { _job_id: job.id, _expected_head_sha: publication.head });
   if (error || !updated) throw new BuilderStepError(409, 'Builder branch publication could not be recorded');
   return { branch: publication.branchName, head: publication.head, existing: false };

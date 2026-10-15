@@ -4,7 +4,7 @@ const os = require('node:os');
 const path = require('node:path');
 const { execFileSync } = require('node:child_process');
 const test = require('node:test');
-const { branchNameForJob, builderCommitIdentity, createBranchWorkspace, createDetachedWorkspace, commitVerifiedPatch, publishWorkspaceBranch, createGiteaPullRequest, mergeGitHubPullRequest } = require('../builder-branch-workspace');
+const { VERIFIED_GITHUB_EMAIL, branchNameForJob, builderCommitIdentity, createBranchWorkspace, createDetachedWorkspace, commitVerifiedPatch, publishWorkspaceBranch, createGiteaPullRequest, mergeGitHubPullRequest } = require('../builder-branch-workspace');
 
 const patch = ['diff --git a/apps/web/src/example.ts b/apps/web/src/example.ts', '--- a/apps/web/src/example.ts', '+++ b/apps/web/src/example.ts', '@@ -1 +1 @@', '-export const value = 1;', '+export const value = 2;', ''].join('\n');
 
@@ -25,10 +25,12 @@ test('Builder can require an explicitly configured verified GitHub commit identi
     delete process.env.BOB_BUILDER_GIT_EMAIL;
     assert.throws(() => builderCommitIdentity({ requireVerified: true }), /BOB_BUILDER_GIT_EMAIL/);
     process.env.BOB_BUILDER_GIT_NAME = 'Don Squires';
-    process.env.BOB_BUILDER_GIT_EMAIL = '256263525+DonSquires@users.noreply.github.com';
+    process.env.BOB_BUILDER_GIT_EMAIL = 'unverified@example.com';
+    assert.throws(() => builderCommitIdentity({ requireVerified: true }), new RegExp(VERIFIED_GITHUB_EMAIL.replace(/[.+]/g, '\\$&')));
+    process.env.BOB_BUILDER_GIT_EMAIL = VERIFIED_GITHUB_EMAIL;
     assert.deepEqual(builderCommitIdentity({ requireVerified: true }), {
       name: 'Don Squires',
-      email: '256263525+DonSquires@users.noreply.github.com',
+      email: VERIFIED_GITHUB_EMAIL,
     });
   } finally {
     if (previousName === undefined) delete process.env.BOB_BUILDER_GIT_NAME;
@@ -185,6 +187,66 @@ test('Builder publication rejects a workspace whose recorded head is stale', () 
     const workspace = createBranchWorkspace({ sourceDir: repo.root, workspaceRoot: repo.workspaceRoot, jobId: '12345678-1234-1234-1234-123456789abc', targetSha: repo.sha });
     assert.throws(() => publishWorkspaceBranch({ workspacePath: workspace.workspacePath, branchName: workspace.branchName, expectedHeadSha: '0'.repeat(40) }), /stale/);
   } finally { fs.rmSync(repo.root, { recursive: true, force: true }); }
+});
+
+test('GitHub publication rejects an unverified workspace head even when its recorded SHA is current', () => {
+  const repo = fixture();
+  const previousName = process.env.BOB_BUILDER_GIT_NAME;
+  const previousEmail = process.env.BOB_BUILDER_GIT_EMAIL;
+  try {
+    process.env.BOB_BUILDER_GIT_NAME = 'Don Squires';
+    process.env.BOB_BUILDER_GIT_EMAIL = VERIFIED_GITHUB_EMAIL;
+    const workspace = createBranchWorkspace({ sourceDir: repo.root, workspaceRoot: repo.workspaceRoot, jobId: '22345678-1234-1234-1234-123456789abc', targetSha: repo.sha });
+    assert.throws(
+      () => publishWorkspaceBranch({ workspacePath: workspace.workspacePath, branchName: workspace.branchName, expectedHeadSha: repo.sha, requireVerifiedIdentity: true }),
+      /verified GitHub identity/
+    );
+  } finally {
+    if (previousName === undefined) delete process.env.BOB_BUILDER_GIT_NAME;
+    else process.env.BOB_BUILDER_GIT_NAME = previousName;
+    if (previousEmail === undefined) delete process.env.BOB_BUILDER_GIT_EMAIL;
+    else process.env.BOB_BUILDER_GIT_EMAIL = previousEmail;
+    fs.rmSync(repo.root, { recursive: true, force: true });
+  }
+});
+
+test('Bob preserves a concurrent agent commit while advancing with a verified release head', () => {
+  const repo = fixture();
+  const previousName = process.env.BOB_BUILDER_GIT_NAME;
+  const previousEmail = process.env.BOB_BUILDER_GIT_EMAIL;
+  try {
+    const workspace = createBranchWorkspace({ sourceDir: repo.root, workspaceRoot: repo.workspaceRoot, jobId: '32345678-1234-1234-1234-123456789abc', targetSha: repo.sha });
+
+    fs.writeFileSync(path.join(repo.root, 'apps/web/src/concurrent.ts'), 'export const concurrent = true;\n');
+    git(repo.root, ['add', '.']);
+    git(repo.root, ['-c', 'user.name=Concurrent Agent', '-c', 'user.email=don@squires.local', 'commit', '-qm', 'concurrent app work']);
+    const concurrentSha = git(repo.root, ['rev-parse', 'HEAD']);
+
+    process.env.BOB_BUILDER_GIT_NAME = 'Don Squires';
+    process.env.BOB_BUILDER_GIT_EMAIL = VERIFIED_GITHUB_EMAIL;
+    const committed = commitVerifiedPatch({
+      workspacePath: workspace.workspacePath,
+      branchName: workspace.branchName,
+      patch,
+      message: 'Bob Builder: concurrent-safe change',
+      requireVerifiedIdentity: true,
+    });
+    assert.equal(git(repo.root, ['show', '-s', '--format=%ae', committed.commitSha]), VERIFIED_GITHUB_EMAIL);
+    assert.equal(git(repo.root, ['rev-parse', `${committed.commitSha}^`]), repo.sha);
+
+    git(repo.root, ['-c', 'user.name=Don Squires', '-c', `user.email=${VERIFIED_GITHUB_EMAIL}`, 'merge', '--no-ff', '-qm', 'merge Bob after concurrent work', committed.commitSha]);
+    const releaseSha = git(repo.root, ['rev-parse', 'HEAD']);
+    assert.equal(git(repo.root, ['merge-base', '--is-ancestor', concurrentSha, releaseSha]), '');
+    assert.equal(git(repo.root, ['merge-base', '--is-ancestor', committed.commitSha, releaseSha]), '');
+    assert.equal(fs.readFileSync(path.join(repo.root, 'apps/web/src/concurrent.ts'), 'utf8'), 'export const concurrent = true;\n');
+    assert.equal(fs.readFileSync(path.join(repo.root, 'apps/web/src/example.ts'), 'utf8'), 'export const value = 2;\n');
+  } finally {
+    if (previousName === undefined) delete process.env.BOB_BUILDER_GIT_NAME;
+    else process.env.BOB_BUILDER_GIT_NAME = previousName;
+    if (previousEmail === undefined) delete process.env.BOB_BUILDER_GIT_EMAIL;
+    else process.env.BOB_BUILDER_GIT_EMAIL = previousEmail;
+    fs.rmSync(repo.root, { recursive: true, force: true });
+  }
 });
 
 test('Builder pull request creation requires the configured self-hosted Gitea remote', async () => {
