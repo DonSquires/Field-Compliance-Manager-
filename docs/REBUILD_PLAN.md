@@ -14,7 +14,12 @@ worker mounted the shared Builder checkout read-only; another job could still
 force that underlying checkout to a different SHA while the suite was
 running. Main health now receives a detached per-SHA Git worktree. Moving the
 shared checkout can no longer change files underneath an active verification
-container or open a false repair job.
+container or open a false repair job. GitHub main, Vercel Production, and the
+control-plane release ledger reached `9ae6981f`; the false repair and its older
+duplicate were retired without a workspace or patch. This documentation-only
+follow-up advances main once after that control-plane restart so the next
+health receipt exercises the deployed isolation path rather than reusing the
+pre-release receipt.
 
 Dispatch main-health repair 2026-10-15: after the Finance guard repair merged,
 the full health compiler exposed Playwright request captures narrowed to
