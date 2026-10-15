@@ -78,6 +78,7 @@ export async function installSupabaseFixtures(page: Page, options: { officerModu
   const debriefFollowups=mutable([{id:'adadadad-adad-4dad-8dad-adadadadadad',organization_id:ORG_ID,debrief_id:'aeaeaeae-aeae-4eae-8eae-aeaeaeaeaeae',shift_id:'66666666-6666-4666-8666-666666666666',officer_user_id:OFFICER_ID,status:'open',priority:'critical',owner_user_id:null,version:1,latest_note:'Supervisor must review the safety incident.',resolved_at:null,created_at:'2026-08-30T09:00:00.000Z'}]);
   const noiseAssessments=[{id:'afafafaf-afaf-4faf-8faf-afafafafafaf',organization_id:ORG_ID,officer_user_id:OFFICER_ID,officer_id:OFFICER_ID,officer_name:'Ana Ngata',decibel_reading:86,noise_source:'Amplified music',prior_notice_count:1,action_taken:'verbal_warning',scene_description:'Music audible beyond the venue boundary.',assessed_at:'2026-08-30T08:10:00.000Z',review_status:'open',reviewed_at:null,review_notes:null,follow_up_required:false}];
   const staffCredentials: Array<Record<string, unknown>> = [{ id: '34343434-3434-4434-8434-343434343434', staff_id: OFFICER_ID, credential_type: 'security_licence', credential_number: 'SL-2048', issuing_authority: 'PSPLA', issued_date: '2026-06-01', expiry_date: '2027-06-01', verified: true }, { id: '35353535-3535-4535-8535-353535353535', staff_id: SECOND_OFFICER_ID, credential_type: 'first_aid', credential_number: 'FA-1024', issuing_authority: 'Red Cross', issued_date: '2025-09-10', expiry_date: '2026-09-10', verified: true }];
+  const staffAvailability: Array<Record<string, unknown>> = [{ id: '98989898-9898-4898-8898-989898989898', staff_id: SECOND_OFFICER_ID, day_of_week: 7, specific_date: null, available_from: null, available_to: null, all_day: true, availability_type: 'unavailable', notes: 'Unavailable on Sundays', created_at: '2026-08-01T00:00:00.000Z' }];
   const welfareAlerts = mutable([{ id: '47474747-4747-4747-8747-474747474747', officer_user_id: OFFICER_ID, status: 'pending', alert_type: 'sos', escalation_level: 3, escalated_at: '2026-08-29T21:25:00.000Z', acknowledged_at: null, acknowledgement_notes: null, resolved_at: null, resolution_notes: null, triggered_at: '2026-08-29T21:20:00.000Z', gps_lat: -36.8485, gps_lng: 174.7633, gps_accuracy: 8, officer_phone: '021 555 0148', notes: 'Officer initiated an SOS from the North Yard.', officer: { id: OFFICER_ID, display_name: 'Ana Ngata', phone: '021 555 0148' }, acknowledged_by: null, resolved_by: null }]);
   const approvalActions = [{ id: '78787878-7878-4878-8878-787878787878', action_type: 'publish_patrol_route', status: 'pending', bob_reasoning: 'The route has complete verified geography and staffing evidence.', confidence_score: 0.91, context_table: 'patrol_routes', context_summary: 'Publish North District evening patrol', created_at: '2026-08-29T21:10:00.000Z', applied_at: null, approved_at: null, proposed_payload: { route_id: '19191919-1919-4919-8919-191919191919' }, amended_payload: null, organization_id: ORG_ID, org_name: 'Harbour Compliance Services', triggered_by_name: 'Bob', user_name: null, approved_by_name: null, rejection_reason: null, error_message: null, result_table: null, result_record_id: null, assigned_approver_id: SECOND_OFFICER_ID, assigned_approver_name: 'Jordan Lee', can_decide: false }];
   const bobJobRuns = [{ id: '81818181-8181-4818-8818-818181818181', job_id: '82828282-8282-4828-8828-828282828282', goal: 'Prepare the monthly client invoice draft', status: 'stopped', approval_mode: 'required', contains_writes: true, stopped_reason: 'step_failed:validate_totals', steps: [{ step_id: 'create_draft', tool: 'create_invoice', kind: 'write', status: 'ok' }, { step_id: 'validate_totals', tool: 'schema_inspect', kind: 'read', status: 'failed' }], clarifications: ['Confirm the tax total before the draft invoice is issued.'], created_at: '2026-08-29T21:15:00.000Z' }];
@@ -380,7 +381,7 @@ export async function installSupabaseFixtures(page: Page, options: { officerModu
       return;
     }
     if (table === 'staff_availability') {
-      await route.fulfill(fulfillJson([{ staff_id: SECOND_OFFICER_ID, day_of_week: 7, specific_date: null, available_from: null, available_to: null, all_day: true, availability_type: 'unavailable' }]));
+      await route.fulfill(fulfillJson(staffAvailability));
       return;
     }
     if (table === 'organization_calendar_settings') { await route.fulfill(fulfillJson([{ region_code: holidayRegion }])); return; }
@@ -430,6 +431,30 @@ export async function installSupabaseFixtures(page: Page, options: { officerModu
     if (table === 'manage_roster_slot') { adminSlotStatus = 'cancelled'; await route.fulfill(fulfillJson([{ slot_id: '32323232-3232-4232-8232-323232323232', slot_status: 'cancelled', shift_id: null, shift_status: null }])); return; }
     if (table === 'reassign_roster_slot') { adminSlotStaffId = SECOND_OFFICER_ID; adminSlotStatus = 'published'; await route.fulfill(fulfillJson([{ slot_id: '32323232-3232-4232-8232-323232323232', slot_status: 'published', staff_id: SECOND_OFFICER_ID, shift_id: null, shift_status: null }])); return; }
     if (table === 'set_organization_calendar_region') { holidayRegion = JSON.parse(request.postData() ?? '{}').p_region_code ?? ''; await route.fulfill(fulfillJson({ organization_id: ORG_ID, country_code: 'NZ', region_code: holidayRegion })); return; }
+    if (table === 'manage_staff_availability') {
+      const payload = JSON.parse(request.postData() ?? '{}');
+      if (payload.p_action === 'delete') {
+        const index = staffAvailability.findIndex((record) => record.id === payload.p_availability_id);
+        const [removed] = index >= 0 ? staffAvailability.splice(index, 1) : [];
+        await route.fulfill(fulfillJson(removed ?? null));
+        return;
+      }
+      const row = {
+        id: '99999999-9999-4999-8999-999999999999',
+        staff_id: payload.p_staff_id,
+        day_of_week: payload.p_day_of_week ?? null,
+        specific_date: payload.p_specific_date ?? null,
+        available_from: payload.p_available_from ?? null,
+        available_to: payload.p_available_to ?? null,
+        all_day: payload.p_all_day,
+        availability_type: payload.p_type,
+        notes: payload.p_notes ?? null,
+        created_at: '2026-08-31T09:30:00.000Z',
+      };
+      staffAvailability.push(row);
+      await route.fulfill(fulfillJson(row));
+      return;
+    }
     if (table === 'review_branch_leave_request' || table === 'review_leave_request') { hrLeaveStatus = JSON.parse(request.postData() ?? '{}').p_decision; await route.fulfill(fulfillJson({ id: '36363636-3636-4636-8636-363636363636', status: hrLeaveStatus })); return; }
     if (table === 'review_branch_timesheet' || table === 'review_timesheet') { hrTimesheetStatus = JSON.parse(request.postData() ?? '{}').p_decision; await route.fulfill(fulfillJson({ id: '38383838-3838-4838-8838-383838383838', status: hrTimesheetStatus })); return; }
     if (table === 'create_shift_coverage_request') { const payload = JSON.parse(request.postData() ?? '{}'); const row = { id: '39393939-3939-4939-8939-393939393939', shift_date: payload.p_shift_date, start_time: payload.p_start_time, end_time: payload.p_end_time, required_staff_count: payload.p_required_staff_count, urgency: payload.p_urgency, status: 'open', claimed_by: null, roster_slot_id: null, notes: payload.p_notes, site: null }; hrCoverage.unshift(row); await route.fulfill(fulfillJson(row)); return; }

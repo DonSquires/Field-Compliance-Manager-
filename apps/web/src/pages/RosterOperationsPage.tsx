@@ -87,7 +87,23 @@ interface HistoricalOfficer { display_name: string | null; email: string | null;
 interface HistoricalAssignment { id: string; officer_id: string; patrol_route_id: string | null; service_type: string; specific_date: string; shift: string; start_time: string | null; end_time: string | null; officer: HistoricalOfficer | HistoricalOfficer[] | null; external_refs: { source?: string; beat_names?: string[]; time_precision?: string; source_event_count?: number } | null; }
 interface PatrolRoute { id: string; name: string; route_code: string | null; }
 interface Leave { staff_id: string; starts_on: string; ends_on: string; }
-interface Availability { staff_id: string; day_of_week: number | null; specific_date: string | null; available_from: string | null; available_to: string | null; all_day: boolean; availability_type: string; }
+type AvailabilityType = 'available' | 'preferred' | 'unavailable' | 'leave';
+interface Availability { id: string; staff_id: string; day_of_week: number | null; specific_date: string | null; available_from: string | null; available_to: string | null; all_day: boolean; availability_type: AvailabilityType; notes: string | null; created_at: string; }
+interface AvailabilityDialog {
+  staffId: string;
+  scheduleKind: 'date' | 'weekday';
+  specificDate: string;
+  dayOfWeek: number;
+  allDay: boolean;
+  availableFrom: string;
+  availableTo: string;
+  availabilityType: Exclude<AvailabilityType, 'leave'>;
+  notes: string;
+  clientRequestId: string;
+  deleteTarget: Availability | null;
+  deleteReason: string;
+  deleteRequestId: string;
+}
 interface Coverage { id: string; shift_date: string; }
 interface CommercialReadiness { slot_id: string; pay_status: string; billing_status: string; quote_status: string; geofence_status: string; cost_centre_status: string; }
 interface LabourCost { slot_id: string; work_unit_name: string; scheduled_hours: number; pay_cost: number; billable: number; margin: number; rate_status: string; }
@@ -131,6 +147,7 @@ const RosterOperationsPage: React.FC = () => {
   const [labourCost, setLabourCost] = useState<LabourCost[]>([]);
   const [attendanceExceptions, setAttendanceExceptions] = useState<AttendanceException[]>([]);
   const [attendanceAction, setAttendanceAction] = useState<{ item: AttendanceException; notes: string } | null>(null);
+  const [availabilityDialog, setAvailabilityDialog] = useState<AvailabilityDialog | null>(null);
   const [templateDialog, setTemplateDialog] = useState<TemplatePreview | 'loading' | null>(null);
   const [publishDialog, setPublishDialog] = useState<BatchPublishPreview | 'loading' | null>(null);
   const [loading, setLoading] = useState(true);
@@ -203,7 +220,7 @@ const RosterOperationsPage: React.FC = () => {
       supabase.from('roster_assignments').select('id,officer_id,patrol_route_id,service_type,specific_date,shift,start_time,end_time,external_refs,officer:user_profiles!roster_assignments_officer_id_fkey(display_name,email)').eq('organization_id', org).gte('specific_date', isoDate(weekStart)).lt('specific_date', isoDate(weekEnd)).order('specific_date'),
       supabase.from('patrol_routes').select('id,name,route_code').eq('organization_id', org).order('name'),
       supabase.from('leave_requests').select('staff_id,starts_on,ends_on,status').eq('organization_id', org).eq('status', 'approved').lte('starts_on', isoDate(addDays(weekEnd, -1))).gte('ends_on', isoDate(weekStart)),
-      supabase.from('staff_availability').select('staff_id,day_of_week,specific_date,available_from,available_to,all_day,availability_type').eq('organization_id', org).in('availability_type', ['unavailable', 'leave']).or(`day_of_week.not.is.null,and(specific_date.gte.${isoDate(weekStart)},specific_date.lt.${isoDate(weekEnd)})`),
+      supabase.from('staff_availability').select('id,staff_id,day_of_week,specific_date,available_from,available_to,all_day,availability_type,notes,created_at').eq('organization_id', org).or(`day_of_week.not.is.null,and(specific_date.gte.${isoDate(weekStart)},specific_date.lt.${isoDate(weekEnd)})`),
       supabase.from('shift_coverage_requests').select('id,shift_date').eq('organization_id', org).eq('status', 'open').gte('shift_date', isoDate(weekStart)).lt('shift_date', isoDate(weekEnd)),
       supabase.from('organization_calendar_settings').select('region_code').eq('organization_id', org),
       supabase.rpc('get_roster_commercial_readiness', { p_organization_id: org, p_from: weekStart.toISOString(), p_to: weekEnd.toISOString() }),
@@ -259,7 +276,7 @@ const RosterOperationsPage: React.FC = () => {
     }),
     { pay: 0, margin: 0, unpriced: 0 },
   );
-  const restrictionsForDay = (staffId: string, day: Date) => availability.filter((record) => record.staff_id === staffId && (record.specific_date === isoDate(day) || (record.specific_date === null && record.day_of_week === ((day.getDay() + 6) % 7) + 1)));
+  const restrictionsForDay = (staffId: string, day: Date) => availability.filter((record) => ['unavailable', 'leave'].includes(record.availability_type) && record.staff_id === staffId && (record.specific_date === isoDate(day) || (record.specific_date === null && record.day_of_week === ((day.getDay() + 6) % 7) + 1)));
   const availabilityOccurrences = days.flatMap((day) => staff.flatMap((person) => restrictionsForDay(person.staffId, day).map((record) => ({ day, person, record }))));
   const commercialExceptions = commercialReadiness.filter((item) => [item.pay_status, item.billing_status, item.quote_status, item.geofence_status, item.cost_centre_status].some((status) => !['ready', 'accepted', 'verified', 'not_applicable'].includes(status)));
   const hasAvailabilityConflict = (staffId: string, startValue: string, endValue: string) => {
@@ -480,10 +497,112 @@ const RosterOperationsPage: React.FC = () => {
     setSaving(false);
   };
 
+  const openAvailabilityDialog = (staffMember?: Staff, specificDate = isoDate(weekStart)) => {
+    setAvailabilityDialog({
+      staffId: staffMember?.staffId ?? staff[0]?.staffId ?? '',
+      scheduleKind: 'date',
+      specificDate,
+      dayOfWeek: 1,
+      allDay: true,
+      availableFrom: '08:00',
+      availableTo: '17:00',
+      availabilityType: 'unavailable',
+      notes: '',
+      clientRequestId: crypto.randomUUID(),
+      deleteTarget: null,
+      deleteReason: '',
+      deleteRequestId: crypto.randomUUID(),
+    });
+    setError(null);
+    setNotice(null);
+  };
+
+  const saveAvailability = async (event: React.FormEvent) => {
+    event.preventDefault();
+    if (!availabilityDialog || !availabilityDialog.staffId) return;
+    if (!availabilityDialog.allDay && availabilityDialog.availableFrom >= availabilityDialog.availableTo) {
+      setError('Availability start time must be before its end time.');
+      return;
+    }
+    if (availabilityDialog.availabilityType === 'unavailable' && !availabilityDialog.notes.trim()) {
+      setError('Explain why this staff member cannot work.');
+      return;
+    }
+
+    setSaving(true);
+    setError(null);
+    try {
+      // ATLAS CALLS: manage_staff_availability (replay-safe availability configuration and audit receipt)
+      const { data, error: availabilityError } = await supabase.rpc('manage_staff_availability', {
+        p_client_request_id: availabilityDialog.clientRequestId,
+        p_staff_id: availabilityDialog.staffId,
+        p_action: 'create',
+        p_day_of_week: availabilityDialog.scheduleKind === 'weekday' ? availabilityDialog.dayOfWeek : undefined,
+        p_specific_date: availabilityDialog.scheduleKind === 'date' ? availabilityDialog.specificDate : undefined,
+        p_available_from: availabilityDialog.allDay ? undefined : availabilityDialog.availableFrom,
+        p_available_to: availabilityDialog.allDay ? undefined : availabilityDialog.availableTo,
+        p_all_day: availabilityDialog.allDay,
+        p_type: availabilityDialog.availabilityType,
+        p_notes: availabilityDialog.notes.trim() || undefined,
+      });
+      if (availabilityError) {
+        setError(availabilityError.message);
+        return;
+      }
+      if (!data?.id) {
+        setError('Availability was not confirmed by the server.');
+        return;
+      }
+      setNotice('Staff availability saved with an audit receipt. Roster conflict checks now use this record.');
+      setAvailabilityDialog({
+        ...availabilityDialog,
+        notes: '',
+        clientRequestId: crypto.randomUUID(),
+      });
+      await load();
+    } finally {
+      setSaving(false);
+    }
+  };
+
+  const deleteAvailability = async () => {
+    if (!availabilityDialog?.deleteTarget || !availabilityDialog.deleteReason.trim()) return;
+    setSaving(true);
+    setError(null);
+    try {
+      const { data, error: availabilityError } = await supabase.rpc('manage_staff_availability', {
+        p_client_request_id: availabilityDialog.deleteRequestId,
+        p_staff_id: availabilityDialog.staffId,
+        p_action: 'delete',
+        p_availability_id: availabilityDialog.deleteTarget.id,
+        p_notes: availabilityDialog.deleteReason.trim(),
+      });
+      if (availabilityError) {
+        setError(availabilityError.message);
+        return;
+      }
+      if (!data?.id) {
+        setError('Availability removal was not confirmed by the server.');
+        return;
+      }
+      setNotice('Availability record removed with an audit receipt. Future roster checks no longer use it.');
+      setAvailabilityDialog({
+        ...availabilityDialog,
+        deleteTarget: null,
+        deleteReason: '',
+        deleteRequestId: crypto.randomUUID(),
+      });
+      await load();
+    } finally {
+      setSaving(false);
+    }
+  };
+
   return <div className="roster-ops">
     <header className="roster-ops-header"><div><span>{rosterView.eyebrow}</span><h1>Roster</h1><p>{rosterView.description}</p></div><div><button onClick={() => void load()} disabled={loading} title="Refresh roster" aria-label="Refresh roster"><RefreshCw size={16} className={loading ? 'is-spinning' : ''} /></button>{workUnits.length > 0 && <><button onClick={() => void openPublishDialog()} disabled={saving || loading || draftCount === 0} title={draftCount ? 'Publish every draft shift in this period' : 'No draft shifts in this period'}>Publish {plural(draftCount, 'draft')}</button><button className="is-primary" onClick={() => openCreate()}><Plus size={16} />Create shift</button></>}</div></header>
     {workflowContext.workUnitId&&<section className="roster-context-banner" role="status"><div><span>{workflowContext.handoffId?'Mobilisation handoff · roster evidence':'Account flow · roster action'}</span><strong>{requestedWorkUnit?.name??'Loading requested work unit'}</strong><p>{requestedWorkUnit?'Schedule the next officer assignment against the work unit selected during mobilisation.':'The requested work unit is not active in this provider roster.'}</p></div><div><button onClick={()=>navigate('/admin/roster')}>Clear focus</button>{workflowContext.handoffId&&<button onClick={()=>navigate(`/admin/handoffs${workflowContextQuery(workflowContext)}`)}>Return to handoff</button>}<button onClick={()=>navigate(`/admin/roster-targets${workflowContextQuery(workflowContext)}`)}>Open work unit</button><button className="is-primary" onClick={()=>openCreate()} disabled={!requestedWorkUnit}><Plus size={15}/>Create shift for this work unit</button></div></section>}
-    {workUnits.length > 0 && <div className="roster-quick-actions"><button type="button" onClick={() => void openTemplateDialog()} disabled={saving || loading}>Fill from templates</button><button type="button" onClick={() => navigate(`/admin/roster-targets${workflowContextQuery(workflowContext)}`)}>Work units</button>{selectedSlot && !['completed', 'cancelled'].includes(selectedSlot.status) && <><button type="button" onClick={() => openCopy(selectedSlot)}>Copy selected</button><button type="button" onClick={() => setRepeatDialog({ slot: selectedSlot, from: isoDate(addDays(new Date(selectedSlot.scheduled_start), 7)), to: isoDate(addDays(new Date(selectedSlot.scheduled_start), 13)) })}>Repeat selected</button></>}</div>}
+    {workUnits.length > 0 && <div className="roster-quick-actions"><button type="button" onClick={() => void openTemplateDialog()} disabled={saving || loading}>Fill from templates</button><button type="button" onClick={() => openAvailabilityDialog()} disabled={saving || loading || staff.length === 0}>Staff availability</button><button type="button" onClick={() => navigate(`/admin/roster-targets${workflowContextQuery(workflowContext)}`)}>Work units</button>{selectedSlot && !['completed', 'cancelled'].includes(selectedSlot.status) && <><button type="button" onClick={() => openCopy(selectedSlot)}>Copy selected</button><button type="button" onClick={() => setRepeatDialog({ slot: selectedSlot, from: isoDate(addDays(new Date(selectedSlot.scheduled_start), 7)), to: isoDate(addDays(new Date(selectedSlot.scheduled_start), 13)) })}>Repeat selected</button></>}</div>}
+    {availabilityDialog && <div className="roster-dialog-backdrop"><form className="roster-dialog roster-availability-dialog" onSubmit={saveAvailability} role="dialog" aria-modal="true" aria-labelledby="staff-availability-title"><header><div><span>Workforce readiness</span><h2 id="staff-availability-title">Staff availability</h2></div><button type="button" onClick={() => setAvailabilityDialog(null)} aria-label="Close staff availability"><X /></button></header><p className="roster-dialog-note">Configure when a staff member can or cannot be rostered. Approved leave remains governed in People, Pay &amp; HR.</p><label><span>Staff member</span><select value={availabilityDialog.staffId} onChange={(event) => setAvailabilityDialog({ ...availabilityDialog, staffId: event.target.value, deleteTarget: null, deleteReason: '' })}>{staff.map((person) => <option value={person.staffId} key={person.staffId}>{person.name}</option>)}</select></label><div className="roster-availability-grid"><label><span>Schedule</span><select value={availabilityDialog.scheduleKind} onChange={(event) => setAvailabilityDialog({ ...availabilityDialog, scheduleKind: event.target.value as AvailabilityDialog['scheduleKind'] })}><option value="date">One date</option><option value="weekday">Every weekday</option></select></label>{availabilityDialog.scheduleKind === 'date' ? <label><span>Date</span><input type="date" required value={availabilityDialog.specificDate} onChange={(event) => setAvailabilityDialog({ ...availabilityDialog, specificDate: event.target.value })} /></label> : <label><span>Weekday</span><select value={availabilityDialog.dayOfWeek} onChange={(event) => setAvailabilityDialog({ ...availabilityDialog, dayOfWeek: Number(event.target.value) })}>{['Monday', 'Tuesday', 'Wednesday', 'Thursday', 'Friday', 'Saturday', 'Sunday'].map((label, index) => <option value={index + 1} key={label}>{label}</option>)}</select></label>}<label><span>Availability</span><select value={availabilityDialog.availabilityType} onChange={(event) => setAvailabilityDialog({ ...availabilityDialog, availabilityType: event.target.value as AvailabilityDialog['availabilityType'] })}><option value="unavailable">Unavailable</option><option value="preferred">Preferred</option><option value="available">Available</option></select></label></div><label className="roster-availability-all-day"><input type="checkbox" checked={availabilityDialog.allDay} onChange={(event) => setAvailabilityDialog({ ...availabilityDialog, allDay: event.target.checked })} /><span>Applies all day</span></label>{!availabilityDialog.allDay && <div className="roster-availability-grid"><label><span>From</span><input type="time" required value={availabilityDialog.availableFrom} onChange={(event) => setAvailabilityDialog({ ...availabilityDialog, availableFrom: event.target.value })} /></label><label><span>To</span><input type="time" required value={availabilityDialog.availableTo} onChange={(event) => setAvailabilityDialog({ ...availabilityDialog, availableTo: event.target.value })} /></label></div>}<label><span>{availabilityDialog.availabilityType === 'unavailable' ? 'Reason' : 'Notes'}</span><textarea rows={2} required={availabilityDialog.availabilityType === 'unavailable'} value={availabilityDialog.notes} onChange={(event) => setAvailabilityDialog({ ...availabilityDialog, notes: event.target.value })} placeholder={availabilityDialog.availabilityType === 'unavailable' ? 'Why can this staff member not work?' : 'Optional roster planning context'} /></label><section className="roster-availability-current" aria-labelledby="current-availability-title"><header><div><span>Current period</span><h3 id="current-availability-title">Recorded availability</h3></div><strong>{availability.filter((record) => record.staff_id === availabilityDialog.staffId).length}</strong></header>{availability.filter((record) => record.staff_id === availabilityDialog.staffId).length === 0 ? <p>No availability records for this staff member in the displayed period.</p> : <div>{availability.filter((record) => record.staff_id === availabilityDialog.staffId).map((record) => <article key={record.id}><div><strong>{record.specific_date ? new Date(`${record.specific_date}T12:00:00`).toLocaleDateString('en-NZ', { weekday: 'short', day: 'numeric', month: 'short' }) : `Every ${['Monday', 'Tuesday', 'Wednesday', 'Thursday', 'Friday', 'Saturday', 'Sunday'][(record.day_of_week ?? 1) - 1]}`}</strong><span>{record.all_day ? 'All day' : `${record.available_from?.slice(0, 5)}–${record.available_to?.slice(0, 5)}`} · {record.availability_type}</span>{record.notes && <small>{record.notes}</small>}</div><button type="button" disabled={saving} onClick={() => setAvailabilityDialog({ ...availabilityDialog, deleteTarget: record, deleteReason: '', deleteRequestId: crypto.randomUUID() })}>Remove</button></article>)}</div>}{availabilityDialog.deleteTarget && <div className="roster-availability-remove" role="group" aria-label="Confirm availability removal"><p>Remove this availability record? Existing roster decisions remain in history, but future conflict checks will stop using it.</p><label><span>Removal reason</span><textarea rows={2} required value={availabilityDialog.deleteReason} onChange={(event) => setAvailabilityDialog({ ...availabilityDialog, deleteReason: event.target.value })} /></label><div><button type="button" onClick={() => setAvailabilityDialog({ ...availabilityDialog, deleteTarget: null, deleteReason: '' })}>Keep record</button><button type="button" className="is-danger" disabled={saving || !availabilityDialog.deleteReason.trim()} onClick={() => void deleteAvailability()}>Confirm removal</button></div></div>}</section><footer><button type="button" onClick={() => setAvailabilityDialog(null)}>Close</button><button type="submit" disabled={saving || !availabilityDialog.staffId || (availabilityDialog.availabilityType === 'unavailable' && !availabilityDialog.notes.trim())}>Save availability</button></footer></form></div>}
     {repeatDialog && <div className="roster-dialog-backdrop"><form className="roster-dialog" onSubmit={repeatSelected} role="dialog" aria-modal="true" aria-labelledby="repeat-roster-title"><header><div><span>Roster planning</span><h2 id="repeat-roster-title">Repeat assignment</h2></div><button type="button" onClick={() => setRepeatDialog(null)}><X /></button></header><p>Creates draft assignments and skips overlapping or leave-conflicted days.</p><label><span>From date</span><input type="date" required value={repeatDialog.from} onChange={(event) => setRepeatDialog({ ...repeatDialog, from: event.target.value })} /></label><label><span>To date</span><input type="date" required value={repeatDialog.to} onChange={(event) => setRepeatDialog({ ...repeatDialog, to: event.target.value })} /></label><footer><button type="button" onClick={() => setRepeatDialog(null)}>Cancel</button><button type="submit" disabled={saving}>Create draft repeats</button></footer></form></div>}
     {publishDialog && <div className="roster-dialog-backdrop"><form className="roster-dialog" onSubmit={(event) => { event.preventDefault(); void batchPublishPeriod(); }} role="dialog" aria-modal="true" aria-labelledby="publish-period-title"><header><div><span>Publish</span><h2 id="publish-period-title">Publish {plural(draftCount, 'draft shift')}?</h2></div><button type="button" onClick={() => setPublishDialog(null)}><X /></button></header>{publishDialog === 'loading' ? <p className="roster-dialog-note">Checking the drafts in {periodLabel}…</p> : <ul className="roster-dialog-facts"><li><strong>{publishDialog.draft_count}</strong><span>draft shift{publishDialog.draft_count === 1 ? '' : 's'} in {periodLabel} will be published. Officers see them on their schedule and can accept or decline.</span></li>{publishDialog.leave_conflict_count > 0 && <li className="is-warning"><strong>{publishDialog.leave_conflict_count}</strong><span>clash with approved leave and will be skipped. Reassign them first.</span></li>}{publishDialog.unassigned_count > 0 && <li className="is-warning"><strong>{publishDialog.unassigned_count}</strong><span>have nobody assigned yet. They are published as open shifts for you to fill – assign someone or offer overtime.</span></li>}<li><strong>{publishDialog.field_shift_count}</strong><span>{publishDialog.field_shift_count === 1 ? 'is' : 'are'} field work (patrol run or static post) and get a shift record the officer can start. The rest are office or internal work.</span></li></ul>}<footer><button type="button" onClick={() => setPublishDialog(null)}>Back</button><button type="submit" disabled={saving || publishDialog === 'loading' || publishDialog.draft_count === 0}>Publish now</button></footer></form></div>}
     {templateDialog && <div className="roster-dialog-backdrop"><form className="roster-dialog" onSubmit={(event) => { event.preventDefault(); void generateFromTemplates(); }} role="dialog" aria-modal="true" aria-labelledby="template-fill-title"><header><div><span>Templates</span><h2 id="template-fill-title">Fill {periodLabel} from templates?</h2></div><button type="button" onClick={() => setTemplateDialog(null)}><X /></button></header>{templateDialog === 'loading' ? <p className="roster-dialog-note">Checking your shift templates…</p> : <ul className="roster-dialog-facts"><li><strong>{templateDialog.new_slots}</strong><span>new draft shift{templateDialog.new_slots === 1 ? '' : 's'} will be created from {plural(templateDialog.templates_applied, 'active template')}. Nobody is assigned yet – assign staff, then publish.</span></li><li><strong>{templateDialog.existing_slots}</strong><span>already exist for these times and will not be duplicated.</span></li></ul>}<footer><button type="button" onClick={() => setTemplateDialog(null)}>Back</button><button type="submit" disabled={saving || templateDialog === 'loading' || templateDialog.new_slots === 0}>Create drafts</button></footer></form></div>}
@@ -541,7 +660,7 @@ const RosterOperationsPage: React.FC = () => {
         </div>
       ))}</>}
     </div>
-    {availabilityOccurrences.length > 0 && <section className="roster-availability-queue"><header><div><span>Staff constraints</span><h2>Availability restrictions</h2></div><strong>{availabilityOccurrences.length}</strong></header><div>{availabilityOccurrences.map(({ day, person, record }, index) => <button type="button" onClick={() => openCreate(person, day)} key={`${person.staffId}-${isoDate(day)}-${index}`}><AlertTriangle size={15} /><div><strong>{person.name}</strong><small>{day.toLocaleDateString('en-NZ', { weekday: 'short', day: 'numeric', month: 'short' })} · {record.all_day || !record.available_from || !record.available_to ? 'Unavailable all day' : `${record.available_from.slice(0, 5)}–${record.available_to.slice(0, 5)}`}</small></div><i>{record.availability_type}</i></button>)}</div></section>}
+    {availabilityOccurrences.length > 0 && <section className="roster-availability-queue"><header><div><span>Staff constraints</span><h2>Availability restrictions</h2></div><strong>{availabilityOccurrences.length}</strong></header><div>{availabilityOccurrences.map(({ day, person, record }, index) => <button type="button" onClick={() => openAvailabilityDialog(person, isoDate(day))} key={`${person.staffId}-${isoDate(day)}-${index}`}><AlertTriangle size={15} /><div><strong>{person.name}</strong><small>{day.toLocaleDateString('en-NZ', { weekday: 'short', day: 'numeric', month: 'short' })} · {record.all_day || !record.available_from || !record.available_to ? 'Unavailable all day' : `${record.available_from.slice(0, 5)}–${record.available_to.slice(0, 5)}`}</small></div><i>Manage</i></button>)}</div></section>}
     {commercialExceptions.length > 0 && <section className="roster-commercial-queue"><header><div><span>Finance & geography</span><h2>Commercial readiness exceptions</h2></div><strong>{commercialExceptions.length}</strong></header><div>{commercialExceptions.map((readiness) => { const slot = slots.find((item) => item.id === readiness.slot_id); const unit = slot ? workUnits.find((item) => item.id === slot.work_unit_id) : null; const issues = Object.entries(readiness).filter(([key, value]) => key !== 'slot_id' && !['ready', 'accepted', 'verified', 'not_applicable'].includes(value)).map(([key]) => key.replace('_status', '').replace('_', ' ')); return <button type="button" onClick={() => setSelectedSlotId(readiness.slot_id)} key={readiness.slot_id}><AlertTriangle size={15} /><div><strong>{unit?.name ?? 'Roster slot'}</strong><small>{issues.join(' · ')}</small></div><i>Review</i></button>; })}</div></section>}
     {attendanceExceptions.length > 0 && <section className="roster-commercial-queue roster-attendance-queue"><header><div><span>Attendance control</span><h2>Roster attendance exceptions</h2></div><strong>{attendanceExceptions.length}</strong></header><div>{attendanceExceptions.map((exception) => <article key={exception.shift_id} className={exception.exception_type === 'missed' ? 'is-missed' : ''}><AlertTriangle size={15} /><div><strong>{ATTENDANCE_EXCEPTION_LABEL[exception.exception_type]}</strong><small>{exception.service_type.replaceAll('_', ' ')} · {new Date(exception.scheduled_start).toLocaleString('en-NZ')}</small></div><i>{exception.exception_type === 'missed' ? `${exception.minutes_overdue} min unattended` : `${exception.minutes_overdue} min`}</i><button type="button" onClick={() => setAttendanceAction({ item: exception, notes: '' })}>Acknowledge</button></article>)}</div></section>}
     {slots.length > 0 && <section className="roster-slot-queue"><header><div><span>Everything rostered</span><h2>All shifts this period</h2></div><strong>{slots.length}</strong></header><div>{slots.map((slot) => { const unit = workUnits.find((item) => item.id === slot.work_unit_id); const person = staff.find((item) => item.staffId === slot.staff_id); return <button type="button" className={`status-${slot.status}`} onClick={() => setSelectedSlotId(slot.id)} key={slot.id}><span className={`type-${unit?.work_unit_type ?? 'internal'}`}>{unit ? workUnitTypeLabel(unit.work_unit_type) : 'slot'}</span><div><strong>{unit?.name ?? 'Roster slot'}</strong><small>{person?.name ?? (slot.staff_id ? 'Staff member' : 'Nobody assigned')} · {new Date(slot.scheduled_start).toLocaleString('en-NZ', { weekday: 'short', day: 'numeric', month: 'short', hour: '2-digit', minute: '2-digit' })}</small></div><i>{slotStatusLabel(slot.status)}</i></button>; })}</div></section>}

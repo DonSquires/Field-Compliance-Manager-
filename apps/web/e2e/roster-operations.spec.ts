@@ -17,7 +17,7 @@ test('enterprise roster week board is operational and visually stable', async ({
  await expect(page).toHaveScreenshot('roster-overview-first-viewport.png');
  if((page.viewportSize()?.width??0)<900){await expect(page.locator('.roster-board-scroll-cue')).toBeVisible();const boardSize=await board.evaluate((element)=>({scrollWidth:element.scrollWidth,clientWidth:element.clientWidth}));expect(boardSize.scrollWidth).toBeGreaterThan(boardSize.clientWidth);}
  await page.getByRole('button',{name:'2 weeks'}).click();await expect(page.locator('.roster-board-head>div')).toHaveCount(15);expect(await board.evaluate((element)=>element.scrollWidth>element.clientWidth)).toBe(true);await page.getByRole('button',{name:'Month'}).click();await expect(page.locator('.roster-board-head>div')).toHaveCount(32);for(let index=0;index<7;index+=1)await page.getByTitle('Previous period').click();await expect(page.getByLabel('Public holidays').getByText('Provincial anniversary day')).toBeVisible();await expect(page.getByLabel('Public holidays').getByText("New Year's Day",{exact:true})).toBeVisible();await expect(page.locator('.roster-horizon-bar')).toHaveScreenshot('roster-calendar-controls.png');await page.getByLabel('Regional holidays').selectOption('WGN');await expect(page.getByText('Regional public holiday calendar updated.')).toBeVisible();await page.getByRole('button',{name:'Week',exact:true}).click();
- await expect(page.getByRole('heading',{name:'Availability restrictions'})).toBeVisible();const restriction=page.locator('.roster-availability-queue').getByRole('button',{name:/Jordan Lee/});await restriction.click();const restrictedDialog=page.getByRole('dialog',{name:'Create shift'});await expect(restrictedDialog).toBeVisible();await restrictedDialog.getByRole('button',{name:'Cancel'}).click();
+ await expect(page.getByRole('heading',{name:'Availability restrictions'})).toBeVisible();const restriction=page.locator('.roster-availability-queue').getByRole('button',{name:/Jordan Lee/});await restriction.click();const availabilityDialog=page.getByRole('dialog',{name:'Staff availability'});await expect(availabilityDialog).toBeVisible();await expect(availabilityDialog.getByLabel('Staff member')).toHaveValue('2f2f2f2f-2222-4222-8222-222222222222');await expect(availabilityDialog.getByText('Unavailable on Sundays')).toBeVisible();await availabilityDialog.getByRole('button',{name:'Close',exact:true}).click();
  const commercialQueue=page.locator('.roster-commercial-queue');await expect(commercialQueue.getByRole('heading',{name:'Commercial readiness exceptions'})).toBeVisible();await commercialQueue.getByRole('button',{name:/Roster Administration/}).click();const commercialInspector=page.locator('.roster-slot-inspector');await expect(commercialInspector.getByText('Missing rule',{exact:true})).toBeVisible();await expect(commercialInspector.getByText('Not applicable',{exact:true})).toHaveCount(3);await expect(commercialInspector.getByText('Ready',{exact:true})).toBeVisible();await expect(commercialInspector).toHaveScreenshot('roster-commercial-readiness.png');if((page.viewportSize()?.width??0)<900){const factBackground=await commercialInspector.locator('dl > div').first().evaluate((element)=>getComputedStyle(element).backgroundColor);expect(factBackground).toBe('rgb(243, 246, 243)');}await commercialInspector.locator('header button').click();
  await expect(page.locator('.roster-board').getByText('Roster Administration',{exact:true})).toBeVisible();
  expect(await page.evaluate(()=>document.documentElement.scrollWidth<=window.innerWidth)).toBe(true);
@@ -26,6 +26,31 @@ test('enterprise roster week board is operational and visually stable', async ({
  const slotQueue=page.locator('.roster-slot-queue');await slotQueue.getByRole('button',{name:/Roster Administration/}).click();await expect(page.getByText('Roster slot',{exact:true})).toBeVisible();await page.getByRole('button',{name:'Reassign'}).click();const reassignDialog=page.getByRole('dialog',{name:'Reassign roster slot?'});await expect(reassignDialog.getByRole('button',{name:'Confirm reassignment'})).toBeDisabled();await reassignDialog.getByLabel('Replacement officer').selectOption({label:'Jordan Lee'});await reassignDialog.getByLabel('Reassignment reason').fill('Coverage plan changed after supervisor review.');await expect(reassignDialog).toHaveScreenshot('roster-reassign-slot-dialog.png');await reassignDialog.getByRole('button',{name:'Confirm reassignment'}).click();await expect(page.getByText('Roster slot reassigned. The replacement officer has been asked to accept it.')).toBeVisible();await slotQueue.getByRole('button',{name:/Roster Administration/}).click();const cancelSlot=page.getByRole('button',{name:'Cancel slot'});await cancelSlot.scrollIntoViewIfNeeded();await cancelSlot.click();const cancelDialog=page.getByRole('dialog',{name:'Cancel roster slot?'});await expect(cancelDialog.getByRole('button',{name:'Confirm cancellation'})).toBeDisabled();await cancelDialog.getByLabel('Cancellation reason').fill('Internal priorities changed for this roster period.');await expect(cancelDialog).toHaveScreenshot('roster-cancel-slot-dialog.png');await cancelDialog.getByRole('button',{name:'Confirm cancellation'}).click();await expect(page.getByText('Roster slot cancelled, and its shift with it.')).toBeVisible();
  await page.getByRole('button',{name:'risk'}).click(); await expect(board.getByText('Jordan Lee',{exact:true})).toBeVisible(); await expect(board.getByText('Ana Ngata',{exact:true})).toBeHidden();
  await page.getByRole('button',{name:/Create shift/}).click(); const dialog=page.getByRole('dialog',{name:'Create shift'}); await expect(dialog).toBeVisible(); await dialog.getByLabel('Officer',{exact:true}).selectOption('22222222-2222-4222-8222-222222222222'); await dialog.getByLabel('Start',{exact:true}).fill('2026-08-30T10:00'); await dialog.getByLabel('End',{exact:true}).fill('2026-08-30T18:00'); await expect(dialog.getByText('Publish immediately')).toBeVisible(); await expect(dialog).toHaveScreenshot('roster-create-shift-dialog.png'); await dialog.getByRole('button',{name:'Create shift'}).click(); await expect(page.getByText('Shift published for Ana Ngata. They will see it on their schedule and can accept or decline.')).toBeVisible(); expect(errors,errors.join('\n')).toEqual([]);
+});
+
+test('administrator corrects staff availability with confirmation and receipts', async ({ page }) => {
+	const errors = monitorBrowserErrors(page);
+	await signInAsAdmin(page, '/admin/roster');
+
+	await page.locator('.roster-availability-queue').getByRole('button', { name: /Jordan Lee/ }).click();
+	const dialog = page.getByRole('dialog', { name: 'Staff availability' });
+	await expect(dialog).toBeVisible();
+	await expect(dialog.getByLabel('Staff member')).toHaveValue('2f2f2f2f-2222-4222-8222-222222222222');
+	await expect(dialog.getByText('Unavailable on Sundays')).toBeVisible();
+
+	await dialog.getByRole('button', { name: 'Remove' }).click();
+	await dialog.getByLabel('Removal reason').fill('Sunday availability has changed after supervisor review.');
+	await dialog.getByRole('button', { name: 'Confirm removal' }).click();
+	await expect(page.getByText('Availability record removed with an audit receipt. Future roster checks no longer use it.')).toBeVisible();
+	await expect(dialog.getByText('No availability records for this staff member in the displayed period.')).toBeVisible();
+
+	await dialog.locator('.roster-availability-grid select').nth(1).selectOption('preferred');
+	await dialog.getByLabel('Notes').fill('Prefers this day when coverage is available.');
+	await dialog.getByRole('button', { name: 'Save availability' }).click();
+	await expect(page.getByText('Staff availability saved with an audit receipt. Roster conflict checks now use this record.')).toBeVisible();
+	await dialog.getByRole('button', { name: 'Close', exact: true }).click();
+	await expect(dialog).toBeHidden();
+	expect(errors).toEqual([]);
 });
 
 test('administrator copies an existing roster assignment into a future draft', async ({ page }) => {

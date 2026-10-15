@@ -225,17 +225,16 @@ serve(async (req)=>{
     // Bob's roster output is deliberately limited to editable draft-slot
     // assignments. The database function rejects published or human-edited slots.
     if (action.action_type === 'apply_roster_fill_plan' || action.action_type === 'rollback_bob_roster_plan') {
-      const rpcName = action.action_type === 'apply_roster_fill_plan'
-        ? 'apply_bob_roster_fill_plan'
-        : 'rollback_bob_roster_fill_plan';
-      const { data: result, error: rosterError } = await admin.rpc(rpcName, {
-        p_action_id: action.id
-      });
+      const isApply = action.action_type === 'apply_roster_fill_plan';
+      const rpcName = isApply ? 'apply_bob_roster_fill_plan' : 'rollback_bob_roster_fill_plan';
+      const { data: result, error: rosterError } = isApply
+        ? await admin.rpc('apply_bob_roster_fill_plan', { p_action_id: action.id })
+        : await admin.rpc('rollback_bob_roster_fill_plan', { p_action_id: action.id });
       const receipt = Array.isArray(result) ? result[0] : result;
       if (rosterError || !receipt?.plan_id) {
         return await failAction(`${rpcName} failed: ${rosterError?.message ?? 'missing receipt'}`);
       }
-      const count = action.action_type === 'apply_roster_fill_plan'
+      const count = isApply
         ? receipt.assignments_applied
         : receipt.assignments_rolled_back;
       await admin.from('bob_agentic_actions').update({
@@ -251,7 +250,7 @@ serve(async (req)=>{
         result_table: 'bob_roster_plans',
         result_record_id: receipt.plan_id,
         assignments: count,
-        note: action.action_type === 'apply_roster_fill_plan'
+        note: isApply
           ? 'Bob roster plan applied as editable draft assignments. A human must publish slots separately.'
           : 'Bob roster plan rolled back from unchanged draft assignments.'
       });

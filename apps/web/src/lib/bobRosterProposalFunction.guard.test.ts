@@ -18,8 +18,8 @@ describe('Bob roster proposal function', () => {
   it('supports human-approved apply and rollback through the executor', () => {
     expect(executor).toContain("'apply_roster_fill_plan'");
     expect(executor).toContain("'rollback_bob_roster_plan'");
-    expect(executor).toContain('apply_bob_roster_fill_plan');
-    expect(executor).toContain('rollback_bob_roster_fill_plan');
+    expect(executor).toContain("admin.rpc('apply_bob_roster_fill_plan'");
+    expect(executor).toContain("admin.rpc('rollback_bob_roster_fill_plan'");
     expect(executor).toContain('A human must publish slots separately');
   });
 

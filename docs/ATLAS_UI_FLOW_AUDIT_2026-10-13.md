@@ -1255,3 +1255,48 @@ remains unpopulated.
   `pages/DispatchConsolePage`, proves its `patrol_solve_cache` write, removes
   `get_open_jobs`, keeps `exercised=null`, and moves bounded gaps 136 -> 133:
   0 Edge Functions, 81 RPCs and 52 tables.
+
+### Closure log — governed staff availability and explicit roster-plan calls
+
+- Atlas showed `apply_bob_roster_fill_plan` and
+  `rollback_bob_roster_fill_plan` as unwired even though the approved-proposal
+  executor already selected both names dynamically. Explicit calls now make
+  the existing authority visible without changing its boundary: Bob may apply
+  an approved plan only to draft roster slots, publication remains a separate
+  human action, and rollback still refuses changed or published slots.
+- `manage_staff_availability` was a genuine task-completion gap. Before:
+  supervisors could see an availability warning but selecting it opened shift
+  creation rather than a correction road. The RPC had no caller, accepted a
+  request ID without replaying it, allowed deletion without proving the record
+  belonged to the selected staff member, and authenticated clients retained a
+  direct table-mutation bypass.
+- During: the roster now opens a labelled Staff availability workspace for the
+  selected person. A supervisor may record one date or a recurring weekday,
+  distinguish available, preferred and unavailable time, choose all-day or a
+  bounded period, and provide planning context. Unavailability requires a
+  reason. Removal requires a separate reason and confirmation, with **Keep
+  record** as the safe exit. Approved leave remains governed in People, Pay &
+  HR rather than becoming a second leave authority.
+- The database enforces one schedule shape, supported availability types,
+  valid weekdays and valid all-day or part-day time bounds. Create and delete
+  first check an immutable request receipt, deletion proves exact staff
+  ownership, and audit metadata retains the record snapshot. Browser mutation
+  is revoked; authenticated users retain organization-scoped read access and
+  all writes travel through the governed RPC.
+- After: the roster reloads the persisted record, future conflict checks start
+  or stop using it, and the supervisor receives an explicit audit-receipt
+  message. The correction workspace has responsive internal scrolling,
+  readable mobile record cards and visible loading, empty, confirmation,
+  success and failure states.
+- This adapts Trackforce's useful desktop-preparation and immediate
+  supervisor-visibility pattern before field execution. It does not create a
+  second HR leave workflow, publish Bob's draft roster automatically or hide
+  an alternate write road behind the UI.
+- The linked migration is applied and the regenerated catalogue has 398
+  tables, 814 functions, 728 indexes and 894 policies. Seven focused
+  governance guards, the production build, web and E2E type-checks, linked
+  database lint and the isolated desktop/mobile correction workflow pass.
+  Rollback-only live verification proved create, create replay, delete, delete
+  replay and cross-staff rejection with zero retained test records. Atlas
+  dry-run wires all three RPCs, keeps `exercised=null`, and moves bounded gaps
+  133 -> 130: 0 Edge Functions, 78 RPCs and 52 tables.
