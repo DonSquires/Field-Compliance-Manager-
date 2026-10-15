@@ -124,6 +124,10 @@ test('GitHub credentials travel as a per-invocation header, never inside a remot
   assert.throws(() => workspace.publishWorkspaceBranch({ workspacePath: '/nonexistent', branchName: 'feature/x', expectedHeadSha: 'a'.repeat(40), pushUrl: 'https://user:tok@github.com/o/r.git' }), /Builder workspace branch is invalid|credential-free URL/);
 });
 
+test('the GitHub control-plane publication boundary revalidates the verified Builder identity', () => {
+  assert.match(controlPlane, /publishWorkspaceBranch\(\{[\s\S]*requireVerifiedIdentity: builderGitHost === 'github'/);
+});
+
 test('a failing git command never echoes an auth header or embedded credential', () => {
   assert.equal(workspace.redactGitError('git -c http.extraheader=Authorization: Basic ZG9uOnNlY3JldA== push https://x:y@host/r.git'), 'git -c http.extraheader=Authorization: [redacted] push https://[redacted]@host/r.git');
   const repo = fs.mkdtempSync(path.join(os.tmpdir(), 'bob-redact-'));
@@ -142,7 +146,7 @@ test('control plane routes publication and pull requests by git host and keeps g
   assert.match(controlPlane, /BOB_GITHUB_KNOWN_HOSTS_FILE/);
   assert.match(controlPlane, /const builderSourceConfigured = Boolean\(\(githubSshConfigured \|\| builderApiConfigured\)/);
   // Git transport uses the deployed SSH identity; PR operations require a separate durable API token.
-  assert.match(controlPlane, /publishWorkspaceBranch\(\{ workspacePath, branchName: job\.workspace_branch, expectedHeadSha: job\.workspace_head_sha, pushUrl: target\.repoUrl, pushAuthHeader: target\.authHeader, sshCommand: target\.sshCommand \}\)/);
+  assert.match(controlPlane, /publishWorkspaceBranch\(\{[\s\S]*pushUrl: target\.repoUrl[\s\S]*sshCommand: target\.sshCommand/);
   assert.match(controlPlane, /builderGitHost === 'github'\s*\?\s*await createGitHubPullRequest/);
   assert.match(controlPlane, /mergeGitHubPullRequest\(\{ number: pullRequest\.number/);
   assert.match(controlPlane, /mainHealthEnabled/);

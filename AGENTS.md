@@ -23,8 +23,10 @@ not a flat app, and check the graph before editing shared terrain.
 
 This repository deploys `main` to Vercel from GitHub. Vercel's protected
 deployment lane rejects commits whose author is not associated with the
-verified owner account. Before creating or pushing a commit intended for
-`main`, every agent must use the verified GitHub identity:
+verified owner account. GitHub `main` requires a pull request so concurrent
+agents cannot bypass the shared integration boundary. Before creating or
+pushing a commit intended for release, every agent must use the verified
+GitHub identity:
 
 ```bash
 git config user.name "Don Squires"
@@ -36,8 +38,9 @@ Do not use local placeholders such as `don@squires.local`. A commit that is
 already on `main` cannot be repaired by changing repository files afterward;
 create the next release commit with the verified identity so the complete tree
 can deploy. Bob Builder's isolated publication lane must fail closed when its
-verified identity is not configured; never weaken Vercel protection or bypass
-the GitHub release path.
+configured identity or the actual branch-head identity is not the exact
+verified GitHub identity. Never weaken Vercel protection, push directly to
+`main`, or bypass the GitHub pull-request path.
 
 **Single target build (owner ruling, 2026-09-15).** Field Compliance Manager is
 the only product being built in this repository. GitLab, FreedomCamp-Manager /

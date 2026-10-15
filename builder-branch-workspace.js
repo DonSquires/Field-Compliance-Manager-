@@ -7,6 +7,7 @@ const { changedFilesFromPatch, validatePatchText } = require('./frontend-worker'
 const BRANCH_PREFIX = 'bob/job-';
 const BUILDER_NAME = 'Bob Builder';
 const BUILDER_EMAIL = 'bob-builder@fieldcompliance.local';
+const VERIFIED_GITHUB_EMAIL = '256263525+DonSquires@users.noreply.github.com';
 
 function builderCommitIdentity({ requireVerified = false } = {}) {
   const name = String(process.env.BOB_BUILDER_GIT_NAME || BUILDER_NAME).trim();
@@ -14,10 +15,18 @@ function builderCommitIdentity({ requireVerified = false } = {}) {
   if (!name || !email || !/^[^@\s]+@[^@\s]+\.[^@\s]+$/.test(email)) {
     throw new Error('Builder commit identity is invalid');
   }
-  if (requireVerified && !process.env.BOB_BUILDER_GIT_EMAIL) {
-    throw new Error('BOB_BUILDER_GIT_EMAIL must be configured to a verified GitHub email before publication');
+  if (requireVerified && email.toLowerCase() !== VERIFIED_GITHUB_EMAIL.toLowerCase()) {
+    throw new Error(`BOB_BUILDER_GIT_EMAIL must be ${VERIFIED_GITHUB_EMAIL} before GitHub publication`);
   }
   return { name, email };
+}
+
+function assertVerifiedCommitIdentity(workspacePath, commitSha) {
+  const expected = builderCommitIdentity({ requireVerified: true });
+  const [name, email] = git(workspacePath, ['show', '-s', '--format=%an%x00%ae', commitSha]).split('\0');
+  if (name !== expected.name || email.toLowerCase() !== expected.email.toLowerCase()) {
+    throw new Error('Builder workspace head does not use the configured verified GitHub identity');
+  }
 }
 
 function redactGitError(message) {
@@ -163,11 +172,12 @@ function commitVerifiedPatch({ workspacePath, branchName, patch, message, body =
   }
 }
 
-function publishWorkspaceBranch({ workspacePath, branchName, expectedHeadSha, pushUrl = null, pushAuthHeader = null, sshCommand = null }) {
+function publishWorkspaceBranch({ workspacePath, branchName, expectedHeadSha, pushUrl = null, pushAuthHeader = null, sshCommand = null, requireVerifiedIdentity = false }) {
   if (!branchName.startsWith(BRANCH_PREFIX) || git(workspacePath, ['branch', '--show-current']) !== branchName) throw new Error('Builder workspace branch is invalid');
   if (git(workspacePath, ['status', '--porcelain', '--untracked-files=normal'])) throw new Error('Builder workspace must be clean before publication');
   const head = git(workspacePath, ['rev-parse', 'HEAD']);
   if (head !== expectedHeadSha) throw new Error('Builder workspace head is stale');
+  if (requireVerifiedIdentity) assertVerifiedCommitIdentity(workspacePath, head);
   if (pushUrl) {
     // Credentials travel per invocation, never inside the remote URL or .git/config.
     const credentialFreeHttp = /^https?:\/\/[^\s@]+$/.test(String(pushUrl));
@@ -348,4 +358,4 @@ function publicGiteaUrl(url, { baseUrl, publicBaseUrl }) {
   return url;
 }
 
-module.exports = { BRANCH_PREFIX, BUILDER_NAME, BUILDER_EMAIL, builderCommitIdentity, branchNameForJob, workspacePathForBranch, createBranchWorkspace, createDetachedWorkspace, commitVerifiedPatch, publishWorkspaceBranch, giteaRepositoryPath, createGiteaPullRequest, publicGiteaUrl, verifySnapshot, githubAuthHeader, githubRepoUrl, githubSshRepoUrl, resolveRemoteHead, ensureSourceCheckout, createGitHubPullRequest, mergeGitHubPullRequest, redactGitError };
+module.exports = { BRANCH_PREFIX, BUILDER_NAME, BUILDER_EMAIL, VERIFIED_GITHUB_EMAIL, builderCommitIdentity, branchNameForJob, workspacePathForBranch, createBranchWorkspace, createDetachedWorkspace, commitVerifiedPatch, publishWorkspaceBranch, giteaRepositoryPath, createGiteaPullRequest, publicGiteaUrl, verifySnapshot, githubAuthHeader, githubRepoUrl, githubSshRepoUrl, resolveRemoteHead, ensureSourceCheckout, createGitHubPullRequest, mergeGitHubPullRequest, redactGitError };

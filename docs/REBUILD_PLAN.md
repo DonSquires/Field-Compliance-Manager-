@@ -12,14 +12,15 @@ Release identity incident 2026-10-15: two concurrent agent commits reached
 `main` with the local author `don@squires.local`, which is not associated with
 the verified Vercel/GitHub owner account. Vercel correctly blocked both
 deployments before build; the already-published Builder workspace remained
-live and was not damaged. Release identity is now an explicit agent contract:
-commits intended for `main` must use
-`256263525+DonSquires@users.noreply.github.com`, and Bob's isolated publisher
-continues to fail closed when its verified identity is unavailable. A
-canonical release commit is required after an unverified commit has landed so
-the complete current tree can be deployed without weakening Vercel
-protection. This keeps concurrent app work from blocking Bob's progress while
-preserving exact-SHA release evidence.
+live and was not damaged. Release identity is now enforced at both shared publication boundaries:
+GitHub `main` requires a pull request, and Bob's isolated publisher validates
+both its configured identity and the actual branch-head author against
+`256263525+DonSquires@users.noreply.github.com` immediately before push. A
+concurrency fixture starts Bob from a pinned SHA, advances `main` with another
+agent's non-overlapping app commit, then proves the verified integration head
+contains both histories and both file changes. A canonical release commit is
+required after any historical unverified commit already on `main` so the
+complete current tree can deploy without weakening Vercel protection.
 
 Builder coding-workspace integration 2026-10-15: the Builder Control Room now
 presents the existing governed build system as one accessible coding workspace
