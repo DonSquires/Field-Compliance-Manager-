@@ -135,9 +135,12 @@ describe('dispatch agreement and creation boundary', () => {
     expect(source).toContain('p_expected_status: selectedJob.status');
     expect(source).toContain("p_dispatch_resource_id: action === 'reassign' ? jobResourceId : null");
     expect(source).toContain('Write a short reason before changing this job.');
-    expect(source).toContain("operatorAction('stop', 'reorder')");
-    expect(source).toContain("operatorAction('shift', 'cancel')");
-    expect(source).toContain('supabase.rpc(rpc, payload)');
+    expect(source).toContain("openRunsheetAction('stop', 'reorder')");
+    expect(source).toContain("openRunsheetAction('shift', 'cancel_shift')");
+    expect(source).toContain("supabase.rpc('manage_shift_stop'");
+    expect(source).toContain("supabase.rpc('manage_active_shift'");
+    expect(source).toContain('p_client_request_id: runsheetAction.clientRequestId');
+    expect(source).toContain('p_expected_updated_at: selectedStop.updatedAt');
   });
 
   it('updates response and attendance timing through the governed authority', () => {
