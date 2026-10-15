@@ -1152,3 +1152,26 @@ remains unpopulated.
   `can_read_current_report_pack_pdf` wired from `storage.objects`,
   `exercised=null`, and no `crm_activity_log` capability. Bounded gaps move
   145 -> 143: 1 Edge Function, 89 RPCs and 53 tables.
+
+### Closure log — explicit document-promotion execution calls
+
+- Four approved document-promotion workflows were already complete for the
+  human reviewer: credential, HR document, Site brief work unit and
+  investigation link. Each presented target-specific fields, invoked a guarded
+  function, returned an application receipt and reloaded the proposal state.
+  Atlas nevertheless listed all four functions as unwired because the component
+  assigned the RPC name to a runtime string before calling `supabase.rpc`.
+- Before application, the existing UI still requires an approved proposal and
+  explicit authoritative target details. During application, each branch now
+  calls its exact generated RPC name with its exact argument shape. This makes
+  the call statically provable, restores generated-type checking, rejects an
+  unsupported target explicitly, and reports thrown failures while always
+  clearing the busy state. No database function, authority or human task was
+  duplicated.
+- After success, the existing receipt and persisted proposal reload remain
+  unchanged. After failure, the reviewer stays on the form with a visible error
+  rather than being left in a busy state.
+- The production build passes. Focused guards cover all four schema boundaries
+  and the explicit UI calls. Atlas dry-run adds four component-to-RPC call edges
+  from `pages/ApprovalsActivityPage`, keeps `exercised=null`, and moves bounded
+  gaps 142 -> 138: 0 Edge Functions, 85 RPCs and 53 tables.

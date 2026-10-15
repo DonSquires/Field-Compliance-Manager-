@@ -355,16 +355,60 @@ const ApprovalsActivityPage: React.FC = () => {
     if (!targetExecution) return;
     const { proposal, target } = targetExecution;
     setBusyId(proposal.id); setError(null); setNotice(null);
-    let rpc = '';
-    let args: Record<string, unknown> = { p_proposal_id: proposal.id };
-    if (target === 'credential') { rpc = 'apply_credential_promotion_proposal'; args = { ...args, p_staff_id: targetForm.staffId, p_credential_type: targetForm.credentialType, p_credential_number: targetForm.credentialNumber || null, p_issuing_authority: targetForm.issuingAuthority || null, p_issued_date: targetForm.issuedDate || null, p_expiry_date: targetForm.expiryDate || null, p_authorized_activities: [] }; }
-    if (target === 'hr_case') { rpc = 'apply_hr_document_promotion_proposal'; args = { ...args, p_staff_id: targetForm.staffId, p_document_type: targetForm.documentType, p_file_name: targetForm.fileName || targetForm.name, p_storage_path: targetForm.storagePath || targetForm.notes, p_expiry_date: targetForm.expiryDate || null, p_notes: targetForm.notes || null }; }
-    if (target === 'site_brief') { rpc = 'apply_site_brief_promotion_proposal'; args = { ...args, p_name: targetForm.name, p_work_unit_type: targetForm.workUnitType, p_service_type: targetForm.serviceType }; }
-    if (target === 'investigation_link') { rpc = 'apply_investigation_link_promotion_proposal'; args = { ...args, p_investigation_id: targetForm.investigationId || targetForm.staffId, p_entity_type: targetForm.entityType, p_entity_id: targetForm.entityId || targetForm.name, p_link_role: targetForm.linkRole, p_link_reason: targetForm.linkReason || targetForm.notes }; }
-    const { error: applyError } = await supabase.rpc(rpc, args);
-    if (applyError) setError(applyError.message);
-    else { setNotice(`${formatActionType(target)} applied from approved proposal.`); setTargetExecution(null); await loadActivity(); }
-    setBusyId(null);
+    try {
+      let applyError: { message: string } | null = null;
+      if (target === 'credential') {
+        ({ error: applyError } = await supabase.rpc('apply_credential_promotion_proposal', {
+          p_proposal_id: proposal.id,
+          p_staff_id: targetForm.staffId,
+          p_credential_type: targetForm.credentialType,
+          p_credential_number: targetForm.credentialNumber || undefined,
+          p_issuing_authority: targetForm.issuingAuthority || undefined,
+          p_issued_date: targetForm.issuedDate || undefined,
+          p_expiry_date: targetForm.expiryDate || undefined,
+          p_authorized_activities: [],
+        }));
+      } else if (target === 'hr_case') {
+        ({ error: applyError } = await supabase.rpc('apply_hr_document_promotion_proposal', {
+          p_proposal_id: proposal.id,
+          p_staff_id: targetForm.staffId,
+          p_document_type: targetForm.documentType,
+          p_file_name: targetForm.fileName || targetForm.name,
+          p_storage_path: targetForm.storagePath || targetForm.notes,
+          p_expiry_date: targetForm.expiryDate || undefined,
+          p_notes: targetForm.notes || undefined,
+        }));
+      } else if (target === 'site_brief') {
+        ({ error: applyError } = await supabase.rpc('apply_site_brief_promotion_proposal', {
+          p_proposal_id: proposal.id,
+          p_name: targetForm.name,
+          p_work_unit_type: targetForm.workUnitType,
+          p_service_type: targetForm.serviceType,
+        }));
+      } else if (target === 'investigation_link') {
+        ({ error: applyError } = await supabase.rpc('apply_investigation_link_promotion_proposal', {
+          p_proposal_id: proposal.id,
+          p_investigation_id: targetForm.investigationId || targetForm.staffId,
+          p_entity_type: targetForm.entityType,
+          p_entity_id: targetForm.entityId || targetForm.name,
+          p_link_role: targetForm.linkRole,
+          p_link_reason: targetForm.linkReason || targetForm.notes || undefined,
+        }));
+      } else {
+        throw new Error(`Unsupported promotion target: ${target}`);
+      }
+      if (applyError) {
+        setError(applyError.message);
+      } else {
+        setNotice(`${formatActionType(target)} applied from approved proposal.`);
+        setTargetExecution(null);
+        await loadActivity();
+      }
+    } catch (applyFailure) {
+      setError(applyFailure instanceof Error ? applyFailure.message : 'The approved proposal could not be applied.');
+    } finally {
+      setBusyId(null);
+    }
   };
 
   useEffect(() => {

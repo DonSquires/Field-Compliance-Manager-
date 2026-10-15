@@ -23,11 +23,12 @@ describe('governed approvals workbench', () => {
     expect(source).toContain("setReviewArea(workAreas[0]?.id ?? 'actions')");
   });
 
-  it('separates decisions, documents, and plans into relevant work areas', () => {
-    expect(source).toContain("type ApprovalWorkArea = 'actions' | 'documents' | 'plans'");
+  it('separates decisions, documents, plans, and job history into relevant work areas', () => {
+    expect(source).toContain("type ApprovalWorkArea = 'actions' | 'documents' | 'plans' | 'runs'");
     expect(source).toContain('aria-label="Approval work area"');
     expect(source).toContain("reviewArea === 'documents' && documentReviews.length > 0");
     expect(source).toContain("reviewArea === 'plans' && plans.length > 0");
+    expect(source).toContain("reviewArea === 'runs' && jobRuns.length > 0");
     expect(source).toContain("reviewArea === 'actions' && <>");
   });
 
@@ -140,6 +141,15 @@ describe('governed approvals workbench', () => {
     expect(source).toContain('Apply approved HR document');
     expect(source).toContain('Apply approved site brief');
     expect(source).toContain('Apply approved investigation link');
+  });
+
+  it('invokes each approved target through an explicit typed RPC path', () => {
+    expect(source).toContain("rpc('apply_credential_promotion_proposal'");
+    expect(source).toContain("rpc('apply_hr_document_promotion_proposal'");
+    expect(source).toContain("rpc('apply_site_brief_promotion_proposal'");
+    expect(source).toContain("rpc('apply_investigation_link_promotion_proposal'");
+    expect(source).not.toContain('supabase.rpc(rpc, args)');
+    expect(source).toContain('The approved proposal could not be applied.');
   });
 
   it('simplifies the approval review into a single clear human-review summary with live evidence and direct actions', () => {
