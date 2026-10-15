@@ -120,7 +120,7 @@ type BobTurnStatus = 'queued' | 'running' | 'cancel_requested' | 'completed' | '
 // 'undelivered' is client-only: the server has no durable row for this request ID, so it must never lock the conversation.
 type ActiveBobTurnStatus = BobTurnStatus | 'undelivered';
 const BLOCKING_TURN_STATUSES: ActiveBobTurnStatus[] = ['queued', 'running', 'cancel_requested'];
-const UNDELIVERED_TURN_MESSAGE = 'Bob never received this request, so nothing is running. Retry delivery with the same request ID or restore the prompt.';
+const UNDELIVERED_TURN_MESSAGE = 'Bob has no record of this request, so nothing is running and the composer is unlocked. Restore the prompt if you want to edit it before sending a new request.';
 
 function edgeFunctionErrorStatus(err: unknown): number | null {
   const response = (err as { context?: unknown } | null)?.context;
@@ -142,7 +142,6 @@ interface ActiveBobTurn {
   message: string;
   startedAt: string;
   accepted: boolean;
-  deliveryBody?: Record<string, unknown>;
 }
 
 type ContextTab = 'context' | 'files' | 'actions' | 'audit';
@@ -863,8 +862,7 @@ export const BobPanel: React.FC<BobPanelProps> = ({ open, onClose, context, mode
     focusComposer();
   };
 
-  // Same request_id + same body is idempotent server-side, so redelivery can never create a second turn.
-  const invokeEnqueue = (body: Record<string, unknown>) => new Promise<{ reply?: unknown; turn_run?: BobTurnRun } | null>((resolve, reject) => {
+    const invokeEnqueue = (body: Record<string, unknown>) => new Promise<{ reply?: unknown; turn_run?: BobTurnRun } | null>((resolve, reject) => {
     const timeout = window.setTimeout(() => reject(new Error(BOB_REQUEST_TIMEOUT_MESSAGE)), BOB_REQUEST_TIMEOUT_MS);
     // ATLAS CALLS: onspace-ai-chat (persists both user + assistant messages server-side)
     supabase.functions.invoke<{ reply?: unknown; turn_run?: BobTurnRun }>('onspace-ai-chat', { body }).then(({ data, error: fnError }) => {
@@ -915,27 +913,6 @@ export const BobPanel: React.FC<BobPanelProps> = ({ open, onClose, context, mode
       : `Delivery of request ${requestId.slice(0, 8)} was not confirmed. Bob is checking whether it arrived; the composer unlocks automatically if it did not.`);
   };
 
-  const retryActiveTurnDelivery = async () => {
-    if (!activeTurn || activeTurn.status !== 'undelivered' || !activeTurn.deliveryBody || !conversationId || sending) return;
-    const { requestId, deliveryBody } = activeTurn;
-    setSending(true);
-    setActivityPhase('waiting');
-    setError(null);
-    setActiveTurn(current => current ? { ...current, status: 'queued', accepted: false, startedAt: new Date().toISOString() } : current);
-    try {
-      const data = await invokeEnqueue(deliveryBody);
-      if (acceptQueuedTurn(data)) return;
-      setActivityPhase('refreshing');
-      await refreshCanonicalThread(conversationId);
-      setActiveTurn(null);
-    } catch (err) {
-      markDeliveryUnconfirmed(requestId, err);
-    } finally {
-      setActivityPhase('idle');
-      setSending(false);
-    }
-  };
-
   const handleSend = async (e: React.FormEvent | null, override?: string) => {
     e?.preventDefault();
     const message = (override ?? (input.trim() || voiceTranscript.trim())).trim();
@@ -983,7 +960,6 @@ export const BobPanel: React.FC<BobPanelProps> = ({ open, onClose, context, mode
         message: message || 'Please review the attached file(s).',
         startedAt: new Date().toISOString(),
         accepted: false,
-        deliveryBody,
       });
       durableRequestStarted = true;
       const data = await invokeEnqueue(deliveryBody);
@@ -1229,11 +1205,6 @@ export const BobPanel: React.FC<BobPanelProps> = ({ open, onClose, context, mode
                     <RefreshCw size={14} /> Check status
                   </button>
                 )}
-                {activeTurn.status === 'undelivered' && activeTurn.deliveryBody && (
-                  <button type="button" onClick={() => void retryActiveTurnDelivery()} disabled={sending}>
-                    <RefreshCw size={14} /> Retry delivery
-                  </button>
-                )}
                 {(activeTurn.status === 'queued' || activeTurn.status === 'running') && (
                   <button type="button" onClick={() => void cancelActiveTurn()} disabled={sending}>
                     <Ban size={14} /> Request cancellation
@@ -1391,7 +1362,7 @@ function derivePanelWorkState(input: { loading: boolean; sending: boolean; error
     return { tone: 'waiting', label: 'Cancellation requested', detail: 'Bob will stop at the next safe conductor boundary. The request remains visible until the final receipt arrives.' };
   }
   if (input.activeTurn?.status === 'undelivered') {
-    return { tone: 'failed', label: 'Not delivered', detail: 'Bob never received the last request, so nothing is running. Retry delivery or restore the prompt; the composer is unlocked.' };
+    return { tone: 'failed', label: 'Not delivered', detail: 'Bob has no record of the last request, so nothing is running. The composer is unlocked; restore the prompt if you want to edit it.' };
   }
   if (input.error) return { tone: 'failed', label: 'Failed/paused', detail: `The last operation did not complete: ${input.error}. Check the message and try again.` };
   if (input.pendingFiles.some(file => file.status === 'uploading')) return { tone: 'using-data', label: 'Using app data', detail: 'Uploading evidence to private storage and registering it for Bob.' };
