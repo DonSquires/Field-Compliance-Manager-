@@ -117,6 +117,15 @@ interface BobGovernedAction {
 }
 
 type BobTurnStatus = 'queued' | 'running' | 'cancel_requested' | 'completed' | 'failed' | 'cancelled';
+// 'undelivered' is client-only: the server has no durable row for this request ID, so it must never lock the conversation.
+type ActiveBobTurnStatus = BobTurnStatus | 'undelivered';
+const BLOCKING_TURN_STATUSES: ActiveBobTurnStatus[] = ['queued', 'running', 'cancel_requested'];
+const UNDELIVERED_TURN_MESSAGE = 'Bob never received this request, so nothing is running. Retry delivery with the same request ID or restore the prompt.';
+
+function edgeFunctionErrorStatus(err: unknown): number | null {
+  const response = (err as { context?: unknown } | null)?.context;
+  return response instanceof Response ? response.status : null;
+}
 
 interface BobTurnRun {
   request_id: string;
@@ -129,10 +138,11 @@ interface BobTurnRun {
 
 interface ActiveBobTurn {
   requestId: string;
-  status: BobTurnStatus;
+  status: ActiveBobTurnStatus;
   message: string;
   startedAt: string;
   accepted: boolean;
+  deliveryBody?: Record<string, unknown>;
 }
 
 type ContextTab = 'context' | 'files' | 'actions' | 'audit';
@@ -800,7 +810,12 @@ export const BobPanel: React.FC<BobPanelProps> = ({ open, onClose, context, mode
           : 'The durable Bob request failed. Restore the prompt to retry with a new request ID.');
       }
     } catch (err) {
-      setError(err instanceof Error ? err.message : 'Bob request status could not be checked.');
+      if (edgeFunctionErrorStatus(err) === 404) {
+        setActiveTurn(current => current ? { ...current, status: 'undelivered', accepted: false } : current);
+        setError(UNDELIVERED_TURN_MESSAGE);
+      } else {
+        setError(err instanceof Error ? err.message : 'Bob request status could not be checked.');
+      }
     } finally {
       setActivityPhase('idle');
       setSending(false);
@@ -828,7 +843,12 @@ export const BobPanel: React.FC<BobPanelProps> = ({ open, onClose, context, mode
         ? 'Cancellation is requested. Bob will stop before the next planner or tool boundary.'
         : `Bob request is already ${data.turn_run.status.replaceAll('_', ' ')}.`);
     } catch (err) {
-      setError(err instanceof Error ? err.message : 'Bob request cancellation could not be submitted.');
+      if (edgeFunctionErrorStatus(err) === 404) {
+        setActiveTurn(current => current ? { ...current, status: 'undelivered', accepted: false } : current);
+        setError(UNDELIVERED_TURN_MESSAGE);
+      } else {
+        setError(err instanceof Error ? err.message : 'Bob request cancellation could not be submitted.');
+      }
     } finally {
       setActivityPhase('idle');
       setSending(false);
@@ -836,18 +856,91 @@ export const BobPanel: React.FC<BobPanelProps> = ({ open, onClose, context, mode
   };
 
   const restoreActiveTurnPrompt = () => {
-    if (!activeTurn || ['queued', 'running', 'cancel_requested'].includes(activeTurn.status)) return;
+    if (!activeTurn || BLOCKING_TURN_STATUSES.includes(activeTurn.status)) return;
     setInput(activeTurn.message);
     setActiveTurn(null);
     setError(null);
     focusComposer();
   };
 
+  // Same request_id + same body is idempotent server-side, so redelivery can never create a second turn.
+  const invokeEnqueue = (body: Record<string, unknown>) => new Promise<{ reply?: unknown; turn_run?: BobTurnRun } | null>((resolve, reject) => {
+    const timeout = window.setTimeout(() => reject(new Error(BOB_REQUEST_TIMEOUT_MESSAGE)), BOB_REQUEST_TIMEOUT_MS);
+    // ATLAS CALLS: onspace-ai-chat (persists both user + assistant messages server-side)
+    supabase.functions.invoke<{ reply?: unknown; turn_run?: BobTurnRun }>('onspace-ai-chat', { body }).then(({ data, error: fnError }) => {
+      window.clearTimeout(timeout);
+      if (fnError) reject(fnError);
+      else resolve(data ?? null);
+    }, (invokeError) => {
+      window.clearTimeout(timeout);
+      reject(invokeError);
+    });
+  });
+
+  const acceptQueuedTurn = (data: { reply?: unknown; turn_run?: BobTurnRun } | null) => {
+    if (!data?.turn_run || data.turn_run.status === 'completed' || 'reply' in data) return false;
+    const turnRun = data.turn_run;
+    setActiveTurn(current => current
+      ? { ...current, status: turnRun.status, startedAt: turnRun.started_at, accepted: true }
+      : current);
+    setError(null);
+    return true;
+  };
+
+  const refreshCanonicalThread = async (targetConversationId: string) => {
+    const { data: history, error: historyErr } = await supabase
+      .from('bob_messages')
+      .select('id, role, content, confidence, flagged, created_at, metadata')
+      .eq('conversation_id', targetConversationId)
+      .order('created_at', { ascending: true });
+    if (historyErr) throw historyErr;
+    if (!history || history.length === 0) return false;
+    setMessages(history as BobMessage[]);
+    await Promise.all([loadAttachments(targetConversationId), loadAuditEvents(targetConversationId), loadGovernedActions(targetConversationId)]);
+    setPendingFiles([]);
+    return true;
+  };
+
+  const markDeliveryUnconfirmed = (requestId: string, err: unknown) => {
+    const timedOut = err instanceof Error && err.message === BOB_REQUEST_TIMEOUT_MESSAGE;
+    if (!timedOut && edgeFunctionErrorStatus(err) === 409) {
+      setActiveTurn(current => current?.requestId === requestId ? { ...current, status: 'failed', accepted: true } : current);
+      setError('Bob rejected this request ID for different input. Restore the prompt to retry as a new request.');
+      return;
+    }
+    // Let the status poll settle it: a real row resolves to its status, a missing row becomes 'undelivered'.
+    setActiveTurn(current => current?.requestId === requestId ? { ...current, status: 'queued', accepted: true } : current);
+    setError(timedOut
+      ? BOB_REQUEST_TIMEOUT_MESSAGE
+      : `Delivery of request ${requestId.slice(0, 8)} was not confirmed. Bob is checking whether it arrived; the composer unlocks automatically if it did not.`);
+  };
+
+  const retryActiveTurnDelivery = async () => {
+    if (!activeTurn || activeTurn.status !== 'undelivered' || !activeTurn.deliveryBody || !conversationId || sending) return;
+    const { requestId, deliveryBody } = activeTurn;
+    setSending(true);
+    setActivityPhase('waiting');
+    setError(null);
+    setActiveTurn(current => current ? { ...current, status: 'queued', accepted: false, startedAt: new Date().toISOString() } : current);
+    try {
+      const data = await invokeEnqueue(deliveryBody);
+      if (acceptQueuedTurn(data)) return;
+      setActivityPhase('refreshing');
+      await refreshCanonicalThread(conversationId);
+      setActiveTurn(null);
+    } catch (err) {
+      markDeliveryUnconfirmed(requestId, err);
+    } finally {
+      setActivityPhase('idle');
+      setSending(false);
+    }
+  };
+
   const handleSend = async (e: React.FormEvent | null, override?: string) => {
     e?.preventDefault();
     const message = (override ?? (input.trim() || voiceTranscript.trim())).trim();
     if ((!message && pendingFiles.length === 0) || !conversationId || sending) return;
-    if (activeTurn && ['queued', 'running', 'cancel_requested'].includes(activeTurn.status)) {
+    if (activeTurn && BLOCKING_TURN_STATUSES.includes(activeTurn.status)) {
       setError('This conversation already has a durable Bob request in progress. Check or cancel it before sending another turn.');
       return;
     }
@@ -869,68 +962,38 @@ export const BobPanel: React.FC<BobPanelProps> = ({ open, onClose, context, mode
     try {
       const attachments = await uploadPendingFiles(conversationId);
       setActivityPhase('waiting');
+      const deliveryBody: Record<string, unknown> = {
+        operation: 'enqueue',
+        message: message || 'Please review the attached file(s).',
+        conversation_id: conversationId,
+        request_id: requestId,
+        attachments,
+        context: {
+          ...(context ?? {}),
+          agent_mode: mode,
+          ...(studioPromptContextRef.current ? {
+            studio_artifact_type: studioPromptContextRef.current.artifactType,
+            studio_document_kind: studioPromptContextRef.current.documentKind,
+          } : {}),
+        },
+      };
       setActiveTurn({
         requestId,
         status: 'queued',
         message: message || 'Please review the attached file(s).',
         startedAt: new Date().toISOString(),
         accepted: false,
+        deliveryBody,
       });
       durableRequestStarted = true;
-      // ATLAS CALLS: onspace-ai-chat (persists both user + assistant messages server-side)
-      const { data, error: fnError } = await new Promise<Awaited<ReturnType<typeof supabase.functions.invoke<{ reply?: unknown }>>>>((resolve, reject) => {
-        const timeout = window.setTimeout(() => reject(new Error(BOB_REQUEST_TIMEOUT_MESSAGE)), BOB_REQUEST_TIMEOUT_MS);
-        supabase.functions.invoke<{ reply?: unknown }>('onspace-ai-chat', {
-          body: {
-            operation: 'enqueue',
-            message: message || 'Please review the attached file(s).',
-            conversation_id: conversationId,
-            request_id: requestId,
-            attachments,
-            context: {
-              ...(context ?? {}),
-              agent_mode: mode,
-              ...(studioPromptContextRef.current ? {
-                studio_artifact_type: studioPromptContextRef.current.artifactType,
-                studio_document_kind: studioPromptContextRef.current.documentKind,
-              } : {}),
-            },
-          },
-        }).then((result) => {
-          window.clearTimeout(timeout);
-          resolve(result);
-        }, (invokeError) => {
-          window.clearTimeout(timeout);
-          reject(invokeError);
-        });
-      });
-
-      if (fnError) throw fnError;
+      const data = await invokeEnqueue(deliveryBody);
       studioPromptContextRef.current = null;
-      if (data && typeof data === 'object' && 'turn_run' in data && (data as { turn_run?: BobTurnRun }).turn_run?.status !== 'completed' && !('reply' in data)) {
-        const turnRun = (data as { turn_run: BobTurnRun }).turn_run;
-        setActiveTurn(current => current
-          ? { ...current, status: turnRun.status, startedAt: turnRun.started_at, accepted: true }
-          : current);
-        setError(null);
-        return;
-      }
+      if (acceptQueuedTurn(data)) return;
 
       setActivityPhase('refreshing');
       // Refresh from bob_messages so we show the server-persisted, canonical thread
-      const { data: history, error: historyErr } = await supabase
-        .from('bob_messages')
-        .select('id, role, content, confidence, flagged, created_at, metadata')
-        .eq('conversation_id', conversationId)
-        .order('created_at', { ascending: true });
-
-      if (historyErr) throw historyErr;
-
-      if (history && history.length > 0) {
-        setMessages(history as BobMessage[]);
-        await Promise.all([loadAttachments(conversationId), loadAuditEvents(conversationId), loadGovernedActions(conversationId)]);
-        setPendingFiles([]);
-      } else if (data?.reply) {
+      const hadHistory = await refreshCanonicalThread(conversationId);
+      if (!hadHistory && data?.reply) {
         // Fallback: function replied but history read didn't return rows yet
         setMessages((prev) => [
           ...prev.filter((m) => m.id !== optimisticId),
@@ -950,12 +1013,8 @@ export const BobPanel: React.FC<BobPanelProps> = ({ open, onClose, context, mode
       }
       setActiveTurn(null);
     } catch (err) {
-      const messageText = err instanceof Error ? err.message : 'Bob could not respond.';
-      setError(messageText === BOB_REQUEST_TIMEOUT_MESSAGE
-        ? BOB_REQUEST_TIMEOUT_MESSAGE
-        : durableRequestStarted
-          ? `Request delivery was not confirmed. Check durable request ${requestId.slice(0, 8)} before retrying; do not resend while it is queued or running.`
-          : messageText);
+      if (durableRequestStarted) markDeliveryUnconfirmed(requestId, err);
+      else setError(err instanceof Error ? err.message : 'Bob could not respond.');
     } finally {
       setActivityPhase('idle');
       setSending(false);
@@ -963,7 +1022,7 @@ export const BobPanel: React.FC<BobPanelProps> = ({ open, onClose, context, mode
   };
 
   useEffect(() => {
-    if (!open || !conversationId || !activeTurn?.accepted || !['queued', 'running', 'cancel_requested'].includes(activeTurn.status)) return;
+    if (!open || !conversationId || !activeTurn?.accepted || !BLOCKING_TURN_STATUSES.includes(activeTurn.status)) return;
 
     let stopped = false;
     let polling = false;
@@ -979,7 +1038,13 @@ export const BobPanel: React.FC<BobPanelProps> = ({ open, onClose, context, mode
             context: { ...(context ?? {}), agent_mode: mode },
           },
         });
-        if (stopped || statusError || !data?.turn_run) return;
+        if (stopped) return;
+        if (statusError && edgeFunctionErrorStatus(statusError) === 404) {
+          setActiveTurn(current => current?.requestId === activeTurn.requestId ? { ...current, status: 'undelivered', accepted: false } : current);
+          setError(UNDELIVERED_TURN_MESSAGE);
+          return;
+        }
+        if (statusError || !data?.turn_run) return;
 
         const nextStatus = data.turn_run.status;
         if (nextStatus === 'completed') {
@@ -1159,15 +1224,22 @@ export const BobPanel: React.FC<BobPanelProps> = ({ open, onClose, context, mode
                 </span>
               </div>
               <div className="bob-turn-recovery-actions">
-                <button type="button" onClick={() => void reconcileActiveTurn()} disabled={sending}>
-                  <RefreshCw size={14} /> Check status
-                </button>
+                {activeTurn.status !== 'undelivered' && (
+                  <button type="button" onClick={() => void reconcileActiveTurn()} disabled={sending}>
+                    <RefreshCw size={14} /> Check status
+                  </button>
+                )}
+                {activeTurn.status === 'undelivered' && activeTurn.deliveryBody && (
+                  <button type="button" onClick={() => void retryActiveTurnDelivery()} disabled={sending}>
+                    <RefreshCw size={14} /> Retry delivery
+                  </button>
+                )}
                 {(activeTurn.status === 'queued' || activeTurn.status === 'running') && (
                   <button type="button" onClick={() => void cancelActiveTurn()} disabled={sending}>
                     <Ban size={14} /> Request cancellation
                   </button>
                 )}
-                {(activeTurn.status === 'failed' || activeTurn.status === 'cancelled') && (
+                {(activeTurn.status === 'failed' || activeTurn.status === 'cancelled' || activeTurn.status === 'undelivered') && (
                   <button type="button" onClick={restoreActiveTurnPrompt} disabled={sending}>
                     <Pencil size={14} /> Restore prompt
                   </button>
@@ -1317,6 +1389,9 @@ function derivePanelWorkState(input: { loading: boolean; sending: boolean; error
   }
   if (input.activeTurn?.status === 'cancel_requested') {
     return { tone: 'waiting', label: 'Cancellation requested', detail: 'Bob will stop at the next safe conductor boundary. The request remains visible until the final receipt arrives.' };
+  }
+  if (input.activeTurn?.status === 'undelivered') {
+    return { tone: 'failed', label: 'Not delivered', detail: 'Bob never received the last request, so nothing is running. Retry delivery or restore the prompt; the composer is unlocked.' };
   }
   if (input.error) return { tone: 'failed', label: 'Failed/paused', detail: `The last operation did not complete: ${input.error}. Check the message and try again.` };
   if (input.pendingFiles.some(file => file.status === 'uploading')) return { tone: 'using-data', label: 'Using app data', detail: 'Uploading evidence to private storage and registering it for Bob.' };

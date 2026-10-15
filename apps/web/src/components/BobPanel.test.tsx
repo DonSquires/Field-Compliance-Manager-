@@ -521,6 +521,59 @@ describe('BobPanel', () => {
     }));
   });
 
+  it('unlocks an undelivered turn instead of leaving it queued forever, and retries with the same request ID', async () => {
+    let enqueueCalls = 0;
+    const enqueuedRequestIds: unknown[] = [];
+    mockInvoke.mockImplementation((_name: string, options?: { body?: Record<string, unknown> }) => {
+      const operation = options?.body?.operation;
+      if (operation === 'enqueue') {
+        enqueueCalls += 1;
+        enqueuedRequestIds.push(options?.body?.request_id);
+        if (enqueueCalls === 1) {
+          return Promise.resolve({ data: null, error: Object.assign(new Error('Failed to send a request to the Edge Function'), { context: undefined }) });
+        }
+        return Promise.resolve({
+          data: {
+            turn_run: {
+              request_id: options?.body?.request_id,
+              status: 'queued',
+              started_at: '2026-10-15T06:40:00.000Z',
+              heartbeat_at: '2026-10-15T06:40:00.000Z',
+              completed_at: null,
+              error_code: null,
+            },
+          },
+          error: null,
+        });
+      }
+      if (operation === 'status') {
+        if (enqueueCalls === 1) {
+          return Promise.resolve({ data: null, error: Object.assign(new Error('Edge Function returned a non-2xx status code'), { context: new Response(null, { status: 404 }) }) });
+        }
+        return new Promise(() => undefined);
+      }
+      return Promise.resolve({ data: null, error: null });
+    });
+
+    render(<BobPanel open onClose={() => undefined} />);
+
+    fireEvent.change(await screen.findByPlaceholderText('Ask Bob to plan, inspect, explain, or prepare a proposal'), { target: { value: 'Redesign the Builder studio' } });
+    fireEvent.click(screen.getByRole('button', { name: 'Send' }));
+
+    expect(await screen.findByText('Not delivered')).toBeTruthy();
+    expect((await screen.findByRole('alert')).textContent).toContain('Bob never received this request');
+    expect(screen.queryByRole('button', { name: 'Request cancellation' })).toBeNull();
+    expect(screen.getByRole('button', { name: 'Restore prompt' })).toBeTruthy();
+
+    fireEvent.click(screen.getByRole('button', { name: 'Retry delivery' }));
+
+    await waitFor(() => {
+      expect(enqueueCalls).toBe(2);
+      expect(screen.getByText('Working')).toBeTruthy();
+    });
+    expect(enqueuedRequestIds[1]).toBe(enqueuedRequestIds[0]);
+  });
+
   it('surfaces a recoverable timeout when Bob does not return', async () => {
     mockInvoke.mockImplementation((_name: string, options?: { body?: Record<string, unknown> }) => {
       if (options?.body?.operation === 'status') {
