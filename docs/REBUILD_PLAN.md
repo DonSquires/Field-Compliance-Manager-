@@ -8,6 +8,14 @@ detailed backlogs (`ENTERPRISE_SAAS_TODO.md`, `PROTOTYPE_GAP_AUDIT.md`,
 Completion language is strict, as in the lineage: **merged ≠ deployed ≠
 glass-proven.** A workstream item is done only when its evidence gate is met.
 
+Main-health snapshot isolation 2026-10-15: an exact-SHA guard repair passed
+targeted and full local suites but failed intermittently in Bob's worker. The
+worker mounted the shared Builder checkout read-only; another job could still
+force that underlying checkout to a different SHA while the suite was
+running. Main health now receives a detached per-SHA Git worktree. Moving the
+shared checkout can no longer change files underneath an active verification
+container or open a false repair job.
+
 Dispatch main-health repair 2026-10-15: after the Finance guard repair merged,
 the full health compiler exposed Playwright request captures narrowed to
 `never` because their assignments occur inside route callbacks. Request

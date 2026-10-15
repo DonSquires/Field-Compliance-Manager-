@@ -22,7 +22,7 @@ const { loadBuilderRuntimeSnapshot, advanceBuilderJob, runBuilderUntilPause, rec
 const { fileSha256, listRepositoryTree, readRepositoryFile, searchRepository } = require('./builder-repository-read');
 const { autopilotTick, listAutopilotJobs, listPendingApprovals } = require('./builder-autopilot');
 const { laptopStatus, runLaptopCommand, laptopConfig, loadLaptopLink, mergeLaptopLink, describeLink } = require('./bob-laptop-shell');
-const { createBranchWorkspace, commitVerifiedPatch, publishWorkspaceBranch, createGiteaPullRequest, workspacePathForBranch, createGitHubPullRequest, mergeGitHubPullRequest, ensureSourceCheckout, githubAuthHeader, githubRepoUrl, githubSshRepoUrl, resolveRemoteHead, redactGitError } = require('./builder-branch-workspace');
+const { createBranchWorkspace, createDetachedWorkspace, commitVerifiedPatch, publishWorkspaceBranch, createGiteaPullRequest, workspacePathForBranch, createGitHubPullRequest, mergeGitHubPullRequest, ensureSourceCheckout, githubAuthHeader, githubRepoUrl, githubSshRepoUrl, resolveRemoteHead, redactGitError } = require('./builder-branch-workspace');
 const { executeWorker, summarizeHumanTest } = require('./worker-executor');
 const { createMainHealthMonitor } = require('./bob-main-health');
 
@@ -748,7 +748,12 @@ async function openMainHealthRepair({ sha, failure }) {
 const mainHealthMonitor = createMainHealthMonitor({
   getMainSha: () => builderRepositoryHead('main').sha,
   runChecks: async ({ sha }) => {
-    const source = builderGitSource(sha);
+    const mutableSource = builderGitSource(sha);
+    const source = createDetachedWorkspace({
+      sourceDir: mutableSource,
+      workspaceRoot: path.join(builderWorkspaceRoot, 'main-health'),
+      targetSha: sha,
+    }).workspacePath;
     const artifactDir = path.join(stateDir, 'main-health-runs', sha);
     fs.mkdirSync(artifactDir, { recursive: true, mode: 0o700 });
     return executeWorker({

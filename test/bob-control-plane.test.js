@@ -103,6 +103,7 @@ test('main-health verification runs independently of owner Builder jobs', () => 
   assert.match(source, /if \(!mainHealthEnabled \|\| mainHealthInFlight\) return mainHealthInFlight/);
   assert.match(source, /startMainHealthCheck\(\);\s*await startRoutineRepairs\(\)/);
   assert.doesNotMatch(source, /await mainHealthMonitor\.tick\(\)/);
+  assert.match(source, /createDetachedWorkspace\(\{[\s\S]*workspaceRoot: path\.join\(builderWorkspaceRoot, 'main-health'\),[\s\S]*targetSha: sha/);
 });
 
 test('startup recovers model steps interrupted by a control-plane restart before autopilot planning', () => {

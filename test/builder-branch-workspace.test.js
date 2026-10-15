@@ -4,7 +4,7 @@ const os = require('node:os');
 const path = require('node:path');
 const { execFileSync } = require('node:child_process');
 const test = require('node:test');
-const { branchNameForJob, builderCommitIdentity, createBranchWorkspace, commitVerifiedPatch, publishWorkspaceBranch, createGiteaPullRequest, mergeGitHubPullRequest } = require('../builder-branch-workspace');
+const { branchNameForJob, builderCommitIdentity, createBranchWorkspace, createDetachedWorkspace, commitVerifiedPatch, publishWorkspaceBranch, createGiteaPullRequest, mergeGitHubPullRequest } = require('../builder-branch-workspace');
 
 const patch = ['diff --git a/apps/web/src/example.ts b/apps/web/src/example.ts', '--- a/apps/web/src/example.ts', '+++ b/apps/web/src/example.ts', '@@ -1 +1 @@', '-export const value = 1;', '+export const value = 2;', ''].join('\n');
 
@@ -52,6 +52,60 @@ test('Builder branch workspace is pinned, isolated, and commits only validated p
     assert.equal(git(repo.root, ['show', `${committed.commitSha}:apps/web/src/example.ts`]), 'export const value = 2;');
     assert.equal(git(repo.root, ['show', `${repo.sha}:apps/web/src/example.ts`]), 'export const value = 1;');
   } finally { fs.rmSync(repo.root, { recursive: true, force: true }); }
+});
+
+test('detached verification workspace remains pinned when the shared source checkout moves', () => {
+  const repo = fixture();
+  try {
+    const firstSha = repo.sha;
+    const snapshot = createDetachedWorkspace({
+      sourceDir: repo.root,
+      workspaceRoot: path.join(repo.workspaceRoot, 'main-health'),
+      targetSha: firstSha,
+    });
+    fs.writeFileSync(path.join(repo.root, 'apps/web/src/example.ts'), 'export const value = 2;\n');
+    git(repo.root, ['add', '.']);
+    git(repo.root, ['commit', '-qm', 'move shared source']);
+    const secondSha = git(repo.root, ['rev-parse', 'HEAD']);
+
+    assert.notEqual(secondSha, firstSha);
+    assert.equal(git(snapshot.workspacePath, ['rev-parse', 'HEAD']), firstSha);
+    assert.equal(fs.readFileSync(path.join(snapshot.workspacePath, 'apps/web/src/example.ts'), 'utf8'), 'export const value = 1;\n');
+    assert.equal(createDetachedWorkspace({
+      sourceDir: repo.root,
+      workspaceRoot: path.join(repo.workspaceRoot, 'main-health'),
+      targetSha: firstSha,
+    }).existing, true);
+    assert.throws(() => createDetachedWorkspace({
+      sourceDir: repo.root,
+      workspaceRoot: path.join(repo.workspaceRoot, 'main-health'),
+      targetSha: '../main',
+    }), /full Git SHA/);
+  } finally { fs.rmSync(repo.root, { recursive: true, force: true }); }
+});
+
+test('detached verification workspace retention removes only old clean snapshots', () => {
+  const repo = fixture();
+  const healthRoot = fs.mkdtempSync(path.join(os.tmpdir(), 'bob-health-snapshots-'));
+  try {
+    const shas = [repo.sha];
+    for (const value of [2, 3]) {
+      fs.writeFileSync(path.join(repo.root, 'apps/web/src/example.ts'), `export const value = ${value};\n`);
+      git(repo.root, ['add', '.']);
+      git(repo.root, ['commit', '-qm', `fixture ${value}`]);
+      shas.push(git(repo.root, ['rev-parse', 'HEAD']));
+    }
+    for (const sha of shas) {
+      git(repo.root, ['checkout', '--detach', '-q', sha]);
+      createDetachedWorkspace({ sourceDir: repo.root, workspaceRoot: healthRoot, targetSha: sha, retentionCount: 2 });
+    }
+
+    assert.equal(fs.existsSync(path.join(healthRoot, `snapshot-${shas[2]}`)), true);
+    assert.equal(fs.readdirSync(healthRoot).filter((name) => name.startsWith('snapshot-')).length, 2);
+  } finally {
+    fs.rmSync(repo.root, { recursive: true, force: true });
+    fs.rmSync(healthRoot, { recursive: true, force: true });
+  }
 });
 
 test('a verified backend patch commits (the commit step enforces protected paths, not the frontend fence)', () => {

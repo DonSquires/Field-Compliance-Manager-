@@ -64,6 +64,49 @@ function verifySnapshot(sourceDir, targetSha) {
   if (git(sourceDir, ['status', '--porcelain', '--untracked-files=normal'])) throw new Error('Builder source checkout must be clean');
 }
 
+function pruneDetachedWorkspaces({ sourceDir, workspaceRoot, activeWorkspacePath, retentionCount }) {
+  const root = path.resolve(workspaceRoot);
+  const candidates = fs.readdirSync(root, { withFileTypes: true })
+    .filter((entry) => entry.isDirectory() && /^snapshot-[a-f0-9]{40}$/i.test(entry.name))
+    .map((entry) => {
+      const workspacePath = path.join(root, entry.name);
+      assertWorkspacePath(root, workspacePath);
+      return { workspacePath, mtimeMs: fs.statSync(workspacePath).mtimeMs };
+    })
+    .sort((left, right) => right.mtimeMs - left.mtimeMs);
+  const retained = new Set([activeWorkspacePath]);
+  for (const candidate of candidates) {
+    if (retained.size >= retentionCount) break;
+    retained.add(candidate.workspacePath);
+  }
+  for (const candidate of candidates) {
+    if (retained.has(candidate.workspacePath)) continue;
+    const targetSha = path.basename(candidate.workspacePath).slice('snapshot-'.length);
+    verifySnapshot(candidate.workspacePath, targetSha);
+    git(sourceDir, ['worktree', 'remove', '--force', candidate.workspacePath]);
+  }
+}
+
+function createDetachedWorkspace({ sourceDir, workspaceRoot, targetSha, retentionCount = 8 }) {
+  if (!/^[a-f0-9]{40}$/i.test(String(targetSha ?? ''))) throw new Error('Builder target SHA must be a full Git SHA');
+  if (!Number.isInteger(retentionCount) || retentionCount < 1 || retentionCount > 64) throw new Error('Builder snapshot retention count is invalid');
+  const workspacePath = path.join(path.resolve(workspaceRoot), `snapshot-${targetSha}`);
+  assertWorkspacePath(workspaceRoot, workspacePath);
+  fs.mkdirSync(workspaceRoot, { recursive: true, mode: 0o700 });
+
+  if (fs.existsSync(workspacePath)) {
+    verifySnapshot(workspacePath, targetSha);
+    pruneDetachedWorkspaces({ sourceDir, workspaceRoot, activeWorkspacePath: workspacePath, retentionCount });
+    return { workspacePath, head: targetSha, existing: true };
+  }
+
+  verifySnapshot(sourceDir, targetSha);
+  git(sourceDir, ['worktree', 'add', '--detach', workspacePath, targetSha]);
+  verifySnapshot(workspacePath, targetSha);
+  pruneDetachedWorkspaces({ sourceDir, workspaceRoot, activeWorkspacePath: workspacePath, retentionCount });
+  return { workspacePath, head: targetSha, existing: false };
+}
+
 function createBranchWorkspace({ sourceDir, workspaceRoot, jobId, targetSha, branchName = branchNameForJob(jobId), recoverInterrupted = false }) {
   if (!branchName.startsWith(BRANCH_PREFIX) || !/^bob\/job-[a-z0-9]+$/.test(branchName)) throw new Error('Builder branch name is invalid');
   const workspacePath = workspacePathForBranch(workspaceRoot, branchName);
@@ -305,4 +348,4 @@ function publicGiteaUrl(url, { baseUrl, publicBaseUrl }) {
   return url;
 }
 
-module.exports = { BRANCH_PREFIX, BUILDER_NAME, BUILDER_EMAIL, builderCommitIdentity, branchNameForJob, workspacePathForBranch, createBranchWorkspace, commitVerifiedPatch, publishWorkspaceBranch, giteaRepositoryPath, createGiteaPullRequest, publicGiteaUrl, verifySnapshot, githubAuthHeader, githubRepoUrl, githubSshRepoUrl, resolveRemoteHead, ensureSourceCheckout, createGitHubPullRequest, mergeGitHubPullRequest, redactGitError };
+module.exports = { BRANCH_PREFIX, BUILDER_NAME, BUILDER_EMAIL, builderCommitIdentity, branchNameForJob, workspacePathForBranch, createBranchWorkspace, createDetachedWorkspace, commitVerifiedPatch, publishWorkspaceBranch, giteaRepositoryPath, createGiteaPullRequest, publicGiteaUrl, verifySnapshot, githubAuthHeader, githubRepoUrl, githubSshRepoUrl, resolveRemoteHead, ensureSourceCheckout, createGitHubPullRequest, mergeGitHubPullRequest, redactGitError };
