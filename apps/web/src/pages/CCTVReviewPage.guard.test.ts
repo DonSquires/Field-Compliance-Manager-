@@ -57,6 +57,19 @@ describe('CCTV inference review', () => {
     expect(source).not.toMatch(/from\('cctv_report_receipts'\)[\s\S]{0,300}\.(insert|update|delete)\(/);
   });
 
+  it('uses explicit permission-aware export transitions and immutable issue receipts', () => {
+    expect(source).toContain("supabase.rpc('approve_cctv_export'");
+    expect(source).toContain("supabase.rpc('seal_cctv_export'");
+    expect(source).toContain("supabase.rpc('issue_cctv_export'");
+    expect(source).not.toContain('supabase.rpc(rpc, args)');
+    expect(source).toContain("transitionExport('rejected')");
+    expect(source).toContain('Awaiting an organization administrator to approve or reject this export.');
+    expect(source).toContain('Seal this approved CCTV export?');
+    expect(source).toContain('Issue this sealed CCTV export?');
+    expect(source).toContain('finally {');
+    expect(source).toContain('setExportSaving(false);');
+  });
+
   it('explains each failed job in plain words and only bulk-retries failures a retry can fix', () => {
     expect(source).toContain("import { describeJobFailure, summariseFailures, type JobFailure } from '../lib/cctvJobFailure';");
     expect(source).toContain('describeJobFailure(job.error_message, fileName)');

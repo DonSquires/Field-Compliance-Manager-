@@ -1175,3 +1175,40 @@ remains unpopulated.
   and the explicit UI calls. Atlas dry-run adds four component-to-RPC call edges
   from `pages/ApprovalsActivityPage`, keeps `exercised=null`, and moves bounded
   gaps 142 -> 138: 0 Edge Functions, 85 RPCs and 53 tables.
+
+### Closure log — governed CCTV export approval, sealing and issue
+
+- `approve_cctv_export` and `seal_cctv_export` were not dormant capabilities:
+  the CCTV review workspace selected their names through a runtime variable.
+  Atlas therefore showed both as unwired and generated TypeScript could not
+  verify that each transition received the correct argument shape.
+- The before/during/after trace exposed a deeper authority gap. Any
+  authenticated user with ordinary organization access could approve, reject,
+  seal and issue evidentiary material, and the approval RPC allowed callers to
+  jump between lifecycle states. The linked project had zero export rows, so
+  hardening did not reinterpret or mutate existing evidence.
+- Before: an authorized reviewer creates a draft from accepted review events,
+  with purpose, recipient scope, selected event IDs and a server-derived
+  manifest hash. The draft author or an organization administrator may submit
+  only a `draft`.
+- During: only an active `admin`, `master` or `grand_master` authorized for the
+  organization may approve or reject a `submitted` export. Approval, rejection,
+  sealing and issue now have explicit confirmation language. Non-admin review
+  users see an awaiting-administrator state instead of controls that fail only
+  after invocation.
+- After approval: only an organization administrator may seal the exact
+  `approved` manifest. After sealing: only an organization administrator may
+  issue it, and the RPC accepts only the canonical private
+  `bob-uploads/cctv-exports/<org>/<export>/manifest-<sha256>.json` object after
+  proving that object exists. Every transition records previous state and
+  manifest provenance in `audit_log`.
+- The UI now calls `approve_cctv_export` and `seal_cctv_export` explicitly,
+  offers a visible rejection path and clears loading state in `finally` after
+  returned or thrown failures. The existing issue receipt and short-lived
+  signed download remain the after-state.
+- The linked migration is applied and the regenerated catalogue remains at 398
+  tables, 813 functions, 726 indexes and 896 policies. Sixteen lifecycle/UI
+  guards, the production build and database lint pass. Atlas dry-run wires both
+  RPCs to `pages/CCTVReviewPage`, retains the existing `issue_cctv_export`
+  caller, keeps `exercised=null`, and moves bounded gaps 138 -> 136:
+  0 Edge Functions, 83 RPCs and 53 tables.
