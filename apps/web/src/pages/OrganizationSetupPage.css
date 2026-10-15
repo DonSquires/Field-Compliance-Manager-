@@ -119,12 +119,25 @@
 .organization-jurisdiction-message.is-success { border-left-color: var(--color-success); background: var(--color-success-bg); }
 .organization-jurisdiction-message.is-error { border-left-color: var(--color-danger); background: var(--color-danger-bg); }
 
+.org-notice-template-form { display: grid; gap: 14px; padding: 16px; border: 1px solid var(--color-border-strong); border-radius: var(--radius-md, 8px); background: var(--color-bg-secondary); }
+.org-notice-template-intro { display: grid; gap: 3px; padding: 10px 12px; border-left: 3px solid var(--color-primary); background: var(--color-bg-elevated); }
+.org-notice-template-intro strong { font-size: 14px; }
+.org-notice-template-intro span, .org-notice-template-form .form-group small { color: var(--color-text-muted); font-size: 12px; line-height: 1.45; }
+.org-notice-template-form textarea { resize: vertical; }
+.org-notice-template-confirmation { display: flex; align-items: flex-start; gap: 10px; padding: 12px; border: 1px solid var(--color-border); border-radius: var(--radius-md, 8px); background: var(--color-bg-elevated); cursor: pointer; }
+.org-notice-template-confirmation input { width: auto; margin: 3px 0 0; flex: 0 0 auto; }
+.org-notice-template-confirmation span { display: grid; gap: 3px; min-width: 0; }
+.org-notice-template-confirmation strong { font-size: 13px; }
+.org-notice-template-confirmation small { color: var(--color-text-muted); font-size: 12px; line-height: 1.45; }
+
 @media (max-width: 720px) {
   .org-settings-checklist { grid-template-columns: 1fr 1fr; }
   .org-settings-checklist a small { white-space: normal; }
   .org-branch-row-actions { width: 100%; justify-content: space-between; }
   .org-distance-input { width: 100%; justify-content: space-between; }
   .organization-jurisdiction-map, .organization-jurisdiction-map-empty { min-height: 300px; }
+  .org-notice-template-form { padding: 12px; }
+  .org-notice-template-form .org-settings-actions .btn { width: 100%; }
 }
 @media (max-width: 480px) {
   .org-settings-checklist { grid-template-columns: 1fr; }

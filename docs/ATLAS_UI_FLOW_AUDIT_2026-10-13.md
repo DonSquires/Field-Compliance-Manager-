@@ -1445,3 +1445,52 @@ remains unpopulated.
   Atlas keeps `exercised=null`; `wired` is the strongest claim available.
   Atlas dry-run records `pages/RosterHRPage -calls-> rpc manage_asset` and moves
   bounded gaps 128 -> 127: 0 Edge Functions, 75 RPCs and 52 tables.
+
+### Closure log - governed notice template versioning
+
+- Atlas showed `manage_notice_template` as present but unwired while
+  `notice_templates` already had proven reads from `generate-notice`,
+  `generate-parking-notice`, and `generate-noise-evidence-package`.
+  Live verification found zero templates and one parking chalk record. The
+  downstream issue path therefore existed before an administrator had a
+  working place to configure approved legal wording. `org_printer_settings`
+  also has zero rows, but remains a separate gap because no runtime notice
+  path currently reads it; wiring that setting alone would create dormant
+  configuration rather than a working feature.
+- Before: Organisation settings described notice templates as reference-only
+  and claimed they would appear when a module was configured, but exposed no
+  authoring action. The RPC silently defaulted missing legislation to the
+  Resource Management Act, was neither replay-safe nor optimistic, allowed
+  direct authenticated table writes through older policies and grants, and
+  recorded only a partial audit fragment.
+- During: an administrator with an enabled enforcement module can create the
+  first template or explicitly create a new immutable version of the active
+  one. The form requires the issuing authority, verified authorising Act,
+  source-document location, body wording, and a human confirmation. Optional
+  section, bylaw, fine, payment, and footer fields remain visible without
+  inventing values. **Keep current template** is the safe exit. Empty, saving,
+  error, success, historical-version, disabled-module, desktop, and mobile
+  states are explicit.
+- After: the governed RPC serializes each organisation/module/type stream,
+  replays a client request without another version or audit row, rejects stale
+  active-version expectations, preserves the prior row as inactive history,
+  and records full previous/resulting snapshots. Direct authenticated writes
+  are revoked. A validated table constraint rejects script, embedded-object,
+  JavaScript-URL, and inline-event-handler HTML for every writer.
+- This applies the useful Trackforce configure-before-deploy pattern without
+  copying a separate notice product: supervisors approve sourced wording
+  before field issuance, future generators consume the active version, and
+  earlier templates and issued notices remain durable evidence.
+- The linked migrations are applied and the regenerated live catalogue has 398
+  tables, 814 functions, 735 indexes, 132 triggers, and 892 policies. Focused
+  governance tests, web/E2E type-checks, the production build, and the
+  desktop/mobile Organisation settings workflow pass. Rollback-only live
+  verification using a throwaway test identity proved create, replay, version
+  transition, stale rejection, source enforcement, unsafe-HTML rejection,
+  direct-write revocation, full audit evidence, and authorization rejection,
+  with zero retained templates, profiles, or audit rows.
+- Honesty note: rollback verification is not production invocation evidence.
+  Atlas keeps `exercised=null`; `wired` is the strongest claim available.
+  Atlas dry-run records `pages/OrganizationSetupPage -calls-> rpc
+  manage_notice_template` and moves bounded gaps 127 -> 126: 0 Edge Functions,
+  74 RPCs and 52 tables.

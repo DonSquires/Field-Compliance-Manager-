@@ -11,7 +11,7 @@
 import React, { useEffect, useState, useCallback, useMemo } from 'react';
 import L from 'leaflet';
 import 'leaflet/dist/leaflet.css';
-import { Building2, GitBranch, MapPin, Package, Ruler, ScrollText, ShieldCheck } from 'lucide-react';
+import { Building2, GitBranch, MapPin, Package, Plus, Ruler, ScrollText, ShieldCheck } from 'lucide-react';
 import { useAuth } from '../context/AuthContext';
 import { supabase } from '../lib/supabase';
 import { addLinzBaseLayers } from '../lib/mapPreferences';
@@ -50,8 +50,63 @@ export interface OrgProfile {
 
 interface ModuleRow { id: string; module_key: string; enabled: boolean; }
 interface BranchRow { id: string; name: string; status: string; active: boolean; contact_email: string | null; contact_phone: string | null; updated_at: string; }
-interface NoticeTemplate { id: string; notice_type: string; version: number; is_active: boolean; authorising_act: string; }
+interface NoticeTemplate {
+  id: string;
+  module_key: string;
+  notice_type: string;
+  version: number;
+  is_active: boolean;
+  issuing_authority: string | null;
+  authorising_act: string;
+  authorising_section: string | null;
+  bylaw_reference: string | null;
+  body_html: string;
+  fine_amount: number | null;
+  payment_url: string | null;
+  footer_text: string | null;
+  source_document_url: string | null;
+  bob_extracted: boolean;
+}
 interface GeofenceConfigRow { id: string; config_key: string; config_value: number; zone_type: string | null; }
+
+const NOTICE_MODULES = [
+  { value: 'freedom_camping', label: 'Freedom camping' },
+  { value: 'parking_enforcement', label: 'Parking enforcement' },
+  { value: 'noise_control', label: 'Noise control' },
+  { value: 'smoke_complaints', label: 'Smoke complaints' },
+  { value: 'biosecurity', label: 'Biosecurity' },
+] as const;
+
+const NOTICE_TYPES = [
+  { value: 'written_warning', label: 'Written warning' },
+  { value: 'notice_to_vacate', label: 'Notice to vacate' },
+  { value: 'infringement', label: 'Infringement' },
+  { value: 'end', label: 'Excessive Noise Direction' },
+  { value: 'seizure', label: 'Seizure notice' },
+] as const;
+
+const EMPTY_NOTICE_TEMPLATE_FORM = {
+  moduleKey: 'freedom_camping',
+  noticeType: 'written_warning',
+  issuingAuthority: '',
+  authorisingAct: '',
+  authorisingSection: '',
+  bylawReference: '',
+  bodyHtml: '',
+  fineAmount: '',
+  paymentUrl: '',
+  footerText: '',
+  sourceDocumentUrl: '',
+  confirmed: false,
+};
+
+function noticeModuleLabel(key: string): string {
+  return NOTICE_MODULES.find((module) => module.value === key)?.label ?? key.replaceAll('_', ' ');
+}
+
+function noticeTypeLabel(key: string): string {
+  return NOTICE_TYPES.find((type) => type.value === key)?.label ?? key.replaceAll('_', ' ');
+}
 
 // public.get_org_geofence_config()'s own comment: zone-type override -> org-wide -> these platform defaults.
 const GEOFENCE_KEYS: { key: string; label: string; help: string; platformDefault: number }[] = [
@@ -91,6 +146,11 @@ const OrganizationSetupPage: React.FC = () => {
   const [modules, setModules] = useState<ModuleRow[]>([]);
   const [branches, setBranches] = useState<BranchRow[]>([]);
   const [templates, setTemplates] = useState<NoticeTemplate[]>([]);
+  const [showTemplateForm, setShowTemplateForm] = useState(false);
+  const [editingTemplate, setEditingTemplate] = useState<NoticeTemplate | null>(null);
+  const [templateForm, setTemplateForm] = useState(EMPTY_NOTICE_TEMPLATE_FORM);
+  const [templateRequestId, setTemplateRequestId] = useState(() => crypto.randomUUID());
+  const [savingTemplate, setSavingTemplate] = useState(false);
   const [geofenceConfig, setGeofenceConfig] = useState<GeofenceConfigRow[]>([]);
   const [resolvedGeofenceDefaults, setResolvedGeofenceDefaults] = useState<Record<string, number>>({});
   const [savingKey, setSavingKey] = useState<string | null>(null);
@@ -137,8 +197,12 @@ const OrganizationSetupPage: React.FC = () => {
         supabase.from('organizations').select('id, name, organization_type, status, active, contact_email, contact_phone, updated_at').eq('parent_organization_id', orgId).eq('organization_type', 'branch').order('name'),
         supabase
           .from('notice_templates')
-          .select('id, notice_type, version, is_active, authorising_act')
-          .eq('organization_id', orgId),
+          .select('id, module_key, notice_type, version, is_active, issuing_authority, authorising_act, authorising_section, bylaw_reference, body_html, fine_amount, payment_url, footer_text, source_document_url, bob_extracted')
+          .eq('organization_id', orgId)
+          .order('is_active', { ascending: false })
+          .order('module_key')
+          .order('notice_type')
+          .order('version', { ascending: false }),
         supabase
           .from('org_geofence_config')
           .select('id, config_key, config_value, zone_type')
@@ -186,6 +250,8 @@ const OrganizationSetupPage: React.FC = () => {
 
   const enabledModuleKeys = useMemo(() => new Set(modules.filter((m) => m.enabled).map((m) => m.module_key)), [modules]);
   const activeBranches = useMemo(() => branches.filter((b) => b.status !== 'archived'), [branches]);
+  const enabledNoticeModules = useMemo(() => NOTICE_MODULES.filter((module) => enabledModuleKeys.has(module.value)), [enabledModuleKeys]);
+  const activeTemplates = useMemo(() => templates.filter((template) => template.is_active), [templates]);
   const filteredAuthorities = useMemo(() => {
     const q = jurisdictionSearch.trim().toLowerCase();
     if (!q) return [];
@@ -278,6 +344,94 @@ const OrganizationSetupPage: React.FC = () => {
       setError(err instanceof Error ? err.message : 'Failed to archive branch');
     } finally {
       setArchivingBranchId(null);
+    }
+  };
+
+  const openNewTemplate = () => {
+    const moduleKey = enabledNoticeModules[0]?.value ?? NOTICE_MODULES[0].value;
+    setEditingTemplate(null);
+    setTemplateForm({ ...EMPTY_NOTICE_TEMPLATE_FORM, moduleKey });
+    setTemplateRequestId(crypto.randomUUID());
+    setShowTemplateForm(true);
+    setError(null);
+    setNotice(null);
+  };
+
+  const openTemplateVersion = (template: NoticeTemplate) => {
+    setEditingTemplate(template);
+    setTemplateForm({
+      moduleKey: template.module_key,
+      noticeType: template.notice_type,
+      issuingAuthority: template.issuing_authority ?? '',
+      authorisingAct: template.authorising_act,
+      authorisingSection: template.authorising_section ?? '',
+      bylawReference: template.bylaw_reference ?? '',
+      bodyHtml: template.body_html,
+      fineAmount: template.fine_amount == null ? '' : String(template.fine_amount),
+      paymentUrl: template.payment_url ?? '',
+      footerText: template.footer_text ?? '',
+      sourceDocumentUrl: template.source_document_url ?? '',
+      confirmed: false,
+    });
+    setTemplateRequestId(crypto.randomUUID());
+    setShowTemplateForm(true);
+    setError(null);
+    setNotice(null);
+  };
+
+  const closeTemplateForm = () => {
+    if (savingTemplate) return;
+    setShowTemplateForm(false);
+    setEditingTemplate(null);
+    setTemplateForm(EMPTY_NOTICE_TEMPLATE_FORM);
+  };
+
+  const saveNoticeTemplate = async (event: React.FormEvent) => {
+    event.preventDefault();
+    if (!org || !templateForm.confirmed) return;
+    try {
+      setSavingTemplate(true);
+      setError(null);
+      setNotice(null);
+      const { data, error: saveError } = await supabase.rpc('manage_notice_template', {
+        p_organization_id: org.id,
+        p_client_request_id: templateRequestId,
+        p_module_key: templateForm.moduleKey,
+        p_notice_type: templateForm.noticeType,
+        p_body_html: templateForm.bodyHtml.trim(),
+        p_expected_current_id: editingTemplate?.id ?? null,
+        p_expected_current_version: editingTemplate?.version ?? null,
+        p_issuing_authority: templateForm.issuingAuthority.trim(),
+        p_authorising_act: templateForm.authorisingAct.trim(),
+        p_authorising_section: templateForm.authorisingSection.trim() || null,
+        p_bylaw_reference: templateForm.bylawReference.trim() || null,
+        p_fine_amount: templateForm.fineAmount === '' ? null : Number(templateForm.fineAmount),
+        p_payment_url: templateForm.paymentUrl.trim() || null,
+        p_footer_text: templateForm.footerText.trim() || null,
+        p_source_document_url: templateForm.sourceDocumentUrl.trim(),
+        p_bob_extracted: false,
+      });
+      if (saveError) throw saveError;
+      const receipt = data as { template?: NoticeTemplate; replayed?: boolean } | null;
+      if (!receipt?.template) throw new Error('The template was saved without a usable receipt');
+      const saved = receipt.template;
+      setTemplates((current) => [
+        saved,
+        ...current
+          .filter((template) => template.id !== saved.id)
+          .map((template) => template.module_key === saved.module_key && template.notice_type === saved.notice_type
+            ? { ...template, is_active: false }
+            : template),
+      ]);
+      setNotice(`${noticeModuleLabel(saved.module_key)} ${noticeTypeLabel(saved.notice_type).toLowerCase()} template v${saved.version} saved. Future notices use this version; earlier issued notices and template versions remain in the audit history.`);
+      setShowTemplateForm(false);
+      setEditingTemplate(null);
+      setTemplateForm(EMPTY_NOTICE_TEMPLATE_FORM);
+      setTemplateRequestId(crypto.randomUUID());
+    } catch (err) {
+      setError(err instanceof Error ? err.message : 'Failed to save the notice template');
+    } finally {
+      setSavingTemplate(false);
     }
   };
 
@@ -422,6 +576,7 @@ const OrganizationSetupPage: React.FC = () => {
         <a href="#org-modules" className={enabledModuleKeys.size ? 'is-done' : 'is-todo'}><Package size={16} /><span><strong>Modules in use</strong><small>{enabledModuleKeys.size} on · {modules.length - enabledModuleKeys.size} off</small></span></a>
         <a href="#org-distances" className="is-neutral"><Ruler size={16} /><span><strong>Location accuracy</strong><small>{customDistanceCount ? `${customDistanceCount} custom distance${customDistanceCount === 1 ? '' : 's'}` : 'Using platform defaults'}</small></span></a>
         <a href="#org-service-area" className={org.jurisdiction_verification === 'verified' ? 'is-done' : 'is-todo'}><MapPin size={16} /><span><strong>Service area</strong><small>{org.jurisdiction_verification === 'verified' ? 'Verified' : 'Not yet verified'}</small></span></a>
+        <a href="#org-templates" className={activeTemplates.length ? 'is-done' : enabledNoticeModules.length ? 'is-todo' : 'is-neutral'}><ScrollText size={16} /><span><strong>Notice templates</strong><small>{activeTemplates.length ? `${activeTemplates.length} active` : enabledNoticeModules.length ? 'Set legal wording before field use' : 'Turn on an enforcement module first'}</small></span></a>
       </nav>
 
       <section className="reports-section org-settings-section" id="org-details" aria-labelledby="org-details-title">
@@ -619,18 +774,100 @@ const OrganizationSetupPage: React.FC = () => {
       </section>
 
       <section className="reports-section org-settings-section" id="org-templates" aria-labelledby="org-templates-title">
-        <div className="org-settings-section-heading"><span>Reference</span><h2 id="org-templates-title">Notice templates</h2><p>The legal notice formats this organisation can issue. They are managed with each enforcement module and shown here for reference.</p></div>
+        <div className="org-settings-section-heading"><span>Field readiness</span><h2 id="org-templates-title">Notice templates</h2><p>Set the approved wording and legal source before officers or supervisors issue notices. Saving creates a new immutable version; earlier versions and issued notices remain unchanged.</p></div>
         {templates.length === 0 ? (
-          <div className="empty-state org-settings-empty"><p>No notice templates yet. They appear once an enforcement module is set up.</p></div>
+          <div className="empty-state org-settings-empty"><p>No notice templates are configured. Generators may require manual legal wording or use a documented fallback until an approved template is saved.</p></div>
         ) : (
           <ul className="org-branch-list" aria-label="Notice templates">
             {templates.map((t) => (
               <li key={t.id} className="org-branch-row">
-                <div><strong><ScrollText size={14} /> {t.notice_type.replaceAll('_', ' ')}</strong><small>{t.authorising_act}</small></div>
-                <span className={`status-badge status-${t.is_active ? 'active' : 'inactive'}`}>v{t.version} · {t.is_active ? 'Active' : 'Inactive'}</span>
+                <div><strong><ScrollText size={14} /> {noticeModuleLabel(t.module_key)} · {noticeTypeLabel(t.notice_type)}</strong><small>{t.issuing_authority || 'Issuing authority missing'} · {t.authorising_act}{t.authorising_section ? ` ${t.authorising_section}` : ''} · Source: {t.source_document_url || 'not recorded'}</small></div>
+                <div className="org-branch-row-actions">
+                  <span className={`status-badge status-${t.is_active ? 'active' : 'inactive'}`}>v{t.version} · {t.is_active ? 'Active' : 'Historical'}</span>
+                  {t.is_active && <button type="button" className="btn btn-sm btn-secondary" onClick={() => openTemplateVersion(t)}>Create new version</button>}
+                </div>
               </li>
             ))}
           </ul>
+        )}
+        {!showTemplateForm && (
+          <div className="org-settings-actions">
+            <button type="button" className="btn btn-primary" onClick={openNewTemplate} disabled={enabledNoticeModules.length === 0}><Plus size={16} /> Add notice template</button>
+            {enabledNoticeModules.length === 0 && <small>Enable an enforcement module before configuring its notice wording.</small>}
+          </div>
+        )}
+        {showTemplateForm && (
+          <form className="settings-form org-notice-template-form" onSubmit={saveNoticeTemplate} aria-label={editingTemplate ? 'Create a new notice template version' : 'Add a notice template'}>
+            <div className="org-notice-template-intro">
+              <strong>{editingTemplate ? `Create v${editingTemplate.version + 1}` : 'Create the first version'}</strong>
+              <span>Only future generated notices use the saved version. Keep the current template to exit without changing anything.</span>
+            </div>
+            <div className="form-row">
+              <div className="form-group">
+                <label htmlFor="notice-module">Enforcement module</label>
+                <select id="notice-module" required disabled={Boolean(editingTemplate)} value={templateForm.moduleKey} onChange={(event) => setTemplateForm({ ...templateForm, moduleKey: event.target.value })}>
+                  {enabledNoticeModules.map((module) => <option key={module.value} value={module.value}>{module.label}</option>)}
+                </select>
+              </div>
+              <div className="form-group">
+                <label htmlFor="notice-type">Notice type</label>
+                <select id="notice-type" required disabled={Boolean(editingTemplate)} value={templateForm.noticeType} onChange={(event) => setTemplateForm({ ...templateForm, noticeType: event.target.value })}>
+                  {NOTICE_TYPES.map((type) => <option key={type.value} value={type.value}>{type.label}</option>)}
+                </select>
+              </div>
+            </div>
+            <div className="form-row">
+              <div className="form-group">
+                <label htmlFor="notice-authority">Issuing authority</label>
+                <input id="notice-authority" required maxLength={300} value={templateForm.issuingAuthority} onChange={(event) => setTemplateForm({ ...templateForm, issuingAuthority: event.target.value })} placeholder="e.g. Nelson City Council" />
+              </div>
+              <div className="form-group">
+                <label htmlFor="notice-act">Authorising Act</label>
+                <input id="notice-act" required maxLength={300} value={templateForm.authorisingAct} onChange={(event) => setTemplateForm({ ...templateForm, authorisingAct: event.target.value })} placeholder="Enter the verified legislation" />
+              </div>
+            </div>
+            <div className="form-row">
+              <div className="form-group">
+                <label htmlFor="notice-section">Section (optional)</label>
+                <input id="notice-section" maxLength={120} value={templateForm.authorisingSection} onChange={(event) => setTemplateForm({ ...templateForm, authorisingSection: event.target.value })} />
+              </div>
+              <div className="form-group">
+                <label htmlFor="notice-bylaw">Bylaw or rule reference (optional)</label>
+                <input id="notice-bylaw" maxLength={300} value={templateForm.bylawReference} onChange={(event) => setTemplateForm({ ...templateForm, bylawReference: event.target.value })} />
+              </div>
+            </div>
+            <div className="form-group">
+              <label htmlFor="notice-source">Source document location</label>
+              <input id="notice-source" required maxLength={1000} value={templateForm.sourceDocumentUrl} onChange={(event) => setTemplateForm({ ...templateForm, sourceDocumentUrl: event.target.value })} placeholder="Document URL, governed file path, or source register reference" />
+              <small>Record where the approved wording came from. Do not paste credentials or private access links.</small>
+            </div>
+            <div className="form-group">
+              <label htmlFor="notice-body">Notice body</label>
+              <textarea id="notice-body" required rows={10} maxLength={100000} value={templateForm.bodyHtml} onChange={(event) => setTemplateForm({ ...templateForm, bodyHtml: event.target.value })} placeholder="Approved plain text or safe HTML. Keep any supported {{placeholders}} exactly as required by the generator." />
+            </div>
+            <div className="form-row">
+              <div className="form-group">
+                <label htmlFor="notice-fine">Fine amount (optional)</label>
+                <input id="notice-fine" type="number" min="0" step="0.01" value={templateForm.fineAmount} onChange={(event) => setTemplateForm({ ...templateForm, fineAmount: event.target.value })} />
+              </div>
+              <div className="form-group">
+                <label htmlFor="notice-payment">Payment URL (optional)</label>
+                <input id="notice-payment" type="url" maxLength={1000} value={templateForm.paymentUrl} onChange={(event) => setTemplateForm({ ...templateForm, paymentUrl: event.target.value })} />
+              </div>
+            </div>
+            <div className="form-group">
+              <label htmlFor="notice-footer">Footer text (optional)</label>
+              <textarea id="notice-footer" rows={3} value={templateForm.footerText} onChange={(event) => setTemplateForm({ ...templateForm, footerText: event.target.value })} />
+            </div>
+            <label className="org-notice-template-confirmation">
+              <input type="checkbox" required checked={templateForm.confirmed} onChange={(event) => setTemplateForm({ ...templateForm, confirmed: event.target.checked })} />
+              <span><strong>I checked this version against the source document.</strong><small>The issuing authority, legislation, amount, wording, and source location are correct for future notices.</small></span>
+            </label>
+            <div className="org-settings-actions">
+              <button type="submit" className="btn btn-primary" disabled={savingTemplate || !templateForm.confirmed}>{savingTemplate ? 'Saving version…' : editingTemplate ? 'Save new version' : 'Save template'}</button>
+              <button type="button" className="btn btn-secondary" disabled={savingTemplate} onClick={closeTemplateForm}>Keep current template</button>
+            </div>
+          </form>
         )}
       </section>
     </div>

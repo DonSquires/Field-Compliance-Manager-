@@ -74,6 +74,7 @@ export async function installSupabaseFixtures(page: Page, options: { officerModu
   let anaWorkReady = true;
   let acceptedQuoteAgreement = false;
   const assets: Array<Record<string, unknown>> = [];
+  const noticeTemplates: Array<Record<string, unknown>> = [];
   const monthlyReportPacks: Array<Record<string, unknown>> = [];
   const breachAlerts=[{id:'abababab-abab-4bab-8bab-abababababab',organization_id:ORG_ID,observation_id:'acacacac-acac-4cac-8cac-acacacacacac',zone_id:'66666666-6666-4666-8666-666666666666',plate_number:'FCM123',breach_type:'nightly_limit',status:'open',nights_count:3,limit_value:2,notes:'Officer recorded a verified limit breach.',created_at:'2026-08-30T08:20:00.000Z',action_type:null,actioned_at:null,zone:{name:'Civic Event Operations Zone'},observation:{observed_at:'2026-08-30T08:20:00.000Z',is_scv:true,photo_url:null}}];
   const debriefFollowups=mutable([{id:'adadadad-adad-4dad-8dad-adadadadadad',organization_id:ORG_ID,debrief_id:'aeaeaeae-aeae-4eae-8eae-aeaeaeaeaeae',shift_id:'66666666-6666-4666-8666-666666666666',officer_user_id:OFFICER_ID,status:'open',priority:'critical',owner_user_id:null,version:1,latest_note:'Supervisor must review the safety incident.',resolved_at:null,created_at:'2026-08-30T09:00:00.000Z'}]);
@@ -299,7 +300,35 @@ export async function installSupabaseFixtures(page: Page, options: { officerModu
     if (table === 'organization_modules') { await route.fulfill(fulfillJson([{ id: 'abababab-abab-4bab-8bab-ababababab01', module_key: 'patrol', enabled: false }, ...(options.officerModules ?? []).map((module_key, index) => ({ id: `abababab-abab-4bab-8bab-abababab${String(index + 10).padStart(2, '0')}`, module_key, enabled: true })), { id: 'abababab-abab-4bab-8bab-ababababab02', module_key: 'welfare', enabled: true },
       // Platform subscriptions the admin flows exercise (AdminShell PAGE_PLATFORM_MODULE gate): a tenant without them cannot reach these pages.
       { id: 'abababab-abab-4bab-8bab-ababababab03', module_key: 'crm', enabled: true }, { id: 'abababab-abab-4bab-8bab-ababababab04', module_key: 'rostering', enabled: true }, { id: 'abababab-abab-4bab-8bab-ababababab05', module_key: 'hr', enabled: true }, { id: 'abababab-abab-4bab-8bab-ababababab06', module_key: 'finance', enabled: true }, { id: 'abababab-abab-4bab-8bab-ababababab07', module_key: 'workshop', enabled: true }])); return; }
-    if (table === 'org_geofence_config' || table === 'notice_templates') { await route.fulfill(fulfillJson([])); return; }
+    if (table === 'org_geofence_config') { await route.fulfill(fulfillJson([])); return; }
+    if (table === 'notice_templates') { await route.fulfill(fulfillJson(noticeTemplates)); return; }
+    if (table === 'manage_notice_template') {
+      const payload = JSON.parse(request.postData() ?? '{}') as Record<string, unknown>;
+      for (const template of noticeTemplates) {
+        if (template.module_key === payload.p_module_key && template.notice_type === payload.p_notice_type) template.is_active = false;
+      }
+      const version = noticeTemplates.filter((template) => template.module_key === payload.p_module_key && template.notice_type === payload.p_notice_type).length + 1;
+      const saved = {
+        id: `b5000000-0000-4000-8000-${String(version).padStart(12, '0')}`,
+        module_key: payload.p_module_key,
+        notice_type: payload.p_notice_type,
+        version,
+        is_active: true,
+        issuing_authority: payload.p_issuing_authority,
+        authorising_act: payload.p_authorising_act,
+        authorising_section: payload.p_authorising_section,
+        bylaw_reference: payload.p_bylaw_reference,
+        body_html: payload.p_body_html,
+        fine_amount: payload.p_fine_amount,
+        payment_url: payload.p_payment_url,
+        footer_text: payload.p_footer_text,
+        source_document_url: payload.p_source_document_url,
+        bob_extracted: false,
+      };
+      noticeTemplates.unshift(saved);
+      await route.fulfill(fulfillJson({ template: saved, request_id: payload.p_client_request_id, replayed: false }));
+      return;
+    }
     if (table === 'assets') { await route.fulfill(fulfillJson(assets)); return; }
     if (table === 'manage_asset') {
       const payload = JSON.parse(request.postData() ?? '{}') as Record<string, unknown>;
