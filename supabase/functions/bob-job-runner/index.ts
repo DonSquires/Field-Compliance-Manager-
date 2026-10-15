@@ -444,7 +444,8 @@ serve(async (req)=>{
         steps: results,
         clarifications
       });
-      // Rollback references for successful write steps.
+      // Target references preserve what a successful write changed. They are
+      // not automatically reversible; correction must use a domain workflow.
       const rollbackRefs = results.filter((r)=>r.kind === 'write' && r.status === 'ok').map((r)=>{
         const res = r.result ?? {};
         return {
@@ -454,7 +455,7 @@ serve(async (req)=>{
           target_table: res.result_table ?? res.target_table ?? null,
           target_record_id: res.result_record_id ?? res.record_id ?? null,
           action: r.tool === 'proposal_execute' ? 'execute' : 'insert',
-          reversible: true
+          reversible: false
         };
       });
       if (rollbackRefs.length) {

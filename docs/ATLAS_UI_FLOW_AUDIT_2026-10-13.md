@@ -67,7 +67,7 @@ out, so no gap is called exercised from that attempt.
 | `bob-propose-place-org-from-parcel` | Legacy producer created an organisation to represent a parcel | Superseded by canonical place registry plus organisation-owned `locations` links through `_shared/houseResolve.ts` | Retired model contradiction | Removed rather than wiring a caller that would fork place identity into an organisation record contrary to the 2026-09-15 house-model ruling. | Closed |
 | `capture-environmental-evidence` | Direct assessment/evidence primitive | Web and mobile call the governed `submit-biosecurity-assessment` and `submit-smoke-assessment` commands instead | Retired duplicated primitive | Removed after confirming both governed commands own watermarking, evidence storage, classification, receipt, and audit paths. | Closed |
 | `delete-user` | Legacy grand-master hard-delete endpoint | User management intentionally exposes audited `deactivate-user`, not hard deletion | Retired unsafe destructive path | Removed because it deleted profile rows before Auth deletion, had no durable audit receipt, and did not guarantee session/token revocation. | Closed |
-| `bob-reverse-job-step` | Admin/master/grand-master reversal endpoint for `bob_job_runner` writes | No UI or Conductor caller; references are written by `bob-job-runner` and keyed to `bob_job_runs`, not `builder_jobs` | Confirmed Bob-job recovery-flow gap | Do not attach this table to Builder Control Room. If governed reversal remains supported, expose it from the Bob job-run/review path with target, impact, scope, confirmation, result receipt, and manual-only outcomes. | P1 |
+| `bob-reverse-job-step` | Generic reversal endpoint for `bob_job_runner` writes | No UI caller; service-role target mutation lacked tenant proof and domain correction semantics | Retired unsafe duplicate authority | Removed generic soft mutation and hard deletion. Approvals now exposes organisation-scoped job progress, outcomes, target receipts, and explicit domain-workflow guidance. | Closed |
 | `bob-self-memory-approve` | Owner-only approval endpoint | No UI caller | Retired contract contradicted live schema doctrine | Removed because `bob_self_memory` explicitly records owner delete as the sole human action and retires the approval apparatus. | Closed |
 
 ## Confirmed user-facing findings
@@ -128,7 +128,7 @@ out, so no gap is called exercised from that attempt.
   conversation ID, and duplicate completion callbacks reuse the same
   notification through the canonical deduplication key.
 
-### 2. Bob job recovery: endpoint exists, review flow does not
+### 2. Bob job recovery: unsafe generic reversal retired, review flow added
 
 **Before**
 
@@ -158,6 +158,46 @@ out, so no gap is called exercised from that attempt.
 - Present: the endpoint returns method, target, actor role, and a preserved
   history note.
 - Missing: no screen consumes or displays that receipt.
+
+**Closed 2026-10-14**
+
+- Live verification found two organisation-scoped, read-only job runs and zero
+  rollback references, so there was no historical reversal receipt or target
+  record to migrate.
+- The endpoint was not wired because its generic inverse was not truthful:
+  changing `is_primary`, `work_ready`, `verified`, or a record status does not
+  reverse the domain event that created the record. Its service-role lookup and
+  target mutation also lacked an organisation predicate, hard deletion bypassed
+  domain retention rules, and a failed receipt update could follow a successful
+  target mutation.
+- The generic endpoint and hard-delete path are retired. Future target
+  references are explicitly non-reversible until a dedicated domain workflow
+  proves and records a safe inverse.
+- `bob_job_runs` and `bob_job_rollback_refs` are now browser read-only.
+  Administrators can see only runs in an authorised organisation; rollback
+  references inherit scope by joining to the matching run. The former
+  select-all and browser-write policies and grants are removed.
+- Approvals Activity now includes a responsive **Job history** work area with
+  goal, status, step progress, approval mode, clarification prompts, affected
+  record receipts, stopped-state feedback, and a safe next action. Read-only
+  jobs clearly state that no record changed. Write receipts direct the reviewer
+  to the affected module's governed correction, void, or deactivation workflow
+  instead of offering a generic destructive button.
+- This adopts the useful Trackforce pattern of current progress plus durable
+  delivery/edit history while preserving FCM's domain authorities and
+  accountability chain. The removed Edge Function closes the final Edge
+  Function gap; the expected bounded Atlas total moves 143 -> 142 with 0 Edge
+  Functions, 89 RPCs and 53 tables. Runtime exercise remains unclaimed.
+- The linked migration and targeted Edge Function deletion are applied. The
+  regenerated catalogue remains at 398 tables, 813 functions, 726 indexes and
+  now 896 policies after replacing four permissive policies with two scoped
+  read policies. Database lint reported no new issue. Thirty-two focused
+  governance/Atlas tests, the production build, and eight desktop/mobile
+  role-and-history acceptance cases pass.
+- The dedicated live `admin_officer` identity remains correctly excluded from
+  Approvals and received zero job-history rows through its own JWT. This proves
+  the officer-capable combined role does not gain the new review surface; no
+  real-user impersonation or service-role result was used as UI evidence.
 
 ### 3. Major workspaces: standardisation is uneven, not absent
 

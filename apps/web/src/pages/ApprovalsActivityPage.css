@@ -186,6 +186,97 @@
   gap: 6px;
 }
 
+.approvals-job-history {
+  min-height: 0;
+}
+
+.approvals-job-run-summary {
+  display: grid;
+  grid-template-columns: repeat(3, minmax(0, 1fr));
+  gap: 1px;
+  overflow: hidden;
+  border: 1px solid #293d4e;
+  border-radius: 6px;
+  background: #293d4e;
+}
+
+.approvals-job-run-summary > div {
+  display: grid;
+  gap: 4px;
+  padding: 9px 10px;
+  background: #07111c;
+}
+
+.approvals-job-run-summary span,
+.approvals-target-references > span {
+  color: #718899;
+  font-size: 12px;
+  font-weight: 800;
+  text-transform: uppercase;
+}
+
+.approvals-job-run-summary strong {
+  color: #dceaf0;
+  font-size: 12px;
+}
+
+.approvals-job-steps {
+  display: grid;
+  gap: 7px;
+  margin: 0;
+  padding: 10px 12px 10px 32px;
+  border-top: 1px solid #293d4e;
+}
+
+.approvals-job-steps li {
+  padding-left: 3px;
+  color: #8297a7;
+  font-size: 12px;
+}
+
+.approvals-job-steps li strong,
+.approvals-job-steps li span {
+  display: block;
+}
+
+.approvals-job-steps li strong {
+  color: #dceaf0;
+}
+
+.approvals-target-references {
+  display: grid;
+  gap: 7px;
+  padding: 10px;
+  border: 1px solid #645a37;
+  border-radius: 6px;
+  background: #211e13;
+}
+
+.approvals-target-references > div {
+  display: grid;
+  grid-template-columns: minmax(140px, 0.5fr) minmax(180px, 1fr);
+  gap: 4px 10px;
+  padding-top: 7px;
+  border-top: 1px solid #4a432b;
+}
+
+.approvals-target-references strong,
+.approvals-target-references code {
+  color: #f0dda0;
+  font-size: 12px;
+}
+
+.approvals-target-references code {
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+.approvals-target-references small {
+  grid-column: 1 / -1;
+  color: #b9ad82;
+  line-height: 1.45;
+}
+
 .approvals-summary > div {
   display: grid;
   grid-template-columns: auto 1fr auto;
@@ -665,6 +756,9 @@
   .approvals-summary > div:nth-child(4) { border-top: 1px solid #2b3d50; }
   .approvals-toolbar { align-items: stretch; flex-direction: column; }
   .approvals-search { width: 100%; }
+  .approvals-job-run-summary { grid-template-columns: 1fr; }
+  .approvals-target-references > div { grid-template-columns: 1fr; }
+  .approvals-target-references small { grid-column: auto; }
 }
 
 @media (max-width: 520px) {

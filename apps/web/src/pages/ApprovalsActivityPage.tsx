@@ -1,4 +1,4 @@
-type ApprovalWorkArea = 'actions' | 'documents' | 'plans';
+type ApprovalWorkArea = 'actions' | 'documents' | 'plans' | 'runs';
 import React, { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { useNavigate, useSearchParams } from 'react-router-dom';
 import { AlertTriangle, CheckCircle2, ChevronRight, Clock3, FileCheck2, Filter, History, ListChecks, RefreshCw, Search, ShieldCheck, X, XCircle } from 'lucide-react';
@@ -52,6 +52,40 @@ interface JobPlanStep {
   sequence: number;
   action_type: string;
   status: string;
+}
+
+interface JobRunStep {
+  step_id?: string;
+  tool?: string;
+  status?: string;
+  kind?: string;
+}
+
+interface JobRunRow {
+  id: string;
+  job_id: string;
+  goal: string;
+  status: string;
+  approval_mode: string;
+  contains_writes: boolean;
+  stopped_reason: string | null;
+  steps: JobRunStep[];
+  clarifications: string[];
+  created_at: string;
+}
+
+interface JobTargetReference {
+  id: string;
+  job_id: string;
+  step_id: string;
+  tool: string;
+  target_table: string | null;
+  target_record_id: string | null;
+  action: string | null;
+  reversible: boolean;
+  reversed: boolean;
+  reversed_at: string | null;
+  created_at: string;
 }
 
 interface DocumentPromotionRow {
@@ -160,6 +194,8 @@ const ApprovalsActivityPage: React.FC = () => {
   const [rows, setRows] = useState<ApprovalRow[]>([]);
   const [plans, setPlans] = useState<JobPlanRow[]>([]);
   const [planSteps, setPlanSteps] = useState<Record<string, JobPlanStep[]>>({});
+  const [jobRuns, setJobRuns] = useState<JobRunRow[]>([]);
+  const [jobTargetReferences, setJobTargetReferences] = useState<JobTargetReference[]>([]);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
   const [notice, setNotice] = useState<string | null>(null);
@@ -197,7 +233,7 @@ const ApprovalsActivityPage: React.FC = () => {
     setLoading(true);
     setError(null);
     try {
-      const [activityResponse, plansResponse, stepsResponse, documentsResponse, proposalsResponse, clientsResponse, staffResponse, investigationsResponse] = await Promise.all([
+      const [activityResponse, plansResponse, stepsResponse, runsResponse, targetReferencesResponse, documentsResponse, proposalsResponse, clientsResponse, staffResponse, investigationsResponse] = await Promise.all([
         supabase.rpc('get_approvals_activity', {
         p_limit: 100,
         p_offset: 0,
@@ -206,6 +242,8 @@ const ApprovalsActivityPage: React.FC = () => {
         }),
         supabase.from('bob_job_plans').select('id,goal,status,reasoning,created_at,organization_id').in('status', ['proposed', 'executing', 'needs_review']).order('created_at', { ascending: false }).limit(30),
         supabase.from('bob_job_plan_steps').select('id,plan_id,sequence,action_type,status').order('sequence'),
+        supabase.from('bob_job_runs').select('id,job_id,goal,status,approval_mode,contains_writes,stopped_reason,steps,clarifications,created_at').order('created_at', { ascending: false }).limit(30),
+        supabase.from('bob_job_rollback_refs').select('id,job_id,step_id,tool,target_table,target_record_id,action,reversible,reversed,reversed_at,created_at').order('created_at', { ascending: false }).limit(100),
         supabase.from('documents').select('id,original_filename,current_scope,updated_at,document_versions(id,version_label,extracted_text,extraction_confidence,ocr_required,created_at,metadata_json,document_classifications(privacy_class,confidence,rationale,contains_pii,contains_operational_security,contains_financial_data,contains_legal_privilege,classifier_source,reviewed_at,created_at))').in('current_scope', ['conversation_only', 'tenant', 'quarantined']).order('created_at', { ascending: false }).limit(50),
         supabase.from('document_promotion_proposals').select('id,target_type,status,proposed_payload,source_map,created_at,review_reason,document_version:document_versions(id,documents(id,original_filename))').order('created_at', { ascending: false }).limit(50),
         supabase.from('organizations').select('id,name').eq('organization_type', 'client').eq('active', true).order('name').limit(100),
@@ -215,6 +253,8 @@ const ApprovalsActivityPage: React.FC = () => {
       if (activityResponse.error) throw activityResponse.error;
       if (plansResponse.error) throw plansResponse.error;
       if (stepsResponse.error) throw stepsResponse.error;
+      if (runsResponse.error) throw runsResponse.error;
+      if (targetReferencesResponse.error) throw targetReferencesResponse.error;
       if (documentsResponse.error) throw documentsResponse.error;
       if (proposalsResponse.error) throw proposalsResponse.error;
       if (clientsResponse.error) throw clientsResponse.error;
@@ -231,6 +271,12 @@ const ApprovalsActivityPage: React.FC = () => {
         (grouped[step.plan_id] ??= []).push(step);
         return grouped;
       }, {}));
+      setJobRuns(((runsResponse.data as Array<Omit<JobRunRow, 'steps' | 'clarifications'> & { steps: unknown; clarifications: unknown }>) ?? []).map((run) => ({
+        ...run,
+        steps: Array.isArray(run.steps) ? run.steps as JobRunStep[] : [],
+        clarifications: Array.isArray(run.clarifications) ? run.clarifications.filter((item): item is string => typeof item === 'string') : [],
+      })));
+      setJobTargetReferences((targetReferencesResponse.data as JobTargetReference[]) ?? []);
       const documentRows = (documentsResponse.data as Array<{ id: string; original_filename: string; current_scope: string; updated_at: string; document_versions?: Array<{ id: string; extracted_text: string | null; extraction_confidence: number | null; ocr_required: boolean; created_at: string; metadata_json?: Record<string, unknown>; document_classifications?: Array<{ privacy_class: string; confidence: number | null; rationale: string | null; contains_pii: boolean; contains_operational_security: boolean; contains_financial_data: boolean; contains_legal_privilege: boolean; classifier_source: string; reviewed_at: string | null; created_at: string }> }> }>) ?? [];
       setDocumentReviews(documentRows.flatMap((document) => {
         const version = [...(document.document_versions ?? [])].sort((left, right) => new Date(right.created_at).getTime() - new Date(left.created_at).getTime())[0];
@@ -375,9 +421,10 @@ const ApprovalsActivityPage: React.FC = () => {
   const visibleStatusFilters = STATUS_FILTERS.filter((item) => item.id === 'all' || rows.some((row) => matchesStatusFilter(row.status, item.id)));
   const documentWorkCount = documentReviews.length + documentPromotions.length + promotionProposals.filter((proposal) => proposal.status === 'proposed' || proposal.status === 'approved').length;
   const workAreas: Array<{ id: ApprovalWorkArea; label: string; count: number }> = [
-    ...(rows.length > 0 || (documentWorkCount === 0 && plans.length === 0) ? [{ id: 'actions' as const, label: 'Decisions', count: rows.length }] : []),
+    ...(rows.length > 0 || (documentWorkCount === 0 && plans.length === 0 && jobRuns.length === 0) ? [{ id: 'actions' as const, label: 'Decisions', count: rows.length }] : []),
     ...(documentWorkCount > 0 ? [{ id: 'documents' as const, label: 'Documents', count: documentWorkCount }] : []),
     ...(plans.length > 0 ? [{ id: 'plans' as const, label: 'Plans', count: plans.length }] : []),
+    ...(jobRuns.length > 0 ? [{ id: 'runs' as const, label: 'Job history', count: jobRuns.length }] : []),
   ];
 
   useEffect(() => {
@@ -537,6 +584,29 @@ const ApprovalsActivityPage: React.FC = () => {
       {reviewArea === 'documents' && documentReviews.length > 0 && <section className="approvals-queue" aria-label="Bob document review queue"><div className="approvals-panel-heading"><div><span>Bob authoring</span><h2>Documents needing review</h2></div><FileCheck2 size={18} /></div><div className="approvals-list">{documentReviews.map((document) => <article className="status-pending" key={document.version_id}><div><strong>{document.title}</strong><small>{formatActionType(document.document_type)} · {formatAge(document.updated_at)}</small></div><p>{document.review_reason ?? 'The author requested human review of this document.'}</p><small>Source file: {document.file_name} · Conversation-only until approved{document.unconfirmed_count ? ` · ${document.unconfirmed_count} unconfirmed field${document.unconfirmed_count === 1 ? '' : 's'}` : ''}</small>{document.preview ? <details className="approvals-payload"><summary>Preview draft content</summary><p>{document.preview.slice(0, 1200)}</p></details> : <p>Open the draft to inspect its full content and source details.</p>}<small>Review and approve or reject this draft in Document Studio.</small><div className="approvals-actions"><button type="button" className="is-secondary" onClick={() => navigate(`/admin/document-studio?document=${encodeURIComponent(document.document_id)}&version=${encodeURIComponent(document.version_id)}`)}>Open exact draft in Studio</button></div></article>)}</div></section>}
 
       {reviewArea === 'plans' && plans.length > 0 && <section className="approvals-queue" aria-label="Governed job plans"><div className="approvals-panel-heading"><div><span>Whole-plan approval</span><h2>Job plans awaiting review</h2></div><ListChecks size={18} /></div><div className="approvals-list">{plans.map((plan) => { const steps = planSteps[plan.id] ?? []; return <article className={`status-${plan.status}`} key={plan.id}><div><strong>{plan.goal}</strong><small>{steps.length} ordered step{steps.length === 1 ? '' : 's'} · {formatAge(plan.created_at)}</small></div><p>{plan.reasoning ?? 'No plan reasoning was recorded.'}</p><small>{steps.map((step) => `${step.sequence + 1}. ${formatActionType(step.action_type)} (${step.status})`).join(' · ')}</small>{plan.status === 'proposed' && <div className="approvals-actions"><button type="button" className="is-reject" onClick={() => openPlanDecision(plan, 'reject')}><XCircle size={17} /> Reject plan</button><button type="button" className="is-approve" onClick={() => openPlanDecision(plan, 'approve')}><CheckCircle2 size={17} /> Review plan</button></div>}</article>; })}</div></section>}
+
+      {reviewArea === 'runs' && jobRuns.length > 0 && <section className="approvals-queue approvals-job-history" aria-label="Bob job history">
+        <div className="approvals-panel-heading"><div><span>Delivery and recovery trail</span><h2>Bob job history</h2></div><History size={18} /></div>
+        <p className="approvals-context">Inspect what ran, what completed, and which records were affected. Generic reversal and hard deletion are unavailable; corrections must use the affected module&apos;s governed workflow.</p>
+        <div className="approvals-list">
+          {jobRuns.map((run) => {
+            const targetReferences = jobTargetReferences.filter((reference) => reference.job_id === run.job_id);
+            const completedSteps = run.steps.filter((step) => step.status === 'ok').length;
+            return <article className={`status-${run.status}`} key={run.id}>
+              <div><strong>{run.goal}</strong><small>{formatActionType(run.status)} · {formatAge(run.created_at)}</small></div>
+              <div className="approvals-job-run-summary">
+                <div><span>Progress</span><strong>{completedSteps} of {run.steps.length} steps completed</strong></div>
+                <div><span>Approval mode</span><strong>{formatActionType(run.approval_mode)}</strong></div>
+                <div><span>Write scope</span><strong>{run.contains_writes ? `${targetReferences.length} target reference${targetReferences.length === 1 ? '' : 's'}` : 'Read only'}</strong></div>
+              </div>
+              {run.stopped_reason && <div className="approvals-outcome is-failed"><AlertTriangle size={16} /><div><strong>Run stopped</strong><span>{formatActionType(run.stopped_reason)}</span></div></div>}
+              {run.clarifications.length > 0 && <div className="approvals-change-summary"><span>Human follow-up</span><ul>{run.clarifications.map((clarification) => <li key={clarification}>{clarification}</li>)}</ul></div>}
+              {run.steps.length > 0 && <details className="approvals-payload"><summary>Review step outcomes</summary><ol className="approvals-job-steps">{run.steps.map((step, index) => <li key={`${run.id}-${step.step_id ?? index}`}><strong>{step.tool ? formatActionType(step.tool) : `Step ${index + 1}`}</strong><span>{formatActionType(step.status ?? 'unknown')} · {formatActionType(step.kind ?? 'unspecified')}</span></li>)}</ol></details>}
+              {targetReferences.length > 0 ? <div className="approvals-target-references"><span>Affected records</span>{targetReferences.map((reference) => <div key={reference.id}><strong>{reference.target_table ? formatActionType(reference.target_table) : 'Target not recorded'}</strong><code>{reference.target_record_id ?? 'No record ID'}</code><small>{reference.reversed ? `Legacy reversal recorded ${reference.reversed_at ? formatAge(reference.reversed_at) : ''}` : 'Automatic reversal unavailable. Use the target module correction, void, or deactivation workflow.'}</small></div>)}</div> : <div className="approvals-outcome"><ShieldCheck size={16} /><div><strong>{run.contains_writes ? 'No recoverable target receipt' : 'No records changed'}</strong><span>{run.contains_writes ? 'Do not infer that this run can be reversed. Review the step result and use the affected module workflow.' : 'This run was read-only, so no correction action is required.'}</span></div></div>}
+            </article>;
+          })}
+        </div>
+      </section>}
 
       {reviewArea === 'documents' && documentPromotions.length > 0 && <section className="approvals-queue" aria-label="Document promotion queue"><div className="approvals-panel-heading"><div><span>Reference library</span><h2>Documents awaiting review</h2></div><ShieldCheck size={18} /></div><div className="approvals-list">{documentPromotions.map((document) => <article className="status-pending" key={document.version_id}><div><strong>{document.file_name}</strong><small>{document.privacy_class ?? 'Unclassified'} · {document.confidence == null ? 'No confidence' : `${Math.round(document.confidence * 100)}% confidence`} · {document.reviewed_at ? 'Human reviewed' : 'Review pending'}</small></div><div className="approvals-document-flags">{document.contains_pii && <span>PII</span>}{document.contains_operational_security && <span>Operational security</span>}{document.contains_financial_data && <span>Financial data</span>}{document.contains_legal_privilege && <span>Legal privilege</span>}</div><p>{document.ocr_required ? 'OCR is still required before reliable classification.' : document.rationale ?? 'Open the source document to review its classification, evidence, and tenant scope.'}</p>{document.extracted_text && <details className="approvals-payload"><summary>Extracted source preview</summary><p>{document.extracted_text.slice(0, 900)}</p></details>}<small>Classifier: {document.classifier_source ?? 'Unavailable'} · Scope: {document.scope.replaceAll('_', ' ')}</small><div className="approvals-actions"><button type="button" className="is-secondary" onClick={() => navigate(`/admin/document-studio?document=${encodeURIComponent(document.document_id)}&version=${encodeURIComponent(document.version_id)}`)}>Open source review</button></div></article>)}</div></section>}
       {reviewArea === 'documents' && promotionProposals.length > 0 && <section className="approvals-queue" aria-label="Document promotion proposals"><div className="approvals-panel-heading"><div><span>Domain intake</span><h2>Promotion proposals</h2></div><FileCheck2 size={18} /></div><div className="approvals-list">{promotionProposals.map((proposal) => <article className={`status-${proposal.status}`} key={proposal.id}><div><strong>{proposal.document_version?.documents?.original_filename ?? 'Document proposal'}</strong><small>{formatActionType(proposal.target_type)} · {proposal.status} · {formatAge(proposal.created_at)}</small></div><details className="approvals-payload"><summary>Proposed fields</summary><pre>{formatGovernedPayload(proposal.proposed_payload)}</pre></details>{typeof proposal.source_map.source_excerpt === 'string' && <details className="approvals-payload"><summary>Source excerpt</summary><p>{proposal.source_map.source_excerpt}</p></details>}{proposal.review_reason && <small>Review reason: {proposal.review_reason}</small>}{proposal.status === 'approved' && <p className="approvals-proposal-boundary">No authoritative CRM record has been created by this approval.</p>}{proposal.status === 'approved' && proposal.target_type === 'crm_agreement' && <div className="approvals-actions"><button type="button" className="is-approve" onClick={() => { setExecutionProposal(proposal); setExecutionForm({ clientOrganizationId: '', name: String(proposal.proposed_payload.title ?? ''), startsOn: '', endsOn: '' }); }}>Apply to CRM</button></div>}{proposal.status === 'proposed' && <div className="approvals-actions">{proposal.document_version?.documents?.id && proposal.document_version.id ? <button type="button" className="is-secondary" onClick={() => navigate(`/admin/document-studio?document=${encodeURIComponent(proposal.document_version!.documents!.id)}&version=${encodeURIComponent(proposal.document_version!.id)}`)}>Review proposal in source Studio</button> : <small>Source document version is unavailable; this proposal cannot be reviewed here.</small>}</div>}</article>)}</div></section>}
