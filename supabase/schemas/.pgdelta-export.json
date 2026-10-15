@@ -73,7 +73,6 @@
     "public/functions/get_boundary_history.sql",
     "public/functions/get_descendant_organizations.sql",
     "public/functions/get_my_pending_proposals.sql",
-    "public/functions/get_open_jobs.sql",
     "public/functions/get_org_geofence_config.sql",
     "public/functions/get_orgs_by_jurisdiction_point.sql",
     "public/functions/get_zone_for_gps.sql",

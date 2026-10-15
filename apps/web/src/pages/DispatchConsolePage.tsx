@@ -60,6 +60,7 @@ interface ActiveShift {
   actualStart?: string;
   notes?: string;
   updatedAt: string;
+  serviceAgreementId?: string;
   officerGpsLat?: number;
   officerGpsLng?: number;
   officerLastSeen?: string;
@@ -81,6 +82,7 @@ interface DispatchJob {
   siteId: string | null;
   zoneId: string | null;
   shiftId?: string;
+  shiftStopId?: string;
   resourceName: string | null;
   expectedDwellMinutes: number | null;
   timingSource: string | null;
@@ -284,6 +286,9 @@ const DispatchConsolePage: React.FC = () => {
   const [jobDwellMinutes, setJobDwellMinutes] = useState(5);
   const [jobTimingSource, setJobTimingSource] = useState('dispatcher_override');
   const [jobTimingReason, setJobTimingReason] = useState('');
+  const [jobRunsheetReason, setJobRunsheetReason] = useState('');
+  const [jobRunsheetRequestId, setJobRunsheetRequestId] = useState(() => crypto.randomUUID());
+  const [showRunsheetInsertConfirm, setShowRunsheetInsertConfirm] = useState(false);
   const [selectedStopId, setSelectedStopId] = useState<string | null>(null);
   const [shiftStops, setShiftStops] = useState<ShiftStop[]>([]);
   const [stopsLoading, setStopsLoading] = useState(false);
@@ -356,13 +361,13 @@ const DispatchConsolePage: React.FC = () => {
         activeZoneIds && activeZoneIds.length > 0
           ? supabase
               .from('shifts')
-              .select('*, officer:officer_user_id(display_name), route:patrol_route_id(name, route_code)')
+              .select('*, officer:officer_user_id(display_name), route:patrol_route_id(name, route_code), agreement_location:service_agreement_location_id(service_agreement_id), agreement_module:service_agreement_module_id(service_agreement_id)')
               .eq('organization_id', operatingBranchId)
               .in('zone_id', activeZoneIds)
               .in('status', ['published', 'accepted', 'in_progress'])
           : supabase
               .from('shifts')
-              .select('*, officer:officer_user_id(display_name), route:patrol_route_id(name, route_code)')
+              .select('*, officer:officer_user_id(display_name), route:patrol_route_id(name, route_code), agreement_location:service_agreement_location_id(service_agreement_id), agreement_module:service_agreement_module_id(service_agreement_id)')
               .eq('organization_id', operatingBranchId)
               .in('status', ['published', 'accepted', 'in_progress']),
         // dispatch_jobs has no zone_id: a zoned agreement scopes its jobs by the agreement itself
@@ -412,6 +417,7 @@ const DispatchConsolePage: React.FC = () => {
           actualStart: s.actual_start ?? undefined,
           notes: s.notes ?? undefined,
           updatedAt: s.updated_at,
+          serviceAgreementId: s.agreement_location?.service_agreement_id ?? s.agreement_module?.service_agreement_id ?? undefined,
         }));
         setActiveShifts(formatted);
       }
@@ -436,6 +442,7 @@ const DispatchConsolePage: React.FC = () => {
           siteId: j.client_site_id ?? null,
           zoneId: j.zone_id ?? null,
           shiftId: j.shift_id ?? undefined,
+          shiftStopId: j.shift_stop_id ?? undefined,
           resourceName: j.resource?.name ?? null,
           expectedDwellMinutes: j.expected_dwell_minutes ?? null,
           timingSource: j.timing_source ?? null,
@@ -1078,6 +1085,21 @@ const DispatchConsolePage: React.FC = () => {
 
   const selectedJob = jobs.find((job) => job.id === jobDetailId) ?? null;
   const jobTimingLocked = selectedJob ? ['completed', 'cancelled'].includes(selectedJob.status) : true;
+  const runsheetInsertUnavailable = !selectedJob
+    ? 'Open a dispatch job first.'
+    : selectedJob.shiftStopId
+      ? 'This job is already on a run sheet.'
+      : selectedJob.shiftId && selectedJob.shiftId !== selectedShift?.id
+        ? 'This job is already assigned to another shift.'
+        : !['pending', 'dispatched', 'acknowledged'].includes(selectedJob.status)
+          ? 'Only pending, dispatched or acknowledged jobs can be added.'
+          : !selectedShift
+            ? 'Select the receiving run sheet in the Shifts column first.'
+            : !selectedShift.serviceAgreementId
+              ? 'The selected run sheet has no service-agreement anchor and cannot receive a dispatch job.'
+              : selectedAgreement && selectedShift.serviceAgreementId !== selectedAgreement.id
+                ? 'The selected run sheet belongs to a different service agreement.'
+                : null;
   const openJobDetail = (jobId: string) => {
     const job = jobs.find((candidate) => candidate.id === jobId);
     setJobDetailId(jobId);
@@ -1087,10 +1109,16 @@ const DispatchConsolePage: React.FC = () => {
     setJobDwellMinutes(job?.expectedDwellMinutes ?? 5);
     setJobTimingSource(job?.timingSource ?? 'dispatcher_override');
     setJobTimingReason('');
+    setJobRunsheetReason('');
+    setJobRunsheetRequestId(crypto.randomUUID());
+    setShowRunsheetInsertConfirm(false);
     setError(null);
     setNotice(null);
   };
-  const closeJobDetail = () => setJobDetailId(null);
+  const closeJobDetail = () => {
+    setJobDetailId(null);
+    setShowRunsheetInsertConfirm(false);
+  };
   const manageJobFromDetail = async (action: 'amend' | 'reassign' | 'escalate' | 'cancel') => {
     if (!selectedJob || !jobActionReason.trim()) { setError('Write a short reason before changing this job.'); return; }
     if (action === 'reassign' && !jobResourceId) { setError('Choose the person or resource taking this job.'); return; }
@@ -1144,6 +1172,51 @@ const DispatchConsolePage: React.FC = () => {
       await loadPhaseA();
     }
     setOperatorBusy(false);
+  };
+  const insertJobIntoSelectedRunsheet = async () => {
+    if (!selectedJob || !selectedShift || runsheetInsertUnavailable) {
+      setError(runsheetInsertUnavailable ?? 'Choose an eligible job and run sheet.');
+      return;
+    }
+    if (!jobRunsheetReason.trim()) {
+      setError('Explain why this job is being inserted into the officer run sheet.');
+      return;
+    }
+
+    setOperatorBusy(true);
+    setError(null);
+    try {
+      // ATLAS CALLS: insert_adhoc_stop (governed dispatch-to-run-sheet insertion with replay and audit receipt)
+      const { data, error: insertError } = await supabase.rpc('insert_adhoc_stop', {
+        p_client_request_id: jobRunsheetRequestId,
+        p_dispatch_job_id: selectedJob.id,
+        p_shift_id: selectedShift.id,
+        p_expected_job_status: selectedJob.status,
+        p_expected_shift_updated_at: selectedShift.updatedAt,
+        p_reason: jobRunsheetReason.trim(),
+      });
+      if (insertError) {
+        setError(insertError.message);
+        return;
+      }
+
+      const receipt = data?.[0];
+      if (!receipt) throw new Error('The run-sheet insertion completed without a receipt.');
+      setNotice(
+        receipt.created
+          ? `Job added to ${selectedShift.officerName}'s run sheet as stop ${receipt.stop_order}. The officer route and supervisor view now share the same job.`
+          : `This job was already on ${selectedShift.officerName}'s run sheet. The existing stop was retained.`,
+      );
+      setShowRunsheetInsertConfirm(false);
+      setJobRunsheetReason('');
+      setJobRunsheetRequestId(crypto.randomUUID());
+      await loadPhaseA();
+      await loadPhaseB(selectedShift.id);
+    } catch (err) {
+      setError(err instanceof Error ? err.message : 'The dispatch job could not be added to the selected run sheet.');
+    } finally {
+      setOperatorBusy(false);
+    }
   };
 
   const noticeBanner = notice && (
@@ -1202,6 +1275,55 @@ const DispatchConsolePage: React.FC = () => {
           {selectedJob.briefingNotes && <p><strong>Briefing</strong>{selectedJob.briefingNotes}</p>}
           {selectedJob.accessInstructions && <p><strong>Access</strong>{selectedJob.accessInstructions}</p>}
           {selectedJob.safetyNotes && <p className="is-safety"><strong>Safety</strong>{selectedJob.safetyNotes}</p>}
+        </section>
+
+        <section className="dispatch-job-dialog-actions">
+          <h3>Add to officer run sheet</h3>
+          {selectedShift ? (
+            <p className="dispatch-console-form-note">
+              Selected run sheet: <strong>{selectedShift.officerName}</strong> · {JOB_STATUS_LABELS[selectedJob.status]} job · {selectedShift.totalStops} current stops.
+            </p>
+          ) : (
+            <p className="dispatch-console-form-note">Select the receiving officer run sheet in the Shifts column. The server will verify the organization, agreement, place, module, officer and current state before changing either record.</p>
+          )}
+          {runsheetInsertUnavailable && <p className="dispatch-console-form-note" role="status">{runsheetInsertUnavailable}</p>}
+          {!showRunsheetInsertConfirm ? (
+            <div>
+              <button
+                type="button"
+                className="btn btn-secondary"
+                disabled={operatorBusy || Boolean(runsheetInsertUnavailable)}
+                onClick={() => setShowRunsheetInsertConfirm(true)}
+              >
+                Add to selected run sheet
+              </button>
+            </div>
+          ) : (
+            <div className="dispatch-runsheet-insert-confirm" role="group" aria-label="Confirm run-sheet insertion">
+              <p>
+                This appends <strong>{selectedJob.siteName}</strong> to <strong>{selectedShift?.officerName}</strong>&apos;s prioritized route,
+                assigns the job to that officer, marks it dispatched, invalidates the old route solution and writes an audit receipt.
+              </p>
+              <label>
+                <span>Reason for the insertion</span>
+                <textarea
+                  value={jobRunsheetReason}
+                  onChange={(event) => setJobRunsheetReason(event.target.value)}
+                  placeholder="Why must this job join the current run sheet?"
+                  rows={2}
+                  disabled={operatorBusy}
+                />
+              </label>
+              <div>
+                <button type="button" className="btn btn-primary" disabled={operatorBusy || !jobRunsheetReason.trim()} onClick={() => void insertJobIntoSelectedRunsheet()}>
+                  Confirm and add stop
+                </button>
+                <button type="button" className="btn btn-secondary" disabled={operatorBusy} onClick={() => setShowRunsheetInsertConfirm(false)}>
+                  Keep job separate
+                </button>
+              </div>
+            </div>
+          )}
         </section>
 
         <section className="dispatch-job-dialog-actions dispatch-job-timing-actions">

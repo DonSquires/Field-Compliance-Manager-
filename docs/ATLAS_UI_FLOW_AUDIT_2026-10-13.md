@@ -1212,3 +1212,46 @@ remains unpopulated.
   RPCs to `pages/CCTVReviewPage`, retains the existing `issue_cctv_export`
   caller, keeps `exercised=null`, and moves bounded gaps 138 -> 136:
   0 Edge Functions, 83 RPCs and 53 tables.
+
+### Closure log — governed dispatch insertion into one current run sheet
+
+- The Trackforce-style check exposed two different gaps that must not be solved
+  the same way. `insert_adhoc_stop` represented a useful job: add an urgent
+  dispatch to the officer's current prioritized route. Its old implementation
+  was unsafe and uncalled: a `SECURITY DEFINER` function executable by
+  `PUBLIC` and `anon` accepted caller-supplied Site, module, SLA and GPS values,
+  did not prove tenant, agreement, place, shift or officer alignment, and wrote
+  no replay or audit receipt. `get_open_jobs` was instead an uncalled duplicate
+  that mixed dispatch jobs and shift-coverage requests into one generic
+  payload even though those workflows have different states, permissions and
+  receipts.
+- Before: a dispatcher selects a current published, accepted or in-progress
+  officer run sheet and opens an eligible pending, dispatched or acknowledged
+  job. The job and run sheet must expose the same service-agreement anchor. An
+  unanchored or mismatched selection is explained before the action is offered.
+- During: the job detail now presents one explicit **Add to selected run sheet**
+  action. A second confirmation names the place and officer, explains that the
+  route will be changed, requires a reason and offers **Keep job separate** as
+  the safe exit. The RPC independently locks both records; proves
+  organization, agreement, active agreement place, module and officer
+  alignment; rejects stale job status or run-sheet timestamp; and replays the
+  same client request without creating a second stop.
+- After: the server appends one ad-hoc stop using the canonical Site or Zone,
+  SLA and expected dwell time; links the dispatch job and officer; updates the
+  shift stop count; invalidates the old patrol solve; and writes an audit
+  receipt with request identity, reason and previous/resulting state. The UI
+  reloads both the supervisor queue and selected run sheet and reports the new
+  stop order. The separate dispatch and roster-coverage screens remain the
+  canonical queues; `get_open_jobs` is dropped without `CASCADE` and removed
+  from declarative schema and generated types.
+- This adopts Trackforce's useful prioritized run-sheet and immediate
+  supervisor-visibility pattern without copying a generic mixed job grid or
+  keeping a hidden second insertion road. FCM's organization, agreement,
+  place, shift and audit spines remain authoritative.
+- Both linked migrations are applied. The regenerated catalogue has 398
+  tables, 812 functions, 727 indexes and 896 policies. Thirty-five focused
+  dispatch/governance guards, two production builds and linked database lint
+  pass. Atlas dry-run wires `insert_adhoc_stop` to
+  `pages/DispatchConsolePage`, proves its `patrol_solve_cache` write, removes
+  `get_open_jobs`, keeps `exercised=null`, and moves bounded gaps 136 -> 133:
+  0 Edge Functions, 81 RPCs and 52 tables.

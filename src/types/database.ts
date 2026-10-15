@@ -38980,20 +38980,6 @@ export type Database = {
           work_status: string
         }[]
       }
-      get_open_jobs: {
-        Args: { p_limit?: number; p_offset?: number }
-        Returns: {
-          created_at: string
-          job_id: string
-          organization_id: string
-          payload: Json
-          priority: string
-          source: string
-          starts_at: string
-          status: string
-          title: string
-        }[]
-      }
       get_operating_branch_roster_staff: {
         Args: { p_operating_organization_id: string }
         Returns: {
@@ -39241,15 +39227,20 @@ export type Database = {
       }
       insert_adhoc_stop: {
         Args: {
+          p_client_request_id: string
           p_dispatch_job_id: string
-          p_module_key: string
-          p_officer_gps_lat: number
-          p_officer_gps_lng: number
+          p_expected_job_status: string
+          p_expected_shift_updated_at: string
+          p_reason: string
           p_shift_id: string
-          p_site_id: string
-          p_sla_respond_by: string
         }
-        Returns: string
+        Returns: {
+          created: boolean
+          dispatch_status: string
+          runsheet_shift_id: string
+          shift_stop_id: string
+          stop_order: number
+        }[]
       }
       invite_client_capability_share: {
         Args: {
