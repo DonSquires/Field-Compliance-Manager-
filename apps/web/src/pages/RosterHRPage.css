@@ -1,6 +1,6 @@
 .hr-review-backdrop{position:fixed;inset:0;z-index:80;display:grid;place-items:center;padding:20px;background:rgba(2,7,14,.78);backdrop-filter:blur(3px)}
 .hr-pay-role-code-section{min-width:0}
-.hr-review-dialog{width:min(100%,480px);padding:18px;border:1px solid #31485b;border-radius:8px;color:#e7eef4;background:#0b1622;box-shadow:0 24px 70px rgba(0,0,0,.45)}
+.hr-review-dialog{width:min(100%,480px);max-height:calc(100dvh - 20px);overflow-y:auto;padding:18px;border:1px solid #31485b;border-radius:8px;color:#e7eef4;background:#0b1622;box-shadow:0 24px 70px rgba(0,0,0,.45)}
 .hr-review-dialog header{display:flex;align-items:flex-start;justify-content:space-between;gap:16px;padding-bottom:13px;border-bottom:1px solid #263b4c}
 .hr-review-dialog header span{color:#76cfc1;font-size: 12px;font-weight:850;text-transform:uppercase}
 /* The server's answer belongs in the dialog; the page banner sits behind the backdrop */
@@ -14,8 +14,9 @@
 .hr-review-dialog footer{display:flex;justify-content:flex-end;gap:8px;margin-top:16px}
 .hr-review-dialog footer .btn{min-height:38px;margin:0}
 .hr-review-dialog input{width:100%;padding:9px 10px;border:1px solid #3a5367;border-radius:5px;color:#eef5f8;background:#07111b;font:inherit}
+.hr-asset-register-header{display:flex;align-items:flex-start;justify-content:space-between;gap:16px;margin-bottom:12px}.hr-asset-register-header h2{margin:0}.hr-asset-register-header p{max-width:720px;margin:5px 0 0;color:#8195a5;font-size:13px;line-height:1.45}.hr-asset-actions{display:flex;flex-wrap:wrap;gap:6px}.hr-asset-dialog{width:min(100%,680px)}.hr-asset-form-grid{display:grid;grid-template-columns:repeat(2,minmax(0,1fr));gap:11px}.hr-asset-form-grid label{display:grid;gap:6px;color:#b9c7d1;font-size:12px;font-weight:800}.hr-asset-form-grid label.is-wide{grid-column:1/-1}.hr-asset-form-grid input,.hr-asset-form-grid select,.hr-asset-form-grid textarea{width:100%;box-sizing:border-box;padding:9px 10px;border:1px solid #3a5367;border-radius:5px;color:#eef5f8;background:#07111b;font:inherit}.hr-asset-form-grid textarea{resize:vertical}.hr-asset-form-grid select:disabled{color:#8fa0ad;background:#101a24}
 .reports-table tr.is-context-focus{outline:2px solid #65b8aa;outline-offset:-2px;background:#102a2b}
-@media(max-width:560px){.hr-review-backdrop{align-items:end;padding:10px}.hr-review-dialog{padding:15px}.hr-review-dialog h2{font-size:17px}.hr-review-dialog footer .btn{flex:1}}
+@media(max-width:560px){.hr-review-backdrop{align-items:end;padding:10px}.hr-review-dialog{padding:15px}.hr-review-dialog h2{font-size:17px}.hr-review-dialog footer .btn{flex:1}.hr-asset-register-header{display:grid}.hr-asset-register-header .btn{width:100%}.hr-asset-form-grid{grid-template-columns:1fr}.hr-asset-form-grid label.is-wide{grid-column:1}.hr-asset-actions{display:grid}.hr-asset-actions .btn{width:100%}}
 .hr-readiness{display:grid;grid-template-columns:repeat(4,minmax(0,1fr));gap:6px;margin-top:10px;padding-top:10px;border-top:1px solid #2b3d4c}.hr-readiness>div{display:grid;gap:2px;padding:7px;border:1px solid #34495a;border-radius:4px;background:#0d1a26}.hr-readiness span{color:#8499aa;font-size: 12px;font-weight:800;text-transform:uppercase}.hr-readiness strong{overflow:hidden;color:#d9e5ec;font-size: 12px;text-overflow:ellipsis;text-transform:capitalize}.hr-readiness>p{grid-column:1/-1;margin:0;padding:7px;border-left:3px solid #c87b55;color:#ddb092;background:#271913;font-size: 12px}.hr-readiness>.btn{grid-column:1/-1;justify-self:start;margin:2px 0 0}
 @media(max-width:700px){.hr-readiness{grid-template-columns:repeat(2,minmax(0,1fr))}}
 

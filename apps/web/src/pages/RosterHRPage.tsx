@@ -206,13 +206,33 @@ interface AssetRow {
   id: string;
   asset_type: string;
   name: string;
+  serial_number: string | null;
   registration: string | null;
   make: string | null;
   model: string | null;
+  year: number | null;
   status: string;
   assigned_to: string | null;
   last_inspection_date: string | null;
   next_inspection_date: string | null;
+  notes: string | null;
+  updated_at: string;
+}
+
+interface AssetDraft {
+  requestId: string;
+  assetId: string | null;
+  expectedUpdatedAt: string | null;
+  assetType: string;
+  name: string;
+  serialNumber: string;
+  registration: string;
+  make: string;
+  model: string;
+  year: string;
+  status: string;
+  nextInspectionDate: string;
+  notes: string;
 }
 
 interface OnCallRow {
@@ -393,6 +413,7 @@ const RosterHRPage: React.FC = () => {
   });
   const [showTemplateForm, setShowTemplateForm] = useState(false);
   const [assets, setAssets] = useState<AssetRow[]>([]);
+  const [assetDraft, setAssetDraft] = useState<AssetDraft | null>(null);
   const [onCallPeriods, setOnCallPeriods] = useState<OnCallRow[]>([]);
   const [onCallForm, setOnCallForm] = useState({ officerId: '', type: 'standard', startsAt: '', endsAt: '', flatRate: '', notes: '' });
   const [callouts, setCallouts] = useState<CalloutRow[]>([]);
@@ -518,7 +539,7 @@ const RosterHRPage: React.FC = () => {
             .order('shift_date', { ascending: true }),
           supabase.rpc('get_staff_readiness_assessment', { p_organization_id: orgId }),
           supabase.from('roster_work_units').select('id,name,work_unit_type').eq('organization_id',orgId).eq('active',true).order('name'),
-          supabase.from('assets').select('id,asset_type,name,registration,make,model,status,assigned_to,last_inspection_date,next_inspection_date').eq('organization_id', orgId).order('asset_type').order('name'),
+          supabase.from('assets').select('id,asset_type,name,serial_number,registration,make,model,year,status,assigned_to,last_inspection_date,next_inspection_date,notes,updated_at').eq('organization_id', orgId).order('asset_type').order('name'),
           supabase.from('on_call_periods').select('id,officer_user_id,period_type,starts_at,ends_at,flat_rate,status').eq('organization_id', orgId).order('starts_at', { ascending: false }).limit(50),
           supabase.from('callout_shifts').select('id,on_call_period_id,officer_user_id,status,minimum_pay_hours,callout_received_at,work_started_at,work_ended_at').eq('organization_id', orgId).order('callout_received_at', { ascending: false }).limit(50),
           supabase.from('court_appearances').select('id,officer_user_id,court_name,case_reference,subpoena_reference,appearance_type,scheduled_at,estimated_hours,status,is_overtime,actual_start,actual_end,outcome').eq('organization_id', orgId).order('scheduled_at', { ascending: false }).limit(50),
@@ -562,7 +583,8 @@ const RosterHRPage: React.FC = () => {
       if (coverageRes.error) throw coverageRes.error;
       if (shiftSwapsRes.error) throw shiftSwapsRes.error;
       if (readinessRes.error) throw readinessRes.error;
-  if(workUnitsRes.error)throw workUnitsRes.error;
+      if (workUnitsRes.error) throw workUnitsRes.error;
+      if (assetsRes.error) throw assetsRes.error;
         if (onboardingRes.error) throw onboardingRes.error;
         if (vacanciesRes.error) throw vacanciesRes.error;
         if (candidatesRes.error) throw candidatesRes.error;
@@ -842,6 +864,71 @@ const RosterHRPage: React.FC = () => {
     else {
       setNotice(`Check recorded for ${assetCheck.asset.name}.`);
       setAssetCheck(null);
+      await loadAll();
+    }
+    setSaving(false);
+  };
+
+  const openAssetRegister = (asset?: AssetRow) => {
+    setAssetDraft({
+      requestId: crypto.randomUUID(),
+      assetId: asset?.id ?? null,
+      expectedUpdatedAt: asset?.updated_at ?? null,
+      assetType: asset?.asset_type ?? 'vehicle',
+      name: asset?.name ?? '',
+      serialNumber: asset?.serial_number ?? '',
+      registration: asset?.registration ?? '',
+      make: asset?.make ?? '',
+      model: asset?.model ?? '',
+      year: asset?.year?.toString() ?? '',
+      status: asset?.status ?? 'available',
+      nextInspectionDate: asset?.next_inspection_date ?? '',
+      notes: asset?.notes ?? '',
+    });
+    setError(null);
+    setNotice(null);
+  };
+
+  const saveAsset = async (event: React.FormEvent) => {
+    event.preventDefault();
+    if (!assetDraft) return;
+    const year = assetDraft.year ? Number(assetDraft.year) : null;
+    const nextYear = new Date().getFullYear() + 1;
+    if (!assetDraft.name.trim()) {
+      setError('Asset name is required.');
+      return;
+    }
+    if (year !== null && (!Number.isInteger(year) || year < 1900 || year > nextYear)) {
+      setError(`Asset year must be between 1900 and ${nextYear}.`);
+      return;
+    }
+
+    setSaving(true);
+    setError(null);
+    setNotice(null);
+    // ATLAS WRITES: manage_asset (replay-safe, optimistic fleet register authority)
+    const { data, error: assetError } = await supabase.rpc('manage_asset', {
+      p_client_request_id: assetDraft.requestId,
+      p_action: assetDraft.assetId ? 'update' : 'create',
+      p_asset_id: assetDraft.assetId,
+      p_expected_updated_at: assetDraft.expectedUpdatedAt,
+      p_asset_type: assetDraft.assetType,
+      p_name: assetDraft.name.trim(),
+      p_serial_number: assetDraft.serialNumber.trim() || null,
+      p_registration: assetDraft.registration.trim() || null,
+      p_make: assetDraft.make.trim() || null,
+      p_model: assetDraft.model.trim() || null,
+      p_year: year,
+      p_status: assetDraft.status,
+      p_next_inspection_date: assetDraft.nextInspectionDate || null,
+      p_notes: assetDraft.notes.trim() || null,
+    });
+    const saved = (Array.isArray(data) ? data[0] : data) as AssetRow | null;
+    if (assetError || !saved) {
+      setError(assetError?.message ?? 'The asset register receipt was not confirmed. Check the register before retrying.');
+    } else {
+      setNotice(`${saved.name} ${assetDraft.assetId ? 'updated' : 'added'} with an audit receipt. Next: it is ${saved.status.replaceAll('_', ' ')} for checks${saved.status === 'available' ? ' and shift sign-out' : ''}.`);
+      setAssetDraft(null);
       await loadAll();
     }
     setSaving(false);
@@ -2069,7 +2156,13 @@ const RosterHRPage: React.FC = () => {
       {payLineReview && <div className="hr-review-backdrop"><form className="hr-review-dialog" role="dialog" aria-modal="true" aria-labelledby="pay-line-review-title" onSubmit={submitPayLineReview}><header><div><span>Payroll evidence</span><h2 id="pay-line-review-title">{payLineReview.decision === 'approved' ? 'Approve pay evidence' : 'Reject for correction'}</h2></div><button type="button" onClick={() => setPayLineReview(null)} aria-label="Close pay-line review">×</button></header><p>{payLineReview.line.pay_code ?? 'Base pay'} · NZ${Number(payLineReview.line.line_total).toFixed(2)} · dispatch {payLineReview.line.source_dispatch_id.slice(0, 8)}</p>{payLineReview.line.pay_code === 'UNRESOLVED' && <p>This evidence cannot be approved for payroll until the source work evidence or effective pay rule is corrected and recalculated.</p>}<label><span>Decision</span><select value={payLineReview.decision} disabled={payLineReview.line.pay_code === 'UNRESOLVED'} onChange={(event) => setPayLineReview({ ...payLineReview, decision: event.target.value as 'approved' | 'rejected' })}><option value="approved">Approve</option><option value="rejected">Reject for correction</option></select></label><label><span>Review notes</span><textarea rows={4} required={payLineReview.decision === 'rejected'} value={payLineReview.notes} onChange={(event) => setPayLineReview({ ...payLineReview, notes: event.target.value })} /></label><footer><button type="button" className="btn btn-secondary" onClick={() => setPayLineReview(null)}>Back</button><button type="submit" className="btn btn-primary" disabled={saving || (payLineReview.decision === 'rejected' && !payLineReview.notes.trim())}>{saving ? 'Saving' : 'Confirm decision'}</button></footer></form></div>}
       {tab === 'assets' && (
         <section className="reports-section">
-          <h2>Fleet &amp; Equipment ({assets.length})</h2>
+          <header className="hr-asset-register-header">
+            <div>
+              <h2>Fleet &amp; Equipment ({assets.length})</h2>
+              <p>Register equipment before officers sign it out. Shift assignment remains a separate officer action with its own receipt.</p>
+            </div>
+            <button type="button" className="btn btn-primary" onClick={() => openAssetRegister()}>Add asset</button>
+          </header>
           <div className="reports-table-wrapper">
             <table className="reports-table">
               <thead>
@@ -2077,7 +2170,7 @@ const RosterHRPage: React.FC = () => {
               </thead>
               <tbody>
                 {assets.length === 0 ? (
-                  <tr><td colSpan={7} className="text-center">No assets recorded</td></tr>
+                  <tr><td colSpan={7} className="text-center"><strong>No fleet or equipment registered.</strong><br /><span>Add the first asset before an officer can sign it out to a shift.</span></td></tr>
                 ) : (
                   assets.map((a) => (
                     <tr key={a.id}>
@@ -2087,7 +2180,7 @@ const RosterHRPage: React.FC = () => {
                       <td>{a.assigned_to ? staffNames[a.assigned_to] ?? 'Assigned' : '—'}</td>
                       <td>{a.last_inspection_date ? new Date(a.last_inspection_date).toLocaleDateString() : 'Never'}</td>
                       <td><span className={`status-badge status-${a.status}`}>{a.status.replaceAll('_', ' ')}</span></td>
-                      <td><button type="button" className="btn btn-sm btn-secondary" onClick={() => setAssetCheck({ asset: a, condition: 'good', odometer: '', fuel: '', defects: '' })}>Record check</button></td>
+                      <td><div className="hr-asset-actions"><button type="button" className="btn btn-sm btn-secondary" onClick={() => openAssetRegister(a)}>Edit register</button><button type="button" className="btn btn-sm btn-secondary" onClick={() => setAssetCheck({ asset: a, condition: 'good', odometer: '', fuel: '', defects: '' })}>Record check</button></div></td>
                     </tr>
                   ))
                 )}
@@ -2096,6 +2189,7 @@ const RosterHRPage: React.FC = () => {
           </div>
         </section>
       )}
+      {assetDraft && <div className="hr-review-backdrop"><form className="hr-review-dialog hr-asset-dialog" role="dialog" aria-modal="true" aria-labelledby="asset-register-title" onSubmit={saveAsset}><header><div><span>Fleet register</span><h2 id="asset-register-title">{assetDraft.assetId ? `Update ${assetDraft.name}` : 'Add fleet or equipment'}</h2></div><button type="button" onClick={() => setAssetDraft(null)} aria-label="Close asset register">×</button></header><p>{assetDraft.assetId ? 'Confirm the register state before officers next sign this asset out.' : 'This creates the accountable register record. It does not assign the asset to a person or shift.'}</p><div className="hr-asset-form-grid"><label><span>Name</span><input required maxLength={160} value={assetDraft.name} onChange={(event) => setAssetDraft({ ...assetDraft, name: event.target.value })} /></label><label><span>Type</span><select disabled={Boolean(assetDraft.assetId)} value={assetDraft.assetType} onChange={(event) => setAssetDraft({ ...assetDraft, assetType: event.target.value })}><option value="vehicle">Vehicle</option><option value="radio">Radio</option><option value="body_camera">Body camera</option><option value="torch">Torch</option><option value="uniform">Uniform</option><option value="first_aid_kit">First aid kit</option><option value="ems_device">EMS device</option><option value="other">Other</option></select></label><label><span>Registration</span><input value={assetDraft.registration} onChange={(event) => setAssetDraft({ ...assetDraft, registration: event.target.value })} placeholder="Vehicle plate, if applicable" /></label><label><span>Serial number</span><input value={assetDraft.serialNumber} onChange={(event) => setAssetDraft({ ...assetDraft, serialNumber: event.target.value })} /></label><label><span>Make</span><input value={assetDraft.make} onChange={(event) => setAssetDraft({ ...assetDraft, make: event.target.value })} /></label><label><span>Model</span><input value={assetDraft.model} onChange={(event) => setAssetDraft({ ...assetDraft, model: event.target.value })} /></label><label><span>Year</span><input type="number" min={1900} max={new Date().getFullYear() + 1} value={assetDraft.year} onChange={(event) => setAssetDraft({ ...assetDraft, year: event.target.value })} /></label><label><span>Status</span><select value={assetDraft.status} onChange={(event) => setAssetDraft({ ...assetDraft, status: event.target.value })}><option value="available">Available</option><option value="maintenance">Maintenance</option><option value="retired">Retired</option><option value="lost">Lost</option>{assetDraft.status === 'in_use' && <option value="in_use">In use (set by shift sign-out)</option>}</select></label><label><span>Next inspection</span><input type="date" value={assetDraft.nextInspectionDate} onChange={(event) => setAssetDraft({ ...assetDraft, nextInspectionDate: event.target.value })} /></label><label className="is-wide"><span>Notes</span><textarea rows={3} value={assetDraft.notes} onChange={(event) => setAssetDraft({ ...assetDraft, notes: event.target.value })} /></label></div><footer><button type="button" className="btn btn-secondary" onClick={() => setAssetDraft(null)} disabled={saving}>Keep current register</button><button type="submit" className="btn btn-primary" disabled={saving || !assetDraft.name.trim()}>{saving ? 'Saving' : assetDraft.assetId ? 'Confirm update' : 'Add to register'}</button></footer></form></div>}
 
       {tab === 'oncall' && (
         <section className="reports-section">

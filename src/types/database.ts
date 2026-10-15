@@ -863,6 +863,7 @@ export type Database = {
           registration: string | null
           serial_number: string | null
           status: string
+          updated_at: string
           year: number | null
         }
         Insert: {
@@ -881,6 +882,7 @@ export type Database = {
           registration?: string | null
           serial_number?: string | null
           status?: string
+          updated_at?: string
           year?: number | null
         }
         Update: {
@@ -899,6 +901,7 @@ export type Database = {
           registration?: string | null
           serial_number?: string | null
           status?: string
+          updated_at?: string
           year?: number | null
         }
         Relationships: [
@@ -45661,6 +45664,7 @@ export type Database = {
           p_asset_id?: string
           p_asset_type?: string
           p_client_request_id: string
+          p_expected_updated_at?: string
           p_make?: string
           p_model?: string
           p_name?: string
@@ -45687,6 +45691,7 @@ export type Database = {
           registration: string | null
           serial_number: string | null
           status: string
+          updated_at: string
           year: number | null
         }
         SetofOptions: {

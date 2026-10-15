@@ -94,6 +94,17 @@ describe('governed HR administration', () => {
     expect(page).toContain('The saved outcome becomes roster, overtime and audit evidence.');
   });
 
+  it('governs the fleet register before officer sign-out', () => {
+    expect(page).toContain("from('assets').select('id,asset_type,name,serial_number,registration,make,model,year,status,assigned_to,last_inspection_date,next_inspection_date,notes,updated_at')");
+    expect(page).toContain("supabase.rpc('manage_asset'");
+    expect(page).toContain('p_client_request_id: assetDraft.requestId');
+    expect(page).toContain('p_expected_updated_at: assetDraft.expectedUpdatedAt');
+    expect(page).toContain('Keep current register');
+    expect(page).toContain('This creates the accountable register record. It does not assign the asset to a person or shift.');
+    expect(page).toContain('Add the first asset before an officer can sign it out to a shift.');
+    expect(page).not.toMatch(/from\('assets'\)[\s\S]{0,300}\.(insert|update|upsert|delete)\(/);
+  });
+
   it('uses governed coverage creation and reasoned review', () => {
     expect(page).toContain("supabase.rpc('create_shift_coverage_request'");
     expect(page).not.toContain(".from('shift_coverage_requests').insert");

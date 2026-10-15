@@ -1392,3 +1392,56 @@ remains unpopulated.
   `components/CrmOperationalWorkPanel -calls-> rpc
   manage_location_module_assignment` and moves bounded gaps 129 -> 128: 0 Edge
   Functions, 76 RPCs and 52 tables.
+
+### Closure log - governed fleet and equipment register
+
+- Atlas showed `manage_asset` as present but unwired. The table was not dormant:
+  proven flow reaches officer shift sign-out and return, administrator checks,
+  and workshop work orders. Structural FK reach separately includes
+  `asset_checks`, `shift_assets`, workshop and finance inventory/cost tables;
+  those relations are blast-radius evidence, not proof that every pathway is
+  exercised. Live verification found zero `assets`, zero `asset_checks`, and
+  zero `shift_assets`, so the already-wired downstream actions had no register
+  record to act on.
+- Before: **Pay & Assets** displayed an empty fleet table and a check action for
+  existing rows, but offered no way to create or correct one. The callerless
+  RPC accepted retried writes without a replay receipt, had no optimistic edit
+  guard, did not normalize or protect registration/serial identifiers, and
+  recorded only a small post-write audit fragment.
+- During: an administrator can add the first vehicle or equipment record from
+  the existing **Pay & Assets** workspace, or explicitly edit a current row.
+  The form distinguishes register state from shift assignment, keeps asset type
+  immutable after registration, excludes a direct `in_use` transition, names
+  the next inspection, validates the year, and offers **Keep current register**
+  as a safe exit. Empty, error, saving, success, and narrow-screen states are
+  explicit. A mobile browser test found that the taller dialog could place its
+  confirmation below the viewport; the shared review dialog now has bounded
+  scrolling rather than hiding the action.
+- After: the governed RPC normalizes registration and serial identifiers,
+  enforces organisation-level uniqueness, serializes each client request,
+  replays the stored result, rejects stale edits, and records the previous and
+  resulting full rows in `audit_log`. A table trigger advances `updated_at`
+  with `clock_timestamp()` for every writer, including officer sign-out and
+  return. This trigger was required because rollback verification proved that
+  transaction-stable `now()` gave create and update the same timestamp and
+  allowed a stale edit; the repaired path rejects it.
+- This applies Trackforce's useful equipment-readiness sequence without copying
+  a separate device product: register and inspect accountable equipment before
+  deployment, show supervisors whether it is available, under maintenance,
+  retired, lost, or currently in use, and leave assignment to the officer's
+  governed shift sign-out/return path. The organisation remains custodian of
+  its operational asset record.
+- The linked migrations are applied and the regenerated live catalogue has 398
+  tables, 814 functions, and 132 triggers. Thirty-three focused guards, the
+  production build, web and E2E type-checks, desktop and mobile Playwright
+  workflows, linked database lint, migration uniqueness across 629 migrations,
+  and all 66 Atlas generator tests pass. Rollback-only live verification using
+  a throwaway test identity - never a real person's account - proved create,
+  create replay with one audit row, optimistic update, update replay, stale
+  rejection, duplicate-serial rejection, direct-`in_use` rejection, and
+  non-administrator rejection, with zero retained assets, profiles, or audit
+  rows.
+- Honesty note: rollback verification is not production invocation evidence.
+  Atlas keeps `exercised=null`; `wired` is the strongest claim available.
+  Atlas dry-run records `pages/RosterHRPage -calls-> rpc manage_asset` and moves
+  bounded gaps 128 -> 127: 0 Edge Functions, 75 RPCs and 52 tables.

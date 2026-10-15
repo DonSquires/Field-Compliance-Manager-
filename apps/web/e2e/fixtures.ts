@@ -73,6 +73,7 @@ export async function installSupabaseFixtures(page: Page, options: { officerModu
   let hrTimesheetStatus = 'submitted';
   let anaWorkReady = true;
   let acceptedQuoteAgreement = false;
+  const assets: Array<Record<string, unknown>> = [];
   const monthlyReportPacks: Array<Record<string, unknown>> = [];
   const breachAlerts=[{id:'abababab-abab-4bab-8bab-abababababab',organization_id:ORG_ID,observation_id:'acacacac-acac-4cac-8cac-acacacacacac',zone_id:'66666666-6666-4666-8666-666666666666',plate_number:'FCM123',breach_type:'nightly_limit',status:'open',nights_count:3,limit_value:2,notes:'Officer recorded a verified limit breach.',created_at:'2026-08-30T08:20:00.000Z',action_type:null,actioned_at:null,zone:{name:'Civic Event Operations Zone'},observation:{observed_at:'2026-08-30T08:20:00.000Z',is_scv:true,photo_url:null}}];
   const debriefFollowups=mutable([{id:'adadadad-adad-4dad-8dad-adadadadadad',organization_id:ORG_ID,debrief_id:'aeaeaeae-aeae-4eae-8eae-aeaeaeaeaeae',shift_id:'66666666-6666-4666-8666-666666666666',officer_user_id:OFFICER_ID,status:'open',priority:'critical',owner_user_id:null,version:1,latest_note:'Supervisor must review the safety incident.',resolved_at:null,created_at:'2026-08-30T09:00:00.000Z'}]);
@@ -299,6 +300,28 @@ export async function installSupabaseFixtures(page: Page, options: { officerModu
       // Platform subscriptions the admin flows exercise (AdminShell PAGE_PLATFORM_MODULE gate): a tenant without them cannot reach these pages.
       { id: 'abababab-abab-4bab-8bab-ababababab03', module_key: 'crm', enabled: true }, { id: 'abababab-abab-4bab-8bab-ababababab04', module_key: 'rostering', enabled: true }, { id: 'abababab-abab-4bab-8bab-ababababab05', module_key: 'hr', enabled: true }, { id: 'abababab-abab-4bab-8bab-ababababab06', module_key: 'finance', enabled: true }, { id: 'abababab-abab-4bab-8bab-ababababab07', module_key: 'workshop', enabled: true }])); return; }
     if (table === 'org_geofence_config' || table === 'notice_templates') { await route.fulfill(fulfillJson([])); return; }
+    if (table === 'assets') { await route.fulfill(fulfillJson(assets)); return; }
+    if (table === 'manage_asset') {
+      const payload = JSON.parse(request.postData() ?? '{}') as Record<string, unknown>;
+      const existing = assets.find((asset) => asset.id === payload.p_asset_id);
+      const saved = existing ?? { id: 'a5000000-0000-4000-8000-000000000001', organization_id: ORG_ID, created_at: '2026-08-30T09:30:00.000Z', assigned_to: null, assigned_site_id: null, last_inspection_date: null };
+      Object.assign(saved, {
+        asset_type: payload.p_asset_type,
+        name: payload.p_name,
+        serial_number: payload.p_serial_number,
+        registration: payload.p_registration,
+        make: payload.p_make,
+        model: payload.p_model,
+        year: payload.p_year,
+        status: payload.p_status,
+        next_inspection_date: payload.p_next_inspection_date,
+        notes: payload.p_notes,
+        updated_at: '2026-08-30T09:31:00.000Z',
+      });
+      if (!existing) assets.push(saved);
+      await route.fulfill(fulfillJson(saved));
+      return;
+    }
     if (table === 'crm_account_activities') { await route.fulfill(fulfillJson(crmActivities)); return; }
     if (table === 'invoices') { await route.fulfill(fulfillJson(crmInvoices)); return; }
     if (table === 'quotes') { await route.fulfill(fulfillJson(crmQuotes)); return; }

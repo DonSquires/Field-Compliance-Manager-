@@ -163,6 +163,35 @@ test('admin officer sees only the People & HR work needed for daily service admi
   await expect(page.getByRole('button', { name: 'Court', exact: true })).toHaveCount(0);
 });
 
+test('administrator registers and corrects equipment before officer sign-out', async ({ page }) => {
+  const errors = monitorBrowserErrors(page);
+  await signInAsAdmin(page, '/admin/people-hr');
+  await page.getByRole('button', { name: 'Pay & Assets', exact: true }).click();
+  await page.getByRole('button', { name: 'Assets', exact: true }).click();
+
+  await expect(page.getByText('No fleet or equipment registered.')).toBeVisible();
+  await page.getByRole('button', { name: 'Add asset' }).click();
+  const createDialog = page.getByRole('dialog', { name: 'Add fleet or equipment' });
+  await expect(createDialog.getByText('This creates the accountable register record. It does not assign the asset to a person or shift.')).toBeVisible();
+  await createDialog.getByLabel('Name').fill('Patrol Radio 12');
+  await createDialog.getByLabel('Type').selectOption('radio');
+  await createDialog.getByLabel('Serial number').fill('RAD-0012');
+  await createDialog.getByLabel('Next inspection').fill('2026-12-01');
+  await createDialog.getByRole('button', { name: 'Add to register' }).click();
+
+  await expect(page.getByRole('status')).toContainText('Patrol Radio 12 added with an audit receipt.');
+  await expect(page.getByRole('cell', { name: 'Patrol Radio 12' })).toBeVisible();
+  await page.getByRole('button', { name: 'Edit register' }).click();
+  const editDialog = page.getByRole('dialog', { name: 'Update Patrol Radio 12' });
+  await expect(editDialog.getByLabel('Type')).toBeDisabled();
+  await editDialog.getByLabel('Status').selectOption('maintenance');
+  await editDialog.getByRole('button', { name: 'Confirm update' }).click();
+
+  await expect(page.getByRole('status')).toContainText('Patrol Radio 12 updated with an audit receipt.');
+  await expect(page.getByRole('cell', { name: 'maintenance' })).toBeVisible();
+  expect(errors, errors.join('\n')).toEqual([]);
+});
+
 test('people and HR decisions are governed and operational', async ({ page }) => {
   const errors = monitorBrowserErrors(page); await signInAsAdmin(page, '/admin/people-hr');
   await expect(page.getByRole('heading', { name: 'Roster & HR' })).toBeVisible();
