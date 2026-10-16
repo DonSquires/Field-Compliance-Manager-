@@ -81,6 +81,10 @@ create index idx_ta_notice on public.task_assignments using btree (notice_id)
 create index idx_ta_observation on public.task_assignments using btree (observation_id)
   where (observation_id is not null);
 
+create unique index idx_task_assignments_observation_direct_unique
+  on public.task_assignments using btree (user_id, observation_id, basis)
+  where (observation_id is not null and basis = 'direct_module_initiation');
+
 create index idx_ta_smoke on public.task_assignments using btree (smoke_assessment_id)
   where (smoke_assessment_id is not null);
 
@@ -118,3 +122,5 @@ create policy "task_assignments_update" on "public"."task_assignments"
 grant delete, insert, maintain, references, select, trigger, truncate, update on table "public"."task_assignments" to "anon", "authenticated", "postgres", "service_role";
 
 comment on table "public"."task_assignments" is 'Situational-entitlement substrate for user_has_task_entitlement (ACCESS_MODEL.md). Logged, time-bounded task-basis records for the signals not on existing columns: direct_module_initiation (claim), backup_attachment, and universal follow_up_ownership. A live basis has ended_at IS NULL; expired rows are retained for audit. Grants ACCESS basis only -- never touches the underlying record. Polymorphic record ref via typed nullable FKs (one-of); extend as the re-anchor worklist grows.';
+
+comment on index "public"."idx_task_assignments_observation_direct_unique" is 'One durable direct-initiation receipt per officer-authored observation; prevents retry duplication while retaining ended basis history.';

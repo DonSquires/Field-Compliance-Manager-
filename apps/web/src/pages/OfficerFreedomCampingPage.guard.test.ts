@@ -47,4 +47,22 @@ describe('Officer Freedom Camping interaction boundary', () => {
   it('keeps the requested-breach scroll effect at component scope instead of nesting it inside the async loader', () => {
     expect(source).not.toMatch(/const loadHistory = useCallback\(async \(\) => \{[\s\S]*?useEffect\(\(\) => \{ if \(requestedBreachId\)/);
   });
+
+  it('submits officer enforcement through the governed mode resolver path', () => {
+    expect(source).toContain("rpc('submit_officer_breach_action'");
+    expect(source).toContain("p_expected_status: 'open'");
+    expect(source).toContain('p_request_id: enforcementRequestId');
+    expect(source).toContain("disposition === 'direct'");
+    expect(source).toContain('Administrator review requested');
+    expect(source).not.toMatch(/from\('breach_alerts'\)[\s\S]{0,300}\.update\(/);
+  });
+
+  it('requires preview and exact typed-name authorization before officer printing', () => {
+    expect(source).toContain("operation: 'preview'");
+    expect(source).toContain("operation: 'authorize_print'");
+    expect(source).toContain('typedAuthorizerName !== profile?.displayName');
+    expect(source).toContain('print_request_id: printRequestId');
+    expect(source).toContain('Authorize Print');
+    expect(source).toContain('<NoticePrintActions');
+  });
 });

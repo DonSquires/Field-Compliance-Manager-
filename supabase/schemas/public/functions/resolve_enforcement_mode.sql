@@ -5,17 +5,19 @@ create or replace function public.resolve_enforcement_mode (
   language sql
   stable
   security definer
+  set search_path = public
   AS $function$
   select coalesce(
     lz.enforcement_workflow_override,
     o.enforcement_workflow_mode,
     'officer_direct'
   )
-  from location_zones lz
-  join organizations o on o.id = lz.organization_id
+  from public.location_zones lz
+  join public.organizations o on o.id = lz.organization_id
   where lz.id = p_zone_id;
 $function$;
 
-grant execute on function "public"."resolve_enforcement_mode"(uuid) to public, "anon", "authenticated", "postgres", "service_role";
+revoke all on function "public"."resolve_enforcement_mode"(uuid) from public, "anon", "authenticated";
+grant execute on function "public"."resolve_enforcement_mode"(uuid) to "postgres", "service_role";
 
-comment on function "public"."resolve_enforcement_mode"(uuid) is 'Effective enforcement workflow mode for a zone: zone override else org default (else officer_direct). Used by the field notice flow to gate direct issuance.';
+comment on function "public"."resolve_enforcement_mode"(uuid) is 'Internal effective enforcement workflow resolver: zone override, then organization default, then officer_direct. Called only from governed server-side paths.';

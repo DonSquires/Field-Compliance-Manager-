@@ -2085,7 +2085,7 @@ remains unpopulated.
   retaining both canonical RPCs as wired. Static evidence does not establish
   runtime exercise.
 
-## 2026-10-17 — Enforcement-mode contradiction requires an owner ruling
+## 2026-10-17 — Govern the configured enforcement modes
 
 - **Observed:** organisation and zone settings offer `officer_direct`,
   `admin_first`, and `hybrid`, and `resolve_enforcement_mode` says it gates
@@ -2094,13 +2094,42 @@ remains unpopulated.
   admin page then generates a draft notice.
 - **User/job affected:** an organisation configuring who may issue a notice
   cannot rely on the selected mode to change the operational path today.
-- **Tradeoff:** wiring officer-direct issuance would shorten field response but
-  changes legal authority, review, signature, evidence, and exception handling.
-  Retiring the setting would make the current admin-first behavior honest but
-  remove a configured policy option.
-- **Status:** unresolved design contradiction, not yet called a defect. Do not
-  wire or retire the mode until the owner confirms whether direct and hybrid
-  field issuance remain intended.
+- **Owner ruling:** retain all three modes. `officer_direct` allows the source
+  officer to take a governed notice action. `admin_first` sends every officer
+  notice action for administrator review. `hybrid` allows direct written
+  warnings and notices to vacate, while infringements require administrator
+  review.
+- **Expected before:** the officer must be the source officer, hold active
+  organisation, place, and task authority, submit required notes and an
+  idempotency key, and receive a server-resolved direct-or-review receipt. The
+  browser must never choose the effective mode.
+- **Expected during:** direct actions move the alert to `actioned`; review
+  requests move it to `acknowledged` while keeping the requested action
+  separate from the approved `action_type`. Administrator approval uses the
+  same expected-state lock as other breach decisions.
+- **Expected after:** the officer sees the persisted mode, disposition, next
+  actor, and request receipt. Administrators see the requested action and notes
+  in the review queue. Audit and notification records preserve who requested
+  and who approved the action.
+- **Trackforce consideration:** one alert now has one accountable transition
+  path. Policy resolution, field authority, exception routing, review, and
+  receipts are server-side facts rather than button labels.
+- **Fire-control closure:** notice preview performs no notice-table or artifact
+  write. Formal issue requires an exact typed profile-name match and explicit
+  `Authorize Print`; the server records an idempotent print request and audit
+  receipt before returning the printable artifact. Both officer-direct and
+  administrator paths use the same boundary.
+- **Access-basis finding during acceptance:** all 8,106 existing observations
+  lacked the canonical `direct_module_initiation` task-assignment receipt, so
+  the correctly guarded officer RPC initially rejected every observation.
+  Observation creation now records that basis at the database boundary, with a
+  unique retry guard. The migration backfilled attributable historical
+  observations while leaving legacy/system observations with no officer
+  untouched.
+- **Verified live:** all attributable observations now have a live direct
+  initiation basis; the resolver has zero configured-zone mismatches; and a
+  synthetic zone-backed breach completed the officer transition inside a
+  transaction that was then rolled back.
 
 ## 2026-10-17 — Retire the unscoped repeat-stay helper
 
