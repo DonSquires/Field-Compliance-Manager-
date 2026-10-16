@@ -19,12 +19,20 @@ interface PerceptionEvidenceReceipt {
   schema_version: number;
   status: string;
   created_at: string;
-  fields: Array<{
-    field_key: string;
-    normalized_value: string | null;
-    authority_state: string;
-    review_required: boolean;
-  }>;
+  fields: PerceptionEvidenceField[];
+}
+
+interface PerceptionEvidenceField {
+  id: string;
+  field_key: string;
+  candidate_value: string | null;
+  normalized_value: string | null;
+  raw_confidence: number | null;
+  calibrated_confidence: number | null;
+  source_locations: unknown[];
+  conflicts: unknown[];
+  authority_state: string;
+  review_required: boolean;
 }
 
 interface StudioAttachment {
@@ -155,7 +163,11 @@ export function BobStudio({
   const [mediaUrl, setMediaUrl] = useState<string | null>(null);
   const [mediaError, setMediaError] = useState<string | null>(null);
   const [evidenceReceipts, setEvidenceReceipts] = useState<Record<string, PerceptionEvidenceReceipt>>({});
+  const [evidenceReceiptsLoading, setEvidenceReceiptsLoading] = useState(false);
   const [evidenceReceiptError, setEvidenceReceiptError] = useState<string | null>(null);
+  const [evidenceReviewError, setEvidenceReviewError] = useState<string | null>(null);
+  const [evidenceReviewNotes, setEvidenceReviewNotes] = useState<Record<string, string>>({});
+  const [reviewingEvidenceField, setReviewingEvidenceField] = useState<string | null>(null);
   const [notice, setNotice] = useState<string | null>(null);
 
   const documentArtifacts = useMemo(() => messages
@@ -207,10 +219,13 @@ export function BobStudio({
   useEffect(() => {
     let cancelled = false;
     setEvidenceReceiptError(null);
+    setEvidenceReviewError(null);
     if (!evidenceEnvelopeIds.length) {
       setEvidenceReceipts({});
+      setEvidenceReceiptsLoading(false);
       return;
     }
+    setEvidenceReceiptsLoading(true);
     const load = async () => {
       let envelopeQuery = supabase
         .from('perception_evidence_envelopes')
@@ -221,7 +236,7 @@ export function BobStudio({
         envelopeQuery,
         supabase
           .from('perception_evidence_fields')
-          .select('envelope_id,field_key,normalized_value,authority_state,review_required')
+          .select('id,envelope_id,field_key,candidate_value,normalized_value,raw_confidence,calibrated_confidence,source_locations,conflicts,authority_state,review_required')
           .in('envelope_id', evidenceEnvelopeIds),
       ]);
       if (cancelled) return;
@@ -229,6 +244,7 @@ export function BobStudio({
       if (error) {
         setEvidenceReceipts({});
         setEvidenceReceiptError(error.message);
+        setEvidenceReceiptsLoading(false);
         return;
       }
       const next = Object.fromEntries((envelopes || []).map((envelope) => [
@@ -239,10 +255,53 @@ export function BobStudio({
         },
       ])) as Record<string, PerceptionEvidenceReceipt>;
       setEvidenceReceipts(next);
+      setEvidenceReviewNotes(Object.fromEntries((fields || []).map((field) => [field.id, ''])));
+      setEvidenceReceiptsLoading(false);
     };
     void load();
     return () => { cancelled = true; };
   }, [evidenceEnvelopeIds, organizationId]);
+
+  const reviewEvidenceField = async (
+    field: PerceptionEvidenceField,
+    decision: 'approve' | 'reject' | 'needs_more_context',
+  ) => {
+    const reviewerNotes = evidenceReviewNotes[field.id]?.trim();
+    if (!reviewerNotes) {
+      setEvidenceReviewError('Record the source comparison or uncertainty before deciding.');
+      return;
+    }
+    setReviewingEvidenceField(field.id);
+    setEvidenceReviewError(null);
+    setNotice(null);
+    const { data, error } = await supabase.rpc('review_perception_evidence_field', {
+      p_field_id: field.id,
+      p_decision: decision,
+      p_reviewer_notes: reviewerNotes,
+      p_canonical_reference: {},
+    });
+    if (error || !data) {
+      setEvidenceReviewError(error?.message ?? 'The evidence-field decision was not recorded.');
+      setReviewingEvidenceField(null);
+      return;
+    }
+    const reviewed = data as PerceptionEvidenceField;
+    setEvidenceReceipts((current) => Object.fromEntries(Object.entries(current).map(([envelopeId, receipt]) => {
+      if (!receipt.fields.some((item) => item.id === reviewed.id)) return [envelopeId, receipt];
+      const fields = receipt.fields.map((item) => item.id === reviewed.id ? reviewed : item);
+      return [envelopeId, {
+        ...receipt,
+        fields,
+        status: fields.some((item) => item.review_required) ? 'manual_review_required' : 'complete',
+      }];
+    })));
+    setNotice(decision === 'approve'
+      ? 'Evidence field approved with a durable human-review receipt.'
+      : decision === 'reject'
+        ? 'Evidence field rejected and excluded from authoritative use.'
+        : 'Evidence field remains a candidate pending more context.');
+    setReviewingEvidenceField(null);
+  };
 
   const startDocument = (kind: DocumentKind) => {
     setDocumentKind(kind);
@@ -315,11 +374,16 @@ export function BobStudio({
             </header>
             {sourceVerifications.length > 0 && <section className="bob-studio-source-verification" aria-label="Source field verification">
               <div><AlertTriangle size={16} /><span><strong>Source verification</strong><small>These are field-level OCR results, separate from Bob's response confidence.</small></span></div>
+              {evidenceReceiptsLoading && <p role="status">Loading shared evidence receipts...</p>}
               {evidenceReceiptError && <p role="alert">The shared evidence receipt could not be loaded: {evidenceReceiptError}</p>}
+              {evidenceReviewError && <p role="alert">{evidenceReviewError}</p>}
               <ul>{sourceVerifications.map((item) => {
                 const receipt = item.envelopeId ? evidenceReceipts[item.envelopeId] : null;
                 const plateField = receipt?.fields.find((field) => field.field_key === 'vehicle.plate_number');
-                return <li key={`${item.fileName}-${item.documentKind}`}><strong>{item.fileName}</strong><span>{item.value ? <>Plate candidate <b>{item.value}</b> has OCR consensus, but the NZTA source still requires administrator comparison.</> : <>Plate is <b>not verified</b>{item.candidates.length ? `; OCR candidates: ${item.candidates.join(', ')}` : ''}. The draft must show [TO CONFIRM].</>}</span>{receipt && <small>Evidence receipt v{receipt.schema_version} · {receipt.status.replaceAll('_', ' ')} · field authority {plateField?.authority_state.replaceAll('_', ' ') ?? 'not recorded'}</small>}</li>;
+                return <li key={`${item.fileName}-${item.documentKind}`}><strong>{item.fileName}</strong><span>{item.value ? <>Plate candidate <b>{item.value}</b> has OCR consensus, but the NZTA source still requires administrator comparison.</> : <>Plate is <b>not verified</b>{item.candidates.length ? `; OCR candidates: ${item.candidates.join(', ')}` : ''}. The draft must show [TO CONFIRM].</>}</span>{receipt && <small>Evidence receipt v{receipt.schema_version} · {receipt.status.replaceAll('_', ' ')} · field authority {plateField?.authority_state.replaceAll('_', ' ') ?? 'not recorded'}</small>}{receipt?.fields.map((field) => {
+                  const confidence = field.calibrated_confidence ?? field.raw_confidence;
+                  return <article className="bob-studio-evidence-field" key={field.id}><header><div><strong>{field.field_key.replaceAll('_', ' ')}</strong><small>{field.normalized_value ?? field.candidate_value ?? 'No candidate value recorded'}</small></div><span>{field.authority_state.replaceAll('_', ' ')}</span></header><dl><div><dt>Confidence</dt><dd>{confidence === null ? 'Not scored' : `${Math.round(confidence * 100)}%`}</dd></div><div><dt>Source locations</dt><dd>{field.source_locations.length ? JSON.stringify(field.source_locations) : 'Not recorded'}</dd></div><div><dt>Conflicts</dt><dd>{field.conflicts.length ? JSON.stringify(field.conflicts) : 'None recorded'}</dd></div></dl>{field.review_required ? <div className="bob-studio-evidence-decision"><label><span>Review reason</span><textarea rows={2} value={evidenceReviewNotes[field.id] ?? ''} onChange={(event) => setEvidenceReviewNotes((current) => ({ ...current, [field.id]: event.target.value }))} placeholder="What did you compare, and what supports this decision?" /></label><div><button type="button" disabled={reviewingEvidenceField !== null} onClick={() => void reviewEvidenceField(field, 'approve')}>{reviewingEvidenceField === field.id ? 'Recording...' : 'Approve field'}</button><button type="button" disabled={reviewingEvidenceField !== null} onClick={() => void reviewEvidenceField(field, 'reject')}>Reject candidate</button><button type="button" disabled={reviewingEvidenceField !== null} onClick={() => void reviewEvidenceField(field, 'needs_more_context')}>Needs more context</button></div></div> : <p>Human decision recorded. This field is no longer awaiting review.</p>}</article>;
+                })}</li>;
               })}</ul>
             </section>}
             {activeDocuments.length > 1 && <label className="bob-document-version"><span>Draft version</span><select value={selectedDocument?.id ?? ''} onChange={(event) => setSelectedMessageId(event.target.value)}>{activeDocuments.map((message) => <option key={message.id} value={message.id}>{new Date(message.created_at).toLocaleString([], { day: 'numeric', month: 'short', hour: '2-digit', minute: '2-digit' })}</option>)}</select></label>}

@@ -5,9 +5,10 @@ import { act, fireEvent, render, screen, waitFor, within } from '@testing-librar
 import { BobPanel } from './BobPanel';
 import { extractMermaidDiagrams } from './BobStudio';
 
-const { mockFrom, mockInvoke, mockStorageFrom } = vi.hoisted(() => ({
+const { mockFrom, mockInvoke, mockRpc, mockStorageFrom } = vi.hoisted(() => ({
   mockFrom: vi.fn(),
   mockInvoke: vi.fn(),
+  mockRpc: vi.fn(),
   mockStorageFrom: vi.fn(),
 }));
 let messageHistory: Array<Record<string, unknown>> = [];
@@ -16,6 +17,8 @@ let conversationList: Array<Record<string, unknown>> = [];
 let auditHistory: Array<Record<string, unknown>> = [];
 let governedActionHistory: Array<Record<string, unknown>> = [];
 let turnRunHistory: Array<Record<string, unknown>> = [];
+let perceptionEnvelopeHistory: Array<Record<string, unknown>> = [];
+let perceptionFieldHistory: Array<Record<string, unknown>> = [];
 let profileRole = 'grand_master';
 
 vi.mock('../context/AuthContext', () => ({
@@ -27,6 +30,7 @@ vi.mock('../context/AuthContext', () => ({
 vi.mock('../lib/supabase', () => ({
   supabase: {
     from: mockFrom,
+    rpc: mockRpc,
     functions: { invoke: mockInvoke },
     storage: { from: mockStorageFrom },
   },
@@ -45,6 +49,7 @@ describe('BobPanel', () => {
   beforeEach(() => {
     mockFrom.mockReset();
     mockInvoke.mockReset();
+    mockRpc.mockReset();
     mockStorageFrom.mockReset();
     messageHistory = [];
     attachmentHistory = [];
@@ -52,6 +57,8 @@ describe('BobPanel', () => {
     auditHistory = [];
     governedActionHistory = [];
     turnRunHistory = [];
+    perceptionEnvelopeHistory = [];
+    perceptionFieldHistory = [];
     profileRole = 'grand_master';
 
     mockFrom.mockImplementation((table: string) => {
@@ -134,6 +141,22 @@ describe('BobPanel', () => {
         return { select: () => runQuery };
       }
 
+      if (table === 'perception_evidence_envelopes') {
+        const envelopeQuery = {
+          in: () => envelopeQuery,
+          eq: async () => ({ data: perceptionEnvelopeHistory, error: null }),
+        };
+        return { select: () => envelopeQuery };
+      }
+
+      if (table === 'perception_evidence_fields') {
+        return {
+          select: () => ({
+            in: async () => ({ data: perceptionFieldHistory, error: null }),
+          }),
+        };
+      }
+
       return {
         select: () => ({
           eq: () => ({
@@ -144,6 +167,7 @@ describe('BobPanel', () => {
     });
 
     mockInvoke.mockResolvedValue({ data: { reply: 'ok' }, error: null });
+    mockRpc.mockResolvedValue({ data: null, error: null });
     mockStorageFrom.mockReturnValue({
       upload: vi.fn().mockResolvedValue({ error: null }),
       remove: vi.fn().mockResolvedValue({ error: null }),
@@ -1033,6 +1057,76 @@ describe('BobPanel', () => {
         }),
       }),
     })));
+  });
+
+  it('records one reasoned perception-field decision and shows the persisted receipt state', async () => {
+    attachmentHistory = [{
+      id: 'attachment-evidence',
+      file_name: 'vehicle-log.jpg',
+      file_type: 'image/jpeg',
+      processing_state: 'extracted',
+      extraction_summary: 'Vehicle plate candidate found.',
+      confidence: 0.91,
+      extraction_payload: {
+        structured_extraction: {
+          document_kind: 'vehicle_log',
+          perception_envelope_id: 'envelope-1',
+          identifier_verification: {
+            plate_number: {
+              status: 'manual_review_required',
+              value: 'ABC123',
+              candidates: [{ value: 'ABC123' }],
+            },
+          },
+        },
+      },
+    }];
+    perceptionEnvelopeHistory = [{
+      id: 'envelope-1',
+      domain: 'vehicle_identity',
+      schema_version: 1,
+      status: 'manual_review_required',
+      created_at: '2026-10-16T08:00:00.000Z',
+    }];
+    perceptionFieldHistory = [{
+      id: 'field-1',
+      envelope_id: 'envelope-1',
+      field_key: 'vehicle.plate_number',
+      candidate_value: 'ABC123',
+      normalized_value: 'ABC123',
+      raw_confidence: 0.91,
+      calibrated_confidence: 0.88,
+      source_locations: [{ page: 1, box: [10, 20, 80, 40] }],
+      conflicts: [],
+      authority_state: 'verified_candidate',
+      review_required: true,
+    }];
+    mockRpc.mockResolvedValueOnce({
+      data: { ...perceptionFieldHistory[0], authority_state: 'human_approved', review_required: false },
+      error: null,
+    });
+
+    render(<BobPanel open onClose={() => undefined} />);
+    fireEvent.click(await screen.findByLabelText('Open document studio'));
+
+    const approve = await screen.findByRole('button', { name: 'Approve field' });
+    fireEvent.click(approve);
+    expect(await screen.findByText('Record the source comparison or uncertainty before deciding.')).toBeTruthy();
+
+    fireEvent.change(screen.getByPlaceholderText('What did you compare, and what supports this decision?'), {
+      target: { value: 'Compared the source image with the vehicle log entry.' },
+    });
+    fireEvent.click(screen.getByRole('button', { name: 'Approve field' }));
+
+    await waitFor(() => expect(mockRpc).toHaveBeenCalledWith('review_perception_evidence_field', {
+      p_field_id: 'field-1',
+      p_decision: 'approve',
+      p_reviewer_notes: 'Compared the source image with the vehicle log entry.',
+      p_canonical_reference: {},
+    }));
+    expect(await screen.findByText('Evidence field approved with a durable human-review receipt.')).toBeTruthy();
+    expect(screen.getByText('Human decision recorded. This field is no longer awaiting review.')).toBeTruthy();
+    expect(screen.queryByRole('button', { name: 'Approve field' })).toBeNull();
   });
 
   it('expands compact mode when Studio opens and closes incidental side panes', async () => {
