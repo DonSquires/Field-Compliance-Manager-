@@ -1445,3 +1445,129 @@ remains unpopulated.
   Atlas keeps `exercised=null`; `wired` is the strongest claim available.
   Atlas dry-run records `pages/RosterHRPage -calls-> rpc manage_asset` and moves
   bounded gaps 128 -> 127: 0 Edge Functions, 75 RPCs and 52 tables.
+
+### Closure log - governed notice template versioning
+
+- Atlas showed `manage_notice_template` as present but unwired while
+  `notice_templates` already had proven reads from `generate-notice`,
+  `generate-parking-notice`, and `generate-noise-evidence-package`.
+  Live verification found zero templates and one parking chalk record. The
+  downstream issue path therefore existed before an administrator had a
+  working place to configure approved legal wording. `org_printer_settings`
+  also has zero rows, but remains a separate gap because no runtime notice
+  path currently reads it; wiring that setting alone would create dormant
+  configuration rather than a working feature.
+- Before: Organisation settings described notice templates as reference-only
+  and claimed they would appear when a module was configured, but exposed no
+  authoring action. The RPC silently defaulted missing legislation to the
+  Resource Management Act, was neither replay-safe nor optimistic, allowed
+  direct authenticated table writes through older policies and grants, and
+  recorded only a partial audit fragment.
+- During: an administrator with an enabled enforcement module can create the
+  first template or explicitly create a new immutable version of the active
+  one. The form requires the issuing authority, verified authorising Act,
+  source-document location, body wording, and a human confirmation. Optional
+  section, bylaw, fine, payment, and footer fields remain visible without
+  inventing values. **Keep current template** is the safe exit. Empty, saving,
+  error, success, historical-version, disabled-module, desktop, and mobile
+  states are explicit.
+- After: the governed RPC serializes each organisation/module/type stream,
+  replays a client request without another version or audit row, rejects stale
+  active-version expectations, preserves the prior row as inactive history,
+  and records full previous/resulting snapshots. Direct authenticated writes
+  are revoked. A validated table constraint rejects script, embedded-object,
+  JavaScript-URL, and inline-event-handler HTML for every writer.
+- This applies the useful Trackforce configure-before-deploy pattern without
+  copying a separate notice product: supervisors approve sourced wording
+  before field issuance, future generators consume the active version, and
+  earlier templates and issued notices remain durable evidence.
+- The linked migrations are applied and the regenerated live catalogue has 398
+  tables, 814 functions, 735 indexes, 132 triggers, and 892 policies. Focused
+  governance tests, web/E2E type-checks, the production build, and the
+  desktop/mobile Organisation settings workflow pass. Rollback-only live
+  verification using a throwaway test identity proved create, replay, version
+  transition, stale rejection, source enforcement, unsafe-HTML rejection,
+  direct-write revocation, full audit evidence, and authorization rejection,
+  with zero retained templates, profiles, or audit rows.
+- Honesty note: rollback verification is not production invocation evidence.
+  Atlas keeps `exercised=null`; `wired` is the strongest claim available.
+  Atlas dry-run records `pages/OrganizationSetupPage -calls-> rpc
+  manage_notice_template` and moves bounded gaps 127 -> 126: 0 Edge Functions,
+  74 RPCs and 52 tables.
+
+### Closure log - scheduled field-work and retention exercise evidence
+
+- The next Trackforce-style exception check found a map defect rather than a
+  missing screen. `sweep_missed_field_work` already implements the required
+  background road: it identifies late starts, contracted visits beyond their
+  arrive-by time, shifts that ended without attendance, and active shifts
+  running long; updates shift/stop facts; notifies the officer and branch
+  administrators; and writes audit evidence. Atlas showed the RPC as unwired
+  because its caller is `pg_cron`, not a page, Edge Function, trigger, or RPC
+  that the static generator previously understood.
+- Before: the live schedule was active every five minutes as
+  `missed-field-work-sweep-every-5m`, but Atlas presented the operational
+  safeguard as a gap. The same blind spot affected the active daily CCTV
+  biometric-retention sweep. Closing either by adding a manual UI button would
+  have duplicated the authority and weakened automatic exception handling.
+- During: Atlas now derives current scheduler caller edges from ordered
+  `cron.schedule`/`cron.schedule_in_database` declarations and removes a job
+  when a later explicit unschedule is the final declaration. The runtime
+  exercise collector separately reads active jobs and their latest successful
+  `cron.job_run_details` receipt through the governed read-only Management API.
+  Static schedules prove `wired`; only successful run receipts prove
+  `exercised`.
+- After: live Atlas records
+  `scheduler/missed-field-work-sweep-every-5m -calls->
+  sweep_missed_field_work` and
+  `scheduler/cctv-biometric-template-expiry-daily -calls->
+  expire_cctv_biometric_templates`. Both RPCs are `wired=true` and
+  `exercised=true`. The missed-work job's twenty sampled runs all succeeded,
+  including the 20:50 NZDT run on 2026-10-15. Thirty-day redacted evidence
+  includes seven late-start audit events, eighteen missed-shift audit events,
+  and corresponding officer/supervisor notification receipts; no personal
+  record values were exported.
+- This adopts Trackforce's useful unattended exception-monitoring and immediate
+  supervisor-visibility pattern without inventing a second operations queue.
+  Officers still use their schedule, supervisors use the roster exception
+  workflow and notifications, and clients receive the existing service
+  delivery truth. The scheduler is the road, not another product surface.
+- Focused scheduler parsing and exercise-evidence tests pass. The scoped live
+  Atlas refresh wrote two scheduler features and two caller edges; runtime
+  calibration promoted exactly the two RPCs backed by successful cron
+  receipts. Bounded gaps move 126 -> 124: 0 Edge Functions, 72 RPCs and 52
+  tables.
+
+### Closure log - source-backed Parking zone rule authoring
+
+- The Trackforce-style configure-before-deploy check found a real task gap in
+  the Parking zone workspace. The field scanner already consumes the zone's
+  effective time limit and disabled-bay multiplier, but the administrator
+  surface did not provide a governed way to establish those values from the
+  posted sign before officers used the zone.
+- Before: a Parking zone could reach field use with missing rule provenance and
+  no required sign photograph. Directly editing `location_zones` would have
+  bypassed tenant, agreement/place authority, optimistic concurrency, replay
+  protection, and audit evidence.
+- During: the zone workspace now requires a whole-minute posted limit, a
+  bounded disabled-bay multiplier, an image upload to the tenant/zone-scoped
+  private `scans` path, and explicit human confirmation that the values match
+  the photographed sign. **Keep current rule** is the safe exit. The governed
+  RPC locks the zone, proves the administrator and canonical place authority,
+  validates Parking module identity and provenance, rejects stale versions,
+  and accepts only JPEG, PNG, or WebP evidence stored under the governed path.
+- After: one immutable configuration version is written, the previous and
+  resulting rule snapshots are recorded in `audit_log`, and a replayed request
+  returns the same resulting row without a second update. The scanner's
+  effective-rule path remains the consumer, so the setup action drives the same
+  operational rule used in the field rather than creating a parallel setting.
+- This adopts Trackforce's useful site/rule readiness sequence without copying
+  its product model: the canonical zone, place, module profile, sign evidence,
+  field scan, and audit receipt remain FCM's authorities. No enforcement claim
+  is made from an unverified or missing sign source.
+- The linked migration is applied and the live schema snapshot is regenerated.
+  Six focused governance tests, eight desktop/mobile geofence workflow tests,
+  web/E2E type-checks, and the production build pass. Atlas records
+  `pages/ZoneDetailPage -calls-> rpc manage_parking_zone_rule`; runtime
+  exercise remains `null` because the acceptance fixture is not production
+  invocation evidence.

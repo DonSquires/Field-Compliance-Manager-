@@ -40,8 +40,15 @@ radius of any change. Screens are the last thing built, not the first.
   after tests pass. It requires `SUPABASE_URL` and
   `SUPABASE_SERVICE_ROLE_KEY`.
 - The generator extracts concrete public tables/views/RPCs, Edge Functions,
-  direct Supabase calls, and SQL function reads/writes. Static evidence is
-  recorded as `live-code` or `live-schema`; it never sets `exercised=true`.
+  direct Supabase calls, SQL function reads/writes, and the latest active
+  `pg_cron` schedule declarations. A later explicit unschedule removes that
+  scheduler caller from the generated terrain. Static evidence is recorded as
+  `live-code` or `live-schema`; it never sets `exercised=true`.
+- `scripts/atlas-exercise-evidence.mjs` may promote a scheduled RPC only when
+  the current active cron job has a successful `cron.job_run_details` receipt.
+  It uses the read-only Management API path when a management token is
+  available, skips that source explicitly when it is not, and never treats the
+  existence of a schedule as runtime exercise.
 - Manual seeds always win. Rows with `refresh_source=manual_seed` are skipped,
   and existing `exercised` values are preserved.
 - Retirement is ownership-scoped. Only stale rows carrying

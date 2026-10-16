@@ -70,4 +70,14 @@ describe('governed organization profile setup', () => {
     expect(source).toContain("org.corporate_profile_verification_status === 'verified'");
     expect(source).toContain('{!isBranch && <OrganizationComplianceSection');
   });
+
+  it('creates sourced notice-template versions through the governed RPC', () => {
+    expect(source).toContain("supabase.rpc('manage_notice_template'");
+    expect(source).toContain('p_client_request_id: templateRequestId');
+    expect(source).toContain('p_expected_current_id: editingTemplate?.id ?? null');
+    expect(source).toContain('Source document location');
+    expect(source).toContain('I checked this version against the source document.');
+    expect(source).toContain('Keep current template');
+    expect(source).not.toMatch(/\.from\(['"]notice_templates['"]\)[\s\S]{0,300}\.(insert|update|delete)\(/);
+  });
 });

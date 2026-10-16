@@ -63,6 +63,41 @@ test('exercise is claimed only where an invocation receipt resolves to a capabil
   assert.deepEqual(plan.pending_writes.map((entry) => entry.entity_name).sort(), ['bob-query-records', 'observations']);
 });
 
+test('successful pg_cron receipts resolve to the scheduled RPC without claiming unrelated commands', async () => {
+  const { cronRowsToObservations, CRON_RUN_EVIDENCE_SQL } = await import(exerciseUrl);
+
+  assert.match(CRON_RUN_EVIDENCE_SQL, /d\.status = 'succeeded'/);
+  assert.match(CRON_RUN_EVIDENCE_SQL, /d\.command = j\.command/);
+  assert.match(CRON_RUN_EVIDENCE_SQL, /j\.active = true/);
+
+  const observations = cronRowsToObservations([
+    {
+      jobname: 'missed-field-work-sweep-every-5m',
+      command: 'select public.sweep_missed_field_work();',
+      invoked_at: '2026-10-15T20:50:00+13:00',
+    },
+    {
+      jobname: 'maintenance',
+      command: 'vacuum analyze public.shifts',
+      invoked_at: '2026-10-15T20:45:00+13:00',
+    },
+    {
+      jobname: 'missing-receipt',
+      command: 'select public.never_ran();',
+      invoked_at: null,
+    },
+  ]);
+
+  assert.deepEqual(observations, [{
+    sourceId: 'pg_cron_run',
+    basis: 'An active pg_cron schedule has a successful database run receipt for this RPC.',
+    entityType: 'rpc',
+    key: 'missed-field-work-sweep-every-5m',
+    at: '2026-10-15T20:50:00+13:00',
+    candidateNames: ['sweep_missed_field_work'],
+  }]);
+});
+
 test('calibration refuses an accuracy claim below the reviewed-sample floor', async () => {
   const { summarize, MIN_REVIEWED_SAMPLE } = await import(calibrationUrl);
 

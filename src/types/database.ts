@@ -21352,6 +21352,7 @@ export type Database = {
           bob_extracted: boolean
           body_html: string
           bylaw_reference: string | null
+          client_request_id: string | null
           created_at: string
           created_by: string | null
           fine_amount: number | null
@@ -21380,6 +21381,7 @@ export type Database = {
           bob_extracted?: boolean
           body_html?: string
           bylaw_reference?: string | null
+          client_request_id?: string | null
           created_at?: string
           created_by?: string | null
           fine_amount?: number | null
@@ -21408,6 +21410,7 @@ export type Database = {
           bob_extracted?: boolean
           body_html?: string
           bylaw_reference?: string | null
+          client_request_id?: string | null
           created_at?: string
           created_by?: string | null
           fine_amount?: number | null
@@ -47011,6 +47014,9 @@ export type Database = {
           p_bob_extracted?: boolean
           p_body_html: string
           p_bylaw_reference?: string
+          p_client_request_id: string
+          p_expected_current_id?: string
+          p_expected_current_version?: number
           p_fine_amount?: number
           p_footer_text?: string
           p_issuing_authority?: string
@@ -47170,6 +47176,7 @@ export type Database = {
       }
       manage_parking_zone_rule: {
         Args: {
+          p_client_request_id: string
           p_disabled_multiplier: number
           p_expected_version: number
           p_limit_source: string

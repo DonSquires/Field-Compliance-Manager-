@@ -1,6 +1,7 @@
 const fs = require('node:fs');
 const path = require('node:path');
 const { execFileSync } = require('node:child_process');
+const { extractCronOperations, extractScheduledRpcName } = require('./lib/atlas-cron.cjs');
 
 const OWNER_MARKER = '[repo-atlas-refresh:v1]';
 const BATCH_SIZE = 250;
@@ -454,6 +455,47 @@ function collectSqlFunctionEdges(rootDir) {
   return [...edges.values()];
 }
 
+function collectCronSchedulerEdges(rootDir, inventory) {
+  const files = [
+    ...walkFiles(rootDir, 'supabase/migrations').filter(file => file.endsWith('.sql')).sort(),
+    ...walkFiles(rootDir, 'supabase/schemas/_cluster').filter(file => file.endsWith('.sql')).sort(),
+  ];
+  const activeSchedules = new Map();
+
+  for (const file of files) {
+    const content = fs.readFileSync(path.join(rootDir, file), 'utf8');
+    for (const operation of extractCronOperations(content)) {
+      if (operation.kind === 'unschedule') {
+        activeSchedules.delete(operation.jobName);
+      } else {
+        activeSchedules.set(operation.jobName, { ...operation, file });
+      }
+    }
+  }
+
+  const edges = [];
+  for (const schedule of activeSchedules.values()) {
+    const rpcName = extractScheduledRpcName(schedule.command);
+    if (!rpcName || !inventory.rpcs.has(rpcName)) continue;
+    edges.push({
+      source_type: 'feature',
+      source_name: `scheduler/${schedule.jobName}`,
+      target_type: 'rpc',
+      target_name: rpcName,
+      edge_kind: 'calls',
+      evidence_class: 'live-schema',
+      retirement_status: 'live',
+      source_file: schedule.file,
+      migration_name: schedule.file.startsWith('supabase/migrations/')
+        ? path.basename(schedule.file, '.sql')
+        : null,
+      caller_context: `${OWNER_MARKER} pg_cron schedule ${schedule.schedule} calls public.${rpcName}`,
+      refresh_source: 'ci_generator',
+    });
+  }
+  return edges;
+}
+
 function collectSchemaForeignKeyEdges(rootDir) {
   const schemaFile = 'supabase/schema.sql';
   const schemaPath = path.join(rootDir, schemaFile);
@@ -654,7 +696,12 @@ function collectAtlasRefresh(rootDir = process.cwd()) {
   );
   const sourceEdges = collectSourceEdges(rootDir, { tables, rpcs, edgeFunctions });
   const edgesByKey = new Map();
-  for (const edge of [...sourceEdges, ...collectSqlFunctionEdges(rootDir), ...collectSchemaForeignKeyEdges(rootDir)]) {
+  for (const edge of [
+    ...sourceEdges,
+    ...collectSqlFunctionEdges(rootDir),
+    ...collectCronSchedulerEdges(rootDir, { tables, rpcs }),
+    ...collectSchemaForeignKeyEdges(rootDir),
+  ]) {
     edgesByKey.set(edgeKey(edge), edge);
   }
   const addDerivedFeature = (sourceName, featureName, sourceFile, context) => {
@@ -988,6 +1035,7 @@ module.exports = {
   collectComponentEdges,
   collectManagedAtlas,
   collectSchemaForeignKeyEdges,
+  collectCronSchedulerEdges,
   staleGeneratedEdgeIds,
   collectAtlasRefresh,
   resolveSourceRevision,
