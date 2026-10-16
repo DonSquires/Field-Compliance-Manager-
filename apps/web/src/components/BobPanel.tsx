@@ -21,6 +21,7 @@ import React, { useEffect, useMemo, useRef, useState, useCallback } from 'react'
 import { AlertTriangle, Archive, ArchiveRestore, Ban, Bot, CheckCircle2, Clock3, FileSearch, FileUp, Image as ImageIcon, ListChecks, Maximize2, Mic, Minimize2, Paperclip, PanelLeft, PanelRight, Pencil, Pin, PinOff, Plus, RefreshCw, Search, Send, ShieldCheck, Sparkles, TerminalSquare, Volume2, X } from 'lucide-react';
 import { useAuth } from '../context/AuthContext';
 import { supabase } from '../lib/supabase';
+import { captureBobPageContext } from '../lib/bobPageContext';
 import { Upload } from 'tus-js-client';
 import { BobMarkdown } from './BobMarkdown';
 import { BobStudio, type StudioPromptContext } from './BobStudio';
@@ -213,7 +214,7 @@ export const BobPanel: React.FC<BobPanelProps> = ({ open, onClose, context, mode
   const [renameValue, setRenameValue] = useState('');
   // Compact mode is a conversation surface. Side panes open on demand as
   // drawers; users can expose both when they deliberately expand the workspace.
-  const [sidebarOpen, setSidebarOpen] = useState(() => typeof window !== 'undefined' && window.innerWidth >= 1100);
+  const [sidebarOpen, setSidebarOpen] = useState(() => presentation !== 'docked' && typeof window !== 'undefined' && window.innerWidth >= 1100);
   const [contextPanelOpen, setContextPanelOpen] = useState(false);
   const [sidebarWidth, setSidebarWidth] = useState(280);
   const [contextPanelWidth, setContextPanelWidth] = useState(320);
@@ -240,7 +241,10 @@ export const BobPanel: React.FC<BobPanelProps> = ({ open, onClose, context, mode
   const closeButtonRef = useRef<HTMLButtonElement>(null);
   const returnFocusRef = useRef<HTMLElement | null>(null);
   const appliedLaunchPromptRef = useRef<string | null>(null);
-  const contextEntries = useMemo(() => Object.entries(context ?? {}).filter(([key]) => CONTEXT_CHIP_KEYS.has(key)).flatMap(([key, value]) => {
+  const contextEntries = useMemo(() => Object.entries(context ?? {}).filter(([key]) => {
+    const pages: Record<string, string> = { crmTab: 'crm', rosterTab: 'roster', fieldOpsSubArea: 'field-ops', reportsTab: 'reports' };
+    return CONTEXT_CHIP_KEYS.has(key) && (!pages[key] || context?.page === pages[key]);
+  }).flatMap(([key, value]) => {
     if (typeof value === 'string' || typeof value === 'number') return [formatContextEntry(key, String(value))];
     if (value && typeof value === 'object' && !Array.isArray(value)) {
       const record = value as Record<string, unknown>;
@@ -501,6 +505,7 @@ export const BobPanel: React.FC<BobPanelProps> = ({ open, onClose, context, mode
     returnFocusRef.current = document.activeElement instanceof HTMLElement ? document.activeElement : null;
     const onKeyDown = (event: KeyboardEvent) => {
       if (event.key === 'Escape') {
+        if (presentation === 'docked' && !panelRef.current?.contains(document.activeElement)) return;
         event.preventDefault();
         onClose();
         window.setTimeout(() => returnFocusRef.current?.focus(), 0);
@@ -508,10 +513,10 @@ export const BobPanel: React.FC<BobPanelProps> = ({ open, onClose, context, mode
     };
     window.addEventListener('keydown', onKeyDown);
     return () => window.removeEventListener('keydown', onKeyDown);
-  }, [onClose, open]);
+  }, [onClose, open, presentation]);
 
   useEffect(() => {
-    if (!open || !workspaceExpanded) return;
+    if (!open || !workspaceExpanded || presentation === 'docked') return;
     const panel = panelRef.current;
     if (!panel) return;
     const selector = 'a[href], button:not([disabled]), input:not([disabled]), select:not([disabled]), textarea:not([disabled]), [tabindex]:not([tabindex="-1"])';
@@ -533,7 +538,7 @@ export const BobPanel: React.FC<BobPanelProps> = ({ open, onClose, context, mode
     };
     document.addEventListener('keydown', onKeyDown);
     return () => document.removeEventListener('keydown', onKeyDown);
-  }, [open, workspaceExpanded]);
+  }, [open, workspaceExpanded, presentation]);
 
   useEffect(() => {
     const node = scrollRef.current;
@@ -948,6 +953,7 @@ export const BobPanel: React.FC<BobPanelProps> = ({ open, onClose, context, mode
         context: {
           ...(context ?? {}),
           agent_mode: mode,
+          visible_page: captureBobPageContext(),
           ...(studioPromptContextRef.current ? {
             studio_artifact_type: studioPromptContextRef.current.artifactType,
             studio_document_kind: studioPromptContextRef.current.documentKind,
@@ -1124,12 +1130,13 @@ export const BobPanel: React.FC<BobPanelProps> = ({ open, onClose, context, mode
     },
   };
   const currentModeConfig = modeConfig[mode] ?? modeConfig.operations;
+  const studio = <BobStudio messages={messages} attachments={attachments} organizationId={profile?.organizationId ?? null} onPrompt={(prompt, promptContext) => { studioPromptContextRef.current = promptContext; setInput(prompt); if (docked) setStudioOpen(false); focusComposer(); }} onAttach={() => fileInputRef.current?.click()} />;
 
   return (
     <div
       ref={panelRef}
       className={`bob-panel ${mode === 'builder' ? 'is-builder-mode' : ''} ${docked ? 'is-docked' : ''} ${workspaceExpanded && !docked ? 'is-expanded' : ''} ${dragging ? 'is-dragging' : ''}`}
-      aria-label={docked ? 'Bob Builder coding agent' : 'Bob agent workspace'}
+      aria-label={docked && mode === 'builder' ? 'Bob Builder coding agent' : 'Bob agent workspace'}
       role={docked ? 'complementary' : workspaceExpanded ? 'dialog' : undefined}
       aria-modal={!docked && workspaceExpanded ? true : undefined}
       tabIndex={!docked && workspaceExpanded ? -1 : undefined}
@@ -1144,9 +1151,9 @@ export const BobPanel: React.FC<BobPanelProps> = ({ open, onClose, context, mode
           {!sidebarOpen && <button type="button" className="bob-icon-button" onClick={() => void startNewConversation()} disabled={loading || sending} title="New chat" aria-label="New chat"><Plus size={17} /></button>}
           <button type="button" className="bob-icon-button" onClick={() => setSidebarOpen(current => !current)} title={sidebarOpen ? 'Hide sessions' : 'Show sessions'} aria-label={sidebarOpen ? 'Hide sessions' : 'Show sessions'} aria-expanded={sidebarOpen}><PanelLeft size={17} /></button>
           <button type="button" className="bob-icon-button" onClick={() => setContextPanelOpen(current => !current)} title={contextPanelOpen ? 'Hide context panel' : 'Show context panel'} aria-label={contextPanelOpen ? 'Hide context panel' : 'Show context panel'} aria-expanded={contextPanelOpen}><PanelRight size={17} /></button>
-          {!docked && <button type="button" className="bob-workspace-toggle" onClick={toggleStudio} title={studioOpen ? 'Hide document studio' : 'Open document studio'} aria-label={studioOpen ? 'Hide document studio' : 'Open document studio'} aria-expanded={studioOpen}><Sparkles size={16} /><span>Studio</span></button>}
+          {(!docked || mode === 'operations') && <button type="button" className="bob-workspace-toggle" onClick={toggleStudio} title={studioOpen ? 'Hide document studio' : 'Open document studio'} aria-label={studioOpen ? 'Hide document studio' : 'Open document studio'} aria-expanded={studioOpen}><Sparkles size={16} /><span>Studio</span></button>}
           {!docked && <button type="button" className="bob-workspace-toggle" onClick={toggleWorkspace} title={workspaceExpanded ? 'Use compact panel' : 'Open full workspace'} aria-label={workspaceExpanded ? 'Use compact panel' : 'Open full workspace'}>{workspaceExpanded ? <Minimize2 size={16} /> : <Maximize2 size={16} />}<span>{workspaceExpanded ? 'Compact' : 'Expand'}</span></button>}
-          <button ref={closeButtonRef} type="button" className="bob-close-button" onClick={() => { onClose(); window.setTimeout(() => returnFocusRef.current?.focus(), 0); }} title={docked ? 'Hide Bob Builder' : 'Close Bob'} aria-label={docked ? 'Hide Bob Builder' : 'Close Bob'}><X size={16} /><span>{docked ? 'Hide' : 'Close'}</span></button>
+          <button ref={closeButtonRef} type="button" className="bob-close-button" onClick={() => { onClose(); window.setTimeout(() => returnFocusRef.current?.focus(), 0); }} title={docked && mode === 'builder' ? 'Hide Bob Builder' : 'Close Bob'} aria-label={docked && mode === 'builder' ? 'Hide Bob Builder' : 'Close Bob'}><X size={16} /><span>{docked ? 'Hide' : 'Close'}</span></button>
         </div>
       </header>
 
@@ -1221,7 +1228,7 @@ export const BobPanel: React.FC<BobPanelProps> = ({ open, onClose, context, mode
 
           <BobActivityTimeline phase={activityPhase} sending={sending} loading={loading} pendingFiles={pendingFiles} />
 
-          <div ref={scrollRef} className="bob-message-stream" aria-live="polite">
+          {docked && studioOpen ? studio : <div ref={scrollRef} className="bob-message-stream" aria-live="polite">
             {dragging && <div className="bob-drop-target"><FileUp size={17} /> Drop files for Bob to read.</div>}
             {loading ? (
               <div className="bob-agent-status"><Sparkles size={16} /> Loading conversation</div>
@@ -1252,16 +1259,16 @@ export const BobPanel: React.FC<BobPanelProps> = ({ open, onClose, context, mode
                     {m.role === 'assistant' && <AgentMetadata message={m} />}
                     <div className="bob-message-content">{m.role === 'assistant' ? <BobMarkdown content={m.content} /> : m.content}</div>
                     {m.role === 'assistant' && <WorkflowProgress message={m} />}
-                    {m.role === 'assistant' && <AnswerChoices message={m} disabled={sending} onAnswer={(answer) => void handleSend(null, answer)} />}
+                    {m.role === 'assistant' && !supersededBy && <AnswerChoices message={m} disabled={loading || sending || m.id !== messages[messages.length - 1]?.id || Boolean(activeTurn && BLOCKING_TURN_STATUSES.includes(activeTurn.status))} hasDraft={Boolean(input.trim() || voiceTranscript.trim() || pendingFiles.length)} onCustomAnswer={focusComposer} onAnswer={(answer) => void handleSend(null, answer)} />}
                     {m.role === 'assistant' && <NavigationActions message={m} />}
                     <footer><time dateTime={m.created_at}>{new Date(m.created_at).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })}</time>{m.role === 'assistant' && <button type="button" onClick={() => void speakMessage(m)} disabled={speakingMessageId !== null} title="Listen to this reply" aria-label="Listen to this reply"><Volume2 size={13} />{speakingMessageId === m.id ? 'Speaking' : <span className="sr-only">Listen to this reply</span>}</button>}{supersededBy ? <span className="bob-superseded"><AlertTriangle size={12} /> Superseded by correction</span> : m.flagged && <span className="bob-flagged"><AlertTriangle size={12} /> Review required</span>}{correctionOf && <span className="bob-correction"><ShieldCheck size={12} /> Audit correction</span>}</footer>
                   </div>
                 </article>
               )})
             )}
-          </div>
+          </div>}
 
-          {attachments.length > 0 && (
+          {attachments.length > 0 && !(docked && studioOpen) && (
             <>
               <ConversationMediaGallery attachments={attachments} onOpenStudio={() => {
                 setWorkspaceExpanded(true);
@@ -1333,7 +1340,7 @@ export const BobPanel: React.FC<BobPanelProps> = ({ open, onClose, context, mode
           </form>
         </div>
 
-        {workspaceExpanded && !docked && studioOpen && <BobStudio messages={messages} attachments={attachments} organizationId={profile?.organizationId ?? null} onPrompt={(prompt, promptContext) => { studioPromptContextRef.current = promptContext; setInput(prompt); focusComposer(); }} onAttach={() => fileInputRef.current?.click()} />}
+        {workspaceExpanded && !docked && studioOpen && studio}
 
         {workspaceExpanded && !docked && contextPanelOpen && <div className="bob-pane-divider is-right" role="separator" aria-orientation="vertical" aria-label="Resize context pane" onPointerDown={(event) => beginPaneResize('right', event)} />}
         {contextPanelOpen && (
@@ -1777,19 +1784,24 @@ function classifyMessageState(message: BobMessage): WorkState {
 }
 
 // Bob's clarifying questions are answered by clicking, not by retyping what he already guessed.
-function AnswerChoices({ message, onAnswer, disabled }: { message: BobMessage; onAnswer: (answer: string) => void; disabled: boolean }) {
+function AnswerChoices({ message, onAnswer, onCustomAnswer, disabled, hasDraft }: { message: BobMessage; onAnswer: (answer: string) => void; onCustomAnswer: () => void; disabled: boolean; hasDraft: boolean }) {
   const metadata = message.metadata ?? {};
-  const supplied = asArray(metadata.answer_options).map(asString).filter(Boolean) as string[];
-  if (asString(metadata.intent) !== 'clarifying_questions' && supplied.length === 0) return null;
+  const supplied = asArray(metadata.answer_options).flatMap(value => typeof value === 'string' && value.trim() ? [value.trim()] : []).slice(0, 6);
+  const continuation = metadata.continuation_pending === true;
+  if (asString(metadata.intent) !== 'clarifying_questions' && supplied.length === 0 && !continuation) return null;
   const bestGuess = asString(metadata.best_guess);
-  const choices = supplied.length ? supplied : bestGuess ? [bestGuess] : [];
-  if (!choices.length) return null;
+  const choices = [...new Set(supplied.length ? supplied : continuation ? ['Continue from where you left off', 'Pause here; wait for my next instruction'] : bestGuess ? [bestGuess] : [])];
+  const recommended = asString(metadata.recommended_answer) ?? bestGuess ?? (continuation ? choices[0] : null);
   return (
-    <div className="bob-answer-choices" aria-label="Answer Bob's question">
-      {choices.map((choice) => (
-        <button key={choice} type="button" onClick={() => onAnswer(choice)} disabled={disabled}>{choice}</button>
-      ))}
-    </div>
+    <section className="bob-guidance" aria-label="Answer Bob's question">
+      <p>{hasDraft ? 'Your draft overrides the suggestions. Send it below, or clear it to choose an option.' : 'Choose an answer, or type your own direction below.'}</p>
+      <div className="bob-answer-choices">
+        {choices.map((choice) => (
+          <button key={choice} type="button" aria-label={choice} aria-description={choice === recommended ? 'Recommended by Bob' : undefined} className={choice === recommended ? 'is-recommended' : undefined} onClick={() => onAnswer(choice)} disabled={disabled || hasDraft}>{choice}{choice === recommended && <small>Recommended</small>}</button>
+        ))}
+        <button type="button" onClick={onCustomAnswer} disabled={disabled}>Write my own answer</button>
+      </div>
+    </section>
   );
 }
 

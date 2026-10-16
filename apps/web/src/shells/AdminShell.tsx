@@ -582,13 +582,9 @@ const AdminShell: React.FC = () => {
     };
   }, [activePage, location.pathname, location.search, crmTab, rosterTab, fieldOpsSubArea, reportsTab, orgName, profile?.role, workflowContext, selectedAgreement, selectedSite, selectedZone, agreements, sites, zones]);
   const openBobCommandCenter = useCallback(() => {
-    navigate('/admin/bob', {
-      state: {
-        bobSourceContext: bobContext,
-        bobReturnPath: `${location.pathname}${location.search}`,
-      },
-    });
-  }, [bobContext, location.pathname, location.search, navigate]);
+    if (activePage === 'bob') return;
+    setBobOpen(true);
+  }, [activePage]);
 
   const visibleWorkspaces = Object.entries(NAVIGATION_MAP)
     .filter(([, items]) => items.some((item) => canAccessAdminPage(item.id, profile?.role, () => true)))
@@ -845,6 +841,7 @@ const AdminShell: React.FC = () => {
               {activeWorkspace.items.map((item) => <button type="button" key={`${item.id}:${item.area ?? ''}`} aria-current={isWorkspaceItemActive(item) ? 'page' : undefined} onClick={() => openWorkspaceItem(item)}>{item.label}</button>)}
             </nav>
           </div>}
+          <div className="bob-page-layout">
           <main data-app-content className={`admin-shell-main ${activePage === 'hub' ? 'is-overview' : ''}`}>
             {showPlaceContext && <PlaceContextBanner />}
             {accessNotice && <div role="alert" className="admin-access-notice">{accessNotice}</div>}
@@ -854,14 +851,15 @@ const AdminShell: React.FC = () => {
               <React.Suspense fallback={<LazyPageFallback />}>{renderPage()}</React.Suspense>
             </LazyPageRecovery>
           </main>
-        </div>
-
         <BobPanel
-          open={bobOpen}
+          open={bobOpen && activePage !== 'bob'}
+          presentation="docked"
           onClose={() => setBobOpen(false)}
           context={bobContext}
           launchPrompt={bobLaunchPrompt}
         />
+          </div>
+        </div>
         {showDesktopDownload && <div className="desktop-download-overlay" role="presentation"><section className="desktop-download-prompt" role="dialog" aria-modal="true" aria-labelledby="desktop-download-title"><Download size={24} aria-hidden="true" /><div><span>FCM Desktop</span><h2 id="desktop-download-title">Download the evidence workstation</h2><p>FCM Desktop reads Dahua camera cards directly, lets you review photos and videos on your own computer, and sends only what you choose. Its installer is signed and its SHA-256 is published beside it.</p></div><div className="desktop-download-options"><a href={DESKTOP_V2_DOWNLOAD_URL} download={DESKTOP_V2_FILENAME} onClick={dismissDesktopDownload}><span><strong>FCM Desktop · v{DESKTOP_V2_VERSION}</strong><small>Reads Dahua hidden DHFS partitions straight from the card · preview here, then send or skip each photo or video · asks for administrator rights once at start · signed by Iron Eagle Security Ltd with our own certificate; SmartScreen may still warn until that certificate is trusted on your machine</small></span><Download size={16} aria-hidden="true" /></a></div><div className="desktop-download-actions"><button type="button" onClick={dismissDesktopDownload}>Not now</button></div></section></div>}
 
       </div>
@@ -914,6 +912,7 @@ const AdminShell: React.FC = () => {
         </div>
       )}
 
+      <div className="bob-page-layout">
       <main data-app-content className={`admin-shell-main ${activePage === 'hub' ? 'is-overview' : ''}`}>
         {showPlaceContext && <PlaceContextBanner />}
         {accessNotice && <div role="alert" className="admin-access-notice">{accessNotice}</div>}
@@ -924,6 +923,14 @@ const AdminShell: React.FC = () => {
           <React.Suspense fallback={<LazyPageFallback />}>{renderPage()}</React.Suspense>
         </LazyPageRecovery>
       </main>
+      <BobPanel
+        open={bobOpen && activePage !== 'bob'}
+        presentation="docked"
+        onClose={() => setBobOpen(false)}
+        context={bobContext}
+        launchPrompt={bobLaunchPrompt}
+      />
+      </div>
 
       <nav className="admin-mobile-tabs" aria-label="Admin navigation">
         {[
@@ -941,13 +948,6 @@ const AdminShell: React.FC = () => {
           );
         })}
       </nav>
-
-      <BobPanel
-        open={bobOpen}
-        onClose={() => setBobOpen(false)}
-        context={bobContext}
-        launchPrompt={bobLaunchPrompt}
-      />
 
     </div>
   );

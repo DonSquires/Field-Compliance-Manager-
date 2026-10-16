@@ -512,7 +512,7 @@ const OfficerShell: React.FC = () => {
           <span className={`officer-connectivity-chip ${isOnline ? 'is-online' : 'is-offline'}`} role="status" title={isOnline ? 'Device is online' : 'Evidence is queued until connection returns'}>{isOnline ? 'Online' : 'Offline'}</span>
           <NotificationCenter onNavigate={navigateFromNotification} />
           <HelpInstructions context={activeModule ?? officerState} role={profile?.role} />
-          <button type="button" className="officer-shell-icon" onClick={() => navigateToModule('bob')} title="Open Bob command center" aria-label="Open Bob command center">
+          <button type="button" className="officer-shell-icon" onClick={() => setBobOpen(true)} title="Open Bob command center" aria-label="Open Bob command center" aria-expanded={bobOpen}>
             <Bot size={19} aria-hidden="true" /><span className="sr-only">{bobOpen ? 'Bob assistant is open' : 'Open Bob assistant'}</span>
           </button>
           <button type="button" className="officer-profile-chip" onClick={() => { setAccountOpen(true); setAccountMessage(null); }} title="Account settings" aria-label="Account settings">
@@ -521,6 +521,7 @@ const OfficerShell: React.FC = () => {
         </div>
       </header>
 
+      <div className="bob-page-layout">
       <main data-app-content className="officer-shell-content">
         <OfficerLocationAdvisory shift={activeShift} />
         <PlaceContextBanner />
@@ -547,6 +548,13 @@ const OfficerShell: React.FC = () => {
           </React.Suspense>
         )}
       </main>
+      <BobPanel
+        open={bobOpen && activeModule !== 'bob'}
+        presentation="docked"
+        onClose={() => setBobOpen(false)}
+        context={bobContext}
+      />
+      </div>
 
       <nav className="officer-action-bar" aria-label="Field actions">
         <button type="button" onClick={() => navigateToModule('modules')} className={activeModule === 'modules' ? 'is-active' : ''} aria-current={activeModule === 'modules' ? 'page' : undefined}>
@@ -560,11 +568,6 @@ const OfficerShell: React.FC = () => {
         </button>
       </nav>
 
-      <BobPanel
-        open={bobOpen}
-        onClose={() => setBobOpen(false)}
-        context={bobContext}
-      />
       {accountOpen && (
         <div className="officer-account-backdrop" onClick={() => setAccountOpen(false)}>
           <section className="officer-account-dialog" role="dialog" aria-modal="true" aria-labelledby="officer-account-title" onClick={(event) => event.stopPropagation()}>

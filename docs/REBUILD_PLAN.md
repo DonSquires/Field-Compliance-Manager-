@@ -8,6 +8,20 @@ detailed backlogs (`ENTERPRISE_SAAS_TODO.md`, `PROTOTYPE_GAP_AUDIT.md`,
 Completion language is strict, as in the lineage: **merged ≠ deployed ≠
 glass-proven.** A workstream item is done only when its evidence gate is met.
 
+Owner-requested Bob workspace behaviour 2026-10-16: shell chat opens beside the
+current working page, shrinking its available width rather than covering it.
+Narrow layouts stack independently scrollable page and chat regions. Neither
+presentation traps focus in Bob. Studio remains available inside the dock.
+Current unanswered guidance offers selectable answers, marks Bob's supplied
+recommendation, and accepts a typed override; historical answers and pending
+durable requests cannot be resubmitted through old buttons. Budget-pause
+receipts now persist Continue/Pause options as message metadata.
+Each send captures the current route and bounded visible headings/control
+labels (never form values, table contents, hidden/private regions, or Bob's
+own thread), alongside the shell's current selected-entity context. These are
+untrusted navigation hints, not authorization or evidence of a completed action:
+Bob still resolves records and writes through the existing governed tools.
+
 Owner ruling 2026-10-16: Deputy roster exports are sample/build/test evidence,
 not an operational integration or production import workflow. The offline
 parser and source-shaped fixtures may be used to test roster mappings and
