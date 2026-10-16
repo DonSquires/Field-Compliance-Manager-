@@ -147,7 +147,10 @@ function createModelGatewayConfig(env = process.env) {
     gpu_workstation: {
       kind: 'ollama',
       baseUrl: (env.GPU_WORKSTATION_URL || '').replace(/\/(v1)?\/*$/, ''),
-      models: parseModelAllowlist(env.BOB_GPU_MODELS, 'qwen2.5-coder:7b'),
+      // The laptop GPU holds ~6 GB: qwen2.5-coder:7b stays resident (1.9k prompt / 46 gen tok/s, measured
+      // 2026-10-16) and authors; the 14b partly offloads (0.4k / 5 tok/s) and serves as the distinct
+      // in-house reviewer model. gpt-oss:20b ran at <1 prompt tok/s there and is deliberately absent.
+      models: parseModelAllowlist(env.BOB_GPU_MODELS, 'qwen2.5-coder:7b,qwen2.5-coder:14b,qwen3:8b'),
       maxOutputTokens: Math.min(maxOutputTokens, 8192),
       numCtx: Math.max(4096, Number(env.BOB_GPU_NUM_CTX) || 32768)
     },

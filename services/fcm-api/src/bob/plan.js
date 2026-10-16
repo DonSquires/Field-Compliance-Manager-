@@ -232,10 +232,10 @@ async function planTurn(body, { gateway, now = Date.now, logger = console, env =
   // In-house first, but not when the caller is nearly out of time: a 7B laptop planner takes
   // 40-50 s a call, so a tight deadline goes straight to the fastest configured tier.
   const FAST_TURN_MS = Math.max(20000, Number(env.BOB_PLAN_FAST_TURN_MS || 45000));
-  // Owner-level code work (repo_search / create_builder_job in the catalogue) needs tool discipline the
-  // 7B in-house planner does not have: it restated the request or narrated a procedure on every try
-  // (proving-series round 2/3, 2026-09-26). "In-house unless stuck" — for this class we are stuck.
-  const codeRequest = isCodeRequest(input.message) && input.tools.some((t) => t.tool === 'repo_search' || t.tool === 'create_builder_job') && env.BOB_PLAN_CODE_REQUESTS_IN_HOUSE !== 'true';
+  // Owner ruling 2026-10-16: OpenAI is the last resort, including for code requests. A code request
+  // starts on the in-house planner and escalates only when its plan is unparseable or blocked (below).
+  // BOB_PLAN_CODE_REQUESTS_FAST=true restores the earlier strong-first routing for code requests.
+  const codeRequest = isCodeRequest(input.message) && input.tools.some((t) => t.tool === 'repo_search' || t.tool === 'create_builder_job') && env.BOB_PLAN_CODE_REQUESTS_FAST === 'true';
   const fastChain = ((input.deadlineMs && input.deadlineMs < FAST_TURN_MS) || codeRequest) && typeof gateway.fastChain === 'function' ? gateway.fastChain('planner') : null;
 
   let attempt;

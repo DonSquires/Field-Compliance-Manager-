@@ -75,7 +75,10 @@ test('health is public and reports the control plane', async () => {
   assert.equal(response.status, 200);
   // Health names the git host Bob's Builder lane publishes to; secrets never appear, only whether the host is configured.
   // Autopilot reads false here: the test server has no Supabase, model gateway, or worker image.
-  const { modelProviders, laptopShell, ...rest } = body;
+  const { modelProviders, laptopShell, storage, ...rest } = body;
+  // Host disk truth is live (statfs of the state dir) and carries only sizes and a status, never paths.
+  assert.ok(['ok', 'warn', 'critical', 'unknown'].includes(storage.status));
+  assert.ok(Object.keys(storage).every((key) => ['total_gb', 'available_gb', 'used_pct', 'status', 'last_hygiene'].includes(key)));
   assert.deepEqual(rest, { status: 'ok', service: 'bob-control-plane', activeLease: false, builderGitHost: 'github', builderSourceConfigured: false, builderApiConfigured: false, builderSshConfigured: false, autopilot: false, autopilotIntervalMs: 60_000, mainHealth: { enabled: false, sourceHost: 'github', latest: null }, runningBuilderJobs: 0 });
   // Bob's laptop terminal is off unless the owner-side env enables it; health never carries the user or key path.
   assert.deepEqual(laptopShell, { enabled: false, configured: false, host: null, ssh_allowed: null });

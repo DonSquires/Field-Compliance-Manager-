@@ -1,0 +1,36 @@
+#!/usr/bin/env bash
+# Daily dump of the legacy Gitea mirror (GitHub is the authoritative home; Gitea is lineage evidence).
+# Installed to /usr/local/sbin/fcm-gitea-backup by `scripts/bob-vps-deploy.sh host-hygiene`.
+#
+# Incident 2026-10-16: the old script kept 14 days of full dumps. Each dump grew to ~18 GB, so the
+# directory reached 202 GB of a 388 GB disk. Retention is now by count (newest GITEA_BACKUP_KEEP,
+# default 3), applied only after a new dump completes, and a dump is skipped rather than allowed to
+# fill the disk when free space cannot hold it with headroom.
+set -euo pipefail
+out=/root/fcm-deploy-backups/gitea
+keep="${GITEA_BACKUP_KEEP:-3}"
+headroom_gb="${GITEA_BACKUP_HEADROOM_GB:-40}"
+stamp=$(date -u +%Y%m%dT%H%M%SZ)
+inside=/tmp/gitea-${stamp}.zip
+install -d -m 700 "$out"
+
+latest=$(ls -1t "$out"/gitea-*.zip 2>/dev/null | head -1 || true)
+last_bytes=$([[ -n "$latest" ]] && stat -c %s "$latest" || echo 0)
+free_bytes=$(df --output=avail -B1 / | tail -1 | tr -d ' ')
+# The dump is written inside the container first and then copied out, so it briefly needs twice its size.
+need_bytes=$(( last_bytes * 2 + headroom_gb * 1024 * 1024 * 1024 ))
+if (( free_bytes < need_bytes )); then
+  echo "$(date -u +%FT%TZ) skipped: free $(( free_bytes / 1073741824 )) GB < needed $(( need_bytes / 1073741824 )) GB; newest dump kept: ${latest:-none}"
+  exit 0
+fi
+
+trap 'docker exec --user git gitea rm -f "$inside" >/dev/null 2>&1 || true; rm -f "$out/.gitea-${stamp}.zip.part"' EXIT
+docker exec --user git gitea gitea dump --file "$inside" >/dev/null
+docker cp "gitea:$inside" "$out/.gitea-${stamp}.zip.part" >/dev/null
+chmod 600 "$out/.gitea-${stamp}.zip.part"
+mv "$out/.gitea-${stamp}.zip.part" "$out/gitea-${stamp}.zip"
+echo "$(date -u +%FT%TZ) dumped gitea-${stamp}.zip ($(( $(stat -c %s "$out/gitea-${stamp}.zip") / 1048576 )) MB)"
+
+ls -1t "$out"/gitea-*.zip | tail -n +$(( keep + 1 )) | while read -r old; do
+  rm -f -- "$old" && echo "$(date -u +%FT%TZ) retired $(basename "$old")"
+done

@@ -42,6 +42,7 @@ interface BuilderJob {
   code_review_mode?: ReviewMode | null;
   code_review_status: string;
   last_error: string | null;
+  autopilot_requested_by?: string | null;
   autopilot_state?: string | null;
   autopilot_report?: Record<string, unknown> | null;
   created_at: string;
@@ -124,11 +125,18 @@ function builderDeliveryTruth(job: BuilderJob) {
   return { label: 'Not deployed', detail: 'No exact merge and Production receipt is recorded for this job.', tone: 'idle' };
 }
 
+function autopilotNotice(data: { autopilot?: unknown; autopilot_error?: unknown } | null, created: string) {
+  if (data?.autopilot === true) return `${created} Bob is driving it to the next human gate.`;
+  if (typeof data?.autopilot_error === 'string') return `${created} Bob could not take it (${data.autopilot_error}); use Let Bob drive or run it yourself.`;
+  return created;
+}
+
 function builderNextAction(job: BuilderJob, snapshot: BuilderSnapshot) {
   if (snapshot.approvals.some(approval => approval.status === 'pending')) return 'Review the immutable evidence and decide the pending approval.';
   if (job.last_error) return 'Inspect the blocker and ask Bob to propose the smallest evidence-backed recovery.';
   if (job.status === 'deployed') return 'Review the exact deployment receipt and start a follow-up only if more work is needed.';
   if (job.status === 'release_ready') return 'Verify the pull request, merge decision, and separate Production receipt.';
+  if (!job.autopilot_requested_by && !['deployed', 'failed', 'cancelled'].includes(job.status)) return 'Nobody is driving this job yet. Select Let Bob drive, or run it to the next gate yourself.';
   if (!job.workspace_branch) return 'Let Bob advance the plan, or create the isolated workspace when implementation is ready.';
   return 'Run to the next governed gate and review the resulting files, tests, and findings.';
 }
@@ -195,6 +203,7 @@ const BuilderControlRoomPage: React.FC = () => {
     projectId: '', title: '', taskDescription: '', targetSha: '', branchName: 'main',
     frontendRequired: true, backendRequired: false, codeReviewMode: 'human' as ReviewMode,
     requestedAction: 'prepare_change' as RequestedAction, targetEnvironment: 'development' as TargetEnvironment,
+    autopilot: true,
   });
 
   const invoke = useCallback(async (body: Record<string, unknown>) => {
@@ -336,9 +345,10 @@ const BuilderControlRoomPage: React.FC = () => {
         branch_name: form.branchName.trim() || 'main', frontend_required: form.frontendRequired,
         backend_required: form.backendRequired, code_review_mode: form.codeReviewMode,
         requested_action: form.requestedAction, target_environment: form.targetEnvironment,
+        autopilot: form.autopilot,
       });
       setShowCreate(false);
-      setNotice('Builder job created at the pinned commit.');
+      setNotice(autopilotNotice(data, 'Builder job created at the pinned commit.'));
       await loadList();
       if (data?.job?.id) setSelectedId(data.job.id);
     } catch (createError) {
@@ -448,13 +458,27 @@ const BuilderControlRoomPage: React.FC = () => {
     setBusy('followup');
     setError(null);
     try {
-      const data = await invoke({ action: 'create_followup', job_id: selectedId, title: `Follow-up: ${selectedJob.title}`, task_description: followupTask.trim(), frontend_required: selectedJob.frontend_required, backend_required: selectedJob.backend_required, code_review_mode: selectedJob.code_review_mode });
+      const data = await invoke({ action: 'create_followup', job_id: selectedId, title: `Follow-up: ${selectedJob.title}`, task_description: followupTask.trim(), frontend_required: selectedJob.frontend_required, backend_required: selectedJob.backend_required, code_review_mode: selectedJob.code_review_mode, autopilot: true });
       setFollowupTask('');
-      setNotice('Builder follow-up created from the verified workspace commit.');
+      setNotice(autopilotNotice(data, 'Builder follow-up created from the verified workspace commit.'));
       await loadList();
       if (data?.job?.id) setSelectedId(data.job.id);
     } catch (followupError) {
       setError(followupError instanceof Error ? followupError.message : 'Builder follow-up could not be created.');
+    } finally { setBusy(null); }
+  };
+
+  const driveJob = async () => {
+    if (!selectedId || busy) return;
+    setBusy('drive');
+    setError(null);
+    setNotice(null);
+    try {
+      await invoke({ action: 'drive', job_id: selectedId });
+      setNotice('Bob is driving this job. He works to the next human gate and reports back; merge and deployment stay with you.');
+      await Promise.all([loadList(), loadSnapshot(selectedId)]);
+    } catch (driveError) {
+      setError(driveError instanceof Error ? driveError.message : 'Bob could not take this job.');
     } finally { setBusy(null); }
   };
 
@@ -726,6 +750,7 @@ const BuilderControlRoomPage: React.FC = () => {
               <button type="button" onClick={() => void createWorkspace()} disabled={Boolean(busy) || Boolean(selectedJob.workspace_branch)}><FolderTree size={15} /> {selectedJob.workspace_branch ? 'Workspace ready' : 'Create workspace'}</button>
               <button type="button" onClick={() => void publishWorkspace()} disabled={Boolean(busy) || !selectedJob.workspace_branch || selectedJob.workspace_published_head_sha === selectedJob.workspace_head_sha}><Workflow size={15} /> {selectedJob.workspace_published_head_sha === selectedJob.workspace_head_sha ? 'Published for review' : 'Publish for review'}</button>
               <button type="button" onClick={() => void createPullRequest()} disabled={Boolean(busy) || selectedJob.workspace_published_head_sha !== selectedJob.workspace_head_sha || selectedJob.workspace_pull_request_head_sha === selectedJob.workspace_head_sha}>{selectedJob.workspace_pull_request_head_sha === selectedJob.workspace_head_sha ? 'Pull request ready' : 'Create pull request'}</button>
+              {!selectedJob.autopilot_requested_by && !['deployed', 'failed', 'cancelled'].includes(selectedJob.status) && <button type="button" className="is-primary" onClick={() => void driveJob()} disabled={Boolean(busy)}>{busy === 'drive' ? <RefreshCw size={15} className="is-spinning" /> : <Bot size={15} />} Let Bob drive</button>}
               <button type="button" onClick={() => void advance('advance')} disabled={Boolean(busy)}><Play size={15} /> Run next step</button>
               <button type="button" className="is-primary" onClick={() => void advance('run')} disabled={Boolean(busy)}>{busy === 'run' ? <RefreshCw size={15} className="is-spinning" /> : <Workflow size={15} />} Run to gate</button>
             </div>
@@ -780,6 +805,7 @@ const BuilderControlRoomPage: React.FC = () => {
         <div className="builder-field-row"><label>Requested action<select value={form.requestedAction} onChange={event => setForm({ ...form, requestedAction: event.target.value as RequestedAction })}><option value="prepare_change">Prepare change</option><option value="prepare_release">Prepare release</option></select></label><label>Target environment<select value={form.targetEnvironment} onChange={event => { const targetEnvironment = event.target.value as TargetEnvironment; setForm({ ...form, targetEnvironment, requestedAction: targetEnvironment === 'production' ? 'prepare_release' : form.requestedAction, codeReviewMode: targetEnvironment === 'production' ? 'human' : form.codeReviewMode }); }}><option value="development">Development</option><option value="staging">Staging</option><option value="production">Production</option></select></label></div>
         <fieldset><legend>Implementation scope</legend><label><input type="checkbox" checked={form.frontendRequired} onChange={event => setForm({ ...form, frontendRequired: event.target.checked })} /> Frontend</label><label><input type="checkbox" checked={form.backendRequired} onChange={event => setForm({ ...form, backendRequired: event.target.checked })} /> Backend</label></fieldset>
         <label>Optional code review<select value={form.codeReviewMode} onChange={event => setForm({ ...form, codeReviewMode: event.target.value as ReviewMode })} disabled={form.targetEnvironment === 'production'}><option value="none">None</option><option value="human">Human reviewer</option><option value="independent_ai">Independent AI reviewer</option></select></label>
+        <label className="builder-autopilot-option"><input type="checkbox" checked={form.autopilot} onChange={event => setForm({ ...form, autopilot: event.target.checked })} /> Bob drives this job to the next human gate and reports back (merge and deployment stay with you)</label>
         <div className="builder-modal-actions"><button type="button" onClick={() => setShowCreate(false)}>Cancel</button><button type="submit" className="is-primary" disabled={busy === 'create' || projects.length === 0}>{busy === 'create' ? 'Creating…' : 'Create job'}</button></div>
       </form></div>}
     </div>

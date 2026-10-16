@@ -10158,7 +10158,9 @@ serve(async (req)=>{
       && /\b(?:query|check|inspect|use|explain|triage|show|look)\b/i.test(message);
     const explicitReadOnlyAtlasRequest = explicitAtlasRequest
       && (/\bread[- ]only\b/i.test(message) || /\bdo not (?:create|propose|open|run) (?:a )?builder\b/i.test(message));
-    if (explicitAtlasRequest && (normAction === 'answer' || explicitReadOnlyAtlasRequest) && chosenTool !== 'query_atlas') {
+    // An explicit Atlas audit reaches Atlas when planning falls back to an answer, the owner said read-only,
+    // or the planner tried to escape into web research; an explicit Builder intent is not hijacked.
+    if (explicitAtlasRequest && (normAction === 'answer' || explicitReadOnlyAtlasRequest || chosenTool === 'web_research') && chosenTool !== 'query_atlas') {
       const requestedAtlasAction = /\bexpectation(?:s| report)?\b/i.test(message)
         ? 'expectation_report'
         : /\bgap(?:s| report)?\b/i.test(message)
@@ -10174,9 +10176,6 @@ serve(async (req)=>{
         limit: 25
       };
     }
-    const explicitAtlasRequest = caps.tier === 'admiral'
-      && /\b(?:atlas|terrain|capability map|gap report|blast radius)\b/i.test(message)
-      && /\b(?:query|check|inspect|use|explain|triage|show|look)\b/i.test(message);
     const explicitSchemaRequest = caps.tier === 'admiral'
       && /\b(?:schema|table structure|database structure|columns?|relationships?)\b/i.test(message)
       && /\b(?:query|check|inspect|use|explain|triage|show|look|find)\b/i.test(message);
@@ -10195,22 +10194,9 @@ serve(async (req)=>{
           include_relationships: false
         }
       : { include_relationships: false };
-    if (explicitAtlasRequest && chosenTool !== 'query_atlas') {
-      const requestedAtlasAction = /\bexpectation(?:s| report)?\b/i.test(message)
-        ? 'expectation_report'
-        : /\bgap(?:s| report)?\b/i.test(message)
-          ? 'gap_report'
-          : /\bterrain|edge(?:s)?\b/i.test(message)
-            ? 'terrain_edges'
-            : 'capability_map';
-      normAction = 'use_tool';
-      chosenTool = 'query_atlas';
-      args = {
-        ...args,
-        action: requestedAtlasAction,
-        limit: 25
-      };
-    } else if (explicitSchemaRequest && chosenTool !== 'schema_inspect') {
+    // Atlas routing for diagnostic tiers is settled above; an Atlas request must not also be
+    // re-routed to schema inspection or override an explicit Builder intent.
+    if (!explicitAtlasRequest && explicitSchemaRequest && chosenTool !== 'schema_inspect') {
       normAction = 'use_tool';
       chosenTool = 'schema_inspect';
       args = explicitSchemaArgs;

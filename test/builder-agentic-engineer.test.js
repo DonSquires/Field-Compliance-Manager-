@@ -350,8 +350,8 @@ test('agentic engineer explores, fixes the bug, runs the tests, and hands over a
   assert.equal(repo.git(['apply', '--check', '--whitespace=error-all', patchFile]), '');
   assert.equal(result.proposal.lane, 'backend');
   // Every turn went to the gateway as a strong multi-turn request with the conversation attached.
-  // Laptop off: authoring goes directly to OpenAI rather than waiting on the VPS CPU.
-  assert.ok(seen.every((request) => Array.isArray(request.request.messages) && request.provider === 'openai' && request.request.reasoning_effort === 'high'));
+  // Laptop off: authoring falls to the VPS CPU (owner ruling 2026-10-16: in-house before OpenAI).
+  assert.ok(seen.every((request) => Array.isArray(request.request.messages) && request.provider === 'ollama' && request.request.reasoning_effort === undefined), 'OpenAI-only reasoning_effort is not sent to the in-house model');
   const firstTest = JSON.parse(seen[4].request.messages.at(-1).content).tool_result;
   assert.equal(firstTest.exit_code, 1, 'the failing test ran inside the worktree');
   const refused = JSON.parse(seen[5].request.messages.at(-1).content).tool_result;
@@ -857,7 +857,7 @@ test('a dropped gateway connection mid-run is retried on the same turn; three in
   const result2 = await runAgenticEngineer({ supabase: null, gateway: { gatewayUrl: 'http://gw', apiToken: 't' }, job: { ...job, id: 'd0c0d0c0d0c0d0c0d0c0d0c0d0c0d0c1' }, step, lane: 'backend', sourceDir: repo.source, workspaceRoot, repoRoot: repo.source, callModel: async () => { seen2.push(1); return { ok: false, status: 502, error: 'model gateway unavailable' }; }, limits: { ...DEFAULT_LIMITS, maxTurns: 10 }, providerHealth: LAPTOP_OFF });
   assert.equal(result2.ok, false);
   assert.match(result2.error, /model unavailable/);
-  assert.equal(seen2.length, 3, 'with the GPU offline, three consecutive strong-provider failures end the run instead of falling back to the VPS CPU');
+  assert.equal(seen2.length, 6, 'with the GPU offline: three VPS CPU failures escalate to OpenAI, and three more there end the run');
   fs.rmSync(repo.root, { recursive: true, force: true });
 });
 

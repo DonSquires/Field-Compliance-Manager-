@@ -210,6 +210,7 @@ function changeLandedOnMain(manifestRows) {
   return true;
 }
 const stateFile = path.join(stateDir, 'bob-state.json');
+const { hostStorageStatus } = require('./bob-host-storage');
 const maxRequestBytes = 1024 * 1024;
 const jobs = new Map();
 const deliveries = new Set();
@@ -1275,7 +1276,7 @@ async function route(req, res, body) {
     const laptopLink = await loadLaptopLink(builderSupabase).catch(() => null);
     const laptop = laptopConfig(mergeLaptopLink(process.env, laptopLink));
     const latestMainHealth = [...mainHealthRuns.values()].sort((left, right) => String(right.checked_at || right.started_at).localeCompare(String(left.checked_at || left.started_at)))[0] ?? null;
-    return json(res, 200, { status: 'ok', service: 'bob-control-plane', activeLease: Boolean(activeLease), builderGitHost, builderSourceConfigured, builderApiConfigured, builderSshConfigured: Boolean(githubSshCommand), autopilot: autopilotEnabled && Boolean(builderSupabase && modelGatewayToken && builderWorkerImage && builderSourceConfigured && builderApiConfigured), autopilotIntervalMs, mainHealth: { enabled: mainHealthEnabled, sourceHost: builderGitHost, latest: latestMainHealth ? { sha: latestMainHealth.sha, status: latestMainHealth.status, job_id: latestMainHealth.job_id ?? null, checked_at: latestMainHealth.checked_at ?? null } : null }, runningBuilderJobs: runningBuilderJobs.size, modelProviders: Object.fromEntries(Object.entries(providers).map(([name, p]) => [name, { configured: p.configured, healthy: p.healthy, ready_model: p.ready_model }])), laptopShell: { enabled: laptop.enabled, configured: laptop.configured, host: laptop.host || null, ssh_allowed: laptopLink ? laptopLink.ssh_allowed === true : null } });
+    return json(res, 200, { status: 'ok', service: 'bob-control-plane', storage: hostStorageStatus({ stateDir }), activeLease: Boolean(activeLease), builderGitHost, builderSourceConfigured, builderApiConfigured, builderSshConfigured: Boolean(githubSshCommand), autopilot: autopilotEnabled && Boolean(builderSupabase && modelGatewayToken && builderWorkerImage && builderSourceConfigured && builderApiConfigured), autopilotIntervalMs, mainHealth: { enabled: mainHealthEnabled, sourceHost: builderGitHost, latest: latestMainHealth ? { sha: latestMainHealth.sha, status: latestMainHealth.status, job_id: latestMainHealth.job_id ?? null, checked_at: latestMainHealth.checked_at ?? null } : null }, runningBuilderJobs: runningBuilderJobs.size, modelProviders: Object.fromEntries(Object.entries(providers).map(([name, p]) => [name, { configured: p.configured, healthy: p.healthy, ready_model: p.ready_model }])), laptopShell: { enabled: laptop.enabled, configured: laptop.configured, host: laptop.host || null, ssh_allowed: laptopLink ? laptopLink.ssh_allowed === true : null } });
   }
   if (req.method === 'GET' && url.pathname === '/api/bob/builder/model-health') {
     if (!modelGatewayAuthorized(req) && !authorized(req)) return json(res, 401, { error: 'model gateway unauthorized' });

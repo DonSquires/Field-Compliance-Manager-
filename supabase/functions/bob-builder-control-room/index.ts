@@ -120,6 +120,15 @@ serve(async req => {
     } catch {}
   };
 
+  // Bob autopilot: the caller's instruction is the key turn. Binding records that person so the control
+  // plane can drive the job to its gates on their behalf (recorded); merge and deployment stay human.
+  const bindAutopilot = async (jobId: string, organizationId: string | null) => {
+    const conversationId = typeof body.conversation_id === 'string' && /^[0-9a-f-]{36}$/i.test(body.conversation_id) ? body.conversation_id : null;
+    const { data: bound, error: bindError } = await admin.rpc('builder_autopilot_bind', { _job_id: jobId, _requested_by: user.id, _conversation_id: conversationId });
+    await audit(organizationId, bindError ? 'autopilot_bind_failed' : 'autopilot_bound', jobId);
+    return bindError ? { job: null, error: failureDetail(bindError) ?? 'Bob could not take this job' } : { job: bound as Record<string, unknown>, error: null };
+  };
+
   if (action === 'refresh_atlas') {
     if (role !== 'grand_master') return json({ error: 'Atlas refresh is restricted to grand master' }, 403);
     if (!CONTROL_PLANE_URL || !CONTROL_PLANE_TOKEN) return json({ error: 'Builder execution host is unavailable' }, 503);
@@ -187,7 +196,7 @@ serve(async req => {
     stage = 'list_builder_state';
     const organizations = role === 'grand_master' ? null : [...allowedOrganizations];
     let projectsQuery = admin.from('builder_projects').select('id, organization_id, gitea_owner, gitea_repo, name, status').eq('status', 'active').order('name');
-    let jobsQuery = admin.from('builder_jobs').select('id, organization_id, project_id, title, status, current_step_name, target_sha, frontend_required, backend_required, code_review_mode, code_review_status, last_error, created_at, updated_at').order('created_at', { ascending: false }).limit(100);
+    let jobsQuery = admin.from('builder_jobs').select('id, organization_id, project_id, title, status, current_step_name, target_sha, frontend_required, backend_required, code_review_mode, code_review_status, last_error, autopilot_requested_by, autopilot_state, created_at, updated_at').order('created_at', { ascending: false }).limit(100);
     if (organizations) {
       projectsQuery = projectsQuery.in('organization_id', organizations);
       jobsQuery = jobsQuery.in('organization_id', organizations);
@@ -266,14 +275,9 @@ serve(async req => {
     // control plane can clear its gates on their behalf (recorded), publish the branch, open the PR and
     // leave a plain-language report. Merge and deployment stay human (BOB_DOCTRINE §9).
     if (body.autopilot === true) {
-      const conversationId = typeof body.conversation_id === 'string' && /^[0-9a-f-]{36}$/i.test(body.conversation_id) ? body.conversation_id : null;
-      const { data: bound, error: bindError } = await admin.rpc('builder_autopilot_bind', { _job_id: job.id, _requested_by: user.id, _conversation_id: conversationId });
-      if (bindError) {
-        await audit(requestedOrgId, 'autopilot_bind_failed', String(job.id));
-        return json({ job: safeJob(job), autopilot: false, autopilot_error: failureDetail(bindError) }, 201);
-      }
-      job = bound as Record<string, unknown>;
-      await audit(requestedOrgId, 'autopilot_bound', String(job.id));
+      const bound = await bindAutopilot(String(job.id), requestedOrgId);
+      if (!bound.job) return json({ job: safeJob(job), autopilot: false, autopilot_error: bound.error }, 201);
+      job = bound.job;
     }
     return json({ job: safeJob(job), autopilot: body.autopilot === true }, 201);
   }
@@ -371,7 +375,19 @@ serve(async req => {
     });
     await audit(job.organization_id, error ? 'followup_failed' : 'followup_created', jobId);
     if (error || !data?.id) return json({ error: 'Builder follow-up could not be created' }, 409);
-    return json({ job: safeJob(data) }, 201);
+    if (body.autopilot === true) {
+      const bound = await bindAutopilot(String(data.id), job.organization_id);
+      if (!bound.job) return json({ job: safeJob(data), autopilot: false, autopilot_error: bound.error }, 201);
+      return json({ job: safeJob(bound.job), autopilot: true }, 201);
+    }
+    return json({ job: safeJob(data), autopilot: false }, 201);
+  }
+  // Hand an existing job (for example one created before autopilot was the default) to Bob to drive.
+  if (action === 'drive') {
+    stage = 'bind_builder_autopilot';
+    const bound = await bindAutopilot(jobId, job.organization_id);
+    if (!bound.job) return json({ error: 'Bob could not take this job', detail: bound.error }, 409);
+    return json({ job: safeJob(bound.job), autopilot: true });
   }
   if (action === 'commit_verified_patch') {
     const artifactId = typeof body.artifact_id === 'string' ? body.artifact_id : '';

@@ -125,8 +125,8 @@ test('Codespaces-like Builder and vibe-coding workspace requests are software-bu
 });
 
 test('explicit Atlas and schema audits cannot escape into web research or omit schema', () => {
-  assert.match(chat, /if \(explicitAtlasRequest && chosenTool !== 'query_atlas'\)/);
-  assert.match(chat, /else if \(explicitSchemaRequest && chosenTool !== 'schema_inspect'\)/);
+  assert.match(chat, /if \(explicitAtlasRequest && \(normAction === 'answer' \|\| explicitReadOnlyAtlasRequest \|\| chosenTool === 'web_research'\) && chosenTool !== 'query_atlas'\)/);
+  assert.match(chat, /if \(!explicitAtlasRequest && explicitSchemaRequest && chosenTool !== 'schema_inspect'\)/);
   assert.match(chat, /explicitAtlasRequest && explicitSchemaRequest && atlasCompleted && !schemaCompleted/);
   assert.match(chat, /'builder_jobs',[\s\S]*'builder_worker_runs'/);
   assert.match(chat, /args: explicitSchemaArgs/);

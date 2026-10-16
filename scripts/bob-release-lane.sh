@@ -182,7 +182,13 @@ if [[ -n "$FUNCTIONS" ]]; then
   : "${SUPABASE_ACCESS_TOKEN:?SUPABASE_ACCESS_TOKEN is required for edge functions}"; : "${SUPABASE_PROJECT_REF:?}"
   for fn in $FUNCTIONS; do
     if SUPABASE_ACCESS_TOKEN="$SUPABASE_ACCESS_TOKEN" npx --yes supabase functions deploy "$fn" --project-ref "$SUPABASE_PROJECT_REF" --use-api >/dev/null 2>"$STATE_DIR/fn-$fn.err"; then
-      RESULTS+=("edge function $fn deployed")
+      # A deploy that uploads is not a function that starts: probe it so a BOOT_ERROR fails the release.
+      boot_body="$(curl -s --max-time 30 -X POST "https://${SUPABASE_PROJECT_REF}.supabase.co/functions/v1/$fn" -H 'Content-Type: application/json' -d '{}' || true)"
+      if [[ "$boot_body" == *BOOT_ERROR* || "$boot_body" == *WORKER_ERROR* ]]; then
+        fail_note "edge function $fn deployed but failed to boot: ${boot_body:0:200}"; OK=false
+      else
+        RESULTS+=("edge function $fn deployed and booted")
+      fi
     else
       fail_note "edge function $fn failed: $(tail -c 300 "$STATE_DIR/fn-$fn.err")"; OK=false
     fi
