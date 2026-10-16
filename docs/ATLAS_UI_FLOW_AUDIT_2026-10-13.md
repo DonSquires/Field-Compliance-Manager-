@@ -1690,3 +1690,30 @@ remains unpopulated.
   `pages/ZoneDetailPage -calls-> rpc manage_parking_zone_rule`; runtime
   exercise remains `null` because the acceptance fixture is not production
   invocation evidence.
+
+### Closure candidate - consequential import-row review
+
+- Atlas showed `review_file_import_row_proposal` present but unwired. The File
+  System already owned source upload, persisted batch review and human column
+  mapping, but consequential row proposals had no visible read or decision
+  surface.
+- Before: a tenant import administrator could inspect batch-level counts and
+  mappings, yet could not compare an individual source row with Bob's proposed
+  target or invoke the existing reason-required approve/reject boundary. The
+  task stopped before the action that can create the governed target.
+- During: the selected batch now loads only its RLS-scoped
+  `file_import_row_proposals`. Each row shows source identity, source values,
+  proposed payload, target type, confidence, current state and applied target
+  receipt. Proposed rows require a written evidence reason and expose separate
+  **Approve and apply** and **Reject proposal** actions through
+  `review_file_import_row_proposal`. Batch approval is a stop-line while any
+  consequential row remains proposed, preventing the parent review from closing
+  before its row decisions are complete; batch rejection remains available.
+- After: the returned persisted row replaces the proposal in place. Approval
+  states that the governed target outcome and audit receipt are recorded;
+  rejection states that no proposed target was applied. Reviewed rows retain
+  their reason and applied target identifier where one exists.
+- Trackforce consideration: this follows an exception-workbench pattern: show
+  the source, proposed outcome, confidence, decision owner action and durable
+  result together without adding bulk approval or treating batch approval as
+  permission to apply every row.
