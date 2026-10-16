@@ -1854,3 +1854,28 @@ remains unpopulated.
   retained profiles, conversations or messages. Static and rollback evidence
   do not prove a real production user rated a reply; Atlas `exercised` remains
   unset.
+
+### Closure log — single governed approval queue
+
+- Atlas showed `get_my_pending_proposals` as present but unwired. Source
+  inspection found no page, Edge Function, script or database function calling
+  it. Its comment identifies it as an older per-user bell query that returns
+  only pending `bob_agentic_actions`.
+- The current Approvals workspace uses `get_approvals_activity`. It preserves
+  the same trigger, attribution, assignment and organization-tree visibility,
+  while also returning lifecycle history, named actors, decision ownership,
+  result receipts, errors, pagination, filters and an explicit `can_decide`
+  authority result.
+- Wiring the older query would create a second, partial approval inbox and
+  expose a security-definer API to `PUBLIC` and `anon`. The obsolete function
+  and its stale declarative source are therefore retired. Historical migrations
+  remain as lineage; `get_approvals_activity` remains the single governed
+  approval queue.
+- Two focused retirement guards, the production web build, all 72 Atlas and
+  retirement tests, and the 638-version migration uniqueness check pass. The
+  live snapshot reports 813 functions; the local Atlas manifest moves from
+  1,364 capabilities and 7,387 edges to 1,363 capabilities and 7,386 edges.
+- PostgREST now returns function-not-found for
+  `get_my_pending_proposals(integer)` and still resolves
+  `get_approvals_activity(integer,integer,text[],text[])`. Removing a duplicate
+  read API is not successful user exercise, so no exercise state is claimed.

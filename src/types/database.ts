@@ -44818,23 +44818,6 @@ export type Database = {
           window_start: string
         }[]
       }
-      get_my_pending_proposals: {
-        Args: { p_limit?: number }
-        Returns: {
-          action_type: string
-          amended_payload: Json
-          bob_reasoning: string
-          confidence_score: number
-          context_table: string
-          created_at: string
-          id: string
-          organization_id: string
-          proposed_payload: Json
-          status: string
-          triggered_by: string
-          user_id: string
-        }[]
-      }
       get_noise_attendance_report: {
         Args: { p_dispatch_job_id: string }
         Returns: Json
