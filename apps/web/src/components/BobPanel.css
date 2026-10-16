@@ -1285,6 +1285,111 @@
   font-size: 12px;
 }
 
+.bob-message-feedback {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 6px;
+  margin-top: 10px;
+  padding-top: 8px;
+  border-top: 1px solid rgba(74, 111, 126, .42);
+  color: #91a7b4;
+  font-size: 11px;
+}
+
+.bob-message-feedback > button,
+.bob-message-feedback form button {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  min-height: 30px;
+  padding: 5px 8px;
+  border: 1px solid #355160;
+  border-radius: 6px;
+  color: #c8d9e1;
+  background: #102431;
+  font: inherit;
+  font-weight: 700;
+  cursor: pointer;
+}
+
+.bob-message-feedback > button.is-selected {
+  border-color: #64b9aa;
+  color: #d9fff7;
+  background: #17483f;
+}
+
+.bob-message-feedback button:disabled {
+  opacity: .6;
+  cursor: wait;
+}
+
+.bob-message-feedback form {
+  display: grid;
+  flex: 1 0 100%;
+  gap: 7px;
+  padding: 9px;
+  border: 1px solid #355160;
+  border-radius: 8px;
+  background: #081823;
+}
+
+.bob-message-feedback form label {
+  display: flex;
+  justify-content: space-between;
+  gap: 8px;
+  color: #d9e5ea;
+  font-weight: 700;
+}
+
+.bob-message-feedback form label span {
+  color: #8298a6;
+  font-weight: 500;
+}
+
+.bob-message-feedback form textarea {
+  width: 100%;
+  min-height: 70px;
+  resize: vertical;
+  border: 1px solid #355160;
+  border-radius: 6px;
+  padding: 8px;
+  color: #e3edf1;
+  background: #0c202b;
+  font: inherit;
+  line-height: 1.45;
+}
+
+.bob-message-feedback form > div {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 7px;
+}
+
+.bob-message-feedback > p {
+  flex: 1 0 100%;
+  margin: 0;
+  font-weight: 700;
+}
+
+.bob-message-feedback > p.is-success {
+  color: #8fe2d8;
+}
+
+.bob-message-feedback > p.is-error {
+  color: #ff9b8f;
+}
+
+.bob-feedback-load-error {
+  margin: 8px 14px 0;
+  padding: 8px 10px;
+  border: 1px solid rgba(184, 84, 77, .72);
+  border-radius: 7px;
+  color: #ffb6ad;
+  background: #2c171b;
+  font-size: 11px;
+}
+
 .bob-flagged {
   display: inline-flex;
   align-items: center;

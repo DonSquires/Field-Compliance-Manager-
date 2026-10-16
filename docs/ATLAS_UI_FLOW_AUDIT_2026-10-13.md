@@ -1812,3 +1812,45 @@ remains unpopulated.
 - Atlas treatment: retire the three capabilities and their outgoing internal
   edges as legacy. Do not invent UI callers. Their replacement RPCs remain
   present and wired; exercise state is unchanged.
+
+### Closure candidate - governed Bob reply feedback
+
+- Live Atlas showed `bob_message_feedback` present but unwired and live
+  verification found zero rows. The table comment explicitly assigned
+  per-reply helpful/improvement feedback to BobPanel, but the canonical chat
+  rendered no controls and never read persisted feedback.
+- Before: users could see Bob's answer, confidence, workflow state and safe next
+  action, but had no durable way to say whether the answer helped. The table's
+  direct-write policy also trusted caller-supplied organization, conversation
+  and message identifiers independently, so wiring a browser upsert would have
+  preserved a cross-tenant integrity weakness.
+- During: each assistant reply now offers **Helpful** and **Needs improvement**.
+  Improvement feedback opens a bounded optional-note editor with **Save
+  feedback** and **Cancel**. Loading, selected, saving, success and error states
+  remain beside the rated reply. A helpful decision saves immediately; a later
+  decision updates the same user/message receipt rather than creating
+  duplicates.
+- The browser calls only `manage_bob_message_feedback`. The command derives the
+  organization, conversation and user from the persisted assistant message,
+  requires that the caller owns that Bob conversation and still has
+  organization access, rejects non-assistant messages and invalid ratings, and
+  bounds notes to 1,000 characters. Direct authenticated insert, update and
+  delete privileges are revoked.
+- After: reopening or switching the conversation reloads the user's persisted
+  choice and optional improvement note. The returned row must match the
+  requested message and rating before the UI reports success. Existing
+  administrator read policy remains available for a later organization-wide
+  quality-triage surface; this change does not invent aggregate quality claims
+  from a single rating.
+- Trackforce consideration: the useful pattern is exception feedback attached
+  to the exact operational response, with an accountable person, optional
+  context, durable current receipt and explicit failure. FCM keeps that
+  feedback tenant-bound and does not let a rating mutate the source message or
+  silently become training authority.
+- Verification: 54 focused BobPanel and governance tests pass. Rollback-only
+  live verification proved derived tenant linkage, helpful-to-improvement
+  update with one retained receipt, invalid-rating rejection, user-message
+  rejection, another-user rejection and direct-write revocation, with zero
+  retained profiles, conversations or messages. Static and rollback evidence
+  do not prove a real production user rated a reply; Atlas `exercised` remains
+  unset.
