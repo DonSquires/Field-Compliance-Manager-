@@ -1495,6 +1495,39 @@ remains unpopulated.
   manage_notice_template` and moves bounded gaps 127 -> 126: 0 Edge Functions,
   74 RPCs and 52 tables.
 
+### Closure log - organization notice printer defaults
+
+- Atlas showed `manage_org_printer_settings` present but unwired.
+  `org_printer_settings` was readable and the notice-print component already
+  supported browser and Bluetooth printing, but administrators had no
+  configuration surface and neither operational print path read the setting.
+- Before: every notice print started independently at 58 mm. Parking oversight
+  and breach review were also scoped to the user's home organization rather
+  than the selected operating organization, so a provider working in a branch
+  could not safely apply branch-specific settings.
+- During: Organisation settings now loads the selected organization or
+  branch's saved paper and connection preference. An administrator chooses
+  58 mm, 80 mm, or A4 and browser/OS or Web Bluetooth, saves through
+  `manage_org_printer_settings`, and sees success only when the returned values
+  match the requested state. The screen explains that A4 is browser-only and
+  prevents the invalid A4 plus raw-Bluetooth choice.
+- After: parking oversight and breach review read records and printer defaults
+  for the same selected operating organization. The shared print action marks
+  the preferred connection, permits a one-print paper override, surfaces
+  settings-load failure, and keeps A4 on the browser/OS path. ESC/POS output
+  remains strictly limited to 58 mm and 80 mm instead of pretending A4 is a
+  thermal format.
+- This applies the useful Trackforce configure-before-deploy pattern without
+  locking staff into one device: the organization supplies an accountable
+  default, the field user can adapt one print to the available printer, and
+  failure leaves a clear safe browser-print route.
+- Focused organization, parking, breach, and printing guards pass together
+  with the production web build and all Atlas generator tests. Atlas now
+  derives a real page-to-RPC call and reads from the settings page and shared
+  print hook.
+- Honesty note: static wiring and tests do not prove a production invocation.
+  `exercised` remains unchanged until governed runtime evidence exists.
+
 ### Closure log - scheduled field-work and retention exercise evidence
 
 - The next Trackforce-style exception check found a map defect rather than a

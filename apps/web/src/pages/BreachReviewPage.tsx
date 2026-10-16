@@ -59,7 +59,7 @@ const ACTION_OPTIONS: { type: ActionType; label: string; btnClass: string }[] = 
 
 const BreachReviewPage: React.FC = () => {
   const navigate = useNavigate();
-  const { profile } = useAuth();
+  const { profile, operatingOrganizationId } = useAuth();
   const { selectedAgreementZones } = useServiceRelationships();
   const [alerts, setAlerts] = useState<BreachAlert[]>([]);
   const [statusFilter, setStatusFilter] = useState<'open' | 'acknowledged' | 'actioned' | 'dismissed' | 'resolved' | 'exempt_homeless' | 'all'>('open');
@@ -75,7 +75,7 @@ const BreachReviewPage: React.FC = () => {
 
   // ATLAS READS: breach_alerts, location_zones, observations
   const loadAlerts = useCallback(async () => {
-    const orgId = profile?.organizationId;
+    const orgId = operatingOrganizationId ?? profile?.organizationId;
     if (!orgId) {
       setAlerts([]);
       setError('Organisation access could not be confirmed. Breach review is unavailable.');
@@ -129,7 +129,7 @@ const BreachReviewPage: React.FC = () => {
     } finally {
       setLoading(false);
     }
-  }, [profile?.organizationId, selectedAgreementZones, statusFilter]);
+  }, [operatingOrganizationId, profile?.organizationId, selectedAgreementZones, statusFilter]);
 
   useEffect(() => {
     loadAlerts();
@@ -466,7 +466,7 @@ const BreachReviewPage: React.FC = () => {
                         ✨ Bob: Draft document
                       </button>
                     </div>
-                    {noticeReceipts[alert.id] && <NoticePrintActions receipt={noticeReceipts[alert.id]} />}
+                    {noticeReceipts[alert.id] && <NoticePrintActions receipt={noticeReceipts[alert.id]} organizationId={operatingOrganizationId ?? profile?.organizationId ?? null} />}
                     {noticeArtifactPaths[alert.id] && <GeneratedArtifactActions bucket="notice-artifacts" path={noticeArtifactPaths[alert.id]} fileName={`notice-${noticeReceipts[alert.id]?.noticeNumber ?? alert.id}.pdf`} label="Notice PDF" />}
                   </div>
                 )}

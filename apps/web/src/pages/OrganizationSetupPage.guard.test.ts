@@ -25,6 +25,17 @@ describe('governed organization profile setup', () => {
     expect(source).toContain('resolvedGeofenceDefaults');
   });
 
+  it('reads and saves branch-scoped printer defaults through the governed RPC', () => {
+    expect(source).toContain(".from('org_printer_settings')");
+    expect(source).toContain(".select('paper_width, connection_type')");
+    expect(source).toContain("supabase.rpc('manage_org_printer_settings'");
+    expect(source).toContain('p_organization_id: org.id');
+    expect(source).toContain("throw new Error('Printer settings were not confirmed after saving.')");
+    expect(source).toContain('A4 page');
+    expect(source).toContain("option.value === 'a4' ? 'browser_print'");
+    expect(source).not.toMatch(/from\(['"]org_printer_settings['"]\)[\s\S]{0,300}\.(insert|update|delete)\(/);
+  });
+
   it('clears loading state when no operating organization is available', () => {
     expect(source).toContain('if (!orgId) {');
     expect(source).toContain('setLoading(false);');

@@ -11,10 +11,11 @@
 import React, { useEffect, useState, useCallback, useMemo } from 'react';
 import L from 'leaflet';
 import 'leaflet/dist/leaflet.css';
-import { Building2, GitBranch, MapPin, Package, Plus, Ruler, ScrollText, ShieldCheck } from 'lucide-react';
+import { Building2, GitBranch, MapPin, Package, Plus, Printer, Ruler, ScrollText, ShieldCheck } from 'lucide-react';
 import { useAuth } from '../context/AuthContext';
 import { supabase } from '../lib/supabase';
 import { addLinzBaseLayers } from '../lib/mapPreferences';
+import type { PrinterConnectionType, PrinterPaperWidth } from '../hooks/useOrganizationPrinterSettings';
 import { PLATFORM_MODULE_BY_KEY, type PlatformModuleKey } from '../config/platformModuleManifest';
 import OrganizationComplianceSection from '../components/OrganizationComplianceSection';
 import './PageStyles.css';
@@ -68,6 +69,11 @@ interface NoticeTemplate {
   bob_extracted: boolean;
 }
 interface GeofenceConfigRow { id: string; config_key: string; config_value: number; zone_type: string | null; }
+interface PrinterSettingsForm {
+  paperWidth: PrinterPaperWidth;
+  connectionType: PrinterConnectionType;
+  configured: boolean;
+}
 
 const NOTICE_MODULES = [
   { value: 'freedom_camping', label: 'Freedom camping' },
@@ -152,6 +158,12 @@ const OrganizationSetupPage: React.FC = () => {
   const [templateRequestId, setTemplateRequestId] = useState(() => crypto.randomUUID());
   const [savingTemplate, setSavingTemplate] = useState(false);
   const [geofenceConfig, setGeofenceConfig] = useState<GeofenceConfigRow[]>([]);
+  const [printerSettings, setPrinterSettings] = useState<PrinterSettingsForm>({
+    paperWidth: '58mm',
+    connectionType: 'browser_print',
+    configured: false,
+  });
+  const [savingPrinterSettings, setSavingPrinterSettings] = useState(false);
   const [resolvedGeofenceDefaults, setResolvedGeofenceDefaults] = useState<Record<string, number>>({});
   const [savingKey, setSavingKey] = useState<string | null>(null);
   const [overrideForm, setOverrideForm] = useState({ config_key: GEOFENCE_KEYS[0].key, zone_type: '', config_value: '' });
@@ -172,7 +184,7 @@ const OrganizationSetupPage: React.FC = () => {
 
   const isBranch = org?.organization_type === 'branch';
 
-  // ATLAS READS: organizations, organization_modules, notice_templates, org_geofence_config
+  // ATLAS READS: organizations, organization_modules, notice_templates, org_geofence_config, org_printer_settings
   const loadAll = useCallback(async () => {
     const orgId = operatingOrganizationId ?? profile?.organizationId;
     if (!orgId) {
@@ -185,7 +197,7 @@ const OrganizationSetupPage: React.FC = () => {
       setLoading(true);
       setError(null);
 
-      const [orgRes, modulesRes, branchesRes, templatesRes, geofenceRes, authoritiesRes] = await Promise.all([
+      const [orgRes, modulesRes, branchesRes, templatesRes, geofenceRes, printerRes, authoritiesRes] = await Promise.all([
         supabase
           .from('organizations')
           .select(
@@ -208,6 +220,11 @@ const OrganizationSetupPage: React.FC = () => {
           .select('id, config_key, config_value, zone_type')
           .eq('organization_id', orgId),
         supabase
+          .from('org_printer_settings')
+          .select('paper_width, connection_type')
+          .eq('organization_id', orgId)
+          .maybeSingle(),
+        supabase
           .from('canonical_ta_names')
           .select('ta_name')
           .order('ta_name'),
@@ -218,6 +235,7 @@ const OrganizationSetupPage: React.FC = () => {
       if (branchesRes.error) throw branchesRes.error;
       if (templatesRes.error) throw templatesRes.error;
       if (geofenceRes.error) throw geofenceRes.error;
+      if (printerRes.error) throw printerRes.error;
       if (authoritiesRes.error) throw authoritiesRes.error;
 
       setOrg(orgRes.data as OrgProfile);
@@ -225,6 +243,15 @@ const OrganizationSetupPage: React.FC = () => {
       setBranches(((branchesRes.data as Array<BranchRow & { organization_type: string }>) || []).filter((row) => row.organization_type === 'branch'));
       setTemplates((templatesRes.data as NoticeTemplate[]) || []);
       setGeofenceConfig((geofenceRes.data as GeofenceConfigRow[]) || []);
+      setPrinterSettings(printerRes.data ? {
+        paperWidth: printerRes.data.paper_width as PrinterPaperWidth,
+        connectionType: printerRes.data.connection_type as PrinterConnectionType,
+        configured: true,
+      } : {
+        paperWidth: '58mm',
+        connectionType: 'browser_print',
+        configured: false,
+      });
       setTerritorialAuthorities((authoritiesRes.data ?? []).map((row) => String(row.ta_name)));
       const resolvedEntries = await Promise.all(GEOFENCE_KEYS.map(async (key) => {
         const { data, error: resolutionError } = await supabase.rpc('get_org_geofence_config', {
@@ -297,6 +324,37 @@ const OrganizationSetupPage: React.FC = () => {
       setModules(modules.map((m) => (m.id === mod.id ? { ...m, enabled: !m.enabled } : m)));
     } catch (err) {
       setError(err instanceof Error ? err.message : 'Failed to update module');
+    }
+  };
+
+  const handleSavePrinterSettings = async (event: React.FormEvent) => {
+    event.preventDefault();
+    if (!org) return;
+
+    try {
+      setSavingPrinterSettings(true);
+      setError(null);
+      setNotice(null);
+
+      // ATLAS WRITES: manage_org_printer_settings
+      const { data, error: saveError } = await supabase.rpc('manage_org_printer_settings', {
+        p_organization_id: org.id,
+        p_paper_width: printerSettings.paperWidth,
+        p_connection_type: printerSettings.connectionType,
+      });
+      if (saveError) throw saveError;
+
+      const receipt = data as { paper_width?: string; connection_type?: string } | null;
+      if (receipt?.paper_width !== printerSettings.paperWidth || receipt?.connection_type !== printerSettings.connectionType) {
+        throw new Error('Printer settings were not confirmed after saving.');
+      }
+
+      setPrinterSettings((current) => ({ ...current, configured: true }));
+      setNotice(`Printer default saved for ${org.name}.`);
+    } catch (saveError) {
+      setError(saveError instanceof Error ? saveError.message : 'Printer settings could not be saved.');
+    } finally {
+      setSavingPrinterSettings(false);
     }
   };
 
@@ -574,6 +632,7 @@ const OrganizationSetupPage: React.FC = () => {
         {!isBranch && <a href="#org-compliance" className={corporateProfileComplete ? 'is-done' : 'is-todo'}><ShieldCheck size={16} /><span><strong>Legal and compliance</strong><small>{corporateProfileComplete ? 'Company identity verified' : 'Review legal identity and evidence'}</small></span></a>}
         {!isBranch && <a href="#org-branches" className={activeBranches.length ? 'is-done' : 'is-neutral'}><GitBranch size={16} /><span><strong>Branches</strong><small>{activeBranches.length ? `${activeBranches.length} active` : 'Optional'}</small></span></a>}
         <a href="#org-modules" className={enabledModuleKeys.size ? 'is-done' : 'is-todo'}><Package size={16} /><span><strong>Modules in use</strong><small>{enabledModuleKeys.size} on · {modules.length - enabledModuleKeys.size} off</small></span></a>
+        <a href="#org-printing" className={printerSettings.configured ? 'is-done' : 'is-todo'}><Printer size={16} /><span><strong>Notice printing</strong><small>{printerSettings.configured ? `${printerSettings.paperWidth.toUpperCase()} · ${printerSettings.connectionType === 'bluetooth_escpos' ? 'Bluetooth' : 'browser/OS'}` : 'Confirm a printer default'}</small></span></a>
         <a href="#org-distances" className="is-neutral"><Ruler size={16} /><span><strong>Location accuracy</strong><small>{customDistanceCount ? `${customDistanceCount} custom distance${customDistanceCount === 1 ? '' : 's'}` : 'Using platform defaults'}</small></span></a>
         <a href="#org-service-area" className={org.jurisdiction_verification === 'verified' ? 'is-done' : 'is-todo'}><MapPin size={16} /><span><strong>Service area</strong><small>{org.jurisdiction_verification === 'verified' ? 'Verified' : 'Not yet verified'}</small></span></a>
         <a href="#org-templates" className={activeTemplates.length ? 'is-done' : enabledNoticeModules.length ? 'is-todo' : 'is-neutral'}><ScrollText size={16} /><span><strong>Notice templates</strong><small>{activeTemplates.length ? `${activeTemplates.length} active` : enabledNoticeModules.length ? 'Set legal wording before field use' : 'Turn on an enforcement module first'}</small></span></a>
@@ -682,6 +741,50 @@ const OrganizationSetupPage: React.FC = () => {
             })}
           </ul>
         )}
+      </section>
+
+      <section className="reports-section org-settings-section" id="org-printing" aria-labelledby="org-printing-title">
+        <div className="org-settings-section-heading"><span>Field readiness</span><h2 id="org-printing-title">Notice printing</h2><p>Choose the default officers and administrators see when printing notices for this {isBranch ? 'branch' : 'organisation'}. They can still change the paper for one print without changing this default.</p></div>
+        <form className="settings-form org-printer-settings" onSubmit={handleSavePrinterSettings}>
+          <fieldset className="org-settings-choice">
+            <legend>Paper</legend>
+            {([
+              { value: '58mm', label: '58 mm thermal receipt', help: 'For compact mobile receipt printers.' },
+              { value: '80mm', label: '80 mm thermal receipt', help: 'For wider receipt printers and more readable field copies.' },
+              { value: 'a4', label: 'A4 page', help: 'Uses the browser or operating-system print dialog. Raw Bluetooth thermal printing is unavailable.' },
+            ] as const).map((option) => (
+              <label key={option.value} className={printerSettings.paperWidth === option.value ? 'is-selected' : ''}>
+                <input
+                  type="radio"
+                  name="printer_paper_width"
+                  value={option.value}
+                  checked={printerSettings.paperWidth === option.value}
+                  onChange={() => setPrinterSettings((current) => ({
+                    ...current,
+                    paperWidth: option.value,
+                    connectionType: option.value === 'a4' ? 'browser_print' : current.connectionType,
+                  }))}
+                />
+                <span><strong>{option.label}</strong><small>{option.help}</small></span>
+              </label>
+            ))}
+          </fieldset>
+          <fieldset className="org-settings-choice">
+            <legend>Preferred connection</legend>
+            <label className={printerSettings.connectionType === 'browser_print' ? 'is-selected' : ''}>
+              <input type="radio" name="printer_connection_type" value="browser_print" checked={printerSettings.connectionType === 'browser_print'} onChange={() => setPrinterSettings((current) => ({ ...current, connectionType: 'browser_print' }))} />
+              <span><strong>Browser / operating-system print</strong><small>Use for Wi-Fi, USB, AirPrint, and A4 printers already installed on the device.</small></span>
+            </label>
+            <label className={printerSettings.connectionType === 'bluetooth_escpos' ? 'is-selected' : ''} aria-disabled={printerSettings.paperWidth === 'a4'}>
+              <input type="radio" name="printer_connection_type" value="bluetooth_escpos" disabled={printerSettings.paperWidth === 'a4'} checked={printerSettings.connectionType === 'bluetooth_escpos'} onChange={() => setPrinterSettings((current) => ({ ...current, connectionType: 'bluetooth_escpos' }))} />
+              <span><strong>Bluetooth thermal printer</strong><small>Uses Web Bluetooth in Chrome or Edge with 58 mm or 80 mm ESC/POS printers.</small></span>
+            </label>
+          </fieldset>
+          <div className="org-settings-actions">
+            <button type="submit" className="btn btn-primary" disabled={savingPrinterSettings}>{savingPrinterSettings ? 'Saving…' : 'Save printer default'}</button>
+            <small>{printerSettings.configured ? `Current saved default for ${org.name}.` : 'No saved default yet; printing falls back to 58 mm browser/OS print.'}</small>
+          </div>
+        </form>
       </section>
 
       <section className="reports-section org-settings-section" id="org-distances" aria-labelledby="org-distances-title">

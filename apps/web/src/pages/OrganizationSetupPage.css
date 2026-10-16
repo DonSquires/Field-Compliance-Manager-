@@ -68,6 +68,14 @@
 .org-settings-choice span { display: grid; gap: 2px; min-width: 0; }
 .org-settings-choice strong { font-size: 13px; }
 .org-settings-choice small { color: var(--color-text-muted); font-size: 12px; line-height: 1.4; }
+.org-settings-choice label[aria-disabled='true'] { cursor: not-allowed; opacity: .58; }
+.org-printer-settings { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 16px; }
+.org-printer-settings .org-settings-actions { grid-column: 1 / -1; }
+
+@media (max-width: 760px) {
+  .org-printer-settings { grid-template-columns: 1fr; }
+  .org-printer-settings .org-settings-actions { grid-column: auto; }
+}
 
 /* Branches and notice templates: one row per item, name on the left, state and action on the right. */
 .org-branch-list { display: grid; gap: 8px; margin: 0; padding: 0; list-style: none; }
