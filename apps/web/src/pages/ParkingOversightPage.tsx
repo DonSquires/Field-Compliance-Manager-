@@ -37,7 +37,7 @@ interface ChalkRecord {
 type ParkingFilter = 'all' | 'active' | 'overdue' | 'review';
 
 const ParkingOversightPage: React.FC = () => {
-  const { profile } = useAuth();
+  const { profile, operatingOrganizationId } = useAuth();
   const { selectedAgreementZones } = useServiceRelationships();
   const [records, setRecords] = useState<ChalkRecord[]>([]);
   const [loading, setLoading] = useState(true);
@@ -49,7 +49,7 @@ const ParkingOversightPage: React.FC = () => {
 
   // ATLAS READS: parking_chalk_records
   const loadRecords = useCallback(async () => {
-    const orgId = profile?.organizationId;
+    const orgId = operatingOrganizationId ?? profile?.organizationId;
     if (!orgId) {
       setLoading(false);
       return;
@@ -76,7 +76,7 @@ const ParkingOversightPage: React.FC = () => {
     } finally {
       setLoading(false);
     }
-  }, [profile?.organizationId, selectedAgreementZones]);
+  }, [operatingOrganizationId, profile?.organizationId, selectedAgreementZones]);
 
   useEffect(() => {
     loadRecords();
@@ -188,7 +188,7 @@ const ParkingOversightPage: React.FC = () => {
                   <td><strong>{r.movement_detected === true ? 'Moved' : r.movement_detected === false ? 'Stationary' : 'Movement unconfirmed'}</strong><small>{r.bob_classification || 'No Bob classification'}{r.bob_confidence != null ? ` · ${Math.round(r.bob_confidence * 100)}%` : ''}</small><small>{r.effective_time_limit_minutes ? `${r.effective_time_limit_minutes} min limit` : 'Time limit unavailable'} · Rego {r.rego_status || 'unknown'} · WOF {r.wof_status || 'unknown'} · CoF {r.cof_status || 'unknown'}</small></td>
                   <td>
                     {!r.infringement_number && <button type="button" className="btn btn-sm btn-primary" disabled={issuingId === r.id} onClick={() => void issueInfringement(r)}>{issuingId === r.id ? 'Issuing…' : 'Issue infringement'}</button>}
-                    {noticeReceipts[r.id] && <NoticePrintActions receipt={noticeReceipts[r.id]} />}
+                    {noticeReceipts[r.id] && <NoticePrintActions receipt={noticeReceipts[r.id]} organizationId={operatingOrganizationId ?? profile?.organizationId ?? null} />}
                     {noticeArtifactPaths[r.id] && <GeneratedArtifactActions bucket="notice-artifacts" path={noticeArtifactPaths[r.id]} fileName={`parking-notice-${noticeReceipts[r.id]?.noticeNumber ?? r.id}.pdf`} label="Notice PDF" />}
                   </td>
                 </tr>
