@@ -190,6 +190,24 @@ test('current permit fieldwork and policy views expose their table dependencies'
   assert.equal(hasEdge('house_event_anchor_reconciliation', 'house_event_anchor_projection'), true);
 });
 
+test('current RLS policies expose unqualified helper dependencies', () => {
+  const manifest = collectAtlasRefresh(path.resolve(__dirname, '..'));
+  const hasSecuredByEdge = (source, target) => manifest.edges.some((edge) => (
+    edge.source_type === 'table' &&
+    edge.source_name === source &&
+    edge.target_type === 'rpc' &&
+    edge.target_name === target &&
+    edge.edge_kind === 'secured_by'
+  ));
+
+  assert.equal(hasSecuredByEdge('access_presets', 'is_master_or_above'), true);
+  assert.equal(hasSecuredByEdge('biosecurity_assessments', 'user_has_task_entitlement'), true);
+  assert.equal(hasSecuredByEdge('infringement_notices', 'is_enforcement_operator_for_org'), true);
+  assert.equal(hasSecuredByEdge('noise_assessments', 'user_has_task_entitlement'), true);
+  assert.equal(hasSecuredByEdge('observations', 'user_has_task_entitlement'), true);
+  assert.equal(hasSecuredByEdge('smoke_assessments', 'user_has_task_entitlement'), true);
+});
+
 test('Atlas refresh extracts concrete entities and Supabase calls without test noise', () => {
   const root = fs.mkdtempSync(path.join(os.tmpdir(), 'atlas-refresh-'));
   try {
@@ -233,7 +251,7 @@ test('Atlas refresh extracts concrete entities and Supabase calls without test n
       CREATE TRIGGER "alpha_touch" BEFORE UPDATE ON "public"."alpha"
         FOR EACH ROW EXECUTE FUNCTION "public"."touch_alpha"();
       CREATE POLICY "alpha_read" ON "public"."alpha" FOR SELECT
-        USING ("public"."can_read_alpha"());
+        USING (can_read_alpha());
       CREATE OR REPLACE FUNCTION private.internal_only() RETURNS void LANGUAGE sql AS $$
         SELECT NULL;
       $$;
