@@ -2143,6 +2143,18 @@ async function loadHistory(supabase, conversationId, limit = 8) {
         metadata: r.metadata
       } : {}
     }));
+  const latestAssistant = rows.slice().reverse().find((row)=>row.role === 'assistant');
+  const continuationState = latestAssistant?.metadata?.task_state;
+  if (latestAssistant?.metadata?.continuation_pending === true
+    && continuationState && typeof continuationState === 'object' && !Array.isArray(continuationState)) {
+    return {
+      history,
+      pending: {
+        kind: 'continuation',
+        task_state: continuationState
+      }
+    };
+  }
   // Most recent in-flight context. PRECEDENCE (fixes the live bug where asking a
   // clarifying question buried the real proposal): a turn carrying a real proposal
   // (proposed_entities / suggested_action / best_target) wins over a clarifying-
@@ -2156,7 +2168,7 @@ async function loadHistory(supabase, conversationId, limit = 8) {
   for(let i = rows.length - 1; i >= 0; i--){
     const md = rows[i]?.metadata;
     if (rows[i]?.role !== 'assistant' || !md) continue;
-    if (md.suggested_action || md.best_target || md.proposed_entities || md.tool === 'plan_import' || md.tool === 'understand_documents') {
+    if (md.tool !== 'understand_documents' && (md.suggested_action || md.best_target || md.proposed_entities || md.tool === 'plan_import')) {
       pending = {
         kind: 'proposal',
         tool: md.tool ?? null,
@@ -10081,7 +10093,10 @@ serve(async (req)=>{
       // a follow-on turn can continue from durable state instead of only chat
       // history. This is best-effort and fail-closed only when the ledger is
       // unavailable or unreadable.
-      task_state: taskLedger ? {
+      task_state: pending?.kind === 'continuation' ? {
+        ...pending.task_state,
+        ...(taskLedger?.checkpoint ? { durable_checkpoint: taskLedger.checkpoint } : {})
+      } : taskLedger ? {
         task: taskLedger.task,
         checkpoint: taskLedger.checkpoint,
         steps: taskLedger.steps

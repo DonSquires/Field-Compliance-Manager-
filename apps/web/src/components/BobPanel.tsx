@@ -17,7 +17,7 @@
  * edge function receives the caller's JWT rather than a page-level identity.
  */
 
-import React, { useEffect, useMemo, useRef, useState, useCallback } from 'react';
+import React, { useEffect, useLayoutEffect, useMemo, useRef, useState, useCallback } from 'react';
 import { AlertTriangle, Archive, ArchiveRestore, Ban, Bot, CheckCircle2, Clock3, FileSearch, FileUp, Image as ImageIcon, ListChecks, Maximize2, Mic, Minimize2, Paperclip, PanelLeft, PanelRight, Pencil, Pin, PinOff, Plus, RefreshCw, Search, Send, ShieldCheck, Sparkles, TerminalSquare, Volume2, X } from 'lucide-react';
 import { useAuth } from '../context/AuthContext';
 import { supabase } from '../lib/supabase';
@@ -540,11 +540,12 @@ export const BobPanel: React.FC<BobPanelProps> = ({ open, onClose, context, mode
     return () => document.removeEventListener('keydown', onKeyDown);
   }, [open, workspaceExpanded, presentation]);
 
-  useEffect(() => {
+  useLayoutEffect(() => {
+    if (!open || (presentation === 'docked' && studioOpen)) return;
     const node = scrollRef.current;
-    if (!node || typeof node.scrollTo !== 'function') return;
-    node.scrollTo({ top: node.scrollHeight, behavior: 'smooth' });
-  }, [messages]);
+    if (!node) return;
+    node.scrollTop = node.scrollHeight;
+  }, [messages, open, presentation, studioOpen]);
 
   useEffect(() => () => {
     mediaRecorderRef.current?.state === 'recording' && mediaRecorderRef.current.stop();

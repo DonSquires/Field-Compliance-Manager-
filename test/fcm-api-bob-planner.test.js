@@ -57,6 +57,25 @@ test('pending ask block carries the earlier questions and the blanket-answer rul
   assert.match(block, /Do NOT re-ask/);
 });
 
+test('a paused task resumes from its saved goal and evidence without treating a read as completion', () => {
+  const taskState = {
+    goal: 'Use source documents to update both organisation compliance profiles.',
+    steps_taken: [{ tool: 'understand_documents', outcome: 'ok', result_summary: 'Read the H&S policy and plan.' }],
+    last_tool: 'understand_documents',
+  };
+  const prompt = buildPlannerPrompt({
+    message: 'Continue from where you left off',
+    pending: { kind: 'continuation', task_state: taskState },
+    taskState,
+    tools: [{ tool: 'propose_compliance_record', purpose: 'Propose governed compliance-register records from source documents.' }],
+  });
+  assert.match(prompt, /PAUSED TASK CONTINUATION/);
+  assert.match(prompt, /Original goal: Use source documents to update both organisation compliance profiles/);
+  assert.match(prompt, /understand_documents -> ok/);
+  assert.match(prompt, /A read or document summary is not completion/);
+  assert.match(prompt, /propose_compliance_record: Propose governed compliance-register records/);
+});
+
 test('planner prompt exposes drafting discipline, one-question rule, and delegation only when delegable tools exist', () => {
   const prompt = buildPlannerPrompt({ message: 'draft a job description', tools: TOOLS });
   assert.match(prompt, /DRAFTING DISCIPLINE/);
