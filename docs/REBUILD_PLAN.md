@@ -22,6 +22,26 @@ contains both histories and both file changes. A canonical release commit is
 required after any historical unverified commit already on `main` so the
 complete current tree can deploy without weakening Vercel protection.
 
+Bob outage and in-house compute ruling 2026-10-16: Bob chat had been down since
+2026-10-14 because commit `8f852dfe6` redeclared `explicitAtlasRequest` in
+`onspace-ai-chat`, so the deployed function returned `503 BOOT_ERROR`. Requests
+never reached the server, which is why jobs could not be sent from chat and no
+history persisted. The duplicate declaration is removed without changing that
+commit's intent. `scripts/edge-boot-check.mjs` (run by
+`test/edge-function-boot.test.js`) now boots every Edge Function before
+release, and the VPS release lane probes each deployed function and fails on
+`BOOT_ERROR` instead of counting the upload as success. Jobs created on the
+Builder New Job page were never bound to autopilot, so #84/#85 sat at intake
+with nobody driving them. New and follow-up jobs now default to Bob driving
+them to the next human gate, and an undriven job offers `Let Bob drive` (Edge
+action `drive`, the service-only `builder_autopilot_bind` with
+`can_approve_action`, audited). Owner ruling: Bob's own compute is the primary
+workforce. Builder analysis, authoring and review route laptop GPU → VPS CPU →
+OpenAI, OpenAI being the paid last resort, and chat code requests plan
+in-house. VPS storage hygiene is now repo-managed (`host-hygiene` deploy
+target): Gitea dump retention by count replaced a 14-day rule that had
+accumulated 202 GB, and the control plane reports disk pressure on `/health`.
+
 Builder coding-workspace integration 2026-10-15: the Builder Control Room now
 presents the existing governed build system as one accessible coding workspace
 rather than opening Bob over the workbench as a floating modal. Desktop uses

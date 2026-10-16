@@ -4,6 +4,7 @@
 #   scripts/bob-vps-deploy.sh control-plane            # Bob control plane (deploy/bob-control-plane compose)
 #   scripts/bob-vps-deploy.sh fcm-api                  # chat lane (docker-compose.full.yml service)
 #   scripts/bob-vps-deploy.sh control-plane fcm-api    # both
+#   scripts/bob-vps-deploy.sh host-hygiene             # nightly storage clean-up + Gitea backup retention
 #
 # Every step is verified: the bundle base is the newest release the VPS already has, the release
 # worktree must exist and be at the pushed commit before anything is built, and each service's
@@ -15,7 +16,7 @@ VPS_HOST="${BOB_VPS_HOST:-72.61.123.97}"
 SSH_KEY="${BOB_VPS_SSH_KEY:-$HOME/.ssh/codespaces-kvm}"
 SSH=(ssh -i "$SSH_KEY" -o BatchMode=yes -o ConnectTimeout=15 "root@$VPS_HOST")
 
-[[ $# -ge 1 ]] || { echo "usage: $0 <control-plane|fcm-api|worker-image> [...]" >&2; exit 2; }
+[[ $# -ge 1 ]] || { echo "usage: $0 <control-plane|fcm-api|worker-image|host-hygiene> [...]" >&2; exit 2; }
 cd "$(git rev-parse --show-toplevel)"
 
 if [[ -n "$(git status --porcelain --untracked-files=no)" ]]; then
@@ -72,6 +73,13 @@ for target in "$@"; do
         docker build -q -f Dockerfile.worker -t fcm/bob-worker:current . >/dev/null && echo 'worker image built: fcm/bob-worker:current'
         docker rm -f fcm-bob-worker-keeper >/dev/null 2>&1 || true
         docker run -d --restart unless-stopped --name fcm-bob-worker-keeper --network none --memory 64m --cpus 0.05 --read-only --entrypoint sleep fcm/bob-worker:current infinity >/dev/null && echo 'worker image pinned by fcm-bob-worker-keeper'" ;;
+    host-hygiene)
+      # Host storage policy lives in the repo (deploy/bob-vps/host); the crons call the installed copies.
+      "${SSH[@]}" "set -euo pipefail; cd /srv/fcm/releases/$SHA
+        bash -n deploy/bob-vps/host/fcm-gitea-backup && bash -n deploy/bob-vps/host/vps-disk-cleanup.sh
+        install -m 755 deploy/bob-vps/host/fcm-gitea-backup /usr/local/sbin/fcm-gitea-backup
+        install -m 755 deploy/bob-vps/host/vps-disk-cleanup.sh /usr/local/bin/vps-disk-cleanup.sh
+        echo \"host hygiene installed: \$(sha256sum /usr/local/sbin/fcm-gitea-backup /usr/local/bin/vps-disk-cleanup.sh | cut -c1-12 | tr '\n' ' ')\"" ;;
     *) echo "unknown target: $target" >&2; exit 2 ;;
   esac
 done

@@ -32,14 +32,16 @@ test('model routing keeps low-risk preprocessing in-house first', () => {
 });
 
 test('model routing is in-house first with OpenAI as the outsourced fallback, per workload class', () => {
-  assert.deepEqual(routeBuilderModel({ workloadKind: 'architecture' }).chain, ['openai', 'gpu_workstation'], 'structured Builder stages use the strongest predictable provider first');
-  assert.deepEqual(routeBuilderModel({ workloadKind: 'backend_implementation' }).chain, ['openai', 'gpu_workstation'], 'unrestricted coding uses the strongest predictable provider first');
+  // Owner ruling 2026-10-16: laptop GPU, then VPS CPU, then OpenAI as the paid last resort.
+  assert.deepEqual(routeBuilderModel({ workloadKind: 'architecture' }).chain, ['gpu_workstation', 'ollama', 'openai'], 'structured Builder stages start on in-house compute');
+  assert.deepEqual(routeBuilderModel({ workloadKind: 'backend_implementation' }).chain, ['gpu_workstation', 'ollama', 'openai'], 'unrestricted coding starts on the laptop GPU');
   assert.equal(routeBuilderModel({ workloadKind: 'backend_implementation' }).reason, 'in_house_first_author');
-  assert.deepEqual(routeBuilderModel({ workloadKind: 'independent_code_review' }).chain, ['openai', 'gpu_workstation'], 'the independent check goes to the strongest reviewer first');
-  assert.deepEqual(routeBuilderModel({ workloadKind: 'independent_code_review', env: { BOB_BUILDER_ROUTE_REVIEW: 'gpu_workstation,ollama,openai' } }).chain, ['gpu_workstation', 'ollama', 'openai'], 'operators can opt the VPS back in');
+  assert.deepEqual(routeBuilderModel({ workloadKind: 'independent_code_review' }).chain, ['gpu_workstation', 'ollama', 'openai'], 'the independent check starts in-house too');
+  assert.equal(routeBuilderModel({ workloadKind: 'independent_code_review' }).chain.at(-1), 'openai', 'OpenAI is always the last resort');
+  assert.deepEqual(routeBuilderModel({ workloadKind: 'independent_code_review', env: { BOB_BUILDER_ROUTE_REVIEW: 'openai,gpu_workstation' } }).chain, ['openai', 'gpu_workstation'], 'operators can still pin a strong-first chain');
   // Operators can pin a class to OpenAI (or anything else) without a code change.
   assert.deepEqual(routeBuilderModel({ workloadKind: 'backend_implementation', env: { BOB_BUILDER_ROUTE_AUTHOR: 'openai' } }).chain, ['openai']);
-  assert.deepEqual(routeBuilderModel({ workloadKind: 'backend_implementation', env: { BOB_BUILDER_ROUTE_AUTHOR: 'nonsense' } }).chain, ['openai', 'gpu_workstation'], 'unknown providers fall back to the default chain');
+  assert.deepEqual(routeBuilderModel({ workloadKind: 'backend_implementation', env: { BOB_BUILDER_ROUTE_AUTHOR: 'nonsense' } }).chain, ['gpu_workstation', 'ollama', 'openai'], 'unknown providers fall back to the default chain');
 });
 
 test('model routing keeps restricted data local regardless of workload', () => {

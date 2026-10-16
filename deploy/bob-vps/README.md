@@ -20,6 +20,29 @@ and prunes releases older than the newest four. Never build from
 `/root/field-compliance-manager` directly: it lags and once shipped a stale
 control plane when a hand-typed deploy chain fell through (2026-09-26).
 
+## Storage hygiene
+
+`scripts/bob-vps-deploy.sh host-hygiene` installs the repo-managed host scripts
+from `deploy/bob-vps/host/`:
+
+- `fcm-gitea-backup` (cron 03:23) dumps the legacy Gitea mirror, keeps the
+  newest `GITEA_BACKUP_KEEP` (default 3) dumps, retires older ones only after a
+  new dump completes, and skips a dump that free space cannot hold with
+  headroom. Incident 2026-10-16: the previous 14-day age rule kept fifteen
+  ~18 GB dumps (202 GB) and pushed the 388 GB disk to 89%.
+- `vps-disk-cleanup.sh` (cron 02:52) prunes stopped containers, images and build
+  cache older than 24 h, unused volumes, journals older than 7 days, Gitea dump
+  backlog, human-test run evidence older than `HUMAN_TEST_RETENTION_DAYS`
+  (default 14), and Bob temp files older than 2 days. It writes
+  `/var/lib/bob/storage-hygiene.json`.
+
+Bob's control-plane `/health` reports `storage` (live disk `used_pct`,
+`available_gb`, `status` ok/warn/critical at 80/90%, and the last hygiene
+receipt), so Bob sees disk pressure before it blocks a build. Application
+evidence (`/opt/fcm/vision-derived`), model volumes, Gitea data and Builder
+workspaces are never removed by these scripts; Builder detached snapshots are
+already capped by `builder-branch-workspace.js`.
+
 ## Configure
 
 ```bash
@@ -62,12 +85,18 @@ The agentic Builder lane needs, in `/var/lib/bob/control-plane.env`:
 `BOB_BUILDER_REVIEWER_MODEL=gpt-5.4` (owner ruling 2026-09-27: cheaper but
 effective — the author makes 30–60 calls per job, the reviewer one, so the mini
 tier authors and the full tier reviews; `gpt-6-sol` at `xhigh` emptied the
-account in an afternoon). Builder routing is separate from Bob's conversational lane. Use
-`BOB_BUILDER_ROUTE_ANALYSIS=openai,gpu_workstation`,
-`BOB_BUILDER_ROUTE_AUTHOR=openai,gpu_workstation`, and
-`BOB_BUILDER_ROUTE_REVIEW=openai,gpu_workstation`. The VPS CPU is reserved for
-`BOB_BUILDER_ROUTE_LOCAL` and `BOB_BUILDER_ROUTE_RESTRICTED`; it must not make a
-simple unrestricted build wait through a long CPU timeout before escalation.
+account in an afternoon). Builder routing is separate from Bob's conversational lane.
+Owner ruling 2026-10-16 (supersedes the strong-first chains): Bob's own compute is
+the primary workforce and OpenAI is the paid last resort. Use
+`BOB_BUILDER_ROUTE_ANALYSIS=gpu_workstation,ollama,openai`,
+`BOB_BUILDER_ROUTE_AUTHOR=gpu_workstation,ollama,openai`, and
+`BOB_BUILDER_ROUTE_REVIEW=gpu_workstation,ollama,openai` (also the code default),
+`BOB_GPU_MODELS=qwen2.5-coder:7b,qwen2.5-coder:14b,qwen3:8b` (the laptop's ~6 GB
+GPU keeps the 7b resident; the 14b is the distinct in-house reviewer; `gpt-oss:20b`
+is too slow there) and `BOB_OLLAMA_MODELS=qwen2.5-coder:7b,qwen3-coder:30b,llama3.1:8b`
+so the VPS CPU tier starts on a model it can serve. The OpenAI variables above apply
+only when both in-house tiers fail. The chat lane follows the same rule: code requests
+plan in-house unless `BOB_PLAN_CODE_REQUESTS_FAST=true`.
 `GITEA_USERNAME` + `GITEA_TOKEN` (scopes `write:repository,write:issue,read:user`),
 or the GitHub publication credentials used by this deployment. For GitHub
 publication, set `BOB_BUILDER_GIT_NAME` and `BOB_BUILDER_GIT_EMAIL` to the

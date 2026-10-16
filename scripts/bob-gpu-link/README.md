@@ -153,10 +153,10 @@ the public HTTPS inference endpoint with `INFERENCE_SERVICE_URL` and
 
 - `BOB_BUILDER_ROUTE_AUTHOR` / `_REVIEW` / `_ANALYSIS` / `_LOCAL` /
   `_RESTRICTED` — comma-separated provider chains (`gpu_workstation`,
-  `ollama`, `openai`). Keep unrestricted analysis/review strong-first, authoring
-  GPU-first, and VPS Ollama out of those heavy chains. Restricted data never
-  includes `openai`. Unrestricted analysis, authoring, and review use the strong
-  provider first; the workstation GPU is the fallback.
+  `ollama`, `openai`). Owner ruling 2026-10-16: unrestricted analysis, authoring
+  and review default to `gpu_workstation,ollama,openai` — laptop GPU first, VPS
+  CPU next, OpenAI only as the paid last resort. Restricted data never includes
+  `openai`.
 - `BOB_GPU_MODELS`, `BOB_OLLAMA_MODELS` — allowlists, best model first.
 - `BOB_GPU_NUM_CTX` (default 32768), `BOB_OLLAMA_NUM_CTX` (default 16384) —
   a prompt that will not fit is sent onward instead of being truncated.

@@ -36,20 +36,20 @@ function parseChain(raw, fallback) {
   return list.length ? list : fallback;
 }
 
-// Builder has a different latency and quality contract from Bob's conversational lane. The VPS
-// CPU remains available for light and restricted work, but unrestricted structured analysis,
-// authoring, and review must not spend a full local timeout there before escalating. Live UI-build
-// acceptance on 2026-10-13 showed the VPS 30B timing out after seven minutes and the laptop 8B
-// repeatedly failing the research/UX schemas, while the strong provider completed the same
-// structured stage in about a minute. Keep the chains env-tunable, but make the safe fast path the
-// default: strong unrestricted work, GPU fallback, and no VPS CPU in either heavy path.
+// Owner ruling 2026-10-16: Bob's own compute is the primary Builder workforce. Every unrestricted
+// stage (analysis, authoring, independent review) runs on the laptop GPU first, then the VPS CPU,
+// and reaches OpenAI only as the last resort when both in-house tiers fail, time out, or return
+// output that fails validation. This supersedes the 2026-10-13 strong-first default: paying
+// OpenAI per call for 30-60 agentic turns per job is the cost the owner has ruled out.
+const IN_HOUSE_FIRST = Object.freeze([PROVIDERS.GPU_WORKSTATION, PROVIDERS.OLLAMA, PROVIDERS.OPENAI]);
+
 function routingChains(env = process.env) {
   return {
     restricted: parseChain(env.BOB_BUILDER_ROUTE_RESTRICTED, [PROVIDERS.OLLAMA, PROVIDERS.GPU_WORKSTATION]),
     local: parseChain(env.BOB_BUILDER_ROUTE_LOCAL, [PROVIDERS.GPU_WORKSTATION, PROVIDERS.OLLAMA, PROVIDERS.OPENAI]),
-    author: parseChain(env.BOB_BUILDER_ROUTE_AUTHOR, [PROVIDERS.OPENAI, PROVIDERS.GPU_WORKSTATION]),
-    review: parseChain(env.BOB_BUILDER_ROUTE_REVIEW, [PROVIDERS.OPENAI, PROVIDERS.GPU_WORKSTATION]),
-    analysis: parseChain(env.BOB_BUILDER_ROUTE_ANALYSIS, [PROVIDERS.OPENAI, PROVIDERS.GPU_WORKSTATION])
+    author: parseChain(env.BOB_BUILDER_ROUTE_AUTHOR, [...IN_HOUSE_FIRST]),
+    review: parseChain(env.BOB_BUILDER_ROUTE_REVIEW, [...IN_HOUSE_FIRST]),
+    analysis: parseChain(env.BOB_BUILDER_ROUTE_ANALYSIS, [...IN_HOUSE_FIRST])
   };
 }
 

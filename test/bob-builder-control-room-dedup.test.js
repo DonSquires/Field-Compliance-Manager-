@@ -26,3 +26,17 @@ test('run relay preserves accepted and already-running preflight receipts', () =
   assert.match(controlRoom, /started_at: result\.payload\.started_at/);
   assert.match(controlRoom, /}, result\.status\)/);
 });
+
+test('jobs created or continued from the control room are driven by Bob, and an undriven job can be handed to him (incident 2026-10-16: #84/#85 sat at intake)', () => {
+  const page = fs.readFileSync(path.resolve(__dirname, '../apps/web/src/pages/BuilderControlRoomPage.tsx'), 'utf8');
+  assert.match(page, /autopilot: true,\n  \}\);/, 'New Job defaults to Bob driving');
+  assert.match(page, /autopilot: form\.autopilot,/);
+  assert.match(page, /action: 'create_followup'[^\n]*autopilot: true/);
+  assert.match(page, /invoke\(\{ action: 'drive', job_id: selectedId \}\)/);
+  assert.match(page, /Let Bob drive/);
+  assert.match(controlRoom, /if \(action === 'drive'\) \{/);
+  assert.match(controlRoom, /admin\.rpc\('builder_autopilot_bind', \{ _job_id: jobId, _requested_by: user\.id/);
+  // The drive action sits after the per-job organisation access check, so it cannot bind a foreign job.
+  assert.ok(controlRoom.indexOf("if (action === 'drive')") > controlRoom.indexOf("if (!job || !canAccessOrganization(job.organization_id))"));
+  assert.match(controlRoom, /autopilot_requested_by, autopilot_state, created_at, updated_at'\)/, 'the queue list carries autopilot ownership');
+});
