@@ -18,7 +18,7 @@ test('house map separates LINZ source geometry from runtime geofence decisions',
   await expect(placeAddress).toContainText('1 Civic Square, Nelson');
   expect(await placeAddress.evaluate((element) => element.scrollWidth <= element.clientWidth + 1)).toBe(true);
   const map = page.getByRole('region', { name: 'Map for Civic Events House' });
-  await expect(map.getByText('2 verified place boundaries')).toBeVisible();
+  await expect(map.getByText('3 verified place boundaries')).toBeVisible();
   await expect(map.getByText('1 Site or work area need review')).toBeVisible();
   const canvas = map.locator('.house-map-canvas');
   await expect(canvas).toBeVisible();
@@ -81,5 +81,28 @@ test('Zone page retains legal authority, closure, and house geometry', async ({ 
   await expect(page.getByText('Operations administrator verified the council boundary on the map')).toBeVisible();
   await expect(page.getByText(/council_gis · verification/)).toBeVisible();
   await expect(page.getByRole('region', { name: 'Map for Civic Events House' })).toBeVisible();
+  expect(errors, errors.join('\n')).toEqual([]);
+});
+
+test('Parking zone requires photographed source evidence before field use', async ({ page }) => {
+  const errors = monitorBrowserErrors(page);
+  await signInAsAdmin(page, '/admin/zones?zone=67676767-6767-4767-8767-676767676768');
+
+  const workspace = page.getByRole('region', { name: 'Posted Parking rule' });
+  await expect(workspace).toContainText('Configuration required');
+  await expect(page.getByRole('heading', { name: 'Compliance limits' })).toHaveCount(0);
+  await workspace.getByLabel('Posted limit in minutes').fill('90');
+  await workspace.getByRole('spinbutton', { name: 'Disabled-bay multiplier' }).fill('2');
+  await workspace.getByLabel('Photograph of posted sign').setInputFiles({
+    name: 'civic-square-p90.jpg',
+    mimeType: 'image/jpeg',
+    buffer: Buffer.from('fixture-signage-image'),
+  });
+  await workspace.getByLabel('I checked the entered limit and disabled-bay multiplier against the photographed sign.').check();
+  await workspace.getByRole('button', { name: 'Save Parking rule' }).click();
+
+  await expect(workspace.getByRole('status')).toContainText('Saved P90 with photographed signage evidence');
+  await expect(workspace).toContainText('Future Parking scans use zone version 2');
+  await expect(workspace.getByText('P90', { exact: true })).toBeVisible();
   expect(errors, errors.join('\n')).toEqual([]);
 });

@@ -1,6 +1,6 @@
 import { useEffect, useState } from "react";
 import { useLocation, useNavigate } from "react-router-dom";
-import { AlertTriangle, LandPlot, MapPin } from "lucide-react";
+import { AlertTriangle, CheckCircle2, Image, LandPlot, MapPin } from "lucide-react";
 import { useAuth } from "../context/AuthContext";
 import { supabase } from "../lib/supabase";
 import {
@@ -32,6 +32,11 @@ interface ZoneRow extends HouseMapZone {
   nightly_limit_consecutive: number | null;
   nightly_limit_monthly: number | null;
   scv_required: boolean;
+  parking_time_limit_minutes: number | null;
+  parking_disabled_multiplier: number;
+  parking_signage_photo_url: string | null;
+  parking_limit_source: string | null;
+  parking_limit_set_at: string | null;
   configuration_version: number;
 }
 
@@ -101,6 +106,13 @@ export default function ZoneDetailPage() {
   const [refreshRevision, setRefreshRevision] = useState(0);
   const [complianceForm, setComplianceForm] = useState({ nightly_limit_consecutive: '', nightly_limit_monthly: '', scv_required: false });
   const [savingCompliance, setSavingCompliance] = useState(false);
+  const [parkingForm, setParkingForm] = useState({ time_limit_minutes: '', disabled_multiplier: '2' });
+  const [parkingSignageFile, setParkingSignageFile] = useState<File | null>(null);
+  const [parkingPendingPath, setParkingPendingPath] = useState<string | null>(null);
+  const [parkingRequestId, setParkingRequestId] = useState(() => crypto.randomUUID());
+  const [parkingConfirmed, setParkingConfirmed] = useState(false);
+  const [parkingSaving, setParkingSaving] = useState(false);
+  const [parkingSuccess, setParkingSuccess] = useState<string | null>(null);
 
   useEffect(() => {
     const load = async () => {
@@ -206,7 +218,16 @@ export default function ZoneDetailPage() {
       nightly_limit_monthly: selected?.nightly_limit_monthly != null ? String(selected.nightly_limit_monthly) : '',
       scv_required: selected?.scv_required ?? false,
     });
-  }, [selected]);
+    setParkingForm({
+      time_limit_minutes: selected?.parking_time_limit_minutes != null ? String(selected.parking_time_limit_minutes) : '',
+      disabled_multiplier: selected?.parking_disabled_multiplier != null ? String(selected.parking_disabled_multiplier) : '2',
+    });
+    setParkingSignageFile(null);
+    setParkingPendingPath(null);
+    setParkingRequestId(crypto.randomUUID());
+    setParkingConfirmed(false);
+    setParkingSuccess(null);
+  }, [selected?.id]);
 
   const handleSaveCompliance = async () => {
     if (!selected || savingCompliance) return;
@@ -243,6 +264,106 @@ export default function ZoneDetailPage() {
       setZones(zones.map((z) => (z.id === updated.id ? updated : z)));
     }
     setSavingCompliance(false);
+  };
+
+  const changeParkingDraft = (next: Partial<typeof parkingForm>) => {
+    setParkingForm((current) => ({ ...current, ...next }));
+    setParkingRequestId(crypto.randomUUID());
+    setParkingPendingPath(null);
+    setParkingSuccess(null);
+  };
+
+  const keepCurrentParkingRule = () => {
+    if (!selected) return;
+    setParkingForm({
+      time_limit_minutes: selected.parking_time_limit_minutes != null ? String(selected.parking_time_limit_minutes) : '',
+      disabled_multiplier: String(selected.parking_disabled_multiplier ?? 2),
+    });
+    setParkingSignageFile(null);
+    setParkingPendingPath(null);
+    setParkingRequestId(crypto.randomUUID());
+    setParkingConfirmed(false);
+    setParkingSuccess(null);
+    setError(null);
+  };
+
+  const handleSaveParkingRule = async () => {
+    if (!selected || parkingSaving) return;
+    const timeLimit = Number(parkingForm.time_limit_minutes);
+    const disabledMultiplier = Number(parkingForm.disabled_multiplier);
+    if (!Number.isInteger(timeLimit) || timeLimit < 1 || timeLimit > 1440) {
+      setError('Parking time limit must be a whole number between 1 and 1440 minutes.');
+      return;
+    }
+    if (!Number.isFinite(disabledMultiplier) || disabledMultiplier < 1 || disabledMultiplier > 4) {
+      setError('Disabled-bay multiplier must be between 1 and 4.');
+      return;
+    }
+    if (!selected.parking_signage_photo_url && !parkingSignageFile && !parkingPendingPath) {
+      setError('Add a photograph of the posted Parking sign before saving this rule.');
+      return;
+    }
+    if (!parkingConfirmed) {
+      setError('Confirm that the limit matches the photographed sign before saving.');
+      return;
+    }
+    const supportedSignageTypes = ['image/jpeg', 'image/png', 'image/webp'];
+    if (parkingSignageFile && (!supportedSignageTypes.includes(parkingSignageFile.type) || parkingSignageFile.size > 15 * 1024 * 1024)) {
+      setError('Parking signage evidence must be a JPEG, PNG, or WebP image no larger than 15 MB.');
+      return;
+    }
+
+    setParkingSaving(true);
+    setParkingSuccess(null);
+    setError(null);
+    let signagePath = parkingPendingPath ?? selected.parking_signage_photo_url;
+    if (parkingSignageFile && !parkingPendingPath) {
+      const extension = parkingSignageFile.type === 'image/png'
+        ? 'png'
+        : parkingSignageFile.type === 'image/webp'
+          ? 'webp'
+          : 'jpg';
+      signagePath = `org/${selected.organization_id}/parking-signage/${selected.id}/${parkingRequestId}.${extension}`;
+      const { error: uploadError } = await supabase.storage
+        .from('scans')
+        .upload(signagePath, parkingSignageFile, {
+          contentType: parkingSignageFile.type,
+          upsert: false,
+        });
+      if (uploadError) {
+        setError(`Parking signage evidence could not be uploaded: ${uploadError.message}`);
+        setParkingSaving(false);
+        return;
+      }
+      setParkingPendingPath(signagePath);
+    }
+
+    // ATLAS WRITES: location_zones via manage_parking_zone_rule
+    const { data, error: saveError } = await supabase.rpc('manage_parking_zone_rule', {
+      p_client_request_id: parkingRequestId,
+      p_zone_id: selected.id,
+      p_expected_version: selected.configuration_version,
+      p_time_limit_minutes: timeLimit,
+      p_disabled_multiplier: disabledMultiplier,
+      p_limit_source: 'manual',
+      p_signage_photo_path: signagePath,
+    });
+    if (saveError) {
+      setError(`Parking rule was not saved: ${saveError.message}. Retry without changing the values so the same request can be checked safely.`);
+      setParkingSaving(false);
+      return;
+    }
+
+    const saved = data as Partial<ZoneRow>;
+    const updated = { ...selected, ...saved };
+    setSelected(updated);
+    setZones((current) => current.map((zone) => (zone.id === updated.id ? updated : zone)));
+    setParkingSignageFile(null);
+    setParkingPendingPath(null);
+    setParkingConfirmed(false);
+    setParkingRequestId(crypto.randomUUID());
+    setParkingSuccess(`Saved P${updated.parking_time_limit_minutes} with photographed signage evidence. Future Parking scans use zone version ${updated.configuration_version}.`);
+    setParkingSaving(false);
   };
 
   if (loading)
@@ -377,6 +498,7 @@ export default function ZoneDetailPage() {
                 setZones((current) => current.map((zone) => (zone.id === updated.id ? updated : zone)));
               }}
             />
+            {selected.module_key === 'freedom_camping' && (
             <section className="reports-section">
               <h3>Compliance limits</h3>
               <div className="form-group">
@@ -413,6 +535,108 @@ export default function ZoneDetailPage() {
                 {savingCompliance ? 'Saving…' : 'Save Compliance Limits'}
               </button>
             </section>
+            )}
+            {selected.module_key === 'parking_enforcement' && selected.zone_type === 'parking' && (
+              <section className="reports-section parking-rule-workspace" aria-labelledby="parking-rule-heading">
+                <div className="parking-rule-heading">
+                  <div>
+                    <h3 id="parking-rule-heading">Posted Parking rule</h3>
+                    <p>
+                      Configure the photographed sign before officers use this zone. Future scans resolve this rule;
+                      existing chalk and notice evidence remains unchanged.
+                    </p>
+                  </div>
+                  <span className={`status-badge status-${selected.parking_time_limit_minutes ? 'active' : 'inactive'}`}>
+                    {selected.parking_time_limit_minutes ? `P${selected.parking_time_limit_minutes}` : 'Configuration required'}
+                  </span>
+                </div>
+                <div className="parking-rule-fields">
+                  <div className="form-group">
+                    <label htmlFor="parking-time-limit">Posted limit in minutes</label>
+                    <input
+                      id="parking-time-limit"
+                      type="number"
+                      min={1}
+                      max={1440}
+                      step={1}
+                      value={parkingForm.time_limit_minutes}
+                      onChange={(event) => changeParkingDraft({ time_limit_minutes: event.target.value })}
+                      placeholder="For example, 60"
+                    />
+                  </div>
+                  <div className="form-group">
+                    <label htmlFor="parking-disabled-multiplier">Disabled-bay multiplier</label>
+                    <input
+                      id="parking-disabled-multiplier"
+                      type="number"
+                      min={1}
+                      max={4}
+                      step={0.25}
+                      value={parkingForm.disabled_multiplier}
+                      onChange={(event) => changeParkingDraft({ disabled_multiplier: event.target.value })}
+                    />
+                  </div>
+                </div>
+                <div className="parking-signage-evidence">
+                  <Image size={18} aria-hidden="true" />
+                  <div>
+                    <label htmlFor="parking-signage-photo">
+                      {selected.parking_signage_photo_url ? 'Replace photographed sign' : 'Photograph of posted sign'}
+                    </label>
+                    <input
+                      id="parking-signage-photo"
+                      type="file"
+                      accept="image/jpeg,image/png,image/webp"
+                      onChange={(event) => {
+                        setParkingSignageFile(event.target.files?.[0] ?? null);
+                        setParkingPendingPath(null);
+                        setParkingRequestId(crypto.randomUUID());
+                        setParkingSuccess(null);
+                      }}
+                    />
+                    <small>
+                      {parkingPendingPath
+                        ? 'The private evidence upload is ready; retrying will reuse it.'
+                        : selected.parking_signage_photo_url
+                          ? `Current source: ${selected.parking_limit_source?.replaceAll('_', ' ') ?? 'recorded signage'}`
+                          : 'Required. Image files up to 15 MB are retained in the private scans bucket.'}
+                    </small>
+                  </div>
+                </div>
+                <label className="parking-rule-confirmation">
+                  <input
+                    type="checkbox"
+                    checked={parkingConfirmed}
+                    onChange={(event) => setParkingConfirmed(event.target.checked)}
+                  />
+                  I checked the entered limit and disabled-bay multiplier against the photographed sign.
+                </label>
+                {parkingSuccess && (
+                  <div className="parking-rule-success" role="status">
+                    <CheckCircle2 size={17} aria-hidden="true" />
+                    {parkingSuccess}
+                  </div>
+                )}
+                <div className="parking-rule-actions">
+                  <button
+                    type="button"
+                    className="btn btn-primary btn-sm"
+                    onClick={() => void handleSaveParkingRule()}
+                    disabled={parkingSaving}
+                  >
+                    {parkingSaving ? 'Saving photographed rule…' : 'Save Parking rule'}
+                  </button>
+                  <button
+                    type="button"
+                    className="btn btn-secondary btn-sm"
+                    onClick={keepCurrentParkingRule}
+                    disabled={parkingSaving}
+                  >
+                    Keep current rule
+                  </button>
+                </div>
+              </section>
+            )}
             {(selected.bylaw_clause || selected.bylaw_source_url) && (
               <section className="reports-section">
                 <h3>Legal authority</h3>

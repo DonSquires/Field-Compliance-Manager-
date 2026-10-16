@@ -18,4 +18,10 @@ describe('ZoneDetailPage compliance limit authoring', () => {
     expect(zoneSource).toContain("complianceForm.nightly_limit_consecutive.trim() ? Number(complianceForm.nightly_limit_consecutive) : null");
     expect(zoneSource).toContain("complianceForm.nightly_limit_monthly.trim() ? Number(complianceForm.nightly_limit_monthly) : null");
   });
+
+  it('shows freedom-camping limits only on the matching module instead of every zone', () => {
+    expect(zoneSource).toContain("selected.module_key === 'freedom_camping'");
+    expect(zoneSource).toContain("selected.module_key === 'parking_enforcement'");
+    expect(zoneSource).toContain("selected.zone_type === 'parking'");
+  });
 });

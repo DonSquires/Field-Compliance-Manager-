@@ -47176,6 +47176,7 @@ export type Database = {
       }
       manage_parking_zone_rule: {
         Args: {
+          p_client_request_id: string
           p_disabled_multiplier: number
           p_expected_version: number
           p_limit_source: string

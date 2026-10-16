@@ -1537,3 +1537,37 @@ remains unpopulated.
   calibration promoted exactly the two RPCs backed by successful cron
   receipts. Bounded gaps move 126 -> 124: 0 Edge Functions, 72 RPCs and 52
   tables.
+
+### Closure log - source-backed Parking zone rule authoring
+
+- The Trackforce-style configure-before-deploy check found a real task gap in
+  the Parking zone workspace. The field scanner already consumes the zone's
+  effective time limit and disabled-bay multiplier, but the administrator
+  surface did not provide a governed way to establish those values from the
+  posted sign before officers used the zone.
+- Before: a Parking zone could reach field use with missing rule provenance and
+  no required sign photograph. Directly editing `location_zones` would have
+  bypassed tenant, agreement/place authority, optimistic concurrency, replay
+  protection, and audit evidence.
+- During: the zone workspace now requires a whole-minute posted limit, a
+  bounded disabled-bay multiplier, an image upload to the tenant/zone-scoped
+  private `scans` path, and explicit human confirmation that the values match
+  the photographed sign. **Keep current rule** is the safe exit. The governed
+  RPC locks the zone, proves the administrator and canonical place authority,
+  validates Parking module identity and provenance, rejects stale versions,
+  and accepts only JPEG, PNG, or WebP evidence stored under the governed path.
+- After: one immutable configuration version is written, the previous and
+  resulting rule snapshots are recorded in `audit_log`, and a replayed request
+  returns the same resulting row without a second update. The scanner's
+  effective-rule path remains the consumer, so the setup action drives the same
+  operational rule used in the field rather than creating a parallel setting.
+- This adopts Trackforce's useful site/rule readiness sequence without copying
+  its product model: the canonical zone, place, module profile, sign evidence,
+  field scan, and audit receipt remain FCM's authorities. No enforcement claim
+  is made from an unverified or missing sign source.
+- The linked migration is applied and the live schema snapshot is regenerated.
+  Six focused governance tests, eight desktop/mobile geofence workflow tests,
+  web/E2E type-checks, and the production build pass. Atlas records
+  `pages/ZoneDetailPage -calls-> rpc manage_parking_zone_rule`; runtime
+  exercise remains `null` because the acceptance fixture is not production
+  invocation evidence.
