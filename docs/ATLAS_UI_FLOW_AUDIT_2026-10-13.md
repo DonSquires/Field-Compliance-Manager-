@@ -1935,3 +1935,23 @@ remains unpopulated.
   The dry-run manifest remains at 1,361 capabilities and moves from 7,383 to
   7,441 edges. Applying these additions should move the bounded live gap count
   from 113 to 110; final live verification remains required after release.
+## 2026-10-16 — Retire the unused generic rule-snapshot mutation API
+
+- **Expected:** effective-rule snapshots form an immutable operational receipt
+  of the rule context that governed a field event. Each live event path should
+  have one accountable capture mechanism, rather than a second generic write
+  API that can manufacture equivalent receipts without the event transition.
+- **Present before:** `capture_effective_rule_snapshot` was exposed to
+  authenticated callers and could insert or replace
+  `effective_rule_snapshots`, but Atlas and source inspection found no caller.
+  All sampled live snapshots were created for `observations`, whose database
+  trigger writes the ledger directly through
+  `capture_observation_effective_rule_snapshot`.
+- **Change:** retire the unused generic RPC while preserving the snapshot
+  table, its existing records, and the observation trigger. Future event types
+  must add an explicit governed capture path tied to their own transition
+  instead of reviving a context-free mutation endpoint.
+- **Trackforce consideration:** durable operational receipts are valuable only
+  when the action that created them is attributable. Removing an unused
+  alternate writer strengthens the chain from field observation to immutable
+  rule context without adding a screen or claiming runtime exercise.

@@ -36283,50 +36283,6 @@ export type Database = {
         }
         Returns: string
       }
-      capture_effective_rule_snapshot: {
-        Args: {
-          p_captured_at?: string
-          p_effective_rules?: Json
-          p_governing_jurisdiction_id?: string
-          p_governing_jurisdiction_name?: string
-          p_jurisdiction_rule_set_id?: string
-          p_matched_location_id?: string
-          p_matched_site_id?: string
-          p_matched_zone_id?: string
-          p_module_key: string
-          p_organization_id: string
-          p_resolution_status?: string
-          p_rule_set_id?: string
-          p_rule_set_name?: string
-          p_source_event_id?: string
-          p_source_event_table?: string
-        }
-        Returns: {
-          captured_at: string
-          created_at: string
-          effective_rules: Json
-          governing_jurisdiction_id: string | null
-          governing_jurisdiction_name: string | null
-          id: string
-          jurisdiction_rule_set_id: string | null
-          matched_location_id: string | null
-          matched_site_id: string | null
-          matched_zone_id: string | null
-          module_key: string
-          organization_id: string
-          resolution_status: string
-          rule_set_id: string | null
-          rule_set_name: string | null
-          source_event_id: string | null
-          source_event_table: string | null
-        }
-        SetofOptions: {
-          from: "*"
-          to: "effective_rule_snapshots"
-          isOneToOne: true
-          isSetofReturn: false
-        }
-      }
       cctv_bbox_is_stationary: {
         Args: { p_left: Json; p_right: Json }
         Returns: boolean
