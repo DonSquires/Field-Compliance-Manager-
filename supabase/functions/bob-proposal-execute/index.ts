@@ -124,7 +124,8 @@ const SUPPORTED_ACTIONS = new Set([
   'apply_roster_fill_plan',
   'rollback_bob_roster_plan',
   'create_rate_rule',
-  'start_staff_onboarding'
+  'start_staff_onboarding',
+  'create_org_compliance_record'
 ]);
 async function fetchTaBoundary(districtName: string) {
   const resolution = await resolveTaBoundary(districtName);
@@ -260,6 +261,12 @@ serve(async (req)=>{
       if (rateError || !rateRuleId) return await failAction(`apply_bob_rate_rule_proposal failed: ${rateError?.message ?? 'missing receipt'}`);
       await admin.from('bob_agentic_actions').update({ status: 'applied', result_table: 'rate_rules', result_record_id: rateRuleId, applied_at: new Date().toISOString(), error_message: null }).eq('id', action.id);
       return json({ success: true, action_id: action.id, result_table: 'rate_rules', result_record_id: rateRuleId, note: 'Approved rate rule applied.' });
+    }
+    if (action.action_type === 'create_org_compliance_record') {
+      const { data: recordId, error: complianceError } = await admin.rpc('apply_bob_compliance_record_proposal', { p_action_id: action.id });
+      if (complianceError || !recordId) return await failAction(`apply_bob_compliance_record_proposal failed: ${complianceError?.message ?? 'missing receipt'}`);
+      await admin.from('bob_agentic_actions').update({ status: 'applied', result_table: 'organization_compliance_records', result_record_id: recordId, applied_at: new Date().toISOString(), error_message: null }).eq('id', action.id);
+      return json({ success: true, action_id: action.id, result_table: 'organization_compliance_records', result_record_id: recordId, note: 'Approved compliance record added as unverified. A master must verify the evidence in the organisation Compliance section.' });
     }
     if (action.action_type === 'start_staff_onboarding') {
       const { data: ledgerId, error: onboardingError } = await admin.rpc('apply_bob_staff_onboarding_proposal', { p_action_id: action.id });

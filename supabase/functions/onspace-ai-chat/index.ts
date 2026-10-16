@@ -661,6 +661,7 @@ function budgetKnowledgeCards(cards) {
     'propose_roster_fill',
     'propose_roster_rollback',
     'propose_rate_rule',
+    'propose_compliance_record',
     'propose_zone_patrol_stop',
     'promote_action',
     'confirm_import',
@@ -773,6 +774,7 @@ const WRITE_CAPABLE_TOOLS = new Set([
   'propose_roster_rollback',
   'propose_rate_rule',
   'propose_staff_onboarding',
+  'propose_compliance_record',
   'propose_zone_patrol_stop',
   'propose_freedom_camping_org_strategy',
   'job_plan_create',
@@ -998,7 +1000,7 @@ async function resolveUserCapabilities(supabase, role, orgId, userId = null) {
   if (canCompareData) allowedTools.push('client_site_compare', 'query_records', 'scv_lookup', 'site_risk', 'resolve_point_context', 'document_search', 'resolve_geofence');
   if (canInspectSchema) allowedTools.push('schema_inspect');
   if (canIngest) allowedTools.push('ingest_document', 'plan_import', 'plan_patrol_import', 'perceive_media', 'confirm_import', 'inventory_document_source', 'create_document_draft');
-  if (canPromote) allowedTools.push('promote_action', 'propose_client_onboarding', 'propose_corporate_profile', 'propose_freedom_camping_zone', 'propose_zone_patrol_stop', 'propose_patrol_route_assignment', 'propose_patrol_route_service_area', 'propose_org_jurisdiction', 'propose_roster_fill', 'propose_roster_rollback', 'propose_rate_rule', 'propose_staff_onboarding', 'propose_site_risk', 'propose_freedom_camping_org_strategy');
+  if (canPromote) allowedTools.push('promote_action', 'propose_client_onboarding', 'propose_corporate_profile', 'propose_freedom_camping_zone', 'propose_zone_patrol_stop', 'propose_patrol_route_assignment', 'propose_patrol_route_service_area', 'propose_org_jurisdiction', 'propose_roster_fill', 'propose_roster_rollback', 'propose_rate_rule', 'propose_staff_onboarding', 'propose_compliance_record', 'propose_site_risk', 'propose_freedom_camping_org_strategy');
   if (tier !== 'guest') allowedTools.push('perceive_media', 'web_research', 'triage_friction');
   if (canCompareData) allowedTools.push('fetch_bylaw_source');
   if (canWrite || canIngest || canPromote) allowedTools.push('job_runner');
@@ -1666,6 +1668,7 @@ function attachGuidedProposalWorkflow(meta) {
     t.tool === 'inventory_document_source' && caps.canIngest ||
     t.tool === 'create_document_draft' && caps.canIngest ||
     t.tool === 'propose_corporate_profile' && caps.canPromote ||
+    t.tool === 'propose_compliance_record' && caps.canPromote ||
     t.tool === 'propose_client_root_org' && caps.tier === 'admiral' ||
     // same gate as every single-action propose_* tool; a plan approval is the
     // same kind of human decision, just at plan granularity (#86 Phase 3).
@@ -5875,7 +5878,7 @@ async function execProposeClientOnboarding(authHeader, caps, orgId, args) {
     }
   };
 }
-// ATLAS CALLS: bob-propose-roster-fill, bob-propose-roster-rollback, bob-propose-rate-rule, bob-propose-staff-onboarding
+// ATLAS CALLS: bob-propose-roster-fill, bob-propose-roster-rollback, bob-propose-rate-rule, bob-propose-staff-onboarding, bob-propose-compliance-record
 async function execProposeRosterFill(authHeader, caps, orgId, args) {
   if (!caps.canPromote) return { reply: 'Roster-fill proposals require an admin, master, or grand master.', meta: { tool: 'propose_roster_fill', outcome: 'forbidden' } };
   const periodStart = String(args.period_start ?? '').trim();
@@ -5905,6 +5908,30 @@ async function execProposeRateRule(authHeader, caps, orgId, args) {
   const result = await callFn('bob-propose-rate-rule', authHeader, payload);
   if (!result.ok) return { reply: `I could not prepare the rate rule (${result.data?.error ?? result.status}).`, meta: { tool: 'propose_rate_rule', outcome: 'failed', error: result.data?.error ?? null } };
   return { reply: 'I created a pending rate-rule proposal. A finance administrator must approve it before it affects roster, dispatch, or billing calculations.', meta: { tool: 'propose_rate_rule', outcome: 'ok', action_id: result.data?.action_id ?? null } };
+}
+async function execProposeComplianceRecord(authHeader, caps, args) {
+  if (!caps.canPromote) return { reply: 'Compliance-register proposals need an admin, master, or grand master.', meta: { tool: 'propose_compliance_record', outcome: 'forbidden' } };
+  const organizationId = String(args.organization_id ?? '').trim();
+  if (!organizationId) return { reply: 'I need the exact organisation before I can file compliance-register proposals. Look it up with query_records first.', meta: { tool: 'propose_compliance_record', outcome: 'need_organization_id' } };
+  const records = Array.isArray(args.records) ? args.records : args.record_type ? [args] : [];
+  if (!records.length) return { reply: 'Tell me which compliance records to propose (type, name, source document, and source date).', meta: { tool: 'propose_compliance_record', outcome: 'need_records' } };
+  const result = await callFn('bob-propose-compliance-record', authHeader, {
+    organization_id: organizationId,
+    records,
+    reasoning: typeof args.reasoning === 'string' ? args.reasoning : undefined,
+    context_summary: typeof args.context_summary === 'string' ? args.context_summary : undefined,
+    conversation_id: args._conversation_id
+  });
+  const results = Array.isArray(result.data?.results) ? result.data.results : [];
+  if (!result.ok || !result.data?.success) {
+    const reason = result.data?.error ?? results.map((r) => `${r.name}: ${r.error ?? r.outcome}`).join('; ') ?? result.status;
+    return { reply: `I could not file the compliance-register proposals (${reason}).`, meta: { tool: 'propose_compliance_record', outcome: 'failed', error: reason, results } };
+  }
+  const lines = results.map((r) => `- **${r.name}** — ${r.outcome === 'pending' ? `pending approval${r.supersedes ? ' (supersedes the current record)' : ''}` : r.outcome === 'already_pending' ? 'already waiting for approval' : `not filed: ${r.error ?? r.outcome}`}`);
+  return {
+    reply: [String(result.data.note ?? 'Compliance-register proposals are ready for approval.'), ...lines].join('\n'),
+    meta: { tool: 'propose_compliance_record', outcome: 'ok', action_ids: result.data.action_ids ?? [], organization_id: result.data.organization_id ?? organizationId, results }
+  };
 }
 async function execProposeStaffOnboarding(authHeader, caps, args) {
   if (!caps.canPromote) return { reply: 'Staff onboarding proposals require an administrator.', meta: { tool: 'propose_staff_onboarding', outcome: 'forbidden' } };
@@ -9293,6 +9320,8 @@ serve(async (req)=>{
           return execProposeRosterRollback(authHeader, caps, toolArgs);
         case 'propose_rate_rule':
           return execProposeRateRule(authHeader, caps, orgId, toolArgs);
+        case 'propose_compliance_record':
+          return execProposeComplianceRecord(authHeader, caps, toolArgs);
         case 'propose_staff_onboarding':
           return execProposeStaffOnboarding(authHeader, caps, toolArgs);
         case 'propose_zone_patrol_stop':
