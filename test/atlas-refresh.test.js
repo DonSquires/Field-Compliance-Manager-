@@ -672,7 +672,7 @@ test('managed user spine routes identity and access through governed RPCs', () =
   assert.equal(atlas.edges.some((edge) => ['components/UserIdentityWorkspace', 'pages/UserManagementPage', 'pages/AccessControlPage'].includes(edge.source_name) && ['user_profiles', 'preset_assignments', 'staff_area_grants'].includes(edge.target_name) && edge.edge_kind === 'writes'), false);
 });
 
-test('Atlas refresh replaces matching manual rows and retires stale manual rows', () => {
+test('Atlas refresh replaces matching rows and retires all stale generator-owned edges', () => {
   const manifest = {
     capabilities: [{
       entity_type: 'table', entity_name: 'alpha', present: true, wired: true,
@@ -725,9 +725,12 @@ test('Atlas refresh replaces matching manual rows and retires stale manual rows'
   assert.equal(plan.capabilityUpserts.length, 1);
   assert.deepEqual(plan.capabilityRetireIds, ['stale-cap']);
   assert.equal(plan.edgeUpserts.length, 1);
-  assert.deepEqual(plan.edgeRetireIds, ['owned-stale', 'managed-pre-marker']);
-  assert.equal(plan.edgeRetireIds.includes('legacy-generator'), false);
-  assert.equal(plan.edgeRetireIds.includes('unmanaged-pre-marker'), false);
+  assert.deepEqual(plan.edgeRetireIds, [
+    'owned-stale',
+    'legacy-generator',
+    'managed-pre-marker',
+    'unmanaged-pre-marker',
+  ]);
 });
 
 test('Atlas refresh retains generated column inventory until column derivation is available', () => {
@@ -773,7 +776,11 @@ test('Atlas refresh retires stale generated and manual edges when their source i
 
   const plan = buildRefreshPlan(manifest, [], existingEdges);
 
-  assert.deepEqual(plan.edgeRetireIds, ['deleted-source', 'manual-deleted-source']);
+  assert.deepEqual(plan.edgeRetireIds, [
+    'deleted-source',
+    'current-source',
+    'manual-deleted-source',
+  ]);
 });
 
 test('Atlas refresh plan preserves exercised state on CI-owned capabilities', () => {
