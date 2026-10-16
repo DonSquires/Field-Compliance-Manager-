@@ -2029,3 +2029,102 @@ remains unpopulated.
 - **Trackforce consideration:** a retired road must not remain visible as a
   live route. Contradictory map edges weaken incident reconstruction and support
   decisions even when the capability gap count is correct.
+## 2026-10-17 — Wire durable noise-control job numbers
+
+- **Expected:** each new noise assessment receives one human-readable,
+  collision-resistant operational identifier at creation. Retries return the
+  existing assessment rather than consuming another identifier.
+- **Present before:** the schema described `job_number` as auto-generated and
+  exposed `generate_noise_job_number`, but no default, trigger, or submission
+  RPC called it. All 76 sampled live assessments had a null job number,
+  including 73 completed records.
+- **Change:** a `BEFORE INSERT` trigger fills only missing job numbers from the
+  existing sequence generator, and a partial unique index enforces uniqueness.
+  Existing historical rows remain unchanged rather than receiving invented
+  retrospective receipts.
+- **Trackforce consideration:** the job number is the short operational handle
+  used across dispatch, attendance, evidence, reports, and follow-up. Allocating
+  it at the database boundary gives every future job one durable receipt without
+  moving authority into a screen.
+- **Verified live:** a transactional insert generated a correctly formatted
+  `NC-YYYY-NNNNNN` value and was rolled back. The enabled trigger, partial
+  unique index, fixed `search_path`, and revoked browser execution privileges
+  are present. The 76 historical assessments remain unchanged with null job
+  numbers; Atlas now derives the internal
+  `assign_noise_job_number -> generate_noise_job_number` call without claiming
+  runtime exercise.
+
+## 2026-10-17 — Retire partial patrol-stop helper RPCs
+
+- **Expected before:** an officer receives the complete contracted-stop brief
+  for their own shift, including the place, SLA, instructions, all assigned
+  modules, attendance state, and the guarded next action.
+- **Present before:** `get_officer_patrol_stops` and
+  `manage_officer_patrol_stop` already provide that accountable read/action
+  path and are called by `OfficerPatrolStops`. The older
+  `patrol_stop_coords` and `patrol_stop_module_keys` functions had no current
+  repository caller, no database dependent, and zero recorded calls. Both were
+  public `SECURITY DEFINER` endpoints returning only fragments of the same
+  stop.
+- **During:** the canonical component loads the officer-scoped stop bundle,
+  records arrival/departure through an expected-status command, displays
+  errors, and retains the returned attendance receipt. Five stops are
+  currently active across the live 15-stop / 12-tool-assignment corpus.
+- **After:** the canonical path persists stop status, GPS verification, SLA
+  state, notes, audit evidence, and a durable receipt for the next actor. The
+  partial predecessor RPCs and their modular source files are removed; no
+  operational stop or module record is changed.
+- **Trackforce consideration:** one shift stop must have one authoritative
+  operational state and one accountable transition path. Keeping public
+  fragment readers beside the complete officer-scoped workflow creates
+  ambiguous roads without improving route, attendance, or exception handling.
+- **Verified live:** both predecessor RPCs return `404 / PGRST202`; the two
+  canonical patrol RPCs remain present, and all 15 stops, five active stops,
+  and 12 stop-tool assignments remain unchanged. The refreshed manifest
+  contains neither predecessor capability nor its stale inbound edges while
+  retaining both canonical RPCs as wired. Static evidence does not establish
+  runtime exercise.
+
+## 2026-10-17 — Enforcement-mode contradiction requires an owner ruling
+
+- **Observed:** organisation and zone settings offer `officer_direct`,
+  `admin_first`, and `hybrid`, and `resolve_enforcement_mode` says it gates
+  direct field issuance. The resolver has no caller. The current breach path
+  requires `is_admin_for_org` before selecting an enforcement action, and the
+  admin page then generates a draft notice.
+- **User/job affected:** an organisation configuring who may issue a notice
+  cannot rely on the selected mode to change the operational path today.
+- **Tradeoff:** wiring officer-direct issuance would shorten field response but
+  changes legal authority, review, signature, evidence, and exception handling.
+  Retiring the setting would make the current admin-first behavior honest but
+  remove a configured policy option.
+- **Status:** unresolved design contradiction, not yet called a defect. Do not
+  wire or retire the mode until the owner confirms whether direct and hybrid
+  field issuance remain intended.
+
+## 2026-10-17 — Retire the unscoped repeat-stay helper
+
+- **Expected before:** a vehicle scan resolves the rule for the verified zone,
+  produces one compliance verdict, persists that verdict on the observation,
+  and creates any breach alert from the same result.
+- **Present before:** `process-officer-scan` already calls
+  `calculate_vehicle_compliance` and carries its night counts, limits, reason,
+  enforcement exemption, observation ID, and breach-alert ID through one
+  governed pipeline. The older NCC-specific `check_repeat_stay` function had
+  no caller, no database dependent, and zero recorded calls.
+- **Risk before:** the older function was a public `SECURITY DEFINER` endpoint
+  that accepted an arbitrary organisation ID and returned cross-observation
+  repeat-stay information outside the governed scan receipt.
+- **Change:** remove `check_repeat_stay` and its modular source. Preserve
+  `calculate_vehicle_compliance`, the 8,106 observations, 12 breach alerts, and
+  all persisted compliance results.
+- **Trackforce consideration:** one scan must produce one authoritative verdict
+  and exception path. A second callable calculator with a hardcoded 500-metre
+  rule can disagree with the configured zone rule and weaken reconstruction of
+  why an officer saw or acted on a breach.
+- **Verified live:** the retired RPC returns `404 / PGRST202`;
+  `calculate_vehicle_compliance` remains present and wired through
+  `process-officer-scan`; and the 8,106 observations, 12 breach alerts, and 15
+  persisted night-count results remain unchanged. The refreshed manifest
+  contains no `check_repeat_stay` capability and does not claim runtime
+  exercise for the canonical calculator.
