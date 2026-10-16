@@ -2015,3 +2015,17 @@ remains unpopulated.
 - **Trackforce consideration:** sequential operational identifiers are custody
   receipts, not display formatting. One atomic allocation road avoids duplicate
   notices, ambiguous audit evidence, and hidden support paths.
+## 2026-10-17 — Retire pre-marker generator edges authoritatively
+
+- **Expected:** the current release manifest is authoritative for
+  `ci_generator` terrain. A generated edge absent from that manifest must become
+  legacy, even when it predates the repository-owner marker.
+- **Present before:** retirement required the newer marker or a small set of
+  compatibility conditions. Two old migration-derived edges therefore remained
+  live after `notice_counters` became a legacy capability.
+- **Change:** any absent live `ci_generator` edge is eligible for retirement.
+  Scoped refresh still limits which entities can move, protecting unrelated
+  concurrent terrain.
+- **Trackforce consideration:** a retired road must not remain visible as a
+  live route. Contradictory map edges weaken incident reconstruction and support
+  decisions even when the capability gap count is correct.

@@ -906,7 +906,7 @@ function buildRefreshPlan(manifest, existingCapabilities, existingEdges) {
       && (String(existing.source_file || '').startsWith('apps/web/src/')
         || String(existing.source_file || '').startsWith('supabase/functions/'))
       && !repositoryFiles.has(existing.source_file);
-    if ((String(existing.caller_context || '').startsWith(OWNER_MARKER) || legacyManagedContext || deletedRepositorySource || existing.refresh_source === 'manual_seed')
+    if ((existing.refresh_source === 'ci_generator' || String(existing.caller_context || '').startsWith(OWNER_MARKER) || legacyManagedContext || deletedRepositorySource || existing.refresh_source === 'manual_seed')
         && existing.retirement_status !== 'legacy'
         && !generatedEdgeKeys.has(edgeKey(existing))) {
       plan.edgeRetireIds.push(existing.id);
