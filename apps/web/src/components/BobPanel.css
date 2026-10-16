@@ -76,6 +76,10 @@
   position: relative;
 }
 
+.bob-panel.is-docked .bob-drawer-head {
+  display: flex;
+}
+
 .bob-panel.is-docked .bob-session-sidebar,
 .bob-panel.is-docked .bob-context-panel {
   position: absolute;
@@ -587,8 +591,8 @@
 }
 
 .bob-answer-choices button {
-  min-height: 30px;
-  padding: 0 12px;
+  min-height: 44px;
+  padding: 8px 12px;
   border: 1px solid #7dd3c7;
   border-radius: 999px;
   color: #d6fff8;
@@ -596,8 +600,14 @@
   cursor: pointer;
   font: inherit;
   font-size: 12px;
+  text-align: left;
+  overflow-wrap: anywhere;
 }
 
+.bob-guidance p { margin: 10px 0 0; font-size: 12px; color: #b3c9d6; }
+.bob-answer-choices button small { display: block; font-size: 10px; font-weight: 700; }
+.bob-answer-choices button.is-recommended { border-width: 2px; background: #17454f; }
+.bob-answer-choices button:focus-visible { outline: 2px solid #fff; outline-offset: 3px; }
 .bob-answer-choices button:hover:not(:disabled) {
   background: #17454f;
 }
@@ -2176,5 +2186,65 @@
     z-index: auto;
     flex: 1 1 auto;
     border-left: 0;
+  }
+}
+
+/* Shell-owned space: Bob never covers the working page. */
+.bob-standalone-workspace { height: 100%; min-height: 65dvh; }
+
+.bob-page-layout {
+  display: flex;
+  flex: 1 1 0;
+  min-width: 0;
+  min-height: 0;
+  overflow: hidden;
+}
+
+.bob-page-layout > main {
+  flex: 1 1 0;
+  min-width: 0;
+  min-height: 0;
+  overflow: auto;
+}
+
+.bob-page-layout > .bob-panel.is-docked {
+  flex: 0 0 clamp(360px, 34vw, 500px);
+  width: clamp(360px, 34vw, 500px);
+  height: 100%;
+  min-width: 0;
+  min-height: 0;
+  border-left: 1px solid #31485b;
+  border-radius: 0;
+}
+
+.bob-panel.is-docked .bob-workspace.is-studio {
+  overflow: hidden;
+}
+
+.bob-panel.is-docked .bob-workspace.is-studio .bob-main-pane {
+  flex: 1 1 0;
+  min-height: 0;
+  border: 0;
+}
+
+.bob-panel.is-docked .bob-workspace.is-studio .bob-studio {
+  flex: 1 1 0;
+  min-height: 0;
+  min-width: 0;
+}
+
+.bob-panel.is-docked .bob-workspace.is-studio .bob-context,
+.bob-panel.is-docked .bob-workspace.is-studio .bob-work-state.state-using-data {
+  display: none;
+}
+
+@media (max-width: 900px) {
+  .bob-page-layout { flex-direction: column; }
+  .bob-page-layout > .bob-panel.is-docked {
+    flex: 0 0 55%;
+    width: 100%;
+    height: auto;
+    border-left: 0;
+    border-top: 1px solid #31485b;
   }
 }

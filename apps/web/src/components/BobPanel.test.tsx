@@ -217,6 +217,7 @@ describe('BobPanel', () => {
             site: { id: 'site-1', name: 'North Plant' },
             zone: { id: 'zone-1', name: 'Zone A' },
             agent_mode: 'operations',
+            visible_page: { path: '/', headings: [], controls: [] },
           },
         },
       });
@@ -405,6 +406,65 @@ describe('BobPanel', () => {
     render(<BobPanel open onClose={() => undefined} />);
 
     expect(await screen.findByRole('button', { name: 'Yes, use the 2026 rate card' })).toBeTruthy();
+  });
+
+  it('offers recommended Continue/Pause choices for persisted budget pauses', async () => {
+    messageHistory = [{
+      id: 'paused', role: 'assistant', content: 'Shall I continue from where I left off?',
+      metadata: { continuation_pending: true },
+      created_at: '2026-10-16T09:00:00Z',
+    }];
+    render(<BobPanel open presentation="docked" onClose={() => undefined} />);
+    const proceed = await screen.findByRole('button', { name: 'Continue from where you left off' });
+    expect(proceed.getAttribute('aria-description')).toBe('Recommended by Bob');
+    expect(screen.getByRole('button', { name: 'Pause here; wait for my next instruction' })).toBeTruthy();
+    fireEvent.click(proceed);
+    await waitFor(() => expect(mockInvoke).toHaveBeenCalledWith('onspace-ai-chat', expect.objectContaining({
+      body: expect.objectContaining({ operation: 'enqueue', message: 'Continue from where you left off' }),
+    })));
+  });
+
+  it('preserves a typed override instead of letting a suggestion replace it', async () => {
+    messageHistory = [{
+      id: 'question', role: 'assistant', content: 'Which plan?',
+      metadata: { answer_options: ['Plan A', 'Plan B'], recommended_answer: 'Plan A' },
+      created_at: '2026-10-16T09:00:00Z',
+    }];
+    render(<BobPanel open presentation="docked" onClose={() => undefined} />);
+    const option = await screen.findByRole('button', { name: 'Plan A' });
+    const composer = screen.getByPlaceholderText('Ask Bob to plan, inspect, explain, or prepare a proposal');
+    fireEvent.change(composer, { target: { value: 'Use Plan B but keep the current rates' } });
+    expect(option).toHaveProperty('disabled', true);
+    fireEvent.click(option);
+    expect(mockInvoke).not.toHaveBeenCalled();
+    fireEvent.click(screen.getByRole('button', { name: 'Send' }));
+    await waitFor(() => expect(mockInvoke).toHaveBeenCalledWith('onspace-ai-chat', expect.objectContaining({
+      body: expect.objectContaining({ message: 'Use Plan B but keep the current rates' }),
+    })));
+  });
+
+  it('disables historical choices and choices during a durable request', async () => {
+    messageHistory = [
+      { id: 'old', role: 'assistant', content: 'Old question', metadata: { answer_options: ['Old answer'] }, created_at: '2026-10-16T09:00:00Z' },
+      { id: 'answer', role: 'user', content: 'Already answered', metadata: {}, created_at: '2026-10-16T09:01:00Z' },
+      { id: 'new', role: 'assistant', content: 'New question', metadata: { answer_options: ['New answer'] }, created_at: '2026-10-16T09:02:00Z' },
+    ];
+    turnRunHistory = [{ request_id: 'pending', status: 'running', started_at: '2026-10-16T09:03:00Z', heartbeat_at: '2026-10-16T09:03:00Z' }];
+    render(<BobPanel open presentation="docked" onClose={() => undefined} />);
+    expect(await screen.findByRole('button', { name: 'Old answer' })).toHaveProperty('disabled', true);
+    await waitFor(() => expect(screen.getByRole('button', { name: 'New answer' })).toHaveProperty('disabled', true));
+  });
+
+  it('keeps the operations dock non-modal and Studio reachable', async () => {
+    render(<><button type="button">Working page action</button><BobPanel open presentation="docked" onClose={() => undefined} /></>);
+    const panel = await screen.findByRole('complementary', { name: 'Bob agent workspace' });
+    expect(panel.getAttribute('aria-modal')).toBeNull();
+    const pageAction = screen.getByRole('button', { name: 'Working page action' });
+    pageAction.focus();
+    fireEvent.keyDown(document, { key: 'Tab' });
+    expect(document.activeElement).toBe(pageAction);
+    fireEvent.click(screen.getByRole('button', { name: 'Open document studio' }));
+    expect(await screen.findByLabelText('Bob studio')).toBeTruthy();
   });
 
   it('renders Bob headings, bold text, and lists as structured elements', async () => {

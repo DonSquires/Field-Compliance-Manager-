@@ -116,13 +116,15 @@ export function ModuleShell() {
           <button type="button" className="module-shell-sos" onClick={() => void safety.triggerSOS()} disabled={safety.writeStatus === 'pending' || safety.activeAlert?.kind === 'sos'} title="Trigger SOS" aria-label="Trigger SOS"><Siren size={17} aria-hidden="true" /></button>
         </div>
       </header>
-      <main className="module-shell-content">
+      <div className="bob-page-layout">
+      <main data-app-content className="module-shell-content">
         <PlaceContextBanner />
         <React.Suspense fallback={<div className="module-shell-loading">Loading module...</div>}>
           {renderModule(canonicalKey, adminView)}
         </React.Suspense>
       </main>
-      <BobPanel open={bobOpen} onClose={() => setBobOpen(false)} context={bobContext} />
+      <BobPanel open={bobOpen} presentation="docked" onClose={() => setBobOpen(false)} context={bobContext} />
+      </div>
     </div>
   );
 }

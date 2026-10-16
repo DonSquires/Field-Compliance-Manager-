@@ -1,4 +1,4 @@
-.module-shell { min-height: 100vh; background: var(--color-bg-primary); }
+.module-shell { display: flex; flex-direction: column; height: 100dvh; background: var(--color-bg-primary); }
 .module-shell-header { position: sticky; top: 0; z-index: 20; display: grid; grid-template-columns: 1fr auto 1fr; align-items: center; gap: 16px; min-height: 58px; padding: 0 18px; border-bottom: 1px solid var(--color-border); background: #09111e; }
 .module-shell-back, .module-shell-icon, .module-shell-sos { border: 1px solid var(--color-border); color: #d6e2ed; background: #101b2a; cursor: pointer; }
 .module-shell-back { display: inline-flex; align-items: center; justify-self: start; gap: 7px; min-height: 34px; padding: 0 10px; border-radius: 6px; font-size: 12px; font-weight: 800; }
@@ -12,7 +12,7 @@
 .module-shell-icon, .module-shell-sos { display: grid; place-items: center; width: 34px; height: 34px; border-radius: 6px; }
 .module-shell-sos { color: #ffd6d6; border-color: #884141; background: #4a2529; }
 .module-shell-sos:disabled { opacity: .5; cursor: not-allowed; }
-.module-shell-content { min-height: calc(100vh - 58px); }
+.module-shell-content { min-width: 0; min-height: 0; flex: 1; overflow: auto; }
 .module-shell-loading { display: grid; place-items: center; min-height: 50vh; color: var(--color-text-secondary); font-size: 13px; }
 .module-shell-access-state { display: grid; place-items: center; align-content: center; gap: 8px; min-height: 50vh; padding: 24px; color: #dce7f1; text-align: center; }
 .module-shell-access-state strong { font-size: 18px; }

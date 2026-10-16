@@ -23,10 +23,11 @@ export default function BobWorkspacePage({ returnPath }: { returnPath?: string }
   const resolvedReturnPath = safeReturnPath(returnPath ?? locationState?.bobReturnPath);
 
   return (
-    <>
+    <div className="bob-standalone-workspace">
       <h1 className="sr-only">Bob agent workspace</h1>
       <BobPanel
         open
+        presentation="docked"
         onClose={() => navigate(resolvedReturnPath)}
         context={{
           page: 'bob',
@@ -35,6 +36,6 @@ export default function BobWorkspacePage({ returnPath }: { returnPath?: string }
           ...sourceContext,
         }}
       />
-    </>
+    </div>
   );
 }
