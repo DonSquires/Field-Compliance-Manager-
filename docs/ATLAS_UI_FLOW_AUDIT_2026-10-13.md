@@ -2084,3 +2084,47 @@ remains unpopulated.
   contains neither predecessor capability nor its stale inbound edges while
   retaining both canonical RPCs as wired. Static evidence does not establish
   runtime exercise.
+
+## 2026-10-17 — Enforcement-mode contradiction requires an owner ruling
+
+- **Observed:** organisation and zone settings offer `officer_direct`,
+  `admin_first`, and `hybrid`, and `resolve_enforcement_mode` says it gates
+  direct field issuance. The resolver has no caller. The current breach path
+  requires `is_admin_for_org` before selecting an enforcement action, and the
+  admin page then generates a draft notice.
+- **User/job affected:** an organisation configuring who may issue a notice
+  cannot rely on the selected mode to change the operational path today.
+- **Tradeoff:** wiring officer-direct issuance would shorten field response but
+  changes legal authority, review, signature, evidence, and exception handling.
+  Retiring the setting would make the current admin-first behavior honest but
+  remove a configured policy option.
+- **Status:** unresolved design contradiction, not yet called a defect. Do not
+  wire or retire the mode until the owner confirms whether direct and hybrid
+  field issuance remain intended.
+
+## 2026-10-17 — Retire the unscoped repeat-stay helper
+
+- **Expected before:** a vehicle scan resolves the rule for the verified zone,
+  produces one compliance verdict, persists that verdict on the observation,
+  and creates any breach alert from the same result.
+- **Present before:** `process-officer-scan` already calls
+  `calculate_vehicle_compliance` and carries its night counts, limits, reason,
+  enforcement exemption, observation ID, and breach-alert ID through one
+  governed pipeline. The older NCC-specific `check_repeat_stay` function had
+  no caller, no database dependent, and zero recorded calls.
+- **Risk before:** the older function was a public `SECURITY DEFINER` endpoint
+  that accepted an arbitrary organisation ID and returned cross-observation
+  repeat-stay information outside the governed scan receipt.
+- **Change:** remove `check_repeat_stay` and its modular source. Preserve
+  `calculate_vehicle_compliance`, the 8,106 observations, 12 breach alerts, and
+  all persisted compliance results.
+- **Trackforce consideration:** one scan must produce one authoritative verdict
+  and exception path. A second callable calculator with a hardcoded 500-metre
+  rule can disagree with the configured zone rule and weaken reconstruction of
+  why an officer saw or acted on a breach.
+- **Verified live:** the retired RPC returns `404 / PGRST202`;
+  `calculate_vehicle_compliance` remains present and wired through
+  `process-officer-scan`; and the 8,106 observations, 12 breach alerts, and 15
+  persisted night-count results remain unchanged. The refreshed manifest
+  contains no `check_repeat_stay` capability and does not claim runtime
+  exercise for the canonical calculator.

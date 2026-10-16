@@ -36554,18 +36554,6 @@ export type Database = {
         Args: { p_caller_id: string; p_target_org_id: string }
         Returns: boolean
       }
-      check_repeat_stay: {
-        Args: {
-          p_at?: string
-          p_lat: number
-          p_lng: number
-          p_org_id: string
-          p_plate: string
-          p_radius_m?: number
-          p_window_nights?: number
-        }
-        Returns: Json
-      }
       claim_cctv_inference_job: {
         Args: {
           p_job_id: string
