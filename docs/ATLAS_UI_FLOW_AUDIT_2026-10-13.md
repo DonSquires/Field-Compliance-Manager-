@@ -1717,3 +1717,36 @@ remains unpopulated.
   the source, proposed outcome, confidence, decision owner action and durable
   result together without adding bulk approval or treating batch approval as
   permission to apply every row.
+
+### Closure candidate - perception evidence field review
+
+- Atlas showed `review_perception_evidence_field` present but unwired while
+  `components/BobStudio` already read `perception_evidence_fields`. The Studio
+  displayed machine authority and warned that administrator comparison was
+  still required, but it stopped before the governed human decision.
+- Primary actor: an administrator working in the operating organization's Bob
+  Studio. The job is to compare a machine-derived field with its source before
+  that field can be treated as human approved or excluded from authoritative
+  use.
+- Before: the shared evidence envelope, normalized candidate and authority
+  state were visible. Source locations, conflicts and calibrated confidence
+  were not visible, and there was no action for completing the stated manual
+  review.
+- During: each attached evidence envelope now presents its fields one at a
+  time with candidate value, confidence, source locations, conflicts and
+  authority state. Approve, reject and needs-more-context decisions require a
+  written comparison rationale and call only
+  `review_perception_evidence_field`. There is no bulk action and no direct
+  table mutation.
+- After: the returned field replaces the visible candidate in place. The
+  envelope remains `manual_review_required` while any field still requires
+  review and becomes `complete` only after the last field is resolved. The UI
+  states whether the field was approved, rejected or left pending more
+  context; the database preserves the append-only review and audit receipts.
+- Trackforce consideration: this is an exception-review lane rather than a
+  confidence dashboard. It keeps the source, conflict, accountable decision,
+  reason and durable outcome together and prevents machine consensus from
+  looking like human authority.
+- Exercise honesty: component tests prove the request and persisted readback
+  contract, but they do not prove a production invocation. Atlas `exercised`
+  must remain unset until an authorized administrator reviews a real field.
