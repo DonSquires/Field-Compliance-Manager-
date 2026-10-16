@@ -8,6 +8,14 @@ detailed backlogs (`ENTERPRISE_SAAS_TODO.md`, `PROTOTYPE_GAP_AUDIT.md`,
 Completion language is strict, as in the lineage: **merged ≠ deployed ≠
 glass-proven.** A workstream item is done only when its evidence gate is met.
 
+Owner ruling 2026-10-16: Deputy roster exports are sample/build/test evidence,
+not an operational integration or production import workflow. The offline
+parser and source-shaped fixtures may be used to test roster mappings and
+billing-evidence preservation, but the product must not expose an authenticated
+Deputy import action or mutate live roster, leave, staff, workplace, or work-unit
+records from that sample path. Future operational imports require a separately
+governed source, review, proposal, approval, apply and receipt design.
+
 Release identity incident 2026-10-15: two concurrent agent commits reached
 `main` with the local author `don@squires.local`, which is not associated with
 the verified Vercel/GitHub owner account. Vercel correctly blocked both

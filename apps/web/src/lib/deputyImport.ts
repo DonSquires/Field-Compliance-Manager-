@@ -1,6 +1,7 @@
 /**
- * deputyImport.ts — parse a Deputy "Timesheets + Schedules + Leave" export (and the optional
- * Location/Area export) into what our roster understands, without touching the database.
+ * deputyImport.ts — parse a Deputy "Timesheets + Schedules + Leave" sample export (and the
+ * optional Location/Area export) for build and test evidence, without touching the database.
+ * This is not an operational roster-import path.
  *
  * Deputy words -> ours: Location = rosterable work unit; Area = pay/roster bucket; Schedule =
  * planned shift (roster slot); Timesheet = actual (counted, not imported); Is Leave = leave.
