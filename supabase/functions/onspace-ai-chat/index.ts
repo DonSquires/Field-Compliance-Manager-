@@ -662,6 +662,7 @@ function budgetKnowledgeCards(cards) {
     'propose_roster_rollback',
     'propose_rate_rule',
     'propose_compliance_record',
+    'propose_place_hazards',
     'propose_zone_patrol_stop',
     'promote_action',
     'confirm_import',
@@ -775,6 +776,7 @@ const WRITE_CAPABLE_TOOLS = new Set([
   'propose_rate_rule',
   'propose_staff_onboarding',
   'propose_compliance_record',
+  'propose_place_hazards',
   'propose_zone_patrol_stop',
   'propose_freedom_camping_org_strategy',
   'job_plan_create',
@@ -1000,7 +1002,7 @@ async function resolveUserCapabilities(supabase, role, orgId, userId = null) {
   if (canCompareData) allowedTools.push('client_site_compare', 'query_records', 'scv_lookup', 'site_risk', 'resolve_point_context', 'document_search', 'resolve_geofence');
   if (canInspectSchema) allowedTools.push('schema_inspect');
   if (canIngest) allowedTools.push('ingest_document', 'plan_import', 'plan_patrol_import', 'perceive_media', 'confirm_import', 'inventory_document_source', 'create_document_draft');
-  if (canPromote) allowedTools.push('promote_action', 'propose_client_onboarding', 'propose_corporate_profile', 'propose_freedom_camping_zone', 'propose_zone_patrol_stop', 'propose_patrol_route_assignment', 'propose_patrol_route_service_area', 'propose_org_jurisdiction', 'propose_roster_fill', 'propose_roster_rollback', 'propose_rate_rule', 'propose_staff_onboarding', 'propose_compliance_record', 'propose_site_risk', 'propose_freedom_camping_org_strategy');
+  if (canPromote) allowedTools.push('promote_action', 'propose_client_onboarding', 'propose_corporate_profile', 'propose_freedom_camping_zone', 'propose_zone_patrol_stop', 'propose_patrol_route_assignment', 'propose_patrol_route_service_area', 'propose_org_jurisdiction', 'propose_roster_fill', 'propose_roster_rollback', 'propose_rate_rule', 'propose_staff_onboarding', 'propose_compliance_record', 'propose_place_hazards', 'propose_site_risk', 'propose_freedom_camping_org_strategy');
   if (tier !== 'guest') allowedTools.push('perceive_media', 'web_research', 'triage_friction');
   if (canCompareData) allowedTools.push('fetch_bylaw_source');
   if (canWrite || canIngest || canPromote) allowedTools.push('job_runner');
@@ -1669,6 +1671,7 @@ function attachGuidedProposalWorkflow(meta) {
     t.tool === 'create_document_draft' && caps.canIngest ||
     t.tool === 'propose_corporate_profile' && caps.canPromote ||
     t.tool === 'propose_compliance_record' && caps.canPromote ||
+    t.tool === 'propose_place_hazards' && caps.canPromote ||
     t.tool === 'propose_client_root_org' && caps.tier === 'admiral' ||
     // same gate as every single-action propose_* tool; a plan approval is the
     // same kind of human decision, just at plan granularity (#86 Phase 3).
@@ -5890,7 +5893,7 @@ async function execProposeClientOnboarding(authHeader, caps, orgId, args) {
     }
   };
 }
-// ATLAS CALLS: bob-propose-roster-fill, bob-propose-roster-rollback, bob-propose-rate-rule, bob-propose-staff-onboarding, bob-propose-compliance-record
+// ATLAS CALLS: bob-propose-roster-fill, bob-propose-roster-rollback, bob-propose-rate-rule, bob-propose-staff-onboarding, bob-propose-compliance-record, bob-propose-place-hazards
 async function execProposeRosterFill(authHeader, caps, orgId, args) {
   if (!caps.canPromote) return { reply: 'Roster-fill proposals require an admin, master, or grand master.', meta: { tool: 'propose_roster_fill', outcome: 'forbidden' } };
   const periodStart = String(args.period_start ?? '').trim();
@@ -5943,6 +5946,30 @@ async function execProposeComplianceRecord(authHeader, caps, args) {
   return {
     reply: [String(result.data.note ?? 'Compliance-register proposals are ready for approval.'), ...lines].join('\n'),
     meta: { tool: 'propose_compliance_record', outcome: 'ok', action_ids: result.data.action_ids ?? [], organization_id: result.data.organization_id ?? organizationId, results }
+  };
+}
+async function execProposePlaceHazards(authHeader, caps, args) {
+  if (!caps.canPromote) return { reply: 'Place-hazard proposals need an admin, master, or grand master.', meta: { tool: 'propose_place_hazards', outcome: 'forbidden' } };
+  const organizationId = String(args.organization_id ?? '').trim();
+  if (!organizationId) return { reply: 'I need the exact organisation keeping the hazard register before I can file hazards. Look it up with query_records first.', meta: { tool: 'propose_place_hazards', outcome: 'need_organization_id' } };
+  const hazards = Array.isArray(args.hazards) ? args.hazards : args.title ? [args] : [];
+  if (!hazards.length) return { reply: 'Tell me which hazards to propose: the place, a short title, hazard class, residual risk level, controls, and the source document section and date.', meta: { tool: 'propose_place_hazards', outcome: 'need_hazards' } };
+  const result = await callFn('bob-propose-place-hazards', authHeader, {
+    organization_id: organizationId,
+    hazards,
+    reasoning: typeof args.reasoning === 'string' ? args.reasoning : undefined,
+    context_summary: typeof args.context_summary === 'string' ? args.context_summary : undefined,
+    conversation_id: args._conversation_id
+  });
+  const results = Array.isArray(result.data?.results) ? result.data.results : [];
+  if (!result.ok || !result.data?.success) {
+    const reason = result.data?.error ?? (results.map((r) => `${r.title}: ${r.error ?? r.outcome}`).join('; ') || result.status);
+    return { reply: `I could not file the place-hazard proposals (${reason}).`, meta: { tool: 'propose_place_hazards', outcome: 'failed', error: reason, results } };
+  }
+  const lines = results.map((r) => `- **${r.title}**${r.place ? ` at ${r.place}` : ''} — ${r.outcome === 'pending' ? `pending approval${r.replaces ? ' (replaces the live hazard with the same title)' : ''}` : r.outcome === 'already_pending' ? 'already waiting for approval' : `not filed: ${r.error ?? r.outcome}`}`);
+  return {
+    reply: [String(result.data.note ?? 'Place-hazard proposals are ready for approval.'), ...lines].join('\n'),
+    meta: { tool: 'propose_place_hazards', outcome: 'ok', action_ids: result.data.action_ids ?? [], organization_id: result.data.organization_id ?? organizationId, results }
   };
 }
 async function execProposeStaffOnboarding(authHeader, caps, args) {
@@ -9334,6 +9361,8 @@ serve(async (req)=>{
           return execProposeRateRule(authHeader, caps, orgId, toolArgs);
         case 'propose_compliance_record':
           return execProposeComplianceRecord(authHeader, caps, toolArgs);
+        case 'propose_place_hazards':
+          return execProposePlaceHazards(authHeader, caps, toolArgs);
         case 'propose_staff_onboarding':
           return execProposeStaffOnboarding(authHeader, caps, toolArgs);
         case 'propose_zone_patrol_stop':

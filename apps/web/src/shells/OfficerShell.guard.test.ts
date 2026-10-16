@@ -54,7 +54,9 @@ describe('OfficerShell state routing', () => {
 
   it('exposes stateful accessible semantics on persistent controls', () => {
     expect(source).toContain('aria-label="Open Bob command center"');
-    expect(source).toContain("navigateToModule('bob')");
+    // Bob docks beside the working page rather than replacing it.
+    expect(source).toContain('onClick={() => setBobOpen(true)}');
+    expect(source).toContain('aria-expanded={bobOpen}');
     expect(source).toContain("aria-current={activeModule === 'modules' ? 'page' : undefined}");
     expect(source).toContain("aria-current={activeModule === 'report' ? 'page' : undefined}");
   });

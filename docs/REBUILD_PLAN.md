@@ -53,6 +53,32 @@ entries extracted from uploaded registers and plans. Trackforce Valiant is
 inspiration for acknowledged post orders, checklists, lone-worker alerts, and
 incident analytics; the register itself is owned by the organisation and place.
 
+Place hazard register and officer safety briefing 2026-10-18 (first slice of
+that workstream; migration `20261018090000_place_hazard_register_briefings`):
+- **Register.** `place_hazards` holds one specific risk at a house or one of its
+  facets (client site or zone) with risk level, controls, and the exact source
+  document section. Writes go only through `report_place_hazard` (officer),
+  `manage_place_hazard` (administrator: create/update/confirm/retire, audited)
+  and `apply_bob_place_hazard_proposal` (service-only, after approval).
+- **Bob.** `propose_place_hazards` (catalogue purpose, no keyword routes) files
+  pending `create_place_hazard` actions through `bob-propose-place-hazards`;
+  `bob-proposal-execute` applies approved ones. A same-title proposal at the
+  same place replaces the live hazard and bumps its version.
+- **Officer briefing.** `get_shift_safety_briefing` combines the shift's place
+  hazards with active `entity_flags` warnings, critical first, under a briefing
+  hash. Web officers must confirm "I've read these risks – start shift" before
+  starting, and confirm again per patrol stop on arrival and whenever the
+  briefing changes mid-shift (`acknowledge_safety_briefing` rejects a stale
+  hash). Source sections open through `place-hazard-source` signed links.
+- **Officer reports.** Reported hazards are visible to other officers at once
+  as "reported — not yet reviewed" until an administrator confirms or retires
+  them on the site's hazard register.
+- **Known gaps.** The mobile app (`OfficerShiftClockPanel`) still calls
+  `start_officer_shift` without showing the briefing, so acknowledgement is a
+  web-client step, not server-enforced. Likelihood × consequence scoring,
+  review-date reminders, task risk assessments with sign-off, and incident →
+  hazard-review links remain open.
+
 Owner ruling 2026-10-16: Deputy roster exports are sample/build/test evidence,
 not an operational integration or production import workflow. The offline
 parser and source-shaped fixtures may be used to test roster mappings and
