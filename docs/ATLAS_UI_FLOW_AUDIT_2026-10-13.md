@@ -2029,3 +2029,27 @@ remains unpopulated.
 - **Trackforce consideration:** a retired road must not remain visible as a
   live route. Contradictory map edges weaken incident reconstruction and support
   decisions even when the capability gap count is correct.
+## 2026-10-17 — Wire durable noise-control job numbers
+
+- **Expected:** each new noise assessment receives one human-readable,
+  collision-resistant operational identifier at creation. Retries return the
+  existing assessment rather than consuming another identifier.
+- **Present before:** the schema described `job_number` as auto-generated and
+  exposed `generate_noise_job_number`, but no default, trigger, or submission
+  RPC called it. All 76 sampled live assessments had a null job number,
+  including 73 completed records.
+- **Change:** a `BEFORE INSERT` trigger fills only missing job numbers from the
+  existing sequence generator, and a partial unique index enforces uniqueness.
+  Existing historical rows remain unchanged rather than receiving invented
+  retrospective receipts.
+- **Trackforce consideration:** the job number is the short operational handle
+  used across dispatch, attendance, evidence, reports, and follow-up. Allocating
+  it at the database boundary gives every future job one durable receipt without
+  moving authority into a screen.
+- **Verified live:** a transactional insert generated a correctly formatted
+  `NC-YYYY-NNNNNN` value and was rolled back. The enabled trigger, partial
+  unique index, fixed `search_path`, and revoked browser execution privileges
+  are present. The 76 historical assessments remain unchanged with null job
+  numbers; Atlas now derives the internal
+  `assign_noise_job_number -> generate_noise_job_number` call without claiming
+  runtime exercise.
