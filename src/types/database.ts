@@ -38072,6 +38072,10 @@ export type Database = {
         Args: { p_assessment_id: string }
         Returns: undefined
       }
+      apply_bob_compliance_record_proposal: {
+        Args: { p_action_id: string }
+        Returns: string
+      }
       apply_bob_rate_rule_proposal: {
         Args: { p_action_id: string }
         Returns: string
@@ -45685,6 +45689,26 @@ export type Database = {
               species_review_decision: string
             }[]
           }
+      manage_bob_message_feedback: {
+        Args: { p_message_id: string; p_note?: string; p_rating: string }
+        Returns: {
+          conversation_id: string
+          created_at: string
+          id: string
+          message_id: string
+          note: string | null
+          organization_id: string
+          rating: string
+          updated_at: string
+          user_id: string
+        }
+        SetofOptions: {
+          from: "*"
+          to: "bob_message_feedback"
+          isOneToOne: true
+          isSetofReturn: false
+        }
+      }
       manage_breach_alert: {
         Args: {
           p_action: string

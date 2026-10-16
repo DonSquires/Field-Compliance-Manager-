@@ -19,6 +19,8 @@ let governedActionHistory: Array<Record<string, unknown>> = [];
 let turnRunHistory: Array<Record<string, unknown>> = [];
 let perceptionEnvelopeHistory: Array<Record<string, unknown>> = [];
 let perceptionFieldHistory: Array<Record<string, unknown>> = [];
+let feedbackHistory: Array<Record<string, unknown>> = [];
+let feedbackLoadFailure = false;
 let profileRole = 'grand_master';
 
 vi.mock('../context/AuthContext', () => ({
@@ -59,6 +61,8 @@ describe('BobPanel', () => {
     turnRunHistory = [];
     perceptionEnvelopeHistory = [];
     perceptionFieldHistory = [];
+    feedbackHistory = [];
+    feedbackLoadFailure = false;
     profileRole = 'grand_master';
 
     mockFrom.mockImplementation((table: string) => {
@@ -91,6 +95,18 @@ describe('BobPanel', () => {
             }),
           }),
         };
+      }
+
+      if (table === 'bob_message_feedback') {
+        const feedbackQuery = {
+          eq: () => feedbackQuery,
+          then: (resolve: (value: { data: unknown; error: { message: string } | null }) => unknown) => resolve(
+            feedbackLoadFailure
+              ? { data: null, error: { message: 'feedback unavailable' } }
+              : { data: feedbackHistory, error: null }
+          ),
+        };
+        return { select: () => feedbackQuery };
       }
 
       if (table === 'bob_attachments') {
@@ -259,6 +275,72 @@ describe('BobPanel', () => {
     expect(await screen.findByText('repo search')).toBeTruthy();
     expect(screen.getByText('Response confidence 80%')).toBeTruthy();
     expect(screen.getByText('Review the affected files before proposing a change.')).toBeTruthy();
+  });
+
+  it('reads back the current user feedback for an assistant reply', async () => {
+    messageHistory = [{
+      id: 'message-feedback', role: 'assistant', content: 'The branch exception is ready for review.', confidence: null,
+      flagged: false, created_at: '2026-10-16T08:00:00.000Z', metadata: {},
+    }];
+    feedbackHistory = [{
+      id: 'feedback-1', message_id: 'message-feedback', rating: 'up', note: null, updated_at: '2026-10-16T08:01:00.000Z',
+    }];
+
+    render(<BobPanel open onClose={() => undefined} />);
+
+    const helpful = await screen.findByRole('button', { name: 'Helpful' });
+    expect(helpful.getAttribute('aria-pressed')).toBe('true');
+    expect(mockFrom).toHaveBeenCalledWith('bob_message_feedback');
+  });
+
+  it('keeps Bob chat available when saved feedback cannot be loaded', async () => {
+    messageHistory = [{
+      id: 'message-feedback', role: 'assistant', content: 'The operational answer remains visible.', confidence: null,
+      flagged: false, created_at: '2026-10-16T08:00:00.000Z', metadata: {},
+    }];
+    feedbackLoadFailure = true;
+
+    render(<BobPanel open onClose={() => undefined} />);
+
+    expect(await screen.findByText('The operational answer remains visible.')).toBeTruthy();
+    expect(screen.getByRole('alert').textContent).toContain('Saved reply feedback could not be loaded. Bob chat remains available.');
+  });
+
+  it('saves improvement feedback through the governed command and shows the persisted receipt', async () => {
+    messageHistory = [{
+      id: 'message-feedback', role: 'assistant', content: 'The branch exception is ready for review.', confidence: null,
+      flagged: false, created_at: '2026-10-16T08:00:00.000Z', metadata: {},
+    }];
+    mockRpc.mockImplementation(async (name: string) => name === 'manage_bob_message_feedback'
+      ? {
+        data: {
+          id: 'feedback-1',
+          message_id: 'message-feedback',
+          rating: 'down',
+          note: 'Show the selected operating branch.',
+          updated_at: '2026-10-16T08:02:00.000Z',
+        },
+        error: null,
+      }
+      : { data: null, error: null });
+
+    render(<BobPanel open onClose={() => undefined} />);
+
+    fireEvent.click(await screen.findByRole('button', { name: 'Needs improvement' }));
+    fireEvent.change(screen.getByLabelText(/What should Bob improve/), {
+      target: { value: 'Show the selected operating branch.' },
+    });
+    fireEvent.click(screen.getByRole('button', { name: 'Save feedback' }));
+
+    await waitFor(() => {
+      expect(mockRpc).toHaveBeenCalledWith('manage_bob_message_feedback', {
+        p_message_id: 'message-feedback',
+        p_rating: 'down',
+        p_note: 'Show the selected operating branch.',
+      });
+    });
+    expect(await screen.findByText('Improvement feedback saved.')).toBeTruthy();
+    expect(screen.getByRole('button', { name: 'Needs improvement' }).getAttribute('aria-pressed')).toBe('true');
   });
 
   it('renders selectable recovery choices and a safe pre-seeded destination for blocked work', async () => {
