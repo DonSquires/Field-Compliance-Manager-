@@ -1568,6 +1568,42 @@ remains unpopulated.
 - The multiline extractor regression and full Atlas refresh test file pass
   (32 tests). No schema or production runtime behavior changed.
 
+### Release candidate - incident people readback
+
+- Live Atlas identified `get_incident_people` as present but unwired while
+  `record_incident_person_identity` already had callers in the identity
+  workspace and officer field report. Schema inspection confirmed both use the
+  same tenant-scoped `incident_person_links` path and the read RPC repeats the
+  existing assigned-officer/admin authorization check.
+- Before: an authorised identity reviewer could select an active incident and
+  link the current canonical person with an involvement role and identity
+  basis. The write returned a success message, but the workspace did not show
+  who was already linked, whether the person was staff or a reviewed identity,
+  or whether a newly stated identity still needed review.
+- During: selecting an incident now calls `get_incident_people` and shows an
+  accessible loading state, a local error state, the empty state, or the
+  current people. Each row exposes the name, involvement role, source kind and
+  review state. A request sequence guard prevents a slower response for the
+  previous incident from replacing the current selection.
+- After: a successful `record_incident_person_identity` call refreshes the
+  same governed readback before releasing the busy state, so the user receives
+  both the write receipt and visible persisted outcome. No direct table read
+  or write was introduced.
+- This adopts the useful Trackforce pattern of keeping the incident roster
+  visible beside the action, while preserving FCM's canonical-person,
+  source-provenance and manual-review rules. It does not add a second incident
+  queue or imply that a stated identity is verified.
+- Verification: the focused identity-workspace guard passes (6 tests), the
+  web and E2E TypeScript check passes, the production web build passes, and the
+  Atlas suite passes (32 tests). The dry-run manifest adds the component caller
+  for `get_incident_people`.
+- Release-state honesty: the live bounded count is 123 while this branch is
+  not yet deployed and the production refresh therefore still omits the
+  multiline NZTA review caller. Once this branch is merged and the production
+  Atlas refresh runs, the two source-backed corrections should reduce that
+  same baseline to 121. Neither RPC may be marked `exercised` without runtime
+  invocation evidence.
+
 ### Closure log - source-backed Parking zone rule authoring
 
 - The Trackforce-style configure-before-deploy check found a real task gap in

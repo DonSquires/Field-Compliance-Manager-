@@ -74,4 +74,15 @@ describe("identity person-of-interest workflow", () => {
     expect(vehicleHistory).toContain("minLength={5}");
     expect(vehicleHistory).toContain("organisation-scoped and audit-logged");
   });
+
+  it("shows the governed incident readback before and after linking a person", () => {
+    expect(workspace).toContain('"get_incident_people"');
+    expect(workspace).toContain("People already linked");
+    expect(workspace).toContain("linkedPerson.involvement_role");
+    expect(workspace).toContain("linkedPerson.source_kind");
+    expect(workspace).toContain("linkedPerson.review_state");
+    expect(workspace).toContain("await loadIncidentPeople(incidentId)");
+    expect(workspace).toContain("requestId !== incidentPeopleRequest.current");
+    expect(workspace).toContain("Could not load incident people:");
+  });
 });
