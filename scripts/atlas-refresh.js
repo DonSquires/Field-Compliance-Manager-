@@ -406,7 +406,7 @@ function collectSqlFunctionEdges(rootDir) {
   const addReferencedFunctions = (tableName, definition, edgeKind, context, sourceFile = schemaFile) => {
     const referenced = new Set();
     for (const match of definition.matchAll(/\bpublic\."?([a-zA-Z_][a-zA-Z0-9_]*)"?\s*\(/gi)) referenced.add(match[1]);
-    for (const match of definition.matchAll(/(?:^|[^\w.])"?([a-zA-Z_][a-zA-Z0-9_]*)"?\s*\(/g)) referenced.add(match[1]);
+    for (const match of definition.matchAll(/(?<![\w.])"?([a-zA-Z_][a-zA-Z0-9_]*)"?\s*\(/g)) referenced.add(match[1]);
     for (const functionName of referenced) {
       if (!latestFunctions.has(functionName)) continue;
       add(tableName, 'rpc', functionName, edgeKind, sourceFile, context, 'table');

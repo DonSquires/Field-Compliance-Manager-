@@ -1955,3 +1955,24 @@ remains unpopulated.
   when the action that created them is attributable. Removing an unused
   alternate writer strengthens the chain from field observation to immutable
   rule context without adding a screen or claiming runtime exercise.
+## 2026-10-17 — Recover unqualified RLS policy dependencies
+
+- **Expected:** Atlas must show when a table's row-level security policy calls a
+  helper RPC. That `secured_by` edge is part of the live access path, not a UI
+  reference and not runtime exercise.
+- **Present before:** the policy parser detected schema-qualified calls such as
+  `public.org_access_allowed(...)`, but its unqualified-call expression consumed
+  the opening parenthesis after `USING` or `WITH CHECK`. The immediately nested
+  helper was therefore skipped. Live policies protecting access presets,
+  observations, noise, smoke, biosecurity, and infringement records called
+  `is_master_or_above`, `user_has_task_entitlement`, or
+  `is_enforcement_operator_for_org`, while all three helpers were incorrectly
+  reported as unwired.
+- **Change:** use a non-consuming negative lookbehind for unqualified SQL
+  function calls. Synthetic coverage now uses an unqualified policy helper, and
+  current-schema assertions prove the access-preset and task-entitlement
+  dependencies.
+- **Trackforce consideration:** field systems rely on trustworthy permission
+  boundaries as much as visible task controls. Recording the policy-to-helper
+  relationship makes the real stop-line visible without claiming that any user
+  has exercised it or inventing a new screen.
