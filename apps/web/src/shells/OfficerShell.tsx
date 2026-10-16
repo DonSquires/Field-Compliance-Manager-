@@ -56,6 +56,7 @@ import { BobPanel } from '../components/BobPanel';
 import { NotificationCenter, type NotificationRecord } from '../components/NotificationCenter';
 import { HelpInstructions } from '../components/HelpInstructions';
 import { OfficerLocationAdvisory } from '../components/OfficerLocationAdvisory';
+import { OfficerSafetyBriefingBanner } from '../components/ShiftSafetyBriefing';
 import { PlaceContextBanner } from '../components/PlaceContextBanner';
 import { resolveNotificationDestination } from '../lib/notificationNavigation';
 import { SPECIALTY_MODULES } from '../config/specialtyModules';
@@ -524,6 +525,7 @@ const OfficerShell: React.FC = () => {
       <div className="bob-page-layout">
       <main data-app-content className="officer-shell-content">
         <OfficerLocationAdvisory shift={activeShift} />
+        <OfficerSafetyBriefingBanner shift={activeShift} />
         <PlaceContextBanner />
         {safety.writeStatus === 'error' && safety.lastError && (
           <div role="alert" className="officer-shell-safety-error">

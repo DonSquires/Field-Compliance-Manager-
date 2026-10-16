@@ -6,6 +6,8 @@ import { useCallback, useEffect, useRef, useState, type FormEvent } from 'react'
 import { AlertTriangle, CheckCircle2, MapPin, RefreshCw, Signpost, TriangleAlert } from 'lucide-react';
 import { supabase } from '../lib/supabase';
 import { plainWords } from '../lib/rosterWords';
+import { briefingNeedsAcknowledgement, fetchShiftSafetyBriefing, type SafetyBriefing } from '../lib/safetyBriefing';
+import { SafetyBriefingDialog } from './ShiftSafetyBriefing';
 import './OfficerPatrolStops.css';
 
 interface StopPlace { kind: 'site' | 'zone' | 'unknown'; name: string; address: string | null; access_instructions: string | null; hs_notes: string | null }
@@ -56,6 +58,7 @@ export function OfficerPatrolStops({ shiftId }: { shiftId: string }) {
   const [notes, setNotes] = useState('');
   const [delayReason, setDelayReason] = useState('');
   const pendingRequest = useRef<Record<string, string>>({});
+  const [stopBriefing, setStopBriefing] = useState<{ stop: PatrolStop; briefing: SafetyBriefing } | null>(null);
 
   const load = useCallback(async () => {
     setLoading(true); setError(null);
@@ -90,6 +93,15 @@ export function OfficerPatrolStops({ shiftId }: { shiftId: string }) {
       setReceipt(data as StopReceipt);
       if (action === 'depart') { setNotes(''); setDelayReason(''); }
       await load();
+      // On arrival, the risks for this exact place are shown and confirmed before the officer works there.
+      if (action === 'arrive') {
+        try {
+          const briefing = await fetchShiftSafetyBriefing(shiftId, stop.id);
+          if (briefingNeedsAcknowledgement(briefing)) setStopBriefing({ stop, briefing });
+        } catch (briefingError) {
+          setError(`Arrival recorded, but the safety briefing for ${stop.place.name} could not be loaded (${briefingError instanceof Error ? briefingError.message : 'unknown error'}).`);
+        }
+      }
     }
     setSaving(false);
   };
@@ -109,6 +121,7 @@ export function OfficerPatrolStops({ shiftId }: { shiftId: string }) {
         <button type="button" className="patrol-stops-refresh" onClick={() => void load()} disabled={loading} aria-label="Refresh contracted stops"><RefreshCw size={15} className={loading ? 'is-spinning' : ''} /></button>
       </header>
 
+      {stopBriefing && <SafetyBriefingDialog briefing={stopBriefing.briefing} title={`Risks at ${stopBriefing.stop.place.name}`} acknowledgeLabel="I've read these risks" onClose={() => setStopBriefing(null)} onAcknowledged={() => setStopBriefing(null)} onReload={async () => { try { const next = await fetchShiftSafetyBriefing(shiftId, stopBriefing.stop.id); setStopBriefing({ stop: stopBriefing.stop, briefing: next }); return next; } catch { return null; } }} />}
       {error && <div className="patrol-stops-message is-error" role="alert"><AlertTriangle size={16} />{error}</div>}
       {receipt && (
         <div className="patrol-stops-message is-success" role="status">

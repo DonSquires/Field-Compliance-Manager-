@@ -209,6 +209,11 @@ const TOOL_REGISTRY = {
     governance: 'WRITE-draft; explicit organization ID; master approval required; written unverified with source provenance',
     effect_class: 'draft_governed_write'
   },
+  propose_place_hazards: {
+    purpose: "PROPOSE specific hazards for a PLACE's hazard register: the short site risks a guard is briefed on and must acknowledge at shift start and on patrol arrival (e.g. aggressive patients in ED, needlestick sharps, vehicle movements in the ambulance bay, lone working at night). Distinct from propose_compliance_record, which files whole documents to an ORGANISATION's compliance profile; use both when a site H&S plan should be on file and its risks should reach officers. Read the documents first (understand_documents), resolve the keeping organisation and each place (client site, zone, or whole location) with query_records, then distil each risk into one hazard with its controls and the exact source section. Args: { organization_id, hazards: [{ client_site_id? | zone_id? | location_id?, title (short, officer-readable), hazard_class: violence_or_aggression|weapons|dangerous_dog|hazardous_substances|biological_or_infection|sharps|slips_trips_falls|traffic_and_vehicles|working_at_height|electrical|fire_or_explosion|confined_space|lone_working|weather_or_environment|security_threat|manual_handling|medical_or_welfare|unsafe_structure_or_ground|other, risk_level: low|medium|high|critical (residual, after controls), controls: [short officer actions], details?, likelihood? 1-5, consequence? 1-5, source_name, source_as_of (YYYY-MM-DD; ask if unknown), source_locator? (section or page), source_document_id?, source_attachment_id?, review_due? }], reasoning? }. A live hazard with the same title at the same place is replaced, not duplicated. Creates pending approvals only; officers see a hazard only after a human approves it.",
+    governance: 'WRITE-draft; explicit organization and place IDs; human approval required; source section provenance; officers must re-acknowledge changed briefings',
+    effect_class: 'draft_governed_write'
+  },
   propose_staff_onboarding: { purpose: 'PROPOSE starting onboarding for an existing staff profile. Args: { staff_id, target_start?, note? }. Creates a pending HR proposal only; evidence and work readiness remain human-governed.', governance: 'WRITE-draft; human HR approval required', effect_class: 'draft_governed_write' },
   resolve_geofence: {
     purpose: "Resolve a place NAME or address (e.g. a named reserve or a street address) to its AUTHORITATIVE location: canonical LINZ address + point, and (by default) the LINZ parcel BOUNDARY polygon. Use this to GET THE GEOFENCE before proposing a freedom-camping zone or a site — you resolve the geometry yourself, then supply zone.boundary (polygon, preferred) or zone.gps_lat/gps_lng (point) to propose_freedom_camping_zone. Args: { query, want_polygon? (default true) }. If no polygon is found you still get the point (use it as a provisional fence). Reason over the result — confirm the resolved address is the right place before proposing.",
@@ -683,6 +688,7 @@ const TOOL_REGISTRY = {
     propose_roster_rollback: 'bob-propose-roster-rollback',
     propose_rate_rule: 'bob-propose-rate-rule',
     propose_compliance_record: 'bob-propose-compliance-record',
+    propose_place_hazards: 'bob-propose-place-hazards',
     propose_staff_onboarding: 'bob-propose-staff-onboarding',
     propose_zone_patrol_stop: 'bob-propose-zone-patrol-stop',
     propose_freedom_camping_org_strategy: 'bob-propose-freedom-camping-org-strategy',

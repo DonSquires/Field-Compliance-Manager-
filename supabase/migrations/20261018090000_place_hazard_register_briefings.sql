@@ -120,7 +120,7 @@ COMMENT ON TABLE public.safety_briefing_acknowledgements IS 'Officer receipt tha
 
 CREATE INDEX IF NOT EXISTS safety_briefing_ack_shift_idx ON public.safety_briefing_acknowledgements (shift_id, officer_user_id, acknowledged_at DESC);
 
--- ââ Access helpers ââââââââââââââââââââââââââââââââââââââââââââââââââââââââ
+-- ── Access helpers ────────────────────────────────────────────────────────
 
 CREATE OR REPLACE FUNCTION public.can_read_place_hazard(p_organization_id uuid, p_location_id uuid, p_site_id uuid, p_zone_id uuid)
 RETURNS boolean
@@ -169,7 +169,7 @@ GRANT SELECT ON public.safety_briefing_acknowledgements TO authenticated;
 GRANT ALL ON public.place_hazards TO service_role;
 GRANT ALL ON public.safety_briefing_acknowledgements TO service_role;
 
--- ââ Briefing ââââââââââââââââââââââââââââââââââââââââââââââââââââââââââââââ
+-- ── Briefing ──────────────────────────────────────────────────────────────
 
 -- Every place a shift (or one of its stops) is for, mirroring
 -- evaluate_shift_start_position: stop sites and zones, the shift's own zone,
@@ -402,7 +402,7 @@ END;
 $$;
 COMMENT ON FUNCTION public.acknowledge_safety_briefing(uuid, text, uuid, uuid, double precision, double precision) IS 'The assigned officer acknowledges the exact safety briefing they read. Rejected (hint briefing_changed) if the briefing changed since it was shown. Idempotent on client_request_id; audited.';
 
--- ââ Officer reports âââââââââââââââââââââââââââââââââââââââââââââââââââââââ
+-- ── Officer reports ───────────────────────────────────────────────────────
 
 CREATE OR REPLACE FUNCTION public.report_place_hazard(
   p_shift_id uuid,
@@ -471,7 +471,7 @@ END;
 $$;
 COMMENT ON FUNCTION public.report_place_hazard(uuid, text, uuid, text, text, text, uuid, text, text[]) IS 'The assigned officer reports a new hazard at one of the places of their in-progress shift. Stored as reported (shown to other officers as not yet reviewed) until a supervisor confirms or retires it. Idempotent on client_request_id; audited.';
 
--- ââ Administration ââââââââââââââââââââââââââââââââââââââââââââââââââââââââ
+-- ── Administration ────────────────────────────────────────────────────────
 
 CREATE OR REPLACE FUNCTION public.manage_place_hazard(
   p_action text,
@@ -662,7 +662,7 @@ END;
 $$;
 COMMENT ON FUNCTION public.get_place_hazard_source(uuid) IS 'Storage location of a hazard''s source document for the place-hazard-source edge function to sign. Allowed for hazard readers and for officers with an open shift at the place.';
 
--- ââ Bob proposals âââââââââââââââââââââââââââââââââââââââââââââââââââââââââ
+-- ── Bob proposals ─────────────────────────────────────────────────────────
 
 -- Bob PROPOSES place hazards distilled from documents he has read (producer:
 -- bob-propose-place-hazards). A human approves; this service-only executor
@@ -778,7 +778,7 @@ END;
 $$;
 COMMENT ON FUNCTION public.apply_bob_place_hazard_proposal(uuid) IS 'Service-only executor for approved create_place_hazard actions. Idempotent on the action id; replaces a live hazard with the same title at the same place and facet (version bump forces officer re-acknowledgement); audited.';
 
--- ââ Grants ââââââââââââââââââââââââââââââââââââââââââââââââââââââââââââââââ
+-- ── Grants ────────────────────────────────────────────────────────────────
 
 REVOKE ALL ON FUNCTION public.place_hazards_check_facet() FROM PUBLIC, anon, authenticated;
 REVOKE ALL ON FUNCTION public.can_read_place_hazard(uuid, uuid, uuid, uuid) FROM PUBLIC, anon;
