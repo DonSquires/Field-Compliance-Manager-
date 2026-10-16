@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useState, type FormEvent } from "react";
+import { useCallback, useEffect, useRef, useState, type FormEvent } from "react";
 import {
   AlertTriangle,
   Car,
@@ -134,6 +134,17 @@ type IncidentOption = {
   incident_type: string;
   status: string;
   occurred_at: string;
+};
+type IncidentPerson = {
+  link_id: string;
+  canonical_person_id: string;
+  person_record_id: string | null;
+  staff_profile_id: string | null;
+  display_name: string;
+  involvement_role: string;
+  source_kind: string;
+  review_state: string | null;
+  created_at: string;
 };
 type ResolutionCandidate = {
   person_record_id: string;
@@ -543,6 +554,12 @@ export function IdentityRecordsWorkspace({
     FALLBACK_DOCUMENT_TYPES,
   );
   const [incidentId, setIncidentId] = useState("");
+  const [incidentPeople, setIncidentPeople] = useState<IncidentPerson[]>([]);
+  const [incidentPeopleLoading, setIncidentPeopleLoading] = useState(false);
+  const [incidentPeopleError, setIncidentPeopleError] = useState<string | null>(
+    null,
+  );
+  const incidentPeopleRequest = useRef(0);
   const [involvementRole, setInvolvementRole] = useState("subject");
   const [incidentIdentityNotes, setIncidentIdentityNotes] = useState("");
   const [sourceUrl, setSourceUrl] = useState<string | null>(null);
@@ -597,6 +614,34 @@ export function IdentityRecordsWorkspace({
   useEffect(() => {
     void load("");
   }, [load]);
+
+  const loadIncidentPeople = useCallback(async (selectedIncidentId: string) => {
+    const requestId = ++incidentPeopleRequest.current;
+    if (!selectedIncidentId) {
+      setIncidentPeople([]);
+      setIncidentPeopleLoading(false);
+      setIncidentPeopleError(null);
+      return;
+    }
+    setIncidentPeopleLoading(true);
+    setIncidentPeopleError(null);
+    const { data, error: peopleError } = await supabase.rpc(
+      "get_incident_people",
+      { p_incident_id: selectedIncidentId },
+    );
+    if (requestId !== incidentPeopleRequest.current) return;
+    if (peopleError) {
+      setIncidentPeople([]);
+      setIncidentPeopleError(peopleError.message);
+    } else {
+      setIncidentPeople((data ?? []) as IncidentPerson[]);
+    }
+    setIncidentPeopleLoading(false);
+  }, []);
+
+  useEffect(() => {
+    void loadIncidentPeople(incidentId);
+  }, [incidentId, loadIncidentPeople]);
 
   const selectPerson = (record: PersonRecord | null) => {
     setSelectedPersonId(record?.person_record_id ?? null);
@@ -1058,6 +1103,7 @@ export function IdentityRecordsWorkspace({
         "Person linked to the incident through their canonical identity.",
       );
       setIncidentIdentityNotes("");
+      await loadIncidentPeople(incidentId);
     }
     setBusy(null);
   };
@@ -1722,6 +1768,43 @@ export function IdentityRecordsWorkspace({
                           ))}
                         </select>
                       </label>
+                      <div
+                        className="identity-incident-people is-wide"
+                        aria-live="polite"
+                      >
+                        <strong>People already linked</strong>
+                        {incidentPeopleLoading ? (
+                          <p>Loading incident people...</p>
+                        ) : incidentPeopleError ? (
+                          <p role="alert">
+                            Could not load incident people:{" "}
+                            {incidentPeopleError}
+                          </p>
+                        ) : incidentPeople.length ? (
+                          <ul>
+                            {incidentPeople.map((linkedPerson) => (
+                              <li key={linkedPerson.link_id}>
+                                <span>
+                                  <strong>{linkedPerson.display_name}</strong>
+                                  <small>
+                                    {words(linkedPerson.involvement_role)} ·{" "}
+                                    {words(linkedPerson.source_kind)}
+                                  </small>
+                                </span>
+                                <span>
+                                  {linkedPerson.review_state
+                                    ? words(linkedPerson.review_state)
+                                    : "Canonical staff identity"}
+                                </span>
+                              </li>
+                            ))}
+                          </ul>
+                        ) : incidentId ? (
+                          <p>No people are linked to this incident yet.</p>
+                        ) : (
+                          <p>Select an incident to see its linked people.</p>
+                        )}
+                      </div>
                       <label>
                         <span>Source files</span>
                         <input

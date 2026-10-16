@@ -275,6 +275,44 @@
 .identity-incidents .is-wide {
   grid-column: 1/-1;
 }
+.identity-incident-people {
+  padding: 12px;
+  border: 1px solid #c8d8d2;
+  border-radius: 8px;
+  background: #f5faf8;
+}
+.identity-incident-people > strong {
+  font-size: 13px;
+  color: #274c40;
+}
+.identity-incident-people p {
+  margin: 7px 0 0;
+  color: #60736d;
+  font-size: 13px;
+}
+.identity-incident-people ul {
+  display: grid;
+  gap: 7px;
+  margin: 9px 0 0;
+  padding: 0;
+  list-style: none;
+}
+.identity-incident-people li {
+  display: flex;
+  justify-content: space-between;
+  gap: 12px;
+  padding-top: 7px;
+  border-top: 1px solid #d6e1dd;
+  color: #35584d;
+  font-size: 12px;
+}
+.identity-incident-people li > span:first-child {
+  display: grid;
+  gap: 2px;
+}
+.identity-incident-people li small {
+  color: #60736d;
+}
 .identity-incidents button {
   display: inline-flex;
   align-items: center;
