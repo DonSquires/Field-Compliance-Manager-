@@ -54,7 +54,8 @@ test('executor applies approved actions through the service-only RPC', () => {
 });
 
 test('planner treats update requests as governed filing, not prose', () => {
-  assert.match(planPrompt, /UPDATE MEANS FILE/);
+  assert.match(planPrompt, /OUTCOME OVER WORDING/);
   assert.match(planPrompt, /reason from purposes, not keywords/);
+  assert.doesNotMatch(planPrompt, /UPDATE MEANS FILE|asks to update, apply, add/);
   assert.doesNotMatch(planPrompt, /H&S|health and safety/i);
 });
