@@ -1538,6 +1538,36 @@ remains unpopulated.
   receipts. Bounded gaps move 126 -> 124: 0 Edge Functions, 72 RPCs and 52
   tables.
 
+### Closure log - multiline identity evidence review routing
+
+- The next Atlas candidate was `review_nzta_mvr_identity_evidence`, which
+  looked unwired even though the identity workspace visibly offered **Approve
+  NZTA check and update records**. The review action selects between the NZTA
+  and canonical identity-review RPCs through a multiline ternary expression.
+  The extractor only recognised single-line conditional calls, so this was a
+  map gap rather than a missing Trackforce-style operator action.
+- Before: the operator could open an identity document, compare the private
+  source, and submit the governed review, but Atlas omitted the NZTA write
+  edge. That understated the real accountability path and made the vehicle
+  evidence workflow look incomplete.
+- During: the existing workspace still requires the human source comparison,
+  approved fields, review notes, and the governed RPC. No new button, direct
+  table write, or automatic identity promotion was added. The Atlas parser now
+  accepts multiline conditional RPC targets and records both possible governed
+  review commands.
+- After: live Atlas records
+  `components/IdentityRecordsWorkspace -calls-> review_nzta_mvr_identity_evidence`
+  and the corresponding canonical review edge. Both RPCs are `wired=true`;
+  `exercised` remains `null` because source tests and static extraction are not
+  invocation evidence. Bounded gaps move 124 -> 122: 0 Edge Functions, 69 RPCs
+  and 53 tables.
+- This preserves the useful Trackforce principle of a visible, accountable
+  supervisor review step without creating a second identity queue. The
+  evidence source, human decision, canonical person/vehicle link, and audit
+  receipt remain the authoritative FCM path.
+- The multiline extractor regression and full Atlas refresh test file pass
+  (32 tests). No schema or production runtime behavior changed.
+
 ### Closure log - source-backed Parking zone rule authoring
 
 - The Trackforce-style configure-before-deploy check found a real task gap in

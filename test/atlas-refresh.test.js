@@ -815,6 +815,29 @@ test('component extraction tolerates formatted multiline Supabase chains', () =>
   assert.ok(edges.some(edge => edge.target_name === 'welfare_alerts' && edge.edge_kind === 'writes'));
 });
 
+test('component extraction records multiline conditional RPC targets', () => {
+  const edges = collectComponentEdges('apps/web/src/components/IdentityRecordsWorkspace.tsx', `
+    const result = await supabase.rpc(
+      selectedDocument.document_kind === "nzta_mvr_record"
+        ? "review_nzta_mvr_identity_evidence"
+        : "review_canonical_identity_evidence",
+      { p_identity_document_id: selectedDocument.id },
+    );
+  `, {
+    rpcs: new Set(['review_nzta_mvr_identity_evidence', 'review_canonical_identity_evidence']),
+    tables: new Set(),
+    edgeFunctions: new Set(),
+  });
+
+  assert.deepEqual(
+    edges
+      .filter((edge) => edge.target_type === 'rpc')
+      .map((edge) => edge.target_name)
+      .sort(),
+    ['review_canonical_identity_evidence', 'review_nzta_mvr_identity_evidence'],
+  );
+});
+
 test('stale edge compatibility helper retires only live CI-generated identities', () => {
   const base = { source_type: 'component', source_name: 'pages/CRMPage', target_type: 'table', source_file: 'apps/web/src/pages/CRMPage.tsx', retirement_status: 'live' };
   const existing = [
