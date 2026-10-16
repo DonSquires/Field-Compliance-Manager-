@@ -455,6 +455,56 @@ function collectSqlFunctionEdges(rootDir) {
   return [...edges.values()];
 }
 
+function maskSqlLiterals(content) {
+  const preserveLines = (value) => value.replace(/[^\r\n]/g, ' ');
+  return content
+    .replace(/\$([a-zA-Z0-9_]*)\$[\s\S]*?\$\1\$/g, preserveLines)
+    .replace(/'(?:''|[^'])*'/g, preserveLines)
+    .replace(/\/\*[\s\S]*?\*\//g, preserveLines)
+    .replace(/--[^\r\n]*/g, preserveLines);
+}
+
+function collectSchemaViewEdges(rootDir, inventory = collectDdlEntities(rootDir)) {
+  const schemaFile = 'supabase/schema.sql';
+  const schemaPath = path.join(rootDir, schemaFile);
+  if (!fs.existsSync(schemaPath)) return [];
+  const schema = maskSqlLiterals(fs.readFileSync(schemaPath, 'utf8'));
+  const edges = new Map();
+  const viewPattern = /(?:^|\n)\s*CREATE\s+(?:OR\s+REPLACE\s+)?(?:MATERIALIZED\s+)?VIEW\s+(?:(?:"?([a-zA-Z_][a-zA-Z0-9_]*)"?\.)?)"?([a-zA-Z_][a-zA-Z0-9_]*)"?(?:\s+WITH\s*\([^;]*?\))?\s+AS\s+([\s\S]*?)\s*;/gim;
+
+  for (const view of schema.matchAll(viewPattern)) {
+    const schemaName = view[1]?.toLowerCase();
+    if (schemaName && schemaName !== 'public') continue;
+    const viewName = view[2];
+    const body = view[3];
+    const cteNames = new Set();
+    for (const cte of body.matchAll(/(?:\bWITH(?:\s+RECURSIVE)?|,)\s*"?([a-zA-Z_][a-zA-Z0-9_]*)"?\s+AS\s+(?:(?:NOT\s+)?MATERIALIZED\s+)?\(/gi)) {
+      cteNames.add(cte[1].toLowerCase());
+    }
+    for (const dependency of body.matchAll(/\b(?:FROM|JOIN)\s+(?:LATERAL\s+)?(?:(?:"?([a-zA-Z_][a-zA-Z0-9_]*)"?\.)?)"?([a-zA-Z_][a-zA-Z0-9_]*)"?/gi)) {
+      const dependencySchema = dependency[1]?.toLowerCase();
+      const dependencyName = dependency[2];
+      if (dependencySchema && dependencySchema !== 'public') continue;
+      if (dependencyName === viewName || cteNames.has(dependencyName.toLowerCase()) || !inventory.tables.has(dependencyName)) continue;
+      const edge = {
+        source_type: 'table',
+        source_name: viewName,
+        target_type: 'table',
+        target_name: dependencyName,
+        edge_kind: 'reads',
+        evidence_class: 'live-schema',
+        retirement_status: 'live',
+        source_file: schemaFile,
+        migration_name: null,
+        caller_context: `${OWNER_MARKER} SQL view reads public.${dependencyName}`,
+        refresh_source: 'ci_generator'
+      };
+      edges.set(edgeKey(edge), edge);
+    }
+  }
+  return [...edges.values()];
+}
+
 function collectCronSchedulerEdges(rootDir, inventory) {
   const files = [
     ...walkFiles(rootDir, 'supabase/migrations').filter(file => file.endsWith('.sql')).sort(),
@@ -699,6 +749,7 @@ function collectAtlasRefresh(rootDir = process.cwd()) {
   for (const edge of [
     ...sourceEdges,
     ...collectSqlFunctionEdges(rootDir),
+    ...collectSchemaViewEdges(rootDir, { tables, rpcs }),
     ...collectCronSchedulerEdges(rootDir, { tables, rpcs }),
     ...collectSchemaForeignKeyEdges(rootDir),
   ]) {
@@ -1034,6 +1085,7 @@ module.exports = {
   OWNER_MARKER,
   collectComponentEdges,
   collectManagedAtlas,
+  collectSchemaViewEdges,
   collectSchemaForeignKeyEdges,
   collectCronSchedulerEdges,
   staleGeneratedEdgeIds,
