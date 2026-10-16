@@ -85,6 +85,24 @@ test('Atlas refresh treats the latest live pg_cron declaration as a real caller'
       target_name: 'sweep_field_work',
       edge_kind: 'calls',
     }]);
+
+    const manifest = collectAtlasRefresh(root);
+    assert.deepEqual(
+      manifest.capabilities
+        .filter((capability) => capability.entity_type === 'feature')
+        .map(({ entity_name, wired, exercised, caller_summary }) => ({
+          entity_name,
+          wired,
+          exercised,
+          caller_summary,
+        })),
+      [{
+        entity_name: 'scheduler/field-sweep',
+        wired: true,
+        exercised: null,
+        caller_summary: 'active pg_cron schedule',
+      }],
+    );
   } finally {
     fs.rmSync(root, { recursive: true, force: true });
   }

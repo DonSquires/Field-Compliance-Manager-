@@ -1976,3 +1976,22 @@ remains unpopulated.
   boundaries as much as visible task controls. Recording the policy-to-helper
   relationship makes the real stop-line visible without claiming that any user
   has exercised it or inventing a new screen.
+## 2026-10-17 — Classify active scheduler features as wired sources
+
+- **Expected:** an active `pg_cron` declaration proves that its scheduler
+  feature has a real outbound execution path. The declaration establishes
+  `wired`; only a successful `cron.job_run_details` receipt establishes
+  `exercised`.
+- **Present before:** Atlas correctly derived scheduler-to-RPC call edges for
+  slow Builder-job warnings, CCTV biometric expiry, and missed-field-work
+  sweeps. Their RPC targets were wired, but the scheduler source capabilities
+  themselves were reported as unwired because feature capabilities normally
+  require an inbound caller.
+- **Change:** a live-schema scheduler source now contributes the explicit caller
+  summary `active pg_cron schedule`. Retired schedules remain absent because the
+  ordered migration replay already removes them. Runtime exercise remains null
+  unless the separate governed receipt importer proves a successful run.
+- **Trackforce consideration:** automatic exception sweeps are operational
+  actors, not screens waiting for a button. Showing their declared execution
+  road—and separately their last successful traversal—supports reliable missed
+  work, retention, and stalled-job monitoring without inventing manual actions.
