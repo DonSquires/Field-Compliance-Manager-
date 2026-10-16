@@ -44586,27 +44586,6 @@ export type Database = {
           to_stage: string
         }[]
       }
-      get_crm_onboarding_queue: {
-        Args: never
-        Returns: {
-          account_name: string
-          account_organization_id: string
-          agreement_id: string
-          agreement_name: string
-          current_stage: string
-          days_open: number
-          has_primary_contact: boolean
-          ledger_id: string
-          ledger_status: string
-          organization_status: string
-          organization_updated_at: string
-          overdue: boolean
-          readiness: Json
-          started_at: string
-          target_live_at: string
-          version: number
-        }[]
-      }
       get_crm_onboarding_workspace: {
         Args: never
         Returns: {
@@ -46048,35 +46027,6 @@ export type Database = {
         }
         Returns: Json
       }
-      manage_crm_onboarding_stage: {
-        Args: {
-          p_account_organization_id: string
-          p_expected_version: number
-          p_stage: string
-          p_target_live_at?: string
-        }
-        Returns: {
-          account_organization_id: string
-          activated_at: string | null
-          activated_by: string | null
-          assigned_to: string | null
-          current_stage: string
-          id: string
-          provider_organization_id: string
-          stage_note: string | null
-          started_at: string
-          status: string
-          target_live_at: string
-          updated_at: string
-          version: number
-        }
-        SetofOptions: {
-          from: "*"
-          to: "crm_onboarding_ledgers"
-          isOneToOne: true
-          isSetofReturn: false
-        }
-      }
       manage_crm_onboarding_workflow: {
         Args: {
           p_account_organization_id: string
@@ -47390,67 +47340,6 @@ export type Database = {
         SetofOptions: {
           from: "*"
           to: "org_module_subscriptions"
-          isOneToOne: true
-          isSetofReturn: false
-        }
-      }
-      manage_rate_rule: {
-        Args: {
-          p_action: string
-          p_amount?: number
-          p_client_org_id?: string
-          p_client_request_id: string
-          p_day_category?: string
-          p_effective_from?: string
-          p_effective_to?: string
-          p_expected_updated_at?: string
-          p_job_type?: string
-          p_name?: string
-          p_pay_code?: string
-          p_priority?: number
-          p_rate_rule_id?: string
-          p_rate_type?: string
-          p_rule_kind?: string
-          p_service_type?: string
-          p_site_id?: string
-          p_zone_id?: string
-        }
-        Returns: {
-          active: boolean
-          amount: number
-          client_org_id: string | null
-          client_request_id: string | null
-          created_at: string
-          created_by: string | null
-          day_category: string | null
-          distance_max_km: number | null
-          distance_min_km: number | null
-          effective_from: string | null
-          effective_to: string | null
-          gl_account: string | null
-          id: string
-          job_code: string | null
-          job_type: string | null
-          module_key: string | null
-          name: string
-          organization_id: string
-          outside_area: boolean | null
-          pay_code: string | null
-          priority: number
-          rate_type: string
-          region_code: string | null
-          role_code: string | null
-          rule_kind: string
-          service_type: string | null
-          site_id: string | null
-          updated_at: string
-          updated_by: string | null
-          vehicle_type: string | null
-          zone_id: string | null
-        }
-        SetofOptions: {
-          from: "*"
-          to: "rate_rules"
           isOneToOne: true
           isSetofReturn: false
         }
@@ -52996,6 +52885,10 @@ export type Database = {
       sweep_missed_field_work: {
         Args: { p_grace_minutes?: number; p_now?: string }
         Returns: Json
+      }
+      sweep_slow_builder_job_notifications: {
+        Args: { p_after_minutes?: number; p_now?: string }
+        Returns: number
       }
       sync_my_profile_email: { Args: never; Returns: string }
       test_bob_signing_config: { Args: never; Returns: Json }

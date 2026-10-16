@@ -1750,3 +1750,32 @@ remains unpopulated.
 - Exercise honesty: component tests prove the request and persisted readback
   contract, but they do not prove a production invocation. Atlas `exercised`
   must remain unset until an authorized administrator reviews a real field.
+
+### Closure candidate - superseded CRM and rate RPC retirement
+
+- Atlas showed three authenticated RPCs as present but unwired:
+  `get_crm_onboarding_queue`, `manage_crm_onboarding_stage`, and
+  `manage_rate_rule`. Repository search, generated callers and E2E fixtures
+  confirmed that the active product instead uses
+  `get_crm_onboarding_workspace`, `manage_crm_onboarding_workflow`, and
+  `manage_operating_branch_rate_rule`.
+- Before: PostgREST advertised two parallel onboarding reads, two parallel
+  onboarding mutation paths and two parallel rate-rule mutation paths. The old
+  APIs could not represent the current named owner, stage note, immutable
+  workflow history, invitation/client-seat state, descendant-provider reach,
+  explicit operating branch, or payroll role code.
+- During: a forward migration drops only the three narrower signatures.
+  Historical migrations remain unchanged as lineage evidence. Stale E2E aliases
+  and Atlas expectations are removed so tests exercise the same single APIs as
+  production.
+- After: PostgREST no longer advertises the old commands. The richer
+  replacements remain advertised and are still the only browser callers.
+  Live-regenerated schema and generated TypeScript definitions no longer claim
+  that the retired functions exist.
+- Trackforce consideration: operational certainty comes from one accountable
+  queue and one governed command path. Leaving callable predecessor APIs beside
+  ownership-aware workflows creates an invisible bypass and ambiguous support
+  evidence even when no current screen calls them.
+- Atlas treatment: retire the three capabilities and their outgoing internal
+  edges as legacy. Do not invent UI callers. Their replacement RPCs remain
+  present and wired; exercise state is unchanged.
