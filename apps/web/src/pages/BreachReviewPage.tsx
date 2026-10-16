@@ -26,6 +26,7 @@ type ActionType =
   | 'infringement'
   | 'tow_request'
   | 'welfare_referral'
+  | 'approve_requested'
   | 'dismissed'
   | 'resolved'
   | 'exempt_homeless';
@@ -41,6 +42,11 @@ interface BreachAlert {
   created_at: string;
   action_type: string | null;
   actioned_at: string | null;
+  requested_action: string | null;
+  requested_at: string | null;
+  request_notes: string | null;
+  enforcement_mode: string | null;
+  request_disposition: string | null;
   zone_name: string | null;
   observation_date: string | null;
   is_scv: boolean | null;
@@ -71,6 +77,9 @@ const BreachReviewPage: React.FC = () => {
   const [busyId, setBusyId] = useState<string | null>(null);
   const [generatingNoticeId, setGeneratingNoticeId] = useState<string | null>(null);
   const [noticeReceipts, setNoticeReceipts] = useState<Record<string, NoticeReceiptData>>({});
+  const [noticePreviews, setNoticePreviews] = useState<Record<string, NoticeReceiptData>>({});
+  const [typedAuthorizerNames, setTypedAuthorizerNames] = useState<Record<string, string>>({});
+  const [printRequestIds, setPrintRequestIds] = useState<Record<string, string>>({});
   const [noticeArtifactPaths, setNoticeArtifactPaths] = useState<Record<string, string>>({});
 
   // ATLAS READS: breach_alerts, location_zones, observations
@@ -90,7 +99,7 @@ const BreachReviewPage: React.FC = () => {
       let query = supabase
         .from('breach_alerts')
         .select(
-          'id, plate_number, breach_type, status, nights_count, limit_value, notes, created_at, action_type, actioned_at, zone_id'
+          'id, plate_number, breach_type, status, nights_count, limit_value, notes, created_at, action_type, actioned_at, zone_id, requested_action, requested_at, request_notes, enforcement_mode, request_disposition'
         )
         .eq('organization_id', orgId);
 
@@ -118,6 +127,11 @@ const BreachReviewPage: React.FC = () => {
           created_at: row.created_at,
           action_type: row.action_type,
           actioned_at: row.actioned_at,
+          requested_action: row.requested_action,
+          requested_at: row.requested_at,
+          request_notes: row.request_notes,
+          enforcement_mode: row.enforcement_mode,
+          request_disposition: row.request_disposition,
           zone_name: row.zone?.name ?? null,
           observation_date: row.observation?.observed_at ?? null,
           is_scv: row.observation?.is_scv ?? null,
@@ -145,7 +159,7 @@ const BreachReviewPage: React.FC = () => {
 
       const receipt=(data as Array<{alert_status:string;action_type:string|null;actioned_at:string}>|null)?.[0];if (updateErr||!receipt) throw updateErr??new Error('Breach decision receipt was not confirmed.');
 
-      if (statusFilter === 'open') {
+      if (statusFilter !== 'all' && receipt.alert_status !== statusFilter) {
         setAlerts((prev) => prev.filter((a) => a.id !== alert.id));
       } else {
         setAlerts((prev) =>
@@ -175,12 +189,12 @@ const BreachReviewPage: React.FC = () => {
     if (!profile?.displayName || !alert.action_type) return;
     setGeneratingNoticeId(alert.id);
     setError(null);
-    const { data, error: invokeError } = await supabase.functions.invoke<{ html?: string; pdf_url?: string; receipt?: NoticeReceiptData }>('generate-notice', {
+    const { data, error: invokeError } = await supabase.functions.invoke<{ html?: string; preview?: boolean; receipt?: NoticeReceiptData }>('generate-notice', {
       body: {
+        operation: 'preview',
         notice_type: alert.action_type,
         breach_alert_id: alert.id,
         officer_name: profile.displayName,
-        authorized_by: profile.displayName,
         location_name: alert.zone_name,
         additional_notes: alert.notes,
       },
@@ -188,17 +202,43 @@ const BreachReviewPage: React.FC = () => {
     if (invokeError || !data?.html) {
       setError(invokeError?.message ?? 'The notice draft was not generated. Refresh and try again.');
     } else {
-      if (data.receipt) setNoticeReceipts((current) => ({ ...current, [alert.id]: data.receipt as NoticeReceiptData }));
-      if (data.pdf_url) {
-        setNoticeArtifactPaths((current) => ({ ...current, [alert.id]: data.pdf_url as string }));
-      } else {
-        const draftUrl = URL.createObjectURL(new Blob([data.html], { type: 'text/html' }));
-        window.open(draftUrl, '_blank', 'noopener,noreferrer');
-        window.setTimeout(() => URL.revokeObjectURL(draftUrl), 60_000);
-        setError('The notice preview opened, but its PDF artifact could not be stored. Download is unavailable until generation succeeds.');
-      }
+      if (data.receipt) setNoticePreviews((current) => ({ ...current, [alert.id]: data.receipt as NoticeReceiptData }));
+      setPrintRequestIds((current) => ({ ...current, [alert.id]: current[alert.id] ?? crypto.randomUUID() }));
+      const draftUrl = URL.createObjectURL(new Blob([data.html], { type: 'text/html' }));
+      window.open(draftUrl, '_blank', 'noopener,noreferrer');
+      window.setTimeout(() => URL.revokeObjectURL(draftUrl), 60_000);
     }
 
+    setGeneratingNoticeId(null);
+  };
+
+  const authorizeNoticePrint = async (alert: BreachAlert) => {
+    if (!profile?.displayName || !alert.action_type) return;
+    setGeneratingNoticeId(alert.id);
+    setError(null);
+    const { data, error: invokeError } = await supabase.functions.invoke<{
+      html?: string;
+      pdf_url?: string;
+      receipt?: NoticeReceiptData;
+      authorization_receipt?: { id: string; created_at: string };
+    }>('generate-notice', {
+      body: {
+        operation: 'authorize_print',
+        notice_type: alert.action_type,
+        breach_alert_id: alert.id,
+        officer_name: profile.displayName,
+        typed_name: typedAuthorizerNames[alert.id] ?? '',
+        print_request_id: printRequestIds[alert.id],
+        location_name: alert.zone_name,
+        additional_notes: alert.notes,
+      },
+    });
+    if (invokeError || !data?.pdf_url || !data.receipt || !data.authorization_receipt) {
+      setError(invokeError?.message ?? 'Print authorization was not confirmed. No issued notice receipt is available.');
+    } else {
+      setNoticeReceipts((current) => ({ ...current, [alert.id]: data.receipt as NoticeReceiptData }));
+      setNoticeArtifactPaths((current) => ({ ...current, [alert.id]: data.pdf_url as string }));
+    }
     setGeneratingNoticeId(null);
   };
 
@@ -372,6 +412,14 @@ const BreachReviewPage: React.FC = () => {
                       {alert.actioned_at ? ` on ${new Date(alert.actioned_at).toLocaleDateString()}` : ''}
                     </p>
                   )}
+                  {alert.status === 'acknowledged' && alert.requested_action && (
+                    <div className="alert alert-warning" role="status">
+                      <strong>Officer request awaiting review</strong>
+                      <p>{alert.requested_action.replaceAll('_', ' ')} · {(alert.enforcement_mode ?? 'policy').replaceAll('_', ' ')}</p>
+                      {alert.request_notes && <p>{alert.request_notes}</p>}
+                      {alert.requested_at && <small>Requested {new Date(alert.requested_at).toLocaleString('en-NZ')}</small>}
+                    </div>
+                  )}
                 </div>
 
                 {/* Enforcement Action Trigger Buttons */}
@@ -441,6 +489,39 @@ const BreachReviewPage: React.FC = () => {
                   </div>
                 )}
 
+                {alert.status === 'acknowledged' && alert.requested_action && (
+                  <div style={{ marginTop: '12px', borderTop: '1px solid var(--color-border)', paddingTop: '10px' }}>
+                    <div className="form-group">
+                      <label>Administrator review note</label>
+                      <input
+                        value={activeActionAlertId === alert.id ? actionNotes : ''}
+                        onFocus={() => setActiveActionAlertId(alert.id)}
+                        onChange={(event) => {
+                          setActiveActionAlertId(alert.id);
+                          setActionNotes(event.target.value);
+                        }}
+                        placeholder="Record why the request is approved or declined"
+                      />
+                    </div>
+                    <div style={{ display: 'flex', gap: '6px', flexWrap: 'wrap', marginTop: '8px' }}>
+                      <button
+                        className="btn btn-sm btn-primary"
+                        onClick={() => void handleAction(alert, 'approve_requested')}
+                        disabled={busyId === alert.id || activeActionAlertId !== alert.id || !actionNotes.trim()}
+                      >
+                        {busyId === alert.id ? 'Processing…' : `Approve ${alert.requested_action.replaceAll('_', ' ')}`}
+                      </button>
+                      <button
+                        className="btn btn-sm btn-danger"
+                        onClick={() => void handleAction(alert, 'dismissed')}
+                        disabled={busyId === alert.id || activeActionAlertId !== alert.id || !actionNotes.trim()}
+                      >
+                        Decline request
+                      </button>
+                    </div>
+                  </div>
+                )}
+
                 {/* Actioned alerts: mark as resolved or exempt_homeless */}
                 {alert.status === 'actioned' && (
                   <div style={{ marginTop: '12px', borderTop: '1px solid var(--color-border)', paddingTop: '10px' }}>
@@ -460,12 +541,32 @@ const BreachReviewPage: React.FC = () => {
                         🏠 Mark Exempt - Homeless
                       </button>
                       {(['written_warning', 'notice_to_vacate', 'infringement'] as string[]).includes(alert.action_type ?? '') && <button className="btn btn-sm btn-primary" onClick={() => void generateNoticeDraft(alert)} disabled={generatingNoticeId === alert.id}>
-                        {generatingNoticeId === alert.id ? 'Generating draft...' : 'Generate notice draft'}
+                        {generatingNoticeId === alert.id ? 'Generating preview...' : 'Preview notice'}
                       </button>}
                       <button className="btn btn-sm btn-primary" onClick={() => void draftBobDocument(alert)} title="Draft a formal notice letter or incident report with Bob">
                         ✨ Bob: Draft document
                       </button>
                     </div>
+                    {noticePreviews[alert.id] && !noticeReceipts[alert.id] && (
+                      <div className="breach-action-editor">
+                        <p><strong>Preview opened.</strong> Confirm it is correct, then type your full profile name to authorize formal issue and printing.</p>
+                        <div className="form-group">
+                          <label>Full name</label>
+                          <input
+                            value={typedAuthorizerNames[alert.id] ?? ''}
+                            onChange={(event) => setTypedAuthorizerNames((current) => ({ ...current, [alert.id]: event.target.value }))}
+                            autoComplete="name"
+                          />
+                        </div>
+                        <button
+                          className="btn btn-sm btn-primary"
+                          onClick={() => void authorizeNoticePrint(alert)}
+                          disabled={generatingNoticeId === alert.id || typedAuthorizerNames[alert.id] !== profile?.displayName}
+                        >
+                          {generatingNoticeId === alert.id ? 'Authorizing…' : 'Authorize Print'}
+                        </button>
+                      </div>
+                    )}
                     {noticeReceipts[alert.id] && <NoticePrintActions receipt={noticeReceipts[alert.id]} organizationId={operatingOrganizationId ?? profile?.organizationId ?? null} />}
                     {noticeArtifactPaths[alert.id] && <GeneratedArtifactActions bucket="notice-artifacts" path={noticeArtifactPaths[alert.id]} fileName={`notice-${noticeReceipts[alert.id]?.noticeNumber ?? alert.id}.pdf`} label="Notice PDF" />}
                   </div>

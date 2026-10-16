@@ -36,6 +36,9 @@ import {
 import { supabase } from '../lib/supabase';
 import { resolveAddressForCoordinates } from '../lib/locationAddress';
 import { ScanSafetyWarnings } from '../components/ScanSafetyWarnings';
+import { NoticePrintActions } from '../components/NoticePrintActions';
+import { GeneratedArtifactActions } from '../components/GeneratedArtifactActions';
+import type { NoticeReceiptData } from '../lib/thermalReceipt';
 import './PageStyles.css';
 
 interface ObservationSummary {
@@ -53,7 +56,30 @@ interface ZoneOption {
   name: string;
 }
 
-interface BreachOutcome { id: string; observation_id: string; status: string; action_type: string | null; actioned_at: string | null; notes: string | null; }
+interface BreachOutcome {
+  id: string;
+  observation_id: string;
+  status: string;
+  action_type: string | null;
+  actioned_at: string | null;
+  notes: string | null;
+  requested_action: string | null;
+  enforcement_mode: string | null;
+  request_disposition: string | null;
+}
+
+type OfficerEnforcementAction = 'written_warning' | 'notice_to_vacate' | 'infringement';
+
+interface OfficerEnforcementReceipt {
+  alert_id: string;
+  alert_status: string;
+  requested_action: OfficerEnforcementAction;
+  enforcement_mode: 'officer_direct' | 'admin_first' | 'hybrid';
+  disposition: 'direct' | 'administrator_review';
+  requested_at: string;
+  next_actor: 'officer' | 'administrator';
+  request_id: string;
+}
 
 type LocationState =
   | { status: 'locating'; latitude: null; longitude: null; accuracy: null; message: string }
@@ -115,6 +141,17 @@ const OfficerFreedomCampingPage: React.FC = () => {
   const [queuedCount, setQueuedCount] = useState(0);
   const [syncing, setSyncing] = useState(false);
   const [queueMessage, setQueueMessage] = useState<string | null>(null);
+  const [enforcementAction, setEnforcementAction] = useState<OfficerEnforcementAction>('written_warning');
+  const [enforcementNotes, setEnforcementNotes] = useState('');
+  const [enforcementBusy, setEnforcementBusy] = useState(false);
+  const [enforcementError, setEnforcementError] = useState<string | null>(null);
+  const [enforcementReceipt, setEnforcementReceipt] = useState<OfficerEnforcementReceipt | null>(null);
+  const [enforcementRequestId, setEnforcementRequestId] = useState(() => crypto.randomUUID());
+  const [noticePreview, setNoticePreview] = useState<NoticeReceiptData | null>(null);
+  const [noticeReceipt, setNoticeReceipt] = useState<NoticeReceiptData | null>(null);
+  const [noticeArtifactPath, setNoticeArtifactPath] = useState<string | null>(null);
+  const [typedAuthorizerName, setTypedAuthorizerName] = useState('');
+  const [printRequestId, setPrintRequestId] = useState(() => crypto.randomUUID());
 
   const loadHistory = useCallback(async () => {
     if (!profile?.id || !profile.organizationId) {
@@ -148,7 +185,7 @@ const OfficerFreedomCampingPage: React.FC = () => {
       setZones((zonesResponse.data as ZoneOption[]) ?? []);
       const observationIds = observationRows.map((observation) => observation.id);
       if (observationIds.length) {
-        const { data: breachRows, error: breachError } = await supabase.from('breach_alerts').select('id, observation_id, status, action_type, actioned_at, notes').in('observation_id', observationIds).order('actioned_at', { ascending: false, nullsFirst: false });
+        const { data: breachRows, error: breachError } = await supabase.from('breach_alerts').select('id, observation_id, status, action_type, actioned_at, notes, requested_action, enforcement_mode, request_disposition').in('observation_id', observationIds).order('actioned_at', { ascending: false, nullsFirst: false });
         if (breachError) throw breachError;
         setBreaches((breachRows as BreachOutcome[]) ?? []);
       } else setBreaches([]);
@@ -375,6 +412,96 @@ const OfficerFreedomCampingPage: React.FC = () => {
 
   const status = result?.compliance_status ?? 'unknown';
 
+  const submitEnforcementAction = async () => {
+    if (!result?.breach_alert_id || !enforcementNotes.trim()) return;
+    setEnforcementBusy(true);
+    setEnforcementError(null);
+    try {
+      const { data, error } = await supabase.rpc('submit_officer_breach_action', {
+        p_alert_id: result.breach_alert_id,
+        p_expected_status: 'open',
+        p_action: enforcementAction,
+        p_notes: enforcementNotes.trim(),
+        p_request_id: enforcementRequestId,
+      });
+      const receipt = (data as OfficerEnforcementReceipt[] | null)?.[0];
+      if (error || !receipt) throw error ?? new Error('The enforcement receipt was not confirmed.');
+      setEnforcementReceipt(receipt);
+      await loadHistory();
+    } catch (error) {
+      setEnforcementError(error instanceof Error ? error.message : 'The enforcement request could not be recorded.');
+    } finally {
+      setEnforcementBusy(false);
+    }
+  };
+
+  const beginNewScan = () => {
+    setResult(null);
+    setEnforcementReceipt(null);
+    setEnforcementNotes('');
+    setEnforcementError(null);
+    setEnforcementRequestId(crypto.randomUUID());
+    setNoticePreview(null);
+    setNoticeReceipt(null);
+    setNoticeArtifactPath(null);
+    setTypedAuthorizerName('');
+    setPrintRequestId(crypto.randomUUID());
+  };
+
+  const previewOfficerNotice = async () => {
+    if (!result?.breach_alert_id || !enforcementReceipt || !profile?.displayName) return;
+    setEnforcementBusy(true);
+    setEnforcementError(null);
+    const { data, error } = await supabase.functions.invoke<{ html?: string; receipt?: NoticeReceiptData }>('generate-notice', {
+      body: {
+        operation: 'preview',
+        notice_type: enforcementReceipt.requested_action,
+        breach_alert_id: result.breach_alert_id,
+        officer_name: profile.displayName,
+        location_name: result.zone_name,
+        additional_notes: enforcementNotes,
+      },
+    });
+    if (error || !data?.html || !data.receipt) {
+      setEnforcementError(error?.message ?? 'The notice preview could not be generated.');
+    } else {
+      setNoticePreview(data.receipt);
+      const previewUrl = URL.createObjectURL(new Blob([data.html], { type: 'text/html' }));
+      window.open(previewUrl, '_blank', 'noopener,noreferrer');
+      window.setTimeout(() => URL.revokeObjectURL(previewUrl), 60_000);
+    }
+    setEnforcementBusy(false);
+  };
+
+  const authorizeOfficerNotice = async () => {
+    if (!result?.breach_alert_id || !enforcementReceipt || !profile?.displayName) return;
+    setEnforcementBusy(true);
+    setEnforcementError(null);
+    const { data, error } = await supabase.functions.invoke<{
+      pdf_url?: string;
+      receipt?: NoticeReceiptData;
+      authorization_receipt?: { id: string };
+    }>('generate-notice', {
+      body: {
+        operation: 'authorize_print',
+        notice_type: enforcementReceipt.requested_action,
+        breach_alert_id: result.breach_alert_id,
+        officer_name: profile.displayName,
+        typed_name: typedAuthorizerName,
+        print_request_id: printRequestId,
+        location_name: result.zone_name,
+        additional_notes: enforcementNotes,
+      },
+    });
+    if (error || !data?.pdf_url || !data.receipt || !data.authorization_receipt) {
+      setEnforcementError(error?.message ?? 'Print authorization was not confirmed.');
+    } else {
+      setNoticeReceipt(data.receipt);
+      setNoticeArtifactPath(data.pdf_url);
+    }
+    setEnforcementBusy(false);
+  };
+
   return (
     <div className="page-container fc-scan-page">
       <header className="fc-scan-header">
@@ -520,7 +647,79 @@ const OfficerFreedomCampingPage: React.FC = () => {
                 </div>
               )}
 
-              <button type="button" className="fc-new-scan" onClick={() => setResult(null)}><Camera size={17} aria-hidden="true" /> New scan</button>
+              {result.breach_alert_id && result.compliance_status === 'breach' && !enforcementReceipt && (
+                <div className="fc-capture-panel" aria-label="Enforcement action">
+                  <div className="fc-section-heading">
+                    <div><span className="fc-eyebrow">Governed next action</span><h2>Record enforcement decision</h2></div>
+                  </div>
+                  <label className="fc-field">
+                    <span>Notice action</span>
+                    <select value={enforcementAction} onChange={(event) => setEnforcementAction(event.target.value as OfficerEnforcementAction)}>
+                      <option value="written_warning">Written warning</option>
+                      <option value="notice_to_vacate">Notice to vacate</option>
+                      <option value="infringement">Infringement</option>
+                    </select>
+                  </label>
+                  <label className="fc-field">
+                    <span>Officer notes <small>required</small></span>
+                    <textarea
+                      value={enforcementNotes}
+                      onChange={(event) => setEnforcementNotes(event.target.value)}
+                      placeholder="Record contact, evidence, instruction, and expected follow-up"
+                      rows={4}
+                    />
+                  </label>
+                  <p className="fc-reason">The server checks your place and task authority, then applies this zone’s direct or administrator-review policy.</p>
+                  {enforcementError && <div className="fc-error" role="alert"><AlertTriangle size={18} aria-hidden="true" /><span>{enforcementError}</span></div>}
+                  <button type="button" className="fc-submit" onClick={() => void submitEnforcementAction()} disabled={enforcementBusy || !enforcementNotes.trim()}>
+                    {enforcementBusy ? <RefreshCw size={19} className="is-spinning" aria-hidden="true" /> : <ShieldCheck size={19} aria-hidden="true" />}
+                    {enforcementBusy ? 'Recording decision' : 'Submit governed action'}
+                  </button>
+                </div>
+              )}
+
+              {enforcementReceipt && (
+                <div className="alert alert-success" role="status">
+                  <strong>{enforcementReceipt.disposition === 'direct' ? 'Direct action recorded' : 'Administrator review requested'}</strong>
+                  <p>
+                    {enforcementReceipt.requested_action.replaceAll('_', ' ')} · {enforcementReceipt.enforcement_mode.replaceAll('_', ' ')}
+                  </p>
+                  <small>
+                    Receipt {enforcementReceipt.request_id.slice(0, 8)} · Next actor: {enforcementReceipt.next_actor}
+                  </small>
+                </div>
+              )}
+
+              {enforcementReceipt?.disposition === 'direct' && !noticePreview && (
+                <button type="button" className="fc-submit" onClick={() => void previewOfficerNotice()} disabled={enforcementBusy}>
+                  Preview notice
+                </button>
+              )}
+              {noticePreview && !noticeReceipt && (
+                <div className="fc-capture-panel">
+                  <p><strong>Preview opened.</strong> Confirm it is correct, then type your full profile name.</p>
+                  <label className="fc-field">
+                    <span>Full name</span>
+                    <input value={typedAuthorizerName} onChange={(event) => setTypedAuthorizerName(event.target.value)} autoComplete="name" />
+                  </label>
+                  <button
+                    type="button"
+                    className="fc-submit"
+                    onClick={() => void authorizeOfficerNotice()}
+                    disabled={enforcementBusy || typedAuthorizerName !== profile?.displayName}
+                  >
+                    Authorize Print
+                  </button>
+                </div>
+              )}
+              {noticeReceipt && (
+                <NoticePrintActions receipt={noticeReceipt} organizationId={profile?.organizationId ?? null} />
+              )}
+              {noticeArtifactPath && (
+                <GeneratedArtifactActions bucket="notice-artifacts" path={noticeArtifactPath} fileName={`notice-${noticeReceipt?.noticeNumber ?? result.breach_alert_id}.pdf`} label="Notice PDF" />
+              )}
+
+              <button type="button" className="fc-new-scan" onClick={beginNewScan}><Camera size={17} aria-hidden="true" /> New scan</button>
             </section>
           ) : (
             <section className="fc-awaiting-result">
@@ -553,7 +752,7 @@ const OfficerFreedomCampingPage: React.FC = () => {
               })}
             </div>
           </section>
-          {breaches.length > 0 && <section className="fc-recent"><div className="fc-section-heading"><div><span className="fc-eyebrow">Supervisor decisions</span><h2>Breach outcomes</h2></div></div><div className="fc-recent-list">{breaches.map((breach) => <article id={`officer-breach-${breach.id}`} className={`fc-breach-outcome ${breach.id === requestedBreachId ? 'is-context-focus' : ''}`} key={breach.id}><div><strong>Admin outcome · {breach.status.replaceAll('_', ' ')}</strong><span>{breach.action_type?.replaceAll('_', ' ') ?? 'Review decision'}</span></div>{breach.notes && <p>{breach.notes}</p>}<small>Alert {breach.id.slice(0, 8)}{breach.actioned_at ? ` · ${new Date(breach.actioned_at).toLocaleString('en-NZ')}` : ''}</small></article>)}</div></section>}
+          {breaches.length > 0 && <section className="fc-recent"><div className="fc-section-heading"><div><span className="fc-eyebrow">Enforcement receipts</span><h2>Breach outcomes</h2></div></div><div className="fc-recent-list">{breaches.map((breach) => <article id={`officer-breach-${breach.id}`} className={`fc-breach-outcome ${breach.id === requestedBreachId ? 'is-context-focus' : ''}`} key={breach.id}><div><strong>{breach.request_disposition === 'administrator_review' && breach.status === 'acknowledged' ? 'Awaiting administrator review' : `Outcome · ${breach.status.replaceAll('_', ' ')}`}</strong><span>{(breach.action_type ?? breach.requested_action)?.replaceAll('_', ' ') ?? 'Review decision'}</span></div>{breach.enforcement_mode && <p>Policy: {breach.enforcement_mode.replaceAll('_', ' ')}</p>}{breach.notes && <p>{breach.notes}</p>}<small>Alert {breach.id.slice(0, 8)}{breach.actioned_at ? ` · ${new Date(breach.actioned_at).toLocaleString('en-NZ')}` : ''}</small></article>)}</div></section>}
         </aside>
       </div>
     </div>

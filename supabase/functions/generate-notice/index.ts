@@ -24,15 +24,15 @@
  *   officer_name       — Authorising officer display name
  *   location_name      — Site/zone name for the notice
  *   additional_notes   — Optional extra notes
- *   authorized_by      — Name of authorising supervisor
+ *   operation          — 'preview' | 'authorize_print'
+ *   typed_name         — Exact profile display name, required for authorize_print
  *
  * Output:
  *   { ok: true, html: string, notice_id: string, pdf_url: string, html_storage_path: string }
  *
  * Legal boundary:
- *   This function only generates a draft HTML document.
- *   No notice is formally issued until the admin prints and signs.
- *   The breach_alert action_type is updated to reflect the draft.
+ *   Preview renders only and never creates an issued record.
+ *   Formal issue requires an exact typed-name match and a server-side audit receipt.
 */ import { serve } from 'https://deno.land/std@0.168.0/http/server.ts';
 import { createClient } from 'https://esm.sh/@supabase/supabase-js@2';
 import { PDFDocument, rgb, type PDFFont } from 'https://esm.sh/pdf-lib@1.17.1';
@@ -45,6 +45,7 @@ const corsHeaders = {
 const PDF_RENDERER_VERSION = 'fcm-notice-pdf-lib-a4-v5';
 const supabaseUrl = Deno.env.get('SUPABASE_URL') ?? '';
 const serviceRoleKey = Deno.env.get('SUPABASE_SERVICE_ROLE_KEY') ?? '';
+const anonKey = Deno.env.get('SUPABASE_ANON_KEY') ?? '';
 
 interface NoticeHtmlData {
   noticeType: string;
@@ -133,11 +134,14 @@ serve(async (req)=>{
       headers: corsHeaders
     });
     const body = await req.json();
-    const { notice_type, breach_alert_id, officer_name, location_name, additional_notes, authorized_by, infringement_fee } = body;
+    const { notice_type, breach_alert_id, officer_name, location_name, additional_notes, infringement_fee } = body;
+    const operation = body.operation ?? 'preview';
+    const typedName = String(body.typed_name ?? '').trim();
+    const printRequestId = String(body.print_request_id ?? '').trim();
     const module_key = body.module_key ?? 'freedom_camping';
-    if (!notice_type || !breach_alert_id) {
+    if (!notice_type || !breach_alert_id || !['preview', 'authorize_print'].includes(operation)) {
       return new Response(JSON.stringify({
-        error: 'notice_type and breach_alert_id are required'
+        error: 'notice_type, breach_alert_id, and a valid operation are required'
       }), {
         status: 400,
         headers: corsHeaders
@@ -146,6 +150,7 @@ serve(async (req)=>{
     // The zone's address is its house's address (locations); zones carry no address of their own.
     const { data: alert, error: alertErr } = await supabase.from('breach_alerts').select(`
         id, plate_number, breach_type, created_at, zone_id, organization_id,
+        observation_id, status, action_type, requested_by, request_disposition,
         location_zones(name, locations(address))
       `).eq('id', breach_alert_id).single();
     if (alertErr || !alert) {
@@ -156,12 +161,35 @@ serve(async (req)=>{
         headers: corsHeaders
       });
     }
-    const { data: profile } = await supabase.from('user_profiles').select('role, organization_id').eq('id', user.id).single();
+    const { data: profile } = await supabase.from('user_profiles').select('role, organization_id, display_name, deactivated_at').eq('id', user.id).single();
     if (!profile || !['grand_master', 'master', 'admin', 'admin_officer', 'officer'].includes(String(profile.role))) {
       return new Response(JSON.stringify({ error: 'Forbidden' }), { status: 403, headers: corsHeaders });
     }
-    if (String(profile.role) !== 'grand_master' && profile.organization_id !== alert.organization_id) {
-      return new Response(JSON.stringify({ error: 'Forbidden: breach alert belongs to another organization' }), { status: 403, headers: corsHeaders });
+    if (profile.deactivated_at) return new Response(JSON.stringify({ error: 'Forbidden: inactive user' }), { status: 403, headers: corsHeaders });
+    if (alert.status !== 'actioned' || alert.action_type !== notice_type) {
+      return new Response(JSON.stringify({ error: 'The breach action is not ready for this notice' }), { status: 409, headers: corsHeaders });
+    }
+    if (String(profile.role) === 'officer') {
+      const { data: observation } = await supabase.from('observations').select('officer_id').eq('id', alert.observation_id).maybeSingle();
+      if (!observation || observation.officer_id !== user.id || alert.requested_by !== user.id || alert.request_disposition !== 'direct') {
+        return new Response(JSON.stringify({ error: 'Forbidden: direct officer notice authority was not confirmed' }), { status: 403, headers: corsHeaders });
+      }
+    }
+    if (operation === 'authorize_print' && (!profile.display_name || typedName !== profile.display_name.trim())) {
+      return new Response(JSON.stringify({ error: 'Typed name must exactly match the signed-in profile name' }), { status: 422, headers: corsHeaders });
+    }
+    if (operation === 'authorize_print' && !/^[0-9a-f]{8}-[0-9a-f]{4}-4[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i.test(printRequestId)) {
+      return new Response(JSON.stringify({ error: 'A valid print request ID is required' }), { status: 400, headers: corsHeaders });
+    }
+    const userSupabase = createClient(supabaseUrl, anonKey, {
+      global: { headers: { Authorization: authHeader } },
+      auth: { persistSession: false }
+    });
+    const { data: canOperate, error: operateError } = await userSupabase.rpc('is_enforcement_operator_for_org', {
+      target_org_id: alert.organization_id
+    });
+    if (operateError || canOperate !== true) {
+      return new Response(JSON.stringify({ error: 'Forbidden: active organisation authority was not confirmed' }), { status: 403, headers: corsHeaders });
     }
     // Load org details
     const { data: org } = await supabase.from('organizations').select('name, contact_email, contact_phone').eq('id', alert.organization_id).single();
@@ -203,7 +231,7 @@ serve(async (req)=>{
     const authorisingSection = template?.authorising_section ?? (notice_type === 'infringement' ? 's.20' : notice_type === 'notice_to_vacate' ? 's.32' : '');
     // Reserve infringement numbers atomically and scope counters by module.
     let noticeNumber = '';
-    if (notice_type === 'infringement') {
+    if (notice_type === 'infringement' && operation === 'authorize_print') {
       const { data: reservedNumber, error: numberError } = await supabase.rpc('reserve_infringement_notice_number', {
         p_organization_id: alert.organization_id,
         p_module_key: module_key,
@@ -213,7 +241,9 @@ serve(async (req)=>{
       noticeNumber = reservedNumber;
     } else {
       // Non-infringement notices don't need sequential numbers
-      noticeNumber = `${notice_type === 'notice_to_vacate' ? 'NTV' : 'WW'}-${new Date().toISOString().slice(0, 10).replace(/-/g, '')}-${alert.id.slice(0, 6).toUpperCase()}`;
+      noticeNumber = operation === 'preview'
+        ? `PREVIEW-${alert.id.slice(0, 8).toUpperCase()}`
+        : `${notice_type === 'notice_to_vacate' ? 'NTV' : 'WW'}-${new Date().toISOString().slice(0, 10).replace(/-/g, '')}-${alert.id.slice(0, 6).toUpperCase()}`;
     }
     // Template rendering: if the org has a template with body_html, render it
     // with {{variable}} replacement. Otherwise fall back to hardcoded HTML.
@@ -225,8 +255,8 @@ serve(async (req)=>{
       siteName: zoneName,
       siteAddress,
       orgName,
-      officerName: officer_name ?? 'Authorised Officer',
-      authorizedBy: authorized_by ?? officer_name ?? 'Authorised Officer',
+      officerName: profile.display_name ?? officer_name ?? 'Authorised Officer',
+      authorizedBy: operation === 'authorize_print' ? typedName : 'PENDING AUTHORIZATION',
       noticeDate,
       vacateBy: vacateByStr,
       fineAmount,
@@ -252,6 +282,58 @@ serve(async (req)=>{
     } else {
       html = generateNoticeHtml(noticeData);
     }
+    const receipt = {
+      orgName,
+      noticeType: notice_type,
+      noticeNumber,
+      issuedAtIso: new Date().toISOString(),
+      subjectLabel: 'Plate',
+      subjectValue: plate,
+      locationLabel: zoneName,
+      officerName: noticeData.officerName,
+      legalBasis: [bylawRef, authorisingSection].filter(Boolean).join(' '),
+      fineAmount: notice_type === 'infringement' ? fineAmount : null,
+      dueDateIso: notice_type === 'notice_to_vacate' ? vacateBy.toISOString() : null,
+      notes: additional_notes ?? null,
+      footerText: template?.footer_text ?? null
+    };
+    if (operation === 'preview') {
+      return new Response(JSON.stringify({ ok: true, preview: true, html, receipt }), {
+        headers: { ...corsHeaders, 'Content-Type': 'application/json' }
+      });
+    }
+    const { data: existingAuthorization, error: existingAuthorizationError } = await supabase
+      .from('notice_print_authorizations')
+      .select('organization_id, breach_alert_id, notice_type, authorized_by, status, response')
+      .eq('request_id', printRequestId)
+      .maybeSingle();
+    if (existingAuthorizationError) throw existingAuthorizationError;
+    if (existingAuthorization) {
+      if (
+        existingAuthorization.organization_id !== alert.organization_id
+        || existingAuthorization.breach_alert_id !== breach_alert_id
+        || existingAuthorization.notice_type !== notice_type
+        || existingAuthorization.authorized_by !== user.id
+      ) {
+        return new Response(JSON.stringify({ error: 'Print request ID has already been used' }), { status: 409, headers: corsHeaders });
+      }
+      if (existingAuthorization.status === 'completed' && existingAuthorization.response) {
+        return new Response(JSON.stringify(existingAuthorization.response), {
+          headers: { ...corsHeaders, 'Content-Type': 'application/json' }
+        });
+      }
+    } else {
+      const { error: authorizationInsertError } = await supabase.from('notice_print_authorizations').insert({
+        organization_id: alert.organization_id,
+        breach_alert_id,
+        notice_type,
+        request_id: printRequestId,
+        authorized_by: user.id,
+        authorized_name: typedName,
+        status: 'authorized'
+      });
+      if (authorizationInsertError) throw authorizationInsertError;
+    }
     // Bug A fix: insert into the correct table based on notice_type
     let noticeId = null;
     if (notice_type === 'notice_to_vacate') {
@@ -268,7 +350,7 @@ serve(async (req)=>{
         issued_at: new Date().toISOString(),
         status: 'issued'
       }).select('id').single();
-      if (ntvErr) console.error('NTV record error:', ntvErr.message);
+      if (ntvErr || !ntvRecord) throw new Error(ntvErr?.message ?? 'Notice to vacate record was not created');
       noticeId = ntvRecord?.id ?? null;
     } else if (notice_type === 'infringement') {
       const dueDate = new Date();
@@ -291,7 +373,7 @@ serve(async (req)=>{
         issued_at: new Date().toISOString(),
         status: 'issued'
       }).select('id').single();
-      if (infErr) console.error('Infringement record error:', infErr.message);
+      if (infErr || !infRecord) throw new Error(infErr?.message ?? 'Infringement record was not created');
       noticeId = infRecord?.id ?? null;
     }
     // written_warning: no separate notice table — breach_alerts update only
@@ -311,52 +393,52 @@ serve(async (req)=>{
       upsert: true
     });
     if (htmlUploadErr || pdfUploadErr) {
-      console.error('Notice artifact upload error:', htmlUploadErr?.message ?? pdfUploadErr?.message);
-    } else {
-      pdfUrl = pdfPath;
-      // Update the notice row with the storage path
-      if (notice_type === 'notice_to_vacate' && noticeId) {
-        await supabase.from('notices_to_vacate').update({
-          pdf_url: pdfUrl
-        }).eq('id', noticeId);
-      } else if (notice_type === 'infringement' && noticeId) {
-        await supabase.from('infringement_notices').update({
-          pdf_url: pdfUrl
-        }).eq('id', noticeId);
-      }
+      throw new Error(htmlUploadErr?.message ?? pdfUploadErr?.message ?? 'Notice artifact storage failed');
     }
-    // Update breach alert
-    await supabase.from('breach_alerts').update({
-      action_type: notice_type,
-      status: 'actioned',
-      actioned_by: user.id,
-      actioned_at: new Date().toISOString()
-    }).eq('id', breach_alert_id);
-    return new Response(JSON.stringify({
+    pdfUrl = pdfPath;
+    if (notice_type === 'notice_to_vacate' && noticeId) {
+      const { error: updateError } = await supabase.from('notices_to_vacate').update({ pdf_url: pdfUrl }).eq('id', noticeId);
+      if (updateError) throw updateError;
+    } else if (notice_type === 'infringement' && noticeId) {
+      const { error: updateError } = await supabase.from('infringement_notices').update({ pdf_url: pdfUrl }).eq('id', noticeId);
+      if (updateError) throw updateError;
+    }
+    const { data: authorization, error: authorizationError } = await supabase.from('audit_log').insert({
+      organization_id: alert.organization_id,
+      actor_user_id: user.id,
+      action: 'notice_print_authorized',
+      target_table: 'breach_alerts',
+      target_id: breach_alert_id,
+      metadata: {
+        notice_type,
+        notice_id: noticeId,
+        notice_number: noticeNumber,
+        pdf_url: pdfUrl,
+        typed_name_match: true,
+        enforcement_disposition: alert.request_disposition
+      }
+    }).select('id, created_at').single();
+    if (authorizationError || !authorization) throw new Error(authorizationError?.message ?? 'Print authorization receipt was not recorded');
+    const responsePayload = {
       ok: true,
+      preview: false,
       html,
       notice_id: noticeId,
       pdf_url: pdfUrl,
       html_storage_path: htmlPath,
       pdf_renderer_version: PDF_RENDERER_VERSION,
-      // Structured fields for narrow receipt-printer rendering (thermalReceipt.ts
-      // on the client) — avoids parsing the HTML shell to recover plate/amount/etc.
-      receipt: {
-        orgName,
-        noticeType: notice_type,
-        noticeNumber,
-        issuedAtIso: new Date().toISOString(),
-        subjectLabel: 'Plate',
-        subjectValue: plate,
-        locationLabel: zoneName,
-        officerName: noticeData.officerName,
-        legalBasis: [bylawRef, authorisingSection].filter(Boolean).join(' '),
-        fineAmount: notice_type === 'infringement' ? fineAmount : null,
-        dueDateIso: notice_type === 'notice_to_vacate' ? vacateBy.toISOString() : null,
-        notes: additional_notes ?? null,
-        footerText: template?.footer_text ?? null
-      }
-    }), {
+      receipt,
+      authorization_receipt: authorization,
+      print_request_id: printRequestId
+    };
+    const { error: completionError } = await supabase.from('notice_print_authorizations').update({
+      status: 'completed',
+      response: responsePayload,
+      error_message: null,
+      completed_at: new Date().toISOString()
+    }).eq('request_id', printRequestId).eq('authorized_by', user.id);
+    if (completionError) throw completionError;
+    return new Response(JSON.stringify(responsePayload), {
       headers: {
         ...corsHeaders,
         'Content-Type': 'application/json'

@@ -74,6 +74,11 @@ create table "public"."observations" (
 alter table "public"."observations"
   enable row level security;
 
+create trigger trg_observations_direct_initiation
+  after insert on public.observations
+  for each row
+  execute function public.record_observation_direct_initiation();
+
 create index idx_observations_client_org_id on public.observations using btree (client_org_id);
 
 create index idx_observations_compliance on public.observations using btree (organization_id, is_compliant, observed_at desc);

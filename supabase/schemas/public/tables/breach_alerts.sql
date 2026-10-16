@@ -12,6 +12,13 @@ create table "public"."breach_alerts" (
   "actioned_at"          timestamp with time zone,
   "action_type"          text,
   "notes"                text,
+  "requested_action"     text,
+  "requested_by"         uuid,
+  "requested_at"         timestamp with time zone,
+  "request_notes"        text,
+  "request_id"           uuid,
+  "enforcement_mode"     text,
+  "request_disposition"  text,
   "created_at"           timestamp with time zone not null default now(),
   "overnight_session_id" uuid,
   "client_org_id"        uuid,
@@ -31,7 +38,14 @@ create table "public"."breach_alerts" (
   constraint "breach_alerts_observation_id_fkey" foreign key (observation_id) references public.observations(id),
   constraint "breach_alerts_client_org_id_fkey" foreign key (client_org_id) references public.organizations(id),
   constraint "breach_alerts_organization_id_fkey" foreign key (organization_id) references public.organizations(id),
-  constraint "breach_alerts_actioned_by_fkey" foreign key (actioned_by) references public.user_profiles(id)
+  constraint "breach_alerts_actioned_by_fkey" foreign key (actioned_by) references public.user_profiles(id),
+  constraint "breach_alerts_requested_by_fkey" foreign key (requested_by) references public.user_profiles(id),
+  constraint "breach_alerts_requested_action_check"
+    check (requested_action is null or requested_action in ('written_warning', 'notice_to_vacate', 'infringement')),
+  constraint "breach_alerts_enforcement_mode_check"
+    check (enforcement_mode is null or enforcement_mode in ('officer_direct', 'admin_first', 'hybrid')),
+  constraint "breach_alerts_request_disposition_check"
+    check (request_disposition is null or request_disposition in ('direct', 'administrator_review'))
 );
 
 alter table "public"."breach_alerts"
@@ -40,6 +54,9 @@ alter table "public"."breach_alerts"
 create index idx_breach_alerts_client_org_id on public.breach_alerts using btree (client_org_id);
 
 create index idx_breach_alerts_org_status on public.breach_alerts using btree (organization_id, status, created_at desc);
+
+create unique index idx_breach_alerts_request_id on public.breach_alerts using btree (request_id)
+  where (request_id is not null);
 
 create unique index idx_breach_alerts_parking_dedup on public.breach_alerts using btree (organization_id, plate_number, zone_id, breach_type)
   where (status = ANY (ARRAY['open'::text, 'acknowledged'::text, 'actioned'::text]));
@@ -88,6 +105,10 @@ comment on column "public"."breach_alerts"."observation_id" is 'FK to observatio
 comment on column "public"."breach_alerts"."overnight_session_id" is 'FK to vehicle_overnight_sessions. Used as the structural dedup key: at most one active breach per verified overnight session (partial unique index on status in open/acknowledged/actioned/exempt_homeless). Nullable for non-overnight breach types. #76.';
 
 comment on column "public"."breach_alerts"."status" is 'open|acknowledged|actioned|dismissed|resolved = normal enforcement lifecycle. exempt_homeless = breach is real (non-compliant) but enforcement is suppressed pending/following a confirmed homeless_claims record; excluded from actionable NTV/infringement queues, included in the homeless-exempt KPI tile if a council enables it. #74.';
+
+comment on column "public"."breach_alerts"."requested_action" is 'Officer-proposed notice action. Kept separate from action_type until administrator approval when review is required.';
+
+comment on column "public"."breach_alerts"."request_disposition" is 'direct when the effective mode permits the officer action; administrator_review when approval is required.';
 
 comment on index "public"."idx_breach_alerts_parking_dedup" is 'Dedup guard for parking breach alerts: at most one active (open/acknowledged/actioned) breach per org+plate+zone+type. Prevents cross-zone dedup collisions and TOCTOU races. 0233 CC3 QA fix. Mirrors 0196 pattern.';
 

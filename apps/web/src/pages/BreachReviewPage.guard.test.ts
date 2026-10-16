@@ -14,12 +14,15 @@ describe('governed breach outcome return', () => {
   });
 
   it('generates supported notice drafts through the authenticated edge function', () => {
-    expect(page).toContain("functions.invoke<{ html?: string; pdf_url?: string; receipt?: NoticeReceiptData }>('generate-notice'");
+    expect(page).toContain("operation: 'preview'");
+    expect(page).toContain("operation: 'authorize_print'");
+    expect(page).toContain('typed_name: typedAuthorizerNames[alert.id]');
+    expect(page).toContain('print_request_id: printRequestIds[alert.id]');
+    expect(page).toContain('Authorize Print');
     expect(page).toContain('breach_alert_id: alert.id');
     expect(page).toContain("['written_warning', 'notice_to_vacate', 'infringement']");
     expect(page).toContain('noticeArtifactPaths');
     expect(page).toContain('GeneratedArtifactActions bucket="notice-artifacts"');
-    expect(page).toContain('notice preview opened, but its PDF artifact could not be stored');
     expect(page).not.toMatch(/from\('(notices_to_vacate|infringement_notices)'\)/);
   });
 
@@ -31,8 +34,16 @@ describe('governed breach outcome return', () => {
   it('shows exact officer-owned breach outcomes', () => {
     expect(officer).toContain("from('breach_alerts')");
     expect(officer).toContain("get('breach')");
-    expect(officer).toContain('Admin outcome');
+    expect(officer).toContain('Enforcement receipts');
     expect(officer).toContain('officer-breach-${breach.id}');
+  });
+
+  it('makes acknowledged officer requests explicitly approvable or dismissible', () => {
+    expect(page).toContain("alert.status === 'acknowledged'");
+    expect(page).toContain("'approve_requested'");
+    expect(page).toContain('Officer request awaiting review');
+    expect(page).toContain('requested_action');
+    expect(page).toContain('enforcement_mode');
   });
 
   it('locks, audits, personally notifies attributable officers, and closes direct updates', () => {

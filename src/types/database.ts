@@ -3689,6 +3689,7 @@ export type Database = {
           breach_type: string
           client_org_id: string | null
           created_at: string
+          enforcement_mode: string | null
           id: string
           limit_value: number | null
           nights_count: number | null
@@ -3697,6 +3698,12 @@ export type Database = {
           organization_id: string
           overnight_session_id: string | null
           plate_number: string
+          request_disposition: string | null
+          request_id: string | null
+          request_notes: string | null
+          requested_action: string | null
+          requested_at: string | null
+          requested_by: string | null
           status: string
           zone_id: string | null
         }
@@ -3707,6 +3714,7 @@ export type Database = {
           breach_type?: string
           client_org_id?: string | null
           created_at?: string
+          enforcement_mode?: string | null
           id?: string
           limit_value?: number | null
           nights_count?: number | null
@@ -3715,6 +3723,12 @@ export type Database = {
           organization_id: string
           overnight_session_id?: string | null
           plate_number: string
+          request_disposition?: string | null
+          request_id?: string | null
+          request_notes?: string | null
+          requested_action?: string | null
+          requested_at?: string | null
+          requested_by?: string | null
           status?: string
           zone_id?: string | null
         }
@@ -3725,6 +3739,7 @@ export type Database = {
           breach_type?: string
           client_org_id?: string | null
           created_at?: string
+          enforcement_mode?: string | null
           id?: string
           limit_value?: number | null
           nights_count?: number | null
@@ -3733,6 +3748,12 @@ export type Database = {
           organization_id?: string
           overnight_session_id?: string | null
           plate_number?: string
+          request_disposition?: string | null
+          request_id?: string | null
+          request_notes?: string | null
+          requested_action?: string | null
+          requested_at?: string | null
+          requested_by?: string | null
           status?: string
           zone_id?: string | null
         }
@@ -3770,6 +3791,13 @@ export type Database = {
             columns: ["overnight_session_id"]
             isOneToOne: false
             referencedRelation: "vehicle_overnight_sessions"
+            referencedColumns: ["id"]
+          },
+          {
+            foreignKeyName: "breach_alerts_requested_by_fkey"
+            columns: ["requested_by"]
+            isOneToOne: false
+            referencedRelation: "user_profiles"
             referencedColumns: ["id"]
           },
           {
@@ -18523,6 +18551,73 @@ export type Database = {
           },
           {
             foreignKeyName: "noise_seizures_organization_id_fkey"
+            columns: ["organization_id"]
+            isOneToOne: false
+            referencedRelation: "organizations"
+            referencedColumns: ["id"]
+          },
+        ]
+      }
+      notice_print_authorizations: {
+        Row: {
+          authorized_by: string
+          authorized_name: string
+          breach_alert_id: string
+          completed_at: string | null
+          created_at: string
+          error_message: string | null
+          id: string
+          notice_type: string
+          organization_id: string
+          request_id: string
+          response: Json | null
+          status: string
+        }
+        Insert: {
+          authorized_by: string
+          authorized_name: string
+          breach_alert_id: string
+          completed_at?: string | null
+          created_at?: string
+          error_message?: string | null
+          id?: string
+          notice_type: string
+          organization_id: string
+          request_id: string
+          response?: Json | null
+          status?: string
+        }
+        Update: {
+          authorized_by?: string
+          authorized_name?: string
+          breach_alert_id?: string
+          completed_at?: string | null
+          created_at?: string
+          error_message?: string | null
+          id?: string
+          notice_type?: string
+          organization_id?: string
+          request_id?: string
+          response?: Json | null
+          status?: string
+        }
+        Relationships: [
+          {
+            foreignKeyName: "notice_print_authorizations_authorized_by_fkey"
+            columns: ["authorized_by"]
+            isOneToOne: false
+            referencedRelation: "user_profiles"
+            referencedColumns: ["id"]
+          },
+          {
+            foreignKeyName: "notice_print_authorizations_breach_alert_id_fkey"
+            columns: ["breach_alert_id"]
+            isOneToOne: false
+            referencedRelation: "breach_alerts"
+            referencedColumns: ["id"]
+          },
+          {
+            foreignKeyName: "notice_print_authorizations_organization_id_fkey"
             columns: ["organization_id"]
             isOneToOne: false
             referencedRelation: "organizations"
@@ -47692,6 +47787,25 @@ export type Database = {
           p_review_reason: string
         }
         Returns: Json
+      }
+      submit_officer_breach_action: {
+        Args: {
+          p_action: string
+          p_alert_id: string
+          p_expected_status: string
+          p_notes: string
+          p_request_id: string
+        }
+        Returns: {
+          alert_id: string
+          alert_status: string
+          disposition: string
+          enforcement_mode: string
+          next_actor: string
+          request_id: string
+          requested_action: string
+          requested_at: string
+        }[]
       }
       submit_officer_field_report:
         | {
