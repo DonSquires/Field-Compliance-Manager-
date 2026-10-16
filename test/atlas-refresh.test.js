@@ -8,6 +8,7 @@ const {
   OWNER_MARKER,
   collectComponentEdges,
   collectManagedAtlas,
+  collectSchemaViewEdges,
   collectSchemaForeignKeyEdges,
   collectCronSchedulerEdges,
   staleGeneratedEdgeIds,
@@ -132,6 +133,62 @@ function write(root, relativePath, content) {
   fs.mkdirSync(path.dirname(filePath), { recursive: true });
   fs.writeFileSync(filePath, content);
 }
+
+test('Atlas refresh derives current SQL view reads without treating CTEs or literals as tables', () => {
+  const root = fs.mkdtempSync(path.join(os.tmpdir(), 'atlas-view-'));
+  try {
+    write(root, 'supabase/schema.sql', `
+      CREATE TABLE public.person_permits (id uuid);
+      CREATE TABLE public.person_permit_vehicles (permit_id uuid, canonical_vehicle_id uuid);
+      CREATE TABLE public.canonical_vehicles (id uuid);
+      CREATE TABLE public.audit_log (id uuid);
+
+      CREATE OR REPLACE VIEW public.person_permits_fieldwork WITH (security_invoker=true) AS
+      WITH current_permits AS (
+        SELECT permit.id
+        FROM public.person_permits permit
+      ),
+      linked_vehicles AS MATERIALIZED (
+        SELECT link.permit_id, vehicle.id
+        FROM public.person_permit_vehicles link
+        JOIN "public"."canonical_vehicles" vehicle ON vehicle.id = link.canonical_vehicle_id
+      )
+      SELECT permit.id
+      FROM current_permits permit
+      LEFT JOIN linked_vehicles vehicle ON vehicle.permit_id = permit.id;
+
+      CREATE OR REPLACE FUNCTION public.example_text() RETURNS text
+      LANGUAGE sql AS $$
+        SELECT 'CREATE VIEW public.phantom AS SELECT * FROM public.audit_log';
+      $$;
+    `);
+
+    const edges = collectSchemaViewEdges(root);
+    assert.deepEqual(
+      edges.map((edge) => [edge.source_name, edge.target_name, edge.edge_kind]).sort(),
+      [
+        ['person_permits_fieldwork', 'canonical_vehicles', 'reads'],
+        ['person_permits_fieldwork', 'person_permit_vehicles', 'reads'],
+        ['person_permits_fieldwork', 'person_permits', 'reads'],
+      ],
+    );
+  } finally {
+    fs.rmSync(root, { recursive: true, force: true });
+  }
+});
+
+test('current permit fieldwork and policy views expose their table dependencies', () => {
+  const edges = collectSchemaViewEdges(path.resolve(__dirname, '..'));
+  const hasEdge = (source, target) => edges.some((edge) => (
+    edge.source_name === source &&
+    edge.target_name === target &&
+    edge.edge_kind === 'reads'
+  ));
+
+  assert.equal(hasEdge('person_permits_fieldwork', 'person_permit_vehicles'), true);
+  assert.equal(hasEdge('module_place_policy_summary', 'module_event_place_matrix'), true);
+  assert.equal(hasEdge('house_event_anchor_reconciliation', 'house_event_anchor_projection'), true);
+});
 
 test('Atlas refresh extracts concrete entities and Supabase calls without test noise', () => {
   const root = fs.mkdtempSync(path.join(os.tmpdir(), 'atlas-refresh-'));

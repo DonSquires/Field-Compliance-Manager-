@@ -1909,3 +1909,29 @@ remains unpopulated.
 - PostgREST now returns table-not-found for both retired views while canonical
   `organizations` remains available. Removing unused derived surfaces is not
   successful user exercise, so no exercise state is claimed.
+
+### Closure log — SQL view dependency terrain
+
+- Atlas showed `person_permit_vehicles` as present but unwired even though the
+  live `person_permits_fieldwork` view reads its 92 vehicle links and both
+  officer and administrator vehicle-search surfaces consume that governed,
+  redacted view. This was a map-extraction gap, not a missing screen.
+- The generator previously inventoried views as entities but did not derive
+  their `FROM` and `JOIN` dependencies. It now emits live-schema `reads` edges
+  from each current public view to referenced tables or views, ignores
+  non-public schemas, CTE aliases and self-references, and masks comments,
+  quoted literals and dollar-quoted function bodies before parsing.
+- Against the current live snapshot this produces 58 coherent edges across 18
+  views. Three bounded gaps become newly proven wired:
+  `person_permit_vehicles`, `module_event_place_matrix`, and
+  `house_event_anchor_projection`. The latter two are policy/accountability
+  projection inputs already consumed by current derived views.
+- Trackforce consideration: an operational console may present a joined or
+  derived read model, but Atlas must still show which authoritative records
+  support it. A view is a proven read path, not runtime exercise and not proof
+  that the underlying record was created correctly.
+- All 72 Atlas generator tests pass, including synthetic CTE/literal exclusion
+  and current-schema assertions for permit, policy and accountability views.
+  The dry-run manifest remains at 1,361 capabilities and moves from 7,383 to
+  7,441 edges. Applying these additions should move the bounded live gap count
+  from 113 to 110; final live verification remains required after release.
