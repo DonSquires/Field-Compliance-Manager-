@@ -41,6 +41,26 @@ describe('location house map', () => {
     expect(source).toContain('if (facet?.boundary || autoResolvedRef.current === editableEntity.id) return;');
   });
 
+  it('never auto-saves the house parcel onto a work area, which is usually only part of the place', () => {
+    expect(source).toContain("if (!editableEntity || seedBoundary || editableEntity.type !== 'client_site') return;");
+  });
+
+  it('retires the LINZ preview once any boundary is saved, so a second button cannot overwrite a drawn shape', () => {
+    const drawn = source.slice(source.indexOf('const saveDrawnBoundary'), source.indexOf('const confirmExistingBoundary'));
+    expect(drawn).toContain('setDrawPoints([]);');
+    expect(drawn).toContain('setLinzPreview(null);');
+    const linz = source.slice(source.indexOf('const saveLinzBoundary'), source.indexOf('const autoResolvedRef'));
+    expect(linz).toContain('setLinzPreview(null);');
+    expect(source).toContain('Replace with this ${');
+    expect(source).toContain('Use this ${');
+  });
+
+  it('names every Site or work area still needing review and lets the person jump to it', () => {
+    expect(source).toContain('house-map-review-list');
+    expect(source).toContain("'no boundary yet'");
+    expect(source).toContain('onSelectFacet({ type, id: facet.id })');
+  });
+
   it('resolves selected points through the canonical geofence spine', () => {
     expect(source).toContain("supabase.rpc('resolve_operational_context_authorized'");
     expect(source).toContain("supabase.rpc('is_zone_closed'");

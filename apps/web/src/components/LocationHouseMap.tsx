@@ -106,7 +106,7 @@ const RESOLUTION_LABEL: Record<string, string> = {
   unresolved_invalid: 'Boundary shape needs repair',
 };
 
-export function LocationHouseMap({ organizationId, house, sites, zones, editableEntity, seedBoundary }: { organizationId: string; house: { name: string; address: string | null }; sites: HouseMapSite[]; zones: HouseMapZone[]; editableEntity?: EditableEntity; seedBoundary?: SeedBoundary | null }) {
+export function LocationHouseMap({ organizationId, house, sites, zones, editableEntity, seedBoundary, onSelectFacet }: { organizationId: string; house: { name: string; address: string | null }; sites: HouseMapSite[]; zones: HouseMapZone[]; editableEntity?: EditableEntity; seedBoundary?: SeedBoundary | null; onSelectFacet?: (facet: { type: EditableEntity['type']; id: string }) => void }) {
   const containerRef = useRef<HTMLDivElement | null>(null);
   const mapRef = useRef<L.Map | null>(null);
   const overlayRef = useRef<L.LayerGroup | null>(null);
@@ -265,6 +265,8 @@ export function LocationHouseMap({ organizationId, house, sites, zones, editable
         const source = preview.kind === 'reserve' ? 'the council registry' : 'LINZ';
         const shape = preview.kind === 'building' ? 'building outline' : preview.kind === 'reserve' ? 'reserve boundary' : 'legal parcel';
         setBoundaryNotice(verify ? `Boundary confirmed from ${source} (${shape}). If it is not the right shape, draw it by hand and save again.` : `Boundary found and set from ${source} (${shape}). Check the shape on the map, then confirm it before officers use it.`);
+        // Once saved, the preview is the boundary; leaving it up would offer a second button that silently re-saves it.
+        setLinzPreview(null);
         editableEntity.onSaved?.(verify);
       } catch (saveError) {
         setError(saveError instanceof Error ? saveError.message : 'The boundary could not be saved.');
@@ -278,7 +280,8 @@ export function LocationHouseMap({ organizationId, house, sites, zones, editable
    */
   const autoResolvedRef = useRef('');
   useEffect(() => {
-    if (!editableEntity || seedBoundary) return;
+    // The house's LINZ parcel is the Site's outline. A work area is usually only part of the place, so it is previewed, never saved for it unasked.
+    if (!editableEntity || seedBoundary || editableEntity.type !== 'client_site') return;
     const facet = [...sites, ...zones].find((item) => item.id === editableEntity.id);
     if (facet?.boundary || autoResolvedRef.current === editableEntity.id) return;
     autoResolvedRef.current = editableEntity.id;
@@ -296,8 +299,11 @@ export function LocationHouseMap({ organizationId, house, sites, zones, editable
       setSavingBoundary('drawn'); setError(null); setBoundaryNotice(null);
       try {
         await proposeAndAccept(drawnPolygon(drawPoints), 'user_drawn', { vertices: drawPoints.length, drawn_via: 'house_map' });
-        setBoundaryNotice(`Boundary saved from the ${drawPoints.length} corners you placed.`);
+        setBoundaryNotice(`Boundary saved and confirmed from the ${drawPoints.length} corners you placed.`);
         setDrawing(false);
+        // The saved shape now renders from the record. A lingering LINZ preview would offer to overwrite the drawing.
+        setDrawPoints([]);
+        setLinzPreview(null);
         editableEntity.onSaved?.(true);
       } catch (saveError) {
         setError(saveError instanceof Error ? saveError.message : 'The boundary could not be saved.');
@@ -328,6 +334,7 @@ export function LocationHouseMap({ organizationId, house, sites, zones, editable
       try {
         await proposeAndAccept(circlePolygon(centerLat, centerLng, radius), 'google_point_radius', { center: { lat: centerLat, lng: centerLng }, radius_m: radius });
         setBoundaryNotice(`Boundary saved as a ${radius} m radius.`);
+        setLinzPreview(null);
         editableEntity.onSaved?.(true);
       } catch (saveError) {
         setError(saveError instanceof Error ? saveError.message : 'The boundary could not be saved.');
@@ -336,11 +343,16 @@ export function LocationHouseMap({ organizationId, house, sites, zones, editable
   };
 
   const verifiedPlaces = [...sites, ...zones].filter((place) => place.boundary && place.boundary_verification === 'verified').length;
-  const unresolvedFacets = [...sites, ...zones].filter((facet) => !facet.boundary || facet.boundary_verification !== 'verified').length;
+  const reviewFacets = [
+    ...sites.map((facet) => ({ facet, type: 'client_site' as const, kind: 'Site' })),
+    ...zones.map((facet) => ({ facet, type: 'location_zone' as const, kind: 'Work area' })),
+  ].filter(({ facet }) => !facet.boundary || facet.boundary_verification !== 'verified');
+  const unresolvedFacets = reviewFacets.length;
   const editableFacet = editableEntity ? [...sites, ...zones].find((facet) => facet.id === editableEntity.id) : null;
   return <section className="house-map" aria-label={`Map for ${house.name}`}>
     <header><div><span>Place boundary map</span><h3>{house.name}</h3><p>{house.address ?? 'Address not recorded'}</p></div><button type="button" onClick={() => void previewLinzBoundary()} disabled={resolving || (!house.address && !house.name)}>{resolving ? <LoaderCircle size={15} className="is-spinning" /> : <LandPlot size={15} />}{resolving ? 'Finding LINZ boundary' : 'Find LINZ boundary'}</button></header>
     <div className="house-map-gates"><span className={verifiedPlaces ? 'is-ready' : 'is-blocked'}><ShieldCheck size={14} /><strong>{verifiedPlaces}</strong> verified place boundar{verifiedPlaces === 1 ? 'y' : 'ies'}</span><span className={unresolvedFacets ? 'is-blocked' : 'is-ready'}><AlertTriangle size={14} /><strong>{unresolvedFacets}</strong> Site or work area{unresolvedFacets === 1 ? '' : 's'} need review</span><span><Crosshair size={14} />{drawing ? 'Drawing the boundary' : probing ? 'Checking this point' : 'Click the map to check a location'}</span></div>
+    {reviewFacets.length > 0 && <ul className="house-map-review-list" aria-label="Sites and work areas that still need a confirmed boundary">{reviewFacets.map(({ facet, type, kind }) => <li key={facet.id}><span><strong>{facet.name}</strong> · {kind} · {facet.boundary ? 'boundary saved, not yet confirmed' : 'no boundary yet'}</span>{facet.id === editableEntity?.id ? <em>Selected below</em> : onSelectFacet && <button type="button" onClick={() => onSelectFacet({ type, id: facet.id })}>Set this boundary</button>}</li>)}</ul>}
     {error && <div className="house-map-message is-error" role="alert"><AlertTriangle size={15} />{error}</div>}
     {linzPreview && <><div className="house-map-message is-success" role="status"><CheckCircle2 size={15} /><span><strong>{linzPreview.kind === 'reserve' ? 'Council reserve boundary' : `Read-only LINZ ${linzPreview.kind === 'parcel' ? 'land-lot' : 'building'} preview`}</strong>{linzPreview.address} · {linzPreview.match}</span></div><div className="house-map-lot-details"><div><span>Canonical address</span><strong>{linzPreview.address}</strong></div><div><span>Source</span><strong>{linzPreview.source.replaceAll('_', ' ')}</strong></div><div><span>Geometry</span><strong>{linzPreview.kind === 'reserve' ? 'Council reserve boundary' : linzPreview.kind === 'parcel' ? 'LINZ parcel / land lot' : 'LINZ building outline'}</strong></div>{Object.entries(linzPreview.properties).filter(([, value]) => value !== null && value !== '').slice(0, 6).map(([key, value]) => <div key={key}><span>{key.replaceAll('_', ' ')}</span><strong>{String(value)}</strong></div>)}</div></>}
     {resolution && <div className={`house-map-resolution is-${resolution.resolution_status === 'resolved' ? 'resolved' : 'unresolved'}`} role="status"><div><span>Map check</span><strong>{RESOLUTION_LABEL[resolution.resolution_status] ?? 'Location could not be confirmed'}</strong></div><div><span>Provider service area</span><strong>{resolution.in_operating_bounds ? 'Inside' : resolution.out_of_bounds_district ? `Outside · ${resolution.out_of_bounds_district}` : 'Outside'}</strong></div><div><span>Matched work area</span><strong>{resolution.matched_zone_id ? zones.find((zone) => zone.id === resolution.matched_zone_id)?.name ?? 'Matched work area' : 'No verified active work area'}</strong></div><div><span>Site match</span><strong>{resolution.site_id ? resolution.on_site ? 'Inside the Site' : 'Work area matched · outside Site boundary' : 'No verified Site match'}</strong></div><div><span>Service</span><strong>{resolution.matched_module_key?.replaceAll('_', ' ') ?? 'None'}</strong></div><div><span>Rules loaded</span><strong>{resolution.effective_rules ? `${Object.keys(resolution.effective_rules).length} applicable setting${Object.keys(resolution.effective_rules).length === 1 ? '' : 's'}` : 'None'}</strong></div><div className={closure ? 'is-warning' : ''}><span>Temporary restriction</span><strong>{closure ? `${closure.closure_type.replaceAll('_', ' ')} · ${closure.reason ?? 'No reason recorded'}` : 'None in force'}</strong></div>{resolution.governor_overlap_flag && <div className="is-warning"><span>Jurisdiction</span><strong>Overlapping authority needs review</strong></div>}</div>}
@@ -349,7 +361,7 @@ export function LocationHouseMap({ organizationId, house, sites, zones, editable
       <span>{drawing ? 'Click each corner of the place on the map, then save the shape. Switch the map to Satellite to see what is actually there.' : 'Set the boundary right here — no separate workbench needed.'}</span>
       <div className="house-map-editable-actions">
         {editableFacet?.boundary && editableFacet.boundary_verification !== 'verified' && !drawing && <button type="button" onClick={confirmExistingBoundary} disabled={savingBoundary !== null}><CheckCircle2 size={14} />{savingBoundary === 'linz' ? 'Confirming' : 'Confirm this boundary'}</button>}
-        {linzPreview && !drawing && <button type="button" onClick={() => saveLinzBoundary()} disabled={savingBoundary !== null}><LandPlot size={14} />{savingBoundary === 'linz' ? 'Saving' : 'Confirm this boundary'}</button>}
+        {linzPreview && !drawing && <button type="button" onClick={() => saveLinzBoundary()} disabled={savingBoundary !== null}><LandPlot size={14} />{savingBoundary === 'linz' ? 'Saving' : editableFacet?.boundary ? `Replace with this ${linzPreview.kind === 'reserve' ? 'council' : 'LINZ'} boundary` : `Use this ${linzPreview.kind === 'reserve' ? 'council' : 'LINZ'} boundary`}</button>}
         {!drawing && <button type="button" onClick={() => { setDrawing(true); setDrawPoints([]); setProbePoint(null); setResolution(null); setClosure(null); }} disabled={savingBoundary !== null}><PenTool size={14} />Draw the boundary</button>}
         {drawing && <>
           <strong className="house-map-draw-count">{drawPoints.length} corner{drawPoints.length === 1 ? '' : 's'} placed{drawPoints.length < 3 ? ` · ${3 - drawPoints.length} more needed` : ''}</strong>

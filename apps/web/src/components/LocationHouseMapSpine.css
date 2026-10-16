@@ -31,6 +31,42 @@
   background: #2e211b;
 }
 
+.house-map-review-list {
+  display: grid;
+  gap: 4px;
+  margin: 0;
+  padding: 8px 14px;
+  list-style: none;
+  border-bottom: 1px solid #294252;
+  background: #0c1b26;
+}
+
+.house-map-review-list li {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 10px;
+  flex-wrap: wrap;
+  color: #efc0a7;
+  font-size: 12px;
+}
+
+.house-map-review-list strong { color: #f4f7f8; }
+.house-map-review-list em { color: #9eb2bd; font-style: normal; }
+
+.house-map-review-list button {
+  min-height: 32px;
+  padding: 4px 10px;
+  border: 1px solid #785143;
+  border-radius: 4px;
+  color: #f4f7f8;
+  background: #2e211b;
+  font-size: 12px;
+  cursor: pointer;
+}
+
+.house-map-review-list button:focus-visible { outline: 2px solid #5da9ff; outline-offset: 2px; }
+
 .house-map-resolution {
   display: grid;
   grid-template-columns: repeat(3, minmax(0, 1fr));
