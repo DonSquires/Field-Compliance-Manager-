@@ -1879,3 +1879,33 @@ remains unpopulated.
   `get_my_pending_proposals(integer)` and still resolves
   `get_approvals_activity(integer,integer,text[],text[])`. Removing a duplicate
   read API is not successful user exercise, so no exercise state is claimed.
+
+### Closure log — obsolete CRM account views
+
+- Atlas showed `crm_account_health` as present but unwired. Its 90 returned
+  rows were derived organization rows, not persisted health assessments. The
+  view hardcoded every account to zero active breaches and labelled a count of
+  user profiles as active roster, so wiring it would create false operational
+  certainty.
+- Atlas marked `crm_account_list` wired only because production comments and an
+  obsolete helper said the view did not exist. No runtime query used either
+  view. The current CRM workflow instead scopes accounts through
+  `get_crm_provider_portfolio`, reads canonical organizations and related sites,
+  contacts, quotes and invoices, and gets readiness from
+  `get_crm_organization_readiness`.
+- Both unused derived views, their stale declarative sources and the obsolete
+  schema helper are retired together. No business row is deleted. The provider
+  portfolio, readiness blockers, next actions, receivables and persisted
+  lifecycle receipts remain the single current workflow.
+- Trackforce consideration: dashboard health must expose real exceptions and
+  accountable next actions. A green zero or roster count inferred from the
+  wrong entity is worse than an explicit unavailable state; FCM will not
+  present placeholder metrics as operational truth.
+- Two retirement guards, 38 focused CRM/schema tests, all 72 Atlas and
+  retirement tests, the production web build, and the 639-version migration
+  uniqueness check pass. The live catalog remains at 398 tables and 813
+  functions and moves from 20 to 18 views. The local Atlas manifest moves from
+  1,363 capabilities and 7,386 edges to 1,361 capabilities and 7,383 edges.
+- PostgREST now returns table-not-found for both retired views while canonical
+  `organizations` remains available. Removing unused derived surfaces is not
+  successful user exercise, so no exercise state is claimed.

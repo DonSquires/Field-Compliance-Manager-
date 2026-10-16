@@ -49,6 +49,15 @@ const BLANKET_AFFIRMATIVE_RULE = 'BLANKET ANSWERS: if the user replies with a bl
 function buildPendingBlock(pending) {
   if (!pending || typeof pending !== 'object') return '';
   const p = pending;
+  if (p.kind === 'continuation') {
+    const taskState = p.task_state && typeof p.task_state === 'object' ? p.task_state : {};
+    return [
+      '',
+      'PAUSED TASK CONTINUATION: the previous assistant turn stopped at a safe time boundary and saved its completed steps and last result.',
+      `Original goal: ${String(taskState.goal ?? "Continue the user's most recent unfinished request.")}`,
+      'If the user says continue or gives a direction to resume, use the saved TASK STATE as evidence, do not repeat completed steps, and take the next necessary action toward the original goal. A read or document summary is not completion when the original goal requires a governed record change. Choose a matching proposal tool by its catalogue purpose; stop only for a real missing required fact, a permission boundary, or an explicit pause/change from the user. Never claim a proposal was filed unless its tool succeeds.',
+    ].join('\n');
+  }
   if (p.kind === 'ask' && Array.isArray(p.questions) && p.questions.length) {
     const qs = p.questions
       .map((q, i) => `  ${i + 1}. ${String(q && q.question ? q.question : '')}${q && q.best_guess ? ` (your earlier best guess: ${String(q.best_guess)})` : ''}`)

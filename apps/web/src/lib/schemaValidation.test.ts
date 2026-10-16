@@ -153,17 +153,15 @@ describe('Schema Enum & Constraint Validation', () => {
 
     it('does not join on non-existent FK columns', () => {
       // Previous gaps identified and fixed:
-      // - crm_account_list view (removed)
       // - dispatch job_type → rate_rule link (documented as unsupported)
       // - requester_organizations table (documented as non-existent)
 
       const documentedGaps = [
-        'crm_account_list (view)',
         'requester_organizations (table)',
         'dispatch_job_type → rate_rules (unsupported link)',
       ];
 
-      expect(documentedGaps.length).toBe(3);
+      expect(documentedGaps.length).toBe(2);
     });
   });
 
