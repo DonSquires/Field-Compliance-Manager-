@@ -18,7 +18,7 @@
  */
 
 import React, { useEffect, useMemo, useRef, useState, useCallback } from 'react';
-import { AlertTriangle, Archive, ArchiveRestore, Ban, Bot, CheckCircle2, Clock3, FileSearch, FileUp, Image as ImageIcon, ListChecks, Maximize2, Mic, Minimize2, Paperclip, PanelLeft, PanelRight, Pencil, Pin, PinOff, Plus, RefreshCw, Search, Send, ShieldCheck, Sparkles, TerminalSquare, Volume2, X } from 'lucide-react';
+import { AlertTriangle, Archive, ArchiveRestore, Ban, Bot, CheckCircle2, Clock3, FileSearch, FileUp, Image as ImageIcon, ListChecks, Maximize2, Mic, Minimize2, Paperclip, PanelLeft, PanelRight, Pencil, Pin, PinOff, Plus, RefreshCw, Search, Send, ShieldCheck, Sparkles, TerminalSquare, ThumbsDown, ThumbsUp, Volume2, X } from 'lucide-react';
 import { useAuth } from '../context/AuthContext';
 import { supabase } from '../lib/supabase';
 import { captureBobPageContext } from '../lib/bobPageContext';
@@ -42,6 +42,14 @@ interface BobMessage {
   flagged: boolean;
   created_at: string;
   metadata: Record<string, unknown>;
+}
+
+interface BobMessageFeedback {
+  id: string;
+  message_id: string;
+  rating: 'up' | 'down';
+  note: string | null;
+  updated_at: string;
 }
 
 type BobMode = 'operations' | 'builder';
@@ -226,6 +234,12 @@ export const BobPanel: React.FC<BobPanelProps> = ({ open, onClose, context, mode
   const [voiceState, setVoiceState] = useState<VoiceState>('off');
   const [voiceTranscript, setVoiceTranscript] = useState('');
   const [speakingMessageId, setSpeakingMessageId] = useState<string | null>(null);
+  const [messageFeedback, setMessageFeedback] = useState<Record<string, BobMessageFeedback>>({});
+  const [feedbackEditorMessageId, setFeedbackEditorMessageId] = useState<string | null>(null);
+  const [feedbackNote, setFeedbackNote] = useState('');
+  const [savingFeedbackMessageId, setSavingFeedbackMessageId] = useState<string | null>(null);
+  const [feedbackStatus, setFeedbackStatus] = useState<{ messageId: string; tone: 'success' | 'error'; text: string } | null>(null);
+  const [feedbackLoadError, setFeedbackLoadError] = useState<string | null>(null);
   const [error, setError] = useState<string | null>(null);
   const [activeTurn, setActiveTurn] = useState<ActiveBobTurn | null>(null);
   const [workspaceExpanded, setWorkspaceExpanded] = useState(true);
@@ -267,6 +281,31 @@ export const BobPanel: React.FC<BobPanelProps> = ({ open, onClose, context, mode
     if (attachmentErr) throw attachmentErr;
     setAttachments((data as BobAttachmentRecord[]) ?? []);
   }, []);
+
+  const loadMessageFeedback = useCallback(async (convId: string) => {
+    if (!profile?.id) {
+      setMessageFeedback({});
+      setFeedbackLoadError(null);
+      return;
+    }
+
+    // ATLAS READS: bob_message_feedback
+    const { data, error: feedbackError } = await supabase
+      .from('bob_message_feedback')
+      .select('id, message_id, rating, note, updated_at')
+      .eq('conversation_id', convId)
+      .eq('user_id', profile.id);
+
+    if (feedbackError) {
+      setMessageFeedback({});
+      setFeedbackLoadError('Saved reply feedback could not be loaded. Bob chat remains available.');
+      return;
+    }
+    setFeedbackLoadError(null);
+    setMessageFeedback(Object.fromEntries(
+      ((data as BobMessageFeedback[]) ?? []).map((feedback) => [feedback.message_id, feedback])
+    ));
+  }, [profile?.id]);
 
   const loadAuditEvents = useCallback(async (convId: string) => {
     const { data, error: auditError } = await supabase
@@ -344,17 +383,22 @@ export const BobPanel: React.FC<BobPanelProps> = ({ open, onClose, context, mode
 
       if (historyResult.error) throw historyResult.error;
       setMessages((historyResult.data as BobMessage[]) || []);
-      await loadActiveTurn(convId);
-      await loadAttachments(convId);
-      await loadAuditEvents(convId);
-      await loadGovernedActions(convId);
+      setFeedbackEditorMessageId(null);
+      setFeedbackStatus(null);
+      await Promise.all([
+        loadActiveTurn(convId),
+        loadAttachments(convId),
+        loadAuditEvents(convId),
+        loadGovernedActions(convId),
+        loadMessageFeedback(convId),
+      ]);
     } catch (err) {
       setError(err instanceof Error ? err.message : 'That Bob session could not be opened.');
     } finally {
       setActivityPhase('idle');
       setLoading(false);
     }
-  }, [loadActiveTurn, loadAttachments, loadAuditEvents, loadGovernedActions]);
+  }, [loadActiveTurn, loadAttachments, loadAuditEvents, loadGovernedActions, loadMessageFeedback]);
 
   const renameSession = useCallback(async (convId: string, title: string) => {
     const trimmed = title.trim();
@@ -427,7 +471,7 @@ export const BobPanel: React.FC<BobPanelProps> = ({ open, onClose, context, mode
     window.addEventListener('pointerup', stop, { once: true });
   };
 
-  // ATLAS READS: bob_conversations, bob_messages
+  // ATLAS READS: bob_conversations, bob_messages, bob_message_feedback
   // Operations and Builder retain separate durable threads. Builder context
   // must not pollute operational decisions, and operational history must not
   // be treated as repository/build evidence.
@@ -475,18 +519,66 @@ export const BobPanel: React.FC<BobPanelProps> = ({ open, onClose, context, mode
 
       if (historyErr) throw historyErr;
       setMessages((history as BobMessage[]) || []);
-      await loadActiveTurn(convId);
-      await loadAttachments(convId);
-      await loadAuditEvents(convId);
-      await loadGovernedActions(convId);
-      await loadSessions();
+      setFeedbackEditorMessageId(null);
+      setFeedbackStatus(null);
+      await Promise.all([
+        loadActiveTurn(convId),
+        loadAttachments(convId),
+        loadAuditEvents(convId),
+        loadGovernedActions(convId),
+        loadMessageFeedback(convId),
+        loadSessions(),
+      ]);
     } catch (err) {
       setError(err instanceof Error ? err.message : 'Failed to load Bob conversation');
     } finally {
       setActivityPhase('idle');
       setLoading(false);
     }
-  }, [mode, profile?.organizationId, profile?.id, loadActiveTurn, loadAttachments, loadAuditEvents, loadGovernedActions, loadSessions]);
+  }, [mode, profile?.organizationId, profile?.id, loadActiveTurn, loadAttachments, loadAuditEvents, loadGovernedActions, loadMessageFeedback, loadSessions]);
+
+  const saveMessageFeedback = async (messageId: string, rating: 'up' | 'down', note: string | null) => {
+    try {
+      setSavingFeedbackMessageId(messageId);
+      setFeedbackStatus(null);
+
+      // ATLAS WRITES: manage_bob_message_feedback
+      const { data, error: saveError } = await supabase.rpc('manage_bob_message_feedback', {
+        p_message_id: messageId,
+        p_rating: rating,
+        p_note: note ?? undefined,
+      });
+      if (saveError) throw saveError;
+
+      const receipt = data as BobMessageFeedback | null;
+      if (!receipt || receipt.message_id !== messageId || receipt.rating !== rating) {
+        throw new Error('Bob feedback was not confirmed after saving.');
+      }
+
+      setMessageFeedback((current) => ({ ...current, [messageId]: receipt }));
+      setFeedbackEditorMessageId(null);
+      setFeedbackNote('');
+      setFeedbackStatus({
+        messageId,
+        tone: 'success',
+        text: rating === 'up' ? 'Marked as helpful.' : 'Improvement feedback saved.',
+      });
+    } catch (saveError) {
+      setFeedbackStatus({
+        messageId,
+        tone: 'error',
+        text: saveError instanceof Error ? saveError.message : 'Bob feedback could not be saved.',
+      });
+    } finally {
+      setSavingFeedbackMessageId(null);
+    }
+  };
+
+  const openImprovementFeedback = (messageId: string) => {
+    setFeedbackEditorMessageId(messageId);
+    setFeedbackNote(messageFeedback[messageId]?.note ?? '');
+    setFeedbackStatus(null);
+  };
 
   useEffect(() => {
     if (open) loadConversation();
@@ -1227,6 +1319,7 @@ export const BobPanel: React.FC<BobPanelProps> = ({ open, onClose, context, mode
           )}
 
           <BobActivityTimeline phase={activityPhase} sending={sending} loading={loading} pendingFiles={pendingFiles} />
+          {feedbackLoadError && <div className="bob-feedback-load-error" role="alert">{feedbackLoadError}</div>}
 
           {docked && studioOpen ? studio : <div ref={scrollRef} className="bob-message-stream" aria-live="polite">
             {dragging && <div className="bob-drop-target"><FileUp size={17} /> Drop files for Bob to read.</div>}
@@ -1261,6 +1354,52 @@ export const BobPanel: React.FC<BobPanelProps> = ({ open, onClose, context, mode
                     {m.role === 'assistant' && <WorkflowProgress message={m} />}
                     {m.role === 'assistant' && !supersededBy && <AnswerChoices message={m} disabled={loading || sending || m.id !== messages[messages.length - 1]?.id || Boolean(activeTurn && BLOCKING_TURN_STATUSES.includes(activeTurn.status))} hasDraft={Boolean(input.trim() || voiceTranscript.trim() || pendingFiles.length)} onCustomAnswer={focusComposer} onAnswer={(answer) => void handleSend(null, answer)} />}
                     {m.role === 'assistant' && <NavigationActions message={m} />}
+                    {m.role === 'assistant' && (
+                      <div className="bob-message-feedback" aria-label="Rate Bob reply">
+                        <span>Was this useful?</span>
+                        <button
+                          type="button"
+                          className={messageFeedback[m.id]?.rating === 'up' ? 'is-selected' : ''}
+                          aria-pressed={messageFeedback[m.id]?.rating === 'up'}
+                          disabled={savingFeedbackMessageId === m.id}
+                          onClick={() => void saveMessageFeedback(m.id, 'up', null)}
+                        >
+                          <ThumbsUp size={13} /> Helpful
+                        </button>
+                        <button
+                          type="button"
+                          className={messageFeedback[m.id]?.rating === 'down' ? 'is-selected' : ''}
+                          aria-pressed={messageFeedback[m.id]?.rating === 'down'}
+                          disabled={savingFeedbackMessageId === m.id}
+                          onClick={() => openImprovementFeedback(m.id)}
+                        >
+                          <ThumbsDown size={13} /> Needs improvement
+                        </button>
+                        {feedbackEditorMessageId === m.id && (
+                          <form onSubmit={(event) => {
+                            event.preventDefault();
+                            void saveMessageFeedback(m.id, 'down', feedbackNote.trim() || null);
+                          }}>
+                            <label htmlFor={`bob-feedback-note-${m.id}`}>What should Bob improve? <span>Optional</span></label>
+                            <textarea
+                              id={`bob-feedback-note-${m.id}`}
+                              maxLength={1000}
+                              value={feedbackNote}
+                              onChange={(event) => setFeedbackNote(event.target.value)}
+                              placeholder="For example: the answer missed the branch context or did not show the next safe action."
+                              rows={3}
+                            />
+                            <div>
+                              <button type="submit" disabled={savingFeedbackMessageId === m.id}>{savingFeedbackMessageId === m.id ? 'Saving…' : 'Save feedback'}</button>
+                              <button type="button" onClick={() => { setFeedbackEditorMessageId(null); setFeedbackNote(''); }}>Cancel</button>
+                            </div>
+                          </form>
+                        )}
+                        {feedbackStatus?.messageId === m.id && (
+                          <p className={`is-${feedbackStatus.tone}`} role={feedbackStatus.tone === 'error' ? 'alert' : 'status'}>{feedbackStatus.text}</p>
+                        )}
+                      </div>
+                    )}
                     <footer><time dateTime={m.created_at}>{new Date(m.created_at).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })}</time>{m.role === 'assistant' && <button type="button" onClick={() => void speakMessage(m)} disabled={speakingMessageId !== null} title="Listen to this reply" aria-label="Listen to this reply"><Volume2 size={13} />{speakingMessageId === m.id ? 'Speaking' : <span className="sr-only">Listen to this reply</span>}</button>}{supersededBy ? <span className="bob-superseded"><AlertTriangle size={12} /> Superseded by correction</span> : m.flagged && <span className="bob-flagged"><AlertTriangle size={12} /> Review required</span>}{correctionOf && <span className="bob-correction"><ShieldCheck size={12} /> Audit correction</span>}</footer>
                   </div>
                 </article>
