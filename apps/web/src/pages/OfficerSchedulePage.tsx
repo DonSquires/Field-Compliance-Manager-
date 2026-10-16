@@ -350,10 +350,17 @@ const OfficerSchedulePage: React.FC = () => {
       p_module_key: unit.service_type,
       p_notes: adHocNotes.trim() || null,
     });
-    if (startError || !data) {
+    if (startError || !data || typeof data.id !== 'string' || !['scheduled', 'in_progress'].includes(data.status)) {
       setError(describeLoadFailures([['unscheduled shift start', startError]]) ?? 'The unscheduled shift was not started.');
     } else {
-      setNotice(`${unit.name} shift started now. Record your work as you go, then use End shift when you are finished.`);
+      if (data.status === 'scheduled') {
+        await loadSchedule();
+        await startShift({
+          id: data.id, service_type: data.service_type, scheduled_start: data.scheduled_start,
+          scheduled_end: data.scheduled_end, status: data.status, notes: data.notes,
+          shift_health: data.shift_health, total_stops: data.total_stops, ended_reason: data.ended_reason,
+        });
+      } else setNotice(`${unit.name} shift started now. Record your work as you go, then use End shift when you are finished.`);
       setAdHocWorkUnitId('');
       setAdHocNotes('');
       await loadSchedule();
@@ -424,6 +431,8 @@ const OfficerSchedulePage: React.FC = () => {
       if (briefingNeedsAcknowledgement(briefing)) { setStartBriefing({ shift, briefing }); setStartingShiftId(null); return; }
     } catch (briefingError) {
       setError(`The safety briefing for this shift could not be loaded (${briefingError instanceof Error ? briefingError.message : 'unknown error'}). Ask your supervisor about site risks before you start.`);
+      setStartingShiftId(null);
+      return;
     }
     await continueStart(shift);
     setStartingShiftId(null);

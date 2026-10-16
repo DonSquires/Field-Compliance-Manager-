@@ -34,4 +34,11 @@ describe('notification navigation', () => {
   it('returns null for unsupported links instead of guessing', () => {
     expect(resolveNotificationDestination('officer', notification({ link_page: 'obligations' }))).toBeNull();
   });
+
+  it('routes a hazard reviewer to the actual place and never gives officers admin navigation', () => {
+    const report = notification({ category: 'place_hazard_review', link_page: 'sites', link_payload: { site_id: 'site-1', location_id: 'location-1' } });
+    expect(resolveNotificationDestination('admin', report)).toEqual({ kind: 'admin_place_hazards', siteId: 'site-1', locationId: 'location-1' });
+    expect(resolveNotificationDestination('officer', report)).toBeNull();
+    expect(resolveNotificationDestination('client_viewer', report)).toBeNull();
+  });
 });

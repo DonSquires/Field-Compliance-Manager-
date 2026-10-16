@@ -51,7 +51,31 @@ test('officer works the contracted stops of a shift one action at a time', async
   await expect(stopsCard.getByRole('button', { name: /Leaving/ })).toHaveCount(0);
   await expect(stopsCard).toHaveScreenshot('officer-patrol-stops-before.png');
 
+  let stopAcknowledged = false;
+  await page.route('**/rest/v1/rpc/get_shift_safety_briefing', async (route) => {
+    const args = route.request().postDataJSON();
+    await route.fulfill({ json: {
+      shift_id: shiftId, stop_id: args.p_stop_id, shift_status: 'in_progress', places: [],
+      hazards: [{ id: 'synthetic-risk', title: 'Broken glass at the loading door', hazard_class: 'sharps', risk_level: 'high',
+        controls: ['Use the front entrance'], details: null, status: 'reported', origin: 'officer_reported', version: 1,
+        place_name: 'Civic Centre', place_kind: 'site', source_name: 'Synthetic safety plan', source_locator: 'Section 2',
+        source_as_of: '2026-08-01', has_source_document: false, recorded_by: 'Fixture organisation', updated_at: '2026-08-30T00:00:00Z' }],
+      warnings: [], item_count: 1, briefing_hash: 'stop-risk-v1', acknowledgement_required: true,
+      acknowledged: stopAcknowledged, acknowledged_at: null, changed_since_acknowledgement: false, is_assigned_officer: true,
+    } });
+  });
+  await page.route('**/rest/v1/rpc/acknowledge_safety_briefing', async (route) => {
+    expect(route.request().postDataJSON()).toMatchObject({ p_shift_id: shiftId, p_stop_id: stopA, p_briefing_hash: 'stop-risk-v1' });
+    stopAcknowledged = true;
+    await route.fulfill({ json: { acknowledged_at: '2026-08-30T10:30:00Z', briefing_hash: 'stop-risk-v1' } });
+  });
   await stopsCard.getByRole('button', { name: 'Arrived at Civic Centre' }).click();
+  const safetyDialog = page.getByRole('dialog', { name: 'Risks at Civic Centre' });
+  await expect(safetyDialog).toContainText('Broken glass at the loading door');
+  await expect(safetyDialog).toContainText('Reported — not yet reviewed');
+  await expect(safetyDialog).toContainText('Section 2');
+  expect(requests).toHaveLength(0);
+  await safetyDialog.getByRole('button', { name: "I've read these risks - record arrival" }).click();
   await expect(stopsCard.getByRole('status')).toContainText('Arrival recorded');
   await expect(stopsCard.getByRole('status')).toContainText('GPS placed you near the site');
   expect(requests[0]).toMatchObject({ p_stop_id: stopA, p_expected_status: 'pending', p_action: 'arrive', p_gps_lat: -41.2705, p_gps_lng: 173.284 });

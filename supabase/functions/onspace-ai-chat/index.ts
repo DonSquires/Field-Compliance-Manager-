@@ -31,6 +31,7 @@ import { OWNER_EMAILS } from '../_shared/auth.ts';
 import { buildToolDispatchedPayload, buildToolOutcomePayload, buildIntrospectPayload, renderNotepadTail } from '../_shared/deterministic-logic.ts';
 import { buildModuleMap } from '../_shared/moduleProfiles.ts';
 import { startToolExecution, finishToolExecution, reloadTaskLedger } from '../_shared/task-lifecycle.ts';
+import { toolSignature } from '../_shared/tool-signature.mjs';
 const createClient = (url, key, opts)=>_createClient(url, key, opts);
 const CORS = {
   'Access-Control-Allow-Origin': '*',
@@ -10094,6 +10095,9 @@ serve(async (req)=>{
         console.warn('[conductor][session-attachments] failed to list session files (non-fatal):', e);
       }
     }
+    const resumedTaskState = pending?.kind === 'continuation' ? pending.task_state : null;
+    const taskGoal = resumedTaskState?.goal || message;
+    const priorTaskSteps = Array.isArray(resumedTaskState?.steps_taken) ? resumedTaskState.steps_taken : [];
     const planPayload = {
       action: 'plan',
       message: message || (att ? `The user uploaded ${att.name}.` : ''),
@@ -10197,8 +10201,9 @@ serve(async (req)=>{
     if (normAction === 'delegate') {
       const subagentRuns = Date.now() - startTime < 70_000 ? await runSubagents(decision.subagents, dispatchTool) : [];
       const delegatedTaskState = {
-        goal: message,
-        steps_taken: [],
+        ...resumedTaskState,
+        goal: taskGoal,
+        steps_taken: priorTaskSteps,
         subagent_results: subagentRuns,
         ...taskLedger && taskLedger.checkpoint ? {
           durable_checkpoint: taskLedger.checkpoint
@@ -11495,8 +11500,9 @@ serve(async (req)=>{
         return snap;
       };
       const loopSteps = [
+        ...priorTaskSteps,
         {
-          step: 1,
+          step: priorTaskSteps.length + 1,
           tool: chosenTool,
           args,
           outcome: String(result.meta.outcome ?? 'ok'),
@@ -11511,15 +11517,8 @@ serve(async (req)=>{
       // This prevents burning the step cap re-resolving the same entity.
       // Only applies to READ tools (the cage already halts on writes).
       const executedSignatures = new Set();
-      const stepSignature = (tool, toolArgs)=>{
-        // Deterministic: sort keys so {a:1,b:2} === {b:2,a:1}.
-        try {
-          return `${tool}::${JSON.stringify(toolArgs, Object.keys(toolArgs).sort())}`;
-        } catch  {
-          return `${tool}::${String(toolArgs)}`;
-        }
-      };
-      executedSignatures.add(stepSignature(chosenTool, args));
+      const stepSignature = toolSignature;
+      for (const step of loopSteps) executedSignatures.add(stepSignature(step.tool, step.args));
       // resolved_facts: keyed by "<step>:<tool>" so the planner sees per-step
       // provenance (advisory context only — no control-flow dependency). The old
       // Object.assign merge clobbered earlier keys (outcome, tool) with later
@@ -11580,7 +11579,8 @@ serve(async (req)=>{
         return extractResolvedOrgIds(steps).filter((id)=>!queried.has(id));
       };
       let taskState = {
-        goal: message,
+        ...resumedTaskState,
+        goal: taskGoal,
         steps_taken: loopSteps,
         resolved_facts: buildResolvedFacts(loopSteps),
         resolved_org_ids: extractResolvedOrgIds(loopSteps),
@@ -11769,7 +11769,7 @@ serve(async (req)=>{
           stepCount++;
           const findingsText = runs.map((r)=>`[${r.role}] ${r.goal}\n${String(r.findings)}${r.sources.length ? `\nSources: ${r.sources.join(' | ')}` : ''}`).join('\n\n') || 'No subagent findings (delegation skipped or unavailable).';
           loopSteps.push({
-            step: stepCount,
+            step: loopSteps.length + 1,
             tool: 'delegate',
             args: {
               subagents: runs.map((r)=>({
@@ -11965,7 +11965,7 @@ serve(async (req)=>{
           args = next.args;
           stepCount++;
           loopSteps.push({
-            step: stepCount,
+            step: loopSteps.length + 1,
             tool: next.chosenTool,
             args: next.args,
             outcome: String(result.meta.outcome ?? 'ok'),
@@ -12054,7 +12054,7 @@ serve(async (req)=>{
           }
         }
         const step = {
-          step: stepCount,
+          step: loopSteps.length + 1,
           tool: next.chosenTool,
           args: next.args,
           outcome: String(result.meta.outcome ?? 'ok'),
@@ -12064,7 +12064,8 @@ serve(async (req)=>{
         loopSteps.push(step);
         // Update task_state with the new result for the next iteration.
         taskState = {
-          goal: message,
+          ...taskState,
+          goal: taskGoal,
           steps_taken: loopSteps,
           resolved_facts: buildResolvedFacts(loopSteps),
           resolved_org_ids: extractResolvedOrgIds(loopSteps),
@@ -12171,8 +12172,11 @@ serve(async (req)=>{
         tools: [],
         allow_delegation: false,
         task_state: {
-          goal: message,
-          steps_taken: priorSteps,
+          ...resumedTaskState,
+          goal: taskGoal,
+          steps_taken: Array.isArray(result.meta?.loop_steps) && result.meta.loop_steps.length
+            ? priorSteps
+            : [...priorTaskSteps, ...priorSteps],
           ...subagentRunsThisTurn.length ? {
             subagent_results: subagentRunsThisTurn.map((r)=>({
                 ...r,

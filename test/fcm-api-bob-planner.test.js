@@ -676,7 +676,39 @@ test('a tight deadline skips the in-house planner and shortens the turn; the pro
   assert.deepEqual(calls2, [null]);
 
   const prompt = buildPlannerPrompt({ message: 'x', tools: [], taskState: { goal: 'g', steps_taken: [], time_left_s: 27 } });
-  assert.match(prompt, /TIME LEFT IN THIS TURN: about 27 s\. If the results below already answer the question \(a not_found IS an answer\), select action=answer NOW/);
+  assert.match(prompt, /TIME LEFT IN THIS TURN: about 27 s\. Answer now ONLY if the original goal is satisfied/);
+});
+
+test('continuation review uses the original record-change goal and repairs summary-only answers', async () => {
+  const calls = [];
+  const gateway = {
+    async chatJson(role, messages) {
+      calls.push({ role, messages });
+      if (role === 'verifier') return {
+        content: JSON.stringify({ verdict: 'repair', issues: [{ code: 'unfinished_outcome', severity: 'block', note: 'The original goal requires records, not a source summary. File a governed proposal or ask for the missing source date.' }] }),
+        provider: 'local-review', model: 'review', latency_ms: 2,
+      };
+      return {
+        content: JSON.stringify(calls.length === 1
+          ? { action: 'answer', reply: 'I found three risks in the documents. Please review this list.' }
+          : { action: 'ask', reply: 'The risks are extracted, but the source date is missing. Nothing has been filed yet.', questions: [{ question: 'What date should be recorded for this source?', best_guess: 'Check the document approval date' }] }),
+        provider: 'local-author', model: 'author', latency_ms: 2,
+      };
+    },
+  };
+  const goal = 'Read these documents and add the relevant risks to the place register.';
+  const result = await planTurn({
+    message: 'Continue from where you left off',
+    pending: { kind: 'continuation', task_state: { goal } },
+    task_state: { goal, steps_taken: [{ tool: 'understand_documents', outcome: 'ok', result_summary: 'Extracted three risks; source date unknown.' }] },
+    tools: [{ tool: 'propose_place_hazards', purpose: 'File hazards for human approval' }],
+  }, { gateway, env: {} });
+  const critic = calls.find((call) => call.role === 'verifier').messages.map((item) => item.content).join('\n');
+  assert.match(critic, /Original task goal: Read these documents and add/);
+  assert.match(critic, /Extracted three risks; source date unknown/);
+  assert.match(critic, /research or a prose list does not complete it/);
+  assert.equal(result.body.action, 'ask');
+  assert.equal(result.body.verification.replanned, true);
 });
 
 test('a code request answered with a procedure and no repository lookup is blocked for repair', () => {

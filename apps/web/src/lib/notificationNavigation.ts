@@ -4,6 +4,7 @@ import type { NotificationRecord } from '../components/NotificationCenter';
 export type NotificationDestination =
   | { kind: 'admin_page'; page: string }
   | { kind: 'admin_crm_account'; accountId: string | null }
+  | { kind: 'admin_place_hazards'; siteId: string | null; locationId: string | null }
   | { kind: 'admin_field_ops'; area: string }
   | { kind: 'admin_hr_credential'; credentialId: string | null }
   | { kind: 'officer_module'; module: string | null }
@@ -35,6 +36,11 @@ export function resolveNotificationDestination(role: AppRole, notification: Noti
   if (notification.category === 'bob_conversation' || link === 'bob_chat') return { kind: 'bob', conversationId };
 
   if (role === 'grand_master' || role === 'master' || role === 'admin' || role === 'admin_officer') {
+    if (notification.category === 'place_hazard_review') return {
+      kind: 'admin_place_hazards',
+      siteId: typeof notification.link_payload?.site_id === 'string' ? notification.link_payload.site_id : null,
+      locationId: typeof notification.link_payload?.location_id === 'string' ? notification.link_payload.location_id : null,
+    };
     if (notification.category === 'builder_job' && link === 'builder') return { kind: 'admin_page', page: 'builder' };
     if (link === 'WelfareAlertsPage' || notification.category === 'welfare') return { kind: 'admin_field_ops', area: 'welfare-alerts' };
     if (link === 'open-jobs' || notification.category === 'dispatch') return { kind: 'admin_field_ops', area: 'dispatch' };

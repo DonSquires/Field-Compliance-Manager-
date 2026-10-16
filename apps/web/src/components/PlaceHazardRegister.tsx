@@ -12,25 +12,27 @@ import './PlaceHazardRegister.css';
 export interface RegisterHazard {
   id: string; organization_id: string; organization_name: string; location_id: string; client_site_id: string | null; zone_id: string | null;
   place_name: string; title: string; hazard_class: string; risk_level: RiskLevel; controls: string[]; details: string | null;
+  likelihood: number | null; consequence: number | null;
   source_document_id: string | null; source_document_name: string | null; source_name: string | null; source_locator: string | null; source_as_of: string | null;
   origin: 'bob_extracted' | 'officer_reported' | 'manual'; status: 'reported' | 'active' | 'retired'; version: number; review_due: string | null;
   reported_by_name: string | null; reviewed_at: string | null; retired_reason: string | null; updated_at: string; can_manage: boolean;
 }
 
 interface PlaceOption { key: string; label: string; siteId: string | null; zoneId: string | null }
-interface Draft { placeKey: string; title: string; hazardClass: string; riskLevel: RiskLevel; controls: string; details: string; sourceName: string; sourceLocator: string; reviewDue: string }
+interface Draft { placeKey: string; title: string; hazardClass: string; riskLevel: RiskLevel; likelihood: string; consequence: string; controls: string; details: string; sourceName: string; sourceLocator: string; reviewDue: string }
 
 const ORIGIN_LABEL: Record<RegisterHazard['origin'], string> = { bob_extracted: 'From a document (Bob, approved)', officer_reported: 'Reported by an officer', manual: 'Added by an administrator' };
-const emptyDraft = (placeKey: string): Draft => ({ placeKey, title: '', hazardClass: 'other', riskLevel: 'medium', controls: '', details: '', sourceName: '', sourceLocator: '', reviewDue: '' });
+const emptyDraft = (placeKey: string): Draft => ({ placeKey, title: '', hazardClass: 'other', riskLevel: 'medium', likelihood: '', consequence: '', controls: '', details: '', sourceName: '', sourceLocator: '', reviewDue: '' });
 
 interface Props {
   organizationId: string;
   locationId: string;
-  site: { id: string; name: string };
+  site?: { id: string; name: string };
+  sites?: Array<{ id: string; name: string }>;
   zones: Array<{ id: string; name: string }>;
 }
 
-export function PlaceHazardRegister({ organizationId, locationId, site, zones }: Props) {
+export function PlaceHazardRegister({ organizationId, locationId, site, sites, zones }: Props) {
   const [hazards, setHazards] = useState<RegisterHazard[]>([]);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
@@ -38,24 +40,34 @@ export function PlaceHazardRegister({ organizationId, locationId, site, zones }:
   const [editing, setEditing] = useState<{ id: string | null; draft: Draft } | null>(null);
   const [retiring, setRetiring] = useState<{ id: string; reason: string } | null>(null);
   const [saving, setSaving] = useState(false);
+  const [canCreate, setCanCreate] = useState(false);
   const createRequestId = useRef(crypto.randomUUID());
 
   const places: PlaceOption[] = [
-    { key: `site:${site.id}`, label: site.name, siteId: site.id, zoneId: null },
+    ...(sites ?? (site ? [site] : [])).map((item) => ({ key: `site:${item.id}`, label: item.name, siteId: item.id, zoneId: null })),
     ...zones.map((zone) => ({ key: `zone:${zone.id}`, label: `Zone: ${zone.name}`, siteId: null, zoneId: zone.id })),
     { key: 'house', label: 'Whole location (every site and zone here)', siteId: null, zoneId: null },
   ];
 
   const load = useCallback(async () => {
     setLoading(true); setError(null);
-    // ATLAS READS: get_place_hazard_register
-    const { data, error: rpcError } = await supabase.rpc('get_place_hazard_register', { p_location_id: locationId, p_include_retired: false });
+    // ATLAS READS: get_place_hazard_register, can_manage_place_hazards
+    const [{ data, error: rpcError }, permission] = await Promise.all([
+      supabase.rpc('get_place_hazard_register', { p_location_id: locationId, p_include_retired: false }),
+      supabase.rpc('can_manage_place_hazards', { p_organization_id: organizationId, p_location_id: locationId }),
+    ]);
+    setCanCreate(!permission.error && permission.data === true);
     if (rpcError) setError(rpcError.message);
     else setHazards((data as RegisterHazard[] | null) ?? []);
+    if (permission.error) setError(permission.error.message);
     setLoading(false);
-  }, [locationId]);
+  }, [locationId, organizationId]);
 
-  useEffect(() => { void load(); }, [load]);
+  useEffect(() => {
+    setHazards([]); setEditing(null); setRetiring(null); setNotice(null); setCanCreate(false);
+    createRequestId.current = crypto.randomUUID();
+    void load();
+  }, [load]);
 
   const manage = async (action: 'create' | 'update' | 'confirm' | 'retire', hazardId: string | null, fields: Record<string, unknown>, requestId: string | null, success: string) => {
     setSaving(true); setError(null); setNotice(null);
@@ -76,6 +88,8 @@ export function PlaceHazardRegister({ organizationId, locationId, site, zones }:
     const { draft } = editing;
     const fields: Record<string, unknown> = {
       title: draft.title, hazard_class: draft.hazardClass, risk_level: draft.riskLevel,
+      likelihood: draft.likelihood ? Number(draft.likelihood) : null,
+      consequence: draft.consequence ? Number(draft.consequence) : null,
       controls: draft.controls.split('\n').map((line) => line.trim()).filter(Boolean),
       details: draft.details, source_name: draft.sourceName, source_locator: draft.sourceLocator, review_due: draft.reviewDue || null,
     };
@@ -105,7 +119,7 @@ export function PlaceHazardRegister({ organizationId, locationId, site, zones }:
         </div>
         <div className="place-hazard-actions">
           <button type="button" className="btn btn-sm btn-secondary" onClick={() => void load()} disabled={loading} aria-label="Refresh hazard register"><RefreshCw size={14} className={loading ? 'is-spinning' : ''} /></button>
-          <button type="button" className="btn btn-sm btn-primary" onClick={() => setEditing({ id: null, draft: emptyDraft(places[0].key) })} disabled={Boolean(editing)}><Plus size={14} aria-hidden="true" /> Add hazard</button>
+          {canCreate && <button type="button" className="btn btn-sm btn-primary" onClick={() => setEditing({ id: null, draft: emptyDraft(places[0].key) })} disabled={Boolean(editing)}><Plus size={14} aria-hidden="true" /> Add hazard</button>}
         </div>
       </header>
 
@@ -122,12 +136,17 @@ export function PlaceHazardRegister({ organizationId, locationId, site, zones }:
               </select>
             </label>
           )}
-          <label><span>Hazard (short, officer-readable)</span><input value={editing.draft.title} onChange={(event) => setEditing({ ...editing, draft: { ...editing.draft, title: event.target.value } })} maxLength={200} required /></label>
+          <label><span>Hazard (short, officer-readable)</span><input value={editing.draft.title} onChange={(event) => setEditing({ ...editing, draft: { ...editing.draft, title: event.target.value } })} minLength={3} maxLength={160} required /></label>
           <div className="place-hazard-form-row">
             <label><span>Type</span><select value={editing.draft.hazardClass} onChange={(event) => setEditing({ ...editing, draft: { ...editing.draft, hazardClass: event.target.value } })}>{HAZARD_CLASSES.map((value) => <option key={value} value={value}>{hazardClassLabel(value)}</option>)}</select></label>
             <label><span>Risk</span><select value={editing.draft.riskLevel} onChange={(event) => setEditing({ ...editing, draft: { ...editing.draft, riskLevel: event.target.value as RiskLevel } })}>{(['critical', 'high', 'medium', 'low'] as RiskLevel[]).map((value) => <option key={value} value={value}>{RISK_LABELS[value]}</option>)}</select></label>
             <label><span>Review by</span><input type="date" value={editing.draft.reviewDue} onChange={(event) => setEditing({ ...editing, draft: { ...editing.draft, reviewDue: event.target.value } })} /></label>
           </div>
+          <div className="place-hazard-form-row">
+            <label><span>Likelihood (1-5, optional)</span><input type="number" min={1} max={5} step={1} value={editing.draft.likelihood} onChange={(event) => setEditing({ ...editing, draft: { ...editing.draft, likelihood: event.target.value } })} /></label>
+            <label><span>Consequence (1-5, optional)</span><input type="number" min={1} max={5} step={1} value={editing.draft.consequence} onChange={(event) => setEditing({ ...editing, draft: { ...editing.draft, consequence: event.target.value } })} /></label>
+          </div>
+          <p className="place-hazard-subtle">Use your organisation's risk matrix. The score is likelihood x consequence; the residual risk category is reviewed separately, not inferred from an unapproved threshold.</p>
           <label><span>Controls — what officers must do, one per line</span><textarea rows={3} value={editing.draft.controls} onChange={(event) => setEditing({ ...editing, draft: { ...editing.draft, controls: event.target.value } })} /></label>
           <label><span>Details</span><textarea rows={2} value={editing.draft.details} onChange={(event) => setEditing({ ...editing, draft: { ...editing.draft, details: event.target.value } })} /></label>
           <div className="place-hazard-form-row">
@@ -151,6 +170,8 @@ export function PlaceHazardRegister({ organizationId, locationId, site, zones }:
                 {hazard.status === 'reported' && <span className="place-hazard-badge">Awaiting review</span>}
               </div>
               <small>{hazardClassLabel(hazard.hazard_class)} · {hazard.place_name} · {ORIGIN_LABEL[hazard.origin]}{hazard.reported_by_name ? ` (${hazard.reported_by_name})` : ''} · v{hazard.version}{hazard.review_due ? ` · review by ${hazard.review_due}` : ''}</small>
+              <small>{hazard.likelihood && hazard.consequence ? `Risk score: ${hazard.likelihood} x ${hazard.consequence} = ${hazard.likelihood * hazard.consequence}/25` : 'Likelihood/consequence assessment not recorded'} · Custodian: {hazard.organization_name}</small>
+              {hazard.review_due && hazard.review_due < new Date().toISOString().slice(0, 10) && <span className="place-hazard-badge">Review overdue</span>}
               {hazard.controls.length > 0 && <ul className="place-hazard-controls">{hazard.controls.map((control) => <li key={control}>{control}</li>)}</ul>}
               {hazard.details && <p>{hazard.details}</p>}
               {(hazard.source_name || hazard.source_document_name) && (
@@ -161,7 +182,7 @@ export function PlaceHazardRegister({ organizationId, locationId, site, zones }:
               {hazard.can_manage && (
                 <div className="place-hazard-row-actions">
                   {hazard.status === 'reported' && <button type="button" className="btn btn-sm btn-primary" disabled={saving} onClick={() => void manage('confirm', hazard.id, {}, null, 'Hazard confirmed and kept in officer briefings.')}><CheckCircle2 size={13} aria-hidden="true" /> Confirm</button>}
-                  <button type="button" className="btn btn-sm btn-secondary" disabled={saving || Boolean(editing)} onClick={() => setEditing({ id: hazard.id, draft: { placeKey: placeKeyOf(hazard), title: hazard.title, hazardClass: hazard.hazard_class, riskLevel: hazard.risk_level, controls: hazard.controls.join('\n'), details: hazard.details ?? '', sourceName: hazard.source_name ?? '', sourceLocator: hazard.source_locator ?? '', reviewDue: hazard.review_due ?? '' } })}><Pencil size={13} aria-hidden="true" /> Edit</button>
+                  <button type="button" className="btn btn-sm btn-secondary" disabled={saving || Boolean(editing)} onClick={() => setEditing({ id: hazard.id, draft: { placeKey: placeKeyOf(hazard), title: hazard.title, hazardClass: hazard.hazard_class, riskLevel: hazard.risk_level, likelihood: hazard.likelihood?.toString() ?? '', consequence: hazard.consequence?.toString() ?? '', controls: hazard.controls.join('\n'), details: hazard.details ?? '', sourceName: hazard.source_name ?? '', sourceLocator: hazard.source_locator ?? '', reviewDue: hazard.review_due ?? '' } })}><Pencil size={13} aria-hidden="true" /> Edit</button>
                   <button type="button" className="btn btn-sm btn-secondary" disabled={saving} onClick={() => setRetiring({ id: hazard.id, reason: '' })}><Trash2 size={13} aria-hidden="true" /> Retire</button>
                 </div>
               )}

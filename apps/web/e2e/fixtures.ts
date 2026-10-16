@@ -647,6 +647,16 @@ export async function installOfficerScheduleFixtures(page: Page, options: { free
     const url = new URL(request.url());
     const resource = url.pathname.split('/').at(-1);
     const select = url.searchParams.get('select') ?? '';
+    if (resource === 'get_shift_safety_briefing') {
+      const args = request.postDataJSON();
+      await route.fulfill(fulfillJson({
+        shift_id: args.p_shift_id, stop_id: args.p_stop_id ?? null, shift_status: 'published',
+        places: [], hazards: [], warnings: [], item_count: 0, briefing_hash: 'empty-fixture',
+        acknowledgement_required: false, acknowledged: false, acknowledged_at: null,
+        changed_since_acknowledgement: false, is_assigned_officer: true,
+      }));
+      return;
+    }
     if (resource === 'organization_modules') {
       await route.fulfill(fulfillJson([{ id: 'abababab-abab-4bab-8bab-ababababab01', module_key: 'patrol', enabled: true }, { id: 'abababab-abab-4bab-8bab-ababababab02', module_key: 'freedom_camping', enabled: true }, { id: 'abababab-abab-4bab-8bab-ababababab03', module_key: 'overnight_verification', enabled: true }, { id: 'abababab-abab-4bab-8bab-ababababab04', module_key: 'noise_control', enabled: true }, { id: 'abababab-abab-4bab-8bab-ababababab05', module_key: 'site_guard', enabled: true }, { id: 'abababab-abab-4bab-8bab-ababababab06', module_key: 'biosecurity', enabled: true }, { id: 'abababab-abab-4bab-8bab-ababababab07', module_key: 'parking', enabled: true }, { id: 'abababab-abab-4bab-8bab-ababababab08', module_key: 'smoke_control', enabled: true }, { id: 'abababab-abab-4bab-8bab-ababababab09', module_key: 'welfare', enabled: true }]));
       return;

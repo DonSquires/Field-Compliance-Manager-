@@ -112,8 +112,17 @@ const SiteDetailPage: React.FC = () => {
         setSites(siteRows);
 
         if (siteRows.length > 0) {
-          const requestedId = new URLSearchParams(location.search).get('site');
-          const initialSite = siteRows.find((site) => site.id === requestedId) ?? siteRows[0];
+          const params = new URLSearchParams(location.search);
+          const requestedId = params.get('site');
+          const requestedLocation = params.get('location');
+          const initialSite = requestedId
+            ? siteRows.find((site) => site.id === requestedId)
+            : requestedLocation ? siteRows.find((site) => site.location_id === requestedLocation) : siteRows[0];
+          if (!initialSite) {
+            setError('The requested place is not available in this site workspace. Open Locations to check your place access.');
+            setLoading(false);
+            return;
+          }
           setSelectedSite(initialSite);
           await loadSiteDetail(initialSite.id, initialSite);
         }

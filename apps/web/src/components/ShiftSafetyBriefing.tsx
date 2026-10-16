@@ -101,27 +101,34 @@ export function SafetyBriefingDialog({ briefing, title, acknowledgeLabel, onAckn
   const [current, setCurrent] = useState(briefing);
   const [saving, setSaving] = useState(false);
   const [message, setMessage] = useState<string | null>(null);
+  const [needsReload, setNeedsReload] = useState(false);
   const requestId = useRef(crypto.randomUUID());
 
-  useEffect(() => { setCurrent(briefing); }, [briefing]);
+  useEffect(() => { setCurrent(briefing); requestId.current = crypto.randomUUID(); }, [briefing.briefing_hash]);
 
   const acknowledge = async () => {
     setSaving(true); setMessage(null);
-    const result = await acknowledgeSafetyBriefing(current, requestId.current, await currentCoords());
-    if (result.ok) {
-      setSaving(false);
-      await onAcknowledged();
-      return;
-    }
-    if (result.changed) {
+    try {
+      if (!needsReload) {
+        const result = await acknowledgeSafetyBriefing(current, requestId.current, await currentCoords());
+        if (result.ok) {
+          await onAcknowledged();
+          return;
+        }
+        if (!result.changed) { setMessage(result.message); return; }
+        setNeedsReload(true);
+      }
       const next = await onReload();
-      if (next) setCurrent(next);
+      if (!next) throw new Error('The updated safety briefing could not be loaded. Retry before confirming.');
+      setCurrent(next);
+      setNeedsReload(false);
       requestId.current = crypto.randomUUID();
       setMessage('The safety briefing was updated while you were reading. Check the changes, then confirm again.');
-    } else {
-      setMessage(result.message);
+    } catch (cause) {
+      setMessage(cause instanceof Error ? cause.message : 'The safety briefing could not be confirmed. Retry before starting work.');
+    } finally {
+      setSaving(false);
     }
-    setSaving(false);
   };
 
   return (
@@ -132,7 +139,7 @@ export function SafetyBriefingDialog({ briefing, title, acknowledgeLabel, onAckn
             <span className="safety-briefing-kicker"><ShieldAlert size={14} aria-hidden="true" /> Safety briefing</span>
             <h2 id="safety-briefing-title">{title ?? `Risks at ${current.places.map((place) => place.name).join(', ') || 'this shift'}`}</h2>
           </div>
-          <button type="button" onClick={onClose} aria-label="Close safety briefing"><X size={18} /></button>
+          <button type="button" onClick={onClose} disabled={saving} aria-label="Close safety briefing"><X size={18} /></button>
         </header>
         {current.changed_since_acknowledgement && <p className="safety-briefing-changed">This briefing changed since you last confirmed it.</p>}
         <SafetyBriefingList briefing={current} />
@@ -140,7 +147,7 @@ export function SafetyBriefingDialog({ briefing, title, acknowledgeLabel, onAckn
         <div className="safety-dialog-actions">
           {briefingNeedsAcknowledgement(current) && <button type="button" onClick={onClose} disabled={saving}>Not now</button>}
           {briefingNeedsAcknowledgement(current)
-            ? <button type="button" onClick={() => void acknowledge()} disabled={saving}><CheckCircle2 size={15} aria-hidden="true" /> {saving ? 'Recording…' : acknowledgeLabel}</button>
+            ? <button type="button" onClick={() => void acknowledge()} disabled={saving}><CheckCircle2 size={15} aria-hidden="true" /> {saving ? 'Recording…' : needsReload ? 'Retry loading briefing' : acknowledgeLabel}</button>
             : <button type="button" onClick={onClose}>Close</button>}
         </div>
       </section>
@@ -182,7 +189,7 @@ export function ReportHazardForm({ shiftId, places, onReported, onCancel }: { sh
           {places.map((place) => <option key={`${place.kind}:${place.id}`} value={`${place.kind}:${place.id}`}>{place.name}</option>)}
         </select>
       </label>
-      <label><span>What is the hazard</span><input value={title} onChange={(event) => setTitle(event.target.value)} placeholder="e.g. Broken glass by the rear loading door" maxLength={200} required /></label>
+      <label><span>What is the hazard</span><input value={title} onChange={(event) => setTitle(event.target.value)} placeholder="e.g. Broken glass by the rear loading door" minLength={3} maxLength={160} required /></label>
       <div className="safety-report-row">
         <label><span>Type</span>
           <select value={hazardClass} onChange={(event) => setHazardClass(event.target.value)}>
@@ -214,27 +221,41 @@ export function OfficerSafetyBriefingBanner({ shift }: { shift: { id: string; st
   const [briefing, setBriefing] = useState<SafetyBriefing | null>(null);
   const [dialog, setDialog] = useState<'briefing' | 'report' | null>(null);
   const [notice, setNotice] = useState<string | null>(null);
+  const [error, setError] = useState<string | null>(null);
   const shiftId = shift?.status === 'in_progress' ? shift.id : null;
+  const activeShiftId = useRef(shiftId);
+  activeShiftId.current = shiftId;
 
   const load = useCallback(async () => {
     if (!shiftId) { setBriefing(null); return null; }
     try {
       const next = await fetchShiftSafetyBriefing(shiftId);
+      if (activeShiftId.current !== shiftId) return null;
       setBriefing(next);
+      setError(null);
       return next;
-    } catch {
+    } catch (cause) {
+      if (activeShiftId.current !== shiftId) return null;
+      setError(cause instanceof Error ? cause.message : 'The safety briefing could not be loaded.');
       return null;
     }
   }, [shiftId]);
 
   useEffect(() => {
+    setBriefing(null); setDialog(null); setNotice(null); setError(null);
     void load();
     if (!shiftId) return undefined;
     const timer = window.setInterval(() => { void load(); }, BANNER_REFRESH_MS);
     return () => window.clearInterval(timer);
   }, [load, shiftId]);
 
-  if (!shiftId || !briefing || !briefing.is_assigned_officer) return null;
+  if (!shiftId) return null;
+  if (!briefing) return <div className="safety-briefing-banner" role={error ? 'alert' : 'status'}>
+    <ShieldAlert size={17} aria-hidden="true" />
+    <span>{error ? `Safety briefing unavailable: ${error} Check site risks with your supervisor before working.` : 'Loading safety briefing...'}</span>
+    {error && <button type="button" onClick={() => void load()}>Retry safety briefing</button>}
+  </div>;
+  if (!briefing.is_assigned_officer) return null;
   const needsAck = briefingNeedsAcknowledgement(briefing);
 
   return (
@@ -244,6 +265,7 @@ export function OfficerSafetyBriefingBanner({ shift }: { shift: { id: string; st
         <div>
           <strong>{needsAck ? (briefing.changed_since_acknowledgement ? 'Safety briefing updated — read and confirm' : 'Read and confirm the safety briefing') : `Safety briefing: ${briefing.item_count} item${briefing.item_count === 1 ? '' : 's'}`}</strong>
           {notice && <small>{notice}</small>}
+          {error && <small role="alert">Safety updates could not be checked: {error}</small>}
         </div>
         <button type="button" onClick={() => setDialog('briefing')}>{needsAck ? 'Read now' : 'View'}</button>
         <button type="button" onClick={() => { setNotice(null); setDialog('report'); }}><Plus size={14} aria-hidden="true" /> Report a hazard</button>
