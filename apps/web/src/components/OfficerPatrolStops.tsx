@@ -77,6 +77,18 @@ export function OfficerPatrolStops({ shiftId }: { shiftId: string }) {
 
   const act = async (stop: PatrolStop, action: 'arrive' | 'depart') => {
     setSaving(true); setError(null); setReceipt(null);
+    if (action === 'arrive') {
+      try {
+        const briefing = await fetchShiftSafetyBriefing(shiftId, stop.id);
+        if (briefingNeedsAcknowledgement(briefing)) {
+          setStopBriefing({ stop, briefing }); setSaving(false); return;
+        }
+      } catch (briefingError) {
+        setError(`The safety briefing for ${stop.place.name} could not be loaded (${briefingError instanceof Error ? briefingError.message : 'unknown error'}). Retry before entering.`);
+        setSaving(false);
+        return;
+      }
+    }
     const key = `${stop.id}:${action}`;
     pendingRequest.current[key] ??= crypto.randomUUID();
     const position = await currentPosition();
@@ -93,15 +105,6 @@ export function OfficerPatrolStops({ shiftId }: { shiftId: string }) {
       setReceipt(data as StopReceipt);
       if (action === 'depart') { setNotes(''); setDelayReason(''); }
       await load();
-      // On arrival, the risks for this exact place are shown and confirmed before the officer works there.
-      if (action === 'arrive') {
-        try {
-          const briefing = await fetchShiftSafetyBriefing(shiftId, stop.id);
-          if (briefingNeedsAcknowledgement(briefing)) setStopBriefing({ stop, briefing });
-        } catch (briefingError) {
-          setError(`Arrival recorded, but the safety briefing for ${stop.place.name} could not be loaded (${briefingError instanceof Error ? briefingError.message : 'unknown error'}).`);
-        }
-      }
     }
     setSaving(false);
   };
@@ -121,7 +124,7 @@ export function OfficerPatrolStops({ shiftId }: { shiftId: string }) {
         <button type="button" className="patrol-stops-refresh" onClick={() => void load()} disabled={loading} aria-label="Refresh contracted stops"><RefreshCw size={15} className={loading ? 'is-spinning' : ''} /></button>
       </header>
 
-      {stopBriefing && <SafetyBriefingDialog briefing={stopBriefing.briefing} title={`Risks at ${stopBriefing.stop.place.name}`} acknowledgeLabel="I've read these risks" onClose={() => setStopBriefing(null)} onAcknowledged={() => setStopBriefing(null)} onReload={async () => { try { const next = await fetchShiftSafetyBriefing(shiftId, stopBriefing.stop.id); setStopBriefing({ stop: stopBriefing.stop, briefing: next }); return next; } catch { return null; } }} />}
+      {stopBriefing && <SafetyBriefingDialog briefing={stopBriefing.briefing} title={`Risks at ${stopBriefing.stop.place.name}`} acknowledgeLabel="I've read these risks - record arrival" onClose={() => setStopBriefing(null)} onAcknowledged={async () => { const stop = stopBriefing.stop; setStopBriefing(null); await act(stop, 'arrive'); }} onReload={async () => { const next = await fetchShiftSafetyBriefing(shiftId, stopBriefing.stop.id); setStopBriefing({ stop: stopBriefing.stop, briefing: next }); return next; }} />}
       {error && <div className="patrol-stops-message is-error" role="alert"><AlertTriangle size={16} />{error}</div>}
       {receipt && (
         <div className="patrol-stops-message is-success" role="status">

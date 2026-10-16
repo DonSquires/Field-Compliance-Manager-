@@ -213,7 +213,7 @@ Deno.serve(async (req) => {
       const replaces = (Array.isArray(live) ? live : []).find((row) => String(row.title).trim().toLowerCase() === hazard.title.toLowerCase())?.id ?? null;
 
       const payload = { organization_id: orgId, ...hazard, location_id: location.id, triggered_by: caller.id };
-      const idempotencyKey = `place_hazard:${await sha256Hex(JSON.stringify([orgId, location.id, hazard.client_site_id, hazard.zone_id, hazard.title.toLowerCase(), hazard.risk_level, hazard.source_name, hazard.source_as_of]))}`;
+      const idempotencyKey = `place_hazard:${await sha256Hex(JSON.stringify([orgId, { ...hazard, location_id: location.id, title: hazard.title.toLowerCase() }]))}`;
       const reasoning = [
         reasoningBase ?? `Bob proposes the ${hazard.risk_level} hazard '${hazard.title}' at ${placeName} from ${hazard.source_name}${hazard.source_locator ? ` (${hazard.source_locator})` : ''}, ${hazard.source_as_of}.`,
         replaces ? 'Approving replaces the live hazard with the same title, so officers re-acknowledge the briefing.' : '',
@@ -237,7 +237,9 @@ Deno.serve(async (req) => {
       if (error || !action) {
         if (error?.code === '23505') {
           const { data: pending } = await admin.from('bob_agentic_actions').select('id').eq('idempotency_key', idempotencyKey).eq('status', 'pending').maybeSingle();
-          results.push({ title: hazard.title, place: placeName, outcome: 'already_pending', action_id: pending?.id ?? null });
+          results.push(pending?.id
+            ? { title: hazard.title, place: placeName, outcome: 'already_pending', action_id: pending.id }
+            : { title: hazard.title, place: placeName, outcome: 'failed', error: 'The concurrent proposal could not be confirmed. Retry.' });
           continue;
         }
         results.push({ title: hazard.title, place: placeName, outcome: 'failed', error: error?.message ?? 'Could not create proposal' });

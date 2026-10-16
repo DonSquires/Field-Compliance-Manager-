@@ -73,11 +73,50 @@ that workstream; migration `20261018090000_place_hazard_register_briefings`):
 - **Officer reports.** Reported hazards are visible to other officers at once
   as "reported — not yet reviewed" until an administrator confirms or retires
   them on the site's hazard register.
-- **Known gaps.** The mobile app (`OfficerShiftClockPanel`) still calls
-  `start_officer_shift` without showing the briefing, so acknowledgement is a
-  web-client step, not server-enforced. Likelihood × consequence scoring,
-  review-date reminders, task risk assessments with sign-off, and incident →
-  hazard-review links remain open.
+- **Delivery follow-through, 2026-10-18**
+  (`20261018100000_safety_briefing_delivery_guards`):
+  - **Before:** Bob's resumed task retains the original goal, earlier tool
+    evidence and nested lookup arguments. Delegated document findings are
+    evidence, not completion of a requested register change. The independent
+    critic checks that distinction; no H&S keyword routing was introduced.
+    Proposal retries hash controls, source sections and scores as well as titles.
+  - **During:** web and native officers load short place-specific risks before
+    starting. Failed loads block start visibly. Patrol arrival is recorded only
+    after the stop-specific acknowledgement. Database triggers enforce current
+    officer receipts on shift starts (including direct inserts) and stop arrival;
+    replay cannot acknowledge a different shift, stop or version. Unscheduled
+    work is prepared with its work-unit contract/route and patrol stops, then
+    goes through the same briefing and normal start RPC, rather than inserting
+    an already-started shift. A retry reuses the prepared shift.
+  - **After:** new officer reports invalidate prior receipts, remain immediately
+    visible as unreviewed, and create deduplicated personal review notifications
+    for active administrators in the keeping organisation. Site notifications
+    open that site; zone/house notifications open the owning Locations workspace,
+    which now exposes the same register even without a site facet. Missing
+    requested places never silently open another place. The native client
+    supports refresh, acknowledgement, signed source links and hazard reporting.
+    Full displayed-content hashing includes changed warning instructions and
+    source references, not merely warning severity. Management authority requires
+    a real organisation/place relationship, not just readable tenant records.
+  - **Risk assessment:** administrators can record optional likelihood and
+    consequence (each 1-5), see their product out of 25, the keeping organisation
+    and overdue review dates. Residual categories remain explicitly reviewed;
+    no undocumented score-to-category thresholds are invented.
+  - **Evidence:** ten desktop/Pixel-7 Chromium checks cover acknowledged/stale
+    starts, load failures, unscheduled starts, pre-arrival confirmation, source
+    sections and unreviewed reports. The rollback-only synthetic SQL probe tests
+    proposal apply/retry, report/retry/notification, shift/stop/direct-insert
+    guards, unscheduled preparation/retry, stale hashes, warning-content changes,
+    tenant/place authority, persisted scores, clearing controls and review.
+    Web/mobile TypeScript and production web build pass. Native device execution
+    and a real human NMDHB document-to-approved-register run remain separate
+    acceptance gates; browser fixtures and SQL probes do not establish either.
+- **Remaining H&S product scope:** automated review-date reminders, individual
+  risk ownership and structured hierarchy-of-controls assessment, task risk
+  assessments/sign-off, and incident/field-report-to-investigation/review links
+  remain unbuilt. A visible overdue date is not a reminder service; a briefing
+  receipt is not a signed task assessment. Do not describe the entire H&S
+  programme as finished.
 
 Owner ruling 2026-10-16: Deputy roster exports are sample/build/test evidence,
 not an operational integration or production import workflow. The offline

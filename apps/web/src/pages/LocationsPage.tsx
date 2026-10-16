@@ -17,6 +17,7 @@ import {
   type HouseMapZone,
 } from "../components/LocationHouseMap";
 import { OperationalPlaceManager } from "../components/OperationalPlaceManager";
+import { PlaceHazardRegister } from "../components/PlaceHazardRegister";
 import { readWorkflowContext, workflowContextQuery } from "../lib/workflowNavigation";
 import "./PageStyles.css";
 import "./GeographyPages.css";
@@ -105,6 +106,10 @@ const LocationsPage: React.FC = () => {
           zones?: ZoneFacet[];
         };
         const locationRows = geography.locations ?? [];
+        if (requestedLocationId && !locationRows.some((item) => item.id === requestedLocationId)) {
+          setSelected(null);
+          throw new Error('The requested location is unavailable in your authorised geography. No other location has been opened.');
+        }
         setLocations(locationRows);
         setOperationalSites(geography.sites ?? []);
         setOperationalZones(geography.zones ?? []);
@@ -253,6 +258,7 @@ const LocationsPage: React.FC = () => {
             </div>
 
             {selected.notes && <p className="contact-meta">{selected.notes}</p>}
+            {profile?.organizationId && <PlaceHazardRegister key={selected.id} organizationId={profile.organizationId} locationId={selected.id} sites={sites} zones={zones} />}
 
             <LocationHouseMap
               organizationId={selected.organization_id}

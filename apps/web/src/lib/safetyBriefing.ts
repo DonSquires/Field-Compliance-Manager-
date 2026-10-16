@@ -93,7 +93,14 @@ export const describeHazardSource = (hazard: Pick<BriefingHazard, 'source_name' 
 export async function fetchShiftSafetyBriefing(shiftId: string, stopId: string | null = null): Promise<SafetyBriefing> {
   // ATLAS READS: get_shift_safety_briefing
   const { data, error } = await supabase.rpc('get_shift_safety_briefing', { p_shift_id: shiftId, p_stop_id: stopId });
-  if (error) throw new Error(error.message);
+  if (error || !data || data.shift_id !== shiftId || data.stop_id !== stopId
+    || !Array.isArray(data.hazards) || !Array.isArray(data.places) || !Array.isArray(data.warnings)
+    || typeof data.briefing_hash !== 'string' || !data.briefing_hash
+    || !Number.isInteger(data.item_count) || data.item_count !== data.hazards.length + data.warnings.length
+    || typeof data.is_assigned_officer !== 'boolean' || typeof data.acknowledged !== 'boolean'
+    || typeof data.acknowledgement_required !== 'boolean') {
+    throw new Error(error?.message ?? 'The server did not return a safety briefing. Retry before starting work.');
+  }
   return data as SafetyBriefing;
 }
 
@@ -110,6 +117,9 @@ export async function acknowledgeSafetyBriefing(briefing: SafetyBriefing, reques
     p_gps_lng: coords?.lng ?? null,
   });
   if (error) return { ok: false, changed: error.hint === 'briefing_changed' || /briefing changed/i.test(error.message), message: error.message };
+  if (!data?.acknowledged_at || data.briefing_hash !== briefing.briefing_hash) {
+    return { ok: false, changed: true, message: 'The acknowledgement did not confirm this version of the briefing. Reload and confirm again.' };
+  }
   return { ok: true, acknowledgedAt: (data as { acknowledged_at: string }).acknowledged_at };
 }
 

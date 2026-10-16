@@ -5,8 +5,8 @@ import type { SafetyBriefing } from '../lib/safetyBriefing';
 const { mockRpc, mockInvoke } = vi.hoisted(() => ({ mockRpc: vi.fn(), mockInvoke: vi.fn() }));
 vi.mock('../lib/supabase', () => ({ supabase: { rpc: mockRpc, functions: { invoke: mockInvoke } } }));
 
-import { SafetyBriefingDialog, SafetyBriefingList } from './ShiftSafetyBriefing';
-import { briefingNeedsAcknowledgement } from '../lib/safetyBriefing';
+import { OfficerSafetyBriefingBanner, SafetyBriefingDialog, SafetyBriefingList } from './ShiftSafetyBriefing';
+import { briefingNeedsAcknowledgement, fetchShiftSafetyBriefing } from '../lib/safetyBriefing';
 
 const hazard = (overrides: Partial<SafetyBriefing['hazards'][number]>): SafetyBriefing['hazards'][number] => ({
   id: 'h1', title: 'Aggressive visitors in waiting room', hazard_class: 'violence_or_aggression', risk_level: 'high', controls: ['Stay in pairs'],
@@ -43,7 +43,7 @@ describe('ShiftSafetyBriefing', () => {
   });
 
   it('acknowledges with the hash that was read, then continues', async () => {
-    mockRpc.mockResolvedValue({ data: { acknowledged_at: '2026-10-18T09:00:00Z' }, error: null });
+    mockRpc.mockResolvedValue({ data: { acknowledged_at: '2026-10-18T09:00:00Z', briefing_hash: 'abc' }, error: null });
     const onAcknowledged = vi.fn();
     render(<SafetyBriefingDialog briefing={briefing()} acknowledgeLabel="I've read these risks – start shift" onAcknowledged={onAcknowledged} onClose={vi.fn()} onReload={vi.fn()} />);
     fireEvent.click(screen.getByRole('button', { name: /I've read these risks – start shift/ }));
@@ -62,5 +62,46 @@ describe('ShiftSafetyBriefing', () => {
     expect(onReload).toHaveBeenCalled();
     expect(onAcknowledged).not.toHaveBeenCalled();
     expect(screen.getByText('New dog on site')).toBeTruthy();
+  });
+
+  it('does not acknowledge stale content when the changed briefing cannot be reloaded', async () => {
+    mockRpc.mockResolvedValue({ data: null, error: { message: 'The safety briefing changed', hint: 'briefing_changed' } });
+    const onReload = vi.fn().mockResolvedValue(null);
+    const onAcknowledged = vi.fn();
+    render(<SafetyBriefingDialog briefing={briefing()} acknowledgeLabel="Confirm" onAcknowledged={onAcknowledged} onClose={vi.fn()} onReload={onReload} />);
+    fireEvent.click(screen.getByRole('button', { name: /Confirm/ }));
+    await screen.findByText(/updated safety briefing could not be loaded/);
+    fireEvent.click(screen.getByRole('button', { name: 'Retry loading briefing' }));
+    await waitFor(() => expect(onReload).toHaveBeenCalledTimes(2));
+    expect(mockRpc).toHaveBeenCalledTimes(1);
+    expect(onAcknowledged).not.toHaveBeenCalled();
+  });
+
+  it('shows a recoverable error instead of hiding an unavailable mid-shift briefing', async () => {
+    mockRpc.mockResolvedValueOnce({ data: null, error: { message: 'Network unavailable' } });
+    render(<OfficerSafetyBriefingBanner shift={{ id: 's1', status: 'in_progress' }} />);
+    await screen.findByText(/Safety briefing unavailable: Network unavailable/);
+    mockRpc.mockResolvedValueOnce({ data: briefing({ shift_status: 'in_progress' }), error: null });
+    fireEvent.click(screen.getByRole('button', { name: 'Retry safety briefing' }));
+    await screen.findByRole('button', { name: 'Read now' });
+  });
+
+  it('never continues on a missing acknowledgement receipt', async () => {
+    mockRpc.mockResolvedValue({ data: null, error: null });
+    const onAcknowledged = vi.fn();
+    render(<SafetyBriefingDialog briefing={briefing()} acknowledgeLabel="Confirm" onAcknowledged={onAcknowledged} onClose={vi.fn()} onReload={vi.fn().mockResolvedValue(briefing())} />);
+    fireEvent.click(screen.getByRole('button', { name: /Confirm/ }));
+    await screen.findByText(/updated while you were reading/);
+    expect(onAcknowledged).not.toHaveBeenCalled();
+  });
+
+  it('rejects incomplete briefings or a response for the wrong shift/stop', async () => {
+    for (const data of [
+      null, [], { ...briefing(), warnings: undefined }, briefing({ item_count: 0 }),
+      briefing({ shift_id: 'another-shift' }), briefing({ stop_id: 'another-stop' }),
+    ]) {
+      mockRpc.mockResolvedValueOnce({ data, error: null });
+      await expect(fetchShiftSafetyBriefing('s1')).rejects.toThrow('server did not return a safety briefing');
+    }
   });
 });

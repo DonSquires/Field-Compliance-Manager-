@@ -1,7 +1,8 @@
 import { useCallback, useEffect, useRef, useState } from 'react';
-import { ActivityIndicator, Alert, Pressable, StyleSheet, Text, View } from 'react-native';
+import { Alert, Pressable, StyleSheet, Text, View } from 'react-native';
 import * as Location from 'expo-location';
 import { supabase } from '../lib/supabase';
+import { OfficerSafetyBriefing } from './OfficerSafetyBriefing';
 
 type Props = { shiftId: string | null; shiftStatus: string | null; onStarted?: () => void };
 
@@ -107,11 +108,7 @@ export function OfficerShiftClockPanel({ shiftId, shiftStatus, onStarted }: Prop
 
   return (
     <View style={styles.panel}>
-      {notStarted && (
-        <Pressable disabled={busy} onPress={() => void startShift()} style={[styles.start, busy && styles.disabled]}>
-          {busy ? <ActivityIndicator color="#04211e" /> : <Text style={styles.startText}>Clock in / start shift</Text>}
-        </Pressable>
-      )}
+      {(notStarted || shiftStatus === 'in_progress') && <OfficerSafetyBriefing key={shiftId} shiftId={shiftId} shiftStatus={shiftStatus} busy={busy} onReadyToStart={startShift} />}
 
       {shiftStatus === 'in_progress' && (
         <View style={styles.content}>

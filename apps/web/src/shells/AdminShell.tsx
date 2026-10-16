@@ -620,6 +620,13 @@ const AdminShell: React.FC = () => {
       navigate(`/admin/people-hr?tab=credentials${credential}`);
       return true;
     }
+    if (destination.kind === 'admin_place_hazards') {
+      const params = new URLSearchParams();
+      if (destination.siteId) params.set('site', destination.siteId);
+      if (destination.locationId) params.set('location', destination.locationId);
+      navigate(`/admin/${destination.siteId ? 'sites' : 'locations'}?${params.toString()}`);
+      return true;
+    }
     if (destination.kind === 'admin_page') {
       navigateToPage(destination.page as AdminPage);
       return true;

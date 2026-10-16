@@ -152,7 +152,7 @@ function buildSubagentResultsBlock(results) {
     '',
     'DELEGATION COMPLETE — your subagents have returned (these ran read-only tools under the caller\'s permissions; treat their findings as evidence gathered by a careful colleague, cite their sources, and say plainly where a subagent could not find something):',
     ...lines,
-    'Now DO THE WORK yourself with these findings: ANSWER (produce the deliverable), USE a tool for the next concrete step, or ASK one genuine question. Do NOT delegate the same goal again.',
+    'Now DO THE WORK yourself with these findings: USE a tool for the next concrete step, ASK one genuine missing fact, or ANSWER only if the original goal is actually satisfied. Research findings are evidence, not a receipt that records changed. If the original outcome requires stored records, choose the matching governed tool by catalogue purpose; do not substitute a list of findings for that action. Do NOT delegate the same goal again.',
   ].join('\n');
 }
 
@@ -205,7 +205,7 @@ function buildTaskStateBlock(taskState) {
     ? ['', `REMAINING ORG IDS (${remainingOrgIds.length} resolved org(s) you have NOT yet queried this turn):`, ...remainingOrgIds.map((id) => `  - ${id}`), 'An empty per-org listing means only "no records at THAT org". You MUST continue with query_records for the NEXT remaining org id. Do NOT select action=answer until every remaining org id has been queried.'].join('\n')
     : '';
 
-  const batchCreateNudge = 'BATCH CREATES: if you have established a LIST of the SAME kind of governed CREATE (several zones, several sites on a route), do NOT file them one propose_* at a time. Select action=use_tool with tool=job_plan_create, ONE step per item ({ action_type, proposed_payload shaped like the matching propose_* tool, depends_on_step_index }). The human approves the WHOLE plan once. A single item is still a single propose_*. job_plan_create supports CREATE action_types only; note plainly if a bulk UPDATE is not yet supported.';
+  const batchCreateNudge = 'BATCH CREATES: prefer a matching catalogue tool that accepts a batch. Otherwise use job_plan_create ONLY if it is available and explicitly supports the required action_type; never invent support for a new action type. A single item is still a single propose_*. Note plainly if a bulk UPDATE is not yet supported.';
   const decideInstruction = remainingOrgIds.length
     ? `DECIDE: orgs remain unqueried (see REMAINING ORG IDS), so you must NOT answer yet. Either USE query_records for the NEXT remaining org id, or USE a write/propose tool if the results already warrant a governed action. ${batchCreateNudge} Do NOT re-run a tool you already ran with the same args.`
     : `DECIDE: based on the results above, either (a) ANSWER the user directly if you now have enough — produce the actual deliverable, not a summary of what you would do, (b) USE another read tool to gather more facts, (c) DELEGATE a bounded sub-task if a broad search or multi-source research is still needed and no subagent has run for it yet, or (d) USE a write/propose tool to take the governed action (the loop halts for human approval). ${batchCreateNudge} Do NOT re-run a tool you already ran with the same args. Do NOT ask the user for information you already have from the tool results above.`;
@@ -214,7 +214,7 @@ function buildTaskStateBlock(taskState) {
     '',
     'TASK STATE (you are in a multi-step reasoning loop — the conductor has already executed these steps for you):',
     `Goal: ${String(ts.goal ?? '')}`,
-    Number.isFinite(Number(ts.time_left_s)) ? `TIME LEFT IN THIS TURN: about ${Math.max(0, Math.round(Number(ts.time_left_s)))} s. If the results below already answer the question (a not_found IS an answer), select action=answer NOW with a plain, complete reply; do not spend the remaining time on variant searches.` : '',
+    Number.isFinite(Number(ts.time_left_s)) ? `TIME LEFT IN THIS TURN: about ${Math.max(0, Math.round(Number(ts.time_left_s)))} s. Answer now ONLY if the original goal is satisfied. A not_found answers a lookup, not an instruction to change a register. For unfinished work, take the next necessary governed action or state the concrete missing fact; never call a research summary completion just because time is short.` : '',
     stepsDesc ? `Steps completed:\n${stepsDesc}` : '',
     ts.last_tool_result ? `Last tool result (use this to decide your NEXT step):\n${sliceWithDisclosure(ts.last_tool_result, PLAN_LAST_TOOL_RESULT_BUDGET, 'the last tool result')}` : '',
     ts.durable_checkpoint ? `Durable task checkpoint: ${safeJson(ts.durable_checkpoint, 3000)}` : '',
