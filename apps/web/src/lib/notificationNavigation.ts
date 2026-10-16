@@ -35,6 +35,7 @@ export function resolveNotificationDestination(role: AppRole, notification: Noti
   if (notification.category === 'bob_conversation' || link === 'bob_chat') return { kind: 'bob', conversationId };
 
   if (role === 'grand_master' || role === 'master' || role === 'admin' || role === 'admin_officer') {
+    if (notification.category === 'builder_job' && link === 'builder') return { kind: 'admin_page', page: 'builder' };
     if (link === 'WelfareAlertsPage' || notification.category === 'welfare') return { kind: 'admin_field_ops', area: 'welfare-alerts' };
     if (link === 'open-jobs' || notification.category === 'dispatch') return { kind: 'admin_field_ops', area: 'dispatch' };
     if (link === 'live-map' || link === 'live_map') return { kind: 'admin_field_ops', area: 'live-map' };

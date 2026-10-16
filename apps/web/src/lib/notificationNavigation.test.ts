@@ -14,6 +14,7 @@ describe('notification navigation', () => {
     expect(resolveNotificationDestination('admin', notification({ category: 'document_review', link_page: 'approvals' }))).toEqual({ kind: 'admin_page', page: 'approvals' });
     expect(resolveNotificationDestination('admin', notification({ category: 'document_review', link_page: 'document-studio' }))).toEqual({ kind: 'admin_page', page: 'document-studio' });
     expect(resolveNotificationDestination('admin', notification({ category: 'crm_client', link_page: 'crm', link_payload: { account_organization_id: 'client-1', agreement_id: 'a-1' } }))).toEqual({ kind: 'admin_crm_account', accountId: 'client-1' });
+    expect(resolveNotificationDestination('grand_master', notification({ category: 'builder_job', link_page: 'builder', link_payload: { job_id: 'job-1' } }))).toEqual({ kind: 'admin_page', page: 'builder' });
   });
 
   it('maps officer open work to home and client reports to reports', () => {
@@ -27,6 +28,7 @@ describe('notification navigation', () => {
     expect(resolveNotificationDestination('officer', notification({ category: 'debrief_followup', link_payload: { debrief_id: 'debrief-1' } }))).toEqual({ kind: 'officer_debrief', debriefId: 'debrief-1' });
     expect(resolveNotificationDestination('officer', notification({ category: 'noise_review', link_payload: { assessment_id: 'noise-1' } }))).toEqual({ kind: 'officer_noise', assessmentId: 'noise-1' });
     expect(resolveNotificationDestination('client_viewer', notification({ category: 'report_ready' }))).toEqual({ kind: 'client_page', page: 'reports' });
+    expect(resolveNotificationDestination('officer', notification({ category: 'builder_job', link_page: 'builder' }))).toBeNull();
   });
 
   it('returns null for unsupported links instead of guessing', () => {

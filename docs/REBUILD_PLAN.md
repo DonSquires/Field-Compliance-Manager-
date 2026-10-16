@@ -30,6 +30,16 @@ contains both histories and both file changes. A canonical release commit is
 required after any historical unverified commit already on `main` so the
 complete current tree can deploy without weakening Vercel protection.
 
+Builder job alerts 2026-10-16: terminal Builder outcomes now create one
+requester-scoped in-app Bell notification that opens the Builder Control Room.
+An in-database five-minute sweep sends a deduplicated warning after 45 minutes
+without a job, step, model-run, or worker-run update. Human-held jobs are
+excluded, including jobs at `awaiting_human`, `approval_pending`, and
+`release_ready` gates. The warning does not cancel or restart work, and the
+Notification Center receives inserts through its existing realtime
+subscription. This replaces assistant-side polling with durable, auditable
+status notifications.
+
 Bob outage and in-house compute ruling 2026-10-16: Bob chat had been down since
 2026-10-14 because commit `8f852dfe6` redeclared `explicitAtlasRequest` in
 `onspace-ai-chat`, so the deployed function returned `503 BOOT_ERROR`. Requests
