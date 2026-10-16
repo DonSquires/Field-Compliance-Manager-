@@ -9,9 +9,11 @@ radius of any change. Screens are the last thing built, not the first.
 1. **Schema before screen.** Before writing a query in a page, read the table
    definition in `supabase/schema.sql`. Do not infer a shape from a screenshot
    or a memory of "how CRM usually works."
-2. **Prefer existing views.** If a view like `crm_account_list` or
-   `crm_account_health` already encodes the join, use it — don't reinvent the
-   join with different logic that could silently diverge.
+2. **Use an existing view only after verifying its semantics and callers.**
+   A view is not authoritative merely because it exists. Confirm that every
+   displayed metric comes from a truthful live source, its security mode
+   preserves the access model, and a current workflow owns it. Retire unused
+   derived surfaces rather than wiring a screen to stale or placeholder logic.
 3. **Atlas before edit, Atlas after edit.**
    - Before: query `bob_app_map_edges` for the entity you're about to touch —
      what reads it, what writes it, what's downstream (blast radius).

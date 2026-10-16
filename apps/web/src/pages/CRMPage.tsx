@@ -311,7 +311,7 @@ const CRMPage: React.FC<{ onNavigate?: NavigateWithContext }> = ({ onNavigate = 
     document.getElementById(`crm-account-${requestedAccountId}`)?.scrollIntoView({ block: 'center' });
   }, [requestedAccountId, state.branches, state.clients]);
 
-  // ATLAS READS: organizations, crm_account_list (view), service_agreements
+  // CRM account scope comes from the selected provider portfolio, then reads canonical organization records.
   const loadCrm = useCallback(async () => {
     const orgId = operatingOrganizationId ?? profile?.organizationId;
     if (!orgId) {
@@ -329,8 +329,6 @@ const CRMPage: React.FC<{ onNavigate?: NavigateWithContext }> = ({ onNavigate = 
         .single();
       if (ownErr) throw ownErr;
 
-      // SCHEMA FIX: crm_account_list view does not exist.
-      // Query organizations directly; site_count loaded separately.
       const { data: directChildren, error: acctErr } = await supabase
         .from('organizations')
         .select('id,name,organization_type,active,status,parent_organization_id,updated_at,nzbn,company_registration_number,contact_email,contact_phone,billing_email,billing_address,account_notes')
