@@ -23893,6 +23893,168 @@ export type Database = {
           },
         ]
       }
+      place_hazards: {
+        Row: {
+          bob_action_id: string | null
+          client_request_id: string | null
+          client_site_id: string | null
+          consequence: number | null
+          controls: string[]
+          created_at: string
+          created_by: string | null
+          details: string | null
+          hazard_class: string
+          id: string
+          likelihood: number | null
+          location_id: string
+          organization_id: string
+          origin: string
+          reported_by: string | null
+          reported_shift_id: string | null
+          retired_at: string | null
+          retired_by: string | null
+          retired_reason: string | null
+          review_due: string | null
+          reviewed_at: string | null
+          reviewed_by: string | null
+          risk_level: string
+          source_as_of: string | null
+          source_document_id: string | null
+          source_locator: string | null
+          source_name: string | null
+          status: string
+          title: string
+          updated_at: string
+          version: number
+          zone_id: string | null
+        }
+        Insert: {
+          bob_action_id?: string | null
+          client_request_id?: string | null
+          client_site_id?: string | null
+          consequence?: number | null
+          controls?: string[]
+          created_at?: string
+          created_by?: string | null
+          details?: string | null
+          hazard_class: string
+          id?: string
+          likelihood?: number | null
+          location_id: string
+          organization_id: string
+          origin: string
+          reported_by?: string | null
+          reported_shift_id?: string | null
+          retired_at?: string | null
+          retired_by?: string | null
+          retired_reason?: string | null
+          review_due?: string | null
+          reviewed_at?: string | null
+          reviewed_by?: string | null
+          risk_level: string
+          source_as_of?: string | null
+          source_document_id?: string | null
+          source_locator?: string | null
+          source_name?: string | null
+          status?: string
+          title: string
+          updated_at?: string
+          version?: number
+          zone_id?: string | null
+        }
+        Update: {
+          bob_action_id?: string | null
+          client_request_id?: string | null
+          client_site_id?: string | null
+          consequence?: number | null
+          controls?: string[]
+          created_at?: string
+          created_by?: string | null
+          details?: string | null
+          hazard_class?: string
+          id?: string
+          likelihood?: number | null
+          location_id?: string
+          organization_id?: string
+          origin?: string
+          reported_by?: string | null
+          reported_shift_id?: string | null
+          retired_at?: string | null
+          retired_by?: string | null
+          retired_reason?: string | null
+          review_due?: string | null
+          reviewed_at?: string | null
+          reviewed_by?: string | null
+          risk_level?: string
+          source_as_of?: string | null
+          source_document_id?: string | null
+          source_locator?: string | null
+          source_name?: string | null
+          status?: string
+          title?: string
+          updated_at?: string
+          version?: number
+          zone_id?: string | null
+        }
+        Relationships: [
+          {
+            foreignKeyName: "place_hazards_bob_action_id_fkey"
+            columns: ["bob_action_id"]
+            isOneToOne: false
+            referencedRelation: "bob_agentic_actions"
+            referencedColumns: ["id"]
+          },
+          {
+            foreignKeyName: "place_hazards_client_site_id_fkey"
+            columns: ["client_site_id"]
+            isOneToOne: false
+            referencedRelation: "client_sites"
+            referencedColumns: ["id"]
+          },
+          {
+            foreignKeyName: "place_hazards_location_id_fkey"
+            columns: ["location_id"]
+            isOneToOne: false
+            referencedRelation: "locations"
+            referencedColumns: ["id"]
+          },
+          {
+            foreignKeyName: "place_hazards_organization_id_fkey"
+            columns: ["organization_id"]
+            isOneToOne: false
+            referencedRelation: "organizations"
+            referencedColumns: ["id"]
+          },
+          {
+            foreignKeyName: "place_hazards_reported_shift_id_fkey"
+            columns: ["reported_shift_id"]
+            isOneToOne: false
+            referencedRelation: "shifts"
+            referencedColumns: ["id"]
+          },
+          {
+            foreignKeyName: "place_hazards_source_document_id_fkey"
+            columns: ["source_document_id"]
+            isOneToOne: false
+            referencedRelation: "documents"
+            referencedColumns: ["id"]
+          },
+          {
+            foreignKeyName: "place_hazards_zone_id_fkey"
+            columns: ["zone_id"]
+            isOneToOne: false
+            referencedRelation: "location_zones"
+            referencedColumns: ["id"]
+          },
+          {
+            foreignKeyName: "place_hazards_zone_id_fkey"
+            columns: ["zone_id"]
+            isOneToOne: false
+            referencedRelation: "module_rule_index_view"
+            referencedColumns: ["zone_id"]
+          },
+        ]
+      }
       preset_assignments: {
         Row: {
           assigned_by: string | null
@@ -26008,6 +26170,73 @@ export type Database = {
             columns: ["workplace_id"]
             isOneToOne: false
             referencedRelation: "organization_workplaces"
+            referencedColumns: ["id"]
+          },
+        ]
+      }
+      safety_briefing_acknowledgements: {
+        Row: {
+          acknowledged_at: string
+          briefing_hash: string
+          client_request_id: string
+          gps_lat: number | null
+          gps_lng: number | null
+          hazard_snapshot: Json
+          id: string
+          item_count: number
+          officer_user_id: string
+          organization_id: string
+          shift_id: string
+          shift_stop_id: string | null
+        }
+        Insert: {
+          acknowledged_at?: string
+          briefing_hash: string
+          client_request_id: string
+          gps_lat?: number | null
+          gps_lng?: number | null
+          hazard_snapshot?: Json
+          id?: string
+          item_count?: number
+          officer_user_id: string
+          organization_id: string
+          shift_id: string
+          shift_stop_id?: string | null
+        }
+        Update: {
+          acknowledged_at?: string
+          briefing_hash?: string
+          client_request_id?: string
+          gps_lat?: number | null
+          gps_lng?: number | null
+          hazard_snapshot?: Json
+          id?: string
+          item_count?: number
+          officer_user_id?: string
+          organization_id?: string
+          shift_id?: string
+          shift_stop_id?: string | null
+        }
+        Relationships: [
+          {
+            foreignKeyName: "safety_briefing_acknowledgements_organization_id_fkey"
+            columns: ["organization_id"]
+            isOneToOne: false
+            referencedRelation: "organizations"
+            referencedColumns: ["id"]
+          },
+          {
+            foreignKeyName: "safety_briefing_acknowledgements_shift_id_fkey"
+            columns: ["shift_id"]
+            isOneToOne: false
+            referencedRelation: "shifts"
+            referencedColumns: ["id"]
+          },
+          {
+            foreignKeyName: "safety_briefing_acknowledgements_shift_stop_id_fkey"
+            columns: ["shift_stop_id"]
+            isOneToOne: false
+            referencedRelation: "shift_stops"
             referencedColumns: ["id"]
           },
         ]
@@ -32618,6 +32847,17 @@ export type Database = {
           shift_id: string
         }[]
       }
+      acknowledge_safety_briefing: {
+        Args: {
+          p_briefing_hash: string
+          p_client_request_id: string
+          p_gps_lat?: number
+          p_gps_lng?: number
+          p_shift_id: string
+          p_stop_id?: string
+        }
+        Returns: Json
+      }
       activate_crm_account: {
         Args: {
           p_account_organization_id: string
@@ -32883,6 +33123,10 @@ export type Database = {
         Returns: undefined
       }
       apply_bob_compliance_record_proposal: {
+        Args: { p_action_id: string }
+        Returns: string
+      }
+      apply_bob_place_hazard_proposal: {
         Args: { p_action_id: string }
         Returns: string
       }
@@ -33766,6 +34010,10 @@ export type Database = {
           p_site_id: string
           p_unrestricted?: boolean
         }
+        Returns: Json
+      }
+      build_shift_safety_briefing: {
+        Args: { p_shift_id: string; p_stop_id?: string }
         Returns: Json
       }
       builder_abort_independent_code_review: {
@@ -36166,9 +36414,22 @@ export type Database = {
         Args: { p_action_org_id: string; p_user_id: string }
         Returns: boolean
       }
+      can_manage_place_hazards: {
+        Args: { p_location_id: string; p_organization_id: string }
+        Returns: boolean
+      }
       can_manage_r_and_m_identity: { Args: never; Returns: boolean }
       can_read_current_report_pack_pdf: {
         Args: { p_object_name: string }
+        Returns: boolean
+      }
+      can_read_place_hazard: {
+        Args: {
+          p_location_id: string
+          p_organization_id: string
+          p_site_id: string
+          p_zone_id: string
+        }
         Returns: boolean
       }
       can_record_incident_person: {
@@ -39691,6 +39952,11 @@ export type Database = {
           name: string
         }[]
       }
+      get_place_hazard_register: {
+        Args: { p_include_retired?: boolean; p_location_id: string }
+        Returns: Json
+      }
+      get_place_hazard_source: { Args: { p_hazard_id: string }; Returns: Json }
       get_roster_attendance_exceptions: {
         Args: {
           p_from?: string
@@ -39773,6 +40039,10 @@ export type Database = {
         }[]
       }
       get_shift_end_readiness: { Args: { p_shift_id: string }; Returns: Json }
+      get_shift_safety_briefing: {
+        Args: { p_shift_id: string; p_stop_id?: string }
+        Returns: Json
+      }
       get_site_induction_state: {
         Args: { p_service_agreement_location_id: string; p_staff_id: string }
         Returns: {
@@ -42036,6 +42306,15 @@ export type Database = {
           isOneToOne: true
           isSetofReturn: false
         }
+      }
+      manage_place_hazard: {
+        Args: {
+          p_action: string
+          p_client_request_id: string
+          p_fields: Json
+          p_hazard_id: string
+        }
+        Returns: string
       }
       manage_provider_module_subscription_status: {
         Args: {
@@ -44446,6 +44725,20 @@ export type Database = {
           skipped_conflict_count: number
         }[]
       }
+      report_place_hazard: {
+        Args: {
+          p_client_request_id: string
+          p_controls?: string[]
+          p_details?: string
+          p_hazard_class: string
+          p_place_id: string
+          p_place_kind: string
+          p_risk_level: string
+          p_shift_id: string
+          p_title: string
+        }
+        Returns: string
+      }
       report_provider_custodian_for_actor: {
         Args: { p_actor_user_id: string; p_target_organization_id: string }
         Returns: boolean
@@ -46503,6 +46796,15 @@ export type Database = {
             }
             Returns: number
           }
+      shift_safety_places: {
+        Args: { p_shift_id: string; p_stop_id?: string }
+        Returns: {
+          location_id: string
+          place_id: string
+          place_kind: string
+          place_name: string
+        }[]
+      }
       soundex: { Args: { "": string }; Returns: string }
       st_3dclosestpoint: {
         Args: { geom1: unknown; geom2: unknown }

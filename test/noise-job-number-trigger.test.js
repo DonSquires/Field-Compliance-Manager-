@@ -10,6 +10,10 @@ const migration = fs.readFileSync(
   ),
   'utf8',
 );
+const schema = fs.readFileSync(
+  path.resolve(__dirname, '../supabase/schema.sql'),
+  'utf8',
+);
 
 test('new noise assessments receive one unique operational job number', () => {
   assert.match(
@@ -36,5 +40,13 @@ test('the trigger boundary is fixed-path and not directly browser-callable', () 
   assert.match(
     migration,
     /REVOKE ALL ON FUNCTION public\.assign_noise_job_number\(\)\s+FROM PUBLIC, anon, authenticated/,
+  );
+  assert.match(
+    schema,
+    /CREATE TRIGGER "noise_assessments_assign_job_number" BEFORE INSERT ON public\."noise_assessments"[\s\S]*?"assign_noise_job_number"\(\)/,
+  );
+  assert.match(
+    schema,
+    /CREATE UNIQUE INDEX "idx_noise_assessments_job_number_unique"[\s\S]*?WHERE \(job_number IS NOT NULL\)/,
   );
 });

@@ -2046,3 +2046,10 @@ remains unpopulated.
   used across dispatch, attendance, evidence, reports, and follow-up. Allocating
   it at the database boundary gives every future job one durable receipt without
   moving authority into a screen.
+- **Verified live:** a transactional insert generated a correctly formatted
+  `NC-YYYY-NNNNNN` value and was rolled back. The enabled trigger, partial
+  unique index, fixed `search_path`, and revoked browser execution privileges
+  are present. The 76 historical assessments remain unchanged with null job
+  numbers; Atlas now derives the internal
+  `assign_noise_job_number -> generate_noise_job_number` call without claiming
+  runtime exercise.
