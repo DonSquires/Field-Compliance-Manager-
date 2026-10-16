@@ -2053,3 +2053,34 @@ remains unpopulated.
   numbers; Atlas now derives the internal
   `assign_noise_job_number -> generate_noise_job_number` call without claiming
   runtime exercise.
+
+## 2026-10-17 — Retire partial patrol-stop helper RPCs
+
+- **Expected before:** an officer receives the complete contracted-stop brief
+  for their own shift, including the place, SLA, instructions, all assigned
+  modules, attendance state, and the guarded next action.
+- **Present before:** `get_officer_patrol_stops` and
+  `manage_officer_patrol_stop` already provide that accountable read/action
+  path and are called by `OfficerPatrolStops`. The older
+  `patrol_stop_coords` and `patrol_stop_module_keys` functions had no current
+  repository caller, no database dependent, and zero recorded calls. Both were
+  public `SECURITY DEFINER` endpoints returning only fragments of the same
+  stop.
+- **During:** the canonical component loads the officer-scoped stop bundle,
+  records arrival/departure through an expected-status command, displays
+  errors, and retains the returned attendance receipt. Five stops are
+  currently active across the live 15-stop / 12-tool-assignment corpus.
+- **After:** the canonical path persists stop status, GPS verification, SLA
+  state, notes, audit evidence, and a durable receipt for the next actor. The
+  partial predecessor RPCs and their modular source files are removed; no
+  operational stop or module record is changed.
+- **Trackforce consideration:** one shift stop must have one authoritative
+  operational state and one accountable transition path. Keeping public
+  fragment readers beside the complete officer-scoped workflow creates
+  ambiguous roads without improving route, attendance, or exception handling.
+- **Verified live:** both predecessor RPCs return `404 / PGRST202`; the two
+  canonical patrol RPCs remain present, and all 15 stops, five active stops,
+  and 12 stop-tool assignments remain unchanged. The refreshed manifest
+  contains neither predecessor capability nor its stale inbound edges while
+  retaining both canonical RPCs as wired. Static evidence does not establish
+  runtime exercise.

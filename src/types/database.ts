@@ -43116,21 +43116,6 @@ export type Database = {
       }
       org_access_allowed: { Args: { target_org_id: string }; Returns: boolean }
       org_default_level: { Args: { p_type: string }; Returns: number }
-      patrol_stop_coords: {
-        Args: { p_shift_id: string }
-        Returns: {
-          lat: number
-          lng: number
-          place_type: string
-          site_id: string
-          stop_id: string
-          zone_id: string
-        }[]
-      }
-      patrol_stop_module_keys: {
-        Args: { p_stop_id: string }
-        Returns: string[]
-      }
       patrol_window_bounds: {
         Args: {
           p_shift_date: string
