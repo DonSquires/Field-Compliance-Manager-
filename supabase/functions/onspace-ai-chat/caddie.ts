@@ -204,6 +204,11 @@ const TOOL_REGISTRY = {
     governance: 'WRITE-draft; human finance approval required',
     effect_class: 'draft_governed_write'
   },
+  propose_compliance_record: {
+    purpose: "PROPOSE adding records to an organisation's compliance register (the organisation's H&S and compliance profile): health and safety policies, H&S plans, safe-work procedures, contractor prequalification, client contractor H&S requirements, licences, insurance, registrations, and certifications. Use it when the user wants evidence they uploaded or named applied to an organisation's profile rather than just summarised. Read the documents first (understand_documents), resolve each organisation's explicit ID with query_records, then classify each document into one record. One organisation per call; call again for each other organisation. Args: { organization_id, records: [{ record_type: company_licence|insurance|policy|prequalification|registration|certification|other, name, source_name (the file or source), source_as_of (YYYY-MM-DD date of the source; ask if unknown), issuer?, reference_number?, effective_date?, expiry_date?, coverage_amount?, source_notes? (short summary and anything [TO CONFIRM]), source_attachment_id?, evidence_document_id?, replaces_record_id? }], reasoning? }. A current record with the same type and name is superseded, not duplicated. Creates pending approvals only; approved records stay unverified until a master verifies the evidence.",
+    governance: 'WRITE-draft; explicit organization ID; master approval required; written unverified with source provenance',
+    effect_class: 'draft_governed_write'
+  },
   propose_staff_onboarding: { purpose: 'PROPOSE starting onboarding for an existing staff profile. Args: { staff_id, target_start?, note? }. Creates a pending HR proposal only; evidence and work readiness remain human-governed.', governance: 'WRITE-draft; human HR approval required', effect_class: 'draft_governed_write' },
   resolve_geofence: {
     purpose: "Resolve a place NAME or address (e.g. a named reserve or a street address) to its AUTHORITATIVE location: canonical LINZ address + point, and (by default) the LINZ parcel BOUNDARY polygon. Use this to GET THE GEOFENCE before proposing a freedom-camping zone or a site — you resolve the geometry yourself, then supply zone.boundary (polygon, preferred) or zone.gps_lat/gps_lng (point) to propose_freedom_camping_zone. Args: { query, want_polygon? (default true) }. If no polygon is found you still get the point (use it as a provisional fence). Reason over the result — confirm the resolved address is the right place before proposing.",
@@ -677,6 +682,7 @@ const TOOL_REGISTRY = {
     propose_roster_fill: 'bob-propose-roster-fill',
     propose_roster_rollback: 'bob-propose-roster-rollback',
     propose_rate_rule: 'bob-propose-rate-rule',
+    propose_compliance_record: 'bob-propose-compliance-record',
     propose_staff_onboarding: 'bob-propose-staff-onboarding',
     propose_zone_patrol_stop: 'bob-propose-zone-patrol-stop',
     propose_freedom_camping_org_strategy: 'bob-propose-freedom-camping-org-strategy',

@@ -22,6 +22,33 @@ own thread), alongside the shell's current selected-entity context. These are
 untrusted navigation hints, not authorization or evidence of a completed action:
 Bob still resolves records and writes through the existing governed tools.
 
+Bob compliance-register proposals 2026-10-16: an organisation's H&S and
+compliance profile is `organization_compliance_records` (policy,
+prequalification, licence, insurance, registration, certification, other).
+Bob previously could only summarise uploaded H&S evidence because no catalogue
+tool could propose a register record. `propose_compliance_record`
+(`bob-propose-compliance-record`) now files one pending
+`create_org_compliance_record` action per record, for one explicitly resolved
+organisation, with source name/date provenance and an optional registered
+document or chat attachment. A master approves each action; the service-only
+`apply_bob_compliance_record_proposal` RPC re-checks master authority over the
+target organisation, applies the canonical validation, supersedes a current
+record with the same type and name, audits the write, and leaves the record
+`unverified` until a master verifies the evidence. The planner selects tools
+by catalogue purpose: an update/apply request is complete only when a matching
+governed proposal is filed, or when Bob states that no tool can write the
+target. There are no H&S keyword routes.
+
+Owner direction 2026-10-16 (next workstream): build an H&S register and risk
+system — hazard/risk register (likelihood × consequence, hierarchy-of-controls
+controls, residual risk, owner, review date, linked evidence), site/task risk
+assessments with sign-off, a pre-start safety checklist gate, post orders and
+H&S briefings staff must acknowledge, incident and field-report links that
+trigger hazard review, H&S incident investigation, and Bob-proposed register
+entries extracted from uploaded registers and plans. Trackforce Valiant is
+inspiration for acknowledged post orders, checklists, lone-worker alerts, and
+incident analytics; the register itself is owned by the organisation and place.
+
 Owner ruling 2026-10-16: Deputy roster exports are sample/build/test evidence,
 not an operational integration or production import workflow. The offline
 parser and source-shaped fixtures may be used to test roster mappings and
