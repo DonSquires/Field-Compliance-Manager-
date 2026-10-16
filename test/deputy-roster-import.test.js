@@ -4,6 +4,7 @@ const path = require('node:path');
 const test = require('node:test');
 
 const migration = fs.readFileSync(path.resolve(__dirname, '../supabase/migrations/20260918130000_deputy_roster_import.sql'), 'utf8');
+const retirementMigration = fs.readFileSync(path.resolve(__dirname, '../supabase/migrations/20261016054717_retire_deputy_roster_import_rpc.sql'), 'utf8');
 
 test('Deputy import keeps source evidence on slots and work units', () => {
   assert.match(migration, /alter table public\.roster_slots add column if not exists external_refs jsonb not null default '\{\}'::jsonb/);
@@ -38,4 +39,9 @@ test('the run is admin-only, replay-safe, batch-recorded and audited', () => {
   assert.match(migration, /'deputy_roster', 'applied'/);
   assert.match(migration, /'deputy_roster_import_applied', 'file_import_batches', v_batch\.id, v_receipt/);
   assert.match(migration, /REVOKE ALL ON FUNCTION public\.apply_deputy_roster_import\(uuid, uuid, text, text, integer, jsonb, jsonb, jsonb, jsonb, jsonb\) FROM PUBLIC, anon;/);
+});
+
+test('Deputy import remains sample-only and has no production mutation RPC', () => {
+  assert.match(retirementMigration, /Deputy exports are sample\/build evidence only/);
+  assert.match(retirementMigration, /DROP FUNCTION IF EXISTS public\.apply_deputy_roster_import\(/);
 });

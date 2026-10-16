@@ -1604,6 +1604,27 @@ remains unpopulated.
   same baseline to 121. Neither RPC may be marked `exercised` without runtime
   invocation evidence.
 
+### Owner ruling - Deputy sample parser is not an operational gap
+
+- Owner ruling 2026-10-16: Deputy roster exports were introduced as sample data
+  for build and test work, not as a live roster integration.
+- Before: Atlas correctly showed `apply_deputy_roster_import` as present and
+  unwired. The absence of a screen was intentional, but the public-schema RPC
+  still granted authenticated administrators a production mutation path into
+  workplaces, work units, staff external references, roster slots, leave,
+  import batches and audit records. That contradicted the sample-only boundary.
+- During: the offline parser and source-shaped tests remain available without
+  database access. A forward migration drops only the mutating RPC. Shared
+  `external_refs` columns remain because they are schema evidence fields, not
+  proof that Deputy is an operational integration.
+- After: the production schema and generated database types no longer advertise
+  the Deputy apply RPC. Atlas must retire the RPC and its outgoing flow edges
+  rather than inventing a caller or adding an import button.
+- Trackforce consideration: imports into an operational roster require visible
+  source review, mapping exceptions, human approval, idempotent apply and a
+  durable receipt. The sample parser supplies test evidence for those future
+  acceptance criteria; it is not itself that governed workflow.
+
 ### Closure log - source-backed Parking zone rule authoring
 
 - The Trackforce-style configure-before-deploy check found a real task gap in

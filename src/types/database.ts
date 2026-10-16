@@ -12,31 +12,6 @@ export type Database = {
   __InternalSupabase: {
     PostgrestVersion: "14.15"
   }
-  graphql_public: {
-    Tables: {
-      [_ in never]: never
-    }
-    Views: {
-      [_ in never]: never
-    }
-    Functions: {
-      graphql: {
-        Args: {
-          extensions?: Json
-          operationName?: string
-          query?: string
-          variables?: Json
-        }
-        Returns: Json
-      }
-    }
-    Enums: {
-      [_ in never]: never
-    }
-    CompositeTypes: {
-      [_ in never]: never
-    }
-  }
   public: {
     Tables: {
       _seed_downer_linz_vehicle_log_raw: {
@@ -38157,21 +38132,6 @@ export type Database = {
           proposal_id: string
         }[]
       }
-      apply_deputy_roster_import: {
-        Args: {
-          p_client_request_id: string
-          p_leave?: Json
-          p_locations?: Json
-          p_manifest?: Json
-          p_operating_organization_id: string
-          p_people?: Json
-          p_row_count: number
-          p_slots?: Json
-          p_source_file: string
-          p_source_sha256: string
-        }
-        Returns: Json
-      }
       apply_finance_reconciliation_proposal: {
         Args: {
           p_client_organization_id: string
@@ -46965,9 +46925,9 @@ export type Database = {
         Args: {
           p_client_request_id: string
           p_effective_from: string
-          p_effective_to: string | null
+          p_effective_to: string
           p_enabled: boolean
-          p_expected_updated_at: string | null
+          p_expected_updated_at: string
           p_location_id: string
           p_module_key: string
           p_service_agreement_id: string
@@ -53805,9 +53765,6 @@ export type CompositeTypes<
     : never
 
 export const Constants = {
-  graphql_public: {
-    Enums: {},
-  },
   public: {
     Enums: {
       report_severity: ["low", "medium", "high", "critical"],
