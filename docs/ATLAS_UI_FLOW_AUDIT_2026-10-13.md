@@ -1625,6 +1625,38 @@ remains unpopulated.
   durable receipt. The sample parser supplies test evidence for those future
   acceptance criteria; it is not itself that governed workflow.
 
+### Closure log - governed tender source attachment
+
+- Live Atlas showed `attach_tender_document` present but unwired while the CRM
+  portfolio already read and displayed `tender_documents`. Direct authenticated
+  inserts are revoked, so the visible Finance/Tenders surface could show source
+  evidence but offered no governed way to add it.
+- Before: an administrator could see a tender and any existing source files but
+  had to leave the task without a safe next action. The gap was operational,
+  unlike the retired Deputy sample importer, because the source evidence table,
+  read path, tenant-scoped RPC and downstream tender view were all live.
+- During: Finance now offers **Attach tender source** when tenders exist. The
+  form requires a tender and file, constrains the document type to the schema
+  vocabulary, accepts an optional source locator, rejects files over 25 MB,
+  records a SHA-256 hash, uploads to a unique tenant/tender path with overwrite
+  disabled, and calls only `attach_tender_document`.
+- Failure is explicit at hashing, upload and registration. If registration
+  fails after upload, the UI attempts object cleanup and reports a cleanup
+  failure separately rather than presenting success or silently leaving the
+  user uncertain.
+- After: a successful receipt says the source is attached as **unreviewed**
+  evidence, closes the form, and reloads the account so the persisted document
+  appears under its tender. Upload does not accept the document, alter tender
+  status, or bypass the later human review decision.
+- Trackforce consideration: the useful pattern is the source document beside
+  the commercial task with immediate receipt and visible state. FCM preserves
+  stronger provenance and review separation rather than treating file presence
+  as operational approval.
+- Verification: the portfolio guard passes (13 tests), the Atlas suite passes
+  (32 tests), web and E2E TypeScript checks pass, and the dry-run manifest adds
+  `components/CrmAccountWorkspace -calls-> attach_tender_document`. Exercise
+  remains unset without an authenticated runtime invocation.
+
 ### Closure log - source-backed Parking zone rule authoring
 
 - The Trackforce-style configure-before-deploy check found a real task gap in

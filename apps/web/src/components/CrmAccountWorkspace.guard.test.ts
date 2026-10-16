@@ -81,4 +81,15 @@ describe('client portfolio hub', () => {
     expect(source).toContain('GeneratedArtifactActions bucket="bob-uploads"');
     expect(source).toContain('pdf_path,pdf_renderer_version,pdf_source_updated_at');
   });
+
+  it('attaches tender sources through the governed provenance RPC', () => {
+    expect(source).toContain("supabase.rpc('attach_tender_document'");
+    expect(source).toContain("supabase.storage.from('bob-uploads').upload");
+    expect(source).toContain("supabase.storage.from('bob-uploads').remove");
+    expect(source).toContain("crypto.subtle.digest('SHA-256'");
+    expect(source).toContain("Tender source hashing failed:");
+    expect(source).toContain("upsert: false");
+    expect(source).toContain("Tender source attached as unreviewed evidence.");
+    expect(source).not.toContain(".from('tender_documents').insert");
+  });
 });
