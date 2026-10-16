@@ -240,6 +240,29 @@ describe('BobPanel', () => {
     });
   });
 
+  it('keeps the newest Bob reply in view when the canonical thread refreshes', async () => {
+    messageHistory = [{
+      id: 'old-reply', role: 'assistant', content: 'Earlier response', confidence: null,
+      flagged: false, created_at: '2026-10-16T09:00:00.000Z', metadata: {},
+    }];
+    render(<BobPanel open presentation="docked" onClose={() => undefined} />);
+
+    expect(await screen.findByText('Earlier response')).toBeTruthy();
+    const stream = document.querySelector('.bob-message-stream') as HTMLDivElement;
+    Object.defineProperty(stream, 'scrollHeight', { configurable: true, value: 1200 });
+    stream.scrollTop = 0;
+    messageHistory = [
+      ...messageHistory,
+      { id: 'new-request', role: 'user', content: 'Continue the work', confidence: null, flagged: false, created_at: '2026-10-16T09:01:00.000Z', metadata: {} },
+      { id: 'new-reply', role: 'assistant', content: 'The latest response', confidence: null, flagged: false, created_at: '2026-10-16T09:02:00.000Z', metadata: {} },
+    ];
+    fireEvent.change(screen.getByPlaceholderText('Ask Bob to plan, inspect, explain, or prepare a proposal'), { target: { value: 'Continue the work' } });
+    fireEvent.click(screen.getByRole('button', { name: 'Send' }));
+
+    expect(await screen.findByText('The latest response')).toBeTruthy();
+    await waitFor(() => expect(stream.scrollTop).toBe(stream.scrollHeight));
+  });
+
   it('renders safe agent plan metadata from the server-persisted conversation', async () => {
     messageHistory = [{
       id: 'message-1', role: 'assistant', content: 'I found a safe next step.', confidence: 0.8,

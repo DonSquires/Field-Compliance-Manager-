@@ -18,6 +18,15 @@ const proposal = { job_id: '12345678-1234-1234-1234-123456789abc', title: 'Fix b
 const assistant = (metadata) => ({ role: 'assistant', content: 'preview', metadata });
 const cancel = (outcome) => assistant({ tool: 'cancel_builder_job', outcome, pending_builder_cancellation: proposal });
 const user = { role: 'user', content: 'yes' };
+const documentRead = assistant({ tool: 'understand_documents', outcome: 'ok', proposed_entities: { client_name: 'R & M Security' } });
+const pausedTask = assistant({
+  continuation_pending: true,
+  task_state: {
+    goal: 'Use the attached documents to update both organisation compliance profiles.',
+    steps_taken: [{ tool: 'understand_documents', outcome: 'ok', result_summary: 'Read the attached H&S policy and plan.' }],
+    last_tool: 'understand_documents',
+  },
+});
 const laptop = assistant({ tool: 'laptop_shell', pending_laptop_command: { command: 'pwd', purpose: 'inspect' }, outcome: 'proposed' });
 const builder = assistant({ tool: 'create_builder_job', pending_builder_job: { title: 'Build' }, outcome: 'proposed' });
 async function recover(chronological) {
@@ -42,6 +51,26 @@ test('a tied-timestamp USER row after the newest ASSISTANT proposal does not hid
   assert.equal(pending.kind, 'builder_cancellation_pending');
   assert.equal(pending.builder_cancellation.job_id, proposal.job_id);
   assert.equal((await recover([request, preview])).pending.kind, 'builder_cancellation_pending');
+});
+
+test('a budget-pause continuation restores its saved task instead of treating document reading as a proposal', async () => {
+  const { pending } = await recover([user, documentRead, pausedTask]);
+  assert.equal(pending.kind, 'continuation');
+  assert.equal(pending.task_state.goal, 'Use the attached documents to update both organisation compliance profiles.');
+  assert.equal(pending.task_state.steps_taken[0].tool, 'understand_documents');
+});
+
+test('a document-reading result with extracted entities is not an in-flight proposal', async () => {
+  const { pending } = await recover([user, documentRead]);
+  assert.equal(pending, null);
+});
+
+test('the saved continuation state is passed to the planner as the active task state', () => {
+  const payloadStart = chat.indexOf('    const planPayload = {');
+  const payloadEnd = chat.indexOf('\n    };', payloadStart);
+  const payload = chat.slice(payloadStart, payloadEnd);
+  assert.match(payload, /task_state: pending\?\.kind === 'continuation'/);
+  assert.match(payload, /\.\.\.pending\.task_state/);
 });
 
 const branch = stripTypeAnnotations(chat.slice(chat.indexOf("case 'cancel_builder_job':"), chat.indexOf("case 'laptop_shell':")));
