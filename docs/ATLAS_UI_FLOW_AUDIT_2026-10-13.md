@@ -1995,3 +1995,23 @@ remains unpopulated.
   actors, not screens waiting for a button. Showing their declared execution
   road—and separately their last successful traversal—supports reliable missed
   work, retention, and stalled-job monitoring without inventing manual actions.
+## 2026-10-17 — Retire the unsafe predecessor parking-number path
+
+- **Expected:** concurrent field notice generation must use one
+  organization-authorized, module-scoped, atomic reservation command. The
+  resulting number is an accountable receipt and must not be duplicated by a
+  parallel generator.
+- **Present before:** active notice Edge Functions called
+  `reserve_infringement_notice_number`, which checks organization access and
+  atomically increments `infringement_notice_counters` by organization and
+  module. A second exposed `generate_parking_notice_number` RPC had no caller
+  and calculated the next value with `MAX(notice_number) + 1`, which is unsafe
+  under concurrent issue. The separate `notice_counters` table had no writer
+  and zero live rows; the canonical counter held the live parking-enforcement
+  record.
+- **Change:** retire the predecessor RPC and empty counter island. Preserve all
+  issued notices, the canonical module-scoped counter, and the two governed
+  notice-generation callers.
+- **Trackforce consideration:** sequential operational identifiers are custody
+  receipts, not display formatting. One atomic allocation road avoids duplicate
+  notices, ambiguous audit evidence, and hidden support paths.

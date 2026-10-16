@@ -18530,38 +18530,6 @@ export type Database = {
           },
         ]
       }
-      notice_counters: {
-        Row: {
-          id: string
-          last_number: number
-          notice_type: string
-          organization_id: string
-          prefix: string
-        }
-        Insert: {
-          id?: string
-          last_number?: number
-          notice_type: string
-          organization_id: string
-          prefix: string
-        }
-        Update: {
-          id?: string
-          last_number?: number
-          notice_type?: string
-          organization_id?: string
-          prefix?: string
-        }
-        Relationships: [
-          {
-            foreignKeyName: "notice_counters_organization_id_fkey"
-            columns: ["organization_id"]
-            isOneToOne: false
-            referencedRelation: "organizations"
-            referencedColumns: ["id"]
-          },
-        ]
-      }
       notice_templates: {
         Row: {
           authorising_act: string
@@ -38978,10 +38946,6 @@ export type Database = {
           package_text: string
           sha256: string
         }[]
-      }
-      generate_parking_notice_number: {
-        Args: { p_org_id: string }
-        Returns: string
       }
       generate_pl_financial_statement: {
         Args: { p_pl_period_id: string }
