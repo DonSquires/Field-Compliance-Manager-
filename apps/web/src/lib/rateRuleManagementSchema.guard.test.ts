@@ -7,6 +7,7 @@ const sql = readFileSync(existsSync(local) ? local : resolve(process.cwd(), '../
 const page = readFileSync(resolve(process.cwd(), 'src/pages/RateRulesPage.tsx'), 'utf8');
 const shell = readFileSync(resolve(process.cwd(), 'src/shells/AdminShell.tsx'), 'utf8');
 const payrollWorkflow = readFileSync(resolve(process.cwd(), '../../supabase/migrations/20261006084652_payroll_role_code_lifecycle_and_rate_rules.sql'), 'utf8');
+const retirementSql = readFileSync(resolve(process.cwd(), '../../supabase/migrations/20261016094832_retire_superseded_crm_and_rate_rpcs.sql'), 'utf8');
 
 describe('governed rate rule management', () => {
   it('replaces direct browser writes with one audited expected-state RPC', () => {
@@ -46,5 +47,10 @@ describe('governed rate rule management', () => {
     expect(payrollWorkflow).toContain('v_role_code,');
     expect(payrollWorkflow).toContain('Pay role code must be active in your payroll organisation');
     expect(payrollWorkflow).toContain("'role_code', v_rule.role_code");
+  });
+
+  it('retires the home-organization command after the operating-branch command became authoritative', () => {
+    expect(retirementSql).toContain('DROP FUNCTION IF EXISTS public.manage_rate_rule(');
+    expect(retirementSql).not.toContain('DROP FUNCTION IF EXISTS public.manage_operating_branch_rate_rule');
   });
 });

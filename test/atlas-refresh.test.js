@@ -449,8 +449,6 @@ test('managed organization spine routes human actions through governed RPCs', ()
   assert.equal(hasEdge('get_crm_operational_readiness', 'site_financial_config', 'reads'), true);
   assert.equal(hasEdge('get_crm_operational_readiness', 'roster_work_units', 'reads'), true);
   assert.equal(hasEdge('get_crm_operational_readiness', 'report_templates', 'reads'), true);
-  assert.equal(hasEdge('get_crm_onboarding_queue', 'crm_onboarding_ledgers', 'reads'), true);
-  assert.equal(hasEdge('manage_crm_onboarding_stage', 'crm_onboarding_ledgers', 'writes'), true);
   assert.equal(hasEdge('get_crm_onboarding_workspace', 'crm_onboarding_ledgers', 'reads'), true);
   assert.equal(hasEdge('get_crm_onboarding_assignees', 'user_profiles', 'reads'), true);
   assert.equal(hasEdge('get_crm_onboarding_history', 'crm_onboarding_events', 'reads'), true);
