@@ -912,6 +912,18 @@ columns, `client_site_zones` and `get_zone_for_gps` are removed as duplicates.
   of the 75 unverified sites through the queue (human work, not a script);
   human test of the workbench on the live build (propose from LINZ → edit →
   accept → verify → place a checkpoint → scan resolves).
+- **Place map boundary review (2026-10-17, NMDHB ED Department evidence):**
+  the proposal ledger showed a hand-drawn work-area shape accepted and then
+  overwritten four times by the house's LINZ parcel. The stale LINZ preview
+  still offered a second "Confirm this boundary" button after the drawing was
+  saved, and the drawn corners stayed on the map, so the overwrite was
+  invisible. The "need review" chip also counted the unbounded NMDHB Site
+  without naming it. Now: any save retires the LINZ preview and drawn corners;
+  the preview button says "Use"/"Replace with this LINZ boundary"; the house
+  parcel is auto-saved only onto a Site, never a work area; the map lists each
+  Site/work area still needing review with a jump to it; and
+  `propose_boundary` keeps `house_map`/`canonical_place_seed` provenance
+  instead of relabelling it `workbench`.
 5. `location_events`: either land the governed writer (dual-write from the
    module submit functions) or keep it out of every UI as an explicit seam.
 
