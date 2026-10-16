@@ -787,20 +787,31 @@ function collectAtlasRefresh(rootDir = process.cwd()) {
   }
   const edges = [...edgesByKey.values()].sort((left, right) => edgeKey(left).localeCompare(edgeKey(right)));
   const callersByTarget = new Map();
-  const externalFeatureSources = new Set();
+  const featureSourceCallers = new Map();
+  const addFeatureSourceCaller = (featureName, caller) => {
+    if (!featureSourceCallers.has(featureName)) featureSourceCallers.set(featureName, new Set());
+    featureSourceCallers.get(featureName).add(caller);
+  };
   for (const edge of edges) {
     const key = `${edge.target_type}\u0000${edge.target_name}`;
     if (!callersByTarget.has(key)) callersByTarget.set(key, new Set());
     callersByTarget.get(key).add(edge.source_name);
     if (edge.source_type === 'feature' && edge.evidence_class === 'declared-external-contract') {
-      externalFeatureSources.add(edge.source_name);
+      addFeatureSourceCaller(edge.source_name, 'declared external contract');
+    }
+    if (edge.source_type === 'feature'
+        && edge.source_name.startsWith('scheduler/')
+        && edge.evidence_class === 'live-schema') {
+      addFeatureSourceCaller(edge.source_name, 'active pg_cron schedule');
     }
   }
   const capabilities = [];
   const addCapabilities = (entityType, names) => {
     for (const entityName of [...names].sort()) {
       const callers = [...(callersByTarget.get(`${entityType}\u0000${entityName}`) || [])];
-      if (entityType === 'feature' && externalFeatureSources.has(entityName)) callers.push('declared external contract');
+      if (entityType === 'feature') {
+        callers.push(...(featureSourceCallers.get(entityName) || []));
+      }
       callers.sort();
       capabilities.push({
         entity_type: entityType,
