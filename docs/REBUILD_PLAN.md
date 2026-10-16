@@ -17,8 +17,9 @@ recommendation, and accepts a typed override; historical answers and pending
 durable requests cannot be resubmitted through old buttons. Budget-pause
 receipts persist Continue/Pause options and the saved task state as message
 metadata; selecting Continue restores the original goal and completed evidence
-instead of treating a document-read result as a pending proposal. After a
-canonical thread refresh, the chat keeps the latest reply in view.
+instead of treating a document-read result as a pending proposal. Extracted
+entities from a document read alone do not create an in-flight proposal.
+After a canonical thread refresh, the chat keeps the latest reply in view.
 Each send captures the current route and bounded visible headings/control
 labels (never form values, table contents, hidden/private regions, or Bob's
 own thread), alongside the shell's current selected-entity context. These are
