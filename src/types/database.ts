@@ -5222,6 +5222,11 @@ export type Database = {
           created_at: string
           embedding_quality: number | null
           engine_number: string | null
+          external_data_source_checked_at: string | null
+          external_data_source_location: string | null
+          external_data_source_meta: Json
+          external_data_source_name: string | null
+          external_data_source_url: string | null
           fuel_type: string | null
           homeless_notes: string | null
           homeless_status: string
@@ -5253,6 +5258,11 @@ export type Database = {
           created_at?: string
           embedding_quality?: number | null
           engine_number?: string | null
+          external_data_source_checked_at?: string | null
+          external_data_source_location?: string | null
+          external_data_source_meta?: Json
+          external_data_source_name?: string | null
+          external_data_source_url?: string | null
           fuel_type?: string | null
           homeless_notes?: string | null
           homeless_status?: string
@@ -5284,6 +5294,11 @@ export type Database = {
           created_at?: string
           embedding_quality?: number | null
           engine_number?: string | null
+          external_data_source_checked_at?: string | null
+          external_data_source_location?: string | null
+          external_data_source_meta?: Json
+          external_data_source_name?: string | null
+          external_data_source_url?: string | null
           fuel_type?: string | null
           homeless_notes?: string | null
           homeless_status?: string
@@ -30383,6 +30398,69 @@ export type Database = {
           },
         ]
       }
+      vehicle_data_sources: {
+        Row: {
+          canonical_vehicle_id: string
+          client_request_id: string
+          created_at: string
+          id: string
+          normalized_payload: Json
+          response_sha256: string
+          retrieved_at: string
+          source_key: string
+          source_location: string
+          source_name: string
+          source_terms_url: string
+          source_url: string
+          storage_authorization_reference: string
+        }
+        Insert: {
+          canonical_vehicle_id: string
+          client_request_id: string
+          created_at?: string
+          id?: string
+          normalized_payload?: Json
+          response_sha256: string
+          retrieved_at: string
+          source_key: string
+          source_location: string
+          source_name: string
+          source_terms_url: string
+          source_url: string
+          storage_authorization_reference: string
+        }
+        Update: {
+          canonical_vehicle_id?: string
+          client_request_id?: string
+          created_at?: string
+          id?: string
+          normalized_payload?: Json
+          response_sha256?: string
+          retrieved_at?: string
+          source_key?: string
+          source_location?: string
+          source_name?: string
+          source_terms_url?: string
+          source_url?: string
+          storage_authorization_reference?: string
+        }
+        Relationships: [
+          {
+            foreignKeyName: "vehicle_data_sources_canonical_vehicle_id_fkey"
+            columns: ["canonical_vehicle_id"]
+            isOneToOne: false
+            referencedRelation: "canonical_vehicle_public"
+            referencedColumns: ["id"]
+          },
+          {
+            foreignKeyName: "vehicle_data_sources_canonical_vehicle_id_fkey"
+            columns: ["canonical_vehicle_id"]
+            isOneToOne: false
+            referencedRelation: "canonical_vehicles"
+            referencedColumns: ["id"]
+          },
+        ]
+      }
       vehicle_identity_checks: {
         Row: {
           canonical_person_id: string
@@ -32086,6 +32164,10 @@ export type Database = {
           cof_status: string | null
           colour: string | null
           created_at: string | null
+          external_data_source_checked_at: string | null
+          external_data_source_location: string | null
+          external_data_source_name: string | null
+          external_data_source_url: string | null
           fuel_type: string | null
           homeless_status: string | null
           id: string | null
@@ -32106,6 +32188,10 @@ export type Database = {
           cof_status?: string | null
           colour?: string | null
           created_at?: string | null
+          external_data_source_checked_at?: string | null
+          external_data_source_location?: string | null
+          external_data_source_name?: string | null
+          external_data_source_url?: string | null
           fuel_type?: string | null
           homeless_status?: string | null
           id?: string | null
@@ -32126,6 +32212,10 @@ export type Database = {
           cof_status?: string | null
           colour?: string | null
           created_at?: string | null
+          external_data_source_checked_at?: string | null
+          external_data_source_location?: string | null
+          external_data_source_name?: string | null
+          external_data_source_url?: string | null
           fuel_type?: string | null
           homeless_status?: string | null
           id?: string | null
@@ -43900,6 +43990,26 @@ export type Database = {
           isOneToOne: true
           isSetofReturn: false
         }
+      }
+      record_carjam_vehicle_enrichment: {
+        Args: {
+          p_body_type: string
+          p_canonical_vehicle_id: string
+          p_client_request_id: string
+          p_colour: string
+          p_fuel_type: string
+          p_make: string
+          p_model: string
+          p_plate: string
+          p_response_sha256: string
+          p_retrieved_at: string
+          p_source_location: string
+          p_source_terms_url: string
+          p_source_url: string
+          p_storage_authorization_reference: string
+          p_year: number
+        }
+        Returns: Json
       }
       record_cctv_alpr_perception_envelopes: {
         Args: { p_job_id: string }

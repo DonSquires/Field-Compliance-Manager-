@@ -36,6 +36,10 @@ interface Vehicle {
   cof_status: string | null;
   cof_expiry: string | null;
   homeless_status: string;
+  external_data_source_name: string | null;
+  external_data_source_url: string | null;
+  external_data_source_location: string | null;
+  external_data_source_checked_at: string | null;
 }
 
 interface ScvRecord {
@@ -117,7 +121,7 @@ const VehicleSearchPage: React.FC = () => {
       // global identity link, not only the plate text recorded at scan time.
       let vehicleQuery = supabase
         .from('canonical_vehicle_public')
-        .select('id, plate_number, make, model, year, colour, body_type, rego_status, rego_expiry, wof_status, wof_expiry, cof_status, cof_expiry, homeless_status');
+        .select('id, plate_number, make, model, year, colour, body_type, rego_status, rego_expiry, wof_status, wof_expiry, cof_status, cof_expiry, homeless_status, external_data_source_name, external_data_source_url, external_data_source_location, external_data_source_checked_at');
       vehicleQuery = canonicalVehicleId
         ? vehicleQuery.eq('id', canonicalVehicleId)
         : vehicleQuery.ilike('plate_number', cleanPlate);
@@ -327,6 +331,24 @@ const VehicleSearchPage: React.FC = () => {
                     )}
                   </div>
                 </div>
+
+                {vehicle?.external_data_source_name || vehicle?.external_data_source_url || vehicle?.external_data_source_location ? (
+                  <div style={{ marginTop: '12px', padding: '10px 12px', background: 'var(--color-bg-secondary)', border: '1px solid var(--color-border)', borderRadius: '6px', fontSize: '13px', color: 'var(--color-text-secondary)' }}>
+                    <strong>Latest licensed enrichment receipt:</strong>{' '}
+                    {vehicle.external_data_source_url ? (
+                      <a href={vehicle.external_data_source_url} target="_blank" rel="noreferrer">
+                        {vehicle.external_data_source_name || 'External source'}
+                      </a>
+                    ) : (
+                      vehicle.external_data_source_name || 'External source'
+                    )}
+                    {vehicle.external_data_source_location ? ` · ${vehicle.external_data_source_location}` : ''}
+                    {vehicle.external_data_source_checked_at ? ` · checked ${new Date(vehicle.external_data_source_checked_at).toLocaleString()}` : ''}
+                    <div style={{ marginTop: '4px' }}>
+                      This receipt records the latest licensed enrichment check; compliance status may come from a separate live provider.
+                    </div>
+                  </div>
+                ) : null}
 
                 {/* Welfare signal: status only — welfare notes stay with the organisation that holds them */}
                 {vehicle?.homeless_status && vehicle.homeless_status !== 'none' && (
