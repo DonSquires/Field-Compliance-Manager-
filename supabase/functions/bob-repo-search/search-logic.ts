@@ -1,10 +1,10 @@
 // ── bob-repo-search — PURE truth-state logic (Bob's eyes) ────────────────────
 // Extracted from index.ts so the criteria-1/3/5 logic is unit-testable WITHOUT
-// mocking the GitLab fetch. Only PURE, I/O-free pieces live here; the search/read
+// mocking the repository fetch. Only PURE, I/O-free pieces live here; the search/read
 // fetch stays in index.ts. Mirrors the constitutional-lane.ts extraction pattern.
 //
-// WHY these matter: GitLab BASIC blob search has no boolean/OR support, so a
-// pipe-delimited query returned a false zero indistinguishable from real absence
+// WHY these matter: a pipe-delimited literal query returned a false zero
+// indistinguishable from real absence
 // -- the truth-state canon Rule 2 violation (empty must say which) living inside
 // Bob's own instrument. splitSearchTerms fixes the OR case; deriveSearchStatus
 // guarantees zero-hits and could-not-see are DIFFERENT faces.
@@ -92,7 +92,7 @@ export function deriveTermStatus(input) {
 // ALREADY-REDACTED text (redaction runs line-wise on the full text BEFORE this,
 // so no slice can split a redaction), compute the window at `rawOffset` and the
 // distinguished read_state. Kept pure so exact-page / page+1 / final-page /
-// offset-past-EOF are all assertable without a GitLab fetch.
+// offset-past-EOF are all assertable without a repository fetch.
 export function computeReadWindow(redacted, rawOffset, window = 20000) {
   const totalLength = redacted.length;
   // Non-finite (NaN from a junk string) and negatives clamp to 0; over-length
@@ -175,4 +175,3 @@ export function deriveReadProgress(previousMaxLineRead, startLine, actualEndLine
     file_fully_read: fileFullyRead
   };
 }
-
