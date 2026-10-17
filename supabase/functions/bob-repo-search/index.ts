@@ -1,27 +1,24 @@
 /**
  * bob-repo-search — ADMIRAL-ONLY repository code read/search (Bob's grep)
- *                   + scoped append-only write to docs/bob/BOB_CHAT.md
+ *                   + append-only Builder notes in Supabase
  *
  * Lets the grand_master ask Bob to actually SEARCH and READ the codebase and
  * READ a file, instead of Bob merely explaining the command.
  *
  * TARGET REPOSITORY (owner ruling, single target build): `search` and `read`
  * answer from the Bob control plane's own checkout of the repository being built
- * (GET /api/bob/builder/repository/{search,file}), pinned to main's head. Until
- * 2026-09-26 they searched the GitLab lineage repository, so Bob's evidence came
- * from a codebase that is not the one being built. GitLab remains only behind
- * the legacy BOB_CHAT notepad actions.
+ * (GET /api/bob/builder/repository/{search,file,head,tree}), pinned to main.
+ * The notepad aliases store Builder notes in bob_self_memory, not a repository.
  *
  * DEFENCE IN DEPTH:
  *   1. Auth: JWT required; caller MUST be grand_master (admiral). No other rank.
  *   2. Read-only: search/file GETs on the control plane; no shell.
- *   3. Write-scoped: write_bob_chat is hard-coded to docs/bob/BOB_CHAT.md only.
+ *   3. Write-scoped: write_bob_chat appends builder_note entries only.
  *   4. Secret-safe: excludes .env*, key/secret/credential files (here and on the
  *      control plane), and redacts obvious secret-looking lines from content.
  *
  * Env:
  *   BOB_CONTROL_PLANE_URL / BOB_ADMIN_TOKEN — the control plane (search/read)
- *   GITLAB_* — legacy notepad actions only
  *
  * Body:
  *   { action: 'search', query: string, path?: string, limit?: number }
@@ -35,14 +32,6 @@ import { splitSearchTerms, detectCompoundQuery, deriveSearchStatus, deriveTermSt
 const SUPABASE_URL = Deno.env.get('SUPABASE_URL') ?? '';
 const SUPABASE_SERVICE_ROLE_KEY = Deno.env.get('SUPABASE_SERVICE_ROLE_KEY') ?? '';
 const SUPABASE_ANON_KEY = Deno.env.get('SUPABASE_ANON_KEY') ?? '';
-// Transitional compatibility: the existing secret is accepted for reads only.
-// It must be replaced with GITLAB_READ_TOKEN after the scoped token is created.
-const GITLAB_READ_TOKEN = Deno.env.get('GITLAB_READ_TOKEN') ?? Deno.env.get('GITLAB_TOKEN') ?? '';
-const GITLAB_WRITE_TOKEN = Deno.env.get('GITLAB_WRITE_TOKEN') ?? '';
-const GITLAB_PROJECT_ID = Deno.env.get('GITLAB_PROJECT_ID') ?? '83317421';
-const GITLAB_ALLOWED_PROJECTS = new Set((Deno.env.get('GITLAB_ALLOWED_PROJECTS') ?? GITLAB_PROJECT_ID).split(',').map((value)=>value.trim()).filter(Boolean));
-const GITLAB_BASE_URL = (Deno.env.get('GITLAB_BASE_URL') ?? 'https://gitlab.com').replace(/\/+$/, '');
-const GITLAB_DEFAULT_REF = Deno.env.get('GITLAB_DEFAULT_REF') ?? 'Main';
 const CONTROL_PLANE_URL = (Deno.env.get('BOB_CONTROL_PLANE_URL') ?? Deno.env.get('FCM_API_URL') ?? '').replace(/\/+$/, '');
 const CONTROL_PLANE_TOKEN = Deno.env.get('BOB_ADMIN_TOKEN') ?? Deno.env.get('FCM_API_TOKEN') ?? '';
 const REPO_REF = 'main';
@@ -78,7 +67,12 @@ function redactSecretLines(text) {
 // out-of-order or repeated read is detected instead of silently re-served.
 // Best-effort/fail-open: a lookup or write failure never blocks the read.
 async function trackReadProgress(admin, conversationId, path, ref, startLine, endLine, totalLines) {
-  const empty = { previously_read_through: null, overlaps_prior_read: false, suggested_next_start_line: null, file_fully_read: false };
+  const empty = {
+    previously_read_through: null,
+    overlaps_prior_read: false,
+    suggested_next_start_line: null,
+    file_fully_read: false
+  };
   const convId = String(conversationId ?? '').trim();
   if (!convId) return empty;
   try {
@@ -92,24 +86,21 @@ async function trackReadProgress(admin, conversationId, path, ref, startLine, en
       last_start_line: startLine,
       last_end_line: endLine,
       updated_at: new Date().toISOString()
-    }, { onConflict: 'conversation_id,path,ref' });
+    }, {
+      onConflict: 'conversation_id,path,ref'
+    });
     return progress;
   } catch (e) {
     console.warn('[bob-repo-search] trackReadProgress failed (non-fatal):', e);
     return empty;
   }
 }
-async function gl(path, token = GITLAB_READ_TOKEN) {
-  return fetch(`${GITLAB_BASE_URL}/api/v4/projects/${encodeURIComponent(GITLAB_PROJECT_ID)}${path}`, {
-    headers: {
-      'PRIVATE-TOKEN': token
-    }
-  });
-}
 // The build's own repository, served by the control plane from its pinned checkout.
 async function cp(path) {
   return fetch(`${CONTROL_PLANE_URL}${path}`, {
-    headers: { Authorization: `Bearer ${CONTROL_PLANE_TOKEN}` },
+    headers: {
+      Authorization: `Bearer ${CONTROL_PLANE_TOKEN}`
+    },
     signal: AbortSignal.timeout(45_000)
   });
 }
@@ -144,18 +135,19 @@ serve(async (req)=>{
         error: 'Forbidden: admiral (grand_master) only'
       }, 403);
     }
-    if (!GITLAB_ALLOWED_PROJECTS.has(GITLAB_PROJECT_ID)) return json({
-      error: 'Repo search project is not allowlisted'
-    }, 503);
     const body = await req.json().catch(()=>({}));
     const action = String(body.action ?? 'search');
-    if ((action === 'search' || action === 'read') && (!CONTROL_PLANE_URL || !CONTROL_PLANE_TOKEN)) return json({
+    if (['search', 'read', 'head', 'tree'].includes(action) && (!CONTROL_PLANE_URL || !CONTROL_PLANE_TOKEN)) return json({
       error: 'Repo search not configured (BOB_CONTROL_PLANE_URL / BOB_ADMIN_TOKEN missing)'
     }, 503);
-    if ((action === 'write_bob_chat' || action === 'read_bob_chat') && !GITLAB_READ_TOKEN) return json({
-      error: 'Notepad not configured (GITLAB_READ_TOKEN missing)'
-    }, 503);
-    const ref = action === 'search' || action === 'read' ? REPO_REF : String(body.ref ?? GITLAB_DEFAULT_REF);
+    const ref = REPO_REF;
+    if (action === 'head' || action === 'tree') {
+      const path = String(body.path ?? '').replace(/^\/+/, '');
+      if (SECRET_PATH.test(path) || PRIVATE_PATH.test(path)) return json({ error: 'That path is excluded.' }, 403);
+      const response = await cp(`/api/bob/builder/repository/${action}?${new URLSearchParams({ ref, path })}`);
+      if (!response.ok) return json({ ok: false, error: `Repository ${action} returned ${response.status}` }, 502);
+      return json({ ...(await response.json()), action });
+    }
     if (action === 'search') {
       const query = String(body.query ?? '').trim();
       if (!query) return json({
@@ -182,10 +174,7 @@ serve(async (req)=>{
           results: []
         }, 422);
       }
-      // MULTI-TERM / OR handling (Bob criterion 3). GitLab BASIC blob search has
-      // NO boolean/OR support, so a `a|b|c` query is otherwise treated as one
-      // literal token and returns a false zero. Split on `|`, search each term,
-      // aggregate + dedupe. Single-term queries take the same path (one term).
+      // Split OR queries and retain per-term evidence instead of hiding failed reads.
       const terms = splitSearchTerms(query);
       const wasOrQuery = terms.length > 1;
       const seen = new Set();
@@ -223,7 +212,10 @@ serve(async (req)=>{
         let termHits = Number(payload.count) || hits.length;
         for (const h of hits){
           const p = String(h.path ?? '');
-          if (SECRET_PATH.test(p) || PRIVATE_PATH.test(p)) { termHits = Math.max(0, termHits - 1); continue; }
+          if (SECRET_PATH.test(p) || PRIVATE_PATH.test(p)) {
+            termHits = Math.max(0, termHits - 1);
+            continue;
+          }
           const dedupeKey = `${p}#${h.line ?? ''}`;
           if (seen.has(dedupeKey)) continue;
           seen.add(dedupeKey);
@@ -342,14 +334,8 @@ serve(async (req)=>{
         content: w.content
       });
     }
-    // ── WRITE_BOB_CHAT — append-only write to Bob's private notepad ─────────
-    // HARD-CODED to docs/bob/BOB_CHAT.md. No path parameter accepted.
-    // Fetches current content, appends the new message, commits via GitLab API.
     if (action === 'write_bob_chat') {
-      if (!GITLAB_WRITE_TOKEN) return json({
-        error: 'Repo write not configured'
-      }, 503);
-      const BOB_CHAT_PATH = _BOB_CHAT_PATH; // hard-coded constant from shared module
+      const BOB_CHAT_PATH = _BOB_CHAT_PATH;
       const message = typeof body.message === 'string' ? body.message.trim() : '';
       if (!message) return json({
         error: 'message is required (non-empty string)'
@@ -357,100 +343,36 @@ serve(async (req)=>{
       if (message.length > 20000) return json({
         error: 'message too long (max 20000 chars)'
       }, 400);
-      // 1. Fetch current file content
-      const fileRef = GITLAB_DEFAULT_REF;
-      const rawRes = await gl(`/repository/files/${encodeURIComponent(BOB_CHAT_PATH)}/raw?ref=${encodeURIComponent(fileRef)}`);
-      if (!rawRes.ok && rawRes.status !== 404) {
-        return json({
-          ok: false,
-          error: `GitLab file read returned ${rawRes.status}`
-        }, 502);
-      }
-      const existingContent = rawRes.ok ? await rawRes.text() : '';
-      // 2. Build the appended block
-      const timestamp = new Date().toISOString();
-      const appendBlock = `\n\n---\n\n**Bob** — ${timestamp}\n\n${message}\n`;
-      const newContent = existingContent + appendBlock;
-      // 3. Commit via the GitLab Commits API (single 'update' or 'create' action)
-      const commitAction = rawRes.ok ? 'update' : 'create';
-      const commitRes = await fetch(`${GITLAB_BASE_URL}/api/v4/projects/${encodeURIComponent(GITLAB_PROJECT_ID)}/repository/commits`, {
-        method: 'POST',
-        headers: {
-          'PRIVATE-TOKEN': GITLAB_WRITE_TOKEN,
-          'Content-Type': 'application/json'
-        },
-        body: JSON.stringify({
-          branch: fileRef,
-          commit_message: 'Bob: note in BOB_CHAT.md',
-          actions: [
-            {
-              action: commitAction,
-              file_path: BOB_CHAT_PATH,
-              content: newContent
-            }
-          ]
-        })
-      });
-      if (!commitRes.ok) {
-        const errText = await commitRes.text().catch(()=>'');
-        console.error(`[bob-repo-search] write_bob_chat commit failed: ${commitRes.status} ${errText.slice(0, 300)}`);
-        return json({
-          ok: false,
-          error: `GitLab commit returned ${commitRes.status}`
-        }, 502);
-      }
-      const commitData = await commitRes.json().catch(()=>({}));
+      // ATLAS WRITES: bob_self_memory
+      const { data: note, error } = await admin.from('bob_self_memory').insert({
+        memory_text: message, memory_kind: 'builder_note', status: 'kept',
+        proposed_by: '00000000-0000-0000-0000-00000000b0b0',
+      }).select('id').single();
+      if (error) throw error;
       return json({
         ok: true,
         action: 'write_bob_chat',
         path: BOB_CHAT_PATH,
-        commit_id: commitData.short_id ?? commitData.id ?? null
+        commit_id: null,
+        memory_id: note.id,
+        storage: 'supabase'
       });
     }
-    // ── READ_BOB_CHAT — pageable full-file read + unanswered-entry scan ────
-    // HARD-CODED to docs/bob/BOB_CHAT.md. Reads a PAGEABLE WINDOW over the
-    // FULL file (via computeReadWindow, same helper as the `read` action) and
-    // extracts entries tagged status:unanswered from the full content.
-    //
-    // Before #317 this returned only the last BOB_CHAT_TAIL_SIZE (8000) chars
-    // as tail_content, making content older than the tail unreachable. Now the
-    // caller can pass `offset` to page through the entire file. The field name
-    // `tail_content` is kept for back-compat with the conductor.
-    //
-    // Returns:
-    //   { ok, action, path, unanswered_entries: [...], tail_content,
-    //     total_length, has_more, next_offset, offset, returned }
-    //
-    // unanswered_entries: parsed entries with { header, author, date, body }
-    // tail_content: the windowed content at the requested offset
     if (action === 'read_bob_chat') {
-      const BOB_CHAT_PATH = _BOB_CHAT_PATH; // hard-coded constant from shared module
-      const fileRef = GITLAB_DEFAULT_REF;
-      const r = await gl(`/repository/files/${encodeURIComponent(BOB_CHAT_PATH)}/raw?ref=${encodeURIComponent(fileRef)}`);
-      if (r.status === 404) return json({
-        ok: false,
-        error: `File not found: ${BOB_CHAT_PATH} @ ${fileRef}`
-      }, 404);
-      if (!r.ok) return json({
-        ok: false,
-        error: `GitLab file read returned ${r.status}`,
-        status: 'could_not_verify'
-      }, 502);
-      const raw = await r.text();
+      const BOB_CHAT_PATH = _BOB_CHAT_PATH;
+      const noteOffset = Number(body.note_offset ?? 0);
+      if (!Number.isSafeInteger(noteOffset) || noteOffset < 0) return json({ error: 'note_offset must be a non-negative integer' }, 400);
+      // ATLAS READS: bob_self_memory
+      const query = admin.from('bob_self_memory').select('id,memory_text,created_at')
+        .eq('memory_kind', 'builder_note').eq('status', 'kept')
+        .order('created_at', { ascending: false }).order('id', { ascending: false }).range(noteOffset, noteOffset + 100);
+      const { data: notes, error } = await query;
+      if (error) throw error;
+      const moreNotes = notes.length > 100;
+      const page = notes.slice(0, 100);
+      const raw = redactSecretLines([...page].reverse().map(note => `\n\n---\n\n**Bob** — ${note.created_at}\n\n${note.memory_text}\n`).join(''));
       const totalLength = raw.length;
-      // Extract unanswered entries: scan the FULL file content (not the window).
-      // parseUnansweredEntries is the shared pure helper — same function the
-      // tests exercise. Returns entries in file order (last = newest).
       const unansweredEntries = parseUnansweredEntries(raw);
-      // Pageable window over the FULL file (#317). Uses the same
-      // computeReadWindow helper as the `read` action — already imported,
-      // already boundary-tested. The caller passes `offset` to page; default
-      // 0 returns the first window (oldest content). The conductor's
-      // renderNotepadTail handles newest-anchored rendering from whatever
-      // window the tool returns.
-      // Default to the NEWEST end of the file (where new messages land).
-      // Explicit offset pages backward into older content (#317 full-file paging).
-      // Window size matches computeReadWindow default (20000 chars).
       const WINDOW_SIZE = 20000;
       const defaultOffset = Math.max(0, raw.length - WINDOW_SIZE);
       const rawOffset = body.offset !== undefined ? Number(body.offset) : defaultOffset;
@@ -459,7 +381,11 @@ serve(async (req)=>{
         ok: true,
         action: 'read_bob_chat',
         path: BOB_CHAT_PATH,
-        ref: fileRef,
+        ref: 'supabase',
+        storage: 'supabase',
+        has_older_notes: moreNotes,
+        next_note_offset: moreNotes ? noteOffset + 100 : null,
+        note_offset: noteOffset,
         total_length: totalLength,
         has_more: w.hasMore,
         next_offset: w.nextOffset,
@@ -475,6 +401,8 @@ serve(async (req)=>{
       valid: [
         'search',
         'read',
+        'head',
+        'tree',
         'write_bob_chat',
         'read_bob_chat'
       ]
