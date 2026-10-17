@@ -120,6 +120,7 @@ test('Builder cutover handlers preserve HTTP contracts without a production data
           assert.equal(result.body.root_job_id, rootId);
           assert.equal(result.body.lineage.length, 2);
           assert.equal(result.body.issue.task_run_id, null);
+          assert.equal(result.body.issue.description, 'Synthetic brief');
           assert.deepEqual(result.body.comments, []);
         }
         assert(calls.some(call => call.query.get('branch_name') === `eq.${branch}`));
@@ -143,6 +144,19 @@ test('Builder cutover handlers preserve HTTP contracts without a production data
         const list = await invoke({ state: 'implementation_pending' });
         assert.equal(list.body.count, 1); assert.equal(list.body.issues[0].iid, childId);
         dbFailure = true; assert.equal((await invoke({ iid: branch })).status, 500); dbFailure = false;
+      });
+      await t.test('ambiguous SHA families and unverifiable ancestry fail explicitly', async () => {
+        jobs.push({ ...jobs[0], id: '77777777-7777-4777-8777-777777777777', workspace_branch: 'bob/job-unrelated', branch_name: 'unrelated' });
+        assert.equal((await invoke({ iid: sha })).status, 400);
+        // Exact branch matches take precedence over the shared target SHA.
+        assert.equal((await invoke({ iid: branch })).body.selected_job_id, childId);
+        jobs.pop();
+        jobs[0].parent_job_id = childId;
+        assert.equal((await invoke({ iid: branch })).status, 500);
+        jobs[0].parent_job_id = null;
+        jobs[0].project_id = '88888888-8888-4888-8888-888888888888';
+        assert.equal((await invoke({ iid: childId })).status, 500);
+        jobs[0].project_id = projectId;
       });
     } finally { await stop(); }
     stop = await start('bob-repo-search');

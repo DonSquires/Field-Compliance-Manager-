@@ -84,3 +84,6 @@ Preserve the deployed platform settings: lookup has JWT verification enabled;
 repository and dispatch have it disabled and retain their internal JWT and
 admiral authorization checks. Deploy only these three functions, and only
 after the PR has been reviewed and merged. No database migration is required.
+When deploying, use `--no-verify-jwt` for repository and dispatch to preserve
+their existing platform settings; do not pass it for lookup. Do not deploy
+the research function as part of this cutover.
