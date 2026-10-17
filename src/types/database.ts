@@ -36791,15 +36791,6 @@ export type Database = {
           transmission_id: string
         }[]
       }
-      closure_at_point: {
-        Args: { p_lat: number; p_lng: number; p_org_id: string }
-        Returns: {
-          closure_id: string
-          closure_type: string
-          reason: string
-          zone_id: string
-        }[]
-      }
       coalesce_cctv_stationary_vehicle_observations: {
         Args: { p_job_id: string }
         Returns: number
@@ -36969,10 +36960,6 @@ export type Database = {
           p_stop_id: string
         }
         Returns: undefined
-      }
-      compute_point_distance_km: {
-        Args: { lat1: number; lat2: number; lng1: number; lng2: number }
-        Returns: number
       }
       compute_travel_distance_km: {
         Args: {
@@ -43265,10 +43252,6 @@ export type Database = {
         Args: { p_organization_id: string; p_reason?: string; p_status: string }
         Returns: Json
       }
-      point_in_zone: {
-        Args: { p_lat: number; p_lng: number; p_zone_id: string }
-        Returns: boolean
-      }
       populate_geometry_columns:
         | { Args: { tbl_oid: unknown; use_typmod?: boolean }; Returns: number }
         | { Args: { use_typmod?: boolean }; Returns: string }
@@ -48645,14 +48628,6 @@ export type Database = {
           p_work_order: Database["public"]["Tables"]["workshop_work_orders"]["Row"]
         }
         Returns: string
-      }
-      zones_for_site: {
-        Args: { p_site_id: string }
-        Returns: {
-          boundary: unknown
-          zone_id: string
-          zone_name: string
-        }[]
       }
     }
     Enums: {

@@ -111,8 +111,11 @@ begin
 
   -- 3. Zone / closure lookup ------------------------------------------------------------------------
   perform pg_temp.as_admin();
-  select count(*) into v_n from public.closure_at_point(-41.27, 173.28, v_provider);
-  perform pg_temp.check('closure_at_point finds the active closure', v_n = 1);
+  select count(*) into v_n
+  from jsonb_to_record(public.is_zone_closed(v_zone, now()))
+    as closure_state(closed boolean, closure_id uuid, closure_type text, reason text, effective_from timestamptz, effective_to timestamptz)
+  where closure_state.closed;
+  perform pg_temp.check('is_zone_closed finds the active closure', v_n = 1);
   -- get_zone_for_gps was dropped by 20260915170000 (duplicate of resolve_context); resolve_context is
   -- proven in supabase/tests/20260915170000_place_model_convergence.sql.
 
