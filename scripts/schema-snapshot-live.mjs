@@ -8,15 +8,32 @@
 // Extension-owned objects (PostGIS, pgvector, ...) are excluded, matching a `--schema public` dump.
 import fs from 'node:fs';
 import path from 'node:path';
+import { spawnSync } from 'node:child_process';
 
 const args = process.argv.slice(2);
 const opt = (name, fallback) => { const i = args.indexOf(name); return i >= 0 ? args[i + 1] : fallback; };
 const PROJECT_REF = opt('--project-ref', process.env.SUPABASE_PROJECT_REF ?? 'dotczcyyzgabmtmnglqj');
 const OUT = opt('--out', 'supabase/schema.sql');
 const TOKEN = process.env.SUPABASE_ACCESS_TOKEN ?? process.env.FIELD_COMPLIANCE_CODESPACE;
-if (!TOKEN) throw new Error('SUPABASE_ACCESS_TOKEN or FIELD_COMPLIANCE_CODESPACE is required');
 
 async function sql(query) {
+  if (!TOKEN) {
+    const command = process.platform === 'win32' ? process.execPath : 'npx';
+    const commandArgs = process.platform === 'win32'
+      ? [path.join(path.dirname(process.execPath), 'node_modules', 'npm', 'bin', 'npx-cli.js')]
+      : [];
+    const result = spawnSync(command, [...commandArgs,
+      'supabase', 'db', 'query', '--linked', '--project-ref', PROJECT_REF,
+      '--output-format', 'json', query,
+    ], { encoding: 'utf8', maxBuffer: 50 * 1024 * 1024 });
+    if (result.status !== 0) {
+      const detail = result.error?.message ?? result.stderr ?? result.stdout ?? 'unknown process error';
+      throw new Error(`linked query failed: ${detail.trim().slice(0, 500)}`);
+    }
+    const jsonStart = result.stdout.indexOf('{');
+    if (jsonStart < 0) throw new Error('linked query returned no JSON payload');
+    return JSON.parse(result.stdout.slice(jsonStart)).rows;
+  }
   const res = await fetch(`https://api.supabase.com/v1/projects/${PROJECT_REF}/database/query`, {
     method: 'POST',
     headers: { Authorization: `Bearer ${TOKEN}`, 'Content-Type': 'application/json' },

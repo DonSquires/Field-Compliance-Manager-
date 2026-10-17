@@ -2157,3 +2157,28 @@ remains unpopulated.
   persisted night-count results remain unchanged. The refreshed manifest
   contains no `check_repeat_stay` capability and does not claim runtime
   exercise for the canonical calculator.
+
+## 2026-10-18 — Retire duplicate geometry helper RPCs
+
+- **Expected before:** field GPS resolves through the governed operational
+  context, closure state is evaluated for the matched zone and capture time,
+  Location House siblings are joined by `location_id`, and dispatch financials
+  use one travel-distance calculator.
+- **Present before:** `closure_at_point`, `point_in_zone`, `zones_for_site`, and
+  `compute_point_distance_km` had no application caller, no database dependent,
+  and no recorded Atlas flow into them. All four remained publicly executable.
+- **Canonical paths:** `process-officer-scan` calls
+  `resolve_operational_context` and `is_zone_closed`; Site and Zone facets are
+  joined directly through their shared Location House; dispatch completion and
+  pay pipelines call `compute_travel_distance_km`.
+- **Change:** retire only the four duplicate helpers and update database
+  acceptance checks to exercise the canonical closure and Location House paths.
+  Preserve all seven closures, 256 zones, and 113 sites.
+- **Trackforce consideration:** one location decision must produce one
+  reconstructable operational context. Generic point predicates and parallel
+  closure/distance helpers let callers bypass place authority, temporal closure
+  evidence, or the calculator used by the financial receipt.
+- **Verified live:** all four helper signatures are absent from the catalog;
+  the migration ledger is current; seven closures, 256 zones, and 113 sites are
+  unchanged. Static evidence does not claim runtime exercise for the canonical
+  paths.

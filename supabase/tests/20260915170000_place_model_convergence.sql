@@ -112,7 +112,15 @@ begin
   insert into public.location_zones (id, organization_id, name, zone_type, module_key, is_active, boundary_verification)
     values (v_zone_named, v_org_a, 'T_SITE_A', 'parking', 'parking_enforcement', true, 'unverified');
   perform pg_temp.check('zone named after a house is a sibling on that house', (select location_id from public.location_zones where id = v_zone_named) = v_house_a);
-  perform pg_temp.check('zones_for_site lists house siblings', exists (select 1 from public.zones_for_site(v_site_a) where zone_id = v_zone_named));
+  perform pg_temp.check(
+    'Location House keys list Site and Zone siblings',
+    exists (
+      select 1
+      from public.location_zones z
+      join public.client_sites s on s.location_id = z.location_id
+      where s.id = v_site_a and z.id = v_zone_named
+    )
+  );
 
   -- ── resolve_context: site and owner come from the matched zone's house ──
   insert into public.client_sites (client_organization_id, organization_id, location_id, name, address, center_point, boundary, boundary_verification, active)
