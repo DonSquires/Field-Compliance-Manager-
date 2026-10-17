@@ -35,6 +35,7 @@ import {
   summariseLines,
   type BomTemplateLineInput,
   type WorkOrderKind,
+  type WorkClassificationOption,
   type WorkOrderLine,
   type WorkOrderLineKind,
   type WorkOrderStatus,
@@ -61,7 +62,7 @@ const clientName = (agreement: AgreementOption): string => {
 
 const requestId = (): string => (typeof crypto !== 'undefined' && 'randomUUID' in crypto ? crypto.randomUUID() : `${Date.now()}-${Math.random()}`);
 
-const emptyOrderForm = { kind: 'fabrication' as WorkOrderKind, title: '', description: '', agreementId: '', siteId: '', assetId: '', stockLocationId: '', assignedUserId: '', scheduledFor: '', templateId: '' };
+const emptyOrderForm = { kind: 'fabrication' as WorkOrderKind, workSubjectCodeId: '', workActivityCodeId: '', title: '', description: '', agreementId: '', siteId: '', assetId: '', stockLocationId: '', assignedUserId: '', scheduledFor: '', templateId: '' };
 const emptyLineForm = { token: '', selection: null as PriceListSelection | null, lineKind: 'material' as WorkOrderLineKind, description: '', quantity: '1', unitPrice: '', unitCost: '' };
 const emptyTemplateForm = { id: '', name: '', description: '', kind: 'fabrication' as WorkOrderKind, lines: [] as BomTemplateLineInput[] };
 const emptyReceiptForm = { token: '', itemId: '', itemName: '', locationId: '', quantity: '1', unitCost: '', reference: '' };
@@ -89,6 +90,7 @@ export default function WorkshopPage({ onNavigate }: { onNavigate?: (page: strin
   const [people, setPeople] = useState<PersonOption[]>([]);
   const [templates, setTemplates] = useState<BomTemplate[]>([]);
   const [templateLines, setTemplateLines] = useState<BomTemplateLine[]>([]);
+  const [workClassifications, setWorkClassifications] = useState<WorkClassificationOption[]>([]);
 
   const [showOrderForm, setShowOrderForm] = useState(false);
   const [orderForm, setOrderForm] = useState(emptyOrderForm);
@@ -110,8 +112,8 @@ export default function WorkshopPage({ onNavigate }: { onNavigate?: (page: strin
     }
     setLoading(true);
     setError(null);
-    // ATLAS READS: workshop_work_order_summary, service_agreements, client_sites, assets, finance_inventory_locations, finance_inventory_balances, user_profiles, workshop_bom_templates, workshop_bom_template_lines
-    const [ordersRes, agreementsRes, assetsRes, locationsRes, balancesRes, peopleRes, templatesRes, templateLinesRes] = await Promise.all([
+    // ATLAS READS: workshop_work_order_summary, service_agreements, client_sites, assets, finance_inventory_locations, finance_inventory_balances, user_profiles, workshop_bom_templates, workshop_bom_template_lines, reference_codes
+    const [ordersRes, agreementsRes, assetsRes, locationsRes, balancesRes, peopleRes, templatesRes, templateLinesRes, classificationsRes] = await Promise.all([
       supabase.from('workshop_work_order_summary').select('*').eq('organization_id', organizationId).order('updated_at', { ascending: false }).limit(300),
       supabase.from('service_agreements').select('id,name,client_organization_id,client:client_organization_id(name)').eq('provider_organization_id', organizationId).in('agreement_type', ['operational', 'financial']).order('name'),
       supabase.from('assets').select('id,name,asset_type').eq('organization_id', organizationId).order('name').limit(300),
@@ -120,8 +122,9 @@ export default function WorkshopPage({ onNavigate }: { onNavigate?: (page: strin
       supabase.from('user_profiles').select('id,display_name,email,role').eq('organization_id', organizationId).is('deactivated_at', null).order('display_name').limit(300),
       supabase.from('workshop_bom_templates').select('id,name,description,kind,active').eq('organization_id', organizationId).order('name'),
       supabase.from('workshop_bom_template_lines').select('id,template_id,line_kind,item_id,description,quantity,unit_of_measure,position').eq('organization_id', organizationId).order('position'),
+      supabase.from('reference_codes').select('id,code_type,code,name,description,sort_order').eq('organization_id', organizationId).in('code_type', ['work_subject', 'work_activity']).eq('is_active', true).order('sort_order'),
     ]);
-    const firstError = [ordersRes, agreementsRes, assetsRes, locationsRes, balancesRes, peopleRes, templatesRes, templateLinesRes].find((res) => res.error)?.error;
+    const firstError = [ordersRes, agreementsRes, assetsRes, locationsRes, balancesRes, peopleRes, templatesRes, templateLinesRes, classificationsRes].find((res) => res.error)?.error;
     if (firstError) {
       setError(firstError.message);
       setLoading(false);
@@ -136,6 +139,7 @@ export default function WorkshopPage({ onNavigate }: { onNavigate?: (page: strin
     setPeople((peopleRes.data as PersonOption[]) ?? []);
     setTemplates((templatesRes.data as BomTemplate[]) ?? []);
     setTemplateLines((templateLinesRes.data as BomTemplateLine[]) ?? []);
+    setWorkClassifications((classificationsRes.data as WorkClassificationOption[]) ?? []);
     const clientIds = Array.from(new Set(((agreementsRes.data as AgreementOption[]) ?? []).map((row) => row.client_organization_id)));
     if (clientIds.length > 0) {
       const sitesRes = await supabase.from('client_sites').select('id,name,client_organization_id').in('client_organization_id', clientIds).eq('active', true).order('name').limit(500);
@@ -150,6 +154,8 @@ export default function WorkshopPage({ onNavigate }: { onNavigate?: (page: strin
   useEffect(() => { void load(); }, [load]);
 
   const selected = useMemo(() => orders.find((row) => row.id === selectedId) ?? null, [orders, selectedId]);
+  const workSubjects = useMemo(() => workClassifications.filter((option) => option.code_type === 'work_subject'), [workClassifications]);
+  const workActivities = useMemo(() => workClassifications.filter((option) => option.code_type === 'work_activity'), [workClassifications]);
 
   useEffect(() => {
     if (!selectedId) { setLines([]); return; }
@@ -187,6 +193,8 @@ export default function WorkshopPage({ onNavigate }: { onNavigate?: (page: strin
         p_organization_id: organizationId,
         p_kind: orderForm.kind,
         p_title: orderForm.title,
+        p_work_subject_code_id: orderForm.kind === 'maintenance' ? orderForm.workSubjectCodeId || null : null,
+        p_work_activity_code_id: orderForm.kind === 'maintenance' ? orderForm.workActivityCodeId || null : null,
         p_description: orderForm.description || null,
         p_client_organization_id: agreement?.client_organization_id ?? null,
         p_service_agreement_id: agreement?.id ?? null,
@@ -409,10 +417,14 @@ export default function WorkshopPage({ onNavigate }: { onNavigate?: (page: strin
               <form className="assessment-form workshop-card" onSubmit={handleCreateOrder}>
                 <h3>New work order</h3>
                 <div className="form-group"><label htmlFor="wo-kind">What kind of job?</label>
-                  <select id="wo-kind" value={orderForm.kind} onChange={(event) => setOrderForm({ ...orderForm, kind: event.target.value as WorkOrderKind, templateId: '' })}>
+                  <select id="wo-kind" value={orderForm.kind} onChange={(event) => setOrderForm({ ...orderForm, kind: event.target.value as WorkOrderKind, workSubjectCodeId: '', workActivityCodeId: '', templateId: '' })}>
                     {(Object.keys(WORK_ORDER_KIND_LABELS) as WorkOrderKind[]).map((kind) => <option key={kind} value={kind}>{WORK_ORDER_KIND_LABELS[kind]}</option>)}
                   </select>
                 </div>
+                {orderForm.kind === 'maintenance' && <div className="form-row">
+                  <div className="form-group"><label htmlFor="wo-subject">What is being worked on?</label><select id="wo-subject" required value={orderForm.workSubjectCodeId} onChange={(event) => setOrderForm({ ...orderForm, workSubjectCodeId: event.target.value })}><option value="">Choose the subject…</option>{workSubjects.map((subject) => <option key={subject.id} value={subject.id}>{subject.name}</option>)}</select>{workSubjects.length === 0 && <small>No active work subjects are configured for this organisation.</small>}</div>
+                  <div className="form-group"><label htmlFor="wo-activity">What work is being done?</label><select id="wo-activity" required value={orderForm.workActivityCodeId} onChange={(event) => setOrderForm({ ...orderForm, workActivityCodeId: event.target.value })}><option value="">Choose the work…</option>{workActivities.map((activity) => <option key={activity.id} value={activity.id}>{activity.name}</option>)}</select>{workActivities.length === 0 && <small>No active work activities are configured for this organisation.</small>}</div>
+                </div>}
                 <div className="form-group"><label htmlFor="wo-title">Title</label><input id="wo-title" required value={orderForm.title} onChange={(event) => setOrderForm({ ...orderForm, title: event.target.value })} placeholder={orderForm.kind === 'fabrication' ? 'e.g. Lockbox for Depot gate' : 'e.g. Replace gate hinges'} /></div>
                 <div className="form-group"><label htmlFor="wo-template">Start from a template (optional)</label>
                   <select id="wo-template" value={orderForm.templateId} onChange={(event) => setOrderForm({ ...orderForm, templateId: event.target.value })}>
@@ -502,6 +514,7 @@ export default function WorkshopPage({ onNavigate }: { onNavigate?: (page: strin
                   <span className={`badge workshop-status workshop-status--${selected.status}`}>{WORK_ORDER_STATUS_LABELS[selected.status]}</span>
                 </div>
                 {selected.description && <p className="workshop-detail__notes">{selected.description}</p>}
+                {selected.kind === 'maintenance' && <p className="workshop-detail__meta">{selected.work_subject_name ?? 'Subject not classified'} · {selected.work_activity_name ?? 'Activity not classified'}</p>}
 
                 <div className="workshop-totals">
                   <div><span>Charge</span><strong>{money(summary.charge)}</strong></div>

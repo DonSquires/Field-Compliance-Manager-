@@ -10,6 +10,15 @@ export type WorkOrderKind = 'fabrication' | 'maintenance';
 export type WorkOrderStatus = 'draft' | 'approved' | 'in_progress' | 'completed' | 'cancelled';
 export type WorkOrderLineKind = 'material' | 'labour' | 'travel' | 'equipment';
 
+export interface WorkClassificationOption {
+  id: string;
+  code_type: 'work_subject' | 'work_activity';
+  code: string;
+  name: string;
+  description: string | null;
+  sort_order: number;
+}
+
 export interface WorkOrderSummary {
   id: string;
   organization_id: string;
@@ -40,6 +49,12 @@ export interface WorkOrderSummary {
   completion_note: string | null;
   created_at: string;
   updated_at: string;
+  work_subject_code_id: string | null;
+  work_subject_code: string | null;
+  work_subject_name: string | null;
+  work_activity_code_id: string | null;
+  work_activity_code: string | null;
+  work_activity_name: string | null;
   line_count: number;
   charge_total: number;
   cost_total: number;
