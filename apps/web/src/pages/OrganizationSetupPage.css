@@ -120,9 +120,10 @@
 .org-service-area-chips li { display: inline-flex; align-items: center; gap: 6px; padding: 4px 6px 4px 10px; border: 1px solid var(--color-border-strong); border-radius: var(--radius-full, 999px); background: var(--color-bg-secondary); font-size: 12px; }
 .org-service-area-chips button { display: grid; place-items: center; width: 20px; height: 20px; padding: 0; border: 0; border-radius: var(--radius-full, 999px); background: transparent; color: var(--color-text-muted); font-size: 14px; line-height: 1; cursor: pointer; }
 .org-service-area-chips button:hover, .org-service-area-chips button:focus-visible { background: var(--color-bg-hover); color: var(--color-text-primary); outline: none; }
+.organization-jurisdiction-map-frame { position: relative; }
 .organization-jurisdiction-map,
 .organization-jurisdiction-map-empty { min-height: 380px; border: 1px solid var(--color-border); border-radius: var(--radius-md, 8px); overflow: hidden; background: var(--color-bg-secondary); }
-.organization-jurisdiction-map-empty { display: grid; place-items: center; padding: 20px; color: var(--color-text-muted); font-size: 13px; text-align: center; }
+.organization-jurisdiction-map-empty { position: absolute; inset: 0; z-index: 500; display: grid; place-items: center; background: color-mix(in srgb, var(--color-bg-secondary) 88%, transparent); padding: 20px; color: var(--color-text-muted); font-size: 13px; text-align: center; }
 .organization-jurisdiction-message { padding: 10px 12px; border-left: 3px solid var(--color-warning); border-radius: var(--radius-sm, 4px); color: var(--color-text-primary); background: var(--color-warning-bg); font-size: 13px; }
 .organization-jurisdiction-message.is-success { border-left-color: var(--color-success); background: var(--color-success-bg); }
 .organization-jurisdiction-message.is-error { border-left-color: var(--color-danger); background: var(--color-danger-bg); }

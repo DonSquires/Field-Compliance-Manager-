@@ -865,7 +865,10 @@ async function runAgenticEngineer({
   if (!step?.id) throw new Error('implementation step is required');
   if (!['frontend', 'backend'].includes(lane)) throw new Error('lane must be frontend or backend');
   const started = now();
-  const workspace = createBranchWorkspace({ sourceDir, workspaceRoot, jobId: job.id, targetSha: job.target_sha });
+  // A job bound to a workspace (e.g. a rerun child that inherits its parent's branch) works in that
+  // worktree, not a fresh one named after its own id. The attempt resets to the pin just below anyway.
+  const boundBranch = /^bob\/job-[a-z0-9]+$/.test(String(job.workspace_branch || '')) ? job.workspace_branch : undefined;
+  const workspace = createBranchWorkspace({ sourceDir, workspaceRoot, jobId: job.id, targetSha: job.target_sha, branchName: boundBranch, recoverInterrupted: true });
   const workspacePath = workspace.workspacePath;
   // Start every attempt from the pinned commit; a previous attempt may have left edits behind.
   git(workspacePath, ['reset', '-q', '--hard', job.target_sha]);

@@ -1438,3 +1438,109 @@
     white-space: nowrap;
   }
 }
+
+/* Calm enterprise pass: quieter surfaces, consistent status pills, and visible motion only for live work. */
+.builder-summary,
+.builder-queue,
+.builder-detail,
+.builder-agent-dock {
+  border-color: rgba(43, 66, 86, 0.7);
+  box-shadow: 0 1px 0 rgba(255, 255, 255, 0.02) inset, 0 8px 20px rgba(2, 8, 14, 0.16);
+}
+
+.builder-heading > div:first-child > span,
+.builder-panel-heading > div > span,
+.builder-truth-grid span {
+  font-weight: 700;
+}
+
+.builder-summary strong {
+  font-weight: 700;
+  font-variant-numeric: tabular-nums;
+}
+
+.builder-truth-grid > div {
+  border-color: #1f3243;
+  background: #0a1520;
+}
+
+.builder-status {
+  border-color: #2c4255;
+  background: #0f1c28;
+  color: #a9bac7;
+  font-size: 11px;
+  font-weight: 700;
+  letter-spacing: 0.05em;
+}
+
+.builder-status.state-deployed,
+.builder-status.state-release_ready,
+.builder-status.state-completed { border-color: #275443; background: #0c211a; color: #94dcb6; }
+.builder-status.state-failed { border-color: #5c2f33; background: #22121a; color: #f6a8a8; }
+.builder-status.state-cancelled { border-color: #2c3742; background: #10171e; color: #8a9aa7; }
+.builder-status.state-approval_pending,
+.builder-status.state-specification_ready { border-color: #6b5228; background: #221a0d; color: #f0c77e; }
+.builder-status.state-analysis_pending,
+.builder-status.state-implementation_pending,
+.builder-status.state-building,
+.builder-status.state-testing { border-color: #2b5578; background: #0f2233; color: #a8d6fa; }
+
+.builder-state.state-analysis_pending,
+.builder-state.state-implementation_pending,
+.builder-state.state-building,
+.builder-state.state-testing {
+  background: #6dbdf4;
+  animation: builder-state-breathe 2.2s ease-in-out infinite;
+}
+
+@keyframes builder-state-breathe {
+  0%, 100% { box-shadow: 0 0 0 3px rgba(109, 189, 244, 0.12); }
+  50% { box-shadow: 0 0 0 6px rgba(109, 189, 244, 0.04); }
+}
+
+.builder-pipeline-node.is-active {
+  box-shadow: 0 0 0 0 rgba(109, 189, 244, 0.35);
+  animation: builder-node-glow 2.2s ease-in-out infinite;
+}
+
+@keyframes builder-node-glow {
+  0%, 100% { box-shadow: 0 0 0 0 rgba(109, 189, 244, 0.3); }
+  50% { box-shadow: 0 0 0 4px rgba(109, 189, 244, 0); }
+}
+
+.builder-step {
+  border-left-width: 2px;
+  background: #0a1520;
+}
+
+.builder-step b {
+  padding: 2px 8px;
+  border: 1px solid #2a3c4d;
+  border-radius: 999px;
+  color: #9fb0bf;
+  background: #0f1c28;
+  font-size: 10px;
+  font-weight: 700;
+  letter-spacing: 0.04em;
+}
+
+.builder-step.state-completed b { border-color: #275443; background: #0c211a; color: #94dcb6; }
+.builder-step.state-failed b,
+.builder-step.state-blocked b { border-color: #5c2f33; background: #22121a; color: #f6a8a8; }
+.builder-step.state-running b { border-color: #2b5578; background: #0f2233; color: #a8d6fa; }
+.builder-step.state-skipped { opacity: 0.62; }
+.builder-step.state-skipped { border-left-color: #34475a; }
+.builder-step.state-running > span {
+  border-color: #6dbdf4;
+  color: #a8d6fa;
+  animation: builder-state-breathe 2.2s ease-in-out infinite;
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .builder-state.state-analysis_pending,
+  .builder-state.state-implementation_pending,
+  .builder-state.state-building,
+  .builder-state.state-testing,
+  .builder-pipeline-node.is-active,
+  .builder-step.state-running > span { animation: none; }
+}

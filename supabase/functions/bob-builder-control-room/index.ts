@@ -31,6 +31,37 @@ function safeJob(job: Record<string, unknown> | null) {
   return Object.fromEntries(keys.map(key => [key, job[key]]));
 }
 
+const LIVE_MODEL_RUN_LIMIT = 12;
+const LIVE_EVENT_LIMIT = 30;
+const CHANGED_FILE_LIMIT = 200;
+
+function count(value: unknown) {
+  return typeof value === 'number' && Number.isFinite(value) && value >= 0 ? Math.round(value) : null;
+}
+
+// Local runners record input/output tokens; OpenAI-compatible runs record prompt/completion tokens.
+function modelUsage(value: unknown) {
+  const usage = value && typeof value === 'object' && !Array.isArray(value) ? value as Record<string, unknown> : {};
+  const input = count(usage.input_tokens) ?? count(usage.prompt_tokens);
+  const output = count(usage.output_tokens) ?? count(usage.completion_tokens);
+  const total = count(usage.total_tokens) ?? (input == null && output == null ? null : (input ?? 0) + (output ?? 0));
+  return {
+    input_tokens: input, output_tokens: output, total_tokens: total,
+    turns: count(usage.turns), phase: typeof usage.phase === 'string' ? usage.phase.slice(0, 40) : null,
+  };
+}
+
+function eventDetail(value: unknown) {
+  const detail = value && typeof value === 'object' && !Array.isArray(value) ? value as Record<string, unknown> : {};
+  const text = (input: unknown) => typeof input === 'string' ? input.slice(0, 120) : null;
+  return {
+    step: text(detail.step), step_status: text(detail.step_status), status: text(detail.status),
+    artifact_type: text(detail.artifact_type), outcome: text(detail.outcome),
+    retryable: typeof detail.retryable === 'boolean' ? detail.retryable : null,
+    failed_files: strings(detail.failed_files, 20),
+  };
+}
+
 function safeSnapshot(value: Record<string, unknown>) {
   const rows = (input: unknown) => Array.isArray(input) ? input as Array<Record<string, unknown>> : [];
   return {
@@ -49,7 +80,17 @@ function safeSnapshot(value: Record<string, unknown>) {
     workerRuns: rows(value.workerRuns).map(run => ({
       id: run.id, step_id: run.step_id, profile: run.profile, status: run.status,
       target_sha: run.target_sha, exit_code: run.exit_code, started_at: run.started_at,
-      completed_at: run.completed_at,
+      completed_at: run.completed_at, heartbeat_at: run.heartbeat_at,
+    })),
+    modelRuns: rows(value.modelRuns).map(run => ({
+      id: run.id, step_id: run.step_id, provider: run.provider, model_name: run.model_name,
+      status: run.status, started_at: run.started_at, completed_at: run.completed_at,
+      created_at: run.created_at, ...modelUsage(run.usage_metadata),
+    })),
+    events: rows(value.events).map(event => ({
+      id: event.id, event_type: event.event_type, actor_type: event.actor_type,
+      change_summary: typeof event.change_summary === 'string' ? event.change_summary.slice(0, 280) : null,
+      detail: eventDetail(event.new_value), created_at: event.created_at,
     })),
     approvals: rows(value.approvals).map(approval => ({
       id: approval.id, approval_type: approval.approval_type, triggered_at_status: approval.triggered_at_status,
@@ -297,17 +338,54 @@ serve(async req => {
 
   if (action === 'get') {
     stage = 'load_builder_snapshot';
-    const [jobResult, stepsResult, artifactsResult, runsResult, approvalsResult] = await Promise.all([
+    const [jobResult, stepsResult, artifactsResult, runsResult, approvalsResult, modelRunsResult, eventsResult] = await Promise.all([
       admin.from('builder_jobs').select('*').eq('id', jobId).single(),
       admin.from('builder_job_steps').select('*').eq('job_id', jobId).order('ordinal_position'),
       admin.from('builder_artifacts').select('*').eq('job_id', jobId).order('created_at'),
       admin.from('builder_worker_runs').select('*').eq('job_id', jobId).order('started_at'),
       admin.from('builder_approvals').select('id, approval_type, triggered_at_status, status, requested_at, requested_target_sha, reviewed_artifact_ids, approval_comment, responded_at').eq('job_id', jobId).order('requested_at', { ascending: false }),
+      admin.from('builder_model_runs').select('id, step_id, provider, model_name, status, usage_metadata, started_at, completed_at, created_at').eq('job_id', jobId).order('created_at', { ascending: false }).limit(LIVE_MODEL_RUN_LIMIT),
+      admin.from('builder_audit_events').select('id, event_type, actor_type, change_summary, new_value, created_at').eq('job_id', jobId).order('created_at', { ascending: false }).limit(LIVE_EVENT_LIMIT),
     ]);
     const failed = jobResult.error || stepsResult.error || artifactsResult.error || runsResult.error || approvalsResult.error;
-    await audit(job.organization_id, failed ? 'failed' : 'viewed', jobId);
+    // Live polls refresh an already-audited view; only their failures are written to audit_log.
+    if (body.live_poll !== true || failed) await audit(job.organization_id, failed ? 'failed' : 'viewed', jobId);
     if (failed) return json({ error: 'Builder job could not be loaded' }, 503);
-    return json(safeSnapshot({ job: jobResult.data, steps: stepsResult.data, artifacts: artifactsResult.data, workerRuns: runsResult.data, approvals: approvalsResult.data }));
+    return json({
+      ...safeSnapshot({ job: jobResult.data, steps: stepsResult.data, artifacts: artifactsResult.data, workerRuns: runsResult.data, approvals: approvalsResult.data, modelRuns: modelRunsResult.data, events: eventsResult.data }),
+      telemetry: { model_runs_available: !modelRunsResult.error, events_available: !eventsResult.error, observed_at: new Date().toISOString() },
+    });
+  }
+  if (action === 'changed_files') {
+    stage = 'load_changed_files';
+    const { data: manifest, error: manifestError } = await admin
+      .from('builder_artifacts')
+      .select('id, content_size_bytes, storage_location, checksum, created_at')
+      .eq('job_id', jobId)
+      .eq('artifact_type', 'changed_file_manifest')
+      .eq('status', 'final')
+      .order('created_at', { ascending: false })
+      .limit(1)
+      .maybeSingle();
+    if (manifestError) return json({ error: 'Changed files could not be loaded' }, 503);
+    if (!manifest) return json({ manifest: null, files: [] });
+    if (!manifest.storage_location?.startsWith('supabase_storage://builder-artifacts/') || (manifest.content_size_bytes ?? 0) > ARTIFACT_PREVIEW_LIMIT_BYTES) {
+      return json({ error: 'Changed-file manifest cannot be read in the workspace' }, 409);
+    }
+    const objectPath = manifest.storage_location.slice('supabase_storage://builder-artifacts/'.length);
+    const { data: object, error: downloadError } = await admin.storage.from('builder-artifacts').download(objectPath);
+    if (downloadError || !object) return json({ error: 'Changed-file manifest content is unavailable' }, 503);
+    let entries: unknown = null;
+    try { entries = JSON.parse(await object.text()); } catch {}
+    if (!Array.isArray(entries)) return json({ error: 'Changed-file manifest is not readable' }, 422);
+    const files = entries
+      .filter((entry): entry is Record<string, unknown> => Boolean(entry) && typeof entry === 'object' && typeof (entry as Record<string, unknown>).path === 'string')
+      .slice(0, CHANGED_FILE_LIMIT)
+      .map(entry => ({
+        path: String(entry.path).slice(0, 300),
+        change: !entry.before_sha256 ? 'added' : !entry.after_sha256 ? 'deleted' : 'modified',
+      }));
+    return json({ manifest: { id: manifest.id, checksum: manifest.checksum, created_at: manifest.created_at, total: entries.length }, files });
   }
   if (action === 'decide_approval') {
     const approvalId = typeof body.approval_id === 'string' ? body.approval_id : '';
