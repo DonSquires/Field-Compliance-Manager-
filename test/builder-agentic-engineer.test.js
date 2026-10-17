@@ -937,3 +937,20 @@ test('the opening packet is fitted to a local model window: the build map keeps 
   const promptBudgetChars = (24576 - 8192 - 512) * 3;
   assert.ok(total <= promptBudgetChars * 0.8, `system+packet ${total} chars`);
 });
+
+test('a rerun child works in its bound parent worktree even when the shared clone has moved on (live job f6df4b84)', async () => {
+  const repo = makeRepo();
+  const workspaceRoot = path.join(repo.root, 'workspaces');
+  const { createBranchWorkspace } = require('../builder-branch-workspace');
+  const parent = createBranchWorkspace({ sourceDir: repo.source, workspaceRoot, jobId: 'a7c916f5b98047f7ac47aaaa', targetSha: repo.sha });
+  // Another job pinned the shared clone elsewhere.
+  fs.writeFileSync(path.join(repo.source, 'later.txt'), 'later\n');
+  repo.git(['add', '-A']);
+  repo.git(['-c', 'user.name=t', '-c', 'user.email=t@example.com', 'commit', '-q', '-m', 'later']);
+  const job = { id: 'f6df4b8403f14ad2adfb7d7fd9d32704', organization_id: '00000000-0000-0000-0000-000000000001', target_sha: repo.sha, workspace_branch: parent.branchName, title: 't', task_description: 't' };
+  const { callModel } = fakeModel([{ tool: 'finish', args: { summary: 'nothing', no_change_reason: 'nothing to change in this fixture' } }]);
+  const result = await runAgenticEngineer({ supabase: null, gateway: { gatewayUrl: 'http://gw', apiToken: 't' }, job, step: { id: 's' }, lane: 'backend', sourceDir: repo.source, workspaceRoot, repoRoot: repo.source, callModel, limits: { ...DEFAULT_LIMITS, maxTurns: 3 }, providerHealth: LAPTOP_OFF });
+  assert.doesNotMatch(String(result.error || ''), /does not match the target SHA/);
+  assert.equal(fs.existsSync(path.join(workspaceRoot, 'bob-job-f6df4b8403f14ad2adfb')), false, 'no second worktree named after the child');
+  fs.rmSync(repo.root, { recursive: true, force: true });
+});

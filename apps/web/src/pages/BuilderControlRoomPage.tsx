@@ -1,6 +1,7 @@
-import React, { useCallback, useEffect, useMemo, useState } from 'react';
+import React, { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { AlertTriangle, Bot, CheckCircle2, ChevronRight, CircleStop, Clock3, Database, FileCode2, FolderTree, MessageSquareText, Play, Plus, RefreshCw, Search, ShieldCheck, TerminalSquare, Workflow, X } from 'lucide-react';
 import { BobPanel } from '../components/BobPanel';
+import { BuilderLiveActivity, isLiveJob, type LiveChangedFile, type LiveEvent, type LiveModelRun, type LivePollState } from '../components/BuilderLiveActivity';
 import { supabase } from '../lib/supabase';
 import './BuilderControlRoomPage.css';
 
@@ -45,6 +46,7 @@ interface BuilderJob {
   autopilot_requested_by?: string | null;
   autopilot_state?: string | null;
   autopilot_report?: Record<string, unknown> | null;
+  autopilot_updated_at?: string | null;
   created_at: string;
   updated_at: string;
 }
@@ -59,6 +61,8 @@ interface BuilderStep {
   result_summary: string | null;
   error: string | null;
   retryable: boolean;
+  started_at?: string | null;
+  completed_at?: string | null;
 }
 
 interface BuilderArtifact {
@@ -77,6 +81,9 @@ interface BuilderWorkerRun {
   status: string;
   target_sha: string | null;
   exit_code: number | null;
+  started_at?: string | null;
+  completed_at?: string | null;
+  heartbeat_at?: string | null;
 }
 interface BuilderApproval {
   id: string;
@@ -96,7 +103,13 @@ interface BuilderSnapshot {
   artifacts: BuilderArtifact[];
   workerRuns: BuilderWorkerRun[];
   approvals: BuilderApproval[];
+  modelRuns?: LiveModelRun[];
+  events?: LiveEvent[];
+  telemetry?: { model_runs_available: boolean; events_available: boolean; observed_at: string };
 }
+
+const LIVE_POLL_MS = 4000;
+const LIVE_POLL_MAX_BACKOFF_MS = 60000;
 
 interface BuilderContextSnapshot {
   build_map: { file_count: number; schema: { tables: string[] } };
@@ -199,6 +212,13 @@ const BuilderControlRoomPage: React.FC = () => {
   const [activeTab, setActiveTab] = useState<JobFilterTab>('all');
   const [searchQuery, setSearchQuery] = useState('');
   const [scopeFilter, setScopeFilter] = useState<ScopeFilter>('all');
+  const [pollState, setPollState] = useState<LivePollState>('idle');
+  const [observedAt, setObservedAt] = useState<string | null>(null);
+  const [retryAt, setRetryAt] = useState<number | null>(null);
+  const [now, setNow] = useState(() => Date.now());
+  const [changedFiles, setChangedFiles] = useState<{ manifestId: string | null; files: LiveChangedFile[]; total: number | null; error: string | null } | null>(null);
+  const selectedIdRef = useRef<string | null>(null);
+  selectedIdRef.current = selectedId;
   const [form, setForm] = useState({
     projectId: '', title: '', taskDescription: '', targetSha: '', branchName: 'main',
     frontendRequired: true, backendRequired: false, codeReviewMode: 'human' as ReviewMode,
@@ -242,12 +262,19 @@ const BuilderControlRoomPage: React.FC = () => {
     }
   }, [invoke]);
 
-  const loadSnapshot = useCallback(async (jobId: string) => {
+  const loadSnapshot = useCallback(async (jobId: string, options: { live?: boolean } = {}) => {
     try {
-      const data = await invoke({ action: 'get', job_id: jobId });
-      setSnapshot(data as BuilderSnapshot);
+      const data = await invoke({ action: 'get', job_id: jobId, ...(options.live ? { live_poll: true } : {}) });
+      // A slower response for a previously selected job must not overwrite the current selection.
+      if (selectedIdRef.current !== jobId) return false;
+      const next = data as BuilderSnapshot;
+      setSnapshot(next);
+      setObservedAt(next.telemetry?.observed_at ?? new Date().toISOString());
+      if (next.job) setJobs(current => current.map(job => job.id === jobId ? { ...job, ...next.job } : job));
       return true;
     } catch (loadError) {
+      if (options.live) throw loadError;
+      if (selectedIdRef.current !== jobId) return false;
       setSnapshot(null);
       setError(loadError instanceof Error ? loadError.message : 'Builder job could not be loaded.');
       return false;
@@ -267,6 +294,59 @@ const BuilderControlRoomPage: React.FC = () => {
   useEffect(() => { void loadList(); }, [loadList]);
   useEffect(() => { setCancellationReason(''); }, [selectedId]);
   useEffect(() => { if (selectedId) { void loadSnapshot(selectedId); void loadContext(selectedId); } else { setSnapshot(null); setContextSnapshot(null); } }, [selectedId, loadSnapshot, loadContext]);
+
+  const liveSnapshot = snapshot?.job?.id === selectedId ? snapshot : null;
+  const shouldPoll = isLiveJob(liveSnapshot?.job ?? null, liveSnapshot);
+
+  // Builder tables are service-role only and not on the realtime publication, so live state is polled
+  // through the authorised edge function: only while work is active and the tab is visible, with backoff.
+  useEffect(() => {
+    if (!selectedId || !shouldPoll) { setPollState('idle'); setRetryAt(null); return undefined; }
+    let cancelled = false;
+    let timer: number | undefined;
+    let failures = 0;
+    const schedule = (delay: number) => { window.clearTimeout(timer); timer = window.setTimeout(tick, delay); };
+    const tick = async () => {
+      if (cancelled) return;
+      if (document.hidden) { setPollState('paused'); return; }
+      try {
+        await loadSnapshot(selectedId, { live: true });
+        if (cancelled) return;
+        failures = 0;
+        setPollState('live');
+        setRetryAt(null);
+        schedule(LIVE_POLL_MS);
+      } catch {
+        if (cancelled) return;
+        failures += 1;
+        const delay = Math.min(LIVE_POLL_MS * 2 ** failures, LIVE_POLL_MAX_BACKOFF_MS);
+        setPollState('retrying');
+        setRetryAt(Date.now() + delay);
+        schedule(delay);
+      }
+    };
+    const onVisibility = () => { if (!document.hidden && !cancelled) schedule(0); else setPollState('paused'); };
+    document.addEventListener('visibilitychange', onVisibility);
+    setPollState(document.hidden ? 'paused' : 'live');
+    schedule(LIVE_POLL_MS);
+    return () => { cancelled = true; window.clearTimeout(timer); document.removeEventListener('visibilitychange', onVisibility); };
+  }, [selectedId, shouldPoll, loadSnapshot]);
+
+  useEffect(() => {
+    if (!selectedId) return undefined;
+    const interval = window.setInterval(() => { if (!document.hidden) setNow(Date.now()); }, 1000);
+    return () => window.clearInterval(interval);
+  }, [selectedId]);
+
+  const latestManifestId = liveSnapshot?.artifacts.filter(artifact => artifact.artifact_type === 'changed_file_manifest' && artifact.status === 'final').at(-1)?.id ?? null;
+  useEffect(() => {
+    if (!selectedId || !latestManifestId) { setChangedFiles(null); return undefined; }
+    let cancelled = false;
+    invoke({ action: 'changed_files', job_id: selectedId })
+      .then(data => { if (!cancelled) setChangedFiles({ manifestId: latestManifestId, files: (data?.files ?? []) as LiveChangedFile[], total: typeof data?.manifest?.total === 'number' ? data.manifest.total : null, error: null }); })
+      .catch(filesError => { if (!cancelled) setChangedFiles({ manifestId: latestManifestId, files: [], total: null, error: filesError instanceof Error ? filesError.message : 'Changed files could not be loaded.' }); });
+    return () => { cancelled = true; };
+  }, [selectedId, latestManifestId, invoke]);
 
   const selectedProject = projects.find(project => project.id === form.projectId) ?? null;
   const pendingJobs = jobs.filter(job => !['release_ready', 'deployed', 'failed', 'cancelled'].includes(job.status)).length;
@@ -669,6 +749,18 @@ const BuilderControlRoomPage: React.FC = () => {
               <span>{plainWords(selectedJob.requested_action)} for {plainWords(selectedJob.target_environment)}</span>
               <span>{completedSteps}/{snapshot.steps.length} steps satisfied</span>
             </div>
+            <BuilderLiveActivity
+              job={selectedJob}
+              snapshot={snapshot}
+              now={now}
+              pollState={pollState}
+              observedAt={observedAt}
+              retryInMs={retryAt ? Math.max(0, retryAt - now) : null}
+              changedFiles={changedFiles?.manifestId === latestManifestId ? changedFiles.files : null}
+              changedFilesTotal={changedFiles?.total ?? null}
+              changedFilesError={changedFiles?.error ?? null}
+              telemetryAvailable={snapshot.telemetry ? snapshot.telemetry.model_runs_available && snapshot.telemetry.events_available : true}
+            />
             {snapshot && (
               <div className="builder-pipeline-bar" aria-label="Autonomous agent pipeline">
                 <span className={`builder-pipeline-node ${snapshot.steps.find(s => s.step_id === 'product_analysis')?.status === 'completed' ? 'is-complete' : selectedJob.current_step_name === 'product_analysis' ? 'is-active' : ''}`}>1. Analyst</span>
@@ -729,8 +821,8 @@ const BuilderControlRoomPage: React.FC = () => {
               </div>
             ))}</div>
             <div className="builder-execution-inputs">
-              {selectedJob.frontend_required && <label>Frontend source files<textarea value={frontendFiles} onChange={event => setFrontendFiles(event.target.value)} rows={3} placeholder="apps/web/src/pages/ExamplePage.tsx" /></label>}
-              {selectedJob.backend_required && <label>Backend source files<textarea value={backendFiles} onChange={event => setBackendFiles(event.target.value)} rows={3} placeholder="supabase/functions/example/index.ts" /></label>}
+              {selectedJob.frontend_required && <label>Frontend source files<textarea value={frontendFiles} onChange={event => setFrontendFiles(event.target.value)} rows={3} placeholder="Optional. Leave blank and Bob finds the files himself. One repo path per line." /></label>}
+              {selectedJob.backend_required && <label>Backend source files<textarea value={backendFiles} onChange={event => setBackendFiles(event.target.value)} rows={3} placeholder="Optional. Leave blank and Bob finds the files himself. One repo path per line." /></label>}
               {selectedJob.code_review_mode === 'independent_ai' && <label>Independent reviewer model<input value={reviewerModel} onChange={event => setReviewerModel(event.target.value)} maxLength={200} placeholder="Configured model identity" /></label>}
             </div>
             <div className="builder-evidence"><span>{snapshot.artifacts.length} artifacts</span><span>{snapshot.workerRuns.length} worker runs</span></div>

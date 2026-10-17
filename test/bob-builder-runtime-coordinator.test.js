@@ -485,3 +485,43 @@ test('an author with nothing to change in its lane skips the step when the other
     delete require.cache[coordinatorPath];
   }
 });
+
+test('two in-house budgets with no edit escalate once to the outsourced tier, seeded with the reading map (live jobs 0c388688, 26ef7a12, e710f032)', async () => {
+  const engineerPath = require.resolve('../builder-agentic-engineer');
+  const originalEngineer = require.cache[engineerPath].exports;
+  const coordinatorPath = require.resolve('../builder-runtime-coordinator');
+  const handoffPath = require.resolve('../builder-backend-handoff');
+  const originalHandoff = require.cache[handoffPath].exports;
+  const map = { files_read: [{ path: 'apps/web/src/pages/OrganizationSetupPage.tsx', ranges: ['960-995'] }], conclusion: 'out of turns', turns_used: 60 };
+  const chain = ['gpu_workstation', 'ollama', 'openai'];
+  const calls = [];
+  const local = (provider) => ({ ok: false, no_change: true, budget_exhausted: true, resume_hints: map, error: 'turn budget exhausted', turns: 60, routing: { provider, chain } });
+  require.cache[handoffPath].exports = { ...originalHandoff, runBackendHandoff: async () => ({ success: true, artifacts: [{ id: 'verified' }] }) };
+  const rpcs = [];
+  const supabase = { rpc: async (name, args) => { rpcs.push({ name, args }); return { data: null, error: null }; } };
+  try {
+    require.cache[engineerPath].exports = { ...originalEngineer, runAgenticEngineer: async (input) => {
+      calls.push({ startAfter: input.startAfterProvider, seeded: Boolean(input.previousAttempt) });
+      return input.startAfterProvider === 'ollama' ? { ok: true, patch_artifact: { id: 'patch-openai' }, routing: { provider: 'openai', chain } } : local('gpu_workstation');
+    } };
+    delete require.cache[coordinatorPath];
+    const result = await require('../builder-runtime-coordinator').runBackendImplementation({ supabase, gateway: {}, job: { id: 'job-e' }, step: { id: 'step-e' }, context: { workspaceRoot: '/ws', gitSourceDir: '/src', repoRoot: '/repo' } });
+    assert.equal(result.success, true, JSON.stringify(result));
+    assert.equal(result.routing.provider, 'openai');
+    assert.deepEqual(calls, [{ startAfter: null, seeded: false }, { startAfter: null, seeded: true }, { startAfter: 'ollama', seeded: true }], 'third run skips every in-house provider and starts from the map');
+    assert.equal(rpcs.length, 0);
+
+    // A restricted (local-only) chain never escalates out of the house.
+    calls.length = 0;
+    require.cache[engineerPath].exports = { ...originalEngineer, runAgenticEngineer: async (input) => { calls.push(input.startAfterProvider); return { ...local('ollama'), routing: { provider: 'ollama', chain: ['ollama', 'gpu_workstation'] } }; } };
+    delete require.cache[coordinatorPath];
+    const parked = await require('../builder-runtime-coordinator').runBackendImplementation({ supabase, gateway: {}, job: { id: 'job-r' }, step: { id: 'step-r' }, context: { workspaceRoot: '/ws', gitSourceDir: '/src', repoRoot: '/repo' } });
+    assert.equal(parked.success, false);
+    // Only the existing in-house hop (ollama → gpu_workstation) follows; no outsourced third run is added.
+    assert.deepEqual(calls, [null, null, 'ollama', 'ollama']);
+  } finally {
+    require.cache[engineerPath].exports = originalEngineer;
+    require.cache[handoffPath].exports = originalHandoff;
+    delete require.cache[coordinatorPath];
+  }
+});

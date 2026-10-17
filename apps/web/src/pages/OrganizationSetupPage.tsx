@@ -541,9 +541,9 @@ const OrganizationSetupPage: React.FC = () => {
     if (jurisdictionNames.length === 0) return;
     setJurisdictionPreviewLoading(true);
     setJurisdictionPreviewMessage(null);
-    setJurisdictionPreview(null);
     const { data, error: previewError } = await supabase.functions.invoke('bob-jurisdiction-preview', { body: { district_names: jurisdictionNames } });
     if (previewError || !data?.results?.length || data.results.some((result: { matched: boolean }) => !result.matched)) {
+      setJurisdictionPreview(null);
       const unmatched = (data?.unmatched ?? jurisdictionNames).join(', ');
       const unavailable = (data?.unavailable ?? []).join(', ');
       setJurisdictionPreviewMessage(previewError?.message ?? (unavailable ? `Boundary source unavailable for: ${unavailable}. Nothing has been saved; retry or draw the boundary manually.` : `No council boundary matched: ${unmatched}.`));
@@ -977,19 +977,70 @@ const OrganizationSetupPage: React.FC = () => {
   );
 };
 
+function geometryFingerprint(layer: L.GeoJSON) {
+  const bounds = layer.getBounds();
+  return `${layer.getLayers().length}:${bounds.isValid() ? bounds.toBBoxString() : 'empty'}`;
+}
+
+// One Leaflet instance stays mounted for the page's life. Selecting councils, re-fetching the org, or
+// saving geofence settings must not reset the officer's pan/zoom; only a genuinely different boundary refits.
 function JurisdictionPreviewMap({ geometry, label }: { geometry: GeoJSON.GeoJsonObject | null; label: string }) {
   const containerRef = React.useRef<HTMLDivElement | null>(null);
+  const mapRef = React.useRef<L.Map | null>(null);
+  const layerRef = React.useRef<L.GeoJSON | null>(null);
+  const fingerprintRef = React.useRef<string | null>(null);
+
   useEffect(() => {
-    if (!containerRef.current || !geometry) return;
-    const map = L.map(containerRef.current, { zoomControl: true }).setView([-41.27, 173.28], 9);
+    if (!containerRef.current || mapRef.current) return undefined;
+    const map = L.map(containerRef.current, { zoomControl: true }).setView([-41.27, 173.28], 6);
     addLinzBaseLayers(map, { collapsed: false, maxZoom: 18 });
-    const layer = L.geoJSON(geometry, { style: { color: '#14c8d4', weight: 2, fillColor: '#14c8d4', fillOpacity: 0.16 } }).bindTooltip(label).addTo(map);
-    const bounds = layer.getBounds();
-    if (bounds.isValid()) map.fitBounds(bounds.pad(0.08));
+    mapRef.current = map;
     const timer = window.setTimeout(() => map.invalidateSize(), 0);
-    return () => { window.clearTimeout(timer); map.remove(); };
-  }, [geometry, label]);
-  return geometry ? <div className="organization-jurisdiction-map" ref={containerRef} aria-label={`${label} service area preview`} /> : <div className="organization-jurisdiction-map-empty">Pick a council area and preview its boundary here.</div>;
+    const resize = typeof ResizeObserver === 'undefined' ? null : new ResizeObserver(() => map.invalidateSize());
+    resize?.observe(containerRef.current);
+    return () => {
+      window.clearTimeout(timer);
+      resize?.disconnect();
+      map.remove();
+      mapRef.current = null;
+      layerRef.current = null;
+      fingerprintRef.current = null;
+    };
+  }, []);
+
+  useEffect(() => {
+    const map = mapRef.current;
+    if (!map) return;
+    if (!geometry) {
+      layerRef.current?.remove();
+      layerRef.current = null;
+      fingerprintRef.current = null;
+      return;
+    }
+    const next = L.geoJSON(geometry, { style: { color: '#14c8d4', weight: 2, fillColor: '#14c8d4', fillOpacity: 0.16 } });
+    const fingerprint = geometryFingerprint(next);
+    if (fingerprint === fingerprintRef.current && layerRef.current) return;
+    layerRef.current?.remove();
+    next.addTo(map);
+    layerRef.current = next;
+    fingerprintRef.current = fingerprint;
+    const bounds = next.getBounds();
+    if (bounds.isValid()) map.fitBounds(bounds.pad(0.08));
+  }, [geometry]);
+
+  useEffect(() => {
+    const layer = layerRef.current;
+    if (!layer) return;
+    layer.unbindTooltip();
+    if (label) layer.bindTooltip(label);
+  }, [label, geometry]);
+
+  return (
+    <div className="organization-jurisdiction-map-frame">
+      <div className="organization-jurisdiction-map" ref={containerRef} aria-label={`${label} service area preview`} aria-hidden={geometry ? undefined : true} />
+      {!geometry && <div className="organization-jurisdiction-map-empty">Pick a council area and preview its boundary here.</div>}
+    </div>
+  );
 }
 
 export default OrganizationSetupPage;

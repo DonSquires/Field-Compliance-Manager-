@@ -182,14 +182,14 @@ function agenticGenerator(lane, context, extra = {}) {
     ]);
     // An engineer crash is a failed generation (counted against the step's attempt ceiling and recorded
     // with its reason), not a failed run that leaves the step looking untouched.
-    const attempt = (previousAttempt = null) => (extra.runEngineer || runAgenticEngineer)({
+    const attempt = (previousAttempt = null, startAfter = startAfterProvider) => (extra.runEngineer || runAgenticEngineer)({
       supabase, gateway, job, step, lane,
       sourceDir: context.gitSourceDir || context.sourceDir,
       workspaceRoot: context.workspaceRoot,
       repoRoot: context.repoRoot,
       specification, uxPlan, liveContext,
       hints: requestedFiles,
-      startAfterProvider,
+      startAfterProvider: startAfter,
       previousFailure: previousFailure ? { failure_evidence: previousFailure, failed_patch_artifact_id: failedPatchArtifact?.id ?? null } : null,
       previousAttempt,
       seedPatch,
@@ -203,10 +203,29 @@ function agenticGenerator(lane, context, extra = {}) {
     if (generation.budget_exhausted && generation.resume_hints) {
       const second = await attempt(generation.resume_hints);
       generation = { ...second, attempts: 2, first_attempt: { turns: generation.turns, conclusion: String(generation.error || '').slice(0, 300) } };
+      // Two full in-house budgets spent reading with no edit means the task is beyond that model
+      // (live jobs 0c388688, 26ef7a12, e710f032: qwen2.5-coder:7b, 60 turns × 2, zero edits each).
+      // Hand it once to the outsourced tier when the routing chain allows it, starting from the map.
+      const pastInHouse = outsourcedEscalationPoint(second);
+      if ((second.budget_exhausted || second.no_change) && pastInHouse) {
+        const third = await attempt(second.resume_hints || generation.resume_hints, pastInHouse);
+        if (third.ok && third.patch_artifact?.id) return { ...third, attempts: 3, escalated_after_in_house_budget: true, first_attempt: generation.first_attempt };
+        return { ...third, attempts: 3, no_change: true, error: `two in-house attempts ran out of turns without an edit; escalated attempt (${third.routing?.provider || 'outsourced'}): ${String(third.error || '').slice(0, 600)}` };
+      }
       if (generation.budget_exhausted || generation.no_change) generation = { ...generation, no_change: true, error: `two attempts ran out of turns without an edit; second attempt: ${String(second.error || '').slice(0, 600)}` };
     }
     return generation;
   };
+}
+
+// The last in-house provider in the routing chain, when an outsourced provider follows it. Restricted
+// (local-only) chains have none, so their data never leaves the house on an escalation.
+function outsourcedEscalationPoint(generation) {
+  const provider = generation?.routing?.provider;
+  const chain = Array.isArray(generation?.routing?.chain) ? generation.routing.chain : [];
+  if (!provider || provider === 'openai' || !chain.includes('openai')) return null;
+  const inHouse = chain.slice(0, chain.indexOf('openai')).filter((item) => item !== 'openai');
+  return inHouse.length ? inHouse[inHouse.length - 1] : null;
 }
 
 // A local (in-house) author that fails is "stuck": the next attempt resumes the chain past it.

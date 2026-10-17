@@ -543,7 +543,9 @@ async function resolveBuilderSourceDir(jobId) {
   const sourceDir = workspacePathForBranch(builderWorkspaceRoot, job.workspace_branch);
   if (!fs.existsSync(sourceDir)) throw new Error('Builder workspace is unavailable');
   if (job.workspace_head_sha !== job.target_sha) throw new Error('Builder job does not match its workspace head');
-  return { sourceDir, gitSourceDir: builderSourceDir, targetSha: job.target_sha, title: job.title, taskDescription: job.task_description };
+  // Re-pin the shared clone: it sits at whichever SHA the previous job used, and the engineer's
+  // worktree checks verify against it (job f6df4b84: "source checkout does not match the target SHA" ×6).
+  return { sourceDir, gitSourceDir: builderGitSource(job.target_sha), targetSha: job.target_sha, title: job.title, taskDescription: job.task_description };
 }
 
 // One Builder run per job at a time; runs continue after the HTTP caller has gone.
