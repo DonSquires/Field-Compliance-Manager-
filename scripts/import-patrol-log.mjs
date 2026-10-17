@@ -1,100 +1,63 @@
 #!/usr/bin/env node
 /*
  * Parses a raw R&M patrol-log CSV (exported via .tmp-xlsx-to-csv.ps1 from the
- * client's raw DATA sheet) into a governed review batch:
+ * client's raw DATA sheet) into a resolved JSON batch, then imports it:
  *   - Rows with a resolvable officer (Patroller matches a known R&M
  *     user_profiles.display_name) AND a plate (Reg column, or extracted from
  *     Comments) go to `public.observations` (vehicle-plate-sighting table).
  *   - Everything else (literal "Camera", unresolved patroller names, no
- *     plate) goes to `public.location_events` via create_location_event().
- * Idempotent: the source/configuration identity freezes the review batch and
- * every row is keyed by `rm_patrol_import:{client_code}:{Job}`.
+ *     plate) goes to `public.location_events`.
+ * Idempotent: every row is keyed by `rm_patrol_import:{client_code}:{Job}` as
+ * external_ref/external_refs so a re-run does not duplicate.
  *
  *   node scripts/import-patrol-log.mjs --csv <path> --org-id <uuid> --client-code <code>
+ *     --provider-org-id <uuid> --classification-profile <code>
  *     --zone-map-file <path-to-json> [--source-label <file>] [--source-hash <sha256>]
- *     [--source-sheet <sheet>] [--source-first-row <number>] [--dry-run|--apply]
+ *     [--source-sheet <sheet>] [--source-first-row <number>] [--include-narratives]
+ *     [--use-supabase-cli] [--dry-run|--apply]
  *
- * Required: FIELD_COMPLIANCE_CODESPACE (Supabase management token; never printed).
+ * Database access: FIELD_COMPLIANCE_CODESPACE (never printed), or an existing
+ * linked Supabase CLI session selected explicitly with --use-supabase-cli.
  */
-import { readFileSync } from 'node:fs';
 import { execFileSync } from 'node:child_process';
-import { mkdtempSync, rmSync, writeFileSync } from 'node:fs';
+import { mkdtempSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
 import { createHash } from 'node:crypto';
 import { tmpdir } from 'node:os';
 import { basename, join } from 'node:path';
+import { classifyPatrolWork } from './patrol-work-classifier.mjs';
+import { buildPatrolImportProposals } from './patrol-import-proposals.mjs';
 
-const PROJECT_REF = 'dotczcyyzgabmtmnglqj';
-const PROVIDER_ORG_ID = 'e96d71c9-28a6-4d4a-b0f3-1c4ecdaa9c13'; // R&M Security and Investigations
-const ACTOR_ID = 'f1c00000-0000-4000-8000-000000000001'; // Dedicated non-login import identity
-const SOURCE_PROFILE = 'rm_patrol_log';
 const args = process.argv.slice(2);
 const flag = (name) => { const i = args.indexOf(name); return i !== -1 ? args[i + 1] : null; };
 const mode = args.includes('--apply') ? 'apply' : 'dry-run';
 const includeNarratives = args.includes('--include-narratives');
 const useSupabaseCli = args.includes('--use-supabase-cli');
+const projectRef = process.env.SUPABASE_PROJECT_REF;
 const csvPath = flag('--csv');
 const orgId = flag('--org-id');
+const providerOrgId = flag('--provider-org-id');
 const clientCode = flag('--client-code');
 const zoneMapFile = flag('--zone-map-file');
 const sourceLabel = flag('--source-label');
 const sourceHash = flag('--source-hash');
 const sourceSheet = flag('--source-sheet');
 const sourceFirstRow = Number(flag('--source-first-row') ?? 2);
+const classificationProfile = flag('--classification-profile');
 const zoneMap = zoneMapFile ? JSON.parse(readFileSync(zoneMapFile, 'utf8')) : JSON.parse(flag('--zone-map') ?? '{}');
 const token = process.env.FIELD_COMPLIANCE_CODESPACE;
-if (mode === 'apply' && !token && !useSupabaseCli) { console.error('FIELD_COMPLIANCE_CODESPACE or --use-supabase-cli is required for --apply'); process.exit(1); }
-if (!csvPath || !orgId || !clientCode) { console.error('Usage: --csv <path> --org-id <uuid> --client-code <code> --zone-map-file <path> [--dry-run|--apply]'); process.exit(1); }
+if (!token && !useSupabaseCli) { console.error('FIELD_COMPLIANCE_CODESPACE or --use-supabase-cli is required'); process.exit(1); }
+if (!projectRef && !useSupabaseCli) { console.error('SUPABASE_PROJECT_REF is required unless --use-supabase-cli is used'); process.exit(1); }
+if (!csvPath || !orgId || !providerOrgId || !clientCode || !classificationProfile) {
+  console.error('Usage: --csv <path> --org-id <uuid> --provider-org-id <uuid> --client-code <code> --classification-profile <code> --zone-map-file <path> [--include-narratives] [--use-supabase-cli] [--dry-run|--apply]');
+  process.exit(1);
+}
+for (const [name, value] of Object.entries({ 'org-id': orgId, 'provider-org-id': providerOrgId })) {
+  if (!/^[a-f0-9]{8}-[a-f0-9]{4}-[1-5][a-f0-9]{3}-[89ab][a-f0-9]{3}-[a-f0-9]{12}$/i.test(value)) { console.error(`--${name} must be a UUID`); process.exit(1); }
+}
+if (!/^[a-z0-9_-]+$/i.test(clientCode)) { console.error('--client-code must contain only letters, numbers, underscores, or hyphens'); process.exit(1); }
 if (sourceHash && !/^[a-f0-9]{64}$/i.test(sourceHash)) { console.error('--source-hash must be a SHA-256 hex digest'); process.exit(1); }
-if (!/^[0-9a-f-]{36}$/i.test(orgId)) { console.error('--org-id must be a UUID'); process.exit(1); }
 if (!Number.isInteger(sourceFirstRow) || sourceFirstRow < 1) { console.error('--source-first-row must be a positive integer'); process.exit(1); }
-
-// R&M's own known officers (created 2026-09-23 on owner instruction). Extend
-// this list as more real names are confirmed from other client files.
-const KNOWN_OFFICERS = {
-  'rob crawford': 'c1f730f2-efb2-4709-bf59-6437e3578bc3',
-  'colin eathorne': '00a5c612-7fec-411c-a7bd-21e526c81cb9',
-  'susan finigan': '0cb049df-fea2-4566-a2fb-30956064ead8',
-  'evan garland': '9a354919-1240-4dac-a264-42857168611b',
-  'marty lucas': '30cf4614-4c66-475c-929a-d9519e2061f4',
-  'wade sutherland-berkett': '9e96c281-3dc1-449b-819f-57b61f91c739',
-  'pete crawford': '8f705807-81d5-424e-910f-3c5d8d97b80e',
-  'reuben stanfield': '19e1ab78-abe3-4ffe-a006-66a4fab56804',
-  // Found in NCC's raw log (2026-09-23):
-  'sally curtis': 'd65b59e3-9c21-45d4-968f-351ca6e319fe',
-  'colin nelson': 'c8c102f0-bec6-4b03-a7a3-160f7a7585d1',
-  'ash bremner': '822509e2-7bf0-4177-b895-d27034b30252',
-  'dan douglas': '60b73649-ddae-4386-be6b-3d9243db625c',
-  'dave porter': '5bd14029-b00b-4240-b42a-c739c168b6e4',
-  'a goodall': '107e5596-a859-4fe7-900f-aa98b7f2147c',
-  'glenn gribben': 'c844ff45-eaf6-439a-bc51-b6065a6acabd',
-  // Found in TDC's raw log (2026-09-23). Don Squires already had an R&M-org profile
-  // (role=master) from earlier in this project - reused rather than duplicated.
-  'steve henery': '1a80c0eb-bfe9-4c75-b6d1-659b13b0bc75',
-  'andrew curtis': 'a77d3dfd-9fb9-4543-9928-421b369aa847',
-  'jacob lucas': 'a4c07cc6-530a-401d-8781-414f382ebe06',
-  'deb crawford': '368b4d00-604b-47f9-9656-9471a0f8ee6e',
-  'ken eccles': '3c25162f-d6dc-44c2-88b2-5607a322d7f9',
-  'don squires': '08369a00-e2df-45d6-9e6b-6b3a6bede645',
-  // Found in M&R's raw log (2026-09-23):
-  'beau webster': '91e8e27b-1bc1-4e69-8d42-e8a816d853dc',
-  // Found in STAND's raw log (2026-09-23) - "Deborah Crawford" is the same real
-  // person as the already-known "Deb Crawford" (verified via existing profile).
-  'deborah crawford': '368b4d00-604b-47f9-9656-9471a0f8ee6e',
-  // Found in Private-Redvale-Merc's raw log (2026-09-23) - same person as
-  // "wade sutherland-berkett" above, just spelled without the hyphen.
-  'wade sutherland berkett': '9e96c281-3dc1-449b-819f-57b61f91c739',
-  // Found in OFO's culling logs + confirmed via R&M's own historical staff roster
-  // (RMSEC Forestry Staff Rosters/Roster.xlsx, "Steve"/"Sheryl" columns, 2026-09-24)
-  // - profile-only records (no auth.users row), same pattern as the officers above.
-  'steve savage': 'a9342300-f1c7-4402-8c2e-4de5689fda5a',
-  'sheryl murray': 'ce9f16b8-bb7f-4e60-929a-64458fefb347',
-  // PLACEHOLDER (2026-09-24) - real, substantial officer in the roster (~89
-  // mentions, Jan-Dec 2023) with no surname found anywhere yet. Owner is
-  // confirming the real name with the Crawfords; display_name "Waz Waz" and
-  // this key are a stand-in - update both (and re-run any imports keyed on
-  // this name) once the real name is known.
-  'waz': 'ee7ded2c-f2b4-4ac3-bd8c-2cc376d94331',
-};
+if (!/^[a-z0-9_-]+$/.test(classificationProfile)) { console.error('--classification-profile must contain only lowercase letters, numbers, underscores, or hyphens'); process.exit(1); }
 
 function parseCsv(text) {
   const rows = [];
@@ -148,43 +111,134 @@ function extractPlates(text) {
   return [...found];
 }
 
-const raw = readFileSync(csvPath, 'utf8');
-const computedSourceHash = createHash('sha256').update(raw).digest('hex');
-if (sourceHash && sourceHash.toLowerCase() !== computedSourceHash) {
-  console.error('--source-hash does not match the CSV bytes');
-  process.exit(1);
+function importedNumber(value) {
+  const normalized = String(value ?? '').replace(/[$,\s]/g, '');
+  return /^-?[0-9]+([.][0-9]+)?$/.test(normalized) ? Number(normalized) : null;
 }
-const immutableSourceHash = computedSourceHash;
-const immutableSourceLabel = sourceLabel || basename(csvPath);
-const immutableSourceSheet = sourceSheet || 'DATA';
+
+function runCliQuery(query) {
+  const tempDir = mkdtempSync(join(tmpdir(), 'fcm-patrol-import-'));
+  const sqlFile = join(tempDir, 'query.sql');
+  try {
+    writeFileSync(sqlFile, query, 'utf8');
+    const cliPath = join(process.cwd(), 'node_modules', 'supabase', 'dist', 'supabase.js');
+    const cliArgs = [cliPath, 'db', 'query', '--linked', '--output-format', 'json', '--file', sqlFile];
+    if (projectRef) cliArgs.splice(4, 0, '--project-ref', projectRef);
+    const output = execFileSync(process.execPath, cliArgs, {
+      encoding: 'utf8',
+      maxBuffer: 32 * 1024 * 1024,
+    });
+    const result = JSON.parse(output);
+    if (!Array.isArray(result.rows)) throw new Error('Supabase CLI returned no query rows');
+    return result.rows;
+  } finally {
+    rmSync(tempDir, { recursive: true, force: true });
+  }
+}
+
+function parseImportContextRows(rows) {
+  const sourceProfile = rows.find((row) => row.record_type === 'source_profile')?.payload ?? null;
+  const personAliases = Object.fromEntries(rows.filter((row) => row.record_type === 'person_alias').map((row) => [row.payload.alias_norm, row.payload.user_profile_id]));
+  const classificationRules = rows.filter((row) => row.record_type === 'classification_rule').map((row) => row.payload);
+  if (!sourceProfile || sourceProfile.parser !== 'csv' || typeof sourceProfile.column_mappings !== 'object' || typeof sourceProfile.target_mappings !== 'object') throw new Error(`No active CSV source profile is configured for ${classificationProfile}`);
+  if (Object.keys(personAliases).length === 0) throw new Error(`No person aliases are configured for ${classificationProfile}`);
+  if (classificationRules.length === 0) throw new Error(`No classification rules are configured for ${classificationProfile}`);
+  return { sourceProfile, personAliases, classificationRules };
+}
+
+async function loadImportContext() {
+  const profile = classificationProfile.replace(/'/g, "''");
+  const query = `SELECT * FROM (
+SELECT 'source_profile' AS record_type,
+  jsonb_build_object('parser', profile.parser, 'column_mappings', profile.column_mappings, 'target_mappings', profile.target_mappings, 'import_actor_id', profile.import_actor_id) AS payload
+FROM public.import_source_profiles profile
+WHERE profile.organization_id = '${providerOrgId}'::uuid
+  AND profile.profile_code = '${profile}'
+  AND profile.active
+UNION ALL
+SELECT 'person_alias' AS record_type,
+       jsonb_build_object('alias_norm', alias.alias_norm, 'user_profile_id', alias.user_profile_id) AS payload
+FROM public.import_person_aliases alias
+WHERE alias.organization_id = '${providerOrgId}'::uuid
+  AND alias.source_profile = '${profile}'
+  AND alias.active
+UNION ALL
+SELECT 'classification_rule',
+       jsonb_build_object(
+         'id', rule.id,
+         'target_code_id', code.id,
+         'target_code_type', code.code_type,
+         'target_code', code.code,
+         'target_external_refs', code.external_refs,
+         'conditions', rule.conditions,
+         'priority', rule.priority,
+         'active', rule.active
+       )
+FROM public.import_value_classification_rules rule
+JOIN public.reference_codes code ON code.id = rule.target_code_id
+WHERE rule.organization_id = '${providerOrgId}'::uuid
+  AND rule.source_profile = '${profile}'
+  AND rule.active
+  AND code.is_active
+) records
+ORDER BY record_type,
+  coalesce((payload->>'priority')::integer, 0),
+  coalesce(payload->>'alias_norm', payload->>'id', '');`;
+  if (useSupabaseCli) return parseImportContextRows(runCliQuery(query));
+  const response = await fetch(`https://api.supabase.com/v1/projects/${projectRef}/database/query`, {
+    method: 'POST', headers: { Authorization: `Bearer ${token}`, 'Content-Type': 'application/json' }, body: JSON.stringify({ query }),
+  });
+  const text = await response.text();
+  if (!response.ok) throw new Error(`Import context lookup failed: ${text.slice(0, 1200)}`);
+  const rows = JSON.parse(text);
+  return parseImportContextRows(rows);
+}
+
+const { sourceProfile, personAliases, classificationRules } = await loadImportContext();
+const actorId = sourceProfile.import_actor_id;
+if (!/^[a-f0-9]{8}-[a-f0-9]{4}-[1-5][a-f0-9]{3}-[89ab][a-f0-9]{3}-[a-f0-9]{12}$/i.test(actorId ?? '')) throw new Error(`Source profile ${classificationProfile} has no valid import actor`);
+const importConfigurationHash = createHash('sha256')
+  .update(JSON.stringify({ sourceProfile, personAliases, classificationRules }))
+  .digest('hex');
+
+const raw = readFileSync(csvPath, 'utf8');
+const derivativeHash = createHash('sha256').update(raw).digest('hex');
+const effectiveSourceHash = sourceHash ?? derivativeHash;
+const effectiveSourceLabel = sourceLabel ?? basename(csvPath);
 const table = parseCsv(raw).filter((r) => r.length > 1);
 // Header cells sometimes carry a leading BOM and/or extra/embedded whitespace (e.g. NCC's
 // "24hr\nTime", Taylors' "Log  no" with a double space) - normalize both before matching.
 const header = table[0].map((h) => h.replace(/^\uFEFF/, '').replace(/\s+/g, ' ').trim());
 const headerLower = header.map((h) => h.toLowerCase());
-// Different clients' raw sheets use different header text (and casing) for the same logical
-// column (confirmed: DOC uses Location/Comments/Job Time/Job KMs; NCC uses a separate Reserve
-// code + Location detail, "24hr Time", "Description/Comments", "Job Time NCC"; Taylors uses
-// "Log  no"/"Action By") - matching is case-insensitive, first candidate found wins.
+// Header aliases belong to the selected import source profile. Matching remains
+// case-insensitive, but adding another source layout is a data change.
 const pick = (...candidates) => { for (const name of candidates) { const i = headerLower.indexOf(name.toLowerCase()); if (i !== -1) return i; } return -1; };
-const col = {
-  job: pick('Job', 'Log No', 'Logno'), patroller: pick('Patroller'), date: pick('Date'),
-  time: pick('Time', '24hr Time'),
-  reserve: pick('Reserve', 'CODE', 'Forest', 'Site'), // primary zone-code key when present (more stable than free-text Location)
-  location: pick('Location'), // fallback zone key: free-text detail, or the only place column on non-council sheets
-  comments: pick('Comments', 'Description/Comments'),
-  reg: pick('Reg', 'Numbers'),
-  jobTime: pick('Job Time', 'Job Time NCC', 'Job Time OFO', 'Job Time TPFL'), jobKms: pick('Job KMs', 'Job Km NCC', 'Job kms', 'Job KM OFO', 'Job KM', 'Job KM TPFL'),
-  issue: pick('Issue'), actionBy: pick('Action by', 'Action By'),
-  actionNotes: pick('Action / Notes', 'Action Notes'), lastActionDate: pick('Last Action Date'), closedBy: pick('Closed By'),
+const mapped = (logicalField) => {
+  const aliases = sourceProfile.column_mappings[logicalField] ?? [];
+  if (!Array.isArray(aliases)) throw new Error(`Source profile ${classificationProfile} has invalid aliases for ${logicalField}`);
+  return pick(...aliases);
 };
+const col = {
+  job: mapped('job'), patroller: mapped('patroller'), date: mapped('date'), time: mapped('time'),
+  reserve: mapped('reserve'), location: mapped('location'), comments: mapped('comments'), registration: mapped('registration'),
+  jobTime: mapped('job_time'), jobKms: mapped('job_km'), workSource: mapped('source'), subject: mapped('subject'), issue: mapped('issue'), actionBy: mapped('action_by'),
+  jobCost: mapped('job_cost'), travelCost: mapped('travel_cost'), totalCost: mapped('total_cost'),
+};
+for (const requiredField of ['job', 'patroller', 'date']) {
+  if (col[requiredField] < 0) throw new Error(`Source profile ${classificationProfile} could not resolve required ${requiredField} header`);
+}
 
 const observationsBatch = [];
 const eventsBatch = [];
+const proposalsBatch = [];
 const seenExternalRefs = new Set();
+const unresolvedAliasValues = new Set();
+const classificationCounts = { work_subject: {}, work_activity: {} };
+const costEvidenceTotals = { job_cost: 0, travel_cost: 0, total_cost: 0, rows: 0 };
 let skipped = 0;
 let skippedNoZone = 0;
 let skippedDuplicate = 0;
+let unresolvedAliasRows = 0;
 
 for (const [rowIndex, r] of table.slice(1).entries()) {
   const job = (r[col.job] ?? '').trim();
@@ -205,16 +259,21 @@ for (const [rowIndex, r] of table.slice(1).entries()) {
   // Reg column sometimes holds several plates separated by commas/slashes/spaces
   // (e.g. "ACZ755, DAB364, DGY148") - split first, validate each token's shape,
   // rather than stripping separators and concatenating them into one string.
-  const regTokens = (r[col.reg] ?? '').toUpperCase().split(/[,;/\s]+/).map((t) => t.replace(/[^A-Z0-9]/g, '')).filter(Boolean);
+  const regTokens = (r[col.registration] ?? '').toUpperCase().split(/[,;/\s]+/).map((t) => t.replace(/[^A-Z0-9]/g, '')).filter(Boolean);
   const regPlates = regTokens.filter((t) => PLATE_SHAPE_RE.test(t));
   const plates = regPlates.length ? regPlates : extractPlates(comments);
   const primaryPlate = plates[0] ?? null;
   const isCamera = /^camera$/i.test(patroller);
+  const workClassification = classifyPatrolWork({ subject: r[col.subject], issue: r[col.issue], description: comments }, classificationRules);
   // Some rows record TWO officers on a joint patrol, separated by a newline/comma in one cell
   // (e.g. "Colin Eathorne\nWade Sutherland-Berkett") - take the first name that resolves to a
   // known officer rather than requiring the whole raw cell to match a single known name exactly.
   const patrollerNames = patroller.split(/[\n,]+/).map((s) => s.trim().toLowerCase()).filter(Boolean);
-  const officerId = !isCamera ? patrollerNames.map((n) => KNOWN_OFFICERS[n]).find(Boolean) ?? null : null;
+  const officerId = !isCamera ? patrollerNames.map((name) => personAliases[name]).find(Boolean) ?? null : null;
+  if (!isCamera && patrollerNames.length > 0 && !officerId) {
+    unresolvedAliasRows += 1;
+    patrollerNames.forEach((name) => unresolvedAliasValues.add(name));
+  }
   const externalRef = `rm_patrol_import:${clientCode}:${job || createHash('md5').update(occurredAt + locationText + comments).digest('hex').slice(0, 8)}`;
   if (seenExternalRefs.has(externalRef)) {
     skippedDuplicate += 1;
@@ -223,146 +282,249 @@ for (const [rowIndex, r] of table.slice(1).entries()) {
   seenExternalRefs.add(externalRef);
   const payload = {
     source: 'rm_patrol_log_import', client_code: clientCode, job_number: job || null,
-    source_file: immutableSourceLabel, source_sha256: immutableSourceHash,
-    source_sheet: immutableSourceSheet, source_row: sourceFirstRow + rowIndex,
-    classification_profile: SOURCE_PROFILE,
-    job_kms: r[col.jobKms] || null,
+    source_file: effectiveSourceLabel, source_sha256: effectiveSourceHash, derivative_sha256: derivativeHash,
+    source_sheet: sourceSheet || null, source_row: sourceFirstRow + rowIndex,
+    location_raw: locationText, reserve_raw: reserveCode || null,
+    reg_raw: (r[col.registration] ?? '').trim() || null, plates_found: plates, job_time_hours: r[col.jobTime] || null,
+    job_kms: r[col.jobKms] || null, job_cost: importedNumber(r[col.jobCost]), travel_cost: importedNumber(r[col.travelCost]),
+    total_cost: importedNumber(r[col.totalCost]), source_category: (r[col.workSource] ?? '').trim() || null,
+    classification_profile: classificationProfile,
     ...(includeNarratives ? {
+      patroller_raw: patroller || null,
       comments: comments || null,
+      subject: (r[col.subject] ?? '').trim() || null,
       issue: (r[col.issue] ?? '').trim() || null,
       action_by: (r[col.actionBy] ?? '').trim() || null,
-      action_notes: (r[col.actionNotes] ?? '').trim() || null,
-      last_action_date: (r[col.lastActionDate] ?? '').trim() || null,
-      closed_by: (r[col.closedBy] ?? '').trim() || null,
     } : {}),
+    ...workClassification,
   };
 
+  for (const [type, code] of [['work_subject', workClassification.work_subject_code], ['work_activity', workClassification.work_activity_code]]) {
+    if (code) classificationCounts[type][code] = (classificationCounts[type][code] ?? 0) + 1;
+  }
+  if ([payload.job_cost, payload.travel_cost, payload.total_cost].some((value) => typeof value === 'number')) {
+    costEvidenceTotals.rows += 1;
+    for (const field of ['job_cost', 'travel_cost', 'total_cost']) costEvidenceTotals[field] += Number(payload[field] ?? 0);
+  }
+
+  let evidenceRecordType = null;
   if (officerId && primaryPlate) {
-    observationsBatch.push({ external_ref: externalRef, occurred_at: occurredAt, zone_id: zoneId, site_id: siteId, officer_id: officerId, plate: primaryPlate, officer_notes: includeNarratives ? comments || null : null, distance_km: r[col.jobKms] || null, payload });
+    observationsBatch.push({ external_ref: externalRef, occurred_at: occurredAt, zone_id: zoneId, site_id: siteId, officer_id: officerId, plate: primaryPlate, officer_notes: includeNarratives ? comments || null : null, distance_km: importedNumber(r[col.jobKms]), payload });
+    evidenceRecordType = 'observations';
   } else if (zoneId || siteId) {
     eventsBatch.push({
       external_ref: externalRef, occurred_at: occurredAt, zone_id: zoneId, site_id: siteId,
       event_type: isCamera ? 'camera_activation' : (officerId ? 'patrol_visit' : 'patrol_log_unattributed'),
       observed_entity_type: officerId ? 'staff' : null, observed_entity_id: officerId,
-      distance_km: r[col.jobKms] || null, payload,
+      status: includeNarratives ? (r[col.issue] || '').trim() || null : null, distance_km: importedNumber(r[col.jobKms]), payload,
     });
+    evidenceRecordType = 'location_events';
   } else {
     // location_events requires client_site_id XOR zone_id (no placeless events) -
     // a row whose Location text doesn't resolve to a seeded zone or site has nowhere
     // valid to attach; skip rather than force/guess a place.
     skippedNoZone += 1;
   }
+  if (includeNarratives) {
+    proposalsBatch.push(...buildPatrolImportProposals({
+      externalRef,
+      evidenceRecordType: evidenceRecordType ?? 'source_row',
+      providerOrganizationId: providerOrgId,
+      clientOrganizationId: orgId,
+      clientCode,
+      occurredAt,
+      zoneId,
+      siteId,
+      officerId,
+      payload,
+    }));
+  }
 }
 
 console.log(`Parsed ${table.length - 1} rows (${skipped} skipped: no date; ${skippedNoZone} skipped: no resolvable zone via Reserve/Location; ${skippedDuplicate} skipped: duplicate external reference): ${observationsBatch.length} -> observations, ${eventsBatch.length} -> location_events`);
-
-const CHUNK_SIZE = 300;
-function chunk(arr, size) { const out = []; for (let i = 0; i < arr.length; i += size) out.push(arr.slice(i, i + size)); return out; }
-const derivativeHash = createHash('sha256').update(JSON.stringify({ observations: observationsBatch, events: eventsBatch })).digest('hex');
-for (const row of [...observationsBatch, ...eventsBatch]) row.payload.derivative_sha256 = derivativeHash;
-const obsChunks = chunk(observationsBatch, CHUNK_SIZE);
-const evtChunks = chunk(eventsBatch, CHUNK_SIZE);
-const totalChunks = Math.max(obsChunks.length, evtChunks.length, 1);
-
-async function runSql(sql) {
-  if (useSupabaseCli) {
-    const tempDir = mkdtempSync(join(tmpdir(), 'fcm-patrol-import-'));
-    const sqlFile = join(tempDir, 'chunk.sql');
-    try {
-      writeFileSync(sqlFile, sql, 'utf8');
-      const cliPath = join(process.cwd(), 'node_modules', 'supabase', 'dist', 'supabase.js');
-      const output = execFileSync(process.execPath, [cliPath, 'db', 'query', '--linked', '--output-format', 'json', '--file', sqlFile], {
-        encoding: 'utf8',
-        maxBuffer: 32 * 1024 * 1024,
-      });
-      const result = JSON.parse(output);
-      if (!Array.isArray(result.rows) || result.rows.length === 0) throw new Error('Supabase CLI returned no import counts');
-      return result.rows[result.rows.length - 1];
-    } finally {
-      rmSync(tempDir, { recursive: true, force: true });
-    }
-  }
-  const response = await fetch(`https://api.supabase.com/v1/projects/${PROJECT_REF}/database/query`, {
-    method: 'POST', headers: { Authorization: `Bearer ${token}`, 'Content-Type': 'application/json' }, body: JSON.stringify({ query: sql }),
-  });
-  const text = await response.text();
-  if (!response.ok) throw new Error(text.slice(0, 3000));
-  return JSON.parse(text)[0];
-}
-
-function encodedJson(value) {
-  return Buffer.from(JSON.stringify(value), 'utf8').toString('base64');
-}
-
-const manifest = {
-  idempotency_key: createHash('sha256').update(`${PROVIDER_ORG_ID}:${orgId}:${immutableSourceHash}:${derivativeHash}`).digest('hex'),
-  source_profile: SOURCE_PROFILE,
-  target_client_organization_id: orgId,
+const missingOptionalMappings = Object.entries(col).filter(([, index]) => index < 0).map(([field]) => field);
+const proposalCounts = proposalsBatch.reduce((counts, proposal) => ({ ...counts, [proposal.target_type]: (counts[proposal.target_type] ?? 0) + 1 }), {});
+const dryRunReceipt = {
+  source_profile: classificationProfile,
+  source_sha256: effectiveSourceHash,
   derivative_sha256: derivativeHash,
-  expected_proposal_count: 0,
+  parsed_rows: table.length - 1,
+  evidence: { observations: observationsBatch.length, location_events: eventsBatch.length },
+  classifications: classificationCounts,
+  electronic_lock_rows: classificationCounts.work_subject.electronic_lock ?? 0,
+  physical_lock_rows: classificationCounts.work_subject.physical_lock ?? 0,
+  work_order_candidates: proposalsBatch.filter((proposal) => proposal.target_type === 'workshop_work_order').length,
+  cost_evidence: costEvidenceTotals,
+  proposals: proposalCounts,
+  unresolved_alias_count: unresolvedAliasValues.size,
+  unresolved_alias_rows: unresolvedAliasRows,
+  unresolved_optional_mappings: missingOptionalMappings,
   include_narratives: includeNarratives,
+  proposal_generation: includeNarratives ? 'enabled' : 'disabled_pending_explicit_narrative_review',
+  direct_workshop_writes: 0,
+  direct_finance_writes: 0,
 };
-const schema = {
+console.log(JSON.stringify(dryRunReceipt));
+
+const resolvedMappings = Object.entries(sourceProfile.target_mappings).flatMap(([logicalField, target]) => {
+  const sourceIndex = mapped(logicalField);
+  if (sourceIndex < 0 || !target?.target_entity) return [];
+  return [{
+    logical_field: logicalField,
+    source_column: header[sourceIndex],
+    target_entity: target.target_entity,
+    target_field: target.target_field ?? null,
+  }];
+});
+const importIdempotencyKey = `${classificationProfile}:${clientCode}:${effectiveSourceHash}:${derivativeHash}:${sourceSheet ?? ''}:${importConfigurationHash}`;
+const importManifest = {
+  idempotency_key: importIdempotencyKey,
+  source_profile: classificationProfile,
+  import_configuration_sha256: importConfigurationHash,
+  derivative_sha256: derivativeHash,
+  target_client_organization_id: orgId,
+  client_code: clientCode,
+  source_sheet: sourceSheet ?? null,
+  expected_proposal_count: proposalsBatch.length,
+  include_narratives: includeNarratives,
+  direct_workshop_writes: 0,
+  direct_finance_writes: 0,
+};
+const importSchema = {
   headers: header,
-  resolved_mappings: header.map((sourceColumn) => ({
-    source_column: sourceColumn,
-    target_entity: 'patrol_import_source',
-    target_field: sourceColumn.toLowerCase().replace(/[^a-z0-9]+/g, '_').replace(/^_|_$/g, ''),
+  mappings: resolvedMappings.map((mapping) => ({
+    source: mapping.source_column,
+    target: `${mapping.target_entity}.${mapping.target_field ?? ''}`.replace(/[.]$/, ''),
+    confidence: 'configured',
   })),
+  resolved_mappings: resolvedMappings,
 };
-
-if (mode === 'dry-run') {
-  console.log(JSON.stringify({
-    mode,
-    source_file: immutableSourceLabel,
-    source_sha256: immutableSourceHash,
-    derivative_sha256: derivativeHash,
-    row_count: table.length - 1,
-    duplicate_count: skippedDuplicate,
-    unresolved_count: skippedNoZone,
-    observation_candidates: observationsBatch.length,
-    event_candidates: eventsBatch.length,
-    proposed_consequential_writes: 0,
-    next_status_on_apply: 'needs_review',
-  }));
-  process.exit(0);
-}
-
-const beginData = encodedJson({
-  provider_organization_id: PROVIDER_ORG_ID,
+const batchDefinition = {
+  provider_organization_id: providerOrgId,
   client_organization_id: orgId,
-  batch_name: `${clientCode} patrol log - ${immutableSourceLabel}`,
-  source_file: immutableSourceLabel,
-  source_sha256: immutableSourceHash,
-  parser: 'scripts/import-patrol-log.mjs',
-  manifest,
-  schema,
+  batch_name: `${clientCode} field-evidence enrichment`,
+  source_file: effectiveSourceLabel,
+  source_sha256: effectiveSourceHash,
+  parser: sourceProfile.parser,
+  manifest: importManifest,
+  schema: importSchema,
   row_count: table.length - 1,
   duplicate_count: skippedDuplicate,
-  unresolved_count: skippedNoZone,
-});
-const beginRow = await runSql(`
-BEGIN;
-SET LOCAL request.jwt.claim.sub = '${ACTOR_ID}';
-WITH args AS (SELECT convert_from(decode('${beginData}','base64'),'UTF8')::jsonb AS value)
-SELECT row_to_json(batch) AS batch
-FROM args, LATERAL public.begin_patrol_import_batch(
-  (value->>'provider_organization_id')::uuid,
-  (value->>'client_organization_id')::uuid,
-  value->>'batch_name',
-  value->>'source_file',
-  value->>'source_sha256',
-  value->>'parser',
-  value->'manifest',
-  value->'schema',
-  (value->>'row_count')::integer,
-  (value->>'duplicate_count')::integer,
-  (value->>'unresolved_count')::integer
-) batch;
-COMMIT;`);
-const batch = beginRow?.batch ?? beginRow?.rows?.[0]?.batch;
-if (!batch?.id) throw new Error('Governed import batch creation was not confirmed');
+  unresolved_count: skippedNoZone + unresolvedAliasRows,
+};
 
+async function managementQuery(query, operation) {
+  if (useSupabaseCli) return runCliQuery(query);
+  const response = await fetch(`https://api.supabase.com/v1/projects/${projectRef}/database/query`, {
+    method: 'POST', headers: { Authorization: `Bearer ${token}`, 'Content-Type': 'application/json' }, body: JSON.stringify({ query }),
+  });
+  const text = await response.text();
+  if (!response.ok) throw new Error(`${operation} failed: ${text.slice(0, 3000)}`);
+  return JSON.parse(text);
+}
+
+async function ensureImportBatch() {
+  const json = JSON.stringify(batchDefinition);
+  if (json.includes('$batch$')) throw new Error('batch data must not contain the $batch$ delimiter');
+  const result = await managementQuery(`BEGIN;
+set local request.jwt.claim.sub = '${actorId}';
+WITH input AS (SELECT $batch$${json}$batch$::jsonb AS data)
+SELECT batch.id
+FROM input
+CROSS JOIN LATERAL public.begin_patrol_import_batch(
+  p_provider_organization_id => (input.data->>'provider_organization_id')::uuid,
+  p_client_organization_id => (input.data->>'client_organization_id')::uuid,
+  p_batch_name => input.data->>'batch_name',
+  p_source_file => input.data->>'source_file',
+  p_source_sha256 => input.data->>'source_sha256',
+  p_parser => input.data->>'parser',
+  p_manifest_json => input.data->'manifest',
+  p_schema_json => input.data->'schema',
+  p_row_count => (input.data->>'row_count')::integer,
+  p_duplicate_count => (input.data->>'duplicate_count')::integer,
+  p_unresolved_count => (input.data->>'unresolved_count')::integer
+) batch;
+COMMIT;`, 'Import batch staging');
+  if (!result[0]?.id) throw new Error('Import batch staging returned no batch id');
+  return result[0].id;
+}
+
+async function finalizeImportBatch(batchId, receipt) {
+  const json = JSON.stringify({ batch_id: batchId, receipt });
+  if (json.includes('$receipt$')) throw new Error('receipt must not contain the $receipt$ delimiter');
+  await managementQuery(`BEGIN;
+set local request.jwt.claim.sub = '${actorId}';
+WITH input AS (SELECT $receipt$${json}$receipt$::jsonb AS data)
+SELECT batch.id
+FROM input
+CROSS JOIN LATERAL public.finalize_patrol_import_batch(
+  (input.data->>'batch_id')::uuid,
+  input.data->'receipt'
+) batch;
+COMMIT;`, 'Import batch finalization');
+}
+
+// Large logs (thousands of rows, verbose free-text comments) can produce a combined JSON
+// payload the Management API rejects as "request entity too large" in one request - chunk
+// both batches into fixed-size slices and run one transaction per chunk, summing results.
+const CHUNK_SIZE = 300;
+function chunk(arr, size) { const out = []; for (let i = 0; i < arr.length; i += size) out.push(arr.slice(i, i + size)); return out; }
+const obsChunks = chunk(observationsBatch, CHUNK_SIZE);
+const evtChunks = chunk(eventsBatch, CHUNK_SIZE);
+const proposalChunks = chunk(proposalsBatch, CHUNK_SIZE);
+const totalChunks = Math.max(obsChunks.length, evtChunks.length, proposalChunks.length, 1);
+
+async function runChunk(obsSlice, evtSlice, proposalSlice, batchId) {
+  const data = {
+    org_id: orgId,
+    provider_org_id: providerOrgId,
+    client_code: clientCode,
+    batch_id: batchId,
+    batch: batchDefinition,
+    observations: obsSlice,
+    events: evtSlice,
+    proposals: proposalSlice,
+  };
+  const json = JSON.stringify(data);
+  if (json.includes('$json$')) throw new Error('data must not contain the $json$ delimiter');
+  const rows = await managementQuery(`BEGIN;
+set local request.jwt.claim.sub = '${actorId}';
+WITH input AS (SELECT $json$${json}$json$::jsonb AS data),
+batch AS (
+  SELECT input.data,
+    coalesce(
+      nullif(input.data->>'batch_id', '')::uuid,
+      (public.begin_patrol_import_batch(
+        p_provider_organization_id => (input.data->'batch'->>'provider_organization_id')::uuid,
+        p_client_organization_id => (input.data->'batch'->>'client_organization_id')::uuid,
+        p_batch_name => input.data->'batch'->>'batch_name',
+        p_source_file => input.data->'batch'->>'source_file',
+        p_source_sha256 => input.data->'batch'->>'source_sha256',
+        p_parser => input.data->'batch'->>'parser',
+        p_manifest_json => input.data->'batch'->'manifest',
+        p_schema_json => input.data->'batch'->'schema',
+        p_row_count => (input.data->'batch'->>'row_count')::integer,
+        p_duplicate_count => (input.data->'batch'->>'duplicate_count')::integer,
+        p_unresolved_count => (input.data->'batch'->>'unresolved_count')::integer
+      )).id
+    ) AS id
+  FROM input
+)
+SELECT staged.*
+FROM batch
+CROSS JOIN LATERAL public.stage_patrol_import_chunk(
+  p_batch_id => batch.id,
+  p_provider_organization_id => (batch.data->>'provider_org_id')::uuid,
+  p_client_organization_id => (batch.data->>'org_id')::uuid,
+  p_observations => batch.data->'observations',
+  p_events => batch.data->'events',
+  p_proposals => batch.data->'proposals'
+) staged;
+${mode === 'apply' ? 'COMMIT;' : 'ROLLBACK;'}`, 'Patrol import chunk');
+  return rows[0];
+}
+
+const batchId = mode === 'apply' ? await ensureImportBatch() : null;
 const totals = {
   obs_inserted: 0,
   obs_matched: 0,
@@ -375,47 +537,12 @@ const totals = {
 for (let i = 0; i < totalChunks; i += 1) {
   const obsSlice = obsChunks[i] ?? [];
   const evtSlice = evtChunks[i] ?? [];
-  if (!obsSlice.length && !evtSlice.length) continue;
-  console.log(`chunk ${i + 1}/${totalChunks}: ${obsSlice.length} observations, ${evtSlice.length} events`);
-  const chunkData = encodedJson({ batch_id: batch.id, observations: obsSlice, events: evtSlice, proposals: [] });
-  const row = await runSql(`
-BEGIN;
-SET LOCAL request.jwt.claim.sub = '${ACTOR_ID}';
-WITH args AS (SELECT convert_from(decode('${chunkData}','base64'),'UTF8')::jsonb AS value)
-SELECT staged.*
-FROM args, LATERAL public.stage_patrol_import_chunk(
-  (value->>'batch_id')::uuid,
-  '${PROVIDER_ORG_ID}'::uuid,
-  '${orgId}'::uuid,
-  value->'observations',
-  value->'events',
-  value->'proposals'
-) staged;
-COMMIT;`);
-  const staged = row?.rows?.[0] ?? row;
-  if (!staged) throw new Error(`Governed staging result was not returned for chunk ${i + 1}`);
-  for (const key of Object.keys(totals)) totals[key] += Number(staged[key] ?? 0);
+  const proposalSlice = proposalChunks[i] ?? [];
+  if (!obsSlice.length && !evtSlice.length && !proposalSlice.length) continue;
+  console.log(`chunk ${i + 1}/${totalChunks}: ${obsSlice.length} observations, ${evtSlice.length} events, ${proposalSlice.length} proposals`);
+  const row = await runChunk(obsSlice, evtSlice, proposalSlice, batchId);
+  for (const key of Object.keys(totals)) totals[key] += Number(row[key] ?? 0);
 }
-
-const receipt = {
-  ...totals,
-  source_sha256: immutableSourceHash,
-  derivative_sha256: derivativeHash,
-  direct_workshop_writes: 0,
-  direct_finance_writes: 0,
-};
-const finalizeData = encodedJson({ batch_id: batch.id, receipt });
-const finalRow = await runSql(`
-BEGIN;
-SET LOCAL request.jwt.claim.sub = '${ACTOR_ID}';
-WITH args AS (SELECT convert_from(decode('${finalizeData}','base64'),'UTF8')::jsonb AS value)
-SELECT row_to_json(batch) AS batch
-FROM args, LATERAL public.finalize_patrol_import_batch(
-  (value->>'batch_id')::uuid,
-  value->'receipt'
-) batch;
-COMMIT;`);
-const finalized = finalRow?.batch ?? finalRow?.rows?.[0]?.batch;
-if (finalized?.status !== 'needs_review') throw new Error('Governed import batch did not reach needs_review');
-console.log(`apply: ${clientCode} patrol log staged for human review`);
-console.log(JSON.stringify({ batch_id: batch.id, status: finalized.status, ...totals }));
+if (mode === 'apply') await finalizeImportBatch(batchId, { ...dryRunReceipt, ...totals });
+console.log(`${mode}: ${clientCode} patrol log import`);
+console.log(JSON.stringify(totals));

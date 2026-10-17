@@ -317,6 +317,92 @@ function collectDdlEntities(rootDir) {
   return { tables, rpcs };
 }
 
+function splitSqlArguments(argumentsSql) {
+  const argumentsList = [];
+  let current = '';
+  let depth = 0;
+  let quote = null;
+  for (let index = 0; index < argumentsSql.length; index += 1) {
+    const character = argumentsSql[index];
+    if (quote) {
+      current += character;
+      if (character === quote && argumentsSql[index + 1] === quote) {
+        current += argumentsSql[index + 1];
+        index += 1;
+      } else if (character === quote) {
+        quote = null;
+      }
+      continue;
+    }
+    if (character === "'" || character === '"') {
+      quote = character;
+      current += character;
+    } else if (character === '(' || character === '[') {
+      depth += 1;
+      current += character;
+    } else if (character === ')' || character === ']') {
+      depth = Math.max(0, depth - 1);
+      current += character;
+    } else if (character === ',' && depth === 0) {
+      argumentsList.push(current.trim());
+      current = '';
+    } else {
+      current += character;
+    }
+  }
+  if (current.trim()) argumentsList.push(current.trim());
+  return argumentsList;
+}
+
+function normalizedArgumentType(argument) {
+  let value = argument
+    .replace(/\s+DEFAULT\s+[\s\S]*$/i, '')
+    .replace(/\s*=\s*[\s\S]*$/, '')
+    .trim()
+    .replace(/\s+/g, ' ');
+  const mode = /^(INOUT|IN|OUT|VARIADIC)\s+/i.exec(value);
+  if (mode) {
+    if (mode[1].toUpperCase() === 'OUT') return null;
+    value = value.slice(mode[0].length).trim();
+  }
+  const firstSpace = value.indexOf(' ');
+  if (firstSpace !== -1) {
+    const firstToken = value.slice(0, firstSpace).replaceAll('"', '').toLowerCase();
+    const typeStarters = new Set([
+      'bigint', 'bigserial', 'bit', 'boolean', 'bytea', 'character', 'date', 'decimal',
+      'double', 'inet', 'integer', 'interval', 'json', 'jsonb', 'numeric', 'real',
+      'record', 'smallint', 'smallserial', 'serial', 'text', 'time', 'timestamp',
+      'timetz', 'timestamptz', 'uuid', 'varchar', 'xml'
+    ]);
+    if (!typeStarters.has(firstToken) && !firstToken.includes('.') && !firstToken.endsWith('[]')) {
+      value = value.slice(firstSpace + 1).trim();
+    }
+  }
+  return value
+    .replace(/\btimestamp\s+with\s+time\s+zone\b/gi, 'timestamptz')
+    .replace(/\btimestamp\s+without\s+time\s+zone\b/gi, 'timestamp')
+    .replace(/\btime\s+with\s+time\s+zone\b/gi, 'timetz')
+    .replace(/\btime\s+without\s+time\s+zone\b/gi, 'time')
+    .replace(/\bcharacter\s+varying\b/gi, 'varchar')
+    .replace(/\bdouble\s+precision\b/gi, 'float8')
+    .replace(/\bsmallint\b/gi, 'int2')
+    .replace(/\bbigint\b/gi, 'int8')
+    .replace(/\binteger\b/gi, 'int4')
+    .replace(/\bboolean\b/gi, 'bool')
+    .replace(/\breal\b/gi, 'float4')
+    .replaceAll('"', '')
+    .replace(/\s+/g, ' ')
+    .trim()
+    .toLowerCase();
+}
+
+function normalizedFunctionSignature(functionName, argumentsSql) {
+  const argumentTypes = splitSqlArguments(argumentsSql)
+    .map(normalizedArgumentType)
+    .filter(Boolean);
+  return `${functionName.toLowerCase()}(${argumentTypes.join(',')})`;
+}
+
 function collectSqlFunctionEdges(rootDir) {
   const schemaFile = 'supabase/schema.sql';
   const files = [
@@ -324,7 +410,7 @@ function collectSqlFunctionEdges(rootDir) {
     schemaFile
   ];
   const latestFunctions = new Map();
-  const functionPattern = /CREATE(?:\s+OR\s+REPLACE)?\s+FUNCTION\s+(?:(?:"?(public|ops)"?)\.)?"?([a-zA-Z_][a-zA-Z0-9_]*)"?[\s\S]*?AS\s+\$([a-zA-Z0-9_]*)\$([\s\S]*?)\$\3\$\s*;/gi;
+  const functionPattern = /CREATE(?:\s+OR\s+REPLACE)?\s+FUNCTION\s+(?:(?:"?(public|ops)"?)\.)?"?([a-zA-Z_][a-zA-Z0-9_]*)"?\s*\(([\s\S]*?)\)\s*RETURNS[\s\S]*?AS\s+\$([a-zA-Z0-9_]*)\$([\s\S]*?)\$\4\$\s*;/gi;
   // The live snapshot only dumps the public schema, so ops-schema scheduler
   // functions exist nowhere but their migrations. Collect those first and only
   // when ops-qualified: an unqualified sweep of every migration would resurrect
@@ -334,15 +420,19 @@ function collectSqlFunctionEdges(rootDir) {
     const content = fs.readFileSync(path.join(rootDir, file), 'utf8');
     for (const match of content.matchAll(functionPattern)) {
       if (match[1]?.toLowerCase() !== 'ops') continue;
-      latestFunctions.set(match[2], { body: match[4], file });
+      const signature = normalizedFunctionSignature(match[2], match[3]);
+      latestFunctions.set(`ops.${signature}`, { name: match[2], body: match[5], file });
     }
   }
   for (const file of files) {
     const content = fs.existsSync(path.join(rootDir, file)) ? fs.readFileSync(path.join(rootDir, file), 'utf8') : '';
     for (const match of content.matchAll(functionPattern)) {
-      latestFunctions.set(match[2], { body: match[4], file });
+      const schemaName = match[1]?.toLowerCase() ?? 'public';
+      const signature = normalizedFunctionSignature(match[2], match[3]);
+      latestFunctions.set(`${schemaName}.${signature}`, { name: match[2], body: match[5], file });
     }
   }
+  const functionNames = new Set([...latestFunctions.values()].map((definition) => definition.name));
 
   const edges = new Map();
   const add = (sourceName, targetType, targetName, kind, file, context, sourceType = 'rpc') => {
@@ -362,21 +452,22 @@ function collectSqlFunctionEdges(rootDir) {
     edges.set(edgeKey(edge), edge);
   };
 
-  for (const [rpcName, definition] of latestFunctions) {
+  for (const definition of latestFunctions.values()) {
+    const rpcName = definition.name;
     for (const match of definition.body.matchAll(/\b(?:FROM|JOIN)\s+public\."?([a-zA-Z_][a-zA-Z0-9_]*)"?/gi)) {
-      const calledAsFunction = latestFunctions.has(match[1]) && /^\s*\(/.test(definition.body.slice((match.index ?? 0) + match[0].length));
+      const calledAsFunction = functionNames.has(match[1]) && /^\s*\(/.test(definition.body.slice((match.index ?? 0) + match[0].length));
       add(rpcName, calledAsFunction ? 'rpc' : 'table', match[1], calledAsFunction ? 'calls' : 'reads', definition.file, calledAsFunction ? `SQL calls public.${match[1]}` : `SQL reads public.${match[1]}`);
     }
     for (const match of definition.body.matchAll(/\b(?:INSERT\s+INTO|UPDATE|DELETE\s+FROM)\s+public\."?([a-zA-Z_][a-zA-Z0-9_]*)"?/gi)) {
       add(rpcName, 'table', match[1], 'writes', definition.file, `SQL writes public.${match[1]}`);
     }
     for (const match of definition.body.matchAll(/\bpublic\."?([a-zA-Z_][a-zA-Z0-9_]*)"?\s*\(/gi)) {
-      if (match[1] !== rpcName && latestFunctions.has(match[1])) {
+      if (match[1] !== rpcName && functionNames.has(match[1])) {
         add(rpcName, 'rpc', match[1], 'calls', definition.file, `SQL calls public.${match[1]}`);
       }
     }
     for (const match of definition.body.matchAll(/(?:^|[^\w.])"?([a-zA-Z_][a-zA-Z0-9_]*)"?\s*\(/g)) {
-      if (match[1] !== rpcName && latestFunctions.has(match[1])) {
+      if (match[1] !== rpcName && functionNames.has(match[1])) {
         add(rpcName, 'rpc', match[1], 'calls', definition.file, `SQL calls ${match[1]} through function search_path`);
       }
     }
@@ -386,7 +477,7 @@ function collectSqlFunctionEdges(rootDir) {
   }
   const schema = fs.existsSync(path.join(rootDir, schemaFile)) ? fs.readFileSync(path.join(rootDir, schemaFile), 'utf8') : '';
   for (const trigger of schema.matchAll(/CREATE TRIGGER\s+"?[a-zA-Z0-9_]+"?[\s\S]*?\s+ON\s+(?:"?public"?\.)"?([a-zA-Z_][a-zA-Z0-9_]*)"?[\s\S]*?EXECUTE FUNCTION\s+(?:"?public"?\.)"?([a-zA-Z_][a-zA-Z0-9_]*)"?\s*\(/gi)) {
-    if (latestFunctions.has(trigger[2])) {
+    if (functionNames.has(trigger[2])) {
       const edge = {
         source_type: 'table',
         source_name: trigger[1],
@@ -408,7 +499,7 @@ function collectSqlFunctionEdges(rootDir) {
     for (const match of definition.matchAll(/\bpublic\."?([a-zA-Z_][a-zA-Z0-9_]*)"?\s*\(/gi)) referenced.add(match[1]);
     for (const match of definition.matchAll(/(?<![\w.])"?([a-zA-Z_][a-zA-Z0-9_]*)"?\s*\(/g)) referenced.add(match[1]);
     for (const functionName of referenced) {
-      if (!latestFunctions.has(functionName)) continue;
+      if (!functionNames.has(functionName)) continue;
       add(tableName, 'rpc', functionName, edgeKind, sourceFile, context, 'table');
     }
   };
@@ -1094,8 +1185,10 @@ if (require.main === module) {
 
 module.exports = {
   OWNER_MARKER,
+  normalizedFunctionSignature,
   collectComponentEdges,
   collectManagedAtlas,
+  collectSqlFunctionEdges,
   collectSchemaViewEdges,
   collectSchemaForeignKeyEdges,
   collectCronSchedulerEdges,
