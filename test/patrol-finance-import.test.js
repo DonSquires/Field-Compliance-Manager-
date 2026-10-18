@@ -124,5 +124,7 @@ test('patrol finance staging sends bounded database requests', () => {
   assert.match(staging, /CREATE TEMP TABLE fcm_patrol_stage_receipt ON COMMIT DROP/);
   assert.match(staging, /Rollback preview chunk \$\{index \+ 1\}\/\$\{chunks\.length\}/);
   assert.match(staging, /Batch \$\{batchId\} remains in staging and can be resumed safely/);
+  assert.match(staging, /SELECT batch_row FROM public\.file_import_batches batch_row WHERE id=/);
+  assert.doesNotMatch(staging, /SELECT \* FROM public\.file_import_batches WHERE id=/);
   assert.doesNotMatch(staging, /JSON\.stringify\(\{ chunks,/);
 });

@@ -252,7 +252,7 @@ let lastStage = null;
 for (const [index, chunk] of chunks.entries()) {
   try {
     lastStage = runQuery(
-      stageChunkSql(chunk, `(SELECT * FROM public.file_import_batches WHERE id=${quote(batchId)}::uuid)`, true),
+      stageChunkSql(chunk, `(SELECT batch_row FROM public.file_import_batches batch_row WHERE id=${quote(batchId)}::uuid)`, true),
       `Persistent staging chunk ${index + 1}/${chunks.length} for batch ${batchId}`,
     )[0]?.receipt;
   } catch (error) {
