@@ -53,11 +53,12 @@ test('release lane skips applied migrations and exclusively owns its live pointe
   assert.match(deploy, /git fetch -q .*refs\/remotes\/origin\/main:refs\/bundles/);
   assert.match(deploy, /docker compose -f deploy\/bob-control-plane\/docker-compose\.yml rm -sf bob-control-plane/);
   // A control-plane restart mid-run would discard the author's turns: the lane waits for the next tick.
-  assert.match(lane, /builder_model_runs\?select=id&status=in\.\(running,queued\)/);
-  assert.match(lane, /deferred \$\{HEAD_SHA:0:8\}: a Bob model run is in flight/);
+  assert.match(lane, /node "\$\(dirname "\$\{BASH_SOURCE\[0\]\}"\)\/bob-runtime-idle\.js"/);
+  assert.match(lane, /deferred \$\{HEAD_SHA:0:8\}: Bob execution is active or unverifiable/);
   // The installed lane is a deliberate copy, so a reviewed lane change must replace it for the next tick.
-  assert.match(lane, /has '\^\(scripts\/bob-release-lane\\\.sh\|deploy\/bob-release-lane\/\)' && TARGETS\+=\(release-lane\)/);
+  assert.match(lane, /scripts\/bob-runtime-idle\\\.js\|deploy\/bob-release-lane/);
   assert.match(lane, /install -m 700 scripts\/bob-release-lane\.sh \/srv\/fcm\/release-lane\/bob-release-lane\.sh/);
+  assert.match(lane, /install -m 644 scripts\/bob-runtime-idle\.js \/srv\/fcm\/release-lane\/bob-runtime-idle\.js/);
   assert.match(lane, /systemctl daemon-reload/);
   // The gates the worker image carries rebuild it when they change.
   assert.match(lane, /builder-data-path-gate\\\.js\|builder-ts-delta-gate\\\.js/);
@@ -69,6 +70,16 @@ test('release lane skips applied migrations and exclusively owns its live pointe
   assert.match(lane, /Atlas exercise evidence failed/);
   assert.match(lane, /node scripts\/schema-snapshot-live\.mjs --project-ref "\$SUPABASE_PROJECT_REF" --out "\$live_schema"/);
   assert.match(lane, /live schema snapshot differs from committed supabase\/schema\.sql/);
+});
+
+test('automatic and legacy control-plane deployment check idle after image build, including rollback', () => {
+  const lane = fs.readFileSync(SCRIPT, 'utf8');
+  const action = lane.slice(lane.indexOf('    control-plane)\n      if'), lane.indexOf('    worker-image)'));
+  assert.match(action, /build -q bob-control-plane \\\n\s*&& node scripts\/bob-runtime-idle\.js \\\n\s*&& DOCKER_GID=999 docker compose/);
+  assert.match(lane.slice(lane.indexOf('rollback()'), lane.indexOf('for target in')), /if ! node scripts\/bob-runtime-idle\.js/);
+  const legacy = fs.readFileSync(path.resolve(__dirname, '../deploy/bob-control-plane/deploy.sh'), 'utf8');
+  assert.match(legacy, /build bob-control-plane\nnode "\$app_dir\/scripts\/bob-runtime-idle\.js"\ndocker compose/);
+  assert.equal(bashSyntax(legacy).status, 0);
 });
 
 test('every control-plane path the edge functions relay is allowed through the public nginx site', () => {

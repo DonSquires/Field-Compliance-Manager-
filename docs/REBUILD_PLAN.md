@@ -53,6 +53,12 @@ window, and checks in-process execution after building the image. Unavailable
 activity checks block deployment. Explicit forced restarts still interrupt
 work; longer timeouts cannot prevent that loss.
 
+The automatic release lane and legacy manual deploy entrypoint use that same
+worker/model/runtime idle probe before replacing the control plane, including
+after image build. The automatic lane must not treat the gap between generation
+and verification as idle; missing credentials, HTTP failures and malformed
+activity receipts defer release rather than authorising a restart.
+
 Implementation worktrees validate the requested commit object and their own
 clean, exact checkout, not the mutable shared clone's HEAD. Moving the shared
 checkout for another job must not invalidate a pinned task. Model exploration

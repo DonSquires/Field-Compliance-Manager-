@@ -55,17 +55,8 @@ drain_control_plane() {
   local wait_s="${BOB_DEPLOY_DRAIN_SECONDS:-1200}"
   [[ "${BOB_DEPLOY_FORCE:-0}" == "1" ]] && { echo "drain skipped (BOB_DEPLOY_FORCE=1)"; return 0; }
   "${SSH[@]}" "set -euo pipefail
-    # Read only the two keys: the env file is docker env-file syntax, not shell (unquoted spaces).
-    SUPABASE_URL=\$(grep -E '^SUPABASE_URL=' /var/lib/bob/control-plane.env | head -1 | cut -d= -f2-)
-    SUPABASE_SERVICE_ROLE_KEY=\$(grep -E '^SUPABASE_SERVICE_ROLE_KEY=' /var/lib/bob/control-plane.env | head -1 | cut -d= -f2-)
     busy() {
-      local w m h
-      # A four-hour author session must not disappear behind a two-hour deployment lookback.
-      if ! w=\$(curl --max-time 15 -sf \"\${SUPABASE_URL%/}/rest/v1/builder_worker_runs?select=id&status=in.(running,queued)&limit=1\" -H \"apikey: \$SUPABASE_SERVICE_ROLE_KEY\" -H \"Authorization: Bearer \$SUPABASE_SERVICE_ROLE_KEY\" | tr -d ' \\n'); then echo 'cannot verify worker activity; treating as busy' >&2; return 0; fi
-      if ! m=\$(curl --max-time 15 -sf \"\${SUPABASE_URL%/}/rest/v1/builder_model_runs?select=id&status=eq.running&limit=1\" -H \"apikey: \$SUPABASE_SERVICE_ROLE_KEY\" -H \"Authorization: Bearer \$SUPABASE_SERVICE_ROLE_KEY\" | tr -d ' \\n'); then echo 'cannot verify model activity; treating as busy' >&2; return 0; fi
-      if ! h=\$(curl --max-time 30 -sf http://172.16.0.1:8091/health); then echo 'cannot verify runtime activity; treating as busy' >&2; return 0; fi
-      if ! printf '%s' \"\$h\" | node -e 'let s=\"\";process.stdin.on(\"data\",d=>s+=d);process.stdin.on(\"end\",()=>{try{const n=JSON.parse(s).runningBuilderJobs;process.exit(Number.isInteger(n)&&n===0?0:1)}catch{process.exit(1)}})'; then return 0; fi
-      [[ \"\$w\" != '[]' || \"\$m\" != '[]' ]]
+      ! node /srv/fcm/releases/$SHA/scripts/bob-runtime-idle.js
     }
     deadline=\$(( \$(date +%s) + $wait_s ))
     while busy; do
