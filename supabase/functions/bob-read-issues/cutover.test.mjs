@@ -149,6 +149,35 @@ test('Builder cutover handlers preserve HTTP contracts without a production data
         assert.equal(list.body.count, 1); assert.equal(list.body.issues[0].iid, childId);
         dbFailure = true; assert.equal((await invoke({ iid: branch })).status, 500); dbFailure = false;
       });
+      await t.test('legacy report handoffs expose the successor and never select a superseded step as actionable', async () => {
+        const original = structuredClone(jobs);
+        const successorId = '0c388688-c566-42b0-b700-d8267f602ddb';
+        try {
+          jobs[1].autopilot_state = 'done';
+          jobs[1].autopilot_report = { resumed_as_job_id: successorId };
+          jobs.push({ ...base, id: successorId, parent_job_id: null, branch_name: 'new-branch', workspace_branch: null,
+            status: 'failed', last_error: 'turn budget exhausted', created_at: '2026-10-18T00:00:00Z' });
+          const result = await invoke({ iid: branch, include_comments: false });
+          assert.equal(result.status, 200);
+          assert.equal(result.body.selected_job_id, rootId, 'without an actionable child the existing root fallback is preserved');
+          assert.equal(result.body.lineage.length, 3);
+          assert.equal(result.body.lineage.at(-1).last_error, 'turn budget exhausted');
+          assert.equal(result.body.lineage.at(-1).parent_job_id, null, 'a recorded handoff is not fabricated into a structural parent');
+          assert(calls.some(call => call.query.get('select')?.includes('autopilot_report')));
+          const list = await invoke({ state: 'implementation_pending' });
+          assert.equal(list.body.issues[0].autopilot_state, 'done');
+          assert.equal(list.body.issues[0].resumed_as_job_id, successorId);
+          jobs[2].parent_job_id = childId;
+          assert.equal((await invoke({ iid: branch })).body.lineage.length, 3, 'FK and report edges deduplicate');
+          jobs[2].status = 'testing';
+          assert.equal((await invoke({ iid: branch })).body.selected_job_id, successorId);
+          jobs[2].organization_id = '99999999-9999-4999-8999-999999999999';
+          assert.equal((await invoke({ iid: branch })).status, 500, 'cross-organisation handoffs fail closed');
+          jobs[2].organization_id = orgId;
+          jobs[2].autopilot_report = { resumed_as_job_id: rootId };
+          assert.equal((await invoke({ iid: branch })).status, 500, 'mixed parent/report cycles fail explicitly');
+        } finally { jobs = original; }
+      });
       await t.test('ambiguous SHA families and unverifiable ancestry fail explicitly', async () => {
         jobs.push({ ...jobs[0], id: '77777777-7777-4777-8777-777777777777', workspace_branch: 'bob/job-unrelated', branch_name: 'unrelated' });
         assert.equal((await invoke({ iid: sha })).status, 400);
