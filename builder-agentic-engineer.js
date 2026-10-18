@@ -228,7 +228,7 @@ function systemPrompt({ lane, limits }) {
 }
 
 function taskPacket(input) {
-  const { job, lane, specification, uxPlan, repositoryContext, liveContext, notes, previousFailure, hints, previousAttempt, seeded } = input;
+  const { job, lane, specification, uxPlan, repositoryContext, liveContext, notes, previousFailure, hints, previousAttempt, seeded, startingMap } = input;
   return JSON.stringify({
     job: { title: job.title, task_description: job.task_description, description: job.description ?? null, target_sha: job.target_sha, requested_action: job.requested_action ?? null, target_environment: job.target_environment ?? null },
     lane,
@@ -237,6 +237,7 @@ function taskPacket(input) {
     repository_build_map: repositoryContext ?? null,
     live_context: liveContext ?? null,
     file_hints: Array.isArray(hints) && hints.length ? hints : undefined,
+    starting_map: startingMap ?? undefined,
     your_recent_notes: notes,
     previous_attempt_failed_verification: previousFailure ?? undefined,
     previous_attempt_applied: seeded ? (seeded.failed
@@ -250,7 +251,7 @@ function taskPacket(input) {
       ? 'Call read_notes once, then git_diff to see the previous attempt\'s change, then go straight to the review findings: outline/read only what each finding touches, fix it, run the tests, finish.'
       : previousAttempt
       ? 'Skip read_canon. Call read_notes once, outline the main file named in the reading map, then edit.'
-      : 'Call read_canon and read_notes once, then explore the code paths named in the task with search/read_file before editing. Finish only after your own test run passes or you can explain exactly why it cannot run here.',
+      : 'Call read_canon and read_notes once. Start from starting_map: outline its confirmed, Atlas and discovered files (never a named_but_missing path), check the Atlas data edges for the tables/RPCs they touch, then read only what the first edit needs. Finish only after your own test run passes or you can explain exactly why it cannot run here.',
   }, null, 0);
 }
 
@@ -258,7 +259,7 @@ function taskPacket(input) {
 // the unfitted build map alone (2000 paths, every schema name) blew past the 40k-token VPS window and every
 // in-house provider was skipped on a 413 (job c00059ca, 2026-09-27). Fit the build map to the task, cap the
 // live context, and shrink until system prompt plus packet fits the laptop's 24k window as well.
-function buildOpeningPacket({ job, lane, specification, uxPlan, rawRepositoryContext, liveContext, notes, previousFailure, hints, previousAttempt, seeded, budgetChars = Number(process.env.BOB_BUILDER_PACKET_MAX_CHARS || 28_000) }) {
+function buildOpeningPacket({ job, lane, specification, uxPlan, rawRepositoryContext, liveContext, notes, previousFailure, hints, previousAttempt, seeded, startingMap = null, budgetChars = Number(process.env.BOB_BUILDER_PACKET_MAX_CHARS || 28_000) }) {
   const taskText = `${job.title ?? ''} ${job.task_description ?? ''} ${JSON.stringify(specification ?? '')}`;
   const liveText = liveContext ? JSON.stringify(liveContext) : '';
   const boundedLiveContext = !liveContext ? null : liveText.length <= 12_000 ? liveContext : { truncated_live_context: `${liveText.slice(0, 12_000)}…`, note: 'live context trimmed to fit the model window' };
@@ -266,7 +267,7 @@ function buildOpeningPacket({ job, lane, specification, uxPlan, rawRepositoryCon
   let packet = '';
   for (const budget of [40_000, 20_000, 10_000, 4_000]) {
     repositoryContext = rawRepositoryContext ? fitRepositoryContext(JSON.parse(JSON.stringify(rawRepositoryContext)), taskText, budget) : null;
-    packet = taskPacket({ job, lane, specification, uxPlan, repositoryContext, liveContext: boundedLiveContext, notes, previousFailure, hints, previousAttempt, seeded });
+    packet = taskPacket({ job, lane, specification, uxPlan, repositoryContext, liveContext: boundedLiveContext, notes, previousFailure, hints, previousAttempt, seeded, startingMap });
     if (packet.length <= budgetChars) break;
   }
   return { packet, repositoryContext, liveContext: boundedLiveContext };
@@ -654,7 +655,104 @@ function requiredChangedFilesFromTask(taskDescription, lane) {
   return paths.filter((file) => laneAllows(lane, file)).sort();
 }
 
-function validateAcceptanceEvidence({ args, specification, files }) {
+const STARTING_FILE_LIMIT = 8;
+const SEARCH_STOPWORDS = new Set(['about', 'above', 'after', 'again', 'being', 'below', 'between', 'build', 'change', 'could', 'during', 'every', 'existing', 'feature', 'first', 'follow', 'frontend', 'backend', 'improve', 'inspiration', 'issue', 'needs', 'other', 'page', 'pages', 'please', 'professional', 'should', 'something', 'their', 'there', 'these', 'thing', 'those', 'through', 'under', 'update', 'using', 'where', 'which', 'while', 'workflow', 'would', 'consideration', 'working', 'seems', 'error', 'calmer', 'enterprise']);
+
+function searchTermsFromTask(job) {
+  const text = `${job?.title ?? ''}\n${job?.task_description ?? ''}`;
+  const counts = new Map();
+  for (const raw of text.match(/[A-Za-z][A-Za-z0-9_-]{4,}/g) ?? []) {
+    const term = raw.toLowerCase().replace(/-/g, '');
+    if (term.length < 5 || SEARCH_STOPWORDS.has(term)) continue;
+    counts.set(term, (counts.get(term) ?? 0) + 1);
+  }
+  return [...counts.entries()].sort((a, b) => b[1] - a[1] || b[0].length - a[0].length).slice(0, 8).map(([term]) => term);
+}
+
+function filesAtPin(workspacePath, files) {
+  const unique = [...new Set(files.map(String).filter(Boolean))];
+  if (!unique.length) return new Set();
+  try {
+    return new Set(git(workspacePath, ['ls-tree', '-r', '--name-only', 'HEAD', '--', ...unique]).split('\n').filter(Boolean));
+  } catch { return new Set(); }
+}
+
+// Bob grounds the engineer in real files before turn 1 so neither a human nor the model has to supply
+// paths: named paths are checked against the pinned commit (invented ones like ExamplePage.tsx are
+// reported, not trusted) and, when too few are real, the repository is searched for the task's own words.
+function resolveStartingFiles({ workspacePath, lane, hints = [], specification = null, job = null }) {
+  const named = [
+    ...(Array.isArray(hints) ? hints : []),
+    ...(Array.isArray(specification?.delivery_requirements) ? specification.delivery_requirements.flatMap((requirement) => Array.isArray(requirement?.source_scope) ? requirement.source_scope : []) : []),
+  ].map((file) => String(file).trim()).filter(Boolean);
+  const tracked = filesAtPin(workspacePath, named);
+  const confirmed = [...new Set(named.filter((file) => tracked.has(file) && laneAllows(lane, file)))].slice(0, STARTING_FILE_LIMIT);
+  const namedButMissing = [...new Set(named.filter((file) => !tracked.has(file)))].slice(0, STARTING_FILE_LIMIT);
+  let discovered = [];
+  const terms = searchTermsFromTask(job);
+  if (confirmed.length < 2 && terms.length) {
+    const scores = new Map();
+    for (const term of terms) {
+      let matches = [];
+      try { matches = git(workspacePath, ['grep', '-l', '-i', '-F', '-e', term, '--', 'apps/web/src', 'supabase/functions', 'services', '*.js']).split('\n').filter(Boolean); } catch { matches = []; }
+      if (matches.length > 60) continue;
+      for (const file of matches) {
+        if (!laneAllows(lane, file) || confirmed.includes(file)) continue;
+        const entry = scores.get(file) ?? { file, terms: [] };
+        entry.terms.push(term);
+        scores.set(file, entry);
+      }
+    }
+    discovered = [...scores.values()]
+      .sort((a, b) => b.terms.length - a.terms.length || Number(/\.test\./.test(a.file)) - Number(/\.test\./.test(b.file)) || a.file.localeCompare(b.file))
+      .slice(0, STARTING_FILE_LIMIT - confirmed.length)
+      .map(({ file, terms: matched }) => ({ file, matched_terms: matched }));
+  }
+  return { confirmed, discovered, named_but_missing: namedButMissing, search_terms: terms };
+}
+
+const ATLAS_FLOW_KINDS = ['reads', 'writes', 'calls', 'invokes'];
+const ATLAS_TIMEOUT_MS = Number(process.env.BOB_BUILDER_ATLAS_TIMEOUT_MS || 8000);
+
+function withTimeout(promise, ms) {
+  let timer;
+  return Promise.race([promise, new Promise((_, reject) => { timer = setTimeout(() => reject(new Error(`Atlas did not answer within ${ms} ms`)), ms); })]).finally(() => clearTimeout(timer));
+}
+
+// Atlas is the terrain map: from the files Bob found, which tables/RPCs/functions they really read,
+// write, call or invoke; and from the task's words, which files hold the data flows that touch the
+// matching entities. Only flow edges suggest files; `references` and FK structure are not a pathway.
+async function atlasMapForFiles({ supabase, workspacePath, lane, startingFiles }) {
+  if (!supabase || typeof supabase.from !== 'function') return { available: false, reason: 'no Atlas client in this run' };
+  const known = [...startingFiles.confirmed, ...startingFiles.discovered.map((entry) => entry.file)];
+  const select = 'source_file,source_type,source_name,target_type,target_name,edge_kind';
+  try {
+    const byFile = known.length
+      ? await withTimeout(supabase.from('bob_app_map_edges').select(select).eq('retirement_status', 'live').in('source_file', known).in('edge_kind', ATLAS_FLOW_KINDS).limit(60), ATLAS_TIMEOUT_MS)
+      : { data: [] };
+    if (byFile.error) throw new Error(byFile.error.message);
+    const byTerm = [];
+    for (const term of startingFiles.search_terms.slice(0, 4)) {
+      const result = await withTimeout(supabase.from('bob_app_map_edges').select(select).eq('retirement_status', 'live').in('edge_kind', ATLAS_FLOW_KINDS).ilike('target_name', `%${term.replace(/[%_]/g, '')}%`).limit(20), ATLAS_TIMEOUT_MS);
+      if (result.error) throw new Error(result.error.message);
+      byTerm.push(...(result.data ?? []));
+    }
+    const candidateFiles = [...new Set(byTerm.map((edge) => edge.source_file).filter((file) => file && !known.includes(file) && laneAllows(lane, file)))];
+    const tracked = filesAtPin(workspacePath, candidateFiles);
+    const suggested = candidateFiles.filter((file) => tracked.has(file)).slice(0, 6);
+    const edge = (row) => `${row.source_name} ${row.edge_kind} ${row.target_type}:${row.target_name}`;
+    const touches = {};
+    for (const row of [...(byFile.data ?? []), ...byTerm.filter((item) => suggested.includes(item.source_file))]) {
+      const list = touches[row.source_file] ?? (touches[row.source_file] = []);
+      if (list.length < 8 && !list.includes(edge(row))) list.push(edge(row));
+    }
+    return { available: true, suggested_files: suggested, flow_edges_by_file: touches, note: 'Atlas flow edges (reads/writes/calls/invokes) only; confirm a write against supabase/schema.sql before relying on it.' };
+  } catch (error) {
+    return { available: false, reason: String(error && error.message || error).slice(0, 200) };
+  }
+}
+
+function validateAcceptanceEvidence({ args, specification, files, trackedAtPin = null }) {
   const requirements = Array.isArray(specification?.delivery_requirements)
     ? specification.delivery_requirements
     : [];
@@ -669,7 +767,16 @@ function validateAcceptanceEvidence({ args, specification, files }) {
     }
     const proof = String(entry.evidence || '').trim();
     if (!proof) return `finish refused: delivery requirement ${id} has no evidence. Name the changed source file and the observable proof.`;
-    const sourceScope = Array.isArray(requirement.source_scope) ? requirement.source_scope.map(String) : [];
+    const namedScope = Array.isArray(requirement.source_scope) ? requirement.source_scope.map(String) : [];
+    // A scope path that neither exists at the pinned commit nor is created by this change was invented
+    // by the planner; demanding an edit to it made the step impossible (job a7c916f5, ExamplePage.tsx).
+    const sourceScope = trackedAtPin ? namedScope.filter(file => trackedAtPin.has(file) || files.includes(file)) : namedScope;
+    if (!sourceScope.length) {
+      if (!files.some(file => proof.includes(file) || proof.includes(path.basename(file)))) {
+        return `finish refused: delivery requirement ${id} named no real source file (${namedScope.join(', ')}), so its evidence must name the changed file where the outcome was implemented.`;
+      }
+      continue;
+    }
     const implementedFiles = files.filter(file => sourceScope.includes(file));
     if (!implementedFiles.length) {
       return `finish refused: delivery requirement ${id} did not change any approved source_scope file (${sourceScope.join(', ')}). Implement the outcome in its approved scope before handoff.`;
@@ -705,7 +812,10 @@ function buildProposal({ workspacePath, lane, tools, args, requiredFiles = [], s
   if (missingRequiredFiles.length) {
     return { error: `finish refused: required source scope was not implemented: ${missingRequiredFiles.join(', ')}. Complete those required files before handoff.` };
   }
-  const acceptanceError = validateAcceptanceEvidence({ args, specification, files });
+  const scopeFiles = Array.isArray(specification?.delivery_requirements)
+    ? specification.delivery_requirements.flatMap((requirement) => Array.isArray(requirement?.source_scope) ? requirement.source_scope.map(String) : [])
+    : [];
+  const acceptanceError = validateAcceptanceEvidence({ args, specification, files, trackedAtPin: filesAtPin(workspacePath, scopeFiles) });
   if (acceptanceError) return { error: acceptanceError };
   // Truth Protocol at the gate: a change that touches tests (or that the brief asked to test) must come with a
   // passing `node --test` run from THIS session, or an explicit reason why none could run. Claims are not evidence.
@@ -901,7 +1011,11 @@ async function runAgenticEngineer({
   const rawRepositoryContext = (() => {
     try { return collectRepositoryContext({ sourceDir: workspacePath, targetSha: job.target_sha }); } catch { return null; }
   })();
-  const opening = buildOpeningPacket({ job, lane, specification, uxPlan, rawRepositoryContext, liveContext, notes, previousFailure, hints, previousAttempt, seeded });
+  const startingFiles = resolveStartingFiles({ workspacePath, lane, hints, specification, job });
+  const atlas = await atlasMapForFiles({ supabase, workspacePath, lane, startingFiles });
+  const startingMap = { ...startingFiles, atlas };
+  log({ turn: 0, starting_map: { confirmed: startingFiles.confirmed, discovered: startingFiles.discovered.map((entry) => entry.file), named_but_missing: startingFiles.named_but_missing, atlas_files: atlas.suggested_files ?? [], atlas_available: atlas.available } });
+  const opening = buildOpeningPacket({ job, lane, specification, uxPlan, rawRepositoryContext, liveContext, notes, previousFailure, hints, previousAttempt, seeded, startingMap });
 
   const messages = [
     { role: 'system', content: systemPrompt({ lane, limits }) },
@@ -1167,4 +1281,4 @@ async function runAgenticEngineer({
   };
 }
 
-module.exports = { DEFAULT_LIMITS, PROMPT_VERSION, RUN_ALLOWLIST, buildOpeningPacket, buildProposal, classifyNoChange, compactMessages, composeRunNote, createTools, finishAgenticReceipt, heartbeatAgenticReceipt, outlineLines, parseToolCall, readingMap, requiredChangedFilesFromTask, runAgenticEngineer, startAgenticReceipt, systemPrompt, taskPacket, validateAcceptanceEvidence };
+module.exports = { DEFAULT_LIMITS, PROMPT_VERSION, RUN_ALLOWLIST, buildOpeningPacket, buildProposal, classifyNoChange, compactMessages, composeRunNote, createTools, finishAgenticReceipt, heartbeatAgenticReceipt, outlineLines, parseToolCall, readingMap, requiredChangedFilesFromTask, resolveStartingFiles, atlasMapForFiles, runAgenticEngineer, startAgenticReceipt, systemPrompt, taskPacket, validateAcceptanceEvidence };

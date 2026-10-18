@@ -332,3 +332,11 @@ test('Product Analyst routes complex analysis through the governed model runner'
   assert.deepEqual(result.specification, specification);
   assert.equal(result.approval.id, 'approval-1');
 });
+
+test('product analyst rejects placeholder source_scope paths even without a tracked-file map', () => {
+  const { validateRepositoryGrounding: ground } = require('../supabase/functions/_shared/builder-product-analyst.js');
+  for (const file of ['apps/web/src/pages/ExamplePage.tsx', 'supabase/functions/example/index.ts']) {
+    assert.throws(() => ground({ delivery_requirements: [{ id: 'r1', source_scope: [file] }] }, {}), /placeholder/);
+  }
+  assert.doesNotThrow(() => ground({ delivery_requirements: [{ id: 'r1', source_scope: ['apps/web/src/pages/OrganizationSetupPage.tsx'] }] }, {}));
+});
