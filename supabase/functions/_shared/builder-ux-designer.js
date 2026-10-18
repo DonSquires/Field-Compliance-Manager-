@@ -5,7 +5,7 @@ const {
 } = require('./builder-model-adapter');
 const { fitRepositoryContext } = require('./builder-repository-context');
 
-const UX_DESIGNER_PROMPT_VERSION = 'ux-designer-v8';
+const UX_DESIGNER_PROMPT_VERSION = 'ux-designer-v9';
 
 const UX_DESIGN_SCHEMA = Object.freeze({
   type: 'object',
@@ -21,6 +21,47 @@ const UX_DESIGN_SCHEMA = Object.freeze({
     'assumptions'
   ]
 });
+
+function designOutputSchema(context) {
+  const strings = { type: 'array', items: { type: 'string' } };
+  const choices = values => values.length
+    ? { type: 'array', items: { type: 'string', enum: values } }
+    : { type: 'array', items: { type: 'string' }, maxItems: 0 };
+  const records = fields => ({
+    type: 'array', minItems: 1,
+    items: { type: 'object', required: fields, properties: Object.fromEntries(fields.map(key => [key, { type: 'string' }])) }
+  });
+  return {
+    ...UX_DESIGN_SCHEMA,
+    properties: {
+      information_architecture: records(['area', 'purpose']),
+      route_map: context.existing_routes.length ? {
+        type: 'array', minItems: 1,
+        items: {
+          type: 'object', required: ['route', 'purpose', 'access'],
+          properties: {
+            route: { type: 'string', enum: context.existing_routes },
+            purpose: { type: 'string' },
+            access: choices(context.existing_access_boundaries)
+          }
+        }
+      } : { type: 'array', maxItems: 0, items: { type: 'object' } },
+      component_inventory: records(['component', 'responsibility']),
+      responsive_behavior: records(['surface', 'behavior']),
+      accessibility_requirements: { ...strings, minItems: 1 },
+      interface_states: {
+        type: 'object', required: ['loading', 'empty', 'error', 'success'],
+        properties: Object.fromEntries(['loading', 'empty', 'error', 'success'].map(key => [key, { type: 'string', minLength: 1 }]))
+      },
+      design_tokens: {
+        type: 'object', required: ['color', 'spacing'],
+        properties: { color: choices(context.design_tokens), spacing: choices(context.design_tokens) }
+      },
+      unresolved_questions: strings,
+      assumptions: strings
+    }
+  };
+}
 
 function boundedDirectoryCounts(value) {
   if (!value || typeof value !== 'object' || Array.isArray(value)) return {};
@@ -99,6 +140,7 @@ function buildUxDesignerPrompt({ specification, repositoryContext, constraints =
   return {
     systemPrompt,
     context,
+    outputSchema: designOutputSchema(context),
     userPrompt: JSON.stringify({
       approved_specification: specification,
       repository_context: context,
@@ -303,7 +345,7 @@ async function runUxDesigner({
     systemPrompt: prompt.systemPrompt,
     userPrompt: prompt.userPrompt,
     inputArtifactIds: [specificationArtifact.id],
-    outputSchema: UX_DESIGN_SCHEMA
+    outputSchema: prompt.outputSchema
   });
   const result = await executeModelRun({
     supabase,

@@ -28,6 +28,17 @@ failure evidence and keep unknown attribution explicit. Terminal checkpoints
 follow the existing seven-day, inactive/no-pending-approval workspace retention
 policy; active or paused work is not retired.
 
+**Owner-approved structured planning routing (2026-10-18):** UI design remains
+mandatory, including test-only repair jobs. Local design output is constrained
+to an evidence-derived JSON schema; semantic validation remains authoritative.
+Fallback requests carry bounded validator corrections, not rejected output.
+Keep GPU-first order and restricted-data boundaries. VPS CPU product analysis
+and UI design receive a two-minute provider budget (caller allows five seconds
+for the response); two timeouts trigger a five-minute, process-local cooldown
+for that endpoint/model's planning calls. Engineering, review, GPU budgets,
+spending authority and approval gates are unchanged. Cooldown is not a durable
+provider outage claim and expires automatically.
+
 - One of the platform's **two core engines** (geofence = where / what applies;
   Bob = think / do). Not a data-entry assistant bolted onto a CRM, and not a
   governed form that proposes one row and waits

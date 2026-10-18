@@ -8,6 +8,33 @@ detailed backlogs (`ENTERPRISE_SAAS_TODO.md`, `PROTOTYPE_GAP_AUDIT.md`,
 Completion language is strict, as in the lineage: **merged ≠ deployed ≠
 glass-proven.** A workstream item is done only when its evidence gate is met.
 
+Owner-approved structured planning routing 2026-10-18:
+
+- Keep UI design mandatory. UX v9 derives a complete output schema from the
+  fitted repository context, including exact route/access/token values and
+  empty route lists for surfaces without supplied routes. Local Ollama receives
+  that schema; Ollama Cloud retains JSON mode because its documented API does
+  not support structured outputs. Semantic validators still gate every tier.
+- Carry up to three bounded validation reasons into fallback prompts, never the
+  rejected response. Include feedback in the fallback idempotency identity.
+- VPS CPU `product_analysis` and `ux_design` calls have a 120-second provider
+  budget and a 125-second caller allowance. Two timeouts within five minutes
+  cause a five-minute endpoint/model planning cooldown with an explicit
+  `provider_planning_cooldown` receipt, followed by normal allowed fallback.
+  Successful responses clear the counter. Cooldowns are process-local and
+  expire; they do not mark engineering or GPU compute unavailable.
+- Do not reorder providers, raise spending limits, run parallel local models,
+  or relax privacy, review, approval or release gates.
+
+Acceptance: 170 targeted Node tests passed across gateway/adapter/design,
+agentic engineering, runtime/autopilot, product analysis, reviewer identity,
+release and deployment guards. Fake-clock evidence proves no provider abort at
+119,999 ms and abort at 120,000 ms; fetch-abort and cooldown tests also cover
+two-timeout admission, expiry, success reset and unaffected engineering calls.
+No live inference was invoked for these checks. Ollama's
+[structured output documentation](https://docs.ollama.com/capabilities/structured-outputs),
+retrieved 2026-10-18, supports local schema format and explicitly excludes Cloud.
+
 Owner-approved durable Builder recovery 2026-10-18:
 
 - Engineer v6 saves an atomic, fsynced private checkpoint after completed tool
