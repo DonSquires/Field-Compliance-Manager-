@@ -114,7 +114,7 @@ turn beats false completeness.
   provider/branch overview returns two operating organisations, 17 accepted
   agreements, and 16 current-period cost lines totalling NZ$50,606.29.
 
-## STATIC-WORK CORPUS AND NMDHB SPINE (2026-10-18) — AUDITED, CONSOLIDATION PENDING
+## STATIC-WORK CORPUS AND NMDHB SPINE (2026-10-18) — CONSOLIDATED, IMPORT REVIEW OPEN
 
 - Read-only inventory covered 466 files under the 1080 operations folder, 284
   hospital commercial/tender files, 33 archived NMDHB operational files, 13
@@ -147,6 +147,26 @@ turn beats false completeness.
   deactivates the literal test work unit. It does not accept the client
   invitation, invent hospital posts, map staff names, or promote any historical
   source row. Those require separate reviewed agreement/place/person mappings.
+- Released through #104 and live-verified. The canonical NMDHB account now owns
+  R&M's operational agreement and the richer Nelson Hospital place/zone/contact;
+  one real static work unit remains active, the platform placeholder link is
+  ended, and one consolidation audit receipt exists. The migration ledger is
+  converged.
+- Capability classification after the audit:
+  - **Supported:** formula-aware local workbook reading; canonical organisation,
+    agreement, place, static work-unit, roster, shift/attendance, safety, labour,
+    and finance spines.
+  - **Partial:** historical hospital roster/hour/pay evidence and 1080
+    shift/travel/cost evidence are parseable, but still need reviewed source
+    profiles plus exact person, place, agreement-version, and rate mappings.
+  - **Gap:** no governed static-history adapter currently carries those reviewed
+    mappings into replay-safe roster slots/cost proposals. The 2021–2022 NMDHB
+    records also predate the only R&M agreement (starts 2026), so that agreement
+    cannot lawfully authorise their promotion.
+  - **Exclude/quarantine:** current tender drafts, superseded and duplicate
+    copies, test work units, the platform-billing placeholder place, unavailable
+    cloud files, and any 1080 row whose client, deployment, staff, or mixed
+    `static_guarding`/`biosecurity` scope is unresolved.
 
 ## INVOICE AND PRICE-BOOK CORPUS (2026-10-18) — INVENTORIED, NOT PROMOTED
 
