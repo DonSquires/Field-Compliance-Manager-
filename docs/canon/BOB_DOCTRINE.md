@@ -39,6 +39,18 @@ for that endpoint/model's planning calls. Engineering, review, GPU budgets,
 spending authority and approval gates are unchanged. Cooldown is not a durable
 provider outage claim and expires automatically.
 
+**Owner ruling: self-heal repairs the app (2026-10-18).** "Self healing is
+meant to fix the app, not just tests." A main-health repair first reproduces
+the failure, then fixes the real cause: application source when the product
+regressed, a guard only when evidence proves it stale; guards are never
+deleted, skipped or weakened. Unattended release may change at most eight
+non-protected files under `apps/web/src`. Anything outside that, and any
+evidential path, is still prepared and verified but pauses for Grandmaster
+approval. Protected paths stay refused. When main moves past a blocked repair,
+Bob hands it back to the main-health monitor, which re-tests current main and
+opens a fresh repair only if it is still red; a repair is never re-run on code
+where its failure is already gone, and never spawns a repair of itself.
+
 - One of the platform's **two core engines** (geofence = where / what applies;
   Bob = think / do). Not a data-entry assistant bolted onto a CRM, and not a
   governed form that proposes one row and waits

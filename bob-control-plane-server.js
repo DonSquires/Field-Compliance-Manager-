@@ -724,14 +724,14 @@ function saveMainHealthState(state) {
 function mainHealthRepairBrief({ sha, failure }) {
   const failingFiles = failure.failing_tests.map((file) => file.startsWith('apps/web/') ? file : `apps/web/${file}`);
   return [
-    `Goal: repair only the failing web source-guard tests reported by Bob's isolated main-health run at ${sha}.`,
+    `Goal: make main green again by fixing the real cause of the failing web checks reported by Bob's isolated main-health run at ${sha}. Self-heal repairs the app, not just its tests.`,
     `Before: the repository is pinned to ${sha}; the main-health worker ran the web build, full Vitest unit/source-guard suite, and CI Playwright smoke suite against a read-only checkout.`,
     `During: the main-health worker exited ${failure.exit_code}; failing guard tests: ${failingFiles.join(', ')}.`,
     `Failure evidence (redacted and bounded):\n${failure.summary || 'See the bounded worker output below.'}\n${failure.stdout}\n${failure.stderr}`.slice(0, 9000),
-    'Required diagnosis: read each failing guard test and the current implementation/schema it asserts. Determine whether the expectation is stale or the product behavior regressed; do not weaken a guard unless schema/source evidence proves the guard itself is obsolete.',
-    'Required verification: rerun the isolated main-health checks, independent code review, security review, and Atlas refresh. Preserve the exact tested main SHA and failing-test file set.',
-    'Scope: only the recorded failing `apps/web/src/**/*.guard.test.ts` or `.guard.test.tsx` files may change for unattended release. Do not delete tests, alter application behavior, schema/RLS/auth, dependencies, environment, legal/safety/identity/enforcement/finance/payroll/evidential code, or add features. Any scope expansion stops for Grandmaster review.',
-    'After: open a draft pull request with the test receipts; the control plane does not merge or deploy this repair.',
+    `Required diagnosis: first reproduce the failure by running the failing test files at the pinned commit (npm run test --prefix apps/web -- ${failingFiles.map((file) => file.replace(/^apps\/web\//, '')).join(' ')}). Then read each failing test and the application source/schema it asserts. If the application regressed, fix the application source so the existing guard passes. Change a guard only when schema/source evidence proves the product intentionally moved on and the guard is stale. Never delete, skip, or weaken a guard to make it pass.`,
+    'Required verification: rerun the failing tests and the isolated main-health checks, independent code review, security review, and Atlas refresh. Preserve the exact tested main SHA and failing-test file set.',
+    'Scope: the smallest corrective patch, at most eight files, anywhere under `apps/web/src`. Protected paths (auth/identity, routing, dependencies, environment, CI/deploy, the schema snapshot) stay refused. A patch that needs anything outside `apps/web/src`, or touches legal, safety, identity, enforcement, finance, payroll, or evidential code, is still prepared and verified but pauses for Grandmaster approval before release. No new features or redesigns.',
+    'After: open a pull request with the test receipts; release follows the normal independent gates.',
   ].join('\n');
 }
 
@@ -743,7 +743,7 @@ async function openMainHealthRepair({ sha, failure }) {
   }
   if (builderRepositoryHead('main').sha !== sha) throw new Error('main moved before the repair job could be opened');
   const project = await routineBuilderProject();
-  const { data: job, error } = await builderSupabase.rpc('builder_open_main_health_repair', {
+  const open = () => builderSupabase.rpc('builder_open_main_health_repair', {
     _organization_id: project.organization_id,
     _project_id: project.id,
     _health_sha: sha,
@@ -753,6 +753,20 @@ async function openMainHealthRepair({ sha, failure }) {
     _failed_files: failingFiles,
     _parent_job_id: null,
   });
+  let { data: job, error } = await open();
+  // The open RPC reuses an active repair for the same failing files. One the autopilot already handed
+  // back after main moved would never be driven again, so retire it and open a fresh one on this SHA.
+  // Hand-back is limited to workspace-free jobs, which the housekeeping RPC can retire.
+  if (!error && job?.id && job.autopilot_state === 'done' && job.source_main_health_sha !== sha && !BUILDER_TERMINAL_STATUSES.has(job.status) && !job.workspace_branch && !job.workspace_pull_request_url) {
+    const { error: retireError } = await builderSupabase.rpc('builder_retire_stale_job', {
+      _job_id: job.id,
+      _reason: `Bob handed this repair back after main moved; main-health re-tested ${sha} and opened a fresh repair for the same failing checks.`,
+      _outcome: 'superseded_main_health',
+      _details: { current_main_sha: sha, failed_files: failingFiles },
+    });
+    if (retireError) throw new Error(`handed-back main-health repair could not be retired: ${retireError.message}`);
+    ({ data: job, error } = await open());
+  }
   if (error || !job?.id) throw new Error(`main-health repair job could not be opened: ${error?.message || 'no job returned'}`);
   record('autopilot', 'builder.main_health_repair.started', job.id, { health_sha: sha, failed_files: failingFiles });
   return { id: job.id };
