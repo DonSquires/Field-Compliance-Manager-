@@ -116,3 +116,13 @@ test('file review UI separates proposal approval from finance apply', () => {
   assert.match(page, /Approval records a decision only/);
   assert.doesNotMatch(page, /Approve and apply/);
 });
+
+test('patrol finance staging sends bounded database requests', () => {
+  const staging = readFileSync(resolve(__dirname, '../scripts/stage-patrol-financials.mjs'), 'utf8');
+  assert.match(staging, /const chunkSize = 150/);
+  assert.match(staging, /for \(const \[index, chunk\] of chunks\.entries\(\)\)/);
+  assert.match(staging, /CREATE TEMP TABLE fcm_patrol_stage_receipt ON COMMIT DROP/);
+  assert.match(staging, /Rollback preview chunk \$\{index \+ 1\}\/\$\{chunks\.length\}/);
+  assert.match(staging, /Batch \$\{batchId\} remains in staging and can be resumed safely/);
+  assert.doesNotMatch(staging, /JSON\.stringify\(\{ chunks,/);
+});
