@@ -41,6 +41,18 @@ a changed-file manifest, verified patch or completion. Monitor-created jobs
 can be driving without a human requester; next-action guidance uses scheduler
 state and recorded execution rather than treating that missing requester as idle.
 
+Owner-approved verifier budget policy 2026-10-18: frontend verification has a
+45-minute default hard runtime (operator override remains bounded to 5–60
+minutes), with the existing renewable lease and global single-verifier guard.
+The laptop retains one loaded model and one parallel request. No additional
+spending authority is inferred from an account balance. Agentic session token
+totals are counted once; transcript/proposal artifact receipts are not new
+model calls. Recent token telemetry is not a provider invoice or a USD cap.
+Deploy admission checks all running model/worker receipts, not only a two-hour
+window, and checks in-process execution after building the image. Unavailable
+activity checks block deployment. Explicit forced restarts still interrupt
+work; longer timeouts cannot prevent that loss.
+
 Implementation worktrees validate the requested commit object and their own
 clean, exact checkout, not the mutable shared clone's HEAD. Moving the shared
 checkout for another job must not invalidate a pinned task. Model exploration

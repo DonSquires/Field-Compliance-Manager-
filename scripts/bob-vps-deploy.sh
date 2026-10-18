@@ -59,9 +59,12 @@ drain_control_plane() {
     SUPABASE_URL=\$(grep -E '^SUPABASE_URL=' /var/lib/bob/control-plane.env | head -1 | cut -d= -f2-)
     SUPABASE_SERVICE_ROLE_KEY=\$(grep -E '^SUPABASE_SERVICE_ROLE_KEY=' /var/lib/bob/control-plane.env | head -1 | cut -d= -f2-)
     busy() {
-      local w m
-      w=\$(curl -sf \"\${SUPABASE_URL%/}/rest/v1/builder_worker_runs?select=id&status=in.(running,queued)&created_at=gt.\$(date -u -d '-2 hours' +%Y-%m-%dT%H:%M:%SZ)&limit=1\" -H \"apikey: \$SUPABASE_SERVICE_ROLE_KEY\" -H \"Authorization: Bearer \$SUPABASE_SERVICE_ROLE_KEY\" | tr -d ' \\n')
-      m=\$(curl -sf \"\${SUPABASE_URL%/}/rest/v1/builder_model_runs?select=id&status=eq.running&created_at=gt.\$(date -u -d '-2 hours' +%Y-%m-%dT%H:%M:%SZ)&limit=1\" -H \"apikey: \$SUPABASE_SERVICE_ROLE_KEY\" -H \"Authorization: Bearer \$SUPABASE_SERVICE_ROLE_KEY\" | tr -d ' \\n')
+      local w m h
+      # A four-hour author session must not disappear behind a two-hour deployment lookback.
+      if ! w=\$(curl --max-time 15 -sf \"\${SUPABASE_URL%/}/rest/v1/builder_worker_runs?select=id&status=in.(running,queued)&limit=1\" -H \"apikey: \$SUPABASE_SERVICE_ROLE_KEY\" -H \"Authorization: Bearer \$SUPABASE_SERVICE_ROLE_KEY\" | tr -d ' \\n'); then echo 'cannot verify worker activity; treating as busy' >&2; return 0; fi
+      if ! m=\$(curl --max-time 15 -sf \"\${SUPABASE_URL%/}/rest/v1/builder_model_runs?select=id&status=eq.running&limit=1\" -H \"apikey: \$SUPABASE_SERVICE_ROLE_KEY\" -H \"Authorization: Bearer \$SUPABASE_SERVICE_ROLE_KEY\" | tr -d ' \\n'); then echo 'cannot verify model activity; treating as busy' >&2; return 0; fi
+      if ! h=\$(curl --max-time 30 -sf http://172.16.0.1:8091/health); then echo 'cannot verify runtime activity; treating as busy' >&2; return 0; fi
+      if ! printf '%s' \"\$h\" | node -e 'let s=\"\";process.stdin.on(\"data\",d=>s+=d);process.stdin.on(\"end\",()=>{try{const n=JSON.parse(s).runningBuilderJobs;process.exit(Number.isInteger(n)&&n===0?0:1)}catch{process.exit(1)}})'; then return 0; fi
       [[ \"\$w\" != '[]' || \"\$m\" != '[]' ]]
     }
     deadline=\$(( \$(date +%s) + $wait_s ))
@@ -75,9 +78,11 @@ drain_control_plane() {
 for target in "$@"; do
   case "$target" in
     control-plane)
+      "${SSH[@]}" "set -euo pipefail; cd /srv/fcm/releases/$SHA
+        DOCKER_GID=999 docker compose -f deploy/bob-control-plane/docker-compose.yml build -q bob-control-plane"
+      # Build first; otherwise new work can start during the image build after the idle check.
       drain_control_plane
       "${SSH[@]}" "set -euo pipefail; cd /srv/fcm/releases/$SHA
-        DOCKER_GID=999 docker compose -f deploy/bob-control-plane/docker-compose.yml build -q bob-control-plane
         DOCKER_GID=999 docker compose -f deploy/bob-control-plane/docker-compose.yml rm -sf bob-control-plane >/dev/null
         DOCKER_GID=999 docker compose -f deploy/bob-control-plane/docker-compose.yml up -d --force-recreate bob-control-plane >/dev/null
         for i in \$(seq 1 20); do sleep 2; curl -sf http://172.16.0.1:8091/health >/tmp/cp-health.json && break; done

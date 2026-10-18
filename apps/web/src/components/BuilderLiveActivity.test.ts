@@ -3,7 +3,7 @@ import React from 'react';
 import { cleanup, render, screen } from '@testing-library/react';
 import { deriveLiveActivity, isLiveJob, STALL_AFTER_MS, type LiveJob, type LiveSnapshot } from './BuilderLiveActivity';
 import { BuilderLiveActivity, modelRunExplanation } from './BuilderLiveActivity';
-import { modelFailure, inferenceUsage } from '../../../../supabase/functions/_shared/builder-run-telemetry';
+import { modelFailure, inferenceUsage, modelReceiptKind } from '../../../../supabase/functions/_shared/builder-run-telemetry';
 
 const now = Date.parse('2026-10-18T10:00:00Z');
 const iso = (msAgo: number) => new Date(now - msAgo).toISOString();
@@ -18,6 +18,42 @@ const snapshot = (over: Partial<LiveSnapshot> = {}): LiveSnapshot => ({
 });
 
 describe('model failure and throughput evidence', () => {
+  it('recognises old and new agentic artifact copies without classifying ordinary calls as duplicates', () => {
+    for (const suffix of ['transcript', 'proposal']) {
+      expect(modelReceiptKind({ prompt_version: 'agentic-engineer-v5', idempotency_key: `job::${suffix}` })).toBe('artifact');
+      expect(modelReceiptKind({ prompt_version: 'frontend-engineer-v2', idempotency_key: `job::${suffix}` })).toBe('call');
+    }
+    expect(modelReceiptKind({ prompt_version: 'agentic-engineer-v5', idempotency_key: 'job::agentic-session' })).toBe('session');
+    expect(modelReceiptKind({ prompt_version: 'agentic-engineer-v5', idempotency_key: 'job::turn-1' })).toBe('call');
+    expect(modelReceiptKind({})).toBe('call');
+  });
+
+  it('counts session usage once instead of adding transcript and patch copies or calling them extra paid runs', () => {
+    const run = {
+      id: 'session', step_id: 'b', provider: 'openai', model_name: 'gpt-5.4-mini',
+      status: 'completed', started_at: iso(30_000), created_at: iso(30_000), completed_at: iso(5000),
+      input_tokens: 100, output_tokens: 20, total_tokens: 120, turns: 4, phase: 'authored',
+    };
+    try {
+      render(React.createElement(BuilderLiveActivity, {
+        job: job(), snapshot: snapshot({ modelRuns: [
+          { ...run, receipt_kind: 'session' },
+          { ...run, id: 'transcript', receipt_kind: 'artifact' },
+          { ...run, id: 'patch', receipt_kind: 'artifact' },
+        ] }), now, pollState: 'idle', observedAt: iso(0), changedFiles: null,
+      }));
+      const region = screen.getByRole('region', { name: 'Bob live activity' });
+      expect(region.textContent).toContain('120 tokens');
+      expect(region.textContent).not.toContain('360 tokens');
+      expect(region.textContent).toContain('1 paid');
+      expect(region.textContent).toContain('2 artifact receipts');
+      expect(screen.getAllByText('artifact receipt · not another model call')).toHaveLength(2);
+      expect(screen.getByText(/not the provider bill/)).toBeTruthy();
+    } finally {
+      cleanup();
+    }
+  });
+
   it('renders a rejected response and measured speed without claiming billing failure or deployment', () => {
     const evidence = snapshot({ modelRuns: [{
       id: 'm', step_id: 'b', provider: 'gpu_workstation', model_name: 'qwen2.5-coder:7b',

@@ -14,6 +14,13 @@ test('control room projects model heartbeat timestamps and in-progress turn coun
   assert.match(controlRoom, /turns: count\(usage\.turns\) \?\? count\(usage\.turn\)/);
 });
 
+test('artifact receipts retain provenance without publishing duplicate cumulative model usage', () => {
+  assert.match(controlRoom, /receipt_kind: modelReceiptKind\(run\)/);
+  assert.match(controlRoom, /modelUsage\(modelReceiptKind\(run\) === 'artifact' \? null : run\.usage_metadata\)/);
+  assert.match(controlRoom, /usage_metadata, prompt_version, idempotency_key, started_at/);
+  assert.doesNotMatch(controlRoom, /idempotency_key: run\.idempotency_key/);
+});
+
 test('autonomous Builder admission reuses an active owner request after research enrichment', () => {
   assert.match(controlRoom, /if \(body\.autopilot === true\) \{/);
   assert.match(controlRoom, /\.eq\('autopilot_requested_by', user\.id\)/);
