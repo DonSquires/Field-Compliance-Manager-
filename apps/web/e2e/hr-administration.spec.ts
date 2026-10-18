@@ -51,8 +51,9 @@ test('payroll administrator creates an organization code and assigns it to staff
   await signInAsAdmin(page, '/admin/people-hr');
   await expect(page.getByText('No active payroll role codes.')).toBeVisible();
   await page.getByRole('button', { name: 'Add payroll role code' }).click();
+  await page.getByLabel('Role name').fill('Field Security Officer');
+  await expect(page.getByLabel('Payroll role code')).toHaveValue('FIELD_SECURITY_OFFICER');
   await page.getByLabel('Payroll role code').fill('FIELD_SECURITY');
-  await page.getByLabel('Name shown to staff admins').fill('Field security officer');
   await page.getByRole('button', { name: 'Create payroll role code' }).click();
   await expect(page.getByRole('status')).toContainText('Payroll role code FIELD_SECURITY created.');
 
@@ -60,8 +61,60 @@ test('payroll administrator creates an organization code and assigns it to staff
   await staffCard.getByLabel('Payroll role').selectOption('FIELD_SECURITY');
   await staffCard.getByRole('button', { name: 'Save payroll role' }).click();
   await expect(page.getByRole('status')).toContainText('Payroll role updated for Ana Ngata.');
-  expect(createPayload).toMatchObject({ p_action: 'create', p_code: 'FIELD_SECURITY', p_name: 'Field security officer' });
+  expect(createPayload).toMatchObject({ p_action: 'create', p_code: 'FIELD_SECURITY', p_name: 'Field Security Officer' });
   expect(assignmentPayload).toMatchObject({ p_staff_id: '22222222-2222-4222-8222-222222222222', p_expected_role_code: null, p_role_code: 'FIELD_SECURITY' });
+});
+
+test('HR records a current roster skill and auditable training evidence for staff', async ({ page }) => {
+  const skills: Array<Record<string, unknown>> = [];
+  const training: Array<Record<string, unknown>> = [];
+  let skillPayload: Record<string, unknown> | null = null;
+  let trainingPayload: Record<string, unknown> | null = null;
+  await page.route('**/rest/v1/roster_skill_catalog*', async (route) => await route.fulfill({ status: 200, contentType: 'application/json', body: JSON.stringify([{ id: 'skill-first-aid', skill_name: 'First aid', skill_category: 'medical', active: true }]) }));
+  await page.route('**/rest/v1/staff_skills*', async (route) => await route.fulfill({ status: 200, contentType: 'application/json', body: JSON.stringify(skills) }));
+  await page.route('**/rest/v1/staff_training_records*', async (route) => await route.fulfill({ status: 200, contentType: 'application/json', body: JSON.stringify(training) }));
+  await page.route('**/rest/v1/rpc/assign_roster_skill_to_staff', async (route) => {
+    skillPayload = JSON.parse(route.request().postData() ?? '{}') as Record<string, unknown>;
+    const row = { id: 'staff-skill-first-aid', staff_id: skillPayload.p_staff_id, skill_id: skillPayload.p_skill_id, skill_name: 'First aid', skill_category: 'medical', proficiency_level: skillPayload.p_proficiency_level, certified: skillPayload.p_certified, certification_expiry: skillPayload.p_certification_expiry, notes: skillPayload.p_notes, updated_at: '2026-08-30T10:00:00Z' };
+    skills.splice(0, skills.length, row);
+    await route.fulfill({ status: 200, contentType: 'application/json', body: JSON.stringify(row) });
+  });
+  await page.route('**/rest/v1/rpc/record_staff_training', async (route) => {
+    trainingPayload = JSON.parse(route.request().postData() ?? '{}') as Record<string, unknown>;
+    const row = { id: 'training-first-aid', staff_id: trainingPayload.p_staff_id, officer_id: trainingPayload.p_staff_id, training_name: trainingPayload.p_training_name, training_type: trainingPayload.p_training_type, provider: trainingPayload.p_provider, completed_date: trainingPayload.p_completed_date, expiry_date: trainingPayload.p_expiry_date, passed: trainingPayload.p_passed, score: trainingPayload.p_score, notes: trainingPayload.p_notes };
+    training.splice(0, training.length, row);
+    await route.fulfill({ status: 200, contentType: 'application/json', body: JSON.stringify(row) });
+  });
+
+  await signInAsAdmin(page, '/admin/people-hr');
+  await page.getByRole('button', { name: 'Credentials', exact: true }).click();
+  await page.getByRole('button', { name: 'Assign skill' }).click();
+  const skillForm = page.locator('form', { has: page.getByRole('button', { name: 'Save staff skill' }) });
+  await skillForm.getByLabel('Staff member').selectOption('22222222-2222-4222-8222-222222222222');
+  await skillForm.getByLabel('Catalog skill').selectOption('skill-first-aid');
+  await skillForm.getByLabel('Certification state').selectOption('certified');
+  await skillForm.getByLabel('Certification expiry').fill('2027-08-30');
+  await skillForm.getByLabel('Evidence note').fill('Certificate sighted by HR');
+  await skillForm.getByRole('button', { name: 'Save staff skill' }).click();
+  await expect(page.getByRole('status')).toContainText('Staff skill saved');
+  await expect(page.getByRole('row', { name: /Ana Ngata First aid/ })).toContainText('Current');
+
+  await page.getByRole('button', { name: 'Record training' }).click();
+  const trainingForm = page.locator('form', { has: page.getByRole('button', { name: 'Record training' }) });
+  await trainingForm.getByLabel('Staff member').selectOption('22222222-2222-4222-8222-222222222222');
+  await trainingForm.getByLabel('Training name').fill('Workplace first aid');
+  await trainingForm.getByLabel('Training type').selectOption('external');
+  await trainingForm.getByLabel('Provider').fill('NZ Training Provider');
+  await trainingForm.getByLabel('Expiry').fill('2027-08-30');
+  await trainingForm.getByLabel('Score (optional)').fill('92');
+  await trainingForm.getByLabel('Evidence or review note').fill('Certificate reference FA-2026');
+  await trainingForm.getByRole('button', { name: 'Record training' }).click();
+  await expect(page.getByRole('status')).toContainText('Training record saved and audited.');
+  await expect(page.getByRole('row').filter({ hasText: 'Workplace first aid' })).toContainText('Passed (92)');
+
+  expect(skillPayload).toMatchObject({ p_staff_id: '22222222-2222-4222-8222-222222222222', p_skill_id: 'skill-first-aid', p_proficiency_level: 'competent', p_certified: true, p_certification_expiry: '2027-08-30' });
+  expect(trainingPayload).toMatchObject({ p_staff_id: '22222222-2222-4222-8222-222222222222', p_training_name: 'Workplace first aid', p_training_type: 'external', p_passed: true, p_score: 92 });
+  expect(typeof (trainingPayload as Record<string, unknown> | null)?.p_client_request_id).toBe('string');
 });
 
 test('saving a changed payroll role sends the existing role as the expected value', async ({ page }) => {

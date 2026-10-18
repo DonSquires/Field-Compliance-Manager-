@@ -30,6 +30,20 @@ interface RateRule {
 }
 
 interface PayrollRoleCode { code: string; name: string; }
+interface PayrollPayCode { id: string; code: string; name: string; }
+interface PayrollSetupReadiness {
+  active_pay_code_count: number;
+  unassigned_staff_count: number;
+  rules_without_active_pay_code: number;
+  roles: Array<{
+    code: string;
+    name: string;
+    staff_count: number;
+    specific_rule_count: number;
+    fallback_rule_count: number;
+    status: 'ready' | 'fallback' | 'missing_rule';
+  }>;
+}
 
 interface CompletedDispatchJob {
   id: string;
@@ -65,12 +79,16 @@ type RuleStatusFilter = 'all' | 'active' | 'inactive';
 const RATE_TYPES = ['hourly', 'flat', 'daily', 'per_km', 'per_unit', 'percentage', 'per_hour_travel', 'per_hour_allowance', 'oncall_flat', 'callout', 'higher_duties_flat', 'per_visit', 'per_notice'];
 const EMPTY_FORM = { kind: 'pay' as 'pay' | 'billing', name: '', rateType: 'hourly', amount: '', payCode: '', roleCode: '', serviceType: '', jobType: '', clientOrgId: '', siteId: '', zoneId: '', dayCategory: '', effectiveFrom: '', effectiveTo: '', priority: '0' };
 const EMPTY_BAND_FORM = { id: '', serviceType: '', minimum: '', maximum: '', discountPercent: '', updatedAt: '' };
+const payrollCodeFromName = (value: string) => value.trim().toUpperCase().replace(/[^A-Z0-9]+/g, '_').replace(/^_+|_+$/g, '').slice(0, 32);
+const validPayrollCode = (value: string) => /^[A-Z0-9][A-Z0-9_-]*$/.test(value);
 
 export default function RateRulesPage() {
   const { profile, operatingOrganizationId } = useAuth();
   const { agreements, sites, zones } = useServiceRelationships();
   const [rules, setRules] = useState<RateRule[]>([]);
   const [payrollRoleCodes, setPayrollRoleCodes] = useState<PayrollRoleCode[]>([]);
+  const [payrollPayCodes, setPayrollPayCodes] = useState<PayrollPayCode[]>([]);
+  const [payrollReadiness, setPayrollReadiness] = useState<PayrollSetupReadiness | null>(null);
   const [patrolBands, setPatrolBands] = useState<PatrolDiscountBand[]>([]);
   const [unresolvedPatrol, setUnresolvedPatrol] = useState<UnresolvedPatrolCharge[]>([]);
   const [agreementLocations, setAgreementLocations] = useState<Array<{ service_agreement_id: string; site_id: string | null; zone_id: string | null }>>([]);
@@ -89,6 +107,8 @@ export default function RateRulesPage() {
   const returnFocusToTrigger = useRef(false);
   const [form, setForm] = useState(EMPTY_FORM);
   const [bandForm, setBandForm] = useState(EMPTY_BAND_FORM);
+  const [showPayCodeForm, setShowPayCodeForm] = useState(false);
+  const [payCodeForm, setPayCodeForm] = useState({ code: '', name: '' });
   const operatingBranchId = operatingOrganizationId ?? profile?.organizationId;
   const clientAgreements = useMemo(() => agreements.filter((agreement) =>
     agreement.provider_organization_id === operatingBranchId &&
@@ -138,20 +158,24 @@ export default function RateRulesPage() {
     }
     setLoading(true); setError(null);
     const agreementIds = clientAgreements.map((agreement) => agreement.id);
-    const [rulesResponse, jobsResponse, payLinesResponse, chargeLinesResponse, roleCodesResponse, locationsResponse, bandsResponse, patrolChargeResponse] = await Promise.all([
+    const [rulesResponse, jobsResponse, payLinesResponse, chargeLinesResponse, roleCodesResponse, payCodesResponse, readinessResponse, locationsResponse, bandsResponse, patrolChargeResponse] = await Promise.all([
       supabase.from('rate_rules').select('id,rule_kind,name,rate_type,amount,pay_code,role_code,service_type,job_type,client_org_id,site_id,zone_id,day_category,effective_from,effective_to,priority,active,updated_at').eq('organization_id', operatingBranchId).order('active', { ascending: false }).order('priority', { ascending: false }).order('name'),
       supabase.from('dispatch_jobs').select('id,job_type,completed_at,client_site_id').eq('organization_id', operatingBranchId).eq('status', 'completed').order('completed_at', { ascending: false }).limit(50),
       supabase.from('dispatch_job_pay_lines').select('source_dispatch_id,rate_rule_id').eq('organization_id', operatingBranchId).limit(500),
       supabase.from('dispatch_job_charge_lines').select('source_dispatch_id,rate_rule_id').eq('organization_id', operatingBranchId).limit(500),
       profile?.organizationId ? supabase.from('reference_codes').select('code,name').eq('organization_id', profile.organizationId).eq('code_type', 'role_code').eq('is_active', true).order('sort_order').order('code') : Promise.resolve({ data: [], error: null }),
+      profile?.organizationId ? supabase.from('reference_codes').select('id,code,name').eq('organization_id', profile.organizationId).eq('code_type', 'pay_item').eq('is_active', true).order('sort_order').order('code') : Promise.resolve({ data: [], error: null }),
+      supabase.rpc('get_payroll_setup_readiness', { p_operating_organization_id: operatingBranchId }),
       agreementIds.length ? supabase.from('service_agreement_locations').select('service_agreement_id,site_id,zone_id').in('service_agreement_id', agreementIds).eq('status', 'active') : Promise.resolve({ data: [], error: null }),
       supabase.from('sla_discount_bands').select('id,service_type,over_by_minutes_min,over_by_minutes_max,discount_pct,active,updated_at').eq('organization_id', operatingBranchId).eq('module_key', 'patrol').order('over_by_minutes_min'),
       supabase.from('patrol_stop_charge_lines').select('id,shift_stop_id,client_organization_id,service_type,module_key,status,created_at').eq('organization_id', operatingBranchId).in('status', ['unresolved_rate', 'unresolved_agreement']).is('invoice_line_item_id', null).order('created_at', { ascending: false }).limit(200),
     ]);
-    const loadError = rulesResponse.error ?? jobsResponse.error ?? payLinesResponse.error ?? chargeLinesResponse.error ?? roleCodesResponse.error ?? locationsResponse.error ?? bandsResponse.error ?? patrolChargeResponse.error;
+    const loadError = rulesResponse.error ?? jobsResponse.error ?? payLinesResponse.error ?? chargeLinesResponse.error ?? roleCodesResponse.error ?? payCodesResponse.error ?? readinessResponse.error ?? locationsResponse.error ?? bandsResponse.error ?? patrolChargeResponse.error;
     if (loadError) setError(loadError.message); else {
       setRules((rulesResponse.data as RateRule[]) ?? []);
       setPayrollRoleCodes((roleCodesResponse.data as PayrollRoleCode[]) ?? []);
+      setPayrollPayCodes((payCodesResponse.data as PayrollPayCode[]) ?? []);
+      setPayrollReadiness(readinessResponse.data as PayrollSetupReadiness);
       setPatrolBands((bandsResponse.data as PatrolDiscountBand[]) ?? []);
       setUnresolvedPatrol((patrolChargeResponse.data as UnresolvedPatrolCharge[]) ?? []);
       setAgreementLocations((locationsResponse.data ?? []) as Array<{ service_agreement_id: string; site_id: string | null; zone_id: string | null }>);
@@ -318,10 +342,74 @@ export default function RateRulesPage() {
     setSaving(false);
   };
 
+  const createPayCode = async (event: React.FormEvent) => {
+    event.preventDefault();
+    const code = payCodeForm.code.trim().toUpperCase();
+    if (!validPayrollCode(code) || !payCodeForm.name.trim()) return;
+    setSaving(true); setError(null); setNotice(null);
+    const { error: actionError } = await supabase.rpc('manage_pay_code', {
+      p_action: 'create',
+      p_pay_code_id: null,
+      p_code: code,
+      p_name: payCodeForm.name.trim(),
+    });
+    if (actionError) setError(actionError.message);
+    else {
+      setNotice(`Pay code ${code} created. It can now be selected on branch pay rules.`);
+      setPayCodeForm({ code: '', name: '' });
+      setShowPayCodeForm(false);
+      await load();
+    }
+    setSaving(false);
+  };
+
+  const deactivatePayCode = async (code: PayrollPayCode) => {
+    if (!window.confirm(`Deactivate pay code ${code.code}? Active pay rules must be moved first.`)) return;
+    setSaving(true); setError(null); setNotice(null);
+    const { error: actionError } = await supabase.rpc('manage_pay_code', {
+      p_action: 'deactivate',
+      p_pay_code_id: code.id,
+      p_code: null,
+      p_name: null,
+    });
+    if (actionError) setError(actionError.message);
+    else {
+      setNotice(`Pay code ${code.code} deactivated.`);
+      await load();
+    }
+    setSaving(false);
+  };
+
   return <div className="page-container rate-rules-page">
     <header className="page-header"><div><h1>Pay and charge rules</h1><p className="subtitle">The rules that decide what staff are paid and what customers are charged for shifts, callouts, court time, and dispatch jobs.</p></div><div><button type="button" className="btn btn-secondary" onClick={() => void load()} disabled={loading} title="Refresh rate rules" aria-label="Refresh rate rules"><RefreshCw size={16} /></button><button ref={ruleFormTriggerRef} type="button" className="btn btn-primary" onClick={openNewRule}><Plus size={16} />New pay or charge rule</button></div></header>
     {error && <div className="alert alert-error" role="alert"><AlertTriangle size={16} />{error}</div>}
     {notice && <div className="alert alert-success" role="status"><CheckCircle2 size={16} />{notice}</div>}
+    {!loading && <section className="reports-section" aria-labelledby="payroll-setup-title">
+      <header className="page-header">
+        <div><span className="contact-meta">Payroll chain</span><h2 id="payroll-setup-title">Roles, pay codes, and branch rules</h2><p className="subtitle">A payroll role says who the person works as. A pay code says how resolved pay is exported. A branch pay rule joins both to an amount and effective period.</p></div>
+        <button type="button" className="btn btn-sm btn-secondary" onClick={() => setShowPayCodeForm((open) => !open)}>{showPayCodeForm ? 'Cancel' : 'Add pay code'}</button>
+      </header>
+      <div className="hr-readiness">
+        <div><span>Active pay codes</span><strong>{payrollReadiness?.active_pay_code_count ?? payrollPayCodes.length}</strong></div>
+        <div><span>Staff without payroll role</span><strong>{payrollReadiness?.unassigned_staff_count ?? 0}</strong></div>
+        <div><span>Rules using an inactive or unknown code</span><strong>{payrollReadiness?.rules_without_active_pay_code ?? 0}</strong></div>
+      </div>
+      {(payrollReadiness?.unassigned_staff_count ?? 0) > 0 && <p className="contact-meta"><Link to="/admin/people-hr">Assign payroll roles in People &amp; HR</Link> before relying on role-specific pay resolution.</p>}
+      {showPayCodeForm && <form className="assessment-form" onSubmit={(event) => void createPayCode(event)}>
+        <div className="form-row">
+          <label><span>Pay code name</span><input required value={payCodeForm.name} onChange={(event) => {
+            const name = event.target.value;
+            setPayCodeForm((current) => ({ name, code: current.code === payrollCodeFromName(current.name) ? payrollCodeFromName(name) : current.code }));
+          }} placeholder="Ordinary hours" /></label>
+          <label><span>Export code</span><input required maxLength={32} value={payCodeForm.code} onChange={(event) => setPayCodeForm((current) => ({ ...current, code: payrollCodeFromName(event.target.value) }))} aria-describedby="pay-code-help" placeholder="ORDINARY" /></label>
+        </div>
+        <p id="pay-code-help" className="contact-meta">Use the code expected by the payroll export, for example ORDINARY, OVERTIME, or TRAVEL_KM. Spaces are converted to underscores.</p>
+        {payCodeForm.code && !validPayrollCode(payCodeForm.code) && <p className="alert alert-error" role="alert">Use letters, numbers, underscores, or hyphens.</p>}
+        <button type="submit" className="btn btn-primary" disabled={saving || !payCodeForm.name.trim() || !validPayrollCode(payCodeForm.code)}>{saving ? 'Creating' : 'Create pay code'}</button>
+      </form>}
+      {payrollPayCodes.length === 0 ? <div className="empty-state"><p><strong>No managed pay codes.</strong> Create the payroll export code before adding a staff pay rule.</p></div> : <div className="contacts-list">{payrollPayCodes.map((code) => <div className="contact-card" key={code.id}><div className="contact-header"><h3>{code.code}</h3><span className="contact-type-badge">Pay code</span></div><div className="contact-details"><p>{code.name}</p></div><button type="button" className="btn btn-sm btn-secondary" disabled={saving} onClick={() => void deactivatePayCode(code)}>Deactivate code</button></div>)}</div>}
+      {(payrollReadiness?.roles ?? []).length > 0 && <div className="reports-table-wrapper"><table className="reports-table"><thead><tr><th>Payroll role</th><th>Assigned staff</th><th>Branch pay rule</th><th>State</th></tr></thead><tbody>{payrollReadiness?.roles.map((role) => <tr key={role.code}><td>{role.code}<div className="contact-meta">{role.name}</div></td><td>{role.staff_count}</td><td>{role.specific_rule_count > 0 ? `${role.specific_rule_count} role-specific` : role.fallback_rule_count > 0 ? `${role.fallback_rule_count} organisation fallback` : 'None'}</td><td><span className={`status-badge ${role.status === 'ready' ? 'status-active' : 'status-pending'}`}>{role.status === 'ready' ? 'Ready' : role.status === 'fallback' ? 'Fallback only' : 'Missing rule'}</span></td></tr>)}</tbody></table></div>}
+    </section>}
     <section className="reports-section" aria-label="Patrol SLA discount bands">
       <h2>Patrol late-arrival discounts</h2>
       <p>A discount applies only to a completed per-visit charge when recorded arrival is later than the contracted deadline. Dwell time remains service evidence, not an additional charge. No discount is applied unless a band matches.</p>
@@ -359,7 +447,7 @@ export default function RateRulesPage() {
         {!payrollRoleCodes.length && <p className="contact-meta">No payroll role codes are set up yet. <Link to="/admin/people-hr">Create one in People &amp; HR</Link>.</p>}
       </div>}
       <div className="form-row">
-        <label><span>Payroll or invoice code (optional)</span><input value={form.payCode} onChange={(event) => setForm({ ...form, payCode: event.target.value })} /></label>
+        {form.kind === 'pay' ? <label><span>Payroll pay code</span><select required value={form.payCode} onChange={(event) => setForm({ ...form, payCode: event.target.value })}><option value="">Select active pay code</option>{payrollPayCodes.map((code) => <option key={code.id} value={code.code}>{code.code} · {code.name}</option>)}</select></label> : <label><span>Invoice code (optional)</span><input value={form.payCode} onChange={(event) => setForm({ ...form, payCode: event.target.value })} /></label>}
         <label><span>Service type</span><input value={form.serviceType} onChange={(event) => setForm({ ...form, serviceType: event.target.value })} /></label>
         <label><span>Job type</span><input value={form.jobType} onChange={(event) => setForm({ ...form, jobType: event.target.value })} /></label>
       </div>
@@ -388,7 +476,7 @@ export default function RateRulesPage() {
         <label><span>Effective through</span><input type="date" value={form.effectiveTo} onChange={(event) => setForm({ ...form, effectiveTo: event.target.value })} /></label>
       </div>
       {form.kind === 'billing' && <p role="status">Applies to {form.clientOrgId ? clientNames.get(form.clientOrgId) ?? 'the selected client' : 'any client'} · {form.siteId ? siteNames.get(form.siteId) ?? 'the selected site' : form.zoneId ? zoneNames.get(form.zoneId) ?? 'the selected zone' : 'all linked places'}.</p>}
-      <button type="submit" className="btn btn-primary" disabled={saving || !form.name.trim() || !form.amount}>{saving ? 'Saving' : editingRule ? 'Save rate rule' : 'Create rate rule'}</button>
+      <button type="submit" className="btn btn-primary" disabled={saving || !form.name.trim() || !form.amount || (form.kind === 'pay' && !form.payCode)}>{saving ? 'Saving' : editingRule ? 'Save rate rule' : 'Create rate rule'}</button>
     </form></div>}
     {loading ? <div className="loading-state"><div className="spinner" /><p>Loading pay and charge rules</p></div> : <section className="reports-section rate-rules-ledger" aria-labelledby="rate-rules-ledger-title">
       <header><div><h2 id="rate-rules-ledger-title">Pay and charge rules</h2><p className="subtitle">Search and review rules loaded for this operating branch.</p></div><strong role="status" aria-live="polite">Showing {visibleRules.length} of {rules.length}</strong></header>
@@ -402,7 +490,10 @@ export default function RateRulesPage() {
       <div className="reports-table-wrapper rate-rules-table-region" role="region" aria-label="Pay and charge rule register" tabIndex={0}>
         <table className="reports-table"><thead><tr><th>Name</th><th>Kind</th><th>Rate</th><th>Scope and dates</th><th>Priority</th><th>Status</th><th>Actions</th></tr></thead><tbody>
           {rules.length === 0 ? <tr><td colSpan={7} className="text-center">No pay or charge rules yet</td></tr> : visibleRules.length === 0 ? <tr><td colSpan={7} className="text-center"><div className="rate-rules-empty"><span>No rules match these filters.</span><button type="button" className="btn btn-sm btn-secondary" onClick={() => { setRuleSearch(''); setRuleKindFilter('all'); setRuleStatusFilter('all'); }}>Clear filters</button></div></td></tr> : visibleRules.map((rule) => <tr key={rule.id}>
-            <td>{rule.name}<small>{rule.pay_code ? `Pay / invoice code ${rule.pay_code}` : rule.role_code ? `Payroll role ${rule.role_code}` : ''}</small></td>
+            <td>{rule.name}<small>{[
+              rule.pay_code ? `${rule.rule_kind === 'pay' ? 'Pay' : 'Invoice'} code ${rule.pay_code}` : null,
+              rule.role_code ? `Payroll role ${rule.role_code}` : null,
+            ].filter(Boolean).join(' · ')}</small></td>
             <td>{rule.rule_kind === 'pay' ? 'Staff pay' : 'Customer charge'}</td>
             <td>{rule.rate_type.replaceAll('_', ' ')} · {Number(rule.amount).toFixed(2)}</td>
             <td>{[rule.client_org_id ? clientNames.get(rule.client_org_id) ?? 'Client account' : null, rule.site_id ? siteNames.get(rule.site_id) ?? 'Site override' : null, rule.zone_id ? zoneNames.get(rule.zone_id) ?? 'Zone override' : null, rule.service_type, rule.job_type, rule.day_category?.replaceAll('_', ' '), rule.effective_from ? `from ${rule.effective_from}` : null, rule.effective_to ? `through ${rule.effective_to}` : null].filter(Boolean).join(' · ') || 'Whole organisation'}</td>
