@@ -65,14 +65,13 @@ async function runFrontendImplementation({
     }
 
     currentStep = await reloadStep(supabase, step.id, job.id);
-    if (!currentStep.retryable) {
-      return { success: false, phase: 'verification', attempts: attempt, job: verification.job };
-    }
     // The repository itself is red at the pinned commit: no repair can pass, so the step is parked
     // with the real reason for a human instead of burning author runs on someone else's break.
     if (verification.baseline_failure) {
-      await recordGenerationFailure({ supabase, job, step: currentStep }, { no_change: true, error: `repository red at the pinned commit: ${verification.baseline_reason}` }, 'baseline');
       return { success: false, phase: 'baseline', attempts: attempt, job: verification.job, error: verification.baseline_reason };
+    }
+    if (!currentStep.retryable) {
+      return { success: false, phase: verification.infrastructure_failure ? 'infrastructure' : 'verification', attempts: attempt, job: verification.job, patch_artifact: patchArtifact };
     }
     // The verifier failed, not the patch (OOM, killed, timed out): run the same patch again once
     // rather than sending the author a failure it did not cause.
@@ -81,9 +80,6 @@ async function runFrontendImplementation({
         infrastructureRetries += 1;
         continue;
       }
-      await recordGenerationFailure({ supabase, job, step: currentStep }, {
-        no_change: true, error: `Verifier recovery exhausted; candidate patch ${patchArtifact.id} is preserved. ${verification.infrastructure_reason || 'Infrastructure failed twice; repair the runner before resuming verification.'}`
-      }, 'infrastructure');
       return { success: false, phase: 'infrastructure', attempts: attempt, patch_artifact: patchArtifact };
     }
     const failureArtifact = verification.failure_artifact || verification.artifacts?.[0];
@@ -111,6 +107,7 @@ async function runFrontendImplementation({
       return { success: false, phase: 'repair', attempts: attempt, result: generation };
     }
     patchArtifact = generation.patch_artifact;
+    infrastructureRetries = 0;
   }
   return { success: false, phase: 'verification', attempts: MAX_FRONTEND_ATTEMPTS };
 }

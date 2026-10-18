@@ -23,7 +23,8 @@ Owner-approved durable Builder recovery 2026-10-18:
 - Ordinary frontend/backend repairs and scheduler-resumed failed verification
   restore the integrity-checked failed patch and failure report. Independent
   review remains mandatory. Prior test claims do not substitute for a new
-  independent worker receipt.
+  independent worker receipt. Verification stages are rerun; completed stage
+  receipts are not cached.
 - `builder_account_verifier_recoveries` refunds an infrastructure/evidence
   worker claim from the existing engineering counter once per worker/lease
   start, with append-only audit receipts. It runs after classified failure and
@@ -49,6 +50,8 @@ and tool context, then runs its test and finishes without repeating the edit;
 PostgreSQL fixtures prove per-lease idempotent refunds, retained engineering
 failures, bounded recovery and service-role-only accounting. These are recovery
 mechanism checks, not proof a real Builder job completed end-to-end.
+The targeted recovery, worker and idle-safe deployment suite passed 180 tests,
+including the isolated PostgreSQL accounting fixture.
 
 Builder recovery 2026-10-18: an automatic continuation must be an idempotent,
 transactionally bound child of its source job, preserving the requester,

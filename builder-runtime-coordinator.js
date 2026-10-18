@@ -1,6 +1,6 @@
 const { runProductAnalyst } = require('./supabase/functions/_shared/builder-product-analyst');
 const { runUxDesigner } = require('./supabase/functions/_shared/builder-ux-designer');
-const { runFrontendImplementation } = require('./builder-frontend-orchestrator');
+const { runFrontendImplementation, reloadFrontendStep } = require('./builder-frontend-orchestrator');
 const { runBackendEngineer } = require('./supabase/functions/_shared/builder-backend-engineer');
 const { runBackendHandoff } = require('./builder-backend-handoff');
 const { runSecurityReview } = require('./builder-security-handoff');
@@ -267,7 +267,8 @@ function resumablePatchArtifact(snapshot, step) {
 
 function failedImplementationEvidence(snapshot, step) {
   if (step?.status !== 'failed' || !step.retryable || resumablePatchArtifact(snapshot, step)) return {};
-  const run = snapshot.workerRuns.filter(item => item.step_id === step.id && item.status === 'failed').at(-1);
+  const run = snapshot.workerRuns.filter(item => item.step_id === step.id && item.status === 'failed'
+    && (!step.input_context?.patch_artifact_id || item.patch_artifact_id === step.input_context.patch_artifact_id)).at(-1);
   if (!run) return {};
   const failedPatchArtifact = snapshot.artifacts.find(item => item.id === run.patch_artifact_id && item.artifact_type === 'code_implementation' && item.status === 'final');
   const failureArtifact = snapshot.artifacts.find(item => run.output_artifact_ids?.includes(item.id) && item.artifact_type === 'build_logs' && item.status === 'final');
@@ -308,17 +309,18 @@ async function runBackendImplementation(input) {
     if (verification.success || !agentic) return { ...verification, attempts: attempt, patch_artifact: patchArtifact, routing: generation.routing };
     // The verifier failed, not the patch (OOM, killed, timed out): same patch again, once, no repair.
     if (verification.infrastructure_failure) {
+      const currentStep = await (input.reloadStep || reloadFrontendStep)(input.supabase, input.step.id, input.job.id);
+      if (!currentStep.retryable) return { ...verification, success: false, phase: 'infrastructure', attempts: attempt, patch_artifact: patchArtifact };
       if (infrastructureRetries < 1) { infrastructureRetries += 1; continue; }
-      await recordGenerationFailure(input, { no_change: true, error: `Verifier recovery exhausted; candidate patch ${patchArtifact.id} is preserved. ${verification.infrastructure_reason || 'Infrastructure failed twice; repair the runner before resuming verification.'}` }, 'infrastructure');
       return { ...verification, success: false, phase: 'infrastructure', attempts: attempt, patch_artifact: patchArtifact };
     }
     // The repository is red at the pinned commit: park with the reason; no repair can pass.
     if (verification.baseline_failure) {
-      await recordGenerationFailure(input, { no_change: true, error: `repository red at the pinned commit: ${verification.baseline_reason}` }, 'baseline');
       return { ...verification, success: false, phase: 'baseline', attempts: attempt, error: verification.baseline_reason };
     }
     if (attempt >= MAX_BACKEND_ATTEMPTS) return { ...verification, success: false, phase: 'repair_limit', attempts: attempt };
     const failureArtifact = verification.failure_artifact || verification.artifacts?.[0];
+    if (!failureArtifact?.id) return { success: false, phase: 'evidence', attempts: attempt, patch_artifact: patchArtifact, error: 'verification failure artifact is missing' };
     // Feed the independent worker's failure evidence back to Bob and let him repair; an in-house author
     // that failed verification hands the repair to the next provider in the chain.
     generation = await generate({ ...input, failureArtifact, failedPatchArtifact: patchArtifact, startAfterProvider: escalationPoint(generation) });
@@ -327,6 +329,7 @@ async function runBackendImplementation(input) {
       return { success: false, phase: 'repair', attempts: attempt, result: generation };
     }
     patchArtifact = generation.patch_artifact;
+    infrastructureRetries = 0;
   }
   return { success: false, phase: 'verification', attempts: MAX_BACKEND_ATTEMPTS };
 }

@@ -502,12 +502,51 @@ test('expired verifier leases are recovered before every advance, and the recove
 
 test('ordinary failed implementation resumes from its exact patch and worker evidence across scheduler ticks', () => {
   const { failedImplementationEvidence } = require('../builder-runtime-coordinator');
-  const step = { id: 'step', status: 'failed', retryable: true, error: 'Frontend worker verification failed' };
+  const step = { id: 'step', status: 'failed', retryable: true, error: 'Frontend worker verification failed', input_context: { patch_artifact_id: 'patch' } };
   const patch = { id: 'patch', artifact_type: 'code_implementation', status: 'final' };
   const failure = { id: 'logs', artifact_type: 'build_logs', status: 'final' };
   const state = { workerRuns: [{ step_id: 'step', status: 'failed', patch_artifact_id: 'patch', output_artifact_ids: ['logs'] }], artifacts: [patch, failure] };
   assert.deepEqual(failedImplementationEvidence(state, step), { failedPatchArtifact: patch, failureArtifact: failure });
+  assert.deepEqual(failedImplementationEvidence({ ...state, workerRuns: [...state.workerRuns, { step_id: 'step', status: 'failed', patch_artifact_id: 'stale-patch' }] }, step), { failedPatchArtifact: patch, failureArtifact: failure });
   assert.throws(() => failedImplementationEvidence({ ...state, artifacts: [patch] }, step), /missing its patch or verification evidence/);
+});
+
+test('backend respects durable recovery pauses without charging infrastructure or baseline as generation failures', async () => {
+  const handoffPath = require.resolve('../builder-backend-handoff');
+  const originalHandoff = require.cache[handoffPath].exports;
+  const coordinatorPath = require.resolve('../builder-runtime-coordinator');
+  let outcomes;
+  let verifications;
+  require.cache[handoffPath].exports = { ...originalHandoff, runBackendHandoff: async () => {
+    verifications += 1;
+    if (!outcomes.length) throw new Error('unexpected additional verification');
+    return outcomes.shift();
+  } };
+  delete require.cache[coordinatorPath];
+  try {
+    const { runBackendImplementation } = require('../builder-runtime-coordinator');
+    for (const scenario of [
+      { outcomes: [{ success: false, infrastructure_failure: true }, { success: false, infrastructure_failure: true }], retryable: [true, false], phase: 'infrastructure', verifications: 2 },
+      { outcomes: [{ success: false, infrastructure_failure: true }], retryable: [false], phase: 'infrastructure', verifications: 1 },
+      { outcomes: [{ success: false, baseline_failure: true, baseline_reason: 'matching assertion' }], retryable: [], phase: 'baseline', verifications: 1 },
+    ]) {
+      outcomes = [...scenario.outcomes];
+      verifications = 0;
+      const states = [...scenario.retryable];
+      const result = await runBackendImplementation({
+        supabase: { rpc: async () => { throw new Error('a non-engineering failure must not charge generation budget'); } },
+        job: { id: 'job' }, step: { id: 'step' },
+        context: { workspaceRoot: '/ws' }, resumePatchArtifact: { id: 'saved-patch' },
+        reloadStep: async () => ({ retryable: states.shift() }),
+      });
+      assert.equal(result.phase, scenario.phase);
+      assert.equal(verifications, scenario.verifications);
+      assert.equal(outcomes.length, 0);
+    }
+  } finally {
+    require.cache[handoffPath].exports = originalHandoff;
+    delete require.cache[coordinatorPath];
+  }
 });
 
 test('an author with nothing to change in its lane skips the step when the other lane delivered the patch; otherwise it parks', async () => {
