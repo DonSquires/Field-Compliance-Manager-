@@ -29,6 +29,7 @@ const QUOTA_EXHAUSTED_PATTERN = /insufficient_quota|no credits|credit balance|ex
 const HEALTH_PROBE_TIMEOUT_MS = Math.max(2_000, Number(process.env.BOB_MODEL_PROBE_TIMEOUT_MS || 10_000));
 const CHARS_PER_TOKEN = 3.5;
 const healthCache = new Map();
+const busyLocalProviders = new Set();
 
 function authHeaders(providerConfig) {
   return providerConfig.apiKey ? { Authorization: `Bearer ${providerConfig.apiKey}` } : {};
@@ -40,6 +41,18 @@ function parseModelAllowlist(value, fallback) {
 
 function estimateTokens(chars) {
   return Math.ceil(Number(chars || 0) / CHARS_PER_TOKEN);
+}
+
+function durationMs(value) {
+  return typeof value === 'number' && Number.isFinite(value) && value >= 0 ? value / 1e6 : null;
+}
+
+function eligibleLocalModels(providerConfig, probe) {
+  if (!providerConfig.modelMemoryBudgetBytes) return [...providerConfig.models];
+  return [...providerConfig.models].filter(model => {
+    const bytes = probe.model_sizes?.[model] ?? probe.model_sizes?.[`${model}:latest`];
+    return Number.isFinite(bytes) && bytes > 0 && bytes <= providerConfig.modelMemoryBudgetBytes;
+  });
 }
 
 // Prompts that cannot fit a local model's context are the clearest "outsource this" signal.
@@ -69,19 +82,23 @@ async function probeProvider(config, name, { fetchImpl = globalThis.fetch, now =
   if (!providerConfig.baseUrl) return { name, configured: false, healthy: false, installed: [] };
   if (providerConfig.kind === 'ollama_cloud' && !providerConfig.apiKey) return { name, configured: false, healthy: false, installed: [] };
   const cached = healthCache.get(name);
-  if (cached && cached.until > now()) return { name, configured: true, healthy: cached.healthy, installed: cached.installed, reason: cached.reason || null, cached: true };
+  if (cached && cached.until > now()) return { name, configured: true, healthy: cached.healthy, installed: cached.installed, model_sizes: cached.model_sizes, reason: cached.reason || null, cached: true };
   let healthy = false;
   let installed = [];
+  let modelSizes = {};
   try {
     const response = await fetchImpl(`${providerConfig.baseUrl}/api/tags`, { headers: authHeaders(providerConfig), signal: AbortSignal.timeout(HEALTH_PROBE_TIMEOUT_MS) });
     healthy = response.ok;
     const data = healthy ? await response.json().catch(() => null) : null;
     installed = Array.isArray(data?.models) ? data.models.map(model => String(model.name || model.model || '')).filter(Boolean) : [];
+    modelSizes = Object.fromEntries((Array.isArray(data?.models) ? data.models : [])
+      .filter(model => typeof model.size === 'number' && Number.isFinite(model.size) && model.size > 0)
+      .map(model => [String(model.name || model.model || ''), model.size]));
   } catch {
     healthy = false;
   }
-  healthCache.set(name, { healthy, installed, until: now() + (healthy ? HEALTH_OK_TTL_MS : HEALTH_FAIL_TTL_MS) });
-  return { name, configured: true, healthy, installed, cached: false };
+  healthCache.set(name, { healthy, installed, model_sizes: modelSizes, until: now() + (healthy ? HEALTH_OK_TTL_MS : HEALTH_FAIL_TTL_MS) });
+  return { name, configured: true, healthy, installed, model_sizes: modelSizes, cached: false };
 }
 
 // The model a provider would actually serve for a request: the requested model when allowed and
@@ -99,17 +116,25 @@ function resolveProviderModel(config, name, requestedModel, installed = null) {
 async function modelHealth(config, options = {}) {
   const names = Object.keys(PROVIDER_KINDS);
   const probes = await Promise.all(names.map(name => probeProvider(config, name, options)));
-  return Object.fromEntries(probes.map(probe => [probe.name, {
-    kind: PROVIDER_KINDS[probe.name],
-    configured: probe.configured,
-    healthy: probe.healthy,
-    models: [...(config[probe.name]?.models ?? [])],
-    installed: probe.installed,
-    ready_model: probe.healthy ? resolveProviderModel(config, probe.name, null, probe.installed) : null,
-    unavailable_reason: probe.healthy ? null : (probe.reason || null),
-    num_ctx: config[probe.name]?.numCtx ?? null,
-    max_output_tokens: config[probe.name]?.maxOutputTokens ?? config.maxOutputTokens ?? null
-  }]));
+  return Object.fromEntries(probes.map(probe => {
+    const provider = config[probe.name];
+    const eligible = provider ? eligibleLocalModels(provider, probe) : [];
+    return [probe.name, {
+      kind: PROVIDER_KINDS[probe.name],
+      configured: probe.configured,
+      healthy: probe.healthy,
+      models: eligible,
+      configured_models: [...(provider?.models ?? [])],
+      installed: probe.installed,
+      ready_model: probe.healthy ? bestAvailableModel(eligible, probe.installed) : null,
+      model_memory_budget_bytes: provider?.modelMemoryBudgetBytes ?? null,
+      memory_budget_source: provider?.modelMemoryBudgetBytes ? 'configured_vram_minus_headroom' : null,
+      excluded_models: [...(provider?.models ?? [])].filter(model => !eligible.includes(model)),
+      unavailable_reason: probe.healthy ? null : (probe.reason || null),
+      num_ctx: config[probe.name]?.numCtx ?? null,
+      max_output_tokens: config[probe.name]?.maxOutputTokens ?? config.maxOutputTokens ?? null
+    }];
+  }));
 }
 
 function isReasoningModel(model) {
@@ -142,6 +167,11 @@ function defaultAuthorModel(env = process.env, installed = null) {
 
 function createModelGatewayConfig(env = process.env) {
   const maxOutputTokens = Math.max(1000, Number(env.BOB_BUILDER_MAX_OUTPUT_TOKENS || 8192));
+  const vramMb = Number(env.BOB_GPU_VRAM_MB || 8192);
+  const headroomMb = Number(env.BOB_GPU_HEADROOM_MB || 2048);
+  if (!Number.isFinite(vramMb) || !Number.isFinite(headroomMb) || headroomMb < 1024 || vramMb <= headroomMb) {
+    throw new Error('GPU memory configuration must reserve at least 1024 MiB and leave a positive model budget');
+  }
   return {
     openai: {
       kind: 'openai',
@@ -161,10 +191,10 @@ function createModelGatewayConfig(env = process.env) {
     gpu_workstation: {
       kind: 'ollama',
       baseUrl: (env.GPU_WORKSTATION_URL || '').replace(/\/(v1)?\/*$/, ''),
-      // The laptop GPU holds ~6 GB: qwen2.5-coder:7b stays resident (1.9k prompt / 46 gen tok/s, measured
-      // 2026-10-16) and authors; the 14b partly offloads (0.4k / 5 tok/s) and serves as the distinct
-      // in-house reviewer model. gpt-oss:20b ran at <1 prompt tok/s there and is deliberately absent.
+      // RTX 5050 laptop: 8 GiB VRAM, 16 GiB RAM (owner-approved diagnostic, 2026-10-18).
+      // Reserve VRAM for context/display; never select a 9 GB model just because it has more parameters.
       models: parseModelAllowlist(env.BOB_GPU_MODELS, 'qwen2.5-coder:7b,qwen2.5-coder:14b,qwen3:8b'),
+      modelMemoryBudgetBytes: (vramMb - headroomMb) * 1024 ** 2,
       maxOutputTokens: Math.min(maxOutputTokens, 8192),
       numCtx: Math.max(4096, Number(env.BOB_GPU_NUM_CTX) || 32768)
     },
@@ -227,7 +257,7 @@ function buildProviderBody({ input, config, model }) {
     if (input.output_schema) body.format = 'json';
     // Ollama defaults to a 4k window and would truncate Bob's prompts silently; keep the model warm between turns.
     body.options = { num_ctx: providerConfig.numCtx, temperature: typeof input.temperature === 'number' ? input.temperature : 0.2, num_predict: Math.min(Number(input.max_output_tokens) || providerConfig.maxOutputTokens || 8192, providerConfig.maxOutputTokens || 8192, 16384) };
-    if (providerConfig.kind === 'ollama') body.keep_alive = '30m';
+    if (providerConfig.kind === 'ollama') body.keep_alive = '5m';
     return body;
   }
   if (input.output_schema) body.response_format = { type: 'json_object' };
@@ -261,8 +291,16 @@ async function invokeBuilderModel({ input, config, fetchImpl = globalThis.fetch 
   const probe = await probeProvider(config, input.provider, { fetchImpl });
   if (probe.reason === 'quota_exhausted') return { status: 429, body: { error: `${input.provider} account has no remaining quota or credits; skipped until it is topped up`, code: 'provider_quota' } };
   if (OLLAMA_API_KINDS.has(providerConfig.kind) && !probe.healthy) return { status: 503, body: { error: `${input.provider} provider is unreachable`, code: 'provider_unavailable' } };
-  const model = resolveProviderModel(config, input.provider, input.model, probe.installed ?? null);
+  const eligible = eligibleLocalModels(providerConfig, probe);
+  const model = input.model ? resolveProviderModel(config, input.provider, input.model, probe.installed ?? null)
+    : bestAvailableModel(eligible, probe.installed ?? null);
   if (!model) return { status: 503, body: { error: `${input.provider} has none of the allowed models installed`, code: 'model_unavailable' } };
+  if (!eligible.includes(model)) {
+    return { status: 422, body: { error: `${input.provider} model exceeds the configured VRAM weight budget or its size is unknown; over-budget model selection is blocked`, code: 'model_memory_budget' } };
+  }
+  const local = providerConfig.kind === 'ollama';
+  if (local && busyLocalProviders.has(input.provider)) return { status: 429, body: { error: `${input.provider} is already serving a request; no parallel local model was loaded`, code: 'provider_busy' } };
+  if (local) busyLocalProviders.add(input.provider);
 
   const controller = new AbortController();
   const timer = setTimeout(() => controller.abort(), config.timeoutMs);
@@ -305,7 +343,15 @@ async function invokeBuilderModel({ input, config, fetchImpl = globalThis.fetch 
         finish_reason: isOpenAI ? (data.choices?.[0]?.finish_reason ?? null) : (data.done_reason ?? null),
         usage: isOpenAI
           ? (data.usage || {})
-          : { input_tokens: data.prompt_eval_count || 0, output_tokens: data.eval_count || 0 }
+          : {
+            input_tokens: data.prompt_eval_count || 0, output_tokens: data.eval_count || 0,
+            inference: {
+              load_ms: durationMs(data.load_duration),
+              prompt_ms: durationMs(data.prompt_eval_duration),
+              generation_ms: durationMs(data.eval_duration),
+              output_tokens_per_second: data.eval_duration > 0 ? (data.eval_count || 0) * 1e9 / data.eval_duration : null,
+            }
+          }
       }
     };
   } catch (error) {
@@ -317,6 +363,7 @@ async function invokeBuilderModel({ input, config, fetchImpl = globalThis.fetch 
     };
   } finally {
     clearTimeout(timer);
+    if (local) busyLocalProviders.delete(input.provider);
   }
 }
 

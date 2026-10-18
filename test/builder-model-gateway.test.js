@@ -73,7 +73,7 @@ test('model gateway normalizes Ollama output and token counts', async () => {
 
   assert.equal(result.status, 200);
   assert.equal(result.body.content, 'local summary');
-  assert.deepEqual(result.body.usage, { input_tokens: 8, output_tokens: 3 });
+  assert.deepEqual(result.body.usage, { input_tokens: 8, output_tokens: 3, inference: { load_ms: null, prompt_ms: null, generation_ms: null, output_tokens_per_second: null } });
 });
 
 test('local prompt budget reserves requested output tokens inside the model context window', async () => {
@@ -155,6 +155,51 @@ test('local Ollama requests carry no Authorization header', async () => {
   });
   assert.ok(calls.length >= 1);
   assert.ok(calls.every(init => !init.headers?.Authorization), 'the cloud key never leaves for a local host');
+});
+
+test('GPU health filters by installed byte size and reserves context headroom, not parameter count', async () => {
+  const { modelHealth } = require('../builder-model-gateway');
+  const cfg = createModelGatewayConfig({
+    GPU_WORKSTATION_URL: 'http://gpu.example:11434',
+    BOB_GPU_MODELS: 'qwen2.5-coder:14b,qwen2.5-coder:7b,unknown-size',
+    BOB_GPU_VRAM_MB: '8192', BOB_GPU_HEADROOM_MB: '2048',
+  });
+  let chats = 0;
+  const fetchImpl = async url => {
+    if (url.endsWith('/api/tags')) return { ok: true, json: async () => ({ models: [
+      { name: 'qwen2.5-coder:14b', size: 9e9 }, { name: 'qwen2.5-coder:7b', size: 4.7e9 }, { name: 'unknown-size' },
+    ] }) };
+    chats++;
+    return { ok: true, json: async () => ({ message: { content: 'ok' }, eval_count: 20, eval_duration: 2e9, load_duration: 1e9 }) };
+  };
+  const h = await modelHealth(cfg, { fetchImpl, now: () => Date.now() + 60000 });
+  assert.deepEqual(h.gpu_workstation.models, ['qwen2.5-coder:7b']);
+  assert.deepEqual(h.gpu_workstation.excluded_models, ['qwen2.5-coder:14b', 'unknown-size']);
+  assert.equal(h.gpu_workstation.ready_model, 'qwen2.5-coder:7b');
+  assert.equal(h.gpu_workstation.model_memory_budget_bytes, 6144 * 1024 ** 2);
+  const denied = await invokeBuilderModel({ input: request({ provider: 'gpu_workstation', model: 'qwen2.5-coder:14b' }), config: cfg, fetchImpl });
+  assert.equal(denied.status, 422);
+  assert.equal(denied.body.code, 'model_memory_budget');
+  assert.equal(chats, 0);
+  const accepted = await invokeBuilderModel({ input: request({ provider: 'gpu_workstation', model: undefined }), config: cfg, fetchImpl });
+  assert.equal(accepted.status, 200);
+  assert.equal(accepted.body.model, 'qwen2.5-coder:7b');
+  assert.equal(accepted.body.usage.inference.output_tokens_per_second, 10);
+  assert.equal(accepted.body.usage.inference.load_ms, 1000);
+  let release;
+  const first = invokeBuilderModel({
+    input: request({ provider: 'gpu_workstation', model: 'qwen2.5-coder:7b' }), config: cfg,
+    fetchImpl: () => new Promise(resolve => { release = () => resolve({ ok: true, json: async () => ({ message: { content: 'done' } }) }); }),
+  });
+  await new Promise(resolve => setImmediate(resolve));
+  const busy = await invokeBuilderModel({ input: request({ provider: 'gpu_workstation', model: 'qwen2.5-coder:7b' }), config: cfg, fetchImpl });
+  assert.equal(busy.body.code, 'provider_busy');
+  release();
+  await first;
+  const after = await invokeBuilderModel({ input: request({ provider: 'gpu_workstation', model: 'qwen2.5-coder:7b' }), config: cfg, fetchImpl });
+  assert.equal(after.status, 200, 'local request lock is released');
+  assert.throws(() => createModelGatewayConfig({ BOB_GPU_HEADROOM_MB: '8192' }), /GPU memory configuration/);
+  assert.throws(() => createModelGatewayConfig({ BOB_GPU_VRAM_MB: 'invalid' }), /GPU memory configuration/);
 });
 
 // Keep last: it marks the module-level OpenAI health entry exhausted for the cooldown.

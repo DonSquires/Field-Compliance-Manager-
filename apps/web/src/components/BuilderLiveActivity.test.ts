@@ -1,5 +1,9 @@
 import { describe, expect, it } from 'vitest';
+import React from 'react';
+import { cleanup, render, screen } from '@testing-library/react';
 import { deriveLiveActivity, isLiveJob, STALL_AFTER_MS, type LiveJob, type LiveSnapshot } from './BuilderLiveActivity';
+import { BuilderLiveActivity, modelRunExplanation } from './BuilderLiveActivity';
+import { modelFailure, inferenceUsage } from '../../../../supabase/functions/_shared/builder-run-telemetry';
 
 const now = Date.parse('2026-10-18T10:00:00Z');
 const iso = (msAgo: number) => new Date(now - msAgo).toISOString();
@@ -11,6 +15,44 @@ const snapshot = (over: Partial<LiveSnapshot> = {}): LiveSnapshot => ({
     { id: 'c', step_id: 'backend_implementation', ordinal_position: 3, status: 'skipped', attempt_count: 0 },
   ],
   workerRuns: [], modelRuns: [], events: [], approvals: [], ...over,
+});
+
+describe('model failure and throughput evidence', () => {
+  it('renders a rejected response and measured speed without claiming billing failure or deployment', () => {
+    const evidence = snapshot({ modelRuns: [{
+      id: 'm', step_id: 'b', provider: 'gpu_workstation', model_name: 'qwen2.5-coder:7b',
+      status: 'failed', started_at: iso(30000), completed_at: iso(5000), created_at: iso(30000),
+      input_tokens: 30, output_tokens: 10, total_tokens: 40, turns: null, phase: null,
+      failure_kind: 'validation', output_validated: false, output_tokens_per_second: 10, load_ms: 2000,
+    }] });
+    try {
+      render(React.createElement(BuilderLiveActivity, { job: job(), snapshot: evidence, now, pollState: 'idle', observedAt: iso(0), changedFiles: null }));
+      expect(screen.getByRole('region', { name: 'Bob live activity' })).toBeTruthy();
+      expect(screen.getByText(/Response received, but rejected by validation/)).toBeTruthy();
+      expect(screen.getByText(/10.0 output tokens\/s.*generation speed, not task success/)).toBeTruthy();
+      expect(screen.queryByText('no usage')).toBeNull();
+    } finally {
+      cleanup();
+    }
+  });
+  it('distinguishes rejected output from billing, connectivity, busy, timeout and unknown errors', () => {
+    expect(modelFailure({ status: 'failed', error: 'model output failed validation: source scope' })).toBe('validation');
+    expect(modelFailure({ status: 'failed', error: 'model gateway unavailable' })).toBe('connection');
+    expect(modelFailure({ status: 'failed', usage_metadata: { failure: { code: 'provider_busy' } } })).toBe('busy');
+    expect(modelFailure({ status: 'timeout' })).toBe('timeout');
+    expect(modelFailure({ status: 'failed', error: 'insufficient_quota' })).toBe('quota');
+    expect(modelFailure({ status: 'failed', error: 'something unclassified' })).toBe('unknown');
+    expect(modelFailure({ status: 'completed', error: 'historical error' })).toBeNull();
+  });
+  it('only publishes finite measured throughput and explicit validation outcomes', () => {
+    expect(inferenceUsage({ output_validated: false, inference: { output_tokens_per_second: 10, load_ms: 2000 } }))
+      .toEqual({ output_validated: false, output_tokens_per_second: 10, load_ms: 2000 });
+    expect(inferenceUsage({ inference: { output_tokens_per_second: Infinity, load_ms: -1 } }))
+      .toEqual({ output_validated: null, output_tokens_per_second: null, load_ms: null });
+  });
+  it('explains validation failure without presenting it as an empty balance', () => {
+    expect(modelRunExplanation({ status: 'failed', failure_kind: 'validation' })).toContain('Not a connection or billing failure');
+  });
 });
 
 describe('deriveLiveActivity', () => {

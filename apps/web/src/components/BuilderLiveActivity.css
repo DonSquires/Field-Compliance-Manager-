@@ -206,6 +206,7 @@
 .builder-live-list small { display: block; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 .builder-live-list strong { color: #dce7ee; font-weight: 600; }
 .builder-live-list small { color: #7d92a3; font-size: 11px; }
+.builder-live-list .builder-live-run-detail { white-space: normal; overflow-wrap: anywhere; line-height: 1.4; margin-top: 3px; }
 .builder-live-list code { color: #9fb3c2; font-size: 10.5px; font-variant-numeric: tabular-nums; white-space: nowrap; }
 
 .builder-live-pill {

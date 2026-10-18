@@ -22,7 +22,7 @@ const { loadBuilderRuntimeSnapshot, advanceBuilderJob, runBuilderUntilPause, rec
 const { fileSha256, listRepositoryTree, readRepositoryFile, searchRepository } = require('./builder-repository-read');
 const { autopilotTick, listAutopilotJobs, listPendingApprovals } = require('./builder-autopilot');
 const { laptopStatus, runLaptopCommand, laptopConfig, loadLaptopLink, mergeLaptopLink, describeLink } = require('./bob-laptop-shell');
-const { createBranchWorkspace, createDetachedWorkspace, commitVerifiedPatch, publishWorkspaceBranch, createGiteaPullRequest, workspacePathForBranch, createGitHubPullRequest, mergeGitHubPullRequest, ensureSourceCheckout, githubAuthHeader, githubRepoUrl, githubSshRepoUrl, resolveRemoteHead, redactGitError } = require('./builder-branch-workspace');
+const { createBranchWorkspace, createDetachedWorkspace, retireTerminalWorkspace, commitVerifiedPatch, publishWorkspaceBranch, createGiteaPullRequest, workspacePathForBranch, createGitHubPullRequest, mergeGitHubPullRequest, ensureSourceCheckout, githubAuthHeader, githubRepoUrl, githubSshRepoUrl, resolveRemoteHead, redactGitError } = require('./builder-branch-workspace');
 const { executeWorker, summarizeHumanTest } = require('./worker-executor');
 const { createMainHealthMonitor } = require('./bob-main-health');
 const { TERMINAL_STATUSES: BUILDER_TERMINAL_STATUSES, jobHygieneDecision } = require('./builder-job-hygiene');
@@ -1040,6 +1040,45 @@ async function reconcileStaleBuilderJobs() {
   return retired;
 }
 
+let lastWorkspaceRetentionAt = 0;
+async function retireOldBuilderWorkspaces() {
+  if (Date.now() - lastWorkspaceRetentionAt < 3600000 || !fs.existsSync(path.join(builderSourceDir, '.git'))) return;
+  const cutoff = new Date(Date.now() - 7 * 86400000).toISOString();
+  const counts = {};
+  for (let offset = 0; ; offset += 100) {
+    const { data: jobs, error } = await builderSupabase.from('builder_jobs')
+      .select('id').in('status', ['deployed', 'failed', 'cancelled']).lt('updated_at', cutoff)
+      .order('id').range(offset, offset + 99);
+    if (error) throw new Error(`workspace retention could not list terminal jobs: ${error.message}`);
+    for (const candidate of jobs || []) {
+      const [current, models, workers, approvals] = await Promise.all([
+        builderSupabase.from('builder_jobs').select('id,status,updated_at,target_sha,workspace_branch,workspace_published_head_sha').eq('id', candidate.id).single(),
+        builderSupabase.from('builder_model_runs').select('id').eq('job_id', candidate.id).in('status', ['pending', 'queued', 'running']).limit(1),
+        builderSupabase.from('builder_worker_runs').select('id').eq('job_id', candidate.id).in('status', ['pending', 'queued', 'running']).limit(1),
+        builderSupabase.from('builder_approvals').select('id').eq('job_id', candidate.id).eq('status', 'pending').limit(1),
+      ]);
+      if ([current, models, workers, approvals].some(result => result.error)) throw new Error('workspace retention could not verify current job activity; no workspace removed for this job');
+      const input = {
+        sourceDir: builderSourceDir, workspaceRoot: builderWorkspaceRoot, job: current.data,
+        legacySourceDir: path.join(stateDir, 'builder-source'),
+        activeExecution: runningBuilderJobs.has(candidate.id) || Boolean(models.data?.length || workers.data?.length),
+        pendingApproval: Boolean(approvals.data?.length),
+      };
+      const preview = retireTerminalWorkspace(input);
+      if (preview.eligible) {
+        record('autopilot', 'builder.workspace.retention_started', candidate.id, { retention_days: 7 });
+        retireTerminalWorkspace({ ...input, dryRun: false });
+        record('autopilot', 'builder.workspace.retired', candidate.id, { retention_days: 7, branches_and_artifacts_preserved: true });
+      }
+      const reason = preview.eligible ? 'retired' : preview.reason;
+      counts[reason] = (counts[reason] || 0) + 1;
+    }
+    if (!jobs || jobs.length < 100) break;
+  }
+  lastWorkspaceRetentionAt = Date.now();
+  record('autopilot', 'builder.workspace.retention_checked', 'builder', { counts });
+}
+
 async function autopilotOnce() {
   if (autopilotBusy || !builderSupabase || !modelGatewayToken || !builderWorkerImage || !builderSourceConfigured || !builderApiConfigured) return [];
   autopilotBusy = true;
@@ -1049,6 +1088,11 @@ async function autopilotOnce() {
     await startRoutineRepairs();
     await reconcileInvalidSelfHealDeployments();
     await reconcileStaleBuilderJobs();
+    try {
+      await retireOldBuilderWorkspaces();
+    } catch (error) {
+      record('autopilot', 'builder.workspace.retention_failed', 'builder', { error: redactGitError(error.message) });
+    }
     const jobs = await listAutopilotJobs(builderSupabase);
     if (!jobs.length) return [];
     return await autopilotTick({

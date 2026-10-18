@@ -5,6 +5,7 @@ const path = require('node:path');
 const { execFileSync } = require('node:child_process');
 const test = require('node:test');
 const { VERIFIED_GITHUB_EMAIL, branchNameForJob, builderCommitIdentity, createBranchWorkspace, createDetachedWorkspace, commitVerifiedPatch, publishWorkspaceBranch, createGiteaPullRequest, mergeGitHubPullRequest } = require('../builder-branch-workspace');
+const { retireTerminalWorkspace } = require('../builder-branch-workspace');
 
 const patch = ['diff --git a/apps/web/src/example.ts b/apps/web/src/example.ts', '--- a/apps/web/src/example.ts', '+++ b/apps/web/src/example.ts', '@@ -1 +1 @@', '-export const value = 1;', '+export const value = 2;', ''].join('\n');
 
@@ -17,6 +18,43 @@ function fixture() {
   return { root, sha: git(root, ['rev-parse', 'HEAD']), workspaceRoot: path.join(root, '.builder-workspaces') };
 }
 
+test('terminal workspace retention preserves active, dirty and unpublished work and removes only eligible worktrees', () => {
+  const repo = fixture();
+  try {
+    const job = { id: '12345678-1234-1234-1234-123456789abc', status: 'cancelled', target_sha: repo.sha, updated_at: new Date(Date.now() - 8 * 86400000).toISOString() };
+    const workspace = createBranchWorkspace({ sourceDir: repo.root, workspaceRoot: repo.workspaceRoot, jobId: job.id, targetSha: repo.sha });
+    const input = { sourceDir: repo.root, workspaceRoot: repo.workspaceRoot, job };
+    assert.equal(retireTerminalWorkspace({ ...input, activeExecution: true }).reason, 'active_or_awaiting_approval');
+    assert.equal(retireTerminalWorkspace({ ...input, pendingApproval: true }).reason, 'active_or_awaiting_approval');
+    assert.equal(retireTerminalWorkspace({ ...input, job: { ...job, status: 'building' } }).reason, 'not_terminal');
+    assert.equal(retireTerminalWorkspace({ ...input, job: { ...job, updated_at: new Date().toISOString() } }).reason, 'retention_window');
+    fs.writeFileSync(path.join(workspace.workspacePath, 'unpublished.txt'), 'keep me');
+    assert.equal(retireTerminalWorkspace(input).reason, 'local_files');
+    fs.unlinkSync(path.join(workspace.workspacePath, 'unpublished.txt'));
+    const committed = commitVerifiedPatch({ workspacePath: workspace.workspacePath, branchName: workspace.branchName, patch, message: 'unpublished work' });
+    assert.equal(retireTerminalWorkspace(input).reason, 'unpublished_commits');
+    const published = { ...job, workspace_published_head_sha: committed.commitSha };
+    assert.equal(retireTerminalWorkspace({ ...input, job: published }).reason, 'publication_not_confirmed');
+    git(repo.root, ['update-ref', `refs/remotes/origin/${workspace.branchName}`, committed.commitSha]);
+    assert.equal(retireTerminalWorkspace({ ...input, job: published }).reason, 'dry_run');
+    assert.ok(fs.existsSync(workspace.workspacePath));
+    assert.equal(retireTerminalWorkspace({ ...input, job: published, dryRun: false }).removed, true);
+    assert.ok(!fs.existsSync(workspace.workspacePath));
+    assert.equal(git(repo.root, ['rev-parse', workspace.branchName]), committed.commitSha, 'the branch and its commits remain');
+  } finally { fs.rmSync(repo.root, { recursive: true, force: true }); }
+});
+
+test('terminal workspace retention refuses symbolic links and unknown timestamps', () => {
+  const repo = fixture();
+  try {
+    const job = { id: '12345678-1234-1234-1234-123456789abc', status: 'failed', target_sha: repo.sha, updated_at: new Date(0).toISOString() };
+    fs.mkdirSync(repo.workspaceRoot);
+    fs.symlinkSync(repo.root, path.join(repo.workspaceRoot, 'bob-job-12345678123412341234'), 'junction');
+    const input = { sourceDir: repo.root, workspaceRoot: repo.workspaceRoot, job };
+    assert.equal(retireTerminalWorkspace(input).reason, 'symlink');
+    assert.equal(retireTerminalWorkspace({ ...input, job: { ...job, updated_at: 'invalid' } }).reason, 'retention_window');
+  } finally { fs.rmSync(repo.root, { recursive: true, force: true }); }
+});
 test('Builder can require an explicitly configured verified GitHub commit identity', () => {
   const previousName = process.env.BOB_BUILDER_GIT_NAME;
   const previousEmail = process.env.BOB_BUILDER_GIT_EMAIL;
@@ -40,6 +78,20 @@ test('Builder can require an explicitly configured verified GitHub commit identi
   }
 });
 
+test('retention recognises the designated legacy clone only, without treating arbitrary repositories as owned', () => {
+  const repo = fixture();
+  const other = fixture();
+  try {
+    const job = { id: '12345678-1234-1234-1234-123456789abc', status: 'cancelled', target_sha: repo.sha, updated_at: new Date(0).toISOString() };
+    createBranchWorkspace({ sourceDir: repo.root, workspaceRoot: repo.workspaceRoot, jobId: job.id, targetSha: repo.sha });
+    const input = { sourceDir: other.root, workspaceRoot: repo.workspaceRoot, job };
+    assert.equal(retireTerminalWorkspace(input).reason, 'different_repository');
+    assert.equal(retireTerminalWorkspace({ ...input, legacySourceDir: repo.root }).reason, 'dry_run');
+  } finally {
+    fs.rmSync(repo.root, { recursive: true, force: true });
+    fs.rmSync(other.root, { recursive: true, force: true });
+  }
+});
 test('Builder branch workspace is pinned, isolated, and commits only validated patches', () => {
   const repo = fixture();
   try {

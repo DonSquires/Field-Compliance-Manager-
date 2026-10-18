@@ -45,7 +45,7 @@ function attemptCeilingReached(step) {
 }
 
 function stepIsRunnable(step) {
-  return step?.status === 'pending' || (step?.status === 'failed' && step.retryable === true && !attemptCeilingReached(step));
+  return step?.status === 'pending' || (step?.status === 'failed' && step.retryable === true && !attemptCeilingReached(step) && !/^Evidence conflict:/.test(step.error || ''));
 }
 
 function attemptCeilingBlock(job, step) {
@@ -72,6 +72,8 @@ function planBuilderAction(snapshot) {
   if (TERMINAL_STATUSES.has(job.status)) return { type: 'terminal', status: job.status };
   if (APPROVAL_STATUSES.has(job.status)) return { type: 'waiting_for_human', status: job.status };
   if (snapshot.workerRuns.some(run => run.status === 'running')) return { type: 'waiting_for_worker' };
+  const conflict = snapshot.steps.find(step => step.status === 'failed' && /^Evidence conflict:/.test(step.error || ''));
+  if (conflict) return { type: 'blocked', status: job.status, reason: 'evidence_conflict', step_id: conflict.step_id, detail: conflict.error };
 
   const product = byStep(snapshot, 'product_analysis');
   if (['intake', 'analysis_pending'].includes(job.status) && stepIsRunnable(product)) {

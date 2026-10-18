@@ -147,6 +147,36 @@ function createBranchWorkspace({ sourceDir, workspaceRoot, jobId, targetSha, bra
   return { branchName, workspacePath, head: git(workspacePath, ['rev-parse', 'HEAD']), existing: false };
 }
 
+function retireTerminalWorkspace({ sourceDir, legacySourceDir = null, workspaceRoot, job, activeExecution = false, pendingApproval = false, now = Date.now(), dryRun = true }) {
+  const skip = reason => ({ removed: false, eligible: false, reason });
+  if (!['deployed', 'failed', 'cancelled'].includes(job?.status)) return skip('not_terminal');
+  if (activeExecution || pendingApproval) return skip('active_or_awaiting_approval');
+  const updated = Date.parse(job.updated_at || '');
+  if (!Number.isFinite(updated) || now - updated < 7 * 86400000) return skip('retention_window');
+  const branchName = branchNameForJob(job.id);
+  if (job.workspace_branch && job.workspace_branch !== branchName) return skip('branch_mismatch');
+  const workspacePath = workspacePathForBranch(workspaceRoot, branchName);
+  if (!fs.existsSync(workspacePath)) return skip('absent');
+  if (fs.lstatSync(workspacePath).isSymbolicLink()) return skip('symlink');
+  const commonDir = directory => fs.realpathSync(git(directory, ['rev-parse', '--path-format=absolute', '--git-common-dir']));
+  const workspaceCommon = commonDir(workspacePath);
+  if (workspaceCommon !== commonDir(sourceDir)) {
+    if (!legacySourceDir || !fs.existsSync(path.join(legacySourceDir, '.git')) || workspaceCommon !== commonDir(legacySourceDir)) return skip('different_repository');
+    sourceDir = legacySourceDir;
+  }
+  if (git(workspacePath, ['branch', '--show-current']) !== branchName) return skip('branch_mismatch');
+  if (git(workspacePath, ['status', '--porcelain', '--untracked-files=all', '--ignored=matching'])) return skip('local_files');
+  const head = git(workspacePath, ['rev-parse', 'HEAD']);
+  // Remove only untouched pins or commits with both a publication receipt and matching remote ref.
+  if (head !== job.target_sha) {
+    if (head !== job.workspace_published_head_sha) return skip('unpublished_commits');
+    const refs = git(sourceDir, ['for-each-ref', '--format=%(objectname)', `refs/remotes/origin/${branchName}`]);
+    if (refs !== head) return skip('publication_not_confirmed');
+  }
+  if (!dryRun) git(sourceDir, ['worktree', 'remove', workspacePath]);
+  return { removed: !dryRun, eligible: true, reason: dryRun ? 'dry_run' : 'retired', workspacePath };
+}
+
 function commitVerifiedPatch({ workspacePath, branchName, patch, message, body = '', push = false, requireVerifiedIdentity = false }) {
   if (!branchName.startsWith(BRANCH_PREFIX) || git(workspacePath, ['branch', '--show-current']) !== branchName) throw new Error('Builder workspace branch is invalid');
   if (git(workspacePath, ['status', '--porcelain', '--untracked-files=normal'])) throw new Error('Builder workspace must be clean before applying a patch');
@@ -366,4 +396,4 @@ function publicGiteaUrl(url, { baseUrl, publicBaseUrl }) {
   return url;
 }
 
-module.exports = { BRANCH_PREFIX, BUILDER_NAME, BUILDER_EMAIL, VERIFIED_GITHUB_EMAIL, builderCommitIdentity, branchNameForJob, workspacePathForBranch, createBranchWorkspace, createDetachedWorkspace, commitVerifiedPatch, publishWorkspaceBranch, giteaRepositoryPath, createGiteaPullRequest, publicGiteaUrl, verifySnapshot, githubAuthHeader, githubRepoUrl, githubSshRepoUrl, resolveRemoteHead, ensureSourceCheckout, createGitHubPullRequest, mergeGitHubPullRequest, redactGitError };
+module.exports = { BRANCH_PREFIX, BUILDER_NAME, BUILDER_EMAIL, VERIFIED_GITHUB_EMAIL, builderCommitIdentity, branchNameForJob, workspacePathForBranch, createBranchWorkspace, createDetachedWorkspace, retireTerminalWorkspace, commitVerifiedPatch, publishWorkspaceBranch, giteaRepositoryPath, createGiteaPullRequest, publicGiteaUrl, verifySnapshot, githubAuthHeader, githubRepoUrl, githubSshRepoUrl, resolveRemoteHead, ensureSourceCheckout, createGitHubPullRequest, mergeGitHubPullRequest, redactGitError };

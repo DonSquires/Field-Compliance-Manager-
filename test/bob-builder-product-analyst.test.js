@@ -51,6 +51,29 @@ function validSpecification() {
   };
 }
 
+test('contradictory main-health receipts abort before any model request', async () => {
+  let aborted;
+  const result = await runProductAnalyst({
+    job: { id: 'j', organization_id: 'o', autopilot_source: 'main_monitor',
+      source_main_health_files: ['apps/web/src/lib/patrolImportLifecycle.guard.test.ts'],
+      task_description: '❯ src/lib/dispatchCreationSchema.guard.test.ts (2 tests | 1 failed)' },
+    step: { id: 's', builder_mode: 'product_analyst' },
+    startAnalysis: async () => ({ success: true }),
+    abortStep: async (_supabase, args) => { aborted = args; },
+    executeModelRun: async () => { assert.fail('conflicting evidence must not consume a model request'); },
+  });
+  assert.equal(result.status, 409);
+  assert.match(aborted.reason, /Evidence conflict/);
+});
+
+test('schema-backed Atlas RPC names are known identifiers, but invented capabilities still fail', () => {
+  const spec = validSpecification();
+  spec.terrain_verification.atlas_capability_checks = ['Inspect bob_atlas_flow_reach'];
+  const repositoryContext = { build_map: { schema: { functions: ['bob_atlas_flow_reach'] } } };
+  assert.doesNotThrow(() => validateRepositoryGrounding(spec, { repositoryContext }));
+  spec.terrain_verification.atlas_capability_checks = ['Inspect bob_invented_capability'];
+  assert.throws(() => validateRepositoryGrounding(spec, { repositoryContext }), /not supplied by repository evidence/);
+});
 test('Product Analyst context excludes arbitrary content and secret fields', () => {
   const context = normalizeRepositoryContext({
     repository: 'owner/repo',

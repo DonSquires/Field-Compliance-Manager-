@@ -43,6 +43,10 @@ export interface LiveModelRun {
   total_tokens: number | null;
   turns: number | null;
   phase: string | null;
+  failure_kind?: string | null;
+  output_validated?: boolean | null;
+  output_tokens_per_second?: number | null;
+  load_ms?: number | null;
 }
 
 export interface LiveWorkerRun {
@@ -108,6 +112,27 @@ export function providerLabel(provider: string) {
   if (provider === 'ollama_cloud') return 'Ollama Cloud';
   if (provider === 'openai') return 'OpenAI (paid)';
   return words(provider, 'Unknown provider');
+}
+
+export function modelRunExplanation(run: Pick<LiveModelRun, 'status' | 'failure_kind' | 'output_validated'>) {
+  const failures: Record<string, string> = {
+    validation: 'Response received, but rejected by validation. Not a connection or billing failure.',
+    connection: 'Provider connection failed.',
+    timeout: 'No completed response within the time limit.',
+    capacity: 'Model excluded by the memory budget.',
+    busy: 'Local provider already serving another request; parallel loading avoided.',
+    interrupted: 'Run interrupted by a restart or lost worker.',
+    evidence: 'Conflicting evidence; corrected intake required.',
+    quota: 'Provider reported an account quota or credit error on this run.',
+    rate_limit: 'Provider rate limit reached.',
+    budget: 'Turn or time allocation exhausted.',
+    tool_format: 'Response did not contain a usable tool call.',
+  };
+  if (run.failure_kind) return failures[run.failure_kind] || 'Failure cause not classified. Inspect the step error.';
+  if (run.output_validated === true) return 'Output passed model validation; this is not deployment proof.';
+  if (run.status === 'completed') return 'Completed run; validation outcome was not separately recorded.';
+  if (['failed', 'timeout'].includes(run.status)) return 'Failure cause not recorded. Inspect the step error.';
+  return 'Awaiting the model result.';
 }
 
 export function builderSuccessorId(job: LiveJob) {
@@ -260,6 +285,8 @@ export const BuilderLiveActivity: React.FC<Props> = ({ job, snapshot, now, pollS
           {!telemetryAvailable ? <p className="builder-live-empty">Model telemetry is unavailable right now.</p> : modelRuns.length === 0 ? <p className="builder-live-empty">No model run recorded yet.</p> : <>
             <div className="builder-live-stats">
               <span><b>{modelRuns.length}</b> recent runs</span>
+              <span><b>{modelRuns.filter(run => run.output_validated === true).length}</b> validation accepted</span>
+              <span><b>{modelRuns.filter(run => run.failure_kind === 'validation').length}</b> validation rejected</span>
               <span><b>{localRuns}</b> local</span>
               {cloudRuns > 0 && <span><b>{cloudRuns}</b> Ollama Cloud</span>}
               <span className={paidRuns ? 'is-paid' : ''}><b>{paidRuns}</b> paid</span>
@@ -269,8 +296,10 @@ export const BuilderLiveActivity: React.FC<Props> = ({ job, snapshot, now, pollS
               {modelRuns.slice(0, 5).map(run => (
                 <li key={run.id}>
                   <span className={`builder-live-pill pill-${ACTIVE_RUN.has(run.status) && !run.completed_at ? 'running' : run.status}`}>{words(run.status)}</span>
-                  <div><strong>{providerLabel(run.provider)}</strong><small>{run.model_name}</small></div>
-                  <code title="Input / output tokens">{run.total_tokens == null ? 'no usage' : `${(run.input_tokens ?? 0).toLocaleString()} in · ${(run.output_tokens ?? 0).toLocaleString()} out`}</code>
+                  <div><strong>{providerLabel(run.provider)}</strong><small>{run.model_name}</small><small className="builder-live-run-detail">{modelRunExplanation(run)}</small>
+                    {run.output_tokens_per_second != null && <small className="builder-live-run-detail">{run.output_tokens_per_second.toFixed(1)} output tokens/s{run.load_ms != null ? ` · ${(run.load_ms / 1000).toFixed(1)}s model load` : ''} · generation speed, not task success</small>}
+                  </div>
+                  <code title="Input / output tokens">{run.total_tokens == null ? 'usage not recorded' : `${(run.input_tokens ?? 0).toLocaleString()} in · ${(run.output_tokens ?? 0).toLocaleString()} out`}</code>
                 </li>
               ))}
             </ul>

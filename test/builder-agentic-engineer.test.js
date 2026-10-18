@@ -6,8 +6,6 @@ const fs = require('node:fs');
 const os = require('node:os');
 const path = require('node:path');
 const { execFileSync } = require('node:child_process');
-// The fixtures below use 7B local models to exercise routing; the author size gate has its own test.
-process.env.BOB_BUILDER_AUTHOR_MIN_MODEL_B = '0';
 
 const policy = require('../builder-path-policy');
 const gateway = require('../builder-model-gateway');
@@ -270,12 +268,12 @@ const LAPTOP_OFF = Object.freeze({
 const LAPTOP_ON = Object.freeze({ ...LAPTOP_OFF, gpu_workstation: { configured: true, healthy: true, models: ['qwen2.5-coder:7b'], ready_model: 'qwen2.5-coder:7b' } });
 const OPENAI_ONLY = Object.freeze({ openai: { configured: true, healthy: true, models: ['gpt-5.4', 'gpt-5.4-mini'] } });
 
-test('authoring skips local models under the size gate and serves the provider\'s stronger installed model', async () => {
+test('authoring uses the memory-eligible model rather than forcing a larger installed model', async () => {
   const repo = makeRepo();
   const workspaceRoot = path.join(repo.root, 'workspaces');
   const job = { id: 'a17e5a17e5a17e5a17e5a17e5a17e5a1', organization_id: '00000000-0000-0000-0000-000000000001', target_sha: repo.sha, title: 'sum subtracts', task_description: 'fix sum' };
   const health = {
-    gpu_workstation: { configured: true, healthy: true, models: ['qwen2.5-coder:7b', 'qwen2.5-coder:14b'], installed: ['qwen2.5-coder:7b', 'qwen2.5-coder:14b'], ready_model: 'qwen2.5-coder:7b' },
+    gpu_workstation: { configured: true, healthy: true, models: ['qwen2.5-coder:7b'], excluded_models: ['qwen2.5-coder:14b'], installed: ['qwen2.5-coder:7b', 'qwen2.5-coder:14b'], ready_model: 'qwen2.5-coder:7b' },
     ollama: { configured: true, healthy: true, models: ['llama3.1:8b'], installed: ['llama3.1:8b'], ready_model: 'llama3.1:8b' },
     ollama_cloud: { configured: true, healthy: true, models: ['gpt-oss:120b'], installed: ['gpt-oss:120b'], ready_model: 'gpt-oss:120b' },
   };
@@ -292,10 +290,10 @@ test('authoring skips local models under the size gate and serves the provider\'
   const previousRoute = process.env.BOB_BUILDER_ROUTE_AUTHOR;
   process.env.BOB_BUILDER_ROUTE_AUTHOR = 'gpu_workstation,ollama,ollama_cloud';
   try {
-    const result = await runAgenticEngineer({ supabase: null, gateway: { gatewayUrl: 'http://gw', apiToken: 't' }, job, step: { id: 's' }, lane: 'backend', sourceDir: repo.source, workspaceRoot, repoRoot: repo.source, callModel, limits: { ...DEFAULT_LIMITS, maxTurns: 10, minAuthorModelB: 14 }, providerHealth: health });
+    const result = await runAgenticEngineer({ supabase: null, gateway: { gatewayUrl: 'http://gw', apiToken: 't' }, job, step: { id: 's' }, lane: 'backend', sourceDir: repo.source, workspaceRoot, repoRoot: repo.source, callModel, limits: { ...DEFAULT_LIMITS, maxTurns: 10 }, providerHealth: health });
     assert.equal(result.ok, true, JSON.stringify(result.error));
-    assert.equal(seen[0], 'gpu_workstation/qwen2.5-coder:14b', 'the laptop authors with its 14B model, not the 7B ready model');
-    assert.ok(!seen.some((entry) => entry.startsWith('ollama/')), 'a provider with only an 8B model is not an author');
+    assert.equal(seen[0], 'gpu_workstation/qwen2.5-coder:7b');
+    assert.ok(!seen.some(entry => entry.includes(':14b')), 'over-budget models are never chosen');
   } finally {
     if (previousRoute === undefined) delete process.env.BOB_BUILDER_ROUTE_AUTHOR;
     else process.env.BOB_BUILDER_ROUTE_AUTHOR = previousRoute;
@@ -324,7 +322,7 @@ test('a provider that runs out of turns mid-change hands off to the next provide
   const previousRoute = process.env.BOB_BUILDER_ROUTE_AUTHOR;
   process.env.BOB_BUILDER_ROUTE_AUTHOR = 'ollama,openai';
   try {
-    const result = await runAgenticEngineer({ supabase: null, gateway: { gatewayUrl: 'http://gw', apiToken: 't' }, job, step: { id: 's' }, lane: 'backend', sourceDir: repo.source, workspaceRoot, repoRoot: repo.source, callModel, limits: { ...DEFAULT_LIMITS, maxTurns: 6, minAuthorModelB: 0 }, providerHealth: LAPTOP_OFF });
+    const result = await runAgenticEngineer({ supabase: null, gateway: { gatewayUrl: 'http://gw', apiToken: 't' }, job, step: { id: 's' }, lane: 'backend', sourceDir: repo.source, workspaceRoot, repoRoot: repo.source, callModel, limits: { ...DEFAULT_LIMITS, maxTurns: 6 }, providerHealth: LAPTOP_OFF });
     assert.equal(result.ok, true, JSON.stringify(result.error));
     assert.equal(seen.filter((entry) => entry.provider === 'ollama').length, 6, 'the first provider used its full allocation');
     assert.equal(result.routing.provider, 'openai');
