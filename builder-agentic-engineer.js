@@ -29,8 +29,6 @@ const PROMPT_VERSION = 'agentic-engineer-v5';
 const STUCK_REFUSALS = 4;
 const DEFAULT_LIMITS = Object.freeze({
   maxTurns: Math.max(4, Number(process.env.BOB_BUILDER_AGENT_TURNS || 60)),
-  // Smallest local model (billions of parameters) allowed to author; 0 disables the gate.
-  minAuthorModelB: Math.max(0, Number(process.env.BOB_BUILDER_AUTHOR_MIN_MODEL_B ?? 14)),
   wallBudgetMs: Math.max(5 * 60_000, Number(process.env.BOB_BUILDER_AGENT_BUDGET_MS || 45 * 60_000)),
   // A 60 kB read is ~15k tokens: half a small local model's window. Operators shrink it for in-house authors.
   readCapChars: Math.max(8_000, Number(process.env.BOB_BUILDER_READ_CAP_CHARS || 60_000)),
@@ -1049,7 +1047,7 @@ async function runAgenticEngineer({
   let lessons = [];
 
   const health = providerHealth || await fetchModelHealth(gateway || {});
-  const candidates = selectProviders(baseRequest, { health, startAfter: startAfterProvider, minModelB: limits.minAuthorModelB });
+  const candidates = selectProviders(baseRequest, { health, startAfter: startAfterProvider });
   if (!candidates.length) {
     return { ok: false, error: 'no model provider is available for the author', turns: 0, usage, duration_ms: now() - started, routing: { provider: null, reason: baseRequest.routing_reason, prompt_version: PROMPT_VERSION, model: null, chain: baseRequest.chain } };
   }

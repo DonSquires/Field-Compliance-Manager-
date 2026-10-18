@@ -57,6 +57,25 @@ test('a repository within the cap is reported in full and unflagged', () => {
   assert.deepEqual(context.directory_counts, { '.': 1, src: 1, supabase: 1 });
 });
 
+test('task-named tracked files are prioritised before inventory truncation', () => {
+  const named = 'apps/web/src/lib/dispatchCreationSchema.guard.test.ts';
+  const files = Array.from({ length: MAX_TRACKED_FILES + 100 }, (_, i) => `apps/web/src/a${i}.ts`).concat(named);
+  const bounded = boundTrackedFiles(files, `Failure evidence: ${named}`);
+  assert.equal(bounded.tracked_files[0], named);
+  assert.equal(bounded.tracked_files.length, MAX_TRACKED_FILES);
+  assert.ok(!bounded.tracked_files.includes('apps/web/src/lib/invented.ts'));
+});
+
+test('ANSI failure receipts are reconciled against immutable main-health scope, never passing neighbours', () => {
+  const { failedTestPaths, mainHealthEvidenceConflict } = require('../supabase/functions/_shared/builder-repository-context');
+  const receipt = '\u001b[32m✓ src/lib/patrolImportLifecycle.guard.test.ts (2 tests)\u001b[0m\n\u001b[31m❯ src/lib/dispatchCreationSchema.guard.test.ts (2 tests | 1 failed)\u001b[0m';
+  assert.deepEqual(failedTestPaths(receipt), ['src/lib/dispatchCreationSchema.guard.test.ts']);
+  const job = { autopilot_source: 'main_monitor', source_main_health_files: ['apps/web/src/lib/patrolImportLifecycle.guard.test.ts'], task_description: receipt };
+  assert.match(mainHealthEvidenceConflict(job), /Evidence conflict:.*dispatchCreationSchema.*immutable scope/);
+  assert.equal(mainHealthEvidenceConflict({ ...job, source_main_health_files: ['apps/web/src/lib/dispatchCreationSchema.guard.test.ts'] }), null);
+  assert.equal(mainHealthEvidenceConflict({ ...job, autopilot_source: 'chat' }), null);
+});
+
 test('boundTrackedFiles is a pure, order-preserving trim that only reorders when it must cut', () => {
   const small = ['b/x.js', 'supabase/migrations/1.sql', 'a/y.js'];
   assert.deepEqual(boundTrackedFiles(small), { tracked_files: small, truncated: false });

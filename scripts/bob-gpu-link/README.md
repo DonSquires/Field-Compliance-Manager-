@@ -12,9 +12,9 @@ the work, so the cost split is auditable (`builder_model_runs.provider`).
 |---|---|---|---|
 | Chat planner / drafting, synthesis | laptop GPU (`qwen2.5-coder:7b`) | — | OpenAI (`gpt-5.4`) |
 | Chat verifier (critic), research subagents | laptop GPU (`qwen2.5:7b`, never the planner's model) | — | OpenAI (`gpt-5.4-mini`) |
-| Builder author (writes the code) | OpenAI (`gpt-6-sol`) | laptop GPU (`qwen2.5-coder:*`) | — |
-| Builder independent reviewer | OpenAI (`gpt-5.6-sol`) | laptop GPU | — |
-| Builder analyst / UX / release notes | OpenAI (`gpt-6-sol`) | laptop GPU | — |
+| Builder author (writes the code) | memory-eligible laptop GPU model | VPS Ollama, then Ollama Cloud | OpenAI |
+| Builder independent reviewer | distinct memory-eligible laptop GPU model | VPS Ollama, then Ollama Cloud | OpenAI |
+| Builder analyst / UX / release notes | memory-eligible laptop GPU model | VPS Ollama, then Ollama Cloud | OpenAI |
 | Light / restricted-data work (classification, summaries) | laptop GPU | VPS Ollama (`llama3.1:8b`, CPU) | OpenAI (never for restricted data) |
 | Embeddings, image/vision helpers | VPS Ollama | — | — |
 
@@ -37,11 +37,13 @@ PowerShell on the laptop, from a checkout of this repository (`git pull` first):
 powershell -ExecutionPolicy Bypass -File scripts\bob-gpu-link\laptop-tailscale.ps1
 ```
 
-It makes the existing Ollama listen for the VPS (32k context, 2 h keep-alive),
+It makes the existing Ollama listen for the VPS (32k context, 5 min keep-alive,
+one loaded model and one parallel request),
 pulls `qwen2.5:7b` and `qwen2.5-coder:7b` (~9 GB), opens port 11434 to the
 Tailscale network only, and sets up **Bob's terminal** (below). Add
-`-BiggerModels` for `qwen2.5-coder:14b` and `qwen3-coder:30b` if the GPU has
-the room. Run it again any time; it only changes what is missing.
+`-BiggerModels` for `qwen2.5-coder:14b` and `qwen3-coder:30b` only if the GPU has
+the room. Installation is not eligibility to run: the gateway checks model file sizes.
+Run it again only at an approved maintenance boundary: changing Ollama settings may restart it.
 
 The VPS side already points at the laptop:
 `GPU_WORKSTATION_URL=http://100.114.240.13:11434` (control plane) and
@@ -153,11 +155,49 @@ the public HTTPS inference endpoint with `INFERENCE_SERVICE_URL` and
 
 - `BOB_BUILDER_ROUTE_AUTHOR` / `_REVIEW` / `_ANALYSIS` / `_LOCAL` /
   `_RESTRICTED` — comma-separated provider chains (`gpu_workstation`,
-  `ollama`, `openai`). Owner ruling 2026-10-16: unrestricted analysis, authoring
-  and review default to `gpu_workstation,ollama,openai` — laptop GPU first, VPS
-  CPU next, OpenAI only as the paid last resort. Restricted data never includes
-  `openai`.
+  `ollama`, `ollama_cloud`, `openai`). Unrestricted analysis, authoring
+  and review default to `gpu_workstation,ollama,ollama_cloud,openai`.
+  Restricted data never includes either external provider.
 - `BOB_GPU_MODELS`, `BOB_OLLAMA_MODELS` — allowlists, best model first.
+- `BOB_GPU_VRAM_MB` / `BOB_GPU_HEADROOM_MB` — default 8192 / 2048 MiB,
+  based on the owner's RTX 5050 laptop diagnostic on 2026-10-18. The remaining
+  6 GiB is a **weight-file budget**, not a measured free-memory promise.
+  `/api/tags` must report the model size; unknown or larger sizes are excluded
+  from author and independent-review selection. Context, display, other programs
+  and Ollama runtime overhead can still require more memory; use `/api/ps` and
+  `nvidia-smi` to verify actual residency. Do not force a larger model on a
+  RAM-starved laptop. The former parameter-count minimum is removed.
+- Gateway local requests keep models warm for five minutes and refuse overlapping
+  local requests rather than load parallel models. This guard covers this gateway,
+  not unrelated chat clients. The setup script's one-model/one-request settings
+  take effect only when the owner runs it at a maintenance boundary.
+
+### Failure truth, measurements and retention
+
+The platform owner reviewing Builder runs sees separate categories for validation
+rejection, connection failure, timeout, provider quota/rate limiting, capacity,
+busy compute and interrupted runs. A response rejected by validation is not a
+billing error. Missing usage is labelled "usage not recorded", not zero spend.
+For new structured runs, usage survives validation rejection and records whether
+output passed validation. Ollama's returned load time and generation rate are
+reported when supplied; generation speed is not verified task completion.
+No paid benchmark or production-job polling is needed to collect these metrics.
+
+Main-health receipts are ANSI-normalised and compared with the repair's immutable
+scope before model execution. A contradictory receipt pauses with an evidence
+conflict; it does not widen unattended repair authority. Named, genuinely tracked
+files are prioritised before the repository inventory is truncated. Schema-backed
+Atlas RPC identifiers are valid inspection targets, not proof they were exercised.
+
+The control plane checks terminal workspaces hourly while autopilot is enabled.
+After seven days, it removes only clean registered worktrees for deployed, failed
+or cancelled jobs, with no active model/worker run, pending approval or in-process
+execution. Unpublished commits, untracked/ignored files, symlinks, unknown ages and
+foreign repositories are preserved. Published commits require both the matching
+receipt and remote-tracking ref. Removal is non-forced; branches, database receipts
+and evidence artifacts remain. Retention actions and skip counts are audited.
+This supplements nightly VPS cache/temp/backup hygiene; it does not uninstall
+laptop models or delete personal files.
 - `BOB_GPU_NUM_CTX` (default 32768), `BOB_OLLAMA_NUM_CTX` (default 16384) —
   a prompt that will not fit is sent onward instead of being truncated.
 

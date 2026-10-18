@@ -9,7 +9,7 @@
   What it does
     1. Confirms Tailscale is up and finds this laptop's Tailscale address (100.x.y.z).
     2. Ollama: makes the existing native Ollama listen on all interfaces so the VPS can reach it
-       over Tailscale (OLLAMA_HOST=0.0.0.0:11434, 2 h keep-alive, 32k context), restarts it, and
+       over Tailscale (OLLAMA_HOST=0.0.0.0:11434, 5 min keep-alive, 32k context), restarts it, and
        pulls Bob's models (qwen2.5:7b + qwen2.5-coder:7b; -BiggerModels adds the 14B and 30B coders).
     3. Windows Firewall: allows TCP 11434 (Ollama) from the Tailscale range only, and TCP 22 (SSH)
        from the VPS's Tailscale address only. Nothing is opened to your LAN or the internet.
@@ -184,7 +184,7 @@ if (-not $SkipOllama) {
     Invoke-Native { winget install --id Ollama.Ollama -e --accept-source-agreements --accept-package-agreements } | Out-Null
     $env:Path = [Environment]::GetEnvironmentVariable('Path', 'Machine') + ';' + [Environment]::GetEnvironmentVariable('Path', 'User')
   }
-  $wanted = @{ OLLAMA_HOST = '0.0.0.0:11434'; OLLAMA_KEEP_ALIVE = '2h'; OLLAMA_CONTEXT_LENGTH = '32768'; OLLAMA_MAX_LOADED_MODELS = '2' }
+  $wanted = @{ OLLAMA_HOST = '0.0.0.0:11434'; OLLAMA_KEEP_ALIVE = '5m'; OLLAMA_CONTEXT_LENGTH = '32768'; OLLAMA_MAX_LOADED_MODELS = '1'; OLLAMA_NUM_PARALLEL = '1' }
   $changed = $false
   foreach ($name in $wanted.Keys) {
     if ([Environment]::GetEnvironmentVariable($name, 'User') -ne $wanted[$name]) { [Environment]::SetEnvironmentVariable($name, $wanted[$name], 'User'); $changed = $true }

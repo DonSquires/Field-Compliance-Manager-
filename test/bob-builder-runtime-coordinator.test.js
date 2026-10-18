@@ -63,6 +63,16 @@ test('runtime never retries a failed step unless durable state marks it retryabl
   assert.equal(planBuilderAction(state).type, 'run_product_analysis');
 });
 
+test('an immutable evidence conflict is parked even when the generic abort RPC marks it retryable', async () => {
+  const state = snapshot('analysis_pending');
+  Object.assign(state.steps[0], { status: 'failed', retryable: true, error: 'Evidence conflict: failure receipt is outside immutable scope' });
+  assert.equal(planBuilderAction(state).reason, 'evidence_conflict');
+  const result = await runBuilderUntilPause({
+    supabase: null, jobId: 'job-1', loadSnapshot: async () => state,
+    handlers: { product: async () => assert.fail('must not call models again') },
+  });
+  assert.equal(result.reason, 'evidence_conflict');
+});
 // Live 2026-10-13 (job e52e7122): an autopilot tick landed while in-process product
 // analysis was running. In-process steps register no builder_worker_runs row, so the
 // planner fell through to `blocked` — and because listAutopilotJobs only re-selects

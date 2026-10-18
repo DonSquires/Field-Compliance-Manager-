@@ -1,6 +1,7 @@
 import { serve } from 'https://deno.land/std@0.168.0/http/server.ts';
 import { createClient } from 'https://esm.sh/@supabase/supabase-js@2';
 import { resolveEffectiveRole } from '../_shared/auth.ts';
+import { modelFailure, inferenceUsage } from '../_shared/builder-run-telemetry.ts';
 
 const FUNCTION_NAME = 'bob-builder-control-room';
 const SUPABASE_URL = Deno.env.get('SUPABASE_URL') ?? '';
@@ -48,6 +49,7 @@ function modelUsage(value: unknown) {
   return {
     input_tokens: input, output_tokens: output, total_tokens: total,
     turns: count(usage.turns), phase: typeof usage.phase === 'string' ? usage.phase.slice(0, 40) : null,
+    ...inferenceUsage(usage),
   };
 }
 
@@ -85,6 +87,7 @@ function safeSnapshot(value: Record<string, unknown>) {
     modelRuns: rows(value.modelRuns).map(run => ({
       id: run.id, step_id: run.step_id, provider: run.provider, model_name: run.model_name,
       status: run.status, started_at: run.started_at, completed_at: run.completed_at,
+      failure_kind: modelFailure(run),
       created_at: run.created_at, ...modelUsage(run.usage_metadata),
     })),
     events: rows(value.events).map(event => ({
@@ -344,7 +347,7 @@ serve(async req => {
       admin.from('builder_artifacts').select('*').eq('job_id', jobId).order('created_at'),
       admin.from('builder_worker_runs').select('*').eq('job_id', jobId).order('started_at'),
       admin.from('builder_approvals').select('id, approval_type, triggered_at_status, status, requested_at, requested_target_sha, reviewed_artifact_ids, approval_comment, responded_at').eq('job_id', jobId).order('requested_at', { ascending: false }),
-      admin.from('builder_model_runs').select('id, step_id, provider, model_name, status, usage_metadata, started_at, completed_at, created_at').eq('job_id', jobId).order('created_at', { ascending: false }).limit(LIVE_MODEL_RUN_LIMIT),
+      admin.from('builder_model_runs').select('id, step_id, provider, model_name, status, error, usage_metadata, started_at, completed_at, created_at').eq('job_id', jobId).order('created_at', { ascending: false }).limit(LIVE_MODEL_RUN_LIMIT),
       admin.from('builder_audit_events').select('id, event_type, actor_type, change_summary, new_value, created_at').eq('job_id', jobId).order('created_at', { ascending: false }).limit(LIVE_EVENT_LIMIT),
     ]);
     const failed = jobResult.error || stepsResult.error || artifactsResult.error || runsResult.error || approvalsResult.error;

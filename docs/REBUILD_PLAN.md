@@ -30,10 +30,26 @@ explicitly rather than returning partial or misleading success.
 Implementation worktrees validate the requested commit object and their own
 clean, exact checkout, not the mutable shared clone's HEAD. Moving the shared
 checkout for another job must not invalidate a pinned task. Model exploration
-without edits gets a bounded share of the existing turn budget before handing
-its evidence to the next allowed provider; this does not extend the total
-budget, require an arbitrary edit, or permit restricted/local-only workloads
+without edits gets a bounded share of the turn and wall-clock budget before handing
+its evidence to the next allowed provider. Escalation may replenish turns up to
+twice the initial turn allocation, never beyond the original wall-clock limit.
+It must not require an arbitrary edit or permit restricted/local-only workloads
 to use an external provider. Verification and human release gates still apply.
+
+Owner-approved resource and recovery hardening 2026-10-18: Builder selects laptop
+models against installed weight-file sizes and a configured VRAM budget with
+reserved headroom, not a blanket minimum parameter count. The measured laptop is
+an RTX 5050 with 8 GiB VRAM and 16 GiB RAM; model-size eligibility is not a claim
+of current free memory or guaranteed full GPU residency. Output validation,
+transport failures, timeouts and account quota errors are separate facts.
+Returned usage is retained even when a response is rejected; measured generation
+rate never substitutes for validated output, a verified patch or deployment.
+Contradictory main-health evidence stops before inference rather than widening
+immutable repair scope. Hourly terminal-workspace retention preserves active,
+dirty and unpublished work, branches and evidence; only eligible worktrees
+older than seven days are removed, without force and with audit receipts.
+The designated pre-GitHub source clone is recognised for retiring its old
+worktrees only; it is not restored as a parallel build or release target.
 
 Page change requests 2026-10-18: authorised operations roles can submit a
 before/desired-after/business-reason brief from the admin or officer header.

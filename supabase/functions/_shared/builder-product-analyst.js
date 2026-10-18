@@ -2,9 +2,9 @@ const {
   buildModelRunRequest,
   executeBuilderModelRun
 } = require('./builder-model-adapter');
-const { fitRepositoryContext } = require('./builder-repository-context');
+const { fitRepositoryContext, mainHealthEvidenceConflict } = require('./builder-repository-context');
 
-const PRODUCT_ANALYST_PROMPT_VERSION = 'product-analyst-v13';
+const PRODUCT_ANALYST_PROMPT_VERSION = 'product-analyst-v14';
 
 const PRODUCT_SPEC_SCHEMA = Object.freeze({
   type: 'object',
@@ -166,7 +166,7 @@ function validateRepositoryGrounding(specification, { repositoryContext = {}, ta
     ...(Array.isArray(schema.views) ? schema.views : []),
     ...(Array.isArray(schema.functions) ? schema.functions : [])
   ].filter(value => typeof value === 'string').map(value => value.toLowerCase()));
-  const knownCapabilities = new Set((Array.isArray(context.known_capabilities) ? context.known_capabilities : [])
+  const knownCapabilities = new Set([...(Array.isArray(context.known_capabilities) ? context.known_capabilities : []), ...schemaEntities]
     .filter(value => typeof value === 'string')
     .map(value => value.toLowerCase()));
   const task = String(taskDescription || '');
@@ -449,6 +449,12 @@ async function runProductAnalyst({
   const abort = abortStep || require('./builder-ux-designer').abortModelStep;
   const started = await startAnalysis(supabase, job.id, step.id);
   if (!started.success) return { ok: false, status: 409, error: started.error };
+  const conflict = mainHealthEvidenceConflict(job);
+  if (conflict) {
+    const aborted = await abort(supabase, { jobId: job.id, stepId: step.id, reason: conflict });
+    if (aborted === false) throw new Error('Conflicting-evidence step could not be stopped and recorded');
+    return { ok: false, status: 409, error: conflict, specification: null };
+  }
   const researchRequired = researchEvidenceRequired(job.task_description);
   const requiredResearchUrls = researchRequired ? suppliedResearchUrls(job.task_description) : [];
   const prompts = buildProductAnalystPrompt({

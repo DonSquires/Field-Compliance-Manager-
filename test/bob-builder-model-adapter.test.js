@@ -244,7 +244,7 @@ test('model execution records usage and output artifacts', async () => {
   const rpc = mock.writes.find(write => write.type === 'rpc');
   assert.equal(rpc.args._artifact_type, 'product_specification');
   assert.equal(rpc.args._model_name, 'gpt-selected');
-  assert.deepEqual(rpc.args._usage_metadata, { input_tokens: 10, output_tokens: 5 });
+  assert.deepEqual(rpc.args._usage_metadata, { input_tokens: 10, output_tokens: 5, output_validated: null });
 });
 
 test('artifact registration failure removes the unregistered storage object', async () => {
@@ -285,6 +285,8 @@ test('invalid model output is rejected before artifact upload', async () => {
   assert.equal(result.error, 'model output failed validation: invalid shape (output starts: invalid)');
   assert.equal(mock.storageWrites.length, 0);
   const update = mock.writes.find(write => write.type === 'update');
+  assert.equal(update.value.usage_metadata.output_validated, false);
+  assert.equal(update.value.usage_metadata.failure.http_status, 422);
   assert.equal(update.value.status, 'failed');
   assert.match(update.value.error, /invalid shape/, 'the validator reason is persisted on the model run');
 });
@@ -408,24 +410,22 @@ test('Ollama Cloud sits after in-house compute and before paid OpenAI', () => {
   assert.ok(chain.indexOf('ollama_cloud') < chain.indexOf('openai'));
 });
 
-test('selectProviders applies the author size gate per provider without touching OpenAI', () => {
-  const { selectProviders, modelSizeB } = require('../supabase/functions/_shared/builder-model-adapter');
-  assert.equal(modelSizeB('qwen2.5-coder:7b'), 7);
-  assert.equal(modelSizeB('gpt-oss:120b'), 120);
-  assert.equal(modelSizeB('nemotron-3-super'), null);
+test('selectProviders uses memory-eligible health models for authors and distinct reviewers', () => {
+  const { selectProviders } = require('../supabase/functions/_shared/builder-model-adapter');
   const health = {
-    gpu_workstation: { configured: true, healthy: true, models: ['qwen2.5-coder:7b', 'qwen2.5-coder:14b', 'qwen3:8b'], installed: ['qwen2.5-coder:7b', 'qwen2.5-coder:14b'], ready_model: 'qwen2.5-coder:7b' },
+    gpu_workstation: { configured: true, healthy: true, models: ['qwen2.5-coder:7b'], excluded_models: ['qwen2.5-coder:14b'], installed: ['qwen2.5-coder:7b', 'qwen2.5-coder:14b'], ready_model: 'qwen2.5-coder:7b' },
     ollama: { configured: true, healthy: true, models: ['qwen2.5-coder:7b', 'llama3.1:8b'], installed: ['qwen2.5-coder:7b', 'llama3.1:8b'], ready_model: 'qwen2.5-coder:7b' },
     ollama_cloud: { configured: true, healthy: true, models: ['nemotron-3-super', 'gpt-oss:20b'], installed: ['nemotron-3-super'], ready_model: 'nemotron-3-super' },
     openai: { configured: true, healthy: true, models: ['gpt-5.4-mini'], ready_model: 'gpt-5.4-mini' },
   };
   const request = { chain: ['gpu_workstation', 'ollama', 'ollama_cloud', 'openai'] };
-  assert.deepEqual(selectProviders(request, { health, minModelB: 14 }), [
-    { provider: 'gpu_workstation', model: 'qwen2.5-coder:14b' },
+  assert.deepEqual(selectProviders(request, { health }), [
+    { provider: 'gpu_workstation', model: 'qwen2.5-coder:7b' },
+    { provider: 'ollama', model: 'qwen2.5-coder:7b' },
     { provider: 'ollama_cloud', model: 'nemotron-3-super' },
     { provider: 'openai', model: 'gpt-5.4-mini' },
   ]);
-  assert.equal(selectProviders(request, { health })[0].model, 'qwen2.5-coder:7b', 'no gate unless asked');
+  assert.ok(!selectProviders(request, { health, avoid: [{ provider: 'gpu_workstation', model: 'qwen2.5-coder:7b' }] }).some(candidate => candidate.provider === 'gpu_workstation'), 'review independence must not select the installed but excluded 14B');
   const exhausted = { ...health, openai: { configured: true, healthy: false, unavailable_reason: 'quota_exhausted', models: ['gpt-5.4-mini'], ready_model: null } };
   assert.ok(!selectProviders(request, { health: exhausted }).some((candidate) => candidate.provider === 'openai'));
 });
