@@ -35,7 +35,7 @@ load_env() {
   while IFS= read -r line; do
     [[ "$line" =~ ^[A-Z_][A-Z0-9_]*= ]] || continue
     local key="${line%%=*}" value="${line#*=}"
-    [[ -n "${!key:-}" ]] || export "$key=$value"
+    [[ -n "$(printenv "$key" || true)" ]] || export "$key=$value"
   done < "$file"
 }
 load_env "$CP_ENV_FILE"

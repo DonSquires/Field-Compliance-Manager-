@@ -1,11 +1,36 @@
 const assert = require('node:assert/strict');
 const fs = require('node:fs');
 const path = require('node:path');
+const os = require('node:os');
 const test = require('node:test');
 const { spawnSync } = require('node:child_process');
 
 const SCRIPT = path.resolve(__dirname, '../scripts/bob-release-lane.sh');
 const bashSyntax = (source) => spawnSync('bash', ['-n'], { input: source.replace(/\r\n/g, '\n'), encoding: 'utf8' });
+
+test('release environment values stay literal and existing environment wins', () => {
+  const lane = fs.readFileSync(SCRIPT, 'utf8');
+  const loader = lane.slice(lane.indexOf('load_env()'), lane.indexOf('load_env "$CP_ENV_FILE"'));
+  assert.doesNotMatch(loader, /\$\{!/);
+  const directory = fs.mkdtempSync(path.join(os.tmpdir(), 'fcm-release-env-'));
+  const file = path.join(directory, 'fixture.env');
+  try {
+    fs.writeFileSync(file, 'EXISTING=replacement\nADDED=value=with spaces\n');
+    const result = spawnSync('bash', ['-s'], {
+      encoding: 'utf8',
+      env: { ...process.env, EXISTING: 'kept', ADDED: '', ENV_FIXTURE: file },
+      input: `${loader}
+load_env "$ENV_FIXTURE"
+printf '%s\\n' "$EXISTING" "$ADDED"
+`,
+    });
+    assert.equal(result.status, 0, result.stderr);
+    assert.equal(result.stdout, 'kept\nvalue=with spaces\n');
+  } finally {
+    fs.unlinkSync(file);
+    fs.rmdirSync(directory);
+  }
+});
 
 // Live 2026-09-27: a stale .git/gc.log (left by a pruned worktree the day before) made the auto-gc
 // after every `git fetch` exit non-zero; the lane read that as "mirror unreachable" for 12 hours
