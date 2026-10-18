@@ -23,6 +23,7 @@ nobody is asked to deploy by hand. This lane closes the last gap after a pull re
 ```bash
 mkdir -p /srv/fcm/release-lane /var/lib/bob/release-lane
 cp scripts/bob-release-lane.sh /srv/fcm/release-lane/ && chmod 700 /srv/fcm/release-lane/bob-release-lane.sh
+install -m 644 scripts/bob-runtime-idle.js /srv/fcm/release-lane/bob-runtime-idle.js
 cp deploy/bob-release-lane/bob-release-lane.{service,timer} /etc/systemd/system/
 printf 'BOB_RELEASE_MODE=dry-run\nSUPABASE_PROJECT_REF=dotczcyyzgabmtmnglqj\nSUPABASE_ACCESS_TOKEN=<management token>\n' > /var/lib/bob/release-lane.env
 chmod 600 /var/lib/bob/release-lane.env
@@ -35,6 +36,15 @@ lane script or its systemd units is a classified `release-lane` target. The curr
 that reviewed revision for the next timer tick without rewriting its own in-flight process.
 Switch to live with `BOB_RELEASE_MODE=live` once the proving series has passed and the dry-run
 plans have been read.
+
+Service replacement and rollback use the shared `bob-runtime-idle.js` probe.
+It reads only the server activity credentials, queries running/queued model
+and verification receipts, and checks in-process Builder execution. Missing
+configuration, failed requests or malformed health responses defer the release.
+The probe runs again after the image build; a generated patch awaiting verification
+is not proof of idle. The helper is installed alongside the lane and updated
+as a `release-lane` target. Never force a restart merely to apply a larger timeout
+to a future run.
 
 ## What stays with a person
 

@@ -35,7 +35,7 @@ load_env() {
   while IFS= read -r line; do
     [[ "$line" =~ ^[A-Z_][A-Z0-9_]*= ]] || continue
     local key="${line%%=*}" value="${line#*=}"
-    [[ -n "${!key:-}" ]] || export "$key=$value"
+    [[ -n "$(printenv "$key" || true)" ]] || export "$key=$value"
   done < "$file"
 }
 load_env "$CP_ENV_FILE"
@@ -108,7 +108,7 @@ if [[ -n "$SHARED_CHANGED" ]]; then
 fi
 has() { printf '%s\n' "$CHANGED" | grep -qE "$1"; }
 TARGETS=()
-has '^(scripts/bob-release-lane\.sh|deploy/bob-release-lane/)' && TARGETS+=(release-lane)
+has '^(scripts/bob-release-lane\.sh|scripts/bob-runtime-idle\.js|deploy/bob-release-lane/)' && TARGETS+=(release-lane)
 has '^(bob-control-plane-server\.js|builder-[a-z-]+\.js|bob-laptop-shell\.js|supabase-workflow-client\.js|package(-lock)?\.json|Dockerfile|deploy/bob-control-plane/|supabase/functions/_shared/builder-)' && TARGETS+=(control-plane)
 has '^services/fcm-api/' && TARGETS+=(fcm-api)
 has '^(Dockerfile\.worker|frontend-worker\.js|backend-worker\.js|security-worker\.js|worker-executor\.js|builder-verification-outcome\.js|builder-path-policy\.js|builder-data-path-gate\.js|builder-ts-delta-gate\.js|assessment-manifest\.js|apps/web/package(-lock)?\.json)' && TARGETS+=(worker-image)
@@ -134,9 +134,13 @@ fi
 # 4. Live: apply in a safe order. Data first (migrations are additive by Builder policy), then
 #    edge functions, then the VPS services, each with a health check and rollback.
 # Restarting the control plane mid-run discards the author's turns; wait for the next tick instead.
-if [[ -n "${SUPABASE_URL:-}" && -n "${SUPABASE_SERVICE_ROLE_KEY:-}" ]] && printf '%s\n' "${TARGETS[@]:-}" | grep -qE '^(control-plane|fcm-api)$'; then
-  inflight="$(curl -s "${SUPABASE_URL%/}/rest/v1/builder_model_runs?select=id&status=in.(running,queued)&limit=1" -H "apikey: ${SUPABASE_SERVICE_ROLE_KEY}" -H "Authorization: Bearer ${SUPABASE_SERVICE_ROLE_KEY}" | tr -d ' \n')"
-  if [[ "$inflight" != "[]" && -n "$inflight" ]]; then log "deferred ${HEAD_SHA:0:8}: a Bob model run is in flight; retrying next tick"; exit 0; fi
+require_idle() {
+  if ! node "$1"; then
+    log "deferred ${HEAD_SHA:0:8}: Bob execution is active or unverifiable; retrying next tick"; exit 0
+  fi
+}
+if printf '%s\n' "${TARGETS[@]:-}" | grep -qE '^(control-plane|fcm-api)$'; then
+  require_idle "$(dirname "${BASH_SOURCE[0]}")/bob-runtime-idle.js"
 fi
 SHA8="${HEAD_SHA:0:8}"
 PREVIOUS_RELEASE="$RELEASES_DIR/${DEPLOYED_SHA:0:8}"
@@ -198,6 +202,9 @@ fi
 rollback() {
   local target="$1"
   [[ -d "$PREVIOUS_RELEASE" ]] || { fail_note "$target: no previous release to roll back to"; return; }
+  if ! node scripts/bob-runtime-idle.js; then
+    fail_note "$target rollback deferred: Bob execution is active or unverifiable"; return
+  fi
   case "$target" in
     control-plane) (cd "$PREVIOUS_RELEASE" && DOCKER_GID=999 docker compose -f deploy/bob-control-plane/docker-compose.yml up -d --force-recreate bob-control-plane >/dev/null) ;;
     fcm-api) (cd "$PREVIOUS_RELEASE" && docker compose -p fcm --env-file /opt/fcm/.env -f docker-compose.full.yml up -d --no-deps fcm-api >/dev/null) ;;
@@ -209,6 +216,7 @@ for target in "${TARGETS[@]:-}"; do
   case "$target" in
     release-lane)
       if install -m 700 scripts/bob-release-lane.sh /srv/fcm/release-lane/bob-release-lane.sh \
+         && install -m 644 scripts/bob-runtime-idle.js /srv/fcm/release-lane/bob-runtime-idle.js \
          && install -m 644 deploy/bob-release-lane/bob-release-lane.service /etc/systemd/system/bob-release-lane.service \
          && install -m 644 deploy/bob-release-lane/bob-release-lane.timer /etc/systemd/system/bob-release-lane.timer \
          && systemctl daemon-reload \
@@ -217,6 +225,7 @@ for target in "${TARGETS[@]:-}"; do
       else OK=false; fail_note "release lane install failed"; fi ;;
     control-plane)
       if DOCKER_GID=999 docker compose -f deploy/bob-control-plane/docker-compose.yml build -q bob-control-plane \
+         && require_idle scripts/bob-runtime-idle.js \
          && DOCKER_GID=999 docker compose -f deploy/bob-control-plane/docker-compose.yml up -d --force-recreate bob-control-plane >/dev/null; then
         healthy=false
         for _ in $(seq 1 20); do sleep 2; if curl -sf http://172.16.0.1:8091/health >"$STATE_DIR/cp-health.json" && node -e 'const h=require(process.argv[1]); process.exit(h.autopilot === undefined || !h.modelProviders ? 1 : 0)' "$STATE_DIR/cp-health.json"; then healthy=true; break; fi; done
@@ -224,6 +233,7 @@ for target in "${TARGETS[@]:-}"; do
       else OK=false; fail_note "control-plane build/up failed"; fi ;;
     fcm-api)
       if docker compose -p fcm --env-file /opt/fcm/.env -f docker-compose.full.yml build -q fcm-api \
+         && require_idle scripts/bob-runtime-idle.js \
          && docker compose -p fcm --env-file /opt/fcm/.env -f docker-compose.full.yml up -d --no-deps fcm-api >/dev/null; then
         T="$(grep -E '^API_TOKEN=' /opt/fcm/.env | cut -d= -f2-)"; healthy=false
         for _ in $(seq 1 20); do sleep 2; if curl -sf -H "Authorization: Bearer $T" http://127.0.0.1:3001/api/bob/health >/dev/null; then healthy=true; break; fi; done

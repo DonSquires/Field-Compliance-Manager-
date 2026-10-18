@@ -1,11 +1,36 @@
 const assert = require('node:assert/strict');
 const fs = require('node:fs');
 const path = require('node:path');
+const os = require('node:os');
 const test = require('node:test');
 const { spawnSync } = require('node:child_process');
 
 const SCRIPT = path.resolve(__dirname, '../scripts/bob-release-lane.sh');
 const bashSyntax = (source) => spawnSync('bash', ['-n'], { input: source.replace(/\r\n/g, '\n'), encoding: 'utf8' });
+
+test('release environment values stay literal and existing environment wins', () => {
+  const lane = fs.readFileSync(SCRIPT, 'utf8');
+  const loader = lane.slice(lane.indexOf('load_env()'), lane.indexOf('load_env "$CP_ENV_FILE"'));
+  assert.doesNotMatch(loader, /\$\{!/);
+  const directory = fs.mkdtempSync(path.join(os.tmpdir(), 'fcm-release-env-'));
+  const file = path.join(directory, 'fixture.env');
+  try {
+    fs.writeFileSync(file, 'EXISTING=replacement\nADDED=value=with spaces\n');
+    const result = spawnSync('bash', ['-s'], {
+      encoding: 'utf8',
+      env: { ...process.env, EXISTING: 'kept', ADDED: '', ENV_FIXTURE: file },
+      input: `${loader}
+load_env "$ENV_FIXTURE"
+printf '%s\\n' "$EXISTING" "$ADDED"
+`,
+    });
+    assert.equal(result.status, 0, result.stderr);
+    assert.equal(result.stdout, 'kept\nvalue=with spaces\n');
+  } finally {
+    fs.unlinkSync(file);
+    fs.rmdirSync(directory);
+  }
+});
 
 // Live 2026-09-27: a stale .git/gc.log (left by a pruned worktree the day before) made the auto-gc
 // after every `git fetch` exit non-zero; the lane read that as "mirror unreachable" for 12 hours
@@ -53,11 +78,12 @@ test('release lane skips applied migrations and exclusively owns its live pointe
   assert.match(deploy, /git fetch -q .*refs\/remotes\/origin\/main:refs\/bundles/);
   assert.match(deploy, /docker compose -f deploy\/bob-control-plane\/docker-compose\.yml rm -sf bob-control-plane/);
   // A control-plane restart mid-run would discard the author's turns: the lane waits for the next tick.
-  assert.match(lane, /builder_model_runs\?select=id&status=in\.\(running,queued\)/);
-  assert.match(lane, /deferred \$\{HEAD_SHA:0:8\}: a Bob model run is in flight/);
+  assert.match(lane, /require_idle "\$\(dirname "\$\{BASH_SOURCE\[0\]\}"\)\/bob-runtime-idle\.js"/);
+  assert.match(lane, /deferred \$\{HEAD_SHA:0:8\}: Bob execution is active or unverifiable/);
   // The installed lane is a deliberate copy, so a reviewed lane change must replace it for the next tick.
-  assert.match(lane, /has '\^\(scripts\/bob-release-lane\\\.sh\|deploy\/bob-release-lane\/\)' && TARGETS\+=\(release-lane\)/);
+  assert.match(lane, /scripts\/bob-runtime-idle\\\.js\|deploy\/bob-release-lane/);
   assert.match(lane, /install -m 700 scripts\/bob-release-lane\.sh \/srv\/fcm\/release-lane\/bob-release-lane\.sh/);
+  assert.match(lane, /install -m 644 scripts\/bob-runtime-idle\.js \/srv\/fcm\/release-lane\/bob-runtime-idle\.js/);
   assert.match(lane, /systemctl daemon-reload/);
   // The gates the worker image carries rebuild it when they change.
   assert.match(lane, /builder-data-path-gate\\\.js\|builder-ts-delta-gate\\\.js/);
@@ -69,6 +95,42 @@ test('release lane skips applied migrations and exclusively owns its live pointe
   assert.match(lane, /Atlas exercise evidence failed/);
   assert.match(lane, /node scripts\/schema-snapshot-live\.mjs --project-ref "\$SUPABASE_PROJECT_REF" --out "\$live_schema"/);
   assert.match(lane, /live schema snapshot differs from committed supabase\/schema\.sql/);
+});
+
+test('automatic and legacy control-plane deployment check idle after image build, including rollback', () => {
+  const lane = fs.readFileSync(SCRIPT, 'utf8');
+  const action = lane.slice(lane.indexOf('    control-plane)\n      if'), lane.indexOf('    worker-image)'));
+  assert.match(action, /build -q bob-control-plane \\\n\s*&& require_idle scripts\/bob-runtime-idle\.js \\\n\s*&& DOCKER_GID=999 docker compose/);
+  assert.match(lane.slice(lane.indexOf('rollback()'), lane.indexOf('for target in')), /if ! node scripts\/bob-runtime-idle\.js/);
+  const legacy = fs.readFileSync(path.resolve(__dirname, '../deploy/bob-control-plane/deploy.sh'), 'utf8');
+  assert.match(legacy, /build bob-control-plane\nnode "\$app_dir\/scripts\/bob-runtime-idle\.js"\ndocker compose/);
+  assert.equal(bashSyntax(legacy).status, 0);
+});
+
+test('work appearing during image build defers without restart, rollback or advancing the release', () => {
+  const lane = fs.readFileSync(SCRIPT, 'utf8');
+  const guard = lane.slice(lane.indexOf('require_idle()'), lane.indexOf('if printf', lane.indexOf('require_idle()')));
+  const controlPlane = lane.slice(lane.indexOf('    control-plane)\n      if'), lane.indexOf('    fcm-api)\n      if'));
+  const result = spawnSync('bash', ['-s'], {
+    encoding: 'utf8',
+    input: `set -euo pipefail
+HEAD_SHA=fixture123456
+log() { printf '%s\\n' "$*"; }
+node() { return 1; }
+docker() { echo build; }
+fail_note() { echo failure; }
+rollback() { echo rollback; }
+${guard}
+case control-plane in
+${controlPlane}
+esac
+echo advanced-release
+`,
+  });
+  assert.equal(result.status, 0, result.stderr);
+  assert.match(result.stdout, /build\ndeferred fixture1/);
+  assert.doesNotMatch(result.stdout, /rollback|failure|advanced-release/);
+  assert.equal(result.stdout.split('\n').filter(line => line === 'build').length, 1, 'only build, not service up');
 });
 
 test('every control-plane path the edge functions relay is allowed through the public nginx site', () => {
