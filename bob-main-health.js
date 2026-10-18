@@ -5,7 +5,8 @@ function summarizeFailure(result) {
   const fullOutput = `${String(result?.stdout || '')}\n${String(result?.stderr || '')}`
     .replace(/\u001B\[[0-?]*[ -/]*[@-~]/g, '');
   const failingTests = [...new Set([
-    ...[...fullOutput.matchAll(/(?:FAIL|✖|✘|×)\s+([^\s:>]+)/g)].map((match) => match[1]),
+    ...[...fullOutput.matchAll(/^\s*(?:FAIL|✖|✘|×)\s+([^\s:>]+)/gm)].map((match) => match[1]),
+    ...[...fullOutput.matchAll(/^\s*❯\s+([^\s]+)\s+\([^\r\n]*\b[1-9]\d* failed\b/gm)].map((match) => match[1]),
     ...[...fullOutput.matchAll(/^\s*\d+\)\s+(?:\[[^\]]+\]\s+›\s+)?([^\r\n]+?\.(?:spec|test)\.tsx?)(?::|\s|$)/gm)].map((match) => match[1]),
   ])].filter((file) => /\.(?:guard\.)?test\.tsx?$|\.spec\.tsx?$/i.test(file)).slice(0, 20);
   const stdout = String(result?.stdout || '').slice(-8000);

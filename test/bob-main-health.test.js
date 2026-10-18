@@ -118,6 +118,25 @@ test('Vitest failure titles are not classified as file paths', () => {
     stdout: 'FAIL src/pages/DocumentContextDrafting.guard.test.ts > keeps drafting\n× keeps drafting\n',
     stderr: '',
   });
+
+  test('Vitest failed-suite markers identify every failing file without including passing neighbours', () => {
+    const failure = summarizeFailure({
+      exitCode: 1,
+      stdout: [
+        '\u001b[32m✓\u001b[39m src/lib/patrolImportLifecycle.guard.test.ts (2 tests) 3ms',
+        '\u001b[31m❯\u001b[39m src/lib/dispatchCreationSchema.guard.test.ts (2 tests | 1 failed) 231ms',
+        '  × deduplicates client retries',
+        '❯ src/pages/Other.guard.test.ts (12 tests | 10 failed | 1 skipped) 40ms',
+        '❯ src/pages/Skipped.test.ts (1 test | 1 skipped)',
+        '✓ src/pages/Passing.test.ts (1 test | 0 failed)',
+        'log: FAIL src/pages/NotAResult.guard.test.ts',
+      ].join('\n'),
+    });
+    assert.deepEqual(failure.failing_tests, [
+      'src/lib/dispatchCreationSchema.guard.test.ts',
+      'src/pages/Other.guard.test.ts',
+    ]);
+  });
   assert.deepEqual(failure.failing_tests, ['src/pages/DocumentContextDrafting.guard.test.ts']);
 });
 
