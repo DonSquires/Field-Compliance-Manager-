@@ -9,7 +9,7 @@ const { execFileSync } = require('node:child_process');
 
 const policy = require('../builder-path-policy');
 const gateway = require('../builder-model-gateway');
-const { runAgenticEngineer, parseToolCall, RUN_ALLOWLIST, buildProposal, createTools, composeRunNote, classifyNoChange, finishAgenticReceipt, heartbeatAgenticReceipt, outlineLines, readingMap, requiredChangedFilesFromTask, startAgenticReceipt, taskPacket, validateAcceptanceEvidence, DEFAULT_LIMITS } = require('../builder-agentic-engineer');
+const { runAgenticEngineer, parseToolCall, RUN_ALLOWLIST, buildProposal, createTools, composeRunNote, classifyNoChange, finishAgenticReceipt, heartbeatAgenticReceipt, outlineLines, readingMap, requiredChangedFilesFromTask, resolveStartingFiles, atlasMapForFiles, startAgenticReceipt, taskPacket, validateAcceptanceEvidence, DEFAULT_LIMITS } = require('../builder-agentic-engineer');
 
 test('path policy: protected paths are refused on every lane, lanes split at apps/web', () => {
   for (const file of ['.github/workflows/ci.yml', 'deploy/bob-vps/compose.yml', 'Dockerfile', 'services/fcm-api/Dockerfile', 'docker-compose.full.yml', 'package.json', 'apps/web/package-lock.json', '.env', 'apps/web/.env.production', 'supabase/schema.sql', 'apps/web/src/context/AuthContext.tsx', 'supabase/functions/_shared/auth.ts', 'certs/site.pem', '../etc/passwd', 'a/../../b']) {
@@ -1010,4 +1010,82 @@ test('distinct unedited exploration hands off early enough for the next allowed 
     assert.deepEqual(result.proposal.changed_files, ['lib/sum.js']);
     assert.equal(result.proposal.verified_runs[0].exit_code, 0);
   } finally { fs.rmSync(repo.root, { recursive: true, force: true }); }
+});
+
+function mapRepo() {
+  const repo = makeRepo();
+  const pages = path.join(repo.source, 'apps', 'web', 'src', 'pages');
+  fs.mkdirSync(pages, { recursive: true });
+  fs.writeFileSync(path.join(pages, 'OrganizationSetupPage.tsx'), 'export function OrganizationSetupPage() { return "council jurisdiction boundary map"; }\n');
+  fs.writeFileSync(path.join(pages, 'RosterPage.tsx'), 'export const RosterPage = () => "roster";\n');
+  repo.git(['add', '-A']);
+  repo.git(['-c', 'user.name=t', '-c', 'user.email=t@example.com', 'commit', '-q', '-m', 'pages']);
+  return repo;
+}
+
+function fakeAtlas(rowsFor, { hang = false } = {}) {
+  const calls = [];
+  return {
+    calls,
+    from() {
+      const query = { filters: {} };
+      const chain = {
+        select() { return chain; },
+        eq(column, value) { query.filters[column] = value; return chain; },
+        in(column, values) { query.filters[column] = values; return chain; },
+        ilike(column, value) { query.filters[column] = value; return chain; },
+        limit() { calls.push(query.filters); return hang ? new Promise(() => {}) : Promise.resolve({ data: rowsFor(query.filters), error: null }); },
+      };
+      return chain;
+    },
+  };
+}
+
+test('starting map: invented scope paths are reported, real files are discovered from the task words', () => {
+  const { source } = mapRepo();
+  const job = { title: 'Org settings persistent map', task_description: 'The council boundary map must persist on the jurisdiction preview.' };
+  const specification = { delivery_requirements: [{ id: 'r1', source_scope: ['apps/web/src/pages/ExamplePage.tsx'] }] };
+  const map = resolveStartingFiles({ workspacePath: source, lane: 'frontend', hints: [], specification, job });
+  assert.deepEqual(map.confirmed, []);
+  assert.deepEqual(map.named_but_missing, ['apps/web/src/pages/ExamplePage.tsx']);
+  assert.equal(map.discovered[0].file, 'apps/web/src/pages/OrganizationSetupPage.tsx');
+  assert.ok(!map.discovered.some((entry) => entry.file === 'apps/web/src/pages/RosterPage.tsx'));
+});
+
+test('starting map: Atlas flow edges map found files to data and suggest files that touch task entities', async () => {
+  const { source } = mapRepo();
+  const startingFiles = { confirmed: ['apps/web/src/app.tsx'], discovered: [], named_but_missing: [], search_terms: ['jurisdiction'] };
+  const supabase = fakeAtlas((filters) => filters.source_file
+    ? [{ source_file: 'apps/web/src/app.tsx', source_type: 'component', source_name: 'App', target_type: 'table', target_name: 'organizations', edge_kind: 'reads' }]
+    : [
+      { source_file: 'apps/web/src/pages/OrganizationSetupPage.tsx', source_type: 'component', source_name: 'OrganizationSetupPage', target_type: 'edge_function', target_name: 'bob-jurisdiction-preview', edge_kind: 'invokes' },
+      { source_file: 'apps/web/src/pages/Missing.tsx', source_type: 'component', source_name: 'Gone', target_type: 'rpc', target_name: 'jurisdiction_x', edge_kind: 'calls' },
+      { source_file: 'supabase/functions/x/index.ts', source_type: 'edge_function', source_name: 'x', target_type: 'table', target_name: 'jurisdiction', edge_kind: 'writes' },
+    ]);
+  const atlas = await atlasMapForFiles({ supabase, workspacePath: source, lane: 'frontend', startingFiles });
+  assert.equal(atlas.available, true);
+  assert.deepEqual(atlas.suggested_files, ['apps/web/src/pages/OrganizationSetupPage.tsx']);
+  assert.deepEqual(atlas.flow_edges_by_file['apps/web/src/app.tsx'], ['App reads table:organizations']);
+  assert.ok(supabase.calls.every((filters) => Array.isArray(filters.edge_kind) && !filters.edge_kind.includes('references')));
+});
+
+test('starting map: an unavailable Atlas degrades to a stated reason instead of stalling the run', async () => {
+  const { source } = mapRepo();
+  process.env.BOB_BUILDER_ATLAS_TIMEOUT_MS = '50';
+  const startingFiles = { confirmed: ['apps/web/src/app.tsx'], discovered: [], named_but_missing: [], search_terms: [] };
+  const timed = await atlasMapForFiles({ supabase: fakeAtlas(() => [], { hang: true }), workspacePath: source, lane: 'frontend', startingFiles });
+  assert.equal(timed.available, false);
+  assert.match(timed.reason, /did not answer|Atlas/);
+  assert.deepEqual(await atlasMapForFiles({ supabase: null, workspacePath: source, lane: 'frontend', startingFiles }), { available: false, reason: 'no Atlas client in this run' });
+});
+
+test('finish gate: a scope of only invented paths needs evidence naming the real changed file', () => {
+  const specification = { delivery_requirements: [{ id: 'r1', source_scope: ['apps/web/src/pages/ExamplePage.tsx'] }] };
+  const files = ['apps/web/src/pages/OrganizationSetupPage.tsx'];
+  const trackedAtPin = new Set();
+  const vague = validateAcceptanceEvidence({ args: { acceptance_evidence: [{ requirement_id: 'r1', status: 'completed', evidence: 'map persists' }] }, specification, files, trackedAtPin });
+  assert.match(vague, /named no real source file/);
+  assert.equal(validateAcceptanceEvidence({ args: { acceptance_evidence: [{ requirement_id: 'r1', status: 'completed', evidence: 'OrganizationSetupPage.tsx keeps one map instance' }] }, specification, files, trackedAtPin }), null);
+  const realScope = { delivery_requirements: [{ id: 'r1', source_scope: ['apps/web/src/pages/RosterPage.tsx'] }] };
+  assert.match(validateAcceptanceEvidence({ args: { acceptance_evidence: [{ requirement_id: 'r1', status: 'completed', evidence: 'OrganizationSetupPage.tsx' }] }, specification: realScope, files, trackedAtPin: new Set(['apps/web/src/pages/RosterPage.tsx']) }), /did not change any approved source_scope/);
 });

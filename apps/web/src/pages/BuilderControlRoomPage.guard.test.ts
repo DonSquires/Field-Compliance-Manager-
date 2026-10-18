@@ -29,12 +29,13 @@ describe('Builder control room boundary', () => {
     expect(source).toContain("targetEnvironment === 'production' ? 'prepare_release'");
     expect(source).toContain("disabled={form.targetEnvironment === 'production'}");
     expect(source).toContain("advance('run')");
-    expect(source).toContain('frontend_files: fileList(frontendFiles)');
-    expect(source).toContain('backend_files: fileList(backendFiles)');
-    expect(source).toContain('reviewer_model_name: reviewerModel.trim()');
+    expect(source).not.toContain('frontend_files: fileList(frontendFiles)');
+    expect(source).not.toContain('reviewer_model_name: reviewerModel.trim()');
+    expect(source).toContain('Bob finds the source files himself and picks the independent reviewer model');
+    expect(source).toContain('<BuilderApprovalBrief');
     expect(source).toContain("action: 'decide_approval'");
     expect(source).toContain('Human approval required');
-    expect(source).toContain('Review rationale');
+    expect(source).toContain('Note for Bob');
     expect(source).toContain("decideApproval(approval, 'approved')");
     expect(source).not.toContain('approval.expires_at');
     expect(source).toContain('approval.reviewed_artifact_ids.includes(artifact.id)');

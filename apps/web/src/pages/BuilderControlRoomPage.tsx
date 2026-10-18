@@ -2,6 +2,7 @@ import React, { useCallback, useEffect, useMemo, useRef, useState } from 'react'
 import { AlertTriangle, Bot, CheckCircle2, ChevronRight, CircleStop, Clock3, Database, FileCode2, FolderTree, MessageSquareText, Play, Plus, RefreshCw, Search, ShieldCheck, TerminalSquare, Workflow, X } from 'lucide-react';
 import { BobPanel } from '../components/BobPanel';
 import { ChangeRequestQueue } from '../components/ChangeRequestQueue';
+import { BuilderApprovalBrief } from '../components/BuilderApprovalBrief';
 import { jobMatchesSearch } from '../lib/builderJobSearch';
 import { BuilderLiveActivity, builderSuccessorId, deriveLiveActivity, isLiveJob, type LiveChangedFile, type LiveEvent, type LiveModelRun, type LivePollState } from '../components/BuilderLiveActivity';
 import { supabase } from '../lib/supabase';
@@ -201,9 +202,6 @@ const BuilderControlRoomPage: React.FC<{ onOpenBob?: (prompt: string) => void }>
   const [error, setError] = useState<string | null>(null);
   const [notice, setNotice] = useState<string | null>(null);
   const [showCreate, setShowCreate] = useState(false);
-  const [frontendFiles, setFrontendFiles] = useState('');
-  const [backendFiles, setBackendFiles] = useState('');
-  const [reviewerModel, setReviewerModel] = useState('');
   const [approvalComment, setApprovalComment] = useState('');
   const [workspaceView, setWorkspaceView] = useState<WorkspaceView>('task');
   const [bobOpen, setBobOpen] = useState(true);
@@ -446,15 +444,8 @@ const BuilderControlRoomPage: React.FC<{ onOpenBob?: (prompt: string) => void }>
     setError(null);
     setNotice(null);
     try {
-      const fileList = (value: string) => value.split(/\r?\n/).map(item => item.trim()).filter(Boolean);
-      const data = await invoke({
-        action,
-        job_id: selectedId,
-        max_actions: 8,
-        frontend_files: fileList(frontendFiles),
-        backend_files: fileList(backendFiles),
-        reviewer_model_name: reviewerModel.trim() || null,
-      });
+      // Bob finds source files and the control plane selects the independent reviewer model.
+      const data = await invoke({ action, job_id: selectedId, max_actions: 8 });
       setNotice(data?.reason === 'waiting_for_human' ? 'Builder paused at a human approval gate.' : `Builder ${action === 'run' ? 'run' : 'step'} completed.`);
       await Promise.all([loadList(), loadSnapshot(selectedId)]);
     } catch (advanceError) {
@@ -465,12 +456,13 @@ const BuilderControlRoomPage: React.FC<{ onOpenBob?: (prompt: string) => void }>
   };
 
   const decideApproval = async (approval: BuilderApproval, decision: 'approved' | 'rejected') => {
-    if (!selectedId || !approvalComment.trim()) return;
+    const note = approvalComment.trim();
+    if (!selectedId || (decision === 'rejected' && !note)) return;
     setBusy(`approval-${approval.id}`);
     setError(null);
     setNotice(null);
     try {
-      await invoke({ action: 'decide_approval', job_id: selectedId, approval_id: approval.id, decision, comment: approvalComment.trim() });
+      await invoke({ action: 'decide_approval', job_id: selectedId, approval_id: approval.id, decision, comment: note || 'Approved after reviewing the plain-language plan summary.' });
       setApprovalComment('');
       setNotice(decision === 'approved' ? 'Human approval recorded.' : 'Human rejection recorded and the Builder job was stopped.');
       await loadList();
@@ -595,6 +587,13 @@ const BuilderControlRoomPage: React.FC<{ onOpenBob?: (prompt: string) => void }>
       setError(refreshError instanceof Error ? refreshError.message : 'Atlas refresh could not be completed.');
     } finally { setBusy(null); }
   };
+
+  const readArtifactContent = useCallback(async (jobId: string, artifactId: string) => {
+    const data = await invoke({ action: 'read_artifact', job_id: jobId, artifact_id: artifactId });
+    const content = (data?.artifact as { content?: unknown } | undefined)?.content;
+    if (typeof content !== 'string') throw new Error('The plan could not be loaded.');
+    return content;
+  }, [invoke]);
 
   const openArtifact = async (artifact: BuilderArtifact) => {
     if (!selectedId || artifactLoading) return;
@@ -833,11 +832,7 @@ const BuilderControlRoomPage: React.FC<{ onOpenBob?: (prompt: string) => void }>
                 <div><b>{step.status}</b>{step.attempt_count > 0 && <small>{step.attempt_count} attempt{step.attempt_count === 1 ? '' : 's'}</small>}</div>
               </div>
             ))}</div>
-            <div className="builder-execution-inputs">
-              {selectedJob.frontend_required && <label>Frontend source files<textarea value={frontendFiles} onChange={event => setFrontendFiles(event.target.value)} rows={3} placeholder="Optional. Leave blank and Bob finds the files himself. One repo path per line." /></label>}
-              {selectedJob.backend_required && <label>Backend source files<textarea value={backendFiles} onChange={event => setBackendFiles(event.target.value)} rows={3} placeholder="Optional. Leave blank and Bob finds the files himself. One repo path per line." /></label>}
-              {selectedJob.code_review_mode === 'independent_ai' && <label>Independent reviewer model<input value={reviewerModel} onChange={event => setReviewerModel(event.target.value)} maxLength={200} placeholder="Configured model identity" /></label>}
-            </div>
+            <p className="builder-execution-inputs">Bob finds the source files himself and picks the independent reviewer model. You only decide at the approval gates.</p>
             <div className="builder-evidence"><span>{snapshot.artifacts.length} artifacts</span><span>{snapshot.workerRuns.length} worker runs</span></div>
             {snapshot.approvals.filter(approval => !successorId && approval.status === 'pending').map(approval => {
               const reviewedArtifacts = snapshot.artifacts.filter(artifact => approval.reviewed_artifact_ids.includes(artifact.id));
@@ -845,9 +840,10 @@ const BuilderControlRoomPage: React.FC<{ onOpenBob?: (prompt: string) => void }>
               return (
               <section className="builder-approval" key={approval.id}>
                 <div><span>Human approval required</span><strong>{approval.approval_type.replaceAll('_', ' ')}</strong><small>Requested for {approval.triggered_at_status.replaceAll('_', ' ')} at commit {approval.requested_target_sha?.slice(0, 12) ?? 'unavailable'}.</small></div>
+                <BuilderApprovalBrief jobId={selectedJob.id} approvalType={approval.approval_type} artifacts={[...reviewedArtifacts, ...snapshot.artifacts.filter(artifact => artifact.status === 'final')]} readArtifact={readArtifactContent} />
                 <ul className="builder-approval-artifacts" aria-label="Immutable evidence under review">{reviewedArtifacts.map(artifact => <li key={artifact.id}><strong>{artifact.artifact_type.replaceAll('_', ' ')}</strong><span>{artifact.checksum?.slice(0, 12) ?? 'Checksum unavailable'}</span></li>)}{!evidenceComplete && <li className="is-incomplete"><strong>Evidence unavailable</strong><span>Refresh before deciding</span></li>}</ul>
-                <label>Review rationale<textarea value={approvalComment} onChange={event => setApprovalComment(event.target.value)} rows={3} maxLength={2000} required /></label>
-                <div><button type="button" className="is-danger" onClick={() => void decideApproval(approval, 'rejected')} disabled={!evidenceComplete || Boolean(busy) || !approvalComment.trim()}>Reject</button><button type="button" className="is-primary" onClick={() => void decideApproval(approval, 'approved')} disabled={!evidenceComplete || Boolean(busy) || !approvalComment.trim()}>{busy === `approval-${approval.id}` ? 'Recording…' : 'Approve'}</button></div>
+                <label>Note for Bob <small>(optional to approve; required to reject: say what should change)</small><textarea value={approvalComment} onChange={event => setApprovalComment(event.target.value)} rows={3} maxLength={2000} /></label>
+                <div><button type="button" className="is-danger" onClick={() => void decideApproval(approval, 'rejected')} disabled={!evidenceComplete || Boolean(busy) || !approvalComment.trim()}>Reject</button><button type="button" className="is-primary" onClick={() => void decideApproval(approval, 'approved')} disabled={!evidenceComplete || Boolean(busy)}>{busy === `approval-${approval.id}` ? 'Recording…' : 'Approve'}</button></div>
               </section>
               );
             })}

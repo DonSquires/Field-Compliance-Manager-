@@ -186,6 +186,9 @@ function validateRepositoryGrounding(specification, { repositoryContext = {}, ta
       if (!/^(?:apps|supabase|services|scripts|test|docs)\/[\w./-]+$/.test(file)) {
         throw new Error(`delivery requirement source_scope is not a repository path: ${file}`);
       }
+      if (/(?:^|\/)(?:example|placeholder|sample|your[-_]?\w*|todo|foo|bar)(?:page|component)?(?:\/index)?\.\w+$/i.test(file) && !taskSourcePaths.has(file)) {
+        throw new Error(`delivery requirement source_scope is a placeholder, not a real repository file: ${file}`);
+      }
       if (requiredScope.length > 0 && !requiredScope.includes(file)) {
         throw new Error(`delivery requirement source_scope is outside the task's required source scope: ${file}`);
       }
