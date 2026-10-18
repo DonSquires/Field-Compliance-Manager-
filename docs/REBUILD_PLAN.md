@@ -46,6 +46,14 @@ Owner ruling 2026-10-18, self-heal repairs the app:
   read back the service-only RPC signature and both enabled lanes. These
   are mechanism and fixture checks, not a claim that a live model-authored
   backend repair has completed or deployed.
+- Before/during/after check: a named failure at an immutable main SHA supplies
+  the intake evidence; the approved specification selects scoped engineering
+  work, unused lanes leave audited skip receipts, and each used lane must hand
+  over a real patch plus acceptance evidence. Afterwards, independent worker
+  receipts and whole-job review remain required, with backend/consequential
+  release held for a human. Atlas proved intake calls job creation and writes
+  job/audit records; its FK reach for the intake RPC was empty, not proof of
+  absent flow. Refresh used upsert-only to avoid retiring unrelated terrain.
 - Design references (retrieved 2026-10-18):
   [GitHub Copilot agentic workflows](https://docs.github.com/en/copilot/concepts/copilot-surfaces/copilot-on-github)
   (repository research, edits, tests and reviewable changes in an isolated
