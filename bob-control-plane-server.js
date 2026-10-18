@@ -1188,26 +1188,19 @@ async function autopilotOnce() {
             record('autopilot', 'builder.main_health_repair.reopened', repair.id, { parent: input.parentJobId ?? null, health_sha: input.sourceMainHealthSha });
             return repair;
           }
-          const { data: created, error } = await builderSupabase.rpc('builder_create_job_v2', {
-            _organization_id: input.organizationId,
-            _project_id: input.projectId,
+          const { data: created, error } = await builderSupabase.rpc('builder_create_autopilot_child', {
+            _parent_job_id: input.parentJobId,
             _title: String(input.title).slice(0, 200),
             _task_description: String(input.taskDescription).slice(0, 12000),
             _target_sha: sha,
-            _branch_name: 'main',
-            _description: input.description ? String(input.description).slice(0, 500) : input.parentJobId ? `Opened by Bob's autopilot from job ${input.parentJobId}.` : null,
+            _description: input.description ? String(input.description).slice(0, 500) : null,
             _frontend_required: input.frontendRequired === true,
             _backend_required: input.backendRequired === true,
             _code_review_mode: input.codeReviewMode || 'independent_ai',
-            _task_run_id: null,
-            _requested_action: 'prepare_change',
-            _target_environment: 'development',
           });
           if (error || !created?.id) throw new Error(`autopilot could not open a job: ${error?.message || 'no job returned'}`);
-          const { data: bound, error: bindError } = await builderSupabase.rpc('builder_autopilot_bind', { _job_id: created.id, _requested_by: input.requestedBy, _conversation_id: input.conversationId ?? null });
-          if (bindError) throw new Error(`autopilot could not bind the new job: ${bindError.message}`);
           record('autopilot', 'builder.autopilot.job_opened', created.id, { parent: input.parentJobId ?? null, title: String(input.title).slice(0, 120) });
-          return bound || created;
+          return created;
         },
         loadJob: async (jobId) => {
           const { data } = await builderSupabase.from('builder_jobs').select('id, title, status, last_error, workspace_pull_request_url, autopilot_state, autopilot_report').eq('id', jobId).maybeSingle();

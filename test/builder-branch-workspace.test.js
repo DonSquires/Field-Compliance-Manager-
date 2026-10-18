@@ -110,6 +110,29 @@ test('detached verification workspace retention removes only old clean snapshots
   }
 });
 
+test('new workspaces use the requested commit even when the shared checkout has moved or has unrelated edits', () => {
+  const repo = fixture();
+  try {
+    fs.writeFileSync(path.join(repo.root, 'apps/web/src/example.ts'), 'export const value = 2;\n');
+    git(repo.root, ['add', 'apps/web/src/example.ts']);
+    git(repo.root, ['commit', '-qm', 'advance shared checkout']);
+    const head = git(repo.root, ['rev-parse', 'HEAD']);
+    fs.writeFileSync(path.join(repo.root, 'apps/web/src/example.ts'), 'export const value = 3;\n');
+    for (const workspace of [
+      createBranchWorkspace({ sourceDir: repo.root, workspaceRoot: repo.workspaceRoot, jobId: 'oldpin12345678', targetSha: repo.sha }),
+      createDetachedWorkspace({ sourceDir: repo.root, workspaceRoot: path.join(repo.workspaceRoot, 'checks'), targetSha: repo.sha }),
+    ]) {
+      assert.equal(git(workspace.workspacePath, ['rev-parse', 'HEAD']), repo.sha);
+      assert.equal(git(workspace.workspacePath, ['status', '--porcelain']), '');
+      assert.equal(fs.readFileSync(path.join(workspace.workspacePath, 'apps/web/src/example.ts'), 'utf8'), 'export const value = 1;\n');
+    }
+    assert.equal(git(repo.root, ['rev-parse', 'HEAD']), head);
+    assert.equal(fs.readFileSync(path.join(repo.root, 'apps/web/src/example.ts'), 'utf8'), 'export const value = 3;\n');
+    const treeSha = git(repo.root, ['rev-parse', 'HEAD^{tree}']);
+    assert.throws(() => createBranchWorkspace({ sourceDir: repo.root, workspaceRoot: repo.workspaceRoot, jobId: 'notcommit12345678', targetSha: treeSha }), /must identify a commit/);
+  } finally { fs.rmSync(repo.root, { recursive: true, force: true }); }
+});
+
 test('a verified backend patch commits (the commit step enforces protected paths, not the frontend fence)', () => {
   const repo = fixture();
   try {

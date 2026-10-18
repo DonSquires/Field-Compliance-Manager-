@@ -450,7 +450,7 @@ function repairJobFor(job, baseline) {
     taskDescription: description,
     frontendRequired: web,
     backendRequired: !web,
-    codeReviewMode: 'independent_ai',
+    codeReviewMode: job.code_review_mode === 'human' ? 'human' : 'independent_ai',
     requestedBy: job.autopilot_requested_by,
     conversationId: job.autopilot_conversation_id ?? null,
     autopilotSource: job.autopilot_source === 'main_monitor' ? 'main_monitor' : null,
@@ -507,6 +507,11 @@ async function autopilotTick({ supabase, jobs, actions, log = () => {} }) {
   const outcomes = [];
   for (const job of orderAutopilotJobs(jobs)) {
     try {
+      if (job.autopilot_report?.resumed_as_job_id) {
+        if (job.autopilot_state !== 'done') await actions.record(job.id, 'done', job.autopilot_report);
+        outcomes.push({ job: job.id, outcome: 'superseded', resumed_as: job.autopilot_report.resumed_as_job_id });
+        continue;
+      }
       // Waiting on a repair of main (owner ruling 2026-09-27: Bob does the coding; nobody is asked to fix main).
       if (job.autopilot_state === 'blocked' && job.autopilot_report?.repair_job_id && !job.autopilot_report?.resumed_as_job_id && !job.autopilot_report?.repair_outcome) {
         outcomes.push(await resumeAfterRepair({ supabase, job, actions, log }));

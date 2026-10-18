@@ -12,6 +12,8 @@ export interface LiveJob {
   autopilot_state?: string | null;
   autopilot_updated_at?: string | null;
   autopilot_requested_by?: string | null;
+  autopilot_report?: Record<string, unknown> | null;
+  last_error?: string | null;
   updated_at: string;
 }
 
@@ -23,6 +25,8 @@ export interface LiveStep {
   attempt_count: number;
   started_at?: string | null;
   completed_at?: string | null;
+  error?: string | null;
+  retryable?: boolean;
 }
 
 export interface LiveModelRun {
@@ -105,6 +109,11 @@ export function providerLabel(provider: string) {
   return words(provider, 'Unknown provider');
 }
 
+export function builderSuccessorId(job: LiveJob) {
+  const id = job.autopilot_report?.resumed_as_job_id;
+  return typeof id === 'string' && /^[0-9a-f]{8}(?:-[0-9a-f]{4}){3}-[0-9a-f]{12}$/i.test(id) && id !== job.id ? id : null;
+}
+
 export function deriveLiveActivity(job: LiveJob, snapshot: LiveSnapshot, now: number) {
   const steps = [...snapshot.steps].sort((left, right) => left.ordinal_position - right.ordinal_position);
   const modelRuns = snapshot.modelRuns ?? [];
@@ -112,7 +121,10 @@ export function deriveLiveActivity(job: LiveJob, snapshot: LiveSnapshot, now: nu
   const runningStep = steps.find(step => step.status === 'running') ?? null;
   const runningModel = modelRuns.find(run => ACTIVE_RUN.has(run.status) && !run.completed_at) ?? null;
   const runningWorker = snapshot.workerRuns.find(run => ACTIVE_RUN.has(run.status) && !run.completed_at) ?? null;
-  const currentStep = runningStep ?? steps.find(step => step.step_id === job.current_step_name) ?? null;
+  const failedStep = steps.find(step => step.status === 'failed') ?? null;
+  const currentStep = runningStep ?? failedStep ?? steps.find(step => step.step_id === job.current_step_name) ?? null;
+  const successorId = builderSuccessorId(job);
+  const blocker = job.last_error || failedStep?.error;
   const countable = steps.filter(step => step.status !== 'skipped');
   const doneCount = countable.filter(step => step.status === 'completed').length;
   const lastActivity = Math.max(
@@ -133,14 +145,19 @@ export function deriveLiveActivity(job: LiveJob, snapshot: LiveSnapshot, now: nu
   };
   const pendingApprovals = snapshot.approvals.filter(approval => approval.status === 'pending').length;
 
+  if (successorId) return {
+    ...base, tone: 'idle' as LiveTone, headline: 'Continued in a newer job',
+    detail: `This historical attempt will not resume. Open job ${successorId.slice(0, 8)} to see its current outcome; continuation is not proof of success.`,
+  };
   if (job.status === 'deployed') return { ...base, tone: 'complete' as LiveTone, headline: 'Delivered', detail: 'This job has a recorded deployment. Bob is not working on it.' };
   if (job.status === 'release_ready') return { ...base, tone: 'waiting' as LiveTone, headline: 'Ready for your release decision', detail: 'Verification is complete. Merge and Production stay with you.' };
-  if (job.status === 'failed') return { ...base, tone: 'failed' as LiveTone, headline: 'Stopped: job failed', detail: 'Bob is not working on this job. Inspect the blocker or start a follow-up.' };
+  if (job.status === 'failed') return { ...base, tone: 'failed' as LiveTone, headline: 'Stopped: job failed', detail: blocker || 'Bob is not working on this job. Inspect the blocker or start a follow-up.' };
   if (job.status === 'cancelled') return { ...base, tone: 'idle' as LiveTone, headline: 'Cancelled', detail: 'This job was cancelled. Bob is not working on it.' };
+  if (job.autopilot_state === 'done') return { ...base, tone: 'idle' as LiveTone, headline: 'Autopilot stopped on this record', detail: 'No automatic resume is scheduled. Review the recorded outcome before starting another attempt.' };
   if (pendingApprovals || job.autopilot_state === 'awaiting_human') {
     return { ...base, tone: 'waiting' as LiveTone, headline: 'Waiting for you', detail: pendingApprovals ? `${pendingApprovals} approval${pendingApprovals === 1 ? '' : 's'} must be decided before Bob can continue.` : 'Bob reached a human gate and is waiting for your direction.' };
   }
-  if (job.autopilot_state === 'blocked') return { ...base, tone: 'blocked' as LiveTone, headline: 'Bob is blocked', detail: 'Autopilot stopped at a blocker. Review the latest events and ask Bob for the smallest recovery.' };
+  if (job.autopilot_state === 'blocked') return { ...base, tone: 'blocked' as LiveTone, headline: 'Bob is blocked', detail: blocker || 'Autopilot stopped at a blocker. Review the latest events and ask Bob for the smallest recovery.' };
 
   const signalOfWork = Boolean(runningStep || runningModel || runningWorker || job.autopilot_state === 'driving');
   if (signalOfWork) {
@@ -148,18 +165,19 @@ export function deriveLiveActivity(job: LiveJob, snapshot: LiveSnapshot, now: nu
     if (quietFor > STALL_AFTER_MS) {
       return { ...base, tone: 'stalled' as LiveTone, headline: 'No recorded progress', detail: `Bob was last recorded working ${lastActivity ? formatDuration(quietFor) : 'an unknown time'} ago. He may be stalled; this is not shown as working.` };
     }
-    const doing = runningModel ? `${providerLabel(runningModel.provider)} · ${runningModel.model_name}` : runningWorker ? `Worker · ${words(runningWorker.profile)}` : 'Autopilot is driving';
+    const doing = runningModel ? `${providerLabel(runningModel.provider)} · ${runningModel.model_name}` : runningWorker ? `Worker · ${words(runningWorker.profile)}` : job.autopilot_state === 'driving' ? 'Autopilot is driving' : 'The recorded step is running';
     return { ...base, tone: 'working' as LiveTone, headline: `Working on ${base.stepLabel}`, detail: doing };
   }
+  if (failedStep) return { ...base, tone: 'blocked' as LiveTone, headline: `${words(failedStep.step_id)} failed`, detail: blocker || 'No run is active. Review the failed step before retrying.' };
   if (TERMINAL_JOB.has(job.status)) return { ...base, tone: 'idle' as LiveTone, headline: 'Idle', detail: 'Bob is not working on this job.' };
   return {
     ...base, tone: 'idle' as LiveTone, headline: 'Not running',
-    detail: job.autopilot_requested_by ? 'Between steps. Bob will resume when autopilot picks up the next step.' : 'Nobody is driving this job. Select Let Bob drive, or run it to the next gate yourself.',
+    detail: 'No active run or driving autopilot is recorded. Review the job outcome before selecting Let Bob drive or running the next step.',
   };
 }
 
 export function isLiveJob(job: LiveJob | null, snapshot: LiveSnapshot | null) {
-  if (!job || TERMINAL_JOB.has(job.status)) return false;
+  if (!job || TERMINAL_JOB.has(job.status) || builderSuccessorId(job) || job.autopilot_state === 'done') return false;
   if (job.autopilot_state === 'driving') return true;
   if (!snapshot) return true;
   return snapshot.steps.some(step => step.status === 'running')

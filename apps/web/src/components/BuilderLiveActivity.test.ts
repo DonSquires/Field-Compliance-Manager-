@@ -34,6 +34,33 @@ describe('deriveLiveActivity', () => {
     expect(deriveLiveActivity(job(), snapshot({ approvals: [{ status: 'pending' }] }), now).tone).toBe('waiting');
     expect(deriveLiveActivity(job({ autopilot_state: 'blocked' }), snapshot(), now).tone).toBe('blocked');
   });
+
+  it('shows the successor for a superseded attempt, not a promise to resume', () => {
+    const old = job({ autopilot_state: 'done', autopilot_requested_by: 'owner', current_step_name: 'product_analysis',
+      autopilot_report: { resumed_as_job_id: '0c388688-c566-42b0-b700-d8267f602ddb' } });
+    const failed = snapshot({ steps: snapshot().steps.map(step => step.id === 'b' ? { ...step, status: 'failed', error: 'generation: source checkout does not match the target SHA' } : step) });
+    const activity = deriveLiveActivity(old, failed, now);
+    expect(activity.headline).toBe('Continued in a newer job');
+    expect(activity.detail).toContain('0c388688');
+    expect(activity.detail).toContain('not proof of success');
+    expect(activity.stepLabel).toBe('frontend implementation');
+    expect(isLiveJob(old, snapshot())).toBe(false);
+  });
+
+  it('shows the real failed step and cause instead of the last completed design step', () => {
+    const failed = snapshot({ steps: snapshot().steps.map(step => step.id === 'b' ? { ...step, status: 'failed', error: 'generation: turn budget exhausted' } : step) });
+    const activity = deriveLiveActivity(job({ current_step_name: 'product_analysis', autopilot_state: 'blocked' }), failed, now);
+    expect(activity.stepLabel).toBe('frontend implementation');
+    expect(activity.detail).toBe('generation: turn budget exhausted');
+  });
+
+  it('never promises an automatic resume based only on a recorded requester', () => {
+    const activity = deriveLiveActivity(job({ autopilot_requested_by: 'owner' }), snapshot({ steps: [] }), now);
+    expect(activity.tone).toBe('idle');
+    expect(activity.detail).not.toMatch(/will resume/);
+    expect(deriveLiveActivity(job({ autopilot_state: 'done' }), snapshot(), now).tone).toBe('idle');
+    expect(isLiveJob(job({ autopilot_state: 'done' }), snapshot())).toBe(false);
+  });
 });
 
 describe('isLiveJob', () => {

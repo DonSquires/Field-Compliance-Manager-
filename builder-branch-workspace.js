@@ -73,6 +73,11 @@ function verifySnapshot(sourceDir, targetSha) {
   if (git(sourceDir, ['status', '--porcelain', '--untracked-files=normal'])) throw new Error('Builder source checkout must be clean');
 }
 
+function verifySourceCommit(sourceDir, targetSha) {
+  if (!/^[a-f0-9]{40}$/i.test(String(targetSha ?? ''))) throw new Error('Builder target SHA must be a full Git SHA');
+  if (git(sourceDir, ['cat-file', '-t', targetSha]) !== 'commit') throw new Error('Builder target SHA must identify a commit');
+}
+
 function pruneDetachedWorkspaces({ sourceDir, workspaceRoot, activeWorkspacePath, retentionCount }) {
   const root = path.resolve(workspaceRoot);
   const candidates = fs.readdirSync(root, { withFileTypes: true })
@@ -109,7 +114,7 @@ function createDetachedWorkspace({ sourceDir, workspaceRoot, targetSha, retentio
     return { workspacePath, head: targetSha, existing: true };
   }
 
-  verifySnapshot(sourceDir, targetSha);
+  verifySourceCommit(sourceDir, targetSha);
   git(sourceDir, ['worktree', 'add', '--detach', workspacePath, targetSha]);
   verifySnapshot(workspacePath, targetSha);
   pruneDetachedWorkspaces({ sourceDir, workspaceRoot, activeWorkspacePath: workspacePath, retentionCount });
@@ -134,8 +139,11 @@ function createBranchWorkspace({ sourceDir, workspaceRoot, jobId, targetSha, bra
     return { branchName, workspacePath, head: git(workspacePath, ['rev-parse', 'HEAD']), existing: true };
   }
 
-  verifySnapshot(sourceDir, targetSha);
+  // The shared clone may serve another job at a different HEAD. Only the new worktree must
+  // match this job's pin; neither the clone's branch nor its working files are changed here.
+  verifySourceCommit(sourceDir, targetSha);
   git(sourceDir, ['worktree', 'add', '-b', branchName, workspacePath, targetSha]);
+  verifySnapshot(workspacePath, targetSha);
   return { branchName, workspacePath, head: git(workspacePath, ['rev-parse', 'HEAD']), existing: false };
 }
 

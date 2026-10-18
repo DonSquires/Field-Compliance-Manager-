@@ -8,6 +8,23 @@ detailed backlogs (`ENTERPRISE_SAAS_TODO.md`, `PROTOTYPE_GAP_AUDIT.md`,
 Completion language is strict, as in the lineage: **merged ≠ deployed ≠
 glass-proven.** A workstream item is done only when its evidence gate is met.
 
+Builder recovery 2026-10-18: an automatic continuation must be an idempotent,
+transactionally bound child of its source job, preserving the requester,
+tenant/project, target environment and release policy. The source is historical,
+not active or completed successfully; its recorded successor is an explicit
+navigation action. Neither manual runtime execution nor autopilot re-driving
+may restart that superseded record. A failed step's actual error takes precedence
+over a stale last-completed step or an unrelated pending code-review label.
+No automatic resume may be promised without a driving scheduler state.
+
+Implementation worktrees validate the requested commit object and their own
+clean, exact checkout, not the mutable shared clone's HEAD. Moving the shared
+checkout for another job must not invalidate a pinned task. Model exploration
+without edits gets a bounded share of the existing turn budget before handing
+its evidence to the next allowed provider; this does not extend the total
+budget, require an arbitrary edit, or permit restricted/local-only workloads
+to use an external provider. Verification and human release gates still apply.
+
 Page change requests 2026-10-18: authorised operations roles can submit a
 before/desired-after/business-reason brief from the admin or officer header.
 The existing `bob_friction_packets` queue owns these requests; there is no

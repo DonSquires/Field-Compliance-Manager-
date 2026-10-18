@@ -24,7 +24,7 @@ const { isProtectedPath, laneAllows, protectedReason, isMigrationPath, normalize
 const { buildModelRunRequest, callModelGateway, persistModelArtifact, fetchModelHealth, selectProviders, providerRequest } = require('./supabase/functions/_shared/builder-model-adapter');
 const { collectRepositoryContext, fitRepositoryContext } = require('./supabase/functions/_shared/builder-repository-context');
 
-const PROMPT_VERSION = 'agentic-engineer-v4';
+const PROMPT_VERSION = 'agentic-engineer-v5';
 // Consecutive refused identical calls (with nothing edited) before the author escalates or stops early.
 const STUCK_REFUSALS = 4;
 const DEFAULT_LIMITS = Object.freeze({
@@ -938,12 +938,17 @@ async function runAgenticEngineer({
     return { ok: false, error: 'no model provider is available for the author', turns: 0, usage, duration_ms: now() - started, routing: { provider: null, reason: baseRequest.routing_reason, prompt_version: PROMPT_VERSION, model: null, chain: baseRequest.chain } };
   }
   let active = 0;
+  let providerStartedTurn = 0;
+  const uneditedTurnBudget = Math.max(8, Math.floor(limits.maxTurns / (candidates.length + 1)));
   const activeRequest = () => providerRequest(baseRequest, candidates[active], null);
   const agenticReceiptId = await startAgenticReceipt(supabase, baseRequest, candidates[active]);
   const escalate = (reason) => {
     if (active + 1 >= candidates.length) return false;
     active += 1;
+    providerStartedTurn = turns;
     parseFailures = 0;
+    refusedStreak = 0;
+    signatures.clear();
     log({ turn: turns, escalated_to: candidates[active].provider, model: candidates[active].model, reason });
     return true;
   };
@@ -955,6 +960,13 @@ async function runAgenticEngineer({
   let compaction = {};
 
   while (turns < limits.maxTurns && now() - started < limits.wallBudgetMs) {
+    if (!tools.__changedFiles().length && turns - providerStartedTurn >= uneditedTurnBudget
+      && escalate(`${uneditedTurnBudget} turns without an edit; preserving the remaining budget for the next allowed provider`)) {
+      messages.push({ role: 'user', content: JSON.stringify({
+        handoff: 'The previous provider used its exploration allocation without an edit. Continue from the recorded evidence; do not repeat the whole investigation or invent an edit just to show progress. Make and verify the required change, or report the concrete blocker.',
+        reading_map: readingMap(transcript),
+      }) });
+    }
     turns++;
     const base = activeRequest();
     await heartbeatAgenticReceipt(supabase, agenticReceiptId, {
