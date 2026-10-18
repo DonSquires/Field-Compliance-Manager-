@@ -29,6 +29,13 @@ test('patrol finance profile mappings ignore unnamed workbook columns', async ()
   );
 });
 
+test('patrol finance profile accepts the reviewed day-of-week workbook header', () => {
+  const migration = readFileSync(resolve(__dirname, '../supabase/migrations/20261018051837_add_patrol_day_of_week_alias.sql'), 'utf8');
+  assert.match(migration, /jsonb_build_array\('Day of Week'\)/);
+  assert.match(migration, /source_values\.day_of_week/);
+  assert.match(migration, /import_source_profile_alias_added/);
+});
+
 test('patrol finance rows use components without double-counting displayed totals', async () => {
   const { buildPatrolFinanceRows } = await loadModule();
   const derivative = {
