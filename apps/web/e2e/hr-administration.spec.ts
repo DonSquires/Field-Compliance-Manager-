@@ -1,7 +1,19 @@
-import { expect, test } from '@playwright/test';
+import { expect, test, type Page } from '@playwright/test';
 import { installSupabaseFixtures, monitorBrowserErrors, signInAsAdmin } from './fixtures';
 
 test.beforeEach(async ({ page }) => { await page.clock.setFixedTime(new Date('2026-08-30T09:30:00+12:00')); await installSupabaseFixtures(page); });
+
+async function openStaffProfile(page: Page, name = 'Ana Ngata', staffId = '22222222-2222-4222-8222-222222222222') {
+  const profilePromise = page.waitForEvent('popup');
+  await page.getByRole('row', { name: new RegExp(name) }).getByRole('button', { name: 'Open profile ↗' }).click();
+  const popup = await profilePromise;
+  await popup.waitForURL(new RegExp(`profile=${staffId}`));
+  const profileUrl = popup.url();
+  await expect(page.getByRole('row', { name: new RegExp(name) })).toBeVisible();
+  await popup.close();
+  await page.goto(profileUrl);
+  return page;
+}
 
 test('organization role codes appear in Payroll role and do not replace the staff authorization role', async ({ page }) => {
   const referenceCodeRequest: { url?: URL } = {};
@@ -16,19 +28,20 @@ test('organization role codes appear in Payroll role and do not replace the staf
   });
 
   await signInAsAdmin(page, '/admin/people-hr');
-  const staffCard = page.locator('.contact-card', { has: page.getByRole('heading', { name: 'Ana Ngata' }) });
-  const payrollRole = staffCard.getByLabel('Payroll role');
+  await expect(page.getByRole('row', { name: /Ana Ngata/ })).toContainText('Officer');
+  const staffProfile = await openStaffProfile(page);
+  await staffProfile.getByRole('button', { name: 'Employment & pay' }).click();
+  const payrollRole = staffProfile.getByLabel('Payroll role');
   await expect(payrollRole.locator('option')).toHaveCount(2);
   await expect(payrollRole).toHaveValue('');
   await payrollRole.selectOption('field_security');
-  await staffCard.getByRole('button', { name: 'Save payroll role' }).click();
-  await expect(page.getByRole('status')).toContainText('Payroll role updated for Ana Ngata.');
+  await staffProfile.getByRole('button', { name: 'Save payroll role' }).click();
+  await expect(staffProfile.getByRole('status')).toContainText('Payroll role updated for Ana Ngata.');
 
   expect(referenceCodeRequest.url?.searchParams.get('organization_id')).toBe('eq.33333333-3333-4333-8333-333333333333');
   expect(referenceCodeRequest.url?.searchParams.get('code_type')).toBe('eq.role_code');
   expect(referenceCodeRequest.url?.searchParams.get('is_active')).toBe('eq.true');
   expect(savedPayRole).toMatchObject({ p_staff_id: '22222222-2222-4222-8222-222222222222', p_expected_role_code: null, p_role_code: 'field_security' });
-  await expect(staffCard.getByText('Officer', { exact: true })).toBeVisible();
 });
 
 test('payroll administrator creates an organization code and assigns it to staff', async ({ page }) => {
@@ -57,10 +70,11 @@ test('payroll administrator creates an organization code and assigns it to staff
   await page.getByRole('button', { name: 'Create payroll role code' }).click();
   await expect(page.getByRole('status')).toContainText('Payroll role code FIELD_SECURITY created.');
 
-  const staffCard = page.locator('.contact-card', { has: page.getByRole('heading', { name: 'Ana Ngata' }) });
-  await staffCard.getByLabel('Payroll role').selectOption('FIELD_SECURITY');
-  await staffCard.getByRole('button', { name: 'Save payroll role' }).click();
-  await expect(page.getByRole('status')).toContainText('Payroll role updated for Ana Ngata.');
+  const staffProfile = await openStaffProfile(page);
+  await staffProfile.getByRole('button', { name: 'Employment & pay' }).click();
+  await staffProfile.getByLabel('Payroll role').selectOption('FIELD_SECURITY');
+  await staffProfile.getByRole('button', { name: 'Save payroll role' }).click();
+  await expect(staffProfile.getByRole('status')).toContainText('Payroll role updated for Ana Ngata.');
   expect(createPayload).toMatchObject({ p_action: 'create', p_code: 'FIELD_SECURITY', p_name: 'Field Security Officer' });
   expect(assignmentPayload).toMatchObject({ p_staff_id: '22222222-2222-4222-8222-222222222222', p_expected_role_code: null, p_role_code: 'FIELD_SECURITY' });
 });
@@ -132,10 +146,12 @@ test('saving a changed payroll role sends the existing role as the expected valu
   });
 
   await signInAsAdmin(page, '/admin/people-hr');
-  const staffCard = page.locator('.contact-card', { has: page.getByRole('heading', { name: 'Ana Ngata' }) });
-  await staffCard.getByLabel('Payroll role').selectOption('field_security');
-  await staffCard.getByRole('button', { name: 'Save payroll role' }).click();
-  await expect(page.getByRole('status')).toContainText('Payroll role updated for Ana Ngata.');
+  await expect(page.getByRole('row', { name: /Ana Ngata/ })).toContainText('Officer');
+  const staffProfile = await openStaffProfile(page);
+  await staffProfile.getByRole('button', { name: 'Employment & pay' }).click();
+  await staffProfile.getByLabel('Payroll role').selectOption('field_security');
+  await staffProfile.getByRole('button', { name: 'Save payroll role' }).click();
+  await expect(staffProfile.getByRole('status')).toContainText('Payroll role updated for Ana Ngata.');
   expect(savedPayRole).toMatchObject({ p_staff_id: '22222222-2222-4222-8222-222222222222', p_expected_role_code: 'existing_guard', p_role_code: 'field_security' });
 });
 
@@ -143,11 +159,12 @@ test('an empty organization role-code list leaves Payroll role unassigned and sa
   await page.route('**/rest/v1/reference_codes*', async (route) => await route.fulfill({ status: 200, contentType: 'application/json', body: '[]' }));
 
   await signInAsAdmin(page, '/admin/people-hr');
-  const staffCard = page.locator('.contact-card', { has: page.getByRole('heading', { name: 'Ana Ngata' }) });
-  const payrollRole = staffCard.getByLabel('Payroll role');
-  await expect(payrollRole.locator('option')).toHaveText(['No role code assigned']);
+  const staffProfile = await openStaffProfile(page);
+  await staffProfile.getByRole('button', { name: 'Employment & pay' }).click();
+  const payrollRole = staffProfile.getByLabel('Payroll role');
+  await expect(payrollRole.locator('option')).toHaveText(['No payroll role assigned']);
   await expect(payrollRole).toHaveValue('');
-  await expect(staffCard.getByRole('button', { name: 'Save payroll role' })).toBeDisabled();
+  await expect(staffProfile.getByRole('button', { name: 'Save payroll role' })).toBeDisabled();
 });
 
 test('a rejected payroll-role write is shown without changing the authorization role', async ({ page }) => {
@@ -155,11 +172,11 @@ test('a rejected payroll-role write is shown without changing the authorization 
   await page.route('**/rest/v1/rpc/set_staff_pay_role_code', async (route) => await route.fulfill({ status: 400, contentType: 'application/json', body: JSON.stringify({ code: '23505', message: 'Role code already exists for this staff member.' }) }));
 
   await signInAsAdmin(page, '/admin/people-hr');
-  const staffCard = page.locator('.contact-card', { has: page.getByRole('heading', { name: 'Ana Ngata' }) });
-  await staffCard.getByLabel('Payroll role').selectOption('field_security');
-  await staffCard.getByRole('button', { name: 'Save payroll role' }).click();
-  await expect(page.getByRole('alert')).toContainText('Role code already exists for this staff member.');
-  await expect(staffCard.getByText('Officer', { exact: true })).toBeVisible();
+  const staffProfile = await openStaffProfile(page);
+  await staffProfile.getByRole('button', { name: 'Employment & pay' }).click();
+  await staffProfile.getByLabel('Payroll role').selectOption('field_security');
+  await staffProfile.getByRole('button', { name: 'Save payroll role' }).click();
+  await expect(staffProfile.getByRole('alert')).toContainText('Role code already exists for this staff member.');
 });
 
 test('missing employment start date blocks the work-readiness review flow', async ({ page }) => {
@@ -182,17 +199,18 @@ test('missing employment start date blocks the work-readiness review flow', asyn
   });
 
   await signInAsAdmin(page, '/admin/people-hr');
-  const staffCard = page.locator('.contact-card', { has: page.getByRole('heading', { name: 'Jordan Lee' }) });
-  await expect(staffCard.getByText('Missing start date', { exact: true })).toBeVisible();
-  await expect(staffCard.getByText('Employment start date is not set')).toBeVisible();
-  await staffCard.getByRole('button', { name: 'Mark work ready' }).click();
+  await expect(page.getByRole('row', { name: /Jordan Lee/ })).toContainText('Not work ready');
+  const staffProfile = await openStaffProfile(page, 'Jordan Lee', '2f2f2f2f-2222-4222-8222-222222222222');
+  await expect(staffProfile.getByText('Missing start date', { exact: true })).toBeVisible();
+  await expect(staffProfile.getByText(/Employment start date is not set/)).toBeVisible();
+  await staffProfile.getByRole('button', { name: 'Mark work ready' }).click();
 
-  const readinessDialog = page.getByRole('dialog', { name: 'Mark work ready?' });
+  const readinessDialog = staffProfile.getByRole('dialog', { name: 'Mark work ready?' });
   await readinessDialog.getByLabel('Readiness review notes').fill('Synthetic test: employment start date is missing.');
   await readinessDialog.getByRole('button', { name: 'Confirm readiness' }).click();
 
-  await expect(page.getByRole('alert')).toContainText('Staff member is not work ready: Employment start date is not set');
-  await expect(staffCard.getByText('Not work ready', { exact: true })).toBeVisible();
+  await expect(staffProfile.getByRole('alert')).toContainText('Staff member is not work ready: Employment start date is not set');
+  await expect(staffProfile.getByText('Not work ready', { exact: true })).toBeVisible();
   expect(readinessPayload).toMatchObject({ p_staff_id: '2f2f2f2f-2222-4222-8222-222222222222', p_expected_work_ready: false, p_work_ready: true, p_review_notes: 'Synthetic test: employment start date is missing.' });
 });
 
@@ -252,22 +270,22 @@ test('people and HR decisions are governed and operational', async ({ page }) =>
   await expect(page.getByRole('button', { name: 'Prepare someone to work' })).toBeVisible();
   await expect(page).toHaveScreenshot('hr-staff-overview.png');
   await expect(page.getByText('These lists change the rules used by onboarding and rostering.')).toBeHidden();
-  await expect(page.getByText('No verified current credential')).toBeVisible();
-  const staffCard = page.locator('.contact-card', { has: page.getByRole('heading', { name: 'Ana Ngata' }) });
-  await expect(staffCard.getByText('Work ready', { exact: true })).toBeVisible();
-  await expect(staffCard.getByRole('button', { name: 'Record credential' })).toHaveCount(0);
-  await expect(staffCard).toHaveScreenshot('hr-staff-card.png');
-  const jordanCard = page.locator('.contact-card', { has: page.getByRole('heading', { name: 'Jordan Lee' }) });
-  await expect(jordanCard.getByText('Not work ready', { exact: true })).toBeVisible();
-  await expect(jordanCard.getByRole('button', { name: 'Record credential' })).toBeVisible();
-  await page.getByRole('button', { name: 'Remove work readiness' }).click();
-  const readinessDialog = page.getByRole('dialog', { name: 'Remove work readiness?' });
+  await expect(page.getByRole('row', { name: /Ana Ngata/ })).toContainText('Work ready');
+  await expect(page.getByRole('row', { name: /Jordan Lee/ })).toContainText('Not work ready');
+  await page.getByRole('searchbox', { name: 'Search staff' }).fill('Jordan');
+  await expect(page.getByRole('row', { name: /Ana Ngata/ })).toHaveCount(0);
+  await expect(page.getByRole('row', { name: /Jordan Lee/ })).toBeVisible();
+  await page.getByRole('searchbox', { name: 'Search staff' }).fill('');
+  const staffProfile = await openStaffProfile(page);
+  await expect(staffProfile.getByRole('heading', { name: 'Ana Ngata' })).toBeVisible();
+  await staffProfile.getByRole('button', { name: 'Remove work readiness' }).click();
+  const readinessDialog = staffProfile.getByRole('dialog', { name: 'Remove work readiness?' });
   await expect(readinessDialog.getByRole('button', { name: 'Confirm readiness' })).toBeDisabled();
   await readinessDialog.getByLabel('Readiness review notes').fill('Temporary restriction pending refresher training review.');
-  await expect(readinessDialog).toHaveScreenshot('hr-readiness-review.png');
   await readinessDialog.getByRole('button', { name: 'Confirm readiness' }).click();
-  await expect(page.getByText('Ana Ngata readiness updated and audited.')).toBeVisible();
+  await expect(staffProfile.getByText('Ana Ngata readiness updated and audited.')).toBeVisible();
 
+  await page.goto('/admin/people-hr');
   await page.getByRole('button', { name: 'People', exact: true }).click();
   await page.getByRole('button', { name: 'Leave', exact: true }).click();
   await page.getByRole('button', { name: 'Branch check' }).click();

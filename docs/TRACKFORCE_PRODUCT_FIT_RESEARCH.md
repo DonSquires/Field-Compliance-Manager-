@@ -215,6 +215,36 @@ This is a sound foundation and already follows the task/exception shape. The vis
 - **Confidence:** M; assumes FCM’s primary target remains NZ providers, councils/agencies and clients as defined in its product architecture.
 - **Watch:** buyer interviews, procurement/RFP requirements, integration demand, and which feature gaps actually block adoption.
 
+## Workforce profile evidence update (2026-10-19)
+
+This update governs the staff-directory and profile interaction added in the
+People, Pay & HR workspace. It is product evidence, not a legal-compliance
+determination.
+
+| Source | Verified fact | FCM design implication |
+|---|---|---|
+| Health NZ / Te Whatu Ora GETS FPO 31955373 | The public notice describes rostered and ad hoc security officers, patrols, incident response and de-escalation, alarm/CCTV response, patient watches and emergency support. It is a future procurement opportunity, not the released RFP; the detailed vetting, training, competency and record clauses are not public yet. | Keep credentials, skills, training, inductions and evidence generic and versionable. Do not label a field or workflow as “Health NZ compliant” until the released RFP is reviewed. |
+| Ministry of Justice / PSPLA training and skills guidance | Property guards, crowd controllers and personal guards must satisfy the stated NZQA unit or skills standards unless covered by the listed NZ Certificate pathways; the Record of Achievement supports the permanent badge pathway. | Keep credential type, issuer, number, issue/expiry, verification and evidence separate from training records, and show both within one staff profile. |
+| NZSA Security Services Good Practice Guidelines (April 2023) | The Ministry of Justice links the industry guideline developed with NZSA, E Tū, WorkSafe and others as guarding-risk guidance. | Surface H&S readiness and site induction evidence with the person, while keeping operational hazards/incidents on their owning place/work records. |
+| Deputy training-requirements help | Deputy supports staff training records and schedule filtering by valid, non-expired training modules. | Use searchable one-row staff lists and preserve skill/training expiry as roster-eligibility inputs rather than decorative profile data. |
+| Trackforce/GuardTek employee HR profile help | The employee record separates core HR, additional/system attributes and linked time/labour and payroll profile views. | Use one stable staff identity with role-specific profile tabs; do not create parallel staff entities for payroll, rostering or credentials. |
+| InTime security scheduling page | InTime advertises filtering staff by training credentials and pay rates for assignment. This is vendor marketing, not verified technical documentation. | Treat credential/pay filters as a workflow benchmark only; FCM assignment must continue through its governed readiness, availability and pay-rule paths. |
+
+**Interaction ruling:** the organization-wide staff directory uses a dense,
+searchable, one-row-per-person table. Selecting a person opens a stable
+independent browser window so the directory and profile can remain active on
+separate screens. Credential, skill, training, document, induction, asset,
+timesheet, leave and HR-case summaries remain single-line records and open a
+separate stable detail URL. Payroll role and work-readiness changes continue
+through `set_staff_pay_role_code` and `set_staff_work_readiness`; the browser
+does not update `staff_profiles` directly.
+
+**Known gap:** there is no dedicated staff injury, exposure or wellbeing record
+path in the current workforce schema. The profile says so explicitly and does
+not repurpose general HR notes for clinical information. Site induction is
+shown as staff-specific H&S readiness evidence; operational incidents and place
+hazards remain on their canonical work/place spines.
+
 ## Three Horizons
 
 | Horizon | Build direction | Guardrail |
@@ -262,6 +292,12 @@ This is a sound foundation and already follows the task/exception shape. The vis
 **Trackforce first-party product material, retrieved 2026-10-08. All capability descriptions below are vendor claims unless the page is explicitly identified as a case study or demo.**
 
 - [Trackforce products catalog](https://www.trackforce.com/products/)
+- [Health NZ security services future procurement opportunity, GETS RFx 31955373](https://www.gets.govt.nz/HEALTHNZ/ExternalTenderDetails.htm?id=31955373)
+- [Ministry of Justice — training and skills for private security licences](https://www.justice.govt.nz/tribunals/licences-certificates/pspla/training-and-skills/)
+- [NZSA Security Services Good Practice Guidelines, April 2023](https://security.org.nz/wp-content/uploads/2023/04/NZSA-NZ-Security-Services-Good-Practice-Guidelines_April-2023.pdf)
+- [Deputy — managing training requirements](https://help.deputy.com/hc/en-au/articles/4657753960463-Managing-training-requirements)
+- [Trackforce/GuardTek — managing the Employee HR Profile](https://rtmsoft.zendesk.com/hc/en-us/articles/360057609331-Managing-the-Employee-HR-Profile)
+- [InTime — scheduling software for security](https://intime.com/scheduling-software-security/)
 - [TrackTik platform](https://www.trackforce.com/products/tracktik/)
 - [GuardTek platform](https://www.trackforce.com/products/guardtek/)
 - [Security operations](https://www.trackforce.com/products/tracktik/security-operations/)
