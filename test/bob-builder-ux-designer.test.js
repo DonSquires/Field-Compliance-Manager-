@@ -28,6 +28,29 @@ function validDesignPlan() {
   };
 }
 
+test('UX output schema binds exact repository routes, access and tokens without inventing empty enums', () => {
+  const repositoryContext = {
+    existing_routes: ['AdminShell page id "builder"'],
+    existing_access_boundaries: ['platform-only'],
+    design_tokens: ['--color-bg-base'],
+  };
+  const prompt = buildUxDesignerPrompt({ specification: {}, repositoryContext });
+  const schema = prompt.outputSchema;
+  assert.equal(UX_DESIGNER_PROMPT_VERSION, 'ux-designer-v9');
+  assert.deepEqual(schema.properties.route_map.items.properties.route.enum, repositoryContext.existing_routes);
+  assert.deepEqual(schema.properties.route_map.items.properties.access.items.enum, repositoryContext.existing_access_boundaries);
+  assert.deepEqual(schema.properties.design_tokens.properties.color.items.enum, repositoryContext.design_tokens);
+  assert.deepEqual(Object.keys(schema.properties).sort(), [...schema.required].sort());
+  assert.equal(schema.properties.interface_states.properties.error.minLength, 1);
+  const empty = buildUxDesignerPrompt({ specification: {}, repositoryContext: {} }).outputSchema;
+  assert.equal(empty.properties.route_map.maxItems, 0);
+  assert.equal(empty.properties.design_tokens.properties.spacing.maxItems, 0);
+  assert.doesNotMatch(JSON.stringify(empty), /"enum":\[\]/);
+  const manyRoutes = Array.from({ length: 205 }, (_, i) => `route-${i}`);
+  const fitted = buildUxDesignerPrompt({ specification: {}, repositoryContext: { existing_routes: manyRoutes } });
+  assert.deepEqual(fitted.outputSchema.properties.route_map.items.properties.route.enum, fitted.context.existing_routes);
+});
+
 test('UX Designer prompt carries approved specification and forbids invented behavior', () => {
   const prompt = buildUxDesignerPrompt({
     specification: { product_brief: { outcome: 'Governed approvals' }, acceptance_criteria: [{ id: 'AC-1' }] },
@@ -152,6 +175,8 @@ test('UX Designer uses approved specification artifact as model provenance', asy
   assert.equal(captured.modelRequest.provider, 'gpu_workstation');
   assert.equal(captured.modelRequest.prompt_version, UX_DESIGNER_PROMPT_VERSION);
   assert.deepEqual(captured.modelRequest.input_artifact_ids, ['artifact-spec']);
+  assert.deepEqual(captured.modelRequest.request.output_schema.properties.route_map.items.properties.route.enum, [route]);
+  assert.deepEqual(captured.modelRequest.request.output_schema.properties.route_map.items.properties.access.items.enum, [access]);
   assert.deepEqual(captured.validateOutput(JSON.stringify(plan)), plan);
   assert.equal(result.job.status, 'implementation_pending');
   assert.deepEqual(result.design_plan, plan);
