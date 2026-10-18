@@ -393,9 +393,9 @@ const RosterHRPage: React.FC = () => {
   const [payLineReview, setPayLineReview] = useState<{ line: DispatchPayLineRow; expectedReviewId: string | null; decision: 'approved' | 'rejected'; notes: string } | null>(null);
   const [payReviewFilter, setPayReviewFilter] = useState<'exceptions' | 'resolved' | 'all'>('exceptions');
   const [roleCodes, setRoleCodes] = useState<RoleCodeRow[]>([]);
-  const [payRoleDrafts, setPayRoleDrafts] = useState<Record<string, string>>({});
   const [showPayRoleCodeForm, setShowPayRoleCodeForm] = useState(false);
   const [payRoleCodeForm, setPayRoleCodeForm] = useState({ code: '', name: '' });
+  const [staffSearch, setStaffSearch] = useState('');
   const [trainingAction, setTrainingAction] = useState<{ staffId: string; trainingName: string; trainingType: string; provider: string; completedDate: string; expiryDate: string; result: 'passed' | 'not_passed' | 'not_assessed'; score: string; notes: string; supersedesId: string | null } | null>(null);
   const [skillAction, setSkillAction] = useState<{ staffId: string; skillId: string; proficiency: string; certified: boolean; certificationExpiry: string; notes: string } | null>(null);
   const [staffNames, setStaffNames] = useState<Record<string, string>>({});
@@ -761,17 +761,14 @@ const RosterHRPage: React.FC = () => {
     if (readinessError) setError(readinessError.message);else { setNotice(`${readinessReview.name} readiness updated and audited.`);setReadinessReview(null);setReadinessNotes('');await loadAll(); }setSaving(false);
   };
 
-  const saveStaffPayRole = async (person: StaffRow) => {
+  const openStaffProfile = (person: StaffRow) => {
     if (!person.staff_id) return;
-    setSaving(true); setError(null); setNotice(null);
-    const { error: payRoleError } = await supabase.rpc('set_staff_pay_role_code', {
-      p_staff_id: person.staff_id,
-      p_expected_role_code: person.role_code,
-      p_role_code: (payRoleDrafts[person.id] ?? person.role_code ?? '').trim() || null,
-    });
-    if (payRoleError) setError(payRoleError.message);
-    else { setNotice(`Payroll role updated for ${person.display_name || person.email || 'staff member'}.`); await loadAll(); }
-    setSaving(false);
+    const url = new URL('/admin/people-hr', window.location.origin);
+    url.searchParams.set('profile', person.staff_id);
+    url.searchParams.set('profileTab', 'overview');
+    url.searchParams.set('popout', '1');
+    const profileWindow = window.open(url.toString(), `fcm-staff-profile-${person.staff_id}`, 'popup=yes,width=1440,height=960,left=80,top=40');
+    if (profileWindow) profileWindow.opener = null;
   };
 
   const createPayRoleCode = async (event: React.FormEvent) => {
@@ -1643,7 +1640,7 @@ const RosterHRPage: React.FC = () => {
       {tab === 'staff' && (
         <section className="reports-section">
           <h2>Staff ({staff.length})</h2>
-          <p className="hr-section-hint">Who works here and whether they can be rostered. Field staff join through Recruitment (offer accepted, then hired), complete Onboarding, and are then marked work-ready.</p>
+          <p className="hr-section-hint">Search one row per person, then open their complete profile in an independent window so this workspace remains available on the first screen.</p>
           <div className="hr-start-panel" aria-label="People and HR next steps">
             <div>
               <strong>What are you here to do?</strong>
@@ -1653,32 +1650,30 @@ const RosterHRPage: React.FC = () => {
             <button type="button" className="btn btn-sm btn-secondary" onClick={() => { setTab('onboarding'); setTabGroup(tabGroupFor('onboarding')); }}>Prepare someone to work</button>
             <button type="button" className="btn btn-sm btn-secondary" onClick={() => { setTab('credentials'); setTabGroup(tabGroupFor('credentials')); }}>Check credentials</button>
           </div>
-          <div className="contacts-list">
+          <div className="hr-staff-directory-tools">
+            <label><span>Search staff</span><input type="search" value={staffSearch} onChange={(event) => setStaffSearch(event.target.value)} placeholder="Name, email, payroll role, employment or readiness" /></label>
+            <span>{staff.filter((person) => [person.display_name, person.email, person.role_code, person.employment_type, person.work_ready ? 'work ready' : 'not work ready'].filter(Boolean).join(' ').toLowerCase().includes(staffSearch.trim().toLowerCase())).length} shown</span>
+          </div>
+          <div className="reports-table-wrapper hr-staff-directory">
             {staff.length === 0 ? (
               <div className="empty-state hr-empty-guide">
                 <p><strong>No staff yet.</strong></p>
                 <p>Field staff are created when a recruitment offer is accepted and the person is hired. Office and admin users are added under People &amp; Access.</p>
                 <button type="button" className="btn btn-sm btn-primary" onClick={() => { setTab('recruitment'); setTabGroup(tabGroupFor('recruitment')); }}>Open Recruitment</button>
               </div>
-            ) : (
-              staff.map((s) => (
-                <div key={s.id} className="contact-card">
-                  <div className="contact-header">
-                    <h3>{s.display_name || s.email || 'Unnamed'}</h3>
-                    <div className="hr-staff-badges"><span className="contact-type-badge">{plainWords(s.role)}</span>{s.staff_id && <span className={`status-badge ${s.work_ready ? 'status-active' : 'status-pending'}`}>{s.work_ready ? 'Work ready' : 'Not work ready'}</span>}</div>
-                  </div>
-                  <div className="contact-details">
-                    <p>{s.email}</p>
-                    <p className="contact-meta">
-                      {plainWords(s.employment_type, 'Employment type not set')}
-                      {s.start_date ? ` · started ${new Date(s.start_date).toLocaleDateString('en-NZ')}` : ''}
-                    </p>
-                    {s.staff_id && canManagePayRoles && <div className="form-row" style={{ marginTop: '0.75rem' }}><label><span>Payroll role</span><select value={payRoleDrafts[s.id] ?? s.role_code ?? ''} onChange={(event) => setPayRoleDrafts((drafts) => ({ ...drafts, [s.id]: event.target.value }))}><option value="">No role code assigned</option>{roleCodes.map((code) => <option value={code.code} key={code.code}>{code.code} · {code.name}</option>)}</select></label><button type="button" className="btn btn-sm btn-secondary" disabled={saving || ((payRoleDrafts[s.id] ?? s.role_code ?? '') === (s.role_code ?? ''))} onClick={() => void saveStaffPayRole(s)}>Save payroll role</button></div>}
-                    {s.staff_id && (() => { const assessment = readinessAssessments.find((item) => item.staff_id === s.staff_id); return assessment ? <div className="hr-readiness"><div><span>Identity</span><strong>{plainWords(assessment.identity_status)}</strong></div><div><span>Employment</span><strong>{plainWords(assessment.employment_status)}</strong></div><div><span>Credentials</span><strong>{plainWords(assessment.credential_status)}</strong></div><div><span>Training advisory</span><strong>{plainWords(assessment.training_status)}</strong></div>{assessment.blockers.length > 0 && <p>{assessment.blockers.join(' · ')}</p>}<div className="hr-readiness-actions">{['missing_valid', 'attention'].includes(assessment.credential_status) && <button type="button" className="btn btn-sm btn-secondary" onClick={() => openEvidence(assessment.staff_id, s.display_name || s.email || 'Staff member', 'record_credential')}>Record credential</button>}<button type="button" className={`btn btn-sm ${assessment.work_ready ? 'btn-danger' : 'btn-primary'}`} onClick={() => { setReadinessNotes('');setReadinessReview({ staffId: assessment.staff_id, name: s.display_name || s.email || 'Staff member', current: assessment.work_ready, next: !assessment.work_ready }); }}>{assessment.work_ready ? 'Remove work readiness' : 'Mark work ready'}</button></div></div> : null; })()}
-                  </div>
-                </div>
-              ))
-            )}
+            ) : <table className="reports-table"><thead><tr><th>Name</th><th>Employment</th><th>Payroll role</th><th>Readiness</th><th>Contact</th><th>Action</th></tr></thead><tbody>
+              {staff.filter((person) => [person.display_name, person.email, person.role_code, person.employment_type, person.work_ready ? 'work ready' : 'not work ready'].filter(Boolean).join(' ').toLowerCase().includes(staffSearch.trim().toLowerCase())).map((s) => (
+                <tr key={s.id}>
+                  <td><button type="button" className="hr-staff-name-button" disabled={!s.staff_id} onClick={() => openStaffProfile(s)}><strong>{s.display_name || s.email || 'Unnamed'}</strong><small>{plainWords(s.role)}</small></button></td>
+                  <td>{plainWords(s.employment_type, 'Not set')}{s.start_date ? <small> · since {new Date(s.start_date).toLocaleDateString('en-NZ')}</small> : null}</td>
+                  <td>{s.role_code ?? 'Not assigned'}</td>
+                  <td><span className={`status-badge ${s.work_ready ? 'status-active' : 'status-pending'}`}>{s.staff_id ? (s.work_ready ? 'Work ready' : 'Not work ready') : 'No staff profile'}</span></td>
+                  <td>{s.email ?? 'No email'}</td>
+                  <td><button type="button" className="btn btn-sm btn-primary" disabled={!s.staff_id} onClick={() => openStaffProfile(s)}>Open profile ↗</button></td>
+                </tr>
+              ))}
+              {staff.length > 0 && staff.filter((person) => [person.display_name, person.email, person.role_code, person.employment_type, person.work_ready ? 'work ready' : 'not work ready'].filter(Boolean).join(' ').toLowerCase().includes(staffSearch.trim().toLowerCase())).length === 0 && <tr><td colSpan={6} className="text-center">No staff match this search.</td></tr>}
+            </tbody></table>}
           </div>
 
           <details className="hr-setup-details">

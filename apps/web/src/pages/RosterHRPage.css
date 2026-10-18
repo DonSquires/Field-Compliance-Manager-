@@ -35,6 +35,88 @@
 	align-items: center;
 }
 
+.hr-staff-directory-tools {
+	display: flex;
+	align-items: flex-end;
+	justify-content: space-between;
+	gap: 12px;
+	margin: 0 0 10px;
+}
+
+.hr-staff-directory-tools label {
+	display: grid;
+	gap: 5px;
+	width: min(100%, 560px);
+}
+
+.hr-staff-directory-tools label span {
+	color: #8fa3b3;
+	font-size: 12px;
+	font-weight: 850;
+	text-transform: uppercase;
+}
+
+.hr-staff-directory-tools input {
+	min-height: 40px;
+	padding: 8px 10px;
+	border: 1px solid #3a5367;
+	border-radius: 5px;
+	color: #eef5f8;
+	background: #07111b;
+	font: inherit;
+}
+
+.hr-staff-directory-tools > span {
+	color: #8fa3b3;
+	font-size: 12px;
+	font-weight: 800;
+}
+
+.hr-staff-directory .reports-table td {
+	vertical-align: middle;
+}
+
+.hr-staff-name-button {
+	display: grid;
+	gap: 2px;
+	min-width: 180px;
+	padding: 0;
+	border: 0;
+	color: #e8f1f5;
+	background: transparent;
+	text-align: left;
+	font: inherit;
+	cursor: pointer;
+}
+
+.hr-staff-name-button strong {
+	font-size: 13px;
+}
+
+.hr-staff-name-button small {
+	color: #879aaa;
+}
+
+.hr-staff-name-button:hover strong,
+.hr-staff-name-button:focus-visible strong {
+	color: #71cec0;
+}
+
+.hr-staff-name-button:disabled {
+	cursor: not-allowed;
+	opacity: .65;
+}
+
+@media(max-width: 620px) {
+	.hr-staff-directory-tools {
+		display: grid;
+	}
+
+	.hr-staff-directory-tools label {
+		width: 100%;
+	}
+}
+
 .hr-readiness strong {
 	text-transform: none;
 }

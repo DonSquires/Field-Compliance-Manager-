@@ -82,6 +82,7 @@ const ActivationHandoffsPage = React.lazy(() => import('../pages/ActivationHando
 const RelationshipWorkspacePage = React.lazy(() => import('../pages/RelationshipWorkspacePage'));
 const RosterOperationsPage = React.lazy(() => import('../pages/RosterOperationsPage'));
 const RosterHRPage = React.lazy(() => import('../pages/RosterHRPage'));
+const StaffProfilePage = React.lazy(() => import('../pages/StaffProfilePage'));
 const RateRulesPage = React.lazy(() => import('../pages/RateRulesPage'));
 const WorkshopPage = React.lazy(() => import('../pages/WorkshopPage'));
 const FinanceBureauPage = React.lazy(() => import('../pages/FinanceBureauPage'));
@@ -763,7 +764,7 @@ const AdminShell: React.FC = () => {
       case 'finance-pricing':
         return <FinanceBureauPage view="pricing" onOpenBob={(prompt) => { setBobLaunchPrompt(prompt); setBobOpen(true); }} onNavigate={navigateFinance} />;
       case 'people-hr':
-        return <RosterHRPage />;
+        return new URLSearchParams(location.search).has('profile') ? <StaffProfilePage /> : <RosterHRPage />;
       case 'roster-targets':
         return <RosterTargetsPage />;
       default:
@@ -773,10 +774,11 @@ const AdminShell: React.FC = () => {
 
   // A popped-out CCTV wall is a second-monitor surface: the console alone, no navigation or banners.
   const isVideoWall = activePage === 'field-ops' && fieldOpsSubArea === 'cctv-console' && new URLSearchParams(location.search).get('popout') === '1';
-  if (isVideoWall) {
+  const isStaffProfilePopout = activePage === 'people-hr' && new URLSearchParams(location.search).has('profile') && new URLSearchParams(location.search).get('popout') === '1';
+  if (isVideoWall || isStaffProfilePopout) {
     return (
       <div className="admin-shell admin-shell-video-wall">
-        <main data-app-content className="admin-shell-main is-video-wall">
+        <main data-app-content className={`admin-shell-main ${isVideoWall ? 'is-video-wall' : 'is-staff-profile-popout'}`}>
           <LazyPageRecovery key={`${activePage}:${fieldOpsSubArea}`} pageKey={`${activePage}:${fieldOpsSubArea}`}>
             <React.Suspense fallback={<LazyPageFallback />}>{renderPage()}</React.Suspense>
           </LazyPageRecovery>

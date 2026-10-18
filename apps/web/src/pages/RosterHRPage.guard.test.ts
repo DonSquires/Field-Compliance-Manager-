@@ -7,6 +7,7 @@ import { describe, expect, it } from 'vitest';
 // when every individual token it checks for is genuinely present.
 const read = (path: string) => readFileSync(resolve(process.cwd(), path), 'utf8').replace(/\r\n/g, '\n');
 const page = read('src/pages/RosterHRPage.tsx');
+const staffProfilePage = read('src/pages/StaffProfilePage.tsx');
 const credentialSql = read('../../supabase/migrations/20260901002000_govern_staff_credential_renewal.sql');
 
 describe('governed HR administration', () => {
@@ -130,13 +131,26 @@ describe('governed HR administration', () => {
   it('assigns staff payroll roles from active reference codes through the governed RPC', () => {
     expect(page).toContain(".from('reference_codes')");
     expect(page).toContain(".eq('code_type', 'role_code')");
-    expect(page).toContain("supabase.rpc('set_staff_pay_role_code'");
-    expect(page).toContain('Save payroll role');
+    expect(staffProfilePage).toContain("supabase.rpc('set_staff_pay_role_code'");
+    expect(staffProfilePage).toContain('Save payroll role');
     expect(page).toContain("supabase.rpc('manage_pay_role_code'");
     expect(page).toContain('Create payroll role code');
     expect(page).toContain('Add its pay rule for each branch');
     expect(page).not.toContain(".from('staff_profiles').update");
     expect(page).not.toContain(".from('reference_codes').insert");
+  });
+
+  it('uses a searchable one-row staff directory and independent profile route', () => {
+    expect(page).toContain('type="search"');
+    expect(page).toContain('Open profile ↗');
+    expect(page).toContain("url.searchParams.set('profile', person.staff_id)");
+    expect(page).toContain("url.searchParams.set('popout', '1')");
+    expect(page).toContain("window.open(url.toString(), `fcm-staff-profile-${person.staff_id}`");
+    expect(staffProfilePage).toContain("{ id: 'credentials', label: 'Credentials' }");
+    expect(staffProfilePage).toContain("{ id: 'skills-training', label: 'Skills & training' }");
+    expect(staffProfilePage).toContain("{ id: 'health-safety', label: 'H&S' }");
+    expect(staffProfilePage).toContain("url.searchParams.set('recordKind', kind)");
+    expect(staffProfilePage).toContain("detailWindow.opener = null");
   });
 
   it('provisions accepted candidates with employer-owned employment and a branch authorization', () => {
