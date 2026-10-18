@@ -13,6 +13,7 @@ const { downloadVerifiedArtifact } = require('./builder-frontend-handoff');
 const { unwrapPatchArtifact } = require('./supabase/functions/_shared/builder-patch-envelope');
 const { EXTERNAL_PROVIDERS } = require('./supabase/functions/_shared/builder-model-adapter');
 const { accountVerifierRecoveries } = require('./builder-verifier-recovery');
+const { laneFor, normalizeRepoPath } = require('./builder-path-policy');
 
 const TERMINAL_STATUSES = new Set(['release_ready', 'deployed', 'failed', 'cancelled']);
 const APPROVAL_STATUSES = new Set(['specification_ready', 'approval_pending']);
@@ -346,6 +347,33 @@ async function executeBuilderAction({ snapshot, action, supabase, gateway, conte
     release: handlers.release || runReleaseEngineer
   };
   const common = { supabase, gateway, job: snapshot.job, step: action.step };
+  if (snapshot.job.autopilot_source === 'main_monitor' && ['run_frontend', 'run_backend'].includes(action.type)) {
+    const artifact = artifactsFor(snapshot, 'product_analysis', 'product_specification').at(-1);
+    if (!artifact) throw new Error('Main-health implementation requires its validated product specification');
+    const { bytes } = await downloadVerifiedArtifact(supabase, artifact.id, snapshot.job.id, 'product_specification');
+    const specification = JSON.parse(bytes.toString('utf8'));
+    const requirements = specification.delivery_requirements;
+    if (!Array.isArray(requirements) || !requirements.length
+      || requirements.some(requirement => !Array.isArray(requirement.source_scope) || !requirement.source_scope.length
+        || requirement.source_scope.some(file => typeof file !== 'string' || !normalizeRepoPath(file)))) {
+      throw new Error('Main-health specification has no valid implementation scope');
+    }
+    const lane = action.type === 'run_frontend' ? 'frontend' : 'backend';
+    const files = [...new Set(requirements.flatMap(requirement => requirement.source_scope))];
+    if (!files.some(file => laneFor(file) === lane)) {
+      const siblingMode = lane === 'frontend' ? 'backend_engineer' : 'frontend_engineer';
+      const sibling = snapshot.steps.find(step => step.builder_mode === siblingMode);
+      if (!sibling || !['pending', 'completed'].includes(sibling.status)) {
+        throw new Error('Cannot skip an unused repair lane without a sibling implementation');
+      }
+      const { error } = await supabase.rpc('builder_skip_implementation_step', {
+        _job_id: snapshot.job.id, _step_id: action.step.id, _builder_mode: action.step.builder_mode,
+        _reason: `Validated specification ${artifact.id} assigns this repair to the ${lane === 'frontend' ? 'backend' : 'frontend'} lane only: ${files.join(', ')}`,
+      });
+      if (error) throw new Error(`Unused repair lane could not be recorded: ${error.message}`);
+      return { success: true, skipped: true, phase: 'specification_scope', specification_artifact_id: artifact.id };
+    }
+  }
   if (action.type === 'continue_backend_only') {
     const { data, error } = await supabase.rpc('builder_continue_backend_only_job', { _job_id: snapshot.job.id });
     if (error) throw new Error('Backend-only job could not advance');

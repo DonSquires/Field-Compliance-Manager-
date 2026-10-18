@@ -155,7 +155,7 @@ function mainHealthEvidenceConflict(job) {
   if (job.autopilot_source !== 'main_monitor') return null;
   const task = String(job.task_description || '');
   const declared = Array.isArray(job.source_main_health_files) ? job.source_main_health_files
-    : (task.match(/failing guard tests:\s*([^\r\n]+)/i)?.[1]?.match(/(?:apps\/web\/)?src\/[\w./-]+\.test\.tsx?/g) || []);
+    : (task.match(/failing (?:guard )?tests:\s*([^\r\n]+)/i)?.[1]?.match(/(?:apps\/web\/)?(?:src|e2e)\/[\w./-]+\.(?:test|spec)\.tsx?/g) || []);
   const normalize = file => file.startsWith('apps/web/') ? file : `apps/web/${file}`;
   const observed = failedTestPaths(task).map(normalize);
   const scope = declared.map(normalize);

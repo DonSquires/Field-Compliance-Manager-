@@ -22,9 +22,44 @@ Owner ruling 2026-10-18, self-heal repairs the app:
   `apps/web/src` files and hold anything else for Grandmaster approval; a
   blocked main-health repair on moved main is handed back to the monitor, and
   a handed-back repair is retired when the monitor opens its replacement.
-- Not yet: main-health repairs are frontend-only, so a regression that needs
-  `supabase/` or `services/` source still pauses for a person. Unrelated e2e
-  baseline failures in the frontend verifier remain a separate defect.
+- Fullstack continuation (owner approved, 2026-10-18): main-health intake now
+  accepts named unit/browser failures and creates both engineer steps.
+  Integrity-checked specification scopes select the needed lanes through the
+  existing audited skip RPC; no model call or invented edit is needed in an
+  unused lane. Engineer v7 checks each lane's portion of the acceptance
+  contract; whole-job independent review remains mandatory. Backend source,
+  additive migrations and browser-test changes can be prepared but require
+  Grandmaster release approval. Existing active jobs are not rewritten.
+- The saved verifier receipt for `8686934c` identified two reproducible smoke
+  failures on current main: the alarm verdict locator matched two legitimate
+  status messages, and the map walkthrough expected two verified facets
+  although the fixture now has three. Narrowed the former to the exact verdict
+  (preserving role/text checks), corrected the latter to the actual fixture,
+  and reran both complete specs offline: seven tests passed. This is not new
+  permission to bypass baseline failures.
+- Verification: 160 targeted Node tests passed, including isolated PostgreSQL
+  creation/de-duplication/tenant/privilege checks and verifier-recovery tests;
+  the exact four-spec offline worker smoke selection passed all 16 tests
+  without retries or skips; application and e2e type-checks passed. Applied
+  migration `20261019150000_builder_fullstack_main_health_repairs` through
+  the authorized management path, regenerated the catalog snapshot, and
+  read back the service-only RPC signature and both enabled lanes. These
+  are mechanism and fixture checks, not a claim that a live model-authored
+  backend repair has completed or deployed.
+- Before/during/after check: a named failure at an immutable main SHA supplies
+  the intake evidence; the approved specification selects scoped engineering
+  work, unused lanes leave audited skip receipts, and each used lane must hand
+  over a real patch plus acceptance evidence. Afterwards, independent worker
+  receipts and whole-job review remain required, with backend/consequential
+  release held for a human. Atlas proved intake calls job creation and writes
+  job/audit records; its FK reach for the intake RPC was empty, not proof of
+  absent flow. Refresh used upsert-only to avoid retiring unrelated terrain.
+- Design references (retrieved 2026-10-18):
+  [GitHub Copilot agentic workflows](https://docs.github.com/en/copilot/concepts/copilot-surfaces/copilot-on-github)
+  (repository research, edits, tests and reviewable changes in an isolated
+  environment) and [Claude Code common workflows](https://code.claude.com/docs/en/common-workflows)
+  (plan, implement, test, and resume). Applied those workflow principles, not
+  another application's source or architecture.
 
 Owner-approved structured planning routing 2026-10-18:
 

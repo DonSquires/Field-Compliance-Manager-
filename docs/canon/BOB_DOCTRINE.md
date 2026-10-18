@@ -51,6 +51,17 @@ Bob hands it back to the main-health monitor, which re-tests current main and
 opens a fresh repair only if it is still red; a repair is never re-run on code
 where its failure is already gone, and never spawns a repair of itself.
 
+**Owner-approved fullstack repair continuation (2026-10-18).** Main-health
+intake accepts named web unit and browser failures and opens both engineering
+lanes. The integrity-checked, validated product specification determines which
+lane actually implements; a lane with no scoped work is skipped through the
+audited implementation RPC, never by fabricating an edit. Each engineer must
+implement and prove every requirement in its lane; a cross-lane requirement
+needs evidence from both. Whole-job independent review and protected release
+gates remain. Backend code and additive migrations can be prepared, not
+automatically released. This does not permit tolerating unexplained browser
+failures or claiming production success from static backend verification.
+
 - One of the platform's **two core engines** (geofence = where / what applies;
   Bob = think / do). Not a data-entry assistant bolted onto a CRM, and not a
   governed form that proposes one row and waits

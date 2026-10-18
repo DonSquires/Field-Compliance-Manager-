@@ -20,13 +20,13 @@ const path = require('node:path');
 const crypto = require('node:crypto');
 const { execFileSync, spawn, spawnSync } = require('node:child_process');
 const { createBranchWorkspace, redactGitError } = require('./builder-branch-workspace');
-const { isProtectedPath, laneAllows, protectedReason, isMigrationPath, normalizeRepoPath } = require('./builder-path-policy');
+const { isProtectedPath, laneAllows, laneFor, protectedReason, isMigrationPath, normalizeRepoPath } = require('./builder-path-policy');
 const { buildModelRunRequest, callModelGateway, persistModelArtifact, fetchModelHealth, selectProviders, providerRequest } = require('./supabase/functions/_shared/builder-model-adapter');
 const { collectRepositoryContext, fitRepositoryContext } = require('./supabase/functions/_shared/builder-repository-context');
 const { engineerCheckpoint } = require('./builder-engineer-checkpoint');
 const { validatePatchText } = require('./frontend-worker');
 
-const PROMPT_VERSION = 'agentic-engineer-v6';
+const PROMPT_VERSION = 'agentic-engineer-v7';
 // Consecutive refused identical calls (with nothing edited) before the author escalates or stops early.
 const STUCK_REFUSALS = 4;
 const DEFAULT_LIMITS = Object.freeze({
@@ -224,7 +224,7 @@ function systemPrompt({ lane, limits }) {
     '- read_canon {}                          AGENTS.md + docs/canon/README.md + docs/canon/BOB_DOCTRINE.md (bounded)',
     '- read_notes {limit?}                    your persistent builder notes (lessons from earlier jobs); the 10 most recent are already in your task packet',
     '- write_note {text}                      leave a durable lesson for future jobs (short, factual, no secrets)',
-    '- finish {summary, tests, rollback_notes, acceptance_evidence, follow_ups?, tests_not_run_reason?, lessons?}   hand over: your worktree diff becomes the reviewed patch. acceptance_evidence must contain one {requirement_id, status:"completed", evidence} entry for every approved delivery requirement; evidence must name a changed source file that implements the outcome. A change that touches tests is refused unless a `node --test` run passed in this session (or tests_not_run_reason says plainly why none could). lessons: up to 3 short, generalisable facts about this codebase or these tools that would save a future job time (or omit).',
+    '- finish {summary, tests, rollback_notes, acceptance_evidence, follow_ups?, tests_not_run_reason?, lessons?}   hand over: your worktree diff becomes the reviewed patch. acceptance_evidence must contain one {requirement_id, status:"completed", evidence} entry for every approved delivery requirement with source_scope in YOUR lane; evidence must name a changed file in your lane that implements the outcome. Requirements spanning both lanes need an implementation in each lane; never claim the sibling lane is complete. Independent review checks the whole job. A change that touches tests is refused unless a `node --test` run passed in this session (or tests_not_run_reason says plainly why none could). lessons: up to 3 short, generalisable facts about this codebase or these tools that would save a future job time (or omit).',
     '',
     `Budget: ${limits.maxTurns} tool turns / ${Math.round(limits.wallBudgetMs / 60000)} minutes. Pace it: spend at most about a third of the turns reading before you start editing; you will be told when the budget is running low. Do not repeat identical calls. Large files: outline first, then targeted reads — a task that names a 10,000-line file is still a 60-turn task. Requirements labelled must, required, or acceptance may not be deferred to follow_ups: complete and verify them before finish. follow_ups are only for optional improvements outside the approved acceptance contract. Running out of turns with an admitted partial change is a failure, not a successful handoff. If the task is impossible, unsafe, or requires a protected path, finish with an empty change set and explain plainly in the summary what a human must do.`,
   ].join('\n');
@@ -755,7 +755,7 @@ async function atlasMapForFiles({ supabase, workspacePath, lane, startingFiles }
   }
 }
 
-function validateAcceptanceEvidence({ args, specification, files, trackedAtPin = null }) {
+function validateAcceptanceEvidence({ args, specification, files, trackedAtPin = null, lane = null }) {
   const requirements = Array.isArray(specification?.delivery_requirements)
     ? specification.delivery_requirements
     : [];
@@ -763,6 +763,8 @@ function validateAcceptanceEvidence({ args, specification, files, trackedAtPin =
   const evidence = Array.isArray(args.acceptance_evidence) ? args.acceptance_evidence : [];
   const byId = new Map(evidence.map(entry => [String(entry?.requirement_id || '').trim(), entry]));
   for (const requirement of requirements) {
+    const scope = Array.isArray(requirement.source_scope) ? requirement.source_scope.map(String) : [];
+    if (lane && scope.length && !scope.some(file => laneFor(file) === lane)) continue;
     const id = String(requirement?.id || '').trim();
     const entry = byId.get(id);
     if (!entry || entry.status !== 'completed') {
@@ -770,7 +772,7 @@ function validateAcceptanceEvidence({ args, specification, files, trackedAtPin =
     }
     const proof = String(entry.evidence || '').trim();
     if (!proof) return `finish refused: delivery requirement ${id} has no evidence. Name the changed source file and the observable proof.`;
-    const namedScope = Array.isArray(requirement.source_scope) ? requirement.source_scope.map(String) : [];
+    const namedScope = lane ? scope.filter(file => laneFor(file) === lane) : scope;
     // A scope path that neither exists at the pinned commit nor is created by this change was invented
     // by the planner; demanding an edit to it made the step impossible (job a7c916f5, ExamplePage.tsx).
     const sourceScope = trackedAtPin ? namedScope.filter(file => trackedAtPin.has(file) || files.includes(file)) : namedScope;
@@ -818,7 +820,7 @@ function buildProposal({ workspacePath, lane, tools, args, requiredFiles = [], s
   const scopeFiles = Array.isArray(specification?.delivery_requirements)
     ? specification.delivery_requirements.flatMap((requirement) => Array.isArray(requirement?.source_scope) ? requirement.source_scope.map(String) : [])
     : [];
-  const acceptanceError = validateAcceptanceEvidence({ args, specification, files, trackedAtPin: filesAtPin(workspacePath, scopeFiles) });
+  const acceptanceError = validateAcceptanceEvidence({ args, specification, files, lane, trackedAtPin: filesAtPin(workspacePath, scopeFiles) });
   if (acceptanceError) return { error: acceptanceError };
   // Truth Protocol at the gate: a change that touches tests (or that the brief asked to test) must come with a
   // passing `node --test` run from THIS session, or an explicit reason why none could run. Claims are not evidence.

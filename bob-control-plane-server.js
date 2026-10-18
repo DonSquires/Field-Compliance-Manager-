@@ -726,20 +726,20 @@ function mainHealthRepairBrief({ sha, failure }) {
   return [
     `Goal: make main green again by fixing the real cause of the failing web checks reported by Bob's isolated main-health run at ${sha}. Self-heal repairs the app, not just its tests.`,
     `Before: the repository is pinned to ${sha}; the main-health worker ran the web build, full Vitest unit/source-guard suite, and CI Playwright smoke suite against a read-only checkout.`,
-    `During: the main-health worker exited ${failure.exit_code}; failing guard tests: ${failingFiles.join(', ')}.`,
+    `During: the main-health worker exited ${failure.exit_code}; failing tests: ${failingFiles.join(', ')}.`,
     `Failure evidence (redacted and bounded):\n${failure.summary || 'See the bounded worker output below.'}\n${failure.stdout}\n${failure.stderr}`.slice(0, 9000),
-    `Required diagnosis: first reproduce the failure by running the failing test files at the pinned commit (npm run test --prefix apps/web -- ${failingFiles.map((file) => file.replace(/^apps\/web\//, '')).join(' ')}). Then read each failing test and the application source/schema it asserts. If the application regressed, fix the application source so the existing guard passes. Change a guard only when schema/source evidence proves the product intentionally moved on and the guard is stale. Never delete, skip, or weaken a guard to make it pass.`,
+    'Required diagnosis: first reproduce each failure at the pinned commit. Run src/**/*.test.ts(x) with npm run test --prefix apps/web -- <test paths>; run e2e/*.spec.ts with npm run test:e2e --prefix apps/web -- <spec paths> --project=desktop-chromium --workers=1 --ignore-snapshots. Then read each failing test and its application source/schema. If the application regressed, fix the application source. Change a test only when source/schema evidence proves it stale; never delete, skip, or weaken it. The validated specification must name the actual frontend and/or backend source files needed; unused lanes are skipped from that evidence, not given invented edits.',
     'Required verification: rerun the failing tests and the isolated main-health checks, independent code review, security review, and Atlas refresh. Preserve the exact tested main SHA and failing-test file set.',
-    'Scope: the smallest corrective patch, at most eight files, anywhere under `apps/web/src`. Protected paths (auth/identity, routing, dependencies, environment, CI/deploy, the schema snapshot) stay refused. A patch that needs anything outside `apps/web/src`, or touches legal, safety, identity, enforcement, finance, payroll, or evidential code, is still prepared and verified but pauses for Grandmaster approval before release. No new features or redesigns.',
+    'Scope: the smallest root-cause repair across frontend and backend, with focused regression tests. Backend application code and new additive migrations may be drafted and independently verified. Unattended release remains limited to at most eight non-protected apps/web/src files; backend, browser-test, migration, legal, safety, identity, enforcement, finance, payroll, and evidential changes pause for Grandmaster approval before release. Auth/identity, dependencies, environment, CI/deploy and hand-editing the schema snapshot remain refused. No unrelated features or redesigns.',
     'After: open a pull request with the test receipts; release follows the normal independent gates.',
   ].join('\n');
 }
 
 async function openMainHealthRepair({ sha, failure }) {
-  const failingFiles = [...new Set(failure.failing_tests.map((file) => file.startsWith('apps/web/') ? file : `apps/web/${file}`))].slice(0, 8);
-  const guardFilePattern = /^apps\/web\/src\/[A-Za-z0-9_./-]+\.guard\.test\.tsx?$/;
-  if (!failingFiles.length || failingFiles.some((file) => !guardFilePattern.test(file) || file.includes('..'))) {
-    throw new Error(`main-health failure is outside the bounded source-guard repair scope; parsed=${failingFiles.join(',').slice(0, 240) || 'none'}`);
+  const failingFiles = [...new Set(failure.failing_tests.map((file) => file.startsWith('apps/web/') ? file : `apps/web/${file}`))];
+  const testFilePattern = /^apps\/web\/(?:src\/[A-Za-z0-9_./-]+\.(?:test|spec)\.tsx?|e2e\/[A-Za-z0-9_./-]+\.spec\.ts)$/;
+  if (!failingFiles.length || failingFiles.length > 8 || failingFiles.some((file) => !testFilePattern.test(file) || file.includes('..'))) {
+    throw new Error(`main-health failure has no supported web test scope; parsed=${failingFiles.join(',').slice(0, 240) || 'none'}`);
   }
   if (builderRepositoryHead('main').sha !== sha) throw new Error('main moved before the repair job could be opened');
   const project = await routineBuilderProject();
@@ -748,7 +748,7 @@ async function openMainHealthRepair({ sha, failure }) {
     _project_id: project.id,
     _health_sha: sha,
     _target_sha: sha,
-    _title: `Repair ${failingFiles.length} failing main guard test${failingFiles.length === 1 ? '' : 's'}`,
+    _title: `Repair app regression behind ${failingFiles.length} failing main check${failingFiles.length === 1 ? '' : 's'}`,
     _task_description: mainHealthRepairBrief({ sha, failure }),
     _failed_files: failingFiles,
     _parent_job_id: null,
