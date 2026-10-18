@@ -54,6 +54,13 @@ Owner ruling 2026-10-18, self-heal repairs the app:
   release held for a human. Atlas proved intake calls job creation and writes
   job/audit records; its FK reach for the intake RPC was empty, not proof of
   absent flow. Refresh used upsert-only to avoid retiring unrelated terrain.
+- Release follow-up: the exact `0356f1b3` catalog comparison exposed Git
+  stripping a literal CR from the CRLF character class in
+  `vehicle_data_sources_authorization_check`. This was not live schema drift:
+  the working snapshot was truthful but staging it changed the SQL literal.
+  Disable Git text normalization for the generated snapshot only, regenerate
+  from live, and verify byte-exact staging/checkout under both `core.autocrlf`
+  settings. Keep the release lane's exact catalog comparison unchanged.
 - Design references (retrieved 2026-10-18):
   [GitHub Copilot agentic workflows](https://docs.github.com/en/copilot/concepts/copilot-surfaces/copilot-on-github)
   (repository research, edits, tests and reviewable changes in an isolated
