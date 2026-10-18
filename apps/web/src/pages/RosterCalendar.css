@@ -1,3 +1,58 @@
-.roster-horizon-bar{display:flex;align-items:end;justify-content:space-between;gap:12px;margin-top:14px}.roster-horizon{display:flex;padding:3px;border:1px solid #344b5f;border-radius:6px;background:#091421}.roster-horizon button{min-height:32px;padding:0 14px;border:0;border-radius:4px;color:#91a5b6;background:transparent;font-size: 12px;font-weight:800;cursor:pointer}.roster-horizon button.is-active{color:#e8fff9;background:#276044}.roster-horizon-bar>label{display:grid;gap:4px;color:#8ea2b4;font-size: 12px;font-weight:800;text-transform:uppercase}.roster-horizon-bar select{min-width:190px;height:36px;padding:0 8px;border:1px solid #3a5064;border-radius:5px;color:#e7eef5;background:#08121e}.roster-holidays{display:flex;gap:7px;margin-top:10px;overflow-x:auto;padding-bottom:3px}.roster-holidays>div{display:grid;grid-template-columns:auto auto minmax(max-content,1fr) auto;align-items:center;gap:7px;min-width:280px;padding:7px 9px;border-left:3px solid #5fa798;border-radius:4px;color:#cfe2e2;background:#102322}.roster-holidays>div.is-regional{border-left-color:#d08b49;background:#251b16}.roster-holidays span,.roster-holidays i{color:#91aaa7;font-size: 12px;font-style:normal;text-transform:uppercase}.roster-holidays strong{font-size: 12px}.roster-board{min-width:calc(220px + var(--roster-days,7) * 120px)}.roster-board-head,.roster-row{grid-template-columns:220px repeat(var(--roster-days,7),minmax(120px,1fr))}.roster-board-head .is-holiday{color:#ffd0a3;background:#2a1d14}.roster-board-head small{font-size:11px;text-transform:uppercase}
-.roster-horizon-bar{display:flex;align-items:end;justify-content:space-between;gap:12px;margin-top:14px}.roster-horizon{display:flex;padding:3px;border:1px solid #344b5f;border-radius:6px;background:#091421}.roster-horizon button{min-height:32px;padding:0 14px;border:0;border-radius:4px;color:#91a5b6;background:transparent;font-size: 12px;font-weight:800;cursor:pointer}.roster-horizon button.is-active{color:#e8fff9;background:#276044}.roster-horizon-bar>label{display:grid;gap:4px;color:#8ea2b4;font-size: 12px;font-weight:800;text-transform:uppercase}.roster-horizon-bar select{min-width:190px;height:36px;padding:0 8px;border:1px solid #3a5064;border-radius:5px;color:#e7eef5;background:#08121e}.roster-holidays{display:flex;gap:7px;margin-top:10px;overflow-x:auto;padding-bottom:3px}.roster-holidays>div{display:grid;grid-template-columns:auto auto minmax(max-content,1fr) auto;align-items:center;gap:7px;min-width:280px;padding:7px 9px;border-left:3px solid #5fa798;border-radius:4px;color:#cfe2e2;background:#102322}.roster-holidays>div.is-regional{border-left-color:#d08b49;background:#251b16}.roster-holidays span,.roster-holidays i{color:#91aaa7;font-size: 12px;font-style:normal;text-transform:uppercase}.roster-holidays strong{font-size: 12px}.roster-board{min-width:0;max-width:100%;overflow-x:auto}.roster-board-head,.roster-row{width:max(100%,calc(220px + var(--roster-days,7) * 120px));grid-template-columns:220px repeat(var(--roster-days,7),120px)}.roster-board-head .is-holiday{color:#ffd0a3;background:#2a1d14}.roster-board-head small{font-size:11px;text-transform:uppercase}
-@media(max-width:700px){.roster-horizon-bar{align-items:stretch;flex-direction:column}.roster-horizon{align-self:flex-start}.roster-horizon-bar>label{width:100%}.roster-horizon-bar select{width:100%}.roster-holidays>div{min-width:240px}}
+.roster-board.is-week {
+  --roster-days: 7;
+  --roster-day-min: 144px;
+  --roster-grid-min: 1228px;
+}
+
+.roster-board.is-fortnight {
+  --roster-days: 14;
+  --roster-day-min: 130px;
+  --roster-grid-min: 2040px;
+}
+
+.roster-board.is-month {
+  --roster-days: 31;
+  --roster-day-min: 112px;
+  --roster-grid-min: 3692px;
+}
+
+.roster-day-label {
+  min-width: var(--roster-day-min);
+}
+
+.roster-horizon-control {
+  display: inline-flex;
+  gap: 0.35rem;
+  padding: 0.3rem;
+  border: 1px solid var(--border);
+  border-radius: 12px;
+  background: var(--surface);
+}
+
+.roster-horizon-control button {
+  min-height: 34px;
+  padding: 0.35rem 0.7rem;
+  border: 0;
+  border-radius: 8px;
+  background: transparent;
+  color: var(--text-muted);
+  font-weight: 700;
+  cursor: pointer;
+}
+
+.roster-horizon-control button.is-active {
+  background: var(--primary);
+  color: #fff;
+}
+
+@media (max-width: 640px) {
+  .roster-horizon-control {
+    width: 100%;
+    overflow-x: auto;
+  }
+
+  .roster-horizon-control button {
+    flex: 1;
+    white-space: nowrap;
+  }
+}
