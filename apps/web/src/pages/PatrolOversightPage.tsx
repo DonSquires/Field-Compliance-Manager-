@@ -3,6 +3,7 @@ import { AlertTriangle, MapPin, RefreshCw, ScanLine, ShieldCheck } from 'lucide-
 import { useAuth } from '../context/AuthContext';
 import { useServiceRelationships } from '../context/ServiceRelationshipContext';
 import { supabase } from '../lib/supabase';
+import PatrolTravelSummary from '../components/PatrolTravelSummary';
 import './PatrolOversightPage.css';
 import './PatrolOversightPageControls.css';
 
@@ -146,6 +147,18 @@ const PatrolOversightPage: React.FC = () => {
     <header className="patrol-oversight-header"><div><span>Field operations / Patrol</span><h1>Patrol evidence</h1><p>{selectedPlaceName ? `Checkpoint attendance at ${selectedPlaceName}` : 'Organisation-wide checkpoint attendance'} · last {periodDays} days.</p></div><button type="button" onClick={() => void loadEvidence()} disabled={loading}><RefreshCw size={17} className={loading ? 'is-spinning' : ''} />Refresh</button></header>
     {error && <div className="patrol-oversight-message" role="alert"><AlertTriangle size={17} /><span>{error}</span></div>}
     <section className="patrol-oversight-summary" aria-label="Checkpoint evidence summary"><div><ScanLine size={18} /><span>{selectedPlaceName ? 'Visits at selected place' : 'Visits across organisation'}</span><strong>{placeVisits.length}</strong></div><div><ShieldCheck size={18} /><span>Within checkpoint</span><strong>{verifiedCount}</strong></div><div className={exceptionCount ? 'is-warning' : ''}><AlertTriangle size={18} /><span>Evidence exceptions</span><strong>{exceptionCount}</strong></div></section>
+    <PatrolTravelSummary
+      organizationId={profile?.organizationId ?? null}
+      monthsBack={3}
+      siteId={selectedSite?.id ?? null}
+      zoneId={selectedSite ? null : selectedZone?.id ?? null}
+      officerNames={officers}
+      placeNames={selectedSite ? { [selectedSite.id]: selectedSite.name } : {}}
+      title="Recorded travel to this place"
+      description={`Distance officers recorded getting to ${selectedPlaceName ?? 'places across this organisation'}, by month. Shown over the last 3 months because travel is summarised monthly — the ${periodDays}-day filter above applies to checkpoint scans only.`}
+      breakdown="officer"
+      emptyHint={`No travel distance has been recorded for ${selectedPlaceName ?? 'this organisation'} in the last 3 months. Distance appears here once an officer records it on a visit, or a patrol log is imported.`}
+    />
     <div className="patrol-oversight-toolbar"><div className="patrol-oversight-controls"><div className="patrol-oversight-period" role="group" aria-label="Evidence period">{([7, 30, 90] as EvidencePeriodDays[]).map((days) => <button type="button" aria-pressed={periodDays === days} onClick={() => setPeriodDays(days)} key={days}>{days} days</button>)}</div><div role="tablist" aria-label="Evidence confidence">{(['all','verified','exception'] as EvidenceFilter[]).map((item) => <button type="button" role="tab" aria-selected={filter === item} className={filter === item ? 'is-active' : ''} onClick={() => setFilter(item)} key={item}>{item}</button>)}</div></div><span>{visibleVisits.length} records</span></div>
     <p className="patrol-oversight-scroll-cue" role="note">Scroll horizontally to review all checkpoint fields.</p>
     <div className="patrol-oversight-table"><table><thead><tr><th>Checkpoint</th><th>Officer</th><th>Visited</th><th>Capture</th><th>GPS accuracy</th><th>Evidence</th></tr></thead><tbody>{loading ? <tr><td colSpan={6} className="patrol-oversight-empty"><RefreshCw size={17} className="is-spinning" />Loading checkpoint evidence</td></tr> : visibleVisits.length === 0 ? <tr><td colSpan={6} className="patrol-oversight-empty"><div className="patrol-oversight-empty-state"><strong>{emptyStateTitle}</strong><p>{emptyStateMessage}</p></div></td></tr> : visibleVisits.map((visit) => { const patrol = patrols[visit.patrol_id];return <tr key={visit.id}><td><strong>{checkpoints[visit.checkpoint_id]?.name ?? 'Checkpoint'}</strong><small>{visit.shift_stop_id ? `Stop ${visit.shift_stop_id.slice(0,8)}` : 'No shift stop link'}</small></td><td>{visit.officer_user_id ? officers[visit.officer_user_id] ?? 'Officer' : 'Officer unavailable'}</td><td>{new Date(visit.visited_at).toLocaleString('en-NZ')}</td><td>{visit.scan_method.replaceAll('_',' ')}</td><td><span className={visit.within_radius === true ? 'is-verified' : 'is-exception'}><MapPin size={13} />{visit.gps_accuracy == null ? 'Not captured' : `${Math.round(visit.gps_accuracy)} m`}</span><small>{visit.gps_distance_from_checkpoint == null ? 'Distance unavailable' : `${Math.round(visit.gps_distance_from_checkpoint)} m from checkpoint`}</small></td><td><strong>{visit.within_radius === true ? 'Verified proximity' : 'Review required'}</strong><small>Evidence ID {visit.id.slice(0,8)} · patrol {visit.patrol_id.slice(0,8)}{patrol?.shift_id ? ` · shift ${patrol.shift_id.slice(0,8)}` : ''}</small>{visit.notes && <p>{visit.notes}</p>}</td></tr>; })}</tbody></table></div>

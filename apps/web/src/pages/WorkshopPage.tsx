@@ -19,6 +19,7 @@
 
 import React, { useCallback, useEffect, useMemo, useState } from 'react';
 import { PriceListPicker, usePriceList } from '../components/PriceListPicker';
+import PatrolTravelSummary from '../components/PatrolTravelSummary';
 import { useAuth } from '../context/AuthContext';
 import type { PriceListSelection } from '../lib/priceList';
 import { supabase } from '../lib/supabase';
@@ -522,6 +523,21 @@ export default function WorkshopPage({ onNavigate }: { onNavigate?: (page: strin
                   <div><span>Margin</span><strong>{summary.marginPct === null ? '—' : `${summary.marginPct}%`}</strong></div>
                   {selected.status === 'completed' && <div><span>Still to invoice</span><strong>{money(selected.uninvoiced_total)}</strong></div>}
                 </div>
+
+                {selected.kind === 'maintenance' && (
+                  <PatrolTravelSummary
+                    organizationId={organizationId}
+                    monthsBack={3}
+                    officerId={selected.assigned_user_id}
+                    siteId={selected.client_site_id}
+                    officerNames={selected.assigned_user_id && selected.assigned_name ? { [selected.assigned_user_id]: selected.assigned_name } : {}}
+                    placeNames={selected.client_site_id && selected.site_name ? { [selected.client_site_id]: selected.site_name } : {}}
+                    title="Vehicle usage for this job's scope"
+                    description={`Distance ${selected.assigned_name ?? 'the assigned person'} recorded travelling to ${selected.site_name ?? 'this organisation\u2019s places'} over the last 3 months. Context for the cost above — it is not a line on this order.`}
+                    compact
+                    emptyHint="No travel distance has been recorded for this person and place in the last 3 months. Add a travel line below to charge travel on this job."
+                  />
+                )}
 
                 <table className="workshop-lines workshop-lines--priced">
                   <thead><tr><th>Kind</th><th>Description</th><th>Qty</th><th>Unit price</th><th>Total</th><th aria-label="Actions"></th></tr></thead>

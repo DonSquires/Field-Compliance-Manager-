@@ -50,6 +50,7 @@ import {
   Shield,
   Users,
   Wrench,
+  Gauge,
   WalletCards,
   X,
 } from 'lucide-react';
@@ -105,6 +106,7 @@ const BuilderControlRoomPage = React.lazy(() => import('../pages/BuilderControlR
 const BobWorkspacePage = React.lazy(() => import('../pages/BobWorkspacePage'));
 const BobDocumentStudioPage = React.lazy(() => import('../pages/BobDocumentStudioPage'));
 const ReportsHubPage = React.lazy(() => import('../pages/ReportsHubPage'));
+const CostOfServicePage = React.lazy(() => import('../pages/CostOfServicePage'));
 const FileSystemPage = React.lazy(() => import('../pages/FileSystemPage'));
 const PatrolOversightPage = React.lazy(() => import('../pages/PatrolOversightPage'));
 const DispatchConsolePage = React.lazy(() => import('../pages/DispatchConsolePage'));
@@ -130,7 +132,7 @@ const CCTVTriagePage = React.lazy(() => import('../pages/CCTVTriagePage'));
 const ObservationSearchPage = React.lazy(() => import('../pages/ObservationSearchPage'));
 
 type AdminPage =
-  | 'hub' | 'bob' | 'document-studio' | 'files' | 'relationships' | 'onboarding' | 'handoffs' | 'crm' | 'client-setup' | 'finance-bureau' | 'finance-connections' | 'finance-money' | 'finance-costing' | 'finance-pricing' | 'rate-rules' | 'roster' | 'people-hr' | 'roster-targets' | 'field-ops' | 'investigations' | 'reports' | 'sites' | 'site-360' | 'zones'
+  | 'hub' | 'bob' | 'document-studio' | 'files' | 'relationships' | 'onboarding' | 'handoffs' | 'crm' | 'client-setup' | 'finance-bureau' | 'finance-connections' | 'finance-money' | 'finance-costing' | 'finance-pricing' | 'rate-rules' | 'roster' | 'people-hr' | 'roster-targets' | 'field-ops' | 'investigations' | 'reports' | 'cost-of-service' | 'sites' | 'site-360' | 'zones'
   | 'locations' | 'users' | 'access-control' | 'org-setup' | 'module-subscriptions'
   | 'approvals' | 'testing' | 'test-data' | 'platform' | 'platform-catalog'
   | 'platform-subscriptions' | 'platform-subscribers' | 'builder' | 'workshop';
@@ -249,6 +251,7 @@ const NAVIGATION_MAP: Record<string, WorkspaceItem[]> = {
   ],
   'Reports & Analytics': [
     { id: 'reports', label: 'Reports', icon: FileBarChart },
+    { id: 'cost-of-service', label: 'Cost of service', icon: Gauge },
   ],
   'Intelligence & Records': [
     { id: 'files', label: 'File System', icon: FolderOpen },
@@ -664,6 +667,8 @@ const AdminShell: React.FC = () => {
         return <ClientSetupPage onNavigate={(destination, context) => navigateToPage(destination as AdminPage, context)} />;
       case 'reports':
         return <ReportsHubPage />;
+      case 'cost-of-service':
+        return <CostOfServicePage />;
       case 'investigations':
         return <InvestigationPage />;
       case 'field-ops':
