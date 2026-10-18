@@ -665,7 +665,7 @@ async function openBuilderPullRequest(jobId, bodyFor = null, { draft = true } = 
   return { ...pullRequest, existing: false };
 }
 
-async function runBuilderJobBounded(jobId, body = {}) {
+async function runBuilderJobBounded(jobId, body = {}, { singleStep = false } = {}) {
   clearStaleBuilderRun(jobId);
   if (runningBuilderJobs.has(jobId)) return { skipped: true, already_running: true, started_at: runningBuilderJobs.get(jobId) };
   const startedAt = new Date().toISOString();
@@ -673,7 +673,8 @@ async function runBuilderJobBounded(jobId, body = {}) {
   const execution = (async () => {
     const source = await boundedPreflight(resolveBuilderSourceDir(jobId), 'Builder source resolution');
     const context = await boundedPreflight(builderRuntimeContext(body, source), 'Builder runtime context');
-    return runBuilderUntilPause({ supabase: builderSupabase, gateway: builderGateway, jobId, context, maxActions: body.maxActions });
+    const input = { supabase: builderSupabase, gateway: builderGateway, jobId, context, maxActions: body.maxActions };
+    return singleStep ? advanceBuilderJob(input) : runBuilderUntilPause(input);
   })()
     .then((outcome) => { record('builder', 'builder.run.paused', jobId, { reason: outcome.reason, detail: outcome.detail ?? null, actions: outcome.history?.length ?? 0 }); return outcome; })
     .catch((error) => { record('builder', 'builder.run.failed', jobId, { error: String(error instanceof Error ? error.message : error).slice(0, 300) }); return { paused: true, reason: 'error', detail: String(error instanceof Error ? error.message : error).slice(0, 300) }; })
@@ -1486,30 +1487,14 @@ async function route(req, res, body) {
       return json(res, 404, { error: 'Builder job not found' });
     }
   }
-  if (builderMatch && req.method === 'POST' && builderMatch[2] === 'advance') {
-    if (!builderSupabase || !modelGatewayToken || !builderWorkerImage) {
-      return json(res, 503, { error: 'Builder runtime is unavailable' });
-    }
-    try {
-      const outcome = await advanceBuilderJob({
-        supabase: builderSupabase,
-        gateway: builderGateway,
-        jobId: builderMatch[1],
-        context: await builderRuntimeContext(body, await resolveBuilderSourceDir(builderMatch[1]))
-      });
-      return json(res, outcome.advanced ? 202 : 200, outcome);
-    } catch {
-      return json(res, 409, { error: 'Builder job could not advance' });
-    }
-  }
-  if (builderMatch && req.method === 'POST' && builderMatch[2] === 'run') {
+  if (builderMatch && req.method === 'POST' && ['advance', 'run'].includes(builderMatch[2])) {
     if (!builderSupabase || !modelGatewayToken || !builderWorkerImage) {
       return json(res, 503, { error: 'Builder runtime is unavailable' });
     }
     const jobId = builderMatch[1];
     let started;
     try {
-      started = await runBuilderJobBounded(jobId, body);
+      started = await runBuilderJobBounded(jobId, body, { singleStep: builderMatch[2] === 'advance' });
     } catch (error) {
       return json(res, 409, { error: 'Builder runtime could not continue', detail: String(error instanceof Error ? error.message : error).slice(0, 200) });
     }

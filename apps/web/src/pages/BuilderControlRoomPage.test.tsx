@@ -9,6 +9,31 @@ vi.mock('../components/BobPanel', () => ({ BobPanel: () => null }));
 vi.mock('../components/ChangeRequestQueue', () => ({ ChangeRequestQueue: () => null }));
 afterEach(() => { cleanup(); vi.resetAllMocks(); });
 
+it.each([
+  ['Run next step', 'advance', false],
+  ['Run to gate', 'run', false],
+  ['Run next step', 'advance', true],
+])('reports background acceptance truthfully for %s (already running: %s)', async (button, action, alreadyRunning) => {
+  const job = {
+    id: 'active-job', project_id: 'project', title: 'Active repair', status: 'implementation_pending',
+    target_sha: 'a'.repeat(40), frontend_required: true, backend_required: false,
+    current_step_name: 'ui_design', code_review_status: 'pending',
+    created_at: '2026-10-18T01:00:00Z', updated_at: '2026-10-18T01:00:00Z',
+  };
+  invoke.mockImplementation(async (_name, { body }) => {
+    if (body.action === 'list') return { data: { jobs: [job], projects: [] }, error: null };
+    if (body.action === 'context_snapshot') return { data: {}, error: null };
+    if (body.action === 'get') return { data: { job, steps: [], artifacts: [], workerRuns: [], approvals: [] }, error: null };
+    if (body.action === action) return { data: { accepted: true, already_running: alreadyRunning }, error: null };
+    throw new Error(`Unexpected action: ${body.action}`);
+  });
+  render(<BuilderControlRoomPage />);
+  fireEvent.click(await screen.findByRole('button', { name: button }));
+  await screen.findByText(alreadyRunning ? /No duplicate run was started/ : /accepted. Bob will work in the background/);
+  expect(screen.queryByText(/^Builder (run|step) completed\.$/)).toBeNull();
+  expect(invoke.mock.calls.some(([, { body }]) => body.action === action && body.job_id === job.id)).toBe(true);
+});
+
 it('treats a cancelled job with stale failures and pending approvals as history, not actionable work', async () => {
   const job = {
     id: 'cancelled-job', project_id: 'project', title: 'Cancelled repair',
