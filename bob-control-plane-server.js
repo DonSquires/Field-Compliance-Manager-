@@ -1065,12 +1065,13 @@ async function retireOldBuilderWorkspaces() {
         pendingApproval: Boolean(approvals.data?.length),
       };
       const preview = retireTerminalWorkspace(input);
+      let reason = preview.reason;
       if (preview.eligible) {
         record('autopilot', 'builder.workspace.retention_started', candidate.id, { retention_days: 7 });
-        retireTerminalWorkspace({ ...input, dryRun: false });
-        record('autopilot', 'builder.workspace.retired', candidate.id, { retention_days: 7, branches_and_artifacts_preserved: true });
+        const outcome = retireTerminalWorkspace({ ...input, dryRun: false });
+        reason = outcome.reason;
+        if (outcome.removed) record('autopilot', 'builder.workspace.retired', candidate.id, { retention_days: 7, branches_and_artifacts_preserved: true });
       }
-      const reason = preview.eligible ? 'retired' : preview.reason;
       counts[reason] = (counts[reason] || 0) + 1;
     }
     if (!jobs || jobs.length < 100) break;
