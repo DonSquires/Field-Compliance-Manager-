@@ -23,8 +23,10 @@ const { createBranchWorkspace, redactGitError } = require('./builder-branch-work
 const { isProtectedPath, laneAllows, protectedReason, isMigrationPath, normalizeRepoPath } = require('./builder-path-policy');
 const { buildModelRunRequest, callModelGateway, persistModelArtifact, fetchModelHealth, selectProviders, providerRequest } = require('./supabase/functions/_shared/builder-model-adapter');
 const { collectRepositoryContext, fitRepositoryContext } = require('./supabase/functions/_shared/builder-repository-context');
+const { engineerCheckpoint } = require('./builder-engineer-checkpoint');
+const { validatePatchText } = require('./frontend-worker');
 
-const PROMPT_VERSION = 'agentic-engineer-v5';
+const PROMPT_VERSION = 'agentic-engineer-v6';
 // Consecutive refused identical calls (with nothing edited) before the author escalates or stops early.
 const STUCK_REFUSALS = 4;
 const DEFAULT_LIMITS = Object.freeze({
@@ -202,6 +204,7 @@ function systemPrompt({ lane, limits }) {
     '5. FINISH with a truthful summary. Truth Protocol: state what you verified, what you inferred, and what you could not check. Never claim a merge, deployment, migration application, or live write — none happen here; a human reviews the draft PR.',
     '6. PRECEDENT PARITY: when the task says "like X" or "the way X does", X is the accepted pattern. First run search {query: "X"} over the WHOLE repo: every file that wires X (tool catalogue, allowlists/gates, the pending-marker loader, the planner prompt under services/fcm-api/src/bob, tests) is a seam the new thing must be wired into as well — wire each one or list it under follow_ups by name. Copy X\'s authorization, confirmation and persistence behaviour exactly; a risk X already carries is not a reason to stop — build to parity and record the residual concern under follow_ups. You are the only engineer on this job: nobody picks up a task you decline. Decline (empty change set, no_change_reason) ONLY for a protected path, destructive SQL, secret material, or evidence that the change would break something. A design worry is a follow_up, not a refusal.',
     '7. DATA PATHS ARE CHECKED: a caller-scoped client (callerClient/userClient) reading a table whose row-level security admits only the service role returns no rows for a real user — the verifier fails such a patch. Before reading a table with the caller\'s client, search supabase/schema.sql for `CREATE POLICY ... ON "public"."<table>"`; if only service_role can see it, go through the path that verifies the caller and then reads with the service role (for Builder tables: callFn(\'bob-builder-control-room\', authHeader, { action: \'list\' }) as create_builder_job does).',
+    '8. CONTINUATION: completed tool steps and edits are checkpointed outside your disposable worktree. When resumed, inspect git_diff and the recorded context; do not restart the investigation or undo prior work without evidence. A repair starts from its exact failed patch. Checkpointed work is not verified work: re-run checks before finish. Runner/resource failures are not instructions to rewrite product code; unmatched baseline failures remain unresolved, never proof that the patch is innocent.',
     '',
     `LANE: ${lane}. ${lane === 'frontend' ? 'You may only change files under apps/web/. Web build/tests are run afterwards by the independent worker; keep changes type-safe and covered by the existing vitest suite where possible.' : 'You may change anything outside apps/web/ that is not protected (edge functions, services, scripts, root modules, tests, docs, ADDITIVE migrations).'}`,
     'PROTECTED (refused, human-only): CI workflows, deploy/, Dockerfiles and compose files, dependency manifests and lockfiles, .env and secret material, supabase/schema.sql (regenerated), auth/identity code (AuthContext, lib/supabase.ts, routing, SafetyGate, access components, _shared/auth.ts). Migrations must be NEW additive files; no destructive SQL. No binary files. Never print, store, or move secrets.',
@@ -977,6 +980,12 @@ async function runAgenticEngineer({
   if (!step?.id) throw new Error('implementation step is required');
   if (!['frontend', 'backend'].includes(lane)) throw new Error('lane must be frontend or backend');
   const started = now();
+  const inputKey = crypto.createHash('sha256').update(JSON.stringify({
+    task: job.task_description, seed: seedPatch?.artifact_id ?? null, inputArtifactIds
+  })).digest('hex');
+  const checkpoint = engineerCheckpoint({ workspaceRoot, job, step, lane, inputKey });
+  const saved = checkpoint.load();
+  if (saved?.proposal_result) return { ...saved.proposal_result, resumed: true };
   // A job bound to a workspace (e.g. a rerun child that inherits its parent's branch) works in that
   // worktree, not a fresh one named after its own id. The attempt resets to the pin just below anyway.
   const boundBranch = /^bob\/job-[a-z0-9]+$/.test(String(job.workspace_branch || '')) ? job.workspace_branch : undefined;
@@ -986,23 +995,24 @@ async function runAgenticEngineer({
   git(workspacePath, ['reset', '-q', '--hard', job.target_sha]);
   git(workspacePath, ['clean', '-fdq']);
 
-  const transcript = [];
+  const transcript = saved?.transcript || [];
   const log = (entry) => transcript.push({ at: new Date().toISOString(), ...entry });
   const tools = createTools({ workspacePath, repoRoot, lane, supabase, limits, log });
   // A revision after a blocked review starts from the previous attempt's verified change, applied
   // here so the model edits it instead of rebuilding from main (round 2 of job f233ec31 did the latter).
   let seeded = null;
-  if (seedPatch?.text) {
+  if (saved ? saved.patch : seedPatch?.text) {
     const seedFile = path.join(os.tmpdir(), `bob-seed-${job.id.slice(0, 8)}-${process.pid}.patch`);
     try {
-      fs.writeFileSync(seedFile, seedPatch.text.endsWith('\n') ? seedPatch.text : `${seedPatch.text}\n`);
+      const text = saved ? saved.patch : seedPatch.text;
+      const files = validatePatchText(text, { lane: lane === 'frontend' ? 'frontend' : 'verified' });
+      if (files.some(file => !laneAllows(lane, file))) throw new Error('Continuation patch is outside the implementation lane');
+      fs.writeFileSync(seedFile, text.endsWith('\n') ? text : `${text}\n`, { mode: 0o600 });
       git(workspacePath, ['apply', '--whitespace=nowarn', seedFile]);
-      seeded = { from_job: seedPatch.from_job ?? null, files: tools.__changedFiles() };
+      seeded = { from_job: seedPatch?.from_job ?? job.id, files: tools.__changedFiles(), checkpoint: Boolean(saved) };
       log({ turn: 0, seed_applied: seeded.files });
     } catch (error) {
-      seeded = { from_job: seedPatch.from_job ?? null, files: [], failed: String(error && error.message).slice(0, 300) };
-      log({ turn: 0, seed_failed: seeded.failed });
-      try { git(workspacePath, ['reset', '-q', '--hard', job.target_sha]); git(workspacePath, ['clean', '-fdq']); } catch { /* fresh anyway */ }
+      throw new Error(`Engineer continuation could not restore its patch: ${redactGitError(error.message)}`);
     } finally {
       try { fs.rmSync(seedFile, { force: true }); } catch { /* gone */ }
     }
@@ -1021,6 +1031,13 @@ async function runAgenticEngineer({
     { role: 'system', content: systemPrompt({ lane, limits }) },
     { role: 'user', content: opening.packet },
   ];
+  if (saved?.messages) {
+    messages.push(...saved.messages.slice(2), { role: 'user', content: JSON.stringify({
+      continuation: 'Resumed from a durable checkpoint. Your edits are restored; inspect git_diff and continue, not start over. Re-run checks before claiming success.',
+      completed_turns: saved.completed_turns, reading_map: saved.reading_map,
+    }) });
+    log({ checkpoint_resumed: true, completed_turns: saved.completed_turns });
+  }
   const builderMode = lane === 'frontend' ? 'frontend_engineer' : 'backend_engineer';
   const baseRequest = buildModelRunRequest({
     organizationId: job.organization_id,
@@ -1045,6 +1062,20 @@ async function runAgenticEngineer({
   let outcome = null;
   let turns = 0;
   let lessons = [];
+  const saveProgress = (proposalResult = null) => {
+    const untracked = git(workspacePath, ['ls-files', '--others', '--exclude-standard', '-z']).split('\0').filter(Boolean);
+    if (untracked.length) git(workspacePath, ['add', '-N', '--', ...untracked]);
+    const patch = execFileSync('git', ['diff', 'HEAD', '--no-color', '--binary'], {
+      cwd: workspacePath, encoding: 'utf8', stdio: ['ignore', 'pipe', 'pipe'], maxBuffer: 64 * 1024 * 1024
+    });
+    if (Buffer.byteLength(patch) > limits.maxPatchBytes) throw new Error('Checkpoint patch exceeds size limit');
+    checkpoint.save({
+      patch, messages: compactMessages(messages, { maxChars: 160000 }),
+      transcript: transcript.slice(-80).map(entry => compactValue(entry, 2000)), reading_map: readingMap(transcript),
+      completed_turns: (saved?.completed_turns || 0) + turns,
+      proposal_result: proposalResult,
+    });
+  };
 
   const health = providerHealth || await fetchModelHealth(gateway || {});
   const candidates = selectProviders(baseRequest, { health, startAfter: startAfterProvider });
@@ -1085,6 +1116,7 @@ async function runAgenticEngineer({
   let compaction = {};
 
   while (now() - started < limits.wallBudgetMs) {
+    saveProgress();
     if (turns >= turnLimit) {
       if (!escalate(`turn allocation of ${turnLimit - providerStartedTurn} used${tools.__changedFiles().length ? ' with an unfinished change' : ''}`)) break;
       messages.push({ role: 'user', content: JSON.stringify({
@@ -1225,16 +1257,17 @@ async function runAgenticEngineer({
       : remaining === Math.floor(allocation / 2)
         ? `BUDGET: half your turns are used (${remaining} left). ${edited ? 'Finish the slice you started, run the test, then finish.' : 'If you have not started editing, start now.'}`
         : remaining > 0 && remaining <= 6
-          ? `BUDGET: ${remaining} turn${remaining === 1 ? '' : 's'} left. Run your test and call finish before they run out; an unfinished worktree is discarded.`
+          ? `BUDGET: ${remaining} turn${remaining === 1 ? '' : 's'} left. Run your test and call finish; unfinished work is checkpointed, not verified or released.`
           : null;
     messages.push({ role: 'user', content: JSON.stringify(budgetNote ? { tool_result: result, budget: budgetNote } : { tool_result: result }) });
+    saveProgress();
   }
 
   // Grace turn: edits exist but the budget ran out mid-flight. One more call, finish only.
   if (!outcome && turns >= turnLimit && tools.__changedFiles().length) {
     const base = activeRequest();
     const isOpenAI = candidates[active].provider === 'openai';
-    messages.push({ role: 'user', content: JSON.stringify({ budget: 'FINAL TURN: the turn budget is used up. Reply with finish now (summary, tests actually run, rollback_notes; tests_not_run_reason if none ran) or this attempt is discarded.' }) });
+    messages.push({ role: 'user', content: JSON.stringify({ budget: 'FINAL TURN: the turn budget is used up. Reply with finish now (summary, tests actually run, rollback_notes; tests_not_run_reason if none ran). Otherwise your unfinished work remains checkpointed, not verified or released.' }) });
     const request = { ...base, idempotency_key: `${base.idempotency_key}::turn-final`, request: { ...base.request, messages: compactMessages(messages), ...(isOpenAI ? { reasoning_effort: 'low' } : {}), max_output_tokens: 4000 } };
     const response = await callModel({ ...gateway, modelRequest: request, timeoutMs: limits.turnTimeoutMs });
     const call = response.ok ? parseToolCall(String(response.data?.content ?? '')) : null;
@@ -1277,6 +1310,11 @@ async function runAgenticEngineer({
     if (supabase && !recorded.artifact) outcome = { ok: false, error: recorded.error || 'proposal artifact could not be recorded' };
     patchArtifact = recorded.artifact;
   }
+  const proposalResult = outcome.ok && patchArtifact ? {
+    ok: true, patch_artifact: patchArtifact, proposal: outcome.proposal,
+    routing: { provider: candidates[active].provider, model: authorModel }, turns: 0, usage: {},
+  } : null;
+  saveProgress(proposalResult);
   // Leave the worktree clean at the pinned commit for the handoff's own apply.
   try { git(workspacePath, ['reset', '-q', '--hard', job.target_sha]); git(workspacePath, ['clean', '-fdq']); } catch (error) { if (logger?.warn) logger.warn(`[agentic-engineer] worktree reset failed: ${error.message}`); }
 

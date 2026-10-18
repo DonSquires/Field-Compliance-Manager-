@@ -297,7 +297,20 @@ test('backend implementation resumes the provider chain past an in-house author 
     : { success: true, artifacts: [{ id: 'verified' }] }) };
   try {
     const fresh = require('../builder-runtime-coordinator');
-    const result = await fresh.runBackendImplementation({ supabase: {}, gateway: {}, job: { id: 'j' }, step: { id: 's' }, context: { workspaceRoot: '/ws', gitSourceDir: '/src', repoRoot: '/repo' } });
+    const patch = Buffer.from('diff --git a/lib/a.js b/lib/a.js\n--- a/lib/a.js\n+++ b/lib/a.js\n@@ -1 +1 @@\n-a\n+b\n');
+    const supabase = {
+      from() {
+        let id;
+        const query = { select() { return this; }, eq(key, value) { if (key === 'id') id = value; return this; }, single: async () => ({ data: {
+          id, job_id: 'j', artifact_type: id === 'fail-1' ? 'build_logs' : 'code_implementation', status: 'final',
+          storage_location: `supabase_storage://builder-artifacts/org/j/${id}`,
+          checksum: require('node:crypto').createHash('sha256').update(id === 'fail-1' ? Buffer.from('{}') : patch).digest('hex')
+        } }) };
+        return query;
+      },
+      storage: { from: () => ({ download: async file => ({ data: { arrayBuffer: async () => file.endsWith('fail-1') ? Buffer.from('{}') : patch } }) }) },
+    };
+    const result = await fresh.runBackendImplementation({ supabase, gateway: {}, job: { id: 'j' }, step: { id: 's' }, context: { workspaceRoot: '/ws', gitSourceDir: '/src', repoRoot: '/repo' } });
     assert.equal(result.success, true);
     assert.equal(result.attempts, 2);
     assert.equal(result.routing.provider, 'openai');
@@ -414,6 +427,11 @@ test('a review re-open\'s seed patch is loaded from the parent job\'s verified a
     const generate = fresh.agenticGenerator('backend', { workspaceRoot: '/ws', gitSourceDir: '/src', repoRoot: '/repo' }, { loadSeedPatch: async () => seed });
     await generate({ supabase: {}, gateway: {}, job: { id: 'j2', description: 'x' }, step: { id: 's' } });
     assert.equal(inputs[0].seedPatch.text, patch);
+    seen.length = 0;
+    await generate({ supabase, gateway: {}, job: { id: parent }, step: { id: 's' }, failedPatchArtifact: { id: artifactId } });
+    assert.equal(inputs[1].seedPatch.text, patch, 'ordinary repair restores the failed patch, not just a review re-open');
+    assert.equal(inputs[1].seedPatch.artifact_id, artifactId);
+    assert.deepEqual(seen, [['id', artifactId], ['job_id', parent]]);
   } finally {
     require.cache[engineerPath].exports = originalEngineer;
     delete require.cache[coordinatorPath];
@@ -473,13 +491,23 @@ test('expired verifier leases are recovered before every advance, and the recove
   assert.equal(planBuilderAction(snapshot).type, 'run_frontend', 'a timed-out run no longer blocks as waiting_for_worker');
   let received = null;
   const outcome = await advanceBuilderJob({ supabase, gateway: {}, jobId: 'job-e', context: {}, loadSnapshot: async () => snapshot, handlers: { frontend: async (input) => { received = input; return { success: true }; } } });
-  assert.deepEqual(rpcs, ['builder_recover_expired_worker_runs']);
+  assert.deepEqual(rpcs, ['builder_recover_expired_worker_runs', 'builder_account_verifier_recoveries']);
   assert.equal(outcome.advanced, true);
   assert.equal(received.resumePatchArtifact?.id, 'patch-7606');
   // A step that failed for any other reason authors afresh.
   const otherSnapshot = { ...snapshot, steps: snapshot.steps.map((s) => s === step ? { ...step, error: 'Frontend worker verification failed' } : s) };
   await advanceBuilderJob({ supabase, gateway: {}, jobId: 'job-e', context: {}, loadSnapshot: async () => otherSnapshot, handlers: { frontend: async (input) => { received = input; return { success: true }; } } });
   assert.equal(received.resumePatchArtifact, undefined);
+});
+
+test('ordinary failed implementation resumes from its exact patch and worker evidence across scheduler ticks', () => {
+  const { failedImplementationEvidence } = require('../builder-runtime-coordinator');
+  const step = { id: 'step', status: 'failed', retryable: true, error: 'Frontend worker verification failed' };
+  const patch = { id: 'patch', artifact_type: 'code_implementation', status: 'final' };
+  const failure = { id: 'logs', artifact_type: 'build_logs', status: 'final' };
+  const state = { workerRuns: [{ step_id: 'step', status: 'failed', patch_artifact_id: 'patch', output_artifact_ids: ['logs'] }], artifacts: [patch, failure] };
+  assert.deepEqual(failedImplementationEvidence(state, step), { failedPatchArtifact: patch, failureArtifact: failure });
+  assert.throws(() => failedImplementationEvidence({ ...state, artifacts: [patch] }, step), /missing its patch or verification evidence/);
 });
 
 test('an author with nothing to change in its lane skips the step when the other lane delivered the patch; otherwise it parks', async () => {

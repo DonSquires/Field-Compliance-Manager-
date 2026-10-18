@@ -44,7 +44,7 @@ test('frontend verification uses a bounded Vitest worker pool', () => {
 
 test('frontend verification runs Playwright serially after build and unit checks: CI smoke set plus specs targeting the changed files', () => {
   const e2eCommand = frontendVerificationCommands().at(-1);
-  assert.deepEqual(e2eCommand, ['run', 'test:e2e', '--prefix', 'apps/web', '--', ...E2E_SMOKE_SPECS, '--project=desktop-chromium', '--workers=1', '--reporter=line', '--ignore-snapshots']);
+  assert.deepEqual(e2eCommand, ['run', 'test:e2e', '--prefix', 'apps/web', '--', ...E2E_SMOKE_SPECS, '--project=desktop-chromium', '--workers=1', '--reporter=line,json', '--ignore-snapshots']);
   // Targeting: a spec whose name or text refers to a changed page/component joins the run (job ecfb4dc4:
   // the full 75-spec suite could not finish inside the lease).
   const root = fs.mkdtempSync(path.join(os.tmpdir(), 'e2e-target-'));
@@ -398,10 +398,34 @@ test('frontend worker still parks a red build on the pinned commit as not the pa
     assert.equal(result.succeeded, false);
     assert.equal(result.baseline_failure, true);
     const evidence = fixture.evidence();
-    assert.match(evidence.baseline_reason, /^npm run build --prefix apps\/web also fails on the pinned commit without this patch .*; not caused by this change$/);
+    assert.match(evidence.baseline_reason, /^npm run build --prefix apps\/web has matching failures/);
     const { classifyVerificationFailure } = require('../builder-verification-outcome');
     assert.deepEqual(classifyVerificationFailure(evidence), { infrastructure: false, baseline: true, reason: evidence.baseline_reason });
   } finally {
     fixture.cleanup();
+  }
+});
+
+test('worker compares structured browser evidence: identical failures block as baseline, different failures stay unresolved', () => {
+  for (const different of [false, true]) {
+    const fixture = redBaselineFixture([
+      "if (process.argv.includes('test:e2e')) {",
+      `const title = ${different ? "patched ? 'new failure' : 'other baseline failure'" : "'same failure'"};`,
+      "fs.writeFileSync(process.env.PLAYWRIGHT_JSON_OUTPUT_NAME, JSON.stringify({ errors: [], suites: [{ title: 'flow', specs: [{ file: 'e2e/example.spec.ts', title, tests: [{ projectName: 'desktop-chromium', status: 'unexpected', results: [{ errors: [{ message: 'expected visible; received hidden' }] }] }] }] }] }));",
+      "console.error('one browser assertion failed'); process.exit(1); }"
+    ]);
+    try {
+      const result = fixture.runPatch();
+      assert.equal(result.succeeded, false);
+      assert.equal(result.baseline_failure, !different);
+      const evidence = fixture.evidence();
+      assert.equal(evidence.commands.at(-1).test_failures.complete, true);
+      const classification = require('../builder-verification-outcome').classifyVerificationFailure(evidence);
+      assert.equal(classification.baseline, !different);
+      if (different) assert.equal(classification.unresolved, true);
+      assert.equal(fs.existsSync(path.join(fixture.root, 'work/.bob-playwright-result.json')), false);
+    } finally {
+      fixture.cleanup();
+    }
   }
 });

@@ -80,7 +80,7 @@ test('frontend orchestration never exceeds the worker attempt ceiling', async ()
   assert.equal(result.success, false);
   assert.equal(result.attempts, MAX_FRONTEND_ATTEMPTS);
   assert.equal(verifications, 3);
-  assert.equal(repairs, 3);
+  assert.equal(repairs, 2, 'do not author a final patch that will never be verified');
   assert.equal(result.phase, 'repair_limit');
 });
 
@@ -125,7 +125,7 @@ test('a verifier infrastructure failure re-runs the same patch once instead of a
   assert.equal(result.success, true);
   assert.deepEqual(calls, ['generate', 'verify:patch-1', 'verify:patch-1']);
 
-  // A second infrastructure failure in a row is treated as a real failure (repair path), not an endless loop.
+  // Repeated infrastructure failure parks the saved patch; it never becomes a code repair.
   const calls2 = [];
   await runFrontendImplementation({
     ...base,
@@ -134,7 +134,7 @@ test('a verifier infrastructure failure re-runs the same patch once instead of a
     reloadStep: async () => ({ ...base.step, status: 'failed', retryable: true }),
     repair: async () => { calls2.push('repair'); return { ok: true, patch_artifact: { id: 'patch-2' } }; }
   });
-  assert.deepEqual(calls2.slice(0, 3), ['verify:patch-1', 'verify:patch-1', 'repair']);
+  assert.deepEqual(calls2, ['verify:patch-1', 'verify:patch-1']);
 });
 
 test('a resumed step verifies the patch the lost verifier was checking instead of authoring again', async () => {

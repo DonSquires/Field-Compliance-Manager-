@@ -605,7 +605,8 @@ test('a job waiting on a repair is re-opened on current main once the repair has
   assert.equal(recorded[2], 'done');
   assert.equal(recorded[3].resumed_as_job_id, 'job-w2');
   assert.equal(recorded[3].repair_outcome, 'landed');
-  assert.match(recorded[3].text, /^Resumed: main is fixed, so Bob has started "Add Cancel control" again/);
+  assert.match(recorded[3].text, /^Resumed: main has changed, so Bob has started "Add Cancel control" again/);
+  assert.match(recorded[3].text, /does not yet prove the earlier failure is fixed/);
 
   // 3) The repair itself failed: say so plainly, once.
   const failed = actionsRecorder();

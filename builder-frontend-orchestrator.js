@@ -76,13 +76,22 @@ async function runFrontendImplementation({
     }
     // The verifier failed, not the patch (OOM, killed, timed out): run the same patch again once
     // rather than sending the author a failure it did not cause.
-    if (verification.infrastructure_failure && infrastructureRetries < 1) {
-      infrastructureRetries += 1;
-      continue;
+    if (verification.infrastructure_failure) {
+      if (infrastructureRetries < 1) {
+        infrastructureRetries += 1;
+        continue;
+      }
+      await recordGenerationFailure({ supabase, job, step: currentStep }, {
+        no_change: true, error: `Verifier recovery exhausted; candidate patch ${patchArtifact.id} is preserved. ${verification.infrastructure_reason || 'Infrastructure failed twice; repair the runner before resuming verification.'}`
+      }, 'infrastructure');
+      return { success: false, phase: 'infrastructure', attempts: attempt, patch_artifact: patchArtifact };
     }
     const failureArtifact = verification.failure_artifact || verification.artifacts?.[0];
     if (!failureArtifact?.id) {
       return { success: false, phase: 'evidence', attempts: attempt, error: 'verification failure artifact is missing' };
+    }
+    if (attempt >= MAX_FRONTEND_ATTEMPTS) {
+      return { success: false, phase: 'repair_limit', attempts: attempt, patch_artifact: patchArtifact };
     }
     generation = await repair({
       supabase,
@@ -97,9 +106,6 @@ async function runFrontendImplementation({
       requestedFiles,
       liveContext
     });
-    if (attempt >= MAX_FRONTEND_ATTEMPTS) {
-      return { success: false, phase: 'repair_limit', attempts: attempt, result: generation };
-    }
     if (!generation.ok || !generation.patch_artifact?.id) {
       await recordGenerationFailure({ supabase, job, step: currentStep }, generation, 'repair');
       return { success: false, phase: 'repair', attempts: attempt, result: generation };

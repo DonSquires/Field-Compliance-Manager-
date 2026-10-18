@@ -9,6 +9,7 @@ WORKDIR /opt/bob
 # test/worker-image-manifest.test.js fails when this list falls behind.
 COPY assessment-manifest.js /opt/bob/assessment-manifest.js
 COPY builder-path-policy.js /opt/bob/builder-path-policy.js
+COPY builder-verification-outcome.js /opt/bob/builder-verification-outcome.js
 COPY builder-data-path-gate.js /opt/bob/builder-data-path-gate.js
 COPY builder-ts-delta-gate.js /opt/bob/builder-ts-delta-gate.js
 COPY frontend-worker.js /opt/bob/frontend-worker.js

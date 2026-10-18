@@ -11,6 +11,23 @@
 
 ## 1. What Bob is
 
+**Owner-approved Builder continuation, 2026-10-18.** A bounded execution may
+pause or lose its runner without losing the task's acknowledged engineering
+progress. Save private, integrity-checked checkpoints bound to organisation,
+job, step, lane, immutable commit and input artifacts. Restore the saved diff
+and tool context before another model call; a repair starts from its exact
+failed patch, not a blank checkout. A checkpoint is not verification or release
+authority. Never silently fall back to main when restoration fails.
+Infrastructure/evidence recovery is counted separately from engineering
+revisions, with append-only receipts. Repeated recovery without usable evidence
+pauses with work preserved. The existing six engineering-attempt ceiling,
+per-execution budgets, spending authority, single GPU/verifier admission and
+human approval gates remain; this ruling does not authorise unlimited retries.
+Two unsuccessful checks alone do not prove a baseline defect: require matching
+failure evidence and keep unknown attribution explicit. Terminal checkpoints
+follow the existing seven-day, inactive/no-pending-approval workspace retention
+policy; active or paused work is not retired.
+
 - One of the platform's **two core engines** (geofence = where / what applies;
   Bob = think / do). Not a data-entry assistant bolted onto a CRM, and not a
   governed form that proposes one row and waits
