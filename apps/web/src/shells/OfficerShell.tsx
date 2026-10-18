@@ -55,6 +55,7 @@ import { useServiceRelationships } from '../context/ServiceRelationshipContext';
 import { BobPanel } from '../components/BobPanel';
 import { NotificationCenter, type NotificationRecord } from '../components/NotificationCenter';
 import { HelpInstructions } from '../components/HelpInstructions';
+import { ChangeRequestButton } from '../components/ChangeRequestButton';
 import { OfficerLocationAdvisory } from '../components/OfficerLocationAdvisory';
 import { OfficerSafetyBriefingBanner } from '../components/ShiftSafetyBriefing';
 import { PlaceContextBanner } from '../components/PlaceContextBanner';
@@ -511,6 +512,7 @@ const OfficerShell: React.FC = () => {
             <span>{welfareDisplay.dot}</span><small>{welfareLabel}</small>
           </button>
           <span className={`officer-connectivity-chip ${isOnline ? 'is-online' : 'is-offline'}`} role="status" title={isOnline ? 'Device is online' : 'Evidence is queued until connection returns'}>{isOnline ? 'Online' : 'Offline'}</span>
+          <ChangeRequestButton compact workspaceLabel="Officer operations" />
           <NotificationCenter onNavigate={navigateFromNotification} />
           <HelpInstructions context={activeModule ?? officerState} role={profile?.role} />
           <button type="button" className="officer-shell-icon" onClick={() => setBobOpen(true)} title="Open Bob command center" aria-label="Open Bob command center" aria-expanded={bobOpen}>

@@ -1,6 +1,7 @@
 import React, { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { AlertTriangle, Bot, CheckCircle2, ChevronRight, CircleStop, Clock3, Database, FileCode2, FolderTree, MessageSquareText, Play, Plus, RefreshCw, Search, ShieldCheck, TerminalSquare, Workflow, X } from 'lucide-react';
 import { BobPanel } from '../components/BobPanel';
+import { ChangeRequestQueue } from '../components/ChangeRequestQueue';
 import { BuilderLiveActivity, isLiveJob, type LiveChangedFile, type LiveEvent, type LiveModelRun, type LivePollState } from '../components/BuilderLiveActivity';
 import { supabase } from '../lib/supabase';
 import './BuilderControlRoomPage.css';
@@ -185,7 +186,7 @@ const PROMPT_TEMPLATES = [
   },
 ];
 
-const BuilderControlRoomPage: React.FC = () => {
+const BuilderControlRoomPage: React.FC<{ onOpenBob?: (prompt: string) => void }> = ({ onOpenBob }) => {
   const [projects, setProjects] = useState<BuilderProject[]>([]);
   const [jobs, setJobs] = useState<BuilderJob[]>([]);
   const [selectedId, setSelectedId] = useState<string | null>(null);
@@ -629,6 +630,7 @@ const BuilderControlRoomPage: React.FC = () => {
         </div>
       </header>
 
+      <ChangeRequestQueue onOpenBob={onOpenBob} />
       <section className="builder-summary" aria-label="Builder summary">
         <div><Workflow size={18} /><span>Jobs</span><strong>{jobs.length}</strong></div>
         <div><Play size={18} /><span>Active</span><strong>{pendingJobs}</strong></div>

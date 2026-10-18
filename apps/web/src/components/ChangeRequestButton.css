@@ -1,0 +1,64 @@
+.change-request-trigger {
+  display: inline-flex; align-items: center; justify-content: center; gap: 6px;
+  min-height: 40px; padding: 8px 10px; border: 1px solid var(--border-color, #d5dfe5);
+  border-radius: 8px; background: transparent; color: inherit; font: inherit; font-size: 12px; cursor: pointer;
+}
+.change-request-trigger:hover { background: var(--bg-secondary, #edf2f5); }
+.change-request-trigger.is-compact { min-width: 40px; padding: 8px; }
+.change-request-dialog {
+  box-sizing: border-box; width: min(640px, calc(100vw - 24px)); max-height: calc(100dvh - 32px);
+  padding: 24px; border: 1px solid #cbd5df; border-radius: 14px;
+  background: #f8fafc; color: #203248; box-shadow: 0 20px 80px #08162544; overflow-y: auto;
+  font: 14px/1.5 system-ui, sans-serif;
+}
+.change-request-dialog::backdrop { background: #0c182b88; }
+.change-request-head { display: flex; align-items: flex-start; gap: 16px; }
+.change-request-head > div { min-width: 0; flex: 1; }
+.change-request-head span { color: #536a7b; font-size: 11px; letter-spacing: .08em; text-transform: uppercase; }
+.change-request-head h2 { font-size: 21px; margin: 4px 0 8px; color: #142c42; }
+.change-request-head p, .change-request-muted { color: #52677b; }
+.change-request-dialog button, .change-request-dialog select, .change-request-dialog textarea { font: inherit; }
+.change-request-dialog button {
+  min-height: 40px; padding: 8px 12px; border: 1px solid #c4d2df;
+  border-radius: 7px; color: #254058; background: #fff; cursor: pointer;
+}
+.change-request-dialog button:disabled { cursor: default; opacity: .55; }
+.change-request-dialog button.is-primary { background: #163f5c; color: #fff; border-color: #163f5c; }
+.change-request-dialog :focus-visible, .change-request-trigger:focus-visible, .change-request-queue :focus-visible { outline: 2px solid #147bac; outline-offset: 3px; }
+.change-request-form { display: grid; gap: 16px; margin-top: 20px; }
+.change-request-form label { display: grid; gap: 6px; font-weight: 600; }
+.change-request-form select, .change-request-form textarea {
+  box-sizing: border-box; width: 100%; min-height: 42px; border: 1px solid #b9c9d5;
+  padding: 9px 11px; border-radius: 7px; color: #203248; background: #fff;
+}
+.change-request-form textarea { resize: vertical; }
+.change-request-form small, .change-request-form em { font-size: 12px; color: #52677b; font-style: normal; font-weight: 400; }
+.change-request-context { padding: 12px; background: #edf2f6; border-radius: 8px; font-size: 12px; }
+.change-request-context summary { cursor: pointer; font-weight: 600; }
+.change-request-context summary svg { vertical-align: middle; margin-right: 5px; }
+.change-request-dialog dl > div { display: grid; grid-template-columns: 90px 1fr; gap: 10px; margin: 6px 0; }
+.change-request-dialog dt { color: #52677b; }
+.change-request-dialog dd { margin: 0; overflow-wrap: anywhere; }
+.change-request-actions { display: flex; justify-content: flex-end; gap: 8px; }
+.change-request-error { color: #a42235; }
+.change-request-sent { padding-top: 18px; }
+.change-request-sent > svg { color: #197054; }
+.change-request-recent { border-top: 1px solid #d5dfe5; margin-top: 22px; padding-top: 12px; }
+.change-request-recent h3 { font-size: 14px; }
+.change-request-recent ul { padding: 0; list-style: none; display: grid; gap: 12px; }
+.change-request-recent-text, .change-request-recent-meta { display: block; overflow-wrap: anywhere; }
+.change-request-recent-meta { font-size: 11px; color: #52677b; margin-top: 3px; }
+.change-request-queue { padding: 16px; margin-block: 16px; border: 1px solid #c5d2df; border-radius: 10px; background: #f4f7fa; color: #203248; }
+.change-request-queue summary { font-weight: 650; cursor: pointer; }
+.change-request-queue article { border-top: 1px solid #d5dfe5; padding-block: 14px; overflow-wrap: anywhere; }
+.change-request-queue h3 { margin: 0 0 4px; font-size: 14px; }
+.change-request-queue p, .change-request-queue small { margin: 6px 0; font-size: 12px; }
+.change-request-queue button { min-height: 40px; padding: 7px 10px; margin: 4px 6px 0 0; border: 1px solid #b7cad8; border-radius: 6px; background: #fff; color: #203248; cursor: pointer; }
+.change-request-queue button:disabled { opacity: .5; cursor: default; }
+.change-request-queue textarea { display: block; width: 100%; box-sizing: border-box; padding: 8px; border: 1px solid #b7cad8; border-radius: 6px; color: #203248; background: #fff; font: inherit; }
+@media (max-width: 600px) {
+  .change-request-dialog { padding: 16px; }
+  .change-request-actions { flex-wrap: wrap; }
+  .change-request-dialog dl > div { grid-template-columns: 1fr; gap: 0; }
+}
+@media (prefers-reduced-motion: reduce) { .change-request-dialog .spin { animation: none; } }

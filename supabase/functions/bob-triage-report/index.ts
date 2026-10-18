@@ -76,8 +76,8 @@ serve(async (req)=>{
     }, 401);
     const admin = createClient(SUPABASE_URL, SUPABASE_SERVICE_ROLE_KEY);
     // Resolve profile: role + organization_id
-    const { data: profile } = await admin.from('user_profiles').select('id, role, organization_id').eq('id', user.id).single();
-    if (!profile) return json({
+    const { data: profile } = await admin.from('user_profiles').select('id, role, organization_id, deactivated_at').eq('id', user.id).single();
+    if (!profile || profile.deactivated_at || !profile.organization_id) return json({
       error: 'Forbidden: unknown user'
     }, 403);
     if (!CAN_REPORT.has(String(profile.role))) {
@@ -112,7 +112,7 @@ serve(async (req)=>{
     // ── 3. Idempotency check FIRST (section 2e) — before any branching on
     // schema version, so a retry of ANY envelope (supported or not) returns the
     // existing packet instead of double-persisting or re-classifying. ──
-    const { data: existingPacket } = await admin.from('bob_friction_packets').select('id, triage, basis, confidence, route, stop_line_hit, truth_state, redaction, repair_risk, automation_status, builder_job_id').eq('organization_id', orgId).eq('client_packet_key', clientPacketKey).maybeSingle();
+    const { data: existingPacket } = await admin.from('bob_friction_packets').select('id, triage, basis, confidence, route, stop_line_hit, truth_state, redaction, repair_risk, automation_status, builder_job_id').eq('organization_id', orgId).eq('user_id', userId).eq('client_packet_key', clientPacketKey).maybeSingle();
     if (existingPacket) {
       // Return existing verdict, no re-classify, no duplicate persist
       return json({
@@ -133,6 +133,12 @@ serve(async (req)=>{
     // Runs for EVERY envelope, including unsupported versions — the least-trusted
     // input path must never store an unredacted / unbounded envelope.
     const { envelope, redaction } = validateAndRedactEnvelope(envelopeInput);
+    if (envelopeInput.during?.user_report) {
+      if (!envelope.during?.user_report || String(envelope.during.user_report.desired_behavior ?? '').trim().length < 10) {
+        return json({ error: 'Choose a request type and describe the desired behaviour in at least 10 characters.' }, 400);
+      }
+      envelope.before = { ...envelope.before, actor_role: profile.role };
+    }
     // ── 5. Schema version check (section 2c) — AFTER redaction + idempotency ──
     const schemaVersion = String(envelopeInput.schema_version ?? '');
     if (!SUPPORTED_SCHEMA_VERSIONS.has(schemaVersion)) {
