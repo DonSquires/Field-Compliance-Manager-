@@ -4,6 +4,7 @@ import { describe, expect, it } from 'vitest';
 
 const read = (path: string) => readFileSync(resolve(process.cwd(), path), 'utf8').replace(/\r\n/g, '\n');
 const migration = read('../../supabase/migrations/20261018085158_govern_pay_codes_training_and_skills.sql');
+const trainingTypeAlignment = read('../../supabase/migrations/20261018091038_align_staff_training_types.sql');
 const ratesPage = read('src/pages/RateRulesPage.tsx');
 const hrPage = read('src/pages/RosterHRPage.tsx');
 const financeWorkspace = read('src/components/FinanceLabourCostWorkspace.tsx');
@@ -46,6 +47,8 @@ describe('pay, training, and skills operational workflow', () => {
     expect(migration).toContain('Training expiry cannot precede completion');
     expect(migration).toContain("'staff_training_renewed'");
     expect(migration).toContain('REVOKE ALL ON FUNCTION public.record_staff_training');
+    expect(trainingTypeAlignment).toContain("'refresher'");
+    expect(trainingTypeAlignment).toContain("'assessment'");
     expect(hrPage).toContain("supabase.rpc('record_staff_training'");
     expect(hrPage).toContain('The previous training evidence remains unchanged for audit.');
   });
