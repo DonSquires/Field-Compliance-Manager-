@@ -6,6 +6,14 @@ function finite(value: unknown) {
   return typeof value === 'number' && Number.isFinite(value) && value >= 0 ? value : null;
 }
 
+export function modelReceiptKind(run: Record<string, unknown>) {
+  if (!String(run.prompt_version || '').startsWith('agentic-engineer-')) return 'call';
+  const key = String(run.idempotency_key || '');
+  if (key.endsWith('::transcript') || key.endsWith('::proposal')) return 'artifact';
+  if (key.endsWith('::agentic-session')) return 'session';
+  return 'call';
+}
+
 // Raw provider errors and model previews stay server-side; the browser receives a bounded category.
 export function modelFailure(run: Record<string, unknown>) {
   if (!['failed', 'timeout'].includes(String(run.status))) return null;

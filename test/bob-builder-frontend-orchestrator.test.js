@@ -14,6 +14,28 @@ const base = {
   workerImage: 'worker:test', runnerId: 'runner-1'
 };
 
+test('frontend verifier gets a 45-minute default and bounded explicit overrides', async () => {
+  const previous = process.env.BOB_BUILDER_FRONTEND_TIMEOUT_SECONDS;
+  try {
+    for (const [configured, expected] of [[undefined, 2700], ['120', 300], ['9999', 3600], ['2100', 2100]]) {
+      if (configured === undefined) delete process.env.BOB_BUILDER_FRONTEND_TIMEOUT_SECONDS;
+      else process.env.BOB_BUILDER_FRONTEND_TIMEOUT_SECONDS = configured;
+      const result = await runFrontendImplementation({
+        ...base,
+        generate: async () => ({ ok: true, patch_artifact: { id: 'patch' } }),
+        handoff: async input => {
+          assert.equal(input.timeoutSeconds, expected);
+          return { success: true, artifacts: [], job: { status: 'testing' } };
+        },
+      });
+      assert.equal(result.success, true);
+    }
+  } finally {
+    if (previous === undefined) delete process.env.BOB_BUILDER_FRONTEND_TIMEOUT_SECONDS;
+    else process.env.BOB_BUILDER_FRONTEND_TIMEOUT_SECONDS = previous;
+  }
+});
+
 test('frontend orchestration repairs a failed patch from durable evidence and succeeds', async () => {
   const calls = [];
   const result = await runFrontendImplementation({

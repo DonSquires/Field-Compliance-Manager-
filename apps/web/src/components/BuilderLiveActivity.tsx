@@ -48,6 +48,7 @@ export interface LiveModelRun {
   output_validated?: boolean | null;
   output_tokens_per_second?: number | null;
   load_ms?: number | null;
+  receipt_kind?: 'call' | 'session' | 'artifact';
 }
 
 export interface LiveWorkerRun {
@@ -241,10 +242,11 @@ export const BuilderLiveActivity: React.FC<Props> = ({ job, snapshot, now, pollS
   const steps = [...snapshot.steps].sort((left, right) => left.ordinal_position - right.ordinal_position);
   const modelRuns = snapshot.modelRuns ?? [];
   const events = (snapshot.events ?? []).slice(0, 8);
-  const tokenTotal = modelRuns.reduce((sum, run) => sum + (run.total_tokens ?? 0), 0);
-  const localRuns = modelRuns.filter(run => run.provider === 'ollama' || run.provider === 'gpu_workstation').length;
-  const cloudRuns = modelRuns.filter(run => run.provider === 'ollama_cloud').length;
-  const paidRuns = modelRuns.length - localRuns - cloudRuns;
+  const executionRuns = modelRuns.filter(run => run.receipt_kind !== 'artifact');
+  const tokenTotal = executionRuns.reduce((sum, run) => sum + (run.total_tokens ?? 0), 0);
+  const localRuns = executionRuns.filter(run => run.provider === 'ollama' || run.provider === 'gpu_workstation').length;
+  const cloudRuns = executionRuns.filter(run => run.provider === 'ollama_cloud').length;
+  const paidRuns = executionRuns.length - localRuns - cloudRuns;
   const latestModel = modelRuns[0] ?? null;
   const eventFiles = [...new Set((snapshot.events ?? []).flatMap(event => event.detail.failed_files))].slice(0, 12);
 
@@ -286,9 +288,10 @@ export const BuilderLiveActivity: React.FC<Props> = ({ job, snapshot, now, pollS
           <h3><Cpu size={14} aria-hidden="true" /> Sub-agents &amp; models</h3>
           {!telemetryAvailable ? <p className="builder-live-empty">Model telemetry is unavailable right now.</p> : modelRuns.length === 0 ? <p className="builder-live-empty">No model run recorded yet.</p> : <>
             <div className="builder-live-stats">
-              <span><b>{modelRuns.length}</b> recent runs</span>
-              <span><b>{modelRuns.filter(run => run.output_validated === true).length}</b> validation accepted</span>
-              <span><b>{modelRuns.filter(run => run.failure_kind === 'validation').length}</b> validation rejected</span>
+              <span><b>{executionRuns.length}</b> recent runs</span>
+              {executionRuns.length < modelRuns.length && <span><b>{modelRuns.length - executionRuns.length}</b> artifact receipts</span>}
+              <span><b>{executionRuns.filter(run => run.output_validated === true).length}</b> validation accepted</span>
+              <span><b>{executionRuns.filter(run => run.failure_kind === 'validation').length}</b> validation rejected</span>
               <span><b>{localRuns}</b> local</span>
               {cloudRuns > 0 && <span><b>{cloudRuns}</b> Ollama Cloud</span>}
               <span className={paidRuns ? 'is-paid' : ''}><b>{paidRuns}</b> paid</span>
@@ -301,13 +304,14 @@ export const BuilderLiveActivity: React.FC<Props> = ({ job, snapshot, now, pollS
                   <div><strong>{providerLabel(run.provider)}</strong><small>{run.model_name}</small><small className="builder-live-run-detail">{modelRunExplanation(run)}</small>
                     {run.output_tokens_per_second != null && <small className="builder-live-run-detail">{run.output_tokens_per_second.toFixed(1)} output tokens/s{run.load_ms != null ? ` · ${(run.load_ms / 1000).toFixed(1)}s model load` : ''} · generation speed, not task success</small>}
                   </div>
-                  <code title="Input / output tokens">{run.total_tokens == null ? 'usage not recorded' : `${(run.input_tokens ?? 0).toLocaleString()} in · ${(run.output_tokens ?? 0).toLocaleString()} out`}</code>
+                  <code title="Input / output tokens">{run.receipt_kind === 'artifact' ? 'artifact receipt · not another model call' : run.total_tokens == null ? 'usage not recorded' : `${(run.input_tokens ?? 0).toLocaleString()} in · ${(run.output_tokens ?? 0).toLocaleString()} out`}</code>
                 </li>
               ))}
             </ul>
             <p className="builder-live-note">
               {latestModel?.phase ? `Last recorded model phase: ${words(latestModel.phase)}${latestModel.turns ? ` after ${latestModel.turns} turns` : ''}. ` : ''}
               Bob's reasoning is not streamed; this shows recorded runs and token usage only.
+              {' '}Token totals cover these recent receipts, not the provider bill. Session totals can span multiple providers; artifact copies are excluded.
             </p>
           </>}
         </section>
