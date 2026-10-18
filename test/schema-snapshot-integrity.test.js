@@ -23,12 +23,19 @@ test('Git preserves live catalog SQL literal bytes on Linux and Windows line-end
       const file = path.join(root, 'supabase/schema.sql');
       fs.writeFileSync(file, sql);
       git(['add', 'supabase/schema.sql']);
+      git(['diff', '--cached', '--check']);
       const staged = execFileSync('git', ['show', ':supabase/schema.sql'], { cwd: root });
       assert.deepEqual(staged, sql);
       fs.unlinkSync(file);
       git(['checkout-index', '--', 'supabase/schema.sql']);
       assert.deepEqual(fs.readFileSync(file), sql);
     }
+    fs.appendFileSync(path.join(root, 'supabase/schema.sql'), 'SELECT 1; \n');
+    git(['add', 'supabase/schema.sql']);
+    assert.throws(() => git(['diff', '--cached', '--check']), error => {
+      assert.match(String(error.stdout), /trailing whitespace/);
+      return true;
+    }, 'ordinary trailing spaces remain an error');
   } finally {
     fs.rmSync(root, { recursive: true, force: true });
   }
