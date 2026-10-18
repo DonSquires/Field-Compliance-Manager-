@@ -302,7 +302,7 @@ function automergeEligible({ job, evidence, env = process.env }) {
   const mainHealthRepair = job?.autopilot_source === 'main_monitor'
     && job?.repair_risk === 'routine'
     && expectedMainHealthFiles.length > 0
-    && expectedMainHealthFiles.every((file) => /^apps\/web\/src\/[A-Za-z0-9_./-]+\.guard\.test\.tsx?$/.test(file) && !file.includes('..'));
+    && expectedMainHealthFiles.every((file) => /^apps\/web\/(?:src\/[A-Za-z0-9_./-]+\.(?:test|spec)\.tsx?|e2e\/[A-Za-z0-9_./-]+\.spec\.ts)$/.test(file) && !file.includes('..'));
   if (!job?.autopilot_requested_by && !mainHealthRepair) return { ok: false, reason: 'not requested by a person in chat or a bounded main-health repair' };
   if (!evidence?.verifyRun) return { ok: false, reason: 'no independent worker verification' };
   if (evidence.verificationContract?.passed !== true) {

@@ -203,7 +203,7 @@ test('an alarm-response job shows its response ladder counted from the alarm, in
   await signInAsAdmin(page, '/admin/field-ops?area=dispatch&job=cccccccc-cccc-4ccc-8ccc-cccccccccccc');
   const detail = page.getByLabel('Dispatch details for Civic Operations Centre');
   await expect(detail).toBeVisible();
-  await expect(detail.getByRole('status')).toContainText('On scene 22 min after the alarm — 7 min over the 15 min target.');
+  await expect(detail.getByRole('status').filter({ hasText: 'On scene 22 min after the alarm' })).toHaveText('On scene 22 min after the alarm — 7 min over the 15 min target.');
   const steps = detail.locator('.dispatch-response-steps li');
   await expect(steps.nth(0)).toContainText('Alarm received (Burglary / intruder, by phone call)');
   await expect(steps.nth(1)).toContainText(/Job created.*10 min after the alarm/);
