@@ -25,12 +25,30 @@ const ALLOWED_BEFORE_FIELDS = new Set([
   'record_id',
   'targetRoute',
   'recent_actions',
-  'active_module_context'
+  'active_module_context',
+  'view_title',
+  'view_headings',
+  'active_tab',
+  'workspace',
+  'viewport'
 ]);
+export const USER_REPORT_KINDS = new Set([
+  'change_request',
+  'workflow_snag',
+  'missing_capability'
+]);
+const USER_REPORT_TEXT_FIELDS = [
+  'current_behavior',
+  'desired_behavior',
+  'business_reason'
+];
+const MAX_VIEW_HEADINGS = 8;
+const MAX_VIEW_TEXT_LEN = 160;
 const ALLOWED_DURING_FIELDS = new Set([
   'error',
   'failed_request',
-  'screenshot_attachment_id'
+  'screenshot_attachment_id',
+  'user_report'
 ]);
 const ALLOWED_ERROR_FIELDS = new Set([
   'kind',
@@ -100,6 +118,28 @@ const ALLOWED_TOP_FIELDS = new Set([
         before.recent_actions = validated;
       }
     }
+    for (const key of ['view_title', 'active_tab', 'workspace', 'viewport']) {
+      if (key in before) {
+        if (typeof before[key] !== 'string') {
+          delete before[key];
+          droppedFields++;
+        } else if (before[key].length > MAX_VIEW_TEXT_LEN) {
+          before[key] = before[key].slice(0, MAX_VIEW_TEXT_LEN);
+          truncated = true;
+        }
+      }
+    }
+    if ('view_headings' in before) {
+      if (!Array.isArray(before.view_headings)) {
+        delete before.view_headings;
+        droppedFields++;
+      } else {
+        const headings = before.view_headings.filter((item) => typeof item === 'string').map((item) => item.slice(0, MAX_VIEW_TEXT_LEN));
+        if (headings.length !== before.view_headings.length) droppedFields++;
+        if (headings.length > MAX_VIEW_HEADINGS) truncated = true;
+        before.view_headings = headings.slice(0, MAX_VIEW_HEADINGS);
+      }
+    }
     envelope.before = before;
   }
   // --- DURING segment ---
@@ -151,6 +191,26 @@ const ALLOWED_TOP_FIELDS = new Set([
         }
       }
       during.failed_request = req;
+    }
+    // A person's own change request: closed field set, bounded text, known kinds only.
+    if ('user_report' in during) {
+      const rawReport = during.user_report;
+      if (typeof rawReport !== 'object' || rawReport === null || Array.isArray(rawReport) || !USER_REPORT_KINDS.has(String(rawReport.kind))) {
+        delete during.user_report;
+        droppedFields++;
+      } else {
+        const report = { kind: String(rawReport.kind) };
+        for (const key of Object.keys(rawReport)) {
+          if (key !== 'kind' && !USER_REPORT_TEXT_FIELDS.includes(key)) droppedFields++;
+        }
+        for (const key of USER_REPORT_TEXT_FIELDS) {
+          const value = rawReport[key];
+          if (typeof value !== 'string' || !value.trim()) continue;
+          report[key] = value.trim().slice(0, MAX_TEXT_FIELD_LEN);
+          if (value.trim().length > MAX_TEXT_FIELD_LEN) truncated = true;
+        }
+        during.user_report = report;
+      }
     }
     envelope.during = during;
   }
@@ -223,7 +283,9 @@ const ALLOWED_TOP_FIELDS = new Set([
   const errorMsg = String(error?.message ?? '').toLowerCase();
   const errorKind = String(error?.kind ?? '').toLowerCase();
   const errorName = String(error?.name ?? '').toLowerCase();
-  const allErrorText = errorMsg + ' ' + errorKind + ' ' + errorName;
+  const report = during?.user_report;
+  const reportText = report ? USER_REPORT_TEXT_FIELDS.map((key) => String(report[key] ?? '')).join(' ').toLowerCase() : '';
+  const allErrorText = errorMsg + ' ' + errorKind + ' ' + errorName + ' ' + reportText;
   if (allErrorText.includes('cross-org') || allErrorText.includes('cross_org') || allErrorText.includes('entitlement') || allErrorText.includes('tenant_leak') || allErrorText.includes('tenant leak') || allErrorText.includes('unauthorized_access') || allErrorText.includes('scope_violation') || allErrorText.includes('egress_redaction') || allErrorText.includes('privacy_breach')) {
     codes.push('stop_line:privacy');
   }
@@ -314,6 +376,25 @@ const ALLOWED_TOP_FIELDS = new Set([
       },
       confidence: null
     };
+  }
+  // --- A person's own change request (no runtime error): a UX gap for human-led review ---
+  const userReport = during?.user_report;
+  if (userReport && !(error && (error.kind || error.message || error.name))) {
+    const described = USER_REPORT_TEXT_FIELDS.filter((key) => typeof userReport[key] === 'string' && userReport[key].length > 0);
+    if (described.includes('desired_behavior')) {
+      return {
+        triage: 'ux_gap',
+        basis: {
+          reason_codes: [
+            'user_change_request:' + String(userReport.kind),
+            ...described.map((key) => 'described:' + key),
+            ...missingSegments
+          ],
+          summary: 'A person asked for a change to ' + String(before?.page ?? 'an unknown page') + '. Human-led review; never an unattended repair.'
+        },
+        confidence: 0.9
+      };
+    }
   }
   // --- Clear error present: likely a bug ---
   const hasError = error && (error.kind || error.message || error.name);
@@ -507,17 +588,31 @@ const ALLOWED_TOP_FIELDS = new Set([
  * fault is routine. New capability, redesign, protected-path, privacy, safety,
  * legal, financial, identity, enforcement, and uncertain work stays human-led.
  */
+function envelopeValues(value: unknown): string {
+  if (typeof value === 'string') return value;
+  if (Array.isArray(value)) return value.map(envelopeValues).join(' ');
+  if (value && typeof value === 'object') return Object.entries(value as Record<string, unknown>).filter(([key]) => key !== 'schema_version').map(([, item]) => envelopeValues(item)).join(' ');
+  return '';
+}
+
 export function classifyRepairRisk(envelope, stopLineHit, triage, confidence, route) {
   if (stopLineHit !== null) return 'protected';
-  if (triage !== 'bug' || route !== 'dispatch_flow' || (confidence ?? -1) < 0.85) return 'unknown';
-
-  const text = JSON.stringify(envelope).toLowerCase();
   const protectedTerms = [
     'privacy', 'tenant', 'cross-org', 'cross_org', 'entitlement', 'safety', 'hswa',
     'legal', 'evidence', 'enforcement', 'notice', 'prosecution', 'identity', 'auth',
     'rls', 'permission', 'payroll', 'finance', 'payment', 'invoice', 'migration',
     'schema', 'database', 'dependency', 'environment', 'secret', 'credential'
   ];
+  // A person's change request is never routine: it waits for a reviewer, as protected when it
+  // touches a consequential surface.
+  if (envelope?.during?.user_report) {
+    // Values only: envelope keys (schema_version, user_intent…) must not trip the term list.
+    const text = envelopeValues(envelope).toLowerCase();
+    return protectedTerms.some((term) => text.includes(term)) ? 'protected' : 'significant';
+  }
+  if (triage !== 'bug' || route !== 'dispatch_flow' || (confidence ?? -1) < 0.85) return 'unknown';
+
+  const text = JSON.stringify(envelope).toLowerCase();
   if (protectedTerms.some((term) => text.includes(term))) return 'protected';
 
   const significantTerms = [

@@ -64,6 +64,7 @@ import { BobPanel } from '../components/BobPanel';
 import { WorkflowRail } from '../components/WorkflowRail';
 import { OperatingSpineRibbon } from '../components/OperatingSpineRibbon';
 import { HelpInstructions } from '../components/HelpInstructions';
+import { ChangeRequestButton } from '../components/ChangeRequestButton';
 import { PlaceContextBanner } from '../components/PlaceContextBanner';
 import { readWorkflowContext, workflowContextQuery, type WorkflowContext } from '../lib/workflowNavigation';
 import { canAccessFieldOpsArea, FIELD_OPS_AREAS, isFieldOpsSubArea, type FieldOpsSubArea } from '../lib/fieldOpsAreaAccess';
@@ -731,7 +732,7 @@ const AdminShell: React.FC = () => {
       case 'platform':
         return <GrandMasterPlatformPage />;
       case 'builder':
-        return <BuilderControlRoomPage />;
+        return <BuilderControlRoomPage onOpenBob={(prompt) => { setBobLaunchPrompt(prompt); setBobOpen(true); }} />;
       case 'platform-catalog':
         return <ModuleCatalogPage />;
       case 'platform-subscriptions':
@@ -828,6 +829,7 @@ const AdminShell: React.FC = () => {
             </div>
             <div className="admin-shell-tools">
               {operatingOrganizations.length > 0 && <label className="admin-operating-selector"><span>Working in</span><select value={operatingOrganizationId ?? ''} onChange={(event) => setOperatingOrganization(event.target.value)} aria-label="Working in">{operatingOrganizations.map((context) => <option value={context.organizationId} key={context.organizationId}>{context.organizationName}{context.authorityBasis === 'organisation_home' ? ' (organisation)' : context.authorityBasis === 'corporate_oversight' ? ' (branch)' : ''}</option>)}</select></label>}
+              <ChangeRequestButton workspaceLabel={operatingOrganizations.find((item) => item.organizationId === operatingOrganizationId)?.organizationName ?? orgName} onOpenBob={(prompt) => { setBobLaunchPrompt(prompt); setBobOpen(true); }} />
               <NotificationCenter onNavigate={navigateFromNotification} />
               <HelpInstructions context={activePage} role={profile?.role} />
               <button type="button" className="admin-shell-icon admin-desktop-download" onClick={() => setShowDesktopDownload(true)} title="Download FCM desktop app" aria-label="Download FCM desktop app"><Download size={19} aria-hidden="true" /></button>
@@ -886,6 +888,7 @@ const AdminShell: React.FC = () => {
         </div>
         <div className="admin-shell-tools">
           {operatingOrganizations.length > 0 && <label className="admin-operating-selector"><span>Working in</span><select value={operatingOrganizationId ?? ''} onChange={(event) => setOperatingOrganization(event.target.value)} aria-label="Working in">{operatingOrganizations.map((context) => <option value={context.organizationId} key={context.organizationId}>{context.organizationName}{context.authorityBasis === 'organisation_home' ? ' (organisation)' : context.authorityBasis === 'corporate_oversight' ? ' (branch)' : ''}</option>)}</select></label>}
+          <ChangeRequestButton compact workspaceLabel={operatingOrganizations.find((item) => item.organizationId === operatingOrganizationId)?.organizationName ?? orgName} onOpenBob={(prompt) => { setBobLaunchPrompt(prompt); setBobOpen(true); }} />
           <NotificationCenter onNavigate={navigateFromNotification} />
           <HelpInstructions context={activePage} role={profile?.role} />
           <button type="button" className="admin-shell-icon" onClick={openBobCommandCenter} title="Open Bob command center" aria-label="Open Bob command center" aria-expanded={bobOpen}>

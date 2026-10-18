@@ -8,6 +8,26 @@ detailed backlogs (`ENTERPRISE_SAAS_TODO.md`, `PROTOTYPE_GAP_AUDIT.md`,
 Completion language is strict, as in the lineage: **merged ≠ deployed ≠
 glass-proven.** A workstream item is done only when its evidence gate is met.
 
+Page change requests 2026-10-18: authorised operations roles can submit a
+before/desired-after/business-reason brief from the admin or officer header.
+The existing `bob_friction_packets` queue owns these requests; there is no
+parallel `builder_change_requests` store. The server resolves the submitter,
+keeping organisation and role. Route pathname, workspace label and bounded
+view headings/tab/title are previewed; form values, table rows and URL query
+parameters are not captured. Headings can contain record names, so users must
+check the preview and omit sensitive information from free text.
+
+User reports are always significant or protected, never unattended routine
+repairs. Only governed triage intake writes evidence and routing; browser
+grants permit reviewers to change disposition and note only. RLS restricts
+receipts to their submitter and authorised organisation/platform reviewers;
+review actor and time are stamped server-side. Builder's review queue can
+hand an explicitly untrusted brief to Bob for canon/Atlas/schema/RLS evaluation.
+This is not an implementation instruction: any job still requires the existing
+separate Builder confirmation and review/release controls. Stop-line reports
+are held for platform review, not sent to Bob by this UI. Queue resolution
+is a reviewer decision, not proof of a code deployment.
+
 Owner-requested Bob workspace behaviour 2026-10-16: shell chat opens beside the
 current working page, shrinking its available width rather than covering it.
 Narrow layouts stack independently scrollable page and chat regions. Neither
