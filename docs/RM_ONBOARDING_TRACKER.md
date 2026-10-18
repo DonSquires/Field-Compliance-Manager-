@@ -2137,3 +2137,35 @@ service-role write was used.
 - Tender attachment verification: live count is 3; schema/Atlas regenerated
   after the migration; the production web build passed; root governance tests
   passed 5/5; and the migration ledger contains 555 unique versions.
+
+## HR recruitment and staff onboarding flow (2026-10-18)
+
+- **Before:** Recruitment already retained candidate stages and the governed
+  `declined` transition, but the HR page did not make “not suitable” a clear
+  decision. Staff onboarding displayed seven stages and five unrelated evidence
+  buttons, while a missing employment start date or payroll role had no direct
+  completion path from the onboarding card.
+- **During:** HR now gets one highlighted next-required action for the current
+  onboarding stage. Employment type, start/end dates, and payroll role are saved
+  together through the race-checked `set_staff_employment_setup` RPC with a
+  reason and audit receipt. Less-common evidence actions remain available under
+  progressive disclosure rather than competing with the next task.
+- **After:** The onboarding, staff-readiness, and User Spine read models all
+  treat employment as complete only when employment type, a current start date,
+  and an active payroll role are recorded. Work readiness cannot conceal those
+  missing employment facts.
+- Recruitment cards now expose **Mark as not suitable** at every active funnel
+  stage. The required internal reason must be factual and job-related; the UI
+  warns against protected-characteristic or unsupported notes and states that
+  this audit action does not itself email the candidate. This follows the
+  candidate-state pattern documented by
+  [SEEK Employer candidate management](https://help.my.employer.seek.com/s/article/All-You-Need-to-Know-About-Candidate-Management)
+  and its separate
+  [candidate-notification guidance](https://help.nz.employer.seek.com/s/article/What-automatic-notifications-do-my-candidates-receive)
+  (retrieved 2026-10-18), while keeping communication claims honest for FCM.
+- Atlas before the change showed the recruitment and staff-onboarding tables as
+  present, wired, and exercised, with their governing RPCs present and wired.
+  The defect was therefore a workflow/read-model gap rather than a missing
+  table. Focused desktop and mobile browser journeys cover employment setup and
+  candidate rejection; the Dr. Bob fixture-backed human test completed with
+  zero failed requests and zero test errors.

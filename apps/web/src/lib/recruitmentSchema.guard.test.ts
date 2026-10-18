@@ -45,4 +45,12 @@ describe('governed recruitment ATS', () => {
     expect(page).toContain('convert_recruitment_candidate_to_staff');
     expect(page).toContain('Candidate has accepted this offer');
   });
+
+  it('exposes an auditable not-suitable decision with safe guidance', () => {
+    expect(page).toContain('Mark as not suitable');
+    expect(page).toContain("nextStage: 'declined'");
+    expect(page).toContain('Job-related reason');
+    expect(page).toContain('Do not record protected personal characteristics or unsupported assumptions');
+    expect(page).toContain('it does not email the candidate');
+  });
 });
