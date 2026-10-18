@@ -53,7 +53,7 @@ test('release lane skips applied migrations and exclusively owns its live pointe
   assert.match(deploy, /git fetch -q .*refs\/remotes\/origin\/main:refs\/bundles/);
   assert.match(deploy, /docker compose -f deploy\/bob-control-plane\/docker-compose\.yml rm -sf bob-control-plane/);
   // A control-plane restart mid-run would discard the author's turns: the lane waits for the next tick.
-  assert.match(lane, /node "\$\(dirname "\$\{BASH_SOURCE\[0\]\}"\)\/bob-runtime-idle\.js"/);
+  assert.match(lane, /require_idle "\$\(dirname "\$\{BASH_SOURCE\[0\]\}"\)\/bob-runtime-idle\.js"/);
   assert.match(lane, /deferred \$\{HEAD_SHA:0:8\}: Bob execution is active or unverifiable/);
   // The installed lane is a deliberate copy, so a reviewed lane change must replace it for the next tick.
   assert.match(lane, /scripts\/bob-runtime-idle\\\.js\|deploy\/bob-release-lane/);
@@ -75,11 +75,37 @@ test('release lane skips applied migrations and exclusively owns its live pointe
 test('automatic and legacy control-plane deployment check idle after image build, including rollback', () => {
   const lane = fs.readFileSync(SCRIPT, 'utf8');
   const action = lane.slice(lane.indexOf('    control-plane)\n      if'), lane.indexOf('    worker-image)'));
-  assert.match(action, /build -q bob-control-plane \\\n\s*&& node scripts\/bob-runtime-idle\.js \\\n\s*&& DOCKER_GID=999 docker compose/);
+  assert.match(action, /build -q bob-control-plane \\\n\s*&& require_idle scripts\/bob-runtime-idle\.js \\\n\s*&& DOCKER_GID=999 docker compose/);
   assert.match(lane.slice(lane.indexOf('rollback()'), lane.indexOf('for target in')), /if ! node scripts\/bob-runtime-idle\.js/);
   const legacy = fs.readFileSync(path.resolve(__dirname, '../deploy/bob-control-plane/deploy.sh'), 'utf8');
   assert.match(legacy, /build bob-control-plane\nnode "\$app_dir\/scripts\/bob-runtime-idle\.js"\ndocker compose/);
   assert.equal(bashSyntax(legacy).status, 0);
+});
+
+test('work appearing during image build defers without restart, rollback or advancing the release', () => {
+  const lane = fs.readFileSync(SCRIPT, 'utf8');
+  const guard = lane.slice(lane.indexOf('require_idle()'), lane.indexOf('if printf', lane.indexOf('require_idle()')));
+  const controlPlane = lane.slice(lane.indexOf('    control-plane)\n      if'), lane.indexOf('    fcm-api)\n      if'));
+  const result = spawnSync('bash', ['-s'], {
+    encoding: 'utf8',
+    input: `set -euo pipefail
+HEAD_SHA=fixture123456
+log() { printf '%s\\n' "$*"; }
+node() { return 1; }
+docker() { echo build; }
+fail_note() { echo failure; }
+rollback() { echo rollback; }
+${guard}
+case control-plane in
+${controlPlane}
+esac
+echo advanced-release
+`,
+  });
+  assert.equal(result.status, 0, result.stderr);
+  assert.match(result.stdout, /build\ndeferred fixture1/);
+  assert.doesNotMatch(result.stdout, /rollback|failure|advanced-release/);
+  assert.equal(result.stdout.split('\n').filter(line => line === 'build').length, 1, 'only build, not service up');
 });
 
 test('every control-plane path the edge functions relay is allowed through the public nginx site', () => {

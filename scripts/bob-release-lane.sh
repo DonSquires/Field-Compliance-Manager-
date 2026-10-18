@@ -134,10 +134,13 @@ fi
 # 4. Live: apply in a safe order. Data first (migrations are additive by Builder policy), then
 #    edge functions, then the VPS services, each with a health check and rollback.
 # Restarting the control plane mid-run discards the author's turns; wait for the next tick instead.
-if printf '%s\n' "${TARGETS[@]:-}" | grep -qE '^(control-plane|fcm-api)$'; then
-  if ! node "$(dirname "${BASH_SOURCE[0]}")/bob-runtime-idle.js"; then
+require_idle() {
+  if ! node "$1"; then
     log "deferred ${HEAD_SHA:0:8}: Bob execution is active or unverifiable; retrying next tick"; exit 0
   fi
+}
+if printf '%s\n' "${TARGETS[@]:-}" | grep -qE '^(control-plane|fcm-api)$'; then
+  require_idle "$(dirname "${BASH_SOURCE[0]}")/bob-runtime-idle.js"
 fi
 SHA8="${HEAD_SHA:0:8}"
 PREVIOUS_RELEASE="$RELEASES_DIR/${DEPLOYED_SHA:0:8}"
@@ -222,7 +225,7 @@ for target in "${TARGETS[@]:-}"; do
       else OK=false; fail_note "release lane install failed"; fi ;;
     control-plane)
       if DOCKER_GID=999 docker compose -f deploy/bob-control-plane/docker-compose.yml build -q bob-control-plane \
-         && node scripts/bob-runtime-idle.js \
+         && require_idle scripts/bob-runtime-idle.js \
          && DOCKER_GID=999 docker compose -f deploy/bob-control-plane/docker-compose.yml up -d --force-recreate bob-control-plane >/dev/null; then
         healthy=false
         for _ in $(seq 1 20); do sleep 2; if curl -sf http://172.16.0.1:8091/health >"$STATE_DIR/cp-health.json" && node -e 'const h=require(process.argv[1]); process.exit(h.autopilot === undefined || !h.modelProviders ? 1 : 0)' "$STATE_DIR/cp-health.json"; then healthy=true; break; fi; done
@@ -230,7 +233,7 @@ for target in "${TARGETS[@]:-}"; do
       else OK=false; fail_note "control-plane build/up failed"; fi ;;
     fcm-api)
       if docker compose -p fcm --env-file /opt/fcm/.env -f docker-compose.full.yml build -q fcm-api \
-         && node scripts/bob-runtime-idle.js \
+         && require_idle scripts/bob-runtime-idle.js \
          && docker compose -p fcm --env-file /opt/fcm/.env -f docker-compose.full.yml up -d --no-deps fcm-api >/dev/null; then
         T="$(grep -E '^API_TOKEN=' /opt/fcm/.env | cut -d= -f2-)"; healthy=false
         for _ in $(seq 1 20); do sleep 2; if curl -sf -H "Authorization: Bearer $T" http://127.0.0.1:3001/api/bob/health >/dev/null; then healthy=true; break; fi; done
