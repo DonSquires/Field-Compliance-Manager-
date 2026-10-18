@@ -1,0 +1,23 @@
+.travel-summary{display:grid;gap:12px;padding:14px;border:1px solid #28495a;border-radius:8px;background:#0c202b}
+.travel-summary__head{display:flex;align-items:flex-start;justify-content:space-between;gap:12px;flex-wrap:wrap}
+.travel-summary__head h3{display:flex;align-items:center;gap:7px;margin:0;color:#e6f0f4;font-size:15px}
+.travel-summary__description{margin:4px 0 0;color:#91a6b4;font-size:12px;line-height:1.5;max-width:62ch}
+.travel-summary__refresh{display:inline-flex;align-items:center;gap:6px;min-height:32px;padding:0 11px;border:1px solid #315969;border-radius:4px;color:#cfe3ec;background:#102833;font-size:12px;font-weight:800;cursor:pointer}
+.travel-summary__refresh:disabled{opacity:.55;cursor:not-allowed}
+.travel-summary__state{display:flex;align-items:center;gap:8px;margin:0;padding:10px 12px;border-radius:6px;color:#91a6b4;background:#0f2a36;font-size:12px;line-height:1.5}
+.travel-summary__state--error{color:#ffd5cf;background:#43221f}
+.travel-summary__figures{display:grid;grid-template-columns:repeat(auto-fit,minmax(130px,1fr));gap:10px;margin:0}
+.travel-summary__figures>div{display:grid;gap:3px;padding:10px 12px;border:1px solid #28495a;border-radius:6px;background:#102833}
+.travel-summary__figures dt{color:#8fa9b5;font-size:11px;font-weight:800;text-transform:uppercase;letter-spacing:.03em}
+.travel-summary__figures dd{margin:0;color:#e6f0f4;font-size:18px;font-weight:700}
+.travel-summary__table{width:100%;border-collapse:collapse;font-size:12px}
+.travel-summary__table th,.travel-summary__table td{padding:8px 10px;border-bottom:1px solid #1d3b4a;text-align:left;color:#c8d9e1}
+.travel-summary__table thead th{color:#8fa9b5;font-size:11px;font-weight:800;text-transform:uppercase;letter-spacing:.03em}
+.travel-summary__table tbody th{color:#e6f0f4;font-weight:600}
+.travel-summary__table td{text-align:right}
+.travel-summary__table thead th+th{text-align:right}
+.travel-summary__note{margin:0;color:#7f96a4;font-size:11px;line-height:1.5}
+.travel-summary .is-spinning{animation:travel-summary-spin 1s linear infinite}
+@keyframes travel-summary-spin{to{transform:rotate(360deg)}}
+@media(prefers-reduced-motion:reduce){.travel-summary .is-spinning{animation:none}}
+@media(max-width:760px){.travel-summary__head{flex-direction:column;align-items:stretch}.travel-summary__figures{grid-template-columns:repeat(auto-fit,minmax(110px,1fr))}}

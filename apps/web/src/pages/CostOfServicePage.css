@@ -1,0 +1,14 @@
+.cost-of-service{display:grid;gap:16px;padding:20px;max-width:1100px}
+.cost-of-service-header{display:flex;align-items:flex-start;justify-content:space-between;gap:16px;flex-wrap:wrap}
+.cost-of-service-header>div{display:grid;gap:4px}
+.cost-of-service-header span{color:#8fa9b5;font-size:11px;font-weight:800;text-transform:uppercase;letter-spacing:.04em}
+.cost-of-service-header h1{display:flex;align-items:center;gap:9px;margin:0;color:#e6f0f4;font-size:22px}
+.cost-of-service-header p{margin:2px 0 0;color:#91a6b4;font-size:13px;line-height:1.55;max-width:70ch}
+.cost-of-service-message{display:flex;align-items:center;gap:8px;margin:0;padding:10px 12px;border-radius:6px;color:#ffd5cf;background:#43221f;font-size:12px;line-height:1.5}
+.cost-of-service-filters{display:flex;align-items:flex-end;gap:12px;flex-wrap:wrap;padding:12px;border:1px solid #28495a;border-radius:8px;background:#0c202b}
+.cost-of-service-filters label{display:grid;gap:4px;min-width:170px}
+.cost-of-service-filters label span{color:#8fa9b5;font-size:11px;font-weight:800;text-transform:uppercase;letter-spacing:.03em}
+.cost-of-service-filters select{min-height:34px;padding:7px 9px;border:1px solid #315969;border-radius:5px;color:#e8f0f4;background:#102833;font:inherit;font-size:12px}
+.cost-of-service-filters button{min-height:34px;padding:0 12px;border:1px solid #315969;border-radius:4px;color:#cfe3ec;background:#102833;font-size:12px;font-weight:800;cursor:pointer}
+.cost-of-service-filters button:disabled{opacity:.5;cursor:not-allowed}
+@media(max-width:760px){.cost-of-service{padding:14px}.cost-of-service-filters label{min-width:100%}.cost-of-service-filters button{width:100%}}
