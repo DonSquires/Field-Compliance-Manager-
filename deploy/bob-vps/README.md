@@ -97,6 +97,13 @@ is too slow there) and `BOB_OLLAMA_MODELS=qwen2.5-coder:7b,qwen3-coder:30b,llama
 so the VPS CPU tier starts on a model it can serve. The OpenAI variables above apply
 only when both in-house tiers fail. The chat lane follows the same rule: code requests
 plan in-house unless `BOB_PLAN_CODE_REQUESTS_FAST=true`.
+Owner direction 2026-10-18: the owner's Ollama Cloud subscription is the first outsourced
+tier, after both in-house tiers and before OpenAI. Set `OLLAMA_API_TOKEN` (never print it) and
+optionally `BOB_OLLAMA_CLOUD_MODELS` (default `gpt-oss:120b,nemotron-3-super,gemma4:31b,gpt-oss:20b`,
+the models the current plan serves; `/api/tags` also lists paid-plan models that fail at request
+time), `OLLAMA_CLOUD_BASE_URL` (default `https://ollama.com`) and `BOB_OLLAMA_CLOUD_NUM_CTX`.
+The default chain is `gpu_workstation,ollama,ollama_cloud,openai`; any `BOB_BUILDER_ROUTE_*`
+override must list `ollama_cloud` or it is skipped. Restricted work never leaves local compute.
 `GITEA_USERNAME` + `GITEA_TOKEN` (scopes `write:repository,write:issue,read:user`),
 or the GitHub publication credentials used by this deployment. For GitHub
 publication, set `BOB_BUILDER_GIT_NAME` and `BOB_BUILDER_GIT_EMAIL` to the

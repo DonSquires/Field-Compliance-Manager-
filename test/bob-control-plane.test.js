@@ -35,6 +35,8 @@ test.before(async () => {
       // (it made /health read the live laptop registry once the laptop had registered).
       SUPABASE_URL: '',
       SUPABASE_SERVICE_ROLE_KEY: '',
+      OLLAMA_API_TOKEN: '',
+      OLLAMA_API_KEY: '',
       PORT: String(port),
       BOB_ADMIN_TOKEN: adminToken,
       BOB_RUNNER_TOKEN: runnerToken,
@@ -83,9 +85,11 @@ test('health is public and reports the control plane', async () => {
   // Bob's laptop terminal is off unless the owner-side env enables it; health never carries the user or key path.
   assert.deepEqual(laptopShell, { enabled: false, configured: false, host: null, ssh_allowed: null });
   // Provider health names Bob's own compute first and never carries secrets or URLs.
-  assert.deepEqual(Object.keys(modelProviders).sort(), ['gpu_workstation', 'ollama', 'openai']);
+  assert.deepEqual(Object.keys(modelProviders).sort(), ['gpu_workstation', 'ollama', 'ollama_cloud', 'openai']);
   assert.deepEqual(Object.keys(modelProviders.openai).sort(), ['configured', 'healthy', 'ready_model']);
   assert.equal(modelProviders.gpu_workstation.configured, false, 'no GPU link in the test environment');
+  assert.equal(modelProviders.ollama_cloud.configured, false, 'no Ollama Cloud key in the test environment');
+  assert.ok(!JSON.stringify(modelProviders.ollama_cloud).includes('ollama.com'), 'public health never carries the cloud URL');
 });
 
 test('control-plane source has a bounded stale Builder lease recovery path', () => {

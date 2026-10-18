@@ -13,7 +13,10 @@ const ALLOWED_BUILDER_MODES = new Set([
 const REASONING_EFFORTS = new Set(['none', 'low', 'medium', 'high', 'xhigh']);
 // In-house first: the laptop GPU and the VPS Ollama are Bob's own compute; OpenAI is the
 // outsourced fallback for when Bob is stuck or the prompt does not fit a local context window.
-const PROVIDER_KINDS = Object.freeze({ openai: 'openai', ollama: 'ollama', gpu_workstation: 'ollama' });
+// Ollama Cloud (ollama.com) speaks the Ollama chat API but is an external, keyed service: it is an
+// outsourced tier like OpenAI, never a stand-in for Bob's own compute.
+const PROVIDER_KINDS = Object.freeze({ openai: 'openai', ollama: 'ollama', gpu_workstation: 'ollama', ollama_cloud: 'ollama_cloud' });
+const OLLAMA_API_KINDS = new Set(['ollama', 'ollama_cloud']);
 const HEALTH_OK_TTL_MS = 30_000;
 const HEALTH_FAIL_TTL_MS = 60_000;
 // A CPU box evaluating a prompt on every core answers /api/tags late; two seconds called a working
@@ -21,6 +24,10 @@ const HEALTH_FAIL_TTL_MS = 60_000;
 const HEALTH_PROBE_TIMEOUT_MS = Math.max(2_000, Number(process.env.BOB_MODEL_PROBE_TIMEOUT_MS || 10_000));
 const CHARS_PER_TOKEN = 3.5;
 const healthCache = new Map();
+
+function authHeaders(providerConfig) {
+  return providerConfig.apiKey ? { Authorization: `Bearer ${providerConfig.apiKey}` } : {};
+}
 
 function parseModelAllowlist(value, fallback) {
   return new Set(String(value || fallback).split(',').map(model => model.trim()).filter(Boolean));
@@ -32,7 +39,7 @@ function estimateTokens(chars) {
 
 // Prompts that cannot fit a local model's context are the clearest "outsource this" signal.
 function promptFitsProvider(input, providerConfig) {
-  if (providerConfig.kind !== 'ollama') return true;
+  if (!OLLAMA_API_KINDS.has(providerConfig.kind)) return true;
   const outputBudget = Math.min(Number(input.max_output_tokens) || providerConfig.maxOutputTokens || 8192, providerConfig.maxOutputTokens || 8192, 16384);
   return estimateTokens(promptLength(input)) + outputBudget + 512 <= providerConfig.numCtx;
 }
@@ -55,12 +62,13 @@ async function probeProvider(config, name, { fetchImpl = globalThis.fetch, now =
     return { name, configured: true, healthy: true, installed, cached: false };
   }
   if (!providerConfig.baseUrl) return { name, configured: false, healthy: false, installed: [] };
+  if (providerConfig.kind === 'ollama_cloud' && !providerConfig.apiKey) return { name, configured: false, healthy: false, installed: [] };
   const cached = healthCache.get(name);
   if (cached && cached.until > now()) return { name, configured: true, healthy: cached.healthy, installed: cached.installed, cached: true };
   let healthy = false;
   let installed = [];
   try {
-    const response = await fetchImpl(`${providerConfig.baseUrl}/api/tags`, { signal: AbortSignal.timeout(HEALTH_PROBE_TIMEOUT_MS) });
+    const response = await fetchImpl(`${providerConfig.baseUrl}/api/tags`, { headers: authHeaders(providerConfig), signal: AbortSignal.timeout(HEALTH_PROBE_TIMEOUT_MS) });
     healthy = response.ok;
     const data = healthy ? await response.json().catch(() => null) : null;
     installed = Array.isArray(data?.models) ? data.models.map(model => String(model.name || model.model || '')).filter(Boolean) : [];
@@ -154,6 +162,18 @@ function createModelGatewayConfig(env = process.env) {
       maxOutputTokens: Math.min(maxOutputTokens, 8192),
       numCtx: Math.max(4096, Number(env.BOB_GPU_NUM_CTX) || 32768)
     },
+    // Ollama Cloud: strong hosted open models, tried after Bob's own compute and before OpenAI.
+    // Ordered strongest-first. /api/tags lists every cloud model, including ones the plan does not
+    // include (those fail at request time), so the default names only free-plan models (probed
+    // 2026-10-18); add paid models through BOB_OLLAMA_CLOUD_MODELS once the plan covers them.
+    ollama_cloud: {
+      kind: 'ollama_cloud',
+      apiKey: env.OLLAMA_API_KEY || env.OLLAMA_API_TOKEN || '',
+      baseUrl: (env.OLLAMA_CLOUD_BASE_URL || 'https://ollama.com').replace(/\/+$/, ''),
+      models: parseModelAllowlist(env.BOB_OLLAMA_CLOUD_MODELS, 'gpt-oss:120b,nemotron-3-super,gemma4:31b,gpt-oss:20b'),
+      maxOutputTokens: Math.min(maxOutputTokens, 16384),
+      numCtx: Math.max(8192, Number(env.BOB_OLLAMA_CLOUD_NUM_CTX) || 131072)
+    },
     // The agentic lane is not bound by an edge timeout: give reasoning models
     // maximum effort, room to write, and long turns.
     reasoningEffort: REASONING_EFFORTS.has(env.BOB_BUILDER_REASONING_EFFORT) ? env.BOB_BUILDER_REASONING_EFFORT : 'high',
@@ -201,7 +221,7 @@ function buildProviderBody({ input, config, model }) {
     if (input.output_schema) body.format = 'json';
     // Ollama defaults to a 4k window and would truncate Bob's prompts silently; keep the model warm between turns.
     body.options = { num_ctx: providerConfig.numCtx, temperature: typeof input.temperature === 'number' ? input.temperature : 0.2, num_predict: Math.min(Number(input.max_output_tokens) || providerConfig.maxOutputTokens || 8192, providerConfig.maxOutputTokens || 8192, 16384) };
-    body.keep_alive = '30m';
+    if (providerConfig.kind === 'ollama') body.keep_alive = '30m';
     return body;
   }
   if (input.output_schema) body.response_format = { type: 'json_object' };
@@ -223,6 +243,9 @@ async function invokeBuilderModel({ input, config, fetchImpl = globalThis.fetch 
   if (input.provider === 'openai' && !providerConfig.apiKey) {
     return { status: 503, body: { error: 'OpenAI provider is not configured', code: 'provider_unconfigured' } };
   }
+  if (providerConfig.kind === 'ollama_cloud' && !providerConfig.apiKey) {
+    return { status: 503, body: { error: 'Ollama Cloud provider is not configured', code: 'provider_unconfigured' } };
+  }
   if (providerConfig.kind === 'ollama' && !providerConfig.baseUrl) {
     return { status: 503, body: { error: `${input.provider} provider is not configured`, code: 'provider_unconfigured' } };
   }
@@ -230,7 +253,7 @@ async function invokeBuilderModel({ input, config, fetchImpl = globalThis.fetch 
     return { status: 413, body: { error: `prompt exceeds the ${input.provider} context window (${providerConfig.numCtx} tokens)`, code: 'context_exceeded' } };
   }
   const probe = await probeProvider(config, input.provider, { fetchImpl });
-  if (providerConfig.kind === 'ollama' && !probe.healthy) return { status: 503, body: { error: `${input.provider} provider is unreachable`, code: 'provider_unavailable' } };
+  if (OLLAMA_API_KINDS.has(providerConfig.kind) && !probe.healthy) return { status: 503, body: { error: `${input.provider} provider is unreachable`, code: 'provider_unavailable' } };
   const model = resolveProviderModel(config, input.provider, input.model, probe.installed ?? null);
   if (!model) return { status: 503, body: { error: `${input.provider} has none of the allowed models installed`, code: 'model_unavailable' } };
 
@@ -244,7 +267,7 @@ async function invokeBuilderModel({ input, config, fetchImpl = globalThis.fetch 
         method: 'POST',
         headers: {
           'Content-Type': 'application/json',
-          ...(isOpenAI ? { Authorization: `Bearer ${providerConfig.apiKey}` } : {})
+          ...authHeaders(providerConfig)
         },
         body: JSON.stringify(buildProviderBody({ input, config, model })),
         signal: controller.signal
@@ -253,7 +276,7 @@ async function invokeBuilderModel({ input, config, fetchImpl = globalThis.fetch 
     const data = await response.json().catch(() => null);
     if (!response.ok || !data) {
       const detail = data?.error?.message ? `: ${String(data.error.message).slice(0, 200)}` : (typeof data?.error === 'string' ? `: ${data.error.slice(0, 200)}` : '');
-      if (providerConfig.kind === 'ollama' && (response.status >= 500 || response.status === 429)) healthCache.set(input.provider, { healthy: false, installed: [], until: Date.now() + HEALTH_FAIL_TTL_MS });
+      if (OLLAMA_API_KINDS.has(providerConfig.kind) && (response.status >= 500 || response.status === 429)) healthCache.set(input.provider, { healthy: false, installed: [], until: Date.now() + HEALTH_FAIL_TTL_MS });
       return { status: 502, body: { error: `${input.provider} provider request failed${detail}`, code: 'provider_error' } };
     }
 
@@ -276,7 +299,7 @@ async function invokeBuilderModel({ input, config, fetchImpl = globalThis.fetch 
     };
   } catch (error) {
     const timedOut = error?.name === 'AbortError';
-    if (!timedOut && providerConfig.kind === 'ollama') healthCache.set(input.provider, { healthy: false, installed: [], until: Date.now() + HEALTH_FAIL_TTL_MS });
+    if (!timedOut && OLLAMA_API_KINDS.has(providerConfig.kind)) healthCache.set(input.provider, { healthy: false, installed: [], until: Date.now() + HEALTH_FAIL_TTL_MS });
     return {
       status: timedOut ? 504 : 502,
       body: { error: timedOut ? 'model provider timed out' : 'model provider unavailable', code: timedOut ? 'provider_timeout' : 'provider_unavailable' }

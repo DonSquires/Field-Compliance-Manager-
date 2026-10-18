@@ -35,6 +35,7 @@ audit event. It must never accept a password or token supplied in a Bob prompt.
 | `GITEA_TOKEN` | `bob-gitea-maintainer` server-side function | Governed issue/PR/file operations on the allowlisted Gitea repository | Browser, Supabase, arbitrary repositories |
 | `VERCEL_TOKEN` | Vercel viewer function/server-side deployment tooling | Inspect approved Vercel deployment state | Supabase, database migrations, browser |
 | VPS/PTT/control-plane tokens | Their specific server-side viewer or control-plane function | Inspect or operate the named approved service | General repository, database, or browser access |
+| `OLLAMA_API_TOKEN` (Ollama Cloud key; also accepted as `OLLAMA_API_KEY`) | VPS control-plane model gateway only (`/var/lib/bob/control-plane.env`), sent as a Bearer header to `https://ollama.com` | Bob Builder's subscription model tier for unrestricted work, after the laptop GPU and VPS Ollama and before paid OpenAI | Restricted/local-only work (the router strips it), local Ollama hosts, browser, Bob prompts, logs, health output, issue text |
 | Bob laptop SSH key (`/var/lib/bob/laptop/id_ed25519`, VPS only) | `bob-laptop-shell.js` in the control plane, over Tailscale, to the owner's laptop only, while the owner's `laptop-tailscale.ps1 -Allow` switch is on | Owner-confirmed PowerShell commands (read files, check the GPU link, setup the owner asked for) | Any other host, unattended or unconfirmed commands, destructive/privilege/credential/firewall changes (refused by the deny list), copying the key anywhere |
 
 ## Monitoring record

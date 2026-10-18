@@ -105,6 +105,7 @@ const ago = (value: string | null | undefined, now: number) => {
 export function providerLabel(provider: string) {
   if (provider === 'gpu_workstation') return 'Local GPU';
   if (provider === 'ollama') return 'Local Ollama';
+  if (provider === 'ollama_cloud') return 'Ollama Cloud';
   if (provider === 'openai') return 'OpenAI (paid)';
   return words(provider, 'Unknown provider');
 }
@@ -214,8 +215,9 @@ export const BuilderLiveActivity: React.FC<Props> = ({ job, snapshot, now, pollS
   const modelRuns = snapshot.modelRuns ?? [];
   const events = (snapshot.events ?? []).slice(0, 8);
   const tokenTotal = modelRuns.reduce((sum, run) => sum + (run.total_tokens ?? 0), 0);
-  const localRuns = modelRuns.filter(run => run.provider !== 'openai').length;
-  const paidRuns = modelRuns.length - localRuns;
+  const localRuns = modelRuns.filter(run => run.provider === 'ollama' || run.provider === 'gpu_workstation').length;
+  const cloudRuns = modelRuns.filter(run => run.provider === 'ollama_cloud').length;
+  const paidRuns = modelRuns.length - localRuns - cloudRuns;
   const latestModel = modelRuns[0] ?? null;
   const eventFiles = [...new Set((snapshot.events ?? []).flatMap(event => event.detail.failed_files))].slice(0, 12);
 
@@ -259,6 +261,7 @@ export const BuilderLiveActivity: React.FC<Props> = ({ job, snapshot, now, pollS
             <div className="builder-live-stats">
               <span><b>{modelRuns.length}</b> recent runs</span>
               <span><b>{localRuns}</b> local</span>
+              {cloudRuns > 0 && <span><b>{cloudRuns}</b> Ollama Cloud</span>}
               <span className={paidRuns ? 'is-paid' : ''}><b>{paidRuns}</b> paid</span>
               <span><b>{tokenTotal.toLocaleString()}</b> tokens</span>
             </div>
