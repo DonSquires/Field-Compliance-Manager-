@@ -33,3 +33,9 @@
 .place-hazard-form-row { display: grid; grid-template-columns: repeat(auto-fit, minmax(160px, 1fr)); gap: 8px; }
 .place-hazard-retire { grid-template-columns: 1fr auto auto; align-items: end; }
 @media (max-width: 640px) { .place-hazard-retire { grid-template-columns: 1fr; } }
+.safety-review-workspace { margin: 12px 0; padding: 12px; border: 1px solid var(--border-color, #d9e1e8); border-radius: 6px; }
+.safety-review-workspace summary { min-height: 44px; padding: 10px 0; cursor: pointer; font-weight: 750; }
+.safety-review-row { display: grid; gap: 6px; padding: 12px 0; border-bottom: 1px solid var(--border-color, #d9e1e8); overflow-wrap: anywhere; }
+.safety-review-row p { margin: 0; }
+.safety-review-workspace button { min-height: 44px; }
+.safety-review-workspace .place-hazard-form { margin: 12px 0; }

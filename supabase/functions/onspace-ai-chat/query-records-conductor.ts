@@ -15,7 +15,8 @@
   'list_routes',
   'list_zones',
   'find_user',
-  'search_observations'
+  'search_observations',
+  'safety_workspace'
 ]);
 /**
  * Query types that are ORG-shaped — eligible for name-promotion to find_org.
@@ -240,6 +241,12 @@ export const PERSON_SURFACEABLE_FIELDS = new Set([
       return `- ${row.observed_at ?? 'unknown time'}${row.plate_number ? ` — ${row.plate_number}` : ''}${anchors ? ` — ${anchors}` : ''}${row.compliance_status ? ` [${row.compliance_status}]` : ''}`;
     }).join('\n');
     return `Found ${results.length} observation(s):\n${lines}`;
+  }
+  if (q === 'safety_workspace') {
+    if (!results.length) return 'No live hazards or safety reviews were found in that scope.';
+    return results.slice(0, 10).map((row) =>
+      `- ${row.name ?? 'Safety record'} (${row.record_type === 'safety_review' ? `review: ${row.status}` : `hazard${row.review_due ? `; review due ${row.review_due}` : '; review not scheduled'}`})`
+    ).join('\n');
   }
   // Org-shaped formatters (existing behaviour, unchanged).
   if (!results.length) {

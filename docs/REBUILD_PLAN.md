@@ -111,12 +111,18 @@ that workstream; migration `20261018090000_place_hazard_register_briefings`):
     Web/mobile TypeScript and production web build pass. Native device execution
     and a real human NMDHB document-to-approved-register run remain separate
     acceptance gates; browser fixtures and SQL probes do not establish either.
-- **Remaining H&S product scope:** automated review-date reminders, individual
-  risk ownership and structured hierarchy-of-controls assessment, task risk
-  assessments/sign-off, and incident/field-report-to-investigation/review links
-  remain unbuilt. A visible overdue date is not a reminder service; a briefing
-  receipt is not a signed task assessment. Do not describe the entire H&S
-  programme as finished.
+- **H&S risk-review lifecycle (migration `20261019100000`):** individual risk
+  owners, structured hierarchy-of-controls classification, scheduled review-date
+  reminders (cron), officer-signed dynamic task assessments (idempotent retry;
+  an unsafe assessment opens a supervisor review and never rewrites the signed
+  evidence), automatic reviews for H&S field reports, and supervisor linking of
+  incidents/investigations with a closure receipt. Evidence: rollback-only SQL
+  probe (RLS/immutability as `authenticated`, foreign-investigation rejection,
+  null-classification rejection), vitest, web/mobile TypeScript and a
+  desktop/Pixel-7 Chromium e2e. `stop_work` records and communicates; it does
+  not gate every task API. Native device execution and a real human supervisor
+  run remain acceptance gates. Do not describe the entire H&S programme as
+  finished.
 
 Owner ruling 2026-10-16: Deputy roster exports are sample/build/test evidence,
 not an operational integration or production import workflow. The offline

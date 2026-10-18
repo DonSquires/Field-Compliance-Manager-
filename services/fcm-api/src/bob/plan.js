@@ -271,10 +271,21 @@ async function planTurn(body, { gateway, now = Date.now, logger = console, env =
   let scrubbed = false;
   let escalated = false;
 
-  // In-house first, outsource when stuck: a local author (laptop/VPS model) whose plan did not parse
-  // hands the turn to the next provider in the chain while there is budget to do so.
+  // Give the local author a bounded correction turn before paying for escalation.
   const inHouse = (provider) => typeof gateway.providerKind === 'function' && gateway.providerKind(provider) !== 'openai';
   const nextChain = (provider) => (typeof gateway.chainAfter === 'function' ? gateway.chainAfter('planner', provider) : null);
+  if (!attempt.parsedOk && inHouse(attempt.completion.provider) && turnBudgetMs - elapsed() > 45000) {
+    try {
+      const local = await runPlannerOnce(gateway, input, {
+        reviewerNotes: ['Your previous response did not parse. Return only one JSON decision matching the documented action/tool/args/reply contract; do not narrate a future action.'],
+        timeoutMs: Math.min(25000, turnBudgetMs - elapsed() - 25000), chain: [attempt.completion.provider],
+      });
+      passes.push({ pass: 'local_format_repair', provider: local.completion.provider, model: local.completion.model, parsed_ok: local.parsedOk });
+      if (local.parsedOk) { attempt = local; decision = local.decision; replanned = true; }
+    } catch (error) {
+      passes.push({ pass: 'local_format_repair', ok: false, error: String(error && error.message || error).slice(0, 200) });
+    }
+  }
   if (!attempt.parsedOk && inHouse(attempt.completion.provider) && nextChain(attempt.completion.provider) && turnBudgetMs - elapsed() > 25000) {
     try {
       const escalation = await runPlannerOnce(gateway, input, { timeoutMs: Math.max(15000, turnBudgetMs - elapsed() - 5000), chain: nextChain(attempt.completion.provider) });
@@ -287,10 +298,31 @@ async function planTurn(body, { gateway, now = Date.now, logger = console, env =
     }
   }
 
+  let selectedCompletion = attempt.completion;
   if (verifyEnabled) {
     const remaining = turnBudgetMs - elapsed();
     const criticBudget = Math.min(30000, remaining - 30000);
     verification = await verifyDecision({ decision, input, gateway, now, budgetMs: criticBudget, useCritic: useCritic && criticBudget > 4000, logger, avoid: { provider: attempt.completion.provider, model: attempt.completion.model } });
+
+    if (verification.verdict === 'repair' && inHouse(attempt.completion.provider) && turnBudgetMs - elapsed() > 45000) {
+      try {
+        const local = await runPlannerOnce(gateway, input, {
+          reviewerNotes: verification.notes, timeoutMs: Math.min(25000, turnBudgetMs - elapsed() - 25000),
+          chain: [attempt.completion.provider],
+        });
+        const check = await verifyDecision({
+          decision: local.decision, input, gateway, now, budgetMs: Math.min(15000, turnBudgetMs - elapsed() - 20000),
+          useCritic, logger, avoid: { provider: local.completion.provider, model: local.completion.model },
+        });
+        const criticRequired = verification.critic?.verdict === 'repair';
+        const criticConfirmed = !criticRequired || (check.critic && !check.critic.error && !check.critic.unparseable && check.critic.verdict === 'pass');
+        const accepted = local.parsedOk && check.verdict === 'pass' && criticConfirmed;
+        passes.push({ pass: 'local_review_repair', provider: local.completion.provider, model: local.completion.model, parsed_ok: local.parsedOk, accepted });
+        if (accepted) { attempt = local; decision = local.decision; selectedCompletion = local.completion; verification = check; replanned = true; }
+      } catch (error) {
+        passes.push({ pass: 'local_review_repair', ok: false, error: String(error && error.message || error).slice(0, 200) });
+      }
+    }
 
     if (verification.verdict === 'repair' && turnBudgetMs - elapsed() > 20000) {
       try {
@@ -306,7 +338,7 @@ async function planTurn(body, { gateway, now = Date.now, logger = console, env =
         // Keep the repaired draft unless it introduced NEW blocking problems the original did not have.
         const originalBlocks = new Set(verification.issues.filter((issue) => issue.severity === 'block').map((issue) => issue.code));
         const regressed = stillBlocked.some((issue) => !originalBlocks.has(issue.code));
-        if (!regressed) decision = repair.decision;
+        if (!regressed) { decision = repair.decision; selectedCompletion = repair.completion; }
         verification = { ...verification, repaired: true, recheck_issues: recheck, regressed };
       } catch (error) {
         passes.push({ pass: 'repair', ok: false, error: String(error && error.message || error).slice(0, 200) });
@@ -337,8 +369,8 @@ async function planTurn(body, { gateway, now = Date.now, logger = console, env =
       proposed_entities: decision.proposed_entities,
       reasoning: decision.reasoning,
       confidence: decision.confidence,
-      model: passes[passes.length - 1].model || authorPass.model,
-      provider: passes[passes.length - 1].provider || authorPass.provider,
+      model: selectedCompletion.model,
+      provider: selectedCompletion.provider,
       planned_tool_rejected: decision.planned_tool_rejected,
       route_selected: decision.route_selected,
       verification: {

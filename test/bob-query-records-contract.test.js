@@ -17,6 +17,14 @@ test('Bob query_records exposes every conductor lookup as an authenticated bound
   assert.doesNotMatch(source, /\.rpc\('execute_sql'/);
 });
 
+test('site resolution uses real schema fields and carries the house into safety work', () => {
+  assert.match(source, /select\('id, client_organization_id, location_id, name/);
+  assert.doesNotMatch(source, /client_organization_id:organization_id/);
+  assert.match(source, /query === 'safety_workspace'/);
+  assert.match(source, /caller\.rpc\('get_safety_review_workspace'/);
+  assert.match(source, /human_action_required/);
+});
+
 test('Bob query_records derives scope from the authenticated profile', () => {
   assert.match(source, /profile\.organization_id/);
   assert.match(source, /const unrestricted = role === 'grand_master'/);

@@ -4978,6 +4978,9 @@ async function execQueryRecords(authHeader, caps, args) {
       outcome: 'ok',
       query: q,
       count: results.length,
+      total: r.data?.total ?? results.length,
+      truncated: r.data?.truncated === true,
+      human_action_required: r.data?.human_action_required ?? undefined,
       results: results.slice(0, 25)
     }
   };

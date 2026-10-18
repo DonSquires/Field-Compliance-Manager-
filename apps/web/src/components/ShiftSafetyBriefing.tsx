@@ -11,6 +11,7 @@ import {
   type BriefingPlace, type RiskLevel, type SafetyBriefing,
 } from '../lib/safetyBriefing';
 import './ShiftSafetyBriefing.css';
+import { DynamicRiskAssessment } from './DynamicRiskAssessment';
 
 const RISK_ORDER: Record<string, number> = { critical: 0, high: 1, medium: 2, low: 3 };
 
@@ -271,6 +272,7 @@ export function OfficerSafetyBriefingBanner({ shift }: { shift: { id: string; st
         <button type="button" onClick={() => { setNotice(null); setDialog('report'); }}><Plus size={14} aria-hidden="true" /> Report a hazard</button>
         <button type="button" onClick={() => void load()} aria-label="Refresh safety briefing"><RefreshCw size={14} /></button>
       </div>
+      <DynamicRiskAssessment shiftId={shiftId} places={briefing.places} />
       {dialog === 'briefing' && (
         <SafetyBriefingDialog
           briefing={briefing}

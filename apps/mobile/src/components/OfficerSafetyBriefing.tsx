@@ -1,6 +1,7 @@
 import { useCallback, useEffect, useRef, useState } from 'react';
 import { Linking, Pressable, StyleSheet, Text, TextInput, View } from 'react-native';
 import { supabase } from '../lib/supabase';
+import { OfficerTaskRiskAssessments } from './OfficerTaskRiskAssessments';
 
 type Place = { kind: 'site' | 'zone'; id: string; name: string };
 type Hazard = {
@@ -180,6 +181,7 @@ export function OfficerSafetyBriefing({ shiftId, shiftStatus, busy, onReadyToSta
       <Pressable accessibilityRole="button" disabled={disabled || !place || !title.trim()} style={styles.button} onPress={() => void report()}><Text style={styles.buttonText}>{saving ? 'Sending...' : 'Submit hazard report'}</Text></Pressable>
       <Pressable accessibilityRole="button" disabled={disabled} style={styles.button} onPress={() => setReporting(false)}><Text style={styles.buttonText}>Cancel report</Text></Pressable>
     </View>}
+    {shiftStatus === 'in_progress' && briefing && <OfficerTaskRiskAssessments shiftId={shiftId} places={briefing.places} />}
   </View>;
 }
 

@@ -464,14 +464,14 @@ test('planTurn works in-house first and escalates to OpenAI only when the local 
   assert.equal(real.chainAfter('planner', 'openai'), null, 'OpenAI is the last resort');
   assert.equal(real.providerKind('gpu_workstation'), 'ollama');
 
-  // 1) The laptop model answers with prose instead of the JSON contract -> the turn goes to OpenAI.
+  // 1) The laptop remains unparseable after a local correction -> last-resort escalation.
   const calls = [];
   const gateway = {
     chainAfter: real.chainAfter,
     providerKind: real.providerKind,
     async chatJson(role, messages, options = {}) {
       calls.push({ role, chain: options.chain ?? null });
-      if (role === 'planner' && !options.chain) return { content: 'Sure! Here is what I would do…', provider: 'gpu_workstation', model: 'qwen2.5-coder:7b', latency_ms: 30 };
+      if (role === 'planner' && (!options.chain || options.chain[0] === 'gpu_workstation')) return { content: 'Sure! Here is what I would do…', provider: 'gpu_workstation', model: 'qwen2.5-coder:7b', latency_ms: 30 };
       if (role === 'planner') return { content: JSON.stringify({ action: 'use_tool', tool: 'query_records', args: { query: 'find_org', name: 'LINZ' }, reply: 'Looking that up.' }), provider: 'openai', model: 'gpt-5.4', latency_ms: 40 };
       throw new Error(`unexpected role ${role}`);
     },
@@ -480,17 +480,17 @@ test('planTurn works in-house first and escalates to OpenAI only when the local 
   assert.equal(result.body.tool, 'query_records');
   assert.equal(result.body.provider, 'openai');
   assert.equal(result.body.verification.escalated, true);
-  assert.deepEqual(result.body.passes.map((p) => [p.pass, p.provider]), [['author', 'gpu_workstation'], ['escalate', 'openai']]);
-  assert.deepEqual(calls.map((c) => c.chain), [null, ['openai']]);
+  assert.deepEqual(result.body.passes.map((p) => [p.pass, p.provider]), [['author', 'gpu_workstation'], ['local_format_repair', 'gpu_workstation'], ['escalate', 'openai']]);
+  assert.deepEqual(calls.map((c) => c.chain), [null, ['gpu_workstation'], ['openai']]);
 
-  // 2) The laptop model's draft is blocked by the verifier -> the repair goes to OpenAI, not back to the same model.
+  // 2) The local correction remains blocked -> only then does repair go to OpenAI.
   const calls2 = [];
   const gateway2 = {
     chainAfter: real.chainAfter,
     providerKind: real.providerKind,
     async chatJson(role, messages, options = {}) {
       calls2.push({ role, chain: options.chain ?? null });
-      if (role === 'planner' && !options.chain) return { content: JSON.stringify({ action: 'ask', reply: 'Before I draft:', questions: [{ question: 'Do you want a 90-day trial clause included?' }] }), provider: 'gpu_workstation', model: 'qwen2.5-coder:7b', latency_ms: 30 };
+      if (role === 'planner' && (!options.chain || options.chain[0] === 'gpu_workstation')) return { content: JSON.stringify({ action: 'ask', reply: 'Before I draft:', questions: [{ question: 'Do you want a 90-day trial clause included?' }] }), provider: 'gpu_workstation', model: 'qwen2.5-coder:7b', latency_ms: 30 };
       if (role === 'planner') return { content: JSON.stringify({ action: 'answer', reply: '## Casual Security Officer — Job Description\n\n…', confidence: 0.9 }), provider: 'openai', model: 'gpt-5.4', latency_ms: 40 };
       if (role === 'verifier') return { content: JSON.stringify({ verdict: 'repair', issues: [], summary: 're-ask' }), provider: 'openai', model: 'gpt-5.4-mini', latency_ms: 3 };
       throw new Error(`unexpected role ${role}`);
@@ -503,7 +503,27 @@ test('planTurn works in-house first and escalates to OpenAI only when the local 
   const repairPass = repaired.body.passes.find((p) => p.pass === 'repair');
   assert.equal(repairPass.provider, 'openai');
   assert.equal(repairPass.escalated_from, 'gpu_workstation');
-  assert.deepEqual(calls2.filter((c) => c.role === 'planner').map((c) => c.chain), [null, ['openai']]);
+  assert.deepEqual(calls2.filter((c) => c.role === 'planner').map((c) => c.chain), [null, ['gpu_workstation'], ['openai']]);
+});
+
+test('a corrected in-house plan stays in-house instead of immediately buying a repair', async () => {
+  let calls = 0;
+  const gateway = {
+    providerKind: () => 'ollama',
+    chainAfter: () => ['openai'],
+    async chatJson(role, _messages, options = {}) {
+      if (role === 'verifier') return { content: JSON.stringify({ verdict: 'pass', issues: [] }), provider: 'gpu_workstation', model: 'independent-critic', latency_ms: 1 };
+      calls++;
+      if (calls === 1) return { content: 'I will look it up', provider: 'gpu_workstation', model: 'local-author', latency_ms: 1 };
+      assert.deepEqual(options.chain, ['gpu_workstation']);
+      return { content: JSON.stringify({ action: 'use_tool', tool: 'query_records', args: { query: 'find_org', args: { name: 'Synthetic place' } }, reply: 'Looking up the organisation.' }), provider: 'gpu_workstation', model: 'local-author', latency_ms: 1 };
+    },
+  };
+  const result = await planTurn({ message: 'Find the synthetic organisation', tools: TOOLS }, { gateway, env: {} });
+  assert.equal(result.body.tool, 'query_records');
+  assert.equal(result.body.provider, 'gpu_workstation');
+  assert.equal(result.body.verification.escalated, false);
+  assert.equal(calls, 2);
 });
 
 test('planTurn returns 502 with attempts when every provider fails', async () => {
