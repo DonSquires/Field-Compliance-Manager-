@@ -1620,8 +1620,8 @@ function attachGuidedProposalWorkflow(meta) {
     },
     {
       tool: 'read_issues',
-      purpose: 'ADMIRAL ONLY. Read GitLab issues. Get full issue context without needing someone to paste it. Args: { iid } for single issue with comments; { label?, search?, state?, limit? } to list.',
-      governance: 'read-only; admiral only; GitLab Issues API'
+      purpose: 'ADMIRAL ONLY. Read Bob Builder jobs from the Builder job records (Supabase builder_jobs, not GitLab). Args: { iid } where iid is any job identifier the user gave: full or 8+ character job ID, dash-less ID, workspace branch (bob/job-…) or its suffix, or commit SHA. Returns the root job, its rerun lineage and the actionable job selected. { state?, search?, limit? } lists jobs.',
+      governance: 'read-only; admiral only; Builder job records'
     },
     {
       tool: 'write_self_memory',
@@ -1635,7 +1635,7 @@ function attachGuidedProposalWorkflow(meta) {
     },
     {
       tool: 'dispatch_flow',
-      purpose: 'ADMIRAL ONLY. Dispatch a governed GitLab Duo coding flow (developer, fix_pipeline, code_review) to implement a task as a DRAFT MR. Bob COMPOSES the brief and PROPOSES the dispatch; the human CONFIRMS before it fires. The flow output always lands as a DRAFT MR -- Bob NEVER merges. Use this when the owner asks you to start a coding task, fix a pipeline, or review code via Duo. Args: { flow: "developer"|"fix_pipeline"|"code_review", goal: "short goal", brief: "full dispatch brief" }. NOTE: "developer" (workflow_definition=software_development) is CONFIRMED working; fix_pipeline and code_review are UNVERIFIED.',
+      purpose: 'ADMIRAL ONLY. Dispatch a governed Bob Builder job (Supabase job state; GitHub workspace branch and draft pull request targeting main). Bob COMPOSES the brief and PROPOSES the dispatch; the human CONFIRMS before it fires. Output is a reviewed draft PR at most -- Bob NEVER merges, deploys or applies migrations. Args: { flow: "developer"|"fix_pipeline"|"code_review", goal: "short goal", brief: "full dispatch brief" }. A dispatch receipt is not a commit, PR, merge or deployment receipt.',
       governance: 'WRITE-draft; admiral (grand_master) only; human-confirms-before-dispatch; output is always DRAFT MR; Bob NEVER merges'
     },
     // C5 stage 1b (#243): generic governed write via the bob-upsert-generic path.

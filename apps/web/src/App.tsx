@@ -7,6 +7,7 @@ import LoginPage from './pages/LoginPage';
 import PublicDisputePage from './pages/PublicDisputePage';
 import AcceptCapabilityShareInvitePage from './pages/AcceptCapabilityShareInvitePage';
 import { installBobFrictionMonitor } from './lib/bobFrictionMonitor';
+import { AppUpdateNotice } from './components/AppUpdateNotice';
 
 function RuntimeFrictionMonitor() {
   const { hasSession } = useAuth();
@@ -47,6 +48,7 @@ export function App() {
       <ServiceRelationshipProvider>
         <BrowserRouter>
           <RuntimeFrictionMonitor />
+          <AppUpdateNotice />
           <Routes>
             <Route path="/dispute" element={<PublicDisputePage />} />
             <Route path="/invite/capability/:token" element={<AcceptCapabilityShareInvitePage />} />

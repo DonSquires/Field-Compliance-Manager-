@@ -64,6 +64,8 @@ test('Builder cutover handlers preserve HTTP contracts without a production data
       if (expression.startsWith('eq.')) rows = rows.filter(row => String(row[field]) === expression.slice(3));
       else if (expression.startsWith('in.(')) rows = rows.filter(row => expression.slice(4, -1).split(',').includes(row[field]));
       else if (expression.startsWith('not.in.(')) rows = rows.filter(row => !expression.slice(8, -1).split(',').includes(row[field]));
+      else if (expression.startsWith('gte.')) rows = rows.filter(row => String(row[field]) >= expression.slice(4));
+      else if (expression.startsWith('lte.')) rows = rows.filter(row => String(row[field]) <= expression.slice(4));
       else if (expression.startsWith('ilike.')) rows = rows.filter(row => String(row[field]).toLowerCase().includes(expression.slice(6).replaceAll('%', '').toLowerCase()));
     }
     const order = url.searchParams.get('order');
@@ -112,7 +114,9 @@ test('Builder cutover handlers preserve HTTP contracts without a production data
         role = 'officer'; assert.equal((await invoke({})).status, 403); role = 'grand_master';
       });
       await t.test('both branch columns deduplicate and select the actionable child without a task run', async () => {
-        for (const request of [{ iid: branch }, { search: branch }, { iid: rootId }, { iid: childId }, { iid: sha }]) {
+        // Pasted forms seen live: the dash-less workspace suffix, a short id prefix, a dash-less UUID.
+        for (const request of [{ iid: branch }, { search: branch }, { iid: rootId }, { iid: childId }, { iid: sha },
+          { iid: 'a7c916f5b98047f7ac47' }, { search: 'A7C916F5B98047F7AC47' }, { iid: 'a7c916f5' }, { iid: rootId.replaceAll('-', '') }, { iid: '#f6df4b84' }]) {
           const result = await invoke({ ...request, include_comments: false });
           assert.equal(result.status, 200);
           assert.equal(result.body.issue.iid, childId);
