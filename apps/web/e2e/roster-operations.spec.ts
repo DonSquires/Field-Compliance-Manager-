@@ -14,6 +14,7 @@ test('enterprise roster week board is operational and visually stable', async ({
  const errors=monitorBrowserErrors(page); await signInAsAdmin(page,'/admin/roster');
  await expect(page.getByRole('heading',{name:'Roster',exact:true})).toBeVisible();
  const board=page.locator('.roster-board');await expect(board.getByText('Ana Ngata',{exact:true})).toBeVisible(); await expect(board.getByText('Jordan Lee',{exact:true})).toBeVisible();
+ const boardLayout=await board.evaluate((element)=>({overflowX:getComputedStyle(element).overflowX,overflowY:getComputedStyle(element).overflowY,headerPosition:getComputedStyle(element.querySelector('.roster-board-head')!).position,firstColumnPosition:getComputedStyle(element.querySelector('.roster-person')!).position}));expect(boardLayout).toEqual({overflowX:'auto',overflowY:'auto',headerPosition:'sticky',firstColumnPosition:'sticky'});
  await expect(page).toHaveScreenshot('roster-overview-first-viewport.png');
  if((page.viewportSize()?.width??0)<900){await expect(page.locator('.roster-board-scroll-cue')).toBeVisible();const boardSize=await board.evaluate((element)=>({scrollWidth:element.scrollWidth,clientWidth:element.clientWidth}));expect(boardSize.scrollWidth).toBeGreaterThan(boardSize.clientWidth);}
  await page.getByRole('button',{name:'2 weeks'}).click();await expect(page.locator('.roster-board-head>div')).toHaveCount(15);expect(await board.evaluate((element)=>element.scrollWidth>element.clientWidth)).toBe(true);await page.getByRole('button',{name:'Month'}).click();await expect(page.locator('.roster-board-head>div')).toHaveCount(32);for(let index=0;index<7;index+=1)await page.getByTitle('Previous period').click();await expect(page.getByLabel('Public holidays').getByText('Provincial anniversary day')).toBeVisible();await expect(page.getByLabel('Public holidays').getByText("New Year's Day",{exact:true})).toBeVisible();await expect(page.locator('.roster-horizon-bar')).toHaveScreenshot('roster-calendar-controls.png');await page.getByLabel('Regional holidays').selectOption('WGN');await expect(page.getByText('Regional public holiday calendar updated.')).toBeVisible();await page.getByRole('button',{name:'Week',exact:true}).click();
@@ -22,7 +23,7 @@ test('enterprise roster week board is operational and visually stable', async ({
  await expect(page.locator('.roster-board').getByText('Roster Administration',{exact:true})).toBeVisible();
  expect(await page.evaluate(()=>document.documentElement.scrollWidth<=window.innerWidth)).toBe(true);
  if((page.viewportSize()?.width??0)<600){await board.scrollIntoViewIfNeeded();await expect(page).toHaveScreenshot('roster-week-board.png');}else await expect(board).toHaveScreenshot('roster-week-board.png');
- await page.getByRole('button',{name:/08:00–\d\d:\d\d site guard/i}).click(); await expect(page.getByText('Assignment',{exact:true})).toBeVisible(); await expect(page.getByText('On track',{exact:true})).toBeVisible(); await page.locator('.roster-inspector header button').click();
+ await page.getByRole('button',{name:/20:00–04:00 site guard/i}).click(); await expect(page.getByText('Assignment',{exact:true})).toBeVisible(); await expect(page.getByText('On track',{exact:true})).toBeVisible(); await page.locator('.roster-inspector header button').click();
  const slotQueue=page.locator('.roster-slot-queue');await slotQueue.getByRole('button',{name:/Roster Administration/}).click();await expect(page.getByText('Roster slot',{exact:true})).toBeVisible();await page.getByRole('button',{name:'Reassign'}).click();const reassignDialog=page.getByRole('dialog',{name:'Reassign roster slot?'});await expect(reassignDialog.getByRole('button',{name:'Confirm reassignment'})).toBeDisabled();await reassignDialog.getByLabel('Replacement officer').selectOption({label:'Jordan Lee'});await reassignDialog.getByLabel('Reassignment reason').fill('Coverage plan changed after supervisor review.');await expect(reassignDialog).toHaveScreenshot('roster-reassign-slot-dialog.png');await reassignDialog.getByRole('button',{name:'Confirm reassignment'}).click();await expect(page.getByText('Roster slot reassigned. The replacement officer has been asked to accept it.')).toBeVisible();await slotQueue.getByRole('button',{name:/Roster Administration/}).click();const cancelSlot=page.getByRole('button',{name:'Cancel slot'});await cancelSlot.scrollIntoViewIfNeeded();await cancelSlot.click();const cancelDialog=page.getByRole('dialog',{name:'Cancel roster slot?'});await expect(cancelDialog.getByRole('button',{name:'Confirm cancellation'})).toBeDisabled();await cancelDialog.getByLabel('Cancellation reason').fill('Internal priorities changed for this roster period.');await expect(cancelDialog).toHaveScreenshot('roster-cancel-slot-dialog.png');await cancelDialog.getByRole('button',{name:'Confirm cancellation'}).click();await expect(page.getByText('Roster slot cancelled, and its shift with it.')).toBeVisible();
  await page.getByRole('button',{name:'risk'}).click(); await expect(board.getByText('Jordan Lee',{exact:true})).toBeVisible(); await expect(board.getByText('Ana Ngata',{exact:true})).toBeHidden();
  await page.getByRole('button',{name:/Create shift/}).click(); const dialog=page.getByRole('dialog',{name:'Create shift'}); await expect(dialog).toBeVisible(); await dialog.getByLabel('Officer',{exact:true}).selectOption('22222222-2222-4222-8222-222222222222'); await dialog.getByLabel('Start',{exact:true}).fill('2026-08-30T10:00'); await dialog.getByLabel('End',{exact:true}).fill('2026-08-30T18:00'); await expect(dialog.getByText('Publish immediately')).toBeVisible(); await expect(dialog).toHaveScreenshot('roster-create-shift-dialog.png'); await dialog.getByRole('button',{name:'Create shift'}).click(); await expect(page.getByText('Shift published for Ana Ngata. They will see it on their schedule and can accept or decline.')).toBeVisible(); expect(errors,errors.join('\n')).toEqual([]);
@@ -131,6 +132,7 @@ test('rosterer sees open shifts in the board and publishes drafts after a plain-
         const json = (body: unknown) => ({ contentType: 'application/json', body: JSON.stringify(body) });
         const unit = '23232323-2323-4323-8323-232323232323';
         let published = false;
+        let offerPayload: Record<string, unknown> | null = null;
         await page.route('**/rest/v1/roster_slots**', async (route) => await route.fulfill(json([
                 { id: 'a1a1a1a1-0000-4000-8000-000000000001', work_unit_id: unit, staff_id: null, scheduled_start: '2026-08-25T20:00:00.000Z', scheduled_end: '2026-08-26T04:00:00.000Z', status: published ? 'published' : 'draft', linked_shift_id: null, notes: null },
                 { id: 'a1a1a1a1-0000-4000-8000-000000000002', work_unit_id: unit, staff_id: '22222222-2222-4222-8222-222222222222', scheduled_start: '2026-08-27T20:00:00.000Z', scheduled_end: '2026-08-28T04:00:00.000Z', status: published ? 'published' : 'draft', linked_shift_id: null, notes: null },
@@ -138,6 +140,10 @@ test('rosterer sees open shifts in the board and publishes drafts after a plain-
         await page.route('**/rest/v1/rpc/preview_batch_publish_roster_slots', async (route) => await route.fulfill(json([{ draft_count: 2, leave_conflict_count: 0, unassigned_count: 1, field_shift_count: 0 }])));
         await page.route('**/rest/v1/rpc/batch_publish_roster_slots', async (route) => { published = true; await route.fulfill(json([{ published_count: 2, materialized_count: 0, conflict_count: 0 }])); });
         await page.route('**/rest/v1/rpc/get_roster_batch_publish_failures', async (route) => await route.fulfill(json([])));
+        await page.route('**/rest/v1/rpc/offer_overtime_by_seniority', async (route) => {
+                offerPayload = JSON.parse(route.request().postData() ?? '{}');
+                await route.fulfill(json([{ offers_created: 3, offer_round: 1 }]));
+        });
         await signInAsAdmin(page, '/admin/roster');
         const board = page.locator('.roster-board');
         await expect(board.getByText('Open shifts', { exact: true })).toBeVisible();
@@ -160,7 +166,74 @@ test('rosterer sees open shifts in the board and publishes drafts after a plain-
         await expect(page.getByText(/2 shifts published and 0 field shift records created\. Officers can now accept or decline\./)).toBeVisible();
         await expect(page.getByRole('button', { name: 'Publish 0 drafts' })).toBeDisabled();
         await expect(board.locator('.roster-open-row').getByText('Waiting for officer', { exact: true })).toBeVisible();
+        await openChip.click();
+        await inspector.getByRole('button', { name: 'Offer overtime' }).click();
+        expect(offerPayload).toMatchObject({
+                p_roster_slot_id: 'a1a1a1a1-0000-4000-8000-000000000001',
+                p_offer_count: 3,
+                p_expires_in_minutes: 60,
+        });
+        await expect(page.getByText('Offered to 3 staff in seniority order (round 1). Offers expire in 60 minutes.')).toBeVisible();
         expect(errors, errors.join('\n')).toEqual([]);
+});
+
+test('work-unit planning can create and advertise an open shift without rosterable staff', async ({ page }) => {
+        const json = (body: unknown) => ({ contentType: 'application/json', body: JSON.stringify(body) });
+        let createPayload: Record<string, unknown> | null = null;
+        let materializeCalled = false;
+        await page.route('**/rest/v1/rpc/get_operating_branch_roster_staff', async (route) => await route.fulfill(json([])));
+        await page.route('**/rest/v1/roster_slots**', async (route) => await route.fulfill(json([])));
+        await page.route('**/rest/v1/rpc/create_roster_slot', async (route) => {
+                createPayload = JSON.parse(route.request().postData() ?? '{}');
+                await route.fulfill(json({
+                        id: 'a1a1a1a1-0000-4000-8000-000000000003',
+                        work_unit_id: '23232323-2323-4323-8323-232323232323',
+                        staff_id: null,
+                        scheduled_start: createPayload?.p_scheduled_start,
+                        scheduled_end: createPayload?.p_scheduled_end,
+                        status: 'published',
+                        linked_shift_id: null,
+                        notes: null,
+                }));
+        });
+        await page.route('**/rest/v1/rpc/materialize_roster_slot', async (route) => {
+                materializeCalled = true;
+                await route.fulfill(json(null));
+        });
+
+        await signInAsAdmin(page, '/admin/roster');
+        await page.getByRole('button', { name: 'Work unit schedule' }).click();
+        const board = page.locator('.roster-board');
+        await expect(board.locator('.roster-board-head').getByText('Work unit', { exact: true })).toBeVisible();
+        await expect(page.getByRole('button', { name: 'ready', exact: true })).toHaveCount(0);
+        await board.getByRole('button', { name: /Add shift for Roster Administration on/ }).first().click();
+        const dialog = page.getByRole('dialog', { name: 'Create shift' });
+        await expect(dialog.getByLabel('Officer', { exact: true })).toHaveValue('');
+        await expect(dialog.getByText('Advertise open shift immediately')).toBeVisible();
+        await expect(dialog.getByRole('button', { name: 'Create shift' })).toBeEnabled();
+        await dialog.getByRole('button', { name: 'Create shift' }).click();
+
+        expect(createPayload).toMatchObject({
+                p_work_unit_id: '23232323-2323-4323-8323-232323232323',
+                p_staff_id: null,
+                p_publish: true,
+        });
+        expect(materializeCalled).toBe(false);
+        await expect(page.getByText('Open shift published for Roster Administration. Open it on the roster and offer it to available staff.')).toBeVisible();
+});
+
+test('roster opens the branch timesheet correction and approval queue directly', async ({ page }) => {
+        await signInAsAdmin(page, '/admin/roster');
+        await page.getByRole('button', { name: 'Timesheets & approvals' }).click();
+        await expect(page).toHaveURL(/\/admin\/people-hr\?tab=timesheets$/);
+        await expect(page.getByRole('heading', { name: /Branch timesheets/ })).toBeVisible();
+
+        await page.getByRole('button', { name: 'Edit hours' }).click();
+        await expect(page.getByRole('dialog', { name: 'Edit timesheet hours' })).toBeVisible();
+        await page.getByRole('dialog', { name: 'Edit timesheet hours' }).getByRole('button', { name: 'Cancel' }).click();
+
+        await page.getByRole('button', { name: 'Branch check' }).click();
+        await expect(page.getByRole('dialog', { name: 'Branch check timesheet?' })).toBeVisible();
 });
 
 test('roster page explains what to set up first when the branch has nothing to roster', async ({ page }) => {

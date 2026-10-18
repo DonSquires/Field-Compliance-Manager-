@@ -39,7 +39,9 @@ describe('enterprise roster operations', () => {
   it('creates slots and materializes only field work through governed RPCs', () => {
     expect(page).toContain("supabase.rpc('create_roster_slot'");
     expect(page).toContain("supabase.rpc('materialize_roster_slot'");
-    expect(page).toContain("unit?.work_unit_type !== 'internal'");
+    expect(page).toContain("form.publish && person && unit?.work_unit_type !== 'internal'");
+    expect(page).toContain('Open shift — advertise to available staff');
+    expect(page).toContain('required={Boolean(editingSlot)}');
     expect(page).not.toContain(".from('shifts').insert");
   });
   it('manages typed slot lifecycle only through governed admin RPCs', () => {
@@ -86,5 +88,15 @@ describe('enterprise roster operations', () => {
     expect(page).toContain("admin: { eyebrow: 'Team planning'");
     expect(page).toContain("admin_officer: { eyebrow: 'Daily scheduling'");
     expect(page).toContain('<h1>Roster</h1><p>{rosterView.description}</p>');
+  });
+
+  it('supports staff and work-unit planning with direct timesheet handoff', () => {
+    expect(page).toContain('Staff schedule');
+    expect(page).toContain('Work unit schedule');
+    expect(page).toContain("openCreate(undefined, day, unit.id)");
+    expect(page).toContain("scheduleMode === 'staff' && staff.length === 0");
+    expect(page).toContain("scheduleMode === 'staff' && <div className=\"roster-readiness\"");
+    expect(page).toContain("scheduleMode === 'staff' ? 'Staff' : 'Work unit'");
+    expect(page).toContain("navigate('/admin/people-hr?tab=timesheets')");
   });
 });
