@@ -223,6 +223,14 @@ in-house. VPS storage hygiene is now repo-managed (`host-hygiene` deploy
 target): Gitea dump retention by count replaced a 14-day rule that had
 accumulated 202 GB, and the control plane reports disk pressure on `/health`.
 
+Ollama Cloud tier, owner direction 2026-10-18: the owner's ollama.com subscription is a
+distinct external provider (`ollama_cloud`), not a replacement for local Ollama. Builder routing
+is laptop GPU → VPS Ollama → Ollama Cloud → OpenAI; restricted work is stripped of every
+external provider and falls back to local-only. Live evidence: both local machines were healthy,
+but the first allowlisted model (`qwen2.5-coder:7b`) failed validation, so steps fell through to
+paid OpenAI; the cloud tier puts large hosted models (`gpt-oss:120b` and others) ahead of that
+cost. A provider missing from the health report is no longer offered as a candidate.
+
 Builder coding-workspace integration 2026-10-15: the Builder Control Room now
 presents the existing governed build system as one accessible coding workspace
 rather than opening Bob over the workbench as a floating modal. Desktop uses

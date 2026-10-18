@@ -3,7 +3,8 @@ const crypto = require('node:crypto');
 const PROVIDERS = Object.freeze({
   OPENAI: 'openai',
   OLLAMA: 'ollama',
-  GPU_WORKSTATION: 'gpu_workstation'
+  GPU_WORKSTATION: 'gpu_workstation',
+  OLLAMA_CLOUD: 'ollama_cloud'
 });
 
 const LOCAL_WORKLOADS = new Set([
@@ -21,12 +22,18 @@ const LOCAL_PROVIDERS = new Set([PROVIDERS.OLLAMA, PROVIDERS.GPU_WORKSTATION]);
 // generates at ~13 tok/s. Give local providers a longer budget so "slow" is not read as "stuck".
 const DEFAULT_GATEWAY_TIMEOUT_MS = 90000;
 const DEFAULT_LOCAL_GATEWAY_TIMEOUT_MS = 420000;
+// Hosted large models answer slower than OpenAI's small models but need no cold load.
+const DEFAULT_CLOUD_GATEWAY_TIMEOUT_MS = 300000;
 
 function gatewayTimeoutFor(provider, gateway = {}, env = process.env) {
   if (Number.isFinite(Number(gateway.timeoutMs)) && Number(gateway.timeoutMs) > 0) return Number(gateway.timeoutMs);
   if (LOCAL_PROVIDERS.has(provider)) {
     const configured = Number(env?.BOB_LOCAL_MODEL_TIMEOUT_MS);
     return Number.isFinite(configured) && configured > 0 ? configured : DEFAULT_LOCAL_GATEWAY_TIMEOUT_MS;
+  }
+  if (provider === PROVIDERS.OLLAMA_CLOUD) {
+    const configured = Number(env?.BOB_CLOUD_MODEL_TIMEOUT_MS);
+    return Number.isFinite(configured) && configured > 0 ? configured : DEFAULT_CLOUD_GATEWAY_TIMEOUT_MS;
   }
   return DEFAULT_GATEWAY_TIMEOUT_MS;
 }
@@ -41,12 +48,22 @@ function parseChain(raw, fallback) {
 // and reaches OpenAI only as the last resort when both in-house tiers fail, time out, or return
 // output that fails validation. This supersedes the 2026-10-13 strong-first default: paying
 // OpenAI per call for 30-60 agentic turns per job is the cost the owner has ruled out.
-const IN_HOUSE_FIRST = Object.freeze([PROVIDERS.GPU_WORKSTATION, PROVIDERS.OLLAMA, PROVIDERS.OPENAI]);
+//
+// Owner direction 2026-10-18: Ollama Cloud (owner's ollama.com subscription) is the first outsourced
+// tier, ahead of per-call OpenAI. It is external, so it never joins the restricted (local-only) chain.
+const IN_HOUSE_FIRST = Object.freeze([PROVIDERS.GPU_WORKSTATION, PROVIDERS.OLLAMA, PROVIDERS.OLLAMA_CLOUD, PROVIDERS.OPENAI]);
+const EXTERNAL_PROVIDERS = new Set([PROVIDERS.OLLAMA_CLOUD, PROVIDERS.OPENAI]);
+
+function localOnly(chain) {
+  const local = chain.filter(provider => !EXTERNAL_PROVIDERS.has(provider));
+  return local.length ? local : [PROVIDERS.OLLAMA, PROVIDERS.GPU_WORKSTATION];
+}
 
 function routingChains(env = process.env) {
   return {
-    restricted: parseChain(env.BOB_BUILDER_ROUTE_RESTRICTED, [PROVIDERS.OLLAMA, PROVIDERS.GPU_WORKSTATION]),
-    local: parseChain(env.BOB_BUILDER_ROUTE_LOCAL, [PROVIDERS.GPU_WORKSTATION, PROVIDERS.OLLAMA, PROVIDERS.OPENAI]),
+    // Restricted data never leaves Bob's own compute, whatever the environment asks for.
+    restricted: localOnly(parseChain(env.BOB_BUILDER_ROUTE_RESTRICTED, [PROVIDERS.OLLAMA, PROVIDERS.GPU_WORKSTATION])),
+    local: parseChain(env.BOB_BUILDER_ROUTE_LOCAL, [...IN_HOUSE_FIRST]),
     author: parseChain(env.BOB_BUILDER_ROUTE_AUTHOR, [...IN_HOUSE_FIRST]),
     review: parseChain(env.BOB_BUILDER_ROUTE_REVIEW, [...IN_HOUSE_FIRST]),
     analysis: parseChain(env.BOB_BUILDER_ROUTE_ANALYSIS, [...IN_HOUSE_FIRST])
@@ -303,6 +320,8 @@ function selectProviders(modelRequest, { health = null, avoid = [], startAfter =
   const candidates = [];
   for (const provider of chain.slice(from)) {
     const status = health ? health[provider] : null;
+    // A health report that omits a provider (an older gateway, or Ollama Cloud with no key) means it is not available.
+    if (health && !status) continue;
     if (status && (!status.configured || !status.healthy)) continue;
     const avoided = candidate => avoid.some(identity => identity && identity.provider === provider && (!identity.model || !candidate || identity.model === candidate));
     let model = provider === PROVIDERS.OPENAI
@@ -447,6 +466,7 @@ async function executeSingleModelRun({ supabase, modelRequest, gateway, validate
 
 module.exports = {
   PROVIDERS,
+  EXTERNAL_PROVIDERS,
   LOCAL_WORKLOADS,
   AUTHOR_WORKLOADS,
   REVIEW_WORKLOADS,

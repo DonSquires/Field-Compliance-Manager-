@@ -148,7 +148,7 @@ test('UX Designer uses approved specification artifact as model provenance', asy
     completeDesign: async () => ({ success: true, job: { status: 'implementation_pending' } })
   });
 
-  assert.deepEqual(captured.modelRequest.chain, ['gpu_workstation', 'ollama', 'openai']);
+  assert.deepEqual(captured.modelRequest.chain, ['gpu_workstation', 'ollama', 'ollama_cloud', 'openai']);
   assert.equal(captured.modelRequest.provider, 'gpu_workstation');
   assert.equal(captured.modelRequest.prompt_version, UX_DESIGNER_PROMPT_VERSION);
   assert.deepEqual(captured.modelRequest.input_artifact_ids, ['artifact-spec']);

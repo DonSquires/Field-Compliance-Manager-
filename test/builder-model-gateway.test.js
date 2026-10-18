@@ -112,3 +112,47 @@ test('model health publishes each provider effective output cap so callers can s
   assert.equal(health.ollama.max_output_tokens, 8192, 'a local provider never reserves more than its own cap');
   assert.equal(health.openai.max_output_tokens, 32000);
 });
+
+test('Ollama Cloud is keyed, uses the Ollama chat API at ollama.com, and never sends keep_alive', async () => {
+  const cloudConfig = createModelGatewayConfig({ OLLAMA_API_TOKEN: 'cloud-key', BOB_OLLAMA_CLOUD_MODELS: 'gpt-oss:120b' });
+  const calls = [];
+  const result = await invokeBuilderModel({
+    input: request({ provider: 'ollama_cloud', model: 'gpt-oss:120b' }),
+    config: cloudConfig,
+    fetchImpl: async (url, init = {}) => {
+      calls.push({ url, init });
+      if (url.endsWith('/api/tags')) return { ok: true, json: async () => ({ models: [{ name: 'gpt-oss:120b' }] }) };
+      return { ok: true, json: async () => ({ message: { content: 'cloud answer' }, prompt_eval_count: 5, eval_count: 2 }) };
+    }
+  });
+  assert.equal(result.status, 200);
+  assert.equal(result.body.content, 'cloud answer');
+  const chat = calls.find(call => call.url === 'https://ollama.com/api/chat');
+  assert.ok(chat, 'chat goes to ollama.com');
+  assert.equal(chat.init.headers.Authorization, 'Bearer cloud-key');
+  assert.equal(JSON.parse(chat.init.body).keep_alive, undefined);
+  assert.ok(calls.every(call => call.init.headers?.Authorization === 'Bearer cloud-key'), 'every cloud request is authenticated');
+});
+
+test('Ollama Cloud without a key is reported unconfigured and is never called', async () => {
+  let called = false;
+  const result = await invokeBuilderModel({
+    input: request({ provider: 'ollama_cloud', model: 'gpt-oss:120b' }),
+    config: createModelGatewayConfig({ BOB_OLLAMA_CLOUD_MODELS: 'gpt-oss:120b' }),
+    fetchImpl: async () => { called = true; throw new Error('must not call'); }
+  });
+  assert.equal(result.status, 503);
+  assert.equal(result.body.code, 'provider_unconfigured');
+  assert.equal(called, false);
+});
+
+test('local Ollama requests carry no Authorization header', async () => {
+  const calls = [];
+  await invokeBuilderModel({
+    input: request({ provider: 'ollama', model: 'approved-local' }),
+    config: createModelGatewayConfig({ OLLAMA_BASE_URL: 'http://ollama.local:11434', BOB_OLLAMA_MODELS: 'approved-local', OLLAMA_API_TOKEN: 'cloud-key' }),
+    fetchImpl: async (url, init = {}) => { calls.push(init); return { ok: true, json: async () => url.endsWith('/api/tags') ? { models: [{ name: 'approved-local' }] } : { message: { content: 'x' } } }; }
+  });
+  assert.ok(calls.length >= 1);
+  assert.ok(calls.every(init => !init.headers?.Authorization), 'the cloud key never leaves for a local host');
+});

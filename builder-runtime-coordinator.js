@@ -11,6 +11,7 @@ const { runAgenticEngineer } = require('./builder-agentic-engineer');
 const { recordGenerationFailure, skipLaneWithNothingToDo } = require('./builder-generation-failure');
 const { downloadVerifiedArtifact } = require('./builder-frontend-handoff');
 const { unwrapPatchArtifact } = require('./supabase/functions/_shared/builder-patch-envelope');
+const { EXTERNAL_PROVIDERS } = require('./supabase/functions/_shared/builder-model-adapter');
 
 const TERMINAL_STATUSES = new Set(['release_ready', 'deployed', 'failed', 'cancelled']);
 const APPROVAL_STATUSES = new Set(['specification_ready', 'approval_pending']);
@@ -227,8 +228,9 @@ function agenticGenerator(lane, context, extra = {}) {
 function outsourcedEscalationPoint(generation) {
   const provider = generation?.routing?.provider;
   const chain = Array.isArray(generation?.routing?.chain) ? generation.routing.chain : [];
-  if (!provider || provider === 'openai' || !chain.includes('openai')) return null;
-  const inHouse = chain.slice(0, chain.indexOf('openai')).filter((item) => item !== 'openai');
+  const firstExternal = chain.findIndex((item) => EXTERNAL_PROVIDERS.has(item));
+  if (!provider || EXTERNAL_PROVIDERS.has(provider) || firstExternal < 0) return null;
+  const inHouse = chain.slice(0, firstExternal);
   return inHouse.length ? inHouse[inHouse.length - 1] : null;
 }
 

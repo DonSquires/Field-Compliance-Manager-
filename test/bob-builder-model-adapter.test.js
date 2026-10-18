@@ -27,21 +27,21 @@ function makeRequest(overrides = {}) {
 
 test('model routing keeps low-risk preprocessing in-house first', () => {
   const route = routeBuilderModel({ workloadKind: 'repository_summary' });
-  assert.deepEqual(route.chain, ['gpu_workstation', 'ollama', 'openai']);
+  assert.deepEqual(route.chain, ['gpu_workstation', 'ollama', 'ollama_cloud', 'openai']);
   assert.equal(route.provider, 'gpu_workstation');
 });
 
 test('model routing is in-house first with OpenAI as the outsourced fallback, per workload class', () => {
   // Owner ruling 2026-10-16: laptop GPU, then VPS CPU, then OpenAI as the paid last resort.
-  assert.deepEqual(routeBuilderModel({ workloadKind: 'architecture' }).chain, ['gpu_workstation', 'ollama', 'openai'], 'structured Builder stages start on in-house compute');
-  assert.deepEqual(routeBuilderModel({ workloadKind: 'backend_implementation' }).chain, ['gpu_workstation', 'ollama', 'openai'], 'unrestricted coding starts on the laptop GPU');
+  assert.deepEqual(routeBuilderModel({ workloadKind: 'architecture' }).chain, ['gpu_workstation', 'ollama', 'ollama_cloud', 'openai'], 'structured Builder stages start on in-house compute');
+  assert.deepEqual(routeBuilderModel({ workloadKind: 'backend_implementation' }).chain, ['gpu_workstation', 'ollama', 'ollama_cloud', 'openai'], 'unrestricted coding starts on the laptop GPU');
   assert.equal(routeBuilderModel({ workloadKind: 'backend_implementation' }).reason, 'in_house_first_author');
-  assert.deepEqual(routeBuilderModel({ workloadKind: 'independent_code_review' }).chain, ['gpu_workstation', 'ollama', 'openai'], 'the independent check starts in-house too');
+  assert.deepEqual(routeBuilderModel({ workloadKind: 'independent_code_review' }).chain, ['gpu_workstation', 'ollama', 'ollama_cloud', 'openai'], 'the independent check starts in-house too');
   assert.equal(routeBuilderModel({ workloadKind: 'independent_code_review' }).chain.at(-1), 'openai', 'OpenAI is always the last resort');
   assert.deepEqual(routeBuilderModel({ workloadKind: 'independent_code_review', env: { BOB_BUILDER_ROUTE_REVIEW: 'openai,gpu_workstation' } }).chain, ['openai', 'gpu_workstation'], 'operators can still pin a strong-first chain');
   // Operators can pin a class to OpenAI (or anything else) without a code change.
   assert.deepEqual(routeBuilderModel({ workloadKind: 'backend_implementation', env: { BOB_BUILDER_ROUTE_AUTHOR: 'openai' } }).chain, ['openai']);
-  assert.deepEqual(routeBuilderModel({ workloadKind: 'backend_implementation', env: { BOB_BUILDER_ROUTE_AUTHOR: 'nonsense' } }).chain, ['gpu_workstation', 'ollama', 'openai'], 'unknown providers fall back to the default chain');
+  assert.deepEqual(routeBuilderModel({ workloadKind: 'backend_implementation', env: { BOB_BUILDER_ROUTE_AUTHOR: 'nonsense' } }).chain, ['gpu_workstation', 'ollama', 'ollama_cloud', 'openai'], 'unknown providers fall back to the default chain');
 });
 
 test('model routing keeps restricted data local regardless of workload', () => {
@@ -393,4 +393,17 @@ test('model gateway retries a dropped connection once and names the cause; timeo
   assert.equal(calls3, 1, 'a timeout is the model being slow, not the socket dropping');
   assert.equal(slow.ok, false);
   assert.equal(slow.timeout, true);
+});
+
+test('restricted data never reaches Ollama Cloud or OpenAI, even when the environment asks for them', () => {
+  const pinned = routeBuilderModel({ workloadKind: 'architecture', containsRestrictedData: true, env: { BOB_BUILDER_ROUTE_RESTRICTED: 'ollama_cloud,gpu_workstation,openai' } });
+  assert.deepEqual(pinned.chain, ['gpu_workstation']);
+  const externalOnly = routeBuilderModel({ workloadKind: 'architecture', containsRestrictedData: true, env: { BOB_BUILDER_ROUTE_RESTRICTED: 'ollama_cloud,openai' } });
+  assert.deepEqual(externalOnly.chain, ['ollama', 'gpu_workstation'], 'an all-external pin falls back to local-only, never to an empty or external chain');
+});
+
+test('Ollama Cloud sits after in-house compute and before paid OpenAI', () => {
+  const chain = routeBuilderModel({ workloadKind: 'frontend_implementation' }).chain;
+  assert.ok(chain.indexOf('ollama_cloud') > chain.indexOf('ollama'));
+  assert.ok(chain.indexOf('ollama_cloud') < chain.indexOf('openai'));
 });
