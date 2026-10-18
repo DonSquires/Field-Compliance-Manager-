@@ -238,7 +238,7 @@ function composeReport({ job, evidence, pullRequestUrl, state, reason, hold, rep
     lines.push(`Why: ${plain(reason, 500)}. This is not caused by the change you asked for.`);
     lines.push(`What Bob is doing: he has opened a repair job, "${plain(repair?.title, 160)}", which goes through the same build, test and review steps. When that repair is merged, Bob re-runs your change automatically. Nothing for you to do now.`);
   } else if (state === 'resumed') {
-    lines.push(`Resumed: main is fixed, so Bob has started "${plain(job.title, 160)}" again from the current code. You will get a fresh report when it is built and checked.`);
+    lines.push(`Resumed: main has changed, so Bob has started "${plain(job.title, 160)}" again from the current code. This does not yet prove the earlier failure is fixed. You will get a fresh report when it is built and checked.`);
   } else if (state === 'review_reopened') {
     lines.push(`Revising: an independent AI reviewer (a different model from the author) found problems with Bob's attempt at "${plain(job.title, 160)}", so Bob is fixing them in a new attempt.`);
     lines.push(`What the reviewer found: ${plain(reason, 700)}`);

@@ -1,6 +1,6 @@
 const { runProductAnalyst } = require('./supabase/functions/_shared/builder-product-analyst');
 const { runUxDesigner } = require('./supabase/functions/_shared/builder-ux-designer');
-const { runFrontendImplementation } = require('./builder-frontend-orchestrator');
+const { runFrontendImplementation, reloadFrontendStep } = require('./builder-frontend-orchestrator');
 const { runBackendEngineer } = require('./supabase/functions/_shared/builder-backend-engineer');
 const { runBackendHandoff } = require('./builder-backend-handoff');
 const { runSecurityReview } = require('./builder-security-handoff');
@@ -12,6 +12,7 @@ const { recordGenerationFailure, skipLaneWithNothingToDo } = require('./builder-
 const { downloadVerifiedArtifact } = require('./builder-frontend-handoff');
 const { unwrapPatchArtifact } = require('./supabase/functions/_shared/builder-patch-envelope');
 const { EXTERNAL_PROVIDERS } = require('./supabase/functions/_shared/builder-model-adapter');
+const { accountVerifierRecoveries } = require('./builder-verifier-recovery');
 
 const TERMINAL_STATUSES = new Set(['release_ready', 'deployed', 'failed', 'cancelled']);
 const APPROVAL_STATUSES = new Set(['specification_ready', 'approval_pending']);
@@ -172,20 +173,32 @@ async function loadSeedPatch(supabase, job) {
   try {
     const downloaded = await downloadVerifiedArtifact(supabase, artifactId, parentJobId, 'code_implementation');
     const { patch } = unwrapPatchArtifact(downloaded.bytes);
-    return patch && patch.trim() ? { text: patch, from_job: parentJobId, artifact_id: artifactId } : null;
+    if (!patch?.trim()) throw new Error('Review seed is empty');
+    return { text: patch, from_job: parentJobId, artifact_id: artifactId };
   } catch {
-    return null;
+    throw new Error('Review continuation patch could not be loaded; verify its artifact and checksum before resuming');
   }
 }
 
 /** Agentic generation for a lane, shaped like the one-shot engineers' result so handoffs stay unchanged. */
 function agenticGenerator(lane, context, extra = {}) {
-  return async ({ supabase, gateway, job, step, uxArtifact, productArtifact, requestedFiles, liveContext, failureArtifact, failedPatchArtifact, startAfterProvider = null }) => {
+  return async ({ supabase, gateway, job, step, uxArtifact, productArtifact, requestedFiles, liveContext,
+    failureArtifact = extra.failureArtifact, failedPatchArtifact = extra.failedPatchArtifact, startAfterProvider = null }) => {
     const [specification, uxPlan, previousFailure, seedPatch] = await Promise.all([
       productArtifact ? loadArtifactJson(supabase, productArtifact) : Promise.resolve(extra.specification ?? null),
       uxArtifact ? loadArtifactJson(supabase, uxArtifact) : Promise.resolve(null),
-      failureArtifact ? loadArtifactJson(supabase, failureArtifact) : Promise.resolve(null),
-      (extra.loadSeedPatch || loadSeedPatch)(supabase, job)
+      failureArtifact ? (async () => {
+        const downloaded = await downloadVerifiedArtifact(supabase, failureArtifact.id, job.id, 'build_logs');
+        return JSON.parse(downloaded.bytes.toString('utf8'));
+      })() : Promise.resolve(null),
+      failedPatchArtifact
+        ? (async () => {
+          const downloaded = await downloadVerifiedArtifact(supabase, failedPatchArtifact.id, job.id, 'code_implementation');
+          const { patch } = unwrapPatchArtifact(downloaded.bytes);
+          if (!patch?.trim()) throw new Error('Repair source patch is empty');
+          return { text: patch, from_job: job.id, artifact_id: failedPatchArtifact.id };
+        })()
+        : (extra.loadSeedPatch || loadSeedPatch)(supabase, job)
     ]);
     // An engineer crash is a failed generation (counted against the step's attempt ceiling and recorded
     // with its reason), not a failed run that leaves the step looking untouched.
@@ -245,11 +258,22 @@ function escalationPoint(generation) {
 // The patch a lost verifier was checking (builder_recover_expired_worker_runs keeps the step's
 // input_context): verify it again rather than spend an author run on a patch nobody rejected.
 function resumablePatchArtifact(snapshot, step) {
-  if (!step || step.status !== 'failed' || step.retryable !== true || !/lease expired/i.test(String(step.error || ''))) return null;
+  if (!step || step.status !== 'failed' || step.retryable !== true || !/lease expired|^Verifier recovery pending/i.test(String(step.error || ''))) return null;
   const patchId = step.input_context?.patch_artifact_id;
   if (!patchId) return null;
   const artifact = (snapshot?.artifacts || []).find((item) => item.id === patchId && item.artifact_type === 'code_implementation' && item.status === 'final');
   return artifact || null;
+}
+
+function failedImplementationEvidence(snapshot, step) {
+  if (step?.status !== 'failed' || !step.retryable || resumablePatchArtifact(snapshot, step)) return {};
+  const run = snapshot.workerRuns.filter(item => item.step_id === step.id && item.status === 'failed'
+    && (!step.input_context?.patch_artifact_id || item.patch_artifact_id === step.input_context.patch_artifact_id)).at(-1);
+  if (!run) return {};
+  const failedPatchArtifact = snapshot.artifacts.find(item => item.id === run.patch_artifact_id && item.artifact_type === 'code_implementation' && item.status === 'final');
+  const failureArtifact = snapshot.artifacts.find(item => run.output_artifact_ids?.includes(item.id) && item.artifact_type === 'build_logs' && item.status === 'final');
+  if (!failedPatchArtifact || !failureArtifact) throw new Error('Failed implementation is missing its patch or verification evidence; cannot restart authoring');
+  return { failedPatchArtifact, failureArtifact };
 }
 
 // Runners that died with their lease (redeploy, crash) must not hold a job for ever. Best-effort.
@@ -268,7 +292,7 @@ async function recoverExpiredWorkerRuns(supabase, logger = console, { includeAct
 
 async function runBackendImplementation(input) {
   const agentic = AGENTIC_ENABLED && input.context?.workspaceRoot;
-  const generate = agentic ? agenticGenerator('backend', input.context) : runBackendEngineer;
+  const generate = agentic ? agenticGenerator('backend', input.context, input.priorFailure) : runBackendEngineer;
   let generation = input.resumePatchArtifact ? { ok: true, patch_artifact: input.resumePatchArtifact, routing: { provider: 'resumed' } } : await generate(input);
   if (agentic && (!generation.ok || !generation.patch_artifact?.id) && escalationPoint(generation)) {
     generation = await generate({ ...input, startAfterProvider: escalationPoint(generation) });
@@ -284,14 +308,19 @@ async function runBackendImplementation(input) {
     const verification = await runBackendHandoff({ ...input, patchArtifact });
     if (verification.success || !agentic) return { ...verification, attempts: attempt, patch_artifact: patchArtifact, routing: generation.routing };
     // The verifier failed, not the patch (OOM, killed, timed out): same patch again, once, no repair.
-    if (verification.infrastructure_failure && infrastructureRetries < 1) { infrastructureRetries += 1; continue; }
+    if (verification.infrastructure_failure) {
+      const currentStep = await (input.reloadStep || reloadFrontendStep)(input.supabase, input.step.id, input.job.id);
+      if (!currentStep.retryable) return { ...verification, success: false, phase: 'infrastructure', attempts: attempt, patch_artifact: patchArtifact };
+      if (infrastructureRetries < 1) { infrastructureRetries += 1; continue; }
+      return { ...verification, success: false, phase: 'infrastructure', attempts: attempt, patch_artifact: patchArtifact };
+    }
     // The repository is red at the pinned commit: park with the reason; no repair can pass.
     if (verification.baseline_failure) {
-      await recordGenerationFailure(input, { no_change: true, error: `repository red at the pinned commit: ${verification.baseline_reason}` }, 'baseline');
       return { ...verification, success: false, phase: 'baseline', attempts: attempt, error: verification.baseline_reason };
     }
     if (attempt >= MAX_BACKEND_ATTEMPTS) return { ...verification, success: false, phase: 'repair_limit', attempts: attempt };
     const failureArtifact = verification.failure_artifact || verification.artifacts?.[0];
+    if (!failureArtifact?.id) return { success: false, phase: 'evidence', attempts: attempt, patch_artifact: patchArtifact, error: 'verification failure artifact is missing' };
     // Feed the independent worker's failure evidence back to Bob and let him repair; an in-house author
     // that failed verification hands the repair to the next provider in the chain.
     generation = await generate({ ...input, failureArtifact, failedPatchArtifact: patchArtifact, startAfterProvider: escalationPoint(generation) });
@@ -300,6 +329,7 @@ async function runBackendImplementation(input) {
       return { success: false, phase: 'repair', attempts: attempt, result: generation };
     }
     patchArtifact = generation.patch_artifact;
+    infrastructureRetries = 0;
   }
   return { success: false, phase: 'verification', attempts: MAX_BACKEND_ATTEMPTS };
 }
@@ -345,12 +375,12 @@ async function executeBuilderAction({ snapshot, action, supabase, gateway, conte
   }
   if (action.type === 'run_frontend') {
     const agentic = AGENTIC_ENABLED && context.workspaceRoot && !handlers.frontend;
-    const generator = agentic ? agenticGenerator('frontend', context) : undefined;
+    const generator = agentic ? agenticGenerator('frontend', context, failedImplementationEvidence(snapshot, action.step)) : undefined;
     const resumePatchArtifact = resumablePatchArtifact(snapshot, action.step);
     const siblingCompleted = byStep(snapshot, 'backend_implementation')?.status === 'completed';
     return run.frontend({ ...common, siblingCompleted, uxArtifact: artifactsFor(snapshot, 'ui_design', 'ui_design_plan').at(-1), sourceDir: context.sourceDir, requestedFiles: context.frontendFiles, workerImage: context.workerImage, runnerId: context.runnerId, liveContext: context.liveContext, ...(resumePatchArtifact ? { resumePatchArtifact } : {}), ...(generator ? { generate: generator, repair: generator } : {}) });
   }
-  if (action.type === 'run_backend') return run.backend({ ...common, context, siblingCompleted: byStep(snapshot, 'frontend_implementation')?.status === 'completed', productArtifact: artifactsFor(snapshot, 'product_analysis', 'product_specification').at(-1), sourceDir: context.sourceDir, requestedFiles: context.backendFiles, workerImage: context.workerImage, runnerId: context.runnerId, liveContext: context.liveContext, resumePatchArtifact: resumablePatchArtifact(snapshot, action.step) });
+  if (action.type === 'run_backend') return run.backend({ ...common, context, priorFailure: failedImplementationEvidence(snapshot, action.step), siblingCompleted: byStep(snapshot, 'frontend_implementation')?.status === 'completed', productArtifact: artifactsFor(snapshot, 'product_analysis', 'product_specification').at(-1), sourceDir: context.sourceDir, requestedFiles: context.backendFiles, workerImage: context.workerImage, runnerId: context.runnerId, liveContext: context.liveContext, resumePatchArtifact: resumablePatchArtifact(snapshot, action.step) });
   const implementation = implementationArtifacts(snapshot);
   const runs = implementationRuns(snapshot);
   const securityArtifact = artifactsFor(snapshot, 'security_review', 'security_review').at(-1);
@@ -363,6 +393,7 @@ async function executeBuilderAction({ snapshot, action, supabase, gateway, conte
 
 async function advanceBuilderJob({ supabase, gateway, jobId, context, handlers, loadSnapshot = loadBuilderRuntimeSnapshot }) {
   await recoverExpiredWorkerRuns(supabase);
+  await accountVerifierRecoveries(supabase, jobId);
   const snapshot = await loadSnapshot(supabase, jobId);
   const action = planBuilderAction(snapshot);
   if (['terminal', 'waiting_for_human', 'waiting_for_worker', 'blocked'].includes(action.type)) return { advanced: false, action, snapshot };
@@ -394,6 +425,7 @@ async function runBuilderUntilPause({
 
 module.exports = {
   MAX_STEP_ATTEMPTS,
+  failedImplementationEvidence,
   attemptCeilingReached,
   AGENTIC_ENABLED,
   MAX_BACKEND_ATTEMPTS,

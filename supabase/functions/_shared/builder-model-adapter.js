@@ -25,7 +25,14 @@ const DEFAULT_LOCAL_GATEWAY_TIMEOUT_MS = 420000;
 // Hosted large models answer slower than OpenAI's small models but need no cold load.
 const DEFAULT_CLOUD_GATEWAY_TIMEOUT_MS = 300000;
 
-function gatewayTimeoutFor(provider, gateway = {}, env = process.env) {
+function planningTimeoutFor(input) {
+  return input?.provider === PROVIDERS.OLLAMA && !Array.isArray(input.messages)
+    && ['product_analysis', 'ux_design'].includes(input.workload_kind) ? 120000 : null;
+}
+
+function gatewayTimeoutFor(provider, gateway = {}, env = process.env, request = {}) {
+  const planningTimeout = planningTimeoutFor({ ...request, provider });
+  if (planningTimeout) return Math.min(Number(gateway.timeoutMs) > 0 ? Number(gateway.timeoutMs) : Infinity, planningTimeout + 5000);
   if (Number.isFinite(Number(gateway.timeoutMs)) && Number(gateway.timeoutMs) > 0) return Number(gateway.timeoutMs);
   if (LOCAL_PROVIDERS.has(provider)) {
     const configured = Number(env?.BOB_LOCAL_MODEL_TIMEOUT_MS);
@@ -360,14 +367,23 @@ async function executeBuilderModelRun({ supabase, modelRequest, gateway, validat
   const candidates = selectProviders(modelRequest, { health, avoid: avoidIdentities, startAfter });
   if (!candidates.length) return { ok: false, status: 503, error: 'no model provider is available for this request', attempts: [] };
   const attempts = [];
+  const corrections = [];
   let last = null;
   for (let index = 0; index < candidates.length; index += 1) {
     const candidate = candidates[index];
     // The first provider keeps the caller's idempotency key; escalations get their own run record.
     const attemptRequest = providerRequest(modelRequest, candidate, index === 0 ? null : candidate.provider);
+    if (corrections.length) {
+      const feedback = JSON.stringify({ validation_corrections: corrections.slice(-3), instruction: 'Correct these prior validation failures. Preserve all original evidence, scope and output requirements.' });
+      attemptRequest.request = Array.isArray(attemptRequest.request.messages)
+        ? { ...attemptRequest.request, messages: [...attemptRequest.request.messages, { role: 'user', content: feedback }] }
+        : { ...attemptRequest.request, user_prompt: `${attemptRequest.request.user_prompt}\n\n${feedback}` };
+      attemptRequest.idempotency_key += `::correction-${crypto.createHash('sha256').update(feedback).digest('hex').slice(0, 16)}`;
+    }
     last = await executeSingleModelRun({ supabase, modelRequest: attemptRequest, gateway, validateOutput });
     attempts.push({ provider: candidate.provider, model: candidate.model, ok: last.ok, status: last.status ?? null, error: last.ok ? null : String(last.error || '').slice(0, 200) });
     if (last.ok || last.duplicate) return { ...last, provider: candidate.provider, model_name: candidate.model, attempts, escalated: index > 0 };
+    if (last.validation_error) corrections.push(String(last.validation_error).slice(0, 600));
     if (!ESCALATE_STATUSES.has(Number(last.status))) break;
   }
   return { ...last, attempts, escalated: attempts.length > 1 };
@@ -413,7 +429,7 @@ async function executeSingleModelRun({ supabase, modelRequest, gateway, validate
     return { ok: false, status: 503, error: 'model run provenance could not be recorded' };
   }
 
-  const result = await callModelGateway({ ...gateway, modelRequest, timeoutMs: gatewayTimeoutFor(modelRequest.provider, gateway) });
+  const result = await callModelGateway({ ...gateway, modelRequest, timeoutMs: gatewayTimeoutFor(modelRequest.provider, gateway, process.env, modelRequest.request) });
   const usage = { ...(result.data?.usage || {}), output_validated: null };
   const completedAt = new Date().toISOString();
   if (result.ok) {
@@ -429,6 +445,7 @@ async function executeSingleModelRun({ supabase, modelRequest, gateway, validate
         result.ok = false;
         usage.output_validated = false;
         result.status = 422;
+        result.validation_error = reason.slice(0, 600);
         result.error = `model output failed validation: ${reason}${preview ? ` (output starts: ${preview})` : ''}`.slice(0, 600);
       }
     }
@@ -485,6 +502,7 @@ module.exports = {
   callModelGateway,
   fetchModelHealth,
   gatewayTimeoutFor,
+  planningTimeoutFor,
   selectProviders,
   providerRequest,
   executeBuilderModelRun,

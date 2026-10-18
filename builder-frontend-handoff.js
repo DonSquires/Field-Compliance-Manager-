@@ -6,6 +6,7 @@ const { execFileSync } = require('node:child_process');
 const { executeWorker } = require('./worker-executor');
 const { classifyMissingEvidence, classifyVerificationFailure } = require('./builder-verification-outcome');
 const { parseFrontendProposal } = require('./supabase/functions/_shared/builder-frontend-engineer');
+const { accountVerifierRecoveries } = require('./builder-verifier-recovery');
 
 function verifyRepositorySnapshot(sourceDir, targetSha) {
   const head = execFileSync('git', ['rev-parse', 'HEAD'], { cwd: sourceDir, encoding: 'utf8' }).trim();
@@ -202,14 +203,15 @@ async function runFrontendHandoff({
       lease,
       succeeded,
       result.exitCode ?? 1,
-      succeeded ? 'Frontend patch passed lint, build, and tests' : infrastructure.baseline ? `Repository is red at the pinned commit (${infrastructure.reason}); not caused by this patch` : infrastructure.infrastructure ? `Frontend verifier infrastructure failure (${infrastructure.reason}); the same patch is re-verified` : 'Frontend patch verification failed'
+      succeeded ? 'Frontend patch passed lint, build, and tests' : infrastructure.baseline ? `Repository is red at the pinned commit (${infrastructure.reason}); not caused by this patch` : infrastructure.infrastructure ? `Frontend verifier infrastructure failure (${infrastructure.reason}); the same patch is re-verified` : infrastructure.unresolved ? `Frontend verification attribution unresolved (${infrastructure.reason}); candidate patch preserved` : 'Frontend patch verification failed'
     );
+    if (infrastructure.infrastructure || infrastructure.unresolved || infrastructure.baseline) await accountVerifierRecoveries(supabase, job.id);
     return {
       success: succeeded,
       job: completedJob,
       worker_run_id: lease.run_id,
       artifacts,
-      infrastructure_failure: infrastructure.infrastructure,
+      infrastructure_failure: infrastructure.infrastructure || infrastructure.unresolved === true,
       infrastructure_reason: infrastructure.reason,
       baseline_failure: infrastructure.baseline === true,
       baseline_reason: infrastructure.baseline ? infrastructure.reason : null,

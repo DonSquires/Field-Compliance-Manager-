@@ -357,6 +357,54 @@ test('in-house providers get a longer gateway timeout than OpenAI, and an explic
   assert.equal(gatewayTimeoutFor('openai', { timeoutMs: 'nope' }, {}), 90000);
 });
 
+test('only VPS one-shot planning has a two-minute provider budget with caller response allowance', () => {
+  const { gatewayTimeoutFor, planningTimeoutFor } = require('../supabase/functions/_shared/builder-model-adapter');
+  for (const workload_kind of ['product_analysis', 'ux_design']) {
+    assert.equal(planningTimeoutFor({ provider: 'ollama', workload_kind }), 120000);
+    assert.equal(gatewayTimeoutFor('ollama', {}, {}, { workload_kind }), 125000);
+    assert.equal(gatewayTimeoutFor('ollama', { timeoutMs: 50000 }, {}, { workload_kind }), 50000);
+    assert.equal(gatewayTimeoutFor('gpu_workstation', {}, {}, { workload_kind }), 420000);
+    assert.equal(gatewayTimeoutFor('ollama_cloud', {}, {}, { workload_kind }), 300000);
+    assert.equal(planningTimeoutFor({ provider: 'ollama', workload_kind, messages: [{ role: 'user', content: 'x' }] }), null);
+  }
+  assert.equal(gatewayTimeoutFor('ollama', {}, {}, { workload_kind: 'frontend_implementation' }), 420000);
+  assert.equal(gatewayTimeoutFor('ollama', {}, {}, { workload_kind: 'independent_code_review' }), 420000);
+});
+
+test('fallback gets bounded validator corrections, not rejected output, with a distinct idempotency identity', async () => {
+  const mock = createSupabaseMock();
+  const calls = [];
+  const request = makeRequest({ workloadKind: 'ux_design' });
+  const result = await executeBuilderModelRun({
+    supabase: mock.client, modelRequest: request,
+    gateway: {
+      gatewayUrl: 'https://feedback.example', apiToken: 'server-token',
+      health: {
+        gpu_workstation: { configured: true, healthy: true, ready_model: 'local' },
+        ollama_cloud: { configured: true, healthy: true, ready_model: 'cloud' }
+      },
+      fetchImpl: async (_url, init) => {
+        const body = JSON.parse(init.body);
+        calls.push(body);
+        return { ok: true, status: 200, text: async () => JSON.stringify({ model: body.model, content: body.provider === 'gpu_workstation' ? 'REJECTED_OUTPUT_MUST_NOT_BE_FORWARDED' : '{"valid":true}' }) };
+      }
+    },
+    validateOutput: content => {
+      if (!content.startsWith('{')) throw new Error(`route_map must use supplied identifiers ${'x'.repeat(900)}`);
+      return JSON.parse(content);
+    }
+  });
+  assert.equal(result.ok, true);
+  assert.deepEqual(calls.map(call => call.provider), ['gpu_workstation', 'ollama_cloud']);
+  assert.match(calls[1].user_prompt, /route_map must use supplied identifiers/);
+  assert.doesNotMatch(calls[1].user_prompt, /REJECTED_OUTPUT_MUST_NOT_BE_FORWARDED/);
+  const feedback = JSON.parse(calls[1].user_prompt.split('\n\n').at(-1));
+  assert.equal(feedback.validation_corrections[0].length, 600);
+  assert.match(calls[1].idempotency_key, /::ollama_cloud::correction-[a-f0-9]{16}$/);
+  assert.equal(request.request.user_prompt, 'Assess the requested change.', 'original request is immutable');
+  assert.equal(mock.storageWrites.filter(write => write.type === 'upload').length, 1);
+});
+
 test('model gateway retries a dropped connection once and names the cause; timeouts are not retried', async () => {
   let calls = 0;
   const result = await callModelGateway({

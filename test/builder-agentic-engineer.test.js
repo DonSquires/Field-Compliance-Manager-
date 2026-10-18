@@ -268,6 +268,51 @@ const LAPTOP_OFF = Object.freeze({
 const LAPTOP_ON = Object.freeze({ ...LAPTOP_OFF, gpu_workstation: { configured: true, healthy: true, models: ['qwen2.5-coder:7b'], ready_model: 'qwen2.5-coder:7b' } });
 const OPENAI_ONLY = Object.freeze({ openai: { configured: true, healthy: true, models: ['gpt-5.4', 'gpt-5.4-mini'] } });
 
+test('a process interruption resumes completed edits and tool context from disk without replaying the write', async () => {
+  const repo = makeRepo();
+  const input = {
+    supabase: null, gateway: {}, job: { id: 'checkpoint000001', organization_id: 'org', target_sha: repo.sha, task_description: 'Fix sum' },
+    step: { id: 's' }, lane: 'backend', sourceDir: repo.source, workspaceRoot: path.join(repo.root, 'workspaces'),
+    repoRoot: repo.source, providerHealth: OPENAI_ONLY, limits: { ...DEFAULT_LIMITS, maxTurns: 4 },
+  };
+  try {
+    let calls = 0;
+    await assert.rejects(runAgenticEngineer({ ...input, callModel: async () => {
+      if (calls++) throw new Error('simulated process interruption');
+      return { ok: true, data: { content: JSON.stringify({ tool: 'write_file', args: {
+        path: 'lib/sum.js', content: "'use strict';\nmodule.exports = { sum: (a, b) => a + b };\n"
+      } }), model: 'gpt-5.4' } };
+    } }), /simulated process interruption/);
+    const { callModel, seen } = fakeModel([
+      { tool: 'run', args: { command: 'node --test test/sum.test.js' } },
+      { tool: 'finish', args: { summary: 'Correct addition and verify the saved implementation with its test.', tests: ['node --test test/sum.test.js'] } }
+    ]);
+    const result = await runAgenticEngineer({ ...input, callModel });
+    assert.equal(result.ok, true);
+    assert.match(result.proposal.patch, /a \+ b/);
+    assert.match(JSON.stringify(seen[0].request.messages), /Resumed from a durable checkpoint/);
+    assert.match(JSON.stringify(seen[0].request.messages), /write_file/);
+    assert.equal(seen.length, 2, 'resume ran test and finish only, not another edit or investigation');
+    assert.equal(repo.git(['status', '--porcelain'], path.join(input.workspaceRoot, 'bob-job-checkpoint000001')), '');
+  } finally {
+    fs.rmSync(repo.root, { recursive: true, force: true });
+  }
+});
+
+test('an invalid repair seed stops before any model call instead of silently starting again', async () => {
+  const repo = makeRepo();
+  try {
+    await assert.rejects(runAgenticEngineer({
+      supabase: null, gateway: {}, job: { id: 'invalidseed00001', organization_id: 'org', target_sha: repo.sha },
+      step: { id: 's' }, lane: 'backend', sourceDir: repo.source, workspaceRoot: path.join(repo.root, 'ws'),
+      repoRoot: repo.source, providerHealth: OPENAI_ONLY, seedPatch: { text: 'not a patch', artifact_id: 'invalid' },
+      callModel: async () => assert.fail('must not spend on a failed continuation'),
+    }), /continuation could not restore/);
+  } finally {
+    fs.rmSync(repo.root, { recursive: true, force: true });
+  }
+});
+
 test('authoring uses the memory-eligible model rather than forcing a larger installed model', async () => {
   const repo = makeRepo();
   const workspaceRoot = path.join(repo.root, 'workspaces');
@@ -609,7 +654,7 @@ test('run chains allowlisted commands with && and stops at the first failure; a 
   fs.rmSync(repo.root, { recursive: true, force: true });
 });
 
-test('a review revision starts from the previous attempt\'s patch applied in the worktree; an unappliable seed falls back to main and says so', async () => {
+test('a review revision starts from the previous patch; an unappliable seed stops without restarting from main', async () => {
   const repo = makeRepo();
   const workspaceRoot = path.join(repo.root, 'workspaces');
   const job = { id: '5eed5eed5eed5eed5eed5eed5eed5eed', organization_id: '00000000-0000-0000-0000-000000000001', target_sha: repo.sha, title: 'revise', task_description: 'fix the review findings', description: "Opened by Bob's autopilot from job p after independent review (round 1 of 2) [[seed_patch:v]]" };
@@ -631,13 +676,8 @@ test('a review revision starts from the previous attempt\'s patch applied in the
   assert.match(packet.how_to_start, /git_diff to see the previous attempt/);
 
   const bad = seed.replace("a - b", 'not in the file');
-  let k = 0;
-  const packets2 = [];
-  const result2 = await runAgenticEngineer({ supabase: null, gateway: { gatewayUrl: 'x', apiToken: 'y' }, job: { ...job, id: '5eed5eed5eed5eed5eed5eed5eed5ee2' }, step: { id: 's' }, lane: 'backend', sourceDir: repo.source, workspaceRoot, repoRoot: repo.source, callModel: async ({ modelRequest }) => { packets2.push(modelRequest.request.messages[1].content); const t = [{ tool: 'finish', args: { summary: 'nothing', no_change_reason: 'seed missing' } }][0]; k++; return { ok: true, data: { content: JSON.stringify(t), model: 'm', usage: {} } }; }, seedPatch: { text: bad, from_job: 'p' }, limits: { ...DEFAULT_LIMITS, maxTurns: 4 } });
-  assert.equal(result2.no_change, true);
-  const packet2 = JSON.parse(packets2[0]);
-  assert.equal(packet2.previous_attempt_applied.applied, false);
-  assert.match(packet2.previous_attempt_applied.instruction, /start from main/);
+  await assert.rejects(runAgenticEngineer({ supabase: null, gateway: {}, job: { ...job, id: '5eed5eed5eed5eed5eed5eed5eed5ee2' }, step: { id: 's' }, lane: 'backend', sourceDir: repo.source, workspaceRoot, repoRoot: repo.source,
+    callModel: async () => assert.fail('invalid seed must stop before inference'), seedPatch: { text: bad, from_job: 'p' }, limits: { ...DEFAULT_LIMITS, maxTurns: 4 } }), /continuation could not restore/);
   fs.rmSync(repo.root, { recursive: true, force: true });
 });
 

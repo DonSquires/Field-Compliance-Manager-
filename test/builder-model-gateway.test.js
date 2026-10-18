@@ -30,8 +30,90 @@ function config() {
   });
 }
 
+test('local design uses the evidence schema while cloud retains supported JSON mode', () => {
+  const { buildProviderBody } = require('../builder-model-gateway');
+  const schema = { type: 'object', properties: { route: { type: 'string', enum: ['existing-route'] } }, required: ['route'] };
+  for (const provider of ['ollama', 'gpu_workstation']) {
+    const body = buildProviderBody({ input: request({ provider, output_schema: schema }), config: config(), model: 'local' });
+    assert.deepEqual(body.format, schema);
+    assert.equal(body.keep_alive, '5m');
+  }
+  assert.equal(buildProviderBody({ input: request({ provider: 'ollama_cloud', output_schema: schema }), config: config(), model: 'cloud' }).format, 'json');
+  assert.equal(buildProviderBody({ input: request({ provider: 'ollama', output_schema: { type: 'object', required: ['summary'] } }), config: config(), model: 'local' }).format, 'json', 'legacy incomplete schemas retain existing mode');
+});
+
+test('VPS planning times out at the provider, cools down after two failures, and automatically recovers', async t => {
+  let clock = Date.now() - 600001;
+  t.mock.method(Date, 'now', () => clock);
+  const c = createModelGatewayConfig({ OLLAMA_BASE_URL: 'http://planning-cooldown.example', BOB_OLLAMA_MODELS: 'planning-model' });
+  c.timeoutMs = 5;
+  let calls = 0;
+  let aborts = 0;
+  let succeed = false;
+  const fetchImpl = async (url, init) => {
+    if (url.endsWith('/api/tags')) return { ok: true, json: async () => ({ models: [{ name: 'planning-model' }] }) };
+    calls += 1;
+    if (succeed) return { ok: true, json: async () => ({ message: { content: '{}' } }) };
+    return new Promise((_resolve, reject) => init.signal.addEventListener('abort', () => {
+      aborts += 1;
+      reject(Object.assign(new Error('aborted'), { name: 'AbortError' }));
+    }, { once: true }));
+  };
+  const input = request({ provider: 'ollama', model: 'planning-model', workload_kind: 'ux_design' });
+  for (let i = 0; i < 2; i += 1) {
+    const result = await invokeBuilderModel({ input, config: c, fetchImpl });
+    assert.equal(result.status, 504);
+    assert.equal(result.body.code, 'provider_timeout');
+  }
+  assert.equal(aborts, 2, 'provider fetch is actually aborted before fallback');
+  const cooled = await invokeBuilderModel({ input, config: c, fetchImpl });
+  assert.equal(cooled.status, 429);
+  assert.equal(cooled.body.code, 'provider_planning_cooldown');
+  assert.equal(cooled.body.retry_after_ms, 300000);
+  assert.equal(calls, 2);
+  succeed = true;
+  assert.equal((await invokeBuilderModel({ input: { ...input, workload_kind: 'frontend_implementation' }, config: c, fetchImpl })).status, 200, 'engineering is not blocked by planning cooldown');
+  clock += 300001;
+  assert.equal((await invokeBuilderModel({ input, config: c, fetchImpl })).status, 200);
+  succeed = false;
+  assert.equal((await invokeBuilderModel({ input, config: c, fetchImpl })).status, 504);
+  succeed = true;
+  assert.equal((await invokeBuilderModel({ input, config: c, fetchImpl })).status, 200, 'a successful planning response clears the counter');
+  succeed = false;
+  assert.equal((await invokeBuilderModel({ input, config: c, fetchImpl })).status, 504);
+  assert.equal((await invokeBuilderModel({ input, config: c, fetchImpl })).status, 504);
+  assert.equal((await invokeBuilderModel({ input, config: c, fetchImpl })).body.code, 'provider_planning_cooldown');
+});
+
 test('model gateway rejects models outside the provider allowlist', () => {
   assert.equal(validateModelRequest(request({ model: 'unapproved' }), config()), 'model is not allowed');
+});
+
+test('VPS planning aborts at exactly 120 seconds even when the general gateway budget is longer', async t => {
+  t.mock.timers.enable({ apis: ['setTimeout'] });
+  const c = config();
+  c.timeoutMs = 600000;
+  let started = false;
+  let aborted = false;
+  const running = invokeBuilderModel({
+    input: request({ provider: 'ollama', model: 'approved-local', workload_kind: 'product_analysis' }),
+    config: c,
+    fetchImpl: async (url, init) => {
+      if (url.endsWith('/api/tags')) return { ok: true, json: async () => ({ models: [{ name: 'approved-local' }] }) };
+      started = true;
+      return new Promise((_resolve, reject) => init.signal.addEventListener('abort', () => {
+        aborted = true;
+        reject(Object.assign(new Error('aborted'), { name: 'AbortError' }));
+      }, { once: true }));
+    }
+  });
+  await new Promise(setImmediate);
+  assert.equal(started, true);
+  t.mock.timers.tick(119999);
+  assert.equal(aborted, false);
+  t.mock.timers.tick(1);
+  assert.equal((await running).status, 504);
+  assert.equal(aborted, true);
 });
 
 test('model gateway normalizes OpenAI output and usage', async () => {

@@ -8,6 +8,78 @@ detailed backlogs (`ENTERPRISE_SAAS_TODO.md`, `PROTOTYPE_GAP_AUDIT.md`,
 Completion language is strict, as in the lineage: **merged ≠ deployed ≠
 glass-proven.** A workstream item is done only when its evidence gate is met.
 
+Owner-approved structured planning routing 2026-10-18:
+
+- Keep UI design mandatory. UX v9 derives a complete output schema from the
+  fitted repository context, including exact route/access/token values and
+  empty route lists for surfaces without supplied routes. Local Ollama receives
+  that schema; Ollama Cloud retains JSON mode because its documented API does
+  not support structured outputs. Semantic validators still gate every tier.
+- Carry up to three bounded validation reasons into fallback prompts, never the
+  rejected response. Include feedback in the fallback idempotency identity.
+- VPS CPU `product_analysis` and `ux_design` calls have a 120-second provider
+  budget and a 125-second caller allowance. Two timeouts within five minutes
+  cause a five-minute endpoint/model planning cooldown with an explicit
+  `provider_planning_cooldown` receipt, followed by normal allowed fallback.
+  Successful responses clear the counter. Cooldowns are process-local and
+  expire; they do not mark engineering or GPU compute unavailable.
+- Do not reorder providers, raise spending limits, run parallel local models,
+  or relax privacy, review, approval or release gates.
+
+Acceptance: 170 targeted Node tests passed across gateway/adapter/design,
+agentic engineering, runtime/autopilot, product analysis, reviewer identity,
+release and deployment guards. Fake-clock evidence proves no provider abort at
+119,999 ms and abort at 120,000 ms; fetch-abort and cooldown tests also cover
+two-timeout admission, expiry, success reset and unaffected engineering calls.
+No live inference was invoked for these checks. Ollama's
+[structured output documentation](https://docs.ollama.com/capabilities/structured-outputs),
+retrieved 2026-10-18, supports local schema format and explicitly excludes Cloud.
+
+Owner-approved durable Builder recovery 2026-10-18:
+
+- Engineer v6 saves an atomic, fsynced private checkpoint after completed tool
+  steps and before subsequent model calls under the persistent
+  `BOB_BUILDER_WORKSPACE_ROOT/.engineer-checkpoints` tree (VPS default
+  `/data/builder-workspaces`). Diff, compacted context, reading map and completed
+  turn count survive a process restart. The disposable worktree may be reset;
+  the checkpoint is outside it. A completed proposal receipt is reused rather
+  than authored again. Changed inputs start a new revision; corrupt/wrong-pin
+  checkpoints or unappliable seeds stop explicitly. Tool calls interrupted
+  before acknowledgement may be repeated; a checkpoint is not exactly-once
+  execution of an arbitrary external action.
+- Ordinary frontend/backend repairs and scheduler-resumed failed verification
+  restore the integrity-checked failed patch and failure report. Independent
+  review remains mandatory. Prior test claims do not substitute for a new
+  independent worker receipt. Verification stages are rerun; completed stage
+  receipts are not cached.
+- `builder_account_verifier_recoveries` refunds an infrastructure/evidence
+  worker claim from the existing engineering counter once per worker/lease
+  start, with append-only audit receipts. It runs after classified failure and
+  before scheduling following lease recovery. Two recoveries of the same patch
+  park it with evidence and work preserved; they do not request another code
+  rewrite. Six genuine engineering failures still pause for diagnosis/approval.
+  Proven baseline failures also refund the worker claim, then pause without
+  retrying or rewriting the candidate. Immutable evidence conflicts remain
+  blocked. This does not increase the existing spending authority.
+- Browser verification retains line logs and a JSON report. Baseline
+  attribution requires the same test identity and assertion fingerprint;
+  different failures, missing/malformed reports and browser resource failures
+  are not proof the patch is innocent. Repeat the saved candidate once for
+  unresolved evidence, then park. Existing unit-baseline tolerance remains
+  scoped to named failing files; this is not a new permission to skip tests.
+- Terminal checkpoints are removed by the existing seven-day retention pass
+  only after activity/approval checks, including when the worktree is already
+  absent. Only the newest checkpoint per job/step/lane is kept. Active, paused
+  and approval-held jobs retain their work.
+
+Acceptance evidence: isolated process-interruption simulation restores an edit
+and tool context, then runs its test and finishes without repeating the edit;
+PostgreSQL fixtures prove per-lease idempotent refunds, retained engineering
+failures, bounded recovery and service-role-only accounting. These are recovery
+mechanism checks, not proof a real Builder job completed end-to-end.
+The targeted recovery, worker and idle-safe deployment suite passed 180 tests,
+including the isolated PostgreSQL accounting fixture.
+
 Builder recovery 2026-10-18: an automatic continuation must be an idempotent,
 transactionally bound child of its source job, preserving the requester,
 tenant/project, target environment and release policy. The source is historical,

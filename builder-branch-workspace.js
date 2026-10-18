@@ -156,7 +156,12 @@ function retireTerminalWorkspace({ sourceDir, legacySourceDir = null, workspaceR
   const branchName = branchNameForJob(job.id);
   if (job.workspace_branch && job.workspace_branch !== branchName) return skip('branch_mismatch');
   const workspacePath = workspacePathForBranch(workspaceRoot, branchName);
-  if (!fs.existsSync(workspacePath)) return skip('absent');
+  if (!fs.existsSync(workspacePath)) {
+    const checkpoints = require('./builder-engineer-checkpoint');
+    if (!checkpoints.hasEngineerCheckpoints(workspaceRoot, job)) return skip('absent');
+    if (!dryRun) checkpoints.retireEngineerCheckpoints(workspaceRoot, job);
+    return { removed: !dryRun, eligible: true, reason: dryRun ? 'dry_run' : 'checkpoint_retired', workspacePath };
+  }
   if (fs.lstatSync(workspacePath).isSymbolicLink()) return skip('symlink');
   const commonDir = directory => fs.realpathSync(git(directory, ['rev-parse', '--path-format=absolute', '--git-common-dir']));
   const workspaceCommon = commonDir(workspacePath);
@@ -173,7 +178,10 @@ function retireTerminalWorkspace({ sourceDir, legacySourceDir = null, workspaceR
     const refs = git(sourceDir, ['for-each-ref', '--format=%(objectname)', `refs/remotes/origin/${branchName}`]);
     if (refs !== head) return skip('publication_not_confirmed');
   }
-  if (!dryRun) git(sourceDir, ['worktree', 'remove', workspacePath]);
+  if (!dryRun) {
+    git(sourceDir, ['worktree', 'remove', workspacePath]);
+    require('./builder-engineer-checkpoint').retireEngineerCheckpoints(workspaceRoot, job);
+  }
   return { removed: !dryRun, eligible: true, reason: dryRun ? 'dry_run' : 'retired', workspacePath };
 }
 

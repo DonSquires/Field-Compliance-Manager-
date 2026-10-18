@@ -3,6 +3,7 @@ const fs = require('node:fs');
 const path = require('node:path');
 const { spawnSync } = require('node:child_process');
 const { isProtectedPath } = require('./builder-path-policy');
+const { INFRASTRUCTURE_PATTERNS } = require('./builder-verification-outcome');
 
 const MAX_PATCH_BYTES = 2 * 1024 * 1024;
 const MAX_CHANGED_FILES = 100;
@@ -75,6 +76,8 @@ function sha256File(filePath) {
 }
 
 function run(command, args, options) {
+  const browserReport = args.includes('test:e2e') ? path.join(options.cwd, '.bob-playwright-result.json') : null;
+  if (browserReport) fs.rmSync(browserReport, { force: true });
   const windowsNpm = process.platform === 'win32' && command === 'npm';
   const executable = windowsNpm ? (process.env.ComSpec || 'cmd.exe') : command;
   const executableArgs = windowsNpm
@@ -84,15 +87,58 @@ function run(command, args, options) {
     cwd: options.cwd,
     encoding: 'utf8',
     maxBuffer: MAX_LOG_BYTES,
-    env: { PATH: process.env.PATH, HOME: '/tmp', CI: 'true', NODE_ENV: 'test', ...VERIFICATION_ENV }
+    env: { PATH: process.env.PATH, HOME: '/tmp', CI: 'true', NODE_ENV: 'test', ...VERIFICATION_ENV,
+      ...(browserReport ? { PLAYWRIGHT_JSON_OUTPUT_NAME: browserReport } : {}) }
   });
+  let testFailures = null;
+  if (browserReport && fs.existsSync(browserReport)) {
+    try { testFailures = browserFailureSignatures(JSON.parse(fs.readFileSync(browserReport, 'utf8'))); }
+    catch (error) { testFailures = { complete: false, failures: [], error: `Browser report unreadable: ${redactLog(error.message)}` }; }
+    fs.rmSync(browserReport);
+  }
   return {
     command: [command, ...args].join(' '),
     status: result.status,
     stdout: redactLog(String(result.stdout || '').slice(-MAX_LOG_BYTES)),
     stderr: redactLog(String(result.stderr || '').slice(-MAX_LOG_BYTES)),
-    error: result.error ? redactLog(result.error.message) : null
+    error: result.error ? redactLog(result.error.message) : null,
+    ...(browserReport ? { test_failures: testFailures } : {})
   };
+}
+
+function browserFailureSignatures(report) {
+  const failures = [];
+  let count = 0;
+  let complete = Array.isArray(report?.suites) && Array.isArray(report?.errors) && !report.errors.length;
+  const visit = (suite, parents = []) => {
+    for (const spec of suite.specs || []) {
+      for (const test of spec.tests || []) {
+        count += 1;
+        if (test.status !== 'unexpected') continue;
+        const result = test.results?.at(-1);
+        const errors = result?.errors?.length ? result.errors : result?.error ? [result.error] : [];
+        if (!spec.file || !errors.length) { complete = false; continue; }
+        const signature = errors.map(error => String(error.message || '')
+          .replace(/\u001b\[[0-9;]*m/g, '').replace(/\b\d+(?:\.\d+)?(?:ms|s)\b/g, '<duration>').trim()).join('\n');
+        if (!signature) complete = false;
+        failures.push({
+          test: `${spec.file}::${test.projectName}::${[...parents, spec.title].join(' > ')}`,
+          signature: crypto.createHash('sha256').update(signature).digest('hex'),
+          infrastructure: INFRASTRUCTURE_PATTERNS.some(pattern => pattern.test(errors.map(error => error.message).join('\n')))
+        });
+      }
+    }
+    for (const child of suite.suites || []) visit(child, [...parents, suite.title || '']);
+  };
+  for (const suite of report?.suites || []) visit(suite);
+  return { complete: complete && count > 0, failures };
+}
+
+function sameBrowserFailures(patched, baseline) {
+  if (!patched?.complete || !baseline?.complete || !patched.failures.length) return false;
+  if ([...patched.failures, ...baseline.failures].some(failure => failure.infrastructure)) return false;
+  const keys = new Set(baseline.failures.map(failure => `${failure.test}::${failure.signature}`));
+  return patched.failures.every(failure => keys.has(`${failure.test}::${failure.signature}`));
 }
 
 // The repository's own CI runs this smoke subset (apps/web package.json test:e2e:ci-smoke); the full
@@ -147,7 +193,7 @@ function frontendVerificationCommands({ changedFiles = [], webDir = null } = {})
     ['run', 'lint', '--prefix', 'apps/web'],
     ['run', 'build', '--prefix', 'apps/web'],
     ['run', 'test', '--prefix', 'apps/web', '--', '--pool=threads', '--maxWorkers=1', '--reporter=dot'],
-    ['run', 'test:e2e', '--prefix', 'apps/web', '--', ...E2E_SMOKE_SPECS, ...targeted, '--project=desktop-chromium', '--workers=1', '--reporter=line', '--ignore-snapshots']
+    ['run', 'test:e2e', '--prefix', 'apps/web', '--', ...E2E_SMOKE_SPECS, ...targeted, '--project=desktop-chromium', '--workers=1', '--reporter=line,json', '--ignore-snapshots']
   ];
 }
 
@@ -185,7 +231,7 @@ function executeFrontendPatch({ sourceDir, patchPath, artifactDir, workDir = '/w
       fs.writeFileSync(progressPath, `${JSON.stringify({ succeeded: false, in_progress: true, running: ['npm', ...args].join(' '), started_at: new Date().toISOString(), commands, e2e_selection: { smoke: E2E_SMOKE_SPECS, targeted: e2eTargeted, project: 'desktop-chromium', offline: true, snapshots: E2E_SNAPSHOT_NOTE } }, null, 2)}\n`, { mode: 0o600 });
       commands.push(run('npm', args, { cwd: workDir }));
       if (commands.at(-1).status !== 0) {
-        baseline = baselineCheck({ workDir, patchPath, args, progressPath, commands });
+        baseline = baselineCheck({ workDir, patchPath, args, progressPath, commands, patched: commands.at(-1) });
         if (tolerateBaselineFailures(commands.at(-1), baseline, args)) continue;
         break;
       }
@@ -209,7 +255,7 @@ function executeFrontendPatch({ sourceDir, patchPath, artifactDir, workDir = '/w
   }
   fs.writeFileSync(path.join(artifactDir, 'changed-files.json'), `${JSON.stringify(manifest, null, 2)}\n`, { mode: 0o600 });
   if (patchApplied) fs.writeFileSync(path.join(artifactDir, 'validated.patch'), patchText, { mode: 0o600 });
-  const baselineBlocks = Boolean(baseline?.also_fails && !baseline.tolerated && !baseline.new_failures?.length);
+  const baselineBlocks = Boolean(baseline?.proven_same_failure && !baseline.tolerated && !baseline.new_failures?.length);
   fs.writeFileSync(path.join(artifactDir, 'verification.json'), `${JSON.stringify({ succeeded, commands, baseline, baseline_failure: baselineBlocks, baseline_reason: baselineBlocks ? baseline.reason : null, preexisting_failures: baseline?.tolerated ? baseline.failing_files : [], e2e_selection: patchApplied ? { smoke: E2E_SMOKE_SPECS, targeted: targetedE2eSpecs(changedFiles, path.join(workDir, 'apps/web')), project: 'desktop-chromium', offline: true, snapshots: E2E_SNAPSHOT_NOTE } : null }, null, 2)}\n`, { mode: 0o600 });
   return { succeeded, changed_files: manifest, commands, baseline_failure: baselineBlocks, preexisting_failures: baseline?.tolerated ? baseline.failing_files : [] };
 }
@@ -250,7 +296,7 @@ function tolerateBaselineFailures(command, baseline, args) {
  * at the pinned commit (job 72edc782: three guard tests broken by unrelated commits on main) and
  * the author must not be sent that failure as their own.
  */
-function baselineCheck({ workDir, patchPath, args, progressPath, commands }) {
+function baselineCheck({ workDir, patchPath, args, progressPath, commands, patched }) {
   const label = ['npm', ...args].join(' ');
   fs.writeFileSync(progressPath, `${JSON.stringify({ succeeded: false, in_progress: true, running: `baseline check: ${label}`, started_at: new Date().toISOString(), commands }, null, 2)}\n`, { mode: 0o600 });
   const revert = run('git', ['apply', '-R', '--whitespace=nowarn', patchPath], { cwd: workDir });
@@ -259,11 +305,21 @@ function baselineCheck({ workDir, patchPath, args, progressPath, commands }) {
   try {
     result = run('npm', args, { cwd: workDir });
   } finally {
-    run('git', ['apply', '--whitespace=nowarn', patchPath], { cwd: workDir });
+    const restored = run('git', ['apply', '--whitespace=nowarn', patchPath], { cwd: workDir });
+    if (restored.status !== 0) throw new Error('Could not restore candidate patch after baseline verification');
   }
   const alsoFails = result.status !== 0;
   const allFailing = alsoFails ? failingTestFiles(`${result.stdout}\n${result.stderr}`) : [];
   const failing = allFailing.slice(0, 8);
+  const provenSameFailure = alsoFails && (args[1] === 'test:e2e'
+    ? sameBrowserFailures(patched.test_failures, result.test_failures)
+    : args[1] === 'test'
+      ? failingTestFiles(`${patched.stdout}\n${patched.stderr}`).length > 0
+        && failingTestFiles(`${patched.stdout}\n${patched.stderr}`).every(file => allFailing.includes(file))
+      : Boolean(`${patched.stdout || ''}${patched.stderr || ''}`.trim())
+        && patched.status === result.status
+        && `${patched.stdout || ''}\n${patched.stderr || ''}`.trim() === `${result.stdout || ''}\n${result.stderr || ''}`.trim()
+        && !INFRASTRUCTURE_PATTERNS.some(pattern => pattern.test(`${result.stdout || ''}\n${result.stderr || ''}`)));
   return {
     command: label,
     checked: true,
@@ -271,7 +327,9 @@ function baselineCheck({ workDir, patchPath, args, progressPath, commands }) {
     status: result.status,
     failing_files: failing,
     all_failing_files: allFailing,
-    reason: alsoFails ? `${label} also fails on the pinned commit without this patch (the repository is red at the target commit${failing.length ? `: ${failing.join(', ')}` : ''}); not caused by this change` : null,
+    proven_same_failure: provenSameFailure,
+    test_failures: result.test_failures ?? null,
+    reason: provenSameFailure ? `${label} has matching failures on the pinned commit without this patch${failing.length ? `: ${failing.join(', ')}` : ''}` : alsoFails ? 'Baseline also failed, but matching failure evidence is absent; patch attribution remains unresolved' : null,
     stdout: redactLog(String(result.stdout || '').slice(-8000)),
     stderr: redactLog(String(result.stderr || '').slice(-8000))
   };
@@ -306,5 +364,7 @@ module.exports = {
   targetedE2eSpecs,
   executeFrontendPatch,
   failingTestFiles,
-  tolerateBaselineFailures
+  tolerateBaselineFailures,
+  browserFailureSignatures,
+  sameBrowserFailures
 };

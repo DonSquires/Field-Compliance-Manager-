@@ -1,3 +1,4 @@
+const { planningTimeoutFor } = require('./supabase/functions/_shared/builder-model-adapter');
 const DEFAULT_MAX_PROMPT_CHARS = 1_200_000; // ~300k tokens: room for a real working set, the way a coding agent holds one
 const ALLOWED_BUILDER_MODES = new Set([
   'product_analyst',
@@ -19,6 +20,8 @@ const PROVIDER_KINDS = Object.freeze({ openai: 'openai', ollama: 'ollama', gpu_w
 const OLLAMA_API_KINDS = new Set(['ollama', 'ollama_cloud']);
 const HEALTH_OK_TTL_MS = 30_000;
 const HEALTH_FAIL_TTL_MS = 60_000;
+const planningTimeouts = new Map();
+const PLANNING_COOLDOWN_MS = 5 * 60_000;
 // An exhausted account ("You have no credits remaining", insufficient_quota) does not recover in a
 // minute. OpenAI's model list still answers, so health kept calling it ready and every frontend job
 // spent its last fallback retrying a 429 (19 failed attempts across 5 jobs, 2026-10).
@@ -254,7 +257,7 @@ function buildProviderBody({ input, config, model }) {
   if (!isOpenAI) {
     const providerConfig = config[input.provider];
     body.stream = false;
-    if (input.output_schema) body.format = 'json';
+    if (input.output_schema) body.format = providerConfig.kind === 'ollama' && input.output_schema.properties ? input.output_schema : 'json';
     // Ollama defaults to a 4k window and would truncate Bob's prompts silently; keep the model warm between turns.
     body.options = { num_ctx: providerConfig.numCtx, temperature: typeof input.temperature === 'number' ? input.temperature : 0.2, num_predict: Math.min(Number(input.max_output_tokens) || providerConfig.maxOutputTokens || 8192, providerConfig.maxOutputTokens || 8192, 16384) };
     if (providerConfig.kind === 'ollama') body.keep_alive = '5m';
@@ -299,11 +302,20 @@ async function invokeBuilderModel({ input, config, fetchImpl = globalThis.fetch 
     return { status: 422, body: { error: `${input.provider} model exceeds the configured VRAM weight budget or its size is unknown; over-budget model selection is blocked`, code: 'model_memory_budget' } };
   }
   const local = providerConfig.kind === 'ollama';
+  const planningTimeout = planningTimeoutFor(input);
+  const planningKey = JSON.stringify([providerConfig.baseUrl, model]);
+  for (const [key, entry] of planningTimeouts) {
+    if (Date.now() - entry.at >= PLANNING_COOLDOWN_MS) planningTimeouts.delete(key);
+  }
+  const previousTimeouts = planningTimeout ? planningTimeouts.get(planningKey) : null;
+  if (previousTimeouts && Date.now() - previousTimeouts.at < PLANNING_COOLDOWN_MS && previousTimeouts.count >= 2) {
+    return { status: 429, body: { error: 'VPS structured planning is cooling down after two timeouts; continue the allowed fallback chain', code: 'provider_planning_cooldown', retry_after_ms: PLANNING_COOLDOWN_MS - (Date.now() - previousTimeouts.at) } };
+  }
   if (local && busyLocalProviders.has(input.provider)) return { status: 429, body: { error: `${input.provider} is already serving a request; no parallel local model was loaded`, code: 'provider_busy' } };
   if (local) busyLocalProviders.add(input.provider);
 
   const controller = new AbortController();
-  const timer = setTimeout(() => controller.abort(), config.timeoutMs);
+  const timer = setTimeout(() => controller.abort(), Math.min(config.timeoutMs, planningTimeout || Infinity));
   try {
     const isOpenAI = input.provider === 'openai';
     const response = await fetchImpl(
@@ -333,6 +345,7 @@ async function invokeBuilderModel({ input, config, fetchImpl = globalThis.fetch 
     if (typeof content !== 'string') {
       return { status: 502, body: { error: `${input.provider} provider returned no content` } };
     }
+    if (planningTimeout) planningTimeouts.delete(planningKey);
 
     return {
       status: 200,
@@ -356,6 +369,10 @@ async function invokeBuilderModel({ input, config, fetchImpl = globalThis.fetch 
     };
   } catch (error) {
     const timedOut = error?.name === 'AbortError';
+    if (timedOut && planningTimeout) {
+      const previous = planningTimeouts.get(planningKey);
+      planningTimeouts.set(planningKey, { count: (previous?.count || 0) + 1, at: Date.now() });
+    }
     if (!timedOut && OLLAMA_API_KINDS.has(providerConfig.kind)) healthCache.set(input.provider, { healthy: false, installed: [], until: Date.now() + HEALTH_FAIL_TTL_MS });
     return {
       status: timedOut ? 504 : 502,
