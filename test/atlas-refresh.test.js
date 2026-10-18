@@ -725,8 +725,9 @@ test('Atlas refresh preserves manual and unmarked generator rows', () => {
   assert.equal(plan.capabilityUpserts.length, 0);
   assert.deepEqual(plan.capabilityRetireIds, ['stale-cap']);
   assert.equal(plan.edgeUpserts.length, 0);
-  assert.deepEqual(plan.edgeRetireIds, ['owned-stale', 'managed-pre-marker']);
+  assert.deepEqual(plan.edgeRetireIds, ['owned-stale']);
   assert.equal(plan.edgeRetireIds.includes('legacy-generator'), false);
+  assert.equal(plan.edgeRetireIds.includes('managed-pre-marker'), false);
   assert.equal(plan.edgeRetireIds.includes('unmanaged-pre-marker'), false);
 });
 
@@ -930,11 +931,12 @@ test('component extraction records multiline conditional RPC targets', () => {
   );
 });
 
-test('stale edge compatibility helper retires only live CI-generated identities', () => {
+test('stale edge compatibility helper retires only marker-owned live CI identities', () => {
   const base = { source_type: 'component', source_name: 'pages/CRMPage', target_type: 'table', source_file: 'apps/web/src/pages/CRMPage.tsx', retirement_status: 'live' };
   const existing = [
-    { ...base, id: 'keep', target_name: 'quotes', edge_kind: 'reads', refresh_source: 'ci_generator' },
-    { ...base, id: 'stale', target_name: 'quote_lines', edge_kind: 'writes', refresh_source: 'ci_generator' },
+    { ...base, id: 'keep', target_name: 'quotes', edge_kind: 'reads', refresh_source: 'ci_generator', caller_context: `${OWNER_MARKER} read` },
+    { ...base, id: 'stale', target_name: 'quote_lines', edge_kind: 'writes', refresh_source: 'ci_generator', caller_context: `${OWNER_MARKER} write` },
+    { ...base, id: 'unmarked', target_name: 'invoice_lines', edge_kind: 'writes', refresh_source: 'ci_generator', caller_context: ".from('invoice_lines').insert({})" },
     { ...base, id: 'manual', target_name: 'quote_lines', edge_kind: 'writes', refresh_source: 'manual_seed' }
   ];
   const generated = [{ ...base, target_name: 'quotes', edge_kind: 'reads' }];

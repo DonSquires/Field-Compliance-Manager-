@@ -55,7 +55,9 @@ radius of any change. Screens are the last thing built, not the first.
   and existing `exercised` values are preserved.
 - Retirement is ownership-scoped. Only stale rows carrying
   `[repo-atlas-refresh:v1]` can be changed to `legacy`; older generator rows
-  and manual rows are left untouched. More than 100 retirements fails closed
+  and manual rows are left untouched. A known source-file path or a caller
+  context that resembles generated code is not ownership evidence and must
+  never substitute for the marker. More than 100 retirements fails closed
   unless an operator explicitly passes `--allow-large-retirement`.
 - When the source checkout is intentionally behind live Atlas, use
   `node scripts/atlas-refresh.js --apply --upsert-only` (optionally with

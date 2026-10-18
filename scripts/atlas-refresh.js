@@ -242,10 +242,17 @@ function collectComponentEdges(sourceFile, content, inventory) {
   return edges;
 }
 
+function isRefreshOwnedEdge(edge) {
+  return edge.refresh_source === 'ci_generator'
+    && String(edge.caller_context || '').startsWith(OWNER_MARKER);
+}
+
 function staleGeneratedEdgeIds(existingEdges, generatedEdges) {
   const generatedKeys = new Set(generatedEdges.map(edge => edgeKey(edge)));
   return existingEdges
-    .filter(edge => edge.refresh_source === 'ci_generator' && edge.retirement_status === 'live' && !generatedKeys.has(edgeKey(edge)))
+    .filter(edge => isRefreshOwnedEdge(edge)
+      && edge.retirement_status === 'live'
+      && !generatedKeys.has(edgeKey(edge)))
     .map(edge => edge.id);
 }
 
@@ -945,7 +952,6 @@ function buildRefreshPlan(manifest, existingCapabilities, existingEdges) {
   const edgeByKey = new Map(existingEdges.map(row => [edgeKey(row), row]));
   const generatedCapabilityKeys = new Set(manifest.capabilities.map(capabilityKey));
   const generatedEdgeKeys = new Set(manifest.edges.map(edgeKey));
-  const repositoryFiles = new Set(manifest.repository_files || []);
   const plan = {
     capabilityUpserts: [],
     edgeUpserts: [],
@@ -1000,18 +1006,7 @@ function buildRefreshPlan(manifest, existingCapabilities, existingEdges) {
     }
   }
   for (const existing of existingEdges) {
-    const generatorOwned = existing.refresh_source === 'ci_generator';
-    const ownedMarker = generatorOwned && String(existing.caller_context || '').startsWith(OWNER_MARKER);
-    const legacyManagedContext = generatorOwned
-      && MANAGED_SOURCES.includes(existing.source_file)
-      && /^\.from\(['"][^'"]+['"]\)\.(?:insert|update|upsert|delete)/.test(String(existing.caller_context || ''));
-    const deletedRepositorySource = repositoryFiles.size > 0
-      && (String(existing.source_file || '').startsWith('apps/web/src/')
-        || String(existing.source_file || '').startsWith('supabase/functions/'))
-      && !repositoryFiles.has(existing.source_file);
-    if ((ownedMarker
-      || legacyManagedContext
-      || (deletedRepositorySource && ownedMarker))
+    if (isRefreshOwnedEdge(existing)
         && existing.retirement_status !== 'legacy'
         && !generatedEdgeKeys.has(edgeKey(existing))) {
       plan.edgeRetireIds.push(existing.id);
