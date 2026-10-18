@@ -55,7 +55,9 @@ drain_control_plane() {
   local wait_s="${BOB_DEPLOY_DRAIN_SECONDS:-1200}"
   [[ "${BOB_DEPLOY_FORCE:-0}" == "1" ]] && { echo "drain skipped (BOB_DEPLOY_FORCE=1)"; return 0; }
   "${SSH[@]}" "set -euo pipefail
-    set -a; . /var/lib/bob/control-plane.env; set +a
+    # Read only the two keys: the env file is docker env-file syntax, not shell (unquoted spaces).
+    SUPABASE_URL=\$(grep -E '^SUPABASE_URL=' /var/lib/bob/control-plane.env | head -1 | cut -d= -f2-)
+    SUPABASE_SERVICE_ROLE_KEY=\$(grep -E '^SUPABASE_SERVICE_ROLE_KEY=' /var/lib/bob/control-plane.env | head -1 | cut -d= -f2-)
     busy() {
       local w m
       w=\$(curl -sf \"\${SUPABASE_URL%/}/rest/v1/builder_worker_runs?select=id&status=in.(running,queued)&created_at=gt.\$(date -u -d '-2 hours' +%Y-%m-%dT%H:%M:%SZ)&limit=1\" -H \"apikey: \$SUPABASE_SERVICE_ROLE_KEY\" -H \"Authorization: Bearer \$SUPABASE_SERVICE_ROLE_KEY\" | tr -d ' \\n')
