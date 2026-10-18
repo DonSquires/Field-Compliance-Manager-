@@ -9,6 +9,27 @@ vi.mock('../components/BobPanel', () => ({ BobPanel: () => null }));
 vi.mock('../components/ChangeRequestQueue', () => ({ ChangeRequestQueue: () => null }));
 afterEach(() => { cleanup(); vi.resetAllMocks(); });
 
+it.each(['driving', 'blocked', 'awaiting_human', 'done'])('does not call a monitor job undriven when scheduler state is %s', async state => {
+  const now = new Date().toISOString();
+  const job = {
+    id: 'monitor-job', project_id: 'project', title: 'Monitor repair', status: 'implementation_pending',
+    target_sha: 'a'.repeat(40), current_step_name: 'ui_design', autopilot_state: state, autopilot_requested_by: null,
+    created_at: now, updated_at: now,
+  };
+  invoke.mockImplementation(async (_name, { body }) => {
+    if (body.action === 'list') return { data: { jobs: [job], projects: [] }, error: null };
+    if (body.action === 'context_snapshot') return { data: {}, error: null };
+    if (body.action === 'get') return { data: { job, steps: [], artifacts: [], workerRuns: [], approvals: [] }, error: null };
+    throw new Error(`Unexpected action: ${body.action}`);
+  });
+  render(<BuilderControlRoomPage />);
+  await screen.findByRole('heading', { name: 'Monitor repair' });
+  await waitFor(() => {
+    expect(screen.queryByText(/Nobody is driving this job yet/)).toBeNull();
+    expect(screen.getByText(state === 'driving' ? /Bob autopilot is assigned/ : state === 'blocked' ? /Bob is blocked. Inspect/ : state === 'awaiting_human' ? /Bob is waiting for a human decision/ : /Autopilot stopped on this record. Review its outcome/)).toBeTruthy();
+  });
+});
+
 it.each([
   ['Run next step', 'advance', false],
   ['Run to gate', 'run', false],
