@@ -88,7 +88,7 @@ turn beats false completeness.
   RPC chain remains present and wired; `exercised` is not claimed because that
   Atlas field is not populated live.
 
-## FINANCE VISIBILITY BUTTERFLY (2026-10-18) — IMPLEMENTED, PENDING RELEASE
+## FINANCE VISIBILITY BUTTERFLY (2026-10-18) — RELEASED AND LIVE-VERIFIED
 
 - Live verification found 61 draft P&L periods with costs, 501 provider-private
   cost lines totalling NZ$927,867.27, and no closed-period snapshots. The
@@ -108,6 +108,11 @@ turn beats false completeness.
   now the provider root plus actual branches. The last-30-day roll-up also
   reports internal service-cost count and total; those provider-private values
   remain absent from client-portal surfaces.
+- Released through #102 and applied as migration `20261018140000`. Live
+  authenticated readback returns the latest six cost lines, NZ$6,548.28 costs,
+  NZ$0 revenue, and the explicit NZ$-6,548.28 draft result. The corrected
+  provider/branch overview returns two operating organisations, 17 accepted
+  agreements, and 16 current-period cost lines totalling NZ$50,606.29.
 
 ## INVOICE AND PRICE-BOOK CORPUS (2026-10-18) — INVENTORIED, NOT PROMOTED
 
