@@ -1544,3 +1544,17 @@
   .builder-pipeline-node.is-active,
   .builder-step.state-running > span { animation: none; }
 }
+
+.builder-search-elsewhere {
+  display: block;
+  margin-top: 6px;
+  padding: 0;
+  border: 0;
+  background: none;
+  color: var(--color-accent, #2dd4bf);
+  font: inherit;
+  text-decoration: underline;
+  text-underline-offset: 2px;
+  cursor: pointer;
+}
+.builder-search-elsewhere:focus-visible { outline: 2px solid var(--color-accent, #2dd4bf); outline-offset: 2px; }

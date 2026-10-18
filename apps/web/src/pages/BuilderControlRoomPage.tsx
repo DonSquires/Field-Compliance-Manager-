@@ -2,6 +2,7 @@ import React, { useCallback, useEffect, useMemo, useRef, useState } from 'react'
 import { AlertTriangle, Bot, CheckCircle2, ChevronRight, CircleStop, Clock3, Database, FileCode2, FolderTree, MessageSquareText, Play, Plus, RefreshCw, Search, ShieldCheck, TerminalSquare, Workflow, X } from 'lucide-react';
 import { BobPanel } from '../components/BobPanel';
 import { ChangeRequestQueue } from '../components/ChangeRequestQueue';
+import { jobMatchesSearch } from '../lib/builderJobSearch';
 import { BuilderLiveActivity, isLiveJob, type LiveChangedFile, type LiveEvent, type LiveModelRun, type LivePollState } from '../components/BuilderLiveActivity';
 import { supabase } from '../lib/supabase';
 import './BuilderControlRoomPage.css';
@@ -383,19 +384,17 @@ const BuilderControlRoomPage: React.FC<{ onOpenBob?: (prompt: string) => void }>
       if (scopeFilter === 'fullstack' && (!job.frontend_required || !job.backend_required)) return false;
 
       // 3. Search query
-      if (searchQuery.trim()) {
-        const q = searchQuery.toLowerCase().trim();
-        const matchesTitle = String(job.title).toLowerCase().includes(q);
-        const matchesStep = String(job.current_step_name || '').toLowerCase().includes(q);
-        const matchesStatus = String(job.status).toLowerCase().includes(q);
-        const matchesError = String(job.last_error || '').toLowerCase().includes(q);
-        const matchesSha = String(job.target_sha || '').toLowerCase().includes(q);
-        if (!matchesTitle && !matchesStep && !matchesStatus && !matchesError && !matchesSha) return false;
-      }
+      if (searchQuery.trim() && !jobMatchesSearch(job, searchQuery)) return false;
 
       return true;
     });
   }, [jobs, activeTab, scopeFilter, searchQuery]);
+  // A pasted job ID often belongs to a failed or release-ready job hidden by the active tab.
+  const searchMatchesElsewhere = useMemo(() => {
+    if (!searchQuery.trim()) return 0;
+    const visible = new Set(filteredJobs.map(job => job.id));
+    return jobs.filter(job => !visible.has(job.id) && jobMatchesSearch(job, searchQuery)).length;
+  }, [jobs, filteredJobs, searchQuery]);
 
   const completedSteps = snapshot?.steps.filter(step => ['completed', 'skipped'].includes(step.status)).length ?? 0;
 
@@ -682,7 +681,7 @@ const BuilderControlRoomPage: React.FC<{ onOpenBob?: (prompt: string) => void }>
                 type="text"
                 value={searchQuery}
                 onChange={e => setSearchQuery(e.target.value)}
-                placeholder="Filter by title, commit, or error…"
+                placeholder="Job ID, branch, title, commit or error…"
                 aria-label="Filter jobs"
               />
               {searchQuery && (
@@ -706,6 +705,11 @@ const BuilderControlRoomPage: React.FC<{ onOpenBob?: (prompt: string) => void }>
 
           <div className="builder-list-summary">
             Showing {filteredJobs.length} of {jobs.length} jobs
+            {searchMatchesElsewhere > 0 && (
+              <button type="button" className="builder-search-elsewhere" onClick={() => { setActiveTab('all'); setScopeFilter('all'); }}>
+                {searchMatchesElsewhere} more match{searchMatchesElsewhere === 1 ? '' : 'es'} outside this tab · Show all
+              </button>
+            )}
           </div>
 
           {loading ? <div className="builder-empty"><RefreshCw size={18} className="is-spinning" /> Loading jobs</div> : filteredJobs.length === 0 ? <div className="builder-empty"><Workflow size={19} /> {jobs.length === 0 ? 'No Builder jobs' : activeTab === 'issues' ? 'No actionable issues' : 'No jobs matching filter'}</div> : (

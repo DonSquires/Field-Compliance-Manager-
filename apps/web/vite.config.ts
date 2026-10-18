@@ -1,13 +1,35 @@
 import { defineConfig } from 'vite';
 import react from '@vitejs/plugin-react';
 import { configDefaults } from 'vitest/config';
+import { execSync } from 'node:child_process';
+import type { Plugin } from 'vite';
+
+// One identity per deployed build. An open tab compares it with /version.json so a user is told
+// when a newer release is live instead of working on a stale bundle indefinitely.
+function resolveBuildId() {
+  if (process.env.VERCEL_GIT_COMMIT_SHA) return process.env.VERCEL_GIT_COMMIT_SHA;
+  try { return execSync('git rev-parse HEAD', { stdio: ['ignore', 'pipe', 'ignore'] }).toString().trim(); }
+  catch { return `local-${Date.now()}`; }
+}
+const BUILD_ID = resolveBuildId();
+
+function buildVersionManifest(): Plugin {
+  return {
+    name: 'fcm-build-version',
+    apply: 'build',
+    generateBundle() {
+      this.emitFile({ type: 'asset', fileName: 'version.json', source: JSON.stringify({ build: BUILD_ID }) });
+    },
+  };
+}
 
 // NOTE: bundler choice is a documented assumption, not verified against the
 // original repository (Bob never confirmed vite.config.* there). Vite is
 // the standard match for a bare main.tsx + BrowserRouter entry; revisit if
 // that assumption is later contradicted by evidence.
 export default defineConfig({
-  plugins: [react()],
+  plugins: [react(), buildVersionManifest()],
+  define: { __APP_BUILD_ID__: JSON.stringify(BUILD_ID) },
   build: {
     // Mermaid is loaded only when Bob renders a diagram; its lazy runtime is
     // intentionally larger than the initial application vendor budget.
