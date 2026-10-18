@@ -88,6 +88,27 @@ turn beats false completeness.
   RPC chain remains present and wired; `exercised` is not claimed because that
   Atlas field is not populated live.
 
+## FINANCE VISIBILITY BUTTERFLY (2026-10-18) — IMPLEMENTED, PENDING RELEASE
+
+- Live verification found 61 draft P&L periods with costs, 501 provider-private
+  cost lines totalling NZ$927,867.27, and no closed-period snapshots. The
+  finance home read only `finance_pl_snapshots`, so it displayed “Not ready”
+  and zero activity even though every period contained governed cost records.
+- Added an administrator-only, read-only period summary over the existing cost,
+  invoice, and P&L-period spines. The finance home now uses that summary for
+  draft/locked periods, labels the result as changeable, and shows recorded
+  revenue, costs, cost-line count, and current result without pretending the
+  period is closed.
+- The period-close snapshot path also omitted `invoice_count`, `gross_profit`,
+  and `gross_margin_pct`. Closing now persists those derived fields atomically
+  with the existing cost and revenue totals. A rollback production check
+  created a complete six-line NZ$6,548.28 snapshot and then removed it.
+- The CRM commercial roll-up treated every descendant client as though it were
+  an operating provider, which produced rows of misleading zeros. Its scope is
+  now the provider root plus actual branches. The last-30-day roll-up also
+  reports internal service-cost count and total; those provider-private values
+  remain absent from client-portal surfaces.
+
 ## INVOICE AND PRICE-BOOK CORPUS (2026-10-18) — INVENTORIED, NOT PROMOTED
 
 - Located and read-only inventoried `Invoice Spreadsheets`: 70 files in 30
