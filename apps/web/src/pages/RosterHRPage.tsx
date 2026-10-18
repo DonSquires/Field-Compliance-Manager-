@@ -81,6 +81,7 @@ interface CredentialRow {
 
 interface StaffDocumentRow { id: string; staff_id: string; document_type: string; file_name: string; file_size_bytes: number | null; mime_type: string | null; notes: string | null; expiry_date: string | null; uploaded_at: string | null; }
 interface StaffTrainingRow { id: string; staff_id: string | null; officer_id: string | null; training_name: string; training_type: string; provider: string | null; completed_date: string; expiry_date: string | null; passed: boolean | null; score: number | null; notes: string | null; }
+interface StaffSkillRow { id: string; staff_id: string; skill_id: string | null; skill_name: string; skill_category: string | null; proficiency_level: string | null; certified: boolean; certification_expiry: string | null; notes: string | null; updated_at: string | null; }
 
 interface ShiftTemplateRow {
   id: string;
@@ -334,6 +335,8 @@ const ONBOARDING_STEPS: Array<{ stage: string; label: string; needs: string }> =
 ];
 const onboardingStageLabel = (stage: string) => ONBOARDING_STEPS.find((step) => step.stage === stage)?.label ?? plainWords(stage);
 const onboardingStatusLabel = (status: string | undefined) => ({ in_progress: 'In progress', blocked: 'Blocked', withdrawn: 'Withdrawn', ready: 'Ready' } as Record<string, string>)[status ?? ''] ?? (status ? plainWords(status) : 'Not started');
+const payrollCodeFromName = (value: string) => value.trim().toUpperCase().replace(/[^A-Z0-9]+/g, '_').replace(/^_+|_+$/g, '').slice(0, 32);
+const validPayrollCode = (value: string) => /^[A-Z0-9][A-Z0-9_-]*$/.test(value);
 
 const RosterHRPage: React.FC = () => {
   const location = useLocation();
@@ -380,6 +383,7 @@ const RosterHRPage: React.FC = () => {
   const [credentials, setCredentials] = useState<CredentialRow[]>([]);
   const [staffDocuments, setStaffDocuments] = useState<StaffDocumentRow[]>([]);
   const [trainingRecords, setTrainingRecords] = useState<StaffTrainingRow[]>([]);
+  const [staffSkills, setStaffSkills] = useState<StaffSkillRow[]>([]);
   const [shiftTemplates, setShiftTemplates] = useState<ShiftTemplateRow[]>([]);
   const [leaveRequests, setLeaveRequests] = useState<LeaveRequestRow[]>([]);
   const [timesheets, setTimesheets] = useState<TimesheetRow[]>([]);
@@ -392,6 +396,8 @@ const RosterHRPage: React.FC = () => {
   const [payRoleDrafts, setPayRoleDrafts] = useState<Record<string, string>>({});
   const [showPayRoleCodeForm, setShowPayRoleCodeForm] = useState(false);
   const [payRoleCodeForm, setPayRoleCodeForm] = useState({ code: '', name: '' });
+  const [trainingAction, setTrainingAction] = useState<{ staffId: string; trainingName: string; trainingType: string; provider: string; completedDate: string; expiryDate: string; result: 'passed' | 'not_passed' | 'not_assessed'; score: string; notes: string; supersedesId: string | null } | null>(null);
+  const [skillAction, setSkillAction] = useState<{ staffId: string; skillId: string; proficiency: string; certified: boolean; certificationExpiry: string; notes: string } | null>(null);
   const [staffNames, setStaffNames] = useState<Record<string, string>>({});
   const [coverageRequests, setCoverageRequests] = useState<CoverageRequestRow[]>([]);
   const [shiftSwaps, setShiftSwaps] = useState<ShiftSwapRow[]>([]);
@@ -479,6 +485,7 @@ const RosterHRPage: React.FC = () => {
     const org_access_allowed = Boolean(orgId);
     if (!org_access_allowed) {
       setCatalogSkills([]);
+      setStaffSkills([]);
       setSiteInductionRequirements([]);
       setRoleCodes([]);
       setStaff([]);
@@ -500,7 +507,7 @@ const RosterHRPage: React.FC = () => {
       setLoading(true);
       setError(null);
 
-      const [profilesRes, staffProfilesRes, roleCodesRes, credentialsRes, templatesRes, leaveRes, timesheetsRes, payLinesRes, payLineReviewsRes, coverageRes, readinessRes, workUnitsRes, assetsRes, onCallRes, calloutRes, courtRes, onboardingRes, vacanciesRes, candidatesRes, cyclesRes, reviewsRes, casesRes, skillCatalogRes, siteInductionRes, staffSiteInductionsRes, sitesRes, zonesRes, agreementLocationsRes, staffDocumentsRes, trainingRecordsRes] =
+      const [profilesRes, staffProfilesRes, roleCodesRes, credentialsRes, templatesRes, leaveRes, timesheetsRes, payLinesRes, payLineReviewsRes, coverageRes, readinessRes, workUnitsRes, assetsRes, onCallRes, calloutRes, courtRes, onboardingRes, vacanciesRes, candidatesRes, cyclesRes, reviewsRes, casesRes, skillCatalogRes, siteInductionRes, staffSiteInductionsRes, sitesRes, zonesRes, agreementLocationsRes, staffDocumentsRes, trainingRecordsRes, staffSkillsRes] =
         await Promise.all([
           supabase
             .from('user_profiles')
@@ -580,6 +587,7 @@ const RosterHRPage: React.FC = () => {
           supabase.from('service_agreement_locations').select('id, service_agreement_id, site_id, zone_id').eq('status', 'active').order('id'),
           supabase.from('staff_documents').select('id,staff_id,document_type,file_name,file_size_bytes,mime_type,notes,expiry_date,uploaded_at').eq('organization_id', orgId).order('created_at', { ascending: false }).limit(200),
           supabase.from('staff_training_records').select('id,staff_id,officer_id,training_name,training_type,provider,completed_date,expiry_date,passed,score,notes').eq('organization_id', orgId).order('completed_date', { ascending: false }).limit(200),
+          supabase.from('staff_skills').select('id,staff_id,skill_id,skill_name,skill_category,proficiency_level,certified,certification_expiry,notes,updated_at').eq('organization_id', orgId).order('skill_name').limit(500),
         ]);
       const shiftSwapsRes = await supabase
         .from('shift_swaps')
@@ -594,6 +602,7 @@ const RosterHRPage: React.FC = () => {
       if (credentialsRes.error) throw credentialsRes.error;
       if (staffDocumentsRes.error) throw staffDocumentsRes.error;
       if (trainingRecordsRes.error) throw trainingRecordsRes.error;
+      if (staffSkillsRes.error) throw staffSkillsRes.error;
       if (templatesRes.error) throw templatesRes.error;
       if (leaveRes.error) throw leaveRes.error;
       if (timesheetsRes.error) throw timesheetsRes.error;
@@ -666,6 +675,7 @@ const RosterHRPage: React.FC = () => {
       setCredentials((credentialsRes.data as CredentialRow[]) || []);
       setStaffDocuments((staffDocumentsRes.data as StaffDocumentRow[]) || []);
       setTrainingRecords((trainingRecordsRes.data as StaffTrainingRow[]) || []);
+      setStaffSkills((staffSkillsRes.data as StaffSkillRow[]) || []);
       setShiftTemplates((templatesRes.data as ShiftTemplateRow[]) || []);
       setLeaveRequests((leaveRes.data as LeaveRequestRow[]) || []);
       setTimesheets((timesheetsRes.data as TimesheetRow[]) || []);
@@ -767,18 +777,67 @@ const RosterHRPage: React.FC = () => {
   const createPayRoleCode = async (event: React.FormEvent) => {
     event.preventDefault();
     if (!profile?.organizationId || !canManagePayRoles) return;
+    const code = payrollCodeFromName(payRoleCodeForm.code);
+    if (!validPayrollCode(code) || !payRoleCodeForm.name.trim()) return;
     setSaving(true); setError(null); setNotice(null);
     const { error: createError } = await supabase.rpc('manage_pay_role_code', {
       p_action: 'create',
-      p_code: payRoleCodeForm.code.trim(),
+      p_code: code,
       p_name: payRoleCodeForm.name.trim(),
       p_role_code_id: null,
     });
     if (createError) setError(createError.message);
     else {
-      setNotice(`Payroll role code ${payRoleCodeForm.code.trim()} created. Add its pay rule for each branch that uses it.`);
+      setNotice(`Payroll role code ${code} created. Add its pay rule for each branch that uses it after assigning staff.`);
       setPayRoleCodeForm({ code: '', name: '' });
       setShowPayRoleCodeForm(false);
+      await loadAll();
+    }
+    setSaving(false);
+  };
+
+  const recordTraining = async (event: React.FormEvent) => {
+    event.preventDefault();
+    if (!trainingAction?.staffId || !trainingAction.trainingName.trim() || !trainingAction.completedDate) return;
+    setSaving(true); setError(null); setNotice(null);
+    const { data, error: actionError } = await supabase.rpc('record_staff_training', {
+      p_client_request_id: crypto.randomUUID(),
+      p_staff_id: trainingAction.staffId,
+      p_training_name: trainingAction.trainingName.trim(),
+      p_training_type: trainingAction.trainingType,
+      p_provider: trainingAction.provider.trim() || null,
+      p_completed_date: trainingAction.completedDate,
+      p_expiry_date: trainingAction.expiryDate || null,
+      p_passed: trainingAction.result === 'not_assessed' ? null : trainingAction.result === 'passed',
+      p_score: trainingAction.score ? Number(trainingAction.score) : null,
+      p_notes: trainingAction.notes.trim() || null,
+      p_supersedes_training_record_id: trainingAction.supersedesId,
+    });
+    if (actionError || !data) setError(actionError?.message ?? 'Training receipt was not confirmed.');
+    else {
+      setNotice(trainingAction.supersedesId ? 'Training renewal recorded with the previous record preserved.' : 'Training record saved and audited.');
+      setTrainingAction(null);
+      await loadAll();
+    }
+    setSaving(false);
+  };
+
+  const saveStaffSkill = async (event: React.FormEvent) => {
+    event.preventDefault();
+    if (!skillAction?.staffId || !skillAction.skillId) return;
+    setSaving(true); setError(null); setNotice(null);
+    const { data, error: actionError } = await supabase.rpc('assign_roster_skill_to_staff', {
+      p_staff_id: skillAction.staffId,
+      p_skill_id: skillAction.skillId,
+      p_proficiency_level: skillAction.proficiency,
+      p_certified: skillAction.certified,
+      p_certification_expiry: skillAction.certificationExpiry || null,
+      p_notes: skillAction.notes.trim() || null,
+    });
+    if (actionError || !data) setError(actionError?.message ?? 'Skill assignment receipt was not confirmed.');
+    else {
+      setNotice('Staff skill saved and available to roster qualification checks.');
+      setSkillAction(null);
       await loadAll();
     }
     setSaving(false);
@@ -1568,10 +1627,15 @@ const RosterHRPage: React.FC = () => {
           )}
           {showPayRoleCodeForm && <form className="assessment-form" onSubmit={(event) => void createPayRoleCode(event)}>
             <div className="form-row">
-              <label><span>Payroll role code</span><input required maxLength={32} pattern="[A-Za-z0-9][A-Za-z0-9_-]*" value={payRoleCodeForm.code} onChange={(event) => setPayRoleCodeForm((form) => ({ ...form, code: event.target.value }))} placeholder="FIELD_SECURITY" /></label>
-              <label><span>Name shown to staff admins</span><input required maxLength={120} value={payRoleCodeForm.name} onChange={(event) => setPayRoleCodeForm((form) => ({ ...form, name: event.target.value }))} placeholder="Field security officer" /></label>
+              <label><span>Role name</span><input required maxLength={120} value={payRoleCodeForm.name} onChange={(event) => {
+                const name = event.target.value;
+                setPayRoleCodeForm((current) => ({ name, code: current.code === payrollCodeFromName(current.name) ? payrollCodeFromName(name) : current.code }));
+              }} placeholder="Office Staff" /></label>
+              <label><span>Payroll role code</span><input required maxLength={32} value={payRoleCodeForm.code} onChange={(event) => setPayRoleCodeForm((form) => ({ ...form, code: payrollCodeFromName(event.target.value) }))} aria-describedby="payroll-role-code-help" placeholder="OFFICE_STAFF" /></label>
             </div>
-            <button type="submit" className="btn btn-primary" disabled={saving}>{saving ? 'Creating…' : 'Create payroll role code'}</button>
+            <p id="payroll-role-code-help" className="contact-meta">The code is generated from the role name and is used to match staff to branch pay rules. Spaces become underscores.</p>
+            {payRoleCodeForm.code && !validPayrollCode(payRoleCodeForm.code) && <p className="alert alert-error" role="alert">Use letters, numbers, underscores, or hyphens.</p>}
+            <button type="submit" className="btn btn-primary" disabled={saving || !payRoleCodeForm.name.trim() || !validPayrollCode(payRoleCodeForm.code)}>{saving ? 'Creating…' : 'Create payroll role code'}</button>
           </form>}
         </section>
       )}
@@ -1869,6 +1933,48 @@ const RosterHRPage: React.FC = () => {
       {tab === 'credentials' && (
         <>
           <section className="reports-section">
+            <header className="page-header">
+              <div><span className="contact-meta">Work qualification</span><h2>Skills and training actions</h2><p className="subtitle">Record evidence here before relying on a person for qualified roster coverage. Skill expiry is rechecked when a roster slot is assigned.</p></div>
+              <div className="assessment-actions">
+                <button type="button" className="btn btn-sm btn-primary" onClick={() => { setSkillAction({ staffId: '', skillId: '', proficiency: 'competent', certified: false, certificationExpiry: '', notes: '' }); setTrainingAction(null); }}>Assign skill</button>
+                <button type="button" className="btn btn-sm btn-secondary" onClick={() => { setTrainingAction({ staffId: '', trainingName: '', trainingType: 'internal', provider: '', completedDate: new Date().toISOString().slice(0, 10), expiryDate: '', result: 'passed', score: '', notes: '', supersedesId: null }); setSkillAction(null); }}>Record training</button>
+              </div>
+            </header>
+            {catalogSkills.length === 0 && <div className="empty-state"><p><strong>No active skill catalog entries.</strong> Add the organisation’s approved skills under Staff → Workforce setup before assigning one.</p></div>}
+            {skillAction && <form className="assessment-form" onSubmit={(event) => void saveStaffSkill(event)}>
+              <div className="form-row">
+                <label><span>Staff member</span><select required value={skillAction.staffId} onChange={(event) => setSkillAction({ ...skillAction, staffId: event.target.value })}><option value="">Select staff</option>{staff.filter((person) => person.staff_id).map((person) => <option key={person.staff_id!} value={person.staff_id!}>{person.display_name || person.email || person.staff_id}</option>)}</select></label>
+                <label><span>Catalog skill</span><select required value={skillAction.skillId} onChange={(event) => setSkillAction({ ...skillAction, skillId: event.target.value })}><option value="">Select skill</option>{catalogSkills.filter((skill) => skill.active).map((skill) => <option key={skill.id} value={skill.id}>{skill.skill_name} · {skill.skill_category}</option>)}</select></label>
+                <label><span>Proficiency</span><select value={skillAction.proficiency} onChange={(event) => setSkillAction({ ...skillAction, proficiency: event.target.value })}><option value="basic">Basic</option><option value="competent">Competent</option><option value="proficient">Proficient</option><option value="expert">Expert</option></select></label>
+              </div>
+              <div className="form-row">
+                <label><span>Certification state</span><select value={skillAction.certified ? 'certified' : 'not_certified'} onChange={(event) => setSkillAction({ ...skillAction, certified: event.target.value === 'certified' })}><option value="not_certified">Skill observed, not certified</option><option value="certified">Certified</option></select></label>
+                <label><span>Certification expiry</span><input type="date" value={skillAction.certificationExpiry} onChange={(event) => setSkillAction({ ...skillAction, certificationExpiry: event.target.value })} /></label>
+                <label><span>Evidence note</span><input value={skillAction.notes} onChange={(event) => setSkillAction({ ...skillAction, notes: event.target.value })} placeholder="Assessment or certificate reference" /></label>
+              </div>
+              <div className="assessment-actions"><button type="button" className="btn btn-secondary" onClick={() => setSkillAction(null)}>Cancel</button><button type="submit" className="btn btn-primary" disabled={saving || !skillAction.staffId || !skillAction.skillId}>{saving ? 'Saving' : 'Save staff skill'}</button></div>
+            </form>}
+            {trainingAction && <form className="assessment-form" onSubmit={(event) => void recordTraining(event)}>
+              <div className="form-row">
+                <label><span>Staff member</span><select required value={trainingAction.staffId} onChange={(event) => setTrainingAction({ ...trainingAction, staffId: event.target.value })}><option value="">Select staff</option>{staff.filter((person) => person.staff_id).map((person) => <option key={person.staff_id!} value={person.staff_id!}>{person.display_name || person.email || person.staff_id}</option>)}</select></label>
+                <label><span>Training name</span><input required value={trainingAction.trainingName} onChange={(event) => setTrainingAction({ ...trainingAction, trainingName: event.target.value })} /></label>
+                <label><span>Training type</span><select value={trainingAction.trainingType} onChange={(event) => setTrainingAction({ ...trainingAction, trainingType: event.target.value })}><option value="induction">Induction</option><option value="internal">Internal</option><option value="external">External</option><option value="refresher">Refresher</option><option value="assessment">Assessment</option></select></label>
+              </div>
+              <div className="form-row">
+                <label><span>Provider</span><input value={trainingAction.provider} onChange={(event) => setTrainingAction({ ...trainingAction, provider: event.target.value })} /></label>
+                <label><span>Completed</span><input type="date" required value={trainingAction.completedDate} onChange={(event) => setTrainingAction({ ...trainingAction, completedDate: event.target.value })} /></label>
+                <label><span>Expiry</span><input type="date" min={trainingAction.completedDate || undefined} value={trainingAction.expiryDate} onChange={(event) => setTrainingAction({ ...trainingAction, expiryDate: event.target.value })} /></label>
+              </div>
+              <div className="form-row">
+                <label><span>Result</span><select value={trainingAction.result} onChange={(event) => setTrainingAction({ ...trainingAction, result: event.target.value as 'passed' | 'not_passed' | 'not_assessed' })}><option value="passed">Passed</option><option value="not_passed">Not passed</option><option value="not_assessed">Not assessed</option></select></label>
+                <label><span>Score (optional)</span><input type="number" min="0" max="100" step="0.01" value={trainingAction.score} onChange={(event) => setTrainingAction({ ...trainingAction, score: event.target.value })} /></label>
+                <label><span>Evidence or review note</span><input value={trainingAction.notes} onChange={(event) => setTrainingAction({ ...trainingAction, notes: event.target.value })} /></label>
+              </div>
+              {trainingAction.supersedesId && <p className="contact-meta">This creates a new renewal record. The previous training evidence remains unchanged for audit.</p>}
+              <div className="assessment-actions"><button type="button" className="btn btn-secondary" onClick={() => setTrainingAction(null)}>Cancel</button><button type="submit" className="btn btn-primary" disabled={saving || !trainingAction.staffId || !trainingAction.trainingName.trim() || !trainingAction.completedDate}>{saving ? 'Saving' : trainingAction.supersedesId ? 'Record renewal' : 'Record training'}</button></div>
+            </form>}
+          </section>
+          <section className="reports-section">
             <h2>Staff documents ({staffDocuments.length})</h2>
             <div className="reports-table-wrapper">
               <table className="reports-table">
@@ -1891,9 +1997,9 @@ const RosterHRPage: React.FC = () => {
             <h2>Training records ({trainingRecords.length})</h2>
             <div className="reports-table-wrapper">
               <table className="reports-table">
-                <thead><tr><th>Staff</th><th>Training</th><th>Provider</th><th>Completed</th><th>Expiry</th><th>Result</th></tr></thead>
+                <thead><tr><th>Staff</th><th>Training</th><th>Provider</th><th>Completed</th><th>Expiry</th><th>Result</th><th /></tr></thead>
                 <tbody>
-                  {trainingRecords.length === 0 ? <tr><td colSpan={6} className="text-center">No training records recorded</td></tr> : trainingRecords.map((record) => (
+                  {trainingRecords.length === 0 ? <tr><td colSpan={7} className="text-center">No training records recorded. Use Record training above to create governed evidence.</td></tr> : trainingRecords.map((record) => (
                     <tr key={record.id}>
                       <td>{staffNames[record.staff_id || record.officer_id || ''] || record.staff_id || record.officer_id || 'Unassigned'}</td>
                       <td>{record.training_name}<div className="contact-meta">{record.training_type}</div></td>
@@ -1901,8 +2007,23 @@ const RosterHRPage: React.FC = () => {
                       <td>{new Date(record.completed_date).toLocaleDateString()}</td>
                       <td><span className={isExpiringSoon(record.expiry_date) ? 'severity-badge severity-high' : ''}>{record.expiry_date ? new Date(record.expiry_date).toLocaleDateString() : 'No expiry'}</span></td>
                       <td>{record.passed === null ? 'Not assessed' : record.passed ? `Passed${record.score !== null ? ` (${record.score})` : ''}` : 'Not passed'}</td>
+                      <td><button type="button" className="btn btn-sm btn-secondary" disabled={!record.staff_id} onClick={() => setTrainingAction({ staffId: record.staff_id ?? '', trainingName: record.training_name, trainingType: 'refresher', provider: record.provider ?? '', completedDate: new Date().toISOString().slice(0, 10), expiryDate: '', result: 'passed', score: '', notes: '', supersedesId: record.id })}>Renew</button></td>
                     </tr>
                   ))}
+                </tbody>
+              </table>
+            </div>
+          </section>
+          <section className="reports-section">
+            <h2>Staff skills ({staffSkills.length})</h2>
+            <div className="reports-table-wrapper">
+              <table className="reports-table">
+                <thead><tr><th>Staff</th><th>Skill</th><th>Proficiency</th><th>Certification</th><th>Expiry</th><th>Roster state</th></tr></thead>
+                <tbody>
+                  {staffSkills.length === 0 ? <tr><td colSpan={6} className="text-center">No staff skills recorded. Qualified work-unit assignments will remain blocked where a skill is required.</td></tr> : staffSkills.map((skill) => {
+                    const expired = Boolean(skill.certification_expiry && skill.certification_expiry < new Date().toISOString().slice(0, 10));
+                    return <tr key={skill.id}><td>{staffNames[skill.staff_id] || skill.staff_id}</td><td>{skill.skill_name}<div className="contact-meta">{skill.skill_category || 'uncategorised'}</div></td><td>{plainWords(skill.proficiency_level, 'Not set')}</td><td>{skill.certified ? 'Certified' : 'Observed only'}</td><td>{skill.certification_expiry ? new Date(skill.certification_expiry).toLocaleDateString() : 'No expiry'}</td><td><span className={`status-badge ${expired ? 'status-inactive' : 'status-active'}`}>{expired ? 'Expired — blocked' : 'Current'}</span></td></tr>;
+                  })}
                 </tbody>
               </table>
             </div>

@@ -6,7 +6,10 @@ test.beforeEach(async ({ page }) => { await page.clock.setFixedTime(new Date('20
 test('creating a branch pay rule sends the selected role code in the governed RPC', async ({ page }) => {
   const rules: Array<Record<string, unknown>> = [];
   let createPayload: Record<string, unknown> | null = null;
-  await page.route('**/rest/v1/reference_codes*', async (route) => await route.fulfill({ status: 200, contentType: 'application/json', body: JSON.stringify([{ code: 'field_security', name: 'Field Security' }]) }));
+  await page.route('**/rest/v1/reference_codes*', async (route) => {
+    const payCodes = route.request().url().includes('code_type=eq.pay_item');
+    await route.fulfill({ status: 200, contentType: 'application/json', body: JSON.stringify(payCodes ? [{ id: 'pay-code-ordinary', code: 'ORDINARY', name: 'Ordinary hours' }] : [{ code: 'field_security', name: 'Field Security' }]) });
+  });
   await page.route('**/rest/v1/rate_rules*', async (route) => await route.fulfill({ status: 200, contentType: 'application/json', body: JSON.stringify(rules) }));
   await page.route('**/rest/v1/rpc/manage_operating_branch_rate_rule', async (route) => {
     const payload = JSON.parse(route.request().postData() ?? '{}') as Record<string, unknown>;
@@ -23,15 +26,19 @@ test('creating a branch pay rule sends the selected role code in the governed RP
   await form.getByLabel('Amount').fill('32.50');
   await expect(form.getByLabel('Payroll role')).toHaveCount(1);
   await form.getByLabel('Payroll role').selectOption('field_security');
+  await form.getByLabel('Payroll pay code').selectOption('ORDINARY');
   await form.getByRole('button', { name: 'Create rate rule' }).click();
   await expect(page.getByRole('row').filter({ hasText: 'Field security hourly pay' })).toContainText('Payroll role field_security');
-  expect(createPayload).toMatchObject({ p_operating_organization_id: '41414141-4141-4141-8141-414141414141', p_action: 'create', p_rule_kind: 'pay', p_role_code: 'field_security' });
+  expect(createPayload).toMatchObject({ p_operating_organization_id: '41414141-4141-4141-8141-414141414141', p_action: 'create', p_rule_kind: 'pay', p_role_code: 'field_security', p_pay_code: 'ORDINARY' });
 });
 
 test('editing a branch pay rule sends its selected role code in the governed RPC', async ({ page }) => {
-  const rules: Array<Record<string, unknown>> = [{ id: 'cdcdcdcd-cdcd-4dcd-8dcd-cdcdcdcdcdcd', rule_kind: 'pay', name: 'Existing hourly pay', rate_type: 'hourly', amount: 30, pay_code: null, service_type: 'guarding', job_type: null, day_category: null, priority: 0, role_code: null, active: true, updated_at: '2026-08-30T09:00:00.000Z' }];
+  const rules: Array<Record<string, unknown>> = [{ id: 'cdcdcdcd-cdcd-4dcd-8dcd-cdcdcdcdcdcd', rule_kind: 'pay', name: 'Existing hourly pay', rate_type: 'hourly', amount: 30, pay_code: 'ORDINARY', service_type: 'guarding', job_type: null, day_category: null, priority: 0, role_code: null, active: true, updated_at: '2026-08-30T09:00:00.000Z' }];
   let updatePayload: Record<string, unknown> | null = null;
-  await page.route('**/rest/v1/reference_codes*', async (route) => await route.fulfill({ status: 200, contentType: 'application/json', body: JSON.stringify([{ code: 'field_security', name: 'Field Security' }]) }));
+  await page.route('**/rest/v1/reference_codes*', async (route) => {
+    const payCodes = route.request().url().includes('code_type=eq.pay_item');
+    await route.fulfill({ status: 200, contentType: 'application/json', body: JSON.stringify(payCodes ? [{ id: 'pay-code-ordinary', code: 'ORDINARY', name: 'Ordinary hours' }] : [{ code: 'field_security', name: 'Field Security' }]) });
+  });
   await page.route('**/rest/v1/rate_rules*', async (route) => await route.fulfill({ status: 200, contentType: 'application/json', body: JSON.stringify(rules) }));
   await page.route('**/rest/v1/rpc/manage_operating_branch_rate_rule', async (route) => {
     const payload = JSON.parse(route.request().postData() ?? '{}') as Record<string, unknown>;
@@ -44,9 +51,35 @@ test('editing a branch pay rule sends its selected role code in the governed RPC
   await page.getByRole('button', { name: 'Edit rule Existing hourly pay' }).click();
   const form = page.getByRole('dialog', { name: 'Edit rate rule' });
   await expect(form.getByLabel('Payroll role')).toHaveCount(1);
+  await expect(form.getByLabel('Payroll pay code')).toHaveValue('ORDINARY');
   await form.getByLabel('Payroll role').selectOption('field_security');
   await form.getByRole('button', { name: 'Save rate rule' }).click();
   expect(updatePayload).toMatchObject({ p_operating_organization_id: '41414141-4141-4141-8141-414141414141', p_action: 'update', p_rate_rule_id: 'cdcdcdcd-cdcd-4dcd-8dcd-cdcdcdcdcdcd', p_role_code: 'field_security' });
+});
+
+test('payroll administrator creates a managed pay code with a safe generated export code', async ({ page }) => {
+  const payCodes: Array<Record<string, unknown>> = [];
+  let createPayload: Record<string, unknown> | null = null;
+  await page.route('**/rest/v1/reference_codes*', async (route) => {
+    const rows = route.request().url().includes('code_type=eq.pay_item') ? payCodes : [];
+    await route.fulfill({ status: 200, contentType: 'application/json', body: JSON.stringify(rows) });
+  });
+  await page.route('**/rest/v1/rpc/manage_pay_code', async (route) => {
+    createPayload = JSON.parse(route.request().postData() ?? '{}') as Record<string, unknown>;
+    const row = { id: 'pay-code-ordinary', code: createPayload.p_code, name: createPayload.p_name };
+    payCodes.push(row);
+    await route.fulfill({ status: 200, contentType: 'application/json', body: JSON.stringify(row) });
+  });
+
+  await signInAsAdmin(page, '/admin/rate-rules');
+  await expect(page.getByText('No managed pay codes.')).toBeVisible();
+  await page.getByRole('button', { name: 'Add pay code' }).click();
+  await page.getByLabel('Pay code name').fill('Ordinary Hours');
+  await expect(page.getByLabel('Export code')).toHaveValue('ORDINARY_HOURS');
+  await page.getByRole('button', { name: 'Create pay code' }).click();
+  await expect(page.getByRole('status').filter({ hasText: 'Pay code ORDINARY_HOURS created.' })).toBeVisible();
+  await expect(page.getByRole('heading', { name: 'ORDINARY_HOURS' })).toBeVisible();
+  expect(createPayload).toMatchObject({ p_action: 'create', p_code: 'ORDINARY_HOURS', p_name: 'Ordinary Hours' });
 });
 
 test('branch rate ledger searches loaded rules and filters type and status without duplicate cards', async ({ page }) => {
@@ -54,7 +87,10 @@ test('branch rate ledger searches loaded rules and filters type and status witho
     { id: 'cdcdcdcd-cdcd-4dcd-8dcd-cdcdcdcdcd31', rule_kind: 'billing', name: 'Civic Events patrol visit', rate_type: 'per_visit', amount: 42.5, pay_code: null, role_code: null, service_type: 'patrol', job_type: null, client_org_id: '40404040-4040-4040-8040-404040404040', site_id: null, zone_id: null, day_category: null, effective_from: '2026-01-01', effective_to: null, priority: 5, active: true, updated_at: '2026-08-30T09:00:00.000Z' },
     { id: 'cdcdcdcd-cdcd-4dcd-8dcd-cdcdcdcdcd32', rule_kind: 'pay', name: 'Field officer hourly', rate_type: 'hourly', amount: 31, pay_code: 'FIELD-01', role_code: 'field_security', service_type: 'guarding', job_type: null, client_org_id: null, site_id: null, zone_id: null, day_category: 'weekday', effective_from: '2026-01-01', effective_to: null, priority: 1, active: false, updated_at: '2026-08-30T09:00:00.000Z' },
   ];
-  await page.route('**/rest/v1/reference_codes*', async (route) => await route.fulfill({ status: 200, contentType: 'application/json', body: JSON.stringify([{ code: 'field_security', name: 'Field Security' }]) }));
+  await page.route('**/rest/v1/reference_codes*', async (route) => {
+    const payCodes = route.request().url().includes('code_type=eq.pay_item');
+    await route.fulfill({ status: 200, contentType: 'application/json', body: JSON.stringify(payCodes ? [{ id: 'pay-code-field', code: 'FIELD-01', name: 'Field ordinary time' }] : [{ code: 'field_security', name: 'Field Security' }]) });
+  });
   await page.route('**/rest/v1/rate_rules**', async (route) => await route.fulfill({ status: 200, contentType: 'application/json', body: JSON.stringify(rules) }));
   await signInAsAdmin(page, '/admin/rate-rules');
   const register = page.getByRole('region', { name: 'Pay and charge rule register' });
@@ -88,6 +124,7 @@ test('administrator creates a governed operating branch patrol rate rule', async
   await expect(page.getByRole('heading', { level: 1, name: 'Pay and charge rules' })).toBeVisible();
   await page.getByRole('button', { name: 'New pay or charge rule' }).click();
   const form = page.getByRole('dialog', { name: 'New pay or charge rule' });
+  await form.getByLabel('What this rule sets').selectOption('billing');
   await form.getByLabel('Name').fill('Patrol visit - branch standard');
   await form.getByLabel('How it is charged').selectOption('per_visit');
   await form.getByLabel('Amount').fill('42.50');

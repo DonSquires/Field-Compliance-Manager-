@@ -1,5 +1,6 @@
 import { useCallback, useEffect, useMemo, useState } from 'react';
 import { CheckCircle2, CircleAlert, RefreshCw } from 'lucide-react';
+import { Link } from 'react-router-dom';
 import { useAuth } from '../context/AuthContext';
 import { supabase } from '../lib/supabase';
 import './FinanceLabourCostWorkspace.css';
@@ -11,7 +12,7 @@ type Period = { id: string; name: string; period_start: string; period_end: stri
 type Agreement = { id: string; name: string };
 type AgreementLink = { id: string; service_agreement_id: string; active: boolean };
 type CostCentre = { id: string; code: string; name: string };
-type Rate = { id: string; amount: number; role_code: string | null; service_type: string | null; effective_from: string | null; effective_to: string | null; priority: number };
+type Rate = { id: string; amount: number; pay_code: string | null; role_code: string | null; service_type: string | null; effective_from: string | null; effective_to: string | null; priority: number };
 type Posting = { timesheet_id: string };
 
 const financeRoles = new Set(['grand_master', 'master', 'admin', 'admin_officer']);
@@ -19,7 +20,7 @@ const money = (value: number) => new Intl.NumberFormat('en-NZ', { style: 'curren
 const shortDate = (value: string) => new Intl.DateTimeFormat('en-NZ', { dateStyle: 'medium' }).format(new Date(`${value}T00:00:00`));
 
 export function FinanceLabourCostWorkspace() {
-  const { profile } = useAuth();
+  const { profile, operatingOrganizationId } = useAuth();
   const [timesheets, setTimesheets] = useState<Timesheet[]>([]);
   const [shifts, setShifts] = useState<Shift[]>([]);
   const [staff, setStaff] = useState<Staff[]>([]);
@@ -35,23 +36,24 @@ export function FinanceLabourCostWorkspace() {
   const [saving, setSaving] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [notice, setNotice] = useState<string | null>(null);
-  const canManage = Boolean(profile?.organizationId && financeRoles.has(profile.role));
+  const organizationId = operatingOrganizationId ?? profile?.organizationId ?? null;
+  const canManage = Boolean(organizationId && profile && financeRoles.has(profile.role));
 
   const load = useCallback(async () => {
-    if (!profile?.organizationId || !canManage) {
+    if (!organizationId || !canManage) {
       setLoading(false);
       return;
     }
     setLoading(true);
     setError(null);
-    const orgId = profile.organizationId;
+    const orgId = organizationId;
     const [sheetResult, postingResult, periodResult, agreementResult, centreResult, rateResult] = await Promise.all([
       supabase.from('timesheets').select('id,staff_id,shift_id,period_start,period_end,actual_hours,work_derived_hours,status').eq('organization_id', orgId).in('status', ['approved', 'paid']).not('shift_id', 'is', null).order('period_end', { ascending: false }).limit(100),
       supabase.from('finance_labour_cost_postings').select('timesheet_id').eq('organization_id', orgId).limit(500),
       supabase.from('finance_pl_periods').select('id,name,period_start,period_end').eq('organization_id', orgId).in('status', ['draft', 'locked']).order('period_start', { ascending: false }),
       supabase.from('service_agreements').select('id,name').eq('provider_organization_id', orgId).eq('agreement_type', 'operational').eq('invitation_status', 'accepted').order('name'),
       supabase.from('cost_centres').select('id,code,name').eq('organization_id', orgId).eq('active', true).order('code'),
-      supabase.from('rate_rules').select('id,amount,role_code,service_type,effective_from,effective_to,priority').eq('organization_id', orgId).eq('rule_kind', 'pay').eq('rate_type', 'hourly').eq('active', true),
+      supabase.from('rate_rules').select('id,amount,pay_code,role_code,service_type,effective_from,effective_to,priority').eq('organization_id', orgId).eq('rule_kind', 'pay').eq('rate_type', 'hourly').eq('active', true),
     ]);
     const firstError = sheetResult.error ?? postingResult.error ?? periodResult.error ?? agreementResult.error ?? centreResult.error ?? rateResult.error;
     if (firstError) {
@@ -65,7 +67,7 @@ export function FinanceLabourCostWorkspace() {
     const staffIds = [...new Set(nextSheets.map((row) => row.staff_id))];
     const [shiftResult, staffResult] = await Promise.all([
       shiftIds.length ? supabase.from('shifts').select('id,service_type,work_unit_id,service_agreement_location_id,service_agreement_module_id').eq('organization_id', orgId).in('id', shiftIds) : Promise.resolve({ data: [] as Shift[], error: null }),
-      staffIds.length ? supabase.from('staff_profiles').select('id,employee_number,role_code').eq('organization_id', orgId).in('id', staffIds) : Promise.resolve({ data: [] as Staff[], error: null }),
+      staffIds.length ? supabase.from('staff_profiles').select('id,employee_number,role_code').in('id', staffIds) : Promise.resolve({ data: [] as Staff[], error: null }),
     ]);
     const relatedError = shiftResult.error ?? staffResult.error;
     if (relatedError) {
@@ -99,7 +101,7 @@ export function FinanceLabourCostWorkspace() {
     ]));
     setSelectedId((current) => nextSheets.some((row) => row.id === current) ? current : '');
     setLoading(false);
-  }, [canManage, profile?.organizationId]);
+  }, [canManage, organizationId]);
 
   useEffect(() => { void load(); }, [load]);
 
@@ -172,11 +174,11 @@ export function FinanceLabourCostWorkspace() {
       <div className="finance-labour-grid">
         <div><h3>1. Approved timesheet <span>{rows.length}</span></h3><div className="finance-labour-list">{rows.map((row) => <button type="button" key={row.sheet.id} className={selectedId === row.sheet.id ? 'is-selected' : ''} onClick={() => choose(row.sheet.id)}><span><strong>{row.employee?.employee_number || `Staff ${row.sheet.staff_id.slice(0, 8)}`}</strong><small>{shortDate(row.sheet.period_start)}–{shortDate(row.sheet.period_end)} · {row.shift?.service_type?.replaceAll('_', ' ') || 'shift unavailable'}</small></span><b>{row.hours.toFixed(2)} h</b></button>)}</div></div>
         <div><h3>2. Confirm attribution</h3>{!selected ? <div className="finance-labour-empty">Choose an approved timesheet to verify its agreement, period, and pay rate.</div> : <div className="finance-labour-review">
-          <dl><div><dt>Agreement</dt><dd>{selected.agreement?.name ?? 'Shift agreement missing or conflicting'}</dd></div><div><dt>Pay rate</dt><dd>{selected.rate ? `${money(selected.rate.amount)} per hour` : 'No applicable hourly pay rule'}</dd></div><div><dt>Estimated cost</dt><dd>{selected.rate ? money(selected.hours * selected.rate.amount) : 'Blocked until rate is configured'}</dd></div></dl>
+          <dl><div><dt>Agreement</dt><dd>{selected.agreement?.name ?? 'Shift agreement missing or conflicting'}</dd></div><div><dt>Payroll role</dt><dd>{selected.employee?.role_code ?? 'No payroll role assigned'}</dd></div><div><dt>Pay rate</dt><dd>{selected.rate ? `${money(selected.rate.amount)} per hour · ${selected.rate.pay_code ?? 'pay code missing'}` : 'No applicable hourly pay rule'}</dd></div><div><dt>Estimated cost</dt><dd>{selected.rate ? money(selected.hours * selected.rate.amount) : 'Blocked until rate is configured'}</dd></div></dl>
           <label><span>Open money period</span><select value={periodId} onChange={(event) => setPeriodId(event.target.value)}><option value="">Select a period</option>{availablePeriods.map((period) => <option key={period.id} value={period.id}>{period.name}</option>)}</select></label>
           <label><span>Cost centre (optional)</span><select value={costCentreId} onChange={(event) => setCostCentreId(event.target.value)}><option value="">No cost centre</option>{costCentres.map((centre) => <option key={centre.id} value={centre.id}>{centre.code} — {centre.name}</option>)}</select></label>
           {!selected.eligible && <div className="finance-labour-message is-error"><CircleAlert size={15} />The timesheet is missing a valid shift-to-agreement path.</div>}
-          {selected.eligible && !selected.rate && <div className="finance-labour-message is-error"><CircleAlert size={15} />Add an applicable hourly pay rule before posting. A zero-cost P&amp;L line will not be created from this screen.</div>}
+          {selected.eligible && !selected.rate && <div className="finance-labour-message is-error"><CircleAlert size={15} /><span>Add an applicable hourly pay rule before posting. A zero-cost P&amp;L line will not be created. <Link to="/admin/rate-rules">Open pay and charge rules</Link>.</span></div>}
         </div>}</div>
       </div>
     )}

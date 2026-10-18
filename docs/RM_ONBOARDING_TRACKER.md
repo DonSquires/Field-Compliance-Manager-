@@ -16,6 +16,61 @@ actually work with a working org and its data and operations." Extended-scope,
 multi-session task — take as many turns as needed; real, verified progress each
 turn beats false completeness.
 
+## PAY, TRAINING, SKILLS, AND FINANCE OPERATIONS (2026-10-18) - READY FOR RELEASE
+
+### Expected versus present
+
+- **Before:** an administrator should be able to define a human-readable
+  payroll role, assign it to staff, choose a governed payroll export code on a
+  branch pay rule, and see the resolved role, rate, and pay code reach finance.
+  Staff qualifications should be current, auditable evidence that can be used
+  by rostering rather than free-text notes.
+- **Present before repair:** R&M had 25 staff profiles, no active payroll role
+  codes, no staff role assignments, two active pay rules, no managed pay-item
+  reference codes, no staff skills, no training records, and no labour-cost
+  postings. The role-code form rejected names containing spaces through native
+  browser validation without durable guidance. Pay rules accepted unmanaged
+  free text, and finance did not consistently follow the selected operating
+  branch.
+- **Missing:** a managed pay-code workflow, cross-screen setup readiness,
+  training renewal lineage, duplicate-safe canonical skill assignment, and a
+  visible branch-to-finance resolution receipt.
+- **Contradictory:** Atlas marked the relevant rate-rule paths as wired, while
+  live records showed no managed pay-item catalog and no exercised
+  training/skill evidence. The live `reference_codes` constraint already
+  defines payroll export categories as `pay_item`; an initial `pay_code`
+  implementation failed the rollback-only migration test and was corrected to
+  use that canonical schema type.
+
+### Before, during, and after
+
+- **Before:** payroll operations require an active role code, a staff
+  assignment, an active managed pay item, a selected operating branch, and
+  current skill/training evidence. Approved work remains blocked from finance
+  when no pay rule resolves.
+- **During:** privileged RPCs enforce tenant administration, code validity,
+  active references, effective rules, idempotent training requests, immutable
+  renewal lineage, and duplicate-safe skill updates. The UI distinguishes
+  payroll role, payroll pay code, and branch pay rule, and surfaces missing,
+  fallback, and ready role coverage.
+- **After:** the rate register shows both role and pay-code evidence; training
+  renewals preserve prior records; current skills remain tied to the canonical
+  roster catalog; and labour-cost review follows the selected operating branch
+  while showing the resolved role, rate, and pay code before governed posting.
+
+### Verification
+
+- The migration executed against the linked live schema inside a transaction
+  and rolled back successfully; no verification records or schema changes
+  persisted.
+- Five focused guard files passed 41/41 tests.
+- Rate Rules and People/HR Playwright coverage passed 54/54 tests across
+  desktop and mobile Chromium after visual baselines were intentionally
+  regenerated for the changed workflows.
+- Trackforce was used only as workflow evidence: qualification-aware
+  scheduling, explicit exception queues, and field-to-payroll traceability.
+  FCM retains its own tenant, place, evidence, and custody doctrine.
+
 ## PATROL WORKBOOK FINANCE BACKFILL (2026-10-18) — APPLIED AND LIVE-VERIFIED
 
 - Audited the read-only R&M patrol-log corpus at `Patrol Log Entries/All Log
