@@ -40,7 +40,7 @@ declare
   v_source_hash text := repeat('a', 64);
   v_derivative_hash text := repeat('b', 64);
   v_manifest jsonb;
-  v_schema jsonb := '{"headers":["Date",""," ","Job Cost"],"resolved_mappings":[]}'::jsonb;
+  v_schema jsonb := '{"headers":["Date",""," ","Job Cost"],"resolved_mappings":[{"source_column":"Date","target_entity":"file_import_finance_cost_rows","target_field":"service_date"},{"source_column":"Job Cost","target_entity":"file_import_finance_cost_rows","target_field":"amount"}]}'::jsonb;
   v_source_values jsonb;
   v_ok boolean;
   v_err text;
@@ -64,7 +64,12 @@ begin
   select id into v_activity from public.reference_codes
   where organization_id=v_provider and code_type='work_activity' and code='maintenance' and is_active;
   insert into public.import_source_profiles(organization_id,profile_code,name,parser,column_mappings,target_mappings,active,created_by,import_actor_id)
-  values(v_provider,'rm_patrol_log','Oracle R&M patrol log','csv','{}','{}',true,v_reviewer,v_automation);
+  values(
+    v_provider,'rm_patrol_log','Oracle R&M patrol log','csv',
+    '{"service_date":["Date"],"job_cost":["Job Cost"]}',
+    '{"service_date":{"target_entity":"file_import_finance_cost_rows","target_field":"service_date"},"job_cost":{"target_entity":"file_import_finance_cost_rows","target_field":"amount"}}',
+    true,v_reviewer,v_automation
+  );
   insert into public.import_value_classification_rules(id,organization_id,source_profile,rule_code,target_code_id,conditions,priority,active,created_by)
   values(v_subject_rule,v_provider,'rm_patrol_log','oracle-subject',v_subject,'[]',10,true,v_reviewer),
         (v_activity_rule,v_provider,'rm_patrol_log','oracle-activity',v_activity,'[]',20,true,v_reviewer);
@@ -231,6 +236,11 @@ begin
   perform pg_temp.as_admin();
   perform pg_temp.check('an invalid proposal can still be rejected and attributed to the human reviewer',
     (select status='rejected' and reviewed_by=v_reviewer from public.file_import_row_proposals where id=v_finance_proposal));
+
+  perform pg_temp.as_user(v_reviewer);
+  perform public.confirm_file_import_profile_mappings(v_batch.id,'Named source columns match the reviewed profile; unnamed columns carry no data mapping');
+  v_batch := public.review_file_import_batch(v_batch.id,'approved','All named mappings and consequential proposals were reviewed');
+  perform pg_temp.check('blank headers do not block an otherwise complete batch review',v_batch.status='approved' and v_batch.reviewed_by=v_reviewer);
 end $$;
 
 rollback;
