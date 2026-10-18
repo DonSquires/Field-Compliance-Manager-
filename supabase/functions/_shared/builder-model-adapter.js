@@ -308,13 +308,22 @@ async function fetchModelHealth({ gatewayUrl, apiToken, fetchImpl = globalThis.f
   }
 }
 
+// Parameter count in billions from an Ollama tag ("qwen2.5-coder:7b" -> 7, "gpt-oss:120b" -> 120);
+// null when the tag does not say (cloud names like "nemotron-3-super", OpenAI models).
+function modelSizeB(model) {
+  const match = /[:\-](\d+(?:\.\d+)?)b\b/i.exec(String(model || ''));
+  return match ? Number(match[1]) : null;
+}
+
 /**
  * The ordered providers a request may try, with the model each would serve. Unhealthy or
  * unconfigured providers are dropped when health is known; `avoid` removes provider+model
  * identities (the independent reviewer must not be the author); `startAfter` resumes the
- * chain past a provider that already failed (escalation between attempts).
+ * chain past a provider that already failed (escalation between attempts); `minModelB` keeps
+ * only Ollama models at least that size (agentic authoring: 7-8B models spent whole budgets
+ * without an edit — 17 of 34 frontend runs of qwen2.5-coder:7b failed, 2026-10).
  */
-function selectProviders(modelRequest, { health = null, avoid = [], startAfter = null } = {}) {
+function selectProviders(modelRequest, { health = null, avoid = [], startAfter = null, minModelB = 0 } = {}) {
   const chain = Array.isArray(modelRequest.chain) && modelRequest.chain.length ? modelRequest.chain : [modelRequest.provider];
   const from = startAfter ? chain.indexOf(startAfter) + 1 : 0;
   const candidates = [];
@@ -327,13 +336,20 @@ function selectProviders(modelRequest, { health = null, avoid = [], startAfter =
     let model = provider === PROVIDERS.OPENAI
       ? (modelRequest.model_name || status?.ready_model || null)
       : (status?.ready_model || (Array.isArray(status?.models) ? status.models[0] : null) || null);
+    const strongEnough = candidate => provider === PROVIDERS.OPENAI || !minModelB || (modelSizeB(candidate) ?? Infinity) >= minModelB;
+    if (model && !strongEnough(model)) {
+      const installed = Array.isArray(status?.installed) && status.installed.length ? status.installed : null;
+      const isInstalled = candidate => !installed || installed.includes(candidate) || installed.includes(`${candidate}:latest`);
+      model = (Array.isArray(status?.models) ? status.models : []).find(candidate => strongEnough(candidate) && !avoided(candidate) && isInstalled(candidate)) || null;
+      if (!model) continue;
+    }
     if (avoided(model)) {
       if (provider === PROVIDERS.OPENAI) continue;
       // The in-house reviewer may share the author's machine but not its model: the next installed
       // allowlisted model on the same provider (e.g. gpt-oss:20b after qwen3-coder:30b) serves instead.
       const installed = Array.isArray(status?.installed) && status.installed.length ? status.installed : null;
       const isInstalled = candidate => !installed || installed.includes(candidate) || installed.includes(`${candidate}:latest`);
-      model = (Array.isArray(status?.models) ? status.models : []).find(candidate => !avoided(candidate) && isInstalled(candidate)) || null;
+      model = (Array.isArray(status?.models) ? status.models : []).find(candidate => !avoided(candidate) && strongEnough(candidate) && isInstalled(candidate)) || null;
       if (!model) continue;
     }
     candidates.push({ provider, model });
@@ -481,6 +497,7 @@ module.exports = {
   fetchModelHealth,
   gatewayTimeoutFor,
   selectProviders,
+  modelSizeB,
   providerRequest,
   executeBuilderModelRun,
   executeSingleModelRun

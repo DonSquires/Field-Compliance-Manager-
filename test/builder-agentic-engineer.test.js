@@ -6,6 +6,8 @@ const fs = require('node:fs');
 const os = require('node:os');
 const path = require('node:path');
 const { execFileSync } = require('node:child_process');
+// The fixtures below use 7B local models to exercise routing; the author size gate has its own test.
+process.env.BOB_BUILDER_AUTHOR_MIN_MODEL_B = '0';
 
 const policy = require('../builder-path-policy');
 const gateway = require('../builder-model-gateway');
@@ -266,6 +268,74 @@ const LAPTOP_OFF = Object.freeze({
   openai: { configured: true, healthy: true, models: ['gpt-5.4', 'gpt-5.4-mini'] },
 });
 const LAPTOP_ON = Object.freeze({ ...LAPTOP_OFF, gpu_workstation: { configured: true, healthy: true, models: ['qwen2.5-coder:7b'], ready_model: 'qwen2.5-coder:7b' } });
+const OPENAI_ONLY = Object.freeze({ openai: { configured: true, healthy: true, models: ['gpt-5.4', 'gpt-5.4-mini'] } });
+
+test('authoring skips local models under the size gate and serves the provider\'s stronger installed model', async () => {
+  const repo = makeRepo();
+  const workspaceRoot = path.join(repo.root, 'workspaces');
+  const job = { id: 'a17e5a17e5a17e5a17e5a17e5a17e5a1', organization_id: '00000000-0000-0000-0000-000000000001', target_sha: repo.sha, title: 'sum subtracts', task_description: 'fix sum' };
+  const health = {
+    gpu_workstation: { configured: true, healthy: true, models: ['qwen2.5-coder:7b', 'qwen2.5-coder:14b'], installed: ['qwen2.5-coder:7b', 'qwen2.5-coder:14b'], ready_model: 'qwen2.5-coder:7b' },
+    ollama: { configured: true, healthy: true, models: ['llama3.1:8b'], installed: ['llama3.1:8b'], ready_model: 'llama3.1:8b' },
+    ollama_cloud: { configured: true, healthy: true, models: ['gpt-oss:120b'], installed: ['gpt-oss:120b'], ready_model: 'gpt-oss:120b' },
+  };
+  const seen = [];
+  const script = [
+    { tool: 'write_file', args: { path: 'lib/sum.js', content: "'use strict';\nmodule.exports = { sum: (a, b) => a + b };\n" } },
+    { tool: 'run', args: { command: 'node --test test/sum.test.js' } },
+    { tool: 'finish', args: { summary: 'sum() used subtraction; changed to addition; test passes.', tests: ['node --test test/sum.test.js'], rollback_notes: ['revert'] } },
+  ];
+  const callModel = async ({ modelRequest }) => {
+    seen.push(`${modelRequest.provider}/${modelRequest.model_name}`);
+    return { ok: true, status: 200, data: { content: JSON.stringify(script[Math.min(seen.length - 1, script.length - 1)]) } };
+  };
+  const previousRoute = process.env.BOB_BUILDER_ROUTE_AUTHOR;
+  process.env.BOB_BUILDER_ROUTE_AUTHOR = 'gpu_workstation,ollama,ollama_cloud';
+  try {
+    const result = await runAgenticEngineer({ supabase: null, gateway: { gatewayUrl: 'http://gw', apiToken: 't' }, job, step: { id: 's' }, lane: 'backend', sourceDir: repo.source, workspaceRoot, repoRoot: repo.source, callModel, limits: { ...DEFAULT_LIMITS, maxTurns: 10, minAuthorModelB: 14 }, providerHealth: health });
+    assert.equal(result.ok, true, JSON.stringify(result.error));
+    assert.equal(seen[0], 'gpu_workstation/qwen2.5-coder:14b', 'the laptop authors with its 14B model, not the 7B ready model');
+    assert.ok(!seen.some((entry) => entry.startsWith('ollama/')), 'a provider with only an 8B model is not an author');
+  } finally {
+    if (previousRoute === undefined) delete process.env.BOB_BUILDER_ROUTE_AUTHOR;
+    else process.env.BOB_BUILDER_ROUTE_AUTHOR = previousRoute;
+  }
+});
+
+test('a provider that runs out of turns mid-change hands off to the next provider with a fresh allocation', async () => {
+  const repo = makeRepo();
+  const workspaceRoot = path.join(repo.root, 'workspaces');
+  const job = { id: 'f2e5f2e5f2e5f2e5f2e5f2e5f2e5f2e5', organization_id: '00000000-0000-0000-0000-000000000001', target_sha: repo.sha, title: 'sum subtracts', task_description: 'fix sum' };
+  const seen = [];
+  const callModel = async ({ modelRequest }) => {
+    seen.push({ provider: modelRequest.provider, messages: modelRequest.request.messages });
+    if (modelRequest.provider === 'ollama') {
+      // The weaker provider edits on its first turn, then keeps re-reading until its allocation ends.
+      if (seen.length === 1) return { ok: true, status: 200, data: { content: JSON.stringify({ tool: 'write_file', args: { path: 'lib/sum.js', content: "'use strict';\nmodule.exports = { sum: (a, b) => a + b };\n" } }) } };
+      return { ok: true, status: 200, data: { content: JSON.stringify({ tool: 'read_file', args: { path: 'lib/sum.js', start_line: seen.length } }) } };
+    }
+    const openaiTurn = seen.filter((entry) => entry.provider === 'openai').length;
+    const script = [
+      { tool: 'run', args: { command: 'node --test test/sum.test.js' } },
+      { tool: 'finish', args: { summary: 'sum() used subtraction; changed to addition; test passes.', tests: ['node --test test/sum.test.js'], rollback_notes: ['revert'] } },
+    ];
+    return { ok: true, status: 200, data: { content: JSON.stringify(script[Math.min(openaiTurn - 1, script.length - 1)]) } };
+  };
+  const previousRoute = process.env.BOB_BUILDER_ROUTE_AUTHOR;
+  process.env.BOB_BUILDER_ROUTE_AUTHOR = 'ollama,openai';
+  try {
+    const result = await runAgenticEngineer({ supabase: null, gateway: { gatewayUrl: 'http://gw', apiToken: 't' }, job, step: { id: 's' }, lane: 'backend', sourceDir: repo.source, workspaceRoot, repoRoot: repo.source, callModel, limits: { ...DEFAULT_LIMITS, maxTurns: 6, minAuthorModelB: 0 }, providerHealth: LAPTOP_OFF });
+    assert.equal(result.ok, true, JSON.stringify(result.error));
+    assert.equal(seen.filter((entry) => entry.provider === 'ollama').length, 6, 'the first provider used its full allocation');
+    assert.equal(result.routing.provider, 'openai');
+    assert.ok(result.turns > 6, 'the escalated provider got turns beyond the original limit');
+    const handoff = seen.find((entry) => entry.provider === 'openai').messages.at(-1).content;
+    assert.match(handoff, /ran out of turns mid-change/);
+  } finally {
+    if (previousRoute === undefined) delete process.env.BOB_BUILDER_ROUTE_AUTHOR;
+    else process.env.BOB_BUILDER_ROUTE_AUTHOR = previousRoute;
+  }
+});
 
 test('an operator can explicitly select GPU-first authoring and it escalates directly to OpenAI', async () => {
   const repo = makeRepo();
@@ -821,7 +891,7 @@ test('the engineer paces its budget and gets one grace turn to finish when edits
     const t = turns[Math.min(i, turns.length - 1)]; i++;
     return { ok: true, data: { content: JSON.stringify(t), model: 'm', usage: {} } };
   };
-  const result = await runAgenticEngineer({ supabase: null, gateway: { gatewayUrl: 'x', apiToken: 'y' }, job, step: { id: 's' }, lane: 'backend', sourceDir: repo.source, workspaceRoot, repoRoot: repo.source, callModel, limits: { ...DEFAULT_LIMITS, maxTurns: 4 } });
+  const result = await runAgenticEngineer({ supabase: null, gateway: { gatewayUrl: 'x', apiToken: 'y' }, job, step: { id: 's' }, lane: 'backend', sourceDir: repo.source, workspaceRoot, repoRoot: repo.source, callModel, limits: { ...DEFAULT_LIMITS, maxTurns: 4 }, providerHealth: OPENAI_ONLY });
   assert.equal(result.ok, true, result.error);
   assert.equal(result.turns, 4, 'the loop itself stopped at the budget');
   assert.match(result.proposal.summary, /changed to addition/);

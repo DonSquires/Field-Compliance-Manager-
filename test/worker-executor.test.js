@@ -318,7 +318,7 @@ test('worker output redacts common secret formats', () => {
   assert.equal(redact(output), 'token=[REDACTED] authorization=[REDACTED] [REDACTED]');
 });
 
-test('frontend worker re-runs a failing step on the unpatched tree and reports a red baseline as not the patch\'s fault', () => {
+function redBaselineFixture(stubBody) {
   const root = fs.mkdtempSync(path.join(os.tmpdir(), 'frontend-worker-baseline-'));
   const sourceDir = path.join(root, 'source');
   const artifactDir = path.join(root, 'artifacts');
@@ -326,6 +326,8 @@ test('frontend worker re-runs a failing step on the unpatched tree and reports a
   fs.mkdirSync(path.join(sourceDir, 'apps/web/src'), { recursive: true });
   fs.mkdirSync(artifactDir);
   fs.mkdirSync(binDir);
+  fs.mkdirSync(path.join(sourceDir, 'scripts'));
+  fs.writeFileSync(path.join(sourceDir, 'scripts/atlas-refresh.js'), 'process.exit(0);\n');
   fs.writeFileSync(path.join(sourceDir, 'apps/web/src/example.ts'), 'export const value = 1;\n');
   fs.writeFileSync(path.join(artifactDir, 'input.patch'), [
     'diff --git a/apps/web/src/example.ts b/apps/web/src/example.ts',
@@ -336,32 +338,70 @@ test('frontend worker re-runs a failing step on the unpatched tree and reports a
     '+export const value = 2;',
     ''
   ].join('\n'));
-  // Fake npm: `run test` fails whether or not the patch is applied (main is red); everything else passes.
-  writeNpmStub(binDir, [
-    '#!/usr/bin/env node',
-    "const fs = require('node:fs');",
-    "if (process.argv.includes('test')) { console.log(' FAIL  src/pages/FinanceBureauPage.guard.test.ts > x\\n FAIL  src/pages/NzscvSupplierPage.guard.test.ts [ src/pages/NzscvSupplierPage.guard.test.ts ]'); process.exit(1); }",
-    'process.exit(0);',
-    ''
-  ].join('\n'));
+  writeNpmStub(binDir, ['#!/usr/bin/env node', "const fs = require('node:fs');", "const patched = fs.readFileSync('apps/web/src/example.ts', 'utf8').includes('2');", ...stubBody, 'process.exit(0);', ''].join('\n'));
   const originalPath = process.env.PATH;
   process.env.PATH = `${binDir}${path.delimiter}${originalPath}`;
+  const runPatch = () => executeFrontendPatch({ sourceDir, patchPath: path.join(artifactDir, 'input.patch'), artifactDir, workDir: path.join(root, 'work') });
+  const evidence = () => JSON.parse(fs.readFileSync(path.join(artifactDir, 'verification.json'), 'utf8'));
+  const cleanup = () => { process.env.PATH = originalPath; fs.rmSync(root, { recursive: true, force: true }); };
+  return { root, runPatch, evidence, cleanup };
+}
+
+test('frontend worker accepts a patch whose only unit-test failures also fail on the pinned commit (red main is recorded, not blocking)', () => {
+  const fixture = redBaselineFixture([
+    "if (process.argv.includes('test')) { console.log(' FAIL  src/pages/FinanceBureauPage.guard.test.ts > x\\n FAIL  src/pages/NzscvSupplierPage.guard.test.ts [ src/pages/NzscvSupplierPage.guard.test.ts ]'); process.exit(1); }"
+  ]);
   try {
-    const result = executeFrontendPatch({ sourceDir, patchPath: path.join(artifactDir, 'input.patch'), artifactDir, workDir: path.join(root, 'work') });
-    assert.equal(result.succeeded, false);
-    assert.equal(result.baseline_failure, true);
-    const evidence = JSON.parse(fs.readFileSync(path.join(artifactDir, 'verification.json'), 'utf8'));
-    assert.equal(evidence.baseline_failure, true);
+    const result = fixture.runPatch();
+    assert.equal(result.succeeded, true);
+    assert.equal(result.baseline_failure, false);
+    assert.deepEqual(result.preexisting_failures, ['src/pages/FinanceBureauPage.guard.test.ts', 'src/pages/NzscvSupplierPage.guard.test.ts']);
+    const evidence = fixture.evidence();
     assert.equal(evidence.baseline.checked, true);
     assert.equal(evidence.baseline.also_fails, true);
-    assert.deepEqual(evidence.baseline.failing_files, ['src/pages/FinanceBureauPage.guard.test.ts', 'src/pages/NzscvSupplierPage.guard.test.ts']);
-    assert.match(evidence.baseline_reason, /^npm run test --prefix apps\/web .* also fails on the pinned commit without this patch .*FinanceBureauPage\.guard\.test\.ts.*; not caused by this change$/);
+    assert.equal(evidence.baseline.tolerated, true);
+    assert.equal(evidence.baseline_reason, null);
+    const testCommand = evidence.commands.find((command) => / run test --prefix/.test(command.command));
+    assert.equal(testCommand.tolerated, true);
+    // Verification went on past the tolerated unit step (e2e ran).
+    assert.ok(evidence.commands.some((command) => /test:e2e/.test(command.command)));
     // The patch is back in place after the baseline check.
-    assert.equal(fs.readFileSync(path.join(root, 'work/apps/web/src/example.ts'), 'utf8').replace(/\r\n/g, '\n'), 'export const value = 2;\n');
+    assert.equal(fs.readFileSync(path.join(fixture.root, 'work/apps/web/src/example.ts'), 'utf8').replace(/\r\n/g, '\n'), 'export const value = 2;\n');
+  } finally {
+    fixture.cleanup();
+  }
+});
+
+test('frontend worker hands a new failure on an already-red main back to the author instead of parking it as baseline', () => {
+  const fixture = redBaselineFixture([
+    "if (process.argv.includes('test')) { console.log(' FAIL  src/pages/FinanceBureauPage.guard.test.ts > x' + (patched ? '\\n FAIL  src/pages/Example.test.tsx > y' : '')); process.exit(1); }"
+  ]);
+  try {
+    const result = fixture.runPatch();
+    assert.equal(result.succeeded, false);
+    assert.equal(result.baseline_failure, false);
+    const evidence = fixture.evidence();
+    assert.deepEqual(evidence.baseline.new_failures, ['src/pages/Example.test.tsx']);
+    const { classifyVerificationFailure } = require('../builder-verification-outcome');
+    assert.equal(classifyVerificationFailure(evidence).baseline, false);
+  } finally {
+    fixture.cleanup();
+  }
+});
+
+test('frontend worker still parks a red build on the pinned commit as not the patch\'s fault', () => {
+  const fixture = redBaselineFixture([
+    "if (process.argv.includes('build')) { console.error('error TS2304: Cannot find name x'); process.exit(1); }"
+  ]);
+  try {
+    const result = fixture.runPatch();
+    assert.equal(result.succeeded, false);
+    assert.equal(result.baseline_failure, true);
+    const evidence = fixture.evidence();
+    assert.match(evidence.baseline_reason, /^npm run build --prefix apps\/web also fails on the pinned commit without this patch .*; not caused by this change$/);
     const { classifyVerificationFailure } = require('../builder-verification-outcome');
     assert.deepEqual(classifyVerificationFailure(evidence), { infrastructure: false, baseline: true, reason: evidence.baseline_reason });
   } finally {
-    process.env.PATH = originalPath;
-    fs.rmSync(root, { recursive: true, force: true });
+    fixture.cleanup();
   }
 });

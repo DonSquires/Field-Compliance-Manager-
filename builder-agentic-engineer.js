@@ -29,6 +29,8 @@ const PROMPT_VERSION = 'agentic-engineer-v5';
 const STUCK_REFUSALS = 4;
 const DEFAULT_LIMITS = Object.freeze({
   maxTurns: Math.max(4, Number(process.env.BOB_BUILDER_AGENT_TURNS || 60)),
+  // Smallest local model (billions of parameters) allowed to author; 0 disables the gate.
+  minAuthorModelB: Math.max(0, Number(process.env.BOB_BUILDER_AUTHOR_MIN_MODEL_B ?? 14)),
   wallBudgetMs: Math.max(5 * 60_000, Number(process.env.BOB_BUILDER_AGENT_BUDGET_MS || 45 * 60_000)),
   // A 60 kB read is ~15k tokens: half a small local model's window. Operators shrink it for in-house authors.
   readCapChars: Math.max(8_000, Number(process.env.BOB_BUILDER_READ_CAP_CHARS || 60_000)),
@@ -1047,19 +1049,30 @@ async function runAgenticEngineer({
   let lessons = [];
 
   const health = providerHealth || await fetchModelHealth(gateway || {});
-  const candidates = selectProviders(baseRequest, { health, startAfter: startAfterProvider });
+  const candidates = selectProviders(baseRequest, { health, startAfter: startAfterProvider, minModelB: limits.minAuthorModelB });
   if (!candidates.length) {
     return { ok: false, error: 'no model provider is available for the author', turns: 0, usage, duration_ms: now() - started, routing: { provider: null, reason: baseRequest.routing_reason, prompt_version: PROMPT_VERSION, model: null, chain: baseRequest.chain } };
   }
   let active = 0;
   let providerStartedTurn = 0;
+  let providerStartedAt = started;
   const uneditedTurnBudget = Math.max(8, Math.floor(limits.maxTurns / (candidates.length + 1)));
+  // A slow local provider must not spend the whole wall clock before the stronger tier gets a turn.
+  const uneditedTimeBudget = Math.floor(limits.wallBudgetMs / (candidates.length + 1));
+  // An escalated provider starts with a fresh allocation, not the remainder: frontend jobs used to hand
+  // the strongest model 8-12 turns after weaker ones spent the rest (2026-10: "turn budget exhausted"
+  // was the second most common frontend failure). The ceiling keeps one run bounded.
+  let turnLimit = limits.maxTurns;
+  const freshTurns = Math.max(12, Math.ceil(limits.maxTurns * 0.6));
+  const turnCeiling = limits.maxTurns * 2;
   const activeRequest = () => providerRequest(baseRequest, candidates[active], null);
   const agenticReceiptId = await startAgenticReceipt(supabase, baseRequest, candidates[active]);
   const escalate = (reason) => {
     if (active + 1 >= candidates.length) return false;
     active += 1;
     providerStartedTurn = turns;
+    providerStartedAt = now();
+    turnLimit = Math.min(turnCeiling, Math.max(turnLimit, turns + freshTurns));
     parseFailures = 0;
     refusedStreak = 0;
     signatures.clear();
@@ -1073,9 +1086,19 @@ async function runAgenticEngineer({
   // have nowhere stronger to escalate to, and the recent turns are what the model needs.
   let compaction = {};
 
-  while (turns < limits.maxTurns && now() - started < limits.wallBudgetMs) {
-    if (!tools.__changedFiles().length && turns - providerStartedTurn >= uneditedTurnBudget
-      && escalate(`${uneditedTurnBudget} turns without an edit; preserving the remaining budget for the next allowed provider`)) {
+  while (now() - started < limits.wallBudgetMs) {
+    if (turns >= turnLimit) {
+      if (!escalate(`turn allocation of ${turnLimit - providerStartedTurn} used${tools.__changedFiles().length ? ' with an unfinished change' : ''}`)) break;
+      messages.push({ role: 'user', content: JSON.stringify({
+        handoff: tools.__changedFiles().length
+          ? 'The previous provider ran out of turns mid-change. Check git_diff, complete the required change, run the test, and finish.'
+          : 'The previous provider ran out of turns without an edit. Continue from the recorded evidence; make and verify the required change, or report the concrete blocker.',
+        reading_map: readingMap(transcript),
+      }) });
+    }
+    const slowUnedited = now() - providerStartedAt >= uneditedTimeBudget;
+    if (!tools.__changedFiles().length && (turns - providerStartedTurn >= uneditedTurnBudget || slowUnedited)
+      && escalate(slowUnedited ? `${Math.round(uneditedTimeBudget / 60000)} minutes without an edit; preserving the remaining time for the next allowed provider` : `${uneditedTurnBudget} turns without an edit; preserving the remaining budget for the next allowed provider`)) {
       messages.push({ role: 'user', content: JSON.stringify({
         handoff: 'The previous provider used its exploration allocation without an edit. Continue from the recorded evidence; do not repeat the whole investigation or invent an edit just to show progress. Make and verify the required change, or report the concrete blocker.',
         reading_map: readingMap(transcript),
@@ -1128,7 +1151,7 @@ async function runAgenticEngineer({
       parseFailures++;
       log({ turn: turns, provider: candidates[active].provider, error: 'unparseable tool call', preview: content.slice(0, 300) });
       messages.push({ role: 'assistant', content: content.slice(0, 4000) }, { role: 'user', content: JSON.stringify({ error: 'Reply with ONLY one JSON object: {"thought": string, "tool": string, "args": object}.' }) });
-      if (parseFailures >= 3 && escalate('three unparseable tool calls in a row')) continue;
+      if (parseFailures >= 2 && escalate('two unparseable tool calls in a row')) continue;
       if (parseFailures >= 3) { outcome = { ok: false, error: 'model did not produce tool calls' }; break; }
       continue;
     }
@@ -1196,11 +1219,12 @@ async function runAgenticEngineer({
       outcome = { ok: false, error: `turn budget exhausted: ${reason}`, budget_exhausted: true };
       break;
     }
-    const remaining = limits.maxTurns - turns;
+    const remaining = turnLimit - turns;
+    const allocation = turnLimit - providerStartedTurn;
     const edited = tools.__changedFiles().length > 0;
-    const budgetNote = remaining === limits.maxTurns - Math.ceil(limits.maxTurns / 3) && !edited
+    const budgetNote = turns - providerStartedTurn === Math.ceil(allocation / 3) && !edited
       ? `BUDGET: a third of your turns are used (${remaining} left) and nothing is edited yet. Stop surveying: outline the main file if you have not, read the one range you need, and make the first edit within the next 3 turns.`
-      : remaining === Math.floor(limits.maxTurns / 2)
+      : remaining === Math.floor(allocation / 2)
         ? `BUDGET: half your turns are used (${remaining} left). ${edited ? 'Finish the slice you started, run the test, then finish.' : 'If you have not started editing, start now.'}`
         : remaining > 0 && remaining <= 6
           ? `BUDGET: ${remaining} turn${remaining === 1 ? '' : 's'} left. Run your test and call finish before they run out; an unfinished worktree is discarded.`
@@ -1209,7 +1233,7 @@ async function runAgenticEngineer({
   }
 
   // Grace turn: edits exist but the budget ran out mid-flight. One more call, finish only.
-  if (!outcome && turns >= limits.maxTurns && tools.__changedFiles().length) {
+  if (!outcome && turns >= turnLimit && tools.__changedFiles().length) {
     const base = activeRequest();
     const isOpenAI = candidates[active].provider === 'openai';
     messages.push({ role: 'user', content: JSON.stringify({ budget: 'FINAL TURN: the turn budget is used up. Reply with finish now (summary, tests actually run, rollback_notes; tests_not_run_reason if none ran) or this attempt is discarded.' }) });

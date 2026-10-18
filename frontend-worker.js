@@ -186,15 +186,16 @@ function executeFrontendPatch({ sourceDir, patchPath, artifactDir, workDir = '/w
       commands.push(run('npm', args, { cwd: workDir }));
       if (commands.at(-1).status !== 0) {
         baseline = baselineCheck({ workDir, patchPath, args, progressPath, commands });
+        if (tolerateBaselineFailures(commands.at(-1), baseline, args)) continue;
         break;
       }
     }
-    if (commands.every(command => command.status === 0)) {
+    if (commands.every(commandPassed)) {
       commands.push(run('node', ['scripts/atlas-refresh.js'], { cwd: workDir }));
     }
   }
 
-  const succeeded = commands.every(command => command.status === 0);
+  const succeeded = commands.every(commandPassed);
   const manifest = changedFiles.map(file => ({
     path: file,
     before_sha256: before[file],
@@ -208,8 +209,40 @@ function executeFrontendPatch({ sourceDir, patchPath, artifactDir, workDir = '/w
   }
   fs.writeFileSync(path.join(artifactDir, 'changed-files.json'), `${JSON.stringify(manifest, null, 2)}\n`, { mode: 0o600 });
   if (patchApplied) fs.writeFileSync(path.join(artifactDir, 'validated.patch'), patchText, { mode: 0o600 });
-  fs.writeFileSync(path.join(artifactDir, 'verification.json'), `${JSON.stringify({ succeeded, commands, baseline, baseline_failure: Boolean(baseline?.also_fails), baseline_reason: baseline?.also_fails ? baseline.reason : null, e2e_selection: patchApplied ? { smoke: E2E_SMOKE_SPECS, targeted: targetedE2eSpecs(changedFiles, path.join(workDir, 'apps/web')), project: 'desktop-chromium', offline: true, snapshots: E2E_SNAPSHOT_NOTE } : null }, null, 2)}\n`, { mode: 0o600 });
-  return { succeeded, changed_files: manifest, commands, baseline_failure: Boolean(baseline?.also_fails) };
+  const baselineBlocks = Boolean(baseline?.also_fails && !baseline.tolerated && !baseline.new_failures?.length);
+  fs.writeFileSync(path.join(artifactDir, 'verification.json'), `${JSON.stringify({ succeeded, commands, baseline, baseline_failure: baselineBlocks, baseline_reason: baselineBlocks ? baseline.reason : null, preexisting_failures: baseline?.tolerated ? baseline.failing_files : [], e2e_selection: patchApplied ? { smoke: E2E_SMOKE_SPECS, targeted: targetedE2eSpecs(changedFiles, path.join(workDir, 'apps/web')), project: 'desktop-chromium', offline: true, snapshots: E2E_SNAPSHOT_NOTE } : null }, null, 2)}\n`, { mode: 0o600 });
+  return { succeeded, changed_files: manifest, commands, baseline_failure: baselineBlocks, preexisting_failures: baseline?.tolerated ? baseline.failing_files : [] };
+}
+
+const commandPassed = (command) => command.status === 0 || command.tolerated === true;
+
+function failingTestFiles(text) {
+  return (String(text || '').match(/(?:FAIL|\u00d7|\u2716)\s+([\w./-]+\.(?:test|spec)\.[cm]?[jt]sx?)/g) || [])
+    .map((m) => m.replace(/^(?:FAIL|\u00d7|\u2716)\s+/, ''))
+    .filter((v, i, a) => a.indexOf(v) === i);
+}
+
+/**
+ * Main is often red for an unrelated guard test (dispatchCreationSchema.guard, 2026-10); parking every
+ * frontend job on it was the most common late failure. A unit-test run whose failing files are all
+ * failing without the patch too is accepted with the pre-existing failures recorded. Only the unit-test
+ * step qualifies: its output names failing files reliably; lint and build failures stay blocking.
+ */
+function tolerateBaselineFailures(command, baseline, args) {
+  if (!baseline?.also_fails || args[1] !== 'test') return false;
+  const patched = failingTestFiles(`${command.stdout}\n${command.stderr}`);
+  const before = baseline.all_failing_files || [];
+  if (!patched.length || !before.length) return false;
+  const introduced = patched.filter((file) => !before.includes(file));
+  if (introduced.length) {
+    // Red main does not excuse a new failure: the author is sent these files as their own to repair.
+    baseline.new_failures = introduced;
+    return false;
+  }
+  command.tolerated = true;
+  command.preexisting_failures = patched;
+  baseline.tolerated = true;
+  return true;
 }
 
 /**
@@ -229,13 +262,15 @@ function baselineCheck({ workDir, patchPath, args, progressPath, commands }) {
     run('git', ['apply', '--whitespace=nowarn', patchPath], { cwd: workDir });
   }
   const alsoFails = result.status !== 0;
-  const failing = alsoFails ? (`${result.stdout}\n${result.stderr}`.match(/(?:FAIL|\u00d7|\u2716)\s+([\w./-]+\.(?:test|spec)\.[cm]?[jt]sx?)/g) || []).map((m) => m.replace(/^(?:FAIL|\u00d7|\u2716)\s+/, '')).filter((v, i, a) => a.indexOf(v) === i).slice(0, 8) : [];
+  const allFailing = alsoFails ? failingTestFiles(`${result.stdout}\n${result.stderr}`) : [];
+  const failing = allFailing.slice(0, 8);
   return {
     command: label,
     checked: true,
     also_fails: alsoFails,
     status: result.status,
     failing_files: failing,
+    all_failing_files: allFailing,
     reason: alsoFails ? `${label} also fails on the pinned commit without this patch (the repository is red at the target commit${failing.length ? `: ${failing.join(', ')}` : ''}); not caused by this change` : null,
     stdout: redactLog(String(result.stdout || '').slice(-8000)),
     stderr: redactLog(String(result.stderr || '').slice(-8000))
@@ -269,5 +304,7 @@ module.exports = {
   validatePatchText,
   frontendVerificationCommands,
   targetedE2eSpecs,
-  executeFrontendPatch
+  executeFrontendPatch,
+  failingTestFiles,
+  tolerateBaselineFailures
 };

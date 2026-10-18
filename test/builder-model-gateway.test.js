@@ -156,3 +156,25 @@ test('local Ollama requests carry no Authorization header', async () => {
   assert.ok(calls.length >= 1);
   assert.ok(calls.every(init => !init.headers?.Authorization), 'the cloud key never leaves for a local host');
 });
+
+// Keep last: it marks the module-level OpenAI health entry exhausted for the cooldown.
+test('an exhausted provider account returns 429 and is reported unavailable until the cooldown ends', async () => {
+  const { modelHealth } = require('../builder-model-gateway');
+  let chatCalls = 0;
+  const fetchImpl = async (url) => {
+    if (url.endsWith('/models')) return { ok: true, json: async () => ({ data: [{ id: 'approved-openai' }] }) };
+    if (url.endsWith('/api/tags')) return { ok: true, json: async () => ({ models: [{ name: 'approved-local' }] }) };
+    chatCalls += 1;
+    return { ok: false, status: 429, json: async () => ({ error: { message: 'You have no credits remaining. Add credits to continue.', type: 'insufficient_quota', code: 'insufficient_quota' } }) };
+  };
+  const first = await invokeBuilderModel({ input: request(), config: config(), fetchImpl });
+  assert.equal(first.status, 429);
+  assert.equal(first.body.code, 'provider_quota');
+  const health = await modelHealth(config(), { fetchImpl });
+  assert.equal(health.openai.healthy, false);
+  assert.equal(health.openai.unavailable_reason, 'quota_exhausted');
+  assert.equal(health.openai.ready_model, null);
+  const second = await invokeBuilderModel({ input: request(), config: config(), fetchImpl });
+  assert.equal(second.status, 429);
+  assert.equal(chatCalls, 1, 'the exhausted account is not called again during the cooldown');
+});

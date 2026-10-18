@@ -19,6 +19,11 @@ const PROVIDER_KINDS = Object.freeze({ openai: 'openai', ollama: 'ollama', gpu_w
 const OLLAMA_API_KINDS = new Set(['ollama', 'ollama_cloud']);
 const HEALTH_OK_TTL_MS = 30_000;
 const HEALTH_FAIL_TTL_MS = 60_000;
+// An exhausted account ("You have no credits remaining", insufficient_quota) does not recover in a
+// minute. OpenAI's model list still answers, so health kept calling it ready and every frontend job
+// spent its last fallback retrying a 429 (19 failed attempts across 5 jobs, 2026-10).
+const QUOTA_COOLDOWN_MS = Math.max(60_000, Number(process.env.BOB_PROVIDER_QUOTA_COOLDOWN_MS || 30 * 60_000));
+const QUOTA_EXHAUSTED_PATTERN = /insufficient_quota|no credits|credit balance|exceeded your current quota|billing|usage limit|weekly limit|session limit/i;
 // A CPU box evaluating a prompt on every core answers /api/tags late; two seconds called a working
 // model "unreachable".
 const HEALTH_PROBE_TIMEOUT_MS = Math.max(2_000, Number(process.env.BOB_MODEL_PROBE_TIMEOUT_MS || 10_000));
@@ -50,7 +55,7 @@ async function probeProvider(config, name, { fetchImpl = globalThis.fetch, now =
   if (providerConfig.kind === 'openai') {
     if (!providerConfig.apiKey) return { name, configured: false, healthy: false, installed: [] };
     const cached = healthCache.get(name);
-    if (cached && cached.until > now()) return { name, configured: true, healthy: cached.healthy, installed: cached.installed, cached: true };
+    if (cached && cached.until > now()) return { name, configured: true, healthy: cached.healthy, installed: cached.installed, reason: cached.reason || null, cached: true };
     // The account's model list decides which allowlisted model is real today; unreachable = assume the allowlist.
     let installed = [];
     try {
@@ -64,7 +69,7 @@ async function probeProvider(config, name, { fetchImpl = globalThis.fetch, now =
   if (!providerConfig.baseUrl) return { name, configured: false, healthy: false, installed: [] };
   if (providerConfig.kind === 'ollama_cloud' && !providerConfig.apiKey) return { name, configured: false, healthy: false, installed: [] };
   const cached = healthCache.get(name);
-  if (cached && cached.until > now()) return { name, configured: true, healthy: cached.healthy, installed: cached.installed, cached: true };
+  if (cached && cached.until > now()) return { name, configured: true, healthy: cached.healthy, installed: cached.installed, reason: cached.reason || null, cached: true };
   let healthy = false;
   let installed = [];
   try {
@@ -101,6 +106,7 @@ async function modelHealth(config, options = {}) {
     models: [...(config[probe.name]?.models ?? [])],
     installed: probe.installed,
     ready_model: probe.healthy ? resolveProviderModel(config, probe.name, null, probe.installed) : null,
+    unavailable_reason: probe.healthy ? null : (probe.reason || null),
     num_ctx: config[probe.name]?.numCtx ?? null,
     max_output_tokens: config[probe.name]?.maxOutputTokens ?? config.maxOutputTokens ?? null
   }]));
@@ -253,6 +259,7 @@ async function invokeBuilderModel({ input, config, fetchImpl = globalThis.fetch 
     return { status: 413, body: { error: `prompt exceeds the ${input.provider} context window (${providerConfig.numCtx} tokens)`, code: 'context_exceeded' } };
   }
   const probe = await probeProvider(config, input.provider, { fetchImpl });
+  if (probe.reason === 'quota_exhausted') return { status: 429, body: { error: `${input.provider} account has no remaining quota or credits; skipped until it is topped up`, code: 'provider_quota' } };
   if (OLLAMA_API_KINDS.has(providerConfig.kind) && !probe.healthy) return { status: 503, body: { error: `${input.provider} provider is unreachable`, code: 'provider_unavailable' } };
   const model = resolveProviderModel(config, input.provider, input.model, probe.installed ?? null);
   if (!model) return { status: 503, body: { error: `${input.provider} has none of the allowed models installed`, code: 'model_unavailable' } };
@@ -276,7 +283,11 @@ async function invokeBuilderModel({ input, config, fetchImpl = globalThis.fetch 
     const data = await response.json().catch(() => null);
     if (!response.ok || !data) {
       const detail = data?.error?.message ? `: ${String(data.error.message).slice(0, 200)}` : (typeof data?.error === 'string' ? `: ${data.error.slice(0, 200)}` : '');
-      if (OLLAMA_API_KINDS.has(providerConfig.kind) && (response.status >= 500 || response.status === 429)) healthCache.set(input.provider, { healthy: false, installed: [], until: Date.now() + HEALTH_FAIL_TTL_MS });
+      const quota = response.status === 429 && QUOTA_EXHAUSTED_PATTERN.test(`${detail} ${data?.error?.code || ''} ${data?.error?.type || ''}`);
+      if (quota) healthCache.set(input.provider, { healthy: false, installed: [], reason: 'quota_exhausted', until: Date.now() + QUOTA_COOLDOWN_MS });
+      else if (OLLAMA_API_KINDS.has(providerConfig.kind) && (response.status >= 500 || response.status === 429)) healthCache.set(input.provider, { healthy: false, installed: [], until: Date.now() + HEALTH_FAIL_TTL_MS });
+      // 429 is passed through so callers escalate at once instead of retrying a provider that cannot answer.
+      if (response.status === 429) return { status: 429, body: { error: `${input.provider} provider request failed${detail}`, code: quota ? 'provider_quota' : 'provider_rate_limited' } };
       return { status: 502, body: { error: `${input.provider} provider request failed${detail}`, code: 'provider_error' } };
     }
 
