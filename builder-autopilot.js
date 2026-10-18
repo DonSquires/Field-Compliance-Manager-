@@ -9,7 +9,7 @@
 // job that touches evidential paths is never cleared by the autopilot; it waits for a person.
 const { runBuilderUntilPause, loadBuilderRuntimeSnapshot, implementationRuns } = require('./builder-runtime-coordinator');
 const { unwrapPatchArtifact } = require('./supabase/functions/_shared/builder-patch-envelope');
-const { evidentialMentions, evidentialPathsIn } = require('./builder-path-policy');
+const { evidentialMentions, evidentialPathsIn, isProtectedPath } = require('./builder-path-policy');
 
 const TERMINAL = new Set(['failed', 'cancelled', 'deployed']);
 const GATES = new Set(['specification_ready', 'approval_pending']);
@@ -60,16 +60,25 @@ function routineRepairHold({ job, approval, evidence }) {
   }
   if (job.autopilot_source === 'main_monitor' && approval.approval_type === 'release_approval') {
     const expectedFiles = Array.isArray(job.source_main_health_files) ? job.source_main_health_files : [];
-    const unexpectedFiles = (evidence?.changedFiles ?? []).filter((file) => !expectedFiles.includes(file));
-    if (!expectedFiles.length || unexpectedFiles.length) {
+    const changedFiles = evidence?.changedFiles ?? [];
+    const outsideApp = mainHealthFilesOutsideApp(changedFiles);
+    if (!expectedFiles.length || !changedFiles.length || outsideApp.length) {
       return {
         gate: approval.approval_type,
-        files: unexpectedFiles,
-        reasons: ['main-health repair changed files outside the recorded failing test set'],
+        files: outsideApp,
+        reasons: ['main-health repair changed files outside the web app it may repair unattended'],
       };
     }
   }
   return null;
+}
+
+// Owner ruling 2026-10-18: main-health self-heal repairs the app, not just its tests. An unattended
+// repair may change any non-protected file under apps/web/src; evidential paths are held separately.
+const MAIN_HEALTH_REPAIR_PATH = /^apps\/web\/src\/[A-Za-z0-9_./-]+$/;
+
+function mainHealthFilesOutsideApp(files) {
+  return (Array.isArray(files) ? files : []).filter((file) => !MAIN_HEALTH_REPAIR_PATH.test(String(file)) || String(file).includes('..') || isProtectedPath(file));
 }
 
 function describeFiles(files) {
@@ -239,6 +248,10 @@ function composeReport({ job, evidence, pullRequestUrl, state, reason, hold, rep
     lines.push(`What Bob is doing: he has opened a repair job, "${plain(repair?.title, 160)}", which goes through the same build, test and review steps. When that repair is merged, Bob re-runs your change automatically. Nothing for you to do now.`);
   } else if (state === 'resumed') {
     lines.push(`Resumed: main has changed, so Bob has started "${plain(job.title, 160)}" again from the current code. This does not yet prove the earlier failure is fixed. You will get a fresh report when it is built and checked.`);
+  } else if (state === 'main_rechecking') {
+    lines.push(`Handed back: main has moved on since Bob started "${plain(job.title, 160)}", so this attempt stops here instead of repairing code that may already be fixed.`);
+    if (reason) lines.push(`Where the attempt stopped: ${plain(reason, 400)}.`);
+    lines.push('What Bob is doing: his isolated main-health check re-tests the current main and opens a fresh repair only if it is still failing. Nothing was published.');
   } else if (state === 'review_reopened') {
     lines.push(`Revising: an independent AI reviewer (a different model from the author) found problems with Bob's attempt at "${plain(job.title, 160)}", so Bob is fixing them in a new attempt.`);
     lines.push(`What the reviewer found: ${plain(reason, 700)}`);
@@ -301,8 +314,8 @@ function automergeEligible({ job, evidence, env = process.env }) {
   if ((review.findingList || []).some((f) => ['critical', 'high'].includes(f.severity))) return { ok: false, reason: 'review has critical/high findings' };
   const files = evidence.changedFiles || [];
   if (!files.length) return { ok: false, reason: 'no changed files' };
-  if (mainHealthRepair && (files.length > 8 || files.some((file) => !expectedMainHealthFiles.includes(file)))) {
-    return { ok: false, reason: 'main-health repair changed files outside the failing source-guard set' };
+  if (mainHealthRepair && (files.length > 8 || mainHealthFilesOutsideApp(files).length)) {
+    return { ok: false, reason: 'main-health repair changed files outside the web app it may repair unattended' };
   }
   const evidential = evidentialPathsIn(files);
   if (evidential.length) return { ok: false, reason: `evidential paths need a person: ${evidential.slice(0, 3).join(', ')}` };
@@ -642,17 +655,28 @@ async function autopilotTick({ supabase, jobs, actions, log = () => {} }) {
         const baseline = baselineBlock(blockedReason);
         const mainHead = typeof actions.mainHead === 'function' ? await actions.mainHead().catch(() => null) : null;
         const mainMoved = Boolean(mainHead && job.target_sha && mainHead !== job.target_sha);
+        // A main-health repair exists to fix the main it was pinned to. Once main has moved, the
+        // isolated main-health monitor re-tests the new main and opens a fresh repair only if it is
+        // still red. Re-running this brief on code where the failure is already fixed leaves Bob
+        // nothing to repair (live jobs 3e8f7800, ea808101), and a red baseline is not a reason for
+        // a repair to spawn a repair of itself.
+        if (job.autopilot_source === 'main_monitor' && mainMoved && !job.workspace_branch && !job.workspace_pull_request_url) {
+          await actions.record(job.id, 'done', { ...composeReport({ job, state: 'main_rechecking', reason: blockedReason }), repair_outcome: 'main_moved_recheck' });
+          log({ job: job.id, main_rechecking: mainHead, reason: blockedReason.slice(0, 200) });
+          outcomes.push({ job: job.id, outcome: 'main_rechecking' });
+          continue;
+        }
         // Main has moved past the pinned commit (someone may already have fixed the checks, or the
         // failures were the verifier's): try the same brief once on the current main before anything
         // else. A job that is itself an automatic re-open is not re-opened again.
-        if ((baseline || run?.reason === 'attempt_ceiling') && mainMoved && !isRepairJob(job) && !isReopenedJob(job) && typeof actions.createJob === 'function') {
+        if ((baseline || run?.reason === 'attempt_ceiling') && mainMoved && !isRepairJob(job) && !isReopenedJob(job) && job.autopilot_source !== 'main_monitor' && typeof actions.createJob === 'function') {
           const reopened = await actions.createJob(reopenSpec(job));
           await actions.record(job.id, 'done', { ...composeReport({ job, state: 'resumed', resumedAs: reopened.id }), repair_outcome: 'main_moved' });
           log({ job: job.id, resumed_as: reopened.id, reason: `${baseline ? 'red baseline' : 'attempt ceiling'} at an older commit; main has moved` });
           outcomes.push({ job: job.id, outcome: 'resumed', resumed_as: reopened.id });
           continue;
         }
-        if (baseline && !isRepairJob(job) && typeof actions.createJob === 'function') {
+        if (baseline && !isRepairJob(job) && job.autopilot_source !== 'main_monitor' && typeof actions.createJob === 'function') {
           const repair = await actions.createJob(repairJobFor(job, baseline));
           await actions.record(job.id, 'blocked', composeReport({ job, evidence, state: 'repairing', reason: baseline.reason, repair }));
           log({ job: job.id, repair_job: repair.id, reason: baseline.reason.slice(0, 200) });

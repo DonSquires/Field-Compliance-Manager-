@@ -8,6 +8,24 @@ detailed backlogs (`ENTERPRISE_SAAS_TODO.md`, `PROTOTYPE_GAP_AUDIT.md`,
 Completion language is strict, as in the lineage: **merged ≠ deployed ≠
 glass-proven.** A workstream item is done only when its evidence gate is met.
 
+Owner ruling 2026-10-18, self-heal repairs the app:
+
+- Evidence: jobs `3e8f7800` and `ea808101` failed with empty diffs. Their
+  parents (`8686934c` at `222ecc03`, `f7c6b48c` at `984991f2`) had real
+  failures and patches, but were blocked by unrelated e2e baseline failures or
+  a lost verifier, then re-opened on a newer main where the guard already
+  passed (verified locally at `6c8030c7` and `db5c1649`). The engineer was also
+  limited to editing the failing guard file, so a real product regression
+  could not be fixed unattended.
+- Change: the main-health brief requires reproduction and a root-cause fix in
+  the app; release and auto-merge accept up to eight non-protected
+  `apps/web/src` files and hold anything else for Grandmaster approval; a
+  blocked main-health repair on moved main is handed back to the monitor, and
+  a handed-back repair is retired when the monitor opens its replacement.
+- Not yet: main-health repairs are frontend-only, so a regression that needs
+  `supabase/` or `services/` source still pauses for a person. Unrelated e2e
+  baseline failures in the frontend verifier remain a separate defect.
+
 Owner-approved structured planning routing 2026-10-18:
 
 - Keep UI design mandatory. UX v9 derives a complete output schema from the

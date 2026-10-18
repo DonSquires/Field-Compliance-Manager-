@@ -106,12 +106,12 @@ test('routine monitor clears a bounded basic fix but holds redesign or broad pat
   assert.match(release.reasons[0], /more than eight files/);
 });
 
-test('main-monitor repairs stay inside the failing guard-test set', () => {
+test('main-monitor repairs may fix the web app but hold protected or out-of-app files for a person', () => {
   const job = {
     autopilot_source: 'main_monitor',
     repair_risk: 'routine',
     title: 'Repair red main tests',
-    task_description: 'Correct stale source-contract assertions; inspect schema but do not change it.',
+    task_description: 'Fix the real cause of the failing guard; inspect schema but do not change it.',
     source_main_health_files: ['apps/web/src/lib/example.guard.test.ts'],
   };
   const approval = { approval_type: 'release_approval' };
@@ -120,16 +120,22 @@ test('main-monitor repairs stay inside the failing guard-test set', () => {
     approval,
     evidence: { changedFiles: ['apps/web/src/lib/example.guard.test.ts'] },
   }), null);
-  assert.match(routineRepairHold({
+  assert.equal(routineRepairHold({
     job,
     approval,
-    evidence: { changedFiles: ['apps/web/src/lib/example.guard.test.ts', 'apps/web/src/lib/example.ts'] },
-  }).reasons[0], /outside the recorded failing test set/);
+    evidence: { changedFiles: ['apps/web/src/lib/example.ts', 'apps/web/src/pages/ExamplePage.tsx'] },
+  }), null, 'an application-source fix without touching the guard is a valid self-heal');
+  for (const outside of ['supabase/migrations/20261019000000_fix.sql', 'apps/web/package.json', 'apps/web/src/routing/AppRoutes.tsx', 'services/fcm-api/src/index.js']) {
+    const hold = routineRepairHold({ job, approval, evidence: { changedFiles: ['apps/web/src/lib/example.ts', outside] } });
+    assert.match(hold.reasons[0], /outside the web app it may repair unattended/, outside);
+    assert.deepEqual(hold.files, [outside]);
+  }
   assert.match(routineRepairHold({
     job: { ...job, source_main_health_files: [] },
     approval,
-    evidence: { changedFiles: [] },
-  }).reasons[0], /outside the recorded failing test set/);
+    evidence: { changedFiles: ['apps/web/src/lib/example.ts'] },
+  }).reasons[0], /outside the web app/);
+  assert.match(routineRepairHold({ job, approval, evidence: { changedFiles: [] } }).reasons[0], /outside the web app/);
 });
 
 test('autopilot runs the bounded runner for a working job and blocks when the attempt ceiling is hit', async () => {
@@ -404,7 +410,9 @@ test('auto-merge is env-gated and narrow: every independent check clean, request
     changedFiles: ['apps/web/src/lib/example.guard.test.ts'],
   };
   assert.equal(automergeEligible({ job: mainHealthJob, evidence: mainHealthEvidence, env: on }).ok, true, 'bounded main-health repair is eligible without a human requester');
-  assert.match(automergeEligible({ job: mainHealthJob, evidence: { ...mainHealthEvidence, changedFiles: [...mainHealthEvidence.changedFiles, 'apps/web/src/lib/example.ts'] }, env: on }).reason, /outside the failing source-guard set/);
+  assert.equal(automergeEligible({ job: mainHealthJob, evidence: { ...mainHealthEvidence, changedFiles: [...mainHealthEvidence.changedFiles, 'apps/web/src/lib/example.ts'] }, env: on }).ok, true, 'a main-health repair may fix application source');
+  assert.match(automergeEligible({ job: mainHealthJob, evidence: { ...mainHealthEvidence, changedFiles: [...mainHealthEvidence.changedFiles, 'supabase/migrations/20261019000000_fix.sql'] }, env: on }).reason, /outside the web app it may repair unattended/);
+  assert.match(automergeEligible({ job: mainHealthJob, evidence: { ...mainHealthEvidence, changedFiles: Array.from({ length: 9 }, (_, index) => `apps/web/src/lib/file-${index}.ts`) }, env: on }).reason, /outside the web app it may repair unattended/);
   assert.equal(automergeEligible({ job: { ...mainHealthJob, source_main_health_files: [] }, evidence: mainHealthEvidence, env: on }).ok, false, 'missing failing-file provenance blocks auto-merge');
   assert.equal(automergeEligible({ job, evidence: { ...clean, verifyRun: null }, env: on }).ok, false, 'no worker verification');
   assert.equal(automergeEligible({ job, evidence: { ...clean, security: { passed: false } }, env: on }).ok, false, 'security findings');
@@ -634,7 +642,7 @@ test('at the attempt ceiling a job pinned behind main is re-opened once on curre
   assert.match(again.calls.find(([name]) => name === 'record')[3].text, /What you can do: tell Bob "try again"/);
 });
 
-test('main-monitor jobs preserve their non-human provenance when reopened on a new main SHA', async () => {
+test('a blocked main-monitor repair is handed back to the health monitor when main moves, not re-run on fixed code', async () => {
   const job = {
     id: 'main-health-job',
     organization_id: 'org-1',
@@ -653,14 +661,27 @@ test('main-monitor jobs preserve their non-human provenance when reopened on a n
   };
   const actions = actionsRecorder({ run: { paused: true, reason: 'blocked', detail: 'repository red at the pinned commit: apps/web/src/lib/example.guard.test.ts' } });
   actions.mainHead = async () => 'b'.repeat(40);
-  const opened = [];
-  actions.createJob = async (spec) => { opened.push(spec); return { id: 'main-health-job-retry' }; };
+  actions.createJob = async () => { throw new Error('a main-health repair must not be re-run on moved main'); };
 
   assert.deepEqual(await autopilotTick({ supabase: fakeSupabase({ job }), jobs: [job], actions }), [
-    { job: 'main-health-job', outcome: 'resumed', resumed_as: 'main-health-job-retry' },
+    { job: 'main-health-job', outcome: 'main_rechecking' },
   ]);
-  assert.equal(opened[0].requestedBy, null);
-  assert.equal(opened[0].autopilotSource, 'main_monitor');
-  assert.equal(opened[0].sourceMainHealthSha, 'a'.repeat(40));
-  assert.deepEqual(opened[0].sourceMainHealthFiles, ['apps/web/src/lib/example.guard.test.ts']);
+  const recorded = actions.calls.find(([name]) => name === 'record');
+  assert.equal(recorded[2], 'done');
+  assert.equal(recorded[3].repair_outcome, 'main_moved_recheck');
+  assert.match(recorded[3].text, /re-tests the current main and opens a fresh repair only if it is still failing/);
+  assert.equal(actions.calls.some(([name]) => name === 'fail'), false);
+
+  const pinned = actionsRecorder({ run: { paused: true, reason: 'blocked', detail: 'baseline: repository red at the pinned commit: npm run test:e2e --prefix apps/web -- e2e/example.spec.ts' } });
+  pinned.mainHead = async () => 'a'.repeat(40);
+  pinned.createJob = async () => { throw new Error('a main-health repair must not spawn a repair of itself'); };
+  const outcome = await autopilotTick({ supabase: fakeSupabase({ job }), jobs: [job], actions: pinned });
+  assert.equal(outcome[0].outcome, 'blocked');
+
+  const withWorkspace = { ...job, workspace_branch: 'bob/main-health-job' };
+  const published = actionsRecorder({ run: { paused: true, reason: 'blocked', detail: 'repository red at the pinned commit: apps/web/src/lib/example.guard.test.ts' } });
+  published.mainHead = async () => 'b'.repeat(40);
+  published.createJob = async () => { throw new Error('a main-health repair must not be re-run on moved main'); };
+  const explicit = await autopilotTick({ supabase: fakeSupabase({ job: withWorkspace }), jobs: [withWorkspace], actions: published });
+  assert.equal(explicit[0].outcome, 'blocked', 'a repair with a workspace needs explicit release handling, not a hand-back');
 });
