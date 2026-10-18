@@ -954,3 +954,28 @@ test('a rerun child works in its bound parent worktree even when the shared clon
   assert.equal(fs.existsSync(path.join(workspaceRoot, 'bob-job-f6df4b8403f14ad2adfb')), false, 'no second worktree named after the child');
   fs.rmSync(repo.root, { recursive: true, force: true });
 });
+
+test('a model looping on one refused call escalates, or stops early with a reading map (live job 0c388688)', async () => {
+  const repo = makeRepo();
+  const workspaceRoot = path.join(repo.root, 'workspaces');
+  const job = { id: '5tuck5tuck5tuck5tuck5tuck5tuck00', organization_id: '00000000-0000-0000-0000-000000000001', target_sha: repo.sha, title: 'loop', task_description: 'd' };
+  const loop = { tool: 'search', args: { query: 'saveGeofenceValue', path: 'lib' } };
+  const gpuOnly = { gpu_workstation: LAPTOP_ON.gpu_workstation, ollama: { configured: false, healthy: false, models: [] }, openai: { configured: false, healthy: false, models: [] } };
+  let calls = 0;
+  const stopped = await runAgenticEngineer({ supabase: null, gateway: { gatewayUrl: 'x', apiToken: 'y' }, job, step: { id: 's' }, lane: 'backend', sourceDir: repo.source, workspaceRoot, repoRoot: repo.source, callModel: async () => { calls++; return { ok: true, data: { content: JSON.stringify(loop), model: 'm', usage: {} } }; }, limits: { ...DEFAULT_LIMITS, maxTurns: 60 }, providerHealth: gpuOnly });
+  assert.equal(stopped.ok, false);
+  assert.equal(stopped.turns, 6, 'two real calls, then four refusals in a row');
+  assert.equal(calls, 6);
+  assert.equal(stopped.budget_exhausted, true, 'the coordinator treats it like a budget failure and escalates from the map');
+  assert.match(stopped.error, /stuck: 4 identical search calls refused in a row/);
+  assert.deepEqual(stopped.resume_hints.searches, ['saveGeofenceValue in lib']);
+
+  const providers = [];
+  const finish = { tool: 'finish', args: { summary: 'nothing to change', no_change_reason: 'the search shows nothing to change' } };
+  const escalated = await runAgenticEngineer({ supabase: null, gateway: { gatewayUrl: 'x', apiToken: 'y' }, job: { ...job, id: '5tuck5tuck5tuck5tuck5tuck5tuck01' }, step: { id: 's' }, lane: 'backend', sourceDir: repo.source, workspaceRoot, repoRoot: repo.source, callModel: async ({ modelRequest }) => { providers.push(modelRequest.provider); return { ok: true, data: { content: JSON.stringify(modelRequest.provider === 'openai' ? finish : loop), model: 'm', usage: {} } }; }, limits: { ...DEFAULT_LIMITS, maxTurns: 60 }, providerHealth: { ...LAPTOP_ON, ollama: { configured: false, healthy: false, models: [] } } });
+  assert.equal(escalated.routing.provider, 'openai');
+  assert.equal(escalated.routing.escalated, true);
+  assert.equal(providers.filter((p) => p !== 'openai').length, 6);
+  assert.equal(escalated.turns, 7);
+  fs.rmSync(repo.root, { recursive: true, force: true });
+});
