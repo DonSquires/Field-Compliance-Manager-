@@ -181,8 +181,23 @@ const OrganizationSetupPage: React.FC = () => {
   const [jurisdictionPreviewLoading, setJurisdictionPreviewLoading] = useState(false);
   const [jurisdictionPreviewMessage, setJurisdictionPreviewMessage] = useState<string | null>(null);
   const [jurisdictionProposalLoading, setJurisdictionProposalLoading] = useState(false);
+  const [jurisdictionRequest, setJurisdictionRequest] = useState<JurisdictionRequest | null>(null);
 
   const isBranch = org?.organization_type === 'branch';
+
+  // ATLAS READS: bob_agentic_actions
+  const loadJurisdictionRequest = useCallback(async (orgId: string) => {
+    const { data, error: requestError } = await supabase
+      .from('bob_agentic_actions')
+      .select('id, status, error_message, proposed_payload, created_at')
+      .eq('organization_id', orgId)
+      .eq('action_type', 'set_org_jurisdiction')
+      .order('created_at', { ascending: false })
+      .limit(1)
+      .maybeSingle();
+    // The request status is supplementary; the saved boundary still renders if it cannot be read.
+    setJurisdictionRequest(requestError || !data ? null : toJurisdictionRequest(data));
+  }, []);
 
   // ATLAS READS: organizations, organization_modules, notice_templates, org_geofence_config, org_printer_settings
   const loadAll = useCallback(async () => {
@@ -264,12 +279,13 @@ const OrganizationSetupPage: React.FC = () => {
         return [key.key, Number(data)] as const;
       }));
       setResolvedGeofenceDefaults(Object.fromEntries(resolvedEntries));
+      await loadJurisdictionRequest(orgId);
     } catch (err) {
       setError(err instanceof Error ? err.message : 'Failed to load organisation settings');
     } finally {
       setLoading(false);
     }
-  }, [operatingOrganizationId, profile?.organizationId]);
+  }, [operatingOrganizationId, profile?.organizationId, loadJurisdictionRequest]);
 
   useEffect(() => {
     loadAll();
@@ -571,6 +587,7 @@ const OrganizationSetupPage: React.FC = () => {
       if (!data?.success) throw new Error(data?.error ?? 'The service-area proposal was not created');
       setNotice(data.note ?? 'Service area sent to Approvals.');
       setJurisdictionPreviewMessage('Boundary preview retained. The proposal is waiting in Approvals; routing will not use it until a person approves and visually verifies it.');
+      await loadJurisdictionRequest(org.id);
     } catch (err) {
       setError(err instanceof Error ? err.message : 'Failed to send the service area to Approvals');
     } finally {
@@ -872,6 +889,13 @@ const OrganizationSetupPage: React.FC = () => {
             </button>
           </div>
         </form>
+        {jurisdictionRequest && (
+          <JurisdictionRequestStatus
+            request={jurisdictionRequest}
+            hasSavedBoundary={Boolean(org.jurisdiction_geom)}
+            onReuse={() => { setJurisdictionNames(jurisdictionRequest.districtNames); setJurisdictionPreview(null); setJurisdictionPreviewMessage('Councils from the last request are selected. Preview the boundary, then send it to Approvals again.'); }}
+          />
+        )}
         {jurisdictionPreviewMessage && <div className={`organization-jurisdiction-message ${jurisdictionPreview ? 'is-success' : 'is-error'}`} role="status">{jurisdictionPreviewMessage}</div>}
         <JurisdictionPreviewMap geometry={jurisdictionPreview ?? org.jurisdiction_geom} label={jurisdictionNames.join(', ') || org.name} />
       </section>
@@ -984,6 +1008,42 @@ function geometryFingerprint(layer: L.GeoJSON) {
 
 // One Leaflet instance stays mounted for the page's life. Selecting councils, re-fetching the org, or
 // saving geofence settings must not reset the officer's pan/zoom; only a genuinely different boundary refits.
+interface JurisdictionRequest {
+  id: string;
+  status: string;
+  errorMessage: string | null;
+  districtNames: string[];
+  createdAt: string;
+}
+
+export function toJurisdictionRequest(row: { id: string; status: string; error_message: string | null; proposed_payload: unknown; created_at: string }): JurisdictionRequest {
+  const payload = (row.proposed_payload ?? {}) as { district_names?: unknown };
+  const districtNames = Array.isArray(payload.district_names) ? payload.district_names.map((name) => String(name)).filter(Boolean) : [];
+  return { id: row.id, status: row.status, errorMessage: row.error_message, districtNames, createdAt: row.created_at };
+}
+
+export function JurisdictionRequestStatus({ request, hasSavedBoundary, onReuse }: { request: JurisdictionRequest; hasSavedBoundary: boolean; onReuse: () => void }) {
+  const councils = request.districtNames.length === 1 ? '1 council' : `${request.districtNames.length} councils`;
+  const when = new Date(request.createdAt).toLocaleDateString('en-NZ', { day: 'numeric', month: 'short', year: 'numeric' });
+  if (request.status === 'applied') {
+    return <div className="organization-jurisdiction-message is-success" role="status">Last service-area request ({councils}, {when}) was saved.</div>;
+  }
+  if (request.status === 'failed') {
+    return (
+      <div className="organization-jurisdiction-message is-error" role="alert">
+        <strong>Your last service-area request ({councils}, {when}) was approved but not saved.</strong>{' '}
+        {hasSavedBoundary ? 'The map shows the previous saved boundary.' : 'No boundary is saved, so the map is empty.'}
+        {request.errorMessage && <> Reason: {request.errorMessage}</>}
+        {request.districtNames.length > 0 && <> <button type="button" className="btn btn-secondary btn-sm" onClick={onReuse}>Use these councils again</button></>}
+      </div>
+    );
+  }
+  if (request.status === 'pending' || request.status === 'approved') {
+    return <div className="organization-jurisdiction-message" role="status">A service-area request ({councils}, {when}) is {request.status === 'pending' ? 'waiting in Approvals' : 'approved and being saved'}. The map changes once it is saved.</div>;
+  }
+  return <div className="organization-jurisdiction-message" role="status">Last service-area request ({councils}, {when}) was {request.status}.</div>;
+}
+
 function JurisdictionPreviewMap({ geometry, label }: { geometry: GeoJSON.GeoJsonObject | null; label: string }) {
   const containerRef = React.useRef<HTMLDivElement | null>(null);
   const mapRef = React.useRef<L.Map | null>(null);
