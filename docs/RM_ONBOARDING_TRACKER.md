@@ -114,6 +114,40 @@ turn beats false completeness.
   provider/branch overview returns two operating organisations, 17 accepted
   agreements, and 16 current-period cost lines totalling NZ$50,606.29.
 
+## STATIC-WORK CORPUS AND NMDHB SPINE (2026-10-18) — AUDITED, CONSOLIDATION PENDING
+
+- Read-only inventory covered 466 files under the 1080 operations folder, 284
+  hospital commercial/tender files, 33 archived NMDHB operational files, 13
+  current NMDHB safety-system files, and two current NMDHB operational
+  workbooks. Hash manifests remain local and sensitive. Fourteen
+  cloud-synchronised hospital tender files were unavailable during hashing and
+  remain explicit gaps rather than success-shaped records.
+- All 217 XLSX workbooks opened: 353 worksheets, 24 hidden worksheets, and
+  38,618 formula cells. The source set contains real roster dates/times, staff
+  identifiers, hours, travel, rates, invoice/payment evidence, work locations,
+  1080 deployment roles, hazards, qualifications, and approval controls. It is
+  not one import: commercial drafts, operational history, templates,
+  superseded copies, safety controls, and tender evidence require separate
+  governed lanes.
+- Atlas/schema show that the shared static spine exists and is wired:
+  `static_guarding` agreement modules, agreement places, roster work units and
+  slots, shifts/stops, officer static-post RPCs, safety briefings, debriefs,
+  labour costing, and finance service costs. Live R&M usage does not match that
+  capability: one not-invited static agreement, one covered place, two work
+  units, and zero slots, assignments, shifts, static stops, or static cost
+  lines.
+- The smallest blocking contradiction is NMDHB identity. The own-rooted,
+  active government organisation is the canonical Model A account, while an
+  inactive child prospect shell holds R&M's operational agreement, richer
+  Nelson Hospital place/zone/contact, and static work units. The owner approved
+  consolidation onto the own-rooted organisation while retaining the prospect
+  shell as inactive audit history.
+- Migration `20261018150000` implements that exact-ID guarded consolidation,
+  retires the Layer-1 platform agreement's placeholder operational place, and
+  deactivates the literal test work unit. It does not accept the client
+  invitation, invent hospital posts, map staff names, or promote any historical
+  source row. Those require separate reviewed agreement/place/person mappings.
+
 ## INVOICE AND PRICE-BOOK CORPUS (2026-10-18) — INVENTORIED, NOT PROMOTED
 
 - Located and read-only inventoried `Invoice Spreadsheets`: 70 files in 30
