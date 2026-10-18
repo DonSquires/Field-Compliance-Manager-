@@ -16,6 +16,91 @@ actually work with a working org and its data and operations." Extended-scope,
 multi-session task — take as many turns as needed; real, verified progress each
 turn beats false completeness.
 
+## PATROL WORKBOOK FINANCE BACKFILL (2026-10-18) — BUILT AND VERIFIED, NOT PROMOTED
+
+- Audited the read-only R&M patrol-log corpus at `Patrol Log Entries/All Log
+  Spreadsheets`: 48 workbooks, 175 worksheets, and 938,094 formula cells. The
+  original operational seed preserved some displayed cost values as source
+  evidence but did not create governed finance records. Whole-workbook totals
+  cannot be imported directly because active, archive, restored, and historic
+  files overlap.
+- Added a formula-aware local derivative exporter and finance staging CLI.
+  Every derivative records the source file/hash, derivative hash, sheet, row,
+  displayed values, and formulas. Files remain local and read-only; no workbook
+  or extracted row value is committed, uploaded, or sent to an external model.
+- The accounting model separates row provenance from ledger aggregation:
+  positive `Job Cost` becomes `labour`, positive `Travel Cost` becomes
+  `vehicle`, and `Total Cost` is reconciliation evidence only. It is never
+  imported as a third line. `file_import_finance_cost_rows` retains every
+  source fact while `finance_service_costs` receives one reviewed
+  agreement/month/component line.
+- The governed workflow is intentionally multi-step: stage source rows,
+  confirm the exact import-profile mappings, review aggregate counts and
+  totals, approve the batch, then explicitly apply it. Approval alone creates
+  no business record. Final apply creates only missing monthly draft P&L
+  periods, refuses locked/closed/overlapping periods, links every contributing
+  row, records audit receipts, and is replay-safe.
+- Removed the former one-proposal-per-row finance path from the operational
+  patrol importer. Workshop candidates still use the existing proposal lane;
+  all patrol finance now has one authoritative aggregate review/apply path.
+- Exercised a real OneFortyOne 2025 row through migration creation, source-row
+  staging, evidence verification, exact mapping confirmation, aggregate
+  review, batch approval, P&L period creation, finance insertion, and applied
+  receipts in one live transaction. The result reached `applied`, then the
+  transaction was rolled back. No production schema or finance record was
+  persisted.
+- Local previews now parse all 16 financially relevant sheets in the active
+  workbooks: 39,729 source rows, 34,251 positive cost components, 30,037
+  locally eligible components, 2,214 quarantined components, and
+  NZ$999,893.74 locally eligible before server-side agreement, place, evidence,
+  replay, and period checks. Formula errors, invalid dates, displayed-total
+  mismatches, duplicate external references, and unresolved places remain
+  quarantined rather than guessed.
+- Remaining rollout gates are explicit: Wrattens lacks an active patrol module
+  on its agreement; server rollback previews must reconcile every active sheet
+  against operational evidence; archive/restored overlap must be classified;
+  and a human must accept the redacted aggregate and quarantine report before
+  any review batch is persisted or applied.
+- Validation completed so far: focused Node tests pass, Python and Node entry
+  points compile, the web production build passes, the migration compiles in a
+  rolled-back live transaction, and the real-row rolled-back lifecycle passes.
+  Production promotion remains deliberately incomplete until the review gates
+  above are satisfied.
+
+## INVOICE AND PRICE-BOOK CORPUS (2026-10-18) — INVENTORIED, NOT PROMOTED
+
+- Located and read-only inventoried `Invoice Spreadsheets`: 70 files in 30
+  folders, comprising 69 XLSX workbooks and one PDF. All 69 workbooks opened
+  successfully. Their 90 worksheets contain 141,081 formula cells and 19,969
+  nonblank rows. Full hashes, sheet metadata, header candidates, and formula
+  examples remain in a local sensitive audit artifact; no workbook value was
+  uploaded, committed, or sent to an external model.
+- This folder is not one import source. It mixes at least four authorities:
+  invoice/revenue documents, parts and supplier price books, patrol-cost
+  extracts, and presentation/empty exports. These must map separately to
+  `invoices`/`invoice_line_items`, versioned finance item cost and sell prices,
+  patrol reconciliation evidence, or quarantine/exclusion.
+- Thirty-two workbooks expose no nonblank worksheet cells and are excluded from
+  record promotion unless a later governed extractor proves that an embedded
+  object or external connection is authoritative. They must not produce
+  success-shaped empty imports.
+- Cross-corpus comparison proved that invoice-folder patrol extracts overlap the
+  patrol source of truth. The OFO 2025 `A:U` operational/financial rows match
+  the active patrol workbook for all 6,606 rows. The OFO 2026 snapshot shares
+  2,159 economic rows with the active workbook and is an older partial snapshot.
+  These sheets are reconciliation evidence only and must never create a second
+  service-cost line.
+- Duplicate invoice-area evidence also exists: the two Birdhurst workbook names
+  contain identical sheets, and the two March OFO pest-control workbooks share
+  multiple full sheets, including all 6,606 rows of the 2025 ledger. File names
+  and whole-file hashes therefore cannot be used alone as economic identity.
+- The safe next lane is invoice-native and review-gated: classify the document
+  role, resolve provider/client/agreement, preserve source file/hash/sheet/cell
+  provenance, reconcile subtotal/GST/total, detect cross-corpus patrol overlap,
+  and propose either invoice headers/lines or versioned item cost/sell prices.
+  No invoice, line item, catalog item, cost version, price version, payment, or
+  P&L revenue record has been created from this corpus.
+
 ## APPROVED VEHICLE HISTORY AND IDENTITY RECORDS (2026-10-11)
 
 - Recorded the owner ruling that plate mentions in the already-reviewed R&M

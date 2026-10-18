@@ -142,7 +142,8 @@ describe('organisation file system', () => {
     expect(page).toContain("from('file_import_row_proposals')");
     expect(page).toContain("rpc('review_file_import_row_proposal'");
     expect(page).toContain('Review consequential targets one row at a time.');
-    expect(page).toContain('Approve and apply');
+    expect(page).toContain('Approval records a decision only');
+    expect(page).toContain("rpc('apply_file_import_finance_batch'");
     expect(page).toContain('Row proposal rejected. No proposed target was applied.');
     expect(page).toContain('A row-level review reason is required.');
     expect(page).toContain('Review every consequential row proposal before approving the batch.');

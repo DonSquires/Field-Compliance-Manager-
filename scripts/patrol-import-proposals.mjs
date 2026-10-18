@@ -28,10 +28,6 @@ function sourceEvidence(input) {
   };
 }
 
-function hasCostEvidence(payload) {
-  return [payload.job_cost, payload.travel_cost, payload.total_cost].some((value) => typeof value === 'number' && Number.isFinite(value));
-}
-
 export function buildPatrolImportProposals(input) {
   const { payload } = input;
   const sourceValues = sourceEvidence(input);
@@ -60,29 +56,6 @@ export function buildPatrolImportProposals(input) {
         zone_id: input.zoneId,
         assigned_user_id: input.officerId,
         scheduled_for: input.occurredAt,
-        evidence_record_type: input.evidenceRecordType,
-        evidence_external_ref: input.externalRef,
-      },
-      source_values: sourceValues,
-      confidence: null,
-    });
-  }
-
-  if (hasCostEvidence(payload)) {
-    proposals.push({
-      source_record_key: input.externalRef,
-      source_row_number: payload.source_row,
-      target_type: 'finance_service_cost',
-      proposed_payload: {
-        organization_id: input.providerOrganizationId,
-        client_organization_id: input.clientOrganizationId,
-        occurred_at: input.occurredAt,
-        client_site_id: input.siteId,
-        zone_id: input.zoneId,
-        job_cost: payload.job_cost,
-        travel_cost: payload.travel_cost,
-        total_cost: payload.total_cost,
-        requires_cost_type_mapping: true,
         evidence_record_type: input.evidenceRecordType,
         evidence_external_ref: input.externalRef,
       },
