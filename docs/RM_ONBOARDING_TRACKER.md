@@ -2169,3 +2169,9 @@ service-role write was used.
   table. Focused desktop and mobile browser journeys cover employment setup and
   candidate rejection; the Dr. Bob fixture-backed human test completed with
   zero failed requests and zero test errors.
+- Released through PR #108 at merge `8faab4bde5168bbca684f11d8f87bfe20bffb68f`.
+  Migration `20261018075927` is present in the live ledger. A live transaction
+  exercised the employment setup RPC, its audit receipt, and all three aligned
+  readiness read models, then rolled back; zero verification receipts persisted.
+  The post-release Atlas refresh added the missing UI-to-RPC edge and a second
+  refresh reported zero capability, edge, or retirement changes.
