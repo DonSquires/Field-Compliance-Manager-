@@ -312,15 +312,29 @@ serve(async (req)=>{
         polygons.push(boundary.geometry);
         boundarySources.add(boundary.source);
       }
-      // Union + write via the SQL helper. Phase 1: RPC now returns area (m^2).
-      // Phase 4 fast-follow (0284): pass real provenance + actor.
-      const { data: jurAreaData, error: rpcErr } = await admin.rpc('set_org_jurisdiction_geom', {
+      // Union one council per request, then commit through the same versioned
+      // write as set_org_jurisdiction_geom. A single-request union of a large
+      // multi-council area (R & M: 23 councils, ~600k vertices) exceeded the
+      // PostgREST statement timeout. Full fidelity is kept; nothing is simplified.
+      let stageId: string | null = null;
+      for (const [index, polygon] of polygons.entries()){
+        const stageResult: { data: unknown; error: { message: string } | null } = await admin.rpc('stage_org_jurisdiction_part', {
+          p_stage_id: stageId,
+          p_org_id: targetOrgId,
+          p_polygon: polygon
+        });
+        const { data: stageData, error: stageErr } = stageResult;
+        if (stageErr || !stageData) return await failAction(`stage_org_jurisdiction_part failed for '${districtNames[index]}': ${stageErr?.message ?? 'no stage returned'}`);
+        stageId = String(stageData);
+      }
+      const { data: jurAreaData, error: rpcErr } = await admin.rpc('commit_org_jurisdiction_stage', {
+        p_stage_id: stageId,
         p_org_id: targetOrgId,
-        p_polygons: polygons,
+        p_expected_parts: polygons.length,
         p_boundary_source: boundarySources.size === 1 ? [...boundarySources][0] : 'mixed_authoritative_ta',
         p_changed_by: action.approved_by ?? null
       });
-      if (rpcErr) return await failAction(`set_org_jurisdiction_geom failed: ${rpcErr.message}`);
+      if (rpcErr) return await failAction(`commit_org_jurisdiction_stage failed: ${rpcErr.message}`);
       // Phase 1 (item 3a): Authoritative ST_IsEmpty/ST_IsValid executor gate.
       // The RPC now returns the written area in m^2 (via ST_Area(geography)).
       // A returned area of 0 / NULL / non-finite means the geometry is empty or
