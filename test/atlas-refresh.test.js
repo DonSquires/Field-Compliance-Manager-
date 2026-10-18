@@ -944,9 +944,15 @@ test('stale edge compatibility helper retires only marker-owned live CI identiti
 });
 
 test('component extraction recognizes governed Management API SQL RPC calls', () => {
-  const inventory = { rpcs: new Set(['project_historical_patrol_roster']) };
+  const inventory = { rpcs: new Set(['project_historical_patrol_roster', 'stage_patrol_finance_cost_rows']) };
   const edges = collectComponentEdges('scripts/seed-historical-patrol-roster.mjs', `
     const query = \`SELECT public.project_historical_patrol_roster($1);\`;
+    const staged = \`DO $$
+      DECLARE v_stage jsonb;
+      BEGIN
+        v_stage := public.stage_patrol_finance_cost_rows($1, $2, $3, $4, $5);
+      END $$;\`;
   `, inventory);
   assert.ok(edges.some(edge => edge.target_name === 'project_historical_patrol_roster' && edge.edge_kind === 'calls'));
+  assert.ok(edges.some(edge => edge.target_name === 'stage_patrol_finance_cost_rows' && edge.edge_kind === 'calls'));
 });

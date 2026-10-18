@@ -234,7 +234,7 @@ function collectComponentEdges(sourceFile, content, inventory) {
       edges.push({ ...source, target_type: 'rpc', target_name: rpcName, edge_kind: 'calls', evidence_class: 'live-code', source_file: sourceFile, caller_context: 'Supabase RPC call in source' });
     }
   }
-  for (const match of content.matchAll(/\bSELECT\s+public\.([a-zA-Z0-9_]+)\s*\(/gi)) {
+  for (const match of content.matchAll(/(?:\b(?:SELECT|PERFORM|LATERAL)\s+|:=\s*)public\.([a-zA-Z0-9_]+)\s*\(/gi)) {
     if (!inventory || inventory.rpcs.has(match[1])) {
       edges.push({ ...source, target_type: 'rpc', target_name: match[1], edge_kind: 'calls', evidence_class: 'live-code', source_file: sourceFile, caller_context: 'Management API SQL RPC call in source' });
     }
@@ -739,7 +739,7 @@ function collectSourceEdges(rootDir, knownEntities) {
     for (const match of content.matchAll(/\.rpc\(\s*['"]([a-zA-Z_][a-zA-Z0-9_]*)['"]/g)) {
       add(source, 'rpc', match[1], 'calls', file, `.rpc('${match[1]}')`);
     }
-    for (const match of content.matchAll(/\b(?:SELECT|PERFORM|LATERAL)\s+(?:public\.)?"?([a-zA-Z_][a-zA-Z0-9_]*)"?\s*\(/gi)) {
+    for (const match of content.matchAll(/(?:\b(?:SELECT|PERFORM|LATERAL)\s+|:=\s*)(?:public\.)?"?([a-zA-Z_][a-zA-Z0-9_]*)"?\s*\(/gi)) {
       if (knownEntities.rpcs.has(match[1])) add(source, 'rpc', match[1], 'calls', file, `SQL call public.${match[1]}(...)`);
     }
     for (const match of content.matchAll(/\.rpc\(\s*[^,?]*\?\s*['"]([a-zA-Z_][a-zA-Z0-9_]*)['"]\s*:\s*['"]([a-zA-Z_][a-zA-Z0-9_]*)['"]/g)) {
