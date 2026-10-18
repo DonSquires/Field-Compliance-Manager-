@@ -25,6 +25,8 @@ const { buildModelRunRequest, callModelGateway, persistModelArtifact, fetchModel
 const { collectRepositoryContext, fitRepositoryContext } = require('./supabase/functions/_shared/builder-repository-context');
 
 const PROMPT_VERSION = 'agentic-engineer-v4';
+// Consecutive refused identical calls (with nothing edited) before the author escalates or stops early.
+const STUCK_REFUSALS = 4;
 const DEFAULT_LIMITS = Object.freeze({
   maxTurns: Math.max(4, Number(process.env.BOB_BUILDER_AGENT_TURNS || 60)),
   wallBudgetMs: Math.max(5 * 60_000, Number(process.env.BOB_BUILDER_AGENT_BUDGET_MS || 45 * 60_000)),
@@ -290,7 +292,7 @@ function readingMap(transcript) {
   return {
     files_read: [...files.entries()].slice(0, 40).map(([file, ranges]) => ({ path: file, ranges: ranges.slice(0, 30) })),
     files_outlined: outlines.slice(0, 20),
-    searches: searches.slice(0, 40),
+    searches: [...new Set(searches)].slice(0, 40),
   };
 }
 
@@ -923,6 +925,9 @@ async function runAgenticEngineer({
   const usage = {};
   const signatures = new Map();
   let parseFailures = 0;
+  // Consecutive refused repeat calls. A small model can spend a whole budget re-issuing one refused
+  // search (live job 0c388688: qwen2.5-coder:7b, 59 of 60 turns, zero reads or edits, twice).
+  let refusedStreak = 0;
   let outcome = null;
   let turns = 0;
   let lessons = [];
@@ -1039,6 +1044,7 @@ async function runAgenticEngineer({
     signatures.set(signature, seen);
     let result;
     if (seen > 2 && !['run', 'git_diff'].includes(call.tool)) {
+      refusedStreak++;
       result = { error: 'identical call already made twice; use the earlier result or take a different step' };
     } else if (typeof tools[call.tool] === 'function' && !call.tool.startsWith('__')) {
       try {
@@ -1049,7 +1055,21 @@ async function runAgenticEngineer({
     } else {
       result = { error: `unknown tool ${call.tool}` };
     }
+    if (!result?.error || !/^identical call already made/.test(result.error)) refusedStreak = 0;
     log({ turn: turns, result: typeof result?.error === 'string' ? { error: result.error.slice(0, 500) } : { ok: true } });
+    if (refusedStreak >= STUCK_REFUSALS && !tools.__changedFiles().length) {
+      const reason = `stuck: ${refusedStreak} identical ${call.tool} calls refused in a row`;
+      if (escalate(reason)) {
+        refusedStreak = 0;
+        messages.push({ role: 'user', content: JSON.stringify({ tool_result: result, escalated: 'The previous model looped on one refused call. Use the results already above; read the one range you need and make the first edit now.' }) });
+        continue;
+      }
+      // Nowhere stronger in this run: stop now with the reading map so the coordinator's next attempt
+      // (and its outsourced escalation) starts after a few wasted turns, not sixty.
+      log({ turn: turns, stuck_loop: true, reason });
+      outcome = { ok: false, error: `turn budget exhausted: ${reason}`, budget_exhausted: true };
+      break;
+    }
     const remaining = limits.maxTurns - turns;
     const edited = tools.__changedFiles().length > 0;
     const budgetNote = remaining === limits.maxTurns - Math.ceil(limits.maxTurns / 3) && !edited
