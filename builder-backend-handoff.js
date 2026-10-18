@@ -3,6 +3,7 @@ const os = require('node:os');
 const path = require('node:path');
 const { executeWorker } = require('./worker-executor');
 const { classifyMissingEvidence, classifyVerificationFailure } = require('./builder-verification-outcome');
+const { accountVerifierRecoveries } = require('./builder-verifier-recovery');
 const {
   verifyRepositorySnapshot,
   downloadVerifiedArtifact,
@@ -179,6 +180,7 @@ async function runBackendHandoff({
           ? `Backend verifier infrastructure failure (${infrastructure.reason}); the same patch is re-verified`
           : 'Backend patch verification failed'
     );
+    if (infrastructure.infrastructure || infrastructure.baseline) await accountVerifierRecoveries(supabase, job.id);
     return {
       success: succeeded,
       job: completedJob,

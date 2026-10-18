@@ -1053,7 +1053,7 @@ async function retireOldBuilderWorkspaces() {
     if (error) throw new Error(`workspace retention could not list terminal jobs: ${error.message}`);
     for (const candidate of jobs || []) {
       const [current, models, workers, approvals] = await Promise.all([
-        builderSupabase.from('builder_jobs').select('id,status,updated_at,target_sha,workspace_branch,workspace_published_head_sha').eq('id', candidate.id).single(),
+        builderSupabase.from('builder_jobs').select('id,organization_id,status,updated_at,target_sha,workspace_branch,workspace_published_head_sha').eq('id', candidate.id).single(),
         builderSupabase.from('builder_model_runs').select('id').eq('job_id', candidate.id).in('status', ['pending', 'queued', 'running']).limit(1),
         builderSupabase.from('builder_worker_runs').select('id').eq('job_id', candidate.id).in('status', ['pending', 'queued', 'running']).limit(1),
         builderSupabase.from('builder_approvals').select('id').eq('job_id', candidate.id).eq('status', 'pending').limit(1),

@@ -80,7 +80,7 @@ test('frontend orchestration never exceeds the worker attempt ceiling', async ()
   assert.equal(result.success, false);
   assert.equal(result.attempts, MAX_FRONTEND_ATTEMPTS);
   assert.equal(verifications, 3);
-  assert.equal(repairs, 3);
+  assert.equal(repairs, 2, 'do not author a final patch that will never be verified');
   assert.equal(result.phase, 'repair_limit');
 });
 
@@ -125,7 +125,7 @@ test('a verifier infrastructure failure re-runs the same patch once instead of a
   assert.equal(result.success, true);
   assert.deepEqual(calls, ['generate', 'verify:patch-1', 'verify:patch-1']);
 
-  // A second infrastructure failure in a row is treated as a real failure (repair path), not an endless loop.
+  // Repeated infrastructure failure parks the saved patch; it never becomes a code repair.
   const calls2 = [];
   await runFrontendImplementation({
     ...base,
@@ -134,7 +134,7 @@ test('a verifier infrastructure failure re-runs the same patch once instead of a
     reloadStep: async () => ({ ...base.step, status: 'failed', retryable: true }),
     repair: async () => { calls2.push('repair'); return { ok: true, patch_artifact: { id: 'patch-2' } }; }
   });
-  assert.deepEqual(calls2.slice(0, 3), ['verify:patch-1', 'verify:patch-1', 'repair']);
+  assert.deepEqual(calls2, ['verify:patch-1', 'verify:patch-1']);
 });
 
 test('a resumed step verifies the patch the lost verifier was checking instead of authoring again', async () => {
@@ -159,13 +159,12 @@ test('a red baseline parks the step with the reason instead of sending the autho
     supabase: { rpc: async (name, args) => { rpcs.push({ name, args }); return { data: {}, error: null }; } },
     generate: async () => ({ ok: true, patch_artifact: { id: 'patch-1' } }),
     handoff: async () => ({ success: false, worker_run_id: 'run-1', artifacts: [{ id: 'log-1' }], job: { status: 'implementation_pending' }, baseline_failure: true, baseline_reason: 'npm run test also fails on the pinned commit without this patch: src/pages/FinanceBureauPage.guard.test.ts; not caused by this change' }),
-    reloadStep: async () => ({ ...base.step, status: 'failed', retryable: true, attempt_count: 1 }),
+    reloadStep: async () => ({ ...base.step, status: 'failed', retryable: false, attempt_count: 1 }),
     repair: async () => { calls.push('repair'); return { ok: true, patch_artifact: { id: 'patch-2' } }; }
   });
   assert.equal(result.success, false);
   assert.equal(result.phase, 'baseline');
   assert.deepEqual(calls, [], 'no author repair for someone else\'s red main');
-  assert.equal(rpcs[0].name, 'builder_record_generation_failure');
-  assert.equal(rpcs[0].args._retryable, false);
-  assert.match(rpcs[0].args._reason, /^baseline: repository red at the pinned commit: npm run test also fails/);
+  assert.equal(rpcs.length, 0, 'durable baseline accounting already parked the step; do not charge another generation failure');
+  assert.match(result.error, /^npm run test also fails/);
 });
