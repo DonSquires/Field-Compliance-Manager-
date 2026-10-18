@@ -137,7 +137,9 @@ describe('governed CRM accounts', () => {
     expect(page).toContain('consolidatedCommercial: (consolidatedCommercial as ConsolidatedCommercialRow[]) ?? []');
     expect(page).toContain('Group commercial oversight');
     expect(page).toContain('row.source_organization_name');
-    expect(page).toContain('Branch-owned commercial activity, consolidated for parent oversight.');
+    expect(page).toContain('Provider and branch-owned commercial activity for the last 30 days.');
+    expect(page).toContain('row.service_cost_total');
+    expect(page).toContain('row.service_cost_count');
   });
 
   it('loads client portfolios through their accountable operating provider branch', () => {

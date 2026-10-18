@@ -13,6 +13,8 @@ describe('Finance operations dashboard', () => {
       expect(component).toContain(".eq('organization_id', profile.organizationId)");
     }
     expect(component).not.toMatch(/\.from\(['"]finance_[^'"].*['"]\)\.insert/);
+    expect(component).toContain("supabase.rpc('get_finance_pl_period_summary'");
+    expect(component).toContain(".eq('pl_period_id', latestPeriod.id)");
   });
 
   it('exposes P&L, GST, budget, and reconciliation signals with safe states', () => {
@@ -22,6 +24,8 @@ describe('Finance operations dashboard', () => {
     expect(component).toContain('Payments to sort');
     expect(component).toContain('Finance dashboard unavailable');
     expect(component).toContain('No money check configured');
+    expect(component).toContain('Costs recorded');
+    expect(component).toContain('Current draft result');
   });
 
   it('is integrated into the existing Finance Bureau page', () => {
