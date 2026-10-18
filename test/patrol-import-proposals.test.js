@@ -43,18 +43,18 @@ function row(overrides = {}) {
   };
 }
 
-test('stages separate work-order and finance proposals without treating cost evidence as complete finance data', async () => {
+test('stages work-order proposals while finance evidence uses the aggregate review lane', async () => {
   const { buildPatrolImportProposals } = await loadModule();
   const proposals = buildPatrolImportProposals(row());
 
-  assert.deepEqual(proposals.map((proposal) => proposal.target_type), ['workshop_work_order', 'finance_service_cost']);
+  assert.deepEqual(proposals.map((proposal) => proposal.target_type), ['workshop_work_order']);
   assert.equal(proposals[0].proposed_payload.kind, 'maintenance');
   assert.equal(proposals[0].proposed_payload.work_subject_code_id, '55555555-5555-4555-8555-555555555555');
-  assert.equal(proposals[1].proposed_payload.requires_cost_type_mapping, true);
-  assert.equal(proposals[1].confidence, null);
-  assert.equal(proposals[1].source_values.patroller_raw, 'Reviewed Officer');
-  assert.equal(proposals[1].source_values.work_subject_code, 'electronic_lock');
-  assert.equal(proposals[1].source_values.comments, 'Electronic lock would not open.');
+  assert.equal(proposals[0].confidence, null);
+  assert.equal(proposals[0].source_values.patroller_raw, 'Reviewed Officer');
+  assert.equal(proposals[0].source_values.work_subject_code, 'electronic_lock');
+  assert.equal(proposals[0].source_values.comments, 'Electronic lock would not open.');
+  assert.equal(proposals[0].source_values.job_cost, 85);
 });
 
 test('does not propose maintenance work for routine rows', async () => {
@@ -63,7 +63,7 @@ test('does not propose maintenance work for routine rows', async () => {
   assert.deepEqual(buildPatrolImportProposals(input), []);
 });
 
-test('keeps cost-only evidence in review even when no work subject or place is resolved', async () => {
+test('does not create legacy per-row finance proposals from cost-only evidence', async () => {
   const { buildPatrolImportProposals } = await loadModule();
   const input = row({
     zoneId: null,
@@ -76,8 +76,5 @@ test('keeps cost-only evidence in review even when no work subject or place is r
       total_cost: null,
     },
   });
-  const proposals = buildPatrolImportProposals(input);
-  assert.equal(proposals.length, 1);
-  assert.equal(proposals[0].target_type, 'finance_service_cost');
-  assert.equal(proposals[0].source_values.travel_cost, 12.5);
+  assert.deepEqual(buildPatrolImportProposals(input), []);
 });

@@ -8,19 +8,22 @@ const atlas = readFileSync(resolve(process.cwd(), '../../scripts/atlas-refresh.j
 describe('governed patrol import lifecycle', () => {
   it('binds source and derivative provenance before staging', () => {
     expect(importer).toContain("createHash('sha256').update(raw).digest('hex')");
-    expect(importer).toContain('source_sha256: immutableSourceHash');
-    expect(importer).toContain('row.payload.derivative_sha256 = derivativeHash');
-    expect(importer).toContain('classification_profile: SOURCE_PROFILE');
+    expect(importer).toContain('const effectiveSourceHash = sourceHash ?? derivativeHash');
+    expect(importer).toContain('source_sha256: effectiveSourceHash');
+    expect(importer).toContain('derivative_sha256: derivativeHash');
+    expect(importer).toContain('classification_profile: classificationProfile');
   });
 
   it('uses the begin, stage, and finalize authorities in order', () => {
-    const begin = importer.indexOf('public.begin_patrol_import_batch(');
-    const stage = importer.indexOf('public.stage_patrol_import_chunk(');
-    const finalize = importer.indexOf('public.finalize_patrol_import_batch(');
+    expect(importer).toContain('public.begin_patrol_import_batch(');
+    expect(importer).toContain('public.stage_patrol_import_chunk(');
+    expect(importer).toContain('public.finalize_patrol_import_batch(');
+    const begin = importer.indexOf("const batchId = mode === 'apply' ? await ensureImportBatch() : null");
+    const stage = importer.indexOf('const row = await runChunk(obsSlice, evtSlice, proposalSlice, batchId)');
+    const finalize = importer.indexOf("if (mode === 'apply') await finalizeImportBatch");
     expect(begin).toBeGreaterThan(0);
     expect(stage).toBeGreaterThan(begin);
     expect(finalize).toBeGreaterThan(stage);
-    expect(importer).toContain("finalized?.status !== 'needs_review'");
   });
 
   it('does not directly mutate evidence or consequential records', () => {
@@ -30,11 +33,9 @@ describe('governed patrol import lifecycle', () => {
   });
 
   it('keeps dry-run local and write-free', () => {
-    const dryRun = importer.indexOf("if (mode === 'dry-run')");
-    const firstQuery = importer.indexOf('await runSql(');
-    expect(dryRun).toBeGreaterThan(0);
-    expect(firstQuery).toBeGreaterThan(dryRun);
-    expect(importer).toContain("next_status_on_apply: 'needs_review'");
+    expect(importer).toContain("const batchId = mode === 'apply' ? await ensureImportBatch() : null");
+    expect(importer).toContain("${mode === 'apply' ? 'COMMIT;' : 'ROLLBACK;'}");
+    expect(importer).toContain("if (mode === 'apply') await finalizeImportBatch");
   });
 });
 

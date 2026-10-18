@@ -244,6 +244,7 @@ const FileSystemPage: React.FC = () => {
   const [rowProposals, setRowProposals] = useState<FileImportRowProposal[]>([]);
   const [rowProposalReasons, setRowProposalReasons] = useState<Record<string, string>>({});
   const [reviewingRowProposal, setReviewingRowProposal] = useState<string | null>(null);
+  const [financeImportAction, setFinanceImportAction] = useState<'mappings' | 'review' | 'apply' | null>(null);
   const [uploadingFile, setUploadingFile] = useState(false);
   const [generatedOutputs, setGeneratedOutputs] = useState<GeneratedOutputRow[]>([]);
   const [noticeArtifacts, setNoticeArtifacts] = useState<NoticeArtifactRow[]>([]);
@@ -616,12 +617,62 @@ const FileSystemPage: React.FC = () => {
     if (proposalError) setPreviewError(proposalError.message);
     else {
       setRowProposals((current) => current.map((item) => item.id === proposal.id ? data as FileImportRowProposal : item));
-      setNotice(decision === 'approved' ? 'Row proposal approved. The governed target outcome and audit receipt are now recorded.' : 'Row proposal rejected. No proposed target was applied.');
+      setNotice(decision === 'approved' ? 'Row proposal approved for the later governed apply step.' : 'Row proposal rejected. No proposed target was applied.');
     }
     setReviewingRowProposal(null);
   };
 
-  const rowProposalReview = selectedBatch ? <section className="file-system-row-proposals" aria-label="Consequential row proposal review"><div><span>Row proposals</span><strong>Review consequential targets one row at a time.</strong><small>Approval may create or update the stated target. Compare source values with the proposed payload before deciding.</small></div>{rowProposals.length === 0 ? <p className="file-system-muted">No consequential row proposals were staged for this batch.</p> : rowProposals.map((proposal) => <article key={proposal.id}><header><div><strong>{proposal.target_type.replaceAll('_', ' ')}</strong><small>Source row {proposal.source_row_number ?? 'not recorded'} - {proposal.source_record_key}</small></div><span>{proposal.status}</span></header><div className="file-system-row-proposal-values"><div><span>Source values</span><pre>{JSON.stringify(proposal.source_values, null, 2)}</pre></div><div><span>Proposed target</span><pre>{JSON.stringify(proposal.proposed_payload, null, 2)}</pre></div></div><small>Confidence: {proposal.confidence === null ? 'not scored' : `${Math.round(proposal.confidence * 100)}%`}{proposal.applied_target_id ? ` - Applied target ${proposal.applied_target_id}` : ''}</small>{proposal.status === 'proposed' ? <div className="file-system-row-proposal-decision"><label><span>Decision reason</span><textarea rows={2} value={rowProposalReasons[proposal.id] ?? ''} onChange={(event) => setRowProposalReasons((current) => ({ ...current, [proposal.id]: event.target.value }))} placeholder="What source evidence supports this decision?" /></label><div><button type="button" disabled={reviewingRowProposal !== null} onClick={() => void reviewRowProposal(proposal, 'approved')}>{reviewingRowProposal === proposal.id ? 'Reviewing' : 'Approve and apply'}</button><button type="button" disabled={reviewingRowProposal !== null} onClick={() => void reviewRowProposal(proposal, 'rejected')}>Reject proposal</button></div></div> : <p>Decision reason: {proposal.review_reason ?? 'Not recorded'}</p>}</article>)}</section> : null;
+  const confirmProfileMappings = async () => {
+    if (!selectedBatch || !reviewReason.trim()) { setPreviewError('A review reason is required to confirm profile mappings.'); return; }
+    setFinanceImportAction('mappings'); setPreviewError(null);
+    const { error: mappingError } = await supabase.rpc('confirm_file_import_profile_mappings', { p_batch_id: selectedBatch.id, p_reason: reviewReason.trim() });
+    if (mappingError) setPreviewError(mappingError.message);
+    else {
+      setMappingReviews((current) => current.map((review) => ({ ...review, decision: 'confirmed', review_reason: reviewReason.trim() })));
+      setNotice('Every exact source-profile mapping was confirmed. No business records were changed.');
+    }
+    setFinanceImportAction(null);
+  };
+
+  const reviewFinanceProposals = async () => {
+    if (!selectedBatch || !reviewReason.trim()) { setPreviewError('A review reason is required to approve the reconciled finance proposal summary.'); return; }
+    const proposals = rowProposals.filter((proposal) => proposal.target_type === 'finance_service_cost' && proposal.status === 'proposed');
+    const expectedTotal = proposals.reduce((total, proposal) => total + Number(proposal.proposed_payload.unit_cost ?? 0), 0);
+    setFinanceImportAction('review'); setPreviewError(null);
+    const { error: proposalError } = await supabase.rpc('review_file_import_finance_proposals', {
+      p_batch_id: selectedBatch.id,
+      p_expected_proposal_count: proposals.length,
+      p_expected_total: expectedTotal,
+      p_reason: reviewReason.trim(),
+    });
+    if (proposalError) setPreviewError(proposalError.message);
+    else {
+      setRowProposals((current) => current.map((proposal) => proposal.target_type === 'finance_service_cost' && proposal.status === 'proposed'
+        ? { ...proposal, status: 'approved', review_reason: reviewReason.trim(), reviewed_at: new Date().toISOString() }
+        : proposal));
+      setNotice(`${proposals.length} reconciled finance proposals approved for the later batch apply step. No finance costs were created.`);
+    }
+    setFinanceImportAction(null);
+  };
+
+  const applyFinanceBatch = async () => {
+    if (!selectedBatch) return;
+    setFinanceImportAction('apply'); setPreviewError(null);
+    const { data, error: applyError } = await supabase.rpc('apply_file_import_finance_batch', { p_batch_id: selectedBatch.id });
+    if (applyError) setPreviewError(applyError.message);
+    else {
+      const receipt = data as { applied?: number; existing?: number; periods_created?: number; total?: number };
+      setImportBatches((current) => current.map((batch) => batch.id === selectedBatch.id ? { ...batch, status: 'applied' } : batch));
+      setRowProposals((current) => current.map((proposal) => proposal.status === 'approved' ? { ...proposal, status: 'applied' } : proposal));
+      setNotice(`Finance batch applied: ${receipt.applied ?? 0} new cost lines, ${receipt.existing ?? 0} existing, ${receipt.periods_created ?? 0} monthly P&L periods created, total ${Number(receipt.total ?? 0).toLocaleString('en-NZ', { style: 'currency', currency: 'NZD' })}.`);
+    }
+    setFinanceImportAction(null);
+  };
+
+  const isFinanceBatch = rowProposals.length > 0 && rowProposals.every((proposal) => proposal.target_type === 'finance_service_cost');
+  const proposedFinance = rowProposals.filter((proposal) => proposal.target_type === 'finance_service_cost' && proposal.status === 'proposed');
+  const proposedFinanceTotal = proposedFinance.reduce((total, proposal) => total + Number(proposal.proposed_payload.unit_cost ?? 0), 0);
+  const rowProposalReview = selectedBatch ? <section className="file-system-row-proposals" aria-label="Consequential row proposal review"><div><span>Row proposals</span><strong>{isFinanceBatch ? 'Review the reconciled monthly cost summary.' : 'Review consequential targets one row at a time.'}</strong><small>Approval records a decision only. Targets are created later, after the complete batch is approved.</small></div>{rowProposals.length === 0 ? <p className="file-system-muted">No consequential row proposals were staged for this batch.</p> : <>{isFinanceBatch && <div className="file-system-import-facts"><div><small>Proposals</small><strong>{rowProposals.length}</strong></div><div><small>Awaiting review</small><strong>{proposedFinance.length}</strong></div><div><small>Awaiting total</small><strong>{proposedFinanceTotal.toLocaleString('en-NZ', { style: 'currency', currency: 'NZD' })}</strong></div></div>}{rowProposals.map((proposal) => <article key={proposal.id}><header><div><strong>{proposal.target_type.replaceAll('_', ' ')}</strong><small>Source row {proposal.source_row_number ?? 'aggregate'} - {proposal.source_record_key}</small></div><span>{proposal.status}</span></header><div className="file-system-row-proposal-values"><div><span>Source values</span><pre>{JSON.stringify(proposal.source_values, null, 2)}</pre></div><div><span>Proposed target</span><pre>{JSON.stringify(proposal.proposed_payload, null, 2)}</pre></div></div><small>Confidence: {proposal.confidence === null ? 'not scored' : `${Math.round(proposal.confidence * 100)}%`}{proposal.applied_target_id ? ` - Applied target ${proposal.applied_target_id}` : ''}</small>{proposal.status === 'proposed' && !isFinanceBatch ? <div className="file-system-row-proposal-decision"><label><span>Decision reason</span><textarea rows={2} value={rowProposalReasons[proposal.id] ?? ''} onChange={(event) => setRowProposalReasons((current) => ({ ...current, [proposal.id]: event.target.value }))} placeholder="What source evidence supports this decision?" /></label><div><button type="button" disabled={reviewingRowProposal !== null} onClick={() => void reviewRowProposal(proposal, 'approved')}>{reviewingRowProposal === proposal.id ? 'Reviewing' : 'Approve proposal'}</button><button type="button" disabled={reviewingRowProposal !== null} onClick={() => void reviewRowProposal(proposal, 'rejected')}>Reject proposal</button></div></div> : proposal.status !== 'proposed' ? <p>Decision reason: {proposal.review_reason ?? 'Not recorded'}</p> : null}</article>)}{isFinanceBatch && selectedBatch.status === 'needs_review' && <div className="file-system-row-proposal-decision"><button type="button" onClick={() => void confirmProfileMappings()} disabled={financeImportAction !== null || mappingReviews.every((review) => review.decision === 'confirmed')}>{financeImportAction === 'mappings' ? 'Confirming mappings' : 'Confirm exact profile mappings'}</button><button type="button" onClick={() => void reviewFinanceProposals()} disabled={financeImportAction !== null || proposedFinance.length === 0 || mappingReviews.some((review) => review.decision !== 'confirmed')}>{financeImportAction === 'review' ? 'Recording review' : 'Approve reconciled finance summary'}</button></div>}{isFinanceBatch && selectedBatch.status === 'approved' && <div className="file-system-row-proposal-decision"><button type="button" onClick={() => void applyFinanceBatch()} disabled={financeImportAction !== null}>{financeImportAction === 'apply' ? 'Applying approved costs' : 'Apply approved finance batch'}</button></div>}</>}</section> : null;
 
   return <ShellLayout shell="admin" className="file-system-shell">
     <div className="file-system-page">
