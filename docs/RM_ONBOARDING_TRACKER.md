@@ -16,7 +16,7 @@ actually work with a working org and its data and operations." Extended-scope,
 multi-session task — take as many turns as needed; real, verified progress each
 turn beats false completeness.
 
-## PATROL WORKBOOK FINANCE BACKFILL (2026-10-18) — MIGRATION LIVE, COSTS NOT PROMOTED
+## PATROL WORKBOOK FINANCE BACKFILL (2026-10-18) — APPLIED AND LIVE-VERIFIED
 
 - Audited the read-only R&M patrol-log corpus at `Patrol Log Entries/All Log
   Spreadsheets`: 48 workbooks, 175 worksheets, and 938,094 formula cells. The
@@ -43,49 +43,50 @@ turn beats false completeness.
 - Removed the former one-proposal-per-row finance path from the operational
   patrol importer. Workshop candidates still use the existing proposal lane;
   all patrol finance now has one authoritative aggregate review/apply path.
-- Exercised a real OneFortyOne 2025 row through migration creation, source-row
-  staging, evidence verification, exact mapping confirmation, aggregate
-  review, batch approval, P&L period creation, finance insertion, and applied
-  receipts in one live transaction. The result reached `applied`, then the
-  transaction was rolled back. PR #82 subsequently merged at `222ecc03`;
-  migration `20261018014551` is now live and `supabase/schema.sql` has been
-  regenerated from the live catalog. No finance source row or patrol cost was
-  promoted.
-- Local previews now parse all 16 financially relevant sheets in the active
-  workbooks: 39,729 source rows, 34,251 positive cost components, 30,037
-  locally eligible components, 2,214 quarantined components, and
-  NZ$999,893.74 locally eligible before server-side agreement, place, evidence,
-  replay, and period checks. Formula errors, invalid dates, displayed-total
-  mismatches, duplicate external references, and unresolved places remain
-  quarantined rather than guessed.
-- The first full OneFortyOne 2025 server preview exposed an HTTP 413 because
-  the CLI put every logical chunk into one management request. The corrected
-  tool now sends bounded 150-row transactions and derives receipts only after
-  staged writes are visible. A 44-request rollback preview completed for 6,589
-  cost components with no persisted batch or finance record. The server
-  quarantined 6,520 locally eligible components as
-  `operational_evidence_not_found`; the remaining 69 retained their local
-  quarantine reasons. This is a real evidence-linkage gap, not permission to
-  weaken validation or promote costs without their operational records.
-- Remaining rollout gates are explicit: Wrattens lacks an active patrol module
-  on its agreement; server rollback previews must reconcile every active sheet
-  against operational evidence; archive/restored overlap must be classified;
-  and a human must accept the redacted aggregate and quarantine report before
-  any review batch is persisted or applied.
-- Validation completed so far: focused Node tests pass, Python and Node entry
-  points compile, the web production build passes, the migration compiles in a
-  rolled-back live transaction, and the real-row rolled-back lifecycle passes.
-  Live readback confirms one migration-ledger row, zero patrol finance source
-  rows, zero `patrol_log` service costs, and preservation of the existing
-  `dispatch_job` cost-source type. For the newly added objects, database
-  advisors report only the expected authenticated `SECURITY DEFINER` warnings
-  for the reviewed admin RPCs.
-- Atlas was refreshed from exact merge SHA `222ecc03`. The refresh exposed and
-  corrected a generator blind spot for PL/pgSQL assignment-style RPC calls
-  (`v_result := public.rpc(...)`), so the local staging CLI is now registered
-  as a real caller instead of leaving its RPC falsely unwired. Production cost
-  promotion remains deliberately incomplete until the review gates above are
-  satisfied.
+- The reviewed active set is 15 sheets: 39,557 workbook rows and 32,159
+  positive cost-component receipts. Local validation marked 29,956 components
+  eligible (NZ$994,597.00) and quarantined 2,203. Live contract, place, and
+  evidence revalidation added 924 correct quarantines: 506 lacked a matching
+  operational-evidence record and 418 fell outside contracted places. That
+  explains the full NZ$66,729.73 difference between local and server totals;
+  no value was silently dropped or rounded away.
+- Every active sheet completed bounded rollback preview before persistence.
+  The server accepted 29,032 component receipts totalling NZ$927,867.27 and
+  retained 3,127 quarantined receipts totalling NZ$185,000.53. Quarantine
+  reasons are explicit: 2,120 unresolved contracted places, 506 missing
+  operational evidence, 418 outside contracted places, 48 duplicate external
+  references, 24 displayed-total mismatches, and 11 invalid service dates.
+- After owner review of the redacted aggregate and quarantine report, all 15
+  batches passed exact profile confirmation, aggregate finance review, batch
+  approval, and explicit final apply. Live readback proves 501 unique
+  `patrol_log` service-cost lines totalling NZ$927,867.27, 60 draft P&L periods
+  created for covered months, 29,032 linked applied receipts, zero unapplied
+  proposals, zero unlinked applied receipts, and zero duplicate source
+  references. Quarantined receipts remain untouched and no cost value was
+  written into client-owned observations or location events.
+- The rollout exposed and closed four real tool/profile defects rather than
+  bypassing them: repeated unnamed spreadsheet columns (#89), persistent batch
+  rows passed as an invalid scalar subquery (#92), blank columns counted as
+  required mapping reviews (#94), and the reviewed `Day of Week` header missing
+  from the data-defined profile (#96). Each repair has a behavioural regression
+  and was merged before the affected workflow continued. Live schema snapshots
+  followed in #90, #95, and #98.
+- Wrattens had an operational agreement but no enabled patrol module. The owner
+  confirmed that its patrol workbooks are evidence of service scope; the module
+  was enabled through `manage_crm_agreement_setup`, producing the normal audit
+  receipt. All three Wrattens sheets then passed rollback preview and governed
+  finance application without weakening agreement validation.
+- Invoice-folder patrol extracts, archive copies, restored files, and the
+  excluded MPC workbook were not promoted. Invoice copies remain reconciliation
+  evidence only; MPC remains excluded because no exact client agreement and
+  reviewed place map exist. Whole-file hashes remain version provenance, never
+  economic identity.
+- The final released schema is regenerated from the live catalog. Atlas was
+  refreshed from exact merge SHA `00630483040b14bd3b022b97d96a85991197b17e`:
+  the first marker-owned refresh retired one stale row and the immediate second
+  refresh was idempotent (zero upserts and zero retirements). The patrol import
+  RPC chain remains present and wired; `exercised` is not claimed because that
+  Atlas field is not populated live.
 
 ## INVOICE AND PRICE-BOOK CORPUS (2026-10-18) — INVENTORIED, NOT PROMOTED
 
