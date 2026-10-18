@@ -48,9 +48,32 @@ else
     echo \"release ready: \$(git -C /srv/fcm/releases/$SHA log --oneline -1)\""
 fi
 
+# Recreating the control plane kills the verifier containers and agentic turns it is running ("control
+# plane restarted before the verifier reported", 10 frontend attempts in October 2026). Wait for Bob's
+# in-flight work to finish; BOB_DEPLOY_FORCE=1 overrides for an emergency fix.
+drain_control_plane() {
+  local wait_s="${BOB_DEPLOY_DRAIN_SECONDS:-1200}"
+  [[ "${BOB_DEPLOY_FORCE:-0}" == "1" ]] && { echo "drain skipped (BOB_DEPLOY_FORCE=1)"; return 0; }
+  "${SSH[@]}" "set -euo pipefail
+    set -a; . /var/lib/bob/control-plane.env; set +a
+    busy() {
+      local w m
+      w=\$(curl -sf \"\${SUPABASE_URL%/}/rest/v1/builder_worker_runs?select=id&status=in.(running,queued)&created_at=gt.\$(date -u -d '-2 hours' +%Y-%m-%dT%H:%M:%SZ)&limit=1\" -H \"apikey: \$SUPABASE_SERVICE_ROLE_KEY\" -H \"Authorization: Bearer \$SUPABASE_SERVICE_ROLE_KEY\" | tr -d ' \\n')
+      m=\$(curl -sf \"\${SUPABASE_URL%/}/rest/v1/builder_model_runs?select=id&status=eq.running&created_at=gt.\$(date -u -d '-2 hours' +%Y-%m-%dT%H:%M:%SZ)&limit=1\" -H \"apikey: \$SUPABASE_SERVICE_ROLE_KEY\" -H \"Authorization: Bearer \$SUPABASE_SERVICE_ROLE_KEY\" | tr -d ' \\n')
+      [[ \"\$w\" != '[]' || \"\$m\" != '[]' ]]
+    }
+    deadline=\$(( \$(date +%s) + $wait_s ))
+    while busy; do
+      if (( \$(date +%s) >= deadline )); then echo 'refusing: Bob still has a verifier or model run in flight; retry later or set BOB_DEPLOY_FORCE=1' >&2; exit 1; fi
+      echo 'waiting: Bob has a verifier or model run in flight'; sleep 30
+    done
+    echo 'drained: no Bob verifier or model run in flight'"
+}
+
 for target in "$@"; do
   case "$target" in
     control-plane)
+      drain_control_plane
       "${SSH[@]}" "set -euo pipefail; cd /srv/fcm/releases/$SHA
         DOCKER_GID=999 docker compose -f deploy/bob-control-plane/docker-compose.yml build -q bob-control-plane
         DOCKER_GID=999 docker compose -f deploy/bob-control-plane/docker-compose.yml rm -sf bob-control-plane >/dev/null

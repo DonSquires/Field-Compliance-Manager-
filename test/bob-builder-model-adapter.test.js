@@ -407,3 +407,25 @@ test('Ollama Cloud sits after in-house compute and before paid OpenAI', () => {
   assert.ok(chain.indexOf('ollama_cloud') > chain.indexOf('ollama'));
   assert.ok(chain.indexOf('ollama_cloud') < chain.indexOf('openai'));
 });
+
+test('selectProviders applies the author size gate per provider without touching OpenAI', () => {
+  const { selectProviders, modelSizeB } = require('../supabase/functions/_shared/builder-model-adapter');
+  assert.equal(modelSizeB('qwen2.5-coder:7b'), 7);
+  assert.equal(modelSizeB('gpt-oss:120b'), 120);
+  assert.equal(modelSizeB('nemotron-3-super'), null);
+  const health = {
+    gpu_workstation: { configured: true, healthy: true, models: ['qwen2.5-coder:7b', 'qwen2.5-coder:14b', 'qwen3:8b'], installed: ['qwen2.5-coder:7b', 'qwen2.5-coder:14b'], ready_model: 'qwen2.5-coder:7b' },
+    ollama: { configured: true, healthy: true, models: ['qwen2.5-coder:7b', 'llama3.1:8b'], installed: ['qwen2.5-coder:7b', 'llama3.1:8b'], ready_model: 'qwen2.5-coder:7b' },
+    ollama_cloud: { configured: true, healthy: true, models: ['nemotron-3-super', 'gpt-oss:20b'], installed: ['nemotron-3-super'], ready_model: 'nemotron-3-super' },
+    openai: { configured: true, healthy: true, models: ['gpt-5.4-mini'], ready_model: 'gpt-5.4-mini' },
+  };
+  const request = { chain: ['gpu_workstation', 'ollama', 'ollama_cloud', 'openai'] };
+  assert.deepEqual(selectProviders(request, { health, minModelB: 14 }), [
+    { provider: 'gpu_workstation', model: 'qwen2.5-coder:14b' },
+    { provider: 'ollama_cloud', model: 'nemotron-3-super' },
+    { provider: 'openai', model: 'gpt-5.4-mini' },
+  ]);
+  assert.equal(selectProviders(request, { health })[0].model, 'qwen2.5-coder:7b', 'no gate unless asked');
+  const exhausted = { ...health, openai: { configured: true, healthy: false, unavailable_reason: 'quota_exhausted', models: ['gpt-5.4-mini'], ready_model: null } };
+  assert.ok(!selectProviders(request, { health: exhausted }).some((candidate) => candidate.provider === 'openai'));
+});
