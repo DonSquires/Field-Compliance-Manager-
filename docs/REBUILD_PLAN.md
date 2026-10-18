@@ -34,6 +34,13 @@ Run next step still advances only one governed action. Acceptance and
 already-running receipts are not completion. Preflight/execution failures
 remain recorded, and approval/release boundaries remain unchanged.
 
+Builder activity truth 2026-10-18: model-session heartbeats (`updated_at`)
+and the model run's step ID inform freshness and current activity even before
+the implementation step is claimed. A model heartbeat proves activity, not
+a changed-file manifest, verified patch or completion. Monitor-created jobs
+can be driving without a human requester; next-action guidance uses scheduler
+state and recorded execution rather than treating that missing requester as idle.
+
 Implementation worktrees validate the requested commit object and their own
 clean, exact checkout, not the mutable shared clone's HEAD. Moving the shared
 checkout for another job must not invalidate a pinned task. Model exploration

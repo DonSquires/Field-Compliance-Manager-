@@ -56,6 +56,29 @@ describe('model failure and throughput evidence', () => {
 });
 
 describe('deriveLiveActivity', () => {
+  it('uses the model heartbeat and step while the job still names completed design work', () => {
+    const evidence = snapshot({
+      steps: snapshot().steps.map(step => step.id === 'b' ? { ...step, status: 'pending', started_at: null } : step),
+      modelRuns: [{
+        id: 'model', step_id: 'b', provider: 'ollama', model_name: 'qwen2.5-coder:7b',
+        status: 'running', started_at: iso(15 * 60_000), created_at: iso(15 * 60_000), updated_at: iso(30_000),
+        completed_at: null, input_tokens: null, output_tokens: null, total_tokens: null, turns: 4, phase: 'authoring',
+      }],
+    });
+    const staleJob = job({ current_step_name: 'product_analysis', updated_at: iso(15 * 60_000) });
+    const live = deriveLiveActivity(staleJob, evidence, now);
+    expect(live.tone).toBe('working');
+    expect(live.stepLabel).toBe('frontend implementation');
+    expect(live.stepPosition).toBe(2);
+    expect(live.lastActivityAt).toBe(iso(30_000));
+    expect(live.doneCount).toBe(1);
+    const quiet = { ...evidence, modelRuns: evidence.modelRuns?.map(run => ({ ...run, updated_at: iso(15 * 60_000) })) };
+    expect(deriveLiveActivity(staleJob, quiet, now).tone).toBe('stalled');
+    const legacy = { ...evidence, modelRuns: evidence.modelRuns?.map(run => ({ ...run, updated_at: undefined })) };
+    expect(deriveLiveActivity(staleJob, legacy, now).tone).toBe('stalled');
+    expect(deriveLiveActivity({ ...staleJob, status: 'cancelled' }, evidence, now).tone).toBe('idle');
+  });
+
   it('reports the running step as working, excluding skipped steps from the count', () => {
     const live = deriveLiveActivity(job(), snapshot(), now);
     expect(live.tone).toBe('working');

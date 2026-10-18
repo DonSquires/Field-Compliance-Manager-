@@ -156,6 +156,13 @@ function builderNextAction(job: BuilderJob, snapshot: BuilderSnapshot) {
   if (job.last_error || snapshot.steps.some(step => step.status === 'failed')) return 'Inspect the failed step and its exact error before proposing an evidence-backed recovery.';
   if (job.status === 'deployed') return 'Review the exact deployment receipt and start a follow-up only if more work is needed.';
   if (job.status === 'release_ready') return 'Verify the pull request, merge decision, and separate Production receipt.';
+  if (job.autopilot_state === 'blocked') return 'Bob is blocked. Inspect the latest recorded outcome before choosing a recovery.';
+  if (job.autopilot_state === 'awaiting_human') return 'Bob is waiting for a human decision. Review the recorded gate before continuing.';
+  if (job.autopilot_state === 'done') return 'Autopilot stopped on this record. Review its outcome before starting another attempt.';
+  const activity = deriveLiveActivity(job, snapshot, Date.now());
+  if (activity.tone === 'stalled') return 'No recent execution activity is recorded. Inspect the last model heartbeat and step error before retrying.';
+  if (activity.runningModel || activity.runningWorker || snapshot.steps.some(step => step.status === 'running')) return 'Execution is recorded on this job. Follow its activity and resulting evidence; do not start a duplicate run.';
+  if (job.autopilot_state === 'driving') return 'Bob autopilot is assigned to drive this job. Follow live activity for progress; assignment is not completion.';
   if (!job.autopilot_requested_by && !['deployed', 'failed', 'cancelled'].includes(job.status)) return 'Nobody is driving this job yet. Select Let Bob drive, or run it to the next gate yourself.';
   if (!job.workspace_branch) return 'Let Bob advance the plan, or create the isolated workspace when implementation is ready.';
   return 'Run to the next governed gate and review the resulting files, tests, and findings.';

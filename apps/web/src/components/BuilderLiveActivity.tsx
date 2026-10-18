@@ -38,6 +38,7 @@ export interface LiveModelRun {
   started_at: string | null;
   completed_at: string | null;
   created_at: string;
+  updated_at?: string | null;
   input_tokens: number | null;
   output_tokens: number | null;
   total_tokens: number | null;
@@ -148,13 +149,14 @@ export function deriveLiveActivity(job: LiveJob, snapshot: LiveSnapshot, now: nu
   const runningModel = modelRuns.find(run => ACTIVE_RUN.has(run.status) && !run.completed_at) ?? null;
   const runningWorker = snapshot.workerRuns.find(run => ACTIVE_RUN.has(run.status) && !run.completed_at) ?? null;
   const failedStep = steps.find(step => step.status === 'failed') ?? null;
-  const currentStep = runningStep ?? failedStep ?? steps.find(step => step.step_id === job.current_step_name) ?? null;
+  const modelStep = runningModel?.step_id ? steps.find(step => step.id === runningModel.step_id) : null;
+  const currentStep = runningStep ?? modelStep ?? failedStep ?? steps.find(step => step.step_id === job.current_step_name) ?? null;
   const successorId = builderSuccessorId(job);
   const blocker = job.last_error || failedStep?.error;
   const countable = steps.filter(step => step.status !== 'skipped');
   const doneCount = countable.filter(step => step.status === 'completed').length;
   const lastActivity = Math.max(
-    ...[job.updated_at, job.autopilot_updated_at, runningStep?.started_at, runningModel?.started_at ?? runningModel?.created_at,
+    ...[job.updated_at, job.autopilot_updated_at, runningStep?.started_at, runningModel?.updated_at, runningModel?.started_at ?? runningModel?.created_at,
       runningWorker?.heartbeat_at ?? runningWorker?.started_at, events[0]?.created_at, modelRuns[0]?.completed_at ?? modelRuns[0]?.created_at]
       .map(time).filter((value): value is number => value != null),
     0,
@@ -164,7 +166,7 @@ export function deriveLiveActivity(job: LiveJob, snapshot: LiveSnapshot, now: nu
     stepPosition: currentStep ? countable.findIndex(step => step.id === currentStep.id) + 1 : 0,
     stepTotal: countable.length,
     doneCount,
-    stepStartedAt: runningStep?.started_at ?? null,
+    stepStartedAt: runningStep?.started_at ?? runningModel?.started_at ?? null,
     lastActivityAt: lastActivity ? new Date(lastActivity).toISOString() : null,
     runningModel,
     runningWorker,

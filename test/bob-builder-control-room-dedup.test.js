@@ -8,6 +8,12 @@ const controlRoom = fs.readFileSync(
   'utf8',
 );
 
+test('control room projects model heartbeat timestamps and in-progress turn counters without raw output', () => {
+  assert.match(controlRoom, /created_at: run\.created_at, updated_at: run\.updated_at/);
+  assert.match(controlRoom, /started_at, completed_at, created_at, updated_at'\)/);
+  assert.match(controlRoom, /turns: count\(usage\.turns\) \?\? count\(usage\.turn\)/);
+});
+
 test('autonomous Builder admission reuses an active owner request after research enrichment', () => {
   assert.match(controlRoom, /if \(body\.autopilot === true\) \{/);
   assert.match(controlRoom, /\.eq\('autopilot_requested_by', user\.id\)/);
