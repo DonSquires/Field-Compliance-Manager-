@@ -94,6 +94,8 @@ describe('enterprise roster operations', () => {
     expect(page).toContain('Staff schedule');
     expect(page).toContain('Work unit schedule');
     expect(page).toContain("openCreate(undefined, day, unit.id)");
+    expect(page).toContain("if (!workUnitOverride && selectedSlot?.status === 'draft')");
+    expect(page).toContain('setEditingSlot(null)');
     expect(page).toContain("scheduleMode === 'staff' && staff.length === 0");
     expect(page).toContain("scheduleMode === 'staff' && <div className=\"roster-readiness\"");
     expect(page).toContain("scheduleMode === 'staff' ? 'Staff' : 'Work unit'");

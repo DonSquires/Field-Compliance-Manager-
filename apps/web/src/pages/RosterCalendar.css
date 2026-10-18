@@ -1,16 +1,19 @@
 .roster-board.is-week {
   --roster-days: 7;
   --roster-day-min: 144px;
+  --roster-grid-min: 1228px;
 }
 
 .roster-board.is-fortnight {
   --roster-days: 14;
   --roster-day-min: 130px;
+  --roster-grid-min: 2040px;
 }
 
 .roster-board.is-month {
   --roster-days: 31;
   --roster-day-min: 112px;
+  --roster-grid-min: 3692px;
 }
 
 .roster-day-label {

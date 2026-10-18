@@ -15,9 +15,10 @@ test('enterprise roster week board is operational and visually stable', async ({
  await expect(page.getByRole('heading',{name:'Roster',exact:true})).toBeVisible();
  const board=page.locator('.roster-board');await expect(board.getByText('Ana Ngata',{exact:true})).toBeVisible(); await expect(board.getByText('Jordan Lee',{exact:true})).toBeVisible();
  const boardLayout=await board.evaluate((element)=>({overflowX:getComputedStyle(element).overflowX,overflowY:getComputedStyle(element).overflowY,headerPosition:getComputedStyle(element.querySelector('.roster-board-head')!).position,firstColumnPosition:getComputedStyle(element.querySelector('.roster-person')!).position}));expect(boardLayout).toEqual({overflowX:'auto',overflowY:'auto',headerPosition:'sticky',firstColumnPosition:'sticky'});
+ const lightHeader=await page.locator('.admin-shell').evaluate((shell)=>{const previous=shell.getAttribute('data-theme');shell.setAttribute('data-theme','light');const cell=shell.querySelector('.roster-board-head>div')!;const result={background:getComputedStyle(cell).backgroundColor,color:getComputedStyle(cell).color};if(previous)shell.setAttribute('data-theme',previous);else shell.removeAttribute('data-theme');return result;});expect(lightHeader).toEqual({background:'rgb(232, 237, 233)',color:'rgb(72, 88, 81)'});
  await expect(page).toHaveScreenshot('roster-overview-first-viewport.png');
  if((page.viewportSize()?.width??0)<900){await expect(page.locator('.roster-board-scroll-cue')).toBeVisible();const boardSize=await board.evaluate((element)=>({scrollWidth:element.scrollWidth,clientWidth:element.clientWidth}));expect(boardSize.scrollWidth).toBeGreaterThan(boardSize.clientWidth);}
- await page.getByRole('button',{name:'2 weeks'}).click();await expect(page.locator('.roster-board-head>div')).toHaveCount(15);expect(await board.evaluate((element)=>element.scrollWidth>element.clientWidth)).toBe(true);await page.getByRole('button',{name:'Month'}).click();await expect(page.locator('.roster-board-head>div')).toHaveCount(32);for(let index=0;index<7;index+=1)await page.getByTitle('Previous period').click();await expect(page.getByLabel('Public holidays').getByText('Provincial anniversary day')).toBeVisible();await expect(page.getByLabel('Public holidays').getByText("New Year's Day",{exact:true})).toBeVisible();await expect(page.locator('.roster-horizon-bar')).toHaveScreenshot('roster-calendar-controls.png');await page.getByLabel('Regional holidays').selectOption('WGN');await expect(page.getByText('Regional public holiday calendar updated.')).toBeVisible();await page.getByRole('button',{name:'Week',exact:true}).click();
+ await page.getByRole('button',{name:'2 weeks'}).click();await expect(page.locator('.roster-board-head>div')).toHaveCount(15);expect(await board.evaluate((element)=>element.scrollWidth>element.clientWidth)).toBe(true);await page.getByRole('button',{name:'Month'}).click();await expect(page.locator('.roster-board-head>div')).toHaveCount(32);const stickyAtMonthEnd=await board.evaluate((element)=>{element.scrollLeft=element.scrollWidth;const boardLeft=element.getBoundingClientRect().left;return{headerOffset:Math.round(element.querySelector('.roster-board-head>div')!.getBoundingClientRect().left-boardLeft),rowOffset:Math.round(element.querySelector('.roster-person')!.getBoundingClientRect().left-boardLeft)};});expect(stickyAtMonthEnd).toEqual({headerOffset:1,rowOffset:1});for(let index=0;index<7;index+=1)await page.getByTitle('Previous period').click();await expect(page.getByLabel('Public holidays').getByText('Provincial anniversary day')).toBeVisible();await expect(page.getByLabel('Public holidays').getByText("New Year's Day",{exact:true})).toBeVisible();await expect(page.locator('.roster-horizon-bar')).toHaveScreenshot('roster-calendar-controls.png');await page.getByLabel('Regional holidays').selectOption('WGN');await expect(page.getByText('Regional public holiday calendar updated.')).toBeVisible();await board.evaluate((element)=>{element.scrollLeft=0;});await page.getByRole('button',{name:'Week',exact:true}).click();
  await expect(page.getByRole('heading',{name:'Availability restrictions'})).toBeVisible();const restriction=page.locator('.roster-availability-queue').getByRole('button',{name:/Jordan Lee/});await restriction.click();const availabilityDialog=page.getByRole('dialog',{name:'Staff availability'});await expect(availabilityDialog).toBeVisible();await expect(availabilityDialog.getByLabel('Staff member')).toHaveValue('2f2f2f2f-2222-4222-8222-222222222222');await expect(availabilityDialog.getByText('Unavailable on Sundays')).toBeVisible();await availabilityDialog.getByRole('button',{name:'Close',exact:true}).click();
  const commercialQueue=page.locator('.roster-commercial-queue');await expect(commercialQueue.getByRole('heading',{name:'Commercial readiness exceptions'})).toBeVisible();await commercialQueue.getByRole('button',{name:/Roster Administration/}).click();const commercialInspector=page.locator('.roster-slot-inspector');await expect(commercialInspector.getByText('Missing rule',{exact:true})).toBeVisible();await expect(commercialInspector.getByText('Not applicable',{exact:true})).toHaveCount(3);await expect(commercialInspector.getByText('Ready',{exact:true})).toBeVisible();await expect(commercialInspector).toHaveScreenshot('roster-commercial-readiness.png');if((page.viewportSize()?.width??0)<900){const factBackground=await commercialInspector.locator('dl > div').first().evaluate((element)=>getComputedStyle(element).backgroundColor);expect(factBackground).toBe('rgb(243, 246, 243)');}await commercialInspector.locator('header button').click();
  await expect(page.locator('.roster-board').getByText('Roster Administration',{exact:true})).toBeVisible();
@@ -220,6 +221,30 @@ test('work-unit planning can create and advertise an open shift without rosterab
         });
         expect(materializeCalled).toBe(false);
         await expect(page.getByText('Open shift published for Roster Administration. Open it on the roster and offer it to available staff.')).toBeVisible();
+});
+
+test('work-unit add targets the chosen unit even when another draft is selected', async ({ page }, testInfo) => {
+        test.skip(testInfo.project.name === 'mobile-chromium', 'The mobile inspector intentionally covers the schedule until it is closed.');
+        const json = (body: unknown) => ({ contentType: 'application/json', body: JSON.stringify(body) });
+        await page.route('**/rest/v1/roster_slots**', async (route) => await route.fulfill(json([{
+                id: '32323232-3232-4232-8232-323232323232',
+                work_unit_id: '23232323-2323-4323-8323-232323232323',
+                staff_id: '22222222-2222-4222-8222-222222222222',
+                scheduled_start: '2026-08-28T21:00:00.000Z',
+                scheduled_end: '2026-08-29T01:00:00.000Z',
+                status: 'draft',
+                linked_shift_id: null,
+                notes: 'Roster administration',
+        }])));
+
+        await signInAsAdmin(page, '/admin/roster');
+        await page.locator('.roster-slot-queue').getByRole('button', { name: /Roster Administration/ }).click();
+        await page.getByRole('button', { name: 'Work unit schedule' }).click();
+        await page.locator('.roster-board').getByRole('button', { name: /Add shift for North District Patrol on/ }).first().click();
+
+        const dialog = page.getByRole('dialog', { name: 'Create shift' });
+        await expect(dialog.getByLabel('Work unit')).toHaveValue('18181818-1818-4818-8818-181818181818');
+        await expect(dialog.getByLabel('Officer')).toHaveValue('');
 });
 
 test('roster opens the branch timesheet correction and approval queue directly', async ({ page }) => {

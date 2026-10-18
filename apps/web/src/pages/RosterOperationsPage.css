@@ -21,6 +21,9 @@
 }
 
 .roster-ops .roster-board {
+	width: 100%;
+	min-width: 0;
+	max-width: 100%;
 	max-height: min(68vh, 760px);
 	overflow: auto;
 	isolation: isolate;
@@ -35,11 +38,12 @@
 
 .roster-ops .roster-board-head,
 .roster-ops .roster-row {
+	width: max(100%, var(--roster-grid-min));
 	grid-template-columns: 220px repeat(var(--roster-days), minmax(var(--roster-day-min), 1fr));
 }
 
 .roster-ops .roster-board-head > div {
-	background: #0d1927;
+	background: inherit;
 	box-shadow: 0 1px 0 #304456;
 }
 

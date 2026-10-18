@@ -298,13 +298,14 @@ const RosterOperationsPage: React.FC = () => {
 
   const openCreate = (person?: Staff, day?: Date, workUnitOverride?: string) => {
     setCopyingSlot(null);
-    if (selectedSlot?.status === 'draft') {
+    if (!workUnitOverride && selectedSlot?.status === 'draft') {
       openEdit(selectedSlot);
       return;
     }
     const start = day ? new Date(day) : new Date(); start.setHours(8, 0, 0, 0); const end = new Date(start); end.setHours(16, 0, 0, 0);
     // Default path: workUnitId: requestedWorkUnit?.id ??
     const preferredWorkUnitId = workUnitOverride ?? requestedWorkUnit?.id ?? workUnits[0]?.id ?? '';
+    setEditingSlot(null);
     setForm({ officerId: person?.id ?? '', workUnitId: preferredWorkUnitId, start: localInput(start), end: localInput(end), notes: '', publish: true }); setShowCreate(true);
   };
 
