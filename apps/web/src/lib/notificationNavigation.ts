@@ -36,6 +36,7 @@ export function resolveNotificationDestination(role: AppRole, notification: Noti
   if (notification.category === 'bob_conversation' || link === 'bob_chat') return { kind: 'bob', conversationId };
 
   if (role === 'grand_master' || role === 'master' || role === 'admin' || role === 'admin_officer') {
+    if (link === 'safety-reviews') return { kind: 'admin_field_ops', area: 'field-reports' };
     if (notification.category === 'place_hazard_review') return {
       kind: 'admin_place_hazards',
       siteId: typeof notification.link_payload?.site_id === 'string' ? notification.link_payload.site_id : null,
@@ -55,6 +56,7 @@ export function resolveNotificationDestination(role: AppRole, notification: Noti
   }
 
   if (role === 'officer') {
+    if (link === 'safety-assessments' || notification.category === 'place_hazard_review') return { kind: 'officer_module', module: null };
     if (notification.category === 'report_reviewed' || link === 'field-report-review') return { kind: 'officer_report', reportId };
     if (notification.category === 'leave_decision' || link === 'leave-decision') return { kind: 'officer_leave', leaveRequestId };
     if (notification.category === 'timesheet_decision' || link === 'timesheet-decision') return { kind: 'officer_timesheet', timesheetId };

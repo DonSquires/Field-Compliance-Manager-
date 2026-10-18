@@ -8,6 +8,7 @@ import { AlertTriangle, CheckCircle2, FileText, Pencil, Plus, RefreshCw, ShieldA
 import { supabase } from '../lib/supabase';
 import { HAZARD_CLASSES, hazardClassLabel, openHazardSource, RISK_LABELS, type RiskLevel } from '../lib/safetyBriefing';
 import './PlaceHazardRegister.css';
+import { SafetyReviewWorkspace } from './SafetyReviewWorkspace';
 
 export interface RegisterHazard {
   id: string; organization_id: string; organization_name: string; location_id: string; client_site_id: string | null; zone_id: string | null;
@@ -197,6 +198,8 @@ export function PlaceHazardRegister({ organizationId, locationId, site, sites, z
           ))}
         </ul>
       )}
+      {canCreate && <SafetyReviewWorkspace organizationId={organizationId} locationId={locationId}
+        refreshKey={hazards.reduce((sum, hazard) => sum + hazard.version, 0)} onChanged={() => void load()} />}
     </section>
   );
 }

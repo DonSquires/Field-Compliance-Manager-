@@ -5,6 +5,7 @@ import { useAuth } from '../context/AuthContext';
 import { useServiceRelationships } from '../context/ServiceRelationshipContext';
 import { supabase } from '../lib/supabase';
 import './FieldReportsPage.css';
+import { SafetyReviewWorkspace } from '../components/SafetyReviewWorkspace';
 
 interface FieldReport {
   id: string;
@@ -163,6 +164,8 @@ const FieldReportsPage: React.FC = () => {
         <div><span>Field operations / Reports</span><h1>Field report review</h1><p>Triage officer submissions, inspect operational context, and record governed review decisions.</p></div>
         <button type="button" onClick={() => void loadReports()} disabled={loading}><RefreshCw size={17} className={loading ? 'is-spinning' : ''} />Refresh</button>
       </header>
+      {(operatingOrganizationId ?? profile?.organizationId) && <SafetyReviewWorkspace
+        organizationId={(operatingOrganizationId ?? profile?.organizationId)!} />}
       <section className="field-reports-summary" aria-label="Report workload"><div className={criticalCount > 0 ? 'is-critical' : ''}><AlertTriangle size={18} /><span>Critical submitted</span><strong>{criticalCount}</strong></div><div><FileText size={18} /><span>Awaiting review</span><strong>{submittedCount}</strong></div><div><ShieldCheck size={18} /><span>Total records</span><strong>{reports.length}</strong></div></section>
       {error && <div className="field-reports-message is-error" role="alert"><AlertTriangle size={17} /><span>{error}</span><button type="button" className="btn-secondary" onClick={() => void loadReports()} disabled={loading}>Try again</button><button type="button" onClick={() => setError(null)} title="Dismiss"><X size={16} /></button></div>}
       {notice && <div className="field-reports-message is-success" role="status"><CheckCircle2 size={17} /><span>{notice}</span><button type="button" onClick={() => setNotice(null)} title="Dismiss"><X size={16} /></button></div>}

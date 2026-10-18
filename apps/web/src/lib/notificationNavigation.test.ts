@@ -38,7 +38,13 @@ describe('notification navigation', () => {
   it('routes a hazard reviewer to the actual place and never gives officers admin navigation', () => {
     const report = notification({ category: 'place_hazard_review', link_page: 'sites', link_payload: { site_id: 'site-1', location_id: 'location-1' } });
     expect(resolveNotificationDestination('admin', report)).toEqual({ kind: 'admin_place_hazards', siteId: 'site-1', locationId: 'location-1' });
-    expect(resolveNotificationDestination('officer', report)).toBeNull();
+    expect(resolveNotificationDestination('officer', report)).toEqual({ kind: 'officer_module', module: null });
     expect(resolveNotificationDestination('client_viewer', report)).toBeNull();
+  });
+
+  it('opens safety review and assessment notifications on the correct role surface', () => {
+    expect(resolveNotificationDestination('admin', notification({ link_page: 'safety-reviews' }))).toEqual({ kind: 'admin_field_ops', area: 'field-reports' });
+    expect(resolveNotificationDestination('officer', notification({ link_page: 'safety-assessments' }))).toEqual({ kind: 'officer_module', module: null });
+    expect(resolveNotificationDestination('client_viewer', notification({ link_page: 'safety-reviews' }))).toBeNull();
   });
 });

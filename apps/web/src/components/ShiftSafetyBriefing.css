@@ -48,3 +48,8 @@
   .safety-dialog-actions button { flex: 1 1 auto; justify-content: center; }
   .safety-report-row { grid-template-columns: 1fr; }
 }
+.safety-task-assessments { padding: 10px 12px; margin-bottom: 12px; border: 1px solid #3b5267; border-radius: 6px; color: #e4edf5; background: #0b1725; overflow-wrap: anywhere; }
+.safety-task-assessments summary { min-height: 44px; padding: 10px 0; cursor: pointer; font-weight: 750; }
+.safety-task-assessments button { min-height: 44px; padding: 8px 12px; margin: 4px; border: 1px solid #40576c; border-radius: 5px; color: #e4edf5; background: #14273a; cursor: pointer; }
+.safety-task-assessments .safety-report-form { margin: 12px 0; }
+.safety-task-receipt { padding: 12px 0; border-top: 1px solid #3b5267; }

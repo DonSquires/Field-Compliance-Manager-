@@ -9,7 +9,7 @@ import { CAN_QUERY, resolveEffectiveRole } from '../_shared/auth.ts';
     'Access-Control-Allow-Origin': '*',
     'Access-Control-Allow-Headers': 'authorization, x-client-info, apikey, content-type',
   };
-  const QUERY_TYPES = new Set(['find_org', 'get_org', 'list_orgs', 'list_sites', 'list_routes', 'list_zones', 'find_user', 'search_observations']);
+  const QUERY_TYPES = new Set(['find_org', 'get_org', 'list_orgs', 'list_sites', 'list_routes', 'list_zones', 'find_user', 'search_observations', 'safety_workspace']);
   const UUID = /^[0-9a-f]{8}-[0-9a-f]{4}-[1-5][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i;
 
   function json(body: unknown, status = 200) {
@@ -60,6 +60,32 @@ import { CAN_QUERY, resolveEffectiveRole } from '../_shared/auth.ts';
       const scopedOrgId = unrestricted ? orgId : profile.organization_id;
       if (!unrestricted && !scopedOrgId) return json({ error: 'No organization scope is available', permanent: true, retryable: false }, 403);
 
+      if (query === 'safety_workspace') {
+        const targetOrg = orgId ?? scopedOrgId;
+        if (!targetOrg) return json({ error: 'An explicit keeping organisation is required' }, 422);
+        const locationId = args.location_id ? asUuid(args.location_id) : null;
+        if (args.location_id && !locationId) return json({ error: 'location_id must be a UUID' }, 422);
+        // ATLAS READS: get_safety_review_workspace
+        const { data, error } = await caller.rpc('get_safety_review_workspace', {
+          p_organization_id: targetOrg, p_location_id: locationId,
+        });
+        if (error) return json({ error: error.message, permanent: true, retryable: false }, 403);
+        const results = [
+          ...(data?.hazards ?? []).map((h: Record<string, unknown>) => ({
+            id: h.id, name: h.title, record_type: 'place_hazard', version: h.version,
+            risk_owner_id: h.risk_owner_id, review_due: h.review_due, location_id: h.location_id,
+            controls: h.controls, control_levels: h.control_levels,
+          })),
+          ...(data?.reviews ?? []).map((r: Record<string, unknown>) => ({
+            id: r.id, name: r.title, record_type: 'safety_review', status: r.status,
+            location_id: r.location_id, field_report_id: r.field_report_id, incident_id: r.incident_id,
+            assessment_id: r.assessment_id, investigation_id: r.investigation_id,
+          })),
+        ];
+        return json({ results: results.slice(0, limit), total: results.length, truncated: results.length > limit,
+          human_action_required: 'Officers sign their own task assessments; supervisors review findings and corrective actions in Field reports / Safety reviews.' });
+      }
+
       if (query === 'find_org') {
         const name = String(args.name ?? args.search ?? '').trim();
         if (!name) return json({ error: 'An organization name is required' }, 422);
@@ -91,7 +117,7 @@ import { CAN_QUERY, resolveEffectiveRole } from '../_shared/auth.ts';
 
       if (query === 'list_sites') {
         if (!scopedOrgId) return json({ error: 'An organization ID is required' }, 422);
-        const { data, error } = await admin.from('client_sites').select('id, client_organization_id:organization_id, name, address, active, boundary_status, boundary_verification').eq('client_organization_id', scopedOrgId).order('name').limit(limit);
+        const { data, error } = await admin.from('client_sites').select('id, client_organization_id, location_id, name, address, active, boundary_status, boundary_verification').eq('client_organization_id', scopedOrgId).order('name').limit(limit);
         if (error) throw error;
         return json({ results: data ?? [] });
       }
