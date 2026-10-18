@@ -16,6 +16,11 @@ navigation action. Neither manual runtime execution nor autopilot re-driving
 may restart that superseded record. A failed step's actual error takes precedence
 over a stale last-completed step or an unrelated pending code-review label.
 No automatic resume may be promised without a driving scheduler state.
+Cancelled jobs show their steps and failures as history, not approval or
+recovery instructions. Control-room request failures identify the attempted
+action and HTTP status and decode either function errors or gateway messages.
+Main-health intake recognises Vitest's failed-suite markers as well as FAIL
+headers, so passing neighbouring suites cannot substitute for the failing scope.
 Bob's job lookup reads those same outcome fields, excludes superseded children
 from actionable selection, and follows recorded successor IDs for older jobs
 whose parent link was omitted. Those read-only report edges remain distinct from

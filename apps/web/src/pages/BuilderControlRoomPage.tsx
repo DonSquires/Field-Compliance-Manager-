@@ -4,6 +4,7 @@ import { BobPanel } from '../components/BobPanel';
 import { ChangeRequestQueue } from '../components/ChangeRequestQueue';
 import { BuilderApprovalBrief } from '../components/BuilderApprovalBrief';
 import { jobMatchesSearch } from '../lib/builderJobSearch';
+import { builderRequestError } from '../lib/builderRequestError';
 import { BuilderLiveActivity, builderSuccessorId, deriveLiveActivity, isLiveJob, type LiveChangedFile, type LiveEvent, type LiveModelRun, type LivePollState } from '../components/BuilderLiveActivity';
 import { supabase } from '../lib/supabase';
 import './BuilderControlRoomPage.css';
@@ -150,6 +151,7 @@ function autopilotNotice(data: { autopilot?: unknown; autopilot_error?: unknown 
 
 function builderNextAction(job: BuilderJob, snapshot: BuilderSnapshot) {
   if (builderSuccessorId(job)) return 'Open the newer job to inspect its current outcome. Do not rerun this historical attempt.';
+  if (job.status === 'cancelled') return 'This job was cancelled. No approval or retry is required; its steps and errors are historical.';
   if (snapshot.approvals.some(approval => approval.status === 'pending')) return 'Review the immutable evidence and decide the pending approval.';
   if (job.last_error || snapshot.steps.some(step => step.status === 'failed')) return 'Inspect the failed step and its exact error before proposing an evidence-backed recovery.';
   if (job.status === 'deployed') return 'Review the exact deployment receipt and start a follow-up only if more work is needed.';
@@ -231,14 +233,7 @@ const BuilderControlRoomPage: React.FC<{ onOpenBob?: (prompt: string) => void }>
   const invoke = useCallback(async (body: Record<string, unknown>) => {
     const { data, error: invokeError } = await supabase.functions.invoke('bob-builder-control-room', { body });
     if (invokeError) {
-      const context = invokeError.context;
-      if (context instanceof Response) {
-        const payload = await context.json().catch(() => null);
-        if (payload && typeof payload.error === 'string') {
-          throw new Error(typeof payload.detail === 'string' && payload.detail ? `${payload.error}: ${payload.detail}` : payload.error);
-        }
-      }
-      throw invokeError;
+      throw await builderRequestError(invokeError, body.action);
     }
     if (data?.error) throw new Error(typeof data.detail === 'string' && data.detail ? `${data.error}: ${data.detail}` : data.error);
     return data;
@@ -615,6 +610,7 @@ const BuilderControlRoomPage: React.FC<{ onOpenBob?: (prompt: string) => void }>
 
   const selectedJob = useMemo(() => snapshot?.job?.id === selectedId ? snapshot.job : jobs.find(job => job.id === selectedId) ?? null, [jobs, selectedId, snapshot]);
   const successorId = selectedJob ? builderSuccessorId(selectedJob) : null;
+  const cancelled = selectedJob?.status === 'cancelled';
   const deliveryTruth = selectedJob ? builderDeliveryTruth(selectedJob) : null;
   const nextSafeAction = selectedJob && snapshot ? builderNextAction(selectedJob, snapshot) : 'Select a job or describe new work to Bob Builder.';
   const pendingApprovalCount = snapshot?.approvals.filter(approval => approval.status === 'pending').length ?? 0;
@@ -796,10 +792,10 @@ const BuilderControlRoomPage: React.FC<{ onOpenBob?: (prompt: string) => void }>
                 <strong>{deriveLiveActivity(selectedJob, snapshot, now).stepLabel}</strong>
                 <small>{completedSteps}/{snapshot.steps.length} governed steps satisfied</small>
               </div>
-              <div className={pendingApprovalCount || failedStepCount || selectedJob.last_error ? 'is-attention' : ''}>
+              <div className={selectedJob.status !== 'cancelled' && (pendingApprovalCount || failedStepCount || selectedJob.last_error) ? 'is-attention' : ''}>
                 <span>Questions and blockers</span>
-                <strong>{pendingApprovalCount ? `${pendingApprovalCount} approval${pendingApprovalCount === 1 ? '' : 's'} waiting` : failedStepCount ? `${failedStepCount} blocked step${failedStepCount === 1 ? '' : 's'}` : selectedJob.last_error ? 'Recovery needed' : 'No open blocker'}</strong>
-                <small>{snapshot.steps.find(step => step.status === 'failed')?.error || (selectedJob.code_review_status === 'pending' ? 'Code review has not completed; this is not a review finding.' : `Code review: ${plainWords(selectedJob.code_review_status)}`)}</small>
+                <strong>{selectedJob.status === 'cancelled' ? 'Cancelled - no action required' : pendingApprovalCount ? `${pendingApprovalCount} approval${pendingApprovalCount === 1 ? '' : 's'} waiting` : failedStepCount ? `${failedStepCount} blocked step${failedStepCount === 1 ? '' : 's'}` : selectedJob.last_error ? 'Recovery needed' : 'No open blocker'}</strong>
+                <small>{selectedJob.status === 'cancelled' ? 'Earlier failures remain in the history; they are not requests to restart this job.' : snapshot.steps.find(step => step.status === 'failed')?.error || selectedJob.last_error || (selectedJob.code_review_status === 'pending' ? 'Code review has not completed; this is not a review finding.' : `Code review: ${plainWords(selectedJob.code_review_status)}`)}</small>
               </div>
               <div className={`is-${deliveryTruth?.tone ?? 'idle'}`}>
                 <span>Deployment truth</span>
@@ -821,7 +817,7 @@ const BuilderControlRoomPage: React.FC<{ onOpenBob?: (prompt: string) => void }>
                 <button type="button" className={workspaceView === 'context' ? 'is-active' : ''} aria-current={workspaceView === 'context' ? 'page' : undefined} onClick={() => setWorkspaceView('context')}><Database size={15} /> Preview &amp; release</button>
               </nav>
               {workspaceView === 'task' && <div className="builder-workbench-content"><span>Plan and immutable task brief</span><pre>{selectedJob.task_description || 'No task description was retained for this job.'}</pre></div>}
-              {workspaceView === 'evidence' && <div className="builder-workbench-content"><span>Verified files, changes, and review artifacts</span>{snapshot.artifacts.length === 0 ? <p>No artifacts have been produced yet.</p> : <><ul className="builder-workbench-artifacts">{snapshot.artifacts.map(artifact => <li key={artifact.id}><button type="button" className={selectedArtifactId === artifact.id ? 'is-selected' : ''} onClick={() => void openArtifact(artifact)} disabled={artifactLoading}><FileCode2 size={15} /><div><strong>{plainWords(artifact.artifact_type)}</strong><small>{artifact.status} · {artifact.content_size_bytes ?? 0} bytes</small></div><code>{artifact.checksum?.slice(0, 12) ?? 'No checksum'}</code></button>{selectedJob.workspace_branch && artifact.status === 'final' && artifact.artifact_type === 'code_implementation' && <button type="button" className="builder-commit-patch" onClick={() => void commitVerifiedPatch(artifact)} disabled={Boolean(busy)}>Commit verified patch</button>}</li>)}</ul>{artifactLoading && <p>Loading verified artifact...</p>}{artifactContent && <pre className="builder-artifact-preview" aria-label="Selected artifact content">{artifactContent.content}</pre>}</>}</div>}
+              {workspaceView === 'evidence' && <div className="builder-workbench-content"><span>Verified files, changes, and review artifacts</span>{snapshot.artifacts.length === 0 ? <p>No artifacts have been produced yet.</p> : <><ul className="builder-workbench-artifacts">{snapshot.artifacts.map(artifact => <li key={artifact.id}><button type="button" className={selectedArtifactId === artifact.id ? 'is-selected' : ''} onClick={() => void openArtifact(artifact)} disabled={artifactLoading}><FileCode2 size={15} /><div><strong>{plainWords(artifact.artifact_type)}</strong><small>{artifact.status} · {artifact.content_size_bytes ?? 0} bytes</small></div><code>{artifact.checksum?.slice(0, 12) ?? 'No checksum'}</code></button>{!successorId && !cancelled && selectedJob.workspace_branch && artifact.status === 'final' && artifact.artifact_type === 'code_implementation' && <button type="button" className="builder-commit-patch" onClick={() => void commitVerifiedPatch(artifact)} disabled={Boolean(busy)}>Commit verified patch</button>}</li>)}</ul>{artifactLoading && <p>Loading verified artifact...</p>}{artifactContent && <pre className="builder-artifact-preview" aria-label="Selected artifact content">{artifactContent.content}</pre>}</>}</div>}
               {workspaceView === 'execution' && <div className="builder-workbench-content"><span>Terminal, tests, and durable worker output</span><ol className="builder-workbench-runs">{snapshot.workerRuns.length === 0 ? <li>No worker run has started.</li> : snapshot.workerRuns.map(run => <li key={run.id}><TerminalSquare size={15} /><div><strong>{run.profile}</strong><small>{run.status}{run.exit_code == null ? '' : ` · exit ${run.exit_code}`}</small></div><code>{run.target_sha?.slice(0, 12) ?? 'No commit'}</code></li>)}</ol></div>}
               {workspaceView === 'context' && <div className="builder-workbench-content"><span>Preview, workspace context, and exact release truth</span><p><strong>{deliveryTruth?.label}.</strong> {deliveryTruth?.detail}</p>{selectedJob.workspace_pull_request_url && <p><a href={selectedJob.workspace_pull_request_url} target="_blank" rel="noreferrer noopener">Open the recorded pull request</a></p>}{contextLoading ? <p>Loading Builder context...</p> : !contextSnapshot ? <p>Context is unavailable.</p> : <><p>{contextSnapshot.build_map.file_count} tracked files and {contextSnapshot.build_map.schema.tables.length} schema tables. Atlas has {contextSnapshot.live_context.atlas.capability_count} capabilities and {contextSnapshot.live_context.atlas.edge_count} live edges; {contextSnapshot.live_context.atlas.wired_capability_count} are wired and {contextSnapshot.live_context.atlas.exercised_capability_count} are exercised.</p><ul className="builder-workbench-runs">{contextSnapshot.live_context.live_data.tables.map(row => <li key={row.table}><Database size={15} /><div><strong>{row.table.replaceAll('_', ' ')}</strong><small>Aggregate live row count</small></div><code>{row.available ? row.count ?? 0 : 'Unavailable'}</code></li>)}</ul><button type="button" onClick={() => void refreshAtlas()} disabled={Boolean(busy)}><RefreshCw size={15} className={busy === 'atlas-refresh' ? 'is-spinning' : ''} /> Refresh Atlas</button></>}</div>}
             </section>
@@ -834,7 +830,7 @@ const BuilderControlRoomPage: React.FC<{ onOpenBob?: (prompt: string) => void }>
             ))}</div>
             <p className="builder-execution-inputs">Bob finds the source files himself and picks the independent reviewer model. You only decide at the approval gates.</p>
             <div className="builder-evidence"><span>{snapshot.artifacts.length} artifacts</span><span>{snapshot.workerRuns.length} worker runs</span></div>
-            {snapshot.approvals.filter(approval => !successorId && approval.status === 'pending').map(approval => {
+            {snapshot.approvals.filter(approval => !successorId && !cancelled && approval.status === 'pending').map(approval => {
               const reviewedArtifacts = snapshot.artifacts.filter(artifact => approval.reviewed_artifact_ids.includes(artifact.id));
               const evidenceComplete = approval.reviewed_artifact_ids.length > 0 && reviewedArtifacts.length === approval.reviewed_artifact_ids.length;
               return (
@@ -847,7 +843,7 @@ const BuilderControlRoomPage: React.FC<{ onOpenBob?: (prompt: string) => void }>
               </section>
               );
             })}
-            {!successorId && <div className="builder-actions">
+            {!successorId && !cancelled && <div className="builder-actions">
               <button type="button" onClick={() => void createWorkspace()} disabled={Boolean(busy) || Boolean(selectedJob.workspace_branch)}><FolderTree size={15} /> {selectedJob.workspace_branch ? 'Workspace ready' : 'Create workspace'}</button>
               <button type="button" onClick={() => void publishWorkspace()} disabled={Boolean(busy) || !selectedJob.workspace_branch || selectedJob.workspace_published_head_sha === selectedJob.workspace_head_sha}><Workflow size={15} /> {selectedJob.workspace_published_head_sha === selectedJob.workspace_head_sha ? 'Published for review' : 'Publish for review'}</button>
               <button type="button" onClick={() => void createPullRequest()} disabled={Boolean(busy) || selectedJob.workspace_published_head_sha !== selectedJob.workspace_head_sha || selectedJob.workspace_pull_request_head_sha === selectedJob.workspace_head_sha}>{selectedJob.workspace_pull_request_head_sha === selectedJob.workspace_head_sha ? 'Pull request ready' : 'Create pull request'}</button>
@@ -855,7 +851,7 @@ const BuilderControlRoomPage: React.FC<{ onOpenBob?: (prompt: string) => void }>
               <button type="button" onClick={() => void advance('advance')} disabled={Boolean(busy)}><Play size={15} /> Run next step</button>
               <button type="button" className="is-primary" onClick={() => void advance('run')} disabled={Boolean(busy)}>{busy === 'run' ? <RefreshCw size={15} className="is-spinning" /> : <Workflow size={15} />} Run to gate</button>
             </div>}
-            {!successorId && selectedJob.workspace_branch && <section className="builder-followup"><label>Continue on this branch<textarea value={followupTask} onChange={event => setFollowupTask(event.target.value)} rows={3} placeholder="Describe the next change, refinement, or repair for Bob Builder" /></label><button type="button" onClick={() => void createFollowup()} disabled={Boolean(busy) || !followupTask.trim()}><Bot size={15} /> {busy === 'followup' ? 'Starting...' : 'Continue build'}</button></section>}
+            {!successorId && !cancelled && selectedJob.workspace_branch && <section className="builder-followup"><label>Continue on this branch<textarea value={followupTask} onChange={event => setFollowupTask(event.target.value)} rows={3} placeholder="Describe the next change, refinement, or repair for Bob Builder" /></label><button type="button" onClick={() => void createFollowup()} disabled={Boolean(busy) || !followupTask.trim()}><Bot size={15} /> {busy === 'followup' ? 'Starting...' : 'Continue build'}</button></section>}
             {!['deployed', 'failed', 'cancelled'].includes(selectedJob.status) && <section className="builder-followup builder-cancel" aria-label="Cancel Builder job"><label>Cancellation reason<textarea value={cancellationReason} onChange={event => setCancellationReason(event.target.value)} rows={3} required disabled={Boolean(busy)} /></label><button type="button" className="is-danger" onClick={() => void cancelJob()} disabled={Boolean(busy) || !cancellationReason.trim()}><CircleStop size={15} /> {busy === 'cancel' ? 'Cancelling…' : 'Cancel job'}</button></section>}
           </>}
         </section>
