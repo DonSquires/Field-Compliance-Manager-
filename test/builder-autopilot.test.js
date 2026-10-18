@@ -67,6 +67,13 @@ test('autopilot prioritizes release reconciliation ahead of long model work', ()
   assert.deepEqual(jobs.map(({ id }) => id), ['analysis', 'gate', 'release', 'implementation'], 'the caller-owned queue is not mutated');
 });
 
+test('re-driving a superseded record restores its historical state without starting another run', async () => {
+  const job = { id: 'old', status: 'implementation_pending', autopilot_state: 'driving', autopilot_report: { resumed_as_job_id: 'new' } };
+  const actions = actionsRecorder();
+  assert.deepEqual(await autopilotTick({ supabase: fakeSupabase({ job }), jobs: [job], actions }), [{ job: 'old', outcome: 'superseded', resumed_as: 'new' }]);
+  assert.deepEqual(actions.calls, [['record', 'old', 'done', job.autopilot_report]]);
+});
+
 test('autopilot clears a pending gate on the requester\'s behalf and does nothing else that tick', async () => {
   const job = { id: 'job-1', status: 'specification_ready', autopilot_state: 'driving', autopilot_conversation_id: 'conv-1', title: 'Fix', target_sha: 'a'.repeat(40) };
   const actions = actionsRecorder({ pending: [{ id: 'appr-1', approval_type: 'specification_review', status: 'pending' }] });
@@ -524,6 +531,7 @@ test('a job blocked by a red main opens a repair job for the same requester inst
   assert.equal(repairSpec.title, 'Repair main: 2 failing checks (FinanceBureauPage.guard.test.ts, NzscvSupplierPage.guard.test.ts)');
   assert.equal(repairSpec.frontendRequired, true);
   assert.equal(repairSpec.backendRequired, false);
+  assert.equal(repairJobFor({ ...job, code_review_mode: 'human' }, baseline).codeReviewMode, 'human');
   assert.equal(repairSpec.requestedBy, 'user-1');
   assert.match(repairSpec.taskDescription, /apps\/web\/src\/pages\/FinanceBureauPage\.guard\.test\.ts/);
   assert.match(repairSpec.taskDescription, /Acceptance test: the failing command passes/);

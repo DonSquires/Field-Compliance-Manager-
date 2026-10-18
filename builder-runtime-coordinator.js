@@ -64,6 +64,10 @@ function parkedStepBlock(job, step) {
 function planBuilderAction(snapshot) {
   const { job } = snapshot;
   if (!job?.id) throw new Error('Builder runtime snapshot is missing a job');
+  if (job.autopilot_report?.resumed_as_job_id) return {
+    type: 'terminal', status: job.status, reason: 'superseded',
+    detail: `This attempt was continued as job ${job.autopilot_report.resumed_as_job_id}; run that job instead.`,
+  };
   if (TERMINAL_STATUSES.has(job.status)) return { type: 'terminal', status: job.status };
   if (APPROVAL_STATUSES.has(job.status)) return { type: 'waiting_for_human', status: job.status };
   if (snapshot.workerRuns.some(run => run.status === 'running')) return { type: 'waiting_for_worker' };

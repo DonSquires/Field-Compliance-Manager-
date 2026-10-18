@@ -979,3 +979,35 @@ test('a model looping on one refused call escalates, or stops early with a readi
   assert.equal(escalated.turns, 7);
   fs.rmSync(repo.root, { recursive: true, force: true });
 });
+
+test('distinct unedited exploration hands off early enough for the next allowed model to edit and test', async () => {
+  const repo = makeRepo();
+  const providers = [];
+  const paid = [
+    { tool: 'read_file', args: { path: 'lib/sum.js' } },
+    { tool: 'write_file', args: { path: 'lib/sum.js', content: "'use strict';\nmodule.exports = { sum: (a, b) => a + b };\n" } },
+    { tool: 'run', args: { command: 'node --test test/sum.test.js' } },
+    { tool: 'finish', args: { summary: 'Fixed addition and verified it.', tests: ['node --test test/sum.test.js'], rollback_notes: ['Revert the PR.'] } },
+  ];
+  let paidTurn = 0;
+  try {
+    const result = await runAgenticEngineer({
+      supabase: null, gateway: {}, lane: 'backend', sourceDir: repo.source,
+      workspaceRoot: path.join(repo.root, 'workspaces'), repoRoot: repo.source,
+      job: { id: 'progress1234567890', organization_id: '00000000-0000-0000-0000-000000000001', target_sha: repo.sha, title: 'Fix addition', task_description: 'Fix lib/sum.js and verify test/sum.test.js.' },
+      step: { id: 's' }, providerHealth: LAPTOP_OFF,
+      limits: { ...DEFAULT_LIMITS, maxTurns: 40 },
+      callModel: async ({ modelRequest }) => {
+        providers.push(modelRequest.provider);
+        const call = modelRequest.provider === 'openai' ? paid[paidTurn++]
+          : { tool: 'search', args: { query: `distinct-investigation-${providers.length}`, path: 'lib' } };
+        return { ok: true, data: { content: JSON.stringify(call), model: 'fixture', usage: {} } };
+      },
+    });
+    assert.equal(result.ok, true, result.error);
+    assert.equal(providers.filter(provider => provider === 'ollama').length, 13);
+    assert.equal(paidTurn, 4, 'the next model can read, edit, test and finish within the original total budget');
+    assert.deepEqual(result.proposal.changed_files, ['lib/sum.js']);
+    assert.equal(result.proposal.verified_runs[0].exit_code, 0);
+  } finally { fs.rmSync(repo.root, { recursive: true, force: true }); }
+});

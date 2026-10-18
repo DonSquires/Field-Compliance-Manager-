@@ -20,6 +20,18 @@ test('runtime planner pauses at human and terminal states', () => {
   assert.equal(planBuilderAction(snapshot('release_ready')).type, 'terminal');
 });
 
+test('a superseded attempt cannot launch another implementation run', async () => {
+  const state = snapshot('implementation_pending', { job: { autopilot_report: { resumed_as_job_id: 'new-job' } } });
+  let started = false;
+  const result = await runBuilderUntilPause({
+    supabase: null, jobId: 'job-1', loadSnapshot: async () => state,
+    handlers: { frontend: async () => { started = true; return { success: true }; } },
+  });
+  assert.equal(result.reason, 'superseded');
+  assert.match(result.detail, /new-job/);
+  assert.equal(started, false);
+});
+
 test('runtime planner selects product, UX, and implementation work from durable state', () => {
   assert.equal(planBuilderAction(snapshot('intake')).type, 'run_product_analysis');
   assert.equal(planBuilderAction(snapshot('design_pending')).type, 'run_ux_design');

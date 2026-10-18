@@ -3,7 +3,7 @@ import { AlertTriangle, Bot, CheckCircle2, ChevronRight, CircleStop, Clock3, Dat
 import { BobPanel } from '../components/BobPanel';
 import { ChangeRequestQueue } from '../components/ChangeRequestQueue';
 import { jobMatchesSearch } from '../lib/builderJobSearch';
-import { BuilderLiveActivity, isLiveJob, type LiveChangedFile, type LiveEvent, type LiveModelRun, type LivePollState } from '../components/BuilderLiveActivity';
+import { BuilderLiveActivity, builderSuccessorId, deriveLiveActivity, isLiveJob, type LiveChangedFile, type LiveEvent, type LiveModelRun, type LivePollState } from '../components/BuilderLiveActivity';
 import { supabase } from '../lib/supabase';
 import './BuilderControlRoomPage.css';
 
@@ -121,6 +121,7 @@ interface BuilderContextSnapshot {
 const plainWords = (value: unknown, fallback = 'Not recorded') => typeof value === 'string' && value.trim() ? value.replaceAll('_', ' ') : fallback;
 const NON_ACTIONABLE_ISSUE_STATUSES = new Set(['release_ready', 'deployed', 'failed', 'cancelled']);
 const isActionableIssue = (job: BuilderJob) => !NON_ACTIONABLE_ISSUE_STATUSES.has(job.status)
+  && !builderSuccessorId(job)
   && (String(job.title).toLowerCase().startsWith('repair') || Boolean(job.last_error));
 const asRecord = (value: unknown) => value && typeof value === 'object' && !Array.isArray(value) ? value as Record<string, unknown> : null;
 const asText = (value: unknown) => typeof value === 'string' && value.trim() ? value.trim() : null;
@@ -147,8 +148,9 @@ function autopilotNotice(data: { autopilot?: unknown; autopilot_error?: unknown 
 }
 
 function builderNextAction(job: BuilderJob, snapshot: BuilderSnapshot) {
+  if (builderSuccessorId(job)) return 'Open the newer job to inspect its current outcome. Do not rerun this historical attempt.';
   if (snapshot.approvals.some(approval => approval.status === 'pending')) return 'Review the immutable evidence and decide the pending approval.';
-  if (job.last_error) return 'Inspect the blocker and ask Bob to propose the smallest evidence-backed recovery.';
+  if (job.last_error || snapshot.steps.some(step => step.status === 'failed')) return 'Inspect the failed step and its exact error before proposing an evidence-backed recovery.';
   if (job.status === 'deployed') return 'Review the exact deployment receipt and start a follow-up only if more work is needed.';
   if (job.status === 'release_ready') return 'Verify the pull request, merge decision, and separate Production receipt.';
   if (!job.autopilot_requested_by && !['deployed', 'failed', 'cancelled'].includes(job.status)) return 'Nobody is driving this job yet. Select Let Bob drive, or run it to the next gate yourself.';
@@ -351,8 +353,8 @@ const BuilderControlRoomPage: React.FC<{ onOpenBob?: (prompt: string) => void }>
   }, [selectedId, latestManifestId, invoke]);
 
   const selectedProject = projects.find(project => project.id === form.projectId) ?? null;
-  const pendingJobs = jobs.filter(job => !['release_ready', 'deployed', 'failed', 'cancelled'].includes(job.status)).length;
-  const approvalJobs = jobs.filter(job => !['deployed', 'failed', 'cancelled'].includes(job.status) && (['specification_ready', 'approval_pending'].includes(job.status) || (job.status === 'testing' && job.code_review_mode === 'human' && job.code_review_status === 'pending'))).length;
+  const pendingJobs = jobs.filter(job => !builderSuccessorId(job) && !['release_ready', 'deployed', 'failed', 'cancelled'].includes(job.status)).length;
+  const approvalJobs = jobs.filter(job => !builderSuccessorId(job) && !['deployed', 'failed', 'cancelled'].includes(job.status) && (['specification_ready', 'approval_pending'].includes(job.status) || (job.status === 'testing' && job.code_review_mode === 'human' && job.code_review_status === 'pending'))).length;
   const completedJobs = jobs.filter(job => ['deployed', 'release_ready'].includes(job.status)).length;
   const failedJobs = jobs.filter(job => job.status === 'failed').length;
   const cancelledJobs = jobs.filter(job => job.status === 'cancelled').length;
@@ -364,9 +366,9 @@ const BuilderControlRoomPage: React.FC<{ onOpenBob?: (prompt: string) => void }>
       if (activeTab === 'issues') {
         if (!isActionableIssue(job)) return false;
       } else if (activeTab === 'active') {
-        if (['release_ready', 'deployed', 'failed', 'cancelled'].includes(job.status)) return false;
+        if (builderSuccessorId(job) || ['release_ready', 'deployed', 'failed', 'cancelled'].includes(job.status)) return false;
       } else if (activeTab === 'awaiting') {
-        const isAwaiting = !['deployed', 'failed', 'cancelled'].includes(job.status) &&
+        const isAwaiting = !builderSuccessorId(job) && !['deployed', 'failed', 'cancelled'].includes(job.status) &&
           (['specification_ready', 'approval_pending'].includes(job.status) ||
           (job.status === 'testing' && job.code_review_mode === 'human' && job.code_review_status === 'pending'));
         if (!isAwaiting) return false;
@@ -613,6 +615,7 @@ const BuilderControlRoomPage: React.FC<{ onOpenBob?: (prompt: string) => void }>
   };
 
   const selectedJob = useMemo(() => snapshot?.job?.id === selectedId ? snapshot.job : jobs.find(job => job.id === selectedId) ?? null, [jobs, selectedId, snapshot]);
+  const successorId = selectedJob ? builderSuccessorId(selectedJob) : null;
   const deliveryTruth = selectedJob ? builderDeliveryTruth(selectedJob) : null;
   const nextSafeAction = selectedJob && snapshot ? builderNextAction(selectedJob, snapshot) : 'Select a job or describe new work to Bob Builder.';
   const pendingApprovalCount = snapshot?.approvals.filter(approval => approval.status === 'pending').length ?? 0;
@@ -737,7 +740,7 @@ const BuilderControlRoomPage: React.FC<{ onOpenBob?: (prompt: string) => void }>
                   </div>
                   <small>{job.current_step_name ?? 'Awaiting first step'}</small>
                 </div>
-                <div><span>{plainWords(job.status, 'Unknown status')}</span><time>{new Date(job.updated_at).toLocaleDateString()}</time></div>
+                <div><span>{builderSuccessorId(job) ? 'Continued' : plainWords(job.status, 'Unknown status')}</span><time>{new Date(job.updated_at).toLocaleDateString()}</time></div>
                 <ChevronRight size={16} />
               </button>
             );})}</div>
@@ -745,8 +748,8 @@ const BuilderControlRoomPage: React.FC<{ onOpenBob?: (prompt: string) => void }>
         </section>
 
         <section className={`builder-detail ${mobileWorkspaceView === 'workbench' ? 'is-mobile-active' : ''}`}>
-          {!selectedJob || !snapshot ? <div className="builder-empty"><FileCode2 size={20} /> Select a job to inspect</div> : <>
-            <div className="builder-panel-heading"><div><span>Execution</span><h2>{selectedJob.title}</h2></div><span className={`builder-status state-${selectedJob.status}`}>{plainWords(selectedJob.status, 'Unknown status')}</span></div>
+          {!selectedJob || !snapshot || snapshot.job.id !== selectedJob.id ? <div className="builder-empty"><FileCode2 size={20} /> Select a job to inspect</div> : <>
+            <div className="builder-panel-heading"><div><span>Execution</span><h2>{selectedJob.title}</h2></div><span className={`builder-status state-${selectedJob.status}`}>{successorId ? 'Continued' : plainWords(selectedJob.status, 'Unknown status')}</span></div>
             <div className="builder-job-meta">
               <span>Commit <code>{selectedJob.target_sha.slice(0, 12)}</code></span>
               <span>{selectedJob.workspace_branch ?? 'Workspace not created'}</span>
@@ -755,6 +758,10 @@ const BuilderControlRoomPage: React.FC<{ onOpenBob?: (prompt: string) => void }>
               <span>{plainWords(selectedJob.requested_action)} for {plainWords(selectedJob.target_environment)}</span>
               <span>{completedSteps}/{snapshot.steps.length} steps satisfied</span>
             </div>
+            {successorId && <div className="builder-notice" role="status">
+              <span>This attempt continued as <code>{successorId.slice(0, 8)}</code>. Its outcome is recorded on the newer job.</span>
+              <button type="button" onClick={() => { setActiveTab('all'); setScopeFilter('all'); setSearchQuery(''); setSelectedId(successorId); }}>Open newer job</button>
+            </div>}
             <BuilderLiveActivity
               job={selectedJob}
               snapshot={snapshot}
@@ -787,13 +794,13 @@ const BuilderControlRoomPage: React.FC<{ onOpenBob?: (prompt: string) => void }>
             <section className="builder-truth-grid" aria-label="Current build truth">
               <div>
                 <span>Current activity</span>
-                <strong>{plainWords(selectedJob.current_step_name, plainWords(selectedJob.status))}</strong>
+                <strong>{deriveLiveActivity(selectedJob, snapshot, now).stepLabel}</strong>
                 <small>{completedSteps}/{snapshot.steps.length} governed steps satisfied</small>
               </div>
               <div className={pendingApprovalCount || failedStepCount || selectedJob.last_error ? 'is-attention' : ''}>
                 <span>Questions and blockers</span>
                 <strong>{pendingApprovalCount ? `${pendingApprovalCount} approval${pendingApprovalCount === 1 ? '' : 's'} waiting` : failedStepCount ? `${failedStepCount} blocked step${failedStepCount === 1 ? '' : 's'}` : selectedJob.last_error ? 'Recovery needed' : 'No open blocker'}</strong>
-                <small>{selectedJob.code_review_status === 'pending' ? 'Review findings are still pending.' : `Code review: ${plainWords(selectedJob.code_review_status)}`}</small>
+                <small>{snapshot.steps.find(step => step.status === 'failed')?.error || (selectedJob.code_review_status === 'pending' ? 'Code review has not completed; this is not a review finding.' : `Code review: ${plainWords(selectedJob.code_review_status)}`)}</small>
               </div>
               <div className={`is-${deliveryTruth?.tone ?? 'idle'}`}>
                 <span>Deployment truth</span>
@@ -832,7 +839,7 @@ const BuilderControlRoomPage: React.FC<{ onOpenBob?: (prompt: string) => void }>
               {selectedJob.code_review_mode === 'independent_ai' && <label>Independent reviewer model<input value={reviewerModel} onChange={event => setReviewerModel(event.target.value)} maxLength={200} placeholder="Configured model identity" /></label>}
             </div>
             <div className="builder-evidence"><span>{snapshot.artifacts.length} artifacts</span><span>{snapshot.workerRuns.length} worker runs</span></div>
-            {snapshot.approvals.filter(approval => approval.status === 'pending').map(approval => {
+            {snapshot.approvals.filter(approval => !successorId && approval.status === 'pending').map(approval => {
               const reviewedArtifacts = snapshot.artifacts.filter(artifact => approval.reviewed_artifact_ids.includes(artifact.id));
               const evidenceComplete = approval.reviewed_artifact_ids.length > 0 && reviewedArtifacts.length === approval.reviewed_artifact_ids.length;
               return (
@@ -844,15 +851,15 @@ const BuilderControlRoomPage: React.FC<{ onOpenBob?: (prompt: string) => void }>
               </section>
               );
             })}
-            <div className="builder-actions">
+            {!successorId && <div className="builder-actions">
               <button type="button" onClick={() => void createWorkspace()} disabled={Boolean(busy) || Boolean(selectedJob.workspace_branch)}><FolderTree size={15} /> {selectedJob.workspace_branch ? 'Workspace ready' : 'Create workspace'}</button>
               <button type="button" onClick={() => void publishWorkspace()} disabled={Boolean(busy) || !selectedJob.workspace_branch || selectedJob.workspace_published_head_sha === selectedJob.workspace_head_sha}><Workflow size={15} /> {selectedJob.workspace_published_head_sha === selectedJob.workspace_head_sha ? 'Published for review' : 'Publish for review'}</button>
               <button type="button" onClick={() => void createPullRequest()} disabled={Boolean(busy) || selectedJob.workspace_published_head_sha !== selectedJob.workspace_head_sha || selectedJob.workspace_pull_request_head_sha === selectedJob.workspace_head_sha}>{selectedJob.workspace_pull_request_head_sha === selectedJob.workspace_head_sha ? 'Pull request ready' : 'Create pull request'}</button>
               {!selectedJob.autopilot_requested_by && !['deployed', 'failed', 'cancelled'].includes(selectedJob.status) && <button type="button" className="is-primary" onClick={() => void driveJob()} disabled={Boolean(busy)}>{busy === 'drive' ? <RefreshCw size={15} className="is-spinning" /> : <Bot size={15} />} Let Bob drive</button>}
               <button type="button" onClick={() => void advance('advance')} disabled={Boolean(busy)}><Play size={15} /> Run next step</button>
               <button type="button" className="is-primary" onClick={() => void advance('run')} disabled={Boolean(busy)}>{busy === 'run' ? <RefreshCw size={15} className="is-spinning" /> : <Workflow size={15} />} Run to gate</button>
-            </div>
-            {selectedJob.workspace_branch && <section className="builder-followup"><label>Continue on this branch<textarea value={followupTask} onChange={event => setFollowupTask(event.target.value)} rows={3} placeholder="Describe the next change, refinement, or repair for Bob Builder" /></label><button type="button" onClick={() => void createFollowup()} disabled={Boolean(busy) || !followupTask.trim()}><Bot size={15} /> {busy === 'followup' ? 'Starting...' : 'Continue build'}</button></section>}
+            </div>}
+            {!successorId && selectedJob.workspace_branch && <section className="builder-followup"><label>Continue on this branch<textarea value={followupTask} onChange={event => setFollowupTask(event.target.value)} rows={3} placeholder="Describe the next change, refinement, or repair for Bob Builder" /></label><button type="button" onClick={() => void createFollowup()} disabled={Boolean(busy) || !followupTask.trim()}><Bot size={15} /> {busy === 'followup' ? 'Starting...' : 'Continue build'}</button></section>}
             {!['deployed', 'failed', 'cancelled'].includes(selectedJob.status) && <section className="builder-followup builder-cancel" aria-label="Cancel Builder job"><label>Cancellation reason<textarea value={cancellationReason} onChange={event => setCancellationReason(event.target.value)} rows={3} required disabled={Boolean(busy)} /></label><button type="button" className="is-danger" onClick={() => void cancelJob()} disabled={Boolean(busy) || !cancellationReason.trim()}><CircleStop size={15} /> {busy === 'cancel' ? 'Cancelling…' : 'Cancel job'}</button></section>}
           </>}
         </section>
