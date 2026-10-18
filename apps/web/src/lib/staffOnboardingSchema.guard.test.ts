@@ -8,6 +8,7 @@ const migration = (name: string) => {
 };
 const ledger = migration('20260904170000_staff_onboarding_ledger.sql');
 const evidence = migration('20260904180000_staff_onboarding_evidence.sql');
+const employment = migration('20261018075927_govern_staff_employment_setup.sql');
 const page = readFileSync(resolve(process.cwd(), 'src/pages/RosterHRPage.tsx'), 'utf8');
 
 describe('governed staff onboarding', () => {
@@ -51,5 +52,18 @@ describe('governed staff onboarding', () => {
     expect(page).toContain("'assign_line_manager'");
     expect(page).toContain("'record_induction'");
     expect(page).toContain("'record_document'");
+  });
+
+  it('treats employment setup as one governed, race-checked onboarding action', () => {
+    expect(employment).toContain('CREATE OR REPLACE FUNCTION public.set_staff_employment_setup');
+    expect(employment).toContain('Staff employment changed; reload before saving');
+    expect(employment).toContain('An active organization payroll role is required');
+    expect(employment).toContain("'staff_employment_setup_saved'");
+    expect(employment).toContain("sp.employment_type IS NULL OR sp.start_date IS NULL");
+    expect(employment).toContain("sp.role_code IS NULL THEN 'Assign a payroll role'");
+    expect(employment).toContain("THEN 'Complete employment setup'");
+    expect(page).toContain("supabase.rpc('set_staff_employment_setup'");
+    expect(page).toContain('Use the highlighted next action');
+    expect(page).toContain('Other onboarding actions');
   });
 });

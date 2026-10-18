@@ -171,6 +171,12 @@ interface StaffOnboardingRow {
   status: string;
   version: number;
   target_start: string | null;
+  identity_status: string;
+  employment_status: string;
+  evidence_status: string;
+  supervision_status: string;
+  induction_status: string;
+  work_status: string;
   blockers: string[];
   next_action: string;
 }
@@ -425,6 +431,19 @@ const RosterHRPage: React.FC = () => {
   const [assetCheck, setAssetCheck] = useState<{ asset: AssetRow; condition: string; odometer: string; fuel: string; defects: string } | null>(null);
   const [payrollExport, setPayrollExport] = useState<{ from: string; to: string } | null>(null);
   const [onboardingAction, setOnboardingAction] = useState<{ staffId: string; ledgerId?: string; version?: number; nextStage?: string; name: string; note: string } | null>(null);
+  const [employmentAction, setEmploymentAction] = useState<{
+    staffId: string;
+    name: string;
+    expectedEmploymentType: string | null;
+    expectedStartDate: string | null;
+    expectedEndDate: string | null;
+    expectedRoleCode: string | null;
+    employmentType: string;
+    startDate: string;
+    endDate: string;
+    roleCode: string;
+    reason: string;
+  } | null>(null);
   const [evidenceAction, setEvidenceAction] = useState<{ staffId: string; name: string; action: EvidenceActionKind; note: string; skillId: string; proficiency: string; managerId: string; trainingName: string; siteRequirementId: string; expiresAt: string; documentType: string; fileName: string; storagePath: string; credentialType: string; credentialNumber: string; issuingAuthority: string; issuedDate: string; expiryDate: string; credentialVerified: boolean } | null>(null);
   const [siteInductionState, setSiteInductionState] = useState<SiteInductionStateRow[]>([]);
   const [catalogSkills, setCatalogSkills] = useState<CatalogSkill[]>([]);
@@ -1017,6 +1036,31 @@ const RosterHRPage: React.FC = () => {
     setSaving(false);
   };
 
+  const saveEmploymentSetup = async (event: React.FormEvent) => {
+    event.preventDefault();
+    if (!employmentAction) return;
+    setSaving(true); setError(null); setNotice(null);
+    const { error: employmentError } = await supabase.rpc('set_staff_employment_setup', {
+      p_staff_id: employmentAction.staffId,
+      p_expected_employment_type: employmentAction.expectedEmploymentType,
+      p_expected_start_date: employmentAction.expectedStartDate,
+      p_expected_end_date: employmentAction.expectedEndDate,
+      p_expected_role_code: employmentAction.expectedRoleCode,
+      p_employment_type: employmentAction.employmentType,
+      p_start_date: employmentAction.startDate,
+      p_end_date: employmentAction.endDate || null,
+      p_role_code: employmentAction.roleCode,
+      p_reason: employmentAction.reason.trim(),
+    });
+    if (employmentError) setError(employmentError.message);
+    else {
+      setNotice(`${employmentAction.name} employment setup saved. Continue with the next onboarding requirement.`);
+      setEmploymentAction(null);
+      await loadAll();
+    }
+    setSaving(false);
+  };
+
   const openCallout = async (period: OnCallRow) => {
     setSaving(true); setError(null); setNotice(null);
     const { error: calloutError } = await supabase.rpc('open_callout', {
@@ -1187,6 +1231,78 @@ const RosterHRPage: React.FC = () => {
     setEvidenceAction({ staffId, name, action, note: '', skillId: '', proficiency: 'competent', managerId: '', trainingName: '', siteRequirementId: '', expiresAt: '', documentType: 'policy_acknowledgement', fileName: '', storagePath: '', credentialType: 'security_licence', credentialNumber: '', issuingAuthority: '', issuedDate: '', expiryDate: '', credentialVerified: true });
   };
 
+  const openEmploymentSetup = (person: StaffRow, name: string) => {
+    if (!person.staff_id) return;
+    setEmploymentAction({
+      staffId: person.staff_id,
+      name,
+      expectedEmploymentType: person.employment_type,
+      expectedStartDate: person.start_date,
+      expectedEndDate: person.end_date,
+      expectedRoleCode: person.role_code,
+      employmentType: person.employment_type ?? 'permanent',
+      startDate: person.start_date ?? '',
+      endDate: person.end_date ?? '',
+      roleCode: person.role_code ?? '',
+      reason: 'Employment details checked for onboarding.',
+    });
+  };
+
+  const onboardingPrimaryActionLabel = (ledger: StaffOnboardingRow) => {
+    if (ledger.current_stage === 'identity') return ledger.identity_status === 'complete' ? 'Continue to Employment' : 'Complete identity';
+    if (ledger.current_stage === 'employment') return ledger.employment_status === 'complete' ? 'Continue to Evidence' : 'Complete employment setup';
+    if (ledger.current_stage === 'evidence') {
+      if (ledger.evidence_status === 'complete') return 'Continue to Supervision';
+      return ledger.next_action;
+    }
+    if (ledger.current_stage === 'supervision') return ledger.supervision_status === 'complete' ? 'Continue to Induction' : 'Assign line manager';
+    if (ledger.current_stage === 'induction') return ledger.induction_status === 'complete' ? 'Continue to Review' : 'Record induction';
+    if (ledger.current_stage === 'review') return ledger.work_status === 'ready' ? 'Complete onboarding' : 'Review work readiness';
+    return 'Onboarding complete';
+  };
+
+  const runOnboardingPrimaryAction = (person: StaffRow, ledger: StaffOnboardingRow, name: string) => {
+    const advance = () => {
+      const nextStage = nextOnboardingStage(ledger.current_stage);
+      if (nextStage) setOnboardingAction({ staffId: person.staff_id!, ledgerId: ledger.ledger_id, version: ledger.version, nextStage, name, note: '' });
+    };
+    if (ledger.current_stage === 'identity') {
+      if (ledger.identity_status === 'complete') advance();
+      else navigate('/admin/users');
+      return;
+    }
+    if (ledger.current_stage === 'employment') {
+      if (ledger.employment_status === 'complete') advance();
+      else openEmploymentSetup(person, name);
+      return;
+    }
+    if (ledger.current_stage === 'evidence') {
+      if (ledger.evidence_status === 'complete') advance();
+      else if (ledger.next_action === 'Verify credential') openEvidence(person.staff_id!, name, 'record_credential');
+      else if (ledger.next_action === 'Upload evidence') openEvidence(person.staff_id!, name, 'record_document');
+      else openEvidence(person.staff_id!, name, 'add_skill');
+      return;
+    }
+    if (ledger.current_stage === 'supervision') {
+      if (ledger.supervision_status === 'complete') advance();
+      else openEvidence(person.staff_id!, name, 'assign_line_manager');
+      return;
+    }
+    if (ledger.current_stage === 'induction') {
+      if (ledger.induction_status === 'complete') advance();
+      else openEvidence(person.staff_id!, name, 'record_induction');
+      return;
+    }
+    if (ledger.current_stage === 'review') {
+      if (ledger.work_status === 'ready') advance();
+      else {
+        const assessment = readinessAssessments.find((item) => item.staff_id === person.staff_id);
+        setReadinessNotes('');
+        setReadinessReview({ staffId: person.staff_id!, name, current: assessment?.work_ready ?? false, next: true });
+      }
+    }
+  };
+
   const saveCatalogSkill = async (event?: React.FormEvent) => {
     event?.preventDefault();
     if (!skillCatalogDraft.name.trim()) return;
@@ -1295,7 +1411,11 @@ const RosterHRPage: React.FC = () => {
     setSaving(true); setError(null); setNotice(null);
     const { error: advanceError } = await supabase.rpc('manage_recruitment_candidate', { p_candidate_id: candidateAction.candidate.id, p_expected_stage: candidateAction.candidate.stage, p_next_stage: candidateAction.nextStage, p_note: candidateAction.note.trim(), p_offer_role: candidateAction.nextStage === 'offer' ? candidateAction.offerRole : null, p_offer_employment_type: candidateAction.nextStage === 'offer' ? candidateAction.offerEmploymentType : null, p_offer_start_date: candidateAction.nextStage === 'offer' ? candidateAction.offerStartDate : null });
     if (advanceError) setError(advanceError.message);
-    else { setNotice(`Candidate moved to ${candidateAction.nextStage.replaceAll('_', ' ')}.`); setCandidateAction(null); await loadAll(); }
+    else {
+      const nextLabel = candidateAction.nextStage === 'declined' ? 'not suitable' : candidateAction.nextStage.replaceAll('_', ' ');
+      setNotice(candidateAction.nextStage === 'declined' ? 'Candidate marked as not suitable and declined.' : `Candidate moved to ${nextLabel}.`);
+      setCandidateAction(null); await loadAll();
+    }
     setSaving(false);
   };
 
@@ -1657,7 +1777,7 @@ const RosterHRPage: React.FC = () => {
           {showVacancyForm && <form className="assessment-form" onSubmit={createVacancy}><div className="form-row"><label><span>Role title</span><input required value={vacancyForm.title} onChange={(event) => setVacancyForm({ ...vacancyForm, title: event.target.value })} /></label><label><span>Employment type</span><select value={vacancyForm.employmentType} onChange={(event) => setVacancyForm({ ...vacancyForm, employmentType: event.target.value })}><option value="permanent">Permanent</option><option value="part_time">Part time</option><option value="casual">Casual</option><option value="contractor">Contractor</option><option value="volunteer">Volunteer</option></select></label></div><label><span>Location summary</span><input value={vacancyForm.location} onChange={(event) => setVacancyForm({ ...vacancyForm, location: event.target.value })} /></label><button type="submit" className="btn btn-primary" disabled={saving || !vacancyForm.title.trim()}>{saving ? 'Saving' : 'Create draft vacancy'}</button></form>}
           {showCandidateForm && <form className="assessment-form" onSubmit={createCandidate}><label><span>Open vacancy</span><select required value={candidateForm.vacancyId} onChange={(event) => setCandidateForm({ ...candidateForm, vacancyId: event.target.value })}><option value="">Select vacancy</option>{vacancies.filter((vacancy) => vacancy.status === 'open').map((vacancy) => <option value={vacancy.id} key={vacancy.id}>{vacancy.title}</option>)}</select></label><div className="form-row"><label><span>First name</span><input required value={candidateForm.firstName} onChange={(event) => setCandidateForm({ ...candidateForm, firstName: event.target.value })} /></label><label><span>Last name</span><input required value={candidateForm.lastName} onChange={(event) => setCandidateForm({ ...candidateForm, lastName: event.target.value })} /></label></div><div className="form-row"><label><span>Email</span><input type="email" required value={candidateForm.email} onChange={(event) => setCandidateForm({ ...candidateForm, email: event.target.value })} /></label><label><span>Phone</span><input value={candidateForm.phone} onChange={(event) => setCandidateForm({ ...candidateForm, phone: event.target.value })} /></label></div><button type="submit" className="btn btn-primary" disabled={saving || !candidateForm.vacancyId || !candidateForm.firstName.trim() || !candidateForm.lastName.trim() || !candidateForm.email.trim()}>{saving ? 'Saving' : 'Add candidate'}</button></form>}
           <h3>Vacancies ({vacancies.length})</h3><div className="contacts-list">{vacancies.length === 0 ? <div className="empty-state"><p>No vacancies. Create a draft vacancy to begin recruitment.</p></div> : vacancies.map((vacancy) => <div key={vacancy.id} className="contact-card"><div className="contact-header"><h3>{vacancy.title}</h3><span className={`status-badge status-${vacancy.status}`}>{vacancy.status}</span></div><div className="contact-details"><p>{vacancy.employment_type.replaceAll('_', ' ')}{vacancy.location_summary ? ` · ${vacancy.location_summary}` : ''}</p></div>{vacancy.status === 'draft' && <button type="button" className="btn btn-sm btn-primary" disabled={saving} onClick={() => void manageVacancy(vacancy, 'open')}>Open vacancy</button>}{vacancy.status === 'open' && <button type="button" className="btn btn-sm btn-secondary" disabled={saving} onClick={() => void manageVacancy(vacancy, 'close')}>Close vacancy</button>}</div>)}</div>
-          <h3 style={{ marginTop: '1.5rem' }}>Candidates ({candidates.length})</h3><p className="hr-section-hint">Applied → screening → interview → reference check → offer. When the candidate accepts, hiring creates their login and staff record and starts onboarding.</p><div className="contacts-list">{candidates.length === 0 ? <div className="empty-state"><p>No candidates yet. Open a vacancy, then add the people who applied.</p></div> : candidates.map((candidate) => { const vacancy = vacancies.find((item) => item.id === candidate.vacancy_id); const nextStage = ({ applied: 'screening', screening: 'interview', interview: 'reference_check', reference_check: 'offer' } as Record<string, string>)[candidate.stage]; const awaitingAcceptance = candidate.stage === 'offer' && candidate.status === 'offered'; return <div key={candidate.id} className="contact-card"><div className="contact-header"><h3>{candidate.first_name} {candidate.last_name}</h3><span className={`status-badge status-${candidate.status}`}>{candidate.status === 'hired' ? 'Hired' : awaitingAcceptance ? 'Offer made' : plainWords(candidate.stage)}</span></div><div className="contact-details"><p>{candidate.email} · {vacancy?.title ?? 'Vacancy unavailable'}</p>{candidate.offer_start_date && <p className="contact-meta">Offer: {plainWords(candidate.offer_role, 'role')} · {plainWords(candidate.offer_employment_type, 'employment type not set')} · starts {new Date(candidate.offer_start_date).toLocaleDateString('en-NZ')}</p>}{candidate.status === 'hired' && <p className="contact-meta">Now on the Staff tab – complete onboarding, then mark work ready.</p>}</div>{nextStage && <button type="button" className="btn btn-sm btn-secondary" onClick={() => setCandidateAction({ candidate, nextStage, note: '' })}>{nextStage === 'offer' ? 'Make an offer' : `Move to ${plainWords(nextStage).toLowerCase()}`}</button>}{awaitingAcceptance && <button type="button" className="btn btn-sm btn-primary" onClick={() => setOfferAction({ candidate, role: candidate.offer_role ?? 'officer', employmentType: candidate.offer_employment_type ?? 'permanent', startDate: candidate.offer_start_date ?? '', note: '', accepted: true })}>Candidate accepted – hire</button>}</div>; })}</div>
+          <h3 style={{ marginTop: '1.5rem' }}>Candidates ({candidates.length})</h3><p className="hr-section-hint">Applied → screening → interview → reference check → offer. When the candidate accepts, hiring creates their login and staff record and starts onboarding. Unsuccessful applicants can be marked as not suitable at any point in the funnel.</p><div className="contacts-list">{candidates.length === 0 ? <div className="empty-state"><p>No candidates yet. Open a vacancy, then add the people who applied.</p></div> : candidates.map((candidate) => { const vacancy = vacancies.find((item) => item.id === candidate.vacancy_id); const nextStage = ({ applied: 'screening', screening: 'interview', interview: 'reference_check', reference_check: 'offer' } as Record<string, string>)[candidate.stage]; const awaitingAcceptance = candidate.stage === 'offer' && candidate.status === 'offered'; const canBeDismissed = !['declined', 'withdrawn', 'hired'].includes(candidate.status); return <div key={candidate.id} className="contact-card"><div className="contact-header"><h3>{candidate.first_name} {candidate.last_name}</h3><span className={`status-badge status-${candidate.status}`}>{candidate.status === 'hired' ? 'Hired' : candidate.status === 'declined' ? 'Not suitable' : candidate.status === 'withdrawn' ? 'Withdrawn' : awaitingAcceptance ? 'Offer made' : plainWords(candidate.stage)}</span></div><div className="contact-details"><p>{candidate.email} · {vacancy?.title ?? 'Vacancy unavailable'}</p>{candidate.offer_start_date && <p className="contact-meta">Offer: {plainWords(candidate.offer_role, 'role')} · {plainWords(candidate.offer_employment_type, 'employment type not set')} · starts {new Date(candidate.offer_start_date).toLocaleDateString('en-NZ')}</p>}{candidate.status === 'hired' && <p className="contact-meta">Now on the Staff tab – complete onboarding, then mark work ready.</p>}</div><div className="assessment-actions" style={{ marginTop: '0.75rem' }}>{nextStage && <button type="button" className="btn btn-sm btn-secondary" onClick={() => setCandidateAction({ candidate, nextStage, note: '' })}>{nextStage === 'offer' ? 'Make an offer' : `Move to ${plainWords(nextStage).toLowerCase()}`}</button>}{canBeDismissed && <button type="button" className="btn btn-sm btn-danger" onClick={() => setCandidateAction({ candidate, nextStage: 'declined', note: `Not suitable for ${vacancy?.title ?? 'this role'} after review.` })}>Mark as not suitable</button>}{awaitingAcceptance && <button type="button" className="btn btn-sm btn-primary" onClick={() => setOfferAction({ candidate, role: candidate.offer_role ?? 'officer', employmentType: candidate.offer_employment_type ?? 'permanent', startDate: candidate.offer_start_date ?? '', note: '', accepted: true })}>Candidate accepted – hire</button>}</div></div>; })}</div>
         </section>
       )}
 
@@ -1672,12 +1792,11 @@ const RosterHRPage: React.FC = () => {
       {tab === 'onboarding' && (
         <section className="reports-section">
           <h2>Staff Onboarding ({onboarding.length})</h2>
-          <p className="hr-section-hint">Seven steps from hired to work-ready. Each step is checked against the record before it can advance; record the evidence on the card, then advance.</p>
+          <p className="hr-section-hint">Seven steps from hired to work-ready. Use the highlighted next action; the server checks the saved record before the person can continue.</p>
           <div className="contacts-list">
             {staff.filter((person) => person.staff_id).length === 0 && <div className="empty-state"><p>No staff to onboard yet. Hire a candidate under People → Recruitment first.</p></div>}
             {staff.filter((person) => person.staff_id).map((person) => {
               const ledger = onboarding.find((item) => item.staff_id === person.staff_id);
-              const nextStage = ledger ? nextOnboardingStage(ledger.current_stage) : null;
               const name = person.display_name ?? person.email ?? 'Staff member';
               const currentIndex = ledger ? ONBOARDING_STEPS.findIndex((step) => step.stage === ledger.current_stage) : -1;
               return <div key={person.id} className="contact-card">
@@ -1690,13 +1809,11 @@ const RosterHRPage: React.FC = () => {
                   {ledger?.blockers?.length ? <p className="contact-meta hr-onboarding-blockers">Holding this up: {ledger.blockers.join(' · ')}</p> : null}
                 </div>
                 <div className="assessment-actions">
-                  {!ledger ? <button type="button" className="btn btn-sm btn-primary" onClick={() => setOnboardingAction({ staffId: person.staff_id!, name, note: 'Onboarding started' })}>Start onboarding</button> : nextStage && <button type="button" className="btn btn-sm btn-primary" disabled={saving} onClick={() => setOnboardingAction({ staffId: person.staff_id!, ledgerId: ledger.ledger_id, version: ledger.version, nextStage, name: ledger.display_name, note: '' })}>Next: {onboardingStageLabel(nextStage)}</button>}
-                  <button type="button" className="btn btn-sm btn-secondary" onClick={() => openEvidence(person.staff_id!, name, 'record_credential')}>Record credential</button>
-                  <button type="button" className="btn btn-sm btn-secondary" onClick={() => openEvidence(person.staff_id!, name, 'add_skill')}>Add skill</button>
-                  <button type="button" className="btn btn-sm btn-secondary" onClick={() => openEvidence(person.staff_id!, name, 'assign_line_manager')}>Assign manager</button>
-                  <button type="button" className="btn btn-sm btn-secondary" onClick={() => openEvidence(person.staff_id!, name, 'record_induction')}>Record site induction</button>
-                  <button type="button" className="btn btn-sm btn-secondary" onClick={() => openEvidence(person.staff_id!, name, 'record_document')}>Register document</button>
+                  {!ledger
+                    ? <button type="button" className="btn btn-sm btn-primary" onClick={() => setOnboardingAction({ staffId: person.staff_id!, name, note: 'Onboarding started' })}>Start onboarding</button>
+                    : ledger.status !== 'ready' && <button type="button" className="btn btn-sm btn-primary" disabled={saving} onClick={() => runOnboardingPrimaryAction(person, ledger, name)}>{onboardingPrimaryActionLabel(ledger)}</button>}
                 </div>
+                {ledger && ledger.status !== 'ready' && <details className="hr-onboarding-more"><summary>Other onboarding actions</summary><div className="assessment-actions"><button type="button" className="btn btn-sm btn-secondary" onClick={() => openEmploymentSetup(person, name)}>Employment setup</button><button type="button" className="btn btn-sm btn-secondary" onClick={() => openEvidence(person.staff_id!, name, 'record_credential')}>Record credential</button><button type="button" className="btn btn-sm btn-secondary" onClick={() => openEvidence(person.staff_id!, name, 'add_skill')}>Add skill</button><button type="button" className="btn btn-sm btn-secondary" onClick={() => openEvidence(person.staff_id!, name, 'assign_line_manager')}>Assign manager</button><button type="button" className="btn btn-sm btn-secondary" onClick={() => openEvidence(person.staff_id!, name, 'record_induction')}>Record site induction</button><button type="button" className="btn btn-sm btn-secondary" onClick={() => openEvidence(person.staff_id!, name, 'record_document')}>Register document</button></div></details>}
               </div>;
             })}
           </div>
@@ -2303,7 +2420,9 @@ const RosterHRPage: React.FC = () => {
 
       {onboardingAction && <div className="hr-review-backdrop"><form className="hr-review-dialog" role="dialog" aria-modal="true" aria-labelledby="staff-onboarding-title" onSubmit={manageOnboarding}><header><div><span>Staff onboarding</span><h2 id="staff-onboarding-title">{onboardingAction.ledgerId ? `Move to ${onboardingStageLabel(onboardingAction.nextStage ?? '')}?` : 'Start onboarding'}</h2></div><button type="button" onClick={() => setOnboardingAction(null)} aria-label="Close staff onboarding">×</button></header><p>{onboardingAction.name}. {onboardingAction.ledgerId ? `Needs: ${ONBOARDING_STEPS.find((step) => step.stage === onboardingAction.nextStage)?.needs ?? 'the previous step complete'}. The record is rechecked before the step advances.` : 'This opens step 1 (Identity) and records who started it.'}</p><label><span>Stage note</span><textarea required rows={4} value={onboardingAction.note} onChange={(event) => setOnboardingAction({ ...onboardingAction, note: event.target.value })} /></label><footer><button type="button" className="btn btn-secondary" onClick={() => setOnboardingAction(null)}>Cancel</button><button type="submit" className="btn btn-primary" disabled={saving || !onboardingAction.note.trim()}>{saving ? 'Saving' : onboardingAction.ledgerId ? 'Advance step' : 'Start onboarding'}</button></footer></form></div>}
 
-      {candidateAction && <div className="hr-review-backdrop"><form className="hr-review-dialog" role="dialog" aria-modal="true" aria-labelledby="candidate-stage-title" onSubmit={advanceCandidate}><header><div><span>Recruitment</span><h2 id="candidate-stage-title">Move to {candidateAction.nextStage.replaceAll('_', ' ')}</h2></div><button type="button" onClick={() => setCandidateAction(null)} aria-label="Close candidate stage">×</button></header><p>{candidateAction.candidate.first_name} {candidateAction.candidate.last_name}. Stage history is retained for every candidate decision.</p><label><span>Stage note</span><textarea required rows={4} value={candidateAction.note} onChange={(event) => setCandidateAction({ ...candidateAction, note: event.target.value })} /></label><footer><button type="button" className="btn btn-secondary" onClick={() => setCandidateAction(null)}>Cancel</button><button type="submit" className="btn btn-primary" disabled={saving || !candidateAction.note.trim()}>{saving ? 'Saving' : 'Advance candidate'}</button></footer></form></div>}
+      {candidateAction && <div className="hr-review-backdrop"><form className="hr-review-dialog" role="dialog" aria-modal="true" aria-labelledby="candidate-stage-title" onSubmit={advanceCandidate}><header><div><span>Recruitment</span><h2 id="candidate-stage-title">{candidateAction.nextStage === 'declined' ? 'Mark as not suitable' : `Move to ${candidateAction.nextStage.replaceAll('_', ' ')}`}</h2></div><button type="button" onClick={() => setCandidateAction(null)} aria-label="Close candidate stage">×</button></header><p>{candidateAction.candidate.first_name} {candidateAction.candidate.last_name}. {candidateAction.nextStage === 'declined' ? 'Record a factual, job-related reason. Do not record protected personal characteristics or unsupported assumptions. This saves the internal decision and audit history; it does not email the candidate.' : 'Stage history is retained for every candidate decision.'}</p><label><span>{candidateAction.nextStage === 'declined' ? 'Job-related reason' : 'Stage note'}</span><textarea required rows={4} value={candidateAction.note} onChange={(event) => setCandidateAction({ ...candidateAction, note: event.target.value })} /></label><footer><button type="button" className="btn btn-secondary" onClick={() => setCandidateAction(null)}>Cancel</button><button type="submit" className="btn btn-primary" disabled={saving || !candidateAction.note.trim()}>{saving ? 'Saving' : candidateAction.nextStage === 'declined' ? 'Decline candidate' : 'Advance candidate'}</button></footer></form></div>}
+
+      {employmentAction && <div className="hr-review-backdrop"><form className="hr-review-dialog" role="dialog" aria-modal="true" aria-labelledby="employment-setup-title" onSubmit={saveEmploymentSetup}><header><div><span>Staff onboarding</span><h2 id="employment-setup-title">Complete employment setup</h2></div><button type="button" onClick={() => setEmploymentAction(null)} aria-label="Close employment setup">×</button></header><p>{employmentAction.name}. Employment type, dates, and payroll role are saved together and audited before onboarding can continue.</p><div className="form-row"><label><span>Employment type</span><select value={employmentAction.employmentType} onChange={(event) => setEmploymentAction({ ...employmentAction, employmentType: event.target.value })}><option value="permanent">Permanent</option><option value="part_time">Part time</option><option value="casual">Casual</option><option value="contractor">Contractor</option><option value="volunteer">Volunteer</option></select></label><label><span>Payroll role</span><select required value={employmentAction.roleCode} onChange={(event) => setEmploymentAction({ ...employmentAction, roleCode: event.target.value })}><option value="">Select payroll role</option>{roleCodes.map((code) => <option value={code.code} key={code.code}>{code.code} · {code.name}</option>)}</select></label></div><div className="form-row"><label><span>Start date</span><input type="date" required value={employmentAction.startDate} onChange={(event) => setEmploymentAction({ ...employmentAction, startDate: event.target.value })} /></label><label><span>End date</span><input type="date" min={employmentAction.startDate || undefined} value={employmentAction.endDate} onChange={(event) => setEmploymentAction({ ...employmentAction, endDate: event.target.value })} /></label></div>{roleCodes.length === 0 && <div className="hr-guidance" role="status"><p>No payroll roles are configured yet.</p><button type="button" className="btn btn-sm btn-secondary" onClick={() => { setEmploymentAction(null); setTab('staff'); setTabGroup('workforce'); setShowPayRoleCodeForm(true); }}>Create payroll role code</button></div>}<label><span>Reason for setup</span><textarea required rows={3} value={employmentAction.reason} onChange={(event) => setEmploymentAction({ ...employmentAction, reason: event.target.value })} /></label><footer><button type="button" className="btn btn-secondary" onClick={() => setEmploymentAction(null)}>Cancel</button><button type="submit" className="btn btn-primary" disabled={saving || !employmentAction.startDate || !employmentAction.roleCode || !employmentAction.reason.trim()}>{saving ? 'Saving' : 'Save employment setup'}</button></footer></form></div>}
 
       {offerAction && <div className="hr-review-backdrop"><form className="hr-review-dialog" role="dialog" aria-modal="true" aria-labelledby="offer-title" onSubmit={sendOffer}><header><div><span>Recruitment offer</span><h2 id="offer-title">{offerAction.candidate.stage === 'offer' ? 'Confirm acceptance and hire' : 'Record offer'}</h2></div><button type="button" onClick={() => setOfferAction(null)} aria-label="Close offer form">×</button></header><p>{offerAction.candidate.first_name} {offerAction.candidate.last_name}. {offerAction.candidate.stage === 'offer' ? 'Confirming acceptance creates their login and staff record for this branch and starts onboarding.' : 'Recording an offer does not create a login. Hire only after the candidate has accepted – you can come back to this candidate to confirm.'}</p><label><span>Application role</span><select value={offerAction.role} onChange={(event) => setOfferAction({ ...offerAction, role: event.target.value })}><option value="officer">Officer</option><option value="admin_officer">Senior officer</option></select></label><div className="form-row"><label><span>Employment type</span><select value={offerAction.employmentType} onChange={(event) => setOfferAction({ ...offerAction, employmentType: event.target.value })}><option value="permanent">Permanent</option><option value="part_time">Part time</option><option value="casual">Casual</option><option value="contractor">Contractor</option><option value="volunteer">Volunteer</option></select></label><label><span>Proposed start</span><input type="date" required value={offerAction.startDate} onChange={(event) => setOfferAction({ ...offerAction, startDate: event.target.value })} /></label></div><label><span>Offer note</span><textarea required rows={4} value={offerAction.note} onChange={(event) => setOfferAction({ ...offerAction, note: event.target.value })} /></label><label className="roster-publish"><input type="checkbox" checked={offerAction.accepted} onChange={(event) => setOfferAction({ ...offerAction, accepted: event.target.checked })} /><span><b>Candidate has accepted this offer</b><small>Provision an application identity and start staff onboarding only after verified acceptance.</small></span></label><footer><button type="button" className="btn btn-secondary" onClick={() => setOfferAction(null)}>Cancel</button><button type="submit" className="btn btn-primary" disabled={saving || !offerAction.startDate || !offerAction.note.trim()}>{saving ? 'Saving' : offerAction.accepted ? 'Confirm acceptance and hire' : 'Record offer'}</button></footer></form></div>}
 

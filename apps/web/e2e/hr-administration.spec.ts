@@ -353,7 +353,7 @@ test('an offered candidate can be hired later, which creates the login and staff
 
 test('onboarding shows each person as a seven-step ladder with what the next step needs', async ({ page }) => {
   const json = (body: unknown) => ({ status: 200, contentType: 'application/json', body: JSON.stringify(body) });
-  await page.route('**/rest/v1/rpc/get_staff_onboarding_readiness', async (route) => await route.fulfill(json([{ ledger_id: '81818181-8181-4181-8181-818181818181', staff_id: '22222222-2222-4222-8222-222222222222', user_id: '22222222-2222-4222-8222-222222222222', display_name: 'Ana Ngata', current_stage: 'evidence', status: 'in_progress', version: 3, target_start: '2026-09-07', blockers: ['No verified current credential'], next_action: 'record_evidence' }])));
+  await page.route('**/rest/v1/rpc/get_staff_onboarding_readiness', async (route) => await route.fulfill(json([{ ledger_id: '81818181-8181-4181-8181-818181818181', staff_id: '22222222-2222-4222-8222-222222222222', user_id: '22222222-2222-4222-8222-222222222222', display_name: 'Ana Ngata', current_stage: 'evidence', status: 'in_progress', version: 3, target_start: '2026-09-07', identity_status: 'complete', employment_status: 'complete', evidence_status: 'complete', supervision_status: 'blocked', induction_status: 'blocked', work_status: 'blocked', blockers: ['Assign a line manager'], next_action: 'Assign line manager' }])));
   await page.route('**/rest/v1/rpc/manage_staff_onboarding', async (route) => { const payload = JSON.parse(route.request().postData() ?? '{}'); expect(payload.p_action).toBe('advance'); expect(payload.p_stage).toBe('supervision'); expect(payload.p_expected_version).toBe(3); await route.fulfill(json([{ ledger_id: payload.p_ledger_id, current_stage: 'supervision', status: 'in_progress', version: 4 }])); });
   await signInAsAdmin(page, '/admin/people-hr');
   await page.getByRole('button', { name: 'Onboarding', exact: true }).click();
@@ -362,10 +362,10 @@ test('onboarding shows each person as a seven-step ladder with what the next ste
   await expect(ladder.getByRole('listitem')).toHaveCount(7);
   await expect(ladder.locator('li.is-done')).toHaveCount(2);
   await expect(ladder.locator('li.is-current')).toContainText('Evidence');
-  await expect(card.getByText('Holding this up: No verified current credential')).toBeVisible();
-  await expect(card.getByRole('button', { name: 'Record site induction' })).toBeVisible();
+  await expect(card.getByText('Holding this up: Assign a line manager')).toBeVisible();
+  await expect(card.getByRole('button', { name: 'Continue to Supervision' })).toBeVisible();
   await expect(card).toHaveScreenshot('hr-onboarding-ladder.png');
-  await card.getByRole('button', { name: 'Next: Supervision' }).click();
+  await card.getByRole('button', { name: 'Continue to Supervision' }).click();
   const dialog = page.getByRole('dialog', { name: 'Move to Supervision?' });
   await expect(dialog.getByText(/Needs: A line manager assigned/)).toBeVisible();
   await dialog.getByLabel('Stage note').fill('Evidence pack checked against the record.');
@@ -375,13 +375,13 @@ test('onboarding shows each person as a seven-step ladder with what the next ste
 
 test('a first credential is recorded and verified from the onboarding card through the governed RPC', async ({ page }) => {
   const json = (body: unknown) => ({ status: 200, contentType: 'application/json', body: JSON.stringify(body) });
-  await page.route('**/rest/v1/rpc/get_staff_onboarding_readiness', async (route) => await route.fulfill(json([{ ledger_id: '81818181-8181-4181-8181-818181818181', staff_id: '22222222-2222-4222-8222-222222222222', user_id: '22222222-2222-4222-8222-222222222222', display_name: 'Ana Ngata', current_stage: 'evidence', status: 'in_progress', version: 3, target_start: null, blockers: ['No verified current credential'], next_action: 'record_evidence' }])));
+  await page.route('**/rest/v1/rpc/get_staff_onboarding_readiness', async (route) => await route.fulfill(json([{ ledger_id: '81818181-8181-4181-8181-818181818181', staff_id: '22222222-2222-4222-8222-222222222222', user_id: '22222222-2222-4222-8222-222222222222', display_name: 'Ana Ngata', current_stage: 'evidence', status: 'in_progress', version: 3, target_start: null, identity_status: 'complete', employment_status: 'complete', evidence_status: 'blocked', supervision_status: 'blocked', induction_status: 'blocked', work_status: 'blocked', blockers: ['No verified current credential'], next_action: 'Verify credential' }])));
   let payload: Record<string, unknown> | null = null;
   await page.route('**/rest/v1/rpc/record_staff_credential', async (route) => { const body = JSON.parse(route.request().postData() ?? '{}'); payload = body; await route.fulfill(json([{ credential_id: '91919191-9191-4191-8191-919191919191', staff_id: body.p_staff_id, verified: true, verified_at: '2026-08-30T10:00:00.000Z', created: true }])); });
   await signInAsAdmin(page, '/admin/people-hr');
   await page.getByRole('button', { name: 'Onboarding', exact: true }).click();
   const card = page.locator('.contact-card', { has: page.getByRole('heading', { name: 'Ana Ngata' }) }).first();
-  await card.getByRole('button', { name: 'Record credential' }).click();
+  await card.getByRole('button', { name: 'Verify credential' }).click();
   const dialog = page.getByRole('dialog', { name: 'Record credential' });
   await expect(dialog.getByText(/A verified, current credential is what makes an officer work ready/)).toBeVisible();
   const submit = dialog.getByRole('button', { name: 'Record and verify' });
@@ -398,6 +398,72 @@ test('a first credential is recorded and verified from the onboarding card throu
   await expect(page.getByRole('status')).toContainText('Security licence recorded and verified for Ana Ngata. If nothing else is holding them up, you can mark them work ready.');
   expect(payload).toMatchObject({ p_staff_id: '22222222-2222-4222-8222-222222222222', p_credential_type: 'security_licence', p_credential_number: 'COA-123456', p_issuing_authority: 'PSPLA', p_issued_date: '2026-01-15', p_expiry_date: '2028-01-14', p_verified: true });
 });
+
+test('onboarding guides HR through employment setup as one audited step', async ({ page }) => {
+  const json = (body: unknown) => ({ status: 200, contentType: 'application/json', body: JSON.stringify(body) });
+  let saved: Record<string, unknown> | null = null;
+  await page.route('**/rest/v1/staff_profiles*', async (route) => await route.fulfill(json([
+    { id: '22222222-2222-4222-8222-222222222222', user_id: '22222222-2222-4222-8222-222222222222', employment_type: null, start_date: null, end_date: null, work_ready: false, role_code: null },
+  ])));
+  await page.route('**/rest/v1/reference_codes*', async (route) => await route.fulfill(json([{ id: '91919191-9191-4191-8191-919191919192', code: 'FIELD_SECURITY', name: 'Field security officer' }])));
+  await page.route('**/rest/v1/rpc/get_staff_onboarding_readiness', async (route) => await route.fulfill(json([{ ledger_id: '81818181-8181-4181-8181-818181818181', staff_id: '22222222-2222-4222-8222-222222222222', user_id: '22222222-2222-4222-8222-222222222222', display_name: 'Ana Ngata', current_stage: 'employment', status: 'in_progress', version: 2, target_start: null, identity_status: 'complete', employment_status: 'blocked', evidence_status: 'blocked', supervision_status: 'blocked', induction_status: 'blocked', work_status: 'blocked', blockers: ['Select an employment type', 'Set a current employment start date', 'Assign a payroll role'], next_action: 'Complete employment setup' }])));
+  await page.route('**/rest/v1/rpc/set_staff_employment_setup', async (route) => {
+    saved = JSON.parse(route.request().postData() ?? '{}');
+    await route.fulfill(json([{ id: '22222222-2222-4222-8222-222222222222', employment_type: 'permanent', start_date: '2026-09-14', role_code: 'FIELD_SECURITY' }]));
+  });
+
+  await signInAsAdmin(page, '/admin/people-hr');
+  await page.getByRole('button', { name: 'Onboarding', exact: true }).click();
+  const card = page.locator('.contact-card', { has: page.getByRole('heading', { name: 'Ana Ngata' }) }).first();
+  await card.getByRole('button', { name: 'Complete employment setup' }).click();
+  const dialog = page.getByRole('dialog', { name: 'Complete employment setup' });
+  await dialog.getByLabel('Employment type').selectOption('permanent');
+  await dialog.getByLabel('Payroll role').selectOption('FIELD_SECURITY');
+  await dialog.getByLabel('Start date').fill('2026-09-14');
+  await dialog.getByLabel('Reason for setup').fill('Signed employment details checked by HR.');
+  await dialog.getByRole('button', { name: 'Save employment setup' }).click();
+  await expect(page.getByRole('status')).toContainText('Ana Ngata employment setup saved. Continue with the next onboarding requirement.');
+  expect(saved).toMatchObject({
+    p_staff_id: '22222222-2222-4222-8222-222222222222',
+    p_expected_employment_type: null,
+    p_expected_start_date: null,
+    p_expected_role_code: null,
+    p_employment_type: 'permanent',
+    p_start_date: '2026-09-14',
+    p_role_code: 'FIELD_SECURITY',
+    p_reason: 'Signed employment details checked by HR.',
+  });
+});
+
+test('HR can mark an applicant not suitable with an audited job-related reason', async ({ page }) => {
+  const json = (body: unknown) => ({ status: 200, contentType: 'application/json', body: JSON.stringify(body) });
+  let decision: Record<string, unknown> | null = null;
+  await page.route('**/rest/v1/recruitment_vacancies**', async (route) => await route.fulfill(json([{ id: '71717171-7171-4171-8171-717171717171', title: 'Patrol officer – Nelson', employment_type: 'permanent', location_summary: 'Nelson', status: 'open', opens_on: null, closes_on: null }])));
+  await page.route('**/rest/v1/recruitment_candidates**', async (route) => await route.fulfill(json([{ id: '72727272-7272-4272-8272-727272727272', vacancy_id: '71717171-7171-4171-8171-717171717171', first_name: 'Tama', last_name: 'Rangi', email: 'tama@fcm.test', stage: 'screening', status: 'active', offer_role: null, offer_employment_type: null, offer_start_date: null }])));
+  await page.route('**/rest/v1/rpc/manage_recruitment_candidate', async (route) => {
+    decision = JSON.parse(route.request().postData() ?? '{}');
+    await route.fulfill(json([{ id: '72727272-7272-4272-8272-727272727272', stage: 'declined', status: 'declined' }]));
+  });
+
+  await signInAsAdmin(page, '/admin/people-hr');
+  await page.getByRole('button', { name: 'People', exact: true }).click();
+  await page.getByRole('button', { name: 'Recruitment', exact: true }).click();
+  const card = page.locator('.contact-card', { has: page.getByRole('heading', { name: 'Tama Rangi' }) });
+  await card.getByRole('button', { name: 'Mark as not suitable' }).click();
+  const dialog = page.getByRole('dialog', { name: 'Mark as not suitable' });
+  await expect(dialog.getByText(/factual, job-related reason/)).toBeVisible();
+  await expect(dialog.getByText(/does not email the candidate/)).toBeVisible();
+  await dialog.getByLabel('Job-related reason').fill('Required licence could not be verified by the closing date.');
+  await dialog.getByRole('button', { name: 'Decline candidate' }).click();
+  await expect(page.getByRole('status')).toContainText('Candidate marked as not suitable and declined.');
+  expect(decision).toMatchObject({
+    p_candidate_id: '72727272-7272-4272-8272-727272727272',
+    p_expected_stage: 'screening',
+    p_next_stage: 'declined',
+    p_note: 'Required licence could not be verified by the closing date.',
+  });
+});
+
 test('administrator sets the rest and hours rules the roster enforces, in plain words', async ({ page }) => {
   const errors = monitorBrowserErrors(page);
   let saved: Record<string, unknown> | null = null;
@@ -405,6 +471,7 @@ test('administrator sets the rest and hours rules the roster enforces, in plain 
     const payload = JSON.parse(route.request().postData() ?? '{}') as Record<string, unknown>; saved = payload;
     await route.fulfill({ status: 200, contentType: 'application/json', body: JSON.stringify({ organization_id: payload.p_organization_id, min_rest_hours_between_shifts: payload.p_min_rest_hours_between_shifts, max_hours_per_week: payload.p_max_hours_per_week, max_consecutive_days: payload.p_max_consecutive_days, enforced: payload.p_enforced, updated_at: '2026-08-30T09:31:00.000Z' }) });
   });
+
   await signInAsAdmin(page, '/admin/people-hr');
   await page.getByRole('button', { name: 'Rostering', exact: true }).click();
   await page.getByRole('button', { name: 'Rest & hours rules' }).click();
