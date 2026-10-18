@@ -16,7 +16,7 @@ actually work with a working org and its data and operations." Extended-scope,
 multi-session task — take as many turns as needed; real, verified progress each
 turn beats false completeness.
 
-## PATROL WORKBOOK FINANCE BACKFILL (2026-10-18) — BUILT AND VERIFIED, NOT PROMOTED
+## PATROL WORKBOOK FINANCE BACKFILL (2026-10-18) — MIGRATION LIVE, COSTS NOT PROMOTED
 
 - Audited the read-only R&M patrol-log corpus at `Patrol Log Entries/All Log
   Spreadsheets`: 48 workbooks, 175 worksheets, and 938,094 formula cells. The
@@ -47,8 +47,10 @@ turn beats false completeness.
   staging, evidence verification, exact mapping confirmation, aggregate
   review, batch approval, P&L period creation, finance insertion, and applied
   receipts in one live transaction. The result reached `applied`, then the
-  transaction was rolled back. No production schema or finance record was
-  persisted.
+  transaction was rolled back. PR #82 subsequently merged at `222ecc03`;
+  migration `20261018014551` is now live and `supabase/schema.sql` has been
+  regenerated from the live catalog. No finance source row or patrol cost was
+  promoted.
 - Local previews now parse all 16 financially relevant sheets in the active
   workbooks: 39,729 source rows, 34,251 positive cost components, 30,037
   locally eligible components, 2,214 quarantined components, and
@@ -64,8 +66,17 @@ turn beats false completeness.
 - Validation completed so far: focused Node tests pass, Python and Node entry
   points compile, the web production build passes, the migration compiles in a
   rolled-back live transaction, and the real-row rolled-back lifecycle passes.
-  Production promotion remains deliberately incomplete until the review gates
-  above are satisfied.
+  Live readback confirms one migration-ledger row, zero patrol finance source
+  rows, zero `patrol_log` service costs, and preservation of the existing
+  `dispatch_job` cost-source type. For the newly added objects, database
+  advisors report only the expected authenticated `SECURITY DEFINER` warnings
+  for the reviewed admin RPCs.
+- Atlas was refreshed from exact merge SHA `222ecc03`. The refresh exposed and
+  corrected a generator blind spot for PL/pgSQL assignment-style RPC calls
+  (`v_result := public.rpc(...)`), so the local staging CLI is now registered
+  as a real caller instead of leaving its RPC falsely unwired. Production cost
+  promotion remains deliberately incomplete until the review gates above are
+  satisfied.
 
 ## INVOICE AND PRICE-BOOK CORPUS (2026-10-18) — INVENTORIED, NOT PROMOTED
 
