@@ -40,7 +40,7 @@ declare
   v_source_hash text := repeat('a', 64);
   v_derivative_hash text := repeat('b', 64);
   v_manifest jsonb;
-  v_schema jsonb := '{"headers":[],"resolved_mappings":[]}'::jsonb;
+  v_schema jsonb := '{"headers":["Date",""," ","Job Cost"],"resolved_mappings":[]}'::jsonb;
   v_source_values jsonb;
   v_ok boolean;
   v_err text;
@@ -100,6 +100,35 @@ begin
     v_provider,v_client,'Oracle governed import','oracle.csv',v_source_hash,'csv',
     v_manifest,v_schema,1,0,0
   );
+  perform pg_temp.check(
+    'repeated blank headers are accepted without mapping-review rows',
+    (select count(*) = 2
+     and count(*) filter (where nullif(regexp_replace(btrim(source_column), '\s+', '', 'g'), '') is null) = 0
+     from public.file_import_mapping_reviews
+     where batch_id = v_batch.id)
+  );
+
+  begin
+    perform public.begin_patrol_import_batch(
+      v_provider,v_client,'Duplicate header oracle','duplicate.csv',repeat('c',64),'csv',
+      v_manifest || jsonb_build_object('idempotency_key','oracle-duplicate-' || gen_random_uuid()::text),
+      '{"headers":["Date","Date"],"resolved_mappings":[]}'::jsonb,1,0,0
+    );
+    v_ok := false;
+  exception when others then v_ok := true; v_err := sqlerrm; end;
+  perform pg_temp.check('duplicate named headers still fail: ' || coalesce(v_err,''),v_ok and v_err ilike '%duplicate source headers%');
+
+  v_ok := false;
+  v_err := null;
+  begin
+    perform public.begin_patrol_import_batch(
+      v_provider,v_client,'Normalized duplicate header oracle','normalized-duplicate.csv',repeat('d',64),'csv',
+      v_manifest || jsonb_build_object('idempotency_key','oracle-normalized-duplicate-' || gen_random_uuid()::text),
+      '{"headers":[" Job   Cost ","job cost"],"resolved_mappings":[]}'::jsonb,1,0,0
+    );
+  exception when others then v_ok := true; v_err := sqlerrm; end;
+  perform pg_temp.check('case and whitespace normalized duplicate headers fail: ' || coalesce(v_err,''),v_ok and v_err ilike '%duplicate source headers%');
+
   v_replayed := public.begin_patrol_import_batch(
     v_provider,v_client,'Oracle governed import','oracle.csv',v_source_hash,'csv',
     v_manifest,v_schema,1,0,0
