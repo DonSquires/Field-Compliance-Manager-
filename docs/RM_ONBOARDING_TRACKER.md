@@ -58,6 +58,15 @@ turn beats false completeness.
   replay, and period checks. Formula errors, invalid dates, displayed-total
   mismatches, duplicate external references, and unresolved places remain
   quarantined rather than guessed.
+- The first full OneFortyOne 2025 server preview exposed an HTTP 413 because
+  the CLI put every logical chunk into one management request. The corrected
+  tool now sends bounded 150-row transactions and derives receipts only after
+  staged writes are visible. A 44-request rollback preview completed for 6,589
+  cost components with no persisted batch or finance record. The server
+  quarantined 6,520 locally eligible components as
+  `operational_evidence_not_found`; the remaining 69 retained their local
+  quarantine reasons. This is a real evidence-linkage gap, not permission to
+  weaken validation or promote costs without their operational records.
 - Remaining rollout gates are explicit: Wrattens lacks an active patrol module
   on its agreement; server rollback previews must reconcile every active sheet
   against operational evidence; archive/restored overlap must be classified;

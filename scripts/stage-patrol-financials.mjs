@@ -78,7 +78,7 @@ if (localOnly) {
   process.exit(0);
 }
 
-const chunkSize = 400;
+const chunkSize = 150;
 const chunks = [];
 for (let index = 0; index < rows.length; index += chunkSize) chunks.push(rows.slice(index, index + chunkSize));
 const idempotencyKey = [
@@ -105,20 +105,12 @@ const schema = {
   resolved_mappings: resolvedMappings,
   source_format: derivative.format,
 };
-const payload = Buffer.from(JSON.stringify({ chunks, manifest, schema, summary }), 'utf8').toString('base64');
 const batchName = `patrol-finance-${derivative.source_file}-${derivative.source_sheet}`;
 const quote = (value) => `'${String(value).replaceAll("'", "''")}'`;
-const sql = `
-BEGIN;
-CREATE TEMP TABLE _patrol_finance_result(receipt jsonb);
-DO $import$
-DECLARE
-  v_data jsonb:=convert_from(decode(${quote(payload)},'base64'),'utf8')::jsonb;
-  v_batch public.file_import_batches%rowtype;
-  v_actor uuid;
-  v_chunk jsonb;
-  v_stage jsonb;
-  v_final public.file_import_batches%rowtype;
+const encodedBatch = Buffer.from(JSON.stringify({ manifest, schema }), 'utf8').toString('base64');
+const actorSetup = `
+DO $actor$
+DECLARE v_actor uuid;
 BEGIN
   SELECT import_actor_id INTO v_actor FROM public.import_source_profiles
   WHERE organization_id=${quote(providerOrganizationId)}::uuid
@@ -126,85 +118,178 @@ BEGIN
     AND active;
   IF v_actor IS NULL THEN RAISE EXCEPTION 'Active import profile with a configured actor is required'; END IF;
   PERFORM set_config('request.jwt.claim.sub',v_actor::text,true);
-  v_batch:=public.begin_patrol_import_batch(
+END
+$actor$;`;
+const beginBatch = (batchPayload = encodedBatch) => `
+public.begin_patrol_import_batch(
+  ${quote(providerOrganizationId)}::uuid,
+  ${quote(clientOrganizationId)}::uuid,
+  ${quote(batchName)},
+  ${quote(derivative.source_file)},
+  ${quote(derivative.source_sha256)},
+  'xlsx_cached_values',
+  (convert_from(decode(${quote(batchPayload)},'base64'),'utf8')::jsonb)->'manifest',
+  (convert_from(decode(${quote(batchPayload)},'base64'),'utf8')::jsonb)->'schema',
+  ${derivative.rows.length},
+  ${summary.duplicate_external_refs},
+  ${summary.quarantined}
+)`;
+
+const cliPath = join(process.cwd(), 'node_modules', 'supabase', 'dist', 'supabase.js');
+function runQuery(sql, operation) {
+  const temporaryDirectory = mkdtempSync(join(tmpdir(), 'fcm-patrol-finance-'));
+  const sqlFile = join(temporaryDirectory, 'stage.sql');
+  try {
+    writeFileSync(sqlFile, sql, 'utf8');
+    const cliArguments = [
+      cliPath,
+      'db',
+      'query',
+      '--linked',
+      '--output-format',
+      'json',
+      '--file',
+      sqlFile,
+    ];
+    if (projectRef) cliArguments.splice(4, 0, '--project-ref', projectRef);
+    const output = execFileSync(process.execPath, cliArguments, { encoding: 'utf8', maxBuffer: 64 * 1024 * 1024 });
+    return JSON.parse(output).rows ?? [];
+  } catch (error) {
+    const detail = error?.stdout || error?.stderr || error?.message || String(error);
+    throw new Error(`${operation} failed: ${String(detail).slice(0, 3000)}`);
+  } finally {
+    rmSync(temporaryDirectory, { recursive: true, force: true });
+  }
+}
+
+function stageChunkSql(chunk, batchReference, commit) {
+  const encodedChunk = Buffer.from(JSON.stringify(chunk), 'utf8').toString('base64');
+  return `
+BEGIN;
+${actorSetup}
+CREATE TEMP TABLE fcm_patrol_stage_receipt ON COMMIT DROP AS
+WITH batch AS (SELECT ${batchReference} AS row),
+staged AS (
+  SELECT public.stage_patrol_finance_cost_rows(
+    (batch.row).id,
     ${quote(providerOrganizationId)}::uuid,
     ${quote(clientOrganizationId)}::uuid,
-    ${quote(batchName)},
-    ${quote(derivative.source_file)},
-    ${quote(derivative.source_sha256)},
-    'xlsx_cached_values',
-    v_data->'manifest',
-    v_data->'schema',
-    ${derivative.rows.length},
-    ${summary.duplicate_external_refs},
-    ${summary.quarantined}
-  );
-  FOR v_chunk IN SELECT * FROM jsonb_array_elements(v_data->'chunks') LOOP
-    v_stage:=public.stage_patrol_finance_cost_rows(
-      v_batch.id,
-      ${quote(providerOrganizationId)}::uuid,
-      ${quote(clientOrganizationId)}::uuid,
-      ${quote(serviceAgreementId)}::uuid,
-      v_chunk
-    );
-  END LOOP;
-  SELECT * INTO v_batch FROM public.file_import_batches WHERE id=v_batch.id;
-  v_final:=public.finalize_patrol_import_batch(
-    v_batch.id,
+    ${quote(serviceAgreementId)}::uuid,
+    convert_from(decode(${quote(encodedChunk)},'base64'),'utf8')::jsonb
+  ) AS result, (batch.row).id AS batch_id
+  FROM batch
+)
+SELECT result,batch_id FROM staged;
+SELECT jsonb_build_object(
+  'stage',staged.result,
+  'mapping_reviews',(SELECT count(*) FROM public.file_import_mapping_reviews WHERE batch_id=staged.batch_id),
+  'aggregate_totals',(
+    SELECT coalesce(jsonb_object_agg(summary.aggregate_key,summary.total),'{}'::jsonb)
+    FROM (
+      SELECT aggregate_key,round(sum(amount),2) AS total
+      FROM public.file_import_finance_cost_rows
+      WHERE batch_id=staged.batch_id AND status='eligible'
+      GROUP BY aggregate_key
+    ) summary
+  ),
+  'quarantine_reasons',(
+    SELECT coalesce(jsonb_object_agg(summary.quarantine_reason,summary.total),'{}'::jsonb)
+    FROM (
+      SELECT quarantine_reason,count(*) AS total
+      FROM public.file_import_finance_cost_rows
+      WHERE batch_id=staged.batch_id AND status='quarantined'
+      GROUP BY quarantine_reason
+    ) summary
+  )
+) AS receipt
+FROM fcm_patrol_stage_receipt staged;
+${commit ? 'COMMIT;' : 'ROLLBACK;'}
+`;
+}
+
+if (!apply) {
+  const totals = { inserted: 0, existing: 0, eligible: 0, quarantined: 0, eligible_total: 0 };
+  const aggregateTotals = new Map();
+  const quarantineReasons = new Map();
+  let mappingReviews = 0;
+  for (const [index, chunk] of chunks.entries()) {
+    const receipt = runQuery(stageChunkSql(chunk, beginBatch(), false), `Rollback preview chunk ${index + 1}/${chunks.length}`)[0]?.receipt;
+    if (!receipt?.stage) throw new Error(`Rollback preview chunk ${index + 1}/${chunks.length} returned no receipt`);
+    for (const key of ['inserted', 'existing', 'eligible', 'quarantined']) totals[key] += Number(receipt.stage[key] ?? 0);
+    totals.eligible_total += Number(receipt.stage.eligible_total ?? 0);
+    mappingReviews = Math.max(mappingReviews, Number(receipt.mapping_reviews ?? 0));
+    for (const [key, value] of Object.entries(receipt.aggregate_totals ?? {})) {
+      aggregateTotals.set(key, Number((Number(aggregateTotals.get(key) ?? 0) + Number(value)).toFixed(2)));
+    }
+    for (const [key, value] of Object.entries(receipt.quarantine_reasons ?? {})) {
+      quarantineReasons.set(key, Number(quarantineReasons.get(key) ?? 0) + Number(value));
+    }
+  }
+  console.log(JSON.stringify({
+    mode: 'rollback_preview',
+    local: summary,
+    server: {
+      status: 'rolled_back',
+      chunks: chunks.length,
+      mapping_reviews: mappingReviews,
+      finance_source_rows: totals.inserted,
+      existing_rows: totals.existing,
+      eligible_rows: totals.eligible,
+      quarantined_rows: totals.quarantined,
+      proposal_count: aggregateTotals.size,
+      eligible_total: Number(totals.eligible_total.toFixed(2)),
+      aggregate_totals: Object.fromEntries(aggregateTotals),
+      quarantine_reasons: Object.fromEntries(quarantineReasons),
+    },
+  }, null, 2));
+  process.exit(0);
+}
+
+const batchRows = runQuery(`BEGIN;${actorSetup}SELECT (${beginBatch()}).id;COMMIT;`, 'Begin persistent finance review batch');
+const batchId = batchRows[0]?.id;
+if (!UUID.test(batchId ?? '')) throw new Error('Begin persistent finance review batch returned no batch id');
+let lastStage = null;
+for (const [index, chunk] of chunks.entries()) {
+  try {
+    lastStage = runQuery(
+      stageChunkSql(chunk, `(SELECT * FROM public.file_import_batches WHERE id=${quote(batchId)}::uuid)`, true),
+      `Persistent staging chunk ${index + 1}/${chunks.length} for batch ${batchId}`,
+    )[0]?.receipt;
+  } catch (error) {
+    throw new Error(`${error.message}. Batch ${batchId} remains in staging and can be resumed safely.`);
+  }
+}
+const finalized = runQuery(`
+BEGIN;
+${actorSetup}
+WITH finalized AS (
+  SELECT public.finalize_patrol_import_batch(
+    ${quote(batchId)}::uuid,
     jsonb_build_object(
-      'finance_source_rows',(SELECT count(*) FROM public.file_import_finance_cost_rows WHERE batch_id=v_batch.id),
-      'eligible_finance_source_rows',(SELECT count(*) FROM public.file_import_finance_cost_rows WHERE batch_id=v_batch.id AND status='eligible'),
-      'quarantined_finance_source_rows',(SELECT count(*) FROM public.file_import_finance_cost_rows WHERE batch_id=v_batch.id AND status='quarantined'),
-      'proposal_candidates',(SELECT count(*) FROM public.file_import_row_proposals WHERE batch_id=v_batch.id),
-      'eligible_total',(SELECT coalesce(round(sum(amount),2),0) FROM public.file_import_finance_cost_rows WHERE batch_id=v_batch.id AND status='eligible'),
+      'finance_source_rows',(SELECT count(*) FROM public.file_import_finance_cost_rows WHERE batch_id=${quote(batchId)}::uuid),
+      'eligible_finance_source_rows',(SELECT count(*) FROM public.file_import_finance_cost_rows WHERE batch_id=${quote(batchId)}::uuid AND status='eligible'),
+      'quarantined_finance_source_rows',(SELECT count(*) FROM public.file_import_finance_cost_rows WHERE batch_id=${quote(batchId)}::uuid AND status='quarantined'),
+      'proposal_candidates',(SELECT count(*) FROM public.file_import_row_proposals WHERE batch_id=${quote(batchId)}::uuid),
+      'eligible_total',(SELECT coalesce(round(sum(amount),2),0) FROM public.file_import_finance_cost_rows WHERE batch_id=${quote(batchId)}::uuid AND status='eligible'),
       'direct_workshop_writes',0,
       'direct_finance_writes',0
     )
-  );
-  INSERT INTO _patrol_finance_result
-  SELECT jsonb_build_object(
-    'batch_id',v_final.id,
-    'status',v_final.status,
-    'source_file',v_final.source_file,
-    'source_sheet',v_final.manifest_json->>'source_sheet',
-    'mapping_reviews',(SELECT count(*) FROM public.file_import_mapping_reviews WHERE batch_id=v_final.id),
-    'finance_source_rows',(SELECT count(*) FROM public.file_import_finance_cost_rows WHERE batch_id=v_final.id),
-    'eligible_rows',(SELECT count(*) FROM public.file_import_finance_cost_rows WHERE batch_id=v_final.id AND status='eligible'),
-    'quarantined_rows',(SELECT count(*) FROM public.file_import_finance_cost_rows WHERE batch_id=v_final.id AND status='quarantined'),
-    'proposal_count',(SELECT count(*) FROM public.file_import_row_proposals WHERE batch_id=v_final.id),
-    'eligible_total',(SELECT coalesce(round(sum(amount),2),0) FROM public.file_import_finance_cost_rows WHERE batch_id=v_final.id AND status='eligible')
-  );
-END
-$import$;
-SELECT receipt FROM _patrol_finance_result;
-${apply ? 'COMMIT;' : 'ROLLBACK;'}
-`;
-
-const temporaryDirectory = mkdtempSync(join(tmpdir(), 'fcm-patrol-finance-'));
-const sqlFile = join(temporaryDirectory, 'stage.sql');
-try {
-  writeFileSync(sqlFile, sql, 'utf8');
-  const cliPath = join(process.cwd(), 'node_modules', 'supabase', 'dist', 'supabase.js');
-  const cliArguments = [
-    cliPath,
-    'db',
-    'query',
-    '--linked',
-    '--output-format',
-    'json',
-    '--file',
-    sqlFile,
-  ];
-  if (projectRef) cliArguments.splice(4, 0, '--project-ref', projectRef);
-  const output = execFileSync(process.execPath, cliArguments, { encoding: 'utf8', maxBuffer: 64 * 1024 * 1024 });
-  const parsed = JSON.parse(output);
-  const receipt = parsed.rows?.[0]?.receipt;
-  if (!receipt) throw new Error('Supabase CLI returned no staging receipt');
-  console.log(JSON.stringify({
-    mode: apply ? 'staged_for_review' : 'rollback_preview',
-    local: summary,
-    server: receipt,
-  }, null, 2));
-} finally {
-  rmSync(temporaryDirectory, { recursive: true, force: true });
-}
+  ) AS batch
+)
+SELECT jsonb_build_object(
+  'batch_id',(finalized.batch).id,
+  'status',(finalized.batch).status,
+  'source_file',(finalized.batch).source_file,
+  'source_sheet',(finalized.batch).manifest_json->>'source_sheet',
+  'mapping_reviews',(SELECT count(*) FROM public.file_import_mapping_reviews WHERE batch_id=(finalized.batch).id),
+  'finance_source_rows',(SELECT count(*) FROM public.file_import_finance_cost_rows WHERE batch_id=(finalized.batch).id),
+  'eligible_rows',(SELECT count(*) FROM public.file_import_finance_cost_rows WHERE batch_id=(finalized.batch).id AND status='eligible'),
+  'quarantined_rows',(SELECT count(*) FROM public.file_import_finance_cost_rows WHERE batch_id=(finalized.batch).id AND status='quarantined'),
+  'proposal_count',(SELECT count(*) FROM public.file_import_row_proposals WHERE batch_id=(finalized.batch).id),
+  'eligible_total',(SELECT coalesce(round(sum(amount),2),0) FROM public.file_import_finance_cost_rows WHERE batch_id=(finalized.batch).id AND status='eligible')
+) AS receipt
+FROM finalized;
+COMMIT;
+`, `Finalize persistent finance review batch ${batchId}`)[0]?.receipt;
+if (!finalized) throw new Error(`Finalize persistent finance review batch ${batchId} returned no receipt`);
+console.log(JSON.stringify({ mode: 'staged_for_review', local: summary, server: finalized }, null, 2));
