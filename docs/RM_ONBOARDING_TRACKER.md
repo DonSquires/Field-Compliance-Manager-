@@ -114,6 +114,60 @@ turn beats false completeness.
   provider/branch overview returns two operating organisations, 17 accepted
   agreements, and 16 current-period cost lines totalling NZ$50,606.29.
 
+## STATIC-WORK CORPUS AND NMDHB SPINE (2026-10-18) — CONSOLIDATED, IMPORT REVIEW OPEN
+
+- Read-only inventory covered 466 files under the 1080 operations folder, 284
+  hospital commercial/tender files, 33 archived NMDHB operational files, 13
+  current NMDHB safety-system files, and two current NMDHB operational
+  workbooks. Hash manifests remain local and sensitive. Fourteen
+  cloud-synchronised hospital tender files were unavailable during hashing and
+  remain explicit gaps rather than success-shaped records.
+- All 217 XLSX workbooks opened: 353 worksheets, 24 hidden worksheets, and
+  38,618 formula cells. The source set contains real roster dates/times, staff
+  identifiers, hours, travel, rates, invoice/payment evidence, work locations,
+  1080 deployment roles, hazards, qualifications, and approval controls. It is
+  not one import: commercial drafts, operational history, templates,
+  superseded copies, safety controls, and tender evidence require separate
+  governed lanes.
+- Atlas/schema show that the shared static spine exists and is wired:
+  `static_guarding` agreement modules, agreement places, roster work units and
+  slots, shifts/stops, officer static-post RPCs, safety briefings, debriefs,
+  labour costing, and finance service costs. Live R&M usage does not match that
+  capability: one not-invited static agreement, one covered place, two work
+  units, and zero slots, assignments, shifts, static stops, or static cost
+  lines.
+- The smallest blocking contradiction is NMDHB identity. The own-rooted,
+  active government organisation is the canonical Model A account, while an
+  inactive child prospect shell holds R&M's operational agreement, richer
+  Nelson Hospital place/zone/contact, and static work units. The owner approved
+  consolidation onto the own-rooted organisation while retaining the prospect
+  shell as inactive audit history.
+- Migration `20261018150000` implements that exact-ID guarded consolidation,
+  retires the Layer-1 platform agreement's placeholder operational place, and
+  deactivates the literal test work unit. It does not accept the client
+  invitation, invent hospital posts, map staff names, or promote any historical
+  source row. Those require separate reviewed agreement/place/person mappings.
+- Released through #104 and live-verified. The canonical NMDHB account now owns
+  R&M's operational agreement and the richer Nelson Hospital place/zone/contact;
+  one real static work unit remains active, the platform placeholder link is
+  ended, and one consolidation audit receipt exists. The migration ledger is
+  converged.
+- Capability classification after the audit:
+  - **Supported:** formula-aware local workbook reading; canonical organisation,
+    agreement, place, static work-unit, roster, shift/attendance, safety, labour,
+    and finance spines.
+  - **Partial:** historical hospital roster/hour/pay evidence and 1080
+    shift/travel/cost evidence are parseable, but still need reviewed source
+    profiles plus exact person, place, agreement-version, and rate mappings.
+  - **Gap:** no governed static-history adapter currently carries those reviewed
+    mappings into replay-safe roster slots/cost proposals. The 2021–2022 NMDHB
+    records also predate the only R&M agreement (starts 2026), so that agreement
+    cannot lawfully authorise their promotion.
+  - **Exclude/quarantine:** current tender drafts, superseded and duplicate
+    copies, test work units, the platform-billing placeholder place, unavailable
+    cloud files, and any 1080 row whose client, deployment, staff, or mixed
+    `static_guarding`/`biosecurity` scope is unresolved.
+
 ## INVOICE AND PRICE-BOOK CORPUS (2026-10-18) — INVENTORIED, NOT PROMOTED
 
 - Located and read-only inventoried `Invoice Spreadsheets`: 70 files in 30
