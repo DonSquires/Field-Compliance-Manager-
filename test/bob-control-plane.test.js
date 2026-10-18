@@ -6,6 +6,7 @@ const path = require('node:path');
 const { once } = require('node:events');
 const { spawn } = require('node:child_process');
 const test = require('node:test');
+const vm = require('node:vm');
 
 const root = path.resolve(__dirname, '..');
 const port = 18080 + Math.floor(Math.random() * 1000);
@@ -16,6 +17,57 @@ const modelGatewayToken = 'test-model-gateway-token';
 const webhookSecret = 'test-webhook-secret';
 const baseUrl = `http://127.0.0.1:${port}`;
 let serverProcess;
+
+test('single-step acceptance does not wait for preflight or models and shares the run lock', async () => {
+  const source = fs.readFileSync(path.join(root, 'bob-control-plane-server.js'), 'utf8');
+  const functionSource = source.slice(source.indexOf('async function runBuilderJobBounded('), source.indexOf('// Bob autopilot:'));
+  let release;
+  const pending = new Promise(resolve => { release = resolve; });
+  const active = new Map();
+  const events = [];
+  let steps = 0;
+  let runs = 0;
+  const context = vm.createContext({
+    clearStaleBuilderRun: () => false, runningBuilderJobs: active, boundedPreflight: promise => promise,
+    resolveBuilderSourceDir: () => pending, builderRuntimeContext: async () => ({}),
+    builderSupabase: {}, builderGateway: {}, record: (...args) => events.push(args),
+    advanceBuilderJob: async () => { steps++; return { advanced: true }; },
+    runBuilderUntilPause: async () => { runs++; return { reason: 'waiting_for_human', history: [] }; },
+  });
+  const start = vm.runInContext(`${functionSource}\nrunBuilderJobBounded`, context);
+  const first = await start('job', {}, { singleStep: true });
+  assert.equal(active.has('job'), true);
+  assert.equal(steps, 0);
+  const duplicate = await start('job');
+  assert.equal(duplicate.already_running, true);
+  assert.equal(duplicate.started_at, first.started_at);
+  release({});
+  assert.equal((await first.execution).advanced, true);
+  assert.equal(steps, 1);
+  assert.equal(runs, 0);
+  assert.equal(active.size, 0);
+  await (await start('job')).execution;
+  assert.equal(runs, 1);
+  assert.equal(events.length, 2);
+  assert.match(source, /singleStep: builderMatch\[2\] === 'advance'/);
+});
+
+test('background single-step failure is recorded and releases the shared lock', async () => {
+  const source = fs.readFileSync(path.join(root, 'bob-control-plane-server.js'), 'utf8');
+  const functionSource = source.slice(source.indexOf('async function runBuilderJobBounded('), source.indexOf('// Bob autopilot:'));
+  const active = new Map();
+  const events = [];
+  const start = vm.runInNewContext(`${functionSource}\nrunBuilderJobBounded`, {
+    clearStaleBuilderRun: () => false, runningBuilderJobs: active, boundedPreflight: promise => promise,
+    resolveBuilderSourceDir: async () => ({}), builderRuntimeContext: async () => { throw new Error('preflight failed'); },
+    builderSupabase: {}, builderGateway: {}, record: (...args) => events.push(args),
+  });
+  const result = await (await start('job', {}, { singleStep: true })).execution;
+  assert.equal(result.reason, 'error');
+  assert.equal(active.size, 0);
+  assert.equal(events[0][1], 'builder.run.failed');
+  assert.match(events[0][3].error, /preflight failed/);
+});
 
 async function request(method, route, body, headers = {}) {
   const response = await fetch(`${baseUrl}${route}`, {

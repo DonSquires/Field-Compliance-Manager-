@@ -13,10 +13,13 @@ test('Builder control-plane routes use server-fixed execution authority', () => 
   assert.doesNotMatch(source, /workerImage:\s*body\./);
 });
 
-test('Builder advance route executes one durable coordinator action', () => {
+test('Builder advance route accepts one background coordinator action behind the shared execution guard', () => {
   assert.match(source, /\/api\\\/bob\\\/builder\\\/jobs/);
   assert.match(source, /advanceBuilderJob/);
-  assert.match(source, /outcome\.advanced \? 202 : 200/);
+  assert.match(source, /return singleStep \? advanceBuilderJob\(input\) : runBuilderUntilPause\(input\)/);
+  assert.match(source, /runBuilderJobBounded\(jobId, body, \{ singleStep: builderMatch\[2\] === 'advance' \}\)/);
+  assert.match(source, /202, \{ accepted: true, already_running: true/);
+  assert.doesNotMatch(source, /const outcome = await advanceBuilderJob/);
   assert.match(source, /runBuilderUntilPause/);
   assert.match(source, /advance\|run/);
 });

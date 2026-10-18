@@ -27,6 +27,13 @@ whose parent link was omitted. Those read-only report edges remain distinct from
 FK parent links; cross-project/organisation targets and cyclic histories fail
 explicitly rather than returning partial or misleading success.
 
+Builder execution acceptance 2026-10-18: both Run next step and Run to gate
+acknowledge background execution without holding a browser/Edge Function
+connection across model work. They share the per-job execution guard;
+Run next step still advances only one governed action. Acceptance and
+already-running receipts are not completion. Preflight/execution failures
+remain recorded, and approval/release boundaries remain unchanged.
+
 Implementation worktrees validate the requested commit object and their own
 clean, exact checkout, not the mutable shared clone's HEAD. Moving the shared
 checkout for another job must not invalidate a pinned task. Model exploration

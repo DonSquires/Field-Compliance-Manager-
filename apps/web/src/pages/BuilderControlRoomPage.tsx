@@ -441,7 +441,15 @@ const BuilderControlRoomPage: React.FC<{ onOpenBob?: (prompt: string) => void }>
     try {
       // Bob finds source files and the control plane selects the independent reviewer model.
       const data = await invoke({ action, job_id: selectedId, max_actions: 8 });
-      setNotice(data?.reason === 'waiting_for_human' ? 'Builder paused at a human approval gate.' : `Builder ${action === 'run' ? 'run' : 'step'} completed.`);
+      setNotice(data?.accepted
+        ? data.already_running
+          ? 'Bob is already working on this job. No duplicate run was started.'
+          : `Builder ${action === 'run' ? 'run' : 'step'} accepted. Bob will work in the background; follow live activity for the outcome. This is not completion.`
+        : data?.reason === 'waiting_for_human'
+          ? 'Builder paused at a human approval gate.'
+          : data?.reason === 'error'
+            ? 'Builder stopped with an execution error. Review the recorded activity before retrying.'
+            : `Builder ${action === 'run' ? 'run' : 'step'} returned. Review the recorded outcome.`);
       await Promise.all([loadList(), loadSnapshot(selectedId)]);
     } catch (advanceError) {
       setError(advanceError instanceof Error ? advanceError.message : 'Builder could not advance.');
