@@ -672,7 +672,7 @@ test('managed user spine routes identity and access through governed RPCs', () =
   assert.equal(atlas.edges.some((edge) => ['components/UserIdentityWorkspace', 'pages/UserManagementPage', 'pages/AccessControlPage'].includes(edge.source_name) && ['user_profiles', 'preset_assignments', 'staff_area_grants'].includes(edge.target_name) && edge.edge_kind === 'writes'), false);
 });
 
-test('Atlas refresh replaces matching rows and retires all stale generator-owned edges', () => {
+test('Atlas refresh preserves manual and unmarked generator rows', () => {
   const manifest = {
     capabilities: [{
       entity_type: 'table', entity_name: 'alpha', present: true, wired: true,
@@ -722,15 +722,12 @@ test('Atlas refresh replaces matching rows and retires all stale generator-owned
 
   const plan = buildRefreshPlan(manifest, existingCapabilities, existingEdges);
 
-  assert.equal(plan.capabilityUpserts.length, 1);
+  assert.equal(plan.capabilityUpserts.length, 0);
   assert.deepEqual(plan.capabilityRetireIds, ['stale-cap']);
-  assert.equal(plan.edgeUpserts.length, 1);
-  assert.deepEqual(plan.edgeRetireIds, [
-    'owned-stale',
-    'legacy-generator',
-    'managed-pre-marker',
-    'unmanaged-pre-marker',
-  ]);
+  assert.equal(plan.edgeUpserts.length, 0);
+  assert.deepEqual(plan.edgeRetireIds, ['owned-stale', 'managed-pre-marker']);
+  assert.equal(plan.edgeRetireIds.includes('legacy-generator'), false);
+  assert.equal(plan.edgeRetireIds.includes('unmanaged-pre-marker'), false);
 });
 
 test('Atlas refresh retains generated column inventory until column derivation is available', () => {
@@ -747,7 +744,7 @@ test('Atlas retirement applies to plan-selected manual records', () => {
   assert.doesNotMatch(source, /id=in\.\(\$\{filter\}\)&refresh_source=eq\.ci_generator/);
 });
 
-test('Atlas refresh retires stale generated and manual edges when their source is deleted', () => {
+test('Atlas refresh retires owned edges when their source is deleted', () => {
   const manifest = {
     repository_files: ['apps/web/src/pages/CurrentPage.tsx'],
     capabilities: [],
@@ -758,7 +755,7 @@ test('Atlas refresh retires stale generated and manual edges when their source i
       id: 'deleted-source', source_type: 'component', source_name: 'pages/DeletedPage',
       target_type: 'table', target_name: 'incidents', edge_kind: 'writes',
       source_file: 'apps/web/src/pages/DeletedPage.tsx', refresh_source: 'ci_generator',
-      caller_context: ".from('incidents').insert({})", retirement_status: 'live'
+      caller_context: `${OWNER_MARKER} .from('incidents').insert({})`, retirement_status: 'live'
     },
     {
       id: 'current-source', source_type: 'component', source_name: 'pages/CurrentPage',
@@ -776,11 +773,7 @@ test('Atlas refresh retires stale generated and manual edges when their source i
 
   const plan = buildRefreshPlan(manifest, [], existingEdges);
 
-  assert.deepEqual(plan.edgeRetireIds, [
-    'deleted-source',
-    'current-source',
-    'manual-deleted-source',
-  ]);
+  assert.deepEqual(plan.edgeRetireIds, ['deleted-source']);
 });
 
 test('Atlas refresh plan preserves exercised state on CI-owned capabilities', () => {
@@ -859,6 +852,7 @@ test('Atlas refresh is exposed as a post-test CI command', () => {
   assert.match(workflow, /npm run bob:refresh-capability-map/);
   const refreshSource = fs.readFileSync(path.join(root, 'scripts/atlas-refresh.js'), 'utf8');
   assert.match(refreshSource, /source_file,migration_name,caller_context/);
+  assert.match(refreshSource, /args\.has\('--upsert-only'\)/);
 });
 
 test('managed Atlas refresh derives governed component and RPC flow edges', () => {

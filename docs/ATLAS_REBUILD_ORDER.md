@@ -57,6 +57,11 @@ radius of any change. Screens are the last thing built, not the first.
   `[repo-atlas-refresh:v1]` can be changed to `legacy`; older generator rows
   and manual rows are left untouched. More than 100 retirements fails closed
   unless an operator explicitly passes `--allow-large-retirement`.
+- When the source checkout is intentionally behind live Atlas, use
+  `node scripts/atlas-refresh.js --apply --upsert-only` (optionally with
+  `--scope-entities=...`) to add or correct current evidence without retiring
+  anything. This is not a substitute for reconciling the source branch: it is
+  the safe bridge while that reconciliation is reviewed.
 - The Gitea main-branch workflow refreshes Atlas only after calibration and all
   tests pass, and skips safely when its Supabase secrets are absent.
 

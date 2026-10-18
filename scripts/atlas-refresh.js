@@ -405,10 +405,13 @@ function normalizedFunctionSignature(functionName, argumentsSql) {
 
 function collectSqlFunctionEdges(rootDir) {
   const schemaFile = 'supabase/schema.sql';
-  const files = [
-    ...walkFiles(rootDir, 'supabase/schemas').filter(file => file.endsWith('.sql')).sort(),
-    schemaFile
-  ];
+  const schemaExists = fs.existsSync(path.join(rootDir, schemaFile));
+  const files = schemaExists
+    ? [
+      ...walkFiles(rootDir, 'supabase/schemas').filter(file => file.endsWith('.sql')).sort(),
+      schemaFile
+    ]
+    : walkFiles(rootDir, 'supabase/migrations').filter(file => file.endsWith('.sql')).sort();
   const latestFunctions = new Map();
   const functionPattern = /CREATE(?:\s+OR\s+REPLACE)?\s+FUNCTION\s+(?:(?:"?(public|ops)"?)\.)?"?([a-zA-Z_][a-zA-Z0-9_]*)"?\s*\(([\s\S]*?)\)\s*RETURNS[\s\S]*?AS\s+\$([a-zA-Z0-9_]*)\$([\s\S]*?)\$\4\$\s*;/gi;
   // The live snapshot only dumps the public schema, so ops-schema scheduler
@@ -952,6 +955,12 @@ function buildRefreshPlan(manifest, existingCapabilities, existingEdges) {
 
   for (const capability of manifest.capabilities) {
     const existing = capabilityByKey.get(capabilityKey(capability));
+    const refreshesDerivedFeature = existing?.entity_type === 'feature'
+      && capability.entity_type === 'feature'
+      && existing.exercised !== null
+      && existing.exercised !== undefined;
+    if ((existing?.refresh_source === 'manual_seed' || existing?.refresh_source === 'schema_fk')
+        && !refreshesDerivedFeature) continue;
     const desired = {
       ...capability,
       exercised: capability.entity_type === 'feature' && capability.refresh_source === 'ci_generator'
@@ -969,17 +978,17 @@ function buildRefreshPlan(manifest, existingCapabilities, existingEdges) {
     }
   }
   for (const existing of existingCapabilities) {
-    const isManual = existing.refresh_source === 'manual_seed';
-    const isGeneratedType = ['table', 'rpc', 'edge_function'].includes(existing.entity_type);
     if (existing.retirement_status !== 'legacy'
         && !generatedCapabilityKeys.has(capabilityKey(existing))
-        && (isManual || isGeneratedType)) {
+        && existing.refresh_source === 'ci_generator'
+        && String(existing.notes || '').startsWith(OWNER_MARKER)) {
       plan.capabilityRetireIds.push(existing.id);
     }
   }
 
   for (const edge of manifest.edges) {
     const existing = edgeByKey.get(edgeKey(edge));
+    if (existing?.refresh_source === 'manual_seed' || existing?.refresh_source === 'schema_fk') continue;
     const desired = {
       ...edge,
       caller_context: edge.caller_context
@@ -991,13 +1000,18 @@ function buildRefreshPlan(manifest, existingCapabilities, existingEdges) {
     }
   }
   for (const existing of existingEdges) {
-    const legacyManagedContext = MANAGED_SOURCES.includes(existing.source_file)
+    const generatorOwned = existing.refresh_source === 'ci_generator';
+    const ownedMarker = generatorOwned && String(existing.caller_context || '').startsWith(OWNER_MARKER);
+    const legacyManagedContext = generatorOwned
+      && MANAGED_SOURCES.includes(existing.source_file)
       && /^\.from\(['"][^'"]+['"]\)\.(?:insert|update|upsert|delete)/.test(String(existing.caller_context || ''));
     const deletedRepositorySource = repositoryFiles.size > 0
       && (String(existing.source_file || '').startsWith('apps/web/src/')
         || String(existing.source_file || '').startsWith('supabase/functions/'))
       && !repositoryFiles.has(existing.source_file);
-    if ((existing.refresh_source === 'ci_generator' || String(existing.caller_context || '').startsWith(OWNER_MARKER) || legacyManagedContext || deletedRepositorySource || existing.refresh_source === 'manual_seed')
+    if ((ownedMarker
+      || legacyManagedContext
+      || (deletedRepositorySource && ownedMarker))
         && existing.retirement_status !== 'legacy'
         && !generatedEdgeKeys.has(edgeKey(existing))) {
       plan.edgeRetireIds.push(existing.id);
