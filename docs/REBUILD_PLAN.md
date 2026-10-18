@@ -16,6 +16,11 @@ navigation action. Neither manual runtime execution nor autopilot re-driving
 may restart that superseded record. A failed step's actual error takes precedence
 over a stale last-completed step or an unrelated pending code-review label.
 No automatic resume may be promised without a driving scheduler state.
+Bob's job lookup reads those same outcome fields, excludes superseded children
+from actionable selection, and follows recorded successor IDs for older jobs
+whose parent link was omitted. Those read-only report edges remain distinct from
+FK parent links; cross-project/organisation targets and cyclic histories fail
+explicitly rather than returning partial or misleading success.
 
 Implementation worktrees validate the requested commit object and their own
 clean, exact checkout, not the mutable shared clone's HEAD. Moving the shared

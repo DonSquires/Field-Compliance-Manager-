@@ -1,6 +1,6 @@
 import type { SupabaseClient } from 'https://esm.sh/@supabase/supabase-js@2';
 
-export const JOB_COLUMNS = 'id,organization_id,project_id,parent_job_id,task_run_id,title,description,task_description,status,branch_name,workspace_branch,target_sha,workspace_pull_request_url,last_error,created_by,created_at,updated_at';
+export const JOB_COLUMNS = 'id,organization_id,project_id,parent_job_id,task_run_id,title,description,task_description,status,branch_name,workspace_branch,target_sha,workspace_pull_request_url,last_error,autopilot_state,autopilot_report,created_by,created_at,updated_at';
 export const UUID = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
 const SHA = /^[0-9a-f]{7,40}$/i;
 const ACTIONABLE = new Set(['implementation_pending', 'building', 'testing', 'approval_pending']);
@@ -10,6 +10,7 @@ export interface Job {
   workspace_branch: string | null; target_sha: string | null; created_at: string;
   description?: string | null; task_description?: string | null; last_error?: string | null;
   workspace_pull_request_url?: string | null; created_by?: string | null; updated_at?: string;
+  autopilot_state?: string | null; autopilot_report?: Record<string, unknown> | null;
 }
 const MAX_LINEAGE = 200;
 
@@ -17,6 +18,7 @@ export function issueView(job: Job, detail = false) {
   return {
     ...(detail ? job : {}),
     iid: job.id, title: job.title, state: job.status, labels: [job.status],
+    autopilot_state: job.autopilot_state ?? null, resumed_as_job_id: continuationId(job),
     web_url: job.workspace_pull_request_url ?? null,
     ...(detail ? {
       description: [job.task_description ?? job.description ?? '', job.last_error ? `Last error: ${job.last_error}` : ''].filter(Boolean).join('\n\n').slice(0, 8000),
@@ -26,8 +28,34 @@ export function issueView(job: Job, detail = false) {
 }
 
 export function selectJob(root: Job, lineage: Job[]) {
-  return lineage.filter(job => job.id !== root.id && ACTIONABLE.has(job.status))
+  return lineage.filter(job => job.id !== root.id && ACTIONABLE.has(job.status)
+    && job.autopilot_state !== 'done' && !continuationId(job))
     .sort((a, b) => b.created_at.localeCompare(a.created_at) || a.id.localeCompare(b.id))[0] ?? root;
+}
+
+function continuationId(job: Job) {
+  const value = job.autopilot_report?.resumed_as_job_id;
+  if (value == null) return null;
+  if (typeof value !== 'string' || !UUID.test(value)) throw new Error('Recorded Builder continuation has an invalid job ID.');
+  return value.toLowerCase();
+}
+
+function verifyLineageGraph(jobs: Map<string, Job>) {
+  const edges = new Map([...jobs.keys()].map(id => [id, new Set<string>()]));
+  for (const job of jobs.values()) {
+    if (job.parent_job_id) edges.get(job.parent_job_id)?.add(job.id);
+    const successor = continuationId(job);
+    if (successor) edges.get(job.id)?.add(successor);
+  }
+  const visiting = new Set<string>(), visited = new Set<string>();
+  const visit = (id: string) => {
+    if (visiting.has(id)) throw new Error('Builder job lineage contains a cycle.');
+    if (visited.has(id)) return;
+    visiting.add(id);
+    for (const next of edges.get(id) ?? []) visit(next);
+    visiting.delete(id); visited.add(id);
+  };
+  for (const id of jobs.keys()) visit(id);
 }
 
 const asUuid = (hex: string) => `${hex.slice(0, 8)}-${hex.slice(8, 12)}-${hex.slice(12, 16)}-${hex.slice(16, 20)}-${hex.slice(20, 32)}`;
@@ -89,14 +117,32 @@ export async function jobLineage(admin: SupabaseClient, seed: Job) {
   const jobs = new Map<string, Job>([[root.id, root]]);
   let pending = [root.id];
   while (pending.length) {
-    const { data, error } = await admin.from('builder_jobs').select(JOB_COLUMNS).in('parent_job_id', pending)
-      .eq('organization_id', root.organization_id).eq('project_id', root.project_id).limit(MAX_LINEAGE + 1);
-    if (error) throw error;
+    // Older automatic continuations recorded their handoff but omitted parent_job_id.
+    // Read that evidence without inventing or writing a structural parent relationship.
+    const successors = [...new Set(pending.flatMap(id => {
+      const job = jobs.get(id);
+      const next = job ? continuationId(job) : null;
+      return next && !jobs.has(next) ? [next] : [];
+    }))];
+    const [children, continued] = await Promise.all([
+      admin.from('builder_jobs').select(JOB_COLUMNS).in('parent_job_id', pending)
+        .eq('organization_id', root.organization_id).eq('project_id', root.project_id).limit(MAX_LINEAGE + 1),
+      successors.length ? admin.from('builder_jobs').select(JOB_COLUMNS).in('id', successors)
+        .eq('organization_id', root.organization_id).eq('project_id', root.project_id).limit(MAX_LINEAGE + 1)
+        : Promise.resolve({ data: [], error: null }),
+    ]);
+    if (children.error) throw children.error;
+    if (continued.error) throw continued.error;
+    const continuationJobs: Job[] = continued.data;
+    if (successors.some(id => !continuationJobs.some(job => job.id === id))) {
+      throw new Error('Recorded Builder continuation was not found in the same project.');
+    }
     pending = [];
-    for (const job of data) {
-      if (jobs.has(job.id)) throw new Error('Builder job lineage contains a cycle.');
+    for (const job of [...children.data, ...continuationJobs]) {
+      if (jobs.has(job.id)) continue;
       jobs.set(job.id, job); pending.push(job.id);
     }
+    verifyLineageGraph(jobs);
     if (jobs.size > MAX_LINEAGE) throw new Error('Builder job lineage is too large; use a more specific job ID.');
   }
   const lineage = [...jobs.values()].sort((a, b) => a.created_at.localeCompare(b.created_at) || a.id.localeCompare(b.id));
