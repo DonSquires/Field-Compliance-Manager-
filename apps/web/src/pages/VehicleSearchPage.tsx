@@ -181,8 +181,17 @@ const VehicleSearchPage: React.FC = () => {
           .limit(10),
       ]);
 
-      const historyError = scvRes.error ?? permitRes.error ?? obsRes.error ?? breachRes.error;
-      if (historyError) throw historyError;
+      const historyFailure = describeLoadFailures([
+        ['self-containment certification', scvRes.error],
+        ['vehicle permits', permitRes.error],
+        ['vehicle observation history', obsRes.error],
+        ['vehicle breaches', breachRes.error],
+      ]);
+      if (historyFailure) {
+        throw new Error(obsRes.error?.code === '57014'
+          ? `${historyFailure} Vehicle observation history timed out.`
+          : historyFailure);
+      }
       setVehicle(vehData);
       setScv((scvRes.data as ScvRecord) || null);
       setPermits((permitRes.data as PermitRecord[]) || []);
@@ -226,7 +235,9 @@ const VehicleSearchPage: React.FC = () => {
         setFlags([]);
       }
     } catch (err) {
-      setError(err instanceof Error ? err.message : 'Failed to search vehicle');
+      setError(err instanceof Error ? err.message : describeLoadFailures([
+        ['vehicle details', { message: err && typeof err === 'object' && 'message' in err ? String(err.message) : String(err) }],
+      ]));
     } finally {
       setLoading(false);
     }

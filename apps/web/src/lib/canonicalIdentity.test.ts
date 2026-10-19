@@ -35,8 +35,8 @@ describe('canonical identity helpers', () => {
   });
 
   it('builds a history filter that prefers the canonical vehicle link and falls back to plate', () => {
-    expect(vehicleHistoryOrFilter(' ab-123 ', 'veh-uuid')).toBe('canonical_vehicle_id.eq.veh-uuid,plate_number.ilike.AB123');
-    expect(vehicleHistoryOrFilter('ab-123', null)).toBe('plate_number.ilike.AB123');
+    expect(vehicleHistoryOrFilter(' ab-123 ', 'veh-uuid')).toBe('canonical_vehicle_id.eq.veh-uuid,plate_number_upper.eq.AB123');
+    expect(vehicleHistoryOrFilter('ab-123', null)).toBe('plate_number_upper.eq.AB123');
     expect(() => vehicleHistoryOrFilter('  --  ', 'veh-uuid')).toThrow('A vehicle plate is required');
   });
 });
