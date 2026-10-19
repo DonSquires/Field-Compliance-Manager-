@@ -122,6 +122,7 @@ const SUPPORTED_ACTIONS = new Set([
   'set_org_corporate_profile',
   'assign_human_id',
   'apply_roster_fill_plan',
+  'apply_tentative_roster_block',
   'rollback_bob_roster_plan',
   'create_rate_rule',
   'start_staff_onboarding',
@@ -255,6 +256,29 @@ serve(async (req)=>{
         note: isApply
           ? 'Bob roster plan applied as editable draft assignments. A human must publish slots separately.'
           : 'Bob roster plan rolled back from unchanged draft assignments.'
+      });
+    }
+    if (action.action_type === 'apply_tentative_roster_block') {
+      const { data: blockResult, error: blockError } = await admin.rpc('apply_bob_tentative_roster_block', { p_action_id: action.id });
+      const receipt = Array.isArray(blockResult) ? blockResult[0] : blockResult;
+      if (blockError || !receipt?.first_slot_id) {
+        return await failAction(`apply_bob_tentative_roster_block failed: ${blockError?.message ?? 'missing receipt'}`);
+      }
+      await admin.from('bob_agentic_actions').update({
+        status: 'applied',
+        result_table: 'roster_slots',
+        result_record_id: receipt.first_slot_id,
+        applied_at: new Date().toISOString(),
+        error_message: null
+      }).eq('id', action.id);
+      return json({
+        success: true,
+        action_id: action.id,
+        result_table: 'roster_slots',
+        result_record_id: receipt.first_slot_id,
+        slots_created: receipt.slots_created,
+        quote_id: receipt.quote_id ?? null,
+        note: 'Open draft roster slots created (no staff, unpublished). A human must assign staff and publish separately.'
       });
     }
     if (action.action_type === 'create_rate_rule') {

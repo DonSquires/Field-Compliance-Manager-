@@ -190,8 +190,13 @@ const TOOL_REGISTRY = {
     effect_class: 'draft_governed_write'
   },
   propose_roster_fill: {
-    purpose: 'PROPOSE filling open DRAFT roster slots for a period. Bob ranks only work-ready staff who are available, fatigue-clear, and not already rostered. It creates a PENDING plan only; a human must approve it, may edit the resulting draft assignments, and must publish slots separately. Args: { period_start, period_end, organization_id? }.',
+    purpose: 'PROPOSE filling EXISTING open DRAFT roster slots for a period of 1-31 days (it cannot create shifts; use propose_tentative_roster_block when shifts do not exist yet). Bob ranks only work-ready staff who are available, fatigue-clear, and not already rostered. It creates a PENDING plan only; a human must approve it, may edit the resulting draft assignments, and must publish slots separately. Args: { period_start, period_end, organization_id? }.',
     governance: 'WRITE-draft; needs approval; applies editable draft slots only; never publishes',
+    effect_class: 'draft_governed_write'
+  },
+  propose_tentative_roster_block: {
+    purpose: 'PROPOSE a whole staffing request as OPEN, UNPUBLISHED draft shifts plus a draft quote, in one approval. Use this (not propose_roster_fill) when shifts do not exist yet; it handles several date windows longer than 31 days, mixed regular and ad-hoc/overnight patterns, unpaid breaks, public holidays and multiple sites. Args: { sites: [{label, work_unit_id?}], blocks: [{name, start_date, end_date | dates:[YYYY-MM-DD], shift_start:"HH:MM", shift_end:"HH:MM" (NZ time), unpaid_break_minutes, site_keys?}], rates: {pay_per_hour, charge_per_hour, holiday_multiplier?}, holidays: [YYYY-MM-DD] (observed days included), gst_rate?, guards_per_shift?, client_org_id?, title?, organization_id? }. Every site must already have a roster work unit; otherwise it reports which are missing instead of guessing.',
+    governance: 'WRITE-draft; needs approval; creates open draft slots only; never assigns staff or publishes',
     effect_class: 'draft_governed_write'
   },
   propose_roster_rollback: {
@@ -686,6 +691,7 @@ const TOOL_REGISTRY = {
     propose_freedom_camping_zone: 'bob-propose-freedom-camping-zone',
     propose_patrol_route_assignment: 'bob-propose-patrol-route-assignment',
     propose_roster_fill: 'bob-propose-roster-fill',
+    propose_tentative_roster_block: 'bob-propose-tentative-roster-block',
     propose_roster_rollback: 'bob-propose-roster-rollback',
     propose_rate_rule: 'bob-propose-rate-rule',
     propose_compliance_record: 'bob-propose-compliance-record',
