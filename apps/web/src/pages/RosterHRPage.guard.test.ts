@@ -142,6 +142,9 @@ describe('governed HR administration', () => {
 
   it('uses a searchable one-row staff directory and independent profile route', () => {
     expect(page).toContain('type="search"');
+    expect(page).toContain('filteredStaff');
+    expect(page).toContain('staffAttention');
+    expect(page).toContain('hr-attention-');
     expect(page).toContain('Open profile ↗');
     expect(page).toContain("url.searchParams.set('profile', person.staff_id)");
     expect(page).toContain("url.searchParams.set('popout', '1')");
@@ -151,6 +154,16 @@ describe('governed HR administration', () => {
     expect(staffProfilePage).toContain("{ id: 'health-safety', label: 'H&S' }");
     expect(staffProfilePage).toContain("url.searchParams.set('recordKind', kind)");
     expect(staffProfilePage).toContain("detailWindow.opener = null");
+  });
+
+  it('uses the searchable onboarding row and schema-backed profile read paths', () => {
+    expect(page).toContain('Search onboarding');
+    expect(page).toContain('filteredOnboardingPeople');
+    expect(page).toContain("openStaffProfile(person, 'onboarding')");
+    expect(staffProfilePage).toContain("{ id: 'onboarding', label: 'Onboarding' }");
+    expect(staffProfilePage).toContain("supabase.rpc('get_staff_onboarding_readiness'");
+    expect(staffProfilePage).toContain("status,created_at').eq('staff_id', staff.id)");
+    expect(staffProfilePage).not.toContain("status,updated_at').eq('staff_id', staff.id)");
   });
 
   it('provisions accepted candidates with employer-owned employment and a branch authorization', () => {

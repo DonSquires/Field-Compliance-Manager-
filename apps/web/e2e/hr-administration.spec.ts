@@ -28,7 +28,8 @@ test('organization role codes appear in Payroll role and do not replace the staf
   });
 
   await signInAsAdmin(page, '/admin/people-hr');
-  await expect(page.getByRole('row', { name: /Ana Ngata/ })).toContainText('Officer');
+  await expect(page.getByRole('row', { name: /Ana Ngata/ })).toContainText('ana@fcm.test');
+  await expect(page.getByRole('row', { name: /Ana Ngata/ })).not.toContainText('Officer');
   const staffProfile = await openStaffProfile(page);
   await staffProfile.getByRole('button', { name: 'Employment & pay' }).click();
   const payrollRole = staffProfile.getByLabel('Payroll role');
@@ -146,7 +147,8 @@ test('saving a changed payroll role sends the existing role as the expected valu
   });
 
   await signInAsAdmin(page, '/admin/people-hr');
-  await expect(page.getByRole('row', { name: /Ana Ngata/ })).toContainText('Officer');
+  await expect(page.getByRole('row', { name: /Ana Ngata/ })).toContainText('ana@fcm.test');
+  await expect(page.getByRole('row', { name: /Ana Ngata/ })).not.toContainText('Officer');
   const staffProfile = await openStaffProfile(page);
   await staffProfile.getByRole('button', { name: 'Employment & pay' }).click();
   await staffProfile.getByLabel('Payroll role').selectOption('field_security');
@@ -422,21 +424,24 @@ test('an offered candidate can be hired later, which creates the login and staff
   expect(calls).toEqual(['manage', 'create-user', 'convert']);
 });
 
-test('onboarding shows each person as a seven-step ladder with what the next step needs', async ({ page }) => {
+test('onboarding shows each person as a searchable single row with the next required action', async ({ page }) => {
   const json = (body: unknown) => ({ status: 200, contentType: 'application/json', body: JSON.stringify(body) });
   await page.route('**/rest/v1/rpc/get_staff_onboarding_readiness', async (route) => await route.fulfill(json([{ ledger_id: '81818181-8181-4181-8181-818181818181', staff_id: '22222222-2222-4222-8222-222222222222', user_id: '22222222-2222-4222-8222-222222222222', display_name: 'Ana Ngata', current_stage: 'evidence', status: 'in_progress', version: 3, target_start: '2026-09-07', identity_status: 'complete', employment_status: 'complete', evidence_status: 'complete', supervision_status: 'blocked', induction_status: 'blocked', work_status: 'blocked', blockers: ['Assign a line manager'], next_action: 'Assign line manager' }])));
   await page.route('**/rest/v1/rpc/manage_staff_onboarding', async (route) => { const payload = JSON.parse(route.request().postData() ?? '{}'); expect(payload.p_action).toBe('advance'); expect(payload.p_stage).toBe('supervision'); expect(payload.p_expected_version).toBe(3); await route.fulfill(json([{ ledger_id: payload.p_ledger_id, current_stage: 'supervision', status: 'in_progress', version: 4 }])); });
   await signInAsAdmin(page, '/admin/people-hr');
   await page.getByRole('button', { name: 'Onboarding', exact: true }).click();
-  const card = page.locator('.contact-card', { has: page.getByRole('heading', { name: 'Ana Ngata' }) }).first();
-  const ladder = card.getByRole('list', { name: 'Onboarding steps for Ana Ngata' });
-  await expect(ladder.getByRole('listitem')).toHaveCount(7);
-  await expect(ladder.locator('li.is-done')).toHaveCount(2);
-  await expect(ladder.locator('li.is-current')).toContainText('Evidence');
-  await expect(card.getByText('Holding this up: Assign a line manager')).toBeVisible();
-  await expect(card.getByRole('button', { name: 'Continue to Supervision' })).toBeVisible();
-  await expect(card).toHaveScreenshot('hr-onboarding-ladder.png');
-  await card.getByRole('button', { name: 'Continue to Supervision' }).click();
+  const row = page.getByRole('row', { name: /Ana Ngata/ });
+  await expect(row).toContainText('Evidence');
+  await expect(row).toContainText('In progress');
+  await expect(row).toContainText('Assign a line manager');
+  await expect(row.getByRole('button', { name: 'Continue to Supervision' })).toBeVisible();
+  await expect(row).toHaveScreenshot('hr-onboarding-list-row.png');
+  await page.getByLabel('Search onboarding').fill('line manager');
+  await expect(row).toBeVisible();
+  await page.getByLabel('Search onboarding').fill('no matching person');
+  await expect(row).toBeHidden();
+  await page.getByLabel('Search onboarding').fill('');
+  await row.getByRole('button', { name: 'Continue to Supervision' }).click();
   const dialog = page.getByRole('dialog', { name: 'Move to Supervision?' });
   await expect(dialog.getByText(/Needs: A line manager assigned/)).toBeVisible();
   await dialog.getByLabel('Stage note').fill('Evidence pack checked against the record.');
@@ -444,15 +449,15 @@ test('onboarding shows each person as a seven-step ladder with what the next ste
   await expect(dialog).toBeHidden();
 });
 
-test('a first credential is recorded and verified from the onboarding card through the governed RPC', async ({ page }) => {
+test('a first credential is recorded and verified from the onboarding row through the governed RPC', async ({ page }) => {
   const json = (body: unknown) => ({ status: 200, contentType: 'application/json', body: JSON.stringify(body) });
   await page.route('**/rest/v1/rpc/get_staff_onboarding_readiness', async (route) => await route.fulfill(json([{ ledger_id: '81818181-8181-4181-8181-818181818181', staff_id: '22222222-2222-4222-8222-222222222222', user_id: '22222222-2222-4222-8222-222222222222', display_name: 'Ana Ngata', current_stage: 'evidence', status: 'in_progress', version: 3, target_start: null, identity_status: 'complete', employment_status: 'complete', evidence_status: 'blocked', supervision_status: 'blocked', induction_status: 'blocked', work_status: 'blocked', blockers: ['No verified current credential'], next_action: 'Verify credential' }])));
   let payload: Record<string, unknown> | null = null;
   await page.route('**/rest/v1/rpc/record_staff_credential', async (route) => { const body = JSON.parse(route.request().postData() ?? '{}'); payload = body; await route.fulfill(json([{ credential_id: '91919191-9191-4191-8191-919191919191', staff_id: body.p_staff_id, verified: true, verified_at: '2026-08-30T10:00:00.000Z', created: true }])); });
   await signInAsAdmin(page, '/admin/people-hr');
   await page.getByRole('button', { name: 'Onboarding', exact: true }).click();
-  const card = page.locator('.contact-card', { has: page.getByRole('heading', { name: 'Ana Ngata' }) }).first();
-  await card.getByRole('button', { name: 'Verify credential' }).click();
+  const row = page.getByRole('row', { name: /Ana Ngata/ });
+  await row.getByRole('button', { name: 'Verify credential' }).click();
   const dialog = page.getByRole('dialog', { name: 'Record credential' });
   await expect(dialog.getByText(/A verified, current credential is what makes an officer work ready/)).toBeVisible();
   const submit = dialog.getByRole('button', { name: 'Record and verify' });
@@ -485,8 +490,8 @@ test('onboarding guides HR through employment setup as one audited step', async 
 
   await signInAsAdmin(page, '/admin/people-hr');
   await page.getByRole('button', { name: 'Onboarding', exact: true }).click();
-  const card = page.locator('.contact-card', { has: page.getByRole('heading', { name: 'Ana Ngata' }) }).first();
-  await card.getByRole('button', { name: 'Complete employment setup' }).click();
+  const row = page.getByRole('row', { name: /Ana Ngata/ });
+  await row.getByRole('button', { name: 'Complete employment setup' }).click();
   const dialog = page.getByRole('dialog', { name: 'Complete employment setup' });
   await dialog.getByLabel('Employment type').selectOption('permanent');
   await dialog.getByLabel('Payroll role').selectOption('FIELD_SECURITY');
