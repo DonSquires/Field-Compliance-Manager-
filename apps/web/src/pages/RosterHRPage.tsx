@@ -7,7 +7,7 @@
  * queue) + timesheets (hours, approval, payroll export).
  */
 
-import React, { useEffect, useState, useCallback, useRef } from 'react';
+import React, { useEffect, useState, useCallback, useMemo, useRef } from 'react';
 import { useLocation, useNavigate } from 'react-router-dom';
 import { useAuth } from '../context/AuthContext';
 import { supabase } from '../lib/supabase';
@@ -17,8 +17,7 @@ import { CREDENTIAL_TYPES, credentialExpiryState, credentialExpiryWords, credent
 import './PageStyles.css';
 import './RosterHRPage.css';
 
-// Keep the read path dormant until the corresponding Supabase table is deployed.
-const PAY_LINE_REVIEW_TABLE_DEPLOYED = false;
+const PAY_LINE_REVIEW_TABLE_DEPLOYED = true;
 
 type RosterTab = 'staff' | 'recruitment' | 'onboarding' | 'performance' | 'cases' | 'credentials' | 'shift-templates' | 'coverage' | 'leave' | 'timesheets' | 'pay-review' | 'assets' | 'oncall' | 'court' | 'roster-rules';
 type RosterTabGroup = 'workforce' | 'people' | 'rostering' | 'pay-assets';
@@ -242,6 +241,20 @@ interface AssetDraft {
   notes: string;
 }
 
+type AttentionLevel = 'clear' | 'due' | 'overdue';
+const attentionRank: Record<AttentionLevel, number> = { clear: 0, due: 1, overdue: 2 };
+const attentionLabel: Record<AttentionLevel, string> = { clear: 'Current', due: 'Due soon', overdue: 'Needs attention' };
+
+const expiryAttention = (value: string | null | undefined): AttentionLevel => {
+  if (!value) return 'clear';
+  const days = Math.ceil((new Date(value).getTime() - new Date().setHours(0, 0, 0, 0)) / 86400000);
+  if (days < 0) return 'overdue';
+  return days <= 30 ? 'due' : 'clear';
+};
+
+const strongestAttention = (...levels: AttentionLevel[]) =>
+  levels.reduce<AttentionLevel>((strongest, level) => attentionRank[level] > attentionRank[strongest] ? level : strongest, 'clear');
+
 interface OnCallRow {
   id: string;
   officer_user_id: string;
@@ -381,6 +394,7 @@ const RosterHRPage: React.FC = () => {
   const [offerAction, setOfferAction] = useState<{ candidate: RecruitmentCandidate; role: string; employmentType: string; startDate: string; note: string; accepted: boolean } | null>(null);
   const [readinessAssessments, setReadinessAssessments] = useState<ReadinessAssessment[]>([]);
   const [credentials, setCredentials] = useState<CredentialRow[]>([]);
+  const [staffSiteInductions, setStaffSiteInductions] = useState<StaffSiteInductionRow[]>([]);
   const [staffDocuments, setStaffDocuments] = useState<StaffDocumentRow[]>([]);
   const [trainingRecords, setTrainingRecords] = useState<StaffTrainingRow[]>([]);
   const [staffSkills, setStaffSkills] = useState<StaffSkillRow[]>([]);
@@ -396,6 +410,7 @@ const RosterHRPage: React.FC = () => {
   const [showPayRoleCodeForm, setShowPayRoleCodeForm] = useState(false);
   const [payRoleCodeForm, setPayRoleCodeForm] = useState({ code: '', name: '' });
   const [staffSearch, setStaffSearch] = useState('');
+  const [onboardingSearch, setOnboardingSearch] = useState('');
   const [trainingAction, setTrainingAction] = useState<{ staffId: string; trainingName: string; trainingType: string; provider: string; completedDate: string; expiryDate: string; result: 'passed' | 'not_passed' | 'not_assessed'; score: string; notes: string; supersedesId: string | null } | null>(null);
   const [skillAction, setSkillAction] = useState<{ staffId: string; skillId: string; proficiency: string; certified: boolean; certificationExpiry: string; notes: string } | null>(null);
   const [staffNames, setStaffNames] = useState<Record<string, string>>({});
@@ -491,6 +506,7 @@ const RosterHRPage: React.FC = () => {
       setStaff([]);
       setReadinessAssessments([]);
       setCredentials([]);
+      setStaffSiteInductions([]);
       setLeaveRequests([]);
       setTimesheets([]);
       setDispatchPayLines([]);
@@ -673,6 +689,7 @@ const RosterHRPage: React.FC = () => {
       setReadinessAssessments((readinessRes.data as ReadinessAssessment[]) || []);
       setStaffNames(names);
       setCredentials((credentialsRes.data as CredentialRow[]) || []);
+      setStaffSiteInductions((staffSiteInductionsRes.data as StaffSiteInductionRow[]) || []);
       setStaffDocuments((staffDocumentsRes.data as StaffDocumentRow[]) || []);
       setTrainingRecords((trainingRecordsRes.data as StaffTrainingRow[]) || []);
       setStaffSkills((staffSkillsRes.data as StaffSkillRow[]) || []);
@@ -681,7 +698,7 @@ const RosterHRPage: React.FC = () => {
       setTimesheets((timesheetsRes.data as TimesheetRow[]) || []);
       setDispatchPayLines((payLinesRes.data as DispatchPayLineRow[]) || []);
       setDispatchPayLineReviews((payLineReviewsRes.data as DispatchPayLineReviewRow[]) || []);
-      setPayReviewGovernanceAvailable(false);
+      setPayReviewGovernanceAvailable(PAY_LINE_REVIEW_TABLE_DEPLOYED);
       setCoverageRequests(
         ((coverageRes.data as any[]) || []).map((row) => ({
           id: row.id,
@@ -761,11 +778,11 @@ const RosterHRPage: React.FC = () => {
     if (readinessError) setError(readinessError.message);else { setNotice(`${readinessReview.name} readiness updated and audited.`);setReadinessReview(null);setReadinessNotes('');await loadAll(); }setSaving(false);
   };
 
-  const openStaffProfile = (person: StaffRow) => {
+  const openStaffProfile = (person: StaffRow, profileTab = 'overview') => {
     if (!person.staff_id) return;
     const url = new URL('/admin/people-hr', window.location.origin);
     url.searchParams.set('profile', person.staff_id);
-    url.searchParams.set('profileTab', 'overview');
+    url.searchParams.set('profileTab', profileTab);
     url.searchParams.set('popout', '1');
     const profileWindow = window.open(url.toString(), `fcm-staff-profile-${person.staff_id}`, 'popup=yes,width=1440,height=960,left=80,top=40');
     if (profileWindow) profileWindow.opener = null;
@@ -1548,6 +1565,50 @@ const RosterHRPage: React.FC = () => {
     return days <= 30;
   };
 
+  const staffAttention = useMemo(() => Object.fromEntries(staff.filter((person) => person.staff_id).map((person) => {
+    const staffId = person.staff_id!;
+    const reasons: string[] = [];
+    const levels: AttentionLevel[] = [];
+    credentials.filter((item) => item.staff_id === staffId).forEach((item) => {
+      const level = item.verified ? expiryAttention(item.expiry_date) : 'overdue';
+      levels.push(level);
+      if (!item.verified) reasons.push(`${credentialTypeLabel(item.credential_type)} is unverified`);
+      else if (level !== 'clear') reasons.push(`${credentialTypeLabel(item.credential_type)} ${level === 'overdue' ? 'has expired' : 'expires soon'}`);
+    });
+    trainingRecords.filter((item) => item.staff_id === staffId).forEach((item) => {
+      const level = expiryAttention(item.expiry_date);
+      levels.push(level);
+      if (level !== 'clear') reasons.push(`${item.training_name} ${level === 'overdue' ? 'has expired' : 'expires soon'}`);
+    });
+    staffSiteInductions.filter((item) => item.staff_id === staffId).forEach((item) => {
+      const level = expiryAttention(item.expires_at);
+      levels.push(level);
+      if (level !== 'clear') reasons.push(`Site induction ${level === 'overdue' ? 'has expired' : 'expires soon'}`);
+    });
+    const readiness = readinessAssessments.find((item) => item.staff_id === staffId);
+    if (readiness?.credential_status === 'attention' || readiness?.training_status === 'attention') levels.push('overdue');
+    if (readiness?.blockers?.length) reasons.push(...readiness.blockers);
+    const level = strongestAttention(...levels);
+    return [staffId, { level, reasons: [...new Set(reasons)] }];
+  })), [credentials, readinessAssessments, staff, staffSiteInductions, trainingRecords]);
+
+  const filteredStaff = useMemo(() => {
+    const search = staffSearch.trim().toLocaleLowerCase('en-NZ');
+    return [...staff]
+      .sort((left, right) => (left.display_name || left.email || '').localeCompare(right.display_name || right.email || '', 'en-NZ', { sensitivity: 'base' }))
+      .filter((person) => [person.display_name, person.email, person.role_code, person.employment_type, person.work_ready ? 'work ready' : 'not work ready']
+        .filter(Boolean).join(' ').toLocaleLowerCase('en-NZ').includes(search));
+  }, [staff, staffSearch]);
+
+  const filteredOnboardingPeople = useMemo(() => {
+    const search = onboardingSearch.trim().toLocaleLowerCase('en-NZ');
+    return staff.filter((person) => person.staff_id)
+      .map((person) => ({ person, ledger: onboarding.find((item) => item.staff_id === person.staff_id) }))
+      .filter(({ person, ledger }) => [person.display_name, person.email, ledger?.current_stage, ledger?.status, ledger?.next_action, ...(ledger?.blockers ?? [])]
+        .filter(Boolean).join(' ').toLocaleLowerCase('en-NZ').includes(search))
+      .sort((left, right) => (left.person.display_name || left.person.email || '').localeCompare(right.person.display_name || right.person.email || '', 'en-NZ', { sensitivity: 'base' }));
+  }, [onboarding, onboardingSearch, staff]);
+
   if (loading) {
     return (
       <div className="page-container">
@@ -1652,7 +1713,7 @@ const RosterHRPage: React.FC = () => {
           </div>
           <div className="hr-staff-directory-tools">
             <label><span>Search staff</span><input type="search" value={staffSearch} onChange={(event) => setStaffSearch(event.target.value)} placeholder="Name, email, payroll role, employment or readiness" /></label>
-            <span>{staff.filter((person) => [person.display_name, person.email, person.role_code, person.employment_type, person.work_ready ? 'work ready' : 'not work ready'].filter(Boolean).join(' ').toLowerCase().includes(staffSearch.trim().toLowerCase())).length} shown</span>
+            <span>{filteredStaff.length} shown</span>
           </div>
           <div className="reports-table-wrapper hr-staff-directory">
             {staff.length === 0 ? (
@@ -1661,18 +1722,21 @@ const RosterHRPage: React.FC = () => {
                 <p>Field staff are created when a recruitment offer is accepted and the person is hired. Office and admin users are added under People &amp; Access.</p>
                 <button type="button" className="btn btn-sm btn-primary" onClick={() => { setTab('recruitment'); setTabGroup(tabGroupFor('recruitment')); }}>Open Recruitment</button>
               </div>
-            ) : <table className="reports-table"><thead><tr><th>Name</th><th>Employment</th><th>Payroll role</th><th>Readiness</th><th>Contact</th><th>Action</th></tr></thead><tbody>
-              {staff.filter((person) => [person.display_name, person.email, person.role_code, person.employment_type, person.work_ready ? 'work ready' : 'not work ready'].filter(Boolean).join(' ').toLowerCase().includes(staffSearch.trim().toLowerCase())).map((s) => (
+            ) : <table className="reports-table"><thead><tr><th>Name</th><th>Attention</th><th>Employment</th><th>Payroll role</th><th>Readiness</th><th>Contact</th><th>Action</th></tr></thead><tbody>
+              {filteredStaff.map((s) => {
+                const attention = s.staff_id ? staffAttention[s.staff_id] ?? { level: 'clear' as AttentionLevel, reasons: [] } : { level: 'overdue' as AttentionLevel, reasons: ['No staff profile'] };
+                return (
                 <tr key={s.id}>
-                  <td><button type="button" className="hr-staff-name-button" disabled={!s.staff_id} onClick={() => openStaffProfile(s)}><strong>{s.display_name || s.email || 'Unnamed'}</strong><small>{plainWords(s.role)}</small></button></td>
+                  <td><button type="button" className="hr-staff-name-button" disabled={!s.staff_id} onClick={() => openStaffProfile(s)}><strong>{s.display_name || s.email || 'Unnamed'}</strong><small>{s.email ?? 'No email recorded'}</small></button></td>
+                  <td><span className={`hr-attention hr-attention-${attention.level}`} title={attention.reasons.join(' · ') || 'No credential, training, or induction deadlines require attention'}><span aria-hidden="true" />{attentionLabel[attention.level]}</span></td>
                   <td>{plainWords(s.employment_type, 'Not set')}{s.start_date ? <small> · since {new Date(s.start_date).toLocaleDateString('en-NZ')}</small> : null}</td>
                   <td>{s.role_code ?? 'Not assigned'}</td>
                   <td><span className={`status-badge ${s.work_ready ? 'status-active' : 'status-pending'}`}>{s.staff_id ? (s.work_ready ? 'Work ready' : 'Not work ready') : 'No staff profile'}</span></td>
                   <td>{s.email ?? 'No email'}</td>
                   <td><button type="button" className="btn btn-sm btn-primary" disabled={!s.staff_id} onClick={() => openStaffProfile(s)}>Open profile ↗</button></td>
                 </tr>
-              ))}
-              {staff.length > 0 && staff.filter((person) => [person.display_name, person.email, person.role_code, person.employment_type, person.work_ready ? 'work ready' : 'not work ready'].filter(Boolean).join(' ').toLowerCase().includes(staffSearch.trim().toLowerCase())).length === 0 && <tr><td colSpan={6} className="text-center">No staff match this search.</td></tr>}
+              );})}
+              {staff.length > 0 && filteredStaff.length === 0 && <tr><td colSpan={7} className="text-center">No staff match this search.</td></tr>}
             </tbody></table>}
           </div>
 
@@ -1851,30 +1915,32 @@ const RosterHRPage: React.FC = () => {
       {tab === 'onboarding' && (
         <section className="reports-section">
           <h2>Staff Onboarding ({onboarding.length})</h2>
-          <p className="hr-section-hint">Seven steps from hired to work-ready. Use the highlighted next action; the server checks the saved record before the person can continue.</p>
-          <div className="contacts-list">
+          <p className="hr-section-hint">One row per person. Search by name, stage, blocker, or next action; open the onboarding profile without losing this workspace.</p>
+          <div className="hr-staff-directory-tools">
+            <label><span>Search onboarding</span><input type="search" value={onboardingSearch} onChange={(event) => setOnboardingSearch(event.target.value)} placeholder="Name, stage, status, blocker or next action" /></label>
+            <span>{filteredOnboardingPeople.length} shown</span>
+          </div>
+          <div className="reports-table-wrapper hr-onboarding-directory">
             {staff.filter((person) => person.staff_id).length === 0 && <div className="empty-state"><p>No staff to onboard yet. Hire a candidate under People → Recruitment first.</p></div>}
-            {staff.filter((person) => person.staff_id).map((person) => {
-              const ledger = onboarding.find((item) => item.staff_id === person.staff_id);
+            {staff.some((person) => person.staff_id) && <table className="reports-table"><thead><tr><th>Name</th><th>Stage</th><th>Status</th><th>Target start</th><th>Blockers / next action</th><th>Action</th></tr></thead><tbody>
+            {filteredOnboardingPeople.map(({ person, ledger }) => {
               const name = person.display_name ?? person.email ?? 'Staff member';
-              const currentIndex = ledger ? ONBOARDING_STEPS.findIndex((step) => step.stage === ledger.current_stage) : -1;
-              return <div key={person.id} className="contact-card">
-                <div className="contact-header"><h3>{name}</h3><span className={`status-badge status-${ledger?.status ?? 'not_started'}`}>{onboardingStatusLabel(ledger?.status)}</span></div>
-                <div className="contact-details">
-                  {ledger
-                    ? <ol className="hr-onboarding-ladder" aria-label={`Onboarding steps for ${name}`}>{ONBOARDING_STEPS.map((step, index) => <li key={step.stage} className={index < currentIndex || ledger.status === 'ready' ? 'is-done' : index === currentIndex ? 'is-current' : 'is-later'} aria-current={index === currentIndex && ledger.status !== 'ready' ? 'step' : undefined}><span>{index + 1}</span><div><strong>{step.label}</strong><small>{step.needs}</small></div></li>)}</ol>
-                    : <p>Not started. Starting creates the onboarding record and opens step 1 (Identity).</p>}
-                  {ledger?.target_start && <p className="contact-meta">Target start {new Date(ledger.target_start).toLocaleDateString('en-NZ')}</p>}
-                  {ledger?.blockers?.length ? <p className="contact-meta hr-onboarding-blockers">Holding this up: {ledger.blockers.join(' · ')}</p> : null}
-                </div>
-                <div className="assessment-actions">
+              return <tr key={person.id}>
+                <td><button type="button" className="hr-staff-name-button" onClick={() => openStaffProfile(person, 'onboarding')}><strong>{name}</strong><small>{person.email ?? 'No email recorded'}</small></button></td>
+                <td>{ledger ? plainWords(ledger.current_stage) : 'Not started'}</td>
+                <td><span className={`status-badge status-${ledger?.status ?? 'not_started'}`}>{onboardingStatusLabel(ledger?.status)}</span></td>
+                <td>{ledger?.target_start ? new Date(ledger.target_start).toLocaleDateString('en-NZ') : 'Not set'}</td>
+                <td>{ledger?.blockers?.length ? <span className="hr-inline-warning">{ledger.blockers.join(' · ')}</span> : ledger?.next_action ?? 'Start onboarding'}</td>
+                <td><div className="assessment-actions">
+                  <button type="button" className="btn btn-sm btn-secondary" onClick={() => openStaffProfile(person, 'onboarding')}>Open profile ↗</button>
                   {!ledger
                     ? <button type="button" className="btn btn-sm btn-primary" onClick={() => setOnboardingAction({ staffId: person.staff_id!, name, note: 'Onboarding started' })}>Start onboarding</button>
                     : ledger.status !== 'ready' && <button type="button" className="btn btn-sm btn-primary" disabled={saving} onClick={() => runOnboardingPrimaryAction(person, ledger, name)}>{onboardingPrimaryActionLabel(ledger)}</button>}
-                </div>
-                {ledger && ledger.status !== 'ready' && <details className="hr-onboarding-more"><summary>Other onboarding actions</summary><div className="assessment-actions"><button type="button" className="btn btn-sm btn-secondary" onClick={() => openEmploymentSetup(person, name)}>Employment setup</button><button type="button" className="btn btn-sm btn-secondary" onClick={() => openEvidence(person.staff_id!, name, 'record_credential')}>Record credential</button><button type="button" className="btn btn-sm btn-secondary" onClick={() => openEvidence(person.staff_id!, name, 'add_skill')}>Add skill</button><button type="button" className="btn btn-sm btn-secondary" onClick={() => openEvidence(person.staff_id!, name, 'assign_line_manager')}>Assign manager</button><button type="button" className="btn btn-sm btn-secondary" onClick={() => openEvidence(person.staff_id!, name, 'record_induction')}>Record site induction</button><button type="button" className="btn btn-sm btn-secondary" onClick={() => openEvidence(person.staff_id!, name, 'record_document')}>Register document</button></div></details>}
-              </div>;
+                </div></td>
+              </tr>;
             })}
+            {filteredOnboardingPeople.length === 0 && <tr><td colSpan={6} className="text-center">No onboarding records match this search.</td></tr>}
+            </tbody></table>}
           </div>
         </section>
       )}

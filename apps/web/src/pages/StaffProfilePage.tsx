@@ -7,7 +7,7 @@ import { plainWords } from '../lib/rosterWords';
 import './PageStyles.css';
 import './StaffProfilePage.css';
 
-type ProfileTab = 'overview' | 'employment' | 'credentials' | 'skills-training' | 'documents' | 'rostering' | 'health-safety' | 'assets' | 'history';
+type ProfileTab = 'overview' | 'onboarding' | 'employment' | 'credentials' | 'skills-training' | 'documents' | 'rostering' | 'health-safety' | 'assets' | 'history';
 type RecordKind = 'credential' | 'skill' | 'training' | 'document' | 'induction' | 'asset' | 'timesheet' | 'leave' | 'case';
 
 interface StaffProfile {
@@ -38,6 +38,7 @@ interface RecordRow { id: string; [key: string]: unknown; }
 
 const PROFILE_TABS: Array<{ id: ProfileTab; label: string }> = [
   { id: 'overview', label: 'Overview' },
+  { id: 'onboarding', label: 'Onboarding' },
   { id: 'employment', label: 'Employment & pay' },
   { id: 'credentials', label: 'Credentials' },
   { id: 'skills-training', label: 'Skills & training' },
@@ -77,6 +78,7 @@ const StaffProfilePage: React.FC = () => {
   const [cases, setCases] = useState<RecordRow[]>([]);
   const [availability, setAvailability] = useState<RecordRow[]>([]);
   const [readiness, setReadiness] = useState<RecordRow | null>(null);
+  const [onboarding, setOnboarding] = useState<RecordRow | null>(null);
   const [payRoleDraft, setPayRoleDraft] = useState('');
   const [readinessReview, setReadinessReview] = useState<{ next: boolean; note: string } | null>(null);
   const [loading, setLoading] = useState(true);
@@ -119,6 +121,7 @@ const StaffProfilePage: React.FC = () => {
       userResult, roleResult, credentialResult, skillResult, trainingResult, documentResult,
       inductionResult, inductionRequirementResult, assetResult, timesheetResult, leaveResult,
       caseResult, availabilityResult, readinessResult,
+      onboardingResult,
     ] = await Promise.all([
       userPromise,
       supabase.from('reference_codes').select('code,name').eq('organization_id', staff.organization_id).eq('code_type', 'role_code').eq('is_active', true).order('sort_order').order('code'),
@@ -131,23 +134,20 @@ const StaffProfilePage: React.FC = () => {
       staff.user_id
         ? supabase.from('assets').select('id,asset_type,name,serial_number,registration,status,last_inspection_date,next_inspection_date,notes,updated_at').eq('organization_id', staff.organization_id).eq('assigned_to', staff.user_id).order('name')
         : Promise.resolve({ data: [], error: null }),
-      supabase.from('timesheets').select('id,period_start,period_end,scheduled_hours,actual_hours,overtime_hours,adjustment_hours,status,updated_at').eq('staff_id', staff.id).order('period_start', { ascending: false }).limit(52),
+      supabase.from('timesheets').select('id,period_start,period_end,scheduled_hours,actual_hours,overtime_hours,adjustment_hours,status,created_at').eq('staff_id', staff.id).order('period_start', { ascending: false }).limit(52),
       supabase.from('leave_requests').select('id,leave_type,starts_on,ends_on,status,reason,created_at').eq('staff_id', staff.id).order('starts_on', { ascending: false }).limit(50),
       supabase.from('hr_cases').select('id,case_type,severity,status,subject,opened_at,resolved_at').eq('staff_id', staff.id).order('opened_at', { ascending: false }).limit(50),
       supabase.from('staff_availability').select('id,day_of_week,specific_date,available_from,available_to,all_day,availability_type,notes').eq('staff_id', staff.id).order('specific_date'),
       supabase.rpc('get_staff_readiness_assessment', { p_organization_id: staff.organization_id }),
+      supabase.rpc('get_staff_onboarding_readiness', { p_organization_id: staff.organization_id }),
     ]);
     const results = [
       userResult, roleResult, credentialResult, skillResult, trainingResult, documentResult,
       inductionResult, inductionRequirementResult, assetResult, timesheetResult, leaveResult,
       caseResult, availabilityResult, readinessResult,
+      onboardingResult,
     ];
-    const firstError = results.find((result) => result.error)?.error;
-    if (firstError) {
-      setError(firstError.message);
-      setLoading(false);
-      return;
-    }
+    const panelErrors = results.flatMap((result) => result.error ? [result.error.message] : []);
     setStaffProfile(staff);
     const users = (userResult.data ?? []) as UserProfile[];
     setUserProfile(users.find((item) => item.id === staff.user_id) ?? users[0] ?? null);
@@ -164,7 +164,9 @@ const StaffProfilePage: React.FC = () => {
     setCases((caseResult.data ?? []) as RecordRow[]);
     setAvailability((availabilityResult.data ?? []) as RecordRow[]);
     setReadiness(((readinessResult.data ?? []) as RecordRow[]).find((item) => item.staff_id === staff.id) ?? null);
+    setOnboarding(((onboardingResult.data ?? []) as RecordRow[]).find((item) => item.staff_id === staff.id) ?? null);
     setPayRoleDraft(staff.role_code ?? '');
+    if (panelErrors.length > 0) setError(`Some profile sections could not be loaded: ${[...new Set(panelErrors)].join(' · ')}`);
     setLoading(false);
   }, [actor?.organizationId, staffId]);
 
@@ -256,7 +258,7 @@ const StaffProfilePage: React.FC = () => {
         <div>
           <span className="staff-profile-kicker">Staff profile · {staffProfile.employee_number ?? 'No employee number'}</span>
           <h1>{displayName}</h1>
-          <p>{text(userProfile?.email)} · {text(userProfile?.phone)} · {plainWords(userProfile?.role, 'role not recorded')}</p>
+          <p>{text(userProfile?.email)} · {text(userProfile?.phone)} · {plainWords(staffProfile.employment_type)} · {staffProfile.role_code ?? 'Payroll role not assigned'}</p>
         </div>
         <div className="staff-profile-header-actions">
           <span className={`status-badge ${staffProfile.work_ready ? 'status-active' : 'status-pending'}`}>{staffProfile.work_ready ? 'Work ready' : 'Not work ready'}</span>
@@ -283,6 +285,22 @@ const StaffProfilePage: React.FC = () => {
             </div>
             <section className="staff-profile-panel"><h2>Readiness</h2>{readiness ? <dl className="staff-profile-facts"><div><dt>Identity</dt><dd>{plainWords(String(readiness.identity_status ?? 'unknown'))}</dd></div><div><dt>Employment</dt><dd>{plainWords(String(readiness.employment_status ?? 'unknown'))}</dd></div><div><dt>Credentials</dt><dd>{plainWords(String(readiness.credential_status ?? 'unknown'))}</dd></div><div><dt>Training</dt><dd>{plainWords(String(readiness.training_status ?? 'unknown'))}</dd></div></dl> : <p>No readiness assessment is available.</p>}{Array.isArray(readiness?.blockers) && readiness.blockers.length > 0 && <p className="staff-profile-warning">Holding this person back: {(readiness.blockers as string[]).join(' · ')}</p>}<div className="staff-profile-panel-actions"><button type="button" className={`btn ${staffProfile.work_ready ? 'btn-danger' : 'btn-primary'}`} onClick={() => setReadinessReview({ next: !staffProfile.work_ready, note: '' })}>{staffProfile.work_ready ? 'Remove work readiness' : 'Mark work ready'}</button><a className="btn btn-secondary" href="/admin/people-hr?tab=credentials" target="_blank" rel="noopener noreferrer">Open credential actions</a></div></section>
           </>}
+
+          {activeTab === 'onboarding' && <section className="staff-profile-panel">
+            <h2>Onboarding</h2>
+            {onboarding ? <>
+              <dl className="staff-profile-facts">
+                <div><dt>Stage</dt><dd>{plainWords(String(onboarding.current_stage ?? 'not started'))}</dd></div>
+                <div><dt>Status</dt><dd>{plainWords(String(onboarding.status ?? 'not started'))}</dd></div>
+                <div><dt>Target start</dt><dd>{dateWords(onboarding.target_start, 'Not set')}</dd></div>
+                <div><dt>Next action</dt><dd>{text(onboarding.next_action, 'Review onboarding')}</dd></div>
+              </dl>
+              {Array.isArray(onboarding.blockers) && onboarding.blockers.length > 0 && <p className="staff-profile-warning">Holding this person up: {(onboarding.blockers as string[]).join(' · ')}</p>}
+              <div className="staff-profile-panel-actions">
+                <a className="btn btn-primary" href="/admin/people-hr?tab=onboarding" target="_blank" rel="noopener noreferrer">Continue governed onboarding</a>
+              </div>
+            </> : <div className="staff-profile-empty">No onboarding ledger is recorded for this person.</div>}
+          </section>}
 
           {activeTab === 'employment' && <section className="staff-profile-panel"><h2>Employment and payroll</h2><dl className="staff-profile-facts"><div><dt>Employment type</dt><dd>{plainWords(staffProfile.employment_type)}</dd></div><div><dt>Start date</dt><dd>{dateWords(staffProfile.start_date)}</dd></div><div><dt>End date</dt><dd>{dateWords(staffProfile.end_date, 'No end date')}</dd></div><div><dt>Seniority date</dt><dd>{dateWords(staffProfile.seniority_date)}</dd></div><div><dt>Overtime</dt><dd>{staffProfile.overtime_eligible ? 'Eligible' : 'Not eligible'}</dd></div></dl>{canManagePay ? <div className="staff-profile-pay-role"><label><span>Payroll role</span><select value={payRoleDraft} onChange={(event) => setPayRoleDraft(event.target.value)}><option value="">No payroll role assigned</option>{roleCodes.map((role) => <option value={role.code} key={role.code}>{role.code} · {role.name}</option>)}</select></label><button type="button" className="btn btn-primary" disabled={saving || payRoleDraft === (staffProfile.role_code ?? '')} onClick={() => void savePayRole()}>{saving ? 'Saving…' : 'Save payroll role'}</button>{roleCodes.length === 0 && <p className="staff-profile-warning">No payroll roles are configured. Create one in People, Pay &amp; HR before employment setup can be completed.</p>}</div> : <p>You do not have permission to change payroll roles.</p>}</section>}
 

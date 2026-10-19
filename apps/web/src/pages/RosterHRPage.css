@@ -107,6 +107,39 @@
 	opacity: .65;
 }
 
+.hr-attention {
+	display: inline-flex;
+	align-items: center;
+	gap: 6px;
+	white-space: nowrap;
+	font-size: 12px;
+	font-weight: 800;
+}
+
+.hr-attention > span {
+	width: 10px;
+	height: 10px;
+	border-radius: 50%;
+	background: #4cc38a;
+	box-shadow: 0 0 0 3px rgb(76 195 138 / 16%);
+}
+
+.hr-attention-due > span {
+	background: #e5aa45;
+	box-shadow: 0 0 0 3px rgb(229 170 69 / 16%);
+}
+
+.hr-attention-overdue > span {
+	background: #e76767;
+	box-shadow: 0 0 0 3px rgb(231 103 103 / 16%);
+}
+
+.hr-inline-warning {
+	color: #f2b18d;
+	font-size: 12px;
+	line-height: 1.4;
+}
+
 @media(max-width: 620px) {
 	.hr-staff-directory-tools {
 		display: grid;
