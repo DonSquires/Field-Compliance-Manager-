@@ -8,6 +8,34 @@ detailed backlogs (`ENTERPRISE_SAAS_TODO.md`, `PROTOTYPE_GAP_AUDIT.md`,
 Completion language is strict, as in the lineage: **merged ≠ deployed ≠
 glass-proven.** A workstream item is done only when its evidence gate is met.
 
+Owner-requested search and subject-trend refinement, 2026-10-19:
+
+- Vehicle Search & Flags preserves `%` search patterns independently from
+  canonical plate normalisation. Plain fragments match anywhere. Multiple
+  matches require explicit identity selection before history or flags load;
+  discovery is capped at 50 visible results with a refinement notice.
+  `search_vehicle_registrations` is security-invoker: it combines the existing
+  public vehicle projection with caller-visible observation plates, so an
+  observation-only registration stays searchable without inventing an identity
+  or bypassing observation RLS.
+- Repeat subject review accepts a NULL agreement as all observations in the
+  R&M organisations the caller may administer, including unmapped observations.
+  A named agreement retains its accepted-agreement/place filter. The existing
+  R&M administrator guard, verified-person requirement, accepted-CCTV rule,
+  timestamp filters and pagination remain in force. No unrelated organisation
+  access or automatic identity/enforcement inference is introduced.
+- Both people and vehicles support a one-sighting threshold. Person summaries
+  follow the report's period selector. List, history, vehicle detail, identity
+  and comment-mention RPCs share the same scope resolver.
+- Atlas inspection proved the report calls its summary RPC, which reads
+  observations, CCTV, canonical vehicles and agreement places. The separate
+  RPC FK reach was empty, not evidence that those data flows are absent.
+  Isolated PostgreSQL fixtures cover mixed places, duplicate place mappings,
+  missing agreement mappings, tenant/role denial, accepted/rejected/future
+  sightings, both subject types and their drilldowns. Rendered UI and
+  desktop/mobile browser fixtures cover wildcard discovery, explicit selection
+  and all-scope report requests. These fixtures are not live-user evidence.
+
 Owner ruling 2026-10-18, self-heal repairs the app:
 
 - Evidence: jobs `3e8f7800` and `ea808101` failed with empty diffs. Their

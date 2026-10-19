@@ -1,4 +1,4 @@
-import React, { useEffect, useMemo, useState } from 'react';
+import React, { useEffect, useMemo, useRef, useState } from 'react';
 import { X } from 'lucide-react';
 import { useAuth } from '../context/AuthContext';
 import { useServiceRelationships } from '../context/ServiceRelationshipContext';
@@ -94,6 +94,7 @@ export const RepeatSubjectsPanel: React.FC = () => {
   const [expandedEvidenceId, setExpandedEvidenceId] = useState<string | null>(null);
   const [historyLoading, setHistoryLoading] = useState(false);
   const [officerNames, setOfficerNames] = useState<Record<string, string>>({});
+  const historyRequest = useRef(0);
 
   const providerAgreements = useMemo(() => agreements.filter((agreement) =>
     agreement.agreement_type === 'operational' && agreement.invitation_status === 'accepted' && agreement.client_organization_id !== profile?.organizationId,
@@ -108,31 +109,37 @@ export const RepeatSubjectsPanel: React.FC = () => {
 
   useEffect(() => {
     let cancelled = false;
-    void supabase.rpc('can_manage_r_and_m_identity').then(({ data }) => {
-      if (!cancelled) setCanManageIdentity(data === true);
+    void supabase.rpc('can_manage_r_and_m_identity').then(({ data, error: accessError }) => {
+      if (cancelled) return;
+      if (accessError) setError(describe(accessError));
+      else setCanManageIdentity(data === true);
     });
     return () => { cancelled = true; };
   }, []);
 
-  useEffect(() => { setPage(0); setSelected(null); }, [agreementId, minSightings, rangeIndex]);
+  useEffect(() => {
+    historyRequest.current += 1;
+    setPage(0); setSelected(null);
+  }, [agreementId, minSightings, rangeIndex]);
 
   // ATLAS READS: observations, cctv_entity_observations via list_repeat_vehicle_subjects
   useEffect(() => {
     let cancelled = false;
     const load = async () => {
       if (!canManageIdentity) { setLoading(false); return; }
-      if (!agreementId) { setRows([]); setPlateMentions([]); setLoading(false); return; }
       setLoading(true);
       setError(null);
+      setRows([]);
+      setPlateMentions([]);
       const days = RANGES[rangeIndex].days;
       const from = days ? new Date(Date.now() - days * 24 * 60 * 60 * 1000).toISOString() : null;
       const [subjects, mentions] = await Promise.all([
         supabase.rpc('list_repeat_vehicle_subjects_for_agreement', {
-          p_service_agreement_id: agreementId, p_min_sightings: minSightings, p_from: from, p_to: new Date().toISOString(),
+          p_service_agreement_id: agreementId || null, p_min_sightings: minSightings, p_from: from, p_to: new Date().toISOString(),
           p_limit: PAGE_SIZE, p_offset: page * PAGE_SIZE,
         }),
         supabase.rpc('list_unlinked_plate_mentions_for_agreement', {
-          p_service_agreement_id: agreementId, p_from: from, p_to: new Date().toISOString(), p_limit: PAGE_SIZE, p_offset: page * PAGE_SIZE,
+          p_service_agreement_id: agreementId || null, p_from: from, p_to: new Date().toISOString(), p_limit: PAGE_SIZE, p_offset: page * PAGE_SIZE,
         }),
       ]);
       if (cancelled) return;
@@ -149,6 +156,8 @@ export const RepeatSubjectsPanel: React.FC = () => {
   }, [agreementId, canManageIdentity, minSightings, rangeIndex, page]);
 
   const open = async (row: SubjectRow) => {
+    const requestId = ++historyRequest.current;
+    setError(null);
     setSelected(row);
     setHistory([]);
     setIdentifications([]);
@@ -156,10 +165,11 @@ export const RepeatSubjectsPanel: React.FC = () => {
     setExpandedEvidenceId(null);
     setHistoryLoading(true);
     const [historyResult, detailsResult, identityResult] = await Promise.all([
-      supabase.rpc('list_vehicle_subject_history_for_agreement', { p_plate: row.plate, p_service_agreement_id: agreementId, p_limit: 200 }),
-      supabase.rpc('get_vehicle_subject_details_for_agreement', { p_plate: row.plate, p_service_agreement_id: agreementId }),
-      supabase.rpc('list_vehicle_subject_identifications', { p_plate: row.plate, p_service_agreement_id: agreementId }),
+      supabase.rpc('list_vehicle_subject_history_for_agreement', { p_plate: row.plate, p_service_agreement_id: agreementId || null, p_limit: 200 }),
+      supabase.rpc('get_vehicle_subject_details_for_agreement', { p_plate: row.plate, p_service_agreement_id: agreementId || null }),
+      supabase.rpc('list_vehicle_subject_identifications', { p_plate: row.plate, p_service_agreement_id: agreementId || null }),
     ]);
+    if (requestId !== historyRequest.current) return;
     const rpcError = historyResult.error ?? detailsResult.error ?? identityResult.error;
     if (rpcError) { setError(describe(rpcError)); setHistoryLoading(false); return; }
     const list = (historyResult.data ?? []) as HistoryRow[];
@@ -186,7 +196,7 @@ export const RepeatSubjectsPanel: React.FC = () => {
   const mentionTotal = plateMentions[0]?.total_count ?? 0;
   const visible = filter.trim() ? rows.filter((row) => row.plate.includes(filter.trim().toUpperCase().replace(/[^A-Z0-9]/g, ''))) : rows;
 
-  if (!canManageIdentity) return null;
+  if (!canManageIdentity) return error ? <div className="alert alert-error" role="alert">{error}</div> : null;
 
   return (
     <section className="reports-section repeat-subjects" aria-labelledby="repeat-subjects-title">
@@ -198,13 +208,13 @@ export const RepeatSubjectsPanel: React.FC = () => {
         <div className="repeat-subjects__controls">
           <label>Agreement
             <select value={agreementId} onChange={(event) => setAgreementId(event.target.value)}>
-              <option value="">Select an agreement</option>
+              <option value="">All authorised agreements and observations</option>
               {providerAgreements.map((agreement) => <option key={agreement.id} value={agreement.id}>{agreement.client_name ? `${agreement.client_name} · ` : ''}{agreement.name}</option>)}
             </select>
           </label>
           <label>Seen at least
             <select value={minSightings} onChange={(event) => setMinSightings(Number(event.target.value))}>
-              {[2, 3, 5, 10].map((n) => <option key={n} value={n}>{n} times</option>)}
+              {[1, 2, 3, 5, 10].map((n) => <option key={n} value={n}>{n} {n === 1 ? 'time (all subjects)' : 'times'}</option>)}
             </select>
           </label>
           <label>Period
@@ -217,7 +227,8 @@ export const RepeatSubjectsPanel: React.FC = () => {
       </div>
 
       {error && <div className="alert alert-error" role="alert">{error}</div>}
-      <p className="repeat-subjects__count" role="status">{!agreementId ? 'Choose an agreement to view its subjects.' : loading ? 'Loading repeat vehicles…' : `${total.toLocaleString('en-NZ')} ${total === 1 ? 'vehicle' : 'vehicles'}`}</p>
+      <p className="subtitle">{agreementId ? 'Selected agreement only.' : 'Across all authorised R&M organisations, including observations without an agreement. Unrelated organisations remain excluded.'}</p>
+      <p className="repeat-subjects__count" role="status">{loading ? 'Loading repeat vehicles…' : `${total.toLocaleString('en-NZ')} ${total === 1 ? 'vehicle' : 'vehicles'}`}</p>
       <div className="reports-table-wrapper repeat-subjects__table-wrap" role="region" aria-label="Repeat vehicle results" tabIndex={0}>
         <table className="reports-table">
           <thead><tr><th>Plate</th><th>Seen</th><th>Places</th><th>Officers</th><th>Patrol / CCTV</th><th>First seen</th><th>Last seen</th><th>Owner</th></tr></thead>
@@ -244,8 +255,7 @@ export const RepeatSubjectsPanel: React.FC = () => {
         <button type="button" className="btn btn-secondary" disabled={page + 1 >= pageCount || loading} onClick={() => setPage((current) => current + 1)}>Next</button>
       </div>
 
-      {agreementId && (
-        <section className="repeat-subjects__mentions" aria-labelledby="plate-mentions-title">
+      <section className="repeat-subjects__mentions" aria-labelledby="plate-mentions-title">
           <h3 id="plate-mentions-title">Plate mentions to review</h3>
           <p className="subtitle">These plate-shaped strings were found in patrol comments but are not linked to a structured observation. They are suggestions only and have not been counted as sightings.</p>
           <p className="repeat-subjects__count" role="status">{loading ? 'Loading mentions…' : `${mentionTotal.toLocaleString('en-NZ')} unlinked plate mentions`}</p>
@@ -263,10 +273,9 @@ export const RepeatSubjectsPanel: React.FC = () => {
               </tbody>
             </table>
           </div>
-        </section>
-      )}
+      </section>
 
-      {agreementId && <RepeatPeoplePanel agreementId={agreementId} />}
+      <RepeatPeoplePanel agreementId={agreementId} rangeDays={RANGES[rangeIndex].days} />
 
       {selected && (
         <div className="activity-browser__overlay" onClick={(event) => { if (event.target === event.currentTarget) setSelected(null); }}>
