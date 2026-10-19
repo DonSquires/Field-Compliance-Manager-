@@ -72,10 +72,20 @@ describe('vehicle search candidate selection', () => {
     render(<MemoryRouter><VehicleSearchPage /></MemoryRouter>);
     fireEvent.change(screen.getByLabelText('Registration search'), { target: { value: 'ABC' } });
     fireEvent.click(screen.getByRole('button', { name: 'Search Plate' }));
-    expect((await screen.findByRole('alert')).textContent).toContain('Search unavailable');
+    expect((await screen.findByRole('alert')).textContent).toContain("We couldn't load matching registrations");
     expect(screen.queryByRole('button', { name: '+ Raise of-interest flag' })).toBeNull();
   });
 
+  it('reports a PostgREST plain-object statement timeout explicitly', async () => {
+    rpc.mockResolvedValue({ data: null, error: {
+      code: '57014', message: 'canceling statement due to statement timeout', details: null, hint: null,
+    } });
+    render(<MemoryRouter><VehicleSearchPage /></MemoryRouter>);
+    fireEvent.change(screen.getByLabelText('Registration search'), { target: { value: 'RJ%9%8' } });
+    fireEvent.click(screen.getByRole('button', { name: 'Search Plate' }));
+    expect((await screen.findByRole('alert')).textContent).toContain('Vehicle search timed out');
+    expect(screen.queryByText('No matching registrations found.')).toBeNull();
+  });
   it('bounds broad result lists and reports empty wildcard searches', async () => {
     rpc.mockResolvedValueOnce({ data: Array.from({ length: 51 }, (_, n) => ({
       id: `vehicle-${n}`, plate_number: `REG${n}`,
