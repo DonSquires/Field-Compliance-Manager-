@@ -10,6 +10,37 @@ glass-proven.** A workstream item is done only when its evidence gate is met.
 
 Owner-requested search and subject-trend refinement, 2026-10-19:
 
+- Human confirmed registry wildcard search works after #124, but selecting a
+  registration fails. Bounded production logs identify the observation-history
+  GET returning HTTP 500 at 23:34:52 and 23:36:02 UTC, followed by eight-second
+  statement timeouts. Before: discovery resolves an exact canonical identity.
+  During: the shared history filter combines canonical UUID equality with
+  exact plate `ILIKE`, forcing a sequential scan and unrelated per-row RLS
+  work. After: the generic detail catch concealed the source as "Failed to
+  search vehicle"; no usable detail/flag surface was shown.
+  The repair adds a generated `observations.plate_number_upper` key and index,
+  then uses indexed equality in the existing shared history helper. This
+  preserves case-insensitive legacy matches, canonical links across old plate
+  text, result limits, ordering, caller RLS and officer agreement-zone scope.
+  It does not change source plate text, identity, access policy or permissions.
+  The derived field follows inserts/updates automatically. Existing
+  `canonical_vehicle_id` index remains in use. Atlas identifies both admin
+  Vehicle Search and Officer Vehicle Lookup as callers of this shared path.
+  Error handling now names failed detail sections and identifies history
+  timeouts instead of hiding plain-object PostgREST errors.
+  The isolated database fixture reproduces the old filter's unrelated-access
+  evaluation, then verifies the new filter over 8,100 unrelated records,
+  mixed-case legacy rows, canonical historical plates, denied records,
+  agreement-zone filtering, deduplication, sorting and generated-key updates
+  under a two-second statement limit.
+  Owner approved live application and protected publication. Live catalog
+  readback confirms the stored generated key; no-user-context authenticated
+  EXPLAIN ANALYZE for both human-selected registrations, including the zone
+  join, uses bitmap index scans on canonical identity and the new plate key
+  (15.1 ms and 7.9 ms). No observation sequential scan remains in those plans.
+  This is plan verification, not affected-user acceptance. Database regression
+  and canonical-link guards, 24 focused UI/helper tests, four desktop/mobile
+  browser cases, TypeScript and production build pass. Atlas refreshed.
 - Whole-system follow-up, 2026-10-19: the policy short-circuit did not resolve
   the human's search timeout. Wider Atlas/schema tracing established that
   `resolve_record_canonical_identity` already calls `ensure_canonical_vehicle`

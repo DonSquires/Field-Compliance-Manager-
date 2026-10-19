@@ -4,8 +4,8 @@ import { cleanup, fireEvent, render, screen, waitFor } from '@testing-library/re
 import { MemoryRouter } from 'react-router-dom';
 import VehicleSearchPage from './VehicleSearchPage';
 
-const { from, rpc, ilike, eq } = vi.hoisted(() => ({
-  from: vi.fn(), rpc: vi.fn(), ilike: vi.fn(), eq: vi.fn(),
+const { from, rpc, ilike, eq, historyOr, historyResult } = vi.hoisted(() => ({
+  from: vi.fn(), rpc: vi.fn(), ilike: vi.fn(), eq: vi.fn(), historyOr: vi.fn(), historyResult: vi.fn(),
 }));
 vi.mock('../lib/supabase', () => ({ supabase: { from, rpc } }));
 vi.mock('../context/AuthContext', () => ({ useAuth: () => ({ profile: { organizationId: 'org', id: 'user' } }) }));
@@ -14,6 +14,7 @@ vi.mock('../components/SafetyWarningsPanel', () => ({ SafetyWarningsPanel: () =>
 describe('vehicle search candidate selection', () => {
   beforeEach(() => {
     vi.clearAllMocks();
+    historyResult.mockReturnValue({ data: [], error: null });
     rpc.mockResolvedValue({ data: [
       { id: 'vehicle-1', plate_number: 'RJ198', make: 'Toyota' },
       { id: 'vehicle-2', plate_number: 'RJ298', make: 'Ford' },
@@ -22,8 +23,9 @@ describe('vehicle search candidate selection', () => {
       const query = {
         select: () => query, eq: (...args: unknown[]) => { eq(...args); return query; },
         ilike: (...args: unknown[]) => { ilike(table, ...args); return query; },
-        order: () => query, contains: () => query, or: () => query, is: () => query,
-        limit: async () => ({ data: table === 'canonical_vehicle_public' ? [
+        order: () => query, contains: () => query,
+        or: (filter: string) => { historyOr(table, filter); return query; }, is: () => query,
+        limit: async () => table === 'observations' ? historyResult() : ({ data: table === 'canonical_vehicle_public' ? [
           { id: 'vehicle-1', plate_number: 'RJ198', make: 'Toyota' },
           { id: 'vehicle-2', plate_number: 'RJ298', make: 'Ford' },
         ] : [], error: null }),
@@ -46,6 +48,7 @@ describe('vehicle search candidate selection', () => {
     await screen.findByRole('button', { name: '+ Raise of-interest flag' });
     expect(eq).toHaveBeenCalledWith('id', 'vehicle-2');
     expect(eq).toHaveBeenCalledWith('entity_id', 'vehicle-2');
+    expect(historyOr).toHaveBeenCalledWith('observations', 'canonical_vehicle_id.eq.vehicle-2,plate_number_upper.eq.RJ298');
     expect(ilike).toHaveBeenCalledWith('breach_alerts', 'plate_number', 'RJ298');
     expect(screen.queryByRole('region', { name: 'Matching vehicles' })).toBeNull();
     fireEvent.change(screen.getByLabelText('Registration search'), { target: { value: '%YG%4' } });
@@ -85,6 +88,21 @@ describe('vehicle search candidate selection', () => {
     fireEvent.click(screen.getByRole('button', { name: 'Search Plate' }));
     expect((await screen.findByRole('alert')).textContent).toContain('Vehicle search timed out');
     expect(screen.queryByText('No matching registrations found.')).toBeNull();
+  });
+  it('identifies a selected-vehicle history timeout instead of hiding it as a search failure', async () => {
+    historyResult.mockReturnValue({ data: null, error: {
+      code: '57014', message: 'canceling statement due to statement timeout',
+    } });
+    render(<MemoryRouter><VehicleSearchPage /></MemoryRouter>);
+    fireEvent.change(screen.getByLabelText('Registration search'), { target: { value: 'RJ%9%8' } });
+    fireEvent.click(screen.getByRole('button', { name: 'Search Plate' }));
+    await screen.findByRole('region', { name: 'Matching vehicles' });
+    fireEvent.click(screen.getByRole('button', { name: 'RJ298' }));
+    const error = await screen.findByRole('alert');
+    expect(error.textContent).toContain("We couldn't load vehicle observation history");
+    expect(error.textContent).toContain('timed out');
+    expect(error.textContent).not.toContain('Failed to search vehicle');
+    expect(screen.queryByRole('button', { name: '+ Raise of-interest flag' })).toBeNull();
   });
   it('bounds broad result lists and reports empty wildcard searches', async () => {
     rpc.mockResolvedValueOnce({ data: Array.from({ length: 51 }, (_, n) => ({

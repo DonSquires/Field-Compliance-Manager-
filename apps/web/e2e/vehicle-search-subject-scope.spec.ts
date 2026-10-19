@@ -8,6 +8,7 @@ test.beforeEach(async ({ page }) => {
 test('registration wildcards show selectable identities before history or flag actions', async ({ page }) => {
   const errors = monitorBrowserErrors(page);
   const patterns: string[] = [];
+  const historyFilters: string[] = [];
   const vehicles = [
     { id: 'abababab-abab-4bab-8bab-abababababab', plate_number: 'RJ198', make: 'Toyota', model: 'Hiace', homeless_status: 'none' },
     { id: 'bcbcbcbc-bcbc-4cbc-8cbc-bcbcbcbcbcbc', plate_number: 'RJ298', make: 'Ford', model: 'Transit', homeless_status: 'none' },
@@ -23,7 +24,15 @@ test('registration wildcards show selectable identities before history or flag a
     await route.fulfill({ contentType: 'application/json', body: JSON.stringify(id ? vehicles[1] : vehicles) });
   });
   for (const table of ['canonical_scv_public', 'person_permits_fieldwork', 'observations', 'breach_alerts', 'entity_flags']) {
-    await page.route(`**/rest/v1/${table}**`, async route => route.fulfill({ contentType: 'application/json', body: '[]' }));
+    await page.route(`**/rest/v1/${table}**`, async route => {
+      if (table === 'observations') {
+        const params = new URL(route.request().url()).searchParams;
+        if (params.get('select')?.includes('nights_this_zone')) {
+          historyFilters.push(params.get('or') ?? '');
+        }
+      }
+      await route.fulfill({ contentType: 'application/json', body: '[]' });
+    });
   }
   await page.route('**/rest/v1/rpc/get_safety_warnings', async route => route.fulfill({ contentType: 'application/json', body: '[]' }));
   await signInAsAdmin(page, '/admin/field-ops?area=vehicle-search');
@@ -37,6 +46,7 @@ test('registration wildcards show selectable identities before history or flag a
   await results.getByRole('button', { name: 'RJ298' }).click();
   await expect(page.getByText('Ford Transit', { exact: true })).toBeVisible();
   await expect(page.getByRole('button', { name: '+ Raise of-interest flag' })).toBeVisible();
+  expect(historyFilters).toEqual([`(canonical_vehicle_id.eq.${vehicles[1].id},plate_number_upper.eq.RJ298)`]);
   expect(errors).toEqual([]);
 });
 
