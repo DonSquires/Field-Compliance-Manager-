@@ -75,6 +75,26 @@ Field Compliance Manager (FCM) is an enterprise SaaS platform designed to replac
 | **Master Shell** | Master, Grand Master | Policy & Governance | Multi-tenant setup, platform terms, module subscriptions |
 | **Bob Studio** | Owner, Grand Master | IDE / Multi-Ability Studio | Continuous in-app build, testing, and system extensions |
 
+### Vehicle search and cross-area subject trends
+
+- In **Vehicle Search & Flags**, enter any part of a registration. Plain text
+  matches anywhere; `%` matches zero or more characters. For example, `RJ%9%8`
+  finds registrations beginning with RJ, followed by 9 and ending in 8;
+  `%yg%%4` finds registrations containing YG and ending in 4. Matching is
+  case-insensitive. Select a registration before inspecting history or raising
+  flags. Broad searches show the first 50 matches and ask you to refine.
+- In **Reports & Accountability > Repeat subject review**, choose **All
+  authorised agreements and observations** to compare subjects across areas,
+  including observations without an agreement mapping, or choose one agreement
+  to narrow the review. The existing R&M administrator identity permission
+  remains required; this is not a platform-wide disclosure option.
+- Select **1 time (all subjects)** in either subject list to include subjects
+  seen only once. Vehicle and verified-person lists use the selected period.
+  Counts combine patrol sightings and accepted CCTV observations, not unreviewed
+  detections or unlinked comment mentions. Open a subject to inspect its history,
+  place and recorded officer context; comment mentions remain separate evidence
+  requiring review.
+
 ---
 
 ## 3. System Section & Role Matrix

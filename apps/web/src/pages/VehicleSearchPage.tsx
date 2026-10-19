@@ -17,6 +17,7 @@ import { useSearchParams } from 'react-router-dom';
 import { SafetyWarningsPanel } from '../components/SafetyWarningsPanel';
 import { useAuth } from '../context/AuthContext';
 import { normalizePlateNumber, vehicleHistoryOrFilter } from '../lib/canonicalIdentity';
+import { vehiclePlateSearchPattern } from '../lib/vehiclePlateSearch';
 import { supabase } from '../lib/supabase';
 import './PageStyles.css';
 import './VehicleSearchPage.css';
@@ -40,6 +41,15 @@ interface Vehicle {
   external_data_source_url: string | null;
   external_data_source_location: string | null;
   external_data_source_checked_at: string | null;
+}
+
+interface VehicleMatch {
+  id: string | null;
+  plate_number: string;
+  make: string | null;
+  model: string | null;
+  year: number | null;
+  colour: string | null;
 }
 
 interface ScvRecord {
@@ -96,7 +106,10 @@ const VehicleSearchPage: React.FC = () => {
   const { profile } = useAuth();
   const [searchParams] = useSearchParams();
   const [plate, setPlate] = useState('');
+  const [selectedPlate, setSelectedPlate] = useState('');
   const [vehicle, setVehicle] = useState<Vehicle | null>(null);
+  const [matches, setMatches] = useState<VehicleMatch[] | null>(null);
+  const [moreMatches, setMoreMatches] = useState(false);
   const [scv, setScv] = useState<ScvRecord | null>(null);
   const [flags, setFlags] = useState<EntityFlag[]>([]);
   const [observations, setObservations] = useState<RecentObservation[]>([]);
@@ -115,6 +128,14 @@ const VehicleSearchPage: React.FC = () => {
       setLoading(true);
       setError(null);
       setSearched(true);
+      setMatches(null);
+      setVehicle(null);
+      setScv(null);
+      setFlags([]);
+      setPermits([]);
+      setObservations([]);
+      setBreaches([]);
+      setShowFlagForm(false);
 
       // ATLAS READS: canonical_vehicle_public, canonical_scv_public, person_permits_fieldwork, observations, breach_alerts
       // Resolve the canonical vehicle first so observation history follows the
@@ -130,6 +151,7 @@ const VehicleSearchPage: React.FC = () => {
       const vehData = vehRes.data as Vehicle | null;
       if (canonicalVehicleId && !vehData) throw new Error('The linked canonical vehicle is unavailable or you do not have access.');
       const resolvedPlate = normalizePlateNumber(vehData?.plate_number ?? cleanPlate);
+      setSelectedPlate(resolvedPlate);
       if (vehData?.plate_number) setPlate(vehData.plate_number);
 
       const historyFilter = vehicleHistoryOrFilter(resolvedPlate, vehData?.id ?? canonicalVehicleId ?? null);
@@ -158,7 +180,8 @@ const VehicleSearchPage: React.FC = () => {
           .limit(10),
       ]);
 
-      if (permitRes.error) throw permitRes.error;
+      const historyError = scvRes.error ?? permitRes.error ?? obsRes.error ?? breachRes.error;
+      if (historyError) throw historyError;
       setVehicle(vehData);
       setScv((scvRes.data as ScvRecord) || null);
       setPermits((permitRes.data as PermitRecord[]) || []);
@@ -221,7 +244,38 @@ const VehicleSearchPage: React.FC = () => {
 
   const handleSearch = (e: React.FormEvent) => {
     e.preventDefault();
-    void searchVehicle(plate);
+    void findVehicles();
+  };
+
+  const findVehicles = async () => {
+    setError(null);
+    setSearched(false);
+    setMatches(null);
+    setShowFlagForm(false);
+    try {
+      const pattern = vehiclePlateSearchPattern(plate);
+      setLoading(true);
+      // ATLAS CALLS: search_vehicle_registrations — caller-scoped discovery only;
+      // history and flag actions always use one selected canonical identity.
+      const { data, error: queryError } = await supabase.rpc('search_vehicle_registrations', {
+        p_pattern: pattern, p_limit: 51,
+      });
+      if (queryError) throw queryError;
+      const candidates = (data ?? []) as VehicleMatch[];
+      if (candidates.length === 1) {
+        await searchVehicle(candidates[0].plate_number, candidates[0].id ?? undefined);
+      } else if (!candidates.length && !plate.includes('%')) {
+        // An exact plate can have observations/permits without a registry row.
+        await searchVehicle(plate);
+      } else {
+        setMatches(candidates.slice(0, 50));
+        setMoreMatches(candidates.length > 50);
+      }
+    } catch (err) {
+      setError(err instanceof Error ? err.message : 'Failed to search vehicles');
+    } finally {
+      setLoading(false);
+    }
   };
 
   const handleRaiseFlag = async (e: React.FormEvent) => {
@@ -279,8 +333,11 @@ const VehicleSearchPage: React.FC = () => {
       <form className="vehicle-search-form" onSubmit={handleSearch}>
         <input
           type="text"
-          placeholder="Enter plate number (e.g. ABC123)"
+          aria-label="Registration search"
+          aria-describedby="vehicle-search-help"
+          placeholder="Registration or pattern, e.g. RJ%9%8"
           value={plate}
+          disabled={loading}
           onChange={(e) => setPlate(e.target.value.toUpperCase())}
           style={{
             flex: 1,
@@ -297,12 +354,37 @@ const VehicleSearchPage: React.FC = () => {
           {loading ? 'Searching…' : 'Search Plate'}
         </button>
       </form>
+      <p id="vehicle-search-help" className="subtitle">
+        Search any part of a registration. Use % for any number of characters, for example RJ%9%8 or %YG%4.
+        Choose a matching vehicle to view its history and flags.
+      </p>
 
-      {searched && !loading && (
+      {matches !== null && !loading && (
+        <section aria-label="Matching vehicles">
+          <p role="status">
+            {matches.length === 0 ? 'No matching registrations found.' : `${matches.length} matching registrations.`}
+            {moreMatches && ' Showing the first 50; refine your search to see others.'}
+          </p>
+          <div className="reports-table-wrapper">
+            <table className="reports-table">
+              <thead><tr><th>Registration</th><th>Vehicle</th><th>Colour</th></tr></thead>
+              <tbody>{matches.map((match) => (
+                <tr key={match.plate_number}>
+                  <td><button type="button" className="btn btn-secondary" onClick={() => void searchVehicle(match.plate_number, match.id ?? undefined)}>{match.plate_number}</button></td>
+                  <td>{[match.year, match.make, match.model].filter(Boolean).join(' ') || 'Not recorded'}</td>
+                  <td>{match.colour || 'Not recorded'}</td>
+                </tr>
+              ))}</tbody>
+            </table>
+          </div>
+        </section>
+      )}
+
+      {searched && !loading && matches === null && !error && (
         <div className="vehicle-search-results">
           {!vehicle && !scv && permits.length === 0 && observations.length === 0 ? (
             <div className="empty-state">
-              <p>No vehicle records, permits, or observations found for "{plate}".</p>
+              <p>No vehicle records, permits, or observations found for "{selectedPlate}".</p>
             </div>
           ) : (
             <div style={{ display: 'grid', gap: '16px' }}>
@@ -310,7 +392,7 @@ const VehicleSearchPage: React.FC = () => {
               <div className="contact-card">
                 <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', flexWrap: 'wrap', gap: '12px' }}>
                   <div style={{ display: 'flex', alignItems: 'center', gap: '12px' }}>
-                    <div className="plate-banner">{plate}</div>
+                    <div className="plate-banner">{selectedPlate}</div>
                     <div>
                       <div style={{ fontSize: '16px', fontWeight: 700 }}>
                         {vehicle?.make || 'Unknown Make'} {vehicle?.model || ''}

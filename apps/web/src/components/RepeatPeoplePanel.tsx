@@ -1,4 +1,4 @@
-import React, { useEffect, useMemo, useState } from 'react';
+import React, { useEffect, useMemo, useRef, useState } from 'react';
 import { useServiceRelationships } from '../context/ServiceRelationshipContext';
 import { supabase } from '../lib/supabase';
 import { RecordEvidencePanel } from './RecordEvidencePanel';
@@ -32,7 +32,7 @@ function describe(err: unknown): string {
   return err && typeof err === 'object' && 'message' in err ? String((err as { message: unknown }).message) : 'Person observations could not be loaded.';
 }
 
-export const RepeatPeoplePanel: React.FC<{ agreementId: string }> = ({ agreementId }) => {
+export const RepeatPeoplePanel: React.FC<{ agreementId: string; rangeDays?: number | null }> = ({ agreementId, rangeDays = 365 }) => {
   const { zones, sites } = useServiceRelationships();
   const [rows, setRows] = useState<PersonRow[]>([]);
   const [history, setHistory] = useState<PersonHistoryRow[]>([]);
@@ -42,22 +42,26 @@ export const RepeatPeoplePanel: React.FC<{ agreementId: string }> = ({ agreement
   const [loading, setLoading] = useState(true);
   const [historyLoading, setHistoryLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
+  const historyRequest = useRef(0);
 
   const placeNames = useMemo(() => new Map([...zones.map((zone) => [zone.id, zone.name] as const), ...sites.map((site) => [site.id, site.name] as const)]), [sites, zones]);
   const total = rows[0]?.total_count ?? 0;
   const pages = Math.max(1, Math.ceil(total / PAGE_SIZE));
 
-  useEffect(() => { setPage(0); setSelected(null); }, [agreementId, minimum]);
+  useEffect(() => {
+    historyRequest.current += 1;
+    setPage(0); setSelected(null);
+  }, [agreementId, minimum, rangeDays]);
 
   useEffect(() => {
     let cancelled = false;
     const load = async () => {
-      if (!agreementId) { setRows([]); setLoading(false); return; }
+      setRows([]);
       setLoading(true); setError(null);
       const { data, error: rpcError } = await supabase.rpc('list_repeat_person_subjects_for_agreement', {
-        p_service_agreement_id: agreementId,
+        p_service_agreement_id: agreementId || null,
         p_min_sightings: minimum,
-        p_from: new Date(Date.now() - 365 * 24 * 60 * 60 * 1000).toISOString(),
+        p_from: rangeDays === null ? null : new Date(Date.now() - rangeDays * 24 * 60 * 60 * 1000).toISOString(),
         p_to: new Date().toISOString(),
         p_limit: PAGE_SIZE,
         p_offset: page * PAGE_SIZE,
@@ -68,15 +72,17 @@ export const RepeatPeoplePanel: React.FC<{ agreementId: string }> = ({ agreement
     };
     void load();
     return () => { cancelled = true; };
-  }, [agreementId, minimum, page]);
+  }, [agreementId, minimum, rangeDays, page]);
 
   const open = async (row: PersonRow) => {
+    const requestId = ++historyRequest.current;
     setSelected(row); setHistory([]); setHistoryLoading(true); setError(null);
     const { data, error: rpcError } = await supabase.rpc('list_person_subject_history_for_agreement', {
       p_canonical_person_id: row.canonical_person_id,
-      p_service_agreement_id: agreementId,
+      p_service_agreement_id: agreementId || null,
       p_limit: 200,
     });
+    if (requestId !== historyRequest.current) return;
     if (rpcError) setError(describe(rpcError)); else setHistory((data ?? []) as PersonHistoryRow[]);
     setHistoryLoading(false);
   };
@@ -92,7 +98,7 @@ export const RepeatPeoplePanel: React.FC<{ agreementId: string }> = ({ agreement
     <section className="reports-section repeat-subjects repeat-people" aria-labelledby="repeat-people-title">
       <div className="repeat-subjects__head">
         <div><h2 id="repeat-people-title">People observed more than once</h2><p className="subtitle">Only R&amp;M admin, master and grandmaster roles can view verified canonical identities. Records pending human review are excluded.</p></div>
-        <label>Seen at least <select value={minimum} onChange={(event) => setMinimum(Number(event.target.value))}>{[2, 3, 5].map((n) => <option key={n} value={n}>{n} times</option>)}</select></label>
+        <label>Seen at least <select value={minimum} onChange={(event) => setMinimum(Number(event.target.value))}>{[1, 2, 3, 5].map((n) => <option key={n} value={n}>{n} {n === 1 ? 'time (all subjects)' : 'times'}</option>)}</select></label>
       </div>
       {error && <div className="alert alert-error" role="alert">{error}</div>}
       <p className="repeat-subjects__count" role="status">{loading ? 'Loading people…' : `${total.toLocaleString('en-NZ')} verified canonical people`}</p>
@@ -100,7 +106,7 @@ export const RepeatPeoplePanel: React.FC<{ agreementId: string }> = ({ agreement
         <table className="reports-table">
           <thead><tr><th>Person</th><th>Observations</th><th>Places</th><th>Patrol / CCTV</th><th>First seen</th><th>Last seen</th><th>Open</th></tr></thead>
           <tbody>
-            {!loading && rows.length === 0 && <tr><td colSpan={7} className="text-center">No verified canonical people meet this threshold in the agreement and period.</td></tr>}
+            {!loading && rows.length === 0 && <tr><td colSpan={7} className="text-center">No verified canonical people meet this threshold in the selected scope and period.</td></tr>}
             {rows.map((row) => <tr key={row.canonical_person_id}>
               <td>{row.display_name || 'Unnamed person record'}</td><td>{row.sightings}</td><td>{row.places}</td><td>{row.patrol_sightings} / {row.cctv_sightings}</td>
               <td>{new Date(row.first_seen).toLocaleDateString('en-NZ')}</td><td>{new Date(row.last_seen).toLocaleDateString('en-NZ')}</td>
