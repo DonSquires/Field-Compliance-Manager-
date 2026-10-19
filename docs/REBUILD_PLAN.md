@@ -10,6 +10,32 @@ glass-proven.** A workstream item is done only when its evidence gate is met.
 
 Owner-requested search and subject-trend refinement, 2026-10-19:
 
+- Whole-system follow-up, 2026-10-19: the policy short-circuit did not resolve
+  the human's search timeout. Wider Atlas/schema tracing established that
+  `resolve_record_canonical_identity` already calls `ensure_canonical_vehicle`
+  for observation writes, and `canonical_vehicle_public` is the existing Tier-0
+  discovery surface. Aggregate live verification found 8,095 plated observations
+  and only 13 with no canonical identity/registry entry. Search now uses the
+  registry plus caller-RLS fallback only for legacy unlinked observations, with
+  a partial index on that subset. No new access engine, definer search, identity
+  promotion, Conductor routing, or Oracle permission decision is introduced.
+  Conductor owns Bob's dispatch/egress; Oracle describes truth state; neither
+  is the UI search's permission engine. The existing batch access resolver is
+  present but has no registered Atlas callers; it is not necessary for Tier-0
+  registry discovery. The previous all-authorised, cheap-helper performance
+  fixture missed the costly unrelated history. The replacement fixture has
+  8,100 linked records whose access helper raises if invoked, plus slow
+  allowed/denied legacy rows, and checks both human wildcard examples under
+  a two-second statement limit.
+  Owner approved application and protected publication. Management-API live
+  readback confirms security-invoker, authenticated-only execute, and the
+  partial index. An `authenticated`-role, **no user identity** EXPLAIN ANALYZE
+  uses that index and completes the legacy branch in 26.8 ms (24 total
+  unlinked rows, including rows without a usable plate). This proves the
+  narrowed plan, not the affected human's end-to-end request. Three isolated
+  PostgreSQL fixtures, 20 focused UI tests, four desktop/mobile browser cases,
+  TypeScript and production build pass. Atlas refreshed with no changed edges;
+  existing canonical writer/reader paths remain the actual implementation.
 - Live follow-up, 2026-10-19: the human's `RJ%9%8` search returned HTTP
   500 at 22:53:58 and 22:56:25 UTC; PostgreSQL logged statement timeouts
   about eight seconds later. The live caller-role plan evaluated task
