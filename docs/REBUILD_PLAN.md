@@ -1718,6 +1718,26 @@ System-wide Bob acceptance gate shipped 2026-10-11:
   `release_ready`; egress proven per rank; Atlas `exercised` is populated from
 evidence, not asserted.
 
+- **Tentative roster blocks and quotes from a written request (owner ruling,
+  2026-10-20).** A staffing request is a set of date windows and shift patterns
+  across one or more sites, not one 1–31 day window. `propose_roster_fill` only
+  ranks staff into slots that already exist; it cannot create shifts. Bob now has
+  `propose_tentative_roster_block`
+  (`supabase/functions/bob-propose-tentative-roster-block`), which expands the
+  request with a pure planner (`_shared/roster-block-plan.mjs`: NZ wall-clock
+  times with daylight saving, unpaid breaks removed from paid and charged hours,
+  hours split at NZ midnight so only holiday-day hours take the holiday rate,
+  holiday list supplied and confirmed by the human) into ONE pending
+  `bob_agentic_actions` proposal. Approval runs the service-only
+  `apply_bob_tentative_roster_block`, which creates open, unpublished draft
+  `roster_slots` (no staff; idempotent per action) and, when a client
+  organisation is named, a draft `quotes` + `quote_lines` set. Every site must
+  already resolve to exactly one active `roster_work_units` row; a missing site
+  is reported, never guessed. Staff assignment and publication remain separate
+  human steps. First-pass limits: break comes off the first midnight segment of a
+  shift; one holiday multiplier applies to both pay and charge. Not yet proven
+  end to end on a live approval.
+
 ## 10. Enterprise hardening (parallel track)
 
 CI gates that actually block (unit + guard tests, migration snapshot drift, CSS

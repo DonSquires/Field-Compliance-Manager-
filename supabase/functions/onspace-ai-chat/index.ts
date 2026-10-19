@@ -660,6 +660,7 @@ function budgetKnowledgeCards(cards) {
     'propose_freedom_camping_zone',
     'propose_patrol_route_assignment',
     'propose_roster_fill',
+    'propose_tentative_roster_block',
     'propose_roster_rollback',
     'propose_rate_rule',
     'propose_compliance_record',
@@ -773,6 +774,7 @@ const WRITE_CAPABLE_TOOLS = new Set([
   'propose_freedom_camping_zone',
   'propose_patrol_route_assignment',
   'propose_roster_fill',
+    'propose_tentative_roster_block',
   'propose_roster_rollback',
   'propose_rate_rule',
   'propose_staff_onboarding',
@@ -1003,7 +1005,7 @@ async function resolveUserCapabilities(supabase, role, orgId, userId = null) {
   if (canCompareData) allowedTools.push('client_site_compare', 'query_records', 'scv_lookup', 'site_risk', 'resolve_point_context', 'document_search', 'resolve_geofence');
   if (canInspectSchema) allowedTools.push('schema_inspect');
   if (canIngest) allowedTools.push('ingest_document', 'plan_import', 'plan_patrol_import', 'perceive_media', 'confirm_import', 'inventory_document_source', 'create_document_draft');
-  if (canPromote) allowedTools.push('promote_action', 'propose_client_onboarding', 'propose_corporate_profile', 'propose_freedom_camping_zone', 'propose_zone_patrol_stop', 'propose_patrol_route_assignment', 'propose_patrol_route_service_area', 'propose_org_jurisdiction', 'propose_roster_fill', 'propose_roster_rollback', 'propose_rate_rule', 'propose_staff_onboarding', 'propose_compliance_record', 'propose_place_hazards', 'propose_site_risk', 'propose_freedom_camping_org_strategy');
+  if (canPromote) allowedTools.push('promote_action', 'propose_client_onboarding', 'propose_corporate_profile', 'propose_freedom_camping_zone', 'propose_zone_patrol_stop', 'propose_patrol_route_assignment', 'propose_patrol_route_service_area', 'propose_org_jurisdiction', 'propose_roster_fill', 'propose_tentative_roster_block', 'propose_roster_rollback', 'propose_rate_rule', 'propose_staff_onboarding', 'propose_compliance_record', 'propose_place_hazards', 'propose_site_risk', 'propose_freedom_camping_org_strategy');
   if (tier !== 'guest') allowedTools.push('perceive_media', 'web_research', 'triage_friction');
   if (canCompareData) allowedTools.push('fetch_bylaw_source');
   if (canWrite || canIngest || canPromote) allowedTools.push('job_runner');
@@ -5897,7 +5899,7 @@ async function execProposeClientOnboarding(authHeader, caps, orgId, args) {
     }
   };
 }
-// ATLAS CALLS: bob-propose-roster-fill, bob-propose-roster-rollback, bob-propose-rate-rule, bob-propose-staff-onboarding, bob-propose-compliance-record, bob-propose-place-hazards
+// ATLAS CALLS: bob-propose-roster-fill, bob-propose-roster-rollback, bob-propose-rate-rule, bob-propose-staff-onboarding, bob-propose-compliance-record, bob-propose-place-hazards, bob-propose-tentative-roster-block
 async function execProposeRosterFill(authHeader, caps, orgId, args) {
   if (!caps.canPromote) return { reply: 'Roster-fill proposals require an admin, master, or grand master.', meta: { tool: 'propose_roster_fill', outcome: 'forbidden' } };
   const periodStart = String(args.period_start ?? '').trim();
@@ -5908,6 +5910,20 @@ async function execProposeRosterFill(authHeader, caps, orgId, args) {
   const result = await callFn('bob-propose-roster-fill', authHeader, payload);
   if (!result.ok) return { reply: `I could not prepare the roster proposal (${result.data?.error ?? result.status}).`, meta: { tool: 'propose_roster_fill', outcome: 'failed', error: result.data?.error ?? null } };
   return { reply: `I proposed ${result.data?.assignments_proposed ?? 0} draft roster assignments. Nothing is published: approve the plan in the bell, review or edit draft slots, then publish separately.`, meta: { tool: 'propose_roster_fill', outcome: 'ok', action_id: result.data?.action_id ?? null } };
+}
+
+async function execProposeTentativeRosterBlock(authHeader, caps, orgId, args) {
+  if (!caps.canPromote) return { reply: 'Tentative roster blocks require an admin, master, or grand master.', meta: { tool: 'propose_tentative_roster_block', outcome: 'forbidden' } };
+  if (!Array.isArray(args.blocks) || !args.blocks.length || !Array.isArray(args.sites) || !args.sites.length || !args.rates) {
+    return { reply: 'Tell me the sites, each shift block (dates, start/end time, unpaid break), the pay and charge rates, and any public holidays. I will create open, unpublished draft shifts and a draft quote only after a human approves.', meta: { tool: 'propose_tentative_roster_block', outcome: 'need_details' } };
+  }
+  const payload = { organization_id: String(args.organization_id ?? orgId ?? '') || undefined, sites: args.sites, blocks: args.blocks, rates: args.rates, holidays: args.holidays, gst_rate: args.gst_rate, guards_per_shift: args.guards_per_shift, client_org_id: args.client_org_id, title: args.title };
+  if (typeof args._idempotency_key === 'string' && args._idempotency_key) payload.idempotency_key = args._idempotency_key;
+  const result = await callFn('bob-propose-tentative-roster-block', authHeader, payload);
+  if (!result.ok) return { reply: `I could not prepare the tentative roster block (${result.data?.error ?? result.status}).`, meta: { tool: 'propose_tentative_roster_block', outcome: 'failed', error: result.data?.error ?? null } };
+  const s = result.data?.summary ?? {};
+  const q = result.data?.quote ?? {};
+  return { reply: `I proposed ${s.shifts ?? 0} open, unpublished draft shifts (${s.ordinary_hours ?? 0} ordinary and ${s.holiday_hours ?? 0} public-holiday paid hours, unpaid breaks excluded). Quote: $${q.subtotal_charge} + GST $${q.gst_amount} = $${q.total_charge}${q.will_create_draft_quote ? '' : ' (no client organisation set, so only the roster shifts will be created)'}. Approve it in the bell; nothing is published and a human must assign staff.`, meta: { tool: 'propose_tentative_roster_block', outcome: 'ok', action_id: result.data?.action_id ?? null } };
 }
 
 async function execProposeRosterRollback(authHeader, caps, args) {
@@ -9359,6 +9375,8 @@ serve(async (req)=>{
           return execProposePatrolRouteAssignment(authHeader, caps, orgId, toolArgs);
         case 'propose_roster_fill':
           return execProposeRosterFill(authHeader, caps, orgId, toolArgs);
+        case 'propose_tentative_roster_block':
+          return execProposeTentativeRosterBlock(authHeader, caps, orgId, toolArgs);
         case 'propose_roster_rollback':
           return execProposeRosterRollback(authHeader, caps, toolArgs);
         case 'propose_rate_rule':
@@ -12294,6 +12312,7 @@ serve(async (req)=>{
       'propose_freedom_camping_zone',
       'propose_patrol_route_assignment',
       'propose_roster_fill',
+    'propose_tentative_roster_block',
       'propose_roster_rollback',
       'propose_rate_rule',
       'propose_zone_patrol_stop',
