@@ -18,6 +18,7 @@ import { SafetyWarningsPanel } from '../components/SafetyWarningsPanel';
 import { useAuth } from '../context/AuthContext';
 import { normalizePlateNumber, vehicleHistoryOrFilter } from '../lib/canonicalIdentity';
 import { vehiclePlateSearchPattern } from '../lib/vehiclePlateSearch';
+import { describeLoadFailures } from '../lib/friendlyLoadError';
 import { supabase } from '../lib/supabase';
 import './PageStyles.css';
 import './VehicleSearchPage.css';
@@ -260,7 +261,13 @@ const VehicleSearchPage: React.FC = () => {
       const { data, error: queryError } = await supabase.rpc('search_vehicle_registrations', {
         p_pattern: pattern, p_limit: 51,
       });
-      if (queryError) throw queryError;
+      if (queryError) {
+        const failure = describeLoadFailures([['matching registrations', queryError]]);
+        setError(queryError.code === '57014'
+          ? 'Vehicle search timed out. Try a more specific registration pattern, or retry. Contact your administrator if this continues.'
+          : failure);
+        return;
+      }
       const candidates = (data ?? []) as VehicleMatch[];
       if (candidates.length === 1) {
         await searchVehicle(candidates[0].plate_number, candidates[0].id ?? undefined);

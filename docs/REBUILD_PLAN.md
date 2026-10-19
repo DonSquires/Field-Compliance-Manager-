@@ -10,6 +10,21 @@ glass-proven.** A workstream item is done only when its evidence gate is met.
 
 Owner-requested search and subject-trend refinement, 2026-10-19:
 
+- Live follow-up, 2026-10-19: the human's `RJ%9%8` search returned HTTP
+  500 at 22:53:58 and 22:56:25 UTC; PostgreSQL logged statement timeouts
+  about eight seconds later. The live caller-role plan evaluated task
+  entitlement before organisation custody while scanning observations.
+  Prior fixture matching checks did not cover that live policy cost.
+  `observations_task_entitlement_select` now uses CASE to skip task-basis
+  resolution only when an existing custody/client/Bob policy already grants
+  the same row. This preserves the permissive-policy union rather than
+  bypassing RLS or raising timeouts. Isolated PostgreSQL tests cover custody,
+  client, task-only, denied and NULL-organisation rows, Bob's existing grant,
+  and the actual search RPC over 8,000 observation fixtures under a two-second
+  statement timeout; the task helper raises if wrongly called on an existing
+  grant. Search errors now use the standard logged load-failure helper and
+  a specific retry/refinement message for PostgREST `57014` plain objects.
+  These checks do not impersonate a live user or establish live-user success.
 - Vehicle Search & Flags preserves `%` search patterns independently from
   canonical plate normalisation. Plain fragments match anywhere. Multiple
   matches require explicit identity selection before history or flags load;
