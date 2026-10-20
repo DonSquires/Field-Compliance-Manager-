@@ -48,7 +48,8 @@ def main():
         description="Export one patrol workbook sheet into a governed local JSON derivative."
     )
     parser.add_argument("--workbook", required=True)
-    parser.add_argument("--sheet", required=True)
+    parser.add_argument("--sheet")
+    parser.add_argument("--inventory", action="store_true")
     parser.add_argument("--output", required=True)
     parser.add_argument("--source-label", required=True)
     parser.add_argument("--header-row", type=int, default=1)
@@ -60,6 +61,59 @@ def main():
         raise SystemExit("--header-row must be a positive integer")
     if source_path.suffix.lower() != ".xlsx":
         raise SystemExit("Only .xlsx workbooks are supported")
+    if not args.inventory and not args.sheet:
+        parser.error("--sheet is required unless --inventory is selected")
+    if source_path == output_path:
+        raise SystemExit("Output must not replace the source workbook")
+
+    if args.inventory:
+        before = source_path.stat()
+        workbook = load_workbook(source_path, read_only=True, data_only=True, keep_links=False)
+        try:
+            sheets = []
+            for sheet in workbook.worksheets:
+                headers = []
+                header_row = None
+                for row_number, header_cells in enumerate(
+                    sheet.iter_rows(min_row=args.header_row, max_row=args.header_row + 19),
+                    start=args.header_row,
+                ):
+                    candidate = [str(cell.value or "").strip() for cell in header_cells]
+                    normalized = {" ".join(header.lower().split()) for header in candidate if header}
+                    if "date" in normalized and normalized & {"job", "log no", "logno"} and "patroller" in normalized:
+                        headers = candidate
+                        header_row = row_number
+                        break
+                sheets.append({
+                    "name": sheet.title,
+                    "header_row": header_row,
+                    "headers": headers,
+                    "worksheet_rows": sheet.max_row,
+                    "worksheet_columns": sheet.max_column,
+                    "candidate_activity_sheet": header_row is not None,
+                })
+        finally:
+            workbook.close()
+        source_hash = sha256_file(source_path)
+        after = source_path.stat()
+        if (before.st_size, before.st_mtime_ns) != (after.st_size, after.st_mtime_ns):
+            raise SystemExit("Workbook changed during inventory; retry after it finishes saving")
+        inventory = {
+            "format": "fcm_patrol_workbook_inventory_v1",
+            "source_file": args.source_label,
+            "source_sha256": source_hash,
+            "sheets": sheets,
+        }
+        output_path.parent.mkdir(parents=True, exist_ok=True)
+        output_path.write_text(json.dumps(inventory, ensure_ascii=False, indent=2), encoding="utf-8")
+        print(json.dumps({
+            "source_file": args.source_label,
+            "source_sha256": source_hash,
+            "sheets": len(sheets),
+            "candidate_activity_sheets": sum(sheet["candidate_activity_sheet"] for sheet in sheets),
+            "business_rows_exported": 0,
+        }))
+        return
 
     formulas_book = load_workbook(source_path, read_only=True, data_only=False, keep_links=False)
     values_book = load_workbook(source_path, read_only=True, data_only=True, keep_links=False)

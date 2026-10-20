@@ -16,6 +16,43 @@ actually work with a working org and its data and operations." Extended-scope,
 multi-session task — take as many turns as needed; real, verified progress each
 turn beats false completeness.
 
+## LAPTOP SOURCE INVENTORY (2026-10-20) - VERIFIED, AUTOMATIC PROMOTION STILL OPEN
+
+- PR #130 released as-attended patrol setup and actual measured between-stop
+  travel through main commit `4ca8904979753816d7f21abeab122303f62f8897`.
+  Both migrations are live, their rollback-only behavior checks passed, and
+  Vercel reported a successful deployment status for that commit.
+- The laptop review area contains 22 hash-verified workbook snapshots and
+  22 completed Markdown conversions. Original workbooks were not changed.
+  Metadata-only inventory found 83 worksheets and 25 candidate activity sheets
+  across 21 workbooks. These are layout candidates, not approved import mappings
+  or proof that business records were promoted.
+- Operation Lizard has no recognized activity header in the first 20 rows of
+  its sheets and remains held for source-specific mapping. CommunityCameras
+  installation/maintenance, digger work, pest control, and overlapping historic
+  sheets retain their proper governed workflow even when headers resemble a
+  patrol log. MPC still requires an exact agreement and reviewed place map.
+- `scripts/export-patrol-workbook.py --inventory` records workbook hash, sheet
+  dimensions, and recognized header positions without exporting business rows.
+  Unmatched sheets return no raw header values: opening rows may be preambles
+  or actual records. Normal derivative export still requires an explicitly
+  selected sheet and header row; inventory does not authorize promotion.
+  The tool refuses output replacing its source workbook and detects source
+  changes during inventory.
+- Three focused Python tests passed: metadata-only inventory/offset headers,
+  existing formula/duplicate-header export compatibility, and missing-sheet
+  and source-overwrite rejection. With the existing patrol import dependencies:
+  `python -m unittest discover -s test -p 'test_patrol_workbook_inventory.py' -v`.
+- Live Atlas provenance confirms the #130 merge SHA, 1,417 capabilities,
+  8,215 edges, and zero retirements. This is map freshness evidence, not a
+  claim that every mapped feature has been exercised.
+- Still open: reviewed source mappings, all-client missing-place reconciliation,
+  versioned row receipts/corrections, legacy-provenance review, photo promotion,
+  and laptop scanner activation. The local detector remains disconnected from
+  business promotion. Automatic spreadsheet-to-FCM sync is not enabled.
+  Preserve history, hold conflicts, never automatically delete records, and
+  keep finance approval separate.
+
 ## PAY, TRAINING, SKILLS, AND FINANCE OPERATIONS (2026-10-18) - READY FOR RELEASE
 
 ### Expected versus present
