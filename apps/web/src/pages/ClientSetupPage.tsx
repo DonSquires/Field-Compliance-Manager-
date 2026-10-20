@@ -23,7 +23,7 @@ type Step = 1 | 2 | 3 | 4 | 5;
 interface ClientRecord { id: string; name: string; contact_email: string | null; contact_phone: string | null; status: string | null }
 interface PlaceRecord { id: string; name: string; address: string | null; site_type: string | null }
 interface ResumePlace extends PlaceRecord { gps_lat: number | null; gps_lng: number | null; boundary: GeoJSON.Geometry | null; boundary_verification: string }
-interface SavedService { schedule_id: string | null; place_id: string; module_key: string; words: string }
+interface SavedService { schedule_id: string | null; place_id: string; module_key: string; words: string; attendance_mode?: 'as_attended'; patrol_route_id?: string }
 interface ExistingMatch { id: string; name: string; status: string | null }
 
 /** The services a provider can be contracted for, in the words a branch manager uses. Keys are module_catalog keys. */
@@ -56,13 +56,14 @@ const DAY_PRESETS: Array<{ key: string; label: string; days: number[] }> = [
 ];
 const DAY_SHORT = ['', 'Mon', 'Tue', 'Wed', 'Thu', 'Fri', 'Sat', 'Sun'];
 
-interface ScheduleForm { preset: string; days: number[]; anyTime: boolean; start: string; end: string; visits: string; gap: string; stay: string; slaMinutes: string; notes: string }
-const defaultSchedule = (): ScheduleForm => ({ preset: 'every', days: [1, 2, 3, 4, 5, 6, 7], anyTime: true, start: '', end: '', visits: '1', gap: '60', stay: '10', slaMinutes: '30', notes: '' });
+interface ScheduleForm { preset: string; days: number[]; anyTime: boolean; start: string; end: string; visits: string; gap: string; stay: string; slaMinutes: string; notes: string; attendanceMode: 'scheduled' | 'as_attended'; patrolRouteId: string }
+const defaultSchedule = (): ScheduleForm => ({ preset: 'every', days: [1, 2, 3, 4, 5, 6, 7], anyTime: true, start: '', end: '', visits: '1', gap: '60', stay: '10', slaMinutes: '30', notes: '', attendanceMode: 'scheduled', patrolRouteId: '' });
 
 /** One sentence a manager can read back to the client: 'Patrol visits · every day · any time of day (24-hour) · 2 visits a shift, 10 min each'. */
-export const serviceWords = (label: string, kind: 'visits' | 'post' | 'response', form: Pick<ScheduleForm, 'days' | 'anyTime' | 'start' | 'end' | 'visits' | 'stay' | 'slaMinutes'>): string => {
+export const serviceWords = (label: string, kind: 'visits' | 'post' | 'response', form: Pick<ScheduleForm, 'days' | 'anyTime' | 'start' | 'end' | 'visits' | 'stay' | 'slaMinutes'> & Partial<Pick<ScheduleForm, 'attendanceMode'>>): string => {
   if (kind === 'post') return `${label} · a guard stays for the shift`;
   if (kind === 'response') return `${label} · on scene within ${form.slaMinutes || '30'} min of the call`;
+  if (label === 'Patrol visits' && form.attendanceMode === 'as_attended') return `${label} · As attended`;
   const visits = Number(form.visits) || 1;
   return `${label} · ${contractedDaysWords(form.days)} · ${form.anyTime ? contractedHoursWords(null, null) : contractedHoursWords(form.start, form.end)} · ${visits} visit${visits === 1 ? '' : 's'} a shift, ${form.stay || '10'} min each`;
 };
@@ -97,6 +98,9 @@ const ClientSetupPage: React.FC<{ onNavigate?: NavigateWithContext }> = ({ onNav
   const [serviceKey, setServiceKey] = useState<string>('patrol');
   const [scheduleForm, setScheduleForm] = useState<ScheduleForm>(defaultSchedule());
   const [services, setServices] = useState<SavedService[]>([]);
+  const [patrolRoutes, setPatrolRoutes] = useState<Array<{ id: string; name: string }>>([]);
+  const [patrolRoutesLoading, setPatrolRoutesLoading] = useState(false);
+  const [patrolRoutesError, setPatrolRoutesError] = useState<string | null>(null);
   const serviceRequest = useRef(crypto.randomUUID());
   // Step 4
   const [inviteState, setInviteState] = useState<'not_sent' | 'sent' | 'skipped'>('not_sent');
@@ -106,6 +110,29 @@ const ClientSetupPage: React.FC<{ onNavigate?: NavigateWithContext }> = ({ onNav
 
   const chosenService = useMemo(() => SERVICE_CHOICES.find((choice) => choice.key === serviceKey) ?? SERVICE_CHOICES[0], [serviceKey]);
   const servicePlace = useMemo(() => places.find((place) => place.id === servicePlaceId) ?? places[0] ?? null, [places, servicePlaceId]);
+  const asAttended = chosenService.key === 'patrol' && scheduleForm.attendanceMode === 'as_attended';
+
+  useEffect(() => {
+    if (!branchId) return;
+    let cancelled = false;
+    setPatrolRoutesLoading(true);
+    setPatrolRoutesError(null);
+    setPatrolRoutes([]);
+    setScheduleForm((form) => ({ ...form, patrolRouteId: '' }));
+    void (async () => {
+      try {
+        const { data, error: routeError } = await supabase.from('patrol_routes').select('id,name').eq('organization_id', branchId).eq('is_active', true).order('name');
+        if (cancelled) return;
+        if (routeError) throw routeError;
+        setPatrolRoutes(data ?? []);
+      } catch {
+        if (!cancelled) setPatrolRoutesError('Patrols could not be loaded. Refresh this page before saving.');
+      } finally {
+        if (!cancelled) setPatrolRoutesLoading(false);
+      }
+    })();
+    return () => { cancelled = true; };
+  }, [branchId]);
 
   const run = async (label: string, work: () => Promise<string | void>) => {
     setBusy(label); setError(null); setNotice(null);
@@ -240,10 +267,15 @@ const ClientSetupPage: React.FC<{ onNavigate?: NavigateWithContext }> = ({ onNav
         if (module.error) throw module.error;
         setServices((current) => [...current, { schedule_id: null, place_id: servicePlace.id, module_key: 'static_guarding', words }]);
       } else {
-        if (chosenService.kind === 'visits' && !scheduleForm.anyTime && (!scheduleForm.start || !scheduleForm.end)) throw new Error('Set both times, or choose any time of day.');
-        if (scheduleForm.preset === 'pick' && scheduleForm.days.length === 0) throw new Error('Pick at least one day.');
+        if (!asAttended && chosenService.kind === 'visits' && !scheduleForm.anyTime && (!scheduleForm.start || !scheduleForm.end)) throw new Error('Set both times, or choose any time of day.');
+        if (!asAttended && scheduleForm.preset === 'pick' && scheduleForm.days.length === 0) throw new Error('Pick at least one day.');
+        if (asAttended && (patrolRoutesLoading || patrolRoutesError || !patrolRoutes.some((route) => route.id === scheduleForm.patrolRouteId))) throw new Error('Choose an active patrol before saving.');
         // ATLAS WRITES: service_agreement_delivery_schedules + client_site_patrol_config via manage_crm_agreement_delivery_schedule
-        const { data, error: scheduleError } = await supabase.rpc('manage_crm_agreement_delivery_schedule', {
+        const { data, error: scheduleError } = asAttended ? await supabase.rpc('manage_crm_as_attended_patrol', {
+          p_client_request_id: serviceRequest.current, p_agreement_id: id, p_patrol_route_id: scheduleForm.patrolRouteId,
+          p_site_id: servicePlace.id, p_zone_id: null, p_officer_instructions: scheduleForm.notes.trim() || null,
+          p_operating_organization_id: branchId,
+        }) : await supabase.rpc('manage_crm_agreement_delivery_schedule', {
           p_client_request_id: serviceRequest.current, p_agreement_id: id, p_action: 'create', p_schedule_id: null,
           p_site_id: servicePlace.id, p_zone_id: null, p_module_key: chosenService.key,
           p_active_days: scheduleForm.days, p_window_start: scheduleForm.anyTime ? null : scheduleForm.start, p_window_end: scheduleForm.anyTime ? null : scheduleForm.end,
@@ -257,7 +289,9 @@ const ClientSetupPage: React.FC<{ onNavigate?: NavigateWithContext }> = ({ onNav
           const sla = await supabase.rpc('manage_crm_agreement_setup', { p_agreement_id: id, p_expected_invitation_status: status, p_action: 'set_module', p_module_key: 'dispatch', p_enabled: true, p_sla_minutes: Math.max(1, Number(scheduleForm.slaMinutes) || 30) });
           if (sla.error) throw sla.error;
         }
-        setServices((current) => [...current, { schedule_id: (data as { schedule_id: string }).schedule_id, place_id: servicePlace.id, module_key: chosenService.key, words }]);
+        setServices((current) => [...current, { schedule_id: (data as { schedule_id: string }).schedule_id, place_id: servicePlace.id, module_key: chosenService.key, words,
+          ...(asAttended ? { attendance_mode: 'as_attended' as const, patrol_route_id: scheduleForm.patrolRouteId } : {}),
+        }]);
       }
       serviceRequest.current = crypto.randomUUID();
       setScheduleForm(defaultSchedule());
@@ -280,7 +314,7 @@ const ClientSetupPage: React.FC<{ onNavigate?: NavigateWithContext }> = ({ onNav
   const finish = () => run('finish', async () => {
     if (!client) return;
     const id = await ensureAgreement();
-    const visitServices = services.filter((service) => SERVICE_CHOICES.find((choice) => choice.key === service.module_key)?.kind === 'visits');
+    const visitServices = services.filter((service) => service.attendance_mode !== 'as_attended' && SERVICE_CHOICES.find((choice) => choice.key === service.module_key)?.kind === 'visits');
     let routeId: string | null = null; let workUnitId: string | null = null; let words = '';
     if (visitServices.length) {
       // ATLAS WRITES: patrol_routes + roster_work_units via create_patrol_route_from_agreement / create_operating_roster_work_unit
@@ -294,6 +328,8 @@ const ClientSetupPage: React.FC<{ onNavigate?: NavigateWithContext }> = ({ onNav
         workUnitId = (unit.data as { id?: string } | null)?.id ?? null;
         words = `The patrol run is built with ${built?.attached_places ?? 0} place${built?.attached_places === 1 ? '' : 's'} and is ready to roster.`;
       }
+    } else if (services.some((service) => service.attendance_mode === 'as_attended')) {
+      words = `As-attended places are saved on ${[...new Set(services.filter((service) => service.attendance_mode === 'as_attended').map((service) => patrolRoutes.find((route) => route.id === service.patrol_route_id)?.name ?? 'the selected patrol'))].join(', ')}.`;
     } else {
       words = services.some((service) => service.module_key === 'static_guarding') ? 'Guard-on-post work is ready to roster as a static post.' : 'Alarm response is set; jobs will appear on the dispatch console when they come in.';
     }
@@ -358,7 +394,18 @@ const ClientSetupPage: React.FC<{ onNavigate?: NavigateWithContext }> = ({ onNav
           <label><span>Service</span><select value={serviceKey} onChange={(event) => setServiceKey(event.target.value)}>{SERVICE_CHOICES.map((choice) => <option key={choice.key} value={choice.key}>{choice.label}</option>)}</select></label>
         </div>
         <p className="client-setup-help">{chosenService.help}</p>
-        {chosenService.kind === 'visits' && <>
+        {chosenService.key === 'patrol' && <fieldset className="client-setup-days"><legend>Attendance</legend>
+          <div className="client-setup-chips" role="radiogroup" aria-label="Patrol attendance">
+            <label className={!asAttended ? 'is-chosen' : ''}><input type="radio" name="attendance" checked={!asAttended} disabled={busy !== null} onChange={() => setScheduleForm({ ...scheduleForm, attendanceMode: 'scheduled' })} />Scheduled visits</label>
+            <label className={asAttended ? 'is-chosen' : ''}><input type="radio" name="attendance" checked={asAttended} disabled={busy !== null} onChange={() => setScheduleForm({ ...scheduleForm, attendanceMode: 'as_attended' })} />As attended</label>
+          </div>
+          {asAttended && <label><span>Patrol</span><select value={scheduleForm.patrolRouteId} disabled={busy !== null || patrolRoutesLoading || Boolean(patrolRoutesError)} required onChange={(event) => setScheduleForm({ ...scheduleForm, patrolRouteId: event.target.value })}>
+            <option value="">{patrolRoutesLoading ? 'Loading patrols...' : patrolRoutes.length ? 'Choose a patrol' : 'No active patrols'}</option>
+            {patrolRoutes.map((route) => <option key={route.id} value={route.id}>{route.name}</option>)}
+          </select></label>}
+          {asAttended && patrolRoutesError && <p role="alert">{patrolRoutesError}</p>}
+        </fieldset>}
+        {chosenService.kind === 'visits' && !asAttended && <>
           <fieldset className="client-setup-days"><legend>Which days</legend>
             <div className="client-setup-chips" role="radiogroup" aria-label="Which days">{DAY_PRESETS.map((preset) => <label key={preset.key} className={scheduleForm.preset === preset.key ? 'is-chosen' : ''}><input type="radio" name="days" checked={scheduleForm.preset === preset.key} onChange={() => setScheduleForm({ ...scheduleForm, preset: preset.key, days: preset.key === 'pick' ? scheduleForm.days : preset.days })} />{preset.label}</label>)}</div>
             {scheduleForm.preset === 'pick' && <div className="client-setup-chips" role="group" aria-label="Days of the week">{[1, 2, 3, 4, 5, 6, 7].map((day) => <label key={day} className={scheduleForm.days.includes(day) ? 'is-chosen' : ''}><input type="checkbox" checked={scheduleForm.days.includes(day)} onChange={() => setScheduleForm({ ...scheduleForm, days: scheduleForm.days.includes(day) ? scheduleForm.days.filter((item) => item !== day) : [...scheduleForm.days, day].sort() })} />{DAY_SHORT[day]}</label>)}</div>}
@@ -374,10 +421,11 @@ const ClientSetupPage: React.FC<{ onNavigate?: NavigateWithContext }> = ({ onNav
           </div>
           <label><span>What the officer should do there (optional)</span><input value={scheduleForm.notes} onChange={(event) => setScheduleForm({ ...scheduleForm, notes: event.target.value })} placeholder="e.g. Check the back roller door and the fuel cage" /></label>
         </>}
+        {asAttended && <label><span>Officer instructions (optional)</span><input value={scheduleForm.notes} onChange={(event) => setScheduleForm({ ...scheduleForm, notes: event.target.value })} /></label>}
         {chosenService.kind === 'response' && <label><span>Be on scene within (minutes)</span><input type="number" min="1" max="1440" value={scheduleForm.slaMinutes} onChange={(event) => setScheduleForm({ ...scheduleForm, slaMinutes: event.target.value })} /></label>}
         <p className="client-setup-readback"><ClipboardList size={14} aria-hidden="true" /> {serviceWords(chosenService.label, chosenService.kind, scheduleForm)}</p>
         <footer>
-          <button type="submit" className="btn btn-secondary" disabled={busy !== null || !servicePlace}>{busy === 'service' ? 'Saving…' : 'Save this service'}</button>
+          <button type="submit" className="btn btn-secondary" disabled={busy !== null || !servicePlace || (asAttended && (patrolRoutesLoading || Boolean(patrolRoutesError) || !scheduleForm.patrolRouteId))}>{busy === 'service' ? 'Saving…' : 'Save this service'}</button>
           <button type="button" className="btn btn-primary" disabled={services.length === 0 || busy !== null} onClick={() => setStep(4)}>Continue <ArrowRight size={15} aria-hidden="true" /></button>
         </footer>
       </form>

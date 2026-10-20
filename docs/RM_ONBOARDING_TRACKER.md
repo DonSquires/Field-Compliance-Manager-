@@ -257,6 +257,124 @@ turn beats false completeness.
   No invoice, line item, catalog item, cost version, price version, payment, or
   P&L revenue record has been created from this corpus.
 
+## LAPTOP SOURCE CHANGE QUEUE (2026-10-19, NOT LIVE RECORD SYNC)
+
+- **As-attended patrols, 2026-10-20:** owner directed Dave Porter completions
+  to the existing Blenheim Forestry Patrol and Dan Douglas completions to the
+  existing Nelson Forestry Patrol. Added the policy at
+  `scripts/data/rm-attendance-patrol-policy.json`. The bounded
+  `scripts/seed-rm-as-attended-patrols.mjs` verified source-authored attendance
+  across all existing imported clients: **89 Blenheim place links across four
+  clients; 57 Nelson place links across five clients**. Rollback passed, applied
+  all 146 links, and replay reused all 146. No shifts or visits were invented.
+  This covers existing place-resolved imported records, not every unresolved
+  row or every not-yet-processed workbook.
+- Migration `20261020103000_as_attended_patrol_schedules` is live and in the
+  ledger. The new governed `manage_crm_as_attended_patrol` reuses existing
+  agreement/ownership checks, records route coverage and an explicit
+  `as_attended_patrol` schedule with zero planned visits and no timing quota.
+  `generate_shift_stops` excludes these configs. A rollback-only behavior test
+  passed before and after deployment. The Client Setup option, route picker
+  and plain-language portfolio summaries are implemented and tested locally;
+  the frontend has not been released to production in this session.
+- **Travel kilometres:** the parser now preserves source job-km values,
+  trip-odometer values and their distinct column names, including the existing
+  Stringer km header. It does not infer confirmed legs across source rows with
+  unknown vehicle/run continuity. Migration
+  `20261020150000_record_actual_patrol_travel` is live: measured kilometres or
+  an odometer difference can be recorded against two actually attended stops
+  in the same assigned shift, separately from `travel_distance_metres` route
+  estimates. The writer requires the assigned active officer, rejects resets,
+  stale corrections, skipped intermediate visits and unaudited direct writes,
+  and provides idempotent audit receipts. Synthetic rollback tests passed
+  before/after deployment; no invented actual travel was persisted.
+- The officer travel-entry controls are implemented and tested locally with
+  measured-km and odometer modes, receipts and failed-save handling. Current
+  focused verification: 19 web tests, 35 import/policy tests, both live SQL
+  behavior probes and the production build passed. Regenerated the schema from
+  the live catalog. Local preview: `http://localhost:5173/`. Frontend release,
+  the full missing-place pass for all workbook sources, and permanent automatic
+  spreadsheet promotion remain incomplete; do not describe this as full sync.
+- Atlas refresh was attempted after the live schema snapshot, but its safety
+  guard refused retirement of 2,463 entries. The override was not used; this
+  generated-map reconciliation remains a separate unresolved gate.
+
+- **Verified NCC backfill, 2026-10-19:** applied 194 new activities through
+  the existing governed import functions after a rollback-only probe. Batch
+  `6309ae11-e434-4d9d-8dae-ccbdded4268a` is `needs_review`. Read-back confirmed
+  194 persisted events, zero duplicate keys and two batch audit entries.
+  Legacy records were not overwritten. The source snapshot was converted
+  locally; raw source notes stayed out of model output. The parser now exports
+  credential-free plans, and `reconcile-plan.mjs` supports no-write,
+  client-scoped comparisons with missing-place, staff, identity and conflict
+  holds. This does not complete the automatic update writer.
+- **Owner's NCC column decision:** `DATA` column J supplies Issue. Column U
+  also has header `Issue`; although described as unused, the inspected snapshot
+  contains 1,606 populated U cells. The explicit source-column alias preserves
+  those values separately as source-only metadata, under narrative opt-in,
+  without changing the active issue mapping or the original workbook.
+- **Missing parks, owner-authorized 2026-10-20:** created Branford Park,
+  Neale Park, Peppertree Park and Queens Garden as NCC location houses with
+  canonical registry links and patrol zone facets. Registry-wide duplicate
+  checks found no matches beforehand. Used `manage_crm_location` and
+  `manage_crm_zone`; the bounded seed is
+  `scripts/seed-rm-ncc-missing-places.mjs`. Rollback passed, apply succeeded,
+  and replay created zero additional houses/zones. Source workbook SHA-256
+  and exact source rows are preserved in location notes and audit metadata.
+  All four remain unplaced, with unverified boundaries. No site facets,
+  coordinates, legal restrictions, subscriptions or agreement coverage were
+  inferred. Exact source labels are now in the checked-in NCC zone map;
+  coverage must still pass the existing import guard before new activity is
+  attached to these zones.
+- Ambiguous labels such as `Culling Signage`, `NCC Toilets`, blank locations
+  and `N/A` were not converted into invented places. Other unresolved places
+  and all remaining workbooks still need source-specific checks.
+
+- Owner direction: defer unattended SharePoint authentication and use the
+  owner's synced Windows files while the laptop is running. Scan again when
+  the laptop worker restarts so changes made during downtime are detected.
+  The requested policy is add/update with preserved history, review conflicts,
+  and never automatically delete FCM records.
+- Added `services/document-source-worker/source-sync.mjs`: an allowlist of all
+  22 requested patrol workbooks and recursive image discovery under `Photos`.
+  The mounted root must be `C:\Users\squir\R & M Security and Investigations\RemSec - Documents`,
+  not the patrol subfolder. Source files remain read-only; the checkpoint is
+  stored separately. Files must be downloaded by OneDrive ("Always keep on
+  this device") and finished saving before a version becomes eligible.
+- The opt-in Compose profile `rm-source-sync` adds the isolated
+  `fcm-rm-source-sync` service. It scans at startup and waits 60 seconds between
+  completed scans, persists hashes/pending versions in `fcm_rm_source_sync`,
+  and uses `restart: unless-stopped`. Docker Desktop must itself start after
+  Windows sign-in; merely powering on the laptop does not prove Docker or
+  OneDrive is running. A manually stopped container remains stopped.
+- **Boundary:** this service is a local change queue, not an operational
+  importer. It has no network access or credentials, and reports
+  `promotion: not_connected`. A pending version can be acknowledged only with
+  an applied receipt matching both the relative source path and SHA-256.
+  Missing files preserve the previous version but cannot submit stale data.
+  No deletion, photo matching, client/place inference, or business write occurs.
+- **Remaining:** implement the audited versioned reconciliation handler, then
+  install and live-prove the full path on the laptop. The current
+  `stage_patrol_import_chunk` rejects changed immutable provenance; rerunning
+  `scripts/import-patrol-log.mjs` on each save is not an update mechanism.
+  CCL installation/maintenance and Mainland Pest Control need verified mappings.
+  Neither is silently routed into another client's patrol records. Spreadsheet
+  row identity and sheet mappings must be verified before any promotion.
+- **Live access verified, 2026-10-19:** `CODESPACE_KVM` is the usable VPS SSH
+  infrastructure credential; `VPS_SSH_PRIVATE_KEY` is not a recognized key in
+  this session. Through the VPS and the existing audited Bob laptop API,
+  KATANA's PowerShell is reachable, Ollama responds, all 22 requested workbooks
+  exist, and `Photos` plus `Mainland Pest Control` exist directly beneath the
+  synced `RemSec - Documents` root. Docker's inference and vision containers
+  report healthy, and the document-source worker is running. Direct Codespace
+  Tailscale timeouts do not establish that the laptop or its services are down.
+  No credentials need changing on the strength of those timeouts. The new
+  source-change queue has not been installed or connected to record promotion.
+- Focused verification: `node --test test/laptop-source-sync.test.js
+  test/document-source-ingestion-contract.test.js` passes 16 tests covering
+  restart persistence, receipt identity/version checks, offline edits, missing
+  sources, photo discovery, corrupt checkpoints, and source containment.
+
 ## APPROVED VEHICLE HISTORY AND IDENTITY RECORDS (2026-10-11)
 
 - Recorded the owner ruling that plate mentions in the already-reviewed R&M

@@ -30,6 +30,8 @@ import { buildPatrolImportProposals } from './patrol-import-proposals.mjs';
 const args = process.argv.slice(2);
 const flag = (name) => { const i = args.indexOf(name); return i !== -1 ? args[i + 1] : null; };
 const mode = args.includes('--apply') ? 'apply' : 'dry-run';
+const exportPlan = args.includes('--export-plan');
+if (exportPlan && args.includes('--apply')) { console.error('--export-plan cannot be combined with --apply'); process.exit(1); }
 const includeNarratives = args.includes('--include-narratives');
 const useSupabaseCli = args.includes('--use-supabase-cli');
 const projectRef = process.env.SUPABASE_PROJECT_REF;
@@ -43,10 +45,15 @@ const sourceHash = flag('--source-hash');
 const sourceSheet = flag('--source-sheet');
 const sourceFirstRow = Number(flag('--source-first-row') ?? 2);
 const classificationProfile = flag('--classification-profile');
+const sourceColumnAliases = JSON.parse(flag('--source-column-aliases') ?? '{}');
+const importContextFile = flag('--import-context');
 const zoneMap = zoneMapFile ? JSON.parse(readFileSync(zoneMapFile, 'utf8')) : JSON.parse(flag('--zone-map') ?? '{}');
 const token = process.env.FIELD_COMPLIANCE_CODESPACE;
-if (!token && !useSupabaseCli) { console.error('FIELD_COMPLIANCE_CODESPACE or --use-supabase-cli is required'); process.exit(1); }
-if (!projectRef && !useSupabaseCli) { console.error('SUPABASE_PROJECT_REF is required unless --use-supabase-cli is used'); process.exit(1); }
+if (importContextFile && !exportPlan) { console.error('--import-context is only allowed with --export-plan'); process.exit(1); }
+if (!exportPlan || !importContextFile) {
+  if (!token && !useSupabaseCli) { console.error('FIELD_COMPLIANCE_CODESPACE or --use-supabase-cli is required'); process.exit(1); }
+  if (!projectRef && !useSupabaseCli) { console.error('SUPABASE_PROJECT_REF is required unless --use-supabase-cli is used'); process.exit(1); }
+}
 if (!csvPath || !orgId || !providerOrgId || !clientCode || !classificationProfile) {
   console.error('Usage: --csv <path> --org-id <uuid> --provider-org-id <uuid> --client-code <code> --classification-profile <code> --zone-map-file <path> [--include-narratives] [--use-supabase-cli] [--dry-run|--apply]');
   process.exit(1);
@@ -147,6 +154,13 @@ function parseImportContextRows(rows) {
 }
 
 async function loadImportContext() {
+  if (importContextFile) {
+    const context = JSON.parse(readFileSync(importContextFile, 'utf8').replace(/^\uFEFF/, ''));
+    if (context.provider_organization_id !== providerOrgId || context.source_profile !== classificationProfile || !Array.isArray(context.rows)) {
+      throw new Error('Local import context must match the selected provider and source profile');
+    }
+    return parseImportContextRows(context.rows);
+  }
   const profile = classificationProfile.replace(/'/g, "''");
   const query = `SELECT * FROM (
 SELECT 'source_profile' AS record_type,
@@ -198,7 +212,7 @@ const { sourceProfile, personAliases, classificationRules } = await loadImportCo
 const actorId = sourceProfile.import_actor_id;
 if (!/^[a-f0-9]{8}-[a-f0-9]{4}-[1-5][a-f0-9]{3}-[89ab][a-f0-9]{3}-[a-f0-9]{12}$/i.test(actorId ?? '')) throw new Error(`Source profile ${classificationProfile} has no valid import actor`);
 const importConfigurationHash = createHash('sha256')
-  .update(JSON.stringify({ sourceProfile, personAliases, classificationRules }))
+  .update(JSON.stringify({ sourceProfile, personAliases, classificationRules, sourceColumnAliases }))
   .digest('hex');
 
 const raw = readFileSync(csvPath, 'utf8');
@@ -210,8 +224,25 @@ const table = parseCsv(raw).filter((r) => r.length > 1);
 // "24hr\nTime", Taylors' "Log  no" with a double space) - normalize both before matching.
 const header = table[0].map((h) => h.replace(/^\uFEFF/, '').replace(/\s+/g, ' ').trim());
 const headerLower = header.map((h) => h.toLowerCase());
-// Header aliases belong to the selected import source profile. Matching remains
-// case-insensitive, but adding another source layout is a data change.
+const schemaHeaders = [...header];
+for (const [position, mapping] of Object.entries(sourceColumnAliases)) {
+  const index = Number(position) - 1;
+  if (!Number.isInteger(index) || index < 0 || index >= header.length
+    || mapping?.source_header !== header[index] || typeof mapping.alias !== 'string' || !mapping.alias.trim()
+    || (mapping.require_empty !== true && mapping.preserve_source !== true)) {
+    console.error('Source column aliases must identify an exact unused or source-only column');
+    process.exit(1);
+  }
+  if (mapping.require_empty === true && table.slice(1).some(row => String(row[index] ?? '').trim())) {
+    console.error(`Source column ${position} is no longer empty; mapping review is required`);
+    process.exit(1);
+  }
+  schemaHeaders[index] = mapping.alias.trim();
+}
+if (Object.keys(sourceColumnAliases).length && new Set(schemaHeaders).size !== schemaHeaders.length) {
+  console.error('Source column aliases do not resolve every duplicate header');
+  process.exit(1);
+}
 const pick = (...candidates) => { for (const name of candidates) { const i = headerLower.indexOf(name.toLowerCase()); if (i !== -1) return i; } return -1; };
 const mapped = (logicalField) => {
   const aliases = sourceProfile.column_mappings[logicalField] ?? [];
@@ -223,6 +254,7 @@ const col = {
   reserve: mapped('reserve'), location: mapped('location'), comments: mapped('comments'), registration: mapped('registration'),
   jobTime: mapped('job_time'), jobKms: mapped('job_km'), workSource: mapped('source'), subject: mapped('subject'), issue: mapped('issue'), actionBy: mapped('action_by'),
   jobCost: mapped('job_cost'), travelCost: mapped('travel_cost'), totalCost: mapped('total_cost'),
+  odometer: mapped('odometer'), actionNotes: mapped('action_notes'), lastActionDate: mapped('action_date'), closedBy: mapped('closed_by'),
 };
 for (const requiredField of ['job', 'patroller', 'date']) {
   if (col[requiredField] < 0) throw new Error(`Source profile ${classificationProfile} could not resolve required ${requiredField} header`);
@@ -252,7 +284,7 @@ for (const [rowIndex, r] of table.slice(1).entries()) {
   // A zone-map entry is normally a bare zone UUID string; some clients (e.g. Taylors) also have
   // commercial client_sites, not just residential/patrol zones - those entries are written as
   // { "site_id": "<uuid>" } instead, so a single map can resolve to either place type.
-  const resolved = (reserveCode && zoneMap[reserveCode]) ?? zoneMap[locationText] ?? null;
+  const resolved = (reserveCode ? zoneMap[reserveCode] : null) ?? zoneMap[locationText] ?? null;
   const zoneId = typeof resolved === 'string' ? resolved : null;
   const siteId = resolved && typeof resolved === 'object' ? resolved.site_id ?? null : null;
   const comments = (r[col.comments] ?? '').trim();
@@ -289,12 +321,26 @@ for (const [rowIndex, r] of table.slice(1).entries()) {
     job_kms: r[col.jobKms] || null, job_cost: importedNumber(r[col.jobCost]), travel_cost: importedNumber(r[col.travelCost]),
     total_cost: importedNumber(r[col.totalCost]), source_category: (r[col.workSource] ?? '').trim() || null,
     classification_profile: classificationProfile,
+    travel_odometer: (r[col.odometer] ?? '').trim() || null,
+    distance_source: col.jobKms === -1 ? null : 'source_job_km',
+    distance_source_column: col.jobKms === -1 ? null : header[col.jobKms],
+    odometer_source_column: col.odometer === -1 ? null : header[col.odometer],
     ...(includeNarratives ? {
       patroller_raw: patroller || null,
       comments: comments || null,
       subject: (r[col.subject] ?? '').trim() || null,
       issue: (r[col.issue] ?? '').trim() || null,
       action_by: (r[col.actionBy] ?? '').trim() || null,
+      action_notes: (r[col.actionNotes] ?? '').trim() || null,
+      last_action_date: (r[col.lastActionDate] ?? '').trim() || null,
+      closed_by: (r[col.closedBy] ?? '').trim() || null,
+      ...(Object.values(sourceColumnAliases).some(mapping => mapping.preserve_source === true) ? {
+        source_only_columns: Object.fromEntries(Object.entries(sourceColumnAliases)
+          .filter(([, mapping]) => mapping.preserve_source === true)
+          .map(([position, mapping]) => [position, { source_header: mapping.source_header, alias: mapping.alias,
+            value: r[Number(position) - 1] ?? '',
+          }])),
+      } : {}),
     } : {}),
     ...workClassification,
   };
@@ -341,7 +387,7 @@ for (const [rowIndex, r] of table.slice(1).entries()) {
   }
 }
 
-console.log(`Parsed ${table.length - 1} rows (${skipped} skipped: no date; ${skippedNoZone} skipped: no resolvable zone via Reserve/Location; ${skippedDuplicate} skipped: duplicate external reference): ${observationsBatch.length} -> observations, ${eventsBatch.length} -> location_events`);
+if (!exportPlan) console.log(`Parsed ${table.length - 1} rows (${skipped} skipped: no date; ${skippedNoZone} skipped: no resolvable zone via Reserve/Location; ${skippedDuplicate} skipped: duplicate external reference): ${observationsBatch.length} -> observations, ${eventsBatch.length} -> location_events`);
 const missingOptionalMappings = Object.entries(col).filter(([, index]) => index < 0).map(([field]) => field);
 const proposalCounts = proposalsBatch.reduce((counts, proposal) => ({ ...counts, [proposal.target_type]: (counts[proposal.target_type] ?? 0) + 1 }), {});
 const dryRunReceipt = {
@@ -364,14 +410,14 @@ const dryRunReceipt = {
   direct_workshop_writes: 0,
   direct_finance_writes: 0,
 };
-console.log(JSON.stringify(dryRunReceipt));
+if (!exportPlan) console.log(JSON.stringify(dryRunReceipt));
 
 const resolvedMappings = Object.entries(sourceProfile.target_mappings).flatMap(([logicalField, target]) => {
   const sourceIndex = mapped(logicalField);
   if (sourceIndex < 0 || !target?.target_entity) return [];
   return [{
     logical_field: logicalField,
-    source_column: header[sourceIndex],
+    source_column: schemaHeaders[sourceIndex],
     target_entity: target.target_entity,
     target_field: target.target_field ?? null,
   }];
@@ -391,7 +437,8 @@ const importManifest = {
   direct_finance_writes: 0,
 };
 const importSchema = {
-  headers: header,
+  headers: schemaHeaders,
+  ...(Object.keys(sourceColumnAliases).length ? { original_headers: header, source_column_aliases: sourceColumnAliases } : {}),
   mappings: resolvedMappings.map((mapping) => ({
     source: mapping.source_column,
     target: `${mapping.target_entity}.${mapping.target_field ?? ''}`.replace(/[.]$/, ''),
@@ -399,6 +446,22 @@ const importSchema = {
   })),
   resolved_mappings: resolvedMappings,
 };
+if (exportPlan) {
+  console.log(JSON.stringify({
+    mode: 'plan',
+    source_file: effectiveSourceLabel,
+    source_sha256: effectiveSourceHash,
+    source_sheet: sourceSheet || null,
+    manifest: importManifest,
+    schema: importSchema,
+    counts: { rows: table.length - 1, skipped, unresolved: skippedNoZone, duplicates: skippedDuplicate },
+    observations: observationsBatch,
+    events: eventsBatch,
+    proposals: proposalsBatch,
+  }));
+  process.exit(0);
+}
+
 const batchDefinition = {
   provider_organization_id: providerOrgId,
   client_organization_id: orgId,
