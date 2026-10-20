@@ -15,6 +15,9 @@ Vehicle search pop-out window, 2026-10-20:
   profile): one named window, same session/working organisation and route
   gating, opener cut after open. Evidence: page tests, web build,
   `e2e/vehicle-search-popout.spec.ts`. No schema or Atlas data-path change.
+- Result rows show the shared profile photo thumbnail: one caller-RLS read of
+  `vehicle_profile_photos` and one batch of signed URLs per result list,
+  best-effort (a failure leaves the list intact). Page tests cover both cases.
 
 CCTV photo enhancement, 2026-10-20:
 

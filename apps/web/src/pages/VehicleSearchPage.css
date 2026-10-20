@@ -145,3 +145,21 @@
   max-width: none;
   padding: 16px;
 }
+
+.vehicle-match-photo-cell {
+  width: 76px;
+}
+
+.vehicle-match-photo {
+  display: block;
+  width: 64px;
+  height: 44px;
+  border-radius: 6px;
+  object-fit: cover;
+  background: #e5e7eb;
+}
+
+.vehicle-match-photo.is-empty {
+  border: 1px dashed #cbd5e1;
+  background: #f1f5f9;
+}

@@ -121,6 +121,31 @@ const VehicleSearchPage: React.FC = () => {
   const [breaches, setBreaches] = useState<VehicleBreach[]>([]);
   const [permits, setPermits] = useState<PermitRecord[]>([]);
   const [searched, setSearched] = useState(false);
+  const [matchPhotos, setMatchPhotos] = useState<Record<string, string>>({});
+
+  // Thumbnails are best-effort: a failed photo lookup must never hide or delay the registration list.
+  useEffect(() => {
+    const ids = (matches ?? []).map((match) => match.id).filter((id): id is string => Boolean(id));
+    if (ids.length === 0) { setMatchPhotos({}); return; }
+    let active = true;
+    void (async () => {
+      try {
+        // ATLAS READS: vehicle_profile_photos — private, caller-RLS media.
+        const { data, error: photoError } = await supabase.from('vehicle_profile_photos').select('canonical_vehicle_id, storage_path').in('canonical_vehicle_id', ids);
+        if (photoError || !data?.length) { if (active) setMatchPhotos({}); return; }
+        const rows = data as Array<{ canonical_vehicle_id: string; storage_path: string }>;
+        const { data: signed, error: signError } = await supabase.storage.from('vehicle-profile-photos').createSignedUrls(rows.map((row) => row.storage_path), 3600);
+        if (signError || !signed) { if (active) setMatchPhotos({}); return; }
+        const byPath = new Map(signed.filter((item) => item.signedUrl && !item.error).map((item) => [item.path, item.signedUrl] as const));
+        const next: Record<string, string> = {};
+        for (const row of rows) { const url = byPath.get(row.storage_path); if (url) next[row.canonical_vehicle_id] = url; }
+        if (active) setMatchPhotos(next);
+      } catch {
+        if (active) setMatchPhotos({});
+      }
+    })();
+    return () => { active = false; };
+  }, [matches]);
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [showFlagForm, setShowFlagForm] = useState(false);
@@ -406,9 +431,14 @@ const VehicleSearchPage: React.FC = () => {
           </p>
           <div className="reports-table-wrapper">
             <table className="reports-table">
-              <thead><tr><th>Registration</th><th>Vehicle</th><th>Colour</th></tr></thead>
+              <thead><tr><th><span className="sr-only">Photo</span></th><th>Registration</th><th>Vehicle</th><th>Colour</th></tr></thead>
               <tbody>{matches.map((match) => (
                 <tr key={match.plate_number}>
+                  <td className="vehicle-match-photo-cell">
+                    {match.id && matchPhotos[match.id]
+                      ? <img className="vehicle-match-photo" src={matchPhotos[match.id]} alt={`Profile photo of ${match.plate_number}`} loading="lazy" />
+                      : <span className="vehicle-match-photo is-empty" aria-hidden="true" />}
+                  </td>
                   <td><button type="button" className="btn btn-secondary" onClick={() => void searchVehicle(match.plate_number, match.id ?? undefined)}>{match.plate_number}</button></td>
                   <td>{[match.year, match.make, match.model].filter(Boolean).join(' ') || 'Not recorded'}</td>
                   <td>{match.colour || 'Not recorded'}</td>
