@@ -129,4 +129,28 @@ describe('vehicle search candidate selection', () => {
     await screen.findByText('No matching registrations found.');
     expect(screen.queryByRole('button', { name: /^REG\d+$/ })).toBeNull();
   });
+
+  it('opens the selected vehicle in a separate movable window and reports a blocked pop-up', async () => {
+    const popup = { opener: {} as unknown, focus: vi.fn() };
+    const open = vi.spyOn(window, 'open').mockReturnValue(popup as unknown as Window);
+    render(<MemoryRouter><VehicleSearchPage /></MemoryRouter>);
+    fireEvent.change(screen.getByLabelText('Registration search'), { target: { value: 'rj%9%8' } });
+    fireEvent.click(screen.getByRole('button', { name: 'Search Plate' }));
+    fireEvent.click(await screen.findByRole('button', { name: 'RJ298' }));
+    await screen.findByRole('button', { name: '+ Raise of-interest flag' });
+    fireEvent.click(screen.getByRole('button', { name: 'Open in new window' }));
+    expect(open).toHaveBeenCalledWith('/admin/field-ops?area=vehicle-search&popout=1&plate=RJ298', 'fcm-vehicle-search', expect.stringContaining('popup=yes'));
+    expect(popup.opener).toBeNull();
+    expect(popup.focus).toHaveBeenCalled();
+    open.mockReturnValue(null);
+    fireEvent.click(screen.getByRole('button', { name: 'Open in new window' }));
+    expect((await screen.findByRole('alert')).textContent).toContain('blocked the pop-up');
+    open.mockRestore();
+  });
+
+  it('marks the pop-out window and does not offer to pop out again', () => {
+    render(<MemoryRouter initialEntries={['/admin/field-ops?area=vehicle-search&popout=1']}><VehicleSearchPage /></MemoryRouter>);
+    expect(screen.getByText('Separate window')).toBeTruthy();
+    expect(screen.queryByRole('button', { name: 'Open in new window' })).toBeNull();
+  });
 });

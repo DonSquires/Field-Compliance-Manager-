@@ -19,6 +19,7 @@ import VehicleProfile from '../components/VehicleProfile';
 import { useAuth } from '../context/AuthContext';
 import { normalizePlateNumber, vehicleHistoryOrFilter } from '../lib/canonicalIdentity';
 import { vehiclePlateSearchPattern } from '../lib/vehiclePlateSearch';
+import { openVehicleSearchPopout } from '../lib/vehicleSearchPopout';
 import { describeLoadFailures } from '../lib/friendlyLoadError';
 import { supabase } from '../lib/supabase';
 import './PageStyles.css';
@@ -107,6 +108,7 @@ interface PermitRecord {
 const VehicleSearchPage: React.FC = () => {
   const { profile } = useAuth();
   const [searchParams] = useSearchParams();
+  const isPopout = searchParams.get('popout') === '1';
   const [plate, setPlate] = useState('');
   const [selectedPlate, setSelectedPlate] = useState('');
   const [vehicle, setVehicle] = useState<Vehicle | null>(null);
@@ -336,10 +338,26 @@ const VehicleSearchPage: React.FC = () => {
   };
 
   return (
-    <div className="page-container vehicle-search-page">
-      <header className="page-header">
-        <h1>Vehicle Search & Flags</h1>
-        <p className="subtitle">Search vehicle register, inspect compliance history, manage VOI & safety flags</p>
+    <div className={`page-container vehicle-search-page${isPopout ? ' is-popout' : ''}`}>
+      <header className="page-header vehicle-search-header">
+        <div>
+          <h1>Vehicle Search & Flags</h1>
+          <p className="subtitle">Search vehicle register, inspect compliance history, manage VOI & safety flags</p>
+        </div>
+        {isPopout ? (
+          <span className="vehicle-search-popout-badge">Separate window</span>
+        ) : (
+          <button
+            type="button"
+            className="btn btn-secondary"
+            onClick={() => {
+              if (!openVehicleSearchPopout(vehicle?.plate_number ?? selectedPlate)) setError('Your browser blocked the pop-up window. Allow pop-ups for this site and try again.');
+            }}
+            title="Open vehicle search in a window you can move to another screen"
+          >
+            Open in new window
+          </button>
+        )}
       </header>
 
       {error && (

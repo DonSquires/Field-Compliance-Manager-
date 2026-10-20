@@ -8,6 +8,14 @@ detailed backlogs (`ENTERPRISE_SAAS_TODO.md`, `PROTOTYPE_GAP_AUDIT.md`,
 Completion language is strict, as in the lineage: **merged ≠ deployed ≠
 glass-proven.** A workstream item is done only when its evidence gate is met.
 
+Vehicle search pop-out window, 2026-10-20:
+
+- Owner asked for vehicle search in a movable window for a second screen.
+  It reuses the existing `popout=1` chrome-free shell pattern (CCTV wall, staff
+  profile): one named window, same session/working organisation and route
+  gating, opener cut after open. Evidence: page tests, web build,
+  `e2e/vehicle-search-popout.spec.ts`. No schema or Atlas data-path change.
+
 CCTV photo enhancement, 2026-10-20:
 
 - Human reported the console's Auto enhancement "not working" on a zoomed

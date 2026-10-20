@@ -640,3 +640,8 @@
   color: #8f1d2b;
   background: #f8e9ea;
 }
+.admin-shell-main.is-vehicle-search-popout {
+  flex: 1;
+  min-width: 0;
+  overflow: auto;
+}

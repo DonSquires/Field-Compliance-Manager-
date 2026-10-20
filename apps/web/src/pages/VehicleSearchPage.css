@@ -124,3 +124,24 @@
     padding: 12px;
   }
 }
+.vehicle-search-header {
+  display: flex;
+  align-items: flex-start;
+  justify-content: space-between;
+  gap: 12px;
+  flex-wrap: wrap;
+}
+
+.vehicle-search-popout-badge {
+  padding: 4px 10px;
+  border-radius: 999px;
+  background: #e0ecff;
+  color: #1d4ed8;
+  font-size: 0.8rem;
+  font-weight: 600;
+}
+
+.vehicle-search-page.is-popout {
+  max-width: none;
+  padding: 16px;
+}
