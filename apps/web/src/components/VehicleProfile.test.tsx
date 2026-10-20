@@ -72,6 +72,7 @@ describe('vehicle profile', () => {
   it('rejects invalid photo types before storage and keeps missing permissions explicit', async () => {
     render(<VehicleProfile vehicle={vehicle} onUpdated={onUpdated} />);
     await screen.findByRole('button', { name: 'Edit vehicle details' });
+    fireEvent.click(screen.getByRole('button', { name: /^(Add|Replace) profile photo$/ }));
     fireEvent.change(screen.getByLabelText('Vehicle profile photo'), { target: {
       files: [new File(['x'], 'payload.svg', { type: 'image/svg+xml' })],
     } });
@@ -93,6 +94,7 @@ describe('vehicle profile', () => {
     upload.mockResolvedValue({ data: {}, error: null });
     render(<VehicleProfile vehicle={vehicle} onUpdated={onUpdated} />);
     await screen.findByRole('button', { name: 'Edit vehicle details' });
+    fireEvent.click(screen.getByRole('button', { name: /^(Add|Replace) profile photo$/ }));
     rpc.mockResolvedValueOnce({ data: null, error: { message: 'Temporary link failure' } });
     fireEvent.change(screen.getByLabelText('Vehicle profile photo'), { target: {
       files: [new File(['source'], 'car.jpg', { type: 'image/jpeg' })],

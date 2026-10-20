@@ -163,3 +163,25 @@
   border: 1px dashed #cbd5e1;
   background: #f1f5f9;
 }
+
+.vehicle-observation-table td {
+  vertical-align: middle;
+  font-size: 13px;
+}
+
+.vehicle-observation-table td:nth-child(2) {
+  white-space: nowrap;
+}
+
+.vehicle-profile-status .spec-grid {
+  margin-top: 0;
+}
+
+.vehicle-profile-section-title {
+  margin: 0 0 8px;
+  font-size: 13px;
+  font-weight: 700;
+  color: var(--color-text-secondary);
+  text-transform: uppercase;
+  letter-spacing: 0.04em;
+}

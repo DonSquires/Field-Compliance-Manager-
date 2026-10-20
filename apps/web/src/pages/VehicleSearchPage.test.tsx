@@ -11,7 +11,7 @@ const { from, rpc, ilike, eq, historyOr, historyResult, photoIn, storageFrom, cr
 vi.mock('../lib/supabase', () => ({ supabase: { from, rpc, storage: { from: storageFrom } } }));
 vi.mock('../context/AuthContext', () => ({ useAuth: () => ({ profile: { organizationId: 'org', id: 'user' } }) }));
 vi.mock('../components/SafetyWarningsPanel', () => ({ SafetyWarningsPanel: () => null }));
-vi.mock('../components/VehicleProfile', () => ({ default: () => <div>Vehicle profile</div> }));
+vi.mock('../components/VehicleProfile', () => ({ default: ({ summary, children }: { summary?: React.ReactNode; children?: React.ReactNode }) => <section aria-label="Vehicle profile">{summary}{children}</section> }));
 
 describe('vehicle search candidate selection', () => {
   beforeEach(() => {
@@ -179,5 +179,32 @@ describe('vehicle search candidate selection', () => {
     await waitFor(() => expect(createSignedUrls).toHaveBeenCalled());
     expect(screen.queryByRole('img', { name: /Profile photo/ })).toBeNull();
     expect(screen.queryByRole('alert')).toBeNull();
+  });
+
+  it('lists observations as a table with signed photos and keeps identity and status inside the profile card', async () => {
+    historyResult.mockReturnValue({ data: [
+      { id: 'obs-1', observed_at: '2026-05-23T05:45:00Z', is_compliant: null, compliance_status: null, compliance_reason: null, nights_this_zone: 2, plate_number: 'RJ298', module_key: 'freedom_camping', vehicle_make: 'Ford', vehicle_model: 'Ranger', vehicle_colour: 'Silver', photo_url: 'org/org-1/obs-1.jpg', zone: { name: 'Kaiuma Forest Block' } },
+      { id: 'obs-2', observed_at: '2026-05-22T05:45:00Z', is_compliant: false, compliance_status: null, compliance_reason: 'Overstayed', nights_this_zone: null, plate_number: 'RJ298', module_key: 'parking_enforcement', vehicle_make: null, vehicle_model: null, vehicle_colour: null, photo_url: null, zone: null },
+    ], error: null });
+    createSignedUrls.mockImplementation(async (paths: string[]) => ({ data: paths.map((path) => ({ path, signedUrl: `https://signed.test/${path}`, error: null })), error: null }));
+    render(<MemoryRouter><VehicleSearchPage /></MemoryRouter>);
+    fireEvent.change(screen.getByLabelText('Registration search'), { target: { value: 'rj%9%8' } });
+    fireEvent.click(screen.getByRole('button', { name: 'Search Plate' }));
+    fireEvent.click(await screen.findByRole('button', { name: 'RJ298' }));
+    const table = await screen.findByRole('table', { name: 'Observation history' });
+    const rows = table.querySelectorAll('tbody tr');
+    expect(rows).toHaveLength(2);
+    expect(rows[0].textContent).toContain('Kaiuma Forest Block');
+    expect(rows[0].textContent).toContain('freedom camping');
+    expect(rows[0].textContent).toContain('Silver Ford Ranger');
+    expect(rows[1].textContent).toContain('NON-COMPLIANT');
+    expect(rows[1].textContent).toContain('Overstayed');
+    await waitFor(() => expect(table.querySelector('img')?.getAttribute('src')).toBe('https://signed.test/org/org-1/obs-1.jpg'));
+    expect(storageFrom).toHaveBeenCalledWith('scans');
+    expect(createSignedUrls).toHaveBeenCalledWith(['org/org-1/obs-1.jpg'], 900);
+    const card = screen.getByRole('region', { name: 'Vehicle profile' });
+    expect(card.querySelector('.plate-banner')?.textContent).toBe('RJ298');
+    expect(card.textContent).toContain('Warrant & Certification Status');
+    expect(card.querySelector('button')?.textContent).toBe('+ Raise of-interest flag');
   });
 });

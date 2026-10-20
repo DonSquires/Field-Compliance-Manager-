@@ -18,6 +18,11 @@ Vehicle search pop-out window, 2026-10-20:
 - Result rows show the shared profile photo thumbnail: one caller-RLS read of
   `vehicle_profile_photos` and one batch of signed URLs per result list,
   best-effort (a failure leaves the list intact). Page tests cover both cases.
+- Selected vehicle: identity, flag action and warrant status are combined
+  into the `VehicleProfile` card; observation history is a table (latest 50)
+  with thumbnails signed from the private `scans` bucket, gated by the existing
+  `scans_select` org-folder policy (live: 12 photo observations, all in
+  `scans`). Evidence: page/profile tests and the vehicle e2e (desktop+mobile).
 
 CCTV photo enhancement, 2026-10-20:
 

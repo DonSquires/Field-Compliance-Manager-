@@ -79,6 +79,24 @@ interface RecentObservation {
   compliance_reason: string | null;
   nights_this_zone: number | null;
   zone_name: string | null;
+  plate_number: string | null;
+  module_key: string | null;
+  compliance_status: string | null;
+  observed_vehicle: string | null;
+  photo_path: string | null;
+}
+
+const OBSERVATION_HISTORY_LIMIT = 50;
+
+function observationOutcome(obs: RecentObservation): { label: string; tone: string } {
+  if (obs.compliance_status) {
+    const status = obs.compliance_status.replace(/_/g, ' ');
+    const tone = /non|breach|fail/i.test(obs.compliance_status) ? 'badge-danger' : /compliant|ok|pass/i.test(obs.compliance_status) ? 'badge-success' : 'badge-info';
+    return { label: status.toUpperCase(), tone };
+  }
+  if (obs.is_compliant === true) return { label: 'COMPLIANT', tone: 'badge-success' };
+  if (obs.is_compliant === false) return { label: 'NON-COMPLIANT', tone: 'badge-danger' };
+  return { label: 'LOGGED', tone: 'badge-info' };
 }
 
 interface VehicleBreach {
@@ -122,6 +140,26 @@ const VehicleSearchPage: React.FC = () => {
   const [permits, setPermits] = useState<PermitRecord[]>([]);
   const [searched, setSearched] = useState(false);
   const [matchPhotos, setMatchPhotos] = useState<Record<string, string>>({});
+  const [observationPhotos, setObservationPhotos] = useState<Record<string, string>>({});
+
+  // Observation photos live in the private `scans` bucket; storage RLS only signs folders the caller's
+  // organisations may read, so observations shared from elsewhere simply show no thumbnail.
+  useEffect(() => {
+    const paths = Array.from(new Set(observations.map((obs) => obs.photo_path).filter((path): path is string => Boolean(path) && !/^https?:/i.test(path as string))));
+    if (paths.length === 0) { setObservationPhotos({}); return; }
+    let active = true;
+    void (async () => {
+      try {
+        const { data, error: signError } = await supabase.storage.from('scans').createSignedUrls(paths, 900);
+        if (!active) return;
+        if (signError || !data) { setObservationPhotos({}); return; }
+        setObservationPhotos(Object.fromEntries(data.filter((item) => item.signedUrl && !item.error && item.path).map((item) => [item.path as string, item.signedUrl as string])));
+      } catch {
+        if (active) setObservationPhotos({});
+      }
+    })();
+    return () => { active = false; };
+  }, [observations]);
 
   // Thumbnails are best-effort: a failed photo lookup must never hide or delay the registration list.
   useEffect(() => {
@@ -198,10 +236,10 @@ const VehicleSearchPage: React.FC = () => {
           .order('date_to', { ascending: false }),
         supabase
           .from('observations')
-          .select('id, observed_at, is_compliant, compliance_reason, nights_this_zone, zone:zone_id(name)')
+          .select('id, observed_at, is_compliant, compliance_reason, compliance_status, nights_this_zone, plate_number, module_key, vehicle_make, vehicle_model, vehicle_colour, photo_url, zone:zone_id(name)')
           .or(historyFilter)
           .order('observed_at', { ascending: false })
-          .limit(10),
+          .limit(OBSERVATION_HISTORY_LIMIT),
         supabase
           .from('breach_alerts')
           .select('id, breach_type, status, nights_count, notes, created_at, zone:location_zones!breach_alerts_zone_id_fkey(name)')
@@ -233,6 +271,11 @@ const VehicleSearchPage: React.FC = () => {
           compliance_reason: row.compliance_reason,
           nights_this_zone: row.nights_this_zone,
           zone_name: row.zone?.name ?? null,
+          plate_number: row.plate_number ?? null,
+          module_key: row.module_key ?? null,
+          compliance_status: row.compliance_status ?? null,
+          observed_vehicle: [row.vehicle_colour, row.vehicle_make, row.vehicle_model].filter(Boolean).join(' ') || null,
+          photo_path: typeof row.photo_url === 'string' && row.photo_url ? row.photo_url : null,
         }))
       );
 
@@ -362,122 +405,7 @@ const VehicleSearchPage: React.FC = () => {
     }
   };
 
-  return (
-    <div className={`page-container vehicle-search-page${isPopout ? ' is-popout' : ''}`}>
-      <header className="page-header vehicle-search-header">
-        <div>
-          <h1>Vehicle Search & Flags</h1>
-          <p className="subtitle">Search vehicle register, inspect compliance history, manage VOI & safety flags</p>
-        </div>
-        {isPopout ? (
-          <span className="vehicle-search-popout-badge">Separate window</span>
-        ) : (
-          <button
-            type="button"
-            className="btn btn-secondary"
-            onClick={() => {
-              if (!openVehicleSearchPopout(vehicle?.plate_number ?? selectedPlate)) setError('Your browser blocked the pop-up window. Allow pop-ups for this site and try again.');
-            }}
-            title="Open vehicle search in a window you can move to another screen"
-          >
-            Open in new window
-          </button>
-        )}
-      </header>
-
-      {error && (
-        <div className="alert alert-error" role="alert">
-          <button className="alert-close" onClick={() => setError(null)} aria-label="Close alert">
-            ×
-          </button>
-          {error}
-        </div>
-      )}
-
-      <form className="vehicle-search-form" onSubmit={handleSearch}>
-        <input
-          type="text"
-          aria-label="Registration search"
-          aria-describedby="vehicle-search-help"
-          placeholder="Registration or pattern, e.g. RJ%9%8"
-          value={plate}
-          disabled={loading}
-          onChange={(e) => setPlate(e.target.value.toUpperCase())}
-          style={{
-            flex: 1,
-            padding: '10px 14px',
-            borderRadius: '6px',
-            border: '1px solid var(--color-border)',
-            background: 'var(--color-bg-primary)',
-            color: 'var(--color-text-primary)',
-            fontSize: '15px',
-            fontFamily: 'var(--font-mono)',
-          }}
-        />
-        <button type="submit" className="btn btn-primary" disabled={loading}>
-          {loading ? 'Searching…' : 'Search Plate'}
-        </button>
-      </form>
-      <p id="vehicle-search-help" className="subtitle">
-        Search any part of a registration. Use % for any number of characters, for example RJ%9%8 or %YG%4.
-        Choose a matching vehicle to view its history and flags.
-      </p>
-
-      {matches !== null && !loading && (
-        <section aria-label="Matching vehicles">
-          <p role="status">
-            {matches.length === 0 ? 'No matching registrations found.' : `${matches.length} matching registrations.`}
-            {moreMatches && ' Showing the first 50; refine your search to see others.'}
-          </p>
-          <div className="reports-table-wrapper">
-            <table className="reports-table">
-              <thead><tr><th><span className="sr-only">Photo</span></th><th>Registration</th><th>Vehicle</th><th>Colour</th></tr></thead>
-              <tbody>{matches.map((match) => (
-                <tr key={match.plate_number}>
-                  <td className="vehicle-match-photo-cell">
-                    {match.id && matchPhotos[match.id]
-                      ? <img className="vehicle-match-photo" src={matchPhotos[match.id]} alt={`Profile photo of ${match.plate_number}`} loading="lazy" />
-                      : <span className="vehicle-match-photo is-empty" aria-hidden="true" />}
-                  </td>
-                  <td><button type="button" className="btn btn-secondary" onClick={() => void searchVehicle(match.plate_number, match.id ?? undefined)}>{match.plate_number}</button></td>
-                  <td>{[match.year, match.make, match.model].filter(Boolean).join(' ') || 'Not recorded'}</td>
-                  <td>{match.colour || 'Not recorded'}</td>
-                </tr>
-              ))}</tbody>
-            </table>
-          </div>
-        </section>
-      )}
-
-      {searched && matches === null && !loading && (
-        <button type="button" className="btn btn-secondary" onClick={() => {
-          setError(null); setSearched(false); setShowFlagForm(false);
-          setPlate(lastSearch?.query ?? plate);
-          setMatches(lastSearch?.matches.slice(0, 50) ?? null);
-          setMoreMatches((lastSearch?.matches.length ?? 0) > 50);
-        }}>Back to search results</button>
-      )}
-
-      {searched && !loading && matches === null && !error && (
-        <div className="vehicle-search-results">
-          {!vehicle && !scv && permits.length === 0 && observations.length === 0 ? (
-            <div className="empty-state">
-              <p>No vehicle records, permits, or observations found for "{selectedPlate}".</p>
-            </div>
-          ) : (
-            <div style={{ display: 'grid', gap: '16px' }}>
-              {vehicle && <VehicleProfile key={vehicle.id} vehicle={vehicle} onUpdated={async () => {
-                const result = await supabase.from('canonical_vehicle_public')
-                  .select('*').eq('id', vehicle.id).single();
-                if (result.error) throw result.error;
-                setVehicle(result.data as Vehicle);
-                setLastSearch(previous => previous ? {
-                  ...previous,
-                  matches: previous.matches.map(match => match.id === result.data.id ? { ...match, ...result.data } : match),
-                } : previous);
-              }} />}
-              {/* Top Overview & Flag Action Card */}
-              <div className="contact-card">
+  const vehicleSummary = (
                 <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', flexWrap: 'wrap', gap: '12px' }}>
                   <div style={{ display: 'flex', alignItems: 'center', gap: '12px' }}>
                     <div className="plate-banner">{selectedPlate}</div>
@@ -501,7 +429,60 @@ const VehicleSearchPage: React.FC = () => {
                     )}
                   </div>
                 </div>
+  );
 
+  const vehicleDetails = (
+    <>
+      <div className="vehicle-profile-status">
+                <h3 className="vehicle-profile-section-title">Warrant & Certification Status</h3>
+                <div className="spec-grid">
+                  <div className="spec-item">
+                    <div className="spec-label">Registration</div>
+                    <div className="spec-value">
+                      <span className={`badge ${vehicle?.rego_status === 'current' ? 'badge-success' : vehicle?.rego_status === 'expired' ? 'badge-danger' : 'badge-info'}`}>
+                        {vehicle?.rego_status ? vehicle.rego_status.toUpperCase() : 'UNKNOWN'}
+                      </span>
+                    </div>
+                    {vehicle?.rego_expiry && (
+                      <div style={{ fontSize: '11px', color: 'var(--color-text-secondary)', marginTop: '4px' }}>
+                        Exp: {new Date(vehicle.rego_expiry).toLocaleDateString()}
+                      </div>
+                    )}
+                  </div>
+
+                  <div className="spec-item">
+                    <div className="spec-label">WOF / COF</div>
+                    <div className="spec-value">
+                      <span className={`badge ${vehicle?.wof_status === 'current' || vehicle?.cof_status === 'current' ? 'badge-success' : vehicle?.wof_status === 'expired' || vehicle?.cof_status === 'expired' ? 'badge-danger' : 'badge-info'}`}>
+                        {vehicle?.wof_status ? `WOF: ${vehicle.wof_status.toUpperCase()}` : vehicle?.cof_status ? `COF: ${vehicle.cof_status.toUpperCase()}` : 'UNKNOWN'}
+                      </span>
+                    </div>
+                    {(vehicle?.wof_expiry || vehicle?.cof_expiry) && (
+                      <div style={{ fontSize: '11px', color: 'var(--color-text-secondary)', marginTop: '4px' }}>
+                        Exp: {new Date(vehicle.wof_expiry || vehicle.cof_expiry!).toLocaleDateString()}
+                      </div>
+                    )}
+                  </div>
+
+                  <div className="spec-item">
+                    <div className="spec-label">Self-Containment (NZSCV)</div>
+                    <div className="spec-value">
+                      {scv ? (
+                        <span className={`badge ${scv.certificate_status === 'active' ? 'badge-success' : 'badge-danger'}`}>
+                          {scv.certificate_status.toUpperCase()} (#{scv.certificate_number || 'N/A'})
+                        </span>
+                      ) : (
+                        <span style={{ color: 'var(--color-text-muted)' }}>Not Certified</span>
+                      )}
+                    </div>
+                    {scv?.expiry_date && (
+                      <div style={{ fontSize: '11px', color: 'var(--color-text-secondary)', marginTop: '4px' }}>
+                        Exp: {new Date(scv.expiry_date).toLocaleDateString()}
+                      </div>
+                    )}
+                  </div>
+                </div>
+      </div>
                 {vehicle?.external_data_source_name || vehicle?.external_data_source_url || vehicle?.external_data_source_location ? (
                   <div style={{ marginTop: '12px', padding: '10px 12px', background: 'var(--color-bg-secondary)', border: '1px solid var(--color-border)', borderRadius: '6px', fontSize: '13px', color: 'var(--color-text-secondary)' }}>
                     <strong>Latest licensed enrichment receipt:</strong>{' '}
@@ -608,62 +589,133 @@ const VehicleSearchPage: React.FC = () => {
                     </div>
                   </div>
                 )}
-              </div>
+    </>
+  );
+
+  return (
+    <div className={`page-container vehicle-search-page${isPopout ? ' is-popout' : ''}`}>
+      <header className="page-header vehicle-search-header">
+        <div>
+          <h1>Vehicle Search & Flags</h1>
+          <p className="subtitle">Search vehicle register, inspect compliance history, manage VOI & safety flags</p>
+        </div>
+        {isPopout ? (
+          <span className="vehicle-search-popout-badge">Separate window</span>
+        ) : (
+          <button
+            type="button"
+            className="btn btn-secondary"
+            onClick={() => {
+              if (!openVehicleSearchPopout(vehicle?.plate_number ?? selectedPlate)) setError('Your browser blocked the pop-up window. Allow pop-ups for this site and try again.');
+            }}
+            title="Open vehicle search in a window you can move to another screen"
+          >
+            Open in new window
+          </button>
+        )}
+      </header>
+
+      {error && (
+        <div className="alert alert-error" role="alert">
+          <button className="alert-close" onClick={() => setError(null)} aria-label="Close alert">
+            ×
+          </button>
+          {error}
+        </div>
+      )}
+
+      <form className="vehicle-search-form" onSubmit={handleSearch}>
+        <input
+          type="text"
+          aria-label="Registration search"
+          aria-describedby="vehicle-search-help"
+          placeholder="Registration or pattern, e.g. RJ%9%8"
+          value={plate}
+          disabled={loading}
+          onChange={(e) => setPlate(e.target.value.toUpperCase())}
+          style={{
+            flex: 1,
+            padding: '10px 14px',
+            borderRadius: '6px',
+            border: '1px solid var(--color-border)',
+            background: 'var(--color-bg-primary)',
+            color: 'var(--color-text-primary)',
+            fontSize: '15px',
+            fontFamily: 'var(--font-mono)',
+          }}
+        />
+        <button type="submit" className="btn btn-primary" disabled={loading}>
+          {loading ? 'Searching…' : 'Search Plate'}
+        </button>
+      </form>
+      <p id="vehicle-search-help" className="subtitle">
+        Search any part of a registration. Use % for any number of characters, for example RJ%9%8 or %YG%4.
+        Choose a matching vehicle to view its history and flags.
+      </p>
+
+      {matches !== null && !loading && (
+        <section aria-label="Matching vehicles">
+          <p role="status">
+            {matches.length === 0 ? 'No matching registrations found.' : `${matches.length} matching registrations.`}
+            {moreMatches && ' Showing the first 50; refine your search to see others.'}
+          </p>
+          <div className="reports-table-wrapper">
+            <table className="reports-table">
+              <thead><tr><th><span className="sr-only">Photo</span></th><th>Registration</th><th>Vehicle</th><th>Colour</th></tr></thead>
+              <tbody>{matches.map((match) => (
+                <tr key={match.plate_number}>
+                  <td className="vehicle-match-photo-cell">
+                    {match.id && matchPhotos[match.id]
+                      ? <img className="vehicle-match-photo" src={matchPhotos[match.id]} alt={`Profile photo of ${match.plate_number}`} loading="lazy" />
+                      : <span className="vehicle-match-photo is-empty" aria-hidden="true" />}
+                  </td>
+                  <td><button type="button" className="btn btn-secondary" onClick={() => void searchVehicle(match.plate_number, match.id ?? undefined)}>{match.plate_number}</button></td>
+                  <td>{[match.year, match.make, match.model].filter(Boolean).join(' ') || 'Not recorded'}</td>
+                  <td>{match.colour || 'Not recorded'}</td>
+                </tr>
+              ))}</tbody>
+            </table>
+          </div>
+        </section>
+      )}
+
+      {searched && matches === null && !loading && (
+        <button type="button" className="btn btn-secondary" onClick={() => {
+          setError(null); setSearched(false); setShowFlagForm(false);
+          setPlate(lastSearch?.query ?? plate);
+          setMatches(lastSearch?.matches.slice(0, 50) ?? null);
+          setMoreMatches((lastSearch?.matches.length ?? 0) > 50);
+        }}>Back to search results</button>
+      )}
+
+      {searched && !loading && matches === null && !error && (
+        <div className="vehicle-search-results">
+          {!vehicle && !scv && permits.length === 0 && observations.length === 0 ? (
+            <div className="empty-state">
+              <p>No vehicle records, permits, or observations found for "{selectedPlate}".</p>
+            </div>
+          ) : (
+            <div style={{ display: 'grid', gap: '16px' }}>
+              {vehicle ? <VehicleProfile key={vehicle.id} vehicle={vehicle} onUpdated={async () => {
+                const result = await supabase.from('canonical_vehicle_public')
+                  .select('*').eq('id', vehicle.id).single();
+                if (result.error) throw result.error;
+                setVehicle(result.data as Vehicle);
+                setLastSearch(previous => previous ? {
+                  ...previous,
+                  matches: previous.matches.map(match => match.id === result.data.id ? { ...match, ...result.data } : match),
+                } : previous);
+              }} summary={vehicleSummary}>
+                {vehicleDetails}
+              </VehicleProfile> : (
+                <div className="contact-card">
+                  {vehicleSummary}
+                  {vehicleDetails}
+                </div>
+              )}
 
               {/* Platform-wide H&S warnings (redacted across organisations) */}
               <SafetyWarningsPanel entityType="vehicle" entityId={vehicle?.id ?? null} entityLabel="this vehicle" />
-
-              {/* Warrant & Certification Status */}
-              <div className="contact-card">
-                <h3 style={{ margin: '0 0 8px 0', fontSize: '15px' }}>Warrant & Certification Status</h3>
-                <div className="spec-grid">
-                  <div className="spec-item">
-                    <div className="spec-label">Registration</div>
-                    <div className="spec-value">
-                      <span className={`badge ${vehicle?.rego_status === 'current' ? 'badge-success' : vehicle?.rego_status === 'expired' ? 'badge-danger' : 'badge-info'}`}>
-                        {vehicle?.rego_status ? vehicle.rego_status.toUpperCase() : 'UNKNOWN'}
-                      </span>
-                    </div>
-                    {vehicle?.rego_expiry && (
-                      <div style={{ fontSize: '11px', color: 'var(--color-text-secondary)', marginTop: '4px' }}>
-                        Exp: {new Date(vehicle.rego_expiry).toLocaleDateString()}
-                      </div>
-                    )}
-                  </div>
-
-                  <div className="spec-item">
-                    <div className="spec-label">WOF / COF</div>
-                    <div className="spec-value">
-                      <span className={`badge ${vehicle?.wof_status === 'current' || vehicle?.cof_status === 'current' ? 'badge-success' : vehicle?.wof_status === 'expired' || vehicle?.cof_status === 'expired' ? 'badge-danger' : 'badge-info'}`}>
-                        {vehicle?.wof_status ? `WOF: ${vehicle.wof_status.toUpperCase()}` : vehicle?.cof_status ? `COF: ${vehicle.cof_status.toUpperCase()}` : 'UNKNOWN'}
-                      </span>
-                    </div>
-                    {(vehicle?.wof_expiry || vehicle?.cof_expiry) && (
-                      <div style={{ fontSize: '11px', color: 'var(--color-text-secondary)', marginTop: '4px' }}>
-                        Exp: {new Date(vehicle.wof_expiry || vehicle.cof_expiry!).toLocaleDateString()}
-                      </div>
-                    )}
-                  </div>
-
-                  <div className="spec-item">
-                    <div className="spec-label">Self-Containment (NZSCV)</div>
-                    <div className="spec-value">
-                      {scv ? (
-                        <span className={`badge ${scv.certificate_status === 'active' ? 'badge-success' : 'badge-danger'}`}>
-                          {scv.certificate_status.toUpperCase()} (#{scv.certificate_number || 'N/A'})
-                        </span>
-                      ) : (
-                        <span style={{ color: 'var(--color-text-muted)' }}>Not Certified</span>
-                      )}
-                    </div>
-                    {scv?.expiry_date && (
-                      <div style={{ fontSize: '11px', color: 'var(--color-text-secondary)', marginTop: '4px' }}>
-                        Exp: {new Date(scv.expiry_date).toLocaleDateString()}
-                      </div>
-                    )}
-                  </div>
-                </div>
-              </div>
 
               {/* Forest / Site Access Permits */}
               {permits.length > 0 && (
@@ -713,42 +765,43 @@ const VehicleSearchPage: React.FC = () => {
 
               {/* Recent Observations Timeline */}
               <div className="contact-card">
-                <h3 style={{ margin: '0 0 8px 0', fontSize: '15px' }}>Observation History ({observations.length})</h3>
+                <h3 style={{ margin: '0 0 8px 0', fontSize: '15px' }}>Observation History ({observations.length}{observations.length >= OBSERVATION_HISTORY_LIMIT ? ', latest shown' : ''})</h3>
                 {observations.length === 0 ? (
                   <div className="empty-state" style={{ padding: '16px' }}>
                     <p style={{ margin: 0 }}>No scan observations recorded for this plate.</p>
                   </div>
                 ) : (
-                  <div style={{ display: 'grid', gap: '8px', marginTop: '8px' }}>
-                    {observations.map((obs) => (
-                      <div
-                        key={obs.id}
-                        className="timeline-card"
-                        style={{
-                          background: 'var(--color-bg-primary)',
-                          padding: '10px 14px',
-                          borderRadius: '6px',
-                          display: 'flex',
-                          justifyContent: 'space-between',
-                          alignItems: 'center',
-                        }}
-                      >
-                        <div>
-                          <div style={{ fontSize: '13px', fontWeight: 600 }}>
-                            {obs.zone_name || 'General Zone'} · {new Date(obs.observed_at).toLocaleString()}
-                          </div>
-                          <div style={{ fontSize: '12px', color: 'var(--color-text-secondary)', marginTop: '2px' }}>
-                            {obs.nights_this_zone ? `${obs.nights_this_zone} night(s) in zone` : ''}
-                            {obs.compliance_reason ? ` · ${obs.compliance_reason}` : ''}
-                          </div>
-                        </div>
-                        <span
-                          className={`badge ${obs.is_compliant === true ? 'badge-success' : obs.is_compliant === false ? 'badge-danger' : 'badge-info'}`}
-                        >
-                          {obs.is_compliant === null ? 'LOGGED' : obs.is_compliant ? 'COMPLIANT' : 'BREACH'}
-                        </span>
-                      </div>
-                    ))}
+                  <div className="reports-table-wrapper">
+                    <table className="reports-table vehicle-observation-table" aria-label="Observation history">
+                      <thead>
+                        <tr>
+                          <th>Photo</th><th>Observed</th><th>Location / zone</th><th>Type</th><th>Plate seen</th><th>Vehicle seen</th><th>Outcome</th><th>Nights</th><th>Reason</th>
+                        </tr>
+                      </thead>
+                      <tbody>
+                        {observations.map((obs) => {
+                          const outcome = observationOutcome(obs);
+                          const photo = obs.photo_path ? observationPhotos[obs.photo_path] : undefined;
+                          return (
+                            <tr key={obs.id}>
+                              <td className="vehicle-match-photo-cell">
+                                {photo
+                                  ? <a href={photo} target="_blank" rel="noreferrer" title="Open full observation photo"><img className="vehicle-match-photo" src={photo} alt={`Observation photo ${new Date(obs.observed_at).toLocaleString()}`} loading="lazy" /></a>
+                                  : <span className="vehicle-match-photo is-empty" aria-label={obs.photo_path ? 'Photo not available in your scope' : 'No photo'} role="img" />}
+                              </td>
+                              <td>{new Date(obs.observed_at).toLocaleString()}</td>
+                              <td>{obs.zone_name || 'General zone'}</td>
+                              <td>{obs.module_key ? obs.module_key.replace(/_/g, ' ') : '—'}</td>
+                              <td>{obs.plate_number || '—'}</td>
+                              <td>{obs.observed_vehicle || '—'}</td>
+                              <td><span className={`badge ${outcome.tone}`}>{outcome.label}</span></td>
+                              <td>{obs.nights_this_zone ?? '—'}</td>
+                              <td>{obs.compliance_reason || '—'}</td>
+                            </tr>
+                          );
+                        })}
+                      </tbody>
+                    </table>
                   </div>
                 )}
               </div>
