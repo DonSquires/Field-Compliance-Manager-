@@ -17,6 +17,7 @@ import {
   X,
 } from "lucide-react";
 import { supabase } from "../lib/supabase";
+import { PersonIdentityPanel } from "./PersonIdentity";
 import "./IdentityRecordsWorkspace.css";
 
 type PersonRecord = {
@@ -567,6 +568,7 @@ export function IdentityRecordsWorkspace({
   const [busy, setBusy] = useState<string | null>(null);
   const [error, setError] = useState<string | null>(null);
   const [notice, setNotice] = useState<string | null>(null);
+  const [personIdentityRecordId, setPersonIdentityRecordId] = useState<string | null>(null);
 
   const load = useCallback(
     async (term = "") => {
@@ -1410,9 +1412,21 @@ export function IdentityRecordsWorkspace({
             {mode === "people" ? (
               <>
                 <form onSubmit={savePerson}>
-                  <h3>
-                    1. {selectedPersonId ? "Person details" : "Add person"}
-                  </h3>
+                  <div className="identity-records-head">
+                    <h3>
+                      1. {selectedPersonId ? "Person details" : "Add person"}
+                    </h3>
+                    {selectedPersonId && (
+                      <button
+                        type="button"
+                        className="identity-records-secondary"
+                        onClick={() => setPersonIdentityRecordId(selectedPersonId)}
+                      >
+                        <ShieldCheck size={15} />
+                        Identity…
+                      </button>
+                    )}
+                  </div>
                   <div className="identity-records-fields">
                     <label>
                       <span>Name</span>
@@ -2335,6 +2349,17 @@ export function IdentityRecordsWorkspace({
                     </a>
                   ) : (
                     <p>Preparing the private source preview…</p>
+                  )}
+                  {personIdentityRecordId && (
+                    <PersonIdentityPanel
+                      personRecordId={personIdentityRecordId}
+                      onClose={() => setPersonIdentityRecordId(null)}
+                      onChanged={(keptPersonRecordId) => {
+                        setPersonIdentityRecordId(keptPersonRecordId);
+                        setSelectedPersonId(keptPersonRecordId);
+                        void load(search);
+                      }}
+                    />
                   )}
                 </div>
                 <div className="identity-records-fields">

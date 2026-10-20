@@ -21,6 +21,7 @@ import { RecordUpdatesPanel } from '../components/RecordUpdatesPanel';
 import { RecordEvidencePanel } from '../components/RecordEvidencePanel';
 import { SendToInvestigationPanel } from '../components/SendToInvestigationPanel';
 import { VehicleOwnerPanel } from '../components/VehicleOwnerPanel';
+import { ObservationPeoplePanel } from '../components/ObservationPeoplePanel';
 import { loadObservationThumbnails } from '../lib/observationThumbnails';
 import { useAuth } from '../context/AuthContext';
 import { normalizePlateNumber, vehicleHistoryOrFilter } from '../lib/canonicalIdentity';
@@ -457,6 +458,8 @@ const VehicleSearchPage: React.FC = () => {
         <div className="vehicle-observation-detail__sections">
           <section aria-label="Updates and notes"><RecordUpdatesPanel recordKind="observation" recordId={obs.id} onChanged={() => void reloadAnnotations()} /></section>
           {vehicle && <VehicleOwnerPanel vehicleId={vehicle.id} organizationId={profile?.organizationId} observationId={obs.id} />}
+          <ObservationPeoplePanel observationId={obs.id} organizationId={profile?.organizationId}
+            isAdmin={['grand_master', 'master', 'admin'].includes(profile?.role ?? '')} onChanged={() => void reloadAnnotations()} />
           <details open={expanded}><summary>Photos and evidence</summary>
             <RecordEvidencePanel recordKind="observation" recordId={obs.id} organizationId={obs.organization_id} canAdd />
           </details>

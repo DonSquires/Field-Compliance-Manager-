@@ -166,10 +166,11 @@ Field Compliance Manager (FCM) is an enterprise SaaS platform designed to replac
   place and recorded officer context; comment mentions remain separate evidence
   requiring review. In a vehicle's drawer: **Correct canonical vehicle
   details** opens Vehicle Search & Flags; authorised users can add owner
-  identity; each patrol sighting shows its status badges and takes follow-up
-  notes and photos. **Link a verified person to this sighting** only lists
-  people whose identity has been reviewed; to record an owner use **Owner
-  identity** instead.
+  identity and open **Identity…** for aliases, merge review, and ID-evidence
+  submission. Each patrol sighting shows its status badges and takes follow-up
+  notes and photos. In **People mentioned**, any member can add people as
+  **Unconfirmed** (or select an existing person) and administrators can confirm
+  a verified person or set the identity of record.
 
 ---
 
