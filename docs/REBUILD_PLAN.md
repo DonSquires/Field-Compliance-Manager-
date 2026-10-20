@@ -10,6 +10,41 @@ glass-proven.** A workstream item is done only when its evidence gate is met.
 
 Owner-requested search and subject-trend refinement, 2026-10-19:
 
+- Human confirmed selected-vehicle history now works after #125 and requested
+  audited detail editing, a profile photo, and return-to-results navigation.
+  Owner chose a shared photo across authorised organisations and editing of
+  appearance plus registration/WoF/CoF expiry dates. The administrator's
+  job is to correct the canonical vehicle with source/reason, then continue
+  reviewing search results; this is not a new identity or owner-check workflow.
+  Before: canonical public projection and registry writer exist, but Search
+  has no editor or designated profile-photo store. During: a narrow details
+  RPC delegates to `manage_identity_vehicle`, preserving org notes and shared
+  fact review; patrol observations now participate in that writer's related
+  and shared checks, matching the existing registry reader. Explicit expiry
+  edits update their derived status. A private image bucket and caller-RLS
+  profile-photo receipt use existing organisation custody/visible observation
+  access, not Tier-0 public registry access. No raw external URL or public
+  bucket is introduced. Images are human-selected, previewed, re-encoded to
+  strip embedded GPS metadata, hashed and uploaded without overwrite.
+  After: canonical detail refresh, audit receipts, signed photo display and
+  return to the preserved result pattern/list. Failed writes remain errors;
+  linking retry reuses a staged upload. Replaced image objects remain retained
+  with previous paths/hashes in audit, not silently deleted or promoted into
+  enforcement evidence. The client-provided hash is an upload receipt, not an
+  independent server-verified evidence-integrity claim.
+  Owner approved live application and protected publication. Catalog/storage
+  readback confirms private 5 MB bucket, caller-RLS photo table, authenticated
+  read without direct writes, no anonymous photo RPC, and scoped storage
+  insert/select policies. The regenerated public schema includes the two new
+  RPCs and profile table; storage policy/bucket definitions remain in the
+  migration because the public-only catalog snapshot excludes storage.
+  Atlas refresh registers 11 capabilities and 21 edges (presence/wiring, not
+  human exercise). Validation: 19 focused identity/profile/history/database
+  regressions, 37 Atlas generator tests, 29 UI/helper tests, four desktop/mobile
+  browser cases, TypeScript and production build pass. Browser tests prepare
+  a real synthetic image, save details/photo through fixture-backed APIs and
+  restore the original search without another RPC. No live tenant photo or
+  vehicle fact was changed for testing; signed-in human acceptance remains.
 - Human confirmed registry wildcard search works after #124, but selecting a
   registration fails. Bounded production logs identify the observation-history
   GET returning HTTP 500 at 23:34:52 and 23:36:02 UTC, followed by eight-second
