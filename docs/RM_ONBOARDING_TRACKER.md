@@ -82,6 +82,14 @@ turn beats false completeness.
   with zero capability/edge upserts and zero retirements (1,417 capabilities,
   8,215 edges). This is map freshness evidence, not a claim that every mapped
   feature has been exercised.
+- After PR #135, Atlas refreshed from main commit
+  `97577c0e5330f7476606a6fa13a6c31c35b49cb2`: zero capability/edge upserts and
+  one stale edge retired. The retired edge claimed `ClientSetupPage` calls
+  `manage_crm_agreement_setup`; current code routes schedule setup through
+  `manage_crm_agreement_delivery_schedule` and as-attended setup through
+  `manage_crm_as_attended_patrol`. Atlas still records the setup RPC call from
+  `CrmAgreementSetupDialog`. Production deployment for #135 succeeded. No schema
+  changes or migrations were needed.
 - Still open: reviewed source mappings, all-client missing-place reconciliation,
   versioned row receipts/corrections, legacy-provenance review, photo promotion,
   and laptop scanner activation. The local detector remains disconnected from
