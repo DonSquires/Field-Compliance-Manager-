@@ -83,6 +83,23 @@ Field Compliance Manager (FCM) is an enterprise SaaS platform designed to replac
   `%yg%%4` finds registrations containing YG and ending in 4. Matching is
   case-insensitive. Select a registration before inspecting history or raising
   flags. Broad searches show the first 50 matches and ask you to refine.
+- **Back to search results** restores the previous registration pattern and
+  result list without rerunning the search, including after a detail-load error.
+- In a selected vehicle's **Vehicle profile**, an organisation administrator
+  can edit make, model, year, colour, body type and registration/WoF/CoF expiry
+  dates with a reason/source. Blank fields leave existing values unchanged.
+  Registration is fixed; shared canonical facts still require grand master
+  review. Organisation notes are preserved. Identity/owner/VIN checks remain
+  in their existing evidence-review workflow.
+- Administrators can add or replace the shared vehicle profile photo using a
+  JPEG, PNG or WebP up to 5 MB, preview it, and record a reason/source. The app
+  resizes/re-encodes the image to remove embedded location metadata before
+  upload. Do not include people or private surroundings. Photos use private
+  storage and expiring links: another organisation only sees the photo through
+  existing custody or caller-visible vehicle observation access. The picture
+  is not public, identity proof, or enforcement evidence. Replacements retain
+  previous photo receipts in audit history. If upload succeeds but linking
+  fails, retry **Save profile photo** to reuse the uploaded file.
 - In **Reports & Accountability > Repeat subject review**, choose **All
   authorised agreements and observations** to compare subjects across areas,
   including observations without an agreement mapping, or choose one agreement

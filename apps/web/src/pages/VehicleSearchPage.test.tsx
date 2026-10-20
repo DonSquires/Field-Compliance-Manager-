@@ -10,6 +10,7 @@ const { from, rpc, ilike, eq, historyOr, historyResult } = vi.hoisted(() => ({
 vi.mock('../lib/supabase', () => ({ supabase: { from, rpc } }));
 vi.mock('../context/AuthContext', () => ({ useAuth: () => ({ profile: { organizationId: 'org', id: 'user' } }) }));
 vi.mock('../components/SafetyWarningsPanel', () => ({ SafetyWarningsPanel: () => null }));
+vi.mock('../components/VehicleProfile', () => ({ default: () => <div>Vehicle profile</div> }));
 
 describe('vehicle search candidate selection', () => {
   beforeEach(() => {
@@ -53,6 +54,12 @@ describe('vehicle search candidate selection', () => {
     expect(screen.queryByRole('region', { name: 'Matching vehicles' })).toBeNull();
     fireEvent.change(screen.getByLabelText('Registration search'), { target: { value: '%YG%4' } });
     expect(screen.getByText('RJ298', { selector: '.plate-banner' })).toBeTruthy();
+    fireEvent.click(screen.getByRole('button', { name: 'Back to search results' }));
+    expect(screen.getByLabelText('Registration search')).toHaveProperty('value', 'RJ%9%8');
+    expect(screen.getByRole('region', { name: 'Matching vehicles' })).toBeTruthy();
+    expect(screen.getByRole('button', { name: 'RJ198' })).toBeTruthy();
+    expect(screen.queryByText('RJ298', { selector: '.plate-banner' })).toBeNull();
+    expect(rpc).toHaveBeenCalledTimes(1);
   });
 
   it('searches a fragment anywhere and rejects wildcard-only input without querying', async () => {
@@ -103,6 +110,9 @@ describe('vehicle search candidate selection', () => {
     expect(error.textContent).toContain('timed out');
     expect(error.textContent).not.toContain('Failed to search vehicle');
     expect(screen.queryByRole('button', { name: '+ Raise of-interest flag' })).toBeNull();
+    fireEvent.click(screen.getByRole('button', { name: 'Back to search results' }));
+    expect(screen.getByRole('region', { name: 'Matching vehicles' })).toBeTruthy();
+    expect(screen.queryByRole('alert')).toBeNull();
   });
   it('bounds broad result lists and reports empty wildcard searches', async () => {
     rpc.mockResolvedValueOnce({ data: Array.from({ length: 51 }, (_, n) => ({

@@ -10,9 +10,50 @@ test('registration wildcards show selectable identities before history or flag a
   const patterns: string[] = [];
   const historyFilters: string[] = [];
   const vehicles = [
-    { id: 'abababab-abab-4bab-8bab-abababababab', plate_number: 'RJ198', make: 'Toyota', model: 'Hiace', homeless_status: 'none' },
-    { id: 'bcbcbcbc-bcbc-4cbc-8cbc-bcbcbcbcbcbc', plate_number: 'RJ298', make: 'Ford', model: 'Transit', homeless_status: 'none' },
+    { id: 'abababab-abab-4bab-8bab-abababababab', plate_number: 'RJ198', make: 'Toyota', model: 'Hiace', colour: '', homeless_status: 'none' },
+    { id: 'bcbcbcbc-bcbc-4cbc-8cbc-bcbcbcbcbcbc', plate_number: 'RJ298', make: 'Ford', model: 'Transit', colour: '', homeless_status: 'none' },
   ];
+  let photoPath: string | null = null;
+  await page.route('**/rest/v1/vehicle_profile_photos**', route => route.fulfill({
+    contentType: 'application/json', body: JSON.stringify(photoPath ? { storage_path: photoPath } : null),
+  }));
+  await page.route('**/rest/v1/rpc/is_admin_for_org', route => route.fulfill({ contentType: 'application/json', body: 'true' }));
+  await page.route('**/rest/v1/rpc/update_vehicle_profile_details', async route => {
+    const body = route.request().postDataJSON();
+    expect(body.p_reason).toBe('Human reviewed appearance');
+    expect(body.p_fields).not.toHaveProperty('notes');
+    vehicles[1].colour = body.p_fields.colour;
+    await route.fulfill({ contentType: 'application/json', body: JSON.stringify({ vehicle_id: vehicles[1].id }) });
+  });
+  await page.route('**/storage/v1/object/vehicle-profile-photos/**', route => route.fulfill({
+    contentType: 'application/json', body: JSON.stringify({ Key: 'uploaded' }),
+  }));
+  await page.route('**/rest/v1/rpc/set_vehicle_profile_photo', async route => {
+    const body = route.request().postDataJSON();
+    expect(body.p_sha256_hash).toMatch(/^[a-f0-9]{64}$/);
+    expect(body.p_vehicle_id).toBe(vehicles[1].id);
+    expect(body.p_reason).toBe('Reviewed source photo');
+    photoPath = body.p_storage_path;
+    await route.fulfill({ contentType: 'application/json', body: 'null' });
+  });
+  const png = Buffer.from(await page.evaluate(() => {
+    const canvas = document.createElement('canvas');
+    canvas.width = 16; canvas.height = 16;
+    const context = canvas.getContext('2d');
+    if (!context) throw new Error('Browser fixture canvas unavailable');
+    context.fillStyle = '#336699';
+    context.fillRect(0, 0, 16, 16);
+    return canvas.toDataURL('image/png').split(',')[1];
+  }), 'base64');
+  await page.route('**/storage/v1/object/sign/vehicle-profile-photos/**', async route => {
+    if (route.request().method() === 'POST') {
+      await route.fulfill({ contentType: 'application/json', body: JSON.stringify({
+        signedURL: '/object/sign/vehicle-profile-photos/profile.webp?token=fixture',
+      }) });
+    } else {
+      await route.fulfill({ contentType: 'image/png', body: png });
+    }
+  });
   await page.route('**/rest/v1/rpc/search_vehicle_registrations', async (route) => {
     const body = route.request().postDataJSON() as Record<string, unknown>;
     patterns.push(String(body.p_pattern));
@@ -47,6 +88,21 @@ test('registration wildcards show selectable identities before history or flag a
   await expect(page.getByText('Ford Transit', { exact: true })).toBeVisible();
   await expect(page.getByRole('button', { name: '+ Raise of-interest flag' })).toBeVisible();
   expect(historyFilters).toEqual([`(canonical_vehicle_id.eq.${vehicles[1].id},plate_number_upper.eq.RJ298)`]);
+  await page.getByRole('button', { name: 'Edit vehicle details' }).click();
+  await page.getByLabel('Colour', { exact: true }).fill('Blue');
+  await page.getByLabel('Reason / source for detail changes').fill('Human reviewed appearance');
+  await page.getByRole('button', { name: 'Save vehicle details' }).click();
+  await expect(page.getByText('Vehicle details saved with audit history.')).toBeVisible();
+  await page.getByLabel('Vehicle profile photo', { exact: true }).setInputFiles({ name: 'car.png', mimeType: 'image/png', buffer: png });
+  await page.getByLabel('Reason / source for profile photo').fill('Reviewed source photo');
+  await page.getByRole('button', { name: 'Save profile photo' }).click();
+  await expect(page.getByText('Shared vehicle profile photo saved with audit history.')).toBeVisible();
+  await expect(page.getByRole('img', { name: 'Profile of vehicle RJ298' })).toBeVisible();
+  await page.getByRole('button', { name: 'Back to search results' }).click();
+  await expect(page.getByLabel('Registration search')).toHaveValue('RJ%9%8');
+  await expect(results.getByRole('button', { name: 'RJ198' })).toBeVisible();
+  expect(patterns).toEqual(['RJ%9%8']);
+  expect(await page.evaluate(() => document.documentElement.scrollWidth <= window.innerWidth)).toBe(true);
   expect(errors).toEqual([]);
 });
 

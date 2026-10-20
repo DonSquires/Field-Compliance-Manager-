@@ -15,6 +15,7 @@
 import React, { useCallback, useEffect, useState } from 'react';
 import { useSearchParams } from 'react-router-dom';
 import { SafetyWarningsPanel } from '../components/SafetyWarningsPanel';
+import VehicleProfile from '../components/VehicleProfile';
 import { useAuth } from '../context/AuthContext';
 import { normalizePlateNumber, vehicleHistoryOrFilter } from '../lib/canonicalIdentity';
 import { vehiclePlateSearchPattern } from '../lib/vehiclePlateSearch';
@@ -111,6 +112,7 @@ const VehicleSearchPage: React.FC = () => {
   const [vehicle, setVehicle] = useState<Vehicle | null>(null);
   const [matches, setMatches] = useState<VehicleMatch[] | null>(null);
   const [moreMatches, setMoreMatches] = useState(false);
+  const [lastSearch, setLastSearch] = useState<{ query: string; matches: VehicleMatch[] } | null>(null);
   const [scv, setScv] = useState<ScvRecord | null>(null);
   const [flags, setFlags] = useState<EntityFlag[]>([]);
   const [observations, setObservations] = useState<RecentObservation[]>([]);
@@ -280,6 +282,7 @@ const VehicleSearchPage: React.FC = () => {
         return;
       }
       const candidates = (data ?? []) as VehicleMatch[];
+      setLastSearch({ query: plate, matches: candidates });
       if (candidates.length === 1) {
         await searchVehicle(candidates[0].plate_number, candidates[0].id ?? undefined);
       } else if (!candidates.length && !plate.includes('%')) {
@@ -398,6 +401,15 @@ const VehicleSearchPage: React.FC = () => {
         </section>
       )}
 
+      {searched && matches === null && !loading && (
+        <button type="button" className="btn btn-secondary" onClick={() => {
+          setError(null); setSearched(false); setShowFlagForm(false);
+          setPlate(lastSearch?.query ?? plate);
+          setMatches(lastSearch?.matches.slice(0, 50) ?? null);
+          setMoreMatches((lastSearch?.matches.length ?? 0) > 50);
+        }}>Back to search results</button>
+      )}
+
       {searched && !loading && matches === null && !error && (
         <div className="vehicle-search-results">
           {!vehicle && !scv && permits.length === 0 && observations.length === 0 ? (
@@ -406,6 +418,16 @@ const VehicleSearchPage: React.FC = () => {
             </div>
           ) : (
             <div style={{ display: 'grid', gap: '16px' }}>
+              {vehicle && <VehicleProfile key={vehicle.id} vehicle={vehicle} onUpdated={async () => {
+                const result = await supabase.from('canonical_vehicle_public')
+                  .select('*').eq('id', vehicle.id).single();
+                if (result.error) throw result.error;
+                setVehicle(result.data as Vehicle);
+                setLastSearch(previous => previous ? {
+                  ...previous,
+                  matches: previous.matches.map(match => match.id === result.data.id ? { ...match, ...result.data } : match),
+                } : previous);
+              }} />}
               {/* Top Overview & Flag Action Card */}
               <div className="contact-card">
                 <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', flexWrap: 'wrap', gap: '12px' }}>
