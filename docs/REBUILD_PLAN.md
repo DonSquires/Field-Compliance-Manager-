@@ -8,6 +8,17 @@ detailed backlogs (`ENTERPRISE_SAAS_TODO.md`, `PROTOTYPE_GAP_AUDIT.md`,
 Completion language is strict, as in the lineage: **merged ≠ deployed ≠
 glass-proven.** A workstream item is done only when its evidence gate is met.
 
+CCTV photo enhancement, 2026-10-20:
+
+- Human reported the console's Auto enhancement "not working" on a zoomed
+  vehicle frame. Live read: the frame at 17:42:58 NZT on 18 Oct was a PNG
+  photo, and `CCTVPlayerTile` had excluded photos from enhancement since
+  19c7acac4 while still showing Auto as active. Photos now use the same
+  display-only GPU/CSS pipeline as video (natural image size, redraw on load
+  and on inspection change). Evidence: guard test, CCTV unit suite (145),
+  web build, and `e2e/cctv-photo-enhancement.spec.ts`, which fails on the old
+  exclusion and passes with the fix. No schema or Atlas edge change.
+
 Owner-requested search and subject-trend refinement, 2026-10-19:
 
 - Human confirmed selected-vehicle history now works after #125 and requested
