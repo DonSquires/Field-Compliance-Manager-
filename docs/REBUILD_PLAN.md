@@ -24,6 +24,19 @@ Vehicle search pop-out window, 2026-10-20:
   `scans_select` org-folder policy (live: 12 photo observations, all in
   `scans`). Evidence: page/profile tests and the vehicle e2e (desktop+mobile).
 
+CRM embedded delivery workspace, 2026-10-20:
+
+- The CRM account workspace embeds the per-site Client Setup view with the
+  selected client and operating provider context. Schedule and billing changes
+  remain explicit drafts, with per-row receipts and no fabricated CCTV/static
+  coverage. As-attended Patrol uses the existing `manage_crm_as_attended_patrol`
+  RPC and requires an active route; unavailable route reads remain visible and
+  block the write. Existing schedules read their `work_model` and route
+  configuration from the schema-backed records. No schema change or migration.
+  Evidence: Client Setup attendance unit tests, CRM/AdminShell guard tests,
+  Client Setup and AdminShell desktop/mobile e2e, TypeScript and production
+  build.
+
 CCTV photo enhancement, 2026-10-20:
 
 - Human reported the console's Auto enhancement "not working" on a zoomed
