@@ -490,7 +490,7 @@ export function CrmOperationalWorkPanel({
               <strong>Places and times</strong>
               {schedules.length === 0
                 ? <p>No scheduled places on this agreement yet. Add delivery schedules in the quote, or raise a variation, and accept it.</p>
-                : <ul className="crm-patrol-run-places">{schedules.map((schedule) => <li key={schedule.id}><MapPinned size={14} aria-hidden="true" /><div><strong>{schedulePlaceName(schedule)}</strong><span>{schedule.visits_per_shift} {schedule.visits_per_shift === 1 ? 'visit' : 'visits'} per shift · {describeWindow(schedule.window_start, schedule.window_end)} · {schedule.dwell_minutes} min on site · {describeDays(schedule.active_days)}</span>{schedule.officer_instructions && <em>{schedule.officer_instructions}</em>}</div></li>)}</ul>}
+                : <ul className="crm-patrol-run-places">{schedules.map((schedule) => <li key={schedule.id}><MapPinned size={14} aria-hidden="true" /><div><strong>{schedulePlaceName(schedule)}</strong><span>{schedule.work_model === 'as_attended_patrol' ? 'As attended' : <>{schedule.visits_per_shift} {schedule.visits_per_shift === 1 ? 'visit' : 'visits'} per shift · {describeWindow(schedule.window_start, schedule.window_end)} · {schedule.dwell_minutes} min on site · {describeDays(schedule.active_days)}</>}</span>{schedule.officer_instructions && <em>{schedule.officer_instructions}</em>}</div></li>)}</ul>}
             </div>
           </li>
           <li className={patrolRun.routeId && patrolRun.unroutedCount === 0 ? 'is-done' : schedules.length ? 'is-next' : 'is-later'}>

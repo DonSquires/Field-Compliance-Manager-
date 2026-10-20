@@ -30,6 +30,7 @@ import {
   CreditCard,
   DollarSign,
   Download,
+  ExternalLink,
   FileBarChart,
   FolderOpen,
   FlaskConical,
@@ -69,6 +70,7 @@ import { PlaceContextBanner } from '../components/PlaceContextBanner';
 import { readWorkflowContext, workflowContextQuery, type WorkflowContext } from '../lib/workflowNavigation';
 import { canAccessFieldOpsArea, FIELD_OPS_AREAS, isFieldOpsSubArea, type FieldOpsSubArea } from '../lib/fieldOpsAreaAccess';
 import { ACTIVE_DISPATCH_JOB_STATUSES } from '../lib/dispatchStatus';
+import { openVehicleSearchPopout } from '../lib/vehicleSearchPopout';
 import './AdminShell.css';
 
 import AdminHubPage from '../pages/AdminHubPage';
@@ -872,9 +874,10 @@ const AdminShell: React.FC = () => {
   // A popped-out CCTV wall is a second-monitor surface: the console alone, no navigation or banners.
   const isVideoWall = activePage === 'field-ops' && fieldOpsSubArea === 'cctv-console' && new URLSearchParams(location.search).get('popout') === '1';
   const isStaffProfilePopout = activePage === 'people-hr' && new URLSearchParams(location.search).has('profile') && new URLSearchParams(location.search).get('popout') === '1';
+  const isVehicleSearchPopout = activePage === 'field-ops' && fieldOpsSubArea === 'vehicle-search' && new URLSearchParams(location.search).get('popout') === '1';
   const isWorkbench = ['hub', 'crm', 'client-setup', 'finance-bureau', 'finance-money', 'roster'].includes(activePage)
     || (activePage === 'people-hr' && !new URLSearchParams(location.search).has('profile'))
-    || (activePage === 'field-ops' && ['landing', 'vehicle-search'].includes(fieldOpsSubArea));
+    || (activePage === 'field-ops' && fieldOpsSubArea === 'landing');
   const showWorkflowNavigation = !['crm', 'client-setup', 'finance-bureau', 'finance-money'].includes(activePage);
   const countScope = telemetryZoneIds.length ? 'Agreement zones' : 'Organisation-wide';
   const telemetryPills = <div className="admin-console-telemetry" role="group" aria-label={`Operational counts · ${countScope}`}>
@@ -902,10 +905,10 @@ const AdminShell: React.FC = () => {
       <button type="button" className="admin-shell-icon" onClick={() => void signOut()} title="Sign out" aria-label="Sign out"><LogOut size={19} aria-hidden="true" /></button>
     </div>
   </details>;
-  if (isVideoWall || isStaffProfilePopout) {
+  if (isVideoWall || isStaffProfilePopout || isVehicleSearchPopout) {
     return (
       <div className="admin-shell admin-shell-video-wall">
-        <main data-app-content className={`admin-shell-main ${isVideoWall ? 'is-video-wall' : 'is-staff-profile-popout'}`}>
+        <main data-app-content className={`admin-shell-main ${isVideoWall ? 'is-video-wall' : isVehicleSearchPopout ? 'is-vehicle-search-popout' : 'is-staff-profile-popout'}`}>
           <LazyPageRecovery key={`${activePage}:${fieldOpsSubArea}`} pageKey={`${activePage}:${fieldOpsSubArea}`}>
             <React.Suspense fallback={<LazyPageFallback />}>{renderPage()}</React.Suspense>
           </LazyPageRecovery>
@@ -959,6 +962,9 @@ const AdminShell: React.FC = () => {
               <NotificationCenter onNavigate={navigateFromNotification} />
               {isFieldOpsAreaEnabled('vehicle-search') && <button type="button" className="admin-top-search" onClick={() => navigateToFieldOps('vehicle-search')} aria-label="Open vehicle search">
                 <Search size={17} aria-hidden="true" /><span>Vehicle search</span>
+              </button>}
+              {isFieldOpsAreaEnabled('vehicle-search') && <button type="button" className="admin-shell-icon" onClick={() => openVehicleSearchPopout()} title="Open vehicle search in its own window" aria-label="Open vehicle search in its own window">
+                <ExternalLink size={17} aria-hidden="true" />
               </button>}
               <button type="button" className="admin-shell-icon" onClick={openBobCommandCenter} title="Open Bob command center" aria-label="Open Bob command center" aria-expanded={bobOpen}>
                 <Bot size={19} aria-hidden="true" /><span className="sr-only">{bobOpen ? 'Bob assistant is open' : 'Open Bob assistant'}</span>

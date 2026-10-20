@@ -8,6 +8,168 @@ detailed backlogs (`ENTERPRISE_SAAS_TODO.md`, `PROTOTYPE_GAP_AUDIT.md`,
 Completion language is strict, as in the lineage: **merged ≠ deployed ≠
 glass-proven.** A workstream item is done only when its evidence gate is met.
 
+Vehicle search pop-out window, 2026-10-20:
+
+- Owner asked for vehicle search in a movable window for a second screen.
+  It reuses the existing `popout=1` chrome-free shell pattern (CCTV wall, staff
+  profile): one named window, same session/working organisation and route
+  gating, opener cut after open. Evidence: page tests, web build,
+  `e2e/vehicle-search-popout.spec.ts`. No schema or Atlas data-path change.
+- Result rows show the shared profile photo thumbnail: one caller-RLS read of
+  `vehicle_profile_photos` and one batch of signed URLs per result list,
+  best-effort (a failure leaves the list intact). Page tests cover both cases.
+- Selected vehicle: identity, flag action and warrant status are combined
+  into the `VehicleProfile` card; observation history is a table (latest 50)
+  with thumbnails signed from the private `scans` bucket, gated by the existing
+  `scans_select` org-folder policy (live: 12 photo observations, all in
+  `scans`). Evidence: page/profile tests and the vehicle e2e (desktop+mobile).
+
+CCTV photo enhancement, 2026-10-20:
+
+- Human reported the console's Auto enhancement "not working" on a zoomed
+  vehicle frame. Live read: the frame at 17:42:58 NZT on 18 Oct was a PNG
+  photo, and `CCTVPlayerTile` had excluded photos from enhancement since
+  19c7acac4 while still showing Auto as active. Photos now use the same
+  display-only GPU/CSS pipeline as video (natural image size, redraw on load
+  and on inspection change). Evidence: guard test, CCTV unit suite (145),
+  web build, and `e2e/cctv-photo-enhancement.spec.ts`, which fails on the old
+  exclusion and passes with the fix. No schema or Atlas edge change.
+
+Owner-requested search and subject-trend refinement, 2026-10-19:
+
+- Human confirmed selected-vehicle history now works after #125 and requested
+  audited detail editing, a profile photo, and return-to-results navigation.
+  Owner chose a shared photo across authorised organisations and editing of
+  appearance plus registration/WoF/CoF expiry dates. The administrator's
+  job is to correct the canonical vehicle with source/reason, then continue
+  reviewing search results; this is not a new identity or owner-check workflow.
+  Before: canonical public projection and registry writer exist, but Search
+  has no editor or designated profile-photo store. During: a narrow details
+  RPC delegates to `manage_identity_vehicle`, preserving org notes and shared
+  fact review; patrol observations now participate in that writer's related
+  and shared checks, matching the existing registry reader. Explicit expiry
+  edits update their derived status. A private image bucket and caller-RLS
+  profile-photo receipt use existing organisation custody/visible observation
+  access, not Tier-0 public registry access. No raw external URL or public
+  bucket is introduced. Images are human-selected, previewed, re-encoded to
+  strip embedded GPS metadata, hashed and uploaded without overwrite.
+  After: canonical detail refresh, audit receipts, signed photo display and
+  return to the preserved result pattern/list. Failed writes remain errors;
+  linking retry reuses a staged upload. Replaced image objects remain retained
+  with previous paths/hashes in audit, not silently deleted or promoted into
+  enforcement evidence. The client-provided hash is an upload receipt, not an
+  independent server-verified evidence-integrity claim.
+  Owner approved live application and protected publication. Catalog/storage
+  readback confirms private 5 MB bucket, caller-RLS photo table, authenticated
+  read without direct writes, no anonymous photo RPC, and scoped storage
+  insert/select policies. The regenerated public schema includes the two new
+  RPCs and profile table; storage policy/bucket definitions remain in the
+  migration because the public-only catalog snapshot excludes storage.
+  Atlas refresh registers 11 capabilities and 21 edges (presence/wiring, not
+  human exercise). Validation: 19 focused identity/profile/history/database
+  regressions, 37 Atlas generator tests, 29 UI/helper tests, four desktop/mobile
+  browser cases, TypeScript and production build pass. Browser tests prepare
+  a real synthetic image, save details/photo through fixture-backed APIs and
+  restore the original search without another RPC. No live tenant photo or
+  vehicle fact was changed for testing; signed-in human acceptance remains.
+- Human confirmed registry wildcard search works after #124, but selecting a
+  registration fails. Bounded production logs identify the observation-history
+  GET returning HTTP 500 at 23:34:52 and 23:36:02 UTC, followed by eight-second
+  statement timeouts. Before: discovery resolves an exact canonical identity.
+  During: the shared history filter combines canonical UUID equality with
+  exact plate `ILIKE`, forcing a sequential scan and unrelated per-row RLS
+  work. After: the generic detail catch concealed the source as "Failed to
+  search vehicle"; no usable detail/flag surface was shown.
+  The repair adds a generated `observations.plate_number_upper` key and index,
+  then uses indexed equality in the existing shared history helper. This
+  preserves case-insensitive legacy matches, canonical links across old plate
+  text, result limits, ordering, caller RLS and officer agreement-zone scope.
+  It does not change source plate text, identity, access policy or permissions.
+  The derived field follows inserts/updates automatically. Existing
+  `canonical_vehicle_id` index remains in use. Atlas identifies both admin
+  Vehicle Search and Officer Vehicle Lookup as callers of this shared path.
+  Error handling now names failed detail sections and identifies history
+  timeouts instead of hiding plain-object PostgREST errors.
+  The isolated database fixture reproduces the old filter's unrelated-access
+  evaluation, then verifies the new filter over 8,100 unrelated records,
+  mixed-case legacy rows, canonical historical plates, denied records,
+  agreement-zone filtering, deduplication, sorting and generated-key updates
+  under a two-second statement limit.
+  Owner approved live application and protected publication. Live catalog
+  readback confirms the stored generated key; no-user-context authenticated
+  EXPLAIN ANALYZE for both human-selected registrations, including the zone
+  join, uses bitmap index scans on canonical identity and the new plate key
+  (15.1 ms and 7.9 ms). No observation sequential scan remains in those plans.
+  This is plan verification, not affected-user acceptance. Database regression
+  and canonical-link guards, 24 focused UI/helper tests, four desktop/mobile
+  browser cases, TypeScript and production build pass. Atlas refreshed.
+- Whole-system follow-up, 2026-10-19: the policy short-circuit did not resolve
+  the human's search timeout. Wider Atlas/schema tracing established that
+  `resolve_record_canonical_identity` already calls `ensure_canonical_vehicle`
+  for observation writes, and `canonical_vehicle_public` is the existing Tier-0
+  discovery surface. Aggregate live verification found 8,095 plated observations
+  and only 13 with no canonical identity/registry entry. Search now uses the
+  registry plus caller-RLS fallback only for legacy unlinked observations, with
+  a partial index on that subset. No new access engine, definer search, identity
+  promotion, Conductor routing, or Oracle permission decision is introduced.
+  Conductor owns Bob's dispatch/egress; Oracle describes truth state; neither
+  is the UI search's permission engine. The existing batch access resolver is
+  present but has no registered Atlas callers; it is not necessary for Tier-0
+  registry discovery. The previous all-authorised, cheap-helper performance
+  fixture missed the costly unrelated history. The replacement fixture has
+  8,100 linked records whose access helper raises if invoked, plus slow
+  allowed/denied legacy rows, and checks both human wildcard examples under
+  a two-second statement limit.
+  Owner approved application and protected publication. Management-API live
+  readback confirms security-invoker, authenticated-only execute, and the
+  partial index. An `authenticated`-role, **no user identity** EXPLAIN ANALYZE
+  uses that index and completes the legacy branch in 26.8 ms (24 total
+  unlinked rows, including rows without a usable plate). This proves the
+  narrowed plan, not the affected human's end-to-end request. Three isolated
+  PostgreSQL fixtures, 20 focused UI tests, four desktop/mobile browser cases,
+  TypeScript and production build pass. Atlas refreshed with no changed edges;
+  existing canonical writer/reader paths remain the actual implementation.
+- Live follow-up, 2026-10-19: the human's `RJ%9%8` search returned HTTP
+  500 at 22:53:58 and 22:56:25 UTC; PostgreSQL logged statement timeouts
+  about eight seconds later. The live caller-role plan evaluated task
+  entitlement before organisation custody while scanning observations.
+  Prior fixture matching checks did not cover that live policy cost.
+  `observations_task_entitlement_select` now uses CASE to skip task-basis
+  resolution only when an existing custody/client/Bob policy already grants
+  the same row. This preserves the permissive-policy union rather than
+  bypassing RLS or raising timeouts. Isolated PostgreSQL tests cover custody,
+  client, task-only, denied and NULL-organisation rows, Bob's existing grant,
+  and the actual search RPC over 8,000 observation fixtures under a two-second
+  statement timeout; the task helper raises if wrongly called on an existing
+  grant. Search errors now use the standard logged load-failure helper and
+  a specific retry/refinement message for PostgREST `57014` plain objects.
+  These checks do not impersonate a live user or establish live-user success.
+- Vehicle Search & Flags preserves `%` search patterns independently from
+  canonical plate normalisation. Plain fragments match anywhere. Multiple
+  matches require explicit identity selection before history or flags load;
+  discovery is capped at 50 visible results with a refinement notice.
+  `search_vehicle_registrations` is security-invoker: it combines the existing
+  public vehicle projection with caller-visible observation plates, so an
+  observation-only registration stays searchable without inventing an identity
+  or bypassing observation RLS.
+- Repeat subject review accepts a NULL agreement as all observations in the
+  R&M organisations the caller may administer, including unmapped observations.
+  A named agreement retains its accepted-agreement/place filter. The existing
+  R&M administrator guard, verified-person requirement, accepted-CCTV rule,
+  timestamp filters and pagination remain in force. No unrelated organisation
+  access or automatic identity/enforcement inference is introduced.
+- Both people and vehicles support a one-sighting threshold. Person summaries
+  follow the report's period selector. List, history, vehicle detail, identity
+  and comment-mention RPCs share the same scope resolver.
+- Atlas inspection proved the report calls its summary RPC, which reads
+  observations, CCTV, canonical vehicles and agreement places. The separate
+  RPC FK reach was empty, not evidence that those data flows are absent.
+  Isolated PostgreSQL fixtures cover mixed places, duplicate place mappings,
+  missing agreement mappings, tenant/role denial, accepted/rejected/future
+  sightings, both subject types and their drilldowns. Rendered UI and
+  desktop/mobile browser fixtures cover wildcard discovery, explicit selection
+  and all-scope report requests. These fixtures are not live-user evidence.
+
 Owner ruling 2026-10-18, self-heal repairs the app:
 
 - Evidence: jobs `3e8f7800` and `ea808101` failed with empty diffs. Their

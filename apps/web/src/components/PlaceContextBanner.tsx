@@ -41,7 +41,7 @@ export function PlaceContextBanner({ compact = false, organizationWide = false, 
 
   if (compact) return <div className="place-context-banner is-console" role="region" aria-label="Service place context">
     <MapPin size={14} aria-hidden="true" />
-    {organizationWide ? <span>Organisation-wide evidence workspace · not filtered by service place</span> : error ? <><span role="status">Service context unavailable</span><button type="button" onClick={() => void refetch()}>Retry</button></> : !loading && organizationId && organizationId !== loadedOrganizationId ? <span role="status">Service place context unavailable for this operating organisation</span> : <>
+    {organizationWide ? <span>Organisation-wide evidence workspace · not filtered by service place</span> : error ? <><span>Service context unavailable</span><button type="button" onClick={() => void refetch()}>Retry</button></> : !loading && organizationId && organizationId !== loadedOrganizationId ? <span>Service place context unavailable for this operating organisation</span> : <>
       <label><span className="sr-only">Service agreement</span><select aria-label="Service agreement" disabled={loading} value={selectedAgreement?.id ?? ''} onChange={(event) => selectAgreement(event.target.value || null)}>
         <option value="">{loading ? 'Loading service context…' : 'No agreement selected'}</option>
         {agreements.map((agreement) => <option key={agreement.id} value={agreement.id}>{agreement.name}</option>)}

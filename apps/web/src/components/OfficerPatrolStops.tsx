@@ -20,6 +20,8 @@ export interface PatrolStop {
   actual_arrived_at: string | null; actual_departed_at: string | null;
   arrival_verification: string | null; arrival_distance_m: number | null; officer_notes: string | null;
   module_key: string; modules?: StopModule[]; place: StopPlace;
+  actual_travel_distance_km?: number | null; travel_from_stop_id?: string | null;
+  travel_distance_method?: 'recorded_km' | 'odometer_difference' | null; travel_distance_version?: number;
 }
 interface StopsBundle { shift: { id: string; status: string; scheduled_start: string; scheduled_end: string; route_name: string | null }; stops: PatrolStop[] }
 interface StopReceipt { reference: string; action: 'arrive' | 'depart'; occurred_at: string; stop_status: string; sla_status: string; arrival_verification: string | null; dwell_minutes: number | null; dwell_short: boolean; completed_stops: number; total_stops: number; billing_review_required?: boolean }
@@ -59,6 +61,8 @@ export function OfficerPatrolStops({ shiftId }: { shiftId: string }) {
   const [delayReason, setDelayReason] = useState('');
   const pendingRequest = useRef<Record<string, string>>({});
   const [stopBriefing, setStopBriefing] = useState<{ stop: PatrolStop; briefing: SafetyBriefing } | null>(null);
+  const [travelDrafts, setTravelDrafts] = useState<Record<string, { distance: string; start: string; end: string; useOdometer: boolean }>>({});
+  const [travelReceipt, setTravelReceipt] = useState<{ distance_km: number; reference: string } | null>(null);
 
   const load = useCallback(async () => {
     setLoading(true); setError(null);
@@ -111,6 +115,35 @@ export function OfficerPatrolStops({ shiftId }: { shiftId: string }) {
 
   const depart = (event: FormEvent) => { event.preventDefault(); if (current) void act(current, 'depart'); };
 
+  const saveTravel = async (stop: PatrolStop, fromStop: PatrolStop) => {
+    const draft = travelDrafts[stop.id];
+    if (!draft) return;
+    const distance = draft.distance.trim() ? Number(draft.distance) : null;
+    const start = draft.start.trim() ? Number(draft.start) : null;
+    const end = draft.end.trim() ? Number(draft.end) : null;
+    if (draft.useOdometer ? start === null || end === null || !Number.isFinite(start) || !Number.isFinite(end) || start < 0 || end < start
+      : distance === null || !Number.isFinite(distance) || distance < 0) {
+      setError('Enter measured kilometres, or two odometer readings that do not decrease.'); return;
+    }
+    setSaving(true); setError(null); setTravelReceipt(null);
+    const key = `${stop.id}:travel`;
+    pendingRequest.current[key] ??= crypto.randomUUID();
+    try {
+      const { data, error: travelError } = await supabase.rpc('record_patrol_travel_distance', {
+        p_request_id: pendingRequest.current[key], p_from_stop_id: fromStop.id, p_to_stop_id: stop.id,
+        p_distance_km: draft.useOdometer ? null : distance,
+        p_odometer_start_km: draft.useOdometer ? start : null, p_odometer_end_km: draft.useOdometer ? end : null,
+        p_expected_version: stop.travel_distance_version ?? 0,
+      });
+      if (travelError || !data) throw travelError ?? new Error('Travel distance was not confirmed.');
+      delete pendingRequest.current[key];
+      setTravelReceipt(data as { distance_km: number; reference: string });
+      await load();
+    } catch (failure) {
+      setError((failure as { message?: string })?.message ?? 'Travel distance could not be saved. Refresh before retrying.');
+    } finally { setSaving(false); }
+  };
+
   if (loading && !bundle) return <section className="patrol-stops" aria-label="Contracted stops"><p className="patrol-stops-subtle"><RefreshCw size={14} className="is-spinning" /> Loading your contracted stops…</p></section>;
   if (!bundle) return null;
 
@@ -126,6 +159,7 @@ export function OfficerPatrolStops({ shiftId }: { shiftId: string }) {
 
       {stopBriefing && <SafetyBriefingDialog briefing={stopBriefing.briefing} title={`Risks at ${stopBriefing.stop.place.name}`} acknowledgeLabel="I've read these risks - record arrival" onClose={() => setStopBriefing(null)} onAcknowledged={async () => { const stop = stopBriefing.stop; setStopBriefing(null); await act(stop, 'arrive'); }} onReload={async () => { const next = await fetchShiftSafetyBriefing(shiftId, stopBriefing.stop.id); setStopBriefing({ stop: stopBriefing.stop, briefing: next }); return next; }} />}
       {error && <div className="patrol-stops-message is-error" role="alert"><AlertTriangle size={16} />{error}</div>}
+      {travelReceipt && <div className="patrol-stops-message is-success" role="status"><CheckCircle2 size={16} /><span>{travelReceipt.distance_km} km travel recorded · receipt {travelReceipt.reference}</span></div>}
       {receipt && (
         <div className="patrol-stops-message is-success" role="status">
           <CheckCircle2 size={16} />
@@ -145,6 +179,11 @@ export function OfficerPatrolStops({ shiftId }: { shiftId: string }) {
           {stops.map((stop, index) => {
             const isCurrent = current?.id === stop.id;
             const state = stop.status === 'completed' ? 'done' : stop.status === 'skipped' || stop.status === 'cancelled' ? 'off' : isCurrent ? 'current' : 'later';
+            const fromStop = stop.actual_arrived_at ? stops.filter((candidate) => candidate.id !== stop.id && candidate.status === 'completed' && candidate.actual_departed_at
+              && new Date(candidate.actual_departed_at).getTime() <= new Date(stop.actual_arrived_at!).getTime())
+              .sort((left, right) => new Date(right.actual_departed_at!).getTime() - new Date(left.actual_departed_at!).getTime())[0] : null;
+            const travelDraft = travelDrafts[stop.id] ?? { distance: '', start: '', end: '', useOdometer: false };
+            const editTravel = (patch: Partial<typeof travelDraft>) => setTravelDrafts((drafts) => ({ ...drafts, [stop.id]: { ...travelDraft, ...patch } }));
             return (
               <li key={stop.id} className={`patrol-stop is-${state} ${stop.sla_status === 'breached' ? 'is-late' : ''}`} aria-current={isCurrent ? 'step' : undefined}>
                 {/* stop_order is a generator sort key (order × 10 + visit); officers get a plain 1..N. */}
@@ -165,6 +204,18 @@ export function OfficerPatrolStops({ shiftId }: { shiftId: string }) {
                     </div>
                   )}
                   {stop.status === 'completed' && stop.officer_notes && <p className="patrol-stop-notes">Your notes: {stop.officer_notes}</p>}
+                  {fromStop && (stop.status === 'on_scene' || stop.status === 'completed') && <details className="patrol-stop-notes">
+                    <summary>{stop.actual_travel_distance_km == null ? `Record travel from ${fromStop.place.name}` : `${stop.actual_travel_distance_km} km recorded travel`}</summary>
+                    <form className="patrol-stop-depart" onSubmit={(event) => { event.preventDefault(); void saveTravel(stop, fromStop); }}>
+                      <strong>{fromStop.place.name} to {stop.place.name}</strong>
+                      <label><span><input type="checkbox" checked={travelDraft.useOdometer} disabled={saving} onChange={(event) => editTravel({ useOdometer: event.target.checked })} />Use odometer readings</span></label>
+                      {travelDraft.useOdometer ? <>
+                        <label><span>Odometer at departure (km)</span><input type="number" min="0" step="0.001" required value={travelDraft.start} disabled={saving} onChange={(event) => editTravel({ start: event.target.value })} /></label>
+                        <label><span>Odometer at arrival (km)</span><input type="number" min="0" step="0.001" required value={travelDraft.end} disabled={saving} onChange={(event) => editTravel({ end: event.target.value })} /></label>
+                      </> : <label><span>Kilometres travelled</span><input type="number" min="0" max="1000000" step="0.001" required value={travelDraft.distance} disabled={saving} onChange={(event) => editTravel({ distance: event.target.value })} /></label>}
+                      <button type="submit" className="btn btn-secondary" disabled={saving}><CheckCircle2 size={16} aria-hidden="true" />{saving ? 'Recording...' : 'Record travel'}</button>
+                    </form>
+                  </details>}
                   {isCurrent && (stop.status === 'pending' || stop.status === 'en_route') && (
                     <button type="button" className="btn btn-primary patrol-stop-action" onClick={() => void act(stop, 'arrive')} disabled={saving}><MapPin size={16} aria-hidden="true" /> {saving ? 'Recording…' : `Arrived at ${stop.place.name}`}</button>
                   )}

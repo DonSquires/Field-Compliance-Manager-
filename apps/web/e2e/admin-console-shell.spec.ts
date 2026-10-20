@@ -35,7 +35,7 @@ test('admin console bounds the canvas and keeps grouped destinations accessible'
   expect(dimensions.place).toBe(mobile ? 44 : 36);
   if (mobile) {
     const destination = page.getByRole('combobox', { name: 'Workspace destination' });
-    expect(await destination.locator('optgroup').evaluateAll((groups) => groups.map((group) => group.label))).toEqual(['Live Ops', 'Evidence & Reports', 'Site & Spatial Setup']);
+    expect(await destination.locator('optgroup').evaluateAll((groups) => groups.map((group) => (group as HTMLOptGroupElement).label))).toEqual(['Live Ops', 'Evidence & Reports', 'Site & Spatial Setup']);
     await destination.selectOption('field-ops:dispatch');
     await expect(page).toHaveURL(/area=dispatch/);
   } else {

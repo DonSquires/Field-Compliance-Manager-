@@ -84,7 +84,7 @@ export const CCTVPlayerTile = React.forwardRef<CCTVPlayerTileHandle, CCTVPlayerT
   const pinned = Boolean(pinnedClip);
   const targetClip = pinnedClip ?? clipAtTime(clips, clockMs);
   const mediaIsPhoto = targetClip?.mediaKind === 'photo';
-  const enhanceRequested = Boolean(!mediaIsPhoto && inspection && inspection.enhance !== 'off' && (inspection.enhance === 'on' || inspection.zoom > 1));
+  const enhanceRequested = Boolean(inspection && inspection.enhance !== 'off' && (inspection.enhance === 'on' || inspection.zoom > 1));
   const gpuActive = enhanceRequested && !gpuUnavailable;
   const effectivePlaying = playing;
   const videoPlaying = effectivePlaying && !mediaIsPhoto;
@@ -256,36 +256,41 @@ export const CCTVPlayerTile = React.forwardRef<CCTVPlayerTileHandle, CCTVPlayerT
   }, [clip?.evidenceId]);
 
   const renderEnhanced = useCallback(() => {
-    const video = videoRef.current;
+    // Photos and videos share one pipeline; only the element and its intrinsic size differ.
+    const video: HTMLVideoElement | HTMLImageElement | null = mediaIsPhoto ? imageRef.current : videoRef.current;
     const canvas = canvasRef.current;
     const renderer = rendererRef.current;
-    if (!video || !canvas || !inspection || video.readyState < 2 || !video.videoWidth) return;
+    if (!video || !canvas || !inspection) return;
+    const sourceWidth = video instanceof HTMLImageElement ? video.naturalWidth : video.videoWidth;
+    const sourceHeight = video instanceof HTMLImageElement ? video.naturalHeight : video.videoHeight;
+    const ready = video instanceof HTMLImageElement ? video.complete : video.readyState >= 2;
+    if (!ready || !sourceWidth || !sourceHeight) return;
     const zoomState = { zoom: inspection.zoom, focusX: inspection.focusX, focusY: inspection.focusY };
     const roi = roiFor(zoomState.zoom, zoomState.focusX, zoomState.focusY);
     const now = performance.now();
     if (now - lastAnalysisRef.current >= ANALYSIS_INTERVAL_MS) {
       lastAnalysisRef.current = now;
       const sampler = analysisCanvasRef.current ?? (analysisCanvasRef.current = document.createElement('canvas'));
-      const sampleHeight = Math.max(8, Math.round(ANALYSIS_WIDTH * (video.videoHeight / video.videoWidth)));
+      const sampleHeight = Math.max(8, Math.round(ANALYSIS_WIDTH * (sourceHeight / sourceWidth)));
       sampler.width = ANALYSIS_WIDTH;
       sampler.height = sampleHeight;
       const context = sampler.getContext('2d', { willReadFrequently: true });
       if (context) {
         try {
           // Noise floor from a 1:1 patch at the centre of the visible region; the exposure sample is downscaled.
-          const patch = Math.min(NOISE_PATCH, Math.floor(roi.width * video.videoWidth), Math.floor(roi.height * video.videoHeight));
+          const patch = Math.min(NOISE_PATCH, Math.floor(roi.width * sourceWidth), Math.floor(roi.height * sourceHeight));
           let noiseFloor: number | null = null;
           if (patch >= 16) {
             sampler.width = patch;
             sampler.height = patch;
-            const patchX = (roi.x + roi.width / 2) * video.videoWidth - patch / 2;
-            const patchY = (roi.y + roi.height / 2) * video.videoHeight - patch / 2;
+            const patchX = (roi.x + roi.width / 2) * sourceWidth - patch / 2;
+            const patchY = (roi.y + roi.height / 2) * sourceHeight - patch / 2;
             context.drawImage(video, patchX, patchY, patch, patch, 0, 0, patch, patch);
             noiseFloor = estimateNoiseFloor(context.getImageData(0, 0, patch, patch).data, patch, patch);
             sampler.width = ANALYSIS_WIDTH;
             sampler.height = sampleHeight;
           }
-          context.drawImage(video, roi.x * video.videoWidth, roi.y * video.videoHeight, roi.width * video.videoWidth, roi.height * video.videoHeight, 0, 0, ANALYSIS_WIDTH, sampleHeight);
+          context.drawImage(video, roi.x * sourceWidth, roi.y * sourceHeight, roi.width * sourceWidth, roi.height * sourceHeight, 0, 0, ANALYSIS_WIDTH, sampleHeight);
           const stats = analyseFramePixels(context.getImageData(0, 0, ANALYSIS_WIDTH, sampleHeight).data, ANALYSIS_WIDTH, sampleHeight, noiseFloor);
           planRef.current = planEnhancement(stats, { zoom: zoomState.zoom, previous: planRef.current, smoothing: planRef.current ? PLAN_SMOOTHING : 1 });
         } catch {
@@ -302,14 +307,24 @@ export const CCTVPlayerTile = React.forwardRef<CCTVPlayerTileHandle, CCTVPlayerT
     const width = Math.max(1, Math.round(canvas.clientWidth * pixelRatio));
     const height = Math.max(1, Math.round(canvas.clientHeight * pixelRatio));
     if (canvas.width !== width || canvas.height !== height) { canvas.width = width; canvas.height = height; }
-    const ok = renderer.render(video, { plan, manual, roi, sourceWidth: video.videoWidth, sourceHeight: video.videoHeight });
+    const ok = renderer.render(video, { plan, manual, roi, sourceWidth: sourceWidth, sourceHeight: sourceHeight });
     if (!ok) setGpuUnavailable(renderer.isLost() ? 'The graphics context was lost; showing basic adjustments instead.' : 'This clip cannot be read for enhancement in the browser; showing basic adjustments instead.');
-  }, [inspection, gpuUnavailable, onEnhancementPlan]);
+  }, [inspection, gpuUnavailable, onEnhancementPlan, mediaIsPhoto]);
 
   // Frame loop: every decoded frame while playing, one render per change while paused.
   useEffect(() => {
+    if (!src || !enhanceRequested) { setCssFilter(null); return; }
+    if (mediaIsPhoto) {
+      const image = imageRef.current;
+      if (!image) return;
+      let cancelled = false;
+      const draw = () => { if (!cancelled) renderEnhanced(); };
+      image.addEventListener('load', draw);
+      const handle = requestAnimationFrame(draw);
+      return () => { cancelled = true; image.removeEventListener('load', draw); cancelAnimationFrame(handle); };
+    }
     const video = videoRef.current as VideoFrameCapable | null;
-    if (!video || !src || !enhanceRequested) { setCssFilter(null); return; }
+    if (!video) { setCssFilter(null); return; }
     let cancelled = false;
     let handle: number | null = null;
     let initialHandle: number | null = null;
@@ -337,7 +352,7 @@ export const CCTVPlayerTile = React.forwardRef<CCTVPlayerTileHandle, CCTVPlayerT
         else cancelAnimationFrame(handle);
       }
     };
-  }, [src, enhanceRequested, playing, renderEnhanced, clockMs]);
+  }, [src, enhanceRequested, playing, renderEnhanced, clockMs, mediaIsPhoto]);
 
   useEffect(() => { setGpuUnavailable(null); }, [clip?.evidenceId]);
 

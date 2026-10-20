@@ -241,6 +241,14 @@ describe('CCTV console', () => {
     expect(styles).toContain('.cctv-tile__body.is-enhanced .cctv-tile__video { visibility: hidden; }');
   });
 
+  it('enhances evidence photos through the same pipeline as video', () => {
+    expect(tile).toContain('const enhanceRequested = Boolean(inspection &&');
+    expect(tile).not.toContain('!mediaIsPhoto && inspection');
+    expect(tile).toContain('mediaIsPhoto ? imageRef.current : videoRef.current');
+    expect(tile).toContain('video instanceof HTMLImageElement ? video.naturalWidth : video.videoWidth');
+    expect(tile).toContain("image.addEventListener('load', draw)");
+  });
+
   it('draws a severity timeline with reviewed entities dimmed and clustered marks', () => {
     expect(timeline).toContain('clusterMarks(marks, view, width)');
     expect(timeline).toContain('SEVERITY_COLOURS[cluster.severity]');

@@ -54,7 +54,7 @@ export function buildCanonicalScvKey(plate: string): string {
 
 /**
  * PostgREST `.or()` filter matching rows that carry the canonical vehicle link
- * or whose stored plate text normalizes to the same identity. Callers pass the
+ * or whose stored plate text matches case-insensitively. Callers pass the
  * resolved canonical id when one exists so history follows the vehicle even
  * when the recorded plate text varies.
  */
@@ -63,7 +63,7 @@ export function vehicleHistoryOrFilter(plate: string, canonicalVehicleId?: strin
   if (!safePlate) {
     throw new Error('A vehicle plate is required');
   }
-  const clauses = [`plate_number.ilike.${safePlate}`];
+  const clauses = [`plate_number_upper.eq.${safePlate}`];
   if (canonicalVehicleId) clauses.unshift(`canonical_vehicle_id.eq.${canonicalVehicleId}`);
   return clauses.join(',');
 }

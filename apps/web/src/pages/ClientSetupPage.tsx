@@ -1,5 +1,16 @@
-import React, { useCallback, useEffect, useRef, useState } from 'react';
+/**
+ * Set up a new client — five plain steps over the existing spine, nothing invented:
+ *   1 Who is the client?      organizations + crm_contacts     (manage_crm_organization, manage_crm_contact)
+ *   2 Where do we work?       client_sites                      (create_crm_site, LINZ address candidates)
+ *   3 What do we do there?    service_agreements + modules + delivery schedules + patrol configs
+ *                             (ensure_crm_client_agreement, manage_crm_agreement_delivery_schedule, manage_crm_agreement_setup)
+ *   4 Who logs in for them?   invitation                        (prepare_crm_client_invitation, invite-org) — optional
+ *   5 Done                    patrol run + work unit, and the next thing to do (roster it).
+ * Resumable: ?account=<id> reopens a client that is part-way through.
+ */
+import React, { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { useLocation, useNavigate } from 'react-router-dom';
+import { AlertTriangle, ArrowRight, Building2, CheckCircle2, ClipboardList, MapPin, Search, Send, Shield, UserRound } from 'lucide-react';
 import { useAuth } from '../context/AuthContext';
 import { LocationHouseMap } from '../components/LocationHouseMap';
 import { resolveAddressCandidates, type AddressCandidate } from '../lib/locationAddress';
@@ -8,390 +19,454 @@ import { supabase } from '../lib/supabase';
 import type { NavigateWithContext } from '../lib/workflowNavigation';
 import './ClientSetupPage.css';
 
+type Step = 1 | 2 | 3 | 4 | 5;
+interface ClientRecord { id: string; name: string; contact_email: string | null; contact_phone: string | null; status: string | null }
+interface PlaceRecord { id: string; name: string; address: string | null; site_type: string | null }
+interface ResumePlace extends PlaceRecord { gps_lat: number | null; gps_lng: number | null; boundary: GeoJSON.Geometry | null; boundary_verification: string }
+interface SavedService { schedule_id: string | null; place_id: string; module_key: string; words: string; attendance_mode?: 'as_attended'; patrol_route_id?: string }
+interface ExistingMatch { id: string; name: string; status: string | null }
+
+/** The services a provider can be contracted for, in the words a branch manager uses. Keys are module_catalog keys. */
 export const SERVICE_CHOICES: Array<{ key: string; label: string; help: string; kind: 'visits' | 'post' | 'response' }> = [
-  { key: 'patrol', label: 'Patrol visits', help: 'Visit and check the place.', kind: 'visits' },
-  { key: 'static_guarding', label: 'Guard on post', help: 'Configure coverage in the agreement workspace.', kind: 'post' },
-  { key: 'dispatch', label: 'Alarm response', help: 'Attend an alarm or call.', kind: 'response' },
-  { key: 'parking_enforcement', label: 'Parking enforcement', help: 'Check vehicles and issue notices.', kind: 'visits' },
-  { key: 'noise_control', label: 'Noise control', help: 'Assess noise complaints.', kind: 'visits' },
-  { key: 'freedom_camping', label: 'Freedom camping', help: 'Patrol camping areas.', kind: 'visits' },
-  { key: 'biosecurity', label: 'Biosecurity checks', help: 'Inspect for pests and breaches.', kind: 'visits' },
-  { key: 'smoke_complaints', label: 'Smoke complaints', help: 'Assess smoke nuisance.', kind: 'visits' },
-  { key: 'access_control', label: 'Access control', help: 'Open, close and control entry.', kind: 'visits' },
+  { key: 'patrol', label: 'Patrol visits', help: 'An officer visits, checks the place, and moves on.', kind: 'visits' },
+  { key: 'static_guarding', label: 'Guard on post', help: 'An officer stays at the place for the whole shift.', kind: 'post' },
+  { key: 'dispatch', label: 'Alarm response', help: 'We attend when an alarm or a call comes in.', kind: 'response' },
+  { key: 'parking_enforcement', label: 'Parking enforcement', help: 'Officers check vehicles and issue notices.', kind: 'visits' },
+  { key: 'noise_control', label: 'Noise control', help: 'Officers assess noise complaints on site.', kind: 'visits' },
+  { key: 'freedom_camping', label: 'Freedom camping', help: 'Officers patrol camping areas and record breaches.', kind: 'visits' },
+  { key: 'biosecurity', label: 'Biosecurity checks', help: 'Officers inspect for pests and breaches.', kind: 'visits' },
+  { key: 'smoke_complaints', label: 'Smoke complaints', help: 'Officers assess smoke nuisance reports.', kind: 'visits' },
+  { key: 'access_control', label: 'Access control', help: 'Officers open, close and control entry to the place.', kind: 'visits' },
 ];
-export const PLACE_TYPES = [
-  { key: 'commercial_premises', label: 'Shop, office or premises' }, { key: 'car_park', label: 'Car park' },
-  { key: 'reserve', label: 'Park or reserve' }, { key: 'street', label: 'Street or public area' },
-  { key: 'residential', label: 'Home or residential block' }, { key: 'industrial', label: 'Yard or industrial site' },
+export const PLACE_TYPES: Array<{ key: string; label: string }> = [
+  { key: 'commercial_premises', label: 'Shop, office or premises' },
+  { key: 'car_park', label: 'Car park' },
+  { key: 'reserve', label: 'Park or reserve' },
+  { key: 'street', label: 'Street or public area' },
+  { key: 'residential', label: 'Home or residential block' },
+  { key: 'industrial', label: 'Yard or industrial site' },
 ];
-interface ScheduleForm { days: number[]; anyTime: boolean; start: string; end: string; visits: string; gap: string; stay: string; slaMinutes: string; notes: string }
-const defaultSchedule = (): ScheduleForm => ({ days: [1, 2, 3, 4, 5, 6, 7], anyTime: true, start: '', end: '', visits: '1', gap: '60', stay: '10', slaMinutes: '', notes: '' });
-export const serviceWords = (label: string, kind: 'visits' | 'post' | 'response', form: Pick<ScheduleForm, 'days' | 'anyTime' | 'start' | 'end' | 'visits' | 'stay' | 'slaMinutes'>): string => {
+/** How each address-candidate `kind` reads next to its label, so a person can tell two similarly-named results apart. */
+const KIND_LABEL: Record<string, string> = { address: 'Address', business: 'Business or place', reserve: 'Council reserve (boundary known)' };
+const DAY_PRESETS: Array<{ key: string; label: string; days: number[] }> = [
+  { key: 'every', label: 'Every day', days: [1, 2, 3, 4, 5, 6, 7] },
+  { key: 'weekdays', label: 'Weekdays', days: [1, 2, 3, 4, 5] },
+  { key: 'weekends', label: 'Weekends', days: [6, 7] },
+  { key: 'pick', label: 'Pick days', days: [] },
+];
+const DAY_SHORT = ['', 'Mon', 'Tue', 'Wed', 'Thu', 'Fri', 'Sat', 'Sun'];
+
+interface ScheduleForm { preset: string; days: number[]; anyTime: boolean; start: string; end: string; visits: string; gap: string; stay: string; slaMinutes: string; notes: string; attendanceMode: 'scheduled' | 'as_attended'; patrolRouteId: string }
+const defaultSchedule = (): ScheduleForm => ({ preset: 'every', days: [1, 2, 3, 4, 5, 6, 7], anyTime: true, start: '', end: '', visits: '1', gap: '60', stay: '10', slaMinutes: '30', notes: '', attendanceMode: 'scheduled', patrolRouteId: '' });
+
+/** One sentence a manager can read back to the client: 'Patrol visits · every day · any time of day (24-hour) · 2 visits a shift, 10 min each'. */
+export const serviceWords = (label: string, kind: 'visits' | 'post' | 'response', form: Pick<ScheduleForm, 'days' | 'anyTime' | 'start' | 'end' | 'visits' | 'stay' | 'slaMinutes'> & Partial<Pick<ScheduleForm, 'attendanceMode'>>): string => {
   if (kind === 'post') return `${label} · a guard stays for the shift`;
   if (kind === 'response') return `${label} · on scene within ${form.slaMinutes || '30'} min of the call`;
+  if (label === 'Patrol visits' && form.attendanceMode === 'as_attended') return `${label} · As attended`;
   const visits = Number(form.visits) || 1;
   return `${label} · ${contractedDaysWords(form.days)} · ${form.anyTime ? contractedHoursWords(null, null) : contractedHoursWords(form.start, form.end)} · ${visits} visit${visits === 1 ? '' : 's'} a shift, ${form.stay || '10'} min each`;
 };
-interface Client { id: string; name: string; contact_email: string | null; contact_phone: string | null }
-interface Place { id: string; name: string; address: string | null; site_type: string | null; gps_lat: number | null; gps_lng: number | null; boundary: GeoJSON.Geometry | null; boundary_verification: string }
-interface Rate { id: string; updated_at: string; amount: number; rate_type: string; site_id: string; service_type: string; name: string }
-interface Delivery { id: string; site_id: string; module_key: string; active_days: number[]; window_start: string | null; window_end: string | null; visits_per_shift: number; min_gap_between_visits_minutes: number; dwell_minutes: number; officer_instructions: string | null; response_sla_minutes: number | null }
-const RATE_UNITS = ['per_visit', 'hourly', 'callout', 'flat', 'daily', 'per_notice'];
-const simpleRate = (rate: Record<string, unknown>) => !['job_type', 'day_category', 'effective_from', 'effective_to', 'module_key', 'role_code', 'region_code', 'job_code', 'vehicle_type', 'distance_min_km', 'distance_max_km', 'outside_area', 'zone_id', 'pay_code', 'gl_account'].some((field) => rate[field] != null) && rate.priority === 0 && RATE_UNITS.includes(String(rate.rate_type));
-interface Row { key: string; module: string; enabled: boolean; scheduleId: string | null; form: ScheduleForm; amount: string; unit: string; rate: Rate | null; rateBlocked: boolean; dirty: boolean; scheduleDone: boolean; rateDone: boolean; requestId: string; rateRequestId: string; receipt: string }
-const moduleKey = (key: string) => key === 'general_patrol' ? 'patrol' : key === 'alarm_response' ? 'dispatch' : key;
-const newRow = (module: string): Row => ({ key: crypto.randomUUID(), module, enabled: false, scheduleId: null, form: defaultSchedule(), amount: '', unit: 'per_visit', rate: null, rateBlocked: false, dirty: false, scheduleDone: false, rateDone: false, requestId: crypto.randomUUID(), rateRequestId: crypto.randomUUID(), receipt: '' });
-const failureMessage = (failure: unknown) => failure instanceof Error ? failure.message : (failure as { message?: string })?.message ?? 'The request failed. Check permissions and retry.';
 
-const ClientSetupPage: React.FC<{ onNavigate?: NavigateWithContext; accountId?: string; providerOrganizationId?: string; embedded?: boolean; onDirtyChange?: (dirty: boolean) => void; onOpenCoverage?: () => void }> = ({ onNavigate = () => undefined, accountId, providerOrganizationId, embedded = false, onDirtyChange, onOpenCoverage }) => {
+type ClientSetupProps = {
+  onNavigate?: NavigateWithContext;
+  accountId?: string;
+  providerOrganizationId?: string;
+  embedded?: boolean;
+  onDirtyChange?: (dirty: boolean) => void;
+  onOpenCoverage?: () => void;
+};
+
+const ClientSetupPage: React.FC<ClientSetupProps> = ({ onNavigate = () => undefined, accountId, providerOrganizationId }) => {
   const { profile, operatingOrganizationId } = useAuth();
-  const branchId = providerOrganizationId ?? operatingOrganizationId ?? profile?.organizationId ?? null;
-  const canEdit = Boolean(branchId && profile && ['admin', 'master', 'grand_master'].includes(profile.role));
   const location = useLocation();
   const navigate = useNavigate();
-  const [client, setClient] = useState<Client | null>(null);
-  const [clientForm, setClientForm] = useState({ name: '', firstName: '', lastName: '', email: '', phone: '' });
-  const [contactSaved, setContactSaved] = useState(false);
-  const [matches, setMatches] = useState<Client[]>([]);
-  const [places, setPlaces] = useState<Place[]>([]);
-  const [selected, setSelected] = useState('');
-  const [agreementId, setAgreementId] = useState<string | null>(null);
-  const [drafts, setDrafts] = useState<Record<string, Row[]>>({});
-  const [catalog, setCatalog] = useState<string[]>([]);
-  const [loading, setLoading] = useState(false);
-  const [busy, setBusy] = useState(false);
+  const branchId = providerOrganizationId ?? operatingOrganizationId ?? profile?.organizationId ?? null;
+  const selectedAccountId = accountId ?? new URLSearchParams(location.search).get('account');
+  const [step, setStep] = useState<Step>(1);
+  const [busy, setBusy] = useState<string | null>(null);
   const [error, setError] = useState<string | null>(null);
   const [notice, setNotice] = useState<string | null>(null);
-  const [drawer, setDrawer] = useState<'organization' | 'location' | 'spatial' | 'invite' | 'bob' | null>(null);
-  const [mobilePane, setMobilePane] = useState<'locations' | 'detail'>('locations');
-  const [placeForm, setPlaceForm] = useState({ name: '', address: '', type: 'commercial_premises' });
-  const [candidates, setCandidates] = useState<AddressCandidate[]>([]);
-  const [chosenAddress, setChosenAddress] = useState<AddressCandidate | null>(null);
-  const [inviteEmail, setInviteEmail] = useState<string | null>(null);
-  const [workUnitId, setWorkUnitId] = useState<string | null>(null);
-  const [inlineExpanded, setInlineExpanded] = useState(false);
-  const [inlineServices, setInlineServices] = useState<Record<string, string>>({});
+
+  // Step 1
+  const [client, setClient] = useState<ClientRecord | null>(null);
+  const [clientForm, setClientForm] = useState({ name: '', firstName: '', lastName: '', email: '', phone: '' });
+  const [matches, setMatches] = useState<ExistingMatch[]>([]);
+  const [contactSaved, setContactSaved] = useState(false);
   const clientRequest = useRef(crypto.randomUUID());
   const contactRequest = useRef(crypto.randomUUID());
+  // Step 2
+  const [places, setPlaces] = useState<PlaceRecord[]>([]);
+  const [placeForm, setPlaceForm] = useState({ name: '', address: '', type: 'commercial_premises' });
+  const [addressCandidates, setAddressCandidates] = useState<AddressCandidate[]>([]);
+  const [chosenAddress, setChosenAddress] = useState<AddressCandidate | null>(null);
+  const [justAddedPlace, setJustAddedPlace] = useState<{ id: string; name: string; address: string | null; lat: number; lng: number; boundary: GeoJSON.Geometry | null; boundaryVerification: string; boundaryLabel: string | null } | null>(null);
   const placeRequest = useRef(crypto.randomUUID());
-  const routeRequest = useRef(crypto.randomUUID());
-  const loadKey = useRef('');
-  const loadVersion = useRef(0);
-  const drawerRef = useRef<HTMLElement>(null);
-  const selectedPlace = places.find((place) => place.id === selected);
-  const rows = drafts[selected] ?? [];
-  const dirtyCount = Object.values(drafts).flat().filter((row) => row.dirty).length;
-  useEffect(() => { onDirtyChange?.(dirtyCount > 0); }, [dirtyCount, onDirtyChange]);
-  const run = async (work: () => Promise<void>) => {
-    setBusy(true); setError(null); setNotice(null);
-    try { await work(); } catch (failure) { setError(failureMessage(failure)); } finally { setBusy(false); }
-  };
-  const leave = (page: Parameters<NavigateWithContext>[0]) => {
-    if (dirtyCount && !window.confirm('Unsaved location drafts will be lost. Leave this workspace?')) return;
-    if (embedded && page === 'crm' && onOpenCoverage) onOpenCoverage();
-    else onNavigate(page, { accountId: client?.id });
-  };
+  // Step 3
+  const [agreementId, setAgreementId] = useState<string | null>(null);
+  const [servicePlaceId, setServicePlaceId] = useState<string>('');
+  const [serviceKey, setServiceKey] = useState<string>('patrol');
+  const [scheduleForm, setScheduleForm] = useState<ScheduleForm>(defaultSchedule());
+  const [services, setServices] = useState<SavedService[]>([]);
+  const [patrolRoutes, setPatrolRoutes] = useState<Array<{ id: string; name: string }>>([]);
+  const [patrolRoutesLoading, setPatrolRoutesLoading] = useState(false);
+  const [patrolRoutesError, setPatrolRoutesError] = useState<string | null>(null);
+  const serviceRequest = useRef(crypto.randomUUID());
+  // Step 4
+  const [inviteState, setInviteState] = useState<'not_sent' | 'sent' | 'skipped'>('not_sent');
+  const [inviteEmail, setInviteEmail] = useState<string | null>(null);
+  // Step 5
+  const [runResult, setRunResult] = useState<{ routeId: string | null; workUnitId: string | null; words: string } | null>(null);
+
+  const chosenService = useMemo(() => SERVICE_CHOICES.find((choice) => choice.key === serviceKey) ?? SERVICE_CHOICES[0], [serviceKey]);
+  const servicePlace = useMemo(() => places.find((place) => place.id === servicePlaceId) ?? places[0] ?? null, [places, servicePlaceId]);
+  const asAttended = chosenService.key === 'patrol' && scheduleForm.attendanceMode === 'as_attended';
+
   useEffect(() => {
-    if (!dirtyCount) return;
-    const guard = (event: BeforeUnloadEvent) => { event.preventDefault(); event.returnValue = ''; };
-    window.addEventListener('beforeunload', guard);
-    return () => window.removeEventListener('beforeunload', guard);
-  }, [dirtyCount]);
-  useEffect(() => {
-    if (!drawer) return;
-    const previous = document.activeElement as HTMLElement | null;
-    const trap = (event: KeyboardEvent) => {
-      if (event.key !== 'Tab') return;
-      const focusable = drawerRef.current?.querySelectorAll<HTMLElement>('button:not(:disabled), input:not(:disabled), select:not(:disabled), textarea:not(:disabled), a[href]');
-      if (!focusable?.length) return;
-      const first = focusable[0]; const last = focusable[focusable.length - 1];
-      if (event.shiftKey && document.activeElement === first) { event.preventDefault(); last.focus(); }
-      if (!event.shiftKey && document.activeElement === last) { event.preventDefault(); first.focus(); }
-    };
-    document.addEventListener('keydown', trap);
-    return () => { document.removeEventListener('keydown', trap); previous?.focus(); };
-  }, [drawer]);
-  const loadClient = useCallback(async (id: string) => {
-    const version = ++loadVersion.current;
-    setLoading(true); setError(null);
-    setClient(null); setPlaces([]); setDrafts({}); setSelected(''); setAgreementId(null); setWorkUnitId(null); setInviteEmail(null);
-    try {
-      const org = await supabase.from('organizations').select('id,name,contact_email,contact_phone').eq('id', id).single();
-      if (org.error || !org.data) throw org.error ?? new Error('Client not found or not accessible.');
-      const [sites, agreements, contacts] = await Promise.all([
-        supabase.from('client_sites').select('id,name,address,site_type,gps_lat,gps_lng,boundary,boundary_verification').eq('client_organization_id', id).eq('active', true).order('created_at'),
-        supabase.from('service_agreements').select('id,ends_on').eq('client_organization_id', id).eq('provider_organization_id', branchId).eq('agreement_type', 'operational').in('invitation_status', ['not_invited', 'invited', 'accepted']),
-        supabase.from('crm_contacts').select('id').eq('organization_id', id).eq('is_primary', true).is('deactivated_at', null).limit(1),
-      ]);
-      if (sites.error || agreements.error || contacts.error) throw sites.error ?? agreements.error ?? contacts.error;
-      const active = (agreements.data ?? []).filter((agreement) => !agreement.ends_on || agreement.ends_on >= new Date().toISOString().slice(0, 10));
-      if (active.length > 1) throw new Error('More than one live agreement exists for this provider. Choose the agreement in the client workspace before editing delivery.');
-      const agreement = active[0]?.id ?? null;
-      const [schedules, rates] = await Promise.all([
-        agreement ? supabase.from('service_agreement_delivery_schedules').select('id,site_id,module_key,active_days,window_start,window_end,visits_per_shift,min_gap_between_visits_minutes,dwell_minutes,officer_instructions,response_sla_minutes').eq('service_agreement_id', agreement).eq('active', true) : Promise.resolve({ data: [], error: null }),
-        supabase.from('rate_rules').select('id,updated_at,amount,rate_type,site_id,service_type,name,job_type,day_category,effective_from,effective_to,priority,module_key,role_code,region_code,job_code,vehicle_type,distance_min_km,distance_max_km,outside_area,zone_id,pay_code,gl_account').eq('organization_id', branchId).eq('client_org_id', id).eq('rule_kind', 'billing').eq('active', true),
-      ]);
-      if (schedules.error || rates.error) throw schedules.error ?? rates.error;
-      const next: Record<string, Row[]> = {};
-      for (const site of (sites.data ?? []) as Place[]) {
-        next[site.id] = ((schedules.data ?? []) as Delivery[]).filter((schedule) => schedule.site_id === site.id).map((schedule) => {
-          const module = moduleKey(schedule.module_key);
-          // Only a simple, exact site/service rule is editable here. Qualified or shared rates stay in Finance.
-          const scoped = (rates.data ?? []).filter((rate) => rate.site_id === site.id && rate.service_type === module);
-          const exact = scoped.filter(simpleRate);
-          const rate = exact.length === 1 ? exact[0] as Rate : null;
-          return { ...newRow(module), enabled: true, scheduleId: schedule.id, rate, rateBlocked: scoped.length > 0 && (scoped.length !== 1 || !rate), amount: rate ? String(rate.amount) : '', unit: rate?.rate_type ?? 'per_visit', form: { ...defaultSchedule(), days: schedule.active_days, anyTime: !schedule.window_start, start: schedule.window_start?.slice(0, 5) ?? '', end: schedule.window_end?.slice(0, 5) ?? '', visits: String(schedule.visits_per_shift), gap: String(schedule.min_gap_between_visits_minutes), stay: String(schedule.dwell_minutes), notes: schedule.officer_instructions ?? '', slaMinutes: schedule.response_sla_minutes == null ? '' : String(schedule.response_sla_minutes) } };
-        });
-        for (const service of SERVICE_CHOICES) {
-          if (next[site.id].some((row) => row.module === service.key)) continue;
-          const scoped = (rates.data ?? []).filter((rate) => rate.site_id === site.id && rate.service_type === service.key);
-          const exact = scoped.length === 1 && simpleRate(scoped[0]) ? scoped[0] as Rate : null;
-          next[site.id].push({ ...newRow(service.key), rate: exact, rateBlocked: scoped.length > 0 && !exact, amount: exact ? String(exact.amount) : '', unit: exact?.rate_type ?? 'per_visit' });
-        }
-      }
-      if (version !== loadVersion.current) return;
-      setClient(org.data as Client); setContactSaved(Boolean(contacts.data?.length));
-      setClientForm({ name: org.data.name, firstName: '', lastName: '', email: org.data.contact_email ?? '', phone: org.data.contact_phone ?? '' });
-      setAgreementId(agreement); setPlaces((sites.data ?? []) as Place[]); setDrafts(next); setSelected(sites.data?.[0]?.id ?? '');
-    } catch (failure) { if (version === loadVersion.current) setError(failureMessage(failure)); } finally { if (version === loadVersion.current) setLoading(false); }
-  }, [branchId]);
-  useEffect(() => {
-    const account = accountId ?? new URLSearchParams(location.search).get('account');
-    const key = `${branchId}:${account}`;
-    if (account && branchId && key !== loadKey.current) { loadKey.current = key; void loadClient(account); }
-  }, [location.search, branchId, loadClient, accountId]);
-  useEffect(() => {
+    if (!branchId) return;
     let cancelled = false;
-    void supabase.from('module_catalog').select('module_key').eq('active', true).then(({ data, error: catalogError }) => {
-      if (!cancelled) { if (catalogError) setError(catalogError.message); else setCatalog((data ?? []).map((item) => item.module_key)); }
-    });
+    setPatrolRoutesLoading(true);
+    setPatrolRoutesError(null);
+    setPatrolRoutes([]);
+    setScheduleForm((form) => ({ ...form, patrolRouteId: '' }));
+    void (async () => {
+      try {
+        const { data, error: routeError } = await supabase.from('patrol_routes').select('id,name').eq('organization_id', branchId).eq('is_active', true).order('name');
+        if (cancelled) return;
+        if (routeError) throw routeError;
+        setPatrolRoutes(data ?? []);
+      } catch {
+        if (!cancelled) setPatrolRoutesError('Patrols could not be loaded. Refresh this page before saving.');
+      } finally {
+        if (!cancelled) setPatrolRoutesLoading(false);
+      }
+    })();
     return () => { cancelled = true; };
+  }, [branchId]);
+
+  const run = async (label: string, work: () => Promise<string | void>) => {
+    setBusy(label); setError(null); setNotice(null);
+    try { const message = await work(); if (message) setNotice(message); }
+    catch (failure) { setError(failure instanceof Error ? failure.message : (failure as { message?: string })?.message ?? 'That did not save. Nothing was changed.'); }
+    finally { setBusy(null); }
+  };
+
+  // Resume a client that is part-way through (?account=<id>).
+  const loadClient = useCallback(async (accountId: string) => {
+    const { data: org } = await supabase.from('organizations').select('id, name, contact_email, contact_phone, status').eq('id', accountId).maybeSingle();
+    if (!org) return;
+    setClient(org as ClientRecord);
+    setClientForm((form) => ({ ...form, name: org.name, email: org.contact_email ?? '', phone: org.contact_phone ?? '' }));
+    const { data: contacts } = await supabase.from('crm_contacts').select('id').eq('organization_id', accountId).eq('is_primary', true).is('deactivated_at', null).limit(1);
+    setContactSaved(Boolean(contacts?.length));
+    const { data: sites } = await supabase.from('client_sites').select('id, name, address, site_type, gps_lat, gps_lng, boundary, boundary_verification').eq('client_organization_id', accountId).eq('active', true).order('created_at');
+    const savedPlaces = (sites as ResumePlace[] | null) ?? [];
+    setPlaces(savedPlaces);
+    const unresolved = savedPlaces.find((site) => site.boundary_verification !== 'verified');
+    if (unresolved && unresolved.gps_lat != null && unresolved.gps_lng != null) {
+      setJustAddedPlace({ id: unresolved.id, name: unresolved.name, address: unresolved.address, lat: unresolved.gps_lat, lng: unresolved.gps_lng, boundary: unresolved.boundary, boundaryVerification: unresolved.boundary_verification, boundaryLabel: null });
+    }
+    setStep(unresolved ? 2 : savedPlaces.length ? 3 : 2);
   }, []);
+
   useEffect(() => {
-    if (client || clientForm.name.trim().length < 3) { setMatches([]); return; }
+    if (selectedAccountId && !client) void loadClient(selectedAccountId);
+  }, [selectedAccountId, client, loadClient]);
+
+  // Duplicate check as the name is typed: a client that already exists should be opened, not created twice.
+  useEffect(() => {
+    const name = clientForm.name.trim();
+    if (client || name.length < 3) { setMatches([]); return; }
     let cancelled = false;
     const timer = window.setTimeout(async () => {
-      const result = await supabase.from('organizations').select('id,name,contact_email,contact_phone').ilike('name', `%${clientForm.name.trim()}%`).limit(5);
-      if (!cancelled) {
-        if (result.error || !Array.isArray(result.data)) { setMatches([]); setError('Existing client matching is unavailable. Check the CRM before creating another organization.'); }
-        else setMatches(result.data.filter((item) => item.id !== branchId));
-      }
+      const { data } = await supabase.from('organizations').select('id, name, status').ilike('name', `%${name}%`).limit(5);
+      if (!cancelled) setMatches(((data as ExistingMatch[]) ?? []).filter((row) => row.id !== branchId));
     }, 350);
     return () => { cancelled = true; window.clearTimeout(timer); };
-  }, [client, clientForm.name, branchId]);
-  const ensureAgreement = async () => {
-    if (agreementId) return agreementId;
-    if (!client) throw new Error('Save the organization first.');
-    const result = await supabase.rpc('ensure_crm_client_agreement', { p_account_organization_id: client.id, p_provider_organization_id: branchId });
-    if (result.error || !result.data?.agreement_id) throw result.error ?? new Error('Agreement could not be opened.');
-    setAgreementId(result.data.agreement_id); return result.data.agreement_id as string;
-  };
+  }, [clientForm.name, client, branchId]);
+
   const saveClient = (event: React.FormEvent) => {
     event.preventDefault();
-    void run(async () => {
-      if (!clientForm.name.trim() || (!clientForm.email.trim() && !clientForm.phone.trim())) throw new Error('Add the client name and an email or phone.');
-      if (!contactSaved && (!clientForm.firstName.trim() || !clientForm.lastName.trim())) throw new Error('Add both first and last names for the primary contact.');
+    void run('client', async () => {
+      const name = clientForm.name.trim();
+      if (!name) throw new Error('Give the client a name.');
+      if (!clientForm.email.trim() && !clientForm.phone.trim()) throw new Error('Add an email or a phone number so we can reach them.');
       let record = client;
       if (!record) {
+        // ATLAS WRITES: organizations via manage_crm_organization (create, prospect)
         const { data, error: saveError } = await supabase.rpc('manage_crm_organization', {
           p_client_request_id: clientRequest.current, p_organization_id: null, p_expected_updated_at: null, p_action: 'create',
-          p_name: clientForm.name.trim(), p_organization_type: 'client', p_nzbn: null, p_company_registration_number: null,
+          p_name: name, p_organization_type: 'client', p_nzbn: null, p_company_registration_number: null,
           p_contact_email: clientForm.email.trim() || null, p_contact_phone: clientForm.phone.trim() || null,
           p_billing_email: null, p_billing_address: null, p_account_notes: null, p_status: null,
         });
-        if (saveError || !data) throw saveError ?? new Error('The organization was not saved.');
-        record = data as Client; setClient(record); loadKey.current = `${branchId}:${record.id}`;
-        navigate(`${location.pathname}?account=${record.id}`, { replace: true });
+        if (saveError || !data) throw saveError ?? new Error('The client was not saved.');
+        record = data as ClientRecord;
+        setClient(record);
       }
-      if (!contactSaved) {
-        const contact = await supabase.rpc('manage_crm_contact', {
+      if (!contactSaved && (clientForm.firstName.trim() || clientForm.lastName.trim() || clientForm.email.trim())) {
+        // ATLAS WRITES: crm_contacts via manage_crm_contact (primary contact — the person we deal with and may invite)
+        const { error: contactError } = await supabase.rpc('manage_crm_contact', {
           p_client_request_id: contactRequest.current, p_contact_id: null, p_account_organization_id: record.id, p_expected_updated_at: null, p_action: 'create',
-          p_first_name: clientForm.firstName.trim(), p_last_name: clientForm.lastName.trim(), p_role_title: null,
+          p_first_name: clientForm.firstName.trim() || name, p_last_name: clientForm.lastName.trim() || '', p_role_title: null,
           p_email: clientForm.email.trim() || null, p_phone: clientForm.phone.trim() || null, p_mobile: null, p_is_primary: true, p_is_emergency: false, p_notes: null,
         });
-        if (contact.error) throw new Error(`Organization saved; contact failed: ${contact.error.message}. Retry to save only the contact.`);
+        if (contactError) throw contactError;
         setContactSaved(true);
       }
-      setDrawer(null); setNotice('Organization and primary contact saved. Add locations when ready.');
+      setPlaceForm((form) => ({ ...form, name: form.name || name }));
+      navigate(`${location.pathname}?account=${record.id}`, { replace: true });
+      setStep(2);
+      return `${record.name} saved. Now add the places we work at.`;
     });
   };
+
+  const findAddress = () => run('address', async () => {
+    const candidates = await resolveAddressCandidates(placeForm.address, 5);
+    if (!candidates.length) throw new Error('No address matched. Try the street number and name, or the suburb.');
+    setAddressCandidates(candidates);
+    if (candidates.length === 1) setChosenAddress(candidates[0]);
+  });
+
   const savePlace = (event: React.FormEvent) => {
     event.preventDefault();
-    void run(async () => {
-      if (!client || !chosenAddress || !placeForm.name.trim()) throw new Error('Choose an organization, location name and resolved address.');
+    void run('place', async () => {
+      if (!client) throw new Error('Save the client first.');
+      if (!placeForm.name.trim()) throw new Error('Give the place a name (for example "Main store" or "Depot").');
+      if (!chosenAddress) throw new Error('Find and choose the address so the place has a pin on the map.');
+      // ATLAS WRITES: client_sites via create_crm_site (unverified boundary until a person checks it on the map)
       const { data, error: saveError } = await supabase.rpc('create_crm_site', {
         p_client_request_id: placeRequest.current, p_account_organization_id: client.id, p_name: placeForm.name.trim(), p_address: chosenAddress.label,
         p_site_type: placeForm.type, p_center_lat: chosenAddress.lat, p_center_lng: chosenAddress.lng, p_location_id: null,
       });
-      if (saveError || !data) throw saveError ?? new Error('The location was not saved.');
-      const row = (Array.isArray(data) ? data[0] : data) as Place;
-      if (!row?.id) throw new Error('Location may have saved; reload before trying again.');
-      setPlaces((current) => current.some((place) => place.id === row.id) ? current : [...current, { ...row, gps_lat: chosenAddress.lat, gps_lng: chosenAddress.lng, boundary: null, boundary_verification: 'unverified' }]);
-      setSelected(row.id); setMobilePane('detail'); setDrawer(null);
-      setPlaceForm({ name: '', address: '', type: 'commercial_premises' }); setChosenAddress(null); setCandidates([]);
-      placeRequest.current = crypto.randomUUID(); setNotice('Location saved. Boundary remains unverified until reviewed in Spatial context.');
+      if (saveError || !data) throw saveError ?? new Error('The place was not saved.');
+      const row = (Array.isArray(data) ? data[0] : data) as { id: string; name: string; address: string | null; site_type: string | null } | undefined;
+      if (!row?.id) throw new Error('The place was saved but could not be read back. Refresh and it will appear.');
+      setPlaces((current) => [...current, { id: row.id, name: row.name, address: row.address, site_type: row.site_type }]);
+      setJustAddedPlace({ id: row.id, name: row.name, address: row.address, lat: chosenAddress.lat, lng: chosenAddress.lng, boundary: chosenAddress.boundary ?? null, boundaryVerification: 'unverified', boundaryLabel: chosenAddress.boundary ? chosenAddress.label : null });
+      placeRequest.current = crypto.randomUUID();
+      setPlaceForm({ name: '', address: '', type: placeForm.type }); setAddressCandidates([]); setChosenAddress(null);
+      return `${row.name} added at ${row.address ?? 'the chosen address'}.`;
     });
   };
-  const changeSiteRow = (site: string, key: string, update: Partial<Row>) => setDrafts((current) => ({ ...current, [site]: (current[site] ?? []).map((row) => row.key === key && !row.receipt.startsWith('Needs retry:') ? { ...row, ...update, dirty: true, scheduleDone: false, rateDone: false, requestId: crypto.randomUUID(), rateRequestId: crypto.randomUUID(), receipt: 'Draft — not saved' } : row) }));
-  const changeRow = (key: string, update: Partial<Row>) => changeSiteRow(selected, key, update);
-  const patchRow = (site: string, key: string, update: Partial<Row>) => setDrafts((current) => ({ ...current, [site]: (current[site] ?? []).map((row) => row.key === key ? { ...row, ...update } : row) }));
-  const toggleService = (module: string, enabled: boolean) => {
-    const existing = rows.find((row) => row.module === module);
-    if (existing) changeRow(existing.key, { enabled });
-    else setDrafts((current) => ({ ...current, [selected]: [...(current[selected] ?? []), { ...newRow(module), enabled, dirty: true, receipt: 'Draft — not saved' }] }));
+
+  const ensureAgreement = async (): Promise<string> => {
+    if (agreementId) return agreementId;
+    if (!client) throw new Error('Save the client first.');
+    // ATLAS WRITES: service_agreements via ensure_crm_client_agreement (the branch's live agreement with this client)
+    const { data, error: agreementError } = await supabase.rpc('ensure_crm_client_agreement', { p_account_organization_id: client.id, p_provider_organization_id: branchId });
+    if (agreementError || !data) throw agreementError ?? new Error('The service agreement could not be opened.');
+    const id = (data as { agreement_id: string }).agreement_id;
+    setAgreementId(id);
+    return id;
   };
-  const saveMatrix = () => void run(async () => {
-    if (!client || !canEdit) throw new Error('Provider administrator permission required.');
-    const pending = Object.entries(drafts).flatMap(([site, entries]) => entries.filter((row) => row.dirty).map((row) => ({ site, row })));
-    for (const { row } of pending) {
-      if (row.enabled && (!row.form.days.length || (!row.form.anyTime && (!row.form.start || !row.form.end)))) throw new Error('Each selected service needs days and both window times, or any-time coverage.');
-      if (row.enabled && (!Number.isInteger(Number(row.form.visits)) || Number(row.form.visits) < 1 || Number(row.form.visits) > 24 || Number(row.form.gap) < 0 || Number(row.form.gap) > 720 || Number(row.form.stay) < 0 || Number(row.form.stay) > 480)) throw new Error('Check visits (1–24), gap (0–720) and dwell (0–480).');
-      if (row.amount && (!Number.isFinite(Number(row.amount)) || Number(row.amount) <= 0)) throw new Error('A rate must be a positive amount.');
-      if (row.enabled && !row.rateBlocked && row.rate && !row.amount) throw new Error('Use Finance to deactivate an existing rate; clearing a field does not remove billing rules.');
-    }
-    const id = await ensureAgreement();
-    let saved = 0; let failed = 0;
-    for (const { site, row } of pending) {
-      let scheduleId = row.scheduleId;
-      try {
-        if (!row.scheduleDone && (row.enabled || scheduleId)) {
-          const result = await supabase.rpc('manage_crm_agreement_delivery_schedule', {
-            p_client_request_id: row.requestId, p_agreement_id: id, p_action: row.enabled ? scheduleId ? 'update' : 'create' : 'remove', p_schedule_id: scheduleId,
-            p_site_id: site, p_zone_id: null, p_module_key: row.module, p_active_days: row.form.days,
-            p_window_start: row.form.anyTime ? null : row.form.start, p_window_end: row.form.anyTime ? null : row.form.end,
-            p_visits_per_shift: Number(row.form.visits), p_min_gap_between_visits_minutes: Number(row.form.gap), p_dwell_minutes: Number(row.form.stay),
-            p_officer_instructions: row.form.notes.trim() || null, p_operating_organization_id: branchId,
-          });
-          if (result.error || !result.data?.schedule_id) throw result.error ?? new Error('Schedule receipt missing; retry with the same request.');
-          scheduleId = row.enabled ? result.data.schedule_id : null;
-          patchRow(site, row.key, { scheduleId, scheduleDone: true, receipt: row.enabled ? 'Schedule saved; rate pending' : 'Schedule archived; billing rule retained' });
+
+  const saveService = (event: React.FormEvent) => {
+    event.preventDefault();
+    void run('service', async () => {
+      if (!servicePlace) throw new Error('Add a place first.');
+      const id = await ensureAgreement();
+      const words = serviceWords(chosenService.label, chosenService.kind, scheduleForm);
+      if (chosenService.kind === 'post') {
+        // ATLAS WRITES: service_agreement_locations + service_agreement_modules via manage_crm_agreement_setup
+        const status = (await supabase.from('service_agreements').select('invitation_status').eq('id', id).single()).data?.invitation_status ?? 'not_invited';
+        const link = await supabase.rpc('manage_crm_agreement_setup', { p_agreement_id: id, p_expected_invitation_status: status, p_action: 'link_site', p_site_id: servicePlace.id });
+        if (link.error && !/already/i.test(link.error.message)) throw link.error;
+        const module = await supabase.rpc('manage_crm_agreement_setup', { p_agreement_id: id, p_expected_invitation_status: status, p_action: 'set_module', p_module_key: 'static_guarding', p_enabled: true });
+        if (module.error) throw module.error;
+        setServices((current) => [...current, { schedule_id: null, place_id: servicePlace.id, module_key: 'static_guarding', words }]);
+      } else {
+        if (!asAttended && chosenService.kind === 'visits' && !scheduleForm.anyTime && (!scheduleForm.start || !scheduleForm.end)) throw new Error('Set both times, or choose any time of day.');
+        if (!asAttended && scheduleForm.preset === 'pick' && scheduleForm.days.length === 0) throw new Error('Pick at least one day.');
+        if (asAttended && (patrolRoutesLoading || patrolRoutesError || !patrolRoutes.some((route) => route.id === scheduleForm.patrolRouteId))) throw new Error('Choose an active patrol before saving.');
+        // ATLAS WRITES: service_agreement_delivery_schedules + client_site_patrol_config via manage_crm_agreement_delivery_schedule
+        const { data, error: scheduleError } = asAttended ? await supabase.rpc('manage_crm_as_attended_patrol', {
+          p_client_request_id: serviceRequest.current, p_agreement_id: id, p_patrol_route_id: scheduleForm.patrolRouteId,
+          p_site_id: servicePlace.id, p_zone_id: null, p_officer_instructions: scheduleForm.notes.trim() || null,
+          p_operating_organization_id: branchId,
+        }) : await supabase.rpc('manage_crm_agreement_delivery_schedule', {
+          p_client_request_id: serviceRequest.current, p_agreement_id: id, p_action: 'create', p_schedule_id: null,
+          p_site_id: servicePlace.id, p_zone_id: null, p_module_key: chosenService.key,
+          p_active_days: scheduleForm.days, p_window_start: scheduleForm.anyTime ? null : scheduleForm.start, p_window_end: scheduleForm.anyTime ? null : scheduleForm.end,
+          p_visits_per_shift: chosenService.kind === 'response' ? 1 : Math.max(1, Number(scheduleForm.visits) || 1),
+          p_min_gap_between_visits_minutes: Math.max(0, Number(scheduleForm.gap) || 0), p_dwell_minutes: Math.max(0, Number(scheduleForm.stay) || 0),
+          p_officer_instructions: scheduleForm.notes.trim() || null, p_operating_organization_id: branchId,
+        });
+        if (scheduleError || !data) throw scheduleError ?? new Error('The service was not saved.');
+        if (chosenService.kind === 'response') {
+          const status = (await supabase.from('service_agreements').select('invitation_status').eq('id', id).single()).data?.invitation_status ?? 'not_invited';
+          const sla = await supabase.rpc('manage_crm_agreement_setup', { p_agreement_id: id, p_expected_invitation_status: status, p_action: 'set_module', p_module_key: 'dispatch', p_enabled: true, p_sla_minutes: Math.max(1, Number(scheduleForm.slaMinutes) || 30) });
+          if (sla.error) throw sla.error;
         }
-        if (!row.rateDone && !row.rateBlocked && row.enabled && row.amount) {
-          const result = await supabase.rpc('manage_operating_branch_rate_rule', {
-            p_operating_organization_id: branchId, p_client_request_id: row.rateRequestId,
-            p_action: row.rate ? 'update' : 'create', p_rate_rule_id: row.rate?.id ?? null, p_expected_updated_at: row.rate?.updated_at ?? null,
-            p_rule_kind: 'billing', p_name: row.rate?.name ?? `${places.find((place) => place.id === site)?.name} · ${row.module}`,
-            p_rate_type: row.unit, p_amount: Number(row.amount), p_pay_code: null, p_service_type: row.module, p_job_type: null,
-            p_client_org_id: client.id, p_site_id: site, p_zone_id: null, p_day_category: null, p_effective_from: null, p_effective_to: null, p_priority: 0, p_role_code: null,
-          });
-          let rate = (Array.isArray(result.data) ? result.data[0] : result.data) as Rate | null;
-          if (result.error && row.rate) {
-            // The update RPC uses optimistic timestamps, not replay receipts. Reconcile a lost response before retrying.
-            const recovered = await supabase.from('rate_rules').select('id,updated_at,amount,rate_type,site_id,service_type,name,job_type,day_category,effective_from,effective_to,priority,module_key,role_code,region_code,job_code,vehicle_type,distance_min_km,distance_max_km,outside_area,zone_id,pay_code,gl_account').eq('id', row.rate.id).eq('organization_id', branchId).eq('client_org_id', client.id).eq('site_id', site).eq('service_type', row.module).eq('active', true).maybeSingle();
-            if (!recovered.error && recovered.data && simpleRate(recovered.data) && Number(recovered.data.amount) === Number(row.amount) && recovered.data.rate_type === row.unit && recovered.data.name === row.rate.name) rate = recovered.data as Rate;
-            else throw result.error;
-          } else if (result.error) throw result.error;
-          if (!rate?.id || !rate.updated_at) throw new Error('Rate receipt missing. Retry without changing the draft.');
-          patchRow(site, row.key, { rate, rateDone: true });
-        }
-        patchRow(site, row.key, { dirty: false, scheduleId, receipt: row.enabled ? 'Saved' : 'Schedule archived; rates unchanged' }); saved++;
-      } catch (failure) { patchRow(site, row.key, { receipt: `Needs retry: ${failureMessage(failure)}` }); failed++; }
-    }
-    setNotice(`${saved} row${saved === 1 ? '' : 's'} saved. ${failed ? `${failed} need retry; successful writes remain saved.` : 'All pending rows complete.'}`);
-    routeRequest.current = crypto.randomUUID();
-    if (failed) setError('Some rows did not complete. Review each receipt, then retry pending rows. This is not an atomic transaction.');
-  });
-  const sendInvite = () => void run(async () => {
+        setServices((current) => [...current, { schedule_id: (data as { schedule_id: string }).schedule_id, place_id: servicePlace.id, module_key: chosenService.key, words,
+          ...(asAttended ? { attendance_mode: 'as_attended' as const, patrol_route_id: scheduleForm.patrolRouteId } : {}),
+        }]);
+      }
+      serviceRequest.current = crypto.randomUUID();
+      setScheduleForm(defaultSchedule());
+      return `Saved: ${words} at ${servicePlace.name}.`;
+    });
+  };
+
+  const sendInvite = () => run('invite', async () => {
     if (!client) return;
-    const prepared = await supabase.rpc('prepare_crm_client_invitation', { p_account_organization_id: client.id });
-    if (prepared.error || !prepared.data) throw prepared.error ?? new Error('Invitation could not be prepared.');
-    const invitation = await supabase.functions.invoke('invite-org', { body: { target_organization_id: client.id, email: prepared.data.email, display_name: prepared.data.display_name?.trim() || client.name } });
-    if (invitation.error) throw invitation.error;
-    setInviteEmail(prepared.data.email); setNotice('Invitation sent. Portal access is optional and does not authorize provider configuration.');
-  });
-  const buildRun = () => void run(async () => {
-    if (!client || dirtyCount) throw new Error('Save delivery drafts before building the run.');
-    const id = await ensureAgreement();
-    const route = await supabase.rpc('create_patrol_route_from_agreement', { p_client_request_id: routeRequest.current, p_service_agreement_id: id, p_name: `${client.name} patrol run`, p_operating_organization_id: branchId });
-    if (route.error) throw route.error;
-    const built = Array.isArray(route.data) ? route.data[0] : route.data;
-    if (!built?.route_id) throw new Error('No patrol run receipt returned.');
-    const existing = await supabase.from('roster_work_units').select('id').eq('organization_id', branchId).eq('patrol_route_id', built.route_id).eq('active', true).limit(1);
-    if (existing.error) throw new Error(`Patrol run saved; could not check its work unit: ${existing.error.message}. Retry before creating another.`);
-    if (existing.data?.[0]?.id) {
-      setWorkUnitId(existing.data[0].id); setNotice('Patrol run and existing work unit are ready to roster.'); return;
-    }
-    const unit = await supabase.rpc('create_operating_roster_work_unit', { p_operating_organization_id: branchId, p_name: `${client.name} patrol run`, p_work_unit_type: 'patrol', p_service_type: 'patrol', p_patrol_route_id: built.route_id, p_service_agreement_location_id: null, p_service_agreement_module_id: null });
-    if (unit.error) throw new Error(`Patrol run saved; work unit failed: ${unit.error.message}. Retry safely or open Roster targets.`);
-    setWorkUnitId(unit.data?.id ?? null); setNotice(`Patrol run saved with ${built.attached_places ?? 0} locations. Roster the run next.`);
+    // ATLAS WRITES: prepare_crm_client_invitation then invite-org (seats the client's administrator; acceptance ticks when they set a password)
+    const { data, error: prepareError } = await supabase.rpc('prepare_crm_client_invitation', { p_account_organization_id: client.id });
+    if (prepareError || !data) throw prepareError ?? new Error('The invitation could not be prepared.');
+    const prepared = data as { email: string; display_name?: string };
+    const { error: inviteError } = await supabase.functions.invoke('invite-org', { body: { target_organization_id: client.id, email: prepared.email, display_name: prepared.display_name?.trim() || client.name } });
+    if (inviteError) throw inviteError;
+    setInviteEmail(prepared.email); setInviteState('sent');
+    return `Invitation sent to ${prepared.email}. When they set a password they can see their places, visits and reports.`;
   });
 
-  return <div className={`client-setup${embedded ? ` is-embedded${inlineExpanded ? ' is-expanded' : ''}` : ''}`} aria-busy={busy || loading}>
-    {!embedded && <header className="client-setup-head"><div><span>Client delivery workspace</span><h1>Set up a new client</h1></div><button type="button" onClick={() => leave('onboarding')}>All clients</button></header>}
-    {!canEdit && <p role="alert">Provider administrator permission is required. No configuration can be saved.</p>}
-    {error && <div className="client-setup-message is-error" role="alert">{error}{!client && !loading && new URLSearchParams(location.search).get('account') && <button type="button" onClick={() => void loadClient(new URLSearchParams(location.search).get('account')!)}>Retry loading client</button>}</div>}
-    {notice && <div className="client-setup-message" role="status">{notice}</div>}
-    {!embedded && <section className="client-setup-parent" aria-label="Parent organization and service agreement">
-      <div><small>Parent organization · workspace grouping, not legal ownership</small><strong>{client?.name ?? 'Choose or create a client organization'}</strong><span>{agreementId ? `Operational agreement · ${agreementId}` : 'Agreement opens through the governed writer on first delivery save'}</span></div>
-      <div className="client-setup-actions"><button type="button" onClick={() => setDrawer('organization')} disabled={busy || loading}>{client ? contactSaved ? 'Organization summary' : 'Complete contact' : 'Add organization'}</button><button type="button" disabled={!client || busy} onClick={() => setDrawer('invite')}>Client invitation</button><button type="button" onClick={() => setDrawer('bob')}>Bob Quick Setup</button></div>
+  const finish = () => run('finish', async () => {
+    if (!client) return;
+    const id = await ensureAgreement();
+    const visitServices = services.filter((service) => service.attendance_mode !== 'as_attended' && SERVICE_CHOICES.find((choice) => choice.key === service.module_key)?.kind === 'visits');
+    let routeId: string | null = null; let workUnitId: string | null = null; let words = '';
+    if (visitServices.length) {
+      // ATLAS WRITES: patrol_routes + roster_work_units via create_patrol_route_from_agreement / create_operating_roster_work_unit
+      const route = await supabase.rpc('create_patrol_route_from_agreement', { p_client_request_id: crypto.randomUUID(), p_service_agreement_id: id, p_name: `${client.name} patrol run`, p_operating_organization_id: branchId });
+      if (route.error) throw route.error;
+      const built = (Array.isArray(route.data) ? route.data[0] : route.data) as { route_id: string; attached_places: number } | null;
+      routeId = built?.route_id ?? null;
+      if (routeId) {
+        const unit = await supabase.rpc('create_operating_roster_work_unit', { p_operating_organization_id: branchId, p_name: `${client.name} patrol run`, p_work_unit_type: 'patrol', p_service_type: 'patrol', p_patrol_route_id: routeId, p_service_agreement_location_id: null, p_service_agreement_module_id: null });
+        if (unit.error && !/already|exists/i.test(unit.error.message)) throw unit.error;
+        workUnitId = (unit.data as { id?: string } | null)?.id ?? null;
+        words = `The patrol run is built with ${built?.attached_places ?? 0} place${built?.attached_places === 1 ? '' : 's'} and is ready to roster.`;
+      }
+    } else if (services.some((service) => service.attendance_mode === 'as_attended')) {
+      words = `As-attended places are saved on ${[...new Set(services.filter((service) => service.attendance_mode === 'as_attended').map((service) => patrolRoutes.find((route) => route.id === service.patrol_route_id)?.name ?? 'the selected patrol'))].join(', ')}.`;
+    } else {
+      words = services.some((service) => service.module_key === 'static_guarding') ? 'Guard-on-post work is ready to roster as a static post.' : 'Alarm response is set; jobs will appear on the dispatch console when they come in.';
+    }
+    setRunResult({ routeId, workUnitId, words });
+    setStep(5);
+  });
+
+  const steps: Array<{ n: Step; label: string }> = [{ n: 1, label: 'Who' }, { n: 2, label: 'Where' }, { n: 3, label: 'What we do' }, { n: 4, label: 'Who logs in' }, { n: 5, label: 'Done' }];
+
+  return <div className="client-setup">
+    <header className="client-setup-head">
+      <div><span>Clients</span><h1>Set up a new client</h1><p>Five short steps. Each one saves as you go, so you can stop and come back.</p></div>
+      <button type="button" className="client-setup-link" onClick={() => onNavigate('onboarding')}>See all clients being set up</button>
+    </header>
+    <ol className="client-setup-rail" aria-label="Setup steps">
+      {steps.map((item) => <li key={item.n} className={item.n === step ? 'is-current' : item.n < step ? 'is-done' : ''} aria-current={item.n === step ? 'step' : undefined}><span>{item.n < step ? <CheckCircle2 size={14} aria-hidden="true" /> : item.n}</span>{item.label}</li>)}
+    </ol>
+    {error && <div className="client-setup-message is-error" role="alert"><AlertTriangle size={16} /><span>{error}</span></div>}
+    {notice && <div className="client-setup-message is-ok" role="status"><CheckCircle2 size={16} /><span>{notice}</span></div>}
+
+    {step === 1 && <form className="client-setup-card" onSubmit={saveClient} aria-labelledby="step-who">
+      <div className="client-setup-card-head"><UserRound size={20} aria-hidden="true" /><div><h2 id="step-who">Who is the client?</h2><p>The business, council or person you are working for, and the person you deal with there.</p></div></div>
+      <label><span>Client name</span><input value={clientForm.name} onChange={(event) => setClientForm({ ...clientForm, name: event.target.value })} placeholder="e.g. Trafalgar Street Dairy Ltd" required disabled={Boolean(client)} /></label>
+      {matches.length > 0 && !client && <div className="client-setup-matches" role="status"><Search size={14} aria-hidden="true" /><span>Already on the books?</span>{matches.map((match) => <button type="button" key={match.id} onClick={() => { navigate(`${location.pathname}?account=${match.id}`, { replace: true }); void loadClient(match.id); }}>{match.name}{match.status ? ` · ${match.status}` : ''}</button>)}</div>}
+      <div className="client-setup-two">
+        <label><span>Contact first name</span><input value={clientForm.firstName} onChange={(event) => setClientForm({ ...clientForm, firstName: event.target.value })} placeholder="Jamie" /></label>
+        <label><span>Contact last name</span><input value={clientForm.lastName} onChange={(event) => setClientForm({ ...clientForm, lastName: event.target.value })} placeholder="Rangi" /></label>
+      </div>
+      <div className="client-setup-two">
+        <label><span>Email</span><input type="email" value={clientForm.email} onChange={(event) => setClientForm({ ...clientForm, email: event.target.value })} placeholder="jamie@example.co.nz" /></label>
+        <label><span>Phone</span><input value={clientForm.phone} onChange={(event) => setClientForm({ ...clientForm, phone: event.target.value })} placeholder="03 555 0100" /></label>
+      </div>
+      <p className="client-setup-hint">The email is who we invite to the client portal in step 4. You can skip that step.</p>
+      <footer><button type="submit" className="btn btn-primary" disabled={busy !== null}>{busy === 'client' ? 'Saving…' : client ? 'Continue' : 'Save client and continue'} <ArrowRight size={15} aria-hidden="true" /></button></footer>
+    </form>}
+
+    {step === 2 && <section className="client-setup-card" aria-labelledby="step-where">
+      <div className="client-setup-card-head"><MapPin size={20} aria-hidden="true" /><div><h2 id="step-where">Where do we work for {client?.name ?? 'them'}?</h2><p>Add each place — a shop, a car park, a reserve. Type the address and pick the match so it gets a pin on the map.</p></div></div>
+      {places.length > 0 && <ul className="client-setup-list">{places.map((place) => <li key={place.id}><strong>{place.name}</strong><span>{place.address ?? 'No address'} · {PLACE_TYPES.find((type) => type.key === place.site_type)?.label ?? place.site_type ?? 'Place'}</span><em>Saved</em></li>)}</ul>}
+      <form onSubmit={savePlace} className="client-setup-subform">
+        <div className="client-setup-two">
+          <label><span>Place name</span><input value={placeForm.name} onChange={(event) => setPlaceForm({ ...placeForm, name: event.target.value })} placeholder="e.g. Main store" required /></label>
+          <label><span>What kind of place</span><select value={placeForm.type} onChange={(event) => setPlaceForm({ ...placeForm, type: event.target.value })}>{PLACE_TYPES.map((type) => <option key={type.key} value={type.key}>{type.label}</option>)}</select></label>
+        </div>
+        <label><span>Address</span><div className="client-setup-address"><input value={placeForm.address} onChange={(event) => { setPlaceForm({ ...placeForm, address: event.target.value }); setChosenAddress(null); }} placeholder="12 Trafalgar Street, Nelson" /><button type="button" onClick={findAddress} disabled={busy !== null || placeForm.address.trim().length < 4}>{busy === 'address' ? 'Finding…' : 'Find address'}</button></div></label>
+        {addressCandidates.length > 0 && <div className="client-setup-candidates" role="radiogroup" aria-label="Address matches">{addressCandidates.map((candidate, index) => <label key={`${candidate.label}-${index}`} className={chosenAddress?.label === candidate.label ? 'is-chosen' : ''}><input type="radio" name="address" checked={chosenAddress?.label === candidate.label} onChange={() => setChosenAddress(candidate)} />{candidate.label}{candidate.kind && <em> · {KIND_LABEL[candidate.kind] ?? candidate.kind}</em>}</label>)}</div>}
+        <footer>
+          <button type="submit" className="btn btn-secondary" disabled={busy !== null}>{busy === 'place' ? 'Saving…' : places.length ? 'Add another place' : 'Add this place'}</button>
+          <button type="button" className="btn btn-primary" disabled={places.length === 0 || busy !== null} onClick={() => { setServicePlaceId(places[0]?.id ?? ''); setStep(3); }}>Continue <ArrowRight size={15} aria-hidden="true" /></button>
+        </footer>
+      </form>
+      {justAddedPlace && <LocationHouseMap organizationId={client?.id ?? ''} house={{ name: justAddedPlace.name, address: justAddedPlace.address }} sites={[{ id: justAddedPlace.id, name: justAddedPlace.name, gps_lat: justAddedPlace.lat, gps_lng: justAddedPlace.lng, boundary: justAddedPlace.boundaryLabel ? null : justAddedPlace.boundary, boundary_status: 'provisional', boundary_verification: justAddedPlace.boundaryVerification }]} zones={[]} editableEntity={{ type: 'client_site', id: justAddedPlace.id, organizationId: client?.id ?? '', centerLat: justAddedPlace.lat, centerLng: justAddedPlace.lng, onSaved: (verified) => setJustAddedPlace((place) => place ? { ...place, boundaryVerification: verified ? 'verified' : 'unverified' } : place) }} seedBoundary={justAddedPlace.boundaryLabel && justAddedPlace.boundary ? { geometry: justAddedPlace.boundary, kind: 'reserve', label: justAddedPlace.boundaryLabel, lat: justAddedPlace.lat, lng: justAddedPlace.lng } : null} />}
+      <p className="client-setup-hint">Officers can be rostered before the boundary is confirmed; arrivals are recorded as unverified until it is done.</p>
     </section>}
-    {embedded && <section className="crm-child-sites" aria-label="Child sites and inline services">
-      <header><h3>Child sites</h3><div><button type="button" disabled={!client || busy || !canEdit} onClick={() => setDrawer('location')}>Add Location</button><button type="button" onClick={() => setDrawer('bob')}>Bob Quick Setup</button><button type="button" onClick={onOpenCoverage}>Agreement coverage</button></div></header>
-      {loading ? <p role="status">Loading client delivery…</p> : !places.length ? <p>No active sites recorded for this client.</p> : <div className="crm-child-sites-scroll"><table><caption>Per-site drafts · save explicitly below. Static and CCTV coverage are not inferred from visit schedules.</caption><thead><tr><th>Site</th><th>Services</th><th>Rate / unit</th><th>Schedule</th><th>Review</th></tr></thead><tbody>{places.map((place) => {
-        const siteRows = drafts[place.id] ?? [];
-        const enabled = siteRows.filter((row) => row.enabled);
-        const module = inlineServices[place.id] ?? enabled[0]?.module ?? 'patrol';
-        const row = siteRows.find((item) => item.module === module && item.enabled);
-        const locked = busy || !canEdit || Boolean(row?.receipt.startsWith('Needs retry:'));
-        const preset = row ? row.form.days.join(',') === '1,2,3,4,5,6,7' ? 'all' : row.form.days.join(',') === '1,2,3,4,5' ? 'weekdays' : row.form.days.join(',') === '6,7' ? 'weekends' : 'custom' : '';
-        return <tr key={place.id}><th scope="row"><strong>{place.name}</strong><small>{place.address}</small></th><td><div className="crm-inline-service-checks">{[{ key: 'patrol', label: 'Patrol' }, { key: 'dispatch', label: 'Alarm' }, { key: 'access_control', label: 'Access' }].map((service) => {
-          const matches = siteRows.filter((item) => item.module === service.key);
-          return <label key={service.key}><input type="checkbox" aria-label={`${place.name} ${service.label}`} checked={matches.some((item) => item.enabled)} disabled={busy || !canEdit || !catalog.includes(service.key) || matches.some((item) => item.receipt.startsWith('Needs retry:'))} onChange={(event) => {
-            if (matches.length) { for (const item of event.target.checked ? matches.slice(0, 1) : matches) changeSiteRow(place.id, item.key, { enabled: event.target.checked }); }
-            else setDrafts((current) => ({ ...current, [place.id]: [...(current[place.id] ?? []), { ...newRow(service.key), enabled: true, dirty: true, receipt: 'Draft — not saved' }] }));
-            setInlineServices((current) => ({ ...current, [place.id]: service.key }));
-          }} />{service.label}</label>;
-        })}<label title="CCTV does not have a compatible per-site delivery schedule writer. Use governed agreement coverage; current coverage is not inferred."><input type="checkbox" disabled aria-label={`${place.name} CCTV setup unavailable`} />CCTV · coverage</label><label title="Static posts do not use visit schedules. Use governed agreement coverage; current coverage is not inferred."><input type="checkbox" disabled aria-label={`${place.name} Static setup unavailable`} />Static · coverage</label></div></td>
-          <td><label><span className="client-setup-sr">Rate service for {place.name}</span><select aria-label={`Rate service for ${place.name}`} value={module} disabled={!enabled.length || busy} onChange={(event) => setInlineServices((current) => ({ ...current, [place.id]: event.target.value }))}>{!enabled.length && <option value="patrol">Select service first</option>}{enabled.map((item) => <option key={item.key} value={item.module}>{SERVICE_CHOICES.find((service) => service.key === item.module)?.label ?? item.module}</option>)}</select></label><div className="client-setup-two"><input aria-label={`Billing rate for ${place.name}`} type="number" min="0.01" step="0.01" value={row?.amount ?? ''} placeholder="Not set" disabled={!row || locked || row.rateBlocked} onChange={(event) => row && changeSiteRow(place.id, row.key, { amount: event.target.value })} /><select aria-label={`Rate unit for ${place.name}`} value={row?.unit ?? 'per_visit'} disabled={!row || locked || row.rateBlocked} onChange={(event) => row && changeSiteRow(place.id, row.key, { unit: event.target.value })}>{RATE_UNITS.map((unit) => <option key={unit} value={unit}>{unit.replaceAll('_', ' ')}</option>)}</select></div>{row?.rateBlocked && <small>Qualified rates: review in Finance.</small>}</td>
-          <td><select aria-label={`Schedule days for ${place.name}`} value={preset} disabled={!row || locked} onChange={(event) => row && changeSiteRow(place.id, row.key, { form: { ...row.form, days: event.target.value === 'weekdays' ? [1, 2, 3, 4, 5] : event.target.value === 'weekends' ? [6, 7] : [1, 2, 3, 4, 5, 6, 7] } })}><option value="" disabled>Select service first</option><option value="all">Every day</option><option value="weekdays">Weekdays</option><option value="weekends">Weekends</option><option value="custom" disabled>Custom days · details</option></select><label><span>Visits / shift</span><input aria-label={`Visits per shift for ${place.name}`} type="number" min="1" max="24" value={row?.form.visits ?? ''} disabled={!row || locked} onChange={(event) => row && changeSiteRow(place.id, row.key, { form: { ...row.form, visits: event.target.value } })} /></label><small>{row ? row.form.anyTime ? 'Any time · 24-hour' : `${row.form.start}–${row.form.end}` : 'Not configured'}</small></td>
-          <td><button type="button" onClick={() => { setSelected(place.id); setMobilePane('detail'); setInlineExpanded((current) => selected === place.id ? !current : true); }}>Service details</button><button type="button" onClick={() => { setSelected(place.id); setDrawer('spatial'); }}>Boundary</button>{siteRows.filter((item) => item.receipt).map((item) => <small key={item.key}>{item.module}: {item.receipt}</small>)}</td></tr>;
-      })}</tbody></table></div>}
-    </section>}
-    {!embedded && <nav className="client-setup-mobile-tabs" aria-label="Workspace panes"><button type="button" aria-pressed={mobilePane === 'locations'} onClick={() => setMobilePane('locations')}>Locations ({places.length})</button><button type="button" aria-pressed={mobilePane === 'detail'} onClick={() => setMobilePane('detail')}>Selected location</button></nav>}
-    <div className={`client-setup-workspace show-${mobilePane}`}>
-      <aside className="client-setup-locations" aria-label="Child locations">
-        <header><h2>Locations <small>{places.length}</small></h2><button type="button" disabled={!client || !canEdit || busy} onClick={() => setDrawer('location')}>Add Location</button></header>
-        {loading ? <p role="status">Loading organization and delivery…</p> : !places.length ? <p>{client ? 'No locations yet. Add a resolved address to begin.' : 'Add the client organization first.'}</p> : <ul>{places.map((place) => <li key={place.id}><button type="button" aria-pressed={place.id === selected} onClick={() => { setSelected(place.id); setMobilePane('detail'); }}><strong>{place.name}</strong><span>{place.address ?? 'No address recorded'}</span><small>{drafts[place.id]?.some((row) => row.dirty) ? 'Unsaved draft retained' : `${drafts[place.id]?.filter((row) => row.enabled).length ?? 0} scheduled services`}</small></button></li>)}</ul>}
-      </aside>
-      <section className="client-setup-detail" aria-label="Selected location delivery">
-        {!selectedPlace ? <div className="client-setup-empty"><h2>Configure delivery in one place</h2><p>Select a location to review services, rates and schedules together. Location drafts remain intact when switching panes.</p></div> : <>
-          <header className="client-setup-detail-head"><div><h2>{selectedPlace.name}</h2><p>{selectedPlace.address}</p></div><button type="button" onClick={() => setDrawer('spatial')}>Spatial context</button></header>
-          <label className="client-setup-clone"><span>Clone service drafts from</span><select aria-label="Clone service drafts from" value="" disabled={busy || !canEdit} onChange={(event) => {
-            const source = drafts[event.target.value] ?? [];
-            const clones = source.filter((row) => row.enabled).flatMap((row) => {
-              const existing = rows.find((item) => item.module === row.module);
-              if (existing?.enabled || existing?.scheduleId || existing?.dirty) return [];
-              return [{ ...newRow(row.module), key: existing?.key ?? crypto.randomUUID(), enabled: true, dirty: true, form: { ...row.form, days: [...row.form.days], slaMinutes: '' }, rate: existing?.rate ?? null, rateBlocked: existing?.rateBlocked ?? false, amount: existing?.rate ? existing.amount : row.amount, unit: existing?.rate ? existing.unit : row.unit, receipt: 'Cloned draft — review before saving' }];
-            });
-            setDrafts((current) => ({ ...current, [selected]: [...rows.filter((row) => !clones.some((clone) => clone.key === row.key)), ...clones] })); setNotice(`${clones.length} services cloned as drafts only. Existing services were not overwritten.`);
-          }}><option value="">Choose another location…</option>{places.filter((place) => place.id !== selected).map((place) => <option key={place.id} value={place.id}>{place.name}</option>)}</select></label>
-          <div className="client-setup-matrix-scroll"><table className="client-setup-matrix"><caption>Location service matrix · changes stay in draft until Save changes</caption><thead><tr><th scope="col">Service</th><th scope="col">Rate / unit</th><th scope="col">Schedule / visits</th><th scope="col">SLA / receipt</th></tr></thead><tbody>
-            {SERVICE_CHOICES.map((service) => {
-              const serviceRows = rows.filter((row) => row.module === service.key);
-              const available = catalog.includes(service.key);
-              if (service.kind === 'post') return <tr key={service.key}><th scope="row">{service.label}</th><td colSpan={3}><button type="button" onClick={() => leave('crm')}>Open governed agreement coverage</button><small>Static posts do not use visit schedules. Configure coverage and roster work in the client workspace.</small></td></tr>;
-              const rendered = serviceRows.length ? serviceRows : [null];
-              return rendered.map((row, index) => <tr key={row?.key ?? service.key} className={row?.dirty ? 'is-draft' : ''}>
-                <th scope="row"><label><input type="checkbox" aria-label={`${service.label}${index ? ` schedule ${index + 1}` : ''}`} checked={row?.enabled ?? false} disabled={busy || loading || !canEdit || (!available && !row?.enabled) || row?.receipt.startsWith('Needs retry:')} onChange={(event) => row ? changeRow(row.key, { enabled: event.target.checked }) : toggleService(service.key, event.target.checked)} />{service.label}{index ? ` · ${index + 1}` : ''}</label><small>{available ? service.help : 'Unavailable in the active module catalog'}</small></th>
-                <td>{row?.enabled ? <><label><span>Rate · {service.label}</span><input type="number" min="0.01" step="0.01" value={row.amount} disabled={busy || !canEdit || row.rateBlocked || row.receipt.startsWith('Needs retry:')} onChange={(event) => changeRow(row.key, { amount: event.target.value })} placeholder="Not configured" /></label><label><span>Unit · {service.label}</span><select value={row.unit} disabled={busy || !canEdit || row.rateBlocked || row.receipt.startsWith('Needs retry:')} onChange={(event) => changeRow(row.key, { unit: event.target.value })}>{['per_visit', 'hourly', 'callout', 'flat', 'daily', 'per_notice'].map((unit) => <option key={unit} value={unit}>{unit.replaceAll('_', ' ')}</option>)}</select></label><small>{row.rateBlocked ? 'Multiple or qualified site rates exist. Review in Finance; this matrix will not overwrite them.' : 'Exact client + location + service billing rule. Shared or qualified rates remain in Finance.'}</small></> : '—'}</td>
-                <td>{row?.enabled ? <fieldset disabled={busy || !canEdit}><legend className="client-setup-sr">{service.label} schedule</legend><div className="client-setup-days" role="group" aria-label={`${service.label} days`}>{['Mon', 'Tue', 'Wed', 'Thu', 'Fri', 'Sat', 'Sun'].map((day, dayIndex) => <label key={day}><input type="checkbox" checked={row.form.days.includes(dayIndex + 1)} onChange={() => changeRow(row.key, { form: { ...row.form, days: row.form.days.includes(dayIndex + 1) ? row.form.days.filter((item) => item !== dayIndex + 1) : [...row.form.days, dayIndex + 1].sort() } })} />{day}</label>)}</div><label className="client-setup-check"><input type="checkbox" checked={row.form.anyTime} onChange={(event) => changeRow(row.key, { form: { ...row.form, anyTime: event.target.checked } })} />Any time of day (24-hour)</label>{!row.form.anyTime && <div className="client-setup-two">{(['start', 'end'] as const).map((field) => <label key={field}><span>{field === 'start' ? 'From' : 'To'} · {service.label}</span><input type="time" value={row.form[field]} onChange={(event) => changeRow(row.key, { form: { ...row.form, [field]: event.target.value } })} /></label>)}</div>}<div className="client-setup-three">{([{ key: 'visits', label: 'Visits each shift', min: 1, max: 24 }, { key: 'gap', label: 'Gap minutes', min: 0, max: 720 }, { key: 'stay', label: 'Dwell minutes', min: 0, max: 480 }] as const).map((field) => <label key={field.key}><span>{field.label} · {service.label}</span><input type="number" min={field.min} max={field.max} value={row.form[field.key]} onChange={(event) => changeRow(row.key, { form: { ...row.form, [field.key]: event.target.value } })} /></label>)}</div><label><span>Officer instructions · {service.label}</span><textarea rows={2} value={row.form.notes} onChange={(event) => changeRow(row.key, { form: { ...row.form, notes: event.target.value } })} /></label></fieldset> : 'Select service to configure'}</td>
-                <td><span>{row?.form.slaMinutes ? `${row.form.slaMinutes} min · recorded schedule target` : 'No location SLA recorded'}</span><small>The direct schedule writer cannot change a location SLA. Use a governed quote/variation in the client workspace.</small>{row && <output aria-label={`${service.label} save receipt`}>{row.receipt || 'Saved schedule'}</output>}</td>
-              </tr>);
-            })}
-          </tbody></table></div>
-          <p className="client-setup-hint">Rates match the work’s service type; saving a rule does not create an invoice. Unchecking archives only this location’s schedule. It does not disable the agreement module, remove other locations or deactivate billing rules. Retry incomplete rows before editing them. Maintenance is not offered without an active supported catalog path.</p>
-          <div className="client-setup-actions"><button type="button" onClick={() => leave('crm')}>Finance, SLA and contract workspace</button><button type="button" disabled={busy || dirtyCount > 0 || !canEdit} onClick={buildRun}>Build patrol run</button>{workUnitId && <button type="button" onClick={() => onNavigate('roster', { workUnitId, accountId: client?.id })}>Roster the patrol run</button>}<button type="button" onClick={() => leave('roster-targets')}>Roster targets / static posts</button></div>
+
+    {step === 3 && <section className="client-setup-card" aria-labelledby="step-what">
+      <div className="client-setup-card-head"><Shield size={20} aria-hidden="true" /><div><h2 id="step-what">What do we do there?</h2><p>Pick a service, say when, and save. Add as many as the client has asked for.</p></div></div>
+      {services.length > 0 && <ul className="client-setup-list">{services.map((service, index) => <li key={`${service.module_key}-${index}`}><strong>{places.find((place) => place.id === service.place_id)?.name ?? 'Place'}</strong><span>{service.words}</span><em>Saved</em></li>)}</ul>}
+      <form onSubmit={saveService} className="client-setup-subform">
+        <div className="client-setup-two">
+          <label><span>At which place</span><select value={servicePlace?.id ?? ''} onChange={(event) => setServicePlaceId(event.target.value)}>{places.map((place) => <option key={place.id} value={place.id}>{place.name}</option>)}</select></label>
+          <label><span>Service</span><select value={serviceKey} onChange={(event) => setServiceKey(event.target.value)}>{SERVICE_CHOICES.map((choice) => <option key={choice.key} value={choice.key}>{choice.label}</option>)}</select></label>
+        </div>
+        <p className="client-setup-help">{chosenService.help}</p>
+        {chosenService.key === 'patrol' && <fieldset className="client-setup-days"><legend>Attendance</legend>
+          <div className="client-setup-chips" role="radiogroup" aria-label="Patrol attendance">
+            <label className={!asAttended ? 'is-chosen' : ''}><input type="radio" name="attendance" checked={!asAttended} disabled={busy !== null} onChange={() => setScheduleForm({ ...scheduleForm, attendanceMode: 'scheduled' })} />Scheduled visits</label>
+            <label className={asAttended ? 'is-chosen' : ''}><input type="radio" name="attendance" checked={asAttended} disabled={busy !== null} onChange={() => setScheduleForm({ ...scheduleForm, attendanceMode: 'as_attended' })} />As attended</label>
+          </div>
+          {asAttended && <label><span>Patrol</span><select value={scheduleForm.patrolRouteId} disabled={busy !== null || patrolRoutesLoading || Boolean(patrolRoutesError)} required onChange={(event) => setScheduleForm({ ...scheduleForm, patrolRouteId: event.target.value })}>
+            <option value="">{patrolRoutesLoading ? 'Loading patrols...' : patrolRoutes.length ? 'Choose a patrol' : 'No active patrols'}</option>
+            {patrolRoutes.map((route) => <option key={route.id} value={route.id}>{route.name}</option>)}
+          </select></label>}
+          {asAttended && patrolRoutesError && <p role="alert">{patrolRoutesError}</p>}
+        </fieldset>}
+        {chosenService.kind === 'visits' && !asAttended && <>
+          <fieldset className="client-setup-days"><legend>Which days</legend>
+            <div className="client-setup-chips" role="radiogroup" aria-label="Which days">{DAY_PRESETS.map((preset) => <label key={preset.key} className={scheduleForm.preset === preset.key ? 'is-chosen' : ''}><input type="radio" name="days" checked={scheduleForm.preset === preset.key} onChange={() => setScheduleForm({ ...scheduleForm, preset: preset.key, days: preset.key === 'pick' ? scheduleForm.days : preset.days })} />{preset.label}</label>)}</div>
+            {scheduleForm.preset === 'pick' && <div className="client-setup-chips" role="group" aria-label="Days of the week">{[1, 2, 3, 4, 5, 6, 7].map((day) => <label key={day} className={scheduleForm.days.includes(day) ? 'is-chosen' : ''}><input type="checkbox" checked={scheduleForm.days.includes(day)} onChange={() => setScheduleForm({ ...scheduleForm, days: scheduleForm.days.includes(day) ? scheduleForm.days.filter((item) => item !== day) : [...scheduleForm.days, day].sort() })} />{DAY_SHORT[day]}</label>)}</div>}
+          </fieldset>
+          <fieldset className="client-setup-days"><legend>What hours</legend>
+            <div className="client-setup-chips" role="radiogroup" aria-label="What hours"><label className={scheduleForm.anyTime ? 'is-chosen' : ''}><input type="radio" name="hours" checked={scheduleForm.anyTime} onChange={() => setScheduleForm({ ...scheduleForm, anyTime: true })} />Any time of day (24-hour)</label><label className={!scheduleForm.anyTime ? 'is-chosen' : ''}><input type="radio" name="hours" checked={!scheduleForm.anyTime} onChange={() => setScheduleForm({ ...scheduleForm, anyTime: false })} />Between set hours</label></div>
+            {!scheduleForm.anyTime && <div className="client-setup-two"><label><span>From</span><input type="time" value={scheduleForm.start} onChange={(event) => setScheduleForm({ ...scheduleForm, start: event.target.value })} /></label><label><span>To</span><input type="time" value={scheduleForm.end} onChange={(event) => setScheduleForm({ ...scheduleForm, end: event.target.value })} /></label></div>}
+          </fieldset>
+          <div className="client-setup-three">
+            <label><span>Visits each shift</span><input type="number" min="1" max="24" value={scheduleForm.visits} onChange={(event) => setScheduleForm({ ...scheduleForm, visits: event.target.value })} /></label>
+            <label><span>At least (min) apart</span><input type="number" min="0" max="720" value={scheduleForm.gap} onChange={(event) => setScheduleForm({ ...scheduleForm, gap: event.target.value })} /></label>
+            <label><span>Stay (min) each visit</span><input type="number" min="0" max="480" value={scheduleForm.stay} onChange={(event) => setScheduleForm({ ...scheduleForm, stay: event.target.value })} /></label>
+          </div>
+          <label><span>What the officer should do there (optional)</span><input value={scheduleForm.notes} onChange={(event) => setScheduleForm({ ...scheduleForm, notes: event.target.value })} placeholder="e.g. Check the back roller door and the fuel cage" /></label>
         </>}
-      </section>
-    </div>
-    <footer className="client-setup-savebar"><div><strong>{dirtyCount ? `${dirtyCount} unsaved service rows` : 'No unsaved service changes'}</strong><small>Sequential governed saves · completed rows stay saved if another fails</small></div><button type="button" className="btn btn-primary" disabled={!canEdit || busy || loading || !dirtyCount} onClick={saveMatrix}>{busy ? 'Working…' : 'Save changes'}</button></footer>
-    {drawer && <div className="client-setup-drawer-backdrop"><section ref={drawerRef} className="client-setup-drawer" role="dialog" aria-modal="true" aria-label={drawer === 'bob' ? 'Bob Quick Setup' : `${drawer} details`} onKeyDown={(event) => { if (event.key === 'Escape' && !busy) setDrawer(null); }}><header><h2>{drawer === 'bob' ? 'Bob Quick Setup' : drawer === 'spatial' ? 'Spatial context' : drawer === 'invite' ? 'Client invitation' : drawer === 'location' ? 'Add Location' : 'Client organization'}</h2><button type="button" autoFocus aria-label="Close details" disabled={busy} onClick={() => setDrawer(null)}>Close</button></header>
-      {drawer === 'organization' && <form onSubmit={saveClient}><p>The client is own-rooted. The operational agreement links this organization to the provider; “parent” describes this workspace only.</p><label><span>Client name</span><input required disabled={Boolean(client) || busy || !canEdit} value={clientForm.name} onChange={(event) => setClientForm({ ...clientForm, name: event.target.value })} /></label>{matches.length > 0 && <div className="client-setup-matches"><span>Already on the books?</span>{matches.map((match) => <button key={match.id} type="button" onClick={() => { setDrawer(null); navigate(`${location.pathname}?account=${match.id}`, { replace: true }); }}>{match.name}</button>)}</div>}{(!client || !contactSaved) && <><div className="client-setup-two">{(['firstName', 'lastName'] as const).map((key) => <label key={key}><span>Contact {key === 'firstName' ? 'first' : 'last'} name</span><input disabled={busy || !canEdit} value={clientForm[key]} onChange={(event) => setClientForm({ ...clientForm, [key]: event.target.value })} /></label>)}</div>{(['email', 'phone'] as const).map((key) => <label key={key}><span>{key === 'email' ? 'Email' : 'Phone'}</span><input type={key === 'email' ? 'email' : 'tel'} disabled={busy || !canEdit || Boolean(client)} value={clientForm[key]} onChange={(event) => setClientForm({ ...clientForm, [key]: event.target.value })} /></label>)}<button type="submit" disabled={busy || !canEdit}>Save organization and contact</button></>}{client && contactSaved && <><p>{client.contact_email || client.contact_phone || 'No contact details recorded'}</p><button type="button" onClick={() => leave('crm')}>Manage organization and contacts</button></>}</form>}
-      {drawer === 'location' && <form onSubmit={savePlace}><p>Creating this location saves immediately. Service changes remain drafts until the workspace save bar is used.</p><label><span>Place name</span><input required disabled={busy || !canEdit} value={placeForm.name} onChange={(event) => setPlaceForm({ ...placeForm, name: event.target.value })} /></label><label><span>What kind of place</span><select disabled={busy || !canEdit} value={placeForm.type} onChange={(event) => setPlaceForm({ ...placeForm, type: event.target.value })}>{PLACE_TYPES.map((type) => <option key={type.key} value={type.key}>{type.label}</option>)}</select></label><label><span>Address</span><input disabled={busy || !canEdit} value={placeForm.address} onChange={(event) => { setPlaceForm({ ...placeForm, address: event.target.value }); setChosenAddress(null); setCandidates([]); }} /></label><button type="button" disabled={busy || placeForm.address.length < 4} onClick={() => void run(async () => { const found = await resolveAddressCandidates(placeForm.address, 5); setCandidates(found); if (!found.length) throw new Error('No address matched. Try the street number, name and suburb.'); if (found.length === 1) setChosenAddress(found[0]); })}>Find address</button><div role="radiogroup" aria-label="Address matches">{candidates.map((candidate, index) => <label className="client-setup-check" key={`${candidate.label}-${index}`}><input type="radio" name="address" checked={chosenAddress === candidate} onChange={() => setChosenAddress(candidate)} />{candidate.label}</label>)}</div><button type="submit" disabled={busy || !canEdit || !chosenAddress}>Create location</button></form>}
-      {drawer === 'spatial' && selectedPlace && <><p>Boundary edits use the existing proposal and human-verification path and save separately from service drafts.</p>{selectedPlace.gps_lat != null && selectedPlace.gps_lng != null ? <LocationHouseMap organizationId={client?.id ?? ''} house={{ name: selectedPlace.name, address: selectedPlace.address }} sites={[{ ...selectedPlace, boundary_status: 'provisional' }]} zones={[]} editableEntity={canEdit ? { type: 'client_site', id: selectedPlace.id, organizationId: client?.id ?? '', centerLat: selectedPlace.gps_lat, centerLng: selectedPlace.gps_lng, onSaved: (verified) => setPlaces((current) => current.map((place) => place.id === selected ? { ...place, boundary_verification: verified ? 'verified' : 'unverified' } : place)) } : undefined} /> : <p>No resolved map pin is recorded. Use the governed location workspace to resolve the address.</p>}</>}
-      {drawer === 'invite' && <><p>Optional client portal access. Provider configuration does not wait for portal acceptance.</p><p>{inviteEmail ? `Invitation sent to ${inviteEmail}` : client?.contact_email ?? 'No primary email recorded'}</p><button type="button" disabled={!client || !canEdit || busy || Boolean(inviteEmail)} onClick={sendInvite}>Send invitation</button></>}
-      {drawer === 'bob' && <><p>Contract extraction must preserve source classification, provenance and human review before any promotion.</p><label><span>Paste contract</span><textarea disabled rows={6} placeholder="Direct contract-to-location auto-fill is not available on this governed path." /></label><button type="button" disabled>Propose location drafts</button><p role="note">The existing Document Studio can ingest classified sources and record CRM agreement proposals for human review. No approved bridge currently promotes those proposals into this matrix. Nothing is sent to a model or saved from this panel.</p><button type="button" onClick={() => leave('document-studio')}>Open governed Document Studio</button></>}
-    </section></div>}
+        {asAttended && <label><span>Officer instructions (optional)</span><input value={scheduleForm.notes} onChange={(event) => setScheduleForm({ ...scheduleForm, notes: event.target.value })} /></label>}
+        {chosenService.kind === 'response' && <label><span>Be on scene within (minutes)</span><input type="number" min="1" max="1440" value={scheduleForm.slaMinutes} onChange={(event) => setScheduleForm({ ...scheduleForm, slaMinutes: event.target.value })} /></label>}
+        <p className="client-setup-readback"><ClipboardList size={14} aria-hidden="true" /> {serviceWords(chosenService.label, chosenService.kind, scheduleForm)}</p>
+        <footer>
+          <button type="submit" className="btn btn-secondary" disabled={busy !== null || !servicePlace || (asAttended && (patrolRoutesLoading || Boolean(patrolRoutesError) || !scheduleForm.patrolRouteId))}>{busy === 'service' ? 'Saving…' : 'Save this service'}</button>
+          <button type="button" className="btn btn-primary" disabled={services.length === 0 || busy !== null} onClick={() => setStep(4)}>Continue <ArrowRight size={15} aria-hidden="true" /></button>
+        </footer>
+      </form>
+    </section>}
+
+    {step === 4 && <section className="client-setup-card" aria-labelledby="step-login">
+      <div className="client-setup-card-head"><Send size={20} aria-hidden="true" /><div><h2 id="step-login">Who logs in for {client?.name ?? 'the client'}?</h2><p>Invite the contact to the client portal. They will see their places, the visits made, and reports — nothing about your staff.</p></div></div>
+      <div className="client-setup-invite"><strong>{clientForm.email.trim() || client?.contact_email || 'No email on file'}</strong><span>{inviteState === 'sent' ? `Invitation sent to ${inviteEmail}.` : 'Sending is optional. You can do it later from the client\u2019s page.'}</span></div>
+      <footer>
+        {inviteState !== 'sent' && <button type="button" className="btn btn-secondary" onClick={() => { setInviteState('skipped'); setStep(5); void finish(); }} disabled={busy !== null}>Skip for now</button>}
+        {inviteState !== 'sent' && <button type="button" className="btn btn-primary" onClick={sendInvite} disabled={busy !== null || !(clientForm.email.trim() || client?.contact_email)}>{busy === 'invite' ? 'Sending…' : 'Send invitation'}</button>}
+        {inviteState === 'sent' && <button type="button" className="btn btn-primary" onClick={finish} disabled={busy !== null}>{busy === 'finish' ? 'Finishing…' : 'Finish setup'} <ArrowRight size={15} aria-hidden="true" /></button>}
+      </footer>
+    </section>}
+
+    {step === 5 && <section className="client-setup-card is-done" aria-labelledby="step-done">
+      <div className="client-setup-card-head"><Building2 size={20} aria-hidden="true" /><div><h2 id="step-done">{busy === 'finish' ? `Finishing ${client?.name}…` : `${client?.name} is set up`}</h2><p>{busy === 'finish' ? 'Building the patrol run from the services you saved.' : runResult?.words ?? 'Everything you entered is saved.'}</p></div></div>
+      <dl className="client-setup-summary">
+        <div><dt>Places</dt><dd>{places.map((place) => place.name).join(', ') || 'None yet'}</dd></div>
+        <div><dt>Services</dt><dd>{services.length ? services.map((service) => service.words).join('; ') : 'None yet'}</dd></div>
+        <div><dt>Client login</dt><dd>{inviteState === 'sent' ? `Invited: ${inviteEmail}` : 'Not invited yet — you can do this from the client\u2019s page.'}</dd></div>
+      </dl>
+      <h3>What happens next</h3>
+      <div className="client-setup-next">
+        {runResult?.workUnitId && <button type="button" className="btn btn-primary" onClick={() => onNavigate('roster', { workUnitId: runResult.workUnitId ?? undefined, accountId: client?.id })}>Roster the patrol run <ArrowRight size={15} aria-hidden="true" /></button>}
+        {!runResult?.workUnitId && services.some((service) => service.module_key === 'static_guarding') && <button type="button" className="btn btn-primary" onClick={() => onNavigate('roster', { accountId: client?.id })}>Roster the guard post <ArrowRight size={15} aria-hidden="true" /></button>}
+        {places[0] && <button type="button" className="btn btn-secondary" onClick={() => onNavigate('sites', { siteId: places[0].id })}>Check the place on the map</button>}
+        <button type="button" className="btn btn-secondary" onClick={() => onNavigate('crm', { accountId: client?.id })}>Open the client's page</button>
+      </div>
+      <p className="client-setup-hint">Prices and invoicing live on the client's page under Finance. Nothing is billed until a rate or quote is set there.</p>
+    </section>}
   </div>;
 };
+
 export default ClientSetupPage;

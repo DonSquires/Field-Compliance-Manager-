@@ -1,9 +1,28 @@
-import React, { useCallback, useEffect, useRef, useState } from 'react';
+/**
+ * VehicleSearchPage.tsx (Admin field-ops sub-area: 'vehicle-search')
+ *
+ * Canonical schema:
+ * - canonical_vehicle_public (plate registry projection: rego/wof/cof status,
+ *   homeless_status signal; canonical_vehicles itself stays Bob-only)
+ * - canonical_scv_public (NZSCV certification status)
+ * - entity_flags (this organisation's own of-interest flags, RLS-scoped) via
+ *   raise_entity_flag / resolve_entity_flag (governed, audited)
+ * - get_safety_warnings (platform-wide, redacted H&S warnings)
+ * - observations (scan/observation history with zone context)
+ * - breach_alerts (compliance breaches recorded for this vehicle)
+ */
+
+import React, { useCallback, useEffect, useState } from 'react';
 import { useSearchParams } from 'react-router-dom';
+import { SafetyWarningsPanel } from '../components/SafetyWarningsPanel';
+import VehicleProfile from '../components/VehicleProfile';
 import { useAuth } from '../context/AuthContext';
 import { normalizePlateNumber, vehicleHistoryOrFilter } from '../lib/canonicalIdentity';
-import { SAFETY_HAZARD_CLASSES, hazardClassLabel, describeWarningSource, warningContactPath, type SafetyWarning } from '../lib/safetyWarnings';
+import { vehiclePlateSearchPattern } from '../lib/vehiclePlateSearch';
+import { openVehicleSearchPopout } from '../lib/vehicleSearchPopout';
+import { describeLoadFailures } from '../lib/friendlyLoadError';
 import { supabase } from '../lib/supabase';
+import './PageStyles.css';
 import './VehicleSearchPage.css';
 
 interface Vehicle {
@@ -20,22 +39,22 @@ interface Vehicle {
   wof_expiry: string | null;
   cof_status: string | null;
   cof_expiry: string | null;
-  homeless_status: string | null;
+  homeless_status: string;
   external_data_source_name: string | null;
   external_data_source_url: string | null;
   external_data_source_location: string | null;
   external_data_source_checked_at: string | null;
 }
-interface EntityFlag {
-  id: string;
-  entity_id: string;
-  flag_type: string;
-  alert_level: string | null;
-  reason: string | null;
-  active: boolean;
-  raised_at: string;
-  raised_by: string | null;
+
+interface VehicleMatch {
+  id: string | null;
+  plate_number: string;
+  make: string | null;
+  model: string | null;
+  year: number | null;
+  colour: string | null;
 }
+
 interface ScvRecord {
   id: string;
   certificate_number: string | null;
@@ -43,24 +62,54 @@ interface ScvRecord {
   expiry_date: string | null;
   issued_date: string | null;
 }
-interface Observation {
+
+interface EntityFlag {
+  id: string;
+  flag_type: string;
+  alert_level: string | null;
+  reason: string | null;
+  active: boolean;
+  raised_at: string;
+}
+
+interface RecentObservation {
   id: string;
   observed_at: string;
   is_compliant: boolean | null;
   compliance_reason: string | null;
   nights_this_zone: number | null;
-  zone: { name: string } | null;
+  zone_name: string | null;
+  plate_number: string | null;
+  module_key: string | null;
+  compliance_status: string | null;
+  observed_vehicle: string | null;
+  photo_path: string | null;
 }
-interface Breach {
+
+const OBSERVATION_HISTORY_LIMIT = 50;
+
+function observationOutcome(obs: RecentObservation): { label: string; tone: string } {
+  if (obs.compliance_status) {
+    const status = obs.compliance_status.replace(/_/g, ' ');
+    const tone = /non|breach|fail/i.test(obs.compliance_status) ? 'badge-danger' : /compliant|ok|pass/i.test(obs.compliance_status) ? 'badge-success' : 'badge-info';
+    return { label: status.toUpperCase(), tone };
+  }
+  if (obs.is_compliant === true) return { label: 'COMPLIANT', tone: 'badge-success' };
+  if (obs.is_compliant === false) return { label: 'NON-COMPLIANT', tone: 'badge-danger' };
+  return { label: 'LOGGED', tone: 'badge-info' };
+}
+
+interface VehicleBreach {
   id: string;
   breach_type: string;
   status: string;
   nights_count: number | null;
   notes: string | null;
   created_at: string;
-  zone: { name: string } | null;
+  zone_name: string | null;
 }
-interface Permit {
+
+interface PermitRecord {
   id: string;
   holder_name: string | null;
   permit_number: string;
@@ -71,366 +120,736 @@ interface Permit {
   status: string;
   firearm_licence_valid: boolean | null;
   conditions: string | null;
-}
-interface Dossier {
-  safety: SafetyWarning[];
-  flags: EntityFlag[];
-  scv: ScvRecord | null;
-  observations: Observation[];
-  breaches: Breach[];
-  permits: Permit[];
-  errors: Record<string, string>;
-}
-type Filter = 'All' | 'VOI / Stolen' | 'Site Banned' | 'Compliance Expired';
-const FILTERS: Filter[] = ['All', 'VOI / Stolen', 'Site Banned', 'Compliance Expired'];
-const VEHICLE_COLUMNS = 'id, plate_number, make, model, year, colour, body_type, rego_status, rego_expiry, wof_status, wof_expiry, cof_status, cof_expiry, homeless_status, external_data_source_name, external_data_source_url, external_data_source_location, external_data_source_checked_at';
-const FLAG_COLUMNS = 'id, entity_id, flag_type, alert_level, reason, active, raised_at, raised_by';
-const UUID = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
-const emptyDossier = (): Dossier => ({ safety: [], flags: [], scv: null, observations: [], breaches: [], permits: [], errors: {} });
-const message = (error: unknown): string => error && typeof error === 'object' && 'message' in error ? String(error.message) : 'Query unavailable. Check your access or connection.';
-const date = (value: string | null | undefined): string => value ? new Date(value).toLocaleString('en-NZ') : 'Unavailable';
-const platePattern = (input: string): string => input.toUpperCase().split('%').map(normalizePlateNumber).join('%');
-
-async function bounded<T>(operation: PromiseLike<T>, controller: AbortController): Promise<T> {
-  let timer: ReturnType<typeof setTimeout> | undefined;
-  try {
-    return await Promise.race([
-      Promise.resolve(operation),
-      new Promise<never>((_, reject) => {
-        timer = setTimeout(() => { reject(new Error('Query timed out after 10 seconds.')); controller.abort(); }, 10_000);
-      }),
-    ]);
-  } finally {
-    clearTimeout(timer);
-  }
+  vehicle_plates: string[] | null;
 }
 
 const VehicleSearchPage: React.FC = () => {
   const { profile } = useAuth();
-  const [params] = useSearchParams();
+  const [searchParams] = useSearchParams();
+  const isPopout = searchParams.get('popout') === '1';
   const [plate, setPlate] = useState('');
-  const [results, setResults] = useState<Vehicle[]>([]);
-  const [resultFlags, setResultFlags] = useState<EntityFlag[] | null>(null);
-  const [resultFlagError, setResultFlagError] = useState('');
-  const [filter, setFilter] = useState<Filter>('All');
+  const [selectedPlate, setSelectedPlate] = useState('');
   const [vehicle, setVehicle] = useState<Vehicle | null>(null);
-  const [dossier, setDossier] = useState<Dossier>(emptyDossier);
-  const [loading, setLoading] = useState(false);
-  const [detailLoading, setDetailLoading] = useState(false);
+  const [matches, setMatches] = useState<VehicleMatch[] | null>(null);
+  const [moreMatches, setMoreMatches] = useState(false);
+  const [lastSearch, setLastSearch] = useState<{ query: string; matches: VehicleMatch[] } | null>(null);
+  const [scv, setScv] = useState<ScvRecord | null>(null);
+  const [flags, setFlags] = useState<EntityFlag[]>([]);
+  const [observations, setObservations] = useState<RecentObservation[]>([]);
+  const [breaches, setBreaches] = useState<VehicleBreach[]>([]);
+  const [permits, setPermits] = useState<PermitRecord[]>([]);
   const [searched, setSearched] = useState(false);
-  const [queryError, setQueryError] = useState('');
-  const [detailError, setDetailError] = useState('');
-  const [latency, setLatency] = useState<number | null>(null);
-  const [detailLatency, setDetailLatency] = useState<number | null>(null);
-  const [mobilePane, setMobilePane] = useState<'results' | 'dossier'>('results');
-  const [form, setForm] = useState<null | 'interest' | 'safety'>(null);
-  const [flagType, setFlagType] = useState('watchlist');
-  const [hazard, setHazard] = useState('violence_or_aggression');
-  const [severity, setSeverity] = useState('medium');
-  const [reason, setReason] = useState('');
-  const [saving, setSaving] = useState(false);
-  const [writeNotice, setWriteNotice] = useState('');
-  const [writeError, setWriteError] = useState('');
-  const searchRequest = useRef(0);
-  const detailRequest = useRef(0);
-  const searchAbort = useRef<AbortController | null>(null);
-  const detailAbort = useRef<AbortController | null>(null);
-  const selectedId = useRef<string | null>(null);
-  const lastQuery = useRef<{ input: string; id?: string }>({ input: '' });
-  const dossierHeading = useRef<HTMLHeadingElement>(null);
-  const resultButtons = useRef(new Map<string, HTMLButtonElement>());
-  const requestId = useRef<string | null>(null);
-  const canRaise = Boolean(profile?.id && profile.organizationId);
+  const [matchPhotos, setMatchPhotos] = useState<Record<string, string>>({});
+  const [observationPhotos, setObservationPhotos] = useState<Record<string, string>>({});
 
-  const loadDossier = useCallback(async (selected: Vehicle) => {
-    detailAbort.current?.abort();
-    const controller = new AbortController();
-    detailAbort.current = controller;
-    const sequence = ++detailRequest.current;
-    const start = performance.now();
-    requestId.current = null;
-    selectedId.current = selected.id;
-    setVehicle(selected);
-    setDossier(emptyDossier());
-    setDetailLoading(true);
-    setDetailError('');
-    setDetailLatency(null);
-    setForm(null);
-    setWriteNotice('');
-    setWriteError('');
-    try {
-      if (!UUID.test(selected.id)) throw new Error('Canonical vehicle identity is unavailable.');
-      const resolvedPlate = normalizePlateNumber(selected.plate_number);
-      const historyFilter = vehicleHistoryOrFilter(resolvedPlate, selected.id);
-      // Canonical Tier 0 attributes are global; flags remain explicitly org-scoped plus RLS.
-      const [safety, flags, scv, observations, breaches, permits] = await bounded(Promise.all([
-        supabase.rpc('get_safety_warnings', { p_entity_type: 'vehicle', p_entity_ids: [selected.id] }).abortSignal(controller.signal),
-        profile?.organizationId
-          ? supabase.from('entity_flags').select(FLAG_COLUMNS).eq('entity_type', 'vehicle').eq('entity_id', selected.id).eq('organization_id', profile.organizationId).is('hazard_class', null).order('raised_at', { ascending: false }).limit(100).abortSignal(controller.signal)
-          : Promise.resolve({ data: null, error: { message: 'An active organisation is required to read flags.' } }),
-        supabase.from('canonical_scv_public').select('id, certificate_number, certificate_status, expiry_date, issued_date').eq('plate_number', resolvedPlate).maybeSingle().abortSignal(controller.signal),
-        supabase.from('observations').select('id, observed_at, is_compliant, compliance_reason, nights_this_zone, zone:zone_id(name)').or(historyFilter).order('observed_at', { ascending: false }).limit(25).abortSignal(controller.signal),
-        supabase.from('breach_alerts').select('id, breach_type, status, nights_count, notes, created_at, zone:location_zones!breach_alerts_zone_id_fkey(name)').eq('plate_number', resolvedPlate).order('created_at', { ascending: false }).limit(25).abortSignal(controller.signal),
-        supabase.from('person_permits_fieldwork').select('id, holder_name, permit_number, permit_type, forest_areas, date_from, date_to, status, firearm_licence_valid, conditions').contains('vehicle_plates', [resolvedPlate]).order('date_to', { ascending: false }).limit(50).abortSignal(controller.signal),
-      ]), controller);
-      if (sequence !== detailRequest.current) return;
-      const errors: Record<string, string> = {};
-      for (const [key, response] of Object.entries({ safety, flags, scv, observations, breaches, permits })) {
-        if (response.error) errors[key] = message(response.error);
+  // Observation photos live in the private `scans` bucket; storage RLS only signs folders the caller's
+  // organisations may read, so observations shared from elsewhere simply show no thumbnail.
+  useEffect(() => {
+    const paths = Array.from(new Set(observations.map((obs) => obs.photo_path).filter((path): path is string => Boolean(path) && !/^https?:/i.test(path as string))));
+    if (paths.length === 0) { setObservationPhotos({}); return; }
+    let active = true;
+    void (async () => {
+      try {
+        const { data, error: signError } = await supabase.storage.from('scans').createSignedUrls(paths, 900);
+        if (!active) return;
+        if (signError || !data) { setObservationPhotos({}); return; }
+        setObservationPhotos(Object.fromEntries(data.filter((item) => item.signedUrl && !item.error && item.path).map((item) => [item.path as string, item.signedUrl as string])));
+      } catch {
+        if (active) setObservationPhotos({});
       }
-      setDossier({
-        safety: (safety.data ?? []) as SafetyWarning[],
-        flags: (flags.data ?? []) as EntityFlag[],
-        scv: scv.data as ScvRecord | null,
-        observations: (observations.data ?? []) as unknown as Observation[],
-        breaches: (breaches.data ?? []) as unknown as Breach[],
-        permits: (permits.data ?? []) as Permit[],
-        errors,
-      });
-    } catch (error) {
-      if (sequence === detailRequest.current) setDetailError(message(error));
-    } finally {
-      if (sequence === detailRequest.current) {
-        setDetailLoading(false);
-        setDetailLatency(Math.round(performance.now() - start));
-      }
-    }
-  }, [profile?.organizationId]);
+    })();
+    return () => { active = false; };
+  }, [observations]);
 
-  const search = useCallback(async (input: string, id?: string) => {
-    searchAbort.current?.abort();
-    detailAbort.current?.abort();
-    ++detailRequest.current;
-    selectedId.current = null;
-    const controller = new AbortController();
-    searchAbort.current = controller;
-    const sequence = ++searchRequest.current;
-    lastQuery.current = { input, id };
-    const start = performance.now();
-    setLoading(true);
-    setDetailLoading(false);
-    setQueryError('');
-    setResultFlagError('');
-    setLatency(null);
-    setSearched(true);
-    setResults([]);
-    setResultFlags(null);
-    setVehicle(null);
-    setDossier(emptyDossier());
-    setMobilePane('results');
-    try {
-      const pattern = platePattern(input);
-      if (id ? !UUID.test(id) : !/[A-Z0-9]/.test(pattern)) throw new Error('Enter a plate or wildcard pattern such as RJ%9%8.');
-      let query = supabase.from('canonical_vehicle_public').select(VEHICLE_COLUMNS);
-      query = id ? query.eq('id', id) : query.ilike('plate_number', pattern);
-      const response = await bounded(query.order('plate_number', { ascending: true }).limit(50).abortSignal(controller.signal), controller);
-      if (response.error) throw response.error;
-      if (sequence !== searchRequest.current) return;
-      const rows = (response.data ?? []) as Vehicle[];
-      setResults(rows);
-      if (rows.length) {
-        const ids = rows.map(row => row.id).filter(value => UUID.test(value));
-        if (profile?.organizationId && ids.length) {
-          const flags = await bounded(supabase.from('entity_flags').select(FLAG_COLUMNS).eq('organization_id', profile.organizationId).eq('entity_type', 'vehicle').in('entity_id', ids).is('hazard_class', null).eq('active', true).limit(1000).abortSignal(controller.signal), controller);
-          if (sequence !== searchRequest.current) return;
-          if (flags.error || (flags.data?.length ?? 0) >= 1000) {
-            setResultFlagError(flags.error ? message(flags.error) : 'Flag result limit reached; flag filters are unavailable.');
-          } else setResultFlags((flags.data ?? []) as EntityFlag[]);
-        } else setResultFlagError('An active organisation is required to read flags.');
-        if (rows.length === 1) void loadDossier(rows[0]);
-      } else setResultFlags([]);
-    } catch (error) {
-      if (sequence === searchRequest.current) setQueryError(message(error));
-    } finally {
-      if (sequence === searchRequest.current) {
-        setLoading(false);
-        setLatency(Math.round(performance.now() - start));
+  // Thumbnails are best-effort: a failed photo lookup must never hide or delay the registration list.
+  useEffect(() => {
+    const ids = (matches ?? []).map((match) => match.id).filter((id): id is string => Boolean(id));
+    if (ids.length === 0) { setMatchPhotos({}); return; }
+    let active = true;
+    void (async () => {
+      try {
+        // ATLAS READS: vehicle_profile_photos — private, caller-RLS media.
+        const { data, error: photoError } = await supabase.from('vehicle_profile_photos').select('canonical_vehicle_id, storage_path').in('canonical_vehicle_id', ids);
+        if (photoError || !data?.length) { if (active) setMatchPhotos({}); return; }
+        const rows = data as Array<{ canonical_vehicle_id: string; storage_path: string }>;
+        const { data: signed, error: signError } = await supabase.storage.from('vehicle-profile-photos').createSignedUrls(rows.map((row) => row.storage_path), 3600);
+        if (signError || !signed) { if (active) setMatchPhotos({}); return; }
+        const byPath = new Map(signed.filter((item) => item.signedUrl && !item.error).map((item) => [item.path, item.signedUrl] as const));
+        const next: Record<string, string> = {};
+        for (const row of rows) { const url = byPath.get(row.storage_path); if (url) next[row.canonical_vehicle_id] = url; }
+        if (active) setMatchPhotos(next);
+      } catch {
+        if (active) setMatchPhotos({});
       }
+    })();
+    return () => { active = false; };
+  }, [matches]);
+  const [loading, setLoading] = useState(false);
+  const [error, setError] = useState<string | null>(null);
+  const [showFlagForm, setShowFlagForm] = useState(false);
+  const [flagForm, setFlagForm] = useState({ flag_type: 'watchlist', alert_level: 'medium', reason: '' });
+
+  const searchVehicle = useCallback(async (plateInput: string, canonicalVehicleId?: string) => {
+    const cleanPlate = normalizePlateNumber(plateInput);
+    if (!cleanPlate && !canonicalVehicleId) return;
+    try {
+      setLoading(true);
+      setError(null);
+      setSearched(true);
+      setMatches(null);
+      setVehicle(null);
+      setScv(null);
+      setFlags([]);
+      setPermits([]);
+      setObservations([]);
+      setBreaches([]);
+      setShowFlagForm(false);
+
+      // ATLAS READS: canonical_vehicle_public, canonical_scv_public, person_permits_fieldwork, observations, breach_alerts
+      // Resolve the canonical vehicle first so observation history follows the
+      // global identity link, not only the plate text recorded at scan time.
+      let vehicleQuery = supabase
+        .from('canonical_vehicle_public')
+        .select('id, plate_number, make, model, year, colour, body_type, rego_status, rego_expiry, wof_status, wof_expiry, cof_status, cof_expiry, homeless_status, external_data_source_name, external_data_source_url, external_data_source_location, external_data_source_checked_at');
+      vehicleQuery = canonicalVehicleId
+        ? vehicleQuery.eq('id', canonicalVehicleId)
+        : vehicleQuery.ilike('plate_number', cleanPlate);
+      const vehRes = await vehicleQuery.maybeSingle();
+      if (vehRes.error) throw vehRes.error;
+      const vehData = vehRes.data as Vehicle | null;
+      if (canonicalVehicleId && !vehData) throw new Error('The linked canonical vehicle is unavailable or you do not have access.');
+      const resolvedPlate = normalizePlateNumber(vehData?.plate_number ?? cleanPlate);
+      setSelectedPlate(resolvedPlate);
+      if (vehData?.plate_number) setPlate(vehData.plate_number);
+
+      const historyFilter = vehicleHistoryOrFilter(resolvedPlate, vehData?.id ?? canonicalVehicleId ?? null);
+      const [scvRes, permitRes, obsRes, breachRes] = await Promise.all([
+        supabase
+          .from('canonical_scv_public')
+          .select('id, certificate_number, certificate_status, expiry_date, issued_date')
+          .ilike('plate_number', resolvedPlate)
+          .maybeSingle(),
+        supabase
+          .from('person_permits_fieldwork')
+          .select('id, holder_name, permit_number, permit_type, forest_areas, date_from, date_to, status, firearm_licence_valid, conditions, vehicle_plates')
+          .contains('vehicle_plates', [resolvedPlate])
+          .order('date_to', { ascending: false }),
+        supabase
+          .from('observations')
+          .select('id, observed_at, is_compliant, compliance_reason, compliance_status, nights_this_zone, plate_number, module_key, vehicle_make, vehicle_model, vehicle_colour, photo_url, zone:zone_id(name)')
+          .or(historyFilter)
+          .order('observed_at', { ascending: false })
+          .limit(OBSERVATION_HISTORY_LIMIT),
+        supabase
+          .from('breach_alerts')
+          .select('id, breach_type, status, nights_count, notes, created_at, zone:location_zones!breach_alerts_zone_id_fkey(name)')
+          .ilike('plate_number', resolvedPlate)
+          .order('created_at', { ascending: false })
+          .limit(10),
+      ]);
+
+      const historyFailure = describeLoadFailures([
+        ['self-containment certification', scvRes.error],
+        ['vehicle permits', permitRes.error],
+        ['vehicle observation history', obsRes.error],
+        ['vehicle breaches', breachRes.error],
+      ]);
+      if (historyFailure) {
+        throw new Error(obsRes.error?.code === '57014'
+          ? `${historyFailure} Vehicle observation history timed out.`
+          : historyFailure);
+      }
+      setVehicle(vehData);
+      setScv((scvRes.data as ScvRecord) || null);
+      setPermits((permitRes.data as PermitRecord[]) || []);
+
+      setObservations(
+        ((obsRes.data as any[]) || []).map((row) => ({
+          id: row.id,
+          observed_at: row.observed_at,
+          is_compliant: row.is_compliant,
+          compliance_reason: row.compliance_reason,
+          nights_this_zone: row.nights_this_zone,
+          zone_name: row.zone?.name ?? null,
+          plate_number: row.plate_number ?? null,
+          module_key: row.module_key ?? null,
+          compliance_status: row.compliance_status ?? null,
+          observed_vehicle: [row.vehicle_colour, row.vehicle_make, row.vehicle_model].filter(Boolean).join(' ') || null,
+          photo_path: typeof row.photo_url === 'string' && row.photo_url ? row.photo_url : null,
+        }))
+      );
+
+      setBreaches(
+        ((breachRes.data as any[]) || []).map((row) => ({
+          id: row.id,
+          breach_type: row.breach_type,
+          status: row.status,
+          nights_count: row.nights_count,
+          notes: row.notes,
+          created_at: row.created_at,
+          zone_name: row.zone?.name ?? null,
+        }))
+      );
+
+      if (vehData) {
+        // ATLAS READS: entity_flags — this organisation's own of-interest flags (safety warnings are shown by SafetyWarningsPanel)
+        const { data: flagData, error: flagErr } = await supabase
+          .from('entity_flags')
+          .select('id, flag_type, alert_level, reason, active, raised_at')
+          .eq('entity_type', 'vehicle')
+          .eq('entity_id', vehData.id)
+          .is('hazard_class', null)
+          .order('raised_at', { ascending: false });
+
+        if (flagErr) throw flagErr;
+        setFlags((flagData as EntityFlag[]) || []);
+      } else {
+        setFlags([]);
+      }
+    } catch (err) {
+      setError(err instanceof Error ? err.message : describeLoadFailures([
+        ['vehicle details', { message: err && typeof err === 'object' && 'message' in err ? String(err.message) : String(err) }],
+      ]));
+    } finally {
+      setLoading(false);
     }
-  }, [profile?.organizationId, loadDossier]);
+  }, []);
 
   useEffect(() => {
-    const id = params.get('vehicle')?.trim();
-    const input = params.get('plate')?.trim();
-    if (id || input) { setPlate(input ?? ''); void search(input ?? '', id); }
-    return () => {
-      ++searchRequest.current;
-      ++detailRequest.current;
-      searchAbort.current?.abort();
-      detailAbort.current?.abort();
-      selectedId.current = null;
-    };
-  }, [params, search]);
+    const canonicalVehicleId = searchParams.get('vehicle')?.trim();
+    const routedPlate = searchParams.get('plate')?.trim();
+    if (canonicalVehicleId) {
+      void searchVehicle('', canonicalVehicleId);
+    } else if (routedPlate) {
+      setPlate(routedPlate);
+      void searchVehicle(routedPlate);
+    }
+  }, [searchParams, searchVehicle]);
 
-  const selectVehicle = (row: Vehicle) => {
-    setMobilePane('dossier');
-    void loadDossier(row);
-    requestAnimationFrame(() => dossierHeading.current?.focus());
+  const handleSearch = (e: React.FormEvent) => {
+    e.preventDefault();
+    void findVehicles();
   };
-  const showResults = () => {
-    setMobilePane('results');
-    requestAnimationFrame(() => { if (vehicle) resultButtons.current.get(vehicle.id)?.focus(); });
-  };
-  const updateFlag = async (event?: React.FormEvent, flagId?: string) => {
-    event?.preventDefault();
-    if (!vehicle || !canRaise || saving) return;
-    const id = vehicle.id;
-    setSaving(true);
-    setWriteError('');
-    setWriteNotice('');
+
+  const findVehicles = async () => {
+    setError(null);
+    setSearched(false);
+    setMatches(null);
+    setShowFlagForm(false);
     try {
-      // Writes are not cancelled: the audited server operation may already have committed.
-      const response = flagId
-        ? await supabase.rpc('resolve_entity_flag', { p_flag_id: flagId, p_note: null })
-        : await supabase.rpc('raise_entity_flag', {
-          p_client_request_id: requestId.current ?? (requestId.current = crypto.randomUUID()),
-          p_entity_type: 'vehicle', p_entity_id: id,
-          p_flag_type: form === 'safety' ? 'safety_warning' : flagType.trim(),
-          p_alert_level: severity, p_reason: reason.trim(),
-          p_hazard_class: form === 'safety' ? hazard : null,
-        });
-      if (response.error) throw response.error;
-      requestId.current = null;
-      if (selectedId.current !== id) return;
-      const returned = response.data as EntityFlag;
-      // Refresh authoritative reads; never synthesize a server flag from form values.
-      setResultFlags(current => current && returned?.id ? [...current.filter(flag => flag.id !== returned.id), ...(returned.active && !('hazard_class' in returned && returned.hazard_class) ? [returned] : [])] : null);
-      await loadDossier(vehicle);
-      if (selectedId.current === id) {
-        setReason('');
-        setWriteNotice(flagId ? 'Flag resolved · audited by the server.' : 'Flag raised · audited by the server.');
+      const pattern = vehiclePlateSearchPattern(plate);
+      setLoading(true);
+      // ATLAS CALLS: search_vehicle_registrations — caller-scoped discovery only;
+      // history and flag actions always use one selected canonical identity.
+      const { data, error: queryError } = await supabase.rpc('search_vehicle_registrations', {
+        p_pattern: pattern, p_limit: 51,
+      });
+      if (queryError) {
+        const failure = describeLoadFailures([['matching registrations', queryError]]);
+        setError(queryError.code === '57014'
+          ? 'Vehicle search timed out. Try a more specific registration pattern, or retry. Contact your administrator if this continues.'
+          : failure);
+        return;
       }
-    } catch (error) {
-      if (selectedId.current === id) setWriteError(message(error));
+      const candidates = (data ?? []) as VehicleMatch[];
+      setLastSearch({ query: plate, matches: candidates });
+      if (candidates.length === 1) {
+        await searchVehicle(candidates[0].plate_number, candidates[0].id ?? undefined);
+      } else if (!candidates.length && !plate.includes('%')) {
+        // An exact plate can have observations/permits without a registry row.
+        await searchVehicle(plate);
+      } else {
+        setMatches(candidates.slice(0, 50));
+        setMoreMatches(candidates.length > 50);
+      }
+    } catch (err) {
+      setError(err instanceof Error ? err.message : 'Failed to search vehicles');
     } finally {
-      setSaving(false);
+      setLoading(false);
     }
   };
-  const openForm = (kind: 'interest' | 'safety') => {
-    requestId.current = null;
-    setForm(form === kind ? null : kind);
-    setReason('');
+
+  const handleRaiseFlag = async (e: React.FormEvent) => {
+    e.preventDefault();
+    if (!vehicle || !profile?.organizationId || !profile?.id) return;
+
+    try {
+      // ATLAS CALLS: raise_entity_flag (governed write, idempotent, audited; no hazard class = of-interest flag)
+      const { data, error } = await supabase.rpc('raise_entity_flag', {
+        p_client_request_id: crypto.randomUUID(),
+        p_entity_type: 'vehicle',
+        p_entity_id: vehicle.id,
+        p_flag_type: flagForm.flag_type,
+        p_alert_level: flagForm.alert_level,
+        p_reason: flagForm.reason || null,
+        p_hazard_class: null,
+      });
+
+      if (error) throw error;
+      setFlags([data as EntityFlag, ...flags]);
+      setFlagForm({ flag_type: 'watchlist', alert_level: 'medium', reason: '' });
+      setShowFlagForm(false);
+    } catch (err) {
+      setError(err instanceof Error ? err.message : 'Failed to raise flag');
+    }
   };
-  const visibleResults = results.filter(row => {
-    if (filter === 'All') return true;
-    if (filter === 'Compliance Expired') return [row.rego_status, row.wof_status, row.cof_status].includes('expired');
-    const types = resultFlags?.filter(flag => flag.entity_id === row.id && flag.active).map(flag => flag.flag_type.toLowerCase()) ?? [];
-    return filter === 'Site Banned' ? types.some(type => ['site_banned', 'site_ban', 'trespass'].includes(type)) : types.some(type => ['voi', 'stolen', 'watchlist', 'vehicle_of_interest'].includes(type));
-  });
-  const sectionUnavailable = (key: string) => detailLoading ? <p>Loading evidence…</p> : detailError || dossier.errors[key] ? <p className="vehicle-inline-error" role="alert">{key === 'safety' ? 'Safety status unavailable. ' : 'Evidence unavailable. '}{detailError || dossier.errors[key]}</p> : null;
-  const canResolve = (flag: EntityFlag) => canRaise && (flag.raised_by === profile?.id || ['admin', 'master', 'grand_master'].includes(profile?.role ?? ''));
-  const filterUnavailable = (filter === 'VOI / Stolen' || filter === 'Site Banned') && resultFlags === null;
-  const priorityWarnings = dossier.safety.filter(warning => warning.alert_level === 'critical' || warning.alert_level === 'high');
-  const activeFlags = dossier.flags.filter(flag => flag.active);
-  const history = [
-    ...dossier.observations.map(row => ({ id: row.id, at: row.observed_at, kind: 'Observation', title: row.zone?.name ?? 'Place unavailable', status: row.is_compliant === true ? 'Compliant' : row.is_compliant === false ? 'Breach recorded' : 'Compliance unavailable', detail: [row.compliance_reason, row.nights_this_zone != null ? `${row.nights_this_zone} nights in zone` : null].filter(Boolean).join(' · ') })),
-    ...dossier.breaches.map(row => ({ id: row.id, at: row.created_at, kind: 'Breach alert', title: `${row.breach_type.replace(/_/g, ' ')} · ${row.zone?.name ?? 'Place unavailable'}`, status: row.status, detail: [row.notes, row.nights_count != null ? `${row.nights_count} nights` : null].filter(Boolean).join(' · ') })),
-    ...dossier.permits.filter(row => row.date_from).map(row => ({ id: row.id, at: row.date_from!, kind: 'Permit starts', title: `Permit ${row.permit_number}`, status: row.status, detail: row.permit_type ?? 'Permit type unavailable' })),
-  ].sort((a, b) => new Date(b.at).getTime() - new Date(a.at).getTime());
+
+  const handleResolveFlag = async (flag: EntityFlag) => {
+    try {
+      // ATLAS CALLS: resolve_entity_flag (raiser or organisation admin; audited)
+      const { error } = await supabase.rpc('resolve_entity_flag', { p_flag_id: flag.id, p_note: null });
+      if (error) throw error;
+      setFlags(flags.map((f) => (f.id === flag.id ? { ...f, active: false } : f)));
+    } catch (err) {
+      setError(err instanceof Error ? err.message : 'Failed to resolve flag');
+    }
+  };
+
+  const vehicleSummary = (
+                <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', flexWrap: 'wrap', gap: '12px' }}>
+                  <div style={{ display: 'flex', alignItems: 'center', gap: '12px' }}>
+                    <div className="plate-banner">{selectedPlate}</div>
+                    <div>
+                      <div style={{ fontSize: '16px', fontWeight: 700 }}>
+                        {vehicle?.make || 'Unknown Make'} {vehicle?.model || ''}
+                        {vehicle?.year ? ` (${vehicle.year})` : ''}
+                      </div>
+                      <div style={{ fontSize: '13px', color: 'var(--color-text-secondary)' }}>
+                        {vehicle?.colour || 'Colour not recorded'}
+                        {vehicle?.body_type ? ` · ${vehicle.body_type}` : ''}
+                      </div>
+                    </div>
+                  </div>
+
+                  <div style={{ display: 'flex', gap: '8px', alignItems: 'center', flexWrap: 'wrap' }}>
+                    {vehicle && (
+                      <button className="btn btn-sm btn-secondary" onClick={() => setShowFlagForm(!showFlagForm)}>
+                        {showFlagForm ? 'Cancel' : '+ Raise of-interest flag'}
+                      </button>
+                    )}
+                  </div>
+                </div>
+  );
+
+  const vehicleDetails = (
+    <>
+      <div className="vehicle-profile-status">
+                <h3 className="vehicle-profile-section-title">Warrant & Certification Status</h3>
+                <div className="spec-grid">
+                  <div className="spec-item">
+                    <div className="spec-label">Registration</div>
+                    <div className="spec-value">
+                      <span className={`badge ${vehicle?.rego_status === 'current' ? 'badge-success' : vehicle?.rego_status === 'expired' ? 'badge-danger' : 'badge-info'}`}>
+                        {vehicle?.rego_status ? vehicle.rego_status.toUpperCase() : 'UNKNOWN'}
+                      </span>
+                    </div>
+                    {vehicle?.rego_expiry && (
+                      <div style={{ fontSize: '11px', color: 'var(--color-text-secondary)', marginTop: '4px' }}>
+                        Exp: {new Date(vehicle.rego_expiry).toLocaleDateString()}
+                      </div>
+                    )}
+                  </div>
+
+                  <div className="spec-item">
+                    <div className="spec-label">WOF / COF</div>
+                    <div className="spec-value">
+                      <span className={`badge ${vehicle?.wof_status === 'current' || vehicle?.cof_status === 'current' ? 'badge-success' : vehicle?.wof_status === 'expired' || vehicle?.cof_status === 'expired' ? 'badge-danger' : 'badge-info'}`}>
+                        {vehicle?.wof_status ? `WOF: ${vehicle.wof_status.toUpperCase()}` : vehicle?.cof_status ? `COF: ${vehicle.cof_status.toUpperCase()}` : 'UNKNOWN'}
+                      </span>
+                    </div>
+                    {(vehicle?.wof_expiry || vehicle?.cof_expiry) && (
+                      <div style={{ fontSize: '11px', color: 'var(--color-text-secondary)', marginTop: '4px' }}>
+                        Exp: {new Date(vehicle.wof_expiry || vehicle.cof_expiry!).toLocaleDateString()}
+                      </div>
+                    )}
+                  </div>
+
+                  <div className="spec-item">
+                    <div className="spec-label">Self-Containment (NZSCV)</div>
+                    <div className="spec-value">
+                      {scv ? (
+                        <span className={`badge ${scv.certificate_status === 'active' ? 'badge-success' : 'badge-danger'}`}>
+                          {scv.certificate_status.toUpperCase()} (#{scv.certificate_number || 'N/A'})
+                        </span>
+                      ) : (
+                        <span style={{ color: 'var(--color-text-muted)' }}>Not Certified</span>
+                      )}
+                    </div>
+                    {scv?.expiry_date && (
+                      <div style={{ fontSize: '11px', color: 'var(--color-text-secondary)', marginTop: '4px' }}>
+                        Exp: {new Date(scv.expiry_date).toLocaleDateString()}
+                      </div>
+                    )}
+                  </div>
+                </div>
+      </div>
+                {vehicle?.external_data_source_name || vehicle?.external_data_source_url || vehicle?.external_data_source_location ? (
+                  <div style={{ marginTop: '12px', padding: '10px 12px', background: 'var(--color-bg-secondary)', border: '1px solid var(--color-border)', borderRadius: '6px', fontSize: '13px', color: 'var(--color-text-secondary)' }}>
+                    <strong>Latest licensed enrichment receipt:</strong>{' '}
+                    {vehicle.external_data_source_url ? (
+                      <a href={vehicle.external_data_source_url} target="_blank" rel="noreferrer">
+                        {vehicle.external_data_source_name || 'External source'}
+                      </a>
+                    ) : (
+                      vehicle.external_data_source_name || 'External source'
+                    )}
+                    {vehicle.external_data_source_location ? ` · ${vehicle.external_data_source_location}` : ''}
+                    {vehicle.external_data_source_checked_at ? ` · checked ${new Date(vehicle.external_data_source_checked_at).toLocaleString()}` : ''}
+                    <div style={{ marginTop: '4px' }}>
+                      This receipt records the latest licensed enrichment check; compliance status may come from a separate live provider.
+                    </div>
+                  </div>
+                ) : null}
+
+                {/* Welfare signal: status only — welfare notes stay with the organisation that holds them */}
+                {vehicle?.homeless_status && vehicle.homeless_status !== 'none' && (
+                  <div style={{ marginTop: '12px', padding: '10px 12px', background: 'var(--color-warning-bg)', border: '1px solid var(--color-warning)', borderRadius: '6px', fontSize: '13px' }}>
+                    <strong>Welfare:</strong> someone may be living in this vehicle ({vehicle.homeless_status.toUpperCase()}). Approach with care and follow your welfare procedure.
+                  </div>
+                )}
+
+                {/* Raise Flag Form */}
+                {showFlagForm && (
+                  <form className="assessment-form" onSubmit={handleRaiseFlag}>
+                    <div className="form-row">
+                      <div className="form-group">
+                        <label>Flag Type</label>
+                        <input
+                          type="text"
+                          required
+                          placeholder="e.g. watchlist, aggressive_dog, trespass"
+                          value={flagForm.flag_type}
+                          onChange={(e) => setFlagForm({ ...flagForm, flag_type: e.target.value })}
+                        />
+                      </div>
+                      <div className="form-group">
+                        <label>Alert Level</label>
+                        <select
+                          value={flagForm.alert_level}
+                          onChange={(e) => setFlagForm({ ...flagForm, alert_level: e.target.value })}
+                        >
+                          <option value="low">Low</option>
+                          <option value="medium">Medium</option>
+                          <option value="high">High</option>
+                          <option value="critical">Critical</option>
+                        </select>
+                      </div>
+                    </div>
+                    <div className="form-group">
+                      <label>Reason / Details</label>
+                      <textarea
+                        rows={2}
+                        required
+                        placeholder="Provide details for field officers..."
+                        value={flagForm.reason}
+                        onChange={(e) => setFlagForm({ ...flagForm, reason: e.target.value })}
+                      />
+                    </div>
+                    <button type="submit" className="btn btn-primary btn-sm">
+                      Confirm & Raise Flag
+                    </button>
+                  </form>
+                )}
+
+                {/* Active & Historical Flags list */}
+                {flags.length > 0 && (
+                  <div style={{ marginTop: '14px' }}>
+                    <div style={{ fontSize: '12px', fontWeight: 600, color: 'var(--color-text-secondary)', marginBottom: '6px' }}>
+                      Your organisation's of-interest flags ({flags.length})
+                    </div>
+                    <div className="vehicle-search-flags" style={{ display: 'flex', gap: '8px', flexWrap: 'wrap' }}>
+                      {flags.map((f) => (
+                        <span
+                          key={f.id}
+                          className={`vehicle-search-flag badge ${f.active ? (f.alert_level === 'critical' || f.alert_level === 'high' ? 'badge-danger' : 'badge-warning') : 'badge-info'}`}
+                          style={{ display: 'inline-flex', alignItems: 'center', gap: '8px', padding: '6px 10px', fontSize: '12px' }}
+                        >
+                          <span>
+                            {f.active ? '⚠️' : '✓'} {f.flag_type.toUpperCase()}: {f.reason || 'No details'}
+                            {!f.active ? ' (Resolved)' : ''}
+                          </span>
+                          {f.active && (
+                            <button
+                              onClick={() => handleResolveFlag(f)}
+                              title="Resolve this flag"
+                              style={{
+                                background: 'none',
+                                border: 'none',
+                                cursor: 'pointer',
+                                color: 'inherit',
+                                fontWeight: 700,
+                                padding: '0 2px',
+                              }}
+                            >
+                              ✕
+                            </button>
+                          )}
+                        </span>
+                      ))}
+                    </div>
+                  </div>
+                )}
+    </>
+  );
 
   return (
-    <div className="vehicle-search-page" data-mobile-pane={mobilePane}>
-      <nav className="vehicle-mobile-tabs" aria-label="Vehicle workbench panes">
-        <button type="button" aria-pressed={mobilePane === 'results'} onClick={showResults}>Results</button>
-        <button type="button" aria-pressed={mobilePane === 'dossier'} disabled={!vehicle} onClick={() => { setMobilePane('dossier'); requestAnimationFrame(() => dossierHeading.current?.focus()); }}>Dossier</button>
-      </nav>
-      <div className="vehicle-workbench">
-        <aside className="vehicle-master" aria-label="Vehicle search and results">
-          <div className="vehicle-master-controls">
-            <p className="vehicle-eyebrow">FIELD OPERATIONS / VEHICLES</p>
-            <h1>Vehicle Search &amp; Flags</h1>
-            <p>Search the register. Review evidence before acting.</p>
-            <form className="vehicle-search-form" onSubmit={event => { event.preventDefault(); void search(plate); }}>
-              <label htmlFor="vehicle-plate">Plate or wildcard</label>
-              <div><input id="vehicle-plate" placeholder="e.g. RJ%9%8" autoComplete="off" spellCheck={false} value={plate} maxLength={40} onChange={event => setPlate(event.target.value.toUpperCase())} /><button type="submit" disabled={loading}>Search</button></div>
-              <small>% matches any sequence · up to 50 vehicles</small>
-            </form>
-            <div className="vehicle-query-status" role="status">
-              {loading ? 'Query running…' : queryError || (searched ? `${results.length} matches${results.length === 50 ? ' · limit reached; refine your query' : ''}` : 'Ready to query')}
-              {latency != null && <span className="vehicle-mono">{latency} ms</span>}
-              {(queryError || resultFlagError) && <button type="button" disabled={loading} onClick={() => void search(lastQuery.current.input, lastQuery.current.id)}>Retry Query</button>}
-            </div>
-            {resultFlagError && <p className="vehicle-inline-error" role="alert">Flag summary unavailable: {resultFlagError}</p>}
-            <div className="vehicle-quick-filters" aria-label="Filter fetched vehicles">
-              {FILTERS.map(item => <button key={item} type="button" aria-pressed={filter === item} disabled={(item === 'VOI / Stolen' || item === 'Site Banned') && resultFlags === null} onClick={() => setFilter(item)}>{item}</button>)}
-            </div>
-            <small>Filters apply to fetched vehicles only. VOI = voi, stolen, watchlist or vehicle_of_interest; site ban = site_ban, site_banned or trespass. Expired = recorded registry status.</small>
+    <div className={`page-container vehicle-search-page${isPopout ? ' is-popout' : ''}`}>
+      <header className="page-header vehicle-search-header">
+        <div>
+          <h1>Vehicle Search & Flags</h1>
+          <p className="subtitle">Search vehicle register, inspect compliance history, manage VOI & safety flags</p>
+        </div>
+        {isPopout ? (
+          <span className="vehicle-search-popout-badge">Separate window</span>
+        ) : (
+          <button
+            type="button"
+            className="btn btn-secondary"
+            onClick={() => {
+              if (!openVehicleSearchPopout(vehicle?.plate_number ?? selectedPlate)) setError('Your browser blocked the pop-up window. Allow pop-ups for this site and try again.');
+            }}
+            title="Open vehicle search in a window you can move to another screen"
+          >
+            Open in new window
+          </button>
+        )}
+      </header>
+
+      {error && (
+        <div className="alert alert-error" role="alert">
+          <button className="alert-close" onClick={() => setError(null)} aria-label="Close alert">
+            ×
+          </button>
+          {error}
+        </div>
+      )}
+
+      <form className="vehicle-search-form" onSubmit={handleSearch}>
+        <input
+          type="text"
+          aria-label="Registration search"
+          aria-describedby="vehicle-search-help"
+          placeholder="Registration or pattern, e.g. RJ%9%8"
+          value={plate}
+          disabled={loading}
+          onChange={(e) => setPlate(e.target.value.toUpperCase())}
+          style={{
+            flex: 1,
+            padding: '10px 14px',
+            borderRadius: '6px',
+            border: '1px solid var(--color-border)',
+            background: 'var(--color-bg-primary)',
+            color: 'var(--color-text-primary)',
+            fontSize: '15px',
+            fontFamily: 'var(--font-mono)',
+          }}
+        />
+        <button type="submit" className="btn btn-primary" disabled={loading}>
+          {loading ? 'Searching…' : 'Search Plate'}
+        </button>
+      </form>
+      <p id="vehicle-search-help" className="subtitle">
+        Search any part of a registration. Use % for any number of characters, for example RJ%9%8 or %YG%4.
+        Choose a matching vehicle to view its history and flags.
+      </p>
+
+      {matches !== null && !loading && (
+        <section aria-label="Matching vehicles">
+          <p role="status">
+            {matches.length === 0 ? 'No matching registrations found.' : `${matches.length} matching registrations.`}
+            {moreMatches && ' Showing the first 50; refine your search to see others.'}
+          </p>
+          <div className="reports-table-wrapper">
+            <table className="reports-table">
+              <thead><tr><th><span className="sr-only">Photo</span></th><th>Registration</th><th>Vehicle</th><th>Colour</th></tr></thead>
+              <tbody>{matches.map((match) => (
+                <tr key={match.plate_number}>
+                  <td className="vehicle-match-photo-cell">
+                    {match.id && matchPhotos[match.id]
+                      ? <img className="vehicle-match-photo" src={matchPhotos[match.id]} alt={`Profile photo of ${match.plate_number}`} loading="lazy" />
+                      : <span className="vehicle-match-photo is-empty" aria-hidden="true" />}
+                  </td>
+                  <td><button type="button" className="btn btn-secondary" onClick={() => void searchVehicle(match.plate_number, match.id ?? undefined)}>{match.plate_number}</button></td>
+                  <td>{[match.year, match.make, match.model].filter(Boolean).join(' ') || 'Not recorded'}</td>
+                  <td>{match.colour || 'Not recorded'}</td>
+                </tr>
+              ))}</tbody>
+            </table>
           </div>
-          <div className="vehicle-result-list" aria-label="Vehicle results" tabIndex={0} aria-busy={loading}>
-            {visibleResults.map(row => {
-              const active = resultFlags?.filter(flag => flag.entity_id === row.id && flag.active);
-              return <button type="button" key={row.id} className="vehicle-result" aria-current={vehicle?.id === row.id ? 'true' : undefined} ref={node => { if (node) resultButtons.current.set(row.id, node); else resultButtons.current.delete(row.id); }} onClick={() => selectVehicle(row)}>
-                <strong className="vehicle-mono">{row.plate_number}</strong>
-                <span>{[row.make, row.model].filter(Boolean).join(' ') || 'Make / model unavailable'}</span>
-                <small>{active ? active.length ? active.map(flag => flag.flag_type.replace(/_/g, ' ')).join(' · ') : 'No active organisation flags' : 'Flags unavailable'}</small>
-              </button>;
-            })}
-            {!loading && !queryError && filterUnavailable && searched && <p className="vehicle-empty">Flag filter unavailable. Retry the query or choose All.</p>}
-            {!loading && !queryError && !filterUnavailable && searched && !visibleResults.length && <p className="vehicle-empty">{results.length ? 'No fetched vehicles match this filter.' : 'No matching vehicles visible in the register. Refine the plate or wildcard.'}</p>}
-            {!searched && <p className="vehicle-empty">Enter an exact plate or a wildcard to begin.</p>}
-          </div>
-        </aside>
-        <main className="vehicle-dossier" aria-label="Selected vehicle dossier" tabIndex={0}>
-          {!vehicle ? <div className="vehicle-dossier-placeholder"><p className="vehicle-eyebrow">VEHICLE DOSSIER</p><h2>Select a vehicle</h2><p>Safety, compliance and chronological evidence appear here.</p><p>Registry attributes are shared. Organisation records remain subject to your permissions and row-level security.</p></div> : <>
-            <header className="vehicle-dossier-header">
-              <p className="vehicle-eyebrow">VEHICLE DOSSIER</p>
-              <h2 tabIndex={-1} ref={dossierHeading} className="vehicle-mono">{vehicle.plate_number}</h2>
-              <p>{[vehicle.make, vehicle.model, vehicle.year].filter(Boolean).join(' ') || 'Make / model unavailable'} · {vehicle.colour ?? 'Colour unavailable'} · {vehicle.body_type ?? 'Body type unavailable'}</p>
-              <small className="vehicle-mono">ID {vehicle.id}</small>
-              {!detailLoading && !detailError && !dossier.errors.safety && priorityWarnings.length > 0 && <div className="vehicle-priority-banner vehicle-priority-banner--danger" role="alert" data-testid="vehicle-priority-safety">
-                <span className="vehicle-priority-icon" aria-hidden="true">!</span>
-                <div><strong>Active safety warning · {priorityWarnings.some(warning => warning.alert_level === 'critical') ? 'CRITICAL — do not approach; call for support' : 'HIGH — do not attend alone'}</strong><p>{priorityWarnings.map(warning => hazardClassLabel(warning.hazard_class)).join(' · ')}</p></div>
-              </div>}
-              {!detailLoading && !detailError && !dossier.errors.flags && activeFlags.length > 0 && <div className={`vehicle-priority-banner ${activeFlags.some(flag => flag.alert_level === 'critical' || flag.alert_level === 'high') ? 'vehicle-priority-banner--danger' : 'vehicle-priority-banner--attention'}`} data-testid="vehicle-active-flags">
-                <span className="vehicle-priority-icon" aria-hidden="true">!</span>
-                <div><strong>Active organisation flags ({activeFlags.length})</strong><p>{activeFlags.map(flag => `${flag.flag_type.replace(/_/g, ' ')}${flag.alert_level ? ` · ${flag.alert_level}` : ''}`).join(' / ')} · Review the recorded basis before acting.</p></div>
-              </div>}
-              <div className="vehicle-detail-status" role="status">{detailLoading ? 'Loading dossier…' : detailError ? 'Dossier unavailable' : 'Dossier query complete'}{detailLatency != null && <span className="vehicle-mono">{detailLatency} ms</span>}<button type="button" disabled={detailLoading || saving} onClick={() => void loadDossier(vehicle)}>{detailError || Object.keys(dossier.errors).length ? 'Retry Query' : 'Refresh dossier'}</button></div>
-            </header>
-            <section className="vehicle-section vehicle-safety" data-testid="vehicle-safety">
-              <div className="vehicle-section-heading"><h3>Safety warnings</h3><button type="button" disabled={!canRaise || saving || detailLoading} onClick={() => openForm('safety')}>Raise a safety warning</button></div>
-              <p>Platform-wide hazards; other organisations’ notes stay private. Contact the raising organisation before attending.</p>
-              {sectionUnavailable('safety') || (dossier.safety.length ? dossier.safety.map(warning => <article key={warning.id} className="vehicle-evidence-row">
-                <strong>{hazardClassLabel(warning.hazard_class)} · {warning.alert_level}</strong>
-                <p>{describeWarningSource(warning)} · <time className="vehicle-mono">{date(warning.raised_at)}</time></p>
-                {warning.is_own_organization && warning.reason && <p>{warning.reason}</p>}
-                {!warning.is_own_organization && <p>{warningContactPath(warning).join(' · ') || 'Contact path unavailable. Ask your supervisor before attending.'}</p>}
-                {warning.is_own_organization && <button type="button" disabled={saving || !canRaise} onClick={() => void updateFlag(undefined, warning.id)}>Resolve safety warning (server checks authority)</button>}
-              </article>) : <p>No active safety warnings returned by the safety service.</p>)}
-              {vehicle.homeless_status && vehicle.homeless_status !== 'none' && <p className="vehicle-welfare"><strong>Welfare: {vehicle.homeless_status}</strong> · Someone may be living in this vehicle. Approach with care and follow your welfare procedure.</p>}
-            </section>
-            {form && <section className="vehicle-section"><h3>{form === 'safety' ? 'Raise safety warning' : 'Raise of-interest flag'}</h3><p>Recorded for your profile organisation. The server checks authority and writes an audit receipt.</p>
-              <form className="vehicle-flag-form" onSubmit={event => void updateFlag(event)}>
-                {form === 'safety' ? <div className="vehicle-flag-field"><label htmlFor="vehicle-flag-hazard">Hazard</label><select id="vehicle-flag-hazard" value={hazard} onChange={event => { requestId.current = null; setHazard(event.target.value); }}>{SAFETY_HAZARD_CLASSES.map(item => <option key={item.value} value={item.value}>{item.label}</option>)}</select></div> : <label>Flag type<input required maxLength={80} value={flagType} onChange={event => { requestId.current = null; setFlagType(event.target.value); }} /></label>}
-                <div className="vehicle-flag-field"><label htmlFor="vehicle-flag-severity">Severity</label><select id="vehicle-flag-severity" value={severity} onChange={event => { requestId.current = null; setSeverity(event.target.value); }}>{['low', 'medium', 'high', 'critical'].map(level => <option key={level}>{level}</option>)}</select></div>
-                <label className="vehicle-flag-reason">Reason / details (organisation-private)<textarea required minLength={5} maxLength={4000} rows={3} value={reason} onChange={event => { requestId.current = null; setReason(event.target.value); }} /></label>
-                <button type="submit" disabled={saving || !canRaise}>{saving ? 'Saving…' : 'Confirm & Raise Flag'}</button><button type="button" disabled={saving} onClick={() => setForm(null)}>Cancel</button>
-              </form></section>}
-            {writeError && <p className="vehicle-write-status" role="alert">Flag write failed: {writeError}</p>}
-            {writeNotice && <p className="vehicle-write-status" role="status">{writeNotice}</p>}
-            <section className="vehicle-section">
-              <div className="vehicle-section-heading"><h3>Organisation flags</h3><button type="button" disabled={!canRaise || saving || detailLoading} onClick={() => openForm('interest')}>+ Raise of-interest flag</button></div>
-              {!canRaise && <p>Flag writes require an active organisation identity.</p>}
-              <p>Resolution is restricted to the raiser or an administrator of their organisation.</p>
-              {sectionUnavailable('flags') || (dossier.flags.length ? dossier.flags.map(flag => <article key={flag.id} className="vehicle-evidence-row"><strong>{flag.flag_type.replace(/_/g, ' ')} · {flag.active ? 'Active' : 'Resolved'} · {flag.alert_level ?? 'Severity unavailable'}</strong><p>{flag.reason ?? 'Reason unavailable'}</p><time className="vehicle-mono">{date(flag.raised_at)}</time>{flag.active && canResolve(flag) && <button type="button" disabled={saving} onClick={() => void updateFlag(undefined, flag.id)}>Resolve flag</button>}</article>) : <p>No organisation flags visible for this vehicle.</p>)}
-              {dossier.flags.length === 100 && <small>Latest 100 flags shown.</small>}
-            </section>
-            <section className="vehicle-section"><h3>Compliance &amp; certification</h3><div className="vehicle-compliance-grid">
-              {([['Registration', vehicle.rego_status, vehicle.rego_expiry], ['WOF', vehicle.wof_status, vehicle.wof_expiry], ['COF', vehicle.cof_status, vehicle.cof_expiry]] as const).map(([label, status, expiry]) => <div key={label}><h4>{label}</h4><strong>{status ?? 'Unavailable'}</strong><p className="vehicle-mono">Expiry: {expiry ?? 'Unavailable'}</p></div>)}
-              <div><h4>Self-containment (NZSCV)</h4>{sectionUnavailable('scv') || (dossier.scv ? <><strong>{dossier.scv.certificate_status}</strong><p className="vehicle-mono">Certificate {dossier.scv.certificate_number ?? 'Unavailable'}<br />Issued {dossier.scv.issued_date ?? 'Unavailable'}<br />Expiry {dossier.scv.expiry_date ?? 'Unavailable'}</p></> : <p>No certification record returned. Certification unavailable.</p>)}</div>
-            </div><p>Registry statuses are recorded evidence, not a fresh external compliance check.</p>
-              <h4>Licensed enrichment receipt</h4><p>{vehicle.external_data_source_name ?? 'Source unavailable'} · {vehicle.external_data_source_location ?? 'Location unavailable'} · <time className="vehicle-mono">{date(vehicle.external_data_source_checked_at)}</time></p>
-              {vehicle.external_data_source_url && /^https?:\/\//i.test(vehicle.external_data_source_url) && <a href={vehicle.external_data_source_url} target="_blank" rel="noreferrer">Open recorded source</a>}
-            </section>
-            <section className="vehicle-section"><h3>Chronological evidence</h3><p>Newest first · latest 25 observations, 25 breaches and 50 permits · visible records only, not a complete incident record.</p>
-              {['observations', 'breaches', 'permits'].map(key => <React.Fragment key={key}>{sectionUnavailable(key)}</React.Fragment>)}
-              {!detailLoading && !detailError && history.map(entry => <article className="vehicle-evidence-row" key={`${entry.kind}-${entry.id}`}><div className="vehicle-evidence-meta"><strong>{entry.kind}</strong><time className="vehicle-mono">{date(entry.at)}</time></div><h4>{entry.title}</h4><p>{entry.status} {entry.detail && `· ${entry.detail}`}</p><small className="vehicle-mono">{entry.id}</small></article>)}
-              {!detailLoading && !detailError && !history.length && !['observations', 'breaches', 'permits'].some(key => dossier.errors[key]) && <p>No observations, breaches or dated permits visible for this vehicle.</p>}
-            </section>
-            <section className="vehicle-section"><h3>Forest / site access permits</h3>{sectionUnavailable('permits') || (dossier.permits.length ? dossier.permits.map(permit => <article className="vehicle-evidence-row" key={permit.id}><h4>Permit <span className="vehicle-mono">{permit.permit_number}</span> · {permit.status}</h4><p>{permit.holder_name ?? 'Holder unavailable'} · {permit.permit_type ?? 'Type unavailable'}</p><p>{permit.forest_areas?.join(', ') || 'Areas unavailable'}</p><p className="vehicle-mono">{permit.date_from ?? 'Start unavailable'} — {permit.date_to ?? 'End unavailable'}</p><p>Firearm licence: {permit.firearm_licence_valid === true ? 'Recorded valid' : permit.firearm_licence_valid === false ? 'Recorded invalid' : 'Unavailable'}</p><p>{permit.conditions ?? 'Conditions unavailable'}</p><small className="vehicle-mono">{permit.id}</small></article>) : <p>No access permits visible for this plate.</p>)}</section>
-          </>}
-        </main>
-      </div>
+        </section>
+      )}
+
+      {searched && matches === null && !loading && (
+        <button type="button" className="btn btn-secondary" onClick={() => {
+          setError(null); setSearched(false); setShowFlagForm(false);
+          setPlate(lastSearch?.query ?? plate);
+          setMatches(lastSearch?.matches.slice(0, 50) ?? null);
+          setMoreMatches((lastSearch?.matches.length ?? 0) > 50);
+        }}>Back to search results</button>
+      )}
+
+      {searched && !loading && matches === null && !error && (
+        <div className="vehicle-search-results">
+          {!vehicle && !scv && permits.length === 0 && observations.length === 0 ? (
+            <div className="empty-state">
+              <p>No vehicle records, permits, or observations found for "{selectedPlate}".</p>
+            </div>
+          ) : (
+            <div style={{ display: 'grid', gap: '16px' }}>
+              {vehicle ? <VehicleProfile key={vehicle.id} vehicle={vehicle} onUpdated={async () => {
+                const result = await supabase.from('canonical_vehicle_public')
+                  .select('*').eq('id', vehicle.id).single();
+                if (result.error) throw result.error;
+                setVehicle(result.data as Vehicle);
+                setLastSearch(previous => previous ? {
+                  ...previous,
+                  matches: previous.matches.map(match => match.id === result.data.id ? { ...match, ...result.data } : match),
+                } : previous);
+              }} summary={vehicleSummary}>
+                {vehicleDetails}
+              </VehicleProfile> : (
+                <div className="contact-card">
+                  {vehicleSummary}
+                  {vehicleDetails}
+                </div>
+              )}
+
+              {/* Platform-wide H&S warnings (redacted across organisations) */}
+              <SafetyWarningsPanel entityType="vehicle" entityId={vehicle?.id ?? null} entityLabel="this vehicle" />
+
+              {/* Forest / Site Access Permits */}
+              {permits.length > 0 && (
+                <div className="contact-card">
+                  <h3 style={{ margin: '0 0 8px 0', fontSize: '15px' }}>Forest / Site Access Permits ({permits.length})</h3>
+                  <div style={{ display: 'grid', gap: '8px', marginTop: '8px' }}>
+                    {permits.map((p) => (
+                      <div
+                        key={p.id}
+                        style={{
+                          background: 'var(--color-bg-primary)',
+                          border: p.status === 'active' ? '1px solid var(--color-success)' : '1px solid var(--color-border)',
+                          padding: '10px 14px',
+                          borderRadius: '6px',
+                        }}
+                      >
+                        <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'flex-start', gap: '12px', flexWrap: 'wrap' }}>
+                          <div>
+                            <div style={{ fontSize: '13px', fontWeight: 600 }}>
+                              Permit #{p.permit_number} {p.permit_type ? `· ${p.permit_type}` : ''}
+                            </div>
+                            <div style={{ fontSize: '12px', color: 'var(--color-text-secondary)', marginTop: '2px' }}>
+                              {p.holder_name || 'Holder not recorded'}
+                              {p.forest_areas && p.forest_areas.length > 0 ? ` · ${p.forest_areas.join(', ')}` : ''}
+                            </div>
+                            {(p.date_from || p.date_to) && (
+                              <div style={{ fontSize: '11px', color: 'var(--color-text-muted)', marginTop: '4px' }}>
+                                Valid {p.date_from ? new Date(p.date_from).toLocaleDateString() : '?'} – {p.date_to ? new Date(p.date_to).toLocaleDateString() : 'no end date'}
+                              </div>
+                            )}
+                          </div>
+                          <div style={{ display: 'flex', gap: '6px', flexWrap: 'wrap' }}>
+                            <span className={`badge ${p.status === 'active' ? 'badge-success' : p.status === 'expired' ? 'badge-warning' : 'badge-danger'}`}>
+                              {p.status.toUpperCase()}
+                            </span>
+                            {p.firearm_licence_valid === false && <span className="badge badge-danger">NO VALID FIREARMS LICENCE</span>}
+                          </div>
+                        </div>
+                        {p.conditions && (
+                          <div style={{ fontSize: '11px', color: 'var(--color-text-muted)', marginTop: '8px', whiteSpace: 'pre-wrap' }}>{p.conditions}</div>
+                        )}
+                      </div>
+                    ))}
+                  </div>
+                </div>
+              )}
+
+              {/* Recent Observations Timeline */}
+              <div className="contact-card">
+                <h3 style={{ margin: '0 0 8px 0', fontSize: '15px' }}>Observation History ({observations.length}{observations.length >= OBSERVATION_HISTORY_LIMIT ? ', latest shown' : ''})</h3>
+                {observations.length === 0 ? (
+                  <div className="empty-state" style={{ padding: '16px' }}>
+                    <p style={{ margin: 0 }}>No scan observations recorded for this plate.</p>
+                  </div>
+                ) : (
+                  <div className="reports-table-wrapper">
+                    <table className="reports-table vehicle-observation-table" aria-label="Observation history">
+                      <thead>
+                        <tr>
+                          <th>Photo</th><th>Observed</th><th>Location / zone</th><th>Type</th><th>Plate seen</th><th>Vehicle seen</th><th>Outcome</th><th>Nights</th><th>Reason</th>
+                        </tr>
+                      </thead>
+                      <tbody>
+                        {observations.map((obs) => {
+                          const outcome = observationOutcome(obs);
+                          const photo = obs.photo_path ? observationPhotos[obs.photo_path] : undefined;
+                          return (
+                            <tr key={obs.id}>
+                              <td className="vehicle-match-photo-cell">
+                                {photo
+                                  ? <a href={photo} target="_blank" rel="noreferrer" title="Open full observation photo"><img className="vehicle-match-photo" src={photo} alt={`Observation photo ${new Date(obs.observed_at).toLocaleString()}`} loading="lazy" /></a>
+                                  : <span className="vehicle-match-photo is-empty" aria-label={obs.photo_path ? 'Photo not available in your scope' : 'No photo'} role="img" />}
+                              </td>
+                              <td>{new Date(obs.observed_at).toLocaleString()}</td>
+                              <td>{obs.zone_name || 'General zone'}</td>
+                              <td>{obs.module_key ? obs.module_key.replace(/_/g, ' ') : '—'}</td>
+                              <td>{obs.plate_number || '—'}</td>
+                              <td>{obs.observed_vehicle || '—'}</td>
+                              <td><span className={`badge ${outcome.tone}`}>{outcome.label}</span></td>
+                              <td>{obs.nights_this_zone ?? '—'}</td>
+                              <td>{obs.compliance_reason || '—'}</td>
+                            </tr>
+                          );
+                        })}
+                      </tbody>
+                    </table>
+                  </div>
+                )}
+              </div>
+
+              {/* Recorded Breaches */}
+              {breaches.length > 0 && (
+                <div className="contact-card">
+                  <h3 style={{ margin: '0 0 8px 0', fontSize: '15px' }}>Breach Alerts ({breaches.length})</h3>
+                  <div style={{ display: 'grid', gap: '8px', marginTop: '8px' }}>
+                    {breaches.map((b) => (
+                      <div
+                        key={b.id}
+                        style={{
+                          background: 'var(--color-bg-primary)',
+                          border: '1px solid var(--color-danger)',
+                          padding: '10px 14px',
+                          borderRadius: '6px',
+                          display: 'flex',
+                          justifyContent: 'space-between',
+                          alignItems: 'center',
+                        }}
+                      >
+                        <div>
+                          <div style={{ fontSize: '13px', fontWeight: 600, color: 'var(--color-danger)' }}>
+                            {b.breach_type.replace(/_/g, ' ').toUpperCase()} {b.zone_name ? `· ${b.zone_name}` : ''}
+                          </div>
+                          <div style={{ fontSize: '12px', color: 'var(--color-text-secondary)', marginTop: '2px' }}>
+                            {new Date(b.created_at).toLocaleDateString()} · Status: {b.status}
+                            {b.nights_count ? ` · ${b.nights_count} nights` : ''}
+                          </div>
+                          {b.notes && (
+                            <div style={{ fontSize: '11px', color: 'var(--color-text-muted)', marginTop: '4px' }}>
+                              {b.notes}
+                            </div>
+                          )}
+                        </div>
+                        <span className={`badge ${b.status === 'open' ? 'badge-danger' : 'badge-info'}`}>
+                          {b.status.toUpperCase()}
+                        </span>
+                      </div>
+                    ))}
+                  </div>
+                </div>
+              )}
+            </div>
+          )}
+        </div>
+      )}
     </div>
   );
 };

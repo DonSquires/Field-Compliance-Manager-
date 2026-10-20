@@ -77,6 +77,30 @@ checkpoint scans + GPS. Identical mechanism for static (one long stop) and patro
 serviced" reporting. Presence records carry `client_org_id` (same tenancy substrate
 as compliance observations).
 
+### Owner direction 2026-10-20: as-attended patrols and recorded travel
+
+- R&M source-backed places completed by Dave Porter belong on Blenheim Forestry
+  Patrol; those completed by Dan Douglas belong on Nelson Forestry Patrol.
+  Source performer identities and original attribution are preserved. A place
+  attended by both may be covered by both routes; the rule does not transfer
+  place ownership or assign a future shift to either person.
+- **As attended** is an explicit schedule mode, distinct from an unstaffed or
+  open shift and from a scheduled visit with an unrestricted time window. It
+  has no planned visit count, minimum dwell or arrival/departure deadline, and
+  is excluded from contracted stop generation. Real attendance is still
+  recorded through the normal governed arrival/departure path.
+- Named source places may be registered without geometry at this build stage.
+  Their canonical identity and client house remain mandatory; unplaced and
+  unverified are honest states, not fabricated pins or verified geofences.
+  This does not waive source identity, agreement, role, safety or access checks.
+- Actual between-stop kilometres are recorded separately from estimated route
+  distance. A measured entry or non-decreasing odometer pair identifies the
+  departed origin and arrived destination in the same assigned shift. Replay,
+  correction version and audit evidence are required. Unknown distance is not
+  zero, and estimated distance is never relabelled as an actual journey. Source
+  job kilometres and cumulative trip readings retain their distinct provenance.
+  Travel recording does not itself create payroll or invoice charges.
+
 ### Base toolkit (shared, always on)
 
 Every guard, every module, has the same first-class, evidence-anchored field-report

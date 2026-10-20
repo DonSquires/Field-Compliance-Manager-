@@ -75,6 +75,60 @@ Field Compliance Manager (FCM) is an enterprise SaaS platform designed to replac
 | **Master Shell** | Master, Grand Master | Policy & Governance | Multi-tenant setup, platform terms, module subscriptions |
 | **Bob Studio** | Owner, Grand Master | IDE / Multi-Ability Studio | Continuous in-app build, testing, and system extensions |
 
+### Vehicle search and cross-area subject trends
+
+- In **Vehicle Search & Flags**, enter any part of a registration. Plain text
+  matches anywhere; `%` matches zero or more characters. For example, `RJ%9%8`
+  finds registrations beginning with RJ, followed by 9 and ending in 8;
+  `%yg%%4` finds registrations containing YG and ending in 4. Matching is
+  case-insensitive. Select a registration before inspecting history or raising
+  flags. Broad searches show the first 50 matches and ask you to refine.
+- **Back to search results** restores the previous registration pattern and
+  result list without rerunning the search, including after a detail-load error.
+- **Open in new window** (on the page) or the pop-out icon beside **Vehicle
+  search** in the top bar opens vehicle search in its own window, without the
+  admin navigation, so it can be moved to another screen while you work
+  elsewhere in FCM. It keeps your sign-in, working organisation and access
+  rules. Opening it again reuses the same window; from the page it opens on the
+  selected registration. If nothing appears, allow pop-ups for the site.
+- Search results show each vehicle's profile photo as a thumbnail when one
+  exists and you are authorised to see it; vehicles without a photo show an
+  empty placeholder.
+- A selected vehicle opens as one **Vehicle profile** card: the profile photo
+  beside the registration, make/model, of-interest flag action and warrant/
+  certification status. **Edit vehicle details** and **Add/Replace profile
+  photo** open their forms only when needed.
+- **Observation History** is a spreadsheet-style table (latest 50): photo
+  thumbnail, observed time, location/zone, type, plate and vehicle seen,
+  outcome, nights and reason. Thumbnails appear only for photos stored in an
+  organisation you can access; select one to open the full photo.
+- In a selected vehicle's **Vehicle profile**, an organisation administrator
+  can edit make, model, year, colour, body type and registration/WoF/CoF expiry
+  dates with a reason/source. Blank fields leave existing values unchanged.
+  Registration is fixed; shared canonical facts still require grand master
+  review. Organisation notes are preserved. Identity/owner/VIN checks remain
+  in their existing evidence-review workflow.
+- Administrators can add or replace the shared vehicle profile photo using a
+  JPEG, PNG or WebP up to 5 MB, preview it, and record a reason/source. The app
+  resizes/re-encodes the image to remove embedded location metadata before
+  upload. Do not include people or private surroundings. Photos use private
+  storage and expiring links: another organisation only sees the photo through
+  existing custody or caller-visible vehicle observation access. The picture
+  is not public, identity proof, or enforcement evidence. Replacements retain
+  previous photo receipts in audit history. If upload succeeds but linking
+  fails, retry **Save profile photo** to reuse the uploaded file.
+- In **Reports & Accountability > Repeat subject review**, choose **All
+  authorised agreements and observations** to compare subjects across areas,
+  including observations without an agreement mapping, or choose one agreement
+  to narrow the review. The existing R&M administrator identity permission
+  remains required; this is not a platform-wide disclosure option.
+- Select **1 time (all subjects)** in either subject list to include subjects
+  seen only once. Vehicle and verified-person lists use the selected period.
+  Counts combine patrol sightings and accepted CCTV observations, not unreviewed
+  detections or unlinked comment mentions. Open a subject to inspect its history,
+  place and recorded officer context; comment mentions remain separate evidence
+  requiring review.
+
 ---
 
 ## 3. System Section & Role Matrix

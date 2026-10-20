@@ -1,0 +1,75 @@
+.vehicle-profile {
+  display: grid;
+  gap: 12px;
+  min-width: 0;
+}
+.vehicle-profile-layout {
+  display: grid;
+  grid-template-columns: minmax(200px, 320px) minmax(0, 1fr);
+  gap: 18px;
+  align-items: start;
+}
+@media (max-width: 720px) {
+  .vehicle-profile-layout { grid-template-columns: minmax(0, 1fr); }
+}
+.vehicle-profile-media {
+  display: grid;
+  gap: 6px;
+  min-width: 0;
+}
+.vehicle-profile-media small,
+.vehicle-profile-hint {
+  color: var(--color-text-secondary);
+  font-size: 12px;
+  margin: 0;
+}
+.vehicle-profile-body {
+  display: grid;
+  gap: 12px;
+  min-width: 0;
+}
+.vehicle-profile-manage {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+}
+.vehicle-profile-photo {
+  width: 100%;
+  max-width: 480px;
+  max-height: 320px;
+  object-fit: contain;
+  border-radius: 6px;
+}
+.vehicle-profile-photo.is-empty {
+  display: grid;
+  place-items: center;
+  aspect-ratio: 4 / 3;
+  padding: 12px;
+  border: 1px dashed var(--color-border, #cbd5e1);
+  background: var(--color-bg-secondary, #f1f5f9);
+  color: var(--color-text-secondary, #64748b);
+  font-size: 13px;
+  text-align: center;
+  box-sizing: border-box;
+}
+.vehicle-profile-fields {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(min(100%, 220px), 1fr));
+  gap: 12px;
+}
+.vehicle-profile label {
+  display: grid;
+  gap: 6px;
+  margin-bottom: 12px;
+}
+.vehicle-profile input,
+.vehicle-profile textarea,
+.vehicle-profile fieldset {
+  min-width: 0;
+  max-width: 100%;
+  box-sizing: border-box;
+}
+.vehicle-profile button,
+.vehicle-profile input {
+  min-height: 42px;
+}

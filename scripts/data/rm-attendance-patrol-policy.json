@@ -1,0 +1,20 @@
+{
+  "provider_organization_id": "e96d71c9-28a6-4d4a-b0f3-1c4ecdaa9c13",
+  "attendance_mode": "as_attended",
+  "geofence_required_for_source_setup": false,
+  "decision_date": "2026-10-20",
+  "performer_routes": [
+    {
+      "performer_id": "5bd14029-b00b-4240-b42a-c739c168b6e4",
+      "performer_name": "Dave Porter",
+      "patrol_route_id": "a08fb622-28ae-448c-bd48-f41d98e0a4bb",
+      "patrol_route_name": "Blenheim Forestry Patrol"
+    },
+    {
+      "performer_id": "60b73649-ddae-4386-be6b-3d9243db625c",
+      "performer_name": "Dan Douglas",
+      "patrol_route_id": "5438c224-02e1-41fd-af00-952ba46cb8c0",
+      "patrol_route_name": "Nelson Forestry Patrol"
+    }
+  ]
+}

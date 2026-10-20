@@ -337,6 +337,7 @@
 .admin-shell-mobile {
   display: grid;
   grid-template-rows: auto auto auto minmax(0, 1fr) auto;
+  grid-template-columns: minmax(0, 1fr);
 }
 
 .admin-shell-mobile > .admin-mobile-header { grid-row: 1; }
@@ -676,6 +677,12 @@
   border-color: #475569;
   color: #334155;
   background: #e2e8f0;
+}
+
+.admin-shell-main.is-vehicle-search-popout {
+  flex: 1;
+  min-width: 0;
+  overflow: auto;
 }
 
 .admin-workspace-desktop { display: flex; align-items: center; gap: 16px; height: 100%; min-width: 0; }
