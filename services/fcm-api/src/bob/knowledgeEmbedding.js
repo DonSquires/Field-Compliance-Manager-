@@ -32,21 +32,23 @@ async function embedText(text, { config = embeddingConfig(), fetchImpl = fetch }
   if (!input) throw new Error('embed_text_required');
   const controller = new AbortController();
   const timer = setTimeout(() => controller.abort(), config.timeoutMs);
-  let response;
+  let body;
   try {
-    response = await fetchImpl(`${config.ollamaUrl}/api/embed`, {
+    const response = await fetchImpl(`${config.ollamaUrl}/api/embed`, {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify({ model: config.model, input }),
       signal: controller.signal,
     });
+    if (!response.ok) throw Object.assign(new Error(`embed_failed_http_${response.status}`), { embedHttp: true });
+    // The body read stays inside the deadline: a stalled body must not hold the backfill lock.
+    body = await response.json();
   } catch (error) {
+    if (error?.embedHttp) throw error;
     throw new Error(controller.signal.aborted ? 'embed_timeout' : `embed_unreachable: ${error instanceof Error ? error.message : 'fetch_failed'}`);
   } finally {
     clearTimeout(timer);
   }
-  if (!response.ok) throw new Error(`embed_failed_http_${response.status}`);
-  const body = await response.json();
   const embedding = Array.isArray(body?.embeddings) ? body.embeddings[0] : body?.embedding;
   if (!Array.isArray(embedding) || embedding.length !== config.dimensions || !embedding.every(Number.isFinite)) {
     throw new Error(`embed_dimension_mismatch: expected ${config.dimensions}, got ${Array.isArray(embedding) ? embedding.length : 'none'}`);
@@ -71,10 +73,11 @@ async function backfillCardEmbeddings({ supabase, config = embeddingConfig(), fe
       try {
         const { embedding } = await embedText(cardEmbeddingText(card), { config, fetchImpl });
         const current = now();
-        const updatedAt = new Date(card.updated_at);
-        const embeddedAt = updatedAt > current ? updatedAt : current;
+        // Postgres keeps microseconds that Date drops; reuse the original string whenever it is
+        // not strictly in the past, so embedded_at can never compare below updated_at.
+        const embeddedAt = new Date(card.updated_at).getTime() >= current.getTime() ? card.updated_at : current.toISOString();
         const { data: written, error: writeError } = await supabase.from('bob_knowledge_cards')
-          .update({ embedding: toVectorLiteral(embedding), embedding_model: config.model, embedded_at: embeddedAt.toISOString() })
+          .update({ embedding: toVectorLiteral(embedding), embedding_model: config.model, embedded_at: embeddedAt })
           .eq('id', card.id).eq('updated_at', card.updated_at)
           .select('id');
         if (writeError) throw new Error(writeError.message);

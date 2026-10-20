@@ -54,26 +54,38 @@ test('embedText calls Ollama /api/embed and rejects wrong dimensions or empty te
 });
 
 test('backfill writes pgvector literals optimistically and never leaves embedded_at behind updated_at', async () => {
-  const future = '2099-01-01T00:00:00+00:00';
+  const future = '2099-01-01T00:00:00.123456+00:00';
+  const sameMillisecond = '2026-10-21T00:00:00.000999+00:00';
   const supabase = fakeSupabase({
-    pending: [{ id: 'a' }, { id: 'b' }],
+    pending: [{ id: 'a' }, { id: 'b' }, { id: 'c' }],
     rows: [
       { id: 'a', title: 'A', content: 'alpha', updated_at: '2026-08-19T00:00:00+00:00' },
       { id: 'b', title: 'B', content: 'beta', updated_at: future },
+      { id: 'c', title: 'C', content: 'gamma', updated_at: sameMillisecond },
     ],
   });
   const calls = [];
   const now = () => new Date('2026-10-21T00:00:00Z');
   const result = await backfillCardEmbeddings({ supabase, config, fetchImpl: ollamaFetch(calls), now });
-  assert.equal(result.embedded, 2);
+  assert.equal(result.embedded, 3);
   assert.equal(result.remaining, 0);
   assert.equal(calls[0].body.input, 'A\n\nalpha');
-  const [first, second] = supabase.writes;
+  const [first, second, third] = supabase.writes;
   assert.equal(first.patch.embedding, '[0.1,-0.2,0.3]');
   assert.equal(first.patch.embedding_model, 'nomic-embed-text');
   assert.equal(first.patch.embedded_at, '2026-10-21T00:00:00.000Z');
   assert.deepEqual(first.filters, { id: 'a', updated_at: '2026-08-19T00:00:00+00:00' });
-  assert.equal(second.patch.embedded_at, new Date(future).toISOString());
+  assert.equal(second.patch.embedded_at, future, 'a future timestamp keeps its microseconds');
+  assert.equal(third.patch.embedded_at, sameMillisecond, 'sub-millisecond precision is never truncated below updated_at');
+});
+
+test('embedText times out when headers arrive promptly but the body stalls', async () => {
+  const stalledBody = async (_url, init) => ({
+    ok: true,
+    status: 200,
+    json: () => new Promise((_resolve, reject) => init.signal.addEventListener('abort', () => reject(new Error('aborted')))),
+  });
+  await assert.rejects(embedText('x', { config: { ...config, timeoutMs: 20 }, fetchImpl: stalledBody }), /embed_timeout/);
 });
 
 test('backfill leaves a card edited mid-run pending and reports per-card failures', async () => {
