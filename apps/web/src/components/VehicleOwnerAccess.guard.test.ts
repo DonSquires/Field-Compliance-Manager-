@@ -8,6 +8,10 @@ const workspace = read('src/components/UserIdentityWorkspace.tsx');
 const profile = read('src/components/VehicleProfile.tsx');
 const repeat = read('src/components/RepeatSubjectsPanel.tsx');
 const migration = read('../../supabase/migrations/20261020180000_vehicle_owner_access_area_locality.sql');
+const people = read('../../supabase/migrations/20261020190000_vehicle_people_tiered_visibility.sql');
+const search = read('src/pages/VehicleSearchPage.tsx');
+const thumbnails = read('src/lib/observationThumbnails.ts');
+const investigation = read('src/components/SendToInvestigationPanel.tsx');
 
 describe('vehicle owner details for authorised users', () => {
   it('gates owner reads and writes on the vehicle_owner_identity access area, not administrator role alone', () => {
@@ -32,10 +36,38 @@ describe('vehicle owner details for authorised users', () => {
     expect(repeat).not.toContain('isHomeAdmin');
   });
 
-  it('shows suburb and city only, never the street address', () => {
-    expect(migration).toContain('public.vehicle_owner_locality(p.metadata->\'profile_details\')');
-    expect(migration).not.toMatch(/get_vehicle_owner_links[\s\S]*profile_details'->>'address'/);
-    expect(panel).toContain('owner.locality');
-    expect(panel).not.toContain('owner.address');
+  it('tiers person details: full details for authorised users, locality only for everyone else', () => {
+    expect(people).toContain('v_full := public.can_access_vehicle_owner_identity(p_organization_id);');
+    expect(people).toContain("CASE WHEN v_full THEN p.metadata->'profile_details'->>'address' END");
+    expect(people).toContain("CASE WHEN v_full THEN coalesce(p.display_name, cp.display_name) END");
+    expect(people).toContain("public.vehicle_owner_locality(p.metadata->'profile_details')");
+    expect(people).toContain('NOT public.org_access_allowed(p_organization_id)');
+    expect(panel).toContain('link.details_visible ?');
+    expect(panel).toMatch(/identified/);
+  });
+
+  it('records drivers and associated people only through the audited RPC', () => {
+    expect(people).toContain("p_relationship NOT IN ('owner', 'driver', 'associated_person')");
+    expect(people).toMatch(/entity_links_write[\s\S]*'driver', 'associated_person'/);
+    expect(people).toContain("'vehicle_person_recorded'");
+    expect(people).toContain("IF p_source = 'nzta_mvr' AND p_relationship <> 'owner'");
+    expect(panel).toContain("supabase.rpc('record_vehicle_person'");
+    expect(panel).toContain('p_observation_id: observationId');
+  });
+
+  it('shows the first observation photo, opens the sighting beside the list and can send it to an investigation', () => {
+    expect(thumbnails).toContain("from('observation_supporting_evidence')");
+    expect(thumbnails).toContain("in('metadata->>observation_id', missing)");
+    expect(search).toContain('observationPhotos[obs.id]');
+    expect(search).toContain('vehicle-observation-panel');
+    expect(search).toContain('vehicle-observation-overlay');
+    expect(search).toContain('<SendToInvestigationPanel');
+    expect(investigation).toContain("supabase.rpc('link_investigation_entity'");
+    expect(investigation).toContain("supabase.rpc('is_admin_for_org', { target_org_id: organizationId })");
+  });
+
+  it('makes a flagged vehicle obvious with a coloured border and a risk banner at the top', () => {
+    expect(search).toContain('riskLevel={riskLevel} riskBanner={riskBanner}');
+    expect(profile).toContain('vehicle-risk-border is-${riskLevel}');
   });
 });

@@ -1936,6 +1936,15 @@ evidence, not asserted.
   `set_vehicle_owner_access` checkbox in the user workspace. The owner reader
   returns suburb and town/city (`vehicle_owner_locality`) instead of the street
   address (`20261020180000`). Not yet exercised by end users.
+- **Tiered owner details, vehicle people, sighting panel (owner correction,
+  2026-10-20).** `get_vehicle_owner_links` redacts to locality for users
+  without the owner area and returns full details (with address) for
+  authorised users; `record_vehicle_person` adds drivers and associated people,
+  optionally at a sighting (`20261020190000`). Observation history shows the
+  first sighting photo (scan or attached evidence), opens the sighting in a
+  right-side panel with a full-screen pop-out and send-to-investigation, and a
+  flagged vehicle's profile carries a flag-coloured border and risk banner.
+  Not yet exercised by end users.
 
 ## 10. Enterprise hardening (parallel track)
 

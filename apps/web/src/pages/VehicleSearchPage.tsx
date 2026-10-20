@@ -19,6 +19,9 @@ import VehicleProfile from '../components/VehicleProfile';
 import { ObservationIndicators, useObservationAnnotations } from '../components/ObservationIndicators';
 import { RecordUpdatesPanel } from '../components/RecordUpdatesPanel';
 import { RecordEvidencePanel } from '../components/RecordEvidencePanel';
+import { SendToInvestigationPanel } from '../components/SendToInvestigationPanel';
+import { VehicleOwnerPanel } from '../components/VehicleOwnerPanel';
+import { loadObservationThumbnails } from '../lib/observationThumbnails';
 import { useAuth } from '../context/AuthContext';
 import { normalizePlateNumber, vehicleHistoryOrFilter } from '../lib/canonicalIdentity';
 import { vehiclePlateSearchPattern } from '../lib/vehiclePlateSearch';
@@ -143,6 +146,7 @@ const VehicleSearchPage: React.FC = () => {
   const [flags, setFlags] = useState<EntityFlag[]>([]);
   const [observations, setObservations] = useState<RecentObservation[]>([]);
   const [selectedObservationId, setSelectedObservationId] = useState<string | null>(null);
+  const [observationExpanded, setObservationExpanded] = useState(false);
   const { annotations, reload: reloadAnnotations } = useObservationAnnotations(observations.map((obs) => obs.id));
   const selectedObservation = observations.find((obs) => obs.id === selectedObservationId) ?? null;
   const [breaches, setBreaches] = useState<VehicleBreach[]>([]);
@@ -151,22 +155,12 @@ const VehicleSearchPage: React.FC = () => {
   const [matchPhotos, setMatchPhotos] = useState<Record<string, string>>({});
   const [observationPhotos, setObservationPhotos] = useState<Record<string, string>>({});
 
-  // Observation photos live in the private `scans` bucket; storage RLS only signs folders the caller's
-  // organisations may read, so observations shared from elsewhere simply show no thumbnail.
+  // Keyed by observation id: the scan photo, else the first photo attached to the sighting later.
+  // Storage and table RLS only sign what the caller may read, so other sightings show no thumbnail.
   useEffect(() => {
-    const paths = Array.from(new Set(observations.map((obs) => obs.photo_path).filter((path): path is string => Boolean(path) && !/^https?:/i.test(path as string))));
-    if (paths.length === 0) { setObservationPhotos({}); return; }
+    if (observations.length === 0) { setObservationPhotos({}); return; }
     let active = true;
-    void (async () => {
-      try {
-        const { data, error: signError } = await supabase.storage.from('scans').createSignedUrls(paths, 900);
-        if (!active) return;
-        if (signError || !data) { setObservationPhotos({}); return; }
-        setObservationPhotos(Object.fromEntries(data.filter((item) => item.signedUrl && !item.error && item.path).map((item) => [item.path as string, item.signedUrl as string])));
-      } catch {
-        if (active) setObservationPhotos({});
-      }
-    })();
+    void loadObservationThumbnails(observations).then((photos) => { if (active) setObservationPhotos(photos); });
     return () => { active = false; };
   }, [observations]);
 
@@ -414,6 +408,65 @@ const VehicleSearchPage: React.FC = () => {
     } catch (err) {
       setError(err instanceof Error ? err.message : 'Failed to resolve flag');
     }
+  };
+
+  useEffect(() => {
+    if (!observationExpanded) return;
+    const onKey = (event: KeyboardEvent) => { if (event.key === 'Escape') setObservationExpanded(false); };
+    window.addEventListener('keydown', onKey);
+    return () => window.removeEventListener('keydown', onKey);
+  }, [observationExpanded]);
+
+  const activeFlags = flags.filter((flag) => flag.active);
+  const riskLevel = (['critical', 'high', 'medium', 'low'] as const).find((level) => activeFlags.some((flag) => (flag.alert_level ?? 'medium') === level)) ?? null;
+  const riskBanner = riskLevel ? (
+    <div className={`vehicle-risk-banner is-${riskLevel}`} role="alert">
+      <strong>{riskLevel.toUpperCase()} RISK · flagged vehicle</strong>
+      <span>{activeFlags.map((flag) => flag.flag_type.replace(/_/g, ' ')).join(' · ')}</span>
+    </div>
+  ) : null;
+
+  const observationDetail = (obs: RecentObservation, expanded: boolean) => {
+    const outcome = observationOutcome(obs);
+    const photo = observationPhotos[obs.id];
+    return (
+      <div className={`vehicle-observation-detail${expanded ? ' is-expanded' : ''}`}>
+        <div className="vehicle-observation-detail__head">
+          <h4>{new Date(obs.observed_at).toLocaleString()} · {obs.zone_name || 'General zone'}</h4>
+          <div className="vehicle-observation-detail__actions">
+            <button type="button" className="btn btn-sm btn-secondary" onClick={() => setObservationExpanded(!expanded)}>
+              {expanded ? 'Back to side panel' : 'Pop out full screen'}
+            </button>
+            <button type="button" className="btn btn-sm btn-secondary" aria-label="Close observation details"
+              onClick={() => { setSelectedObservationId(null); setObservationExpanded(false); }}>Close</button>
+          </div>
+        </div>
+        {riskBanner}
+        {photo && <a href={photo} target="_blank" rel="noreferrer" title="Open full-size photo">
+          <img className="vehicle-observation-detail__photo" src={photo} alt={`Observation photo ${new Date(obs.observed_at).toLocaleString()}`} />
+        </a>}
+        <dl className="vehicle-observation-detail__facts">
+          <div><dt>Outcome</dt><dd><span className={`badge ${outcome.tone}`}>{outcome.label}</span></dd></div>
+          <div><dt>Status</dt><dd><ObservationIndicators annotation={annotations[obs.id]} /></dd></div>
+          <div><dt>Type</dt><dd>{obs.module_key ? obs.module_key.replace(/_/g, ' ') : '—'}</dd></div>
+          <div><dt>Plate seen</dt><dd>{obs.plate_number || '—'}</dd></div>
+          <div><dt>Vehicle seen</dt><dd>{obs.observed_vehicle || '—'}</dd></div>
+          <div><dt>Nights</dt><dd>{obs.nights_this_zone ?? '—'}</dd></div>
+          <div><dt>Reason</dt><dd>{obs.compliance_reason || '—'}</dd></div>
+        </dl>
+        <div className="vehicle-observation-detail__sections">
+          <section aria-label="Updates and notes"><RecordUpdatesPanel recordKind="observation" recordId={obs.id} onChanged={() => void reloadAnnotations()} /></section>
+          {vehicle && <VehicleOwnerPanel vehicleId={vehicle.id} organizationId={profile?.organizationId} observationId={obs.id} />}
+          <details open={expanded}><summary>Photos and evidence</summary>
+            <RecordEvidencePanel recordKind="observation" recordId={obs.id} organizationId={obs.organization_id} canAdd />
+          </details>
+          <details open={expanded}><summary>Send to investigation</summary>
+            <SendToInvestigationPanel organizationId={obs.organization_id} observationId={obs.id} vehicleId={vehicle?.id ?? null}
+              plate={vehicle?.plate_number ?? obs.plate_number} observedAt={obs.observed_at} />
+          </details>
+        </div>
+      </div>
+    );
   };
 
   const vehicleSummary = (
@@ -716,10 +769,11 @@ const VehicleSearchPage: React.FC = () => {
                   ...previous,
                   matches: previous.matches.map(match => match.id === result.data.id ? { ...match, ...result.data } : match),
                 } : previous);
-              }} summary={vehicleSummary}>
+              }} summary={vehicleSummary} riskLevel={riskLevel} riskBanner={riskBanner}>
                 {vehicleDetails}
               </VehicleProfile> : (
-                <div className="contact-card">
+                <div className={`contact-card${riskLevel ? ` vehicle-risk-border is-${riskLevel}` : ''}`}>
+                  {riskBanner}
                   {vehicleSummary}
                   {vehicleDetails}
                 </div>
@@ -782,6 +836,7 @@ const VehicleSearchPage: React.FC = () => {
                     <p style={{ margin: 0 }}>No scan observations recorded for this plate.</p>
                   </div>
                 ) : (
+                  <div className={`vehicle-observations-layout${selectedObservation ? ' has-selection' : ''}`}>
                   <div className="reports-table-wrapper">
                     <table className="reports-table vehicle-observation-table" aria-label="Observation history">
                       <thead>
@@ -792,17 +847,18 @@ const VehicleSearchPage: React.FC = () => {
                       <tbody>
                         {observations.map((obs) => {
                           const outcome = observationOutcome(obs);
-                          const photo = obs.photo_path ? observationPhotos[obs.photo_path] : undefined;
+                          const photo = observationPhotos[obs.id];
                           return (
-                            <tr key={obs.id} className={obs.id === selectedObservationId ? 'is-selected' : ''}>
+                            <tr key={obs.id} className={`is-clickable${obs.id === selectedObservationId ? ' is-selected' : ''}`}
+                              onClick={() => { setSelectedObservationId((current) => current === obs.id ? null : obs.id); setObservationExpanded(false); }}>
                               <td className="vehicle-match-photo-cell">
                                 {photo
-                                  ? <a href={photo} target="_blank" rel="noreferrer" title="Open full observation photo"><img className="vehicle-match-photo" src={photo} alt={`Observation photo ${new Date(obs.observed_at).toLocaleString()}`} loading="lazy" /></a>
-                                  : <span className="vehicle-match-photo is-empty" aria-label={obs.photo_path ? 'Photo not available in your scope' : 'No photo'} role="img" />}
+                                  ? <img className="vehicle-match-photo" src={photo} alt={`Observation photo ${new Date(obs.observed_at).toLocaleString()}`} loading="lazy" />
+                                  : <span className="vehicle-match-photo is-empty" aria-label="No photo in your scope" role="img" />}
                               </td>
                               <td><button type="button" className="activity-browser__row-link" aria-expanded={obs.id === selectedObservationId}
-                                aria-label={`Open follow-up for observation ${new Date(obs.observed_at).toLocaleString()}`}
-                                onClick={() => setSelectedObservationId((current) => current === obs.id ? null : obs.id)}>{new Date(obs.observed_at).toLocaleString()}</button></td>
+                                aria-label={`Open details for observation ${new Date(obs.observed_at).toLocaleString()}`}
+                                onClick={(event) => { event.stopPropagation(); setSelectedObservationId((current) => current === obs.id ? null : obs.id); setObservationExpanded(false); }}>{new Date(obs.observed_at).toLocaleString()}</button></td>
                               <td>{obs.zone_name || 'General zone'}</td>
                               <td>{obs.module_key ? obs.module_key.replace(/_/g, ' ') : '—'}</td>
                               <td>{obs.plate_number || '—'}</td>
@@ -817,20 +873,21 @@ const VehicleSearchPage: React.FC = () => {
                       </tbody>
                     </table>
                   </div>
-                )}
-                {selectedObservation && (
-                  <div className="vehicle-observation-followup" aria-label="Selected observation follow-up">
-                    <div className="vehicle-observation-followup__head">
-                      <h4>Observation {new Date(selectedObservation.observed_at).toLocaleString()} · {selectedObservation.zone_name || 'General zone'}</h4>
-                      <button type="button" className="btn btn-sm btn-secondary" onClick={() => setSelectedObservationId(null)}>Close</button>
-                    </div>
-                    <RecordUpdatesPanel recordKind="observation" recordId={selectedObservation.id} onChanged={() => void reloadAnnotations()} />
-                    <details open><summary>Photos and evidence</summary>
-                      <RecordEvidencePanel recordKind="observation" recordId={selectedObservation.id} organizationId={selectedObservation.organization_id} canAdd />
-                    </details>
+                  {selectedObservation && !observationExpanded && (
+                    <aside className="vehicle-observation-panel" aria-label="Selected observation">
+                      {observationDetail(selectedObservation, false)}
+                    </aside>
+                  )}
                   </div>
                 )}
               </div>
+              {selectedObservation && observationExpanded && (
+                <div className="vehicle-observation-overlay" role="dialog" aria-modal="true" aria-label="Observation details">
+                  <div className="vehicle-observation-overlay__body">
+                    {observationDetail(selectedObservation, true)}
+                  </div>
+                </div>
+              )}
 
               {/* Recorded Breaches */}
               {breaches.length > 0 && (

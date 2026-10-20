@@ -110,25 +110,35 @@ Field Compliance Manager (FCM) is an enterprise SaaS platform designed to replac
   values, and the profile shows when the details were last updated and by which
   organisation. Organisation notes are preserved. VIN and registration identity
   checks remain in their existing evidence-review workflow.
-- **Owner identity** (administrators and authorised users) records who owns the
-  vehicle: create a new person (name, contact, suburb and town/city; street
-  address optional) or choose an existing person record, give the source (NZTA motor
-  vehicle register, owner or driver told us, officer established on site, other)
-  and the basis.
-  The owner is added to the canonical person registry. Owner details are visible
-  to administrators and to people your organisation has authorised for
-  **Vehicle owner details** (Users → open the person → Restricted information,
-  or an access preset). Only the suburb and town/city are shown, never the
-  street or street number. Owners sourced from NZTA are
-  marked **NZTA restricted** and must only be used for the purpose they were
-  obtained for. **Change owner** ends the previous owner link; **No longer owner**
-  ends the current owner link with a reason. Owner identity can also be added from the
-  repeat-subject drawer.
-- Select an observation's time in **Observation History** to open its
-  follow-up panel: add a note, request or resolve a follow-up, record an H&S
-  concern, or attach a photo from file. The original observation is never
-  changed. The **Status** column shows **Flagged**, **Notice issued** (or prior
-  notices), **H&S**, **Follow-up open** and the number of updates.
+- **Owner, drivers and associated people** (administrators and authorised users)
+  links people to the vehicle: **Add owner** / **Change owner** (one current
+  owner), **Add driver** and **Add associated person** (any number). Create a
+  new person (name, contact, street address, suburb and town/city) or choose an
+  existing person record, give the source (NZTA motor vehicle register — owner
+  only —, owner or driver told us, officer established on site, other) and the
+  basis. New people are added to your person records and the canonical person
+  registry. People your organisation has authorised for **Vehicle owner
+  details** (Users → open the person → Restricted information, or an access
+  preset) and administrators see the full details, including the address, on
+  every screen that shows them. Everyone else sees only that the owner (or
+  driver) has been identified and the suburb and town/city. Owners sourced from
+  NZTA are marked **NZTA restricted** and must only be used for the purpose they
+  were obtained for. **No longer owner / driver** ends a link with a reason. The
+  owner can also be added from the repeat-subject drawer.
+- A flagged vehicle's profile has a border in the colour of its highest active
+  flag (red for high/critical, amber for medium, blue for low) and a risk
+  banner at the top listing the active flags.
+- **Observation History** shows the first photo of each sighting (the scan
+  photo, otherwise the first photo attached later). Click a row to open the
+  sighting on the right of the list; **Pop out full screen** shows the same
+  sighting with every update option. From the panel: add a note, request or
+  resolve a follow-up, record an H&S concern, attach a photo from file, record
+  the driver or another person **at this sighting**, and (administrators of the
+  organisation that recorded it) **Send to investigation** — a new
+  investigation, or one already open; the sighting and vehicle are linked. The
+  original observation is never changed. The **Status** column shows
+  **Flagged**, **Notice issued** (or prior notices), **H&S**, **Follow-up
+  open** and the number of updates.
 - Administrators can add or replace the shared vehicle profile photo using a
   JPEG, PNG or WebP up to 5 MB, preview it, and record a reason/source. The app
   resizes/re-encodes the image to remove embedded location metadata before
