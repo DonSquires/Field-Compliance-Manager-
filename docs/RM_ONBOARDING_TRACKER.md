@@ -50,9 +50,22 @@ turn beats false completeness.
   existing formula/duplicate-header export compatibility, and missing-sheet
   and source-overwrite rejection. With the existing patrol import dependencies:
   `python -m unittest discover -s test -p 'test_patrol_workbook_inventory.py' -v`.
-- Live Atlas provenance confirms the #130 merge SHA, 1,417 capabilities,
-  8,215 edges, and zero retirements. This is map freshness evidence, not a
-  claim that every mapped feature has been exercised.
+- A provider-scoped, read-only check compared these workbook names and hashes
+  with 120 `file_import_batches`: five latest batches are `applied` with exact
+  name/hash matches; six have an exact filename but a different latest hash
+  (five `applied`, NCC `needs_review`); eleven have no exact filename match.
+  These are provenance-comparison results, not proof that those eleven have no
+  imported records; historic labels can differ. Do not blindly replay changed
+  hashes or overwrite existing activity. The current importer intentionally
+  holds immutable-provenance changes pending a reconciliation workflow.
+- The approved Photos folder contains 58,589 files with supported image
+  extensions, counted by extension only. No image contents were read and no
+  file names were returned. Identity/place matching and custody review remain
+  separate from patrol-event import.
+- Atlas refreshed from merged main commit `8fa8e794f06e79ed83442f07cd84436d0d95dd20`
+  with zero capability/edge upserts and zero retirements (1,417 capabilities,
+  8,215 edges). This is map freshness evidence, not a claim that every mapped
+  feature has been exercised.
 - Still open: reviewed source mappings, all-client missing-place reconciliation,
   versioned row receipts/corrections, legacy-provenance review, photo promotion,
   and laptop scanner activation. The local detector remains disconnected from
