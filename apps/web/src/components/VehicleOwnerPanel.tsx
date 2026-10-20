@@ -1,5 +1,7 @@
 import React, { useCallback, useEffect, useState } from 'react';
 import { supabase } from '../lib/supabase';
+import { isDuplicateError, type NewPersonFields, type PersonMatch } from '../lib/personIdentity';
+import { PersonIdentityPanel, PersonMatchSuggestions, PersonSearchPicker } from './PersonIdentity';
 import './RecordFollowUp.css';
 
 type Relationship = 'owner' | 'registered_owner' | 'driver' | 'associated_person';
@@ -73,12 +75,12 @@ export const VehicleOwnerPanel: React.FC<{
   const [error, setError] = useState<string | null>(null);
   const [adding, setAdding] = useState<Exclude<Relationship, 'registered_owner'> | null>(null);
   const [mode, setMode] = useState<'new' | 'existing'>('new');
-  const [personQuery, setPersonQuery] = useState('');
-  const [personMatches, setPersonMatches] = useState<Array<{ id: string; display_name: string | null }>>([]);
-  const [personId, setPersonId] = useState('');
+  const [pickedPerson, setPickedPerson] = useState<PersonMatch | null>(null);
   const [fields, setFields] = useState(EMPTY_FIELDS);
+  const [confirmNew, setConfirmNew] = useState(false);
   const [source, setSource] = useState('owner_declared');
   const [basis, setBasis] = useState('');
+  const [openIdentityFor, setOpenIdentityFor] = useState<string | null>(null);
   const [busy, setBusy] = useState(false);
 
   // ATLAS CALLS: can_access_vehicle_owner_identity
@@ -117,25 +119,14 @@ export const VehicleOwnerPanel: React.FC<{
 
   useEffect(() => { void load(); }, [load]);
 
-  // ATLAS READS: person_records (own organisation, caller RLS)
-  useEffect(() => {
-    if (!adding || mode !== 'existing' || !organizationId || personQuery.trim().length < 2) { setPersonMatches([]); return; }
-    let cancelled = false;
-    const handle = window.setTimeout(() => {
-      const term = personQuery.trim().replace(/[%_,()]/g, ' ');
-      void supabase.from('person_records').select('id,display_name').eq('organization_id', organizationId)
-        .ilike('display_name', `%${term}%`).order('display_name').limit(10)
-        .then(({ data }) => { if (!cancelled) setPersonMatches(Array.isArray(data) ? data as typeof personMatches : []); });
-    }, 300);
-    return () => { cancelled = true; window.clearTimeout(handle); };
-  }, [adding, mode, organizationId, personQuery]);
-
   if (access === null) return null;
 
   const startAdding = (role: Exclude<Relationship, 'registered_owner'>) => {
     setAdding((current) => current === role ? null : role);
     setSource(role === 'owner' ? 'owner_declared' : 'officer_observed');
     setError(null);
+    setPickedPerson(null);
+    setConfirmNew(false);
   };
 
   const save = async (event: React.FormEvent) => {
@@ -147,18 +138,30 @@ export const VehicleOwnerPanel: React.FC<{
     const { error: saveError } = await supabase.rpc('record_vehicle_person', {
       p_organization_id: organizationId,
       p_canonical_vehicle_id: vehicleId,
-      p_person_record_id: mode === 'existing' ? personId || null : null,
-      p_person_fields: mode === 'new' ? Object.fromEntries(Object.entries(fields).filter(([, value]) => value.trim()).map(([key, value]) => [key, value.trim()])) : null,
+      p_person_record_id: mode === 'existing' ? pickedPerson?.person_record_id ?? null : null,
+      p_person_fields: mode === 'new'
+        ? Object.fromEntries(Object.entries({ ...fields, confirm_new_person: confirmNew } as NewPersonFields)
+          .filter(([, value]) => typeof value === 'boolean' ? value : Boolean(String(value ?? '').trim()))
+          .map(([key, value]) => [key, typeof value === 'string' ? value.trim() : value]))
+        : null,
       p_relationship: adding,
       p_source: source,
       p_basis: basis.trim(),
       p_observation_id: observationId,
     });
     setBusy(false);
-    if (saveError) { setError(saveError.message); return; }
+    if (saveError) {
+      const message = saveError.message;
+      setError(isDuplicateError(message)
+        ? `${message.replace(/^POSSIBLE_DUPLICATE:\s*/, '')} Pick the existing person above, or tick “This is a different person”.`
+        : message);
+      return;
+    }
     setAdding(null);
     setFields(EMPTY_FIELDS);
-    setPersonId(''); setPersonQuery(''); setBasis('');
+    setPickedPerson(null);
+    setConfirmNew(false);
+    setBasis('');
     await load();
     onChanged?.();
   };
@@ -176,7 +179,7 @@ export const VehicleOwnerPanel: React.FC<{
   const active = scoped.filter((link) => link.active);
   const past = scoped.filter((link) => !link.active);
   const hasOwner = people.some((link) => link.active && isOwner(link));
-  const canSave = Boolean(basis.trim()) && (mode === 'existing' ? Boolean(personId) : Boolean(fields.display_name.trim()));
+  const canSave = Boolean(basis.trim()) && (mode === 'existing' ? Boolean(pickedPerson) : Boolean(fields.display_name.trim()));
   const sourceOptions = adding && adding !== 'owner' ? SOURCES.filter(([value]) => value !== 'nzta_mvr') : SOURCES;
 
   const card = (link: VehiclePersonLink) => link.details_visible ? (
@@ -191,7 +194,10 @@ export const VehicleOwnerPanel: React.FC<{
       <small>{SOURCE_LABEL[link.source ?? ''] ?? 'Source not recorded'}{link.basis ? ` · ${link.basis}` : ''} · recorded {new Date(link.recorded_at).toLocaleDateString('en-NZ')} by {link.recorded_by_name ?? 'staff'}
         {!observationId && link.observation_ids?.length ? ` · seen at ${link.observation_ids.length} sighting${link.observation_ids.length === 1 ? '' : 's'}` : ''}</small>
       {link.nzta_restricted && <p className="vehicle-owner__notice" role="note">{NZTA_NOTICE}</p>}
-      {canRecord && <div><button type="button" className="btn btn-sm btn-secondary" onClick={() => void endLink(link)}>No longer {ROLE_LABEL[link.relationship].toLowerCase()}</button></div>}
+      <div className="vehicle-owner__actions">
+        {link.person_record_id && <button type="button" className="btn btn-sm btn-secondary" onClick={() => setOpenIdentityFor(link.person_record_id!)}>Identity…</button>}
+        {canRecord && <button type="button" className="btn btn-sm btn-secondary" onClick={() => void endLink(link)}>No longer {ROLE_LABEL[link.relationship].toLowerCase()}</button>}
+      </div>
     </div>
   ) : (
     <div key={link.link_id} className="vehicle-owner__card is-redacted">
@@ -201,6 +207,7 @@ export const VehicleOwnerPanel: React.FC<{
       </div>
       <div className="vehicle-owner__meta">{link.locality ? `Registered to ${link.locality}` : 'Locality not recorded'}</div>
       <small>Your organisation has identified this person on {new Date(link.recorded_at).toLocaleDateString('en-NZ')}. Their details are shown only to authorised users.</small>
+      {link.person_record_id && <div><button type="button" className="btn btn-sm btn-secondary" onClick={() => setOpenIdentityFor(link.person_record_id!)}>Identity…</button></div>}
     </div>
   );
 
@@ -238,7 +245,8 @@ export const VehicleOwnerPanel: React.FC<{
             </div>
             {mode === 'new' ? (
               <div className="vehicle-profile-fields">
-                <label>Full name<input required value={fields.display_name} maxLength={200} onChange={(event) => setFields({ ...fields, display_name: event.target.value })} /></label>
+                <label>Full name<input required value={fields.display_name} maxLength={200}
+                  onChange={(event) => { setFields({ ...fields, display_name: event.target.value }); setConfirmNew(false); }} /></label>
                 <label>Phone<input value={fields.phone} maxLength={50} onChange={(event) => setFields({ ...fields, phone: event.target.value })} /></label>
                 <label>Email<input type="email" value={fields.email} maxLength={200} onChange={(event) => setFields({ ...fields, email: event.target.value })} /></label>
                 <label>Street address<input value={fields.address} maxLength={300} onChange={(event) => setFields({ ...fields, address: event.target.value })} aria-describedby="vehicle-owner-street-hint" /></label>
@@ -247,15 +255,11 @@ export const VehicleOwnerPanel: React.FC<{
                 <small id="vehicle-owner-street-hint" className="vehicle-profile-hint">Authorised users see the full address. Everyone else sees only the suburb and town/city.</small>
               </div>
             ) : (
-              <>
-                <label>Find person<input type="search" value={personQuery} onChange={(event) => { setPersonQuery(event.target.value); setPersonId(''); }} placeholder="Type at least 2 letters of the name" /></label>
-                <label>Person record
-                  <select required value={personId} onChange={(event) => setPersonId(event.target.value)}>
-                    <option value="">{personMatches.length ? 'Select person' : 'No matches yet'}</option>
-                    {personMatches.map((person) => <option key={person.id} value={person.id}>{person.display_name || 'Unnamed person'}</option>)}
-                  </select>
-                </label>
-              </>
+              <PersonSearchPicker organizationId={organizationId} value={pickedPerson} onChange={setPickedPerson} />
+            )}
+            {mode === 'new' && (
+              <PersonMatchSuggestions organizationId={organizationId} fields={fields} confirmNew={confirmNew}
+                onConfirmNewChange={setConfirmNew} onPick={(match) => { setMode('existing'); setPickedPerson(match); }} />
             )}
             <label>Where did these details come from?
               <select value={source} onChange={(event) => setSource(event.target.value)}>
@@ -265,10 +269,12 @@ export const VehicleOwnerPanel: React.FC<{
             {source === 'nzta_mvr' && <p className="vehicle-owner__notice" role="note">{NZTA_NOTICE}</p>}
             <label>Reason / evidence<textarea required value={basis} maxLength={1000} onChange={(event) => setBasis(event.target.value)} placeholder={adding === 'owner' ? 'For example: owner produced registration papers, 12/10' : 'For example: driver produced licence at gate, 12/10'} /></label>
             <p className="vehicle-profile-hint">A new person is added to your person records and the shared person register. {adding === 'owner' ? 'Any previous owner your organisation recorded is ended. ' : 'A vehicle can have several drivers and associated people. '}Every change is audit-logged.</p>
-            <button type="submit" className="btn btn-primary btn-sm" disabled={!canSave}>{busy ? 'Saving…' : `Save ${ROLE_LABEL[adding].toLowerCase()}`}</button>
+            <button type="submit" className="btn btn-primary btn-sm"
+              disabled={mode === 'existing' ? !basis.trim() || !pickedPerson : !canSave}>{busy ? 'Saving…' : `Save ${ROLE_LABEL[adding].toLowerCase()}`}</button>
           </fieldset>
         </form>
       )}
+      {openIdentityFor && <PersonIdentityPanel personRecordId={openIdentityFor} onClose={() => setOpenIdentityFor(null)} onChanged={() => void load()} />}
     </section>
   );
 };

@@ -106,14 +106,15 @@ serve(async (req)=>{
       error: 'attachment_id is required'
     }, 400);
     const incidentMode = body.mode === 'incident_identity_document';
-    const attachmentClient = incidentMode ? admin : callerClient;
+    const submissionMode = body.mode === 'person_identity_submission';
+    const attachmentClient = incidentMode || submissionMode ? admin : callerClient;
     const { data: att } = await attachmentClient.from('bob_attachments').select('id, organization_id, uploaded_by, file_name, purpose, storage_bucket, storage_path, extraction_payload').eq('id', attachmentId).maybeSingle();
     if (!att) return json({
       error: 'Attachment not found'
     }, 404);
     if (att.uploaded_by !== user.id) return json({ error: 'Attachment belongs to another user' }, 403);
-    if (body.mode === 'identity_document' || incidentMode) {
-      if (!incidentMode && !['grand_master', 'master', 'admin'].includes(String(profile.role))) {
+    if (body.mode === 'identity_document' || incidentMode || submissionMode) {
+      if (!incidentMode && !submissionMode && !['grand_master', 'master', 'admin'].includes(String(profile.role))) {
         return json({ error: 'Forbidden: administrator identity review required' }, 403);
       }
       const personRecordId = String(body.person_record_id ?? '').trim();
@@ -122,7 +123,9 @@ serve(async (req)=>{
       const incidentId = incidentMode ? String(body.incident_id ?? att.extraction_payload?.incident_id ?? '').trim() : '';
       const expectedPrefix = incidentMode
         ? `org/${organizationId}/identity/${user.id}/incident-${incidentId}/`
-        : `org/${organizationId}/identity/${user.id}/`;
+        : submissionMode
+          ? `org/${organizationId}/identity/${user.id}/submission-${personRecordId}/`
+          : `org/${organizationId}/identity/${user.id}/`;
       if (!personRecordId || !organizationId || !documentKind || att.organization_id !== organizationId) {
         return json({ error: 'Identity document organization, person, and kind are required' }, 400);
       }
@@ -137,6 +140,18 @@ serve(async (req)=>{
         }
         const { data: incidentLink } = await admin.from('incident_person_links').select('id').eq('incident_id', incidentId).eq('person_record_id', personRecordId).maybeSingle();
         if (!incidentLink) return json({ error: 'Record the person on the incident before adding identity evidence' }, 400);
+      } else if (submissionMode) {
+        // Any member may submit evidence for a person they can see; an administrator still approves it.
+        const payload = att.extraction_payload ?? {};
+        if (String(payload.capture_authority ?? '') !== 'member_submission'
+          || String(payload.person_record_id ?? '') !== personRecordId
+          || String(payload.document_kind ?? '') !== documentKind) {
+          return json({ error: 'Forbidden: identity submission context does not match' }, 403);
+        }
+        const { data: visiblePerson } = await callerClient.from('person_records').select('id, organization_id').eq('id', personRecordId).maybeSingle();
+        if (!visiblePerson || visiblePerson.organization_id !== organizationId) {
+          return json({ error: 'Forbidden: this person is not visible to you' }, 403);
+        }
       } else {
         const { data: canAdminister } = await callerClient.rpc('is_admin_for_org', { target_org_id: organizationId });
         if (!canAdminister) return json({ error: 'Forbidden: administrator access to this organization is required' }, 403);
