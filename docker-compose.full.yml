@@ -303,6 +303,9 @@ services:
       OLLAMA_CONTEXT_LENGTH: ${OLLAMA_CONTEXT_LENGTH:-16384}
       # One resident model at a time: the 30B MoE coder (~21 GB with its window) plus a second model
       # pushed the 31 GB host into swap and took every service offline for five minutes (2026-09-27).
+      # fcm-api's knowledge embeddings (nomic-embed-text, ~0.3 GB) share this server; since 2026-10-21
+      # only restricted-data Builder runs use the CPU coder models, so the rare swap between them is
+      # cheaper than risking a second large resident model.
       OLLAMA_MAX_LOADED_MODELS: ${OLLAMA_MAX_LOADED_MODELS:-1}
       OLLAMA_NUM_PARALLEL: ${OLLAMA_NUM_PARALLEL:-1}
     # A hard ceiling so a model that does not fit kills only Ollama, never the host.

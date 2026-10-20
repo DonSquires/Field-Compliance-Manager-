@@ -58,7 +58,16 @@ function parseChain(raw, fallback) {
 //
 // Owner direction 2026-10-18: Ollama Cloud (owner's ollama.com subscription) is the first outsourced
 // tier, ahead of per-call OpenAI. It is external, so it never joins the restricted (local-only) chain.
-const IN_HOUSE_FIRST = Object.freeze([PROVIDERS.GPU_WORKSTATION, PROVIDERS.OLLAMA, PROVIDERS.OLLAMA_CLOUD, PROVIDERS.OPENAI]);
+//
+// Owner direction 2026-10-21 ("a stronger model, in the VPS or GPU or both, in parallel or any way that
+// benefits the project"): the VPS CPU tier leaves the unrestricted chains. Measured over 21 days it
+// passed 0-3% of analysis/UX runs (qwen2.5-coder:7b; qwen3-coder:30b timed out) while costing 2-7 min
+// per attempt before escalation; the laptop GPU, Ollama Cloud gpt-oss:120b (13/14 agentic) and OpenAI
+// carry the work. In-house still goes first (GPU), the flat-rate subscription second, per-call OpenAI
+// last. The VPS CPU now serves restricted-data runs and knowledge embeddings. Parallelism comes from the
+// gateway's one-request-per-local-provider guard: a busy GPU answers 429, which escalates, so concurrent
+// stages spread across the GPU and Ollama Cloud instead of queueing.
+const IN_HOUSE_FIRST = Object.freeze([PROVIDERS.GPU_WORKSTATION, PROVIDERS.OLLAMA_CLOUD, PROVIDERS.OPENAI]);
 const EXTERNAL_PROVIDERS = new Set([PROVIDERS.OLLAMA_CLOUD, PROVIDERS.OPENAI]);
 
 function localOnly(chain) {

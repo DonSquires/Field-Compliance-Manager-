@@ -206,12 +206,15 @@ function parseUxDesignPlan(content, { repositoryContext = {}, enforceRepositoryE
   if (enforceRepositoryEvidence && allowedRoutes.size && plan.route_map.length === 0) {
     throw new Error('route_map must include the supplied route or page identifier for this routed surface');
   }
+  const sample = (set) => [...set].slice(0, 12).map(value => JSON.stringify(value)).join(', ');
   if (enforceRepositoryEvidence) for (const entry of plan.route_map) {
     if (!entry || typeof entry.route !== 'string' || !allowedRoutes.has(entry.route)) {
-      throw new Error('route_map contains a route or page identifier not supplied by repository evidence');
+      // Named so the fallback chain's correction feedback tells the next model exactly what to fix.
+      throw new Error(`route_map contains a route or page identifier not supplied by repository evidence: ${JSON.stringify(String(entry?.route ?? '')).slice(0, 120)}; use one of: ${sample(allowedRoutes)}`);
     }
-    if (!Array.isArray(entry.access) || entry.access.some(value => !allowedAccess.has(value))) {
-      throw new Error('route_map contains an access boundary not supplied by repository evidence');
+    const unknownAccess = Array.isArray(entry.access) ? entry.access.filter(value => !allowedAccess.has(value)) : null;
+    if (!unknownAccess || unknownAccess.length) {
+      throw new Error(`route_map contains an access boundary not supplied by repository evidence: ${unknownAccess ? unknownAccess.slice(0, 5).map(value => JSON.stringify(value)).join(', ') : 'access must be an array'}; use only: ${sample(allowedAccess)}`);
     }
   }
   const componentIdentity = (value) => String(value ?? '').trim().replace(/\\/g, '/').split('/').at(-1).replace(/\.(?:tsx?|jsx?|css)$/i, '').toLowerCase();

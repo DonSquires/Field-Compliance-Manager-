@@ -113,7 +113,8 @@ test('UX Designer rejects invented routes, access boundaries, tokens, and alread
     grounded.design_tokens
   );
   assert.throws(() => parseUxDesignPlan(JSON.stringify({ ...grounded, route_map: [] }), { repositoryContext: context, enforceRepositoryEvidence: true }), /must include the supplied route/);
-  assert.throws(() => parseUxDesignPlan(JSON.stringify({ ...grounded, route_map: [{ route: '/builder/control-room', purpose: 'invented', access: ['AUTHORIZED_BUILDER_OPERATOR'] }] }), { repositoryContext: context, enforceRepositoryEvidence: true }), /route or page identifier/);
+  assert.throws(() => parseUxDesignPlan(JSON.stringify({ ...grounded, route_map: [{ route: '/builder/control-room', purpose: 'invented', access: ['AUTHORIZED_BUILDER_OPERATOR'] }] }), { repositoryContext: context, enforceRepositoryEvidence: true }), /route or page identifier not supplied by repository evidence: "\/builder\/control-room"; use one of: "AdminShell page id/);
+  assert.throws(() => parseUxDesignPlan(JSON.stringify({ ...grounded, route_map: [{ route: context.existing_routes[0], purpose: 'Builder workspace', access: ['AUTHORIZED_BUILDER_OPERATOR'] }] }), { repositoryContext: context, enforceRepositoryEvidence: true }), /access boundary not supplied by repository evidence: "AUTHORIZED_BUILDER_OPERATOR"; use only: "platform-only AdminShell page"/);
   assert.deepEqual(
     parseUxDesignPlan(JSON.stringify({
       ...grounded,
@@ -171,7 +172,7 @@ test('UX Designer uses approved specification artifact as model provenance', asy
     completeDesign: async () => ({ success: true, job: { status: 'implementation_pending' } })
   });
 
-  assert.deepEqual(captured.modelRequest.chain, ['gpu_workstation', 'ollama', 'ollama_cloud', 'openai']);
+  assert.deepEqual(captured.modelRequest.chain, ['gpu_workstation', 'ollama_cloud', 'openai']);
   assert.equal(captured.modelRequest.provider, 'gpu_workstation');
   assert.equal(captured.modelRequest.prompt_version, UX_DESIGNER_PROMPT_VERSION);
   assert.deepEqual(captured.modelRequest.input_artifact_ids, ['artifact-spec']);

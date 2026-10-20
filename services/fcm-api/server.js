@@ -13,6 +13,7 @@ const { planTurn } = require('./src/bob/plan');
 const { subagentStep } = require('./src/bob/subagent');
 const { classifyIdentityDocument, extractIdentityFields, extractIdentityFieldsConsensus, identityDocumentDefinition } = require('./src/bob/identityDocument');
 const { createDocumentReader, docxXmlToText } = require('./src/bob/documents');
+const { embedText, backfillCardEmbeddings, startCardEmbeddingBackfill } = require('./src/bob/knowledgeEmbedding');
 
 const execFileAsync = promisify(execFile);
 
@@ -120,6 +121,22 @@ async function runBobSubagentStep(request, response) {
   const body = await readJson(request);
   const result = await subagentStep(body, { gateway: modelGateway });
   return json(response, result.status, result.body);
+}
+
+async function embedBobText(request, response) {
+  const body = await readJson(request);
+  try {
+    return json(response, 200, await embedText(body?.text));
+  } catch (error) {
+    const message = error instanceof Error ? error.message : 'embed_failed';
+    return json(response, message === 'embed_text_required' ? 400 : 502, { error: message });
+  }
+}
+
+async function runCardEmbeddingBackfill(request, response) {
+  const body = await readJson(request).catch(() => ({}));
+  const limit = Math.max(1, Math.min(Number(body?.limit) || 25, 100));
+  return json(response, 200, await backfillCardEmbeddings({ supabase, limit }));
 }
 
 async function bobHealth(_request, response) {
@@ -421,6 +438,8 @@ http.createServer(async (request, response) => {
   try {
     if (request.method === 'POST' && request.url === '/api/bob/subagent') return await runBobSubagentStep(request, response);
     if (request.method === 'GET' && request.url === '/api/bob/health') return await bobHealth(request, response);
+    if (request.method === 'POST' && request.url === '/api/bob/embed') return await embedBobText(request, response);
+    if (request.method === 'POST' && request.url === '/api/bob/knowledge/embed-backfill') return await runCardEmbeddingBackfill(request, response);
     if (request.method === 'POST' && request.url === '/api/bob/voice/transcribe') return await proxyVoiceTranscription(request, response);
     if (request.method === 'POST' && request.url === '/api/bob/voice/speak') return await proxyVoiceSpeech(request, response);
     if (request.method === 'POST' && request.url === '/api/bob/media/ocr-image') return await identityDocument(request, response, true);
@@ -433,3 +452,9 @@ http.createServer(async (request, response) => {
     return json(response, 400, { error: error instanceof Error ? error.message : 'request_failed' });
   }
 }).listen(port, '0.0.0.0', () => console.log(`[fcm-api] listening on ${port}`));
+
+startCardEmbeddingBackfill({
+  supabase,
+  intervalMs: Number(process.env.BOB_EMBED_BACKFILL_INTERVAL_MS ?? 15 * 60 * 1000),
+  limit: Number(process.env.BOB_EMBED_BACKFILL_BATCH || 25),
+});

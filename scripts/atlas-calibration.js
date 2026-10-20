@@ -42,9 +42,10 @@ const REQUIREMENTS = [
     requiredMarkers: ['lease_token', 'lease_expires_at', 'wf_runs_one_active_lease_per_job', 'wf_heartbeat_run', 'wf_service_pickup_run', 'wf_service_return_artifact']
   },
   {
-    name: 'gitlab_read_boundary',
+    // Single target build: repo_search reads the control plane's pinned checkout, not GitLab (322dd6ff).
+    name: 'repository_read_boundary',
     file: 'supabase/functions/bob-repo-search/index.ts',
-    requiredMarkers: ['GITLAB_READ_TOKEN', 'GITLAB_WRITE_TOKEN', 'GITLAB_ALLOWED_PROJECTS', 'write_bob_chat', 'trackReadProgress']
+    requiredMarkers: ['BOB_CONTROL_PLANE_URL', 'BOB_ADMIN_TOKEN', '/api/bob/builder/repository/', 'write_bob_chat', 'trackReadProgress']
   },
   {
     name: 'repo_read_progress',
