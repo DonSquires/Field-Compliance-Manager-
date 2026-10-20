@@ -69,11 +69,15 @@ turn beats false completeness.
   60 lacked dates and 89 had no mapped place. Both plans produced zero
   observations and proposals. These were temporary laptop-only plans; no apply
   path was invoked.
-- Read-only live counts show 1,004 existing `DART2025` and 1,105 existing
-  `DART2026` event keys. Counts do not establish exact key overlap or whether
-  source-managed fields changed. Both sheets remain held until a local
-  key-by-key reconciliation can safely distinguish inserts, unchanged rows,
-  and review-required corrections. Do not replay either plan as an import.
+- A local-only, ephemeral-HMAC comparison established exact key overlap:
+  all 681 planned `DART2025` event keys already exist among 1,004 live keys;
+  all 1,105 planned `DART2026` keys already exist among 1,105 live keys. The
+  additional 323 `DART2025` keys match the previously applied `Update 251215`
+  sheet. There are zero new DART event keys to insert from these two year sheets.
+- Key equality does not prove that source-managed fields match or authorize
+  corrections. Existing records have legacy/source-hash provenance boundaries;
+  the DART sheets remain held until content fingerprints and provenance can be
+  reconciled through an audited correction path. No DART plan was applied.
 - Atlas refreshed from merged main commit `8fa8e794f06e79ed83442f07cd84436d0d95dd20`
   with zero capability/edge upserts and zero retirements (1,417 capabilities,
   8,215 edges). This is map freshness evidence, not a claim that every mapped
