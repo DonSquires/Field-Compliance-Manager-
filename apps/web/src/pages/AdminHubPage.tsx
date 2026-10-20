@@ -1,33 +1,25 @@
-import React, { useCallback, useEffect, useState } from 'react';
+import React, { useCallback, useEffect, useLayoutEffect, useRef, useState } from 'react';
 import {
   AlertTriangle,
   ArrowRight,
   Binoculars,
-  Car,
   ClipboardCheck,
-  FileWarning,
-  FileSearch,
   HeartPulse,
-  Map,
   Radio,
   RefreshCw,
-  Route,
   ShieldAlert,
   Users,
 } from 'lucide-react';
-import type { LucideIcon } from 'lucide-react';
 import { useAuth } from '../context/AuthContext';
 import { useServiceRelationships } from '../context/ServiceRelationshipContext';
 import { LoggedActivityPanel } from './LoggedActivityPanel';
 import { SafetyGate } from '../components/SafetyGate';
 import { MetricCard } from '../components/MetricCard/MetricCard';
 import { QueueCard } from '../components/QueueCard/QueueCard';
-import { StatusStrip, type StatusTone } from '../components/StatusStrip/StatusStrip';
 import { ACTIVE_DISPATCH_JOB_STATUSES } from '../lib/dispatchStatus';
 import { describeLoadFailures } from '../lib/friendlyLoadError';
 import { useEnabledModules } from '../hooks/useEnabledModules';
 import { supabase } from '../lib/supabase';
-import { ShellLayout } from '../layouts/ShellLayout';
 import './AdminHubPage.css';
 
 interface AdminHubPageProps {
@@ -96,9 +88,10 @@ function relativeTime(value: string): string {
 }
 
 const AdminHubPage: React.FC<AdminHubPageProps> = ({ onNavigate }) => {
-  const { profile } = useAuth();
-  const { selectedAgreementZones } = useServiceRelationships();
-  const { status: moduleStatus, isModuleEnabled } = useEnabledModules(profile?.organizationId);
+  const { profile, operatingOrganizationId } = useAuth();
+  const organizationId = operatingOrganizationId ?? profile?.organizationId;
+  const { selectedAgreementZones, loadedOrganizationId } = useServiceRelationships();
+  const { status: moduleStatus, isModuleEnabled } = useEnabledModules(organizationId);
   const welfareEnabled = isModuleEnabled('welfare', { safetyRelevant: true });
   const [metrics, setMetrics] = useState<Metrics>(EMPTY_METRICS);
   const [queue, setQueue] = useState<QueueItem[]>([]);
@@ -106,9 +99,23 @@ const AdminHubPage: React.FC<AdminHubPageProps> = ({ onNavigate }) => {
   const [queueWarnings, setQueueWarnings] = useState<string[]>([]);
   const [lastUpdated, setLastUpdated] = useState<Date | null>(null);
   const [trend, setTrend] = useState<TrendPoint[]>([]);
+  const [activePane, setActivePane] = useState<'queue' | 'activity' | 'exceptions'>('queue');
+  const requestGeneration = useRef(0);
+
+  useLayoutEffect(() => {
+    requestGeneration.current += 1;
+    setMetrics(EMPTY_METRICS);
+    setQueue([]);
+    setTrend([]);
+    setQueueWarnings([]);
+    setLastUpdated(null);
+    setLoading(true);
+    return () => { requestGeneration.current += 1; };
+  }, [organizationId, loadedOrganizationId, selectedAgreementZones, welfareEnabled]);
 
   const loadDashboard = useCallback(async () => {
-    if (!profile?.organizationId) {
+    const request = ++requestGeneration.current;
+    if (!organizationId) {
       const message = 'Organisation access could not be confirmed. Operational metrics are unavailable.';
       setMetrics(Object.fromEntries(Object.keys(EMPTY_METRICS).map((key) => [key, { value: null, error: message }])) as unknown as Metrics);
       setQueue([]);
@@ -121,8 +128,7 @@ const AdminHubPage: React.FC<AdminHubPageProps> = ({ onNavigate }) => {
     setLoading(true);
     setQueueWarnings([]);
 
-    const organizationId = profile.organizationId;
-    const activeZoneIds = selectedAgreementZones.length > 0 ? selectedAgreementZones.map((zone) => zone.id) : null;
+    const activeZoneIds = loadedOrganizationId === organizationId && selectedAgreementZones.length > 0 ? selectedAgreementZones.map((zone) => zone.id) : null;
     const now = new Date();
     const nowIso = now.toISOString();
     const todayStart = new Date(now.getFullYear(), now.getMonth(), now.getDate()).toISOString();
@@ -131,37 +137,38 @@ const AdminHubPage: React.FC<AdminHubPageProps> = ({ onNavigate }) => {
     try {
       const [onDuty, dispatchCount, welfareCount, breachCount, observationCount, dispatchTrend, welfareRows, dispatchRows, breachRows, reportRows, videoRows] = await Promise.all([
         activeZoneIds && activeZoneIds.length > 0
-          ? supabase.from('shifts').select('id', { count: 'exact', head: true }).in('zone_id', activeZoneIds).lte('scheduled_start', nowIso).gte('scheduled_end', nowIso).in('status', ['accepted', 'in_progress'])
+          ? supabase.from('shifts').select('id', { count: 'exact', head: true }).eq('organization_id', organizationId).in('zone_id', activeZoneIds).lte('scheduled_start', nowIso).gte('scheduled_end', nowIso).in('status', ['accepted', 'in_progress'])
           : supabase.from('shifts').select('id', { count: 'exact', head: true }).eq('organization_id', organizationId).lte('scheduled_start', nowIso).gte('scheduled_end', nowIso).in('status', ['accepted', 'in_progress']),
         activeZoneIds && activeZoneIds.length > 0
-          ? supabase.from('dispatch_jobs').select('id', { count: 'exact', head: true }).in('zone_id', activeZoneIds).in('status', ACTIVE_DISPATCH_JOB_STATUSES)
+          ? supabase.from('dispatch_jobs').select('id', { count: 'exact', head: true }).eq('organization_id', organizationId).in('zone_id', activeZoneIds).in('status', ACTIVE_DISPATCH_JOB_STATUSES)
           : supabase.from('dispatch_jobs').select('id', { count: 'exact', head: true }).eq('organization_id', organizationId).in('status', ACTIVE_DISPATCH_JOB_STATUSES),
         welfareEnabled
           ? supabase.from('welfare_alerts').select('id', { count: 'exact', head: true }).eq('organization_id', organizationId).in('status', ['pending', 'acknowledged'])
-          : Promise.resolve({ count: 0, error: null }),
+          : Promise.resolve({ count: null, error: { message: 'Welfare monitoring is unavailable until organisation entitlement is confirmed.' } }),
         activeZoneIds && activeZoneIds.length > 0
-          ? supabase.from('breach_alerts').select('id', { count: 'exact', head: true }).in('zone_id', activeZoneIds).in('status', ['open', 'acknowledged', 'actioned'])
+          ? supabase.from('breach_alerts').select('id', { count: 'exact', head: true }).eq('organization_id', organizationId).in('zone_id', activeZoneIds).in('status', ['open', 'acknowledged', 'actioned'])
           : supabase.from('breach_alerts').select('id', { count: 'exact', head: true }).eq('organization_id', organizationId).in('status', ['open', 'acknowledged', 'actioned']),
         activeZoneIds && activeZoneIds.length > 0
-          ? supabase.from('observations').select('id', { count: 'exact', head: true }).in('zone_id', activeZoneIds).gte('observed_at', todayStart)
+          ? supabase.from('observations').select('id', { count: 'exact', head: true }).eq('organization_id', organizationId).in('zone_id', activeZoneIds).gte('observed_at', todayStart)
           : supabase.from('observations').select('id', { count: 'exact', head: true }).eq('organization_id', organizationId).gte('observed_at', todayStart),
         activeZoneIds && activeZoneIds.length > 0
-          ? supabase.from('dispatch_jobs').select('created_at,status').in('zone_id', activeZoneIds).gte('created_at', trendStart.toISOString()).order('created_at', { ascending: true }).limit(1000)
+          ? supabase.from('dispatch_jobs').select('created_at,status').eq('organization_id', organizationId).in('zone_id', activeZoneIds).gte('created_at', trendStart.toISOString()).order('created_at', { ascending: true }).limit(1000)
           : supabase.from('dispatch_jobs').select('created_at,status').eq('organization_id', organizationId).gte('created_at', trendStart.toISOString()).order('created_at', { ascending: true }).limit(1000),
         welfareEnabled
           ? supabase.from('welfare_alerts').select('id, officer_user_id, alert_type, status, escalation_level, triggered_at').eq('organization_id', organizationId).in('status', ['pending', 'acknowledged']).order('triggered_at', { ascending: false }).limit(6)
           : Promise.resolve({ data: [], error: null }),
         activeZoneIds && activeZoneIds.length > 0
-          ? supabase.from('dispatch_jobs').select('id, job_type, priority, status, sla_respond_by, created_at').in('zone_id', activeZoneIds).in('status', ACTIVE_DISPATCH_JOB_STATUSES).order('created_at', { ascending: false }).limit(6)
+          ? supabase.from('dispatch_jobs').select('id, job_type, priority, status, sla_respond_by, created_at').eq('organization_id', organizationId).in('zone_id', activeZoneIds).in('status', ACTIVE_DISPATCH_JOB_STATUSES).order('created_at', { ascending: false }).limit(6)
           : supabase.from('dispatch_jobs').select('id, job_type, priority, status, sla_respond_by, created_at').eq('organization_id', organizationId).in('status', ACTIVE_DISPATCH_JOB_STATUSES).order('created_at', { ascending: false }).limit(6),
         activeZoneIds && activeZoneIds.length > 0
-          ? supabase.from('breach_alerts').select('id, plate_number, breach_type, status, created_at').in('zone_id', activeZoneIds).in('status', ['open', 'acknowledged', 'actioned']).order('created_at', { ascending: false }).limit(6)
+          ? supabase.from('breach_alerts').select('id, plate_number, breach_type, status, created_at').eq('organization_id', organizationId).in('zone_id', activeZoneIds).in('status', ['open', 'acknowledged', 'actioned']).order('created_at', { ascending: false }).limit(6)
           : supabase.from('breach_alerts').select('id, plate_number, breach_type, status, created_at').eq('organization_id', organizationId).in('status', ['open', 'acknowledged', 'actioned']).order('created_at', { ascending: false }).limit(6),
         activeZoneIds && activeZoneIds.length > 0
-          ? supabase.from('officer_field_reports').select('id, title, severity, status, reported_at').in('zone_id', activeZoneIds).eq('follow_up_required', true).eq('status', 'submitted').order('reported_at', { ascending: false }).limit(6)
+          ? supabase.from('officer_field_reports').select('id, title, severity, status, reported_at').eq('organization_id', organizationId).in('zone_id', activeZoneIds).eq('follow_up_required', true).eq('status', 'submitted').order('reported_at', { ascending: false }).limit(6)
           : supabase.from('officer_field_reports').select('id, title, severity, status, reported_at').eq('organization_id', organizationId).eq('follow_up_required', true).eq('status', 'submitted').order('reported_at', { ascending: false }).limit(6),
         supabase.from('inference_jobs').select('id, evidence_item_id, domain, status, created_at').eq('organization_id', organizationId).in('domain', ['video_motion', 'vehicle', 'face']).in('status', ['queued', 'processing', 'manual_review_required']).order('created_at', { ascending: false }).limit(6),
       ]);
+      if (request !== requestGeneration.current) return;
 
       setMetrics({
         onDuty: metricFrom(onDuty),
@@ -279,14 +286,15 @@ const AdminHubPage: React.FC<AdminHubPageProps> = ({ onNavigate }) => {
       setQueueWarnings(failure ? [failure] : []);
       setLastUpdated(new Date());
     } catch (error) {
+      if (request !== requestGeneration.current) return;
       const message = error instanceof Error ? error.message : 'Operations data could not be loaded.';
       setMetrics(Object.fromEntries(Object.keys(EMPTY_METRICS).map((key) => [key, { value: null, error: message }])) as unknown as Metrics);
       setQueue([]);
       setQueueWarnings([message]);
     } finally {
-      setLoading(false);
+      if (request === requestGeneration.current) setLoading(false);
     }
-  }, [profile?.organizationId, selectedAgreementZones, welfareEnabled]);
+  }, [organizationId, loadedOrganizationId, selectedAgreementZones, welfareEnabled]);
 
   useEffect(() => {
     void loadDashboard();
@@ -295,8 +303,7 @@ const AdminHubPage: React.FC<AdminHubPageProps> = ({ onNavigate }) => {
   }, [loadDashboard]);
 
   useEffect(() => {
-    if (!profile?.organizationId) return;
-    const organizationId = profile.organizationId;
+    if (!organizationId) return;
     const channel = supabase
       .channel(`admin-hub-${organizationId}`)
       .on('postgres_changes', { event: '*', schema: 'public', table: 'breach_alerts', filter: `organization_id=eq.${organizationId}` }, () => void loadDashboard())
@@ -312,27 +319,23 @@ const AdminHubPage: React.FC<AdminHubPageProps> = ({ onNavigate }) => {
       void supabase.removeChannel(channel);
       if (welfareChannel) void supabase.removeChannel(welfareChannel);
     };
-  }, [loadDashboard, profile?.organizationId, welfareEnabled]);
+  }, [loadDashboard, organizationId, welfareEnabled]);
 
   const attentionMetrics = [metrics.welfare.value, metrics.breaches.value, metrics.activeDispatch.value];
   const attentionCount = attentionMetrics.reduce<number>((sum, value) => sum + (value ?? 0), 0);
   const attentionUnavailable = attentionMetrics.some((value) => value === null);
-  const overviewTone: StatusTone = attentionUnavailable ? 'watch' : attentionCount > 0 ? 'action' : 'normal';
   const overviewMessage = attentionUnavailable
     ? 'Some operational counts are unavailable. Review metric status before relying on the queue.'
     : attentionCount > 0
       ? `${attentionCount} active items need attention across safety, dispatch, and compliance.`
       : 'Operations are clear across safety, dispatch, and compliance.';
-  const maxTrendJobs = Math.max(1, ...trend.map((point) => point.jobs));
+  const exceptions = queue.filter((item) => item.kind === 'welfare' || item.kind === 'breach');
 
   return (
-    <ShellLayout shell="admin" className="admin-shell-surface">
-      <div className="admin-overview">
+    <div className="admin-overview adminhub-command" data-active-pane={activePane}>
       <header className="admin-overview-header">
         <div>
-          <span>Operations control</span>
           <h1>Today at a glance</h1>
-          <p>{attentionUnavailable ? 'Some active safety, dispatch, or compliance counts are unavailable. Review metric status below.' : attentionCount > 0 ? `${attentionCount} active items across safety, dispatch, and compliance.` : 'No active safety, dispatch, or compliance items.'}</p>
         </div>
         <div className="admin-refresh-block">
           {lastUpdated && <time dateTime={lastUpdated.toISOString()}>Updated {lastUpdated.toLocaleTimeString('en-NZ', { hour: '2-digit', minute: '2-digit' })}</time>}
@@ -343,7 +346,16 @@ const AdminHubPage: React.FC<AdminHubPageProps> = ({ onNavigate }) => {
         </div>
       </header>
 
-      <StatusStrip tone={overviewTone}>{overviewMessage}</StatusStrip>
+      <section className="admin-metric-grid" aria-label="Current operations metrics">
+        <MetricCard icon={Users} label="On duty now" value={displayMetric(metrics.onDuty, loading)} unavailable={!loading && metrics.onDuty.value === null} loading={loading && metrics.onDuty.value === null} title={metrics.onDuty.error ?? undefined} tone="blue" onClick={() => onNavigate?.('roster')} />
+        <MetricCard icon={Radio} label="Active dispatch" value={displayMetric(metrics.activeDispatch, loading)} unavailable={!loading && metrics.activeDispatch.value === null} loading={loading && metrics.activeDispatch.value === null} title={metrics.activeDispatch.error ?? undefined} tone="teal" onClick={() => onNavigate?.('dispatch')} />
+        <MetricCard icon={ShieldAlert} label="Open breaches" value={displayMetric(metrics.breaches, loading)} unavailable={!loading && metrics.breaches.value === null} loading={loading && metrics.breaches.value === null} title={metrics.breaches.error ?? undefined} tone="amber" onClick={() => onNavigate?.('breach-review')} />
+        <MetricCard icon={Binoculars} label="Observations today" value={displayMetric(metrics.observations, loading)} unavailable={!loading && metrics.observations.value === null} loading={loading && metrics.observations.value === null} title={metrics.observations.error ?? undefined} tone="green" onClick={() => onNavigate?.('reports')} />
+        <SafetyGate status={moduleStatus} isEnabled={welfareEnabled} moduleLabel="Welfare monitoring" safetyRelevant renderUnavailable={(message) => <MetricCard icon={HeartPulse} label="Welfare alerts" value="Unavailable" unavailable title={message.description} tone="red" />}>
+          <MetricCard icon={HeartPulse} label="Welfare alerts" value={displayMetric(metrics.welfare, loading)} unavailable={!loading && metrics.welfare.value === null} loading={loading && metrics.welfare.value === null} title={metrics.welfare.error ?? undefined} tone="red" onClick={() => onNavigate?.('welfare-alerts')} />
+        </SafetyGate>
+      </section>
+      <div className="admin-console-status" role="status">{loading ? 'Updating operational evidence…' : overviewMessage}</div>
 
       {queueWarnings.length > 0 && (
         <div className="admin-data-warning" role="alert">
@@ -352,16 +364,20 @@ const AdminHubPage: React.FC<AdminHubPageProps> = ({ onNavigate }) => {
         </div>
       )}
 
+      <nav className="admin-pane-switcher" aria-label="Overview panes">
+        {(['queue', 'activity', 'exceptions'] as const).map((pane) => <button key={pane} type="button" aria-pressed={activePane === pane} onClick={() => setActivePane(pane)}>{pane === 'queue' ? 'Priority queue' : pane === 'activity' ? 'Activity ledger' : 'Exceptions'}</button>)}
+      </nav>
       <div className="admin-overview-layout">
-        <section className="admin-priority-queue" aria-labelledby="priority-queue-heading">
+        <section className="admin-priority-queue admin-console-pane" aria-labelledby="priority-queue-heading" tabIndex={0}>
           <div className="admin-section-heading">
-            <div><span>Live work</span><h2 id="priority-queue-heading">Priority queue</h2></div>
+            <div><h2 id="priority-queue-heading">Priority queue</h2></div>
             <strong>{queue.length}</strong>
           </div>
           <p className="admin-queue-scope-note">
             Dispatch, breaches, reports, and observations use {selectedAgreementZones.length > 0 ? 'Zones on the active agreement' : 'organization-wide scope'}. Welfare and CCTV processing are organization-wide.
           </p>
 
+          <div className="admin-pane-scroll">
           {loading && queue.length === 0 ? (
             <div className="admin-queue-loading" role="status">Refreshing the live queue…</div>
           ) : queue.length === 0 && queueWarnings.length === 0 ? (
@@ -378,61 +394,33 @@ const AdminHubPage: React.FC<AdminHubPageProps> = ({ onNavigate }) => {
               {queue.map((item, index) => <QueueCard key={`${item.kind}-${item.id}`} item={item} isNext={index === 0} onOpen={() => onNavigate?.(item.navigate)} />)}
             </div>
           )}
+          </div>
+          <footer className="admin-queue-footer">
+            {profile?.role && ['grand_master', 'master', 'admin'].includes(profile.role) && <button type="button" onClick={() => onNavigate?.('approvals')}>Open approvals <ArrowRight size={13} aria-hidden="true" /></button>}
+            <small>Review, approve or assign in the governed record.</small>
+          </footer>
         </section>
-
-        <aside className="admin-command-panel">
-          <div className="admin-section-heading"><div><span>Shortcuts</span><h2>Quick actions</h2></div></div>
-          <div className="admin-command-group"><span>Respond now</span>
-          <CommandLink icon={Radio} label="Dispatch console" detail="Jobs, resources, and SLA state" onClick={() => onNavigate?.('dispatch')} />
-          <CommandLink icon={Map} label="Operational map" detail="Officers, sites, and zones" onClick={() => onNavigate?.('live-map')} />
-          <CommandLink icon={Route} label="Patrol operations" detail="Shifts, routes, and checkpoints" onClick={() => onNavigate?.('patrol')} />
+        <div className="admin-console-right">
+          <section className="admin-console-pane admin-console-activity" aria-label="Activity ledger" tabIndex={0}>
+            <div className="admin-pane-scroll">
+              <LoggedActivityPanel refreshKey={lastUpdated?.getTime()} onOpenRecords={() => onNavigate?.('reports')} />
+              <details className="admin-trend-panel">
+                <summary>Dispatch volume · last seven days</summary>
+                <table><thead><tr><th>Day</th><th>Created</th><th>Completed</th></tr></thead><tbody>{trend.map((point) => <tr key={point.label}><td>{point.label}</td><td>{point.jobs}</td><td>{point.completed}</td></tr>)}</tbody></table>
+              </details>
+            </div>
+          </section>
+          <section className="admin-console-pane admin-console-exceptions" aria-labelledby="exceptions-heading" tabIndex={0}>
+            <div className="admin-section-heading"><h2 id="exceptions-heading">Shift & compliance exceptions</h2><button type="button" onClick={() => onNavigate?.('roster')}>Review shifts <ArrowRight size={13} aria-hidden="true" /></button></div>
+            <div className="admin-pane-scroll">
+              <p className="admin-queue-scope-note">Safety and compliance queue samples. Shift coverage and readiness require review in the roster.</p>
+              {exceptions.length ? exceptions.map((item) => <QueueCard key={`${item.kind}-${item.id}`} item={item} isNext={false} onOpen={() => onNavigate?.(item.navigate)} />) : <p className="admin-queue-loading">{loading ? 'Loading exceptions…' : queueWarnings.length || attentionUnavailable ? 'Exception evidence is incomplete. Review unavailable sources.' : 'No active exceptions in the current queue sample.'}</p>}
+            </div>
+          </section>
           </div>
-          <div className="admin-command-group"><span>Review and investigate</span>
-          <CommandLink icon={FileWarning} label="Field reports" detail="Review and follow-up" onClick={() => onNavigate?.('field-reports')} />
-          <CommandLink icon={FileSearch} label="Officer timeline" detail="Evidence and investigation chronology" onClick={() => onNavigate?.('officer-activity')} />
-          <CommandLink icon={Car} label="Vehicle lookup" detail="Observation and compliance history" onClick={() => onNavigate?.('vehicle-search')} />
-          </div>
-        </aside>
-      </div>
-
-      <LoggedActivityPanel onOpenRecords={() => onNavigate?.('reports')} />
-
-      <section className="admin-dashboard" aria-labelledby="dashboard-heading">
-        <div className="admin-dashboard-heading">
-          <div><span>Operational intelligence</span><h2 id="dashboard-heading">Dashboard</h2></div>
-          <small>Live totals and the last seven days</small>
         </div>
-        <section className="admin-metric-grid" aria-label="Current operations metrics">
-          <MetricCard icon={Users} label="On duty now" value={displayMetric(metrics.onDuty, loading)} unavailable={!loading && metrics.onDuty.value === null} loading={loading && metrics.onDuty.value === null} title={metrics.onDuty.error ?? undefined} tone="blue" onClick={() => onNavigate?.('roster')} />
-          <MetricCard icon={Radio} label="Active dispatch" value={displayMetric(metrics.activeDispatch, loading)} unavailable={!loading && metrics.activeDispatch.value === null} loading={loading && metrics.activeDispatch.value === null} title={metrics.activeDispatch.error ?? undefined} tone="teal" onClick={() => onNavigate?.('dispatch')} />
-          <MetricCard icon={ShieldAlert} label="Open breaches" value={displayMetric(metrics.breaches, loading)} unavailable={!loading && metrics.breaches.value === null} loading={loading && metrics.breaches.value === null} title={metrics.breaches.error ?? undefined} tone="amber" onClick={() => onNavigate?.('breach-review')} />
-          <MetricCard icon={Binoculars} label="Observations today" value={displayMetric(metrics.observations, loading)} unavailable={!loading && metrics.observations.value === null} loading={loading && metrics.observations.value === null} title={metrics.observations.error ?? undefined} tone="green" onClick={() => onNavigate?.('reports')} />
-          <SafetyGate status={moduleStatus} isEnabled={welfareEnabled} moduleLabel="Welfare monitoring" safetyRelevant renderUnavailable={(message) => <MetricCard icon={HeartPulse} label="Welfare alerts" value="Unavailable" unavailable title={message.description} tone="red" />}>
-            <MetricCard icon={HeartPulse} label="Welfare alerts" value={displayMetric(metrics.welfare, loading)} unavailable={!loading && metrics.welfare.value === null} loading={loading && metrics.welfare.value === null} title={metrics.welfare.error ?? undefined} tone="red" onClick={() => onNavigate?.('welfare-alerts')} />
-          </SafetyGate>
-        </section>
-        <section className="admin-trend-panel" aria-labelledby="dispatch-trend-heading">
-          <div className="admin-section-heading"><div><span>Work volume</span><h2 id="dispatch-trend-heading">Dispatch jobs</h2></div><small>Created versus completed</small></div>
-          <div className="admin-trend-chart" role="img" aria-label="Seven day dispatch jobs trend">
-            {trend.map((point) => <div className="admin-trend-column" key={point.label}><div className="admin-trend-bars"><span style={{ height: `${(point.jobs / maxTrendJobs) * 100}%` }} title={`${point.jobs} jobs`} /><span className="is-completed" style={{ height: `${(point.completed / maxTrendJobs) * 100}%` }} title={`${point.completed} completed`} /></div><small>{point.label}</small></div>)}
-          </div>
-          <div className="admin-trend-legend"><span><i /> Jobs created</span><span><i className="is-completed" /> Completed</span></div>
-        </section>
-      </section>
-
-      </div>
-    </ShellLayout>
+    </div>
   );
 };
-
-function CommandLink({ icon: Icon, label, detail, onClick }: { icon: LucideIcon; label: string; detail: string; onClick: () => void }) {
-  return (
-    <button type="button" className="admin-command-link" onClick={onClick}>
-      <span><Icon size={18} aria-hidden="true" /></span>
-      <div><strong>{label}</strong><small>{detail}</small></div>
-      <ArrowRight size={16} aria-hidden="true" />
-    </button>
-  );
-}
 
 export default AdminHubPage;

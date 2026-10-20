@@ -1,4 +1,4 @@
-import React, { useEffect, useMemo, useState } from 'react';
+import React, { useEffect, useLayoutEffect, useMemo, useState } from 'react';
 import { ArrowRight } from 'lucide-react';
 import { useAuth } from '../context/AuthContext';
 import { useServiceRelationships } from '../context/ServiceRelationshipContext';
@@ -7,6 +7,7 @@ import './LoggedActivityPanel.css';
 
 interface Props {
   onOpenRecords: () => void;
+  refreshKey?: number;
 }
 
 interface RecentRecord {
@@ -29,18 +30,26 @@ const WINDOW_DAYS = 14;
  * Historical record of what has been logged against the provider's agreements. The priority queue above it is
  * live work only, so without this a tenant with imported history would see an apparently empty overview.
  */
-export const LoggedActivityPanel: React.FC<Props> = ({ onOpenRecords }) => {
-  const { profile } = useAuth();
-  const { agreements, zones, sites } = useServiceRelationships();
+export const LoggedActivityPanel: React.FC<Props> = ({ onOpenRecords, refreshKey }) => {
+  const { profile, operatingOrganizationId } = useAuth();
+  const organizationId = operatingOrganizationId ?? profile?.organizationId;
+  const { agreements, zones, sites, loadedOrganizationId } = useServiceRelationships();
   const [totals, setTotals] = useState<Totals | null>(null);
   const [recent, setRecent] = useState<RecentRecord[]>([]);
   const [error, setError] = useState<string | null>(null);
   const [loading, setLoading] = useState(true);
 
   const agreementIds = useMemo(() => agreements
-    .filter((agreement) => agreement.agreement_type === 'operational' && agreement.client_organization_id !== profile?.organizationId)
-    .map((agreement) => agreement.id), [agreements, profile?.organizationId]);
+    .filter((agreement) => loadedOrganizationId === organizationId && agreement.agreement_type === 'operational' && agreement.client_organization_id !== organizationId)
+    .map((agreement) => agreement.id), [agreements, organizationId, loadedOrganizationId]);
   const agreementKey = agreementIds.join(',');
+
+  useLayoutEffect(() => {
+    setTotals(null);
+    setRecent([]);
+    setError(null);
+    setLoading(true);
+  }, [organizationId, loadedOrganizationId, agreementKey]);
 
   const placeName = (zoneId: string | null, siteId: string | null) => (
     zones.find((zone) => zone.id === zoneId)?.name ?? sites.find((site) => site.id === siteId)?.name ?? 'Unnamed place'
@@ -50,12 +59,19 @@ export const LoggedActivityPanel: React.FC<Props> = ({ onOpenRecords }) => {
   useEffect(() => {
     let cancelled = false;
     const load = async () => {
+      if (!organizationId || loadedOrganizationId !== organizationId) {
+        setTotals(null); setRecent([]);
+        setError('Agreement activity is unavailable until the selected organisation context is loaded.');
+        setLoading(false);
+        return;
+      }
       if (agreementIds.length === 0) { setTotals(null); setRecent([]); setLoading(false); return; }
       setLoading(true);
       setError(null);
       try {
         const { data: links, error: linksError } = await supabase
           .from('service_agreement_locations').select('zone_id,site_id').in('service_agreement_id', agreementIds).eq('status', 'active');
+        if (cancelled) return;
         if (linksError) throw linksError;
         const zoneIds = [...new Set((links ?? []).map((link) => link.zone_id).filter((id): id is string => Boolean(id)))];
         const siteIds = [...new Set((links ?? []).map((link) => link.site_id).filter((id): id is string => Boolean(id)))];
@@ -66,9 +82,9 @@ export const LoggedActivityPanel: React.FC<Props> = ({ onOpenRecords }) => {
         const since = new Date(Date.now() - WINDOW_DAYS * 24 * 60 * 60 * 1000).toISOString();
         const until = new Date().toISOString();
         const [visits, sightings, recentVisits] = await Promise.all([
-          supabase.from('location_events').select('id', { count: 'exact', head: true }).or(eventPlaces).gte('occurred_at', since).lte('occurred_at', until),
-          supabase.from('observations').select('id', { count: 'exact', head: true }).or(sightingPlaces).gte('observed_at', since).lte('observed_at', until),
-          supabase.from('location_events').select('id,occurred_at,event_type,zone_id,client_site_id,payload').or(eventPlaces).gte('occurred_at', since).lte('occurred_at', until).order('occurred_at', { ascending: false }).limit(5),
+          supabase.from('location_events').select('id', { count: 'exact', head: true }).eq('organization_id', organizationId).or(eventPlaces).gte('occurred_at', since).lte('occurred_at', until),
+          supabase.from('observations').select('id', { count: 'exact', head: true }).eq('organization_id', organizationId).or(sightingPlaces).gte('observed_at', since).lte('observed_at', until),
+          supabase.from('location_events').select('id,occurred_at,event_type,zone_id,client_site_id,payload').eq('organization_id', organizationId).or(eventPlaces).gte('occurred_at', since).lte('occurred_at', until).order('occurred_at', { ascending: false }).limit(5),
         ]);
         const failure = visits.error ?? sightings.error ?? recentVisits.error;
         if (failure) throw failure;
@@ -85,7 +101,7 @@ export const LoggedActivityPanel: React.FC<Props> = ({ onOpenRecords }) => {
     return () => { cancelled = true; };
     // agreementKey stands in for agreementIds so a new array with the same ids does not refetch.
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [agreementKey]);
+  }, [agreementKey, refreshKey, organizationId, loadedOrganizationId]);
 
   return (
     <section className="admin-logged-activity" aria-labelledby="logged-activity-heading">

@@ -3,8 +3,22 @@ import { resolve } from 'node:path';
 import { describe, expect, it } from 'vitest';
 
 const source = readFileSync(resolve(process.cwd(), 'src/pages/AdminHubPage.tsx'), 'utf8');
+const css = readFileSync(resolve(process.cwd(), 'src/pages/AdminHubPage.css'), 'utf8');
+const shellCss = readFileSync(resolve(process.cwd(), 'src/shells/AdminShell.css'), 'utf8');
 
 describe('Admin Hub operational data contract', () => {
+  it('invalidates previous-scope requests and validates agreement scope', () => {
+    expect(source).toContain('loadedOrganizationId === organizationId');
+    expect(source).toContain('const request = ++requestGeneration.current');
+    expect(source).toContain('if (request !== requestGeneration.current) return;');
+    expect(source).toContain('if (request === requestGeneration.current) setLoading(false)');
+    expect(source).toContain('useLayoutEffect(() =>');
+    const activity = readFileSync(resolve(process.cwd(), 'src/pages/LoggedActivityPanel.tsx'), 'utf8');
+    expect(activity).toContain('loadedOrganizationId === organizationId');
+    expect(activity).toContain('[agreementKey, refreshKey, organizationId, loadedOrganizationId]');
+    expect(activity).toContain(".eq('organization_id', organizationId).or(eventPlaces)");
+  });
+
   it('uses schema-backed operational sources and checks response errors', () => {
     for (const table of ['shifts', 'dispatch_jobs', 'welfare_alerts', 'breach_alerts', 'observations', 'officer_field_reports']) {
       expect(source).toContain(`from('${table}')`);
@@ -33,7 +47,7 @@ describe('Admin Hub operational data contract', () => {
     expect(source).toContain("{ value: null, error: response.error.message }");
     expect(source).toContain("unavailable ? 'Unavailable' : metric.value");
     expect(source).toContain('const attentionUnavailable = attentionMetrics.some((value) => value === null);');
-    expect(source).toContain('Some active safety, dispatch, or compliance counts are unavailable.');
+    expect(source).toContain('Some operational counts are unavailable.');
   });
 
   it('does not leave the operations landing page in an indefinite loading state without tenant scope', () => {
@@ -42,9 +56,13 @@ describe('Admin Hub operational data contract', () => {
     expect(source).toContain('setLoading(false);');
   });
 
-  it('keeps live work ahead of supporting metrics without a duplicate shortcut directory', () => {
-    expect(source.indexOf('className="admin-overview-layout"')).toBeLessThan(source.indexOf('className="admin-dashboard"'));
-    expect(source).toContain('<h2>Quick actions</h2>');
+  it('keeps the queue beside independently scrollable evidence and exceptions without a duplicate shortcut directory', () => {
+    expect(source).toContain('className="admin-overview-layout"');
+    expect(source).toContain('className="admin-console-right"');
+    expect(source).toContain('className="admin-pane-scroll"');
+    expect(source).toContain('aria-label="Overview panes"');
+    expect(source).toContain('Shift & compliance exceptions');
+    expect(source).not.toContain('<h2>Quick actions</h2>');
     expect(source).not.toContain('Command Centre');
     expect(source).not.toContain('ADMIN_COMMAND_CENTRE_GROUPS');
   });
@@ -58,5 +76,17 @@ describe('Admin Hub operational data contract', () => {
     expect(welfareQueries.length).toBeGreaterThanOrEqual(2);
     for (const query of welfareQueries) expect(query).not.toContain("in('zone_id'");
     expect(source).toContain('Welfare and CCTV processing are organization-wide.');
+  });
+
+  it('locks the console viewport and gives the master-detail panes their own scroll ownership', () => {
+    expect(shellCss).toMatch(/\.admin-shell\s*\{[^}]*height:\s*100vh;[^}]*overflow:\s*hidden;/s);
+    expect(css).toContain('height: 100%;');
+    expect(css).toContain('min-height: 0;');
+    expect(css).toContain('grid-template-columns: minmax(280px,35fr) minmax(0,65fr)');
+    expect(css).toMatch(/\.admin-pane-scroll\s*\{[^}]*overflow-y:\s*auto/s);
+    expect(css).toContain('flex: 0 0 48px');
+    expect(css).toContain('font-variant-numeric: tabular-nums');
+    expect(css).not.toContain('max-width: 1320px');
+    expect(source).toContain('Review, approve or assign in the governed record.');
   });
 });

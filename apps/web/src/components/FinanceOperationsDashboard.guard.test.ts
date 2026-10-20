@@ -30,6 +30,7 @@ describe('Finance operations dashboard', () => {
 
   it('is integrated into the existing Finance Bureau page', () => {
     expect(moneyPage).toContain("import { FinanceOperationsDashboard } from '../components/FinanceOperationsDashboard';");
-    expect(moneyPage).toContain('<FinanceOperationsDashboard />');
+    expect(moneyPage).toContain("workflow === 'overview' && <FinanceOperationsDashboard");
+    expect(moneyPage).toContain('activePeriodId={periodId} compact');
   });
 });

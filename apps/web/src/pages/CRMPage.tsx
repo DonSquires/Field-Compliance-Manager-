@@ -1,18 +1,9 @@
 /**
  * CRMPage.tsx
  *
- * Canonical spine: organizations (hierarchy) + service_agreements (contracts).
- * There is no standalone "contact rolodex" entity — accounts ARE organizations,
- * grouped by organization_type and parent_organization_id. crm_contacts are
- * people attached to an organization, not accounts themselves.
- *
- * Sections mirror the live production screen:
- *  - Your Organisation (own org + child counts)
- *  - Our Clients        (organizations.organization_type = 'client', parent = own org)
- *  - Branches           (organizations.organization_type = 'branch', parent = own org)
- *  - Platform Subscription (service_agreements.agreement_type = 'financial', client = own org)
- *  - Organizations We Contract With (service_agreements.agreement_type = 'operational',
- *    counterpart not part of the branch hierarchy)
+ * Model A: own-rooted organizations, contextual service-agreement relationships.
+ * One directory merges portfolio, branch and subscription metadata without
+ * inventing ownership. Contacts and delivery use their existing governed writers.
  */
 
 import React, { useEffect, useRef, useState, useCallback } from 'react';
@@ -22,7 +13,8 @@ import { useAuth } from '../context/AuthContext';
 import { supabase } from '../lib/supabase';
 import { contractedDaysWords, contractedHoursWords } from '../lib/rosterWords';
 import { readWorkflowContext, type NavigateWithContext } from '../lib/workflowNavigation';
-import { CrmAccountWorkspace, type CrmWorkspaceAccount, type WorkspaceQuote } from '../components/CrmAccountWorkspace';
+import { CrmAccountWorkspace, CrmPrimaryContactEditor, type CrmWorkspaceAccount, type WorkspaceQuote } from '../components/CrmAccountWorkspace';
+import ClientSetupPage from './ClientSetupPage';
 import { CrmOrganizationDialog, type EditableCrmOrganization } from '../components/CrmOrganizationDialog';
 import { CrmSiteDialog } from '../components/CrmSiteDialog';
 import { PriceListPicker } from '../components/PriceListPicker';
@@ -271,6 +263,13 @@ const CRMPage: React.FC<{ onNavigate?: NavigateWithContext }> = ({ onNavigate = 
   const [notice, setNotice] = useState<string | null>(null);
   const [quoteAcceptance, setQuoteAcceptance] = useState<{ quoteTitle: string; accountId: string; accountName: string; agreementId: string; variedAgreementName?: string | null } | null>(null);
   const [workspaceAccount, setWorkspaceAccount] = useState<CrmWorkspaceAccount | null>(null);
+  const [directorySelection, setDirectorySelection] = useState('');
+  const [directoryType, setDirectoryType] = useState('all');
+  const [directoryPane, setDirectoryPane] = useState<'directory' | 'detail'>('directory');
+  const [directoryDirty, setDirectoryDirty] = useState({ contact: false, matrix: false });
+  const [showCommercial, setShowCommercial] = useState(false);
+  const contactDirty = useCallback((dirty: boolean) => setDirectoryDirty((current) => current.contact === dirty ? current : { ...current, contact: dirty }), []);
+  const matrixDirty = useCallback((dirty: boolean) => setDirectoryDirty((current) => current.matrix === dirty ? current : { ...current, matrix: dirty }), []);
   const [workspaceInitialView, setWorkspaceInitialView] = useState<'overview' | 'sites'>('overview');
   const [accountSearch, setAccountSearch] = useState('');
   const [invoiceAction, setInvoiceAction] = useState<{ invoice: InvoiceRow; action: 'send' | 'mark_paid' | 'void' } | null>(null);
@@ -309,8 +308,8 @@ const CRMPage: React.FC<{ onNavigate?: NavigateWithContext }> = ({ onNavigate = 
     const requestedAccount = [...state.clients, ...state.branches].find((account) => account.id === requestedAccountId);
     if (!requestedAccount || openedContextAccountId.current === requestedAccountId) return;
     openedContextAccountId.current = requestedAccountId;
-    setWorkspaceAccount({ id: requestedAccount.id, name: requestedAccount.name, status: requestedAccount.status, primaryContactName: requestedAccount.primary_contact_name, siteCount: requestedAccount.site_count, readinessBlockers: requestedAccount.blockers, nextAction: requestedAccount.next_action, latestQuoteStatus: requestedAccount.latest_quote_status });
-    document.getElementById(`crm-account-${requestedAccountId}`)?.scrollIntoView({ block: 'center' });
+    setDirectorySelection(requestedAccount.id);
+    setDirectoryPane('detail');
   }, [requestedAccountId, state.branches, state.clients]);
 
   // CRM account scope comes from the selected provider portfolio, then reads canonical organization records.
@@ -1463,7 +1462,7 @@ const CRMPage: React.FC<{ onNavigate?: NavigateWithContext }> = ({ onNavigate = 
     </div>
   ) : null;
 
-  if (state.loading) {
+  if (state.loading && !state.ownOrg) {
     return (
       <div className="page-container">
         <h1 className="sr-only">Client Portfolios</h1>
@@ -1475,30 +1474,31 @@ const CRMPage: React.FC<{ onNavigate?: NavigateWithContext }> = ({ onNavigate = 
     );
   }
 
-  const totalAccounts = state.clients.length + state.branches.length;
+  const directory = new Map<string, { id: string; name: string; type: string; metadata: string[]; account?: AccountRow }>();
+  for (const account of [...state.clients, ...state.branches]) directory.set(account.id, { id: account.id, name: account.name, type: account.organization_type, account, metadata: [account.operating_provider_name ? `Provider: ${account.operating_provider_name}` : '', account.organization_type === 'branch' ? 'Internal branch' : '', `${account.site_count} sites`, account.status].filter(Boolean) });
+  const operatingId = operatingOrganizationId ?? profile?.organizationId;
+  for (const agreement of [...state.contractedOrgs, ...state.platformSubscribers]) {
+    const id = agreement.provider_organization_id === operatingId ? agreement.client_organization_id : agreement.provider_organization_id;
+    const entry = directory.get(id) ?? { id, name: agreement.counterparty_name, type: agreement.counterparty_type, metadata: [] };
+    entry.metadata = [...entry.metadata, `${agreement.agreement_type === 'financial' ? 'Subscription' : 'Contract'}: ${agreement.name} · ${agreement.invitation_status.replaceAll('_', ' ')}`];
+    directory.set(id, entry);
+  }
+  if (state.ownOrg && !directory.has(state.ownOrg.id)) directory.set(state.ownOrg.id, { id: state.ownOrg.id, name: state.ownOrg.name, type: state.ownOrg.organization_type, metadata: ['Operating organization'] });
+  const directoryEntries = [...directory.values()];
+  const selectedEntry = directory.get(directorySelection || requestedAccountId || state.clients[0]?.id || '') ?? directoryEntries[0];
+  const totalAccounts = directoryEntries.length;
   const normalizedAccountSearch = accountSearch.trim().toLocaleLowerCase();
-  const visibleClients = state.clients.filter((client) => {
-    if (!normalizedAccountSearch) return true;
-    return [
-      client.name,
-      ...(client.former_names ?? []),
-      client.operating_provider_name,
-      client.primary_contact_name,
-      client.status,
-      client.latest_quote_status,
-      client.next_action,
-      ...client.sites.map((site) => site.name),
-    ].filter(Boolean).join(' ').toLocaleLowerCase().includes(normalizedAccountSearch);
-  });
+  const visibleClients = directoryEntries.filter((entry) => (directoryType === 'all' || entry.type === directoryType || (directoryType === 'contract' || directoryType === 'subscription') && entry.metadata.some((value) => value.toLowerCase().startsWith(`${directoryType}:`))) && [entry.name, entry.type, ...entry.metadata, entry.account?.primary_contact_name, entry.account?.next_action, ...(entry.account?.former_names ?? []), ...(entry.account?.sites.map((site) => site.name) ?? [])].filter(Boolean).join(' ').toLocaleLowerCase().includes(normalizedAccountSearch));
+  const commercialTotals = state.consolidatedCommercial.reduce((sum, row) => ({ open: sum.open + Number(row.open_receivables), overdue: sum.overdue + Number(row.overdue_receivables), cost: sum.cost + Number(row.service_cost_total), invoices: sum.invoices + Number(row.invoice_count) }), { open: 0, overdue: 0, cost: 0, invoices: 0 });
   const openReceivables = state.invoices.filter((invoice) => invoice.status === 'sent' || invoice.status === 'overdue');
   const receivableTotal = openReceivables.reduce((sum, invoice) => sum + Number(invoice.total_amount), 0);
 
   return (
-    <div className="page-container crm-page">
+    <div className="page-container crm-page is-directory-workbench">
       <header className="page-header">
-        <div><h1>Client Portfolios</h1><p className="subtitle">{totalAccounts} accounts · every client and provider you work with, one page each</p></div>
+        <div><h1>Client directory</h1><p className="subtitle">{totalAccounts} organizations · own-rooted identities, linked through agreements</p></div>
         <div className="crm-header-actions">
-          <button type="button" className="btn btn-primary" onClick={() => onNavigate('client-setup')}>Set up a new client</button>
+          <button type="button" className="btn btn-primary" onClick={() => { if ((directoryDirty.contact || directoryDirty.matrix) && !window.confirm('Discard unsaved client drafts and set up another client?')) return; onNavigate('client-setup'); }}>Set up a new client</button>
           <button type="button" className="btn btn-secondary" onClick={() => setOrganizationDialog('create')} title="Add a provider, council or other organisation without the guided setup">Add other organisation</button>
         </div>
       </header>
@@ -1531,130 +1531,33 @@ const CRMPage: React.FC<{ onNavigate?: NavigateWithContext }> = ({ onNavigate = 
         </section>
       )}
 
-      {state.ownOrg && (
-        <section className="reports-section">
-          <h2>{state.ownOrg.name}</h2>
-          <p className="subtitle">
-            {state.clients.length} clients · 0 contractors ·{' '}
-            {state.branches.length} branches
-          </p>
+      <section className="crm-kpi-ribbon" aria-label="Commercial totals for the last 30 days"><span>Group AR <strong>{state.error ? 'Unavailable' : `NZ$${commercialTotals.open.toFixed(2)}`}</strong></span><span>Overdue <strong>{state.error ? 'Unavailable' : `NZ$${commercialTotals.overdue.toFixed(2)}`}</strong></span><span>Invoices <strong>{state.error ? 'Unavailable' : commercialTotals.invoices}</strong></span><span>Internal costs <strong>{state.error ? 'Unavailable' : `NZ$${commercialTotals.cost.toFixed(2)}`}</strong></span><small>30-day governed group overview</small><button type="button" onClick={() => setShowCommercial(true)}>Receivables / commercial detail</button></section>
+      <nav className="crm-directory-mobile-tabs" aria-label="Client workspace panes"><button type="button" onClick={() => setDirectoryPane('directory')} aria-pressed={directoryPane === 'directory'}>Directory</button><button type="button" onClick={() => setDirectoryPane('detail')} aria-pressed={directoryPane === 'detail'}>Selected client</button></nav>
+      <div className={`crm-directory-layout show-${directoryPane}`}>
+        <aside className="crm-unified-directory" aria-label="Client directory">
+          <label className="crm-directory-search"><Search size={14} /><input type="search" aria-label="Search client portfolios" value={accountSearch} onChange={(event) => setAccountSearch(event.target.value)} placeholder="Client, provider, contact, site…" /></label>
+          <label><span>Organization type or relationship</span><select aria-label="Directory filter" value={directoryType} onChange={(event) => setDirectoryType(event.target.value)}>{[['all', 'All organizations'], ['client', 'Client'], ['government', 'Government'], ['private_enterprise', 'Private enterprise'], ['contractor', 'Contractor'], ['branch', 'Branch'], ['contract', 'Contract relationship'], ['subscription', 'Platform subscription']].map(([value, label]) => <option key={value} value={value}>{label}</option>)}</select></label>
+          <p role="status">{visibleClients.length} of {totalAccounts} organizations</p>
+          <ul>{visibleClients.map((entry) => <li key={entry.id}><button id={`crm-account-${entry.id}`} type="button" aria-pressed={entry.id === selectedEntry?.id} onClick={() => {
+            if (entry.id !== selectedEntry?.id && (directoryDirty.contact || directoryDirty.matrix) && !window.confirm('This client has unsaved contact or service drafts. Discard them and select another client?')) return;
+            if (entry.id !== selectedEntry?.id) setDirectoryDirty({ contact: false, matrix: false });
+            setDirectorySelection(entry.id); setDirectoryPane('detail');
+          }}><strong>{entry.name}</strong><span>{entry.type.replaceAll('_', ' ')}</span>{entry.metadata.map((value, index) => <small key={`${value}-${index}`}>{value}</small>)}{entry.account?.primary_contact_name && <small>{entry.account.primary_contact_name}</small>}</button></li>)}</ul>
+          {!visibleClients.length && <p>No organizations match these filters.</p>}
+        </aside>
+        <section className="crm-selected-client" aria-label="Selected client">
+          {selectedEntry ? <><header><div><h2>{selectedEntry.name}</h2><small>{selectedEntry.type.replaceAll('_', ' ')} · identity is not owned by the provider</small></div><button type="button" onClick={() => setWorkspaceAccount({ id: selectedEntry.id, name: selectedEntry.name, status: selectedEntry.account?.status })}>Full account workspace</button></header>
+            <CrmPrimaryContactEditor key={`contact-${selectedEntry.id}`} accountId={selectedEntry.id} canEdit={Boolean(profile && ['admin', 'master', 'grand_master'].includes(profile.role))} onDirtyChange={contactDirty} />
+            {selectedEntry.id === operatingId ? <p>The operating organization is not its own client. Manage its internal places and subscription through the full account workspace.</p> : <ClientSetupPage key={`delivery-${selectedEntry.id}`} accountId={selectedEntry.id} providerOrganizationId={selectedEntry.account?.operating_provider_organization_id} embedded onDirtyChange={matrixDirty} onNavigate={onNavigate} onOpenCoverage={() => { setWorkspaceInitialView('overview'); setWorkspaceAccount({ id: selectedEntry.id, name: selectedEntry.name, status: selectedEntry.account?.status }); }} />}
+          </> : <p>Select or create a client organization to configure its contacts and sites.</p>}
         </section>
-      )}
-
-      <section className="reports-section crm-finance-section">
-        <div className="crm-section-heading"><div><h2>Accounts receivable</h2><p className="subtitle">Invoice status, collection actions, and retained finance decisions.</p></div><div className="crm-finance-kpis"><span>Open <strong>{openReceivables.length}</strong></span><span>Receivable <strong>NZ${receivableTotal.toFixed(2)}</strong></span><span>Overdue <strong>{state.invoices.filter((invoice) => invoice.status === 'overdue').length}</strong></span><button type="button" className="btn btn-sm btn-secondary" onClick={() => setShowGenerateInvoice(true)}>Generate from agreement</button></div></div>
-        {state.invoices.length === 0 ? <div className="empty-state"><p>No invoices exist yet. Generate a draft from accepted agreement pricing or completed operational work.</p></div> : <div className="crm-invoice-table" role="table" aria-label="Accounts receivable"><div className="crm-invoice-row is-header" role="row"><span>Invoice</span><span>Account</span><span>Due</span><span>Total</span><span>Status</span><span>Action</span></div>{state.invoices.map((invoice) => <div className="crm-invoice-row" role="row" key={invoice.id}><strong>{invoice.invoice_number}</strong><span>{invoice.client?.name ?? 'Unknown account'}</span><time dateTime={invoice.due_date}>{new Date(`${invoice.due_date}T00:00:00`).toLocaleDateString('en-NZ')}</time><span>{invoice.currency} {Number(invoice.total_amount).toFixed(2)}</span><span className={`crm-invoice-status status-${invoice.status}`}>{invoice.status}</span><div>{invoice.status === 'draft' && <><button type="button" onClick={() => setInvoiceLineInvoice(invoice)}>Review lines</button><button type="button" onClick={() => setInvoiceAction({ invoice, action: 'send' })}>Send</button></>}{(invoice.status === 'sent' || invoice.status === 'overdue') && <button type="button" onClick={() => { setPaymentForm({ amount: String(invoice.total_amount), date: new Date().toISOString().slice(0, 10), method: 'bank_transfer', reference: '' }); setInvoiceAction({ invoice, action: 'mark_paid' }); }}>Record payment</button>}{!['paid','void'].includes(invoice.status) && <button type="button" onClick={() => { setInvoiceReason(''); setInvoiceAction({ invoice, action: 'void' }); }}>Void</button>}</div></div>)}</div>}
-      </section>
-
-      {state.consolidatedCommercial.length > 1 && <section className="reports-section crm-finance-section"><div className="crm-section-heading"><div><h2>Group commercial oversight</h2><p className="subtitle">Provider and branch-owned commercial activity for the last 30 days. Costs are internal and never exposed in the client portal.</p></div></div><div className="crm-account-register crm-commercial-oversight" role="table" aria-label="Group commercial oversight"><div className="crm-account-register-row is-header" role="row"><span>Operating organization</span><span>Invoices</span><span>Open receivables</span><span>Operating costs</span><span>Agreements</span><span>Report packs</span></div>{state.consolidatedCommercial.map((row) => <button key={row.source_organization_id} type="button" role="row" className="crm-account-register-row" onClick={() => setWorkspaceAccount({ id: row.source_organization_id, name: row.source_organization_name })}><strong>{row.source_organization_name}</strong><span>{row.invoice_count}</span><span>NZ${Number(row.open_receivables).toFixed(2)}{Number(row.overdue_receivables) > 0 ? ` · NZ$${Number(row.overdue_receivables).toFixed(2)} overdue` : ''}</span><span>NZ${Number(row.service_cost_total).toFixed(2)}<small>{row.service_cost_count} cost lines</small></span><span>{row.accepted_agreement_count}</span><span>{row.report_pack_count}</span></button>)}</div></section>}
-
-      <section className="reports-section">
-        <h2>Client Portfolios ({state.clients.length})</h2>
-        <div className="crm-client-search-tools" role="search" aria-label="Search client portfolios">
-          <label className="crm-client-search-field"><Search size={16} aria-hidden="true" /><span className="sr-only">Search client portfolios</span><input type="search" value={accountSearch} onChange={(event) => setAccountSearch(event.target.value)} placeholder="Name, provider, contact, or next action" aria-label="Search client portfolios" /></label>
-          <span className="crm-client-search-count" role="status" aria-live="polite">Showing {visibleClients.length} of {state.clients.length} portfolios</span>
-        </div>
-        <div className="crm-account-register" role="table" aria-label="Client accounts">
-          {state.clients.length === 0 ? (
-            <div className="empty-state">
-              <p>No client accounts yet.</p>
-            </div>
-          ) : visibleClients.length === 0 ? (
-            <div className="empty-state crm-client-search-empty">
-              <p>No client portfolios match this search.</p>
-              <button type="button" className="btn btn-secondary btn-sm" onClick={() => setAccountSearch('')}>Clear search</button>
-            </div>
-          ) : (
-            <>
-              <div className="crm-account-register-row is-header" role="row"><span>Client and operating provider</span><span>Primary contact</span><span>Sites</span><span>Readiness</span><span>Quote</span><span>Next action</span></div>
-              {visibleClients.map((client) => (
-                <button id={`crm-account-${client.id}`} type="button" role="row" key={client.id} className={`crm-account-register-row ${client.id === requestedAccountId ? 'is-context-focus' : ''}`} onClick={() => setWorkspaceAccount({ id: client.id, name: client.name, status: client.status, primaryContactName: client.primary_contact_name, siteCount: client.site_count, readinessBlockers: client.blockers, nextAction: client.next_action, latestQuoteStatus: client.latest_quote_status })}>
-                  <strong>{client.name}{client.former_names?.length ? <em className="crm-former-name">formerly {client.former_names.join(', ')}</em> : null}<small>{client.operating_provider_name ? `Operating provider: ${client.operating_provider_name}` : 'Operating provider not recorded'}</small></strong><span>{client.primary_contact_name ?? 'Not assigned'}</span><span>{client.site_count}</span><span className={client.blockers.length ? 'is-attention' : 'is-ready'}>{client.blockers.length ? `${client.blockers.length} open` : 'Ready'}</span><span>{client.latest_quote_status ?? 'None'}</span><span>{client.next_action}</span>
-                </button>
-              ))}
-            </>
-          )}
-        </div>
-      </section>
-
-      <section className="reports-section">
-        <h2>Branches ({state.branches.length})</h2>
-        <div className="contacts-list">
-          {state.branches.length === 0 ? (
-            <div className="empty-state">
-              <p>No branch accounts yet.</p>
-            </div>
-          ) : (
-            state.branches.map((branch) => (
-              <div key={branch.id} className="contact-card">
-                <div className="contact-header">
-                  <h3>{branch.name}</h3>
-                  <span className="contact-type-badge">Branch</span>
-                </div>
-                <div className="contact-details">
-                  <p>{branch.primary_contact_name ?? 'No primary contact'}</p>
-                  <p className="contact-meta">
-                    {branch.active ? 'Active' : 'Inactive'} ·{' '}
-                    {branch.site_count} site
-                    {branch.site_count === 1 ? '' : 's'}
-                  </p>
-                  <div className="crm-account-actions"><span>Internal branch</span><div><button type="button" className="btn btn-sm btn-secondary" onClick={() => setWorkspaceAccount({ id: branch.id, name: branch.name })}>Manage account</button></div></div>
-                </div>
-              </div>
-            ))
-          )}
-        </div>
-      </section>
-
-      <section className="reports-section">
-        <h2>Platform Subscription ({state.platformSubscribers.length})</h2>
-        <p className="subtitle">
-          Your Iron Eagle platform agreement (Layer-1 financial subscription).
-        </p>
-        <div className="crm-account-register is-compact" role="table" aria-label="Platform subscription">
-          {state.platformSubscribers.length === 0 ? (
-            <div className="empty-state">
-              <p>No platform subscription is recorded for this organization.</p>
-            </div>
-          ) : (
-            <>
-              <div className="crm-account-register-row is-header" role="row"><span>Platform provider</span><span>Agreement</span><span>Type</span></div>
-              {state.platformSubscribers.map((agreement) => (
-                <div key={agreement.id} role="row" className="crm-account-register-row is-static">
-                  <strong>{agreement.counterparty_name}</strong><span>{agreement.name}</span><span>{agreement.counterparty_type}</span>
-                </div>
-              ))}
-            </>
-          )}
-        </div>
-      </section>
-
-      <section className="reports-section">
-        <h2>Organizations We Contract With ({state.contractedOrgs.length})</h2>
-        <p className="subtitle">
-          Organizations linked via operational service agreements (Layer-2
-          fieldwork) — not part of your branch hierarchy.
-        </p>
-        <div className="crm-account-register is-compact" role="table" aria-label="Contracted organizations">
-          {state.contractedOrgs.length === 0 ? (
-            <div className="empty-state">
-              <p>
-                No operational contracted organizations found. Service
-                agreements create these links.
-              </p>
-            </div>
-          ) : (
-            <>
-              <div className="crm-account-register-row is-header" role="row"><span>Organization</span><span>Agreement</span><span>Type</span></div>
-              {state.contractedOrgs.map((agreement) => (
-                <div key={agreement.id} role="row" className="crm-account-register-row is-static">
-                  <strong>{agreement.counterparty_name}</strong><span>{agreement.name}</span><span>{agreement.counterparty_type}</span>
-                </div>
-              ))}
-            </>
-          )}
-        </div>
-      </section>
+      </div>
+      {showCommercial && <div className="crm-commercial-drawer-backdrop"><section className="reports-section crm-finance-section crm-commercial-drawer" role="dialog" aria-modal="true" aria-label="Receivables and commercial detail">
+        <button type="button" autoFocus onClick={() => setShowCommercial(false)}>Close commercial detail</button>
+        <div className="crm-section-heading"><div><h2>Accounts receivable</h2><p className="subtitle">Invoice status, collection actions, and retained finance decisions.</p></div><div className="crm-finance-kpis"><span>Open <strong>{openReceivables.length}</strong></span><span>Receivable <strong>NZ${receivableTotal.toFixed(2)}</strong></span><span>Overdue <strong>{state.invoices.filter((invoice) => invoice.status === 'overdue').length}</strong></span><button type="button" className="btn btn-sm btn-secondary" onClick={() => { setShowCommercial(false); setShowGenerateInvoice(true); }}>Generate from agreement</button></div></div>
+        {state.invoices.length === 0 ? <div className="empty-state"><p>No invoices exist yet. Generate a draft from accepted agreement pricing or completed operational work.</p></div> : <div className="crm-invoice-table" role="table" aria-label="Accounts receivable"><div className="crm-invoice-row is-header" role="row"><span>Invoice</span><span>Account</span><span>Due</span><span>Total</span><span>Status</span><span>Action</span></div>{state.invoices.map((invoice) => <div className="crm-invoice-row" role="row" key={invoice.id}><strong>{invoice.invoice_number}</strong><span>{invoice.client?.name ?? 'Unknown account'}</span><time dateTime={invoice.due_date}>{new Date(`${invoice.due_date}T00:00:00`).toLocaleDateString('en-NZ')}</time><span>{invoice.currency} {Number(invoice.total_amount).toFixed(2)}</span><span className={`crm-invoice-status status-${invoice.status}`}>{invoice.status}</span><div>{invoice.status === 'draft' && <><button type="button" onClick={() => { setShowCommercial(false); setInvoiceLineInvoice(invoice); }}>Review lines</button><button type="button" onClick={() => { setShowCommercial(false); setInvoiceAction({ invoice, action: 'send' }); }}>Send</button></>}{(invoice.status === 'sent' || invoice.status === 'overdue') && <button type="button" onClick={() => { setShowCommercial(false); setPaymentForm({ amount: String(invoice.total_amount), date: new Date().toISOString().slice(0, 10), method: 'bank_transfer', reference: '' }); setInvoiceAction({ invoice, action: 'mark_paid' }); }}>Record payment</button>}{!['paid','void'].includes(invoice.status) && <button type="button" onClick={() => { setShowCommercial(false); setInvoiceReason(''); setInvoiceAction({ invoice, action: 'void' }); }}>Void</button>}</div></div>)}</div>}
+        <h3>Group commercial oversight · last 30 days</h3>{state.consolidatedCommercial.map((row) => <p key={row.source_organization_id}>{row.source_organization_name}: NZ${Number(row.open_receivables).toFixed(2)} open · NZ${Number(row.service_cost_total).toFixed(2)} internal costs · {row.accepted_agreement_count} agreements · {row.report_pack_count} report packs</p>)}
+      </section></div>}
       {quoteClient && (
         <div className="crm-quote-backdrop">
           <form

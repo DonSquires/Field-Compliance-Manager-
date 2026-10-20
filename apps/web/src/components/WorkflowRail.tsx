@@ -1,4 +1,4 @@
-import { Check, ChevronRight } from 'lucide-react';
+import { ChevronRight } from 'lucide-react';
 import type { NavigateWithContext, WorkflowContext } from '../lib/workflowNavigation';
 import './WorkflowRail.css';
 
@@ -17,6 +17,9 @@ export function WorkflowRail({ activePage, context, onNavigate }: { activePage: 
   if (activeIndex < 0) return null;
   return <nav className="workflow-rail" aria-label="Account operations workflow">
     <span className="workflow-rail-label">Account flow</span>
-    <div>{STEPS.map((step, index) => <span key={step.page} className="workflow-rail-step"><button type="button" className={index === activeIndex ? 'is-current' : index < activeIndex ? 'is-complete' : ''} aria-current={index === activeIndex ? 'step' : undefined} onClick={() => onNavigate(step.page, context)}><i>{index < activeIndex ? <Check size={12} /> : index + 1}</i>{step.label}</button>{index < STEPS.length - 1 && <ChevronRight size={13} />}</span>)}</div>
+    <div>{STEPS.map((step, index) => <span key={step.page} className="workflow-rail-step"><button type="button" className={index === activeIndex ? 'is-current' : ''} aria-current={index === activeIndex ? 'step' : undefined} onClick={() => onNavigate(step.page, context)}><i>{index + 1}</i>{step.label}</button>{index < STEPS.length - 1 && <ChevronRight size={13} />}</span>)}</div>
+    <select className="workflow-rail-select" aria-label="Account workflow destination" value={workflowPage} onChange={(event) => onNavigate(event.target.value, context)}>
+      {STEPS.map((step) => <option key={step.page} value={step.page}>{step.label}</option>)}
+    </select>
   </nav>;
 }

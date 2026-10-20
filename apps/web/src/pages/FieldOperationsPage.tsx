@@ -1,4 +1,4 @@
-import React, { useCallback, useEffect, useState } from 'react';
+import React, { useCallback, useEffect, useLayoutEffect, useRef, useState } from 'react';
 import {
   AlertTriangle,
   ArrowRight,
@@ -94,54 +94,73 @@ function toMetric(response: { count: number | null; error: { message: string } |
 }
 
 const FieldOperationsPage: React.FC<FieldOperationsPageProps> = ({ onNavigate }) => {
-  const { profile } = useAuth();
-  const { selectedAgreementZones } = useServiceRelationships();
+  const { profile, operatingOrganizationId } = useAuth();
+  const organizationId = operatingOrganizationId ?? profile?.organizationId;
+  const { selectedAgreementZones, loadedOrganizationId } = useServiceRelationships();
   const dispatchContext = useActiveModuleContext('dispatch');
-  const { isModuleEnabled } = useEnabledModules(profile?.organizationId);
+  const { isModuleEnabled } = useEnabledModules(organizationId);
   const dispatchEnabled = isModuleEnabled('dispatch');
   const dispatchAvailable = dispatchEnabled && dispatchContext.enabled;
   const welfareEnabled = isModuleEnabled('welfare', { safetyRelevant: true });
   const role = profile?.role ?? 'unknown';
+  const [workflowQuery, setWorkflowQuery] = useState('');
+  const [activeGroup, setActiveGroup] = useState<WorkflowGroup>('respond');
   const pageView = FIELD_OPERATIONS_VIEW_BY_ROLE[role] ?? FIELD_OPERATIONS_VIEW_BY_ROLE.admin!;
   const visibleWorkflows = WORKFLOWS.filter((workflow) => workflow.roles.includes(role) && (!workflow.moduleKeys || workflow.moduleKeys.some((moduleKey) => moduleKey === 'dispatch' ? dispatchAvailable : isModuleEnabled(moduleKey, { safetyRelevant: workflow.safetyRelevant }))));
+  const matchingWorkflows = visibleWorkflows.filter((workflow) => `${workflow.label} ${workflow.detail}`.toLowerCase().includes(workflowQuery.trim().toLowerCase()));
   const workflowGroups = [
-    { id: 'respond' as const, eyebrow: 'Respond now', title: 'Live operations', workflows: visibleWorkflows.filter((workflow) => workflow.group === 'respond') },
-    { id: 'review' as const, eyebrow: 'Review and investigate', title: 'Operational records', workflows: visibleWorkflows.filter((workflow) => workflow.group === 'review') },
-  ].filter((group) => group.workflows.length > 0);
+    { id: 'respond' as const, eyebrow: 'Respond now', title: 'Live operations', workflows: matchingWorkflows.filter((workflow) => workflow.group === 'respond') },
+    { id: 'review' as const, eyebrow: 'Review and investigate', title: 'Operational records', workflows: matchingWorkflows.filter((workflow) => workflow.group === 'review') },
+  ];
   const [metrics, setMetrics] = useState<Metrics>(EMPTY_METRICS);
   const [loading, setLoading] = useState(true);
   const [updatedAt, setUpdatedAt] = useState<Date | null>(null);
+  const requestGeneration = useRef(0);
+
+  useLayoutEffect(() => {
+    requestGeneration.current += 1;
+    setMetrics(EMPTY_METRICS);
+    setUpdatedAt(null);
+    setLoading(true);
+    return () => { requestGeneration.current += 1; };
+  }, [organizationId, loadedOrganizationId, selectedAgreementZones, dispatchAvailable, welfareEnabled]);
 
   const loadMetrics = useCallback(async () => {
-    if (!profile?.organizationId) {
+    const request = ++requestGeneration.current;
+    if (!organizationId) {
+      setMetrics(Object.fromEntries(Object.keys(EMPTY_METRICS).map((key) => [key, { value: null, error: 'Organisation access could not be confirmed.' }])) as unknown as Metrics);
       setLoading(false);
       return;
     }
     setLoading(true);
     const now = new Date().toISOString();
-    const organizationId = profile.organizationId;
-    const activeZoneIds = selectedAgreementZones.length > 0 ? selectedAgreementZones.map((zone) => zone.id) : null;
+    const activeZoneIds = loadedOrganizationId === organizationId && selectedAgreementZones.length > 0 ? selectedAgreementZones.map((zone) => zone.id) : null;
     const unavailableForRole = Promise.resolve({ count: null, error: null });
-    const [onDuty, dispatch, welfare, reports] = await Promise.all([
-      !dispatchAvailable ? unavailableForRole : activeZoneIds && activeZoneIds.length > 0
-        ? supabase.from('shifts').select('id', { count: 'exact', head: true }).in('zone_id', activeZoneIds).lte('scheduled_start', now).gte('scheduled_end', now).in('status', ['accepted', 'in_progress'])
-        : supabase.from('shifts').select('id', { count: 'exact', head: true }).eq('organization_id', organizationId).lte('scheduled_start', now).gte('scheduled_end', now).in('status', ['accepted', 'in_progress']),
-      !dispatchAvailable ? unavailableForRole : activeZoneIds && activeZoneIds.length > 0
-        ? supabase.from('dispatch_jobs').select('id', { count: 'exact', head: true }).in('zone_id', activeZoneIds).in('status', ACTIVE_DISPATCH_JOB_STATUSES)
-        : supabase.from('dispatch_jobs').select('id', { count: 'exact', head: true }).eq('organization_id', organizationId).in('status', ACTIVE_DISPATCH_JOB_STATUSES),
-      welfareEnabled
-        ? (activeZoneIds && activeZoneIds.length > 0
-          ? supabase.from('welfare_alerts').select('id', { count: 'exact', head: true }).in('zone_id', activeZoneIds).in('status', ['pending', 'acknowledged'])
-          : supabase.from('welfare_alerts').select('id', { count: 'exact', head: true }).eq('organization_id', organizationId).in('status', ['pending', 'acknowledged']))
-        : Promise.resolve({ count: null, error: { message: 'Welfare monitoring is unavailable until organisation entitlement is confirmed.' } }),
-      activeZoneIds && activeZoneIds.length > 0
-        ? supabase.from('officer_field_reports').select('id', { count: 'exact', head: true }).in('zone_id', activeZoneIds).eq('follow_up_required', true).eq('status', 'submitted')
-        : supabase.from('officer_field_reports').select('id', { count: 'exact', head: true }).eq('organization_id', organizationId).eq('follow_up_required', true).eq('status', 'submitted'),
-    ]);
-    setMetrics({ onDuty: toMetric(onDuty), activeDispatch: toMetric(dispatch), welfareAlerts: toMetric(welfare), reportFollowUp: toMetric(reports) });
-    setUpdatedAt(new Date());
-    setLoading(false);
-  }, [dispatchAvailable, profile?.organizationId, selectedAgreementZones, welfareEnabled]);
+    try {
+      const [onDuty, dispatch, welfare, reports] = await Promise.all([
+        !dispatchAvailable ? unavailableForRole : activeZoneIds && activeZoneIds.length > 0
+          ? supabase.from('shifts').select('id', { count: 'exact', head: true }).eq('organization_id', organizationId).in('zone_id', activeZoneIds).lte('scheduled_start', now).gte('scheduled_end', now).in('status', ['accepted', 'in_progress'])
+          : supabase.from('shifts').select('id', { count: 'exact', head: true }).eq('organization_id', organizationId).lte('scheduled_start', now).gte('scheduled_end', now).in('status', ['accepted', 'in_progress']),
+        !dispatchAvailable ? unavailableForRole : activeZoneIds && activeZoneIds.length > 0
+          ? supabase.from('dispatch_jobs').select('id', { count: 'exact', head: true }).eq('organization_id', organizationId).in('zone_id', activeZoneIds).in('status', ACTIVE_DISPATCH_JOB_STATUSES)
+          : supabase.from('dispatch_jobs').select('id', { count: 'exact', head: true }).eq('organization_id', organizationId).in('status', ACTIVE_DISPATCH_JOB_STATUSES),
+        welfareEnabled
+          ? supabase.from('welfare_alerts').select('id', { count: 'exact', head: true }).eq('organization_id', organizationId).in('status', ['pending', 'acknowledged'])
+          : Promise.resolve({ count: null, error: { message: 'Welfare monitoring is unavailable until organisation entitlement is confirmed.' } }),
+        activeZoneIds && activeZoneIds.length > 0
+          ? supabase.from('officer_field_reports').select('id', { count: 'exact', head: true }).eq('organization_id', organizationId).in('zone_id', activeZoneIds).eq('follow_up_required', true).eq('status', 'submitted')
+          : supabase.from('officer_field_reports').select('id', { count: 'exact', head: true }).eq('organization_id', organizationId).eq('follow_up_required', true).eq('status', 'submitted'),
+      ]);
+      if (request !== requestGeneration.current) return;
+      setMetrics({ onDuty: toMetric(onDuty), activeDispatch: toMetric(dispatch), welfareAlerts: toMetric(welfare), reportFollowUp: toMetric(reports) });
+      setUpdatedAt(new Date());
+    } catch {
+      if (request !== requestGeneration.current) return;
+      setMetrics(Object.fromEntries(Object.keys(EMPTY_METRICS).map((key) => [key, { value: null, error: 'Operational metrics could not be loaded.' }])) as unknown as Metrics);
+    } finally {
+      if (request === requestGeneration.current) setLoading(false);
+    }
+  }, [dispatchAvailable, organizationId, loadedOrganizationId, selectedAgreementZones, welfareEnabled]);
 
   useEffect(() => {
     void loadMetrics();
@@ -151,7 +170,7 @@ const FieldOperationsPage: React.FC<FieldOperationsPageProps> = ({ onNavigate })
   if (dispatchEnabled && dispatchContext.error) warnings.push(['dispatchContext', { value: null, error: dispatchContext.error }]);
 
   return (
-    <div className="field-ops-home">
+    <div className="field-ops-home field-ops-command" data-active-group={activeGroup}>
       <header className="field-ops-header">
         <div><span>{pageView.eyebrow}</span><h1>{pageView.title}</h1><p>{pageView.description}</p></div>
         <div className="field-ops-refresh">
@@ -162,16 +181,23 @@ const FieldOperationsPage: React.FC<FieldOperationsPageProps> = ({ onNavigate })
 
       {warnings.length > 0 && <div className="field-ops-warning" role="alert"><AlertTriangle size={18} /><div><strong>Some operational counts are unavailable</strong><span>{warnings.map(([name, metric]) => `${name}: ${metric.error}`).join(' · ')}</span></div></div>}
 
+      <div className="field-ops-filter">
+        <label htmlFor="field-ops-query">Find a workflow</label>
+        <input id="field-ops-query" type="search" value={workflowQuery} onChange={(event) => setWorkflowQuery(event.target.value)} placeholder="Search available workflows" />
+        <small>Available to your role and enabled modules</small>
+      </div>
+      <nav className="field-ops-pane-switcher" aria-label="Workflow panes">{workflowGroups.map((group) => <button type="button" key={group.id} aria-pressed={activeGroup === group.id} onClick={() => setActiveGroup(group.id)}>{group.title} · {group.workflows.length}</button>)}</nav>
       <section className="field-ops-workflows">
-        {workflowGroups.map((group) => <section className="field-ops-workflow-group" aria-labelledby={`field-ops-${group.id}`} key={group.id}>
-          <div><span>{group.eyebrow}</span><h3 id={`field-ops-${group.id}`}>{group.title}</h3></div>
+        {workflowGroups.map((group) => <section className={`field-ops-workflow-group field-ops-${group.id}`} aria-labelledby={`field-ops-${group.id}`} key={group.id}>
+          <div><h2 id={`field-ops-${group.id}`}>{group.title}</h2><span>{group.eyebrow}</span></div>
           <div className="field-ops-workflow-grid">
+            {!group.workflows.length && <p className="field-ops-empty">{visibleWorkflows.some((workflow) => workflow.group === group.id) ? 'No matching workflows. Clear the search to see available tools.' : 'No workflows are available here for your role and enabled modules.'}</p>}
             {group.workflows.map(({ area, label, detail, icon: Icon, tone, metric: metricKey }) => {
               const metric = metricKey ? metrics[metricKey] : null;
               const count = !metricKey ? null : loading && metric?.value === null ? 'Updating' : metric?.value === null ? 'Unavailable' : metricKey === 'onDuty' ? `${metric?.value} on duty` : metricKey === 'reportFollowUp' ? `${metric?.value} follow-up` : `${metric?.value} active`;
               return (
                 <button type="button" key={area} className={`field-ops-workflow tone-${tone}`} onClick={() => onNavigate(area)}>
-                  <span><Icon size={19} aria-hidden="true" /></span><div><strong>{label}</strong><small>{detail}</small></div>{count !== null && <span className={`field-ops-workflow-count ${count === 'Unavailable' ? 'is-unavailable' : ''}`} aria-label={`Current workload: ${count}`}>{count}</span>}<ArrowRight size={17} aria-hidden="true" />
+                  <span className="field-ops-workflow-icon"><Icon size={16} aria-hidden="true" /></span><div><strong>{label}</strong><small>{detail}</small></div>{count !== null && <span className={`field-ops-workflow-count ${count === 'Unavailable' ? 'is-unavailable' : ''}`} aria-label={`Current workload: ${count}`}>{count}</span>}<ArrowRight size={14} aria-hidden="true" />
                 </button>
               );
             })}

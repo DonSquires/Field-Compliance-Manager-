@@ -28,6 +28,41 @@ This is a **tactical operations platform**, not a consumer app. Three distinct o
 
 ## 2. Design Tokens
 
+### Operations console ruling — 2026-10-19 (owner approved)
+
+The admin operations console uses a viewport-locked hairline-grid workbench:
+40px telemetry header, 36px place context, compact navigation, and independently
+scrolling data panes. On small screens, explicit pane switching preserves readable
+content and touch targets without window scrolling. Operational primary actions
+and active navigation use slate/navy, not decorative red. Red denotes an actual
+breach, safety alarm, or error; amber denotes warning, emerald active/compliant,
+and slate neutral telemetry. Plates, identifiers and timestamps use monospace
+tabular numerals. These scoped console tokens supersede the original red-primary
+and floating-card guidance below for admin operations only; officer safety/PTT
+and client branding are unchanged. Readiness, approvals and assignments still
+require their existing governed writers and permission checks.
+
+The same owner-approved slice consolidates CRM into a client/location
+master-detail matrix, rather than competing account-flow navigation and
+duplicate organisation lists. “Parent” describes the selected client portfolio
+and its service locations, not provider ownership of a client organisation.
+Commercial and operational settings retain their separate governed sources:
+an inline matrix must not turn a draft rate into accepted pricing or silently
+disable an agreement-wide module when one location is unchecked. Bob quick-fill
+produces reviewable drafts with source context; it never authorises a contract,
+geofence, rate, invitation, or live service change.
+
+Finance uses one active-period/KPI ribbon and a workflow switcher: only the
+selected ledger or tool occupies the work pane. Rostering uses an officer
+directory beside a dense assignment matrix and inline timesheet reconciliation.
+Neither presentation changes financial approvals, roster publication checks,
+licence evidence, or the organisation/branch scope of its existing writers.
+
+Actions on dark surfaces have explicit foreground/background pairs: white on
+`#1E40AF` for primary actions; `#F8FAFC` on `#1E293B` with a `#475569` border for
+secondary actions. Destructive/error semantics remain distinct. Reports and
+investigation actions share these contrast rules in both supported themes.
+
 All values come from `apps/web/src/styles/tokens.css`. Never hardcode colours or spacing in components.
 
 ### 2.1 Colour Palette

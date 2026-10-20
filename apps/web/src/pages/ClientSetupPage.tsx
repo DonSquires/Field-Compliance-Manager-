@@ -68,11 +68,21 @@ export const serviceWords = (label: string, kind: 'visits' | 'post' | 'response'
   return `${label} · ${contractedDaysWords(form.days)} · ${form.anyTime ? contractedHoursWords(null, null) : contractedHoursWords(form.start, form.end)} · ${visits} visit${visits === 1 ? '' : 's'} a shift, ${form.stay || '10'} min each`;
 };
 
-const ClientSetupPage: React.FC<{ onNavigate?: NavigateWithContext }> = ({ onNavigate = () => undefined }) => {
+type ClientSetupProps = {
+  onNavigate?: NavigateWithContext;
+  accountId?: string;
+  providerOrganizationId?: string;
+  embedded?: boolean;
+  onDirtyChange?: (dirty: boolean) => void;
+  onOpenCoverage?: () => void;
+};
+
+const ClientSetupPage: React.FC<ClientSetupProps> = ({ onNavigate = () => undefined, accountId, providerOrganizationId }) => {
   const { profile, operatingOrganizationId } = useAuth();
   const location = useLocation();
   const navigate = useNavigate();
-  const branchId = operatingOrganizationId ?? profile?.organizationId ?? null;
+  const branchId = providerOrganizationId ?? operatingOrganizationId ?? profile?.organizationId ?? null;
+  const selectedAccountId = accountId ?? new URLSearchParams(location.search).get('account');
   const [step, setStep] = useState<Step>(1);
   const [busy, setBusy] = useState<string | null>(null);
   const [error, setError] = useState<string | null>(null);
@@ -160,9 +170,8 @@ const ClientSetupPage: React.FC<{ onNavigate?: NavigateWithContext }> = ({ onNav
   }, []);
 
   useEffect(() => {
-    const accountId = new URLSearchParams(location.search).get('account');
-    if (accountId && !client) void loadClient(accountId);
-  }, [location.search, client, loadClient]);
+    if (selectedAccountId && !client) void loadClient(selectedAccountId);
+  }, [selectedAccountId, client, loadClient]);
 
   // Duplicate check as the name is typed: a client that already exists should be opened, not created twice.
   useEffect(() => {

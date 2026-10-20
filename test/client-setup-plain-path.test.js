@@ -20,7 +20,7 @@ test('the ruling is recorded in canon before the code stands: configuring happen
   assert.match(canon.replace(/\s+/g, ' '), /The client's acceptance of the invitation grants \*\*portal access\*\*; it is not the provider's permission to configure\./);
 });
 
-test('one governed writer per step of the guided setup, over the existing spine', () => {
+test('the workspace retains governed writers over the existing spine', () => {
   assert.match(plainPath, /ADD COLUMN IF NOT EXISTS delivery_schedule_id uuid REFERENCES public\.service_agreement_delivery_schedules\(id\) ON DELETE SET NULL/);
   assert.match(plainPath, /CREATE OR REPLACE FUNCTION public\.ensure_crm_client_agreement\(p_account_organization_id uuid, p_provider_organization_id uuid DEFAULT NULL\)/);
   assert.match(plainPath, /CREATE OR REPLACE FUNCTION public\.manage_crm_agreement_delivery_schedule\(/);
@@ -32,7 +32,7 @@ test('one governed writer per step of the guided setup, over the existing spine'
   assert.match(wizard, /const row = \(Array\.isArray\(data\) \? data\[0\] : data\)/);
   assert.match(wizard, /supabase\.rpc\('ensure_crm_client_agreement', \{ p_account_organization_id: client\.id, p_provider_organization_id: branchId \}\)/);
   assert.match(wizard, /supabase\.rpc\('manage_crm_agreement_delivery_schedule', \{/);
-  assert.match(wizard, /supabase\.rpc\('create_patrol_route_from_agreement', \{ p_client_request_id: crypto\.randomUUID\(\), p_service_agreement_id: id, p_name: `\$\{client\.name\} patrol run`, p_operating_organization_id: branchId \}\)/);
+  assert.match(wizard, /supabase\.rpc\('create_patrol_route_from_agreement', \{ p_client_request_id: routeRequest\.current, p_service_agreement_id: id, p_name: `\$\{client\.name\} patrol run`, p_operating_organization_id: branchId \}\)/);
   assert.match(wizard, /supabase\.rpc\('create_operating_roster_work_unit', \{ p_operating_organization_id: branchId,/);
   assert.doesNotMatch(wizard, /create_operating_roster_work_unit', \{ p_client_request_id/);
 });
@@ -50,17 +50,49 @@ test('readiness and activation no longer wait for the client\'s portal acceptanc
   assert.match(onboardingPanel, /Client login sent \(optional\)/);
 });
 
-test('the guided setup is reachable where a person would look, and the field-only banner stays off desk pages', () => {
+test('the setup workspace is reachable and uses the shared planning-context strip', () => {
   assert.match(shell, /\{ id: 'client-setup', label: 'Set up a new client', icon: ClipboardCheck \}/);
   assert.match(shell, /\{ id: 'onboarding', label: 'Clients being set up', icon: ClipboardCheck \}/);
   assert.match(shell, /case 'client-setup':\s+return <ClientSetupPage onNavigate=/);
-  assert.match(shell, /const FIELD_CONTEXT_PAGES = new Set<AdminPage>\(\['field-ops', 'site-360', 'locations', 'zones', 'sites', 'workshop', 'investigations'\]\);/);
-  assert.match(shell, /\{showPlaceContext && <PlaceContextBanner \/>\}/);
+  assert.match(shell, /<PlaceContextBanner compact/);
   assert.match(crmPage, /onClick=\{\(\) => onNavigate\('client-setup'\)\}>Set up a new client<\/button>/);
   assert.match(ledger, /<h1>Clients being set up<\/h1>/);
   assert.match(ledger, /onClick=\{\(\) => onNavigate\('client-setup'\)\}/);
-  // plain words on the steps and the read-back sentence
-  for (const words of ['Who is the client?', 'Where do we work for', 'What do we do there?', 'Who logs in for', 'What happens next', 'Any time of day (24-hour)', 'Five short steps. Each one saves as you go, so you can stop and come back.']) {
+  for (const words of ['Parent organization', 'Child locations', 'Location service matrix', 'Bob Quick Setup', 'Any time of day (24-hour)', 'Save changes']) {
     assert.ok(wizard.includes(words), words);
   }
+  assert.doesNotMatch(wizard, /Setup steps|setStep\(|type Step =/);
+});
+
+test('site changes remain scoped and incomplete sequential saves keep receipts for retry', () => {
+  assert.match(wizard, /p_action: row\.enabled \? scheduleId \? 'update' : 'create' : 'remove'/);
+  assert.match(wizard, /p_client_org_id: client\.id, p_site_id: site/);
+  assert.match(wizard, /p_service_type: row\.module/);
+  assert.match(wizard, /p_expected_updated_at: row\.rate\?\.updated_at/);
+  assert.match(wizard, /if \(!row\.scheduleDone/);
+  assert.match(wizard, /if \(!row\.rateDone/);
+  assert.match(wizard, /scheduleDone: true/);
+  assert.match(wizard, /Needs retry:/);
+  assert.match(wizard, /not an atomic transaction/);
+  assert.doesNotMatch(wizard, /\.from\('[^']+'\)\.(insert|update|upsert|delete)\(/);
+  assert.doesNotMatch(wizard, /p_action: 'set_module'/);
+});
+
+test('unsupported quick-fill and per-site SLA are explicit, not invented persistence', () => {
+  assert.match(wizard, /No approved bridge currently promotes those proposals into this matrix/);
+  assert.match(wizard, /Nothing is sent to a model or saved from this panel/);
+  assert.match(wizard, /leave\('document-studio'\)/);
+  assert.doesNotMatch(wizard, /p_response_sla_minutes:|p_sla_minutes:/);
+  assert.match(wizard, /workspace grouping, not legal ownership/);
+  assert.match(wizard, /beforeunload/);
+  assert.match(wizard, /Cloned draft — review before saving/);
+});
+
+test('the client delivery route owns bounded panes and a persistent save bar', () => {
+  const styles = read('apps/web/src/pages/ClientSetupPage.css');
+  assert.match(styles, /grid-template-columns:320px minmax\(0,1fr\)/);
+  assert.match(styles, /\.client-setup\{[^}]*height:100%[^}]*overflow:hidden/);
+  assert.match(styles, /\.client-setup-matrix th,\.client-setup-matrix td\{[^}]*background:#0b1820;color:#dbe9ee/);
+  assert.match(styles, /show-detail \.client-setup-locations/);
+  assert.match(wizard, /className="client-setup-savebar"/);
 });

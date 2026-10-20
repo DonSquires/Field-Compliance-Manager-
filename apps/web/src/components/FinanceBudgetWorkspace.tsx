@@ -11,7 +11,7 @@ type Period = { id: string; name: string; period_start: string; period_end: stri
 const financeRoles = new Set(['grand_master', 'master', 'admin', 'admin_officer']);
 const money = (value: number) => new Intl.NumberFormat('en-NZ', { style: 'currency', currency: 'NZD' }).format(value);
 
-export function FinanceBudgetWorkspace() {
+export function FinanceBudgetWorkspace({ activePeriodId }: { activePeriodId?: string } = {}) {
   const { profile } = useAuth();
   const [budgets, setBudgets] = useState<Budget[]>([]);
   const [lines, setLines] = useState<BudgetLine[]>([]);
@@ -19,7 +19,9 @@ export function FinanceBudgetWorkspace() {
   const [selectedBudgetId, setSelectedBudgetId] = useState('');
   const [budgetName, setBudgetName] = useState('');
   const [fiscalYear, setFiscalYear] = useState(new Date().getFullYear());
-  const [periodId, setPeriodId] = useState('');
+  const [localPeriodId, setPeriodId] = useState('');
+  const requestedPeriodId = activePeriodId ?? localPeriodId;
+  const periodId = periods.some((period) => period.id === requestedPeriodId) ? requestedPeriodId : '';
   const [costType, setCostType] = useState('operating');
   const [amount, setAmount] = useState('');
   const [notes, setNotes] = useState('');
@@ -163,6 +165,7 @@ export function FinanceBudgetWorkspace() {
 
   return <section className="finance-budget-workspace" aria-labelledby="finance-budget-heading">
     <header><div><p>Planning and variance control</p><h2 id="finance-budget-heading">Finance budgets</h2><span>Create a draft, allocate amounts to reporting periods, then approve it for variance monitoring.</span></div><button type="button" className="btn btn-secondary" onClick={() => void load()} disabled={saving}><RefreshCw size={15} />Refresh</button></header>
+    {activePeriodId !== undefined && <p className="finance-workbench-note">Lines and variance use the active accounting period: {periods.find((period) => period.id === periodId)?.name ?? 'Choose an open period in the top bar'}. Budget fiscal years remain independent.</p>}
     {error && <p className="finance-budget-message is-error" role="alert"><AlertTriangle size={15} />{error}</p>}
     {notice && <p className="finance-budget-message is-success" role="status"><CheckCircle2 size={15} />{notice}</p>}
     <div className="finance-budget-grid">
@@ -182,7 +185,7 @@ export function FinanceBudgetWorkspace() {
       {selectedLines.length > 0 && <div className="finance-budget-lines" role="table" aria-label={`${selectedBudget.name} budget lines`}>{selectedLines.map((line) => <div role="row" key={line.id}><span>{periods.find((period) => period.id === line.pl_period_id)?.name ?? 'Reporting period'}</span><strong>{line.cost_type}</strong><span>{money(Number(line.budget_amount))}</span><small>{line.notes ?? 'No note'}</small></div>)}</div>}
       {selectedBudget.status === 'draft' && <>
         <form onSubmit={addLine} className="finance-budget-line-form">
-          <label><span>Reporting period</span><select required value={periodId} onChange={(event) => setPeriodId(event.target.value)}><option value="">Choose a period</option>{periods.map((item) => <option value={item.id} key={item.id}>{item.name}</option>)}</select></label>
+          {activePeriodId === undefined && <label><span>Reporting period</span><select required value={periodId} onChange={(event) => setPeriodId(event.target.value)}><option value="">Choose a period</option>{periods.map((item) => <option value={item.id} key={item.id}>{item.name}</option>)}</select></label>}
           <label><span>Cost type</span><input required maxLength={80} value={costType} onChange={(event) => setCostType(event.target.value)} /></label>
           <label><span>Budget amount</span><input required type="number" min={0} step="0.01" value={amount} onChange={(event) => setAmount(event.target.value)} /></label>
           <label><span>Note</span><input maxLength={500} value={notes} onChange={(event) => setNotes(event.target.value)} /></label>
@@ -190,7 +193,7 @@ export function FinanceBudgetWorkspace() {
         </form>
         {!confirmApproval ? <button type="button" className="btn btn-primary" disabled={saving || selectedLines.length === 0} onClick={() => setConfirmApproval(true)}>Review and approve budget</button> : <div className="finance-budget-confirm" role="alert"><strong>Approve {selectedBudget.name}?</strong><p>Approval locks this draft for operational variance comparison. Confirm the {money(selectedTotal)} total first.</p><div><button type="button" className="btn btn-secondary" onClick={() => setConfirmApproval(false)}>Keep editing</button><button type="button" className="btn btn-primary" disabled={saving} onClick={() => void approveBudget()}>{saving ? 'Approving...' : 'Approve budget'}</button></div></div>}
       </>}
-      {['approved', 'locked'].includes(selectedBudget.status) && <div className="finance-budget-variance"><div><strong>Refresh actual-versus-budget results</strong><p>Choose a reporting period. Existing variance and cost-centre roll rows are updated rather than duplicated.</p></div><select value={periodId} onChange={(event) => setPeriodId(event.target.value)} aria-label="Variance reporting period"><option value="">Choose a period</option>{periods.map((item) => <option value={item.id} key={item.id}>{item.name}</option>)}</select><button type="button" className="btn btn-primary" disabled={saving || !periodId} onClick={() => void calculateVariance()}>{saving ? 'Calculating...' : 'Refresh finance results'}</button></div>}
+      {['approved', 'locked'].includes(selectedBudget.status) && <div className="finance-budget-variance"><div><strong>Refresh actual-versus-budget results</strong><p>Existing variance and cost-centre roll rows are updated rather than duplicated.</p></div>{activePeriodId === undefined && <select value={periodId} onChange={(event) => setPeriodId(event.target.value)} aria-label="Variance reporting period"><option value="">Choose a period</option>{periods.map((item) => <option value={item.id} key={item.id}>{item.name}</option>)}</select>}<button type="button" className="btn btn-primary" disabled={saving || !periodId} onClick={() => void calculateVariance()}>{saving ? 'Calculating...' : 'Refresh finance results'}</button></div>}
     </div>}
   </section>;
 }

@@ -30,6 +30,7 @@ import {
   CreditCard,
   DollarSign,
   Download,
+  ExternalLink,
   FileBarChart,
   FolderOpen,
   FlaskConical,
@@ -53,11 +54,9 @@ import {
   Gauge,
   WalletCards,
   X,
-  ExternalLink,
 } from 'lucide-react';
 import type { LucideIcon } from 'lucide-react';
 import { useAuth } from '../context/AuthContext';
-import { openVehicleSearchPopout } from '../lib/vehicleSearchPopout';
 import { useEnabledModules } from '../hooks/useEnabledModules';
 import { getModuleAccessMessage } from '../lib/moduleAccessMessage';
 import { supabase } from '../lib/supabase';
@@ -65,12 +64,13 @@ import { useServiceRelationships } from '../context/ServiceRelationshipContext';
 import { reportMonitoredError } from '../lib/bobFrictionMonitor';
 import { BobPanel } from '../components/BobPanel';
 import { WorkflowRail } from '../components/WorkflowRail';
-import { OperatingSpineRibbon } from '../components/OperatingSpineRibbon';
 import { HelpInstructions } from '../components/HelpInstructions';
 import { ChangeRequestButton } from '../components/ChangeRequestButton';
 import { PlaceContextBanner } from '../components/PlaceContextBanner';
 import { readWorkflowContext, workflowContextQuery, type WorkflowContext } from '../lib/workflowNavigation';
 import { canAccessFieldOpsArea, FIELD_OPS_AREAS, isFieldOpsSubArea, type FieldOpsSubArea } from '../lib/fieldOpsAreaAccess';
+import { ACTIVE_DISPATCH_JOB_STATUSES } from '../lib/dispatchStatus';
+import { openVehicleSearchPopout } from '../lib/vehicleSearchPopout';
 import './AdminShell.css';
 
 import AdminHubPage from '../pages/AdminHubPage';
@@ -156,8 +156,6 @@ const APPROVAL_DECISION_ROLES = new Set(['grand_master', 'master', 'admin']);
 const ROSTER_MANAGEMENT_ROLES = new Set(['grand_master', 'master', 'admin', 'admin_officer']);
 const ROSTER_MANAGEMENT_PAGES = new Set<AdminPage>(['roster', 'roster-targets']);
 
-const FIELD_CONTEXT_PAGES = new Set<AdminPage>(['field-ops', 'site-360', 'locations', 'zones', 'sites', 'workshop', 'investigations']);
-
 // Maps an AdminPage to the platform module (see platformModuleManifest.ts)
 // that must be enabled for the caller's org to reach it. Pages absent here
 // have no module gate (role checks below still apply).
@@ -210,6 +208,74 @@ interface WorkspaceItem {
   label: string;
   icon: LucideIcon;
   area?: FieldOpsSubArea;
+}
+
+export interface AdminConsoleTelemetry {
+  organizationId: string | null;
+  zoneIds: string[];
+  onDuty: { value: number | null; error: string | null };
+  activeDispatch: { value: number | null; error: string | null };
+  breaches: { value: number | null; error: string | null };
+  welfare: { value: number | null; error: string | null };
+  loading: boolean;
+  scopeKey: string;
+  welfareEnabled: boolean;
+}
+
+const EMPTY_TELEMETRY_METRIC = { value: null, error: null };
+
+function useConsoleTelemetry(organizationId: string | null, zoneIds: string[], ready: boolean, welfareEnabled: boolean, contextError: string | null) {
+  const zoneKey = [...zoneIds].sort().join(',');
+  const scopeKey = `${organizationId ?? ''}:${zoneKey}:${welfareEnabled}:${contextError ? 'unavailable' : 'ready'}`;
+  const [state, setState] = useState<Omit<AdminConsoleTelemetry, 'organizationId' | 'zoneIds'>>({
+    onDuty: EMPTY_TELEMETRY_METRIC, activeDispatch: EMPTY_TELEMETRY_METRIC,
+    breaches: EMPTY_TELEMETRY_METRIC, welfare: EMPTY_TELEMETRY_METRIC,
+    loading: true, scopeKey: '', welfareEnabled,
+  });
+  useEffect(() => {
+    let cancelled = false;
+    let inFlight = false;
+    const unavailable = { value: null, error: 'Organisation access could not be confirmed.' };
+    const load = async () => {
+      if (inFlight || !ready) return;
+      if (!organizationId || contextError) {
+        const failed = contextError ? { value: null, error: 'Service context unavailable.' } : unavailable;
+        setState({ onDuty: failed, activeDispatch: failed, breaches: failed, welfare: failed, loading: false, scopeKey, welfareEnabled });
+        return;
+      }
+      inFlight = true;
+      setState((previous) => ({ ...previous, loading: true }));
+      try {
+        const ids = zoneKey ? zoneKey.split(',') : [];
+        const now = new Date().toISOString();
+        let duty = supabase.from('shifts').select('id', { count: 'exact', head: true }).eq('organization_id', organizationId).lte('scheduled_start', now).gte('scheduled_end', now).in('status', ['accepted', 'in_progress']);
+        let dispatch = supabase.from('dispatch_jobs').select('id', { count: 'exact', head: true }).eq('organization_id', organizationId).in('status', ACTIVE_DISPATCH_JOB_STATUSES);
+        let breaches = supabase.from('breach_alerts').select('id', { count: 'exact', head: true }).eq('organization_id', organizationId).in('status', ['open', 'acknowledged', 'actioned']);
+        if (ids.length) { duty = duty.in('zone_id', ids); dispatch = dispatch.in('zone_id', ids); breaches = breaches.in('zone_id', ids); }
+        const [onDuty, activeDispatch, openBreaches, welfare] = await Promise.all([
+          duty, dispatch, breaches,
+          welfareEnabled ? supabase.from('welfare_alerts').select('id', { count: 'exact', head: true }).eq('organization_id', organizationId).in('status', ['pending', 'acknowledged']) : Promise.resolve({ count: null, error: null }),
+        ]);
+        const metric = (result: { count: number | null; error: { message: string } | null }) => ({
+          value: result.error ? null : result.count,
+          error: result.error ? 'Count unavailable. Try again shortly.' : null,
+        });
+        if (!cancelled) setState({ onDuty: metric(onDuty), activeDispatch: metric(activeDispatch), breaches: metric(openBreaches), welfare: metric(welfare), loading: false, scopeKey, welfareEnabled });
+      } catch {
+        const failed = { value: null, error: 'Operational counts could not load.' };
+        if (!cancelled) setState({ onDuty: failed, activeDispatch: failed, breaches: failed, welfare: failed, loading: false, scopeKey, welfareEnabled });
+      } finally { inFlight = false; }
+    };
+    void load();
+    const interval = window.setInterval(() => void load(), 60_000);
+    return () => { cancelled = true; window.clearInterval(interval); };
+  }, [organizationId, zoneKey, scopeKey, ready, welfareEnabled, contextError]);
+  const current = state.scopeKey === scopeKey && ready ? state : {
+    onDuty: EMPTY_TELEMETRY_METRIC, activeDispatch: EMPTY_TELEMETRY_METRIC,
+    breaches: EMPTY_TELEMETRY_METRIC, welfare: EMPTY_TELEMETRY_METRIC,
+    loading: true, scopeKey, welfareEnabled,
+  };
+  return { ...current, organizationId, zoneIds: zoneKey ? zoneKey.split(',') : [] };
 }
 
 const NAVIGATION_MAP: Record<string, WorkspaceItem[]> = {
@@ -290,6 +356,36 @@ const WORKSPACE_LABELS: Record<string, { label: string; icon: LucideIcon }> = {
   'Platform & Settings': { label: 'Organisation & Settings', icon: Settings },
 };
 
+function WorkspaceToolbar({ workspace, isActive, onOpen }: {
+  workspace: { group: string; items: WorkspaceItem[] };
+  isActive: (item: WorkspaceItem) => boolean;
+  onOpen: (item: WorkspaceItem) => void;
+}) {
+  const isField = workspace.group === 'Field Operations';
+  const groups = isField ? [
+    { label: 'Live Ops', items: workspace.items.filter((item) => item.id === 'field-ops' && !['field-reports', 'cctv-console'].includes(item.area ?? '')) },
+    { label: 'Evidence & Reports', items: workspace.items.filter((item) => ['field-reports', 'cctv-console'].includes(item.area ?? '')) },
+    { label: 'Site & Spatial Setup', items: workspace.items.filter((item) => item.id !== 'field-ops') },
+  ].filter((group) => group.items.length) : [{ label: WORKSPACE_LABELS[workspace.group].label, items: workspace.items }];
+  const activeGroup = groups.find((group) => group.items.some(isActive))?.label ?? groups[0]?.label;
+  const [selectedGroup, setSelectedGroup] = useState(activeGroup);
+  useEffect(() => { setSelectedGroup(activeGroup); }, [activeGroup]);
+  const currentGroup = groups.find((group) => group.label === selectedGroup) ?? groups[0];
+  const itemKey = (item: WorkspaceItem) => `${item.id}:${item.area ?? ''}`;
+  return <div className="admin-workspace-bar">
+    <div className="admin-workspace-desktop">
+      {isField ? <label className="admin-toolbar-group"><span className="sr-only">Guarding and patrol section</span><select value={currentGroup?.label} onChange={(event) => setSelectedGroup(event.target.value)}>{groups.map((group) => <option key={group.label}>{group.label}</option>)}</select></label> : <span className="admin-workspace-title">{WORKSPACE_LABELS[workspace.group].label}</span>}
+      <nav aria-label="Workspace sections">{currentGroup?.label === 'Site & Spatial Setup'
+        ? <details className="admin-spatial-menu"><summary>Site & Spatial Setup</summary><div>{currentGroup.items.map((item) => <button type="button" key={itemKey(item)} aria-current={isActive(item) ? 'page' : undefined} onClick={(event) => { onOpen(item); event.currentTarget.closest('details')?.removeAttribute('open'); }}>{item.label}</button>)}</div></details>
+        : currentGroup?.items.map((item) => <button type="button" key={itemKey(item)} aria-current={isActive(item) ? 'page' : undefined} onClick={() => onOpen(item)}>{item.label}</button>)}</nav>
+    </div>
+    <label className="admin-workspace-mobile"><span className="sr-only">Workspace destination</span><select aria-label="Workspace destination" value={workspace.items.find(isActive) ? itemKey(workspace.items.find(isActive)!) : ''} onChange={(event) => { const item = workspace.items.find((entry) => itemKey(entry) === event.target.value); if (item) onOpen(item); }}>
+      <option value="" disabled>Choose a destination</option>
+      {groups.map((group) => <optgroup key={group.label} label={group.label}>{group.items.map((item) => <option key={itemKey(item)} value={itemKey(item)}>{item.label}</option>)}</optgroup>)}
+    </select></label>
+  </div>;
+}
+
 interface NavItemProps {
   id: string;
   label: string;
@@ -347,7 +443,10 @@ const AdminShell: React.FC = () => {
   const { profile, signOut, operatingOrganizationId, operatingOrganizations, setOperatingOrganization } = useAuth();
   const activeOrganizationId = operatingOrganizationId ?? profile?.organizationId ?? null;
   const { status: modulesStatus, isModuleEnabled } = useEnabledModules(activeOrganizationId);
-  const { agreements, sites, zones, selectedAgreement, selectedSite, selectedZone, setLocationMode, loading: relationshipLoading } = useServiceRelationships();
+  const { agreements, sites, zones, selectedAgreement, selectedAgreementZones, selectedSite, selectedZone, setLocationMode, loading: relationshipLoading, loadedOrganizationId, error: relationshipError } = useServiceRelationships();
+  const contextMatchesOrganization = loadedOrganizationId === activeOrganizationId;
+  const telemetryZoneIds = contextMatchesOrganization ? selectedAgreementZones.map((zone) => zone.id) : [];
+  const telemetry = useConsoleTelemetry(activeOrganizationId, telemetryZoneIds, !relationshipLoading && modulesStatus !== 'loading', isModuleEnabled('welfare', { safetyRelevant: true }), contextMatchesOrganization ? relationshipError : null);
 
   const [activePage, setActivePage] = useState<AdminPage>('hub');
   const [crmTab, setCrmTab] = useState<CRMTab>('crm');
@@ -497,9 +596,7 @@ const AdminShell: React.FC = () => {
     return () => window.removeEventListener('resize', handleResize);
   }, []);
 
-  // GPS / geofence evidence belongs to field pages; on a desk page (clients, finance, roster, settings) it only confuses.
   const isOrgWideCctvWorkspace = activePage === 'field-ops' && (fieldOpsSubArea === 'cctv-import' || fieldOpsSubArea === 'cctv-triage');
-  const showPlaceContext = FIELD_CONTEXT_PAGES.has(activePage) && !isOrgWideCctvWorkspace;
   const isPageEnabled = useCallback((page: AdminPage): boolean => {
     // While subscriptions are still loading, isModuleEnabled() answers false for everything; that is "unknown", not "denied".
     // Role checks still apply, and the route effect re-evaluates the module gate once loading finishes.
@@ -772,12 +869,42 @@ const AdminShell: React.FC = () => {
       default:
         return <AdminHubPage />;
     }
-  }, [activePage, fieldOpsSubArea, navigateFinance, navigateFromHub, navigateToFieldOps, setBobOpen]);
+  }, [activePage, fieldOpsSubArea, navigateFinance, navigateFromHub, navigateToFieldOps, setBobOpen, telemetry]);
 
   // A popped-out CCTV wall is a second-monitor surface: the console alone, no navigation or banners.
   const isVideoWall = activePage === 'field-ops' && fieldOpsSubArea === 'cctv-console' && new URLSearchParams(location.search).get('popout') === '1';
   const isStaffProfilePopout = activePage === 'people-hr' && new URLSearchParams(location.search).has('profile') && new URLSearchParams(location.search).get('popout') === '1';
   const isVehicleSearchPopout = activePage === 'field-ops' && fieldOpsSubArea === 'vehicle-search' && new URLSearchParams(location.search).get('popout') === '1';
+  const isWorkbench = ['hub', 'crm', 'client-setup', 'finance-bureau', 'finance-money', 'roster'].includes(activePage)
+    || (activePage === 'people-hr' && !new URLSearchParams(location.search).has('profile'))
+    || (activePage === 'field-ops' && fieldOpsSubArea === 'landing');
+  const showWorkflowNavigation = !['crm', 'client-setup', 'finance-bureau', 'finance-money'].includes(activePage);
+  const countScope = telemetryZoneIds.length ? 'Agreement zones' : 'Organisation-wide';
+  const telemetryPills = <div className="admin-console-telemetry" role="group" aria-label={`Operational counts · ${countScope}`}>
+    {([
+      { key: 'onDuty', label: 'On duty', destination: 'roster', allowed: isPageEnabled('roster') },
+      { key: 'activeDispatch', label: 'Dispatch', destination: 'dispatch', allowed: isFieldOpsAreaEnabled('dispatch') },
+      { key: 'breaches', label: 'Breaches', destination: 'breach-review', allowed: isFieldOpsAreaEnabled('breach-review') },
+      ...(telemetry.welfareEnabled ? [{ key: 'welfare', label: 'Welfare · org', destination: 'welfare-alerts', allowed: isFieldOpsAreaEnabled('welfare-alerts') }] : []),
+    ] as const).map((item) => {
+      const metric = telemetry[item.key as 'onDuty' | 'activeDispatch' | 'breaches' | 'welfare'];
+      const value = telemetry.loading ? '…' : metric.error || metric.value === null ? 'Unavailable' : metric.value;
+      return <button type="button" key={item.key} className={`admin-console-pill ${item.key === 'welfare' && (metric.value ?? 0) > 0 ? 'is-critical' : ''}`} disabled={!item.allowed} title={`${item.label}: ${value}. ${item.key === 'welfare' ? 'Organisation-wide; welfare alerts have no zone field.' : countScope}${metric.error ? ` · ${metric.error}` : ''}`} onClick={() => navigateFromHub(item.destination)}>
+        <span>{item.label}</span><strong aria-live="polite">{value}</strong>
+      </button>;
+    })}
+  </div>;
+  const utilityTools = <details className="admin-shell-utilities">
+    <summary aria-label="Account and workspace tools">More</summary>
+    <div className="admin-utilities-content">
+      <strong>{profile?.displayName ?? profile?.role ?? 'Administrator'}</strong>
+      {operatingOrganizations.length > 0 && <label className="admin-operating-selector"><span>Working in</span><select value={operatingOrganizationId ?? ''} onChange={(event) => setOperatingOrganization(event.target.value)} aria-label="Working in">{operatingOrganizations.map((context) => <option value={context.organizationId} key={context.organizationId}>{context.organizationName}{context.authorityBasis === 'organisation_home' ? ' (organisation)' : context.authorityBasis === 'corporate_oversight' ? ' (branch)' : ''}</option>)}</select></label>}
+      <ChangeRequestButton compact workspaceLabel={operatingOrganizations.find((item) => item.organizationId === operatingOrganizationId)?.organizationName ?? orgName} onOpenBob={(prompt) => { setBobLaunchPrompt(prompt); setBobOpen(true); }} />
+      <HelpInstructions context={activePage} role={profile?.role} />
+      {!isMobile && <button type="button" className="admin-shell-icon admin-desktop-download" onClick={() => setShowDesktopDownload(true)} title="Download FCM desktop app" aria-label="Download FCM desktop app"><Download size={19} aria-hidden="true" /></button>}
+      <button type="button" className="admin-shell-icon" onClick={() => void signOut()} title="Sign out" aria-label="Sign out"><LogOut size={19} aria-hidden="true" /></button>
+    </div>
+  </details>;
   if (isVideoWall || isStaffProfilePopout || isVehicleSearchPopout) {
     return (
       <div className="admin-shell admin-shell-video-wall">
@@ -829,20 +956,10 @@ const AdminShell: React.FC = () => {
           <header className="admin-shell-header">
             <div className="admin-shell-context">
               <strong>{orgName || 'Field Compliance Manager'}</strong>
-              {!relationshipLoading && (
-                <span>
-                  {selectedAgreement ? selectedAgreement.name : 'No agreement selected'}
-                  {selectedSite ? ` · ${selectedSite.name}` : ''}
-                  {selectedZone ? ` · ${selectedZone.name}` : ''}
-                </span>
-              )}
             </div>
+            {telemetryPills}
             <div className="admin-shell-tools">
-              {operatingOrganizations.length > 0 && <label className="admin-operating-selector"><span>Working in</span><select value={operatingOrganizationId ?? ''} onChange={(event) => setOperatingOrganization(event.target.value)} aria-label="Working in">{operatingOrganizations.map((context) => <option value={context.organizationId} key={context.organizationId}>{context.organizationName}{context.authorityBasis === 'organisation_home' ? ' (organisation)' : context.authorityBasis === 'corporate_oversight' ? ' (branch)' : ''}</option>)}</select></label>}
-              <ChangeRequestButton workspaceLabel={operatingOrganizations.find((item) => item.organizationId === operatingOrganizationId)?.organizationName ?? orgName} onOpenBob={(prompt) => { setBobLaunchPrompt(prompt); setBobOpen(true); }} />
               <NotificationCenter onNavigate={navigateFromNotification} />
-              <HelpInstructions context={activePage} role={profile?.role} />
-              <button type="button" className="admin-shell-icon admin-desktop-download" onClick={() => setShowDesktopDownload(true)} title="Download FCM desktop app" aria-label="Download FCM desktop app"><Download size={19} aria-hidden="true" /></button>
               {isFieldOpsAreaEnabled('vehicle-search') && <button type="button" className="admin-top-search" onClick={() => navigateToFieldOps('vehicle-search')} aria-label="Open vehicle search">
                 <Search size={17} aria-hidden="true" /><span>Vehicle search</span>
               </button>}
@@ -852,26 +969,20 @@ const AdminShell: React.FC = () => {
               <button type="button" className="admin-shell-icon" onClick={openBobCommandCenter} title="Open Bob command center" aria-label="Open Bob command center" aria-expanded={bobOpen}>
                 <Bot size={19} aria-hidden="true" /><span className="sr-only">{bobOpen ? 'Bob assistant is open' : 'Open Bob assistant'}</span>
               </button>
-              <button type="button" className="admin-shell-icon" onClick={() => void signOut()} title="Sign out" aria-label="Sign out"><LogOut size={19} aria-hidden="true" /></button>
-              <div className="admin-profile-chip">{profile?.displayName ?? profile?.role ?? 'Administrator'}</div>
+              {utilityTools}
             </div>
           </header>
 
-          {activeWorkspace && <div className="admin-workspace-bar">
-            <span className="admin-workspace-title">{WORKSPACE_LABELS[activeWorkspace.group].label}</span>
-            <nav aria-label="Workspace sections">
-              {activeWorkspace.items.map((item) => <button type="button" key={`${item.id}:${item.area ?? ''}`} aria-current={isWorkspaceItemActive(item) ? 'page' : undefined} onClick={() => openWorkspaceItem(item)}>{item.label}</button>)}
-            </nav>
-          </div>}
+          <PlaceContextBanner compact organizationWide={isOrgWideCctvWorkspace} organizationId={activeOrganizationId} />
+          {activeWorkspace && showWorkflowNavigation && <WorkspaceToolbar workspace={activeWorkspace} isActive={isWorkspaceItemActive} onOpen={openWorkspaceItem} />}
           <div className="bob-page-layout">
-          <main data-app-content className={`admin-shell-main ${activePage === 'hub' ? 'is-overview' : ''}`}>
-            {showPlaceContext && <PlaceContextBanner />}
+          <main data-app-content className={`admin-shell-main ${isWorkbench ? 'is-workbench' : ''} ${activePage === 'hub' ? 'is-overview' : ''}`}>
             {accessNotice && <div role="alert" className="admin-access-notice">{accessNotice}</div>}
             {moduleAccessNotice && <div role="status" className="admin-access-notice"><strong>{moduleAccessNotice.title}</strong><span>{moduleAccessNotice.description}</span></div>}
-            <WorkflowRail activePage={activePage} context={workflowContext} onNavigate={(destination, context) => navigateToPage(destination as AdminPage, context)} />
-            <LazyPageRecovery key={`${activePage}:${fieldOpsSubArea}`} pageKey={`${activePage}:${fieldOpsSubArea}`}>
+            {showWorkflowNavigation && <WorkflowRail activePage={activePage} context={workflowContext} onNavigate={(destination, context) => navigateToPage(destination as AdminPage, context)} />}
+            <div className="admin-shell-page"><LazyPageRecovery key={`${activePage}:${fieldOpsSubArea}`} pageKey={`${activePage}:${fieldOpsSubArea}`}>
               <React.Suspense fallback={<LazyPageFallback />}>{renderPage()}</React.Suspense>
-            </LazyPageRecovery>
+            </LazyPageRecovery></div>
           </main>
         <BobPanel
           open={bobOpen && activePage !== 'bob'}
@@ -897,23 +1008,23 @@ const AdminShell: React.FC = () => {
             alt="Iron Eagle Security"
             className="admin-brand-logo"
           />
-          <strong>{orgName || 'Field Compliance Manager'}</strong>
+          <strong>{orgName || 'FCM'}</strong>
         </div>
+        <details className="admin-mobile-metrics"><summary>Operations</summary>{telemetryPills}</details>
         <div className="admin-shell-tools">
-          {operatingOrganizations.length > 0 && <label className="admin-operating-selector"><span>Working in</span><select value={operatingOrganizationId ?? ''} onChange={(event) => setOperatingOrganization(event.target.value)} aria-label="Working in">{operatingOrganizations.map((context) => <option value={context.organizationId} key={context.organizationId}>{context.organizationName}{context.authorityBasis === 'organisation_home' ? ' (organisation)' : context.authorityBasis === 'corporate_oversight' ? ' (branch)' : ''}</option>)}</select></label>}
-          <ChangeRequestButton compact workspaceLabel={operatingOrganizations.find((item) => item.organizationId === operatingOrganizationId)?.organizationName ?? orgName} onOpenBob={(prompt) => { setBobLaunchPrompt(prompt); setBobOpen(true); }} />
           <NotificationCenter onNavigate={navigateFromNotification} />
-          <HelpInstructions context={activePage} role={profile?.role} />
           <button type="button" className="admin-shell-icon" onClick={openBobCommandCenter} title="Open Bob command center" aria-label="Open Bob command center" aria-expanded={bobOpen}>
             <Bot size={19} aria-hidden="true" /><span className="sr-only">{bobOpen ? 'Bob assistant is open' : 'Open Bob assistant'}</span>
           </button>
-          <button type="button" className="admin-shell-icon" onClick={() => void signOut()} title="Sign out" aria-label="Sign out"><LogOut size={19} aria-hidden="true" /></button>
+          {utilityTools}
           <button type="button" className="admin-shell-icon" onClick={() => setMobileMenuOpen(!mobileMenuOpen)} title={mobileMenuOpen ? 'Close navigation' : 'Open navigation'} aria-label={mobileMenuOpen ? 'Close navigation' : 'Open navigation'} aria-expanded={mobileMenuOpen}>
             {mobileMenuOpen ? <X size={20} aria-hidden="true" /> : <Menu size={20} aria-hidden="true" />}
             <span className="sr-only">{mobileMenuOpen ? 'Close navigation' : 'Open navigation'}</span>
           </button>
         </div>
       </header>
+      <PlaceContextBanner compact organizationWide={isOrgWideCctvWorkspace} organizationId={activeOrganizationId} />
+      {activeWorkspace && showWorkflowNavigation && <WorkspaceToolbar workspace={activeWorkspace} isActive={isWorkspaceItemActive} onOpen={openWorkspaceItem} />}
 
       {mobileMenuOpen && (
         <div className="admin-mobile-overlay" onClick={() => setMobileMenuOpen(false)}>
@@ -936,15 +1047,13 @@ const AdminShell: React.FC = () => {
       )}
 
       <div className="bob-page-layout">
-      <main data-app-content className={`admin-shell-main ${activePage === 'hub' ? 'is-overview' : ''}`}>
-        {showPlaceContext && <PlaceContextBanner />}
+      <main data-app-content className={`admin-shell-main ${isWorkbench ? 'is-workbench' : ''} ${activePage === 'hub' ? 'is-overview' : ''}`}>
         {accessNotice && <div role="alert" className="admin-access-notice">{accessNotice}</div>}
         {moduleAccessNotice && <div role="status" className="admin-access-notice"><strong>{moduleAccessNotice.title}</strong><span>{moduleAccessNotice.description}</span></div>}
-        {!isOrgWideCctvWorkspace && <OperatingSpineRibbon organizationName={orgName || 'Your organisation'} agreementName={selectedAgreement?.name ?? null} placeName={selectedZone?.name ?? selectedSite?.name ?? null} activePage={activePage} onNavigate={(page) => navigateToPage(page as AdminPage)} />}
-        <WorkflowRail activePage={activePage} context={workflowContext} onNavigate={(destination, context) => navigateToPage(destination as AdminPage, context)} />
-        <LazyPageRecovery key={`${activePage}:${fieldOpsSubArea}`} pageKey={`${activePage}:${fieldOpsSubArea}`}>
+        {showWorkflowNavigation && <WorkflowRail activePage={activePage} context={workflowContext} onNavigate={(destination, context) => navigateToPage(destination as AdminPage, context)} />}
+        <div className="admin-shell-page"><LazyPageRecovery key={`${activePage}:${fieldOpsSubArea}`} pageKey={`${activePage}:${fieldOpsSubArea}`}>
           <React.Suspense fallback={<LazyPageFallback />}>{renderPage()}</React.Suspense>
-        </LazyPageRecovery>
+        </LazyPageRecovery></div>
       </main>
       <BobPanel
         open={bobOpen && activePage !== 'bob'}

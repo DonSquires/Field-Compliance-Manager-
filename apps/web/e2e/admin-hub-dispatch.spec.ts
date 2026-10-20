@@ -170,6 +170,8 @@ test('priority dispatch item opens its exact operational review record', async (
   await expect(page.getByText(/Welfare and CCTV processing are organization-wide/)).toBeVisible();
   const queueItem = page.getByRole('button', { name: /Alarm response.*SLA due/i });
   await expect(queueItem).toBeVisible();
+  await expect(page.locator('.admin-priority-queue')).toHaveCSS('overflow', 'hidden');
+  expect(await page.evaluate(() => document.documentElement.scrollHeight <= window.innerHeight)).toBe(true);
   await expect(page).toHaveScreenshot('admin-hub-first-viewport.png');
   await queueItem.click();
   await expect(page).toHaveURL(/\/admin\/field-ops\?area=dispatch&job=cccccccc-cccc-4ccc-8ccc-cccccccccccc/);
@@ -183,6 +185,7 @@ test('priority dispatch item opens its exact operational review record', async (
   await expect(detail).toContainText('Use the north loading entrance.');
   await expect(detail).toContainText('Boundary-first arrival check required.');
   expect(await page.evaluate(() => document.documentElement.scrollWidth <= window.innerWidth)).toBe(true);
+  expect(await page.evaluate(() => document.documentElement.scrollHeight <= window.innerHeight)).toBe(true);
   expect(browserErrors, browserErrors.join('\n')).toEqual([]);
 });
 test('an alarm-response job shows its response ladder counted from the alarm, in the dispatcher\'s words', async ({ page }) => {

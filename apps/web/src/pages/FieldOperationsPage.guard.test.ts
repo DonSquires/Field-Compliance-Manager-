@@ -4,8 +4,18 @@ import { describe, expect, it } from 'vitest';
 
 const page = readFileSync(resolve(process.cwd(), 'src/pages/FieldOperationsPage.tsx'), 'utf8');
 const shell = readFileSync(resolve(process.cwd(), 'src/shells/AdminShell.tsx'), 'utf8');
+const css = readFileSync(resolve(process.cwd(), 'src/pages/FieldOperationsPage.css'), 'utf8');
 
 describe('field operations command surface', () => {
+  it('invalidates previous-scope counts and validates agreement scope', () => {
+    expect(page).toContain('loadedOrganizationId === organizationId');
+    expect(page).toContain('const request = ++requestGeneration.current');
+    expect(page).toContain('if (request !== requestGeneration.current) return;');
+    expect(page).toContain('if (request === requestGeneration.current) setLoading(false)');
+    expect(page).toContain('useLayoutEffect(() =>');
+    expect(page).toContain(".eq('organization_id', organizationId).in('zone_id', activeZoneIds)");
+  });
+
   it('replaces the exposed placeholder with the operational landing page', () => {
     expect(shell).toContain("case 'landing':");
     expect(shell).toContain('<FieldOperationsPage onNavigate={navigateToFieldOps} />');
@@ -50,7 +60,7 @@ describe('field operations command surface', () => {
     expect(page).toContain('safetyRelevant: workflow.safetyRelevant');
     expect(page).toContain("import { ACTIVE_DISPATCH_JOB_STATUSES } from '../lib/dispatchStatus'");
     expect(page).toContain(".in('status', ACTIVE_DISPATCH_JOB_STATUSES)");
-    expect(page).toContain('[dispatchAvailable, profile?.organizationId, selectedAgreementZones, welfareEnabled]');
+    expect(page).toContain('[dispatchAvailable, organizationId, loadedOrganizationId, selectedAgreementZones, welfareEnabled]');
     expect(page).toContain('Some operational counts are unavailable');
   });
 
@@ -62,5 +72,25 @@ describe('field operations command surface', () => {
     expect(page).toContain("metric: 'reportFollowUp'");
     expect(page).toContain('field-ops-workflow-count');
     expect(page).toContain('Current workload:');
+  });
+
+  it('keeps workflow panes contained and welfare counts on their actual organization spine', () => {
+    expect(page).toContain('aria-label="Workflow panes"');
+    expect(page).toContain('Find a workflow');
+    const welfareQueries = page.split('\n').filter((line) => line.includes("from('welfare_alerts')"));
+    expect(welfareQueries).toHaveLength(1);
+    expect(welfareQueries[0]).not.toContain("in('zone_id'");
+    expect(welfareQueries[0]).toContain("eq('organization_id', organizationId)");
+  });
+
+  it('retains full-bleed two-pane grid and independent scrolling rather than stacked cards', () => {
+    expect(css).toContain('height: 100%');
+    expect(css).toContain('min-height: 0');
+    expect(css).toContain('overflow: hidden');
+    expect(css).toContain('grid-template-columns: minmax(0,1fr) minmax(0,1fr)');
+    expect(css).toMatch(/\.field-ops-workflow-grid\s*\{[^}]*overflow-y:\s*auto/s);
+    expect(css).toContain('border-radius: 0');
+    expect(css).not.toContain('max-width: 1320px');
+    expect(page).toContain('data-active-group={activeGroup}');
   });
 });
