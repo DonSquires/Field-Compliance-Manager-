@@ -91,6 +91,9 @@ Field Compliance Manager (FCM) is an enterprise SaaS platform designed to replac
   elsewhere in FCM. It keeps your sign-in, working organisation and access
   rules. Opening it again reuses the same window; from the page it opens on the
   selected registration. If nothing appears, allow pop-ups for the site.
+- Search results show each vehicle's profile photo as a thumbnail when one
+  exists and you are authorised to see it; vehicles without a photo show an
+  empty placeholder.
 - In a selected vehicle's **Vehicle profile**, an organisation administrator
   can edit make, model, year, colour, body type and registration/WoF/CoF expiry
   dates with a reason/source. Blank fields leave existing values unchanged.

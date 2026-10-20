@@ -4,10 +4,11 @@ import { cleanup, fireEvent, render, screen, waitFor } from '@testing-library/re
 import { MemoryRouter } from 'react-router-dom';
 import VehicleSearchPage from './VehicleSearchPage';
 
-const { from, rpc, ilike, eq, historyOr, historyResult } = vi.hoisted(() => ({
+const { from, rpc, ilike, eq, historyOr, historyResult, photoIn, storageFrom, createSignedUrls } = vi.hoisted(() => ({
+  photoIn: vi.fn(), storageFrom: vi.fn(), createSignedUrls: vi.fn(),
   from: vi.fn(), rpc: vi.fn(), ilike: vi.fn(), eq: vi.fn(), historyOr: vi.fn(), historyResult: vi.fn(),
 }));
-vi.mock('../lib/supabase', () => ({ supabase: { from, rpc } }));
+vi.mock('../lib/supabase', () => ({ supabase: { from, rpc, storage: { from: storageFrom } } }));
 vi.mock('../context/AuthContext', () => ({ useAuth: () => ({ profile: { organizationId: 'org', id: 'user' } }) }));
 vi.mock('../components/SafetyWarningsPanel', () => ({ SafetyWarningsPanel: () => null }));
 vi.mock('../components/VehicleProfile', () => ({ default: () => <div>Vehicle profile</div> }));
@@ -16,6 +17,8 @@ describe('vehicle search candidate selection', () => {
   beforeEach(() => {
     vi.clearAllMocks();
     historyResult.mockReturnValue({ data: [], error: null });
+    createSignedUrls.mockResolvedValue({ data: [{ path: 'org/user/photo.jpg', signedUrl: 'https://signed.test/photo.jpg', error: null }], error: null });
+    storageFrom.mockReturnValue({ createSignedUrls });
     rpc.mockResolvedValue({ data: [
       { id: 'vehicle-1', plate_number: 'RJ198', make: 'Toyota' },
       { id: 'vehicle-2', plate_number: 'RJ298', make: 'Ford' },
@@ -25,6 +28,7 @@ describe('vehicle search candidate selection', () => {
         select: () => query, eq: (...args: unknown[]) => { eq(...args); return query; },
         ilike: (...args: unknown[]) => { ilike(table, ...args); return query; },
         order: () => query, contains: () => query,
+        in: (...args: unknown[]) => { photoIn(table, ...args); return Promise.resolve(table === 'vehicle_profile_photos' ? { data: [{ canonical_vehicle_id: 'vehicle-2', storage_path: 'org/user/photo.jpg' }], error: null } : { data: [], error: null }); },
         or: (filter: string) => { historyOr(table, filter); return query; }, is: () => query,
         limit: async () => table === 'observations' ? historyResult() : ({ data: table === 'canonical_vehicle_public' ? [
           { id: 'vehicle-1', plate_number: 'RJ198', make: 'Toyota' },
@@ -152,5 +156,28 @@ describe('vehicle search candidate selection', () => {
     render(<MemoryRouter initialEntries={['/admin/field-ops?area=vehicle-search&popout=1']}><VehicleSearchPage /></MemoryRouter>);
     expect(screen.getByText('Separate window')).toBeTruthy();
     expect(screen.queryByRole('button', { name: 'Open in new window' })).toBeNull();
+  });
+
+  it('shows a vehicle profile photo thumbnail in the result list when one exists', async () => {
+    render(<MemoryRouter><VehicleSearchPage /></MemoryRouter>);
+    fireEvent.change(screen.getByLabelText('Registration search'), { target: { value: 'rj%9%8' } });
+    fireEvent.click(screen.getByRole('button', { name: 'Search Plate' }));
+    const photo = await screen.findByRole('img', { name: 'Profile photo of RJ298' });
+    expect(photo.getAttribute('src')).toBe('https://signed.test/photo.jpg');
+    expect(screen.queryByRole('img', { name: 'Profile photo of RJ198' })).toBeNull();
+    expect(photoIn).toHaveBeenCalledWith('vehicle_profile_photos', 'canonical_vehicle_id', ['vehicle-1', 'vehicle-2']);
+    expect(storageFrom).toHaveBeenCalledWith('vehicle-profile-photos');
+    expect(createSignedUrls).toHaveBeenCalledWith(['org/user/photo.jpg'], 3600);
+  });
+
+  it('keeps the result list when photo lookup fails', async () => {
+    createSignedUrls.mockResolvedValue({ data: null, error: { message: 'denied' } });
+    render(<MemoryRouter><VehicleSearchPage /></MemoryRouter>);
+    fireEvent.change(screen.getByLabelText('Registration search'), { target: { value: 'rj%9%8' } });
+    fireEvent.click(screen.getByRole('button', { name: 'Search Plate' }));
+    expect(await screen.findByRole('button', { name: 'RJ298' })).toBeTruthy();
+    await waitFor(() => expect(createSignedUrls).toHaveBeenCalled());
+    expect(screen.queryByRole('img', { name: /Profile photo/ })).toBeNull();
+    expect(screen.queryByRole('alert')).toBeNull();
   });
 });
