@@ -1,4 +1,4 @@
-import { useEffect, useState, type FormEvent } from 'react';
+import { useEffect, useState, type FormEvent, type ReactNode } from 'react';
 import { useAuth } from '../context/AuthContext';
 import { supabase } from '../lib/supabase';
 import { describeLoadFailures } from '../lib/friendlyLoadError';
@@ -30,9 +30,13 @@ function errorMessage(error: unknown): string {
   return `${describeLoadFailures([['vehicle profile', { message }]])} ${message}`;
 }
 
-export default function VehicleProfile({ vehicle, onUpdated }: {
+export default function VehicleProfile({ vehicle, onUpdated, summary, children }: {
   vehicle: EditableVehicle;
   onUpdated: () => Promise<void>;
+  /** Identity line (plate, make/model, primary actions) shown beside the photo. */
+  summary?: ReactNode;
+  /** Status, receipts and flags that belong to the same vehicle card. */
+  children?: ReactNode;
 }) {
   const { profile } = useAuth();
   const [canEdit, setCanEdit] = useState(false);
@@ -40,6 +44,7 @@ export default function VehicleProfile({ vehicle, onUpdated }: {
   const [photoUrl, setPhotoUrl] = useState<string | null>(null);
   const [photoVersion, setPhotoVersion] = useState(0);
   const [editing, setEditing] = useState(false);
+  const [changingPhoto, setChangingPhoto] = useState(false);
   const [draft, setDraft] = useState(() => Object.fromEntries(fields.map(([key]) => [key, String(vehicle[key] ?? '')])));
   const [reason, setReason] = useState('');
   const [photoReason, setPhotoReason] = useState('');
@@ -153,25 +158,38 @@ export default function VehicleProfile({ vehicle, onUpdated }: {
       setUploaded(null); setFile(null); setPhotoReason('');
       setPhotoVersion(value => value + 1);
       setNotice('Shared vehicle profile photo saved with audit history.');
+      setChangingPhoto(false);
     } catch (failure) { setError(errorMessage(failure)); }
     finally { setBusy(false); }
   }
 
   return <section className="contact-card vehicle-profile" aria-label="Vehicle profile">
-    <h2>Vehicle profile</h2>
-    {loading && <p role="status">Loading photo and edit permissions…</p>}
-    {error && <p role="alert">{error}</p>}
-    {notice && <p role="status">{notice}</p>}
-    {photoUrl ? <img className="vehicle-profile-photo" src={photoUrl} alt={`Profile of vehicle ${vehicle.plate_number}`}
-      onError={() => setError('The vehicle photo could not be displayed. Refresh to request a new private link.')} />
-      : !loading && <p>No profile photo available in your authorised scope.</p>}
-    <p>Profile photos are shared with authorised organisations, not public. A profile photo is not proof of identity or enforcement evidence.</p>
-    {!loading && !canEdit && <p>Vehicle profile changes require an organisation administrator.</p>}
+    <div className="vehicle-profile-layout">
+      <div className="vehicle-profile-media">
+        {photoUrl ? <img className="vehicle-profile-photo" src={photoUrl} alt={`Profile of vehicle ${vehicle.plate_number}`}
+          onError={() => setError('The vehicle photo could not be displayed. Refresh to request a new private link.')} />
+          : <div className="vehicle-profile-photo is-empty">{loading ? 'Loading photo…' : 'No profile photo in your authorised scope'}</div>}
+        <small>Shared with authorised organisations, not public. Not proof of identity or enforcement evidence.</small>
+      </div>
+      <div className="vehicle-profile-body">
+        <h2 className="sr-only">Vehicle profile</h2>
+        {summary}
+        {loading && <p role="status" className="sr-only">Loading photo and edit permissions…</p>}
+        {error && <p role="alert">{error}</p>}
+        {notice && <p role="status">{notice}</p>}
+        {children}
+        {!loading && !canEdit && <p className="vehicle-profile-hint">Vehicle profile changes require an organisation administrator.</p>}
+        {canEdit && <div className="vehicle-profile-manage">
+          <button className="btn btn-sm btn-secondary" type="button" disabled={busy} onClick={() => {
+            setDraft(Object.fromEntries(fields.map(([key]) => [key, String(vehicle[key] ?? '')])));
+            setEditing(value => !value);
+          }}>{editing ? 'Cancel editing' : 'Edit vehicle details'}</button>
+          <button className="btn btn-sm btn-secondary" type="button" disabled={busy} aria-expanded={changingPhoto}
+            onClick={() => setChangingPhoto(value => !value)}>{changingPhoto ? 'Cancel photo change' : photoUrl ? 'Replace profile photo' : 'Add profile photo'}</button>
+        </div>}
+      </div>
+    </div>
     {canEdit && <>
-      <button className="btn btn-secondary" type="button" disabled={busy} onClick={() => {
-        setDraft(Object.fromEntries(fields.map(([key]) => [key, String(vehicle[key] ?? '')])));
-        setEditing(value => !value);
-      }}>{editing ? 'Cancel editing' : 'Edit vehicle details'}</button>
       {editing && <form onSubmit={saveDetails}>
         <p>Registration is fixed. Shared vehicle facts may require grand master review. Blank fields leave existing values unchanged.</p>
         <fieldset disabled={busy}><legend>Vehicle details</legend>
@@ -184,7 +202,7 @@ export default function VehicleProfile({ vehicle, onUpdated }: {
           <button className="btn btn-primary" disabled={!reason.trim()}>Save vehicle details</button>
         </fieldset>
       </form>}
-      <form onSubmit={savePhoto}><fieldset disabled={busy}><legend>{photoUrl ? 'Replace profile photo' : 'Add profile photo'}</legend>
+      {changingPhoto && <form onSubmit={savePhoto}><fieldset disabled={busy}><legend>{photoUrl ? 'Replace profile photo' : 'Add profile photo'}</legend>
         <label>Vehicle profile photo<input type="file" accept="image/jpeg,image/png,image/webp" onChange={event => {
           setFile(event.target.files?.[0] ?? null); setUploaded(null); setError(null);
         }} /></label>
@@ -193,7 +211,7 @@ export default function VehicleProfile({ vehicle, onUpdated }: {
         <label>Reason / source for profile photo<textarea required value={photoReason} onChange={event => setPhotoReason(event.target.value)} /></label>
         <button className="btn btn-primary" disabled={!file || !photoReason.trim()}>{busy ? 'Saving…' : 'Save profile photo'}</button>
         {uploaded && <p role="status">Photo uploaded; if linking fails, retry Save profile photo to reuse this upload.</p>}
-      </fieldset></form>
+      </fieldset></form>}
     </>}
   </section>;
 }

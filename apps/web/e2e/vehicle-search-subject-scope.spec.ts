@@ -54,6 +54,14 @@ test('registration wildcards show selectable identities before history or flag a
       await route.fulfill({ contentType: 'image/png', body: png });
     }
   });
+  await page.route('**/storage/v1/object/sign/scans**', async route => {
+    if (route.request().method() === 'POST') {
+      const body = route.request().postDataJSON() as { paths: string[] };
+      await route.fulfill({ contentType: 'application/json', body: JSON.stringify(body.paths.map(path => ({ path, signedURL: `/object/sign/scans/${path}?token=fixture`, error: null }))) });
+    } else {
+      await route.fulfill({ contentType: 'image/png', body: png });
+    }
+  });
   await page.route('**/rest/v1/rpc/search_vehicle_registrations', async (route) => {
     const body = route.request().postDataJSON() as Record<string, unknown>;
     patterns.push(String(body.p_pattern));
@@ -70,6 +78,11 @@ test('registration wildcards show selectable identities before history or flag a
         const params = new URL(route.request().url()).searchParams;
         if (params.get('select')?.includes('nights_this_zone')) {
           historyFilters.push(params.get('or') ?? '');
+          await route.fulfill({ contentType: 'application/json', body: JSON.stringify([
+            { id: 'obs-1', observed_at: '2026-05-23T05:45:00Z', is_compliant: true, compliance_status: null, compliance_reason: null, nights_this_zone: 1, plate_number: 'RJ298', module_key: 'freedom_camping', vehicle_make: 'Ford', vehicle_model: 'Transit', vehicle_colour: 'White', photo_url: 'org/33333333-3333-4333-8333-333333333333/obs-1.png', zone: { name: 'Kaiuma Forest Block' } },
+            { id: 'obs-2', observed_at: '2026-05-20T05:45:00Z', is_compliant: false, compliance_status: null, compliance_reason: 'Overstayed', nights_this_zone: 3, plate_number: 'RJ298', module_key: 'freedom_camping', vehicle_make: null, vehicle_model: null, vehicle_colour: null, photo_url: null, zone: null },
+          ]) });
+          return;
         }
       }
       await route.fulfill({ contentType: 'application/json', body: '[]' });
@@ -88,11 +101,18 @@ test('registration wildcards show selectable identities before history or flag a
   await expect(page.getByText('Ford Transit', { exact: true })).toBeVisible();
   await expect(page.getByRole('button', { name: '+ Raise of-interest flag' })).toBeVisible();
   expect(historyFilters).toEqual([`(canonical_vehicle_id.eq.${vehicles[1].id},plate_number_upper.eq.RJ298)`]);
+  const history = page.getByRole('table', { name: 'Observation history' });
+  await expect(history.locator('tbody tr')).toHaveCount(2);
+  await expect(history.getByRole('img', { name: /Observation photo/ })).toBeVisible();
+  await expect(history.locator('tbody tr').nth(1)).toContainText('NON-COMPLIANT');
+  await expect(history.locator('tbody tr').nth(1)).toContainText('Overstayed');
+  await expect(page.getByRole('region', { name: 'Vehicle profile' }).getByText('Warrant & Certification Status')).toBeVisible();
   await page.getByRole('button', { name: 'Edit vehicle details' }).click();
   await page.getByLabel('Colour', { exact: true }).fill('Blue');
   await page.getByLabel('Reason / source for detail changes').fill('Human reviewed appearance');
   await page.getByRole('button', { name: 'Save vehicle details' }).click();
   await expect(page.getByText('Vehicle details saved with audit history.')).toBeVisible();
+  await page.getByRole('button', { name: 'Add profile photo' }).click();
   await page.getByLabel('Vehicle profile photo', { exact: true }).setInputFiles({ name: 'car.png', mimeType: 'image/png', buffer: png });
   await page.getByLabel('Reason / source for profile photo').fill('Reviewed source photo');
   await page.getByRole('button', { name: 'Save profile photo' }).click();

@@ -94,6 +94,14 @@ Field Compliance Manager (FCM) is an enterprise SaaS platform designed to replac
 - Search results show each vehicle's profile photo as a thumbnail when one
   exists and you are authorised to see it; vehicles without a photo show an
   empty placeholder.
+- A selected vehicle opens as one **Vehicle profile** card: the profile photo
+  beside the registration, make/model, of-interest flag action and warrant/
+  certification status. **Edit vehicle details** and **Add/Replace profile
+  photo** open their forms only when needed.
+- **Observation History** is a spreadsheet-style table (latest 50): photo
+  thumbnail, observed time, location/zone, type, plate and vehicle seen,
+  outcome, nights and reason. Thumbnails appear only for photos stored in an
+  organisation you can access; select one to open the full photo.
 - In a selected vehicle's **Vehicle profile**, an organisation administrator
   can edit make, model, year, colour, body type and registration/WoF/CoF expiry
   dates with a reason/source. Blank fields leave existing values unchanged.
