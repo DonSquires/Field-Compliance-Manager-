@@ -1928,6 +1928,14 @@ evidence, not asserted.
   all dates (`search_activity_records`, trigram-indexed, same access
   predicates as table RLS). Repeat subject review is its own Reports tab.
   Not yet exercised by end users.
+- **Vehicle owner access area and locality-only display (owner correction,
+  2026-10-20).** Owner identity is the `vehicle_owner_identity` access area
+  (direct grant or preset; administrators always), checked by
+  `can_access_vehicle_owner_identity` in the owner RPCs and the `entity_links`
+  owner policy; administrators switch it per user with the audited
+  `set_vehicle_owner_access` checkbox in the user workspace. The owner reader
+  returns suburb and town/city (`vehicle_owner_locality`) instead of the street
+  address (`20261020180000`). Not yet exercised by end users.
 
 ## 10. Enterprise hardening (parallel track)
 

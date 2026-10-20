@@ -220,6 +220,6 @@ export default function VehicleProfile({ vehicle, onUpdated, summary, children }
         {uploaded && <p role="status">Photo uploaded; if linking fails, retry Save profile photo to reuse this upload.</p>}
       </fieldset></form>}
     </>}
-    {!loading && <VehicleOwnerPanel vehicleId={vehicle.id} organizationId={profile?.organizationId} canManage={canEdit} />}
+    {!loading && <VehicleOwnerPanel vehicleId={vehicle.id} organizationId={profile?.organizationId} />}
   </section>;
 }

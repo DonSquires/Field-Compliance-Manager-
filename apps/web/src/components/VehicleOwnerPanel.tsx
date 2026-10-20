@@ -13,7 +13,7 @@ interface OwnerLink {
   display_name: string | null;
   phone: string | null;
   email: string | null;
-  address: string | null;
+  locality: string | null;
   recorded_at: string;
   recorded_by_name: string | null;
   ended_at: string | null;
@@ -35,19 +35,22 @@ const SOURCES: Array<[string, string]> = [
 ];
 
 const SOURCE_LABEL = Object.fromEntries(SOURCES);
-const NZTA_NOTICE = 'NZTA register information is restricted. Only your organisation\'s administrators can see it, and it may only be used for the lawful purpose it was obtained for. Do not share it with clients or other organisations.';
+const NZTA_NOTICE = 'NZTA register information is restricted. Only people your organisation has authorised for vehicle owner details can see it, and it may only be used for the lawful purpose it was obtained for. Do not share it with clients or other organisations.';
+const EMPTY_FIELDS = { display_name: '', phone: '', email: '', suburb: '', city: '', address: '' };
 
 /**
  * Owner identity for a canonical vehicle. Owners are recorded by the caller's
  * organisation as a person -> vehicle edge, creating the person record and its
- * canonical person when needed. Administrator-only (personal information).
+ * canonical person when needed. Personal information: visible to users holding
+ * the vehicle_owner_identity access area (or administrators). Only the suburb
+ * and city are shown, never the street address.
  */
 export const VehicleOwnerPanel: React.FC<{
   vehicleId: string;
   organizationId: string | null | undefined;
-  canManage: boolean;
   onChanged?: () => void;
-}> = ({ vehicleId, organizationId, canManage, onChanged }) => {
+}> = ({ vehicleId, organizationId, onChanged }) => {
+  const [access, setAccess] = useState<{ view: boolean; record: boolean } | null>(null);
   const [owners, setOwners] = useState<OwnerLink[]>([]);
   const [checks, setChecks] = useState<NztaCheck[]>([]);
   const [loading, setLoading] = useState(true);
@@ -57,14 +60,32 @@ export const VehicleOwnerPanel: React.FC<{
   const [personQuery, setPersonQuery] = useState('');
   const [personMatches, setPersonMatches] = useState<Array<{ id: string; display_name: string | null }>>([]);
   const [personId, setPersonId] = useState('');
-  const [fields, setFields] = useState({ display_name: '', phone: '', email: '', address: '' });
+  const [fields, setFields] = useState(EMPTY_FIELDS);
   const [source, setSource] = useState('owner_declared');
   const [basis, setBasis] = useState('');
   const [busy, setBusy] = useState(false);
 
+  // ATLAS CALLS: can_access_vehicle_owner_identity
+  useEffect(() => {
+    if (!organizationId) { setAccess({ view: false, record: false }); return; }
+    let cancelled = false;
+    void Promise.all([
+      supabase.rpc('can_access_vehicle_owner_identity', { p_organization_id: organizationId, p_record: false }),
+      supabase.rpc('can_access_vehicle_owner_identity', { p_organization_id: organizationId, p_record: true }),
+    ]).then(([viewResult, recordResult]) => {
+      if (cancelled) return;
+      if (viewResult.error) setError(viewResult.error.message);
+      setAccess({ view: viewResult.data === true, record: recordResult.data === true });
+    });
+    return () => { cancelled = true; };
+  }, [organizationId]);
+
+  const canView = access?.view === true;
+  const canRecord = access?.record === true;
+
   // ATLAS CALLS: get_vehicle_owner_links, get_vehicle_identity_checks
   const load = useCallback(async () => {
-    if (!canManage || !organizationId) { setLoading(false); return; }
+    if (!canView || !organizationId) { setLoading(false); return; }
     setLoading(true);
     const [ownerResult, checkResult] = await Promise.all([
       supabase.rpc('get_vehicle_owner_links', { p_organization_id: organizationId, p_canonical_vehicle_id: vehicleId }),
@@ -74,7 +95,7 @@ export const VehicleOwnerPanel: React.FC<{
     else setOwners(Array.isArray(ownerResult.data) ? ownerResult.data as OwnerLink[] : []);
     setChecks(checkResult.error ? [] : (Array.isArray(checkResult.data) ? checkResult.data as NztaCheck[] : []));
     setLoading(false);
-  }, [canManage, organizationId, vehicleId]);
+  }, [canView, organizationId, vehicleId]);
 
   useEffect(() => { void load(); }, [load]);
 
@@ -91,8 +112,9 @@ export const VehicleOwnerPanel: React.FC<{
     return () => { cancelled = true; window.clearTimeout(handle); };
   }, [adding, mode, organizationId, personQuery]);
 
-  if (!canManage) {
-    return <p className="vehicle-profile-hint">Owner details are personal information and are shown to organisation administrators only.</p>;
+  if (access === null) return null;
+  if (!canView) {
+    return <p className="vehicle-profile-hint">Owner details are personal information. They are shown only to people your organisation has authorised for vehicle owner details (an administrator can enable this under Users).</p>;
   }
 
   const save = async (event: React.FormEvent) => {
@@ -112,7 +134,7 @@ export const VehicleOwnerPanel: React.FC<{
     setBusy(false);
     if (saveError) { setError(saveError.message); return; }
     setAdding(false);
-    setFields({ display_name: '', phone: '', email: '', address: '' });
+    setFields(EMPTY_FIELDS);
     setPersonId(''); setPersonQuery(''); setBasis('');
     await load();
     onChanged?.();
@@ -135,20 +157,22 @@ export const VehicleOwnerPanel: React.FC<{
     <section className="vehicle-owner" aria-label="Vehicle owner">
       <div className="vehicle-owner__head">
         <h3>Owner</h3>
-        <button type="button" className="btn btn-sm btn-secondary" aria-expanded={adding} onClick={() => setAdding((value) => !value)}>
+        {canRecord && <button type="button" className="btn btn-sm btn-secondary" aria-expanded={adding} onClick={() => setAdding((value) => !value)}>
           {adding ? 'Cancel' : activeOwners.length ? 'Change owner' : 'Add owner'}
-        </button>
+        </button>}
       </div>
       {error && <div className="alert alert-error" role="alert">{error}</div>}
       {loading ? <p role="status">Loading owner…</p> : activeOwners.length === 0 ? <p>No owner recorded by your organisation.</p> : activeOwners.map((owner) => (
         <div key={owner.link_id} className="vehicle-owner__card">
-          <strong>{owner.display_name ?? 'Unnamed person'}</strong>
-          {' '}<span className="badge badge-info">{owner.relationship === 'registered_owner' ? 'Registered owner' : 'Owner'}</span>
-          {owner.nzta_restricted && <> <span className="badge badge-warning" title={NZTA_NOTICE}>NZTA restricted</span></>}
-          <div className="vehicle-owner__meta">{[owner.phone, owner.email, owner.address].filter(Boolean).join(' · ') || 'No contact details recorded'}</div>
+          <div className="vehicle-owner__title">
+            <strong>{owner.display_name ?? 'Unnamed person'}</strong>
+            <span className="badge badge-info">{owner.relationship === 'registered_owner' ? 'Registered owner' : 'Owner'}</span>
+            {owner.nzta_restricted && <span className="badge badge-warning" title={NZTA_NOTICE}>NZTA restricted</span>}
+          </div>
+          <div className="vehicle-owner__meta">{[owner.phone, owner.email, owner.locality].filter(Boolean).join(' · ') || 'No contact details recorded'}</div>
           <small>{SOURCE_LABEL[owner.source ?? ''] ?? 'Source not recorded'} · {owner.basis ?? ''} · recorded {new Date(owner.recorded_at).toLocaleDateString('en-NZ')} by {owner.recorded_by_name ?? 'staff'}</small>
           {owner.nzta_restricted && <p className="vehicle-owner__notice" role="note">{NZTA_NOTICE}</p>}
-          <div><button type="button" className="btn btn-sm btn-secondary" onClick={() => void endLink(owner)}>No longer owner</button></div>
+          {canRecord && <div><button type="button" className="btn btn-sm btn-secondary" onClick={() => void endLink(owner)}>No longer owner</button></div>}
         </div>
       ))}
       {pastOwners.length > 0 && <details><summary>Previous owners ({pastOwners.length})</summary>
@@ -158,7 +182,7 @@ export const VehicleOwnerPanel: React.FC<{
         <p className="vehicle-owner__notice" role="note">{NZTA_NOTICE}</p>
         <ul>{checks.map((check) => <li key={check.check_id}>{new Date(check.checked_at).toLocaleDateString('en-NZ')} · {check.relationship.replace(/_/g, ' ')} · {check.display_name ?? 'Person not named'}{check.source_authority ? ` · ${check.source_authority}` : ''}</li>)}</ul>
       </details>}
-      {adding && (
+      {adding && canRecord && (
         <form className="vehicle-owner__form" onSubmit={(event) => void save(event)}>
           <fieldset disabled={busy}>
             <legend>{activeOwners.length ? 'Record the new owner' : 'Record the owner'}</legend>
@@ -171,7 +195,10 @@ export const VehicleOwnerPanel: React.FC<{
                 <label>Full name<input required value={fields.display_name} maxLength={200} onChange={(event) => setFields({ ...fields, display_name: event.target.value })} /></label>
                 <label>Phone<input value={fields.phone} maxLength={50} onChange={(event) => setFields({ ...fields, phone: event.target.value })} /></label>
                 <label>Email<input type="email" value={fields.email} maxLength={200} onChange={(event) => setFields({ ...fields, email: event.target.value })} /></label>
-                <label>Address<input value={fields.address} maxLength={300} onChange={(event) => setFields({ ...fields, address: event.target.value })} /></label>
+                <label>Suburb<input value={fields.suburb} maxLength={100} onChange={(event) => setFields({ ...fields, suburb: event.target.value })} /></label>
+                <label>Town / city<input value={fields.city} maxLength={100} onChange={(event) => setFields({ ...fields, city: event.target.value })} /></label>
+                <label>Street address (optional)<input value={fields.address} maxLength={300} onChange={(event) => setFields({ ...fields, address: event.target.value })} aria-describedby="vehicle-owner-street-hint" /></label>
+                <small id="vehicle-owner-street-hint" className="vehicle-profile-hint">Kept on the person record. Only the suburb and town/city are shown with the vehicle.</small>
               </div>
             ) : (
               <>
