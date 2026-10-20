@@ -63,7 +63,7 @@ describe('governed staff onboarding', () => {
     expect(employment).toContain("sp.role_code IS NULL THEN 'Assign a payroll role'");
     expect(employment).toContain("THEN 'Complete employment setup'");
     expect(page).toContain("supabase.rpc('set_staff_employment_setup'");
-    expect(page).toContain('Use the highlighted next action');
-    expect(page).toContain('Other onboarding actions');
+    expect(page).toContain('onClick={() => runOnboardingPrimaryAction(person, ledger, name)}>{onboardingPrimaryActionLabel(ledger)}</button>');
+    expect(page).toContain("onClick={() => openStaffProfile(person, 'onboarding')}>Open profile");
   });
 });

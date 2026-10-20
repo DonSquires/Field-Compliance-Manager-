@@ -62,7 +62,7 @@ function collectRepositoryContext({ sourceDir, targetSha, taskDescription = '' }
     .filter(file => file && !EXCLUDED_PATH.test(file));
   const bounded = boundTrackedFiles(files, taskDescription);
   const assessment = createAssessment(sourceDir);
-  return {
+  const context = {
     target_sha: targetSha,
     file_count: files.length,
     tracked_files: bounded.tracked_files,
@@ -75,6 +75,9 @@ function collectRepositoryContext({ sourceDir, targetSha, taskDescription = '' }
     recent_commits: assessment.git.recentCommits,
     secret_files_excluded: true
   };
+  // Grounding needs the whole inventory; prompts and artifacts only ever serialize the bounded list.
+  Object.defineProperty(context, 'all_tracked_files', { value: files, enumerable: false });
+  return context;
 }
 
 // A local model's window (24-40k tokens) cannot hold the full build map: the file list and schema names

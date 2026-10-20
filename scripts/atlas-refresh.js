@@ -214,6 +214,22 @@ function componentName(sourceFile) {
   return sourceFile.replace(/^apps\/web\/src\//, '').replace(/\.(?:[cm]?js|jsx|ts|tsx)$/, '');
 }
 
+// `const rpcName = isAdmiral ? 'a' : 'b'; client.rpc(rpcName, ...)` — the literal names a const can hold
+// are the RPCs that call reaches. Missing this made bob_execute_read_query an "unwired" false gap
+// (bob-sql-read) that Builder then spent jobs #89–#93 trying to wire (2026-10-21).
+function variableRpcTargets(content) {
+  const literals = new Map();
+  for (const assignment of content.matchAll(/\bconst\s+([a-zA-Z_$][\w$]*)\s*=\s*([^;\n]+)/g)) {
+    const names = Array.from(assignment[2].matchAll(/['"]([a-zA-Z_][a-zA-Z0-9_]*)['"]/g), (match) => match[1]);
+    if (names.length && /^[\s\w$.!?:&|()'"=<>-]+$/.test(assignment[2])) literals.set(assignment[1], names);
+  }
+  const targets = [];
+  for (const call of content.matchAll(/\.\s*rpc\(\s*([a-zA-Z_$][\w$]*)\s*[,)]/g)) {
+    for (const name of literals.get(call[1]) || []) targets.push({ name, variable: call[1] });
+  }
+  return targets;
+}
+
 function collectComponentEdges(sourceFile, content, inventory) {
   const source = sourceIdentity(sourceFile);
   const sourceName = source.source_name;
@@ -233,6 +249,11 @@ function collectComponentEdges(sourceFile, content, inventory) {
   for (const match of content.matchAll(/(?:supabase|admin|callerClient)\s*\.\s*rpc\([^;]*?\?\s*['"]([^'"]+)['"]\s*:\s*['"]([^'"]+)['"]/g)) {
     for (const rpcName of [match[1], match[2]]) {
       edges.push({ ...source, target_type: 'rpc', target_name: rpcName, edge_kind: 'calls', evidence_class: 'live-code', source_file: sourceFile, caller_context: 'Supabase RPC call in source' });
+    }
+  }
+  for (const target of variableRpcTargets(content)) {
+    if (!inventory || inventory.rpcs.has(target.name)) {
+      edges.push({ ...source, target_type: 'rpc', target_name: target.name, edge_kind: 'calls', evidence_class: 'live-code', source_file: sourceFile, caller_context: `Supabase RPC call via const ${target.variable}` });
     }
   }
   for (const match of content.matchAll(/(?:\b(?:SELECT|PERFORM|LATERAL)\s+|:=\s*)public\.([a-zA-Z0-9_]+)\s*\(/gi)) {
@@ -747,6 +768,9 @@ function collectSourceEdges(rootDir, knownEntities) {
       for (const target of [match[1], match[2]]) {
         if (knownEntities.rpcs.has(target)) add(source, 'rpc', target, 'calls', file, `.rpc(conditional '${target}')`);
       }
+    }
+    for (const target of variableRpcTargets(content)) {
+      if (knownEntities.rpcs.has(target.name)) add(source, 'rpc', target.name, 'calls', file, `.rpc(${target.variable} = '${target.name}')`);
     }
     for (const match of content.matchAll(/\.functions\.invoke(?:\s*<[^>]*>)?\(\s*['"]([a-zA-Z0-9_-]+)['"]/g)) {
       add(source, 'edge_function', match[1], 'calls', file, `.functions.invoke('${match[1]}')`);

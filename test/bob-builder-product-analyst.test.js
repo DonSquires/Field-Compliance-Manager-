@@ -279,6 +279,20 @@ test('Product Analyst accepts exact source paths named by the owner brief when f
   }), /source_scope was not supplied by repository evidence/);
 });
 
+test('Product Analyst grounds source_scope against the full tracked inventory, not the window-fitted prompt list', () => {
+  // Live 2026-10-21: main-health repairs named the real apps/web/src/shells/AdminShell.tsx and were
+  // rejected 6/6 because the fitted context kept only 40 files.
+  const specification = {
+    ...validSpecification(),
+    delivery_requirements: [{ id: 'DR-1', outcome: 'Admin shell guard passes', evidence: 'Guard test', source_scope: ['apps/web/src/shells/AdminShell.tsx'] }]
+  };
+  const repositoryContext = { build_map: { tracked_files: ['apps/web/src/components/BobPanel.tsx'], schema: {} } };
+  const repositoryFiles = ['apps/web/src/components/BobPanel.tsx', 'apps/web/src/shells/AdminShell.tsx'];
+  assert.doesNotThrow(() => validateRepositoryGrounding(specification, { repositoryContext, taskDescription: 'Repair main', repositoryFiles }));
+  const invented = { ...specification, delivery_requirements: [{ ...specification.delivery_requirements[0], source_scope: ['apps/web/src/shells/InventedShell.tsx'] }] };
+  assert.throws(() => validateRepositoryGrounding(invented, { repositoryContext, taskDescription: 'Repair main', repositoryFiles }), /not supplied by repository evidence/);
+});
+
 test('Product Analyst parser rejects malformed or incomplete output', () => {
   assert.throws(() => parseProductSpecification('not json'), /valid JSON/);
   assert.throws(() => parseProductSpecification(JSON.stringify({ product_brief: {} })), /must be an array/);

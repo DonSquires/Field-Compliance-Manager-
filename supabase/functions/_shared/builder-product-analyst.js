@@ -157,7 +157,7 @@ function specificationStrings(value, path = [], output = []) {
   return output;
 }
 
-function validateRepositoryGrounding(specification, { repositoryContext = {}, taskDescription = '' } = {}) {
+function validateRepositoryGrounding(specification, { repositoryContext = {}, taskDescription = '', repositoryFiles = null } = {}) {
   const context = repositoryContext && typeof repositoryContext === 'object' ? repositoryContext : {};
   const buildMap = context.build_map && typeof context.build_map === 'object' ? context.build_map : {};
   const schema = buildMap.schema && typeof buildMap.schema === 'object' ? buildMap.schema : {};
@@ -176,7 +176,10 @@ function validateRepositoryGrounding(specification, { repositoryContext = {}, ta
   const neutralEntities = new Set(['none', 'no new entity', 'no new entities', 'existing frontend state', 'existing ui state']);
   const trackedFiles = new Set([
     ...(Array.isArray(buildMap.tracked_files) ? buildMap.tracked_files : []),
-    ...(Array.isArray(context.relevant_files) ? context.relevant_files : [])
+    ...(Array.isArray(context.relevant_files) ? context.relevant_files : []),
+    // The prompt context is trimmed to fit the model window (40-300 files); a real file the model names
+    // from the failure excerpt is still repository evidence (live 2026-10-21: AdminShell.tsx, 6/6 rejected).
+    ...(Array.isArray(repositoryFiles) ? repositoryFiles : [])
   ]);
   const taskSourcePaths = new Set((task.match(/\b(?:apps|supabase|services|scripts|test|docs)\/[\w./-]+/g) || [])
     .map(file => file.replace(/[.,;:!?]+$/, '')));
@@ -340,6 +343,7 @@ function parseProductSpecification(content, {
   requiredResearchUrls = [],
   researchRequired = false,
   repositoryContext = null,
+  repositoryFiles = null,
   taskDescription = ''
 } = {}) {
   if (typeof content !== 'string' || !content.trim()) throw new Error('product specification is empty');
@@ -400,7 +404,7 @@ function parseProductSpecification(content, {
       || !Array.isArray(acceptance.required_states) || acceptance.required_states.length === 0) {
     throw new Error('human_acceptance must define role, route, job, steps, visible result, and required states');
   }
-  if (repositoryContext) validateRepositoryGrounding(specification, { repositoryContext, taskDescription });
+  if (repositoryContext) validateRepositoryGrounding(specification, { repositoryContext, taskDescription, repositoryFiles });
   return specification;
 }
 
@@ -429,6 +433,13 @@ async function completeProductAnalysis(supabase, {
   });
   if (error) return { success: false, error: 'product analysis could not be completed' };
   return { success: true, approval: data };
+}
+
+/** Every tracked path at the pinned SHA (non-enumerable on the build map, so it never enters a prompt). */
+function completeTrackedFiles(repositoryContext) {
+  const buildMap = repositoryContext?.build_map;
+  const all = buildMap?.all_tracked_files ?? buildMap?.tracked_files;
+  return Array.isArray(all) ? all.filter(value => typeof value === 'string') : null;
 }
 
 async function runProductAnalyst({
@@ -483,6 +494,7 @@ async function runProductAnalyst({
       requiredResearchUrls,
       researchRequired,
       repositoryContext: prompts.context,
+      repositoryFiles: completeTrackedFiles(repositoryContext),
       taskDescription: job.task_description
     })
   });

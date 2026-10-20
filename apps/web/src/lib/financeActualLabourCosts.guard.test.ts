@@ -53,8 +53,8 @@ describe('finance actual labour costs', () => {
     expect(workspace).toContain("from('finance_labour_cost_postings')");
     expect(workspace).toContain("from('rate_rules')");
     expect(workspace).toContain("supabase.rpc('post_finance_timesheet_labour_cost'");
-    expect(workspace).toContain('!selected.rate || !periodId');
+    expect(workspace).toContain('!selected.rate || !availablePeriods.some((period) => period.id === periodId)');
     expect(workspace).not.toMatch(/from\('(finance_service_costs|finance_labour_cost_postings)'\)[\s\S]{0,500}\.(insert|update|upsert|delete)\(/);
-    expect(moneyPage).toContain('<FinanceLabourCostWorkspace />');
+    expect(moneyPage).toContain("{workflow === 'labour' && <FinanceLabourCostWorkspace activePeriodId={periodId} onChanged={refresh} />}");
   });
 });

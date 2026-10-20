@@ -46,6 +46,12 @@ test('a repository past the tracked-file cap still yields a bounded build map in
   assert.equal(context.directory_counts.supabase, 40);
   assert.equal(context.directory_counts['.'], 1);
   assert.equal(context.secret_files_excluded, true);
+  // The complete inventory rides along for grounding only: never serialized, never holding secrets.
+  assert.equal(context.all_tracked_files.length, files.length - 1);
+  assert.ok(context.all_tracked_files.includes('supabase/migrations/20260039_m.sql'));
+  assert.ok(!context.all_tracked_files.some(file => /\.env/.test(file)));
+  assert.ok(!Object.keys(context).includes('all_tracked_files'));
+  assert.ok(!JSON.stringify(context).includes('20260039_m.sql'));
 });
 
 test('a repository within the cap is reported in full and unflagged', () => {

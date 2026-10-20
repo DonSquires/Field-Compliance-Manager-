@@ -101,3 +101,25 @@ test('backend worker fails a TypeScript patch that introduces an undefined name 
     fs.rmSync(root, { recursive: true, force: true });
   }
 });
+
+test('a new edge function using the Deno runtime passes; a same-file redeclaration blocks', { skip: !TS_DIR && 'TypeScript is not installed here' }, () => {
+  const ts = loadTypeScript(TS_DIR);
+  const fresh = [
+    "import { createClient } from 'npm:@supabase/supabase-js@2';",
+    'const url = Deno.env.get("SUPABASE_URL") ?? "";',
+    'const admin = createClient(url, Deno.env.get("SUPABASE_SERVICE_ROLE_KEY") ?? "");',
+    'Deno.serve(async (_req: Request) => new Response(JSON.stringify({ ok: !!admin, rt: typeof EdgeRuntime })));',
+    '',
+  ].join('\n');
+  // Live 2026-10-21 (jobs #89–#93): every attempt to add a function failed on TS2304 'Deno'.
+  assert.deepEqual(newDiagnostics(ts, 'supabase/functions/bob-new/index.ts', null, fresh), []);
+  // Outside supabase/functions the ambient is not supplied, so a stray Deno reference in web code is caught.
+  assert.equal(classifyDelta(newDiagnostics(ts, 'apps/web/src/x.ts', null, 'export const v = Deno.env.get("X");\n')).blocking.length, 1);
+  // A model that appends a second `const url` instead of revising the first ships a load-time crash.
+  const duplicated = `${fresh}const url = "again";\n`;
+  const split = classifyDelta(newDiagnostics(ts, 'supabase/functions/bob-new/index.ts', null, duplicated));
+  assert.ok(split.blocking.some((d) => d.code === 2451 && d.sameFile), JSON.stringify(split));
+  // A lib.dom collision in a script-scope file stays a warning (other declaration is not in the file).
+  const domOnly = classifyDelta(newDiagnostics(ts, 'scripts/thing.ts', null, 'const name = "x";\nconsole.log(name);\n'));
+  assert.equal(domOnly.blocking.length, 0, JSON.stringify(domOnly));
+});
