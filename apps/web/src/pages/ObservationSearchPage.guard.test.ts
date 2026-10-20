@@ -44,6 +44,13 @@ describe('Observation Search canonical entity contract', () => {
     }
   });
 
+  it('shows governed observation evidence alongside the selected observation detail', () => {
+    expect(source).toContain("import { RecordEvidencePanel } from '../components/RecordEvidencePanel'");
+    expect(source).toContain('recordKind="observation"');
+    expect(source).toContain('recordId={selected.observation_id}');
+    expect(source).toContain('canAdd={false}');
+  });
+
   it('joins the redacted vehicle projection inside search_observations, not the RLS-locked base table', () => {
     // canonical_vehicles carries only a bob_full_read RLS policy and search_observations is plain
     // SQL (not SECURITY DEFINER), so joining the base table directly silently returns nothing for

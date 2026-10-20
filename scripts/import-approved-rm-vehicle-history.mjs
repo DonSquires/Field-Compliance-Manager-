@@ -4,10 +4,18 @@ import { access, readFile } from 'node:fs/promises';
 import { basename, extname, isAbsolute, relative, resolve } from 'node:path';
 import { createInterface } from 'node:readline';
 import { createClient } from '@supabase/supabase-js';
+import { pathToFileURL } from 'node:url';
+import { validatePhotoImportEnvironment } from './rm-photo-import-config.mjs';
+import {
+  aucklandInstant,
+  indexPhotoTargets,
+  matchPhotoTarget,
+  normalizePlate,
+  parsePhotoName,
+} from './rm-photo-matcher.mjs';
 
 const DEFAULT_PROVIDER_ORG = 'e96d71c9-28a6-4d4a-b0f3-1c4ecdaa9c13';
 const SUPPORTED_EXTENSIONS = new Set(['.jpg', '.jpeg', '.png', '.webp']);
-const PLATE_PATTERN = '(?:[A-Z]{2,3}[0-9]{2,4}|[0-9]{1,3}[A-Z]{2,3})';
 
 function argument(name, fallback = null) {
   const index = process.argv.indexOf(name);
@@ -20,10 +28,6 @@ function requiredArgument(name) {
   return value;
 }
 
-function normalizePlate(value) {
-  return String(value ?? '').toUpperCase().replace(/[^A-Z0-9]/g, '');
-}
-
 function sourcePath(root, candidate) {
   const resolvedRoot = resolve(root);
   const resolvedCandidate = resolve(resolvedRoot, candidate);
@@ -32,85 +36,6 @@ function sourcePath(root, candidate) {
     throw new Error(`Candidate leaves the governed R&M source root: ${candidate}`);
   }
   return resolvedCandidate;
-}
-
-function parsePhotoName(fileName) {
-  const stem = basename(fileName, extname(fileName)).toUpperCase();
-  const dateFirst = new RegExp(`(?:^|[^0-9])([0-9]{6})[ _-]+([0-9]{4,6})[ _-]+(${PLATE_PATTERN})(?:[^A-Z0-9]|$)`).exec(stem);
-  const plateFirst = new RegExp(`(?:^|[^A-Z0-9])(${PLATE_PATTERN})[ _-]+([0-9]{6})[ _-]+([0-9]{4,6})(?:[^0-9]|$)`).exec(stem);
-  const match = dateFirst
-    ? { date: dateFirst[1], time: dateFirst[2], plate: dateFirst[3] }
-    : plateFirst
-      ? { plate: plateFirst[1], date: plateFirst[2], time: plateFirst[3] }
-      : null;
-  if (!match) return null;
-
-  const year = 2000 + Number(match.date.slice(0, 2));
-  const month = Number(match.date.slice(2, 4));
-  const day = Number(match.date.slice(4, 6));
-  const paddedTime = match.time.padEnd(6, '0');
-  const hour = Number(paddedTime.slice(0, 2));
-  const minute = Number(paddedTime.slice(2, 4));
-  const second = Number(paddedTime.slice(4, 6));
-  const clock = new Date(Date.UTC(year, month - 1, day, hour, minute, second));
-  if (
-    clock.getUTCFullYear() !== year
-    || clock.getUTCMonth() !== month - 1
-    || clock.getUTCDate() !== day
-    || hour > 23
-    || minute > 59
-    || second > 59
-  ) return null;
-
-  return {
-    plate: normalizePlate(match.plate),
-    localClockMs: clock.getTime(),
-    year,
-    month,
-    day,
-    hour,
-    minute,
-    second,
-  };
-}
-
-function aucklandClockMs(instant) {
-  const values = Object.fromEntries(
-    new Intl.DateTimeFormat('en-NZ', {
-      timeZone: 'Pacific/Auckland',
-      year: 'numeric',
-      month: '2-digit',
-      day: '2-digit',
-      hour: '2-digit',
-      minute: '2-digit',
-      second: '2-digit',
-      hourCycle: 'h23',
-    }).formatToParts(instant).filter((part) => part.type !== 'literal').map((part) => [part.type, part.value]),
-  );
-  return Date.UTC(
-    Number(values.year),
-    Number(values.month) - 1,
-    Number(values.day),
-    Number(values.hour),
-    Number(values.minute),
-    Number(values.second),
-  );
-}
-
-function sourceClockDeltas(observedAt, localClockMs) {
-  const instant = new Date(observedAt);
-  return [
-    Math.abs((instant.getTime() + 12 * 60 * 60 * 1000) - localClockMs),
-    Math.abs(aucklandClockMs(instant) - localClockMs),
-  ];
-}
-
-function nzInstant(parsed) {
-  for (const offsetHours of [13, 12]) {
-    const candidate = new Date(parsed.localClockMs - offsetHours * 60 * 60 * 1000);
-    if (aucklandClockMs(candidate) === parsed.localClockMs) return candidate.toISOString();
-  }
-  throw new Error(`Could not resolve Pacific/Auckland time for ${parsed.year}-${parsed.month}-${parsed.day}`);
 }
 
 function mimeType(path) {
@@ -162,25 +87,30 @@ async function loadVisibleOrganizationIds(service, providerOrganizationId) {
 }
 
 async function loadTargets(service, organizationIds) {
-  const targets = await page(() => service
-    .from('observations')
-    .select('id,organization_id,plate_number,observed_at,canonical_vehicle_id,module_key,plate_source')
-    .in('organization_id', organizationIds)
-    .not('canonical_vehicle_id', 'is', null)
-    .not('plate_number', 'is', null)
-    .order('observed_at', { ascending: true }));
-  const byPlate = new Map();
-  for (const target of targets) {
-    const plate = normalizePlate(target.plate_number);
-    if (!plate) continue;
-    const rows = byPlate.get(plate) ?? [];
-    rows.push(target);
-    byPlate.set(plate, rows);
+  const [targets, sites, zones, locations] = await Promise.all([
+    page(() => service
+      .from('observations')
+      .select('id,organization_id,plate_number,officer_notes,observed_at,site_id,zone_id,location_id,canonical_vehicle_id,module_key,plate_source')
+      .in('organization_id', organizationIds)
+      .order('observed_at', { ascending: true })),
+    page(() => service.from('client_sites').select('id,name').in('organization_id', organizationIds)),
+    page(() => service.from('location_zones').select('id,name').in('organization_id', organizationIds)),
+    page(() => service.from('locations').select('id,name').in('organization_id', organizationIds)),
+  ]);
+  const aliasesByPlace = new Map();
+  for (const place of [...sites, ...zones, ...locations]) {
+    aliasesByPlace.set(place.id, place.name ? [place.name] : []);
   }
-  return { targets, byPlate };
+  const withAliases = targets.map((target) => ({
+    ...target,
+    place_aliases: [target.site_id, target.zone_id, target.location_id]
+      .flatMap((id) => aliasesByPlace.get(id) ?? []),
+  }));
+  const byMinute = indexPhotoTargets(withAliases);
+  return { targets, byMinute };
 }
 
-async function matchPhotos(inventoryPath, sourceRoot, byPlate, toleranceMinutes) {
+async function matchPhotos(inventoryPath, sourceRoot, byMinute) {
   const matched = [];
   let supportedPhotos = 0;
   let namedPhotos = 0;
@@ -202,21 +132,16 @@ async function matchPhotos(inventoryPath, sourceRoot, byPlate, toleranceMinutes)
     const parsed = parsePhotoName(row.file_name ?? relativePath);
     if (!parsed) continue;
     namedPhotos += 1;
-    const candidates = byPlate.get(parsed.plate) ?? [];
-    const scored = candidates.map((target) => ({
-      target,
-      deltaMs: Math.min(...sourceClockDeltas(target.observed_at, parsed.localClockMs)),
-    })).filter((candidate) => candidate.deltaMs <= toleranceMinutes * 60 * 1000)
-      .sort((a, b) => a.deltaMs - b.deltaMs);
-    if (scored.length === 0) {
+    const match = matchPhotoTarget(parsed, relativePath, byMinute);
+    if (match.status === 'unmatched') {
       unmatched += 1;
       continue;
     }
-    if (scored.length > 1 && Math.abs(scored[0].deltaMs - scored[1].deltaMs) < 60 * 1000) {
+    if (match.status === 'ambiguous') {
       ambiguous += 1;
       continue;
     }
-    const key = `${relativePath}:${scored[0].target.id}`;
+    const key = `${relativePath}:${match.target.id}`;
     if (seen.has(key)) continue;
     seen.add(key);
     const localPath = sourcePath(sourceRoot, relativePath);
@@ -226,15 +151,20 @@ async function matchPhotos(inventoryPath, sourceRoot, byPlate, toleranceMinutes)
       unmatched += 1;
       continue;
     }
+    const capturedAt = aucklandInstant(parsed);
+    if (!capturedAt) {
+      ambiguous += 1;
+      continue;
+    }
     matched.push({
       relativePath,
       localPath,
       parsed,
-      observationId: scored[0].target.id,
-      organizationId: scored[0].target.organization_id,
-      plate: parsed.plate,
-      deltaMs: scored[0].deltaMs,
-      capturedAt: nzInstant(parsed),
+      observationId: match.target.id,
+      organizationId: match.target.organization_id,
+      plate: parsed.plate ?? normalizePlate(match.target.plate_number),
+      matchType: match.matchType,
+      capturedAt,
     });
   }
   return { matched, supportedPhotos, namedPhotos, unmatched, ambiguous };
@@ -256,13 +186,10 @@ async function main() {
   const inventoryPath = requiredArgument('--inventory');
   const sourceRoot = requiredArgument('--source-root');
   const providerOrganizationId = argument('--provider-org', DEFAULT_PROVIDER_ORG);
-  const toleranceMinutes = Number(argument('--tolerance-minutes', '15'));
   const concurrency = Number(argument('--concurrency', '4'));
   const limit = argument('--limit') ? Number(argument('--limit')) : null;
   const apply = process.argv.includes('--apply');
-  if (!Number.isFinite(toleranceMinutes) || toleranceMinutes < 0 || toleranceMinutes > 120) {
-    throw new Error('--tolerance-minutes must be between 0 and 120');
-  }
+  if (argument('--tolerance-minutes') !== null) throw new Error('Photo matching uses the exact Auckland-local minute; --tolerance-minutes is no longer supported');
   if (!Number.isInteger(concurrency) || concurrency < 1 || concurrency > 12) {
     throw new Error('--concurrency must be an integer from 1 to 12');
   }
@@ -272,45 +199,21 @@ async function main() {
 
   const url = process.env.SUPABASE_URL;
   const serviceRole = process.env.SUPABASE_SERVICE_ROLE_KEY;
-  const email = process.env.username_email;
-  const password = process.env.username_password;
-  if (!url || !serviceRole || !email || !password) {
-    throw new Error('Supabase URL, service role, and governed user credentials are required');
-  }
+  const actorEmail = process.env.RM_PHOTO_IMPORT_ACTOR_EMAIL;
+  const actorPassword = process.env.RM_PHOTO_IMPORT_ACTOR_PASSWORD;
+  validatePhotoImportEnvironment({ apply, url, serviceRole, actorEmail, actorPassword });
 
   const service = createClient(url, serviceRole, { auth: { persistSession: false } });
-  const governed = createClient(url, serviceRole, { auth: { persistSession: false } });
-  const { error: authError } = await governed.auth.signInWithPassword({ email, password });
-  if (authError) throw new Error(`Governed user authentication failed: ${authError.message}`);
-
-  let promotion = null;
+  let governed = null;
   if (apply) {
-    promotion = {
-      batches: 0,
-      candidates: 0,
-      observations_inserted: 0,
-      observations_matched: 0,
-      audit_receipts_inserted: 0,
-    };
-    for (let batch = 0; batch < 1000; batch += 1) {
-      const result = await governed.rpc('promote_approved_rnm_vehicle_mentions', {
-        p_provider_organization_id: providerOrganizationId,
-      });
-      if (result.error) throw result.error;
-      const values = result.data ?? {};
-      promotion.batches += 1;
-      promotion.candidates += Number(values.candidates ?? 0);
-      promotion.observations_inserted += Number(values.observations_inserted ?? 0);
-      promotion.observations_matched += Number(values.observations_matched ?? 0);
-      promotion.audit_receipts_inserted += Number(values.audit_receipts_inserted ?? 0);
-      if (Number(values.candidates ?? 0) === 0) break;
-      if (batch === 999) throw new Error('Approved vehicle promotion did not drain after 1000 batches');
-    }
+    governed = createClient(url, serviceRole, { auth: { persistSession: false } });
+    const { error: authError } = await governed.auth.signInWithPassword({ email: actorEmail, password: actorPassword });
+    if (authError) throw new Error(`Dedicated photo importer authentication failed: ${authError.message}`);
   }
 
   const organizationIds = await loadVisibleOrganizationIds(service, providerOrganizationId);
-  const { targets, byPlate } = await loadTargets(service, organizationIds);
-  const matching = await matchPhotos(inventoryPath, sourceRoot, byPlate, toleranceMinutes);
+  const { targets, byMinute } = await loadTargets(service, organizationIds);
+  const matching = await matchPhotos(inventoryPath, sourceRoot, byMinute);
   const selected = limit === null ? matching.matched : matching.matched.slice(0, limit);
 
   if (!apply) {
@@ -323,9 +226,8 @@ async function main() {
       ambiguousMatchesHeld: matching.ambiguous,
       unmatchedStructuredPhotos: matching.unmatched,
       selected: selected.length,
-      toleranceMinutes,
+      matchingRule: 'exact Auckland-local date and minute plus filename rego or exact folder place alias',
     }));
-    await governed.auth.signOut();
     return;
   }
 
@@ -379,8 +281,8 @@ async function main() {
     }
 
     const sourceReference = `local://rm/remsec-documents/${row.relativePath.replaceAll('\\', '/')}`;
-    const description = `Approved working-file photo for ${row.plate}`;
-    const sourceNote = `${sourceReference}; filename plate/date/time matched to the approved observation within ${(row.deltaMs / 60000).toFixed(2)} minutes`;
+    const description = `Approved working-file photo${row.plate ? ` for ${row.plate}` : ''}`;
+    const sourceNote = `${sourceReference}; exact Auckland-local date/minute matched by ${row.matchType}`;
     const result = await governed.rpc('attach_external_photo_to_record', {
       p_record_kind: 'observation',
       p_record_id: row.observationId,
@@ -414,7 +316,6 @@ async function main() {
 
   console.log(JSON.stringify({
     mode: 'apply',
-    promotion,
     structuredVehicleObservations: targets.length,
     exactObservationMatches: matching.matched.length,
     ambiguousMatchesHeld: matching.ambiguous,
@@ -430,4 +331,9 @@ async function main() {
   await governed.auth.signOut();
 }
 
-await main();
+if (process.argv[1] && import.meta.url === pathToFileURL(resolve(process.argv[1])).href) {
+  main().catch((error) => {
+    console.error(error instanceof Error ? error.message : 'Photo import failed');
+    process.exitCode = 1;
+  });
+}
