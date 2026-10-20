@@ -14,6 +14,9 @@ except ImportError as error:
     ) from error
 
 
+HEADER_SEARCH_ROWS = 300
+
+
 def json_value(value):
     if isinstance(value, (date, datetime)):
         return value.isoformat()
@@ -75,7 +78,10 @@ def main():
                 headers = []
                 header_row = None
                 for row_number, header_cells in enumerate(
-                    sheet.iter_rows(min_row=args.header_row, max_row=args.header_row + 19),
+                    sheet.iter_rows(
+                        min_row=args.header_row,
+                        max_row=args.header_row + HEADER_SEARCH_ROWS - 1,
+                    ),
                     start=args.header_row,
                 ):
                     candidate = [str(cell.value or "").strip() for cell in header_cells]

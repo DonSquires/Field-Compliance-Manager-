@@ -24,14 +24,20 @@ turn beats false completeness.
   Vercel reported a successful deployment status for that commit.
 - The laptop review area contains 22 hash-verified workbook snapshots and
   22 completed Markdown conversions. Original workbooks were not changed.
-  Metadata-only inventory found 83 worksheets and 25 candidate activity sheets
-  across 21 workbooks. These are layout candidates, not approved import mappings
-  or proof that business records were promoted.
-- Operation Lizard has no recognized activity header in the first 20 rows of
-  its sheets and remains held for source-specific mapping. CommunityCameras
-  installation/maintenance, digger work, pest control, and overlapping historic
-  sheets retain their proper governed workflow even when headers resemble a
-  patrol log. MPC still requires an exact agreement and reviewed place map.
+  Metadata-only inventory found 83 worksheets and 27 candidate activity sheets
+  across all 22 workbooks. The importer recognizes every candidate header and
+  finds job, patroller, date, and a place-key column in each; that is only a
+  layout compatibility check, not approval of row values, client ownership,
+  agreement coverage, place mappings, or business promotion.
+- The first inventory searched only 20 rows and missed Operation Lizard's
+  actual `2025` and `2026` headers. The bounded search now checks the first 300
+  rows and finds both headers at row 266, consistent with the earlier workbook
+  audit. Its differently structured `Update 251215` sheet remains outside the
+  generic detector and requires its reviewed sheet-specific handling.
+- CommunityCameras installation/maintenance, digger work, pest control, culling,
+  and overlapping historic sheets retain their proper governed workflows even
+  when their headers resemble patrol logs. MPC still requires an exact
+  agreement and reviewed place map.
 - `scripts/export-patrol-workbook.py --inventory` records workbook hash, sheet
   dimensions, and recognized header positions without exporting business rows.
   Unmatched sheets return no raw header values: opening rows may be preambles
@@ -39,7 +45,8 @@ turn beats false completeness.
   selected sheet and header row; inventory does not authorize promotion.
   The tool refuses output replacing its source workbook and detects source
   changes during inventory.
-- Three focused Python tests passed: metadata-only inventory/offset headers,
+- Three focused Python tests passed: metadata-only inventory including a row-265
+  header without exposing preamble or activity values,
   existing formula/duplicate-header export compatibility, and missing-sheet
   and source-overwrite rejection. With the existing patrol import dependencies:
   `python -m unittest discover -s test -p 'test_patrol_workbook_inventory.py' -v`.
