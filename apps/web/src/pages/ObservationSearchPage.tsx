@@ -2,6 +2,7 @@ import React, { useCallback, useEffect, useState } from 'react';
 import { Car, CheckCircle2, Eye, FileSearch, Filter, Link2, MapPin, RefreshCw, Search, UserRound } from 'lucide-react';
 import { useAuth } from '../context/AuthContext';
 import { useSearchParams } from 'react-router-dom';
+import { RecordEvidencePanel } from '../components/RecordEvidencePanel';
 import { supabase } from '../lib/supabase';
 import './PageStyles.css';
 import './ObservationSearchPage.css';
@@ -166,7 +167,7 @@ export default function ObservationSearchPage() {
       {error && <div className="page-error">{error}</div>}
       <section className="observation-content" aria-label="Observation results">
         <div className="observation-queue"><div className="observation-queue-header"><div><span>Review queue</span><h2>{results.length} observation{results.length === 1 ? '' : 's'}</h2></div><small>{search || siteId || zoneId ? 'Filtered results' : 'Most recent first'}</small></div>{results.map((row) => <ObservationRow key={row.observation_id} row={row} selected={row.observation_id === selected?.observation_id} onSelect={() => setSelectedId(row.observation_id)} />)}{!results.length && <div className="observation-empty"><FileSearch size={25} /><strong>No observations found</strong><span>Try a plate, place, person, incident, or note.</span></div>}</div>
-        <aside className="observation-detail" aria-label="Selected observation detail">{selected ? <ObservationDetail row={selected} sites={sites} zones={zones} vehicles={vehicles} people={people} canManageIdentity={canManageIdentity} linking={linking === selected.observation_id} onLink={linkObservation} /> : <div className="observation-detail-empty"><Eye size={28} /><strong>Select an observation</strong><span>Choose a result to inspect its links and compliance context.</span></div>}</aside>
+        <aside className="observation-detail" aria-label="Selected observation detail">{selected ? <><ObservationDetail row={selected} sites={sites} zones={zones} vehicles={vehicles} people={people} canManageIdentity={canManageIdentity} linking={linking === selected.observation_id} onLink={linkObservation} />{profile?.organizationId && <RecordEvidencePanel key={selected.observation_id} recordKind="observation" recordId={selected.observation_id} organizationId={profile.organizationId} canAdd={false} />}</> : <div className="observation-detail-empty"><Eye size={28} /><strong>Select an observation</strong><span>Choose a result to inspect its links and compliance context.</span></div>}</aside>
       </section>
     </main>
   );

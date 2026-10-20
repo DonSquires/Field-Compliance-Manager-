@@ -24,8 +24,10 @@ import { mkdtempSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
 import { createHash } from 'node:crypto';
 import { tmpdir } from 'node:os';
 import { basename, join } from 'node:path';
+import ExcelJS from 'exceljs';
 import { classifyPatrolWork } from './patrol-work-classifier.mjs';
 import { buildPatrolImportProposals } from './patrol-import-proposals.mjs';
+import { aucklandInstantFromLocalParts } from './rm-photo-matcher.mjs';
 
 const args = process.argv.slice(2);
 const flag = (name) => { const i = args.indexOf(name); return i !== -1 ? args[i + 1] : null; };
@@ -36,14 +38,20 @@ const includeNarratives = args.includes('--include-narratives');
 const useSupabaseCli = args.includes('--use-supabase-cli');
 const projectRef = process.env.SUPABASE_PROJECT_REF;
 const csvPath = flag('--csv');
+const xlsxPath = flag('--xlsx');
+const sheetName = flag('--sheet');
+const headerRow = flag('--header-row') === null ? null : Number(flag('--header-row'));
+const workbookInput = Boolean(xlsxPath);
+const inputPath = xlsxPath ?? csvPath;
+if (xlsxPath && !exportPlan) { console.error('--xlsx is currently supported for --export-plan only'); process.exit(1); }
 const orgId = flag('--org-id');
 const providerOrgId = flag('--provider-org-id');
 const clientCode = flag('--client-code');
 const zoneMapFile = flag('--zone-map-file');
 const sourceLabel = flag('--source-label');
 const sourceHash = flag('--source-hash');
-const sourceSheet = flag('--source-sheet');
-const sourceFirstRow = Number(flag('--source-first-row') ?? 2);
+const sourceSheet = flag('--source-sheet') ?? sheetName;
+const sourceFirstRow = Number(flag('--source-first-row') ?? (workbookInput && headerRow ? headerRow + 1 : 2));
 const classificationProfile = flag('--classification-profile');
 const sourceColumnAliases = JSON.parse(flag('--source-column-aliases') ?? '{}');
 const importContextFile = flag('--import-context');
@@ -54,8 +62,12 @@ if (!exportPlan || !importContextFile) {
   if (!token && !useSupabaseCli) { console.error('FIELD_COMPLIANCE_CODESPACE or --use-supabase-cli is required'); process.exit(1); }
   if (!projectRef && !useSupabaseCli) { console.error('SUPABASE_PROJECT_REF is required unless --use-supabase-cli is used'); process.exit(1); }
 }
-if (!csvPath || !orgId || !providerOrgId || !clientCode || !classificationProfile) {
-  console.error('Usage: --csv <path> --org-id <uuid> --provider-org-id <uuid> --client-code <code> --classification-profile <code> --zone-map-file <path> [--include-narratives] [--use-supabase-cli] [--dry-run|--apply]');
+if (Boolean(csvPath) === Boolean(xlsxPath) || !inputPath || !orgId || !providerOrgId || !clientCode || !classificationProfile) {
+  console.error('Choose exactly one of --csv <path> or --xlsx <path> --sheet <name> --header-row <number>, then supply --org-id, --provider-org-id, --client-code, --classification-profile, and --zone-map-file');
+  process.exit(1);
+}
+if (workbookInput && (!sheetName || !Number.isInteger(headerRow) || headerRow < 1)) {
+  console.error('--xlsx plan mode requires an exact --sheet name and positive --header-row');
   process.exit(1);
 }
 for (const [name, value] of Object.entries({ 'org-id': orgId, 'provider-org-id': providerOrgId })) {
@@ -83,6 +95,29 @@ function parseCsv(text) {
   return rows;
 }
 
+function workbookCellText(cell) {
+  if (cell.value === null || cell.value === undefined) return '';
+  if (cell.value instanceof Date) return cell.text || cell.value.toISOString();
+  if (typeof cell.value === 'object') return cell.text ?? '';
+  return String(cell.value);
+}
+
+async function readWorkbookSheet(bytes, name, firstRow) {
+  const workbook = new ExcelJS.Workbook();
+  await workbook.xlsx.load(bytes);
+  const worksheet = workbook.getWorksheet(name);
+  if (!worksheet) throw new Error(`Selected worksheet was not found: ${name}`);
+  if (firstRow > worksheet.rowCount) throw new Error(`Header row ${firstRow} is outside worksheet ${name}`);
+  const table = [];
+  for (let rowNumber = firstRow; rowNumber <= worksheet.rowCount; rowNumber += 1) {
+    const row = worksheet.getRow(rowNumber);
+    const values = Array.from({ length: worksheet.columnCount }, (_, index) => workbookCellText(row.getCell(index + 1)));
+    table.push(values);
+  }
+  if (!table[0]?.some(value => value.trim())) throw new Error(`Selected header row ${firstRow} is empty in worksheet ${name}`);
+  return table;
+}
+
 function parseNzDate(dateStr, timeStr) {
   const trimmed = (dateStr ?? '').trim();
   let y, mo, d;
@@ -98,12 +133,15 @@ function parseNzDate(dateStr, timeStr) {
   if (Number(y) < 2000 || Number(y) > new Date().getUTCFullYear()) return null;
   const calendarDate = new Date(Date.UTC(Number(y), Number(mo) - 1, Number(d)));
   if (calendarDate.getUTCFullYear() !== Number(y) || calendarDate.getUTCMonth() !== Number(mo) - 1 || calendarDate.getUTCDate() !== Number(d)) return null;
-  let hh = '00', mm = '00';
+  let hh = 0, mm = 0;
   const t = (timeStr ?? '').trim().replace(/\.\d+$/, '');
-  if (/^\d{3,4}$/.test(t)) { const padded = t.padStart(4, '0'); hh = padded.slice(0, 2); mm = padded.slice(2, 4); }
-  if (Number(hh) > 23) hh = '00';
-  if (Number(mm) > 59) mm = '00';
-  return `${y}-${String(mo).padStart(2, '0')}-${String(d).padStart(2, '0')}T${hh}:${mm}:00+12:00`;
+  if (/^\d{1,2}:\d{2}$/.test(t)) [hh, mm] = t.split(':').map(Number);
+  else if (/^\d{3,4}$/.test(t)) {
+    const padded = t.padStart(4, '0');
+    hh = Number(padded.slice(0, 2));
+    mm = Number(padded.slice(2, 4));
+  } else if (t) return null;
+  return aucklandInstantFromLocalParts(Number(y), Number(mo), Number(d), hh, mm)?.replace('.000Z', 'Z') ?? null;
 }
 
 // NZ plate shapes: 2-3 letters + 2-4 digits, or 1-3 digits + 2-3 letters (older/personalised).
@@ -215,11 +253,15 @@ const importConfigurationHash = createHash('sha256')
   .update(JSON.stringify({ sourceProfile, personAliases, classificationRules, sourceColumnAliases }))
   .digest('hex');
 
-const raw = readFileSync(csvPath, 'utf8');
-const derivativeHash = createHash('sha256').update(raw).digest('hex');
-const effectiveSourceHash = sourceHash ?? derivativeHash;
-const effectiveSourceLabel = sourceLabel ?? basename(csvPath);
-const table = parseCsv(raw).filter((r) => r.length > 1);
+const sourceBytes = readFileSync(inputPath);
+const raw = workbookInput ? null : sourceBytes.toString('utf8');
+const table = workbookInput
+  ? await readWorkbookSheet(sourceBytes, sheetName, headerRow)
+  : parseCsv(raw).filter((r) => r.length > 1);
+const derivativeInput = workbookInput ? JSON.stringify(table) : raw;
+const derivativeHash = createHash('sha256').update(derivativeInput).digest('hex');
+const effectiveSourceHash = sourceHash ?? createHash('sha256').update(sourceBytes).digest('hex');
+const effectiveSourceLabel = sourceLabel ?? basename(inputPath);
 // Header cells sometimes carry a leading BOM and/or extra/embedded whitespace (e.g. NCC's
 // "24hr\nTime", Taylors' "Log  no" with a double space) - normalize both before matching.
 const header = table[0].map((h) => h.replace(/^\uFEFF/, '').replace(/\s+/g, ' ').trim());

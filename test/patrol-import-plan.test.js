@@ -5,6 +5,7 @@ const { tmpdir } = require('node:os');
 const { join, resolve } = require('node:path');
 const { spawnSync } = require('node:child_process');
 const { createHash } = require('node:crypto');
+const ExcelJS = require('exceljs');
 
 function plan(context, extra = [], csvOverride) {
   const directory = mkdtempSync(join(tmpdir(), 'fcm-patrol-plan-'));
@@ -17,7 +18,7 @@ function plan(context, extra = [], csvOverride) {
     provider_organization_id: '30000000-0000-4000-8000-000000000001', source_profile: 'test_patrol',
     rows: [
       { record_type: 'source_profile', payload: { parser: 'csv', import_actor_id: '40000000-0000-4000-8000-000000000001',
-        column_mappings: { job: ['Job'], patroller: ['Patroller'], date: ['Date'], location: ['Location'],
+        column_mappings: { job: ['Job'], patroller: ['Patroller'], date: ['Date'], time: ['Time'], location: ['Location'],
           comments: ['Comments'], registration: ['Reg'], issue: ['Issue'],
           job_km: ['Job Km NCC', 'Job KM Stringer'], odometer: ['Travel Odometer', 'ODO'],
         }, target_mappings: {},
@@ -41,6 +42,48 @@ function plan(context, extra = [], csvOverride) {
   return { result, csv, args, env, contextPath };
 }
 
+async function xlsxPlan(context, { requestedSheet = 'DATA', apply = false } = {}) {
+  const directory = mkdtempSync(join(tmpdir(), 'fcm-patrol-xlsx-plan-'));
+  context.after(() => rmSync(directory, { recursive: true, force: true }));
+  const xlsxPath = join(directory, 'source.xlsx');
+  const contextPath = join(directory, 'context.json');
+  const workbook = new ExcelJS.Workbook();
+  const readme = workbook.addWorksheet('README');
+  readme.addRow(['Do not import this sheet']);
+  const data = workbook.addWorksheet('DATA');
+  data.addRow(['Workbook export']);
+  data.addRow(['Generated for review']);
+  data.addRow(['Job', 'Patroller', 'Date', 'Time', 'Location', 'Comments', 'Reg']);
+  data.addRow(['42', 'Camera', '20/09/2026', '1636', 'Test place', 'winter row', '']);
+  const bytes = Buffer.from(await workbook.xlsx.writeBuffer());
+  writeFileSync(xlsxPath, bytes);
+  writeFileSync(contextPath, JSON.stringify({
+    provider_organization_id: '30000000-0000-4000-8000-000000000001', source_profile: 'test_patrol',
+    rows: [
+      { record_type: 'source_profile', payload: { parser: 'csv', import_actor_id: '40000000-0000-4000-8000-000000000001',
+        column_mappings: { job: ['Job'], patroller: ['Patroller'], date: ['Date'], time: ['Time'], location: ['Location'],
+          comments: ['Comments'], registration: ['Reg'], issue: ['Issue'], job_km: ['Job Km NCC'], odometer: ['ODO'],
+        }, target_mappings: {},
+      } },
+      { record_type: 'person_alias', payload: { alias_norm: 'fixture officer', user_profile_id: '40000000-0000-4000-8000-000000000002' } },
+      { record_type: 'classification_rule', payload: { target_code_type: 'work_subject', conditions: [{ field: 'subject', operator: 'exact', value: 'fixture-only' }] } },
+    ],
+  }));
+  const env = { ...process.env };
+  delete env.FIELD_COMPLIANCE_CODESPACE;
+  delete env.SUPABASE_ACCESS_TOKEN;
+  delete env.SUPABASE_SERVICE_ROLE_KEY;
+  const args = [
+    resolve('scripts/import-patrol-log.mjs'), ...(apply ? ['--apply'] : ['--export-plan']), '--xlsx', xlsxPath,
+    '--sheet', requestedSheet, '--header-row', '3',
+    '--provider-org-id', '30000000-0000-4000-8000-000000000001', '--classification-profile', 'test_patrol', '--import-context', contextPath,
+    '--org-id', '10000000-0000-4000-8000-000000000001', '--client-code', 'TEST',
+    '--zone-map', JSON.stringify({ 'Test place': '20000000-0000-4000-8000-000000000001' }),
+  ];
+  const result = spawnSync(process.execPath, args, { env, encoding: 'utf8' });
+  return { result, bytes };
+}
+
 test('plan export reuses governed parser without requiring database credentials', context => {
   const { result, csv } = plan(context);
   assert.equal(result.status, 0, result.stderr);
@@ -57,6 +100,50 @@ test('plan export reuses governed parser without requiring database credentials'
   assert.equal(output.events[0].payload.source_row, 2);
   assert.equal(output.events[0].payload.comments, undefined);
   assert.match(output.events[0].payload.derivative_sha256, /^[a-f0-9]{64}$/);
+});
+
+test('XLSX plan reads the exact selected sheet and preserves original workbook hash and row number', async context => {
+  const { result, bytes } = await xlsxPlan(context);
+  assert.equal(result.status, 0, result.stderr);
+  const output = JSON.parse(result.stdout);
+  assert.equal(output.source_sha256, createHash('sha256').update(bytes).digest('hex'));
+  assert.equal(output.source_sheet, 'DATA');
+  assert.equal(output.events.length, 1);
+  assert.equal(output.events[0].payload.source_sheet, 'DATA');
+  assert.equal(output.events[0].payload.source_row, 4);
+  assert.equal(output.events[0].occurred_at, '2026-09-20T04:36:00Z');
+});
+
+test('XLSX plan rejects a missing selected sheet rather than falling back', async context => {
+  const { result } = await xlsxPlan(context, { requestedSheet: 'NOT_DATA' });
+  assert.equal(result.status, 1);
+  assert.match(result.stderr, /Selected worksheet was not found: NOT_DATA/);
+  assert.equal(result.stdout, '');
+});
+
+test('XLSX input refuses apply mode before requiring database credentials', async context => {
+  const { result } = await xlsxPlan(context, { apply: true });
+  assert.equal(result.status, 1);
+  assert.match(result.stderr, /--xlsx is currently supported for --export-plan only/);
+  assert.equal(result.stdout, '');
+});
+
+test('patrol plan converts Auckland daylight offsets and skips ambiguous local clock times', context => {
+  const csv = [
+    'Job,Patroller,Date,Time,Location',
+    '42,Camera,20/09/2026,1636,Test place',
+    '43,Camera,01/11/2026,1636,Test place',
+    '44,Camera,27/09/2026,0230,Test place',
+    '45,Camera,05/04/2026,0230,Test place',
+  ].join('\n');
+  const { result } = plan(context, [], csv);
+  assert.equal(result.status, 0, result.stderr);
+  const output = JSON.parse(result.stdout);
+  assert.deepEqual(output.events.map(row => row.occurred_at), [
+    '2026-09-20T04:36:00Z',
+    '2026-11-01T03:36:00Z',
+  ]);
+  assert.equal(output.counts.skipped, 2);
 });
 
 test('plan export preserves narratives only when explicitly selected', context => {
