@@ -2,7 +2,9 @@ import { useEffect, useState, type FormEvent, type ReactNode } from 'react';
 import { useAuth } from '../context/AuthContext';
 import { supabase } from '../lib/supabase';
 import { describeLoadFailures } from '../lib/friendlyLoadError';
+import { VehicleOwnerPanel } from './VehicleOwnerPanel';
 import './VehicleProfile.css';
+import './RecordFollowUp.css';
 
 export interface EditableVehicle {
   id: string;
@@ -15,6 +17,8 @@ export interface EditableVehicle {
   rego_expiry: string | null;
   wof_expiry: string | null;
   cof_expiry: string | null;
+  details_updated_at?: string | null;
+  details_updated_by_org_name?: string | null;
 }
 
 const fields = [
@@ -178,6 +182,9 @@ export default function VehicleProfile({ vehicle, onUpdated, summary, children }
         {error && <p role="alert">{error}</p>}
         {notice && <p role="status">{notice}</p>}
         {children}
+        <p className="vehicle-profile-provenance">{vehicle.details_updated_at
+          ? `Vehicle details last updated ${new Date(vehicle.details_updated_at).toLocaleString('en-NZ')} by ${vehicle.details_updated_by_org_name ?? 'an authorised organisation'}.`
+          : 'Vehicle details have not been corrected by an organisation yet.'}</p>
         {!loading && !canEdit && <p className="vehicle-profile-hint">Vehicle profile changes require an organisation administrator.</p>}
         {canEdit && <div className="vehicle-profile-manage">
           <button className="btn btn-sm btn-secondary" type="button" disabled={busy} onClick={() => {
@@ -191,7 +198,7 @@ export default function VehicleProfile({ vehicle, onUpdated, summary, children }
     </div>
     {canEdit && <>
       {editing && <form onSubmit={saveDetails}>
-        <p>Registration is fixed. Shared vehicle facts may require grand master review. Blank fields leave existing values unchanged.</p>
+        <p>Registration is fixed. These are shared vehicle facts: any authorised organisation can correct them, and every change is audit-logged with your organisation and the time. Blank fields leave existing values unchanged.</p>
         <fieldset disabled={busy}><legend>Vehicle details</legend>
           <div className="vehicle-profile-fields">{fields.map(([key, label, type]) => <label key={key}>
             {label}<input type={type} value={draft[key]} maxLength={type === 'text' ? 100 : undefined}
@@ -213,5 +220,6 @@ export default function VehicleProfile({ vehicle, onUpdated, summary, children }
         {uploaded && <p role="status">Photo uploaded; if linking fails, retry Save profile photo to reuse this upload.</p>}
       </fieldset></form>}
     </>}
+    {!loading && <VehicleOwnerPanel vehicleId={vehicle.id} organizationId={profile?.organizationId} canManage={canEdit} />}
   </section>;
 }

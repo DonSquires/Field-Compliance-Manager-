@@ -2,8 +2,9 @@ import React, { useCallback, useEffect, useMemo, useRef, useState } from 'react'
 import { Search, X } from 'lucide-react';
 import { useNavigate } from 'react-router-dom';
 import { useServiceRelationships } from '../context/ServiceRelationshipContext';
-import { ACTIVITY_PAGE_SIZE, sanitiseSearchTerm } from '../lib/activitySearch';
+import { ACTIVITY_PAGE_SIZE, ACTIVITY_SEARCH_MIN_LENGTH, normaliseSearchTerm } from '../lib/activitySearch';
 import { RecordEvidencePanel } from './RecordEvidencePanel';
+import { RecordUpdatesPanel } from './RecordUpdatesPanel';
 import { supabase } from '../lib/supabase';
 import './ActivityRecordBrowser.css';
 
@@ -127,7 +128,7 @@ export const ActivityRecordBrowser: React.FC<Props> = ({ zoneIds, siteIds, scope
 
   // Debounce typing so each keystroke is not a database round trip.
   useEffect(() => {
-    const handle = window.setTimeout(() => { setSearch(sanitiseSearchTerm(searchInput)); setPage(0); }, 350);
+    const handle = window.setTimeout(() => { setSearch(normaliseSearchTerm(searchInput)); setPage(0); }, 350);
     return () => window.clearTimeout(handle);
   }, [searchInput]);
 
@@ -146,7 +147,27 @@ export const ActivityRecordBrowser: React.FC<Props> = ({ zoneIds, siteIds, scope
       try {
         const rangeFrom = page * ACTIVITY_PAGE_SIZE;
         const rangeTo = rangeFrom + ACTIVITY_PAGE_SIZE - 1;
-        const wild = `*${search}*`;
+        if (search) {
+          // Search runs server-side across every recorded field, appended updates, and all dates.
+          const { data, error: searchError } = await supabase.rpc('search_activity_records', {
+            p_kind: kind, p_zone_ids: zoneIds, p_site_ids: siteIds, p_term: search,
+            p_from: null, p_to: null, p_limit: ACTIVITY_PAGE_SIZE, p_offset: rangeFrom,
+          });
+          if (searchError) throw searchError;
+          if (cancelled) return;
+          const results = (data ?? []) as Array<{ record: unknown; total_count: number | string }>;
+          const count = Number(results[0]?.total_count ?? 0);
+          if (kind === 'visits') {
+            const rows = results.map((row) => row.record as VisitRecord);
+            setVisits(rows); setTotal(count);
+            await loadOfficers(rows.map((row) => row.observed_entity_id));
+          } else {
+            const rows = results.map((row) => row.record as SightingRecord);
+            setSightings(rows); setTotal(count);
+            await loadOfficers(rows.map((row) => row.officer_id));
+          }
+          return;
+        }
         if (kind === 'visits') {
           const places = [
             ...(zoneIds.length ? [`zone_id.in.(${zoneIds.join(',')})`] : []),
@@ -158,10 +179,6 @@ export const ActivityRecordBrowser: React.FC<Props> = ({ zoneIds, siteIds, scope
             .or(places);
           if (from) query = query.gte('occurred_at', startOfDayIso(from));
           if (to) query = query.lt('occurred_at', nextDayIso(to));
-          if (search) {
-            query = query.or(['comments', 'issue', 'action_notes', 'action_by', 'closed_by', 'source_file']
-              .map((key) => `payload->>${key}.ilike.${wild}`).join(','));
-          }
           const { data, error: queryError, count } = await query.order('occurred_at', { ascending: false }).range(rangeFrom, rangeTo);
           if (queryError) throw queryError;
           if (cancelled) return;
@@ -180,15 +197,6 @@ export const ActivityRecordBrowser: React.FC<Props> = ({ zoneIds, siteIds, scope
             .or(places);
           if (from) query = query.gte('observed_at', startOfDayIso(from));
           if (to) query = query.lt('observed_at', nextDayIso(to));
-          if (search) {
-            query = query.or([
-              `plate_number.ilike.${wild}`,
-              `officer_notes.ilike.${wild}`,
-              `reported_by_name.ilike.${wild}`,
-              `source_document_name.ilike.${wild}`,
-              ...['comments', 'issue', 'action_notes', 'action_by'].map((key) => `external_refs->import->>${key}.ilike.${wild}`),
-            ].join(','));
-          }
           const { data, error: queryError, count } = await query.order('observed_at', { ascending: false }).range(rangeFrom, rangeTo);
           if (queryError) throw queryError;
           if (cancelled) return;
@@ -221,7 +229,7 @@ export const ActivityRecordBrowser: React.FC<Props> = ({ zoneIds, siteIds, scope
   const pageCount = Math.max(1, Math.ceil(total / ACTIVITY_PAGE_SIZE));
   const selectedVisit = kind === 'visits' ? visits.find((row) => row.id === selectedId) ?? null : null;
   const selectedSighting = kind === 'sightings' ? sightings.find((row) => row.id === selectedId) ?? null : null;
-  const hasFilters = Boolean(searchInput);
+  const hasFilters = Boolean(search);
   const today = daysAgoDate(0);
 
   const detailRows = (): Array<[string, string]> => {
@@ -341,18 +349,20 @@ export const ActivityRecordBrowser: React.FC<Props> = ({ zoneIds, siteIds, scope
             type="search"
             value={searchInput}
             onChange={(event) => setSearchInput(event.target.value)}
-            placeholder={kind === 'visits' ? 'Search comments, issue, action notes, officer action…' : 'Search plate, officer notes, issue, action notes…'}
+            placeholder={kind === 'visits' ? 'Search any text: comments, rego, names, issues, action notes, updates…' : 'Search any text: plate, notes, people, officer, source, updates…'}
             aria-label="Search records"
           />
         </label>
-        <div className="activity-browser__window" role="group" aria-label="Date window">
+        {search ? <p className="activity-browser__search-scope" role="note">Searching every date and every recorded field for “{search}”. Clear the search to browse by date window.</p>
+        : <div className="activity-browser__window" role="group" aria-label="Date window">
           <button type="button" className="btn btn-secondary" onClick={() => setTo(shiftDate(to, -windowDays))}>← Earlier</button>
           <strong>{new Date(`${from}T00:00:00`).toLocaleDateString('en-NZ')} – {new Date(`${to}T00:00:00`).toLocaleDateString('en-NZ')}</strong>
           <button type="button" className="btn btn-secondary" disabled={to >= today} onClick={() => setTo(shiftDate(to, windowDays) > today ? today : shiftDate(to, windowDays))}>Later →</button>
           <label>Window <select value={windowDays} onChange={(event) => setWindowDays(Number(event.target.value))}>{WINDOW_DAY_OPTIONS.map((days) => <option key={days} value={days}>{days} days</option>)}</select></label>
           <label>Jump to <input type="date" value={to} max={today} onChange={(event) => { if (event.target.value) setTo(event.target.value); }} /></label>
-        </div>
+        </div>}
         {searchInput && <button type="button" className="btn btn-secondary" onClick={() => setSearchInput('')}>Clear search</button>}
+        {searchInput.trim().length > 0 && searchInput.trim().length < ACTIVITY_SEARCH_MIN_LENGTH && <small className="activity-browser__search-hint">Type at least {ACTIVITY_SEARCH_MIN_LENGTH} characters to search.</small>}
       </div>
 
       {error && <div className="alert alert-error" role="alert">{error}</div>}
@@ -360,7 +370,7 @@ export const ActivityRecordBrowser: React.FC<Props> = ({ zoneIds, siteIds, scope
       <div className="activity-browser__body">
         <div className="activity-browser__list" aria-busy={loading}>
           <p className="activity-browser__count" role="status">
-            {loading ? 'Loading records…' : `${total === ACTIVITY_PAGE_SIZE * pageCount && pageCount > 1 ? 'About ' : ''}${total.toLocaleString('en-NZ')} ${total === 1 ? 'record' : 'records'}${hasFilters ? ' in this view' : ''}`}
+            {loading ? 'Loading records…' : `${total === ACTIVITY_PAGE_SIZE * pageCount && pageCount > 1 ? 'About ' : ''}${total.toLocaleString('en-NZ')} ${total === 1 ? 'record' : 'records'}${hasFilters ? ' matching, all dates' : ''}`}
           </p>
           <div className="reports-table-wrapper">
             <table className="reports-table">
@@ -371,7 +381,7 @@ export const ActivityRecordBrowser: React.FC<Props> = ({ zoneIds, siteIds, scope
               </thead>
               <tbody>
                 {!loading && total === 0 && (
-                  <tr><td colSpan={5} className="text-center">{zoneIds.length + siteIds.length === 0 ? 'No places are linked to this agreement yet.' : hasFilters ? 'Nothing matches this search in this date window. Clear the search, or step Earlier.' : 'No records in this date window. Use Earlier to look further back.'}</td></tr>
+                  <tr><td colSpan={5} className="text-center">{zoneIds.length + siteIds.length === 0 ? 'No places are linked to this agreement yet.' : hasFilters ? 'Nothing in any recorded field or update matches this search, across all dates.' : 'No records in this date window. Use Earlier to look further back.'}</td></tr>
                 )}
                 {kind === 'visits' && visits.map((row) => {
                   const note = text(row.payload?.comments) ?? text(row.payload?.issue);
@@ -439,6 +449,11 @@ export const ActivityRecordBrowser: React.FC<Props> = ({ zoneIds, siteIds, scope
               </div>
               {pdfError && <div className="alert alert-error" role="alert">{pdfError}</div>}
               <RecordEvidencePanel key={selectedRecord.id} recordKind={selectedRecord.kind} recordId={selectedRecord.id} organizationId={selectedRecord.organizationId} canAdd />
+              <section className="activity-browser__updates" aria-label="Follow-up and notes">
+                <h4>Follow-up and notes</h4>
+                <p className="subtitle">The original record cannot be changed. Updates are added alongside it with your name and the time.</p>
+                <RecordUpdatesPanel key={`updates-${selectedRecord.id}`} recordKind={selectedRecord.kind} recordId={selectedRecord.id} />
+              </section>
             </aside>
           </div>
         )}

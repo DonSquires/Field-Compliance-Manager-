@@ -389,6 +389,38 @@ record" candidates and `review_cctv_entity_observation`'s `link_person` /
 That is the intended behaviour, not a leak: the identity is global, the evidence
 behind it is not.
 
+### 2026-10-20 — Any organisation may correct shared vehicle facts; owners are canonical people (Don Squires)
+
+> "For the canonical record, any organisation should be able to update the
+> vehicle details as long as it is audited and states in the record when it was
+> last updated and by what org."
+
+**Ruling.** A canonical vehicle's descriptive and expiry facts (make, model,
+year, colour, body type, rego/WoF/CoF expiry) are shared facts. An
+administrator of **any** organisation may correct them; there is no
+"observed by this organisation" or grand-master gate on this path. Every change
+writes `audit_log` action `vehicle_profile_details_updated` with before/after
+values, and the record carries `details_updated_at`,
+`details_updated_by_org_id` and `details_updated_by`, exposed through
+`canonical_vehicle_public.details_updated_by_org_name`. The registration, VIN,
+chassis/engine identifiers and owner stay on their governed identity paths
+(`manage_identity_vehicle`, NZTA MVR review) and are unchanged. Migration
+`20261020170000`.
+
+**Owners.** Recording an owner always resolves to a tenant `person_records` row
+and its global `canonical_people` row, joined to the vehicle by an
+`entity_links` person→vehicle edge (`registered_owner` when sourced from an
+NZTA motor-vehicle-register check, otherwise `owner`). Owner edges are written
+only through `record_vehicle_owner` / `end_vehicle_owner_link`, readable only
+by administrators of the recording organisation (`get_vehicle_owner_links`), and
+NZTA-sourced owners are flagged `nzta_restricted` so the UI states the
+restriction. Migration `20261020171000`.
+
+**Original records stay immutable.** Follow-up notes, follow-up requests and
+resolutions, and H&S concerns on an observation or patrol visit are appended to
+`record_updates` (append-only, audited, same access as the source record);
+photos use the existing org-scoped record-evidence path.
+
 ### 2026-09-22 — The `persons` fork is closed; `canonical_people` is the only canonical person record (Don Squires)
 
 > "We should only have 1 person canonical record, 1 vehicle canonical record and

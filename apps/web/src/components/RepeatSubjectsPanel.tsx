@@ -5,6 +5,9 @@ import { useServiceRelationships } from '../context/ServiceRelationshipContext';
 import { supabase } from '../lib/supabase';
 import { RecordEvidencePanel } from './RecordEvidencePanel';
 import { RepeatPeoplePanel } from './RepeatPeoplePanel';
+import { VehicleOwnerPanel } from './VehicleOwnerPanel';
+import { RecordUpdatesPanel } from './RecordUpdatesPanel';
+import { ObservationIndicators, useObservationAnnotations } from './ObservationIndicators';
 import './RepeatSubjectsPanel.css';
 
 interface SubjectRow {
@@ -94,7 +97,10 @@ export const RepeatSubjectsPanel: React.FC = () => {
   const [expandedEvidenceId, setExpandedEvidenceId] = useState<string | null>(null);
   const [historyLoading, setHistoryLoading] = useState(false);
   const [officerNames, setOfficerNames] = useState<Record<string, string>>({});
+  const [isHomeAdmin, setIsHomeAdmin] = useState(false);
   const historyRequest = useRef(0);
+  const patrolIds = useMemo(() => history.filter((item) => item.source === 'patrol').map((item) => item.record_id), [history]);
+  const { annotations, reload: reloadAnnotations } = useObservationAnnotations(patrolIds);
 
   const providerAgreements = useMemo(() => agreements.filter((agreement) =>
     agreement.agreement_type === 'operational' && agreement.invitation_status === 'accepted' && agreement.client_organization_id !== profile?.organizationId,
@@ -116,6 +122,15 @@ export const RepeatSubjectsPanel: React.FC = () => {
     });
     return () => { cancelled = true; };
   }, []);
+
+  useEffect(() => {
+    if (!profile?.organizationId || !canManageIdentity) return;
+    let cancelled = false;
+    void supabase.rpc('is_admin_for_org', { target_org_id: profile.organizationId }).then(({ data }) => {
+      if (!cancelled) setIsHomeAdmin(data === true);
+    });
+    return () => { cancelled = true; };
+  }, [canManageIdentity, profile?.organizationId]);
 
   useEffect(() => {
     historyRequest.current += 1;
@@ -290,6 +305,12 @@ export const RepeatSubjectsPanel: React.FC = () => {
               <div><dt>Fuel type</dt><dd>{vehicleDetails.fuel_type || '—'}</dd></div>
               <div><dt>Owner</dt><dd>{vehicleDetails.owner_identified ? 'Identified by R&M' : 'Not identified'}</dd></div>
             </dl>}
+            {vehicleDetails && <p className="repeat-subjects__correct">
+              <a className="btn btn-secondary btn-sm" href={`/admin/field-ops?area=vehicle-search&vehicle=${encodeURIComponent(vehicleDetails.canonical_vehicle_id)}`}>Correct canonical vehicle details</a>
+              <small>Opens Vehicle Search &amp; Flags. Shared vehicle facts are audit-logged with your organisation and time.</small>
+            </p>}
+            {vehicleDetails && <VehicleOwnerPanel vehicleId={vehicleDetails.canonical_vehicle_id} organizationId={profile?.organizationId} canManage={isHomeAdmin}
+              onChanged={() => setVehicleDetails((current) => current ? { ...current, owner_identified: true } : current)} />}
             {identifications.length > 0 && <section className="repeat-subjects__identifications" aria-label="R&M person identifications">
               <h4>People related to these observations</h4>
               {identifications.map((item) => <p key={`${item.canonical_person_id}-${item.linked_at}`}><strong>{item.display_name || 'Unnamed person record'}</strong> · {item.identification_basis || 'Basis recorded in audit history'} · {new Date(item.linked_at).toLocaleDateString('en-NZ')}</p>)}
@@ -299,11 +320,15 @@ export const RepeatSubjectsPanel: React.FC = () => {
               {history.map((item) => (
                 <li key={`${item.source}-${item.record_id}`}>
                   <strong>{new Date(item.observed_at).toLocaleString('en-NZ')}</strong>
+                  {item.source === 'patrol' && <ObservationIndicators annotation={annotations[item.record_id]} />}
                   <span>{item.place_id ? placeNames.get(item.place_id) ?? 'Unnamed place' : 'No place recorded'} · {item.source === 'cctv' ? 'CCTV (accepted)' : item.source === 'patrol_comment' ? 'Patrol comment mention' : 'Patrol'}{item.officer_id ? ` · ${officerNames[item.officer_id] ?? '…'}` : ''}</span>
                   {item.note && <em>{item.note}</em>}
                   {item.compliance_status && <span>Compliance: {item.compliance_status}</span>}
                   {item.compliance_reason && <em>{item.compliance_reason}</em>}
-                  {item.source === 'patrol' && <details><summary>Photos and evidence</summary><RecordEvidencePanel recordKind="observation" recordId={item.record_id} organizationId={item.organization_id} canAdd={false} /></details>}
+                  {item.source === 'patrol' && <details><summary>Photos and evidence</summary><RecordEvidencePanel recordKind="observation" recordId={item.record_id} organizationId={item.organization_id} canAdd /></details>}
+                  {item.source === 'patrol' && <details><summary>Follow-up and notes{annotations[item.record_id]?.update_count ? ` (${annotations[item.record_id].update_count})` : ''}</summary>
+                    <RecordUpdatesPanel recordKind="observation" recordId={item.record_id} onChanged={() => void reloadAnnotations()} />
+                  </details>}
                   {item.source === 'cctv' && item.evidence_item_id && <CctvEvidenceLink evidenceId={item.evidence_item_id} />}
                   {item.source === 'patrol' && item.canonical_vehicle_id && <PersonObservationLink item={item} onLinked={() => void open(selected)} />}
                 </li>
@@ -406,7 +431,7 @@ function PersonObservationLink({
         aria-expanded={open}
         onClick={() => setOpen((value) => !value)}
       >
-        {open ? "Cancel person link" : "Relate a person record"}
+        {open ? "Cancel person link" : "Link a verified person to this sighting"}
       </button>
       {open && (
         <form onSubmit={(event) => void save(event)}>
@@ -426,9 +451,10 @@ function PersonObservationLink({
             </select>
             {people.length === 0 && (
               <small>
-                No verified canonical identities are available for this
-                organisation; person links stay disabled until identity review
-                is complete.
+                No identity-reviewed people are available yet. To record who
+                owns this vehicle, use the Owner identity section above; a
+                sighting can only be linked to a person after their identity
+                has been reviewed.
               </small>
             )}
           </label>

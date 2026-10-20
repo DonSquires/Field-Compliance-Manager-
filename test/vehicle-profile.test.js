@@ -4,7 +4,7 @@ const fs = require('node:fs');
 const path = require('node:path');
 const test = require('node:test');
 
-test('vehicle profile reuses registry governance, preserves notes and restricts shared private media', {
+test('vehicle profile lets any org admin correct audited shared facts, preserves notes and restricts shared private media', {
   skip: process.env.BOB_TEST_POSTGRES !== '1', timeout: 90000,
 }, () => {
   const name = `fcm-vehicle-profile-${process.pid}`;
@@ -23,6 +23,7 @@ test('vehicle profile reuses registry governance, preserves notes and restricts 
     const table = schema.slice(schema.indexOf('CREATE TABLE IF NOT EXISTS "public"."canonical_vehicles"'),
       schema.indexOf('COMMENT ON TABLE "public"."canonical_vehicles"'));
     const migration = fs.readFileSync(path.resolve(__dirname, '../supabase/migrations/20261020140000_vehicle_profile_details_and_photos.sql'), 'utf8');
+    const anyOrgMigration = fs.readFileSync(path.resolve(__dirname, '../supabase/migrations/20261020170000_vehicle_profile_any_org_audited.sql'), 'utf8');
     const sql = `
 CREATE ROLE authenticated; CREATE ROLE anon; CREATE ROLE service_role;
 CREATE SCHEMA auth; CREATE SCHEMA storage;
@@ -35,7 +36,7 @@ CREATE FUNCTION org_access_allowed(uuid) RETURNS boolean LANGUAGE sql STABLE AS 
  SELECT auth.uid()=md5('admin')::uuid AND $1=md5('org')::uuid
 $$;
 CREATE FUNCTION normalize_plate_number(text) RETURNS text LANGUAGE sql IMMUTABLE AS $$ SELECT upper(regexp_replace($1,'[^A-Za-z0-9]','','g')) $$;
-CREATE TABLE organizations(id uuid PRIMARY KEY);
+CREATE TABLE organizations(id uuid PRIMARY KEY,name text);
 CREATE TABLE user_profiles(id uuid PRIMARY KEY);
 ${table}
 ALTER TABLE canonical_vehicles ADD PRIMARY KEY(id);
@@ -57,7 +58,8 @@ GRANT USAGE ON SCHEMA public,auth,storage TO authenticated;
 GRANT SELECT ON observations TO authenticated;
 GRANT SELECT,INSERT,UPDATE,DELETE ON storage.objects TO authenticated;
 ${migration}
-INSERT INTO organizations VALUES(md5('org')::uuid);
+${anyOrgMigration}
+INSERT INTO organizations VALUES(md5('org')::uuid,'Test Org');
 INSERT INTO user_profiles VALUES(md5('admin')::uuid),(md5('reader')::uuid),(md5('outsider')::uuid);
 INSERT INTO canonical_vehicles(id,plate_number,make,org_notes) VALUES
  (md5('vehicle')::uuid,'ABC123','Original',jsonb_build_object(md5('org')::uuid::text,jsonb_build_object('text','Keep these notes'))),
@@ -76,11 +78,13 @@ SELECT update_vehicle_profile_details(md5('org')::uuid,md5('vehicle')::uuid,
  '{"make":"Toyota","colour":"Blue","year":"2020","rego_expiry":"2027-01-01"}','Human source review');
 SELECT update_vehicle_profile_details(md5('org')::uuid,md5('observed')::uuid,
  '{"colour":"Green","wof_expiry":"2020-01-01"}','Own observation');
+SELECT update_vehicle_profile_details(md5('org')::uuid,md5('observed-shared')::uuid,'{"make":"Changed"}','Cross-org observed correction');
+SELECT update_vehicle_profile_details(md5('org')::uuid,md5('shared')::uuid,'{"make":"Changed"}','Shared vehicle correction');
+SELECT update_vehicle_profile_details(md5('org')::uuid,md5('unrelated')::uuid,'{"make":"Changed"}','Unobserved vehicle correction');
 DO $$ BEGIN
- BEGIN
-   PERFORM update_vehicle_profile_details(md5('org')::uuid,md5('observed-shared')::uuid,'{"make":"Changed"}','Invalid');
-   RAISE EXCEPTION 'Unexpected allowed cross-org observed edit';
- EXCEPTION WHEN raise_exception THEN IF SQLERRM NOT LIKE 'Shared canonical vehicle facts require%' THEN RAISE; END IF; END;
+ IF (update_vehicle_profile_details(md5('org')::uuid,md5('vehicle')::uuid,'{"make":"Toyota"}','No-op')->>'changed')::boolean THEN
+   RAISE EXCEPTION 'Unchanged save reported as a change';
+ END IF;
  BEGIN
    PERFORM update_vehicle_profile_details(md5('org')::uuid,md5('vehicle')::uuid,'{"plate_number":"CHANGE"}','Invalid');
    RAISE EXCEPTION 'Unexpected allowed identity field';
@@ -90,13 +94,9 @@ DO $$ BEGIN
    RAISE EXCEPTION 'Unexpected allowed year';
  EXCEPTION WHEN raise_exception THEN IF SQLERRM<>'Enter a valid vehicle year' THEN RAISE; END IF; END;
  BEGIN
-   PERFORM update_vehicle_profile_details(md5('org')::uuid,md5('shared')::uuid,'{"make":"Changed"}','Invalid');
-   RAISE EXCEPTION 'Unexpected allowed shared edit';
- EXCEPTION WHEN raise_exception THEN IF SQLERRM NOT LIKE 'Shared canonical vehicle facts require%' THEN RAISE; END IF; END;
- BEGIN
-   PERFORM update_vehicle_profile_details(md5('org')::uuid,md5('unrelated')::uuid,'{"make":"Changed"}','Invalid');
-   RAISE EXCEPTION 'Unexpected allowed unrelated edit';
- EXCEPTION WHEN raise_exception THEN IF SQLERRM<>'Vehicle is outside this organization' THEN RAISE; END IF; END;
+   PERFORM update_vehicle_profile_details(md5('org')::uuid,md5('vehicle')::uuid,'{"make":"x"}','  ');
+   RAISE EXCEPTION 'Unexpected edit without reason';
+ EXCEPTION WHEN raise_exception THEN IF SQLERRM<>'A reason is required for the identity audit trail' THEN RAISE; END IF; END;
 END $$;
 INSERT INTO storage.objects VALUES('vehicle-profile-photos',
  md5('org')::uuid::text||'/'||md5('admin')::uuid::text||'/'||md5('vehicle')::uuid::text||'/11111111-1111-4111-8111-111111111111.webp',
@@ -138,6 +138,14 @@ DO $$ BEGIN
  IF (SELECT count(*) FROM audit_log WHERE action='vehicle_profile_photo_set')<>1 THEN RAISE EXCEPTION 'Photo retry not idempotent'; END IF;
  IF (SELECT colour FROM canonical_vehicles WHERE plate_number='OBS123')<>'Green' THEN RAISE EXCEPTION 'Own observed vehicle edit failed'; END IF;
  IF (SELECT wof_status FROM canonical_vehicles WHERE plate_number='OBS123')<>'expired' THEN RAISE EXCEPTION 'Expiry status not persisted'; END IF;
+ IF (SELECT count(*) FROM canonical_vehicles WHERE plate_number IN ('SHARED','OTHER','OBS456') AND make='Changed'
+     AND details_updated_by_org_id=md5('org')::uuid AND details_updated_by=md5('admin')::uuid AND details_updated_at IS NOT NULL)<>3
+   THEN RAISE EXCEPTION 'Any-org audited correction not persisted with provenance'; END IF;
+ IF (SELECT count(*) FROM audit_log WHERE action='vehicle_profile_details_updated')<>5 THEN RAISE EXCEPTION 'Every change (and only changes) must be audited'; END IF;
+ IF NOT EXISTS(SELECT 1 FROM audit_log WHERE action='vehicle_profile_details_updated' AND target_id=md5('unrelated')::uuid
+   AND metadata->'changes'->'make'->>'before'='Unrelated' AND metadata->'changes'->'make'->>'after'='Changed')
+   THEN RAISE EXCEPTION 'Before/after audit missing'; END IF;
+ IF (SELECT details_updated_by_org_name FROM canonical_vehicle_public WHERE plate_number='OTHER')<>'Test Org' THEN RAISE EXCEPTION 'Public provenance missing'; END IF;
  IF has_table_privilege('authenticated','vehicle_profile_photos','UPDATE') OR has_function_privilege('anon','set_vehicle_profile_photo(uuid,uuid,text,text,text)','EXECUTE') THEN RAISE EXCEPTION 'Direct or anonymous write granted'; END IF;
 END $$;
 SET ROLE authenticated;

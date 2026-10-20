@@ -95,7 +95,7 @@ describe('governed monthly report pack generation', () => {
     expect(browser).toContain('zone_id.in.(');
     expect(browser).toContain('client_site_id.in.(');
     expect(browser).toContain('.range(rangeFrom, rangeTo)');
-    expect(browser).toContain('ilike');
+    expect(browser).toContain("supabase.rpc('search_activity_records'");
     // Narrative columns are read only through the signed-in session, so row-level security still decides who sees them.
     expect(browser).toContain('officer_notes');
     expect(browser).not.toContain('service_role');

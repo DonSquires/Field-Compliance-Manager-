@@ -105,9 +105,26 @@ Field Compliance Manager (FCM) is an enterprise SaaS platform designed to replac
 - In a selected vehicle's **Vehicle profile**, an organisation administrator
   can edit make, model, year, colour, body type and registration/WoF/CoF expiry
   dates with a reason/source. Blank fields leave existing values unchanged.
-  Registration is fixed; shared canonical facts still require grand master
-  review. Organisation notes are preserved. Identity/owner/VIN checks remain
-  in their existing evidence-review workflow.
+  Registration is fixed. These are shared facts: an administrator of any
+  organisation can correct them, every change is audit-logged with before/after
+  values, and the profile shows when the details were last updated and by which
+  organisation. Organisation notes are preserved. VIN and registration identity
+  checks remain in their existing evidence-review workflow.
+- **Owner identity** (administrators) records who owns the vehicle: create a
+  new person or choose an existing person record, give the source (NZTA motor
+  vehicle register, owner or driver told us, officer established on site, other)
+  and the basis.
+  The owner is added to the canonical person registry. Owner details are visible
+  only to administrators of your organisation; owners sourced from NZTA are
+  marked **NZTA restricted** and must only be used for the purpose they were
+  obtained for. **Change owner** ends the previous owner link; **No longer owner**
+  ends the current owner link with a reason. Owner identity can also be added from the
+  repeat-subject drawer.
+- Select an observation's time in **Observation History** to open its
+  follow-up panel: add a note, request or resolve a follow-up, record an H&S
+  concern, or attach a photo from file. The original observation is never
+  changed. The **Status** column shows **Flagged**, **Notice issued** (or prior
+  notices), **H&S**, **Follow-up open** and the number of updates.
 - Administrators can add or replace the shared vehicle profile photo using a
   JPEG, PNG or WebP up to 5 MB, preview it, and record a reason/source. The app
   resizes/re-encodes the image to remove embedded location metadata before
@@ -117,7 +134,13 @@ Field Compliance Manager (FCM) is an enterprise SaaS platform designed to replac
   is not public, identity proof, or enforcement evidence. Replacements retain
   previous photo receipts in audit history. If upload succeeds but linking
   fails, retry **Save profile photo** to reuse the uploaded file.
-- In **Reports & Accountability > Repeat subject review**, choose **All
+- In **Reports & Accountability**, the **Logged activity and officer notes**
+  search covers every recorded field (comments, issue, action notes, plates,
+  people, officer names, source files) and appended updates, across all dates.
+  Type at least two characters; clear the search to browse by date window. Open
+  a record to add follow-up notes or photos alongside it.
+- **Repeat subject review** is its own tab in Reports & Accountability. Choose
+  **All
   authorised agreements and observations** to compare subjects across areas,
   including observations without an agreement mapping, or choose one agreement
   to narrow the review. The existing R&M administrator identity permission
@@ -127,7 +150,12 @@ Field Compliance Manager (FCM) is an enterprise SaaS platform designed to replac
   Counts combine patrol sightings and accepted CCTV observations, not unreviewed
   detections or unlinked comment mentions. Open a subject to inspect its history,
   place and recorded officer context; comment mentions remain separate evidence
-  requiring review.
+  requiring review. In a vehicle's drawer: **Correct canonical vehicle
+  details** opens Vehicle Search & Flags; administrators can add owner
+  identity; each patrol sighting shows its status badges and takes follow-up
+  notes and photos. **Link a verified person to this sighting** only lists
+  people whose identity has been reviewed; to record an owner use **Owner
+  identity** instead.
 
 ---
 
