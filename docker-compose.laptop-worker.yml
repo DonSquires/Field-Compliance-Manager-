@@ -107,8 +107,27 @@ services:
       - "${BOB_DOCUMENT_ROOT_PATH:?BOB_DOCUMENT_ROOT_PATH is required}:/sources/primary:ro"
     networks: [fcm-laptop-net]
 
+  fcm-rm-source-sync:
+    profiles: [rm-source-sync]
+    build: ./services/document-source-worker
+    image: fcm/document-source-worker:local
+    container_name: fcm-rm-source-sync-laptop
+    restart: unless-stopped
+    init: true
+    command: ["node", "/app/source-sync.mjs", "--watch"]
+    environment:
+      DOCUMENT_SOURCE_ROOT: /sources/primary
+      SOURCE_SYNC_STATE_PATH: /state/rm-source-sync.json
+      SOURCE_SYNC_INTERVAL_MS: "60000"
+      SOURCE_SYNC_INCLUDE_PHOTOS: "true"
+    volumes:
+      - "${BOB_DOCUMENT_ROOT_PATH:?BOB_DOCUMENT_ROOT_PATH is required}:/sources/primary:ro"
+      - fcm_rm_source_sync:/state
+    network_mode: none
+
 networks:
   fcm-laptop-net:
 
 volumes:
   fcm_laptop_derived:
+  fcm_rm_source_sync:
