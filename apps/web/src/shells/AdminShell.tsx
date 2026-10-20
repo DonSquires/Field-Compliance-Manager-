@@ -53,9 +53,11 @@ import {
   Gauge,
   WalletCards,
   X,
+  ExternalLink,
 } from 'lucide-react';
 import type { LucideIcon } from 'lucide-react';
 import { useAuth } from '../context/AuthContext';
+import { openVehicleSearchPopout } from '../lib/vehicleSearchPopout';
 import { useEnabledModules } from '../hooks/useEnabledModules';
 import { getModuleAccessMessage } from '../lib/moduleAccessMessage';
 import { supabase } from '../lib/supabase';
@@ -775,10 +777,11 @@ const AdminShell: React.FC = () => {
   // A popped-out CCTV wall is a second-monitor surface: the console alone, no navigation or banners.
   const isVideoWall = activePage === 'field-ops' && fieldOpsSubArea === 'cctv-console' && new URLSearchParams(location.search).get('popout') === '1';
   const isStaffProfilePopout = activePage === 'people-hr' && new URLSearchParams(location.search).has('profile') && new URLSearchParams(location.search).get('popout') === '1';
-  if (isVideoWall || isStaffProfilePopout) {
+  const isVehicleSearchPopout = activePage === 'field-ops' && fieldOpsSubArea === 'vehicle-search' && new URLSearchParams(location.search).get('popout') === '1';
+  if (isVideoWall || isStaffProfilePopout || isVehicleSearchPopout) {
     return (
       <div className="admin-shell admin-shell-video-wall">
-        <main data-app-content className={`admin-shell-main ${isVideoWall ? 'is-video-wall' : 'is-staff-profile-popout'}`}>
+        <main data-app-content className={`admin-shell-main ${isVideoWall ? 'is-video-wall' : isVehicleSearchPopout ? 'is-vehicle-search-popout' : 'is-staff-profile-popout'}`}>
           <LazyPageRecovery key={`${activePage}:${fieldOpsSubArea}`} pageKey={`${activePage}:${fieldOpsSubArea}`}>
             <React.Suspense fallback={<LazyPageFallback />}>{renderPage()}</React.Suspense>
           </LazyPageRecovery>
@@ -842,6 +845,9 @@ const AdminShell: React.FC = () => {
               <button type="button" className="admin-shell-icon admin-desktop-download" onClick={() => setShowDesktopDownload(true)} title="Download FCM desktop app" aria-label="Download FCM desktop app"><Download size={19} aria-hidden="true" /></button>
               {isFieldOpsAreaEnabled('vehicle-search') && <button type="button" className="admin-top-search" onClick={() => navigateToFieldOps('vehicle-search')} aria-label="Open vehicle search">
                 <Search size={17} aria-hidden="true" /><span>Vehicle search</span>
+              </button>}
+              {isFieldOpsAreaEnabled('vehicle-search') && <button type="button" className="admin-shell-icon" onClick={() => openVehicleSearchPopout()} title="Open vehicle search in its own window" aria-label="Open vehicle search in its own window">
+                <ExternalLink size={17} aria-hidden="true" />
               </button>}
               <button type="button" className="admin-shell-icon" onClick={openBobCommandCenter} title="Open Bob command center" aria-label="Open Bob command center" aria-expanded={bobOpen}>
                 <Bot size={19} aria-hidden="true" /><span className="sr-only">{bobOpen ? 'Bob assistant is open' : 'Open Bob assistant'}</span>

@@ -85,6 +85,12 @@ Field Compliance Manager (FCM) is an enterprise SaaS platform designed to replac
   flags. Broad searches show the first 50 matches and ask you to refine.
 - **Back to search results** restores the previous registration pattern and
   result list without rerunning the search, including after a detail-load error.
+- **Open in new window** (on the page) or the pop-out icon beside **Vehicle
+  search** in the top bar opens vehicle search in its own window, without the
+  admin navigation, so it can be moved to another screen while you work
+  elsewhere in FCM. It keeps your sign-in, working organisation and access
+  rules. Opening it again reuses the same window; from the page it opens on the
+  selected registration. If nothing appears, allow pop-ups for the site.
 - In a selected vehicle's **Vehicle profile**, an organisation administrator
   can edit make, model, year, colour, body type and registration/WoF/CoF expiry
   dates with a reason/source. Blank fields leave existing values unchanged.
