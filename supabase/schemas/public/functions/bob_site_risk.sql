@@ -176,6 +176,6 @@ begin
 end;
 $function$;
 
-grant execute on function "public"."bob_site_risk"(uuid, integer, boolean, uuid[]) to "anon", "authenticated", "postgres", "service_role";
+grant execute on function "public"."bob_site_risk"(uuid, integer, boolean, uuid[]) to "postgres", "service_role";
 
 revoke all on function "public"."bob_site_risk"(uuid, integer, boolean, uuid[]) from public;

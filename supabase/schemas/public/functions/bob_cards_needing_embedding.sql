@@ -22,7 +22,7 @@ create or replace function public.bob_cards_needing_embedding (
   limit greatest(1, least(match_limit, 100));
 $function$;
 
-grant execute on function "public"."bob_cards_needing_embedding"(integer) to "anon", "authenticated", "postgres", "service_role";
+grant execute on function "public"."bob_cards_needing_embedding"(integer) to "postgres", "service_role";
 
 comment on function "public"."bob_cards_needing_embedding"(integer) is 'Bob RAG embed backfill: active cards that are new or whose content changed since last embed (embedding IS NULL OR embedded_at IS NULL OR embedded_at < updated_at). Stalest-first. Service-role only.';
 

@@ -114,7 +114,7 @@ create or replace function public.bob_inspect_schema (
   left join referenced_by on referenced_by.table_name = cols.table_name;
 $function$;
 
-grant execute on function "public"."bob_inspect_schema"(text[], boolean) to "anon", "authenticated", "postgres", "service_role";
+grant execute on function "public"."bob_inspect_schema"(text[], boolean) to "postgres", "service_role";
 
 comment on function "public"."bob_inspect_schema"(text[], boolean) is 'Read-only public-schema introspection. include_fks=false skips the expensive FK/constraint joins so the ALL-tables call does not hit the edge statement timeout (used by Bob''s import planner, which needs columns only). include_fks=true (default) returns relationships for scoped table lists.';
 

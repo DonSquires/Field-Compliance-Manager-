@@ -27,7 +27,7 @@ create or replace function public.bob_match_knowledge (
   limit greatest(1, least(match_count, 20));
 $function$;
 
-grant execute on function "public"."bob_match_knowledge"(public.vector, integer, uuid) to "anon", "authenticated", "postgres", "service_role";
+grant execute on function "public"."bob_match_knowledge"(public.vector, integer, uuid) to "postgres", "service_role";
 
 comment on function "public"."bob_match_knowledge"(public.vector, integer, uuid) is 'Semantic knowledge retrieval for Bob RAG. Returns closest active cards by cosine similarity to the query embedding, scoped to platform-canonical + the caller''s org cards. Read-only.';
 

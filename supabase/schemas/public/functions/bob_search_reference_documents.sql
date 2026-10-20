@@ -91,7 +91,7 @@ exception when others then
 end;
 $function$;
 
-grant execute on function "public"."bob_search_reference_documents"(text, text, uuid, text, text, text[], boolean, integer) to "anon", "postgres", "service_role";
+grant execute on function "public"."bob_search_reference_documents"(text, text, uuid, text, text, text[], boolean, integer) to "postgres", "service_role";
 
 comment on function "public"."bob_search_reference_documents"(text, text, uuid, text, text, text[], boolean, integer) is 'Mediated, policy-filtered retrieval over approved reference documents for Bob. Enforces tenant/global scope, excludes quarantined and (unless authorized) restricted/tenant_sensitive material, and returns summaries + approved retrieval handles only. service_role execute only; the edge function verifies caller scope first.';
 
