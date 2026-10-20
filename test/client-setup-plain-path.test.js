@@ -55,7 +55,7 @@ test('the setup workspace is reachable and uses the shared planning-context stri
   assert.match(shell, /\{ id: 'onboarding', label: 'Clients being set up', icon: ClipboardCheck \}/);
   assert.match(shell, /case 'client-setup':\s+return <ClientSetupPage onNavigate=/);
   assert.match(shell, /<PlaceContextBanner compact/);
-  assert.match(crmPage, /onClick=\{\(\) => onNavigate\('client-setup'\)\}>Set up a new client<\/button>/);
+  assert.match(crmPage, /Discard unsaved client drafts and set up another client[\s\S]*onNavigate\('client-setup'\)/);
   assert.match(ledger, /<h1>Clients being set up<\/h1>/);
   assert.match(ledger, /onClick=\{\(\) => onNavigate\('client-setup'\)\}/);
   for (const words of ['Parent organization', 'Child locations', 'Location service matrix', 'Bob Quick Setup', 'Any time of day (24-hour)', 'Save changes']) {
