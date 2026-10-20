@@ -1,11 +1,12 @@
 import { describe, expect, it } from 'vitest';
-import { ACTIVITY_PAGE_SIZE, sanitiseSearchTerm } from '../lib/activitySearch';
+import { ACTIVITY_PAGE_SIZE, normaliseSearchTerm, sanitiseSearchTerm } from '../lib/activitySearch';
 import { readFileSync } from 'node:fs';
 import { resolve } from 'node:path';
 
 const browserSource = readFileSync(resolve(process.cwd(), 'src/components/ActivityRecordBrowser.tsx'), 'utf8');
 const vehicleSearchSource = readFileSync(resolve(process.cwd(), 'src/pages/VehicleSearchPage.tsx'), 'utf8');
 const recordPdfSource = readFileSync(resolve(process.cwd(), '../../supabase/functions/generate-record-pdf/index.ts'), 'utf8');
+const searchMigration = readFileSync(resolve(process.cwd(), '../../supabase/migrations/20261020171000_vehicle_owners_record_updates_activity_search.sql'), 'utf8');
 const evidenceCaptureMigration = readFileSync(resolve(process.cwd(), '../../supabase/migrations/20261010201209_preserve_external_evidence_capture_time.sql'), 'utf8');
 
 describe('activity record search', () => {
@@ -13,6 +14,22 @@ describe('activity record search', () => {
     expect(sanitiseSearchTerm('abc,zone_id.eq.1)')).toBe('abc zone_id.eq.1');
     expect(sanitiseSearchTerm('  50%  *wild* ')).toBe('50 wild');
     expect(sanitiseSearchTerm('("x")')).toBe('x');
+  });
+
+  it('keeps typed punctuation for the parameterised full-text search and ignores one-letter terms', () => {
+    expect(normaliseSearchTerm("  O'Brien   gate ")).toBe("O'Brien gate");
+    expect(normaliseSearchTerm('a')).toBe('');
+    expect(normaliseSearchTerm('RJ-298')).toBe('RJ-298');
+  });
+
+  it('searches every recorded field, updates and all dates through the governed RPC', () => {
+    expect(browserSource).toContain("supabase.rpc('search_activity_records'");
+    expect(browserSource).toContain('p_from: null, p_to: null');
+    expect(browserSource).toContain('<RecordUpdatesPanel');
+    expect(searchMigration).toContain('public.location_event_search_text(e.event_type, e.payload) ILIKE v_pattern');
+    expect(searchMigration).toContain("r.record_kind = 'location_event' AND r.body ILIKE v_pattern");
+    expect(searchMigration).toContain('org_access_allowed');
+    expect(searchMigration).toContain('GRANT EXECUTE ON FUNCTION public.search_activity_records(text,uuid[],uuid[],text,timestamptz,timestamptz,integer,integer) TO authenticated');
   });
 
   it('pages in a human-readable size', () => {

@@ -188,6 +188,8 @@ const ReportsHubPage: React.FC = () => {
   const relationships = useServiceRelationships();
   // The hub filters by an agreement the reader chooses here, not by the app-wide place context.
   const [agreementFilterId, setAgreementFilterId] = useState('');
+  const [view, setView] = useState<'reports' | 'repeat'>(() =>
+    typeof window !== 'undefined' && new URLSearchParams(window.location.search).get('view') === 'repeat' ? 'repeat' : 'reports');
   const providerAgreements = useMemo(() => relationships.agreements.filter((agreement) => agreement.agreement_type === 'operational' && agreement.client_organization_id !== organizationId), [organizationId, relationships.agreements]);
   const selectedAgreement = useMemo(() => providerAgreements.find((agreement) => agreement.id === agreementFilterId) ?? null, [agreementFilterId, providerAgreements]);
   const [metrics, setMetrics] = useState<ReportMetrics>({
@@ -480,6 +482,19 @@ const ReportsHubPage: React.FC = () => {
       )}
       {notice && <output className="alert alert-success">{notice}</output>}
 
+      <div className="reports-tabs" role="tablist" aria-label="Reports and accountability views">
+        <button type="button" role="tab" id="reports-tab-reports" aria-controls="reports-panel-reports" aria-selected={view === 'reports'}
+          className={`reports-tab${view === 'reports' ? ' is-active' : ''}`} onClick={() => setView('reports')}>Records &amp; client reports</button>
+        <button type="button" role="tab" id="reports-tab-repeat" aria-controls="reports-panel-repeat" aria-selected={view === 'repeat'}
+          className={`reports-tab${view === 'repeat' ? ' is-active' : ''}`} onClick={() => setView('repeat')}>Repeat subject review</button>
+      </div>
+
+      {view === 'repeat' && <section id="reports-panel-repeat" role="tabpanel" aria-labelledby="reports-tab-repeat" className="reports-section reports-subject-review">
+        <p className="subtitle">Trends across every authorised agreement and observation: vehicles and people that keep returning, including to places managed by different teams.</p>
+        <RepeatSubjectsPanel />
+      </section>}
+
+      {view === 'reports' && <div id="reports-panel-reports" role="tabpanel" aria-labelledby="reports-tab-reports">
       <div className="reports-filter">
         {providerAgreements.length > 0 && (
           <label className="reports-agreement-filter">
@@ -565,14 +580,6 @@ const ReportsHubPage: React.FC = () => {
 
       <ActivityRecordBrowser zoneIds={reportScope.zoneIds} siteIds={reportScope.siteIds} scopeLabel={selectedAgreement ? selectedAgreement.name : 'all your agreements'} />
 
-      <details className="reports-section reports-oversight reports-subject-review">
-        <summary className="reports-oversight__summary">
-          <h2>Repeat subject review</h2>
-          <span>Open when investigation context is needed</span>
-        </summary>
-        <RepeatSubjectsPanel />
-      </details>
-
       <section className="reports-section report-packs-section" aria-labelledby="report-production-heading">
         <div className="reports-production-heading">
           <div>
@@ -615,6 +622,7 @@ const ReportsHubPage: React.FC = () => {
           <table className="reports-table"><thead><tr><th>Operating Organization</th><th>Breach Alerts</th><th>Observations</th><th>Non-Compliant</th><th>Report Packs</th></tr></thead><tbody>{consolidatedReporting.map((row) => <tr key={row.source_organization_id}><td>{row.source_organization_name}</td><td>{row.breach_count}</td><td>{row.observation_count}</td><td>{row.non_compliant_observation_count}</td><td>{row.report_pack_count}</td></tr>)}</tbody></table>
         </div>
       </details>}
+      </div>}
     </div>
   );
 };

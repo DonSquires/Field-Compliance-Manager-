@@ -16,6 +16,9 @@ import React, { useCallback, useEffect, useState } from 'react';
 import { useSearchParams } from 'react-router-dom';
 import { SafetyWarningsPanel } from '../components/SafetyWarningsPanel';
 import VehicleProfile from '../components/VehicleProfile';
+import { ObservationIndicators, useObservationAnnotations } from '../components/ObservationIndicators';
+import { RecordUpdatesPanel } from '../components/RecordUpdatesPanel';
+import { RecordEvidencePanel } from '../components/RecordEvidencePanel';
 import { useAuth } from '../context/AuthContext';
 import { normalizePlateNumber, vehicleHistoryOrFilter } from '../lib/canonicalIdentity';
 import { vehiclePlateSearchPattern } from '../lib/vehiclePlateSearch';
@@ -44,6 +47,8 @@ interface Vehicle {
   external_data_source_url: string | null;
   external_data_source_location: string | null;
   external_data_source_checked_at: string | null;
+  details_updated_at?: string | null;
+  details_updated_by_org_name?: string | null;
 }
 
 interface VehicleMatch {
@@ -74,6 +79,7 @@ interface EntityFlag {
 
 interface RecentObservation {
   id: string;
+  organization_id: string;
   observed_at: string;
   is_compliant: boolean | null;
   compliance_reason: string | null;
@@ -136,6 +142,9 @@ const VehicleSearchPage: React.FC = () => {
   const [scv, setScv] = useState<ScvRecord | null>(null);
   const [flags, setFlags] = useState<EntityFlag[]>([]);
   const [observations, setObservations] = useState<RecentObservation[]>([]);
+  const [selectedObservationId, setSelectedObservationId] = useState<string | null>(null);
+  const { annotations, reload: reloadAnnotations } = useObservationAnnotations(observations.map((obs) => obs.id));
+  const selectedObservation = observations.find((obs) => obs.id === selectedObservationId) ?? null;
   const [breaches, setBreaches] = useState<VehicleBreach[]>([]);
   const [permits, setPermits] = useState<PermitRecord[]>([]);
   const [searched, setSearched] = useState(false);
@@ -202,6 +211,7 @@ const VehicleSearchPage: React.FC = () => {
       setFlags([]);
       setPermits([]);
       setObservations([]);
+      setSelectedObservationId(null);
       setBreaches([]);
       setShowFlagForm(false);
 
@@ -210,7 +220,7 @@ const VehicleSearchPage: React.FC = () => {
       // global identity link, not only the plate text recorded at scan time.
       let vehicleQuery = supabase
         .from('canonical_vehicle_public')
-        .select('id, plate_number, make, model, year, colour, body_type, rego_status, rego_expiry, wof_status, wof_expiry, cof_status, cof_expiry, homeless_status, external_data_source_name, external_data_source_url, external_data_source_location, external_data_source_checked_at');
+        .select('id, plate_number, make, model, year, colour, body_type, rego_status, rego_expiry, wof_status, wof_expiry, cof_status, cof_expiry, homeless_status, external_data_source_name, external_data_source_url, external_data_source_location, external_data_source_checked_at, details_updated_at, details_updated_by_org_name');
       vehicleQuery = canonicalVehicleId
         ? vehicleQuery.eq('id', canonicalVehicleId)
         : vehicleQuery.ilike('plate_number', cleanPlate);
@@ -236,7 +246,7 @@ const VehicleSearchPage: React.FC = () => {
           .order('date_to', { ascending: false }),
         supabase
           .from('observations')
-          .select('id, observed_at, is_compliant, compliance_reason, compliance_status, nights_this_zone, plate_number, module_key, vehicle_make, vehicle_model, vehicle_colour, photo_url, zone:zone_id(name)')
+          .select('id, organization_id, observed_at, is_compliant, compliance_reason, compliance_status, nights_this_zone, plate_number, module_key, vehicle_make, vehicle_model, vehicle_colour, photo_url, zone:zone_id(name)')
           .or(historyFilter)
           .order('observed_at', { ascending: false })
           .limit(OBSERVATION_HISTORY_LIMIT),
@@ -266,6 +276,7 @@ const VehicleSearchPage: React.FC = () => {
       setObservations(
         ((obsRes.data as any[]) || []).map((row) => ({
           id: row.id,
+          organization_id: row.organization_id,
           observed_at: row.observed_at,
           is_compliant: row.is_compliant,
           compliance_reason: row.compliance_reason,
@@ -775,7 +786,7 @@ const VehicleSearchPage: React.FC = () => {
                     <table className="reports-table vehicle-observation-table" aria-label="Observation history">
                       <thead>
                         <tr>
-                          <th>Photo</th><th>Observed</th><th>Location / zone</th><th>Type</th><th>Plate seen</th><th>Vehicle seen</th><th>Outcome</th><th>Nights</th><th>Reason</th>
+                          <th>Photo</th><th>Observed</th><th>Location / zone</th><th>Type</th><th>Plate seen</th><th>Vehicle seen</th><th>Outcome</th><th>Status</th><th>Nights</th><th>Reason</th>
                         </tr>
                       </thead>
                       <tbody>
@@ -783,18 +794,21 @@ const VehicleSearchPage: React.FC = () => {
                           const outcome = observationOutcome(obs);
                           const photo = obs.photo_path ? observationPhotos[obs.photo_path] : undefined;
                           return (
-                            <tr key={obs.id}>
+                            <tr key={obs.id} className={obs.id === selectedObservationId ? 'is-selected' : ''}>
                               <td className="vehicle-match-photo-cell">
                                 {photo
                                   ? <a href={photo} target="_blank" rel="noreferrer" title="Open full observation photo"><img className="vehicle-match-photo" src={photo} alt={`Observation photo ${new Date(obs.observed_at).toLocaleString()}`} loading="lazy" /></a>
                                   : <span className="vehicle-match-photo is-empty" aria-label={obs.photo_path ? 'Photo not available in your scope' : 'No photo'} role="img" />}
                               </td>
-                              <td>{new Date(obs.observed_at).toLocaleString()}</td>
+                              <td><button type="button" className="activity-browser__row-link" aria-expanded={obs.id === selectedObservationId}
+                                aria-label={`Open follow-up for observation ${new Date(obs.observed_at).toLocaleString()}`}
+                                onClick={() => setSelectedObservationId((current) => current === obs.id ? null : obs.id)}>{new Date(obs.observed_at).toLocaleString()}</button></td>
                               <td>{obs.zone_name || 'General zone'}</td>
                               <td>{obs.module_key ? obs.module_key.replace(/_/g, ' ') : '—'}</td>
                               <td>{obs.plate_number || '—'}</td>
                               <td>{obs.observed_vehicle || '—'}</td>
                               <td><span className={`badge ${outcome.tone}`}>{outcome.label}</span></td>
+                              <td><ObservationIndicators annotation={annotations[obs.id]} /></td>
                               <td>{obs.nights_this_zone ?? '—'}</td>
                               <td>{obs.compliance_reason || '—'}</td>
                             </tr>
@@ -802,6 +816,18 @@ const VehicleSearchPage: React.FC = () => {
                         })}
                       </tbody>
                     </table>
+                  </div>
+                )}
+                {selectedObservation && (
+                  <div className="vehicle-observation-followup" aria-label="Selected observation follow-up">
+                    <div className="vehicle-observation-followup__head">
+                      <h4>Observation {new Date(selectedObservation.observed_at).toLocaleString()} · {selectedObservation.zone_name || 'General zone'}</h4>
+                      <button type="button" className="btn btn-sm btn-secondary" onClick={() => setSelectedObservationId(null)}>Close</button>
+                    </div>
+                    <RecordUpdatesPanel recordKind="observation" recordId={selectedObservation.id} onChanged={() => void reloadAnnotations()} />
+                    <details open><summary>Photos and evidence</summary>
+                      <RecordEvidencePanel recordKind="observation" recordId={selectedObservation.id} organizationId={selectedObservation.organization_id} canAdd />
+                    </details>
                   </div>
                 )}
               </div>

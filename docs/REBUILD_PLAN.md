@@ -1913,6 +1913,22 @@ evidence, not asserted.
   shift; one holiday multiplier applies to both pay and charge. Not yet proven
   end to end on a live approval.
 
+- **Vehicle owners, record follow-ups and full-text activity search (owner
+  ruling, 2026-10-20).** Vehicle profile facts are correctable by any
+  organisation administrator with audited before/after and last-updated
+  org/time (`20261020170000`). Owners are canonical people linked by
+  `entity_links` owner edges via `record_vehicle_owner` (admin-only reads,
+  NZTA restriction flag) (`20261020171000`); repeat-subject "owner identified"
+  now honours those edges (`20261020172000`). Observations and patrol visits
+  take appended `record_updates` (note, follow-up requested/resolved, H&S
+  concern) and photos; Vehicle Search & Flags and the repeat-subject drawer show
+  flagged / notice issued / H&S / open follow-up per observation
+  (`get_observation_annotations`). Logged activity search runs server-side
+  across every recorded field, appended updates, person and officer names and
+  all dates (`search_activity_records`, trigram-indexed, same access
+  predicates as table RLS). Repeat subject review is its own Reports tab.
+  Not yet exercised by end users.
+
 ## 10. Enterprise hardening (parallel track)
 
 CI gates that actually block (unit + guard tests, migration snapshot drift, CSS
