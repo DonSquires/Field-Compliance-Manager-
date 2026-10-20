@@ -30,6 +30,12 @@ class PatrolWorkbookInventoryTests(unittest.TestCase):
         offset.append([])
         offset.append(["Job", "Patroller", "Date", "Location"])
         offset.append([43, "PRIVATE_ROW_VALUE", "20/10/2026", "Another place"])
+        distant = workbook.create_sheet("Distant DATA")
+        distant.append(["PRIVATE_PREAMBLE"])
+        for _ in range(2, 265):
+            distant.append([])
+        distant.append(["Job", "Patroller", "Date", "Location"])
+        distant.append([44, "PRIVATE_ROW_VALUE", "20/10/2026", "A third place"])
         workbook.save(self.source)
         workbook.close()
 
@@ -48,19 +54,22 @@ class PatrolWorkbookInventoryTests(unittest.TestCase):
         inventory = json.loads(output.read_text())
         self.assertEqual(inventory["format"], "fcm_patrol_workbook_inventory_v1")
         self.assertEqual(inventory["source_sha256"], hashlib.sha256(before).hexdigest())
-        self.assertEqual(len(inventory["sheets"]), 4)
-        activity, summary, blank, offset = inventory["sheets"]
+        self.assertEqual(len(inventory["sheets"]), 5)
+        activity, summary, blank, offset, distant = inventory["sheets"]
         self.assertTrue(activity["candidate_activity_sheet"])
         self.assertFalse(summary["candidate_activity_sheet"])
         self.assertFalse(blank["candidate_activity_sheet"])
         self.assertEqual(summary["headers"], [])
         self.assertTrue(offset["candidate_activity_sheet"])
         self.assertEqual(offset["header_row"], 3)
+        self.assertTrue(distant["candidate_activity_sheet"])
+        self.assertEqual(distant["header_row"], 265)
         self.assertEqual(activity["headers"].count("Issue"), 2)
         self.assertNotIn("rows", activity)
         self.assertNotIn("PRIVATE_ROW_VALUE", output.read_text())
         self.assertNotIn("PRIVATE_ROW_VALUE", result.stdout)
         self.assertNotIn("PRIVATE_PREAMBLE", output.read_text())
+        self.assertNotIn("A third place", output.read_text())
         self.assertEqual(json.loads(result.stdout)["business_rows_exported"], 0)
         self.assertEqual(self.source.read_bytes(), before)
 
