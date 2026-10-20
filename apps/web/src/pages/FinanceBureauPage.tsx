@@ -4,10 +4,8 @@ import { useAuth } from '../context/AuthContext';
 import { supabase } from '../lib/supabase';
 import './PageStyles.css';
 import './FinanceHome.css';
-import { FinanceOwnerGuide } from '../components/FinanceOwnerGuide';
-import { FinanceCard } from '../components/FinanceCard';
+import FinanceMoneyPage from './FinanceMoneyPage';
 import { PriceBookPanel } from '../components/PriceBookPanel';
-import { CompletedWorkToInvoicePanel } from '../components/CompletedWorkToInvoicePanel';
 
 interface Schedule { id: string; name: string; status: 'draft' | 'active' | 'retired'; effective_from: string; effective_to: string | null; version: number; }
 interface DiscountRule { id: string; schedule_id: string; module_key: string | null; discount_kind: 'percentage' | 'fixed_amount'; discount_value: number; minimum_subtotal: number | null; priority: number; }
@@ -17,21 +15,7 @@ type FinanceDestination = 'finance-connections' | 'finance-money' | 'finance-cos
 type FinanceBobLauncher = (prompt: string) => void;
 
 function FinanceHomeCards({ onOpenBob, onNavigate }: { onOpenBob?: FinanceBobLauncher; onNavigate?: (destination: FinanceDestination) => void }) {
-  const { profile, operatingOrganizationId } = useAuth();
-  return <div className="page-container finance-home-page">
-    <header className="page-header"><div><p className="finance-owner-eyebrow">Finance, made simple</p><h1>What would you like to do?</h1><p className="subtitle">Bob checks the records and prepares the work. You review the important decisions.</p></div></header>
-    <CompletedWorkToInvoicePanel organizationId={operatingOrganizationId ?? profile?.organizationId ?? null} onOpenInvoices={onNavigate ? () => onNavigate('finance-money') : undefined} />
-    <section className="finance-primary-tasks" aria-labelledby="finance-primary-tasks-heading">
-      <div><h2 id="finance-primary-tasks-heading">Choose a finance task</h2><p>Start with the job you need to finish. Each workspace shows the records and the next safe action.</p></div>
-      <div className="finance-task-grid">
-        <FinanceCard eyebrow="Daily overview" title="See how the business is doing" description="Money earned, money left after costs, tax to plan for, and payments to sort." action="Open money check" tone="primary" onClick={() => onNavigate?.('finance-money')} />
-        <FinanceCard eyebrow="Connections" title="Connect ANZ or IRD" description="Bob prepares the secure connection. Your login stays with the provider." action="Open connections" tone="neutral" onClick={() => onNavigate?.('finance-connections')} />
-        <FinanceCard eyebrow="Before quoting" title="Work out what a job should cost" description="Use the job facts to see wages, vehicles, gear, and what should be left over." action="Open job cost check" tone="attention" onClick={() => onNavigate?.('finance-costing')} />
-        <FinanceCard eyebrow="Prices" title="Set prices and discounts" description="Keep customer prices and discount plans in one controlled workspace." action="Open prices" tone="good" onClick={() => onNavigate?.('finance-pricing')} />
-      </div>
-    </section>
-    <FinanceOwnerGuide onOpenBob={onOpenBob} />
-  </div>;
+  return <FinanceMoneyPage onOpenBob={onOpenBob} onNavigate={onNavigate} initialWorkflow="invoices" />;
 }
 
 export default function FinanceBureauPage({ onOpenBob, onNavigate, view = 'home' }: { onOpenBob?: FinanceBobLauncher; onNavigate?: (destination: FinanceDestination) => void; view?: FinanceView }) {
@@ -74,7 +58,7 @@ export default function FinanceBureauPage({ onOpenBob, onNavigate, view = 'home'
   const manageSchedule = async (action: 'activate' | 'retire') => { if (!selectedSchedule) return; setSaving(true); setError(null); setNotice(null); const { error: actionError } = await supabase.rpc('manage_commercial_discount_schedule', { p_client_request_id: crypto.randomUUID(), p_action: action, p_schedule_id: selectedSchedule.id, p_name: null, p_effective_from: null, p_effective_to: null, p_notes: null }); if (actionError) setError(actionError.message); else { setNotice(`${selectedSchedule.name} ${action === 'activate' ? 'activated' : 'retired'}.`); await load(); } setSaving(false); };
   if (view === 'home') return <FinanceHomeCards onOpenBob={onOpenBob} onNavigate={onNavigate} />;
 
-  return <div className="page-container">
+  return <div className="page-container finance-control-centre">
     <header className="page-header"><div><h1>Prices and discounts</h1><p className="subtitle">Your materials and equipment price list, and approved discount reference plans for quoting. Linking a plan records commercial provenance; its rules are not automatically applied to quote totals. Hourly and per-km rates live in Pay and charge rules; accepted quotes keep a locked copy of the prices used.</p></div><div><button type="button" className="btn btn-secondary" onClick={() => void load()} disabled={loading}><RefreshCw size={16} /></button><button type="button" className="btn btn-primary" onClick={() => setShowScheduleForm((value) => !value)}><Plus size={16} />{showScheduleForm ? 'Cancel' : 'New discount plan'}</button></div></header>
     {error && <div className="alert alert-error" role="alert"><AlertTriangle size={16} />{error}</div>}{notice && <div className="alert alert-success" role="status"><CheckCircle2 size={16} />{notice}</div>}
     <PriceBookPanel organizationId={profile?.organizationId ?? null} />

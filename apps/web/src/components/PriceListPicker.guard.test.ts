@@ -41,7 +41,10 @@ describe('price list, price book, and live job financials', () => {
     expect(crm).toContain('<option value="materials">Materials</option>');
     expect(crm).toContain('<option value="equipment">Equipment</option>');
     expect(migration).toContain("if p_kind not in('labour','travel','overhead','module','custom','materials','equipment')");
-    expect(control).toContain('<PriceListPicker id="job-cost-price-list"');
+    expect(control).toContain('usePriceList(profile?.organizationId');
+    expect(control).toContain('id="job-cost-price-list"');
+    expect(control).toContain('Price list categories');
+    expect(control).toContain("category === 'all' || entry.selection.costType === category");
     expect(control).toContain('setCostType(selection.costType)');
   });
 

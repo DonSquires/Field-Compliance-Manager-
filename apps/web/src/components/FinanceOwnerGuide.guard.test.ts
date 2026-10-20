@@ -4,6 +4,7 @@ import { describe, expect, it } from 'vitest';
 
 const guide = readFileSync(resolve(process.cwd(), 'src/components/FinanceOwnerGuide.tsx'), 'utf8');
 const page = readFileSync(resolve(process.cwd(), 'src/pages/FinanceBureauPage.tsx'), 'utf8');
+const moneyPage = readFileSync(resolve(process.cwd(), 'src/pages/FinanceMoneyPage.tsx'), 'utf8');
 const shell = readFileSync(resolve(process.cwd(), 'src/shells/AdminShell.tsx'), 'utf8');
 
 describe('finance owner guide', () => {
@@ -20,7 +21,8 @@ describe('finance owner guide', () => {
   });
 
   it('opens the existing governed Bob panel from Finance Bureau', () => {
-    expect(page).toContain('<FinanceOwnerGuide onOpenBob={onOpenBob} />');
+    expect(page).toContain('<FinanceMoneyPage onOpenBob={onOpenBob}');
+    expect(moneyPage).toContain("workflow === 'guide' && <FinanceOwnerGuide onOpenBob={onOpenBob} />");
     expect(shell).toContain("<FinanceBureauPage onOpenBob={(prompt) => { setBobLaunchPrompt(prompt); setBobOpen(true); }} onNavigate={navigateFinance} />");
   });
 

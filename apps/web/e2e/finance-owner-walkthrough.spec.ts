@@ -6,6 +6,7 @@ test.beforeEach(async ({ page }) => {
   await installSupabaseFixtures(page);
   await page.route('**/rest/v1/finance_pl_periods*', async (route) => await route.fulfill({ contentType: 'application/json', body: JSON.stringify([{ id: 'period-1', name: 'September 2026', period_start: '2026-09-01', period_end: '2026-09-30', status: 'draft' }]) }));
   await page.route('**/rest/v1/finance_pl_snapshots*', async (route) => await route.fulfill({ contentType: 'application/json', body: JSON.stringify([{ total_revenue: 24800, total_cost: 16400, gross_profit: 8400, gross_margin_pct: 33.87, cost_line_count: 42 }]) }));
+  await page.route('**/rest/v1/rpc/get_finance_pl_period_summary', async (route) => await route.fulfill({ contentType: 'application/json', body: JSON.stringify([{ pl_period_id: 'period-1', period_status: 'draft', total_revenue: 24800, total_cost: 16400, gross_profit: 8400, gross_margin_pct: 33.87, cost_line_count: 42 }]) }));
   await page.route('**/rest/v1/finance_tax_periods*', async (route) => await route.fulfill({ contentType: 'application/json', body: JSON.stringify([{ period_end: '2026-08-31', filing_due_date: '2026-10-28', status: 'open', net_tax_due: 3720 }]) }));
   await page.route('**/rest/v1/finance_budget_variances*', async (route) => await route.fulfill({ contentType: 'application/json', body: JSON.stringify([{ status: 'watch', variance_amount: 320, variance_pct: 4.1 }]) }));
   await page.route('**/rest/v1/payment_receipts*', async (route) => await route.fulfill({ contentType: 'application/json', body: JSON.stringify([{ payment_amount: 8200, reconciliation_status: 'matched' }, { payment_amount: 4600, reconciliation_status: 'unmatched' }]) }));
@@ -19,19 +20,18 @@ test.beforeEach(async ({ page }) => {
 test('owner can walk finance from simple home to final review boundary', async ({ page }) => {
   const errors = monitorBrowserErrors(page);
   await signInAsAdmin(page, '/admin/finance-bureau');
-  await expect(page.getByRole('heading', { name: 'What would you like to do?' })).toBeVisible();
+  await expect(page.getByRole('heading', { name: 'Finance', exact: true })).toBeVisible();
   await expect(page.getByRole('button', { name: /See how the business is doing/ })).toBeVisible();
   await expect(page.getByRole('button', { name: /Connect ANZ or IRD/ })).toBeVisible();
-  const firstTask = await page.getByRole('button', { name: /See how the business is doing/ }).boundingBox();
-  const bobGuide = await page.getByRole('heading', { name: 'You do not need to be an accountant' }).boundingBox();
-  expect(firstTask?.y).toBeLessThan(bobGuide?.y ?? 0);
+  await expect(page.getByRole('heading', { name: 'You do not need to be an accountant' })).toHaveCount(0);
+  await expect(page.locator('.completed-work')).toHaveCSS('background-color', 'rgb(15, 23, 42)');
   expect(await page.evaluate(() => document.documentElement.scrollWidth <= window.innerWidth)).toBe(true);
   await expect(page).toHaveScreenshot('finance-home-desktop.png');
 
   await page.getByRole('button', { name: /See how the business is doing/ }).click();
-  await expect(page.getByRole('heading', { name: 'How is the business doing?' })).toBeVisible();
-  await expect(page.getByText('Money left after costs')).toBeVisible();
-  await page.goBack();
+  await expect(page.getByRole('heading', { name: 'What is happening with my money?' })).toBeVisible();
+  await expect(page.locator('.finance-period-bar')).toContainText('$8,400');
+  await expect(page.locator('.finance-ops-kpis')).toHaveCount(0);
 
   await page.getByRole('button', { name: /Work out what a job should cost/ }).click();
   await expect(page.getByRole('heading', { name: 'What should this job cost?' })).toBeVisible();
@@ -108,6 +108,7 @@ test('owner uses the three-month fuel median as an internal vehicle-cost suggest
 
 test('owner can run readiness check without submitting to IRD or bank', async ({ page }) => {
   await signInAsAdmin(page, '/admin/finance-bureau');
+  await page.getByRole('button', { name: /Finance guidance/ }).click();
   await page.getByRole('button', { name: 'Check now' }).click();
   await expect(page.getByText('Readiness snapshot: 58%')).toBeVisible();
   await expect(page.getByText('not a legal compliance certificate')).toBeVisible();
@@ -116,6 +117,7 @@ test('owner can run readiness check without submitting to IRD or bank', async ({
 
 test('global help explains the current workflow and can collapse its steps', async ({ page }) => {
   await signInAsAdmin(page, '/admin/finance-bureau');
+  await page.getByText('More', { exact: true }).click();
   await page.getByRole('button', { name: /Open instructions for Using Finance/ }).click();
   await expect(page.locator('[role="dialog"]')).toContainText('How to use it');
   await expect(page.getByText('Start at Finance home')).toBeVisible();

@@ -171,19 +171,18 @@ const InvestigationPage: React.FC = () => {
   }
 
   if (!investigationId) {
-    if (listLoading) return <div className="page-container"><div className="loading-state"><RefreshCw className="is-spinning" /> Loading investigations</div></div>;
-    return <div className="page-container">
+    if (listLoading) return <div className="page-container investigation-page"><div className="loading-state"><RefreshCw className="is-spinning" /> Loading investigations</div></div>;
+    return <div className="page-container investigation-page">
       <header className="page-header"><div><span>Evidence / Investigations</span><h1>Investigations</h1><p>Existence and status only - open an investigation to see its full detail, if you are the assigned lead or an organisation administrator.</p></div><button type="button" onClick={() => void load()}><RefreshCw size={16} /> Refresh</button></header>
       {listError && <div className="alert alert-error" role="alert">{listError}</div>}
       {!listError && list.length === 0 && <div className="empty-state">No investigations recorded for this organisation.</div>}
       {list.length > 0 && <div className="contacts-list">{list.map((item) => <article className="contact-card" key={item.id}><div className="contact-header"><strong>{item.investigation_reference}</strong><small>{new Date(item.opened_at).toLocaleDateString('en-NZ')}</small></div><p>{item.title}</p><span>{item.investigation_type} · {item.priority} · {item.status}{item.legal_hold ? ' · legal hold' : ''}</span><button type="button" onClick={() => setParams({ id: item.id })}>Open</button></article>)}</div>}
     </div>;
   }
-  if (loading) return <div className="page-container"><div className="loading-state"><RefreshCw className="is-spinning" /> Loading investigation</div></div>;
-  if (error && !investigation) return <div className="page-container"><div className="alert alert-error">{error}</div></div>;
-  if (!investigation) return <div className="page-container"><div className="empty-state">Investigation not found.</div></div>;
-
-  return <div className="page-container">
+  if (loading) return <div className="page-container investigation-page"><div className="loading-state"><RefreshCw className="is-spinning" /> Loading investigation</div></div>;
+  if (error && !investigation) return <div className="page-container investigation-page"><div className="alert alert-error">{error}</div></div>;
+  if (!investigation) return <div className="page-container investigation-page"><div className="empty-state">Investigation not found.</div></div>;
+  return <div className="page-container investigation-page">
     <header className="page-header"><div><span>Evidence / Investigation</span><h1>{investigation.investigation_reference}</h1><p>{investigation.title}</p></div><button type="button" onClick={() => void load()}><RefreshCw size={16} /> Refresh</button></header>
     {notice && <div className="alert alert-success" role="status">{notice}</div>}
     {error && <div className="alert alert-error" role="alert">{error}</div>}

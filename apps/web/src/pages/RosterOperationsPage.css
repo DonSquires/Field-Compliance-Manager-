@@ -20,6 +20,153 @@
 	color: #e6f0f4;
 }
 
+.roster-ops.roster-command-workbench {
+	display: flex;
+	flex-direction: column;
+	height: 100%;
+	min-height: 0;
+	min-width: 0;
+	max-width: none;
+	margin: 0;
+	box-sizing: border-box;
+	overflow: hidden;
+	padding: 0;
+	gap: 0;
+	background: #0d1725;
+	color: #edf2f7;
+}
+.roster-command-workbench > .roster-ops-header {
+	flex: 0 0 40px;
+	min-height: 40px;
+	margin: 0;
+	padding: 0 12px;
+	border-bottom: 1px solid #2c3b4d;
+	align-items: center;
+}
+.roster-command-workbench .roster-ops-header h1 { margin: 0; font-size: 17px; }
+.roster-command-workbench .roster-ops-header > div:first-child { display: flex; align-items: center; gap: 8px; }
+.roster-command-workbench .roster-ops-header > div:first-child > span { display: inline; color: #b9c9da; font-size: 11px; text-transform: none; }
+.roster-command-workbench .roster-ops-header p { display: none; }
+.roster-command-workbench .roster-ops-header button { min-height: 30px; padding: 4px 9px; }
+.roster-command-bar {
+	display: flex;
+	align-items: center;
+	flex: 0 0 40px;
+	min-width: 0;
+	gap: 10px;
+	padding: 0 10px;
+	border-bottom: 1px solid #2c3b4d;
+	overflow-x: auto;
+	white-space: nowrap;
+	background: #142133;
+	font-size: 12px;
+}
+.roster-command-workbench .roster-command-bar .roster-week-nav { gap: 4px; }
+.roster-command-workbench .roster-command-bar button,
+.roster-command-workbench .roster-command-bar select,
+.roster-command-workbench .roster-command-bar input { min-height: 30px; height: 30px; padding: 3px 7px; width: auto; color: #edf2f7; background: #142133; border: 1px solid #3a4c61; font-size: 12px; }
+.roster-command-bar .roster-week-nav strong { min-width: 150px; font-size: 12px; }
+.roster-command-count { display: inline-flex; gap: 5px; align-items: center; }
+.roster-command-workbench .roster-quick-actions { flex: 0 0 auto; margin: 0; padding: 4px 10px; border-bottom: 1px solid #2c3b4d; gap: 6px; }
+.roster-command-workbench .roster-quick-actions button { min-height: 28px; padding: 3px 8px; font-size: 12px; color: #c8d5e3; background: #142133; border-color: #35475d; }
+.roster-workbench-panes { display: grid; grid-template-columns: 224px minmax(0,1fr); flex: 1; min-height: 0; min-width: 0; overflow: hidden; }
+.roster-directory { display: flex; flex-direction: column; min-height: 0; min-width: 0; border-right: 1px solid #2c3b4d; background: #101d2d; }
+.roster-directory > header { display: flex; justify-content: space-between; padding: 10px; font-size: 12px; border-bottom: 1px solid #2c3b4d; }
+.roster-directory-search { display: flex; align-items: center; gap: 5px; margin: 8px; padding: 0 6px; border: 1px solid #3a4c61; background: #0d1725; }
+.roster-directory-search input { width: 100%; min-width: 0; min-height: 32px; border: 0; color: #edf2f7; background: transparent; font-size: 12px; }
+.roster-directory .roster-readiness { padding: 0 8px 6px; display: flex; gap: 3px; align-items: center; }
+.roster-directory button { cursor: pointer; font: inherit; }
+.roster-directory .roster-readiness button,
+.roster-directory-all { min-height: 30px; padding: 4px 8px; border: 1px solid #35475d; color: #c8d5e3; background: #142133; font-size: 12px; }
+.roster-directory-all { margin: 0 8px 5px; text-align: left; }
+.roster-directory-list { flex: 1; min-height: 0; overflow: auto; }
+.roster-directory-list > p { padding: 12px; color: #b9c7d7; font-size: 12px; line-height: 1.5; }
+.roster-directory-person { display: grid; gap: 5px; width: 100%; padding: 10px; text-align: left; border: 0; border-bottom: 1px solid #29394c; color: #edf2f7; background: transparent; }
+.roster-directory-person strong { font-size: 13px; }
+.roster-directory-person small { color: #acbdd0; font-size: 11px; line-height: 1.4; }
+.roster-directory-person > span { width: fit-content; padding: 2px 5px; border: 1px solid #3b5265; color: #c9d8e5; font-size: 10px; }
+.roster-directory-person > .is-risk { color: #f3c699; border-color: #72543b; }
+.roster-directory button[aria-pressed="true"] { background: #223a57; color: #fff; box-shadow: inset 2px 0 #8aabc9; }
+.roster-schedule-pane { display: flex; flex-direction: column; min-height: 0; min-width: 0; overflow: hidden; }
+.roster-command-workbench .roster-schedule-mode,
+.roster-command-workbench .roster-horizon-bar { flex: 0 0 auto; margin: 0; padding: 4px 8px; border-bottom: 1px solid #29394c; min-height: 32px; }
+.roster-command-workbench .roster-schedule-mode button,
+.roster-command-workbench .roster-horizon button { min-height: 26px; padding: 3px 8px; color: #d5dfeb; background: #15253a; border-color: #35475d; font-size: 12px; }
+.roster-command-workbench .roster-schedule-mode .is-active,
+.roster-command-workbench .roster-horizon .is-active { color: #fff; background: #294565; border-color: #6c8eaf; }
+.roster-command-workbench .roster-horizon-bar label { display: flex; align-items: center; gap: 6px; }
+.roster-command-workbench .roster-horizon-bar select { min-height: 28px; color: #d5dfeb; background: #15253a; border-color: #35475d; }
+.roster-command-workbench .roster-holidays { flex: 0 0 auto; max-height: 52px; overflow: auto; margin: 0; }
+.roster-command-workbench .roster-board-scroll-cue { margin: 0; padding: 3px 8px; flex: 0 0 auto; font-size: 11px; }
+.roster-ops.roster-command-workbench .roster-board { flex: 1 1 0; min-height: 80px; max-height: none; margin: 0; border-radius: 0; --roster-day-min: 100px; --roster-grid-min: calc(180px + var(--roster-days) * 100px); }
+.roster-ops.roster-command-workbench .roster-board-head,
+.roster-ops.roster-command-workbench .roster-row { grid-template-columns: 180px repeat(var(--roster-days), minmax(100px,1fr)); }
+.roster-command-workbench .roster-row { min-height: 84px; }
+.roster-command-workbench .roster-cell { padding: 3px; min-height: 84px; }
+.roster-command-workbench .roster-shift { padding: 4px 5px; min-height: 50px; border-radius: 2px; }
+.roster-command-workbench .roster-person { padding: 6px; gap: 5px; }
+.roster-command-workbench .roster-person strong { font-size: 12px; }
+.roster-command-workbench .roster-person small,
+.roster-command-workbench .roster-person i { font-size: 10px; }
+.roster-command-workbench .roster-secondary-dock { flex: 0 0 auto; min-height: 0; max-height: 32%; overflow: auto; border-top: 1px solid #3a4c61; background: #101d2d; color: #edf2f7; }
+.roster-secondary-dock > summary { padding: 8px 10px; cursor: pointer; background: #142133; color: #e4edf7; font-size: 12px; }
+.roster-command-workbench .roster-timesheet-dock[open] { flex: 0 1 38%; max-height: 38%; }
+.roster-command-workbench .roster-metrics { margin: 8px; grid-template-columns: repeat(auto-fit,minmax(110px,1fr)); gap: 4px; }
+.roster-command-workbench .roster-metrics > div { padding: 6px; border: 1px solid #2c3b4d; }
+.roster-command-workbench > .roster-message { flex: 0 0 auto; margin: 0; padding: 7px 10px; max-height: 90px; overflow: auto; }
+.roster-command-workbench .roster-inspector { max-height: calc(100dvh - 70px); }
+.roster-command-workbench .roster-ops-header button.is-primary,
+.roster-command-workbench .roster-dialog button[type="submit"] { color: #fff; background: #234364; border: 1px solid #6d8bac; }
+.admin-shell[data-theme] .roster-ops.roster-command-workbench { color: #edf2f7; }
+.admin-shell[data-theme] .roster-command-workbench .roster-ops-header h1,
+.admin-shell[data-theme] .roster-command-workbench .roster-command-count,
+.admin-shell[data-theme] .roster-command-workbench .roster-directory header,
+.admin-shell[data-theme] .roster-command-workbench .roster-week-nav strong { color: #edf2f7; }
+.admin-shell[data-theme] .roster-command-workbench .roster-command-bar input,
+.admin-shell[data-theme] .roster-command-workbench .roster-command-bar select,
+.admin-shell[data-theme] .roster-command-workbench .roster-directory-search input,
+.admin-shell[data-theme] .roster-command-workbench .roster-horizon-bar select { color: #edf2f7; background: #142133; border-color: #49617b; }
+.admin-shell[data-theme] .roster-command-workbench .roster-ops-header button.is-primary { color: #fff; background: #234364; border: 1px solid #6d8bac; }
+.admin-shell[data-theme] .roster-command-workbench .roster-horizon { background: transparent; }
+.admin-shell[data-theme] .roster-command-workbench .roster-directory-person { display: grid; border-radius: 0; background: #101d2d; color: #edf2f7; }
+.admin-shell[data-theme] .roster-command-workbench .roster-directory-person[aria-pressed="true"] { background: #223a57; }
+.admin-shell[data-theme] .roster-command-workbench .roster-horizon button.is-active,
+.admin-shell[data-theme] .roster-command-workbench .roster-schedule-mode button.is-active { color: #fff; background: #294565; }
+@media(max-width:760px) {
+	.roster-workbench-panes { grid-template-columns: minmax(130px,32%) minmax(0,1fr); }
+	.roster-command-bar { gap: 8px; }
+	.roster-command-bar .roster-week-nav strong { display: none; }
+	.roster-command-workbench .roster-ops-header { padding: 0 8px; }
+	.roster-command-workbench .roster-ops-header button,
+	.roster-command-workbench .roster-command-bar button,
+	.roster-command-workbench .roster-command-bar input,
+	.roster-command-workbench .roster-command-bar select,
+	.roster-command-workbench .roster-quick-actions button,
+	.roster-command-workbench .roster-directory button,
+	.roster-command-workbench .roster-schedule-mode button,
+	.roster-command-workbench .roster-horizon button,
+	.roster-command-workbench .roster-horizon-bar select,
+	.roster-command-workbench summary { min-height: 44px; height: auto; }
+	.roster-command-workbench .roster-ops-header { flex-basis: auto; min-height: 48px; }
+	.roster-command-workbench .roster-command-bar { flex-basis: 48px; }
+	.roster-command-workbench .roster-quick-actions { flex-wrap: nowrap; overflow-x: auto; }
+	.roster-command-workbench .roster-quick-actions button { flex: 0 0 auto; }
+	.roster-directory .roster-readiness { overflow-x: auto; flex-shrink: 0; }
+	.roster-directory-person { padding: 8px; }
+	.roster-command-workbench .roster-horizon-bar { display: flex; flex-wrap: wrap; gap: 4px; }
+	.roster-command-workbench .roster-horizon-bar label span { display: none; }
+	.roster-command-workbench .roster-person { min-height: 70px; }
+	.roster-command-workbench .roster-ops-header { flex-direction: row; align-items: center; }
+	.roster-command-workbench .roster-ops-header > div:first-child { flex-direction: column-reverse; align-items: flex-start; gap: 2px; }
+	.roster-command-workbench .roster-ops-header > div:last-child { width: auto; }
+	.roster-command-workbench .roster-week-nav { flex-wrap: nowrap; }
+	.roster-command-workbench .roster-schedule-mode { display: flex; overflow-x: auto; white-space: nowrap; border-radius: 0; }
+	.roster-command-workbench .roster-schedule-mode button { flex: 0 0 auto; }
+	.roster-schedule-pane:has(> .roster-timesheet-dock[open]) > :not(.roster-timesheet-dock) { display: none; }
+	.roster-command-workbench .roster-timesheet-dock[open] { flex: 1; max-height: 100%; }
+	.roster-command-workbench .roster-timesheet-dock > summary { position: static; }
+}
+
 .roster-ops .roster-board {
 	width: 100%;
 	min-width: 0;

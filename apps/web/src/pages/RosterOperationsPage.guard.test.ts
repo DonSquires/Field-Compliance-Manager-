@@ -101,4 +101,21 @@ describe('enterprise roster operations', () => {
     expect(page).toContain("scheduleMode === 'staff' ? 'Staff' : 'Work unit'");
     expect(page).toContain("navigate('/admin/people-hr?tab=timesheets')");
   });
+  it('locks the workbench to its parent and selects officers without creating a shift', () => {
+    expect(page).toContain('roster-workbench-panes');
+    expect(page).toContain('aria-label="Officer directory"');
+    expect(page).toContain('const scheduleStaff = visibleStaff.filter');
+    expect(page).toContain('aria-label="Roster branch"');
+    expect(page).toContain('setOperatingOrganization(event.target.value)');
+    expect(page).toContain('roster-command-workbench');
+    expect(page).toContain("loading || !rosterDataReady ? '—' : openSlots.length");
+  });
+  it('uses unknown credential and timesheet read states instead of inventing licences or zero approvals', () => {
+    expect(page).toContain("user.credential_verified === null || user.credential_verified === undefined ? 'unknown'");
+    expect(page).toContain('Credentials not recorded');
+    expect(page).toContain('Recorded credentials verified');
+    expect(page).not.toContain("return 'licence clear'");
+    expect(page).toContain("<RosterTimesheetPanel");
+    expect(page).toContain("timesheetCount ?? '—'");
+  });
 });

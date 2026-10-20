@@ -3,10 +3,11 @@ import { MapPin, Navigation, ShieldAlert } from 'lucide-react';
 import { useServiceRelationships } from '../context/ServiceRelationshipContext';
 import './PlaceContextBanner.css';
 
-export function PlaceContextBanner() {
+export function PlaceContextBanner({ compact = false, organizationWide = false, organizationId }: { compact?: boolean; organizationWide?: boolean; organizationId?: string | null }) {
   const {
     locationStatus, currentCoordinates, currentAddress, locationError, locationMode,
     geofenceResolution, selectedAgreementSites, selectedAgreementZones, selectedSite, selectedZone, selectSite, selectZone,
+    agreements, selectedAgreement, selectAgreement, loading, error, refetch, loadedOrganizationId,
   } = useServiceRelationships();
 
   const coordinates = currentCoordinates
@@ -37,6 +38,27 @@ export function PlaceContextBanner() {
       : locationStatus === 'unavailable'
         ? 'Location evidence unavailable'
         : 'Resolving current location evidence';
+
+  if (compact) return <div className="place-context-banner is-console" role="region" aria-label="Service place context">
+    <MapPin size={14} aria-hidden="true" />
+    {organizationWide ? <span>Organisation-wide evidence workspace · not filtered by service place</span> : error ? <><span role="status">Service context unavailable</span><button type="button" onClick={() => void refetch()}>Retry</button></> : !loading && organizationId && organizationId !== loadedOrganizationId ? <span role="status">Service place context unavailable for this operating organisation</span> : <>
+      <label><span className="sr-only">Service agreement</span><select aria-label="Service agreement" disabled={loading} value={selectedAgreement?.id ?? ''} onChange={(event) => selectAgreement(event.target.value || null)}>
+        <option value="">{loading ? 'Loading service context…' : 'No agreement selected'}</option>
+        {agreements.map((agreement) => <option key={agreement.id} value={agreement.id}>{agreement.name}</option>)}
+      </select></label>
+      <label><span className="sr-only">Service site or zone</span><select aria-label="Service site or zone" disabled={loading || !selectedAgreement} value={selectedZone ? `zone:${selectedZone.id}` : selectedSite ? `site:${selectedSite.id}` : ''} onChange={(event) => {
+        const [kind, id] = event.target.value.split(':');
+        if (kind === 'zone') selectZone(id);
+        else if (kind === 'site') selectSite(id);
+        else { selectSite(null); selectZone(null); }
+      }}>
+        <option value="">{selectedAgreementSites.length || selectedAgreementZones.length ? 'All agreement places' : 'No service places configured'}</option>
+        {selectedAgreementSites.length > 0 && <optgroup label="Sites">{selectedAgreementSites.map((site) => <option key={site.id} value={`site:${site.id}`}>{site.name}</option>)}</optgroup>}
+        {selectedAgreementZones.length > 0 && <optgroup label="Zones">{selectedAgreementZones.map((zone) => <option key={zone.id} value={`zone:${zone.id}`}>{zone.name}</option>)}</optgroup>}
+      </select></label>
+      <span className="place-context-console-mode">Planning context · not GPS proof</span>
+    </>}
+  </div>;
 
   return (
     <div className={`place-context-banner is-${locationStatus}`} role="note" aria-label={heading} data-place-context-status={locationStatus}>

@@ -351,6 +351,110 @@ const onboardingStatusLabel = (status: string | undefined) => ({ in_progress: 'I
 const payrollCodeFromName = (value: string) => value.trim().toUpperCase().replace(/[^A-Z0-9]+/g, '_').replace(/^_+|_+$/g, '').slice(0, 32);
 const validPayrollCode = (value: string) => /^[A-Z0-9][A-Z0-9_-]*$/.test(value);
 
+type TimesheetDecision = 'branch_checked' | 'approved' | 'rejected';
+interface TimesheetRowsProps {
+  rows: TimesheetRow[];
+  staffNames: Record<string, string>;
+  corporateReviewer: boolean;
+  actorId?: string;
+  onReview: (item: TimesheetRow, decision: TimesheetDecision) => void;
+  onCorrect?: (item: TimesheetRow) => void;
+}
+
+const TimesheetRows: React.FC<TimesheetRowsProps> = ({ rows, staffNames, corporateReviewer, actorId, onReview, onCorrect }) => (
+  <div className="reports-table-wrapper hr-timesheet-table">
+    <table className="reports-table">
+      <caption className="sr-only">Timesheet reconciliation: rostered, worked, adjusted and submitted hours</caption>
+      <thead><tr><th scope="col">Staff</th><th scope="col">Period</th><th scope="col">Rostered h</th><th scope="col">Worked h</th><th scope="col">Adjustment h</th><th scope="col">To pay h</th><th scope="col">Status</th><th scope="col">Review</th></tr></thead>
+      <tbody>{rows.length === 0 ? <tr><td colSpan={8}>No timesheets in this scope.</td></tr> : rows.map((item) => <tr key={item.id}>
+        <td>{staffNames[item.staff_id] || 'Staff identity unavailable'}</td>
+        <td>{item.period_start} – {item.period_end}</td>
+        <td>{item.scheduled_hours ?? '—'}</td><td>{item.work_derived_hours ?? '—'}{item.work_summary?.source_count !== undefined && <small> · {item.work_summary.source_count} work records</small>}</td><td>{item.adjustment_hours ?? '—'}</td><td>{item.actual_hours ?? '—'}</td>
+        <td><span className={`status-badge status-${item.status}`}>{HR_TIMESHEET_STATUS[item.status] ?? plainWords(item.status)}</span></td>
+        <td><div className="hr-timesheet-actions">
+          {onCorrect && ['submitted', 'branch_checked'].includes(item.status) && <button className="btn btn-sm btn-secondary" onClick={() => onCorrect(item)}>Edit hours</button>}
+          {item.status === 'submitted' && <><button className="btn btn-sm btn-secondary" onClick={() => onReview(item, 'branch_checked')}>Branch check</button><button className="btn btn-sm btn-danger" onClick={() => onReview(item, 'rejected')}>Return for correction</button></>}
+          {item.status === 'branch_checked' && corporateReviewer && <>{item.branch_reviewed_by !== actorId && <button className="btn btn-sm btn-secondary" onClick={() => onReview(item, 'approved')}>Final approve</button>}<button className="btn btn-sm btn-danger" onClick={() => onReview(item, 'rejected')}>Return for correction</button></>}
+          {item.status === 'branch_checked' && (!corporateReviewer || item.branch_reviewed_by === actorId) && <small>A different corporate payroll reviewer must approve.</small>}
+        </div></td>
+      </tr>)}</tbody>
+    </table>
+  </div>
+);
+
+/** Branch-local evidence and review; payroll export and corporate corrections stay in HR. */
+export const RosterTimesheetPanel: React.FC<{
+  from: string;
+  to: string;
+  staffId: string | null;
+  staffNames: Record<string, string>;
+  onPendingCount: (count: number | null) => void;
+}> = ({ from, to, staffId, staffNames, onPendingCount }) => {
+  const { profile, operatingOrganizationId, operatingOrganizations } = useAuth();
+  const branchId = operatingOrganizationId ?? profile?.organizationId;
+  const context = operatingOrganizations.find((item) => item.organizationId === branchId);
+  const [rows, setRows] = useState<TimesheetRow[]>([]);
+  const [loading, setLoading] = useState(true);
+  const [error, setError] = useState<string | null>(null);
+  const [receipt, setReceipt] = useState<string | null>(null);
+  const [decision, setDecision] = useState<{ item: TimesheetRow; action: TimesheetDecision } | null>(null);
+  const [notes, setNotes] = useState('');
+  const [saving, setSaving] = useState(false);
+  const generation = useRef(0);
+  const loadQueue = useCallback(async () => {
+    const version = ++generation.current;
+    setLoading(true); setError(null); setRows([]); onPendingCount(null);
+    if (!branchId || !context || context.authorityBasis === 'corporate_oversight') {
+      setError('Select an authorised delivery branch for local timesheet review.'); setLoading(false); return;
+    }
+    try {
+      const { data, error: queueError } = await supabase.rpc('get_branch_timesheet_queue', { p_operating_organization_id: branchId });
+      if (version !== generation.current) return;
+      if (queueError) throw queueError;
+      const scoped = ((data ?? []) as TimesheetRow[]).filter((item) => item.period_start <= to && item.period_end >= from);
+      setRows(scoped); onPendingCount(scoped.filter((item) => item.status === 'submitted').length);
+    } catch (failure) {
+      if (version === generation.current) setError(failure instanceof Error ? failure.message : (failure as { message?: string })?.message ?? 'Timesheet review is unavailable.');
+    } finally { if (version === generation.current) setLoading(false); }
+  }, [branchId, context?.authorityBasis, from, to, onPendingCount]);
+  useEffect(() => { void loadQueue(); return () => { generation.current += 1; }; }, [loadQueue]);
+  const submitDecision = async (event: React.FormEvent) => {
+    event.preventDefault();
+    if (!decision || saving || (decision.action === 'rejected' && !notes.trim())) return;
+    const version = generation.current;
+    setSaving(true); setError(null); setReceipt(null);
+    try {
+      const { data, error: reviewError } = await supabase.rpc('review_branch_timesheet', {
+        p_operating_organization_id: branchId,
+        p_timesheet_id: decision.item.id,
+        p_expected_status: decision.item.status,
+        p_decision: decision.action,
+        p_review_notes: notes.trim() || null,
+      });
+      if (version !== generation.current) return;
+      if (reviewError) throw reviewError;
+      const confirmed = Array.isArray(data) ? data[0] : data;
+      if (confirmed?.id !== decision.item.id || confirmed?.status !== decision.action) throw new Error('The server did not confirm this decision. Refresh before retrying.');
+      setReceipt(`Timesheet ${confirmed.id}: ${HR_TIMESHEET_STATUS[confirmed.status] ?? plainWords(confirmed.status)}. Audit decision recorded; no payment made.`);
+      setDecision(null); setNotes(''); await loadQueue();
+    } catch (failure) {
+      if (version === generation.current) setError(failure instanceof Error ? failure.message : (failure as { message?: string })?.message ?? 'Review failed. Refresh and try again.');
+    } finally { setSaving(false); }
+  };
+  return <section className="hr-roster-reconciliation" aria-label="Inline timesheet reconciliation">
+    <header><strong>Branch-local reconciliation</strong><button className="btn btn-sm btn-secondary" disabled={loading || saving} onClick={() => void loadQueue()}>Refresh timesheets</button></header>
+    <p>Overlapping timesheet periods in the selected roster range. Branch check confirms local evidence, not payroll approval. Corrections and final approval require the HR workspace and its authority.</p>
+    {receipt && <p role="status" className="hr-timesheet-receipt">{receipt}</p>}
+    {error && <p role="alert" className="hr-review-error">{error}</p>}
+    {loading ? <p role="status">Loading authorised timesheets…</p> : !error && <TimesheetRows rows={rows.filter((item) => !staffId || item.staff_id === staffId)} staffNames={staffNames} corporateReviewer={false} actorId={profile?.id} onReview={(item, action) => { setDecision({ item, action }); setNotes(''); setError(null); }} />}
+    {decision && <form className="hr-inline-review" onSubmit={submitDecision} aria-label="Timesheet decision">
+      <strong>{decision.action === 'branch_checked' ? 'Branch check' : 'Return for correction'} · {staffNames[decision.item.staff_id] ?? 'Staff member'}</strong>
+      <label>Review notes<textarea rows={2} required={decision.action === 'rejected'} value={notes} onChange={(event) => setNotes(event.target.value)} /></label>
+      <div><button type="button" className="btn btn-sm btn-secondary" disabled={saving} onClick={() => { setDecision(null); setError(null); }}>Cancel</button><button type="submit" className="btn btn-sm btn-primary" disabled={saving || (decision.action === 'rejected' && !notes.trim())}>{saving ? 'Recording…' : 'Confirm decision'}</button></div>
+    </form>}
+  </section>;
+};
+
 const RosterHRPage: React.FC = () => {
   const location = useLocation();
   const navigate = useNavigate();
@@ -1611,7 +1715,7 @@ const RosterHRPage: React.FC = () => {
 
   if (loading) {
     return (
-      <div className="page-container">
+      <div className="page-container roster-hr-page" data-surface="dark">
         <div className="loading-state">
           <div className="spinner"></div>
           <p>Loading roster & HR data...</p>
@@ -1621,7 +1725,7 @@ const RosterHRPage: React.FC = () => {
   }
 
   return (
-    <div className="page-container roster-hr-page">
+    <div className="page-container roster-hr-page" data-surface="dark">
       {timesheetCorrection && <div className="hr-review-backdrop"><form className="hr-review-dialog" role="dialog" aria-modal="true" aria-labelledby="timesheet-correction-title" onSubmit={correctTimesheet}><header><div><span>Payroll correction</span><h2 id="timesheet-correction-title">Edit timesheet hours</h2></div><button type="button" onClick={() => setTimesheetCorrection(null)} aria-label="Close timesheet correction">×</button></header><p>Correction returns the timesheet to submitted review and records before/after values in the audit trail.</p><label><span>Actual hours</span><input type="number" min="0" max="744" step="0.25" required value={timesheetCorrection.actualHours} onChange={(event) => setTimesheetCorrection({ ...timesheetCorrection, actualHours: event.target.value })} /></label><label><span>Overtime hours</span><input type="number" min="0" max="744" step="0.25" required value={timesheetCorrection.overtimeHours} onChange={(event) => setTimesheetCorrection({ ...timesheetCorrection, overtimeHours: event.target.value })} /></label><label><span>Correction reason</span><textarea required rows={4} value={timesheetCorrection.reason} onChange={(event) => setTimesheetCorrection({ ...timesheetCorrection, reason: event.target.value })} /></label><footer><button type="button" className="btn btn-secondary" onClick={() => setTimesheetCorrection(null)}>Cancel</button><button type="submit" className="btn btn-primary" disabled={saving || !timesheetCorrection.reason.trim()}>Save correction</button></footer></form></div>}
       {swapReview && <div className="hr-review-backdrop"><form className="hr-review-dialog" role="dialog" aria-modal="true" aria-labelledby="shift-swap-review-title" onSubmit={reviewSwap}><header><div><span>Roster governance</span><h2 id="shift-swap-review-title">{swapReview.decision === 'approved' ? 'Approve' : 'Decline'} shift swap?</h2></div><button type="button" onClick={() => setSwapReview(null)} aria-label="Close shift swap review">×</button></header><p>Approval transfers ownership of the unstarted shift and its linked roster slot. Declined requests remain in the audit history.</p><label><span>Review notes</span><textarea rows={4} required={swapReview.decision === 'declined'} value={reviewNotes} onChange={(event) => setReviewNotes(event.target.value)} /></label><footer><button type="button" className="btn btn-secondary" onClick={() => setSwapReview(null)}>Cancel</button><button type="submit" className={swapReview.decision === 'declined' ? 'btn btn-danger' : 'btn btn-primary'} disabled={saving || (swapReview.decision === 'declined' && !reviewNotes.trim())}>{saving ? 'Saving' : 'Confirm decision'}</button></footer></form></div>}
       <header className="page-header">
@@ -1659,6 +1763,7 @@ const RosterHRPage: React.FC = () => {
         ))}
       </div>
 
+      <div className="hr-workbench-scroll" aria-label="HR workspace content">
       {tab === 'staff' && canManagePayRoles && (
         <section className="reports-section hr-pay-role-code-section">
           <header className="page-header">
@@ -2341,67 +2446,9 @@ const RosterHRPage: React.FC = () => {
           {corporatePayrollReviewer && <button className="btn btn-primary btn-sm" style={{ marginBottom: '1rem' }} onClick={() => { const now = new Date(); setPayrollExport({ from: new Date(now.getFullYear(), now.getMonth(), 1).toISOString().slice(0, 10), to: new Date(now.getFullYear(), now.getMonth() + 1, 0).toISOString().slice(0, 10) }); }}>
             Export approved to payroll
           </button>}
-          <div className="reports-table-wrapper">
-            <table className="reports-table">
-              <thead>
-                <tr>
-                  <th>Staff</th>
-                  <th>Period</th>
-                  <th>Rostered h</th>
-                  <th>Worked h</th>
-                  <th>Adjustment h</th>
-                  <th>To pay h</th>
-                  <th>Status</th>
-                  <th></th>
-                </tr>
-              </thead>
-              <tbody>
-                {timesheets.length === 0 ? (
-                  <tr>
-                    <td colSpan={8} className="text-center">
-                      No timesheets
-                    </td>
-                  </tr>
-                ) : (
-                  timesheets.map((t) => (
-                    <tr key={t.id}>
-                      <td>{staffNames[t.staff_id] || t.staff_id}</td>
-                      <td>
-                        {new Date(t.period_start).toLocaleDateString()} –{' '}
-                        {new Date(t.period_end).toLocaleDateString()}
-                      </td>
-                      <td>{t.scheduled_hours ?? '-'}</td>
-                      <td>{t.work_derived_hours ?? '-'}{t.work_summary?.source_count !== undefined ? ` from ${t.work_summary.source_count} ${t.work_summary.source_count === 1 ? 'work record' : 'work records'}` : ''}</td>
-                      <td>{t.adjustment_hours || 0}</td>
-                      <td>{t.actual_hours ?? '-'}</td>
-                      <td>
-                        <span className={`status-badge status-${t.status}`}>{HR_TIMESHEET_STATUS[t.status] ?? plainWords(t.status)}</span>
-                      </td>
-                      <td>
-                        {['submitted', 'branch_checked'].includes(t.status) && <button className="btn btn-sm btn-secondary" onClick={() => setTimesheetCorrection({ item: t, actualHours: String(t.actual_hours ?? ''), overtimeHours: String(t.overtime_hours ?? 0), reason: '' })}>Edit hours</button>}{t.status === 'submitted' && (
-                          <>
-                            <button
-                              className="btn btn-sm btn-secondary"
-                              onClick={() => { setReviewNotes('');setReview({ kind: 'timesheet', id: t.id, decision: 'branch_checked' }); }}
-                            >
-                              Branch check
-                            </button>{' '}
-                            <button
-                              className="btn btn-sm btn-danger"
-                              onClick={() => { setReviewNotes('');setReview({ kind: 'timesheet', id: t.id, decision: 'rejected' }); }}
-                            >
-                              Return for correction
-                            </button>
-                          </>
-                        )}
-                        {t.status === 'branch_checked' && corporatePayrollReviewer && <>{t.branch_reviewed_by !== profile?.id && <button className="btn btn-sm btn-secondary" onClick={() => { setReviewNotes('');setReview({ kind: 'timesheet', id: t.id, decision: 'approved' }); }}>Final approve</button>}{t.branch_reviewed_by !== profile?.id && ' '}<button className="btn btn-sm btn-danger" onClick={() => { setReviewNotes('');setReview({ kind: 'timesheet', id: t.id, decision: 'rejected' }); }}>Return for correction</button></>}
-                      </td>
-                    </tr>
-                  ))
-                )}
-              </tbody>
-            </table>
-          </div>
+          <TimesheetRows rows={timesheets} staffNames={staffNames} corporateReviewer={corporatePayrollReviewer} actorId={profile?.id}
+            onCorrect={(item) => setTimesheetCorrection({ item, actualHours: String(item.actual_hours ?? ''), overtimeHours: String(item.overtime_hours ?? 0), reason: '' })}
+            onReview={(item, decision) => { setReviewNotes(''); setReview({ kind: 'timesheet', id: item.id, decision }); }} />
         </section>
       )}
 
@@ -2612,6 +2659,7 @@ const RosterHRPage: React.FC = () => {
       {readinessReview && <div className="hr-review-backdrop"><form className="hr-review-dialog" role="dialog" aria-modal="true" aria-labelledby="readiness-review-title" onSubmit={handleReadinessReview}><header><div><span>Staff eligibility</span><h2 id="readiness-review-title">{readinessReview.next ? 'Mark work ready?' : 'Remove work readiness?'}</h2></div><button type="button" onClick={() => setReadinessReview(null)} aria-label="Close readiness review">×</button></header><p>{readinessReview.next ? 'Identity, employment, and current credential blockers are checked again by the server.' : 'The staff member will no longer be eligible for new roster assignments.'}</p><label><span>Readiness review notes</span><textarea rows={4} required value={readinessNotes} onChange={(event) => setReadinessNotes(event.target.value)} /></label><footer><button type="button" className="btn btn-secondary" onClick={() => setReadinessReview(null)}>Back</button><button type="submit" className="btn btn-primary" disabled={saving || !readinessNotes.trim()}>{saving ? 'Saving' : 'Confirm readiness'}</button></footer></form></div>}
       {credentialRenewal && <div className="hr-review-backdrop"><form className="hr-review-dialog" role="dialog" aria-modal="true" aria-labelledby="credential-renewal-title" onSubmit={handleCredentialRenewal}><header><div><span>Credential evidence</span><h2 id="credential-renewal-title">Record renewal</h2></div><button type="button" onClick={() => setCredentialRenewal(null)} aria-label="Close credential renewal">×</button></header><p>The existing {credentialRenewal.source.credential_type.replaceAll('_',' ')} record remains in history. This replacement is verified against your evidence notes.</p><label><span>Credential number</span><input required value={credentialRenewal.credentialNumber} onChange={(event)=>setCredentialRenewal({...credentialRenewal,credentialNumber:event.target.value})}/></label><label><span>Issuing authority</span><input required value={credentialRenewal.issuingAuthority} onChange={(event)=>setCredentialRenewal({...credentialRenewal,issuingAuthority:event.target.value})}/></label><div className="form-row"><label><span>Issued date</span><input type="date" required value={credentialRenewal.issuedDate} onChange={(event)=>setCredentialRenewal({...credentialRenewal,issuedDate:event.target.value})}/></label><label><span>New expiry date</span><input type="date" required min={credentialRenewal.source.expiry_date??undefined} value={credentialRenewal.expiryDate} onChange={(event)=>setCredentialRenewal({...credentialRenewal,expiryDate:event.target.value})}/></label></div><label><span>Verification evidence notes</span><textarea rows={4} required minLength={10} value={credentialRenewal.evidenceNotes} onChange={(event)=>setCredentialRenewal({...credentialRenewal,evidenceNotes:event.target.value})}/></label><footer><button type="button" className="btn btn-secondary" onClick={()=>setCredentialRenewal(null)}>Back</button><button type="submit" className="btn btn-primary" disabled={saving||!credentialRenewal.credentialNumber.trim()||!credentialRenewal.issuingAuthority.trim()||!credentialRenewal.issuedDate||!credentialRenewal.expiryDate||credentialRenewal.evidenceNotes.trim().length<10}>{saving?'Saving':'Confirm renewal'}</button></footer></form></div>}
       {coverageFinalization&&<div className="hr-review-backdrop"><form className="hr-review-dialog" role="dialog" aria-modal="true" aria-labelledby="coverage-finalization-title" onSubmit={finalizeCoverage}><header><div><span>Coverage ownership</span><h2 id="coverage-finalization-title">Finalize assignment</h2></div><button type="button" onClick={()=>setCoverageFinalization(null)} aria-label="Close coverage finalization">×</button></header><p>Confirm the claimant against an active work unit. Field work creates the linked operational shift through the governed roster workflow.</p><label><span>Select work unit</span><select required value={coverageFinalization.workUnitId} onChange={(event)=>setCoverageFinalization({...coverageFinalization,workUnitId:event.target.value})}><option value="">Select work unit</option>{coverageWorkUnits.map((unit)=><option value={unit.id} key={unit.id}>{unit.name} · {unit.work_unit_type}</option>)}</select></label><label><span>Finalization notes</span><textarea rows={3} value={coverageFinalization.notes} onChange={(event)=>setCoverageFinalization({...coverageFinalization,notes:event.target.value})}/></label><footer><button type="button" className="btn btn-secondary" onClick={()=>setCoverageFinalization(null)}>Back</button><button type="submit" className="btn btn-primary" disabled={saving||!coverageFinalization.workUnitId}>{saving?'Finalizing':'Confirm assignment'}</button></footer></form></div>}
+      </div>
     </div>
   );
 };

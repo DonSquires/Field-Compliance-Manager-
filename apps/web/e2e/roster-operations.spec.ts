@@ -10,7 +10,78 @@ test.beforeEach(async ({ page }) => {
 	}));
 });
 
+test('roster command workbench keeps directory, range and governed timesheet review inline', async ({ page }) => {
+  const errors = monitorBrowserErrors(page);
+  const staffId = '22222222-2222-4222-8222-222222222222';
+  const sheetId = '38383838-3838-4838-8838-383838383838';
+  let status = 'submitted';
+  let reviewPayload: Record<string, unknown> | null = null;
+  let branchPayload: Record<string, unknown> | null = null;
+  await page.route('**/rest/v1/rpc/get_branch_timesheet_queue', async (route) => {
+    branchPayload = route.request().postDataJSON();
+    await route.fulfill({ contentType: 'application/json', body: JSON.stringify([{ id: sheetId, staff_id: staffId, period_start: '2026-08-24', period_end: '2026-09-06', scheduled_hours: 40, actual_hours: 42, work_derived_hours: 41, adjustment_hours: 1, status }]) });
+  });
+  await page.route('**/rest/v1/rpc/review_branch_timesheet', async (route) => {
+    reviewPayload = route.request().postDataJSON();
+    status = String(reviewPayload!.p_decision);
+    await route.fulfill({ contentType: 'application/json', body: JSON.stringify({ id: sheetId, status }) });
+  });
+  await signInAsAdmin(page, '/admin/roster');
+  const directory = page.getByRole('complementary', { name: 'Officer directory' });
+  const board = page.locator('.roster-board');
+  await expect(directory.getByText('Ana Ngata', { exact: true })).toBeVisible();
+  await expect(page.getByRole('button', { name: '1 timesheet approvals' })).toBeVisible();
+  await expect(page.getByLabel('Roster branch')).toHaveValue('41414141-4141-4141-8141-414141414141');
+  expect(branchPayload).toEqual({ p_operating_organization_id: '41414141-4141-4141-8141-414141414141' });
+  await directory.getByRole('button', { name: /Ana Ngata/ }).click();
+  await expect(board.getByText('Jordan Lee', { exact: true })).toHaveCount(0);
+  await expect(board.getByText('Ana Ngata', { exact: true })).toBeVisible();
+  await directory.getByRole('button', { name: 'All officers' }).click();
+  await page.getByLabel('Search officers').fill('Jordan');
+  await expect(board.getByText('Ana Ngata', { exact: true })).toHaveCount(0);
+  await page.getByLabel('Search officers').fill('');
+  await page.getByRole('button', { name: '1 timesheet approvals' }).click();
+  const reconciliation = page.getByRole('region', { name: 'Inline timesheet reconciliation' });
+  await expect(reconciliation.getByText('42', { exact: true })).toBeVisible();
+  await reconciliation.getByRole('button', { name: 'Branch check', exact: true }).click();
+  await reconciliation.getByLabel('Review notes').fill('Compared roster and governed work evidence.');
+  await reconciliation.getByRole('button', { name: 'Confirm decision' }).click();
+  await expect(reconciliation.getByText(/Audit decision recorded; no payment made\./)).toBeVisible();
+  expect(reviewPayload).toMatchObject({ p_expected_status: 'submitted', p_decision: 'branch_checked', p_timesheet_id: sheetId });
+  await expect(page.getByRole('button', { name: '0 timesheet approvals' })).toBeVisible();
+  await expect(reconciliation.getByText('A different corporate payroll reviewer must approve.')).toBeVisible();
+  const layout = await page.locator('.roster-command-workbench').evaluate((element) => ({
+    bottom: element.getBoundingClientRect().bottom,
+    viewport: window.innerHeight,
+    overflow: getComputedStyle(element).overflow,
+    minHeight: getComputedStyle(element).minHeight,
+    bodyWidth: document.documentElement.scrollWidth,
+    viewportWidth: window.innerWidth,
+  }));
+  expect(layout.bottom).toBeLessThanOrEqual(layout.viewport + 1);
+  expect(layout.overflow).toBe('hidden');
+  expect(layout.minHeight).toBe('0px');
+  expect(layout.bodyWidth).toBeLessThanOrEqual(layout.viewportWidth);
+  await page.getByLabel('Roster range start').fill('2026-10-12');
+  await expect(page.getByRole('button', { name: '0 timesheet approvals' })).toBeVisible();
+  await expect(reconciliation.getByText('No timesheets in this scope.')).toBeVisible();
+  expect(errors).toEqual([]);
+});
+
+test('roster directory never invents licences and timesheet read failures stay unknown', async ({ page }) => {
+  await page.route('**/rest/v1/rpc/get_operating_branch_roster_staff', async (route) => route.fulfill({ contentType: 'application/json', body: JSON.stringify([{ user_id: '22222222-2222-4222-8222-222222222222', staff_id: '22222222-2222-4222-8222-222222222222', display_name: 'Ana Ngata', employment_type: 'permanent', work_ready: true, credential_expiry: null, credential_verified: null }]) }));
+  await page.route('**/rest/v1/rpc/get_branch_timesheet_queue', async (route) => route.fulfill({ status: 403, contentType: 'application/json', body: JSON.stringify({ message: 'Local timesheet review authority required' }) }));
+  await signInAsAdmin(page, '/admin/roster');
+  const directory = page.getByRole('complementary', { name: 'Officer directory' });
+  await expect(directory.getByText('Credentials not recorded')).toBeVisible();
+  await expect(directory.getByText(/licence clear/i)).toHaveCount(0);
+  await page.getByRole('button', { name: '— timesheet approvals' }).click();
+  await expect(page.getByRole('region', { name: 'Inline timesheet reconciliation' }).getByRole('alert')).toContainText('Local timesheet review authority required');
+  await expect(page.getByRole('button', { name: '— timesheet approvals' })).toBeVisible();
+});
+
 test('enterprise roster week board is operational and visually stable', async ({ page }) => {
+ test.setTimeout(90_000);
  const errors=monitorBrowserErrors(page); await signInAsAdmin(page,'/admin/roster');
  await expect(page.getByRole('heading',{name:'Roster',exact:true})).toBeVisible();
  const board=page.locator('.roster-board');await expect(board.getByText('Ana Ngata',{exact:true})).toBeVisible(); await expect(board.getByText('Jordan Lee',{exact:true})).toBeVisible();
@@ -19,12 +90,13 @@ test('enterprise roster week board is operational and visually stable', async ({
  await expect(page).toHaveScreenshot('roster-overview-first-viewport.png');
  if((page.viewportSize()?.width??0)<900){await expect(page.locator('.roster-board-scroll-cue')).toBeVisible();const boardSize=await board.evaluate((element)=>({scrollWidth:element.scrollWidth,clientWidth:element.clientWidth}));expect(boardSize.scrollWidth).toBeGreaterThan(boardSize.clientWidth);}
  await page.getByRole('button',{name:'2 weeks'}).click();await expect(page.locator('.roster-board-head>div')).toHaveCount(15);expect(await board.evaluate((element)=>element.scrollWidth>element.clientWidth)).toBe(true);await page.getByRole('button',{name:'Month'}).click();await expect(page.locator('.roster-board-head>div')).toHaveCount(32);const stickyAtMonthEnd=await board.evaluate((element)=>{element.scrollLeft=element.scrollWidth;const boardLeft=element.getBoundingClientRect().left;return{headerOffset:Math.round(element.querySelector('.roster-board-head>div')!.getBoundingClientRect().left-boardLeft),rowOffset:Math.round(element.querySelector('.roster-person')!.getBoundingClientRect().left-boardLeft)};});expect(stickyAtMonthEnd).toEqual({headerOffset:1,rowOffset:1});for(let index=0;index<7;index+=1)await page.getByTitle('Previous period').click();await expect(page.getByLabel('Public holidays').getByText('Provincial anniversary day')).toBeVisible();await expect(page.getByLabel('Public holidays').getByText("New Year's Day",{exact:true})).toBeVisible();await expect(page.locator('.roster-horizon-bar')).toHaveScreenshot('roster-calendar-controls.png');await page.getByLabel('Regional holidays').selectOption('WGN');await expect(page.getByText('Regional public holiday calendar updated.')).toBeVisible();await board.evaluate((element)=>{element.scrollLeft=0;});await page.getByRole('button',{name:'Week',exact:true}).click();
+ await page.locator('.roster-operational-dock > summary').click();
  await expect(page.getByRole('heading',{name:'Availability restrictions'})).toBeVisible();const restriction=page.locator('.roster-availability-queue').getByRole('button',{name:/Jordan Lee/});await restriction.click();const availabilityDialog=page.getByRole('dialog',{name:'Staff availability'});await expect(availabilityDialog).toBeVisible();await expect(availabilityDialog.getByLabel('Staff member')).toHaveValue('2f2f2f2f-2222-4222-8222-222222222222');await expect(availabilityDialog.getByText('Unavailable on Sundays')).toBeVisible();await availabilityDialog.getByRole('button',{name:'Close',exact:true}).click();
  const commercialQueue=page.locator('.roster-commercial-queue');await expect(commercialQueue.getByRole('heading',{name:'Commercial readiness exceptions'})).toBeVisible();await commercialQueue.getByRole('button',{name:/Roster Administration/}).click();const commercialInspector=page.locator('.roster-slot-inspector');await expect(commercialInspector.getByText('Missing rule',{exact:true})).toBeVisible();await expect(commercialInspector.getByText('Not applicable',{exact:true})).toHaveCount(3);await expect(commercialInspector.getByText('Ready',{exact:true})).toBeVisible();await expect(commercialInspector).toHaveScreenshot('roster-commercial-readiness.png');if((page.viewportSize()?.width??0)<900){const factBackground=await commercialInspector.locator('dl > div').first().evaluate((element)=>getComputedStyle(element).backgroundColor);expect(factBackground).toBe('rgb(243, 246, 243)');}await commercialInspector.locator('header button').click();
  await expect(page.locator('.roster-board').getByText('Roster Administration',{exact:true})).toBeVisible();
  expect(await page.evaluate(()=>document.documentElement.scrollWidth<=window.innerWidth)).toBe(true);
  if((page.viewportSize()?.width??0)<600){await board.scrollIntoViewIfNeeded();await expect(page).toHaveScreenshot('roster-week-board.png');}else await expect(board).toHaveScreenshot('roster-week-board.png');
- await page.getByRole('button',{name:/20:00–04:00 site guard/i}).click(); await expect(page.getByText('Assignment',{exact:true})).toBeVisible(); await expect(page.getByText('On track',{exact:true})).toBeVisible(); await page.locator('.roster-inspector header button').click();
+ await page.getByRole('button',{name:/08:00–16:00 site guard/i}).click(); await expect(page.getByText('Assignment',{exact:true})).toBeVisible(); await expect(page.getByText('On track',{exact:true})).toBeVisible(); await page.locator('.roster-inspector header button').click();
  const slotQueue=page.locator('.roster-slot-queue');await slotQueue.getByRole('button',{name:/Roster Administration/}).click();await expect(page.getByText('Roster slot',{exact:true})).toBeVisible();await page.getByRole('button',{name:'Reassign'}).click();const reassignDialog=page.getByRole('dialog',{name:'Reassign roster slot?'});await expect(reassignDialog.getByRole('button',{name:'Confirm reassignment'})).toBeDisabled();await reassignDialog.getByLabel('Replacement officer').selectOption({label:'Jordan Lee'});await reassignDialog.getByLabel('Reassignment reason').fill('Coverage plan changed after supervisor review.');await expect(reassignDialog).toHaveScreenshot('roster-reassign-slot-dialog.png');await reassignDialog.getByRole('button',{name:'Confirm reassignment'}).click();await expect(page.getByText('Roster slot reassigned. The replacement officer has been asked to accept it.')).toBeVisible();await slotQueue.getByRole('button',{name:/Roster Administration/}).click();const cancelSlot=page.getByRole('button',{name:'Cancel slot'});await cancelSlot.scrollIntoViewIfNeeded();await cancelSlot.click();const cancelDialog=page.getByRole('dialog',{name:'Cancel roster slot?'});await expect(cancelDialog.getByRole('button',{name:'Confirm cancellation'})).toBeDisabled();await cancelDialog.getByLabel('Cancellation reason').fill('Internal priorities changed for this roster period.');await expect(cancelDialog).toHaveScreenshot('roster-cancel-slot-dialog.png');await cancelDialog.getByRole('button',{name:'Confirm cancellation'}).click();await expect(page.getByText('Roster slot cancelled, and its shift with it.')).toBeVisible();
  await page.getByRole('button',{name:'risk'}).click(); await expect(board.getByText('Jordan Lee',{exact:true})).toBeVisible(); await expect(board.getByText('Ana Ngata',{exact:true})).toBeHidden();
  await page.getByRole('button',{name:/Create shift/}).click(); const dialog=page.getByRole('dialog',{name:'Create shift'}); await expect(dialog).toBeVisible(); await dialog.getByLabel('Officer',{exact:true}).selectOption('22222222-2222-4222-8222-222222222222'); await dialog.getByLabel('Start',{exact:true}).fill('2026-08-30T10:00'); await dialog.getByLabel('End',{exact:true}).fill('2026-08-30T18:00'); await expect(dialog.getByText('Publish immediately')).toBeVisible(); await expect(dialog).toHaveScreenshot('roster-create-shift-dialog.png'); await dialog.getByRole('button',{name:'Create shift'}).click(); await expect(page.getByText('Shift published for Ana Ngata. They will see it on their schedule and can accept or decline.')).toBeVisible(); expect(errors,errors.join('\n')).toEqual([]);
@@ -34,6 +106,7 @@ test('administrator corrects staff availability with confirmation and receipts',
 	const errors = monitorBrowserErrors(page);
 	await signInAsAdmin(page, '/admin/roster');
 
+	await page.locator('.roster-operational-dock > summary').click();
 	await page.locator('.roster-availability-queue').getByRole('button', { name: /Jordan Lee/ }).click();
 	const dialog = page.getByRole('dialog', { name: 'Staff availability' });
 	await expect(dialog).toBeVisible();
@@ -57,6 +130,7 @@ test('administrator corrects staff availability with confirmation and receipts',
 
 test('administrator copies an existing roster assignment into a future draft', async ({ page }) => {
 	await signInAsAdmin(page, '/admin/roster');
+	await page.locator('.roster-operational-dock > summary').click();
 	await page.locator('.roster-slot-queue').getByRole('button', { name: /Roster Administration/ }).click();
 	await page.getByRole('button', { name: 'Copy selected' }).click();
 	const dialog = page.getByRole('dialog', { name: 'Create shift' });
@@ -74,6 +148,7 @@ test('the Create shift dialog says what the shift would contain on that day befo
                 await route.fulfill({ status: 200, contentType: 'application/json', body: JSON.stringify({ kind: 'patrol', ok: false, has_route: true, config_count: 3, stop_count: 0, day_of_week: 6, contracted_days: [1, 2, 3, 4, 5] }) });
         });
         await signInAsAdmin(page, '/admin/roster');
+        await page.locator('.roster-operational-dock > summary').click();
         await page.locator('.roster-slot-queue').getByRole('button', { name: /Roster Administration/ }).click();
         await page.getByRole('button', { name: 'Copy selected' }).click();
         const dialog = page.getByRole('dialog', { name: 'Create shift' });
@@ -93,6 +168,7 @@ test('a shift outside the contracted hours, or too short for the contracted visi
                 await route.fulfill({ status: 200, contentType: 'application/json', body: JSON.stringify({ kind: 'patrol', ok: shape !== 'night', has_route: true, config_count: 1, stop_count: 2, day_of_week: 2, contracted_days: [1, 2, 3, 4, 5], window_start: '07:00', window_end: '19:00', visits_max: 2, min_gap_minutes: 60, outside_window: shape === 'night', too_short_for_visits: shape === 'short' }) });
         });
         await signInAsAdmin(page, '/admin/roster');
+        await page.locator('.roster-operational-dock > summary').click();
         await page.locator('.roster-slot-queue').getByRole('button', { name: /Roster Administration/ }).click();
         await page.getByRole('button', { name: 'Copy selected' }).click();
         const dialog = page.getByRole('dialog', { name: 'Create shift' });
@@ -109,6 +185,7 @@ test('a static post whose place has no verified boundary is flagged at roster ti
                 await route.fulfill({ status: 200, contentType: 'application/json', body: JSON.stringify({ kind: 'static', ok: false, has_module: true, place_name: 'Tahunanui Patrol Zone', place_kind: 'zone', boundary_verified: false }) });
         });
         await signInAsAdmin(page, '/admin/roster');
+        await page.locator('.roster-operational-dock > summary').click();
         await page.locator('.roster-slot-queue').getByRole('button', { name: /Roster Administration/ }).click();
         await page.getByRole('button', { name: 'Copy selected' }).click();
         const dialog = page.getByRole('dialog', { name: 'Create shift' });
@@ -119,6 +196,7 @@ test.describe('in the roster operating timezone', () => {
 
         test('administrator repeats a selected assignment across a date range', async ({ page }) => {
                 await signInAsAdmin(page, '/admin/roster');
+                await page.locator('.roster-operational-dock > summary').click();
                 await page.locator('.roster-slot-queue').getByRole('button', { name: /Roster Administration/ }).click();
                 await page.getByRole('button', { name: 'Repeat selected' }).click();
                 const dialog = page.getByRole('dialog', { name: 'Repeat assignment' });
@@ -157,6 +235,7 @@ test('rosterer sees open shifts in the board and publishes drafts after a plain-
         await expect(inspector.getByText('Draft – not sent yet', { exact: true })).toBeVisible();
         await expect(inspector.getByText('Not needed for office work', { exact: true })).toBeVisible();
         await inspector.locator('header button').click();
+        await page.locator('.roster-operational-dock > summary').click();
         await expect(page.locator('.roster-slot-queue').getByText('All shifts this period')).toBeVisible();
         await page.getByRole('button', { name: 'Publish 2 drafts' }).click();
         const dialog = page.getByRole('dialog', { name: 'Publish 2 draft shifts?' });
@@ -238,6 +317,7 @@ test('work-unit add targets the chosen unit even when another draft is selected'
         }])));
 
         await signInAsAdmin(page, '/admin/roster');
+        await page.locator('.roster-operational-dock > summary').click();
         await page.locator('.roster-slot-queue').getByRole('button', { name: /Roster Administration/ }).click();
         await page.getByRole('button', { name: 'Work unit schedule' }).click();
         await page.locator('.roster-board').getByRole('button', { name: /Add shift for North District Patrol on/ }).first().click();
@@ -249,7 +329,7 @@ test('work-unit add targets the chosen unit even when another draft is selected'
 
 test('roster opens the branch timesheet correction and approval queue directly', async ({ page }) => {
         await signInAsAdmin(page, '/admin/roster');
-        await page.getByRole('button', { name: 'Timesheets & approvals' }).click();
+        await page.getByRole('button', { name: 'Open HR workspace' }).click();
         await expect(page).toHaveURL(/\/admin\/people-hr\?tab=timesheets$/);
         await expect(page.getByRole('heading', { name: /Branch timesheets/ })).toBeVisible();
 
@@ -283,6 +363,7 @@ test('the Create shift dialog shows the officer\'s rest, hours and days in a row
                 await route.fulfill({ status: 200, contentType: 'application/json', body: JSON.stringify({ staff_id: payload.p_staff_id, work_ready: true, rules: { min_rest_hours_between_shifts: 10, max_hours_per_week: 60, max_consecutive_days: 6, enforced: true }, rest_hours: 4, week_start: '2026-08-24', week_hours: 44, consecutive_days: 3, availability_conflict: false, conflict: "Only 4 hours' rest from the nearest other shift; this organisation requires 10", credential_warnings: [{ credential_type: 'Security licence', expiry_date: '2026-08-28', verified: true }] }) });
         });
         await signInAsAdmin(page, '/admin/roster');
+        await page.locator('.roster-operational-dock > summary').click();
         await page.locator('.roster-slot-queue').getByRole('button', { name: /Roster Administration/ }).click();
         await page.getByRole('button', { name: 'Copy selected' }).click();
         const dialog = page.getByRole('dialog', { name: 'Create shift' });
@@ -304,6 +385,7 @@ test('when the employer has no rest and hours rules the Create shift dialog says
                 await route.fulfill({ status: 400, contentType: 'application/json', body: JSON.stringify({ code: 'P0001', message: "Fatigue rule breach: Only 4 hours' rest from the nearest other shift; this organisation requires 10", details: null, hint: null }) });
         });
         await signInAsAdmin(page, '/admin/roster');
+        await page.locator('.roster-operational-dock > summary').click();
         await page.locator('.roster-slot-queue').getByRole('button', { name: /Roster Administration/ }).click();
         await page.getByRole('button', { name: 'Copy selected' }).click();
         const dialog = page.getByRole('dialog', { name: 'Create shift' });

@@ -17,11 +17,9 @@ describe('finance card system', () => {
     expect(style).toContain('min-height:170px');
   });
 
-  it('uses the card system for the finance home tasks', () => {
-    expect(home).toContain("import { FinanceCard } from '../components/FinanceCard';");
-    expect(home).toContain('<FinanceCard eyebrow="Daily overview"');
-    expect(home).toContain('<FinanceCard eyebrow="Connections"');
-    expect(home).toContain('<FinanceCard eyebrow="Before quoting"');
-    expect(home).toContain('<FinanceCard eyebrow="Prices"');
+  it('opens the selected-tool workbench instead of stacking home task cards', () => {
+    expect(home).toContain("import FinanceMoneyPage from './FinanceMoneyPage';");
+    expect(home).toContain('initialWorkflow="invoices"');
+    expect(home).not.toContain('<FinanceCard');
   });
 });

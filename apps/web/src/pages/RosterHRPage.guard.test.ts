@@ -11,6 +11,18 @@ const staffProfilePage = read('src/pages/StaffProfilePage.tsx');
 const credentialSql = read('../../supabase/migrations/20260901002000_govern_staff_credential_renewal.sql');
 
 describe('governed HR administration', () => {
+  it('shares inline reconciliation without granting payroll authority or inventing receipts', () => {
+    expect(page).toContain('export const RosterTimesheetPanel');
+    expect(page).toContain('const TimesheetRows');
+    expect(page).toContain('item.period_start <= to && item.period_end >= from');
+    expect(page).toContain("scoped.filter((item) => item.status === 'submitted').length");
+    expect(page).toContain('onPendingCount(null)');
+    expect(page).toContain('p_expected_status: decision.item.status');
+    expect(page).toContain('confirmed?.id !== decision.item.id || confirmed?.status !== decision.action');
+    expect(page).toContain('corporateReviewer={false}');
+    expect(page).toContain('no payment made');
+    expect(page).toContain('hr-workbench-scroll');
+  });
   it('matches live roster schema and branch context', () => {
     expect(page).toContain(".select('id, user_id, employment_type, start_date, end_date, work_ready, role_code')");
     expect(page).toContain('operatingOrganizationId\n            ? supabase.rpc');

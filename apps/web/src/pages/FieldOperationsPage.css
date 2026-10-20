@@ -1,37 +1,46 @@
-.field-ops-home { width: 100%; max-width: 1320px; margin: 0 auto; padding: 26px 26px 52px; }
-.field-ops-header { display: flex; align-items: flex-end; justify-content: space-between; gap: 20px; padding-bottom: 20px; border-bottom: 1px solid #29394b; }
-.field-ops-header > div:first-child > span, .field-ops-section-heading span { color: #7dd3c7; font-size: 12px; font-weight: 850; text-transform: uppercase; }
-.field-ops-header h1 { margin: 4px 0 0; color: #edf4fa; font-size: 28px; letter-spacing: 0; }
-.field-ops-header p { margin: 6px 0 0; color: var(--color-text-secondary); font-size: 13px; }
-.field-ops-refresh { display: flex; align-items: center; gap: 11px; }
-.field-ops-refresh time { color: var(--color-text-muted); font-size: 12px; }
-.field-ops-refresh button { display: inline-flex; align-items: center; gap: 7px; min-height: 36px; padding: 0 12px; border: 1px solid #47716d; border-radius: 6px; color: #a7e8df; background: #0d2526; cursor: pointer; font-size: 12px; font-weight: 800; }
-.field-ops-refresh button:disabled { cursor: wait; opacity: .6; }
-.field-ops-warning { display: flex; gap: 10px; margin-top: 14px; padding: 11px 13px; border: 1px solid #7a5d19; border-radius: 7px; color: #ffe39a; background: #2c240d; }
-.field-ops-warning div { display: grid; gap: 3px; min-width: 0; }
-.field-ops-warning strong { font-size: 12px; }
-.field-ops-warning span { overflow-wrap: anywhere; color: #d9bd74; font-size: 12px; }
-.field-ops-workflows { margin-top: 22px; padding: 18px; border: 1px solid #29394b; border-radius: 8px; background: #091321; }
-.field-ops-section-heading { display: flex; align-items: end; justify-content: space-between; gap: 16px; margin-bottom: 14px; }
-.field-ops-section-heading h2 { margin: 3px 0 0; color: #e7eff6; font-size: 17px; letter-spacing: 0; }
-.field-ops-section-heading small { color: #728497; font-size: 12px; }
-.field-ops-workflows { margin-top: 14px; padding: 0; border: 0; background: transparent; }
-.field-ops-workflow-group + .field-ops-workflow-group { margin-top: 18px; padding-top: 16px; border-top: 1px solid #29394b; }
-.field-ops-workflow-group > div:first-child { margin-bottom: 9px; }
-.field-ops-workflow-group > div:first-child span { color: #7dd3c7; font-size: 11px; font-weight: 800; text-transform: uppercase; }
-.field-ops-workflow-group h3 { margin: 2px 0 0; color: #dce7f1; font-size: 14px; }
-.field-ops-workflow-grid { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 8px; }
-.field-ops-workflow { display: grid; grid-template-columns: auto minmax(0, 1fr) max-content auto; align-items: center; gap: 12px; min-height: 72px; padding: 12px 13px; border: 1px solid #293b4d; border-radius: 6px; color: #dce7f1; background: #0c1827; cursor: pointer; text-align: left; }
-.field-ops-workflow:hover { border-color: #547b82; background: #102131; }
-.field-ops-workflow > span { display: grid; place-items: center; width: 37px; height: 37px; border-radius: 6px; color: #8dc7ce; background: #14283a; }
-.field-ops-workflow > div { display: grid; gap: 4px; min-width: 0; }
-.field-ops-workflow strong { font-size: 13px; }
-.field-ops-workflow small { overflow: hidden; color: #8ea0b1; font-size: 12px; text-overflow: ellipsis; white-space: nowrap; }
-.field-ops-workflow-count { min-width: 62px; color: #c5d6e6; font-size: 12px; font-weight: 750; text-align: right; white-space: nowrap; }
-.field-ops-workflow-count.is-unavailable { color: #a7b1bb; font-weight: 600; }
-.field-ops-workflow > svg { color: #5e758a; }
-.field-ops-workflow.tone-red > span { color: #ff9696; background: #351a1a; }
-.field-ops-workflow.tone-green > span { color: #82d9b1; background: #0b281f; }
-.field-ops-workflow.tone-amber > span { color: #ffd166; background: #2c240d; }
-.field-ops-workflow.tone-slate > span { color: #c4cbd3; background: #232c37; }
-@media (max-width: 640px) { .field-ops-home { padding: 18px 14px 42px; } .field-ops-header { align-items: flex-start; flex-direction: column; } .field-ops-refresh { width: 100%; justify-content: space-between; } .field-ops-workflow-grid { grid-template-columns: 1fr; } .field-ops-section-heading { align-items: flex-start; flex-direction: column; } .field-ops-workflow small { white-space: normal; } }
+.admin-shell[data-theme] .field-ops-command { display: flex; flex-direction: column; width: 100%; height: 100%; min-height: 0; min-width: 0; max-width: none; margin: 0; padding: 0; overflow: hidden; background: var(--console-surface,#fff); color: var(--console-text,#0f172a); }
+.field-ops-command * { box-sizing: border-box; }
+.admin-shell[data-theme] .field-ops-command .field-ops-header { display: flex; align-items: center; justify-content: space-between; flex: 0 0 auto; min-height: 48px; gap: 8px; padding: 4px 8px; border-bottom: 1px solid var(--console-border,#e2e8f0); }
+.admin-shell[data-theme] .field-ops-command .field-ops-header h1 { margin: 0; font-size: 16px; color: var(--console-text,#0f172a); }
+.admin-shell[data-theme] .field-ops-command .field-ops-header > div > span { display: none; }
+.admin-shell[data-theme] .field-ops-command .field-ops-header p { margin: 2px 0 0; font-size: 11px; color: var(--console-muted,#475569); }
+.field-ops-command .field-ops-refresh { display: flex; align-items: center; gap: 8px; }
+.field-ops-command time { font-family: ui-monospace,SFMono-Regular,Menlo,monospace; font-variant-numeric: tabular-nums; font-size: 11px; }
+.admin-shell[data-theme] .field-ops-command .field-ops-refresh button { display: inline-flex; align-items: center; gap: 4px; min-height: 28px; padding: 0 8px; border: 1px solid var(--console-border,#e2e8f0); border-radius: 0; color: #fff; background: var(--console-action,#0f172a); cursor: pointer; font-size: 12px; }
+.field-ops-command button:disabled { opacity: .65; cursor: default; }
+.field-ops-command :is(button,input):focus-visible { outline: 2px solid var(--console-focus,#1e40af); outline-offset: -2px; }
+.admin-shell[data-theme] .field-ops-command .field-ops-warning { display: flex; flex: 0 0 auto; gap: 6px; max-height: 76px; overflow: auto; margin: 0; padding: 6px 8px; border: 0; border-bottom: 1px solid #d97706; border-radius: 0; background: #fffbeb; color: #92400e; font-size: 12px; }
+.field-ops-command .field-ops-warning div { display: grid; gap: 2px; }
+.admin-shell[data-theme] .field-ops-command .field-ops-warning span { color: #92400e; overflow-wrap: anywhere; }
+.field-ops-command .field-ops-filter { display: flex; align-items: center; gap: 8px; min-height: 36px; padding: 4px 8px; border-bottom: 1px solid var(--console-border,#e2e8f0); font-size: 12px; }
+.field-ops-command .field-ops-filter input { width: min(280px,50%); min-width: 0; min-height: 28px; border: 1px solid var(--console-border,#e2e8f0); border-radius: 0; padding: 4px 8px; background: #fff; color: #0f172a; font-size: 12px; }
+.field-ops-command .field-ops-filter small { color: var(--console-muted,#475569); font-size: 11px; }
+.admin-shell[data-theme] .field-ops-command .field-ops-workflows { display: grid; grid-template-columns: minmax(0,1fr) minmax(0,1fr); flex: 1 1 0; min-height: 0; min-width: 0; gap: 0; margin: 0; padding: 0; border: 0; border-radius: 0; background: transparent; }
+.admin-shell[data-theme] .field-ops-command .field-ops-workflow-group { display: flex; flex-direction: column; min-height: 0; min-width: 0; margin: 0; padding: 0; border: 1px solid var(--console-border,#e2e8f0); }
+.admin-shell[data-theme] .field-ops-command .field-ops-workflow-group > div:first-child { display: flex; align-items: center; justify-content: space-between; flex: 0 0 auto; min-height: 36px; gap: 4px; margin: 0; padding: 4px 8px; border-bottom: 1px solid var(--console-border,#e2e8f0); }
+.admin-shell[data-theme] .field-ops-command .field-ops-workflow-group h2 { margin: 0; font-size: 13px; color: var(--console-text,#0f172a); }
+.admin-shell[data-theme] .field-ops-command .field-ops-workflow-group > div:first-child span { color: var(--console-muted,#475569); font-size: 10px; text-transform: none; }
+.admin-shell[data-theme] .field-ops-command .field-ops-workflow-grid { display: flex; flex-direction: column; flex: 1 1 0; min-height: 0; gap: 0; overflow-y: auto; overscroll-behavior: contain; }
+.admin-shell[data-theme] .field-ops-command .field-ops-workflow { display: grid; grid-template-columns: 18px minmax(0,1fr) auto 14px; flex: 0 0 auto; align-items: center; gap: 8px; min-height: 44px; margin: 0; padding: 4px 8px; border: 0; border-bottom: 1px solid var(--console-border,#e2e8f0); border-radius: 0; background: #fff; color: var(--console-text,#0f172a); text-align: left; cursor: pointer; box-shadow: none; }
+.admin-shell[data-theme] .field-ops-command .field-ops-workflow:hover { background: #f1f5f9; }
+.admin-shell[data-theme] .field-ops-command .field-ops-workflow > span.field-ops-workflow-icon { display: flex; width: 18px; height: 18px; padding: 0; border-radius: 0; background: none; color: var(--console-muted,#475569); }
+.field-ops-command .field-ops-workflow > div { display: grid; gap: 2px; min-width: 0; }
+.field-ops-command .field-ops-workflow strong { font-size: 12px; }
+.admin-shell[data-theme] .field-ops-command .field-ops-workflow small { display: block; overflow: hidden; white-space: nowrap; text-overflow: ellipsis; color: var(--console-muted,#475569); font-size: 10px; }
+.admin-shell[data-theme] .field-ops-command .field-ops-workflow > span.field-ops-workflow-count { display: block; width: auto; height: auto; min-width: 0; padding: 0; border-radius: 0; color: var(--console-muted,#475569); background: none; font-size: 11px; font-family: ui-monospace,SFMono-Regular,Menlo,monospace; font-variant-numeric: tabular-nums; white-space: nowrap; }
+.field-ops-command .field-ops-empty { padding: 8px; margin: 0; color: var(--console-muted,#475569); font-size: 12px; }
+.field-ops-command .field-ops-pane-switcher { display: none; }
+@media (max-width:767px) {
+  .field-ops-command .field-ops-refresh time, .field-ops-command .field-ops-filter small { display: none; }
+  .admin-shell[data-theme] .field-ops-command .field-ops-header p { display: none; }
+  .field-ops-command .field-ops-filter input { flex: 1; min-height: 44px; }
+  .admin-shell[data-theme] .field-ops-command .field-ops-refresh button { min-height: 44px; }
+  .field-ops-command .field-ops-pane-switcher { display: flex; flex: 0 0 44px; }
+  .field-ops-command .field-ops-pane-switcher button { flex: 1; border: 0; border-bottom: 1px solid var(--console-border,#e2e8f0); color: #475569; background: #f8fafc; font-size: 12px; }
+  .field-ops-command .field-ops-pane-switcher [aria-pressed=true] { color: #fff; background: var(--console-action,#0f172a); }
+  .admin-shell[data-theme] .field-ops-command .field-ops-workflows { display: flex; }
+  .field-ops-command .field-ops-workflow-group { flex: 1; }
+  .admin-shell[data-theme] .field-ops-command[data-active-group=respond] .field-ops-review,
+  .admin-shell[data-theme] .field-ops-command[data-active-group=review] .field-ops-respond { display: none; }
+  .admin-shell[data-theme] .field-ops-command .field-ops-workflow { min-height: 52px; }
+}

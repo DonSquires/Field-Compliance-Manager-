@@ -128,7 +128,7 @@ describe('governed CRM accounts', () => {
   it('shows a provider tenant its own platform subscription and invoices only its operational agreements', () => {
     expect(page).toContain(".eq('client_organization_id', orgId)");
     expect(page).toContain(".eq('agreement_type', 'financial')");
-    expect(page).toContain('Platform Subscription');
+    expect(page).toContain('Platform subscription');
     expect(page).toContain("agreement.provider_organization_id === (operatingOrganizationId ?? profile?.organizationId) && agreement.invitation_status === 'accepted'");
   });
 
@@ -137,15 +137,15 @@ describe('governed CRM accounts', () => {
     expect(page).toContain('consolidatedCommercial: (consolidatedCommercial as ConsolidatedCommercialRow[]) ?? []');
     expect(page).toContain('Group commercial oversight');
     expect(page).toContain('row.source_organization_name');
-    expect(page).toContain('Provider and branch-owned commercial activity for the last 30 days.');
+    expect(page).toContain('Commercial totals for the last 30 days');
     expect(page).toContain('row.service_cost_total');
-    expect(page).toContain('row.service_cost_count');
+    expect(page).toContain('crm-kpi-ribbon');
   });
 
   it('loads client portfolios through their accountable operating provider branch', () => {
     expect(page).toContain("supabase.rpc('get_crm_provider_portfolio'");
     expect(page).toContain('operating_provider_organization_id');
-    expect(page).toContain('Operating provider: ${client.operating_provider_name}');
+    expect(page).toContain('Provider: ${account.operating_provider_name}');
     expect(page).toContain('client.operating_provider_organization_id ?? operatingOrganizationId ?? profile?.organizationId');
     expect(page).toContain('Client Portfolios');
   });
@@ -153,7 +153,7 @@ describe('governed CRM accounts', () => {
   it('opens the exact account workspace once from explicit URL context', () => {
     expect(page).toContain('openedContextAccountId');
     expect(page).toContain('account.id === requestedAccountId');
-    expect(page).toContain('setWorkspaceAccount({ id: requestedAccount.id, name: requestedAccount.name,');
+    expect(page).toContain('setDirectorySelection(requestedAccount.id)');
   });
 
   it('clears CRM loading state when operating organization scope is unavailable', () => {
@@ -168,7 +168,7 @@ describe('governed CRM accounts', () => {
     expect(page).toContain('Set up a new client');
     expect(page).toContain("onNavigate('client-setup')");
     expect(page).toContain('Add other organisation');
-    expect(page).toContain('client.next_action');
+    expect(page).toContain('entry.account?.next_action');
     expect(organizationDialog).toMatch(/Search all FCM organizations by name, NZBN, or an owned-place[\s\S]*address before creating/);
     expect(organizationDialog).toMatch(/Search results reveal identity details[\s\S]*service-specific contacts are added during setup/);
     expect(organizationDialog).toContain('Organization name or address');
@@ -183,5 +183,21 @@ describe('governed CRM accounts', () => {
     expect(page).toContain('onUseOrganization={(organization) =>');
     expect(page).toContain("setWorkspaceInitialView('sites')");
     expect(page).not.toMatch(/\.from\(["']organizations["']\)\.insert/);
+  });
+
+  describe('single-screen CRM directory', () => {
+    it('merges relationship lists and embeds the shared governed delivery model after the contact editor', () => {
+      expect(page).toContain('new Map<string,');
+      expect(page).toContain('[...state.contractedOrgs, ...state.platformSubscribers]');
+      expect(page).toContain('Directory filter');
+      expect(page).toContain("['government', 'Government']");
+      expect(page).toContain("['private_enterprise', 'Private enterprise']");
+      expect(page).toContain("['contractor', 'Contractor']");
+      expect(page.indexOf('<CrmPrimaryContactEditor')).toBeLessThan(page.indexOf('<ClientSetupPage'));
+      expect(page).toContain('embedded onDirtyChange={matrixDirty}');
+      expect(page).toContain('directoryDirty.contact || directoryDirty.matrix');
+      expect(page).not.toContain('<h2>Branches (');
+      expect(page).not.toContain('<h2>Organizations We Contract With');
+    });
   });
 });

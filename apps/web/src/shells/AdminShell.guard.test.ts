@@ -129,7 +129,7 @@ describe('AdminShell access and routing boundaries', () => {
 
   it('keeps people and HR accessible until the local roster workspace is consolidated', () => {
     expect(source).toContain("{ id: 'people-hr', label: 'People, Pay & HR'");
-    expect(source).toContain('return <RosterHRPage />');
+    expect(source).toContain("new URLSearchParams(location.search).has('profile') ? <StaffProfilePage /> : <RosterHRPage />");
     expect(source).toContain("'roster_hr': { page: 'people-hr' }");
   });
 
@@ -163,5 +163,36 @@ describe('AdminShell access and routing boundaries', () => {
     expect(source).toContain('agreementId: workflowContext.agreementId');
     expect(source).toContain('locationId: workflowContext.locationId');
     expect(source).toContain('workUnitId: workflowContext.workUnitId');
+  });
+
+  it('scopes telemetry to the operating organisation and selected zones without inventing missing counts', () => {
+    expect(source).toContain("contextMatchesOrganization ? selectedAgreementZones.map((zone) => zone.id) : []");
+    expect(source).toContain("loadedOrganizationId === activeOrganizationId");
+    expect(source.match(/\.eq\('organization_id', organizationId\)/g)?.length).toBeGreaterThanOrEqual(4);
+    expect(source).toContain('value: result.error ? null : result.count');
+    expect(source).toContain("isModuleEnabled('welfare', { safetyRelevant: true })");
+    expect(source).toContain('telemetry.welfareEnabled ?');
+    expect(source).toContain('Organisation-wide; welfare alerts have no zone field.');
+    expect(source).toContain('cancelled = true; window.clearInterval(interval)');
+  });
+
+  it('keeps grouped operational navigation and global service context outside the scrolling canvas', () => {
+    expect(source).toContain("label: 'Live Ops'");
+    expect(source).toContain("label: 'Evidence & Reports'");
+    expect(source).toContain("label: 'Site & Spatial Setup'");
+    expect(source).toContain('aria-label="Workspace destination"');
+    expect(source).toContain('<PlaceContextBanner compact organizationWide={isOrgWideCctvWorkspace} organizationId={activeOrganizationId} />');
+    expect(source).toContain('className="admin-shell-page"');
+  });
+
+  it('lets the CRM matrix replace rather than duplicate shell workflow controls', () => {
+    expect(source).toContain("const showWorkflowNavigation = !['crm', 'client-setup', 'finance-bureau', 'finance-money'].includes(activePage)");
+    expect(source).toContain("['hub', 'crm', 'client-setup', 'finance-bureau', 'finance-money', 'roster'].includes(activePage)");
+    expect(source.match(/activeWorkspace && showWorkflowNavigation && <WorkspaceToolbar/g)).toHaveLength(2);
+    expect(source.match(/showWorkflowNavigation && <WorkflowRail/g)).toHaveLength(2);
+  });
+
+  it('contains the HR workbench without locking ordinary staff-profile pages', () => {
+    expect(source).toContain("(activePage === 'people-hr' && !new URLSearchParams(location.search).has('profile'))");
   });
 });

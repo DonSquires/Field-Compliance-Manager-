@@ -352,7 +352,7 @@ test('administrator corrects submitted timesheet hours before review', async ({ 
   await dialog.getByLabel('Actual hours').fill('40');
   await dialog.getByLabel('Correction reason').fill('Corrected after comparing the signed attendance record.');
   await dialog.getByRole('button', { name: 'Save correction' }).click();
-  await expect(page.getByRole('status')).toContainText('Timesheet hours corrected and returned to submitted review.');
+  await expect(page.locator('.roster-hr-page .alert-success')).toContainText('Timesheet hours corrected and returned to submitted review.');
 });
 
 test('administrator returns branch-checked time for correction and reapproves it', async ({ page }) => {

@@ -3096,3 +3096,28 @@
   color: #ffffff;
   background: #b42332;
 }
+
+.admin-shell {
+  --console-dark-primary-text: #ffffff;
+  --console-dark-primary-bg: #1e40af;
+  --console-dark-secondary-text: #f8fafc;
+  --console-dark-secondary-bg: #1e293b;
+  --console-dark-button-border: #475569;
+}
+
+.admin-shell[data-theme] :is(.finance-control-centre, .finance-control-panel, .console-dark-panel, [data-surface='dark'], .reports-hub-page, .investigation-page) button:not(.btn-danger):not(.is-danger):not(.btn-destructive):not([data-variant='destructive']):not(.alert-close) {
+  color: var(--console-dark-secondary-text);
+  background: var(--console-dark-secondary-bg);
+  border: 1px solid var(--console-dark-button-border);
+}
+
+.admin-shell[data-theme] :is(.finance-control-centre, .finance-control-panel, .console-dark-panel, [data-surface='dark'], .reports-hub-page, .investigation-page) :is(button.btn-primary, button[type='submit']):not(.btn-danger):not(.is-danger):not(.btn-destructive):not([data-variant='destructive']) {
+  color: var(--console-dark-primary-text);
+  background: var(--console-dark-primary-bg);
+  border-color: var(--console-dark-primary-bg);
+}
+
+.admin-shell[data-theme] :is(.finance-control-centre, .finance-control-panel, .console-dark-panel, [data-surface='dark'], .reports-hub-page, .investigation-page) button:focus-visible {
+  outline: 2px solid #93c5fd;
+  outline-offset: 2px;
+}

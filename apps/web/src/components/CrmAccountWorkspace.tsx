@@ -87,6 +87,62 @@ const emptyActivity = { type: 'call', subject: '', details: '', outcome: '', occ
 const emptyChildOrganization = { name: '', type: 'client', nzbn: '', notes: '' };
 const MAX_TENDER_DOCUMENT_BYTES = 25 * 1024 * 1024;
 
+export function CrmPrimaryContactEditor({ accountId, canEdit, onDirtyChange }: { accountId: string; canEdit: boolean; onDirtyChange: (dirty: boolean) => void }) {
+  const [contact, setContact] = useState<Contact | null>(null);
+  const [form, setForm] = useState({ firstName: '', lastName: '', email: '', phone: '' });
+  const [loading, setLoading] = useState(true);
+  const [saving, setSaving] = useState(false);
+  const [dirty, setDirty] = useState(false);
+  const [loadFailed, setLoadFailed] = useState(false);
+  const [error, setError] = useState<string | null>(null);
+  const [notice, setNotice] = useState<string | null>(null);
+  const request = useRef(crypto.randomUUID());
+  useEffect(() => { onDirtyChange(dirty); }, [dirty, onDirtyChange]);
+  useEffect(() => {
+    if (!dirty) return;
+    const guard = (event: BeforeUnloadEvent) => { event.preventDefault(); event.returnValue = ''; };
+    window.addEventListener('beforeunload', guard);
+    return () => window.removeEventListener('beforeunload', guard);
+  }, [dirty]);
+  useEffect(() => {
+    let cancelled = false;
+    void supabase.from('crm_contacts').select('id,first_name,last_name,role_title,email,phone,mobile,is_primary,is_emergency,notes,updated_at,deactivated_at').eq('organization_id', accountId).eq('is_primary', true).is('deactivated_at', null).maybeSingle().then((result) => {
+      if (cancelled) return;
+      if (result.error) { setError(result.error.message); setLoadFailed(true); }
+      else {
+        const primary = result.data as Contact | null;
+        setContact(primary);
+        setForm({ firstName: primary?.first_name ?? '', lastName: primary?.last_name ?? '', email: primary?.email ?? '', phone: primary?.phone ?? '' });
+      }
+      setLoading(false);
+    });
+    return () => { cancelled = true; };
+  }, [accountId]);
+  const save = async (event: FormEvent) => {
+    event.preventDefault();
+    if (!canEdit || loading || saving || loadFailed) return;
+    if (!form.firstName.trim() || !form.lastName.trim() || !(form.email.trim() || form.phone.trim() || contact?.mobile)) {
+      setError('Both names and an email or phone are required.'); return;
+    }
+    setSaving(true); setError(null); setNotice(null);
+    const result = await supabase.rpc('manage_crm_contact', {
+      p_client_request_id: request.current, p_contact_id: contact?.id ?? null, p_account_organization_id: accountId,
+      p_expected_updated_at: contact?.updated_at ?? null, p_action: contact ? 'update' : 'create',
+      p_first_name: form.firstName.trim(), p_last_name: form.lastName.trim(), p_role_title: contact?.role_title ?? null,
+      p_email: form.email.trim() || null, p_phone: form.phone.trim() || null, p_mobile: contact?.mobile ?? null,
+      p_is_primary: true, p_is_emergency: contact?.is_emergency ?? false, p_notes: contact?.notes ?? null,
+    });
+    if (result.error || !result.data?.id || !result.data.updated_at) setError(result.error?.message ?? 'Primary contact receipt was not confirmed. Your draft is retained.');
+    else { setContact(result.data as Contact); setDirty(false); setNotice('Primary contact saved.'); request.current = crypto.randomUUID(); }
+    setSaving(false);
+  };
+  return <form className="crm-inline-primary-contact" aria-label="Primary contact editor" onSubmit={(event) => void save(event)}>
+    <header><h3>Primary contact</h3><button type="submit" disabled={!canEdit || loading || saving || !dirty || !form.firstName.trim() || !form.lastName.trim() || !(form.email.trim() || form.phone.trim() || contact?.mobile)}>{saving ? 'Saving…' : 'Save contact'}</button></header>
+    {loading ? <p role="status">Loading primary contact…</p> : <fieldset disabled={!canEdit || saving || loadFailed}>{([{ key: 'firstName', label: 'First name' }, { key: 'lastName', label: 'Last name' }, { key: 'email', label: 'Email' }, { key: 'phone', label: 'Phone' }] as const).map((field) => <label key={field.key}><span>{field.label}</span><input type={field.key === 'email' ? 'email' : 'text'} value={form[field.key]} onChange={(event) => { setForm({ ...form, [field.key]: event.target.value }); setDirty(true); }} /></label>)}</fieldset>}
+    {error && <p role="alert">{error}</p>}{notice && <p role="status">{notice}</p>}
+  </form>;
+}
+
 async function fileSha256(file: File): Promise<string> {
   const digest = await crypto.subtle.digest('SHA-256', await file.arrayBuffer());
   return Array.from(new Uint8Array(digest), (byte) => byte.toString(16).padStart(2, '0')).join('');

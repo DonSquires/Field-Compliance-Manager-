@@ -42,6 +42,7 @@ test('manual labour cost follows the selected shift agreement and requires a rea
   });
 
   await signInAsAdmin(page, '/admin/finance-money');
+  await page.getByRole('button', { name: /Job BOM \/ cost entry/ }).click();
   const panel = page.locator('.finance-control-panel');
   await expect(panel).toBeVisible();
   const source = panel.getByLabel('Where this number came from');
