@@ -20,7 +20,7 @@ test('atlas, oracle, caddie, conductor, endpoint, db, and UI/UX calibration stay
   assert.ok(status.modules.includes('endpoint_contract'));
   assert.ok(status.modules.includes('database_schema'));
   assert.ok(status.modules.includes('workflow_lease'));
-  assert.ok(status.modules.includes('gitlab_read_boundary'));
+  assert.ok(status.modules.includes('repository_read_boundary'));
   assert.ok(status.modules.includes('repo_read_progress'));
   assert.ok(status.modules.includes('frontend_patch_worker'));
   assert.ok(status.modules.includes('backend_engineer'));
@@ -53,7 +53,7 @@ test('calibration update writes a fresh status artifact across all surfaces', ()
     'bob-control-plane-server.js': 'health\nassessment\n/jobs\n/webhooks/gitea',
     'supabase/schema.sql': 'CREATE TABLE public.organizations\nCREATE TABLE public.client_sites',
     'supabase/migrations/20260828000000_workflow_run_leases.sql': 'lease_token\nlease_expires_at\nwf_runs_one_active_lease_per_job\nwf_heartbeat_run\nwf_service_pickup_run\nwf_service_return_artifact',
-    'supabase/functions/bob-repo-search/index.ts': 'GITLAB_READ_TOKEN\nGITLAB_TOKEN\nGITLAB_WRITE_TOKEN\nGITLAB_ALLOWED_PROJECTS\nwrite_bob_chat\ntrackReadProgress',
+    'supabase/functions/bob-repo-search/index.ts': 'BOB_CONTROL_PLANE_URL\nBOB_ADMIN_TOKEN\n/api/bob/builder/repository/\nwrite_bob_chat\ntrackReadProgress',
     'supabase/migrations/20260828010000_bob_repo_read_progress.sql': 'bob_repo_read_progress\nmax_line_read\nconversation_id',
     'frontend-worker.js': 'validatePatchText\ngit apply\nchanged-files.json\nverification.json\nredactLog',
     'supabase/functions/_shared/builder-backend-engineer.js': 'collectBackendSourceContext\nclassifyBackendChangeRisk\nparseBackendProposal\nrollback_notes\nrequires_human_approval',

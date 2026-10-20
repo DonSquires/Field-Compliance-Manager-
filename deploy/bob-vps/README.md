@@ -104,6 +104,16 @@ the models the current plan serves; `/api/tags` also lists paid-plan models that
 time), `OLLAMA_CLOUD_BASE_URL` (default `https://ollama.com`) and `BOB_OLLAMA_CLOUD_NUM_CTX`.
 The default chain is `gpu_workstation,ollama,ollama_cloud,openai`; any `BOB_BUILDER_ROUTE_*`
 override must list `ollama_cloud` or it is skipped. Restricted work never leaves local compute.
+Owner direction 2026-10-21 (a stronger model, any way that benefits the project): the VPS CPU
+tier leaves the unrestricted chains (21-day evidence: 0–3% of analysis/UX runs passed while each
+attempt cost 2–7 minutes). The code default and the live env are now
+`BOB_BUILDER_ROUTE_ANALYSIS|AUTHOR|REVIEW=gpu_workstation,ollama_cloud,openai`, and the cloud
+allowlist default is `gpt-oss:120b,nemotron-3-ultra,nemotron-3-super,gemma4:31b,gpt-oss:20b`
+(free-plan access probed 2026-10-21; kimi/glm/deepseek/minimax need paid credits). A busy GPU
+answers 429 and escalates, so concurrent stages run in parallel across the GPU and Ollama Cloud.
+The VPS Ollama keeps restricted-data runs and fcm-api's knowledge-card embeddings
+(`POST /api/bob/embed`, plus a backfill every `BOB_EMBED_BACKFILL_INTERVAL_MS`, default 15 min,
+batch `BOB_EMBED_BACKFILL_BATCH`, default 25; `0` disables the timer).
 `GITEA_USERNAME` + `GITEA_TOKEN` (scopes `write:repository,write:issue,read:user`),
 or the GitHub publication credentials used by this deployment. For GitHub
 publication, set `BOB_BUILDER_GIT_NAME` and `BOB_BUILDER_GIT_EMAIL` to the

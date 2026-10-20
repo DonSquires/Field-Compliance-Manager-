@@ -142,7 +142,7 @@ test('Backend Engineer routes approved specification and source through governed
         return { ok: true, validated_output: validated, artifact: { id: 'patch-1' } };
       }
     });
-    assert.deepEqual(captured.modelRequest.chain, ['gpu_workstation', 'ollama', 'ollama_cloud', 'openai']);
+    assert.deepEqual(captured.modelRequest.chain, ['gpu_workstation', 'ollama_cloud', 'openai']);
     assert.equal(captured.modelRequest.provider, 'gpu_workstation');
     assert.equal(captured.modelRequest.prompt_version, BACKEND_ENGINEER_PROMPT_VERSION);
     assert.deepEqual(captured.modelRequest.input_artifact_ids, ['spec-1']);

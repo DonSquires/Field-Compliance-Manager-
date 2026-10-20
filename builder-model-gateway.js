@@ -203,13 +203,16 @@ function createModelGatewayConfig(env = process.env) {
     },
     // Ollama Cloud: strong hosted open models, tried after Bob's own compute and before OpenAI.
     // Ordered strongest-first. /api/tags lists every cloud model, including ones the plan does not
-    // include (those fail at request time), so the default names only free-plan models (probed
-    // 2026-10-18); add paid models through BOB_OLLAMA_CLOUD_MODELS once the plan covers them.
+    // include (those fail at request time with 402/410), so the default names only models the plan
+    // serves, ordered strongest-first. Free-plan access probed 2026-10-21: gpt-oss:120b, nemotron-3-ultra,
+    // nemotron-3-super, gemma4:31b, gpt-oss:20b answer; kimi/glm/deepseek/minimax need paid credits.
+    // A second strong model on the same tier lets the independent reviewer differ from the author.
+    // Add paid models through BOB_OLLAMA_CLOUD_MODELS once the plan covers them.
     ollama_cloud: {
       kind: 'ollama_cloud',
       apiKey: env.OLLAMA_API_KEY || env.OLLAMA_API_TOKEN || '',
       baseUrl: (env.OLLAMA_CLOUD_BASE_URL || 'https://ollama.com').replace(/\/+$/, ''),
-      models: parseModelAllowlist(env.BOB_OLLAMA_CLOUD_MODELS, 'gpt-oss:120b,nemotron-3-super,gemma4:31b,gpt-oss:20b'),
+      models: parseModelAllowlist(env.BOB_OLLAMA_CLOUD_MODELS, 'gpt-oss:120b,nemotron-3-ultra,nemotron-3-super,gemma4:31b,gpt-oss:20b'),
       maxOutputTokens: Math.min(maxOutputTokens, 16384),
       numCtx: Math.max(8192, Number(env.BOB_OLLAMA_CLOUD_NUM_CTX) || 131072)
     },

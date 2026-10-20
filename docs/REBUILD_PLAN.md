@@ -586,6 +586,13 @@ but the first allowlisted model (`qwen2.5-coder:7b`) failed validation, so steps
 paid OpenAI; the cloud tier puts large hosted models (`gpt-oss:120b` and others) ahead of that
 cost. A provider missing from the health report is no longer offered as a candidate.
 
+Owner direction 2026-10-21: unrestricted routing is laptop GPU → Ollama Cloud → OpenAI. The VPS
+CPU tier passed 0–3% of analysis/UX runs over 21 days, so it now serves only restricted-data runs
+and knowledge-card embeddings. The cloud tier adds `nemotron-3-ultra` after `gpt-oss:120b`.
+fcm-api serves `/api/bob/embed`, which had been missing, so every chat retrieval had fallen back to
+keyword search. It also backfills pending card embeddings (`bob_cards_needing_embedding`, which
+previously had no caller).
+
 Builder coding-workspace integration 2026-10-15: the Builder Control Room now
 presents the existing governed build system as one accessible coding workspace
 rather than opening Bob over the workbench as a floating modal. Desktop uses
