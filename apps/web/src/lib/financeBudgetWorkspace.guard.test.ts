@@ -8,7 +8,7 @@ const rollMigration = readFileSync(resolve(process.cwd(), '../../supabase/migrat
 
 describe('finance budget workspace', () => {
   it('wires the governed budget lifecycle into the finance money page', () => {
-    expect(page).toContain('<FinanceBudgetWorkspace />');
+    expect(page).toContain("{workflow === 'budgets' && <FinanceBudgetWorkspace activePeriodId={periodId} />}");
     expect(workspace).toContain("supabase.rpc('create_finance_budget'");
     expect(workspace).toContain("supabase.rpc('add_finance_budget_line'");
     expect(workspace).toContain("supabase.rpc('approve_finance_budget'");

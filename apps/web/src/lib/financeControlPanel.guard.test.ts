@@ -35,7 +35,7 @@ describe('Finance control centre', () => {
 
   it('keeps bank and IRD external linking outside the control centre', () => {
     expect(component).toContain('Nothing here touches your bank or IRD');
-    expect(page).toContain('<FinanceControlPanel />');
+    expect(page).toMatch(/\(\['cost', 'tax', 'close', 'periods'\] as Workflow\[\]\)\.includes\(workflow\) && <FinanceControlPanel key=\{workflow\} mode=/);
   });
 
   it('guards agreement, shift, work-unit, dispatch, investigation, period, and source attribution at the cost table', () => {

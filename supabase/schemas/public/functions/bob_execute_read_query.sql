@@ -54,7 +54,7 @@ exception when others then
 end;
 $function$;
 
-grant execute on function "public"."bob_execute_read_query"(text, integer, integer) to "anon", "postgres", "service_role";
+grant execute on function "public"."bob_execute_read_query"(text, integer, integer) to "postgres", "service_role";
 
 comment on function "public"."bob_execute_read_query"(text, integer, integer) is 'Admiral-only read-only SQL for Bob. SELECT/WITH-SELECT only, single statement, row-capped, statement-timeout, executed read-only. Called by the bob-sql-read edge function AFTER it verifies the caller is grand_master. service_role execute only.';
 

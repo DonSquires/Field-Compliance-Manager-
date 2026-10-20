@@ -178,7 +178,7 @@ exception when others then
 end;
 $function$;
 
-grant execute on function "public"."bob_recall_prior_context"(text, uuid, integer, integer) to "anon", "authenticated", "postgres", "service_role";
+grant execute on function "public"."bob_recall_prior_context"(text, uuid, integer, integer) to "postgres", "service_role";
 
 comment on function "public"."bob_recall_prior_context"(text, uuid, integer, integer) is 'Runtime retrieval for Bob: queries prior owner rulings, learnings, event-log outcomes, and job-run results matching search terms. Returns a unified result set ordered by authority (rulings > learnings > events > jobs). Bob calls this via sql_read or directly as an RPC before acting on a topic where prior context may exist. Read-only. Issue #232, epic #228.';
 

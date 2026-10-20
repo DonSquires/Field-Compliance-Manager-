@@ -23,6 +23,16 @@ function scriptKind(ts, file) {
   return file.endsWith('x') ? ts.ScriptKind.TSX : ts.ScriptKind.TS;
 }
 
+// Edge functions run on Deno/Supabase Edge Runtime. Without these ambients a NEW edge function has no
+// "before" baseline, so `Cannot find name 'Deno'` became a blocking delta and every Builder job that
+// created a function failed backend-verify (live 2026-10-21, jobs #89–#93, 6/6 attempts each).
+const EDGE_AMBIENT_FILE = '__builder_edge_runtime_ambient.d.ts';
+const EDGE_AMBIENT_TEXT = 'declare const Deno: any;\ndeclare const EdgeRuntime: any;\n';
+
+function isEdgeFunctionFile(file) {
+  return /(^|[\\/])supabase[\\/]functions[\\/]/.test(file);
+}
+
 /** Semantic diagnostics for one file, checked in isolation (imports unresolved → `any`, never a gate failure). */
 function fileDiagnostics(ts, file, text) {
   const options = {
@@ -42,16 +52,27 @@ function fileDiagnostics(ts, file, text) {
   const host = ts.createCompilerHost(options, true);
   const normalized = path.resolve(file);
   const source = ts.createSourceFile(normalized, text, options.target, true, scriptKind(ts, file));
+  const virtual = new Map([[normalized, { text, source }]]);
+  if (isEdgeFunctionFile(file)) {
+    const ambientPath = path.resolve(path.dirname(normalized), EDGE_AMBIENT_FILE);
+    virtual.set(ambientPath, { text: EDGE_AMBIENT_TEXT, source: ts.createSourceFile(ambientPath, EDGE_AMBIENT_TEXT, options.target, true, ts.ScriptKind.TS) });
+  }
   const originalGet = host.getSourceFile.bind(host);
-  host.getSourceFile = (name, languageVersion, onError, shouldCreate) => (path.resolve(name) === normalized ? source : originalGet(name, languageVersion, onError, shouldCreate));
-  host.fileExists = (name) => path.resolve(name) === normalized || ts.sys.fileExists(name);
-  host.readFile = (name) => (path.resolve(name) === normalized ? text : ts.sys.readFile(name));
+  host.getSourceFile = (name, languageVersion, onError, shouldCreate) => virtual.get(path.resolve(name))?.source ?? originalGet(name, languageVersion, onError, shouldCreate);
+  host.fileExists = (name) => virtual.has(path.resolve(name)) || ts.sys.fileExists(name);
+  host.readFile = (name) => virtual.get(path.resolve(name))?.text ?? ts.sys.readFile(name);
   host.writeFile = () => {};
-  const program = ts.createProgram([normalized], options, host);
-  return program.getSemanticDiagnostics(source).map((diagnostic) => {
+  const program = ts.createProgram([...virtual.keys()], options, host);
+  const diagnostics = program.getSemanticDiagnostics(source).map((diagnostic) => {
     const { line } = diagnostic.file && typeof diagnostic.start === 'number' ? diagnostic.file.getLineAndCharacterOfPosition(diagnostic.start) : { line: -1 };
     return { code: diagnostic.code, message: ts.flattenDiagnosticMessageText(diagnostic.messageText, ' '), line: line + 1 };
   });
+  // TypeScript reports a redeclaration once per declaration. Two reports in this file mean both
+  // declarations are here (a module-load crash); one means it collides with a lib.dom global and
+  // only exists because the file is checked as a script.
+  const counts = new Map();
+  for (const diagnostic of diagnostics) counts.set(key(diagnostic), (counts.get(key(diagnostic)) ?? 0) + 1);
+  return diagnostics.map((diagnostic) => ({ ...diagnostic, sameFile: counts.get(key(diagnostic)) > 1 }));
 }
 
 // Unresolved-import noise is identical before and after and is dropped anyway; these codes are
@@ -64,10 +85,19 @@ const key = (diagnostic) => `${diagnostic.code}::${diagnostic.message}`;
 // a call with the wrong shape. Other new diagnostics are reported as warnings, not failures.
 const BLOCKING_CODES = new Set([2304, 2552, 2551, 2339, 2349, 2350, 2448, 2454, 2540, 2554, 2556, 2693, 2367, 1345]);
 
+// "Cannot redeclare block-scoped variable" (2451) and "Duplicate identifier" (2300) block only when
+// both declarations are in the patched file: a model that appends a second `const x` instead of
+// revising the first ships a SyntaxError at module load.
+const SAME_FILE_BLOCKING_CODES = new Set([2451, 2300]);
+
+function isBlocking(diagnostic) {
+  return BLOCKING_CODES.has(diagnostic.code) || (SAME_FILE_BLOCKING_CODES.has(diagnostic.code) && diagnostic.sameFile === true);
+}
+
 /** Split new diagnostics into what fails the patch and what is only reported. */
 function classifyDelta(diagnostics) {
-  const blocking = diagnostics.filter((diagnostic) => BLOCKING_CODES.has(diagnostic.code));
-  const warnings = diagnostics.filter((diagnostic) => !BLOCKING_CODES.has(diagnostic.code));
+  const blocking = diagnostics.filter(isBlocking);
+  const warnings = diagnostics.filter((diagnostic) => !isBlocking(diagnostic));
   return { blocking, warnings };
 }
 
@@ -107,4 +137,4 @@ function newDiagnostics(ts, file, beforeText, afterText) {
   return fresh;
 }
 
-module.exports = { BLOCKING_CODES, IGNORED_CODES, classifyDelta, fileDiagnostics, gateTypeScriptDelta, loadTypeScript, newDiagnostics };
+module.exports = { BLOCKING_CODES, IGNORED_CODES, SAME_FILE_BLOCKING_CODES, classifyDelta, isEdgeFunctionFile, fileDiagnostics, gateTypeScriptDelta, loadTypeScript, newDiagnostics };

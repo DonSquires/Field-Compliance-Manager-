@@ -58,6 +58,7 @@ create or replace function public.bob_atlas_flow_reach (
   where depth > 0
 $function$;
 
-grant execute on function "public"."bob_atlas_flow_reach"(text, text, text, integer) to public, "anon", "authenticated", "postgres", "service_role";
+revoke all on function "public"."bob_atlas_flow_reach"(text, text, text, integer) from public;
+grant execute on function "public"."bob_atlas_flow_reach"(text, text, text, integer) to "postgres", "service_role";
 
 comment on function "public"."bob_atlas_flow_reach"(text, text, text, integer) is 'Atlas blast-radius: directed data-FLOW reachability (writes/reads/calls/invokes) from a node, live edges only, cycle-guarded + depth-capped. FLOW only - never conflate with FK relation (bob_atlas_fk_reach).';

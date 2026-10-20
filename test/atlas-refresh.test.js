@@ -956,3 +956,13 @@ test('component extraction recognizes governed Management API SQL RPC calls', ()
   assert.ok(edges.some(edge => edge.target_name === 'project_historical_patrol_roster' && edge.edge_kind === 'calls'));
   assert.ok(edges.some(edge => edge.target_name === 'stage_patrol_finance_cost_rows' && edge.edge_kind === 'calls'));
 });
+test('an RPC called through a const bound to literal names is a real call edge, not an unwired gap', () => {
+  const edges = collectComponentEdges('supabase/functions/bob-sql-read/index.ts', `
+    const rpcClient = isAdmiral ? admin : callerClient;
+    const rpcName = isAdmiral ? 'bob_execute_read_query' : 'bob_execute_read_query_scoped';
+    const { data, error } = await rpcClient.rpc(rpcName, { query_text: q });
+    const label = 'not_an_rpc';
+  `, { rpcs: new Set(['bob_execute_read_query', 'bob_execute_read_query_scoped']) });
+  const rpcTargets = edges.filter((edge) => edge.target_type === 'rpc').map((edge) => edge.target_name).sort();
+  assert.deepEqual(rpcTargets, ['bob_execute_read_query', 'bob_execute_read_query_scoped']);
+});

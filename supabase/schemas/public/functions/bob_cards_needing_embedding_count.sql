@@ -14,7 +14,7 @@ create or replace function public.bob_cards_needing_embedding_count()
     );
 $function$;
 
-grant execute on function "public"."bob_cards_needing_embedding_count"() to "anon", "authenticated", "postgres", "service_role";
+grant execute on function "public"."bob_cards_needing_embedding_count"() to "postgres", "service_role";
 
 comment on function "public"."bob_cards_needing_embedding_count"() is 'Count of active cards needing (re-)embedding, using the same predicate as bob_cards_needing_embedding. Feeds the embed job pending==0 stop condition.';
 

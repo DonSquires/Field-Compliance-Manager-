@@ -49,6 +49,7 @@ BEGIN
 END;
 $function$;
 
+revoke all on function "public"."bob_ingest_knowledge_card_384"(uuid, text, text, text, text, public.vector, text[], text, boolean) from public;
 grant execute
   on function "public"."bob_ingest_knowledge_card_384"(uuid, text, text, text, text, public.vector, text[], text, boolean)
-  to public, "anon", "authenticated", "postgres", "service_role";
+  to "postgres", "service_role";
