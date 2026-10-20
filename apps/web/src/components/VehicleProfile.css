@@ -73,3 +73,25 @@
 .vehicle-profile input {
   min-height: 42px;
 }
+
+/* Flagged vehicles: the card border takes the highest active flag level. */
+.vehicle-risk-border { border-width: 3px; border-style: solid; }
+.vehicle-risk-border.is-critical, .vehicle-risk-border.is-high { border-color: #dc2626; box-shadow: 0 0 0 1px rgba(220, 38, 38, 0.25); }
+.vehicle-risk-border.is-medium { border-color: #d97706; }
+.vehicle-risk-border.is-low { border-color: #2563eb; }
+.vehicle-risk-banner {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 4px 12px;
+  margin: 0 0 12px;
+  padding: 8px 12px;
+  border-radius: 6px;
+  color: #fff;
+  font-size: 0.875rem;
+}
+.vehicle-risk-banner strong { letter-spacing: 0.04em; }
+.vehicle-risk-banner span { text-transform: capitalize; }
+.vehicle-risk-banner.is-critical, .vehicle-risk-banner.is-high { background: #b91c1c; }
+.vehicle-risk-banner.is-medium { background: #b45309; }
+.vehicle-risk-banner.is-low { background: #1d4ed8; }

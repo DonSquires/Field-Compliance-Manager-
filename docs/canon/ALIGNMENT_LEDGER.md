@@ -433,6 +433,25 @@ may be stored on the person record but is not shown with the vehicle. NZTA
 identity-check evidence documents (`get_vehicle_identity_checks`) remain
 administrator-only. Migration `20261020180000`.
 
+**Tiered owner details; drivers and associated people (owner correction, 2026-10-20).**
+> "autherised users should still be able to see the details of the owner in any
+> screen that presents them but unautherised users can only see the suberb and
+> town/city and that the organisation has identified the owner or person
+> responsible for the vehicle ... the owner and the driver are not the same
+> person so we need to be able to have people associated with the vehicle also"
+
+`get_vehicle_owner_links` now serves every user of the organisation: authorised
+callers (`can_access_vehicle_owner_identity`) receive full details including the
+street address; others receive the relationship, source, dates and locality only
+(`details_visible = false`). This supersedes the locality-only display above for
+authorised users. People link to a vehicle as `owner`/`registered_owner` (one
+current), `driver` or `associated_person` (many) through the audited
+`record_vehicle_person`, optionally at a sighting (`evidence.observation_ids`);
+NZTA can only establish the registered owner. Direct `entity_links` writes for
+these relationships are blocked. `observations.person_record_id` stays reserved
+for verified identities (`link_observation_entities`), so unreviewed people are
+never made a sighting's identity of record. Migration `20261020190000`.
+
 **Original records stay immutable.** Follow-up notes, follow-up requests and
 resolutions, and H&S concerns on an observation or patrol visit are appended to
 `record_updates` (append-only, audited, same access as the source record);

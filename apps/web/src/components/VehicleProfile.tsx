@@ -34,11 +34,15 @@ function errorMessage(error: unknown): string {
   return `${describeLoadFailures([['vehicle profile', { message }]])} ${message}`;
 }
 
-export default function VehicleProfile({ vehicle, onUpdated, summary, children }: {
+export default function VehicleProfile({ vehicle, onUpdated, summary, riskLevel = null, riskBanner, children }: {
   vehicle: EditableVehicle;
   onUpdated: () => Promise<void>;
   /** Identity line (plate, make/model, primary actions) shown beside the photo. */
   summary?: ReactNode;
+  /** Highest active of-interest flag level: colours the profile border. */
+  riskLevel?: 'critical' | 'high' | 'medium' | 'low' | null;
+  /** Risk summary shown at the very top of the profile when the vehicle is flagged. */
+  riskBanner?: ReactNode;
   /** Status, receipts and flags that belong to the same vehicle card. */
   children?: ReactNode;
 }) {
@@ -167,7 +171,8 @@ export default function VehicleProfile({ vehicle, onUpdated, summary, children }
     finally { setBusy(false); }
   }
 
-  return <section className="contact-card vehicle-profile" aria-label="Vehicle profile">
+  return <section className={`contact-card vehicle-profile${riskLevel ? ` vehicle-risk-border is-${riskLevel}` : ''}`} aria-label="Vehicle profile">
+    {riskBanner}
     <div className="vehicle-profile-layout">
       <div className="vehicle-profile-media">
         {photoUrl ? <img className="vehicle-profile-photo" src={photoUrl} alt={`Profile of vehicle ${vehicle.plate_number}`}
