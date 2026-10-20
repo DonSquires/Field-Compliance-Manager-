@@ -62,6 +62,18 @@ turn beats false completeness.
   extensions, counted by extension only. No image contents were read and no
   file names were returned. Identity/place matching and custody review remain
   separate from patrol-event import.
+- A local `--export-plan` run used the existing DART client, active patrol
+  agreement, reviewed zone map, and current importer catalog. For sheet `2025`,
+  911 data rows produced 681 event candidates; 162 lacked dates and 68 had no
+  mapped place. For `2026`, 1,254 data rows produced 1,105 event candidates;
+  60 lacked dates and 89 had no mapped place. Both plans produced zero
+  observations and proposals. These were temporary laptop-only plans; no apply
+  path was invoked.
+- Read-only live counts show 1,004 existing `DART2025` and 1,105 existing
+  `DART2026` event keys. Counts do not establish exact key overlap or whether
+  source-managed fields changed. Both sheets remain held until a local
+  key-by-key reconciliation can safely distinguish inserts, unchanged rows,
+  and review-required corrections. Do not replay either plan as an import.
 - Atlas refreshed from merged main commit `8fa8e794f06e79ed83442f07cd84436d0d95dd20`
   with zero capability/edge upserts and zero retirements (1,417 capabilities,
   8,215 edges). This is map freshness evidence, not a claim that every mapped
