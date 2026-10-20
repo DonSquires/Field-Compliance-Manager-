@@ -97,7 +97,6 @@ export const RepeatSubjectsPanel: React.FC = () => {
   const [expandedEvidenceId, setExpandedEvidenceId] = useState<string | null>(null);
   const [historyLoading, setHistoryLoading] = useState(false);
   const [officerNames, setOfficerNames] = useState<Record<string, string>>({});
-  const [isHomeAdmin, setIsHomeAdmin] = useState(false);
   const historyRequest = useRef(0);
   const patrolIds = useMemo(() => history.filter((item) => item.source === 'patrol').map((item) => item.record_id), [history]);
   const { annotations, reload: reloadAnnotations } = useObservationAnnotations(patrolIds);
@@ -122,15 +121,6 @@ export const RepeatSubjectsPanel: React.FC = () => {
     });
     return () => { cancelled = true; };
   }, []);
-
-  useEffect(() => {
-    if (!profile?.organizationId || !canManageIdentity) return;
-    let cancelled = false;
-    void supabase.rpc('is_admin_for_org', { target_org_id: profile.organizationId }).then(({ data }) => {
-      if (!cancelled) setIsHomeAdmin(data === true);
-    });
-    return () => { cancelled = true; };
-  }, [canManageIdentity, profile?.organizationId]);
 
   useEffect(() => {
     historyRequest.current += 1;
@@ -309,7 +299,7 @@ export const RepeatSubjectsPanel: React.FC = () => {
               <a className="btn btn-secondary btn-sm" href={`/admin/field-ops?area=vehicle-search&vehicle=${encodeURIComponent(vehicleDetails.canonical_vehicle_id)}`}>Correct canonical vehicle details</a>
               <small>Opens Vehicle Search &amp; Flags. Shared vehicle facts are audit-logged with your organisation and time.</small>
             </p>}
-            {vehicleDetails && <VehicleOwnerPanel vehicleId={vehicleDetails.canonical_vehicle_id} organizationId={profile?.organizationId} canManage={isHomeAdmin}
+            {vehicleDetails && <VehicleOwnerPanel vehicleId={vehicleDetails.canonical_vehicle_id} organizationId={profile?.organizationId}
               onChanged={() => setVehicleDetails((current) => current ? { ...current, owner_identified: true } : current)} />}
             {identifications.length > 0 && <section className="repeat-subjects__identifications" aria-label="R&M person identifications">
               <h4>People related to these observations</h4>

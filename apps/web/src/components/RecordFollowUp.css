@@ -44,6 +44,9 @@
   border-radius: 8px;
   background: var(--color-bg-elevated, #0f1b2d);
 }
+.vehicle-owner__title { display: flex; flex-wrap: wrap; align-items: center; gap: 6px; }
+.vehicle-owner__title .badge,
+.vehicle-owner__card > div > .btn { width: auto; justify-self: start; }
 .vehicle-owner__meta { color: var(--color-text-secondary, #94a3b8); font-size: 0.8125rem; }
 .vehicle-owner__mode { display: flex; flex-wrap: wrap; gap: 12px; border: 0; margin: 0; padding: 0; }
 .vehicle-owner__form { display: grid; gap: 8px; }

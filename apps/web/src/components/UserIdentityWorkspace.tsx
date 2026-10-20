@@ -1,5 +1,5 @@
-import { useState, type FormEvent } from 'react';
-import { AlertTriangle, BadgeCheck, BriefcaseBusiness, CheckCircle2, KeyRound, Mail, ShieldCheck, UserRoundCog, X } from 'lucide-react';
+import { useEffect, useState, type FormEvent } from 'react';
+import { AlertTriangle, BadgeCheck, BriefcaseBusiness, Car, CheckCircle2, KeyRound, Mail, ShieldCheck, UserRoundCog, X } from 'lucide-react';
 import type { AppRole, OperatingOrganization } from '../context/AuthContext';
 import { getAssignableRoles, IDENTITY_ROLE_LABEL } from '../lib/identityRoles';
 import { supabase } from '../lib/supabase';
@@ -72,7 +72,55 @@ export function UserIdentityWorkspace({ user, callerRole, presets, assignment, r
       </form>
     </div>
     <form className="user-spine-email" onSubmit={saveEmail}><div className="user-spine-section-title"><Mail size={18} /><div><strong>Email and sign-in</strong><span>The address this person signs in with, and where their invitation is sent.</span></div></div><div className="user-spine-email-grid"><label><span>Email address</span><input type="email" required value={email} onChange={(event) => setEmail(event.target.value)} /></label><label><span>Reason for change</span><input required value={emailReason} onChange={(event) => setEmailReason(event.target.value)} placeholder="Corrected typo, name change, new work address" /></label></div><button type="submit" disabled={saving !== null || !email.trim() || !emailReason.trim() || email.trim().toLowerCase() === (user.email ?? '').toLowerCase()}>{saving === 'email' ? 'Saving' : 'Change email'}</button><small>If they have never signed in, the address is corrected and their invitation re-sent to it. If they have signed in before, the new address must be confirmed before it replaces the old one — their profile, role and history stay as they are.</small></form>
+    <VehicleOwnerAccessSection userId={user.id} />
     <StaffBranchAccessPanel userId={user.id} branches={branches} onChanged={onChanged} />
     <footer><span><BriefcaseBusiness size={14} />Employment, credentials, and work readiness remain governed in People &amp; HR.</span><span><BadgeCheck size={14} />Every change requires a reason and is retained in the identity audit trail.</span></footer>
   </section></div>;
+}
+
+interface VehicleOwnerAccess { direct: boolean; via_preset: boolean; via_role: boolean; granted_at: string | null; }
+
+/** Per-user authorisation for the vehicle_owner_identity access area (owner details, including NZTA-restricted owners). */
+function VehicleOwnerAccessSection({ userId }: { userId: string }) {
+  const [access, setAccess] = useState<VehicleOwnerAccess | null>(null);
+  const [enabled, setEnabled] = useState(false);
+  const [reason, setReason] = useState('');
+  const [saving, setSaving] = useState(false);
+  const [error, setError] = useState<string | null>(null);
+  const [notice, setNotice] = useState<string | null>(null);
+
+  // ATLAS CALLS: get_vehicle_owner_access
+  useEffect(() => {
+    let cancelled = false;
+    void supabase.rpc('get_vehicle_owner_access', { p_user_id: userId }).then(({ data, error: loadError }) => {
+      if (cancelled) return;
+      if (loadError) { setError(loadError.message); return; }
+      const row = data as VehicleOwnerAccess;
+      setAccess(row); setEnabled(row.direct);
+    });
+    return () => { cancelled = true; };
+  }, [userId]);
+
+  const save = async (event: FormEvent) => {
+    event.preventDefault(); setSaving(true); setError(null); setNotice(null);
+    // ATLAS CALLS: set_vehicle_owner_access
+    const { data, error: saveError } = await supabase.rpc('set_vehicle_owner_access', { p_user_id: userId, p_enabled: enabled, p_reason: reason.trim() });
+    if (saveError) setError(saveError.message);
+    else { const row = data as VehicleOwnerAccess; setAccess(row); setEnabled(row.direct); setReason(''); setNotice(row.direct ? 'Vehicle owner details enabled for this person.' : 'Vehicle owner details access removed.'); }
+    setSaving(false);
+  };
+
+  const inherited = access?.via_role ? 'Included with their administrator role.' : access?.via_preset ? 'Also granted through their access preset.' : null;
+  return <form className="user-spine-email" onSubmit={(event) => void save(event)} aria-label="Restricted information access">
+    <div className="user-spine-section-title"><Car size={18} /><div><strong>Restricted information</strong><span>Personal information this person may see and record beyond their role.</span></div></div>
+    {error && <div className="user-spine-message is-error" role="alert"><AlertTriangle size={16} />{error}</div>}
+    {notice && <div className="user-spine-message is-success" role="status"><CheckCircle2 size={16} />{notice}</div>}
+    {access === null && !error ? <small role="status">Loading access…</small> : <>
+      <label className="user-spine-checkbox"><input type="checkbox" checked={enabled} disabled={saving} onChange={(event) => setEnabled(event.target.checked)} /> <span>Vehicle owner details — view and record vehicle owners, including NZTA-restricted register details</span></label>
+      {inherited && <small>{inherited}</small>}
+      <label><span>Reason for change</span><input required value={reason} onChange={(event) => setReason(event.target.value)} placeholder="For example: investigations officer, approved by operations manager" /></label>
+      <button type="submit" disabled={saving || !reason.trim() || enabled === Boolean(access?.direct)}>{saving ? 'Saving' : 'Save restricted access'}</button>
+      <small>NZTA register information may only be used for the lawful purpose it was obtained for. Owner addresses are shown as suburb and town/city only. Every change is audit-logged.</small>
+    </>}
+  </form>;
 }

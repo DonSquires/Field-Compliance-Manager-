@@ -17,7 +17,7 @@ const BRANCH_AUTHORITY_AREAS = [
   ['timesheet_local_review', 'Timesheet local review'], ['leave_branch_approve', 'Leave branch approval'], ['roster_impact_approve', 'Roster impact approval'],
   ['credentials_supervise', 'Credential supervision'], ['hr_case_local_investigate', 'Local people-matter investigation'], ['incident_manage_local', 'Local incident management'],
 ] as const;
-const BRANCH_AUTHORITY_LABELS = Object.fromEntries(BRANCH_AUTHORITY_AREAS) as Record<string, string>;
+const BRANCH_AUTHORITY_LABELS = { ...Object.fromEntries(BRANCH_AUTHORITY_AREAS), vehicle_owner_identity: 'Vehicle owner details (NZTA restricted)' } as Record<string, string>;
 const ACCESS_LEVEL_LABELS: Record<string, string> = { view: 'View', verify: 'Verify', approve: 'Approve', adjust: 'Adjust', manage: 'Manage' };
 const ACCESS_STATUS_LABELS: Record<string, string> = { active: 'Active', ended: 'Ended', suspended: 'Suspended' };
 const accessLabel = (value: string) => {

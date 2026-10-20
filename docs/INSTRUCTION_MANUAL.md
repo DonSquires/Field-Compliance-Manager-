@@ -110,12 +110,16 @@ Field Compliance Manager (FCM) is an enterprise SaaS platform designed to replac
   values, and the profile shows when the details were last updated and by which
   organisation. Organisation notes are preserved. VIN and registration identity
   checks remain in their existing evidence-review workflow.
-- **Owner identity** (administrators) records who owns the vehicle: create a
-  new person or choose an existing person record, give the source (NZTA motor
+- **Owner identity** (administrators and authorised users) records who owns the
+  vehicle: create a new person (name, contact, suburb and town/city; street
+  address optional) or choose an existing person record, give the source (NZTA motor
   vehicle register, owner or driver told us, officer established on site, other)
   and the basis.
   The owner is added to the canonical person registry. Owner details are visible
-  only to administrators of your organisation; owners sourced from NZTA are
+  to administrators and to people your organisation has authorised for
+  **Vehicle owner details** (Users → open the person → Restricted information,
+  or an access preset). Only the suburb and town/city are shown, never the
+  street or street number. Owners sourced from NZTA are
   marked **NZTA restricted** and must only be used for the purpose they were
   obtained for. **Change owner** ends the previous owner link; **No longer owner**
   ends the current owner link with a reason. Owner identity can also be added from the
@@ -151,7 +155,7 @@ Field Compliance Manager (FCM) is an enterprise SaaS platform designed to replac
   detections or unlinked comment mentions. Open a subject to inspect its history,
   place and recorded officer context; comment mentions remain separate evidence
   requiring review. In a vehicle's drawer: **Correct canonical vehicle
-  details** opens Vehicle Search & Flags; administrators can add owner
+  details** opens Vehicle Search & Flags; authorised users can add owner
   identity; each patrol sighting shows its status badges and takes follow-up
   notes and photos. **Link a verified person to this sighting** only lists
   people whose identity has been reviewed; to record an owner use **Owner

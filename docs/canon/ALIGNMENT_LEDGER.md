@@ -411,10 +411,27 @@ chassis/engine identifiers and owner stay on their governed identity paths
 and its global `canonical_people` row, joined to the vehicle by an
 `entity_links` person→vehicle edge (`registered_owner` when sourced from an
 NZTA motor-vehicle-register check, otherwise `owner`). Owner edges are written
-only through `record_vehicle_owner` / `end_vehicle_owner_link`, readable only
-by administrators of the recording organisation (`get_vehicle_owner_links`), and
-NZTA-sourced owners are flagged `nzta_restricted` so the UI states the
-restriction. Migration `20261020171000`.
+only through `record_vehicle_owner` / `end_vehicle_owner_link`, readable
+through `get_vehicle_owner_links`, and NZTA-sourced owners are flagged
+`nzta_restricted` so the UI states the restriction. Migration `20261020171000`.
+
+**Owner access is an authorisation, not a role (owner correction, 2026-10-20).**
+> "any user that has authorisation can access the details, so we should add that
+> as a skill and maybe a check box for users, also we probably should not
+> display the full address but put in the suburb and city the vehicle is
+> registered to not the street or street number"
+
+Owner identity is the `vehicle_owner_identity` area of the access matrix
+(`staff_area_grants` + access presets via `resolve_access_grants`), checked by
+`can_access_vehicle_owner_identity(org, record)`: organisation administrators
+always hold it; `view` reads owners, `adjust`/`manage` also records and ends
+them. An administrator switches it per user with the audited
+`set_vehicle_owner_access` (Users → person → Restricted information), or
+bundles it into a preset. The owner reader returns `locality` (suburb, town/city
+from `vehicle_owner_locality`) and never the street address; a street address
+may be stored on the person record but is not shown with the vehicle. NZTA
+identity-check evidence documents (`get_vehicle_identity_checks`) remain
+administrator-only. Migration `20261020180000`.
 
 **Original records stay immutable.** Follow-up notes, follow-up requests and
 resolutions, and H&S concerns on an observation or patrol visit are appended to
