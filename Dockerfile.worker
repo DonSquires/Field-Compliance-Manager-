@@ -25,6 +25,16 @@ RUN cd /opt/bob/web-package \
 	&& ln -s /opt/bob/web-node_modules /opt/bob/node_modules \
 	&& rm -rf /opt/bob/web-package
 
+# Root node:test suites require the root runtime deps (exceljs, @supabase/supabase-js, undici, ws).
+# NODE_PATH is a CommonJS fallback after the normal node_modules walk, so apps/web keeps its own copies.
+# Dev deps are omitted: the supabase CLI downloads a binary at install time and no test needs it.
+COPY package.json package-lock.json /opt/bob/root-package/
+RUN cd /opt/bob/root-package \
+	&& npm ci --omit=dev --ignore-scripts --no-audit --no-fund \
+	&& mv node_modules /opt/bob/root-node_modules \
+	&& rm -rf /opt/bob/root-package
+ENV NODE_PATH=/opt/bob/root-node_modules
+
 RUN mkdir -p /workspace \
 	&& chown -R 1000:1000 /opt/bob /workspace
 USER 1000:1000

@@ -73,11 +73,14 @@ test('People & HR owns the rules for the employing organisation, in plain words'
 
 test('a licence that outlives the shift never blocks rostering; expired or unverified says exactly what to do', () => {
   assert.doesNotMatch(rosterPage, /cannot be assigned until their credential status is clear/);
-  assert.match(rosterPage, /has no verified licence or warrant on file\. Verify it in People & HR › Credentials first\./);
-  assert.match(rosterPage, /licence or warrant has expired/);
-  assert.match(rosterPage, /expires \$\{dayWords\(person\.credentialExpiry\)\}, before this shift ends\. Record the renewal in People & HR › Credentials first\./);
+  // Wording is per credential, not "licence": the branch RPC aggregates every credential type and
+  // does not prove a specific licence; the assignment preview names the type.
+  assert.match(rosterPage, /credentials have not been confirmed\. Check People & HR › Credentials before assigning\./);
+  assert.match(rosterPage, /has unverified credentials on file\. Verify them in People & HR › Credentials first\./);
+  assert.match(rosterPage, /has an expired credential\$\{person\.credentialExpiry \? ` \(\$\{dayWords\(person\.credentialExpiry\)\}\)` : ''\}\. Record the renewal in People & HR › Credentials first\./);
+  assert.match(rosterPage, /has a credential expiring \$\{dayWords\(person\.credentialExpiry\)\}, before this shift ends\. Record the renewal in People & HR › Credentials first\./);
   assert.match(rosterPage, /const blocker = credentialBlocker\(person, form\.end\); if \(blocker\)/);
   assert.match(rosterPage, /const blocker = person \? credentialBlocker\(person, form\.end\) : null; if \(blocker\)/);
   assert.match(rosterPage, /\{credentialBadgeWords\(person\)\}<\/i>/);
-  assert.match(rosterPage, /return `licence expires \$\{person\.credentialExpiry \? dayWords\(person\.credentialExpiry\) : 'soon'\}`;/);
+  assert.match(rosterPage, /return `Credential expires \$\{person\.credentialExpiry \? dayWords\(person\.credentialExpiry\) : 'soon'\}`;/);
 });
