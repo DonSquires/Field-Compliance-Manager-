@@ -30,7 +30,7 @@ services:
       BOB_LAPTOP_SSH_KEY: ${BOB_LAPTOP_SSH_KEY:-/data/laptop/id_ed25519}
     extra_hosts:
       - "host.docker.internal:host-gateway"
-    # Docker socket access for isolated workers (no-new-privileges, cap-drop ALL, network none).
+    # Docker socket access for isolated workers (no-new-privileges, cap-drop ALL, bob-workers network).
     group_add:
       - "${DOCKER_GID:-999}"
     healthcheck:

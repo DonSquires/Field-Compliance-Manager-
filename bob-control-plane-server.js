@@ -24,6 +24,7 @@ const { autopilotTick, listAutopilotJobs, listPendingApprovals } = require('./bu
 const { laptopStatus, runLaptopCommand, laptopConfig, loadLaptopLink, mergeLaptopLink, describeLink } = require('./bob-laptop-shell');
 const { createVibeWorker, vibeWorkspacePath } = require('./builder-vibe-session');
 const { createFirewall } = require('./bob-firewall');
+const { createTailscale } = require('./bob-tailscale');
 const { createVibePreviewManager } = require('./builder-vibe-preview');
 const { createBranchWorkspace, createDetachedWorkspace, retireTerminalWorkspace, commitVerifiedPatch, publishWorkspaceBranch, createGiteaPullRequest, workspacePathForBranch, createGitHubPullRequest, mergeGitHubPullRequest, ensureSourceCheckout, githubAuthHeader, githubRepoUrl, githubSshRepoUrl, resolveRemoteHead, redactGitError } = require('./builder-branch-workspace');
 const { executeWorker, summarizeHumanTest } = require('./worker-executor');
@@ -65,6 +66,39 @@ const builderGateway = {
 };
 const builderWorkerImage = process.env.BOB_WORKER_IMAGE || '';
 const firewall = createFirewall({ stateDir, image: builderWorkerImage });
+const tailscale = createTailscale({ stateDir });
+// Host network control handed to Bob's autonomous lanes (Vibe Builder, self-heal, autopilot):
+// owner ruling 2026-10-21. Every change is audited under the acting lane.
+function hostNetworkFor(actor) {
+  return {
+    status: () => firewall.status(),
+    change: async ({ op, rule, purpose, job_id: jobId }) => {
+      record(actor, 'firewall.change.requested', jobId ?? null, { op, rule, purpose: purpose ?? null });
+      try {
+        const result = await firewall.change({ op, rule });
+        record(actor, 'firewall.change', result.rule ? `${op}:${result.rule.chain}` : null, { op, rule: result.rule, changed: result.changed, purpose: purpose ?? null, job_id: jobId ?? null, rule_count: result.rules.length });
+        return result;
+      } catch (error) {
+        record(actor, 'firewall.change.refused', jobId ?? null, { op, purpose: purpose ?? null, error: error.message });
+        throw error;
+      }
+    },
+    tailnet: tailscale.configured ? {
+      status: () => tailscale.status(),
+      acl: async ({ op, policy, ifMatch, purpose, job_id: jobId }) => {
+        if (op === 'set') record(actor, 'tailnet.acl.requested', tailscale.tailnet, { purpose: purpose ?? null, job_id: jobId ?? null });
+        try {
+          const result = await tailscale.acl({ op, policy, ifMatch });
+          if (op === 'set') record(actor, 'tailnet.acl.set', tailscale.tailnet, { purpose: purpose ?? null, job_id: jobId ?? null, etag: result.etag ?? null, backup: result.previous_policy_backup ?? null, bytes: Buffer.byteLength(String(policy ?? '')) });
+          return result;
+        } catch (error) {
+          if (op === 'set') record(actor, 'tailnet.acl.refused', tailscale.tailnet, { purpose: purpose ?? null, job_id: jobId ?? null, error: error.message });
+          throw error;
+        }
+      },
+    } : null,
+  };
+}
 // Re-apply Bob's saved firewall rules (iptables does not survive a reboot on its own).
 if (builderWorkerImage && process.env.BOB_FIREWALL_RECONCILE !== 'off') {
   firewall.reconcile().then(result => console.log(`bob firewall reconciled: ${result.applied} rule(s)`), error => console.error(`bob firewall reconcile failed: ${error.message}`));
@@ -507,6 +541,7 @@ async function builderRuntimeContext(body, source = { sourceDir: assessmentRoot,
     workspaceRoot: builderWorkspaceRoot,
     repoRoot: assessmentRoot,
     workerImage: builderWorkerImage,
+    firewall: hostNetworkFor('bob-builder'),
     runnerId: builderRunnerId,
     reviewerModelName: typeof body.reviewerModelName === 'string' && body.reviewerModelName.trim() ? body.reviewerModelName.slice(0, 200) : defaultReviewerModel(process.env, providers.openai?.installed ?? null),
     frontendFiles: boundedStringArray(body.frontendFiles, 30),
@@ -1396,6 +1431,23 @@ async function route(req, res, body) {
       return json(res, 400, { ok: false, error: error.message });
     }
   }
+  if (req.method === 'GET' && url.pathname === '/api/bob/tailnet/status') {
+    if (!authorized(req)) return json(res, 401, { error: 'unauthorized' });
+    try { return json(res, 200, { configured: tailscale.configured, ...(tailscale.configured ? await tailscale.status() : {}) }); } catch (error) { return json(res, 502, { error: error.message }); }
+  }
+  if (req.method === 'POST' && url.pathname === '/api/bob/tailnet/acl') {
+    if (!authorized(req)) return json(res, 401, { error: 'unauthorized' });
+    const requestedBy = typeof body?.requested_by === 'string' ? body.requested_by.slice(0, 120) : 'bob';
+    const purpose = typeof body?.purpose === 'string' ? body.purpose.slice(0, 300) : null;
+    try {
+      const result = await tailscale.acl({ op: body?.op, policy: body?.policy, ifMatch: body?.if_match });
+      if (body?.op === 'set') record(requestedBy, 'tailnet.acl.set', tailscale.tailnet, { purpose, etag: result.etag ?? null, backup: result.previous_policy_backup ?? null });
+      return json(res, 200, result);
+    } catch (error) {
+      if (body?.op === 'set') record(requestedBy, 'tailnet.acl.refused', tailscale.tailnet, { purpose, error: error.message });
+      return json(res, 400, { ok: false, error: error.message });
+    }
+  }
   const isAssessmentRoute = url.pathname === '/assessment' || ['/api/bob/assessment', '/api/bob/builder/assessment'].includes(url.pathname);
   if (req.method === 'GET' && isAssessmentRoute) {
     if (!authorized(req)) return json(res, 401, { error: 'unauthorized' });
@@ -1676,14 +1728,7 @@ const vibePreview = vibeEnabled ? createVibePreviewManager({
 const vibeWorker = vibeEnabled ? createVibeWorker({
   supabase: builderSupabase,
   deps: {
-    firewall: {
-      status: () => firewall.status(),
-      change: async ({ op, rule, purpose }) => {
-        const result = await firewall.change({ op, rule });
-        record('bob-vibe', 'firewall.change', result.rule ? `${op}:${result.rule.chain}` : null, { op, rule: result.rule, changed: result.changed, purpose: purpose ?? null, rule_count: result.rules.length });
-        return result;
-      },
-    },
+    firewall: hostNetworkFor('bob-vibe'),
     workspaceRoot: builderWorkspaceRoot,
     gateway: builderGateway,
     sourceDirFor: sha => builderGitSource(sha),

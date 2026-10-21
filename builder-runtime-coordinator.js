@@ -208,6 +208,7 @@ function agenticGenerator(lane, context, extra = {}) {
       sourceDir: context.gitSourceDir || context.sourceDir,
       workspaceRoot: context.workspaceRoot,
       repoRoot: context.repoRoot,
+      firewall: context.firewall || null,
       specification, uxPlan, liveContext,
       hints: requestedFiles,
       startAfterProvider: startAfter,

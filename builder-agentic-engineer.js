@@ -26,7 +26,7 @@ const { collectRepositoryContext, fitRepositoryContext } = require('./supabase/f
 const { engineerCheckpoint } = require('./builder-engineer-checkpoint');
 const { validatePatchText } = require('./frontend-worker');
 
-const PROMPT_VERSION = 'agentic-engineer-v7';
+const PROMPT_VERSION = 'agentic-engineer-v8';
 // Consecutive refused identical calls (with nothing edited) before the author escalates or stops early.
 const STUCK_REFUSALS = 4;
 const DEFAULT_LIMITS = Object.freeze({
@@ -194,7 +194,7 @@ function outlineLines(text, { pattern = null, cap = 400 } = {}) {
   return { entries: candidates.map(({ index, line }) => `${index + 1}: ${line.trim().slice(0, 140)}`), total_lines: lines.length, omitted: found - candidates.length };
 }
 
-function systemPrompt({ lane, limits }) {
+function systemPrompt({ lane, limits, firewall = false }) {
   return [
     'You are Bob Builder, the engineering half of Bob — the Field Compliance Manager platform\'s own agent. You work the way a senior coding agent works, at full effort:',
     '1. UNDERSTAND before editing: read AGENTS.md / the canon (read_canon), your own notes (read_notes), and the code paths involved (search, read_file, list_dir, git_log), then the live terrain (atlas, live_count) for any shared table, RPC, or edge function. Trace the whole seam before changing part of it.',
@@ -227,6 +227,11 @@ function systemPrompt({ lane, limits }) {
     '- read_canon {}                          AGENTS.md + docs/canon/README.md + docs/canon/BOB_DOCTRINE.md (bounded)',
     '- read_notes {limit?}                    your persistent builder notes (lessons from earlier jobs); the 10 most recent are already in your task packet',
     '- write_note {text}                      leave a durable lesson for future jobs (short, factual, no secrets)',
+    ...(firewall ? [
+      '- firewall_status {}                     the VPS firewall: Bob chains, ufw, Tailscale peers, worker network (bob-workers 172.31.250.0/24; your test runs have network incl. the tailnet)',
+      '- firewall_change {op: add|remove, rule: {chain: input|worker_egress, action: allow|deny, protocol?, port?, source? (input), destination? (worker_egress), comment}, purpose}   applies LIVE immediately, outside the patch, and is audited (owner ruling 2026-10-21). Use it only when the task needs it (a test or service must reach / must not reach a host); name every change in your finish summary. SSH/80/443/Tailscale lockouts are refused.',
+      ...(firewall.tailnet ? ['- tailnet_status {} | tailnet_acl {op: get|set, policy?, if_match?, purpose?}   Tailscale devices and ACL policy (strict JSON string). set validates first, needs the etag from get as if_match, is LIVE and audited, requires an explicit unrestricted grant to the configured owner, and preserves existing Tailscale SSH rules.'] : []),
+    ] : []),
     '- finish {summary, tests, rollback_notes, acceptance_evidence, follow_ups?, tests_not_run_reason?, lessons?}   hand over: your worktree diff becomes the reviewed patch. acceptance_evidence must contain one {requirement_id, status:"completed", evidence} entry for every approved delivery requirement with source_scope in YOUR lane; evidence must name a changed file in your lane that implements the outcome. Requirements spanning both lanes need an implementation in each lane; never claim the sibling lane is complete. Independent review checks the whole job. A change that touches tests is refused unless a `node --test` run passed in this session (or tests_not_run_reason says plainly why none could). lessons: up to 3 short, generalisable facts about this codebase or these tools that would save a future job time (or omit).',
     '',
     `Budget: ${limits.maxTurns} tool turns / ${Math.round(limits.wallBudgetMs / 60000)} minutes. Pace it: spend at most about a third of the turns reading before you start editing; you will be told when the budget is running low. Do not repeat identical calls. Large files: outline first, then targeted reads — a task that names a 10,000-line file is still a 60-turn task. Requirements labelled must, required, or acceptance may not be deferred to follow_ups: complete and verify them before finish. follow_ups are only for optional improvements outside the approved acceptance contract. Running out of turns with an admitted partial change is a failure, not a successful handoff. If the task is impossible, unsafe, or requires a protected path, finish with an empty change set and explain plainly in the summary what a human must do.`,
@@ -1028,6 +1033,8 @@ async function runAgenticEngineer({
   // null = the outsourced tier serves its strongest available allowlisted model (BOB_OPENAI_MODELS, best first).
   modelName = process.env.BOB_BUILDER_MODEL || null,
   callModel = callModelGateway,
+  // Host network control for self-heal/autopilot (owner ruling 2026-10-21); null outside the control plane.
+  firewall = null,
   // In-house first: resume the chain past a provider whose earlier attempt failed verification.
   startAfterProvider = null,
   providerHealth = null,
@@ -1056,6 +1063,15 @@ async function runAgenticEngineer({
   const transcript = saved?.transcript || [];
   const log = (entry) => transcript.push({ at: new Date().toISOString(), ...entry });
   const tools = createTools({ workspacePath, repoRoot, lane, supabase, limits, log });
+  if (firewall) {
+    const purposeOf = args => `job ${String(job.id).slice(0, 8)}: ${String(args.purpose || '').slice(0, 250)}`;
+    tools.firewall_status = () => firewall.status();
+    tools.firewall_change = args => firewall.change({ op: args.op, rule: args.rule, purpose: purposeOf(args), job_id: job.id });
+    if (firewall.tailnet) {
+      tools.tailnet_status = () => firewall.tailnet.status();
+      tools.tailnet_acl = args => firewall.tailnet.acl({ op: args.op, policy: args.policy, ifMatch: args.if_match, purpose: purposeOf(args), job_id: job.id });
+    }
+  }
   // A revision after a blocked review starts from the previous attempt's verified change, applied
   // here so the model edits it instead of rebuilding from main (round 2 of job f233ec31 did the latter).
   let seeded = null;
@@ -1086,7 +1102,7 @@ async function runAgenticEngineer({
   const opening = buildOpeningPacket({ job, lane, specification, uxPlan, rawRepositoryContext, liveContext, notes, previousFailure, hints, previousAttempt, seeded, startingMap });
 
   const messages = [
-    { role: 'system', content: systemPrompt({ lane, limits }) },
+    { role: 'system', content: systemPrompt({ lane, limits, firewall: firewall ? { tailnet: Boolean(firewall.tailnet) } : false }) },
     { role: 'user', content: opening.packet },
   ];
   if (saved?.messages) {

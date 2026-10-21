@@ -44,6 +44,28 @@ audit event. It must never accept a password or token supplied in a Bob prompt.
 
 ### Worker network (owner ruling 2026-10-21)
 
+Owner extension, 2026-10-21: self-heal and autopilot engineers also receive the
+structured firewall tools. The control plane records the acting lane, job ID,
+purpose and change result; worker containers never receive the Docker socket
+or host-management credentials.
+
+Tailscale OAuth credentials (`TAILSCALE_OAUTH_CLIENT_ID` and
+`TAILSCALE_OAUTH_CLIENT_SECRET`) live in Codespaces secrets and the VPS
+control-plane environment, never in model prompts, browser bundles or workers.
+The required scopes are policy-file read/write and devices-core read.
+`TAILSCALE_TAILNET` selects the tailnet; `TAILSCALE_OWNER_LOGIN` is required for
+policy writes. These credentials are not needed by Supabase Edge Functions:
+owner-only control-room actions relay to the authenticated control plane.
+
+Vibe, self-heal and autopilot use `tailnet_status` and `tailnet_acl` when the
+credential is configured. Reads return canonical JSON and an ETag. Writes
+require strict JSON, the matching ETag, successful Tailscale validation, an
+explicit unrestricted network grant to the configured owner, and unchanged
+Tailscale SSH rules. The previous policy is saved privately under
+`/var/lib/bob/tailscale/acl-history` before the conditional write. Every live
+policy change is audited separately from repository changes; a git undo does
+not restore a tailnet policy.
+
 Verification, build, test and main-health workers run on Bob's own `bob-workers` Docker bridge
 network (created on demand, subnet `172.31.250.0/24`), which reaches the internet and the Tailscale
 tailnet through the VPS. Workers still receive no credentials (only the named human-test variables
