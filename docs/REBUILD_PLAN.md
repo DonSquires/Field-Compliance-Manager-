@@ -27,8 +27,12 @@ Bob main-health visual baseline, 2026-10-21:
   service-place context; neither is evidence of a new production defect.
   They remain observations, not unconfirmed issues or unrelated UI changes.
 - Baseline replacement here is an owner-authorized maintenance operation.
-  The general engineer still refuses arbitrary binary patches; this does not
-  claim an autonomous PNG-generation/publication lane exists.
+  Owner continuation, 2026-10-21: the dedicated `generate_visual_baselines`
+  lane now prepares fixture-only PNG candidates, preserving before/after
+  evidence and requiring independent rerendering. Generic arbitrary binary
+  editing remains refused. Publication uses the existing verified branch/PR
+  path and release holds; human review/merge is mandatory, never silent
+  baseline acceptance to turn a failing test green.
 - Historical failed/cancelled main-health jobs can be resolved only after a
   newer pinned main passes every health step and the original test files
   remain present at that commit. Resolution is organization/project scoped,

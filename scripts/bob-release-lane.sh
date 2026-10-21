@@ -111,7 +111,7 @@ TARGETS=()
 has '^(scripts/bob-release-lane\.sh|scripts/bob-runtime-idle\.js|deploy/bob-release-lane/)' && TARGETS+=(release-lane)
 has '^(bob-control-plane-server\.js|builder-[a-z-]+\.js|bob-laptop-shell\.js|worker-executor\.js|supabase-workflow-client\.js|package(-lock)?\.json|Dockerfile|deploy/bob-control-plane/|supabase/functions/_shared/builder-)' && TARGETS+=(control-plane)
 has '^services/fcm-api/' && TARGETS+=(fcm-api)
-has '^(Dockerfile\.worker|frontend-worker\.js|backend-worker\.js|security-worker\.js|worker-executor\.js|builder-verification-outcome\.js|builder-path-policy\.js|builder-data-path-gate\.js|builder-ts-delta-gate\.js|assessment-manifest\.js|apps/web/package(-lock)?\.json)' && TARGETS+=(worker-image)
+has '^(Dockerfile\.worker|frontend-worker\.js|visual-baseline-worker\.js|builder-visual-baseline\.js|backend-worker\.js|security-worker\.js|worker-executor\.js|builder-verification-outcome\.js|builder-path-policy\.js|builder-data-path-gate\.js|builder-ts-delta-gate\.js|assessment-manifest\.js|apps/web/package(-lock)?\.json)' && TARGETS+=(worker-image)
 has '^deploy/bob-vps/nginx/' && TARGETS+=(nginx)
 WEB_ONLY_NOTE=""; has '^apps/web/' && WEB_ONLY_NOTE="apps/web changed: Vercel deploys it from main on its own"
 

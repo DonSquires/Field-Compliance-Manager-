@@ -11,6 +11,21 @@
 
 ## 1. What Bob is
 
+**Owner-approved autonomous visual baseline candidates, 2026-10-21.** Builder,
+self-heal/autopilot and Vibe may generate bounded Playwright Linux PNG
+baselines through the dedicated offline, credential-free fixture worker.
+State the intentional before/during/after change first; a mismatch alone is
+not evidence that the baseline is wrong. Preserve before/after images, hashes,
+pinned source identity, candidate-diff digest, commands and functional results.
+Rerender, restore the exact candidate bytes, and compare against them using
+the existing spec assertions and tolerances; the independent frontend verifier
+repeats this before normal verification. Record separate candidate and actual
+render hashes; harmless raster drift is not byte corruption. No
+assertion/tolerance weakening, arbitrary binary writes, live
+tenant capture or automatic merge is authorized. Existing protected/evidential
+and release holds remain; human review/merge is always required for a visual
+baseline PR. Resumed edits must reverify PNG provenance before handoff.
+
 **Owner-approved Builder continuation, 2026-10-18.** A bounded execution may
 pause or lose its runner without losing the task's acknowledged engineering
 progress. Save private, integrity-checked checkpoints bound to organisation,

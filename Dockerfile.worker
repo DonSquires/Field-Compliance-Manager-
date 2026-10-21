@@ -13,6 +13,8 @@ COPY builder-verification-outcome.js /opt/bob/builder-verification-outcome.js
 COPY builder-data-path-gate.js /opt/bob/builder-data-path-gate.js
 COPY builder-ts-delta-gate.js /opt/bob/builder-ts-delta-gate.js
 COPY frontend-worker.js /opt/bob/frontend-worker.js
+COPY builder-visual-baseline.js /opt/bob/builder-visual-baseline.js
+COPY visual-baseline-worker.js /opt/bob/visual-baseline-worker.js
 COPY backend-worker.js /opt/bob/backend-worker.js
 COPY security-worker.js /opt/bob/security-worker.js
 COPY supabase/functions/_shared/builder-backend-engineer.js /opt/bob/supabase/functions/_shared/builder-backend-engineer.js
