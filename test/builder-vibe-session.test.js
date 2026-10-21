@@ -126,7 +126,8 @@ test('dependency preparation does not become a false protected-edit refusal', as
 
 test('Vibe opening packet grounds natural screen labels in tracked source and outlines', async () => {
   const { store, deps, model, repo } = setup([]);
-  fs.writeFileSync(path.join(repo.dir, 'apps/web/src/OverviewApprovals.tsx'), 'export function OverviewApprovals() { return "Overview and approvals"; }\n');
+  fs.writeFileSync(path.join(repo.dir, 'apps/web/src/OverviewApprovals.tsx'),
+    Array.from({ length: 24 }, (_, index) => `export function OverviewApprovals${index}() { return "Overview and approvals"; }`).join('\n'));
   git(repo.dir, ['add', '.']);
   git(repo.dir, ['-c', 'user.name=T', '-c', 'user.email=t@example.com', 'commit', '-qm', 'add overview fixture']);
   repo.sha = git(repo.dir, ['rev-parse', 'HEAD']);
@@ -136,6 +137,9 @@ test('Vibe opening packet grounds natural screen labels in tracked source and ou
   assert.match(packet, /apps\/web\/src\/OverviewApprovals.tsx/);
   assert.match(packet, /export function OverviewApprovals/);
   assert.match(packet, /no Atlas client/);
+  const startingPacket = JSON.parse(packet.match(/VERIFIED STARTING FILES[^\n]*\n([^\n]+)/)[1]);
+  assert.equal(startingPacket.outlines[0].entries.length, 16);
+  assert.equal(startingPacket.outlines[0].truncated, true);
 });
 
 test('repeated unchanged reads reuse results and a distinct local model can recover once', async () => {

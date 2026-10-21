@@ -452,7 +452,15 @@ async function runConversation({ store, session, message, workspacePath, branch,
   const atlas = await atlasMapForFiles({ supabase, workspacePath, lane: 'fullstack', startingFiles });
   const sourceCandidates = [...startingFiles.confirmed, ...startingFiles.discovered.map(entry => entry.file), ...(atlas.suggested_files || [])];
   const startingOutlines = sourceCandidates.filter(file => !/\.(?:css|json|md)$/.test(file)).slice(0, 3)
-    .map(file => ({ path: file, ...tools.outline({ path: file }) }));
+    .map(file => {
+      const outline = tools.outline({ path: file });
+      const entries = outline.entries || [];
+      return {
+        ...outline, path: file,
+        entries: entries.slice(0, 16).map(entry => clip(entry, 200)),
+        truncated: entries.length > 16 || entries.some(entry => String(entry).length > 200),
+      };
+    });
   const state = branchState(workspacePath, baseSha);
   const transcript = history.map(entry => {
     const pastAttachments = Array.isArray(entry.payload?.attachment_context)
@@ -475,7 +483,7 @@ async function runConversation({ store, session, message, workspacePath, branch,
   const task = [
     `SESSION: ${session.title} (branch ${branch}, based on main ${String(baseSha).slice(0, 10)})`,
     state.commits.length ? `BRANCH SO FAR (${state.commits.length} commit(s)):\n${state.commits.slice(0, 20).join('\n')}\nFiles changed vs main: ${state.files.slice(0, 40).join(', ')}` : 'BRANCH SO FAR: no changes yet.',
-    `VERIFIED STARTING FILES (candidates, not a diagnosis):\n${JSON.stringify({ ...startingFiles, atlas, outlines: startingOutlines }).slice(0, 14000)}`,
+    `VERIFIED STARTING FILES (candidates, not a diagnosis):\n${JSON.stringify({ ...startingFiles, atlas, outlines: startingOutlines })}`,
     transcript ? `CONVERSATION SO FAR:\n${transcript}` : 'CONVERSATION SO FAR: (this is the first message)',
     executionSummary ? `RECENT EXECUTION LOGS (avoid repeating failed/refused steps):\n${executionSummary}` : null,
     `OWNER NOW SAYS:\n${message.content}`,
