@@ -297,7 +297,15 @@ if [[ -n "$NEW_MIGRATIONS" ]]; then
     if diff -u <(grep -vE '^-- (project:|applied_migrations:)' supabase/schema.sql) <(grep -vE '^-- (project:|applied_migrations:)' "$live_schema") >"$STATE_DIR/schema-$SHA8.diff"; then
       RESULTS+=("live schema snapshot refreshed and matches the committed catalog at $SHA8")
     else
-      fail_note "live schema snapshot differs from committed supabase/schema.sql after migration; release requires a catalog refresh commit"; OK=false
+      # Applied migrations changed the live catalog. Bob commits the regenerated schema.sql and
+      # database types as a catalog-only PR and merges it (the migration's merge was the approval).
+      # The pointer stays put, so the next tick re-checks against the refreshed main.
+      if catalog="$(BOB_CATALOG_REMOTE="${REMOTE_URL:-}" "${FETCH_ENV[@]}" node scripts/bob-catalog-refresh-pr.mjs --repo "$REPO_DIR" --base "$HEAD_SHA" --schema "$live_schema" 2>"$STATE_DIR/catalog-$SHA8.err")"; then
+        RESULTS+=("live catalog changed by the migration; catalog refresh ${catalog}; release completes on the next tick")
+      else
+        fail_note "live schema snapshot differs from committed supabase/schema.sql and the catalog refresh PR failed: $(tail -c 300 "$STATE_DIR/catalog-$SHA8.err")"
+      fi
+      OK=false
     fi
   else
     fail_note "live schema snapshot refresh failed: $(tail -c 300 "$STATE_DIR/schema-$SHA8.err")"; OK=false

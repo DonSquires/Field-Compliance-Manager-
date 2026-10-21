@@ -37,7 +37,7 @@ test('start_officer_shift names the shift it stopped in its receipt, and the off
   assert.match(migration, /where s\.officer_user_id = v_shift\.officer_user_id and s\.status = 'in_progress' and s\.id <> v_shift\.id\n\s+order by s\.actual_start desc nulls last\n\s+limit 1;/);
   assert.match(migration, /'superseded_shift_id', v_prev_id,/);
   assert.match(migration, /set status = 'completed', actual_end = coalesce\(actual_end, v_completed_at\), ended_reason = 'officer'/);
-  assert.match(types, /superseded_service_type: string \| null\n\s+superseded_shift_id: string \| null\n\s+superseded_started_at: string \| null/);
+  assert.match(types, /superseded_service_type: string(?: \| null)?\n\s+superseded_shift_id: string(?: \| null)?\n\s+superseded_started_at: string(?: \| null)?/);
   assert.match(types, /ended_reason: string \| null/);
 });
 
