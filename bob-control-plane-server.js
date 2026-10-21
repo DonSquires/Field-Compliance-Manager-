@@ -29,7 +29,7 @@ const { createVibePreviewManager } = require('./builder-vibe-preview');
 const { createBranchWorkspace, createDetachedWorkspace, retireTerminalWorkspace, commitVerifiedPatch, publishWorkspaceBranch, createGiteaPullRequest, workspacePathForBranch, createGitHubPullRequest, mergeGitHubPullRequest, ensureSourceCheckout, githubAuthHeader, githubRepoUrl, githubSshRepoUrl, resolveRemoteHead, redactGitError } = require('./builder-branch-workspace');
 const { executeWorker, summarizeHumanTest } = require('./worker-executor');
 const { createMainHealthMonitor } = require('./bob-main-health');
-const { TERMINAL_STATUSES: BUILDER_TERMINAL_STATUSES, jobHygieneDecision } = require('./builder-job-hygiene');
+const { TERMINAL_STATUSES: BUILDER_TERMINAL_STATUSES, jobHygieneDecision, historicalHealthResolution } = require('./builder-job-hygiene');
 
 // Route failures used to be swallowed into a bare 409; keep a short redacted reason so the
 // operator (and Bob's self-heal loop) can act without a shell on the host.
@@ -1055,9 +1055,7 @@ async function reconcileStaleBuilderJobs() {
     .order('updated_at', { ascending: true })
     .limit(100);
   if (error) throw new Error(`stale Builder jobs could not be listed: ${error.message}`);
-  if (!jobs?.length) return 0;
-
-  const jobIds = jobs.map((job) => job.id);
+  const jobIds = (jobs || []).map((job) => job.id);
   const [modelRuns, workerRuns, approvals] = await Promise.all([
     builderSupabase.from('builder_model_runs').select('job_id').in('job_id', jobIds).in('status', ['pending', 'running']),
     builderSupabase.from('builder_worker_runs').select('job_id').in('job_id', jobIds).in('status', ['pending', 'running']),
@@ -1070,7 +1068,7 @@ async function reconcileStaleBuilderJobs() {
   const pendingApprovals = new Set((approvals.data || []).map((row) => row.job_id));
 
   let retired = 0;
-  for (const job of jobs) {
+  for (const job of jobs || []) {
     const decision = jobHygieneDecision(job, {
       currentMainSha,
       currentMainHealthPassed,
@@ -1092,6 +1090,47 @@ async function reconcileStaleBuilderJobs() {
     if (updated?.status === 'cancelled') {
       retired += 1;
       record('autopilot', 'builder.housekeeping.retired', job.id, { outcome: decision.outcome });
+    }
+  }
+  if (currentMainHealthPassed) {
+    const project = await routineBuilderProject();
+    const { data: historical, error: historicalError } = await builderSupabase.from('builder_jobs')
+      .select('id,status,autopilot_state,autopilot_source,source_main_health_sha,source_main_health_files,workspace_branch,workspace_pull_request_url')
+      .eq('organization_id', project.organization_id).eq('project_id', project.id)
+      .eq('autopilot_source', 'main_monitor').in('status', ['failed', 'cancelled'])
+      .or('autopilot_state.is.null,autopilot_state.neq.done')
+      .is('workspace_branch', null).is('workspace_pull_request_url', null)
+      .order('updated_at', { ascending: true }).limit(100);
+    if (historicalError) throw new Error(`historical health repairs could not be listed: ${historicalError.message}`);
+    const verification = { ...mainHealthState(currentMainSha), profile: 'main-health' };
+    const verifiedFiles = new Set();
+    for (const job of historical || []) {
+      for (const file of job.source_main_health_files || []) {
+        if (!isHealthTestPath(file) || verifiedFiles.has(file)) continue;
+        // Read from the tested commit, not a mutable worktree or a filename in an old error.
+        try {
+          readRepositoryFile({ sourceDir: builderSourceDir, sha: currentMainSha, path: file });
+          verifiedFiles.add(file);
+        } catch (error) {
+          if (error.code !== 'NOT_FOUND') throw error;
+          record('autopilot', 'builder.housekeeping.historical_unproven', job.id, { current_main_sha: currentMainSha, missing_test: file });
+        }
+      }
+      const decision = historicalHealthResolution(job, {
+        currentMainSha, currentMainHealthPassed, verifiedFiles: [...verifiedFiles],
+      });
+      if (!decision) continue;
+      if (builderRepositoryHead('main').sha !== currentMainSha) break;
+      const { data: resolved, error: resolveError } = await builderSupabase.rpc('builder_resolve_historical_health_job', {
+        _job_id: job.id, _organization_id: project.organization_id, _project_id: project.id,
+        _main_sha: currentMainSha, _source_sha: job.source_main_health_sha,
+        _verified_files: job.source_main_health_files, _verification: verification,
+      });
+      if (resolveError) throw new Error(`historical health repair ${job.id} could not be resolved: ${resolveError.message}`);
+      if (resolved?.autopilot_state === 'done') {
+        retired += 1;
+        record('autopilot', 'builder.housekeeping.historical_resolved', job.id, { current_main_sha: currentMainSha, historical_status: resolved.status });
+      }
     }
   }
   return retired;

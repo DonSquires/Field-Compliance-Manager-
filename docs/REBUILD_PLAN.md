@@ -29,6 +29,13 @@ Bob main-health visual baseline, 2026-10-21:
 - Baseline replacement here is an owner-authorized maintenance operation.
   The general engineer still refuses arbitrary binary patches; this does not
   claim an autonomous PNG-generation/publication lane exists.
+- Historical failed/cancelled main-health jobs can be resolved only after a
+  newer pinned main passes every health step and the original test files
+  remain present at that commit. Resolution is organization/project scoped,
+  refuses active execution or workspaces, records the verification and audit
+  event, and marks automation done without rewriting the original status,
+  error, approvals, artifacts or release history. Jobs without this proof
+  stay unresolved.
 
 Vehicle search pop-out window, 2026-10-20:
 
