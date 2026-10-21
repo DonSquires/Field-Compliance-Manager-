@@ -8,6 +8,21 @@ const { spawnSync } = require('node:child_process');
 const SCRIPT = path.resolve(__dirname, '../scripts/bob-release-lane.sh');
 const bashSyntax = (source) => spawnSync('bash', ['-n'], { input: source.replace(/\r\n/g, '\n'), encoding: 'utf8' });
 
+test('worker launcher changes redeploy the control plane as well as the worker image', () => {
+  const lane = fs.readFileSync(SCRIPT, 'utf8');
+  const classification = lane.slice(lane.indexOf('has()'), lane.indexOf('WEB_ONLY_NOTE='));
+  const result = spawnSync('bash', ['-s'], {
+    encoding: 'utf8',
+    input: `set -euo pipefail
+CHANGED=worker-executor.js
+${classification}
+printf '%s\\n' "\${TARGETS[@]}"
+`,
+  });
+  assert.equal(result.status, 0, result.stderr);
+  assert.deepEqual(result.stdout.trim().split('\n'), ['control-plane', 'worker-image']);
+});
+
 test('release environment values stay literal and existing environment wins', () => {
   const lane = fs.readFileSync(SCRIPT, 'utf8');
   const loader = lane.slice(lane.indexOf('load_env()'), lane.indexOf('load_env "$CP_ENV_FILE"'));
