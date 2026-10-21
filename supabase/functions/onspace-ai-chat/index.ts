@@ -9586,6 +9586,20 @@ serve(async (req)=>{
                 }
               };
             }
+            // Owner ruling 2026-10-21: chat-composed code changes move to the
+            // independent Vibe Builder (Platform & Settings → Builder). Only the
+            // governed friction-triage self-heal route and an already-pending
+            // proposal may still open a Builder job from this chat.
+            const viaFrictionTriage = toolArgs.owner_instruction_confirmed === true && typeof toolArgs.source_friction_packet_id === 'string';
+            if (!storedJob && !viaFrictionTriage) {
+              return {
+                reply: 'Code changes are now built in the **Vibe Builder** — open **Platform & Settings → Builder** and describe the change there. Bob will work on a live branch, show each step, the diff and a live preview, and open a pull request only when you say ship. I have not opened a Builder job from this chat.',
+                meta: {
+                  tool: 'create_builder_job',
+                  outcome: 'redirected_to_vibe_builder'
+                }
+              };
+            }
             if (!storedJob && !explicitBuilderCreationRequest(message) && toolArgs.owner_instruction_confirmed !== true) {
               return {
                 reply: 'I have kept this in the diagnostic/agentic lane. I did not open or propose a Builder job because you did not explicitly ask me to implement a code change.',

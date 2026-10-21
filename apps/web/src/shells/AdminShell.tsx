@@ -106,6 +106,7 @@ const GrandMasterPlatformPage = React.lazy(() => import('../pages/GrandMasterPla
 const ProviderBillingPage = React.lazy(() => import('../pages/ProviderBillingPage'));
 const PlatformSubscribersPage = React.lazy(() => import('../pages/PlatformSubscribersPage'));
 const BuilderControlRoomPage = React.lazy(() => import('../pages/BuilderControlRoomPage'));
+const BuilderVibePage = React.lazy(() => import('../pages/BuilderVibePage'));
 const BobWorkspacePage = React.lazy(() => import('../pages/BobWorkspacePage'));
 const BobDocumentStudioPage = React.lazy(() => import('../pages/BobDocumentStudioPage'));
 const ReportsHubPage = React.lazy(() => import('../pages/ReportsHubPage'));
@@ -458,6 +459,7 @@ const AdminShell: React.FC = () => {
   const [sidebarCollapsed, setSidebarCollapsed] = useState(false);
   const [mobileMenuOpen, setMobileMenuOpen] = useState(false);
   const [bobOpen, setBobOpen] = useState(false);
+  const [builderView, setBuilderView] = useState<'vibe' | 'jobs'>('vibe');
   const [bobLaunchPrompt, setBobLaunchPrompt] = useState<string | null>(null);
   const [isMobile, setIsMobile] = useState(window.innerWidth < 768);
   const [accessNotice, setAccessNotice] = useState<string | null>(null);
@@ -732,6 +734,7 @@ const AdminShell: React.FC = () => {
       return true;
     }
     if (destination.kind === 'admin_page') {
+      if (destination.page === 'builder') setBuilderView('jobs');
       navigateToPage(destination.page as AdminPage);
       return true;
     }
@@ -837,7 +840,9 @@ const AdminShell: React.FC = () => {
       case 'platform':
         return <GrandMasterPlatformPage />;
       case 'builder':
-        return <BuilderControlRoomPage onOpenBob={(prompt) => { setBobLaunchPrompt(prompt); setBobOpen(true); }} />;
+        return builderView === 'jobs'
+          ? <BuilderControlRoomPage onOpenVibe={() => setBuilderView('vibe')} onOpenBob={(prompt) => { setBobLaunchPrompt(prompt); setBobOpen(true); }} />
+          : <BuilderVibePage onOpenJobs={() => setBuilderView('jobs')} />;
       case 'platform-catalog':
         return <ModuleCatalogPage />;
       case 'platform-subscriptions':

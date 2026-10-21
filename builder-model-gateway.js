@@ -5,6 +5,7 @@ const ALLOWED_BUILDER_MODES = new Set([
   'ux_designer',
   'frontend_engineer',
   'backend_engineer',
+  'vibe_engineer',
   'qa_security_reviewer',
   'code_reviewer',
   'release_engineer'

@@ -5,6 +5,9 @@ const { execFileSync } = require('node:child_process');
 const { changedFilesFromPatch, validatePatchText } = require('./frontend-worker');
 
 const BRANCH_PREFIX = 'bob/job-';
+const VIBE_BRANCH_PREFIX = 'bob/vibe-';
+// Job branches and owner vibe-session branches are the only refs Builder may publish.
+const isPublishableBranch = name => /^bob\/(?:job|vibe)-[a-z0-9]+$/.test(String(name));
 const BUILDER_NAME = 'Bob Builder';
 const BUILDER_EMAIL = 'bob-builder@fieldcompliance.local';
 const VERIFIED_GITHUB_EMAIL = '256263525+DonSquires@users.noreply.github.com';
@@ -219,7 +222,7 @@ function commitVerifiedPatch({ workspacePath, branchName, patch, message, body =
 }
 
 function publishWorkspaceBranch({ workspacePath, branchName, expectedHeadSha, pushUrl = null, pushAuthHeader = null, sshCommand = null, requireVerifiedIdentity = false }) {
-  if (!branchName.startsWith(BRANCH_PREFIX) || git(workspacePath, ['branch', '--show-current']) !== branchName) throw new Error('Builder workspace branch is invalid');
+  if (!isPublishableBranch(branchName) || git(workspacePath, ['branch', '--show-current']) !== branchName) throw new Error('Builder workspace branch is invalid');
   if (git(workspacePath, ['status', '--porcelain', '--untracked-files=normal'])) throw new Error('Builder workspace must be clean before publication');
   const head = git(workspacePath, ['rev-parse', 'HEAD']);
   if (head !== expectedHeadSha) throw new Error('Builder workspace head is stale');
@@ -320,7 +323,7 @@ async function githubGraphql({ fetchImpl, githubToken, query, variables }) {
 }
 
 async function createGitHubPullRequest({ workspacePath, branchName, expectedHeadSha, title, body, githubToken, owner, repo, base = 'main', draft = true, fetchImpl = globalThis.fetch }) {
-  if (!branchName.startsWith(BRANCH_PREFIX) || git(workspacePath, ['branch', '--show-current']) !== branchName) throw new Error('Builder workspace branch is invalid');
+  if (!isPublishableBranch(branchName) || git(workspacePath, ['branch', '--show-current']) !== branchName) throw new Error('Builder workspace branch is invalid');
   if (git(workspacePath, ['status', '--porcelain', '--untracked-files=normal'])) throw new Error('Builder workspace must be clean before opening a pull request');
   if (git(workspacePath, ['rev-parse', 'HEAD']) !== expectedHeadSha) throw new Error('Builder workspace head is stale');
   if (!githubToken || !owner || !repo || typeof fetchImpl !== 'function') throw new Error('Builder GitHub integration is not configured');
@@ -404,4 +407,4 @@ function publicGiteaUrl(url, { baseUrl, publicBaseUrl }) {
   return url;
 }
 
-module.exports = { BRANCH_PREFIX, BUILDER_NAME, BUILDER_EMAIL, VERIFIED_GITHUB_EMAIL, builderCommitIdentity, branchNameForJob, workspacePathForBranch, createBranchWorkspace, createDetachedWorkspace, retireTerminalWorkspace, commitVerifiedPatch, publishWorkspaceBranch, giteaRepositoryPath, createGiteaPullRequest, publicGiteaUrl, verifySnapshot, githubAuthHeader, githubRepoUrl, githubSshRepoUrl, resolveRemoteHead, ensureSourceCheckout, createGitHubPullRequest, mergeGitHubPullRequest, redactGitError };
+module.exports = { BRANCH_PREFIX, VIBE_BRANCH_PREFIX, isPublishableBranch, BUILDER_NAME, BUILDER_EMAIL, VERIFIED_GITHUB_EMAIL, builderCommitIdentity, branchNameForJob, workspacePathForBranch, createBranchWorkspace, createDetachedWorkspace, retireTerminalWorkspace, commitVerifiedPatch, publishWorkspaceBranch, giteaRepositoryPath, createGiteaPullRequest, publicGiteaUrl, verifySnapshot, githubAuthHeader, githubRepoUrl, githubSshRepoUrl, resolveRemoteHead, ensureSourceCheckout, createGitHubPullRequest, mergeGitHubPullRequest, redactGitError };

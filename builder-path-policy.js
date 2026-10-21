@@ -66,6 +66,8 @@ function laneAllows(lane, file) {
   if (isProtectedPath(file)) return false;
   if (lane === 'frontend') return laneFor(file) === 'frontend';
   if (lane === 'backend') return laneFor(file) === 'backend';
+  // Owner-driven vibe sessions span the web app and the backend; protected paths still refuse above.
+  if (lane === 'fullstack') return true;
   return false;
 }
 
