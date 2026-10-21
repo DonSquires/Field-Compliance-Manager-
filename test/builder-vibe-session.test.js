@@ -5,6 +5,7 @@ const assert = require('node:assert/strict');
 const fs = require('node:fs');
 const os = require('node:os');
 const path = require('node:path');
+const crypto = require('node:crypto');
 const http = require('node:http');
 const { EventEmitter } = require('node:events');
 const { execFileSync } = require('node:child_process');
@@ -249,6 +250,10 @@ test('preview dependency install always includes devDependencies', async () => {
   fs.mkdirSync(web, { recursive: true });
   fs.writeFileSync(path.join(web, 'package.json'), '{"name":"web"}\n');
   fs.writeFileSync(path.join(web, 'package-lock.json'), '{"name":"web","lockfileVersion":3}\n');
+  const cacheHash = crypto.createHash('sha256').update(fs.readFileSync(path.join(web, 'package-lock.json'))).update(fs.readFileSync(path.join(web, 'package.json'))).digest('hex').slice(0, 16);
+  const staleCache = path.join(root, 'vibe-cache', cacheHash);
+  fs.mkdirSync(path.join(staleCache, 'node_modules'), { recursive: true });
+  fs.writeFileSync(path.join(staleCache, '.complete'), 'stale cache entry without Vite');
   const calls = [];
   const spawnImpl = (cmd, args, options) => {
     calls.push({ cmd, args, options });
