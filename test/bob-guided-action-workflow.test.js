@@ -9,7 +9,7 @@ const adminShell = fs.readFileSync('apps/web/src/shells/AdminShell.tsx', 'utf8')
 const bobWorkspace = fs.readFileSync('apps/web/src/pages/BobWorkspacePage.tsx', 'utf8');
 
 test('Bob proposals include a visible guided workflow and exact review destination', () => {
-  assert.match(conductor, /function attachGuidedProposalWorkflow\(meta\)/);
+  assert.match(conductor, /function attachGuidedProposalWorkflow\(meta(?:: \w+)?\)/);
   assert.match(conductor, /\/admin\/approvals\?actionId=\$\{encodeURIComponent\(firstId\)\}&source=bob/);
   assert.match(conductor, /label: 'Human review'[\s\S]*status: 'current'/);
   assert.match(conductor, /label: 'Apply and verify'[\s\S]*status: 'pending'/);

@@ -32,7 +32,7 @@ const CORS = {
   'Access-Control-Allow-Origin': '*',
   'Access-Control-Allow-Headers': 'authorization, x-client-info, apikey, content-type'
 };
-const json = (body, status = 200)=>new Response(JSON.stringify(body), {
+const json = (body: unknown, status = 200)=>new Response(JSON.stringify(body), {
     status,
     headers: {
       ...CORS,

@@ -67,7 +67,7 @@ export const PERSON_SURFACEABLE_FIELDS = new Set([
  *    ORG_QUERY_TYPES), it is NEVER promoted — the real error surfaces (F1b).
  * 4. If q is NOT valid and no name-like arg is present, the real error
  *    surfaces (existing behaviour).
- */ export function resolveQueryRouting(q, args) {
+ */ export function resolveQueryRouting(q: any, args: Record<string, any>) {
   // F1a: valid query types pass through unchanged.
   if (VALID_QUERY_TYPES.has(q)) {
     return {
@@ -138,7 +138,7 @@ export const PERSON_SURFACEABLE_FIELDS = new Set([
  * - NO SECOND DOOR: the caller must not allow any other path to defeat this.
  *
  * @param responseData The parsed response body from callFn (r.data).
- */ export function checkTerminalRefusal(responseData) {
+ */ export function checkTerminalRefusal(responseData: Record<string, any>) {
   if (!responseData || typeof responseData !== 'object') {
     return {
       isTerminal: false
@@ -167,7 +167,7 @@ export const PERSON_SURFACEABLE_FIELDS = new Set([
  * #334 F1c (Don-ratified): fail-closed. If the row cannot be classified
  * (missing display_name), returns null — the caller must handle this as a
  * terminal safe response, NOT fall through to a generic formatter.
- */ export function renderPersonRow(row) {
+ */ export function renderPersonRow(row: Record<string, any>) {
   const displayName = row.display_name;
   if (typeof displayName !== 'string' || !displayName.trim()) {
     // Fail-closed: cannot classify this person row.
@@ -198,7 +198,7 @@ export const PERSON_SURFACEABLE_FIELDS = new Set([
  * - Decline-don't-guess.
  *
  * @returns The rendered reply string. Always safe; never falls through.
- */ export function renderPersonResults(results) {
+ */ export function renderPersonResults(results: any) {
   if (!results.length) {
     return 'I looked but found no matching person records.';
   }
@@ -228,7 +228,7 @@ export const PERSON_SURFACEABLE_FIELDS = new Set([
  * Dispatches to the person-safe renderer for find_user results.
  * All other query types use the existing org-shaped formatters.
  * The generic/default formatter is UNREACHABLE for find_user results.
- */ export function renderQueryResults(q, results) {
+ */ export function renderQueryResults(q: any, results: any) {
   // F1c: person results go through the dedicated person-safe path.
   // The generic formatter is unreachable for find_user.
   if (q === 'find_user') {
@@ -236,7 +236,7 @@ export const PERSON_SURFACEABLE_FIELDS = new Set([
   }
   if (q === 'search_observations') {
     if (!results.length) return 'I looked but found no matching observations.';
-    const lines = results.slice(0, 10).map((row) => {
+    const lines = results.slice(0, 10).map((row: Record<string, any>) => {
       const anchors = [row.site_name, row.zone_name, row.vehicle_label, row.person_label, row.incident_label].filter(Boolean).join(' | ');
       return `- ${row.observed_at ?? 'unknown time'}${row.plate_number ? ` — ${row.plate_number}` : ''}${anchors ? ` — ${anchors}` : ''}${row.compliance_status ? ` [${row.compliance_status}]` : ''}`;
     }).join('\n');
@@ -244,7 +244,7 @@ export const PERSON_SURFACEABLE_FIELDS = new Set([
   }
   if (q === 'safety_workspace') {
     if (!results.length) return 'No live hazards or safety reviews were found in that scope.';
-    return results.slice(0, 10).map((row) =>
+    return results.slice(0, 10).map((row: Record<string, any>) =>
       `- ${row.name ?? 'Safety record'} (${row.record_type === 'safety_review' ? `review: ${row.status}` : `hazard${row.review_due ? `; review due ${row.review_due}` : '; review not scheduled'}`})`
     ).join('\n');
   }
@@ -252,7 +252,7 @@ export const PERSON_SURFACEABLE_FIELDS = new Set([
   if (!results.length) {
     return `I looked but found no matching records for that ${q}.`;
   }
-  const lines = results.slice(0, 10).map((row)=>{
+  const lines = results.slice(0, 10).map((row: Record<string, any>)=>{
     if (q === 'list_zones') {
       return `- ${row.name ?? '(unnamed zone)'}${row.rule_type ? ` [${row.rule_type}]` : ''} — ${row.has_boundary ? 'boundary set' : 'no boundary'} [id ${row.id}]`;
     }
@@ -276,7 +276,7 @@ export const PERSON_SURFACEABLE_FIELDS = new Set([
  *
  * For retryable errors, returns the existing [INTERNAL:] self-correction
  * instruction so the reasoning loop can fix its own call.
- */ export function formatQueryError(responseData, httpStatus) {
+ */ export function formatQueryError(responseData: Record<string, any>, httpStatus: any) {
   // F2: TERMINATE-BEFORE-GENERATION. Check terminal refusal FIRST,
   // before any retry/promotion/rewrite logic.
   const terminal = checkTerminalRefusal(responseData);
@@ -285,7 +285,7 @@ export const PERSON_SURFACEABLE_FIELDS = new Set([
     // and defensively strip any [INTERNAL: or [SYSTEM: fragment so a
     // downstream body can never inject internal scaffolding into a user-facing
     // reply.
-    const scrubbed = terminal.terminalMessage.replace(/\[INTERNAL:[^\]]*\]?/g, '').replace(/\[SYSTEM:[^\]]*\]?/g, '').trim().slice(0, 400);
+    const scrubbed = (terminal.terminalMessage ?? '').replace(/\[INTERNAL:[^\]]*\]?/g, '').replace(/\[SYSTEM:[^\]]*\]?/g, '').trim().slice(0, 400);
     return {
       reply: scrubbed,
       meta: {

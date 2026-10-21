@@ -27,13 +27,22 @@
  *      BOB_INFERENCE_URL, BOB_INFERENCE_SECRET
  */ import { serve } from 'https://deno.land/std@0.168.0/http/server.ts';
 import { createClient as _createClient } from 'https://esm.sh/@supabase/supabase-js@2';
+// Untyped JSON crossing a network or model boundary.
+type JsonRecord = Record<string, any>;
+// Every tool executor returns a user-facing reply and a structured meta receipt.
+type Caps = Awaited<ReturnType<typeof resolveUserCapabilities>>;
+type PayloadFieldSpec = { name: string; type: string };
+type PayloadSchema = { actionType: string; requiredFields: PayloadFieldSpec[]; optionalFields: PayloadFieldSpec[]; businessRules?: Array<{ id: string; description: string; check: string }> };
+type ConversationFacts = { conversation_id: string; organization_id: string; schema_version: number; active_slot: string | null; slots: Record<string, JsonRecord> };
+type ToolResult = { reply: string; meta: JsonRecord; [key: string]: any };
 import { OWNER_EMAILS } from '../_shared/auth.ts';
 import { buildToolDispatchedPayload, buildToolOutcomePayload, buildIntrospectPayload, renderNotepadTail } from '../_shared/deterministic-logic.ts';
 import { buildModuleMap } from '../_shared/moduleProfiles.ts';
-import { startToolExecution, finishToolExecution, reloadTaskLedger } from '../_shared/task-lifecycle.ts';
+import { startToolExecution, finishToolExecution, reloadTaskLedger, type TaskLedger } from '../_shared/task-lifecycle.ts';
 import { toolSignature } from '../_shared/tool-signature.mjs';
 import { builderJobTitle, atlasGapTargets, atlasGapBrief, stripBuilderProposalEchoes } from '../_shared/builder-job-title.mjs';
-const createClient = (url, key, opts)=>_createClient(url, key, opts);
+const createClient = (url: string, key: string, opts?: Parameters<typeof _createClient>[2])=>_createClient(url, key, opts);
+type DbClient = ReturnType<typeof createClient>;
 const CORS = {
   'Access-Control-Allow-Origin': '*',
   'Access-Control-Allow-Headers': 'authorization, x-client-info, apikey, content-type'
@@ -58,7 +67,7 @@ const BUILD_TAG = 'onspace-ai-chat-v2.1-contract';
 // `text.length <= NaN` is false for ALL text while `.slice(0, NaN)` is "" --
 // every tool result would silently become EMPTY. Fall back to the default on
 // any non-finite or non-positive value instead.
-function parseBudgetEnv(raw, fallback) {
+function parseBudgetEnv(raw: any, fallback: any) {
   const n = parseInt(raw ?? '', 10);
   return Number.isFinite(n) && n > 0 ? n : fallback;
 }
@@ -71,7 +80,7 @@ const LOOP_STEP_SUMMARY_BUDGET = parseBudgetEnv(Deno.env.get('BOB_LOOP_STEP_SUMM
  * is invisible to the reasoner harmed by it. Producers assemble detail LAST
  * (an MR diff follows its description), so a dropped tail is likely the
  * primary evidence, not filler.
- */ function sliceWithTruncationDisclosure(raw, budget, label) {
+ */ function sliceWithTruncationDisclosure(raw: any, budget: any, label: string) {
   const text = String(raw ?? '');
   if (text.length <= budget) return text;
   const dropped = text.length - budget;
@@ -90,7 +99,7 @@ const BOB_INFERENCE_SECRET = Deno.env.get('BOB_INFERENCE_SECRET') ?? '';
  * Derive disclosure_tier from conductor egress signals.
  * Inline mirror of deriveDisclosureTier (packages/shared/src/disclosureTier.ts).
  * Precedence: quiet > safety > forbidden-set > aggregate > default(operational).
- */ function conductorDeriveDisclosureTier(signals) {
+ */ function conductorDeriveDisclosureTier(signals: any) {
   if (signals.quietDenial) {
     return {
       disclosure_tier: 'none'
@@ -138,7 +147,7 @@ const BOB_INFERENCE_SECRET = Deno.env.get('BOB_INFERENCE_SECRET') ?? '';
   return `bob-${ts}-${rand}`;
 }
 // ── v2 CONTRACT: Unified request envelope validation ─────────────────────────
-/** Validate the incoming request body against the BobRequestEnvelope contract. */ function validateRequestEnvelope(body) {
+/** Validate the incoming request body against the BobRequestEnvelope contract. */ function validateRequestEnvelope(body: JsonRecord) {
   const errors = [];
   // message must be a string (may be empty for attachment-only turns)
   if (body.message !== undefined && typeof body.message !== 'string') errors.push('message must be a string');
@@ -158,11 +167,11 @@ const BOB_INFERENCE_SECRET = Deno.env.get('BOB_INFERENCE_SECRET') ?? '';
     errors
   };
 }
-function safeAgentWorkspaceContext(value) {
+function safeAgentWorkspaceContext(value: any) {
   const source = value && typeof value === 'object' && !Array.isArray(value) ? value : {};
-  const text = (key, maximum = 200) => typeof source[key] === 'string' ? source[key].slice(0, maximum) : null;
+  const text = (key: any, maximum = 200) => typeof source[key] === 'string' ? source[key].slice(0, maximum) : null;
   const page = source.visible_page && typeof source.visible_page === 'object' && !Array.isArray(source.visible_page) ? source.visible_page : {};
-  const pageLabels = (key, maximum) => Array.isArray(page[key])
+  const pageLabels = (key: any, maximum: any) => Array.isArray(page[key])
     ? page[key].filter((value) => typeof value === 'string').slice(0, maximum).map((value) => value.slice(0, 120))
     : [];
   const visiblePage = {
@@ -172,7 +181,7 @@ function safeAgentWorkspaceContext(value) {
   };
   const agentMode = source.agent_mode === 'builder' ? 'builder' : 'operations';
   if (agentMode !== 'builder') {
-    const safeEntity = (value)=>{
+    const safeEntity = (value: any)=>{
       if (!value || typeof value !== 'object' || Array.isArray(value)) return null;
       const allowed = [
         'id',
@@ -183,7 +192,7 @@ function safeAgentWorkspaceContext(value) {
         'module_key',
         'client_name'
       ];
-      return Object.fromEntries(allowed.flatMap((key)=>{
+      return Object.fromEntries(allowed.flatMap((key): Array<[string, string | number | boolean]> =>{
         const raw = value[key];
         if (typeof raw === 'string') return [
           [
@@ -200,7 +209,7 @@ function safeAgentWorkspaceContext(value) {
         return [];
       }));
     };
-    const safeEntityList = (key)=>Array.isArray(source[key]) ? source[key].slice(0, 10).map(safeEntity).filter(Boolean) : [];
+    const safeEntityList = (key: any)=>Array.isArray(source[key]) ? source[key].slice(0, 10).map(safeEntity).filter(Boolean) : [];
     return {
       agent_mode: agentMode,
       visible_page: visiblePage,
@@ -248,7 +257,7 @@ function safeAgentWorkspaceContext(value) {
     builder_workspace_view: text('workspace_view', 40),
   };
 }
-/** Validate a response object against the v2 structured schema. */ function validateStructuredResponse(resp) {
+/** Validate a response object against the v2 structured schema. */ function validateStructuredResponse(resp: any) {
   const errors = [];
   if (typeof resp.reply !== 'string') errors.push('reply must be a string');
   if (typeof resp.route_selected !== 'string') errors.push('route_selected must be a string');
@@ -294,7 +303,7 @@ function safeAgentWorkspaceContext(value) {
  * Build a v2 structured response from the conductor's internal result.
  * This is the single exit point that ensures every response conforms to
  * the contract. Includes one-retry + degraded fallback on schema failure.
- */ function buildStructuredResponse(opts) {
+ */ function buildStructuredResponse(opts: JsonRecord): JsonRecord {
   const responseId = generateResponseId();
   const latencyMs = Date.now() - opts.startTime;
   const retries = opts.retries ?? 0;
@@ -335,7 +344,7 @@ function safeAgentWorkspaceContext(value) {
     console.error(`[conductor][v2] schema validation failed (attempt ${retries + 1}): ${validation.errors.join(', ')}`);
     if (retries === 0) {
       // One retry: meaningfully normalize/repair ALL required fields, not just reply.
-      const fixedOpts = {
+      const fixedOpts: JsonRecord = {
         ...opts,
         retries: 1
       };
@@ -411,17 +420,17 @@ function safeAgentWorkspaceContext(value) {
  * The `available` flag now reflects whether the Conductor would PERMIT the
  * tool's effect for this caller (isToolEffectPermitted), not whether Bob
  * can see it. Bob sees everything; the human sees which tools would execute.
- */ function buildCapabilityRegistry(_catalogue, tier, allToolSpecs, caps) {
-  const capabilities = allToolSpecs.map((t)=>({
+ */ function buildCapabilityRegistry(_catalogue: any, tier: string, allToolSpecs: any, caps: Caps) {
+  const capabilities = allToolSpecs.map((t: any)=>({
       id: t.tool,
-      label: t.tool.replace(/_/g, ' ').replace(/\b\w/g, (c)=>c.toUpperCase()),
+      label: t.tool.replace(/_/g, ' ').replace(/\b\w/g, (c: any)=>c.toUpperCase()),
       description: t.purpose,
       governance: t.governance?.includes('WRITE') ? 'write-draft' : t.governance?.includes('write') ? 'write-governed' : t.governance?.includes('advisory') ? 'advisory' : 'read-only',
       // available = would the Conductor permit this tool's effect for this caller?
       available: caps ? isToolEffectPermitted(t.tool, caps) : true,
       min_tier: t.governance?.includes('admiral') ? 'admiral' : t.governance?.includes('admin') ? 'commander' : undefined
     }));
-  const availableCount = capabilities.filter((c)=>c.available).length;
+  const availableCount = capabilities.filter((c: any)=>c.available).length;
   return {
     capabilities,
     tier,
@@ -434,8 +443,8 @@ function safeAgentWorkspaceContext(value) {
  * request context > recent bob_messages > bob_context_memory >
  * bob_knowledge_cards > bob_learning_memory.
  * Later tiers never override earlier ones on the same key.
- */ function assembleMemoryContext(layers) {
-  const merged = {};
+ */ function assembleMemoryContext(layers: any) {
+  const merged: JsonRecord = {};
   // Apply in reverse precedence order so higher-precedence overwrites
   const tiers = [
     layers.learningMemory,
@@ -451,8 +460,8 @@ function safeAgentWorkspaceContext(value) {
   }
   return merged;
 }
-/** Compute the emitted size of a knowledge-cards array as it appears in the planner payload. */ function knowledgeCardsEmittedSize(cards) {
-  return cards.reduce((sum, c)=>sum + c.title.length + KNOWLEDGE_ENTRY_SEPARATOR.length + c.content.length, 0);
+/** Compute the emitted size of a knowledge-cards array as it appears in the planner payload. */ function knowledgeCardsEmittedSize(cards: any) {
+  return cards.reduce((sum: any, c: any)=>sum + c.title.length + KNOWLEDGE_ENTRY_SEPARATOR.length + c.content.length, 0);
 }
 /**
  * Budget-constrained knowledge-card injection.
@@ -523,7 +532,7 @@ import { evaluateWelfareSafetySeam, isSafetySignalAction, buildAlertRaisePayload
 // in this global would bleed one org's policy into another (Bob #7). Org-
 // constitutional (Class 2, Don's three-class ruling) is fetched per-turn UNCACHED
 // until the team agrees an org-keyed cache + Oracle current-org resolution.
-let _constitutionalCache = null;
+let _constitutionalCache: ReturnType<typeof selectCacheableCards> | null = null;
 // Negative cache: epoch ms until which the DB lane is treated as failed and
 // fallback is served without re-awaiting it (Jim flaw 1 — stop re-hammering a
 // failing lane every turn under tail-timeout). 0 = not in a failure window.
@@ -544,7 +553,7 @@ const CONSTITUTIONAL_KEYSTONE_KEYS = [
 // Order: warm cache -> negative-cache window (fallback, no DB hit) -> DB read.
 // Only PLATFORM cards (org NULL) are cached. Never touches bob_match_knowledge
 // or `scored`.
-async function fetchConstitutionalCards(admin, scopeOrgId) {
+async function fetchConstitutionalCards(admin: DbClient, scopeOrgId: string) {
   if (_constitutionalCache) return {
     cards: _constitutionalCache,
     source: 'cache'
@@ -603,7 +612,7 @@ async function fetchConstitutionalCards(admin, scopeOrgId) {
 // (renderConstitutionalSection lives in ./constitutional-lane.ts and is imported
 // above; the earlier inline copy was removed to resolve the import/local
 // collision that failed deno check on Main.)
-function budgetKnowledgeCards(cards) {
+function budgetKnowledgeCards(cards: any) {
   const result = [];
   let remaining = KNOWLEDGE_TOTAL_BUDGET;
   for (const card of cards){
@@ -634,7 +643,7 @@ function budgetKnowledgeCards(cards) {
  * - learning_memory: only on explicit positive signal (user confirms/approves)
  * - knowledge_cards: NEVER from chat path (admin-curated only)
  * - messages: always (conversation persistence)
- */ function shouldWriteMemory(target, opts) {
+ */ function shouldWriteMemory(target: any, opts: JsonRecord) {
   if (target === 'messages') return true;
   if (target === 'learning_memory') return opts.hasExplicitSignal;
   if (target === 'context_memory') {
@@ -652,7 +661,7 @@ function budgetKnowledgeCards(cards) {
 /**
  * Governance lock check: no operational writes from chat path.
  * All writes must go through proposal/approval path.
- */ function isGovernanceLocked(tool) {
+ */ function isGovernanceLocked(tool: string) {
   // These tools produce PROPOSALS (write-draft), not direct writes.
   // They are allowed through the chat path because they create
   // pending actions that require human approval.
@@ -688,15 +697,15 @@ function budgetKnowledgeCards(cards) {
 }
 /**
  * Detect help/status intent and generate response from capability registry.
- */ function handleHelpStatus(message, registry, displayName) {
+ */ function handleHelpStatus(message: any, registry: any, displayName: any) {
   const lower = message.toLowerCase().trim();
   const isHelp = /^\s*(help|what can you do|capabilities|commands|features)\s*[?!.]*\s*$/i.test(lower);
   const isStatus = /^\s*(status|health|bob status|system status)\s*[?!.]*\s*$/i.test(lower);
   if (!isHelp && !isStatus) return null;
   if (isStatus) {
-    const available = registry.capabilities.filter((c)=>c.available);
-    const reads = available.filter((c)=>c.governance === 'read-only').length;
-    const writes = available.filter((c)=>c.governance === 'write-draft' || c.governance === 'write-governed').length;
+    const available = registry.capabilities.filter((c: any)=>c.available);
+    const reads = available.filter((c: any)=>c.governance === 'read-only').length;
+    const writes = available.filter((c: any)=>c.governance === 'write-draft' || c.governance === 'write-governed').length;
     return [
       `Systems nominal, ${displayName}. Here's the current status:`,
       '',
@@ -709,8 +718,8 @@ function budgetKnowledgeCards(cards) {
     ].join('\n');
   }
   // Help: list available capabilities from registry
-  const available = registry.capabilities.filter((c)=>c.available);
-  const grouped = {};
+  const available = registry.capabilities.filter((c: any)=>c.available);
+  const grouped: Record<string, JsonRecord[]> = {};
   for (const cap of available){
     const g = cap.governance;
     if (!grouped[g]) grouped[g] = [];
@@ -818,7 +827,7 @@ const WRITE_CAPABLE_TOOLS = new Set([
 //
 // The patterns below are deliberately conservative (high-precision, moderate
 // recall) to avoid false positives on legitimate write requests.
-function detectExplicitWriteRefusal(message, selectedTool = '') {
+function detectExplicitWriteRefusal(message: any, selectedTool = '') {
   if (!message || !message.trim()) return false;
   const lower = message.toLowerCase();
   // A caller may explicitly request a reversible conversation draft while
@@ -858,7 +867,7 @@ function detectExplicitWriteRefusal(message, selectedTool = '') {
   if (/\bno\s+action\s*(yet|now|this\s+time)\b/i.test(lower)) return true;
   return false;
 }
-function json(body, status = 200) {
+function json(body: JsonRecord, status = 200) {
   return new Response(JSON.stringify(body), {
     status,
     headers: {
@@ -918,14 +927,14 @@ function publicTurnRun(row: BobTurnRunRow) {
 // a string description — all of which pass a bare `typeof === 'object'` check
 // but produce "No geometry set" in the bell. Used by both dispatchTool (carry-
 // forward + pre-flight) and execProposeFreedomCampingZone (reply text accuracy).
-function isValidGeoJsonBoundary(b) {
+function isValidGeoJsonBoundary(b: any) {
   if (!b || typeof b !== 'object' || Array.isArray(b)) return false;
   const geo = b;
   const t = geo.type;
   if (t !== 'Polygon' && t !== 'MultiPolygon' && t !== 'Feature' && t !== 'FeatureCollection') return false;
   if (t === 'Feature') return isValidGeoJsonBoundary(geo.geometry);
   if (t === 'FeatureCollection') {
-    return Array.isArray(geo.features) && geo.features.length > 0 && geo.features.some((f)=>isValidGeoJsonBoundary(f));
+    return Array.isArray(geo.features) && geo.features.length > 0 && geo.features.some((f: any)=>isValidGeoJsonBoundary(f));
   }
   if (!Array.isArray(geo.coordinates)) return false;
   const coords = geo.coordinates;
@@ -934,7 +943,7 @@ function isValidGeoJsonBoundary(b) {
   if (!Array.isArray(first) || first.length === 0) return false;
   return true;
 }
-async function resolveUserCapabilities(supabase, role, orgId, userId = null) {
+async function resolveUserCapabilities(supabase: DbClient, role: string, orgId: string, userId: string | null = null) {
   const r = (role || '').toLowerCase();
   const tier = r === 'grand_master' ? 'admiral' : r === 'master' ? 'captain' : r === 'admin' ? 'commander' : r === 'admin_officer' ? 'officer' : r === 'officer' ? 'ensign' : 'guest';
   const crossOrgUnrestricted = tier === 'admiral';
@@ -1021,7 +1030,7 @@ async function resolveUserCapabilities(supabase, role, orgId, userId = null) {
   // everyone else it is a best-effort NARROWING signal read by the UI/help layer;
   // rank + scope remain the hard gates. Failures fall back to an empty map (no
   // extra narrowing) so a resolver hiccup never widens access.
-  const areaGrants = {};
+  const areaGrants: Record<string, string> = {};
   if (orgId && userId && tier !== 'admiral') {
     try {
       const { data: grants } = await supabase.rpc('resolve_access_grants', {
@@ -1087,7 +1096,7 @@ const FINANCE_KEYS = new Set([
   'contract_price',
   'actual_cost'
 ]);
-function hasFinanceKeys(data) {
+function hasFinanceKeys(data: JsonRecord) {
   for (const key of Object.keys(data)){
     const lower = key.toLowerCase();
     if (FINANCE_KEYS.has(lower)) return true;
@@ -1098,7 +1107,7 @@ function hasFinanceKeys(data) {
   }
   return false;
 }
-async function redactLocationFinanceFields(data, userOrgId, supabaseClient) {
+async function redactLocationFinanceFields(data: JsonRecord, userOrgId: any, supabaseClient: any) {
   // Fail open: no org, no data, or no finance keys -> return unchanged.
   if (!userOrgId || !data || typeof data !== 'object') return data;
   if (!hasFinanceKeys(data)) return data;
@@ -1184,7 +1193,7 @@ async function redactLocationFinanceFields(data, userOrgId, supabaseClient) {
     return data;
   }
 }
-function redactOutgoing(reply, forbiddenNames, forbiddenAddresses) {
+function redactOutgoing(reply: string, forbiddenNames: any, forbiddenAddresses: any) {
   if (!reply) return reply;
   let out = reply;
   // Redact out-of-scope organisation names.
@@ -1209,7 +1218,7 @@ function redactOutgoing(reply, forbiddenNames, forbiddenAddresses) {
   }
   return out;
 }
-function computeEgressForbiddenSet(caps, meta) {
+function computeEgressForbiddenSet(caps: Caps, meta: JsonRecord) {
   // Admiral sees all — no redaction, but still surface HSWA alerts.
   if (caps.crossOrgUnrestricted) {
     const safetyAlerts = [];
@@ -1235,21 +1244,21 @@ function computeEgressForbiddenSet(caps, meta) {
     };
   }
   const scopeSet = new Set(caps.scopeOrgIds);
-  const forbiddenNames = [];
-  const forbiddenAddresses = [];
-  const safetyAlerts = [];
+  const forbiddenNames: string[] = [];
+  const forbiddenAddresses: string[] = [];
+  const safetyAlerts: JsonRecord[] = [];
   if (!meta || typeof meta !== 'object') return {
     forbiddenNames,
     forbiddenAddresses,
     safetyAlerts
   };
   // Helper: check if an org id is out-of-scope.
-  const isOutOfScope = (orgId)=>{
+  const isOutOfScope = (orgId: string)=>{
     if (!orgId || typeof orgId !== 'string') return false;
     return !scopeSet.has(orgId);
   };
   // Scan results array (from query_records, resolve_address candidates, etc.)
-  const scanResults = (results)=>{
+  const scanResults = (results: any)=>{
     if (!Array.isArray(results)) return;
     for (const row of results){
       if (!row || typeof row !== 'object') continue;
@@ -1346,7 +1355,7 @@ function computeEgressForbiddenSet(caps, meta) {
  * @param meta        Tool-result metadata from the turn (may be null for
  *                    canned/early-return replies).
  * @returns           The swept reply string, safe for client egress.
- */ function applyEgressSweep(reply, caps, meta) {
+ */ function applyEgressSweep(reply: string, caps: Caps, meta: JsonRecord) {
   const { forbiddenNames, forbiddenAddresses, safetyAlerts } = computeEgressForbiddenSet(caps, meta);
   let out = redactOutgoing(reply, forbiddenNames, forbiddenAddresses);
   // UUID redaction backstop (#96): non-admiral tiers never see raw UUIDs.
@@ -1387,70 +1396,70 @@ function computeEgressForbiddenSet(caps, meta) {
     tier0IdentitySurfaced
   };
 }
-function attachGuidedProposalWorkflow(meta) {
+const APP_DESTINATIONS: Record<string, { label: string; path: string; job: string }> = {
+  approvals: { label: 'Open Approvals', path: '/admin/approvals', job: 'review governed proposals and receipts' },
+  builder: { label: 'Open Builder', path: '/admin/builder', job: 'describe code changes in the Vibe Builder chat, or follow repository jobs and approvals' },
+  clients: { label: 'Open Client Portfolios', path: '/admin/crm', job: 'work with clients, agreements, contacts, and delivery context' },
+  dispatch: { label: 'Open Dispatch console', path: '/admin/field-ops?area=dispatch', job: 'dispatch and monitor field work' },
+  documents: { label: 'Open Document Studio', path: '/admin/document-studio', job: 'create and review documents and Studio artifacts' },
+  field_reports: { label: 'Open Field reports', path: '/admin/field-ops?area=field-reports', job: 'review reports from field operations' },
+  finance: { label: 'Open Finance home', path: '/admin/finance-bureau', job: 'work with finance, costing, pricing, and commercial readiness' },
+  investigations: { label: 'Open Investigations', path: '/admin/investigations', job: 'investigate linked records and observations' },
+  locations: { label: 'Open Location Houses', path: '/admin/locations', job: 'work with operational places and their layers' },
+  organization_settings: { label: 'Open Organisation Settings', path: '/admin/org-setup', job: 'configure the active organization' },
+  people: { label: 'Open People, Pay & HR', path: '/admin/people-hr', job: 'work with staff, readiness, credentials, leave, and HR' },
+  reports: { label: 'Open Reports', path: '/admin/reports', job: 'review operational and compliance reporting' },
+  roster: { label: 'Open Schedules & Rosters', path: '/admin/roster', job: 'schedule staff and manage roster coverage' },
+  sites: { label: 'Open Site Workspaces', path: '/admin/site-360', job: 'work with a place, agreement, work, evidence, and audit context' },
+  users: { label: 'Open People & Access', path: '/admin/users', job: 'manage user access through governed identity workflows' },
+  zones: { label: 'Open Zone Facets', path: '/admin/zones', job: 'work with zones and geofenced operational rules' }
+};
+
+function execNavigateApp(args: Record<string, unknown>) {
+  const requested = String(args.destination ?? '').trim().toLowerCase().replace(/[\s-]+/g, '_');
+  const destination = APP_DESTINATIONS[requested];
+  if (!destination) {
+    return {
+      reply: `I need a supported workspace destination. I can open: ${Object.keys(APP_DESTINATIONS).join(', ')}.`,
+      meta: {
+        tool: 'navigate_app',
+        outcome: 'need_destination',
+        answer_options: ['Open Schedules & Rosters', 'Open People, Pay & HR', 'Open Organisation Settings', 'Open Approvals']
+      }
+    };
+  }
+  const context = typeof args.context === 'string' ? args.context.trim().slice(0, 500) : '';
+  return {
+    reply: `${destination.label}. The page will apply your current role, organisation, and module access.${context ? ` I will carry this job context: ${context}` : ''}`,
+    meta: {
+      tool: 'navigate_app',
+      outcome: 'ready',
+      navigation_actions: [{ label: destination.label, path: destination.path }],
+      workflow_steps: [
+        { id: 'destination', label: destination.label, status: 'current', detail: destination.job },
+        { id: 'inspect', label: 'Inspect the live page context', status: 'pending', detail: 'Bob uses the selected organisation and the records visible on that page.' },
+        { id: 'act', label: 'Prepare or perform the governed action', status: 'pending', detail: 'Writes use the page workflow or a specific proposal tool and return an auditable receipt.' }
+      ]
+    }
+  };
+}
+function attachGuidedProposalWorkflow(meta: JsonRecord) {
   if (!meta || typeof meta !== 'object') return;
   const proposalIds = [
     typeof meta.action_id === 'string' ? meta.action_id : null,
     typeof meta.org_action_id === 'string' ? meta.org_action_id : null,
-    ...Array.isArray(meta.site_action_ids) ? meta.site_action_ids.filter((id)=>typeof id === 'string') : []
+    ...Array.isArray(meta.site_action_ids) ? meta.site_action_ids.filter((id: any)=>typeof id === 'string') : []
   ].filter(Boolean);
   if (!proposalIds.length) return;
 
   if (!Array.isArray(meta.navigation_actions) || meta.navigation_actions.length === 0) {
-    const firstId = proposalIds[0];
+    const firstId = String(proposalIds[0]);
     meta.navigation_actions = [{
       label: proposalIds.length === 1 ? 'Review and apply proposal' : `Review ${proposalIds.length} proposals`,
       path: `/admin/approvals?actionId=${encodeURIComponent(firstId)}&source=bob`
     }];
   }
 
-  const APP_DESTINATIONS: Record<string, { label: string; path: string; job: string }> = {
-    approvals: { label: 'Open Approvals', path: '/admin/approvals', job: 'review governed proposals and receipts' },
-    builder: { label: 'Open Builder control room', path: '/admin/builder', job: 'follow repository repair and build work' },
-    clients: { label: 'Open Client Portfolios', path: '/admin/crm', job: 'work with clients, agreements, contacts, and delivery context' },
-    dispatch: { label: 'Open Dispatch console', path: '/admin/field-ops?area=dispatch', job: 'dispatch and monitor field work' },
-    documents: { label: 'Open Document Studio', path: '/admin/document-studio', job: 'create and review documents and Studio artifacts' },
-    field_reports: { label: 'Open Field reports', path: '/admin/field-ops?area=field-reports', job: 'review reports from field operations' },
-    finance: { label: 'Open Finance home', path: '/admin/finance-bureau', job: 'work with finance, costing, pricing, and commercial readiness' },
-    investigations: { label: 'Open Investigations', path: '/admin/investigations', job: 'investigate linked records and observations' },
-    locations: { label: 'Open Location Houses', path: '/admin/locations', job: 'work with operational places and their layers' },
-    organization_settings: { label: 'Open Organisation Settings', path: '/admin/org-setup', job: 'configure the active organization' },
-    people: { label: 'Open People, Pay & HR', path: '/admin/people-hr', job: 'work with staff, readiness, credentials, leave, and HR' },
-    reports: { label: 'Open Reports', path: '/admin/reports', job: 'review operational and compliance reporting' },
-    roster: { label: 'Open Schedules & Rosters', path: '/admin/roster', job: 'schedule staff and manage roster coverage' },
-    sites: { label: 'Open Site Workspaces', path: '/admin/site-360', job: 'work with a place, agreement, work, evidence, and audit context' },
-    users: { label: 'Open People & Access', path: '/admin/users', job: 'manage user access through governed identity workflows' },
-    zones: { label: 'Open Zone Facets', path: '/admin/zones', job: 'work with zones and geofenced operational rules' }
-  };
-
-  function execNavigateApp(args: Record<string, unknown>) {
-    const requested = String(args.destination ?? '').trim().toLowerCase().replace(/[\s-]+/g, '_');
-    const destination = APP_DESTINATIONS[requested];
-    if (!destination) {
-      return {
-        reply: `I need a supported workspace destination. I can open: ${Object.keys(APP_DESTINATIONS).join(', ')}.`,
-        meta: {
-          tool: 'navigate_app',
-          outcome: 'need_destination',
-          answer_options: ['Open Schedules & Rosters', 'Open People, Pay & HR', 'Open Organisation Settings', 'Open Approvals']
-        }
-      };
-    }
-    const context = typeof args.context === 'string' ? args.context.trim().slice(0, 500) : '';
-    return {
-      reply: `${destination.label}. The page will apply your current role, organisation, and module access.${context ? ` I will carry this job context: ${context}` : ''}`,
-      meta: {
-        tool: 'navigate_app',
-        outcome: 'ready',
-        navigation_actions: [{ label: destination.label, path: destination.path }],
-        workflow_steps: [
-          { id: 'destination', label: destination.label, status: 'current', detail: destination.job },
-          { id: 'inspect', label: 'Inspect the live page context', status: 'pending', detail: 'Bob uses the selected organisation and the records visible on that page.' },
-          { id: 'act', label: 'Prepare or perform the governed action', status: 'pending', detail: 'Writes use the page workflow or a specific proposal tool and return an auditable receipt.' }
-        ]
-      }
-    };
-  }
   if (!Array.isArray(meta.workflow_steps) || meta.workflow_steps.length === 0) {
     meta.workflow_steps = [
       {
@@ -1474,7 +1483,7 @@ function attachGuidedProposalWorkflow(meta) {
     ];
   }
 }
-/** @deprecated Use generateToolCatalogue() from caddie.ts instead. Retained for CI grep. */ function _buildToolCatalogue(caps) {
+/** @deprecated Use generateToolCatalogue() from caddie.ts instead. Retained for CI grep. */ function _buildToolCatalogue(caps: Caps) {
   const all = [
     {
       tool: 'retrieve_knowledge',
@@ -1654,7 +1663,7 @@ function attachGuidedProposalWorkflow(meta) {
     }
   ];
   const allowed = new Set(caps.allowedTools);
-  const envelopeName = {
+  const envelopeName: Record<string, string> = {
     plan_import: 'ingest_document',
     plan_patrol_import: 'ingest_document',
     perceive_media: 'perceive_media',
@@ -1710,7 +1719,7 @@ function attachGuidedProposalWorkflow(meta) {
     t.tool === 'laptop_shell' && caps.tier === 'admiral' || allowed.has(t.tool) || allowed.has(envelopeName[t.tool] ?? ''));
 }
 // ── Persona + platform grounding (passed to the brain) ───────────────────────
-function buildPersona(tier) {
+function buildPersona(tier: string) {
   const financials = tier === 'admiral' || tier === 'captain' || tier === 'commander';
   const restricted = [];
   if (!financials) restricted.push('Do NOT reveal financial data.');
@@ -1781,10 +1790,10 @@ const _PLAN_REASONING_EFFORT = Deno.env.get('OPENAI_PLAN_REASONING_EFFORT') ?? '
 const _OPENAI_TIMEOUT_MS = parseInt(Deno.env.get('OPENAI_TIMEOUT_MS') ?? '55000', 10);
 const _PLAN_TEMPERATURE = parseFloat(Deno.env.get('BOB_PLAN_TEMPERATURE') ?? '0.6');
 // ── Small helpers ────────────────────────────────────────────────────────────
-async function callFn(fnName, authHeader, payload, timeoutMs = 25_000) {
+async function callFn(fnName: string, authHeader: string, payload: unknown, timeoutMs = 25_000): Promise<{ ok: boolean; status: number; data: JsonRecord }> {
   const controller = new AbortController();
   const timeout = setTimeout(()=>controller.abort(), timeoutMs);
-  let res;
+  let res: Response;
   try {
     res = await fetch(`${SUPABASE_URL}/functions/v1/${fnName}`, {
       method: 'POST',
@@ -1799,7 +1808,7 @@ async function callFn(fnName, authHeader, payload, timeoutMs = 25_000) {
     clearTimeout(timeout);
   }
   const text = await res.text();
-  let data = {};
+  let data: JsonRecord = {};
   try {
     data = JSON.parse(text);
   } catch  {
@@ -1860,7 +1869,7 @@ async function callPlatformDiagnostic(
 // callInference: routes non-plan actions (embed, understand_documents, media,
 // knowledge retrieval) through bob-inference → VPS. Those paths need the VPS
 // for Supabase storage access and ONNX inference.
-async function callInference(payload) {
+async function callInference(payload: JsonRecord): Promise<{ ok: boolean; status: number; data: JsonRecord }> {
   const res = await fetch(BOB_INFERENCE_URL, {
     method: 'POST',
     headers: {
@@ -1870,7 +1879,7 @@ async function callInference(payload) {
     body: JSON.stringify(payload)
   });
   const text = await res.text();
-  let data = {};
+  let data: JsonRecord = {};
   try {
     data = JSON.parse(text);
   } catch  {
@@ -1904,8 +1913,8 @@ async function callInference(payload) {
 //
 // `allowFallback` is false inside the reasoning loop to keep loop latency
 // bounded (the loop already degrades gracefully by breaking on failure).
-async function callPlan(planPayload, allowFallback = true) {
-  const fallback = async (reason)=>{
+async function callPlan(planPayload: JsonRecord, allowFallback = true): Promise<{ ok: boolean; status: number; data: JsonRecord }> {
+  const fallback = async (reason: string)=>{
     if (!allowFallback) return {
       ok: false,
       status: 502,
@@ -1968,7 +1977,7 @@ async function callPlan(planPayload, allowFallback = true) {
     });
     clearTimeout(timer);
     const text = await r.text();
-    let data = {};
+    let data: JsonRecord = {};
     try {
       data = JSON.parse(text);
     } catch  {
@@ -1992,7 +2001,7 @@ async function callPlan(planPayload, allowFallback = true) {
       status: 200,
       data
     };
-  } catch (err) {
+  } catch (err: any) {
     clearTimeout(timer);
     const isTimeout = err?.name === 'AbortError';
     console.error(`[conductor][callPlan] ${isTimeout ? 'TIMEOUT (55s)' : 'ERROR'}: ${err?.message ?? err}`);
@@ -2023,7 +2032,7 @@ const SUBAGENT_DELEGABLE_TOOLS = new Set([
   'self_audit',
   'assess_system'
 ]);
-async function callSubagentStep(payload) {
+async function callSubagentStep(payload: JsonRecord) {
   const apiUrl = (Deno.env.get('API_URL') ?? '').replace(/\/+$/, '');
   const apiToken = Deno.env.get('API_TOKEN') ?? '';
   if (!apiUrl || !apiToken) return {
@@ -2047,7 +2056,7 @@ async function callSubagentStep(payload) {
     });
     clearTimeout(timer);
     const text = await r.text();
-    let data = {};
+    let data: JsonRecord = {};
     try {
       data = JSON.parse(text);
     } catch  {
@@ -2060,7 +2069,7 @@ async function callSubagentStep(payload) {
       status: r.status,
       data
     };
-  } catch (err) {
+  } catch (err: any) {
     clearTimeout(timer);
     return {
       ok: false,
@@ -2071,7 +2080,7 @@ async function callSubagentStep(payload) {
     };
   }
 }
-async function retrieveKnowledgeTraced(admin, query, scopeOrgId, matchCount = 4) {
+async function retrieveKnowledgeTraced(admin: DbClient, query: string, scopeOrgId: string, matchCount = 4) {
   if (!query.trim()) return {
     cards: [],
     path: 'none',
@@ -2134,7 +2143,7 @@ async function retrieveKnowledgeTraced(admin, query, scopeOrgId, matchCount = 4)
 // CONTINUE across turns instead of re-asking. Returns chronological history
 // (role+content) and the most recent "in-flight" context (a prior ask's
 // questions, or a proposal/suggested_action awaiting the human's go-ahead).
-async function loadHistory(supabase, conversationId, limit = 8) {
+async function loadHistory(supabase: DbClient, conversationId: string, limit = 8) {
   if (!conversationId) return {
     history: [],
     pending: null
@@ -2143,14 +2152,14 @@ async function loadHistory(supabase, conversationId, limit = 8) {
     ascending: false
   }).limit(limit);
   const rows = (data ?? []).slice().reverse(); // chronological
-  const history = rows.filter((r)=>r.role === 'user' || r.role === 'assistant').map((r)=>({
+  const history = rows.filter((r: any)=>r.role === 'user' || r.role === 'assistant').map((r: any)=>({
       role: r.role,
       content: String(r.content ?? ''),
       ...r.role === 'assistant' && r.metadata && typeof r.metadata === 'object' ? {
         metadata: r.metadata
       } : {}
     }));
-  const latestAssistant = rows.slice().reverse().find((row)=>row.role === 'assistant');
+  const latestAssistant = rows.slice().reverse().find((row: JsonRecord)=>row.role === 'assistant');
   const continuationState = latestAssistant?.metadata?.task_state;
   if (latestAssistant?.metadata?.continuation_pending === true
     && continuationState && typeof continuationState === 'object' && !Array.isArray(continuationState)) {
@@ -2218,7 +2227,7 @@ async function loadHistory(supabase, conversationId, limit = 8) {
         builder_job: md.pending_builder_job
       };
     }
-    if (md.tool === 'cancel_builder_job' && !rows.slice(i + 1).some((row)=>row.role === 'assistant') && md.outcome === 'proposed') {
+    if (md.tool === 'cancel_builder_job' && !rows.slice(i + 1).some((row: JsonRecord)=>row.role === 'assistant') && md.outcome === 'proposed') {
       const proposal = md.pending_builder_cancellation;
       if (proposal && typeof proposal === 'object' &&
           typeof proposal.job_id === 'string' && typeof proposal.title === 'string' &&
@@ -2270,7 +2279,7 @@ async function loadHistory(supabase, conversationId, limit = 8) {
 // user's habits never leak into another user's context within the same org.
 // Read-only, best-effort: any failure returns empty objects rather than
 // blocking the turn (matches retrieveKnowledge's fail-open pattern).
-async function loadUserMemory(supabase, userId, orgId) {
+async function loadUserMemory(supabase: DbClient, userId: string, orgId: string) {
   const empty = {
     contextMemory: {},
     learningMemory: {}
@@ -2301,19 +2310,19 @@ async function loadUserMemory(supabase, userId, orgId) {
     const learningRows = Array.isArray(learnRes.data) ? learnRes.data : [];
     const rulingRows = Array.isArray(rulingsRes.data) ? rulingsRes.data : [];
     const selfRows = Array.isArray(selfRes.data) ? selfRes.data : [];
-    const contextMemory = {};
+    const contextMemory: JsonRecord = {};
     for (const r of contextRows){
       if (r.context_key) contextMemory[r.context_key] = r.context_data;
     }
-    const learningMemory = {};
+    const learningMemory: JsonRecord = {};
     if (learningRows.length) {
-      learningMemory.recent_lessons = learningRows.map((r)=>`[${r.memory_kind}] ${r.content}`.slice(0, 300));
+      learningMemory.recent_lessons = learningRows.map((r: any)=>`[${r.memory_kind}] ${r.content}`.slice(0, 300));
     }
     if (rulingRows.length) {
-      learningMemory.owner_rulings = rulingRows.map((r)=>`${r.title}: ${String(r.ruling_text || '').replace(/\s+/g, ' ')}`.slice(0, 500));
+      learningMemory.owner_rulings = rulingRows.map((r: any)=>`${r.title}: ${String(r.ruling_text || '').replace(/\s+/g, ' ')}`.slice(0, 500));
     }
     if (selfRows.length) {
-      learningMemory.bob_own_notes = selfRows.map((r)=>`[${r.memory_kind}] ${String(r.memory_text || '').replace(/\s+/g, ' ')}`.slice(0, 300));
+      learningMemory.bob_own_notes = selfRows.map((r: any)=>`[${r.memory_kind}] ${String(r.memory_text || '').replace(/\s+/g, ' ')}`.slice(0, 300));
     }
     return {
       contextMemory,
@@ -2344,7 +2353,7 @@ async function loadUserMemory(supabase, userId, orgId) {
  * Compute the idempotency key for a proposal.
  * Combines action_type with the active slot key so the key is scoped to
  * both the entity kind/name AND the action being taken on it.
- */ function computeProposalIdempotencyKey(actionType, facts) {
+ */ function computeProposalIdempotencyKey(actionType: string, facts: ConversationFacts | null) {
   if (!facts?.active_slot) return null;
   // The slot key is already deterministic: makeSlotKey(kind, name)
   // e.g. 'zone_kinzet', 'branch_regulatory_services'
@@ -2360,7 +2369,7 @@ async function loadUserMemory(supabase, userId, orgId) {
  *
  * Best-effort: any failure returns null (fail-open -- never block a dispatch
  * due to an idempotency check failure).
- */ async function checkIdempotency(supabase, conversationId, idempotencyKey, facts) {
+ */ async function checkIdempotency(supabase: DbClient, conversationId: string, idempotencyKey: string, facts: ConversationFacts | null) {
   const empty = {
     isDuplicate: false,
     existingActionId: null,
@@ -2404,7 +2413,7 @@ async function loadUserMemory(supabase, userId, orgId) {
  * Also called from the bell callback path with 'approved' or 'rejected'.
  *
  * Best-effort: failures are logged but never block the response.
- */ async function transitionSlotStatus(supabase, conversationId, slotKey, newStatus, actionId) {
+ */ async function transitionSlotStatus(supabase: DbClient, conversationId: string, slotKey: any, newStatus: any, actionId: any) {
   if (!conversationId || !slotKey) return;
   try {
     const existing = await loadConversationFacts(supabase, conversationId);
@@ -2457,7 +2466,7 @@ async function loadUserMemory(supabase, userId, orgId) {
  * Awaited single-row insert via the service-role admin client, wrapped in
  * try/catch that ONLY console.warns on failure and NEVER throws/blocks.
  * Pattern precedent: upsertConversationFacts, transitionSlotStatus.
- */ async function logEvent(admin, conversationId, orgId, userId, turnIndex, stepIndex, eventType, payload, opts) {
+ */ async function logEvent(admin: DbClient, conversationId: string, orgId: string, userId: string, turnIndex: any, stepIndex: any, eventType: string, payload: JsonRecord, opts: JsonRecord) {
   try {
     const { error } = await admin.from("bob_event_log").insert({
       conversation_id: conversationId,
@@ -2482,7 +2491,7 @@ async function loadUserMemory(supabase, userId, orgId) {
  * Derive the turn_index for this request by counting distinct turn_index
  * values already in bob_event_log for this conversation, then adding 1.
  * Returns 1 for the first turn. Best-effort: returns 1 on any failure.
- */ async function deriveTurnIndex(admin, conversationId) {
+ */ async function deriveTurnIndex(admin: DbClient, conversationId: string) {
   if (!conversationId) return 1;
   try {
     const { count, error } = await admin.from("bob_event_log").select("turn_index", {
@@ -2506,7 +2515,7 @@ async function loadUserMemory(supabase, userId, orgId) {
  * Step 2 — READ PATH: load the bob_conversation_facts row for a conversation.
  * Returns null if no row exists yet (first turn, or pre-migration conversation).
  * Best-effort: any failure returns null rather than blocking the turn.
- */ async function loadConversationFacts(supabase, conversationId) {
+ */ async function loadConversationFacts(supabase: DbClient, conversationId: string): Promise<ConversationFacts | null> {
   if (!conversationId) return null;
   try {
     const { data, error } = await supabase.from('bob_conversation_facts').select('conversation_id, organization_id, schema_version, active_slot, slots').eq('conversation_id', conversationId).maybeSingle();
@@ -2528,7 +2537,7 @@ async function loadUserMemory(supabase, userId, orgId) {
   }
 }
 
-async function loadTaskLedger(supabase, conversationId) {
+async function loadTaskLedger(supabase: DbClient, conversationId: string) {
   if (!conversationId) return null;
   try {
     const { data: task, error: taskErr } = await supabase.from('bob_task_runs').select('id, task_id, conversation_id, organization_id, goal, status, current_step_index, total_steps, updated_at, last_verified_at, last_error').eq('conversation_id', conversationId).order('updated_at', { ascending: false }).limit(1).maybeSingle();
@@ -2564,7 +2573,7 @@ async function loadTaskLedger(supabase, conversationId) {
   }
 }
 
-async function ensureTaskLedger(supabase, conversationId, orgId, goal) {
+async function ensureTaskLedger(supabase: DbClient, conversationId: string, orgId: string, goal: string): Promise<TaskLedger | null> {
   if (!conversationId || !goal) return null;
   const existing = await loadTaskLedger(supabase, conversationId);
   if (existing) return existing;
@@ -2618,14 +2627,14 @@ async function ensureTaskLedger(supabase, conversationId, orgId, goal) {
 /**
  * Generate a deterministic slot key from entity kind + name (design doc §3.4).
  * e.g. ("branch", "Regulatory Services") → "branch_regulatory_services"
- */ function makeSlotKey(kind, name) {
+ */ function makeSlotKey(kind: string, name: any) {
   const slug = name.toLowerCase().replace(/[^a-z0-9]+/g, '_').replace(/^_|_$/g, '');
   return `${kind.toLowerCase()}_${slug || 'unnamed'}`;
 }
 /**
  * Infer entity kind from proposed_entities or tool context.
  * Returns a best-effort kind string for slot key generation.
- */ function inferEntityKind(proposedEntities) {
+ */ function inferEntityKind(proposedEntities: any) {
   // Zone detection: zone-specific fields
   if (proposedEntities.zone_name || proposedEntities.zone_type || proposedEntities.nightly_limit_consecutive != null) {
     return {
@@ -2681,7 +2690,7 @@ async function ensureTaskLedger(supabase, conversationId, orgId, goal) {
  * @param newResolvedIds - new resolved ID key/value pairs to merge into resolved_ids
  * @param source - provenance label (e.g. "llm_extraction", "tool_result:resolve_geofence")
  * @param entityHint - optional { kind, name } to create/switch the active slot
- */ async function upsertConversationFacts(supabase, conversationId, orgId, newFacts, newResolvedIds, source, entityHint) {
+ */ async function upsertConversationFacts(supabase: DbClient, conversationId: string, orgId: string, newFacts: JsonRecord | null, newResolvedIds: JsonRecord | null, source: string, entityHint?: { kind?: string; name?: string } | null) {
   if (!conversationId || !orgId) return;
   // Skip if there is nothing to write
   const hasNewFacts = newFacts && Object.keys(newFacts).length > 0;
@@ -2696,7 +2705,7 @@ async function ensureTaskLedger(supabase, conversationId, orgId, goal) {
     let activeSlot = existing?.active_slot ?? null;
     // Determine the slot key to write into
     if (entityHint && entityHint.name) {
-      const hintKey = makeSlotKey(entityHint.kind, entityHint.name);
+      const hintKey = makeSlotKey(entityHint.kind ?? 'entity', entityHint.name);
       // If the hint points to a different entity than the current active slot,
       // check if we need to create a new slot or switch to an existing one
       if (hintKey !== activeSlot) {
@@ -2816,11 +2825,11 @@ async function ensureTaskLedger(supabase, conversationId, orgId, goal) {
  * Build a structured context block from conversation facts for injection into
  * the planner prompt. Returns a plain object suitable for JSON serialisation,
  * or null if no facts exist.
- */ function buildConversationFactsContext(facts) {
+ */ function buildConversationFactsContext(facts: ConversationFacts | null) {
   if (!facts || Object.keys(facts.slots).length === 0) return null;
   const activeSlotKey = facts.active_slot;
   const activeSlot = activeSlotKey ? facts.slots[activeSlotKey] ?? null : null;
-  const otherSlots = {};
+  const otherSlots: JsonRecord = {};
   for (const [key, slot] of Object.entries(facts.slots)){
     if (key === activeSlotKey) continue;
     // Only include non-terminal slots as secondary context
@@ -2848,7 +2857,7 @@ async function ensureTaskLedger(supabase, conversationId, orgId, goal) {
  * Rollout: create_freedom_camping_zone + create_client_onboarding + create_patrol_route_assignment + create_zone_patrol_stop + create_freedom_camping_org_strategy.
  * This completes the propose_* payload-from-state rollout for finding #4.
  * Fields mirror exactly what the corresponding producer edge fn consumes.
- */ const PAYLOAD_SCHEMAS = {
+ */ const PAYLOAD_SCHEMAS: Record<string, PayloadSchema> = {
   create_freedom_camping_zone: {
     actionType: 'create_freedom_camping_zone',
     requiredFields: [
@@ -3298,7 +3307,7 @@ async function ensureTaskLedger(supabase, conversationId, orgId, goal) {
 /**
  * Loose type guard: returns true if the value is plausibly the declared type.
  * Prevents a malformed slot value from poisoning the payload.
- */ function fieldTypeOk(value, fieldType) {
+ */ function fieldTypeOk(value: any, fieldType: any) {
   if (value === null || value === undefined) return false;
   switch(fieldType){
     case 'string':
@@ -3326,7 +3335,7 @@ async function ensureTaskLedger(supabase, conversationId, orgId, goal) {
  *
  * Returns { payload, missingFields }. payload is null if any required field
  * is missing (names collected into missingFields).
- */ function buildProposalPayload(slot, actionType) {
+ */ function buildProposalPayload(slot: JsonRecord, actionType: string): { payload: JsonRecord | null; missingFields: string[] } {
   const schema = PAYLOAD_SCHEMAS[actionType];
   if (!schema) return {
     payload: null,
@@ -3351,7 +3360,7 @@ async function ensureTaskLedger(supabase, conversationId, orgId, goal) {
     };
   }
   // Build payload: only declared fields, only if type-valid
-  const payload = {};
+  const payload: JsonRecord = {};
   for (const f of [
     ...schema.requiredFields,
     ...schema.optionalFields
@@ -3376,7 +3385,7 @@ async function ensureTaskLedger(supabase, conversationId, orgId, goal) {
  * @param actionType - e.g. 'create_freedom_camping_zone'
  * @param payload    - the reconciled payload about to be dispatched
  * @returns { valid, violations } — valid is true when all rules pass
- */ function validateBusinessRules(actionType, payload) {
+ */ function validateBusinessRules(actionType: string, payload: JsonRecord) {
   const schema = PAYLOAD_SCHEMAS[actionType];
   if (!schema || !schema.businessRules || schema.businessRules.length === 0) {
     return {
@@ -3445,7 +3454,7 @@ async function ensureTaskLedger(supabase, conversationId, orgId, goal) {
  * @param actionType - e.g. 'create_freedom_camping_zone'
  * @param payload    - the payload object sent to the producer (contains `zone`, `site_id`, etc.)
  * @returns A concise, ASCII-only, human-readable factual block string.
- */ function renderProposalConfirmation(actionType, payload) {
+ */ function renderProposalConfirmation(actionType: string, payload: JsonRecord) {
   switch(actionType){
     case 'create_freedom_camping_zone':
       {
@@ -3495,9 +3504,9 @@ async function ensureTaskLedger(supabase, conversationId, orgId, goal) {
 // is frequently dropped. That caused conversations to persist 0 or 1 of their
 // messages (history showing only fragments / empty conversations). Awaiting the
 // insert and surfacing errors makes persistence reliable.
-async function persist(supabase, orgId, conversationId, turns) {
+async function persist(supabase: DbClient, orgId: string, conversationId: string, turns: any) {
   if (!orgId || !conversationId) return false;
-  const withMeta = turns.map((t)=>({
+  const withMeta = turns.map((t: any)=>({
       organization_id: orgId,
       conversation_id: conversationId,
       role: t.role,
@@ -3512,7 +3521,7 @@ async function persist(supabase, orgId, conversationId, turns) {
   // memory; never do that again.
   if (error && /metadata/i.test(error.message ?? '')) {
     console.error(`[conductor] PERSIST FALLBACK: bob_messages.metadata missing (${error.message}). Retrying without metadata — APPLY MIGRATION 0131. conversation ${conversationId}`);
-    const noMeta = turns.map((t)=>({
+    const noMeta = turns.map((t: any)=>({
         organization_id: orgId,
         conversation_id: conversationId,
         role: t.role,
@@ -3539,7 +3548,7 @@ async function persist(supabase, orgId, conversationId, turns) {
 // bob-extract-document. Returns the extraction result or null on failure.
 // Reused by perceiveAttachment (general perception) and execPlanImport
 // (import-path fallback) so the logic is not duplicated.
-async function extractFromStorage(authHeader, att) {
+async function extractFromStorage(authHeader: string, att: JsonRecord) {
   if (!att.storage_path) return null;
   const ex = await callFn('bob-extract-document', authHeader, {
     storage_bucket: att.storage_bucket ?? 'bob-uploads',
@@ -3555,7 +3564,7 @@ async function extractFromStorage(authHeader, att) {
     selected_sheet: typeof d.selected_sheet === 'string' ? d.selected_sheet : null
   };
 }
-async function perceiveAttachment(authHeader, attachments) {
+async function perceiveAttachment(authHeader: string, attachments: any) {
   // Active working context = THIS turn's own input only. We use the attachments
   // supplied on this request; we do NOT reach back into the conversation for a
   // prior upload. A previous version carried the most-recent bob_attachments row
@@ -3565,7 +3574,7 @@ async function perceiveAttachment(authHeader, attachments) {
   // stale file). The conversation owns its attachments; Bob does not resurrect an
   // old one. Cross-conversation recall is a DELIBERATE memory layer, not silent
   // active context — see docs/bob/ARCHITECTURE.md.
-  const att = attachments.find((a)=>a.storage_path || a.table_text || a.document_text || a.text) ?? null;
+  const att = attachments.find((a: any)=>a.storage_path || a.table_text || a.document_text || a.text) ?? null;
   if (!att) return {
     att: null,
     text: '',
@@ -3590,7 +3599,7 @@ async function perceiveAttachment(authHeader, attachments) {
     selected_sheet: selectedSheet
   };
 }
-async function execPlanImport(authHeader, orgId, att, text, sheetNames = [], selectedSheet = null) {
+async function execPlanImport(authHeader: string, orgId: string, att: JsonRecord, text: string, sheetNames: string[] = [], selectedSheet: string | null = null) {
   // Fallback extraction: if perceiveAttachment returned empty text (e.g. the
   // extractor was not deployed at the time, or the first-sheet-only bug hit
   // before the fix), retry extraction here so the import path is self-healing.
@@ -3631,7 +3640,7 @@ async function execPlanImport(authHeader, orgId, att, text, sheetNames = [], sel
   const p = plan.data ?? {};
   const best = p.best_target ?? p.model_choice?.target_table ?? null;
   const mapping = Array.isArray(p.mappings) && p.mappings.length ? p.mappings[0] : null;
-  const mapLines = mapping && Array.isArray(mapping.mapping) ? mapping.mapping.filter((m)=>m.column).map((m)=>`- ${m.source} -> ${m.column}${m.value_match ? '' : ' (type mismatch)'}`) : Array.isArray(p.model_choice?.column_mapping) ? p.model_choice.column_mapping.filter((m)=>m.column).map((m)=>`- ${m.source} -> ${m.column}`) : [];
+  const mapLines = mapping && Array.isArray(mapping.mapping) ? mapping.mapping.filter((m: any)=>m.column).map((m: any)=>`- ${m.source} -> ${m.column}${m.value_match ? '' : ' (type mismatch)'}`) : Array.isArray(p.model_choice?.column_mapping) ? p.model_choice.column_mapping.filter((m: any)=>m.column).map((m: any)=>`- ${m.source} -> ${m.column}`) : [];
   const tier = p.confident && best ? 'high' : best ? 'medium' : 'low';
   const reasoning = p.model_choice?.reasoning ? ` (${p.model_choice.reasoning})` : '';
   // Surface which worksheet was read so the user knows Bob picked the right one.
@@ -3663,7 +3672,7 @@ async function execPlanImport(authHeader, orgId, att, text, sheetNames = [], sel
     }
   };
 }
-async function execPlanPatrolImport(authHeader, orgId, toolArgs = {}) {
+async function execPlanPatrolImport(authHeader: string, orgId: string, toolArgs: JsonRecord = {}) {
   const result = await callFn('bob-plan-patrol-import', authHeader, {
     ...toolArgs,
     organization_id: orgId,
@@ -3679,7 +3688,7 @@ async function execPlanPatrolImport(authHeader, orgId, toolArgs = {}) {
     meta: { tool: 'plan_patrol_import', outcome: 'dry_run', plan }
   };
 }
-async function execPerceive(authHeader, att, text) {
+async function execPerceive(authHeader: string, att: JsonRecord, text: string) {
   if (!att) return {
     reply: 'Upload a document, image, or video and I will read it for you.',
     meta: {
@@ -3720,7 +3729,7 @@ async function execPerceive(authHeader, att, text) {
     }
   };
 }
-async function execSchemaInspect(authHeader, args) {
+async function execSchemaInspect(authHeader: string, args: JsonRecord) {
   const tables = Array.isArray(args.tables) ? args.tables : undefined;
   // Default to the FAST path (no FK/constraint CTEs). The all-tables + FKs read
   // hits the edge statement timeout ("Schema inspection failed"). Only ask for
@@ -3742,8 +3751,8 @@ async function execSchemaInspect(authHeader, args) {
   const tableRows = Array.isArray(r.data.tables) ? r.data.tables : [];
   const shownTables = tableRows.slice(0, 60);
   const lines = shownTables.map((t)=>{
-    const cols = (t.columns ?? []).map((c)=>`${c.name}${c.nullable ? '' : ' required'} (${c.data_type})`).join(', ');
-    const fks = wantRels && Array.isArray(t.foreign_keys) && t.foreign_keys.length ? `\nFKs: ${t.foreign_keys.map((f)=>`${f.column} -> ${f.references_table}.${f.references_column}`).join(', ')}` : '';
+    const cols = (t.columns ?? []).map((c: any)=>`${c.name}${c.nullable ? '' : ' required'} (${c.data_type})`).join(', ');
+    const fks = wantRels && Array.isArray(t.foreign_keys) && t.foreign_keys.length ? `\nFKs: ${t.foreign_keys.map((f: any)=>`${f.column} -> ${f.references_table}.${f.references_column}`).join(', ')}` : '';
     return `### ${t.table}\n${cols}${fks}`;
   }).join('\n\n');
   const totalTables = r.data.table_count ?? tableRows.length;
@@ -3762,7 +3771,7 @@ async function execSchemaInspect(authHeader, args) {
 // Bob's EYES: resolve a live entity (org/branch/sites) via the whitelisted
 // bob-query-records tool, scoped to the caller's authorised orgs. Read-only.
 // ADMIRAL-ONLY repo grep/read (bob-repo-search). Read-only, secret-safe.
-async function execRepoSearch(authHeader, caps, conversationId, args) {
+async function execRepoSearch(authHeader: string, caps: Caps, conversationId: string, args: JsonRecord) {
   if (caps.tier !== 'admiral') {
     return {
       reply: 'Repository search is restricted to the admiral (grand_master).',
@@ -3953,7 +3962,7 @@ async function execRepoSearch(authHeader, caps, conversationId, args) {
 // Raw ids are DELIBERATELY not redacted here (unlike ordinary chat replies) --
 // this is genuine diagnostic context for the admiral, the same carve-out already
 // applied to the UUID-redaction backstop (#96) and sql_read's row-level output.
-async function execSelfAudit(authHeader, caps, conversationId, args) {
+async function execSelfAudit(authHeader: string, caps: Caps, conversationId: string, args: JsonRecord) {
   if (caps.tier !== 'admiral') {
     return {
       reply: 'Self-audit is restricted to the admiral (grand_master) -- it is a diagnostic capability, not a general chat tool.',
@@ -4078,7 +4087,7 @@ async function execSelfAudit(authHeader, caps, conversationId, args) {
 // Same posture as self_audit/sql_read: read-only, admiral-gated, raw data for
 // Bob to reason over. Addresses the capability gap where Bob could only reason
 // from human-supplied MR summaries, not the actual source diff.
-async function execReviewMergeRequest(authHeader, caps, args) {
+async function execReviewMergeRequest(authHeader: string, caps: Caps, args: JsonRecord) {
   if (caps.tier !== 'admiral') {
     return {
       reply: 'MR review is restricted to the admiral (grand_master).',
@@ -4105,7 +4114,7 @@ async function execReviewMergeRequest(authHeader, caps, args) {
       }
     };
   }
-  const payload = {};
+  const payload: JsonRecord = {};
   if (mrIid && Number.isFinite(mrIid)) payload.mr_iid = mrIid;
   else if (mrUrl) payload.mr_url = mrUrl;
   const r = await callFn('bob-review-merge-request', authHeader, payload);
@@ -4169,11 +4178,11 @@ async function execReviewMergeRequest(authHeader, caps, args) {
     mr.labels?.length ? `Labels: ${mr.labels.join(', ')}` : null
   ].filter(Boolean).join('\n');
   const descBlock = mr.description ? `\n\nDESCRIPTION:\n${String(mr.description).slice(0, 20000)}` : '\n\n(No description)';
-  const pipelineBlock = pipeline ? `\n\nPIPELINE #${pipeline.id}: ${pipeline.status}${Array.isArray(pipeline.failing_jobs) && pipeline.failing_jobs.length ? '\nFailing jobs:\n' + pipeline.failing_jobs.map((j)=>`  - ${j.name} (${j.stage}): ${j.status}`).join('\n') : ''}` : '\n\n(No pipeline data)';
+  const pipelineBlock = pipeline ? `\n\nPIPELINE #${pipeline.id}: ${pipeline.status}${Array.isArray(pipeline.failing_jobs) && pipeline.failing_jobs.length ? '\nFailing jobs:\n' + pipeline.failing_jobs.map((j: any)=>`  - ${j.name} (${j.stage}): ${j.status}`).join('\n') : ''}` : '\n\n(No pipeline data)';
   const files = Array.isArray(diff.files) ? diff.files : [];
-  const fileList = files.map((f)=>`  ${f.status ?? 'modified'}: ${f.path}${f.renamed_from ? ` (from ${f.renamed_from})` : ''}`).join('\n');
+  const fileList = files.map((f: any)=>`  ${f.status ?? 'modified'}: ${f.path}${f.renamed_from ? ` (from ${f.renamed_from})` : ''}`).join('\n');
   const diffBlock = `\n\nCHANGED FILES (${diff.changed_files ?? files.length})${diff.truncated ? ' [truncated]' : ''}:\n${fileList}`;
-  const diffContent = files.map((f)=>{
+  const diffContent = files.map((f: any)=>{
     if (!f.diff || f.diff === '[diff omitted — total diff budget exceeded]') {
       return `\n--- ${f.path} ---\n[diff omitted]`;
     }
@@ -4303,7 +4312,7 @@ async function execInspectPlatformServices(
     }
   };
 }
-async function execQueryAtlas(authHeader, caps, toolArgs) {
+async function execQueryAtlas(authHeader: string, caps: Caps, toolArgs: JsonRecord) {
   if (caps.tier !== 'admiral' && caps.tier !== 'captain' && caps.tier !== 'commander') return {
     reply: 'Querying the Atlas is restricted to admin diagnostic roles.',
     meta: {
@@ -4395,7 +4404,7 @@ async function execQueryAtlas(authHeader, caps, toolArgs) {
     if (!scanAll || nextOffset === null || pages.length >= maxScanRows) break;
     offset = nextOffset;
   } while (true);
-  const r = {
+  const r: JsonRecord = {
     ok: true,
     data: {
       results: pages,
@@ -4422,13 +4431,13 @@ async function execQueryAtlas(authHeader, caps, toolArgs) {
       internal: true
     }
   };
-  const countsBy = (key)=>Object.entries(results.reduce((counts, row)=>{
+  const countsBy = (key: any)=>Object.entries(results.reduce((counts: any, row: JsonRecord)=>{
       const value = String(row[key] ?? 'unknown');
       counts[value] = (counts[value] ?? 0) + 1;
       return counts;
     }, {})).map(([value, count])=>`${count} ${value}`).join(', ');
-  const sample = (key) => results
-    .map((row) => String(row[key] ?? '').trim())
+  const sample = (key: any) => results
+    .map((row: JsonRecord) => String(row[key] ?? '').trim())
     .filter(Boolean)
     .slice(0, 12)
     .join(', ');
@@ -4457,7 +4466,7 @@ async function execQueryAtlas(authHeader, caps, toolArgs) {
     }
   };
 }
-async function execAssessSystem(authHeader, caps) {
+async function execAssessSystem(authHeader: string, caps: Caps) {
   if (caps.tier !== 'admiral') return {
     reply: 'Whole-build assessment is restricted to the admiral.',
     meta: {
@@ -4476,7 +4485,7 @@ async function execAssessSystem(authHeader, caps) {
   };
   const data = r.data?.data ?? {};
   return {
-    reply: `Read-only system assessment complete. Files: ${data.fileCount ?? 0}; package manifests: ${data.packageCount ?? 0}; Compose services mapped: ${Array.isArray(data.compose) ? data.compose.reduce((total, item) => total + (Array.isArray(item.services) ? item.services.length : 0), 0) : 0}; Supabase Edge Functions: ${data.edgeFunctionCount ?? 0}. Secret files excluded: ${data.secretFilesExcluded === true ? 'yes' : 'not confirmed'}. I have not changed files, data, or deployments.`,
+    reply: `Read-only system assessment complete. Files: ${data.fileCount ?? 0}; package manifests: ${data.packageCount ?? 0}; Compose services mapped: ${Array.isArray(data.compose) ? data.compose.reduce((total: any, item: any) => total + (Array.isArray(item.services) ? item.services.length : 0), 0) : 0}; Supabase Edge Functions: ${data.edgeFunctionCount ?? 0}. Secret files excluded: ${data.secretFilesExcluded === true ? 'yes' : 'not confirmed'}. I have not changed files, data, or deployments.`,
     meta: {
       tool: 'assess_system',
       outcome: 'ok',
@@ -4486,7 +4495,7 @@ async function execAssessSystem(authHeader, caps) {
   };
 }
 
-async function execHumanTest(authHeader, caps, toolArgs) {
+async function execHumanTest(authHeader: string, caps: Caps, toolArgs: JsonRecord) {
   if (caps.tier !== 'admiral') return {
     reply: 'Dr Bob human testing is restricted to the admiral.',
     meta: { tool: 'run_human_test', outcome: 'forbidden' }
@@ -4540,7 +4549,7 @@ async function execHumanTest(authHeader, caps, toolArgs) {
   };
 }
 
-async function execReadIssues(authHeader, caps, toolArgs) {
+async function execReadIssues(authHeader: string, caps: Caps, toolArgs: JsonRecord) {
   if (caps.tier !== 'admiral') return {
     reply: 'Reading issues is restricted to the admiral.',
     meta: {
@@ -4599,7 +4608,7 @@ async function execReadIssues(authHeader, caps, toolArgs) {
     }
   };
 }
-async function execWriteSelfMemory(authHeader, caps, toolArgs) {
+async function execWriteSelfMemory(authHeader: string, caps: Caps, toolArgs: JsonRecord) {
   if (caps.tier !== 'admiral') {
     return {
       reply: 'Writing to your own memory is restricted to the admiral (grand_master).',
@@ -4643,7 +4652,7 @@ async function execWriteSelfMemory(authHeader, caps, toolArgs) {
     }
   };
 }
-async function execReadSelfMemory(authHeader, caps, toolArgs) {
+async function execReadSelfMemory(authHeader: string, caps: Caps, toolArgs: JsonRecord) {
   if (caps.tier !== 'admiral') {
     return {
       reply: 'Reading your own memory is restricted to the admiral (grand_master).',
@@ -4691,7 +4700,7 @@ async function execReadSelfMemory(authHeader, caps, toolArgs) {
     }
   };
 }
-async function execWriteBobChat(authHeader, caps, toolArgs) {
+async function execWriteBobChat(authHeader: string, caps: Caps, toolArgs: JsonRecord) {
   if (caps.tier !== 'admiral') {
     return {
       reply: 'Writing to BOB_CHAT.md is restricted to the admiral (grand_master).',
@@ -4745,7 +4754,7 @@ async function execWriteBobChat(authHeader, caps, toolArgs) {
 // action=read path, which truncates from the TOP of the file (first 4000 chars
 // of a 20000-char cap), structurally missing all new messages in an append-only
 // file. The new path reads the tail and scans for unanswered entries.
-async function execReadBobChat(authHeader, caps, args) {
+async function execReadBobChat(authHeader: string, caps: Caps, args: JsonRecord) {
   if (caps.tier !== 'admiral') {
     return {
       reply: 'Reading BOB_CHAT.md is restricted to the admiral (grand_master).',
@@ -4848,7 +4857,7 @@ async function execReadBobChat(authHeader, caps, args) {
 }
 // ADMIRAL-ONLY read-only SQL (bob-sql-read). Belt-and-braces rank check here too
 // (the edge function + DB function also enforce it). Prefer aggregates/counts.
-async function execSqlRead(authHeader, caps, args) {
+async function execSqlRead(authHeader: string, caps: Caps, args: JsonRecord) {
   const allowedTiers = new Set([
     'admiral',
     'captain',
@@ -4875,7 +4884,7 @@ async function execSqlRead(authHeader, caps, args) {
   // This is a belt-and-braces guard — RLS on the DB also enforces tenant isolation.
   const scopedQuery = query;
   if (caps.tier !== 'admiral' && caps.scopeOrgIds.length > 0) {
-    const orgList = caps.scopeOrgIds.map((id)=>`'${id}'`).join(',');
+    const orgList = caps.scopeOrgIds.map((id: any)=>`'${id}'`).join(',');
     // Wrap in a CTE so the org filter applies to the whole query
     if (!query.toLowerCase().includes('organization_id')) {
       console.warn(`[sql_read] non-admiral query missing org scope, wrapping: tier=${caps.tier}`);
@@ -4921,7 +4930,7 @@ async function execSqlRead(authHeader, caps, args) {
     }
   };
 }
-async function execQueryRecords(authHeader, caps, args) {
+async function execQueryRecords(authHeader: string, caps: Caps, args: JsonRecord) {
   const q = String(args.query ?? args.q ?? '').trim();
   // #334 F1a + F1b: routing + promotion-guard (extracted to query-records-conductor.ts).
   // F1a: find_user is now a valid query type — passes through unchanged.
@@ -4991,7 +5000,7 @@ async function execQueryRecords(authHeader, caps, args) {
 // Read ALL attachments in the conversation together (OpenAI text + vision) and
 // return a unified understanding. Fixes single-file blindness; answers
 // "how many / what did I upload" and relates multiple docs.
-async function execUnderstandDocuments(conversationId, message) {
+async function execUnderstandDocuments(conversationId: string, message: any) {
   if (!conversationId) {
     return {
       reply: 'Upload one or more documents/images and I will read them all together.',
@@ -5034,7 +5043,7 @@ async function execUnderstandDocuments(conversationId, message) {
   const pe = d.proposed_entities && typeof d.proposed_entities === 'object' ? d.proposed_entities : null;
   const clientName = pe && typeof pe.client_name === 'string' ? pe.client_name.trim() : '';
   const branch = pe && typeof pe.owning_branch === 'string' ? pe.owning_branch.trim() : '';
-  const siteNames = pe && Array.isArray(pe.sites) ? pe.sites.map((s)=>s && typeof s.name === 'string' ? s.name.trim() : '').filter(Boolean) : [];
+  const siteNames = pe && Array.isArray(pe.sites) ? pe.sites.map((s: any)=>s && typeof s.name === 'string' ? s.name.trim() : '').filter(Boolean) : [];
   const hasPatrol = pe && pe.patrol && typeof pe.patrol === 'object';
   let offer = '';
   if (clientName) {
@@ -5071,7 +5080,7 @@ async function execUnderstandDocuments(conversationId, message) {
 // fallback, the live NZSCV register via the apps/api VPS proxy. Bob then reasons
 // over the result (and, if warranted, PROPOSES a governed canonical write-back —
 // a separate action, not done here).
-async function execScvLookup(authHeader, args) {
+async function execScvLookup(authHeader: string, args: JsonRecord) {
   const plate = String(args.plate ?? args.plate_number ?? args.rego ?? args.registration ?? '').toUpperCase().replace(/[^A-Z0-9]/g, '').trim();
   if (!plate) {
     return {
@@ -5122,7 +5131,7 @@ async function execScvLookup(authHeader, args) {
     }
   };
 }
-async function execSiteRisk(authHeader, args) {
+async function execSiteRisk(authHeader: string, args: JsonRecord) {
   const siteId = String(args.site_id ?? '').trim();
   if (!siteId) return {
     reply: 'Tell me which site to assess before I check its operational risk.',
@@ -5155,7 +5164,7 @@ async function execSiteRisk(authHeader, args) {
     }
   };
 }
-async function execResolvePointContext(authHeader, caps, orgId, args) {
+async function execResolvePointContext(authHeader: string, caps: Caps, orgId: string, args: JsonRecord) {
   const lat = Number(args.lat ?? args.gps_lat);
   const lng = Number(args.lng ?? args.gps_lng);
   const organizationId = String(args.organization_id ?? orgId ?? '').trim();
@@ -5185,7 +5194,7 @@ async function execResolvePointContext(authHeader, caps, orgId, args) {
     }
   };
 }
-async function execDocumentSearch(authHeader, args) {
+async function execDocumentSearch(authHeader: string, args: JsonRecord) {
   const r = await callFn('bob-document-search', authHeader, {
     query: typeof args.query === 'string' ? args.query : undefined,
     scope: typeof args.scope === 'string' ? args.scope : undefined,
@@ -5198,7 +5207,7 @@ async function execDocumentSearch(authHeader, args) {
   const results = Array.isArray(r.data.results) ? r.data.results : [];
   return { reply: results.length ? `I found ${results.length} approved document match${results.length === 1 ? '' : 'es'}.` : 'I found no approved documents matching that search.', meta: { tool: 'document_search', outcome: 'ok', count: results.length } };
 }
-async function execInventoryDocumentSource(authHeader, args) {
+async function execInventoryDocumentSource(authHeader: string, args: JsonRecord) {
   const action = ['start', 'status', 'cancel'].includes(String(args.action)) ? String(args.action) : 'start';
   const r = await callFn('bob-document-source-ingestion', authHeader, {
     action,
@@ -5257,7 +5266,7 @@ async function execInventoryDocumentSource(authHeader, args) {
     }
   };
 }
-async function execCreateDocumentDraft(authHeader, args) {
+async function execCreateDocumentDraft(authHeader: string, args: JsonRecord) {
   const title = String(args.title ?? '').trim().slice(0, 220);
   const documentType = String(args.document_type ?? 'custom').trim().slice(0, 80);
   const authoredText = String(args.authored_text ?? '').trim();
@@ -5316,7 +5325,7 @@ async function execCreateDocumentDraft(authHeader, args) {
     }
   };
 }
-async function execProposeSiteRisk(authHeader, caps, args) {
+async function execProposeSiteRisk(authHeader: string, caps: Caps, args: JsonRecord) {
   if (!caps.canPromote) return {
     reply: 'Updating a site risk rating needs an admin, master, or grand master. I can assess the site risk, but cannot prepare a proposal for this account.',
     meta: {
@@ -5362,13 +5371,13 @@ async function execProposeSiteRisk(authHeader, caps, args) {
     }
   };
 }
-async function execProposePatrolRouteServiceArea(authHeader, caps, args) {
+async function execProposePatrolRouteServiceArea(authHeader: string, caps: Caps, args: JsonRecord) {
   if (!caps.canPromote) return {
     reply: 'Creating a patrol route service area needs an admin, master, or grand master.',
     meta: { tool: 'propose_patrol_route_service_area', outcome: 'forbidden' }
   };
   const routeId = String(args.patrol_route_id ?? '').trim();
-  const districtNames = Array.isArray(args.district_names) ? args.district_names.map((name)=>String(name).trim()).filter(Boolean) : [];
+  const districtNames = Array.isArray(args.district_names) ? args.district_names.map((name: any)=>String(name).trim()).filter(Boolean) : [];
   if (!routeId || districtNames.length === 0) return {
     reply: 'Provide the exact patrol route ID and at least one valid New Zealand Territorial Authority district name before I prepare this proposal.',
     meta: { tool: 'propose_patrol_route_service_area', outcome: 'need_route_or_districts' }
@@ -5551,7 +5560,7 @@ async function execTriageFriction(
     }
   };
 }
-async function execProposeCorporateProfile(authHeader, caps, args) {
+async function execProposeCorporateProfile(authHeader: string, caps: Caps, args: JsonRecord) {
   if (!caps.canPromote) return {
     reply: 'Preparing a corporate-profile proposal needs an admin, master, or grand master.',
     meta: { tool: 'propose_corporate_profile', outcome: 'forbidden' }
@@ -5581,7 +5590,7 @@ async function execProposeCorporateProfile(authHeader, caps, args) {
     meta: { tool: 'propose_corporate_profile', outcome: 'ok', action_id: r.data.action_id ?? null }
   };
 }
-async function execProposeClientRootOrg(authHeader, caps, args) {
+async function execProposeClientRootOrg(authHeader: string, caps: Caps, args: JsonRecord) {
   if (caps.tier !== 'admiral') return {
     reply: 'Creating a national client tenant root is restricted to the grand master.',
     meta: { tool: 'propose_client_root_org', outcome: 'forbidden' }
@@ -5620,7 +5629,7 @@ async function execProposeClientRootOrg(authHeader, caps, args) {
 // his bob_site_geofence_resolution card) and supply it; the producer never
 // auto-resolves. If no geometry is supplied we ASK Bob to resolve it rather than
 // file a doomed proposal (the executor would fail it).
-async function execProposeFreedomCampingZone(authHeader, caps, orgId, args) {
+async function execProposeFreedomCampingZone(authHeader: string, caps: Caps, orgId: string, args: JsonRecord) {
   if (!caps.canPromote) {
     return {
       reply: 'Creating a freedom-camping zone needs an admin/master/grand_master. I can prepare the plan, but I cannot file the proposal.',
@@ -5670,7 +5679,7 @@ async function execProposeFreedomCampingZone(authHeader, caps, orgId, args) {
       }
     };
   }
-  const zone = {
+  const zone: JsonRecord = {
     name: zoneName
   };
   if (boundary) zone.boundary = boundary;
@@ -5699,7 +5708,7 @@ async function execProposeFreedomCampingZone(authHeader, caps, orgId, args) {
     if (typeof z[k] === 'string' && z[k].trim()) zone[k] = z[k].trim();
   }
   if (z.legal && typeof z.legal === 'object') zone.legal = z.legal;
-  const payload = {
+  const payload: JsonRecord = {
     organization_id: targetOrgId,
     zone
   };
@@ -5760,7 +5769,7 @@ async function execProposeFreedomCampingZone(authHeader, caps, orgId, args) {
 //   { client: { name, contact_email?... }, sites: [{ name, address?... }],
 //     provider_organization_id?, reasoning? }
 // If the client name is missing we ASK rather than guess.
-async function execProposeClientOnboarding(authHeader, caps, orgId, args) {
+async function execProposeClientOnboarding(authHeader: string, caps: Caps, orgId: string, args: JsonRecord) {
   if (!caps.canPromote) {
     return {
       reply: 'Proposing a client setup needs an admin/master/grand_master. I can still read + prepare a plan, but I cannot file the proposal.',
@@ -5790,7 +5799,7 @@ async function execProposeClientOnboarding(authHeader, caps, orgId, args) {
   // the args. Entries without a resolvable name are dropped (the completeness check
   // below then asks for the site name rather than filing a doomed proposal — the
   // "each site requires a name" failure).
-  const normSite = (s)=>{
+  const normSite = (s: any)=>{
     if (typeof s === 'string') {
       const n = s.trim();
       return n ? {
@@ -5800,7 +5809,7 @@ async function execProposeClientOnboarding(authHeader, caps, orgId, args) {
     if (s && typeof s === 'object') {
       const name = String(s.name ?? s.site_name ?? s.site ?? '').trim();
       if (!name) return null;
-      const out = {
+      const out: JsonRecord = {
         name
       };
       for (const k of [
@@ -5901,24 +5910,24 @@ async function execProposeClientOnboarding(authHeader, caps, orgId, args) {
   };
 }
 // ATLAS CALLS: bob-propose-roster-fill, bob-propose-roster-rollback, bob-propose-rate-rule, bob-propose-staff-onboarding, bob-propose-compliance-record, bob-propose-place-hazards, bob-propose-tentative-roster-block
-async function execProposeRosterFill(authHeader, caps, orgId, args) {
+async function execProposeRosterFill(authHeader: string, caps: Caps, orgId: string, args: JsonRecord) {
   if (!caps.canPromote) return { reply: 'Roster-fill proposals require an admin, master, or grand master.', meta: { tool: 'propose_roster_fill', outcome: 'forbidden' } };
   const periodStart = String(args.period_start ?? '').trim();
   const periodEnd = String(args.period_end ?? '').trim();
   if (!periodStart || !periodEnd) return { reply: 'Tell me the roster planning period start and end. I will only propose draft assignments; a human must review and publish.', meta: { tool: 'propose_roster_fill', outcome: 'need_period' } };
-  const payload = { organization_id: String(args.organization_id ?? orgId ?? '') || undefined, period_start: periodStart, period_end: periodEnd };
+  const payload: JsonRecord = { organization_id: String(args.organization_id ?? orgId ?? '') || undefined, period_start: periodStart, period_end: periodEnd };
   if (typeof args._idempotency_key === 'string' && args._idempotency_key) payload.idempotency_key = args._idempotency_key;
   const result = await callFn('bob-propose-roster-fill', authHeader, payload);
   if (!result.ok) return { reply: `I could not prepare the roster proposal (${result.data?.error ?? result.status}).`, meta: { tool: 'propose_roster_fill', outcome: 'failed', error: result.data?.error ?? null } };
   return { reply: `I proposed ${result.data?.assignments_proposed ?? 0} draft roster assignments. Nothing is published: approve the plan in the bell, review or edit draft slots, then publish separately.`, meta: { tool: 'propose_roster_fill', outcome: 'ok', action_id: result.data?.action_id ?? null } };
 }
 
-async function execProposeTentativeRosterBlock(authHeader, caps, orgId, args) {
+async function execProposeTentativeRosterBlock(authHeader: string, caps: Caps, orgId: string, args: JsonRecord) {
   if (!caps.canPromote) return { reply: 'Tentative roster blocks require an admin, master, or grand master.', meta: { tool: 'propose_tentative_roster_block', outcome: 'forbidden' } };
   if (!Array.isArray(args.blocks) || !args.blocks.length || !Array.isArray(args.sites) || !args.sites.length || !args.rates) {
     return { reply: 'Tell me the sites, each shift block (dates, start/end time, unpaid break), the pay and charge rates, and any public holidays. I will create open, unpublished draft shifts and a draft quote only after a human approves.', meta: { tool: 'propose_tentative_roster_block', outcome: 'need_details' } };
   }
-  const payload = { organization_id: String(args.organization_id ?? orgId ?? '') || undefined, sites: args.sites, blocks: args.blocks, rates: args.rates, holidays: args.holidays, gst_rate: args.gst_rate, guards_per_shift: args.guards_per_shift, client_org_id: args.client_org_id, title: args.title };
+  const payload: JsonRecord = { organization_id: String(args.organization_id ?? orgId ?? '') || undefined, sites: args.sites, blocks: args.blocks, rates: args.rates, holidays: args.holidays, gst_rate: args.gst_rate, guards_per_shift: args.guards_per_shift, client_org_id: args.client_org_id, title: args.title };
   if (typeof args._idempotency_key === 'string' && args._idempotency_key) payload.idempotency_key = args._idempotency_key;
   const result = await callFn('bob-propose-tentative-roster-block', authHeader, payload);
   if (!result.ok) return { reply: `I could not prepare the tentative roster block (${result.data?.error ?? result.status}).`, meta: { tool: 'propose_tentative_roster_block', outcome: 'failed', error: result.data?.error ?? null } };
@@ -5927,25 +5936,25 @@ async function execProposeTentativeRosterBlock(authHeader, caps, orgId, args) {
   return { reply: `I proposed ${s.shifts ?? 0} open, unpublished draft shifts (${s.ordinary_hours ?? 0} ordinary and ${s.holiday_hours ?? 0} public-holiday paid hours, unpaid breaks excluded). Quote: $${q.subtotal_charge} + GST $${q.gst_amount} = $${q.total_charge}${q.will_create_draft_quote ? '' : ' (no client organisation set, so only the roster shifts will be created)'}. Approve it in the bell; nothing is published and a human must assign staff.`, meta: { tool: 'propose_tentative_roster_block', outcome: 'ok', action_id: result.data?.action_id ?? null } };
 }
 
-async function execProposeRosterRollback(authHeader, caps, args) {
+async function execProposeRosterRollback(authHeader: string, caps: Caps, args: JsonRecord) {
   if (!caps.canPromote) return { reply: 'Roster-plan rollback proposals require an admin, master, or grand master.', meta: { tool: 'propose_roster_rollback', outcome: 'forbidden' } };
   const planId = String(args.plan_id ?? '').trim();
   if (!planId) return { reply: 'Tell me the Bob roster plan ID to roll back. I will not roll back slots that a human has edited or published.', meta: { tool: 'propose_roster_rollback', outcome: 'need_plan' } };
-  const payload = { plan_id: planId, reason: typeof args.reason === 'string' ? args.reason : undefined };
+  const payload: JsonRecord = { plan_id: planId, reason: typeof args.reason === 'string' ? args.reason : undefined };
   if (typeof args._idempotency_key === 'string' && args._idempotency_key) payload.idempotency_key = args._idempotency_key;
   const result = await callFn('bob-propose-roster-rollback', authHeader, payload);
   if (!result.ok) return { reply: `I could not prepare the rollback proposal (${result.data?.error ?? result.status}).`, meta: { tool: 'propose_roster_rollback', outcome: 'failed', error: result.data?.error ?? null } };
   return { reply: 'I created a pending rollback proposal. Human approval is required, and it will fail closed for any edited or published slot.', meta: { tool: 'propose_roster_rollback', outcome: 'ok', action_id: result.data?.action_id ?? null } };
 }
 
-async function execProposeRateRule(authHeader, caps, orgId, args) {
+async function execProposeRateRule(authHeader: string, caps: Caps, orgId: string, args: JsonRecord) {
   if (!caps.canPromote) return { reply: 'Rate-rule proposals require an administrator.', meta: { tool: 'propose_rate_rule', outcome: 'forbidden' } };
-  const payload = { organization_id: String(args.organization_id ?? orgId ?? '') || undefined, name: args.name, rule_kind: args.rule_kind, rate_type: args.rate_type, amount: args.amount, pay_code: args.pay_code, service_type: args.service_type, job_type: args.job_type, day_category: args.day_category, priority: args.priority };
+  const payload: JsonRecord = { organization_id: String(args.organization_id ?? orgId ?? '') || undefined, name: args.name, rule_kind: args.rule_kind, rate_type: args.rate_type, amount: args.amount, pay_code: args.pay_code, service_type: args.service_type, job_type: args.job_type, day_category: args.day_category, priority: args.priority };
   const result = await callFn('bob-propose-rate-rule', authHeader, payload);
   if (!result.ok) return { reply: `I could not prepare the rate rule (${result.data?.error ?? result.status}).`, meta: { tool: 'propose_rate_rule', outcome: 'failed', error: result.data?.error ?? null } };
   return { reply: 'I created a pending rate-rule proposal. A finance administrator must approve it before it affects roster, dispatch, or billing calculations.', meta: { tool: 'propose_rate_rule', outcome: 'ok', action_id: result.data?.action_id ?? null } };
 }
-async function execProposeComplianceRecord(authHeader, caps, args) {
+async function execProposeComplianceRecord(authHeader: string, caps: Caps, args: JsonRecord) {
   if (!caps.canPromote) return { reply: 'Compliance-register proposals need an admin, master, or grand master.', meta: { tool: 'propose_compliance_record', outcome: 'forbidden' } };
   const organizationId = String(args.organization_id ?? '').trim();
   if (!organizationId) return { reply: 'I need the exact organisation before I can file compliance-register proposals. Look it up with query_records first.', meta: { tool: 'propose_compliance_record', outcome: 'need_organization_id' } };
@@ -5969,7 +5978,7 @@ async function execProposeComplianceRecord(authHeader, caps, args) {
     meta: { tool: 'propose_compliance_record', outcome: 'ok', action_ids: result.data.action_ids ?? [], organization_id: result.data.organization_id ?? organizationId, results }
   };
 }
-async function execProposePlaceHazards(authHeader, caps, args) {
+async function execProposePlaceHazards(authHeader: string, caps: Caps, args: JsonRecord) {
   if (!caps.canPromote) return { reply: 'Place-hazard proposals need an admin, master, or grand master.', meta: { tool: 'propose_place_hazards', outcome: 'forbidden' } };
   const organizationId = String(args.organization_id ?? '').trim();
   if (!organizationId) return { reply: 'I need the exact organisation keeping the hazard register before I can file hazards. Look it up with query_records first.', meta: { tool: 'propose_place_hazards', outcome: 'need_organization_id' } };
@@ -5993,7 +6002,7 @@ async function execProposePlaceHazards(authHeader, caps, args) {
     meta: { tool: 'propose_place_hazards', outcome: 'ok', action_ids: result.data.action_ids ?? [], organization_id: result.data.organization_id ?? organizationId, results }
   };
 }
-async function execProposeStaffOnboarding(authHeader, caps, args) {
+async function execProposeStaffOnboarding(authHeader: string, caps: Caps, args: JsonRecord) {
   if (!caps.canPromote) return { reply: 'Staff onboarding proposals require an administrator.', meta: { tool: 'propose_staff_onboarding', outcome: 'forbidden' } };
   const staffId = String(args.staff_id ?? '').trim();
   if (!staffId) return { reply: 'Tell me the staff profile ID to start onboarding. I will only create a pending HR proposal.', meta: { tool: 'propose_staff_onboarding', outcome: 'need_staff' } };
@@ -6006,7 +6015,7 @@ async function execProposeStaffOnboarding(authHeader, caps, args) {
 // must exist (site_id) or be a just-proposed create_client_site (parent_action_id);
 // the route must exist (patrol_route_id — Bob looks it up via query_records
 // list_routes first). Nothing is written until a human approves in the bell.
-async function execProposePatrolRouteAssignment(authHeader, caps, orgId, args) {
+async function execProposePatrolRouteAssignment(authHeader: string, caps: Caps, orgId: string, args: JsonRecord) {
   if (!caps.canPromote) {
     return {
       reply: 'Adding a site to a patrol route needs an admin/master/grand_master. I can prepare the plan, but I cannot file the proposal.',
@@ -6037,7 +6046,7 @@ async function execProposePatrolRouteAssignment(authHeader, caps, orgId, args) {
       }
     };
   }
-  const payload = {
+  const payload: JsonRecord = {
     patrol_route_id: patrolRouteId,
     organization_id: String(args.organization_id ?? orgId ?? '') || undefined,
     reasoning: typeof args.reasoning === 'string' ? args.reasoning : undefined
@@ -6116,7 +6125,7 @@ async function execProposePatrolRouteAssignment(authHeader, caps, orgId, args) {
 // duplicate in favour of the single canonical engine bob-resolve-geofence.
 // Parity verified: bob-resolve-geofence returns address, boundary, confidence,
 // source -- a superset of what the inline version returned.
-async function execResolveGeofence(authHeader, args) {
+async function execResolveGeofence(authHeader: string, args: JsonRecord) {
   const query = String(args.query ?? args.q ?? args.name ?? args.address ?? '').trim();
   const argLat = Number(args.lat ?? args.gps_lat);
   const argLng = Number(args.lng ?? args.gps_lng);
@@ -6130,7 +6139,7 @@ async function execResolveGeofence(authHeader, args) {
     };
   }
   // Delegate to the canonical resolution engine (bob-resolve-geofence).
-  const payload = {
+  const payload: JsonRecord = {
     place_name: query || 'Supplied location'
   };
   if (Number.isFinite(argLat) && Number.isFinite(argLng)) {
@@ -6199,7 +6208,7 @@ async function execResolveGeofence(authHeader, args) {
 // the resolved boundary (LINZ parcel or provisional), GPS point, and validation
 // status. This is the unified resolution service — Bob should use this INSTEAD
 // of calling resolve_geofence manually when he needs to resolve an address.
-async function execResolveAddress(authHeader, caps, args) {
+async function execResolveAddress(authHeader: string, caps: Caps, args: JsonRecord) {
   const address = String(args.address ?? args.query ?? args.q ?? args.name ?? '').trim();
   if (!address) {
     return {
@@ -6210,7 +6219,7 @@ async function execResolveAddress(authHeader, caps, args) {
       }
     };
   }
-  const payload = {
+  const payload: JsonRecord = {
     address
   };
   if (typeof args.zone_type === 'string' && args.zone_type.trim()) payload.zone_type = args.zone_type.trim();
@@ -6318,7 +6327,7 @@ async function execResolveAddress(authHeader, caps, args) {
 // into the bell. Calls bob-propose-zone-patrol-stop. zone_id + patrol_route_id
 // are EXPLICIT ids; the producer re-resolves the owning org from the zone and
 // cross-checks the route. Never resolves by name; never passes an org.
-async function execProposeZonePatrolStop(authHeader, caps, args) {
+async function execProposeZonePatrolStop(authHeader: string, caps: Caps, args: JsonRecord) {
   if (!caps.canPromote) {
     return {
       reply: 'Adding a zone to a patrol route needs an admin/master/grand_master. I can prepare the plan, but I cannot file the proposal.',
@@ -6348,7 +6357,7 @@ async function execProposeZonePatrolStop(authHeader, caps, args) {
       }
     };
   }
-  const normModule = (m)=>{
+  const normModule = (m: any)=>{
     if (typeof m === 'string') {
       const k = m.trim();
       return k ? {
@@ -6358,7 +6367,7 @@ async function execProposeZonePatrolStop(authHeader, caps, args) {
     if (m && typeof m === 'object') {
       const k = String(m.module_key ?? m.key ?? m.module ?? '').trim();
       if (!k) return null;
-      const out = {
+      const out: JsonRecord = {
         module_key: k
       };
       if (typeof m.is_required === 'boolean') out.is_required = m.is_required;
@@ -6377,7 +6386,7 @@ async function execProposeZonePatrolStop(authHeader, caps, args) {
       module_key: 'general_patrol'
     }
   ];
-  const schedule = {};
+  const schedule: JsonRecord = {};
   const src = args.schedule && typeof args.schedule === 'object' ? args.schedule : args;
   for (const k of [
     'time_window_type',
@@ -6398,7 +6407,7 @@ async function execProposeZonePatrolStop(authHeader, caps, args) {
     if (src[k] != null && Number.isFinite(Number(src[k]))) schedule[k] = Number(src[k]);
   }
   if (Array.isArray(src.active_days)) schedule.active_days = src.active_days;
-  const payload = {
+  const payload: JsonRecord = {
     zone_id: zoneId,
     patrol_route_id: patrolRouteId,
     modules
@@ -6438,7 +6447,7 @@ async function execProposeZonePatrolStop(authHeader, caps, args) {
 // (bob-fetch-bylaw-source, #74 Layer -1c). Read-only; never Bob's own
 // initiative (human_invoked:true is set here since dispatch only reaches this
 // path via an explicit tool call already gated on the user's message).
-async function execFetchBylawSource(authHeader, caps, conversationId, args) {
+async function execFetchBylawSource(authHeader: string, caps: Caps, conversationId: string, args: JsonRecord) {
   if (!caps.canCompareData) {
     return {
       reply: 'Fetching an external bylaw source needs at least a commander-level role.',
@@ -6458,7 +6467,7 @@ async function execFetchBylawSource(authHeader, caps, conversationId, args) {
       }
     };
   }
-  const payload = {
+  const payload: JsonRecord = {
     url,
     human_invoked: true
   };
@@ -6495,7 +6504,7 @@ async function execFetchBylawSource(authHeader, caps, conversationId, args) {
 // action (rule_type governs enforcement) — Bob must ask rather than guess a
 // classification the bylaw text did not clearly state.
 // ---- execProposeLocationSetup (epic #179 D5) --------------------------------
-async function execProposeLocationSetup(authHeader, caps, orgId, args) {
+async function execProposeLocationSetup(authHeader: string, caps: Caps, orgId: string, args: JsonRecord) {
   if (!caps.canPromote) {
     return {
       reply: 'Proposing a location setup needs an admin/master/grand_master. I can describe the plan, but I cannot file the proposal.',
@@ -6550,7 +6559,7 @@ async function execProposeLocationSetup(authHeader, caps, orgId, args) {
   };
 }
 // ---- end execProposeLocationSetup ------------------------------------------
-async function execProposeFreedomCampingOrgStrategy(authHeader, caps, orgId, args) {
+async function execProposeFreedomCampingOrgStrategy(authHeader: string, caps: Caps, orgId: string, args: JsonRecord) {
   if (!caps.canPromote) {
     return {
       reply: 'Proposing a Freedom Camping policy strategy needs an admin/master/grand_master. I can prepare the plan, but I cannot file the proposal.',
@@ -6571,7 +6580,7 @@ async function execProposeFreedomCampingOrgStrategy(authHeader, caps, orgId, arg
     };
   }
   const settingsIn = args.settings && typeof args.settings === 'object' ? args.settings : {};
-  const settings = {};
+  const settings: JsonRecord = {};
   for (const k of [
     'verification_mode',
     'enforcement_ladder_mode',
@@ -6596,7 +6605,7 @@ async function execProposeFreedomCampingOrgStrategy(authHeader, caps, orgId, arg
         }
       };
     }
-    const entry = {
+    const entry: JsonRecord = {
       zone_id: zoneId
     };
     for (const k of [
@@ -6619,7 +6628,7 @@ async function execProposeFreedomCampingOrgStrategy(authHeader, caps, orgId, arg
       }
     };
   }
-  const payload = {
+  const payload: JsonRecord = {
     organization_id: targetOrgId,
     settings,
     zone_updates: zoneUpdates
@@ -6665,7 +6674,7 @@ async function execProposeFreedomCampingOrgStrategy(authHeader, caps, orgId, arg
 // propose_* tool's own payload -- this function does not invent new write
 // behaviour, it only sequences the SAME allow-listed action types
 // bob-job-plan-create itself re-validates server-side.
-async function execJobPlanCreate(authHeader, caps, orgId, conversationId, args) {
+async function execJobPlanCreate(authHeader: string, caps: Caps, orgId: string, conversationId: string, args: JsonRecord) {
   if (!caps.canPromote) {
     return {
       reply: 'Assembling a multi-step plan needs an admin/master/grand_master. I can describe the steps, but I cannot file the plan.',
@@ -6701,7 +6710,7 @@ async function execJobPlanCreate(authHeader, caps, orgId, conversationId, args) 
     const actionType = String(s.action_type ?? '').trim();
     const proposedPayload = s.proposed_payload;
     if (!actionType || !proposedPayload || typeof proposedPayload !== 'object') continue;
-    const step = {
+    const step: JsonRecord = {
       action_type: actionType,
       proposed_payload: proposedPayload
     };
@@ -6718,7 +6727,7 @@ async function execJobPlanCreate(authHeader, caps, orgId, conversationId, args) 
       }
     };
   }
-  const payload = {
+  const payload: JsonRecord = {
     goal,
     steps
   };
@@ -6768,7 +6777,7 @@ async function execJobPlanCreate(authHeader, caps, orgId, conversationId, args) 
 // bob_agentic_actions row a human approves in the bell — never through here.
 // (#86 Phase 1: fixes job_runner being catalogued but undispatched, i.e. a
 // silent no-op if the planner ever selected it.)
-async function execJobRunner(authHeader, args) {
+async function execJobRunner(authHeader: string, args: JsonRecord) {
   const goal = String(args.goal ?? args.job?.goal ?? '').trim();
   const rawSteps = Array.isArray(args.steps) ? args.steps : Array.isArray(args.job?.steps) ? args.job.steps : [];
   if (!goal || !rawSteps.length) {
@@ -6780,7 +6789,7 @@ async function execJobRunner(authHeader, args) {
       }
     };
   }
-  const steps = rawSteps.slice(0, 20).map((s, i)=>({
+  const steps = rawSteps.slice(0, 20).map((s: any, i: any)=>({
       id: String(s?.id ?? `s${i + 1}`),
       tool: String(s?.tool ?? ''),
       params: s?.params && typeof s.params === 'object' ? s.params : {}
@@ -6821,7 +6830,7 @@ async function execJobRunner(authHeader, args) {
 // pending bob_agentic_actions row itself — a human approves + bob-proposal-
 // execute performs the actual (inert-draft) write. Mirrors the other
 // propose_* tools' shape exactly.
-async function execPromoteAction(authHeader, caps, args) {
+async function execPromoteAction(authHeader: string, caps: Caps, args: JsonRecord) {
   if (!caps.canPromote) {
     return {
       reply: 'Drafting a proposal from a document needs an admin/master/grand_master.',
@@ -6842,7 +6851,7 @@ async function execPromoteAction(authHeader, caps, args) {
     };
   }
   const actionType = String(args.action_type ?? 'create_service_agreement_draft').trim();
-  const payload = {
+  const payload: JsonRecord = {
     attachment_id: attachmentId,
     action_type: actionType
   };
@@ -6885,7 +6894,7 @@ async function execPromoteAction(authHeader, caps, args) {
     }
   };
 }
-async function execCompare(authHeader, caps, args) {
+async function execCompare(authHeader: string, caps: Caps, args: JsonRecord) {
   const candidate = {
     client_name: args.client_name ?? args.client,
     site_name: args.site_name ?? args.site,
@@ -6914,7 +6923,7 @@ async function execCompare(authHeader, caps, args) {
     }
   };
 }
-async function execWebResearch(authHeader, message) {
+async function execWebResearch(authHeader: string, message: any) {
   const urls = (message.match(/https?:\/\/[^\s)]+/gi) ?? []).slice(0, 6);
   const r = await callFn('bob-web-research', authHeader, {
     query: message,
@@ -6954,7 +6963,7 @@ async function execWebResearch(authHeader, message) {
     }
   };
 }
-async function execConfirmImport(authHeader, supabase, caps, orgId, conversationId) {
+async function execConfirmImport(authHeader: string, supabase: DbClient, caps: Caps, orgId: string, conversationId: string) {
   if (!conversationId) return {
     reply: 'I have no recent import proposal to confirm. Upload the file first and I will propose a target + mapping.',
     meta: {
@@ -6965,7 +6974,7 @@ async function execConfirmImport(authHeader, supabase, caps, orgId, conversation
   const { data: recent } = await supabase.from('bob_messages').select('metadata').eq('conversation_id', conversationId).eq('role', 'assistant').order('created_at', {
     ascending: false
   }).limit(10);
-  const proposal = (recent ?? []).map((m)=>m?.metadata).find((md)=>md?.tool === 'plan_import' && md?.best_target);
+  const proposal = (recent ?? []).map((m: any)=>m?.metadata).find((md: any)=>md?.tool === 'plan_import' && md?.best_target);
   if (!proposal) return {
     reply: 'I have no recent import proposal in this conversation to confirm. Upload the file (or say "import this") first.',
     meta: {
@@ -7058,7 +7067,7 @@ serve(async (req)=>{
         status: 0,
         data: {
           error: notificationError instanceof Error ? notificationError.message : String(notificationError)
-        }
+        } as JsonRecord
       }));
       const delivery = notification.ok && notification.data?.ok !== false
         ? {
@@ -7158,7 +7167,7 @@ serve(async (req)=>{
     const pillarHResponseId = generateResponseId();
     // Helper: increment step_index and call logEvent with the current context.
     // Only fires when conversationId, orgId, and user.id are all available.
-    const emitEvent = async (eventType, payload, opts)=>{
+    const emitEvent = async (eventType: string, payload: JsonRecord, opts?: JsonRecord)=>{
       if (!conversationId || !orgId || !user.id) return;
       pillarHStepIndex++;
       await logEvent(admin, conversationId, orgId, user.id, pillarHTurnIndex, pillarHStepIndex, eventType, payload, {
@@ -7501,12 +7510,12 @@ serve(async (req)=>{
       return respond(structured, 200);
     }
     let knowledge = '';
-    let knowledgeCards = [];
+    let knowledgeCards: JsonRecord[] = [];
     // #298: capture the retrieval trace (path / embedOk / scored top-titles +
     // cosine) so a debug=true request can SEE what bob_match_knowledge returned,
     // not just the answer. Surfaced in _diagnostics.knowledge_retrieval below.
     // Defaults are the empty-query state; overwritten when message is present.
-    let knowledgeTrace = {
+    let knowledgeTrace: { path: string; embedOk: boolean; scored: Array<{ title: string; similarity: number }> } = {
       path: 'none',
       embedOk: false,
       scored: []
@@ -7619,7 +7628,7 @@ serve(async (req)=>{
           if (commitsRes.ok) {
             const recentCommits = await commitsRes.json();
             // Check if any recent commit was NOT by Bob (i.e. a human or Duo wrote something)
-            const nonBobCommits = recentCommits.filter((c)=>{
+            const nonBobCommits = recentCommits.filter((c: any)=>{
               const title = String(c.title ?? '').toLowerCase();
               return !title.startsWith('bob:');
             });
@@ -7857,8 +7866,8 @@ serve(async (req)=>{
               const recallObj = recallData;
               if (recallObj.ok && Array.isArray(recallObj.results) && recallObj.results.length > 0) {
                 // Sort by authority descending (owner rulings first)
-                const sorted = recallObj.results.sort((a, b)=>(b.authority ?? 0) - (a.authority ?? 0)).slice(0, 8);
-                const recallBlock = sorted.map((r)=>`  [${r.source_type}${r.authority === 1.0 ? ' AUTHORITATIVE' : ''}] ${r.title ?? r.key}: ${String(r.content ?? '').slice(0, 300)}`).join('\n');
+                const sorted = recallObj.results.sort((a: any, b: any)=>(b.authority ?? 0) - (a.authority ?? 0)).slice(0, 8);
+                const recallBlock = sorted.map((r: any)=>`  [${r.source_type}${r.authority === 1.0 ? ' AUTHORITATIVE' : ''}] ${r.title ?? r.key}: ${String(r.content ?? '').slice(0, 300)}`).join('\n');
                 const counts = recallObj.counts ?? {};
                 const recallContext = `[PRIOR CONTEXT (durable memory — owner rulings are AUTHORITATIVE and override all other sources; learnings are high-confidence; events/jobs are contextual):\n${recallBlock}\nRulings: ${counts.rulings ?? 0}, Learnings: ${counts.learnings ?? 0}, Events: ${counts.events ?? 0}, Jobs: ${counts.jobs ?? 0}.\nHonour owner rulings as binding. If a ruling contradicts your reasoning, the ruling wins.]`;
                 knowledge = knowledge ? knowledge + '\n\n' + recallContext : recallContext;
@@ -7888,7 +7897,7 @@ serve(async (req)=>{
     // total) — the budgeted array is computed once here and also passed to
     // assembleMemoryContext below (keeping the existing memory_context
     // channel intact as required).
-    let budgetedCards = [];
+    let budgetedCards: JsonRecord[] = [];
     if (knowledgeCards.length > 0) {
       budgetedCards = budgetKnowledgeCards(knowledgeCards);
       // Empty-retrieval guard (review point 4): only append the Knowledge cards
@@ -7909,7 +7918,7 @@ serve(async (req)=>{
     let taskLedger = await ensureTaskLedger(admin, conversationId, orgId, message);
     // Bob autopilot outcomes for this person (Builder jobs they asked Bob to do) that have not been
     // relayed yet. Bob leads his reply with them; they are marked reported once the plan is made.
-    let completedWork = [];
+    let completedWork: JsonRecord[] = [];
     try {
       const { data: autopilotJobs } = await admin
         .from('builder_jobs')
@@ -7992,8 +8001,8 @@ serve(async (req)=>{
     // "usetool"/"reposearch" instead of "use_tool"/"repo_search". Match on a
     // canonical form so a formatting quirk never falls through to the default
     // branch (which used to echo the raw JSON decision to the user).
-    const canon = (s)=>String(s ?? '').toLowerCase().replace(/[^a-z0-9]/g, '');
-    /** Parse a raw plan decision into normalised action/tool/args. */ const parsePlanDecision = (d)=>{
+    const canon = (s: any)=>String(s ?? '').toLowerCase().replace(/[^a-z0-9]/g, '');
+    /** Parse a raw plan decision into normalised action/tool/args. */ const parsePlanDecision = (d: JsonRecord)=>{
       const ra = canon(d.action);
       const na = ra === 'usetool' ? 'use_tool' : ra === 'ask' ? 'ask' : ra === 'introspect' ? 'introspect' : ra === 'delegate' ? 'delegate' : 'answer';
       const ct = na === 'use_tool' ? resolveCatalogueTool(catalogue, d.tool) : null;
@@ -8007,9 +8016,9 @@ serve(async (req)=>{
         args: a
       };
     };
-    /** Planner-side trace worth persisting with the turn: verification verdict, models, subagent runs. */ let subagentRunsThisTurn = [];
-    const planTrace = (d)=>{
-      const trace = {};
+    /** Planner-side trace worth persisting with the turn: verification verdict, models, subagent runs. */ let subagentRunsThisTurn: JsonRecord[] = [];
+    const planTrace = (d: JsonRecord)=>{
+      const trace: JsonRecord = {};
       if (d?.verification && typeof d.verification === 'object') trace.verification = d.verification;
       if (typeof d?.model === 'string') trace.plan_model = d.model;
       if (typeof d?.provider === 'string') trace.plan_provider = d.provider;
@@ -8023,7 +8032,7 @@ serve(async (req)=>{
     // gating, egress, and audit apply exactly as they do for Bob), until the
     // subagent reports "done" or hits its step/time cap. Findings return to the
     // planner as task_state.subagent_results. Writes never reach a subagent.
-    const runSubagents = async (requests, dispatch)=>{
+    const runSubagents = async (requests: any, dispatch: any)=>{
       const allowedNames = new Set(catalogue.map((t)=>t.tool).filter((name)=>SUBAGENT_DELEGABLE_TOOLS.has(name)));
       const jobs = (Array.isArray(requests) ? requests : []).slice(0, 3).map((req)=>({
           role: [
@@ -8038,7 +8047,7 @@ serve(async (req)=>{
         })).filter((job)=>job.goal && job.tools.length);
       if (!jobs.length) return [];
       const deadline = Date.now() + BOB_SUBAGENT_BUDGET_MS;
-      const runOne = async (job, index)=>{
+      const runOne = async (job: any, index: any)=>{
         const steps = [];
         const signatures = new Set();
         const sources = [];
@@ -8046,9 +8055,9 @@ serve(async (req)=>{
           subagent: index + 1,
           role: job.role,
           goal: job.goal.slice(0, 300),
-          tools: job.tools.map((t)=>t.tool)
+          tools: job.tools.map((t: any)=>t.tool)
         });
-        let outcome = {
+        let outcome: { status: string; findings: string; confidence: number | null; gaps: string[] } = {
           status: 'completed',
           findings: '',
           confidence: null,
@@ -8063,7 +8072,7 @@ serve(async (req)=>{
             role: job.role,
             goal: job.goal,
             inputs: job.inputs,
-            tools: job.tools.map((t)=>({
+            tools: job.tools.map((t: any)=>({
                 tool: t.tool,
                 purpose: t.purpose
               })),
@@ -8121,7 +8130,7 @@ serve(async (req)=>{
           let stepResult;
           try {
             stepResult = await dispatch(toolName, toolArgs, {});
-          } catch (err) {
+          } catch (err: any) {
             stepResult = {
               reply: 'Tool failed for this step.',
               meta: {
@@ -8177,7 +8186,7 @@ serve(async (req)=>{
       };
       return Promise.all(jobs.map((job, index)=>runOne(job, index)));
     };
-    /** Compact, acyclic summary of subagent runs for metadata and the UI. */ const summariseSubagentRuns = (runs)=>runs.map((r)=>({
+    /** Compact, acyclic summary of subagent runs for metadata and the UI. */ const summariseSubagentRuns = (runs: any)=>runs.map((r: any)=>({
         role: r.role,
         goal: String(r.goal).slice(0, 300),
         status: r.status,
@@ -8190,8 +8199,8 @@ serve(async (req)=>{
     // subsequent propose_freedom_camping_zone call within the SAME loop turn.
     // This mirrors the cross-turn carry-forward from pending.kind='geofence_resolved'
     // (loadHistory) but works for the in-loop path where pending is not updated.
-    let loopResolvedGeofence = null;
-    const PREFLIGHT_CHECKS = {
+    let loopResolvedGeofence: JsonRecord | null = null;
+    const PREFLIGHT_CHECKS: Record<string, Array<{ claim_keywords: string[]; payload_path: string[]; label: string }>> = {
       propose_freedom_camping_zone: [
         {
           claim_keywords: [
@@ -8254,7 +8263,7 @@ serve(async (req)=>{
         }
       ]
     };
-    const getAtPath = (obj, path)=>{
+    const getAtPath = (obj: any, path: string[])=>{
       let cur = obj;
       for (const key of path){
         if (cur == null || typeof cur !== 'object') return undefined;
@@ -8262,14 +8271,14 @@ serve(async (req)=>{
       }
       return cur;
     };
-    const isEmptyVal = (v)=>v === null || v === undefined || typeof v === 'string' && v.trim() === '';
+    const isEmptyVal = (v: any)=>v === null || v === undefined || typeof v === 'string' && v.trim() === '';
     /**
      * Checks whether Bob's OWN stated reasoning this turn (his chat reply text
      * and/or an explicit args.reasoning field) claims something the payload
      * being filed does not actually carry. Returns the unverified claim labels
      * (empty array = no mismatch found by this heuristic -- not proof of
      * correctness, just no known red flag).
-     */ const preflightMismatches = (tool, toolArgs, narration)=>{
+     */ const preflightMismatches = (tool: string, toolArgs: JsonRecord, narration: any)=>{
       const checks = PREFLIGHT_CHECKS[tool];
       if (!checks) return [];
       const text = `${narration} ${String(toolArgs.reasoning ?? '')}`.toLowerCase();
@@ -8280,7 +8289,7 @@ serve(async (req)=>{
       };
       const found = [];
       for (const check of checks){
-        const claimed = check.claim_keywords.some((kw)=>text.includes(kw));
+        const claimed = check.claim_keywords.some((kw: any)=>text.includes(kw));
         if (!claimed) continue;
         if (isEmptyVal(getAtPath(payloadShape, check.payload_path))) found.push(check.label);
       }
@@ -8405,7 +8414,7 @@ serve(async (req)=>{
         ].join('\n').slice(0, 12000)
       };
     };
-    /** Dispatch a single tool and return { reply, meta }. Pure execution, no persistence. */ const dispatchTool = async (tool, toolArgs, d)=>{
+    /** Dispatch a single tool and return { reply, meta }. Pure execution, no persistence. */ const dispatchTool = async (tool: string, toolArgs: JsonRecord, d: JsonRecord): Promise<ToolResult> => {
       // Geofence carry-forward (!752): if the planner chose propose_freedom_camping_zone
       // but did not re-supply the geometry (a terse "Confirmed" after a resolve turn),
       // inject the geofence Bob already resolved on the prior turn (stored in
@@ -8475,7 +8484,7 @@ serve(async (req)=>{
           if (stillNoBoundary && zoneName) {
             console.log(`[conductor][auto-resolve] propose_freedom_camping_zone has no valid boundary — auto-resolving geofence for "${zoneName}"`);
             try {
-              const resolveArgs = {
+              const resolveArgs: JsonRecord = {
                 query: zoneName,
                 want_polygon: true
               };
@@ -8659,7 +8668,7 @@ serve(async (req)=>{
       if (tool === 'propose_freedom_camping_zone') {
         try {
           // (a) Merge LLM toolArgs into the active slot as a hint so they become part of state
-          const llmZoneHint = {};
+          const llmZoneHint: JsonRecord = {};
           const zoneArgsSrc = toolArgs.zone && typeof toolArgs.zone === 'object' ? toolArgs.zone : toolArgs;
           for (const k of Object.keys(zoneArgsSrc)){
             const v = zoneArgsSrc[k];
@@ -8740,8 +8749,8 @@ serve(async (req)=>{
             // PILLAR H: state_reconciled event (FC-zone path only in Phase 1)
             // Identify which fields were gap-filled from state vs still missing.
             {
-              const gapFilled = [];
-              const missing = [];
+              const gapFilled: string[] = [];
+              const missing: string[] = [];
               const schema = PAYLOAD_SCHEMAS['create_freedom_camping_zone'];
               if (schema) {
                 const allFields = [
@@ -8789,7 +8798,7 @@ serve(async (req)=>{
         try {
           // (a) Merge LLM toolArgs into the active slot as a hint so they become part of state.
           //     Flatten the nested client/sites structure into the flat fact-key namespace.
-          const llmOnboardingHint = {};
+          const llmOnboardingHint: JsonRecord = {};
           const clientSrc = toolArgs.client && typeof toolArgs.client === 'object' ? toolArgs.client : {};
           // client.name → client_name in facts
           if (typeof clientSrc.name === 'string' && clientSrc.name.trim()) {
@@ -8886,7 +8895,7 @@ serve(async (req)=>{
               const stateSiteName = statePayload.site_name;
               if (!hasSites && typeof stateSiteName === 'string' && stateSiteName.trim()) {
                 // State knows about a site the LLM args missed — seed a minimal entry
-                const newSite = {
+                const newSite: JsonRecord = {
                   name: stateSiteName
                 };
                 for (const k of [
@@ -8989,7 +8998,7 @@ serve(async (req)=>{
       if (tool === 'propose_patrol_route_assignment') {
         try {
           // (a) Merge LLM toolArgs into the active slot as a hint so they become part of state.
-          const llmPatrolHint = {};
+          const llmPatrolHint: JsonRecord = {};
           for (const k of Object.keys(toolArgs)){
             const v = toolArgs[k];
             if (v !== null && v !== undefined && v !== '' && k !== '_idempotency_key' && k !== '_conversation_id' && k !== '_context_summary' && k !== 'reasoning') {
@@ -9091,7 +9100,7 @@ serve(async (req)=>{
       if (tool === 'propose_zone_patrol_stop') {
         try {
           // (a) Merge LLM toolArgs into the active slot as a hint so they become part of state.
-          const llmZpsHint = {};
+          const llmZpsHint: JsonRecord = {};
           for (const k of Object.keys(toolArgs)){
             const v = toolArgs[k];
             if (v !== null && v !== undefined && v !== '' && k !== '_idempotency_key' && k !== '_conversation_id' && k !== '_context_summary' && k !== 'reasoning') {
@@ -9183,7 +9192,7 @@ serve(async (req)=>{
         try {
           // (a) Merge LLM toolArgs into the active slot as a hint so they become part of state.
           //     Flatten the nested settings structure into the flat fact-key namespace.
-          const llmOrgStrategyHint = {};
+          const llmOrgStrategyHint: JsonRecord = {};
           // organization_id
           const hintOrgId = toolArgs.organization_id;
           if (typeof hintOrgId === 'string' && hintOrgId.trim()) {
@@ -9300,7 +9309,7 @@ serve(async (req)=>{
       // Scoped to propose_freedom_camping_zone ONLY in this slice.
       if (tool === 'propose_freedom_camping_zone') {
         const vrZone = toolArgs.zone && typeof toolArgs.zone === 'object' && !Array.isArray(toolArgs.zone) ? toolArgs.zone : {};
-        const vrPayload = {
+        const vrPayload: JsonRecord = {
           zone: vrZone
         };
         if (typeof toolArgs.site_id === 'string') vrPayload.site_id = toolArgs.site_id;
@@ -9623,7 +9632,7 @@ serve(async (req)=>{
               if (gapTargets.length && !/Target Atlas gaps?:/.test(bjDescription)) bjDescription = `${atlasGapBrief(gapTargets)}\n\n${bjDescription}`.slice(0, 12000);
             }
             const delegatedWebResearch = subagentRunsThisTurn.filter((run) => Array.isArray(run.steps)
-              && run.steps.some((step) => step?.tool === 'web_research' && step?.outcome === 'ok'));
+              && run.steps.some((step: any) => step?.tool === 'web_research' && step?.outcome === 'ok'));
             const delegatedResearchUrls = [...new Set(delegatedWebResearch
               .flatMap((run) => Array.isArray(run.sources) ? run.sources : [])
               .filter((url) => /^https:\/\//i.test(String(url)) && !/^https:\/\/example\.com\//i.test(String(url))))].slice(0, 8);
@@ -9919,7 +9928,7 @@ serve(async (req)=>{
           }
         case 'check_proposals':
           {
-            const cpPayload = {
+            const cpPayload: JsonRecord = {
               limit: typeof toolArgs.limit === 'number' ? toolArgs.limit : 20
             };
             if (conversationId && !toolArgs.all_conversations) cpPayload.conversation_id = conversationId;
@@ -9943,7 +9952,7 @@ serve(async (req)=>{
               // almost certainly the wrong tool for a fresh request — return a
               // distinguishable marker so the user gets actionable guidance
               // instead of a dead-end "no pending proposals" non-answer.
-              const hasProposalEvidence = !!pending || history.some((h)=>h.role === 'assistant' && h.metadata && typeof h.metadata.tool === 'string' && (h.metadata.tool.startsWith('propose_') || h.metadata.tool === 'job_plan_create'));
+              const hasProposalEvidence = !!pending || history.some((h: any)=>h.role === 'assistant' && h.metadata && typeof h.metadata.tool === 'string' && (h.metadata.tool.startsWith('propose_') || h.metadata.tool === 'job_plan_create'));
               if (!hasProposalEvidence) {
                 console.warn('[conductor][check_proposals] empty result with no prior proposal evidence — likely wrong tool for a fresh request');
                 return {
@@ -10054,7 +10063,7 @@ serve(async (req)=>{
           }
       }
     };
-    /** Handle the ASK action: format questions, persist, and return the Response. */ const handleAsk = (d)=>{
+    /** Handle the ASK action: format questions, persist, and return the Response. */ const handleAsk = (d: JsonRecord)=>{
       const rawQuestions = Array.isArray(d.questions) ? d.questions : [];
       if (!rawQuestions.length) return null;
       // Only use the FIRST question — Bob asks one thing at a time.
@@ -10067,7 +10076,7 @@ serve(async (req)=>{
       // Answer choices the panel renders as buttons so the human clicks instead of retyping.
       // The planner may omit them; best_guess still gives the panel one concrete answer.
       const suppliedOptions = Array.isArray(q?.options)
-        ? q.options.map((option)=>String(option?.label ?? option ?? '').trim()).filter((label)=>label.length > 0).slice(0, 6)
+        ? q.options.map((option: any)=>String(option?.label ?? option ?? '').trim()).filter((label: string)=>label.length > 0).slice(0, 6)
         : [];
       const bestGuess = typeof q?.best_guess === 'string' ? q.best_guess.trim() : '';
       const answerOptions = [...new Set([...(bestGuess ? [bestGuess] : []), ...suppliedOptions])].slice(0, 6);
@@ -10136,7 +10145,7 @@ serve(async (req)=>{
       enabledModuleProfiles = buildModuleMap(new Set());
     }
     // Earlier-turn files stay readable via understand_documents; the planner must know they exist.
-    let sessionAttachments = [];
+    let sessionAttachments: JsonRecord[] = [];
     if (conversationId) {
       try {
         const { data: sessionRows } = await admin.from('bob_attachments').select('file_name, file_type').eq('conversation_id', conversationId).order('created_at', { ascending: true }).limit(20);
@@ -10192,7 +10201,7 @@ serve(async (req)=>{
     const plan = await callPlan(planPayload);
     if (plan.ok && completedWork.length) {
       for (const item of completedWork) {
-        admin.rpc('builder_autopilot_mark_reported', { _job_id: item.job_id }).then(({ error }) => {
+        Promise.resolve(admin.rpc('builder_autopilot_mark_reported', { _job_id: item.job_id })).then(({ error }) => {
           if (error) console.warn('[conductor][autopilot-reports] mark_reported failed:', error.message);
         }).catch(() => {});
       }
@@ -10235,7 +10244,7 @@ serve(async (req)=>{
     if (decision.verification && typeof decision.verification === 'object') {
       await emitEvent("plan_verified", {
         verdict: String(decision.verification.verdict ?? 'unknown'),
-        issues: Array.isArray(decision.verification.issues) ? decision.verification.issues.map((i)=>i.code).slice(0, 12) : [],
+        issues: Array.isArray(decision.verification.issues) ? decision.verification.issues.map((i: any)=>i.code).slice(0, 12) : [],
         replanned: Boolean(decision.verification.replanned),
         critic_model: decision.verification.critic?.model ?? null,
         plan_model: decision.model ?? null,
@@ -10265,7 +10274,7 @@ serve(async (req)=>{
         allow_delegation: false
       }, false) : {
         ok: false,
-        data: {}
+        data: {} as JsonRecord
       };
       const runSummary = summariseSubagentRuns(subagentRuns);
       subagentRunsThisTurn = [
@@ -10758,7 +10767,7 @@ serve(async (req)=>{
         const blockedTool = chosenTool;
         const reasoningText = String(decision.reply || decision.reasoning || '').trim();
         const rawWriteRefusalReply = reasoningText ? `${reasoningText}\n\nAs you requested, I have not filed or proposed anything — this is reasoning and findings only. When you are ready to proceed, just say the word and I will file the proposal.` : 'I have completed my analysis as requested. Nothing has been filed or proposed to the bell — this is reasoning only. When you are ready to proceed, let me know and I will file the proposal.';
-        const writeRefusalMeta = {
+        const writeRefusalMeta: JsonRecord = {
           tool: blockedTool,
           outcome: 'write_refused_by_user_instruction',
           blocked_tool: blockedTool,
@@ -10845,7 +10854,7 @@ serve(async (req)=>{
       const blockedTool = chosenTool;
       const reasoningText = String(decision.reply || decision.reasoning || '').trim();
       const rawWriteRefusalReply = reasoningText ? `${reasoningText}\n\nAs you requested, I have not filed or proposed anything — this is reasoning and findings only. When you are ready to proceed, just say the word and I will file the proposal.` : 'I have completed my analysis as requested. Nothing has been filed or proposed to the bell — this is reasoning only. When you are ready to proceed, let me know and I will file the proposal.';
-      const writeRefusalMeta = {
+      const writeRefusalMeta: JsonRecord = {
         tool: blockedTool,
         outcome: 'write_refused_by_user_instruction',
         blocked_tool: blockedTool,
@@ -11067,7 +11076,7 @@ serve(async (req)=>{
       const activeSlot = freshFacts.slots[activeSlotKey];
       // Infer the action type from the slot kind
       // Phase 1: only create_freedom_camping_zone is supported
-      const actionTypeMap = {
+      const actionTypeMap: Record<string, string> = {
         zone: 'create_freedom_camping_zone'
       };
       const inferredActionType = actionTypeMap[activeSlot.kind] ?? null;
@@ -11432,8 +11441,8 @@ serve(async (req)=>{
     // Steps 5-6 (building dispatchTool args FROM these facts, simplifying
     // loadHistory) are deliberately NOT part of this change.
     if (chosenTool && result.meta.outcome === 'ok') {
-      const toolResolvedIds = {};
-      const toolFacts = {};
+      const toolResolvedIds: JsonRecord = {};
+      const toolFacts: JsonRecord = {};
       // resolve_geofence: extract boundary, gps, name, address
       if (chosenTool === 'resolve_geofence' && result.meta.geofence) {
         const gf = result.meta.geofence;
@@ -11520,8 +11529,8 @@ serve(async (req)=>{
       //
       // safeMetaSnapshot extracts only scalar/plain fields from meta, producing
       // a guaranteed-acyclic plain object safe for JSON serialisation.
-      const safeMetaSnapshot = (meta)=>{
-        const snap = {};
+      const safeMetaSnapshot = (meta: JsonRecord)=>{
+        const snap: JsonRecord = {};
         for (const [k, v] of Object.entries(meta)){
           if (v === null || v === undefined) {
             snap[k] = v;
@@ -11573,15 +11582,15 @@ serve(async (req)=>{
       // provenance (advisory context only — no control-flow dependency). The old
       // Object.assign merge clobbered earlier keys (outcome, tool) with later
       // steps, feeding the planner ambiguous facts.
-      const buildResolvedFacts = (steps)=>{
-        const facts = {};
+      const buildResolvedFacts = (steps: any)=>{
+        const facts: JsonRecord = {};
         for (const s of steps)facts[`${s.step}:${s.tool}`] = s.meta;
         return facts;
       };
       // #121 fix: extract org ids resolved by prior find_org/list_orgs/get_org
       // steps so the planner knows it can iterate list_zones/list_sites per-org
       // across the already-resolved set, instead of reaching for sql_read.
-      const extractResolvedOrgIds = (steps)=>{
+      const extractResolvedOrgIds = (steps: any)=>{
         const ids = new Set();
         for (const s of steps){
           if (s.tool !== 'query_records') continue;
@@ -11609,7 +11618,7 @@ serve(async (req)=>{
       // the planner which orgs it still has to iterate, so an empty result at one
       // org is NOT read as "the whole task is done". org_id lives in the nested
       // args.args.org_id (the documented query_records call shape).
-      const extractQueriedOrgIds = (steps)=>{
+      const extractQueriedOrgIds = (steps: any)=>{
         const ids = new Set();
         for (const s of steps){
           if (s.tool !== 'query_records') continue;
@@ -11624,7 +11633,7 @@ serve(async (req)=>{
         ];
       };
       // remaining = resolved org ids not yet used in a per-org listing step.
-      const computeRemainingOrgIds = (steps)=>{
+      const computeRemainingOrgIds = (steps: any)=>{
         const queried = new Set(extractQueriedOrgIds(steps));
         return extractResolvedOrgIds(steps).filter((id)=>!queried.has(id));
       };
@@ -12061,8 +12070,8 @@ serve(async (req)=>{
         // Pillar A Step 4 (in-loop): write tool-result resolved IDs to
         // conversation facts for in-loop read steps.
         if (result.meta.outcome === 'ok') {
-          const loopToolResolvedIds = {};
-          const loopToolFacts = {};
+          const loopToolResolvedIds: JsonRecord = {};
+          const loopToolFacts: JsonRecord = {};
           if (next.chosenTool === 'resolve_geofence' && result.meta.geofence) {
             const gf = result.meta.geofence;
             if (gf.boundary) loopToolResolvedIds.boundary = gf.boundary;
@@ -12276,7 +12285,7 @@ serve(async (req)=>{
     // rule "NEVER output text beginning with [INTERNAL" is enforced at the output
     // layer, not just in the system prompt.
     let strippedInternalFallback = false;
-    const stripInternal = (s)=>{
+    const stripInternal = (s: any)=>{
       const trimmed = s.trim();
       // #107 recoverability: the fresh-request-misroute marker gets a distinct,
       // actionable fallback so the user is not left with a dead-end non-answer.
@@ -12366,7 +12375,7 @@ serve(async (req)=>{
     if (chosenTool === 'understand_documents' || chosenTool === 'plan_import' || chosenTool === 'perceive_media') {
       // Extract structured items from the result metadata if available
       const files = Array.isArray(result.meta.files) ? result.meta.files : [];
-      const allItems = files.map((f)=>({
+      const allItems: Array<{ label: string; kind: string; confidence?: number; source: string }> = files.map((f)=>({
           label: String(f.name ?? f.file_name ?? 'unknown'),
           kind: String(f.kind ?? f.type ?? 'document'),
           confidence: typeof f.confidence === 'number' ? f.confidence : undefined,
@@ -12484,7 +12493,7 @@ serve(async (req)=>{
     // ── v2 CONTRACT: Build structured response with observability ────────────
     // Strip internal error detail from client-facing response data.
     // tool_call_error is logged server-side but must not leak to clients.
-    const clientMeta = {
+    const clientMeta: JsonRecord = {
       intent: 'conductor',
       planned_tool: chosenTool,
       reasoning: decision.reasoning ?? null,

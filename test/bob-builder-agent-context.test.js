@@ -3,6 +3,7 @@ const fs = require('node:fs');
 const path = require('node:path');
 const test = require('node:test');
 const vm = require('node:vm');
+const { stripTypeScriptTypes } = require('node:module');
 
 const source = fs.readFileSync(path.resolve(__dirname, '../supabase/functions/onspace-ai-chat/index.ts'), 'utf8');
 
@@ -35,7 +36,7 @@ test('page awareness is bounded and cannot grant authority; pauses persist recom
 
 test('the workspace sanitizer caps page hints and discards unapproved payload fields', () => {
   const helper = source.slice(source.indexOf('function safeAgentWorkspaceContext('), source.indexOf('/** Validate a response object'));
-  const sanitize = vm.runInNewContext(`(${helper.trim()})`);
+  const sanitize = vm.runInNewContext(`(${stripTypeScriptTypes(helper.trim())})`);
   const result = JSON.parse(JSON.stringify(sanitize({
     agent_mode: 'operations',
     visible_page: {

@@ -18,7 +18,7 @@
  *
  * If the caller's email is in OWNER_EMAILS, returns "grand_master" regardless
  * of the DB role. Otherwise returns the DB role unchanged.
- */ export function resolveEffectiveRole(email, dbRole) {
+ */ export function resolveEffectiveRole(email: any, dbRole: any) {
   const normalized = (email ?? "").toLowerCase().trim();
   if (OWNER_EMAILS.has(normalized)) return "grand_master";
   return dbRole;
@@ -69,7 +69,7 @@ export const CAN_WRITE = new Set([
   "admin",
   "admin_officer"
 ]);
-export function roleTier(role) {
+export function roleTier(role: string) {
   const r = (role || "").toLowerCase();
   if (r === "grand_master") return "admiral";
   if (r === "master") return "captain";
@@ -87,7 +87,7 @@ export function roleTier(role) {
 // mirror; changes to ROLE_HIERARCHY must be reflected here.
 // ---------------------------------------------------------------------------
 export const ADMIN_LEVEL = 4;
-export const ROLE_LEVEL = {
+export const ROLE_LEVEL: Record<string, number> = {
   grand_master: 6,
   master: 5,
   admin: 4,
@@ -99,9 +99,9 @@ export const ROLE_LEVEL = {
   client_officer: 1,
   client_viewer: 1
 };
-export function roleLevel(role) {
+export function roleLevel(role: string) {
   return ROLE_LEVEL[role] ?? 0;
 }
-/** True when the role is admin-tier or above (the floor for management areas). */ export function isAdminTier(role) {
+/** True when the role is admin-tier or above (the floor for management areas). */ export function isAdminTier(role: string) {
   return roleLevel(role) >= ADMIN_LEVEL;
 }

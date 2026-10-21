@@ -43,7 +43,7 @@
 // This map is the SHAPE of the catalogue; the Atlas is the PROVENANCE of
 // which tools appear. The caddie replaces "which tools" (from hardcoded list
 // to Atlas-generated), not "what each tool does" (still hand-authored).
-const TOOL_REGISTRY = {
+const TOOL_REGISTRY: Record<string, { purpose: string; governance: string; effect_class: string }> = {
   retrieve_knowledge: {
     purpose: 'Retrieve grounded product/legal/privacy/workflow knowledge to answer a question.',
     governance: 'read-only',
@@ -65,7 +65,8 @@ const TOOL_REGISTRY = {
     effect_class: 'internal_observation'
   },
   query_records: {
-    purpose: 'Look up LIVE records to resolve an entity. Bob calls this himself and NEVER asks the user for a lookup type. Lookup types Bob chooses internally: find_org (find org by name — returns matching orgs including branches/children), get_org (fetch org by UUID), list_orgs (list orgs, accepts parent_id to list children of a parent org), list_sites (list sites under an org), list_routes (list patrol routes under an org), list_zones (list freedom-camping zones under an org — returns id, name, has_boundary, rule_type). FIND_USER — TWO NAMED MODES (not interchangeable; choose from intent before acting): (1) DIRECTORY MODE (default, only available mode): use for person/contact lookup — returns display_name, role, managing org. Bob carries the id internally but NEVER shows it to the human. Governance: own-org full; cross-org scoped contact lookup. (2) TRANSFER MODE (NOT AVAILABLE — custody boundary): use ONLY when user intent is to move/transfer a person to another organisation or initiate a cross-org person handoff. This is NOT a directory lookup. Transfer mode is not available for execution. Refuse BEFORE resolving the person or destination organisation. Do not perform any resolution, handoff, or transfer steps. The refusal is terminal and non-retryable — do not suggest the user can rephrase or retry to make it work. Do not downgrade a transfer request into a directory lookup. Cross-org person-transfer is a custody-boundary action and is not implied by scoped cross-org directory access. Bob picks the right type himself based on what he needs. If unsure, default to find_org with the name. BATCH/MULTI-ORG ZONE LISTING: when you need zones across MULTIPLE orgs (e.g. a parent org and all its branches found by find_org), call list_zones ONCE PER ORG ID from the resolved set — do NOT reach for sql_read. list_zones is the correct and sufficient tool for zone listing at any scale; iterate it across the org ids you already have from find_org/list_orgs. sql_read is for diagnostic aggregates/counts that no whitelisted lookup can answer, NEVER for listing entities that query_records handles.',
+    purpose: 'Look up LIVE records to resolve an entity. Bob calls this himself and NEVER asks the user for a lookup type. Lookup types Bob chooses internally: find_org (find org by name — returns matching orgs including branches/children), get_org (fetch org by UUID), list_orgs (list orgs, accepts parent_id to list children of a parent org), list_sites (list sites under an org), list_routes (list patrol routes under an org), list_zones (list freedom-camping zones under an org — returns id, name, has_boundary, rule_type), search_observations (wildcard-search observations by plate, person, vehicle, site, zone, location, POI, LOI, incident, or notes). Use search_observations for global observation history and carry returned IDs internally when opening records. FIND_USER — TWO NAMED MODES (not interchangeable; choose from intent before acting): (1) DIRECTORY MODE (default, only available mode): use for person/contact lookup — returns display_name, role, managing org. Bob carries the id internally but NEVER shows it to the human. Governance: own-org full; cross-org scoped contact lookup. (2) TRANSFER MODE (NOT AVAILABLE — custody boundary): use ONLY when user intent is to move/transfer a person to another organisation or initiate a cross-org person handoff. This is NOT a directory lookup. Transfer mode is not available for execution. Refuse BEFORE resolving the person or destination organisation. Do not perform any resolution, handoff, or transfer steps. The refusal is terminal and non-retryable — do not suggest the user can rephrase or retry to make it work. Do not downgrade a transfer request into a directory lookup. Cross-org person-transfer is a custody-boundary action and is not implied by scoped cross-org directory access. Bob picks the right type himself based on what he needs. If unsure, default to find_org with the name. BATCH/MULTI-ORG ZONE LISTING: when you need zones across MULTIPLE orgs (e.g. a parent org and all its branches found by find_org), call list_zones ONCE PER ORG ID from the resolved set — do NOT reach for sql_read. list_zones is the correct and sufficient tool for zone listing at any scale; iterate it across the org ids you already have from find_org/list_orgs. sql_read is for diagnostic aggregates/counts that no whitelisted lookup can answer, NEVER for listing entities that query_records handles.'
+      + ' SAFETY FOLLOW-THROUGH: query safety_workspace with args { organization_id, location_id? } inspects scoped hazard owners, control hierarchy, review dates and officer assessment/report/incident review pointers. Read source evidence before using propose_place_hazards to file requested risk updates; a prose summary is not a stored change. Officers personally sign dynamic task assessments; do not sign for them, invent source dates, declare unsafe work safe, or claim supervisor approval without a receipt. Administrators record corrective action in Field reports / Safety reviews and review owners/controls at the place register. Missing evidence needs a clear question, not a fabricated completion.',
     governance: 'read-only; own-org full; cross-org scoped (directory contact only — cross-org person-transfer is a custody boundary, not scoped access)',
     effect_class: 'internal_observation'
   },
@@ -235,9 +236,8 @@ const TOOL_REGISTRY = {
     governance: 'WRITE-draft (client_site_patrol_config + stop modules); needs approval; org from the zone; ids never by name',
     effect_class: 'draft_governed_write'
   },
-    query_records: {
-      purpose: 'Look up LIVE records to resolve an entity. Bob calls this himself and NEVER asks the user for a lookup type. Lookup types Bob chooses internally: find_org (find org by name — returns matching orgs including branches/children), get_org (fetch org by UUID), list_orgs (list orgs, accepts parent_id to list children of a parent org), list_sites (list sites under an org), list_routes (list patrol routes under an org), list_zones (list freedom-camping zones under an org — returns id, name, has_boundary, rule_type), search_observations (wildcard-search observations by plate, person, vehicle, site, zone, location, POI, LOI, incident, or notes). Use search_observations for global observation history and carry returned IDs internally when opening records. FIND_USER — TWO NAMED MODES (not interchangeable; choose from intent before acting): (1) DIRECTORY MODE (default, only available mode): use for person/contact lookup — returns display_name, role, managing org. Bob carries the id internally but NEVER shows it to the human. Governance: own-org full; cross-org scoped contact lookup. (2) TRANSFER MODE (NOT AVAILABLE — custody boundary): use ONLY when user intent is to move/transfer a person to another organisation or initiate a cross-org person handoff. This is NOT a directory lookup. Transfer mode is not available for execution. Refuse BEFORE resolving the person or destination organisation. Do not perform any resolution, handoff, or transfer steps. The refusal is terminal and non-retryable — do not suggest the user can rephrase or retry to make it work. Do not downgrade a transfer request into a directory lookup. Cross-org person-transfer is a custody-boundary action and is not implied by scoped cross-org directory access. Bob picks the right type himself based on what he needs. If unsure, default to find_org with the name. BATCH/MULTI-ORG ZONE LISTING: when you need zones across MULTIPLE orgs (e.g. a parent org and all its branches found by find_org), call list_zones ONCE PER ORG ID from the resolved set — do NOT reach for sql_read. list_zones is the correct and sufficient tool for zone listing at any scale; iterate it across the org ids you already have from find_org/list_orgs. sql_read is for diagnostic aggregates/counts that no whitelisted lookup can answer, NEVER for listing entities that query_records handles.'
-        + ' SAFETY FOLLOW-THROUGH: query safety_workspace with args { organization_id, location_id? } inspects scoped hazard owners, control hierarchy, review dates and officer assessment/report/incident review pointers. Read source evidence before using propose_place_hazards to file requested risk updates; a prose summary is not a stored change. Officers personally sign dynamic task assessments; do not sign for them, invent source dates, declare unsafe work safe, or claim supervisor approval without a receipt. Administrators record corrective action in Field reports / Safety reviews and review owners/controls at the place register. Missing evidence needs a clear question, not a fabricated completion.',
+  fetch_bylaw_source: {
+    purpose: "Fetch a council's Freedom Camping bylaw (or infringement/NTV notice template) from an explicit URL the user gave you (e.g. a council's published bylaw page or PDF link) — the second intake path alongside a file upload. Args: { url, label? (e.g. 'freedom_camping_bylaw') }. Requires the user to have explicitly given you this URL in-session — never search for one yourself. Returns an attachment_id once fetched; pass that to your own reasoning / extraction step, then to propose_freedom_camping_org_strategy once you have reviewed the extracted draft. A non-.govt.nz source is flagged low_trust and MUST be treated as requiring manual review regardless of extraction confidence.",
     governance: 'read-only fetch; human-invoked only; SSRF-protected, PII-redacted; the outbound request carries ONLY the user-supplied URL — never internal context (owner ruling 2026-08-19)',
     effect_class: 'internal_observation'
   },
@@ -368,7 +368,7 @@ const TOOL_REGISTRY = {
  *
  * Unknown tools (not in TOOL_REGISTRY) are BLOCKED — fail safe at the
  * enforcement seam without hiding known capabilities from Bob.
- */ export function isToolEffectPermitted(tool, caps) {
+ */ export function isToolEffectPermitted(tool: string, caps: any) {
   const effectClass = TOOL_REGISTRY[tool]?.effect_class;
   // ── Unknown tool: fail safe (block) ────────────────────────────────────
   // A tool not in the registry has no classified effect. Block it at the
@@ -439,7 +439,7 @@ const TOOL_REGISTRY = {
  * If the generation rule ever changes (e.g. multiple sources of tool
  * entries, or a disambiguation suffix step), this check becomes load-
  * bearing. Until then it is a defense-in-depth assertion.
- */ function detectCollisions(catalogue) {
+ */ function detectCollisions(catalogue: any) {
   // Key by surface label; collect ALL tool names that share that label.
   // A collision is when two DISTINCT tool names produce the same label,
   // or (future) when a disambiguation step maps two entries to the same
@@ -467,7 +467,7 @@ const TOOL_REGISTRY = {
 /**
  * Query the Atlas terrain graph for wired tools and their reachability.
  * Returns the set of tool names that pass both gates (wired + reachable).
- */ async function queryAtlasTools(admin) {
+ */ async function queryAtlasTools(admin: any) {
   const errors = [];
   // Gate 1: bob_capability_map — wired edge_function entities
   // The brief says "tool = <name>" and "status = 'wired'". In the schema,
@@ -480,10 +480,10 @@ const TOOL_REGISTRY = {
     } else {
       wiredNodes = data ?? [];
     }
-  } catch (e) {
+  } catch (e: any) {
     errors.push(`bob_capability_map query threw: ${e?.message ?? String(e)}`);
   }
-  const wiredTools = wiredNodes.map((n)=>n.entity_name);
+  const wiredTools = wiredNodes.map((n: any)=>n.entity_name);
   // Gate 2: bob_app_map_edges — reachability check
   // A tool is reachable if at least one live edge connects it (as source or
   // target) to another entity. This is a presence check, not a full graph
@@ -496,7 +496,7 @@ const TOOL_REGISTRY = {
     } else {
       edges = data ?? [];
     }
-  } catch (e) {
+  } catch (e: any) {
     errors.push(`bob_app_map_edges query threw: ${e?.message ?? String(e)}`);
   }
   // Build the set of entity names that appear in any live edge
@@ -578,7 +578,7 @@ const TOOL_REGISTRY = {
  *
  * @param admin - Service-role Supabase client (bypasses RLS for Atlas reads)
  * @returns CaddieResult with the generated catalogue and diagnostics
- */ export async function generateToolCatalogue(admin) {
+ */ export async function generateToolCatalogue(admin: any) {
   const errors = [];
   // Query the Atlas
   const atlas = await queryAtlasTools(admin);
@@ -648,7 +648,7 @@ const TOOL_REGISTRY = {
   // in bob_capability_map, wiredSet.has(edgeFn) returns false and the tool
   // is excluded from the catalogue with no error. This is worse than a loud
   // failure.
-  const toolToEdgeFn = {
+  const toolToEdgeFn: Record<string, string> = {
     // Tools dispatched via callFn() to a separate edge function:
     query_records: 'bob-query-records',
     schema_inspect: 'bob-schema-inspect',
@@ -833,10 +833,10 @@ function fallbackCatalogue() {
 // Resolve planner output only through the catalogue generated for this turn.
 // Formatting variations are tolerated, but tools absent from Caddie never reach
 // the conductor's execution switch.
-export function resolveCatalogueTool(catalogue, requestedTool) {
+export function resolveCatalogueTool(catalogue: any, requestedTool: any) {
   const canonical = String(requestedTool ?? '').toLowerCase().replace(/[^a-z0-9]/g, '');
   if (!canonical) return null;
-  return catalogue.find((entry)=>String(entry.tool).toLowerCase().replace(/[^a-z0-9]/g, '') === canonical)?.tool ?? null;
+  return catalogue.find((entry: Record<string, any>)=>String(entry.tool).toLowerCase().replace(/[^a-z0-9]/g, '') === canonical)?.tool ?? null;
 }
 /**
  * Classify a tool's effect class for enforcement purposes.
@@ -848,6 +848,6 @@ export function resolveCatalogueTool(catalogue, requestedTool) {
  * is blocked at the enforcement seam for all but the highest rank. Known
  * tools are never hidden from Bob's catalogue; unknown tools are blocked
  * at enforcement, not suppressed from awareness.
- */ export function classifyToolEffect(tool) {
+ */ export function classifyToolEffect(tool: string) {
   return TOOL_REGISTRY[tool]?.effect_class ?? 'direct_world_change';
 }

@@ -30,14 +30,14 @@
  * A boundary must be a real GeoJSON geometry (Polygon or MultiPolygon with
  * actual coordinates), not just any truthy object. Feature / FeatureCollection
  * recurse to their inner geometry.
- */ export function isValidGeoJsonBoundary(b) {
+ */ export function isValidGeoJsonBoundary(b: any) {
   if (!b || typeof b !== "object" || Array.isArray(b)) return false;
   const geo = b;
   const t = geo.type;
   if (t !== "Polygon" && t !== "MultiPolygon" && t !== "Feature" && t !== "FeatureCollection") return false;
   if (t === "Feature") return isValidGeoJsonBoundary(geo.geometry);
   if (t === "FeatureCollection") {
-    return Array.isArray(geo.features) && geo.features.length > 0 && geo.features.some((f)=>isValidGeoJsonBoundary(f));
+    return Array.isArray(geo.features) && geo.features.length > 0 && geo.features.some((f: any)=>isValidGeoJsonBoundary(f));
   }
   if (!Array.isArray(geo.coordinates)) return false;
   const coords = geo.coordinates;
@@ -49,7 +49,7 @@
 /**
  * Registry slice mirrored from PAYLOAD_SCHEMAS. THIS SLICE:
  * create_freedom_camping_zone only (one rule: require_geometry_or_provisional).
- */ export const PAYLOAD_SCHEMAS = {
+ */ export const PAYLOAD_SCHEMAS: Record<string, { actionType: string; businessRules: Array<{ id: string; description: string; check: string }> }> = {
   create_freedom_camping_zone: {
     actionType: "create_freedom_camping_zone",
     businessRules: [
@@ -64,7 +64,7 @@
 /**
  * Evaluate declarative business rules for an action type against a payload.
  * Fail-open for unregistered tools / no rules: returns valid:true.
- */ export function validateBusinessRules(actionType, payload) {
+ */ export function validateBusinessRules(actionType: string, payload: Record<string, any>) {
   const schema = PAYLOAD_SCHEMAS[actionType];
   if (!schema || !schema.businessRules || schema.businessRules.length === 0) {
     return {
@@ -107,7 +107,7 @@
 /**
  * Compute the idempotency key for a proposal: action_type + '::' + active_slot.
  * Returns null when there is no active slot.
- */ export function computeProposalIdempotencyKey(actionType, facts) {
+ */ export function computeProposalIdempotencyKey(actionType: string, facts: Record<string, any>) {
   if (!facts?.active_slot) return null;
   return `${actionType}::${facts.active_slot}`;
 }
@@ -115,7 +115,7 @@
  * Mirror of makeSlotKey from onspace-ai-chat/index.ts.
  * Deterministic slot key: kind + '_' + slugified name.
  * e.g. ("branch", "Regulatory Services") → "branch_regulatory_services"
- */ export function makeSlotKey(kind, name) {
+ */ export function makeSlotKey(kind: string, name: any) {
   const slug = name.toLowerCase().replace(/[^a-z0-9]+/g, '_').replace(/^_|_$/g, '');
   return `${kind.toLowerCase()}_${slug || 'unnamed'}`;
 }
@@ -124,7 +124,7 @@
  * (e.g. bob-plan-step-advance) that have no active slot.
  * Uses the same action_type::makeSlotKey contract from 0267, prefixed with
  * 'plan_' to distinguish from conversation-driven proposals.
- */ export function computePlanStepIdempotencyKey(actionType, entityName) {
+ */ export function computePlanStepIdempotencyKey(actionType: string, entityName: any) {
   const slug = entityName.toLowerCase().replace(/[^a-z0-9]+/g, '_').replace(/^_|_$/g, '') || 'unnamed';
   return `${actionType}::plan_${slug}`;
 }
@@ -132,7 +132,7 @@
  * Compute a per-entity idempotency key for site actions within a client
  * onboarding batch. Each site gets its own key so they deduplicate
  * independently of the parent org action.
- */ export function computeSiteIdempotencyKey(siteName) {
+ */ export function computeSiteIdempotencyKey(siteName: any) {
   const slug = siteName.trim().toLowerCase().replace(/[^a-z0-9]+/g, '_').replace(/^_|_$/g, '') || 'unnamed';
   return `create_client_site::${slug}`;
 }
@@ -150,7 +150,7 @@
  * neither field is present (the transition will skip recording the id).
  *
  * PURE: no I/O, no side-effects.
- */ export function normalizeProposalActionId(meta) {
+ */ export function normalizeProposalActionId(meta: Record<string, any>) {
   const actionId = meta.action_id ?? meta.org_action_id;
   return typeof actionId === 'string' ? actionId : undefined;
 }
@@ -162,8 +162,8 @@
  *
  * Extracts a curated subset of tool args (no full GeoJSON, no raw emails,
  * no raw SQL). Returns a plain object safe for JSONB storage.
- */ export function buildToolDispatchedPayload(tool, toolArgs) {
-  const summary = {
+ */ export function buildToolDispatchedPayload(tool: string, toolArgs: Record<string, any>) {
+  const summary: Record<string, unknown> = {
     tool
   };
   // Curate per-tool: extract only the fields that are operationally useful
@@ -233,8 +233,8 @@
  * Build a step_payload for a tool_outcome event.
  *
  * Extracts outcome + action_id (for propose tools) from the tool result meta.
- */ export function buildToolOutcomePayload(tool, meta) {
-  const payload = {
+ */ export function buildToolOutcomePayload(tool: string, meta: Record<string, any>) {
+  const payload: Record<string, unknown> = {
     tool,
     outcome: typeof meta.outcome === "string" ? meta.outcome : "unknown"
   };
@@ -257,7 +257,7 @@
 /**
  * Map internal tool identifiers to user-facing labels.
  * Introspect MUST NOT surface internal tool names (TOOL SELF-HEALING HARD RULE).
- */ export const TOOL_USER_LABELS = {
+ */ export const TOOL_USER_LABELS: Record<string, string> = {
   resolve_geofence: "geofence resolution",
   resolve_address: "address resolution",
   query_records: "record lookup",
@@ -311,7 +311,7 @@
  * object (the conductor uses this to decide the fallback message).
  *
  * PURE: no LLM, no network, no DB.
- */ export function buildIntrospectPayload(slot, actionType) {
+ */ export function buildIntrospectPayload(slot: Record<string, any>, actionType: string) {
   // Merge: resolved_ids win over facts on key collision
   const merged = {
     ...slot.facts,
@@ -349,8 +349,8 @@
  * to user-facing labels.
  *
  * PURE: no LLM, no network, no DB.
- */ export function filterUserMeaningfulEvents(events) {
-  return events.filter((e)=>USER_MEANINGFUL_EVENT_TYPES.has(e.event_type)).map((e)=>({
+ */ export function filterUserMeaningfulEvents(events: any) {
+  return events.filter((e: any)=>USER_MEANINGFUL_EVENT_TYPES.has(e.event_type)).map((e: any)=>({
       event_type: e.event_type,
       tool_label: e.tool ? TOOL_USER_LABELS[e.tool] ?? "processing step" : "",
       outcome: e.outcome,
@@ -383,7 +383,7 @@
  * append-only file).
  *
  * PURE: no I/O, no side-effects.
- */ export function parseUnansweredEntries(content) {
+ */ export function parseUnansweredEntries(content: any) {
   const ENTRY_HEADER = /^###\s+\[([^\]]+)\]\s+(\S+)\s*\|\s*status:unanswered\s*$/;
   const lines = content.split("\n");
   const entries = [];
@@ -416,7 +416,7 @@
  * In an append-only file the last entry in file order is the newest.
  *
  * PURE: no I/O, no side-effects.
- */ export function selectLatestUnanswered(entries) {
+ */ export function selectLatestUnanswered(entries: any) {
   if (!entries || entries.length === 0) return null;
   return entries[entries.length - 1];
 }
@@ -454,7 +454,7 @@
  * - a tail shorter than budget returns the whole tail, hasMore=false.
  *
  * PURE: no I/O, no side-effects.
- */ export function renderNotepadTail(tailContent, opts) {
+ */ export function renderNotepadTail(tailContent: any, opts: Record<string, any>) {
   const tail = typeof tailContent === 'string' ? tailContent : '';
   const tailLength = tail.length;
   const rawBudget = opts?.budget;

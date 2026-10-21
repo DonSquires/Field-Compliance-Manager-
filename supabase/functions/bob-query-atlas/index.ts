@@ -8,14 +8,14 @@ const CORS = {
   'Access-Control-Allow-Origin': '*',
   'Access-Control-Allow-Headers': 'authorization, x-client-info, apikey, content-type'
 };
-const json = (b, s = 200)=>new Response(JSON.stringify(b), {
+const json = (b: unknown, s = 200)=>new Response(JSON.stringify(b), {
     status: s,
     headers: {
       ...CORS,
       'Content-Type': 'application/json'
     }
   });
-async function readAtlasStatus(admin, expectedCommit = '') {
+async function readAtlasStatus(admin: any, expectedCommit = '') {
   const [capabilities, edges] = await Promise.all([
     admin.from('bob_capability_map')
       .select('last_refreshed_at, refresh_source', { count: 'exact' })

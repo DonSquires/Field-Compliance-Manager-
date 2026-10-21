@@ -83,13 +83,13 @@ const RATIFIED_SAFETY_SIGNAL_ACTIONS = [
   'dispatcher_notify',
   'escalation_timing'
 ];
-function isRatifiedSafetySignalAction(action) {
+function isRatifiedSafetySignalAction(action: any) {
   return RATIFIED_SAFETY_SIGNAL_ACTIONS.includes(action);
 }
-export function hasActiveSafetyConcern(state) {
+export function hasActiveSafetyConcern(state: Record<string, any>) {
   return state.active_sos || state.active_man_down || state.active_overdue;
 }
-export function resolveWelfareTruthState(input) {
+export function resolveWelfareTruthState(input: Record<string, any>) {
   const level = mapEscalationLevel(input.escalation_level);
   const isActiveSafety = input.welfare_status === 'overdue' || input.welfare_status === 'man_down' || input.welfare_status === 'sos';
   return {
@@ -104,12 +104,12 @@ export function resolveWelfareTruthState(input) {
     active_overdue: input.welfare_status === 'overdue'
   };
 }
-function mapEscalationLevel(level) {
+function mapEscalationLevel(level: any) {
   if (level === null || level <= 1) return 'L1';
   if (level === 2) return 'L2';
   return 'L3';
 }
-function validateSafetySignal(candidate) {
+function validateSafetySignal(candidate: any) {
   const failed = [];
   if (!isRatifiedSafetySignalAction(candidate.action)) failed.push('action_not_ratified');
   if (candidate.mutates_governed_record) failed.push('record_mutating');
@@ -122,7 +122,7 @@ function validateSafetySignal(candidate) {
     failed_conditions: failed
   };
 }
-export function conductorSafetyPrecedence(oracle, candidate) {
+export function conductorSafetyPrecedence(oracle: any, candidate: any) {
   if (oracle.effect_class === 'internal_observation') {
     return {
       permitted: true,
@@ -213,7 +213,7 @@ export function conductorSafetyPrecedence(oracle, candidate) {
     enforcement_reason_code: 'unknown_effect_class_fail_closed'
   };
 }
-function buildWelfareSafetyAuditRecord(input) {
+function buildWelfareSafetyAuditRecord(input: Record<string, any>) {
   const reasonCode = input.decision.enforcement_reason_code ?? 'unknown_effect_class_fail_closed';
   return {
     selected_intent: {
@@ -255,7 +255,7 @@ function buildWelfareSafetyAuditRecord(input) {
  * Whether a tool/action name is classified as a safety-signal effect.
  * Used by the conductor to detect when the planner has selected a
  * safety-signal action.
- */ export function isSafetySignalAction(action) {
+ */ export function isSafetySignalAction(action: any) {
   return SAFETY_SIGNAL_TOOL_ACTIONS.has(action);
 }
 /**
@@ -271,7 +271,7 @@ function buildWelfareSafetyAuditRecord(input) {
  *   - welfare: from the welfare context supplied by the conductor
  *
  * PURE function — no I/O.
- */ export function buildOracleTurnTruthState(input) {
+ */ export function buildOracleTurnTruthState(input: Record<string, any>) {
   const base = buildGenericOracleTurnTruthState({
     explicit_hold: input.explicit_hold,
     effect_class: input.effect_class,
@@ -300,7 +300,7 @@ function buildWelfareSafetyAuditRecord(input) {
  * by design. A non-ratified action fails the action_not_ratified check.
  *
  * PURE function — no I/O.
- */ export function buildSafetySignalCandidate(action) {
+ */ export function buildSafetySignalCandidate(action: any) {
   const isRatified = isRatifiedSafetySignalAction(action);
   return {
     action,
@@ -333,7 +333,7 @@ function buildWelfareSafetyAuditRecord(input) {
  * @param input.explicit_hold - Whether explicit hold is active (from detectExplicitWriteRefusal)
  * @param input.effect_class - The tool's effect class (from classifyToolEffect)
  * @param input.welfare_context - Welfare context for the current turn (null if none)
- */ export function evaluateWelfareSafetySeam(input) {
+ */ export function evaluateWelfareSafetySeam(input: Record<string, any>) {
   // Not applicable if no welfare context or not a safety-signal action
   const isSafety = isSafetySignalAction(input.action);
   if (!input.welfare_context && !isSafety) {
@@ -430,7 +430,7 @@ function buildWelfareSafetyAuditRecord(input) {
  *
  * Returns null if the input lacks required fields (organization_id,
  * officer_user_id). The conductor must supply these from the turn context.
- */ export function buildAlertRaisePayload(input) {
+ */ export function buildAlertRaisePayload(input: Record<string, any>) {
   if (!input.organization_id || !input.officer_user_id) return null;
   const alertType = mapWelfareStatusToAlertType(input.welfare_context.welfare_status);
   if (!alertType) return null;
@@ -449,7 +449,7 @@ function buildWelfareSafetyAuditRecord(input) {
 /**
  * Map welfare status to welfare_alerts.alert_type.
  * Only active safety concerns produce alerts.
- */ function mapWelfareStatusToAlertType(status) {
+ */ function mapWelfareStatusToAlertType(status: any) {
   switch(status){
     case 'sos':
       return 'sos';
@@ -463,7 +463,7 @@ function buildWelfareSafetyAuditRecord(input) {
 }
 /**
  * Build human-readable notes for the alert_raise payload.
- */ function buildAlertNotes(welfare, args) {
+ */ function buildAlertNotes(welfare: any, args: Record<string, any>) {
   const source = 'Conductor safety-signal (§6)';
   const status = welfare.welfare_status.toUpperCase();
   const level = welfare.escalation_level ?? 1;
@@ -485,7 +485,7 @@ function buildWelfareSafetyAuditRecord(input) {
  * truth-state — not just the generic "write refused by user instruction" reason.
  *
  * PURE function — no I/O.
- */ export function captureWelfareTruthForWriteRefusal(input) {
+ */ export function captureWelfareTruthForWriteRefusal(input: Record<string, any>) {
   const oracle = buildOracleTurnTruthState({
     explicit_hold: input.explicit_hold,
     effect_class: 'draft_governed_write',
@@ -521,7 +521,7 @@ function buildWelfareSafetyAuditRecord(input) {
  * ALERT_DEDUPE_WINDOW_MS boundary.
  *
  * PURE function — no I/O.
- */ export function buildAlertDedupeKey(payload) {
+ */ export function buildAlertDedupeKey(payload: Record<string, any>) {
   const triggerMs = new Date(payload.triggered_at).getTime();
   const bucketMs = Math.floor(triggerMs / ALERT_DEDUPE_WINDOW_MS) * ALERT_DEDUPE_WINDOW_MS;
   const windowBucket = new Date(bucketMs).toISOString();
@@ -541,7 +541,7 @@ function buildWelfareSafetyAuditRecord(input) {
  * against welfare_alerts. The conductor (index.ts) performs the actual query.
  *
  * PURE function — no I/O.
- */ export function buildDedupeQueryParams(dedupeKey) {
+ */ export function buildDedupeQueryParams(dedupeKey: any) {
   const bucketMs = new Date(dedupeKey.window_bucket).getTime();
   return {
     organization_id: dedupeKey.organization_id,
@@ -573,7 +573,7 @@ function buildWelfareSafetyAuditRecord(input) {
  * not half-succeed into a live effect."
  *
  * PURE function — no I/O.
- */ export function validateAuthorityPredicate(input) {
+ */ export function validateAuthorityPredicate(input: Record<string, any>) {
   const failures = [];
   // Rule 1: welfare_context must be present
   if (!input.welfare_context) {
@@ -636,7 +636,7 @@ function buildWelfareSafetyAuditRecord(input) {
  * Ambiguous context fails closed entirely.
  *
  * PURE function — no I/O.
- */ export function validateWelfareContextCompleteness(ctx) {
+ */ export function validateWelfareContextCompleteness(ctx: Record<string, any>) {
   if (!ctx) {
     return {
       complete: false,
@@ -681,7 +681,7 @@ function buildWelfareSafetyAuditRecord(input) {
 /**
  * Build the effect result for a successful alert_raise insert.
  * PURE function — no I/O.
- */ export function buildAlertRaiseSuccess(baseAudit) {
+ */ export function buildAlertRaiseSuccess(baseAudit: Record<string, any>) {
   return {
     emitted: true,
     deduplicated: false,
@@ -697,7 +697,7 @@ function buildWelfareSafetyAuditRecord(input) {
 /**
  * Build the effect result for a deduplicated alert_raise (existing alert found).
  * PURE function — no I/O.
- */ export function buildAlertRaiseDeduplicated(baseAudit, existingAlertId) {
+ */ export function buildAlertRaiseDeduplicated(baseAudit: Record<string, any>, existingAlertId: any) {
   return {
     emitted: false,
     deduplicated: true,
@@ -720,7 +720,7 @@ function buildWelfareSafetyAuditRecord(input) {
  * timing system).
  *
  * PURE function — no I/O.
- */ export function buildAlertRaiseInsertFailed(baseAudit, errorMessage) {
+ */ export function buildAlertRaiseInsertFailed(baseAudit: Record<string, any>, errorMessage: any) {
   return {
     emitted: false,
     deduplicated: false,
@@ -739,7 +739,7 @@ function buildWelfareSafetyAuditRecord(input) {
  *
  * SAFETY PATH: Fail closed to audit-only. No live effect.
  * PURE function — no I/O.
- */ export function buildAlertRaiseAuthorityFailed(baseAudit, authorityResult) {
+ */ export function buildAlertRaiseAuthorityFailed(baseAudit: Record<string, any>, authorityResult: any) {
   return {
     emitted: false,
     deduplicated: false,
@@ -760,7 +760,7 @@ function buildWelfareSafetyAuditRecord(input) {
  * SAFETY PATH: Fail closed to audit-only. No live effect.
  * Ambiguous/partial context does not half-succeed into a live effect.
  * PURE function — no I/O.
- */ export function buildAlertRaiseIncompleteContext(baseAudit, contextValidation) {
+ */ export function buildAlertRaiseIncompleteContext(baseAudit: Record<string, any>, contextValidation: any) {
   return {
     emitted: false,
     deduplicated: false,
@@ -792,7 +792,7 @@ function buildWelfareSafetyAuditRecord(input) {
  * behaviour.
  *
  * PURE function — no I/O.
- */ export function shouldActivateWelfareSeam(input) {
+ */ export function shouldActivateWelfareSeam(input: Record<string, any>) {
   if (input.welfare_context !== null) return true;
   if (isSafetySignalAction(input.action)) return true;
   return false;
