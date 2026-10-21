@@ -147,26 +147,35 @@ function fitRepositoryContext(context, task, maxChars = Number(process.env.BOB_B
   return context;
 }
 
+function normalizeHealthPath(file) {
+  const value = String(file || '').replaceAll('\\', '/').replace(/^\/workspace\//, '').replace(/^\.\//, '');
+  return /^(?:src|e2e)\//.test(value) ? `apps/web/${value}` : value;
+}
+
+function isHealthTestPath(file) {
+  return !String(file).includes('..') && /^(?:test\/[A-Za-z0-9_.-]+\.test\.(?:[cm]?js)|apps\/web\/(?:src\/[A-Za-z0-9_./-]+\.(?:test|spec)\.tsx?|e2e\/[A-Za-z0-9_./-]+\.spec\.ts))$/.test(file);
+}
+
 function failedTestPaths(output) {
   const text = String(output || '').replace(/\u001B\[[0-?]*[ -/]*[@-~]/g, '');
   return [...new Set([
     ...[...text.matchAll(/^\s*(?:FAIL|✖|✘|×)\s+([^\s:>]+)/gm)].map(match => match[1]),
     ...[...text.matchAll(/^\s*❯\s+([^\s]+)\s+\([^\r\n]*\b[1-9]\d* failed\b/gm)].map(match => match[1]),
     ...[...text.matchAll(/^\s*\d+\)\s+(?:\[[^\]]+\]\s+›\s+)?([^\r\n]+?\.(?:spec|test)\.tsx?)(?::|\s|$)/gm)].map(match => match[1]),
-  ])].filter(file => /\.(?:test|spec)\.tsx?$/i.test(file)).slice(0, 20);
+    ...[...text.matchAll(/^\s*location:\s*['"]?((?:\/workspace\/)?test\/[A-Za-z0-9_.-]+\.test\.[cm]?js):\d+(?::\d+)?/gm)].map(match => match[1].replace(/^\/workspace\//, '')),
+  ])].filter(file => /\.(?:test|spec)\.(?:tsx?|[cm]?js)$/i.test(file)).slice(0, 20);
 }
 
 function mainHealthEvidenceConflict(job) {
   if (job.autopilot_source !== 'main_monitor') return null;
   const task = String(job.task_description || '');
   const declared = Array.isArray(job.source_main_health_files) ? job.source_main_health_files
-    : (task.match(/failing (?:guard )?tests:\s*([^\r\n]+)/i)?.[1]?.match(/(?:apps\/web\/)?(?:src|e2e)\/[\w./-]+\.(?:test|spec)\.tsx?/g) || []);
-  const normalize = file => file.startsWith('apps/web/') ? file : `apps/web/${file}`;
-  const observed = failedTestPaths(task).map(normalize);
-  const scope = declared.map(normalize);
+    : (task.match(/failing (?:guard )?tests:\s*([^\r\n]+)/i)?.[1]?.match(/(?:(?:apps\/web\/)?(?:src|e2e)\/[\w./-]+\.(?:test|spec)\.tsx?|test\/[\w.-]+\.test\.[cm]?js)/g) || []);
+  const observed = failedTestPaths(task).map(normalizeHealthPath);
+  const scope = declared.map(normalizeHealthPath);
   const outside = observed.filter(file => !scope.includes(file));
   if (!outside.length) return null;
   return `Evidence conflict: the isolated failure receipt names ${outside.join(', ')} outside this repair's immutable scope. Recreate the repair from the pinned check receipt; do not widen scope or retry models.`;
 }
 
-module.exports = { MAX_TRACKED_FILES, MAX_SCHEMA_ENTITIES, EXCLUDED_PATH, LOW_SIGNAL_PATH, DEFAULT_CONTEXT_MAX_CHARS, boundTrackedFiles, directoryCounts, collectSchemaInventory, collectRepositoryContext, fitRepositoryContext, relevanceTerms, failedTestPaths, mainHealthEvidenceConflict };
+module.exports = { MAX_TRACKED_FILES, MAX_SCHEMA_ENTITIES, EXCLUDED_PATH, LOW_SIGNAL_PATH, DEFAULT_CONTEXT_MAX_CHARS, boundTrackedFiles, directoryCounts, collectSchemaInventory, collectRepositoryContext, fitRepositoryContext, relevanceTerms, failedTestPaths, normalizeHealthPath, isHealthTestPath, mainHealthEvidenceConflict };

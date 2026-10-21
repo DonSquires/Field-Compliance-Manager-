@@ -73,6 +73,16 @@ for the human-QA profiles), run read-only with all capabilities dropped and with
 and their outbound traffic is governed by the `BOB-WORKER-EGRESS` chain. `BOB_WORKER_NETWORK=none`
 in `control-plane.env` restores fully offline workers; `host` is refused.
 
+Main-health also mounts root runtime dependencies into a disposable
+`/workspace/node_modules` so both CommonJS and ESM imports work without an
+install. Its `/tmp` permits execution because root tests create executable
+git/npm fixtures there; other profiles retain their existing tmpfs policy.
+Root node:test, lint, build, Vitest and browser-smoke steps each emit a
+START/PASS/FAIL marker and all run even if an earlier check fails. Root TAP
+failure paths remain repository-root paths through repair intake; none are
+rewritten as web paths. Root/backend and screenshot changes still require the
+existing human release approval.
+
 ## Monitoring record
 
 Every Bob diagnostic or human-test run should record only:

@@ -1,6 +1,25 @@
 const { spawn } = require('node:child_process');
 const { WORKER_NETWORK, WORKER_SUBNET } = require('./bob-firewall');
 
+const MAIN_HEALTH_COMMAND = [
+  'set -eu',
+  'failed=0',
+  'health_step() { name="$1"; shift; printf "\\nBOB_HEALTH_STEP %s START\\n" "$name"; if "$@"; then printf "\\nBOB_HEALTH_STEP %s PASS\\n" "$name"; else code=$?; printf "\\nBOB_HEALTH_STEP %s FAIL exit=%s\\n" "$name" "$code"; failed=1; fi; }',
+  'cp -a /opt/bob/root-node_modules/. /workspace/node_modules/',
+  'cp -a /opt/bob/web-node_modules/. /workspace/apps/web/node_modules/',
+  'cd /workspace',
+  'health_step root-tests sh -c \'node --test --test-reporter=tap test/*.test.js\'',
+  'cd /workspace/apps/web',
+  'export PATH=/workspace/apps/web/node_modules/.bin:$PATH',
+  'export VITE_SUPABASE_URL=http://127.0.0.1:54321 VITE_SUPABASE_ANON_KEY=playwright-anon-key E2E_OFFLINE=1',
+  'export PLAYWRIGHT_OUTPUT_DIR=/artifacts/test-results PLAYWRIGHT_HTML_OUTPUT_DIR=/artifacts/playwright-report',
+  'health_step lint npm run lint',
+  'health_step build vite build --outDir=/tmp/bob-main-health-dist',
+  'health_step unit-tests npm test -- --run',
+  'health_step browser-smoke npm run test:e2e:ci-smoke',
+  'exit "$failed"',
+].join('; ');
+
 const WORKER_PROFILES = Object.freeze({
   assessment: Object.freeze(['node', '/opt/bob/assessment-manifest.js', '/workspace', '/artifacts/system-assessment.json']),
   test: Object.freeze(['npm', 'test']),
@@ -8,7 +27,7 @@ const WORKER_PROFILES = Object.freeze({
   lint: Object.freeze(['npm', 'run', 'lint']),
   'human-qa': Object.freeze(['sh', '-lc', 'cp -a /opt/bob/web-node_modules/. /workspace/apps/web/node_modules/ && cd /workspace/apps/web && PATH=/workspace/apps/web/node_modules/.bin:$PATH PLAYWRIGHT_OUTPUT_DIR=/artifacts/test-results PLAYWRIGHT_HTML_OUTPUT_DIR=/artifacts/playwright-report playwright test e2e/dr-bob-human-test.spec.ts --workers=4']),
   'human-qa-live': Object.freeze(['sh', '-lc', 'cp -a /opt/bob/web-node_modules/. /workspace/apps/web/node_modules/ && cd /workspace/apps/web && PATH=/workspace/apps/web/node_modules/.bin:$PATH PLAYWRIGHT_OUTPUT_DIR=/artifacts/test-results PLAYWRIGHT_HTML_OUTPUT_DIR=/artifacts/playwright-report playwright test e2e/dr-bob-human-test.spec.ts --workers=1']),
-  'main-health': Object.freeze(['sh', '-lc', 'set -eu; cp -a /opt/bob/web-node_modules/. /workspace/apps/web/node_modules/; cd /workspace/apps/web; PATH=/workspace/apps/web/node_modules/.bin:$PATH npm run lint; PATH=/workspace/apps/web/node_modules/.bin:$PATH VITE_SUPABASE_URL=http://127.0.0.1:54321 VITE_SUPABASE_ANON_KEY=playwright-anon-key vite build --outDir=/tmp/bob-main-health-dist; PATH=/workspace/apps/web/node_modules/.bin:$PATH VITE_SUPABASE_URL=http://127.0.0.1:54321 VITE_SUPABASE_ANON_KEY=playwright-anon-key npm test -- --run; PATH=/workspace/apps/web/node_modules/.bin:$PATH VITE_SUPABASE_URL=http://127.0.0.1:54321 VITE_SUPABASE_ANON_KEY=playwright-anon-key E2E_OFFLINE=1 PLAYWRIGHT_OUTPUT_DIR=/artifacts/test-results PLAYWRIGHT_HTML_OUTPUT_DIR=/artifacts/playwright-report npm run test:e2e:ci-smoke']),
+  'main-health': Object.freeze(['sh', '-lc', MAIN_HEALTH_COMMAND]),
   'full-page-audit': Object.freeze(['sh', '-lc', 'set -eu; npm test; npm run check:css; cp -a /opt/bob/web-node_modules/. /workspace/apps/web/node_modules/; cd /workspace/apps/web; PATH=/workspace/apps/web/node_modules/.bin:$PATH npm run lint; PATH=/workspace/apps/web/node_modules/.bin:$PATH npm test -- --reporter=dot; PATH=/workspace/apps/web/node_modules/.bin:$PATH npm run build; PATH=/workspace/apps/web/node_modules/.bin:$PATH PLAYWRIGHT_OUTPUT_DIR=/artifacts/test-results PLAYWRIGHT_HTML_OUTPUT_DIR=/artifacts/playwright-report playwright test e2e/dr-bob-human-test.spec.ts --workers=1']),
   'frontend-verify': Object.freeze(['node', '/opt/bob/frontend-worker.js', '/workspace', '/artifacts/input.patch', '/artifacts']),
   'backend-verify': Object.freeze(['node', '/opt/bob/backend-worker.js', '/workspace', '/artifacts/input.patch', '/artifacts']),
@@ -59,8 +78,13 @@ function dockerArguments({ image, sourceDir, artifactDir, profile, memory = '2g'
     `--memory=${memory}`,
     `--cpus=${cpus}`,
     `--pids-limit=${pidsLimit}`,
-    `--tmpfs=/tmp:rw,noexec,nosuid,size=${browserProfile ? '1024m' : '64m'}`,
+    // Root tests execute temporary git/npm fixtures; only this profile needs an executable /tmp.
+    `--tmpfs=/tmp:rw,${profile === 'main-health' ? 'exec' : 'noexec'},nosuid,size=${browserProfile ? '1024m' : '64m'}`,
   ];
+  if (profile === 'main-health') {
+    args.push('--tmpfs=/workspace/node_modules:rw,exec,nosuid,size=256m,uid=1000,gid=1000,mode=0755');
+    args.push('--tmpfs=/workspace/.bob:rw,noexec,nosuid,size=32m,uid=1000,gid=1000,mode=0755');
+  }
   if (profile === 'frontend-verify' || profile === 'backend-verify') {
     args.push(`--tmpfs=/work:rw,exec,nosuid,size=${profile === 'frontend-verify' ? '2048m' : '1024m'}`);
   }
