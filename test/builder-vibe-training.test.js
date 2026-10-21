@@ -22,3 +22,14 @@ test('Vibe continuation and navigation lessons ship as platform cards and runtim
   assert.match(prompt, /pages\/StaffProfilePage/);
   assert.match(prompt, /\/vibe\/<session-id>\//);
 });
+
+test('grounded discovery card preserves the private recovery boundary and verification distinction', () => {
+  const sql = fs.readFileSync(path.join(__dirname, '../supabase/migrations/20261023001000_bob_vibe_grounded_discovery_card.sql'), 'utf8');
+  assert.match(sql, /builder_vibe_grounded_discovery/);
+  assert.match(sql, /WHERE NOT EXISTS/);
+  assert.match(sql, /c.organization_id IS NULL/);
+  assert.match(sql, /Failed writes and failed commands must not reset/);
+  assert.match(sql, /does not expand to hosted providers/);
+  assert.match(sql, /none proves deployment or live tenant acceptance/);
+  assert.match(vibeSystemPrompt(), /VERIFIED STARTING FILES/);
+});

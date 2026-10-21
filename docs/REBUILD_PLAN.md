@@ -8,6 +8,50 @@ detailed backlogs (`ENTERPRISE_SAAS_TODO.md`, `PROTOTYPE_GAP_AUDIT.md`,
 Completion language is strict, as in the lineage: **merged ≠ deployed ≠
 glass-proven.** A workstream item is done only when its evidence gate is met.
 
+Vibe grounded discovery and local recovery, 2026-10-22:
+
+- Before: live session `6d6438f8` searched an invented
+  `LandingPageOverview.tsx`, ignored real files in a directory listing, then
+  stopped on repeated listings without an edit. The author was the local
+  7B coder. Existing continuation history was reaching the loop; more history
+  alone did not solve discovery. Dependency hydration also removed a tracked
+  `node_modules/.gitkeep`, incorrectly attributed to a protected model edit.
+- During: Vibe reuses governed Builder's tracked-file discovery and Atlas
+  flow-map helpers before the first model request, excluding generic session
+  titles from discovery and including bounded source outlines. Candidates
+  are evidence, not an approved diagnosis. Tool output is schema-constrained.
+  Repeated unchanged read-only results are reused. A fourth identical call
+  is refused; one distinct healthy, installed, memory-eligible local model
+  may recover the turn. A second loop still stops; failed edits/commands do
+  not reset the guard. Already-successful identical edits are not replayed
+  without an intervening workspace change. Recovery receives the current
+  diff and failed-check output. Failed verification blocks a successful
+  handoff until the same check passes (unrelated passing checks do not clear
+  it); known failures in bounded continuation receipts remain blocked too.
+  The same source-guard selection may rerun in its required Node environment
+  instead of jsdom, without modifying assertions. A blocked draft remains
+  visibly unverified. No hosted provider is
+  added. Known dependency noise
+  is restored immediately after trusted workspace preparation, before model
+  execution; actual model edits still pass the unchanged protected-path gate.
+- After: regressions cover real-label discovery, local recovery, duplicate
+  model exclusion, failed-edit loop bounds, and dependency housekeeping.
+  The exact owner request now discovers `AdminShell.tsx`, `AdminHubPage.tsx`
+  and other real candidates instead of inventing a page filename. This does
+  not itself prove a correct redesign or live acceptance. Existing session
+  drafts, screenshot analysis and protected release decisions remain intact.
+- Matching chat training is additive in
+  `20261023001000_bob_vibe_grounded_discovery_card.sql`; Vibe receives the
+  discovery rules in its runtime prompt, not automatic card retrieval.
+- Validation: root tests passed (1,510, eight skipped). The existing
+  `AdminHubPage` source guards passed nine cases with `--environment node`.
+  Two isolated real-model replays found real files and made edits, but did
+  not complete the redesign: the first produced malformed TypeScript; the
+  second failed a source guard under jsdom and correctly ended unverified.
+  Those disposable drafts were removed; neither was published or copied
+  into the owner's session. Passing recovery unit tests is not autonomous
+  design acceptance.
+
 Staff profile preview navigation, 2026-10-22:
 
 - Before: an authorised HR user opens a staff row from the staff directory.

@@ -110,6 +110,182 @@ test('an owner message edits the branch, commits the turn and replies', async ()
   assert.equal(model.calls[0].request.workload_kind, 'vibe_implementation');
   assert.deepEqual(model.calls[0].chain, ['gpu_workstation', 'ollama']);
   assert.equal(model.calls[0].routing_reason, 'private_repository_local_only');
+  assert.ok(model.calls[0].request.output_schema.properties.tool.enum.includes('replace_in_file'));
+  assert.ok(!model.calls[0].request.output_schema.properties.tool.enum.includes('__policyCheck'));
+});
+
+test('dependency preparation does not become a false protected-edit refusal', async () => {
+  const { store, deps, workspaceRoot } = setup([], {
+    prepareWorkspace: async workspace => fs.unlinkSync(path.join(workspace, 'apps/web/node_modules/.gitkeep')),
+  });
+  await vibe.processVibeMessage({ store, message: ownerMessage('explain the page'), deps });
+  assert.equal(store.state.rows.some(row => row.kind === 'error'), false);
+  assert.equal(fs.existsSync(path.join(vibe.vibeWorkspacePath(workspaceRoot, SESSION_ID), 'apps/web/node_modules/.gitkeep')), true);
+  assert.equal(store.state.session.head_sha, store.state.session.base_sha);
+});
+
+test('Vibe opening packet grounds natural screen labels in tracked source and outlines', async () => {
+  const { store, deps, model, repo } = setup([]);
+  fs.writeFileSync(path.join(repo.dir, 'apps/web/src/OverviewApprovals.tsx'), 'export function OverviewApprovals() { return "Overview and approvals"; }\n');
+  git(repo.dir, ['add', '.']);
+  git(repo.dir, ['-c', 'user.name=T', '-c', 'user.email=t@example.com', 'commit', '-qm', 'add overview fixture']);
+  repo.sha = git(repo.dir, ['rev-parse', 'HEAD']);
+  await vibe.processVibeMessage({ store, message: ownerMessage('Align overview approvals with our theme'), deps });
+  const packet = model.calls[0].request.messages[1].content;
+  assert.match(packet, /VERIFIED STARTING FILES/);
+  assert.match(packet, /apps\/web\/src\/OverviewApprovals.tsx/);
+  assert.match(packet, /export function OverviewApprovals/);
+  assert.match(packet, /no Atlas client/);
+});
+
+test('repeated unchanged reads reuse results and a distinct local model can recover once', async () => {
+  const repeated = { thought: 'inspect', tool: 'list_dir', args: { path: 'apps/web/src/' } };
+  const { store, deps, model } = setup([
+    repeated, repeated, repeated, repeated,
+    { thought: 'read actual source', tool: 'read_file', args: { path: 'apps/web/src/hello.ts' } },
+    { thought: 'implement', tool: 'replace_in_file', args: { path: 'apps/web/src/hello.ts', old_text: '"hi"', new_text: '"recovered"' } },
+    { thought: 'report', tool: 'reply', args: { message: 'Recovered locally and edited the greeting.' } },
+  ], {
+    fetchHealth: async () => ({
+      gpu_workstation: { configured: true, healthy: true, models: ['local-primary', 'local-recovery'], installed: ['local-primary', 'local-recovery'], ready_model: 'local-primary' },
+      ollama_cloud: { configured: true, healthy: true, ready_model: 'external-model' },
+    }),
+  });
+  const outcome = await vibe.processVibeMessage({ store, message: ownerMessage('improve greeting'), deps });
+  assert.equal(outcome.error, undefined);
+  assert.ok(model.calls[2].request.messages.some(entry => entry.content.includes('"reused":true')));
+  assert.equal(model.calls[4].model_name, 'local-recovery');
+  assert.ok(model.calls.every(call => call.provider === 'gpu_workstation'));
+  assert.equal(store.state.rows.filter(row => row.payload?.reason === 'repeated_tool_call').length, 1);
+  assert.deepEqual(store.state.session.changed_files, ['apps/web/src/hello.ts']);
+});
+
+test('local recovery is memory-filtered, installed, distinct, and never expands to external providers', () => {
+  const candidates = vibe.vibeProviderCandidates({ chain: ['gpu_workstation', 'ollama'] }, {
+    gpu_workstation: { configured: true, healthy: true, ready_model: 'small', models: ['small', 'fits', 'not-installed'], installed: ['small', 'fits', 'oversized'], excluded_models: ['oversized'] },
+    ollama: { configured: true, healthy: true, ready_model: 'small', models: ['small', 'cpu-model'], installed: ['small', 'cpu-model'] },
+    openai: { configured: true, healthy: true, ready_model: 'external' },
+  });
+  assert.deepEqual(candidates, [
+    { provider: 'gpu_workstation', model: 'small' },
+    { provider: 'gpu_workstation', model: 'fits' },
+    { provider: 'ollama', model: 'cpu-model' },
+  ]);
+});
+
+test('repeated failed edits still stop even when another local recovery model is available', async () => {
+  const edit = { thought: 'guess edit', tool: 'replace_in_file', args: { path: 'apps/web/src/hello.ts', old_text: 'missing', new_text: 'bad' } };
+  const { store, deps, model } = setup(Array.from({ length: 12 }, () => edit), {
+    fetchHealth: async () => ({
+      gpu_workstation: { configured: true, healthy: true, models: ['primary', 'alternate'], installed: ['primary', 'alternate'], ready_model: 'primary' },
+    }),
+  });
+  const outcome = await vibe.processVibeMessage({ store, message: ownerMessage('fix greeting'), deps });
+  assert.equal(outcome.error, true);
+  assert.equal(model.calls.length, 8);
+  assert.equal(store.state.rows.filter(row => row.payload?.reason === 'repeated_tool_call').length, 1);
+  assert.deepEqual(store.state.session.changed_files, []);
+});
+
+test('successful edits invalidate cached source reads', async () => {
+  const read = { thought: 'inspect source', tool: 'read_file', args: { path: 'apps/web/src/hello.ts' } };
+  const { store, deps, model } = setup([
+    read,
+    { thought: 'change source', tool: 'replace_in_file', args: { path: 'apps/web/src/hello.ts', old_text: '"hi"', new_text: '"updated"' } },
+    read,
+    { thought: 'report', tool: 'reply', args: { message: 'Updated source read back.' } },
+  ]);
+  await vibe.processVibeMessage({ store, message: ownerMessage('update the greeting'), deps });
+  const lastResult = model.calls[3].request.messages.filter(entry => entry.role === 'user').at(-1).content;
+  assert.match(lastResult, /updated/);
+  assert.doesNotMatch(lastResult, /"reused":true/);
+});
+
+test('failed commands cannot reset the repetition limit', async () => {
+  const run = { thought: 'install tooling', tool: 'run', args: { command: 'npm install vitest --save-dev' } };
+  const { store, deps, model } = setup(Array.from({ length: 8 }, () => run));
+  const outcome = await vibe.processVibeMessage({ store, message: ownerMessage('verify greeting'), deps });
+  assert.equal(outcome.error, true);
+  assert.equal(model.calls.length, 4);
+});
+
+test('an identical successful edit is not applied twice after rereading the source', async () => {
+  const edit = { thought: 'add greeting', tool: 'replace_in_file', args: { path: 'apps/web/src/hello.ts', old_text: 'export const hello', new_text: '// greeting\nexport const hello' } };
+  const { store, deps, workspaceRoot } = setup([
+    edit,
+    { thought: 'inspect', tool: 'read_file', args: { path: 'apps/web/src/hello.ts' } },
+    edit,
+    { thought: 'report', tool: 'reply', args: { message: 'Added comment once.' } },
+  ]);
+  await vibe.processVibeMessage({ store, message: ownerMessage('describe the greeting'), deps });
+  const source = fs.readFileSync(path.join(vibe.vibeWorkspacePath(workspaceRoot, SESSION_ID), 'apps/web/src/hello.ts'), 'utf8');
+  assert.equal(source.split('// greeting').length - 1, 1);
+  assert.ok(store.state.rows.some(row => row.payload?.preview?.includes('This exact edit already succeeded') && row.payload.ok === false));
+});
+
+test('failed verification cannot become a successful handoff just because the model says done', async () => {
+  const { store, deps, model } = setup([
+    { thought: 'check', tool: 'run', args: { command: 'node --check missing.js' } },
+    { thought: 'optimistic', tool: 'reply', args: { message: 'All fixed.' } },
+    { thought: 'blocked', tool: 'reply', args: { message: 'Done.', blocked_reason: 'The syntax check could not find the target.' } },
+  ]);
+  const result = await vibe.processVibeMessage({ store, message: ownerMessage('verify the change'), deps });
+  assert.equal(result.error, true);
+  assert.match(result.reply, /Changes are not verified: node --check missing.js failed/);
+  assert.ok(model.calls[2].request.messages.some(row => row.content.includes('Handoff refused')));
+  assert.equal(store.state.rows.at(-1).kind, 'error');
+});
+
+test('a passing rerun clears the failed-verification handoff blocker', async () => {
+  const { store, deps } = setup([
+    { thought: 'check missing target', tool: 'run', args: { command: 'node --check test/syntax.js' } },
+    { thought: 'create target', tool: 'write_file', args: { path: 'test/syntax.js', content: 'module.exports = 1;\n' } },
+    { thought: 'verify correct target', tool: 'run', args: { command: 'node --check test/syntax.js' } },
+    { thought: 'report', tool: 'reply', args: { message: 'Syntax verified.' } },
+  ]);
+  const result = await vibe.processVibeMessage({ store, message: ownerMessage('verify syntax'), deps });
+  assert.equal(result.error, undefined);
+  assert.equal(result.reply, 'Syntax verified.');
+});
+
+test('an unrelated passing check does not clear a failed verification', async () => {
+  const { store, deps } = setup([
+    { thought: 'check missing target', tool: 'run', args: { command: 'node --check missing.js' } },
+    { thought: 'create other target', tool: 'write_file', args: { path: 'test/other.js', content: 'module.exports = 1;\n' } },
+    { thought: 'check unrelated target', tool: 'run', args: { command: 'node --check test/other.js' } },
+    { thought: 'report', tool: 'reply', args: { message: 'Done.', blocked_reason: 'missing.js still cannot be checked.' } },
+  ]);
+  const result = await vibe.processVibeMessage({ store, message: ownerMessage('verify syntax'), deps });
+  assert.equal(result.error, true);
+  assert.match(result.reply, /node --check missing.js failed/);
+});
+
+test('continuation retains a failed check even if the next model only replies', async () => {
+  const { store, deps } = setup([
+    { thought: 'optimistic', tool: 'reply', args: { message: 'Done.', blocked_reason: 'Previous lint is still failing.' } },
+  ]);
+  store.recentExecution = async () => [{
+    kind: 'test', seq: 8, payload: { tool: 'run', args: { command: 'npm run lint --prefix apps/web' }, ok: false, preview: 'exit 2\nTypeScript syntax error' },
+  }];
+  const result = await vibe.processVibeMessage({ store, message: ownerMessage('continue'), deps });
+  assert.equal(result.error, true);
+  assert.match(result.reply, /npm run lint --prefix apps\/web failed/);
+});
+
+test('the same source-guard selection can be verified in its correct Node environment', async () => {
+  const { store, deps, repo } = setup([
+    { thought: 'check default', tool: 'run', args: { command: 'npm run test --prefix apps/web -- guard' } },
+    { thought: 'correct runner environment', tool: 'run', args: { command: 'npm run test --prefix apps/web -- guard --environment node' } },
+    { thought: 'report', tool: 'reply', args: { message: 'Guard verified in Node.' } },
+  ]);
+  fs.writeFileSync(path.join(repo.dir, 'apps/web/package.json'), JSON.stringify({ scripts: { test: 'node check.cjs' } }));
+  fs.writeFileSync(path.join(repo.dir, 'apps/web/check.cjs'), 'process.exit(process.argv.includes("--environment") ? 0 : 1);\n');
+  git(repo.dir, ['add', '.']);
+  git(repo.dir, ['-c', 'user.name=T', '-c', 'user.email=t@example.com', 'commit', '-qm', 'add runner fixture']);
+  repo.sha = git(repo.dir, ['rev-parse', 'HEAD']);
+  const result = await vibe.processVibeMessage({ store, message: ownerMessage('verify guard'), deps });
+  assert.equal(result.error, undefined);
+  assert.equal(result.reply, 'Guard verified in Node.');
 });
 
 test('vibe stops after four identical tool calls rather than spending the full turn budget', async () => {
