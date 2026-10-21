@@ -111,7 +111,7 @@ function executeBackendPatch({ sourceDir, patchPath, artifactDir, workDir = '/wo
     }
   }
   // Static checks alone left the release evidence saying "only syntax checks were run". Execute the
-  // test files the patch touches (root runtime deps come from the image's NODE_PATH; the container has no network).
+  // test files the patch touches (root runtime deps come from the image's NODE_PATH, so no install is needed).
   const changedTests = changedFiles.filter(file => /^test\/[^/]+\.test\.js$/.test(file));
   if (patchApplied && checks.every(check => check.status === 0) && changedTests.length) {
     checks.push(run('node', ['--test', ...changedTests], workDir, TEST_TIMEOUT_MS));

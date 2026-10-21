@@ -3,7 +3,7 @@ const fs = require('node:fs');
 const os = require('node:os');
 const path = require('node:path');
 const test = require('node:test');
-const { dockerArguments, redact, summarizeHumanTest, workerCommand } = require('../worker-executor');
+const { dockerArguments, ensureWorkerNetwork, redact, summarizeHumanTest, workerCommand, workerNetwork } = require('../worker-executor');
 const { validatePatchText, changedFilesFromPatch, executeFrontendPatch, frontendVerificationCommands, targetedE2eSpecs, E2E_SMOKE_SPECS, redactLog, VERIFICATION_ENV } = require('../frontend-worker');
 
 function writeNpmStub(binDir, source) {
@@ -83,7 +83,7 @@ test('docker arguments enforce worker isolation', () => {
     artifactDir: '/tmp/artifacts',
     profile: 'test'
   });
-  assert.equal(args.includes('--network=none'), true);
+  assert.equal(args.includes('--network=bob-workers'), true);
   assert.equal(args.includes('--read-only'), true);
   assert.equal(args.includes('--cap-drop=ALL'), true);
   assert.equal(args.includes('--security-opt=no-new-privileges:true'), true);
@@ -102,13 +102,13 @@ test('full page audit mounts disposable browser dependencies', () => {
     artifactDir: '/tmp/artifacts',
     profile: 'full-page-audit'
   });
-  assert.ok(args.includes('--network=none'));
+  assert.ok(args.includes('--network=bob-workers'));
   assert.ok(args.includes('--tmpfs=/tmp:rw,noexec,nosuid,size=1024m'));
   assert.ok(args.includes('--tmpfs=/workspace/apps/web/node_modules:rw,exec,nosuid,size=768m,uid=1000,gid=1000,mode=0755'));
   assert.equal(args.some(value => value.includes('docker.sock')), false);
 });
 
-test('main health checks run offline in the isolated read-only browser worker', () => {
+test('main health checks run in the isolated read-only browser worker', () => {
   const args = dockerArguments({
     image: 'fcm/bob-worker:test',
     sourceDir: '/tmp/source',
@@ -116,7 +116,7 @@ test('main health checks run offline in the isolated read-only browser worker', 
     profile: 'main-health',
     environment: { E2E_OFFLINE: '1' },
   });
-  assert.ok(args.includes('--network=none'));
+  assert.ok(args.includes('--network=bob-workers'));
   assert.ok(args.includes('--read-only'));
   assert.ok(args.includes('--tmpfs=/workspace/apps/web/node_modules:rw,exec,nosuid,size=768m,uid=1000,gid=1000,mode=0755'));
   assert.equal(args.some((value) => value.includes('/workspace/apps/web/dist')), false);
@@ -146,7 +146,7 @@ test('human QA forwards only named environment variables without putting values 
     'GRANDMASTER_TEST_PASSWORD', 'VERCEL_PROJECT_ID'
   ]);
   assert.equal(args.some(value => value.includes('https://example.test') || value.includes('not-in-argv') || value.includes('project-id')), false);
-  assert.ok(args.includes('--network=bridge'));
+  assert.ok(args.includes('--network=bob-workers'));
 });
 
 test('fixture human QA does not receive live identity variables', () => {
@@ -189,14 +189,14 @@ test('frontend verification executes only in disposable tmpfs while source remai
   assert.equal(args.some(value => value.includes('docker.sock')), false);
 });
 
-test('backend verification executes only in disposable tmpfs without network or Docker authority', () => {
+test('backend verification executes only in disposable tmpfs on the governed worker network without Docker authority', () => {
   const args = dockerArguments({
     image: 'fcm/bob-worker:test',
     sourceDir: '/tmp/source',
     artifactDir: '/tmp/artifacts',
     profile: 'backend-verify'
   });
-  assert.ok(args.includes('--network=none'));
+  assert.ok(args.includes('--network=bob-workers'));
   assert.ok(args.includes('--tmpfs=/work:rw,exec,nosuid,size=1024m'));
   assert.ok(args.includes('type=bind,src=/tmp/source,dst=/workspace,readonly'));
   assert.equal(args.some(value => value.includes('docker.sock')), false);
@@ -428,4 +428,31 @@ test('worker compares structured browser evidence: identical failures block as b
       fixture.cleanup();
     }
   }
+});
+
+test('worker network follows the owner ruling: bob-workers by default, none on request, never host', () => {
+  assert.equal(workerNetwork('backend-verify', {}), 'bob-workers');
+  assert.equal(workerNetwork('backend-verify', { BOB_WORKER_NETWORK: 'none' }), 'none');
+  assert.equal(workerNetwork('human-qa-live', { BOB_WORKER_NETWORK: 'none' }), 'bridge');
+  assert.throws(() => workerNetwork('test', { BOB_WORKER_NETWORK: 'host' }), /unsupported worker network/);
+  assert.throws(() => workerNetwork('test', { BOB_WORKER_NETWORK: 'x; rm -rf /' }), /unsupported worker network/);
+  const args = dockerArguments({ image: 'img', sourceDir: '/src', artifactDir: '/art', profile: 'test', env: { BOB_WORKER_NETWORK: 'none' } });
+  assert.ok(args.includes('--network=none'));
+});
+
+test('missing bob-workers network is created once on the fixed firewall subnet', async () => {
+  const { EventEmitter } = require('node:events');
+  const calls = [];
+  const spawnImpl = (cmd, args) => {
+    calls.push(args.join(' '));
+    const child = new EventEmitter();
+    child.stderr = new EventEmitter();
+    setImmediate(() => child.emit('close', args[1] === 'inspect' ? 1 : 0));
+    return child;
+  };
+  await ensureWorkerNetwork('bob-workers-test-net', { spawnImpl });
+  await ensureWorkerNetwork('bob-workers-test-net', { spawnImpl });
+  assert.deepEqual(calls, ['network inspect bob-workers-test-net', 'network create --driver bridge bob-workers-test-net']);
+  await ensureWorkerNetwork('none', { spawnImpl });
+  assert.equal(calls.length, 2);
 });

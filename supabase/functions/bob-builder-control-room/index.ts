@@ -238,6 +238,26 @@ serve(async req => {
     return json({ run: result.payload }, result.ok ? 200 : result.status);
   }
 
+  // Bob's VPS firewall (owner ruling 2026-10-21: Bob changes it directly, audited). Grand master
+  // only; the control plane accepts structured rules and refuses SSH/app/Tailscale lockouts.
+  if (action === 'firewall_status' || action === 'firewall_change') {
+    if (role !== 'grand_master') return json({ error: 'The VPS firewall is restricted to the platform owner' }, 403);
+    if (!CONTROL_PLANE_URL || !CONTROL_PLANE_TOKEN) return json({ error: 'Builder execution host is unavailable' }, 503);
+    if (action === 'firewall_status') {
+      const result = await relay('/api/bob/firewall/status', 'GET');
+      await audit(profile.organization_id, result.ok ? 'firewall_status' : 'firewall_status_failed');
+      return json({ firewall: result.payload }, result.ok ? 200 : result.status);
+    }
+    const result = await relay('/api/bob/firewall/change', 'POST', {
+      op: body.op,
+      rule: body.rule && typeof body.rule === 'object' ? body.rule : null,
+      purpose: typeof body.purpose === 'string' ? body.purpose.slice(0, 300) : null,
+      requested_by: user.id,
+    });
+    await audit(profile.organization_id, result.ok ? 'firewall_changed' : `firewall_change_${result.status}`);
+    return json({ firewall: result.payload }, result.ok ? 200 : result.status);
+  }
+
   if (action === 'list') {
     stage = 'list_builder_state';
     const organizations = role === 'grand_master' ? null : [...allowedOrganizations];

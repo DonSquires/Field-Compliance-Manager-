@@ -14,7 +14,7 @@ const VERIFICATION_ENV = Object.freeze({
   PLAYWRIGHT_BROWSERS_PATH: '/ms-playwright',
   // `tsc --noEmit` on apps/web needs >1 GB of heap; V8's default inside the container was ~1 GB (job ecfb4dc4 OOMed in lint).
   NODE_OPTIONS: '--max-old-space-size=2048',
-  // The container has no network: e2e fixtures answer external requests with an empty 204 (job ecfb4dc4: ERR_INTERNET_DISCONNECTED).
+  // E2E stays deterministic even though workers now have network: fixtures answer external requests with an empty 204 (job ecfb4dc4).
   E2E_OFFLINE: '1'
 });
 const BLOCKED_FILES = new Set([
