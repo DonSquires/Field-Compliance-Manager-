@@ -575,6 +575,37 @@ test('an author with nothing to change in its lane skips the step when the other
   }
 });
 
+test('a cross-lane no-change skips this lane even before the sibling finishes', async () => {
+  const engineerPath = require.resolve('../builder-agentic-engineer');
+  const originalEngineer = require.cache[engineerPath].exports;
+  const coordinatorPath = require.resolve('../builder-runtime-coordinator');
+  delete require.cache[coordinatorPath];
+  require.cache[engineerPath].exports = {
+    ...originalEngineer,
+    runAgenticEngineer: async () => ({ ok: false, no_change: true, error: 'the crash lives in builder-vibe-preview.js: outside the frontend lane', routing: { provider: 'openai' } }),
+  };
+  const rpcs = [];
+  const supabase = { rpc: async (name, args) => { rpcs.push({ name, args }); return { data: {}, error: null }; } };
+  try {
+    const fresh = require('../builder-runtime-coordinator');
+    const result = await fresh.runBackendImplementation({
+      supabase,
+      gateway: {},
+      job: { id: 'job-cross' },
+      step: { id: 'step-cross', builder_mode: 'backend_engineer' },
+      siblingCompleted: false,
+      context: { workspaceRoot: '/ws', gitSourceDir: '/src', repoRoot: '/repo' }
+    });
+    assert.equal(result.success, true);
+    assert.equal(result.skipped, true);
+    assert.deepEqual(rpcs.map((r) => r.name), ['builder_skip_implementation_step']);
+    assert.match(rpcs[0].args._reason, /belongs to the frontend lane/);
+  } finally {
+    require.cache[engineerPath].exports = originalEngineer;
+    delete require.cache[coordinatorPath];
+  }
+});
+
 test('two in-house budgets with no edit escalate once to the outsourced tier, seeded with the reading map (live jobs 0c388688, 26ef7a12, e710f032)', async () => {
   const engineerPath = require.resolve('../builder-agentic-engineer');
   const originalEngineer = require.cache[engineerPath].exports;

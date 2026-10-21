@@ -6,6 +6,18 @@ The control plane loads `worker-executor.js` in its own process. A launcher
 change therefore requires a control-plane redeploy as well as the worker-image
 rebuild; an image rebuild alone does not update the running launcher.
 
+## Private repository code and Vibe Builder
+
+Vibe Builder runs against the private `DonSquires/Field-Compliance-Manager-`
+repository. Its model context can contain owner messages, source code, diffs,
+and tool output, so Vibe authoring is local-only: the GPU workstation and VPS
+Ollama providers may be used; Ollama Cloud and OpenAI must not receive Vibe
+session prompts or tool results. Do not add an external Vibe route without a
+separate approved data-classification and egress control that proves what
+content is safe to send. The Ollama Cloud key remains available only to the
+other unrestricted workloads already governed by the model adapter; its
+presence does not authorize Vibe source-code egress.
+
 ## Visual baseline generation
 
 `generate_visual_baselines` is shared by the frontend agentic engineer

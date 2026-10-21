@@ -6,6 +6,7 @@ const fs = require('node:fs');
 const os = require('node:os');
 const path = require('node:path');
 const http = require('node:http');
+const { EventEmitter } = require('node:events');
 const { execFileSync } = require('node:child_process');
 
 const vibe = require('../builder-vibe-session');
@@ -18,10 +19,13 @@ function sourceRepo() {
   const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'vibe-src-'));
   git(dir, ['init', '-q', '-b', 'main']);
   fs.mkdirSync(path.join(dir, 'apps/web/src'), { recursive: true });
+  fs.mkdirSync(path.join(dir, 'apps/web/node_modules'), { recursive: true });
   fs.writeFileSync(path.join(dir, 'apps/web/src/hello.ts'), 'export const hello = "hi";\n');
+  fs.writeFileSync(path.join(dir, 'apps/web/node_modules/.gitkeep'), '');
   fs.writeFileSync(path.join(dir, 'package.json'), '{"name":"x"}\n');
   fs.writeFileSync(path.join(dir, '.gitignore'), 'node_modules\n');
   git(dir, ['add', '-A']);
+  git(dir, ['add', '-f', 'apps/web/node_modules/.gitkeep']);
   git(dir, ['-c', 'user.name=T', '-c', 'user.email=t@example.com', 'commit', '-qm', 'base']);
   return { dir, sha: git(dir, ['rev-parse', 'HEAD']) };
 }
@@ -36,6 +40,7 @@ function memoryStore(session, ownerMessages = []) {
     async post(_id, row) { rows.push({ seq: rows.length + 100, ...row }); },
     async complete(id, status) { state.completed[id] = status; },
     async history() { return []; },
+    async recentExecution() { return []; },
   };
 }
 
@@ -102,6 +107,19 @@ test('an owner message edits the branch, commits the turn and replies', async ()
   assert.equal(Object.values(store.state.completed)[0], 'done');
   assert.equal(model.calls[0].request.builder_mode, 'vibe_engineer');
   assert.equal(model.calls[0].request.workload_kind, 'vibe_implementation');
+  assert.deepEqual(model.calls[0].chain, ['gpu_workstation', 'ollama']);
+  assert.equal(model.calls[0].routing_reason, 'private_repository_local_only');
+});
+
+test('vibe stops after four identical tool calls rather than spending the full turn budget', async () => {
+  const repeated = Array.from({ length: 10 }, () => ({ thought: 'inspect', tool: 'read_file', args: { path: 'apps/web/src/hello.ts' } }));
+  const { store, deps, model } = setup(repeated);
+  const outcome = await vibe.processVibeMessage({ store, message: ownerMessage('inspect the greeting'), deps, limits: { ...vibe.VIBE_LIMITS, maxTurns: 10 } });
+  assert.equal(outcome.error, true);
+  assert.match(outcome.reply, /stopped after repeating the same tool call/);
+  assert.equal(model.calls.length, 4);
+  assert.equal(store.state.rows.filter(row => row.payload?.tool === 'read_file').length, 4);
+  assert.equal(store.state.rows.at(-1).kind, 'error');
 });
 
 test('protected paths are refused and never committed', async () => {
@@ -222,4 +240,38 @@ test('the vite wrapper config serves the app under the session base path', () =>
   assert.match(config, /import config from '\.\.\/\.\.\/vite\.config\.ts'/);
   assert.match(config, new RegExp(`base = '/vibe/${SESSION_ID}/'`));
   assert.match(config, /allowedHosts: true/);
+});
+
+test('preview dependency install always includes devDependencies', async () => {
+  const root = fs.mkdtempSync(path.join(os.tmpdir(), 'vibe-preview-'));
+  const workspacePath = path.join(root, 'vibe', 'vibe-12345678');
+  const web = path.join(workspacePath, 'apps', 'web');
+  fs.mkdirSync(web, { recursive: true });
+  fs.writeFileSync(path.join(web, 'package.json'), '{"name":"web"}\n');
+  fs.writeFileSync(path.join(web, 'package-lock.json'), '{"name":"web","lockfileVersion":3}\n');
+  const calls = [];
+  const spawnImpl = (cmd, args, options) => {
+    calls.push({ cmd, args, options });
+    const child = new EventEmitter();
+    child.stderr = new EventEmitter();
+    process.nextTick(() => {
+      if (cmd === 'npm') {
+        fs.mkdirSync(path.join(options.cwd, 'node_modules', 'vite'), { recursive: true });
+        fs.writeFileSync(path.join(options.cwd, 'node_modules', 'vite', 'package.json'), '{"name":"vite"}\n');
+        child.emit('close', 0);
+        return;
+      }
+      child.emit('error', new Error(`unexpected command: ${cmd}`));
+    });
+    return child;
+  };
+  const manager = preview.createVibePreviewManager({ workspaceRoot: root, secret: Buffer.from('k'), onStatus: async () => {}, spawnImpl });
+  await manager.ensureWebDependencies(workspacePath);
+  const install = calls.find(call => call.cmd === 'npm');
+  assert.ok(install, 'npm ci was called');
+  assert.ok(install.args.includes('--include=dev'));
+  assert.equal(install.options.env.NODE_ENV, 'development');
+  assert.equal(install.options.env.NPM_CONFIG_PRODUCTION, 'false');
+  assert.equal(install.options.env.npm_config_production, 'false');
+  assert.equal(fs.existsSync(path.join(web, 'node_modules', 'vite', 'package.json')), true);
 });

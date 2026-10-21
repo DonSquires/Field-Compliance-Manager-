@@ -86,7 +86,7 @@ function createVibePreviewManager({ workspaceRoot, supabaseUrl, anonKey, secret,
           fs.mkdirSync(cacheDir, { recursive: true, mode: 0o700 });
           fs.copyFileSync(path.join(webDir, 'package.json'), path.join(cacheDir, 'package.json'));
           fs.copyFileSync(path.join(webDir, 'package-lock.json'), path.join(cacheDir, 'package-lock.json'));
-          const child = spawnImpl('npm', ['ci', '--no-audit', '--no-fund', '--loglevel=error'], { cwd: cacheDir, env: safeEnv(), stdio: ['ignore', 'ignore', 'pipe'] });
+          const child = spawnImpl('npm', ['ci', '--include=dev', '--no-audit', '--no-fund', '--loglevel=error'], { cwd: cacheDir, env: safeEnv(), stdio: ['ignore', 'ignore', 'pipe'] });
           let stderr = '';
           child.stderr?.on('data', chunk => { stderr = (stderr + chunk).slice(-2000); });
           child.on('error', reject);
@@ -105,7 +105,7 @@ function createVibePreviewManager({ workspaceRoot, supabaseUrl, anonKey, secret,
 
   function safeEnv() {
     const { BOB_ADMIN_TOKEN: _a, BOB_RUNNER_TOKEN: _r, BOB_MODEL_GATEWAY_TOKEN: _g, SUPABASE_SERVICE_ROLE_KEY: _s, OPENAI_API_KEY: _o, OLLAMA_API_TOKEN: _ol, GITEA_TOKEN: _gt, GITHUB_TOKEN: _gh, BOB_GITHUB_ACCESS_TOKEN: _bg, VERCEL_TOKEN: _v, GRANDMASTER_TEST_PASSWORD: _p, BOB_LAPTOP_SSH_KEY: _l, NODE_OPTIONS: _n, PORT: _port, ...rest } = process.env;
-    return { ...rest, CI: '1', FORCE_COLOR: '0' };
+    return { ...rest, CI: '1', FORCE_COLOR: '0', NODE_ENV: 'development', NPM_CONFIG_PRODUCTION: 'false', npm_config_production: 'false' };
   }
 
   function freePort() {

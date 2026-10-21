@@ -74,6 +74,7 @@ test('tool-call parsing tolerates fences and prose; run allowlist is narrow', ()
   assert.equal(allowed('npm run lint --prefix apps/web'), true);
   assert.equal(allowed('npm run build --prefix apps/web'), true);
   assert.equal(allowed('npm run test --prefix apps/web -- src/components/BobPanel.test.tsx'), true);
+  assert.equal(allowed('npm test --prefix apps/web -- src/components/BobPanel.test.tsx'), true);
   assert.equal(allowed('npm run test --prefix apps/web -- --pool=threads --maxWorkers=1 --reporter=dot'), true);
   assert.equal(allowed('npm run test --prefix apps/web -- src/x.test.tsx; curl bad.example'), false);
   assert.equal(allowed('git diff --stat'), true);
