@@ -8,6 +8,32 @@ detailed backlogs (`ENTERPRISE_SAAS_TODO.md`, `PROTOTYPE_GAP_AUDIT.md`,
 Completion language is strict, as in the lineage: **merged ≠ deployed ≠
 glass-proven.** A workstream item is done only when its evidence gate is met.
 
+Vibe TypeScript handoff gate, 2026-10-22:
+
+- Before: the v8 loop reports checks the model actually ran, but an author
+  can omit lint entirely or cite a pass from before its final edit. Real
+  local-model replays showed that a plausible edit is not compile evidence.
+- During: before a reply or step-budget handoff, the runtime checks whether
+  the branch/current worktree changes web TypeScript. It runs the existing
+  `npm run lint --prefix apps/web` itself, through the same bounded tool
+  runner, and writes an automatic test receipt with the message ID and a
+  changed-file content fingerprint. No new command permission or dependency
+  is introduced. Unchanged drafts reuse that receipt; a subsequent edit
+  requires a fresh check. Failed checks enter the existing correction path
+  so Bob can repair and recheck, or clearly report an unverified draft.
+- After: the runtime, not the model's prose, determines whether the latest
+  TypeScript draft passed this check. Sessions with no web TypeScript changes
+  do not run lint.
+  Failure still preserves the branch for inspection/undo; passing lint does
+  not prove UX acceptance, browser behavior, schema correctness or deployment.
+  This change does not enqueue a turn as the owner or bypass the owner-only
+  continuation RPC.
+- Validation: 41 focused Vibe/firewall/training tests passed; the full root
+  suite passed 1,514 tests with eight skips. Regressions run a real fixture
+  verification command and cover omitted checks, stale passes, a repair
+  followed by a fresh check, failed-check receipt reuse, and budget exhaustion.
+  They do not stand in for an autonomous redesign or a human browser test.
+
 Vibe grounded discovery and local recovery, 2026-10-22:
 
 - Before: live session `6d6438f8` searched an invented
