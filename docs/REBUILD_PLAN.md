@@ -8,6 +8,28 @@ detailed backlogs (`ENTERPRISE_SAAS_TODO.md`, `PROTOTYPE_GAP_AUDIT.md`,
 Completion language is strict, as in the lineage: **merged ≠ deployed ≠
 glass-proven.** A workstream item is done only when its evidence gate is met.
 
+Bob main-health visual baseline, 2026-10-21:
+
+- Before: the geofence house-map full-page baseline predated the admin-shell
+  redesign, location hazard register and three-boundary fixture. The current
+  functional assertions passed, but the obsolete image differed by 20%.
+- During: regenerated only the desktop geofence baseline with Playwright in
+  the worker image. No screenshot tolerance or functional assertion changed.
+  The verifier now compares screenshots instead of using
+  `--ignore-snapshots`, so visual failures cannot pass verification and then
+  repeatedly fail main-health.
+- After: the read-only main-health worker passed root tests (1,467 passed,
+  eight skipped), lint, build, Vitest and all 16 browser-smoke tests. A
+  separate Dr Bob read-only walkthrough passed across 27 admin route
+  families, including Locations and Zones. These are fixture-backed browser
+  receipts, not proof of live tenant configuration.
+- The fixture screenshot contains a missing brand image and unavailable
+  service-place context; neither is evidence of a new production defect.
+  They remain observations, not unconfirmed issues or unrelated UI changes.
+- Baseline replacement here is an owner-authorized maintenance operation.
+  The general engineer still refuses arbitrary binary patches; this does not
+  claim an autonomous PNG-generation/publication lane exists.
+
 Vehicle search pop-out window, 2026-10-20:
 
 - Owner asked for vehicle search in a movable window for a second screen.

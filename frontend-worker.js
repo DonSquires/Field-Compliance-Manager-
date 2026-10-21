@@ -151,10 +151,8 @@ const E2E_SMOKE_SPECS = Object.freeze([
   'e2e/officer-module-entitlements.spec.ts'
 ]);
 const E2E_TARGETED_MAX = 6;
-// Visual baselines embed live LINZ tiles and the baseline machine's fonts; a network-less sandbox
-// cannot reproduce them (geofence-spine-map failed on the screenshot alone), so snapshots are not
-// compared here. Functional assertions still run; CI (with network) keeps comparing snapshots.
-const E2E_SNAPSHOT_NOTE = 'ignored: visual baselines need live LINZ tiles and the baseline machine; compared in CI, not in the offline verifier';
+// Keep the verifier aligned with main-health: screenshot failures are real evidence too.
+const E2E_SNAPSHOT_NOTE = 'compared: stored visual baselines and functional assertions are both required';
 
 function kebab(name) {
   return String(name).replace(/([a-z0-9])([A-Z])/g, '$1-$2').replace(/[^A-Za-z0-9]+/g, '-').toLowerCase();
@@ -193,7 +191,7 @@ function frontendVerificationCommands({ changedFiles = [], webDir = null } = {})
     ['run', 'lint', '--prefix', 'apps/web'],
     ['run', 'build', '--prefix', 'apps/web'],
     ['run', 'test', '--prefix', 'apps/web', '--', '--pool=threads', '--maxWorkers=1', '--reporter=dot'],
-    ['run', 'test:e2e', '--prefix', 'apps/web', '--', ...E2E_SMOKE_SPECS, ...targeted, '--project=desktop-chromium', '--workers=1', '--reporter=line,json', '--ignore-snapshots']
+    ['run', 'test:e2e', '--prefix', 'apps/web', '--', ...E2E_SMOKE_SPECS, ...targeted, '--project=desktop-chromium', '--workers=1', '--reporter=line,json']
   ];
 }
 
