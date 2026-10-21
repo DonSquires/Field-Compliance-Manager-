@@ -14,7 +14,7 @@ const { execFileSync } = require('node:child_process');
 const { createClient } = require('@supabase/supabase-js');
 const { createWorkflowClient } = require('./supabase-workflow-client');
 const { createAssessment } = require('./assessment-manifest');
-const { collectRepositoryContext } = require('./supabase/functions/_shared/builder-repository-context');
+const { collectRepositoryContext, normalizeHealthPath, isHealthTestPath } = require('./supabase/functions/_shared/builder-repository-context');
 const { collectBuilderLiveContext } = require('./builder-live-context');
 const { buildAtlasGraph } = require('./scripts/atlas-graph');
 const { createModelGatewayConfig, defaultReviewerModel, invokeBuilderModel, modelHealth } = require('./builder-model-gateway');
@@ -765,13 +765,13 @@ function saveMainHealthState(state) {
 }
 
 function mainHealthRepairBrief({ sha, failure }) {
-  const failingFiles = failure.failing_tests.map((file) => file.startsWith('apps/web/') ? file : `apps/web/${file}`);
+  const failingFiles = failure.failing_tests.map(normalizeHealthPath);
   return [
-    `Goal: make main green again by fixing the real cause of the failing web checks reported by Bob's isolated main-health run at ${sha}. Self-heal repairs the app, not just its tests.`,
-    `Before: the repository is pinned to ${sha}; the main-health worker ran the web build, full Vitest unit/source-guard suite, and CI Playwright smoke suite against a read-only checkout.`,
+    `Goal: make main green again by fixing the real cause of the failing root or web checks reported by Bob's isolated main-health run at ${sha}. Self-heal repairs the app, not just its tests.`,
+    `Before: the repository is pinned to ${sha}; the main-health worker ran root node:test, lint, web build, full Vitest unit/source-guard, and CI Playwright smoke steps against a read-only checkout. Each step has an independent START/PASS/FAIL receipt.`,
     `During: the main-health worker exited ${failure.exit_code}; failing tests: ${failingFiles.join(', ')}.`,
     `Failure evidence (redacted and bounded):\n${failure.summary || 'See the bounded worker output below.'}\n${failure.stdout}\n${failure.stderr}`.slice(0, 9000),
-    'Required diagnosis: first reproduce each failure at the pinned commit. Run src/**/*.test.ts(x) with npm run test --prefix apps/web -- <test paths>; run e2e/*.spec.ts with npm run test:e2e --prefix apps/web -- <spec paths> --project=desktop-chromium --workers=1 --ignore-snapshots. Then read each failing test and its application source/schema. If the application regressed, fix the application source. Change a test only when source/schema evidence proves it stale; never delete, skip, or weaken it. The validated specification must name the actual frontend and/or backend source files needed; unused lanes are skipped from that evidence, not given invented edits.',
+    'Required diagnosis: first reproduce each failure at the pinned commit. Run test/*.test.js with node --test --test-reporter=tap <test paths>; run src/**/*.test.ts(x) with npm run test --prefix apps/web -- <test paths>; run e2e/*.spec.ts with npm run test:e2e --prefix apps/web -- <spec paths> --project=desktop-chromium --workers=1. Do not ignore snapshots. Then read each failing test and its application source/schema. If the application regressed, fix the application source. Change a test or screenshot baseline only when source/schema evidence and, for visual changes, Dr Bob human-test evidence prove the intended behaviour changed; never delete, skip, or weaken coverage. The validated specification must name the actual frontend and/or backend source files needed; unused lanes are skipped from that evidence, not given invented edits.',
     'Required verification: rerun the failing tests and the isolated main-health checks, independent code review, security review, and Atlas refresh. Preserve the exact tested main SHA and failing-test file set.',
     'Scope: the smallest root-cause repair across frontend and backend, with focused regression tests. Backend application code and new additive migrations may be drafted and independently verified. Unattended release remains limited to at most eight non-protected apps/web/src files; backend, browser-test, migration, legal, safety, identity, enforcement, finance, payroll, and evidential changes pause for Grandmaster approval before release. Auth/identity, dependencies, environment, CI/deploy and hand-editing the schema snapshot remain refused. No unrelated features or redesigns.',
     'After: open a pull request with the test receipts; release follows the normal independent gates.',
@@ -779,10 +779,9 @@ function mainHealthRepairBrief({ sha, failure }) {
 }
 
 async function openMainHealthRepair({ sha, failure }) {
-  const failingFiles = [...new Set(failure.failing_tests.map((file) => file.startsWith('apps/web/') ? file : `apps/web/${file}`))];
-  const testFilePattern = /^apps\/web\/(?:src\/[A-Za-z0-9_./-]+\.(?:test|spec)\.tsx?|e2e\/[A-Za-z0-9_./-]+\.spec\.ts)$/;
-  if (!failingFiles.length || failingFiles.length > 8 || failingFiles.some((file) => !testFilePattern.test(file) || file.includes('..'))) {
-    throw new Error(`main-health failure has no supported web test scope; parsed=${failingFiles.join(',').slice(0, 240) || 'none'}`);
+  const failingFiles = [...new Set(failure.failing_tests.map(normalizeHealthPath))];
+  if (!failingFiles.length || failingFiles.length > 8 || failingFiles.some(file => !isHealthTestPath(file))) {
+    throw new Error(`main-health failure has no supported test scope; parsed=${failingFiles.join(',').slice(0, 240) || 'none'}`);
   }
   if (builderRepositoryHead('main').sha !== sha) throw new Error('main moved before the repair job could be opened');
   const project = await routineBuilderProject();

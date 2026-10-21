@@ -133,7 +133,10 @@ test('Postgres creates fullstack repairs, deduplicates, scopes tenancy, and deni
       Atomics.wait(new Int32Array(new SharedArrayBuffer(4)), 0, 0, 500);
     }
     assert.equal(ready, true);
-    const migration = fs.readFileSync(path.resolve(__dirname, '../supabase/migrations/20261019150000_builder_fullstack_main_health_repairs.sql'), 'utf8');
+    const migration = [
+      '20261019150000_builder_fullstack_main_health_repairs.sql',
+      '20261021081500_builder_root_health_tests.sql',
+    ].map(file => fs.readFileSync(path.resolve(__dirname, '../supabase/migrations', file), 'utf8')).join('\n');
     const sql = `
 CREATE ROLE anon; CREATE ROLE authenticated; CREATE ROLE service_role;
 CREATE SCHEMA auth;
@@ -142,8 +145,17 @@ CREATE TABLE builder_projects(id uuid PRIMARY KEY, organization_id uuid, status 
 CREATE TABLE builder_jobs(id uuid PRIMARY KEY DEFAULT gen_random_uuid(), organization_id uuid, project_id uuid, parent_job_id uuid,
   status text DEFAULT 'intake', autopilot_source text, repair_risk text, source_main_health_sha text, source_main_health_files text[],
   autopilot_state text, autopilot_updated_at timestamptz, updated_at timestamptz, created_at timestamptz DEFAULT now(),
-  frontend_required boolean, backend_required boolean);
-CREATE TABLE builder_audit_events(organization_id uuid, job_id uuid, event_type text, actor_type text, new_value jsonb, change_summary text);
+  frontend_required boolean, backend_required boolean, target_sha text, source_friction_packet_id uuid, last_error text);
+CREATE TABLE builder_audit_events(organization_id uuid, job_id uuid, event_type text, actor_type text, new_value jsonb, change_summary text,
+ actor_user_id uuid, previous_value jsonb, related_artifact_ids uuid[], related_approval_id uuid);
+CREATE TABLE builder_approvals(id uuid PRIMARY KEY, job_id uuid, organization_id uuid, status text, approval_type text,
+ triggered_at_status text, requested_target_sha text, reviewed_artifact_ids uuid[], expires_at timestamptz,
+ approved_by uuid, decided_by uuid, approval_comment text, responded_at timestamptz, updated_at timestamptz);
+CREATE TABLE bob_friction_packets(id uuid, repair_risk text, route text, stop_line_hit text, user_id uuid);
+CREATE TABLE builder_artifacts(id uuid, job_id uuid, status text);
+CREATE FUNCTION builder_autopilot_decide_approval(uuid,text) RETURNS builder_jobs LANGUAGE plpgsql AS $$ BEGIN
+ RAISE EXCEPTION 'unexpected human-request fallback';
+END $$;
 CREATE FUNCTION builder_create_job_v2(uuid,uuid,text,text,text,text,text,boolean,boolean,text,uuid,text,text) RETURNS builder_jobs
 LANGUAGE sql AS $$ INSERT INTO builder_jobs(organization_id,project_id,frontend_required,backend_required) VALUES($1,$2,$8,$9) RETURNING * $$;
 ${migration}
@@ -157,6 +169,15 @@ BEGIN
  IF NOT j.frontend_required OR NOT j.backend_required OR j.autopilot_source <> 'main_monitor' THEN RAISE EXCEPTION 'not fullstack'; END IF;
  SELECT * INTO again FROM builder_open_main_health_repair(o,p,repeat('b',40),repeat('b',40),'Repair','Root cause',ARRAY['apps/web/e2e/example.spec.ts']);
  IF again.id <> j.id THEN RAISE EXCEPTION 'dedupe failed'; END IF;
+ SELECT * INTO again FROM builder_open_main_health_repair(o,p,repeat('c',40),repeat('c',40),'Root repair','Root cause',ARRAY['test/root.test.js','test/module.test.mjs']);
+ IF again.source_main_health_files[1] <> 'test/root.test.js' THEN RAISE EXCEPTION 'root scope lost'; END IF;
+ UPDATE builder_jobs SET status = 'specification_ready', target_sha = repeat('c',40) WHERE id = again.id;
+ INSERT INTO builder_approvals(id,job_id,organization_id,status,approval_type,triggered_at_status,requested_target_sha,reviewed_artifact_ids,expires_at)
+ VALUES ('00000000-0000-4000-8000-000000000099',again.id,o,'pending','specification_review','specification_ready',repeat('c',40),ARRAY[]::uuid[],now()+interval '1 hour');
+ SELECT * INTO again FROM builder_autopilot_decide_approval_guarded('00000000-0000-4000-8000-000000000099','Bounded root repair');
+ IF again.status <> 'design_pending' THEN RAISE EXCEPTION 'root specification gate blocked'; END IF;
+ IF builder_main_health_test_path_valid(NULL) OR builder_main_health_test_path_valid('test/../escape.test.js')
+    OR builder_main_health_test_path_valid('test/nested/root.test.js') THEN RAISE EXCEPTION 'unsafe root scope accepted'; END IF;
  SELECT * INTO again FROM builder_open_main_health_repair('00000000-0000-4000-8000-000000000004','00000000-0000-4000-8000-000000000003',repeat('a',40),repeat('a',40),'Repair','Root cause',ARRAY['apps/web/src/example.test.ts']);
  IF again.id = j.id THEN RAISE EXCEPTION 'cross-tenant reuse'; END IF;
  BEGIN

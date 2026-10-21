@@ -22,7 +22,8 @@ test('worker profiles use fixed commands', () => {
   assert.deepEqual(workerCommand('build'), ['npm', 'run', 'build']);
   assert.match(workerCommand('human-qa').at(-1), /dr-bob-human-test\.spec\.ts --workers=4/);
   assert.match(workerCommand('human-qa-live').at(-1), /dr-bob-human-test\.spec\.ts --workers=1/);
-  assert.match(workerCommand('main-health').at(-1), /npm run lint;.*vite build --outDir=\/tmp\/bob-main-health-dist;.*npm test -- --run;.*npm run test:e2e:ci-smoke/);
+  assert.match(workerCommand('main-health').at(-1), /health_step root-tests.*node --test --test-reporter=tap test\/\*\.test\.js/);
+  assert.match(workerCommand('main-health').at(-1), /health_step lint npm run lint;.*health_step build vite build.*health_step unit-tests npm test -- --run;.*health_step browser-smoke npm run test:e2e:ci-smoke/);
   assert.deepEqual(workerCommand('full-page-audit').slice(0, 3), ['sh', '-lc', 'set -eu; npm test; npm run check:css; cp -a /opt/bob/web-node_modules/. /workspace/apps/web/node_modules/; cd /workspace/apps/web; PATH=/workspace/apps/web/node_modules/.bin:$PATH npm run lint; PATH=/workspace/apps/web/node_modules/.bin:$PATH npm test -- --reporter=dot; PATH=/workspace/apps/web/node_modules/.bin:$PATH npm run build; PATH=/workspace/apps/web/node_modules/.bin:$PATH PLAYWRIGHT_OUTPUT_DIR=/artifacts/test-results PLAYWRIGHT_HTML_OUTPUT_DIR=/artifacts/playwright-report playwright test e2e/dr-bob-human-test.spec.ts --workers=1']);
   assert.deepEqual(workerCommand('frontend-verify'), [
     'node', '/opt/bob/frontend-worker.js', '/workspace', '/artifacts/input.patch', '/artifacts'
@@ -118,10 +119,36 @@ test('main health checks run in the isolated read-only browser worker', () => {
   });
   assert.ok(args.includes('--network=bob-workers'));
   assert.ok(args.includes('--read-only'));
+  assert.ok(args.includes('--tmpfs=/tmp:rw,exec,nosuid,size=1024m'));
+  assert.ok(args.includes('--tmpfs=/workspace/node_modules:rw,exec,nosuid,size=256m,uid=1000,gid=1000,mode=0755'));
+  assert.ok(args.includes('--tmpfs=/workspace/.bob:rw,noexec,nosuid,size=32m,uid=1000,gid=1000,mode=0755'));
   assert.ok(args.includes('--tmpfs=/workspace/apps/web/node_modules:rw,exec,nosuid,size=768m,uid=1000,gid=1000,mode=0755'));
   assert.equal(args.some((value) => value.includes('/workspace/apps/web/dist')), false);
   assert.ok(args.includes('type=bind,src=/tmp/source,dst=/workspace,readonly'));
   assert.equal(args.some((value) => value.includes('docker.sock')), false);
+});
+
+test('main health runs every check after a root failure and returns an aggregate failure', t => {
+  const { spawnSync } = require('node:child_process');
+  const temp = fs.mkdtempSync(path.join(os.tmpdir(), 'bob-health-steps-'));
+  t.after(() => fs.rmSync(temp, { recursive: true, force: true }));
+  const bin = path.join(temp, 'bin');
+  fs.mkdirSync(bin);
+  const calls = path.join(temp, 'calls');
+  for (const command of ['node', 'npm', 'vite']) {
+    fs.writeFileSync(path.join(bin, command),
+      `#!/bin/sh\nprintf '%s\\n' '${command}' >> '${calls}'\n${command === 'node' ? 'exit 1' : 'exit 0'}\n`,
+      { mode: 0o755 });
+  }
+  const script = workerCommand('main-health').at(-1)
+    .replace(/cp -a [^;]+;/g, ':;')
+    .replace(/export PATH=[^;]+;/g, ':;')
+    .replace(/cd \/workspace(?:\/apps\/web)?;/g, `cd '${temp}';`);
+  const result = spawnSync('sh', ['-c', script], { env: { ...process.env, PATH: `${bin}:${process.env.PATH}` }, encoding: 'utf8' });
+  assert.equal(result.status, 1, result.stderr);
+  assert.deepEqual(fs.readFileSync(calls, 'utf8').trim().split('\n'), ['node', 'npm', 'vite', 'npm', 'npm']);
+  assert.match(result.stdout, /BOB_HEALTH_STEP root-tests FAIL exit=1/);
+  assert.match(result.stdout, /BOB_HEALTH_STEP browser-smoke PASS/);
 });
 
 test('human QA forwards only named environment variables without putting values in process arguments', () => {

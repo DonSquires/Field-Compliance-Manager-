@@ -108,6 +108,32 @@ test('failure path detection strips ANSI color codes from Vitest output', () => 
     stdout: '\u001b[31mFAIL\u001b[39m  \u001b[22m\u001b[49msrc/pages/DocumentContextDrafting.guard.test.ts\u001b[22m',
     stderr: '',
   });
+
+  test('node TAP failures identify root paths alongside web failures without web-prefixing them', () => {
+    const { normalizeHealthPath, isHealthTestPath, mainHealthEvidenceConflict } = require('../supabase/functions/_shared/builder-repository-context');
+    const stdout = [
+      'ok 1 - passing root test',
+      'not ok 2 - failing root assertion',
+      '  ---',
+      "  location: '/workspace/test/root.test.js:22:1'",
+      '  ...',
+      'not ok 3 - esm failure',
+      "  location: 'test/module.test.mjs:1:1'",
+      'FAIL src/pages/example.test.ts',
+    ].join('\n');
+    const failure = summarizeFailure({ status: 'failed', exitCode: 1, stdout });
+    assert.deepEqual(failure.failing_tests, ['src/pages/example.test.ts', 'test/root.test.js', 'test/module.test.mjs']);
+    assert.equal(normalizeHealthPath('/workspace/test/root.test.js'), 'test/root.test.js');
+    assert.equal(normalizeHealthPath('src/pages/example.test.ts'), 'apps/web/src/pages/example.test.ts');
+    assert.equal(isHealthTestPath('test/root.test.js'), true);
+    assert.equal(isHealthTestPath('test/module.test.mjs'), true);
+    assert.equal(isHealthTestPath('../test/root.test.js'), false);
+    assert.equal(isHealthTestPath('test/nested/root.test.js'), false);
+    assert.equal(mainHealthEvidenceConflict({
+      autopilot_source: 'main_monitor', source_main_health_files: failure.failing_tests.map(normalizeHealthPath),
+      task_description: stdout,
+    }), null);
+  });
   assert.deepEqual(failure.failing_tests, ['src/pages/DocumentContextDrafting.guard.test.ts']);
 });
 
