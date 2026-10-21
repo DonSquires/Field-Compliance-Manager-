@@ -126,7 +126,7 @@ def run_vps_cmd(cmd_to_run):
 ### Edge function deploy (from Codespace)
 
 ```bash
-export SUPABASE_ACCESS_TOKEN="$FIELD_COMPLIANCE_CODESPACE"
+# SUPABASE_ACCESS_TOKEN is already set from the Codespaces secret
 npx --yes supabase functions deploy <function-name> --project-ref dotczcyyzgabmtmnglqj --use-api
 ```
 

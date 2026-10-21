@@ -12,7 +12,7 @@
  *   node scripts/seed-forestry-sector-rm.mjs --apply     # BEGIN … report … COMMIT
  *   node scripts/seed-forestry-sector-rm.mjs --apply --file scripts/data/other-seed.json
  *
- * Required: FIELD_COMPLIANCE_CODESPACE (Supabase management token; never printed).
+ * Required: SUPABASE_ACCESS_TOKEN or FIELD_COMPLIANCE_CODESPACE (Supabase management token; never printed).
  */
 import { readFileSync } from 'node:fs';
 import path from 'node:path';
@@ -25,8 +25,8 @@ const dataPath = fileArgIndex !== -1 && process.argv[fileArgIndex + 1]
   ? path.resolve(process.argv[fileArgIndex + 1])
   : path.join(here, 'data', 'forestry-sector-rm.json');
 const mode = process.argv.includes('--apply') ? 'apply' : 'dry-run';
-const token = process.env.FIELD_COMPLIANCE_CODESPACE;
-if (!token) { console.error('FIELD_COMPLIANCE_CODESPACE is required'); process.exit(1); }
+const token = process.env.SUPABASE_ACCESS_TOKEN || process.env.FIELD_COMPLIANCE_CODESPACE;
+if (!token) { console.error('SUPABASE_ACCESS_TOKEN (or FIELD_COMPLIANCE_CODESPACE) is required'); process.exit(1); }
 
 const raw = readFileSync(dataPath, 'utf8');
 const data = JSON.parse(raw);

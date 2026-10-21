@@ -127,7 +127,7 @@ npx supabase db dump --linked --schema public --file supabase/schema.sql
 2. Live-catalog snapshot via the Management API (needs only a personal access token; what this Codespace uses):
 
 ```bash
-SUPABASE_ACCESS_TOKEN="$FIELD_COMPLIANCE_CODESPACE" node scripts/schema-snapshot-live.mjs
+node scripts/schema-snapshot-live.mjs   # uses the Codespaces SUPABASE_ACCESS_TOKEN
 ```
 
 It reads `pg_catalog` read-only and writes the same quoted dialect as `db dump` (tables, constraints, indexes, views, functions with grants/revokes, triggers, RLS policies, comments), excluding extension-owned objects. Never append migration text to `schema.sql` by hand — regenerate it.

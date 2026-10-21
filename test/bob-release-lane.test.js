@@ -151,3 +151,12 @@ test('every control-plane path the edge functions relay is allowed through the p
   assert.ok(relayed.has('/api/bob/laptop/run'), 'laptop run relay found');
   for (const p of relayed) assert.ok(allow.some((re) => re.test(p)), `${p} is not allowed by deploy/bob-vps/nginx/bob.fcmanager.co.nz (it would be an HTTP 404 in Bob's chat)`);
 });
+
+test('nginx backups are kept outside sites-enabled so nginx never loads a duplicate site', () => {
+  const lane = fs.readFileSync(SCRIPT, 'utf8');
+  const start = lane.indexOf('    nginx)');
+  const nginxBlock = lane.slice(start, lane.indexOf('  esac', start));
+  assert.doesNotMatch(nginxBlock, /install[^\n]*-b\b/);
+  assert.doesNotMatch(nginxBlock, /\.lane-previous/);
+  assert.match(nginxBlock, /nginx_backup="\$STATE_DIR\/nginx-previous"/);
+});
