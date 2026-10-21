@@ -45,7 +45,7 @@ test('frontend verification uses a bounded Vitest worker pool', () => {
 
 test('frontend verification runs Playwright serially after build and unit checks: CI smoke set plus specs targeting the changed files', () => {
   const e2eCommand = frontendVerificationCommands().at(-1);
-  assert.deepEqual(e2eCommand, ['run', 'test:e2e', '--prefix', 'apps/web', '--', ...E2E_SMOKE_SPECS, '--project=desktop-chromium', '--workers=1', '--reporter=line,json', '--ignore-snapshots']);
+  assert.deepEqual(e2eCommand, ['run', 'test:e2e', '--prefix', 'apps/web', '--', ...E2E_SMOKE_SPECS, '--project=desktop-chromium', '--workers=1', '--reporter=line,json']);
   // Targeting: a spec whose name or text refers to a changed page/component joins the run (job ecfb4dc4:
   // the full 75-spec suite could not finish inside the lease).
   const root = fs.mkdtempSync(path.join(os.tmpdir(), 'e2e-target-'));
