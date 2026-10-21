@@ -1,4 +1,6 @@
-const { spawn } = require('node:child_process');
+const { spawn, execFileSync } = require('node:child_process');
+const fs = require('node:fs');
+const path = require('node:path');
 const { WORKER_NETWORK, WORKER_SUBNET } = require('./bob-firewall');
 
 const MAIN_HEALTH_COMMAND = [
@@ -8,6 +10,7 @@ const MAIN_HEALTH_COMMAND = [
   'cp -a /opt/bob/root-node_modules/. /workspace/node_modules/',
   'cp -a /opt/bob/web-node_modules/. /workspace/apps/web/node_modules/',
   'cd /workspace',
+  'export BOB_HEALTH_TRACKED_FILES=/artifacts/health-tracked-files.json',
   'health_step root-tests sh -c \'node --test --test-reporter=tap test/*.test.js\'',
   'cd /workspace/apps/web',
   'export PATH=/workspace/apps/web/node_modules/.bin:$PATH',
@@ -130,6 +133,13 @@ async function executeWorker(options, { spawnImpl = spawn } = {}) {
   const timeoutMs = options.timeoutMs || 10 * 60 * 1000;
   const environment = options.environment || {};
   const args = dockerArguments({ ...options, environment });
+  prepareWorkerMounts(options.sourceDir, options.profile);
+  if (options.profile === 'main-health') {
+    const tracked = execFileSync('git', ['ls-tree', '-r', '-z', '--name-only', 'HEAD'], {
+      cwd: options.sourceDir, encoding: 'utf8', maxBuffer: 8 * 1024 * 1024,
+    }).split('\0').filter(Boolean);
+    fs.writeFileSync(path.join(options.artifactDir, 'health-tracked-files.json'), JSON.stringify(tracked), { mode: 0o600 });
+  }
   await ensureWorkerNetwork(workerNetwork(options.profile, options.env || process.env), { spawnImpl });
   return new Promise((resolve, reject) => {
     const child = spawnImpl('docker', args, {
@@ -159,6 +169,16 @@ async function executeWorker(options, { spawnImpl = spawn } = {}) {
   });
 }
 
+function prepareWorkerMounts(sourceDir, profile) {
+  if (profile !== 'main-health') return;
+  // Docker cannot create nested mountpoints inside the read-only source bind.
+  for (const relative of ['node_modules', '.bob', 'apps/web/node_modules']) {
+    const target = path.join(sourceDir, relative);
+    fs.mkdirSync(target, { recursive: true });
+    if (!fs.lstatSync(target).isDirectory()) throw new Error(`worker mountpoint must be a directory: ${relative}`);
+  }
+}
+
 function summarizeHumanTest(result) {
   const output = `${result.stdout || ''}\n${result.stderr || ''}`;
   const matches = [...output.matchAll(/^\s*(\d+)\s+(passed|failed|skipped)(?:\s|$)/gm)];
@@ -174,4 +194,4 @@ function redact(value) {
     .replace(/(sk-[A-Za-z0-9_-]+)/g, '[REDACTED]');
 }
 
-module.exports = { WORKER_PROFILES, dockerArguments, ensureWorkerNetwork, executeWorker, workerNetwork, hostPath, redact, summarizeHumanTest, workerCommand };
+module.exports = { WORKER_PROFILES, dockerArguments, ensureWorkerNetwork, executeWorker, workerNetwork, prepareWorkerMounts, hostPath, redact, summarizeHumanTest, workerCommand };

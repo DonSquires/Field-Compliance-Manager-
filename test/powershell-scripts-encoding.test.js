@@ -10,7 +10,10 @@ const root = path.resolve(__dirname, '..');
 // an em dash (E2 80 94) becomes `a`, `EUR`, `"` (a smart quote) and the parser sees a string
 // delimiter. That broke laptop-tailscale.ps1 on the owner's laptop on 2026-09-26.
 test('PowerShell scripts are pure ASCII or carry a UTF-8 BOM so Windows PowerShell 5.1 parses them', () => {
-  const files = execFileSync('git', ['ls-files', '*.ps1', '**/*.ps1'], { cwd: root, encoding: 'utf8' }).split('\n').map((f) => f.trim()).filter(Boolean);
+  // Linked-worktree Git metadata is outside the isolated worker; its manifest comes from the pinned tree.
+  const files = process.env.BOB_HEALTH_TRACKED_FILES
+    ? JSON.parse(fs.readFileSync(process.env.BOB_HEALTH_TRACKED_FILES, 'utf8')).filter(file => file.endsWith('.ps1'))
+    : execFileSync('git', ['ls-files', '*.ps1', '**/*.ps1'], { cwd: root, encoding: 'utf8' }).split('\n').map((f) => f.trim()).filter(Boolean);
   assert.ok(files.length >= 3, `expected the repo's PowerShell scripts, found ${files.length}`);
   for (const file of files) {
     const bytes = fs.readFileSync(path.join(root, file));

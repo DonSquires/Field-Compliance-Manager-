@@ -3,7 +3,7 @@ const fs = require('node:fs');
 const os = require('node:os');
 const path = require('node:path');
 const test = require('node:test');
-const { dockerArguments, ensureWorkerNetwork, redact, summarizeHumanTest, workerCommand, workerNetwork } = require('../worker-executor');
+const { dockerArguments, ensureWorkerNetwork, prepareWorkerMounts, redact, summarizeHumanTest, workerCommand, workerNetwork } = require('../worker-executor');
 const { validatePatchText, changedFilesFromPatch, executeFrontendPatch, frontendVerificationCommands, targetedE2eSpecs, E2E_SMOKE_SPECS, redactLog, VERIFICATION_ENV } = require('../frontend-worker');
 
 function writeNpmStub(binDir, source) {
@@ -126,6 +126,21 @@ test('main health checks run in the isolated read-only browser worker', () => {
   assert.equal(args.some((value) => value.includes('/workspace/apps/web/dist')), false);
   assert.ok(args.includes('type=bind,src=/tmp/source,dst=/workspace,readonly'));
   assert.equal(args.some((value) => value.includes('docker.sock')), false);
+});
+
+test('fresh health checkouts get real directories for nested mounts before Docker runs', t => {
+  const sourceDir = fs.mkdtempSync(path.join(os.tmpdir(), 'bob-health-mounts-'));
+  t.after(() => fs.rmSync(sourceDir, { recursive: true, force: true }));
+  prepareWorkerMounts(sourceDir, 'test');
+  assert.deepEqual(fs.readdirSync(sourceDir), []);
+  prepareWorkerMounts(sourceDir, 'main-health');
+  for (const relative of ['node_modules', '.bob', 'apps/web/node_modules']) {
+    assert.ok(fs.lstatSync(path.join(sourceDir, relative)).isDirectory());
+  }
+  prepareWorkerMounts(sourceDir, 'main-health');
+  fs.rmdirSync(path.join(sourceDir, '.bob'));
+  fs.symlinkSync(os.tmpdir(), path.join(sourceDir, '.bob'));
+  assert.throws(() => prepareWorkerMounts(sourceDir, 'main-health'), /must be a directory/);
 });
 
 test('main health runs every check after a root failure and returns an aggregate failure', t => {
