@@ -79,6 +79,28 @@ Public access (`https://bob.fcmanager.co.nz`, nginx site
 A new control-plane route must be added to that `location ~` regex (test with
 `nginx -t`, then `systemctl reload nginx`; keep backups outside `sites-enabled/`).
 
+### Vibe Builder (owner ruling 2026-10-21)
+
+The web Builder page is now a chat-to-code workspace that bypasses the
+`onspace-ai-chat` edge function. The browser writes turns through the
+grand-master-only RPCs in `builder_vibe_sessions` / `builder_vibe_messages`;
+the control plane (`builder-vibe-session.js`) claims them, edits one live
+`bob/vibe-<id8>` branch per session under `$BOB_BUILDER_WORKSPACE_ROOT/vibe/`,
+streams every step back via Realtime, commits each turn, and on **Ship** pushes
+the branch and opens a pull request. Optional per-session Vite previews
+(`builder-vibe-preview.js`, ports 5310+) are served at
+`https://bob.fcmanager.co.nz/vibe/<session-id>/` behind a one-time ticket that
+sets an HMAC cookie (derived from `BOB_ADMIN_TOKEN`). The preview talks to the
+live Supabase project with the public anon key only.
+
+Environment (in `/var/lib/bob/control-plane.env`):
+`BOB_VIBE_SUPABASE_ANON_KEY` (public anon key, required for previews),
+`BOB_VIBE_ENABLED=0` to switch the worker off, and optional
+`BOB_VIBE_TURNS` (40), `BOB_VIBE_BUDGET_MS` (1200000), `BOB_VIBE_MAX_PREVIEWS`
+(2), `BOB_VIBE_FRAME_ANCESTORS`. The nginx site has a `/vibe/<uuid>/` location
+with websocket upgrade for Vite HMR; install it from
+`deploy/bob-vps/nginx/bob.fcmanager.co.nz`, run `nginx -t`, then reload.
+
 The agentic Builder lane needs, in `/var/lib/bob/control-plane.env`:
 `OPENAI_API_KEY`, `BOB_OPENAI_MODELS=gpt-5.4-mini,gpt-5.4,gpt-5.1-codex-mini,gpt-5.4-nano`,
 `BOB_BUILDER_MODEL=gpt-5.4-mini`, `BOB_BUILDER_REASONING_EFFORT=medium`,

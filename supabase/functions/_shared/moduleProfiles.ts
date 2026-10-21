@@ -12,7 +12,7 @@
 // Only the fields the planner map needs are mirrored (key, label, profile). The
 // per-org BEHAVIOURAL overlay (module_rule_sets / jurisdiction_rule_sets) is read
 // live at use time, never mirrored.
-const Z = (zoneType, moduleKey, compliance, perc, moduleRules, jurisdictionRules, bespoke)=>({
+const Z = (zoneType: any, moduleKey: any, compliance: any, perc: any, moduleRules: any, jurisdictionRules: any, bespoke: any)=>({
     hasZones: true,
     hasSites: true,
     zoneType,
@@ -29,7 +29,7 @@ const Z = (zoneType, moduleKey, compliance, perc, moduleRules, jurisdictionRules
       bespokeTables: bespoke
     }
   });
-const SITE_ONLY = (onsite, perc, moduleRules, jurisdictionRules, bespoke)=>({
+const SITE_ONLY = (onsite: any, perc: any, moduleRules: any, jurisdictionRules: any, bespoke: any)=>({
     hasZones: false,
     hasSites: true,
     zoneType: null,
@@ -226,7 +226,7 @@ export const SHARED_MODULE_PROFILES = [
  * the active org (Option A — full structural map, not just enabled modules).
  * `enabledKeys` is the set of module_key values the org has turned on
  * (organization_modules.enabled = true).
- */ export function buildModuleMap(enabledKeys) {
+ */ export function buildModuleMap(enabledKeys: any) {
   return SHARED_MODULE_PROFILES.map((m)=>({
       key: m.key,
       label: m.label,

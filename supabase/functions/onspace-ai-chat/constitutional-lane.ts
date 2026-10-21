@@ -27,19 +27,19 @@ export const CONSTITUTIONAL_FALLBACK = [
 ];
 // UUID guard so scopeOrgId is never raw-interpolated into a PostgREST filter
 // string unchecked (Jim flaw 2). Server-derived today; this removes the seam.
-export function isLikelyUuid(s) {
+export function isLikelyUuid(s: any) {
   return typeof s === 'string' && /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i.test(s);
 }
 // PURE classifier (no I/O) so empty-vs-failure is unit-testable (Bob #3).
 // DB error/throw -> 'fallback'; DB ok (incl. zero rows) -> 'db'. Zero rows is a
 // real answer, NOT a failure — never silently substituted with the fallback.
-export function classifyConstitutional(raw) {
+export function classifyConstitutional(raw: any) {
   if ('threw' in raw || raw.error) return {
     cards: CONSTITUTIONAL_FALLBACK,
     source: 'fallback'
   };
   const rows = Array.isArray(raw.data) ? raw.data : [];
-  const cards = rows.map((c)=>({
+  const cards = rows.map((c: any)=>({
       title: String(c.title),
       content: String(c.content)
     }));
@@ -50,7 +50,7 @@ export function classifyConstitutional(raw) {
 }
 // Build the PostgREST org filter. Platform cards (org NULL) always; the caller's
 // org cards too, but ONLY when scopeOrgId is a valid UUID (Jim flaw 2).
-export function buildConstitutionalOrgFilter(scopeOrgId) {
+export function buildConstitutionalOrgFilter(scopeOrgId: string) {
   return isLikelyUuid(scopeOrgId) ? `organization_id.is.null,organization_id.eq.${scopeOrgId}` : `organization_id.is.null`;
 }
 // PURE cache-selection rule (testable): ONLY platform-constitutional cards
@@ -58,7 +58,7 @@ export function buildConstitutionalOrgFilter(scopeOrgId) {
 // (Class 2) cards are NEVER cached in the shared isolate global — caching them
 // would bleed one org's policy into another (Bob #7). This is the tenant-
 // isolation guard, extracted so a test can assert it directly.
-export function selectCacheableCards(rows) {
+export function selectCacheableCards(rows: any) {
   return (Array.isArray(rows) ? rows : []).filter((c)=>c.organization_id == null).map((c)=>({
       title: String(c.title),
       content: String(c.content)
@@ -76,21 +76,21 @@ export function selectCacheableCards(rows) {
 // is guaranteed its slice. Slack unused by short cards is redistributed to the
 // cards that need it, so the reserve is not wasted. Cards render in input order
 // (identity first for read order), but presence no longer depends on order.
-export function renderConstitutionalSection(cards, source = 'db') {
+export function renderConstitutionalSection(cards: any, source = 'db') {
   if (!cards.length) return '';
   const heading = source === 'fallback' ? 'Who you are and what you are for (always applies — degraded: live knowledge unavailable this turn):\n\n' : 'Who you are and what you are for (always applies):\n\n';
   const afterHeading = CONSTITUTIONAL_RESERVE - heading.length;
   if (afterHeading <= 0) return heading.slice(0, CONSTITUTIONAL_RESERVE);
   // First pass: compute the emitted size each card WANTS (label + full body + joiner).
   const JOINER = 2; // the \n\n between cards
-  const want = cards.map((c)=>`**${c.title}**\n`.length + c.content.length + JOINER);
+  const want = cards.map((c: any)=>`**${c.title}**\n`.length + c.content.length + JOINER);
   const fairShare = Math.floor(afterHeading / cards.length);
   // Cards that fit within their fair share release their slack; cards that want
   // more share the released slack proportionally. Two-pass so a short identity
   // card never robs mission, and a short mission never robs identity.
   let slack = 0;
-  const greedy = [];
-  const alloc = want.map((w, i)=>{
+  const greedy: number[] = [];
+  const alloc = want.map((w: any, i: any)=>{
     if (w <= fairShare) {
       slack += fairShare - w;
       return w;

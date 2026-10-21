@@ -11,7 +11,8 @@ test('Bob control-plane deployment fast-forwards its Gitea checkout and preserve
   assert.match(deployment, /git -c safe\.directory="\$app_dir" -C "\$app_dir" fetch --prune "\$git_remote" "\$git_ref"/);
   assert.match(deployment, /git -c safe\.directory="\$app_dir" -C "\$app_dir" merge --ff-only FETCH_HEAD/);
   assert.match(deployment, /\/var\/lib\/bob\/control-plane\.env/);
-  assert.match(deployment, /docker compose -f "\$compose_file" up -d --build --force-recreate bob-control-plane/);
+  // Build first, wait for the runtime to go idle, then restart: an active verifier is never cut off mid-run.
+  assert.match(deployment, /docker compose -f "\$compose_file" build bob-control-plane\nnode "\$app_dir\/scripts\/bob-runtime-idle\.js"\ndocker compose -f "\$compose_file" up -d --force-recreate bob-control-plane/);
   assert.match(deployment, /for attempt in \{1\.\.30\}/);
   assert.match(deployment, /docker compose -f "\$compose_file" logs --tail 100 bob-control-plane/);
   assert.match(deployment, /172\.16\.0\.1:8091\/health/);

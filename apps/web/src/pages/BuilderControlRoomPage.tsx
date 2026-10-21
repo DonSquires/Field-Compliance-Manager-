@@ -1,5 +1,5 @@
 import React, { useCallback, useEffect, useMemo, useRef, useState } from 'react';
-import { AlertTriangle, Bot, CheckCircle2, ChevronRight, CircleStop, Clock3, Database, FileCode2, FolderTree, MessageSquareText, Play, Plus, RefreshCw, Search, ShieldCheck, TerminalSquare, Workflow, X } from 'lucide-react';
+import { AlertTriangle, Bot, CheckCircle2, ChevronRight, CircleStop, Clock3, Database, FileCode2, FolderTree, MessageSquareText, Play, Plus, RefreshCw, Search, ShieldCheck, Sparkles, TerminalSquare, Workflow, X } from 'lucide-react';
 import { BobPanel } from '../components/BobPanel';
 import { ChangeRequestQueue } from '../components/ChangeRequestQueue';
 import { BuilderApprovalBrief } from '../components/BuilderApprovalBrief';
@@ -199,7 +199,7 @@ const PROMPT_TEMPLATES = [
   },
 ];
 
-const BuilderControlRoomPage: React.FC<{ onOpenBob?: (prompt: string) => void }> = ({ onOpenBob }) => {
+const BuilderControlRoomPage: React.FC<{ onOpenBob?: (prompt: string) => void; onOpenVibe?: () => void }> = ({ onOpenBob, onOpenVibe }) => {
   const [projects, setProjects] = useState<BuilderProject[]>([]);
   const [jobs, setJobs] = useState<BuilderJob[]>([]);
   const [selectedId, setSelectedId] = useState<string | null>(null);
@@ -636,6 +636,7 @@ const BuilderControlRoomPage: React.FC<{ onOpenBob?: (prompt: string) => void }>
       <header className="builder-heading">
         <div><span>Bob build system</span><h1>Builder control room</h1><p>Run governed implementation work to the next evidence or approval boundary.</p></div>
         <div className="builder-heading-actions">
+          {onOpenVibe && <button type="button" onClick={onOpenVibe} title="Back to the Vibe Builder chat"><Sparkles size={16} /> Vibe Builder</button>}
           <button type="button" onClick={() => void loadList()} disabled={loading}><RefreshCw size={16} className={loading ? 'is-spinning' : ''} /> Refresh</button>
           <button type="button" onClick={() => { setBobOpen(current => !current); setMobileWorkspaceView('agent'); }} title={bobOpen ? 'Hide the docked Bob Builder agent' : 'Open the docked Bob Builder agent'} aria-pressed={bobOpen}><MessageSquareText size={16} /> {bobOpen ? 'Hide agent' : 'Open agent'}</button>
           <button type="button" className="is-primary" onClick={() => setShowCreate(true)}><Plus size={16} /> New job</button>

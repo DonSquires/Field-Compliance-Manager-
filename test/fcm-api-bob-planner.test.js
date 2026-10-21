@@ -91,15 +91,15 @@ test('planner prompt exposes drafting discipline, one-question rule, and delegat
   assert.equal(messages[2].role, 'assistant');
 });
 
-test('planner teaches natural-language app building to use the governed Builder lane', () => {
+test('planner keeps Builder explicit and points code changes to the Vibe Builder', () => {
   const prompt = buildPlannerPrompt({
     message: 'Build me an app for patrol handovers',
     tools: [{ tool: 'repo_search', purpose: 'inspect source' }, { tool: 'create_builder_job', purpose: 'open a governed Builder job' }],
   });
-  assert.match(prompt, /BUILD \/ SELF-HEAL/);
-  assert.match(prompt, /build me an app/);
-  assert.match(prompt, /draft-PR publication/);
-  assert.match(prompt, /never merge, deploy, apply migrations/);
+  assert.match(prompt, /BUILDER LANE/);
+  assert.match(prompt, /explicitly asks Bob to implement\/fix\/change code/);
+  assert.match(prompt, /Vibe Builder \(Platform & Settings → Builder\)/);
+  assert.match(prompt, /never merges, deploys, or applies migrations/);
 });
 
 test('natural-language Builder work advances from web research to source inspection to a job proposal', () => {

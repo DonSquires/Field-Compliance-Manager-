@@ -8,8 +8,8 @@ const caddie = fs.readFileSync('supabase/functions/onspace-ai-chat/caddie.ts', '
 const planner = require('../services/fcm-api/src/bob/planPrompt.js');
 
 const stripTypeAnnotations = (source) => source
-  .replace(/([A-Za-z_$][\w$]*)\s*:\s*(?:string\|string\[\]|string\[\]|string|number|boolean|unknown|any|Array<[^>]+>|Record<[^>]+>)(?=\s*(?:,|\)|=>))/g, '$1')
-  .replace(/:\s*(?:string\|string\[\]|string\[\]|string|number|boolean|unknown|any|Array<[^>]+>|Record<[^>]+>)/g, '');
+  .replace(/([A-Za-z_$][\w$]*)\s*:\s*(?:string\|string\[\]|string\[\]|string|number|boolean|unknown|any|JsonRecord|DbClient|Caps|ToolResult|Array<[^>]+>|Record<[^>]+>)(?:\s*\|\s*null)?(?=\s*(?:,|\)|=>))/g, '$1')
+  .replace(/:\s*(?:string\|string\[\]|string\[\]|string|number|boolean|unknown|any|JsonRecord|DbClient|Caps|ToolResult|Array<[^>]+>|Record<[^>]+>)(?:\s*\|\s*null)?/g, '');
 
 const historySource = chat.slice(chat.indexOf('async function loadHistory('), chat.indexOf('// Bob\'s per-user memory', chat.indexOf('async function loadHistory(')));
 assert.ok(historySource.startsWith('async function loadHistory('));

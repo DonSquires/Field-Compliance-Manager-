@@ -13,7 +13,7 @@ const LOCAL_WORKLOADS = new Set([
   'repository_summary',
   'simple_documentation'
 ]);
-const AUTHOR_WORKLOADS = new Set(['backend_implementation', 'frontend_implementation', 'frontend_repair']);
+const AUTHOR_WORKLOADS = new Set(['backend_implementation', 'frontend_implementation', 'frontend_repair', 'vibe_implementation']);
 const REVIEW_WORKLOADS = new Set(['independent_code_review']);
 const LOCAL_PROVIDERS = new Set([PROVIDERS.OLLAMA, PROVIDERS.GPU_WORKSTATION]);
 

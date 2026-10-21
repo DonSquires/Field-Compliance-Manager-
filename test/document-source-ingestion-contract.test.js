@@ -57,7 +57,7 @@ test('Bob can create a governed conversation-scoped document draft', () => {
   assert.match(caddie, /bob-agentic-document-draft/);
   assert.match(conductor, /case 'create_document_draft'/);
   assert.match(conductor, /execCreateDocumentDraft/);
-  assert.match(conductor, /detectExplicitWriteRefusal\(message, selectedTool = ''\)/);
+  assert.match(conductor, /detectExplicitWriteRefusal\(message(?:: \w+)?, selectedTool = ''\)/);
   assert.match(conductor, /selectedTool === 'create_document_draft'/);
   assert.match(conductor, /scopesRefusalAwayFromDraft/);
   assert.match(conductor, /detectExplicitWriteRefusal\(message, chosenTool\)/);

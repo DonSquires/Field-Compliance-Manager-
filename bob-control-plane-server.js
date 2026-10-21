@@ -22,6 +22,8 @@ const { loadBuilderRuntimeSnapshot, advanceBuilderJob, runBuilderUntilPause, rec
 const { fileSha256, listRepositoryTree, readRepositoryFile, searchRepository } = require('./builder-repository-read');
 const { autopilotTick, listAutopilotJobs, listPendingApprovals } = require('./builder-autopilot');
 const { laptopStatus, runLaptopCommand, laptopConfig, loadLaptopLink, mergeLaptopLink, describeLink } = require('./bob-laptop-shell');
+const { createVibeWorker, vibeWorkspacePath } = require('./builder-vibe-session');
+const { createVibePreviewManager } = require('./builder-vibe-preview');
 const { createBranchWorkspace, createDetachedWorkspace, retireTerminalWorkspace, commitVerifiedPatch, publishWorkspaceBranch, createGiteaPullRequest, workspacePathForBranch, createGitHubPullRequest, mergeGitHubPullRequest, ensureSourceCheckout, githubAuthHeader, githubRepoUrl, githubSshRepoUrl, resolveRemoteHead, redactGitError } = require('./builder-branch-workspace');
 const { executeWorker, summarizeHumanTest } = require('./worker-executor');
 const { createMainHealthMonitor } = require('./bob-main-health');
@@ -1635,7 +1637,43 @@ async function route(req, res, body) {
   return json(res, 404, { error: 'not found' });
 }
 
+// Owner vibe sessions: an independent chat-to-code lane (Supabase is the bus; see builder-vibe-session.js).
+const vibeEnabled = Boolean(builderSupabase) && process.env.BOB_VIBE_ENABLED !== '0';
+const vibePreview = vibeEnabled ? createVibePreviewManager({
+  workspaceRoot: builderWorkspaceRoot,
+  supabaseUrl: process.env.SUPABASE_URL,
+  anonKey: process.env.BOB_VIBE_SUPABASE_ANON_KEY || process.env.SUPABASE_ANON_KEY || '',
+  // Derived, so no new secret is needed; rotating the admin token signs every preview out.
+  secret: crypto.createHmac('sha256', process.env.BOB_ADMIN_TOKEN || modelGatewayToken || 'unset').update('bob-vibe-preview-v1').digest(),
+  maxConcurrent: Math.max(1, Number(process.env.BOB_VIBE_MAX_PREVIEWS || 2)),
+  onStatus: async (sessionId, patch) => { await builderSupabase.from('builder_vibe_sessions').update({ ...patch, updated_at: new Date().toISOString() }).eq('id', sessionId); },
+}) : null;
+const vibeWorker = vibeEnabled ? createVibeWorker({
+  supabase: builderSupabase,
+  deps: {
+    workspaceRoot: builderWorkspaceRoot,
+    gateway: builderGateway,
+    sourceDirFor: sha => builderGitSource(sha),
+    resolveHead: () => builderRepositoryHead('main').sha,
+    prepareWorkspace: workspacePath => vibePreview.ensureWebDependencies(workspacePath),
+    publish: ({ workspacePath, branch, head }) => {
+      const target = builderGitTarget();
+      return publishWorkspaceBranch({ workspacePath, branchName: branch, expectedHeadSha: head, pushUrl: target.repoUrl, pushAuthHeader: target.authHeader, sshCommand: target.sshCommand, requireVerifiedIdentity: true });
+    },
+    openPullRequest: ({ workspacePath, branch, head, title, body }) => createGitHubPullRequest({ workspacePath, branchName: branch, expectedHeadSha: head, title: `Bob vibe: ${title}`, body, githubToken, owner: githubOwner, repo: githubRepo, draft: false }),
+  },
+}) : null;
+const redeemVibeTicket = async (sessionId, ticket) => {
+  const { data, error } = await builderSupabase.rpc('builder_vibe_redeem_preview_ticket', { p_session_id: sessionId, p_ticket: ticket });
+  if (error) throw new Error(error.message);
+  if (data) record(String(data), 'vibe.preview.opened', sessionId, {});
+  return data || null;
+};
+
 const server = http.createServer(async (req, res) => {
+  if (vibePreview && req.url.startsWith('/vibe/')) {
+    try { if (await vibePreview.handleHttp(req, res, { redeemTicket: redeemVibeTicket })) return; } catch { if (!res.headersSent) return json(res, 502, { error: 'preview unavailable' }); return; }
+  }
   let raw = '';
   let tooLarge = false;
   req.on('data', chunk => {
@@ -1672,7 +1710,17 @@ const server = http.createServer(async (req, res) => {
 // "unreachable" (job 2fba8ca0, 2026-09-27). Give requests the model budget plus a margin.
 server.requestTimeout = Math.min(Number(process.env.BOB_MODEL_TIMEOUT_MS || 600000), 1800000) + 120000;
 server.keepAliveTimeout = 65000;
+server.on('upgrade', (req, socket, head) => {
+  if (!vibePreview || !vibePreview.handleUpgrade(req, socket, head)) socket.destroy();
+});
 server.listen(port, '0.0.0.0', () => console.log(`bob-control-plane listening on ${port}`));
+if (vibeWorker) {
+  vibeWorker.start();
+  const vibePreviewTimer = setInterval(() => {
+    vibePreview.reconcile(builderSupabase, sessionId => vibeWorkspacePath(builderWorkspaceRoot, sessionId)).catch(() => {});
+  }, 5000);
+  vibePreviewTimer.unref?.();
+}
 if (autopilotEnabled && builderSupabase) {
   startInterruptedModelRecovery().catch(() => {});
   // This process is the only verifier runner: anything still 'running' at startup was orphaned by
