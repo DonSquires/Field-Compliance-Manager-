@@ -4,6 +4,7 @@ const path = require('node:path');
 const { spawnSync } = require('node:child_process');
 const { isProtectedPath } = require('./builder-path-policy');
 const { INFRASTRUCTURE_PATTERNS } = require('./builder-verification-outcome');
+const { baselineInfo, renderBaselines } = require('./builder-visual-baseline');
 
 const MAX_PATCH_BYTES = 2 * 1024 * 1024;
 const MAX_CHANGED_FILES = 100;
@@ -49,7 +50,16 @@ function changedFilesFromPatch(patchText) {
 function validatePatchText(patchText, { lane = 'frontend' } = {}) {
   if (typeof patchText !== 'string' || !patchText.trim()) throw new Error('patch is empty');
   if (Buffer.byteLength(patchText) > MAX_PATCH_BYTES) throw new Error('patch exceeds size limit');
-  if (/GIT binary patch|Binary files .* differ/m.test(patchText)) throw new Error('binary patches are not allowed');
+  for (const section of patchText.split(/(?=^diff --git )/m)) {
+    const header = section.match(/^diff --git a\/(.+?) b\/(.+)$/m);
+    const binary = /GIT binary patch|Binary files .* differ/m.test(section);
+    if (binary && (!header || header[1] !== header[2] || !baselineInfo(header[2]) || !/^GIT binary patch$/m.test(section))) {
+      throw new Error('binary patches are not allowed outside generated Playwright PNG baselines');
+    }
+    if (header && baselineInfo(header[2]) && (!binary || /^deleted file mode|^old mode|^new mode|^new file mode (?!100644$)/m.test(section))) {
+      throw new Error('baseline changes must be generated regular PNG replacements or additions');
+    }
+  }
   if (/^(?:new|old) mode (?:120000|160000)$/m.test(patchText)) throw new Error('symlink and submodule patches are not allowed');
   const files = changedFilesFromPatch(patchText);
   if (files.length === 0) throw new Error('patch has no changed files');
@@ -186,7 +196,8 @@ function targetedE2eSpecs(changedFiles, webDir) {
 }
 
 function frontendVerificationCommands({ changedFiles = [], webDir = null } = {}) {
-  const targeted = webDir ? targetedE2eSpecs(changedFiles, webDir).filter((spec) => !E2E_SMOKE_SPECS.includes(spec)) : [];
+  const baselineSpecs = changedFiles.map(baselineInfo).filter(Boolean).map(info => info.spec);
+  const targeted = [...new Set([...baselineSpecs, ...(webDir ? targetedE2eSpecs(changedFiles, webDir) : [])])].filter(spec => !E2E_SMOKE_SPECS.includes(spec));
   return [
     ['run', 'lint', '--prefix', 'apps/web'],
     ['run', 'build', '--prefix', 'apps/web'],
@@ -220,10 +231,21 @@ function executeFrontendPatch({ sourceDir, patchPath, artifactDir, workDir = '/w
   }
 
   let baseline = null;
+  let visualBaselines = null;
   if (patchApplied) {
+    const visualFiles = changedFiles.filter(baselineInfo);
+    if (visualFiles.length) {
+      try {
+        visualBaselines = renderBaselines({ workDir, files: visualFiles, run, verifyOnly: true });
+        commands.push(...visualBaselines.commands);
+      } catch (error) {
+        commands.push({ command: 'independent visual baseline render', status: 1, stdout: '', stderr: redactLog(error.message) });
+      }
+    }
     const e2eTargeted = targetedE2eSpecs(changedFiles, path.join(workDir, 'apps/web'));
     const progressPath = path.join(artifactDir, 'verification.json');
     for (const args of frontendVerificationCommands({ changedFiles, webDir: path.join(workDir, 'apps/web') })) {
+      if (!commands.every(commandPassed)) break;
       // Evidence before each step: a worker killed at its lease still tells the handoff what was running.
       fs.mkdirSync(artifactDir, { recursive: true });
       fs.writeFileSync(progressPath, `${JSON.stringify({ succeeded: false, in_progress: true, running: ['npm', ...args].join(' '), started_at: new Date().toISOString(), commands, e2e_selection: { smoke: E2E_SMOKE_SPECS, targeted: e2eTargeted, project: 'desktop-chromium', offline: true, snapshots: E2E_SNAPSHOT_NOTE } }, null, 2)}\n`, { mode: 0o600 });
@@ -254,7 +276,7 @@ function executeFrontendPatch({ sourceDir, patchPath, artifactDir, workDir = '/w
   fs.writeFileSync(path.join(artifactDir, 'changed-files.json'), `${JSON.stringify(manifest, null, 2)}\n`, { mode: 0o600 });
   if (patchApplied) fs.writeFileSync(path.join(artifactDir, 'validated.patch'), patchText, { mode: 0o600 });
   const baselineBlocks = Boolean(baseline?.proven_same_failure && !baseline.tolerated && !baseline.new_failures?.length);
-  fs.writeFileSync(path.join(artifactDir, 'verification.json'), `${JSON.stringify({ succeeded, commands, baseline, baseline_failure: baselineBlocks, baseline_reason: baselineBlocks ? baseline.reason : null, preexisting_failures: baseline?.tolerated ? baseline.failing_files : [], e2e_selection: patchApplied ? { smoke: E2E_SMOKE_SPECS, targeted: targetedE2eSpecs(changedFiles, path.join(workDir, 'apps/web')), project: 'desktop-chromium', offline: true, snapshots: E2E_SNAPSHOT_NOTE } : null }, null, 2)}\n`, { mode: 0o600 });
+  fs.writeFileSync(path.join(artifactDir, 'verification.json'), `${JSON.stringify({ succeeded, commands, visual_baselines: visualBaselines, baseline, baseline_failure: baselineBlocks, baseline_reason: baselineBlocks ? baseline.reason : null, preexisting_failures: baseline?.tolerated ? baseline.failing_files : [], e2e_selection: patchApplied ? { smoke: E2E_SMOKE_SPECS, targeted: targetedE2eSpecs(changedFiles, path.join(workDir, 'apps/web')), project: 'desktop-chromium', offline: true, snapshots: E2E_SNAPSHOT_NOTE } : null }, null, 2)}\n`, { mode: 0o600 });
   return { succeeded, changed_files: manifest, commands, baseline_failure: baselineBlocks, preexisting_failures: baseline?.tolerated ? baseline.failing_files : [] };
 }
 

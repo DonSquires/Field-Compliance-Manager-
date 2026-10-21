@@ -9,7 +9,7 @@
  * at maximum reasoning effort on the control plane (no edge timeout).
  *
  * Cage that stays: protected paths are refused (builder-path-policy), migrations
- * may only be added, no binary or dependency changes, every tool call is logged
+ * may only be added, no arbitrary binary or dependency changes, every tool call is logged
  * into a build_logs artifact, and nothing here merges, deploys, or writes live
  * data — the output is a draft PR for a human.
  */
@@ -25,8 +25,10 @@ const { buildModelRunRequest, callModelGateway, persistModelArtifact, fetchModel
 const { collectRepositoryContext, fitRepositoryContext } = require('./supabase/functions/_shared/builder-repository-context');
 const { engineerCheckpoint } = require('./builder-engineer-checkpoint');
 const { validatePatchText } = require('./frontend-worker');
+const { generateVisualBaselines } = require('./builder-visual-baseline-tool');
+const { baselineInfo, pngEvidence } = require('./builder-visual-baseline');
 
-const PROMPT_VERSION = 'agentic-engineer-v8';
+const PROMPT_VERSION = 'agentic-engineer-v9';
 // Consecutive refused identical calls (with nothing edited) before the author escalates or stops early.
 const STUCK_REFUSALS = 4;
 const DEFAULT_LIMITS = Object.freeze({
@@ -208,7 +210,7 @@ function systemPrompt({ lane, limits, firewall = false }) {
     '',
     `LANE: ${lane}. ${lane === 'frontend' ? 'You may only change files under apps/web/. Web build/tests are run afterwards by the independent worker; keep changes type-safe and covered by the existing vitest suite where possible.' : 'You may change anything outside apps/web/ that is not protected (edge functions, services, scripts, root modules, tests, docs, ADDITIVE migrations).'}`,
     'LANE AND PATH GUARDS ARE SAFETY CONTROLS, NOT DEFECTS: if the correct fix lives outside your lane or under a protected path, finish with an empty change set and a no_change_reason that names the exact file and the lane that owns it, so Builder can re-scope. Never edit builder-path-policy.js or any guard to get around it.',
-    'PROTECTED (refused, human-only): CI workflows, deploy/, Dockerfiles and compose files, dependency manifests and lockfiles, .env and secret material, supabase/schema.sql (regenerated), auth/identity code (AuthContext, lib/supabase.ts, routing, SafetyGate, access components, _shared/auth.ts). Migrations must be NEW additive files; no destructive SQL. No binary files. Never print, store, or move secrets.',
+    'PROTECTED (refused, human-only): CI workflows, deploy/, Dockerfiles and compose files, dependency manifests and lockfiles, .env and secret material, supabase/schema.sql (regenerated), auth/identity code (AuthContext, lib/supabase.ts, routing, SafetyGate, access components, _shared/auth.ts). Migrations must be NEW additive files; no destructive SQL. No arbitrary binary files: only generate_visual_baselines may replace/add Playwright PNGs. Never print, store, or move secrets.',
     '',
     'TOOLS (one call per turn; reply with ONLY a JSON object {"thought": string, "tool": string, "args": object}):',
     '- list_dir {path}                        list a directory (node_modules/.git skipped)',
@@ -221,6 +223,7 @@ function systemPrompt({ lane, limits, firewall = false }) {
     '- replace_in_file {path, old_text, new_text, all?}   PREFERRED EDIT: replace one exact occurrence of old_text (copy it verbatim from read_file, several lines is fine) with new_text; all=true replaces every occurrence. Fails safely when the text is missing or ambiguous.',
     '- apply_patch {diff}                     apply a unified diff (git apply); hunk counts must be exact — use replace_in_file instead when unsure',
     '- delete_file {path}                     delete a file',
+    '- generate_visual_baselines {paths, reason}  frontend only: 1-6 exact apps/web/e2e/<name>.spec.ts-snapshots/<name>-desktop-chromium-linux.png (or mobile) paths. Explain intentional before/during/after behavior, not just a mismatch. Runs offline fixture tests, generates PNGs, rerenders and compares, retains private before/after images and hashes. Never use it to bless an unexplained regression or weaken assertions/tolerances. Independent verification repeats rendering. Existing release holds and HUMAN merge approval remain; no auto-merge.',
     `- run {command}                          allowed: node --test [test files], node --check <file>, bounded apps/web test/lint/build commands, git status/diff/log/show/blame (timeout ${Math.round(limits.runTimeoutMs / 60000)} min); chain allowed commands with && (stops at the first failure)`,
     '- atlas {action, name?, type?, direction?, depth?, limit?}   live Atlas: capability_map (name fragment) | terrain_edges (exact name) | gap_report | blast_radius (name + type, returns flow_reach and fk_reach separately). Query it before touching shared terrain and to pick a real gap; never edit a UI fallback seed to "close" a gap.',
     '- live_count {table, column?, equals?}  aggregate live check: total rows, rows where column is set, or rows where column = equals. Counts only, never row bodies. Use it to prove a column has a writer before wiring UI to it.',
@@ -421,7 +424,8 @@ function compactMessages(messages, { keepRecent = 6, stubChars = 600, threshold 
   return fitted;
 }
 
-function createTools({ workspacePath, repoRoot, lane, supabase, limits, log }) {
+function createTools({ workspacePath, repoRoot, lane, supabase, limits, log, generateBaselines = generateVisualBaselines }) {
+  const generatedBaselines = new Map();
   // First-hand evidence of what Bob actually executed (not what he says he ran).
   const runs = [];
   const run = (command) => {
@@ -463,6 +467,15 @@ function createTools({ workspacePath, repoRoot, lane, supabase, limits, log }) {
   const policyCheck = (file) => {
     if (isProtectedPath(file)) return `${file}: ${protectedReason(file)}`;
     if (!laneAllows(lane, file)) return `${file}: outside the ${lane} lane`;
+    if (baselineInfo(file)) {
+      const receipt = generatedBaselines.get(file);
+      let evidence;
+      try { evidence = pngEvidence(workspacePath, file, { optional: true }); }
+      catch (error) { return `${file}: ${error.message}; regenerate with generate_visual_baselines`; }
+      if (!receipt || evidence?.sha256 !== receipt.sha256) {
+        return `${file}: use generate_visual_baselines to generate or reverify this exact PNG before handoff`;
+      }
+    }
     return null;
   };
 
@@ -487,6 +500,13 @@ function createTools({ workspacePath, repoRoot, lane, supabase, limits, log }) {
   };
 
   return {
+    async generate_visual_baselines({ paths, reason }) {
+      if (lane === 'backend') return { error: 'Visual baselines belong to the frontend lane' };
+      const result = await generateBaselines({ workspacePath, paths, reason });
+      for (const item of result.receipt.after) generatedBaselines.set(item.path, item);
+      log({ visual_baselines: result });
+      return result;
+    },
     list_dir({ path: dir = '.' }) {
       const { normalized, absolute } = resolveInside(workspacePath, dir || '.');
       if (!fs.existsSync(absolute) || !fs.statSync(absolute).isDirectory()) return { error: `not a directory: ${normalized}` };
@@ -543,6 +563,7 @@ function createTools({ workspacePath, repoRoot, lane, supabase, limits, log }) {
     },
     write_file({ path: file, content }) {
       const { normalized, absolute } = resolveInside(workspacePath, file);
+      if (baselineInfo(normalized)) return { error: 'Use generate_visual_baselines, not text writes, for PNG baselines' };
       const violation = policyCheck(normalized);
       if (violation) return { error: `refused: ${violation}` };
       if (typeof content !== 'string') return { error: 'content must be a string' };
@@ -555,6 +576,7 @@ function createTools({ workspacePath, repoRoot, lane, supabase, limits, log }) {
     // (job 1021dbaa burned 3 x 40 turns on "corrupt patch" / "does not apply").
     replace_in_file({ path: file, old_text, new_text, all = false }) {
       const { normalized, absolute } = resolveInside(workspacePath, file);
+      if (baselineInfo(normalized)) return { error: 'Use generate_visual_baselines, not text edits, for PNG baselines' };
       const violation = policyCheck(normalized);
       if (violation) return { error: `refused: ${violation}` };
       if (typeof old_text !== 'string' || !old_text.length) return { error: 'old_text is required (copy it verbatim from read_file)' };
@@ -578,6 +600,7 @@ function createTools({ workspacePath, repoRoot, lane, supabase, limits, log }) {
     },
     apply_patch({ diff }) {
       if (typeof diff !== 'string' || !diff.trim()) return { error: 'diff is required' };
+      if (/GIT binary patch|Binary files .* differ/m.test(diff)) return { error: 'Use generate_visual_baselines; model-authored binary patches are refused' };
       const before = new Set(changedFiles());
       const patchPath = path.join(fs.mkdtempSync(path.join(os.tmpdir(), 'bob-agent-patch-')), 'patch.diff');
       // Models wrap diffs in fences and miscount hunk lengths; tolerate both before asking for a rewrite.
@@ -607,6 +630,7 @@ function createTools({ workspacePath, repoRoot, lane, supabase, limits, log }) {
     },
     delete_file({ path: file }) {
       const { normalized, absolute } = resolveInside(workspacePath, file);
+      if (baselineInfo(normalized)) return { error: 'Baseline deletion is not supported by the generation lane' };
       const violation = policyCheck(normalized);
       if (violation) return { error: `refused: ${violation}` };
       if (!fs.existsSync(absolute)) return { error: `not found: ${normalized}` };
@@ -709,6 +733,7 @@ function createTools({ workspacePath, repoRoot, lane, supabase, limits, log }) {
     __changedFiles: changedFiles,
     __policyCheck: policyCheck,
     __runs: () => runs.slice(),
+    __visualBaselines: () => [...generatedBaselines.values()],
     __log: log,
   };
 }
@@ -866,9 +891,9 @@ function buildProposal({ workspacePath, lane, tools, args, requiredFiles = [], s
   if (badMigrations.length) return { error: `finish refused: migrations may only be added, never modified or deleted: ${badMigrations.join(', ')}` };
   // Raw, untrimmed: git()'s trim() also eats a trailing blank context line (" \n"), which
   // shortens the last hunk and makes git apply reject the patch as corrupt.
-  const patch = execFileSync('git', ['diff', '--cached', '--no-color'], { cwd: workspacePath, encoding: 'utf8', stdio: ['ignore', 'pipe', 'pipe'], maxBuffer: 64 * 1024 * 1024 });
+  const patch = execFileSync('git', ['diff', '--cached', '--no-color', '--binary'], { cwd: workspacePath, encoding: 'utf8', stdio: ['ignore', 'pipe', 'pipe'], maxBuffer: 64 * 1024 * 1024 });
   if (Buffer.byteLength(patch) > DEFAULT_LIMITS.maxPatchBytes) return { error: 'finish refused: patch exceeds 2 MB' };
-  if (/GIT binary patch|Binary files .* differ/m.test(patch)) return { error: 'finish refused: binary changes are not allowed' };
+  if (/GIT binary patch|Binary files .* differ/m.test(patch) && !files.some(baselineInfo)) return { error: 'finish refused: binary changes are not allowed' };
   const summary = String(args.summary ?? '').trim();
   if (summary.length < 20) return { error: 'finish refused: summary must explain the change (what, why, how verified)' };
   if (/\b(?:did not|could not|unable to)\s+(?:fully\s+)?(?:complete|implement)\b|\bfirst (?:structural )?slice\b|\bpartial (?:implementation|slice)\b/i.test(summary)) {
@@ -909,6 +934,7 @@ function buildProposal({ workspacePath, lane, tools, args, requiredFiles = [], s
       : [],
     // What actually ran, from the tool log (command + exit code), so reviewers need not trust the summary.
     verified_runs: sessionRuns.filter((r) => /^(?:node --(?:test|check)\b|npm run (?:test|lint|build) --prefix apps\/web\b)/.test(r.command)).slice(-20),
+    visual_baselines: typeof tools.__visualBaselines === 'function' ? tools.__visualBaselines() : [],
     tests_not_run_reason: testsNotRunReason || undefined,
     rollback_notes: Array.isArray(args.rollback_notes) && args.rollback_notes.length ? args.rollback_notes.map(String).slice(0, 10) : [files.some((file) => file.startsWith('supabase/migrations/')) ? 'Before merge: close the pull request; nothing is live. After merge the release lane applies the migration, so undo it with a new forward migration and revert the code.' : 'Revert the pull request; this run applies no live data, migrations, or deployments.'],
     follow_ups: Array.isArray(args.follow_ups) ? args.follow_ups.map(String).slice(0, 10) : [],

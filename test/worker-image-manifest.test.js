@@ -10,7 +10,7 @@ const test = require('node:test');
 // Bob self-heal run died on 2026-09-26. This test keeps the list honest.
 
 const ROOT = path.resolve(__dirname, '..');
-const ENTRYPOINTS = ['assessment-manifest.js', 'frontend-worker.js', 'backend-worker.js', 'security-worker.js'];
+const ENTRYPOINTS = ['assessment-manifest.js', 'frontend-worker.js', 'backend-worker.js', 'security-worker.js', 'visual-baseline-worker.js'];
 
 function localRequireClosure(entrypoints) {
   const seen = new Set();

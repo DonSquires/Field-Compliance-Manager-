@@ -10,6 +10,7 @@
 const { runBuilderUntilPause, loadBuilderRuntimeSnapshot, implementationRuns } = require('./builder-runtime-coordinator');
 const { unwrapPatchArtifact } = require('./supabase/functions/_shared/builder-patch-envelope');
 const { evidentialMentions, evidentialPathsIn, isProtectedPath } = require('./builder-path-policy');
+const { baselineInfo } = require('./builder-visual-baseline');
 
 const TERMINAL = new Set(['failed', 'cancelled', 'deployed']);
 const GATES = new Set(['specification_ready', 'approval_pending']);
@@ -314,6 +315,7 @@ function automergeEligible({ job, evidence, env = process.env }) {
   if ((review.findingList || []).some((f) => ['critical', 'high'].includes(f.severity))) return { ok: false, reason: 'review has critical/high findings' };
   const files = evidence.changedFiles || [];
   if (!files.length) return { ok: false, reason: 'no changed files' };
+  if (files.some(baselineInfo)) return { ok: false, reason: 'visual baseline changes always require human review and merge' };
   if (mainHealthRepair && (files.length > 8 || mainHealthFilesOutsideApp(files).length)) {
     return { ok: false, reason: 'main-health repair changed files outside the web app it may repair unattended' };
   }

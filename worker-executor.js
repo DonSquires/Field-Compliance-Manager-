@@ -31,6 +31,7 @@ const WORKER_PROFILES = Object.freeze({
   'human-qa': Object.freeze(['sh', '-lc', 'cp -a /opt/bob/web-node_modules/. /workspace/apps/web/node_modules/ && cd /workspace/apps/web && PATH=/workspace/apps/web/node_modules/.bin:$PATH PLAYWRIGHT_OUTPUT_DIR=/artifacts/test-results PLAYWRIGHT_HTML_OUTPUT_DIR=/artifacts/playwright-report playwright test e2e/dr-bob-human-test.spec.ts --workers=4']),
   'human-qa-live': Object.freeze(['sh', '-lc', 'cp -a /opt/bob/web-node_modules/. /workspace/apps/web/node_modules/ && cd /workspace/apps/web && PATH=/workspace/apps/web/node_modules/.bin:$PATH PLAYWRIGHT_OUTPUT_DIR=/artifacts/test-results PLAYWRIGHT_HTML_OUTPUT_DIR=/artifacts/playwright-report playwright test e2e/dr-bob-human-test.spec.ts --workers=1']),
   'main-health': Object.freeze(['sh', '-lc', MAIN_HEALTH_COMMAND]),
+  'visual-baseline': Object.freeze(['node', '/opt/bob/visual-baseline-worker.js', '/workspace', '/artifacts']),
   'full-page-audit': Object.freeze(['sh', '-lc', 'set -eu; npm test; npm run check:css; cp -a /opt/bob/web-node_modules/. /workspace/apps/web/node_modules/; cd /workspace/apps/web; PATH=/workspace/apps/web/node_modules/.bin:$PATH npm run lint; PATH=/workspace/apps/web/node_modules/.bin:$PATH npm test -- --reporter=dot; PATH=/workspace/apps/web/node_modules/.bin:$PATH npm run build; PATH=/workspace/apps/web/node_modules/.bin:$PATH PLAYWRIGHT_OUTPUT_DIR=/artifacts/test-results PLAYWRIGHT_HTML_OUTPUT_DIR=/artifacts/playwright-report playwright test e2e/dr-bob-human-test.spec.ts --workers=1']),
   'frontend-verify': Object.freeze(['node', '/opt/bob/frontend-worker.js', '/workspace', '/artifacts/input.patch', '/artifacts']),
   'backend-verify': Object.freeze(['node', '/opt/bob/backend-worker.js', '/workspace', '/artifacts/input.patch', '/artifacts']),
@@ -58,6 +59,7 @@ function hostPath(containerPath, env = process.env) {
 // (bob-workers) so the BOB-WORKER-EGRESS firewall chain can govern it. BOB_WORKER_NETWORK=none
 // restores the offline sandbox. Workers still get no credentials beyond the human-test keys below.
 function workerNetwork(profile, env = process.env) {
+  if (profile === 'visual-baseline') return 'none';
   const configured = String(env.BOB_WORKER_NETWORK || WORKER_NETWORK).trim();
   if (!/^[A-Za-z0-9][A-Za-z0-9_.-]{0,63}$/.test(configured) || configured === 'host') throw new Error(`unsupported worker network: ${configured}`);
   if (configured === 'none' && profile === 'human-qa-live') return 'bridge';
@@ -88,8 +90,8 @@ function dockerArguments({ image, sourceDir, artifactDir, profile, memory = '2g'
     args.push('--tmpfs=/workspace/node_modules:rw,exec,nosuid,size=256m,uid=1000,gid=1000,mode=0755');
     args.push('--tmpfs=/workspace/.bob:rw,noexec,nosuid,size=32m,uid=1000,gid=1000,mode=0755');
   }
-  if (profile === 'frontend-verify' || profile === 'backend-verify') {
-    args.push(`--tmpfs=/work:rw,exec,nosuid,size=${profile === 'frontend-verify' ? '2048m' : '1024m'}`);
+  if (profile === 'frontend-verify' || profile === 'backend-verify' || profile === 'visual-baseline') {
+    args.push(`--tmpfs=/work:rw,exec,nosuid,size=${profile === 'backend-verify' ? '1024m' : '2048m'}`);
   }
   if (browserProfile) {
     args.push('--tmpfs=/workspace/apps/web/node_modules:rw,exec,nosuid,size=768m,uid=1000,gid=1000,mode=0755');

@@ -15,7 +15,7 @@ const { isProtectedPath, protectedReason, normalizeRepoPath } = require('./build
 const { VIBE_BRANCH_PREFIX, builderCommitIdentity, redactGitError } = require('./builder-branch-workspace');
 const { buildModelRunRequest, callModelGateway, fetchModelHealth, selectProviders, providerRequest } = require('./supabase/functions/_shared/builder-model-adapter');
 
-const PROMPT_VERSION = 'vibe-v3';
+const PROMPT_VERSION = 'vibe-v4';
 const VIBE_LIMITS = Object.freeze({
   maxTurns: Math.max(6, Number(process.env.BOB_VIBE_TURNS || 40)),
   wallBudgetMs: Math.max(60_000, Number(process.env.BOB_VIBE_BUDGET_MS || 20 * 60_000)),
@@ -68,6 +68,7 @@ function vibeSystemPrompt(limits = VIBE_LIMITS) {
     'TOOLS:',
     '- list_dir {path} | read_file {path, start_line?, end_line?} | outline {path, pattern?} | search {query, path?, regex?, context?} | git_log {path?, limit?} | git_diff {}',
     '- write_file {path, content} | replace_in_file {path, old_text, new_text, all?} | apply_patch {diff} | delete_file {path}',
+    '- generate_visual_baselines {paths, reason}  1-6 exact Playwright Linux PNG paths under apps/web/e2e/*.spec.ts-snapshots/. Explain the intentional before/after UI change; a mismatch alone is NOT approval. Generates offline fixture PNGs, rerenders and compares, retains before/after hashes and images. Never weaken tests or tolerances to bless a regression. Human review and merge are required; no live tenant screenshots.',
     `- run {command}  allowed: node --test [test files], node --check <file>, npm run lint|build --prefix apps/web, npm run test --prefix apps/web -- <pattern>, git status|diff|log|show|blame (timeout ${Math.round(limits.runTimeoutMs / 60000)} min)`,
     '- atlas {action: capability_map|terrain_edges|gap_report|blast_radius, name?, type?, direction?, depth?, limit?}  live build map (flow_reach and fk_reach are different truths)',
     '- live_count {table, column?, equals?}  aggregate row counts only',
@@ -167,8 +168,9 @@ function revertRefusedChanges(tools, workspacePath) {
   const refused = [];
   for (const file of tools.__changedFiles()) {
     const normalized = normalizeRepoPath(file.replace(/\/$/, ''));
-    if (!normalized || isProtectedPath(normalized)) {
-      refused.push({ file, reason: normalized ? protectedReason(normalized) : 'unsafe path' });
+    const violation = normalized && tools.__policyCheck(normalized);
+    if (!normalized || isProtectedPath(normalized) || violation) {
+      refused.push({ file, reason: violation || (normalized ? protectedReason(normalized) : 'unsafe path') });
       try { git(workspacePath, ['checkout', '--', file]); } catch { fs.rmSync(path.resolve(workspacePath, file), { recursive: true, force: true }); }
     }
   }
@@ -184,7 +186,7 @@ function branchState(workspacePath, baseSha) {
 
 async function runConversation({ store, session, message, workspacePath, branch, baseSha, gateway, deps, limits }) {
   const supabase = deps.supabase;
-  const tools = createTools({ workspacePath, repoRoot: workspacePath, lane: 'fullstack', supabase, limits, log: () => {} });
+  const tools = createTools({ workspacePath, repoRoot: workspacePath, lane: 'fullstack', supabase, limits, log: () => {}, generateBaselines: deps.generateBaselines });
   if (deps.firewall) {
     tools.firewall_status = () => deps.firewall.status();
     tools.firewall_change = args => deps.firewall.change({ op: args.op, rule: args.rule, purpose: args.purpose });

@@ -6,6 +6,39 @@ The control plane loads `worker-executor.js` in its own process. A launcher
 change therefore requires a control-plane redeploy as well as the worker-image
 rebuild; an image rebuild alone does not update the running launcher.
 
+## Visual baseline generation
+
+`generate_visual_baselines` is shared by the frontend agentic engineer
+(including self-heal/autopilot) and Vibe's fullstack tools. It accepts at most
+six exact standard Playwright Linux PNG paths plus the intentional-change
+rationale, never raw image bytes or shell commands. Only this tool grants PNG
+provenance for a turn. After a checkpoint resume, call it again to reverify the
+restored images; matching images are a valid no-change verification.
+
+The `visual-baseline` worker always uses `--network=none`, a read-only source
+mount and disposable writable work area, with no credentials, Docker socket or
+live test identities. Tests use the existing offline fixtures. It generates
+requested screenshots, runs the same specs with screenshot comparison enabled,
+then repeats rendering, restores the exact candidate bytes and compares against
+them using the existing spec assertions/tolerances. Candidate and rendered
+hashes are distinct provenance: two pixels of broken-image-icon raster drift
+in a 1.44-million-pixel fixture are not grounds to rewrite the candidate or
+increase tolerances. It rejects
+unrequested screenshot changes and functional failures, retains private
+`before/`, `after/`, `baseline.json` and `baseline.patch` under the workspace
+parent's `.visual-baseline-runs/`, and binds output to the source commit and
+current diff. Workspace drift refuses application, not a best-effort apply.
+
+Only regular PNG additions/replacements in standard `*.spec.ts-snapshots/`
+paths can travel in git binary patches. General binary editing remains refused.
+The independent frontend verifier rerenders these PNGs, compares against the
+restored candidate, preserves its exact bytes and then runs the normal
+verification commands; its existing `build_logs`
+artifact carries the hash/command receipt. The PR's image diff presents old and
+new images from Git history. Fixture renders do not prove live tenant behavior.
+Existing human release holds still apply, and visual-baseline PRs never receive
+the unattended-merge marker. Vibe still publishes only when the owner ships.
+
 ## No arbitrary-user login
 
 Bob must not retrieve, reveal, or use another person's password, recovery link,
