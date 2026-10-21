@@ -32,7 +32,7 @@ import { buildToolDispatchedPayload, buildToolOutcomePayload, buildIntrospectPay
 import { buildModuleMap } from '../_shared/moduleProfiles.ts';
 import { startToolExecution, finishToolExecution, reloadTaskLedger } from '../_shared/task-lifecycle.ts';
 import { toolSignature } from '../_shared/tool-signature.mjs';
-import { builderJobTitle } from '../_shared/builder-job-title.mjs';
+import { builderJobTitle, atlasGapTargets, atlasGapBrief, stripBuilderProposalEchoes } from '../_shared/builder-job-title.mjs';
 const createClient = (url, key, opts)=>_createClient(url, key, opts);
 const CORS = {
   'Access-Control-Allow-Origin': '*',
@@ -8341,6 +8341,8 @@ serve(async (req)=>{
     const builderLanesForOwnerRequest = (text: string, fallbackFrontend = false, fallbackBackend = true) => {
       const ownerText = String(text ?? '');
       const paths = builderRepositoryPaths(ownerText);
+      // Atlas gaps are database/edge/scanner entities; their repair never starts in the web lane.
+      if (!paths.length && atlasGapTargets(ownerText).length) return { frontend: false, backend: true };
       if (paths.length) return {
         frontend: paths.some((path) => path.startsWith('apps/web/')),
         backend: paths.some((path) => !path.startsWith('apps/web/'))
@@ -8349,7 +8351,7 @@ serve(async (req)=>{
         return { frontend: true, backend: true };
       }
       const frontend = /\b(?:ui|ux|page|panel|component|screen|web app|frontend|css|react|tsx|website|portal)\b/i.test(ownerText);
-      const backend = /\b(?:backend|api|rpc|schema|database|supabase|edge function|server|service|worker|migration|auth|rls)\b/i.test(ownerText);
+      const backend = /\b(?:backend|api|rpc|schema|database|supabase|edge function|server|service|worker|migration|auth|rls|atlas|cron|trigger)\b/i.test(ownerText);
       if (frontend || backend) return { frontend, backend };
       return { frontend: fallbackFrontend, backend: fallbackBackend };
     };
@@ -8366,6 +8368,7 @@ serve(async (req)=>{
     const builderJobArgsFromEvidence = (text: string, evidenceSteps: Array<{ tool: string; result_summary: string }>) => {
       const requestBrief = String(text ?? '').trim();
       const evidenceSummary = evidenceSteps
+        .filter((step) => !/^(?:create|cancel|retry|approve|reject)_builder_job$/.test(step.tool))
         .map((step) => `${step.tool}: ${step.result_summary.slice(0, step.tool === 'web_research' || step.tool === 'delegate' ? 3500 : 500)}`)
         .join('\n');
       const researchUrls = [...new Set(evidenceSteps
@@ -8384,6 +8387,7 @@ serve(async (req)=>{
               ? 'Translate the owner’s plain-language request into source changes: inspect the existing code and schema, preserve shared spines, implement the smallest coherent patch, and return a draft pull request with exact verification receipts.'
               : 'Treat this as a bounded repair: reproduce the reported failure, identify the smallest safe cause, repair only the affected surface, and stop for human review if the scope expands or a protected/evidential path appears.',
           'Autonomy contract: the isolated Builder worker may inspect, edit, test, iterate, and independently review this job. It may not merge, deploy, apply migrations, change auth/RLS/dependencies/environment, or invent an unrequested capability.',
+          atlasGapBrief(atlasGapTargets(requestBrief)),
           requestBrief,
           '',
           'Evidence gathered before proposal:',
@@ -9593,6 +9597,17 @@ serve(async (req)=>{
             }
             let bjTitle = String(toolArgs.title ?? storedJob?.title ?? '').trim().slice(0, 200);
             let bjDescription = String(toolArgs.task_description ?? toolArgs.brief ?? storedJob?.task_description ?? '').trim().slice(0, 12000);
+            if (!storedJob) {
+              // The planner drafts these args; correct what it copies from the conversation (live 2026-10-21:
+              // a raw first sentence as the title and earlier jobs' receipts pasted into the brief).
+              const ownerWords = String(message ?? '');
+              const flatTitle = bjTitle.toLowerCase().replace(/[^a-z0-9_]+/g, ' ').trim();
+              const flatOwner = ownerWords.toLowerCase().replace(/[^a-z0-9_]+/g, ' ');
+              const gapTargets = atlasGapTargets(ownerWords);
+              if (!bjTitle || gapTargets.length || (flatTitle.length > 12 && flatOwner.includes(flatTitle))) bjTitle = builderJobTitle(ownerWords || bjTitle);
+              bjDescription = stripBuilderProposalEchoes(bjDescription);
+              if (gapTargets.length && !/Target Atlas gaps?:/.test(bjDescription)) bjDescription = `${atlasGapBrief(gapTargets)}\n\n${bjDescription}`.slice(0, 12000);
+            }
             const delegatedWebResearch = subagentRunsThisTurn.filter((run) => Array.isArray(run.steps)
               && run.steps.some((step) => step?.tool === 'web_research' && step?.outcome === 'ok'));
             const delegatedResearchUrls = [...new Set(delegatedWebResearch

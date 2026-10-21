@@ -3,6 +3,7 @@ const fs = require('node:fs');
 const path = require('node:path');
 const test = require('node:test');
 const vm = require('node:vm');
+const builderJobHelpers = require('../supabase/functions/_shared/builder-job-title.mjs');
 
 const chat = fs.readFileSync(path.resolve(__dirname, '../supabase/functions/onspace-ai-chat/index.ts'), 'utf8');
 const start = chat.indexOf('    const builderBriefGrounding = ');
@@ -17,10 +18,10 @@ assert.ok(builderIntentStart >= 0);
 const builderIntentSource = chat.slice(builderIntentStart, chat.indexOf('    const builderJobArgsFromEvidence = ', builderIntentStart))
   .replace(/\(text: string\)/g, '(text)')
   .replace('(text: string, fallbackFrontend = false, fallbackBackend = true)', '(text, fallbackFrontend = false, fallbackBackend = true)');
-const explicitBuilderCreationRequest = vm.runInNewContext(`(() => { ${builderIntentSource} return explicitBuilderCreationRequest; })()`);
-const builderLanesForOwnerRequest = vm.runInNewContext(`(() => { ${builderIntentSource} return builderLanesForOwnerRequest; })()`);
-const continuesBuilderRequest = vm.runInNewContext(`(() => { ${builderIntentSource} return continuesBuilderRequest; })()`);
-const builderProposalDecision = vm.runInNewContext(`(() => { ${builderIntentSource} return builderProposalDecision; })()`);
+const explicitBuilderCreationRequest = vm.runInNewContext(`(() => { ${builderIntentSource} return explicitBuilderCreationRequest; })()`, { ...builderJobHelpers });
+const builderLanesForOwnerRequest = vm.runInNewContext(`(() => { ${builderIntentSource} return builderLanesForOwnerRequest; })()`, { ...builderJobHelpers });
+const continuesBuilderRequest = vm.runInNewContext(`(() => { ${builderIntentSource} return continuesBuilderRequest; })()`, { ...builderJobHelpers });
+const builderProposalDecision = vm.runInNewContext(`(() => { ${builderIntentSource} return builderProposalDecision; })()`, { ...builderJobHelpers });
 
 const request = "In Bob's chat, whenever Bob asks me a question or proposes something that needs my confirmation — a Builder job proposal, a laptop command, a cancellation — show tappable choice buttons under his message, for example 'Yes, run it' / 'Change it' / 'No'. Server side, in supabase/functions/onspace-ai-chat/index.ts, include meta.options on every proposed outcome; client side, in apps/web/src/components/BobPanel.tsx, render metadata.options as accessible buttons. Add component tests.";
 
@@ -165,15 +166,24 @@ test('an explicit self-heal request turns a confirmed friction route into a real
   assert.match(builder, /label: 'Merge, deploy, and prove in the glass'/);
 });
 
-test('natural-language Builder jobs carry an explicit app, coding, or self-heal mode contract', async () => {
-  const { builderJobTitle } = await import('../supabase/functions/_shared/builder-job-title.mjs');
+test('natural-language Builder jobs carry an explicit app, coding, or self-heal mode contract', () => {
+  const helpers = builderJobHelpers;
   const argsStart = chat.indexOf('    const builderModeForRequest = ');
   const argsSource = chat.slice(argsStart, chat.indexOf('/** Dispatch a single tool', argsStart))
     .replace('(text: string, evidenceSteps: Array<{ tool: string; result_summary: string }>)', '(text, evidenceSteps)')
     .replace('(text: string, fallbackFrontend = false, fallbackBackend = true)', '(text, fallbackFrontend = false, fallbackBackend = true)')
     .replace(/\(text: string\)/g, '(text)');
-  const builderJobArgsFromEvidence = vm.runInNewContext(`(() => { ${argsSource} return builderJobArgsFromEvidence; })()`, { builderJobTitle });
-  assert.match(chat, /import \{ builderJobTitle \} from '\.\.\/_shared\/builder-job-title\.mjs'/);
+  const builderJobArgsFromEvidence = vm.runInNewContext(`(() => { ${argsSource} return builderJobArgsFromEvidence; })()`, { ...helpers });
+  assert.match(chat, /import \{ builderJobTitle, atlasGapTargets, atlasGapBrief, stripBuilderProposalEchoes \} from '\.\.\/_shared\/builder-job-title\.mjs'/);
+  // Live 2026-10-21 Builder-chat request: context sentence first, the real target second.
+  const gapJob = builderJobArgsFromEvidence('that last job was rejected as it was a job that has been supaseeded. \nan atlas gap compact_cctv_inference_results is one we should test the update on', [
+    { tool: 'create_builder_job', result_summary: 'Started **Repair Atlas gaps one by one**' },
+    { tool: 'repo_search', result_summary: 'status: found' }
+  ]);
+  assert.equal(gapJob.title, 'Close Atlas gap: compact_cctv_inference_results');
+  assert.match(gapJob.task_description, /Target Atlas gap: compact_cctv_inference_results/);
+  assert.doesNotMatch(gapJob.task_description, /Repair Atlas gaps one by one/);
+  assert.match(gapJob.task_description, /repo_search: status: found/);
   assert.equal(builderJobArgsFromEvidence('please add a back button to the vehicle search page. Thanks', []).title, 'Add a back button to the vehicle search page');
   assert.match(builderJobArgsFromEvidence('Build me a patrol handover app', []).task_description, /Builder mode: no_code_app_generation/);
   assert.match(builderJobArgsFromEvidence('Add an API-backed handover page', []).task_description, /Builder mode: chat_to_code/);
@@ -218,7 +228,7 @@ test('research URLs cannot be mistaken for repository paths when Builder chooses
     .replace(/\(text: string\)/g, '(text)')
     .replace('(text: string, fallbackFrontend = false, fallbackBackend = true)', '(text, fallbackFrontend = false, fallbackBackend = true)');
   const builderRepositoryPaths = vm.runInNewContext(`(() => { ${pathsSource} return builderRepositoryPaths; })()`);
-  const builderLanesForOwnerRequest = vm.runInNewContext(`(() => { ${pathsSource} return builderLanesForOwnerRequest; })()`);
+  const builderLanesForOwnerRequest = vm.runInNewContext(`(() => { ${pathsSource} return builderLanesForOwnerRequest; })()`, { ...builderJobHelpers });
   assert.deepEqual([...builderRepositoryPaths('Research https://example.com/ai-apps/ui-patterns for this UI redesign')], []);
   assert.deepEqual([...builderRepositoryPaths('Change apps/web/src/pages/BuilderControlRoomPage.tsx and test/builder.test.js')], [
     'apps/web/src/pages/BuilderControlRoomPage.tsx',
