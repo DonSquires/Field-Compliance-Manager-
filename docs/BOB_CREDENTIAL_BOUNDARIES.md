@@ -2,6 +2,10 @@
 
 Bob must use the narrowest credential for each operation. Credential values must never appear in prompts, browser code, logs, screenshots, issue bodies, test artifacts, or human-test reports.
 
+The control plane loads `worker-executor.js` in its own process. A launcher
+change therefore requires a control-plane redeploy as well as the worker-image
+rebuild; an image rebuild alone does not update the running launcher.
+
 ## No arbitrary-user login
 
 Bob must not retrieve, reveal, or use another person's password, recovery link,
