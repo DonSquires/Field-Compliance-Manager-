@@ -46,7 +46,7 @@ server {
     }
 
     # Bob VPS firewall (structured, audited rules; owner ruling 2026-10-21); relayed by bob-builder-control-room.
-    location ~ ^/api/bob/firewall/(status|change)$ {
+    location ~ ^/api/bob/(firewall/(status|change)|tailnet/(status|acl))$ {
         limit_req zone=bob_builder_api burst=5 nodelay;
         proxy_pass http://172.16.0.1:8091;
         proxy_set_header Host $host;

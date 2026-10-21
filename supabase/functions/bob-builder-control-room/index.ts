@@ -257,6 +257,21 @@ serve(async req => {
     await audit(profile.organization_id, result.ok ? 'firewall_changed' : `firewall_change_${result.status}`);
     return json({ firewall: result.payload }, result.ok ? 200 : result.status);
   }
+  if (action === 'tailnet_status' || action === 'tailnet_acl') {
+    if (role !== 'grand_master') return json({ error: 'The tailnet is restricted to the platform owner' }, 403);
+    if (!CONTROL_PLANE_URL || !CONTROL_PLANE_TOKEN) return json({ error: 'Builder execution host is unavailable' }, 503);
+    const result = action === 'tailnet_status'
+      ? await relay('/api/bob/tailnet/status', 'GET')
+      : await relay('/api/bob/tailnet/acl', 'POST', {
+        op: body.op === 'set' ? 'set' : 'get',
+        policy: typeof body.policy === 'string' ? body.policy : undefined,
+        if_match: typeof body.if_match === 'string' ? body.if_match : undefined,
+        purpose: typeof body.purpose === 'string' ? body.purpose.slice(0, 300) : null,
+        requested_by: user.id,
+      });
+    await audit(profile.organization_id, result.ok ? action : `${action}_failed`);
+    return json({ tailnet: result.payload }, result.ok ? 200 : result.status);
+  }
 
   if (action === 'list') {
     stage = 'list_builder_state';
