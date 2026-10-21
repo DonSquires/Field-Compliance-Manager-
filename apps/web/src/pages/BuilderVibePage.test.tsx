@@ -3,13 +3,18 @@ import { cleanup, fireEvent, render, screen, waitFor } from '@testing-library/re
 import { afterEach, expect, it, vi } from 'vitest';
 import BuilderVibePage, { groupThread, type VibeMessage } from './BuilderVibePage';
 
-const { rpc, from, channel, removeChannel } = vi.hoisted(() => ({
+const { rpc, from, channel, removeChannel, storageFrom, functionsInvoke } = vi.hoisted(() => ({
   rpc: vi.fn(),
   from: vi.fn(),
   channel: vi.fn(),
   removeChannel: vi.fn(),
+  storageFrom: vi.fn(),
+  functionsInvoke: vi.fn(),
 }));
-vi.mock('../lib/supabase', () => ({ supabase: { rpc, from, channel, removeChannel } }));
+vi.mock('../lib/supabase', () => ({
+  supabase: { rpc, from, channel, removeChannel, storage: { from: storageFrom }, functions: { invoke: functionsInvoke } },
+}));
+vi.mock('../context/AuthContext', () => ({ useAuth: () => ({ profile: { id: 'owner-id' } }) }));
 afterEach(() => { cleanup(); vi.resetAllMocks(); });
 
 function query(rows: unknown[]) {
@@ -65,4 +70,51 @@ it('shows starters for an owner with no sessions and opens a session from one', 
   expect(starter).toBeTruthy();
   fireEvent.click(starter!);
   await waitFor(() => expect(rpc).toHaveBeenCalledWith('builder_vibe_session_open', expect.objectContaining({ p_title: expect.any(String) })));
+});
+
+it('uploads a document privately, extracts text, and sends its session-scoped reference', async () => {
+  wireRealtime();
+  const sessionId = '1a2b3c4d-0000-4000-8000-000000000001';
+  rpc.mockImplementation(async (name: string) => {
+    if (name === 'is_grand_master') return { data: true, error: null };
+    return { data: 'attachment-id', error: null };
+  });
+  from.mockImplementation((table: string) => query(table === 'builder_vibe_sessions' ? [{
+    id: sessionId, title: 'Review error', status: 'open', branch: null, base_sha: null, head_sha: null,
+    changed_files: [], preview_requested: false, preview_status: 'off', preview_detail: null, pr_url: null,
+    last_activity_at: new Date(0).toISOString(),
+  }] : []));
+  const upload = vi.fn().mockResolvedValue({ error: null });
+  const remove = vi.fn().mockResolvedValue({ error: null });
+  storageFrom.mockReturnValue({ upload, remove });
+  functionsInvoke.mockResolvedValue({ data: { success: true, text: 'Visible error: employment date is missing', checksum: 'a'.repeat(64), has_text: true }, error: null });
+
+  render(<BuilderVibePage />);
+  const input = await screen.findByRole('textbox', { name: 'Tell Bob what to build' });
+  const file = new File(['sample pdf'], 'error.pdf', { type: 'application/pdf' });
+  fireEvent.change(screen.getByLabelText('Attach screenshots or documents'), { target: { files: [file] } });
+  fireEvent.change(input, { target: { value: 'Please investigate this error' } });
+  fireEvent.click(screen.getByRole('button', { name: 'Send' }));
+
+  await waitFor(() => expect(rpc).toHaveBeenCalledWith('builder_vibe_send_with_attachments', expect.objectContaining({
+    p_session_id: sessionId,
+    p_content: 'Please investigate this error',
+    p_attachment_ids: [expect.any(String)],
+  })));
+  expect(upload).toHaveBeenCalledWith(expect.stringMatching(new RegExp(`^desktop/owner-id/vibe/${sessionId}/`)), file, expect.objectContaining({ contentType: 'application/pdf', upsert: false }));
+  expect(rpc).toHaveBeenCalledWith('builder_vibe_attachment_register', expect.objectContaining({
+    p_session_id: sessionId,
+    p_file_name: 'error.pdf',
+    p_file_type: 'application/pdf',
+    p_file_size_bytes: file.size,
+  }));
+  expect(functionsInvoke).toHaveBeenCalledWith('bob-extract-document', expect.objectContaining({
+    body: expect.objectContaining({ file_name: 'error.pdf', storage_bucket: 'bob-uploads' }),
+  }));
+  expect(rpc).toHaveBeenCalledWith('builder_vibe_attachment_set_extraction', expect.objectContaining({
+    p_extraction_status: 'extracted',
+    p_sha256: 'a'.repeat(64),
+    p_extracted_text: 'Visible error: employment date is missing',
+  }));
+  expect(functionsInvoke).not.toHaveBeenCalledWith('bob-document-register', expect.anything());
 });

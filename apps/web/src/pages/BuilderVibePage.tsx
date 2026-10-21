@@ -1,5 +1,6 @@
 import React, { useCallback, useEffect, useMemo, useRef, useState } from 'react';
-import { AlertTriangle, ListChecks, ChevronDown, ChevronRight, ExternalLink, FileDiff, GitPullRequest, Loader2, Lock, MonitorPlay, Plus, Send, Sparkles, SquareTerminal, Undo2, Wrench, X } from 'lucide-react';
+import { AlertTriangle, ListChecks, ChevronDown, ChevronRight, ExternalLink, FileDiff, FileText, GitPullRequest, Image as ImageIcon, Loader2, Lock, MonitorPlay, Paperclip, Plus, Send, Sparkles, SquareTerminal, Undo2, Wrench, X } from 'lucide-react';
+import { useAuth } from '../context/AuthContext';
 import { supabase } from '../lib/supabase';
 import './BuilderVibePage.css';
 
@@ -30,10 +31,38 @@ export interface VibeMessage {
   created_at: string;
 }
 
+interface VibeAttachmentSummary {
+  id: string;
+  file_name: string;
+  file_type: string;
+  file_size_bytes: number;
+  extraction_status: string;
+}
+
+interface PendingVibeAttachment {
+  id: string;
+  file: File;
+  fileType: string;
+  status: 'staged' | 'uploading' | 'extracting' | 'ready' | 'failed';
+  storagePath?: string;
+  registered?: boolean;
+  error?: string;
+}
+
 type Access = 'checking' | 'allowed' | 'denied';
 
 const PREVIEW_ORIGIN = (import.meta.env.VITE_BOB_VIBE_PREVIEW_ORIGIN as string | undefined) || 'https://bob.fcmanager.co.nz';
 const SESSION_FIELDS = 'id, title, status, branch, base_sha, head_sha, changed_files, preview_requested, preview_status, preview_detail, pr_url, last_activity_at';
+const VIBE_FILE_TYPES: Record<string, string> = {
+  jpg: 'image/jpeg', jpeg: 'image/jpeg', png: 'image/png', webp: 'image/webp',
+  pdf: 'application/pdf', docx: 'application/vnd.openxmlformats-officedocument.wordprocessingml.document',
+  txt: 'text/plain', md: 'text/plain', csv: 'text/csv',
+  xlsx: 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet',
+};
+const VIBE_ACCEPTED_FILES = 'image/jpeg,image/png,image/webp,application/pdf,application/vnd.openxmlformats-officedocument.wordprocessingml.document,text/plain,text/csv,application/vnd.openxmlformats-officedocument.spreadsheetml.sheet';
+const VIBE_MAX_FILES = 5;
+const VIBE_MAX_IMAGE_BYTES = 10 * 1024 * 1024;
+const VIBE_MAX_DOCUMENT_BYTES = 20 * 1024 * 1024;
 const STARTERS = [
   'Add a "last updated by" line under the vehicle profile header',
   'Explain how the Atlas gap report is built and where it is shown',
@@ -51,6 +80,13 @@ function errorText(error: unknown): string {
 
 function requestId(): string {
   return typeof crypto !== 'undefined' && 'randomUUID' in crypto ? crypto.randomUUID() : `${Date.now()}-${Math.random().toString(36).slice(2)}`;
+}
+
+function vibeFileType(file: File): string | null {
+  const extension = file.name.split('.').pop()?.toLowerCase() || '';
+  const expected = VIBE_FILE_TYPES[extension];
+  if (!expected) return null;
+  return file.type && VIBE_ACCEPTED_FILES.split(',').includes(file.type) && file.type !== expected ? null : expected;
 }
 
 /** Steps between two conversational messages collapse into one "Bob's steps" group. */
@@ -118,11 +154,20 @@ function MessageBlock({ message }: { message: VibeMessage }) {
   const system = message.role === 'system';
   const action = typeof message.payload.action === 'string' ? message.payload.action : 'message';
   const prUrl = typeof message.payload.pr_url === 'string' ? message.payload.pr_url : null;
+  const attachments = Array.isArray(message.payload.attachments) ? message.payload.attachments as VibeAttachmentSummary[] : [];
+  const attachmentContext = Array.isArray(message.payload.attachment_context) ? message.payload.attachment_context as Array<{ file_name?: string; context?: string }> : [];
   return (
     <div className={`vibe-msg vibe-msg--${message.role}${message.kind === 'error' ? ' is-error' : ''}`}>
       {!owner && !system && <span className="vibe-msg__avatar" aria-hidden="true"><Sparkles size={14} /></span>}
       <div className="vibe-msg__body">
         {owner && action !== 'message' ? <em>{action === 'ship' ? 'Ship this as a pull request' : 'Undo the last change'}</em> : <p>{message.content}</p>}
+        {attachments.length > 0 && <ul className="vibe-msg__attachments">{attachments.map((attachment) => (
+          <li key={attachment.id}>{attachment.file_type.startsWith('image/') ? <ImageIcon size={13} /> : <FileText size={13} />}<span>{attachment.file_name}</span></li>
+        ))}</ul>}
+        {attachmentContext.length > 0 && <details className="vibe-msg__attachment-context">
+          <summary>Local attachment analysis</summary>
+          {attachmentContext.map((item, index) => <p key={`${item.file_name || 'attachment'}-${index}`}>{item.context}</p>)}
+        </details>}
         {prUrl && <a href={prUrl} target="_blank" rel="noreferrer" className="vibe-msg__link"><GitPullRequest size={14} />Open pull request</a>}
         {owner && message.status && message.status !== 'done' && <span className={`vibe-msg__state is-${message.status}`}>{message.status === 'queued' ? 'Waiting for Bob' : message.status === 'claimed' ? 'Bob is on it' : 'Not processed — send it again'}</span>}
       </div>
@@ -131,6 +176,7 @@ function MessageBlock({ message }: { message: VibeMessage }) {
 }
 
 export default function BuilderVibePage({ onOpenJobs }: { onOpenJobs?: () => void } = {}) {
+  const { profile } = useAuth();
   const [access, setAccess] = useState<Access>('checking');
   const [sessions, setSessions] = useState<VibeSession[]>([]);
   const [selectedId, setSelectedId] = useState<string | null>(null);
@@ -140,9 +186,11 @@ export default function BuilderVibePage({ onOpenJobs }: { onOpenJobs?: () => voi
   const [draft, setDraft] = useState('');
   const [busy, setBusy] = useState<string | null>(null);
   const [error, setError] = useState<string | null>(null);
+  const [attachments, setAttachments] = useState<PendingVibeAttachment[]>([]);
   const [previewSrc, setPreviewSrc] = useState<string | null>(null);
   const [mobilePane, setMobilePane] = useState<'chat' | 'preview'>('chat');
   const threadEnd = useRef<HTMLDivElement | null>(null);
+  const fileInput = useRef<HTMLInputElement | null>(null);
 
   const selected = useMemo(() => sessions.find((session) => session.id === selectedId) ?? null, [sessions, selectedId]);
   const working = selected?.status === 'working' || selected?.status === 'shipping' || messages.some((message) => message.role === 'owner' && (message.status === 'queued' || message.status === 'claimed'));
@@ -214,25 +262,128 @@ export default function BuilderVibePage({ onOpenJobs }: { onOpenJobs?: () => voi
   }, []);
 
   const newSession = (title?: string) => run('new', async () => {
+    if (attachments.length) throw new Error('Send or remove the staged attachments before starting another session.');
     const { data, error: openError } = await supabase.rpc('builder_vibe_session_open', { p_title: title || null });
     if (openError) throw openError;
     await loadSessions();
     setSelectedId(String(data));
   });
 
+  const updateAttachment = (id: string, patch: Partial<PendingVibeAttachment>) => {
+    setAttachments(current => current.map(item => item.id === id ? { ...item, ...patch } : item));
+  };
+
+  const addFiles = (fileList: FileList | null) => {
+    if (!fileList?.length) return;
+    if (!selected || selected.status === 'closed') { setError('Open a Vibe session before attaching files.'); return; }
+    const files = Array.from(fileList);
+    if (attachments.length + files.length > VIBE_MAX_FILES) { setError(`Attach up to ${VIBE_MAX_FILES} files to one message.`); return; }
+    const staged: PendingVibeAttachment[] = [];
+    for (const file of files) {
+      const fileType = vibeFileType(file);
+      if (!fileType) { setError(`${file.name} is not a supported Vibe attachment type.`); return; }
+      const limit = fileType.startsWith('image/') ? VIBE_MAX_IMAGE_BYTES : VIBE_MAX_DOCUMENT_BYTES;
+      if (file.size <= 0 || file.size > limit) { setError(`${file.name} exceeds the ${fileType.startsWith('image/') ? '10 MB image' : '20 MB document'} limit.`); return; }
+      staged.push({ id: crypto.randomUUID(), file, fileType, status: 'staged' });
+    }
+    setError(null);
+    setAttachments(current => [...current, ...staged]);
+  };
+
+  const prepareAttachment = async (pending: PendingVibeAttachment): Promise<PendingVibeAttachment> => {
+    if (!selected || !profile?.id) throw new Error('Your owner profile is not ready for Vibe uploads.');
+    let current = pending;
+    if (!current.registered) {
+      const safeName = current.file.name.replace(/[^a-zA-Z0-9._-]/g, '_').slice(-180) || 'upload.bin';
+      const storagePath = `desktop/${profile.id}/vibe/${selected.id}/${current.id}-${safeName}`;
+      updateAttachment(current.id, { status: 'uploading', error: undefined });
+      const { error: uploadError } = await supabase.storage.from('bob-uploads').upload(storagePath, current.file, { contentType: current.fileType, upsert: false });
+      if (uploadError) throw uploadError;
+      const { error: registerError } = await supabase.rpc('builder_vibe_attachment_register', {
+        p_session_id: selected.id,
+        p_attachment_id: current.id,
+        p_file_name: current.file.name,
+        p_file_type: current.fileType,
+        p_file_size_bytes: current.file.size,
+        p_storage_path: storagePath,
+      });
+      if (registerError) {
+        await supabase.storage.from('bob-uploads').remove([storagePath]);
+        throw registerError;
+      }
+      current = { ...current, storagePath, registered: true };
+      updateAttachment(current.id, { storagePath, registered: true });
+    }
+    if (!current.fileType.startsWith('image/')) {
+      updateAttachment(current.id, { status: 'extracting', error: undefined });
+      const { data, error: extractionError } = await supabase.functions.invoke('bob-extract-document', {
+        body: { file_name: current.file.name, storage_bucket: 'bob-uploads', storage_path: current.storagePath },
+      });
+      if (extractionError) throw extractionError;
+      if (!data?.success || typeof data.text !== 'string' || typeof data.checksum !== 'string') {
+        throw new Error(`Local extraction could not read ${current.file.name}.`);
+      }
+      const extractedText = data.text.slice(0, 200000);
+      const extractionStatus = data.has_text ? 'extracted' : 'empty';
+      const { error: saveError } = await supabase.rpc('builder_vibe_attachment_set_extraction', {
+        p_session_id: selected.id,
+        p_attachment_id: current.id,
+        p_extracted_text: extractedText,
+        p_sha256: data.checksum,
+        p_extraction_status: extractionStatus,
+      });
+      if (saveError) throw saveError;
+    }
+    current = { ...current, status: 'ready', error: undefined };
+    updateAttachment(current.id, { status: 'ready', error: undefined });
+    return current;
+  };
+
+  const removeAttachment = (attachment: PendingVibeAttachment) => run(`remove-${attachment.id}`, async () => {
+    if (attachment.registered && attachment.storagePath && selected) {
+      const { error: removeError } = await supabase.storage.from('bob-uploads').remove([attachment.storagePath]);
+      if (removeError) throw removeError;
+      const { error: deleteError } = await supabase.rpc('builder_vibe_attachment_delete', { p_session_id: selected.id, p_attachment_id: attachment.id });
+      if (deleteError) throw deleteError;
+    }
+    setAttachments(current => current.filter(item => item.id !== attachment.id));
+  });
+
   const send = (action: 'message' | 'ship' | 'revert', text = '') => {
     if (!selected) return;
     void run(action, async () => {
+      if (action === 'message') {
+        const ready: PendingVibeAttachment[] = [];
+        for (const attachment of attachments) {
+          try { ready.push(await prepareAttachment(attachment)); }
+          catch (caught) {
+            const message = caught instanceof Error ? caught.message : 'Attachment processing failed.';
+            updateAttachment(attachment.id, { status: 'failed', error: message });
+            throw caught;
+          }
+        }
+        const content = text || (ready.length ? 'Please inspect the attached files and use them as context.' : '');
+        const { error: sendError } = await supabase.rpc('builder_vibe_send_with_attachments', {
+          p_session_id: selected.id,
+          p_content: content,
+          p_client_request_id: requestId(),
+          p_attachment_ids: ready.map(item => item.id),
+        });
+        if (sendError) throw sendError;
+        setDraft('');
+        setAttachments([]);
+        if (fileInput.current) fileInput.current.value = '';
+        return;
+      }
       const { error: sendError } = await supabase.rpc('builder_vibe_send', { p_session_id: selected.id, p_content: text, p_client_request_id: requestId(), p_action: action });
       if (sendError) throw sendError;
-      if (action === 'message') setDraft('');
     });
   };
 
   const submit = (event?: React.FormEvent) => {
     event?.preventDefault();
     const text = draft.trim();
-    if (!text || !selected || busy) return;
+    if ((!text && !attachments.length) || !selected || busy) return;
     send('message', text);
   };
 
@@ -257,7 +408,7 @@ export default function BuilderVibePage({ onOpenJobs }: { onOpenJobs?: () => voi
   };
 
   const closeSession = () => {
-    if (!selected || !window.confirm(`Close "${selected.title}"? The branch and any pull request stay on GitHub.`)) return;
+    if (!selected || attachments.length || !window.confirm(`Close "${selected.title}"? The branch and any pull request stay on GitHub.`)) return;
     void run('close', async () => {
       const { error: closeError } = await supabase.rpc('builder_vibe_session_close', { p_session_id: selected.id });
       if (closeError) throw closeError;
@@ -283,13 +434,13 @@ export default function BuilderVibePage({ onOpenJobs }: { onOpenJobs?: () => voi
       <aside className="vibe-rail" aria-label="Vibe sessions">
         <div className="vibe-rail__head">
           <h1><Sparkles size={18} />Vibe Builder</h1>
-          <button type="button" className="vibe-btn vibe-btn--primary" onClick={() => void newSession()} disabled={busy === 'new'}><Plus size={15} />New</button>
+          <button type="button" className="vibe-btn vibe-btn--primary" onClick={() => void newSession()} disabled={busy === 'new' || attachments.length > 0}><Plus size={15} />New</button>
         </div>
         {loadingSessions ? <p className="vibe-muted" role="status">Loading sessions…</p>
           : sessions.length === 0 ? <p className="vibe-muted">No sessions yet. Start one and describe what you want built.</p>
             : <ul className="vibe-rail__list">{sessions.map((session) => (
               <li key={session.id}>
-                <button type="button" className={`vibe-rail__item${session.id === selectedId ? ' is-active' : ''}`} aria-current={session.id === selectedId} onClick={() => setSelectedId(session.id)}>
+                <button type="button" className={`vibe-rail__item${session.id === selectedId ? ' is-active' : ''}`} aria-current={session.id === selectedId} onClick={() => { if (attachments.length) setError('Send or remove the staged attachments before switching sessions.'); else setSelectedId(session.id); }}>
                   <span className="vibe-rail__title">{session.title}</span>
                   <span className={`vibe-pill is-${session.status}`}>{STATUS_LABEL[session.status]}</span>
                   <span className="vibe-rail__meta">{session.changed_files?.length ? `${session.changed_files.length} file${session.changed_files.length === 1 ? '' : 's'} changed` : 'No changes yet'}</span>
@@ -316,10 +467,10 @@ export default function BuilderVibePage({ onOpenJobs }: { onOpenJobs?: () => voi
                 <p className="vibe-muted">{selected.branch ? <code>{selected.branch}</code> : 'Branch is created from main on your first message'}{selected.head_sha && selected.base_sha && selected.head_sha !== selected.base_sha ? ` · ${selected.changed_files.length} file(s) changed` : ''}</p>
               </div>
               <div className="vibe-chat__actions">
-                <button type="button" className="vibe-btn" onClick={() => send('revert')} disabled={!hasChanges || working || Boolean(busy)} title="Undo Bob's last change"><Undo2 size={15} />Undo</button>
-                <button type="button" className="vibe-btn vibe-btn--primary" onClick={() => send('ship')} disabled={!hasChanges || working || Boolean(busy)}><GitPullRequest size={15} />{selected.pr_url ? 'Update PR' : 'Ship as PR'}</button>
+                <button type="button" className="vibe-btn" onClick={() => send('revert')} disabled={!hasChanges || working || Boolean(busy) || attachments.length > 0} title="Undo Bob's last change"><Undo2 size={15} />Undo</button>
+                <button type="button" className="vibe-btn vibe-btn--primary" onClick={() => send('ship')} disabled={!hasChanges || working || Boolean(busy) || attachments.length > 0}><GitPullRequest size={15} />{selected.pr_url ? 'Update PR' : 'Ship as PR'}</button>
                 {selected.pr_url && <a className="vibe-btn" href={selected.pr_url} target="_blank" rel="noreferrer"><ExternalLink size={15} />PR</a>}
-                <button type="button" className="vibe-btn vibe-btn--ghost" onClick={closeSession} aria-label="Close session"><X size={15} /></button>
+                <button type="button" className="vibe-btn vibe-btn--ghost" onClick={closeSession} aria-label="Close session" disabled={attachments.length > 0}><X size={15} /></button>
                 <button type="button" className="vibe-btn vibe-only-mobile" onClick={() => setMobilePane('preview')}><MonitorPlay size={15} />Preview</button>
               </div>
             </header>
@@ -332,6 +483,17 @@ export default function BuilderVibePage({ onOpenJobs }: { onOpenJobs?: () => voi
               <div ref={threadEnd} />
             </div>
             <form className="vibe-composer" onSubmit={submit}>
+              <input ref={fileInput} className="vibe-sr-only" type="file" multiple accept={VIBE_ACCEPTED_FILES} aria-label="Attach screenshots or documents" onChange={(event) => { addFiles(event.currentTarget.files); event.currentTarget.value = ''; }} />
+              {attachments.length > 0 && <ul className="vibe-composer__attachments" aria-label="Attachments ready for Bob">
+                {attachments.map((attachment) => (
+                  <li key={attachment.id}>
+                    {attachment.fileType.startsWith('image/') ? <ImageIcon size={14} /> : <FileText size={14} />}
+                    <span>{attachment.file.name}</span>
+                    <small>{attachment.status === 'ready' ? 'Ready' : attachment.status === 'failed' ? attachment.error || 'Failed' : attachment.status === 'extracting' ? 'Extracting text…' : attachment.status === 'uploading' ? 'Uploading…' : 'Queued'}</small>
+                    <button type="button" aria-label={`Remove ${attachment.file.name}`} onClick={() => void removeAttachment(attachment)} disabled={Boolean(busy)}><X size={13} /></button>
+                  </li>
+                ))}
+              </ul>}
               <label htmlFor="vibe-input" className="vibe-sr-only">Tell Bob what to build</label>
               <textarea
                 id="vibe-input"
@@ -343,7 +505,9 @@ export default function BuilderVibePage({ onOpenJobs }: { onOpenJobs?: () => voi
                 maxLength={20000}
                 disabled={selected.status === 'closed'}
               />
-              <button type="submit" className="vibe-btn vibe-btn--primary" disabled={!draft.trim() || Boolean(busy)} aria-label="Send"><Send size={15} />Send</button>
+              <button type="button" className="vibe-btn" onClick={() => fileInput.current?.click()} disabled={selected.status === 'closed' || attachments.length >= VIBE_MAX_FILES || Boolean(busy)} aria-label="Attach screenshot or document"><Paperclip size={15} />Attach</button>
+              <button type="submit" className="vibe-btn vibe-btn--primary" disabled={(!draft.trim() && !attachments.length) || Boolean(busy)} aria-label="Send"><Send size={15} />Send</button>
+              <p className="vibe-composer__notice">Private session files only · images are analyzed on local Ollama · documents are text-extracted · nothing is registered as a business record.</p>
             </form>
           </>
         )}

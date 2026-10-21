@@ -141,6 +141,72 @@ test('a prose answer is accepted as the reply after one correction', async () =>
   assert.equal(outcome.reply, 'It currently says hi.');
 });
 
+test('Vibe image attachments use only a private, installed local vision model', async () => {
+  const image = Buffer.from('image-fixture');
+  const attachmentId = '2b3c4d5e-0000-4000-8000-000000000002';
+  const attachment = {
+    id: attachmentId,
+    session_id: SESSION_ID,
+    uploaded_by: 'owner-uuid',
+    file_name: 'error-screen.png',
+    file_type: 'image/png',
+    file_size_bytes: image.length,
+    storage_bucket: 'bob-uploads',
+    storage_path: `desktop/owner-uuid/vibe/${SESSION_ID}/${attachmentId}-error-screen.png`,
+    extraction_status: 'not_applicable',
+  };
+  const calls = [];
+  let savedPayload;
+  const store = {
+    async attachments(sessionId, ids) {
+      assert.equal(sessionId, SESSION_ID);
+      assert.deepEqual(ids, [attachmentId]);
+      return [attachment];
+    },
+    async downloadAttachment(row) {
+      assert.equal(row.id, attachmentId);
+      return image;
+    },
+    async updateOwnerPayload(_id, payload) { savedPayload = payload; },
+  };
+  const context = await vibe.prepareVibeAttachmentContext({
+    store,
+    session: { id: SESSION_ID, created_by: 'owner-uuid' },
+    message: { id: 'owner-message', payload: { attachment_ids: [attachmentId] } },
+    supabase: null,
+    deps: {
+      visionUrl: 'http://127.0.0.1:11434',
+      downloadAttachment: async () => image,
+      visionFetch: async (url, options = {}) => {
+        calls.push({ url, options });
+        if (url.endsWith('/api/tags')) return { ok: true, json: async () => ({ models: [{ name: 'moondream:latest' }] }) };
+        return { ok: true, json: async () => ({ response: 'A staff form is open with a red validation alert at the top.' }) };
+      },
+    },
+  });
+  assert.match(context[0].context, /Local visual analysis \(advisory\)/);
+  assert.match(context[0].context, /red validation alert/);
+  assert.equal(calls.length, 2);
+  assert.equal(calls[1].url, 'http://127.0.0.1:11434/api/generate');
+  assert.deepEqual(JSON.parse(calls[1].options.body).images, [image.toString('base64')]);
+  assert.match(savedPayload.attachment_context[0].context, /red validation alert/);
+});
+
+test('Vibe rejects public vision endpoints and attachment IDs from other sessions', async () => {
+  await assert.rejects(
+    vibe.assertLocalVisionUrl('https://ollama.example.com', async () => [{ address: '203.0.113.4' }]),
+    /restricted to private local vision endpoints/,
+  );
+  await assert.rejects(vibe.assertLocalVisionUrl('http://169.254.169.254'));
+  const attachmentId = '2b3c4d5e-0000-4000-8000-000000000002';
+  await assert.rejects(vibe.prepareVibeAttachmentContext({
+    store: { attachments: async () => [] },
+    session: { id: SESSION_ID },
+    message: { id: 'owner-message', payload: { attachment_ids: [attachmentId] } },
+    supabase: null,
+  }), /not registered to this Vibe session/);
+});
+
 test('revert undoes the last turn and ship pushes the branch and opens one pull request', async () => {
   process.env.BOB_BUILDER_GIT_EMAIL = '256263525+DonSquires@users.noreply.github.com';
   process.env.BOB_BUILDER_GIT_NAME = 'Don Squires';

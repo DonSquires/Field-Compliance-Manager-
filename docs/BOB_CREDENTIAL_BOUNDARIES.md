@@ -18,6 +18,21 @@ content is safe to send. The Ollama Cloud key remains available only to the
 other unrestricted workloads already governed by the model adapter; its
 presence does not authorize Vibe source-code egress.
 
+Vibe file attachments are stored in the private `bob-uploads` bucket under the
+owner's `desktop/{user_id}/vibe/{session_id}/` path and are registered against
+that exact session. The worker reads only the attachment IDs on the owner's
+message. Supported inputs are JPEG/PNG/WebP screenshots (10 MB each) and
+PDF/DOCX/TXT/CSV/XLSX documents (20 MB each; five files per message). Documents
+use the existing `bob-extract-document` text extractor; images use the
+configured local Ollama vision endpoint (`OLLAMA_VISION_URL`, otherwise the
+private `OLLAMA_BASE_URL`) and `OLLAMA_VISION_MODEL` (default `moondream`).
+The worker verifies the endpoint resolves to private addresses and confirms the
+model is installed before sending image bytes. It never falls back to a hosted
+model. Extracted text and visual descriptions are scoped to the Vibe session,
+treated as untrusted advisory context, and are not registered or promoted as
+business records. If the local vision endpoint/model is unavailable, the image
+turn fails visibly rather than claiming Bob inspected the screenshot.
+
 ## Visual baseline generation
 
 `generate_visual_baselines` is shared by the frontend agentic engineer

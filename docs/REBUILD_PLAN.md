@@ -8,6 +8,28 @@ detailed backlogs (`ENTERPRISE_SAAS_TODO.md`, `PROTOTYPE_GAP_AUDIT.md`,
 Completion language is strict, as in the lineage: **merged ≠ deployed ≠
 glass-proven.** A workstream item is done only when its evidence gate is met.
 
+Vibe Builder attachments, 2026-10-22:
+
+- Before: Vibe messages were text-only. Bob chat stored files in the private
+  `bob-uploads` bucket and had separate document/image processing paths, but
+  Vibe had no attachment-to-session relationship. Atlas had no Vibe attachment
+  capability or data-flow edge; the live schema made `bob_attachments`
+  conversation-scoped and required `conversation_id`.
+- During: the additive attachment migration defines a Vibe-session-scoped
+  receipt with owner-only reads and RPC-gated registration/removal. The browser
+  accepts selected JPEG/PNG/WebP and PDF/DOCX/TXT/CSV/XLSX files, uploads only
+  under the owner's `desktop/{user_id}/vibe/{session_id}/` path, and links them
+  to a message by checked attachment IDs. Documents use the existing text
+  extractor without business-record registration; image bytes go only to the
+  configured private Ollama vision model, with public endpoints and hosted
+  fallback refused. The worker saves bounded, provenance-linked advisory
+  context on the owner message; embedded file instructions remain untrusted.
+- After: the model receives the selected document text and local visual
+  description as context for that turn and later session history. This remains
+  a Vibe-session record, not a tenant/business record. The migration is not live
+  until the protected PR release lane applies it; Atlas should be refreshed
+  after that and wired/exercised claims must wait for their own evidence.
+
 Bob main-health visual baseline, 2026-10-21:
 
 - Before: the geofence house-map full-page baseline predated the admin-shell
