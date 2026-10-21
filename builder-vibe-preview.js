@@ -79,7 +79,7 @@ function createVibePreviewManager({ workspaceRoot, supabaseUrl, anonKey, secret,
     const hash = lockHash(webDir);
     const cacheDir = path.join(cacheRoot, hash);
     const cached = path.join(cacheDir, 'node_modules');
-    if (!fs.existsSync(path.join(cacheDir, '.complete'))) {
+    if (!fs.existsSync(path.join(cacheDir, '.complete')) || !fs.existsSync(path.join(cached, 'vite', 'package.json'))) {
       if (!installs.has(hash)) {
         installs.set(hash, new Promise((resolve, reject) => {
           fs.rmSync(cacheDir, { recursive: true, force: true });
