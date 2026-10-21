@@ -22,6 +22,7 @@ function sourceRepo() {
   fs.mkdirSync(path.join(dir, 'apps/web/src'), { recursive: true });
   fs.mkdirSync(path.join(dir, 'apps/web/node_modules'), { recursive: true });
   fs.writeFileSync(path.join(dir, 'apps/web/src/hello.ts'), 'export const hello = "hi";\n');
+  fs.writeFileSync(path.join(dir, 'apps/web/package.json'), JSON.stringify({ scripts: { lint: 'node -e "process.exit(0)"' } }));
   fs.writeFileSync(path.join(dir, 'apps/web/node_modules/.gitkeep'), '');
   fs.writeFileSync(path.join(dir, 'package.json'), '{"name":"x"}\n');
   fs.writeFileSync(path.join(dir, '.gitignore'), 'node_modules\n');
@@ -78,6 +79,70 @@ function setup(steps, extra = {}) {
 }
 
 const ownerMessage = (content, action = 'message') => ({ id: `m-${Math.random()}`, seq: 10, session_id: SESSION_ID, role: 'owner', content, payload: { action } });
+
+function installFixtureTypecheck(repo) {
+  fs.writeFileSync(path.join(repo.dir, 'apps/web/package.json'), JSON.stringify({ scripts: { lint: 'node verify.cjs' } }));
+  fs.writeFileSync(path.join(repo.dir, 'apps/web/verify.cjs'), 'const source=require("fs").readFileSync("src/hello.ts","utf8");if(source.includes("BROKEN")){console.error("fixture TypeScript failure");process.exit(2);}\n');
+  git(repo.dir, ['add', '.']);
+  git(repo.dir, ['-c', 'user.name=T', '-c', 'user.email=t@example.com', 'commit', '-qm', 'add verification fixture']);
+  repo.sha = git(repo.dir, ['rev-parse', 'HEAD']);
+}
+
+test('web TypeScript drafts are automatically checked even when the model skips verification', async () => {
+  const { store, deps, repo } = setup([
+    { thought: 'edit', tool: 'replace_in_file', args: { path: 'apps/web/src/hello.ts', old_text: '"hi"', new_text: 'BROKEN' } },
+    { thought: 'claim success', tool: 'reply', args: { message: 'Fixed and ready.' } },
+    { thought: 'blocked', tool: 'reply', args: { blocked_reason: 'The draft still needs a syntax repair.' } },
+  ]);
+  installFixtureTypecheck(repo);
+  const result = await vibe.processVibeMessage({ store, message: ownerMessage('improve greeting'), deps });
+  assert.equal(result.error, true);
+  assert.match(result.reply, /fixture TypeScript failure/);
+  const checks = store.state.rows.filter(row => row.payload?.automatic);
+  assert.equal(checks.length, 1);
+  assert.equal(checks[0].payload.ok, false);
+  assert.match(checks[0].payload.source_fingerprint, /^[a-f0-9]{64}$/);
+});
+
+test('automatic verification gives the model a repair chance and rechecks the edited source', async () => {
+  const { store, deps, repo } = setup([
+    { thought: 'edit', tool: 'replace_in_file', args: { path: 'apps/web/src/hello.ts', old_text: '"hi"', new_text: 'BROKEN' } },
+    { thought: 'claim', tool: 'reply', args: { message: 'Done.' } },
+    { thought: 'repair', tool: 'replace_in_file', args: { path: 'apps/web/src/hello.ts', old_text: 'BROKEN', new_text: '"fixed"' } },
+    { thought: 'handoff', tool: 'reply', args: { message: 'Fixed the draft and verified.' } },
+  ]);
+  installFixtureTypecheck(repo);
+  const result = await vibe.processVibeMessage({ store, message: ownerMessage('improve greeting'), deps });
+  assert.equal(result.error, undefined);
+  const checks = store.state.rows.filter(row => row.payload?.automatic);
+  assert.deepEqual(checks.map(row => row.payload.ok), [false, true]);
+  assert.notEqual(checks[0].payload.source_fingerprint, checks[1].payload.source_fingerprint);
+});
+
+test('an earlier passing model check cannot verify a later broken edit', async () => {
+  const { store, deps, repo } = setup([
+    { thought: 'check', tool: 'run', args: { command: 'npm run lint --prefix apps/web' } },
+    { thought: 'break', tool: 'replace_in_file', args: { path: 'apps/web/src/hello.ts', old_text: '"hi"', new_text: 'BROKEN' } },
+    { thought: 'handoff', tool: 'reply', args: { blocked_reason: 'Needs repair.' } },
+  ]);
+  installFixtureTypecheck(repo);
+  const result = await vibe.processVibeMessage({ store, message: ownerMessage('improve greeting'), deps });
+  assert.equal(result.error, true);
+  assert.equal(store.state.rows.find(row => row.payload?.automatic).payload.ok, false);
+});
+
+test('step-budget exhaustion still verifies and labels a broken draft', async () => {
+  const { store, deps, repo } = setup([
+    { thought: 'edit', tool: 'replace_in_file', args: { path: 'apps/web/src/hello.ts', old_text: '"hi"', new_text: 'BROKEN' } },
+  ]);
+  installFixtureTypecheck(repo);
+  const result = await vibe.processVibeMessage({
+    store, message: ownerMessage('improve greeting'), deps, limits: { ...vibe.VIBE_LIMITS, maxTurns: 1 },
+  });
+  assert.equal(result.error, true);
+  assert.match(result.reply, /Changes are not verified/);
+  assert.match(result.reply, /ran out of steps/);
+});
 
 test('vibe branch and workspace names are fixed to the session id', () => {
   assert.equal(vibe.vibeBranchName(SESSION_ID), 'bob/vibe-1a2b3c4d');
