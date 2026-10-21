@@ -1,5 +1,24 @@
 const TERMINAL_STATUSES = new Set(['deployed', 'failed', 'cancelled']);
 const ORPHAN_RETENTION_MS = 7 * 24 * 60 * 60 * 1000;
+const { isHealthTestPath } = require('./supabase/functions/_shared/builder-repository-context');
+
+function historicalHealthResolution(job, {
+  currentMainSha, currentMainHealthPassed, activeExecution = false, verifiedFiles = [],
+} = {}) {
+  if (!job?.id || !['failed', 'cancelled'].includes(job.status)
+    || job.autopilot_source !== 'main_monitor' || job.autopilot_state === 'done'
+    || activeExecution || job.workspace_branch || job.workspace_pull_request_url
+    || currentMainHealthPassed !== true || !/^[a-f0-9]{40}$/.test(String(currentMainSha || ''))
+    || !/^[a-f0-9]{40}$/.test(String(job.source_main_health_sha || ''))
+    || job.source_main_health_sha === currentMainSha) return null;
+  const files = job.source_main_health_files;
+  if (!Array.isArray(files) || !files.length || files.length > 8
+    || files.some(file => !isHealthTestPath(file) || !verifiedFiles.includes(file))) return null;
+  return {
+    outcome: 'resolved_historical_main_health',
+    reason: `Current main ${currentMainSha} passed all health steps and still contains this repair's failing test files; the historical ${job.status} status is preserved.`,
+  };
+}
 
 function jobHygieneDecision(job, {
   currentMainSha,
@@ -48,4 +67,4 @@ function jobHygieneDecision(job, {
   return null;
 }
 
-module.exports = { ORPHAN_RETENTION_MS, TERMINAL_STATUSES, jobHygieneDecision };
+module.exports = { ORPHAN_RETENTION_MS, TERMINAL_STATUSES, jobHygieneDecision, historicalHealthResolution };

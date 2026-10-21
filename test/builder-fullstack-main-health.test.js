@@ -136,6 +136,7 @@ test('Postgres creates fullstack repairs, deduplicates, scopes tenancy, and deni
     const migration = [
       '20261019150000_builder_fullstack_main_health_repairs.sql',
       '20261021081500_builder_root_health_tests.sql',
+      '20261021083500_builder_historical_health_resolution.sql',
     ].map(file => fs.readFileSync(path.resolve(__dirname, '../supabase/migrations', file), 'utf8')).join('\n');
     const sql = `
 CREATE ROLE anon; CREATE ROLE authenticated; CREATE ROLE service_role;
@@ -145,14 +146,21 @@ CREATE TABLE builder_projects(id uuid PRIMARY KEY, organization_id uuid, status 
 CREATE TABLE builder_jobs(id uuid PRIMARY KEY DEFAULT gen_random_uuid(), organization_id uuid, project_id uuid, parent_job_id uuid,
   status text DEFAULT 'intake', autopilot_source text, repair_risk text, source_main_health_sha text, source_main_health_files text[],
   autopilot_state text, autopilot_updated_at timestamptz, updated_at timestamptz, created_at timestamptz DEFAULT now(),
-  frontend_required boolean, backend_required boolean, target_sha text, source_friction_packet_id uuid, last_error text);
+  frontend_required boolean, backend_required boolean, target_sha text, source_friction_packet_id uuid, last_error text,
+  workspace_branch text, workspace_pull_request_url text, autopilot_report jsonb);
 CREATE TABLE builder_audit_events(organization_id uuid, job_id uuid, event_type text, actor_type text, new_value jsonb, change_summary text,
  actor_user_id uuid, previous_value jsonb, related_artifact_ids uuid[], related_approval_id uuid);
+ALTER TABLE builder_audit_events ADD CONSTRAINT builder_audit_events_event_type_check
+ CHECK(event_type IN ('job_created','job_status_changed','step_started','step_completed','step_failed','step_blocked',
+ 'artifact_created','approval_requested','approval_approved','approval_rejected','model_run_started','model_run_completed',
+ 'model_run_failed','error_recorded','job_cancelled','builder_job_policy_bound'));
 CREATE TABLE builder_approvals(id uuid PRIMARY KEY, job_id uuid, organization_id uuid, status text, approval_type text,
  triggered_at_status text, requested_target_sha text, reviewed_artifact_ids uuid[], expires_at timestamptz,
  approved_by uuid, decided_by uuid, approval_comment text, responded_at timestamptz, updated_at timestamptz);
 CREATE TABLE bob_friction_packets(id uuid, repair_risk text, route text, stop_line_hit text, user_id uuid);
 CREATE TABLE builder_artifacts(id uuid, job_id uuid, status text);
+CREATE TABLE builder_model_runs(job_id uuid,status text);
+CREATE TABLE builder_worker_runs(job_id uuid,status text);
 CREATE FUNCTION builder_autopilot_decide_approval(uuid,text) RETURNS builder_jobs LANGUAGE plpgsql AS $$ BEGIN
  RAISE EXCEPTION 'unexpected human-request fallback';
 END $$;
@@ -176,6 +184,30 @@ BEGIN
  VALUES ('00000000-0000-4000-8000-000000000099',again.id,o,'pending','specification_review','specification_ready',repeat('c',40),ARRAY[]::uuid[],now()+interval '1 hour');
  SELECT * INTO again FROM builder_autopilot_decide_approval_guarded('00000000-0000-4000-8000-000000000099','Bounded root repair');
  IF again.status <> 'design_pending' THEN RAISE EXCEPTION 'root specification gate blocked'; END IF;
+ UPDATE builder_jobs SET status='failed',autopilot_state='blocked',last_error='original failure' WHERE id=again.id;
+ SELECT * INTO again FROM builder_resolve_historical_health_job(again.id,o,p,repeat('d',40),repeat('c',40),
+  ARRAY['test/root.test.js','test/module.test.mjs'],
+  jsonb_build_object('status','passed','profile','main-health','sha',repeat('d',40),'checked_at',now()));
+ IF again.status <> 'failed' OR again.last_error <> 'original failure' OR again.autopilot_state <> 'done' THEN
+  RAISE EXCEPTION 'historical status or failure truth changed'; END IF;
+ PERFORM builder_resolve_historical_health_job(again.id,o,p,repeat('d',40),repeat('c',40),
+  ARRAY['test/root.test.js','test/module.test.mjs'],
+  jsonb_build_object('status','passed','profile','main-health','sha',repeat('d',40),'checked_at',now()));
+ IF (SELECT count(*) FROM builder_audit_events WHERE job_id=again.id AND new_value->>'outcome'='resolved_historical_main_health') <> 1 THEN
+  RAISE EXCEPTION 'resolution audit was not idempotent'; END IF;
+ UPDATE builder_jobs SET autopilot_state='blocked' WHERE id=again.id;
+ BEGIN
+  PERFORM builder_resolve_historical_health_job(again.id,o,p,repeat('d',40),repeat('c',40),ARRAY['test/root.test.js'],
+   jsonb_build_object('status','passed','profile','main-health','sha',repeat('d',40),'checked_at',now()));
+  RAISE EXCEPTION 'partial proof accepted';
+ EXCEPTION WHEN raise_exception THEN IF SQLERRM='partial proof accepted' THEN RAISE; END IF; END;
+ INSERT INTO builder_worker_runs VALUES (again.id,'running');
+ BEGIN
+  PERFORM builder_resolve_historical_health_job(again.id,o,p,repeat('d',40),repeat('c',40),ARRAY['test/root.test.js','test/module.test.mjs'],
+   jsonb_build_object('status','passed','profile','main-health','sha',repeat('d',40),'checked_at',now()));
+  RAISE EXCEPTION 'active historical execution accepted';
+ EXCEPTION WHEN raise_exception THEN IF SQLERRM='active historical execution accepted' THEN RAISE; END IF; END;
+ DELETE FROM builder_worker_runs;
  IF builder_main_health_test_path_valid(NULL) OR builder_main_health_test_path_valid('test/../escape.test.js')
     OR builder_main_health_test_path_valid('test/nested/root.test.js') THEN RAISE EXCEPTION 'unsafe root scope accepted'; END IF;
  SELECT * INTO again FROM builder_open_main_health_repair('00000000-0000-4000-8000-000000000004','00000000-0000-4000-8000-000000000003',repeat('a',40),repeat('a',40),'Repair','Root cause',ARRAY['apps/web/src/example.test.ts']);
