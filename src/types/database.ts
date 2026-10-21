@@ -4542,6 +4542,66 @@ export type Database = {
           },
         ]
       }
+      builder_vibe_attachments: {
+        Row: {
+          created_at: string
+          extracted_text: string
+          extraction_status: string
+          file_name: string
+          file_size_bytes: number
+          file_type: string
+          id: string
+          session_id: string
+          sha256: string | null
+          storage_bucket: string
+          storage_path: string
+          uploaded_by: string
+        }
+        Insert: {
+          created_at?: string
+          extracted_text?: string
+          extraction_status?: string
+          file_name: string
+          file_size_bytes: number
+          file_type: string
+          id: string
+          session_id: string
+          sha256?: string | null
+          storage_bucket?: string
+          storage_path: string
+          uploaded_by: string
+        }
+        Update: {
+          created_at?: string
+          extracted_text?: string
+          extraction_status?: string
+          file_name?: string
+          file_size_bytes?: number
+          file_type?: string
+          id?: string
+          session_id?: string
+          sha256?: string | null
+          storage_bucket?: string
+          storage_path?: string
+          uploaded_by?: string
+        }
+        Relationships: [
+          {
+            foreignKeyName: "builder_vibe_attachments_session_id_fkey"
+            columns: ["session_id"]
+            isOneToOne: false
+            referencedRelation: "builder_vibe_sessions"
+            referencedColumns: ["id"]
+          },
+          {
+            foreignKeyName: "builder_vibe_attachments_uploaded_by_fkey"
+            columns: ["uploaded_by"]
+            isOneToOne: false
+            referencedRelation: "user_profiles"
+            referencedColumns: ["id"]
+          },
+        ]
+      }
       builder_vibe_messages: {
         Row: {
           claimed_at: string | null
@@ -37647,6 +37707,31 @@ export type Database = {
           isSetofReturn: false
         }
       }
+      builder_vibe_attachment_delete: {
+        Args: { p_attachment_id: string; p_session_id: string }
+        Returns: undefined
+      }
+      builder_vibe_attachment_register: {
+        Args: {
+          p_attachment_id: string
+          p_file_name: string
+          p_file_size_bytes: number
+          p_file_type: string
+          p_session_id: string
+          p_storage_path: string
+        }
+        Returns: string
+      }
+      builder_vibe_attachment_set_extraction: {
+        Args: {
+          p_attachment_id: string
+          p_extracted_text: string
+          p_extraction_status: string
+          p_session_id: string
+          p_sha256: string
+        }
+        Returns: undefined
+      }
       builder_vibe_claim_next: {
         Args: never
         Returns: {
@@ -37684,6 +37769,15 @@ export type Database = {
         Args: {
           p_action?: string
           p_client_request_id?: string
+          p_content: string
+          p_session_id: string
+        }
+        Returns: string
+      }
+      builder_vibe_send_with_attachments: {
+        Args: {
+          p_attachment_ids: string[]
+          p_client_request_id: string
           p_content: string
           p_session_id: string
         }
