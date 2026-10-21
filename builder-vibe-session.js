@@ -15,7 +15,7 @@ const { isProtectedPath, protectedReason, normalizeRepoPath } = require('./build
 const { VIBE_BRANCH_PREFIX, builderCommitIdentity, redactGitError } = require('./builder-branch-workspace');
 const { buildModelRunRequest, callModelGateway, fetchModelHealth, selectProviders, providerRequest } = require('./supabase/functions/_shared/builder-model-adapter');
 
-const PROMPT_VERSION = 'vibe-v2';
+const PROMPT_VERSION = 'vibe-v3';
 const VIBE_LIMITS = Object.freeze({
   maxTurns: Math.max(6, Number(process.env.BOB_VIBE_TURNS || 40)),
   wallBudgetMs: Math.max(60_000, Number(process.env.BOB_VIBE_BUDGET_MS || 20 * 60_000)),
@@ -72,6 +72,8 @@ function vibeSystemPrompt(limits = VIBE_LIMITS) {
     '- atlas {action: capability_map|terrain_edges|gap_report|blast_radius, name?, type?, direction?, depth?, limit?}  live build map (flow_reach and fk_reach are different truths)',
     '- live_count {table, column?, equals?}  aggregate row counts only',
     '- read_canon {} | read_notes {limit?} | write_note {text}',
+    '- firewall_status {}  the VPS firewall: Bob chains, ufw, tailscale peers, worker network (bob-workers 172.31.250.0/24; your test runs have network incl. the tailnet)',
+    '- firewall_change {op: add|remove, rule: {chain: input|worker_egress, action: allow|deny, protocol?: tcp|udp|all, port?, source? (input), destination? (worker_egress), comment}, purpose}  applies LIVE immediately and is audited (owner ruling 2026-10-21). Only change the firewall when the owner asked or a task truly needs it; say exactly what you changed. Lockouts of SSH/80/443/Tailscale are refused.',
     '- reply {message}  END YOUR TURN: tell the owner, in a few plain sentences, what you changed (files), what you verified, and anything they should check in the preview. Use markdown sparingly.',
   ].join('\n');
 }
@@ -85,8 +87,8 @@ function describeArgs(tool, args) {
 }
 
 function toolHeadline(tool, args) {
-  const target = args.path || args.query || args.command || args.name || args.table || '';
-  const verbs = { list_dir: 'Listing', read_file: 'Reading', outline: 'Outlining', search: 'Searching', git_log: 'Checking history', git_diff: 'Reviewing diff', write_file: 'Writing', replace_in_file: 'Editing', apply_patch: 'Patching', delete_file: 'Deleting', run: 'Running', atlas: 'Querying Atlas', live_count: 'Counting live rows', read_canon: 'Reading the canon', read_notes: 'Reading notes', write_note: 'Saving a note' };
+  const target = tool === 'firewall_change' && args.rule ? `${args.op} ${args.rule.chain} ${args.rule.action} ${args.rule.protocol || 'tcp'}/${args.rule.port || 'any'}` : args.path || args.query || args.command || args.name || args.table || '';
+  const verbs = { list_dir: 'Listing', read_file: 'Reading', outline: 'Outlining', search: 'Searching', git_log: 'Checking history', git_diff: 'Reviewing diff', write_file: 'Writing', replace_in_file: 'Editing', apply_patch: 'Patching', delete_file: 'Deleting', run: 'Running', atlas: 'Querying Atlas', live_count: 'Counting live rows', read_canon: 'Reading the canon', read_notes: 'Reading notes', write_note: 'Saving a note', firewall_status: 'Checking the firewall', firewall_change: 'Changing the firewall' };
   return `${verbs[tool] || tool}${target ? ` ${String(target).slice(0, 160)}` : ''}`;
 }
 
@@ -182,6 +184,10 @@ function branchState(workspacePath, baseSha) {
 async function runConversation({ store, session, message, workspacePath, branch, baseSha, gateway, deps, limits }) {
   const supabase = deps.supabase;
   const tools = createTools({ workspacePath, repoRoot: workspacePath, lane: 'fullstack', supabase, limits, log: () => {} });
+  if (deps.firewall) {
+    tools.firewall_status = () => deps.firewall.status();
+    tools.firewall_change = args => deps.firewall.change({ op: args.op, rule: args.rule, purpose: args.purpose });
+  }
   const history = await store.history(session.id, message.seq);
   const state = branchState(workspacePath, baseSha);
   const transcript = history.map(entry => `${entry.role === 'owner' ? 'OWNER' : 'BOB'}: ${clip(entry.content, 3000)}`).join('\n\n');

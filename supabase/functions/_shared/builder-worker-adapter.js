@@ -302,8 +302,9 @@ function buildWorkerExecutionPlan({
       ],
     },
 
-    // Network isolation (no network by default)
-    network: 'none',
+    // Bob's worker bridge network (owner ruling 2026-10-21): tailnet reachable, governed by the
+    // BOB-WORKER-EGRESS firewall chain; BOB_WORKER_NETWORK=none on the host restores offline runs.
+    network: 'bob-workers',
 
     // Artifact capture
     capture_stdout: true,

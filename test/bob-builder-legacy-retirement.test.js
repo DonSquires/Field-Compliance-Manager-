@@ -25,7 +25,7 @@ test('legacy Builder interfaces retire only after their active replacements are 
   assert.doesNotMatch(securityHandoff, /builder_claim_security_review['"]/);
   assert.match(approvalsPage, /rpc\('get_approvals_activity'/);
   assert.doesNotMatch(approvalsPage, /get_builder_approvals_activity/);
-  assert.match(workerExecutor, /--network=none/);
+  assert.match(workerExecutor, /--network=\$\{workerNetwork\(profile, env\)\}/);
   assert.match(workerExecutor, /const environment = options\.environment \|\| \{\}/);
   assert.doesNotMatch(workerExecutor, /builder_protected_variables/);
 

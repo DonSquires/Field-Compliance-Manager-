@@ -851,7 +851,7 @@ test('worker mounts are translated to host paths when the control plane runs in 
   const args = dockerArguments({ image: 'fcm/bob-worker:current', sourceDir: '/data/builder-workspaces/bob-job-x', artifactDir: '/data/tmp/bob-backend-worker-1', profile: 'backend-verify', env });
   assert.ok(args.includes('type=bind,src=/var/lib/bob/builder-workspaces/bob-job-x,dst=/workspace,readonly'));
   assert.ok(args.includes('type=bind,src=/var/lib/bob/tmp/bob-backend-worker-1,dst=/artifacts'));
-  assert.ok(args.includes('--network=none') && args.includes('--cap-drop=ALL'));
+  assert.ok(args.includes('--network=bob-workers') && args.includes('--cap-drop=ALL'));
 });
 
 test('path policy classifies evidential work (owner ruling 2026-09-26: human approval required)', () => {

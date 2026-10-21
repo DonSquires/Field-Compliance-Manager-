@@ -243,7 +243,7 @@ test('Builder worker: buildWorkerExecutionPlan isolates network', () => {
   });
 
   assert.ok(plan);
-  assert.equal(plan.network, 'none');
+  assert.equal(plan.network, 'bob-workers');
 });
 
 test('Builder worker: getBuilderImage returns node for all modes', () => {

@@ -40,6 +40,16 @@ audit event. It must never accept a password or token supplied in a Bob prompt.
 | VPS/PTT/control-plane tokens | Their specific server-side viewer or control-plane function | Inspect or operate the named approved service | General repository, database, or browser access |
 | `OLLAMA_API_TOKEN` (Ollama Cloud key; also accepted as `OLLAMA_API_KEY`) | VPS control-plane model gateway only (`/var/lib/bob/control-plane.env`), sent as a Bearer header to `https://ollama.com` | Bob Builder's subscription model tier for unrestricted work, after the laptop GPU and VPS Ollama and before paid OpenAI | Restricted/local-only work (the router strips it), local Ollama hosts, browser, Bob prompts, logs, health output, issue text |
 | Bob laptop SSH key (`/var/lib/bob/laptop/id_ed25519`, VPS only) | `bob-laptop-shell.js` in the control plane, over Tailscale, to the owner's laptop only, while the owner's `laptop-tailscale.ps1 -Allow` switch is on | Owner-confirmed PowerShell commands (read files, check the GPU link, setup the owner asked for) | Any other host, unattended or unconfirmed commands, destructive/privilege/credential/firewall changes (refused by the deny list), copying the key anywhere |
+| Host docker socket → VPS firewall (owner ruling 2026-10-21: Bob changes the firewall directly) | `bob-firewall.js` in the control plane, via `/api/bob/firewall/*` (control-room actions `firewall_status`/`firewall_change`, grand master only) and Vibe Builder's `firewall_status`/`firewall_change` tools | Structured allow/deny rules in the Bob-owned `BOB-INPUT` (from `INPUT`) and `BOB-WORKER-EGRESS` (from `DOCKER-USER`, worker subnet `172.31.250.0/24`) chains; persisted in `/var/lib/bob/firewall/rules.json` and re-applied at control-plane start; every change audited (`firewall.change`) | Free-form shell, other chains, UFW/Docker/Tailscale rules, denies that lock out SSH (22), the public app (80/443) or Tailscale (udp 41641) — refused; laptop firewall (still owner-only) |
+
+### Worker network (owner ruling 2026-10-21)
+
+Verification, build, test and main-health workers run on Bob's own `bob-workers` Docker bridge
+network (created on demand, subnet `172.31.250.0/24`), which reaches the internet and the Tailscale
+tailnet through the VPS. Workers still receive no credentials (only the named human-test variables
+for the human-QA profiles), run read-only with all capabilities dropped and without the Docker socket,
+and their outbound traffic is governed by the `BOB-WORKER-EGRESS` chain. `BOB_WORKER_NETWORK=none`
+in `control-plane.env` restores fully offline workers; `host` is refused.
 
 ## Monitoring record
 

@@ -1,4 +1,5 @@
 const { spawn } = require('node:child_process');
+const { WORKER_NETWORK, WORKER_SUBNET } = require('./bob-firewall');
 
 const WORKER_PROFILES = Object.freeze({
   assessment: Object.freeze(['node', '/opt/bob/assessment-manifest.js', '/workspace', '/artifacts/system-assessment.json']),
@@ -31,6 +32,16 @@ function hostPath(containerPath, env = process.env) {
   throw new Error(`worker mount must live under ${from} to be visible to the host docker daemon: ${containerPath}`);
 }
 
+// Owner ruling 2026-10-21: workers get the network, tailnet included, on Bob's own bridge network
+// (bob-workers) so the BOB-WORKER-EGRESS firewall chain can govern it. BOB_WORKER_NETWORK=none
+// restores the offline sandbox. Workers still get no credentials beyond the human-test keys below.
+function workerNetwork(profile, env = process.env) {
+  const configured = String(env.BOB_WORKER_NETWORK || WORKER_NETWORK).trim();
+  if (!/^[A-Za-z0-9][A-Za-z0-9_.-]{0,63}$/.test(configured) || configured === 'host') throw new Error(`unsupported worker network: ${configured}`);
+  if (configured === 'none' && profile === 'human-qa-live') return 'bridge';
+  return configured;
+}
+
 function dockerArguments({ image, sourceDir, artifactDir, profile, memory = '2g', cpus = '1', pidsLimit = 256, environment = {}, env = process.env }) {
   if (!image) throw new Error('worker image is required');
   if (!sourceDir || !artifactDir) throw new Error('sourceDir and artifactDir are required');
@@ -40,7 +51,7 @@ function dockerArguments({ image, sourceDir, artifactDir, profile, memory = '2g'
   const browserProfile = profile === 'human-qa' || profile === 'human-qa-live' || profile === 'main-health' || profile === 'full-page-audit';
   const args = [
     'run', '--rm', '--init',
-    profile === 'human-qa-live' ? '--network=bridge' : '--network=none',
+    `--network=${workerNetwork(profile, env)}`,
     '--read-only',
     '--cap-drop=ALL',
     '--security-opt=no-new-privileges:true',
@@ -68,10 +79,34 @@ function dockerArguments({ image, sourceDir, artifactDir, profile, memory = '2g'
   return args;
 }
 
-function executeWorker(options, { spawnImpl = spawn } = {}) {
+const ensuredNetworks = new Map();
+function ensureWorkerNetwork(name, { spawnImpl = spawn } = {}) {
+  if (['none', 'bridge'].includes(name)) return Promise.resolve();
+  if (!ensuredNetworks.has(name)) {
+    const run = args => new Promise(resolve => {
+      const child = spawnImpl('docker', args, { stdio: ['ignore', 'ignore', 'pipe'] });
+      let stderr = '';
+      child.stderr?.on('data', chunk => { stderr += chunk; });
+      child.on('error', error => resolve({ code: null, stderr: error.message }));
+      child.on('close', code => resolve({ code, stderr }));
+    });
+    const subnet = name === WORKER_NETWORK ? ['--subnet', WORKER_SUBNET] : [];
+    const pending = run(['network', 'inspect', name]).then(async inspected => {
+      if (inspected.code === 0) return;
+      const created = await run(['network', 'create', '--driver', 'bridge', ...subnet, name]);
+      if (created.code !== 0 && !/already exists/i.test(created.stderr)) throw new Error(`could not create worker network ${name}: ${created.stderr.trim()}`);
+    });
+    pending.catch(() => ensuredNetworks.delete(name));
+    ensuredNetworks.set(name, pending);
+  }
+  return ensuredNetworks.get(name);
+}
+
+async function executeWorker(options, { spawnImpl = spawn } = {}) {
   const timeoutMs = options.timeoutMs || 10 * 60 * 1000;
   const environment = options.environment || {};
   const args = dockerArguments({ ...options, environment });
+  await ensureWorkerNetwork(workerNetwork(options.profile, options.env || process.env), { spawnImpl });
   return new Promise((resolve, reject) => {
     const child = spawnImpl('docker', args, {
       stdio: ['ignore', 'pipe', 'pipe'],
@@ -115,4 +150,4 @@ function redact(value) {
     .replace(/(sk-[A-Za-z0-9_-]+)/g, '[REDACTED]');
 }
 
-module.exports = { WORKER_PROFILES, dockerArguments, executeWorker, hostPath, redact, summarizeHumanTest, workerCommand };
+module.exports = { WORKER_PROFILES, dockerArguments, ensureWorkerNetwork, executeWorker, workerNetwork, hostPath, redact, summarizeHumanTest, workerCommand };

@@ -23,6 +23,7 @@ const { fileSha256, listRepositoryTree, readRepositoryFile, searchRepository } =
 const { autopilotTick, listAutopilotJobs, listPendingApprovals } = require('./builder-autopilot');
 const { laptopStatus, runLaptopCommand, laptopConfig, loadLaptopLink, mergeLaptopLink, describeLink } = require('./bob-laptop-shell');
 const { createVibeWorker, vibeWorkspacePath } = require('./builder-vibe-session');
+const { createFirewall } = require('./bob-firewall');
 const { createVibePreviewManager } = require('./builder-vibe-preview');
 const { createBranchWorkspace, createDetachedWorkspace, retireTerminalWorkspace, commitVerifiedPatch, publishWorkspaceBranch, createGiteaPullRequest, workspacePathForBranch, createGitHubPullRequest, mergeGitHubPullRequest, ensureSourceCheckout, githubAuthHeader, githubRepoUrl, githubSshRepoUrl, resolveRemoteHead, redactGitError } = require('./builder-branch-workspace');
 const { executeWorker, summarizeHumanTest } = require('./worker-executor');
@@ -63,6 +64,11 @@ const builderGateway = {
   apiToken: modelGatewayToken
 };
 const builderWorkerImage = process.env.BOB_WORKER_IMAGE || '';
+const firewall = createFirewall({ stateDir, image: builderWorkerImage });
+// Re-apply Bob's saved firewall rules (iptables does not survive a reboot on its own).
+if (builderWorkerImage && process.env.BOB_FIREWALL_RECONCILE !== 'off') {
+  firewall.reconcile().then(result => console.log(`bob firewall reconciled: ${result.applied} rule(s)`), error => console.error(`bob firewall reconcile failed: ${error.message}`));
+}
 const builderRunnerId = process.env.BOB_BUILDER_RUNNER_ID || 'bob-builder-runtime';
 const builderWorkspaceRoot = process.env.BOB_BUILDER_WORKSPACE_ROOT || '/data/builder-workspaces';
 const giteaBaseUrl = process.env.GITEA_BASE_URL || '';
@@ -1371,6 +1377,25 @@ async function route(req, res, body) {
     });
     return json(res, result.status, result);
   }
+  // Bob's VPS firewall (owner ruling 2026-10-21: direct, audited). Structured rules only; the
+  // module refuses lockouts of SSH, the public app and Tailscale.
+  if (req.method === 'GET' && url.pathname === '/api/bob/firewall/status') {
+    if (!authorized(req)) return json(res, 401, { error: 'unauthorized' });
+    try { return json(res, 200, await firewall.status()); } catch (error) { return json(res, 503, { error: error.message }); }
+  }
+  if (req.method === 'POST' && url.pathname === '/api/bob/firewall/change') {
+    if (!authorized(req)) return json(res, 401, { error: 'unauthorized' });
+    const requestedBy = typeof body?.requested_by === 'string' ? body.requested_by.slice(0, 120) : 'bob';
+    const purpose = typeof body?.purpose === 'string' ? body.purpose.slice(0, 300) : null;
+    try {
+      const result = await firewall.change({ op: body?.op, rule: body?.rule });
+      record(requestedBy, 'firewall.change', result.rule ? `${body.op}:${result.rule.chain}` : null, { op: body?.op, rule: result.rule ?? body?.rule ?? null, changed: result.changed, purpose, rule_count: result.rules.length });
+      return json(res, 200, result);
+    } catch (error) {
+      record(requestedBy, 'firewall.change.refused', null, { op: body?.op ?? null, rule: body?.rule ?? null, purpose, error: error.message });
+      return json(res, 400, { ok: false, error: error.message });
+    }
+  }
   const isAssessmentRoute = url.pathname === '/assessment' || ['/api/bob/assessment', '/api/bob/builder/assessment'].includes(url.pathname);
   if (req.method === 'GET' && isAssessmentRoute) {
     if (!authorized(req)) return json(res, 401, { error: 'unauthorized' });
@@ -1651,6 +1676,14 @@ const vibePreview = vibeEnabled ? createVibePreviewManager({
 const vibeWorker = vibeEnabled ? createVibeWorker({
   supabase: builderSupabase,
   deps: {
+    firewall: {
+      status: () => firewall.status(),
+      change: async ({ op, rule, purpose }) => {
+        const result = await firewall.change({ op, rule });
+        record('bob-vibe', 'firewall.change', result.rule ? `${op}:${result.rule.chain}` : null, { op, rule: result.rule, changed: result.changed, purpose: purpose ?? null, rule_count: result.rules.length });
+        return result;
+      },
+    },
     workspaceRoot: builderWorkspaceRoot,
     gateway: builderGateway,
     sourceDirFor: sha => builderGitSource(sha),

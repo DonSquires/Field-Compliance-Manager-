@@ -35,10 +35,10 @@ Goal: make Bob a governed enterprise copilot that can assess, propose, and prepa
 ### Safe Worker Execution
 
 - [x] Launch each worker in a disposable non-root workspace with CPU, memory, wall-clock, and disk limits. `worker-executor.js` enforces read-only source mounts, bounded tmpfs work areas, CPU/memory/PID limits, and a fixed worker profile command.
-- [x] Apply a command allowlist, network policy, secret-redaction layer, and automatic cleanup. The worker has no network, no Docker socket, dropped capabilities, `no-new-privileges`, redacted output, and handoff cleanup in `finally` blocks.
+- [x] Apply a command allowlist, network policy, secret-redaction layer, and automatic cleanup. The worker has no Docker socket and no credentials (network: Bob's `bob-workers` bridge incl. the tailnet, governed by the `BOB-WORKER-EGRESS` chain — owner ruling 2026-10-21), dropped capabilities, `no-new-privileges`, redacted output, and handoff cleanup in `finally` blocks.
 - [x] Bind worker verification idempotency to job, step, pinned commit SHA, and generated patch checksum. Completed inputs cannot run twice; lease recovery reuses the run and increments `attempt_count` without duplicating artifacts.
 - [x] Add isolated verification adapters for frontend patch validation, TypeScript lint, production build, calibrated single-worker unit tests, serial Playwright browser checks, and static secret/security scanning. The Browser worker uses the pinned Playwright image and is verified to run as the executor's non-root identity with network disabled.
-- [ ] Define the separate human-approved dependency-audit process for package manifest changes; autonomous workers reject dependency manifests and run without network access.
+- [ ] Define the separate human-approved dependency-audit process for package manifest changes; autonomous workers reject dependency manifests (they have network since 2026-10-21, but dependencies still come only from the image).
 - [ ] Store logs and artifacts with checksums, retention policy, provenance, and job-scoped access control.
 
 ### Human Approval and First Vertical Slice
