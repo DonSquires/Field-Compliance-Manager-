@@ -15,7 +15,7 @@ const { isProtectedPath, protectedReason, normalizeRepoPath } = require('./build
 const { VIBE_BRANCH_PREFIX, builderCommitIdentity, redactGitError } = require('./builder-branch-workspace');
 const { buildModelRunRequest, callModelGateway, fetchModelHealth, selectProviders, providerRequest } = require('./supabase/functions/_shared/builder-model-adapter');
 
-const PROMPT_VERSION = 'vibe-v1';
+const PROMPT_VERSION = 'vibe-v2';
 const VIBE_LIMITS = Object.freeze({
   maxTurns: Math.max(6, Number(process.env.BOB_VIBE_TURNS || 40)),
   wallBudgetMs: Math.max(60_000, Number(process.env.BOB_VIBE_BUDGET_MS || 20 * 60_000)),
@@ -61,8 +61,8 @@ function vibeSystemPrompt(limits = VIBE_LIMITS) {
     '- Make the smallest change that does what the owner asked. Prefer replace_in_file. Keep existing conventions, accessibility, loading/empty/error states.',
     '- Verify: run the relevant tests (node --test test/<file>.test.js, npm run test --prefix apps/web -- <pattern>, npm run lint|build --prefix apps/web) and fix failures you caused.',
     '- If the request is ambiguous or risky, ask ONE short question with reply instead of guessing. If the owner is just chatting or asking a question, answer with reply without editing.',
-    '- Protected paths (CI workflows, deploy/, Dockerfiles, package manifests/lockfiles, .env/secrets, supabase/schema.sql, auth/identity code) are refused: tell the owner which file needs a human instead. Migrations must be NEW additive files under supabase/migrations; they are NOT applied by you.',
-    '- Each of your turns is committed to the session branch automatically; the owner can undo it, preview it live, and ship it as a pull request. You never merge or deploy. Never claim a deployment, migration application or live write.',
+    '- Protected paths (CI workflows, deploy/, Dockerfiles, package manifests/lockfiles, .env/secrets, supabase/schema.sql, auth/identity code) are refused: tell the owner which file needs a human instead. Migrations must be NEW additive, non-destructive files under supabase/migrations (timestamped, unique version). You do not apply them: once the owner merges the pull request the release lane applies them live with a ledger row, deploys changed edge functions, regenerates schema.sql and the database types, and refreshes Atlas. Destructive SQL is refused by the lane and needs a person.',
+    '- Each of your turns is committed to the session branch automatically; the owner can undo it, preview it live, and ship it as a pull request. You never merge or deploy. Never claim a deployment, migration application or live write that has not happened; say it goes live after the owner merges.',
     '',
     'Reply with ONLY one JSON object per message: {"thought": string, "tool": string, "args": object}.',
     'TOOLS:',
@@ -266,7 +266,7 @@ async function shipSession({ store, session, workspacePath, branch, baseSha, dep
       `Opened from a Bob Builder vibe session (\`${session.id}\`) at the owner's request.`,
       '', '### Commits', ...state.commits.map(line => `- ${line}`),
       '', '### Files', ...state.files.map(file => `- \`${file}\``),
-      '', 'Review before merge. Vibe sessions never merge or deploy on their own; migrations in this branch are not applied.',
+      '', 'Review before merge. Vibe sessions never merge or deploy on their own. After merge the release lane applies any new migrations live (refusing destructive SQL), deploys changed edge functions and refreshes the catalog and Atlas.',
     ].join('\n');
     const pr = await deps.openPullRequest({ workspacePath, branch, head: state.head, title: session.title, body });
     prUrl = pr.url;

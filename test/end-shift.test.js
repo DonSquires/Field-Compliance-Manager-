@@ -38,8 +38,9 @@ test('complete_officer_shift keeps every rule, records the end position, and rep
   ]) assert.ok(migration.includes(rule), rule);
   assert.match(migration, /'end_position', v_position/);
   assert.match(migration, /grant execute on function public\.complete_officer_shift\(uuid, text, double precision, double precision\) to postgres, authenticated, service_role;/);
-  assert.match(types, /complete_officer_shift: \{\n\s+Args: \{ p_expected_status: string; p_gps_lat\?: number \| null; p_gps_lng\?: number \| null; p_shift_id: string \}/);
-  assert.match(types, /get_shift_end_readiness: \{\n\s+Args: \{ p_shift_id: string \}\n\s+Returns: Json/);
+  // Matches `supabase gen types` output (single- or multi-line Args, no `| null` on optional args).
+  assert.match(types, /complete_officer_shift: \{\s*Args: \{\s+p_expected_status: string;?\s+p_gps_lat\?: number(?: \| null)?;?\s+p_gps_lng\?: number(?: \| null)?;?\s+p_shift_id: string;?\s+\}/);
+  assert.match(types, /get_shift_end_readiness: \{\s*Args: \{ p_shift_id: string \};?\s+Returns: Json/);
 });
 
 test('the End shift dialog reads readiness, takes the missing debrief, then ends with the position', () => {

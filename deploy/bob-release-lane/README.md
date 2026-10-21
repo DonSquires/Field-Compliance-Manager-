@@ -14,7 +14,13 @@ nobody is asked to deploy by hand. This lane closes the last gap after a pull re
 4. **dry-run** (default): writes the plan to `plan.json` and the log, once per new head;
    **live**: applies migrations (refusing destructive SQL), deploys edge functions, rebuilds and
    restarts services with a health check, rolling a failed service back to the previous release,
-5. records a ledger (`ledger.json`) and a note in Bob's own memory (`bob_self_memory`, kind
+5. after applying migrations, snapshots the live catalog. If it no longer matches the committed
+   `supabase/schema.sql`, `scripts/bob-catalog-refresh-pr.mjs` commits the regenerated
+   `schema.sql` and `src/types/database.ts` (verified identity) on `bob/catalog-<sha8>`, opens a
+   pull request with `BOB_GITHUB_ACCESS_TOKEN` and merges it only if it touches nothing but those two
+   generated files. The owner's merge of the migration is the approval (owner ruling 2026-10-21);
+   the next tick re-checks and moves the pointer,
+6. records a ledger (`ledger.json`) and a note in Bob's own memory (`bob_self_memory`, kind
    `deployment`) so Bob can tell the owner what went live. The live pointer only moves when
    every target succeeded, so a partial release is retried next tick, not forgotten.
 
