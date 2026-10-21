@@ -112,7 +112,7 @@ Atlas edges are periodically generated/ci-seeded and can lag or under-report
 (see the `references`-only gap above). `supabase/schema.sql` is the ground
 truth for what a column/table/function/trigger actually does right now — and
 it is only true because it is **regenerated from the live catalog**
-(`SUPABASE_ACCESS_TOKEN="$FIELD_COMPLIANCE_CODESPACE" node scripts/schema-snapshot-live.mjs`,
+(`node scripts/schema-snapshot-live.mjs` with the Codespaces `SUPABASE_ACCESS_TOKEN`,
 or `supabase db dump --linked --schema public`). Never append migration text to
 it by hand; re-run the snapshot after applying a migration. Two more honesty
 rules: `bob_capability_map.exercised` is unpopulated live (0 rows), so `wired`

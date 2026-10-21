@@ -249,14 +249,23 @@ for target in "${TARGETS[@]:-}"; do
     nginx)
       # The public allowlist in front of the control plane: a relay path missing here is an HTTP 404
       # in Bob's chat (laptop terminal, 2026-09-27). Installed only when nginx accepts the whole config.
+      # Backups live outside sites-enabled: nginx includes every file there, so a backup beside the
+      # site redefined its limit_req_zone and failed every nginx release (2026-10-21).
       nginx_ok=true
+      nginx_backup="$STATE_DIR/nginx-previous"
+      rm -rf "$nginx_backup"; mkdir -p "$nginx_backup"
       for site in deploy/bob-vps/nginx/*; do
         [[ -f "$site" ]] || continue
-        install -m 644 -b -S .lane-previous "$site" "/etc/nginx/sites-enabled/$(basename "$site")" || nginx_ok=false
+        live="/etc/nginx/sites-enabled/$(basename "$site")"
+        [[ -f "$live" ]] && cp -p "$live" "$nginx_backup/$(basename "$site")"
+        install -m 644 "$site" "$live" || nginx_ok=false
       done
       if $nginx_ok && nginx -t >/dev/null 2>&1 && systemctl reload nginx; then RESULTS+=("nginx sites installed at $SHA8")
       else
-        for site in deploy/bob-vps/nginx/*; do b="/etc/nginx/sites-enabled/$(basename "$site")"; [[ -f "$b.lane-previous" ]] && mv -f "$b.lane-previous" "$b"; done
+        for site in deploy/bob-vps/nginx/*; do
+          b="$nginx_backup/$(basename "$site")"; live="/etc/nginx/sites-enabled/$(basename "$site")"
+          if [[ -f "$b" ]]; then cp -p "$b" "$live"; else rm -f "$live"; fi
+        done
         systemctl reload nginx || true; OK=false; fail_note "nginx rejected the new site config; previous restored"
       fi ;;
   esac

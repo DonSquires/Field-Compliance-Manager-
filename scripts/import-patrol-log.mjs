@@ -16,7 +16,7 @@
  *     [--source-sheet <sheet>] [--source-first-row <number>] [--include-narratives]
  *     [--use-supabase-cli] [--dry-run|--apply]
  *
- * Database access: FIELD_COMPLIANCE_CODESPACE (never printed), or an existing
+ * Database access: SUPABASE_ACCESS_TOKEN or FIELD_COMPLIANCE_CODESPACE (never printed), or an existing
  * linked Supabase CLI session selected explicitly with --use-supabase-cli.
  */
 import { execFileSync } from 'node:child_process';
@@ -56,10 +56,10 @@ const classificationProfile = flag('--classification-profile');
 const sourceColumnAliases = JSON.parse(flag('--source-column-aliases') ?? '{}');
 const importContextFile = flag('--import-context');
 const zoneMap = zoneMapFile ? JSON.parse(readFileSync(zoneMapFile, 'utf8')) : JSON.parse(flag('--zone-map') ?? '{}');
-const token = process.env.FIELD_COMPLIANCE_CODESPACE;
+const token = process.env.SUPABASE_ACCESS_TOKEN || process.env.FIELD_COMPLIANCE_CODESPACE;
 if (importContextFile && !exportPlan) { console.error('--import-context is only allowed with --export-plan'); process.exit(1); }
 if (!exportPlan || !importContextFile) {
-  if (!token && !useSupabaseCli) { console.error('FIELD_COMPLIANCE_CODESPACE or --use-supabase-cli is required'); process.exit(1); }
+  if (!token && !useSupabaseCli) { console.error('SUPABASE_ACCESS_TOKEN (or FIELD_COMPLIANCE_CODESPACE) or --use-supabase-cli is required'); process.exit(1); }
   if (!projectRef && !useSupabaseCli) { console.error('SUPABASE_PROJECT_REF is required unless --use-supabase-cli is used'); process.exit(1); }
 }
 if (Boolean(csvPath) === Boolean(xlsxPath) || !inputPath || !orgId || !providerOrgId || !clientCode || !classificationProfile) {

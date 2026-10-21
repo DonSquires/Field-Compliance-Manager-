@@ -27,12 +27,15 @@ audit event. It must never accept a password or token supplied in a Bob prompt.
 
 | Credential | Where it may be used | Purpose | Must not be used for |
 |---|---|---|---|
-| `FIELD_COMPLIANCE_CODESPACE` / `SUPABASE_ACCESS_TOKEN` | Codespaces terminal, explicitly approved Supabase CLI or one-off Management API seed command | Migration status, migration repair, database push, explicitly approved bounded seed SQL | Edge Function runtime, browser, Bob prompt, ordinary live data API header |
+| `SUPABASE_ACCESS_TOKEN` (Supabase Management token; the Codespaces secret of the same name is the valid one, `FIELD_COMPLIANCE_CODESPACE` was rejected with 401 on 2026-10-21) | Codespaces terminal; the VPS release lane (`/var/lib/bob/release-lane.env`) and control plane (`/var/lib/bob/control-plane.env`, with `SUPABASE_PROJECT_REF`) | Applying merged migrations with a ledger row, deploying changed edge functions, regenerating `schema.sql` and `src/types/database.ts`, explicitly approved bounded seed SQL | Edge Function runtime, browser, Bob prompt, ordinary live data API header |
 | `SUPABASE_SERVICE_ROLE_KEY` | Supabase Edge Functions/server-side diagnostics and explicitly approved Codespaces read checks | Bypassed-RLS server-side reads, governed service operations, Atlas checks | Browser/frontend, external web research, issue text, screenshots |
 | `SUPABASE_ANON_KEY` | Supabase client/Edge Function caller client | Establish caller-authenticated Supabase context | Privileged database access |
 | Caller `Authorization: Bearer <user JWT>` | Request forwarding from an authenticated Edge Function | Preserve the user's identity, role, tenant, and RLS context | Replacing service-role authorization for approved server operations |
 | `GITLAB_TOKEN` / `GITLAB_READ_TOKEN` | Bob repository-search/read-issues functions | Read the allowlisted GitLab repository and issues | Supabase, Vercel, arbitrary repositories, write operations |
 | `GITEA_TOKEN` | `bob-gitea-maintainer` server-side function | Governed issue/PR/file operations on the allowlisted Gitea repository | Browser, Supabase, arbitrary repositories |
+| `BOB_GITHUB_ACCESS_TOKEN` (owner ruling 2026-10-21: Bob's single GitHub API credential) | VPS control plane (`/var/lib/bob/control-plane.env`) and Codespaces | Every Bob GitHub API action: branches, pull requests, verified merges, issues, reviews, main-health status | Browser, Bob prompts, logs, issue text; a second GitHub token must not be added beside it (the stale `GITHUB_TOKEN` was removed) |
+| Bob GitHub deploy key (`BOB_GITHUB_SSH_KEY_FILE` / `BOB_FCM_MAIN`) | Control plane and release lane, git transport only | Fetch `main`, push `bob/job-*` and `bob/vibe-*` branches | API calls, any other repository |
+| Role test identities (`GRANDMASTER_`, `MASTER_`, `OFFICER_`, `NMDHB_TEST_EMAIL`/`_PASSWORD`) | Dr Bob human-test workers and live e2e specs | Dedicated test accounts for role-specific glass checks | Real users' sessions; never printed or stored in receipts |
 | `VERCEL_TOKEN` | Vercel viewer function/server-side deployment tooling | Inspect approved Vercel deployment state | Supabase, database migrations, browser |
 | VPS/PTT/control-plane tokens | Their specific server-side viewer or control-plane function | Inspect or operate the named approved service | General repository, database, or browser access |
 | `OLLAMA_API_TOKEN` (Ollama Cloud key; also accepted as `OLLAMA_API_KEY`) | VPS control-plane model gateway only (`/var/lib/bob/control-plane.env`), sent as a Bearer header to `https://ollama.com` | Bob Builder's subscription model tier for unrestricted work, after the laptop GPU and VPS Ollama and before paid OpenAI | Restricted/local-only work (the router strips it), local Ollama hosts, browser, Bob prompts, logs, health output, issue text |
@@ -63,10 +66,10 @@ secret_value=never_recorded
 ```
 
 One-off management scripts must accept the neutral variable name
-`SUPABASE_ACCESS_TOKEN`; callers may map the Codespaces secret at invocation:
+`SUPABASE_ACCESS_TOKEN`; the Codespaces secret of that name is valid and used directly:
 
 ```bash
-SUPABASE_ACCESS_TOKEN="$FIELD_COMPLIANCE_CODESPACE" node scripts/seed-legacy-noise-dispatch.js
+node scripts/seed-legacy-noise-dispatch.js   # SUPABASE_ACCESS_TOKEN is already set in Codespaces
 ```
 
 The script must never print the value or persist it in an artifact.
