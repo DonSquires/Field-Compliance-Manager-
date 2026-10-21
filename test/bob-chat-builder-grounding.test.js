@@ -165,13 +165,16 @@ test('an explicit self-heal request turns a confirmed friction route into a real
   assert.match(builder, /label: 'Merge, deploy, and prove in the glass'/);
 });
 
-test('natural-language Builder jobs carry an explicit app, coding, or self-heal mode contract', () => {
+test('natural-language Builder jobs carry an explicit app, coding, or self-heal mode contract', async () => {
+  const { builderJobTitle } = await import('../supabase/functions/_shared/builder-job-title.mjs');
   const argsStart = chat.indexOf('    const builderModeForRequest = ');
   const argsSource = chat.slice(argsStart, chat.indexOf('/** Dispatch a single tool', argsStart))
     .replace('(text: string, evidenceSteps: Array<{ tool: string; result_summary: string }>)', '(text, evidenceSteps)')
     .replace('(text: string, fallbackFrontend = false, fallbackBackend = true)', '(text, fallbackFrontend = false, fallbackBackend = true)')
     .replace(/\(text: string\)/g, '(text)');
-  const builderJobArgsFromEvidence = vm.runInNewContext(`(() => { ${argsSource} return builderJobArgsFromEvidence; })()`);
+  const builderJobArgsFromEvidence = vm.runInNewContext(`(() => { ${argsSource} return builderJobArgsFromEvidence; })()`, { builderJobTitle });
+  assert.match(chat, /import \{ builderJobTitle \} from '\.\.\/_shared\/builder-job-title\.mjs'/);
+  assert.equal(builderJobArgsFromEvidence('please add a back button to the vehicle search page. Thanks', []).title, 'Add a back button to the vehicle search page');
   assert.match(builderJobArgsFromEvidence('Build me a patrol handover app', []).task_description, /Builder mode: no_code_app_generation/);
   assert.match(builderJobArgsFromEvidence('Add an API-backed handover page', []).task_description, /Builder mode: chat_to_code/);
   assert.match(builderJobArgsFromEvidence('Repair the failing Builder test', []).task_description, /Builder mode: autonomous_self_heal/);

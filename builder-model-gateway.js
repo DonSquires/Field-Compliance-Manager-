@@ -204,15 +204,16 @@ function createModelGatewayConfig(env = process.env) {
     // Ollama Cloud: strong hosted open models, tried after Bob's own compute and before OpenAI.
     // Ordered strongest-first. /api/tags lists every cloud model, including ones the plan does not
     // include (those fail at request time with 402/410), so the default names only models the plan
-    // serves, ordered strongest-first. Free-plan access probed 2026-10-21: gpt-oss:120b, nemotron-3-ultra,
-    // nemotron-3-super, gemma4:31b, gpt-oss:20b answer; kimi/glm/deepseek/minimax need paid credits.
-    // A second strong model on the same tier lets the independent reviewer differ from the author.
-    // Add paid models through BOB_OLLAMA_CLOUD_MODELS once the plan covers them.
+    // serves. Pro-plan access probed 2026-10-21 (owner upgraded); qwen3-coder:480b is retired (410). Order
+    // follows a replay of the real "Repair Atlas gaps" analyst brief: gpt-oss:120b, deepseek-v4-pro:0813 and
+    // nemotron-3-ultra returned valid grounded specs; kimi-k2.7-code, kimi-k3 and mistral-large-4 answered but
+    // could exhaust the 16384-token cap; glm-5.3 and minimax-m3 returned empty JSON and are left out.
+    // The independent reviewer takes the next distinct model, so a different family reviews the author.
     ollama_cloud: {
       kind: 'ollama_cloud',
       apiKey: env.OLLAMA_API_KEY || env.OLLAMA_API_TOKEN || '',
       baseUrl: (env.OLLAMA_CLOUD_BASE_URL || 'https://ollama.com').replace(/\/+$/, ''),
-      models: parseModelAllowlist(env.BOB_OLLAMA_CLOUD_MODELS, 'gpt-oss:120b,nemotron-3-ultra,nemotron-3-super,gemma4:31b,gpt-oss:20b'),
+      models: parseModelAllowlist(env.BOB_OLLAMA_CLOUD_MODELS, 'gpt-oss:120b,deepseek-v4-pro:0813,nemotron-3-ultra,kimi-k2.7-code,kimi-k3,mistral-large-4,gemma4:31b,gpt-oss:20b'),
       maxOutputTokens: Math.min(maxOutputTokens, 16384),
       numCtx: Math.max(8192, Number(env.BOB_OLLAMA_CLOUD_NUM_CTX) || 131072)
     },

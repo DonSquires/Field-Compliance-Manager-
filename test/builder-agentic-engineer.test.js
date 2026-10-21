@@ -263,6 +263,8 @@ function fakeModel(turns) {
 const LAPTOP_OFF = Object.freeze({
   gpu_workstation: { configured: true, healthy: false, models: ['qwen2.5-coder:7b'], ready_model: null },
   ollama: { configured: true, healthy: true, models: ['llama3.1:8b'], ready_model: 'llama3.1:8b' },
+  // Owner direction 2026-10-21: the VPS CPU left the unrestricted chains; Ollama Cloud is the next tier.
+  ollama_cloud: { configured: true, healthy: true, models: ['gpt-oss:120b', 'deepseek-v4-pro:0813'], ready_model: 'gpt-oss:120b' },
   openai: { configured: true, healthy: true, models: ['gpt-5.4', 'gpt-5.4-mini'] },
 });
 const LAPTOP_ON = Object.freeze({ ...LAPTOP_OFF, gpu_workstation: { configured: true, healthy: true, models: ['qwen2.5-coder:7b'], ready_model: 'qwen2.5-coder:7b' } });
@@ -463,8 +465,9 @@ test('agentic engineer explores, fixes the bug, runs the tests, and hands over a
   assert.equal(repo.git(['apply', '--check', '--whitespace=error-all', patchFile]), '');
   assert.equal(result.proposal.lane, 'backend');
   // Every turn went to the gateway as a strong multi-turn request with the conversation attached.
-  // Laptop off: authoring falls to the VPS CPU (owner ruling 2026-10-16: in-house before OpenAI).
-  assert.ok(seen.every((request) => Array.isArray(request.request.messages) && request.provider === 'ollama' && request.request.reasoning_effort === undefined), 'OpenAI-only reasoning_effort is not sent to the in-house model');
+  // Laptop off: authoring falls to Ollama Cloud, the first outsourced tier before OpenAI (owner direction
+  // 2026-10-21 removed the VPS CPU from unrestricted chains).
+  assert.ok(seen.every((request) => Array.isArray(request.request.messages) && request.provider === 'ollama_cloud' && request.request.reasoning_effort === undefined), 'OpenAI-only reasoning_effort is not sent to Ollama Cloud');
   const firstTest = JSON.parse(seen[4].request.messages.at(-1).content).tool_result;
   assert.equal(firstTest.exit_code, 1, 'the failing test ran inside the worktree');
   const refused = JSON.parse(seen[5].request.messages.at(-1).content).tool_result;
@@ -1080,7 +1083,7 @@ test('a model looping on one refused call escalates, or stops early with a readi
 
   const providers = [];
   const finish = { tool: 'finish', args: { summary: 'nothing to change', no_change_reason: 'the search shows nothing to change' } };
-  const escalated = await runAgenticEngineer({ supabase: null, gateway: { gatewayUrl: 'x', apiToken: 'y' }, job: { ...job, id: '5tuck5tuck5tuck5tuck5tuck5tuck01' }, step: { id: 's' }, lane: 'backend', sourceDir: repo.source, workspaceRoot, repoRoot: repo.source, callModel: async ({ modelRequest }) => { providers.push(modelRequest.provider); return { ok: true, data: { content: JSON.stringify(modelRequest.provider === 'openai' ? finish : loop), model: 'm', usage: {} } }; }, limits: { ...DEFAULT_LIMITS, maxTurns: 60 }, providerHealth: { ...LAPTOP_ON, ollama: { configured: false, healthy: false, models: [] } } });
+  const escalated = await runAgenticEngineer({ supabase: null, gateway: { gatewayUrl: 'x', apiToken: 'y' }, job: { ...job, id: '5tuck5tuck5tuck5tuck5tuck5tuck01' }, step: { id: 's' }, lane: 'backend', sourceDir: repo.source, workspaceRoot, repoRoot: repo.source, callModel: async ({ modelRequest }) => { providers.push(modelRequest.provider); return { ok: true, data: { content: JSON.stringify(modelRequest.provider === 'openai' ? finish : loop), model: 'm', usage: {} } }; }, limits: { ...DEFAULT_LIMITS, maxTurns: 60 }, providerHealth: { ...LAPTOP_ON, ollama: { configured: false, healthy: false, models: [] }, ollama_cloud: { configured: false, healthy: false, models: [] } } });
   assert.equal(escalated.routing.provider, 'openai');
   assert.equal(escalated.routing.escalated, true);
   assert.equal(providers.filter((p) => p !== 'openai').length, 6);
@@ -1113,7 +1116,7 @@ test('distinct unedited exploration hands off early enough for the next allowed 
       },
     });
     assert.equal(result.ok, true, result.error);
-    assert.equal(providers.filter(provider => provider === 'ollama').length, 13);
+    assert.equal(providers.filter(provider => provider === 'ollama_cloud').length, 13);
     assert.equal(paidTurn, 4, 'the next model can read, edit, test and finish within the original total budget');
     assert.deepEqual(result.proposal.changed_files, ['lib/sum.js']);
     assert.equal(result.proposal.verified_runs[0].exit_code, 0);
@@ -1196,4 +1199,40 @@ test('finish gate: a scope of only invented paths needs evidence naming the real
   assert.equal(validateAcceptanceEvidence({ args: { acceptance_evidence: [{ requirement_id: 'r1', status: 'completed', evidence: 'OrganizationSetupPage.tsx keeps one map instance' }] }, specification, files, trackedAtPin }), null);
   const realScope = { delivery_requirements: [{ id: 'r1', source_scope: ['apps/web/src/pages/RosterPage.tsx'] }] };
   assert.match(validateAcceptanceEvidence({ args: { acceptance_evidence: [{ requirement_id: 'r1', status: 'completed', evidence: 'OrganizationSetupPage.tsx' }] }, specification: realScope, files, trackedAtPin: new Set(['apps/web/src/pages/RosterPage.tsx']) }), /did not change any approved source_scope/);
+});
+
+test('atlas and live_count give Bob live terrain and aggregate checks without tenant row bodies', async () => {
+  const calls = [];
+  const chain = (result) => {
+    const query = {
+      select(...args) { calls.push(['select', ...args]); return query; },
+      eq(...args) { calls.push(['eq', ...args]); return query; },
+      not(...args) { calls.push(['not', ...args]); return query; },
+      or(...args) { calls.push(['or', ...args]); return query; },
+      ilike(...args) { calls.push(['ilike', ...args]); return query; },
+      limit() { return query; },
+      then(resolve) { return resolve(result); }
+    };
+    return query;
+  };
+  const supabase = {
+    from(table) { calls.push(['from', table]); return chain(table === 'vehicles' ? { count: 7, error: null } : { data: [{ entity_name: 'vehicles', wired: true }], error: null }); },
+    rpc(name, args) { calls.push(['rpc', name, args]); return chain({ data: [{ node_name: name }], error: null }); }
+  };
+  const tools = createTools({ workspacePath: os.tmpdir(), repoRoot: os.tmpdir(), lane: 'backend', supabase, limits: DEFAULT_LIMITS, log() {} });
+
+  const gaps = await tools.atlas({ action: 'gap_report', limit: 10 });
+  assert.deepEqual(gaps.rows, [{ node_name: 'bob_atlas_gap_report' }]);
+  const reach = await tools.atlas({ action: 'blast_radius', name: 'vehicles', type: 'table' });
+  assert.ok(Array.isArray(reach.flow_reach) && Array.isArray(reach.fk_reach));
+  assert.match(reach.note, /fk_reach is structural/);
+  assert.match((await tools.atlas({ action: 'capability_map' })).error, /name is required/);
+  assert.match((await tools.atlas({ action: 'drop_table', name: 'x' })).error, /action must be/);
+
+  const count = await tools.live_count({ table: 'vehicles', column: 'profile_photo_path' });
+  assert.equal(count.rows, 7);
+  assert.equal(count.rows_with_value, 7);
+  assert.ok(calls.filter(([kind]) => kind === 'select').every(([, columns, options]) => columns !== '*' || options?.head === true), 'live reads are head/count only');
+  assert.match((await tools.live_count({ table: 'vehicles; drop table x' })).error, /plain public table/);
+  assert.match((await tools.live_count({ table: 'vehicles', column: 'a,b' })).error, /plain column/);
 });

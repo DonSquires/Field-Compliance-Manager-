@@ -293,6 +293,36 @@ test('Product Analyst grounds source_scope against the full tracked inventory, n
   assert.throws(() => validateRepositoryGrounding(invented, { repositoryContext, taskDescription: 'Repair main', repositoryFiles }), /not supplied by repository evidence/);
 });
 
+test('Product Analyst accepts tracked deploy/, Build-Plan/ and root files but rejects unsafe or untracked paths', () => {
+  // Live 2026-10-21: deploy/bob-release-lane/bob-release-lane.timer and Build-Plan/bob-control-plane-server.js
+  // are tracked, yet a prefix allowlist rejected them as "not a repository path".
+  const tracked = ['deploy/bob-release-lane/bob-release-lane.timer', 'Build-Plan/bob-control-plane-server.js', 'builder-autopilot.js'];
+  const repositoryContext = { build_map: { tracked_files: [], schema: {} } };
+  const withScope = (scope) => ({
+    ...validSpecification(),
+    delivery_requirements: [{ id: 'DR-1', outcome: 'Release lane timer is correct', evidence: 'Unit test', source_scope: scope }]
+  });
+  assert.doesNotThrow(() => validateRepositoryGrounding(withScope(tracked), { repositoryContext, taskDescription: 'Repair', repositoryFiles: tracked }));
+  for (const unsafe of ['/etc/passwd', '../secrets.env', 'apps/../x.js', '.env', 'apps/web/']) {
+    assert.throws(() => validateRepositoryGrounding(withScope([unsafe]), { repositoryContext, taskDescription: 'Repair', repositoryFiles: tracked }), /not a repository path/, unsafe);
+  }
+  assert.throws(() => validateRepositoryGrounding(withScope(['deploy/invented.service']), { repositoryContext, taskDescription: 'Repair', repositoryFiles: tracked }), /not supplied by repository evidence/);
+});
+
+test('Product Analyst parser accepts one complete object wrapped in prose, never a truncated one', () => {
+  const spec = JSON.stringify(validSpecification());
+  assert.equal(parseProductSpecification(`Here is the specification:\n${spec}\nDone.`).product_brief.problem, validSpecification().product_brief.problem);
+  assert.throws(() => parseProductSpecification(spec.slice(0, -20)), /valid JSON/);
+  assert.throws(() => parseProductSpecification(`Here: ${spec.slice(0, -20)}`), /valid JSON/);
+});
+
+test('Product Analyst prompt forbids weakening lane guards and grounds Atlas gap work in live gaps', () => {
+  const { systemPrompt } = buildProductAnalystPrompt({ taskDescription: 'Repair Atlas gaps one by one', repositoryContext: {} });
+  assert.match(systemPrompt, /never propose removing or weakening a guard/);
+  assert.match(systemPrompt, /live_context\.atlas\.gaps/);
+  assert.match(systemPrompt, /claim to verify, not evidence/);
+});
+
 test('Product Analyst parser rejects malformed or incomplete output', () => {
   assert.throws(() => parseProductSpecification('not json'), /valid JSON/);
   assert.throws(() => parseProductSpecification(JSON.stringify({ product_brief: {} })), /must be an array/);
@@ -376,4 +406,17 @@ test('product analyst rejects placeholder source_scope paths even without a trac
     assert.throws(() => ground({ delivery_requirements: [{ id: 'r1', source_scope: [file] }] }, {}), /placeholder/);
   }
   assert.doesNotThrow(() => ground({ delivery_requirements: [{ id: 'r1', source_scope: ['apps/web/src/pages/OrganizationSetupPage.tsx'] }] }, {}));
+});
+
+test('Atlas gap specifications must name a live gap, and live gap names are known capabilities', () => {
+  const repositoryContext = { build_map: { tracked_files: ['scripts/atlas-refresh.js'], schema: { tables: ['bob_capability_map'] } }, live_context: { atlas: { gaps: { total: 1, items: [{ entity_type: 'rpc', entity_name: 'compact_cctv_inference_results', gap_kind: 'unwired' }] } } } };
+  const task = 'Repair Atlas gaps one by one.';
+  const spec = (outcome) => ({
+    ...validSpecification(),
+    delivery_requirements: [{ id: 'DR-1', outcome, evidence: 'Atlas refresh shows wired', source_scope: ['scripts/atlas-refresh.js'] }],
+    terrain_verification: { ...validSpecification().terrain_verification, atlas_capability_checks: ['bob_capability_map row for compact_cctv_inference_results'] }
+  });
+  assert.doesNotThrow(() => validateRepositoryGrounding(spec('Register the caller of compact_cctv_inference_results'), { repositoryContext, taskDescription: task }));
+  assert.throws(() => validateRepositoryGrounding(spec('Close the BuilderLiveActivity gap in the Atlas page seed'), { repositoryContext, taskDescription: task }), /must name at least one live gap/);
+  assert.doesNotThrow(() => validateRepositoryGrounding(spec('Close the BuilderLiveActivity gap'), { repositoryContext: { ...repositoryContext, live_context: null }, taskDescription: task }));
 });

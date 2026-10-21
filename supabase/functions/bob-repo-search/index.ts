@@ -28,7 +28,7 @@
 import { createClient } from 'https://esm.sh/@supabase/supabase-js@2';
 import { resolveEffectiveRole } from '../_shared/auth.ts';
 import { BOB_CHAT_PATH as _BOB_CHAT_PATH, parseUnansweredEntries } from '../_shared/deterministic-logic.ts';
-import { splitSearchTerms, detectCompoundQuery, deriveSearchStatus, deriveTermStatus, computeReadWindow, computeLineWindow, deriveReadProgress } from './search-logic.ts';
+import { splitSearchTerms, detectCompoundQuery, deriveSearchStatus, deriveTermStatus, computeReadWindow, computeLineWindow, deriveReadProgress, pathLikeTerm } from './search-logic.ts';
 const SUPABASE_URL = Deno.env.get('SUPABASE_URL') ?? '';
 const SUPABASE_SERVICE_ROLE_KEY = Deno.env.get('SUPABASE_SERVICE_ROLE_KEY') ?? '';
 const SUPABASE_ANON_KEY = Deno.env.get('SUPABASE_ANON_KEY') ?? '';
@@ -230,13 +230,28 @@ serve(async (req)=>{
             });
           }
         }
+        let pathExists = false;
+        const asPath = termHits === 0 ? pathLikeTerm(term) : null;
+        if (asPath && !SECRET_PATH.test(asPath.path) && !PRIVATE_PATH.test(asPath.path)) {
+          const tree = await cp(`/api/bob/builder/repository/tree?${new URLSearchParams({ path: asPath.dir })}`).catch(()=>null);
+          const listing = tree && tree.ok ? await tree.json().catch(()=>null) : null;
+          pathExists = Array.isArray(listing?.entries) && listing.entries.includes(asPath.base);
+          if (pathExists) {
+            termHits = 1;
+            if (!seen.has(`${asPath.path}#`) && results.length < limit) {
+              seen.add(`${asPath.path}#`);
+              results.push({ path: asPath.path, startline: null, snippet: 'file exists at this path (path match; content search is text-only)' });
+            }
+          }
+        }
         termStatus.push({
           term,
           status: deriveTermStatus({
             failed: false,
             hitCount: termHits
           }),
-          count: termHits
+          count: termHits,
+          ...(pathExists ? { match: 'path' } : {})
         });
       }
       // DISTINGUISHED EMPTY (Bob criteria 1 + 5): the AGGREGATE status still tells
