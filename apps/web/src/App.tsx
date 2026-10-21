@@ -46,7 +46,7 @@ export function App() {
   return (
     <AuthProvider>
       <ServiceRelationshipProvider>
-        <BrowserRouter>
+        <BrowserRouter basename={import.meta.env.BASE_URL}>
           <RuntimeFrictionMonitor />
           <AppUpdateNotice />
           <Routes>

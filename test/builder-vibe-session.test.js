@@ -119,8 +119,61 @@ test('vibe stops after four identical tool calls rather than spending the full t
   assert.equal(outcome.error, true);
   assert.match(outcome.reply, /stopped after repeating the same tool call/);
   assert.equal(model.calls.length, 4);
+  assert.match(JSON.stringify(model.calls[2].request.messages), /This exact call has already run 2 times/);
   assert.equal(store.state.rows.filter(row => row.payload?.tool === 'read_file').length, 4);
   assert.equal(store.state.rows.at(-1).kind, 'error');
+});
+
+test('Vibe can recover from a repeated broad search without disabling its loop guard', async () => {
+  const search = { thought: 'find routing', tool: 'search', args: { path: 'apps/web/src', query: 'routes' } };
+  const { store, deps, model } = setup([
+    search,
+    search,
+    { thought: 'narrow to known source', tool: 'read_file', args: { path: 'apps/web/src/hello.ts' } },
+    { thought: 'fix', tool: 'replace_in_file', args: { path: 'apps/web/src/hello.ts', old_text: '"hi"', new_text: '"fixed"' } },
+    { thought: 'report', tool: 'reply', args: { message: 'Fixed and kept the existing context.' } },
+  ]);
+  const outcome = await vibe.processVibeMessage({ store, message: ownerMessage('fix navigation'), deps });
+  assert.equal(outcome.error, undefined);
+  assert.match(JSON.stringify(model.calls[2].request.messages), /narrow path\/query/);
+  assert.deepEqual(store.state.session.changed_files, ['apps/web/src/hello.ts']);
+  assert.match(vibe.vibeSystemPrompt(), /routing\/RoleRouter.tsx/);
+  assert.match(vibe.vibeSystemPrompt(), /pages\/StaffProfilePage/);
+});
+
+test('continuation receives prior answers, failures, successful edits and committed files', async () => {
+  const { store, deps, model } = setup([]);
+  store.history = async () => [
+    { role: 'owner', kind: 'message', status: 'done', content: 'The start date is in Staff profile, Employment & pay.', payload: {} },
+    { role: 'bob', kind: 'error', content: 'Stopped after repeating a search.', payload: {} },
+  ];
+  store.recentExecution = async () => [
+    { seq: 1, kind: 'tool', content: 'Searching apps/web/src', payload: { tool: 'search', args: { path: 'apps/web/src', query: 'routes' }, ok: true, preview: '409 matches; truncated' } },
+    { seq: 2, kind: 'tool', content: 'Reading guessed route', payload: { tool: 'read_file', args: { path: 'apps/web/src/routes.tsx' }, ok: false, preview: 'not a file' } },
+    { seq: 3, kind: 'tool', content: 'Editing profile', payload: { tool: 'replace_in_file', args: { path: 'apps/web/src/hello.ts' }, ok: true, preview: 'replaced one occurrence' } },
+    { seq: 4, kind: 'test', content: 'Running check', payload: { tool: 'run', args: { command: 'node --check missing.js' }, ok: true, preview: 'exit 1\nCannot find module' } },
+    { seq: 5, kind: 'diff', content: 'One file changed', payload: { files: ['apps/web/src/hello.ts'] } },
+  ];
+  await vibe.processVibeMessage({ store, message: ownerMessage('continue'), deps });
+  const task = model.calls[0].request.messages[1].content;
+  assert.match(task, /OWNER \[done\]: The start date is in Staff profile, Employment & pay/);
+  assert.match(task, /BOB \[failed\]: Stopped after repeating/);
+  assert.match(task, /SUCCEEDED search:.*"query":"routes"/);
+  assert.match(task, /FAILED read_file:.*routes.tsx.*not a file/);
+  assert.match(task, /SUCCEEDED replace_in_file:.*hello.ts/);
+  assert.match(task, /FAILED run:.*Cannot find module/);
+  assert.match(task, /COMMITTED diff:.*files=apps\/web\/src\/hello.ts/);
+});
+
+test('a command with nonzero exit status is recorded as failed for subsequent turns', async () => {
+  const { store, deps } = setup([
+    { thought: 'check missing file', tool: 'run', args: { command: 'node --check missing.js' } },
+  ]);
+  await vibe.processVibeMessage({ store, message: ownerMessage('check syntax'), deps });
+  const receipt = store.state.rows.find(row => row.payload?.tool === 'run');
+  assert.equal(receipt.payload.ok, false);
+  assert.match(receipt.payload.preview, /^exit 1/);
+  assert.ok(receipt.payload.message_id);
 });
 
 test('protected paths are refused and never committed', async () => {
