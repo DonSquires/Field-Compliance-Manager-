@@ -99,7 +99,7 @@ only when both in-house tiers fail. The chat lane follows the same rule: code re
 plan in-house unless `BOB_PLAN_CODE_REQUESTS_FAST=true`.
 Owner direction 2026-10-18: the owner's Ollama Cloud subscription is the first outsourced
 tier, after both in-house tiers and before OpenAI. Set `OLLAMA_API_TOKEN` (never print it) and
-optionally `BOB_OLLAMA_CLOUD_MODELS` (default `gpt-oss:120b,nemotron-3-super,gemma4:31b,gpt-oss:20b`,
+optionally `BOB_OLLAMA_CLOUD_MODELS` (see the default below,
 the models the current plan serves; `/api/tags` also lists paid-plan models that fail at request
 time), `OLLAMA_CLOUD_BASE_URL` (default `https://ollama.com`) and `BOB_OLLAMA_CLOUD_NUM_CTX`.
 The default chain is `gpu_workstation,ollama,ollama_cloud,openai`; any `BOB_BUILDER_ROUTE_*`
@@ -108,8 +108,10 @@ Owner direction 2026-10-21 (a stronger model, any way that benefits the project)
 tier leaves the unrestricted chains (21-day evidence: 0–3% of analysis/UX runs passed while each
 attempt cost 2–7 minutes). The code default and the live env are now
 `BOB_BUILDER_ROUTE_ANALYSIS|AUTHOR|REVIEW=gpu_workstation,ollama_cloud,openai`, and the cloud
-allowlist default is `gpt-oss:120b,nemotron-3-ultra,nemotron-3-super,gemma4:31b,gpt-oss:20b`
-(free-plan access probed 2026-10-21; kimi/glm/deepseek/minimax need paid credits). A busy GPU
+allowlist default is `gpt-oss:120b,deepseek-v4-pro:0813,nemotron-3-ultra,kimi-k2.7-code,kimi-k3,mistral-large-4,gemma4:31b,gpt-oss:20b`
+(Ollama Pro access probed 2026-10-21 and ordered by a replay of a real analyst brief: the first three
+returned valid grounded specs, the Kimi and Mistral models could exhaust the 16384-token cap;
+qwen3-coder:480b is retired, and glm-5.3/minimax-m3 return empty JSON, so they are excluded). A busy GPU
 answers 429 and escalates, so concurrent stages run in parallel across the GPU and Ollama Cloud.
 The VPS Ollama keeps restricted-data runs and fcm-api's knowledge-card embeddings
 (`POST /api/bob/embed`, plus a backfill every `BOB_EMBED_BACKFILL_INTERVAL_MS`, default 15 min,

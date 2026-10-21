@@ -4,7 +4,36 @@ const {
 } = require('./builder-model-adapter');
 const { fitRepositoryContext, mainHealthEvidenceConflict } = require('./builder-repository-context');
 
-const PRODUCT_ANALYST_PROMPT_VERSION = 'product-analyst-v14';
+const PRODUCT_ANALYST_PROMPT_VERSION = 'product-analyst-v15';
+
+// Repository paths may live under any tracked top-level directory (deploy/, Build-Plan/) or at the
+// repository root (builder-autopilot.js). Format is checked here; existence is checked against the
+// complete tracked-file list at the pinned SHA. Live 2026-10-21: real deploy/ and Build-Plan/ files
+// were rejected as "not a repository path" and the run escalated to the next provider.
+const TASK_PATH_PATTERN = /\b(?:apps|supabase|services|scripts|test|docs|deploy|Build-Plan)\/[\w./-]+/g;
+
+function isSafeRepositoryPath(file) {
+  const value = String(file || '');
+  return /^[\w.-][\w./-]*$/.test(value)
+    && !value.startsWith('.')
+    && !value.endsWith('/')
+    && value.split('/').every(part => part && part !== '.' && part !== '..');
+}
+
+function parseJsonObject(text) {
+  try {
+    return JSON.parse(text);
+  } catch (error) {
+    // Some hosted models wrap the object in prose or trailing commentary; accept only one
+    // complete outer object and never repair a truncated one.
+    const start = text.indexOf('{');
+    const end = text.lastIndexOf('}');
+    if (start > 0 || (start === 0 && end > 0 && end < text.length - 1)) {
+      return JSON.parse(text.slice(start, end + 1));
+    }
+    throw error;
+  }
+}
 
 const PRODUCT_SPEC_SCHEMA = Object.freeze({
   type: 'object',
@@ -86,7 +115,7 @@ function suppliedResearchUrls(taskDescription) {
 
 function requiredSourceScope(taskDescription) {
   const line = String(taskDescription || '').match(/required source scope:\s*([^\n]+)/i)?.[1] || '';
-  return [...new Set((line.match(/\b(?:apps|supabase|services|scripts|test|docs)\/[\w./-]+/g) || [])
+  return [...new Set((line.match(TASK_PATH_PATTERN) || [])
     .map(file => file.replace(/[.,;:!?]+$/, '')))];
 }
 
@@ -166,7 +195,10 @@ function validateRepositoryGrounding(specification, { repositoryContext = {}, ta
     ...(Array.isArray(schema.views) ? schema.views : []),
     ...(Array.isArray(schema.functions) ? schema.functions : [])
   ].filter(value => typeof value === 'string').map(value => value.toLowerCase()));
-  const knownCapabilities = new Set([...(Array.isArray(context.known_capabilities) ? context.known_capabilities : []), ...schemaEntities]
+  const liveGaps = Array.isArray(context.live_context?.atlas?.gaps?.items) ? context.live_context.atlas.gaps.items
+    : Array.isArray(context.live_context?.atlas?.gaps) ? context.live_context.atlas.gaps : [];
+  const gapNames = liveGaps.map(gap => String(gap?.entity_name || '').toLowerCase()).filter(Boolean);
+  const knownCapabilities = new Set([...(Array.isArray(context.known_capabilities) ? context.known_capabilities : []), ...schemaEntities, ...gapNames]
     .filter(value => typeof value === 'string')
     .map(value => value.toLowerCase()));
   const task = String(taskDescription || '');
@@ -181,12 +213,12 @@ function validateRepositoryGrounding(specification, { repositoryContext = {}, ta
     // from the failure excerpt is still repository evidence (live 2026-10-21: AdminShell.tsx, 6/6 rejected).
     ...(Array.isArray(repositoryFiles) ? repositoryFiles : [])
   ]);
-  const taskSourcePaths = new Set((task.match(/\b(?:apps|supabase|services|scripts|test|docs)\/[\w./-]+/g) || [])
+  const taskSourcePaths = new Set((task.match(TASK_PATH_PATTERN) || [])
     .map(file => file.replace(/[.,;:!?]+$/, '')));
 
   for (const requirement of specification.delivery_requirements || []) {
     for (const file of requirement.source_scope || []) {
-      if (!/^(?:apps|supabase|services|scripts|test|docs)\/[\w./-]+$/.test(file)) {
+      if (!isSafeRepositoryPath(file)) {
         throw new Error(`delivery requirement source_scope is not a repository path: ${file}`);
       }
       if (/(?:^|\/)(?:example|placeholder|sample|your[-_]?\w*|todo|foo|bar)(?:page|component)?(?:\/index)?\.\w+$/i.test(file) && !taskSourcePaths.has(file)) {
@@ -199,6 +231,16 @@ function validateRepositoryGrounding(specification, { repositoryContext = {}, ta
         throw new Error(`delivery requirement source_scope was not supplied by repository evidence: ${file}`);
       }
     }
+  }
+
+  // Atlas gap repair must target a real, named gap; live 2026-10-21 runs instead re-targeted the
+  // AtlasPage.tsx fallback seed, which closes nothing in bob_capability_map.
+  if (gapNames.length && /\batlas\b[^.]{0,40}\bgaps?\b/i.test(task)) {
+    const targetsGap = (specification.delivery_requirements || []).some(requirement => {
+      const text = `${requirement.outcome || ''} ${requirement.evidence || ''}`.toLowerCase();
+      return gapNames.some(name => text.includes(name));
+    });
+    if (!targetsGap) throw new Error('Atlas gap delivery requirements must name at least one live gap from live_context.atlas.gaps');
   }
 
   if (forbidsNewBackend) {
@@ -269,6 +311,9 @@ function buildProductAnalystPrompt({ taskDescription, repositoryContext, constra
     'Every proposed data entity, relationship identifier, named Atlas capability, route, API, and integration must exist in the supplied repository evidence or be quoted explicitly by the task.',
     'For frontend-only work that forbids new schema or APIs, use an existing schema entity or state clearly that no new data entity is proposed.',
     'When supplied_research_urls is non-empty, copy at least the first four exact URLs into research_evidence and provide every required field for each.',
+    'Lane, path, and protection guards are safety controls, never the defect: if the right file is outside the job lane, say so in unresolved_questions and scope delivery to the correct lane; never propose removing or weakening a guard.',
+    'Cite a source file only when it appears in repository_context (tracked_files or relevant_files) or byte-for-byte in the task; a file named by a previous agent or chat summary is a claim to verify, not evidence.',
+    'For Atlas gap work, take gaps only from repository_context.live_context.atlas.gaps; Atlas covers tables, columns, RPCs, edge functions, and features, and is refreshed by scripts/atlas-refresh.js, never by editing a UI fallback seed. Close one named gap per job.',
     'Return one JSON object matching the supplied schema, with no markdown fence.'
   ].join(' ');
   const userPrompt = JSON.stringify({
@@ -350,7 +395,7 @@ function parseProductSpecification(content, {
   const normalized = content.trim().replace(/^```(?:json)?\s*/i, '').replace(/\s*```$/, '');
   let specification;
   try {
-    specification = JSON.parse(normalized);
+    specification = parseJsonObject(normalized);
   } catch {
     throw new Error('product specification must be valid JSON');
   }

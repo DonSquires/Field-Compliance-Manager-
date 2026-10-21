@@ -197,7 +197,7 @@ function outlineLines(text, { pattern = null, cap = 400 } = {}) {
 function systemPrompt({ lane, limits }) {
   return [
     'You are Bob Builder, the engineering half of Bob — the Field Compliance Manager platform\'s own agent. You work the way a senior coding agent works, at full effort:',
-    '1. UNDERSTAND before editing: read AGENTS.md / the canon (read_canon), your own notes (read_notes), and the code paths involved (search, read_file, list_dir, git_log). Trace the whole seam before changing part of it.',
+    '1. UNDERSTAND before editing: read AGENTS.md / the canon (read_canon), your own notes (read_notes), and the code paths involved (search, read_file, list_dir, git_log), then the live terrain (atlas, live_count) for any shared table, RPC, or edge function. Trace the whole seam before changing part of it.',
     '2. PLAN the smallest correct change that fixes the root cause. Prefer editing existing files over adding new ones. Do not add features, refactors, comments, or "improvements" beyond the task.',
     '3. IMPLEMENT inside your worktree: replace_in_file for edits to existing files (exact old text -> new text; no line counting), write_file for new files or full rewrites, apply_patch only if you already hold a correct unified diff. Keep existing conventions. Never invent schema, tables, or behaviour absent from the evidence — verify with search/read_file.',
     '4. VERIFY: run the relevant tests (run "node --test test/<file>.test.js"), node --check on changed files, and read git diff. If a test fails, read the failure, fix the cause, and run again. Add or update a test when the change is testable at this layer.',
@@ -207,6 +207,7 @@ function systemPrompt({ lane, limits }) {
     '8. CONTINUATION: completed tool steps and edits are checkpointed outside your disposable worktree. When resumed, inspect git_diff and the recorded context; do not restart the investigation or undo prior work without evidence. A repair starts from its exact failed patch. Checkpointed work is not verified work: re-run checks before finish. Runner/resource failures are not instructions to rewrite product code; unmatched baseline failures remain unresolved, never proof that the patch is innocent.',
     '',
     `LANE: ${lane}. ${lane === 'frontend' ? 'You may only change files under apps/web/. Web build/tests are run afterwards by the independent worker; keep changes type-safe and covered by the existing vitest suite where possible.' : 'You may change anything outside apps/web/ that is not protected (edge functions, services, scripts, root modules, tests, docs, ADDITIVE migrations).'}`,
+    'LANE AND PATH GUARDS ARE SAFETY CONTROLS, NOT DEFECTS: if the correct fix lives outside your lane or under a protected path, finish with an empty change set and a no_change_reason that names the exact file and the lane that owns it, so Builder can re-scope. Never edit builder-path-policy.js or any guard to get around it.',
     'PROTECTED (refused, human-only): CI workflows, deploy/, Dockerfiles and compose files, dependency manifests and lockfiles, .env and secret material, supabase/schema.sql (regenerated), auth/identity code (AuthContext, lib/supabase.ts, routing, SafetyGate, access components, _shared/auth.ts). Migrations must be NEW additive files; no destructive SQL. No binary files. Never print, store, or move secrets.',
     '',
     'TOOLS (one call per turn; reply with ONLY a JSON object {"thought": string, "tool": string, "args": object}):',
@@ -221,6 +222,8 @@ function systemPrompt({ lane, limits }) {
     '- apply_patch {diff}                     apply a unified diff (git apply); hunk counts must be exact — use replace_in_file instead when unsure',
     '- delete_file {path}                     delete a file',
     `- run {command}                          allowed: node --test [test files], node --check <file>, bounded apps/web test/lint/build commands, git status/diff/log/show/blame (timeout ${Math.round(limits.runTimeoutMs / 60000)} min); chain allowed commands with && (stops at the first failure)`,
+    '- atlas {action, name?, type?, direction?, depth?, limit?}   live Atlas: capability_map (name fragment) | terrain_edges (exact name) | gap_report | blast_radius (name + type, returns flow_reach and fk_reach separately). Query it before touching shared terrain and to pick a real gap; never edit a UI fallback seed to "close" a gap.',
+    '- live_count {table, column?, equals?}  aggregate live check: total rows, rows where column is set, or rows where column = equals. Counts only, never row bodies. Use it to prove a column has a writer before wiring UI to it.',
     '- read_canon {}                          AGENTS.md + docs/canon/README.md + docs/canon/BOB_DOCTRINE.md (bounded)',
     '- read_notes {limit?}                    your persistent builder notes (lessons from earlier jobs); the 10 most recent are already in your task packet',
     '- write_note {text}                      leave a durable lesson for future jobs (short, factual, no secrets)',
@@ -304,7 +307,7 @@ function readingMap(transcript) {
 // do"); it is the budget failing. Live job 118731bd: 42 reads, 11 searches, 60 turns, zero edits,
 // then "cannot complete within the remaining budget" — parked as if the task were impossible.
 function classifyNoChange({ reason, turns, transcript, limits }) {
-  const exploring = transcript.filter((entry) => ['read_file', 'search', 'outline', 'list_dir', 'git_log'].includes(entry.tool)).length;
+  const exploring = transcript.filter((entry) => ['read_file', 'search', 'outline', 'list_dir', 'git_log', 'atlas', 'live_count'].includes(entry.tool)).length;
   const lateFinish = turns >= Math.ceil(limits.maxTurns * 0.5);
   const mentionsBudget = /\b(budget|turns?|remaining|ran out|could not (?:complete|finish)|cannot be completed)\b/i.test(String(reason || ''));
   return exploring >= 8 && (lateFinish || mentionsBudget);
@@ -644,6 +647,59 @@ function createTools({ workspacePath, repoRoot, lane, supabase, limits, log }) {
         return { error: `note could not be saved: ${error.message}` };
       }
       return { saved: true };
+    },
+    // Live Atlas: metadata about the build (entity names and edges), never tenant rows.
+    async atlas({ action, name, type, direction, depth, limit } = {}) {
+      if (!supabase) return { error: 'Atlas is unavailable in this run' };
+      const cap = Math.min(200, Math.max(1, Number(limit) || 50));
+      const term = String(name ?? '').trim().slice(0, 200);
+      const call = async (query) => {
+        const { data, error } = await withTimeout(query, ATLAS_TIMEOUT_MS);
+        return error ? { error: `Atlas ${action} failed: ${String(error.message).slice(0, 200)}` } : { rows: data ?? [] };
+      };
+      if (action === 'gap_report') {
+        return call(supabase.rpc('bob_atlas_gap_report', { p_limit: cap, p_offset: 0, p_include_columns: false, p_include_unknown_exercise: false }));
+      }
+      if (!term) return { error: 'name is required (exact entity name, or a fragment for capability_map)' };
+      if (action === 'capability_map') {
+        let query = supabase.from('bob_capability_map').select('entity_type,entity_name,present,wired,exercised,retirement_status,notes').ilike('entity_name', `%${term.replace(/[%_]/g, '\\$&')}%`).limit(cap);
+        if (type) query = query.eq('entity_type', String(type));
+        const result = await call(query);
+        return result.rows ? { ...result, note: 'wired is the strongest live claim; exercised is unpopulated unless invocation evidence exists.' } : result;
+      }
+      if (action === 'terrain_edges') {
+        const result = await call(supabase.from('bob_app_map_edges').select('source_file,source_type,source_name,target_type,target_name,edge_kind').eq('retirement_status', 'live').or(`source_name.eq.${term.replace(/[,()]/g, '')},target_name.eq.${term.replace(/[,()]/g, '')}`).limit(cap));
+        return result.rows ? { ...result, note: 'references is weak evidence; confirm reads/writes against supabase/schema.sql.' } : result;
+      }
+      if (action === 'blast_radius') {
+        const fromType = String(type || 'table');
+        const maxDepth = Math.min(6, Math.max(1, Number(depth) || 3));
+        const flow = await call(supabase.rpc('bob_atlas_flow_reach', { p_from_type: fromType, p_from_name: term, p_direction: direction === 'upstream' ? 'upstream' : 'downstream', p_max_depth: maxDepth }));
+        const fk = await call(supabase.rpc('bob_atlas_fk_reach', { p_from_type: fromType, p_from_name: term, p_max_depth: maxDepth }));
+        return {
+          flow_reach: flow.rows ? flow.rows.slice(0, cap) : flow,
+          fk_reach: fk.rows ? fk.rows.slice(0, cap) : fk,
+          note: 'flow_reach is proven data flow; fk_reach is structural relation only and is not a live pathway.'
+        };
+      }
+      return { error: 'action must be capability_map, terrain_edges, gap_report, or blast_radius' };
+    },
+    // Live data checks are aggregate only: a service-role read must never put tenant rows into a prompt.
+    async live_count({ table, column, equals } = {}) {
+      if (!supabase) return { error: 'live data is unavailable in this run' };
+      const identifier = /^[a-z_][a-z0-9_]{0,62}$/;
+      if (!identifier.test(String(table ?? ''))) return { error: 'table must be a plain public table name' };
+      if (column != null && !identifier.test(String(column))) return { error: 'column must be a plain column name' };
+      const head = () => supabase.from(table).select('*', { count: 'exact', head: true });
+      const total = await withTimeout(head(), ATLAS_TIMEOUT_MS);
+      if (total.error) return { error: `count failed: ${String(total.error.message).slice(0, 200)}` };
+      const result = { table, rows: total.count ?? 0 };
+      if (column) {
+        const filled = await withTimeout(equals === undefined ? head().not(column, 'is', null) : head().eq(column, equals), ATLAS_TIMEOUT_MS);
+        if (filled.error) return { ...result, error: `column count failed: ${String(filled.error.message).slice(0, 200)}` };
+        result[equals === undefined ? 'rows_with_value' : 'rows_matching'] = filled.count ?? 0;
+      }
+      return { ...result, note: 'Aggregate count only. A column with zero rows_with_value has no live writer yet: report it as a gap, do not wire UI to it as live data.' };
     },
     __changedFiles: changedFiles,
     __policyCheck: policyCheck,

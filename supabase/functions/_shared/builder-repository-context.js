@@ -131,7 +131,9 @@ function fitRepositoryContext(context, task, maxChars = Number(process.env.BOB_B
     () => {
       buildMap.tracked_files = keepRelevantFirst(buildMap.tracked_files, terms, 120);
       if (schema) { schema.tables = keepRelevantFirst(schema.tables, terms, 60); schema.functions = keepRelevantFirst(schema.functions, terms, 30); }
-      context.live_context = null;
+      // Aggregates go, but the bounded gap list stays: Atlas repair work has nothing real to target without it.
+      const gaps = context.live_context?.atlas?.gaps;
+      context.live_context = gaps ? { atlas: { gaps } } : null;
     },
     () => {
       buildMap.tracked_files = keepRelevantFirst(buildMap.tracked_files, terms, 40);

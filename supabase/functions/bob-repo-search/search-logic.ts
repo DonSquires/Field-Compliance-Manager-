@@ -175,3 +175,14 @@ export function deriveReadProgress(previousMaxLineRead, startLine, actualEndLine
     file_fully_read: fileFullyRead
   };
 }
+
+// A term that is a repository file path is a question about existence, not content: imports drop
+// the extension, so a content grep for "apps/web/src/pages/AtlasPage.tsx" found nothing and Bob
+// reported a real file as not_found (live 2026-10-21). Returns the parent directory and basename.
+export function pathLikeTerm(term) {
+  const value = String(term ?? '').trim().replace(/^\.\//, '');
+  if (!/^[\w.-][\w./-]*\/[\w.-]+\.[A-Za-z0-9]{1,8}$/.test(value)) return null;
+  if (value.split('/').some((part)=>part === '..' || part === '.' || part === '')) return null;
+  const index = value.lastIndexOf('/');
+  return { path: value, dir: value.slice(0, index), base: value.slice(index + 1) };
+}

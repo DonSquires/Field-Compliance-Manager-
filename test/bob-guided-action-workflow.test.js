@@ -25,7 +25,8 @@ test('the approval workbench selects the requested action and preserves the auth
 });
 
 test('Bob preserves and sanitizes the selected governed action as page context', () => {
-  assert.match(adminShell, /bobSourceContext: bobContext/);
+  // Bob docks beside the working page (eeb9f572d), so the shell passes the page context to the dock directly.
+  assert.match(adminShell, /context=\{bobContext\}/);
   assert.match(adminShell, /actionId: routeSearch\.get\('actionId'\)/);
   assert.match(bobWorkspace, /\.\.\.sourceContext/);
   assert.match(conductor, /action_id: text\('actionId', 80\)/);

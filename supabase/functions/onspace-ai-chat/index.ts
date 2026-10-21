@@ -32,6 +32,7 @@ import { buildToolDispatchedPayload, buildToolOutcomePayload, buildIntrospectPay
 import { buildModuleMap } from '../_shared/moduleProfiles.ts';
 import { startToolExecution, finishToolExecution, reloadTaskLedger } from '../_shared/task-lifecycle.ts';
 import { toolSignature } from '../_shared/tool-signature.mjs';
+import { builderJobTitle } from '../_shared/builder-job-title.mjs';
 const createClient = (url, key, opts)=>_createClient(url, key, opts);
 const CORS = {
   'Access-Control-Allow-Origin': '*',
@@ -8336,7 +8337,7 @@ serve(async (req)=>{
     };
     const builderRepositoryPaths = (text: string) => String(text ?? '')
       .replace(/https?:\/\/[^\s<>()]+/gi, ' ')
-      .match(/\b(?:apps|supabase|services|scripts|test|docs|deploy)\/[\w./-]+/g) ?? [];
+      .match(/\b(?:apps|supabase|services|scripts|test|docs|deploy|Build-Plan)\/[\w./-]+/g) ?? [];
     const builderLanesForOwnerRequest = (text: string, fallbackFrontend = false, fallbackBackend = true) => {
       const ownerText = String(text ?? '');
       const paths = builderRepositoryPaths(ownerText);
@@ -8364,7 +8365,6 @@ serve(async (req)=>{
     };
     const builderJobArgsFromEvidence = (text: string, evidenceSteps: Array<{ tool: string; result_summary: string }>) => {
       const requestBrief = String(text ?? '').trim();
-      const firstSentence = requestBrief.replace(/\s+/g, ' ').split(/(?<=[.!?])\s/)[0];
       const evidenceSummary = evidenceSteps
         .map((step) => `${step.tool}: ${step.result_summary.slice(0, step.tool === 'web_research' || step.tool === 'delegate' ? 3500 : 500)}`)
         .join('\n');
@@ -8374,7 +8374,7 @@ serve(async (req)=>{
         .map((url) => url.replace(/[.,;:!?]+$/, '')))].slice(0, 8);
       const builderMode = builderModeForRequest(requestBrief);
       return {
-        title: (firstSentence || 'Implement the requested FCM change').slice(0, 160),
+        title: builderJobTitle(requestBrief),
         owner_instruction_confirmed: true,
         task_description: [
           `Builder mode: ${builderMode}`,
