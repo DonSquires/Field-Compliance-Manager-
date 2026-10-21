@@ -5,6 +5,7 @@ const test = require('node:test');
 
 const migration = fs.readFileSync(path.resolve(__dirname, '../supabase/migrations/20260919040000_record_staff_credential.sql'), 'utf8');
 const hrPage = fs.readFileSync(path.resolve(__dirname, '../apps/web/src/pages/RosterHRPage.tsx'), 'utf8');
+const profilePage = fs.readFileSync(path.resolve(__dirname, '../apps/web/src/pages/StaffProfilePage.tsx'), 'utf8');
 
 test('only an administrator of the staff member organisation can record a credential', () => {
   assert.match(migration, /select s\.\* into v_staff from public\.staff_profiles s where s\.id = p_staff_id;/);
@@ -30,7 +31,11 @@ test('replay-safe on client_request_id and audited as staff_credential_recorded'
 test('the HR page offers Record credential wherever the readiness gate bites and submits through the RPC', () => {
   assert.match(hrPage, /supabase\.rpc\('record_staff_credential', \{/);
   assert.match(hrPage, /p_verified: evidenceAction\.credentialVerified/);
-  assert.equal((hrPage.match(/'record_credential'\)\}>Record credential<\/button>/g) ?? []).length, 2, 'Onboarding card and Staff readiness block');
+  // Since the onboarding table (#118) and staff profile workspace, the gate is met by: the onboarding
+  // row's primary action, the Credentials tab form, and the profile Readiness panel link.
+  assert.match(hrPage, /else if \(ledger\.next_action === 'Verify credential'\) openEvidence\(person\.staff_id!, name, 'record_credential'\);/);
+  assert.match(hrPage, /if \(person\?\.staff_id\) openEvidence\(person\.staff_id, person\.display_name \|\| person\.email \|\| 'Staff member', 'record_credential'\);/);
+  assert.match(profilePage, /<a className="btn btn-secondary" href="\/admin\/people-hr\?tab=credentials"[^>]*>Open credential actions<\/a>/);
   assert.match(hrPage, /aria-label="Staff member for new credential"/);
   assert.match(hrPage, /A verified, current credential is what makes an officer work ready\./);
   assert.match(hrPage, /evidenceAction\.credentialVerified && \(!evidenceAction\.credentialNumber\.trim\(\) \|\| !evidenceAction\.issuingAuthority\.trim\(\) \|\| evidenceAction\.note\.trim\(\)\.length < 10\)/);

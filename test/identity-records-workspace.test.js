@@ -207,7 +207,10 @@ test('private identity evidence runs local OCR and source-face inference', () =>
   assert.match(perceptionEdge, /register_deterministic_identity_document_proposal/);
   assert.match(perceptionEdge, /admin\.rpc\('register_deterministic_identity_document_proposal'/);
   assert.match(perceptionEdge, /att\.uploaded_by !== user\.id/);
-  assert.match(perceptionEdge, /const attachmentClient = incidentMode \? admin : callerClient/);
+  // Incident capture and member submissions (#145) read the attachment as admin, each behind its own path and payload guard.
+  assert.match(perceptionEdge, /const attachmentClient = incidentMode \|\| submissionMode \? admin : callerClient/);
+  assert.match(perceptionEdge, /submission-\$\{personRecordId\}\//);
+  assert.match(perceptionEdge, /capture_authority \?\? ''\) !== 'member_submission'/);
   assert.match(perceptionEdge, /incident_identity_document/);
   assert.match(perceptionEdge, /can_record_incident_person/);
   assert.match(perceptionEdge, /attach_incident_identity_proposal/);

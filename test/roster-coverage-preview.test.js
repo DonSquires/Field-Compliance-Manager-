@@ -29,8 +29,11 @@ test('the Create shift dialog tells the rosterer, in plain words, and never bloc
   assert.match(rosterPage, /No contracted stops on a \$\{weekdayName\(startLocal\)\} for this run — the contract covers \$\{contractedDaysWords\(preview\.contracted_days\)\}\. The shift would have nothing to visit unless stops are added\./);
   assert.match(rosterPage, /has no verified boundary\$\{preview\.place_kind === 'zone' \? ' \(it is a zone, not a site\)' : ''\}, so the officer cannot record arriving or leaving the post\./);
   assert.match(rosterPage, /className=\{`roster-coverage-note is-\$\{words\.tone\}`\} role=\{words\.tone === 'warn' \? 'alert' : 'status'\}/);
-  // the submit button's disabled condition does not depend on the preview
-  assert.match(rosterPage, /disabled=\{saving \|\| !form\.officerId \|\| !form\.workUnitId \|\| !form\.start \|\| !form\.end\}>\{saving \? 'Creating' : 'Create shift'\}/);
+  // the submit button's disabled condition does not depend on the preview; a new shift may be an
+  // open (unassigned) slot, so only editing an existing draft slot requires an officer
+  assert.match(rosterPage, /disabled=\{saving \|\| Boolean\(editingSlot && !form\.officerId\) \|\| !form\.workUnitId \|\| !form\.start \|\| !form\.end\}>\{saving \? 'Creating' : 'Create shift'\}/);
+  assert.doesNotMatch(rosterPage, /disabled=\{[^}]*preview[^}]*\}>\{saving \? 'Creating' : 'Create shift'\}/);
+  assert.match(rosterPage, /p_staff_id: person\?\.staffId \?\? null/);
 });
 
 test('the Work Units card says when a static post\'s place cannot take attendance, before anyone rosters it', () => {
