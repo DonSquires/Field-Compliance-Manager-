@@ -77,7 +77,7 @@ test('vibe builder and the owner control room can reach the firewall, nobody els
   const prompt = vibe.vibeSystemPrompt();
   assert.match(prompt, /firewall_status \{\}/);
   assert.match(prompt, /firewall_change \{op: add\|remove/);
-  assert.equal(vibe.PROMPT_VERSION, 'vibe-v7');
+  assert.equal(vibe.PROMPT_VERSION, 'vibe-v8');
   const session = fs.readFileSync(path.join(__dirname, '..', 'builder-vibe-session.js'), 'utf8');
   assert.match(session, /if \(deps\.firewall\) \{\s*tools\.firewall_status/);
   const server = fs.readFileSync(path.join(__dirname, '..', 'bob-control-plane-server.js'), 'utf8');
