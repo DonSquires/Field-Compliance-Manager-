@@ -47,7 +47,7 @@ server {
 
     # Vibe-session live previews (Vite dev server per session, HMR over WebSocket). The control plane
     # admits only a one-time ticket from builder_vibe_preview_ticket or the HMAC cookie it sets.
-    location ~ ^/vibe/[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}/ {
+    location ~ "^/vibe/[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}/" {
         proxy_pass http://172.16.0.1:8091;
         proxy_http_version 1.1;
         proxy_set_header Upgrade $http_upgrade;
