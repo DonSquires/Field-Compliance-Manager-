@@ -8,7 +8,7 @@
  */
 
 import React, { useEffect, useState, useCallback, useMemo, useRef } from 'react';
-import { useLocation, useNavigate } from 'react-router-dom';
+import { useHref, useLocation, useNavigate } from 'react-router-dom';
 import { useAuth } from '../context/AuthContext';
 import { supabase } from '../lib/supabase';
 import { plainWords } from '../lib/rosterWords';
@@ -456,6 +456,7 @@ export const RosterTimesheetPanel: React.FC<{
 };
 
 const RosterHRPage: React.FC = () => {
+  const staffProfileHref = useHref('/admin/people-hr');
   const location = useLocation();
   const navigate = useNavigate();
   const requestedCredentialId = new URLSearchParams(location.search).get('credential');
@@ -884,7 +885,7 @@ const RosterHRPage: React.FC = () => {
 
   const openStaffProfile = (person: StaffRow, profileTab = 'overview') => {
     if (!person.staff_id) return;
-    const url = new URL('/admin/people-hr', window.location.origin);
+    const url = new URL(staffProfileHref, window.location.origin);
     url.searchParams.set('profile', person.staff_id);
     url.searchParams.set('profileTab', profileTab);
     url.searchParams.set('popout', '1');

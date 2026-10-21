@@ -8,6 +8,48 @@ detailed backlogs (`ENTERPRISE_SAAS_TODO.md`, `PROTOTYPE_GAP_AUDIT.md`,
 Completion language is strict, as in the lineage: **merged ≠ deployed ≠
 glass-proven.** A workstream item is done only when its evidence gate is met.
 
+Staff profile preview navigation, 2026-10-22:
+
+- Before: an authorised HR user opens a staff row from the staff directory.
+  Five checks traced the action URL, React routes, hosting responses, live
+  Atlas/schema, and workflow/browser coverage. Production deep links returned
+  HTTP 200; the same root-level link on Bob's preview host returned HTTP 404.
+  Native popout URLs discarded the preview's `/vibe/<session>/` prefix, and
+  BrowserRouter did not declare the Vite base. This was a transport/routing
+  failure before staff reads, not evidence of missing staff records or RLS.
+- During: BrowserRouter uses Vite's base; staff, evidence-record and return
+  links use router-resolved hrefs. Production `/` behavior and existing
+  caller-authenticated reads remain unchanged. Atlas confirms profile reads
+  of `staff_profiles`, `user_profiles` and evidence tables; FK adjacency is
+  structural only, not proof of additional flows. No schema change is needed.
+- After: regression coverage follows the selected staff ID into the popout,
+  changes tabs, reloads, opens a credential detail, returns to the directory,
+  and verifies unavailable staff produces the existing permission/data state.
+  Run at both `/` and a session-prefixed Vite base on desktop and mobile.
+  These fixture-backed tests do not claim live tenant acceptance.
+- Separate Bob receipt: both screenshot descriptions were saved before the
+  coding loop stopped on four identical `routes` searches. The UI now
+  distinguishes that partial completion from attachment processing failure.
+  Bob receives verified route/Atlas naming guidance and a repeated-call
+  recovery hint; the hard loop limit remains in place.
+- Continuations now include previous Bob error replies as well as owner
+  answers, and up to 60 recent execution/diff receipts rather than 12.
+  The handoff names exact tool arguments, success/failure, committed files
+  and bounded result previews. Nonzero command exits are recorded as failures,
+  not successful tool dispatches. This is bounded history, not perfect memory
+  of every earlier result; Bob must verify the current branch/diff before
+  trusting an old change or reusing a stale test result.
+- Matching platform knowledge cards are seeded by
+  `20261022223000_bob_vibe_continuation_navigation_cards.sql` for Bob chat's
+  existing retrieval path. Vibe receives the same operational rules directly
+  in its runtime prompt; do not claim Vibe automatically retrieves these cards.
+- Validation: eight focused browser cases passed across root/session-prefixed
+  bases and desktop/mobile; 88 focused web tests, lint/type checks and build
+  passed; root tests passed (1,495, eight skipped) before the card test was
+  added. The broader HR suite passed 35 cases and failed five visual-baseline
+  comparisons/missing-baseline checks. Baselines were not changed or waived;
+  no live tenant acceptance is claimed.
+
 Vibe Builder attachments, 2026-10-22:
 
 - Before: Vibe messages were text-only. Bob chat stored files in the private

@@ -118,3 +118,21 @@ it('uploads a document privately, extracts text, and sends its session-scoped re
   }));
   expect(functionsInvoke).not.toHaveBeenCalledWith('bob-document-register', expect.anything());
 });
+
+it('distinguishes completed attachment analysis from a failed coding turn', async () => {
+  wireRealtime();
+  rpc.mockResolvedValue({ data: true, error: null });
+  const failed = {
+    ...message('failed', 1, 'owner', 'message', 'Fix profile navigation'),
+    session_id: 's',
+    status: 'failed' as const,
+    payload: { attachment_context: [{ file_name: 'screen.png', context: 'A 404 is visible.' }] },
+  };
+  from.mockImplementation((table: string) => query(table === 'builder_vibe_sessions' ? [{
+    id: 's', title: 'Navigation', status: 'open', changed_files: [], preview_status: 'off',
+  }] : [failed]));
+  render(<BuilderVibePage />);
+  await screen.findByText(/Coding turn stopped after attachment analysis/);
+  expect(screen.getByText('A 404 is visible.')).toBeTruthy();
+  expect(screen.queryByText('Not processed — send it again')).toBeNull();
+});

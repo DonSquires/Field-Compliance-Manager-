@@ -169,7 +169,7 @@ function MessageBlock({ message }: { message: VibeMessage }) {
           {attachmentContext.map((item, index) => <p key={`${item.file_name || 'attachment'}-${index}`}>{item.context}</p>)}
         </details>}
         {prUrl && <a href={prUrl} target="_blank" rel="noreferrer" className="vibe-msg__link"><GitPullRequest size={14} />Open pull request</a>}
-        {owner && message.status && message.status !== 'done' && <span className={`vibe-msg__state is-${message.status}`}>{message.status === 'queued' ? 'Waiting for Bob' : message.status === 'claimed' ? 'Bob is on it' : 'Not processed — send it again'}</span>}
+        {owner && message.status && message.status !== 'done' && <span className={`vibe-msg__state is-${message.status}`}>{message.status === 'queued' ? 'Waiting for Bob' : message.status === 'claimed' ? 'Bob is on it' : attachmentContext.length ? 'Coding turn stopped after attachment analysis — see Bob’s error below. Continue with a new message; these files remain in session history.' : 'Turn failed — see Bob’s error below.'}</span>}
       </div>
     </div>
   );

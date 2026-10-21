@@ -18,7 +18,7 @@ const { isProtectedPath, protectedReason, normalizeRepoPath } = require('./build
 const { VIBE_BRANCH_PREFIX, builderCommitIdentity, redactGitError } = require('./builder-branch-workspace');
 const { buildModelRunRequest, callModelGateway, fetchModelHealth, selectProviders, providerRequest } = require('./supabase/functions/_shared/builder-model-adapter');
 
-const PROMPT_VERSION = 'vibe-v6';
+const PROMPT_VERSION = 'vibe-v7';
 const VIBE_LIMITS = Object.freeze({
   maxTurns: Math.max(6, Number(process.env.BOB_VIBE_TURNS || 40)),
   wallBudgetMs: Math.max(60_000, Number(process.env.BOB_VIBE_BUDGET_MS || 20 * 60_000)),
@@ -31,7 +31,7 @@ const VIBE_LIMITS = Object.freeze({
   maxPatchBytes: 2 * 1024 * 1024,
 });
 const HISTORY_MESSAGES = 30;
-const HISTORY_EXECUTION = 12;
+const HISTORY_EXECUTION = 60;
 const STREAM_PREVIEW_CHARS = 1500;
 const MAX_VIBE_IMAGE_BYTES = 10 * 1024 * 1024;
 const MAX_VIBE_ATTACHMENT_CONTEXT_CHARS = 24_000;
@@ -65,6 +65,9 @@ function vibeSystemPrompt(limits = VIBE_LIMITS) {
     'The owner describes what they want in plain language. You make it real in your worktree, the way a senior engineer pairing with them would: understand, change, verify, then reply briefly in plain language.',
     'WORKING RULES:',
     '- Read before you write: search / outline / read_file the code you will change; check the live Atlas (atlas, live_count) before touching a shared table, RPC or edge function. Never invent tables, columns or behaviour; verify against supabase/schema.sql.',
+    '- Diagnose navigation before/during/after: find the clicked control, its URL, the router, and the destination data/permission path. Routes live in apps/web/src/App.tsx, routing/RoleRouter.tsx and shells/AdminShell.tsx; do not guess a routes.tsx file. Vibe preview uses /vibe/<session-id>/, unlike production at /. Check basename and native links/popouts that might escape it.',
+    '- Discover exact Atlas entity names with capability_map before querying terrain_edges; UI files are components such as pages/StaffProfilePage, not a guessed page named staff_profile. Empty Atlas results are not proof a feature is missing. Narrow broad/truncated searches to the relevant file or symbol; repeating the same search returns the same results.',
+    '- Before continuing, review CONVERSATION SO FAR, RECENT EXECUTION LOGS and BRANCH SO FAR. Reuse the owner’s previous answers and distinguish recorded successes, failures and unverified claims. Do not restart the investigation or repeat a failed command unchanged. History is bounded; read the current diff/source to verify old edits, and rerun a check only when changed code or a specific stale result justifies it.',
     '- Make the smallest change that does what the owner asked. Prefer replace_in_file. Keep existing conventions, accessibility, loading/empty/error states.',
     '- Verify: run the relevant tests (node --test test/<file>.test.js, npm run test --prefix apps/web -- <pattern>, npm run lint|build --prefix apps/web) and fix failures you caused.',
     '- If the request is ambiguous or risky, ask ONE short question with reply instead of guessing. If the owner is just chatting or asking a question, answer with reply without editing.',
@@ -140,14 +143,14 @@ function createVibeStore(supabase) {
       if (error) throw new Error(`message completion failed: ${error.message}`);
     },
     async history(sessionId, beforeSeq) {
-      const { data, error } = await supabase.from('builder_vibe_messages').select('role, kind, content, payload, seq').eq('session_id', sessionId)
-        .in('role', ['owner', 'bob']).eq('kind', 'message').lt('seq', beforeSeq).order('seq', { ascending: false }).limit(HISTORY_MESSAGES);
+      const { data, error } = await supabase.from('builder_vibe_messages').select('role, kind, content, payload, status, seq').eq('session_id', sessionId)
+        .in('role', ['owner', 'bob']).in('kind', ['message', 'error']).lt('seq', beforeSeq).order('seq', { ascending: false }).limit(HISTORY_MESSAGES);
       if (error) throw new Error(`history read failed: ${error.message}`);
       return (data || []).reverse();
     },
     async recentExecution(sessionId, beforeSeq) {
       const { data, error } = await supabase.from('builder_vibe_messages').select('role, kind, content, payload, seq').eq('session_id', sessionId)
-        .lt('seq', beforeSeq).in('kind', ['tool', 'test', 'error', 'status']).order('seq', { ascending: false }).limit(HISTORY_EXECUTION);
+        .lt('seq', beforeSeq).in('kind', ['tool', 'test', 'error', 'status', 'diff']).order('seq', { ascending: false }).limit(HISTORY_EXECUTION);
       if (error) throw new Error(`execution history read failed: ${error.message}`);
       return (data || []).reverse();
     },
@@ -416,12 +419,18 @@ async function runConversation({ store, session, message, workspacePath, branch,
     const pastAttachments = Array.isArray(entry.payload?.attachment_context)
       ? `\n${entry.payload.attachment_context.map(item => clip(item.context, 4000)).join('\n')}`
       : '';
-    return `${entry.role === 'owner' ? 'OWNER' : 'BOB'}: ${clip(entry.content, 3000)}${pastAttachments}`;
+    const status = entry.status ? ` [${entry.status}]` : entry.kind === 'error' ? ' [failed]' : '';
+    return `${entry.role === 'owner' ? 'OWNER' : 'BOB'}${status}: ${clip(entry.content, 3000)}${pastAttachments}`;
   }).join('\n\n');
   const executionSummary = execution
     .map((entry) => {
-      const preview = entry?.payload?.preview ? ` → ${clip(String(entry.payload.preview).replace(/\s+/g, ' '), 180)}` : '';
-      return `${entry.role?.toUpperCase() || 'LOG'} ${entry.kind}: ${clip(String(entry.content || ''), 160)}${preview}`;
+      const payload = entry.payload || {};
+      const failed = entry.kind === 'error' || payload.ok === false || /^exit [1-9]\d*\b/.test(String(payload.preview || ''));
+      const status = failed ? 'FAILED' : payload.ok === true ? 'SUCCEEDED' : entry.kind === 'diff' ? 'COMMITTED' : 'RECORDED (not verification)';
+      const args = payload.args ? ` args=${clip(JSON.stringify(payload.args), 400)}` : '';
+      const files = Array.isArray(payload.files) ? ` files=${payload.files.join(', ')}` : '';
+      const preview = payload.preview ? ` → ${clip(String(payload.preview).replace(/\s+/g, ' '), failed ? 600 : 240)}` : '';
+      return `#${entry.seq} ${status} ${payload.tool || entry.kind}: ${clip(String(entry.content || ''), 160)}${args}${files}${preview}`;
     })
     .join('\n');
   const task = [
@@ -493,13 +502,20 @@ async function runConversation({ store, session, message, workspacePath, branch,
     }
     await store.post(session.id, {
       role: 'tool', kind: call.tool === 'run' ? 'test' : 'tool', content: toolHeadline(call.tool, args),
-      payload: { tool: call.tool, thought: String(call.thought ?? '').slice(0, 600), args: describeArgs(call.tool, args), ok: !result?.error, preview: resultPreview(result), turn },
+      payload: { message_id: message.id, tool: call.tool, thought: String(call.thought ?? '').slice(0, 600), args: describeArgs(call.tool, args), ok: !result?.error && !result?.timed_out && (typeof result?.exit_code !== 'number' || result.exit_code === 0), preview: resultPreview(result), turn },
     });
     if (repeatCount > 3) {
       return { reply: `I stopped after repeating the same tool call. The last successful progress remains on the branch; blocker: ${clip(result.error, 500)}`, error: true, tools, model: response.data?.model };
     }
     const remaining = limits.maxTurns - turn;
-    messages.push({ role: 'user', content: JSON.stringify(remaining <= 3 ? { tool_result: result, budget: `${remaining} step(s) left: verify and reply now.` } : { tool_result: result }) });
+    const recovery = repeatCount > 1
+      ? `This exact call has already run ${repeatCount} times. Use the existing result; do not call it again. For search, narrow path/query or read a matching file. For a missing file, list_dir its parent instead of guessing. The next repeated call may stop this turn.`
+      : undefined;
+    messages.push({ role: 'user', content: JSON.stringify({
+      tool_result: result,
+      recovery,
+      ...(remaining <= 3 ? { budget: `${remaining} step(s) left: verify and reply now.` } : {}),
+    }) });
   }
   return { reply: 'I ran out of steps for this message. What I changed so far is kept on the branch; say "continue" to carry on.', tools, budget: true };
 }

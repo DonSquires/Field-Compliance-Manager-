@@ -1,5 +1,5 @@
 import React, { useCallback, useEffect, useMemo, useState } from 'react';
-import { useLocation, useNavigate } from 'react-router-dom';
+import { useHref, useLocation, useNavigate } from 'react-router-dom';
 import { useAuth } from '../context/AuthContext';
 import { supabase } from '../lib/supabase';
 import { credentialExpiryWords, credentialTypeLabel } from '../lib/credentialWords';
@@ -54,6 +54,8 @@ const text = (value: unknown, fallback = 'Not recorded') => typeof value === 'st
 const dateWords = (value: unknown, fallback = 'Not recorded') => typeof value === 'string' && value ? new Date(value).toLocaleDateString('en-NZ') : fallback;
 
 const StaffProfilePage: React.FC = () => {
+  const staffProfileHref = useHref('/admin/people-hr');
+  const mainWorkspaceHref = useHref('/admin/people-hr?tab=staff');
   const location = useLocation();
   const navigate = useNavigate();
   const { profile: actor } = useAuth();
@@ -183,7 +185,7 @@ const StaffProfilePage: React.FC = () => {
   };
 
   const openRecord = (kind: RecordKind, id: string, tab: ProfileTab) => {
-    const url = new URL('/admin/people-hr', window.location.origin);
+    const url = new URL(staffProfileHref, window.location.origin);
     url.searchParams.set('profile', staffId ?? '');
     url.searchParams.set('profileTab', tab);
     url.searchParams.set('recordKind', kind);
@@ -262,7 +264,7 @@ const StaffProfilePage: React.FC = () => {
         </div>
         <div className="staff-profile-header-actions">
           <span className={`status-badge ${staffProfile.work_ready ? 'status-active' : 'status-pending'}`}>{staffProfile.work_ready ? 'Work ready' : 'Not work ready'}</span>
-          <a className="btn btn-secondary" href="/admin/people-hr?tab=staff" target="_blank" rel="noopener noreferrer">Open main workspace</a>
+          <a className="btn btn-secondary" href={mainWorkspaceHref} target="_blank" rel="noopener noreferrer">Open main workspace</a>
           <button type="button" className="btn btn-secondary" onClick={() => window.close()}>Close window</button>
         </div>
       </header>
