@@ -36775,6 +36775,10 @@ export type Database = {
         Args: { _lease_token: string; _run_id: string }
         Returns: Json
       }
+      builder_main_health_test_path_valid: {
+        Args: { _file: string }
+        Returns: boolean
+      }
       builder_open_main_health_repair: {
         Args: {
           _failed_files: string[]
