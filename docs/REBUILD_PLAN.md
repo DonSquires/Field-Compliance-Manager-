@@ -29,6 +29,17 @@ Vibe Builder attachments, 2026-10-22:
   a Vibe-session record, not a tenant/business record. The migration is not live
   until the protected PR release lane applies it; Atlas should be refreshed
   after that and wired/exercised claims must wait for their own evidence.
+- Release verification: #165 applied the migration; #166 regenerated the live
+  schema and database types. The release lane completed at `57520d4f`, including
+  the control plane and Atlas refresh. Live catalog checks confirmed RLS,
+  denied anonymous reads/RPC execution, and denied direct authenticated inserts.
+  The private VPS has `moondream:latest` installed. A repository screenshot
+  revealed that its original multi-sentence prompt repeatedly returned empty
+  output; a concise visual question returned a description. Vibe uses that
+  tested question, retaining its authoring-level untrusted/advisory boundary.
+  The description also contained inaccuracies and repetition: this proves local
+  inference, not reliable visual diagnosis or a full browser-upload acceptance
+  test. Human/source verification remains required.
 
 Bob main-health visual baseline, 2026-10-21:
 

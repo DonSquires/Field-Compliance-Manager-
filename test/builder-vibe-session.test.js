@@ -188,6 +188,7 @@ test('Vibe image attachments use only a private, installed local vision model', 
   assert.match(context[0].context, /red validation alert/);
   assert.equal(calls.length, 2);
   assert.equal(calls[1].url, 'http://127.0.0.1:11434/api/generate');
+  assert.equal(JSON.parse(calls[1].options.body).prompt, 'What UI controls and error messages are visible in this screenshot?');
   assert.deepEqual(JSON.parse(calls[1].options.body).images, [image.toString('base64')]);
   assert.match(savedPayload.attachment_context[0].context, /red validation alert/);
 });
