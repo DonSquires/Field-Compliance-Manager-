@@ -8,6 +8,41 @@ detailed backlogs (`ENTERPRISE_SAAS_TODO.md`, `PROTOTYPE_GAP_AUDIT.md`,
 Completion language is strict, as in the lineage: **merged ≠ deployed ≠
 glass-proven.** A workstream item is done only when its evidence gate is met.
 
+Vibe typed edit contracts, 2026-10-22:
+
+- Before: a disposable GPU replay using the installed, memory-eligible
+  `qwen3:8b` found the owning page but supplied invalid replacement text,
+  then asked the owner to provide code. The v9 output schema constrained
+  the tool name but left its arguments as an arbitrary object.
+- During: the output schema now has self-contained alternatives for write,
+  replace, patch, delete, command and visual-baseline calls. Each requires
+  the existing tool's exact argument names and value types; edit tools
+  cannot fall through to the generic read/reply alternative. Empty
+  replacement text remains valid (deleting matched text is intentional),
+  while paths and old text must be non-empty. Existing runtime validation,
+  path protection and command policies remain authoritative.
+- After: a real private Ollama request accepted the schema and returned a
+  complete, correctly typed replacement call. This proves decoder/schema
+  compatibility, not that arbitrary generated code is correct. Vibe is
+  instructed to repair its own tool calls rather than ask the owner for
+  code, and to read the enterprise UX standard and existing CSS for UI work.
+- The same replay also exposed semantic phrases sent to a literal grep
+  tool. Vibe now explains that search matches case-sensitive source text,
+  and an empty search includes a specific non-error hint to read/outline
+  the known path rather than repeatedly append words such as "layout".
+- Validation: the full suite passed 1,516 with eight skips. An earlier run
+  passed 70 focused schema/gateway/Vibe/firewall/baseline tests.
+  The first full run
+  hit an existing binary-patch/index mismatch in the visual-baseline test;
+  that test passed unchanged in the focused run and the complete rerun.
+  No baseline or patch-transport code was changed.
+- Separate capacity evidence: the private 30B CPU replay took 624 seconds,
+  made nine model requests (four timed out), executed five discovery tools,
+  and changed no files. The v9 alternate GPU replay completed nine requests
+  in 209 seconds, but its invalid tool call and code-request handoff were not
+  autonomous acceptance. Both disposable worktrees were removed. No default
+  model routing or private-code egress policy was changed.
+
 Vibe TypeScript handoff gate, 2026-10-22:
 
 - Before: the v8 loop reports checks the model actually ran, but an author

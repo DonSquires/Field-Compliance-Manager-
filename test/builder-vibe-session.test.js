@@ -150,6 +150,46 @@ test('vibe branch and workspace names are fixed to the session id', () => {
   assert.throws(() => vibe.vibeWorkspacePath('/data/ws', '../../etc'));
 });
 
+test('model output schema requires exact typed edit arguments without a generic edit escape', () => {
+  const schema = vibe.vibeToolSchema({
+    replace_in_file() {}, write_file() {}, delete_file() {}, apply_patch() {}, run() {},
+    generate_visual_baselines() {}, read_file() {}, __policyCheck() {},
+  });
+  const edit = schema.oneOf.find(branch => branch.properties.tool.const === 'replace_in_file');
+  assert.deepEqual(edit.required, ['tool', 'args']);
+  assert.deepEqual(edit.properties.args.required, ['path', 'old_text', 'new_text']);
+  assert.equal(edit.properties.args.properties.new_text.type, 'string');
+  assert.equal(edit.properties.args.properties.new_text.minLength, undefined);
+  assert.equal(edit.properties.args.properties.all.type, 'boolean');
+  assert.equal(edit.properties.args.additionalProperties, false);
+  const fallback = schema.oneOf.at(-1).properties.tool.enum;
+  assert.ok(fallback.includes('read_file'));
+  assert.ok(fallback.includes('reply'));
+  assert.ok(!fallback.includes('replace_in_file'));
+  assert.ok(!schema.properties.tool.enum.includes('__policyCheck'));
+  for (const name of ['write_file', 'delete_file', 'apply_patch', 'run', 'generate_visual_baselines']) {
+    const branch = schema.oneOf.find(item => item.properties.tool.const === name);
+    assert.ok(branch.properties.args.required.length > 0, name);
+    assert.equal(branch.additionalProperties, false, name);
+    assert.ok(!fallback.includes(name), name);
+  }
+});
+
+test('empty literal searches explain the actual tool contract instead of inviting semantic query loops', async () => {
+  const { store, deps, model } = setup([
+    { thought: 'semantic guess', tool: 'search', args: { path: 'apps/web/src/hello.ts', query: 'Greeting component layout structure' } },
+    { thought: 'read source', tool: 'read_file', args: { path: 'apps/web/src/hello.ts' } },
+    { thought: 'reply', tool: 'reply', args: { message: 'Read the actual greeting.' } },
+  ]);
+  await vibe.processVibeMessage({ store, message: ownerMessage('inspect greeting'), deps });
+  const result = model.calls[1].request.messages.filter(entry => entry.role === 'user').at(-1);
+  const payload = JSON.parse(result.content).tool_result;
+  assert.equal(payload.matches, 0);
+  assert.match(payload.hint, /not semantic search/);
+  assert.match(payload.hint, /read_file or outline/);
+  assert.equal(payload.error, undefined);
+});
+
 test('an owner message edits the branch, commits the turn and replies', async () => {
   const { store, model, deps, workspaceRoot, repo } = setup([
     { thought: 'look', tool: 'read_file', args: { path: 'apps/web/src/hello.ts' } },
