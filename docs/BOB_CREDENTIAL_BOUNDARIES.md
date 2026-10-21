@@ -77,6 +77,12 @@ Main-health also mounts root runtime dependencies into a disposable
 `/workspace/node_modules` so both CommonJS and ESM imports work without an
 install. Its `/tmp` permits execution because root tests create executable
 git/npm fixtures there; other profiles retain their existing tmpfs policy.
+Before Docker starts, the control plane creates the empty dependency and
+`.bob` mountpoint directories in fresh detached checkouts; execution still
+uses a read-only source bind and disposable tmpfs contents.
+Git-based inventory tests consume a tracked-file manifest produced from that
+checkout's pinned Git tree before launch, rather than mounting host Git
+metadata or credentials into the worker.
 Root node:test, lint, build, Vitest and browser-smoke steps each emit a
 START/PASS/FAIL marker and all run even if an earlier check fails. Root TAP
 failure paths remain repository-root paths through repair intake; none are
