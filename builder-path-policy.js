@@ -24,6 +24,7 @@ const PROTECTED_PATTERNS = [
   /^deploy\//,
   /(^|\/)package\.json$/,
   /(^|\/)package-lock\.json$/,
+  /(^|\/)node_modules\//,
   /(^|\/)pnpm-lock\.yaml$/,
   /(^|\/)yarn\.lock$/,
   /(^|\/)Cargo\.(toml|lock)$/,
@@ -77,7 +78,7 @@ function protectedReason(file) {
   if (/^\.github\/workflows\//.test(normalized)) return 'CI workflow (protected path)';
   if (/(^|\/)\.env/.test(normalized) || /\.(pem|key|pfx|p12|crt|keystore)$/i.test(normalized)) return 'environment or secret material (protected path)';
   if (/Dockerfile|docker-compose|^deploy\//.test(normalized)) return 'deployment or environment change (protected path)';
-  if (/package(-lock)?\.json$|pnpm-lock|yarn\.lock|Cargo\.(toml|lock)|requirements/.test(normalized)) return 'dependency change (protected path)';
+  if (/package(-lock)?\.json$|(^|\/)node_modules\/|pnpm-lock|yarn\.lock|Cargo\.(toml|lock)|requirements/.test(normalized)) return 'dependency change (protected path)';
   if (/^supabase\/schema\.sql$/.test(normalized)) return 'regenerated schema snapshot (never hand-edited)';
   if (/AuthContext|lib\/supabase\.ts|routing\/|SafetyGate|components\/access\/|_shared\/auth\.ts/.test(normalized)) return 'auth/identity code (protected path)';
   return 'protected path';

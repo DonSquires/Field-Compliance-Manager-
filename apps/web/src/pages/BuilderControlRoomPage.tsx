@@ -199,6 +199,9 @@ const PROMPT_TEMPLATES = [
   },
 ];
 
+const TEMPLATE_PLACEHOLDER = /\[[^\]\n]{3,}\]/;
+const hasTemplatePlaceholders = (value: string) => TEMPLATE_PLACEHOLDER.test(String(value || ''));
+
 const BuilderControlRoomPage: React.FC<{ onOpenBob?: (prompt: string) => void; onOpenVibe?: () => void }> = ({ onOpenBob, onOpenVibe }) => {
   const [projects, setProjects] = useState<BuilderProject[]>([]);
   const [jobs, setJobs] = useState<BuilderJob[]>([]);
@@ -413,6 +416,10 @@ const BuilderControlRoomPage: React.FC<{ onOpenBob?: (prompt: string) => void; o
   const createJob = async (event: React.FormEvent) => {
     event.preventDefault();
     if (!selectedProject || !form.title.trim() || !form.taskDescription.trim()) return;
+    if (hasTemplatePlaceholders(form.title) || hasTemplatePlaceholders(form.taskDescription)) {
+      setError('Fill in template placeholders before creating the Builder job.');
+      return;
+    }
     if (!form.frontendRequired && !form.backendRequired) {
       setError('Select at least one implementation scope.');
       return;

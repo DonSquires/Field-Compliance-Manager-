@@ -22,14 +22,26 @@ async function recordGenerationFailure({ supabase, job, step, logger = console }
   }
 }
 
+function crossLaneNoChange(generation) {
+  const detail = String(generation?.error || generation?.summary || '').toLowerCase();
+  return /outside the (frontend|backend) lane/.test(detail)
+    || /outside the allowed .* lane/.test(detail)
+    || /resides outside the allowed/.test(detail);
+}
+
 /**
- * The author found nothing to change in its lane and the sibling lane already delivered the
- * patch (a brief that names both apps/web and an edge function it must not touch): the step is
- * skipped with the author's reason, not parked for a human. Returns true when skipped.
+ * A no-change answer can be actionable in two ways:
+ * 1) the sibling implementation already delivered the patch, or
+ * 2) this lane can prove the fix belongs to the sibling lane.
+ * In either case, skip this lane with the recorded reason so the job can continue.
  */
 async function skipLaneWithNothingToDo({ supabase, job, step, siblingCompleted, logger = console }, generation) {
-  if (!generation?.no_change || !siblingCompleted || !supabase || typeof supabase.rpc !== 'function' || !job?.id || !step?.id) return false;
-  const reason = `Nothing to change in this lane; the ${step.builder_mode === 'frontend_engineer' ? 'backend' : 'frontend'} lane delivered the change. Author: ${String(generation.error || '').slice(0, 600)}`;
+  const reroute = crossLaneNoChange(generation);
+  if (!generation?.no_change || (!siblingCompleted && !reroute) || !supabase || typeof supabase.rpc !== 'function' || !job?.id || !step?.id) return false;
+  const sibling = step.builder_mode === 'frontend_engineer' ? 'backend' : 'frontend';
+  const reason = reroute
+    ? `Nothing to change in this lane; author evidence says this fix belongs to the ${sibling} lane. Author: ${String(generation.error || '').slice(0, 600)}`
+    : `Nothing to change in this lane; the ${sibling} lane delivered the change. Author: ${String(generation.error || '').slice(0, 600)}`;
   try {
     const { error } = await supabase.rpc('builder_skip_implementation_step', { _job_id: job.id, _step_id: step.id, _builder_mode: step.builder_mode, _reason: reason });
     if (error) { logger?.warn?.(`[builder] lane skip not recorded: ${error.message}`); return false; }
@@ -40,4 +52,4 @@ async function skipLaneWithNothingToDo({ supabase, job, step, siblingCompleted, 
   }
 }
 
-module.exports = { recordGenerationFailure, skipLaneWithNothingToDo };
+module.exports = { crossLaneNoChange, recordGenerationFailure, skipLaneWithNothingToDo };

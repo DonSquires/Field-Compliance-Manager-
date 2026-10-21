@@ -52,6 +52,7 @@ const RUN_ALLOWLIST = [
   /^node -e "require\('\.\/[A-Za-z0-9_./-]+'\)"$/,
   /^npm run (?:lint|build) --prefix apps\/web$/,
   /^npm run test --prefix apps\/web -- [A-Za-z0-9_./*=\- ]+$/,
+  /^npm test --prefix apps\/web -- [A-Za-z0-9_./*=\- ]+$/,
   /^git (?:status|diff|log|show|blame)(?: [A-Za-z0-9_./=@^~:*-]+)*$/,
 ];
 const SKIP_DIRS = new Set(['node_modules', '.git', 'dist', 'build', 'target', '.next', 'coverage']);
@@ -224,7 +225,7 @@ function systemPrompt({ lane, limits, firewall = false }) {
     '- apply_patch {diff}                     apply a unified diff (git apply); hunk counts must be exact — use replace_in_file instead when unsure',
     '- delete_file {path}                     delete a file',
     '- generate_visual_baselines {paths, reason}  frontend only: 1-6 exact apps/web/e2e/<name>.spec.ts-snapshots/<name>-desktop-chromium-linux.png (or mobile) paths. Explain intentional before/during/after behavior, not just a mismatch. Runs offline fixture tests, generates PNGs, rerenders and compares, retains private before/after images and hashes. Never use it to bless an unexplained regression or weaken assertions/tolerances. Independent verification repeats rendering. Existing release holds and HUMAN merge approval remain; no auto-merge.',
-    `- run {command}                          allowed: node --test [test files], node --check <file>, bounded apps/web test/lint/build commands, git status/diff/log/show/blame (timeout ${Math.round(limits.runTimeoutMs / 60000)} min); chain allowed commands with && (stops at the first failure)`,
+    `- run {command}                          allowed: node --test [test files], node --check <file>, bounded apps/web test/lint/build commands (npm run test or npm test), git status/diff/log/show/blame (timeout ${Math.round(limits.runTimeoutMs / 60000)} min); chain allowed commands with && (stops at the first failure). Never run npm install/ci.`,
     '- atlas {action, name?, type?, direction?, depth?, limit?}   live Atlas: capability_map (name fragment) | terrain_edges (exact name) | gap_report | blast_radius (name + type, returns flow_reach and fk_reach separately). Query it before touching shared terrain and to pick a real gap; never edit a UI fallback seed to "close" a gap.',
     '- live_count {table, column?, equals?}  aggregate live check: total rows, rows where column is set, or rows where column = equals. Counts only, never row bodies. Use it to prove a column has a writer before wiring UI to it.',
     '- read_canon {}                          AGENTS.md + docs/canon/README.md + docs/canon/BOB_DOCTRINE.md (bounded)',
@@ -430,7 +431,10 @@ function createTools({ workspacePath, repoRoot, lane, supabase, limits, log, gen
   const runs = [];
   const run = (command) => {
     const text = String(command ?? '').trim();
-    if (!RUN_ALLOWLIST.some((pattern) => pattern.test(text))) return { error: 'command not allowed; allowed forms: node --test [test/<file>.test.js …], node --check <file>, bounded apps/web test/lint/build commands, git status|diff|log|show|blame' };
+    if (/^npm (?:i|install)\b/.test(text)) {
+      return { error: 'command not allowed in this lane: dependency installation is blocked; use the allowlisted npm run/npm test commands and report missing tooling as a workspace issue' };
+    }
+    if (!RUN_ALLOWLIST.some((pattern) => pattern.test(text))) return { error: 'command not allowed; allowed forms: node --test [test/<file>.test.js …], node --check <file>, bounded apps/web test/lint/build commands (npm run test or npm test), git status|diff|log|show|blame' };
     const argv = text.match(/"[^"]*"|\S+/g).map((part) => part.replace(/^"|"$/g, ''));
     const started = Date.now();
     // A nested `node --test` inherits the parent test-runner context and misreports; give the child a clean runner env.

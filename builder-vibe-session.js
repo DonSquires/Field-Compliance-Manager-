@@ -15,7 +15,7 @@ const { isProtectedPath, protectedReason, normalizeRepoPath } = require('./build
 const { VIBE_BRANCH_PREFIX, builderCommitIdentity, redactGitError } = require('./builder-branch-workspace');
 const { buildModelRunRequest, callModelGateway, fetchModelHealth, selectProviders, providerRequest } = require('./supabase/functions/_shared/builder-model-adapter');
 
-const PROMPT_VERSION = 'vibe-v4';
+const PROMPT_VERSION = 'vibe-v5';
 const VIBE_LIMITS = Object.freeze({
   maxTurns: Math.max(6, Number(process.env.BOB_VIBE_TURNS || 40)),
   wallBudgetMs: Math.max(60_000, Number(process.env.BOB_VIBE_BUDGET_MS || 20 * 60_000)),
@@ -28,6 +28,7 @@ const VIBE_LIMITS = Object.freeze({
   maxPatchBytes: 2 * 1024 * 1024,
 });
 const HISTORY_MESSAGES = 30;
+const HISTORY_EXECUTION = 12;
 const STREAM_PREVIEW_CHARS = 1500;
 
 const id8 = sessionId => String(sessionId).replace(/-/g, '').slice(0, 8).toLowerCase();
@@ -61,6 +62,7 @@ function vibeSystemPrompt(limits = VIBE_LIMITS) {
     '- Make the smallest change that does what the owner asked. Prefer replace_in_file. Keep existing conventions, accessibility, loading/empty/error states.',
     '- Verify: run the relevant tests (node --test test/<file>.test.js, npm run test --prefix apps/web -- <pattern>, npm run lint|build --prefix apps/web) and fix failures you caused.',
     '- If the request is ambiguous or risky, ask ONE short question with reply instead of guessing. If the owner is just chatting or asking a question, answer with reply without editing.',
+    '- Never repeat an identical tool call more than three times. Use recent execution logs and prior owner answers; if a tool keeps failing, stop and report the concrete blocker instead of retrying or asking the same question again.',
     '- Protected paths (CI workflows, deploy/, Dockerfiles, package manifests/lockfiles, .env/secrets, supabase/schema.sql, auth/identity code) are refused: tell the owner which file needs a human instead. Migrations must be NEW additive, non-destructive files under supabase/migrations (timestamped, unique version). You do not apply them: once the owner merges the pull request the release lane applies them live with a ledger row, deploys changed edge functions, regenerates schema.sql and the database types, and refreshes Atlas. Destructive SQL is refused by the lane and needs a person.',
     '- Each of your turns is committed to the session branch automatically; the owner can undo it, preview it live, and ship it as a pull request. You never merge or deploy. Never claim a deployment, migration application or live write that has not happened; say it goes live after the owner merges.',
     '',
@@ -69,7 +71,7 @@ function vibeSystemPrompt(limits = VIBE_LIMITS) {
     '- list_dir {path} | read_file {path, start_line?, end_line?} | outline {path, pattern?} | search {query, path?, regex?, context?} | git_log {path?, limit?} | git_diff {}',
     '- write_file {path, content} | replace_in_file {path, old_text, new_text, all?} | apply_patch {diff} | delete_file {path}',
     '- generate_visual_baselines {paths, reason}  1-6 exact Playwright Linux PNG paths under apps/web/e2e/*.spec.ts-snapshots/. Explain the intentional before/after UI change; a mismatch alone is NOT approval. Generates offline fixture PNGs, rerenders and compares, retains before/after hashes and images. Never weaken tests or tolerances to bless a regression. Human review and merge are required; no live tenant screenshots.',
-    `- run {command}  allowed: node --test [test files], node --check <file>, npm run lint|build --prefix apps/web, npm run test --prefix apps/web -- <pattern>, git status|diff|log|show|blame (timeout ${Math.round(limits.runTimeoutMs / 60000)} min)`,
+    `- run {command}  allowed: node --test [test files], node --check <file>, npm run lint|build --prefix apps/web, npm run test --prefix apps/web -- <pattern> (or npm test --prefix apps/web -- <pattern>), git status|diff|log|show|blame (timeout ${Math.round(limits.runTimeoutMs / 60000)} min)`,
     '- atlas {action: capability_map|terrain_edges|gap_report|blast_radius, name?, type?, direction?, depth?, limit?}  live build map (flow_reach and fk_reach are different truths)',
     '- live_count {table, column?, equals?}  aggregate row counts only',
     '- read_canon {} | read_notes {limit?} | write_note {text}',
@@ -78,6 +80,11 @@ function vibeSystemPrompt(limits = VIBE_LIMITS) {
     '- tailnet_status {} | tailnet_acl {op: get|set, policy?, if_match?, purpose?}  Tailscale devices and ACL policy (strict JSON string). set validates first, needs the etag from get, is LIVE and audited, requires an explicit unrestricted grant to the configured owner, and preserves existing Tailscale SSH rules (only when credentials are configured).',
     '- reply {message}  END YOUR TURN: tell the owner, in a few plain sentences, what you changed (files), what you verified, and anything they should check in the preview. Use markdown sparingly.',
   ].join('\n');
+}
+
+function applyVibeRouting(modelRequest) {
+  const chain = ['gpu_workstation', 'ollama'];
+  return { ...modelRequest, provider: chain[0], chain, routing_reason: 'private_repository_local_only' };
 }
 
 function describeArgs(tool, args) {
@@ -131,6 +138,12 @@ function createVibeStore(supabase) {
       if (error) throw new Error(`history read failed: ${error.message}`);
       return (data || []).reverse();
     },
+    async recentExecution(sessionId, beforeSeq) {
+      const { data, error } = await supabase.from('builder_vibe_messages').select('role, kind, content, payload, seq').eq('session_id', sessionId)
+        .lt('seq', beforeSeq).in('kind', ['tool', 'test', 'error', 'status']).order('seq', { ascending: false }).limit(HISTORY_EXECUTION);
+      if (error) throw new Error(`execution history read failed: ${error.message}`);
+      return (data || []).reverse();
+    },
     async releaseStaleClaims(olderThanMs = 45 * 60_000) {
       const cutoff = new Date(Date.now() - olderThanMs).toISOString();
       await supabase.from('builder_vibe_messages').update({ status: 'failed', completed_at: new Date().toISOString() }).eq('status', 'claimed').lt('claimed_at', cutoff);
@@ -155,7 +168,25 @@ function ensureVibeWorkspace({ workspaceRoot, session, sourceDirFor, resolveHead
   return { workspacePath, branch, baseSha, created: true, recovered: Boolean(session.base_sha && session.head_sha && session.head_sha !== session.base_sha) };
 }
 
+const EPHEMERAL_VIBE_PATHS = ['apps/web/node_modules/'];
+function revertEphemeralWorkspaceChanges(workspacePath) {
+  const raw = execFileSync('git', ['status', '--porcelain=v1', '-z', '--untracked-files=all'], { cwd: workspacePath, encoding: 'utf8', stdio: ['ignore', 'pipe', 'pipe'], maxBuffer: 64 * 1024 * 1024 });
+  const entries = raw.split('\0').filter(Boolean);
+  const ephemeral = [];
+  for (let index = 0; index < entries.length; index += 1) {
+    const entry = entries[index];
+    const status = entry.slice(0, 2);
+    const file = entry.slice(3);
+    if (status[0] === 'R' || status[0] === 'C') index += 1;
+    if (EPHEMERAL_VIBE_PATHS.some(prefix => file.startsWith(prefix))) ephemeral.push(file);
+  }
+  for (const file of ephemeral) {
+    try { git(workspacePath, ['checkout', '--', file]); } catch { fs.rmSync(path.resolve(workspacePath, file), { recursive: true, force: true }); }
+  }
+}
+
 function commitTurn({ workspacePath, message, identity }) {
+  revertEphemeralWorkspaceChanges(workspacePath);
   git(workspacePath, ['add', '-A']);
   if (!git(workspacePath, ['diff', '--cached', '--name-only'])) return null;
   const subject = `vibe: ${String(message || 'update').split('\n')[0].replace(/\s+/g, ' ').trim().slice(0, 64) || 'update'}`;
@@ -196,33 +227,43 @@ async function runConversation({ store, session, message, workspacePath, branch,
     }
   }
   const history = await store.history(session.id, message.seq);
+  const execution = typeof store.recentExecution === 'function' ? await store.recentExecution(session.id, message.seq) : [];
   const state = branchState(workspacePath, baseSha);
   const transcript = history.map(entry => `${entry.role === 'owner' ? 'OWNER' : 'BOB'}: ${clip(entry.content, 3000)}`).join('\n\n');
+  const executionSummary = execution
+    .map((entry) => {
+      const preview = entry?.payload?.preview ? ` → ${clip(String(entry.payload.preview).replace(/\s+/g, ' '), 180)}` : '';
+      return `${entry.role?.toUpperCase() || 'LOG'} ${entry.kind}: ${clip(String(entry.content || ''), 160)}${preview}`;
+    })
+    .join('\n');
   const task = [
     `SESSION: ${session.title} (branch ${branch}, based on main ${String(baseSha).slice(0, 10)})`,
     state.commits.length ? `BRANCH SO FAR (${state.commits.length} commit(s)):\n${state.commits.slice(0, 20).join('\n')}\nFiles changed vs main: ${state.files.slice(0, 40).join(', ')}` : 'BRANCH SO FAR: no changes yet.',
     transcript ? `CONVERSATION SO FAR:\n${transcript}` : 'CONVERSATION SO FAR: (this is the first message)',
+    executionSummary ? `RECENT EXECUTION LOGS (avoid repeating failed/refused steps):\n${executionSummary}` : null,
     `OWNER NOW SAYS:\n${message.content}`,
-  ].join('\n\n');
+  ].filter(Boolean).join('\n\n');
   const messages = [{ role: 'system', content: vibeSystemPrompt(limits) }, { role: 'user', content: task }];
   const baseRequest = buildModelRunRequest({
     organizationId: 'platform', jobId: session.id, stepId: message.id, builderMode: 'vibe_engineer', workloadKind: 'vibe_implementation',
     promptVersion: PROMPT_VERSION, systemPrompt: messages[0].content, userPrompt: task, outputSchema: { type: 'object', required: ['tool', 'args'] },
   });
+  const modelRequest = applyVibeRouting(baseRequest);
   const health = await (deps.fetchHealth || fetchModelHealth)(gateway);
-  const candidates = selectProviders(baseRequest, { health });
+  const candidates = selectProviders(modelRequest, { health });
   if (!candidates.length) return { reply: 'No model provider is available right now, so I could not work on this. The model gateway health needs checking.', error: true, tools };
   const callModel = deps.callModel || callModelGateway;
   const started = Date.now();
   let active = 0;
   let unparseable = 0;
   let unavailable = 0;
+  const repeatedCalls = new Map();
   for (let turn = 1; turn <= limits.maxTurns && Date.now() - started < limits.wallBudgetMs; turn++) {
     const candidate = candidates[active];
     const status = health?.[candidate.provider] || {};
     const maxOutput = Math.min(Number(status.max_output_tokens || 8192), status.num_ctx ? Math.floor(status.num_ctx / 2) : 8192);
     const promptBudget = status.num_ctx ? Math.floor((status.num_ctx - maxOutput - 512) * 3.5) : Infinity;
-    const base = providerRequest(baseRequest, candidate, null);
+    const base = providerRequest(modelRequest, candidate, null);
     const request = { ...base, idempotency_key: `${base.idempotency_key}::vibe-${turn}`, request: { ...base.request, messages: compactMessages(messages, { maxChars: promptBudget }), max_output_tokens: maxOutput } };
     const response = await callModel({ ...gateway, modelRequest: request, timeoutMs: limits.turnTimeoutMs });
     if (!response.ok) {
@@ -250,8 +291,13 @@ async function runConversation({ store, session, message, workspacePath, branch,
       return { reply: clip(args.message || args.summary || call.thought || 'Done.', 8000), tools, model: response.data?.model };
     }
     messages.push({ role: 'assistant', content: JSON.stringify({ thought: String(call.thought ?? '').slice(0, 1500), tool: call.tool, args }) });
+    const callKey = `${call.tool}:${JSON.stringify(args)}`;
+    const repeatCount = (repeatedCalls.get(callKey) || 0) + 1;
+    repeatedCalls.set(callKey, repeatCount);
     let result;
-    if (typeof tools[call.tool] === 'function' && !call.tool.startsWith('__')) {
+    if (repeatCount > 3) {
+      result = { error: 'identical tool call limit reached; use prior results or report the blocker instead of repeating this call' };
+    } else if (typeof tools[call.tool] === 'function' && !call.tool.startsWith('__')) {
       try { result = await tools[call.tool](args); } catch (error) { result = { error: clip(redactGitError(error && error.message), 1500) }; }
     } else {
       result = { error: `unknown tool ${call.tool}` };
@@ -260,6 +306,9 @@ async function runConversation({ store, session, message, workspacePath, branch,
       role: 'tool', kind: call.tool === 'run' ? 'test' : 'tool', content: toolHeadline(call.tool, args),
       payload: { tool: call.tool, thought: String(call.thought ?? '').slice(0, 600), args: describeArgs(call.tool, args), ok: !result?.error, preview: resultPreview(result), turn },
     });
+    if (repeatCount > 3) {
+      return { reply: `I stopped after repeating the same tool call. The last successful progress remains on the branch; blocker: ${clip(result.error, 500)}`, error: true, tools, model: response.data?.model };
+    }
     const remaining = limits.maxTurns - turn;
     messages.push({ role: 'user', content: JSON.stringify(remaining <= 3 ? { tool_result: result, budget: `${remaining} step(s) left: verify and reply now.` } : { tool_result: result }) });
   }
@@ -376,4 +425,4 @@ function createVibeWorker({ supabase, deps, intervalMs = 3000, log = console }) 
   };
 }
 
-module.exports = { PROMPT_VERSION, VIBE_LIMITS, vibeBranchName, vibeWorkspacePath, vibeSystemPrompt, ensureVibeWorkspace, commitTurn, revertLastTurn, revertRefusedChanges, branchState, createVibeStore, runConversation, shipSession, processVibeMessage, createVibeWorker };
+module.exports = { PROMPT_VERSION, VIBE_LIMITS, vibeBranchName, vibeWorkspacePath, vibeSystemPrompt, applyVibeRouting, ensureVibeWorkspace, commitTurn, revertLastTurn, revertRefusedChanges, branchState, createVibeStore, runConversation, shipSession, processVibeMessage, createVibeWorker };
