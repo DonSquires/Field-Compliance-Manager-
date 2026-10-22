@@ -8,6 +8,23 @@ detailed backlogs (`ENTERPRISE_SAAS_TODO.md`, `PROTOTYPE_GAP_AUDIT.md`,
 Completion language is strict, as in the lineage: **merged ≠ deployed ≠
 glass-proven.** A workstream item is done only when its evidence gate is met.
 
+Vibe tolerant edits and Ollama Cloud escalation (vibe-v12), 2026-10-22:
+
+- Before: owner session 6d6438f8 ("Overview & approvals" redesign) found the
+  right `AdminHubPage.css`, but local models reflowed whitespace in its long
+  one-line rules. Every `replace_in_file` was refused as a whitespace miss,
+  the identical-call guard stopped the turn, and local recovery hit the same
+  wall. No file changed.
+- During: `replace_in_file` now accepts a unique match that differs only in
+  whitespace or copied read_file `N: ` prefixes and reports `matched`;
+  ambiguous normalized matches are refused. Under the owner's 2026-10-22
+  ruling, Vibe may escalate to Ollama Cloud after private candidates, behind
+  `BOB_VIBE_ALLOW_OLLAMA_CLOUD`, in JSON mode, never for attachment-bearing
+  turns, with an `external_egress` status receipt (see
+  [credential boundaries](BOB_CREDENTIAL_BOUNDARIES.md)).
+- After: unit and root suites pass. Not yet proven: the owner's own retry
+  producing the redesign; it remains unverified until Bob's turn succeeds.
+
 Vibe native execution and private compute, 2026-10-22:
 
 - Before: Vibe made local models print JSON as text instead of using their

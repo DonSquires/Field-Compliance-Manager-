@@ -10,13 +10,24 @@ rebuild; an image rebuild alone does not update the running launcher.
 
 Vibe Builder runs against the private `DonSquires/Field-Compliance-Manager-`
 repository. Its model context can contain owner messages, source code, diffs,
-and tool output, so Vibe authoring is local-only: the GPU workstation and VPS
-Ollama providers may be used; Ollama Cloud and OpenAI must not receive Vibe
-session prompts or tool results. Do not add an external Vibe route without a
-separate approved data-classification and egress control that proves what
-content is safe to send. The Ollama Cloud key remains available only to the
-other unrestricted workloads already governed by the model adapter; its
-presence does not authorize Vibe source-code egress.
+and tool output, so Vibe authoring is private-first: the GPU workstation and VPS
+Ollama providers are always tried first. Owner ruling 2026-10-22 ("ollama web
+is an option and local for smaller jobs"; "you can use alternative methods and
+models as needed") approves Ollama Cloud as the only external Vibe escalation,
+under these egress controls:
+
+- It is off unless the control plane sets `BOB_VIBE_ALLOW_OLLAMA_CLOUD=true`.
+- It is reached only after the private candidates: when they are unavailable,
+  or as the single repeated-tool-call recovery.
+- Any turn whose current message or bounded history carries attachment context
+  (screenshots, documents) stays local-only; attachment bytes and descriptions
+  never leave private compute.
+- Ollama Cloud receives structured JSON requests, never native tool
+  definitions, and each escalation posts a session status with
+  `external_egress: true`.
+- OpenAI and every other hosted provider remain forbidden for Vibe prompts and
+  tool results. The Ollama Cloud key's presence alone does not authorize egress;
+  the flag and these controls do.
 
 Vibe file attachments are stored in the private `bob-uploads` bucket under the
 owner's `desktop/{user_id}/vibe/{session_id}/` path and are registered against

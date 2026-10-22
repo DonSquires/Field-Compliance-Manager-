@@ -590,11 +590,30 @@ function createTools({ workspacePath, repoRoot, lane, supabase, limits, log, gen
       const current = fs.readFileSync(absolute, 'utf8');
       const occurrences = current.split(old_text).length - 1;
       if (occurrences === 0) {
-        // A near miss is almost always whitespace; say so instead of making the model guess.
-        const collapsed = (s) => s.replace(/\s+/g, ' ').trim();
-        const hint = collapsed(current).includes(collapsed(old_text)) ? ' (the text exists with different whitespace/indentation - copy it exactly as read_file shows it)' : '';
+        // Small local models copy read_file's "12: " prefixes or reflow long one-line rules. Accept
+        // that only when the whitespace-insensitive text identifies exactly one source span (or all=true).
+        const numbered = /^\s*\d+: /;
+        const lines = old_text.split('\n');
+        const unnumber = (text) => text.split('\n').map((line) => line.replace(numbered, '')).join('\n');
+        const prefixed = lines.filter((line) => line.trim()).every((line) => numbered.test(line));
+        const needle = prefixed ? unnumber(old_text) : old_text;
+        const replacement = prefixed && new_text.split('\n').filter((line) => line.trim()).every((line) => numbered.test(line)) ? unnumber(new_text) : new_text;
+        const tokens = needle.trim().split(/\s+/).filter(Boolean);
+        const spans = tokens.length ? [...current.matchAll(new RegExp(tokens.map((token) => token.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')).join('\\s+'), 'g'))] : [];
+        if (spans.length === 1 || (spans.length > 1 && all)) {
+          let updated = '';
+          let cursor = 0;
+          for (const span of spans) {
+            updated += current.slice(cursor, span.index) + replacement;
+            cursor = span.index + span[0].length;
+          }
+          updated += current.slice(cursor);
+          fs.writeFileSync(absolute, updated);
+          return { path: normalized, replaced: spans.length, bytes: Buffer.byteLength(updated), matched: prefixed ? 'line_numbers_and_whitespace_normalized' : 'whitespace_normalized' };
+        }
+        if (spans.length > 1) return { error: `old_text matches ${spans.length} places in ${normalized} after whitespace normalization; include more surrounding text to make it unique, or pass all=true` };
         return {
-          error: `old_text not found in ${normalized}${hint}. Do not retry guessed source text: use search for a real nearby symbol/class, then read_file that exact line range and copy old_text verbatim.`,
+          error: `old_text not found in ${normalized}. Do not retry guessed source text: use search for a real nearby symbol/class, then read_file that exact line range and copy old_text verbatim.`,
         };
       }
       if (occurrences > 1 && !all) return { error: `old_text occurs ${occurrences} times in ${normalized}; include more surrounding lines to make it unique, or pass all=true` };

@@ -347,6 +347,38 @@ test('repeated unchanged reads reuse results and a distinct local model can reco
   assert.deepEqual(store.state.session.changed_files, ['apps/web/src/hello.ts']);
 });
 
+test('owner-approved Ollama Cloud recovers loops in JSON mode and never receives attachment turns', async () => {
+  assert.equal(vibe.vibeCloudAllowed({}), false);
+  assert.equal(vibe.vibeCloudAllowed({ BOB_VIBE_ALLOW_OLLAMA_CLOUD: 'true' }), true);
+  const health = async () => ({
+    gpu_workstation: { configured: true, healthy: true, models: ['local-primary', 'local-recovery'], installed: ['local-primary', 'local-recovery'], ready_model: 'local-primary' },
+    ollama_cloud: { configured: true, healthy: true, models: ['cloud-strong'], ready_model: 'cloud-strong' },
+    openai: { configured: true, healthy: true, ready_model: 'external' },
+  });
+  const repeated = { thought: 'inspect', tool: 'list_dir', args: { path: 'apps/web/src/' } };
+  const { store, deps, model } = setup([
+    repeated, repeated, repeated, repeated,
+    { thought: 'implement', tool: 'replace_in_file', args: { path: 'apps/web/src/hello.ts', old_text: '"hi"', new_text: '"cloud"' } },
+    { thought: 'report', tool: 'reply', args: { message: 'Edited.' } },
+  ], { fetchHealth: health, allowCloud: true });
+  const outcome = await vibe.processVibeMessage({ store, message: ownerMessage('improve greeting'), deps });
+  assert.equal(outcome.error, undefined);
+  assert.deepEqual(model.calls[0].chain, ['gpu_workstation', 'ollama', 'ollama_cloud']);
+  assert.equal(model.calls[0].provider, 'gpu_workstation');
+  assert.ok(model.calls[0].request.tools);
+  assert.equal(model.calls[4].provider, 'ollama_cloud');
+  assert.equal(model.calls[4].request.tools, undefined);
+  assert.ok(model.calls.every(call => call.provider !== 'openai'));
+  assert.ok(store.state.rows.some(row => row.payload?.reason === 'repeated_tool_call' && row.payload.external_egress === true));
+
+  const attached = setup([{ thought: 'answer', tool: 'reply', args: { message: 'ok' } }], { fetchHealth: health, allowCloud: true });
+  const routed = vibe.applyVibeRouting({}, { allowCloud: false });
+  assert.deepEqual(routed.chain, ['gpu_workstation', 'ollama']);
+  attached.store.history = async () => [{ seq: 1, role: 'owner', kind: 'message', content: 'earlier', payload: { attachment_context: [{ context: 'private screenshot' }] } }];
+  await vibe.processVibeMessage({ store: attached.store, message: ownerMessage('look again'), deps: attached.deps });
+  assert.deepEqual(attached.model.calls[0].chain, ['gpu_workstation', 'ollama']);
+});
+
 test('local recovery is memory-filtered, installed, distinct, and never expands to external providers', () => {
   const candidates = vibe.vibeProviderCandidates({ chain: ['gpu_workstation', 'ollama'] }, {
     gpu_workstation: { configured: true, healthy: true, ready_model: 'small', models: ['small', 'fits', 'not-installed'], installed: ['small', 'fits', 'oversized'], excluded_models: ['oversized'] },
