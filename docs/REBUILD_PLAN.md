@@ -37,6 +37,11 @@ Vibe tolerant edits and Ollama Cloud escalation (vibe-v12), 2026-10-22:
   as a formal `reply` call, which bypassed the prose guard. A reply before
   any tool runs is now refused once (unless it asks the owner a question or
   gives `blocked_reason`) and escalates to the stronger candidate.
+- Third retry (seq 409+): escalation worked (coder 7B -> gpt-oss:120b ->
+  deepseek-v4-pro), which read `AdminHubPage.css`, but then emitted its native
+  `<tool_call name=...><parameter ...>` XML markup, which was shown to the
+  owner as a reply. The parser now executes that markup and the
+  `{name, arguments}` shape; unparsed tool markup is never handed off.
 
 Vibe native execution and private compute, 2026-10-22:
 

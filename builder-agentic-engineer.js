@@ -109,6 +109,15 @@ function boundedNumberedLines(lines, start, end, cap, label) {
 }
 
 function parseToolCall(content) {
+  const call = parseToolCallShape(content);
+  if (call && typeof call.tool !== 'string' && typeof call.name === 'string' && (call.arguments || call.parameters)) {
+    const args = typeof call.arguments === 'string' ? (() => { try { return JSON.parse(call.arguments); } catch { return null; } })() : (call.arguments || call.parameters);
+    if (args && typeof args === 'object') return { thought: call.thought || '', tool: call.name, args };
+  }
+  return call;
+}
+
+function parseToolCallShape(content) {
   const raw = String(content ?? '').trim();
   const attempt = (text) => {
     try {
@@ -124,6 +133,19 @@ function parseToolCall(content) {
   if (fence) {
     const fenced = attempt(fence[1].trim());
     if (fenced) return fenced;
+  }
+  // Some hosted models (e.g. DeepSeek) emit their native XML call markup even when asked for JSON:
+  // <tool_call name="read_file"><parameter name="path" string="true">x</parameter>…. Take only the first call.
+  const xmlCall = raw.match(/<(?:tool_call|invoke|function)\s+name="([a-z][a-z0-9_]{0,63})"\s*>([\s\S]*?)(?:<\/(?:invoke|tool_call|function)>|$)/i);
+  if (xmlCall) {
+    const args = {};
+    for (const parameter of xmlCall[2].matchAll(/<parameter\s+name="([A-Za-z_][\w]*)"([^>]*)>([\s\S]*?)<\/parameter>/g)) {
+      const [, name, attributes, value] = parameter;
+      if (/string="true"/.test(attributes) && !(['all', 'regex'].includes(name) && /^(true|false)$/.test(value.trim()))) { args[name] = value; continue; }
+      const parsed = attempt(`{"v":${value.trim()}}`);
+      args[name] = parsed ? parsed.v : value;
+    }
+    return { thought: '', tool: xmlCall[1], args };
   }
   const start = raw.indexOf('{');
   if (start === -1) return null;

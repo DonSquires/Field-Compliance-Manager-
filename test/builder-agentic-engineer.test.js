@@ -68,6 +68,12 @@ test('tool-call parsing tolerates fences and prose; run allowlist is narrow', ()
   assert.deepEqual(parseToolCall('```json\n{"tool":"read_file","args":{"path":"a.js"}}\n```'), { tool: 'read_file', args: { path: 'a.js' } });
   assert.deepEqual(parseToolCall('Sure: {"thought":"x","tool":"finish","args":{"summary":"s"}} done'), { thought: 'x', tool: 'finish', args: { summary: 's' } });
   assert.equal(parseToolCall('nope'), null);
+  // Live DeepSeek output in owner Vibe session 6d6438f8 (2026-10-22).
+  assert.deepEqual(parseToolCall('<tool_call>\n<tool_call name="read_file">\n<parameter name="path" string="true">docs/BOB_ENTERPRISE_SAAS_UX_TRAINING.md</parameter>\n<parameter name="start_line" string="true">1</parameter>\n<parameter name="end_line" string="true">200</parameter>\n</invoke>\n</tool_call>'),
+    { thought: '', tool: 'read_file', args: { path: 'docs/BOB_ENTERPRISE_SAAS_UX_TRAINING.md', start_line: '1', end_line: '200' } });
+  assert.deepEqual(parseToolCall('<invoke name="replace_in_file"><parameter name="old_text" string="true">.a { b: c; }</parameter><parameter name="all" string="true">false</parameter></invoke>'),
+    { thought: '', tool: 'replace_in_file', args: { old_text: '.a { b: c; }', all: false } });
+  assert.deepEqual(parseToolCall('<tool_call>{"name":"search","arguments":{"query":"Overview"}}</tool_call>'), { thought: '', tool: 'search', args: { query: 'Overview' } });
   const allowed = (cmd) => RUN_ALLOWLIST.some((pattern) => pattern.test(cmd));
   assert.equal(allowed('node --test test/fcm-api-bob-planner.test.js'), true);
   assert.equal(allowed('node --check services/fcm-api/server.js'), true);
