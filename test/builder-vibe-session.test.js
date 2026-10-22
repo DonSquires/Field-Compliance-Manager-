@@ -347,7 +347,7 @@ test('repeated unchanged reads reuse results and a distinct local model can reco
   assert.deepEqual(store.state.session.changed_files, ['apps/web/src/hello.ts']);
 });
 
-test('owner-approved Ollama Cloud recovers loops in JSON mode and never receives attachment turns', async () => {
+test('owner-approved Ollama Cloud recovers loops in JSON mode and redacts earlier attachments', async () => {
   assert.equal(vibe.vibeCloudAllowed({}), false);
   assert.equal(vibe.vibeCloudAllowed({ BOB_VIBE_ALLOW_OLLAMA_CLOUD: 'true' }), true);
   const health = async () => ({
@@ -371,12 +371,40 @@ test('owner-approved Ollama Cloud recovers loops in JSON mode and never receives
   assert.ok(model.calls.every(call => call.provider !== 'openai'));
   assert.ok(store.state.rows.some(row => row.payload?.reason === 'repeated_tool_call' && row.payload.external_egress === true));
 
-  const attached = setup([{ thought: 'answer', tool: 'reply', args: { message: 'ok' } }], { fetchHealth: health, allowCloud: true });
+  const attached = setup([{ thought: 'answer', tool: 'reply', args: { message: 'ok' } }], {
+    fetchHealth: async () => ({ ollama_cloud: { configured: true, healthy: true, models: ['cloud-strong'], ready_model: 'cloud-strong' } }), allowCloud: true,
+  });
   const routed = vibe.applyVibeRouting({}, { allowCloud: false });
   assert.deepEqual(routed.chain, ['gpu_workstation', 'ollama']);
   attached.store.history = async () => [{ seq: 1, role: 'owner', kind: 'message', content: 'earlier', payload: { attachment_context: [{ context: 'private screenshot' }] } }];
   await vibe.processVibeMessage({ store: attached.store, message: ownerMessage('look again'), deps: attached.deps });
-  assert.deepEqual(attached.model.calls[0].chain, ['gpu_workstation', 'ollama']);
+  assert.equal(attached.model.calls[0].provider, 'ollama_cloud');
+  const sent = JSON.stringify(attached.model.calls[0].request.messages);
+  assert.doesNotMatch(sent, /private screenshot/);
+  assert.match(sent, /earlier attachment analysis withheld/);
+});
+
+test('a prose promise with no executed tool is never handed off and escalates to a stronger model', async () => {
+  const { store, deps, model } = setup([
+    'Understood. I will continue with the redesign.',
+    'Sure, continuing the redesign now.',
+    { thought: 'start', tool: 'read_file', args: { path: 'apps/web/src/hello.ts' } },
+    { thought: 'edit', tool: 'replace_in_file', args: { path: 'apps/web/src/hello.ts', old_text: '"hi"', new_text: '"redesigned"' } },
+    { thought: 'report', tool: 'reply', args: { message: 'Edited hello.ts.' } },
+  ], {
+    allowCloud: true,
+    fetchHealth: async () => ({
+      gpu_workstation: { configured: true, healthy: true, models: ['weak'], installed: ['weak'], ready_model: 'weak' },
+      ollama_cloud: { configured: true, healthy: true, models: ['cloud-strong'], ready_model: 'cloud-strong' },
+    }),
+  });
+  const outcome = await vibe.processVibeMessage({ store, message: ownerMessage('continue the redesign'), deps });
+  assert.equal(outcome.error, undefined);
+  assert.doesNotMatch(outcome.reply, /Understood/);
+  assert.equal(model.calls[2].provider, 'ollama_cloud');
+  assert.ok(model.calls[1].request.messages.some(entry => entry.content.includes('No tool has executed this turn')));
+  assert.ok(store.state.rows.some(row => row.payload?.reason === 'prose_without_tool'));
+  assert.deepEqual(store.state.session.changed_files, ['apps/web/src/hello.ts']);
 });
 
 test('local recovery is memory-filtered, installed, distinct, and never expands to external providers', () => {

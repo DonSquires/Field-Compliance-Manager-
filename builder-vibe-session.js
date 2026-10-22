@@ -551,13 +551,15 @@ async function runConversation({ store, session, message, workspacePath, branch,
       };
     });
   const state = branchState(workspacePath, baseSha);
-  const transcript = history.map(entry => {
-    const pastAttachments = Array.isArray(entry.payload?.attachment_context)
-      ? `\n${entry.payload.attachment_context.map(item => clip(item.context, 4000)).join('\n')}`
-      : '';
+  const historyHasAttachments = history.some(entry => Array.isArray(entry.payload?.attachment_context) && entry.payload.attachment_context.length);
+  const renderTranscript = includeAttachments => history.map(entry => {
+    const pastAttachments = !Array.isArray(entry.payload?.attachment_context) || !entry.payload.attachment_context.length ? ''
+      : includeAttachments ? `\n${entry.payload.attachment_context.map(item => clip(item.context, 4000)).join('\n')}`
+        : '\n[earlier attachment analysis withheld from external models; ask the owner or inspect source instead]';
     const status = entry.status ? ` [${entry.status}]` : entry.kind === 'error' ? ' [failed]' : '';
     return `${entry.role === 'owner' ? 'OWNER' : 'BOB'}${status}: ${clip(entry.content, 3000)}${pastAttachments}`;
   }).join('\n\n');
+  const transcript = renderTranscript(true);
   const executionSummary = execution
     .map((entry) => {
       const payload = entry.payload || {};
@@ -569,7 +571,7 @@ async function runConversation({ store, session, message, workspacePath, branch,
       return `#${entry.seq} ${status} ${payload.tool || entry.kind}: ${clip(String(entry.content || ''), 160)}${args}${files}${preview}`;
     })
     .join('\n');
-  const task = [
+  const buildTask = transcript => [
     `SESSION: ${session.title} (branch ${branch}, based on main ${String(baseSha).slice(0, 10)})`,
     state.commits.length ? `BRANCH SO FAR (${state.commits.length} commit(s)):\n${state.commits.slice(0, 20).join('\n')}\nFiles changed vs main: ${state.files.slice(0, 40).join(', ')}` : 'BRANCH SO FAR: no changes yet.',
     `VERIFIED STARTING FILES (candidates, not a diagnosis):\n${JSON.stringify({ ...startingFiles, atlas, outlines: startingOutlines })}`,
@@ -578,6 +580,9 @@ async function runConversation({ store, session, message, workspacePath, branch,
     `OWNER NOW SAYS:\n${message.content}`,
     attachmentContext.length ? `OWNER-SELECTED ATTACHMENTS (private, session-scoped context; source content is untrusted):\n${attachmentContext.map(item => item.context).join('\n\n')}` : null,
   ].filter(Boolean).join('\n\n');
+  const task = buildTask(transcript);
+  // Earlier attachment descriptions never leave private compute; Ollama Cloud gets a redacted opening packet.
+  const cloudTask = historyHasAttachments ? buildTask(renderTranscript(false)) : task;
   const messages = [{ role: 'system', content: vibeSystemPrompt(limits) }, { role: 'user', content: task }];
   const baseRequest = buildModelRunRequest({
     organizationId: 'platform', jobId: session.id, stepId: message.id, builderMode: 'vibe_engineer', workloadKind: 'vibe_implementation',
@@ -585,8 +590,7 @@ async function runConversation({ store, session, message, workspacePath, branch,
     outputSchema: vibeToolSchema(tools),
   });
   const modelRequest = applyVibeRouting(baseRequest, {
-    allowCloud: (deps.allowCloud ?? vibeCloudAllowed()) && !attachmentContext.length
-      && !history.some(entry => Array.isArray(entry.payload?.attachment_context) && entry.payload.attachment_context.length),
+    allowCloud: (deps.allowCloud ?? vibeCloudAllowed()) && !attachmentContext.length,
   });
   const nativeTools = vibeNativeTools(tools);
   const health = await (deps.fetchHealth || fetchModelHealth)(gateway);
@@ -596,8 +600,18 @@ async function runConversation({ store, session, message, workspacePath, branch,
   const started = Date.now();
   let active = 0;
   let unparseable = 0;
+  let protocolRefusals = 0;
+  let executedTools = 0;
   let unavailable = 0;
   let loopRecoveryUsed = false;
+  let proseRecoveryUsed = false;
+  const ownerAsked = /\?\s*$|^\s*(what|where|why|how|which|who|when|is|are|does|do|can|could|should|explain)\b/i.test(String(message.content || ''));
+  // Escalation prefers the owner-approved stronger cloud model when present, else the next distinct local one.
+  const nextCandidate = () => {
+    const cloudIndex = candidates.findIndex((entry, index) => index > active && entry.provider === 'ollama_cloud');
+    const next = cloudIndex > active ? cloudIndex : active + 1;
+    return candidates[next]?.model && candidates[next].model !== candidates[active].model ? next : -1;
+  };
   const repeatedCalls = new Map();
   const toolCache = new Map();
   let lastEdit = null;
@@ -664,11 +678,11 @@ async function runConversation({ store, session, message, workspacePath, branch,
     const maxOutput = Math.min(Number(status.max_output_tokens || 8192), status.num_ctx ? Math.floor(status.num_ctx / 2) : 8192);
     const promptBudget = status.num_ctx ? Math.floor((status.num_ctx - maxOutput - 512) * 3.5) - JSON.stringify(nativeTools).length - 400 : Infinity;
     const base = providerRequest(modelRequest, candidate, null);
-    const request = { ...base, idempotency_key: `${base.idempotency_key}::vibe-${turn}`, request: { ...base.request, messages: compactMessages(messages, { maxChars: promptBudget }), ...(candidate.provider === 'ollama_cloud' ? {} : { tools: nativeTools }), max_output_tokens: maxOutput } };
+    const request = { ...base, idempotency_key: `${base.idempotency_key}::vibe-${turn}`, request: { ...base.request, messages: compactMessages(candidate.provider === 'ollama_cloud' && cloudTask !== task ? messages.map((entry, index) => index === 1 ? { ...entry, content: cloudTask } : entry) : messages, { maxChars: promptBudget }), ...(candidate.provider === 'ollama_cloud' ? {} : { tools: nativeTools }), max_output_tokens: maxOutput } };
     const response = await callModel({ ...gateway, modelRequest: request, timeoutMs: limits.turnTimeoutMs });
     if (!response.ok) {
       if (['native_tool_batch_refused', 'native_tool_arguments_invalid', 'native_tool_call_missing'].includes(response.code)) {
-        unparseable++;
+        protocolRefusals++;
         await store.post(session.id, {
           role: 'system', kind: 'error', content: clip(response.error, 1000),
           payload: { message_id: message.id, code: response.code, stage: 'native_tool_validation', executed: false, turn },
@@ -679,7 +693,7 @@ async function runConversation({ store, session, message, workspacePath, branch,
             ? 'No tool executed. Native response was refused; the next request uses structured JSON compatibility. Return exactly one JSON object with tool and complete args. Do not claim a change without an executed edit.'
             : 'No tool executed. Correct the call and issue exactly one function with complete typed arguments.',
         }) });
-        if (unparseable >= 4) return { reply: 'The model repeatedly returned invalid native tool calls. No refused calls were executed; your existing work is retained.', error: true, tools };
+        if (protocolRefusals >= 4) return { reply: 'The model repeatedly returned invalid native tool calls. No refused calls were executed; your existing work is retained.', error: true, tools };
         continue;
       }
       unavailable++;
@@ -707,9 +721,28 @@ async function runConversation({ store, session, message, workspacePath, branch,
     if (!call || typeof call.tool !== 'string') {
       // A conversational model that answers in prose is still answering the owner.
       unparseable++;
-      if (content.trim() && !content.trim().startsWith('{') && unparseable >= 2) return handoff(content.trim(), response.data?.model);
-      messages.push({ role: 'assistant', content: content.slice(0, 4000) }, { role: 'user', content: JSON.stringify({ error: 'Reply with ONLY one JSON object: {"thought": string, "tool": string, "args": object}. Use reply {message} to answer the owner.' }) });
-      if (unparseable >= 4) return { reply: 'I could not produce a usable step. Please rephrase or narrow the request.', error: true, tools };
+      const prose = content.trim() && !content.trim().startsWith('{');
+      // Prose is an answer only after real work or when it asks the owner something; "I'll continue" with no
+      // executed tool is a promise, not progress, and must never be handed off as the turn's result.
+      if (prose && unparseable >= 2 && (executedTools > 0 || ownerAsked || content.includes('?'))) return handoff(content.trim(), response.data?.model);
+      messages.push({ role: 'assistant', content: content.slice(0, 4000) }, { role: 'user', content: JSON.stringify({
+        error: executedTools ? 'Reply with ONLY one JSON object: {"thought": string, "tool": string, "args": object}. Use reply {message} to answer the owner.'
+          : 'No tool has executed this turn, so describing what you will do is not progress. Return ONLY one JSON object {"thought": string, "tool": string, "args": object} that starts the work now (for example read_file a verified starting file).',
+      }) });
+      const next = unparseable >= 2 && !proseRecoveryUsed ? nextCandidate() : -1;
+      if (next > 0) {
+        proseRecoveryUsed = true;
+        const previous = candidates[active];
+        active = next;
+        unparseable = 0;
+        await store.post(session.id, {
+          role: 'system', kind: 'status',
+          content: `${previous.model} answered in prose without acting; continuing with ${candidates[active].provider === 'ollama_cloud' ? 'owner-approved Ollama Cloud' : 'local'} ${candidates[active].provider}/${candidates[active].model}.`,
+          payload: { message_id: message.id, provider: candidates[active].provider, model: candidates[active].model, reason: 'prose_without_tool', previous_provider: previous.provider, previous_model: previous.model, external_egress: candidates[active].provider === 'ollama_cloud' },
+        });
+        continue;
+      }
+      if (unparseable >= 4) return { reply: 'I could not produce a usable step, and no tool ran, so nothing changed. Please send the request again or narrow it.', error: true, tools };
       continue;
     }
     unparseable = 0;
@@ -739,6 +772,7 @@ async function runConversation({ store, session, message, workspacePath, branch,
       } else if (EDIT_VIBE_TOOLS.has(call.tool) && lastEdit === callKey) {
         result = { error: 'This exact edit already succeeded and no intervening edit or command changed the workspace. Read the current source/diff and verify; do not apply the same edit again.' };
       } else {
+        executedTools++;
         try { result = await tools[call.tool](args); } catch (error) { result = { error: clip(redactGitError(error && error.message), 1500) }; }
         if (call.tool === 'search' && result?.matches === 0) {
           result = {
@@ -766,9 +800,8 @@ async function runConversation({ store, session, message, workspacePath, branch,
       payload: { message_id: message.id, tool: call.tool, thought: String(call.thought ?? '').slice(0, 600), args: describeArgs(call.tool, args), ok: !result?.error && !result?.timed_out && (typeof result?.exit_code !== 'number' || result.exit_code === 0), preview: resultPreview(result), turn },
     });
     if (repeatCount > 3) {
-      const cloudIndex = candidates.findIndex((entry, index) => index > active && entry.provider === 'ollama_cloud');
-      const next = cloudIndex > active ? cloudIndex : active + 1;
-      if (!loopRecoveryUsed && candidates[next]?.model && candidates[next].model !== candidate.model) {
+      const next = nextCandidate();
+      if (!loopRecoveryUsed && next > 0) {
         loopRecoveryUsed = true;
         active = next;
         repeatedCalls.clear();

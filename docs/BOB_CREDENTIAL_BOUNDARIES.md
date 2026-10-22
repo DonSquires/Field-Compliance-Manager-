@@ -19,9 +19,10 @@ under these egress controls:
 - It is off unless the control plane sets `BOB_VIBE_ALLOW_OLLAMA_CLOUD=true`.
 - It is reached only after the private candidates: when they are unavailable,
   or as the single repeated-tool-call recovery.
-- Any turn whose current message or bounded history carries attachment context
-  (screenshots, documents) stays local-only; attachment bytes and descriptions
-  never leave private compute.
+- A turn whose current message carries attachments stays local-only. When
+  earlier messages carried attachments, the Ollama Cloud opening packet
+  replaces their analysis with a withheld marker; attachment bytes and
+  descriptions never leave private compute.
 - Ollama Cloud receives structured JSON requests, never native tool
   definitions, and each escalation posts a session status with
   `external_egress: true`.
