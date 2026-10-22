@@ -172,7 +172,7 @@ test('priority dispatch item opens its exact operational review record', async (
   await expect(queueItem).toBeVisible();
   await expect(page.locator('.admin-priority-queue')).toHaveCSS('overflow', 'hidden');
   expect(await page.evaluate(() => document.documentElement.scrollHeight <= window.innerHeight)).toBe(true);
-  await expect(page).toHaveScreenshot('admin-hub-first-viewport.png');
+  await expect(page).toHaveScreenshot('admin-hub-first-viewport-updated.png');
   await queueItem.click();
   await expect(page).toHaveURL(/\/admin\/field-ops\?area=dispatch&job=cccccccc-cccc-4ccc-8ccc-cccccccccccc/);
   const detail = page.getByLabel('Dispatch details for Civic Operations Centre');
