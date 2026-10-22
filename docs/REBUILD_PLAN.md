@@ -36,6 +36,15 @@ Vibe browser verification with Dr Bob's walk (vibe-v13), 2026-10-22:
   field-portal step, `/schedule/` matched the disabled "Start unscheduled
   shift" button, which timed out every run. The walk now selects only enabled
   controls whose text matches a whole word.
+- First owner-requested walk (session 6d6438f8, 2026-10-22): timed out at 20
+  minutes with no readable report. The trace showed the harness, not the page:
+  after "Pick position on map" on `/admin/sites`, the page rendered fewer
+  buttons and an unbounded `textContent()` on button #17 waited out the
+  15-minute test timeout (2 of 3 VPS runs). The runner's label reads now have
+  1-second bounds, and Playwright's 18-minute `--global-timeout` ends the run
+  before the 20-minute host kill, so a slow walk still yields a report. Vibe
+  branches do not yet pick up later main commits, so an older session keeps
+  its own copy of the harness until it is shipped or rebased.
 - Bob Builder parity (checked against the live jobs ledger): Builder is
   progressing jobs; two were deployed on 2026-10-21. It shares the XML
   tool-call parser and the whitespace-tolerant edits. It has its own guards
