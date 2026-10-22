@@ -414,8 +414,9 @@ async function invokeBuilderModel({ input, config, fetchImpl = globalThis.fetch 
 
     let content = isOpenAI ? data.choices?.[0]?.message?.content : data.message?.content;
     if (nativeTools && !data.message?.tool_calls?.length) {
-      const reason = 'model declared native support but returned no function call; using structured JSON compatibility for five minutes';
-      toolCapabilityCache.set(toolCapabilityKey(providerConfig, model), { supported: false, reason, until: Date.now() + 5 * 60_000 });
+      // A model that ignores native tools once keeps doing so; do not re-spend a turn proving it every message.
+      const reason = 'model declared native support but returned no function call; using structured JSON compatibility for six hours';
+      toolCapabilityCache.set(toolCapabilityKey(providerConfig, model), { supported: false, reason, until: Date.now() + 6 * 60 * 60_000 });
       return { status: 422, body: { error: `${reason}. Its response was refused; no tool executed. Retry the same step in structured JSON mode.`, code: 'native_tool_call_missing' } };
     }
     if (nativeTools && data.message?.tool_calls?.length) {

@@ -24,6 +24,15 @@ Vibe tolerant edits and Ollama Cloud escalation (vibe-v12), 2026-10-22:
   [credential boundaries](BOB_CREDENTIAL_BOUNDARIES.md)).
 - After: unit and root suites pass. Not yet proven: the owner's own retry
   producing the redesign; it remains unverified until Bob's turn succeeds.
+- Owner retry (seq 399-403): coder 7B again skipped native calls; that
+  refusal counted toward the prose limit, so the next prose line ("I'll
+  continue...") was handed off with no tool run, and the session's earlier
+  screenshot kept it local-only. Fix: protocol refusals are counted
+  separately; prose without an executed tool is never a handoff unless the
+  owner asked a question, and after a correction escalates once to the
+  stronger candidate (Ollama Cloud when enabled); earlier attachment analysis
+  is withheld from the cloud packet instead of blocking escalation; a
+  missing native call keeps that model in JSON mode for six hours.
 
 Vibe native execution and private compute, 2026-10-22:
 
