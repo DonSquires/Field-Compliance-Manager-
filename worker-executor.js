@@ -30,6 +30,9 @@ const WORKER_PROFILES = Object.freeze({
   lint: Object.freeze(['npm', 'run', 'lint']),
   'human-qa': Object.freeze(['sh', '-lc', 'cp -a /opt/bob/web-node_modules/. /workspace/apps/web/node_modules/ && cd /workspace/apps/web && PATH=/workspace/apps/web/node_modules/.bin:$PATH PLAYWRIGHT_OUTPUT_DIR=/artifacts/test-results PLAYWRIGHT_HTML_OUTPUT_DIR=/artifacts/playwright-report playwright test e2e/dr-bob-human-test.spec.ts --workers=4']),
   'human-qa-live': Object.freeze(['sh', '-lc', 'cp -a /opt/bob/web-node_modules/. /workspace/apps/web/node_modules/ && cd /workspace/apps/web && PATH=/workspace/apps/web/node_modules/.bin:$PATH PLAYWRIGHT_OUTPUT_DIR=/artifacts/test-results PLAYWRIGHT_HTML_OUTPUT_DIR=/artifacts/playwright-report playwright test e2e/dr-bob-human-test.spec.ts --workers=1']),
+  // Vibe branch check: Dr Bob's fixture walk plus targeted specs listed by the control plane in specs.txt
+  // (validated e2e/<name>.spec.ts paths only), desktop project, offline.
+  'vibe-human-qa': Object.freeze(['sh', '-lc', 'cp -a /opt/bob/web-node_modules/. /workspace/apps/web/node_modules/ && cd /workspace/apps/web && PATH=/workspace/apps/web/node_modules/.bin:$PATH PLAYWRIGHT_OUTPUT_DIR=/artifacts/test-results PLAYWRIGHT_HTML_OUTPUT_DIR=/artifacts/playwright-report PLAYWRIGHT_JSON_OUTPUT_NAME=/artifacts/results.json playwright test $(grep -E \'^e2e/[A-Za-z0-9][A-Za-z0-9._-]*\\.spec\\.ts$\' /artifacts/specs.txt) --project=desktop-chromium --workers=2 --reporter=line,json']),
   'main-health': Object.freeze(['sh', '-lc', MAIN_HEALTH_COMMAND]),
   'visual-baseline': Object.freeze(['node', '/opt/bob/visual-baseline-worker.js', '/workspace', '/artifacts']),
   'full-page-audit': Object.freeze(['sh', '-lc', 'set -eu; npm test; npm run check:css; cp -a /opt/bob/web-node_modules/. /workspace/apps/web/node_modules/; cd /workspace/apps/web; PATH=/workspace/apps/web/node_modules/.bin:$PATH npm run lint; PATH=/workspace/apps/web/node_modules/.bin:$PATH npm test -- --reporter=dot; PATH=/workspace/apps/web/node_modules/.bin:$PATH npm run build; PATH=/workspace/apps/web/node_modules/.bin:$PATH PLAYWRIGHT_OUTPUT_DIR=/artifacts/test-results PLAYWRIGHT_HTML_OUTPUT_DIR=/artifacts/playwright-report playwright test e2e/dr-bob-human-test.spec.ts --workers=1']),
@@ -59,7 +62,7 @@ function hostPath(containerPath, env = process.env) {
 // (bob-workers) so the BOB-WORKER-EGRESS firewall chain can govern it. BOB_WORKER_NETWORK=none
 // restores the offline sandbox. Workers still get no credentials beyond the human-test keys below.
 function workerNetwork(profile, env = process.env) {
-  if (profile === 'visual-baseline') return 'none';
+  if (profile === 'visual-baseline' || profile === 'vibe-human-qa') return 'none';
   const configured = String(env.BOB_WORKER_NETWORK || WORKER_NETWORK).trim();
   if (!/^[A-Za-z0-9][A-Za-z0-9_.-]{0,63}$/.test(configured) || configured === 'host') throw new Error(`unsupported worker network: ${configured}`);
   if (configured === 'none' && profile === 'human-qa-live') return 'bridge';
@@ -72,7 +75,7 @@ function dockerArguments({ image, sourceDir, artifactDir, profile, memory = '2g'
   const command = workerCommand(profile);
   const sourceMount = hostPath(sourceDir, env);
   const artifactMount = hostPath(artifactDir, env);
-  const browserProfile = profile === 'human-qa' || profile === 'human-qa-live' || profile === 'main-health' || profile === 'full-page-audit';
+  const browserProfile = profile === 'human-qa' || profile === 'human-qa-live' || profile === 'vibe-human-qa' || profile === 'main-health' || profile === 'full-page-audit';
   const args = [
     'run', '--rm', '--init',
     `--network=${workerNetwork(profile, env)}`,
@@ -95,7 +98,9 @@ function dockerArguments({ image, sourceDir, artifactDir, profile, memory = '2g'
   }
   if (browserProfile) {
     args.push('--tmpfs=/workspace/apps/web/node_modules:rw,exec,nosuid,size=768m,uid=1000,gid=1000,mode=0755');
-    for (const key of ['HUMAN_TEST_LIVE', 'E2E_OFFLINE', 'HUMAN_TEST_BASE_URL', 'HUMAN_TEST_EXPECTED_SHA', 'HUMAN_TEST_REQUIRE_DEPLOYMENT_MATCH', 'HUMAN_TEST_ADMIN_ROUTE', 'GRANDMASTER_TEST_EMAIL', 'GRANDMASTER_TEST_PASSWORD', 'VERCEL_TOKEN', 'VERCEL_PROJECT_ID', 'VERCEL_TEAM_ID']) {
+    // The Vibe walk runs unreviewed branch code offline: it only ever receives the fixture switches.
+    const forwarded = profile === 'vibe-human-qa' ? ['HUMAN_TEST_LIVE', 'E2E_OFFLINE'] : ['HUMAN_TEST_LIVE', 'E2E_OFFLINE', 'HUMAN_TEST_BASE_URL', 'HUMAN_TEST_EXPECTED_SHA', 'HUMAN_TEST_REQUIRE_DEPLOYMENT_MATCH', 'HUMAN_TEST_ADMIN_ROUTE', 'GRANDMASTER_TEST_EMAIL', 'GRANDMASTER_TEST_PASSWORD', 'VERCEL_TOKEN', 'VERCEL_PROJECT_ID', 'VERCEL_TEAM_ID'];
+    for (const key of forwarded) {
       if (environment[key]) args.push('--env', key);
     }
   }
@@ -172,9 +177,9 @@ async function executeWorker(options, { spawnImpl = spawn } = {}) {
 }
 
 function prepareWorkerMounts(sourceDir, profile) {
-  if (profile !== 'main-health') return;
+  if (profile !== 'main-health' && profile !== 'vibe-human-qa') return;
   // Docker cannot create nested mountpoints inside the read-only source bind.
-  for (const relative of ['node_modules', '.bob', 'apps/web/node_modules']) {
+  for (const relative of profile === 'main-health' ? ['node_modules', '.bob', 'apps/web/node_modules'] : ['apps/web/node_modules']) {
     const target = path.join(sourceDir, relative);
     fs.mkdirSync(target, { recursive: true });
     if (!fs.lstatSync(target).isDirectory()) throw new Error(`worker mountpoint must be a directory: ${relative}`);

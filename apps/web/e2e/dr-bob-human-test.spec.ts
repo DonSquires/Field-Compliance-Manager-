@@ -133,7 +133,8 @@ test.describe("Dr. Bob's human browser test", () => {
       await dismissDesktopPrompt(page, session);
       await session.observe('field portal after authentication');
     }
-    const safeModule = page.locator('button, a').filter({ hasText: /schedule|dispatch|map|report|patrol/i }).first();
+    // Whole words on enabled controls: "Start unscheduled shift" is a disabled write action, not a module.
+    const safeModule = page.locator('button:enabled, a').filter({ hasText: /\b(?:schedule|dispatch|map|report|patrol)\b/i }).first();
     if (await safeModule.isVisible({ timeout: 1500 }).catch(() => false)) {
       await safeModule.click();
       await page.waitForTimeout(300);

@@ -23,6 +23,7 @@ const { fileSha256, listRepositoryTree, readRepositoryFile, searchRepository } =
 const { autopilotTick, listAutopilotJobs, listPendingApprovals } = require('./builder-autopilot');
 const { laptopStatus, runLaptopCommand, laptopConfig, loadLaptopLink, mergeLaptopLink, describeLink } = require('./bob-laptop-shell');
 const { createVibeWorker, vibeWorkspacePath } = require('./builder-vibe-session');
+const { runVibeHumanTest } = require('./builder-vibe-human-test');
 const { createFirewall } = require('./bob-firewall');
 const { createTailscale } = require('./bob-tailscale');
 const { createVibePreviewManager } = require('./builder-vibe-preview');
@@ -1772,6 +1773,8 @@ const vibeWorker = vibeEnabled ? createVibeWorker({
     sourceDirFor: sha => builderGitSource(sha),
     resolveHead: () => builderRepositoryHead('main').sha,
     prepareWorkspace: workspacePath => vibePreview.ensureWebDependencies(workspacePath),
+    // Dr Bob's offline browser walk of the session branch (BOB_VIBE_HUMAN_TEST=0 disables it).
+    humanTest: process.env.BOB_VIBE_HUMAN_TEST === '0' || !process.env.BOB_WORKER_IMAGE ? null : runVibeHumanTest,
     publish: ({ workspacePath, branch, head }) => {
       const target = builderGitTarget();
       return publishWorkspaceBranch({ workspacePath, branchName: branch, expectedHeadSha: head, pushUrl: target.repoUrl, pushAuthHeader: target.authHeader, sshCommand: target.sshCommand, requireVerifiedIdentity: true });
