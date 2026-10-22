@@ -190,6 +190,27 @@ export class HumanTestSession {
       const bodyStyle = window.getComputedStyle(body);
       const bodyContrast = contrast(bodyStyle.color, bodyStyle.backgroundColor);
       if (bodyContrast !== null && bodyContrast < 4.5) issues.push(`body text contrast is approximately ${bodyContrast.toFixed(1)}:1`);
+      // Text a person cannot read: own text against the first opaque ancestor background, below 3:1 (WCAG large-text floor).
+      const effectiveBackground = (element: Element) => {
+        for (let node: Element | null = element; node; node = node.parentElement) {
+          const background = window.getComputedStyle(node).backgroundColor;
+          const parsed = parseRgb(background);
+          if (parsed && !/rgba\([^)]*,\s*0\)$|transparent/.test(background)) return background;
+        }
+        return 'rgb(255, 255, 255)';
+      };
+      const faint = [...document.querySelectorAll('body *')].filter(visible).filter((element) => {
+        const ownText = [...element.childNodes].some((node) => node.nodeType === Node.TEXT_NODE && (node.textContent ?? '').trim());
+        if (!ownText) return false;
+        const style = window.getComputedStyle(element);
+        if (Number.parseFloat(style.opacity) === 0) return false;
+        const ratio = contrast(style.color, effectiveBackground(element));
+        return ratio !== null && ratio < 3;
+      });
+      if (faint.length) {
+        const samples = faint.slice(0, 4).map((element) => `"${(element.textContent ?? '').replace(/\s+/g, ' ').trim().slice(0, 40)}"`).join(', ');
+        issues.push(`${faint.length} visible text element(s) have contrast below 3:1 against their background and may be unreadable (${samples})`);
+      }
       const fixedOverlays = [...document.querySelectorAll('*')].filter(visible).filter((element) => window.getComputedStyle(element).position === 'fixed').filter((element) => {
         const rect = (element as HTMLElement).getBoundingClientRect();
         return rect.width > viewport.width * 0.6 && rect.height > viewport.height * 0.35;
