@@ -52,3 +52,20 @@ test('human button walkthrough backs out of a safe dialog without confirming it'
   await expect(page.locator('#review-dialog')).toBeHidden();
   expect(session.findings.filter((finding) => finding.severity === 'error')).toEqual([]);
 });
+
+test('human safe fields use Bob Test and 999 prefixes for data entry', async ({ page }, testInfo) => {
+  const session = new HumanTestSession(page, testInfo);
+
+  await page.setContent('<!doctype html><html><body><input aria-label="Observation" /></body></html>');
+  expect(await session.fillSafeField()).toBe(true);
+  await expect(page.locator('input')).toHaveValue('Bob Test human test observation');
+
+  await page.setContent('<!doctype html><html><body><input aria-label="Risk score" type="number" /></body></html>');
+  expect(await session.fillSafeField()).toBe(true);
+  await expect(page.locator('input')).toHaveValue('999');
+
+  await page.setContent('<!doctype html><html><body><input aria-label="Inspection date" type="date" /></body></html>');
+  expect(await session.fillSafeField()).toBe(true);
+  await expect(page.locator('input')).toHaveValue('2026-09-12');
+  expect(session.findings.filter((finding) => finding.severity === 'error')).toEqual([]);
+});
