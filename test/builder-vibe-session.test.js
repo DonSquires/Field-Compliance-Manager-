@@ -611,6 +611,26 @@ test('protected paths are refused and never committed', async () => {
   assert.equal(store.state.rows.some(row => row.kind === 'diff'), false);
 });
 
+test('a JSON reply promising work before any tool ran is refused and escalated', async () => {
+  const { store, deps, model } = setup([
+    { thought: 'ack', tool: 'reply', args: { message: "Understood. I'll continue with the Overview & approvals redesign using structured JSON compatibility." } },
+    { thought: 'start', tool: 'replace_in_file', args: { path: 'apps/web/src/hello.ts', old_text: '"hi"', new_text: '"redesigned"' } },
+    { thought: 'report', tool: 'reply', args: { message: 'Edited hello.ts.' } },
+  ], {
+    allowCloud: true,
+    fetchHealth: async () => ({
+      gpu_workstation: { configured: true, healthy: true, models: ['weak'], installed: ['weak'], ready_model: 'weak' },
+      ollama_cloud: { configured: true, healthy: true, models: ['cloud-strong'], ready_model: 'cloud-strong' },
+    }),
+  });
+  const outcome = await vibe.processVibeMessage({ store, message: ownerMessage('continue the Overview & approvals redesign'), deps });
+  assert.equal(outcome.reply, 'Edited hello.ts.');
+  assert.equal(model.calls[1].provider, 'ollama_cloud');
+  assert.ok(model.calls[1].request.messages.some(entry => entry.content.includes('Reply refused: no tool has executed')));
+  assert.ok(store.state.rows.some(row => row.payload?.reason === 'reply_without_tool'));
+  assert.deepEqual(store.state.session.changed_files, ['apps/web/src/hello.ts']);
+});
+
 test('a prose answer is accepted as the reply after one correction', async () => {
   const { store, deps } = setup(['Sure — the greeting lives in hello.ts.', 'It currently says hi.']);
   const outcome = await vibe.processVibeMessage({ store, message: ownerMessage('where is the greeting?'), deps });
