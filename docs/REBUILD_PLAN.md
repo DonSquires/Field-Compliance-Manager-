@@ -45,6 +45,12 @@ Vibe browser verification with Dr Bob's walk (vibe-v13), 2026-10-22:
   before the 20-minute host kill, so a slow walk still yields a report. Vibe
   branches do not yet pick up later main commits, so an older session keeps
   its own copy of the harness until it is shipped or rebased.
+- Dr Bob's UX audit now checks text contrast: visible text below 3:1 against
+  its first opaque ancestor background is a warning that names sample text.
+  The verified walk of session 6d6438f8 passed while its headings were dark
+  blue on navy. Before this check the audit measured font size but not colour.
+  With the check, Bob's CSS raises 27 faint elements ("Today at a glance",
+  "Priority queue", …); main raises 4 warnings on genuinely faint helper text.
 - Bob Builder parity (checked against the live jobs ledger): Builder is
   progressing jobs; two were deployed on 2026-10-21. It shares the XML
   tool-call parser and the whitespace-tolerant edits. It has its own guards
