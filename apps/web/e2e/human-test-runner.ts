@@ -27,10 +27,10 @@ interface HumanSkippedAction {
 }
 
 const SAFE_SAMPLE_VALUES: Record<string, string> = {
-  search: 'Civic Events',
-  email: 'human-test@example.invalid',
-  text: 'Human test observation',
-  number: '1',
+  search: 'Bob Test Civic Events',
+  email: 'bob.test@example.invalid',
+  text: 'Bob Test human test observation',
+  number: '999',
 };
 
 const RESOURCE_INTENSIVE_ADMIN_ROUTES = new Set(['Client Portfolios']);
