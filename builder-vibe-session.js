@@ -722,7 +722,8 @@ async function runConversation({ store, session, message, workspacePath, branch,
     if (!call || typeof call.tool !== 'string') {
       // A conversational model that answers in prose is still answering the owner.
       unparseable++;
-      const prose = content.trim() && !content.trim().startsWith('{');
+      // Unparsed tool markup is a failed call, never an answer for the owner.
+      const prose = content.trim() && !content.trim().startsWith('{') && !/<\/?(?:tool_call|invoke|parameter|function)\b/i.test(content);
       // Prose is an answer only after real work or when it asks the owner something; "I'll continue" with no
       // executed tool is a promise, not progress, and must never be handed off as the turn's result.
       if (prose && unparseable >= 2 && (executedTools > 0 || ownerAsked || content.includes('?'))) return handoff(content.trim(), response.data?.model);

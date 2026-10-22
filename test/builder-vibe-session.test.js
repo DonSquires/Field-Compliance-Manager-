@@ -611,6 +611,17 @@ test('protected paths are refused and never committed', async () => {
   assert.equal(store.state.rows.some(row => row.kind === 'diff'), false);
 });
 
+test('XML tool-call markup from hosted models executes instead of being shown as a reply', async () => {
+  const { store, deps } = setup([
+    { thought: 'read', tool: 'read_file', args: { path: 'apps/web/src/hello.ts' } },
+    '<tool_call>\n<tool_call name="replace_in_file">\n<parameter name="path" string="true">apps/web/src/hello.ts</parameter>\n<parameter name="old_text" string="true">"hi"</parameter>\n<parameter name="new_text" string="true">"xml"</parameter>\n</invoke>\n</tool_call>',
+    { thought: 'report', tool: 'reply', args: { message: 'Edited via markup.' } },
+  ]);
+  const outcome = await vibe.processVibeMessage({ store, message: ownerMessage('change greeting'), deps });
+  assert.equal(outcome.reply, 'Edited via markup.');
+  assert.deepEqual(store.state.session.changed_files, ['apps/web/src/hello.ts']);
+});
+
 test('a JSON reply promising work before any tool ran is refused and escalated', async () => {
   const { store, deps, model } = setup([
     { thought: 'ack', tool: 'reply', args: { message: "Understood. I'll continue with the Overview & approvals redesign using structured JSON compatibility." } },
