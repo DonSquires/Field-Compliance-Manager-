@@ -605,6 +605,7 @@ async function runConversation({ store, session, message, workspacePath, branch,
   let unavailable = 0;
   let loopRecoveryUsed = false;
   let proseRecoveryUsed = false;
+  let emptyReplyCorrected = false;
   const ownerAsked = /\?\s*$|^\s*(what|where|why|how|which|who|when|is|are|does|do|can|could|should|explain)\b/i.test(String(message.content || ''));
   // Escalation prefers the owner-approved stronger cloud model when present, else the next distinct local one.
   const nextCandidate = () => {
@@ -748,6 +749,25 @@ async function runConversation({ store, session, message, workspacePath, branch,
     unparseable = 0;
     const args = call.args && typeof call.args === 'object' ? call.args : {};
     if (call.tool === 'reply' || call.tool === 'finish') {
+      const replyText = String(args.message || args.summary || call.thought || '');
+      if (!executedTools && !args.blocked_reason && !ownerAsked && !replyText.includes('?') && !emptyReplyCorrected) {
+        // A reply that only promises work ("I'll continue...") before any tool ran is not an answer.
+        emptyReplyCorrected = true;
+        messages.push({ role: 'assistant', content: JSON.stringify({ thought: String(call.thought ?? '').slice(0, 600), tool: call.tool, args }) }, { role: 'user', content: JSON.stringify({
+          error: 'Reply refused: no tool has executed this turn, so nothing was done. Start the work now with one tool call (for example read_file a verified starting file). Use reply only to report finished, verified work, to ask the owner one question, or with args.blocked_reason.',
+        }) });
+        const next = nextCandidate();
+        if (next > 0) {
+          const previous = candidates[active];
+          active = next;
+          await store.post(session.id, {
+            role: 'system', kind: 'status',
+            content: `${previous.model} replied without doing any work; continuing with ${candidates[active].provider === 'ollama_cloud' ? 'owner-approved Ollama Cloud' : 'local'} ${candidates[active].provider}/${candidates[active].model}.`,
+            payload: { message_id: message.id, provider: candidates[active].provider, model: candidates[active].model, reason: 'reply_without_tool', previous_provider: previous.provider, previous_model: previous.model, external_egress: candidates[active].provider === 'ollama_cloud' },
+          });
+        }
+        continue;
+      }
       await ensureTypecheck();
       if (lastVerification?.failed && !args.blocked_reason && !verificationCorrectionSent) {
         verificationCorrectionSent = true;

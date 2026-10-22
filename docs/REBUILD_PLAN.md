@@ -33,6 +33,10 @@ Vibe tolerant edits and Ollama Cloud escalation (vibe-v12), 2026-10-22:
   stronger candidate (Ollama Cloud when enabled); earlier attachment analysis
   is withheld from the cloud packet instead of blocking escalation; a
   missing native call keeps that model in JSON mode for six hours.
+- Second retry (seq 404-408): in JSON mode the model sent the same promise
+  as a formal `reply` call, which bypassed the prose guard. A reply before
+  any tool runs is now refused once (unless it asks the owner a question or
+  gives `blocked_reason`) and escalates to the stronger candidate.
 
 Vibe native execution and private compute, 2026-10-22:
 
