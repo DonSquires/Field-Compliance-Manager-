@@ -883,7 +883,15 @@ test('replace_in_file edits by exact text, refuses ambiguity, hints at whitespac
   assert.match(fs.readFileSync(path.join(ws.workspacePath, 'lib/sum.js'), 'utf8'), /a \+ b/);
   assert.deepEqual(tools.__changedFiles(), ['lib/sum.js']);
   assert.match(tools.replace_in_file({ path: 'lib/sum.js', old_text: 'not here at all', new_text: 'x' }).error, /old_text not found[\s\S]*use search[\s\S]*read_file/);
-  assert.match(tools.replace_in_file({ path: 'lib/sum.js', old_text: 'a  +  b', new_text: 'x' }).error, /different whitespace/);
+  const reflowed = tools.replace_in_file({ path: 'lib/sum.js', old_text: 'a  +\n  b', new_text: 'a * b' });
+  assert.equal(reflowed.matched, 'whitespace_normalized');
+  assert.match(fs.readFileSync(path.join(ws.workspacePath, 'lib/sum.js'), 'utf8'), /a \* b/);
+  fs.writeFileSync(path.join(ws.workspacePath, 'lib/sum.js'), '.row { display: grid; gap: 6px; }\n.cell { gap: 6px; }\n');
+  const numbered = tools.replace_in_file({ path: 'lib/sum.js', old_text: '1: .row {  display: grid;\n1:   gap: 6px; }', new_text: '1: .row { display: flex; gap: 8px; }' });
+  assert.equal(numbered.matched, 'line_numbers_and_whitespace_normalized');
+  assert.match(fs.readFileSync(path.join(ws.workspacePath, 'lib/sum.js'), 'utf8'), /^\.row \{ display: flex; gap: 8px; \}\n\.cell/);
+  fs.writeFileSync(path.join(ws.workspacePath, 'lib/sum.js'), 'gap: 6px;\ngap:  6px;\n');
+  assert.match(tools.replace_in_file({ path: 'lib/sum.js', old_text: 'gap:\t6px;', new_text: 'gap: 8px;' }).error, /matches 2 places/);
   fs.writeFileSync(path.join(ws.workspacePath, 'lib/sum.js'), 'const x = 1;\nconst x = 1;\n');
   assert.match(tools.replace_in_file({ path: 'lib/sum.js', old_text: 'const x = 1;', new_text: 'const y = 2;' }).error, /occurs 2 times/);
   assert.equal(tools.replace_in_file({ path: 'lib/sum.js', old_text: 'const x = 1;', new_text: 'const y = 2;', all: true }).replaced, 2);

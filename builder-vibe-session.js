@@ -18,7 +18,7 @@ const { isProtectedPath, protectedReason, normalizeRepoPath } = require('./build
 const { VIBE_BRANCH_PREFIX, builderCommitIdentity, redactGitError } = require('./builder-branch-workspace');
 const { buildModelRunRequest, callModelGateway, fetchModelHealth, selectProviders, providerRequest } = require('./supabase/functions/_shared/builder-model-adapter');
 
-const PROMPT_VERSION = 'vibe-v11';
+const PROMPT_VERSION = 'vibe-v12';
 const VIBE_LIMITS = Object.freeze({
   maxTurns: Math.max(6, Number(process.env.BOB_VIBE_TURNS || 40)),
   wallBudgetMs: Math.max(60_000, Number(process.env.BOB_VIBE_BUDGET_MS || 20 * 60_000)),
@@ -81,7 +81,7 @@ function vibeSystemPrompt(limits = VIBE_LIMITS) {
     'Reply with ONLY one JSON object per message: {"thought": string, "tool": string, "args": object}.',
     'TOOLS:',
     '- list_dir {path} lists filenames. read_file {path, start_line?, end_line?} reads known source. outline {path, pattern?} lists source declarations. search {query, path?, regex?, context?} matches literal case-sensitive text inside files by default, not semantic questions or filename discovery: search visible labels/imports/class names that actually occur in code, not phrases like "Page layout structure". git_log {path?, limit?} | git_diff {}',
-    '- write_file {path, content} | replace_in_file {path, old_text, new_text, all?} | apply_patch {diff} | delete_file {path}',
+    '- write_file {path, content} | replace_in_file {path, old_text, new_text, all?} | apply_patch {diff} | delete_file {path}. replace_in_file accepts a unique match that differs only in whitespace or read_file "N: " prefixes; other tokens must be exact. If it still fails, read_file the exact range and copy a shorter unique snippet instead of retrying the same text.',
     '- generate_visual_baselines {paths, reason}  1-6 exact Playwright Linux PNG paths under apps/web/e2e/*.spec.ts-snapshots/. Explain the intentional before/after UI change; a mismatch alone is NOT approval. Generates offline fixture PNGs, rerenders and compares, retains before/after hashes and images. Never weaken tests or tolerances to bless a regression. Human review and merge are required; no live tenant screenshots.',
     `- run {command}  allowed: node --test [test files], node --check <file>, npm run lint|build --prefix apps/web, npm run test --prefix apps/web -- <pattern> (or npm test --prefix apps/web -- <pattern>), git status|diff|log|show|blame (timeout ${Math.round(limits.runTimeoutMs / 60000)} min)`,
     '- atlas {action: capability_map|terrain_edges|gap_report|blast_radius, name?, type?, direction?, depth?, limit?}  live build map (flow_reach and fk_reach are different truths)',
@@ -94,13 +94,21 @@ function vibeSystemPrompt(limits = VIBE_LIMITS) {
   ].join('\n');
 }
 
-function applyVibeRouting(modelRequest) {
-  const chain = ['gpu_workstation', 'ollama'];
-  return { ...modelRequest, provider: chain[0], chain, routing_reason: 'private_repository_local_only' };
+// Owner ruling 2026-10-22: Vibe may escalate to Ollama Cloud after private models when the
+// operator enables BOB_VIBE_ALLOW_OLLAMA_CLOUD. Turns carrying attachment evidence stay local.
+function vibeCloudAllowed(env = process.env) {
+  return /^(1|true|yes)$/i.test(String(env.BOB_VIBE_ALLOW_OLLAMA_CLOUD || ''));
+}
+
+function applyVibeRouting(modelRequest, { allowCloud = false } = {}) {
+  const chain = allowCloud ? ['gpu_workstation', 'ollama', 'ollama_cloud'] : ['gpu_workstation', 'ollama'];
+  return { ...modelRequest, provider: chain[0], chain, routing_reason: allowCloud ? 'private_first_owner_approved_ollama_cloud' : 'private_repository_local_only' };
 }
 
 function vibeProviderCandidates(modelRequest, health) {
-  const primary = selectProviders(applyVibeRouting(modelRequest), { health });
+  const allowed = new Set(['gpu_workstation', 'ollama', 'ollama_cloud']);
+  const routed = modelRequest.chain ? { ...modelRequest, chain: modelRequest.chain.filter(provider => allowed.has(provider)) } : applyVibeRouting(modelRequest);
+  const primary = selectProviders(routed, { health });
   const candidates = [];
   for (const candidate of primary) {
     const alternatives = [candidate, ...selectProviders({ ...modelRequest, chain: [candidate.provider] }, {
@@ -576,7 +584,10 @@ async function runConversation({ store, session, message, workspacePath, branch,
     promptVersion: PROMPT_VERSION, systemPrompt: messages[0].content, userPrompt: task,
     outputSchema: vibeToolSchema(tools),
   });
-  const modelRequest = applyVibeRouting(baseRequest);
+  const modelRequest = applyVibeRouting(baseRequest, {
+    allowCloud: (deps.allowCloud ?? vibeCloudAllowed()) && !attachmentContext.length
+      && !history.some(entry => Array.isArray(entry.payload?.attachment_context) && entry.payload.attachment_context.length),
+  });
   const nativeTools = vibeNativeTools(tools);
   const health = await (deps.fetchHealth || fetchModelHealth)(gateway);
   const candidates = vibeProviderCandidates(modelRequest, health);
@@ -653,7 +664,7 @@ async function runConversation({ store, session, message, workspacePath, branch,
     const maxOutput = Math.min(Number(status.max_output_tokens || 8192), status.num_ctx ? Math.floor(status.num_ctx / 2) : 8192);
     const promptBudget = status.num_ctx ? Math.floor((status.num_ctx - maxOutput - 512) * 3.5) - JSON.stringify(nativeTools).length - 400 : Infinity;
     const base = providerRequest(modelRequest, candidate, null);
-    const request = { ...base, idempotency_key: `${base.idempotency_key}::vibe-${turn}`, request: { ...base.request, messages: compactMessages(messages, { maxChars: promptBudget }), tools: nativeTools, max_output_tokens: maxOutput } };
+    const request = { ...base, idempotency_key: `${base.idempotency_key}::vibe-${turn}`, request: { ...base.request, messages: compactMessages(messages, { maxChars: promptBudget }), ...(candidate.provider === 'ollama_cloud' ? {} : { tools: nativeTools }), max_output_tokens: maxOutput } };
     const response = await callModel({ ...gateway, modelRequest: request, timeoutMs: limits.turnTimeoutMs });
     if (!response.ok) {
       if (['native_tool_batch_refused', 'native_tool_arguments_invalid', 'native_tool_call_missing'].includes(response.code)) {
@@ -679,14 +690,16 @@ async function runConversation({ store, session, message, workspacePath, branch,
       continue;
     }
     unavailable = 0;
-    const protocol = response.data?.tool_protocol;
+    const protocol = response.data?.tool_protocol || (candidate.provider === 'ollama_cloud' ? 'json' : undefined);
     const protocolKey = `${candidate.provider}:${candidate.model}:${protocol}`;
     if (protocol && !reportedProtocols.has(protocolKey)) {
       reportedProtocols.add(protocolKey);
       await store.post(session.id, {
         role: 'system', kind: 'status',
-        content: protocol === 'native' ? `Using native function calls on private ${candidate.provider}/${candidate.model}.` : `Using structured JSON calls: ${response.data.tool_protocol_reason || 'native calls unavailable'}.`,
-        payload: { message_id: message.id, provider: candidate.provider, model: candidate.model, tool_protocol: protocol },
+        content: protocol === 'native' ? `Using native function calls on private ${candidate.provider}/${candidate.model}.`
+          : candidate.provider === 'ollama_cloud' ? `Using owner-approved Ollama Cloud ${candidate.model} with structured JSON calls (no attachments in context).`
+            : `Using structured JSON calls: ${response.data.tool_protocol_reason || 'native calls unavailable'}.`,
+        payload: { message_id: message.id, provider: candidate.provider, model: candidate.model, tool_protocol: protocol, external_egress: candidate.provider === 'ollama_cloud' },
       });
     }
     const content = String(response.data?.content ?? '');
@@ -753,9 +766,11 @@ async function runConversation({ store, session, message, workspacePath, branch,
       payload: { message_id: message.id, tool: call.tool, thought: String(call.thought ?? '').slice(0, 600), args: describeArgs(call.tool, args), ok: !result?.error && !result?.timed_out && (typeof result?.exit_code !== 'number' || result.exit_code === 0), preview: resultPreview(result), turn },
     });
     if (repeatCount > 3) {
-      if (!loopRecoveryUsed && candidates[active + 1]?.model && candidates[active + 1].model !== candidate.model) {
+      const cloudIndex = candidates.findIndex((entry, index) => index > active && entry.provider === 'ollama_cloud');
+      const next = cloudIndex > active ? cloudIndex : active + 1;
+      if (!loopRecoveryUsed && candidates[next]?.model && candidates[next].model !== candidate.model) {
         loopRecoveryUsed = true;
-        active++;
+        active = next;
         repeatedCalls.clear();
         const recovery = {
           error: result.error,
@@ -768,8 +783,8 @@ async function runConversation({ store, session, message, workspacePath, branch,
         messages.push({ role: 'user', content: JSON.stringify(recovery) });
         await store.post(session.id, {
           role: 'system', kind: 'status',
-          content: `Repeated tool call blocked; recovering once with local ${candidates[active].provider}/${candidates[active].model || 'configured model'}. Existing work and evidence are retained.`,
-          payload: { message_id: message.id, provider: candidates[active].provider, model: candidates[active].model, reason: 'repeated_tool_call', previous_provider: candidate.provider, previous_model: candidate.model },
+          content: `Repeated tool call blocked; recovering once with ${candidates[active].provider === 'ollama_cloud' ? 'owner-approved Ollama Cloud' : 'local'} ${candidates[active].provider}/${candidates[active].model || 'configured model'}. Existing work and evidence are retained.`,
+          payload: { message_id: message.id, provider: candidates[active].provider, model: candidates[active].model, reason: 'repeated_tool_call', previous_provider: candidate.provider, previous_model: candidate.model, external_egress: candidates[active].provider === 'ollama_cloud' },
         });
         continue;
       }
@@ -899,4 +914,4 @@ function createVibeWorker({ supabase, deps, intervalMs = 3000, log = console }) 
   };
 }
 
-module.exports = { PROMPT_VERSION, VIBE_LIMITS, vibeBranchName, vibeWorkspacePath, vibeSystemPrompt, applyVibeRouting, vibeProviderCandidates, vibeToolSchema, vibeNativeTools, ensureVibeWorkspace, commitTurn, revertLastTurn, revertRefusedChanges, branchState, createVibeStore, isPrivateVisionAddress, assertLocalVisionUrl, describeVibeImage, prepareVibeAttachmentContext, runConversation, shipSession, processVibeMessage, createVibeWorker };
+module.exports = { PROMPT_VERSION, VIBE_LIMITS, vibeBranchName, vibeWorkspacePath, vibeSystemPrompt, vibeCloudAllowed, applyVibeRouting, vibeProviderCandidates, vibeToolSchema, vibeNativeTools, ensureVibeWorkspace, commitTurn, revertLastTurn, revertRefusedChanges, branchState, createVibeStore, isPrivateVisionAddress, assertLocalVisionUrl, describeVibeImage, prepareVibeAttachmentContext, runConversation, shipSession, processVibeMessage, createVibeWorker };
