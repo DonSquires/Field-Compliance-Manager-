@@ -146,7 +146,7 @@ async function runOnce({ workspacePath, changedFiles, reason, image, execute, ti
 
 /** Serialised: one browser walk at a time keeps the VPS within memory. */
 function runVibeHumanTest({ workspacePath, changedFiles = [], reason = '', image = process.env.BOB_WORKER_IMAGE, execute = executeWorker,
-  timeoutMs = Math.max(120_000, Number(process.env.BOB_VIBE_HUMAN_TEST_TIMEOUT_MS || 20 * 60_000)) }) {
+  timeoutMs = Math.max(19 * 60_000, Number(process.env.BOB_VIBE_HUMAN_TEST_TIMEOUT_MS || 20 * 60_000)) }) {
   const run = queue.then(() => runOnce({ workspacePath, changedFiles, reason, image, execute, timeoutMs }));
   queue = run.catch(() => {});
   return run;

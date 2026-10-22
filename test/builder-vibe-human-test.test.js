@@ -95,7 +95,7 @@ test('vibe-human-qa worker is offline, uses tmpfs dependencies and only runs val
   assert.equal(workerNetwork('vibe-human-qa', { BOB_WORKER_NETWORK: 'bob-workers' }), 'none');
   const command = workerCommand('vibe-human-qa').at(-1);
   assert.match(command, /grep -E '\^e2e\/\[A-Za-z0-9\]\[A-Za-z0-9\._-\]\*\\\.spec\\\.ts\$' \/artifacts\/specs\.txt/);
-  assert.match(command, /--project=desktop-chromium --workers=2 --reporter=line,json/);
+  assert.match(command, /--project=desktop-chromium --workers=2 --global-timeout=1080000 --reporter=line,json/);
   assert.match(command, /PLAYWRIGHT_JSON_OUTPUT_NAME=\/artifacts\/results\.json/);
   const args = dockerArguments({ image: 'img', sourceDir: '/tmp/source', artifactDir: '/tmp/artifacts', profile: 'vibe-human-qa', environment: { HUMAN_TEST_LIVE: 'false', E2E_OFFLINE: '1', GRANDMASTER_TEST_PASSWORD: 'x' } });
   assert.ok(args.includes('--network=none'));

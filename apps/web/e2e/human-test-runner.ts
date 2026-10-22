@@ -209,7 +209,7 @@ export class HumanTestSession {
   async clickSafe(label: string | RegExp): Promise<boolean> {
     const candidate = this.page.getByRole('button', { name: label }).or(this.page.getByRole('link', { name: label })).first();
     if (!(await candidate.isVisible({ timeout: 1500 }).catch(() => false))) return false;
-    const name = compact(await candidate.textContent()) || String(label);
+    const name = compact(await candidate.textContent({ timeout: 1000 }).catch(() => null)) || String(label);
     if (isWriteOrDestructiveAction(name)) {
       console.log(`[HUMAN SKIP] Unsafe action: ${name}`);
       return false;
@@ -245,7 +245,7 @@ export class HumanTestSession {
     console.log(`[HUMAN NAV] Found ${count} visible admin navigation items`);
     for (let index = 0; index < count; index += 1) {
       const item = navItems.nth(index);
-      const label = compact(await item.textContent());
+      const label = compact(await item.textContent({ timeout: 1000 }).catch(() => null));
       if (!label || isWriteOrDestructiveAction(label)) continue;
       if (RESOURCE_INTENSIVE_ADMIN_ROUTES.has(label)) {
         this.findings.push({ severity: 'warning', message: `${label} was not opened during the broad navigation sweep because it is resource-intensive in the constrained browser runner.`, url: this.page.url(), step: 'admin navigation' });
@@ -263,7 +263,7 @@ export class HumanTestSession {
     const tabCount = await tabs.count();
     for (let index = 0; index < tabCount; index += 1) {
       const tab = tabs.nth(index);
-      const label = compact(await tab.textContent());
+      const label = compact(await tab.textContent({ timeout: 1000 }).catch(() => null));
       if (!label || isWriteOrDestructiveAction(label)) continue;
       await tab.click();
       await this.page.waitForTimeout(150);
@@ -293,7 +293,8 @@ export class HumanTestSession {
       await this.page.waitForTimeout(150);
       const candidates = this.page.locator('[data-app-content]').first().locator('button:visible');
       const indexedButton = candidates.nth(button.index);
-      const currentLabel = (await indexedButton.textContent().catch(() => null) ?? '').replace(/\s+/g, ' ').trim();
+      // The restored page can render fewer buttons (e.g. a map pick mode); an unbounded read waited out the whole test.
+      const currentLabel = (await indexedButton.textContent({ timeout: 1000 }).catch(() => null) ?? '').replace(/\s+/g, ' ').trim();
       const label = button.label || currentLabel || `button-${button.index}`;
       if (isWriteOrDestructiveAction(label)) {
         this.skippedActions.push({ route, index: button.index, label, reason: 'write-or-destructive' });
@@ -390,7 +391,7 @@ export class HumanTestSession {
     if (!(await dialog.isVisible({ timeout: 250 }).catch(() => false))) return;
     if (await dialog.getAttribute('aria-label') === 'Bob agent workspace') return;
 
-    const heading = compact(await dialog.locator('h1, h2, h3').first().textContent().catch(() => null));
+    const heading = compact(await dialog.locator('h1, h2, h3').first().textContent({ timeout: 1000 }).catch(() => null));
     const buttons = await dialog.getByRole('button').evaluateAll((elements) => elements.map((element) => (element.getAttribute('aria-label') || element.textContent || '').replace(/\s+/g, ' ').trim()));
     console.log(`[HUMAN DIALOG] ${heading || '(untitled)'}; buttons: ${buttons.join(' | ') || '(none)'}`);
 
