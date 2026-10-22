@@ -104,6 +104,59 @@ test('web TypeScript drafts are automatically checked even when the model skips 
   assert.match(checks[0].payload.source_fingerprint, /^[a-f0-9]{64}$/);
 });
 
+test('native tools share edit contracts and describe literal source discovery precisely', () => {
+  const definitions = vibe.vibeNativeTools({ read_file() {}, search() {}, replace_in_file() {}, __policyCheck() {} });
+  const replacement = definitions.find(tool => tool.function.name === 'replace_in_file').function;
+  assert.deepEqual(replacement.parameters.required, ['path', 'old_text', 'new_text']);
+  assert.equal(replacement.parameters.properties.new_text.type, 'string');
+  const read = definitions.find(tool => tool.function.name === 'read_file').function;
+  assert.deepEqual(read.parameters.required, ['path']);
+  assert.equal(read.parameters.properties.start_line.type, 'integer');
+  assert.match(definitions.find(tool => tool.function.name === 'search').function.description, /not semantic questions/);
+  assert.ok(definitions.every(tool => !tool.function.name.startsWith('__')));
+});
+
+for (const [refusal, protocol] of [
+  ['native_tool_batch_refused', 'native'],
+  ['native_tool_call_missing', 'json'],
+]) test(`${refusal} gets bounded correction, then uses the unchanged guarded tool loop`, async () => {
+  let calls = 0;
+  const { store, deps, workspaceRoot } = setup([], {
+    callModel: async ({ modelRequest }) => {
+      calls++;
+      assert.ok(modelRequest.request.tools.some(tool => tool.function.name === 'replace_in_file'));
+      if (calls === 1) return { ok: false, status: 422, code: refusal, error: 'Native response refused; none executed.' };
+      if (calls === 2 && protocol === 'json') assert.match(modelRequest.request.messages.at(-1).content, /structured JSON compatibility/);
+      const call = calls === 2
+        ? { tool: 'replace_in_file', args: { path: 'apps/web/src/hello.ts', old_text: '"hi"', new_text: '"native"' } }
+        : { tool: 'reply', args: { message: 'Changed and checked.' } };
+      return { ok: true, data: { content: JSON.stringify(call), tool_protocol: protocol } };
+    },
+  });
+  const result = await vibe.processVibeMessage({ store, message: ownerMessage('improve greeting'), deps });
+  assert.equal(result.error, undefined);
+  assert.equal(calls, 3);
+  assert.equal(store.state.rows.filter(row => row.payload?.tool_protocol === protocol).length, 1);
+  assert.equal(store.state.rows.find(row => row.payload?.stage === 'native_tool_validation').payload.executed, false);
+  assert.equal(store.state.rows.filter(row => row.payload?.tool === 'replace_in_file').length, 1);
+  assert.match(fs.readFileSync(path.join(vibe.vibeWorkspacePath(workspaceRoot, SESSION_ID), 'apps/web/src/hello.ts'), 'utf8'), /native/);
+});
+
+test('four malformed native batches stop without executing any tools', async () => {
+  let calls = 0;
+  const { store, deps } = setup([], {
+    callModel: async () => {
+      calls++;
+      return { ok: false, status: 422, code: 'native_tool_arguments_invalid', error: 'Invalid arguments; none executed.' };
+    },
+  });
+  const result = await vibe.processVibeMessage({ store, message: ownerMessage('improve greeting'), deps });
+  assert.equal(result.error, true);
+  assert.equal(calls, 4);
+  assert.deepEqual(store.state.session.changed_files, []);
+  assert.equal(store.state.rows.filter(row => row.role === 'tool').length, 0);
+});
+
 test('automatic verification gives the model a repair chance and rechecks the edited source', async () => {
   const { store, deps, repo } = setup([
     { thought: 'edit', tool: 'replace_in_file', args: { path: 'apps/web/src/hello.ts', old_text: '"hi"', new_text: 'BROKEN' } },
@@ -117,6 +170,31 @@ test('automatic verification gives the model a repair chance and rechecks the ed
   const checks = store.state.rows.filter(row => row.payload?.automatic);
   assert.deepEqual(checks.map(row => row.payload.ok), [false, true]);
   assert.notEqual(checks[0].payload.source_fingerprint, checks[1].payload.source_fingerprint);
+});
+
+test('a continuation repairs the preserved failing draft and clears its exact verification failure', async () => {
+  const { store, deps, repo, workspaceRoot, model } = setup([
+    { tool: 'replace_in_file', args: { path: 'apps/web/src/hello.ts', old_text: '"hi"', new_text: 'BROKEN' } },
+    { tool: 'replace_in_file', args: { path: 'apps/web/src/hello.ts', old_text: 'BROKEN', new_text: '"repaired"' } },
+    { tool: 'reply', args: { message: 'Repaired and verified the preserved draft.' } },
+  ]);
+  installFixtureTypecheck(repo);
+  const first = await vibe.processVibeMessage({
+    store, message: ownerMessage('improve greeting without changing other behavior'), deps,
+    limits: { ...vibe.VIBE_LIMITS, maxTurns: 1 },
+  });
+  assert.equal(first.error, true);
+  const firstCommit = store.state.session.head_sha;
+  const priorRows = store.state.rows.slice();
+  store.recentExecution = async () => priorRows.filter(row => ['test', 'diff', 'error'].includes(row.kind));
+  store.history = async () => [{ role: 'owner', content: 'improve greeting without changing other behavior' }, { role: 'bob', kind: 'error', content: first.reply }];
+  const second = await vibe.processVibeMessage({ store, message: ownerMessage('continue'), deps });
+  assert.equal(second.error, undefined);
+  assert.notEqual(store.state.session.head_sha, firstCommit);
+  assert.match(model.calls[1].request.messages[1].content, /fixture TypeScript failure/);
+  assert.match(model.calls[1].request.messages[1].content, /without changing other behavior/);
+  assert.match(fs.readFileSync(path.join(vibe.vibeWorkspacePath(workspaceRoot, SESSION_ID), 'apps/web/src/hello.ts'), 'utf8'), /repaired/);
+  assert.equal(store.state.rows.filter(row => row.payload?.automatic).at(-1).payload.ok, true);
 });
 
 test('an earlier passing model check cannot verify a later broken edit', async () => {

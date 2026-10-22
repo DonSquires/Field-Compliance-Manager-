@@ -34,6 +34,51 @@ const HEALTH_PROBE_TIMEOUT_MS = Math.max(2_000, Number(process.env.BOB_MODEL_PRO
 const CHARS_PER_TOKEN = 3.5;
 const healthCache = new Map();
 const busyLocalProviders = new Set();
+const toolCapabilityCache = new Map();
+const healthKey = (name, provider) => JSON.stringify([name, provider.baseUrl]);
+const toolCapabilityKey = (provider, model) => JSON.stringify([provider.baseUrl, model]);
+
+async function nativeToolCapability(provider, model, fetchImpl) {
+  const key = toolCapabilityKey(provider, model);
+  const cached = toolCapabilityCache.get(key);
+  if (cached && cached.until > Date.now()) return cached;
+  const response = await fetchImpl(`${provider.baseUrl}/api/show`, {
+    method: 'POST', headers: { 'Content-Type': 'application/json', ...authHeaders(provider) },
+    body: JSON.stringify({ model }), signal: AbortSignal.timeout(HEALTH_PROBE_TIMEOUT_MS),
+  });
+  if (!response.ok) throw new Error(`model capability probe returned ${response.status}`);
+  const data = await response.json();
+  if (!Array.isArray(data?.capabilities)) throw new Error('model capability probe omitted capabilities');
+  const supported = data.capabilities.includes('tools');
+  const capability = { supported, reason: supported ? null : 'model does not declare native tool support', until: Date.now() + 5 * 60_000 };
+  toolCapabilityCache.set(key, capability);
+  return capability;
+}
+
+function nativeToolMessages(messages, tools) {
+  const allowed = new Set(tools.map(tool => tool.function.name));
+  let pending = null;
+  return messages.map(message => {
+    if (message.role === 'system') return {
+      ...message,
+      content: `${message.content}\nTRANSPORT: Native function calling overrides the JSON-only response instructions above. Call exactly one supplied function per response. Supply its typed arguments directly; do not print JSON tool calls as text. Use reply for the final owner-facing answer.`,
+    };
+    if (message.role === 'assistant') {
+      let call;
+      try { call = JSON.parse(message.content); } catch { return message; }
+      if (allowed.has(call?.tool) && call.args && typeof call.args === 'object' && !Array.isArray(call.args)) {
+        pending = call.tool;
+        return { role: 'assistant', content: '', tool_calls: [{ type: 'function', function: { name: call.tool, arguments: call.args } }] };
+      }
+    }
+    if (message.role === 'user' && pending) {
+      const toolName = pending;
+      pending = null;
+      return { role: 'tool', tool_name: toolName, content: message.content };
+    }
+    return message;
+  });
+}
 
 function authHeaders(providerConfig) {
   return providerConfig.apiKey ? { Authorization: `Bearer ${providerConfig.apiKey}` } : {};
@@ -69,9 +114,10 @@ function promptFitsProvider(input, providerConfig) {
 async function probeProvider(config, name, { fetchImpl = globalThis.fetch, now = Date.now } = {}) {
   const providerConfig = config[name];
   if (!providerConfig) return { name, configured: false, healthy: false, installed: [] };
+  const cacheKey = healthKey(name, providerConfig);
   if (providerConfig.kind === 'openai') {
     if (!providerConfig.apiKey) return { name, configured: false, healthy: false, installed: [] };
-    const cached = healthCache.get(name);
+    const cached = healthCache.get(cacheKey);
     if (cached && cached.until > now()) return { name, configured: true, healthy: cached.healthy, installed: cached.installed, reason: cached.reason || null, cached: true };
     // The account's model list decides which allowlisted model is real today; unreachable = assume the allowlist.
     let installed = [];
@@ -80,12 +126,12 @@ async function probeProvider(config, name, { fetchImpl = globalThis.fetch, now =
       const data = response.ok ? await response.json().catch(() => null) : null;
       installed = Array.isArray(data?.data) ? data.data.map(model => String(model.id || '')).filter(Boolean) : [];
     } catch { installed = []; }
-    healthCache.set(name, { healthy: true, installed, until: now() + (installed.length ? 10 * 60_000 : HEALTH_FAIL_TTL_MS) });
+    healthCache.set(cacheKey, { healthy: true, installed, until: now() + (installed.length ? 10 * 60_000 : HEALTH_FAIL_TTL_MS) });
     return { name, configured: true, healthy: true, installed, cached: false };
   }
   if (!providerConfig.baseUrl) return { name, configured: false, healthy: false, installed: [] };
   if (providerConfig.kind === 'ollama_cloud' && !providerConfig.apiKey) return { name, configured: false, healthy: false, installed: [] };
-  const cached = healthCache.get(name);
+  const cached = healthCache.get(cacheKey);
   if (cached && cached.until > now()) return { name, configured: true, healthy: cached.healthy, installed: cached.installed, model_sizes: cached.model_sizes, reason: cached.reason || null, cached: true };
   let healthy = false;
   let installed = [];
@@ -101,7 +147,7 @@ async function probeProvider(config, name, { fetchImpl = globalThis.fetch, now =
   } catch {
     healthy = false;
   }
-  healthCache.set(name, { healthy, installed, model_sizes: modelSizes, until: now() + (healthy ? HEALTH_OK_TTL_MS : HEALTH_FAIL_TTL_MS) });
+  healthCache.set(cacheKey, { healthy, installed, model_sizes: modelSizes, until: now() + (healthy ? HEALTH_OK_TTL_MS : HEALTH_FAIL_TTL_MS) });
   return { name, configured: true, healthy, installed, model_sizes: modelSizes, cached: false };
 }
 
@@ -229,8 +275,9 @@ function createModelGatewayConfig(env = process.env) {
 }
 
 function promptLength(input) {
-  if (Array.isArray(input.messages)) return input.messages.reduce((sum, message) => sum + String(message?.content ?? '').length, 0);
-  return String(input.system_prompt || '').length + String(input.user_prompt || '').length;
+  const toolsLength = input.tools ? JSON.stringify(input.tools).length : 0;
+  if (Array.isArray(input.messages)) return toolsLength + input.messages.reduce((sum, message) => sum + String(message?.content ?? '').length, 0);
+  return toolsLength + String(input.system_prompt || '').length + String(input.user_prompt || '').length;
 }
 
 function validateModelRequest(input, config) {
@@ -239,6 +286,13 @@ function validateModelRequest(input, config) {
   if (!ALLOWED_BUILDER_MODES.has(input.builder_mode)) return 'unsupported builder mode';
   if (!input.prompt_version || typeof input.prompt_version !== 'string') return 'prompt_version is required';
   if (!input.idempotency_key || typeof input.idempotency_key !== 'string') return 'idempotency_key is required';
+  if (input.tools !== undefined) {
+    if (input.builder_mode !== 'vibe_engineer' || config[input.provider].kind !== 'ollama') return 'native tools are restricted to private Vibe providers';
+    if (!Array.isArray(input.tools) || !input.tools.length || input.tools.length > 40) return 'tools must contain 1-40 function definitions';
+    if (input.tools.some(tool => tool?.type !== 'function' || !/^[a-z][a-z0-9_]{0,63}$/.test(tool.function?.name || '') ||
+      typeof tool.function?.description !== 'string' || tool.function?.parameters?.type !== 'object')) return 'invalid native tool definition';
+    if (new Set(input.tools.map(tool => tool.function.name)).size !== input.tools.length) return 'native tool names must be unique';
+  }
   if (Array.isArray(input.messages)) {
     // Multi-turn (agentic) requests carry the conversation; every turn must be a typed, string message.
     if (!input.messages.length) return 'messages must not be empty';
@@ -253,16 +307,17 @@ function validateModelRequest(input, config) {
   return null;
 }
 
-function buildProviderBody({ input, config, model }) {
+function buildProviderBody({ input, config, model, nativeTools = false }) {
   const isOpenAI = input.provider === 'openai';
   const messages = Array.isArray(input.messages)
     ? input.messages
     : [{ role: 'system', content: input.system_prompt }, { role: 'user', content: input.user_prompt }];
-  const body = { model, messages };
+  const body = { model, messages: nativeTools ? nativeToolMessages(messages, input.tools) : messages };
   if (!isOpenAI) {
     const providerConfig = config[input.provider];
     body.stream = false;
-    if (input.output_schema) body.format = providerConfig.kind === 'ollama' && input.output_schema.properties ? input.output_schema : 'json';
+    if (nativeTools) body.tools = input.tools;
+    else if (input.output_schema) body.format = providerConfig.kind === 'ollama' && input.output_schema.properties ? input.output_schema : 'json';
     // Ollama defaults to a 4k window and would truncate Bob's prompts silently; keep the model warm between turns.
     body.options = { num_ctx: providerConfig.numCtx, temperature: typeof input.temperature === 'number' ? input.temperature : 0.2, num_predict: Math.min(Number(input.max_output_tokens) || providerConfig.maxOutputTokens || 8192, providerConfig.maxOutputTokens || 8192, 16384) };
     if (providerConfig.kind === 'ollama') body.keep_alive = '5m';
@@ -306,6 +361,17 @@ async function invokeBuilderModel({ input, config, fetchImpl = globalThis.fetch 
   if (!eligible.includes(model)) {
     return { status: 422, body: { error: `${input.provider} model exceeds the configured VRAM weight budget or its size is unknown; over-budget model selection is blocked`, code: 'model_memory_budget' } };
   }
+  let nativeTools = false;
+  let toolProtocolReason = null;
+  if (input.tools) {
+    try {
+      const capability = await nativeToolCapability(providerConfig, model, fetchImpl);
+      nativeTools = capability.supported;
+      toolProtocolReason = capability.reason;
+    } catch (error) {
+      return { status: 503, body: { error: `native tool capability could not be verified: ${String(error.message).slice(0, 150)}`, code: 'native_tool_capability_unavailable' } };
+    }
+  }
   const local = providerConfig.kind === 'ollama';
   const planningTimeout = planningTimeoutFor(input);
   const planningKey = JSON.stringify([providerConfig.baseUrl, model]);
@@ -331,7 +397,7 @@ async function invokeBuilderModel({ input, config, fetchImpl = globalThis.fetch 
           'Content-Type': 'application/json',
           ...authHeaders(providerConfig)
         },
-        body: JSON.stringify(buildProviderBody({ input, config, model })),
+        body: JSON.stringify(buildProviderBody({ input, config, model, nativeTools })),
         signal: controller.signal
       }
     );
@@ -339,14 +405,34 @@ async function invokeBuilderModel({ input, config, fetchImpl = globalThis.fetch 
     if (!response.ok || !data) {
       const detail = data?.error?.message ? `: ${String(data.error.message).slice(0, 200)}` : (typeof data?.error === 'string' ? `: ${data.error.slice(0, 200)}` : '');
       const quota = response.status === 429 && QUOTA_EXHAUSTED_PATTERN.test(`${detail} ${data?.error?.code || ''} ${data?.error?.type || ''}`);
-      if (quota) healthCache.set(input.provider, { healthy: false, installed: [], reason: 'quota_exhausted', until: Date.now() + QUOTA_COOLDOWN_MS });
-      else if (OLLAMA_API_KINDS.has(providerConfig.kind) && (response.status >= 500 || response.status === 429)) healthCache.set(input.provider, { healthy: false, installed: [], until: Date.now() + HEALTH_FAIL_TTL_MS });
+      if (quota) healthCache.set(healthKey(input.provider, providerConfig), { healthy: false, installed: [], reason: 'quota_exhausted', until: Date.now() + QUOTA_COOLDOWN_MS });
+      else if (OLLAMA_API_KINDS.has(providerConfig.kind) && (response.status >= 500 || response.status === 429)) healthCache.set(healthKey(input.provider, providerConfig), { healthy: false, installed: [], until: Date.now() + HEALTH_FAIL_TTL_MS });
       // 429 is passed through so callers escalate at once instead of retrying a provider that cannot answer.
       if (response.status === 429) return { status: 429, body: { error: `${input.provider} provider request failed${detail}`, code: quota ? 'provider_quota' : 'provider_rate_limited' } };
       return { status: 502, body: { error: `${input.provider} provider request failed${detail}`, code: 'provider_error' } };
     }
 
-    const content = isOpenAI ? data.choices?.[0]?.message?.content : data.message?.content;
+    let content = isOpenAI ? data.choices?.[0]?.message?.content : data.message?.content;
+    if (nativeTools && !data.message?.tool_calls?.length) {
+      const reason = 'model declared native support but returned no function call; using structured JSON compatibility for five minutes';
+      toolCapabilityCache.set(toolCapabilityKey(providerConfig, model), { supported: false, reason, until: Date.now() + 5 * 60_000 });
+      return { status: 422, body: { error: `${reason}. Its response was refused; no tool executed. Retry the same step in structured JSON mode.`, code: 'native_tool_call_missing' } };
+    }
+    if (nativeTools && data.message?.tool_calls?.length) {
+      const calls = data.message.tool_calls;
+      if (!Array.isArray(calls) || calls.length !== 1) return {
+        status: 422, body: { error: 'Call exactly one native function per response; none of these calls were executed. Reissue the smallest next call.', code: 'native_tool_batch_refused' },
+      };
+      const call = calls[0]?.function;
+      let args = call?.arguments;
+      if (typeof args === 'string') {
+        try { args = JSON.parse(args); } catch { return { status: 422, body: { error: 'Native function arguments must be a JSON object; no call executed.', code: 'native_tool_arguments_invalid' } }; }
+      }
+      if (!input.tools.some(tool => tool.function.name === call?.name) || !args || typeof args !== 'object' || Array.isArray(args)) {
+        return { status: 422, body: { error: 'Native function name or arguments are invalid; no call executed.', code: 'native_tool_arguments_invalid' } };
+      }
+      content = JSON.stringify({ tool: call.name, args });
+    }
     if (typeof content !== 'string') {
       return { status: 502, body: { error: `${input.provider} provider returned no content` } };
     }
@@ -358,6 +444,7 @@ async function invokeBuilderModel({ input, config, fetchImpl = globalThis.fetch 
         provider: input.provider,
         model,
         content,
+        ...(input.tools ? { tool_protocol: nativeTools ? 'native' : 'json', tool_protocol_reason: toolProtocolReason } : {}),
         finish_reason: isOpenAI ? (data.choices?.[0]?.finish_reason ?? null) : (data.done_reason ?? null),
         usage: isOpenAI
           ? (data.usage || {})
@@ -378,7 +465,7 @@ async function invokeBuilderModel({ input, config, fetchImpl = globalThis.fetch 
       const previous = planningTimeouts.get(planningKey);
       planningTimeouts.set(planningKey, { count: (previous?.count || 0) + 1, at: Date.now() });
     }
-    if (!timedOut && OLLAMA_API_KINDS.has(providerConfig.kind)) healthCache.set(input.provider, { healthy: false, installed: [], until: Date.now() + HEALTH_FAIL_TTL_MS });
+    if (!timedOut && OLLAMA_API_KINDS.has(providerConfig.kind)) healthCache.set(healthKey(input.provider, providerConfig), { healthy: false, installed: [], until: Date.now() + HEALTH_FAIL_TTL_MS });
     return {
       status: timedOut ? 504 : 502,
       body: { error: timedOut ? 'model provider timed out' : 'model provider unavailable', code: timedOut ? 'provider_timeout' : 'provider_unavailable' }

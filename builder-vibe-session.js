@@ -18,7 +18,7 @@ const { isProtectedPath, protectedReason, normalizeRepoPath } = require('./build
 const { VIBE_BRANCH_PREFIX, builderCommitIdentity, redactGitError } = require('./builder-branch-workspace');
 const { buildModelRunRequest, callModelGateway, fetchModelHealth, selectProviders, providerRequest } = require('./supabase/functions/_shared/builder-model-adapter');
 
-const PROMPT_VERSION = 'vibe-v10';
+const PROMPT_VERSION = 'vibe-v11';
 const VIBE_LIMITS = Object.freeze({
   maxTurns: Math.max(6, Number(process.env.BOB_VIBE_TURNS || 40)),
   wallBudgetMs: Math.max(60_000, Number(process.env.BOB_VIBE_BUDGET_MS || 20 * 60_000)),
@@ -160,6 +160,55 @@ function vibeToolSchema(tools) {
       callSchema({ type: 'string', enum: names.filter(name => !contracts[name]) }, { type: 'object', additionalProperties: true }),
     ],
   };
+}
+
+function vibeNativeTools(tools) {
+  const text = { type: 'string' };
+  const path = { type: 'string', minLength: 1 };
+  const integer = { type: 'integer', minimum: 1 };
+  const readers = {
+    list_dir: { properties: { path }, required: ['path'] },
+    read_file: { properties: { path, start_line: integer, end_line: integer }, required: ['path'] },
+    outline: { properties: { path, pattern: text }, required: ['path'] },
+    search: { properties: { query: path, path: { anyOf: [text, { type: 'array', items: text }] }, regex: { type: 'boolean' }, context: { type: 'integer', minimum: 0, maximum: 8 } }, required: ['query'] },
+    git_log: { properties: { path, limit: integer } },
+    git_diff: { properties: {} },
+    read_canon: { properties: {} },
+    read_notes: { properties: { limit: integer } },
+    write_note: { properties: { text: path }, required: ['text'] },
+    atlas: { properties: { action: { type: 'string', enum: ['capability_map', 'terrain_edges', 'blast_radius', 'gap_report'] }, name: text, type: text, direction: text, depth: integer, limit: integer }, required: ['action'] },
+    live_count: { properties: { table: path, column: text, equals: { type: ['string', 'number', 'boolean', 'null'] } }, required: ['table'] },
+    reply: { properties: { message: path, blocked_reason: text }, required: ['message'] },
+    finish: { properties: { message: path, blocked_reason: text }, required: ['message'] },
+  };
+  const descriptions = {
+    list_dir: 'List existing file/directory names, not file contents.',
+    read_file: 'Read actual numbered source lines. Use this before editing. For long files choose a bounded line range.',
+    outline: 'Inspect declarations and line numbers in an existing source file.',
+    search: 'Find literal case-sensitive text INSIDE tracked files, not semantic questions or filenames. Search exact visible labels, imports or class names.',
+    git_diff: 'Inspect current changes before editing further or verifying.',
+    replace_in_file: 'Replace exact existing source text copied from read_file. Include unique surrounding lines and complete new_text. Do not append a second component outside its JSX tree.',
+    write_file: 'Write complete file content after inspecting existing source. Protected paths remain refused.',
+    apply_patch: 'Apply a textual unified diff. Protected paths and binary patches remain refused.',
+    delete_file: 'Delete an inspected, unprotected file only when required by the task.',
+    run: 'Run existing bounded tests, lint or build commands. npm install/ci is blocked. Use npm run lint --prefix apps/web for TypeScript.',
+    atlas: 'Read the live build map. Discover exact entity names with capability_map before terrain_edges or blast_radius. Flow edges are distinct from FK structure.',
+    reply: 'Answer the owner after verification, or ask a product question. You supply code/tool arguments yourself. Include blocked_reason for an unresolved failure.',
+    finish: 'Finish with an honest owner-facing message after verification. Include blocked_reason for unresolved failures.',
+    generate_visual_baselines: 'Generate up to six exact allowed Playwright PNG paths with an intentional-change rationale, never merely to bless a mismatch.',
+  };
+  const schema = vibeToolSchema(tools);
+  return schema.properties.tool.enum.map(name => {
+    const existing = schema.oneOf.find(branch => branch.properties.tool.const === name)?.properties.args;
+    const contract = readers[name];
+    return {
+      type: 'function',
+      function: {
+        name, description: descriptions[name] || `Use the existing ${name} tool according to its documented arguments and safety rules.`,
+        parameters: existing || (contract ? { type: 'object', ...contract, additionalProperties: false } : { type: 'object', additionalProperties: true }),
+      },
+    };
+  });
 }
 
 function describeArgs(tool, args) {
@@ -528,6 +577,7 @@ async function runConversation({ store, session, message, workspacePath, branch,
     outputSchema: vibeToolSchema(tools),
   });
   const modelRequest = applyVibeRouting(baseRequest);
+  const nativeTools = vibeNativeTools(tools);
   const health = await (deps.fetchHealth || fetchModelHealth)(gateway);
   const candidates = vibeProviderCandidates(modelRequest, health);
   if (!candidates.length) return { reply: 'No model provider is available right now, so I could not work on this. The model gateway health needs checking.', error: true, tools };
@@ -590,6 +640,7 @@ async function runConversation({ store, session, message, workspacePath, branch,
     });
   };
   let verificationCorrectionSent = false;
+  const reportedProtocols = new Set();
   const handoff = async (reply, model) => {
     await ensureTypecheck();
     return lastVerification?.failed
@@ -600,11 +651,26 @@ async function runConversation({ store, session, message, workspacePath, branch,
     const candidate = candidates[active];
     const status = health?.[candidate.provider] || {};
     const maxOutput = Math.min(Number(status.max_output_tokens || 8192), status.num_ctx ? Math.floor(status.num_ctx / 2) : 8192);
-    const promptBudget = status.num_ctx ? Math.floor((status.num_ctx - maxOutput - 512) * 3.5) : Infinity;
+    const promptBudget = status.num_ctx ? Math.floor((status.num_ctx - maxOutput - 512) * 3.5) - JSON.stringify(nativeTools).length - 400 : Infinity;
     const base = providerRequest(modelRequest, candidate, null);
-    const request = { ...base, idempotency_key: `${base.idempotency_key}::vibe-${turn}`, request: { ...base.request, messages: compactMessages(messages, { maxChars: promptBudget }), max_output_tokens: maxOutput } };
+    const request = { ...base, idempotency_key: `${base.idempotency_key}::vibe-${turn}`, request: { ...base.request, messages: compactMessages(messages, { maxChars: promptBudget }), tools: nativeTools, max_output_tokens: maxOutput } };
     const response = await callModel({ ...gateway, modelRequest: request, timeoutMs: limits.turnTimeoutMs });
     if (!response.ok) {
+      if (['native_tool_batch_refused', 'native_tool_arguments_invalid', 'native_tool_call_missing'].includes(response.code)) {
+        unparseable++;
+        await store.post(session.id, {
+          role: 'system', kind: 'error', content: clip(response.error, 1000),
+          payload: { message_id: message.id, code: response.code, stage: 'native_tool_validation', executed: false, turn },
+        });
+        messages.push({ role: 'user', content: JSON.stringify({
+          error: response.error,
+          instruction: response.code === 'native_tool_call_missing'
+            ? 'No tool executed. Native response was refused; the next request uses structured JSON compatibility. Return exactly one JSON object with tool and complete args. Do not claim a change without an executed edit.'
+            : 'No tool executed. Correct the call and issue exactly one function with complete typed arguments.',
+        }) });
+        if (unparseable >= 4) return { reply: 'The model repeatedly returned invalid native tool calls. No refused calls were executed; your existing work is retained.', error: true, tools };
+        continue;
+      }
       unavailable++;
       if (active + 1 < candidates.length && (unavailable >= 2 || [413, 429].includes(response.status))) { active++; unavailable = 0; turn--; continue; }
       if (unavailable >= 3) return { reply: `The model stopped responding (${clip(response.error, 200)}). Your branch keeps whatever was done so far; send another message to continue.`, error: true, tools };
@@ -613,6 +679,16 @@ async function runConversation({ store, session, message, workspacePath, branch,
       continue;
     }
     unavailable = 0;
+    const protocol = response.data?.tool_protocol;
+    const protocolKey = `${candidate.provider}:${candidate.model}:${protocol}`;
+    if (protocol && !reportedProtocols.has(protocolKey)) {
+      reportedProtocols.add(protocolKey);
+      await store.post(session.id, {
+        role: 'system', kind: 'status',
+        content: protocol === 'native' ? `Using native function calls on private ${candidate.provider}/${candidate.model}.` : `Using structured JSON calls: ${response.data.tool_protocol_reason || 'native calls unavailable'}.`,
+        payload: { message_id: message.id, provider: candidate.provider, model: candidate.model, tool_protocol: protocol },
+      });
+    }
     const content = String(response.data?.content ?? '');
     const call = parseToolCall(content);
     if (!call || typeof call.tool !== 'string') {
@@ -823,4 +899,4 @@ function createVibeWorker({ supabase, deps, intervalMs = 3000, log = console }) 
   };
 }
 
-module.exports = { PROMPT_VERSION, VIBE_LIMITS, vibeBranchName, vibeWorkspacePath, vibeSystemPrompt, applyVibeRouting, vibeProviderCandidates, vibeToolSchema, ensureVibeWorkspace, commitTurn, revertLastTurn, revertRefusedChanges, branchState, createVibeStore, isPrivateVisionAddress, assertLocalVisionUrl, describeVibeImage, prepareVibeAttachmentContext, runConversation, shipSession, processVibeMessage, createVibeWorker };
+module.exports = { PROMPT_VERSION, VIBE_LIMITS, vibeBranchName, vibeWorkspacePath, vibeSystemPrompt, applyVibeRouting, vibeProviderCandidates, vibeToolSchema, vibeNativeTools, ensureVibeWorkspace, commitTurn, revertLastTurn, revertRefusedChanges, branchState, createVibeStore, isPrivateVisionAddress, assertLocalVisionUrl, describeVibeImage, prepareVibeAttachmentContext, runConversation, shipSession, processVibeMessage, createVibeWorker };
