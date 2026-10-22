@@ -8,6 +8,44 @@ detailed backlogs (`ENTERPRISE_SAAS_TODO.md`, `PROTOTYPE_GAP_AUDIT.md`,
 Completion language is strict, as in the lineage: **merged ≠ deployed ≠
 glass-proven.** A workstream item is done only when its evidence gate is met.
 
+Vibe browser verification with Dr Bob's walk (vibe-v13), 2026-10-22:
+
+- Before: Vibe accepted a handoff after the TypeScript check alone. The live
+  preview was for the owner; nothing walked the changed UI in a browser, so
+  console errors, broken routes and UX/layout findings reached the owner
+  first. Bob Builder's `frontend-verify` already ran lint, build, unit tests
+  and smoke plus targeted e2e specs, but Vibe had no browser evidence.
+- During: when a message changed browser-visible web files
+  (`apps/web/src/`, `index.html`, `public/`) and the other checks passed,
+  Vibe runs `e2e/dr-bob-human-test.spec.ts` plus the targeted specs for
+  those files in the `vibe-human-qa` worker. That worker is offline
+  (`--network=none`, `E2E_OFFLINE=1`, `HUMAN_TEST_LIVE=false`), mounts the
+  source read-only and receives no credentials. It runs on desktop Chromium
+  only and one walk at a time. Bob can also call `human_test` himself. Two
+  outcomes block the handoff once, so Bob can either fix the problem or
+  give a `blocked_reason`: a failed spec (including a screenshot mismatch)
+  or a Dr Bob error finding. If the worker cannot run, that is reported but
+  does not block. Unchanged UI files are not walked twice, and walk time
+  does not count against Bob's working budget. Every reply ends with the
+  walk's counts, and the report and screenshots stay under
+  `.human-test-runs/`. This is fixture evidence, not a live-tenant test or
+  merge approval.
+  `BOB_VIBE_HUMAN_TEST=0` turns the walk off; `BOB_VIBE_HUMAN_TEST_TIMEOUT_MS`
+  bounds it (default 20 minutes; the desktop walk took 6.5 minutes locally).
+  The first real walk of `main` found a defect in the walk itself: in the
+  field-portal step, `/schedule/` matched the disabled "Start unscheduled
+  shift" button, which timed out every run. The walk now selects only enabled
+  controls whose text matches a whole word.
+- Bob Builder parity (checked against the live jobs ledger): Builder is
+  progressing jobs; two were deployed on 2026-10-21. It shares the XML
+  tool-call parser and the whitespace-tolerant edits. It has its own guards
+  that escalate on unparseable output, refusal loops and exploration
+  without edits. The cross-lane "resides outside the allowed lane" failure
+  from job 437257cb is re-scoped by #163. Builder does not yet run Dr Bob's
+  walk; its browser evidence is still the smoke and targeted e2e specs.
+- After: unit and root suites pass. Not yet proven: a real owner Vibe turn
+  that ends with a walk receipt.
+
 Vibe tolerant edits and Ollama Cloud escalation (vibe-v12), 2026-10-22:
 
 - Before: owner session 6d6438f8 ("Overview & approvals" redesign) found the

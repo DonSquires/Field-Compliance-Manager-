@@ -854,3 +854,83 @@ test('preview dependency install always includes devDependencies', async () => {
   assert.equal(install.options.env.npm_config_production, 'false');
   assert.equal(fs.existsSync(path.join(web, 'node_modules', 'vite', 'package.json')), true);
 });
+
+function fakeHumanTest(outcomes) {
+  const calls = [];
+  const humanTest = async options => {
+    calls.push(options);
+    const next = outcomes.length > 1 ? outcomes.shift() : outcomes[0];
+    if (next instanceof Error) throw next;
+    return next;
+  };
+  return { calls, humanTest };
+}
+const walkPassed = { ok: true, status: 'succeeded', passed: 7, failed: 0, skipped: 1, flaky: 0, specs: ['e2e/dr-bob-human-test.spec.ts'], failures: [], errors: [], warnings: [{ severity: 'warning', message: 'UX/layout: crowded header' }], screenshot_mismatches: [], duration_ms: 1000 };
+const walkFailed = { ok: false, status: 'failed', passed: 6, failed: 1, skipped: 1, flaky: 0, specs: ['e2e/dr-bob-human-test.spec.ts'], failures: [{ file: 'dr-bob-human-test.spec.ts', title: 'admin walk', status: 'failed', error: 'Dr Bob found 1 error finding' }], errors: [{ severity: 'error', message: 'Console error: boom' }], warnings: [], screenshot_mismatches: [], duration_ms: 1000 };
+const editHello = { thought: 'edit', tool: 'replace_in_file', args: { path: 'apps/web/src/hello.ts', old_text: '"hi"', new_text: '"hello"' } };
+
+test('web UI changes get Dr Bob\'s browser walk before the reply is accepted', async () => {
+  const walk = fakeHumanTest([walkPassed]);
+  const { store, deps } = setup([editHello, { thought: 'done', tool: 'reply', args: { message: 'Greeting updated.' } }], { humanTest: walk.humanTest });
+  const result = await vibe.processVibeMessage({ store, message: ownerMessage('friendlier greeting'), deps });
+  assert.equal(result.error, undefined);
+  assert.equal(walk.calls.length, 1);
+  assert.deepEqual(walk.calls[0].changedFiles, ['apps/web/src/hello.ts']);
+  assert.match(result.reply, /Dr Bob's browser walk \(fixture data, desktop\): 7 passed, 0 failed, 1 skipped; 1 UX\/request warning/);
+  const row = store.state.rows.find(entry => entry.payload?.tool === 'human_test');
+  assert.equal(row.kind, 'test');
+  assert.equal(row.payload.automatic, true);
+  assert.equal(row.payload.ok, true);
+  assert.match(row.payload.source_fingerprint, /^[a-f0-9]{64}$/);
+  assert.ok(store.state.rows.some(entry => entry.payload?.stage === 'human_test'));
+});
+
+test('a failing browser walk refuses the handoff once and then reports the change as unverified', async () => {
+  const walk = fakeHumanTest([walkFailed]);
+  const { store, deps, model } = setup([
+    editHello,
+    { thought: 'done', tool: 'reply', args: { message: 'All good.' } },
+    { thought: 'blocked', tool: 'reply', args: { blocked_reason: 'The console error predates this change.' } },
+  ], { humanTest: walk.humanTest });
+  const result = await vibe.processVibeMessage({ store, message: ownerMessage('friendlier greeting'), deps });
+  assert.equal(result.error, true);
+  assert.match(result.reply, /Changes are not verified: human_test failed/);
+  assert.match(result.reply, /Console error: boom/);
+  assert.equal(walk.calls.length, 1, 'unchanged UI files are not walked twice');
+  assert.ok(model.calls.some(request => JSON.stringify(request).includes('Handoff refused: the latest verification failed')));
+});
+
+test('browser walk infrastructure failures are reported but do not block the handoff', async () => {
+  const walk = fakeHumanTest([new Error('docker unavailable')]);
+  const { store, deps } = setup([editHello, { thought: 'done', tool: 'reply', args: { message: 'Greeting updated.' } }], { humanTest: walk.humanTest });
+  const result = await vibe.processVibeMessage({ store, message: ownerMessage('friendlier greeting'), deps });
+  assert.equal(result.error, undefined);
+  assert.match(result.reply, /browser walk could not run: docker unavailable/);
+  const row = store.state.rows.find(entry => entry.payload?.tool === 'human_test');
+  assert.equal(row.payload.infrastructure, true);
+});
+
+test('Bob can request the walk as a tool and the handoff reuses it for unchanged files', async () => {
+  const walk = fakeHumanTest([walkPassed]);
+  const { store, deps } = setup([
+    editHello,
+    { thought: 'check in a browser', tool: 'human_test', args: { reason: 'confirm greeting renders' } },
+    { thought: 'done', tool: 'reply', args: { message: 'Greeting updated and walked.' } },
+  ], { humanTest: walk.humanTest });
+  const result = await vibe.processVibeMessage({ store, message: ownerMessage('friendlier greeting'), deps });
+  assert.equal(result.error, undefined);
+  assert.equal(walk.calls.length, 1);
+  assert.equal(walk.calls[0].reason, 'confirm greeting renders');
+  const rows = store.state.rows.filter(entry => entry.payload?.tool === 'human_test');
+  assert.equal(rows.length, 1);
+  assert.equal(rows[0].kind, 'test');
+  assert.equal(rows[0].payload.automatic, undefined);
+});
+
+test('a pure answer with no tool use does not trigger the browser walk', async () => {
+  const walk = fakeHumanTest([walkPassed]);
+  const { store, deps } = setup([{ thought: 'answer', tool: 'reply', args: { message: 'The greeting lives in hello.ts.' } }], { humanTest: walk.humanTest });
+  const result = await vibe.processVibeMessage({ store, message: ownerMessage('where is the greeting?'), deps });
+  assert.equal(result.error, undefined);
+  assert.equal(walk.calls.length, 0);
+});
