@@ -8,6 +8,52 @@ detailed backlogs (`ENTERPRISE_SAAS_TODO.md`, `PROTOTYPE_GAP_AUDIT.md`,
 Completion language is strict, as in the lineage: **merged ≠ deployed ≠
 glass-proven.** A workstream item is done only when its evidence gate is met.
 
+Vibe native execution and private compute, 2026-10-22:
+
+- Before: Vibe made local models print JSON as text instead of using their
+  declared native tool support. Invalid arguments and semantic-search loops
+  consumed the turn; larger CPU inference was slow and no replay established
+  autonomous UX acceptance.
+- During: private Vibe requests supply function definitions. The gateway
+  verifies the installed model's `/api/show` capability before using native
+  assistant/tool messages, then normalises a single returned function into
+  the existing guarded dispatcher. Transcript storage/compaction stays in its
+  existing bounded format. Multiple returned calls are explicitly refused
+  before execution and receive bounded correction. Models declaring no tool
+  support use visibly reported JSON compatibility. A private replay proved
+  declared capability alone insufficient: coder 7B returned text instead of
+  native functions and described an edit it never executed. Such native
+  responses are now refused without execution, visibly recorded, and retried
+  through existing structured JSON for five minutes on that same private
+  model. An unavailable capability probe fails explicitly instead of claiming
+  either mode works. Tool schemas count toward context limits.
+  Health/capability evidence is endpoint-scoped.
+- After: all path, command, local-routing, repetition and runtime verification
+  gates remain in force. A continuation test preserves a failing draft and
+  exact check receipt, repairs the same branch, and requires a fresh pass.
+  Mocked tests are not proof that arbitrary real redesigns self-heal.
+- Private acceptance: Qwen3 8B returned eleven actual native function calls
+  across two diagnostic turns (raw returned arrays checked, not just declared
+  capabilities). On continuation it read the preserved TS2322 receipt, read
+  the source, removed an intentionally injected invalid export, ran the real
+  web lint command, and replied. Runtime and independent TypeScript checks
+  passed. The preceding seven-step heading probe did not find the requested
+  literal in the selected file and made no successful edit; it is not a
+  successful redesign or heading-change receipt.
+- Default-model acceptance: coder 7B returned no native function, was refused
+  with `executed:false`, and then used five structured-JSON calls on the same
+  private endpoint. An incorrect first literal edit was refused; a source
+  search supplied the real text, the next edit removed the seeded fault, and
+  model-invoked, automatic and independent lint all passed. No hosted model
+  received the turn. All diagnostic worktrees were removed.
+- Root regression suite: 1,528 passed, eight skipped. Diagnostic clones are
+  disposable; no draft or owner turn is inserted into the original session.
+  No migration or generated schema edit is required.
+- [Private compute assessment](BOB_PRIVATE_COMPUTE_ASSESSMENT.md) separates
+  measured machine limits, official model/vendor facts, illustrative costs,
+  privacy prerequisites and acceptance before routing changes. No purchase,
+  provisioning, endpoint or default model change is included.
+
 Vibe typed edit contracts, 2026-10-22:
 
 - Before: a disposable GPU replay using the installed, memory-eligible

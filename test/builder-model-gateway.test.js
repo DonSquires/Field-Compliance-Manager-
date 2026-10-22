@@ -42,6 +42,157 @@ test('local design uses the evidence schema while cloud retains supported JSON m
   assert.equal(buildProviderBody({ input: request({ provider: 'ollama', output_schema: { type: 'object', required: ['summary'] } }), config: config(), model: 'local' }).format, 'json', 'legacy incomplete schemas retain existing mode');
 });
 
+const nativeTools = [{
+  type: 'function',
+  function: {
+    name: 'read_file', description: 'Read numbered source.',
+    parameters: { type: 'object', properties: { path: { type: 'string' } }, required: ['path'] },
+  },
+}];
+
+test('native local calls use declared tools, typed history and the existing normalized dispatch protocol', async () => {
+  const c = config();
+  c.ollama.baseUrl = 'http://native-tools.example';
+  let body;
+  const result = await invokeBuilderModel({
+    config: c,
+    input: request({
+      provider: 'ollama', model: 'approved-local', builder_mode: 'vibe_engineer', tools: nativeTools,
+      output_schema: { type: 'object', properties: { tool: { type: 'string' } } },
+      messages: [
+        { role: 'system', content: 'JSON-only transport.' },
+        { role: 'user', content: 'Inspect source.' },
+        { role: 'assistant', content: JSON.stringify({ tool: 'read_file', args: { path: 'src/a.ts' } }) },
+        { role: 'user', content: '{"tool_result":{"content":"source"},"recovery":"inspect the next file"}' },
+      ],
+    }),
+    fetchImpl: async (url, init) => {
+      if (url.endsWith('/api/tags')) return { ok: true, json: async () => ({ models: [{ name: 'approved-local' }] }) };
+      if (url.endsWith('/api/show')) return { ok: true, json: async () => ({ capabilities: ['completion', 'tools'] }) };
+      body = JSON.parse(init.body);
+      return { ok: true, json: async () => ({ message: { tool_calls: [{ function: { name: 'read_file', arguments: { path: 'src/b.ts' } } }] } }) };
+    },
+  });
+  assert.equal(result.status, 200);
+  assert.equal(result.body.tool_protocol, 'native');
+  assert.deepEqual(JSON.parse(result.body.content), { tool: 'read_file', args: { path: 'src/b.ts' } });
+  assert.deepEqual(body.tools, nativeTools);
+  assert.equal(body.format, undefined);
+  assert.match(body.messages[0].content, /Native function calling overrides/);
+  assert.deepEqual(body.messages[2].tool_calls[0].function, { name: 'read_file', arguments: { path: 'src/a.ts' } });
+  assert.equal(body.messages[3].role, 'tool');
+  assert.equal(body.messages[3].tool_name, 'read_file');
+  assert.match(body.messages[3].content, /recovery/);
+});
+
+test('health/model inventory cannot leak between different private endpoints', async () => {
+  const { probeProvider } = require('../builder-model-gateway');
+  const c = config();
+  const first = 'http://inventory-a.example';
+  const second = 'http://inventory-b.example';
+  const probes = [];
+  const fetchImpl = async url => {
+    probes.push(url);
+    return { ok: true, json: async () => ({ models: [{ name: url.startsWith(first) ? 'model-a' : 'model-b' }] }) };
+  };
+  c.ollama.baseUrl = first;
+  const a = await probeProvider(c, 'ollama', { fetchImpl });
+  c.ollama.baseUrl = second;
+  const b = await probeProvider(c, 'ollama', { fetchImpl });
+  c.ollama.baseUrl = first;
+  const cached = await probeProvider(c, 'ollama', { fetchImpl });
+  assert.deepEqual(a.installed, ['model-a']);
+  assert.deepEqual(b.installed, ['model-b']);
+  assert.deepEqual(cached.installed, ['model-a']);
+  assert.equal(cached.cached, true);
+  assert.equal(probes.length, 2);
+});
+
+test('verified lack of native capability selects visible JSON compatibility, not silent failure', async () => {
+  const c = config();
+  c.ollama.baseUrl = 'http://legacy-tools.example';
+  let body;
+  const schema = { type: 'object', properties: { tool: { type: 'string' } } };
+  const result = await invokeBuilderModel({
+    config: c, input: request({ provider: 'ollama', model: 'approved-local', builder_mode: 'vibe_engineer', tools: nativeTools, output_schema: schema }),
+    fetchImpl: async (url, init) => {
+      if (url.endsWith('/api/tags')) return { ok: true, json: async () => ({ models: [{ name: 'approved-local' }] }) };
+      if (url.endsWith('/api/show')) return { ok: true, json: async () => ({ capabilities: ['completion'] }) };
+      body = JSON.parse(init.body);
+      return { ok: true, json: async () => ({ message: { content: '{"tool":"read_file","args":{"path":"src/a.ts"}}' } }) };
+    },
+  });
+  assert.equal(result.status, 200);
+  assert.equal(result.body.tool_protocol, 'json');
+  assert.match(result.body.tool_protocol_reason, /does not declare/);
+  assert.equal(body.tools, undefined);
+  assert.deepEqual(body.format, schema);
+});
+
+test('declared native support without an actual function cannot become a false-success reply', async () => {
+  const c = config();
+  c.ollama.baseUrl = 'http://declared-but-unused-tools.example';
+  const input = request({ provider: 'ollama', model: 'approved-local', builder_mode: 'vibe_engineer', tools: nativeTools });
+  const bodies = [];
+  const fetchImpl = async (url, init) => {
+    if (url.endsWith('/api/tags')) return { ok: true, json: async () => ({ models: [{ name: 'approved-local' }] }) };
+    if (url.endsWith('/api/show')) return { ok: true, json: async () => ({ capabilities: ['completion', 'tools'] }) };
+    bodies.push(JSON.parse(init.body));
+    return { ok: true, json: async () => ({ message: { content: bodies.length === 1 ? 'Changed and verified.' : '{"tool":"read_file","args":{"path":"src/a.ts"}}' } }) };
+  };
+  const refused = await invokeBuilderModel({ config: c, input, fetchImpl });
+  assert.equal(refused.status, 422);
+  assert.equal(refused.body.code, 'native_tool_call_missing');
+  assert.match(refused.body.error, /no tool executed/);
+  assert.equal(refused.body.content, undefined);
+  const compatible = await invokeBuilderModel({ config: c, input, fetchImpl });
+  assert.equal(compatible.status, 200);
+  assert.equal(compatible.body.tool_protocol, 'json');
+  assert.match(compatible.body.tool_protocol_reason, /returned no function call/);
+  assert.ok(bodies[0].tools);
+  assert.equal(bodies[1].tools, undefined);
+  assert.equal(JSON.parse(compatible.body.content).tool, 'read_file');
+});
+
+test('a failed native capability probe cannot be mislabeled as supported or legacy', async () => {
+  const c = config();
+  c.ollama.baseUrl = 'http://unavailable-tools.example';
+  const result = await invokeBuilderModel({
+    config: c, input: request({ provider: 'ollama', model: 'approved-local', builder_mode: 'vibe_engineer', tools: nativeTools }),
+    fetchImpl: async url => {
+      if (url.endsWith('/api/tags')) return { ok: true, json: async () => ({ models: [{ name: 'approved-local' }] }) };
+      return { ok: false, status: 503 };
+    },
+  });
+  assert.equal(result.status, 503);
+  assert.equal(result.body.code, 'native_tool_capability_unavailable');
+});
+
+test('parallel native calls are explicitly refused before any Vibe tool dispatch', async () => {
+  const c = config();
+  c.ollama.baseUrl = 'http://batch-tools.example';
+  const result = await invokeBuilderModel({
+    config: c, input: request({ provider: 'ollama', model: 'approved-local', builder_mode: 'vibe_engineer', tools: nativeTools }),
+    fetchImpl: async url => {
+      if (url.endsWith('/api/tags')) return { ok: true, json: async () => ({ models: [{ name: 'approved-local' }] }) };
+      if (url.endsWith('/api/show')) return { ok: true, json: async () => ({ capabilities: ['completion', 'tools'] }) };
+      return { ok: true, json: async () => ({ message: { tool_calls: [1, 2].map(() => ({ function: { name: 'read_file', arguments: { path: 'a.ts' } } })) } }) };
+    },
+  });
+  assert.equal(result.status, 422);
+  assert.equal(result.body.code, 'native_tool_batch_refused');
+  assert.match(result.body.error, /none of these calls were executed/);
+});
+
+test('native definitions remain private, scoped, well-formed and included in prompt limits', () => {
+  assert.match(validateModelRequest(request({ builder_mode: 'vibe_engineer', tools: nativeTools }), config()), /restricted to private/);
+  assert.match(validateModelRequest(request({ provider: 'ollama', model: 'approved-local', tools: nativeTools }), config()), /restricted to private/);
+  assert.match(validateModelRequest(request({ provider: 'ollama', model: 'approved-local', builder_mode: 'vibe_engineer', tools: [nativeTools[0], nativeTools[0]] }), config()), /unique/);
+  const c = config();
+  c.maxPromptChars = 100;
+  assert.equal(validateModelRequest(request({ provider: 'ollama', model: 'approved-local', builder_mode: 'vibe_engineer', tools: nativeTools }), c), 'prompt exceeds configured limit');
+});
+
 test('VPS planning times out at the provider, cools down after two failures, and automatically recovers', async t => {
   let clock = Date.now() - 600001;
   t.mock.method(Date, 'now', () => clock);
