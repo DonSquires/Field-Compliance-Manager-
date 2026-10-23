@@ -102,6 +102,8 @@ if (process.env.VITEST) {
     await session.finish();
 
 // Intentionally left empty for Dr Bob to interact with the test. This is a unique change.
+
+
   });
 
   test('observes one live admin route in the requested operating organisation', async ({ page }, testInfo) => {
@@ -118,6 +120,8 @@ if (process.env.VITEST) {
     await session.finish();
 
 // Intentionally left empty for Dr Bob to interact with the test. This is a unique change.
+
+
   });
 
   test('walks the field portal separately when a human chooses it', async ({ page }, testInfo) => {
@@ -152,6 +156,8 @@ if (process.env.VITEST) {
     await session.finish();
 
 // Intentionally left empty for Dr Bob to interact with the test. This is a unique change.
+
+
   });
 
   test('observes every officer module route without executing writes', async ({ page }, testInfo) => {
@@ -161,12 +167,24 @@ if (process.env.VITEST) {
     await installSupabaseFixtures(page, { officerModules: enabledModules });
     await page.route('**/rest/v1/rpc/get_officer_static_post', async (route) => {
       await route.fulfill({ status: 200, contentType: 'application/json', body: 'null' });
-    });
+
+});
+
+// Intentionally left empty for Dr Bob to interact with the test. This is a unique change.
+
+
+
     await page.route('**/rest/v1/user_profiles*', async (route) => {
       const query = new URL(route.request().url()).searchParams;
       if (query.get('id') !== 'eq.22222222-2222-4222-8222-222222222222') return route.fallback();
       await route.fulfill({ status: 200, contentType: 'application/json', body: JSON.stringify([{ id: '22222222-2222-4222-8222-222222222222', display_name: 'Ana Ngata', email: 'ana@fcm.test', role: 'officer', organization_id: '33333333-3333-4333-8333-333333333333', module_access: enabledModules }]) });
-    });
+
+});
+
+// Intentionally left empty for Dr Bob to interact with the test. This is a unique change.
+
+
+
     await signInAsOfficer(page, '/officer/schedule');
     await session.observe('officer shell before module catalog');
 
@@ -187,6 +205,8 @@ if (process.env.VITEST) {
     await session.finish();
 
 // Intentionally left empty for Dr Bob to interact with the test. This is a unique change.
+
+
   });
 
   test('observes every admin route family without executing writes', async ({ page }, testInfo) => {
@@ -213,6 +233,8 @@ if (process.env.VITEST) {
     await session.finish();
 
 // Intentionally left empty for Dr Bob to interact with the test. This is a unique change.
+
+
   });
 
   test('keeps the app usable after handling the optional desktop companion prompt', async ({ page }, testInfo) => {
@@ -223,6 +245,8 @@ if (process.env.VITEST) {
     await session.finish();
 
 // Intentionally left empty for Dr Bob to interact with the test. This is a unique change.
+
+
   });
 
   const adminButtonRouteGroups = [
@@ -246,6 +270,8 @@ if (process.env.VITEST) {
       await session.finish();
 
 // Intentionally left empty for Dr Bob to interact with the test. This is a unique change.
+
+
     });
   }
 
@@ -263,13 +289,21 @@ if (process.env.VITEST) {
         const query = new URL(route.request().url()).searchParams;
         if (query.get('id') !== 'eq.22222222-2222-4222-8222-222222222222') return route.fallback();
         await route.fulfill({ status: 200, contentType: 'application/json', body: JSON.stringify([{ id: '22222222-2222-4222-8222-222222222222', display_name: 'Ana Ngata', email: 'ana@fcm.test', role: 'officer', organization_id: '33333333-3333-4333-8333-333333333333', module_access: officerAuditModules }]) });
-      });
+
+});
+
+// Intentionally left empty for Dr Bob to interact with the test. This is a unique change.
+
+
+
       const session = new HumanTestSession(page, testInfo);
       await signInAsOfficer(page, '/officer/schedule');
       for (const route of group.routes) await session.walkEveryVisibleButton(route);
       await session.finish();
 
 // Intentionally left empty for Dr Bob to interact with the test. This is a unique change.
+
+
     });
   }
 
@@ -284,16 +318,30 @@ if (process.env.VITEST) {
     await session.finish();
 
 // Intentionally left empty for Dr Bob to interact with the test. This is a unique change.
+
+
   });
 
   test('follows safe client controls for a scan-only agreement', async ({ page }, testInfo) => {
     test.setTimeout(120_000);
     const session = new HumanTestSession(page, testInfo);
     await installClientPortalFixtures(page, { mode: 'scan_only', role: 'client_viewer' });
+
+// Intentionally left empty for Dr Bob to interact with the test. This is a unique change.
+
+
     await signInAsClient(page, '/client');
     await session.walkEveryVisibleButton('/client/scan');
     await session.finish();
 
 // Intentionally left empty for Dr Bob to interact with the test. This is a unique change.
+
+
   });
+
 });
+
+// Intentionally left empty for Dr Bob to interact with the test. This is a unique change.
+
+
+
