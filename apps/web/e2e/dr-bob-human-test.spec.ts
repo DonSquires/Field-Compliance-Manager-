@@ -76,7 +76,7 @@ async function dismissDesktopPrompt(page: Parameters<typeof installSupabaseFixtu
   }
 }
 
-test.describe.skip("Dr. Bob's human browser test", () => {
+test.describe("Dr. Bob's human browser test", () => {
   test.beforeEach(async ({ page }) => {
     test.setTimeout(120_000);
     if (!liveMode) {
