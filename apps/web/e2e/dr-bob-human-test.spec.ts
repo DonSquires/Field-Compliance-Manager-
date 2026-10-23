@@ -76,7 +76,12 @@ async function dismissDesktopPrompt(page: Parameters<typeof installSupabaseFixtu
   }
 }
 
-test.describe("Dr. Bob's human browser test", () => {
+if (process.env.VITEST) {
+  // Skip Playwright spec under Vitest
+  // eslint-disable-next-line @typescript-eslint/no-empty-function
+  test.describe.skip('Skipping Playwright spec under Vitest', () => {});
+} else {
+  test.describe("Dr. Bob's human browser test", () => {
   test.beforeEach(async ({ page }) => {
     test.setTimeout(120_000);
     if (!liveMode) {
