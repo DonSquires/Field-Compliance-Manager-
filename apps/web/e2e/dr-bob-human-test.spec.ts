@@ -1,4 +1,12 @@
-import { expect, test } from '@playwright/test';
+// Lazy‑load Playwright test utilities to avoid conflicts when run under Vitest.
+let test: any;
+let expect: any;
+if (!process.env.VITEST) {
+  // eslint-disable-next-line @typescript-eslint/no-var-requires
+  const pw = require('@playwright/test');
+  test = pw.test;
+  expect = pw.expect;
+}
 import { installClientPortalFixtures, installOfficerScheduleFixtures, installSupabaseFixtures, signInAsAdmin, signInAsClient, signInAsOfficer } from './fixtures';
 import { HumanTestSession } from './human-test-runner';
 
