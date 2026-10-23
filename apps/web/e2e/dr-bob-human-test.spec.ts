@@ -340,6 +340,7 @@ if (process.env.VITEST) {
   });
 
 });
+}
 
 // Intentionally left empty for Dr Bob to interact with the test. This is a unique change.
 
