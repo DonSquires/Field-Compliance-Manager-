@@ -98,7 +98,7 @@ test.describe("Dr. Bob's human browser test", () => {
   });
 
   test('observes one live admin route in the requested operating organisation', async ({ page }, testInfo) => {
-    test.skip(!liveMode || !liveAdminRoute, 'Set HUMAN_TEST_LIVE=true and HUMAN_TEST_ADMIN_ROUTE to run this read-only live check.');
+    test(!liveMode || !liveAdminRoute, 'Set HUMAN_TEST_LIVE=true and HUMAN_TEST_ADMIN_ROUTE to run this read-only live check.');
     const session = new HumanTestSession(page, testInfo);
     await session.verifyDeployment(liveBaseUrl);
     await signInAsHuman(page, session);
