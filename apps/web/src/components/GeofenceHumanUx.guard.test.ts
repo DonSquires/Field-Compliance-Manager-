@@ -14,7 +14,7 @@ const zoneDetail = read('src/pages/ZoneDetailPage.tsx');
 
 describe('human geofence UX policy', () => {
   it('keeps every editable place boundary on a visual map workflow', () => {
-    expect(manager).toContain('<LocationHouseMap>');
+    expect(manager).toContain('<LocationHouseMap key={boundaryTarget}');
     expect(siteDetail).toContain('<LocationHouseMap');
     expect(zoneDetail).toContain('<LocationHouseMap');
     expect(workbench).toContain('L.map(');
