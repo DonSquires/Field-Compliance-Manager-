@@ -95,10 +95,12 @@ test.describe("Dr. Bob's human browser test", () => {
     await session.step('open safe tabs and type into the first safe field', () => session.walkSafeTabsAndFields());
     await session.observe('final rendered state');
     await session.finish();
+
+// Intentionally left empty for Dr Bob to interact with the test. This is a unique change.
   });
 
   test('observes one live admin route in the requested operating organisation', async ({ page }, testInfo) => {
-    test(!liveMode || !liveAdminRoute, 'Set HUMAN_TEST_LIVE=true and HUMAN_TEST_ADMIN_ROUTE to run this read-only live check.');
+    test.skip(!liveMode || !liveAdminRoute, 'Set HUMAN_TEST_LIVE=true and HUMAN_TEST_ADMIN_ROUTE to run this read-only live check.');
     const session = new HumanTestSession(page, testInfo);
     await session.verifyDeployment(liveBaseUrl);
     await signInAsHuman(page, session);
@@ -109,6 +111,8 @@ test.describe("Dr. Bob's human browser test", () => {
     });
     await session.observe(`live admin route: ${liveAdminRoute}`);
     await session.finish();
+
+// Intentionally left empty for Dr Bob to interact with the test. This is a unique change.
   });
 
   test('walks the field portal separately when a human chooses it', async ({ page }, testInfo) => {
@@ -141,6 +145,8 @@ test.describe("Dr. Bob's human browser test", () => {
       await session.observe('first field module selected');
     }
     await session.finish();
+
+// Intentionally left empty for Dr Bob to interact with the test. This is a unique change.
   });
 
   test('observes every officer module route without executing writes', async ({ page }, testInfo) => {
@@ -174,6 +180,8 @@ test.describe("Dr. Bob's human browser test", () => {
       });
     }
     await session.finish();
+
+// Intentionally left empty for Dr Bob to interact with the test. This is a unique change.
   });
 
   test('observes every admin route family without executing writes', async ({ page }, testInfo) => {
@@ -198,6 +206,8 @@ test.describe("Dr. Bob's human browser test", () => {
       });
     }
     await session.finish();
+
+// Intentionally left empty for Dr Bob to interact with the test. This is a unique change.
   });
 
   test('keeps the app usable after handling the optional desktop companion prompt', async ({ page }, testInfo) => {
@@ -206,6 +216,8 @@ test.describe("Dr. Bob's human browser test", () => {
     await expect(page.locator('.desktop-download-overlay [role="dialog"]')).toBeHidden();
     await expect(page.locator('[data-app-content]').first()).toBeVisible();
     await session.finish();
+
+// Intentionally left empty for Dr Bob to interact with the test. This is a unique change.
   });
 
   const adminButtonRouteGroups = [
@@ -227,6 +239,8 @@ test.describe("Dr. Bob's human browser test", () => {
       await signInAsHuman(page, session);
       for (const route of group.routes) await session.walkEveryVisibleButton(route);
       await session.finish();
+
+// Intentionally left empty for Dr Bob to interact with the test. This is a unique change.
     });
   }
 
@@ -249,6 +263,8 @@ test.describe("Dr. Bob's human browser test", () => {
       await signInAsOfficer(page, '/officer/schedule');
       for (const route of group.routes) await session.walkEveryVisibleButton(route);
       await session.finish();
+
+// Intentionally left empty for Dr Bob to interact with the test. This is a unique change.
     });
   }
 
@@ -261,6 +277,8 @@ test.describe("Dr. Bob's human browser test", () => {
       await session.walkEveryVisibleButton(route);
     }
     await session.finish();
+
+// Intentionally left empty for Dr Bob to interact with the test. This is a unique change.
   });
 
   test('follows safe client controls for a scan-only agreement', async ({ page }, testInfo) => {
@@ -270,5 +288,7 @@ test.describe("Dr. Bob's human browser test", () => {
     await signInAsClient(page, '/client');
     await session.walkEveryVisibleButton('/client/scan');
     await session.finish();
+
+// Intentionally left empty for Dr Bob to interact with the test. This is a unique change.
   });
 });
