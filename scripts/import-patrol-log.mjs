@@ -322,7 +322,7 @@ const eventsBatch = [];
 const proposalsBatch = [];
 const seenExternalRefs = new Set();
 const unresolvedAliasValues = new Set();
-const classificationCounts = { work_subject: {}, work_activity: {} };
+const classificationCounts = { work_subject: {}, work_activity: {}, biosecurity_species: {} };
 const costEvidenceTotals = { job_cost: 0, travel_cost: 0, total_cost: 0, rows: 0 };
 let skipped = 0;
 let skippedNoZone = 0;
@@ -353,7 +353,7 @@ for (const [rowIndex, r] of table.slice(1).entries()) {
   const plates = regPlates.length ? regPlates : extractPlates(comments);
   const primaryPlate = plates[0] ?? null;
   const isCamera = /^camera$/i.test(patroller);
-  const workClassification = classifyPatrolWork({ subject: r[col.subject], issue: r[col.issue], description: comments }, classificationRules);
+  const workClassification = classifyPatrolWork({ subject: r[col.subject], issue: r[col.issue], description: comments, source: col.workSource === -1 ? null : r[col.workSource] }, classificationRules);
   // Some rows record TWO officers on a joint patrol, separated by a newline/comma in one cell
   // (e.g. "Colin Eathorne\nWade Sutherland-Berkett") - take the first name that resolves to a
   // known officer rather than requiring the whole raw cell to match a single known name exactly.
@@ -402,7 +402,7 @@ for (const [rowIndex, r] of table.slice(1).entries()) {
     ...workClassification,
   };
 
-  for (const [type, code] of [['work_subject', workClassification.work_subject_code], ['work_activity', workClassification.work_activity_code]]) {
+  for (const [type, code] of [['work_subject', workClassification.work_subject_code], ['work_activity', workClassification.work_activity_code], ['biosecurity_species', workClassification.biosecurity_species_code]]) {
     if (code) classificationCounts[type][code] = (classificationCounts[type][code] ?? 0) + 1;
   }
   if ([payload.job_cost, payload.travel_cost, payload.total_cost].some((value) => typeof value === 'number')) {
