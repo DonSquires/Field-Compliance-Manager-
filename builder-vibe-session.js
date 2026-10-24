@@ -16,7 +16,7 @@ const { execFileSync } = require('node:child_process');
 const { createTools, parseToolCall, compactMessages, resolveStartingFiles, atlasMapForFiles } = require('./builder-agentic-engineer');
 const { humanTestInputFiles } = require('./builder-vibe-human-test');
 const { isProtectedPath, protectedReason, normalizeRepoPath } = require('./builder-path-policy');
-const { VIBE_BRANCH_PREFIX, builderCommitIdentity, redactGitError } = require('./builder-branch-workspace');
+const { VIBE_BRANCH_PREFIX, builderCommitIdentity, redactGitError, gitSpawnFault } = require('./builder-branch-workspace');
 const { buildModelRunRequest, callModelGateway, fetchModelHealth, selectProviders, providerRequest } = require('./supabase/functions/_shared/builder-model-adapter');
 
 const PROMPT_VERSION = 'vibe-v14';
@@ -46,16 +46,6 @@ function vibeWorkspacePath(workspaceRoot, sessionId) {
   const target = path.join(root, `vibe-${id8(sessionId)}`);
   if (!/^[0-9a-f]{8}$/.test(id8(sessionId)) || path.dirname(target) !== root) throw new Error('vibe session id is invalid');
   return target;
-}
-
-// A spawn-level failure (no git output) is a host fault, not a code fault: name the directory
-// and the likely cause so the owner sees an actionable message instead of "spawnSync git EACCES".
-function gitSpawnFault(error, cwd) {
-  const code = error && error.code;
-  if (!code || error.status != null) return null;
-  if (code === 'EACCES') return `Vibe workspace is not accessible to the Builder runtime (permission denied on ${cwd}); the workspace folder ownership must match the Builder container user. This is a host fault, not a code fault; retry once it is corrected.`;
-  if (code === 'ENOENT') return fs.existsSync(cwd) ? 'git is not installed or not on PATH for the Builder runtime.' : `Vibe workspace folder is missing (${cwd}).`;
-  return null;
 }
 
 function git(cwd, args) {

@@ -36,12 +36,23 @@ function redactGitError(message) {
   return String(message || '').replace(/Authorization:\s*(Basic|Bearer|token)\s+\S+/gi, 'Authorization: [redacted]').replace(/https?:\/\/[^\s/@]+:[^\s/@]+@/gi, 'https://[redacted]@');
 }
 
+// A spawn-level failure (no git exit status) is a host fault, not a code fault: name the directory
+// and the likely cause so the owner sees an actionable message instead of "spawnSync git EACCES".
+function gitSpawnFault(error, cwd) {
+  const code = error && error.code;
+  if (!code || error.status != null) return null;
+  if (code === 'EACCES') return `Builder git directory is not accessible to the Builder runtime (permission denied on ${cwd}); the folder ownership must match the Builder container user. This is a host fault, not a code fault; retry once it is corrected.`;
+  if (code === 'ENOENT') return fs.existsSync(cwd) ? 'git is not installed or not on PATH for the Builder runtime.' : `Builder git directory is missing (${cwd}).`;
+  return null;
+}
+
 function git(directory, args, options = {}) {
   try {
     return execFileSync('git', args, { cwd: directory, encoding: 'utf8', stdio: ['ignore', 'pipe', 'pipe'], ...options }).trim();
   } catch (error) {
     // execFileSync echoes the full command line (including any auth header) into the error; never let that escape.
-    const sanitized = new Error(redactGitError(error && error.message));
+    const sanitized = new Error(gitSpawnFault(error, directory) || redactGitError(error && error.message));
+    sanitized.code = error && error.code;
     sanitized.stderr = redactGitError(error && error.stderr);
     sanitized.status = error && error.status;
     throw sanitized;
@@ -407,4 +418,4 @@ function publicGiteaUrl(url, { baseUrl, publicBaseUrl }) {
   return url;
 }
 
-module.exports = { BRANCH_PREFIX, VIBE_BRANCH_PREFIX, isPublishableBranch, BUILDER_NAME, BUILDER_EMAIL, VERIFIED_GITHUB_EMAIL, builderCommitIdentity, branchNameForJob, workspacePathForBranch, createBranchWorkspace, createDetachedWorkspace, retireTerminalWorkspace, commitVerifiedPatch, publishWorkspaceBranch, giteaRepositoryPath, createGiteaPullRequest, publicGiteaUrl, verifySnapshot, githubAuthHeader, githubRepoUrl, githubSshRepoUrl, resolveRemoteHead, ensureSourceCheckout, createGitHubPullRequest, mergeGitHubPullRequest, redactGitError };
+module.exports = { BRANCH_PREFIX, VIBE_BRANCH_PREFIX, isPublishableBranch, BUILDER_NAME, BUILDER_EMAIL, VERIFIED_GITHUB_EMAIL, builderCommitIdentity, branchNameForJob, workspacePathForBranch, createBranchWorkspace, createDetachedWorkspace, retireTerminalWorkspace, commitVerifiedPatch, publishWorkspaceBranch, giteaRepositoryPath, createGiteaPullRequest, publicGiteaUrl, verifySnapshot, githubAuthHeader, githubRepoUrl, githubSshRepoUrl, resolveRemoteHead, ensureSourceCheckout, createGitHubPullRequest, mergeGitHubPullRequest, redactGitError, gitSpawnFault };
