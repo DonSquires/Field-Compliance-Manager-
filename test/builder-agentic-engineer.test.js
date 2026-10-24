@@ -992,6 +992,10 @@ test('replace_in_file edits by exact text, refuses ambiguity, hints at whitespac
   assert.equal(tools.replace_in_file({ path: 'lib/sum.js', old_text: 'const x = 1;', new_text: 'const y = 2;', all: true }).replaced, 2);
   assert.match(tools.replace_in_file({ path: 'package.json', old_text: '{', new_text: '[' }).error, /refused/);
   assert.match(tools.replace_in_file({ path: 'lib/missing.js', old_text: 'a', new_text: 'b' }).error, /not found: lib\/missing\.js/);
+  fs.writeFileSync(path.join(ws.workspacePath, 'lib/sum.js'), 'const tone = "red";\n');
+  assert.match(tools.replace_in_file({ path: 'lib/sum.js', old_text: 'tone = "red"', new_text: 'tone = "red"' }).error, /no-op edit refused/);
+  assert.match(tools.replace_in_file({ path: 'lib/sum.js', old_text: 'tone  =\n "red"', new_text: 'tone = "red"' }).error, /no-op edit refused/);
+  assert.equal(fs.readFileSync(path.join(ws.workspacePath, 'lib/sum.js'), 'utf8'), 'const tone = "red";\n');
 });
 
 test('oversized file reads preserve real head and tail with an exact omitted range', () => {

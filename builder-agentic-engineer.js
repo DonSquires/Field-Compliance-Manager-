@@ -454,6 +454,7 @@ function isEnvelopePatch(text) {
 }
 
 const ENVELOPE_EOF = Symbol('end-of-file');
+const NO_OP_EDIT = 'no-op edit refused: new_text produces exactly the current file, so nothing changed. read_file the exact lines you need to change and send the real new text.';
 
 function parseEnvelopePatch(text) {
   const ops = [];
@@ -722,6 +723,7 @@ function createTools({ workspacePath, repoRoot, lane, supabase, limits, log, gen
             cursor = span.index + span[0].length;
           }
           updated += current.slice(cursor);
+          if (updated === current) return { error: NO_OP_EDIT };
           fs.writeFileSync(absolute, updated);
           return { path: normalized, replaced: spans.length, bytes: Buffer.byteLength(updated), matched: prefixed ? 'line_numbers_and_whitespace_normalized' : 'whitespace_normalized' };
         }
@@ -732,6 +734,7 @@ function createTools({ workspacePath, repoRoot, lane, supabase, limits, log, gen
       }
       if (occurrences > 1 && !all) return { error: `old_text occurs ${occurrences} times in ${normalized}; include more surrounding lines to make it unique, or pass all=true` };
       const updated = all ? current.split(old_text).join(new_text) : current.replace(old_text, () => new_text);
+      if (updated === current) return { error: NO_OP_EDIT };
       fs.writeFileSync(absolute, updated);
       return { path: normalized, replaced: all ? occurrences : 1, bytes: Buffer.byteLength(updated) };
     },

@@ -570,6 +570,27 @@ test('an identical successful edit is not applied twice after rereading the sour
   assert.ok(store.state.rows.some(row => row.payload?.preview?.includes('This exact edit already succeeded') && row.payload.ok === false));
 });
 
+test('a change request cannot end on a no-op edit and a vague reply', async () => {
+  const { store, deps, model } = setup([
+    { thought: 'same text', tool: 'replace_in_file', args: { path: 'apps/web/src/hello.ts', old_text: '"hi"', new_text: '"hi"' } },
+    { thought: 'vague', tool: 'reply', args: { message: 'Search for MetricCard in repo.' } },
+    { thought: 'honest', tool: 'reply', args: { message: 'I could not locate the right lines.' } },
+  ]);
+  const result = await vibe.processVibeMessage({ store, message: ownerMessage('revert the greeting and restore the tone'), deps });
+  assert.ok(store.state.rows.some(row => row.payload?.tool === 'replace_in_file' && /no-op edit refused/.test(row.payload.preview)));
+  assert.ok(model.calls[2].request.messages.some(row => String(row.content).includes('no file changed during this message')));
+  assert.match(result.reply, /^No files changed during this message\.\n\nI could not locate the right lines\./);
+});
+
+test('a real edit for a change request is handed off without a no-change notice', async () => {
+  const { store, deps } = setup([
+    { thought: 'edit', tool: 'replace_in_file', args: { path: 'apps/web/src/hello.ts', old_text: '"hi"', new_text: '"kia ora"' } },
+    { thought: 'report', tool: 'reply', args: { message: 'Greeting updated.' } },
+  ]);
+  const result = await vibe.processVibeMessage({ store, message: ownerMessage('update the greeting'), deps });
+  assert.match(result.reply, /^Greeting updated\./);
+});
+
 test('failed verification cannot become a successful handoff just because the model says done', async () => {
   const { store, deps, model } = setup([
     { thought: 'check', tool: 'run', args: { command: 'node --check missing.js' } },
