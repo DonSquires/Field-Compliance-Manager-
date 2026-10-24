@@ -16,7 +16,7 @@ const { execFileSync } = require('node:child_process');
 const { createTools, parseToolCall, compactMessages, resolveStartingFiles, atlasMapForFiles } = require('./builder-agentic-engineer');
 const { humanTestInputFiles } = require('./builder-vibe-human-test');
 const { isProtectedPath, protectedReason, normalizeRepoPath } = require('./builder-path-policy');
-const { VIBE_BRANCH_PREFIX, builderCommitIdentity, redactGitError } = require('./builder-branch-workspace');
+const { VIBE_BRANCH_PREFIX, builderCommitIdentity, redactGitError, gitSpawnFault } = require('./builder-branch-workspace');
 const { buildModelRunRequest, callModelGateway, fetchModelHealth, selectProviders, providerRequest } = require('./supabase/functions/_shared/builder-model-adapter');
 
 const PROMPT_VERSION = 'vibe-v14';
@@ -52,7 +52,7 @@ function git(cwd, args) {
   try {
     return execFileSync('git', args, { cwd, encoding: 'utf8', stdio: ['ignore', 'pipe', 'pipe'], maxBuffer: 64 * 1024 * 1024 }).trim();
   } catch (error) {
-    throw new Error(redactGitError(error && (error.stderr || error.message)));
+    throw new Error(gitSpawnFault(error, cwd) || redactGitError(error && (error.stderr || error.message)));
   }
 }
 

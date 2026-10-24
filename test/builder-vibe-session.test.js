@@ -12,6 +12,7 @@ const { execFileSync } = require('node:child_process');
 
 const vibe = require('../builder-vibe-session');
 const preview = require('../builder-vibe-preview');
+const { ensureSourceCheckout } = require('../builder-branch-workspace');
 
 const SESSION_ID = '1a2b3c4d-0000-4000-8000-000000000001';
 const git = (cwd, args) => execFileSync('git', args, { cwd, encoding: 'utf8', stdio: ['ignore', 'pipe', 'pipe'] }).trim();
@@ -99,6 +100,32 @@ function verifiedFixtureIdentity(t) {
     else process.env.BOB_BUILDER_GIT_EMAIL = previous.email;
   });
 }
+
+test('an inaccessible source checkout reports a host permission fault instead of spawnSync EACCES', { skip: process.getuid && process.getuid() === 0 }, t => {
+  const { dir, sha } = sourceRepo();
+  const workspaceRoot = fs.mkdtempSync(path.join(os.tmpdir(), 'vibe-ws-'));
+  fs.chmodSync(dir, 0o000);
+  t.after(() => fs.chmodSync(dir, 0o755));
+  assert.throws(
+    () => vibe.ensureVibeWorkspace({ workspaceRoot, session: { id: SESSION_ID }, sourceDirFor: () => dir, resolveHead: () => sha }),
+    error => /not accessible to the Builder runtime/.test(error.message) && error.message.includes(dir) && !/spawnSync/.test(error.message),
+  );
+});
+
+test('an inaccessible source checkout during source preparation reports a host fault, not spawnSync EACCES', { skip: process.getuid && process.getuid() === 0 }, t => {
+  const { dir: upstream, sha } = sourceRepo();
+  const sourceRoot = fs.mkdtempSync(path.join(os.tmpdir(), 'vibe-source-root-'));
+  const sourceDir = path.join(sourceRoot, 'builder-source');
+  const workspaceRoot = fs.mkdtempSync(path.join(os.tmpdir(), 'vibe-ws-'));
+  ensureSourceCheckout({ sourceDir, repoUrl: upstream, sha });
+  fs.chmodSync(sourceRoot, 0o000);
+  t.after(() => { fs.chmodSync(sourceRoot, 0o755); fs.rmSync(sourceRoot, { recursive: true, force: true }); fs.rmSync(upstream, { recursive: true, force: true }); fs.rmSync(workspaceRoot, { recursive: true, force: true }); });
+  const sourceDirFor = targetSha => ensureSourceCheckout({ sourceDir, repoUrl: upstream, sha: targetSha }).sourceDir;
+  assert.throws(
+    () => vibe.ensureVibeWorkspace({ workspaceRoot, session: { id: SESSION_ID }, sourceDirFor, resolveHead: () => sha }),
+    error => /not accessible to the Builder runtime/.test(error.message) && error.message.includes(sourceRoot) && !/spawnSync/.test(error.message),
+  );
+});
 
 test('web TypeScript drafts are automatically checked even when the model skips verification', async () => {
   const { store, deps, repo } = setup([
