@@ -1,0 +1,88 @@
+name: PR verification
+
+on:
+  pull_request:
+    branches: [main]
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: pr-verification-${{ github.event.pull_request.number || github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  runtime:
+    name: Runtime and migration inventory
+    runs-on: ubuntu-22.04
+    timeout-minutes: 15
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          persist-credentials: false
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: npm
+      - run: npm ci
+      - run: npm run calibrate
+      - run: node scripts/check-migration-versions.js
+      - run: node --test --test-concurrency=4 test/*.test.js
+
+  web:
+    name: Web types, build and unit tests
+    runs-on: ubuntu-22.04
+    timeout-minutes: 20
+    defaults:
+      run:
+        working-directory: apps/web
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          persist-credentials: false
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: npm
+          cache-dependency-path: apps/web/package-lock.json
+      - run: npm ci
+      - run: npm run lint
+      - run: npm run build
+      - run: npm run test -- --maxWorkers=2 --reporter=dot
+
+  browser:
+    name: Offline browser workflows
+    runs-on: ubuntu-22.04
+    timeout-minutes: 25
+    env:
+      E2E_OFFLINE: '1'
+      HUMAN_TEST_LIVE: 'false'
+    defaults:
+      run:
+        working-directory: apps/web
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          persist-credentials: false
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: npm
+          cache-dependency-path: apps/web/package-lock.json
+      - run: npm ci
+      - run: npx playwright install --with-deps chromium
+      - name: Human-test harness and staff navigation
+        run: npx playwright test e2e/human-test-runner.spec.ts e2e/staff-profile-navigation.spec.ts --project=desktop-chromium --workers=2 --global-timeout=600000
+      - name: Existing operational smoke suite
+        run: npm run test:e2e:ci-smoke -- --global-timeout=900000
+      - name: Retain fixture browser evidence
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: offline-browser-evidence
+          path: |
+            apps/web/playwright-report/
+            apps/web/test-results/
+          if-no-files-found: warn
+          retention-days: 7

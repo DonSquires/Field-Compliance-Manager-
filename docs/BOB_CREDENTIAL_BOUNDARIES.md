@@ -2,6 +2,33 @@
 
 Bob must use the narrowest credential for each operation. Credential values must never appear in prompts, browser code, logs, screenshots, issue bodies, test artifacts, or human-test reports.
 
+## GitHub Actions verification (owner decision, 2026-10-24)
+
+GitHub repository secrets now include `SUPABASE_ACCESS_TOKEN`,
+`SUPABASE_PROJECT_ID`, `SUPABASE_URL` and `SUPABASE_SERVICE_ROLE_KEY`. Only
+their names were inspected, not their values. Their presence is not authority
+to make them available to PR code. No additional credentials were copied.
+
+The owner chose **PR verification first; production writes stay in the VPS
+release lane**. `.github/workflows/verify-pr.yml` uses no repository secrets,
+read-only contents permission, and checkout without persisted credentials.
+Independent jobs check the runtime/migration inventory, web types/build/unit
+tests and offline fixture browser workflows. Artifacts contain fixture browser
+evidence only. Failures remain red; existing Overview guard/snapshot failures
+are not suppressed.
+
+This workflow does not apply migrations, deploy functions, refresh live Atlas,
+write embeddings or send email. Adding secrets does not implement those jobs.
+Production migrations remain single-writer in the governed VPS release lane.
+If a later decision authorises Actions writes, define approved environments,
+reviewer/branch protection, exact caller/data scope, idempotency and audit
+receipts first; do not give untrusted PRs or fork code production secrets.
+Existing GitHub Production environments had no approval protection when
+inspected. `BOB_GITHUB_ACCESS_TOKEN` need not be added to verification: the
+job-scoped read-only GitHub token is sufficient. A future project-reference
+consumer must explicitly map `SUPABASE_PROJECT_ID` to its expected
+`SUPABASE_PROJECT_REF` setting rather than assuming they are already wired.
+
 The control plane loads `worker-executor.js` in its own process. A launcher
 change therefore requires a control-plane redeploy as well as the worker-image
 rebuild; an image rebuild alone does not update the running launcher.

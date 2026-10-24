@@ -8,6 +8,19 @@ detailed backlogs (`ENTERPRISE_SAAS_TODO.md`, `PROTOTYPE_GAP_AUDIT.md`,
 Completion language is strict, as in the lineage: **merged ≠ deployed ≠
 glass-proven.** A workstream item is done only when its evidence gate is met.
 
+GitHub PR verification, owner decision 2026-10-24:
+
+- New `verify-pr.yml` uses no Supabase secrets, no persisted checkout credential
+  and read-only contents permission. Three independent jobs run runtime and
+  migration-inventory checks, web types/build/unit tests, and offline browser
+  harness/navigation plus the existing operational smoke suite.
+- The owner explicitly retained the VPS as the sole production migration
+  writer. GitHub Supabase secret names were confirmed, but no live database,
+  embedding or deployment job is enabled by this workflow. Production
+  environment protections require a separate decision before Actions writes.
+- Existing product/test mismatches are expected to remain visible in CI;
+  there is no skip or continue-on-error to make the Overview redesign green.
+
 Vibe verification repair (vibe-v14), 2026-10-24:
 
 - Before: recent shipped session `b237fe39` tried to load Playwright through
