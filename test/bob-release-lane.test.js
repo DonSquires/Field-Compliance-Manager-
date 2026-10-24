@@ -213,3 +213,45 @@ test('nginx backups are kept outside sites-enabled so nginx never loads a duplic
   assert.doesNotMatch(nginxBlock, /\.lane-previous/);
   assert.match(nginxBlock, /nginx_backup="\$STATE_DIR\/nginx-previous"/);
 });
+
+test('release lane heals out-of-band nginx drift every tick and keeps the drifted copy', (t) => {
+  const { execFileSync } = require('node:child_process');
+  const lane = fs.readFileSync(path.resolve(__dirname, '../scripts/bob-release-lane.sh'), 'utf8');
+  const fn = lane.slice(lane.indexOf('heal_nginx_drift() {'), lane.indexOf('\nheal_nginx_drift\n'));
+  assert.ok(lane.indexOf('\nheal_nginx_drift\n') < lane.indexOf('if [[ "$HEAD_SHA" == "$DEPLOYED_SHA" ]]; then exit 0; fi'), 'drift heal must run before the no-new-release exit');
+
+  const root = fs.mkdtempSync(path.join(os.tmpdir(), 'lane-nginx-'));
+  t.after(() => fs.rmSync(root, { recursive: true, force: true }));
+  const repo = path.join(root, 'repo');
+  const sites = path.join(root, 'sites');
+  const bin = path.join(root, 'bin');
+  const state = path.join(root, 'state');
+  for (const dir of [repo, sites, bin, state, path.join(repo, 'deploy/bob-vps/nginx')]) fs.mkdirSync(dir, { recursive: true });
+  fs.writeFileSync(path.join(repo, 'deploy/bob-vps/nginx/bob.example'), 'managed\n');
+  const g = (...args) => execFileSync('git', ['-C', repo, '-c', 'user.name=t', '-c', 'user.email=t@t', '-c', 'commit.gpgsign=false', ...args], { encoding: 'utf8' }).trim();
+  g('init', '-q'); g('add', '.'); g('commit', '-qm', 'managed');
+  const sha = g('rev-parse', 'HEAD');
+  fs.writeFileSync(path.join(bin, 'systemctl'), '#!/bin/sh\nexit 0\n', { mode: 0o755 });
+  const run = (nginxExit) => {
+    fs.writeFileSync(path.join(bin, 'nginx'), `#!/bin/sh\nexit ${nginxExit}\n`, { mode: 0o755 });
+    return execFileSync('bash', ['-c', `set -euo pipefail\nlog() { echo "$*"; }\n${fn}\nheal_nginx_drift`], {
+      encoding: 'utf8',
+      env: { ...process.env, PATH: `${bin}:${process.env.PATH}`, MODE: 'live', REPO_DIR: repo, DEPLOYED_SHA: sha, STATE_DIR: state, BOB_RELEASE_NGINX_SITES_DIR: sites },
+    });
+  };
+  const live = path.join(sites, 'bob.example');
+
+  fs.writeFileSync(live, 'managed\n');
+  assert.equal(run(0), '');
+
+  fs.writeFileSync(live, 'hand edit\n');
+  assert.match(run(0), /nginx drift healed/);
+  assert.equal(fs.readFileSync(live, 'utf8'), 'managed\n');
+  const kept = fs.readdirSync(path.join(state, 'nginx-drift'));
+  assert.equal(kept.length, 1);
+  assert.equal(fs.readFileSync(path.join(state, 'nginx-drift', kept[0]), 'utf8'), 'hand edit\n');
+
+  fs.writeFileSync(live, 'hand edit\n');
+  assert.match(run(1), /failed nginx -t/);
+  assert.equal(fs.readFileSync(live, 'utf8'), 'hand edit\n');
+});

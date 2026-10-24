@@ -83,6 +83,39 @@ if [[ ! -s "$DEPLOYED_FILE" ]]; then
 fi
 DEPLOYED_SHA="$(cat "$DEPLOYED_FILE" 2>/dev/null || true)"
 if [[ -z "$DEPLOYED_SHA" ]]; then log "no baseline release known; refusing to guess"; exit 0; fi
+
+# 2b. Heal out-of-band nginx drift on every tick. A hand edit repointed bob.fcmanager.co.nz at a
+#     legacy host service and every Builder relay returned 404 for a day (2026-10-24); the lane
+#     only reinstalled sites when a commit touched them. The drifted copy is kept for review.
+heal_nginx_drift() {
+  [[ "$MODE" == "live" ]] || return 0
+  command -v nginx >/dev/null 2>&1 || return 0
+  local name managed live drift_dir="$STATE_DIR/nginx-drift" healed=() sites="${BOB_RELEASE_NGINX_SITES_DIR:-/etc/nginx/sites-enabled}"
+  for name in $(git -C "$REPO_DIR" ls-tree --name-only "$DEPLOYED_SHA" deploy/bob-vps/nginx/ 2>/dev/null | xargs -r -n1 basename); do
+    live="$sites/$name"
+    [[ -f "$live" ]] || continue
+    managed="$(mktemp)"
+    git -C "$REPO_DIR" show "$DEPLOYED_SHA:deploy/bob-vps/nginx/$name" > "$managed" 2>/dev/null || { rm -f "$managed"; continue; }
+    if ! cmp -s "$managed" "$live"; then
+      mkdir -p "$drift_dir"
+      cp -pL "$live" "$drift_dir/$name.$(date -u +%Y%m%dT%H%M%SZ)"
+      cp -pL "$live" "$drift_dir/$name.restore"
+      install -m 644 "$managed" "$live" && healed+=("$name")
+    fi
+    rm -f "$managed"
+  done
+  [[ ${#healed[@]} -gt 0 ]] || return 0
+  if nginx -t >/dev/null 2>&1 && systemctl reload nginx; then
+    log "nginx drift healed to ${DEPLOYED_SHA:0:8}: ${healed[*]} (drifted copies in $drift_dir)"
+  else
+    for name in "${healed[@]}"; do cp -p "$drift_dir/$name.restore" "$sites/$name"; done
+    systemctl reload nginx || true
+    log "nginx drift detected in ${healed[*]} but the managed site failed nginx -t; drifted copy left live, a person must look"
+  fi
+  rm -f "$drift_dir"/*.restore
+}
+heal_nginx_drift
+
 if [[ "$HEAD_SHA" == "$DEPLOYED_SHA" ]]; then exit 0; fi
 if ! git -C "$REPO_DIR" merge-base --is-ancestor "$DEPLOYED_SHA" "$HEAD_SHA"; then
   log "main $HEAD_SHA does not descend from the live release $DEPLOYED_SHA (force-push or rollback?); a person must look"
