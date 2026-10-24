@@ -591,6 +591,48 @@ test('a real edit for a change request is handed off without a no-change notice'
   assert.match(result.reply, /^Greeting updated\./);
 });
 
+test('owner requests are classified as change, verification or question in both directions', () => {
+  for (const text of ['change the greeting', 'edit the greeting', 'Can you fix the greeting?', 'Please add a spinner', 'check the build then fix the header']) {
+    assert.deepEqual(vibe.classifyOwnerRequest(text), { asked: false, wantsChange: true }, text);
+  }
+  for (const text of ['run the build', 'verify the fix without editing files', 'npm run build and report', 'check whether the tests pass', 'verify the fix']) {
+    assert.equal(vibe.classifyOwnerRequest(text).wantsChange, false, text);
+  }
+  assert.deepEqual(vibe.classifyOwnerRequest('What does MetricCard do?'), { asked: true, wantsChange: false });
+  assert.equal(vibe.isClarifyingQuestion('Which card should be red?'), true);
+  assert.equal(vibe.isClarifyingQuestion('Fixed. Can you check the preview?'), false);
+});
+
+test('a verification-only request that changes nothing is not refused or relabelled', async () => {
+  const { store, deps, model } = setup([
+    { thought: 'inspect', tool: 'read_file', args: { path: 'apps/web/src/hello.ts' } },
+    { thought: 'report', tool: 'reply', args: { message: 'The fix is in place.' } },
+  ]);
+  const result = await vibe.processVibeMessage({ store, message: ownerMessage('verify the fix without editing files'), deps });
+  assert.equal(model.calls.length, 2);
+  assert.doesNotMatch(result.reply, /No files changed/);
+});
+
+test('a completion claim ending in a question still gets the no-change safeguards', async () => {
+  const { store, deps, model } = setup([
+    { thought: 'look', tool: 'read_file', args: { path: 'apps/web/src/hello.ts' } },
+    { thought: 'claim', tool: 'reply', args: { message: 'Fixed. Can you check the preview?' } },
+    { thought: 'claim again', tool: 'reply', args: { message: 'Fixed. Can you check the preview?' } },
+  ]);
+  const result = await vibe.processVibeMessage({ store, message: ownerMessage('Can you fix the greeting?'), deps });
+  assert.ok(model.calls[2].request.messages.some(row => String(row.content).includes('no file changed during this message')));
+  assert.match(result.reply, /^No files changed during this message\./);
+});
+
+test('no_change_reason is honoured even before any tool runs', async () => {
+  const { store, deps, model } = setup([
+    { thought: 'already done', tool: 'reply', args: { message: 'Already in place.', no_change_reason: 'The previous message already restored the greeting.' } },
+  ]);
+  const result = await vibe.processVibeMessage({ store, message: ownerMessage('restore the greeting'), deps });
+  assert.equal(model.calls.length, 1);
+  assert.match(result.reply, /The previous message already restored the greeting\./);
+});
+
 test('failed verification cannot become a successful handoff just because the model says done', async () => {
   const { store, deps, model } = setup([
     { thought: 'check', tool: 'run', args: { command: 'node --check missing.js' } },

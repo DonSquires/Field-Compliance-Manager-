@@ -61,6 +61,30 @@ const clip = (text, cap) => {
   return value.length <= cap ? value : `${value.slice(0, cap)}\n[… ${value.length - cap} more chars]`;
 };
 
+const EDIT_VERB = /\b(fix|revert|build|add|implement|replace|remove|delete|correct|redesign|update|make|improve|create|restore|rename|refactor|continue|carry on|style|move|wire|change|edit|modify|adjust|tweak|rewrite|convert|migrate|swap|apply|undo)\b/i;
+const NO_EDIT_REQUEST = /\b(without|no)\s+(editing|changing|modifying|touching|code\s+changes?|changes?|edits?)\b|\b(do\s+not|don't|dont|never)\s+(edit|change|modify|touch|write)\b|\b(read[- ]only|dry[- ]run)\b/i;
+// Verification phrases mention "build"/"test" as nouns, not as a request to build something.
+const VERIFY_PHRASE = /\b(?:npm\s+)?(?:run|rerun|re-run|execute|kick off)\s+(?:the\s+|a\s+)?(?:build|tests?|typecheck|type[- ]check|lint|checks?|verification|human[_ ]test|dr\.? bob)\b|\b(?:verify|check|confirm|test|review|inspect|audit|diagnose|explain|show|list|summari[sz]e)\b(?:\s+(?:that|whether|if|the|this|my|it|its|your))?(?:\s+(?:fix|fixes|change|changes|build|update|updates|edit|edits|redesign|revert))?/gi;
+const POLITE_REQUEST = /^\s*(?:please\s+)?(?:can|could|would|will)\s+you\b|^\s*please\b/i;
+
+// Classifies the owner's message: a question, a request to change files, or neither (verification/informational).
+function classifyOwnerRequest(content) {
+  const text = String(content || '');
+  const politeRequest = POLITE_REQUEST.test(text);
+  const questionForm = /\?\s*$|^\s*(what|where|why|how|which|who|when|is|are|does|do|can|could|should|would|will|explain)\b/i.test(text);
+  if (NO_EDIT_REQUEST.test(text)) return { asked: questionForm && !politeRequest, wantsChange: false };
+  const editText = text.replace(VERIFY_PHRASE, ' ');
+  const wantsChange = EDIT_VERB.test(editText) && (!questionForm || politeRequest);
+  return { asked: questionForm && !wantsChange, wantsChange };
+}
+
+const COMPLETION_CLAIM = /\b(done|fixed|implemented|updated|changed|added|removed|completed|committed|reverted|restored|created|applied|finished|shipped|resolved)\b/i;
+// Only a genuine clarifying question to the owner may skip the change safeguards; "Fixed. Can you check?" is a completion claim.
+function isClarifyingQuestion(reply) {
+  const text = String(reply || '').trim();
+  return /\?\s*$/.test(text) && !COMPLETION_CLAIM.test(text);
+}
+
 function vibeSystemPrompt(limits = VIBE_LIMITS) {
   return [
     'You are Bob Builder in a live vibe-coding session with the platform owner of Field Compliance Manager (multi-tenant field-compliance SaaS: React/Vite web app in apps/web, Supabase edge functions in supabase/functions, Node control-plane modules at the repo root, tests in test/ and apps/web).',
@@ -636,9 +660,8 @@ async function runConversation({ store, session, message, workspacePath, branch,
   // Edits that actually changed workspace bytes this message; a successful-but-identical edit is not progress.
   let effectiveEdits = 0;
   let noChangeReplyCorrected = false;
-  const ownerAsked = /\?\s*$|^\s*(what|where|why|how|which|who|when|is|are|does|do|can|could|should|explain)\b/i.test(String(message.content || ''));
   // A request to alter code; verification-only or question messages may legitimately change nothing.
-  const ownerWantsChange = !ownerAsked && /\b(fix|revert|build|add|implement|replace|remove|delete|correct|redesign|update|make|improve|create|restore|rename|refactor|continue|carry on|style|move|wire)\b/i.test(String(message.content || ''));
+  const { asked: ownerAsked, wantsChange: ownerWantsChange } = classifyOwnerRequest(message.content);
   // Escalation prefers the owner-approved stronger cloud model when present, else the next distinct local one.
   const nextCandidate = () => {
     const cloudIndex = candidates.findIndex((entry, index) => index > active && entry.provider === 'ollama_cloud');
@@ -775,7 +798,7 @@ async function runConversation({ store, session, message, workspacePath, branch,
   const handoff = async (reply, model, { browser = true } = {}) => {
     await ensureTypecheck();
     if (browser) await ensureHumanTest();
-    if (!effectiveEdits && ownerWantsChange && !String(reply).includes('?')) reply = `No files changed during this message.\n\n${reply}`;
+    if (!effectiveEdits && ownerWantsChange && !isClarifyingQuestion(reply)) reply = `No files changed during this message.\n\n${reply}`;
     const walked = humanTestRan ? `\n\n${humanTestRan.infrastructure ? `Dr Bob's browser walk could not run: ${clip(humanTestRan.error, 300)}` : `Dr Bob's browser walk (fixture data, desktop): ${humanTestRan.passed || 0} passed, ${humanTestRan.failed || 0} failed, ${humanTestRan.skipped || 0} skipped${humanTestRan.warnings?.length ? `; ${humanTestRan.warnings.length} UX/request warning(s) recorded` : ''}.`}` : '';
     return lastVerification?.failed
       ? { reply: `Changes are not verified: ${lastVerification.command} failed.\n${clip(lastVerification.preview, 900)}\n${clip(reply, 8000)}`, error: true, tools, model }
@@ -859,7 +882,7 @@ async function runConversation({ store, session, message, workspacePath, branch,
     const args = call.args && typeof call.args === 'object' ? call.args : {};
     if (call.tool === 'reply' || call.tool === 'finish') {
       const replyText = String(args.message || args.summary || call.thought || '');
-      if (!executedTools && !args.blocked_reason && !ownerAsked && !replyText.includes('?') && !emptyReplyCorrected) {
+      if (!executedTools && !args.blocked_reason && !args.no_change_reason && !ownerAsked && !isClarifyingQuestion(replyText) && !emptyReplyCorrected) {
         // A reply that only promises work ("I'll continue...") before any tool ran is not an answer.
         emptyReplyCorrected = true;
         messages.push({ role: 'assistant', content: JSON.stringify({ thought: String(call.thought ?? '').slice(0, 600), tool: call.tool, args }) }, { role: 'user', content: JSON.stringify({
@@ -877,7 +900,7 @@ async function runConversation({ store, session, message, workspacePath, branch,
         }
         continue;
       }
-      if (!effectiveEdits && ownerWantsChange && !args.blocked_reason && !args.no_change_reason && !replyText.includes('?') && !noChangeReplyCorrected) {
+      if (!effectiveEdits && ownerWantsChange && !args.blocked_reason && !args.no_change_reason && !isClarifyingQuestion(replyText) && !noChangeReplyCorrected) {
         // Edits that failed or were byte-identical leave the owner's request undone; "Search for X" is not a result.
         noChangeReplyCorrected = true;
         messages.push({ role: 'assistant', content: JSON.stringify({ thought: String(call.thought ?? '').slice(0, 600), tool: call.tool, args }) }, { role: 'user', content: JSON.stringify({
@@ -1158,4 +1181,4 @@ function createVibeWorker({ supabase, deps, intervalMs = 3000, log = console }) 
   };
 }
 
-module.exports = { PROMPT_VERSION, VIBE_LIMITS, vibeBranchName, vibeWorkspacePath, vibeSystemPrompt, vibeCloudAllowed, applyVibeRouting, vibeProviderCandidates, vibeToolSchema, vibeNativeTools, ensureVibeWorkspace, commitTurn, revertLastTurn, revertRefusedChanges, branchState, createVibeStore, isPrivateVisionAddress, assertLocalVisionUrl, describeVibeImage, prepareVibeAttachmentContext, runConversation, shipSession, processVibeMessage, createVibeWorker };
+module.exports = { PROMPT_VERSION, VIBE_LIMITS, classifyOwnerRequest, isClarifyingQuestion, vibeBranchName, vibeWorkspacePath, vibeSystemPrompt, vibeCloudAllowed, applyVibeRouting, vibeProviderCandidates, vibeToolSchema, vibeNativeTools, ensureVibeWorkspace, commitTurn, revertLastTurn, revertRefusedChanges, branchState, createVibeStore, isPrivateVisionAddress, assertLocalVisionUrl, describeVibeImage, prepareVibeAttachmentContext, runConversation, shipSession, processVibeMessage, createVibeWorker };
