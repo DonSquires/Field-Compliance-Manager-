@@ -808,6 +808,22 @@ const WRITE_CAPABLE_TOOLS = new Set([
   // write-refusal guard must cover it too (an in-message "don't write" blocks it).
   'generic_write'
 ]);
+// Tools reserved for Bob Builder's coding lane. They are never available in
+// ordinary in-app operations mode, even to admiral users.
+const BUILDER_LANE_TOOLS = new Set([
+  'dispatch_flow',
+  'create_builder_job',
+  'cancel_builder_job',
+  'laptop_shell',
+  'run_human_test'
+]);
+function isToolAllowedInAgentMode(tool: string, agentMode: string) {
+  if (agentMode !== 'builder' && BUILDER_LANE_TOOLS.has(tool)) return false;
+  return true;
+}
+function filterCatalogueForAgentMode(catalogue: Array<{ tool: string }>, agentMode: string) {
+  return catalogue.filter((entry)=>isToolAllowedInAgentMode(entry.tool, agentMode));
+}
 // ── EXPLICIT WRITE-REFUSAL DETECTION (#125) ──────────────────────────────────
 // Deterministic, code-level guard: when the CURRENT user message contains an
 // explicit, unambiguous instruction NOT to write/propose/file anything this
@@ -7428,7 +7444,7 @@ serve(async (req)=>{
     //   seam via isToolEffectPermitted() (caddie.ts, called at dispatch time).
     failureStage = 'catalogue_generation';
     const caddieResult = await generateToolCatalogue(admin);
-    const catalogue = caddieResult.catalogue;
+    const catalogue = filterCatalogueForAgentMode(caddieResult.catalogue, agentWorkspaceContext.agent_mode);
     if (!caddieResult.fromAtlas) {
       console.warn(`[conductor] caddie fell back to hardcoded catalogue: ${caddieResult.errors.join('; ')}`);
     }
@@ -10945,6 +10961,56 @@ serve(async (req)=>{
     // ENFORCES at egress/consequence (§3). This does NOT weaken existing
     // enforcement — isGovernanceLocked, detectExplicitWriteRefusal, and
     // per-tool tier checks in exec functions remain as defense-in-depth.
+    if (chosenTool && !isToolAllowedInAgentMode(chosenTool, agentWorkspaceContext.agent_mode)) {
+      console.warn(`[conductor][lane] BLOCKED tool=${chosenTool} mode=${agentWorkspaceContext.agent_mode}: builder-lane tool in operations mode`);
+      await emitEvent("tool_lane_blocked", {
+        blocked_tool: chosenTool,
+        agent_mode: agentWorkspaceContext.agent_mode
+      });
+      const blockedMeta = {
+        tool: chosenTool,
+        outcome: 'lane_blocked_by_conductor',
+        blocked_tool: chosenTool,
+        enforcement_reason: 'builder_lane_only',
+        agent_mode: agentWorkspaceContext.agent_mode,
+        answer_options: ['Open Builder control room', 'Stay in operations mode'],
+        navigation_actions: [{ label: 'Open Builder control room', path: '/admin/builder' }]
+      };
+      const blockedReply = 'That action is reserved for Bob Builder. In-app Bob operations can inspect and advise, but build/dispatch/laptop actions run only in the Builder lane.';
+      const { reply: enforcedReply, safetyAlerts: enforcedAlerts, forbiddenSetApplied: enfForbidden, tier0IdentitySurfaced: enfTier0 } = applyEgressSweep(blockedReply, caps, blockedMeta);
+      const enfDisclosure = conductorDeriveDisclosureTier({
+        safetyAlerts: enforcedAlerts,
+        forbiddenSetApplied: enfForbidden,
+        tier0IdentitySurfaced: enfTier0,
+        isAggregate: false,
+        crossOrgUnrestricted: caps.crossOrgUnrestricted,
+        quietDenial: false
+      });
+      await persist(admin, orgId, conversationId, [
+        {
+          role: 'user',
+          content: message || (att ? `[uploaded ${att.name}]` : ''),
+          metadata: { intent: 'user' }
+        },
+        {
+          role: 'assistant',
+          content: enforcedReply,
+          metadata: {
+            intent: 'lane_blocked_by_conductor',
+            route_selected: 'answer',
+            blocked_action: chosenTool,
+            agent_mode: agentWorkspaceContext.agent_mode
+          }
+        }
+      ]);
+      return respond(buildStructuredResponse({
+        reply: enforcedReply,
+        route: 'answer',
+        startTime,
+        meta: blockedMeta,
+        disclosureTier: enfDisclosure
+      }));
+    }
     if (chosenTool && !isToolEffectPermitted(chosenTool, caps)) {
       const effectClass = classifyToolEffect(chosenTool);
       console.warn(`[conductor][enforcement] BLOCKED tool=${chosenTool} effect_class=${effectClass} tier=${caps.tier}: tool effect not permitted for this caller`);

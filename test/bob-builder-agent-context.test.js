@@ -14,6 +14,10 @@ test('Bob Builder accepts only descriptive workspace context and retains governa
   assert.match(source, /BUILDER_WORKSPACE_CONTEXT/);
   assert.match(source, /Builder mode does not grant shell access, repository write access, deployment authority, extra tools, or permission to bypass approval gates/);
   assert.match(source, /\.\.\.agentWorkspaceContext/);
+  assert.match(source, /const BUILDER_LANE_TOOLS = new Set\(\[/);
+  assert.match(source, /'create_builder_job'/);
+  assert.match(source, /filterCatalogueForAgentMode\(caddieResult\.catalogue, agentWorkspaceContext\.agent_mode\)/);
+  assert.match(source, /tool_lane_blocked/);
 });
 
 test('Bob Operations preserves capped page context and Studio artifact provenance without granting authority', () => {

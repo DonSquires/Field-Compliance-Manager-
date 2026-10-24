@@ -46,6 +46,19 @@ GitHub support automation, expanded owner decision 2026-10-24:
   harness/navigation passed 6/6 without retries. Only the existing Overview
   unit guard and screenshot remain red (373/374 unit files, 15/16 smoke tests).
 
+Builder lane separation hardening, 2026-10-24:
+
+- Enforce lane boundaries in the Conductor: Builder-only tools
+  (`dispatch_flow`, `create_builder_job`, `cancel_builder_job`,
+  `laptop_shell`, `run_human_test`) are filtered from operations-mode
+  catalogues and blocked server-side if selected outside Builder mode.
+- Preserve in-app operations workflow: users can still converse with Bob for
+  operational read/reasoning/proposal work; build execution stays in Bob
+  Builder mode/lane.
+- Prevent release interruptions of active Vibe work: runtime-idle checks now
+  include pending/claimed `builder_vibe_messages`, so control-plane deploys
+  defer while Vibe turns are in flight.
+
 Vibe verification repair (vibe-v14), 2026-10-24:
 
 - Before: recent shipped session `b237fe39` tried to load Playwright through

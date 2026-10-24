@@ -4,18 +4,20 @@ async function checkRuntimeIdle({ url, key, healthUrl = 'http://172.16.0.1:8091/
   if (!url || !key) return { idle: false, reason: 'activity credentials unavailable' };
   const headers = { apikey: key, Authorization: `Bearer ${key}` };
   try {
-    const [workers, models, health] = await Promise.all([
+    const [workers, models, vibeMessages, health] = await Promise.all([
       fetchImpl(`${url.replace(/\/+$/, '')}/rest/v1/builder_worker_runs?select=id&status=in.(running,queued)&limit=1`, { headers, signal: AbortSignal.timeout(15000) }),
       fetchImpl(`${url.replace(/\/+$/, '')}/rest/v1/builder_model_runs?select=id&status=in.(running,queued)&limit=1`, { headers, signal: AbortSignal.timeout(15000) }),
+      fetchImpl(`${url.replace(/\/+$/, '')}/rest/v1/builder_vibe_messages?select=id&status=in.(pending,claimed)&limit=1`, { headers, signal: AbortSignal.timeout(15000) }),
       fetchImpl(healthUrl, { signal: AbortSignal.timeout(30000) }),
     ]);
-    if (![workers, models, health].every(response => response.ok)) return { idle: false, reason: 'activity endpoint unavailable' };
-    const [workerRows, modelRows, runtime] = await Promise.all([workers.json(), models.json(), health.json()]);
-    if (!Array.isArray(workerRows) || !Array.isArray(modelRows) || !Number.isInteger(runtime?.runningBuilderJobs) || runtime.runningBuilderJobs < 0) {
+    if (![workers, models, vibeMessages, health].every(response => response.ok)) return { idle: false, reason: 'activity endpoint unavailable' };
+    const [workerRows, modelRows, vibeRows, runtime] = await Promise.all([workers.json(), models.json(), vibeMessages.json(), health.json()]);
+    if (!Array.isArray(workerRows) || !Array.isArray(modelRows) || !Array.isArray(vibeRows) || !Number.isInteger(runtime?.runningBuilderJobs) || runtime.runningBuilderJobs < 0) {
       return { idle: false, reason: 'activity response malformed' };
     }
     if (workerRows.length) return { idle: false, reason: 'verification worker in flight' };
     if (modelRows.length) return { idle: false, reason: 'model run in flight' };
+    if (vibeRows.length) return { idle: false, reason: 'vibe turn in flight' };
     if (runtime.runningBuilderJobs) return { idle: false, reason: 'runtime execution in flight' };
     return { idle: true, reason: 'no recorded worker, model or runtime execution in flight' };
   } catch {
