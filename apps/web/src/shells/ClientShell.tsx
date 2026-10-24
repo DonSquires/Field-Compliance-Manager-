@@ -106,7 +106,7 @@ export function ClientShell() {
   );
 
   return (
-    <div className="client-shell" data-theme="light">
+    <div className="client-shell" data-theme="dark">
       <aside className={`client-shell-sidebar ${collapsed ? 'is-collapsed' : ''}`}>
         {navigation}
         <button type="button" className="client-collapse-button" onClick={() => setCollapsed((value) => !value)} title={collapsed ? 'Expand navigation' : 'Collapse navigation'}>

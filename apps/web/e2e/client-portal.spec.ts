@@ -18,6 +18,8 @@ test('a transparency-only client sees what was delivered at its places, in plain
     }
   });
   await signInAsClient(page);
+  await expect(page.locator('.client-shell')).toHaveAttribute('data-theme', 'dark');
+  await expect(page.locator('.client-shell')).toHaveCSS('background-color', 'rgb(7, 19, 27)');
 
   // Overview: the delivered-work panel sits first, before observations the agreement does not include.
   await expect(page.getByRole('heading', { name: 'Service overview' })).toBeVisible();

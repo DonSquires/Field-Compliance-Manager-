@@ -912,7 +912,7 @@ const AdminShell: React.FC = () => {
   </details>;
   if (isVideoWall || isStaffProfilePopout || isVehicleSearchPopout) {
     return (
-      <div className="admin-shell admin-shell-video-wall">
+      <div className="admin-shell admin-shell-video-wall" data-theme="dark">
         <main data-app-content className={`admin-shell-main ${isVideoWall ? 'is-video-wall' : isVehicleSearchPopout ? 'is-vehicle-search-popout' : 'is-staff-profile-popout'}`}>
           <LazyPageRecovery key={`${activePage}:${fieldOpsSubArea}`} pageKey={`${activePage}:${fieldOpsSubArea}`}>
             <React.Suspense fallback={<LazyPageFallback />}>{renderPage()}</React.Suspense>
@@ -924,7 +924,7 @@ const AdminShell: React.FC = () => {
 
   if (!isMobile) {
     return (
-      <div className="admin-shell admin-shell-desktop" data-theme="light">
+      <div className="admin-shell admin-shell-desktop" data-theme="dark">
         <aside className={`admin-sidebar ${sidebarCollapsed ? 'is-collapsed' : ''}`}>
           <div className="admin-sidebar-brand">
             <img
@@ -1005,7 +1005,7 @@ const AdminShell: React.FC = () => {
   }
 
   return (
-    <div className="admin-shell admin-shell-mobile" data-theme="light">
+    <div className="admin-shell admin-shell-mobile" data-theme="dark">
       <header className="admin-mobile-header">
         <div className="admin-mobile-brand">
           <img

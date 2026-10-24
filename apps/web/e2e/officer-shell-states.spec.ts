@@ -29,6 +29,8 @@ test.describe('Officer shell states and chrome', () => {
       return route.fallback();
     });
     await signInAsOfficer(page, '/officer');
+    await expect(page.locator('.officer-shell')).toHaveAttribute('data-theme', 'dark');
+    await expect(page.locator('.officer-shell')).toHaveCSS('background-color', 'rgb(7, 19, 27)');
 
     // Header in standby state shows "Officer operations" (attached in DOM; on small mobile screens <=410px, small subtitle is hidden responsively)
     const header = page.locator('.officer-shell-header');

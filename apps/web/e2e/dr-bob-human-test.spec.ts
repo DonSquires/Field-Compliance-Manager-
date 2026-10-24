@@ -10,6 +10,20 @@ const password = liveMode ? (process.env.GRANDMASTER_TEST_PASSWORD || '') : 'pla
 const liveOperatingOrganizationId = process.env.HUMAN_TEST_OPERATING_ORG_ID || '';
 const liveAdminRoute = process.env.HUMAN_TEST_ADMIN_ROUTE || '';
 
+function contrastRatio(foreground: string, background: string): number {
+  const channels = (color: string) => {
+    const values = color.match(/\d+(?:\.\d+)?/g)?.slice(0, 3).map(Number);
+    if (!values || values.length !== 3) throw new Error(`Cannot measure contrast for ${color}`);
+    return values.map((value) => {
+      const normalized = value / 255;
+      return normalized <= 0.03928 ? normalized / 12.92 : ((normalized + 0.055) / 1.055) ** 2.4;
+    });
+  };
+  const luminance = (color: string) => channels(color).reduce((sum, value, index) => sum + value * [0.2126, 0.7152, 0.0722][index], 0);
+  const values = [luminance(foreground), luminance(background)].sort((a, b) => b - a);
+  return (values[0] + 0.05) / (values[1] + 0.05);
+}
+
 async function openTarget(page: Parameters<typeof installSupabaseFixtures>[0], path: string) {
   await page.goto(liveMode ? `${liveBaseUrl}${path}` : path);
   await page.waitForLoadState('domcontentloaded');
@@ -95,6 +109,28 @@ test.describe("Dr. Bob's human browser test", () => {
     await session.step('open safe tabs and type into the first safe field', () => session.walkSafeTabsAndFields());
     await session.observe('final rendered state');
     await session.finish();
+  });
+
+  test('observes readable text in the highlighted Admin Hub next action', async ({ page }, testInfo) => {
+    test.skip(liveMode, 'This focused contrast check uses the governed local fixture.');
+    const session = new HumanTestSession(page, testInfo);
+    await signInAsAdmin(page, '/admin/hub');
+    const selectedRow = page.locator('.admin-queue-row.is-next').first();
+    await expect(selectedRow).toBeVisible();
+    await session.observe('Admin Hub highlighted next action');
+    const textSamples = await selectedRow.evaluate((row) => {
+      const background = window.getComputedStyle(row).backgroundColor;
+      return [...row.querySelectorAll('strong, div > span, time')].map((element) => ({
+        text: (element.textContent ?? '').trim(),
+        foreground: window.getComputedStyle(element).color,
+        background,
+      }));
+    });
+    await session.finish();
+    expect(textSamples.length).toBeGreaterThanOrEqual(3);
+    for (const sample of textSamples) {
+      expect(contrastRatio(sample.foreground, sample.background), `${sample.text} contrast`).toBeGreaterThanOrEqual(4.5);
+    }
   });
 
   test('observes one live admin route in the requested operating organisation', async ({ page }, testInfo) => {

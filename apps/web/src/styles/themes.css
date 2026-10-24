@@ -1,23 +1,4 @@
-/* Optional presentation themes. Data fetching and API contracts are unchanged. */
-:root,
-[data-theme='dark'] {
-  color-scheme: dark;
-  --color-bg-primary: #07131b;
-  --color-bg-secondary: #0c202b;
-  --color-bg-elevated: #112c3a;
-  /* table headers (global thead) and quiet panels; global.css defaults this to a near-white neutral */
-  --color-bg-tertiary: #0f2531;
-  --color-text-primary: #f5f9fb;
-  --color-text-secondary: #b8cad4;
-  --color-text-muted: #9bb1bf;
-  --color-border: #244654;
-  --color-border-strong: #396575;
-}
-
-[data-theme='light'] {
-  color-scheme: light;
-  --color-bg-base: #f1f4f1;
-}
+/* Theme values are global design tokens in tokens.css. */
 
 .admin-shell[data-theme='light'] .debrief-followup {
   color: #17211d;
@@ -575,7 +556,7 @@
   --color-accent: #0033cc;
 }
 
-/* Operations and client surfaces use the light scheme; field shells remain dark. */
+/* Legacy light-only overrides are dormant; every app shell opts into dark tokens. */
 .admin-shell[data-theme='light'] .workflow-rail,
 .admin-shell[data-theme='light'] .operating-spine {
   border-color: var(--color-border);

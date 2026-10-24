@@ -1,18 +1,18 @@
-.workflow-rail { display: flex; align-items: center; gap: 12px; max-width: 1440px; margin: 0 auto 12px; padding: 6px 10px; border: 1px solid #2b414d; border-radius: 4px; background: #0a1720; overflow: auto; }
-.workflow-rail-label { flex: 0 0 auto; color: #a8bcc7; font-size: 11px; font-weight: 700; text-transform: uppercase; }
+.workflow-rail { display: flex; align-items: center; gap: 12px; max-width: 1440px; margin: 0 auto 12px; padding: 6px 10px; border: 1px solid var(--color-border); border-radius: var(--radius-sm); color: var(--color-text-primary); background: var(--color-bg-surface); overflow: auto; }
+.workflow-rail-label { flex: 0 0 auto; color: var(--color-text-muted); font-size: 11px; font-weight: 700; text-transform: uppercase; }
 .workflow-rail > div, .workflow-rail-step { display: flex; align-items: center; gap: 5px; }
 .workflow-rail > div { min-width: max-content; }
-.workflow-rail-step > svg { color: #64748b; }
-.workflow-rail button { display: flex; align-items: center; gap: 6px; min-height: 28px; padding: 0 8px; border: 0; border-radius: 3px; color: #b8c6d0; background: transparent; font-size: 12px; cursor: pointer; }
-.workflow-rail button i { display: grid; place-items: center; width: 16px; height: 16px; border: 1px solid #64748b; border-radius: 50%; font-size: 10px; font-style: normal; }
-.workflow-rail button.is-current { color: #f1f5f9; background: #334155; }
-.workflow-rail button:focus-visible, .workflow-rail-select:focus-visible { outline: 2px solid #94a3b8; outline-offset: -2px; }
-.workflow-rail-select { display: none; min-width: 0; min-height: 44px; border: 1px solid #64748b; border-radius: 3px; color: #e2e8f0; background: #17212e; font: inherit; }
-.admin-shell[data-theme] nav.workflow-rail { flex: 0 0 auto; max-width: none; margin: 0 0 10px; padding: 0 8px; border-color: var(--console-hairline); border-radius: 0; color: #475569; background: #f8fafc; }
-.admin-shell[data-theme] nav.workflow-rail .workflow-rail-label { color: #475569; background: transparent; }
-.admin-shell[data-theme] nav.workflow-rail button { color: #475569; }
-.admin-shell[data-theme] nav.workflow-rail button.is-current { color: #1e293b; background: var(--console-action-soft); }
-.admin-shell[data-theme] nav.workflow-rail .workflow-rail-select { color: #334155; background: #fff; }
+.workflow-rail-step > svg { color: var(--color-text-muted); }
+.workflow-rail button { display: flex; align-items: center; gap: 6px; min-height: 28px; padding: 0 8px; border: 0; border-radius: var(--radius-xs); color: var(--color-text-secondary); background: transparent; font-size: 12px; cursor: pointer; }
+.workflow-rail button i { display: grid; place-items: center; width: 16px; height: 16px; border: 1px solid var(--color-border-strong); border-radius: 50%; font-size: 10px; font-style: normal; }
+.workflow-rail button.is-current { color: var(--color-text-primary); background: var(--color-bg-hover); }
+.workflow-rail button:focus-visible, .workflow-rail-select:focus-visible { outline: 2px solid var(--color-brand-primary); outline-offset: -2px; }
+.workflow-rail-select { display: none; min-width: 0; min-height: var(--touch-target-officer); border: 1px solid var(--color-border-strong); border-radius: var(--radius-xs); color: var(--color-text-primary); background: var(--color-bg-surface); font: inherit; }
+.admin-shell[data-theme] nav.workflow-rail { flex: 0 0 auto; max-width: none; margin: 0 0 10px; padding: 0 8px; border-color: var(--console-hairline); border-radius: 0; color: var(--console-text); background: var(--console-surface-raised); }
+.admin-shell[data-theme] nav.workflow-rail .workflow-rail-label { color: var(--console-muted); background: transparent; }
+.admin-shell[data-theme] nav.workflow-rail button { color: var(--console-muted); }
+.admin-shell[data-theme] nav.workflow-rail button.is-current { color: var(--color-text-primary); background: var(--console-action-soft); }
+.admin-shell[data-theme] nav.workflow-rail .workflow-rail-select { color: var(--console-text); background: var(--console-surface); }
 @media (max-width: 700px) {
   .workflow-rail { margin: 0 10px 10px; }
   .workflow-rail > div { display: none; }
