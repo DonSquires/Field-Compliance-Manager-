@@ -155,8 +155,8 @@ serve(async (req)=>{
       const { data, error } = await admin.rpc('bob_atlas_gap_report', {
         p_limit: limit,
         p_offset: offset,
-        p_include_columns: body.include_columns,
-        p_include_unknown_exercise: body.include_unknown_exercise
+        p_include_columns: body.include_columns === true,
+        p_include_unknown_exercise: body.include_unknown_exercise === true
       });
       if (error) return json({
         error: error.message

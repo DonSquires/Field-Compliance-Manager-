@@ -8,6 +8,69 @@ detailed backlogs (`ENTERPRISE_SAAS_TODO.md`, `PROTOTYPE_GAP_AUDIT.md`,
 Completion language is strict, as in the lineage: **merged ≠ deployed ≠
 glass-proven.** A workstream item is done only when its evidence gate is met.
 
+Vibe verification repair (vibe-v14), 2026-10-24:
+
+- Before: recent shipped session `b237fe39` tried to load Playwright through
+  Vitest, replaced typed Playwright imports with `any`, and added no-op
+  placeholder comments while repairing syntax repeatedly. Current main
+  reproduced 24 implicit-any TypeScript errors. The tool loop also counted
+  each lint rerun toward the identical-call ceiling even after a real repair.
+  Ship as PR published without a fresh check despite failed receipts.
+- During: restore static typed imports and exclude `e2e/**` from Vitest
+  discovery (Playwright still discovers those tests). Reject the wrong
+  Vitest/e2e command with a specific correction. Reset verification-call
+  repetition counts only after a successful edit actually changes source;
+  no-op/failed edits and unchanged retry loops do not reset them.
+  The read-only action policy explicitly guards suspend/restore/reactivate
+  and related lifecycle controls; labelled data is tested only through
+  targeted, governed scenarios. Restore Atlas's explicit boolean gap-report
+  arguments and the existing Overview screenshot identity: passing raw
+  request values and renaming a missing snapshot were not valid repairs.
+  Register `human_test` before generating the model's JSON/native tool
+  definitions (it previously existed only in the dispatcher). A successful
+  browser run supersedes a misrouted Vitest/e2e attempt without ignoring an
+  unrelated genuine failed check.
+  Browser inputs now include harness/config files and directly edited
+  Playwright specs; a fully skipped walk or error findings cannot certify
+  success. Fresh pre-publication lint, changed root test/syntax checks,
+  unresolved recorded checks and applicable browser verification must pass
+  against the unchanged branch head before any push/PR creation. Each
+  check posts a receipt bound to that head. Unavailable browser verification
+  blocks publication; this is stricter than the older non-blocking
+  infrastructure report at conversational handoff.
+- Training: runtime instructions and the enterprise UX training explain
+  before/during/after workflow assertions, selected state, Back/Forward,
+  persistence, downstream effects and lifecycle tests. Text uses `Bob Test`,
+  numbers use `999`, dates are scenario-chosen; constrained fixture values
+  need a recorded exception. Test prefixes alone never authorise a write or
+  identify an existing record as safe to archive/suspend.
+- Evidence scope: Atlas reads confirm Vibe session/message/attachment
+  read/write edges and the claim RPC. Component downstream flow is distinct
+  from the empty component FK reach; exercised is still null. Synthetic
+  model probes and current model-role recommendations are recorded in
+  [the private compute assessment](BOB_PRIVATE_COMPUTE_ASSESSMENT.md).
+  Training is not proof that generic walks now test all workflows.
+  Validation: the final bounded root suite passed 1,559 with 8 skipped
+  (unbounded concurrency first caused a transient
+  control-plane startup timeout; its isolated 23-test suite passed too).
+  TypeScript and 373/374 web unit files passed; one existing Overview CSS
+  guard still expects the old 48px header instead of the redesigned 52px.
+  Five focused browser checks passed, and 4/5 Overview/dispatch checks passed:
+  its existing screenshot differs by 70%. No screenshot, tolerance, CSS
+  guard assertion or product design is silently changed to bless that output.
+  Dr Bob still warns about 27 unreadable Overview text elements. Those
+  product/visual findings remain open for Bob's governed redesign workflow.
+- Release diagnosis: the public Vercel build was `a68d76d0`, while the VPS
+  release marker remained `6f4a7913`. Live read-only catalog/ledger inspection
+  confirmed `20241022120000` was not applied: it guessed four RPC signatures
+  and attempted unjustified anonymous/authenticated maintenance grants.
+  Preserve that unapplied migration identity as a no-op; do not implement
+  those grants. The release host also reproduced a missing Linux CLI binary
+  from unpinned `npx supabase`. Explicitly selecting the locked CLI 2.115.0
+  and its matching native package passed `--version` on the host; both
+  deploy and ledger repair now use that locked helper. No unmerged
+  migration, function deployment or runtime restart was performed.
+
 Vibe browser verification with Dr Bob's walk (vibe-v13), 2026-10-22:
 
 - Before: Vibe accepted a handoff after the TypeScript check alone. The live

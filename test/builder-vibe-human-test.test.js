@@ -5,7 +5,7 @@ const assert = require('node:assert/strict');
 const fs = require('node:fs');
 const os = require('node:os');
 const path = require('node:path');
-const { HUMAN_SPEC, humanTestSpecs, runVibeHumanTest, summarizeHumanReport, uiChangedFiles } = require('../builder-vibe-human-test');
+const { HUMAN_SPEC, humanTestSpecs, humanTestInputFiles, runVibeHumanTest, summarizeHumanReport, uiChangedFiles } = require('../builder-vibe-human-test');
 const { dockerArguments, workerCommand, workerNetwork } = require('../worker-executor');
 
 const attachment = findings => ({ name: 'human-test-report.json', contentType: 'application/json', body: Buffer.from(JSON.stringify({ findings })).toString('base64') });
@@ -61,6 +61,31 @@ function workspace() {
 test('specs always include Dr Bob\'s walk and only existing, well-formed spec paths', () => {
   const ws = workspace();
   assert.deepEqual(humanTestSpecs(ws, []), [HUMAN_SPEC]);
+});
+
+test('browser evidence is invalidated by harness/config changes and runs directly edited specs', t => {
+  const ws = workspace();
+  t.after(() => fs.rmSync(path.dirname(ws), { recursive: true, force: true }));
+  fs.writeFileSync(path.join(ws, 'apps/web/e2e/human-test-runner.spec.ts'), '');
+  const files = ['apps/web/e2e/human-test-runner.spec.ts', 'apps/web/e2e/fixtures.ts', 'apps/web/vite.config.ts', 'apps/web/src/a.css', 'docs/a.md'];
+  assert.deepEqual(humanTestInputFiles(files), files.slice(0, 4));
+  assert.deepEqual(humanTestSpecs(ws, files), [HUMAN_SPEC, 'e2e/human-test-runner.spec.ts']);
+});
+
+for (const kind of ['skipped', 'findings']) test(`a successful worker exit cannot certify ${kind === 'skipped' ? 'an entirely skipped walk' : 'a report with error findings'}`, async t => {
+  const ws = workspace();
+  t.after(() => fs.rmSync(path.dirname(ws), { recursive: true, force: true }));
+  const execute = async options => {
+    const data = { errors: [], suites: [{ specs: [{
+      file: 'a.spec.ts', title: 'walk', tests: [{ status: kind === 'skipped' ? 'skipped' : 'expected', results: [{
+        attachments: [attachment(kind === 'findings' ? [{ severity: 'error', message: 'broken interaction' }] : [])],
+      }] }],
+    }] }] };
+    fs.writeFileSync(path.join(options.artifactDir, 'results.json'), JSON.stringify(data));
+    return { status: 'succeeded' };
+  };
+  const result = await runVibeHumanTest({ workspacePath: ws, image: 'img', execute });
+  assert.equal(result.ok, false);
 });
 
 test('runs the vibe-human-qa worker offline and maps its report back to the host', async () => {

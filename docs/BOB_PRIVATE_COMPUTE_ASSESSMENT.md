@@ -4,6 +4,82 @@ Assessment: 2026-10-22 (NZ work session). No purchase, provisioning, new inferen
 endpoint, default model change or source-code egress is authorised by this report.
 Read with [credential boundaries](BOB_CREDENTIAL_BOUNDARIES.md).
 
+## Model-role review, 2026-10-24
+
+This section supersedes the older blanket statement below that Ollama Cloud
+is forbidden: the owner's 2026-10-22 approval and credential-boundary controls
+allow gated Ollama Cloud escalation. Current attachments remain private.
+This review did **not** send repository source, real documents, emails,
+screenshots, production records, credentials or owner messages to a model.
+No new model was installed and production routing/defaults were not changed.
+
+### Observed runtime and bounded screening
+
+Read-only checks found:
+
+- GPU: coder 7B (4.68 GB) and Qwen3 8B (5.23 GB) are installed and within
+  the configured 6 GiB weight budget. Coder 14B (8.99 GB) and GPT-OSS 20B
+  (13.79 GB) are installed but too large for that budget. Do not disable it.
+- VPS CPU: coder 7B, Qwen3 Coder 30B, Llama 3.1 8B, GPT-OSS 20B,
+  Moondream and Nomic embeddings are installed. The installed 20B is not
+  in the current VPS allowlist. Installed does not mean selected or fast.
+- Cloud allowlist currently starts GPT-OSS 120B, DeepSeek V4 Pro, then
+  Nemotron 3 Ultra. Recent Vibe receipts show GPT-OSS prose-only escalation
+  and DeepSeek repair attempts, not reliable complete-job acceptance.
+
+One direct Ollama Cloud API screening used invented `src/add.js` code only:
+first return a JSON `read_file` call; then, given a synthetic read result,
+return an exact `replace_in_file` call fixing subtraction to addition.
+The replacement was applied in memory and evaluated against `add(2,3) = 5`.
+Requests used JSON mode, temperature 0, thinking disabled, 8K context and
+a 4096-token cap. Calls were concurrent across models. Timings are for two
+requests, not tokens/second or a statistically meaningful ranking.
+
+| Exact direct-API model | Result | Total elapsed | Interpretation |
+| --- | --- | --- | --- |
+| `deepseek-v4.1-flash` | 2/2 valid calls; arithmetic assertion passed | 1.11 s | Promising fast coding/investigation candidate; not a production qualification. |
+| `deepseek-v4-pro:0813` | 2/2 valid calls; arithmetic assertion passed | 2.21 s | Existing strong author/recovery candidate. |
+| `gpt-oss:120b` | 2/2 valid calls; arithmetic assertion passed | 2.67 s | Existing planning/review candidate; the probe does not erase live prose-only failures. |
+| `glm-5.3` | First response was not a parseable JSON object | 2.15 s | Do not promote based on the advertised coding claim. |
+| `glm-5.3-flash` | First response was not a parseable JSON object | 2.78 s | Same; investigate protocol compatibility before considering routing. |
+
+The probe does not execute the real gateway, long session compaction,
+large-context edits, independent review, browser acceptance or deployment.
+Retest through those paths before promoting a new candidate. Catalogue tags
+such as `:cloud` used by a local Ollama client are not necessarily the exact
+direct cloud API identifiers; validate both availability and account access.
+
+### Recommended workforce, not a model for every integration
+
+| Work | Candidate and reason | Execution/evidence boundary |
+| --- | --- | --- |
+| Multi-file coding and difficult recovery | Existing DeepSeek V4 Pro; trial V4.1 Flash for bounded edits | Real tool calls, exact diff, lint/tests and browser evidence; catalogue claims are insufficient. |
+| Planning, investigation, task decomposition | GPT-OSS 120B; compare V4 Pro on representative briefs | Schema/Atlas-grounded plans; acknowledge unbuilt paths and validator failures. |
+| Small private subagent work | Installed coder 7B or Qwen3 8B | One bounded read/edit/check task, admitted within GPU memory/concurrency limits; no autonomous agent spawning is added by a model choice. |
+| Independent verification | A different model family from the author, e.g. GPT-OSS after DeepSeek | Deterministic CI/type checks/browser assertions remain authoritative; self-review is not independent review. |
+| Research | General reasoning model plus governed web-research tool | Official sources, dates and exact claims; a language model alone is not live web search. No private data in queries. |
+| CI, CLI, Supabase and VPS | Same qualified coding/reasoning models | Narrow allowlisted tools, caller authority, audited approval paths, migration/deployment receipts. No model needs raw infrastructure credentials. |
+| Email and document analysis | Private Qwen3 8B for extracted text; deterministic PDF/DOCX/XLSX extraction first | Synthetic/test recipients only for tests, no unapproved sends; preserve source locations, confidence and provenance. |
+| Screenshot/image analysis and visual verification | Existing private Moondream; trial `qwen3-vl:4b` (3.3 GB package) | Private-only image path; verify actual capability, OCR accuracy and runtime fit before installing/switching. An image model does not replace DOM, contrast and browser tests. |
+| Embeddings/retrieval | Existing Nomic embeddings | Retrieval only, not an author, planner or verifier. |
+| Larger private author | Qwen3 Coder 30B or Qwen3.8 27B only on suitable hardware | Packages are approximately 19/18 GB before KV cache/runtime. Not suitable for the present laptop's 6 GiB model-weight budget; CPU evidence below remains relevant. |
+
+### Official catalogue evidence
+
+Retrieved 2026-10-24 from Ollama (publisher). Pages show relative update ages,
+not stable exact publication dates; no precise publication date is inferred.
+These are vendor descriptions, **not independently verified benchmark ranks**.
+
+| Source | Exact claim supported |
+| --- | --- |
+| [Ollama search](https://ollama.com/search) | Currently lists coding/agentic, vision, embedding and decision-model families; filter by actual task and capabilities. |
+| [DeepSeek V4.1 Flash tags](https://ollama.com/library/deepseek-v4.1-flash/tags) | Cloud model, tools/thinking/vision, advertised 1M context; includes dated `1017-cloud` tag. |
+| [GLM 5.3 tags](https://ollama.com/library/glm-5.3/tags) / [Flash tags](https://ollama.com/library/glm-5.3-flash/tags) | Advertised tools/thinking and 1M cloud context; Flash also advertises vision. Our JSON screening did not pass. |
+| [Qwen3 Coder tags](https://ollama.com/library/qwen3-coder/tags) | 30B Q4 package about 19 GB; tools; advertised 256K model context. |
+| [Qwen3.8 tags](https://ollama.com/library/qwen3.8/tags) | 27B package about 18 GB; text/image, tools/thinking; advertised 256K model context. |
+| [Qwen3 VL tags](https://ollama.com/library/qwen3-vl/tags) | 4B package about 3.3 GB, 8B about 6.2 GB; text/image and tools. The 8B is close to the 6 GiB weight cap: verify exact byte size and total runtime fit rather than equating GB with GiB. |
+| [GPT-OSS tags](https://ollama.com/library/gpt-oss/tags) | Tools/thinking; 20B/120B and cloud variants. |
+
 ## Evidence and its limits
 
 Before: Vibe runs on the owner's GPU workstation or VPS. Hosted Ollama and

@@ -453,6 +453,9 @@ function createTools({ workspacePath, repoRoot, lane, supabase, limits, log, gen
   const runs = [];
   const run = (command) => {
     const text = String(command ?? '').trim();
+    if (/^npm (?:run test|test) --prefix apps\/web -- /.test(text) && /(?:^|[\s/])e2e\//.test(text)) {
+      return { error: 'Wrong test runner: e2e/ specs use Playwright, not Vitest. Use human_test in Vibe or the browser verification worker. Do not rewrite Playwright imports or assertions to make Vitest load them.' };
+    }
     if (/^npm (?:i|install)\b/.test(text)) {
       return { error: 'command not allowed in this lane: dependency installation is blocked; use the allowlisted npm run/npm test commands and report missing tooling as a workspace issue' };
     }
