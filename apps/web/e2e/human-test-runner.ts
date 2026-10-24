@@ -243,20 +243,50 @@ export class HumanTestSession {
   }
 
   async fillSafeField(): Promise<boolean> {
-    const field = this.page.locator('input:visible, textarea:visible').filter({ hasNot: this.page.locator('[type="password"]') }).first();
-    if (!(await field.isVisible({ timeout: 1000 }).catch(() => false))) return false;
-    const type = (await field.getAttribute('type') ?? 'text').toLowerCase();
-    if (['password', 'file', 'hidden', 'checkbox', 'radio', 'button', 'submit'].includes(type)) return false;
-    const name = `${await field.getAttribute('aria-label') ?? ''} ${await field.getAttribute('placeholder') ?? ''} ${await field.getAttribute('name') ?? ''}`.toLowerCase();
-    let value = SAFE_SAMPLE_VALUES.text;
-    if (type === 'date') value = '2026-09-12';
-    else if (type === 'datetime-local') value = '2026-09-12T10:00';
-    else if (type === 'time') value = '10:00';
-    else if (type === 'number' || name.includes('number')) value = SAFE_SAMPLE_VALUES.number;
-    else if (type === 'email' || name.includes('email')) value = SAFE_SAMPLE_VALUES.email;
-    else if (name.includes('search')) value = SAFE_SAMPLE_VALUES.search;
-    await field.fill(value);
-    console.log(`[HUMAN TYPE] ${name.trim() || 'field'} (${type}) = ${value}`);
+    const fields = this.page.locator('input:visible, textarea:visible, select:visible').filter({ hasNot: this.page.locator('[type="password"]') });
+    const count = await fields.count();
+    let filled = false;
+    for (let index = 0; index < count; index += 1) {
+      const field = fields.nth(index);
+      if (!(await field.isVisible({ timeout: 500 }).catch(() => false))) continue;
+      const tag = (await field.evaluate((element) => element.tagName.toLowerCase()).catch(() => 'input'));
+      const type = ((await field.getAttribute('type')) ?? 'text').toLowerCase();
+      if (['password', 'file', 'hidden', 'checkbox', 'radio', 'button', 'submit'].includes(type)) continue;
+      const name = `${await field.getAttribute('aria-label') ?? ''} ${await field.getAttribute('placeholder') ?? ''} ${await field.getAttribute('name') ?? ''}`.toLowerCase();
+      if (tag === 'select') {
+        const options = field.locator('option');
+        const optionCount = await options.count();
+        if (optionCount > 1) {
+          await field.selectOption({ index: 1 });
+          filled = true;
+          console.log(`[HUMAN TYPE] ${name.trim() || 'select'} (select) = first option`);
+        }
+        continue;
+      }
+      let value = SAFE_SAMPLE_VALUES.text;
+      if (type === 'date') value = '2026-09-12';
+      else if (type === 'datetime-local') value = '2026-09-12T10:00';
+      else if (type === 'time') value = '10:00';
+      else if (type === 'number' || name.includes('number')) value = SAFE_SAMPLE_VALUES.number;
+      else if (type === 'email' || name.includes('email')) value = SAFE_SAMPLE_VALUES.email;
+      else if (name.includes('search')) value = SAFE_SAMPLE_VALUES.search;
+      await field.fill(value);
+      filled = true;
+      console.log(`[HUMAN TYPE] ${name.trim() || 'field'} (${type}) = ${value}`);
+    }
+    return filled;
+  }
+
+  async followThroughSafeSubmit(): Promise<boolean> {
+    const proceed = this.page.locator('button:visible').filter({ hasText: /^(save|submit|create|add|next|continue|confirm|apply|send|publish|register|record|post|issue|invite|link|connect|enable|activate|start|complete|finish|approve|accept|resolve|acknowledge|claim|assign|update|run|verify|mark|check\s+now|generate|prepare|work\s+out|process|reconcile|import|sync|pay|export|download|print|lock|close|end\s+(shift|access)|revoke|request|check\s+in|clock\s+(in|out)|scan|move|rename|copy|return|promote|archive|retry|deactivate|disable)\b/i }).first();
+    if (!(await proceed.isVisible({ timeout: 1000 }).catch(() => false))) return false;
+    if (await proceed.isDisabled().catch(() => true)) return false;
+    const label = compact(await proceed.textContent({ timeout: 1000 }).catch(() => null)) || 'submit';
+    await this.step(`follow through: ${label}`, async () => {
+      await proceed.click({ timeout: 2000 });
+      await this.page.waitForTimeout(300);
+    });
+    await this.observe(`next stage after ${label}`);
     return true;
   }
 
@@ -291,6 +321,7 @@ export class HumanTestSession {
       await this.observe(`tab: ${label}`);
     }
     await this.fillSafeField();
+    await this.followThroughSafeSubmit();
   }
 
   async walkEveryVisibleButton(route: string): Promise<void> {
