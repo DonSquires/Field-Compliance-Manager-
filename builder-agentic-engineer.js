@@ -28,7 +28,7 @@ const { validatePatchText } = require('./frontend-worker');
 const { generateVisualBaselines } = require('./builder-visual-baseline-tool');
 const { baselineInfo, pngEvidence } = require('./builder-visual-baseline');
 
-const PROMPT_VERSION = 'agentic-engineer-v9';
+const PROMPT_VERSION = 'agentic-engineer-v10';
 // Consecutive refused identical calls (with nothing edited) before the author escalates or stops early.
 const STUCK_REFUSALS = 4;
 const DEFAULT_LIMITS = Object.freeze({
@@ -244,7 +244,7 @@ function systemPrompt({ lane, limits, firewall = false }) {
     '- git_diff {}                            your uncommitted changes so far',
     '- write_file {path, content}             create or overwrite a file (full content)',
     '- replace_in_file {path, old_text, new_text, all?}   PREFERRED EDIT: replace one exact occurrence of old_text (copy it verbatim from read_file, several lines is fine) with new_text; all=true replaces every occurrence. Fails safely when the text is missing or ambiguous.',
-    '- apply_patch {diff}                     apply a unified diff (git apply); hunk counts must be exact — use replace_in_file instead when unsure',
+    '- apply_patch {diff}                     apply a git unified diff or a "*** Begin Patch"/"*** Update File: <path>" envelope; use replace_in_file instead when unsure',
     '- delete_file {path}                     delete a file',
     '- generate_visual_baselines {paths, reason}  frontend only: 1-6 exact apps/web/e2e/<name>.spec.ts-snapshots/<name>-desktop-chromium-linux.png (or mobile) paths. Explain intentional before/during/after behavior, not just a mismatch. Runs offline fixture tests, generates PNGs, rerenders and compares, retains private before/after images and hashes. Never use it to bless an unexplained regression or weaken assertions/tolerances. Independent verification repeats rendering. Existing release holds and HUMAN merge approval remain; no auto-merge.',
     `- run {command}                          allowed: node --test [test files], node --check <file>, bounded apps/web test/lint/build commands (npm run test or npm test), git status/diff/log/show/blame (timeout ${Math.round(limits.runTimeoutMs / 60000)} min); chain allowed commands with && (stops at the first failure). Never run npm install/ci.`,
@@ -445,6 +445,90 @@ function compactMessages(messages, { keepRecent = 6, stubChars = 600, threshold 
     else break;
   }
   return fitted;
+}
+
+// Codex/gpt-oss models emit the "*** Begin Patch / *** Update File:" envelope, which git apply
+// rejects as "No valid patches in input" (Vibe session cb3630ca lost its last turn to exactly that).
+function isEnvelopePatch(text) {
+  return /^\*\*\* (?:Begin Patch|Update File:|Add File:|Delete File:)/m.test(text);
+}
+
+function parseEnvelopePatch(text) {
+  const ops = [];
+  let op = null;
+  for (const line of String(text).replace(/\r\n/g, '\n').split('\n')) {
+    let match;
+    if (/^\*\*\* (?:Begin|End) Patch\s*$/.test(line)) { op = null; continue; }
+    if ((match = line.match(/^\*\*\* (Update|Add|Delete) File:\s*(.+?)\s*$/))) {
+      op = { kind: match[1].toLowerCase(), path: match[2], moveTo: null, lines: [] };
+      ops.push(op);
+      continue;
+    }
+    if (op && (match = line.match(/^\*\*\* Move to:\s*(.+?)\s*$/))) { op.moveTo = match[1]; continue; }
+    if (/^\*\*\* End of File\s*$/.test(line)) continue;
+    if (op) op.lines.push(line);
+  }
+  return ops;
+}
+
+function envelopeChunks(lines) {
+  const chunks = [];
+  let chunk = null;
+  for (const line of lines) {
+    if (line.startsWith('@@')) {
+      chunk = { anchor: line.replace(/^@@+\s?/, '').replace(/\s?@@+$/, '').trim(), old: [], next: [] };
+      chunks.push(chunk);
+      continue;
+    }
+    if (!chunk) { chunk = { anchor: '', old: [], next: [] }; chunks.push(chunk); }
+    if (line.startsWith('-')) chunk.old.push(line.slice(1));
+    else if (line.startsWith('+')) chunk.next.push(line.slice(1));
+    else {
+      const context = line.startsWith(' ') ? line.slice(1) : line;
+      chunk.old.push(context);
+      chunk.next.push(context);
+    }
+  }
+  // A trailing blank line is usually the patch's own terminator, not source context.
+  for (const item of chunks) {
+    while (item.old.length && item.next.length && item.old.at(-1) === '' && item.next.at(-1) === '') { item.old.pop(); item.next.pop(); }
+  }
+  return chunks.filter((item) => item.old.length || item.next.length);
+}
+
+function findLineBlock(source, block, from) {
+  const comparators = [(a, b) => a === b, (a, b) => a.trimEnd() === b.trimEnd(), (a, b) => a.trim() === b.trim()];
+  for (const same of comparators) {
+    for (const start of [from, 0]) {
+      for (let index = start; index + block.length <= source.length; index++) {
+        if (block.every((line, offset) => same(source[index + offset], line))) return index;
+      }
+    }
+  }
+  return -1;
+}
+
+function applyEnvelopeUpdate(content, lines, file) {
+  const source = content.split('\n');
+  let cursor = 0;
+  for (const [number, chunk] of envelopeChunks(lines).entries()) {
+    if (chunk.anchor) {
+      const anchorAt = source.findIndex((line, index) => index >= cursor && line.includes(chunk.anchor));
+      const fallback = anchorAt < 0 ? source.findIndex((line) => line.includes(chunk.anchor)) : anchorAt;
+      if (fallback >= 0) cursor = chunk.old.length ? fallback : fallback + 1;
+    }
+    if (!chunk.old.length) {
+      const at = chunk.anchor ? cursor : (source.at(-1) === '' ? source.length - 1 : source.length);
+      source.splice(at, 0, ...chunk.next);
+      cursor = at + chunk.next.length;
+      continue;
+    }
+    const at = findLineBlock(source, chunk.old, cursor);
+    if (at < 0) return { error: `hunk ${number + 1} for ${file} did not match; first expected line: ${JSON.stringify(chunk.old.find((line) => line.trim()) ?? '')}` };
+    source.splice(at, chunk.old.length, ...chunk.next);
+    cursor = at + chunk.next.length;
+  }
+  return { content: source.join('\n') };
 }
 
 function createTools({ workspacePath, repoRoot, lane, supabase, limits, log, generateBaselines = generateVisualBaselines }) {
@@ -650,9 +734,41 @@ function createTools({ workspacePath, repoRoot, lane, supabase, limits, log, gen
       if (typeof diff !== 'string' || !diff.trim()) return { error: 'diff is required' };
       if (/GIT binary patch|Binary files .* differ/m.test(diff)) return { error: 'Use generate_visual_baselines; model-authored binary patches are refused' };
       const before = new Set(changedFiles());
-      const patchPath = path.join(fs.mkdtempSync(path.join(os.tmpdir(), 'bob-agent-patch-')), 'patch.diff');
       // Models wrap diffs in fences and miscount hunk lengths; tolerate both before asking for a rewrite.
       const text = diff.replace(/^\s*```(?:diff|patch)?\s*\n/, '').replace(/\n```\s*$/, '');
+      if (isEnvelopePatch(text)) {
+        const ops = parseEnvelopePatch(text);
+        if (!ops.length) return { error: 'patch did not apply: the *** Begin Patch envelope names no file. Use "*** Update File: <path>" sections, or replace_in_file.' };
+        // Plan every file first so a bad hunk leaves the worktree untouched.
+        const writes = [];
+        for (const op of ops) {
+          const { normalized, absolute } = resolveInside(workspacePath, op.path);
+          const target = op.moveTo ? resolveInside(workspacePath, op.moveTo) : null;
+          for (const file of [normalized, target?.normalized].filter(Boolean)) {
+            if (baselineInfo(file)) return { error: 'Use generate_visual_baselines; model-authored binary patches are refused' };
+            const violation = policyCheck(file);
+            if (violation) return { error: `refused: ${violation}` };
+            if (isMigrationPath(file) && (op.kind !== 'add' || fs.existsSync(path.join(workspacePath, file)))) return { error: `refused: ${file} is a migration; migrations may only be added as new files` };
+          }
+          if (op.kind === 'add') {
+            if (fs.existsSync(absolute)) return { error: `patch did not apply: ${normalized} already exists; use "*** Update File:" or write_file` };
+            writes.push({ absolute, content: `${op.lines.map((line) => line.replace(/^\+/, '')).join('\n').replace(/\n*$/, '')}\n` });
+            continue;
+          }
+          if (!fs.existsSync(absolute)) return { error: `patch did not apply: not found: ${normalized}` };
+          if (op.kind === 'delete') { writes.push({ absolute, remove: true }); continue; }
+          const updated = applyEnvelopeUpdate(fs.readFileSync(absolute, 'utf8'), op.lines, normalized);
+          if (updated.error) return { error: `patch did not apply: ${updated.error}. Read the current file (exact lines) and send replace_in_file with verbatim old_text, or write_file with the full content.` };
+          if (target) writes.push({ absolute, remove: true }, { absolute: target.absolute, content: updated.content });
+          else writes.push({ absolute, content: updated.content });
+        }
+        for (const write of writes) {
+          if (write.remove) fs.rmSync(write.absolute, { force: true });
+          else { fs.mkdirSync(path.dirname(write.absolute), { recursive: true }); fs.writeFileSync(write.absolute, write.content); }
+        }
+        return { applied: true, format: 'envelope', changed_files: changedFiles() };
+      }
+      const patchPath = path.join(fs.mkdtempSync(path.join(os.tmpdir(), 'bob-agent-patch-')), 'patch.diff');
       const strategies = [[], ['--recount'], ['--recount', '--ignore-whitespace']];
       let failure = '';
       try {

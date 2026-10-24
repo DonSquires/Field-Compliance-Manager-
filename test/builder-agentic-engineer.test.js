@@ -732,6 +732,55 @@ test('search honours several pathspecs and treats no matches as a result; apply_
   fs.rmSync(repo.root, { recursive: true, force: true });
 });
 
+test('apply_patch accepts the *** Begin Patch envelope that gpt-oss/Codex models emit, atomically', () => {
+  const repo = makeRepo();
+  const { createBranchWorkspace } = require('../builder-branch-workspace');
+  const ws = createBranchWorkspace({ sourceDir: repo.source, workspaceRoot: path.join(repo.root, 'workspaces'), jobId: 'feedfacefeedfacefeedface', targetSha: repo.sha });
+  const tools = createTools({ workspacePath: ws.workspacePath, repoRoot: repo.source, lane: 'backend', supabase: null, limits: DEFAULT_LIMITS, log() {} });
+  const sumPath = path.join(ws.workspacePath, 'lib', 'sum.js');
+  const original = fs.readFileSync(sumPath, 'utf8');
+
+  const envelope = [
+    '*** Begin Patch',
+    '*** Update File: lib/sum.js',
+    '@@',
+    " 'use strict';",
+    '-module.exports = { sum: (a, b) => a - b };',
+    '+module.exports = { sum: (a, b) => a + b };',
+    '*** Add File: lib/double.js',
+    "+'use strict';",
+    '+module.exports = { double: (a) => a * 2 };',
+    '*** End Patch',
+  ].join('\n');
+  const applied = tools.apply_patch({ diff: envelope });
+  assert.equal(applied.applied, true, JSON.stringify(applied));
+  assert.equal(applied.format, 'envelope');
+  assert.match(fs.readFileSync(sumPath, 'utf8'), /a \+ b/);
+  assert.equal(fs.readFileSync(path.join(ws.workspacePath, 'lib', 'double.js'), 'utf8'), "'use strict';\nmodule.exports = { double: (a) => a * 2 };\n");
+
+  // A second file whose hunk does not match leaves every file untouched.
+  fs.writeFileSync(sumPath, original);
+  const partial = [
+    '*** Begin Patch',
+    '*** Update File: lib/sum.js',
+    '-module.exports = { sum: (a, b) => a - b };',
+    '+module.exports = { sum: (a, b) => a + b };',
+    '*** Update File: test/sum.test.js',
+    '-this line is not in the file',
+    '+replacement',
+    '*** End Patch',
+  ].join('\n');
+  const refused = tools.apply_patch({ diff: partial });
+  assert.match(refused.error, /patch did not apply: hunk 1 for test\/sum\.test\.js did not match/);
+  assert.equal(fs.readFileSync(sumPath, 'utf8'), original);
+
+  // Protected paths stay refused through the envelope too.
+  const protectedEdit = tools.apply_patch({ diff: '*** Begin Patch\n*** Add File: .github/workflows/x.yml\n+name: x\n*** End Patch' });
+  assert.match(protectedEdit.error, /refused/);
+  assert.equal(fs.existsSync(path.join(ws.workspacePath, '.github', 'workflows', 'x.yml')), false);
+  fs.rmSync(repo.root, { recursive: true, force: true });
+});
+
 test('compactMessages keeps recent turns verbatim and collapses older bulky results and write payloads', () => {
   const { compactMessages } = require('../builder-agentic-engineer');
   const big = 'x'.repeat(5000);
