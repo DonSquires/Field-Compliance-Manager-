@@ -453,6 +453,8 @@ function isEnvelopePatch(text) {
   return /^\*\*\* (?:Begin Patch|Update File:|Add File:|Delete File:)/m.test(text);
 }
 
+const ENVELOPE_EOF = Symbol('end-of-file');
+
 function parseEnvelopePatch(text) {
   const ops = [];
   let op = null;
@@ -465,7 +467,7 @@ function parseEnvelopePatch(text) {
       continue;
     }
     if (op && (match = line.match(/^\*\*\* Move to:\s*(.+?)\s*$/))) { op.moveTo = match[1]; continue; }
-    if (/^\*\*\* End of File\s*$/.test(line)) continue;
+    if (/^\*\*\* End of File\s*$/.test(line)) { if (op) op.lines.push(ENVELOPE_EOF); continue; }
     if (op) op.lines.push(line);
   }
   return ops;
@@ -475,12 +477,13 @@ function envelopeChunks(lines) {
   const chunks = [];
   let chunk = null;
   for (const line of lines) {
+    if (line === ENVELOPE_EOF) { if (chunk) chunk.eof = true; continue; }
     if (line.startsWith('@@')) {
-      chunk = { anchor: line.replace(/^@@+\s?/, '').replace(/\s?@@+$/, '').trim(), old: [], next: [] };
+      chunk = { anchor: line.replace(/^@@+\s?/, '').replace(/\s?@@+$/, '').trim(), old: [], next: [], eof: false };
       chunks.push(chunk);
       continue;
     }
-    if (!chunk) { chunk = { anchor: '', old: [], next: [] }; chunks.push(chunk); }
+    if (!chunk) { chunk = { anchor: '', old: [], next: [], eof: false }; chunks.push(chunk); }
     if (line.startsWith('-')) chunk.old.push(line.slice(1));
     else if (line.startsWith('+')) chunk.next.push(line.slice(1));
     else {
@@ -496,13 +499,14 @@ function envelopeChunks(lines) {
   return chunks.filter((item) => item.old.length || item.next.length);
 }
 
-function findLineBlock(source, block, from) {
+// Matches only at or after `from`: hunks are ordered, so jumping back would edit the wrong block.
+function findLineBlock(source, block, from, atEof = false) {
+  const end = source.at(-1) === '' ? source.length - 1 : source.length;
   const comparators = [(a, b) => a === b, (a, b) => a.trimEnd() === b.trimEnd(), (a, b) => a.trim() === b.trim()];
   for (const same of comparators) {
-    for (const start of [from, 0]) {
-      for (let index = start; index + block.length <= source.length; index++) {
-        if (block.every((line, offset) => same(source[index + offset], line))) return index;
-      }
+    const first = atEof ? Math.max(from, end - block.length) : from;
+    for (let index = first; index + block.length <= end; index++) {
+      if (block.every((line, offset) => same(source[index + offset], line))) return index;
     }
   }
   return -1;
@@ -514,17 +518,18 @@ function applyEnvelopeUpdate(content, lines, file) {
   for (const [number, chunk] of envelopeChunks(lines).entries()) {
     if (chunk.anchor) {
       const anchorAt = source.findIndex((line, index) => index >= cursor && line.includes(chunk.anchor));
-      const fallback = anchorAt < 0 ? source.findIndex((line) => line.includes(chunk.anchor)) : anchorAt;
-      if (fallback >= 0) cursor = chunk.old.length ? fallback : fallback + 1;
+      if (anchorAt < 0) return { error: `hunk ${number + 1} for ${file}: anchor ${JSON.stringify(chunk.anchor)} was not found after the previous hunk` };
+      cursor = chunk.old.length ? anchorAt : anchorAt + 1;
     }
     if (!chunk.old.length) {
-      const at = chunk.anchor ? cursor : (source.at(-1) === '' ? source.length - 1 : source.length);
+      const end = source.at(-1) === '' ? source.length - 1 : source.length;
+      const at = chunk.anchor && !chunk.eof ? cursor : end;
       source.splice(at, 0, ...chunk.next);
       cursor = at + chunk.next.length;
       continue;
     }
-    const at = findLineBlock(source, chunk.old, cursor);
-    if (at < 0) return { error: `hunk ${number + 1} for ${file} did not match; first expected line: ${JSON.stringify(chunk.old.find((line) => line.trim()) ?? '')}` };
+    const at = findLineBlock(source, chunk.old, cursor, chunk.eof);
+    if (at < 0) return { error: `hunk ${number + 1} for ${file} did not match${chunk.eof ? ' at end of file' : ''}; first expected line: ${JSON.stringify(chunk.old.find((line) => line.trim()) ?? '')}` };
     source.splice(at, chunk.old.length, ...chunk.next);
     cursor = at + chunk.next.length;
   }
@@ -739,8 +744,18 @@ function createTools({ workspacePath, repoRoot, lane, supabase, limits, log, gen
       if (isEnvelopePatch(text)) {
         const ops = parseEnvelopePatch(text);
         if (!ops.length) return { error: 'patch did not apply: the *** Begin Patch envelope names no file. Use "*** Update File: <path>" sections, or replace_in_file.' };
-        // Plan every file first so a bad hunk leaves the worktree untouched.
-        const writes = [];
+        // Plan every op against a virtual tree so later ops see earlier ones and a bad hunk touches nothing.
+        const virtual = new Map();
+        const exists = (file) => (virtual.has(file) ? virtual.get(file).content !== null : fs.existsSync(path.join(workspacePath, file)));
+        const read = (file) => (virtual.has(file) ? virtual.get(file).content : fs.readFileSync(path.join(workspacePath, file), 'utf8'));
+        const blocker = (file) => {
+          const absolute = path.join(workspacePath, file);
+          if (fs.existsSync(absolute) && !fs.statSync(absolute).isFile()) return `${file} is not a regular file`;
+          for (let dir = path.dirname(absolute); dir.startsWith(workspacePath) && dir !== workspacePath; dir = path.dirname(dir)) {
+            if (fs.existsSync(dir) && !fs.statSync(dir).isDirectory()) return `${path.relative(workspacePath, dir)} is a file, so ${file} cannot be created`;
+          }
+          return null;
+        };
         for (const op of ops) {
           const { normalized, absolute } = resolveInside(workspacePath, op.path);
           const target = op.moveTo ? resolveInside(workspacePath, op.moveTo) : null;
@@ -749,22 +764,38 @@ function createTools({ workspacePath, repoRoot, lane, supabase, limits, log, gen
             const violation = policyCheck(file);
             if (violation) return { error: `refused: ${violation}` };
             if (isMigrationPath(file) && (op.kind !== 'add' || fs.existsSync(path.join(workspacePath, file)))) return { error: `refused: ${file} is a migration; migrations may only be added as new files` };
+            const problem = blocker(file);
+            if (problem) return { error: `patch did not apply: ${problem}` };
           }
           if (op.kind === 'add') {
-            if (fs.existsSync(absolute)) return { error: `patch did not apply: ${normalized} already exists; use "*** Update File:" or write_file` };
-            writes.push({ absolute, content: `${op.lines.map((line) => line.replace(/^\+/, '')).join('\n').replace(/\n*$/, '')}\n` });
+            if (exists(normalized)) return { error: `patch did not apply: ${normalized} already exists; use "*** Update File:" or write_file` };
+            virtual.set(normalized, { absolute, content: `${op.lines.filter((line) => line !== ENVELOPE_EOF).map((line) => line.replace(/^\+/, '')).join('\n').replace(/\n*$/, '')}\n` });
             continue;
           }
-          if (!fs.existsSync(absolute)) return { error: `patch did not apply: not found: ${normalized}` };
-          if (op.kind === 'delete') { writes.push({ absolute, remove: true }); continue; }
-          const updated = applyEnvelopeUpdate(fs.readFileSync(absolute, 'utf8'), op.lines, normalized);
+          if (!exists(normalized)) return { error: `patch did not apply: not found: ${normalized}` };
+          if (op.kind === 'delete') { virtual.set(normalized, { absolute, content: null }); continue; }
+          const updated = applyEnvelopeUpdate(read(normalized), op.lines, normalized);
           if (updated.error) return { error: `patch did not apply: ${updated.error}. Read the current file (exact lines) and send replace_in_file with verbatim old_text, or write_file with the full content.` };
-          if (target) writes.push({ absolute, remove: true }, { absolute: target.absolute, content: updated.content });
-          else writes.push({ absolute, content: updated.content });
+          if (target && target.normalized !== normalized) {
+            if (exists(target.normalized)) return { error: `patch did not apply: move destination ${target.normalized} already exists` };
+            virtual.set(normalized, { absolute, content: null });
+            virtual.set(target.normalized, { absolute: target.absolute, content: updated.content });
+          } else virtual.set(normalized, { absolute, content: updated.content });
         }
-        for (const write of writes) {
-          if (write.remove) fs.rmSync(write.absolute, { force: true });
-          else { fs.mkdirSync(path.dirname(write.absolute), { recursive: true }); fs.writeFileSync(write.absolute, write.content); }
+        const originals = [...virtual.values()].map(({ absolute }) => ({ absolute, content: fs.existsSync(absolute) ? fs.readFileSync(absolute) : null }));
+        try {
+          for (const { absolute, content } of virtual.values()) {
+            if (content === null) fs.rmSync(absolute, { force: true });
+            else { fs.mkdirSync(path.dirname(absolute), { recursive: true }); fs.writeFileSync(absolute, content); }
+          }
+        } catch (error) {
+          for (const { absolute, content } of originals) {
+            try {
+              if (content === null) fs.rmSync(absolute, { force: true });
+              else { fs.mkdirSync(path.dirname(absolute), { recursive: true }); fs.writeFileSync(absolute, content); }
+            } catch { /* best-effort restore; the original error is reported below */ }
+          }
+          return { error: `patch did not apply: ${error.message}; the worktree was restored` };
         }
         return { applied: true, format: 'envelope', changed_files: changedFiles() };
       }

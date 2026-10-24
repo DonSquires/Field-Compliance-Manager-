@@ -781,6 +781,46 @@ test('apply_patch accepts the *** Begin Patch envelope that gpt-oss/Codex models
   fs.rmSync(repo.root, { recursive: true, force: true });
 });
 
+test('apply_patch envelope honours End of File, forward-only anchors, composed ops and destination checks', () => {
+  const repo = makeRepo();
+  const { createBranchWorkspace } = require('../builder-branch-workspace');
+  const ws = createBranchWorkspace({ sourceDir: repo.source, workspaceRoot: path.join(repo.root, 'workspaces'), jobId: 'facefeedfacefeedfacefeed', targetSha: repo.sha });
+  const tools = createTools({ workspacePath: ws.workspacePath, repoRoot: repo.source, lane: 'backend', supabase: null, limits: DEFAULT_LIMITS, log() {} });
+  const file = path.join(ws.workspacePath, 'lib', 'footer.js');
+  const write = (content) => fs.writeFileSync(file, content);
+  const patch = (...lines) => tools.apply_patch({ diff: ['*** Begin Patch', ...lines, '*** End Patch'].join('\n') });
+
+  // Repeated footer text: End of File must edit the last copy, not the first.
+  write('// footer\nconst a = 1;\n// footer\n');
+  assert.equal(patch('*** Update File: lib/footer.js', '@@', '-// footer', '+// end', '*** End of File').applied, true);
+  assert.equal(fs.readFileSync(file, 'utf8'), '// footer\nconst a = 1;\n// end\n');
+
+  // A missing anchor is refused rather than ignored.
+  write('function one() {\n  return 1;\n}\n');
+  assert.match(patch('*** Update File: lib/footer.js', '@@ function missing()', '-  return 1;', '+  return 2;').error, /anchor "function missing\(\)" was not found/);
+  assert.equal(fs.readFileSync(file, 'utf8'), 'function one() {\n  return 1;\n}\n');
+
+  // Hunks never jump back above an earlier hunk.
+  write('x = 1;\ny = 2;\n');
+  assert.match(patch('*** Update File: lib/footer.js', '@@', '-y = 2;', '+y = 3;', '@@', '-x = 1;', '+x = 0;').error, /hunk 2 .* did not match/);
+  assert.equal(fs.readFileSync(file, 'utf8'), 'x = 1;\ny = 2;\n');
+
+  // Two ops on the same file compose instead of the second overwriting the first.
+  write('a\nb\n');
+  assert.equal(patch('*** Update File: lib/footer.js', '-a', '+A', '*** Update File: lib/footer.js', '-b', '+B').applied, true);
+  assert.equal(fs.readFileSync(file, 'utf8'), 'A\nB\n');
+
+  // A move onto an existing file is refused and touches nothing.
+  assert.match(patch('*** Update File: lib/footer.js', '*** Move to: lib/sum.js', '-A', '+Z').error, /move destination lib\/sum\.js already exists/);
+  assert.equal(fs.readFileSync(file, 'utf8'), 'A\nB\n');
+
+  // A destination under an existing file (or a directory target) is refused before any write.
+  assert.match(patch('*** Update File: lib/footer.js', '-A', '+Q', '*** Add File: lib/sum.js/nested.js', '+x').error, /lib\/sum\.js is a file/);
+  assert.match(patch('*** Add File: lib', '+x').error, /patch did not apply/);
+  assert.equal(fs.readFileSync(file, 'utf8'), 'A\nB\n');
+  fs.rmSync(repo.root, { recursive: true, force: true });
+});
+
 test('compactMessages keeps recent turns verbatim and collapses older bulky results and write payloads', () => {
   const { compactMessages } = require('../builder-agentic-engineer');
   const big = 'x'.repeat(5000);
