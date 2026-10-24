@@ -5,9 +5,9 @@ const test = require('node:test');
 
 const workflowsDirectory = resolve(__dirname, '../.github/workflows');
 
-test('GitHub is the source host only; no GitHub Actions workflows run', () => {
+test('GitHub permits only the owner-approved PR verification workflow, not mirror or release workflows', () => {
   const workflowFiles = existsSync(workflowsDirectory)
     ? readdirSync(workflowsDirectory).filter((file) => /\.ya?ml$/i.test(file))
     : [];
-  assert.deepEqual(workflowFiles, []);
+  assert.deepEqual(workflowFiles, ['verify-pr.yml']);
 });

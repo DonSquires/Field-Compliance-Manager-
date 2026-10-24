@@ -1,8 +1,10 @@
 # Bob VPS Verification and Human QA
 
-GitHub is the canonical source repository only. It runs no CI, agent, mirror, or
-release workflow. Bob's control plane on the VPS owns routine verification and
-the bounded repair loop.
+GitHub is the canonical source repository. The owner decision of 2026-10-24
+permits credential-free PR verification in Actions, superseding only the
+no-CI part of the 2026-10-12 rule. It runs no coding agent, mirror or release
+workflow. Bob's control plane on the VPS still owns routine main verification,
+the bounded repair loop and the sole production migration-writing lane.
 
 ## Main-Health Loop
 

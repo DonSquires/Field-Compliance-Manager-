@@ -20,6 +20,13 @@ GitHub PR verification, owner decision 2026-10-24:
   environment protections require a separate decision before Actions writes.
 - Existing product/test mismatches are expected to remain visible in CI;
   there is no skip or continue-on-error to make the Overview redesign green.
+- First Actions run `40071970872`: types/build passed; web tests passed 1,791
+  with the existing Overview 48px-header guard failing. Operational browser
+  checks passed 15/16, failing the existing Overview screenshot. The six
+  harness/navigation checks completed, with one staff-navigation retry.
+  Runtime passed 1,554 with 13 skipped and one obsolete no-Actions guard
+  failing. Update that guard to permit exactly `verify-pr.yml`; its separate
+  workflow contract retains the no-secret/read-only/no-release boundary.
 
 Vibe verification repair (vibe-v14), 2026-10-24:
 
@@ -1144,7 +1151,10 @@ finance, payroll, and evidential work remain Grandmaster-gated. Expansion
 beyond eight changed files also stops at the gate.
 
 Owner ruling 2026-10-12: GitHub is the source repository only; no GitHub Actions
-CI, coding agent, Gitea mirror, or release workflow runs. Bob's VPS directly
+CI, coding agent, Gitea mirror, or release workflow runs. **Narrowly superseded
+2026-10-24:** credential-free PR verification is now allowed; coding agents,
+mirrors, production writes and releases are not authorised in Actions.
+Bob's VPS directly
 polls the pinned GitHub `main` SHA, runs the isolated web build/unit/source-guard
 and Playwright smoke checks, and opens bounded Builder repair jobs for
 test-only baseline failures. Auto-merge requires the existing clean

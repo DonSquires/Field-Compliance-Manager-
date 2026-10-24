@@ -182,6 +182,13 @@ RLS remains the hard backstop underneath. In this repo the mechanism is
 - **Legal, identity-critical, enforcement and commercial truth is human-decided.**
   Bob explains verdicts, finds missing evidence, drafts wording, prepares
   proposals; a person signs (the fire-control key in `PRODUCT_DESIGN.md` §7.2).
+- **PR verification ruling (owner, 2026-10-24).** GitHub Actions may run
+  credential-free PR verification with read-only repository permission and
+  offline fixtures. This narrowly supersedes the 2026-10-12 no-Actions rule;
+  it does not authorise an Actions coding agent, mirror, deployment, live
+  embedding job or database write. The governed VPS release lane remains the
+  sole production migration writer. Verification failures remain visible and
+  do not grant merge or release authority.
 
 ## 5. Runtime contract (how this repo implements it)
 

@@ -117,8 +117,10 @@ Bob's VPS polls the GitHub main SHA, runs the web build, full unit/source-guard
 suite, and bounded Playwright smoke suite in an isolated worker, then records a
 durable result per SHA. On a red baseline, Bob opens a constrained Builder
 repair, verifies and reviews it, and automatically merges only the approved
-low-risk test-only case. GitHub is the source host; it runs no CI or agent
-workflows.
+low-risk test-only case. GitHub is the source host and, under the owner decision
+of 2026-10-24, also runs credential-free PR verification with offline fixtures.
+This does not move the repair agent or production migration writes into
+Actions; those remain on the VPS.
 
 Bob also owns the expansive human/visual pass, which produces screenshots, UX
 findings, HTTP evidence, traces, and before/during/after workflow reports:
