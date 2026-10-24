@@ -16,6 +16,45 @@ actually work with a working org and its data and operations." Extended-scope,
 multi-session task — take as many turns as needed; real, verified progress each
 turn beats false completeness.
 
+## R&M GROUP CHARGE CODES (2026-10-25) - APPLIED, PR STACKED ON #190
+
+Owner decisions: OneFortyOne numbers are the group standard; Mainland Pest
+Control (an R&M subsidiary) numbers are used for pest-control jobs; logic
+assigns every other code. "Removal" means removing a covert camera or CCTV
+device. Gate and sign work is engineering (maintenance or manufacture) unless
+the row only reports a gate open/live or closed/dead, which is patrol
+reporting. Equipment and materials are separate dimensions; ammunition is a
+material recorded with its calibre.
+
+- Migration `20261024233829_rm_charge_code_catalog.sql`, applied and
+  live-verified (`supabase/tests/20261024233829_rm_charge_code_catalog.sql`);
+  `schema.sql` regenerated.
+- Code = source digit + two-digit subject + two-digit issue (OFO scheme). The
+  catalog lives on R&M and Mainland only: 4 sources, 29 subjects (new ones
+  from 27), 100 issues (new ones from 76), 421 codes (268 OFO, 153 derived).
+  Client organisations do not receive copies.
+- Labels resolve through aliases (plurals, typos, "- company" to "- R&M") and
+  combination aliases (Gate Live/Dead to Open/Closed, camera Removal to
+  Uninstall 40570/30570, Lock "E-Lock ..." to the E-Lock subject).
+- Pest codes carry the real OneFortyOne client GL where the MPC log evidences
+  it (Goat 3609, Ammunition 3606, Monitoring 3758, others 3615). Each species
+  has its own charge code; there are no per-species GL numbers. Derived codes
+  have no billing basis until the owner sets one.
+- Mainland ownership is recorded in `organizations.external_refs.corporate_group`
+  with `grants_access: false`; `parent_organization_id` is not set because
+  parentage widens access under Model A.
+- New catalog types: `equipment_type`, `material_type` (ammunition with
+  calibre, quantity, unit price). New activities `uninstall`, `manufacture`;
+  new subject `sign`. Rules cannot target charge codes; the importer composes
+  them (`scripts/patrol-charge-code.mjs`) and parses stated material use only
+  (`scripts/patrol-materials.mjs`).
+- Coverage: 38,631 of 38,642 observed workbook rows resolve. 11 stay
+  unresolved for review (blank/#N/A subject, "Gates / Signs", "Keys / Locks
+  /Pins"). DART 2026 plan: 1,105 of 1,105 rows catalogued.
+- Sync impact: the row fingerprint covers derived payload keys, so the next
+  sync versions or holds existing rows whose derived codes changed. Step B
+  must separate derived reclassification from real source edits.
+
 ## DART BUSINESS-MODEL BUILD-OUT (2026-10-25) - STEP A APPLIED
 
 Owner decisions: build all five steps in order (A codes, B legacy correction
