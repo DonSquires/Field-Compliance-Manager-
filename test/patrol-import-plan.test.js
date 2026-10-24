@@ -42,12 +42,13 @@ function plan(context, extra = [], csvOverride) {
   return { result, csv, args, env, contextPath };
 }
 
-async function xlsxPlan(context, { requestedSheet = 'DATA', apply = false } = {}) {
+async function xlsxPlan(context, { requestedSheet = 'DATA', apply = false, typedDates = false, formulaDates = false, date1904 = false } = {}) {
   const directory = mkdtempSync(join(tmpdir(), 'fcm-patrol-xlsx-plan-'));
   context.after(() => rmSync(directory, { recursive: true, force: true }));
   const xlsxPath = join(directory, 'source.xlsx');
   const contextPath = join(directory, 'context.json');
   const workbook = new ExcelJS.Workbook();
+  workbook.properties.date1904 = date1904;
   const readme = workbook.addWorksheet('README');
   readme.addRow(['Do not import this sheet']);
   const data = workbook.addWorksheet('DATA');
@@ -55,6 +56,14 @@ async function xlsxPlan(context, { requestedSheet = 'DATA', apply = false } = {}
   data.addRow(['Generated for review']);
   data.addRow(['Job', 'Patroller', 'Date', 'Time', 'Location', 'Comments', 'Reg']);
   data.addRow(['42', 'Camera', '20/09/2026', '1636', 'Test place', 'winter row', '']);
+  if (typedDates || formulaDates) {
+    const date = new Date('2026-09-20T00:00:00Z');
+    const time = new Date('1899-12-30T16:36:12Z');
+    data.getCell('C4').value = formulaDates ? { formula: 'DATE(2026,9,20)', result: date } : date;
+    data.getCell('C4').numFmt = 'dd/mm/yyyy';
+    data.getCell('D4').value = formulaDates ? { formula: 'TIME(16,36,12)', result: time } : time;
+    data.getCell('D4').numFmt = 'hh:mm:ss';
+  }
   const bytes = Buffer.from(await workbook.xlsx.writeBuffer());
   writeFileSync(xlsxPath, bytes);
   writeFileSync(contextPath, JSON.stringify({
@@ -89,6 +98,7 @@ test('plan export reuses governed parser without requiring database credentials'
   assert.equal(result.status, 0, result.stderr);
   const output = JSON.parse(result.stdout);
   assert.equal(output.mode, 'plan');
+  assert.equal(output.provider_organization_id, '30000000-0000-4000-8000-000000000001');
   assert.equal(output.source_sha256, createHash('sha256').update(csv).digest('hex'));
   assert.equal(output.manifest.target_client_organization_id, '10000000-0000-4000-8000-000000000001');
   assert.equal(output.events.length, 1);
@@ -119,6 +129,34 @@ test('XLSX plan rejects a missing selected sheet rather than falling back', asyn
   assert.equal(result.status, 1);
   assert.match(result.stderr, /Selected worksheet was not found: NOT_DATA/);
   assert.equal(result.stdout, '');
+});
+
+test('XLSX typed and cached formula date/time cells retain Auckland time instead of silently skipping every row', async context => {
+  for (const options of [{ typedDates: true }, { formulaDates: true }, { typedDates: true, date1904: true }]) {
+    const { result } = await xlsxPlan(context, options);
+    assert.equal(result.status, 0, result.stderr);
+    const output = JSON.parse(result.stdout);
+    assert.equal(output.counts.skipped, 0);
+    assert.equal(output.events.length, 1);
+    assert.equal(output.events[0].occurred_at, '2026-09-20T04:36:12Z');
+  }
+});
+
+test('CSV Excel time fractions preserve seconds without accepting invalid clock values', context => {
+  const csv = [
+    'Job,Patroller,Date,Time,Location',
+    `42,Camera,20/09/2026,${(16 * 3600 + 36 * 60 + 12) / 86400},Test place`,
+    '43,Camera,20/09/2026,16:36:12,Test place',
+    '44,Camera,20/09/2026,24:00:00,Test place',
+    '45,Camera,20/09/2026,0,Test place',
+  ].join('\n');
+  const { result } = plan(context, [], csv);
+  assert.equal(result.status, 0, result.stderr);
+  const output = JSON.parse(result.stdout);
+  assert.equal(output.counts.skipped, 1);
+  assert.deepEqual(output.events.map(row => row.occurred_at), [
+    '2026-09-20T04:36:12Z', '2026-09-20T04:36:12Z', '2026-09-19T12:00:00Z',
+  ]);
 });
 
 test('XLSX input refuses apply mode before requiring database credentials', async context => {

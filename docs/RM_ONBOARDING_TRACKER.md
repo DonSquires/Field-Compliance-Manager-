@@ -16,6 +16,161 @@ actually work with a working org and its data and operations." Extended-scope,
 multi-session task — take as many turns as needed; real, verified progress each
 turn beats false completeness.
 
+## PATROL SOURCE ROW SYNC (2026-10-25) - BUILT AND VERIFIED, NOT APPLIED
+
+Owner requirement: "if a row has been updated, it will need to be updated in
+fcm as well so we need to know if a row was updated."
+
+### Design
+
+- Migration `20261024214047_patrol_source_row_sync.sql` adds the append-only
+  `patrol_import_record_versions` table (one current source version per
+  record; history kept; RLS read for provider import admins only) and two
+  governed RPCs run as the configured import identity:
+  `adopt_patrol_source_baseline` records the first source version for an
+  imported record, and `apply_patrol_source_updates` applies a changed source
+  row with a new version and audit entry (field names only, never values).
+- Updates hold instead of overwriting when: there is no baseline, the
+  comparison is stale, FCM was edited since the last sync, the new place is
+  outside contracted patrol coverage, another batch has an open proposal for
+  the record, or a locked observation would change its evidence fields.
+  Locked-observation edits to non-evidence fields (for example distance) still
+  apply. Rows missing from the source are never deleted.
+- `reconcile-plan.mjs --apply --source-plan <plan> --provider-org-id <id>
+  --output <report>` runs each workbook version as one sync batch: stage new
+  rows, adopt baselines, apply updates, finalize with a zero direct
+  workshop/finance write receipt. Default is a rolled-back dry run;
+  `--commit` writes; `--attempt n` re-runs after holds are resolved;
+  `--preview-migration` dry-runs against the migration before it is applied.
+- The importer's `--export-plan` output now includes the batch definition the
+  sync needs.
+
+### Verification
+
+- SQL behavioural truth table `supabase/tests/20261024214047_patrol_source_row_sync.sql`
+  passed against the linked database inside a rolled-back transaction, with a
+  sentinel run proving the test reached its end; production confirmed clean
+  afterwards. It found and fixed two defects: a locked observation's stored
+  plate spelling tripping the lock trigger, and an applied proposal holding
+  its record forever.
+- 50 native client tests and 13 Docker scanner tests pass.
+
+### Real DART dry run - legacy rows need an owner decision
+
+- Dry run of both DART year sheets: zero writes, all 1,786 existing year-sheet
+  events held client-side (1,783 `existing_source_identity_mismatch`, 3
+  `invalid_source_distance`). The 2026-09-23 importer stored no source file,
+  sheet, or row provenance and an older payload shape.
+- Field-level comparison against the current workbook (counts only): every
+  difference is a legacy importer artifact, not a workbook edit.
+  - `occurred_at`: 1,362 events one hour late, all in NZDT months; NZST months
+    match. The legacy importer applied a fixed +12 offset.
+  - `distance_km`: never populated by the legacy importer.
+  - `status`: legacy stored the activity label in `status`; the current
+    importer classifies it as a work activity code and leaves status empty.
+  - 20 current payload keys (provenance, classification, cost) are absent.
+- All 681 `DART2025` visits also appear identically in the `2026` sheet, so
+  FCM holds them twice (`DART2025` and `DART2026` refs). Reports and invoices
+  covering Oct 2025 - Jan 2026 may double count.
+- Nothing is applied until the owner decides how legacy rows are re-baselined
+  and which sheet owns the overlapping visits.
+
+## IMPORT AUTOMATION RESUMPTION (2026-10-25) - RECONCILIATION GATE OPEN
+
+Owner requested this order: patrol spreadsheet automation, company document
+intake, photo linking, then whole-pipeline verification. These are separate
+completion gates; the inventory and running scanner do not prove promotion.
+
+Owner clarification in the same session supersedes the interim "new-only"
+choice: source row edits must be detected and propagated to FCM as well as new
+rows. Use stable job identities and source-content fingerprints, preserve
+history, and hold conflicting FCM edits. No new-only migration was applied;
+the unused empty migration scaffold was removed.
+
+### Before: live, scoped read verification
+
+- The laptop source scanner is running with a read-only source mount and a
+  separate persistent state volume. Its latest receipt finds all 22 workbooks
+  available and unchanged, with 22 pending versions and
+  `promotion: not_connected`. The inspected scan does not include photos.
+- The approved tenant-bound source alias is active. Its completed inventory
+  contains 140,826 entries and zero recorded failures. There are 13,777 entries
+  marked `ready_for_extraction`, but all still have
+  `extraction_status=not_started`. Inventory is not extracted or imported data.
+- Atlas confirms the patrol staging path and its agreement/place checks.
+  Proven flow reaches the importer, source profile, activity, and contracted
+  place/module checks. FK adjacency to finance receipts and review tables is
+  structural evidence only, not proof of automatic updates.
+- The schema explicitly rejects changed immutable provenance in
+  `stage_patrol_import_chunk`. No versioned reconciliation writer is connected
+  to the running scanner.
+
+### During: real workbook defect and local repair
+
+- The first fresh DART XLSX plans skipped all 911 rows in `2025` and all 1,254
+  rows in `2026`. ExcelJS decoded the date cells as JavaScript Dates, but the
+  reader returned their default text, which the date parser did not accept.
+- The XLSX reader now emits ISO values for typed and cached-formula dates.
+  The parser accepts those values, native Excel time fractions, seconds, and
+  midnight zero while retaining Auckland DST checks. Synthetic tests cover
+  both Excel date systems, cached formulas, numeric times, invalid clocks,
+  source hashes, exact selected sheets, and original row numbers.
+- Reconciliation now compares status, observed entity type, and measured
+  distance as well as the existing source-managed fields. Nullable fields
+  normalize consistently across rows. Duplicate checkpoints, mismatched
+  checkpoint record/source identities, missing keys, and invalid distances
+  are held. Old checkpoints without record/source bindings require review;
+  they must not be silently upgraded into update authority.
+- A source version cannot be acknowledged while unavailable or still saving.
+- The existing reconciliation command can now load a linked baseline through
+  explicit read-only transactions. It verifies the provider/client patrol
+  relationship and reads exact incoming references in chunks of 200. It
+  writes only a local JSON report, never activity, checkpoints, or finance.
+  Source rows and skipped/unresolved counts remain visible in its summary.
+- Source-to-source comparison now separately classifies baseline, added,
+  updated, unchanged, missing, and held job keys. It reports changed field
+  names without printing field values. Workbook hash changes, row movement,
+  and derivative hash changes alone do not count as row edits. Provider,
+  client, source file/sheet, profile, and key namespace must agree; changed
+  extraction configuration is held rather than passed off as a source edit.
+  First observation of a source creates a comparison baseline, not authority
+  to replace a legacy FCM record. A missing row never requests deletion.
+
+```powershell
+node services\document-source-worker\reconcile-plan.mjs `
+  --source-plan <local-plan.json> --linked `
+  --provider-org-id <approved-provider-uuid> --output <local-review.json>
+# Add --previous-source-plan <prior-plan.json> to identify source-row edits.
+```
+
+### After: verified result, not an automatic cutover
+
+- Corrected DART `2025` produces 681 mapped activity candidates, all held
+  because the legacy records lack the matching source identity.
+- Corrected DART `2026` produces 1,105 mapped candidates: 1,102 legacy
+  source-identity holds and three invalid source-distance holds. Both previews
+  find zero new keys to insert. The separate `Update 251215` sheet was not
+  replayed.
+- Initial provider-bound source snapshots for both year sheets are saved
+  locally for later comparisons. A self-comparison confirms 681 and 1,102
+  unchanged valid source rows, respectively, with the same three invalid
+  distance holds. This is an initial comparison baseline and serialization
+  check, not evidence about historical edits or authorization to update the
+  matching legacy FCM rows.
+- Linked diagnostics used the existing approved CLI credential class and
+  provider/client scope. No credential values or source narratives were
+  printed. No business records, original workbooks, finance records, or
+  scanner acknowledgements were changed.
+- Validation: 43 native parser/reconciliation/contract tests and 13 isolated
+  Linux scanner tests pass. Native Windows cannot create the symlinks used by
+  two scanner tests without additional privileges; the Linux run exercises
+  those checks rather than skipping them.
+- This code is a local repair and row-change preview capability, not a
+  deployed writer. The next gate is the audited legacy-baseline/correction
+  path and versioned writer with history and conflict holds. Company-document
+  extraction, ongoing photo import, and integrated cutover remain pending in
+  the owner's requested order.
+
 ## LAPTOP SOURCE INVENTORY (2026-10-20) - VERIFIED, AUTOMATIC PROMOTION STILL OPEN
 
 - PR #130 released as-attended patrol setup and actual measured between-stop

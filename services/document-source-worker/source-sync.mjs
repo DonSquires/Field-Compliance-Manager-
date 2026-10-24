@@ -114,7 +114,7 @@ export function pendingSourceVersions(state) {
 
 export function acknowledgeSourceVersion(state, relativePath, receipt) {
   const file = state.files[relativePath];
-  if (!file?.pending || receipt?.status !== 'applied' || !receipt.receipt_id
+  if (!file?.pending || file.availability !== 'available' || receipt?.status !== 'applied' || !receipt.receipt_id
     || receipt.source_relative_path !== relativePath
     || receipt.source_sha256 !== file.observed.sha256) {
     throw new Error('A matching applied import receipt is required');

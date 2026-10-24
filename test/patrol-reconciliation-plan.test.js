@@ -12,7 +12,9 @@ async function fixture() {
   const sourcePlan = { mode: 'plan', source_file: 'source.xlsx', source_sheet: 'DATA', source_sha256: 'hash-1', observations: [], events: [row] };
   const desired = buildReconciliationPlan({ sourcePlan, existing: [] }).actions[0].desired;
   const existing = [{ external_ref: row.external_ref, id: 'existing-id', kind: 'event', source_file: 'source.xlsx', source_sheet: 'DATA', record: desired }];
-  const checkpoints = [{ external_ref: row.external_ref, record_fingerprint: recordFingerprint(desired), source_fingerprint: recordFingerprint(desired) }];
+  const checkpoints = [{ external_ref: row.external_ref, record_id: 'existing-id', kind: 'event',
+    source_file: 'source.xlsx', source_sheet: 'DATA',
+    record_fingerprint: recordFingerprint(desired), source_fingerprint: recordFingerprint(desired) }];
   return { buildReconciliationPlan, recordFingerprint, row, sourcePlan, existing, checkpoints };
 }
 
@@ -76,6 +78,183 @@ test('fingerprints are key-order independent but detect real source changes', as
   const { recordFingerprint } = await fixture();
   assert.equal(recordFingerprint({ a: 1, b: { c: 2 } }), recordFingerprint({ b: { c: 2 }, a: 1 }));
   assert.notEqual(recordFingerprint({ a: 1 }), recordFingerprint({ a: 2 }));
+});
+
+async function sourceVersions() {
+  const { sourcePlan } = await fixture();
+  sourcePlan.provider_organization_id = 'provider-one';
+  sourcePlan.source_sha256 = 'a'.repeat(64);
+  sourcePlan.events[0].payload.source_sha256 = sourcePlan.source_sha256;
+  sourcePlan.manifest = { target_client_organization_id: 'client-one', source_profile: 'test_patrol',
+    client_code: 'TEST', import_configuration_sha256: 'configuration-one' };
+  const current = structuredClone(sourcePlan);
+  current.source_sha256 = 'b'.repeat(64);
+  current.events[0].payload.source_sha256 = current.source_sha256;
+  return { previous: sourcePlan, current };
+}
+
+test('source comparison identifies edited contents by job key, not workbook hash or row position', async () => {
+  const { compareSourcePlans } = await import('../services/document-source-worker/reconcile-plan.mjs');
+  const { previous, current } = await sourceVersions();
+  current.events[0].payload.source_row = 900;
+  current.events[0].payload.derivative_sha256 = 'changed-derivative';
+  assert.equal(compareSourcePlans(current, previous).summary.unchanged, 1);
+  current.events[0].payload.comments = 'source correction';
+  const result = compareSourcePlans(current, previous);
+  assert.equal(result.summary.updated, 1);
+  assert.deepEqual(result.actions[0].changed_fields, ['source_values.comments']);
+  assert.notEqual(result.actions[0].source_fingerprint, result.actions[0].previous_source_fingerprint);
+});
+
+test('first source snapshot is a baseline, not evidence that an FCM record may be overwritten', async () => {
+  const { compareSourcePlans } = await import('../services/document-source-worker/reconcile-plan.mjs');
+  const { current } = await sourceVersions();
+  const result = compareSourcePlans(current);
+  assert.equal(result.baseline_established, false);
+  assert.equal(result.summary.baseline, 1);
+  assert.equal(result.summary.updated, 0);
+  assert.equal(result.summary.added, 0);
+});
+
+test('source additions and missing rows are distinguished without automatic deletion', async () => {
+  const { compareSourcePlans } = await import('../services/document-source-worker/reconcile-plan.mjs');
+  const { previous, current } = await sourceVersions();
+  current.events[0].external_ref = 'rm_patrol_import:TEST:43';
+  current.events[0].payload.job_number = '43';
+  const result = compareSourcePlans(current, previous);
+  assert.equal(result.summary.added, 1);
+  assert.equal(result.summary.missing, 1);
+  assert.deepEqual(result.deletes, []);
+});
+
+test('source comparisons reject scope changes and hold duplicates, kind changes, and changed parsing configuration', async () => {
+  const { compareSourcePlans } = await import('../services/document-source-worker/reconcile-plan.mjs');
+  for (const field of ['source_file', 'source_sheet', 'provider_organization_id']) {
+    const { previous, current } = await sourceVersions();
+    current[field] = 'another-source';
+    assert.throws(() => compareSourcePlans(current, previous), /same workbook/);
+  }
+  for (const field of ['target_client_organization_id', 'source_profile', 'client_code']) {
+    const { previous, current } = await sourceVersions();
+    current.manifest[field] = 'another-scope';
+    assert.throws(() => compareSourcePlans(current, previous), /same workbook/);
+  }
+  const { previous, current } = await sourceVersions();
+  current.manifest.import_configuration_sha256 = 'changed-configuration';
+  assert.equal(compareSourcePlans(current, previous).actions[0].reason, 'import_configuration_changed');
+  current.manifest.import_configuration_sha256 = previous.manifest.import_configuration_sha256;
+  current.observations = current.events;
+  current.events = [];
+  assert.equal(compareSourcePlans(current, previous).actions[0].reason, 'record_kind_changed');
+  current.events = current.observations;
+  current.observations = [];
+  current.events.push(structuredClone(current.events[0]));
+  assert.equal(compareSourcePlans(current, previous).actions[0].reason, 'ambiguous_record_key');
+});
+
+test('changed parsed contents with an unchanged workbook version cannot claim a source edit', async () => {
+  const { compareSourcePlans } = await import('../services/document-source-worker/reconcile-plan.mjs');
+  const { previous, current } = await sourceVersions();
+  current.source_sha256 = previous.source_sha256;
+  current.events[0].payload.source_sha256 = current.source_sha256;
+  current.events[0].payload.comments = 'different parser output';
+  assert.equal(compareSourcePlans(current, previous).actions[0].reason, 'source_version_not_advanced');
+});
+
+test('status, entity type, and measured distance participate in reconciliation', async () => {
+  for (const [field, value] of [['status', 'closed'], ['observed_entity_type', 'staff'], ['distance_km', 12.5]]) {
+    const { buildReconciliationPlan, sourcePlan, existing, checkpoints } = await fixture();
+    sourcePlan.events[0][field] = value;
+    const result = buildReconciliationPlan({ sourcePlan, existing, checkpoints });
+    assert.equal(result.actions[0].operation, 'update', field);
+    assert.equal(result.actions[0].desired[field], value);
+  }
+});
+
+test('checkpoints cannot authorize changes to a different record or source identity', async () => {
+  for (const [field, value] of [['record_id', 'replacement-record'], ['kind', 'observation'],
+    ['source_file', 'other.xlsx'], ['source_sheet', 'other']]) {
+    const { buildReconciliationPlan, sourcePlan, existing, checkpoints } = await fixture();
+    checkpoints[0][field] = value;
+    sourcePlan.events[0].payload.comments = 'corrected';
+    const result = buildReconciliationPlan({ sourcePlan, existing, checkpoints });
+    assert.equal(result.actions[0].reason, 'checkpoint_identity_mismatch', field);
+  }
+});
+
+test('duplicate checkpoints are held rather than trusting the last one', async () => {
+  const { buildReconciliationPlan, sourcePlan, existing, checkpoints } = await fixture();
+  checkpoints.push(structuredClone(checkpoints[0]));
+  assert.equal(buildReconciliationPlan({ sourcePlan, existing, checkpoints }).actions[0].reason, 'ambiguous_checkpoint');
+});
+
+test('missing keys and invalid distances never produce insert candidates', async () => {
+  const { buildReconciliationPlan, sourcePlan } = await fixture();
+  for (const value of [-1, 'not-a-number', Infinity]) {
+    sourcePlan.events[0].distance_km = value;
+    assert.equal(buildReconciliationPlan({ sourcePlan, existing: [] }).actions[0].reason, 'invalid_source_distance');
+  }
+  delete sourcePlan.events[0].external_ref;
+  assert.equal(buildReconciliationPlan({ sourcePlan, existing: [] }).actions[0].reason, 'stable_source_job_required');
+});
+
+test('nullable managed fields are normalized consistently across rows', async () => {
+  const { previewReconciliation } = await import('../services/document-source-worker/reconcile-plan.mjs');
+  const { sourcePlan } = await fixture();
+  sourcePlan.manifest = { target_client_organization_id: 'client-one' };
+  sourcePlan.events.push({ ...structuredClone(sourcePlan.events[0]), external_ref: 'rm_patrol_import:TEST:43' });
+  sourcePlan.events[1].payload.optional_field = 'present on another row';
+  const result = previewReconciliation(sourcePlan, {
+    organization_id: 'client-one', observations: [],
+    events: [{
+      organization_id: 'client-one', id: 'existing-id', external_ref: sourcePlan.events[0].external_ref,
+      occurred_at: sourcePlan.events[0].occurred_at, zone_id: 'test-zone',
+      event_type: 'camera_activation', payload: sourcePlan.events[0].payload,
+    }],
+  });
+
+  assert.equal(result.summary.unchanged, 1);
+  assert.equal(result.summary.insert, 1);
+});
+
+test('linked baseline reads are provider/client-scoped and bounded to exact incoming references', async () => {
+  const { loadLinkedBaseline } = await import('../services/document-source-worker/reconcile-plan.mjs');
+  const { sourcePlan } = await fixture();
+  const provider = '10000000-0000-4000-8000-000000000001';
+  const client = '10000000-0000-4000-8000-000000000002';
+  sourcePlan.manifest = { target_client_organization_id: client };
+  sourcePlan.events = Array.from({ length: 401 }, (_, i) => ({
+    ...sourcePlan.events[0], external_ref: `rm_patrol_import:TEST:${i}`,
+  }));
+  const queries = [];
+  const baseline = await loadLinkedBaseline(sourcePlan, provider, async sql => {
+    queries.push(sql);
+    if (sql.includes('AS scope')) return [{ scope: { authorized: true, eligible_officer_ids: ['active-officer'] } }];
+    return [{ activity: { observations: [], events: [] } }];
+  });
+  assert.equal(queries.length, 4);
+  assert.ok(queries[0].includes(provider));
+  assert.ok(queries.every(sql => sql.includes(client)));
+  const sizes = queries.slice(1).map(sql => JSON.parse(sql.split('$refs$')[1]).length);
+  assert.deepEqual(sizes, [200, 200, 1]);
+  assert.deepEqual(baseline.eligible_officer_ids, ['active-officer']);
+  assert.equal(baseline.organization_id, client);
+});
+
+test('linked baseline refuses missing authority, malformed responses, and invalid scope', async () => {
+  const { loadLinkedBaseline } = await import('../services/document-source-worker/reconcile-plan.mjs');
+  const { sourcePlan } = await fixture();
+  const provider = '10000000-0000-4000-8000-000000000001';
+  sourcePlan.manifest = { target_client_organization_id: '10000000-0000-4000-8000-000000000002' };
+  await assert.rejects(loadLinkedBaseline(sourcePlan, 'not-a-uuid', async () => assert.fail('must not query')), /organization IDs/);
+  sourcePlan.provider_organization_id = 'another-provider';
+  await assert.rejects(loadLinkedBaseline(sourcePlan, provider, async () => assert.fail('must not query')), /provider does not match/);
+  delete sourcePlan.provider_organization_id;
+  await assert.rejects(loadLinkedBaseline(sourcePlan, provider, async () => [{ scope: { authorized: false } }]), /patrol agreement/);
+  await assert.rejects(loadLinkedBaseline(sourcePlan, provider, async sql => sql.includes('AS scope')
+    ? [{ scope: { authorized: true, eligible_officer_ids: [] } }] : []), /Incomplete linked activity/);
+  sourcePlan.events[0].external_ref = 'arbitrary_reference';
+  await assert.rejects(loadLinkedBaseline(sourcePlan, provider, async () => assert.fail('must not query')), /patrol import reference/);
 });
 
 test('live activity normalization compares managed fields while retaining source identity', async () => {

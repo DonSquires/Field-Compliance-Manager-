@@ -96,10 +96,11 @@ function parseCsv(text) {
 }
 
 function workbookCellText(cell) {
-  if (cell.value === null || cell.value === undefined) return '';
-  if (cell.value instanceof Date) return cell.text || cell.value.toISOString();
-  if (typeof cell.value === 'object') return cell.text ?? '';
-  return String(cell.value);
+  const value = cell.type === ExcelJS.ValueType.Formula ? cell.result : cell.value;
+  if (value === null || value === undefined) return '';
+  if (value instanceof Date) return value.toISOString();
+  if (typeof value === 'object') return cell.text ?? '';
+  return String(value);
 }
 
 async function readWorkbookSheet(bytes, name, firstRow) {
@@ -122,7 +123,9 @@ function parseNzDate(dateStr, timeStr) {
   const trimmed = (dateStr ?? '').trim();
   let y, mo, d;
   const m = /^(\d{1,2})\/(\d{1,2})\/(\d{4})$/.exec(trimmed);
+  const iso = /^(\d{4})-(\d{2})-(\d{2})T\d{2}:\d{2}:\d{2}(?:\.\d+)?Z$/.exec(trimmed);
   if (m) { [, d, mo, y] = m; }
+  else if (iso) { [, y, mo, d] = iso; }
   else if (/^\d{4,6}$/.test(trimmed)) {
     // Value2-based CSV export (fast bulk COM read, no cell-by-cell .Text formatting)
     // returns dates as raw Excel serial numbers instead of a dd/mm/yyyy string -
@@ -133,15 +136,27 @@ function parseNzDate(dateStr, timeStr) {
   if (Number(y) < 2000 || Number(y) > new Date().getUTCFullYear()) return null;
   const calendarDate = new Date(Date.UTC(Number(y), Number(mo) - 1, Number(d)));
   if (calendarDate.getUTCFullYear() !== Number(y) || calendarDate.getUTCMonth() !== Number(mo) - 1 || calendarDate.getUTCDate() !== Number(d)) return null;
-  let hh = 0, mm = 0;
-  const t = (timeStr ?? '').trim().replace(/\.\d+$/, '');
-  if (/^\d{1,2}:\d{2}$/.test(t)) [hh, mm] = t.split(':').map(Number);
+  let hh = 0, mm = 0, ss = 0;
+  const rawTime = (timeStr ?? '').trim();
+  const isoTime = /^\d{4}-\d{2}-\d{2}T(\d{2}):(\d{2}):(\d{2})(?:\.\d+)?Z$/.exec(rawTime);
+  const t = rawTime.replace(/\.\d+$/, '');
+  if (isoTime) [hh, mm, ss] = isoTime.slice(1).map(Number);
+  else if (/^0(?:[.]\d+)?$/.test(rawTime)) {
+    const seconds = Math.round(Number(rawTime) * 86_400);
+    hh = Math.floor(seconds / 3_600);
+    mm = Math.floor(seconds % 3_600 / 60);
+    ss = seconds % 60;
+  } else if (/^\d{1,2}:\d{2}(?::\d{2})?$/.test(t)) {
+    const parts = t.split(':').map(Number);
+    [hh, mm] = parts;
+    ss = parts[2] ?? 0;
+  }
   else if (/^\d{3,4}$/.test(t)) {
     const padded = t.padStart(4, '0');
     hh = Number(padded.slice(0, 2));
     mm = Number(padded.slice(2, 4));
   } else if (t) return null;
-  return aucklandInstantFromLocalParts(Number(y), Number(mo), Number(d), hh, mm)?.replace('.000Z', 'Z') ?? null;
+  return aucklandInstantFromLocalParts(Number(y), Number(mo), Number(d), hh, mm, ss)?.replace('.000Z', 'Z') ?? null;
 }
 
 // NZ plate shapes: 2-3 letters + 2-4 digits, or 1-3 digits + 2-3 letters (older/personalised).
@@ -488,22 +503,6 @@ const importSchema = {
   })),
   resolved_mappings: resolvedMappings,
 };
-if (exportPlan) {
-  console.log(JSON.stringify({
-    mode: 'plan',
-    source_file: effectiveSourceLabel,
-    source_sha256: effectiveSourceHash,
-    source_sheet: sourceSheet || null,
-    manifest: importManifest,
-    schema: importSchema,
-    counts: { rows: table.length - 1, skipped, unresolved: skippedNoZone, duplicates: skippedDuplicate },
-    observations: observationsBatch,
-    events: eventsBatch,
-    proposals: proposalsBatch,
-  }));
-  process.exit(0);
-}
-
 const batchDefinition = {
   provider_organization_id: providerOrgId,
   client_organization_id: orgId,
@@ -517,6 +516,23 @@ const batchDefinition = {
   duplicate_count: skippedDuplicate,
   unresolved_count: skippedNoZone + unresolvedAliasRows,
 };
+if (exportPlan) {
+  console.log(JSON.stringify({
+    mode: 'plan',
+    batch: batchDefinition,
+    provider_organization_id: providerOrgId,
+    source_file: effectiveSourceLabel,
+    source_sha256: effectiveSourceHash,
+    source_sheet: sourceSheet || null,
+    manifest: importManifest,
+    schema: importSchema,
+    counts: { rows: table.length - 1, skipped, unresolved: skippedNoZone, duplicates: skippedDuplicate },
+    observations: observationsBatch,
+    events: eventsBatch,
+    proposals: proposalsBatch,
+  }));
+  process.exit(0);
+}
 
 async function managementQuery(query, operation) {
   if (useSupabaseCli) return runCliQuery(query);
