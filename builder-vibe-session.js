@@ -19,7 +19,7 @@ const { isProtectedPath, protectedReason, normalizeRepoPath } = require('./build
 const { VIBE_BRANCH_PREFIX, builderCommitIdentity, redactGitError, gitSpawnFault } = require('./builder-branch-workspace');
 const { buildModelRunRequest, callModelGateway, fetchModelHealth, selectProviders, providerRequest } = require('./supabase/functions/_shared/builder-model-adapter');
 
-const PROMPT_VERSION = 'vibe-v14';
+const PROMPT_VERSION = 'vibe-v15';
 const VIBE_LIMITS = Object.freeze({
   maxTurns: Math.max(6, Number(process.env.BOB_VIBE_TURNS || 40)),
   wallBudgetMs: Math.max(60_000, Number(process.env.BOB_VIBE_BUDGET_MS || 20 * 60_000)),
@@ -88,7 +88,7 @@ function vibeSystemPrompt(limits = VIBE_LIMITS) {
     'Reply with ONLY one JSON object per message: {"thought": string, "tool": string, "args": object}.',
     'TOOLS:',
     '- list_dir {path} lists filenames. read_file {path, start_line?, end_line?} reads known source. outline {path, pattern?} lists source declarations. search {query, path?, regex?, context?} matches literal case-sensitive text inside files by default, not semantic questions or filename discovery: search visible labels/imports/class names that actually occur in code, not phrases like "Page layout structure". git_log {path?, limit?} | git_diff {}',
-    '- write_file {path, content} | replace_in_file {path, old_text, new_text, all?} | apply_patch {diff} | delete_file {path}. replace_in_file accepts a unique match that differs only in whitespace or read_file "N: " prefixes; other tokens must be exact. If it still fails, read_file the exact range and copy a shorter unique snippet instead of retrying the same text.',
+    '- write_file {path, content} | replace_in_file {path, old_text, new_text, all?} | apply_patch {diff} | delete_file {path}. replace_in_file accepts a unique match that differs only in whitespace or read_file "N: " prefixes; other tokens must be exact. If it still fails, read_file the exact range and copy a shorter unique snippet instead of retrying the same text. apply_patch accepts a git unified diff or a "*** Begin Patch" / "*** Update File: <path>" envelope.',
     '- generate_visual_baselines {paths, reason}  1-6 exact Playwright Linux PNG paths under apps/web/e2e/*.spec.ts-snapshots/. Explain the intentional before/after UI change; a mismatch alone is NOT approval. Generates offline fixture PNGs, rerenders and compares, retains before/after hashes and images. Never weaken tests or tolerances to bless a regression. Human review and merge are required; no live tenant screenshots.',
     '- human_test {reason}  Dr Bob\'s human browser walk of this branch (offline fixtures, desktop, no live data, about 5-15 minutes). Returns passed/failed/skipped, failing tests (screenshot mismatches flagged), Dr Bob\'s error findings and UX/layout warnings, and an evidence directory. Not a live tenant test or merge approval.',
     `- run {command}  allowed: node --test [test files], node --check <file>, npm run lint|build --prefix apps/web, npm run test --prefix apps/web -- <pattern> (or npm test --prefix apps/web -- <pattern>), git status|diff|log|show|blame (timeout ${Math.round(limits.runTimeoutMs / 60000)} min)`,
@@ -207,7 +207,7 @@ function vibeNativeTools(tools) {
     git_diff: 'Inspect current changes before editing further or verifying.',
     replace_in_file: 'Replace exact existing source text copied from read_file. Include unique surrounding lines and complete new_text. Do not append a second component outside its JSX tree.',
     write_file: 'Write complete file content after inspecting existing source. Protected paths remain refused.',
-    apply_patch: 'Apply a textual unified diff. Protected paths and binary patches remain refused.',
+    apply_patch: 'Apply a git unified diff or a "*** Begin Patch / *** Update File: <path>" envelope with @@ context hunks. A failed envelope changes nothing. Protected paths and binary patches remain refused.',
     delete_file: 'Delete an inspected, unprotected file only when required by the task.',
     run: 'Run existing bounded tests, lint or build commands. npm install/ci is blocked. Use npm run lint --prefix apps/web for TypeScript.',
     atlas: 'Read the live build map. Discover exact entity names with capability_map before terrain_edges or blast_radius. Flow edges are distinct from FK structure.',
