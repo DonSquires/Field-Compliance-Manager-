@@ -54,6 +54,27 @@ async function expectSurfaceInheritance(page: Page, target: Locator, token: stri
   }
 }
 
+async function expectFocusContrast(target: Locator) {
+  await target.page().keyboard.press('Tab');
+  await target.focus();
+  await expect(target).toBeFocused();
+  await expect(target).toHaveCSS('outline-style', 'solid');
+  const colors = await target.evaluate((element) => {
+    const style = getComputedStyle(element);
+    return { foreground: style.outlineColor, background: style.backgroundColor };
+  });
+  const luminance = (value: string) => {
+    const channels = value.match(/[\d.]+/g)?.map(Number);
+    if (!channels || channels.length !== 3) throw new Error(`Expected opaque RGB: ${value}`);
+    return channels.map((channel) => {
+      const value = channel / 255;
+      return value <= 0.04045 ? value / 12.92 : ((value + 0.055) / 1.055) ** 2.4;
+    }).reduce((sum, channel, index) => sum + channel * [0.2126, 0.7152, 0.0722][index], 0);
+  };
+  const [light, dark] = [luminance(colors.foreground), luminance(colors.background)].sort((a, b) => b - a);
+  expect((light + 0.05) / (dark + 0.05)).toBeGreaterThanOrEqual(3);
+}
+
 test('client panels, metadata and selected periods follow shared tokens', async ({ page }) => {
   await installClientPortalFixtures(page);
   await signInAsClient(page, '/client/delivery');
@@ -105,12 +126,32 @@ test('field lookup buttons remain readable after loading the shared page CSS', a
 test('rate-rule pop-out inherits surfaces and readable primary action without a write', async ({ page }) => {
   await installSupabaseFixtures(page);
   await signInAsAdmin(page, '/admin/rate-rules');
-  await page.getByRole('button', { name: 'New pay or charge rule' }).click();
+  const create = page.getByRole('button', { name: 'New pay or charge rule' });
+  await expectFocusContrast(create);
+  await create.click();
   const dialog = page.getByRole('dialog', { name: 'New pay or charge rule' });
   await expectSurfaceInheritance(page, dialog, '--color-bg-secondary');
   await expectContrast(dialog.getByRole('button', { name: 'Create rate rule' }));
   await dialog.getByRole('button', { name: /close/i }).click();
   await expect(dialog).toBeHidden();
+});
+
+test('priority-action focus and welfare telemetry remain readable', async ({ page }, testInfo) => {
+  await installSupabaseFixtures(page);
+  await signInAsAdmin(page, '/admin/hub');
+  await expectFocusContrast(page.locator('.admin-queue-row.is-next'));
+  if (testInfo.project.name === 'mobile-chromium') {
+    await page.locator('.admin-mobile-metrics > summary').click();
+  }
+  await expectContrast(page.locator('.admin-console-pill.is-critical:visible').first());
+});
+
+test('location hazard heading stays readable on its shared dark surface', async ({ page }) => {
+  await installSupabaseFixtures(page);
+  await signInAsAdmin(page, '/admin/locations');
+  await expectContrast(page.getByRole('heading', { name: 'Risks officers are briefed on here' }));
+  await expectContrast(page.locator('.place-hazard-kicker'));
+  await expectSurfaceInheritance(page, page.locator('.place-hazard-register'), '--color-bg-surface');
 });
 
 test('Field Operations refresh and mobile selected pane keep readable console actions', async ({ page }, testInfo) => {

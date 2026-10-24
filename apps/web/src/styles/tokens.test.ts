@@ -68,4 +68,9 @@ describe('shared dark token contract', () => {
       expect(read(path)).not.toMatch(/(?:\bcolor|outline):[^;{}]*var\(--console-action\)/);
     }
   });
+
+  it('keeps off-site safety advice and welfare telemetry on the critical-text pair', () => {
+    expect(read('components/PlaceContextBanner.css')).toMatch(/\.place-context-banner\.is-outside_geofence\s*\{[^}]*color:\s*var\(--color-status-critical-text\)/);
+    expect(read('shells/AdminShell.css')).toMatch(/\.admin-console-pill\.is-critical\s*\{[^}]*color:\s*var\(--color-status-critical-text\)/);
+  });
 });

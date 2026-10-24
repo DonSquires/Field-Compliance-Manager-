@@ -707,7 +707,7 @@
 .admin-console-telemetry { display: flex; align-items: center; gap: 6px; flex: 0 1 auto; min-width: 0; }
 .admin-console-pill { display: inline-flex; align-items: center; gap: 6px; min-height: 24px; border: 1px solid var(--console-hairline); border-radius: var(--radius-sm); padding: 0 6px; background: var(--color-bg-elevated); color: var(--color-text-primary); font: inherit; font-size: 11px; white-space: nowrap; cursor: pointer; }
 .admin-console-pill:disabled { cursor: default; opacity: 1; }
-.admin-console-pill.is-critical { color: var(--color-status-critical); border-color: var(--color-status-critical-border); background: var(--color-status-critical-bg); }
+.admin-console-pill.is-critical { color: var(--color-status-critical-text); border-color: var(--color-status-critical-border); background: var(--color-status-critical-bg); }
 .admin-shell-utilities { position: relative; }
 .admin-shell-utilities > summary,
 .admin-mobile-metrics > summary { display: flex; align-items: center; justify-content: center; min-height: 32px; padding: 0 8px; border: 1px solid var(--console-hairline); border-radius: var(--radius-sm); color: var(--color-text-primary); background: var(--color-bg-elevated); font-size: 12px; cursor: pointer; list-style: none; }
@@ -719,6 +719,7 @@
 .admin-shell button:focus-visible,
 .admin-shell summary:focus-visible,
 .admin-shell select:focus-visible { outline: 2px solid var(--color-primary); outline-offset: -2px; }
+.admin-shell .btn-primary:focus-visible { outline-color: var(--color-primary-text); }
 .admin-mobile-metrics { flex: 0 0 auto; }
 .admin-mobile-metrics .admin-console-telemetry { position: absolute; top: 44px; left: 6px; right: 6px; z-index: var(--z-popover); flex-wrap: wrap; padding: 10px; border: 1px solid var(--console-hairline); background: var(--color-bg-elevated); color: var(--color-text-primary); box-shadow: var(--shadow-md); }
 .admin-mobile-metrics .admin-console-pill { min-height: 44px; }

@@ -48,7 +48,7 @@
 .place-context-banner.is-outside_geofence {
   border-color: var(--color-status-critical);
   background: var(--color-status-critical-bg);
-  color: var(--color-status-critical);
+  color: var(--color-status-critical-text);
 }
 
 .place-context-banner.is-unavailable {

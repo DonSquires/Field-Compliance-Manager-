@@ -76,6 +76,7 @@
 .admin-shell[data-theme] .adminhub-command .admin-queue-row.is-next > div > span,
 .admin-shell[data-theme] .adminhub-command .admin-queue-row.is-next time { color: var(--color-state-selected-text); }
 .admin-shell[data-theme] .adminhub-command .admin-queue-row.is-next:hover { background: var(--color-state-selected-bg); }
+.admin-shell[data-theme] .adminhub-command .admin-queue-row.is-next:focus-visible { outline-color: var(--color-state-selected-text); }
 .admin-shell[data-theme] .adminhub-command .admin-queue-row.is-next:hover strong { color: var(--color-state-selected-text); }
 .admin-shell[data-theme] .adminhub-command .admin-queue-row.is-next:hover > div > span,
 .admin-shell[data-theme] .adminhub-command .admin-queue-row.is-next:hover time { color: var(--color-state-selected-text); }

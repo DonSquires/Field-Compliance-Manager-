@@ -1,8 +1,8 @@
-.place-hazard-register { display: grid; gap: 12px; margin: 16px 0; padding: 16px; border: 1px solid var(--border-color, #d9e1e8); border-radius: 8px; background: var(--card-bg, #fff); }
+.place-hazard-register { display: grid; gap: 12px; margin: 16px 0; padding: 16px; border: 1px solid var(--color-border); border-radius: 8px; background: var(--color-bg-surface); color: var(--color-text-primary); }
 .place-hazard-register > header { display: flex; flex-wrap: wrap; align-items: flex-start; justify-content: space-between; gap: 12px; }
 .place-hazard-register h3 { margin: 4px 0; font-size: 17px; }
-.place-hazard-register header p { margin: 0; color: var(--text-secondary, #5b6b79); font-size: 13px; }
-.place-hazard-kicker { display: inline-flex; align-items: center; gap: 5px; color: #9a5b00; font-size: 12px; font-weight: 800; text-transform: uppercase; }
+.place-hazard-register header p { margin: 0; color: var(--color-text-secondary); font-size: 13px; }
+.place-hazard-kicker { display: inline-flex; align-items: center; gap: 5px; color: var(--color-status-watch); font-size: 12px; font-weight: 800; text-transform: uppercase; }
 .place-hazard-actions, .place-hazard-row-actions, .place-hazard-form-actions { display: flex; flex-wrap: wrap; gap: 6px; }
 .place-hazard-message { display: flex; align-items: center; gap: 6px; margin: 0; padding: 8px 10px; border-radius: 5px; font-size: 13px; }
 .place-hazard-message.is-error { color: #8a1c1c; background: #fdecec; }

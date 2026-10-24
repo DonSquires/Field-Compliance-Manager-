@@ -46,6 +46,11 @@ use dark `--color-primary-text` on `--color-primary` (and
 `--color-action-danger-*` pair; critical text uses
 `--color-status-critical-text` on dark status surfaces. Do not reuse the
 critical indicator colour as a small-text foreground or a white-text button.
+Keyboard focus must retain at least 3:1 contrast against its adjacent surface:
+use the selected-text colour for the pale next-action row and the primary-text
+colour for an inset ring on a filled primary button. Off-site safety advice
+and active welfare telemetry use the critical-text foreground, not the darker
+critical indicator colour.
 Number plates deliberately retain a light background and dark text through
 `--color-plate-*`; photo shading uses `--color-photo-shade` to preserve evidence
 legibility. These are semantic exceptions, not alternative page themes.
