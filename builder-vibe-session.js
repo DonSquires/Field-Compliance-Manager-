@@ -48,11 +48,21 @@ function vibeWorkspacePath(workspaceRoot, sessionId) {
   return target;
 }
 
+// A spawn-level failure (no git output) is a host fault, not a code fault: name the directory
+// and the likely cause so the owner sees an actionable message instead of "spawnSync git EACCES".
+function gitSpawnFault(error, cwd) {
+  const code = error && error.code;
+  if (!code || error.status != null) return null;
+  if (code === 'EACCES') return `Vibe workspace is not accessible to the Builder runtime (permission denied on ${cwd}); the workspace folder ownership must match the Builder container user. This is a host fault, not a code fault; retry once it is corrected.`;
+  if (code === 'ENOENT') return fs.existsSync(cwd) ? 'git is not installed or not on PATH for the Builder runtime.' : `Vibe workspace folder is missing (${cwd}).`;
+  return null;
+}
+
 function git(cwd, args) {
   try {
     return execFileSync('git', args, { cwd, encoding: 'utf8', stdio: ['ignore', 'pipe', 'pipe'], maxBuffer: 64 * 1024 * 1024 }).trim();
   } catch (error) {
-    throw new Error(redactGitError(error && (error.stderr || error.message)));
+    throw new Error(gitSpawnFault(error, cwd) || redactGitError(error && (error.stderr || error.message)));
   }
 }
 

@@ -100,6 +100,17 @@ function verifiedFixtureIdentity(t) {
   });
 }
 
+test('an inaccessible source checkout reports a host permission fault instead of spawnSync EACCES', { skip: process.getuid && process.getuid() === 0 }, t => {
+  const { dir, sha } = sourceRepo();
+  const workspaceRoot = fs.mkdtempSync(path.join(os.tmpdir(), 'vibe-ws-'));
+  fs.chmodSync(dir, 0o000);
+  t.after(() => fs.chmodSync(dir, 0o755));
+  assert.throws(
+    () => vibe.ensureVibeWorkspace({ workspaceRoot, session: { id: SESSION_ID }, sourceDirFor: () => dir, resolveHead: () => sha }),
+    error => /not accessible to the Builder runtime/.test(error.message) && error.message.includes(dir) && !/spawnSync/.test(error.message),
+  );
+});
+
 test('web TypeScript drafts are automatically checked even when the model skips verification', async () => {
   const { store, deps, repo } = setup([
     { thought: 'edit', tool: 'replace_in_file', args: { path: 'apps/web/src/hello.ts', old_text: '"hi"', new_text: 'BROKEN' } },
