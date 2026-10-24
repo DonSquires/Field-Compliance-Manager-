@@ -153,6 +153,16 @@ fi
 [[ "$(git -C "$RELEASES_DIR/$SHA8" rev-parse HEAD)" == "$HEAD_SHA" ]] || { log "release worktree is not at $HEAD_SHA"; exit 1; }
 cd "$RELEASES_DIR/$SHA8"
 
+supabase_cli() {
+  local version platform
+  version="$(node -p "require('./package-lock.json').packages['node_modules/supabase'].version")" || return 1
+  [[ "$version" =~ ^[0-9]+\.[0-9]+\.[0-9]+([+-][A-Za-z0-9.-]+)?$ ]] || { printf '%s\n' 'Supabase CLI version is missing or invalid in package-lock.json' >&2; return 1; }
+  platform="$(node -p 'process.platform + "-" + process.arch')" || return 1
+  # Explicitly include the native package: the host's unpinned npx cache lacked
+  # it and every edge deployment/ledger repair failed before reaching Supabase.
+  npx --yes --package="supabase@$version" --package="@supabase/cli-$platform@$version" supabase "$@"
+}
+
 OK=true
 if [[ -n "$NEW_MIGRATIONS" ]]; then
   : "${SUPABASE_ACCESS_TOKEN:?SUPABASE_ACCESS_TOKEN is required for migrations}"; : "${SUPABASE_PROJECT_REF:?}"
@@ -170,7 +180,7 @@ if [[ -n "$NEW_MIGRATIONS" ]]; then
     code="$(curl -s -o "$STATE_DIR/migration-$version.out" -w '%{http_code}' -X POST "https://api.supabase.com/v1/projects/${SUPABASE_PROJECT_REF}/database/query" \
       -H "Authorization: Bearer ${SUPABASE_ACCESS_TOKEN}" -H 'Content-Type: application/json' --data-binary "$body")"
     if [[ "$code" =~ ^2 ]]; then
-      if SUPABASE_ACCESS_TOKEN="$SUPABASE_ACCESS_TOKEN" npx --yes supabase migration repair --status applied "$version" --project-ref "$SUPABASE_PROJECT_REF" --yes >"$STATE_DIR/migration-$version-repair.out" 2>"$STATE_DIR/migration-$version-repair.err"; then
+      if SUPABASE_ACCESS_TOKEN="$SUPABASE_ACCESS_TOKEN" supabase_cli migration repair --status applied "$version" --project-ref "$SUPABASE_PROJECT_REF" --yes >"$STATE_DIR/migration-$version-repair.out" 2>"$STATE_DIR/migration-$version-repair.err"; then
         RESULTS+=("migration $version applied and ledgered")
       else
         fail_note "migration $version applied but ledger repair failed: $(tail -c 300 "$STATE_DIR/migration-$version-repair.err")"
@@ -185,7 +195,7 @@ fi
 if [[ -n "$FUNCTIONS" ]]; then
   : "${SUPABASE_ACCESS_TOKEN:?SUPABASE_ACCESS_TOKEN is required for edge functions}"; : "${SUPABASE_PROJECT_REF:?}"
   for fn in $FUNCTIONS; do
-    if SUPABASE_ACCESS_TOKEN="$SUPABASE_ACCESS_TOKEN" npx --yes supabase functions deploy "$fn" --project-ref "$SUPABASE_PROJECT_REF" --use-api >/dev/null 2>"$STATE_DIR/fn-$fn.err"; then
+    if SUPABASE_ACCESS_TOKEN="$SUPABASE_ACCESS_TOKEN" supabase_cli functions deploy "$fn" --project-ref "$SUPABASE_PROJECT_REF" --use-api >/dev/null 2>"$STATE_DIR/fn-$fn.err"; then
       # A deploy that uploads is not a function that starts: probe it so a BOOT_ERROR fails the release.
       boot_body="$(curl -s --max-time 30 -X POST "https://${SUPABASE_PROJECT_REF}.supabase.co/functions/v1/$fn" -H 'Content-Type: application/json' -d '{}' || true)"
       if [[ "$boot_body" == *BOOT_ERROR* || "$boot_body" == *WORKER_ERROR* ]]; then

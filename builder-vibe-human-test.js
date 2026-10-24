@@ -29,9 +29,16 @@ function uiChangedFiles(files) {
   return (files || []).filter(file => /^apps\/web\/(?:src\/|index\.html$|public\/)/.test(String(file)));
 }
 
+function humanTestInputFiles(files) {
+  return (files || []).filter(file => uiChangedFiles([file]).length
+    || /^apps\/web\/(?:e2e\/|(?:vite|playwright)\.config\.ts$|package(?:-lock)?\.json$)/.test(String(file)));
+}
+
 function humanTestSpecs(workspacePath, changedFiles) {
   const webDir = path.join(workspacePath, 'apps/web');
-  const specs = [HUMAN_SPEC, ...targetedE2eSpecs(changedFiles, webDir)];
+  const changedSpecs = (changedFiles || []).filter(file => /^apps\/web\/e2e\/[^/]+\.spec\.ts$/.test(file))
+    .map(file => file.slice('apps/web/'.length));
+  const specs = [HUMAN_SPEC, ...changedSpecs, ...targetedE2eSpecs(changedFiles, webDir)];
   return [...new Set(specs)].filter(spec => SPEC_PATTERN.test(spec) && fs.existsSync(path.join(webDir, spec)));
 }
 
@@ -129,7 +136,7 @@ async function runOnce({ workspacePath, changedFiles, reason, image, execute, ti
     summary = { passed: 0, failed: 0, skipped: 0, flaky: 0, complete: false, failures: [], errors: [], warnings: [], report_errors: ['No readable Playwright report was produced.'] };
   }
   const output = `${result.stdout || ''}\n${result.stderr || ''}`;
-  const ok = result.status === 'succeeded' && summary.complete && summary.failed === 0;
+  const ok = result.status === 'succeeded' && summary.complete && summary.passed > 0 && summary.failed === 0 && summary.errors.length === 0;
   return {
     ok,
     status: result.status,
@@ -152,4 +159,4 @@ function runVibeHumanTest({ workspacePath, changedFiles = [], reason = '', image
   return run;
 }
 
-module.exports = { HUMAN_SPEC, humanTestSpecs, runVibeHumanTest, summarizeHumanReport, uiChangedFiles };
+module.exports = { HUMAN_SPEC, humanTestSpecs, humanTestInputFiles, runVibeHumanTest, summarizeHumanReport, uiChangedFiles };

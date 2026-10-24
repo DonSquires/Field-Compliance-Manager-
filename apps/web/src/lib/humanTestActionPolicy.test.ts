@@ -34,6 +34,14 @@ describe('human test action safety policy', () => {
     'Move file',
     'Rename folder',
     'Copy document',
+    'Suspend staff member',
+    'Unsuspend Bob Test staff member',
+    'Reactivate agreement',
+    'Restore archived record',
+    'Resume service',
+    'Pause automation',
+    'Terminate agreement',
+    'Purge old records',
   ])('skips possible writes: %s', (label) => {
     expect(isWriteOrDestructiveAction(label)).toBe(true);
   });

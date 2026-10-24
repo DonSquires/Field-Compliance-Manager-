@@ -8,6 +8,44 @@ const { spawnSync } = require('node:child_process');
 const SCRIPT = path.resolve(__dirname, '../scripts/bob-release-lane.sh');
 const bashSyntax = (source) => spawnSync('bash', ['-n'], { input: source.replace(/\r\n/g, '\n'), encoding: 'utf8' });
 
+test('release CLI uses the locked version and explicitly installs its matching platform binary', t => {
+  const lane = fs.readFileSync(SCRIPT, 'utf8');
+  const helper = lane.slice(lane.indexOf('supabase_cli()'), lane.indexOf('\nOK=true'));
+  const directory = fs.mkdtempSync(path.join(os.tmpdir(), 'fcm-release-cli-'));
+  t.after(() => fs.rmSync(directory, { recursive: true, force: true }));
+  fs.writeFileSync(path.join(directory, 'package-lock.json'), JSON.stringify({ packages: { 'node_modules/supabase': { version: '2.115.0' } } }));
+  const result = spawnSync('bash', ['-s'], {
+    cwd: directory, encoding: 'utf8', input: `${helper}
+npx() { printf '%s\\n' "$@"; }
+supabase_cli functions deploy bob-query-atlas --project-ref fixture --use-api
+`,
+  });
+  assert.equal(result.status, 0, result.stderr);
+  assert.deepEqual(result.stdout.trim().split('\n'), [
+    '--yes', '--package=supabase@2.115.0', `--package=@supabase/cli-${process.platform}-${process.arch}@2.115.0`,
+    'supabase', 'functions', 'deploy', 'bob-query-atlas', '--project-ref', 'fixture', '--use-api',
+  ]);
+  assert.doesNotMatch(lane, /npx --yes supabase (?:migration|functions)/);
+  assert.match(lane, /supabase_cli migration repair/);
+  assert.match(lane, /supabase_cli functions deploy/);
+  fs.writeFileSync(path.join(directory, 'package-lock.json'), JSON.stringify({ packages: { 'node_modules/supabase': { version: 'latest' } } }));
+  const refused = spawnSync('bash', ['-s'], {
+    cwd: directory, encoding: 'utf8', input: `${helper}
+npx() { printf '%s\\n' 'must not install an unpinned CLI'; }
+supabase_cli --version
+`,
+  });
+  assert.equal(refused.status, 1);
+  assert.equal(refused.stdout, '');
+  assert.match(refused.stderr, /Supabase CLI version is missing or invalid/);
+});
+
+test('the unapplied Atlas gap migration preserves service-only RPC boundaries without invented grants', () => {
+  const sql = fs.readFileSync(path.resolve(__dirname, '../supabase/migrations/20241022120000_grant_unwired_rpcs.sql'), 'utf8')
+    .replace(/--[^\n]*/g, '').trim();
+  assert.equal(sql, 'SELECT 1;');
+});
+
 test('worker launcher changes redeploy the control plane as well as the worker image', () => {
   const lane = fs.readFileSync(SCRIPT, 'utf8');
   const classification = lane.slice(lane.indexOf('has()'), lane.indexOf('WEB_ONLY_NOTE='));

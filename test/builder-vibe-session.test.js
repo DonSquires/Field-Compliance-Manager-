@@ -88,6 +88,18 @@ function installFixtureTypecheck(repo) {
   repo.sha = git(repo.dir, ['rev-parse', 'HEAD']);
 }
 
+function verifiedFixtureIdentity(t) {
+  const previous = { name: process.env.BOB_BUILDER_GIT_NAME, email: process.env.BOB_BUILDER_GIT_EMAIL };
+  process.env.BOB_BUILDER_GIT_NAME = 'Don Squires';
+  process.env.BOB_BUILDER_GIT_EMAIL = '256263525+DonSquires@users.noreply.github.com';
+  t.after(() => {
+    if (previous.name === undefined) delete process.env.BOB_BUILDER_GIT_NAME;
+    else process.env.BOB_BUILDER_GIT_NAME = previous.name;
+    if (previous.email === undefined) delete process.env.BOB_BUILDER_GIT_EMAIL;
+    else process.env.BOB_BUILDER_GIT_EMAIL = previous.email;
+  });
+}
+
 test('web TypeScript drafts are automatically checked even when the model skips verification', async () => {
   const { store, deps, repo } = setup([
     { thought: 'edit', tool: 'replace_in_file', args: { path: 'apps/web/src/hello.ts', old_text: '"hi"', new_text: 'BROKEN' } },
@@ -102,6 +114,67 @@ test('web TypeScript drafts are automatically checked even when the model skips 
   assert.equal(checks.length, 1);
   assert.equal(checks[0].payload.ok, false);
   assert.match(checks[0].payload.source_fingerprint, /^[a-f0-9]{64}$/);
+});
+
+test('a real edit permits the same verification command again after more than three repairs', async t => {
+  const steps = [];
+  let oldText = '"hi"';
+  for (let index = 0; index < 4; index++) {
+    const newText = index === 3 ? '"repaired"' : `BROKEN${index}`;
+    steps.push(
+      { tool: 'replace_in_file', args: { path: 'apps/web/src/hello.ts', old_text: oldText, new_text: newText } },
+      { tool: 'run', args: { command: 'npm run lint --prefix apps/web' } },
+    );
+    oldText = newText;
+  }
+  steps.push({ tool: 'reply', args: { message: 'Repaired and checked.' } });
+  const { store, deps, repo, workspaceRoot } = setup(steps);
+  t.after(() => { fs.rmSync(workspaceRoot, { recursive: true, force: true }); fs.rmSync(repo.dir, { recursive: true, force: true }); });
+  installFixtureTypecheck(repo);
+  const result = await vibe.processVibeMessage({ store, message: ownerMessage('repair the greeting'), deps });
+  assert.equal(result.error, undefined);
+  const checks = store.state.rows.filter(row => row.payload?.tool === 'run' && !row.payload.automatic);
+  assert.equal(checks.length, 4);
+  assert.deepEqual(checks.map(row => row.payload.ok), [false, false, false, true]);
+});
+
+test('no-op edits do not reset the repeated verification guard', async t => {
+  const steps = Array.from({ length: 4 }, () => [
+    { tool: 'run', args: { command: 'node --check missing.js' } },
+    { tool: 'write_file', args: { path: 'apps/web/src/hello.ts', content: 'export const hello = "hi";\n' } },
+  ]).flat();
+  const { store, deps, repo, workspaceRoot } = setup(steps);
+  t.after(() => { fs.rmSync(workspaceRoot, { recursive: true, force: true }); fs.rmSync(repo.dir, { recursive: true, force: true }); });
+  const result = await vibe.processVibeMessage({ store, message: ownerMessage('verify the source'), deps });
+  assert.equal(result.error, true);
+  assert.match(result.reply, /identical tool call limit/);
+});
+
+test('Playwright specs are refused by the Vitest command with a runner-specific correction', async t => {
+  const { store, deps, repo, workspaceRoot } = setup([
+    { tool: 'run', args: { command: 'npm run test --prefix apps/web -- e2e/dr-bob-human-test.spec.ts' } },
+    { tool: 'reply', args: { blocked_reason: 'Use the browser worker instead.' } },
+  ]);
+  t.after(() => { fs.rmSync(workspaceRoot, { recursive: true, force: true }); fs.rmSync(repo.dir, { recursive: true, force: true }); });
+  const result = await vibe.processVibeMessage({ store, message: ownerMessage('run the human test'), deps });
+  assert.equal(result.error, true);
+  assert.match(result.reply, /Wrong test runner/);
+  assert.match(store.state.rows.find(row => row.payload?.tool === 'run').payload.preview, /Do not rewrite Playwright imports/);
+});
+
+test('the advertised human_test tool clears a misrouted browser check using the correct runner', async t => {
+  const { store, deps, repo, workspaceRoot, model } = setup([
+    { tool: 'run', args: { command: 'npm run test --prefix apps/web -- e2e/dr-bob-human-test.spec.ts' } },
+    { tool: 'human_test', args: { reason: 'Use Playwright rather than Vitest.' } },
+    { tool: 'reply', args: { message: 'Browser checks passed using the correct runner.' } },
+  ], { humanTest: async () => ({ ok: true, passed: 1, failed: 0 }) });
+  t.after(() => { fs.rmSync(workspaceRoot, { recursive: true, force: true }); fs.rmSync(repo.dir, { recursive: true, force: true }); });
+  const result = await vibe.processVibeMessage({ store, message: ownerMessage('run the browser test'), deps });
+  assert.equal(result.error, undefined);
+  assert.ok(model.calls[0].request.output_schema.properties.tool.enum.includes('human_test'));
+  assert.ok(model.calls[0].request.tools.some(tool => tool.function.name === 'human_test'));
+  assert.equal(store.state.rows.find(row => row.payload?.tool === 'run').payload.ok, false);
+  assert.equal(store.state.rows.find(row => row.payload?.tool === 'human_test').payload.ok, true);
 });
 
 test('native tools share edit contracts and describe literal source discovery precisely', () => {
@@ -727,6 +800,7 @@ test('revert undoes the last turn and ship pushes the branch and opens one pull 
       { thought: 'edit', tool: 'replace_in_file', args: { path: 'apps/web/src/hello.ts', old_text: '"one"', new_text: '"two"' } },
       { thought: 'tell', tool: 'reply', args: { message: 'two' } },
     ], {
+      humanTest: async () => ({ ok: true, passed: 1, failed: 0, skipped: 0, warnings: [] }),
       publish: async args => { published.push(args); },
       openPullRequest: async args => { opened.push(args); return { url: 'https://github.com/o/r/pull/7', number: 7 }; },
     });
@@ -742,6 +816,7 @@ test('revert undoes the last turn and ship pushes the branch and opens one pull 
     assert.equal(published[0].branch, 'bob/vibe-1a2b3c4d');
     assert.equal(opened.length, 1);
     assert.match(opened[0].body, /never merge or deploy/);
+    assert.match(opened[0].body, /human_test: passed/);
     assert.equal(store.state.session.status, 'shipped');
     assert.equal(store.state.session.pr_url, 'https://github.com/o/r/pull/7');
     assert.equal(git(ws, ['log', '-1', '--format=%ae']), '256263525+DonSquires@users.noreply.github.com');
@@ -750,6 +825,77 @@ test('revert undoes the last turn and ship pushes the branch and opens one pull 
     delete process.env.BOB_BUILDER_GIT_EMAIL;
     delete process.env.BOB_BUILDER_GIT_NAME;
   }
+});
+
+test('publication freshly checks a failing draft and permits shipping only after repair', async t => {
+  verifiedFixtureIdentity(t);
+  const published = [];
+  const { store, deps, repo, workspaceRoot } = setup([
+    { tool: 'replace_in_file', args: { path: 'apps/web/src/hello.ts', old_text: '"hi"', new_text: 'BROKEN' } },
+    { tool: 'reply', args: { blocked_reason: 'Needs repair.' } },
+    { tool: 'replace_in_file', args: { path: 'apps/web/src/hello.ts', old_text: 'BROKEN', new_text: '"fixed"' } },
+    { tool: 'reply', args: { message: 'Repaired.' } },
+  ], {
+    humanTest: async () => ({ ok: true, passed: 1 }),
+    publish: async args => published.push(args),
+    openPullRequest: async () => ({ url: 'https://github.com/o/r/pull/7', number: 7 }),
+  });
+  t.after(() => { fs.rmSync(workspaceRoot, { recursive: true, force: true }); fs.rmSync(repo.dir, { recursive: true, force: true }); });
+  installFixtureTypecheck(repo);
+  await vibe.processVibeMessage({ store, message: ownerMessage('edit the greeting'), deps });
+  const head = store.state.session.head_sha;
+  const refused = await vibe.processVibeMessage({ store, message: ownerMessage('ship', 'ship'), deps });
+  assert.equal(refused.error, true);
+  assert.match(refused.reply, /Publication refused.*lint/);
+  assert.equal(published.length, 0);
+  assert.equal(store.state.session.head_sha, head);
+  assert.equal(store.state.session.status, 'open');
+  await vibe.processVibeMessage({ store, message: ownerMessage('repair the error'), deps });
+  const shipped = await vibe.processVibeMessage({ store, message: ownerMessage('ship', 'ship'), deps });
+  assert.equal(shipped.error, undefined);
+  assert.equal(published.length, 1);
+  const checks = store.state.rows.filter(row => row.payload?.reason === 'pre_publish' && row.payload.tool === 'run');
+  assert.deepEqual(checks.map(row => row.payload.ok), [false, true]);
+  assert.notEqual(checks[0].payload.head_sha, checks[1].payload.head_sha);
+});
+
+for (const mode of ['failed', 'missing', 'drift']) test(`publication refuses ${mode} browser verification without pushing`, async t => {
+  verifiedFixtureIdentity(t);
+  let published = 0;
+  const { store, deps, repo, workspaceRoot } = setup([
+    { tool: 'replace_in_file', args: { path: 'apps/web/src/hello.ts', old_text: '"hi"', new_text: '"draft"' } },
+    { tool: 'reply', args: { blocked_reason: 'Preserve draft for review.' } },
+  ], {
+    publish: async () => { published++; },
+    humanTest: mode === 'missing' ? undefined : async ({ workspacePath }) => {
+      if (mode === 'drift') fs.writeFileSync(path.join(workspacePath, 'apps/web/src/hello.ts'), 'export const changed = true;\n');
+      return { ok: mode !== 'failed', passed: 1, failed: mode === 'failed' ? 1 : 0 };
+    },
+  });
+  t.after(() => { fs.rmSync(workspaceRoot, { recursive: true, force: true }); fs.rmSync(repo.dir, { recursive: true, force: true }); });
+  await vibe.processVibeMessage({ store, message: ownerMessage('update the greeting'), deps: { ...deps, humanTest: undefined } });
+  const result = await vibe.processVibeMessage({ store, message: ownerMessage('ship', 'ship'), deps });
+  assert.equal(result.error, true);
+  assert.match(result.reply, /Publication refused/);
+  assert.equal(published, 0);
+});
+
+test('edits to the browser harness itself trigger browser verification at handoff', async t => {
+  let walked = 0;
+  const { store, deps, repo, workspaceRoot } = setup([
+    { tool: 'write_file', args: { path: 'apps/web/e2e/example.spec.ts', content: 'export {};\n' } },
+    { tool: 'reply', args: { message: 'Test added.' } },
+  ], {
+    humanTest: async ({ changedFiles }) => {
+      walked++;
+      assert.ok(changedFiles.includes('apps/web/e2e/example.spec.ts'));
+      return { ok: true, passed: 1 };
+    },
+  });
+  t.after(() => { fs.rmSync(workspaceRoot, { recursive: true, force: true }); fs.rmSync(repo.dir, { recursive: true, force: true }); });
+  const result = await vibe.processVibeMessage({ store, message: ownerMessage('add a browser test'), deps });
+  assert.equal(result.error, undefined);
+  assert.equal(walked, 1);
 });
 
 test('ship with no changes does not publish', async () => {

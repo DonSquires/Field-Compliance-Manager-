@@ -149,6 +149,23 @@ screen in isolation when the same node controls several workflows.
 
 ### 8. Human-test acceptance
 
+**Owner test-data ruling, 2026-10-22; operational clarification 2026-10-24.**
+Text entered for testing starts with `Bob Test`; numeric-only input starts with
+`999`; dates may be selected to exercise the scenario. Append a run identifier
+to names so concurrent runs are distinguishable. A valid email address, UUID,
+enum, or constrained number cannot always carry that literal prefix: use a
+valid synthetic fixture value, label its parent test record `Bob Test`, and
+record the constraint and exception. Never bypass application validation to
+force a prefix.
+
+Test labels are identification, not write authority. Default to offline,
+stateful fixtures or a dedicated test tenant/identity. Record created IDs,
+organisation and run provenance; archive, suspend, reactivate, delete or clean
+up only those exact test-created records. A matching name or `999` prefix on
+an existing record is not proof Bob created it. Do not send email/SMS, bill,
+dispatch or mutate production records merely because an input is labelled
+as test data. Live tests still require the governed approval/credential path.
+
 A UI is not complete because it compiles or matches a screenshot. Bob's human test must:
 
 - Navigate through visible controls as a real user
@@ -159,6 +176,42 @@ A UI is not complete because it compiles or matches a screenshot. Bob's human te
 - Exercise safe read-only paths and controlled governed actions
 - Reload and verify persistence where a write was intentionally tested
 - Attach a structured report with findings, URLs, evidence, and next move
+
+#### Workflow proof, not just a walk
+
+Before editing, derive a bounded scenario from the role/job, source records,
+schema writer/RPC and Atlas capability/direct edges. Trace proven `flow_reach`
+separately from structural `fk_reach`; a references-only edge is not a writer.
+For each scenario define expected versus observed:
+
+| Stage | Required assertions |
+| --- | --- |
+| Before | Dedicated identity, role/permission, organisation, source record ID, starting route, initial status and configured prerequisites. |
+| During | Correct active navigation/tab/row (semantic state and visible indication), required/invalid/valid entry, cancel without writes, correct request/RPC arguments and tenant, loading/duplicate-submit/error behavior, audit/receipt where required. |
+| After | Persisted values, refresh and leave/return, Back/Forward with the same authorised record/context, expected derived status, downstream queue/report, next actor's permitted view and rejected unauthorised access. |
+| Lifecycle | Archive/suspend on the created test record, absence from the active list, preserved history/detail where specified, refusal of disallowed actions, and restore/reactivate only if the schema/workflow supports it. |
+
+Use existing targeted Playwright specs with stateful fixtures for write and
+retention assertions. A hard-coded successful mock response proves neither a
+saved record nor reload persistence: update the fixture store on the actual
+write and assert subsequent reads through the UI. Fixture persistence proves
+the client workflow, not live PostgreSQL/RLS, triggers, or production delivery.
+Verify those separately through the governed live read path, approved test
+identity and controlled write path when authorised.
+
+Run `human_test` for the broad read-only browser smoke/UX walk and targeted
+browser specs. It is not an automatic verifier for every business outcome,
+Atlas blast radius, data retention, selected state or lifecycle operation.
+Name the targeted assertions/specs actually executed and record every untested
+stage as **not verified**. Do not turn a recommendation into a proven defect.
+
+**Choose the runner correctly.** `npm run test --prefix apps/web -- src/...`
+is Vitest, with paths relative to `apps/web`. Playwright `e2e/*.spec.ts` belongs
+to the browser worker (`human_test` in Vibe), not Vitest. When the wrong runner
+loads a browser spec, repair discovery configuration; never introduce `any`,
+conditional test imports, placeholder edits or skipped assertions to hide it.
+Fresh lint and browser verification run again before Vibe publishes a PR;
+failed/unavailable evidence preserves the branch without pushing it.
 
 The human observer also performs a conservative visual UX audit at each
 checkpoint. It records measurable findings for horizontal overflow and

@@ -228,7 +228,7 @@ npm run test:manual-walkthroughs
    - Shell & Entitlements (20+ phases)
 
 ### 5. **LONG-TERM** — Integrate Into CI
-   - Superseded by the 2026-10-12 owner ruling: Bob's VPS owns verification; GitHub Actions are not used.
+   - Current owner ruling (2026-10-24): the no-Actions restriction is lifted. GitHub supplies PR/main CI and retained evidence in support of Vibe Builder and Bob Builder; the VPS retains the repair loop and single production migration writer. See [credential boundaries](BOB_CREDENTIAL_BOUNDARIES.md).
    - Run after every merge to detect regressions
    - Compare console output across builds
 

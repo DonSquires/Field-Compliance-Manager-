@@ -1,8 +1,13 @@
 # Bob VPS Verification and Human QA
 
-GitHub is the canonical source repository only. It runs no CI, agent, mirror, or
-release workflow. Bob's control plane on the VPS owns routine verification and
-the bounded repair loop.
+GitHub is the canonical source repository. The expanded owner decision of
+2026-10-24 lifts GitHub-specific workflow restrictions, with Vibe Builder and
+Bob Builder remaining the primary builders. GitHub supports them with
+credential-free PR/main verification, review and retained evidence; additional
+governed support workflows may be added without a workflow-name allowlist.
+Bob's control plane on the VPS still owns the bounded repair loop and the sole
+production migration-writing lane. GitHub checks complement the existing
+VPS main-health loop; they do not replace or automatically trigger that agent.
 
 ## Main-Health Loop
 

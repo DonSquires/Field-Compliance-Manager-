@@ -182,6 +182,19 @@ RLS remains the hard backstop underneath. In this repo the mechanism is
 - **Legal, identity-critical, enforcement and commercial truth is human-decided.**
   Bob explains verdicts, finds missing evidence, drafts wording, prepares
   proposals; a person signs (the fire-control key in `PRODUCT_DESIGN.md` §7.2).
+- **GitHub support ruling (owner, 2026-10-24; expanded after PR verification).**
+  The owner lifted the GitHub-specific restrictions and delegated selection of
+  supporting GitHub jobs. Vibe Builder and Bob Builder remain the primary
+  building systems; GitHub supplies CI, review, artifacts and supporting
+  automation rather than a competing builder. This supersedes the
+  2026-10-12 no-Actions rule and the initial PR-only workflow allowlist.
+  Supporting Supabase, embedding or release workflows are not categorically
+  prohibited, but each implementation still needs scoped credentials,
+  governed effects and verification. The current topology keeps the VPS as
+  the sole production migration writer; do not add a competing writer.
+  PR code receives no production secrets. The PR integration boundary,
+  verified release identity and truthful verification remain in force;
+  lifting a platform restriction does not make a failed test pass.
 
 ## 5. Runtime contract (how this repo implements it)
 

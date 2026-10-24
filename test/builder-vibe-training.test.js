@@ -33,3 +33,18 @@ test('grounded discovery card preserves the private recovery boundary and verifi
   assert.match(sql, /none proves deployment or live tenant acceptance/);
   assert.match(vibeSystemPrompt(), /VERIFIED STARTING FILES/);
 });
+
+test('Vibe teaches workflow evidence, test-data provenance and the correct browser runner', () => {
+  const prompt = vibeSystemPrompt();
+  assert.match(prompt, /Playwright specs under e2e\/ belong to human_test, not Vitest/);
+  assert.match(prompt, /AFTER \(saved record, reload, back\/forward/);
+  assert.match(prompt, /numeric-only values start with "999"/);
+  assert.match(prompt, /text values start with "Bob Test"/);
+  assert.match(prompt, /identified by ID, tenant and run provenance/);
+  assert.match(prompt, /"unwired" means no registered caller, not missing database EXECUTE grants/);
+  const config = fs.readFileSync(path.join(__dirname, '../apps/web/vite.config.ts'), 'utf8');
+  assert.match(config, /exclude: \[\.\.\.configDefaults.exclude, 'e2e\/\*\*'\]/);
+  const spec = fs.readFileSync(path.join(__dirname, '../apps/web/e2e/dr-bob-human-test.spec.ts'), 'utf8');
+  assert.match(spec, /import \{ expect, test \} from '@playwright\/test'/);
+  assert.doesNotMatch(spec, /process\.env\.VITEST|let test: any|Intentionally left empty/);
+});
