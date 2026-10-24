@@ -19,7 +19,7 @@ const { isProtectedPath, protectedReason, normalizeRepoPath } = require('./build
 const { VIBE_BRANCH_PREFIX, builderCommitIdentity, redactGitError, gitSpawnFault } = require('./builder-branch-workspace');
 const { buildModelRunRequest, callModelGateway, fetchModelHealth, selectProviders, providerRequest } = require('./supabase/functions/_shared/builder-model-adapter');
 
-const PROMPT_VERSION = 'vibe-v15';
+const PROMPT_VERSION = 'vibe-v16';
 const VIBE_LIMITS = Object.freeze({
   maxTurns: Math.max(6, Number(process.env.BOB_VIBE_TURNS || 40)),
   wallBudgetMs: Math.max(60_000, Number(process.env.BOB_VIBE_BUDGET_MS || 20 * 60_000)),
@@ -60,6 +60,30 @@ const clip = (text, cap) => {
   const value = String(text ?? '');
   return value.length <= cap ? value : `${value.slice(0, cap)}\n[… ${value.length - cap} more chars]`;
 };
+
+const EDIT_VERB = /\b(fix|revert|build|add|implement|replace|remove|delete|correct|redesign|update|make|improve|create|restore|rename|refactor|continue|carry on|style|move|wire|change|edit|modify|adjust|tweak|rewrite|convert|migrate|swap|apply|undo)\b/i;
+const NO_EDIT_REQUEST = /\b(without|no)\s+(editing|changing|modifying|touching|code\s+changes?|changes?|edits?)\b|\b(do\s+not|don't|dont|never)\s+(edit|change|modify|touch|write)\b|\b(read[- ]only|dry[- ]run)\b/i;
+// Verification phrases mention "build"/"test" as nouns, not as a request to build something.
+const VERIFY_PHRASE = /\b(?:npm\s+)?(?:run|rerun|re-run|execute|kick off)\s+(?:the\s+|a\s+)?(?:build|tests?|typecheck|type[- ]check|lint|checks?|verification|human[_ ]test|dr\.? bob)\b|\b(?:verify|check|confirm|test|review|inspect|audit|diagnose|explain|show|list|summari[sz]e)\b(?:\s+(?:that|whether|if|the|this|my|it|its|your))?(?:\s+(?:fix|fixes|change|changes|build|update|updates|edit|edits|redesign|revert))?/gi;
+const POLITE_REQUEST = /^\s*(?:please\s+)?(?:can|could|would|will)\s+you\b|^\s*please\b/i;
+
+// Classifies the owner's message: a question, a request to change files, or neither (verification/informational).
+function classifyOwnerRequest(content) {
+  const text = String(content || '');
+  const politeRequest = POLITE_REQUEST.test(text);
+  const questionForm = /\?\s*$|^\s*(what|where|why|how|which|who|when|is|are|does|do|can|could|should|would|will|explain)\b/i.test(text);
+  if (NO_EDIT_REQUEST.test(text)) return { asked: questionForm && !politeRequest, wantsChange: false };
+  const editText = text.replace(VERIFY_PHRASE, ' ');
+  const wantsChange = EDIT_VERB.test(editText) && (!questionForm || politeRequest);
+  return { asked: questionForm && !wantsChange, wantsChange };
+}
+
+const COMPLETION_CLAIM = /\b(done|fixed|implemented|updated|changed|added|removed|completed|committed|reverted|restored|created|applied|finished|shipped|resolved)\b/i;
+// Only a genuine clarifying question to the owner may skip the change safeguards; "Fixed. Can you check?" is a completion claim.
+function isClarifyingQuestion(reply) {
+  const text = String(reply || '').trim();
+  return /\?\s*$/.test(text) && !COMPLETION_CLAIM.test(text);
+}
 
 function vibeSystemPrompt(limits = VIBE_LIMITS) {
   return [
@@ -196,8 +220,8 @@ function vibeNativeTools(tools) {
     write_note: { properties: { text: path }, required: ['text'] },
     atlas: { properties: { action: { type: 'string', enum: ['capability_map', 'terrain_edges', 'blast_radius', 'gap_report'] }, name: text, type: text, direction: text, depth: integer, limit: integer }, required: ['action'] },
     live_count: { properties: { table: path, column: text, equals: { type: ['string', 'number', 'boolean', 'null'] } }, required: ['table'] },
-    reply: { properties: { message: path, blocked_reason: text }, required: ['message'] },
-    finish: { properties: { message: path, blocked_reason: text }, required: ['message'] },
+    reply: { properties: { message: path, blocked_reason: text, no_change_reason: text }, required: ['message'] },
+    finish: { properties: { message: path, blocked_reason: text, no_change_reason: text }, required: ['message'] },
   };
   const descriptions = {
     list_dir: 'List existing file/directory names, not file contents.',
@@ -211,8 +235,8 @@ function vibeNativeTools(tools) {
     delete_file: 'Delete an inspected, unprotected file only when required by the task.',
     run: 'Run existing bounded tests, lint or build commands. npm install/ci is blocked. Use npm run lint --prefix apps/web for TypeScript.',
     atlas: 'Read the live build map. Discover exact entity names with capability_map before terrain_edges or blast_radius. Flow edges are distinct from FK structure.',
-    reply: 'Answer the owner after verification, or ask a product question. You supply code/tool arguments yourself. Include blocked_reason for an unresolved failure.',
-    finish: 'Finish with an honest owner-facing message after verification. Include blocked_reason for unresolved failures.',
+    reply: 'Answer the owner after verification, or ask a product question. You supply code/tool arguments yourself. Include blocked_reason for an unresolved failure, or no_change_reason when the request truly needs no file change.',
+    finish: 'Finish with an honest owner-facing message after verification. Include blocked_reason for unresolved failures, or no_change_reason when no file change is needed.',
     generate_visual_baselines: 'Generate up to six exact allowed Playwright PNG paths with an intentional-change rationale, never merely to bless a mismatch.',
     human_test: 'Run Dr Bob\'s human browser walk of this branch (offline fixtures, desktop) plus e2e specs targeting the changed web files. Slow (minutes): use after UI edits are lint-clean.',
   };
@@ -633,7 +657,11 @@ async function runConversation({ store, session, message, workspacePath, branch,
   let loopRecoveryUsed = false;
   let proseRecoveryUsed = false;
   let emptyReplyCorrected = false;
-  const ownerAsked = /\?\s*$|^\s*(what|where|why|how|which|who|when|is|are|does|do|can|could|should|explain)\b/i.test(String(message.content || ''));
+  // Edits that actually changed workspace bytes this message; a successful-but-identical edit is not progress.
+  let effectiveEdits = 0;
+  let noChangeReplyCorrected = false;
+  // A request to alter code; verification-only or question messages may legitimately change nothing.
+  const { asked: ownerAsked, wantsChange: ownerWantsChange } = classifyOwnerRequest(message.content);
   // Escalation prefers the owner-approved stronger cloud model when present, else the next distinct local one.
   const nextCandidate = () => {
     const cloudIndex = candidates.findIndex((entry, index) => index > active && entry.provider === 'ollama_cloud');
@@ -770,6 +798,7 @@ async function runConversation({ store, session, message, workspacePath, branch,
   const handoff = async (reply, model, { browser = true } = {}) => {
     await ensureTypecheck();
     if (browser) await ensureHumanTest();
+    if (!effectiveEdits && ownerWantsChange && !isClarifyingQuestion(reply)) reply = `No files changed during this message.\n\n${reply}`;
     const walked = humanTestRan ? `\n\n${humanTestRan.infrastructure ? `Dr Bob's browser walk could not run: ${clip(humanTestRan.error, 300)}` : `Dr Bob's browser walk (fixture data, desktop): ${humanTestRan.passed || 0} passed, ${humanTestRan.failed || 0} failed, ${humanTestRan.skipped || 0} skipped${humanTestRan.warnings?.length ? `; ${humanTestRan.warnings.length} UX/request warning(s) recorded` : ''}.`}` : '';
     return lastVerification?.failed
       ? { reply: `Changes are not verified: ${lastVerification.command} failed.\n${clip(lastVerification.preview, 900)}\n${clip(reply, 8000)}`, error: true, tools, model }
@@ -853,7 +882,7 @@ async function runConversation({ store, session, message, workspacePath, branch,
     const args = call.args && typeof call.args === 'object' ? call.args : {};
     if (call.tool === 'reply' || call.tool === 'finish') {
       const replyText = String(args.message || args.summary || call.thought || '');
-      if (!executedTools && !args.blocked_reason && !ownerAsked && !replyText.includes('?') && !emptyReplyCorrected) {
+      if (!executedTools && !args.blocked_reason && !args.no_change_reason && !ownerAsked && !isClarifyingQuestion(replyText) && !emptyReplyCorrected) {
         // A reply that only promises work ("I'll continue...") before any tool ran is not an answer.
         emptyReplyCorrected = true;
         messages.push({ role: 'assistant', content: JSON.stringify({ thought: String(call.thought ?? '').slice(0, 600), tool: call.tool, args }) }, { role: 'user', content: JSON.stringify({
@@ -871,6 +900,14 @@ async function runConversation({ store, session, message, workspacePath, branch,
         }
         continue;
       }
+      if (!effectiveEdits && ownerWantsChange && !args.blocked_reason && !args.no_change_reason && !isClarifyingQuestion(replyText) && !noChangeReplyCorrected) {
+        // Edits that failed or were byte-identical leave the owner's request undone; "Search for X" is not a result.
+        noChangeReplyCorrected = true;
+        messages.push({ role: 'assistant', content: JSON.stringify({ thought: String(call.thought ?? '').slice(0, 600), tool: call.tool, args }) }, { role: 'user', content: JSON.stringify({
+          error: 'Reply refused: no file changed during this message (edits failed, were no-ops, or none were made), so the owner\'s request is not done. read_file the exact lines, then make the requested change with replace_in_file or write_file. If nothing should change, reply with args.no_change_reason or args.blocked_reason stating honestly why.',
+        }) });
+        continue;
+      }
       await ensureTypecheck();
       await ensureHumanTest();
       if (lastVerification?.failed && !args.blocked_reason && !verificationCorrectionSent) {
@@ -881,7 +918,7 @@ async function runConversation({ store, session, message, workspacePath, branch,
         }) });
         continue;
       }
-      return handoff(args.blocked_reason || args.message || args.summary || call.thought || 'Done.', response.data?.model);
+      return handoff(args.blocked_reason || args.no_change_reason || args.message || args.summary || call.thought || 'Done.', response.data?.model);
     }
     messages.push({ role: 'assistant', content: JSON.stringify({ thought: String(call.thought ?? '').slice(0, 1500), tool: call.tool, args }) });
     const callKey = toolCallKey(call.tool, args);
@@ -900,6 +937,7 @@ async function runConversation({ store, session, message, workspacePath, branch,
         const beforeEdit = EDIT_VIBE_TOOLS.has(call.tool) ? uiFingerprint(changedVsBase()) : null;
         try { result = await tools[call.tool](args); } catch (error) { result = { error: clip(redactGitError(error && error.message), 1500) }; }
         if (beforeEdit !== null && !result?.error && beforeEdit !== uiFingerprint(changedVsBase())) {
+          effectiveEdits++;
           for (const key of repeatedCalls.keys()) {
             if (key.startsWith('human_test:') || key.startsWith('run:') && isVerificationCommand(JSON.parse(key.slice(4)).command || '')) repeatedCalls.delete(key);
           }
@@ -1143,4 +1181,4 @@ function createVibeWorker({ supabase, deps, intervalMs = 3000, log = console }) 
   };
 }
 
-module.exports = { PROMPT_VERSION, VIBE_LIMITS, vibeBranchName, vibeWorkspacePath, vibeSystemPrompt, vibeCloudAllowed, applyVibeRouting, vibeProviderCandidates, vibeToolSchema, vibeNativeTools, ensureVibeWorkspace, commitTurn, revertLastTurn, revertRefusedChanges, branchState, createVibeStore, isPrivateVisionAddress, assertLocalVisionUrl, describeVibeImage, prepareVibeAttachmentContext, runConversation, shipSession, processVibeMessage, createVibeWorker };
+module.exports = { PROMPT_VERSION, VIBE_LIMITS, classifyOwnerRequest, isClarifyingQuestion, vibeBranchName, vibeWorkspacePath, vibeSystemPrompt, vibeCloudAllowed, applyVibeRouting, vibeProviderCandidates, vibeToolSchema, vibeNativeTools, ensureVibeWorkspace, commitTurn, revertLastTurn, revertRefusedChanges, branchState, createVibeStore, isPrivateVisionAddress, assertLocalVisionUrl, describeVibeImage, prepareVibeAttachmentContext, runConversation, shipSession, processVibeMessage, createVibeWorker };
