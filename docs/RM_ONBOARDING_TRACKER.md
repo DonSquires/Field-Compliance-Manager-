@@ -16,7 +16,32 @@ actually work with a working org and its data and operations." Extended-scope,
 multi-session task — take as many turns as needed; real, verified progress each
 turn beats false completeness.
 
-## PATROL SOURCE ROW SYNC (2026-10-25) - BUILT AND VERIFIED, NOT APPLIED
+## DART BUSINESS-MODEL BUILD-OUT (2026-10-25) - STEP A APPLIED
+
+Owner decisions: build all five steps in order (A codes, B legacy correction
+and supersede, C animal outcomes, D stations, E finance), each as a reviewed
+PR. The 2025 sheet is canonical for the 681 overlapping visits. Sites 1-11 are
+mixed traps and cameras. Bait quantities are not recorded yet, so none are
+inferred.
+
+### Step A - pest-control vocabulary (PR #190, stacked on #189)
+
+- Migration `20261024224750_rm_pest_control_vocabulary.sql`, applied and
+  live-verified; `schema.sql` regenerated. It adds:
+  - work_subject codes `pest_device`, `animal`, `habitat`;
+  - work_activity codes `device_reset`, `device_unset`, `rebait`, `prefeed`,
+    `removal` (work-order candidate), `device_inactive`, `access_blocked`,
+    `cull`, `sighting`, `pest_patrol`;
+  - a new `biosecurity_species` catalog, seeded to every organisation.
+- R&M `rm_patrol_log` rules key on the labels from the master charge-code
+  file (`Misc\MASTER`), never on charge-code numbers, because the numbers are
+  renumbered between workbook versions.
+- DART 2026 simulation: `other/other` went from 511 rows to 0. Animal rows
+  now carry species.
+- Existing events are unchanged. Step B reclassifies them through a governed
+  correction with versions and audit.
+
+## PATROL SOURCE ROW SYNC (2026-10-25) - APPLIED (PR #189), LEGACY CORRECTION IS STEP B
 
 Owner requirement: "if a row has been updated, it will need to be updated in
 fcm as well so we need to know if a row was updated."
