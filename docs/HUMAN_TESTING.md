@@ -117,10 +117,12 @@ Bob's VPS polls the GitHub main SHA, runs the web build, full unit/source-guard
 suite, and bounded Playwright smoke suite in an isolated worker, then records a
 durable result per SHA. On a red baseline, Bob opens a constrained Builder
 repair, verifies and reviews it, and automatically merges only the approved
-low-risk test-only case. GitHub is the source host and, under the owner decision
-of 2026-10-24, also runs credential-free PR verification with offline fixtures.
-This does not move the repair agent or production migration writes into
-Actions; those remain on the VPS.
+low-risk test-only case. Under the expanded owner decision of 2026-10-24,
+GitHub supports the primary Vibe Builder/Bob Builder systems with
+credential-free PR/main verification and offline fixture evidence. Additional
+governed support workflows are permitted. The current topology does not move
+the repair agent or production migration writes into Actions; those remain on
+the VPS, without a competing production writer.
 
 Bob also owns the expansive human/visual pass, which produces screenshots, UX
 findings, HTTP evidence, traces, and before/during/after workflow reports:

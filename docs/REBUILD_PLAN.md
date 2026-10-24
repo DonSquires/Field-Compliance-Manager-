@@ -8,16 +8,29 @@ detailed backlogs (`ENTERPRISE_SAAS_TODO.md`, `PROTOTYPE_GAP_AUDIT.md`,
 Completion language is strict, as in the lineage: **merged ≠ deployed ≠
 glass-proven.** A workstream item is done only when its evidence gate is met.
 
-GitHub PR verification, owner decision 2026-10-24:
+GitHub support automation, expanded owner decision 2026-10-24:
+
+- The owner subsequently lifted the GitHub-specific restrictions and
+  delegated supporting workflow selection. Vibe Builder and Bob Builder
+  remain the primary builders. Remove the obsolete workflow-name allowlist;
+  GitHub supports CI, review and build evidence rather than becoming a
+  parallel builder. Additional governed workflows are permitted.
+- Extend the existing credential-free verification to pushes to `main`,
+  alongside PR and manual runs, so the integrated tree gets independent CI
+  evidence too. Retain the PR integration boundary and verified release
+  identity. Choose to keep the VPS as the single production migration writer;
+  lifting GitHub restrictions does not require duplicating production writes.
 
 - New `verify-pr.yml` uses no Supabase secrets, no persisted checkout credential
   and read-only contents permission. Three independent jobs run runtime and
   migration-inventory checks, web types/build/unit tests, and offline browser
   harness/navigation plus the existing operational smoke suite.
-- The owner explicitly retained the VPS as the sole production migration
-  writer. GitHub Supabase secret names were confirmed, but no live database,
+- The initial owner decision retained the VPS as the sole production migration
+  writer; that remains the selected topology. GitHub Supabase secret names
+  were confirmed, but no live database,
   embedding or deployment job is enabled by this workflow. Production
-  environment protections require a separate decision before Actions writes.
+  environment protections and scoped credentials must be designed before
+  implementing credentialed Actions jobs.
 - Existing product/test mismatches are expected to remain visible in CI;
   there is no skip or continue-on-error to make the Overview redesign green.
 - First Actions run `40071970872`: types/build passed; web tests passed 1,791
@@ -25,8 +38,13 @@ GitHub PR verification, owner decision 2026-10-24:
   checks passed 15/16, failing the existing Overview screenshot. The six
   harness/navigation checks completed, with one staff-navigation retry.
   Runtime passed 1,554 with 13 skipped and one obsolete no-Actions guard
-  failing. Update that guard to permit exactly `verify-pr.yml`; its separate
-  workflow contract retains the no-secret/read-only/no-release boundary.
+  failing. The initial correction allowed exactly `verify-pr.yml`; the
+  expanded owner decision now removes that allowlist entirely. The separate
+  verification-workflow contract retains its no-secret/read-only/no-release
+  boundary without forbidding additional workflows.
+- Corrected run `40072496447`: runtime passed 1,555 with 13 skipped; browser
+  harness/navigation passed 6/6 without retries. Only the existing Overview
+  unit guard and screenshot remain red (373/374 unit files, 15/16 smoke tests).
 
 Vibe verification repair (vibe-v14), 2026-10-24:
 
@@ -1151,9 +1169,11 @@ finance, payroll, and evidential work remain Grandmaster-gated. Expansion
 beyond eight changed files also stops at the gate.
 
 Owner ruling 2026-10-12: GitHub is the source repository only; no GitHub Actions
-CI, coding agent, Gitea mirror, or release workflow runs. **Narrowly superseded
-2026-10-24:** credential-free PR verification is now allowed; coding agents,
-mirrors, production writes and releases are not authorised in Actions.
+CI, coding agent, Gitea mirror, or release workflow runs. **Superseded
+2026-10-24:** the owner lifted GitHub-specific restrictions; Vibe Builder and
+Bob Builder remain the primary builders and GitHub provides supporting
+automation. The selected topology retains the VPS production writer and
+credential-free PR/main CI, not a competing builder or production writer.
 Bob's VPS directly
 polls the pinned GitHub `main` SHA, runs the isolated web build/unit/source-guard
 and Playwright smoke checks, and opens bounded Builder repair jobs for

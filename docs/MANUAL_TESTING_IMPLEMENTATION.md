@@ -138,7 +138,7 @@ npx playwright test --ui
 
 ### Short-term (this sprint):
 1. Create remaining 3 test suites (Roster-HR, Field Ops, Shells)
-2. Superseded by the 2026-10-12 owner ruling: Bob's VPS owns verification; GitHub Actions are not used.
+2. Current owner ruling (2026-10-24): GitHub supports Vibe Builder and Bob Builder with PR/main CI and retained evidence. The earlier no-Actions restriction is lifted; the VPS retains the repair loop and single production migration writer. See [credential boundaries](BOB_CREDENTIAL_BOUNDARIES.md).
 3. Set output baseline (log comparison across builds)
 
 ### Long-term:
@@ -181,4 +181,3 @@ Test suite is successful when:
 3. ✅ Detects real Gap 1, Gap 2, Gap 3 failures in current code
 4. ✅ Output can be read/parsed by Bob or automated review
 5. ✅ Running tests takes < 5 minutes total (fast feedback)
-
