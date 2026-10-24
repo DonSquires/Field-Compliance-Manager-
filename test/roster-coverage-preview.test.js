@@ -44,7 +44,13 @@ test('the Work Units card says when a static post\'s place cannot take attendanc
 });
 
 test('every presentation theme defines the tertiary background used by table headers', () => {
+  const tokens = readSource('../apps/web/src/styles/tokens.css');
+  const canonical = tokens.match(/:root\s*\{([^}]+)\}/)?.[1];
+  assert.ok(canonical, 'canonical root tokens must exist');
+  assert.match(canonical, /--color-bg-tertiary: #[0-9a-f]{6};/);
   const blocks = themes.split(/\n(?=\[data-theme=|:root)/).filter((block) => /--color-bg-primary:/.test(block));
-  assert.ok(blocks.length >= 4, `expected the theme blocks, found ${blocks.length}`);
+  for (const theme of ['light', 'high-contrast', 'night-patrol']) {
+    assert.ok(blocks.some((block) => block.startsWith(`[data-theme='${theme}']`)), `missing ${theme} override`);
+  }
   for (const block of blocks) assert.match(block, /--color-bg-tertiary: #[0-9a-f]{6};/, block.slice(0, 40));
 });

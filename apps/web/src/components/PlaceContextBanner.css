@@ -3,24 +3,24 @@
   gap: 10px;
   align-items: flex-start;
   padding: 10px 14px;
-  border: 1px solid #d7a24a;
-  border-radius: 6px;
-  background: #fff8e8;
-  color: #4b3514;
+  border: 1px solid var(--color-status-watch-border);
+  border-radius: var(--radius-md);
+  background: var(--color-status-watch-bg);
+  color: var(--color-status-watch);
   margin: 0 0 12px;
 }
 
 .place-context-banner.is-resolved {
-  border-color: #7bb9a6;
-  background: #eefaf5;
-  color: #184b3d;
+  border-color: var(--color-status-normal-border);
+  background: var(--color-status-normal-bg);
+  color: var(--color-status-normal);
 }
 
 .place-context-banner.is-locating,
 .place-context-banner.is-idle {
-  border-color: #aab8c5;
-  background: #f4f7fa;
-  color: #304454;
+  border-color: var(--color-border-strong);
+  background: var(--color-bg-elevated);
+  color: var(--color-text-secondary);
 }
 
 .place-context-banner > svg {
@@ -42,35 +42,35 @@
 }
 
 .place-context-banner small {
-  color: #6b521f;
+  color: var(--color-status-watch);
 }
 
 .place-context-banner.is-outside_geofence {
-  border-color: #d85050;
-  background: #fff0ef;
-  color: #5a1a17;
+  border-color: var(--color-status-critical);
+  background: var(--color-status-critical-bg);
+  color: var(--color-status-critical-text);
 }
 
 .place-context-banner.is-unavailable {
-  border-color: #aab8c5;
-  background: #f4f7fa;
-  color: #304454;
+  border-color: var(--color-border-strong);
+  background: var(--color-bg-elevated);
+  color: var(--color-text-secondary);
 }
 
 .place-context-banner__picker { align-items: center; display: flex; gap: 7px; min-width: min(520px, 75vw); }
-.place-context-banner__picker select { background: #fff; border: 1px solid #aab8c5; border-radius: 5px; color: #18212b; font: inherit; min-height: 34px; min-width: 0; padding: 0 30px 0 9px; width: 100%; }
+.place-context-banner__picker select { background: var(--color-bg-base); border: 1px solid var(--color-border-strong); border-radius: var(--radius-sm); color: var(--color-text-primary); font: inherit; min-height: 34px; min-width: 0; padding: 0 30px 0 9px; width: 100%; }
 
 @media (max-width: 640px) {
   .place-context-banner__picker { min-width: 0; width: 100%; }
 }
 
-.admin-shell .place-context-banner.is-console { display: flex; flex: 0 0 36px; align-items: center; gap: 8px; min-height: 36px; min-width: 0; margin: 0; padding: 0 10px; border: 0; border-bottom: 1px solid var(--console-hairline); border-radius: 0; color: #475569; background: #f1f5f9; font-size: 12px; }
+.admin-shell .place-context-banner.is-console { display: flex; flex: 0 0 36px; align-items: center; gap: 8px; min-height: 36px; min-width: 0; margin: 0; padding: 0 10px; border: 0; border-bottom: 1px solid var(--console-hairline); border-radius: 0; color: var(--console-muted); background: var(--console-surface-raised); font-size: 12px; }
 .admin-shell .place-context-banner.is-console > svg { margin: 0; }
 .place-context-banner.is-console label { flex: 0 1 320px; min-width: 0; }
-.place-context-banner.is-console select { width: 100%; min-width: 0; min-height: 28px; padding: 0 4px; border: 1px solid transparent; border-radius: 3px; color: #334155; background: transparent; font: inherit; }
-.place-context-banner.is-console select:hover { border-color: #94a3b8; }
-.place-context-banner.is-console button { min-height: 28px; border: 1px solid #94a3b8; border-radius: 3px; color: #334155; background: #fff; cursor: pointer; }
-.place-context-console-mode { flex: 0 0 auto; margin-left: auto; color: #64748b; font-size: 11px; }
+.place-context-banner.is-console select { width: 100%; min-width: 0; min-height: 28px; padding: 0 4px; border: 1px solid transparent; border-radius: var(--radius-xs); color: var(--console-text); background: transparent; font: inherit; }
+.place-context-banner.is-console select:hover { border-color: var(--color-border-strong); }
+.place-context-banner.is-console button { min-height: 28px; border: 1px solid var(--color-border-strong); border-radius: var(--radius-xs); color: var(--console-text); background: var(--console-surface); cursor: pointer; }
+.place-context-console-mode { flex: 0 0 auto; margin-left: auto; color: var(--console-muted); font-size: 11px; }
 @media (max-width: 1100px) {
   .place-context-console-mode { display: none !important; }
 }

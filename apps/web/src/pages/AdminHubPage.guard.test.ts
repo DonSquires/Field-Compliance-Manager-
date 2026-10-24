@@ -71,6 +71,21 @@ describe('Admin Hub operational data contract', () => {
     expect(source).toMatch(/renderUnavailable=\{\(message\) => <MetricCard[^>]+label="Welfare alerts"[^>]+tone="red" \/>\}/);
   });
 
+  it('uses canonical high-contrast tokens and hierarchy for dashboard headings', () => {
+    expect(css).toContain('--hub-ink: var(--color-accent-silver-light);');
+    expect(css).toContain('--hub-heading: var(--color-brand-primary);');
+    expect(css).toContain('.adminhub-command .admin-overview-header h1 { margin: 0; color: var(--hub-heading); font-size: 22px; font-weight: 700;');
+    expect(css).toContain('.adminhub-command .admin-section-heading h2 { margin: 0; font-size: 18px; font-weight: 600;');
+  });
+
+  it('keeps selected queue text readable on its pale highlight and hover state', () => {
+    expect(css).toContain('.admin-queue-row.is-next { border-left: 3px solid var(--hub-accent); background: var(--color-state-selected-bg); color: var(--color-state-selected-text); }');
+    expect(css).toContain('.admin-queue-row.is-next strong { color: var(--color-state-selected-text); }');
+    expect(css).toContain('.admin-queue-row.is-next > div > span,\n.admin-shell[data-theme] .adminhub-command .admin-queue-row.is-next time { color: var(--color-state-selected-text); }');
+    expect(css).toContain('.admin-queue-row.is-next:hover strong { color: var(--color-state-selected-text); }');
+    expect(css).toContain('.admin-queue-row.is-next:hover > div > span,\n.admin-shell[data-theme] .adminhub-command .admin-queue-row.is-next:hover time { color: var(--color-state-selected-text); }');
+  });
+
   it('queries welfare organization-wide because welfare alerts have no zone column', () => {
     const welfareQueries = source.split('\n').filter((line) => line.includes("from('welfare_alerts')"));
     expect(welfareQueries.length).toBeGreaterThanOrEqual(2);
@@ -84,7 +99,7 @@ describe('Admin Hub operational data contract', () => {
     expect(css).toContain('min-height: 0;');
     expect(css).toContain('grid-template-columns: minmax(280px,35fr) minmax(0,65fr)');
     expect(css).toMatch(/\.admin-pane-scroll\s*\{[^}]*overflow-y:\s*auto/s);
-    expect(css).toContain('flex: 0 0 48px');
+    expect(css).toContain('flex: 0 0 52px');
     expect(css).toContain('font-variant-numeric: tabular-nums');
     expect(css).not.toContain('max-width: 1320px');
     expect(source).toContain('Review, approve or assign in the governed record.');

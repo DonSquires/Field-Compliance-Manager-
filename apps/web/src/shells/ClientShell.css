@@ -3,15 +3,15 @@
   height: 100vh;
   min-width: 0;
   color: var(--color-text-primary);
-  background: #071019;
+  background: var(--color-bg-base);
 }
 
 .client-shell-sidebar,
 .client-mobile-drawer {
   display: flex;
   flex-direction: column;
-  background: #0b1620;
-  border-right: 1px solid #263746;
+  background: var(--color-bg-surface);
+  border-right: 1px solid var(--color-border);
 }
 
 .client-shell-sidebar {
@@ -34,7 +34,7 @@
   min-height: 46px;
   padding: 0 7px;
   border: 0;
-  color: #edf5f3;
+  color: var(--color-text-primary);
   background: transparent;
   cursor: pointer;
   text-align: left;
@@ -54,10 +54,10 @@
   width: 36px;
   height: 36px;
   flex: 0 0 36px;
-  border: 1px solid #3a645c;
-  border-radius: 7px;
-  color: #89d8c7;
-  background: #102a28;
+  border: 1px solid var(--color-border-strong);
+  border-radius: var(--radius-md);
+  color: var(--color-brand-primary);
+  background: var(--color-bg-hover);
 }
 
 .client-shell-brand div,
@@ -78,7 +78,7 @@
 .client-shell-brand small,
 .client-shell-topbar small {
   overflow: hidden;
-  color: #7f96a5;
+  color: var(--color-text-muted);
   font-size: 12px;
   text-overflow: ellipsis;
   white-space: nowrap;
@@ -99,7 +99,7 @@
   padding: 0 12px;
   border: 1px solid transparent;
   border-radius: 6px;
-  color: #9db0bf;
+  color: var(--color-text-secondary);
   background: transparent;
   cursor: pointer;
   font-size: 12px;
@@ -109,14 +109,14 @@
 
 .client-shell-nav button:hover,
 .client-shell-sidebar-footer > button:hover {
-  color: #dbebe7;
-  background: #111f2b;
+  color: var(--color-text-primary);
+  background: var(--color-bg-hover);
 }
 
 .client-shell-nav button.is-active {
-  color: #b9eee2;
-  border-color: #31564f;
-  background: #102725;
+  color: var(--color-brand-primary);
+  border-color: var(--color-border-strong);
+  background: var(--color-bg-hover);
 }
 
 .client-shell-sidebar.is-collapsed .client-shell-nav button,
@@ -135,13 +135,13 @@
   display: grid;
   gap: 4px;
   padding: 10px 11px;
-  border: 1px solid #263746;
-  border-radius: 6px;
-  background: #0e1b27;
+  border: 1px solid var(--color-border);
+  border-radius: var(--radius-sm);
+  background: var(--color-bg-base);
 }
 
 .client-shell-agreement span {
-  color: #6f8798;
+  color: var(--color-text-muted);
   font-size: 12px;
   font-weight: 800;
   text-transform: uppercase;
@@ -162,10 +162,10 @@
   place-items: center;
   width: 26px;
   height: 26px;
-  border: 1px solid #34495a;
+  border: 1px solid var(--color-border-strong);
   border-radius: 50%;
-  color: #9db0bf;
-  background: #101d29;
+  color: var(--color-text-secondary);
+  background: var(--color-bg-elevated);
   cursor: pointer;
 }
 
@@ -182,8 +182,8 @@
   flex: 0 0 58px;
   gap: 10px;
   padding: 0 20px;
-  border-bottom: 1px solid #263746;
-  background: #09131d;
+  border-bottom: 1px solid var(--color-border);
+  background: var(--color-bg-surface);
 }
 
 .client-shell-topbar > div {
@@ -192,10 +192,10 @@
 
 .client-role-badge {
   padding: 5px 8px;
-  border: 1px solid #34495a;
+  border: 1px solid var(--color-border-strong);
   border-radius: 999px;
-  color: #9eb2c1;
-  background: #101d29;
+  color: var(--color-text-secondary);
+  background: var(--color-bg-elevated);
   font-size: 12px;
   font-weight: 850;
   text-transform: uppercase;
@@ -213,10 +213,10 @@
   place-items: center;
   width: 34px;
   height: 34px;
-  border: 1px solid #34495a;
+  border: 1px solid var(--color-border-strong);
   border-radius: 6px;
-  color: #c7d6df;
-  background: #101d29;
+  color: var(--color-text-primary);
+  background: var(--color-bg-elevated);
   cursor: pointer;
 }
 
@@ -230,7 +230,7 @@
   place-items: center;
   min-height: 100vh;
   color: var(--color-text-secondary);
-  background: #071019;
+  background: var(--color-bg-base);
 }
 
 @media (max-width: 760px) {
@@ -248,7 +248,7 @@
     display: block;
     inset: 0;
     border: 0;
-    background: rgba(2, 8, 14, 0.72);
+    background: var(--color-bg-overlay);
   }
 
   .client-mobile-drawer {

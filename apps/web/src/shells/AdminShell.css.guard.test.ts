@@ -20,7 +20,7 @@ describe('admin shell desktop download control', () => {
     expect(css).toContain('width: 52px');
     expect(css).toContain('.admin-shell .admin-shell-main.is-workbench');
     expect(css).toContain('.admin-shell-main.is-workbench > .admin-shell-page');
-    expect(css).toContain('--console-action: #0F172A');
+    expect(css).toContain('--console-action: var(--color-bg-elevated);');
     expect(css).not.toMatch(/(?:^|\})\s*(?:html|body|#root)\s*\{/);
   });
 });

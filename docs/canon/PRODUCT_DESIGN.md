@@ -28,6 +28,40 @@ This is a **tactical operations platform**, not a consumer app. Three distinct o
 
 ## 2. Design Tokens
 
+### Universal dark shell ruling — 2026-10-24
+
+All app-managed routes, role shells, dialogs, menus, and pop-outs use the shared
+dark design tokens in `apps/web/src/styles/tokens.css`. Admin, client, and
+officer layouts remain role-specific; this ruling standardises their visual
+language, not their information architecture or safety controls. Page and
+component styles should consume semantic tokens rather than define a competing
+palette. Status colours retain their meaning, and selected/action states must
+keep readable foreground/background pairs. Any future accessibility mode must
+be an intentional token override, not an accidental page-level light palette.
+
+Shared page styles and the client portal consume this same palette, including
+their pop-out forms, error states and selected period controls. Primary actions
+use dark `--color-primary-text` on `--color-primary` (and
+`--color-primary-hover` for hover/pressed). Destructive buttons use the separate
+`--color-action-danger-*` pair; critical text uses
+`--color-status-critical-text` on dark status surfaces. Do not reuse the
+critical indicator colour as a small-text foreground or a white-text button.
+Keyboard focus must retain at least 3:1 contrast against its adjacent surface:
+use the selected-text colour for the pale next-action row and the primary-text
+colour for an inset ring on a filled primary button. Off-site safety advice
+and active welfare telemetry use the critical-text foreground, not the darker
+critical indicator colour.
+Number plates deliberately retain a light background and dark text through
+`--color-plate-*`; photo shading uses `--color-photo-shade` to preserve evidence
+legibility. These are semantic exceptions, not alternative page themes.
+
+Migration is incremental: shared page styles and the client portal have no
+local colour literals, but independent legacy stylesheets still need migration.
+Token guards and desktop/mobile fixture checks verify contrast, token
+inheritance, navigation, selected states and modal workflows. Fixture results
+do not establish live persistence, production role coverage or a completed
+app-wide visual audit.
+
 ### Operations console ruling — 2026-10-19 (owner approved)
 
 The admin operations console uses a viewport-locked hairline-grid workbench:
@@ -58,10 +92,9 @@ directory beside a dense assignment matrix and inline timesheet reconciliation.
 Neither presentation changes financial approvals, roster publication checks,
 licence evidence, or the organisation/branch scope of its existing writers.
 
-Actions on dark surfaces have explicit foreground/background pairs: white on
-`#1E40AF` for primary actions; `#F8FAFC` on `#1E293B` with a `#475569` border for
-secondary actions. Destructive/error semantics remain distinct. Reports and
-investigation actions share these contrast rules in both supported themes.
+The original console action pairs (white on cobalt, light text on slate) are
+superseded by the universal dark ruling above. Reports and investigation actions
+must use the same shared action pairs as other app-managed routes.
 
 All values come from `apps/web/src/styles/tokens.css`. Never hardcode colours or spacing in components.
 
@@ -69,15 +102,15 @@ All values come from `apps/web/src/styles/tokens.css`. Never hardcode colours or
 
 | Token | Value | Usage |
 |-------|-------|-------|
-| `--color-bg-base` | `#121212` | Global page background |
-| `--color-bg-surface` | `#1E1E1E` | Cards, panels, modals |
-| `--color-bg-elevated` | `#2A2A2A` | Hover states, dropdowns, tooltips |
-| `--color-brand-primary` | `#D32F2F` | Primary actions, active nav, PTT button |
-| `--color-brand-hover` | `#B71C1C` | Hover/pressed on primary actions |
-| `--color-accent-silver` | `#9E9E9E` | Borders, inactive icons, standby states |
-| `--color-accent-silver-light` | `#BDBDBD` | Secondary labels, helper text |
-| `--color-text-primary` | `#FFFFFF` | All primary body text and headings |
-| `--color-text-secondary` | `#E0E0E0` | Secondary text, table data, metadata |
+| `--color-bg-base` | `#07131B` | Global page background |
+| `--color-bg-surface` | `#0C202B` | Shells, cards, panels, modals |
+| `--color-bg-elevated` | `#112C3A` | Controls, dropdowns, elevated surfaces |
+| `--color-brand-primary` | `#14C8D4` | Primary actions and active navigation |
+| `--color-brand-hover` | `#0BA5B8` | Hover/pressed on primary actions |
+| `--color-accent-silver` | `#9BB1BF` | Borders, inactive icons, standby states |
+| `--color-accent-silver-light` | `#D4E0E6` | Secondary labels and helper text |
+| `--color-text-primary` | `#F5F9FB` | Primary body text and headings |
+| `--color-text-secondary` | `#B8CAD4` | Secondary text, table data, metadata |
 
 ### 2.2 Status Scale
 
@@ -85,17 +118,17 @@ Always paired with text + icon. Never colour alone.
 
 | Token | Value | Label | Icon | When to use |
 |-------|-------|-------|------|-------------|
-| `--color-status-normal` | `#4CAF50` | Normal | 🟢 | All clear, compliant, on time |
-| `--color-status-watch` | `#FFC107` | Watch | 🟡 | Approaching threshold, monitor |
-| `--color-status-action` | `#FF9800` | Action | 🟠 | Needs attention soon |
-| `--color-status-critical` | `#C62828` | Critical | 🔴 | Immediate action required |
+| `--color-status-normal` | `#4CC38A` | Normal | 🟢 | All clear, compliant, on time |
+| `--color-status-watch` | `#F2BF3A` | Watch | 🟡 | Approaching threshold, monitor |
+| `--color-status-action` | `#EF9B37` | Action | 🟠 | Needs attention soon |
+| `--color-status-critical` | `#D85050` | Critical | 🔴 | Immediate action required |
 
 ### 2.3 Reserved Colours
 
 | Token | Value | Reserved for |
 |-------|-------|-------------|
-| `--color-critical-alert` | `#C62828` | Armed Danger + Welfare Man-Down ONLY |
-| `--color-critical-border` | `#EF5350` | Pulsing viewport border during Armed Danger ONLY |
+| `--color-critical-alert` | `#D85050` | Armed Danger + Welfare Man-Down ONLY |
+| `--color-critical-border` | `#F08080` | Pulsing viewport border during Armed Danger ONLY |
 
 Do NOT use these for general errors or warnings.
 
@@ -108,7 +141,7 @@ Do NOT use these for general errors or warnings.
 | Body text | 15px | 400 | `--font-size-body` |
 | Labels / metadata | 13px | 400–600 | `--font-size-label` |
 | Kicker / uppercase label | 11px | 700 | — |
-| Font family | Inter, Roboto, system-ui | — | `--font-family` |
+| Font family | IBM Plex Sans, Aptos, Segoe UI, sans-serif | — | `--font-family` |
 
 ### 2.5 Spacing
 

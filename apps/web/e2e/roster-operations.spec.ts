@@ -86,13 +86,38 @@ test('enterprise roster week board is operational and visually stable', async ({
  await expect(page.getByRole('heading',{name:'Roster',exact:true})).toBeVisible();
  const board=page.locator('.roster-board');await expect(board.getByText('Ana Ngata',{exact:true})).toBeVisible(); await expect(board.getByText('Jordan Lee',{exact:true})).toBeVisible();
  const boardLayout=await board.evaluate((element)=>({overflowX:getComputedStyle(element).overflowX,overflowY:getComputedStyle(element).overflowY,headerPosition:getComputedStyle(element.querySelector('.roster-board-head')!).position,firstColumnPosition:getComputedStyle(element.querySelector('.roster-person')!).position}));expect(boardLayout).toEqual({overflowX:'auto',overflowY:'auto',headerPosition:'sticky',firstColumnPosition:'sticky'});
- const lightHeader=await page.locator('.admin-shell').evaluate((shell)=>{const previous=shell.getAttribute('data-theme');shell.setAttribute('data-theme','light');const cell=shell.querySelector('.roster-board-head>div')!;const result={background:getComputedStyle(cell).backgroundColor,color:getComputedStyle(cell).color};if(previous)shell.setAttribute('data-theme',previous);else shell.removeAttribute('data-theme');return result;});expect(lightHeader).toEqual({background:'rgb(232, 237, 233)',color:'rgb(72, 88, 81)'});
+ await expect(page.locator('.admin-shell')).toHaveAttribute('data-theme', 'dark');
+ const headerColors = await page.locator('.roster-board-head>div').first().evaluate((cell) => {
+  const style = getComputedStyle(cell);
+  return { background: style.backgroundColor, color: style.color };
+ });
+ expect(headerColors).toEqual({ background: 'rgb(13, 25, 39)', color: 'rgb(130, 150, 168)' });
  await expect(page).toHaveScreenshot('roster-overview-first-viewport.png');
  if((page.viewportSize()?.width??0)<900){await expect(page.locator('.roster-board-scroll-cue')).toBeVisible();const boardSize=await board.evaluate((element)=>({scrollWidth:element.scrollWidth,clientWidth:element.clientWidth}));expect(boardSize.scrollWidth).toBeGreaterThan(boardSize.clientWidth);}
  await page.getByRole('button',{name:'2 weeks'}).click();await expect(page.locator('.roster-board-head>div')).toHaveCount(15);expect(await board.evaluate((element)=>element.scrollWidth>element.clientWidth)).toBe(true);await page.getByRole('button',{name:'Month'}).click();await expect(page.locator('.roster-board-head>div')).toHaveCount(32);const stickyAtMonthEnd=await board.evaluate((element)=>{element.scrollLeft=element.scrollWidth;const boardLeft=element.getBoundingClientRect().left;return{headerOffset:Math.round(element.querySelector('.roster-board-head>div')!.getBoundingClientRect().left-boardLeft),rowOffset:Math.round(element.querySelector('.roster-person')!.getBoundingClientRect().left-boardLeft)};});expect(stickyAtMonthEnd).toEqual({headerOffset:1,rowOffset:1});for(let index=0;index<7;index+=1)await page.getByTitle('Previous period').click();await expect(page.getByLabel('Public holidays').getByText('Provincial anniversary day')).toBeVisible();await expect(page.getByLabel('Public holidays').getByText("New Year's Day",{exact:true})).toBeVisible();await expect(page.locator('.roster-horizon-bar')).toHaveScreenshot('roster-calendar-controls.png');await page.getByLabel('Regional holidays').selectOption('WGN');await expect(page.getByText('Regional public holiday calendar updated.')).toBeVisible();await board.evaluate((element)=>{element.scrollLeft=0;});await page.getByRole('button',{name:'Week',exact:true}).click();
  await page.locator('.roster-operational-dock > summary').click();
  await expect(page.getByRole('heading',{name:'Availability restrictions'})).toBeVisible();const restriction=page.locator('.roster-availability-queue').getByRole('button',{name:/Jordan Lee/});await restriction.click();const availabilityDialog=page.getByRole('dialog',{name:'Staff availability'});await expect(availabilityDialog).toBeVisible();await expect(availabilityDialog.getByLabel('Staff member')).toHaveValue('2f2f2f2f-2222-4222-8222-222222222222');await expect(availabilityDialog.getByText('Unavailable on Sundays')).toBeVisible();await availabilityDialog.getByRole('button',{name:'Close',exact:true}).click();
- const commercialQueue=page.locator('.roster-commercial-queue');await expect(commercialQueue.getByRole('heading',{name:'Commercial readiness exceptions'})).toBeVisible();await commercialQueue.getByRole('button',{name:/Roster Administration/}).click();const commercialInspector=page.locator('.roster-slot-inspector');await expect(commercialInspector.getByText('Missing rule',{exact:true})).toBeVisible();await expect(commercialInspector.getByText('Not applicable',{exact:true})).toHaveCount(3);await expect(commercialInspector.getByText('Ready',{exact:true})).toBeVisible();await expect(commercialInspector).toHaveScreenshot('roster-commercial-readiness.png');if((page.viewportSize()?.width??0)<900){const factBackground=await commercialInspector.locator('dl > div').first().evaluate((element)=>getComputedStyle(element).backgroundColor);expect(factBackground).toBe('rgb(243, 246, 243)');}await commercialInspector.locator('header button').click();
+ const commercialQueue=page.locator('.roster-commercial-queue');
+ await expect(commercialQueue.getByRole('heading',{name:'Commercial readiness exceptions'})).toBeVisible();
+ await commercialQueue.getByRole('button',{name:/Roster Administration/}).click();
+ const commercialInspector=page.locator('.roster-slot-inspector');
+ await expect(commercialInspector.getByText('Missing rule',{exact:true})).toBeVisible();
+ await expect(commercialInspector.getByText('Not applicable',{exact:true})).toHaveCount(3);
+ await expect(commercialInspector.getByText('Ready',{exact:true})).toBeVisible();
+ await expect(commercialInspector).toHaveScreenshot('roster-commercial-readiness.png');
+ if((page.viewportSize()?.width??0)<900){
+  const factBackground=await commercialInspector.locator('dl > div').first().evaluate((element)=>getComputedStyle(element).backgroundColor);
+  const tokenBackground=await page.evaluate(()=>{
+   const probe=document.createElement('div');
+   probe.style.backgroundColor='var(--color-bg-elevated)';
+   document.body.appendChild(probe);
+   const background=getComputedStyle(probe).backgroundColor;
+   probe.remove();
+   return background;
+  });
+  expect(factBackground).toBe(tokenBackground);
+ }
+ await commercialInspector.locator('header button').click();
  await expect(page.locator('.roster-board').getByText('Roster Administration',{exact:true})).toBeVisible();
  expect(await page.evaluate(()=>document.documentElement.scrollWidth<=window.innerWidth)).toBe(true);
  if((page.viewportSize()?.width??0)<600){await board.scrollIntoViewIfNeeded();await expect(page).toHaveScreenshot('roster-week-board.png');}else await expect(board).toHaveScreenshot('roster-week-board.png');

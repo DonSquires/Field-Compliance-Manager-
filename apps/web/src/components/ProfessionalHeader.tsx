@@ -44,7 +44,7 @@ export const ProfessionalHeader: React.FC<HeaderProps> = ({
   return (
     <header
       style={{
-        backgroundColor: 'var(--color-neutral-0)',
+        backgroundColor: 'var(--color-bg-surface)',
         borderBottom: '1px solid var(--color-border)',
         boxShadow: 'var(--shadow-sm)',
         position: 'sticky',

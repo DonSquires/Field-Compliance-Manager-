@@ -495,7 +495,7 @@ const OfficerShell: React.FC = () => {
   }, [activeModule, grantedModules, navigate, navigateToModule]);
 
   return (
-    <div className="officer-shell">
+    <div className="officer-shell" data-theme="dark">
       <header className="officer-shell-header">
         <button type="button" className="officer-shell-brand" onClick={() => navigateToModule(null)} title="Officer home">
           <img

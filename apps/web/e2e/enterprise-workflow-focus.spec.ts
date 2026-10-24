@@ -14,28 +14,39 @@ async function expectViewportContained(page: Page) {
   expect(size.windowY).toBe(0);
 }
 
+function contrastRatio(foreground: string, background: string): number {
+  const luminance = (color: string) => {
+    const channels = color.match(/\d+(?:\.\d+)?/g)?.slice(0, 3).map(Number);
+    if (!channels || channels.length !== 3) throw new Error(`Cannot measure contrast for ${color}`);
+    const linear = channels.map((channel) => {
+      const value = channel / 255;
+      return value <= 0.04045 ? value / 12.92 : ((value + 0.055) / 1.055) ** 2.4;
+    });
+    return linear[0] * 0.2126 + linear[1] * 0.7152 + linear[2] * 0.0722;
+  };
+  const [lighter, darker] = [luminance(foreground), luminance(background)].sort((a, b) => b - a);
+  return (lighter + 0.05) / (darker + 0.05);
+}
+
 for (const workspace of [
   { route: '/admin/reports', selector: '.reports-hub-page' },
   { route: '/admin/investigations', selector: '.investigation-page' },
 ]) {
-  test(`${workspace.route} keeps action contrast explicit in both themes`, async ({ page }) => {
+  test(`${workspace.route} uses the universal dark theme and accessible action contrast`, async ({ page }) => {
     await installSupabaseFixtures(page);
     await signInAsAdmin(page, workspace.route);
     const workspaceRoot = page.locator(workspace.selector);
     await expect(workspaceRoot).toBeVisible();
     const action = workspaceRoot.locator('button:visible:not(:disabled)').first();
     await expect(action).toBeVisible();
-    for (const theme of ['light', 'dark']) {
-      await page.locator('.admin-shell').evaluate((shell, value) => shell.setAttribute('data-theme', value), theme);
-      const colours = await action.evaluate((button) => {
-        const style = getComputedStyle(button);
-        return { text: style.color, background: style.backgroundColor };
-      });
-      expect(['rgb(248, 250, 252)', 'rgb(255, 255, 255)']).toContain(colours.text);
-      expect(['rgb(30, 41, 59)', 'rgb(30, 64, 175)']).toContain(colours.background);
-      await expect(action).toHaveCSS('border-top-width', '1px');
-      await expectViewportContained(page);
-    }
+    await expect(page.locator('.admin-shell')).toHaveAttribute('data-theme', 'dark');
+    const colours = await action.evaluate((button) => {
+      const style = getComputedStyle(button);
+      return { text: style.color, background: style.backgroundColor };
+    });
+    expect(contrastRatio(colours.text, colours.background)).toBeGreaterThanOrEqual(4.5);
+    await expect(action).toHaveCSS('border-top-width', '1px');
+    await expectViewportContained(page);
   });
 }
 
@@ -48,7 +59,20 @@ test('overview keeps queue, ledger and exceptions inside the command viewport', 
   await expect(page.locator('.admin-priority-queue')).toBeVisible();
   await expectViewportContained(page);
   const ribbon = page.getByRole('region', { name: 'Current operations metrics' });
-  await expect(ribbon).toHaveCSS('height', '48px');
+  const metricContentFits = await ribbon.locator('.admin-metric').evaluateAll((cards) => cards.map((card) => {
+    const bounds = card.getBoundingClientRect();
+    const content = [...card.querySelectorAll(':scope > span, :scope > strong')];
+    return content.every((item) => {
+      const itemBounds = item.getBoundingClientRect();
+      return itemBounds.left >= bounds.left - 1
+        && itemBounds.right <= bounds.right + 1
+        && itemBounds.top >= bounds.top - 1
+        && itemBounds.bottom <= bounds.bottom + 1
+        && item.scrollWidth <= item.clientWidth + 1;
+    });
+  }));
+  expect(metricContentFits).toHaveLength(5);
+  expect(metricContentFits).toEqual([true, true, true, true, true]);
   await expect(page).toHaveScreenshot('enterprise-command-overview.png');
   if (testInfo.project.name === 'mobile-chromium') {
     const panes = page.getByRole('navigation', { name: 'Overview panes' });
