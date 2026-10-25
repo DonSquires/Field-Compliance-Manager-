@@ -35055,6 +35055,10 @@ export type Database = {
           proposal_id: string
         }[]
       }
+      apply_historical_patrol_labour_routes: {
+        Args: { p_client_request_id: string; p_organization_id: string }
+        Returns: Json
+      }
       apply_historical_roster_assignment_import: {
         Args: {
           p_assignments: Json
@@ -36547,6 +36551,14 @@ export type Database = {
         Args: { p_message_id: string; p_token: string }
         Returns: undefined
       }
+      builder_chat_remember: {
+        Args: {
+          p_content: string
+          p_memory_type?: string
+          p_message_id: string
+        }
+        Returns: string
+      }
       builder_chat_require_owner: { Args: never; Returns: string }
       builder_chat_reserve_proposal: {
         Args: { p_message_id: string; p_token: string }
@@ -36558,6 +36570,20 @@ export type Database = {
           p_content: string
           p_context?: Json
           p_thread_id: string
+        }
+        Returns: string
+      }
+      builder_chat_send_pm: {
+        Args: {
+          p_allow_cloud?: boolean
+          p_client_request_id: string
+          p_content: string
+          p_evidence_summary?: string
+          p_files?: Json
+          p_purpose?: string
+          p_thread_id: string
+          p_urls?: Json
+          p_web_search?: boolean
         }
         Returns: string
       }
@@ -49032,6 +49058,14 @@ export type Database = {
         Args: { p_site_id: string; p_zone_id: string }
         Returns: string
       }
+      roster_slot_is_source_truth: {
+        Args: { p_external_refs: Json }
+        Returns: boolean
+      }
+      route_historical_patrol_labour: {
+        Args: { p_organization_id: string; p_request_id: string }
+        Returns: Json
+      }
       safe_healthcheck: { Args: never; Returns: Json }
       save_bob_document_revision: {
         Args: {
@@ -49518,6 +49552,10 @@ export type Database = {
           isOneToOne: true
           isSetofReturn: false
         }
+      }
+      set_patrol_route_primary_officer: {
+        Args: { p_reason: string; p_route_id: string; p_staff_id: string }
+        Returns: Json
       }
       set_site_geometry: {
         Args: {
