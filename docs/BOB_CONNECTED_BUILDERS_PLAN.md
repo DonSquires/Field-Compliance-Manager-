@@ -125,6 +125,15 @@ full runtime validation passed 1,715 tests with nine existing skips.
 
 ### 3. Evidence-supported investigation
 
+Owner clarification after #224: Atlas is a map, not evidence. It identifies
+where to research; facts require investigation of those locations. The live
+`bob_atlas_blast_radius` card retrieved during acceptance still said "PROVEN
+DATA FLOW", contradicting that distinction. Correct the shared runtime guidance,
+Atlas tool receipts and four directly related canonical cards, invalidating
+their old embeddings. Preserve flow/FK separation without promoting either
+map into proof. Keep map leads, independently verified facts and unknowns
+separate; unchecked areas stay unverified.
+
 Carry goal, observed behavior, evidence, hypotheses, unknowns, proposed change,
 blast radius and before/during/after acceptance into the handoff. Deterministic
 checks establish provenance and shape; bounded independent critique challenges

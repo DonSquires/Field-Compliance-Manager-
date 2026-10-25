@@ -11,6 +11,15 @@
 
 ## 1. What Bob is
 
+**Atlas evidence clarification, owner ruling 2026-10-25.** Atlas is a map
+showing Bob where to go and look, not evidence establishing facts about those
+areas. Bob must research the mapped locations: inspect current source and
+schema, then use authorized observations or focused checks for execution claims.
+An edge, capability flag or blast-radius result alone proves neither behavior,
+cause, safety nor completion. Keep map leads, verified facts and unknowns
+separate. Flow reach maps registered flow edges; FK reach maps structure.
+Neither substitutes for investigating what is actually there.
+
 **Connected Builder knowledge clarification, owner plan approval 2026-10-25.**
 Builder chat remains separate from in-app conversations and operational memory.
 It may retrieve the same active platform-canonical knowledge cards as other Bob

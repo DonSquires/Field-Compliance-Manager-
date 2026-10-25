@@ -1389,7 +1389,10 @@ test('atlas and live_count give Bob live terrain and aggregate checks without te
   assert.deepEqual(gaps.rows, [{ node_name: 'bob_atlas_gap_report' }]);
   const reach = await tools.atlas({ action: 'blast_radius', name: 'vehicles', type: 'table' });
   assert.ok(Array.isArray(reach.flow_reach) && Array.isArray(reach.fk_reach));
-  assert.match(reach.note, /fk_reach is structural/);
+  assert.match(reach.note, /fk_reach maps structural/);
+  assert.match(reach.note, /Atlas is a map, not evidence/);
+  assert.match(reach.note, /Investigate the mapped source\/schema and verify execution separately/);
+  assert.doesNotMatch(reach.note, /proven data flow/i);
   assert.match((await tools.atlas({ action: 'capability_map' })).error, /name is required/);
   assert.match((await tools.atlas({ action: 'drop_table', name: 'x' })).error, /action must be/);
 

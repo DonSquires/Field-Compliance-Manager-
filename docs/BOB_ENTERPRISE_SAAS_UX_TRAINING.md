@@ -26,6 +26,14 @@ blast radius and the butterfly effect. Chat, Builder and Vibe carry the same
 runtime guidance; the platform card `builder_atlas_research_navigation`
 provides retrievable training.
 
+Owner clarification: **Atlas is a map, not evidence.** It shows where to go
+and look. Research those areas to get the facts; do not upgrade an Atlas edge,
+flag or reach result into a factual claim. Read the mapped source/schema and
+verify relevant behavior with authorized observations or focused tests.
+Separate map leads, independently verified facts and unknowns. Source inspection
+establishes implementation, not live execution; fixture tests do not establish
+production success. If the mapped area cannot be checked, it remains unverified.
+
 - Start from the current request, not an unrelated selected or cancelled job.
   Discover exact entity names/types with `capability_map`, then use
   `terrain_edges` and returned `source_file` values to choose owning source,
