@@ -24,6 +24,7 @@ const { autopilotTick, listAutopilotJobs, listPendingApprovals } = require('./bu
 const { laptopStatus, runLaptopCommand, laptopConfig, loadLaptopLink, mergeLaptopLink, describeLink } = require('./bob-laptop-shell');
 const { createVibeWorker, vibeWorkspacePath } = require('./builder-vibe-session');
 const { createBuilderChatWorker } = require('./builder-chat-session');
+const { createPlatformTools } = require('./bob-platform-diagnostics');
 const { runVibeHumanTest } = require('./builder-vibe-human-test');
 const { createFirewall } = require('./bob-firewall');
 const { createTailscale } = require('./bob-tailscale');
@@ -46,6 +47,10 @@ const adminToken = process.env.BOB_ADMIN_TOKEN || '';
 const runnerToken = process.env.BOB_RUNNER_TOKEN || '';
 const modelGatewayToken = process.env.BOB_MODEL_GATEWAY_TOKEN || '';
 const assessmentRoot = process.env.BOB_ASSESSMENT_ROOT || '/app';
+const platformTools = createPlatformTools({
+  sourceRoot: assessmentRoot,
+  audit: result => record('bob-platform-diagnostics', 'platform.inspect', null, result),
+});
 const allowedRepositories = new Set((process.env.BOB_ALLOWED_REPOSITORIES || '')
   .split(',')
   .map(repository => repository.trim())
@@ -1495,6 +1500,11 @@ async function route(req, res, body) {
     }
   }
   const isAssessmentRoute = url.pathname === '/assessment' || ['/api/bob/assessment', '/api/bob/builder/assessment'].includes(url.pathname);
+  if (req.method === 'GET' && ['/docker/services', '/api/bob/docker/services', '/api/bob/builder/docker/services'].includes(url.pathname)) {
+    if (!authorized(req)) return json(res, 401, { error: 'unauthorized' });
+    const result = await platformTools.inspect_platform({ action: 'docker_services' });
+    return result.error ? json(res, 503, result) : json(res, 200, { ...result.data, evidence: result.evidence });
+  }
   if (req.method === 'GET' && isAssessmentRoute) {
     if (!authorized(req)) return json(res, 401, { error: 'unauthorized' });
     const assessment = createAssessment(assessmentRoot);
@@ -1795,6 +1805,7 @@ const builderChatWorker = Boolean(builderSupabase) && process.env.BOB_BUILDER_CH
   deps: {
     workspaceRoot: builderWorkspaceRoot,
     gateway: builderGateway,
+    platformTools,
     sourceDirFor: sha => builderGitSource(sha),
     resolveHead: () => builderRepositoryHead('main').sha,
   },

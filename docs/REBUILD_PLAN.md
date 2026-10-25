@@ -8,6 +8,13 @@ detailed backlogs (`ENTERPRISE_SAAS_TODO.md`, `PROTOTYPE_GAP_AUDIT.md`,
 Completion language is strict, as in the lineage: **merged ≠ deployed ≠
 glass-proven.** A workstream item is done only when its evidence gate is met.
 
+Connected Bob delivery, owner instruction 2026-10-25: implement the phased
+[connected builders plan](BOB_CONNECTED_BUILDERS_PLAN.md). Start with usable
+diagnostics/capability discovery, then shared knowledge/evidence, investigation
+quality, Builder/Vibe handoffs, measured routing and UI acceptance. Existing
+approval and credential boundaries stand; the original release-source repair
+remains open until independently investigated and verified by Bob.
+
 Builder research release follow-up, 2026-10-25:
 
 - PR #213 and generated-catalog PR #214 are merged; governed release

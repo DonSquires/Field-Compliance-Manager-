@@ -16,8 +16,9 @@ const { applyVibeRouting, vibeProviderCandidates, vibeNativeTools, vibeToolSchem
 const { redactGitError, gitSpawnFault } = require('./builder-branch-workspace');
 const { buildModelRunRequest, callModelGateway, fetchModelHealth, providerRequest } = require('./supabase/functions/_shared/builder-model-adapter');
 const { runBuilderResearch } = require('./builder-chat-research');
+const { PLATFORM_CONTRACTS, PLATFORM_DESCRIPTIONS } = require('./bob-platform-diagnostics');
 
-const PROMPT_VERSION = 'builder-chat-v4';
+const PROMPT_VERSION = 'builder-chat-v5';
 const BUILDER_CHAT_LIMITS = Object.freeze({
   maxTurns: Math.max(4, Number(process.env.BOB_BUILDER_CHAT_TURNS || 14)),
   wallBudgetMs: Math.max(60_000, Number(process.env.BOB_BUILDER_CHAT_BUDGET_MS || 8 * 60_000)),
@@ -47,6 +48,7 @@ function builderChatSystemPrompt() {
     'WHAT YOU CAN DO HERE:',
     '- Investigate with read-only tools on the current main: find_files (filename/path discovery), search, read_file, outline, list_dir, git_log, read_canon, atlas (live build map), live_count (row counts).',
     '- Read the Builder job ledger: owner_queue (what is waiting on the owner), list_jobs, job_status.',
+    '- Where provided, platform_capabilities lists bounded read-only platform actions and their evidence limits; inspect_platform runs one. Discover available actions instead of guessing. Availability is not established until an actual diagnostic succeeds.',
     '- Plan a build and propose it with propose_job. The owner then confirms it in the UI; only that creates the job, which runs through specification, implementation and release approval gates and publishes a pull request.',
     '- For interactive, iterative edits suggest the Vibe Builder tab (chat-to-code on a live branch).',
     '- Public cloud research is a separate owner-approved message mode in this chat: best available configured Ollama Cloud candidates first, no metered providers, prior conversation and repository tools excluded. The owner can attach reviewed non-sensitive screenshots and documents and request public web evidence. Never send private source, credentials or tenant records to that mode; ask the owner to use its explicit approval controls. Returned research is advisory, not release authority.',
@@ -59,7 +61,7 @@ function builderChatSystemPrompt() {
     '- Start filename discovery with find_files {"name":"release"} or another short path fragment from the task. It lists tracked paths, not their contents or relevance. Select owning lifecycle files, inspect them and follow actual writers/callers before deciding a cause.',
     '- Tool argument examples: read_file {"path":"scripts/example.sh","start_line":1,"end_line":120}; list_jobs {"limit":25}; atlas {"action":"capability_map","name":"release"}. For terrain_edges use an exact discovered name. Empty Atlas results are a gap, not proof of absence; reads/writes differ from weak references and flow_reach differs from fk_reach.',
     '- propose_job requires title (4-160 characters), task_description (your own 40+ character summary), frontend_required/backend_required (booleans), findings, plan and acceptance_checks. Each finding has path, source_quote (an exact snippet from read_file) and observation (what that code proves). Supply at least two concrete plan steps and two acceptance checks. Include unknowns separately. A request to investigate later is not a repair plan. A tool error means correct those arguments, not restart the investigation.',
-    '- Separate known facts, hypotheses and unknowns. You have repository/Atlas/ledger read tools, not a VPS shell. If live evidence or access is missing, report that boundary; do not invent host observations. An incomplete investigation ends with an explicit blocker and no Create job card.',
+    '- Separate known facts, hypotheses and unknowns. You have repository/Atlas/ledger read tools and any explicitly provided read-only platform diagnostics, not a VPS shell. Source inventory describes the deployed control-plane source, not the host filesystem. Docker Compose labels describe container creation, not whether referenced paths still exist. Report missing evidence rather than inventing host observations. An incomplete investigation ends with an explicit blocker and no Create job card.',
     '- Answer the question asked. A status question is answered from owner_queue/list_jobs/job_status; do not read source code for it.',
     '- Never guess file paths. If a path is missing, use did_you_mean from the error, search or list_dir. After a couple of failed calls, reply with what you know.',
     '- All repository tools use repository-relative paths, never VPS filesystem paths. Use list_dir {"path":"."} to discover the repository root. A deployment investigation must inspect the actual release lifecycle writers/callers for the affected service, not stop at a Compose file or a different service. A plan to investigate later is not a completed investigation.',
@@ -198,9 +200,12 @@ function validateProposal(args) {
   return { proposal: { title, task_description: description, frontend_required: frontend, backend_required: backend, rationale: clip(String(args.rationale || '').trim(), 1500) } };
 }
 
-function createBuilderChatTools({ supabase, workspacePath, limits }) {
+function createBuilderChatTools({ supabase, workspacePath, limits, platformTools }) {
   const base = workspacePath ? createTools({ workspacePath, repoRoot: workspacePath, lane: 'fullstack', supabase, limits, log: () => {} }) : {};
   const tools = Object.fromEntries(READ_TOOLS.filter(name => typeof base[name] === 'function').map(name => [name, base[name]]));
+  for (const name of Object.keys(PLATFORM_CONTRACTS)) {
+    if (typeof platformTools?.[name] === 'function') tools[name] = platformTools[name];
+  }
   if (workspacePath) {
     tools.read_file = (args = {}) => {
       const start = args.start_line === undefined ? 1 : Number(args.start_line);
@@ -224,7 +229,7 @@ function createBuilderChatTools({ supabase, workspacePath, limits }) {
       }
       const paths = Array.isArray(args.path) ? args.path : String(args.path ?? '').split(/[\s,]+/).filter(Boolean);
       if (paths.some(value => typeof value !== 'string' || !value.trim() || /^(?:\/|[A-Za-z]:)|\\|[\0\r\n]|(?:^|\/)\.\.(?:\/|$)/.test(value))) {
-        return { error: 'search path must be repository-relative, not a VPS/absolute path or traversal. Use find_files to discover repository paths; live host access is not available.' };
+        return { error: 'search path must be repository-relative, not a VPS/absolute path or traversal. Use find_files for source paths or platform_capabilities for available read-only diagnostics; search never reads the host filesystem.' };
       }
       return base.search({ ...args, path: paths });
     };
@@ -389,6 +394,10 @@ function builderChatNativeTools(tools) {
   const text = { type: 'string' };
   const steps = { type: 'array', minItems: 2, maxItems: 12, items: { type: 'string', minLength: 10, maxLength: 1000 } };
   const custom = {
+    ...Object.fromEntries(Object.entries(PLATFORM_CONTRACTS).map(([name, contract]) => [name, {
+      description: PLATFORM_DESCRIPTIONS[name],
+      parameters: { type: 'object', ...contract, additionalProperties: false },
+    }])),
     find_files: { description: 'Discover tracked filenames/paths by a short case-insensitive fragment. Does not search contents. Read owning source from the returned paths.', parameters: { type: 'object', properties: { name: { type: 'string', minLength: 2, maxLength: 100 }, limit: { type: 'integer', minimum: 1, maximum: 100 } }, required: ['name'], additionalProperties: false } },
     list_jobs: { description: 'List recent Builder jobs from the job ledger (newest first).', parameters: { type: 'object', properties: { status: text, limit: { type: 'integer', minimum: 1, maximum: 25 } }, additionalProperties: false } },
     owner_queue: { description: 'Everything waiting on the owner: pending approval gates, published pull requests to review, jobs awaiting a human, and recently blocked jobs. Use for "what is waiting on me" questions.', parameters: { type: 'object', properties: {}, additionalProperties: false } },
@@ -432,7 +441,7 @@ function contextLine(context) {
 }
 
 async function runBuilderChat({ store, thread, message, workspacePath, head, gateway, deps, limits = BUILDER_CHAT_LIMITS }) {
-  const allTools = deps.tools || createBuilderChatTools({ supabase: deps.supabase, workspacePath, limits });
+  const allTools = deps.tools || createBuilderChatTools({ supabase: deps.supabase, workspacePath, limits, platformTools: deps.platformTools });
   const intent = statusIntent(message.content);
   const preloadTool = intent ? { owner: 'owner_queue', job: 'job_status', jobs: 'list_jobs' }[intent.kind] : null;
   const statusMode = Boolean(preloadTool && typeof allTools[preloadTool] === 'function');
