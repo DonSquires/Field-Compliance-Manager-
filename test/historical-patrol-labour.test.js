@@ -281,13 +281,18 @@ test('import batch request ids are deterministic UUIDs per fingerprint and batch
 });
 
 test('import SQL rolls back by default, splits batches and commits only on request', async () => {
-  const { importSql, batchRequestId } = await applyLoaded;
+  const { importSql, batchRequestId, routingRequestId } = await applyLoaded;
   const slots = [1, 2, 3, 4, 5].map(slot);
   const rollback = importSql({ slots, reportFingerprint: FP, batchSize: 2 });
   assert.match(rollback, /ROLLBACK;\s*$/);
   assert.doesNotMatch(rollback, /COMMIT;/);
   assert.equal((rollback.match(/import_historical_patrol_labour_slots\(/g) ?? []).length, 3);
   for (const index of [0, 1, 2]) assert.ok(rollback.includes(batchRequestId(FP, index)));
+  assert.equal((rollback.match(/apply_historical_patrol_labour_routes\(/g) ?? []).length, 1);
+  assert.ok(rollback.indexOf('apply_historical_patrol_labour_routes(') > rollback.lastIndexOf('import_historical_patrol_labour_slots('),
+    'routing runs once, after every batch has been imported');
+  assert.ok(rollback.includes(routingRequestId(FP)));
+  assert.notEqual(routingRequestId(FP), routingRequestId('b'.repeat(64)));
   assert.match(importSql({ slots, reportFingerprint: FP, commit: true }), /COMMIT;\s*$/);
 });
 

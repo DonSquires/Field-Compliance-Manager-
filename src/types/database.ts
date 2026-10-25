@@ -23565,6 +23565,7 @@ export type Database = {
           name: string
           organization_id: string
           parent_assignment_id: string | null
+          primary_staff_id: string | null
           route_code: string | null
           route_type: string
           site_id: string | null
@@ -23588,6 +23589,7 @@ export type Database = {
           name: string
           organization_id: string
           parent_assignment_id?: string | null
+          primary_staff_id?: string | null
           route_code?: string | null
           route_type?: string
           site_id?: string | null
@@ -23611,6 +23613,7 @@ export type Database = {
           name?: string
           organization_id?: string
           parent_assignment_id?: string | null
+          primary_staff_id?: string | null
           route_code?: string | null
           route_type?: string
           site_id?: string | null
@@ -23628,6 +23631,13 @@ export type Database = {
             columns: ["parent_assignment_id"]
             isOneToOne: false
             referencedRelation: "patrol_routes"
+            referencedColumns: ["id"]
+          },
+          {
+            foreignKeyName: "patrol_routes_primary_staff_id_fkey"
+            columns: ["primary_staff_id"]
+            isOneToOne: false
+            referencedRelation: "staff_profiles"
             referencedColumns: ["id"]
           },
           {

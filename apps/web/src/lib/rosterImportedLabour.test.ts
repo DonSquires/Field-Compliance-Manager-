@@ -10,6 +10,13 @@ describe('source-backed roster labour', () => {
     expect(importedLabourLabel({ source: 'rm_patrol_log_labour', recorded_hours: 3.125, source_records: [{}, {}] }))
       .toBe('Patrol log · 3.13h recorded · 2 source entries · start approximate');
   });
+  it('names the client once labour sits on a shared patrol route row', () => {
+    expect(importedLabourLabel({ source: 'rm_patrol_log_labour', recorded_hours: 7.5, source_records: [{}],
+      client_name: ' Tasman District Council ', route_code: 'RM-NELSON-FORESTRY' }))
+      .toBe('Patrol log · Tasman District Council · 7.5h recorded · 1 source entry · start approximate');
+    expect(importedLabourLabel({ source: 'rm_patrol_log_labour', recorded_hours: 1, client_name: '  ' }))
+      .toBe('Patrol log · 1h recorded · 0 source entries · start approximate');
+  });
   it('does not invent hours from missing or invalid evidence', () => {
     for (const recorded_hours of [undefined, NaN, Infinity]) {
       expect(importedLabourLabel({ source: 'rm_patrol_log_labour', recorded_hours })).toContain('Hours not recorded');

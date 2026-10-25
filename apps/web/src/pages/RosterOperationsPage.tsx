@@ -3,7 +3,7 @@ import { AlertTriangle, CalendarDays, ChevronLeft, ChevronRight, Clock3, Filter,
 import { useLocation, useNavigate } from 'react-router-dom';
 import { useAuth, type AppRole } from '../context/AuthContext';
 import { moveRosterPeriod, NZ_HOLIDAY_REGIONS, nzRosterHolidays, rosterPeriod, type RosterHorizon } from '../lib/rosterCalendar';
-import { contractedDaysWords, contractedHoursWords, plainWords, plural, shiftStatusLabel, slotStatusLabel, timeRange, workUnitTypeLabel } from '../lib/rosterWords';
+import { COMMERCIAL_READY_STATUSES, commercialStatusLabel, contractedDaysWords, contractedHoursWords, plainWords, plural, shiftStatusLabel, slotStatusLabel, timeRange, workUnitTypeLabel } from '../lib/rosterWords';
 import { credentialTypeLabel } from '../lib/credentialWords';
 import { supabase } from '../lib/supabase';
 import { readWorkflowContext, workflowContextQuery } from '../lib/workflowNavigation';
@@ -86,7 +86,7 @@ export const credentialBadgeWords = (person: Pick<Staff, 'workReady' | 'credenti
   return 'Recorded credentials verified';
 };
 interface Shift { id: string; officer_user_id: string; service_type: string; scheduled_start: string; scheduled_end: string; status: string; shift_health: string | null; total_stops: number; completed_stops?: number | null; notes: string | null; actual_start?: string | null; actual_end?: string | null; ended_reason?: string | null; }
-interface WorkUnit { id: string; name: string; work_unit_type: 'patrol' | 'static' | 'internal' | 'workshop'; service_type: string; patrol_route_id: string | null; workshop_work_order_id: string | null; external_refs?: { historical_only?: boolean; deputy?: { code?: string; name?: string } } | null; }
+interface WorkUnit { id: string; name: string; work_unit_type: 'patrol' | 'static' | 'internal' | 'workshop'; service_type: string; patrol_route_id: string | null; workshop_work_order_id: string | null; patrol_route?: { primary_staff_id: string | null } | { primary_staff_id: string | null }[] | null; external_refs?: { historical_only?: boolean; deputy?: { code?: string; name?: string } } | null; }
 interface RosterSlot { id: string; work_unit_id: string; staff_id: string | null; scheduled_start: string; scheduled_end: string; status: string; linked_shift_id: string | null; notes: string | null; external_refs?: ImportedLabourRefs | null; }
 interface SourceAssignment {
   id: string;
@@ -254,7 +254,7 @@ const RosterOperationsPage: React.FC = () => {
         ? supabase.rpc('get_operating_branch_roster_staff', { p_operating_organization_id: org })
         : Promise.resolve({ data: [], error: null }),
       supabase.from('shifts').select('id,officer_user_id,service_type,scheduled_start,scheduled_end,status,shift_health,total_stops,completed_stops,notes,actual_start,actual_end,ended_reason').eq('organization_id', org).gte('scheduled_start', weekStart.toISOString()).lt('scheduled_start', weekEnd.toISOString()).order('scheduled_start'),
-      supabase.from('roster_work_units').select('id,name,work_unit_type,service_type,patrol_route_id,workshop_work_order_id,external_refs').eq('organization_id', org).eq('active', true).order('name'),
+      supabase.from('roster_work_units').select('id,name,work_unit_type,service_type,patrol_route_id,workshop_work_order_id,external_refs,patrol_route:patrol_routes!roster_work_units_patrol_route_id_fkey(primary_staff_id)').eq('organization_id', org).eq('active', true).order('name'),
       supabase.from('roster_slots').select('id,work_unit_id,staff_id,scheduled_start,scheduled_end,status,linked_shift_id,notes,external_refs').eq('organization_id', org).gte('scheduled_start', weekStart.toISOString()).lt('scheduled_start', weekEnd.toISOString()).order('scheduled_start'),
       supabase.from('roster_assignments').select('id,officer_id,patrol_route_id,specific_date,start_time,end_time,external_refs,officer:user_profiles!roster_assignments_officer_id_fkey(display_name)').eq('organization_id', org).in('external_refs->>source', ['rm_forestry_roster_history', 'rm_patrol_log_roster_evidence']).gte('specific_date', isoDate(weekStart)).lt('specific_date', isoDate(weekEnd)).order('specific_date'),
       supabase.from('leave_requests').select('staff_id,starts_on,ends_on,status').eq('organization_id', org).eq('status', 'approved').lte('starts_on', isoDate(addDays(weekEnd, -1))).gte('ends_on', isoDate(weekStart)),
@@ -330,9 +330,14 @@ const RosterOperationsPage: React.FC = () => {
     }),
     { pay: 0, margin: 0, unpriced: 0 },
   );
+  const usualOfficerName = (unit: WorkUnit) => {
+    const route = Array.isArray(unit.patrol_route) ? unit.patrol_route[0] : unit.patrol_route;
+    const staffId = route?.primary_staff_id;
+    return staffId ? staff.find((person) => person.staffId === staffId)?.name ?? null : null;
+  };
   const restrictionsForDay = (staffId: string, day: Date) => availability.filter((record) => ['unavailable', 'leave'].includes(record.availability_type) && record.staff_id === staffId && (record.specific_date === isoDate(day) || (record.specific_date === null && record.day_of_week === ((day.getDay() + 6) % 7) + 1)));
   const availabilityOccurrences = days.flatMap((day) => staff.flatMap((person) => restrictionsForDay(person.staffId, day).map((record) => ({ day, person, record }))));
-  const commercialExceptions = commercialReadiness.filter((item) => [item.pay_status, item.billing_status, item.quote_status, item.geofence_status, item.cost_centre_status].some((status) => !['ready', 'accepted', 'verified', 'not_applicable'].includes(status)));
+  const commercialExceptions = commercialReadiness.filter((item) => [item.pay_status, item.billing_status, item.quote_status, item.geofence_status, item.cost_centre_status].some((status) => !COMMERCIAL_READY_STATUSES.includes(status)));
   const hasAvailabilityConflict = (staffId: string, startValue: string, endValue: string) => {
     if (!startValue || !endValue) return false;
     const start = new Date(startValue); const end = new Date(endValue); const firstDay = new Date(start); firstDay.setHours(0, 0, 0, 0);
@@ -748,7 +753,7 @@ const RosterOperationsPage: React.FC = () => {
         <div className="roster-row" key={unit.id}>
           {unit.external_refs?.historical_only
             ? <div className="roster-person" title="Completed source labour only — choose an active work unit for new work"><span>{unit.name.split(' ').map((value) => value[0]).join('').slice(0, 2)}</span><div><strong>{unit.name}</strong><small>{workUnitTypeLabel(unit.work_unit_type)}</small></div><i className="is-risk">Source record</i></div>
-            : <button className="roster-person" onClick={() => openCreate(undefined, undefined, unit.id)}><span>{unit.name.split(' ').map((value) => value[0]).join('').slice(0, 2)}</span><div><strong>{unit.name}</strong><small>{workUnitTypeLabel(unit.work_unit_type)}</small></div><i className="is-ready">Schedule</i></button>}
+            : <button className="roster-person" onClick={() => openCreate(undefined, undefined, unit.id)}><span>{unit.name.split(' ').map((value) => value[0]).join('').slice(0, 2)}</span><div><strong>{unit.name}</strong><small>{workUnitTypeLabel(unit.work_unit_type)}{usualOfficerName(unit) && ` · Usual officer: ${usualOfficerName(unit)}`}</small></div><i className="is-ready">Schedule</i></button>}
           {days.map((day) => {
             const key = isoDate(day);
             const dayAssignments = slots.filter((slot) => slot.work_unit_id === unit.id && isoDate(new Date(slot.scheduled_start)) === key);
@@ -788,7 +793,7 @@ const RosterOperationsPage: React.FC = () => {
         <div><dt>End</dt><dd>{new Date(selectedSlot.scheduled_end).toLocaleString('en-NZ')}</dd></div>
         <div><dt>Field shift</dt><dd>{selectedSlot.external_refs?.source === 'rm_patrol_log_labour' ? 'Completed source labour; no live shift is created' : selectedSlot.linked_shift_id ? 'Created \u2013 the officer can start it' : selectedSlotUnit?.work_unit_type === 'workshop' ? 'Job execution and completion stay in Workshop' : selectedSlotUnit?.work_unit_type === 'internal' ? 'Not needed for office work' : 'Created when published'}</dd></div>
         {importedLabourLabel(selectedSlot.external_refs) && <div><dt>Source labour</dt><dd>{importedLabourLabel(selectedSlot.external_refs)}{selectedSlot.external_refs?.pay_code && ` · ${selectedSlot.external_refs.pay_code}`}</dd></div>}
-        {selectedCommercialReadiness && <><div><dt>Wage rule</dt><dd>{plainWords(selectedCommercialReadiness.pay_status)}</dd></div><div><dt>Billing</dt><dd>{plainWords(selectedCommercialReadiness.billing_status)}</dd></div><div><dt>Quote</dt><dd>{plainWords(selectedCommercialReadiness.quote_status)}</dd></div><div><dt>Geofence</dt><dd>{plainWords(selectedCommercialReadiness.geofence_status)}</dd></div><div><dt>Cost centre</dt><dd>{plainWords(selectedCommercialReadiness.cost_centre_status)}</dd></div></>}
+        {selectedCommercialReadiness && <><div><dt>Wage rule</dt><dd>{plainWords(selectedCommercialReadiness.pay_status)}</dd></div><div><dt>Billing</dt><dd>{commercialStatusLabel(selectedCommercialReadiness.billing_status)}</dd></div><div><dt>Quote</dt><dd>{commercialStatusLabel(selectedCommercialReadiness.quote_status)}</dd></div><div><dt>Geofence</dt><dd>{commercialStatusLabel(selectedCommercialReadiness.geofence_status)}</dd></div><div><dt>Cost centre</dt><dd>{plainWords(selectedCommercialReadiness.cost_centre_status)}</dd></div></>}
       </dl>
       {selectedSlotUnit?.workshop_work_order_id && <><p>Client billing, place or asset, job lead and completion are managed on the linked work order. This slot plans labour only and does not change the job lead.</p><button type="button" onClick={() => navigate(`/admin/workshop?workOrderId=${selectedSlotUnit.workshop_work_order_id}`)}>Open work order</button></>}
       {selectedSlot.notes && <p>{selectedSlot.notes}</p>}

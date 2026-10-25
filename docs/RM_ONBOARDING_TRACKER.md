@@ -172,6 +172,30 @@ inferred.
   digger hours/travel are equipment use, not labour. The $166.60 service amount
   includes time, travel and ammunition, not a per-person pay rate.
 
+### Phase B - labour seeded and routed to patrol routes (2026-10-26)
+
+- The labour seed is live: 3,520 completed slots, 8,610.4707 hours,
+  $275,534.94 estimated pay at FORESTRY-PATROL $32/hour. It was released in PR #223.
+  Historical slots are pay-only, with no second billable amount.
+- Owner ruling: shifts belong on the Blenheim (Dave Porter) or Nelson (Dan
+  Douglas) patrol route. Migration `20261030120000` records each route's usual
+  officer and routes the seeded labour. Rollback result: 680 Blenheim and 2,840
+  Nelson, none unrouted. By basis: 3,317 by place, 64 by dated route assignment
+  and 139 by the officer's usual route. 49 coverage zones were added and the 14
+  per-client holding units closed. A fresh import and a live replay give the
+  same split. The import script now routes once, after every batch.
+- Owner ruling: seeded spreadsheet jobs are verified source truth with no
+  geofence requirement. Rollback: the 22 seeded slots in the current 62-day
+  readiness window change from three `pending_materialization` exceptions to
+  `source_verified`. The wage rule is unchanged.
+- Atlas and schema check: routing reaches the roster calendar and the route
+  coverage list only. Payroll exports read timesheets, and patrol billing reads
+  the patrol log, so neither moves. No function that builds future patrol stops
+  reads `patrol_route_zones`.
+- Data anomaly, not corrected: the Bartletts (OFO) place is geocoded at
+  longitude 177.87, which is outside the patrol region. The geocode needs a
+  review.
+
 ### Phase B - historical labour readiness, not posted
 
 2026-10-25 continuation (local implementation; not deployed):
