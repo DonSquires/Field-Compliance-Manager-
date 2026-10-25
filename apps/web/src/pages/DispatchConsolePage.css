@@ -839,8 +839,11 @@
 .dispatch-billing-chip.is-extra { background: #4b3721; color: #ffe1b5; }
 .dispatch-billing-chip.is-contract { background: #1e3a33; color: #c9f4e9; }
 .dispatch-billing-chip.is-unset { border: 1px dashed #8aa0a8; color: #c6d8df; background: transparent; }
+/* Agreements not billed fixed price + Extra: every callout is billed at the agreed rates. */
+.dispatch-billing-chip.is-rated { background: #233449; color: #cfe2ff; }
 .dispatch-billing-panel p { display: flex; flex-wrap: wrap; align-items: center; gap: 8px; }
 .dispatch-billing-panel .dispatch-billing-chip { margin-left: 0; }
 .admin-shell[data-theme='light'] .dispatch-billing-chip.is-extra { color: #6b4210; background: #fbefd9; }
 .admin-shell[data-theme='light'] .dispatch-billing-chip.is-contract { color: #1f5a4b; background: #e3f3ee; }
 .admin-shell[data-theme='light'] .dispatch-billing-chip.is-unset { color: #485851; border-color: #8a9a93; }
+.admin-shell[data-theme='light'] .dispatch-billing-chip.is-rated { color: #1d3d6b; background: #e3ecfa; }

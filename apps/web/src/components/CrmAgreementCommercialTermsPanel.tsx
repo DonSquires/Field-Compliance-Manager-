@@ -1,0 +1,135 @@
+import { useCallback, useEffect, useState, type FormEvent } from 'react';
+import { AlertTriangle, CheckCircle2, RefreshCw } from 'lucide-react';
+import { supabase } from '../lib/supabase';
+import {
+  BILLING_CYCLES,
+  COMMERCIAL_MODELS,
+  COMMERCIAL_MODEL_HELP,
+  COMMERCIAL_MODEL_LABEL,
+  RATE_FIELDS,
+  asCommercialModel,
+  commercialModelLabel,
+  commercialTermsFormFrom,
+  commercialTermsPayload,
+  commercialTermsProblem,
+  type CommercialModel,
+  type CommercialSettingsRow,
+  type CommercialTermsForm,
+} from '../lib/commercialModel';
+import './CrmAgreementCommercialTermsPanel.css';
+
+const cycleLabels = { weekly: 'Weekly', fortnightly: 'Fortnightly', monthly: 'Monthly', quarterly: 'Quarterly' } as const;
+
+/** How this client is billed under the agreement, and its billing terms. Writes go through set_agreement_commercial_terms. */
+export function CrmAgreementCommercialTermsPanel({ agreementId, onModelChange }: {
+  agreementId: string;
+  onModelChange?: (model: CommercialModel | null) => void;
+}) {
+  const [saved, setSaved] = useState<CommercialSettingsRow | null>(null);
+  const [form, setForm] = useState<CommercialTermsForm>(() => commercialTermsFormFrom(null));
+  const [editing, setEditing] = useState(false);
+  const [reason, setReason] = useState('');
+  const [loading, setLoading] = useState(true);
+  const [saving, setSaving] = useState(false);
+  const [loadError, setLoadError] = useState<string | null>(null);
+  const [error, setError] = useState<string | null>(null);
+  const [notice, setNotice] = useState<string | null>(null);
+
+  const load = useCallback(async () => {
+    setLoading(true);
+    setLoadError(null);
+    // ATLAS READS: crm_commercial_settings (RLS: provider or client org access)
+    const { data, error: readError } = await supabase.from('crm_commercial_settings')
+      .select('commercial_model,billing_cycle,payment_terms_days,invoice_email,purchase_order_number,notes,base_rate_per_hour,overtime_rate_per_hour,callout_rate_per_hour,callout_minimum_hours,travel_rate_per_km,updated_at')
+      .eq('service_agreement_id', agreementId)
+      .maybeSingle();
+    if (readError) {
+      setLoadError(`Billing terms could not be loaded: ${readError.message}`);
+    } else {
+      const row = (data as CommercialSettingsRow | null) ?? null;
+      setSaved(row);
+      setForm(commercialTermsFormFrom(row));
+      onModelChange?.(asCommercialModel(row?.commercial_model));
+    }
+    setLoading(false);
+  }, [agreementId, onModelChange]);
+
+  useEffect(() => { void load(); }, [load]);
+
+  const savedModel = asCommercialModel(saved?.commercial_model);
+  const modelChanging = Boolean(savedModel && form.model && savedModel !== form.model);
+  const problem = editing ? commercialTermsProblem(form, savedModel, reason) : null;
+
+  const startEdit = () => { setForm(commercialTermsFormFrom(saved)); setReason(''); setError(null); setNotice(null); setEditing(true); };
+  const cancel = () => { setForm(commercialTermsFormFrom(saved)); setReason(''); setError(null); setEditing(false); };
+
+  const save = async (event: FormEvent) => {
+    event.preventDefault();
+    if (problem || !form.model) return;
+    setSaving(true);
+    setError(null);
+    // ATLAS WRITES: set_agreement_commercial_terms (provider admin; audited agreement_commercial_terms_set)
+    const { error: saveError } = await supabase.rpc('set_agreement_commercial_terms', {
+      p_service_agreement_id: agreementId,
+      p_commercial_model: form.model,
+      p_terms: commercialTermsPayload(form),
+      p_reason: modelChanging ? reason.trim() : null,
+    });
+    setSaving(false);
+    if (saveError) { setError(saveError.message); return; }
+    setEditing(false);
+    setNotice(`Saved. This client is billed ${COMMERCIAL_MODEL_LABEL[form.model].toLowerCase()}. The change is in the audit log.`);
+    await load();
+  };
+
+  const rate = (value: number | null | undefined) => (value == null ? 'Not set' : value.toLocaleString('en-NZ', { minimumFractionDigits: 2, maximumFractionDigits: 4 }));
+
+  return <section className="agreement-obligations agreement-commercial" aria-labelledby="agreement-commercial-title" aria-busy={loading || saving}>
+    <div className="agreement-section-heading">
+      <div>
+        <h3 id="agreement-commercial-title">How this client is billed</h3>
+        <p>Each client has its own terms. The billing model decides whether Dispatch asks for Contracted work or Extra, whether a client reference is needed, and how completed work is invoiced.</p>
+      </div>
+      {!editing && !loading && !loadError && <button type="button" onClick={startEdit}>{savedModel ? 'Change terms' : 'Set billing model'}</button>}
+    </div>
+
+    {loadError && <div className="agreement-obligation-message is-error" role="alert"><AlertTriangle size={15} />{loadError}<button type="button" className="agreement-extra-retry" onClick={() => void load()}>Retry</button></div>}
+    {loading && !saved && !loadError && <div className="agreement-setup-loading"><RefreshCw size={18} className="is-spinning" />Loading billing terms</div>}
+    {notice && !editing && <div className="agreement-obligation-message is-success" role="status"><CheckCircle2 size={15} />{notice}</div>}
+
+    {!editing && !loading && !loadError && (savedModel ? <dl className="agreement-commercial-summary">
+      <div className="is-wide"><dt>Billing model</dt><dd><strong>{commercialModelLabel(savedModel)}</strong><small>{COMMERCIAL_MODEL_HELP[savedModel]}</small></dd></div>
+      <div><dt>Billing cycle</dt><dd>{saved?.billing_cycle ? cycleLabels[saved.billing_cycle as keyof typeof cycleLabels] ?? saved.billing_cycle : 'Not set'}</dd></div>
+      <div><dt>Payment terms</dt><dd>{saved?.payment_terms_days != null ? `${saved.payment_terms_days} days` : 'Not set'}</dd></div>
+      <div><dt>Invoice email</dt><dd>{saved?.invoice_email || 'Not set'}</dd></div>
+      <div><dt>Standing PO</dt><dd>{saved?.purchase_order_number || 'None'}</dd></div>
+      {RATE_FIELDS.map(({ key, label }) => <div key={key}><dt>{label}</dt><dd>{rate(saved?.[key])}</dd></div>)}
+      {saved?.notes && <div className="is-wide"><dt>Notes</dt><dd>{saved.notes}</dd></div>}
+    </dl> : <div className="agreement-setup-empty">No billing model is set. Until one is chosen, Dispatch treats callouts as Contracted work or Extra. Set it so invoices follow this client's terms.</div>)}
+
+    {editing && <form className="agreement-obligation-form" onSubmit={save} aria-describedby="commercial-form-help">
+      <header><div><strong>Billing terms</strong><span id="commercial-form-help">Only an administrator of the provider can save these. Every change is audited.</span></div></header>
+      <fieldset className="agreement-commercial-models">
+        <legend>Billing model</legend>
+        {COMMERCIAL_MODELS.map((model) => <label key={model} className={form.model === model ? 'is-selected' : ''}>
+          <input type="radio" name="commercial-model" value={model} checked={form.model === model} onChange={() => setForm({ ...form, model })} />
+          <span><strong>{COMMERCIAL_MODEL_LABEL[model]}</strong><small>{COMMERCIAL_MODEL_HELP[model]}</small></span>
+        </label>)}
+      </fieldset>
+      {modelChanging && <div className="agreement-obligation-grid">
+        <label className="is-wide"><span>Why is the billing model changing? (required)</span><input required maxLength={500} value={reason} onChange={(event) => setReason(event.target.value)} placeholder="New contract signed from 1 July" /></label>
+      </div>}
+      <div className="agreement-obligation-grid">
+        <label><span>Billing cycle</span><select value={form.billingCycle} onChange={(event) => setForm({ ...form, billingCycle: event.target.value as CommercialTermsForm['billingCycle'] })}>{BILLING_CYCLES.map((cycle) => <option key={cycle} value={cycle}>{cycleLabels[cycle]}</option>)}</select></label>
+        <label><span>Payment terms (days)</span><input inputMode="numeric" required value={form.paymentTermsDays} onChange={(event) => setForm({ ...form, paymentTermsDays: event.target.value })} /></label>
+        <label><span>Invoice email (optional)</span><input type="email" maxLength={320} value={form.invoiceEmail} onChange={(event) => setForm({ ...form, invoiceEmail: event.target.value })} /></label>
+        <label><span>Standing PO number (optional)</span><input maxLength={120} value={form.purchaseOrderNumber} onChange={(event) => setForm({ ...form, purchaseOrderNumber: event.target.value })} /></label>
+        {RATE_FIELDS.map(({ key, label }) => <label key={key}><span>{label} (optional)</span><input inputMode="decimal" value={form.rates[key]} onChange={(event) => setForm({ ...form, rates: { ...form.rates, [key]: event.target.value } })} /></label>)}
+        <label className="is-wide"><span>Notes (optional)</span><textarea rows={3} maxLength={2000} value={form.notes} onChange={(event) => setForm({ ...form, notes: event.target.value })} /></label>
+      </div>
+      {problem && <p className="agreement-extra-hint" role="note">{problem}</p>}
+      {error && <div className="agreement-obligation-message is-error" role="alert"><AlertTriangle size={15} />{error}</div>}
+      <footer><button type="button" onClick={cancel} disabled={saving}>Cancel</button><button type="submit" disabled={saving || Boolean(problem)}>{saving ? 'Saving…' : 'Save billing terms'}</button></footer>
+    </form>}
+  </section>;
+}

@@ -13,9 +13,12 @@ describe('completed patrol work invoice handoff', () => {
     expect(source).toContain('priced patrol visits turn into a draft invoice per client');
   });
 
-  it('leaves contracted callouts out and blocks invoicing until unclassified callouts are set', () => {
-    expect(source).toContain(".or('billing_basis.is.null,billing_basis.eq.extra')");
+  it('follows each agreement commercial model and blocks invoicing until callouts are set or referenced', () => {
+    expect(source).toContain('job:source_dispatch_id(client_order_reference)');
+    expect(source).toContain('loadCommercialModels(');
+    expect(source).toContain('commercial_model: agreementId ? models.get(agreementId) ?? null : null');
+    expect(source).not.toContain(".or('billing_basis.is.null,billing_basis.eq.extra')");
     expect(source).toContain('invoiceBlocker(entry)');
-    expect(source).toContain('Contracted callouts are covered by the agreement price and are not billed again');
+    expect(source).toContain('contracted callouts are covered by the agreement price');
   });
 });

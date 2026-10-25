@@ -33,6 +33,8 @@ describe('finance period Contract and Extra split', () => {
       'no agreement price recorded',
       'not invoiced revenue',
       'Contract and Extra by agreement',
+      'Billed at agreed rates',
+      'Pay as you go, do and invoice, per request',
     ]) expect(panel).toContain(text);
     expect(panel).toContain('role="alert"');
     expect(panel).toContain('aria-busy="true"');

@@ -2747,6 +2747,61 @@ passed, `schema.sql` regenerated):
   `close_finance_pl_period`, budget variance) are untouched because the cost
   lines are unchanged.
 
-**Open.** Record the OneFortyOne fixed monthly price (13,333 per Sheet2) as an
-accepted quote (owner decision); review the 28 TYPE/code conflicts; classify
+**Open.** ~~Record the OneFortyOne fixed monthly price (13,333 per Sheet2) as an
+accepted quote (owner decision)~~ done 2026-10-26 (Step F); review the 28 TYPE/code conflicts; classify
 the non-OneFortyOne codes that sit outside the charge-code catalog.
+
+**Step F (billing follows each client's commercial model) - done 2026-10-26.**
+Owner ruling: OneFortyOne has a contract plus Extra; other clients are pay as
+you go, do and invoice, or per request, so they must not get the OneFortyOne
+treatment. Evidence: the R&M finance workbooks (FS-2024/25/26), the RFQ and
+the terms documents (session copies only; nothing promoted from them except the
+owner-approved OneFortyOne price). Migration
+`20261026090000_agreement_commercial_model.sql` (applied live; its own test and
+the 091600, 120000 and Extra works tests pass live, rolled back; `schema.sql`
+regenerated):
+- `crm_commercial_settings.commercial_model` (4 values, NULL = not set),
+  `updated_at`, unique per agreement. Write path:
+  `set_agreement_commercial_terms` (provider admin, whitelisted terms,
+  reason to change a model, audited `agreement_commercial_terms_set`).
+- `dispatch_jobs.client_order_reference` (1-120 chars), written only by
+  `set_dispatch_job_client_reference` (audited, reason to change, refused once
+  invoiced, protected by the billing-basis guard trigger).
+- `set_dispatch_job_billing_basis` refuses non-fixed agreements.
+  `generate_crm_invoice_from_completed_work` bills every callout on non-fixed
+  agreements, blocks per-request callouts with no reference, prints
+  `Client ref X` on the line and uses the agreement's payment terms for the due
+  date. `get_agreement_billing_basis_summary` returns the terms;
+  `get_finance_pl_period_billing_basis` adds a **billable at agreed rates**
+  bucket and the model per agreement.
+- Live seed: 19 agreements set (see the canon table in `ORG_SERVICE_MODEL.md`),
+  one audit row each. OneFortyOne contract price recorded as an accepted quote
+  (subtotal 13,333 + GST) with its commercial snapshot and an
+  `agreement_contract_price_recorded` audit row.
+- UI:
+  - Dispatch: jobs on non-fixed agreements show the model chip instead of
+    Contract/Extra; the create form only asks for Contracted/Extra on fixed
+    agreements; per-request jobs get a client reference field on create and
+    an add/change control (reason to change) in the job detail. Loading and
+    load-failure states block creating a job until the model is known.
+  - Agreement setup: the tab is now **Billing**: "How this client is billed"
+    (model cards with plain-language help, cycle, payment days, invoice email,
+    standing PO, rates, notes; client-side checks mirror the RPC) above the
+    summary. Non-fixed agreements see "Work billed at agreed rates" and no
+    Extra works tab or Contract/Extra warnings.
+  - Finance: Completed work counts rated callouts and holds unreferenced
+    per-request ones ("Fix in Dispatch first"); the period panel shows the new
+    bucket and the model per agreement.
+- Tests: web `tsc` clean, vitest 381 files / 1,833 tests pass.
+- Atlas (refresh after merge): new RPCs `set_agreement_commercial_terms`
+  (called by `CrmAgreementCommercialTermsPanel`) and
+  `set_dispatch_job_client_reference` (called by `DispatchBillingBasis`);
+  `crm_commercial_settings` is now read by `commercialModel.ts`,
+  `generate_crm_invoice_from_completed_work`, `set_dispatch_job_billing_basis`
+  and both summary RPCs.
+
+**Still to confirm or build.** Billing cycle, payment terms and rates per
+client (seeded defaults only); whether 13,333 is excluding GST (recorded as
+excluding); the recurring monthly OneFortyOne contract invoice (not
+generated); loading the rate cards into `rate_rules`; GL codes and financial
+year from the statements; the 28 TYPE/code conflicts.

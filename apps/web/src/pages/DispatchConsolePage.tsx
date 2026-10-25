@@ -28,7 +28,8 @@ import {
   shiftHealthBadge,
 } from '../lib/dispatchStatus';
 import { shiftStopStatusLabel } from '../lib/shiftStopStatus';
-import { BillingBasisChip, BillingBasisFields, DispatchJobBillingPanel, saveJobBillingBasis, useExtraWorkOrders, type BillingBasis, type BillingFormChoice } from '../components/DispatchBillingBasis';
+import { BillingBasisChip, BillingBasisFields, ClientReferenceField, DispatchJobBillingPanel, saveJobBillingBasis, saveJobClientReference, useExtraWorkOrders, type BillingBasis, type BillingFormChoice } from '../components/DispatchBillingBasis';
+import { COMMERCIAL_MODEL_HELP, commercialModelLabel, loadCommercialModels, useAgreementCommercialModels, usesContractExtra, type CommercialModel } from '../lib/commercialModel';
 import { localToday } from '../lib/agreementTerm';
 import { resolveDispatchBillingRule, type DispatchBillingRule } from '../lib/dispatchBillingRate';
 import { findNearestAvailableUnit } from '../lib/dispatch/nearestUnit';
@@ -97,6 +98,8 @@ interface DispatchJob {
   serviceAgreementId: string | null;
   billingBasis: BillingBasis | null;
   extraWorkOrderId: string | null;
+  commercialModel?: CommercialModel | null;
+  clientOrderReference?: string | null;
 }
 
 interface ClientSite {
@@ -336,6 +339,11 @@ const DispatchConsolePage: React.FC = () => {
   const [runsheetAction, setRunsheetAction] = useState<RunsheetActionDraft | null>(null);
 
   const { orders: agreementExtraOrders } = useExtraWorkOrders(selectedAgreement?.id);
+  const selectedAgreementIds = useMemo(() => (selectedAgreement ? [selectedAgreement.id] : []), [selectedAgreement]);
+  const { models: selectedAgreementModels, loading: selectedModelLoading, error: selectedModelError } = useAgreementCommercialModels(selectedAgreementIds);
+  const selectedCommercialModel = selectedAgreement ? selectedAgreementModels.get(selectedAgreement.id) ?? null : null;
+  const formUsesContractExtra = usesContractExtra(selectedCommercialModel);
+  const [formClientReference, setFormClientReference] = useState('');
 
   // State: Phase D (Billing rates)
   const [billingRules, setBillingRules] = useState<DispatchBillingRule[]>([]);
@@ -464,7 +472,11 @@ const DispatchConsolePage: React.FC = () => {
           serviceAgreementId: j.service_agreement_id ?? null,
           billingBasis: j.billing_basis ?? null,
           extraWorkOrderId: j.extra_work_order_id ?? null,
+          clientOrderReference: j.client_order_reference ?? null,
         }));
+        const { models: jobModels, error: modelError } = await loadCommercialModels(formatted.map((job) => job.serviceAgreementId ?? ''));
+        if (modelError) throw new Error(`Billing models could not be loaded: ${modelError}`);
+        for (const job of formatted) job.commercialModel = job.serviceAgreementId ? jobModels.get(job.serviceAgreementId) ?? null : null;
         setJobs(formatted);
         // ATLAS READS: alarm_events (one per alarm-response job; recorded by record_alarm_signal)
         const alarmJobIds = formatted.filter((job) => job.jobType === 'alarm_response').map((job) => job.id);
@@ -664,7 +676,15 @@ const DispatchConsolePage: React.FC = () => {
       setError('Resolve the incident address before dispatching');
       return;
     }
-    if (!formBilling) {
+    if (selectedAgreement && selectedModelLoading) {
+      setError('The agreement billing model is still loading. Try again in a moment.');
+      return;
+    }
+    if (selectedModelError) {
+      setError(`The agreement billing model could not be loaded: ${selectedModelError}`);
+      return;
+    }
+    if (formUsesContractExtra && !formBilling) {
       setError('Choose billing for this job: Contracted work, Extra, or Decide later.');
       return;
     }
@@ -757,9 +777,14 @@ const DispatchConsolePage: React.FC = () => {
         else if (complainantAddress && !formComplainantSiteId && !harmedPartyReceipt?.out_harmed_party_site_id) setWarning('Job created. The complainant address was not resolved to coordinates, so attendance there will be recorded by time only.');
       }
 
-      if (formBilling === 'contract' || formBilling === 'extra') {
-        const { error: billingError } = await saveJobBillingBasis((data as Array<{ id: string }>)[0].id, formBilling, formExtraOrderId, null);
+      const createdJobId = (data as Array<{ id: string }>)[0].id;
+      if (formUsesContractExtra && (formBilling === 'contract' || formBilling === 'extra')) {
+        const { error: billingError } = await saveJobBillingBasis(createdJobId, formBilling, formExtraOrderId, null);
         if (billingError) setWarning(`Job created, but its billing was not set: ${billingError.message}. Open the job and set billing before it is invoiced.`);
+      }
+      if (selectedCommercialModel === 'per_request' && formClientReference.trim()) {
+        const { error: referenceError } = await saveJobClientReference(createdJobId, formClientReference.trim(), null);
+        if (referenceError) setWarning(`Job created, but the client reference was not saved: ${referenceError.message}. Open the job and add it before it is invoiced.`);
       }
 
       setShowNewJob(false);
@@ -781,6 +806,7 @@ const DispatchConsolePage: React.FC = () => {
       setFormZoneId('');
       setFormBilling('');
       setFormExtraOrderId('');
+      setFormClientReference('');
       setFormComplainantAddress('');
       setResolvedComplainant(null);
       setFormComplainantSiteId('');
@@ -796,7 +822,7 @@ const DispatchConsolePage: React.FC = () => {
     } finally {
       setSaving(false);
     }
-  }, [operatingBranchId, relationshipLoading, relationshipError, selectedAgreement, formRequestId, formJobType, formPriority, formSiteId, formZoneId, isNewIncidentLocation, resolvedLocation, formShiftId, formResourceId, formDirectOfficerId, formWorkUnitId, dispatchWorkUnits, formSlaMinutes, formNotes, loadPhaseA, formComplainantAddress, resolvedComplainant, formComplainantSiteId, formComplainantName, formComplainantPhone, formComplainantNotes, formAlarmIntakeChannel, formAlarmSignalType, formAlarmReceivedAt, formBilling, formExtraOrderId]);
+  }, [operatingBranchId, relationshipLoading, relationshipError, selectedAgreement, formRequestId, formJobType, formPriority, formSiteId, formZoneId, isNewIncidentLocation, resolvedLocation, formShiftId, formResourceId, formDirectOfficerId, formWorkUnitId, dispatchWorkUnits, formSlaMinutes, formNotes, loadPhaseA, formComplainantAddress, resolvedComplainant, formComplainantSiteId, formComplainantName, formComplainantPhone, formComplainantNotes, formAlarmIntakeChannel, formAlarmSignalType, formAlarmReceivedAt, formBilling, formExtraOrderId, selectedModelLoading, selectedModelError, formUsesContractExtra, selectedCommercialModel, formClientReference]);
 
   const resolveComplainantLocation = useCallback(async () => {
     try {
@@ -1581,7 +1607,18 @@ const DispatchConsolePage: React.FC = () => {
         <textarea value={formNotes} onChange={(e) => setFormNotes(e.target.value)} />
       </div>
 
-      <BillingBasisFields idPrefix="dispatch-new-job" choice={formBilling} orderId={formExtraOrderId} orders={agreementExtraOrders} day={localToday()} onChange={(next) => { setFormBilling(next.choice); setFormExtraOrderId(next.orderId); }} />
+      {selectedModelLoading ? <div className="dispatch-console-form-note" role="status">Loading the agreement billing model…</div>
+        : selectedModelError ? <div className="dispatch-console-inline-error" role="alert">The agreement billing model could not be loaded: {selectedModelError}</div>
+        : formUsesContractExtra
+          ? <BillingBasisFields idPrefix="dispatch-new-job" choice={formBilling} orderId={formExtraOrderId} orders={agreementExtraOrders} day={localToday()} onChange={(next) => { setFormBilling(next.choice); setFormExtraOrderId(next.orderId); }} />
+          : <>
+            <div className="dispatch-console-form-field">
+              <span className="dispatch-console-form-label">Billing</span>
+              <div><span className={`dispatch-billing-chip is-rated`}>{commercialModelLabel(selectedCommercialModel)}</span></div>
+              <div className="dispatch-console-form-note">{COMMERCIAL_MODEL_HELP[selectedCommercialModel as CommercialModel]}</div>
+            </div>
+            {selectedCommercialModel === 'per_request' && <ClientReferenceField idPrefix="dispatch-new-job" value={formClientReference} onChange={setFormClientReference} />}
+          </>}
 
       {resolvedRate && (
         <div className="dispatch-console-rate-banner">

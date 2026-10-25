@@ -4,9 +4,10 @@
 .finance-basis-bar .is-contract,.finance-basis-totals .is-contract{--basis-color:#14c8d4}
 .finance-basis-bar .is-extra,.finance-basis-totals .is-extra{--basis-color:#f2bf3a}
 .finance-basis-bar .is-unclassified,.finance-basis-totals .is-unclassified{--basis-color:#e0775a}
+.finance-basis-bar .is-billable,.finance-basis-totals .is-billable{--basis-color:#7fa6e0}
 .finance-basis-bar .is-other,.finance-basis-totals .is-other{--basis-color:#7f97a3}
 .finance-basis-bar span{background:var(--basis-color)}
-.finance-ops-panel dl.finance-basis-totals{grid-template-columns:repeat(4,minmax(0,1fr));gap:9px}
+.finance-ops-panel dl.finance-basis-totals{grid-template-columns:repeat(5,minmax(0,1fr));gap:9px}
 .finance-ops-panel dl.finance-basis-totals div{display:grid;gap:3px;justify-content:stretch;padding:8px 0 0;border-top:3px solid var(--basis-color)}
 .finance-basis-totals dd{text-align:left!important;font-size:16px!important;font-weight:800}
 .finance-basis-totals small{color:#8fa9b5;font-size:12px}
@@ -21,6 +22,7 @@
 .finance-basis-table th[scope=row],.finance-basis-table thead th:first-child{text-align:left;white-space:normal}
 .finance-basis-table th[scope=row] span{display:block;font-weight:700}
 .finance-basis-table small{display:block;color:#8fa9b5;font-weight:400}
+.finance-basis-table small.finance-basis-model{color:#a9c4e8}
 .finance-basis-table td.is-attention{color:#f2a58f}
 .finance-basis-muted{color:#8fa9b5}
 .finance-basis-more{justify-self:start}

@@ -19,7 +19,10 @@ describe('agreement Contract and Extra view', () => {
     expect(panel).toContain('Every callout has a billing decision');
   });
 
-  it('is reachable from the agreement setup dialog', () => {
-    expect(dialog).toContain("view === 'billing' ? <CrmAgreementBillingPanel agreementId={agreement.id} />");
+  it('is reachable from the agreement setup dialog, after the billing terms, and follows the billing model', () => {
+    expect(dialog).toContain("<CrmAgreementCommercialTermsPanel agreementId={agreement.id} onModelChange={setCommercialModel} /><CrmAgreementBillingPanel agreementId={agreement.id} commercialModel={commercialModel} />");
+    expect(dialog).toContain("{usesContractExtra(commercialModel) && <button type=\"button\" className={view === 'extra'");
+    expect(panel).toContain("'Work billed at agreed rates'");
+    expect(panel).toContain('billingAttention(summary, commercialModel)');
   });
 });

@@ -9,6 +9,7 @@
 import React, { useCallback, useEffect, useState } from 'react';
 import { supabase } from '../lib/supabase';
 import { describeUninvoiced, groupUninvoicedWork, invoiceBlocker, type ClientUninvoicedSummary, type UninvoicedDispatchRow, type UninvoicedPatrolVisitRow, type UninvoicedWorkshopRow } from '../lib/uninvoicedWork';
+import { loadCommercialModels } from '../lib/commercialModel';
 import { money } from '../lib/workshop';
 import './CompletedWorkToInvoicePanel.css';
 
@@ -30,10 +31,10 @@ export const CompletedWorkToInvoicePanel: React.FC<Props> = ({ organizationId, o
     if (!organizationId) { setRows([]); setLoading(false); return; }
     setLoading(true);
     setError(null);
-    // ATLAS READS: workshop_work_order_summary (completed, still to invoice), dispatch_job_charge_lines (no invoice line yet)
+    // ATLAS READS: workshop_work_order_summary (completed, still to invoice), dispatch_job_charge_lines (no invoice line yet), dispatch_jobs.client_order_reference, crm_commercial_settings.commercial_model
     const [workshopRes, dispatchRes, patrolRes] = await Promise.all([
       supabase.from('workshop_work_order_summary').select('client_organization_id,client_name,order_number,uninvoiced_total,completed_at').eq('organization_id', organizationId).eq('status', 'completed').gt('uninvoiced_total', 0).limit(500),
-      supabase.from('dispatch_job_charge_lines').select('client_organization_id,source_dispatch_id,line_total,created_at,billing_basis,client:client_organization_id(name)').eq('organization_id', organizationId).is('invoice_line_item_id', null).or('billing_basis.is.null,billing_basis.eq.extra').limit(1000),
+      supabase.from('dispatch_job_charge_lines').select('client_organization_id,service_agreement_id,source_dispatch_id,line_total,created_at,billing_basis,client:client_organization_id(name),job:source_dispatch_id(client_order_reference)').eq('organization_id', organizationId).is('invoice_line_item_id', null).limit(1000),
       supabase.from('patrol_stop_charge_lines').select('client_organization_id,shift_stop_id,line_total,created_at,client:client_organization_id(name)').eq('organization_id', organizationId).eq('status', 'ready').is('invoice_line_item_id', null).limit(1000),
     ]);
     if (workshopRes.error || dispatchRes.error || patrolRes.error) {
@@ -41,8 +42,17 @@ export const CompletedWorkToInvoicePanel: React.FC<Props> = ({ organizationId, o
       setLoading(false);
       return;
     }
-    const dispatchRows: UninvoicedDispatchRow[] = ((dispatchRes.data as Array<Record<string, unknown>>) ?? []).map((row) => {
+    const rawDispatch = (dispatchRes.data as Array<Record<string, unknown>>) ?? [];
+    const { models, error: modelError } = await loadCommercialModels(rawDispatch.map((row) => String(row.service_agreement_id ?? '')));
+    if (modelError) {
+      setError(`Billing models could not be loaded: ${modelError}`);
+      setLoading(false);
+      return;
+    }
+    const dispatchRows: UninvoicedDispatchRow[] = rawDispatch.map((row) => {
       const client = row.client as { name: string } | { name: string }[] | null;
+      const job = row.job as { client_order_reference: string | null } | { client_order_reference: string | null }[] | null;
+      const agreementId = (row.service_agreement_id as string | null) ?? null;
       return {
         client_organization_id: (row.client_organization_id as string | null) ?? null,
         client_name: (Array.isArray(client) ? client[0]?.name : client?.name) ?? null,
@@ -50,6 +60,8 @@ export const CompletedWorkToInvoicePanel: React.FC<Props> = ({ organizationId, o
         line_total: Number(row.line_total ?? 0),
         created_at: String(row.created_at),
         billing_basis: row.billing_basis === 'extra' || row.billing_basis === 'contract' ? row.billing_basis : null,
+        commercial_model: agreementId ? models.get(agreementId) ?? null : null,
+        client_reference: (Array.isArray(job) ? job[0]?.client_order_reference : job?.client_order_reference) ?? null,
       };
     });
     const patrolRows: UninvoicedPatrolVisitRow[] = ((patrolRes.data as Array<Record<string, unknown>>) ?? []).map((row) => {
@@ -99,8 +111,8 @@ export const CompletedWorkToInvoicePanel: React.FC<Props> = ({ organizationId, o
       <header className="completed-work__header">
         <div>
           <p className="finance-owner-eyebrow">Finished work, not yet billed</p>
-          <h2 id="completed-work-title">{loading ? 'Checking finished work…' : rows.length === 0 ? 'Everything finished has been billed' : total > 0 ? `${money(total)} waiting to be invoiced` : 'Callouts need billing set before invoicing'}</h2>
-          <p className="subtitle">Completed workshop jobs, Extra callouts, and priced patrol visits turn into a draft invoice per client. Contracted callouts are covered by the agreement price and are not billed again. Nothing is sent until you review it.</p>
+          <h2 id="completed-work-title">{loading ? 'Checking finished work…' : rows.length === 0 ? 'Everything finished has been billed' : total > 0 ? `${money(total)} waiting to be invoiced` : 'Callouts need attention in Dispatch before invoicing'}</h2>
+          <p className="subtitle">Completed workshop jobs, callouts and priced patrol visits turn into a draft invoice per client, following how each client is billed. On fixed-price agreements only Extra callouts are billed; contracted callouts are covered by the agreement price. Pay as you go, do and invoice and per request clients are billed for every callout at the agreed rates. Nothing is sent until you review it.</p>
         </div>
         {onOpenInvoices && <button type="button" className="btn btn-secondary" onClick={onOpenInvoices}>Open invoices</button>}
       </header>
@@ -122,7 +134,7 @@ export const CompletedWorkToInvoicePanel: React.FC<Props> = ({ organizationId, o
                 </div>
                 <div className="completed-work__amount">{money(entry.total)}<small>before GST</small></div>
                 <button type="button" className="btn btn-primary btn-sm" onClick={() => invoice(entry)} disabled={busyClient !== null || blocker !== null} aria-describedby={blocker ? blockerId : undefined}>
-                  {busyClient === entry.clientId ? 'Creating…' : blocker ? 'Set billing first' : 'Create draft invoice'}
+                  {busyClient === entry.clientId ? 'Creating…' : blocker ? 'Fix in Dispatch first' : 'Create draft invoice'}
                 </button>
               </li>
             );

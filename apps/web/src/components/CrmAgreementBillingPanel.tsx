@@ -2,7 +2,8 @@ import { useCallback, useEffect, useState } from 'react';
 import { AlertTriangle, CheckCircle2, RefreshCw } from 'lucide-react';
 import { supabase } from '../lib/supabase';
 import { money } from '../lib/workshop';
-import { billingAttention, billingPeriodBounds, monthLabel, parseAgreementBillingSummary, type AgreementBillingSummary, type BillingPeriod } from '../lib/agreementBillingSummary';
+import { billingAttention, billingPeriodBounds, monthLabel, parseAgreementBillingSummary, recordedWorkTotal, type AgreementBillingSummary, type BillingPeriod } from '../lib/agreementBillingSummary';
+import { commercialModelLabel, usesContractExtra, type CommercialModel } from '../lib/commercialModel';
 import './CrmAgreementObligationsPanel.css';
 import './CrmAgreementExtraWorksPanel.css';
 import './CrmAgreementBillingPanel.css';
@@ -10,7 +11,8 @@ import './CrmAgreementBillingPanel.css';
 const periodLabels: Record<BillingPeriod, string> = { '12m': 'Last 12 months', year: 'This calendar year', all: 'All recorded work' };
 const basisLabels = { contract: 'Contracted work', extra: 'Extra', unclassified: 'Billing not set' } as const;
 
-export function CrmAgreementBillingPanel({ agreementId }: { agreementId: string }) {
+export function CrmAgreementBillingPanel({ agreementId, commercialModel = null }: { agreementId: string; commercialModel?: CommercialModel | null }) {
+  const contractExtra = usesContractExtra(commercialModel);
   const [period, setPeriod] = useState<BillingPeriod>('12m');
   const [summary, setSummary] = useState<AgreementBillingSummary | null>(null);
   const [loading, setLoading] = useState(true);
@@ -33,14 +35,15 @@ export function CrmAgreementBillingPanel({ agreementId }: { agreementId: string 
 
   useEffect(() => { void load(); }, [load]);
 
-  const notes = summary ? billingAttention(summary) : [];
+  const notes = summary ? billingAttention(summary, commercialModel) : [];
+  const callouts = summary ? summary.dispatch.reduce((sum, row) => ({ lines: sum.lines + row.lines, total: sum.total + row.total, uninvoiced: sum.uninvoiced + row.uninvoiced_total }), { lines: 0, total: 0, uninvoiced: 0 }) : null;
   const hasActivity = summary ? summary.months.length > 0 || summary.dispatch.length > 0 || summary.extraOrders.length > 0 : false;
 
   return <section className="agreement-obligations agreement-billing" aria-labelledby="agreement-billing-title" aria-busy={loading}>
     <div className="agreement-section-heading">
       <div>
-        <h3 id="agreement-billing-title">Contract and Extra</h3>
-        <p>What was done under the fixed contract and what was Extra, month by month. Log rows show recorded service cost (job time and travel), not invoiced amounts.</p>
+        <h3 id="agreement-billing-title">{contractExtra ? 'Contract and Extra' : 'Work billed at agreed rates'}</h3>
+        <p>{contractExtra ? 'What was done under the fixed contract and what was Extra, month by month.' : `This client is billed ${commercialModelLabel(commercialModel).toLowerCase()}, so all recorded work is billable at the agreed rates.`} Log rows show recorded service cost (job time and travel), not invoiced amounts.</p>
       </div>
       <label className="agreement-billing-period"><span>Period</span>
         <select value={period} onChange={(event) => setPeriod(event.target.value as BillingPeriod)} disabled={loading}>
@@ -52,7 +55,33 @@ export function CrmAgreementBillingPanel({ agreementId }: { agreementId: string 
     {error && <div className="agreement-obligation-message is-error" role="alert"><AlertTriangle size={15} />{error}<button type="button" className="agreement-extra-retry" onClick={() => void load()}>Retry</button></div>}
     {loading && !summary && !error && <div className="agreement-setup-loading"><RefreshCw size={18} className="is-spinning" />Loading contract and Extra totals</div>}
 
-    {summary && <>
+    {summary && !contractExtra && callouts && <>
+      <div className="agreement-billing-cards" role="list">
+        <div role="listitem" className="agreement-billing-card is-rated">
+          <span>Billing model</span>
+          <strong>{commercialModelLabel(commercialModel)}</strong>
+          <small>No Contracted work / Extra decision</small>
+        </div>
+        <div role="listitem" className="agreement-billing-card is-rated">
+          <span>Recorded work</span>
+          <strong>{money(recordedWorkTotal(summary.totals))}</strong>
+          <small>From the imported patrol log</small>
+        </div>
+        <div role="listitem" className="agreement-billing-card is-rated">
+          <span>Callouts not yet invoiced</span>
+          <strong>{money(callouts.uninvoiced)}</strong>
+          <small>{callouts.lines} charge line{callouts.lines === 1 ? '' : 's'} in total</small>
+        </div>
+      </div>
+      {!hasActivity && <div className="agreement-setup-empty">No work recorded for {periodLabels[period].toLowerCase()}.</div>}
+      {summary.months.length > 0 && <table className="agreement-billing-table">
+        <caption>Imported patrol log, by month</caption>
+        <thead><tr><th scope="col">Month</th><th scope="col">Recorded work</th></tr></thead>
+        <tbody>{[...summary.months].reverse().map((row) => <tr key={row.month}><th scope="row">{monthLabel(row.month)}</th><td>{money(recordedWorkTotal(row))}</td></tr>)}</tbody>
+      </table>}
+    </>}
+
+    {summary && contractExtra && <>
       <div className="agreement-billing-cards" role="list">
         <div role="listitem" className="agreement-billing-card">
           <span>Contract price</span>

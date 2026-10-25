@@ -309,5 +309,39 @@ and is charged on top. It does not change the agreement.
   component. `get_finance_pl_period_billing_basis` derives Contract, Extra,
   not classified and other from the linked source rows and the dispatch job's
   billing choice, and its total must equal the P&L period's recorded cost.
-- **Open.** The fixed monthly price is recorded as an accepted quote (none
-  recorded for OneFortyOne yet).
+- **Open.** ~~The fixed monthly price is recorded as an accepted quote (none
+  recorded for OneFortyOne yet).~~ Recorded 2026-10-26 (see the next ruling).
+
+## Ruling 2026-10-26 — each client is billed on its own commercial model
+
+Not every client receives the OneFortyOne arrangement. How a client is billed
+is a property of its **service agreement**, held in
+`crm_commercial_settings.commercial_model` (one row per agreement) and set only
+through `set_agreement_commercial_terms` (provider administrator, audited,
+reason required to change an existing model). The four models:
+
+| Model | Meaning | Dispatch | Invoicing |
+|---|---|---|---|
+| `fixed_price_with_extras` | A fixed contract price covers the agreed service; anything outside is Extra. | Each callout is Contracted work or Extra (rules above). | Only Extra callouts are billed; Contract is covered by the price; unclassified callouts block invoicing. |
+| `pay_as_you_go` | All work charged at agreed rates each billing cycle. | No Contract/Extra decision; `set_dispatch_job_billing_basis` refuses. | Every completed callout is billed. |
+| `do_and_invoice` | Standing authority to do what is needed, then invoice the work done. | As pay as you go. | Every completed callout is billed. |
+| `per_request` | The client asks for each job. | The job carries the client's request or PO reference (`dispatch_jobs.client_order_reference`, via `set_dispatch_job_client_reference`, audited, reason to change, refused once invoiced). | Every completed callout is billed; a callout with no reference blocks invoicing and the reference is printed on the line. |
+
+- **No model yet = Contract/Extra.** An agreement with no model behaves as fixed
+  price plus Extra (`agreement_uses_contract_extra`), so nothing is billed by
+  accident while terms are being set.
+- **Terms live with the model.** Billing cycle, payment terms (0–120 days,
+  used for the invoice due date when an agreement is invoiced), invoice email,
+  standing PO, rates and notes are optional terms on the same row.
+- **Finance shows the difference.** `get_finance_pl_period_billing_basis` moves
+  all service cost on non-fixed agreements into a separate **billed at agreed
+  rates** bucket, so Contract, Extra and not classified only ever describe
+  fixed-price clients. Totals still reconcile to the period's recorded cost.
+- **R&M seed (owner confirmed, 2026-10-26).** Fixed price + Extra: OneFortyOne,
+  STAND, TDC, Birdhurst, Stringer, Wrattens, Thomas Bros, Taylors. Pay as you
+  go: NCC, R&M Other Private, Private Parks, Private Redvale-Merc. Do and
+  invoice: Tasman Pine Forests, Merril and Ring, NMDHB, NZ Health. Per request:
+  DOC, Fulton Hogan (Maitai Dam), Operation Lizard (DART). Billing cycle and
+  payment terms are seeded as defaults until confirmed per client.
+- **OneFortyOne contract price.** Recorded as an accepted quote (13,333 per
+  month, per the R&M finance workbook Sheet2), with its commercial snapshot.

@@ -4,6 +4,8 @@
  * callouts by billing decision, Extra works orders, and the recorded price.
  */
 
+import { usesContractExtra, type CommercialModel } from './commercialModel';
+
 export interface BillingMonth {
   month: string;
   contract_cost: number;
@@ -42,6 +44,11 @@ const num = (value: unknown): number => {
   const parsed = Number(value);
   return Number.isFinite(parsed) ? parsed : 0;
 };
+
+/** Recorded work whatever its basis: on agreements billed at agreed rates every row is billable. */
+export function recordedWorkTotal(row: { contract_cost: number; extra_cost: number; unclassified_cost: number }): number {
+  return row.contract_cost + row.extra_cost + row.unclassified_cost;
+}
 
 export function parseAgreementBillingSummary(raw: unknown): AgreementBillingSummary {
   const data = (raw && typeof raw === 'object' ? raw : {}) as Record<string, unknown>;
@@ -100,9 +107,10 @@ export function monthLabel(month: string): string {
   return new Date(year, mm - 1, 1).toLocaleDateString('en-NZ', { month: 'short', year: 'numeric' });
 }
 
-/** Plain-language warnings, in the order a finance person should act on them. */
-export function billingAttention(summary: AgreementBillingSummary): string[] {
+/** Plain-language warnings, in the order a finance person should act on them. Agreements not billed fixed price + Extra have no Contract/Extra decision, so none of these apply. */
+export function billingAttention(summary: AgreementBillingSummary, model: CommercialModel | null = null): string[] {
   const notes: string[] = [];
+  if (!usesContractExtra(model)) return notes;
   const unsetCallouts = summary.dispatch.find((row) => row.basis === 'unclassified');
   if (unsetCallouts && unsetCallouts.lines > 0) {
     notes.push(`${unsetCallouts.lines} callout charge line${unsetCallouts.lines === 1 ? ' has' : 's have'} no billing decision. Set them in Dispatch before invoicing — invoicing is blocked until then.`);

@@ -1,0 +1,154 @@
+/**
+ * commercialModel.ts — how a client is billed under a service agreement
+ * (owner ruling 2026-10-26). Mirrors crm_commercial_settings.commercial_model
+ * and public.agreement_uses_contract_extra(): only fixed price plus Extra, or
+ * a model that has not been set yet, uses the Contracted work / Extra decision.
+ */
+
+import { useEffect, useState } from 'react';
+
+export const COMMERCIAL_MODELS = ['fixed_price_with_extras', 'pay_as_you_go', 'do_and_invoice', 'per_request'] as const;
+export type CommercialModel = (typeof COMMERCIAL_MODELS)[number];
+
+export const COMMERCIAL_MODEL_LABEL: Record<CommercialModel, string> = {
+  fixed_price_with_extras: 'Fixed price + Extra',
+  pay_as_you_go: 'Pay as you go',
+  do_and_invoice: 'Do and invoice',
+  per_request: 'Per request',
+};
+
+export const COMMERCIAL_MODEL_HELP: Record<CommercialModel, string> = {
+  fixed_price_with_extras: 'A fixed contract price covers the agreed service. Work outside it is Extra and billed on top, so each callout is marked Contracted work or Extra.',
+  pay_as_you_go: 'All work is charged at the agreed rates and invoiced each billing cycle. There is no Contracted work / Extra decision.',
+  do_and_invoice: 'Standing authority to do what is needed. The actual work done is invoiced; there is no Contracted work / Extra decision.',
+  per_request: 'The client asks for each job. Each callout needs the client\'s request or purchase-order reference before it can be invoiced.',
+};
+
+export function asCommercialModel(value: unknown): CommercialModel | null {
+  return typeof value === 'string' && (COMMERCIAL_MODELS as readonly string[]).includes(value) ? (value as CommercialModel) : null;
+}
+
+/** True when callouts on the agreement need a Contracted work / Extra decision. */
+export function usesContractExtra(model: CommercialModel | null | undefined): boolean {
+  return model == null || model === 'fixed_price_with_extras';
+}
+
+export function commercialModelLabel(model: CommercialModel | null | undefined): string {
+  return model ? COMMERCIAL_MODEL_LABEL[model] : 'Billing model not set';
+}
+
+/** Commercial model per agreement id. Agreements with no settings row are absent (treated as not set). */
+export function useAgreementCommercialModels(agreementIds: ReadonlyArray<string>): { models: Map<string, CommercialModel | null>; loading: boolean; error: string | null } {
+  const key = Array.from(new Set(agreementIds.filter(Boolean))).sort().join(',');
+  const [state, setState] = useState<{ models: Map<string, CommercialModel | null>; loading: boolean; error: string | null }>({ models: new Map(), loading: false, error: null });
+
+  useEffect(() => {
+    if (!key) { setState({ models: new Map(), loading: false, error: null }); return; }
+    let cancelled = false;
+    setState((prev) => ({ ...prev, loading: true, error: null }));
+    void loadCommercialModels(key.split(',')).then((result) => {
+      if (!cancelled) setState({ ...result, loading: false });
+    });
+    return () => { cancelled = true; };
+  }, [key]);
+
+  return state;
+}
+
+export async function loadCommercialModels(agreementIds: ReadonlyArray<string>): Promise<{ models: Map<string, CommercialModel | null>; error: string | null }> {
+  const ids = Array.from(new Set(agreementIds.filter(Boolean)));
+  if (ids.length === 0) return { models: new Map(), error: null };
+  // Imported lazily so the pure helpers above stay usable without a configured client (unit tests).
+  const { supabase } = await import('./supabase');
+  // ATLAS READS: crm_commercial_settings (commercial_model per service agreement)
+  const { data, error } = await supabase.from('crm_commercial_settings').select('service_agreement_id,commercial_model').in('service_agreement_id', ids);
+  if (error) return { models: new Map(), error: error.message };
+  const models = new Map<string, CommercialModel | null>();
+  for (const row of (data as Array<{ service_agreement_id: string; commercial_model: string | null }>) ?? []) {
+    models.set(row.service_agreement_id, asCommercialModel(row.commercial_model));
+  }
+  return { models, error: null };
+}
+
+export const BILLING_CYCLES = ['weekly', 'fortnightly', 'monthly', 'quarterly'] as const;
+export type BillingCycle = (typeof BILLING_CYCLES)[number];
+
+export const RATE_FIELDS = [
+  { key: 'base_rate_per_hour', label: 'Base rate per hour' },
+  { key: 'overtime_rate_per_hour', label: 'Overtime rate per hour' },
+  { key: 'callout_rate_per_hour', label: 'Callout rate per hour' },
+  { key: 'callout_minimum_hours', label: 'Callout minimum hours' },
+  { key: 'travel_rate_per_km', label: 'Travel rate per km' },
+] as const;
+export type RateKey = (typeof RATE_FIELDS)[number]['key'];
+
+export interface CommercialTermsForm {
+  model: CommercialModel | '';
+  billingCycle: BillingCycle;
+  paymentTermsDays: string;
+  invoiceEmail: string;
+  purchaseOrderNumber: string;
+  notes: string;
+  rates: Record<RateKey, string>;
+}
+
+export interface CommercialSettingsRow {
+  commercial_model: string | null;
+  billing_cycle: string | null;
+  payment_terms_days: number | null;
+  invoice_email: string | null;
+  purchase_order_number: string | null;
+  notes: string | null;
+  base_rate_per_hour: number | null;
+  overtime_rate_per_hour: number | null;
+  callout_rate_per_hour: number | null;
+  callout_minimum_hours: number | null;
+  travel_rate_per_km: number | null;
+  updated_at?: string | null;
+}
+
+const text = (value: number | string | null | undefined) => (value == null ? '' : String(value));
+
+export function commercialTermsFormFrom(row: CommercialSettingsRow | null): CommercialTermsForm {
+  const cycle = row?.billing_cycle;
+  return {
+    model: asCommercialModel(row?.commercial_model) ?? '',
+    billingCycle: (BILLING_CYCLES as readonly string[]).includes(cycle ?? '') ? (cycle as BillingCycle) : 'monthly',
+    paymentTermsDays: text(row?.payment_terms_days ?? 14),
+    invoiceEmail: row?.invoice_email ?? '',
+    purchaseOrderNumber: row?.purchase_order_number ?? '',
+    notes: row?.notes ?? '',
+    rates: Object.fromEntries(RATE_FIELDS.map(({ key }) => [key, text(row?.[key])])) as Record<RateKey, string>,
+  };
+}
+
+const RATE_PATTERN = /^\d{1,7}(\.\d{1,4})?$/;
+const EMAIL_PATTERN = /^[^@\s]+@[^@\s]+\.[^@\s]+$/;
+
+/** Mirrors set_agreement_commercial_terms validation so the form explains problems before saving. */
+export function commercialTermsProblem(form: CommercialTermsForm, savedModel: CommercialModel | null, reason: string): string | null {
+  if (!form.model) return 'Choose how this client is billed.';
+  if (!/^\d{1,3}$/.test(form.paymentTermsDays.trim()) || Number(form.paymentTermsDays) > 120) return 'Payment terms must be a whole number of days from 0 to 120.';
+  const email = form.invoiceEmail.trim();
+  if (email && !EMAIL_PATTERN.test(email)) return 'The invoice email is not a valid email address.';
+  for (const { key, label } of RATE_FIELDS) {
+    const value = form.rates[key].trim();
+    if (value && !RATE_PATTERN.test(value)) return `${label} must be zero or a positive number (up to 4 decimals).`;
+  }
+  if (form.notes.length > 2000) return 'Notes are limited to 2000 characters.';
+  if (savedModel && savedModel !== form.model && reason.trim().length < 3) return 'Say why the billing model is changing.';
+  return null;
+}
+
+/** The p_terms object: every editable key is sent; blank rates and text clear the stored value. */
+export function commercialTermsPayload(form: CommercialTermsForm): Record<string, string | number | null> {
+  const blankToNull = (value: string) => (value.trim() ? value.trim() : null);
+  return {
+    billing_cycle: form.billingCycle,
+    payment_terms_days: Number(form.paymentTermsDays.trim()),
+    invoice_email: blankToNull(form.invoiceEmail),
+    purchase_order_number: blankToNull(form.purchaseOrderNumber),
+    notes: blankToNull(form.notes),
+    ...Object.fromEntries(RATE_FIELDS.map(({ key }) => [key, form.rates[key].trim() ? Number(form.rates[key].trim()) : null])),
+  };
+}
