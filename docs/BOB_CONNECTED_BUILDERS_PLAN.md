@@ -98,6 +98,31 @@ Do not silently promote experience notes into authoritative knowledge.
 Gate: continuations recall decisions and failed approaches without repeating
 answered questions; stale evidence is recognized, not reused as current proof.
 
+First stage-2 slice: ordinary private Builder chat turns automatically retrieve
+relevant active platform-canonical cards before reasoning and record the actual
+retrieval receipt; status-only and public-research turns do not preload them.
+Builder chat can also retrieve cards again as the investigation changes,
+using the existing 768-dimensional embedding/match path, re-read scoped provenance
+and return version/hash/truncation receipts. An explicitly degraded bounded keyword
+path remains available if private embedding fails. Thread-scoped tool receipts
+persist bounded result text, revision, time and failures for continuation reads;
+historical results do not satisfy fresh source-investigation gates. No tenant
+cards, in-app conversation or diary are shared. Vibe/Builder integration and
+cross-mode handoffs remain subsequent work, not implied by chat-only delivery.
+
+Stage-1 delivery evidence: #220 and proxy follow-up #221 are merged; governed
+release `e4a5049130ea069651537cf084dd6fbbe3c32a07` passed actual dedicated
+test-owner edge reads (assessment 200, Docker inventory 200). The live UI
+acceptance invoked the new diagnostic successfully but also made refused and
+repeated calls, then ended with an error after model timeout. Capability
+reachability is proven, useful end-to-end model completion and efficiency are not.
+
+Stage-2 probe: a real private embedding request hit its 15-second deadline under
+the current runtime workload. The explicit degraded keyword path returned relevant
+continuation/discovery cards with provenance; semantic retrieval was not proven.
+Do not hide this degradation or claim vector quality from fixture tests. Initial
+full runtime validation passed 1,715 tests with nine existing skips.
+
 ### 3. Evidence-supported investigation
 
 Carry goal, observed behavior, evidence, hypotheses, unknowns, proposed change,

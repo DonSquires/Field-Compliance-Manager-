@@ -11,6 +11,16 @@
 
 ## 1. What Bob is
 
+**Connected Builder knowledge clarification, owner plan approval 2026-10-25.**
+Builder chat remains separate from in-app conversations and operational memory.
+It may retrieve the same active platform-canonical knowledge cards as other Bob
+surfaces, with source/version/hash provenance, and its own thread-scoped tool
+receipts. Shared canonical guidance is not shared tenant conversation, private
+diary or a new approval authority. No tenant cards or unreviewed experience notes
+are loaded by this path. Private knowledge and operational evidence stay on
+private compute; isolated public research still receives neither. Existing
+Create job and protected release gates remain unchanged.
+
 **Owner-approved Builder chat cloud research, 2026-10-25.** For eligible
 public research, try verified available Ollama Cloud candidates first; do not
 spend the entire turn on small private models or introduce metered providers.
