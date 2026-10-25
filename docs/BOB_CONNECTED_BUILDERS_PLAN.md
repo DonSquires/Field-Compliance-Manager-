@@ -80,6 +80,14 @@ and was not asserted. This probe neither replaced production modules nor deploye
 the branch, and is not proof of a live UI turn or repaired edge relay. Atlas
 generation was dry-run only; no schema, credentials or live map were changed.
 
+Release follow-up: PR #220 merged and deployed at
+`6be75e55ab2f6cd9f6e32b0dd1e6f69274d3f8d5`. Actual edge acceptance still
+returned 404: the public nginx allowlist omitted every assessment/Docker alias.
+An authenticated internal route and a deployed tool are insufficient evidence
+of public reachability. Add the exact diagnostic aliases to managed nginx and
+test them as part of relay-path coverage; all handlers retain admin authentication.
+Do not mark the relay repaired until dedicated test-owner live reads succeed.
+
 ### 2. Shared relevant context
 
 Reuse approved card retrieval and memory. Keep canon, task evidence and experience

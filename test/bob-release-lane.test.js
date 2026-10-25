@@ -202,7 +202,13 @@ test('every control-plane path the edge functions relay is allowed through the p
     }
   }
   assert.ok(relayed.has('/api/bob/laptop/run'), 'laptop run relay found');
+  for (const prefix of ['', '/api/bob', '/api/bob/builder']) {
+    for (const suffix of ['/assessment', '/docker/services']) relayed.add(`${prefix}${suffix}`);
+  }
   for (const p of relayed) assert.ok(allow.some((re) => re.test(p)), `${p} is not allowed by deploy/bob-vps/nginx/bob.fcmanager.co.nz (it would be an HTTP 404 in Bob's chat)`);
+  for (const p of ['/assessment/extra', '/docker/exec', '/api/bob/builder/docker/logs']) {
+    assert.ok(!allow.some(re => re.test(p)), `${p} must not be admitted by the diagnostic allowlist`);
+  }
 });
 
 test('nginx backups are kept outside sites-enabled so nginx never loads a duplicate site', () => {
