@@ -520,6 +520,19 @@ test('local recovery is memory-filtered, installed, distinct, and never expands 
   ]);
 });
 
+test('Vibe considers every owner-approved Ollama Cloud model after the ready model', () => {
+  const models = ['kimi-k2.7-code', 'deepseek-v4.1-flash:1017', 'deepseek-v4-pro:0813', 'gpt-oss:120b'];
+  const candidates = vibe.vibeProviderCandidates({ chain: ['ollama_cloud'] }, {
+    ollama_cloud: { configured: true, healthy: true, ready_model: 'gpt-oss:120b', models, installed: models },
+  });
+  assert.deepEqual(candidates, [
+    { provider: 'ollama_cloud', model: 'gpt-oss:120b' },
+    { provider: 'ollama_cloud', model: 'kimi-k2.7-code' },
+    { provider: 'ollama_cloud', model: 'deepseek-v4.1-flash:1017' },
+    { provider: 'ollama_cloud', model: 'deepseek-v4-pro:0813' },
+  ]);
+});
+
 test('repeated failed edits still stop even when another local recovery model is available', async () => {
   const edit = { thought: 'guess edit', tool: 'replace_in_file', args: { path: 'apps/web/src/hello.ts', old_text: 'missing', new_text: 'bad' } };
   const { store, deps, model } = setup(Array.from({ length: 12 }, () => edit), {
@@ -796,6 +809,9 @@ test('Vibe can recover from a repeated broad search without disabling its loop g
   assert.deepEqual(store.state.session.changed_files, ['apps/web/src/hello.ts']);
   assert.match(vibe.vibeSystemPrompt(), /routing\/RoleRouter.tsx/);
   assert.match(vibe.vibeSystemPrompt(), /pages\/StaffProfilePage/);
+  assert.match(vibe.vibeSystemPrompt(), /React hooks may only be called at the top level/);
+  assert.match(vibe.vibeSystemPrompt(), /Preserve existing tests and imports/);
+  assert.match(vibe.vibeSystemPrompt(), /run tool forces NODE_ENV=test/);
 });
 
 test('continuation receives prior answers, failures, successful edits and committed files', async () => {
