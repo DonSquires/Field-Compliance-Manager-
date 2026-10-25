@@ -24,6 +24,13 @@ Builder research release follow-up, 2026-10-25:
 - A prepared tool correction refuses invalid search paths instead of silently
   broadening scope and bounds source reads to 120 lines/8,000 characters.
   This improves evidence handling, not a claim of autonomous repair completion.
+- Tool correction #216 deployed as `96127f4d123cc776c3e13916681cf1e15437bfa2`
+  with green CI and healthy release. The next UI continuation still looped;
+  a proposal was refused for missing ledger/Atlas evidence, then the model's
+  ordinary reply was incorrectly recorded as a completed answer. No job card
+  was accepted. A follow-up fix recognizes repair-plan requests per clause,
+  distinguishes "do not create" from "do not propose", and keeps a rejected
+  proposal attempt incomplete until a validated proposal actually succeeds.
 
 Builder chat public research, owner decision 2026-10-25 (deployed and live UI verified):
 

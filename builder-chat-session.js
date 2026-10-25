@@ -316,14 +316,15 @@ const INVESTIGATION = /\b(?:why|how (?:does|do))\b/i;
 // The owner explicitly asked for a job to be proposed. The model must then end with propose_job,
 // not a refusal: live thread 2026-10-25, qwen2.5-coder:7b read schema.sql 13 times and replied that
 // it had "no permission to modify the file" instead of proposing the fix it was asked for.
-const PROPOSE_REQUEST = /\b(?:propose|draft|plan|create|open|raise|queue|set up|make)\b[^.?!\n]{0,40}\b(?:builder\s+)?(?:job|build|fix|change)\b/i;
+const PROPOSE_REQUEST = /\b(?:propose|draft|plan|create|open|raise|queue|set up|make)\b[^.?!\n]{0,40}\b(?:builder\s+)?(?:job|build|fix|change|(?:repair|implementation)\s+plan)\b/i;
 const PROPOSE_NEGATED = /\b(?:don'?t|do not|does not|no need to|not yet|never|without|instead of|rather than|before you)\b[^.?!\n]{0,24}\b(?:propose|draft|plan|create|open|raise|queue|set up|make)\b|\b(?:propose|draft|create|open|raise|queue|make)\b[^.?!\n]{0,40}\b(?:job|build|fix|change)\b[^.?!\n]{0,12}\b(?:yet|later)\b/i;
 // "How do I create a job?" asks for an explanation; "Can you propose a job?" asks Bob to act.
 const INFORMATIONAL = /^\s*(?:how|what|why|when|where|which|who|is|are|does|do|did|should|would it)\b/i;
 const ADDRESSED_REQUEST = /\b(?:can|could|would|will) you\b|\bplease\b/i;
 function proposeIntent(text) {
   const value = String(text || '');
-  if (!PROPOSE_REQUEST.test(value) || PROPOSE_NEGATED.test(value)) return false;
+  const requested = value.split(/[.!?\n]+/).some(clause => PROPOSE_REQUEST.test(clause) && !PROPOSE_NEGATED.test(clause));
+  if (!requested) return false;
   return !INFORMATIONAL.test(value) || ADDRESSED_REQUEST.test(value);
 }
 
@@ -435,7 +436,7 @@ async function runBuilderChat({ store, thread, message, workspacePath, head, gat
   const intent = statusIntent(message.content);
   const preloadTool = intent ? { owner: 'owner_queue', job: 'job_status', jobs: 'list_jobs' }[intent.kind] : null;
   const statusMode = Boolean(preloadTool && typeof allTools[preloadTool] === 'function');
-  const proposeMode = !statusMode && proposeIntent(message.content) && typeof allTools.propose_job === 'function';
+  let proposeMode = !statusMode && proposeIntent(message.content) && typeof allTools.propose_job === 'function';
   const research = { source_paths: [], ledger_checked: false, atlas_queries: [] };
   const sourceReads = new Map();
   const normalizeQuote = text => text.replace(/^\d+: ?/gm, '').replace(/\s+/g, ' ').trim();
@@ -564,6 +565,7 @@ async function runBuilderChat({ store, thread, message, workspacePath, head, gat
     }
     unparseable = 0;
     const args = call.args && typeof call.args === 'object' ? call.args : {};
+    if (!statusMode && call.tool === 'propose_job' && typeof tools.propose_job === 'function') proposeMode = true;
     if (final && call.tool !== 'reply' && call.tool !== 'finish' && !(proposeMode && !proposal && call.tool === 'propose_job')) break;
     if (call.tool === 'reply' || call.tool === 'finish') {
       let text = String(args.message || args.summary || '').trim();

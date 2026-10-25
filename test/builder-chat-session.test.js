@@ -614,12 +614,30 @@ test('proposal requests are told apart from questions and status checks', () => 
   assert.equal(chat.proposeIntent('Draft a fix for the dispatch page spacing'), true);
   assert.equal(chat.proposeIntent('What is waiting on me?'), false);
   assert.equal(chat.proposeIntent('Where are the dispatch console styles?'), false);
+  assert.equal(chat.proposeIntent('Continue investigating. Propose your own concrete repair plan with actual source findings. Do not create a job or start implementation.'), true);
+  assert.equal(chat.proposeIntent('Please propose a Builder job. Do not create or start it yet.'), true);
 });
 
 test('explanations and negated requests are not mandatory proposals', () => {
   assert.equal(chat.proposeIntent('How do I create a Builder job?'), false);
   assert.equal(chat.proposeIntent("Don't propose a job yet, just look at the dispatch page"), false);
   assert.equal(chat.proposeIntent('Can you propose a job for the dispatch spacing?'), true);
+  assert.equal(chat.proposeIntent('Do not propose a repair plan yet; just inspect the source.'), false);
+});
+
+test('a rejected proposal cannot end as a successfully answered ordinary conversation', async () => {
+  const { store, deps } = setup([
+    { tool: 'propose_job', args: PROPOSAL },
+    { tool: 'reply', args: { message: 'Next step: propose a job to restore the file.' } },
+    { tool: 'reply', args: { message: 'The investigation is complete.' } },
+  ]);
+  const message = ownerMessage('Continue investigating the missing Compose source.');
+  const outcome = await chat.processBuilderChatMessage({ store, message, deps });
+  assert.equal(outcome.error, true);
+  assert.equal(store.state.completed[message.id], 'failed');
+  assert.equal(store.rows.at(-1).kind, 'error');
+  assert.match(store.rows.at(-1).content, /did not complete an evidence-based repair plan/);
+  assert.equal(store.rows.some(row => row.kind === 'proposal'), false);
 });
 
 test('structured JSON mode preserves the same required proposal and reader arguments as native tools', () => {
