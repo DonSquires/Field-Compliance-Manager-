@@ -98,6 +98,36 @@ function createBuilderChatStore(supabase) {
       const cutoff = new Date(Date.now() - olderThanMs).toISOString();
       await supabase.from('builder_chat_messages').update({ status: 'failed', completed_at: new Date().toISOString() }).eq('status', 'claimed').lt('claimed_at', cutoff);
     },
+    // Startup only (sole worker). A release restart mid-turn re-queues the owner's message once and
+    // reopens a thread left "working", instead of failing the message without a word.
+    async recoverInterruptedTurns() {
+      const now = new Date().toISOString();
+      const { data: claimed, error } = await supabase.from('builder_chat_messages').select('id,thread_id,payload').eq('status', 'claimed');
+      if (error) throw new Error(`Builder chat restart recovery read failed: ${error.message}`);
+      const outcome = { requeued: 0, failed: 0, threads: 0 };
+      for (const row of claimed || []) {
+        const payload = row.payload && typeof row.payload === 'object' ? row.payload : {};
+        const retryable = !(Number(payload.restart_retries) >= 1);
+        const patch = retryable
+          ? { status: 'queued', claimed_at: null, payload: { ...payload, restart_retries: (Number(payload.restart_retries) || 0) + 1 } }
+          : { status: 'failed', completed_at: now };
+        const { error: updateError } = await supabase.from('builder_chat_messages').update(patch).eq('id', row.id).eq('status', 'claimed');
+        if (updateError) throw new Error(`Builder chat restart recovery update failed: ${updateError.message}`);
+        const { error: postError } = await supabase.from('builder_chat_messages').insert({
+          thread_id: row.thread_id, role: 'system', kind: retryable ? 'status' : 'error',
+          content: retryable
+            ? 'Bob Builder restarted during this answer (usually a release going live). Your message is queued again.'
+            : 'Bob Builder restarted twice during this answer, so it was not retried again. Send it again when you are ready.',
+          payload: { message_id: row.id, reason: 'worker_restart' },
+        });
+        if (postError) throw new Error(`Builder chat restart notice failed: ${postError.message}`);
+        outcome[retryable ? 'requeued' : 'failed']++;
+      }
+      const { data: stuck, error: stuckError } = await supabase.from('builder_chat_threads').update({ status: 'open', updated_at: now }).eq('status', 'working').select('id');
+      if (stuckError) throw new Error(`Builder chat restart recovery thread reset failed: ${stuckError.message}`);
+      outcome.threads = (stuck || []).length;
+      return outcome;
+    },
   };
 }
 
@@ -598,7 +628,10 @@ function createBuilderChatWorker({ supabase, deps, intervalMs = 2500, log = cons
     tick,
     start() {
       // This process is the only Builder chat worker: a claim left from before a restart is orphaned.
-      store.releaseStaleClaims(0).catch(() => {});
+      store.recoverInterruptedTurns()
+        .then(outcome => { if (outcome.requeued || outcome.failed || outcome.threads) log.info?.(`builder chat worker: restart recovery ${JSON.stringify(outcome)}`); })
+        .catch(error => { log.error?.(`builder chat worker: restart recovery failed: ${redactGitError(error && error.message)}`); return store.releaseStaleClaims(0); })
+        .catch(() => {});
       timer = setInterval(() => { tick(); }, intervalMs);
       timer.unref?.();
       setTimeout(() => { tick(); }, 2000).unref?.();
