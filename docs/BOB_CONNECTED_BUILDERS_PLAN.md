@@ -170,7 +170,12 @@ Pre-release validation: 1,722 runtime tests passed with nine existing skips
 using four concurrent test files. An initial unconstrained run failed its
 control-plane startup fixture; that fixture passed in isolation and in the
 bounded full run. The prompt-version assertion was updated for Vibe v17.
-The new 2,161-character card fits Chat's 2,500-character per-card limit.
+The new 2,313-character card fits Chat's 2,500-character per-card limit.
+Schema cross-check of `bob_atlas_flow_reach` confirms direction means stored
+edge traversal, not business impact: downstream is source-to-target and upstream
+reverses it. In particular, a table reader is upstream of its table. The shared
+lesson and card teach that distinction rather than equating downstream with
+every affected consumer. The focused follow-up suite passed 108 tests.
 Migration inventory reports 712 unique versions; Atlas generation was dry-run
 only (1,517 capabilities, 8,788 edges). Release and live acceptance remain
 separate evidence gates.

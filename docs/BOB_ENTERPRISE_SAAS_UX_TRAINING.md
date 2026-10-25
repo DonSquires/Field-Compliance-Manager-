@@ -30,8 +30,10 @@ provides retrievable training.
   Discover exact entity names/types with `capability_map`, then use
   `terrain_edges` and returned `source_file` values to choose owning source,
   callers, writers and access-control checks.
-- Use `blast_radius` upstream for dependencies/callers and downstream for
-  potentially affected consumers. Inspect `secured_by` controls. Keep
+- Use `blast_radius` in the relevant directions: downstream follows stored
+  source-to-target edges and upstream reverses them. For `component reads table`,
+  the table is downstream and the reader is upstream of the table; neither
+  direction alone establishes business impact. Inspect `secured_by` controls. Keep
   `reads`/`writes`/`calls`/`invokes` flow, weak `references` and structural
   `fk_reach` separate. A mapped edge does not prove an invocation succeeded.
 - Cross-check current source and actual schema function/trigger/policy bodies.

@@ -13,7 +13,8 @@ test('all builder modes carry the same Atlas research navigation and butterfly-e
     assert.ok(prompt.includes(ATLAS_RESEARCH_GUIDANCE));
   }
   assert.match(ATLAS_RESEARCH_GUIDANCE, /source_file/);
-  assert.match(ATLAS_RESEARCH_GUIDANCE, /upstream.*downstream/);
+  assert.match(ATLAS_RESEARCH_GUIDANCE, /downstream traverses source to target; upstream traverses target to source/);
+  assert.match(ATLAS_RESEARCH_GUIDANCE, /reader is upstream of the table/);
   assert.match(ATLAS_RESEARCH_GUIDANCE, /secured_by/);
   assert.match(ATLAS_RESEARCH_GUIDANCE, /fk_reach separate from flow_reach/);
   assert.match(ATLAS_RESEARCH_GUIDANCE, /wired is not exercised/);
@@ -25,6 +26,8 @@ test('all builder modes carry the same Atlas research navigation and butterfly-e
   assert.match(sql, /source_file/);
   assert.match(sql, /Before:.*During:.*After:/s);
   assert.match(sql, /invocation receipt/);
+  const card = sql.match(/\$\$([\s\S]*?)\$\$/)[1];
+  assert.ok(card.length <= 2500, 'the complete lesson must fit the actual per-card retrieval cap');
 });
 
 test('Vibe continuation and navigation lessons ship as platform cards and runtime instructions', () => {
