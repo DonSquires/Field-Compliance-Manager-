@@ -831,7 +831,7 @@ async function runConversation({ store, session, message, workspacePath, branch,
       unavailable++;
       // A timeout already cost the owner a full turn budget of silence; never spend a second one on the
       // same provider when another candidate exists, and say why the model changed.
-      const timedOut = response.timeout === true || response.status === 408;
+      const timedOut = response.timeout === true || response.status === 408 || response.code === 'provider_timeout';
       if (active + 1 < candidates.length && (timedOut || unavailable >= 2 || [413, 429].includes(response.status))) {
         const previous = candidates[active];
         active++; unavailable = 0; turn--;
