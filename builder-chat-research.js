@@ -220,7 +220,7 @@ async function runBuilderResearch({ supabase, thread, message, post, env = proce
         ], options: { temperature: 0.1, num_predict: 3000 },
       };
       const { result, memoryReceipts, proposal } = pm
-        ? await pmChatWithMemory({ api, request, supabase, message, post, allowHandoff: message.payload.pm_purpose !== 'qa' })
+        ? await pmChatWithMemory({ api, request, supabase, message, post, sources, allowHandoff: message.payload.pm_purpose !== 'qa' })
         : { result: await api('chat', request, 90_000), memoryReceipts: [] };
       if (proposal) return {
         proposal, model,

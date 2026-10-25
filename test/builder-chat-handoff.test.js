@@ -39,6 +39,32 @@ test('invalid or overbroad handoffs fail explicitly', () => {
   ]) assert.throws(() => investigationProposal(args, MESSAGE), /Invalid|requires/);
 });
 
+test('short reports require normalized whole-report equality, never a short fragment', () => {
+  const args = { ...ARGS, report_quote: 'Fix HTTP 500' };
+  assert.equal(investigationProposal(args, { ...MESSAGE, content: ' Fix\nHTTP 500 ' }).handoff_kind, 'investigation');
+  assert.throws(() => investigationProposal({ ...args, report_quote: 'HTTP 500' }, { ...MESSAGE, content: 'Fix HTTP 500' }), /must match/);
+  assert.throws(() => investigationProposal(args, { ...MESSAGE, content: 'Please Fix HTTP 500 when saving.' }), /must match/);
+  assert.throws(() => investigationProposal({ ...args, report_quote: ' ' }, MESSAGE), /Invalid/);
+});
+
+test('validated extracted documents support reports with retained attachment provenance, not web or images', async () => {
+  const source = { id: 'attachment-1', attachment_id: 'approved-file', sha256: 'a'.repeat(64), transfer: 'locally_extracted_text', content: REPORT };
+  const message = { ...MESSAGE, content: 'Investigate the attached report.' };
+  const proposal = investigationProposal(ARGS, message, [source]);
+  assert.match(proposal.task_description, /"attachment_id":"approved-file"/);
+  assert.match(proposal.task_description, /"source_id":"attachment-1"/);
+  assert.ok(proposal.task_description.includes(source.sha256));
+  for (const invalid of [{ ...source, transfer: 'raw_image' }, { ...source, transfer: undefined }, { ...source, attachment_id: undefined }]) {
+    assert.throws(() => investigationProposal(ARGS, message, [invalid]), /must match/);
+  }
+  const result = await pmChatWithMemory({
+    message, sources: [source], allowHandoff: true, request: {},
+    api: async () => ({ message: { tool_calls: [{ function: { name: 'propose_builder_investigation', arguments: ARGS } }] } }),
+    supabase: { rpc: () => assert.fail('No writes') }, post: () => assert.fail('No posts'),
+  });
+  assert.match(result.proposal.task_description, /approved-file/);
+});
+
 test('one native handoff call yields an unconfirmed proposal with no job, diary write or extra inference', async () => {
   const calls = [];
   const outcome = await pmChatWithMemory({

@@ -10,7 +10,7 @@ const HANDOFF_TOOL = Object.freeze({
       required: ['title', 'report_quote', 'assessment', 'investigation_steps', 'acceptance_checks', 'unknowns', 'frontend_required', 'backend_required'],
       properties: {
         title: { type: 'string', minLength: 4, maxLength: 140 },
-        report_quote: { type: 'string', minLength: 15, maxLength: 1500 },
+        report_quote: { type: 'string', minLength: 1, maxLength: 1500 },
         assessment: { type: 'string', minLength: 40, maxLength: 1800 },
         investigation_steps: { type: 'array', minItems: 2, maxItems: 8, items: { type: 'string', minLength: 15, maxLength: 500 } },
         acceptance_checks: { type: 'array', minItems: 2, maxItems: 8, items: { type: 'string', minLength: 15, maxLength: 500 } },
@@ -22,7 +22,7 @@ const HANDOFF_TOOL = Object.freeze({
   },
 });
 
-function investigationProposal(args, message) {
+function investigationProposal(args, message, sources = []) {
   const fields = HANDOFF_TOOL.function.parameters.properties;
   if (!args || typeof args !== 'object' || Array.isArray(args)
       || Object.keys(args).some(key => !Object.hasOwn(fields, key))) throw new Error('Invalid Builder investigation arguments');
@@ -37,13 +37,22 @@ function investigationProposal(args, message) {
   }
   if (!args.frontend_required && !args.backend_required) throw new Error('Builder investigation requires at least one scope');
   const normalize = text => text.replace(/\s+/g, ' ').trim();
-  const report = [message.content, message.payload?.evidence_summary].filter(value => typeof value === 'string');
-  if (!report.some(text => normalize(text).includes(normalize(args.report_quote)))) {
+  const reports = [
+    { source_id: 'current-question', content: message.content },
+    { source_id: 'reviewed-summary', content: message.payload?.evidence_summary },
+    ...sources.filter(source => source.transfer === 'locally_extracted_text' && source.attachment_id)
+      .map(source => ({ source_id: source.id, attachment_id: source.attachment_id, sha256: source.sha256, content: source.content })),
+  ].filter(source => typeof source.content === 'string');
+  const quote = normalize(args.report_quote);
+  const report = reports.find(source => quote.length < 15
+    ? normalize(source.content) === quote : normalize(source.content).includes(quote));
+  if (!report) {
     throw new Error('Builder investigation report quote must match the approved current packet');
   }
   const task = [
     'INVESTIGATION HANDOFF - not a source-verified repair plan.',
     `Originating PM message: ${message.id}`,
+    `Report provenance: ${JSON.stringify({ source_id: report.source_id, ...(report.attachment_id ? { attachment_id: report.attachment_id, sha256: report.sha256 } : {}) })}`,
     `User-reported observation (not independently verified):\n"${args.report_quote}"`,
     `PM assessment (hypothesis, not established cause):\n${args.assessment}`,
     `Unknowns:\n${args.unknowns}`,

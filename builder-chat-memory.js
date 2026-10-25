@@ -29,7 +29,7 @@ function completedPmResult(result) {
   return result;
 }
 
-async function pmChatWithMemory({ api, request, supabase, message, post, allowHandoff = false }) {
+async function pmChatWithMemory({ api, request, supabase, message, post, allowHandoff = false, sources = [] }) {
   const first = completedPmResult(await api('chat', { ...request, tools: [SELF_MEMORY_TOOL, ...(allowHandoff ? [HANDOFF_TOOL] : [])] }, 90_000));
   const calls = first.message?.tool_calls;
   if (calls !== undefined && !Array.isArray(calls)) throw new Error('Cloud PM tool calls must be an array');
@@ -46,7 +46,7 @@ async function pmChatWithMemory({ api, request, supabase, message, post, allowHa
     try { args = JSON.parse(args); } catch { throw new Error('PM tool arguments must be valid JSON'); }
   }
   if (tool === HANDOFF_TOOL.function.name) {
-    const proposal = investigationProposal(args, message);
+    const proposal = investigationProposal(args, message, sources);
     return { result: first, memoryReceipts: [], proposal };
   }
   if (!args || typeof args.content !== 'string' || !args.content.trim() || args.content.length > 2000

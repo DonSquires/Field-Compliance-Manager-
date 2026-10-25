@@ -64,6 +64,13 @@ and a persisted job ID must prove acceptance; a written brief is insufficient.
 Monitor Builder's outcome without supplying the repair solution or claiming a
 created job proves the fix.
 
+Review corrections: short report quotes require normalized whole-report
+equality below 15 characters, so a complete "Fix HTTP 500" is valid without
+accepting short fragments. Approved, checksum-validated extracted document
+text can supply the report quote; retain its source ID, attachment ID and hash
+in the handoff. Web text and model image observations are not user-report
+substitutes. No additional file or private context is loaded by this validation.
+
 ### Fixed cloud PM/QA packet slice (owner decision 2026-10-25)
 
 Builder Chat is the technical PM/investigator/QA lead, not the coding agent.
