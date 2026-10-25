@@ -7169,6 +7169,15 @@ serve(async (req)=>{
       console.warn(`[conductor][v2] request envelope validation: ${envelopeValidation.errors.join(', ')}`);
     // Non-fatal: log and coerce — backward compat with pre-v2 clients
     }
+    // Owner ruling 2026-10-25: the Bob Builder chat is its own lane
+    // (builder_chat_* RPCs + control-plane worker). This in-app OnSpace chat
+    // serves users' UX, agentic work, questions and research only.
+    if (body?.context?.agent_mode === 'builder') {
+      return json({
+        error: 'builder_lane_separate',
+        detail: 'Bob Builder chat runs in its own lane on the Builder page; the in-app Bob chat does not accept builder turns.'
+      }, 409);
+    }
     const message = String(body.message ?? '').trim();
     const attachments = Array.isArray(body.attachments) ? body.attachments : [];
     const conversationId = body.conversation_id ?? undefined;
