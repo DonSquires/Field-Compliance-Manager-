@@ -79,10 +79,19 @@ async function request(method, route, body, headers = {}) {
 }
 
 test.before(async () => {
+  const bin = path.join(stateDir, 'bin');
+  fs.mkdirSync(bin);
+  fs.writeFileSync(path.join(bin, 'docker'), `#!${process.execPath}
+const args = process.argv.slice(2);
+if (args[0] === 'container' && args[1] === 'ls') console.log('a'.repeat(64));
+else if (args[0] === 'container' && args[1] === 'inspect') console.log(JSON.stringify({id:'a'.repeat(64),name:'/fixture-api',status:'running',compose_config_files:'/srv/fixture/compose.yml'}));
+else process.exit(2);
+`, { mode: 0o700 });
   serverProcess = spawn(process.execPath, ['bob-control-plane-server.js'], {
     cwd: root,
     env: {
       ...process.env,
+      PATH: `${bin}${path.delimiter}${process.env.PATH}`,
       // Hermetic: the developer's live Supabase env must not leak into the unit server
       // (it made /health read the live laptop registry once the laptop had registered).
       SUPABASE_URL: '',
@@ -219,6 +228,21 @@ test('assessment aliases retain the same authentication and read-only contract',
     assert.equal(allowed.response.status, 200);
     assert.equal(allowed.body.sourceRoot, root);
     assert.equal(allowed.body.secretFilesExcluded, true);
+  }
+});
+
+test('Docker diagnostic aliases require admin authority rather than worker or model authority', async () => {
+  for (const route of ['/docker/services', '/api/bob/docker/services', '/api/bob/builder/docker/services']) {
+    for (const token of ['', runnerToken, modelGatewayToken]) {
+      const result = await request('GET', route, undefined, { authorization: `Bearer ${token}` });
+      assert.equal(result.response.status, 401);
+    }
+    const allowed = await request('GET', route, undefined, { authorization: `Bearer ${adminToken}` });
+    assert.equal(allowed.response.status, 200);
+    assert.equal(allowed.body.services[0].name, '/fixture-api');
+    assert.equal(allowed.body.total, 1);
+    assert.equal(allowed.body.evidence.environment, 'host_docker_daemon');
+    assert.equal(allowed.body.evidence.read_only, true);
   }
 });
 
