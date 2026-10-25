@@ -288,6 +288,21 @@ and is charged on top. It does not change the agreement.
   Contract: they are part of the regular security role. The OFO schedule's
   Extra codes (for example Friday 41358/42061 and Monday 41320/42034 for
   hunter access) stay Extra.
-- **Open, Step E.** Billing basis for imported patrol rows, and how Contract
-  lines reconcile with a fixed monthly price, are decided in the patrol
-  finance step. Imports do not write finance directly.
+- **Derived codes default to Extra (owner ruling 2026-10-25).** Charge codes
+  derived from the group catalog (`origin = derived`) carry
+  `billing_basis = Extra`, `basis_source = owner_default_2026-10-25`. A code
+  can be moved to Contract individually; OneFortyOne-origin codes keep the
+  client's own schedule.
+- **Invoicing respects the basis.** `generate_crm_invoice_from_completed_work`
+  bills only Extra callouts (labelled with their Extra works order reference),
+  never Contract callouts (covered by the agreement price), and refuses to run
+  while any callout in scope has no billing decision.
+- **Imported patrol rows are classified at read time.** The workbook's own
+  TYPE column wins; otherwise the charge code's catalog basis; otherwise
+  "not classified". Disagreements are counted, not hidden.
+  `get_agreement_billing_basis_summary` reports this per month with callouts,
+  Extra works orders and the recorded contract price. These amounts are
+  service cost, not revenue, and imports still do not write finance directly.
+- **Open, Step E.** The fixed monthly price is recorded as an accepted quote
+  (none recorded for OneFortyOne yet), and monthly cost aggregates
+  (`finance_service_costs`) do not yet keep the basis.

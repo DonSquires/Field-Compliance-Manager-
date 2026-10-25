@@ -46,7 +46,7 @@ material recorded with its calibre.
 - Pest codes carry the real OneFortyOne client GL where the MPC log evidences
   it (Goat 3609, Ammunition 3606, Monitoring 3758, others 3615). Each species
   has its own charge code; there are no per-species GL numbers. Derived codes
-  have no billing basis until the owner sets one.
+  default to Extra (owner ruling 2026-10-25, migration 20261025091600).
 - Mainland Pest Control (owner choice `mainland_parent=true`) now has
   `parent_organization_id` = R&M (level 2). R&M masters/admins reach it by
   tree descent; Mainland users gain no upward access. Ruling recorded in
@@ -2688,6 +2688,33 @@ live; behavioural test passes live under rollback).**
   works order picker on job creation; basis chip in the job list; Billing
   section in the job dialog to set or change with a reason.
 
-**Open.** Step E: billing basis for imported patrol charges, fixed monthly
-price versus Contract lines, and the basis for the 153 derived codes
-(proposal: default Extra, awaiting owner).
+### Billing basis linked to finance (2026-10-25, migration 20261025091600)
+
+- 153 derived codes x 35 organisations (5,355 rows) set to Extra with
+  `basis_source = owner_default_2026-10-25`. OneFortyOne codes unchanged
+  (51 Contract, 216 Extra, 40000 N/A per organisation).
+- `generate_crm_invoice_from_completed_work` was sweeping every uninvoiced
+  callout regardless of basis, so Contract callouts would have been billed on
+  top of the fixed price. It now bills Extra only (line text "Extra EW-001 —
+  ..."), skips Contract, blocks on unclassified, and audits the Contract lines
+  not billed.
+- Finance -> Completed work panel: Contract callouts no longer count as money
+  waiting; clients with unclassified callouts show "N callouts need billing
+  set in Dispatch" and the button reads "Set billing first".
+- Agreement setup -> **Contract and Extra** tab
+  (`get_agreement_billing_basis_summary`, provider finance admin only):
+  contract price card, Contract/Extra/not-classified cost cards, what needs
+  attention, callouts by basis, Extra works orders, and the imported log by
+  month. Period: last 12 months, this year, or all.
+- OneFortyOne live read (all periods, recorded service cost): Contract
+  232,884.06; Extra 155,911.38; not classified 63,746.30 (2,098 rows, mostly
+  early-2025 three-digit codes with no TYPE); 28 rows where TYPE says Extra but
+  the code says Contract. No contract price recorded.
+- Atlas: new RPC `get_agreement_billing_basis_summary` (called by
+  `CrmAgreementBillingPanel`); `generate_crm_invoice_from_completed_work`
+  now reads `agreement_extra_work_orders` and the charge-line basis. Refresh
+  after merge.
+
+**Open.** Step E: record the OneFortyOne fixed monthly price (13,333 per
+Sheet2) as an accepted quote, carry basis into `finance_service_costs`
+aggregates, and review the 28 TYPE/code conflicts.
