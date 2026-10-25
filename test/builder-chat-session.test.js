@@ -161,6 +161,25 @@ test('a question is answered after a read-only tool, with the tool step recorded
   assert.ok(!firstRequest.tools.some(tool => ['write_file', 'replace_in_file', 'apply_patch', 'run', 'finish'].includes(tool.function.name)));
 });
 
+test('a request longer than the packet cap does not displace subsequent tool evidence', async () => {
+  const { store, deps, model } = setup([
+    { tool: 'search', args: { query: 'dispatch-console' } },
+    { tool: 'reply', args: { message: 'The search returned a tracked stylesheet.' } },
+  ]);
+  const message = ownerMessage(`Locate the dispatch styles. ${'background text '.repeat(700)}`);
+  assert.ok(message.content.length > chat.BUILDER_CHAT_LIMITS.readCapChars);
+  await chat.processBuilderChatMessage({ store, message, deps });
+  assert.ok(model.calls[0].request.messages[1].content.includes(message.content));
+  const packet = model.calls[1].request.messages.at(-1).content;
+  assert.ok(packet.length <= chat.BUILDER_CHAT_LIMITS.readCapChars);
+  const parsed = JSON.parse(packet);
+  assert.ok(parsed.current_owner_request.length < 1100);
+  assert.match(parsed.current_owner_request, /more chars/);
+  assert.equal(parsed.tool, 'search');
+  assert.equal(parsed.result.matches, 1);
+  assert.deepEqual(parsed.result.results, ['apps/web/src/pages/DispatchConsolePage.css:12']);
+});
+
 test('continuation reads same-thread evidence with revision/freshness limits and persists new tool receipts', async () => {
   const { store, deps } = setup([
     { tool: 'read_task_evidence', args: { seq: 12, limit: 1 } },

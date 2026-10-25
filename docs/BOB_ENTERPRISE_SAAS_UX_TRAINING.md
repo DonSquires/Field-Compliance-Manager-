@@ -52,7 +52,9 @@ The last reasoning turn's structured schema must expose only `reply`, plus
 satisfied. Removing native tool definitions alone does not prevent a model from
 requesting more tools through its structured output. Tool-result packets retain
 the current owner request so retrieved evidence does not silently become a new
-task. These protocol protections do not prove that a small private model has
+task. Bound that reminder separately (at most 1,000 source characters or a
+quarter of the packet cap) so a long request cannot displace tool evidence;
+the full request stays in the opening task. These protocol protections do not prove that a small private model has
 followed the method or authored an adequate plan; measure the actual answer.
 
 Private investigation follow-up, 2026-10-25: repository search must refuse host
