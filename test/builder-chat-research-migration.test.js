@@ -7,6 +7,17 @@ const path = require('node:path');
 const { execFileSync } = require('node:child_process');
 const { randomUUID } = require('node:crypto');
 const migration = fs.readFileSync(path.join(__dirname, '../supabase/migrations/20261025160000_builder_chat_public_research.sql'), 'utf8');
+const pmMigration = fs.readFileSync(path.join(__dirname, '../supabase/migrations/20261025170000_builder_chat_cloud_pm.sql'), 'utf8');
+
+test('PM RPC adds immutable purpose/summary approval without exposing browser write grants', () => {
+  assert.match(pmMigration, /p_purpose NOT IN \('pm', 'qa', 'technical_review'\)/);
+  assert.match(pmMigration, /char_length\(p_evidence_summary\) > 6000/);
+  assert.match(pmMigration, /'evidence_summary_sha256', v_hash/);
+  assert.match(pmMigration, /different PM purpose or summary/);
+  assert.match(pmMigration, /v_id := public.builder_chat_send_research\(/);
+  assert.match(pmMigration, /FROM PUBLIC, anon/);
+  assert.doesNotMatch(pmMigration, /GRANT (?:INSERT|UPDATE|DELETE|ALL) ON (?:TABLE|public\.builder_chat_messages)/);
+});
 
 test('research RPC binds per-message consent, ownership, file bounds and immutable replay without browser write grants', () => {
   assert.match(migration, /p_allow_cloud IS DISTINCT FROM true/);
@@ -40,6 +51,7 @@ test('research migration executes with owner/consent/storage/idempotency authori
     const fixture = `
       CREATE ROLE anon; CREATE ROLE authenticated; CREATE ROLE service_role;
       CREATE SCHEMA auth; CREATE SCHEMA storage;
+      CREATE SCHEMA extensions; CREATE EXTENSION pgcrypto WITH SCHEMA extensions;
       CREATE FUNCTION auth.uid() RETURNS uuid LANGUAGE sql AS $$ SELECT nullif(current_setting('test.actor', true), '')::uuid $$;
       CREATE FUNCTION public.is_grand_master() RETURNS boolean LANGUAGE sql AS $$ SELECT current_setting('test.owner', true) = 'on' $$;
       CREATE TABLE public.builder_jobs(id uuid PRIMARY KEY);
@@ -63,7 +75,7 @@ test('research migration executes with owner/consent/storage/idempotency authori
       INSERT INTO storage.objects VALUES ('bob-uploads',
         'desktop/11111111-1111-4111-8111-111111111111/builder-chat/22222222-2222-4222-8222-222222222222/33333333-3333-4333-8333-333333333333-fixture.txt',
         auth.uid()::text);
-      GRANT USAGE ON SCHEMA auth TO authenticated;
+      GRANT USAGE ON SCHEMA auth, extensions TO authenticated;
       SET ROLE authenticated;
       DO $$
       DECLARE result uuid; again uuid; files jsonb; changed jsonb;
@@ -101,13 +113,32 @@ test('research migration executes with owner/consent/storage/idempotency authori
         changed := files || files;
         PERFORM public.expect_error(format('SELECT public.builder_chat_send_research(%L,%L,%L,%L,%L,false,true)',
           '22222222-2222-4222-8222-222222222222', 'Question', 'duplicate', changed, '[]'), 'unique ids');
+        result := public.builder_chat_send_pm('22222222-2222-4222-8222-222222222222', 'PM question', 'pm-request', 'pm', 'Synthetic summary.', '[]', '[]', false, true);
+        again := public.builder_chat_send_pm('22222222-2222-4222-8222-222222222222', 'PM question', 'pm-request', 'pm', 'Synthetic summary.', '[]', '[]', false, true);
+        IF result <> again OR NOT EXISTS (
+          SELECT 1 FROM public.builder_chat_messages WHERE id = result AND status = 'queued'
+          AND payload->>'pm_purpose' = 'pm' AND payload->>'evidence_summary' = 'Synthetic summary.'
+          AND payload->'research_consent'->>'pm_purpose' = 'pm'
+          AND payload->'research_consent'->>'evidence_summary_sha256' =
+            encode(extensions.digest('Synthetic summary.', 'sha256'), 'hex')
+        ) THEN RAISE EXCEPTION 'PM approval/replay was not persisted'; END IF;
+        IF has_function_privilege('anon', 'public.builder_chat_send_pm(uuid,text,text,text,text,jsonb,jsonb,boolean,boolean)', 'EXECUTE') THEN
+          RAISE EXCEPTION 'Anonymous PM access';
+        END IF;
+        PERFORM public.expect_error($cmd$SELECT public.builder_chat_send_pm('22222222-2222-4222-8222-222222222222','PM question','pm-request','qa','Synthetic summary.','[]','[]',false,true)$cmd$, 'different PM purpose');
+        PERFORM public.expect_error($cmd$SELECT public.builder_chat_send_pm('22222222-2222-4222-8222-222222222222','PM question','pm-request','pm','Changed summary.','[]','[]',false,true)$cmd$, 'different PM purpose');
+        PERFORM public.expect_error($cmd$SELECT public.builder_chat_send_pm('22222222-2222-4222-8222-222222222222','Question','request-1','pm','','[]','[]',false,true)$cmd$, 'different PM purpose');
+        PERFORM public.expect_error($cmd$SELECT public.builder_chat_send_pm('22222222-2222-4222-8222-222222222222','Question','pm-invalid','other','','[]','[]',false,true)$cmd$, 'purpose must be');
+        PERFORM public.expect_error($cmd$SELECT public.builder_chat_send_pm('22222222-2222-4222-8222-222222222222','Question','pm-long','pm',repeat('a',6001),'[]','[]',false,true)$cmd$, 'at most 6000');
+        PERFORM public.expect_error($cmd$SELECT public.builder_chat_send_pm('22222222-2222-4222-8222-222222222222','Question','pm-no-consent','pm','','[]','[]',false,false)$cmd$, 'explicit');
+        PERFORM public.expect_error($cmd$SELECT public.builder_chat_send_pm('22222222-2222-4222-8222-222222222223','Question','pm-wrong-owner','pm','','[]','[]',false,true)$cmd$, 'this owner');
         PERFORM set_config('test.owner', 'off', false);
         PERFORM public.expect_error(format('SELECT public.builder_chat_send_research(%L,%L,%L,%L,%L,false,true)',
           '22222222-2222-4222-8222-222222222222', 'Question', 'not-grandmaster', '[]', '[]'), 'platform owner');
       END $$;
     `;
     const output = execFileSync('docker', ['exec', '-i', name, 'psql', '-U', 'postgres', '-v', 'ON_ERROR_STOP=1'], {
-      encoding: 'utf8', input: fixture + base + migration + checks, stdio: ['pipe', 'pipe', 'pipe'],
+      encoding: 'utf8', input: fixture + base + migration + pmMigration + checks, stdio: ['pipe', 'pipe', 'pipe'],
     });
     assert.match(output, /DO/);
   } finally { if (created) docker(['rm', '--force', name]); }

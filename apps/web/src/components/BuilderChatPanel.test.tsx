@@ -3,8 +3,8 @@ import { afterEach, expect, it, vi } from 'vitest';
 import { cleanup, fireEvent, render, screen, waitFor } from '@testing-library/react';
 import { BuilderChatPanel, chatContext, groupChat, mergeSnapshot, type BuilderChatMessage } from './BuilderChatPanel';
 
-const { rpc, from, channel, removeChannel } = vi.hoisted(() => ({ rpc: vi.fn(), from: vi.fn(), channel: vi.fn(), removeChannel: vi.fn() }));
-vi.mock('../lib/supabase', () => ({ supabase: { rpc, from, channel, removeChannel } }));
+const { rpc, from, channel, removeChannel, getUser } = vi.hoisted(() => ({ rpc: vi.fn(), from: vi.fn(), channel: vi.fn(), removeChannel: vi.fn(), getUser: vi.fn() }));
+vi.mock('../lib/supabase', () => ({ supabase: { rpc, from, channel, removeChannel, auth: { getUser } } }));
 afterEach(() => { cleanup(); vi.resetAllMocks(); });
 
 const THREAD = '6f1d2c3b-0000-4000-8000-000000000001';
@@ -23,6 +23,7 @@ function wire({ owner = true, threads = [{ id: THREAD }], messages = [] as Build
   from.mockImplementation((table: string) => query(table === 'builder_chat_threads' ? threads : messages));
   const sub = { on: () => sub, subscribe: () => sub };
   channel.mockReturnValue(sub);
+  getUser.mockResolvedValue({ data: { user: { id: 'test-owner' } }, error: null });
   rpc.mockImplementation(async (name: string) => {
     if (name === 'is_grand_master') return { data: owner, error: null };
     if (name === 'builder_chat_thread_open') return { data: THREAD, error: null };
@@ -44,14 +45,21 @@ it('tells a non-owner the Builder chat is restricted', async () => {
   expect(screen.getByText('Build lane chat · separate from in-app Bob')).toBeTruthy();
 });
 
-it('sends through the Builder chat lane, never the in-app Bob function', async () => {
+it('defaults to one cloud PM packet, requiring approval and withholding private selected-job context', async () => {
   wire();
   render(<BuilderChatPanel context={{ surface: 'builder_control_room', job_title: 'Dispatch tokens', nested: { no: 1 } }} onCreateJob={vi.fn()} />);
-  expect(await screen.findByText(/Bob reads the build and can propose a job/)).toBeTruthy();
+  expect(await screen.findByText(/Bob is your technical PM and QA lead/)).toBeTruthy();
   expect(screen.getByText('Dispatch tokens')).toBeTruthy();
   fireEvent.change(screen.getByLabelText('Message Bob Builder'), { target: { value: 'What is waiting on me?' } });
-  fireEvent.click(screen.getByRole('button', { name: 'Send to Bob Builder' }));
-  await waitFor(() => expect(rpc).toHaveBeenCalledWith('builder_chat_send', expect.objectContaining({ p_thread_id: THREAD, p_content: 'What is waiting on me?', p_context: { surface: 'builder_control_room', job_title: 'Dispatch tokens' } })));
+  const send = screen.getByRole('button', { name: 'Send approved PM message' });
+  expect((send as HTMLButtonElement).disabled).toBe(true);
+  fireEvent.click(screen.getByLabelText(/I reviewed this question/));
+  fireEvent.click(send);
+  await waitFor(() => expect(rpc).toHaveBeenCalledWith('builder_chat_send_pm', {
+    p_thread_id: THREAD, p_content: 'What is waiting on me?', p_client_request_id: expect.any(String),
+    p_purpose: 'pm', p_evidence_summary: '', p_files: [], p_urls: [], p_web_search: false, p_allow_cloud: true,
+  }));
+  expect(rpc.mock.calls.map(call => call[0])).not.toContain('builder_chat_send');
   expect(rpc.mock.calls.map(call => call[0])).not.toContain('onspace-ai-chat');
 });
 

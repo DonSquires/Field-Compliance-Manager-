@@ -39,6 +39,65 @@ These observations are dated evidence, not permanent health assertions.
 
 ## Delivery checklist
 
+### Fixed cloud PM/QA packet slice (owner decision 2026-10-25)
+
+Builder Chat is the technical PM/investigator/QA lead, not the coding agent.
+The owner chose direct purpose-assigned Ollama Cloud inference, with
+human-reviewed non-sensitive summaries rather than raw private evidence:
+
+| Purpose | Assigned model | When |
+| --- | --- | --- |
+| PM, investigation planning, public research and visual design | `kimi-k3` | Default current approved packet |
+| Independent plan/QA challenge | `deepseek-v4-pro:0813` | Explicit purpose, not every answer |
+| Technical handoff review | `kimi-k2.7-code` | Explicit technical-review purpose |
+
+No VPS/laptop inference, automatic model ladder or metered provider is used by
+new PM turns. Model absence, capability mismatch and invalid responses fail
+explicitly. The older private/research queues remain compatible; the normal UI
+submits only PM packets. Builder/Vibe model policy and executable proposal
+authority are unchanged. Briefs remain advisory and do not create jobs.
+
+- [x] Record the owning canon and owner-selected transfer boundary.
+- [x] Add immutable purpose, summary/hash and per-message approval binding.
+- [x] Default normal Chat to the isolated cloud packet, with explicit purpose,
+  optional human-reviewed summary and optional web/approved attachments.
+- [x] Verify role models' live availability and advertised completion/vision.
+- [x] Targeted runtime regressions (73), web component tests (16), real
+  disposable PostgreSQL consent/replay/ownership/grant checks (3), web lint/
+  production build and desktop/mobile fixture workflows (2) pass locally.
+  The optional static CSS checker still reports the same 27 missing selectors
+  on both the changed tree and an archived untouched `HEAD`; no new mismatch
+  was introduced and those unrelated baseline defects are not suppressed.
+- [x] Harmless live role probes: one inference per independent request,
+  Kimi K3 guidance ~8.1s, DeepSeek QA ~3.1s, Kimi technical brief ~6.6s.
+  A separate Kimi reviewed-summary request ~3.1s returned quotes matching the
+  synthetic report and kept cause unknown. These are adapter probes, not
+  persisted production UI acceptance or a repair.
+- [ ] Independent CI, protected merge and governed migration/runtime deployment.
+- [ ] Persisted live UI acceptance of the original guidance question and reviewed
+  summary, with the expected single assigned model and no private context.
+- [ ] Governed PM-to-builder handoff, private evidence collection/reviewer loop
+  and original missing Compose-source repair. Not implemented by this slice.
+
+Discriminating test: generic JSON and even a schema-only no-source prompt caused
+all three models to fabricate evidence fields or cite system instructions.
+Ordinary no-source PM answers therefore use natural-language output, not a
+research schema; actual supplied sources still require structured matched
+quotes. Preserve the complete bounded advisory answer (up to 12,000 characters)
+rather than silently truncating its limitations at 3,000. The cloud packet never
+receives the reviewer's identity, private history, selected job or source dump.
+
+Atlas read: capability map/direct edges and depth-two flow reach map the Chat
+component to send/reservation RPCs, messages, threads and job records. FK reach
+links messages structurally to threads; it is not an invocation claim. Live
+`exercised` remains null. Cross-checking the schema confirmed the existing
+research function enforces ownership, approval, storage scope and immutable
+retry; the new PM wrapper reuses it inside one locked transaction. Refresh Atlas
+and regenerate the live schema after governed migration, never hand-edit them.
+
+PR #230 remains open with new reviewer findings; do not merge merely because
+its CI is green. Its lexical guard is not the new cloud PM's intent router.
+
 - [x] Record this plan and establish tracked tasks.
 - [ ] 1. Repair diagnostics and connect governed capability discovery.
 - [ ] 2. Connect relevant knowledge retrieval and durable task evidence.

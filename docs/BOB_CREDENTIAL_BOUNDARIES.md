@@ -45,6 +45,24 @@ rebuild; an image rebuild alone does not update the running launcher.
 
 ## Private repository code and Vibe Builder
 
+### Builder Chat cloud PM/QA (owner decision, 2026-10-25)
+
+New PM turns use purpose-assigned Ollama Cloud models directly, without private
+inference attempts. The owner selected human-approved non-sensitive summaries,
+not raw private evidence. The server must bind purpose and summary to the same
+message's approval and retry identity. Neither earlier conversation nor selected
+job/page context is implicitly transferred. A summary may be pasted by the
+reviewer after redaction; no private model or automatic summarizer prepares it
+for external transfer. Sensitive source, credentials and tenant/HR/legal data
+remain excluded. Exact text matching proves only what a reviewed summary said,
+not that its underlying assertions were independently observed.
+
+Capability metadata must match the selected purpose's inputs. Unavailable,
+invalid or non-vision models fail explicitly; no automatic model ladder or
+private fallback. Independent QA is a deliberate purpose, not an automatic
+second model on every PM answer. Existing explicit public-research mode remains
+isolated. Model receipts disclose purpose, model and the actual transfer shape.
+
 ### Builder chat public research (owner decision, 2026-10-25)
 
 Builder chat's explicit public-research mode uses only server-side Ollama Cloud

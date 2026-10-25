@@ -11,6 +11,34 @@
 
 ## 1. What Bob is
 
+**Builder Chat PM/QA and cloud-purpose ruling, owner decision 2026-10-25.**
+Builder Chat is the technical PM, investigator and QA lead, not the coding
+agent. Vibe Builder handles interactive implementation and Bob Builder durable
+autonomous implementation; both are full-stack. The owner directs Chat model
+inference straight to Ollama Cloud, bypassing VPS/laptop models. Assign Kimi K3
+to normal PM conversation, investigation planning and visual design review;
+DeepSeek V4 Pro to an explicitly requested independent QA challenge; Kimi
+K2.7 Code to explicitly requested technical handoff review. Do not run every
+question through multiple models or silently fall back to private inference.
+Model assignments require live capability checks and task acceptance, not
+claims of comparative superiority.
+
+The owner selected **human-reviewed non-sensitive evidence summaries** as the
+cloud evidence flow. A current approved question, summary and selected approved
+public/non-sensitive attachments may be transferred. Private history, source,
+tenant records, credentials, knowledge-card dumps and raw diagnostic output
+remain excluded. Consent is per packet and changes invalidate it; a summary is
+reported evidence, not independent verification. Missing withheld facts must be
+identified rather than invented. Local tools may collect private evidence, but
+collection is not permission to transfer it. No automatic private-to-cloud
+summarizer or classifier is authorized here.
+
+This supersedes the private-first default for new PM Chat turns, not the
+builders' model policy or existing private queued turns. A cloud handoff brief
+remains advisory: it does not satisfy the source-inspected executable proposal
+gate, start a builder, create a job, approve a change or establish completion.
+Governed handoff and live acceptance remain separate delivery gates.
+
 **Atlas evidence clarification, owner ruling 2026-10-25.** Atlas is a map
 showing Bob where to go and look, not evidence establishing facts about those
 areas. Bob must research the mapped locations: inspect current source and

@@ -34,7 +34,8 @@ function fixture({ models = ['kimi-k2.7-code'], vision = true, result = () => an
     if (endpoint === 'web_fetch') return Response.json({ title: 'Compose documentation', content: CONTENT });
     if (endpoint === 'web_search') return Response.json({ results: searchResults || [{ url: SOURCE.url }] });
     if (body.model === failedModel) return new Response('', { status: 503 });
-    return Response.json({ message: { content: JSON.stringify(result(body)) } });
+    const response = result(body);
+    return Response.json({ message: { content: typeof response === 'string' ? response : JSON.stringify(response) } });
   };
   return {
     calls, rows, fetchImpl,
@@ -44,6 +45,114 @@ function fixture({ models = ['kimi-k2.7-code'], vision = true, result = () => an
     }),
   };
 }
+
+function pmMessage(purpose = 'pm', summary = '') {
+  return message({
+    pm_purpose: purpose, evidence_summary: summary, research_urls: [], web_search: false,
+    context: { job_title: 'PRIVATE-SELECTED-JOB' }, history: ['PRIVATE-HISTORY'],
+    research_consent: {
+      allowed: true, policy_version: 'builder_research_v1', actor_user_id: OWNER,
+      pm_purpose: purpose, evidence_summary_sha256: crypto.createHash('sha256').update(summary).digest('hex'),
+      recorded_at: '2026-10-25T00:00:00.000Z',
+    },
+  });
+}
+
+test('PM purposes invoke exactly their assigned cloud model once and withhold unrelated private context', async () => {
+  for (const [purpose, model] of [['pm', 'kimi-k3'], ['qa', 'deepseek-v4-pro:0813'], ['technical_review', 'kimi-k2.7-code']]) {
+    const f = fixture({ models: ['kimi-k3', 'deepseek-v4-pro:0813', 'kimi-k2.7-code'], result: () => 'Start by checking the reported behavior against expected behavior.' });
+    const result = await f.run(pmMessage(purpose));
+    assert.equal(result.model, model);
+    assert.equal(result.research.purpose, purpose);
+    assert.equal(result.research.fallback_allowed, false);
+    assert.equal(result.research.history_withheld, true);
+    assert.deepEqual(f.calls.filter(call => call.url.endsWith('/chat')).map(call => call.body.model), [model]);
+    assert.equal(f.calls.filter(call => call.url.endsWith('/web_search')).length, 0);
+    const chat = JSON.stringify(f.calls.find(call => call.url.endsWith('/chat')).body);
+    assert.ok(!chat.includes('PRIVATE-SELECTED-JOB') && !chat.includes('PRIVATE-HISTORY'));
+    assert.match(chat, /technical PM, investigator and QA lead/);
+    assert.match(chat, /Atlas is a map, not evidence/);
+    assert.match(chat, /cannot create jobs/);
+    const request = f.calls.find(call => call.url.endsWith('/chat')).body;
+    assert.ok(!('format' in request));
+    assert.match(result.reply, /Start by checking/);
+  }
+});
+
+test('PM summary quotes are matched but labelled human reports, never primary or live verification', async () => {
+  const f = fixture({ models: ['kimi-k3'], result: () => answer('reviewed-summary', CONTENT) });
+  const result = await f.run(pmMessage('pm', CONTENT));
+  assert.equal(result.research.claims[0].verification, 'human_report_not_independently_verified');
+  assert.equal(result.research.sources[0].transfer, 'reviewed_summary');
+  assert.equal(result.research.sources[0].sha256, crypto.createHash('sha256').update(CONTENT).digest('hex'));
+  assert.ok(!('content' in result.research.sources[0]));
+  const chat = f.calls.find(call => call.url.endsWith('/chat'));
+  assert.equal(JSON.parse(chat.body.messages[1].content).sources[0].content, CONTENT);
+  assert.ok(!JSON.stringify(chat.body).includes(OWNER));
+  assert.ok(!JSON.stringify(chat.body).includes(THREAD.id));
+  assert.equal(chat.body.format.properties.claims.minItems, 1);
+});
+
+test('PM preserves a complete advisory answer instead of silently cutting off its limitations', async () => {
+  const text = `${'Guidance. '.repeat(350)}This does not prove execution or safe completion.`;
+  const f = fixture({ models: ['kimi-k3'], result: () => text });
+  const result = await f.run(pmMessage());
+  assert.ok(result.reply.includes(text));
+  const oversized = fixture({ models: ['kimi-k3'], result: () => 'x'.repeat(12001) });
+  await assert.rejects(oversized.run(pmMessage()), /bounded response contract/);
+});
+
+test('PM screenshot review requires advertised vision on its assigned model without a model switch', async () => {
+  const bytes = Buffer.from([137, 80, 78, 71, 13, 10, 26, 10, 0, 0]);
+  const msg = pmMessage();
+  msg.payload.research_consent.raw_images_allowed = true;
+  msg.payload.research_files = [{
+    id: 'image', file_name: 'synthetic.png', file_type: 'image/png', file_size_bytes: bytes.length,
+    sha256: crypto.createHash('sha256').update(bytes).digest('hex'),
+    storage_path: `desktop/${OWNER}/builder-chat/${THREAD.id}/image-synthetic.png`,
+  }];
+  const f = fixture({
+    models: ['kimi-k3'], bytes,
+    result: () => ({ summary: 'A synthetic shape is visible.', claims: [], image_observations: [{ source_id: 'attachment-1', description: 'A blue square.' }] }),
+  });
+  const outcome = await f.run(msg);
+  assert.equal(outcome.research.raw_images_sent, 1);
+  const chat = f.calls.find(call => call.url.endsWith('/chat')).body;
+  assert.equal(chat.format.properties.image_observations.minItems, 1);
+  assert.deepEqual(chat.messages[1].images, [bytes.toString('base64')]);
+  const incompatible = fixture({ models: ['kimi-k3', 'kimi-k2.7-code'], bytes, vision: false });
+  await assert.rejects(incompatible.run(msg), /required completion\/vision capability/);
+  assert.ok(!incompatible.calls.some(call => call.url.endsWith('/chat')));
+});
+
+test('PM refuses changed approval, unassigned purpose and oversized summaries before cloud access', async () => {
+  for (const mutate of [
+    msg => { msg.payload.evidence_summary = 'changed'; },
+    msg => { msg.payload.pm_purpose = 'qa'; },
+    msg => { msg.payload.pm_purpose = 'random'; },
+    msg => { msg.payload.evidence_summary = 'x'.repeat(6001); },
+  ]) {
+    const f = fixture({ models: ['kimi-k3'] });
+    const msg = pmMessage();
+    mutate(msg);
+    await assert.rejects(f.run(msg), /purpose|summary/);
+    assert.equal(f.calls.length, 0);
+  }
+});
+
+test('PM unavailability, provider failure and invalid output never start another model', async () => {
+  for (const options of [
+    { models: ['kimi-k2.7-code'] },
+    { models: ['kimi-k3', 'kimi-k2.7-code'], failedModel: 'kimi-k3' },
+    { models: ['kimi-k3', 'kimi-k2.7-code'], result: () => '' },
+  ]) {
+    const f = fixture(options);
+    await assert.rejects(f.run(pmMessage()), /no automatic fallback/i);
+    assert.ok(f.calls.filter(call => call.url.endsWith('/chat')).length <= 1);
+    assert.ok(!f.calls.some(call => call.body?.model === 'kimi-k2.7-code'));
+    assert.ok(!f.rows.some(row => /trying the next/.test(row.content)));
+  }
+});
 
 test('public research goes directly to verified cloud candidate without private history, source tools or metered providers', async () => {
   const f = fixture();
@@ -144,4 +253,23 @@ test('research dispatch never loads a checkout, repository tools or earlier chat
   assert.equal(outcome.error, undefined);
   assert.ok(!posted.some(row => row.kind === 'proposal'));
   assert.equal(posted.at(-1).payload.model, 'kimi-k2.7-code');
+});
+
+test('normal PM dispatch bypasses private checkout, gateway, history and proposal flow', async () => {
+  const f = fixture({ models: ['kimi-k3'], result: () => 'Atlas guides investigation; it is not execution evidence.' });
+  const posted = [];
+  const store = {
+    thread: async () => THREAD, updateThread: async () => {}, complete: async () => {},
+    post: async (_id, row) => posted.push(row),
+    history: async () => { throw new Error('Private history must not be loaded'); },
+  };
+  const outcome = await processBuilderChatMessage({ store, message: pmMessage(), deps: {
+    resolveHead: () => { throw new Error('Private checkout must not be loaded'); },
+    gateway: { run: () => { throw new Error('Private gateway must not be invoked'); } },
+    research: { env: ENV, fetchImpl: f.fetchImpl },
+  } });
+  assert.equal(outcome.error, undefined);
+  assert.ok(!posted.some(row => row.kind === 'proposal'));
+  assert.equal(posted.at(-1).payload.model, 'kimi-k3');
+  assert.equal(posted.at(-1).payload.research.purpose, 'pm');
 });
