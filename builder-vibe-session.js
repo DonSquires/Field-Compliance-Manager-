@@ -660,6 +660,9 @@ async function runConversation({ store, session, message, workspacePath, branch,
   // Edits that actually changed workspace bytes this message; a successful-but-identical edit is not progress.
   let effectiveEdits = 0;
   let noChangeReplyCorrected = false;
+  // Edit targets whose latest edit failed; a success elsewhere must not let the reply claim these were done.
+  const failedEdits = new Map();
+  let failedEditReplyCorrected = false;
   // A request to alter code; verification-only or question messages may legitimately change nothing.
   const { asked: ownerAsked, wantsChange: ownerWantsChange } = classifyOwnerRequest(message.content);
   // Escalation prefers the owner-approved stronger cloud model when present, else the next distinct local one.
@@ -799,6 +802,7 @@ async function runConversation({ store, session, message, workspacePath, branch,
     await ensureTypecheck();
     if (browser) await ensureHumanTest();
     if (!effectiveEdits && ownerWantsChange && !isClarifyingQuestion(reply)) reply = `No files changed during this message.\n\n${reply}`;
+    else if (failedEdits.size) reply = `Not done: these edits failed and were not applied — ${[...failedEdits.keys()].join(', ')}. Anything below that claims a change to these files is wrong.\n\n${reply}`;
     const walked = humanTestRan ? `\n\n${humanTestRan.infrastructure ? `Dr Bob's browser walk could not run: ${clip(humanTestRan.error, 300)}` : `Dr Bob's browser walk (fixture data, desktop): ${humanTestRan.passed || 0} passed, ${humanTestRan.failed || 0} failed, ${humanTestRan.skipped || 0} skipped${humanTestRan.warnings?.length ? `; ${humanTestRan.warnings.length} UX/request warning(s) recorded` : ''}.`}` : '';
     return lastVerification?.failed
       ? { reply: `Changes are not verified: ${lastVerification.command} failed.\n${clip(lastVerification.preview, 900)}\n${clip(reply, 8000)}`, error: true, tools, model }
@@ -920,6 +924,25 @@ async function runConversation({ store, session, message, workspacePath, branch,
         }) });
         continue;
       }
+      if (failedEdits.size && !args.blocked_reason && !failedEditReplyCorrected) {
+        // One file changed is not the whole request; failed edits elsewhere must be fixed or reported, never claimed.
+        failedEditReplyCorrected = true;
+        messages.push({ role: 'assistant', content: JSON.stringify({ thought: String(call.thought ?? '').slice(0, 600), tool: call.tool, args }) }, { role: 'user', content: JSON.stringify({
+          error: 'Reply refused: these edits failed and were never applied, so that part of the owner\'s request is not done. read_file the exact current lines and retry with old_text copied verbatim, or reply with args.blocked_reason naming what remains undone. Do not claim changes to these files.',
+          failed_edits: Object.fromEntries(failedEdits),
+        }) });
+        const next = nextCandidate();
+        if (next > 0) {
+          const previous = candidates[active];
+          active = next;
+          await store.post(session.id, {
+            role: 'system', kind: 'status',
+            content: `${previous.model} tried to finish with failed edits outstanding; continuing with ${candidates[active].provider === 'ollama_cloud' ? 'owner-approved Ollama Cloud' : 'local'} ${candidates[active].provider}/${candidates[active].model}.`,
+            payload: { message_id: message.id, provider: candidates[active].provider, model: candidates[active].model, reason: 'failed_edits_outstanding', previous_provider: previous.provider, previous_model: previous.model, external_egress: candidates[active].provider === 'ollama_cloud' },
+          });
+        }
+        continue;
+      }
       await ensureTypecheck();
       await ensureHumanTest();
       if (lastVerification?.failed && !args.blocked_reason && !verificationCorrectionSent) {
@@ -948,6 +971,11 @@ async function runConversation({ store, session, message, workspacePath, branch,
         executedTools++;
         const beforeEdit = EDIT_VIBE_TOOLS.has(call.tool) ? uiFingerprint(changedVsBase()) : null;
         try { result = await tools[call.tool](args); } catch (error) { result = { error: clip(redactGitError(error && error.message), 1500) }; }
+        if (EDIT_VIBE_TOOLS.has(call.tool)) {
+          const target = String(args.path || call.tool);
+          if (!result?.error) failedEdits.delete(target);
+          else if (!/^no-op edit refused/.test(String(result.error))) failedEdits.set(target, clip(String(result.error), 200));
+        }
         if (beforeEdit !== null && !result?.error && beforeEdit !== uiFingerprint(changedVsBase())) {
           effectiveEdits++;
           for (const key of repeatedCalls.keys()) {

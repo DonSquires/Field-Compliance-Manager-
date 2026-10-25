@@ -591,6 +591,40 @@ test('a real edit for a change request is handed off without a no-change notice'
   assert.match(result.reply, /^Greeting updated\./);
 });
 
+test('a reply cannot claim a file whose edits failed just because another file changed', async () => {
+  const { store, deps, model } = setup([
+    { thought: 'guess', tool: 'replace_in_file', args: { path: 'apps/web/src/hello.ts', old_text: 'import { ClipboardCheck }', new_text: '' } },
+    { thought: 'other', tool: 'write_file', args: { path: 'apps/web/src/other.ts', content: 'export const other = 1;\n' } },
+    { thought: 'claim', tool: 'reply', args: { message: 'The ClipboardCheck import has been removed from hello.ts.' } },
+    { thought: 'honest', tool: 'reply', args: { message: 'Added other.ts.', blocked_reason: 'hello.ts edit failed: old_text not found.' } },
+  ], {
+    allowCloud: true,
+    fetchHealth: async () => ({
+      gpu_workstation: { configured: true, healthy: true, models: ['weak'], installed: ['weak'], ready_model: 'weak' },
+      ollama_cloud: { configured: true, healthy: true, models: ['cloud-strong'], ready_model: 'cloud-strong' },
+    }),
+  });
+  const outcome = await vibe.processVibeMessage({ store, message: ownerMessage('remove the import and add other.ts'), deps });
+  const refusal = model.calls[3].request.messages.find(entry => String(entry.content).includes('these edits failed and were never applied'));
+  assert.ok(refusal);
+  assert.match(refusal.content, /apps\/web\/src\/hello\.ts/);
+  assert.equal(model.calls[3].provider, 'ollama_cloud');
+  assert.ok(store.state.rows.some(row => row.payload?.reason === 'failed_edits_outstanding'));
+  assert.match(outcome.reply, /^Not done: these edits failed and were not applied — apps\/web\/src\/hello\.ts\./);
+  assert.doesNotMatch(outcome.reply, /has been removed/);
+});
+
+test('a failed edit later retried successfully on the same file does not block the reply', async () => {
+  const { store, deps, model } = setup([
+    { thought: 'guess', tool: 'replace_in_file', args: { path: 'apps/web/src/hello.ts', old_text: '"missing"', new_text: '"x"' } },
+    { thought: 'retry', tool: 'replace_in_file', args: { path: 'apps/web/src/hello.ts', old_text: '"hi"', new_text: '"kia ora"' } },
+    { thought: 'report', tool: 'reply', args: { message: 'Greeting updated.' } },
+  ]);
+  const outcome = await vibe.processVibeMessage({ store, message: ownerMessage('update the greeting'), deps });
+  assert.equal(model.calls.length, 3);
+  assert.match(outcome.reply, /^Greeting updated\./);
+});
+
 test('owner requests are classified as change, verification or question in both directions', () => {
   for (const text of ['change the greeting', 'edit the greeting', 'Can you fix the greeting?', 'Please add a spinner', 'check the build then fix the header']) {
     assert.deepEqual(vibe.classifyOwnerRequest(text), { asked: false, wantsChange: true }, text);
