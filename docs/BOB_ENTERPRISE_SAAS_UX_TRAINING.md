@@ -19,6 +19,24 @@ the same required arguments. Repeated empty literal searches need a different
 discovery method; repeated invalid arguments need correction or a candidate
 handoff with the existing evidence. Neither counts as progress or completion.
 
+### Public research, visual and document evidence
+
+Use Builder chat's explicit public-cloud mode for an owner-reviewed public
+question, screenshots or documents. Request fresh approval after changing the
+question, sources or attachments. Cloud-first research is not permission to
+forward repository context, previous conversations, credentials or tenant data.
+Explain which files were actually read: images require advertised vision;
+documents currently provide at most 12,000 extracted characters, and XLSX uses
+one selected populated sheet. Do not claim OCR, all pages/sheets or native raw
+document understanding when those capabilities have not run.
+
+For web facts, quote retrieved primary evidence or corroborating sources from
+three different publishers; expose unverified claims rather than presenting
+them as established facts. Source quotes, URL, retrieval time, digest and model
+belong in the retained receipt. An image observation is model interpretation,
+not an independent verification. A research answer is not a Builder job:
+return to private source/Atlas/ledger investigation before proposing changes.
+
 ## Product context
 
 FCM is a New Zealand field-operations and compliance operating system for security providers, councils, agencies, and commercial clients. It is not a collection of disconnected module screens.

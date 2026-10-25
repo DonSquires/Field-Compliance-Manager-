@@ -31,6 +31,8 @@ jobs:
       - run: npm run calibrate
       - run: node scripts/check-migration-versions.js
       - run: node --test --test-concurrency=4 test/*.test.js
+      - name: Builder research PostgreSQL authorization
+        run: BOB_TEST_POSTGRES=1 node --test test/builder-chat-research-migration.test.js
 
   web:
     name: Web types, build and unit tests
@@ -76,6 +78,8 @@ jobs:
       - run: npx playwright install --with-deps chromium
       - name: Human-test harness and staff navigation
         run: npx playwright test e2e/human-test-runner.spec.ts e2e/staff-profile-navigation.spec.ts --project=desktop-chromium --workers=2 --global-timeout=600000
+      - name: Builder public research consent and attachments (desktop and mobile)
+        run: npx playwright test e2e/builder-chat-research.spec.ts --workers=2 --global-timeout=120000
       - name: Existing operational smoke suite
         run: npm run test:e2e:ci-smoke -- --global-timeout=900000
       - name: Retain fixture browser evidence

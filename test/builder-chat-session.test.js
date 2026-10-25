@@ -81,6 +81,21 @@ test('the Builder chat prompt keeps it separate from in-app Bob and forbids clai
   assert.match(prompt, /cannot edit files, create or cancel jobs, approve gates, merge or deploy/);
 });
 
+test('private source investigation never enables cloud even when the general cloud flag is available', async () => {
+  const { store, model, deps } = setup([{ tool: 'reply', args: { message: 'No private source leaves this lane.' } }], {
+    allowCloud: true,
+    fetchHealth: async () => ({
+      gpu_workstation: { configured: true, healthy: true, models: ['local-primary'], installed: ['local-primary'], ready_model: 'local-primary' },
+      ollama_cloud: { configured: true, healthy: true, models: ['kimi-k2.7-code'], installed: ['kimi-k2.7-code'] },
+    }),
+  });
+  const outcome = await chat.processBuilderChatMessage({ store, message: ownerMessage('Inspect private source for the current task.'), deps });
+  assert.equal(outcome.error, undefined);
+  assert.ok(model.calls.length > 0);
+  assert.ok(!JSON.stringify(model.calls).includes('"provider":"ollama_cloud"'));
+  assert.ok(!JSON.stringify(model.calls).includes('kimi-k2.7-code'));
+});
+
 test('a question is answered after a read-only tool, with the tool step recorded', async () => {
   const { store, model, deps, toolCalls } = setup([
     { thought: 'find it', tool: 'search', args: { query: 'dispatch-console' } },

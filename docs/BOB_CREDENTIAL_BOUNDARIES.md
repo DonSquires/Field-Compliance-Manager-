@@ -45,6 +45,33 @@ rebuild; an image rebuild alone does not update the running launcher.
 
 ## Private repository code and Vibe Builder
 
+### Builder chat public research (owner decision, 2026-10-25)
+
+Builder chat's explicit public-research mode uses only server-side Ollama Cloud
+credentials and the fixed official API origin. It requires both the configured
+cloud flag and immutable per-message owner approval. The private chat/planning
+lane does not escalate repository/history packets to cloud. Approval is a human
+non-sensitive-content attestation, not an automated classification guarantee.
+Never attach secrets, tenant records, private source or confidential documents.
+
+The research RPC binds the question, URLs and file manifest to the authenticated
+thread owner and request ID. Changed input cannot reuse that ID to upgrade
+consent. Attachments are private `bob-uploads` objects under
+`desktop/{user_id}/builder-chat/{thread_id}/{attachment_id}-{safe_name}`;
+the RPC checks storage ownership and the worker verifies scope, byte size and
+SHA-256. Images require explicit raw-image approval and live vision capability.
+Documents send up to 12,000 extracted characters, never the raw original through
+the current adapter. XLSX extraction uses the existing extractor's selected
+largest populated sheet, not every sheet. Empty/scanned PDFs fail pending OCR.
+Question/files do not include prior chat or repository tools.
+
+Web search and fetch use the same fixed Ollama origin, not arbitrary server-side
+URL requests. Source URLs exclude credentials, query strings, fragments,
+custom ports, IP literals and local/reserved names. Pages/files are untrusted
+evidence. Receipts distinguish checked publisher/quote provenance from semantic
+verification; unmatched quotes fail, under-corroborated claims remain unverified.
+Neither approval nor research grants deployment or job-creation authority.
+
 Vibe Builder runs against the private `DonSquires/Field-Compliance-Manager-`
 repository. Its model context can contain owner messages, source code, diffs,
 and tool output, so Vibe authoring is private-first: the GPU workstation and VPS

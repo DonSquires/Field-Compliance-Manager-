@@ -8,7 +8,28 @@ detailed backlogs (`ENTERPRISE_SAAS_TODO.md`, `PROTOTYPE_GAP_AUDIT.md`,
 Completion language is strict, as in the lineage: **merged ≠ deployed ≠
 glass-proven.** A workstream item is done only when its evidence gate is met.
 
-Builder chat investigation gate, owner correction 2026-10-25 (prepared, not deployed):
+Builder chat public research, owner decision 2026-10-25 (in development, not deployed):
+
+- Before: local chat candidates could consume the entire wall budget before
+  cloud was reached; chat had no image/document/public-web research input.
+- During: add isolated, owner-approved public research with cloud candidates
+  first, live availability/vision checks, owned attachment staging, private
+  document extraction, bounded public search/fetch and source-quote validation.
+  No previous history or repository packet leaves via this mode; normal source
+  investigation remains private. Persist per-message approval and evidence.
+- After gate: runtime, UI, migration authorization and browser tests must pass,
+  then governed migration/release and live synthetic image/document/web checks
+  must prove persisted receipts. This is not yet autonomous repair readiness;
+  the missing API release source still requires Bob's own investigation/plan.
+- Local evidence: runtime suite, web types/build/full unit suite, disposable
+  PostgreSQL role/ownership/consent/replay checks and desktop/mobile synthetic
+  document browser checks passed. A real public Docker-documentation request
+  fell through invalid Kimi output to validated DeepSeek source quotes; a real
+  Kimi vision request correctly read READY and three tasks from an
+  offline-generated synthetic image. These were isolated adapter probes, not
+  persisted production UI turns or proof that a live repair completed.
+
+Builder chat investigation gate, owner correction 2026-10-25 (merged and deployed #212):
 
 - Before: live UI research requests exhausted their model turns and produced
   actionable proposals copied from the owner's message, despite incomplete
@@ -42,6 +63,9 @@ Builder chat investigation gate, owner correction 2026-10-25 (prepared, not depl
   repeated reads, but did not complete a valid source-grounded plan. It correctly
   returned an explicit incomplete-investigation error without a proposal. This
   proves the refusal boundary, not autonomous repair readiness.
+- Release evidence: merge `6768896ea698612878c3deb752a11f4ccb95084f`
+  deployed through the governed control-plane lane. The subsequent live UI turn
+  refused an incomplete proposal correctly but did not finish the investigation.
 
 GitHub support automation, expanded owner decision 2026-10-24:
 
