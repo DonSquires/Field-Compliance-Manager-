@@ -71,7 +71,8 @@ function createBuilderChatStore(supabase) {
     },
     async updateThread(threadId, patch) {
       const now = new Date().toISOString();
-      const { error } = await supabase.from('builder_chat_threads').update({ ...patch, updated_at: now, last_activity_at: now }).eq('id', threadId);
+      // The worker never reopens a thread the owner closed while a turn was running.
+      const { error } = await supabase.from('builder_chat_threads').update({ ...patch, updated_at: now, last_activity_at: now }).eq('id', threadId).neq('status', 'closed');
       if (error) throw new Error(`thread update failed: ${error.message}`);
     },
     async post(threadId, row) {
@@ -84,7 +85,10 @@ function createBuilderChatStore(supabase) {
     },
     async history(threadId, beforeSeq) {
       const { data, error } = await supabase.from('builder_chat_messages').select('role, kind, content, payload, status, seq').eq('thread_id', threadId)
-        .in('role', ['owner', 'bob']).in('kind', ['message', 'proposal', 'error']).lt('seq', beforeSeq).order('seq', { ascending: false }).limit(HISTORY_MESSAGES);
+        .in('kind', ['message', 'proposal', 'error'])
+        // Owner turns before this one, plus every Bob reply already persisted (including answers to
+        // earlier queued turns that were posted after this message was sent).
+        .or(`and(role.eq.owner,seq.lt.${Number(beforeSeq)}),role.eq.bob`).order('seq', { ascending: false }).limit(HISTORY_MESSAGES);
       if (error) throw new Error(`history read failed: ${error.message}`);
       return (data || []).reverse();
     },
@@ -277,7 +281,11 @@ async function runBuilderChat({ store, thread, message, workspacePath, head, gat
         }) });
         continue;
       }
-      if (ACTION_CLAIM.test(text)) text = `Note: this chat has not created or started anything; Builder jobs start only when you confirm a proposal.\n\n${text}`;
+      if (ACTION_CLAIM.test(text)) {
+        text = proposal
+          ? 'I proposed the job above. Nothing has been created, started, merged or deployed: it starts only when you confirm it with Create job.'
+          : 'I cannot create, start, approve, merge or deploy anything from this chat, and nothing has been done. Ask me to propose a Builder job, or check a job\'s real status in the queue.';
+      }
       return { reply: clip(text, 8000), proposal, model: response.data?.model, executedTools };
     }
     messages.push({ role: 'assistant', content: JSON.stringify({ thought: clip(call.thought, 1500), tool: call.tool, args }) });
@@ -305,11 +313,20 @@ async function runBuilderChat({ store, thread, message, workspacePath, head, gat
   return { reply: 'I ran out of time on this one before reaching an answer. Ask again with a narrower question.', error: true };
 }
 
+async function retry(fn, attempts = 3, delayMs = 500) {
+  for (let attempt = 1; ; attempt++) {
+    try { return await fn(); } catch (error) {
+      if (attempt >= attempts) throw error;
+      await new Promise(resolve => setTimeout(resolve, delayMs * attempt));
+    }
+  }
+}
+
 async function processBuilderChatMessage({ store, message, deps, limits = BUILDER_CHAT_LIMITS }) {
-  const thread = await store.thread(message.thread_id);
-  if (!thread || thread.status === 'closed') { await store.complete(message.id, 'failed'); return { skipped: true }; }
-  await store.updateThread(thread.id, { status: 'working' });
   try {
+    const thread = await store.thread(message.thread_id);
+    if (!thread || thread.status === 'closed') { await retry(() => store.complete(message.id, 'failed'), 3, deps.retryDelayMs ?? 500); return { skipped: true }; }
+    await store.updateThread(thread.id, { status: 'working' });
     await store.post(thread.id, { role: 'bob', kind: 'thinking', content: 'Looking into it…', payload: { message_id: message.id } });
     const checkout = deps.workspacePath ? { workspacePath: deps.workspacePath, head: deps.head || null }
       : ensureChatCheckout({ workspaceRoot: deps.workspaceRoot, sourceDirFor: deps.sourceDirFor, resolveHead: deps.resolveHead });
@@ -326,9 +343,10 @@ async function processBuilderChatMessage({ store, message, deps, limits = BUILDE
     return outcome;
   } catch (error) {
     const detail = clip(redactGitError(error && error.message), 600);
-    await store.post(thread.id, { role: 'bob', kind: 'error', content: `Something went wrong: ${detail}` }).catch(() => {});
-    await store.updateThread(thread.id, { status: 'open' }).catch(() => {});
-    await store.complete(message.id, 'failed').catch(() => {});
+    await store.post(message.thread_id, { role: 'bob', kind: 'error', content: `Something went wrong: ${detail}`, payload: { message_id: message.id } }).catch(() => {});
+    await store.updateThread(message.thread_id, { status: 'open' }).catch(() => {});
+    // An unreleased claim would block later turns and VPS deploys until restart, so retry the release.
+    await retry(() => store.complete(message.id, 'failed'), 3, deps.retryDelayMs ?? 500).catch(() => {});
     return { error: detail };
   }
 }

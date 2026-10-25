@@ -68,6 +68,19 @@ export function proposalFrom(message: BuilderChatMessage): BuilderChatProposal |
   return { title: raw.title, task_description: raw.task_description, frontend_required: raw.frontend_required === true, backend_required: raw.backend_required === true, rationale: typeof raw.rationale === 'string' ? raw.rationale : undefined };
 }
 
+/**
+ * Merges a persisted snapshot into the live list without losing rows that arrived during the fetch:
+ * a row updated by Realtime after the snapshot started keeps its live version.
+ */
+export function mergeSnapshot(current: BuilderChatMessage[], snapshot: BuilderChatMessage[], liveAfterStart: Set<string>): BuilderChatMessage[] {
+  const byId = new Map(current.map(message => [message.id, message]));
+  for (const row of snapshot) {
+    if (liveAfterStart.has(row.id) && byId.has(row.id)) continue;
+    byId.set(row.id, row);
+  }
+  return [...byId.values()].sort((a, b) => a.seq - b.seq);
+}
+
 /** Tool rows between two conversational messages collapse into one steps group; thinking rows are hidden. */
 export function groupChat(messages: BuilderChatMessage[]): ThreadItem[] {
   const out: ThreadItem[] = [];
@@ -97,7 +110,7 @@ function Steps({ steps }: { steps: BuilderChatMessage[] }) {
   );
 }
 
-function ProposalCard({ message, onCreate, onOpenJob, busy, settings }: { message: BuilderChatMessage; onCreate: () => void; onOpenJob?: (jobId: string) => void; busy: boolean; settings?: string }) {
+function ProposalCard({ message, onCreate, onOpenJob, busy, settings, creatingElsewhere }: { message: BuilderChatMessage; onCreate: () => void; onOpenJob?: (jobId: string) => void; busy: boolean; settings?: string; creatingElsewhere: boolean }) {
   const proposal = proposalFrom(message);
   if (!proposal) return null;
   const jobId = typeof message.payload.job_id === 'string' ? message.payload.job_id : null;
@@ -109,7 +122,7 @@ function ProposalCard({ message, onCreate, onOpenJob, busy, settings }: { messag
       {proposal.rationale && <p className="bchat-proposal__why">{proposal.rationale}</p>}
       {jobId
         ? <div className="bchat-proposal__done"><CheckCircle2 size={15} /> Job created{onOpenJob && <button type="button" onClick={() => onOpenJob(jobId)}>Open job</button>}</div>
-        : <div className="bchat-proposal__actions"><span>{settings ? `Creates with: ${settings}. ` : ''}Nothing runs until you create it.</span><button type="button" onClick={onCreate} disabled={busy}>{busy ? <Loader2 size={14} className="bchat-spin" /> : <Bot size={14} />} Create job</button></div>}
+        : <div className="bchat-proposal__actions"><span>{settings ? `Creates with: ${settings}. ` : ''}Nothing runs until you create it.</span><button type="button" onClick={onCreate} disabled={busy || creatingElsewhere} title={creatingElsewhere ? 'This job is being created from another tab or window' : undefined}>{busy || creatingElsewhere ? <Loader2 size={14} className="bchat-spin" /> : <Bot size={14} />} {creatingElsewhere ? 'Creating…' : 'Create job'}</button></div>}
     </article>
   );
 }
@@ -123,6 +136,9 @@ export function BuilderChatPanel({ context, onClose, onCreateJob, onOpenJob, job
   const [busy, setBusy] = useState<string | null>(null);
   const [error, setError] = useState<string | null>(null);
   const threadEnd = useRef<HTMLDivElement | null>(null);
+  // Per-tab reservation tokens, so this tab can retry its own create but another tab cannot duplicate it.
+  const reservations = useRef(new Map<string, string>());
+  const reconcileRef = useRef<(() => Promise<void>) | null>(null);
 
   const working = messages.some(message => message.role === 'owner' && (message.status === 'queued' || message.status === 'claimed'));
   const items = useMemo(() => groupChat(messages), [messages]);
@@ -158,17 +174,29 @@ export function BuilderChatPanel({ context, onClose, onCreateJob, onOpenJob, job
   useEffect(() => {
     if (!threadId) return undefined;
     let cancelled = false;
+    const liveAt = new Map<string, number>();
+    let tick = 0;
     setLoading(true);
-    void supabase.from('builder_chat_messages').select(MESSAGE_FIELDS).eq('thread_id', threadId).order('seq', { ascending: true }).limit(400).then(({ data, error: loadError }) => {
+    setMessages([]);
+    // Newest 400 rows (the conversation tail), shown oldest first. Re-run on subscribe and reconnect,
+    // because Realtime does not replay rows written while the socket was not listening.
+    const reconcile = async () => {
+      const started = ++tick;
+      const { data, error: loadError } = await supabase.from('builder_chat_messages').select(MESSAGE_FIELDS).eq('thread_id', threadId).order('seq', { ascending: false }).limit(400);
       if (cancelled) return;
       setLoading(false);
-      if (loadError) setError(errorText(loadError));
-      else setMessages((data ?? []) as BuilderChatMessage[]);
-    });
+      if (loadError) { setError(errorText(loadError)); return; }
+      const snapshot = ((data ?? []) as BuilderChatMessage[]).slice().reverse();
+      const liveAfterStart = new Set([...liveAt].filter(([, at]) => at > started).map(([id]) => id));
+      setMessages(current => mergeSnapshot(current, snapshot, liveAfterStart));
+    };
+    reconcileRef.current = reconcile;
+    void reconcile();
     const channel = supabase.channel(`builder-chat-${threadId}`)
       .on('postgres_changes', { event: '*', schema: 'public', table: 'builder_chat_messages', filter: `thread_id=eq.${threadId}` }, change => {
         const row = change.new as BuilderChatMessage | undefined;
         if (!row?.id) return;
+        liveAt.set(row.id, ++tick);
         setMessages(current => {
           const index = current.findIndex(message => message.id === row.id);
           if (index === -1) return [...current, row].sort((a, b) => a.seq - b.seq);
@@ -177,9 +205,16 @@ export function BuilderChatPanel({ context, onClose, onCreateJob, onOpenJob, job
           return next;
         });
       })
-      .subscribe();
-    return () => { cancelled = true; void supabase.removeChannel(channel); };
+      .subscribe((status: string) => { if (status === 'SUBSCRIBED' && !cancelled) void reconcile(); });
+    return () => { cancelled = true; reconcileRef.current = null; void supabase.removeChannel(channel); };
   }, [threadId]);
+
+  // Safety net while a turn is in flight: a dropped Realtime event must not leave the panel stuck.
+  useEffect(() => {
+    if (!working) return undefined;
+    const timer = window.setInterval(() => { void reconcileRef.current?.(); }, 8000);
+    return () => window.clearInterval(timer);
+  }, [working]);
 
   useEffect(() => { threadEnd.current?.scrollIntoView?.({ block: 'end' }); }, [messages.length]);
 
@@ -222,12 +257,21 @@ export function BuilderChatPanel({ context, onClose, onCreateJob, onOpenJob, job
     if (!proposal || busy) return;
     setBusy(`proposal:${message.id}`);
     setError(null);
+    const token = reservations.current.get(message.id) ?? requestId();
+    reservations.current.set(message.id, token);
+    let jobId: string | null = null;
     try {
-      const jobId = await onCreateJob(proposal);
+      const { data: reserved, error: reserveError } = await supabase.rpc('builder_chat_reserve_proposal', { p_message_id: message.id, p_token: token });
+      if (reserveError) throw reserveError;
+      if (reserved !== true) throw new Error('This proposal is already being created from another tab or window, or was already created.');
+      jobId = await onCreateJob(proposal);
       if (!jobId) throw new Error('The Builder job was not created.');
       const { error: recordError } = await supabase.rpc('builder_chat_record_job', { p_message_id: message.id, p_job_id: jobId });
       if (recordError) throw recordError;
+      reservations.current.delete(message.id);
     } catch (createError) {
+      // Release only when no job exists; once created, keep the reservation so a retry links the same job.
+      if (!jobId) await supabase.rpc('builder_chat_release_proposal', { p_message_id: message.id, p_token: token });
       setError(errorText(createError));
     } finally {
       setBusy(null);
@@ -262,7 +306,8 @@ export function BuilderChatPanel({ context, onClose, onCreateJob, onOpenJob, job
             {items.map(item => item.type === 'steps'
               ? <Steps key={item.key} steps={item.steps} />
               : item.message.kind === 'proposal'
-                ? <ProposalCard key={item.message.id} message={item.message} settings={jobSettings} busy={busy === `proposal:${item.message.id}`} onCreate={() => void createFromProposal(item.message)} onOpenJob={onOpenJob} />
+                ? <ProposalCard key={item.message.id} message={item.message} settings={jobSettings} busy={busy === `proposal:${item.message.id}`}
+                  creatingElsewhere={typeof item.message.payload.creating_token === 'string' && item.message.payload.creating_token !== reservations.current.get(item.message.id) && Date.now() - Date.parse(String(item.message.payload.creating_at ?? '')) < 5 * 60_000} onCreate={() => void createFromProposal(item.message)} onOpenJob={onOpenJob} />
                 : <div key={item.message.id} className={`bchat-msg bchat-msg--${item.message.role}${item.message.kind === 'error' ? ' is-error' : ''}${item.message.kind === 'status' ? ' is-status' : ''}`}>
                     <p>{item.message.content}</p>
                     {item.message.role === 'owner' && item.message.status === 'failed' && <span className="bchat-msg__meta">Not answered</span>}

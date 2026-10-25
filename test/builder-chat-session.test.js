@@ -119,7 +119,7 @@ test('an invalid proposal is returned to the model as an error, not posted', asy
   assert.match(model.calls[1].request.messages.at(-1).content, /frontend_required and\/or backend_required/);
 });
 
-test('a reply claiming it created a job is refused once, then annotated if repeated', async () => {
+test('a reply claiming it created a job is refused once, then replaced if repeated', async () => {
   const refusedOnce = setup([
     { tool: 'reply', args: { message: "I've created the Builder job for the CCTV page." } },
     { tool: 'reply', args: { message: 'I can propose a CCTV token job if you want it.' } },
@@ -133,7 +133,59 @@ test('a reply claiming it created a job is refused once, then annotated if repea
     { tool: 'reply', args: { message: 'I have opened a pull request for it.' } },
   ]);
   await chat.processBuilderChatMessage({ store: repeated.store, message: ownerMessage('Do it'), deps: repeated.deps });
-  assert.match(repeated.store.rows.at(-1).content, /^Note: this chat has not created or started anything/);
+  const finalReply = repeated.store.rows.at(-1).content;
+  assert.doesNotMatch(finalReply, /opened a pull request/);
+  assert.doesNotMatch(finalReply, chat.ACTION_CLAIM);
+  assert.match(finalReply, /nothing has been done/);
+
+  const merged = setup([
+    { tool: 'propose_job', args: PROPOSAL },
+    { tool: 'reply', args: { message: 'I have merged the pull request.' } },
+    { tool: 'reply', args: { message: 'I have merged the pull request.' } },
+  ]);
+  await chat.processBuilderChatMessage({ store: merged.store, message: ownerMessage('Ship it'), deps: merged.deps });
+  assert.ok(merged.store.rows.some(row => row.kind === 'proposal'), 'a valid proposal is kept');
+  assert.doesNotMatch(merged.store.rows.at(-1).content, /merged the pull request/);
+  assert.match(merged.store.rows.at(-1).content, /starts only when you confirm it/);
+});
+
+test('a thread the owner closes mid-turn is not reopened by the worker', async () => {
+  const { store, deps } = setup([{ tool: 'reply', args: { message: 'Answer.' } }]);
+  const real = store.updateThread;
+  let closedDuringTurn = false;
+  store.updateThread = async (id, patch) => {
+    if (store.state.thread.status === 'closed') return; // mirrors .neq('status', 'closed')
+    await real(id, patch);
+    if (patch.status === 'working' && !closedDuringTurn) { closedDuringTurn = true; store.state.thread.status = 'closed'; }
+  };
+  await chat.processBuilderChatMessage({ store, message: ownerMessage('Hello'), deps });
+  assert.equal(store.state.thread.status, 'closed');
+});
+
+test('a failure before the turn starts still releases the claim, retrying the release', async () => {
+  const { store, deps } = setup([]);
+  store.thread = async () => { throw new Error('thread read failed: network'); };
+  let attempts = 0;
+  store.complete = async (id, status) => { attempts++; if (attempts < 2) throw new Error('transient'); store.state.completed[id] = status; };
+  const message = ownerMessage('Hello');
+  const outcome = await chat.processBuilderChatMessage({ store, message, deps });
+  assert.match(outcome.error, /network/);
+  assert.equal(store.state.completed[message.id], 'failed');
+  assert.equal(attempts, 2);
+});
+
+test('history includes Bob replies posted after this turn was queued, and the store never reopens closed threads', async () => {
+  const calls = [];
+  const awaited = { data: [], error: null };
+  const query = new Proxy({}, { get: (_t, name) => name === 'then' ? (resolve => resolve(awaited)) : (...args) => { calls.push([name, ...args]); return query; } });
+  const store = chat.createBuilderChatStore({ from: () => query });
+  await store.history(THREAD_ID, 42);
+  const or = calls.find(([name]) => name === 'or');
+  assert.equal(or[1], 'and(role.eq.owner,seq.lt.42),role.eq.bob');
+  assert.ok(!calls.some(([name]) => name === 'lt'), 'Bob replies are not cut off by sequence');
+  calls.length = 0;
+  await store.updateThread(THREAD_ID, { status: 'open' });
+  assert.deepEqual(calls.find(([name]) => name === 'neq'), ['neq', 'status', 'closed']);
 });
 
 test('ordinary investigation wording is not treated as an action claim', () => {
@@ -225,7 +277,7 @@ test('the shared read-only checkout follows main and discards stray files', t =>
   assert.equal(opened.head, first);
   fs.writeFileSync(path.join(opened.workspacePath, 'stray.txt'), 'x');
   fs.writeFileSync(path.join(dir, 'a.txt'), 'two\n');
-  git(['commit', '-qam', 'two']);
+  git(['-c', 'user.name=T', '-c', 'user.email=t@example.com', 'commit', '-qam', 'two']);
   head = git(['rev-parse', 'HEAD']);
   const refreshed = checkout();
   assert.equal(refreshed.workspacePath, opened.workspacePath);

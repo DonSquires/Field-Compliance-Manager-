@@ -1,7 +1,7 @@
 import React from 'react';
 import { afterEach, expect, it, vi } from 'vitest';
 import { cleanup, fireEvent, render, screen, waitFor } from '@testing-library/react';
-import { BuilderChatPanel, chatContext, groupChat, type BuilderChatMessage } from './BuilderChatPanel';
+import { BuilderChatPanel, chatContext, groupChat, mergeSnapshot, type BuilderChatMessage } from './BuilderChatPanel';
 
 const { rpc, from, channel, removeChannel } = vi.hoisted(() => ({ rpc: vi.fn(), from: vi.fn(), channel: vi.fn(), removeChannel: vi.fn() }));
 vi.mock('../lib/supabase', () => ({ supabase: { rpc, from, channel, removeChannel } }));
@@ -13,7 +13,7 @@ const row = (id: string, seq: number, role: BuilderChatMessage['role'], kind: Bu
 });
 const PROPOSAL = { title: 'CCTV tokens', task_description: 'Move CctvReviewPage.css onto shared tokens.', frontend_required: true, backend_required: false, rationale: 'Matches Dispatch.' };
 
-function wire({ owner = true, threads = [{ id: THREAD }], messages = [] as BuilderChatMessage[] } = {}) {
+function wire({ owner = true, threads = [{ id: THREAD }], messages = [] as BuilderChatMessage[], reserve = true } = {}) {
   const query = (rows: unknown[]) => {
     const builder: Record<string, unknown> = {};
     for (const name of ['select', 'neq', 'eq', 'order']) builder[name] = () => builder;
@@ -26,6 +26,7 @@ function wire({ owner = true, threads = [{ id: THREAD }], messages = [] as Build
   rpc.mockImplementation(async (name: string) => {
     if (name === 'is_grand_master') return { data: owner, error: null };
     if (name === 'builder_chat_thread_open') return { data: THREAD, error: null };
+    if (name === 'builder_chat_reserve_proposal') return { data: reserve, error: null };
     return { data: null, error: null };
   });
 }
@@ -64,6 +65,32 @@ it('creates a proposed job only when the owner confirms, then records it on the 
   fireEvent.click(screen.getByRole('button', { name: 'Create job' }));
   await waitFor(() => expect(rpc).toHaveBeenCalledWith('builder_chat_record_job', { p_message_id: 'p', p_job_id: 'job-123' }));
   expect(onCreateJob).toHaveBeenCalledWith(PROPOSAL);
+  const names = rpc.mock.calls.map(call => call[0]);
+  expect(names.indexOf('builder_chat_reserve_proposal')).toBeLessThan(names.indexOf('builder_chat_record_job'));
+});
+
+it('does not create a job when another tab already holds the proposal', async () => {
+  wire({ reserve: false, messages: [row('p', 2, 'bob', 'proposal', 'CCTV tokens', { proposal: PROPOSAL })] });
+  const onCreateJob = vi.fn(async () => 'job-123');
+  render(<BuilderChatPanel context={{}} onCreateJob={onCreateJob} />);
+  fireEvent.click(await screen.findByRole('button', { name: 'Create job' }));
+  expect((await screen.findByRole('alert')).textContent).toMatch(/already being created from another tab/);
+  expect(onCreateJob).not.toHaveBeenCalled();
+});
+
+it('shows a proposal reserved by another tab as creating, not clickable', async () => {
+  wire({ messages: [row('p', 2, 'bob', 'proposal', 'CCTV tokens', { proposal: PROPOSAL, creating_token: 'other-tab-token', creating_at: new Date().toISOString() })] });
+  render(<BuilderChatPanel context={{}} onCreateJob={vi.fn()} />);
+  const button = await screen.findByRole('button', { name: /Creating/ });
+  expect((button as HTMLButtonElement).disabled).toBe(true);
+});
+
+it('keeps live rows that arrived during a snapshot fetch and adds missed ones', () => {
+  const queued = { ...row('o', 1, 'owner', 'message'), status: 'queued' as const };
+  const liveDone = { ...queued, status: 'done' as const };
+  const merged = mergeSnapshot([liveDone], [queued, row('b', 2, 'bob', 'message', 'answer')], new Set(['o']));
+  expect(merged.map(message => [message.id, message.status])).toEqual([['o', 'done'], ['b', 'done']]);
+  expect(mergeSnapshot([queued], [liveDone], new Set()).map(message => message.status)).toEqual(['done']);
 });
 
 it('shows an accepted proposal as created with a way to open the job', async () => {
@@ -81,4 +108,5 @@ it('surfaces a failed job creation instead of marking the proposal accepted', as
   fireEvent.click(await screen.findByRole('button', { name: 'Create job' }));
   expect(await screen.findByRole('alert')).toHaveProperty('textContent', 'Choose a Builder project before creating a job.');
   expect(rpc.mock.calls.map(call => call[0])).not.toContain('builder_chat_record_job');
+  expect(rpc).toHaveBeenCalledWith('builder_chat_release_proposal', expect.objectContaining({ p_message_id: 'p' }));
 });
