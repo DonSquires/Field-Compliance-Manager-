@@ -1,0 +1,45 @@
+name: Atlas refresh
+
+on:
+  workflow_run:
+    workflows: [PR verification]
+    types: [completed]
+    branches: [main]
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: atlas-refresh
+  cancel-in-progress: false
+
+jobs:
+  refresh:
+    name: Refresh live Atlas from main
+    if: >-
+      (github.event_name == 'workflow_dispatch' && github.ref == 'refs/heads/main') ||
+      (github.event.workflow_run.conclusion == 'success' && github.event.workflow_run.event == 'push')
+    runs-on: ubuntu-22.04
+    timeout-minutes: 15
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: ${{ github.event.workflow_run.head_sha || github.sha }}
+          persist-credentials: false
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+      - name: Refresh Atlas tables
+        env:
+          SUPABASE_URL: ${{ secrets.SUPABASE_URL }}
+          SUPABASE_SERVICE_ROLE_KEY: ${{ secrets.SUPABASE_SERVICE_ROLE_KEY }}
+          ATLAS_REFRESH_SOURCE_BRANCH: main
+          ATLAS_REFRESH_SOURCE_COMMIT: ${{ github.event.workflow_run.head_sha || github.sha }}
+          ATLAS_REFRESH_OUTPUT_DIR: ${{ runner.temp }}/atlas
+        run: |
+          if [ -z "$SUPABASE_URL" ] || [ -z "$SUPABASE_SERVICE_ROLE_KEY" ]; then
+            echo "Atlas refresh needs SUPABASE_URL and SUPABASE_SERVICE_ROLE_KEY secrets." >&2
+            exit 1
+          fi
+          node scripts/atlas-refresh.js --apply
