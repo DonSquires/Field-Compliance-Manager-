@@ -178,6 +178,32 @@ function importedNumber(value) {
   return /^-?[0-9]+([.][0-9]+)?$/.test(normalized) ? Number(normalized) : null;
 }
 
+const NZ_DAY = new Intl.DateTimeFormat('en-CA', { timeZone: 'Pacific/Auckland', year: 'numeric', month: '2-digit', day: '2-digit' });
+
+// Elapsed minutes come from the timestamp parseNzDate already normalised, so every time format it
+// accepts (HH:mm, HH:mm:ss, Excel fractions, ISO) is usable; a blank time cell stays unknown.
+function elapsedMinutes(occurredAt, rawTime) {
+  if (!occurredAt || !String(rawTime ?? '').trim()) return null;
+  const ms = Date.parse(occurredAt);
+  return Number.isFinite(ms) ? ms / 60_000 : null;
+}
+
+// Each patrol day opens with a "Start" row (trip odometer reset). Where a sheet row's formulas
+// skip that Start row and subtract the previous day's closing row, the leg comes out negative.
+// Recompute the leg against the Start row, keeping the sheet's own hourly and per-km rates.
+function startRowLeg(source, start) {
+  if (source.kms === null || source.kms >= 0 || !start || source.odometer === null || start.odometer === null) return null;
+  const kms = source.odometer - start.odometer;
+  const minutes = source.minutes !== null && start.minutes !== null ? source.minutes - start.minutes : null;
+  if (kms < 0 || minutes === null || minutes < 0) return null;
+  const hours = minutes / 60;
+  const hourRate = source.hours && source.jobCost !== null ? source.jobCost / source.hours : null;
+  const kmRate = source.kms && source.travelCost !== null ? source.travelCost / source.kms : null;
+  const jobCost = hourRate !== null && Number.isFinite(hourRate) ? hours * hourRate : null;
+  const travelCost = kmRate !== null && Number.isFinite(kmRate) ? Math.round(kms * kmRate * 100) / 100 : null;
+  return { kms, hours, jobCost, travelCost, totalCost: jobCost !== null && travelCost !== null ? jobCost + travelCost : null };
+}
+
 function runCliQuery(query) {
   const tempDir = mkdtempSync(join(tmpdir(), 'fcm-patrol-import-'));
   const sqlFile = join(tempDir, 'query.sql');
@@ -340,12 +366,30 @@ let skipped = 0;
 let skippedNoZone = 0;
 let skippedDuplicate = 0;
 let unresolvedAliasRows = 0;
+let previousDated = null;
+let startLegCorrections = 0;
+let dayResetKmCorrections = 0;
 
 for (const [rowIndex, r] of table.slice(1).entries()) {
   const job = (r[col.job] ?? '').trim();
   const patroller = (r[col.patroller] ?? '').trim();
   const occurredAt = parseNzDate(r[col.date], r[col.time]);
   if (!occurredAt) { skipped += 1; continue; } // header/blank/summary rows with no real date
+  const day = NZ_DAY.format(new Date(occurredAt));
+  const sourceKms = importedNumber(r[col.jobKms]);
+  const odometer = importedNumber(r[col.odometer]);
+  const minutes = elapsedMinutes(occurredAt, r[col.time]);
+  const startRow = previousDated?.day === day && previousDated.start ? previousDated : null;
+  const leg = startRowLeg({ kms: sourceKms, odometer, minutes, hours: importedNumber(r[col.jobTime]),
+    jobCost: importedNumber(r[col.jobCost]), travelCost: importedNumber(r[col.travelCost]) }, startRow);
+  if (leg) startLegCorrections += 1;
+  const dayResetKms = !leg && sourceKms !== null && sourceKms < 0 && odometer !== null
+    && previousDated && previousDated.day !== day ? odometer : null;
+  if (dayResetKms !== null) dayResetKmCorrections += 1;
+  const jobKms = leg ? leg.kms : dayResetKms !== null ? dayResetKms : sourceKms;
+  const kmCorrection = sourceKms !== null && sourceKms < 0 && (leg || dayResetKms !== null)
+    ? (leg ? 'formula_skipped_start_row' : 'trip_odometer_day_reset') : null;
+  previousDated = { day, odometer, minutes, sourceRow: sourceFirstRow + rowIndex, start: (r[col.comments] ?? '').trim().toLowerCase() === 'start' };
   const locationText = (r[col.location] ?? '').trim();
   const reserveCode = col.reserve !== -1 ? (r[col.reserve] ?? '').trim() : '';
   // Reserve code (when the sheet has one) is the stable join key; free-text Location is the fallback
@@ -389,12 +433,24 @@ for (const [rowIndex, r] of table.slice(1).entries()) {
     source_file: effectiveSourceLabel, source_sha256: effectiveSourceHash, derivative_sha256: derivativeHash,
     source_sheet: sourceSheet || null, source_row: sourceFirstRow + rowIndex,
     location_raw: locationText, reserve_raw: reserveCode || null,
-    reg_raw: (r[col.registration] ?? '').trim() || null, plates_found: plates, job_time_hours: r[col.jobTime] || null,
-    job_kms: r[col.jobKms] || null, job_cost: importedNumber(r[col.jobCost]), travel_cost: importedNumber(r[col.travelCost]),
-    total_cost: importedNumber(r[col.totalCost]), source_category: (r[col.workSource] ?? '').trim() || null,
+    reg_raw: (r[col.registration] ?? '').trim() || null, plates_found: plates,
+    job_time_hours: leg ? String(leg.hours) : r[col.jobTime] || null,
+    job_kms: leg ? String(leg.kms) : dayResetKms !== null ? String(dayResetKms) : r[col.jobKms] || null,
+    ...(kmCorrection ? {
+      job_kms_source_value: (r[col.jobKms] ?? '').trim() || null,
+      job_kms_correction: kmCorrection,
+    } : {}),
+    job_cost: leg ? leg.jobCost : importedNumber(r[col.jobCost]),
+    travel_cost: leg ? leg.travelCost : importedNumber(r[col.travelCost]),
+    total_cost: leg ? leg.totalCost : importedNumber(r[col.totalCost]),
+    ...(leg ? { source_leg_correction: {
+      rule: 'formula_skipped_start_row', start_source_row: startRow.sourceRow,
+      job_time_hours: r[col.jobTime] || null, job_kms: r[col.jobKms] || null, job_cost: importedNumber(r[col.jobCost]),
+      travel_cost: importedNumber(r[col.travelCost]), total_cost: importedNumber(r[col.totalCost]),
+    } } : {}), source_category: (r[col.workSource] ?? '').trim() || null,
     classification_profile: classificationProfile,
     travel_odometer: (r[col.odometer] ?? '').trim() || null,
-    distance_source: col.jobKms === -1 ? null : 'source_job_km',
+    distance_source: col.jobKms === -1 ? null : kmCorrection ?? 'source_job_km',
     distance_source_column: col.jobKms === -1 ? null : header[col.jobKms],
     odometer_source_column: col.odometer === -1 ? null : header[col.odometer],
     ...(includeNarratives ? {
@@ -431,14 +487,14 @@ for (const [rowIndex, r] of table.slice(1).entries()) {
 
   let evidenceRecordType = null;
   if (officerId && primaryPlate) {
-    observationsBatch.push({ external_ref: externalRef, occurred_at: occurredAt, zone_id: zoneId, site_id: siteId, officer_id: officerId, plate: primaryPlate, officer_notes: includeNarratives ? comments || null : null, distance_km: importedNumber(r[col.jobKms]), payload });
+    observationsBatch.push({ external_ref: externalRef, occurred_at: occurredAt, zone_id: zoneId, site_id: siteId, officer_id: officerId, plate: primaryPlate, officer_notes: includeNarratives ? comments || null : null, distance_km: jobKms, payload });
     evidenceRecordType = 'observations';
   } else if (zoneId || siteId) {
     eventsBatch.push({
       external_ref: externalRef, occurred_at: occurredAt, zone_id: zoneId, site_id: siteId,
       event_type: isCamera ? 'camera_activation' : (officerId ? 'patrol_visit' : 'patrol_log_unattributed'),
       observed_entity_type: officerId ? 'staff' : null, observed_entity_id: officerId,
-      status: includeNarratives ? (r[col.issue] || '').trim() || null : null, distance_km: importedNumber(r[col.jobKms]), payload,
+      status: includeNarratives ? (r[col.issue] || '').trim() || null : null, distance_km: jobKms, payload,
     });
     evidenceRecordType = 'location_events';
   } else {
@@ -546,7 +602,9 @@ if (exportPlan) {
     source_sheet: sourceSheet || null,
     manifest: importManifest,
     schema: importSchema,
-    counts: { rows: table.length - 1, skipped, unresolved: skippedNoZone, duplicates: skippedDuplicate },
+    counts: { rows: table.length - 1, skipped, unresolved: skippedNoZone, duplicates: skippedDuplicate,
+      ...(startLegCorrections ? { start_row_leg_corrections: startLegCorrections } : {}),
+      ...(dayResetKmCorrections ? { day_reset_km_corrections: dayResetKmCorrections } : {}) },
     observations: observationsBatch,
     events: eventsBatch,
     proposals: proposalsBatch,

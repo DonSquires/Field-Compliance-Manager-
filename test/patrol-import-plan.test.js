@@ -21,6 +21,7 @@ function plan(context, extra = [], csvOverride) {
         column_mappings: { job: ['Job'], patroller: ['Patroller'], date: ['Date'], time: ['Time'], location: ['Location'],
           comments: ['Comments'], registration: ['Reg'], issue: ['Issue'],
           job_km: ['Job Km NCC', 'Job KM Stringer'], odometer: ['Travel Odometer', 'ODO'],
+          job_time: ['Job Time'], job_cost: ['Job Cost'], travel_cost: ['Travel Cost'], total_cost: ['Total Cost'],
         }, target_mappings: {},
       } },
       { record_type: 'person_alias', payload: { alias_norm: 'fixture officer', user_profile_id: '40000000-0000-4000-8000-000000000002' } },
@@ -249,6 +250,85 @@ test('source distance and trip odometer retain separate values and column proven
   assert.equal(row.payload.distance_source_column, 'Job Km NCC');
   assert.equal(row.payload.odometer_source_column, 'Travel Odometer');
   assert.equal(row.payload.between_site_distance_km, undefined);
+});
+
+test('a leg whose sheet formulas skipped the day Start row is recomputed from the Start row with provenance', context => {
+  const csv = 'Job,Patroller,Date,Time,Location,Comments,ODO,Job Time,Job Cost,Job KM Stringer,Travel Cost,Total Cost\n'
+    + '1,Camera,04/06/2026,1300,Test place,finish,127,1.5,93.75,61,60.39,154.14\n'
+    + '2,Camera,05/06/2026,0915,,Start,0,,,,,\n'
+    + '3,Camera,05/06/2026,1019,Test place,All clear,43,-2.683333333333332,-167.70833333333323,-84,-83.16,-250.86833333333323\n'
+    + '4,Camera,05/06/2026,1019,Test place,All clear,43,1.0666666666666669,66.66666666666669,43,42.57,109.23666666666668\n'
+    + '5,Camera,05/06/2026,1100,Test place,odd,38,0.5,31.25,-5,-4.95,26.3\n';
+  const { result } = plan(context, [], csv);
+  assert.equal(result.status, 0, result.stderr);
+  const output = JSON.parse(result.stdout);
+  const rows = Object.fromEntries(output.events.map(row => [row.payload.job_number, row]));
+  assert.equal(output.counts.start_row_leg_corrections, 1);
+  assert.equal(rows['1'].payload.source_leg_correction, undefined);
+  const fixed = rows['3'];
+  assert.equal(fixed.distance_km, 43);
+  assert.equal(fixed.payload.job_kms, '43');
+  assert.equal(fixed.payload.job_kms_source_value, '-84');
+  assert.equal(fixed.payload.job_kms_correction, 'formula_skipped_start_row');
+  assert.equal(fixed.payload.distance_source, 'formula_skipped_start_row');
+  assert.ok(Math.abs(Number(fixed.payload.job_time_hours) - 64 / 60) < 1e-9);
+  assert.ok(Math.abs(fixed.payload.job_cost - 66.6666666667) < 1e-6);
+  assert.equal(fixed.payload.travel_cost, 42.57);
+  assert.ok(Math.abs(fixed.payload.total_cost - 109.2366666667) < 1e-6);
+  assert.deepEqual({ ...fixed.payload.source_leg_correction, job_time_hours: undefined, job_cost: undefined, total_cost: undefined }, {
+    rule: 'formula_skipped_start_row', start_source_row: 3, job_kms: '-84', travel_cost: -83.16,
+    job_time_hours: undefined, job_cost: undefined, total_cost: undefined,
+  });
+  assert.equal(rows['4'].payload.source_leg_correction, undefined);
+  // A negative leg that does not follow a Start row is not this artifact; it is kept as recorded and held downstream.
+  assert.equal(rows['5'].distance_km, -5);
+  assert.equal(rows['5'].payload.source_leg_correction, undefined);
+});
+
+test('a Start-row correction accepts every normalised time format and keeps unknown costs unknown', context => {
+  const csv = 'Job,Patroller,Date,Time,Location,Comments,ODO,Job Time,Job Cost,Job KM Stringer,Travel Cost,Total Cost\n'
+    + '1,Camera,04/06/2026,13:00:00,Test place,finish,127,1.5,93.75,61,60.39,154.14\n'
+    + '2,Camera,05/06/2026,0.3854166666666667,,Start,0,,,,,\n'
+    + '3,Camera,05/06/2026,10:19:00,Test place,All clear,43,-2.683333333333332,,-84,,\n';
+  const { result } = plan(context, [], csv);
+  assert.equal(result.status, 0, result.stderr);
+  const output = JSON.parse(result.stdout);
+  const fixed = output.events.find(row => row.payload.job_number === '3');
+  assert.equal(output.counts.start_row_leg_corrections, 1);
+  assert.equal(fixed.distance_km, 43);
+  assert.ok(Math.abs(Number(fixed.payload.job_time_hours) - 64 / 60) < 1e-9);
+  assert.equal(fixed.payload.job_cost, null);
+  assert.equal(fixed.payload.travel_cost, null);
+  assert.equal(fixed.payload.total_cost, null);
+});
+
+test('a negative first-job distance on a new day uses the trip odometer and preserves the source value', context => {
+  const csv = 'Job,Patroller,Date,Time,Location,Comments,ODO,Job Time,Job Cost,Job KM Stringer,Travel Cost,Total Cost\n'
+    + '790,Camera,04/06/2026,1710,Test place,finish,125,0.5,31.25,10,10.4,41.65\n'
+    + '793,Camera,05/06/2026,0915,Test place,first,43,0.5,31.25,-82,44.72,75.97\n'
+    + '794,Camera,05/06/2026,1000,Test place,second,48,0.5,31.25,-5,4.95,36.2\n'
+    + '982,Camera,06/06/2026,0915,Test place,first,43,0.5,31.25,-89,44.72,75.97\n'
+    + '1068,Camera,07/06/2026,0915,Test place,first,48,0.5,31.25,-90,49.92,81.17\n';
+  const { result } = plan(context, [], csv);
+  assert.equal(result.status, 0, result.stderr);
+  const output = JSON.parse(result.stdout);
+  const rows = Object.fromEntries(output.events.map(row => [row.payload.job_number, row]));
+  assert.equal(output.counts.day_reset_km_corrections, 3);
+  for (const [job, kms, source] of [['793', 43, '-82'], ['982', 43, '-89'], ['1068', 48, '-90']]) {
+    assert.equal(rows[job].distance_km, kms);
+    assert.equal(rows[job].payload.job_kms, String(kms));
+    assert.equal(rows[job].payload.job_kms_source_value, source);
+    assert.equal(rows[job].payload.job_kms_correction, 'trip_odometer_day_reset');
+    assert.equal(rows[job].payload.distance_source, 'trip_odometer_day_reset');
+  }
+  assert.equal(rows['793'].payload.job_cost, 31.25);
+  assert.equal(rows['794'].distance_km, -5);
+  assert.equal(rows['794'].payload.job_kms_correction, undefined);
+
+  const firstRow = plan(context, [], 'Job,Patroller,Date,Time,Location,Comments,ODO,Job KM Stringer\n'
+    + '793,Camera,05/06/2026,0915,Test place,first,43,-82\n').result;
+  assert.equal(firstRow.status, 0, firstRow.stderr);
+  assert.equal(JSON.parse(firstRow.stdout).events[0].distance_km, -82);
 });
 
 test('missing distances stay unknown and recorded zero remains a real source value', context => {

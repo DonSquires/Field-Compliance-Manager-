@@ -190,6 +190,32 @@ test('a dry run sends rolled-back chunks and never finalizes; nothing is written
   assert.equal(typeof recordFingerprint, 'function');
 });
 
+test('evidence-only sync preserves narrative fields but suppresses proposals on every chunk', async () => {
+  const { runSourceSync } = await load();
+  const rows = [sourceRow(1), sourceRow(2)];
+  const plan = sourcePlan(rows, rows.map(row => ({
+    source_record_key: row.external_ref, target_type: 'finance_service_cost',
+  })));
+  const harness = syncHarness();
+  const report = await runSourceSync({ sourcePlan: plan, providerOrganizationId: PROVIDER,
+    readQuery: harness.readQuery, writeQuery: harness.writeQuery, evidenceOnly: true, chunkSize: 1 });
+  assert.equal(report.requested.proposals, 0);
+  assert.equal(harness.writes.length, 2);
+  for (const sql of harness.writes) {
+    assert.ok(sql.includes('"proposals":[]'));
+    assert.ok(sql.includes('"expected_proposal_count":0'));
+    assert.ok(sql.includes('"comments":"original"'));
+    assert.ok(!sql.includes('finance_service_cost'));
+    assert.match(sql, /ROLLBACK;$/);
+  }
+  assert.equal(plan.proposals.length, 2);
+
+  const standard = syncHarness();
+  const defaultReport = await runSourceSync({ sourcePlan: plan, providerOrganizationId: PROVIDER,
+    readQuery: standard.readQuery, writeQuery: standard.writeQuery });
+  assert.equal(defaultReport.requested.proposals, 2);
+});
+
 test('a committed sync resumes an open batch, finalizes with a zero-direct-write receipt, and refuses a closed batch', async () => {
   const { runSourceSync } = await load();
   const plan = sourcePlan([sourceRow(1)]);
@@ -226,4 +252,315 @@ test('sync refuses plans without the importer batch definition or an installed s
   };
   await assert.rejects(runSourceSync({ sourcePlan: sourcePlan([sourceRow(1)]), providerOrganizationId: PROVIDER,
     ...uninstalled }), /not installed/);
+});
+
+const OTHER = '10000000-0000-4000-8000-000000000006';
+
+function legacyLive(row, overrides = {}) {
+  const { source_file, source_sheet, source_sha256, ...legacyPayload } = row.payload;
+  return liveEvent({ ...row, payload: legacyPayload, ...overrides });
+}
+
+test('pre-provenance records become legacy corrections, not identity-mismatch holds', async () => {
+  const { previewReconciliation, buildSyncChunks } = await load();
+  const row = sourceRow(1);
+  const plan = sourcePlan([row]);
+  const live = legacyLive(row, { occurred_at: '2026-10-19T13:00:00+12:00' });
+  const result = previewReconciliation(plan, { organization_id: CLIENT, observations: [], events: [live] });
+  assert.equal(result.actions[0].operation, 'legacy_correct');
+  assert.equal(result.actions[0].record_id, RECORD);
+  assert.equal(result.summary.legacy_correct, 1);
+  const { chunks, counts } = buildSyncChunks(plan, result);
+  assert.equal(chunks[0].corrections[0].record_id, RECORD);
+  assert.equal(chunks[0].corrections[0].desired, row);
+  assert.equal(counts.corrections, 1);
+
+  const sourced = liveEvent({ ...row, payload: { ...row.payload, source_sheet: 'OTHER' } });
+  const mismatch = previewReconciliation(plan, { organization_id: CLIENT, observations: [], events: [sourced] });
+  assert.equal(mismatch.actions[0].reason, 'existing_source_identity_mismatch');
+});
+
+test('rows copied from a canonical worksheet are superseded only when the visit is identical', async () => {
+  const { buildReconciliationPlan, buildSyncChunks } = await load();
+  const canonicalRow = { ...sourceRow(7), external_ref: 'rm_patrol_import:CANON:7',
+    payload: { ...sourceRow(7).payload, source_sheet: 'CANON' } };
+  const canonicalPlan = { ...sourcePlan([canonicalRow]), source_sheet: 'CANON' };
+  const copy = sourceRow(7);
+  const differing = sourceRow(8, { payload: { ...sourceRow(8).payload, comments: 'different' } });
+  const canonicalDiffering = { ...sourceRow(8), external_ref: 'rm_patrol_import:CANON:8',
+    payload: { ...sourceRow(8).payload, source_sheet: 'CANON' } };
+  canonicalPlan.events.push(canonicalDiffering);
+  const plan = sourcePlan([copy, differing, sourceRow(9)]);
+  const existing = [{ external_ref: copy.external_ref, id: RECORD, kind: 'event', source_file: null, source_sheet: null,
+    record: { occurred_at: copy.occurred_at } }];
+  const result = buildReconciliationPlan({ sourcePlan: plan, existing, canonicalPlan });
+  const byRef = Object.fromEntries(result.actions.map(action => [action.external_ref, action]));
+  assert.equal(byRef[copy.external_ref].operation, 'supersede');
+  assert.equal(byRef[copy.external_ref].canonical_external_ref, canonicalRow.external_ref);
+  assert.equal(byRef[differing.external_ref].reason, 'canonical_job_differs');
+  assert.equal(byRef[sourceRow(9).external_ref].operation, 'insert');
+  const absent = buildReconciliationPlan({ sourcePlan: plan, existing: [], canonicalPlan });
+  assert.equal(absent.actions[0].operation, 'canonical_copy');
+  const { chunks, counts } = buildSyncChunks(plan, result);
+  assert.deepEqual(chunks[0].supersedes[0], { kind: 'event', external_ref: copy.external_ref,
+    canonical_external_ref: canonicalRow.external_ref, source_fingerprint: byRef[copy.external_ref].source_fingerprint, desired: copy });
+  assert.equal(counts.supersedes, 1);
+  assert.throws(() => buildReconciliationPlan({ sourcePlan: plan, existing: [], canonicalPlan: sourcePlan([]) }), /different worksheet/);
+});
+
+test('existing copies on another worksheet supersede to a unique planned visit and archived refs are skipped', async () => {
+  const { previewReconciliation, buildSyncChunks } = await load();
+  const row = sourceRow(1);
+  const plan = sourcePlan([row]);
+  const copyRow = { ...row, external_ref: 'rm_patrol_import:TEST:md5copy',
+    payload: { ...row.payload, job_number: null, source_sheet: 'Update' } };
+  const strayRow = { ...copyRow, external_ref: 'rm_patrol_import:TEST:md5stray', zone_id: 'zone-2' };
+  const baseline = { organization_id: CLIENT, observations: [], events: [],
+    sheet_copies: [liveEvent(copyRow, OTHER), liveEvent(strayRow, OTHER)] };
+  const result = previewReconciliation(plan, baseline);
+  const byRef = Object.fromEntries(result.actions.map(action => [action.external_ref, action]));
+  assert.equal(byRef[copyRow.external_ref].operation, 'supersede');
+  assert.equal(byRef[copyRow.external_ref].canonical_external_ref, row.external_ref);
+  assert.equal(byRef[strayRow.external_ref].reason, 'canonical_visit_not_found');
+  const { chunks } = buildSyncChunks(plan, result);
+  assert.deepEqual(chunks.flatMap(chunk => chunk.supersedes), [{ kind: 'event', external_ref: copyRow.external_ref,
+    canonical_external_ref: row.external_ref }]);
+
+  const archived = previewReconciliation(plan, { ...baseline, superseded_refs: [row.external_ref, copyRow.external_ref] });
+  const archivedByRef = Object.fromEntries(archived.actions.map(action => [action.external_ref, action]));
+  assert.equal(archivedByRef[row.external_ref].operation, 'superseded');
+  assert.equal(archivedByRef[copyRow.external_ref], undefined);
+  assert.throws(() => previewReconciliation(plan, { ...baseline, sheet_copies: [{ ...liveEvent(copyRow), organization_id: OTHER }] }),
+    /outside the selected client/);
+});
+
+test('linked baseline loads archived refs and named worksheet copies only when requested', async () => {
+  const { loadLinkedBaseline } = await load();
+  const plan = sourcePlan([sourceRow(1)]);
+  const queries = [];
+  const baseline = await loadLinkedBaseline(plan, PROVIDER, async sql => {
+    queries.push(sql);
+    if (sql.includes('AS scope')) return [{ scope: { authorized: true, eligible_officer_ids: [], sync_history: true, supersede_history: true } }];
+    if (sql.includes('AS copies')) return [{ copies: [{ id: OTHER }] }];
+    return [{ activity: { observations: [], events: [], checkpoints: [], superseded: ['rm_patrol_import:TEST:1'] } }];
+  }, { copySheets: ['Update'] });
+  assert.ok(queries[0].includes('location_events_superseded'));
+  assert.ok(queries[1].includes('location_events_superseded') && queries[1].includes(CLIENT));
+  assert.ok(queries[2].includes('"Update"') && queries[2].includes(CLIENT) && queries[2].includes('rm_patrol_log_import'));
+  assert.deepEqual(baseline.superseded_refs, ['rm_patrol_import:TEST:1']);
+  assert.deepEqual(baseline.sheet_copies, [{ id: OTHER }]);
+  await assert.rejects(loadLinkedBaseline(plan, PROVIDER, async () => [], { copySheets: ['DATA'] }), /differ from the source/);
+  await assert.rejects(loadLinkedBaseline(plan, PROVIDER, async sql => sql.includes('AS scope')
+    ? [{ scope: { authorized: true, eligible_officer_ids: [], supersede_history: true } }]
+    : [{ activity: { observations: [], events: [] } }]), /Incomplete linked activity/);
+});
+
+test('sync SQL runs legacy corrections before supersedes and summarizes both phases', async () => {
+  const { buildSyncChunkSql, summarizeSyncResults } = await load();
+  const sql = buildSyncChunkSql({ actorId: ACTOR, providerOrganizationId: PROVIDER, clientOrganizationId: CLIENT,
+    batchId: BATCH, chunk: { observations: [], events: [], proposals: [], baselines: [], updates: [],
+      corrections: [{ external_ref: 'x' }], supersedes: [{ external_ref: 'y' }],
+      dartUpdates: [{ update_external_ref: 'update-x' }] },
+    dartUpdateBatch: { batch_name: 'DART Update 251215', source_file: 'dart.xlsx', source_sha256: HASH,
+      parser: 'xlsx', manifest: { idempotency_key: 'dart-update-batch', source_sheet: 'Update 251215' },
+      schema: {}, row_count: 1, duplicate_count: 0, unresolved_count: 0 }, commit: false });
+  const correction = sql.indexOf('correct_legacy_patrol_source_records');
+  const supersede = sql.indexOf('supersede_duplicate_patrol_events');
+  const update = sql.indexOf('apply_dart_patrol_source_updates_and_supersede');
+  assert.ok(correction > 0 && supersede > correction && update > supersede);
+  assert.ok(sql.includes('DART Update 251215') && sql.includes('dart_update_batch_id'));
+  assert.ok(sql.trim().endsWith('ROLLBACK;'));
+  const summary = summarizeSyncResults([
+    { phase: 'correction', outcome: 'corrected' },
+    { phase: 'correction', outcome: 'held', detail: 'invoiced_record' },
+    { phase: 'supersede', outcome: 'superseded' },
+    { phase: 'dart_update', outcome: 'updated_and_superseded' },
+  ]);
+  assert.deepEqual(summary.correction, { corrected: 1, held: 1 });
+  assert.deepEqual(summary.supersede, { superseded: 1 });
+  assert.deepEqual(summary.dart_update, { updated_and_superseded: 1 });
+  assert.deepEqual(summary.hold_reasons, { 'correction:invoiced_record': 1 });
+});
+
+test('one-to-one DART Update rows patch the 2025 event and archive the source copy as one unit', async () => {
+  const { previewReconciliation, buildSyncChunks } = await load();
+  const canonical = sourceRow(7, { payload: { ...sourceRow(7).payload, source_sheet: '2025',
+    source_file: 'dart.xlsx', source_row: 12, source_sha256: HASH, derivative_sha256: 'b'.repeat(64),
+    location_raw: 'Old reserve road', reserve_raw: 'R-7', source_category: 'Patrol',
+    patroller_raw: 'Fixture Officer', plates_found: [] } });
+  const canonicalPlan = { ...sourcePlan([canonical]), source_file: 'dart.xlsx', source_sheet: '2025' };
+  const update = sourceRow('copy', { external_ref: 'rm_patrol_import:UPDATE:row-2', status: null,
+    payload: { ...sourceRow(7).payload, job_number: null, source_sheet: 'Update 251215', source_file: 'dart.xlsx',
+      source_row: 2, source_sha256: HASH, derivative_sha256: 'c'.repeat(64), location_raw: 'New reserve road',
+      reserve_raw: 'R-7', source_category: 'Patrol', patroller_raw: 'Fixture Officer', plates_found: [] } });
+  const updatePlan = { ...sourcePlan([update]), source_file: 'dart.xlsx', source_sheet: 'Update 251215' };
+  const canonicalDesired = (await load()).buildReconciliationPlan({ sourcePlan: canonicalPlan, existing: [] }).actions[0].desired;
+  const canonicalLive = legacyLive(canonical, { id: RECORD });
+  const copyLive = liveEvent({ ...update, external_ref: 'rm_patrol_import:OLD:copy', status: null }, OTHER);
+  const result = previewReconciliation(canonicalPlan, {
+    organization_id: CLIENT, observations: [], events: [canonicalLive], sheet_copies: [copyLive],
+  }, { sheetUpdatePlan: updatePlan });
+  const pair = result.actions.find(action => action.operation === 'update_and_supersede');
+  assert.ok(pair);
+  assert.equal(pair.external_ref, canonical.external_ref);
+  assert.equal(pair.copy_external_ref, 'rm_patrol_import:OLD:copy');
+  assert.equal(pair.update_external_ref, update.external_ref);
+  assert.equal(pair.update_patch.location_raw, 'New reserve road');
+  assert.equal(pair.update_patch.job_cost, undefined);
+  assert.equal(result.actions.some(action => action.operation === 'legacy_correct'
+    && action.external_ref === canonical.external_ref), false);
+  assert.equal(result.summary.update_and_supersede, 1);
+
+  const { chunks, counts } = buildSyncChunks(canonicalPlan, result, { sheetUpdatePlan: updatePlan, includeProposals: false });
+  assert.equal(chunks.length, 1);
+  assert.equal(chunks[0].corrections[0].desired, canonical);
+  assert.equal(chunks[0].dartUpdates[0].copy_record_id, OTHER);
+  assert.equal(chunks[0].dartUpdates[0].update_desired, update);
+  assert.equal(counts.corrections, 1);
+  assert.equal(counts.dart_updates, 1);
+  assert.equal(counts.proposals, 0);
+  assert.ok(canonicalDesired);
+});
+
+test('DART Update collisions and unmatched copies remain held without paired writes', async () => {
+  const { previewReconciliation, buildSyncChunks } = await load();
+  const canonical = sourceRow(7, { payload: { ...sourceRow(7).payload, source_sheet: '2025',
+    source_file: 'dart.xlsx', source_row: 12, source_sha256: HASH, derivative_sha256: 'b'.repeat(64),
+    location_raw: 'Reserve road' } });
+  const canonicalPlan = { ...sourcePlan([canonical]), source_file: 'dart.xlsx', source_sheet: '2025' };
+  const updateRow = (row, overrides = {}) => sourceRow(`copy-${row}`, { status: null,
+    external_ref: `rm_patrol_import:UPDATE:${row}`,
+    payload: { ...sourceRow(7).payload, job_number: null, source_file: 'dart.xlsx', source_sheet: 'Update 251215',
+      source_row: row, source_sha256: HASH, derivative_sha256: 'c'.repeat(64), location_raw: `Updated ${row}`,
+      ...overrides },
+  });
+  const updateRows = [updateRow(2), updateRow(3), updateRow(4)];
+  const updatePlan = { ...sourcePlan(updateRows), source_file: 'dart.xlsx', source_sheet: 'Update 251215' };
+  const copies = [
+    liveEvent({ ...updateRows[0], external_ref: 'rm_patrol_import:OLD:copy-a' }, OTHER),
+    liveEvent({ ...updateRows[1], external_ref: 'rm_patrol_import:OLD:copy-b' }, '10000000-0000-4000-8000-000000000007'),
+    liveEvent({ ...updateRows[2], external_ref: 'rm_patrol_import:OLD:unmatched', zone_id: 'zone-unmatched' },
+      '10000000-0000-4000-8000-000000000008'),
+  ];
+  const result = previewReconciliation(canonicalPlan, {
+    organization_id: CLIENT, observations: [], events: [legacyLive(canonical, { id: RECORD })], sheet_copies: copies,
+  }, { sheetUpdatePlan: updatePlan });
+  const copyActions = result.actions.filter(action => action.source_sheet === 'Update 251215');
+  assert.equal(copyActions.length, 3);
+  assert.deepEqual(copyActions.map(action => action.reason).sort(), [
+    'ambiguous_canonical_visit', 'ambiguous_canonical_visit', 'canonical_visit_not_found',
+  ]);
+  const { chunks, counts } = buildSyncChunks(canonicalPlan, result, { sheetUpdatePlan: updatePlan });
+  assert.equal(counts.dart_updates, undefined);
+  assert.equal(counts.supersedes, undefined);
+  assert.equal(chunks.flatMap(chunk => chunk.dartUpdates ?? []).length, 0);
+  assert.equal(chunks.flatMap(chunk => chunk.supersedes).length, 0);
+});
+
+function dartFixture() {
+  const canonical = sourceRow(7, { payload: { ...sourceRow(7).payload, source_sheet: '2025',
+    source_file: 'dart.xlsx', source_row: 12, source_sha256: HASH, derivative_sha256: 'b'.repeat(64),
+    location_raw: 'Old reserve road', reserve_raw: 'R-7', source_category: 'Patrol',
+    patroller_raw: 'Fixture Officer', plates_found: [] } });
+  const canonicalPlan = { ...sourcePlan([canonical]), source_file: 'dart.xlsx', source_sheet: '2025' };
+  const update = sourceRow('copy', { external_ref: 'rm_patrol_import:UPDATE:row-2', status: null,
+    payload: { ...sourceRow(7).payload, job_number: null, source_sheet: 'Update 251215', source_file: 'dart.xlsx',
+      source_row: 2, source_sha256: HASH, derivative_sha256: 'c'.repeat(64), location_raw: 'New reserve road',
+      reserve_raw: 'R-7', source_category: 'Patrol', patroller_raw: 'Fixture Officer', plates_found: [] } });
+  const updatePlan = { ...sourcePlan([update]), source_file: 'dart.xlsx', source_sheet: 'Update 251215' };
+  const copyLive = liveEvent({ ...update, external_ref: 'rm_patrol_import:OLD:copy', status: null }, OTHER);
+  return { canonical, canonicalPlan, update, updatePlan, copyLive };
+}
+
+// What the paired RPC leaves behind: the patched canonical and a version that keeps the 2025 identity.
+function appliedOverlay(canonical, pair) {
+  const live = liveEvent({ ...canonical, payload: { ...canonical.payload, ...pair.update_patch } }, RECORD);
+  const checkpoint = { external_ref: canonical.external_ref, record_id: RECORD, kind: 'event',
+    source_file: 'dart.xlsx', source_sheet: '2025', source_fingerprint: pair.source_fingerprint,
+    record_fingerprint: pair.record_fingerprint };
+  return { live, checkpoint };
+}
+
+test('an applied DART Update overlay resyncs as unchanged; a later source edit to that row is held', async () => {
+  const { previewReconciliation } = await load();
+  const { canonical, canonicalPlan, updatePlan, copyLive } = dartFixture();
+  const first = previewReconciliation(canonicalPlan, { organization_id: CLIENT, observations: [],
+    events: [legacyLive(canonical, { id: RECORD })], sheet_copies: [copyLive] }, { sheetUpdatePlan: updatePlan });
+  const pair = first.actions.find(action => action.operation === 'update_and_supersede');
+  assert.match(pair.record_fingerprint, /^[a-f0-9]{64}$/);
+  assert.notEqual(pair.record_fingerprint, pair.source_fingerprint);
+  const { live, checkpoint } = appliedOverlay(canonical, pair);
+
+  for (const options of [{ sheetUpdatePlan: updatePlan }, {}]) {
+    const resync = previewReconciliation(canonicalPlan, { organization_id: CLIENT, observations: [], events: [live],
+      sheet_copies: [], checkpoints: [checkpoint] }, options);
+    const action = resync.actions.find(row => row.external_ref === canonical.external_ref);
+    assert.equal(action.operation, 'unchanged');
+    assert.equal(action.update_overlay, true);
+    assert.equal(action.baseline_required, undefined);
+    assert.equal(resync.summary.baseline_required, 0);
+    assert.equal(resync.summary.hold, 0);
+  }
+
+  const edited = { ...canonicalPlan, events: [{ ...canonical, status: 'completed - gate damaged' }] };
+  const held = previewReconciliation(edited, { organization_id: CLIENT, observations: [], events: [live],
+    sheet_copies: [], checkpoints: [checkpoint] });
+  const action = held.actions.find(row => row.external_ref === canonical.external_ref);
+  assert.equal(action.operation, 'hold');
+  assert.equal(action.reason, 'update_overlay_review_required');
+});
+
+test('a DART Update pairing that repeats a canonical or copy is refused even across chunks', async () => {
+  const { previewReconciliation, buildSyncChunks } = await load();
+  const { canonical, canonicalPlan, updatePlan, copyLive } = dartFixture();
+  const result = previewReconciliation(canonicalPlan, { organization_id: CLIENT, observations: [],
+    events: [legacyLive(canonical, { id: RECORD })], sheet_copies: [copyLive] }, { sheetUpdatePlan: updatePlan });
+  const pair = result.actions.find(action => action.operation === 'update_and_supersede');
+  const repeated = { ...result, actions: [...result.actions,
+    { ...pair, copy_external_ref: 'rm_patrol_import:OLD:copy-2', copy_record_id: '10000000-0000-4000-8000-000000000009' }] };
+  assert.throws(() => buildSyncChunks(canonicalPlan, repeated, { sheetUpdatePlan: updatePlan, includeProposals: false, chunkSize: 1 }),
+    /repeats a canonical event, copy, or Update row/);
+  const { chunks } = buildSyncChunks(canonicalPlan, result, { sheetUpdatePlan: updatePlan, includeProposals: false });
+  assert.equal(chunks[0].dartUpdates[0].record_fingerprint, pair.record_fingerprint);
+});
+
+test('a committed re-run with nothing left to send closes both open batches in one transaction', async () => {
+  const { previewReconciliation, runSourceSync } = await load();
+  const { canonical, canonicalPlan, updatePlan, copyLive } = dartFixture();
+  const pair = previewReconciliation(canonicalPlan, { organization_id: CLIENT, observations: [],
+    events: [legacyLive(canonical, { id: RECORD })], sheet_copies: [copyLive] }, { sheetUpdatePlan: updatePlan })
+    .actions.find(action => action.operation === 'update_and_supersede');
+  const { live, checkpoint } = appliedOverlay(canonical, pair);
+  const UPDATE_BATCH = '10000000-0000-4000-8000-00000000000a';
+  const writes = [];
+  const harness = {
+    readQuery: async sql => {
+      if (sql.includes('AS scope')) return [{ scope: { authorized: true, eligible_officer_ids: [], sync_history: true, supersede_history: true } }];
+      if (sql.includes('AS activity')) return [{ activity: { observations: [], events: [live], checkpoints: [checkpoint], superseded: [] } }];
+      if (sql.includes('AS copies')) return [{ copies: [] }];
+      if (sql.includes('import_actor_id')) return [{ import_actor_id: ACTOR }];
+      if (sql.includes('file_import_batches')) {
+        return sql.includes('dart_update:') ? [{ id: UPDATE_BATCH, status: 'staging' }] : [{ id: BATCH, status: 'staging' }];
+      }
+      throw new Error('unexpected read');
+    },
+    writeQuery: async sql => { writes.push(sql); return [{ id: BATCH }]; },
+  };
+  const report = await runSourceSync({ sourcePlan: canonicalPlan, providerOrganizationId: PROVIDER,
+    readQuery: harness.readQuery, writeQuery: harness.writeQuery, commit: true,
+    copySheets: ['Update 251215'], sheetUpdatePlan: updatePlan });
+  assert.equal(report.status, 'receipt_recovered');
+  assert.equal(writes.length, 1);
+  assert.match(writes[0], /^BEGIN;/);
+  assert.match(writes[0], /COMMIT;$/);
+  assert.equal(writes[0].match(/finalize_patrol_import_batch/g).length, 2);
+  assert.ok(writes[0].includes(BATCH) && writes[0].includes(UPDATE_BATCH));
+  assert.ok(writes[0].includes('"receipt_recovered":true'));
+
+  const dryRun = [];
+  const idle = await runSourceSync({ sourcePlan: canonicalPlan, providerOrganizationId: PROVIDER,
+    readQuery: harness.readQuery, writeQuery: async sql => { dryRun.push(sql); return []; },
+    copySheets: ['Update 251215'], sheetUpdatePlan: updatePlan });
+  assert.equal(idle.status, 'no_source_changes');
+  assert.equal(dryRun.length, 0);
 });
