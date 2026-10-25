@@ -304,3 +304,41 @@ COMMENT ON FUNCTION public.apply_historical_patrol_labour_routes(uuid, uuid) IS
   'Admin-only, idempotent, audited routing of historical patrol-log labour onto primary-officer patrol routes. Serialised per organisation.';
 REVOKE ALL ON FUNCTION public.apply_historical_patrol_labour_routes(uuid, uuid) FROM PUBLIC, anon, authenticated, service_role;
 GRANT EXECUTE ON FUNCTION public.apply_historical_patrol_labour_routes(uuid, uuid) TO authenticated, service_role;
+-- 6. R&M: re-route existing seeded labour under the hardened rules ------------------------------
+-- Owner approved (2026-10-30). The dry run moved 14 cover-staff shifts (51.74 h) between the
+-- Blenheim and Nelson routes; pay, hours and billing are unchanged. Audited once per request.
+DO $reroute$
+declare
+  v_org constant uuid := 'e96d71c9-28a6-4d4a-b0f3-1c4ecdaa9c13';
+  v_actor constant uuid := 'f1c00000-0000-4000-8000-000000000001';
+  v_request constant uuid := '9e4d2c71-5b3a-4f08-a6d1-2026103013a0';
+  v_receipt jsonb;
+  v_changed integer;
+begin
+  if not exists (select 1 from public.organizations where id = v_org) then return; end if;
+  if exists (select 1 from public.audit_log where organization_id = v_org and action = 'historical_patrol_labour_routed'
+             and metadata->>'request_id' = v_request::text) then
+    return;
+  end if;
+  perform pg_advisory_xact_lock(hashtextextended('historical_patrol_labour_routing:' || v_org::text, 0));
+
+  create temp table _hpl_before on commit drop as
+  select id, external_refs->>'route_code' as route_code from public.roster_slots
+  where organization_id = v_org and external_refs->>'source' = 'rm_patrol_log_labour';
+
+  update public.roster_slots
+  set work_unit_id = (external_refs->>'routed_from_work_unit_id')::uuid,
+      external_refs = external_refs - 'route_code' - 'route_basis' - 'routed_from_work_unit_id' - 'routed_request_id'
+  where organization_id = v_org and external_refs->>'source' = 'rm_patrol_log_labour'
+    and external_refs ? 'routed_from_work_unit_id';
+
+  v_receipt := public.route_historical_patrol_labour(v_org, v_request);
+  select count(*) into v_changed from _hpl_before b join public.roster_slots s on s.id = b.id
+  where b.route_code is distinct from s.external_refs->>'route_code';
+  v_receipt := v_receipt || jsonb_build_object('reroute', true, 'route_changed', v_changed,
+    'ruling', 'Re-route seeded labour under hardened routing rules (owner, 2026-10-30)');
+  insert into public.audit_log(organization_id, actor_user_id, action, target_table, target_id, metadata)
+  values (v_org, case when exists (select 1 from public.user_profiles where id = v_actor) then v_actor end,
+    'historical_patrol_labour_routed', 'roster_slots', null, v_receipt);
+end;
+$reroute$;
