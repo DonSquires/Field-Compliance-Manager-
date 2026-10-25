@@ -122,7 +122,7 @@ function Steps({ steps }: { steps: BuilderChatMessage[] }) {
     <div className="bchat-steps">
       <button type="button" aria-expanded={open} onClick={() => setOpen(value => !value)}>
         {open ? <ChevronDown size={14} /> : <ChevronRight size={14} />}<Wrench size={13} />
-        <span>{steps.length} read-only step{steps.length === 1 ? '' : 's'}</span>
+        <span>{steps.length} step{steps.length === 1 ? '' : 's'}</span>
       </button>
       {open && <ol>{steps.map(step => <li key={step.id} className={step.payload.ok === false ? 'is-failed' : undefined}>{step.content}</li>)}</ol>}
     </div>
@@ -302,7 +302,7 @@ export function BuilderChatPanel({ context, onClose, onCreateJob, onOpenJob, job
             {(access === 'checking' || loading) && <div className="bchat__state" role="status"><Loader2 size={16} className="bchat-spin" /> Loading Builder chat…</div>}
             {!loading && access === 'allowed' && items.length === 0 && (
               <div className="bchat__empty">
-                <p>Bob is your technical PM and QA lead. Ask a question or supply reviewed non-sensitive evidence; Builder and Vibe do the implementation. Private history and selected-job context are not sent to cloud.</p>
+                <p>Bob is your technical PM and QA lead. This cloud stage answers questions and reviews approved evidence; autonomous private investigation and connected builder handoff are not yet wired. Builder and Vibe do the implementation. Private history and selected-job context are not sent to cloud.</p>
                 <ul>{STARTERS.map(starter => <li key={starter}><button type="button" onClick={() => setDraft(starter)}>{starter}</button></li>)}</ul>
               </div>
             )}

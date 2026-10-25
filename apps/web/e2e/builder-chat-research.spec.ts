@@ -20,6 +20,11 @@ test('owner reviews a synthetic evidence summary/document and approves a fixed-m
     await route.fulfill({ json: { Key: 'synthetic', Id: 'synthetic' } });
   });
   const text = 'Synthetic public fixture: Docker Compose configures services.';
+  let memoryReads = 0;
+  await page.route('**/functions/v1/bob-self-memory-read', route => {
+    memoryReads++;
+    return route.fulfill({ json: { ok: true, memories: [{ id: 'synthetic-memory', content: 'Synthetic lesson: Atlas guides investigation, not factual conclusions.', memory_type: 'reflection', created_at: '2026-10-25' }] } });
+  });
   const { createHash } = await import('node:crypto');
   await page.route('**/functions/v1/bob-extract-document', route => route.fulfill({
     json: { checksum: createHash('sha256').update(text).digest('hex'), text, has_text: true },
@@ -38,6 +43,14 @@ test('owner reviews a synthetic evidence summary/document and approves a fixed-m
   await expect(send).toBeDisabled();
   const approval = chat.getByLabel(/I reviewed this question/);
   await approval.check();
+  expect(memoryReads).toBe(0);
+  await chat.getByText("Recall Bob's existing memory (private preview)").click();
+  await chat.getByRole('button', { name: 'Recall private memories', exact: true }).click();
+  await expect(chat.getByText('Synthetic lesson: Atlas guides investigation, not factual conclusions.')).toBeVisible();
+  expect(submissions).toHaveLength(0);
+  await chat.getByRole('button', { name: 'Use excerpt in reviewed summary' }).click();
+  await expect(approval).not.toBeChecked();
+  await approval.check();
   await input.fill('Explain the Docker Compose wording in this synthetic public document.');
   await expect(approval).not.toBeChecked();
   await approval.check();
@@ -46,10 +59,11 @@ test('owner reviews a synthetic evidence summary/document and approves a fixed-m
   expect(submissions[0]).toMatchObject({
     p_thread_id: THREAD, p_content: 'Explain the Docker Compose wording in this synthetic public document.',
     p_allow_cloud: true, p_web_search: false, p_purpose: 'pm',
-    p_evidence_summary: 'Synthetic report: the owner wants a bounded Compose explanation, not a code change.',
+    p_evidence_summary: expect.stringContaining('unverified reflection excerpt'),
     p_files: [expect.objectContaining({ file_name: 'public-fixture.txt', extracted_text: text })],
   });
   expect(submissions[0]).not.toHaveProperty('p_context');
+  expect(memoryReads).toBe(1);
   expect(uploads).toHaveLength(1);
   expect(uploads[0]).toContain(`/builder-chat/${THREAD}/`);
   await expect(input).toHaveValue('');

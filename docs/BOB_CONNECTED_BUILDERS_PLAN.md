@@ -47,7 +47,7 @@ human-reviewed non-sensitive summaries rather than raw private evidence:
 
 | Purpose | Assigned model | When |
 | --- | --- | --- |
-| PM, investigation planning, public research and visual design | `kimi-k3` | Default current approved packet |
+| PM, investigation planning, public research and visual design | `kimi-k2.7-code` | Default current approved packet |
 | Independent plan/QA challenge | `deepseek-v4-pro:0813` | Explicit purpose, not every answer |
 | Technical handoff review | `kimi-k2.7-code` | Explicit technical-review purpose |
 
@@ -97,6 +97,66 @@ and regenerate the live schema after governed migration, never hand-edit them.
 
 PR #230 remains open with new reviewer findings; do not merge merely because
 its CI is green. Its lexical guard is not the new cloud PM's intent router.
+
+Doctrine reconciliation before release, 2026-10-25: re-read Foundation,
+Access Doctrine/Model, Bob Doctrine, Retention Doctrine, classification,
+credential boundaries and platform-engine direction together. The PM runtime
+now carries their relevant design lessons: accountability, harmed party/place,
+custodian not owner, shared spines, purpose-bound access, separate retention,
+heuristic tool choice and no owner-as-technical-operator. These are guidance,
+not schema facts or a hardcoded per-task sequence. The UI explicitly identifies
+the interim stage's absent private collection, continuity and connected handoff.
+The owner's cloud and reviewed-summary decisions stand, but implementation
+model assignments are not misrepresented as owner-authored doctrine.
+
+Review correction: a claim using any reviewed summary keeps its human-report
+qualification even alongside primary documentation or three publisher domains.
+A short summary accepts an exact whole-report quote; partial short quotes and
+short document/web quotes remain refused. An inference stopped at its output
+limit fails explicitly, with no partial answer accepted and no automatic model
+switch. Runtime regressions cover all three cases.
+
+Owner reminder on Bob's memory, 2026-10-25: schema and existing
+`bob-self-memory-write`/`bob-self-memory-read` confirm his graduated append-only
+diary, with no approval gate or bell and no organization column. Builder Chat
+had been excluded. Reuse the same `bob_self_memory` rather than a new store:
+
+- Advertise `write_self_memory` as an optional native tool, chosen by the PM
+  when a lesson/correction/job note is worth retaining, not on every answer.
+  One note per turn is an operational bound; it is not an approval gate.
+- Save via service-only `builder_chat_remember`, bound to a currently
+  authorized owner message and deterministic entry identity. Retries do not
+  duplicate or overwrite. General lessons use `reflection`, job notes
+  `builder_note`; no conduct row or knowledge card is written.
+- A diary call resumes the same assigned model with only its save receipt;
+  normal answers remain one inference. A failed save stays an explicit error.
+  If the answer fails after saving, the persisted note remains honestly
+  receipted, not erased or claimed as a completed answer.
+- Reuse the existing owner-authenticated read endpoint for private preview.
+  Recalled entries are not automatically cloud context. A selected bounded
+  excerpt joins the summary, with provenance and an unverified-memory label,
+  and requires fresh disclosure approval. Existing diary writes need no such
+  approval; disclosure and memory ownership are different concerns.
+
+This connects diary append and reviewed recall, not autonomous private
+investigation or bidirectional executable handoff. No unrelated diary contents
+were read during implementation; Atlas flags alone are not invocation evidence.
+
+Live native-tool discrimination changed the initial PM assignment: Kimi K3
+advertises tools but returned internal tool delimiters in prose rather than
+`message.tool_calls`, and falsely claimed its diary was saved. The runtime now
+refuses unreceipted diary-save claims. In the same harmless, no-write API test,
+Kimi K2.7 Code and DeepSeek V4 Pro returned actual native calls with valid
+arguments. Assign the PM to Kimi K2.7 Code rather than parsing a broken
+provider-specific pseudo-tool format or adding another model pass. Earlier
+Kimi K3 advisory timing results remain historical, not PM tool acceptance.
+The revised actual-policy probe answered the original guidance question with
+Kimi K2.7 Code in ~5.3s, one inference and no tool. Its explicit diary request
+returned a real native append call in ~2.2s; no private diary was written by
+that adapter probe. Actual persistence and recall still require release/UI
+acceptance. Current local checks: 80 runtime regressions plus four real
+PostgreSQL/migration tests, 18 UI component tests, desktop/mobile recall/
+approval flows, production build and type-check pass.
 
 - [x] Record this plan and establish tracked tasks.
 - [ ] 1. Repair diagnostics and connect governed capability discovery.

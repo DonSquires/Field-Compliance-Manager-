@@ -1,12 +1,13 @@
 'use strict';
 
 // Bob Builder chat: the Builder page's own conversation lane for the platform owner.
-// Independent of in-app agentic Bob (onspace-ai-chat, bob_conversations, bob_self_memory),
+// Independent of in-app agentic conversations (onspace-ai-chat, bob_conversations),
 // which serves app users. The browser writes owner turns through the builder_chat_* RPCs;
 // this worker claims them with the service role, answers with the Builder model chain and
 // read-only Builder tools (repository, Atlas, schema counts, Builder job ledger) and may
 // PROPOSE a Builder job. It never edits code, creates jobs, approves gates, merges or deploys:
 // a proposal becomes a job only when the owner confirms it through bob-builder-control-room.
+// Cloud PM turns may append to Bob's existing diary; recall needs reviewed cloud disclosure.
 
 const fs = require('node:fs');
 const path = require('node:path');

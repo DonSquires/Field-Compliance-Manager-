@@ -51,9 +51,11 @@ New PM turns use purpose-assigned Ollama Cloud models directly, without private
 inference attempts. The owner selected human-approved non-sensitive summaries,
 not raw private evidence. The server must bind purpose and summary to the same
 message's approval and retry identity. Neither earlier conversation nor selected
-job/page context is implicitly transferred. A summary may be pasted by the
-reviewer after redaction; no private model or automatic summarizer prepares it
-for external transfer. Sensitive source, credentials and tenant/HR/legal data
+job/page context is implicitly transferred. The current slice accepts a summary
+pasted by the reviewer after redaction. Future governed private collection may
+prepare a candidate for review, but cannot automatically approve its external
+transfer or introduce a private inference ladder for Chat. Sensitive source,
+credentials and tenant/HR/legal data
 remain excluded. Exact text matching proves only what a reviewed summary said,
 not that its underlying assertions were independently observed.
 
@@ -62,6 +64,16 @@ invalid or non-vision models fail explicitly; no automatic model ladder or
 private fallback. Independent QA is a deliberate purpose, not an automatic
 second model on every PM answer. Existing explicit public-research mode remains
 isolated. Model receipts disclose purpose, model and the actual transfer shape.
+
+Bob's own diary is not tenant operational memory. The cloud PM may choose
+`write_self_memory` to append a bounded non-sensitive reflection or Builder
+note to existing `bob_self_memory`, via a service-only, retry-safe RPC bound to
+the originating owner PM turn. No memory approval or growth score is created.
+The model receives the saved ID, not private earlier entries. Optional recall
+uses the existing authenticated `bob-self-memory-read` endpoint to preview
+entries privately in the owner UI. Selecting an excerpt copies it to the
+reviewed summary and invalidates packet approval; nothing is automatically
+sent to cloud, promoted to knowledge or copied from tenant conversation.
 
 ### Builder chat public research (owner decision, 2026-10-25)
 

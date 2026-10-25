@@ -11,17 +11,38 @@
 
 ## 1. What Bob is
 
+**Builder memory continuity clarification, owner reminder 2026-10-25.**
+Bob already has his own `bob_self_memory` and must be able to write to it and
+use it to support lessons, continuity and jobs. Reuse that diary; do not invent
+a second identity or memory silo for Builder Chat. It remains append-only,
+direct-write without an approval gate or bell. Corrections append rather than
+overwrite. A reflection is not approved canonical knowledge, a new permission,
+independently verified evidence or human-judged conduct/growth.
+
+Independent Builder conversations and task receipts do not require separating
+Bob from his own self-memory. The global diary has no organization column:
+tenant/personal material does not belong there. General lessons may be
+`reflection`; job-continuity notes use `builder_note`, which existing in-app
+automatic recall excludes. The current cloud PM can choose a bounded append
+using only its approved non-sensitive packet. Private recall uses the existing
+owner-gated read path; excerpts join a cloud packet only after review and fresh
+packet approval. No private diary is automatically dumped into cloud inference.
+
 **Builder Chat PM/QA and cloud-purpose ruling, owner decision 2026-10-25.**
 Builder Chat is the technical PM, investigator and QA lead, not the coding
 agent. Vibe Builder handles interactive implementation and Bob Builder durable
 autonomous implementation; both are full-stack. The owner directs Chat model
-inference straight to Ollama Cloud, bypassing VPS/laptop models. Assign Kimi K3
+inference straight to Ollama Cloud, bypassing VPS/laptop models. The engineering
+implementation assigns Kimi K2.7 Code
 to normal PM conversation, investigation planning and visual design review;
 DeepSeek V4 Pro to an explicitly requested independent QA challenge; Kimi
 K2.7 Code to explicitly requested technical handoff review. Do not run every
 question through multiple models or silently fall back to private inference.
 Model assignments require live capability checks and task acceptance, not
-claims of comparative superiority.
+claims of comparative superiority. Kimi K3 was the initial candidate, but
+live native-tool probes returned tool-like text rather than executable calls
+and an unsupported diary-save claim. Kimi K2.7 Code and DeepSeek V4 Pro returned
+valid native calls; the PM assignment uses the measured working contract.
 
 The owner selected **human-reviewed non-sensitive evidence summaries** as the
 cloud evidence flow. A current approved question, summary and selected approved
@@ -30,14 +51,20 @@ tenant records, credentials, knowledge-card dumps and raw diagnostic output
 remain excluded. Consent is per packet and changes invalidate it; a summary is
 reported evidence, not independent verification. Missing withheld facts must be
 identified rather than invented. Local tools may collect private evidence, but
-collection is not permission to transfer it. No automatic private-to-cloud
-summarizer or classifier is authorized here.
+collection is not permission to transfer it. Private preparation of a candidate
+summary is distinct from disclosure: no automatic summarizer or classifier can
+replace the human review required by this selected cloud evidence flow.
 
 This supersedes the private-first default for new PM Chat turns, not the
 builders' model policy or existing private queued turns. A cloud handoff brief
 remains advisory: it does not satisfy the source-inspected executable proposal
 gate, start a builder, create a job, approve a change or establish completion.
-Governed handoff and live acceptance remain separate delivery gates.
+Governed handoff and live acceptance remain separate delivery gates. The isolated
+cloud packet is an interim transport/reasoning slice, not the PM's target
+capability ceiling. It must not be presented as complete autonomous investigation
+or require the owner to diagnose code. Governed tool discovery, evidence
+collection, approved continuity, handoff and outcome verification remain work
+to connect under the existing rails and protected-effect gates.
 
 **Atlas evidence clarification, owner ruling 2026-10-25.** Atlas is a map
 showing Bob where to go and look, not evidence establishing facts about those
@@ -53,7 +80,8 @@ Builder chat remains separate from in-app conversations and operational memory.
 It may retrieve the same active platform-canonical knowledge cards as other Bob
 surfaces, with source/version/hash provenance, and its own thread-scoped tool
 receipts. Shared canonical guidance is not shared tenant conversation, private
-diary or a new approval authority. No tenant cards or unreviewed experience notes
+diary dump or a new approval authority. The diary continuity clarification above
+permits Bob to append his own reflections and use reviewed excerpts. No tenant cards or unreviewed experience notes
 are loaded by this path. Private knowledge and operational evidence stay on
 private compute; isolated public research still receives neither. Existing
 Create job and protected release gates remain unchanged.
@@ -307,7 +335,8 @@ its own lane: `builder_chat_threads`/`builder_chat_messages` written only throug
 owner-only `builder_chat_*` RPCs, answered by the control-plane worker
 (`builder-chat-session.js`) on the builder model chain with read-only build
 tools (code, git log, canon, Atlas, job ledger). It shares no conversation,
-memory or planner with in-app Bob. It can only *propose* a job; the owner's
+operational task memory or planner with in-app Bob; Bob's own diary is shared
+under the later memory-continuity clarification. It can only *propose* a job; the owner's
 **Create job** click calls `bob-builder-control-room` and records the job on the
 proposal with `builder_chat_record_job`. It never edits, approves, merges or
 deploys, and a reply claiming it did is refused.

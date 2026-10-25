@@ -20,7 +20,7 @@ const message = (payload = {}) => ({
   payload: { research_mode: 'public_cloud', research_consent: { allowed: true, policy_version: 'builder_research_v1', actor_user_id: OWNER, raw_images_allowed: true }, research_urls: [SOURCE.url], ...payload },
 });
 
-function fixture({ models = ['kimi-k2.7-code'], vision = true, result = () => answer(), bytes, failedModel, searchResults } = {}) {
+function fixture({ models = ['kimi-k2.7-code'], vision = true, result = () => answer(), bytes, failedModel, searchResults, doneReason = 'stop' } = {}) {
   const calls = [];
   const rows = [];
   const fetchImpl = async (url, options) => {
@@ -30,12 +30,12 @@ function fixture({ models = ['kimi-k2.7-code'], vision = true, result = () => an
     calls.push({ url, body, method: options.method });
     const endpoint = url.split('/').at(-1);
     if (endpoint === 'tags') { assert.equal(options.method, 'GET'); return Response.json({ models: models.map(name => ({ name })) }); }
-    if (endpoint === 'show') return Response.json({ capabilities: vision ? ['completion', 'vision'] : ['completion'] });
+    if (endpoint === 'show') return Response.json({ capabilities: vision ? ['completion', 'tools', 'vision'] : ['completion', 'tools'] });
     if (endpoint === 'web_fetch') return Response.json({ title: 'Compose documentation', content: CONTENT });
     if (endpoint === 'web_search') return Response.json({ results: searchResults || [{ url: SOURCE.url }] });
     if (body.model === failedModel) return new Response('', { status: 503 });
     const response = result(body);
-    return Response.json({ message: { content: typeof response === 'string' ? response : JSON.stringify(response) } });
+    return Response.json({ message: { content: typeof response === 'string' ? response : JSON.stringify(response) }, done_reason: doneReason });
   };
   return {
     calls, rows, fetchImpl,
@@ -59,7 +59,7 @@ function pmMessage(purpose = 'pm', summary = '') {
 }
 
 test('PM purposes invoke exactly their assigned cloud model once and withhold unrelated private context', async () => {
-  for (const [purpose, model] of [['pm', 'kimi-k3'], ['qa', 'deepseek-v4-pro:0813'], ['technical_review', 'kimi-k2.7-code']]) {
+  for (const [purpose, model] of [['pm', 'kimi-k2.7-code'], ['qa', 'deepseek-v4-pro:0813'], ['technical_review', 'kimi-k2.7-code']]) {
     const f = fixture({ models: ['kimi-k3', 'deepseek-v4-pro:0813', 'kimi-k2.7-code'], result: () => 'Start by checking the reported behavior against expected behavior.' });
     const result = await f.run(pmMessage(purpose));
     assert.equal(result.model, model);
@@ -73,14 +73,55 @@ test('PM purposes invoke exactly their assigned cloud model once and withhold un
     assert.match(chat, /technical PM, investigator and QA lead/);
     assert.match(chat, /Atlas is a map, not evidence/);
     assert.match(chat, /cannot create jobs/);
+    assert.match(chat, /People before property/);
+    assert.match(chat, /custodian, not owner/);
+    assert.match(chat, /not by keywords/);
+    assert.match(chat, /Do not make the owner diagnose code/);
+    assert.match(chat, /not a complete autonomous investigator/);
     const request = f.calls.find(call => call.url.endsWith('/chat')).body;
     assert.ok(!('format' in request));
     assert.match(result.reply, /Start by checking/);
   }
 });
 
+test('a reviewed report keeps its qualification when cited alongside primary documentation or corroborating domains', () => {
+  const report = { id: 'reviewed-summary', transfer: 'reviewed_summary', content: CONTENT };
+  for (const otherSources of [
+    [SOURCE],
+    ['a.com', 'b.org', 'c.net'].map((domain, index) => ({ id: `web-${index}`, url: `https://${domain}/`, content: CONTENT })),
+  ]) {
+    const sources = [report, ...otherSources];
+    const checked = evidenceAnswer({
+      summary: 'Reported behavior with reference material.',
+      claims: [{ statement: 'The owner reports this behavior.', evidence: sources.map(source => ({ source_id: source.id, quote: CONTENT })) }],
+    }, sources);
+    assert.equal(checked.claims[0].verification, 'human_report_not_independently_verified');
+  }
+});
+
+test('a short reviewed report accepts its complete exact quote but not fragments or short document quotes', async () => {
+  const f = fixture({ result: () => answer('reviewed-summary', 'HTTP 500') });
+  const checked = await f.run(pmMessage('pm', 'HTTP 500'));
+  assert.equal(checked.research.claims[0].verification, 'human_report_not_independently_verified');
+  assert.throws(() => evidenceAnswer(answer('report', '500'), [{ id: 'report', transfer: 'reviewed_summary', content: 'HTTP 500' }]), /quote was not found/);
+  assert.throws(() => evidenceAnswer(answer('report', 'HTTP 500'), [{ id: 'report', transfer: 'locally_extracted_text', content: 'HTTP 500' }]), /quote was not found/);
+  assert.throws(() => evidenceAnswer(answer('report', 'HTTP 500'), [{ id: 'report', transfer: 'reviewed_summary', content: 'Reported HTTP 500 after saving.' }]), /quote was not found/);
+});
+
+test('PM rejects output-limit termination for advisory and sourced answers without fallback or success', async () => {
+  for (const sourced of [false, true]) {
+    const f = fixture({
+      doneReason: 'length',
+      result: () => sourced ? answer('reviewed-summary', CONTENT) : 'An unfinished answer with the remaining checks',
+    });
+    await assert.rejects(f.run(pmMessage('pm', sourced ? CONTENT : '')), /output limit reached; answer is incomplete/);
+    assert.deepEqual(f.calls.filter(call => call.url.endsWith('/chat')).map(call => call.body.model), ['kimi-k2.7-code']);
+    assert.ok(!f.rows.some(row => row.kind === 'message'));
+  }
+});
+
 test('PM summary quotes are matched but labelled human reports, never primary or live verification', async () => {
-  const f = fixture({ models: ['kimi-k3'], result: () => answer('reviewed-summary', CONTENT) });
+  const f = fixture({ result: () => answer('reviewed-summary', CONTENT) });
   const result = await f.run(pmMessage('pm', CONTENT));
   assert.equal(result.research.claims[0].verification, 'human_report_not_independently_verified');
   assert.equal(result.research.sources[0].transfer, 'reviewed_summary');
@@ -95,10 +136,10 @@ test('PM summary quotes are matched but labelled human reports, never primary or
 
 test('PM preserves a complete advisory answer instead of silently cutting off its limitations', async () => {
   const text = `${'Guidance. '.repeat(350)}This does not prove execution or safe completion.`;
-  const f = fixture({ models: ['kimi-k3'], result: () => text });
+  const f = fixture({ result: () => text });
   const result = await f.run(pmMessage());
   assert.ok(result.reply.includes(text));
-  const oversized = fixture({ models: ['kimi-k3'], result: () => 'x'.repeat(12001) });
+  const oversized = fixture({ result: () => 'x'.repeat(12001) });
   await assert.rejects(oversized.run(pmMessage()), /bounded response contract/);
 });
 
@@ -112,7 +153,7 @@ test('PM screenshot review requires advertised vision on its assigned model with
     storage_path: `desktop/${OWNER}/builder-chat/${THREAD.id}/image-synthetic.png`,
   }];
   const f = fixture({
-    models: ['kimi-k3'], bytes,
+    bytes,
     result: () => ({ summary: 'A synthetic shape is visible.', claims: [], image_observations: [{ source_id: 'attachment-1', description: 'A blue square.' }] }),
   });
   const outcome = await f.run(msg);
@@ -142,14 +183,14 @@ test('PM refuses changed approval, unassigned purpose and oversized summaries be
 
 test('PM unavailability, provider failure and invalid output never start another model', async () => {
   for (const options of [
-    { models: ['kimi-k2.7-code'] },
-    { models: ['kimi-k3', 'kimi-k2.7-code'], failedModel: 'kimi-k3' },
+    { models: ['kimi-k3'] },
+    { models: ['kimi-k3', 'kimi-k2.7-code'], failedModel: 'kimi-k2.7-code' },
     { models: ['kimi-k3', 'kimi-k2.7-code'], result: () => '' },
   ]) {
     const f = fixture(options);
     await assert.rejects(f.run(pmMessage()), /no automatic fallback/i);
     assert.ok(f.calls.filter(call => call.url.endsWith('/chat')).length <= 1);
-    assert.ok(!f.calls.some(call => call.body?.model === 'kimi-k2.7-code'));
+    assert.ok(!f.calls.some(call => call.body?.model === 'kimi-k3'));
     assert.ok(!f.rows.some(row => /trying the next/.test(row.content)));
   }
 });
@@ -256,7 +297,7 @@ test('research dispatch never loads a checkout, repository tools or earlier chat
 });
 
 test('normal PM dispatch bypasses private checkout, gateway, history and proposal flow', async () => {
-  const f = fixture({ models: ['kimi-k3'], result: () => 'Atlas guides investigation; it is not execution evidence.' });
+  const f = fixture({ result: () => 'Atlas guides investigation; it is not execution evidence.' });
   const posted = [];
   const store = {
     thread: async () => THREAD, updateThread: async () => {}, complete: async () => {},
@@ -270,6 +311,6 @@ test('normal PM dispatch bypasses private checkout, gateway, history and proposa
   } });
   assert.equal(outcome.error, undefined);
   assert.ok(!posted.some(row => row.kind === 'proposal'));
-  assert.equal(posted.at(-1).payload.model, 'kimi-k3');
+  assert.equal(posted.at(-1).payload.model, 'kimi-k2.7-code');
   assert.equal(posted.at(-1).payload.research.purpose, 'pm');
 });
