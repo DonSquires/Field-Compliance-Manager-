@@ -30,6 +30,9 @@ Production migrations remain single-writer in the governed VPS release lane.
 Before implementing any credentialed support job, define approved environments,
 reviewer/branch protection, exact caller/data scope, idempotency and audit
 receipts; do not give untrusted PRs or fork code production secrets.
+The first such job is `.github/workflows/atlas-refresh.yml`: it writes only
+Atlas tables, runs only for the verified current `main` head, and reads its
+service-role key from the `atlas-refresh` environment, restricted to `main`.
 Existing GitHub Production environments had no approval protection when
 inspected. `BOB_GITHUB_ACCESS_TOKEN` need not be added to verification: the
 job-scoped read-only GitHub token is sufficient. A future project-reference
