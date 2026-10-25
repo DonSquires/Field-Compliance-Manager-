@@ -591,6 +591,77 @@ test('a real edit for a change request is handed off without a no-change notice'
   assert.match(result.reply, /^Greeting updated\./);
 });
 
+test('a reply cannot claim a file whose edits failed just because another file changed', async () => {
+  const { store, deps, model } = setup([
+    { thought: 'guess', tool: 'replace_in_file', args: { path: 'apps/web/src/hello.ts', old_text: 'import { ClipboardCheck }', new_text: '' } },
+    { thought: 'other', tool: 'write_file', args: { path: 'apps/web/src/other.ts', content: 'export const other = 1;\n' } },
+    { thought: 'claim', tool: 'reply', args: { message: 'The ClipboardCheck import has been removed from hello.ts.' } },
+    { thought: 'honest', tool: 'reply', args: { message: 'Added other.ts.', blocked_reason: 'hello.ts edit failed: old_text not found.' } },
+  ], {
+    allowCloud: true,
+    fetchHealth: async () => ({
+      gpu_workstation: { configured: true, healthy: true, models: ['weak'], installed: ['weak'], ready_model: 'weak' },
+      ollama_cloud: { configured: true, healthy: true, models: ['cloud-strong'], ready_model: 'cloud-strong' },
+    }),
+  });
+  const outcome = await vibe.processVibeMessage({ store, message: ownerMessage('remove the import and add other.ts'), deps });
+  const refusal = model.calls[3].request.messages.find(entry => String(entry.content).includes('these edits failed and were never applied'));
+  assert.ok(refusal);
+  assert.match(refusal.content, /apps\/web\/src\/hello\.ts/);
+  assert.equal(model.calls[3].provider, 'ollama_cloud');
+  assert.ok(store.state.rows.some(row => row.payload?.reason === 'failed_edits_outstanding'));
+  assert.match(outcome.reply, /^Not done: these edits failed and were not applied — apps\/web\/src\/hello\.ts\./);
+  assert.doesNotMatch(outcome.reply, /has been removed/);
+});
+
+test('a failed edit later retried successfully on the same file does not block the reply', async () => {
+  const { store, deps, model } = setup([
+    { thought: 'guess', tool: 'replace_in_file', args: { path: 'apps/web/src/hello.ts', old_text: '"missing"', new_text: '"x"' } },
+    { thought: 'retry', tool: 'replace_in_file', args: { path: 'apps/web/src/hello.ts', old_text: '"hi"', new_text: '"kia ora"' } },
+    { thought: 'report', tool: 'reply', args: { message: 'Greeting updated.' } },
+  ]);
+  const outcome = await vibe.processVibeMessage({ store, message: ownerMessage('update the greeting'), deps });
+  assert.equal(model.calls.length, 3);
+  assert.match(outcome.reply, /^Greeting updated\./);
+});
+
+test('edit targets come from the files a patch or baseline call touches, not the tool name', () => {
+  assert.deepEqual(vibe.editTargets('replace_in_file', { path: 'a.ts' }), ['a.ts']);
+  assert.deepEqual(vibe.editTargets('apply_patch', { diff: '--- a/x.ts\n+++ b/x.ts\n@@ -1 +1 @@\n-a\n+b\n' }), ['x.ts']);
+  assert.deepEqual(vibe.editTargets('apply_patch', { diff: '--- /dev/null\n+++ b/new.ts\n' }), ['new.ts']);
+  assert.deepEqual(vibe.editTargets('apply_patch', { diff: '*** Begin Patch\n*** Update File: y.ts\n*** Move to: z.ts\n@@\n-a\n+b\n*** End Patch' }), ['y.ts', 'z.ts']);
+  assert.deepEqual(vibe.editTargets('generate_visual_baselines', { paths: ['e2e/a.spec.ts'], reason: 'r' }), ['e2e/a.spec.ts']);
+});
+
+test('a successful patch to an unrelated file does not clear an earlier failed patch', async () => {
+  const { store, deps } = setup([
+    { thought: 'bad', tool: 'apply_patch', args: { diff: '*** Begin Patch\n*** Update File: apps/web/src/hello.ts\n@@\n-export const missing = 1;\n+export const missing = 2;\n*** End Patch' } },
+    { thought: 'other', tool: 'write_file', args: { path: 'apps/web/src/other.ts', content: 'export const other = 1;\n' } },
+    { thought: 'claim', tool: 'reply', args: { message: 'Both files are done.', blocked_reason: 'hello.ts patch did not apply.' } },
+  ]);
+  const outcome = await vibe.processVibeMessage({ store, message: ownerMessage('change hello and add other.ts'), deps });
+  assert.match(outcome.reply, /^Not done: these edits failed and were not applied — apps\/web\/src\/hello\.ts\./);
+});
+
+test('a failed edit repaired through a different edit tool is no longer reported as undone', async () => {
+  const { store, deps } = setup([
+    { thought: 'guess', tool: 'replace_in_file', args: { path: 'apps/web/src/hello.ts', old_text: '"missing"', new_text: '"x"' } },
+    { thought: 'patch', tool: 'apply_patch', args: { diff: '*** Begin Patch\n*** Update File: apps/web/src/hello.ts\n@@\n-export const hello = "hi";\n+export const hello = "kia ora";\n*** End Patch' } },
+    { thought: 'report', tool: 'reply', args: { message: 'Greeting updated.' } },
+  ]);
+  const outcome = await vibe.processVibeMessage({ store, message: ownerMessage('update the greeting'), deps });
+  assert.match(outcome.reply, /^Greeting updated\./);
+});
+
+test('when every edit failed the handoff carries both the no-change notice and the Not done list', async () => {
+  const { store, deps } = setup([
+    { thought: 'guess', tool: 'replace_in_file', args: { path: 'apps/web/src/hello.ts', old_text: '"missing"', new_text: '"x"' } },
+    { thought: 'honest', tool: 'reply', args: { message: 'I could not apply it.', blocked_reason: 'old_text not found in hello.ts.' } },
+  ]);
+  const outcome = await vibe.processVibeMessage({ store, message: ownerMessage('update the greeting'), deps });
+  assert.match(outcome.reply, /^No files changed during this message\.\n\nNot done: these edits failed and were not applied — apps\/web\/src\/hello\.ts\./);
+});
+
 test('owner requests are classified as change, verification or question in both directions', () => {
   for (const text of ['change the greeting', 'edit the greeting', 'Can you fix the greeting?', 'Please add a spinner', 'check the build then fix the header']) {
     assert.deepEqual(vibe.classifyOwnerRequest(text), { asked: false, wantsChange: true }, text);
