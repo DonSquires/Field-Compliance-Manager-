@@ -197,6 +197,10 @@ begin
   perform pg_temp.as_admin();
   insert into public.dispatch_jobs (id, organization_id, service_agreement_id, client_site_id, job_type, priority, status, completed_at)
   values (v_job, v_provider, v_agreement, v_site, 'alarm_response', 'normal', 'completed', now());
+  -- Callouts must carry a billing decision before invoicing (20261025091600); this one is Extra.
+  perform set_config('fcm.dispatch_billing_rpc', 'on', true);
+  update public.dispatch_jobs set billing_basis = 'extra', billing_basis_set_at = now() where id = v_job;
+  perform set_config('fcm.dispatch_billing_rpc', '', true);
   insert into public.dispatch_job_charge_lines (id, organization_id, source_dispatch_id, client_organization_id, service_agreement_id, rate_type, description, quantity, unit_rate, line_total, service_type, day_category)
   values (v_charge, v_provider, v_job, v_client, v_agreement, 'callout', 'Alarm response callout', 1, 38.87, 38.87, 'alarm_response', 'weekday');
   perform pg_temp.as_user(v_other_master);

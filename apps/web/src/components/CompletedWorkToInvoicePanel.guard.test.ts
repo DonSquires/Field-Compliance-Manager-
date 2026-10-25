@@ -1,4 +1,4 @@
-import { readFileSync } from 'node:fs';
+﻿import { readFileSync } from 'node:fs';
 import { resolve } from 'node:path';
 import { describe, expect, it } from 'vitest';
 
@@ -11,5 +11,14 @@ describe('completed patrol work invoice handoff', () => {
     expect(source).toContain(".is('invoice_line_item_id', null)");
     expect(source).toContain('groupUninvoicedWork((workshopRes.data as UninvoicedWorkshopRow[]) ?? [], dispatchRows, patrolRows)');
     expect(source).toContain('priced patrol visits turn into a draft invoice per client');
+  });
+
+  it('follows each agreement commercial model and blocks invoicing until callouts are set or referenced', () => {
+    expect(source).toContain('job:source_dispatch_id(client_order_reference)');
+    expect(source).toContain('loadCommercialModels(');
+    expect(source).toContain('commercial_model: agreementId ? models.get(agreementId) ?? null : null');
+    expect(source).not.toContain(".or('billing_basis.is.null,billing_basis.eq.extra')");
+    expect(source).toContain('invoiceBlocker(entry)');
+    expect(source).toContain('contracted callouts are covered by the agreement price');
   });
 });

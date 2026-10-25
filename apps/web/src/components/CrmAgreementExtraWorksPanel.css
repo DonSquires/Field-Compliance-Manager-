@@ -1,0 +1,76 @@
+.agreement-extra-state.is-active,
+.agreement-extra-state.is-ending {
+	color: #c9f4e9;
+	background: #15372f;
+}
+
+.agreement-extra-state.is-review_due,
+.agreement-extra-state.is-upcoming {
+	color: #f1dca8;
+	background: #3a3018;
+}
+
+.agreement-extra-state.is-ended,
+.agreement-extra-state.is-cancelled {
+	color: #a9b8b3;
+	background: #1f2b28;
+}
+
+.agreement-extra-hint {
+	margin: 10px 0 0;
+	color: #f1dca8;
+	font-size: 12px;
+}
+
+.agreement-extra-retry {
+	margin-left: auto;
+	padding: 4px 10px;
+	border: 1px solid currentColor;
+	border-radius: 4px;
+	color: inherit;
+	background: transparent;
+	font-size: 12px;
+	cursor: pointer;
+}
+
+.agreement-extra-end {
+	display: grid;
+	grid-column: 1 / -1;
+	grid-template-columns: minmax(150px, 200px) minmax(200px, 1fr);
+	gap: 8px 12px;
+	padding: 10px;
+	border: 1px solid #5a3a33;
+	border-radius: 4px;
+	background: #24171a;
+}
+
+.agreement-extra-end label {
+	display: grid;
+	gap: 4px;
+	color: #c7d5d0;
+	font-size: 12px;
+}
+
+.agreement-extra-end input {
+	min-height: 32px;
+	padding: 0 8px;
+	border: 1px solid #3f5550;
+	border-radius: 4px;
+	color: #e9f5f1;
+	background: #0d1a17;
+}
+
+.agreement-extra-end small,
+.agreement-extra-end .agreement-obligation-actions {
+	grid-column: 1 / -1;
+}
+
+.agreement-extra-end small {
+	color: #c7b98f;
+}
+
+@media (max-width: 640px) {
+	.agreement-extra-end {
+		grid-template-columns: 1fr;
+	}
+}

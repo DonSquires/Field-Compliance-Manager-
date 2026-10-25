@@ -39,7 +39,9 @@ begin
         and code.organization_id = v_rm
         and ((rule.rule_code like 'species\_%' and code.code_type = 'biosecurity_species')
           or (rule.rule_code like 'activity\_%' and code.code_type = 'work_activity')
-          or (rule.rule_code like 'subject\_%' and code.code_type = 'work_subject'))) =
+          or (rule.rule_code like 'subject\_%' and code.code_type = 'work_subject')
+          or (rule.rule_code like 'equipment\_%' and code.code_type = 'equipment_type')
+          or (rule.rule_code like 'material\_%' and code.code_type = 'material_type'))) =
     (select count(*) from public.import_value_classification_rules
       where organization_id = v_rm and source_profile = 'rm_patrol_log'));
   perform pg_temp.check('nine species rules are active for R&M',

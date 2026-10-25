@@ -1,0 +1,122 @@
+﻿.agreement-billing-period {
+	display: grid;
+	gap: 4px;
+	color: #c7d5d0;
+	font-size: 12px;
+}
+
+.agreement-billing-period select {
+	min-height: 32px;
+	padding: 0 8px;
+	border: 1px solid #3f5550;
+	border-radius: 4px;
+	color: #e9f5f1;
+	background: #0d1a17;
+}
+
+.agreement-billing-cards {
+	display: grid;
+	grid-template-columns: repeat(auto-fit, minmax(150px, 1fr));
+	gap: 10px;
+	margin: 12px 0;
+}
+
+.agreement-billing-card {
+	display: grid;
+	gap: 2px;
+	padding: 10px 12px;
+	border: 1px solid #2c403b;
+	border-left-width: 4px;
+	border-radius: 4px;
+	background: #12211e;
+}
+
+.agreement-billing-card span {
+	color: #a9b8b3;
+	font-size: 12px;
+}
+
+.agreement-billing-card strong {
+	color: #e9f5f1;
+	font-size: 18px;
+	font-variant-numeric: tabular-nums;
+}
+
+.agreement-billing-card small {
+	color: #a9b8b3;
+	font-size: 11px;
+}
+
+.agreement-billing-card.is-contract { border-left-color: #4f9f8a; }
+.agreement-billing-card.is-extra { border-left-color: #d2a74a; }
+.agreement-billing-card.is-unset { border-left-color: #c2675a; }
+
+.agreement-billing-attention {
+	display: grid;
+	gap: 6px;
+	margin: 0 0 12px;
+	padding: 10px 12px;
+	border: 1px solid #5a4a23;
+	border-radius: 4px;
+	color: #f1dca8;
+	background: #241f12;
+	font-size: 13px;
+	list-style: none;
+}
+
+.agreement-billing-attention li {
+	display: flex;
+	gap: 8px;
+	align-items: flex-start;
+}
+
+.agreement-billing-attention svg {
+	flex: none;
+	margin-top: 2px;
+}
+
+.agreement-billing-table {
+	width: 100%;
+	margin: 12px 0;
+	border-collapse: collapse;
+	color: #dbe8e4;
+	font-size: 13px;
+	font-variant-numeric: tabular-nums;
+}
+
+.agreement-billing-table caption {
+	padding-bottom: 6px;
+	color: #e9f5f1;
+	font-weight: 600;
+	text-align: left;
+}
+
+.agreement-billing-table th,
+.agreement-billing-table td {
+	padding: 6px 8px;
+	border-bottom: 1px solid #22332f;
+	text-align: right;
+}
+
+.agreement-billing-table th[scope='row'],
+.agreement-billing-table thead th:first-child {
+	text-align: left;
+}
+
+.agreement-billing-table thead th {
+	color: #a9b8b3;
+	font-weight: 500;
+}
+
+.agreement-billing-table tr.is-unclassified th {
+	color: #f0a598;
+}
+
+@media (max-width: 640px) {
+	.agreement-billing-table th,
+	.agreement-billing-table td {
+		padding: 6px 4px;
+	}
+}
+
+.agreement-fee-drawdown caption small{display:block;margin-top:2px;font-weight:400;text-transform:none}.agreement-fee-drawdown td small{display:block;opacity:.75}.agreement-fee-drawdown tr.is-credit td:nth-child(3){color:#7fd8a8}.agreement-fee-drawdown tr.is-overrun td:nth-child(3){color:#f4d88a}

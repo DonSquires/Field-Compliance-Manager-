@@ -21,7 +21,7 @@ create index idx_ili_invoice_id on public.invoice_line_items using btree (invoic
 
 create index idx_invoice_line_items_invoice on public.invoice_line_items using btree (invoice_id);
 
-create unique index idx_invoice_line_items_source_dispatch on public.invoice_line_items using btree (organization_id, source_dispatch_id)
+create index idx_invoice_line_items_source_dispatch on public.invoice_line_items using btree (organization_id, source_dispatch_id)
   where (source_dispatch_id is not null);
 
 create policy "bob_full_read" on "public"."invoice_line_items"

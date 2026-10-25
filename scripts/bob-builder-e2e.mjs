@@ -146,14 +146,37 @@ if (cmd === 'create') {
   }
   console.log(`publish verified: commit=${job.workspace_head_sha} pr=${job.workspace_pull_request_url ?? 'missing URL'}`);
 } else if (cmd === 'chat') {
-  // One chat turn as the dedicated test identity, exactly as BobPanel sends it. Proves the
-  // autopilot report relay: Bob must lead with any unreported outcome for this person.
+  // One chat turn as the dedicated test identity. Default: the Bob Builder chat lane.
+  // E2E_AGENT_MODE=operations sends one in-app Bob turn exactly as BobPanel does.
   const s = await session();
   const rest = (path, init = {}) => fetch(`${SUPABASE_URL}/rest/v1/${path}`, { ...init, headers: { apikey: s.anon, Authorization: `Bearer ${s.access_token}`, 'Content-Type': 'application/json', Prefer: 'return=representation', ...(init.headers ?? {}) } });
   const authenticatedUserId = JSON.parse(Buffer.from(s.access_token.split('.')[1], 'base64url').toString('utf8')).sub;
   const profile = await (await rest(`user_profiles?select=id,organization_id&id=eq.${encodeURIComponent(authenticatedUserId)}&limit=1`)).json();
   const { id: userId, organization_id: organizationId } = profile[0];
   const agentMode = process.env.E2E_AGENT_MODE === 'operations' ? 'operations' : 'builder';
+  if (agentMode === 'builder') {
+    // The Bob Builder chat is its own lane (builder_chat_* RPCs answered by the control-plane
+    // worker); the in-app onspace-ai-chat refuses builder turns.
+    const rpc = async (name, body) => {
+      const response = await rest(`rpc/${name}`, { method: 'POST', body: JSON.stringify(body) });
+      const payload = await response.json().catch(() => null);
+      if (!response.ok) throw new Error(`${name} ${response.status}: ${payload?.message ?? JSON.stringify(payload)}`);
+      return payload;
+    };
+    const threadId = process.env.E2E_THREAD || await rpc('builder_chat_thread_open', { p_title: 'E2E Bob Builder chat' });
+    const messageId = await rpc('builder_chat_send', { p_thread_id: threadId, p_content: args.join(' ') || 'What is waiting on me across Builder jobs?', p_client_request_id: crypto.randomUUID(), p_context: { surface: 'e2e' } });
+    let owner;
+    for (let attempt = 0; attempt < 120; attempt++) {
+      await sleep(2_500);
+      [owner] = await (await rest(`builder_chat_messages?select=status&id=eq.${encodeURIComponent(messageId)}`)).json();
+      if (['done', 'failed'].includes(owner?.status)) break;
+    }
+    const rows = await (await rest(`builder_chat_messages?select=role,kind,content,payload&thread_id=eq.${encodeURIComponent(threadId)}&order=seq.asc`)).json();
+    const turn = rows.filter(row => row.payload?.message_id === messageId || row.role === 'tool');
+    console.log('thread', threadId, 'message', messageId, 'status', owner?.status ?? 'timeout');
+    for (const row of turn) console.log(`[${row.role}/${row.kind}] ${String(row.content).slice(0, 1500)}`);
+    if (owner?.status !== 'done') process.exitCode = 1;
+  } else {
   // E2E_CONVERSATION=<id> continues an earlier turn (e.g. answering "yes" to a composed brief).
   let conversationId = process.env.E2E_CONVERSATION || '';
   if (!conversationId) {
@@ -198,6 +221,7 @@ if (cmd === 'create') {
     reasoning_steps: data.meta.reasoning_steps,
     verification: data.meta.verification?.status,
   }).slice(0, 1600));
+  }
 } else {
   console.log('usage: create <title> <description> | follow <job_id> | publish <job_id> <artifact_id> | show <job_id> | cancel <job_id> "<reason>" | approve <job_id> "<comment>" | chat <message>');
   process.exit(2);

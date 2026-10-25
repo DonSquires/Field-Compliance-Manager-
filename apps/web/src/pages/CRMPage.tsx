@@ -11,6 +11,8 @@ import { Search } from 'lucide-react';
 import { useLocation } from 'react-router-dom';
 import { useAuth } from '../context/AuthContext';
 import { supabase } from '../lib/supabase';
+import { describePaymentTerms, type FeeOverrunPolicy } from '../lib/commercialModel';
+import { describeDrawdown, drawdownAdjustment, monthBounds, overrunJustificationProblem, parseFeeDrawdown, previousMonth, type DrawdownMonth, type OverrunDecision } from '../lib/feeDrawdown';
 import { contractedDaysWords, contractedHoursWords } from '../lib/rosterWords';
 import { readWorkflowContext, type NavigateWithContext } from '../lib/workflowNavigation';
 import { CrmAccountWorkspace, CrmPrimaryContactEditor, type CrmWorkspaceAccount, type WorkspaceQuote } from '../components/CrmAccountWorkspace';
@@ -132,7 +134,8 @@ interface InvoiceReadiness {
   source: 'accepted_quote' | 'commercial_rate' | 'client_approval_required' | 'missing';
   detail: string;
   billingCycle: string | null;
-  paymentTermsDays: number | null;
+  paymentTerms: string | null;
+  commercialModel: string | null;
 }
 interface ConsolidatedCommercialRow {
   source_organization_id: string;
@@ -279,6 +282,11 @@ const CRMPage: React.FC<{ onNavigate?: NavigateWithContext }> = ({ onNavigate = 
   const [showGenerateInvoice, setShowGenerateInvoice] = useState(false);
   const [invoiceReadiness, setInvoiceReadiness] = useState<InvoiceReadiness | null>(null);
   const [invoiceReadinessLoading, setInvoiceReadinessLoading] = useState(false);
+  const [invoiceMonth, setInvoiceMonth] = useState(() => previousMonth());
+  const [invoiceDrawdown, setInvoiceDrawdown] = useState<{ month: DrawdownMonth | null; policy: FeeOverrunPolicy | null; error: string | null; loading: boolean } | null>(null);
+  const [overrunDecision, setOverrunDecision] = useState<OverrunDecision | null>(null);
+  const [overrunJustification, setOverrunJustification] = useState('');
+  const invoiceRequestId = useRef(crypto.randomUUID());
   const [selectedAgreementId, setSelectedAgreementId] = useState('');
   const [quoteLines, setQuoteLines] = useState<QuoteLine[]>([]);
   const [editingQuoteLine, setEditingQuoteLine] = useState<QuoteLine | null>(null);
@@ -774,21 +782,24 @@ const CRMPage: React.FC<{ onNavigate?: NavigateWithContext }> = ({ onNavigate = 
 
   const generateInvoiceFromAgreement = async (e: React.FormEvent) => {
     e.preventDefault();
-    if (!selectedAgreementId || invoiceReadiness?.source === 'missing') return;
+    if (!selectedAgreementId || invoiceReadiness?.source === 'missing' || drawdownBlocksInvoice) return;
     setQuoteSaving(true);
-    const now = new Date();
-    const startDate = `${now.getFullYear()}-${String(now.getMonth() + 1).padStart(2, '0')}-01`;
-    const endDate = new Date(now.getFullYear(), now.getMonth() + 1, 0).toISOString().slice(0, 10);
+    const { start, end } = monthBounds(invoiceMonth);
+    const fixedFee = invoiceReadiness?.commercialModel === 'fixed_price_with_extras';
+    // ATLAS CALLS: generate_crm_invoice_from_agreement (monthly fee drawdown settles one whole month)
     const { error } = await supabase.rpc('generate_crm_invoice_from_agreement', {
-      p_client_request_id: crypto.randomUUID(),
+      p_client_request_id: invoiceRequestId.current,
       p_service_agreement_id: selectedAgreementId,
-      p_service_period_start: startDate,
-      p_service_period_end: endDate,
+      p_service_period_start: start,
+      p_service_period_end: end,
+      p_overrun_decision: fixedFee ? overrunDecision : null,
+      p_overrun_justification: fixedFee && overrunJustification.trim() ? overrunJustification.trim() : null,
     });
     if (error) setState((s) => ({ ...s, error: s.error ? `${s.error} · ${error.message}` : error.message }));
     else {
-      setNotice('Invoice generated from agreement with line items.');
+      setNotice(fixedFee ? `Draft invoice for ${invoiceDrawdown?.month?.label ?? invoiceMonth} created with the monthly fee drawdown settled. Review the lines before sending.` : 'Invoice generated from agreement with line items.');
       setShowGenerateInvoice(false);
+      invoiceRequestId.current = crypto.randomUUID();
       await loadCrm();
     }
     setQuoteSaving(false);
@@ -800,20 +811,21 @@ const CRMPage: React.FC<{ onNavigate?: NavigateWithContext }> = ({ onNavigate = 
     setInvoiceReadinessLoading(true); setInvoiceReadiness(null);
     const [quotesResponse, settingsResponse] = await Promise.all([
       supabase.from('quotes').select('id,quote_lines(id)').eq('service_agreement_id', agreementId).eq('status', 'accepted'),
-      supabase.from('crm_commercial_settings').select('base_rate_per_hour,billing_cycle,payment_terms_days').eq('service_agreement_id', agreementId).maybeSingle(),
+      supabase.from('crm_commercial_settings').select('base_rate_per_hour,billing_cycle,payment_terms_days,payment_due_day_of_month,commercial_model').eq('service_agreement_id', agreementId).maybeSingle(),
     ]);
     if (quotesResponse.error || settingsResponse.error) {
       setState((current) => ({ ...current, error: quotesResponse.error?.message ?? settingsResponse.error?.message ?? 'Invoice readiness could not be loaded.' }));
     } else {
       const quoteLineCount = ((quotesResponse.data as Array<{ quote_lines: Array<{ id: string }> | null }> | null) ?? []).reduce((count, quote) => count + (quote.quote_lines?.length ?? 0), 0);
-      const settings = settingsResponse.data as { base_rate_per_hour: number | null; billing_cycle: string; payment_terms_days: number } | null;
+      const settings = settingsResponse.data as { base_rate_per_hour: number | null; billing_cycle: string; payment_terms_days: number; payment_due_day_of_month: number | null; commercial_model: string | null } | null;
       setInvoiceReadiness({
         accountName: agreement.counterparty_name,
         agreementName: agreement.name,
         source: agreement.invitation_status !== 'accepted' ? 'client_approval_required' : quoteLineCount > 0 ? 'accepted_quote' : settings?.base_rate_per_hour != null ? 'commercial_rate' : 'missing',
-        detail: agreement.invitation_status !== 'accepted' ? 'The client has not approved this service agreement yet. Invoicing remains blocked.' : quoteLineCount > 0 ? `${quoteLineCount} accepted quote line${quoteLineCount === 1 ? '' : 's'} will be copied.` : settings?.base_rate_per_hour != null ? `Monthly commercial rate: NZ$${Number(settings.base_rate_per_hour).toFixed(2)}.` : 'No accepted quote lines or commercial base rate are configured.',
+        detail: agreement.invitation_status !== 'accepted' ? 'The client has not approved this service agreement yet. Invoicing remains blocked.' : quoteLineCount > 0 ? `${quoteLineCount} accepted quote line${quoteLineCount === 1 ? '' : 's'} will be copied.` : settings?.base_rate_per_hour != null ? `Monthly commercial rate: NZ$${Number(settings.base_rate_per_hour).toFixed(2)} excl. GST.` : 'No accepted quote lines or commercial base rate are configured.',
         billingCycle: settings?.billing_cycle ?? null,
-        paymentTermsDays: settings?.payment_terms_days ?? null,
+        paymentTerms: settings ? describePaymentTerms(settings) : null,
+        commercialModel: settings?.commercial_model ?? null,
       });
     }
     setInvoiceReadinessLoading(false);
@@ -823,6 +835,30 @@ const CRMPage: React.FC<{ onNavigate?: NavigateWithContext }> = ({ onNavigate = 
     if (!showGenerateInvoice || !selectedAgreementId) { setInvoiceReadiness(null); return; }
     void loadInvoiceReadiness(selectedAgreementId);
   }, [loadInvoiceReadiness, selectedAgreementId, showGenerateInvoice]);
+
+  const invoiceIsFixedFee = invoiceReadiness?.commercialModel === 'fixed_price_with_extras';
+  useEffect(() => {
+    setOverrunDecision(null);
+    setOverrunJustification('');
+    invoiceRequestId.current = crypto.randomUUID();
+    if (!showGenerateInvoice || !selectedAgreementId || !invoiceIsFixedFee) { setInvoiceDrawdown(null); return; }
+    let cancelled = false;
+    setInvoiceDrawdown({ month: null, policy: null, error: null, loading: true });
+    const { start } = monthBounds(invoiceMonth);
+    // ATLAS CALLS: get_agreement_fee_drawdown (preview of one month before invoicing)
+    void supabase.rpc('get_agreement_fee_drawdown', { p_service_agreement_id: selectedAgreementId, p_from: start, p_to: start }).then(({ data, error }) => {
+      if (cancelled) return;
+      if (error) { setInvoiceDrawdown({ month: null, policy: null, error: error.message, loading: false }); return; }
+      const parsed = parseFeeDrawdown(data);
+      setInvoiceDrawdown({ month: parsed.months[0] ?? null, policy: parsed.overrunPolicy, error: null, loading: false });
+    });
+    return () => { cancelled = true; };
+  }, [invoiceIsFixedFee, invoiceMonth, selectedAgreementId, showGenerateInvoice]);
+
+  const drawdownMonth = invoiceDrawdown?.month ?? null;
+  const drawdownAdjust = drawdownMonth ? drawdownAdjustment(drawdownMonth, invoiceDrawdown?.policy ?? null, overrunDecision) : null;
+  const drawdownJustificationProblem = drawdownMonth && drawdownMonth.balance != null && drawdownMonth.balance < 0 ? overrunJustificationProblem(invoiceDrawdown?.policy ?? null, overrunDecision, overrunJustification) : null;
+  const drawdownBlocksInvoice = invoiceIsFixedFee && (!invoiceDrawdown || invoiceDrawdown.loading || !!invoiceDrawdown.error || !drawdownMonth || drawdownMonth.blockers.length > 0 || !!drawdownMonth.settlement || drawdownAdjust?.kind === 'decide' || !!drawdownJustificationProblem);
 
   const openQuote = (client: AccountRow, place?: { siteId?: string; zoneId?: string; name: string }) => {
     const validUntil = new Date();
@@ -1754,10 +1790,38 @@ const CRMPage: React.FC<{ onNavigate?: NavigateWithContext }> = ({ onNavigate = 
               </select>
             </label>
             {invoiceReadinessLoading && <div className="crm-invoice-readiness">Checking agreement billing readiness.</div>}
-            {invoiceReadiness && <div className={`crm-invoice-readiness is-${invoiceReadiness.source}`}><strong>{invoiceReadiness.accountName}</strong><span>{invoiceReadiness.agreementName}</span><p>{invoiceReadiness.detail}</p>{invoiceReadiness.billingCycle && <small>{invoiceReadiness.billingCycle} billing · {invoiceReadiness.paymentTermsDays} day payment terms</small>}{invoiceReadiness.source === 'missing' && <small>Configure accepted quote lines or commercial settings before creating a draft invoice.</small>}</div>}
+            {invoiceReadiness && <div className={`crm-invoice-readiness is-${invoiceReadiness.source}`}><strong>{invoiceReadiness.accountName}</strong><span>{invoiceReadiness.agreementName}</span><p>{invoiceReadiness.detail}</p>{invoiceReadiness.billingCycle && <small>{invoiceReadiness.billingCycle} billing · {invoiceReadiness.paymentTerms} · prices before GST</small>}{invoiceReadiness.source === 'missing' && <small>Configure accepted quote lines or commercial settings before creating a draft invoice.</small>}</div>}
+            <label>
+              <span>Month invoiced</span>
+              <input type="month" required value={invoiceMonth} max={new Date().toISOString().slice(0, 7)} onChange={(e) => setInvoiceMonth(e.target.value || previousMonth())} aria-describedby="crm-gen-inv-month-help" />
+              <small id="crm-gen-inv-month-help">{invoiceIsFixedFee ? 'A whole calendar month, once it has finished. Normally last month.' : 'The service period on the invoice. Normally last month.'}</small>
+            </label>
+            {invoiceIsFixedFee && <section className="crm-invoice-drawdown" aria-live="polite" aria-labelledby="crm-gen-inv-drawdown-title">
+              <h3 id="crm-gen-inv-drawdown-title">Monthly fee drawdown</h3>
+              {invoiceDrawdown?.loading && <p>Working out contracted work against the monthly fee.</p>}
+              {invoiceDrawdown?.error && <p role="alert">The drawdown could not be worked out: {invoiceDrawdown.error}</p>}
+              {invoiceDrawdown && !invoiceDrawdown.loading && !invoiceDrawdown.error && !drawdownMonth && <p role="alert">No drawdown is available for this month.</p>}
+              {drawdownMonth && <>
+                <dl>
+                  <div><dt>Monthly fee</dt><dd>{drawdownMonth.fee != null ? `NZ$${drawdownMonth.fee.toFixed(2)}` : 'Not recorded'}</dd></div>
+                  <div><dt>Contracted work done</dt><dd>NZ${drawdownMonth.work.total.toFixed(2)}<small>Log NZ${drawdownMonth.work.imported.toFixed(2)} · callouts NZ${drawdownMonth.work.callouts.toFixed(2)} · patrol visits NZ${drawdownMonth.work.patrolVisits.toFixed(2)}</small></dd></div>
+                  <div><dt>Against the fee</dt><dd>{describeDrawdown(drawdownMonth)}</dd></div>
+                </dl>
+                {drawdownMonth.settlement && <p role="alert">{drawdownMonth.label} is already settled on {drawdownMonth.settlement.invoiceNumber} ({drawdownMonth.settlement.invoiceStatus}). Void that invoice first to settle the month again.</p>}
+                {!drawdownMonth.settlement && drawdownMonth.blockers.length > 0 && <ul className="crm-invoice-drawdown-blockers" aria-label="Before this month can be invoiced">{drawdownMonth.blockers.map((b) => <li key={b.code}>{b.message}</li>)}</ul>}
+                {!drawdownMonth.settlement && drawdownMonth.blockers.length === 0 && drawdownMonth.balance != null && drawdownMonth.balance < 0 && <fieldset>
+                  <legend>NZ${(-drawdownMonth.balance).toFixed(2)} of contracted work is above the monthly fee</legend>
+                  {invoiceDrawdown?.policy === 'bill_as_extra' && <p>The agreement already allows this to be billed as Extra. It will be added unless you choose to absorb it.</p>}
+                  <label className="crm-radio"><input type="radio" name="overrun-decision" checked={overrunDecision === 'bill_as_extra' || (overrunDecision == null && invoiceDrawdown?.policy === 'bill_as_extra')} onChange={() => setOverrunDecision('bill_as_extra')} /> Bill the excess as Extra</label>
+                  <label className="crm-radio"><input type="radio" name="overrun-decision" checked={overrunDecision === 'absorb'} onChange={() => setOverrunDecision('absorb')} /> Absorb it (R&amp;M carries the cost)</label>
+                  {(overrunDecision === 'bill_as_extra' || (overrunDecision == null && invoiceDrawdown?.policy === 'bill_as_extra')) && <label><span>{invoiceDrawdown?.policy === 'bill_as_extra' ? 'Note for the invoice line (optional)' : 'Why the client should pay for it'}</span><textarea rows={3} maxLength={500} value={overrunJustification} onChange={(e) => setOverrunJustification(e.target.value)} aria-invalid={!!drawdownJustificationProblem} aria-describedby="crm-gen-inv-justify-help" /><small id="crm-gen-inv-justify-help">{drawdownJustificationProblem ?? 'Shown on the invoice line. 10 to 500 characters.'}</small></label>}
+                </fieldset>}
+                {drawdownAdjust && !drawdownMonth.settlement && drawdownMonth.blockers.length === 0 && <p className="crm-invoice-drawdown-result">{drawdownAdjust.kind === 'credit' ? `The invoice will include a credit of NZ$${(-drawdownAdjust.amount).toFixed(2)} for contracted work not used.` : drawdownAdjust.kind === 'extra' ? `The invoice will include NZ$${drawdownAdjust.amount.toFixed(2)} of Extra for work above the fee.` : drawdownAdjust.kind === 'decide' ? 'Choose how to handle the work above the fee.' : 'The monthly fee is invoiced as agreed, with no adjustment.'} Prices before GST.</p>}
+              </>}
+            </section>}
             <footer>
               <button type="button" className="btn btn-secondary" onClick={() => setShowGenerateInvoice(false)}>Cancel</button>
-              <button type="submit" className="btn btn-primary" disabled={quoteSaving || !selectedAgreementId || invoiceReadinessLoading || invoiceReadiness?.source === 'missing' || invoiceReadiness?.source === 'client_approval_required'}>{quoteSaving ? 'Generating...' : 'Generate draft invoice'}</button>
+              <button type="submit" className="btn btn-primary" disabled={quoteSaving || !selectedAgreementId || invoiceReadinessLoading || invoiceReadiness?.source === 'missing' || invoiceReadiness?.source === 'client_approval_required' || drawdownBlocksInvoice}>{quoteSaving ? 'Generating...' : 'Generate draft invoice'}</button>
             </footer>
           </form>
         </div>

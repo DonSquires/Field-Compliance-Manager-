@@ -564,6 +564,10 @@ test('outline indexes the declarations of a big file with line numbers; search c
   assert.match(outline.entries.join('\n'), /^1: const test = require/m);
   assert.match(tools.outline({ path: 'lib/sum.js', pattern: '[' }).error, /not a valid regular expression/);
   assert.match(tools.outline({ path: 'lib' }).error, /not a file/);
+  assert.deepEqual(tools.read_file({ path: 'src/sum.ts' }).did_you_mean, ['lib/sum.js', 'test/sum.test.js']);
+  assert.deepEqual(tools.read_file({ path: 'test/sum.ts' }).did_you_mean, ['test/sum.test.js', 'lib/sum.js']);
+  assert.match(tools.read_file({ path: 'nothing/here.js' }).hint, /do not guess paths/);
+  assert.deepEqual(tools.list_dir({ path: 'apps/web/sum' }).did_you_mean, ['lib/sum.js', 'test/sum.test.js']);
 
   const plain = tools.search({ query: 'sum adds', path: 'test' });
   assert.equal(plain.results.length, 1);
@@ -732,6 +736,95 @@ test('search honours several pathspecs and treats no matches as a result; apply_
   fs.rmSync(repo.root, { recursive: true, force: true });
 });
 
+test('apply_patch accepts the *** Begin Patch envelope that gpt-oss/Codex models emit, atomically', () => {
+  const repo = makeRepo();
+  const { createBranchWorkspace } = require('../builder-branch-workspace');
+  const ws = createBranchWorkspace({ sourceDir: repo.source, workspaceRoot: path.join(repo.root, 'workspaces'), jobId: 'feedfacefeedfacefeedface', targetSha: repo.sha });
+  const tools = createTools({ workspacePath: ws.workspacePath, repoRoot: repo.source, lane: 'backend', supabase: null, limits: DEFAULT_LIMITS, log() {} });
+  const sumPath = path.join(ws.workspacePath, 'lib', 'sum.js');
+  const original = fs.readFileSync(sumPath, 'utf8');
+
+  const envelope = [
+    '*** Begin Patch',
+    '*** Update File: lib/sum.js',
+    '@@',
+    " 'use strict';",
+    '-module.exports = { sum: (a, b) => a - b };',
+    '+module.exports = { sum: (a, b) => a + b };',
+    '*** Add File: lib/double.js',
+    "+'use strict';",
+    '+module.exports = { double: (a) => a * 2 };',
+    '*** End Patch',
+  ].join('\n');
+  const applied = tools.apply_patch({ diff: envelope });
+  assert.equal(applied.applied, true, JSON.stringify(applied));
+  assert.equal(applied.format, 'envelope');
+  assert.match(fs.readFileSync(sumPath, 'utf8'), /a \+ b/);
+  assert.equal(fs.readFileSync(path.join(ws.workspacePath, 'lib', 'double.js'), 'utf8'), "'use strict';\nmodule.exports = { double: (a) => a * 2 };\n");
+
+  // A second file whose hunk does not match leaves every file untouched.
+  fs.writeFileSync(sumPath, original);
+  const partial = [
+    '*** Begin Patch',
+    '*** Update File: lib/sum.js',
+    '-module.exports = { sum: (a, b) => a - b };',
+    '+module.exports = { sum: (a, b) => a + b };',
+    '*** Update File: test/sum.test.js',
+    '-this line is not in the file',
+    '+replacement',
+    '*** End Patch',
+  ].join('\n');
+  const refused = tools.apply_patch({ diff: partial });
+  assert.match(refused.error, /patch did not apply: hunk 1 for test\/sum\.test\.js did not match/);
+  assert.equal(fs.readFileSync(sumPath, 'utf8'), original);
+
+  // Protected paths stay refused through the envelope too.
+  const protectedEdit = tools.apply_patch({ diff: '*** Begin Patch\n*** Add File: .github/workflows/x.yml\n+name: x\n*** End Patch' });
+  assert.match(protectedEdit.error, /refused/);
+  assert.equal(fs.existsSync(path.join(ws.workspacePath, '.github', 'workflows', 'x.yml')), false);
+  fs.rmSync(repo.root, { recursive: true, force: true });
+});
+
+test('apply_patch envelope honours End of File, forward-only anchors, composed ops and destination checks', () => {
+  const repo = makeRepo();
+  const { createBranchWorkspace } = require('../builder-branch-workspace');
+  const ws = createBranchWorkspace({ sourceDir: repo.source, workspaceRoot: path.join(repo.root, 'workspaces'), jobId: 'facefeedfacefeedfacefeed', targetSha: repo.sha });
+  const tools = createTools({ workspacePath: ws.workspacePath, repoRoot: repo.source, lane: 'backend', supabase: null, limits: DEFAULT_LIMITS, log() {} });
+  const file = path.join(ws.workspacePath, 'lib', 'footer.js');
+  const write = (content) => fs.writeFileSync(file, content);
+  const patch = (...lines) => tools.apply_patch({ diff: ['*** Begin Patch', ...lines, '*** End Patch'].join('\n') });
+
+  // Repeated footer text: End of File must edit the last copy, not the first.
+  write('// footer\nconst a = 1;\n// footer\n');
+  assert.equal(patch('*** Update File: lib/footer.js', '@@', '-// footer', '+// end', '*** End of File').applied, true);
+  assert.equal(fs.readFileSync(file, 'utf8'), '// footer\nconst a = 1;\n// end\n');
+
+  // A missing anchor is refused rather than ignored.
+  write('function one() {\n  return 1;\n}\n');
+  assert.match(patch('*** Update File: lib/footer.js', '@@ function missing()', '-  return 1;', '+  return 2;').error, /anchor "function missing\(\)" was not found/);
+  assert.equal(fs.readFileSync(file, 'utf8'), 'function one() {\n  return 1;\n}\n');
+
+  // Hunks never jump back above an earlier hunk.
+  write('x = 1;\ny = 2;\n');
+  assert.match(patch('*** Update File: lib/footer.js', '@@', '-y = 2;', '+y = 3;', '@@', '-x = 1;', '+x = 0;').error, /hunk 2 .* did not match/);
+  assert.equal(fs.readFileSync(file, 'utf8'), 'x = 1;\ny = 2;\n');
+
+  // Two ops on the same file compose instead of the second overwriting the first.
+  write('a\nb\n');
+  assert.equal(patch('*** Update File: lib/footer.js', '-a', '+A', '*** Update File: lib/footer.js', '-b', '+B').applied, true);
+  assert.equal(fs.readFileSync(file, 'utf8'), 'A\nB\n');
+
+  // A move onto an existing file is refused and touches nothing.
+  assert.match(patch('*** Update File: lib/footer.js', '*** Move to: lib/sum.js', '-A', '+Z').error, /move destination lib\/sum\.js already exists/);
+  assert.equal(fs.readFileSync(file, 'utf8'), 'A\nB\n');
+
+  // A destination under an existing file (or a directory target) is refused before any write.
+  assert.match(patch('*** Update File: lib/footer.js', '-A', '+Q', '*** Add File: lib/sum.js/nested.js', '+x').error, /lib\/sum\.js is a file/);
+  assert.match(patch('*** Add File: lib', '+x').error, /patch did not apply/);
+  assert.equal(fs.readFileSync(file, 'utf8'), 'A\nB\n');
+  fs.rmSync(repo.root, { recursive: true, force: true });
+});
+
 test('compactMessages keeps recent turns verbatim and collapses older bulky results and write payloads', () => {
   const { compactMessages } = require('../builder-agentic-engineer');
   const big = 'x'.repeat(5000);
@@ -889,6 +982,26 @@ test('replace_in_file edits by exact text, refuses ambiguity, hints at whitespac
   assert.match(fs.readFileSync(path.join(ws.workspacePath, 'lib/sum.js'), 'utf8'), /a \+ b/);
   assert.deepEqual(tools.__changedFiles(), ['lib/sum.js']);
   assert.match(tools.replace_in_file({ path: 'lib/sum.js', old_text: 'not here at all', new_text: 'x' }).error, /old_text not found[\s\S]*use search[\s\S]*read_file/);
+  const edited = fs.readFileSync(path.join(ws.workspacePath, 'lib/sum.js'), 'utf8');
+  fs.writeFileSync(path.join(ws.workspacePath, 'lib/sum.js'), 'function sum(a, b) {\n  const total = a - b;\n  return total;\n}\n');
+  const near = tools.replace_in_file({ path: 'lib/sum.js', old_text: '  const total = a - b;\n  return totl;', new_text: 'x' });
+  assert.match(near.error, /old_text not found in lib\/sum\.js, but one of its lines matches source line 2\. closest_match holds the real text of lines 2-5/);
+  assert.equal(near.closest_match.start_line, 2);
+  assert.equal(near.closest_match.matched_line, 2);
+  assert.match(near.closest_match.content, /^2:   const total = a - b;\n3:   return total;/);
+  const second = tools.replace_in_file({ path: 'lib/sum.js', old_text: 'function sum(a, b) { // guessed\n  const total = a - b;\n  return totl;', new_text: 'x' });
+  assert.match(second.error, /matches source line 2\. closest_match holds the real text of lines 1-/);
+  assert.equal(second.closest_match.matched_line, 2);
+  const deepLines = Array.from({ length: 40 }, (_, i) => `  step_${String(i).padStart(2, '0')}_value();`);
+  fs.writeFileSync(path.join(ws.workspacePath, 'lib/sum.js'), `${deepLines.join('\n')}\n`);
+  const deep = tools.replace_in_file({ path: 'lib/sum.js', old_text: `${Array.from({ length: 35 }, (_, i) => `  guessed_${i}();`).join('\n')}\n  step_37_value();`, new_text: 'x' });
+  assert.equal(deep.closest_match.matched_line, 38);
+  assert.match(deep.closest_match.content, /38:   step_37_value\(\);/, 'the anchor is always inside the window');
+  fs.writeFileSync(path.join(ws.workspacePath, 'lib/sum.js'), `${'x'.repeat(5000)}\n  const anchor = here;\n`);
+  const wide = tools.replace_in_file({ path: 'lib/sum.js', old_text: 'guessed first line\n  const anchor = here;\n  more', new_text: 'x' });
+  assert.equal(wide.closest_match, undefined, 'no excerpt when the size cap would hide the anchor');
+  assert.match(wide.error, /use search for a real nearby symbol/);
+  fs.writeFileSync(path.join(ws.workspacePath, 'lib/sum.js'), edited);
   const reflowed = tools.replace_in_file({ path: 'lib/sum.js', old_text: 'a  +\n  b', new_text: 'a * b' });
   assert.equal(reflowed.matched, 'whitespace_normalized');
   assert.match(fs.readFileSync(path.join(ws.workspacePath, 'lib/sum.js'), 'utf8'), /a \* b/);
@@ -903,6 +1016,10 @@ test('replace_in_file edits by exact text, refuses ambiguity, hints at whitespac
   assert.equal(tools.replace_in_file({ path: 'lib/sum.js', old_text: 'const x = 1;', new_text: 'const y = 2;', all: true }).replaced, 2);
   assert.match(tools.replace_in_file({ path: 'package.json', old_text: '{', new_text: '[' }).error, /refused/);
   assert.match(tools.replace_in_file({ path: 'lib/missing.js', old_text: 'a', new_text: 'b' }).error, /not found: lib\/missing\.js/);
+  fs.writeFileSync(path.join(ws.workspacePath, 'lib/sum.js'), 'const tone = "red";\n');
+  assert.match(tools.replace_in_file({ path: 'lib/sum.js', old_text: 'tone = "red"', new_text: 'tone = "red"' }).error, /no-op edit refused/);
+  assert.match(tools.replace_in_file({ path: 'lib/sum.js', old_text: 'tone  =\n "red"', new_text: 'tone = "red"' }).error, /no-op edit refused/);
+  assert.equal(fs.readFileSync(path.join(ws.workspacePath, 'lib/sum.js'), 'utf8'), 'const tone = "red";\n');
 });
 
 test('oversized file reads preserve real head and tail with an exact omitted range', () => {
@@ -1251,3 +1368,39 @@ test('atlas and live_count give Bob live terrain and aggregate checks without te
   assert.match((await tools.live_count({ table: 'vehicles; drop table x' })).error, /plain public table/);
   assert.match((await tools.live_count({ table: 'vehicles', column: 'a,b' })).error, /plain column/);
 });
+
+const TIMEOUT_SHAPES = [
+  ['client abort', { ok: false, status: 408, error: 'model gateway timed out', timeout: true }],
+  ['gateway provider timeout', { ok: false, status: 504, error: 'model provider timed out', code: 'provider_timeout' }],
+];
+
+for (const [shape, timedOutResponse] of TIMEOUT_SHAPES) {
+  test(`a provider timeout (${shape}) escalates at once instead of spending two more turn budgets`, async () => {
+    const repo = makeRepo();
+    const workspaceRoot = path.join(repo.root, 'workspaces');
+    const job = { id: 'f1ee1f1ee1f1ee1f1ee1f1ee1f1ee1f1', organization_id: '00000000-0000-0000-0000-000000000001', target_sha: repo.sha, title: 'sum subtracts', task_description: 'fix sum' };
+    const step = { id: 'step-timeout', builder_mode: 'backend_engineer' };
+    const seen = [];
+    const callModel = async ({ modelRequest }) => {
+      seen.push(modelRequest.provider);
+      if (modelRequest.provider === 'gpu_workstation') return { ...timedOutResponse };
+      const script = [
+        { tool: 'write_file', args: { path: 'lib/sum.js', content: "'use strict';\nmodule.exports = { sum: (a, b) => a + b };\n" } },
+        { tool: 'run', args: { command: 'node --test test/sum.test.js' } },
+        { tool: 'finish', args: { summary: 'sum() used subtraction; changed to addition; test passes.', tests: ['node --test test/sum.test.js'], rollback_notes: ['revert'] } },
+      ];
+      return { ok: true, status: 200, data: { content: JSON.stringify(script[Math.min(seen.filter(p => p !== 'gpu_workstation').length - 1, script.length - 1)]), model: 'gpt-5.4' } };
+    };
+    const previousAuthorRoute = process.env.BOB_BUILDER_ROUTE_AUTHOR;
+    process.env.BOB_BUILDER_ROUTE_AUTHOR = 'gpu_workstation,openai';
+    let result;
+    try {
+      result = await runAgenticEngineer({ supabase: null, gateway: { gatewayUrl: 'http://gw', apiToken: 't' }, job, step, lane: 'backend', sourceDir: repo.source, workspaceRoot, repoRoot: repo.source, callModel, limits: { ...DEFAULT_LIMITS, maxTurns: 10 }, providerHealth: LAPTOP_ON });
+    } finally {
+      if (previousAuthorRoute === undefined) delete process.env.BOB_BUILDER_ROUTE_AUTHOR;
+      else process.env.BOB_BUILDER_ROUTE_AUTHOR = previousAuthorRoute;
+    }
+    assert.equal(result.ok, true, JSON.stringify(result.error));
+    assert.deepEqual(seen.slice(0, 2), ['gpu_workstation', 'openai']);
+  });
+}

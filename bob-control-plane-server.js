@@ -23,11 +23,12 @@ const { fileSha256, listRepositoryTree, readRepositoryFile, searchRepository } =
 const { autopilotTick, listAutopilotJobs, listPendingApprovals } = require('./builder-autopilot');
 const { laptopStatus, runLaptopCommand, laptopConfig, loadLaptopLink, mergeLaptopLink, describeLink } = require('./bob-laptop-shell');
 const { createVibeWorker, vibeWorkspacePath } = require('./builder-vibe-session');
+const { createBuilderChatWorker } = require('./builder-chat-session');
 const { runVibeHumanTest } = require('./builder-vibe-human-test');
 const { createFirewall } = require('./bob-firewall');
 const { createTailscale } = require('./bob-tailscale');
 const { createVibePreviewManager } = require('./builder-vibe-preview');
-const { createBranchWorkspace, createDetachedWorkspace, retireTerminalWorkspace, commitVerifiedPatch, publishWorkspaceBranch, createGiteaPullRequest, workspacePathForBranch, createGitHubPullRequest, mergeGitHubPullRequest, ensureSourceCheckout, githubAuthHeader, githubRepoUrl, githubSshRepoUrl, resolveRemoteHead, redactGitError } = require('./builder-branch-workspace');
+const { createBranchWorkspace, createDetachedWorkspace, retireTerminalWorkspace, commitVerifiedPatch, publishWorkspaceBranch, createGiteaPullRequest, workspacePathForBranch, createGitHubPullRequest, mergeGitHubPullRequest, readGitHubPullRequestState, ensureSourceCheckout, githubAuthHeader, githubRepoUrl, githubSshRepoUrl, resolveRemoteHead, redactGitError } = require('./builder-branch-workspace');
 const { executeWorker, summarizeHumanTest } = require('./worker-executor');
 const { createMainHealthMonitor } = require('./bob-main-health');
 const { TERMINAL_STATUSES: BUILDER_TERMINAL_STATUSES, jobHygieneDecision, historicalHealthResolution } = require('./builder-job-hygiene');
@@ -1220,6 +1221,12 @@ async function autopilotOnce() {
           return { pullRequestUrl: pullRequest.url, merged: false };
         },
         verifyRelease: async (job) => verifyGitHubProductionRelease(job.autopilot_report?.merge_sha),
+        ...(builderGitHost === 'github' ? { pullRequestState: async (job) => readGitHubPullRequestState({ url: job.workspace_pull_request_url, githubToken, owner: githubOwner, repo: githubRepo }) } : {}),
+        closeDeclinedJob: async (job, details = {}) => {
+          const { error } = await builderSupabase.rpc('builder_record_pull_request_closed', { _job_id: job.id, _pull_request_url: job.workspace_pull_request_url, _details: details });
+          if (error) throw new Error(`declined Builder job ${job.id} could not be closed: ${error.message}`);
+          record('autopilot', 'builder.pull_request.closed_unmerged', job.id, { url: job.workspace_pull_request_url });
+        },
         markDeployed: async (jobId, deployment) => {
           if (deployment?.status !== 'success' || deployment?.live_verified !== true || !/^[a-f0-9]{40}$/i.test(String(deployment?.source_sha || ''))) {
             throw new Error('Builder deployment receipt is incomplete');
@@ -1782,6 +1789,16 @@ const vibeWorker = vibeEnabled ? createVibeWorker({
     openPullRequest: ({ workspacePath, branch, head, title, body }) => createGitHubPullRequest({ workspacePath, branchName: branch, expectedHeadSha: head, title: `Bob vibe: ${title}`, body, githubToken, owner: githubOwner, repo: githubRepo, draft: false }),
   },
 }) : null;
+// Bob Builder chat: the Builder page's own conversation lane, independent of in-app Bob (onspace-ai-chat).
+const builderChatWorker = Boolean(builderSupabase) && process.env.BOB_BUILDER_CHAT_ENABLED !== '0' ? createBuilderChatWorker({
+  supabase: builderSupabase,
+  deps: {
+    workspaceRoot: builderWorkspaceRoot,
+    gateway: builderGateway,
+    sourceDirFor: sha => builderGitSource(sha),
+    resolveHead: () => builderRepositoryHead('main').sha,
+  },
+}) : null;
 const redeemVibeTicket = async (sessionId, ticket) => {
   const { data, error } = await builderSupabase.rpc('builder_vibe_redeem_preview_ticket', { p_session_id: sessionId, p_ticket: ticket });
   if (error) throw new Error(error.message);
@@ -1840,6 +1857,7 @@ if (vibeWorker) {
   }, 5000);
   vibePreviewTimer.unref?.();
 }
+if (builderChatWorker) builderChatWorker.start();
 if (autopilotEnabled && builderSupabase) {
   startInterruptedModelRecovery().catch(() => {});
   // This process is the only verifier runner: anything still 'running' at startup was orphaned by
