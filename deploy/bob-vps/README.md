@@ -78,6 +78,12 @@ Public access (`https://bob.fcmanager.co.nz`, nginx site
 `/api/bob/builder/jobs/<id>/(advance|run|workspace|commit|publish|pull-request|context)`.
 A new control-plane route must be added to that `location ~` regex (test with
 `nginx -t`, then `systemctl reload nginx`; keep backups outside `sites-enabled/`).
+The release lane treats `deploy/bob-vps/nginx/` as the only source of these
+sites: every tick it compares the live files with the last revision it
+installed successfully (`$STATE_DIR/nginx_sha`, else the deployed SHA),
+restores any out-of-band edit, deletion or dangling link (keeping the drifted
+copy in `$STATE_DIR/nginx-drift/`), and puts the drifted state back with a log
+line if the managed site fails `nginx -t`. Change the site in the repo, not on the host.
 
 ### Vibe Builder (owner ruling 2026-10-21)
 
