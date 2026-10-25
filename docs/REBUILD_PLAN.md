@@ -46,6 +46,20 @@ GitHub support automation, expanded owner decision 2026-10-24:
   harness/navigation passed 6/6 without retries. Only the existing Overview
   unit guard and screenshot remain red (373/374 unit files, 15/16 smoke tests).
 
+Independent Bob Builder chat lane, owner ruling 2026-10-25:
+
+- The Builder page chat no longer mounts `BobPanel mode="builder"` (which sent
+  turns to `onspace-ai-chat`). `BuilderChatPanel` uses migration
+  `20261025090000_builder_chat_lane.sql` (owner-only RPCs, Realtime) and the
+  control-plane `builder-chat-session.js` worker (builder model chain via the
+  gateway's `builder_chat` mode, read-only tools, `propose_job`).
+- Proposals become jobs only on the owner's Create job click (shows project,
+  branch, environment, review mode and autopilot before confirming).
+- `onspace-ai-chat` returns 409 `builder_lane_separate` for builder turns;
+  `scripts/bob-builder-e2e.mjs chat` drives the new lane by default.
+- Runtime-idle defers control-plane deploys while a Builder chat turn is
+  claimed.
+
 Builder lane separation hardening, 2026-10-24:
 
 - Enforce lane boundaries in the Conductor: Builder-only tools

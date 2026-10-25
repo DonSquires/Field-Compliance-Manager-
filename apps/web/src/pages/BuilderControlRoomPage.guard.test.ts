@@ -64,9 +64,10 @@ describe('Builder control room boundary', () => {
     expect(source).toContain("action: 'create_followup'");
     expect(source).toContain('Continue on this branch');
     expect(source).toContain('Continue build');
-    expect(source).toContain('<BobPanel');
-    expect(source).toContain('mode="builder"');
-    expect(source).toContain('presentation="docked"');
+    expect(source).toContain('<BuilderChatPanel');
+    expect(source).not.toContain('<BobPanel');
+    expect(source).not.toContain('mode="builder"');
+    expect(source).toContain('onCreateJob={createJobFromProposal}');
     expect(source).toContain("surface: 'builder_control_room'");
   });
 
