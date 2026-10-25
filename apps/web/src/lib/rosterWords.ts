@@ -40,6 +40,12 @@ export const COMMERCIAL_READY_STATUSES = ['ready', 'accepted', 'verified', 'not_
 export const commercialStatusLabel = (status: string | null | undefined): string =>
   status === 'source_verified' ? 'Verified by source records' : plainWords(status);
 
+/** Readiness areas (`billing`, `cost centre`) still needing action for one slot's readiness row. */
+export const commercialIssueAreas = (readiness: object): string[] =>
+  Object.entries(readiness)
+    .filter(([key, value]) => key.endsWith('_status') && !COMMERCIAL_READY_STATUSES.includes(String(value)))
+    .map(([key]) => key.replace(/_status$/, '').replaceAll('_', ' '));
+
 /** `21:00–01:00` in NZ local time, 24-hour so it fits a roster chip. */
 export const timeRange = (start: string, end: string): string =>
   `${new Date(start).toLocaleTimeString('en-NZ', { hour: '2-digit', minute: '2-digit', hour12: false })}\u2013${new Date(end).toLocaleTimeString('en-NZ', { hour: '2-digit', minute: '2-digit', hour12: false })}`;
