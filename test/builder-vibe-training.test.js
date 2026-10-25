@@ -5,6 +5,27 @@ const assert = require('node:assert/strict');
 const fs = require('node:fs');
 const path = require('node:path');
 const { vibeSystemPrompt } = require('../builder-vibe-session');
+const { ATLAS_RESEARCH_GUIDANCE, systemPrompt, DEFAULT_LIMITS } = require('../builder-agentic-engineer');
+const { builderChatSystemPrompt } = require('../builder-chat-session');
+
+test('all builder modes carry the same Atlas research navigation and butterfly-effect guidance', () => {
+  for (const prompt of [vibeSystemPrompt(), builderChatSystemPrompt(), systemPrompt({ lane: 'backend', limits: DEFAULT_LIMITS })]) {
+    assert.ok(prompt.includes(ATLAS_RESEARCH_GUIDANCE));
+  }
+  assert.match(ATLAS_RESEARCH_GUIDANCE, /source_file/);
+  assert.match(ATLAS_RESEARCH_GUIDANCE, /upstream.*downstream/);
+  assert.match(ATLAS_RESEARCH_GUIDANCE, /secured_by/);
+  assert.match(ATLAS_RESEARCH_GUIDANCE, /fk_reach separate from flow_reach/);
+  assert.match(ATLAS_RESEARCH_GUIDANCE, /wired is not exercised/);
+  assert.match(ATLAS_RESEARCH_GUIDANCE, /Guidance-only questions/);
+  const sql = fs.readFileSync(path.join(__dirname, '../supabase/migrations/20261025103500_bob_atlas_research_navigation_card.sql'), 'utf8');
+  assert.match(sql, /builder_atlas_research_navigation/);
+  assert.match(sql, /WHERE NOT EXISTS/);
+  assert.match(sql, /organization_id IS NULL/);
+  assert.match(sql, /source_file/);
+  assert.match(sql, /Before:.*During:.*After:/s);
+  assert.match(sql, /invocation receipt/);
+});
 
 test('Vibe continuation and navigation lessons ship as platform cards and runtime instructions', () => {
   const sql = fs.readFileSync(path.join(__dirname, '../supabase/migrations/20261022223000_bob_vibe_continuation_navigation_cards.sql'), 'utf8');

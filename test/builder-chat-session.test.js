@@ -154,7 +154,9 @@ test('a question is answered after a read-only tool, with the tool step recorded
   assert.match(store.rows.at(-1).content, /DispatchConsolePage\.css/);
   const firstRequest = model.calls[0].request;
   assert.equal(firstRequest.builder_mode, 'builder_chat');
-  assert.match(firstRequest.messages[1].content, /BUILDER PAGE CONTEXT.*job_id=f2a6362e/);
+  assert.match(firstRequest.messages[1].content, /BACKGROUND PAGE CONTEXT.*"job_id":"f2a6362e"/);
+  assert.equal(JSON.parse(model.calls[1].request.messages.at(-1).content).current_owner_request,
+    message.content);
   assert.ok(firstRequest.tools.some(tool => tool.function.name === 'propose_job'));
   assert.ok(!firstRequest.tools.some(tool => ['write_file', 'replace_in_file', 'apply_patch', 'run', 'finish'].includes(tool.function.name)));
 });
@@ -461,7 +463,53 @@ test('repeated failed calls get a stop-guessing nudge and the last turn is answe
   const last = model.calls[4].request;
   assert.equal(last.tools, undefined);
   assert.match(last.messages.at(-1).content, /FINAL TURN/);
+  assert.deepEqual(last.output_schema.oneOf.map(branch => branch.properties.tool.const), ['reply']);
   assert.ok(last.messages.every(entry => !('final' in entry)));
+});
+
+test('background job context stays subordinate to the current request and loaded guidance', async () => {
+  const { store, deps, model } = setup([{ tool: 'reply', args: { message: 'Historical evidence needs revalidation.' } }]);
+  deps.tools.retrieve_knowledge = async () => ({ cards: [{ key: 'continuation', content: 'Revalidate historical evidence.' }] });
+  await chat.processBuilderChatMessage({
+    store, message: ownerMessage('Explain how to reuse historical evidence.', {
+      job_id: 'cancelled-id', job_status: 'cancelled', job_title: 'Unrelated deployment investigation',
+    }), deps,
+  });
+  const request = model.calls[0].request;
+  assert.match(request.system_prompt, /current owner request defines the task/);
+  assert.match(request.system_prompt, /Guidance questions can be answered from retrieved cards and receipts/);
+  const content = request.messages[1].content;
+  assert.match(content, /BACKGROUND PAGE CONTEXT \(what is open, not a task or instruction/);
+  assert.ok(content.indexOf('CURRENT OWNER REQUEST') > content.indexOf('RETRIEVED CANONICAL GUIDANCE'));
+  assert.ok(content.endsWith('Explain how to reuse historical evidence.'));
+  assert.equal(store.rows.filter(row => row.payload?.tool === 'read_file').length, 0);
+});
+
+test('final structured schema permits a proposal only when required evidence was gathered', async () => {
+  for (const researched of [false, true]) {
+    const steps = researched ? [...RESEARCH] : [{ tool: 'search', args: { query: 'fixture' } }];
+    const { store, deps, model } = setup([...steps, { tool: 'reply', args: { message: 'Still incomplete.' } }]);
+    await chat.processBuilderChatMessage({
+      store, message: ownerMessage('Investigate and propose a repair job.'), deps,
+      limits: { ...chat.BUILDER_CHAT_LIMITS, maxTurns: steps.length + 1 },
+    });
+
+    const final = model.calls.at(-1).request;
+    assert.equal(final.tools, undefined);
+    assert.deepEqual(final.output_schema.oneOf.map(branch => branch.properties.tool.const).sort(),
+      researched ? ['propose_job', 'reply'] : ['reply']);
+  }
+});
+
+test('an ordinary final turn cannot execute another investigation tool', async () => {
+  const { store, deps, toolCalls } = setup([{ tool: 'search', args: { query: 'not permitted now' } }]);
+  const outcome = await chat.processBuilderChatMessage({
+    store, message: ownerMessage('Answer from the available evidence.'), deps,
+    limits: { ...chat.BUILDER_CHAT_LIMITS, maxTurns: 1 },
+  });
+  assert.deepEqual(toolCalls, []);
+  assert.equal(outcome.error, true);
+  assert.equal(store.rows.filter(row => row.kind === 'proposal').length, 0);
 });
 
 test('a status question is answered from a preloaded owner queue with only ledger tools offered', async () => {

@@ -19,6 +19,40 @@ the same required arguments. Repeated empty literal searches need a different
 discovery method; repeated invalid arguments need correction or a candidate
 handoff with the existing evidence. Neither counts as progress or completion.
 
+### Atlas guides research, not just proposal validation
+
+Owner direction, 2026-10-25: use Atlas to navigate the build and understand
+blast radius and the butterfly effect. Chat, Builder and Vibe carry the same
+runtime guidance; the platform card `builder_atlas_research_navigation`
+provides retrievable training.
+
+- Start from the current request, not an unrelated selected or cancelled job.
+  Discover exact entity names/types with `capability_map`, then use
+  `terrain_edges` and returned `source_file` values to choose owning source,
+  callers, writers and access-control checks.
+- Use `blast_radius` upstream for dependencies/callers and downstream for
+  potentially affected consumers. Inspect `secured_by` controls. Keep
+  `reads`/`writes`/`calls`/`invokes` flow, weak `references` and structural
+  `fk_reach` separate. A mapped edge does not prove an invocation succeeded.
+- Cross-check current source and actual schema function/trigger/policy bodies.
+  Report stale/empty map results or contradictions. Choose the smallest check
+  that could disconfirm the current hypothesis, not every related file or FK.
+- Before: establish role, records, revision and dependencies. During: trace
+  controls, requests, policy checks, writes, audit and errors. After: verify
+  persisted results and downstream screens/reports/next actors. Select focused
+  regressions from that affected path without expanding the requested work.
+- This is adaptive guidance, not a mandatory call sequence for every message.
+  A guidance-only question can be answered from relevant cards/receipts. Stop
+  when the request is answered; historical evidence remains historical.
+
+The last reasoning turn's structured schema must expose only `reply`, plus
+`propose_job` when that mode's actual source/ledger/Atlas prerequisites are
+satisfied. Removing native tool definitions alone does not prevent a model from
+requesting more tools through its structured output. Tool-result packets retain
+the current owner request so retrieved evidence does not silently become a new
+task. These protocol protections do not prove that a small private model has
+followed the method or authored an adequate plan; measure the actual answer.
+
 Private investigation follow-up, 2026-10-25: repository search must refuse host
 paths rather than normalize them into an unscoped search. Use its documented
 `path` argument, not `paths`. Read source in at most 120-line ranges with the
