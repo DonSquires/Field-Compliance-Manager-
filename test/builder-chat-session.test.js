@@ -190,6 +190,21 @@ test('task evidence queries cannot select another thread or accept invalid recei
   assert.ok(store.rows.filter(row => row.role === 'tool').every(row => row.payload.ok === false));
 });
 
+test('ordinary turns actually preload canonical guidance and record it without treating it as source evidence', async () => {
+  const { store, deps, model } = setup([{ tool: 'reply', args: { message: 'I used the relevant guidance without claiming a source inspection.' } }]);
+  deps.tools.retrieve_knowledge = async args => {
+    assert.deepEqual(args, { query: 'How should I continue an interrupted investigation?', limit: 3 });
+    return { cards: [{ key: 'continuation', content: 'Use prior evidence.' }], retrieval: { path: 'keyword', degradation: 'private_embedding_not_configured' } };
+  };
+  const result = await chat.processBuilderChatMessage({ store, message: ownerMessage('How should I continue an interrupted investigation?'), deps });
+  assert.match(model.calls[0].request.user_prompt, /RETRIEVED CANONICAL GUIDANCE/);
+  assert.match(model.calls[0].request.user_prompt, /private_embedding_not_configured/);
+  assert.deepEqual(result.research.source_paths, []);
+  const receipt = store.rows.find(row => row.payload?.preloaded && row.payload?.tool === 'retrieve_knowledge');
+  assert.equal(receipt.payload.ok, true);
+  assert.match(receipt.payload.result_text, /continuation/);
+});
+
 test('persistent evidence store applies exact thread, tool-role and receipt filters', async () => {
   const calls = [];
   const query = {};

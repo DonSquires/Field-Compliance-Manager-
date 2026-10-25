@@ -505,6 +505,21 @@ async function runBuilderChat({ store, thread, message, workspacePath, head, gat
     error: true, research,
   });
   const history = await store.history(thread.id, message.seq);
+  let knowledge = null;
+  if (!statusMode && typeof allTools.retrieve_knowledge === 'function') {
+    try {
+      knowledge = await allTools.retrieve_knowledge({ query: message.content.slice(0, 1000), limit: 3 });
+    } catch {
+      knowledge = { error: 'Canonical knowledge retrieval failed; no knowledge is claimed loaded.', code: 'KNOWLEDGE_READ_FAILED' };
+    }
+    const text = JSON.stringify(knowledge);
+    await store.post(thread.id, {
+      role: 'tool', kind: 'tool', content: 'retrieve_knowledge',
+      payload: { message_id: message.id, tool: 'retrieve_knowledge', preloaded: true, ok: !knowledge?.error,
+        preview: clip(text, 600), result_text: clip(text, limits.readCapChars), result_truncated: text.length > limits.readCapChars,
+        main_head: head || null, observed_at: new Date().toISOString() },
+    });
+  }
   const transcript = history.map(entry => {
     const label = entry.role === 'owner' ? 'OWNER' : entry.kind === 'proposal' ? 'BOB (proposed job)' : 'BOB';
     const accepted = entry.kind === 'proposal' ? (entry.payload?.job_id ? ` [owner created job ${entry.payload.job_id}]` : ' [not created]') : '';
@@ -515,6 +530,7 @@ async function runBuilderChat({ store, thread, message, workspacePath, head, gat
     contextLine(message.payload?.context),
     transcript ? `CONVERSATION SO FAR:\n${transcript}` : 'CONVERSATION SO FAR: (first message)',
     `OWNER NOW SAYS:\n${message.content}`,
+    knowledge ? `RETRIEVED CANONICAL GUIDANCE (not source/live evidence; retrieval failures and degradation remain visible):\n${clip(JSON.stringify(knowledge), limits.readCapChars)}` : null,
     proposeMode ? 'THE OWNER ASKED FOR A PROPOSAL. Proposing changes nothing and needs no permission: investigate briefly with the read-only tools, then call propose_job. The owner reviews it and decides with Create job. Never answer that you cannot modify files.' : null,
   ].filter(Boolean).join('\n\n');
   const messages = [{ role: 'system', content: builderChatSystemPrompt() }, { role: 'user', content: task }];
