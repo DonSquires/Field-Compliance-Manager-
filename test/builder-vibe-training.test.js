@@ -19,6 +19,10 @@ test('all builder modes carry the same Atlas research navigation and butterfly-e
   assert.match(ATLAS_RESEARCH_GUIDANCE, /fk_reach separate from flow_reach/);
   assert.match(ATLAS_RESEARCH_GUIDANCE, /wired is not exercised/);
   assert.match(ATLAS_RESEARCH_GUIDANCE, /Guidance-only questions/);
+  assert.match(ATLAS_RESEARCH_GUIDANCE, /ATLAS IS A MAP, NOT EVIDENCE/);
+  assert.match(ATLAS_RESEARCH_GUIDANCE, /investigate those areas to establish facts/);
+  assert.match(ATLAS_RESEARCH_GUIDANCE, /Report map leads, independently verified facts and unknowns separately/);
+  assert.match(ATLAS_RESEARCH_GUIDANCE, /leave its behavior unverified/);
   const sql = fs.readFileSync(path.join(__dirname, '../supabase/migrations/20261025103500_bob_atlas_research_navigation_card.sql'), 'utf8');
   assert.match(sql, /builder_atlas_research_navigation/);
   assert.match(sql, /WHERE NOT EXISTS/);
@@ -28,6 +32,26 @@ test('all builder modes carry the same Atlas research navigation and butterfly-e
   assert.match(sql, /invocation receipt/);
   const card = sql.match(/\$\$([\s\S]*?)\$\$/)[1];
   assert.ok(card.length <= 2500, 'the complete lesson must fit the actual per-card retrieval cap');
+});
+
+test('Atlas card corrections replace contradictory proof teaching and invalidate stale embeddings', () => {
+  const sql = fs.readFileSync(path.join(__dirname, '../supabase/migrations/20261025105500_bob_atlas_map_not_evidence.sql'), 'utf8');
+  assert.match(sql, /WHERE c.organization_id IS NULL AND c.key = v.key/);
+  for (const column of ['embedding', 'embedding_384', 'embedding_model', 'embedded_at']) {
+    assert.ok(sql.includes(`${column} = NULL`));
+  }
+  assert.match(sql, /updated_at = now\(\)/);
+  const cards = [...sql.matchAll(/\('([^']+)',\s*\$\$([\s\S]*?)\$\$/g)];
+  assert.deepEqual(cards.map(([, key]) => key), [
+    'builder_atlas_research_navigation', 'bob_atlas_blast_radius', 'bob_wired_vs_dormant', 'bob_capability_map_tool',
+  ]);
+  for (const [, key, content] of cards) {
+    assert.ok(content.length <= 2500, `${key} must fit the actual retrieval cap`);
+    assert.match(content, /Atlas is a map, not evidence/);
+    assert.match(content, /[Rr]esearch/);
+    assert.match(content, /verified facts and unknowns/);
+    assert.doesNotMatch(content, /PROVEN DATA FLOW|flow_reach is proven/);
+  }
 });
 
 test('Vibe continuation and navigation lessons ship as platform cards and runtime instructions', () => {

@@ -28,7 +28,7 @@ const { validatePatchText } = require('./frontend-worker');
 const { generateVisualBaselines } = require('./builder-visual-baseline-tool');
 const { baselineInfo, pngEvidence } = require('./builder-visual-baseline');
 
-const PROMPT_VERSION = 'agentic-engineer-v11';
+const PROMPT_VERSION = 'agentic-engineer-v12';
 // Consecutive refused identical calls (with nothing edited) before the author escalates or stops early.
 const STUCK_REFUSALS = 4;
 const DEFAULT_LIMITS = Object.freeze({
@@ -241,10 +241,10 @@ function outlineLines(text, { pattern = null, cap = 400 } = {}) {
 }
 
 const ATLAS_RESEARCH_GUIDANCE = [
-  'ATLAS AS A RESEARCH GUIDE: use the map to choose your next useful source read, not merely to tick a proposal prerequisite.',
+  'ATLAS IS A MAP, NOT EVIDENCE: it tells you where to go and look, not what is fact. Use it to choose research locations; then investigate those areas to establish facts. Never cite an Atlas edge, flag or reach result alone as proof of behavior, a cause, safety or completion.',
   'For an implementation question, start from the affected surface/entity in the current request. Discover exact type/name with capability_map, then inspect terrain_edges and its source_file values to locate callers, writers, access controls and downstream consumers. Confirm those paths in the current checkout; do not guess filenames or read an unrelated subsystem.',
   'Use blast_radius with the discovered name/type. Directions follow stored edges: downstream traverses source to target; upstream traverses target to source. For a component that reads a table, the table is downstream and its reader is upstream of the table. Inspect both directions as needed to find dependencies and affected consumers; do not infer impact from a direction label alone. The butterfly effect concerns potentially affected workflows, not permission to expand the task. Follow reads/writes/calls/invokes, inspect secured_by controls, and keep weak references and structural fk_reach separate from flow_reach.',
-  'Atlas can lag or under-report. Map edges are source-backed navigation evidence, not proof a live call succeeded; wired is not exercised. Cross-check the owning source and actual schema function/trigger/policy bodies. An empty map is a discovery gap, not proof of absence. Record contradictions and choose the smallest check that could disconfirm your hypothesis.',
+  'Atlas can lag or under-report; wired is not exercised. At each relevant mapped location, read the current owning source and schema function/trigger/policy bodies, then use authorized runtime observations or focused tests for claims about execution. Report map leads, independently verified facts and unknowns separately. Source establishes implementation, not successful live execution; a fixture test is not production evidence. If a mapped area cannot be investigated, leave its behavior unverified. An empty map is a discovery gap, not proof of absence. Record contradictions and choose the smallest check that could disconfirm your hypothesis.',
   'Before a change, identify expected behavior, dependencies and permissions; during, trace requests/writes/audit and errors; after, verify persisted and downstream outcomes. Use the affected paths to select focused regression tests. Do not walk the entire graph or every FK. Guidance-only questions may be answered from relevant cards/receipts without Atlas or source inspection.',
 ].join('\n');
 
@@ -967,7 +967,7 @@ function createTools({ workspacePath, repoRoot, lane, supabase, limits, log, gen
         let query = supabase.from('bob_capability_map').select('entity_type,entity_name,present,wired,exercised,retirement_status,notes').ilike('entity_name', `%${term.replace(/[%_]/g, '\\$&')}%`).limit(cap);
         if (type) query = query.eq('entity_type', String(type));
         const result = await call(query);
-        return result.rows ? { ...result, note: 'wired is the strongest live claim; exercised is unpopulated unless invocation evidence exists.' } : result;
+        return result.rows ? { ...result, note: 'Atlas is a map, not evidence. Verify presence/wiring in current source/schema and exercise with actual invocation receipts; flags alone do not establish facts.' } : result;
       }
       if (action === 'terrain_edges') {
         const result = await call(supabase.from('bob_app_map_edges').select('source_file,source_type,source_name,target_type,target_name,edge_kind').eq('retirement_status', 'live').or(`source_name.eq.${term.replace(/[,()]/g, '')},target_name.eq.${term.replace(/[,()]/g, '')}`).limit(cap));
@@ -981,7 +981,7 @@ function createTools({ workspacePath, repoRoot, lane, supabase, limits, log, gen
         return {
           flow_reach: flow.rows ? flow.rows.slice(0, cap) : flow,
           fk_reach: fk.rows ? fk.rows.slice(0, cap) : fk,
-          note: 'flow_reach is proven data flow; fk_reach is structural relation only and is not a live pathway.'
+          note: 'Atlas is a map, not evidence. flow_reach maps registered reads/writes/calls/invokes; fk_reach maps structural relations only. Investigate the mapped source/schema and verify execution separately before claiming facts or impact.'
         };
       }
       return { error: 'action must be capability_map, terrain_edges, gap_report, or blast_radius' };
@@ -1108,7 +1108,7 @@ async function atlasMapForFiles({ supabase, workspacePath, lane, startingFiles }
       const list = touches[row.source_file] ?? (touches[row.source_file] = []);
       if (list.length < 8 && !list.includes(edge(row))) list.push(edge(row));
     }
-    return { available: true, suggested_files: suggested, flow_edges_by_file: touches, note: 'Atlas flow edges (reads/writes/calls/invokes) only; confirm a write against supabase/schema.sql before relying on it.' };
+    return { available: true, suggested_files: suggested, flow_edges_by_file: touches, note: 'Atlas is a map, not evidence. These registered flow edges suggest where to research; inspect current source/schema and verify relevant behavior before claiming facts.' };
   } catch (error) {
     return { available: false, reason: String(error && error.message || error).slice(0, 200) };
   }

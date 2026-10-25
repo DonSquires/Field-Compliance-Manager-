@@ -19,7 +19,7 @@ const { isProtectedPath, protectedReason, normalizeRepoPath } = require('./build
 const { VIBE_BRANCH_PREFIX, builderCommitIdentity, redactGitError, gitSpawnFault } = require('./builder-branch-workspace');
 const { buildModelRunRequest, callModelGateway, fetchModelHealth, selectProviders, providerRequest } = require('./supabase/functions/_shared/builder-model-adapter');
 
-const PROMPT_VERSION = 'vibe-v17';
+const PROMPT_VERSION = 'vibe-v18';
 const VIBE_LIMITS = Object.freeze({
   maxTurns: Math.max(6, Number(process.env.BOB_VIBE_TURNS || 40)),
   wallBudgetMs: Math.max(60_000, Number(process.env.BOB_VIBE_BUDGET_MS || 20 * 60_000)),

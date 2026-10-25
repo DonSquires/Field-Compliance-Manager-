@@ -19,7 +19,7 @@ const { runBuilderResearch } = require('./builder-chat-research');
 const { PLATFORM_CONTRACTS, PLATFORM_DESCRIPTIONS } = require('./bob-platform-diagnostics');
 const { KNOWLEDGE_CONTRACT } = require('./builder-knowledge');
 
-const PROMPT_VERSION = 'builder-chat-v7';
+const PROMPT_VERSION = 'builder-chat-v8';
 const BUILDER_CHAT_LIMITS = Object.freeze({
   maxTurns: Math.max(4, Number(process.env.BOB_BUILDER_CHAT_TURNS || 14)),
   wallBudgetMs: Math.max(60_000, Number(process.env.BOB_BUILDER_CHAT_BUDGET_MS || 8 * 60_000)),
