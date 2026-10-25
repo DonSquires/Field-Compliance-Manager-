@@ -39,6 +39,125 @@ These observations are dated evidence, not permanent health assertions.
 
 ## Delivery checklist
 
+### Fixed cloud PM/QA packet slice (owner decision 2026-10-25)
+
+Builder Chat is the technical PM/investigator/QA lead, not the coding agent.
+The owner chose direct purpose-assigned Ollama Cloud inference, with
+human-reviewed non-sensitive summaries rather than raw private evidence:
+
+| Purpose | Assigned model | When |
+| --- | --- | --- |
+| PM, investigation planning, public research and visual design | `kimi-k2.7-code` | Default current approved packet |
+| Independent plan/QA challenge | `deepseek-v4-pro:0813` | Explicit purpose, not every answer |
+| Technical handoff review | `kimi-k2.7-code` | Explicit technical-review purpose |
+
+No VPS/laptop inference, automatic model ladder or metered provider is used by
+new PM turns. Model absence, capability mismatch and invalid responses fail
+explicitly. The older private/research queues remain compatible; the normal UI
+submits only PM packets. Builder/Vibe model policy and executable proposal
+authority are unchanged. Briefs remain advisory and do not create jobs.
+
+- [x] Record the owning canon and owner-selected transfer boundary.
+- [x] Add immutable purpose, summary/hash and per-message approval binding.
+- [x] Default normal Chat to the isolated cloud packet, with explicit purpose,
+  optional human-reviewed summary and optional web/approved attachments.
+- [x] Verify role models' live availability and advertised completion/vision.
+- [x] Targeted runtime regressions (73), web component tests (16), real
+  disposable PostgreSQL consent/replay/ownership/grant checks (3), web lint/
+  production build and desktop/mobile fixture workflows (2) pass locally.
+  The optional static CSS checker still reports the same 27 missing selectors
+  on both the changed tree and an archived untouched `HEAD`; no new mismatch
+  was introduced and those unrelated baseline defects are not suppressed.
+- [x] Harmless live role probes: one inference per independent request,
+  Kimi K3 guidance ~8.1s, DeepSeek QA ~3.1s, Kimi technical brief ~6.6s.
+  A separate Kimi reviewed-summary request ~3.1s returned quotes matching the
+  synthetic report and kept cause unknown. These are adapter probes, not
+  persisted production UI acceptance or a repair.
+- [ ] Independent CI, protected merge and governed migration/runtime deployment.
+- [ ] Persisted live UI acceptance of the original guidance question and reviewed
+  summary, with the expected single assigned model and no private context.
+- [ ] Governed PM-to-builder handoff, private evidence collection/reviewer loop
+  and original missing Compose-source repair. Not implemented by this slice.
+
+Discriminating test: generic JSON and even a schema-only no-source prompt caused
+all three models to fabricate evidence fields or cite system instructions.
+Ordinary no-source PM answers therefore use natural-language output, not a
+research schema; actual supplied sources still require structured matched
+quotes. Preserve the complete bounded advisory answer (up to 12,000 characters)
+rather than silently truncating its limitations at 3,000. The cloud packet never
+receives the reviewer's identity, private history, selected job or source dump.
+
+Atlas read: capability map/direct edges and depth-two flow reach map the Chat
+component to send/reservation RPCs, messages, threads and job records. FK reach
+links messages structurally to threads; it is not an invocation claim. Live
+`exercised` remains null. Cross-checking the schema confirmed the existing
+research function enforces ownership, approval, storage scope and immutable
+retry; the new PM wrapper reuses it inside one locked transaction. Refresh Atlas
+and regenerate the live schema after governed migration, never hand-edit them.
+
+PR #230 remains open with new reviewer findings; do not merge merely because
+its CI is green. Its lexical guard is not the new cloud PM's intent router.
+
+Doctrine reconciliation before release, 2026-10-25: re-read Foundation,
+Access Doctrine/Model, Bob Doctrine, Retention Doctrine, classification,
+credential boundaries and platform-engine direction together. The PM runtime
+now carries their relevant design lessons: accountability, harmed party/place,
+custodian not owner, shared spines, purpose-bound access, separate retention,
+heuristic tool choice and no owner-as-technical-operator. These are guidance,
+not schema facts or a hardcoded per-task sequence. The UI explicitly identifies
+the interim stage's absent private collection, continuity and connected handoff.
+The owner's cloud and reviewed-summary decisions stand, but implementation
+model assignments are not misrepresented as owner-authored doctrine.
+
+Review correction: a claim using any reviewed summary keeps its human-report
+qualification even alongside primary documentation or three publisher domains.
+A short summary accepts an exact whole-report quote; partial short quotes and
+short document/web quotes remain refused. An inference stopped at its output
+limit fails explicitly, with no partial answer accepted and no automatic model
+switch. Runtime regressions cover all three cases.
+
+Owner reminder on Bob's memory, 2026-10-25: schema and existing
+`bob-self-memory-write`/`bob-self-memory-read` confirm his graduated append-only
+diary, with no approval gate or bell and no organization column. Builder Chat
+had been excluded. Reuse the same `bob_self_memory` rather than a new store:
+
+- Advertise `write_self_memory` as an optional native tool, chosen by the PM
+  when a lesson/correction/job note is worth retaining, not on every answer.
+  One note per turn is an operational bound; it is not an approval gate.
+- Save via service-only `builder_chat_remember`, bound to a currently
+  authorized owner message and deterministic entry identity. Retries do not
+  duplicate or overwrite. General lessons use `reflection`, job notes
+  `builder_note`; no conduct row or knowledge card is written.
+- A diary call resumes the same assigned model with only its save receipt;
+  normal answers remain one inference. A failed save stays an explicit error.
+  If the answer fails after saving, the persisted note remains honestly
+  receipted, not erased or claimed as a completed answer.
+- Reuse the existing owner-authenticated read endpoint for private preview.
+  Recalled entries are not automatically cloud context. A selected bounded
+  excerpt joins the summary, with provenance and an unverified-memory label,
+  and requires fresh disclosure approval. Existing diary writes need no such
+  approval; disclosure and memory ownership are different concerns.
+
+This connects diary append and reviewed recall, not autonomous private
+investigation or bidirectional executable handoff. No unrelated diary contents
+were read during implementation; Atlas flags alone are not invocation evidence.
+
+Live native-tool discrimination changed the initial PM assignment: Kimi K3
+advertises tools but returned internal tool delimiters in prose rather than
+`message.tool_calls`, and falsely claimed its diary was saved. The runtime now
+refuses unreceipted diary-save claims. In the same harmless, no-write API test,
+Kimi K2.7 Code and DeepSeek V4 Pro returned actual native calls with valid
+arguments. Assign the PM to Kimi K2.7 Code rather than parsing a broken
+provider-specific pseudo-tool format or adding another model pass. Earlier
+Kimi K3 advisory timing results remain historical, not PM tool acceptance.
+The revised actual-policy probe answered the original guidance question with
+Kimi K2.7 Code in ~5.3s, one inference and no tool. Its explicit diary request
+returned a real native append call in ~2.2s; no private diary was written by
+that adapter probe. Actual persistence and recall still require release/UI
+acceptance. Current local checks: 80 runtime regressions plus four real
+PostgreSQL/migration tests, 18 UI component tests, desktop/mobile recall/
+approval flows, production build and type-check pass.
+
 - [x] Record this plan and establish tracked tasks.
 - [ ] 1. Repair diagnostics and connect governed capability discovery.
 - [ ] 2. Connect relevant knowledge retrieval and durable task evidence.

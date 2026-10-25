@@ -48,6 +48,27 @@ it('invalidates approval when question, sources or search selection changes', ()
   expect(checked()).toBe(false);
 });
 
+it('uses fixed-purpose PM with a human-reviewed summary, no automatic web search, and fresh approval on edits', async () => {
+  const { props, rerender } = setup('How should we investigate?');
+  rerender(<BuilderResearchComposer {...props} pmMode />);
+  const approved = () => (screen.getByLabelText(consent) as HTMLInputElement).checked;
+  fireEvent.click(screen.getByLabelText(consent));
+  fireEvent.change(screen.getByLabelText(/Human-reviewed non-sensitive evidence summary/), { target: { value: 'Synthetic report: a saved draft is missing after reload.' } });
+  expect(approved()).toBe(false);
+  fireEvent.click(screen.getByLabelText(consent));
+  fireEvent.change(screen.getByLabelText('Purpose and model'), { target: { value: 'qa' } });
+  expect(approved()).toBe(false);
+  // The component was initially mounted in legacy research mode for this fixture.
+  fireEvent.click(screen.getByLabelText('Search the public web'));
+  fireEvent.click(screen.getByLabelText(consent));
+  fireEvent.click(screen.getByRole('button', { name: 'Send approved PM message' }));
+  await waitFor(() => expect(props.onSent).toHaveBeenCalledOnce());
+  expect(rpc).toHaveBeenCalledWith('builder_chat_send_pm', expect.objectContaining({
+    p_purpose: 'qa', p_evidence_summary: 'Synthetic report: a saved draft is missing after reload.',
+    p_web_search: false, p_allow_cloud: true,
+  }));
+});
+
 it('blocks unsafe URL submissions and unsupported or excessive files before upload', async () => {
   const { props } = setup();
   fireEvent.change(screen.getByLabelText(/Source URLs/), { target: { value: 'https://docs.docker.com/?token=secret' } });
