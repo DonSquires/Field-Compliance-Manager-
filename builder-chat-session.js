@@ -153,8 +153,9 @@ function createBuilderChatTools({ supabase, workspacePath, limits }) {
     if (error) return { error: `job ledger read failed: ${error.message}` };
     return { jobs: (data || []).map(jobSummary) };
   };
-  tools.job_status = async ({ job } = {}) => {
-    const key = String(job || '').trim().toLowerCase().replace(/^bob\/job-/, '');
+  tools.job_status = async (args = {}) => {
+    // Small models name the argument id/job_id/branch as often as job.
+    const key = String(args.job || args.job_id || args.id || args.branch || '').trim().toLowerCase().replace(/^bob\/job-/, '');
     if (key.length < 6 || !/^[0-9a-f-]+$/.test(key)) return { error: 'give a job id (at least 6 hex characters) or its bob/job-… branch' };
     const { data, error } = await supabase.from('builder_jobs').select(JOB_COLUMNS).order('updated_at', { ascending: false }).limit(200);
     if (error) return { error: `job ledger read failed: ${error.message}` };
@@ -212,6 +213,35 @@ function createBuilderChatTools({ supabase, workspacePath, limits }) {
   return tools;
 }
 
+const LEDGER_TOOLS = ['owner_queue', 'list_jobs', 'job_status'];
+const STATUS_QUESTION = /\b(?:waiting on me|waiting for me|what(?:'s| is) (?:waiting|pending|blocked|next|left|outstanding)|my queue|owner queue|(?:job|jobs|gate|gates|approvals?|queue|build|builds|release) status|status of (?:the |my )?(?:jobs?|builds?|queue|gates?)|(?:pending|outstanding) (?:approvals?|gates?|jobs?|reviews?|prs?|pull requests?)|anything (?:waiting|pending|blocked|for me)|need(?:s)? (?:my )?(?:approval|review|decision))\b/i;
+const BUILD_REQUEST = /\b(?:fix|build|add|create|change|implement|redesign|refactor|propose|investigate|why|how does|where is|plan)\b/i;
+
+// A status question is answered from the job ledger alone; code tools only send a small model wandering.
+function isStatusQuestion(text) {
+  const value = String(text || '');
+  return STATUS_QUESTION.test(value) && !BUILD_REQUEST.test(value.replace(STATUS_QUESTION, ' '));
+}
+
+function formatOwnerQueue(queue) {
+  if (!queue || queue.error) return null;
+  const name = job => `${job?.title || 'Untitled job'} (${String(job?.id || '').slice(0, 8)})`;
+  const sections = [];
+  const gates = queue.approval_gates || [];
+  if (gates.length) sections.push(`Approval gates waiting on you (decide in the Builder queue):\n${gates.map(row => `- ${name(row.job)}: ${String(row.gate || '').replace(/_/g, ' ')}`).join('\n')}`);
+  const prs = queue.pull_requests_to_review || [];
+  if (prs.length) sections.push(`Pull requests to review and merge on GitHub:\n${prs.map(job => `- ${name(job)}: ${job.pull_request || job.branch || 'no link'}`).join('\n')}`);
+  const awaiting = queue.awaiting_owner || [];
+  if (awaiting.length) sections.push(`Jobs waiting for you:\n${awaiting.map(job => `- ${name(job)}: ${job.status}`).join('\n')}`);
+  const blocked = queue.blocked_recently || [];
+  if (blocked.length) sections.push(`Blocked in the last 14 days (retry, re-scope or cancel):\n${blocked.map(job => `- ${name(job)}: ${job.status}`).join('\n')}`);
+  const merged = queue.merged_awaiting_deploy || [];
+  if (merged.length) sections.push(`Merged, waiting on the release lane (no action unless it stalls): ${merged.map(name).join(', ')}`);
+  if (!sections.length) return 'Nothing is waiting on you: no pending gates, pull requests, waiting or blocked jobs.';
+  if (queue.truncated?.length) sections.push(`Some lists are capped (${queue.truncated.join(', ')}); open the Builder queue for the rest.`);
+  return sections.join('\n\n');
+}
+
 function builderChatNativeTools(tools) {
   const text = { type: 'string' };
   const custom = {
@@ -237,7 +267,17 @@ function contextLine(context) {
 }
 
 async function runBuilderChat({ store, thread, message, workspacePath, head, gateway, deps, limits = BUILDER_CHAT_LIMITS }) {
-  const tools = deps.tools || createBuilderChatTools({ supabase: deps.supabase, workspacePath, limits });
+  const allTools = deps.tools || createBuilderChatTools({ supabase: deps.supabase, workspacePath, limits });
+  const statusMode = isStatusQuestion(message.content) && typeof allTools.owner_queue === 'function';
+  const tools = statusMode ? Object.fromEntries(LEDGER_TOOLS.filter(name => typeof allTools[name] === 'function').map(name => [name, allTools[name]])) : allTools;
+  let ledgerAnswer = null;
+  let preloaded = null;
+  if (statusMode) {
+    try { preloaded = await allTools.owner_queue({}); } catch (error) { preloaded = { error: clip(error && error.message, 300) }; }
+    ledgerAnswer = formatOwnerQueue(preloaded);
+    await store.post(thread.id, { role: 'tool', kind: 'tool', content: 'owner_queue', payload: { message_id: message.id, tool: 'owner_queue', ok: !preloaded?.error, preview: clip(JSON.stringify(preloaded), 600), preloaded: true } });
+  }
+  const ledgerFallback = () => (ledgerAnswer ? { reply: `Straight from the job ledger:\n\n${ledgerAnswer}`, proposal: null, model: null, ledger: true } : null);
   const history = await store.history(thread.id, message.seq);
   const transcript = history.map(entry => {
     const label = entry.role === 'owner' ? 'OWNER' : entry.kind === 'proposal' ? 'BOB (proposed job)' : 'BOB';
@@ -251,6 +291,12 @@ async function runBuilderChat({ store, thread, message, workspacePath, head, gat
     `OWNER NOW SAYS:\n${message.content}`,
   ].filter(Boolean).join('\n\n');
   const messages = [{ role: 'system', content: builderChatSystemPrompt() }, { role: 'user', content: task }];
+  if (statusMode) {
+    messages.push(
+      { role: 'assistant', content: JSON.stringify({ thought: 'This is a status question; read the owner queue.', tool: 'owner_queue', args: {} }) },
+      { role: 'user', content: clip(JSON.stringify({ tool: 'owner_queue', result: preloaded, instruction: 'STATUS QUESTION: answer from this ledger result. Only ledger tools (owner_queue, list_jobs, job_status with a job id from above) are available. Do not read code. Reply now unless one job needs job_status detail.' }), limits.readCapChars) },
+    );
+  }
   const modelRequest = applyVibeRouting(buildModelRunRequest({
     organizationId: 'platform', jobId: thread.id, stepId: message.id, builderMode: 'builder_chat', workloadKind: 'builder_conversation',
     promptVersion: PROMPT_VERSION, systemPrompt: messages[0].content, userPrompt: task, outputSchema: vibeToolSchema(tools),
@@ -258,7 +304,7 @@ async function runBuilderChat({ store, thread, message, workspacePath, head, gat
   const nativeTools = builderChatNativeTools(tools);
   const health = await (deps.fetchHealth || fetchModelHealth)(gateway);
   const candidates = vibeProviderCandidates(modelRequest, health);
-  if (!candidates.length) return { reply: 'No Builder model is available right now, so I could not answer. The model gateway health needs checking.', error: true };
+  if (!candidates.length) return ledgerFallback() || { reply: 'No Builder model is available right now, so I could not answer. The model gateway health needs checking.', error: true };
   const callModel = deps.callModel || callModelGateway;
   const started = Date.now();
   let active = 0;
@@ -303,7 +349,7 @@ async function runBuilderChat({ store, thread, message, workspacePath, head, gat
       if ((timedOut || unavailable >= 2 || [413, 429].includes(response.status)) && await escalate(timedOut ? 'timeout' : 'unavailable', timedOut ? `did not answer within ${Math.max(1, Math.round(timeoutMs / 1000))} s` : `is unavailable (${clip(response.error, 160)})`)) {
         unavailable = 0; turn--; continue;
       }
-      if (unavailable >= 3) return { reply: `The Builder model stopped responding (${clip(response.error, 200)}). Send the message again to retry.`, error: true };
+      if (unavailable >= 3) return ledgerFallback() || { reply: `The Builder model stopped responding (${clip(response.error, 200)}). Send the message again to retry.`, error: true };
       turn--;
       await new Promise(resolve => setTimeout(resolve, (deps.retryDelayMs ?? 1500) * unavailable));
       continue;
@@ -318,7 +364,7 @@ async function runBuilderChat({ store, thread, message, workspacePath, head, gat
       if (prose && !ACTION_CLAIM.test(content)) return { reply: clip(content.trim(), 8000), proposal, model: response.data?.model };
       messages.push({ role: 'assistant', content: content.slice(0, 4000) }, { role: 'user', content: JSON.stringify({ error: 'Reply with ONLY one JSON object {"thought": string, "tool": string, "args": object}. Use reply {message} to answer.' }) });
       if (unparseable >= 2 && await escalate('prose_without_tool', 'did not produce a usable step')) unparseable = 0;
-      else if (unparseable >= 4) return { reply: 'I could not produce a usable answer. Please send the request again or narrow it.', error: true };
+      else if (unparseable >= 4) return ledgerFallback() || { reply: 'I could not produce a usable answer. Please send the request again or narrow it.', error: true };
       continue;
     }
     unparseable = 0;
@@ -346,7 +392,7 @@ async function runBuilderChat({ store, thread, message, workspacePath, head, gat
     repeated.set(key, count);
     let result;
     if (count > 2) result = { error: 'identical call already made; use the earlier result or reply' };
-    else if (typeof tools[call.tool] !== 'function') result = { error: `unknown tool ${call.tool}; available: ${Object.keys(tools).join(', ')}, reply` };
+    else if (typeof tools[call.tool] !== 'function') result = { error: statusMode && typeof allTools[call.tool] === 'function' ? `${call.tool} is not used for status questions; answer from the owner_queue result above with reply` : `unknown tool ${call.tool}; available: ${Object.keys(tools).join(', ')}, reply` };
     else {
       executedTools++;
       try { result = await tools[call.tool](args); } catch (error) { result = { error: clip(redactGitError(error && error.message), 1200) }; }
@@ -362,12 +408,14 @@ async function runBuilderChat({ store, thread, message, workspacePath, head, gat
     failedCalls = result?.error ? failedCalls + 1 : 0;
     if (failedCalls >= 3) {
       failedCalls = 0;
-      result = { ...result, instruction: 'Three tool calls in a row failed. Stop guessing: use search or list_dir to locate what you need, or reply now with what you already know.' };
+      result = { ...result, instruction: statusMode
+        ? 'Three tool calls in a row failed. The owner_queue result above already answers this status question: reply with it now.'
+        : 'Three tool calls in a row failed. Stop guessing: use search or list_dir to locate what you need, or reply now with what you already know.' };
     }
     messages.push({ role: 'user', content: clip(JSON.stringify({ tool: call.tool, result }), limits.readCapChars) });
   }
   if (proposal) return { reply: 'I have proposed the job above for your confirmation.', proposal };
-  return { reply: 'I ran out of time on this one before reaching an answer. Ask again with a narrower question.', error: true };
+  return ledgerFallback() || { reply: 'I ran out of time on this one before reaching an answer. Ask again with a narrower question.', error: true };
 }
 
 async function retry(fn, attempts = 3, delayMs = 500) {
@@ -442,4 +490,5 @@ function createBuilderChatWorker({ supabase, deps, intervalMs = 2500, log = cons
 module.exports = {
   PROMPT_VERSION, BUILDER_CHAT_LIMITS, ACTION_CLAIM, builderChatSystemPrompt, createBuilderChatStore, ensureChatCheckout,
   validateProposal, createBuilderChatTools, builderChatNativeTools, runBuilderChat, processBuilderChatMessage, createBuilderChatWorker,
+  isStatusQuestion, formatOwnerQueue,
 };

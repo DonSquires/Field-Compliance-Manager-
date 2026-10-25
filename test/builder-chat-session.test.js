@@ -327,6 +327,51 @@ test('repeated failed calls get a stop-guessing nudge and the last turn is answe
   assert.ok(last.messages.every(entry => !('final' in entry)));
 });
 
+test('a status question is answered from a preloaded owner queue with only ledger tools offered', async () => {
+  const queue = { approval_gates: [{ job: { id: 'aae6d519-a0b9', title: 'CCTV tokens' }, gate: 'implementation_review' }], pull_requests_to_review: [], merged_awaiting_deploy: [], awaiting_owner: [], blocked_recently: [] };
+  const { store, model, deps, toolCalls } = setup([
+    { tool: 'search', args: { query: 'job status update' } },
+    { tool: 'reply', args: { message: 'CCTV tokens is waiting on your implementation review.' } },
+  ]);
+  deps.tools.owner_queue = async () => { toolCalls.push(['owner_queue']); return queue; };
+  const outcome = await chat.processBuilderChatMessage({ store, message: ownerMessage('What is waiting on me across Builder jobs?'), deps });
+  assert.equal(outcome.error, undefined);
+  assert.deepEqual(toolCalls, [['owner_queue']], 'code search must not run for a status question');
+  const first = model.calls[0].request;
+  assert.deepEqual(first.tools.map(tool => tool.function.name).sort(), ['list_jobs', 'owner_queue', 'reply']);
+  assert.match(first.messages.at(-1).content, /STATUS QUESTION/);
+  assert.match(model.calls[1].request.messages.at(-1).content, /not used for status questions/);
+  assert.match(store.rows.at(-1).content, /implementation review/);
+});
+
+test('a status question still gets a ledger answer when the model fails or runs out of turns', async () => {
+  const queue = { approval_gates: [{ job: { id: 'aae6d519-a0b9', title: 'CCTV tokens' }, gate: 'implementation_review' }], pull_requests_to_review: [{ id: 'f2a6362e-5ef3', title: 'Dispatch tokens', pull_request: 'https://github.com/x/y/pull/195' }], merged_awaiting_deploy: [], awaiting_owner: [], blocked_recently: [] };
+  const { store, deps } = setup([{ tool: 'job_status', args: {} }, { tool: 'job_status', args: { x: 1 } }]);
+  deps.tools.owner_queue = async () => queue;
+  deps.tools.job_status = async () => ({ error: 'give a job id' });
+  const outcome = await chat.processBuilderChatMessage({ store, message: ownerMessage("What's waiting on me?"), deps, limits: { ...chat.BUILDER_CHAT_LIMITS, maxTurns: 2 } });
+  assert.equal(outcome.error, undefined);
+  const reply = store.rows.at(-1);
+  assert.equal(reply.kind, 'message');
+  assert.match(reply.content, /Straight from the job ledger/);
+  assert.match(reply.content, /CCTV tokens \(aae6d519\): implementation review/);
+  assert.match(reply.content, /pull\/195/);
+});
+
+test('status questions are told apart from build requests', () => {
+  for (const text of ['What is waiting on me?', 'any pending approvals?', 'job status please', "what's blocked right now"]) assert.ok(chat.isStatusQuestion(text), text);
+  for (const text of ['Fix the job status badge colour on the queue page', 'Where is the dispatch console CSS?', 'Plan a redesign of the queue']) assert.ok(!chat.isStatusQuestion(text), text);
+  assert.match(chat.formatOwnerQueue({ approval_gates: [], pull_requests_to_review: [], merged_awaiting_deploy: [], awaiting_owner: [], blocked_recently: [] }), /Nothing is waiting on you/);
+});
+
+test('job_status accepts the id under the argument names small models use', async () => {
+  const rows = [{ id: 'aae6d519-a0b9-46fd-a3ca-df859c889aad', title: 'CCTV', status: 'security_review', workspace_branch: null, updated_at: 'now' }];
+  const query = data => { const q = { select: () => q, eq: () => q, order: () => q, limit: () => q, then: (resolve) => resolve({ data, error: null }) }; return q; };
+  const supabase = { from: table => query(table === 'builder_jobs' ? rows : []) };
+  const tools = chat.createBuilderChatTools({ supabase, workspacePath: null, limits: chat.BUILDER_CHAT_LIMITS });
+  for (const args of [{ job: 'aae6d519' }, { job_id: 'aae6d519' }, { id: 'aae6d519' }]) assert.equal((await tools.job_status(args)).job?.title, 'CCTV', JSON.stringify(args));
+});
+
 test('a tool call on the answer-only turn is not executed', async () => {
   const { store, deps, toolCalls } = setup([{ tool: 'search', args: { query: 'a' } }, { tool: 'search', args: { query: 'b' } }]);
   const outcome = await chat.processBuilderChatMessage({ store, message: ownerMessage('Look'), deps, limits: { ...chat.BUILDER_CHAT_LIMITS, maxTurns: 2 } });
