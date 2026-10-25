@@ -2,6 +2,7 @@ import { useCallback, useEffect, useState } from 'react';
 import { AlertTriangle, BarChart3, CheckCircle2, CircleDollarSign, Clock3, RefreshCw, ShieldAlert } from 'lucide-react';
 import { useAuth } from '../context/AuthContext';
 import { supabase } from '../lib/supabase';
+import { FinancePeriodBillingBasisPanel } from './FinancePeriodBillingBasisPanel';
 import './FinanceOperationsDashboard.css';
 
 type Period = { id: string; name: string; period_start: string; period_end: string; status: string };
@@ -97,5 +98,6 @@ export function FinanceOperationsDashboard({ activePeriodId, compact = false }: 
       <div className="finance-ops-panel"><div className="finance-ops-panel-heading"><div><h3>Tax money to plan for</h3><p>{taxPeriod ? `Bob says it is due ${date(taxPeriod.filing_due_date)}` : 'No tax check configured'}</p></div><span className={`finance-ops-status status-${taxPeriod?.status ?? 'empty'}`}>{taxPeriod?.status ?? 'empty'}</span></div>{taxPeriod ? <dl><div><dt>Dates covered</dt><dd>Until {date(taxPeriod.period_end)}</dd></div><div><dt>Set aside</dt><dd>{money(taxPeriod.net_tax_due)}</dd></div></dl> : <div className="finance-ops-empty">Bob can prepare a tax checklist once a tax period is open.</div>}</div>
       <div className="finance-ops-panel"><div className="finance-ops-panel-heading"><div><h3>Payments to sort</h3><p>Bob found bank activity that still needs to be matched to the right job or invoice</p></div><Clock3 size={18} /></div>{unmatchedTransactions.length ? <ul className="finance-ops-list">{unmatchedTransactions.slice(0, 4).map((transaction) => <li key={transaction.id}><span>{money(transaction.amount)}{transaction.description ? ` · ${transaction.description}` : ''}</span><strong>{transaction.reconciliation_status.replaceAll('_', ' ')}</strong></li>)}</ul> : unmatchedReceipts.length ? <ul className="finance-ops-list">{unmatchedReceipts.slice(0, 4).map((receipt, index) => <li key={`${receipt.reconciliation_status}-${index}`}><span>{money(receipt.payment_amount)}</span><strong>{receipt.reconciliation_status.replaceAll('_', ' ')}</strong></li>)}</ul> : <div className="finance-ops-empty is-good"><CheckCircle2 size={16} />Nothing needs sorting</div>}</div>
     </div>
+    <FinancePeriodBillingBasisPanel periodId={period?.id ?? null} />
   </section>;
 }

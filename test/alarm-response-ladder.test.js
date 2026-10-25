@@ -41,7 +41,11 @@ test('the dispatch console records the alarm through the RPC and never filters d
   assert.match(console, /useState\(\(\) => localDateTimeValue\(new Date\(\)\)\)/);
   assert.match(console, /from\('alarm_events'\)\.select\('dispatch_job_id, received_at, signal_type, intake_channel, panel_id, zone_name, zone_number, account_number'\)\.in\('dispatch_job_id', alarmJobIds\)/);
   assert.match(console, /<h3>Response so far<\/h3>/);
-  assert.match(console, /formAlarmIntakeChannel, formAlarmSignalType, formAlarmReceivedAt\]\);/);
+  const createJobDependencies = console.match(/const handleCreateJob = useCallback\([\s\S]*?\}, \[([^\]]+)\]\);/);
+  assert.ok(createJobDependencies, 'job creation must retain its callback dependencies');
+  for (const dependency of ['formAlarmIntakeChannel', 'formAlarmSignalType', 'formAlarmReceivedAt']) {
+    assert.ok(createJobDependencies[1].split(',').map(value => value.trim()).includes(dependency), `${dependency} must be a job-creation dependency`);
+  }
 });
 
 test('the ladder speaks in minutes after the alarm and says when the clock is only counting from the job', () => {

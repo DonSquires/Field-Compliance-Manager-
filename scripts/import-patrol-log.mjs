@@ -26,6 +26,8 @@ import { tmpdir } from 'node:os';
 import { basename, join } from 'node:path';
 import ExcelJS from 'exceljs';
 import { classifyPatrolWork } from './patrol-work-classifier.mjs';
+import { buildChargeCatalog, composeChargeCode } from './patrol-charge-code.mjs';
+import { materialsUsed } from './patrol-materials.mjs';
 import { buildPatrolImportProposals } from './patrol-import-proposals.mjs';
 import { aucklandInstantFromLocalParts } from './rm-photo-matcher.mjs';
 
@@ -96,10 +98,11 @@ function parseCsv(text) {
 }
 
 function workbookCellText(cell) {
-  if (cell.value === null || cell.value === undefined) return '';
-  if (cell.value instanceof Date) return cell.text || cell.value.toISOString();
-  if (typeof cell.value === 'object') return cell.text ?? '';
-  return String(cell.value);
+  const value = cell.type === ExcelJS.ValueType.Formula ? cell.result : cell.value;
+  if (value === null || value === undefined) return '';
+  if (value instanceof Date) return value.toISOString();
+  if (typeof value === 'object') return cell.text ?? '';
+  return String(value);
 }
 
 async function readWorkbookSheet(bytes, name, firstRow) {
@@ -122,7 +125,9 @@ function parseNzDate(dateStr, timeStr) {
   const trimmed = (dateStr ?? '').trim();
   let y, mo, d;
   const m = /^(\d{1,2})\/(\d{1,2})\/(\d{4})$/.exec(trimmed);
+  const iso = /^(\d{4})-(\d{2})-(\d{2})T\d{2}:\d{2}:\d{2}(?:\.\d+)?Z$/.exec(trimmed);
   if (m) { [, d, mo, y] = m; }
+  else if (iso) { [, y, mo, d] = iso; }
   else if (/^\d{4,6}$/.test(trimmed)) {
     // Value2-based CSV export (fast bulk COM read, no cell-by-cell .Text formatting)
     // returns dates as raw Excel serial numbers instead of a dd/mm/yyyy string -
@@ -133,15 +138,27 @@ function parseNzDate(dateStr, timeStr) {
   if (Number(y) < 2000 || Number(y) > new Date().getUTCFullYear()) return null;
   const calendarDate = new Date(Date.UTC(Number(y), Number(mo) - 1, Number(d)));
   if (calendarDate.getUTCFullYear() !== Number(y) || calendarDate.getUTCMonth() !== Number(mo) - 1 || calendarDate.getUTCDate() !== Number(d)) return null;
-  let hh = 0, mm = 0;
-  const t = (timeStr ?? '').trim().replace(/\.\d+$/, '');
-  if (/^\d{1,2}:\d{2}$/.test(t)) [hh, mm] = t.split(':').map(Number);
+  let hh = 0, mm = 0, ss = 0;
+  const rawTime = (timeStr ?? '').trim();
+  const isoTime = /^\d{4}-\d{2}-\d{2}T(\d{2}):(\d{2}):(\d{2})(?:\.\d+)?Z$/.exec(rawTime);
+  const t = rawTime.replace(/\.\d+$/, '');
+  if (isoTime) [hh, mm, ss] = isoTime.slice(1).map(Number);
+  else if (/^0(?:[.]\d+)?$/.test(rawTime)) {
+    const seconds = Math.round(Number(rawTime) * 86_400);
+    hh = Math.floor(seconds / 3_600);
+    mm = Math.floor(seconds % 3_600 / 60);
+    ss = seconds % 60;
+  } else if (/^\d{1,2}:\d{2}(?::\d{2})?$/.test(t)) {
+    const parts = t.split(':').map(Number);
+    [hh, mm] = parts;
+    ss = parts[2] ?? 0;
+  }
   else if (/^\d{3,4}$/.test(t)) {
     const padded = t.padStart(4, '0');
     hh = Number(padded.slice(0, 2));
     mm = Number(padded.slice(2, 4));
   } else if (t) return null;
-  return aucklandInstantFromLocalParts(Number(y), Number(mo), Number(d), hh, mm)?.replace('.000Z', 'Z') ?? null;
+  return aucklandInstantFromLocalParts(Number(y), Number(mo), Number(d), hh, mm, ss)?.replace('.000Z', 'Z') ?? null;
 }
 
 // NZ plate shapes: 2-3 letters + 2-4 digits, or 1-3 digits + 2-3 letters (older/personalised).
@@ -185,10 +202,11 @@ function parseImportContextRows(rows) {
   const sourceProfile = rows.find((row) => row.record_type === 'source_profile')?.payload ?? null;
   const personAliases = Object.fromEntries(rows.filter((row) => row.record_type === 'person_alias').map((row) => [row.payload.alias_norm, row.payload.user_profile_id]));
   const classificationRules = rows.filter((row) => row.record_type === 'classification_rule').map((row) => row.payload);
+  const chargeCatalogRows = rows.filter((row) => row.record_type === 'charge_catalog').map((row) => row.payload);
   if (!sourceProfile || sourceProfile.parser !== 'csv' || typeof sourceProfile.column_mappings !== 'object' || typeof sourceProfile.target_mappings !== 'object') throw new Error(`No active CSV source profile is configured for ${classificationProfile}`);
   if (Object.keys(personAliases).length === 0) throw new Error(`No person aliases are configured for ${classificationProfile}`);
   if (classificationRules.length === 0) throw new Error(`No classification rules are configured for ${classificationProfile}`);
-  return { sourceProfile, personAliases, classificationRules };
+  return { sourceProfile, personAliases, classificationRules, chargeCatalogRows };
 }
 
 async function loadImportContext() {
@@ -232,6 +250,13 @@ WHERE rule.organization_id = '${providerOrgId}'::uuid
   AND rule.source_profile = '${profile}'
   AND rule.active
   AND code.is_active
+UNION ALL
+SELECT 'charge_catalog',
+       jsonb_build_object('id', code.id, 'code_type', code.code_type, 'code', code.code, 'external_refs', code.external_refs)
+FROM public.reference_codes code
+WHERE code.organization_id = '${providerOrgId}'::uuid
+  AND code.code_type IN ('charge_source', 'charge_subject', 'charge_issue', 'charge_code')
+  AND code.is_active
 ) records
 ORDER BY record_type,
   coalesce((payload->>'priority')::integer, 0),
@@ -246,11 +271,12 @@ ORDER BY record_type,
   return parseImportContextRows(rows);
 }
 
-const { sourceProfile, personAliases, classificationRules } = await loadImportContext();
+const { sourceProfile, personAliases, classificationRules, chargeCatalogRows } = await loadImportContext();
+const chargeCatalog = buildChargeCatalog(chargeCatalogRows);
 const actorId = sourceProfile.import_actor_id;
 if (!/^[a-f0-9]{8}-[a-f0-9]{4}-[1-5][a-f0-9]{3}-[89ab][a-f0-9]{3}-[a-f0-9]{12}$/i.test(actorId ?? '')) throw new Error(`Source profile ${classificationProfile} has no valid import actor`);
 const importConfigurationHash = createHash('sha256')
-  .update(JSON.stringify({ sourceProfile, personAliases, classificationRules, sourceColumnAliases }))
+  .update(JSON.stringify({ sourceProfile, personAliases, classificationRules, sourceColumnAliases, ...(chargeCatalogRows.length ? { chargeCatalogRows } : {}) }))
   .digest('hex');
 
 const sourceBytes = readFileSync(inputPath);
@@ -307,7 +333,8 @@ const eventsBatch = [];
 const proposalsBatch = [];
 const seenExternalRefs = new Set();
 const unresolvedAliasValues = new Set();
-const classificationCounts = { work_subject: {}, work_activity: {} };
+const classificationCounts = { work_subject: {}, work_activity: {}, biosecurity_species: {}, equipment_type: {}, material_type: {} };
+const chargeCodeCounts = {};
 const costEvidenceTotals = { job_cost: 0, travel_cost: 0, total_cost: 0, rows: 0 };
 let skipped = 0;
 let skippedNoZone = 0;
@@ -338,7 +365,10 @@ for (const [rowIndex, r] of table.slice(1).entries()) {
   const plates = regPlates.length ? regPlates : extractPlates(comments);
   const primaryPlate = plates[0] ?? null;
   const isCamera = /^camera$/i.test(patroller);
-  const workClassification = classifyPatrolWork({ subject: r[col.subject], issue: r[col.issue], description: comments }, classificationRules);
+  const workClassification = classifyPatrolWork({ subject: r[col.subject], issue: r[col.issue], description: comments, source: col.workSource === -1 ? null : r[col.workSource] }, classificationRules);
+  const chargeCode = composeChargeCode({ source: col.workSource === -1 ? null : r[col.workSource], subject: r[col.subject], issue: r[col.issue] }, chargeCatalog);
+  const { material_type_detail_fields: materialDetailFields, ...workCodes } = workClassification;
+  const materials = materialsUsed(workCodes.material_type_code, materialDetailFields, comments);
   // Some rows record TWO officers on a joint patrol, separated by a newline/comma in one cell
   // (e.g. "Colin Eathorne\nWade Sutherland-Berkett") - take the first name that resolves to a
   // known officer rather than requiring the whole raw cell to match a single known name exactly.
@@ -384,12 +414,16 @@ for (const [rowIndex, r] of table.slice(1).entries()) {
           }])),
       } : {}),
     } : {}),
-    ...workClassification,
+    ...workCodes,
+    ...chargeCode,
+    ...(materials.length ? { materials_used: materials } : {}),
   };
 
-  for (const [type, code] of [['work_subject', workClassification.work_subject_code], ['work_activity', workClassification.work_activity_code]]) {
+  for (const type of Object.keys(classificationCounts)) {
+    const code = workCodes[`${type}_code`];
     if (code) classificationCounts[type][code] = (classificationCounts[type][code] ?? 0) + 1;
   }
+  if (chargeCode.charge_code_status) chargeCodeCounts[chargeCode.charge_code_status] = (chargeCodeCounts[chargeCode.charge_code_status] ?? 0) + 1;
   if ([payload.job_cost, payload.travel_cost, payload.total_cost].some((value) => typeof value === 'number')) {
     costEvidenceTotals.rows += 1;
     for (const field of ['job_cost', 'travel_cost', 'total_cost']) costEvidenceTotals[field] += Number(payload[field] ?? 0);
@@ -439,6 +473,7 @@ const dryRunReceipt = {
   parsed_rows: table.length - 1,
   evidence: { observations: observationsBatch.length, location_events: eventsBatch.length },
   classifications: classificationCounts,
+  charge_codes: chargeCodeCounts,
   electronic_lock_rows: classificationCounts.work_subject.electronic_lock ?? 0,
   physical_lock_rows: classificationCounts.work_subject.physical_lock ?? 0,
   work_order_candidates: proposalsBatch.filter((proposal) => proposal.target_type === 'workshop_work_order').length,
@@ -488,22 +523,6 @@ const importSchema = {
   })),
   resolved_mappings: resolvedMappings,
 };
-if (exportPlan) {
-  console.log(JSON.stringify({
-    mode: 'plan',
-    source_file: effectiveSourceLabel,
-    source_sha256: effectiveSourceHash,
-    source_sheet: sourceSheet || null,
-    manifest: importManifest,
-    schema: importSchema,
-    counts: { rows: table.length - 1, skipped, unresolved: skippedNoZone, duplicates: skippedDuplicate },
-    observations: observationsBatch,
-    events: eventsBatch,
-    proposals: proposalsBatch,
-  }));
-  process.exit(0);
-}
-
 const batchDefinition = {
   provider_organization_id: providerOrgId,
   client_organization_id: orgId,
@@ -517,6 +536,23 @@ const batchDefinition = {
   duplicate_count: skippedDuplicate,
   unresolved_count: skippedNoZone + unresolvedAliasRows,
 };
+if (exportPlan) {
+  console.log(JSON.stringify({
+    mode: 'plan',
+    batch: batchDefinition,
+    provider_organization_id: providerOrgId,
+    source_file: effectiveSourceLabel,
+    source_sha256: effectiveSourceHash,
+    source_sheet: sourceSheet || null,
+    manifest: importManifest,
+    schema: importSchema,
+    counts: { rows: table.length - 1, skipped, unresolved: skippedNoZone, duplicates: skippedDuplicate },
+    observations: observationsBatch,
+    events: eventsBatch,
+    proposals: proposalsBatch,
+  }));
+  process.exit(0);
+}
 
 async function managementQuery(query, operation) {
   if (useSupabaseCli) return runCliQuery(query);

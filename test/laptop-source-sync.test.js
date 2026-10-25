@@ -82,6 +82,20 @@ test('recent saves settle before becoming import candidates', async context => {
   assert.deepEqual(pendingSourceVersions(recent.state), []);
 });
 
+test('a matching receipt cannot acknowledge a source that became unavailable or is still saving', async context => {
+  const { state, scan } = await fixture(context);
+  const current = (await scan(state)).state;
+  const receipt = {
+    status: 'applied', receipt_id: 'receipt-1',
+    source_sha256: current.files['log.xlsx'].observed.sha256, source_relative_path: 'log.xlsx',
+  };
+  for (const availability of ['unavailable', 'settling']) {
+    current.files['log.xlsx'].availability = availability;
+    assert.throws(() => acknowledgeSourceVersion(current, 'log.xlsx', receipt), /matching applied import receipt/);
+    assert.equal(current.files['log.xlsx'].pending, true);
+  }
+});
+
 test('source traversal and symlink escape are refused', async context => {
   const { root, state } = await fixture(context);
   const outside = await mkdtemp(path.join(tmpdir(), 'fcm-source-outside-'));
