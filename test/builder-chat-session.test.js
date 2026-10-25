@@ -544,3 +544,31 @@ test('proposal requests are told apart from questions and status checks', () => 
   assert.equal(chat.proposeIntent('What is waiting on me?'), false);
   assert.equal(chat.proposeIntent('Where are the dispatch console styles?'), false);
 });
+
+test('explanations and negated requests are not mandatory proposals', () => {
+  assert.equal(chat.proposeIntent('How do I create a Builder job?'), false);
+  assert.equal(chat.proposeIntent("Don't propose a job yet, just look at the dispatch page"), false);
+  assert.equal(chat.proposeIntent('Can you propose a job for the dispatch spacing?'), true);
+});
+
+test('the drafted proposal honours explicit scope words and stays within proposal limits', () => {
+  const frontend = chat.draftProposalFromBrief('Propose a Builder job for frontend accessibility improvements on the roster screens.');
+  assert.equal(frontend.frontend_required, true);
+  assert.equal(frontend.backend_required, false);
+  const long = chat.draftProposalFromBrief(`Please propose a job to ${'tidy '.repeat(80)}. ${'Keep every existing behaviour. '.repeat(700)}`);
+  assert.ok(long, 'a long brief still yields a draft');
+  assert.ok(long.title.length <= 160 && !/OMITTED|…/.test(long.title));
+  assert.ok(long.task_description.length <= 8000);
+  assert.match(long.task_description, /more characters are in this Builder chat message/);
+});
+
+test('a plain-prose refusal to a proposal request is nudged, not returned as the answer', async () => {
+  const { store, model, deps } = setup([
+    'I cannot proceed; I do not have permission to modify the file.',
+    { tool: 'propose_job', args: { ...PROPOSAL, title: 'Lock the patrol sync target row', frontend_required: false, backend_required: true } },
+    { tool: 'reply', args: { message: 'I propose the migration above.' } },
+  ]);
+  await chat.processBuilderChatMessage({ store, message: ownerMessage(PATROL_BRIEF), deps });
+  assert.match(model.calls[1].request.messages.at(-1).content, /owner asked you to PROPOSE a job/);
+  assert.equal(store.rows.find(row => row.kind === 'proposal').payload.proposal.title, 'Lock the patrol sync target row');
+});

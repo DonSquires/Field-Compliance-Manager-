@@ -226,12 +226,18 @@ const INVESTIGATION = /\b(?:why|how (?:does|do))\b/i;
 // not a refusal: live thread 2026-10-25, qwen2.5-coder:7b read schema.sql 13 times and replied that
 // it had "no permission to modify the file" instead of proposing the fix it was asked for.
 const PROPOSE_REQUEST = /\b(?:propose|draft|plan|create|open|raise|queue|set up|make)\b[^.?!\n]{0,40}\b(?:builder\s+)?(?:job|build|fix|change)\b/i;
+const PROPOSE_NEGATED = /\b(?:don'?t|do not|does not|no need to|not yet|never|without|instead of|rather than|before you)\b[^.?!\n]{0,24}\b(?:propose|draft|plan|create|open|raise|queue|set up|make)\b|\b(?:propose|draft|create|open|raise|queue|make)\b[^.?!\n]{0,40}\b(?:job|build|fix|change)\b[^.?!\n]{0,12}\b(?:yet|later)\b/i;
+// "How do I create a job?" asks for an explanation; "Can you propose a job?" asks Bob to act.
+const INFORMATIONAL = /^\s*(?:how|what|why|when|where|which|who|is|are|does|do|did|should|would it)\b/i;
+const ADDRESSED_REQUEST = /\b(?:can|could|would|will) you\b|\bplease\b/i;
 function proposeIntent(text) {
-  return PROPOSE_REQUEST.test(String(text || ''));
+  const value = String(text || '');
+  if (!PROPOSE_REQUEST.test(value) || PROPOSE_NEGATED.test(value)) return false;
+  return !INFORMATIONAL.test(value) || ADDRESSED_REQUEST.test(value);
 }
 
-const FRONTEND_HINT = /\b(?:apps\/web|\.tsx|\.css|ui|ux|page|screen|panel|component|layout|button|composer)\b/i;
-const BACKEND_HINT = /\b(?:supabase|sql|migration|rpc|function|schema|table|edge function|worker|trigger|race|lock)\b/i;
+const FRONTEND_HINT = /\b(?:frontend|front-end|apps\/web|\.tsx|\.css|ui|ux|page|screen|panel|component|layout|button|composer)\b/i;
+const BACKEND_HINT = /\b(?:backend|back-end|supabase|sql|migration|rpc|function|schema|table|edge function|worker|trigger|race|lock)\b/i;
 // Last resort when the model never proposes: a draft built only from the owner's own brief and the
 // paths Bob actually read, clearly labelled, for the owner to review before Create job.
 function draftProposalFromBrief(brief, readPaths = []) {
@@ -239,9 +245,15 @@ function draftProposalFromBrief(brief, readPaths = []) {
   const first = (text.replace(/^\s*please\s+/i, '').split(/(?<=[.!?])\s|\n/)[0] || text)
     .replace(/^(?:investigate and\s+)?(?:propose|draft|plan|create|open|raise)\s+(?:a\s+)?(?:builder\s+)?job\s+(?:for|to)\s+/i, '')
     .replace(/\s*\([^)]*\)/g, '').trim();
-  const title = clip(first.charAt(0).toUpperCase() + first.slice(1), 150).replace(/[.:;,]+$/, '');
+  const title = (first.charAt(0).toUpperCase() + first.slice(1)).slice(0, 150).trim().replace(/[.:;,]+$/, '');
   const paths = [...new Set(readPaths)].slice(0, 12);
-  const task = [text, paths.length ? `Evidence Bob read in chat: ${paths.join(', ')}.` : null,
+  // validateProposal caps task_description at 8000 characters while the chat accepts 20000: keep the
+  // head of the brief and say plainly that the rest is in the thread, never drop the draft silently.
+  const BRIEF_CAP = 6800;
+  const ownerBrief = text.length > BRIEF_CAP
+    ? `${text.slice(0, BRIEF_CAP)}\n\n[Owner brief continues: ${text.length - BRIEF_CAP} more characters are in this Builder chat message. The specification step must read the full brief there before planning.]`
+    : text;
+  const task = [ownerBrief, paths.length ? `Evidence Bob read in chat: ${paths.join(', ')}.` : null,
     'Drafted from the owner brief because the chat model did not produce its own proposal; the specification gate must confirm the details against the code and schema before implementation.'].filter(Boolean).join('\n\n');
   const scope = text.replace(/\bno\s+(?:ui|ux|frontend|front-end|backend|schema)\s+changes?\b/gi, '');
   const frontend = FRONTEND_HINT.test(scope);
@@ -442,10 +454,12 @@ async function runBuilderChat({ store, thread, message, workspacePath, head, gat
     }
     unavailable = 0;
     const content = String(response.data?.content ?? '');
-    const call = parseToolCall(content);
+    let call = parseToolCall(content);
+    const prose = content.trim() && !content.trim().startsWith('{') && !/<\/?(?:tool_call|invoke|parameter|function)\b/i.test(content);
+    // A required proposal must not escape through plain prose: treat it as a reply so it is nudged or drafted.
+    if ((!call || typeof call.tool !== 'string') && prose && proposeMode && !proposal) call = { tool: 'reply', args: { message: content.trim() } };
     if (!call || typeof call.tool !== 'string') {
       unparseable++;
-      const prose = content.trim() && !content.trim().startsWith('{') && !/<\/?(?:tool_call|invoke|parameter|function)\b/i.test(content);
       // Plain prose is still an answer in a chat lane, but never one that claims an action.
       if (prose && !ACTION_CLAIM.test(content)) return { reply: clip(content.trim(), 8000), proposal, model: response.data?.model };
       messages.push({ role: 'assistant', content: content.slice(0, 4000) }, { role: 'user', content: JSON.stringify({ error: 'Reply with ONLY one JSON object {"thought": string, "tool": string, "args": object}. Use reply {message} to answer.' }) });
