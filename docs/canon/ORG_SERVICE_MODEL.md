@@ -242,3 +242,241 @@ least one place (a site address or an area) — a zone is not specifically
 required. Delivery schedules may be written directly
 (`manage_crm_agreement_delivery_schedule`) as well as through quote acceptance;
 both link the patrol config by `client_site_patrol_config.delivery_schedule_id`.
+
+## Ruling 2026-10-25 — Mainland Pest Control under R&M; group charge catalog
+
+Owner choice `mainland_parent=true`: Mainland Pest Control, an R&M
+subsidiary, has `parent_organization_id` = R&M (migration
+`20261024235708_rm_group_charge_scope.sql`). This uses the legacy tree path
+that R&M already uses for its client organisations. R&M masters and admins
+reach Mainland by tree descent. Mainland's users gain no upward access to R&M,
+and Mainland's own clients stay own-rooted. Other new organisations remain
+own-rooted under Model A.
+
+Owner choice `scope=rm_group`: the R&M group charge-code catalog (OneFortyOne
+numbering) is owned by R&M and copied to R&M's tree (including Mainland) and
+to the client side of every active operational agreement whose provider is in
+that tree. New children and new agreements receive it by trigger. Ending an
+agreement removes nothing. It is not a platform-wide template.
+
+## Ruling 2026-10-25 — Extra work outside the contract: Extra works orders, not variations
+
+A provider's operational agreement sets the contracted scope and, where agreed,
+a fixed monthly price. Work the client asks for outside that scope is **Extra**
+and is charged on top. It does not change the agreement.
+
+- **One-off Extra (dispatch).** A dispatcher classifies each dispatch job as
+  `contract` or `extra` (`dispatch_jobs.billing_basis`, NULL = not yet
+  classified) through `set_dispatch_job_billing_basis`. The console has no
+  default: the dispatcher must choose Contracted, Extra or Decide later,
+  because regular security work (patrols, gate open/close, lock checks and
+  replacement) is Contract and must not be swept into Extra. Changing an existing
+  classification needs a reason; every change is audited; an invoiced job is
+  corrected by credit note, not reclassified. Charge lines inherit the job's
+  basis.
+- **Temporary or ongoing Extra (agreement level).** An **Extra works order**
+  (`agreement_extra_work_orders`, managed only through
+  `manage_agreement_extra_work_order`) records what the client asked for, how
+  it was authorised (written, purchase order, verbal with a note, standing
+  instruction), its term, and an optional review date and default charge code.
+  It hangs off the base agreement, so jobs stay on the agreement that owns the
+  place. An Extra job may be linked to an order in force on the job's day.
+- **Not a variation.** An Extra works order never changes covered places,
+  modules, obligations or price. When Extra work becomes a permanent part of
+  the service, vary the agreement and end the order.
+- **OneFortyOne codes.** Lock replacement (42063) and gate open/closed remain
+  Contract: they are part of the regular security role. The OFO schedule's
+  Extra codes (for example Friday 41358/42061 and Monday 41320/42034 for
+  hunter access) stay Extra.
+- **Derived codes default to Extra (owner ruling 2026-10-25).** Charge codes
+  derived from the group catalog (`origin = derived`) carry
+  `billing_basis = Extra`, `basis_source = owner_default_2026-10-25`. A code
+  can be moved to Contract individually; OneFortyOne-origin codes keep the
+  client's own schedule.
+- **Invoicing respects the basis.** `generate_crm_invoice_from_completed_work`
+  bills only Extra callouts (labelled with their Extra works order reference),
+  never Contract callouts (covered by the agreement price), and refuses to run
+  while any callout in scope has no billing decision.
+- **Imported patrol rows are classified at read time.** The workbook's own
+  TYPE column wins; otherwise the charge code's catalog basis; otherwise
+  "not classified". Disagreements are counted, not hidden. The rule lives in
+  one place (`classify_patrol_cost_row_billing_basis`) so every view agrees.
+  `get_agreement_billing_basis_summary` reports this per month with callouts,
+  Extra works orders and the recorded contract price. These amounts are
+  service cost, not revenue, and imports still do not write finance directly.
+- **The finance period shows the split; cost lines are never split.**
+  Reconciled `finance_service_costs` lines stay one per agreement, month and
+  component. `get_finance_pl_period_billing_basis` derives Contract, Extra,
+  not classified and other from the linked source rows and the dispatch job's
+  billing choice, and its total must equal the P&L period's recorded cost.
+- **Open.** ~~The fixed monthly price is recorded as an accepted quote (none
+  recorded for OneFortyOne yet).~~ Recorded 2026-10-26 (see the next ruling).
+
+## Ruling 2026-10-26 — each client is billed on its own commercial model
+
+Not every client receives the OneFortyOne arrangement. How a client is billed
+is a property of its **service agreement**, held in
+`crm_commercial_settings.commercial_model` (one row per agreement) and set only
+through `set_agreement_commercial_terms` (provider administrator, audited,
+reason required to change an existing model). The four models:
+
+| Model | Meaning | Dispatch | Invoicing |
+|---|---|---|---|
+| `fixed_price_with_extras` | A fixed contract price covers the agreed service; anything outside is Extra. | Each callout is Contracted work or Extra (rules above). | Only Extra callouts are billed; Contract is covered by the price; unclassified callouts block invoicing. |
+| `pay_as_you_go` | All work charged at agreed rates each billing cycle. | No Contract/Extra decision; `set_dispatch_job_billing_basis` refuses. | Every completed callout is billed. |
+| `do_and_invoice` | Standing authority: R&M does what is needed without asking first and invoices the actual time, travel and materials. **Not** the same as pay as you go (see the ruling below). | No Contract/Extra decision. A job over the agreement's standing authority limit needs the client's approval reference (same field and RPC as per request). | Every completed callout is invoiced at actuals (line text `Actuals — …`); a job over the limit with no approval reference blocks invoicing. |
+| `per_request` | The client asks for each job. | The job carries the client's request or PO reference (`dispatch_jobs.client_order_reference`, via `set_dispatch_job_client_reference`, audited, reason to change, refused once invoiced). | Every completed callout is billed; a callout with no reference blocks invoicing and the reference is printed on the line. |
+
+- **No model yet = Contract/Extra.** An agreement with no model behaves as fixed
+  price plus Extra (`agreement_uses_contract_extra`), so nothing is billed by
+  accident while terms are being set.
+- **Terms live with the model.** Billing cycle, payment terms (0–120 days,
+  used for the invoice due date when an agreement is invoiced), invoice email,
+  standing PO, rates and notes are optional terms on the same row.
+- **Finance shows the difference.** `get_finance_pl_period_billing_basis` moves
+  all service cost on non-fixed agreements into a separate **billable, no
+  Contract/Extra split** bucket, broken down as agreed rates (pay as you go),
+  actuals (do and invoice) and per request, so Contract, Extra and not
+  classified only ever describe fixed-price clients. Totals still reconcile to
+  the period's recorded cost.
+- **R&M seed (owner confirmed, 2026-10-26).** Fixed price + Extra: OneFortyOne,
+  STAND, TDC, Birdhurst, Stringer, Wrattens, Thomas Bros, Taylors. Pay as you
+  go: NCC, R&M Other Private, Private Parks, Private Redvale-Merc. Do and
+  invoice: Tasman Pine Forests, Merril and Ring, NMDHB, NZ Health. Per request:
+  DOC, Fulton Hogan (Maitai Dam), Operation Lizard (DART). Billing cycle and
+  payment terms are seeded as defaults until confirmed per client.
+- **OneFortyOne contract price.** Recorded as an accepted quote (13,333 per
+  month, per the R&M finance workbook Sheet2), with its commercial snapshot.
+
+## Ruling 2026-10-26 — do and invoice is standing authority, not pay as you go
+
+The first build treated `do_and_invoice` exactly like `pay_as_you_go`. That was
+wrong. Pay as you go bills each job at the agreed rates. Do and invoice means
+the client has given R&M **standing authority** to do what is needed without
+asking first; R&M then invoices the **actual** time, travel and materials.
+The authority can be capped:
+
+- **Standing authority limit.** `crm_commercial_settings.standing_authority_limit`
+  (numeric, excl. GST, per job; NULL = no cap). A CHECK allows a value only on
+  `do_and_invoice` agreements. It is written only through
+  `set_agreement_commercial_terms` (audited); switching an agreement to another
+  model clears it.
+- **Over the limit needs approval.** A job whose charge lines (all of them,
+  invoiced or not) total more than the limit needs the client's approval
+  reference, recorded through `set_dispatch_job_client_reference` (audited).
+  Until then `generate_crm_invoice_from_completed_work` refuses to invoice the
+  client, and the agreement summary counts the job in
+  `jobs_over_standing_authority_without_approval`.
+- **Invoices say actuals.** Do-and-invoice lines are prefixed `Actuals — `
+  (plus `Client approval REF — ` when a reference exists).
+- **No limit is set for any client yet.** The R&M finance documents define no
+  standing authority amount, so the seeded agreements (Tasman Pine Forests,
+  Merril and Ring, NMDHB, NZ Health) have no cap until the owner sets one.
+
+Migration `20261026100000_do_and_invoice_standing_authority.sql` also fixed a
+defect found while previewing this: the unique index
+`idx_invoice_line_items_source_dispatch` allowed only one invoice line per
+dispatch job, but completion writes Attendance and Travel as separate charge
+lines, so any job with travel could not be invoiced. The index is now
+non-unique, and the invoice loop locks the charge lines it stamps.
+
+## Ruling 2026-10-25 — invoiced monthly, due on the 20th; all prices before GST
+
+Owner ruling (Don Squires): every R&M client is invoiced monthly. A month's work
+is invoiced in the first week of the next month and is **due on the 20th of
+that month** (October work, invoiced early November, due 20 November). All
+agreed rates, prices and limits are **before GST**; GST (15%) is added when the
+invoice is created. No standing authority limit applies unless one is entered.
+
+- **Due day of the following month.** `crm_commercial_settings.payment_due_day_of_month`
+  (1–28; NULL = use `payment_terms_days` after the invoice date). Set only
+  through `set_agreement_commercial_terms` (audited).
+- **One rule for both invoices.** `invoice_due_date(invoice_date, period_end,
+  terms_days, due_day)` gives the due day of the month after the invoiced
+  period, rolled to the next month when the invoice is raised after that day.
+  `generate_crm_invoice_from_completed_work` and
+  `generate_crm_invoice_from_agreement` both use it. Before this,
+  the agreement-price invoice always set the due date 14 days out and ignored
+  the agreement terms.
+- **R&M set.** Migration `20261027090000_invoice_due_twentieth.sql` set all 19
+  R&M agreements to monthly billing, due on the 20th (audited as
+  `agreement_commercial_terms_set`). New billing terms start on the 20th in the
+  form; saved day-count terms are kept until changed.
+
+## Ruling 2026-10-26 — client rates, and the monthly fee is drawn down to $0
+
+Owner ruling (Don Squires): each client's rates are in the invoice
+spreadsheets. When a client has no rate of its own, the **standing rate card**
+applies; that is what the rate bureau is for. On a fixed monthly fee, each
+contracted job or action charged to the client **draws down the fee**, so a
+fully delivered month nets to **$0**.
+
+- **If the month nets above $0**, contracted value was not delivered. R&M
+  credits it.
+- **If the month goes below $0**, the work above the fee is **Extra**. It must
+  be justified, unless the agreement already says it is billed. OneFortyOne's
+  does.
+
+How the build holds this:
+
+- **Rates.** `resolve_rate_rule` prefers a rule for the client over a rule with
+  no client, so rules with no client are the standing rate card. Client rates
+  taken from R&M's invoice workbooks are loaded as client-scoped `rate_rules`
+  (migration `20261029090000_client_rates_from_invoice_workbooks.sql`, each
+  rule audited with its workbook as provenance, all excl. GST):
+  - an hourly rule carries the client **and** a service type (patrol, security
+    enquiry, investigation, cordon guard, camera review). A client-only hourly
+    rule would outrank the standing specialist rules (engineering, excavator,
+    two-person), so specialist work stays on the standing card;
+  - a per-km rule is client-wide, because dispatch resolves travel without a
+    service type;
+  - a client with no workbook rate stays on the standing card;
+  - rates price new work and quotes; existing charge lines and imported rows
+    are not repriced.
+  - private community-camera customers each have their own client record and
+    agreement, so each is invoiced on its own ($85/hr, $1.26/km; migration
+    `20261029100000_private_camera_clients_and_payg_models.sql`). One-off jobs
+    (for example the Rotorua job at $160/hr) are priced on the job, not loaded
+    as client rates.
+- **Two-person work is separate lines (ruling 2026-10-25).** A job worked by
+  two people is billed as one line per person at that person's role rate, not
+  as one combined rate. The workbooks' $137.80 is engineer ($79.50) plus
+  officer ($58.30) ("eng+1"); $135 is engineer plus a second person at $55.50;
+  $166.60 (goat culling) is not yet explained. The build prices a dispatch job
+  for one officer today, so per-person lines need crew billing to be built;
+  until then the standing two-person rules remain.
+- **Drawdown only on a fixed fee (ruling 2026-10-25).** Pay-as-you-use work has
+  no fee to draw down. Only OneFortyOne is fixed price with Extra; STAND, TDC,
+  Birdhurst, Stringer, Wrattens, Thomas Bros and Taylors are pay as you go
+  (migration `20261029100000`, audited).
+- **Fee and work.** `get_agreement_fee_drawdown` reports each month's fee: the
+  accepted quote lines, or the commercial base rate. It reports contracted work
+  from three sources:
+  - imported patrol log rows classified Contract;
+  - Dispatch charge lines on the contract basis;
+  - patrol visit charge lines.
+- **Blockers.** The report lists what stops a month being settled:
+  - the month has not finished;
+  - unclassified log rows;
+  - undecided or unpriced callouts;
+  - unresolved patrol visits;
+  - no fee;
+  - no work.
+- **Settlement.** It applies only to `fixed_price_with_extras`.
+  `generate_crm_invoice_from_agreement` settles one whole calendar month once,
+  recorded in `agreement_fee_settlements`:
+  - a credit line for unused value;
+  - an Extra line for work above the fee, when billed;
+  - nothing, when absorbed.
+- **Who decides on work above the fee.**
+  `crm_commercial_settings.fee_overrun_policy` sets this per agreement:
+  - `bill_as_extra`: already agreed with the client;
+  - `justify` (the default): the invoicer bills it with a 10–500 character
+    reason, or absorbs it.
+- **Redoing a month.** Voiding the invoice frees the month to be settled again.
+- **No double billing.** The completed-work invoice no longer bills patrol
+  visits on these agreements, because they are drawn down against the fee.
+- **OneFortyOne.** Set to `bill_as_extra` in migration
+  `20261028090000_monthly_fee_drawdown.sql`, audited. It is the only R&M
+  fixed-price agreement; the others without a fee were pay as you use and
+  were switched to `pay_as_you_go` (migration `20261029100000`).

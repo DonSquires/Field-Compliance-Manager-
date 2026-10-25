@@ -227,6 +227,19 @@ and creation still requires a separate unambiguous affirmative. `No`,
 `No, cancel`, `cancel`, `stop`, `not now`, and `change the brief` never confirm
 Builder creation.
 
+**Owner ruling 2026-10-25 (supersedes the shared surface above).** The Bob
+Builder chat is independent of in-app Bob. In-app Bob (`onspace-ai-chat`, the
+OnSpace AI chat) is solely for users' in-app UX, agentic work, questions and
+research; it refuses `agent_mode: 'builder'` turns. The Builder page's chat is
+its own lane: `builder_chat_threads`/`builder_chat_messages` written only through
+owner-only `builder_chat_*` RPCs, answered by the control-plane worker
+(`builder-chat-session.js`) on the builder model chain with read-only build
+tools (code, git log, canon, Atlas, job ledger). It shares no conversation,
+memory or planner with in-app Bob. It can only *propose* a job; the owner's
+**Create job** click calls `bob-builder-control-room` and records the job on the
+proposal with `builder_chat_record_job`. It never edits, approves, merges or
+deploys, and a reply claiming it did is refused.
+
 Chat turns use a durable asynchronous handoff. The browser creates one
 tenant-scoped request ID; the Conductor records `queued`, returns an immediate
 acknowledgement, and claims that queued run once for background execution.

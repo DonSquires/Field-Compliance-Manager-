@@ -4,7 +4,7 @@ const os = require('node:os');
 const path = require('node:path');
 const { execFileSync } = require('node:child_process');
 const test = require('node:test');
-const { VERIFIED_GITHUB_EMAIL, branchNameForJob, builderCommitIdentity, createBranchWorkspace, createDetachedWorkspace, commitVerifiedPatch, publishWorkspaceBranch, createGiteaPullRequest, mergeGitHubPullRequest } = require('../builder-branch-workspace');
+const { VERIFIED_GITHUB_EMAIL, branchNameForJob, builderCommitIdentity, createBranchWorkspace, createDetachedWorkspace, commitVerifiedPatch, publishWorkspaceBranch, createGiteaPullRequest, mergeGitHubPullRequest, readGitHubPullRequestState } = require('../builder-branch-workspace');
 const { retireTerminalWorkspace } = require('../builder-branch-workspace');
 
 const patch = ['diff --git a/apps/web/src/example.ts b/apps/web/src/example.ts', '--- a/apps/web/src/example.ts', '+++ b/apps/web/src/example.ts', '@@ -1 +1 @@', '-export const value = 1;', '+export const value = 2;', ''].join('\n');
@@ -401,4 +401,26 @@ test('Bob refuses a changed-head, closed, or non-main GitHub pull request', asyn
     }), /not the verified open main-targeted change/);
     assert.equal(mergeRequested, false);
   }
+});
+test('readGitHubPullRequestState reports merged, closed and open PRs only for the configured repository', async () => {
+  const pulls = {
+    1: { merged: true, merged_at: '2026-10-25T02:40:00Z', merge_commit_sha: 'c'.repeat(40), merged_by: { login: 'DonSquires' }, head: { sha: 'd'.repeat(40) }, base: { ref: 'main' }, state: 'closed' },
+    2: { merged: false, merged_at: null, state: 'closed', closed_at: '2026-10-24T00:00:00Z' },
+    3: { merged: false, state: 'open', draft: true },
+  };
+  const requested = [];
+  const fetchImpl = async (url) => {
+    requested.push(url);
+    const number = Number(url.split('/').pop());
+    return { ok: Boolean(pulls[number]), status: pulls[number] ? 200 : 404, json: async () => pulls[number] || {} };
+  };
+  const read = (url) => readGitHubPullRequestState({ url, githubToken: 'token', owner: 'Owner', repo: 'repo', fetchImpl });
+  assert.deepEqual(await read('https://github.com/owner/repo/pull/1'), { state: 'merged', mergeSha: 'c'.repeat(40), mergedAt: '2026-10-25T02:40:00Z', mergedBy: 'DonSquires', headSha: 'd'.repeat(40), baseRef: 'main' });
+  assert.deepEqual(await read('https://github.com/owner/repo/pull/2'), { state: 'closed', closedAt: '2026-10-24T00:00:00Z' });
+  assert.deepEqual(await read('https://github.com/owner/repo/pull/3'), { state: 'open', draft: true });
+  assert.equal((await read('https://github.com/owner/repo/pull/4')).state, 'unknown');
+  assert.equal((await read('https://github.com/someone/else/pull/1')).state, 'unknown');
+  assert.equal((await readGitHubPullRequestState({ url: 'https://github.com/owner/repo/pull/1', githubToken: '', owner: 'owner', repo: 'repo', fetchImpl })).state, 'unknown');
+  assert.equal(requested.length, 4, 'foreign or unconfigured PRs are never fetched');
+  assert.ok(requested.every(url => url.startsWith('https://api.github.com/repos/Owner/repo/pulls/')));
 });

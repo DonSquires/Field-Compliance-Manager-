@@ -16,7 +16,79 @@ actually work with a working org and its data and operations." Extended-scope,
 multi-session task — take as many turns as needed; real, verified progress each
 turn beats false completeness.
 
-## PATROL SOURCE ROW SYNC (2026-10-25) - BUILT AND VERIFIED, NOT APPLIED
+## R&M GROUP CHARGE CODES (2026-10-25) - APPLIED, PR STACKED ON #190
+
+Owner decisions: OneFortyOne numbers are the group standard; Mainland Pest
+Control (an R&M subsidiary) numbers are used for pest-control jobs; logic
+assigns every other code. "Removal" means removing a covert camera or CCTV
+device. Gate and sign work is engineering (maintenance or manufacture) unless
+the row only reports a gate open/live or closed/dead, which is patrol
+reporting. Equipment and materials are separate dimensions; ammunition is a
+material recorded with its calibre.
+
+- Migration `20261024233829_rm_charge_code_catalog.sql`, applied and
+  live-verified (`supabase/tests/20261024233829_rm_charge_code_catalog.sql`);
+  `schema.sql` regenerated.
+- Code = source digit + two-digit subject + two-digit issue (OFO scheme):
+  4 sources, 29 subjects (new ones from 27), 100 issues (new ones from 76),
+  421 codes. OneFortyOne's List sheet has 269 code rows; Security | General |
+  Intel (41535) appears twice, so 268 distinct OneFortyOne codes are
+  reproduced unchanged, plus 153 derived codes.
+- Scope (owner choice `rm_group`, migration
+  `20261024235708_rm_group_charge_scope.sql`, applied and live-verified): R&M
+  owns the catalog; R&M's tree (including Mainland) and every active
+  operational client of a tree member hold synchronised copies. 35
+  organisations live, 19,390 rows. New children and agreements are seeded by
+  trigger.
+- Labels resolve through aliases (plurals, typos, "- company" to "- R&M") and
+  combination aliases (Gate Live/Dead to Open/Closed, camera Removal to
+  Uninstall 40570/30570, Lock "E-Lock ..." to the E-Lock subject).
+- Pest codes carry the real OneFortyOne client GL where the MPC log evidences
+  it (Goat 3609, Ammunition 3606, Monitoring 3758, others 3615). Each species
+  has its own charge code; there are no per-species GL numbers. Derived codes
+  default to Extra (owner ruling 2026-10-25, migration 20261025091600).
+- Mainland Pest Control (owner choice `mainland_parent=true`) now has
+  `parent_organization_id` = R&M (level 2). R&M masters/admins reach it by
+  tree descent; Mainland users gain no upward access. Ruling recorded in
+  `docs/canon/ORG_SERVICE_MODEL.md`.
+- New catalog types: `equipment_type`, `material_type` (ammunition with
+  calibre, quantity, unit price). New activities `uninstall`, `manufacture`;
+  new subject `sign`. Rules cannot target charge codes; the importer composes
+  them (`scripts/patrol-charge-code.mjs`) and parses stated material use only
+  (`scripts/patrol-materials.mjs`).
+- Coverage: 38,631 of 38,642 observed workbook rows resolve. 11 stay
+  unresolved for review (blank/#N/A subject, "Gates / Signs", "Keys / Locks
+  /Pins"). DART 2026 plan: 1,105 of 1,105 rows catalogued.
+- Sync impact: the row fingerprint covers derived payload keys, so the next
+  sync versions or holds existing rows whose derived codes changed. Step B
+  must separate derived reclassification from real source edits.
+
+## DART BUSINESS-MODEL BUILD-OUT (2026-10-25) - STEP A APPLIED
+
+Owner decisions: build all five steps in order (A codes, B legacy correction
+and supersede, C animal outcomes, D stations, E finance), each as a reviewed
+PR. The 2025 sheet is canonical for the 681 overlapping visits. Sites 1-11 are
+mixed traps and cameras. Bait quantities are not recorded yet, so none are
+inferred.
+
+### Step A - pest-control vocabulary (PR #190, stacked on #189)
+
+- Migration `20261024224750_rm_pest_control_vocabulary.sql`, applied and
+  live-verified; `schema.sql` regenerated. It adds:
+  - work_subject codes `pest_device`, `animal`, `habitat`;
+  - work_activity codes `device_reset`, `device_unset`, `rebait`, `prefeed`,
+    `removal` (work-order candidate), `device_inactive`, `access_blocked`,
+    `cull`, `sighting`, `pest_patrol`;
+  - a new `biosecurity_species` catalog, seeded to every organisation.
+- R&M `rm_patrol_log` rules key on the labels from the master charge-code
+  file (`Misc\MASTER`), never on charge-code numbers, because the numbers are
+  renumbered between workbook versions.
+- DART 2026 simulation: `other/other` went from 511 rows to 0. Animal rows
+  now carry species.
+- Existing events are unchanged. Step B reclassifies them through a governed
+  correction with versions and audit.
+
+## PATROL SOURCE ROW SYNC (2026-10-25) - APPLIED (PR #189), LEGACY CORRECTION IS STEP B
 
 Owner requirement: "if a row has been updated, it will need to be updated in
 fcm as well so we need to know if a row was updated."
@@ -2584,3 +2656,278 @@ service-role write was used.
   readiness read models, then rolled back; zero verification receipts persisted.
   The post-release Atlas refresh added the missing UI-to-RPC edge and a second
   refresh reported zero capability, edge, or retirement changes.
+
+## OneFortyOne contract versus Extra, and Extra works orders (2026-10-25)
+
+**Evidence searched (R&M corpus).** OFO Security Proposal 2021, Tasman Pine
+proposal, Security Packages, Pest Control Proposal (hourly per person, per km,
+ammunition extra), RMSI update, Public Hunting 2024 ("vetting and
+patrolling/camera work is on-charged to OFO each month") and Public Hunting
+Locks. No signed contract and no written Contract/Extra split was found.
+
+**Working source of truth.** The OFO workbook `List` sheet, column 16: 51
+Contract, 217 Extra and 1 N/A codes, already loaded as
+`reference_codes.external_refs.billing_basis`. `Sheet2` tracks a fixed monthly
+price. The 2026 log shows Friday lock-off (41358, 42061) and Monday lock-on
+(41320, 42034) for hunter access, all Extra. Owner ruling: 42063 Lock Replace
+and Gate Open/Closed stay Contract (regular security role). No code changes.
+
+**Built (migration `20261025004211_agreement_extra_work_orders.sql`, applied
+live; behavioural test passes live under rollback).**
+- `agreement_extra_work_orders` and `manage_agreement_extra_work_order`
+  (create/update/end, idempotent, optimistic concurrency, audited, provider
+  admins only, references EW-001 per agreement).
+- `dispatch_jobs.billing_basis` / `extra_work_order_id` and
+  `set_dispatch_job_billing_basis`. Direct writes are blocked by trigger;
+  charge lines inherit the basis.
+- UI: Client Portfolios -> agreement setup -> **Extra works** tab (list with
+  status, authorise/edit/end with reason, empty and error states). Dispatch
+  Console: required Billing choice with no default (Contracted, Extra, Decide
+  later; owner ruling 2026-10-25 keeps lock replace and gate open/closed as
+  Contract) and Extra
+  works order picker on job creation; basis chip in the job list; Billing
+  section in the job dialog to set or change with a reason.
+
+### Billing basis linked to finance (2026-10-25, migration 20261025091600)
+
+- 153 derived codes x 35 organisations (5,355 rows) set to Extra with
+  `basis_source = owner_default_2026-10-25`. OneFortyOne codes unchanged
+  (51 Contract, 216 Extra, 40000 N/A per organisation).
+- `generate_crm_invoice_from_completed_work` was sweeping every uninvoiced
+  callout regardless of basis, so Contract callouts would have been billed on
+  top of the fixed price. It now bills Extra only (line text "Extra EW-001 —
+  ..."), skips Contract, blocks on unclassified, and audits the Contract lines
+  not billed.
+- Finance -> Completed work panel: Contract callouts no longer count as money
+  waiting; clients with unclassified callouts show "N callouts need billing
+  set in Dispatch" and the button reads "Set billing first".
+- Agreement setup -> **Contract and Extra** tab
+  (`get_agreement_billing_basis_summary`, provider finance admin only):
+  contract price card, Contract/Extra/not-classified cost cards, what needs
+  attention, callouts by basis, Extra works orders, and the imported log by
+  month. Period: last 12 months, this year, or all.
+- OneFortyOne live read (all periods, recorded service cost): Contract
+  232,884.06; Extra 155,911.38; not classified 63,746.30 (2,098 rows, mostly
+  early-2025 three-digit codes with no TYPE); 28 rows where TYPE says Extra but
+  the code says Contract. No contract price recorded.
+- Atlas: new RPC `get_agreement_billing_basis_summary` (called by
+  `CrmAgreementBillingPanel`); `generate_crm_invoice_from_completed_work`
+  now reads `agreement_extra_work_orders` and the charge-line basis. Refresh
+  after merge.
+
+**Step E (finance period split) - done 2026-10-25.** Migration
+`20261025120000_finance_period_billing_basis.sql` (applied live, live test
+passed, `schema.sql` regenerated):
+- One shared rule, `classify_patrol_cost_row_billing_basis` (internal, not an
+  API): workbook TYPE first, then the provider charge-code basis, else not
+  classified; flags a conflict when both disagree. `get_agreement_billing_basis_summary`
+  now uses it, so the agreement tab and finance can never disagree.
+- New read-only RPC `get_finance_pl_period_billing_basis(p_pl_period_id)`
+  (active finance administrator of the period's organisation, same gate as
+  `get_finance_pl_period_summary`). The 501 reconciled `patrol_log` lines in
+  `finance_service_costs` are **not split or rewritten**; the split is derived
+  from their linked applied source rows. Dispatch cost lines follow the job's
+  billing choice; timesheet, overhead and manual cost is shown as "other".
+  Totals reconcile to the P&L summary `total_cost` (asserted in the test).
+- Finance -> money overview: new **Contract and Extra this period** panel
+  (`FinancePeriodBillingBasisPanel`) under the dashboard, with loading,
+  error-with-retry and empty states, a split bar, notes for unclassified,
+  conflicting and unpriced amounts, and a per-agreement table that stacks on
+  small screens.
+- Live read, all periods, all agreements (recorded service cost NZ$927,867.27):
+  Contract 233,500.40; Extra 157,904.80; not classified 536,462.07 (18,772
+  rows, mostly agreements whose workbooks have no TYPE column and codes outside
+  the catalog); other 1,680.00 (one estimate line); 28 conflicts. OneFortyOne
+  alone is unchanged from the figures above.
+- Atlas: new edges to expect after refresh - `FinancePeriodBillingBasisPanel`
+  calls `get_finance_pl_period_billing_basis`, which reads
+  `finance_service_costs`, `file_import_finance_cost_rows`, `dispatch_jobs`,
+  `reference_codes`, `quotes`/`quote_lines`. Existing finance readers
+  (`calculate_cost_centre_roll`, `calculate_service_profitability_snapshot`,
+  `close_finance_pl_period`, budget variance) are untouched because the cost
+  lines are unchanged.
+
+**Open.** ~~Record the OneFortyOne fixed monthly price (13,333 per Sheet2) as an
+accepted quote (owner decision)~~ done 2026-10-26 (Step F); review the 28 TYPE/code conflicts; classify
+the non-OneFortyOne codes that sit outside the charge-code catalog.
+
+**Step F (billing follows each client's commercial model) - done 2026-10-26.**
+Owner ruling: OneFortyOne has a contract plus Extra; other clients are pay as
+you go, do and invoice, or per request, so they must not get the OneFortyOne
+treatment. Evidence: the R&M finance workbooks (FS-2024/25/26), the RFQ and
+the terms documents (session copies only; nothing promoted from them except the
+owner-approved OneFortyOne price). Migration
+`20261026090000_agreement_commercial_model.sql` (applied live; its own test and
+the 091600, 120000 and Extra works tests pass live, rolled back; `schema.sql`
+regenerated):
+- `crm_commercial_settings.commercial_model` (4 values, NULL = not set),
+  `updated_at`, unique per agreement. Write path:
+  `set_agreement_commercial_terms` (provider admin, whitelisted terms,
+  reason to change a model, audited `agreement_commercial_terms_set`).
+- `dispatch_jobs.client_order_reference` (1-120 chars), written only by
+  `set_dispatch_job_client_reference` (audited, reason to change, refused once
+  invoiced, protected by the billing-basis guard trigger).
+- `set_dispatch_job_billing_basis` refuses non-fixed agreements.
+  `generate_crm_invoice_from_completed_work` bills every callout on non-fixed
+  agreements, blocks per-request callouts with no reference, prints
+  `Client ref X` on the line and uses the agreement's payment terms for the due
+  date. `get_agreement_billing_basis_summary` returns the terms;
+  `get_finance_pl_period_billing_basis` adds a **billable at agreed rates**
+  bucket and the model per agreement.
+- Live seed: 19 agreements set (see the canon table in `ORG_SERVICE_MODEL.md`),
+  one audit row each. OneFortyOne contract price recorded as an accepted quote
+  (subtotal 13,333 + GST) with its commercial snapshot and an
+  `agreement_contract_price_recorded` audit row.
+- UI:
+  - Dispatch: jobs on non-fixed agreements show the model chip instead of
+    Contract/Extra; the create form only asks for Contracted/Extra on fixed
+    agreements; per-request jobs get a client reference field on create and
+    an add/change control (reason to change) in the job detail. Loading and
+    load-failure states block creating a job until the model is known.
+  - Agreement setup: the tab is now **Billing**: "How this client is billed"
+    (model cards with plain-language help, cycle, payment days, invoice email,
+    standing PO, rates, notes; client-side checks mirror the RPC) above the
+    summary. Non-fixed agreements see "Work billed at agreed rates" and no
+    Extra works tab or Contract/Extra warnings.
+  - Finance: Completed work counts rated callouts and holds unreferenced
+    per-request ones ("Fix in Dispatch first"); the period panel shows the new
+    bucket and the model per agreement.
+- Tests: web `tsc` clean, vitest 381 files / 1,833 tests pass.
+- Atlas (refresh after merge): new RPCs `set_agreement_commercial_terms`
+  (called by `CrmAgreementCommercialTermsPanel`) and
+  `set_dispatch_job_client_reference` (called by `DispatchBillingBasis`);
+  `crm_commercial_settings` is now read by `commercialModel.ts`,
+  `generate_crm_invoice_from_completed_work`, `set_dispatch_job_billing_basis`
+  and both summary RPCs.
+
+**Step G (do and invoice is standing authority, not pay as you go) - done 2026-10-26.**
+A review found Step F billed `do_and_invoice` exactly like pay as you go. Ruling
+recorded in `ORG_SERVICE_MODEL.md`. Migration
+`20261026100000_do_and_invoice_standing_authority.sql` (rolled-back preview,
+then applied live; its own test and the 090000, 091600 and 120000 tests pass
+live, rolled back; `schema.sql` regenerated):
+- `crm_commercial_settings.standing_authority_limit` (NULL = no cap; CHECK: only
+  on do and invoice), set and cleared through `set_agreement_commercial_terms`.
+- Internal helper `dispatch_job_over_standing_authority` (postgres only).
+- `generate_crm_invoice_from_completed_work` blocks over-limit jobs with no
+  client approval reference, prints `Actuals — ` lines and audits the count;
+  `get_agreement_billing_basis_summary` returns the limit and the jobs waiting
+  for approval; `get_finance_pl_period_billing_basis` splits billable cost into
+  agreed rates / actuals / per request (totals still reconcile).
+- Defect fixed: the unique index `idx_invoice_line_items_source_dispatch`
+  allowed one invoice line per dispatch job, so a job with Attendance plus
+  Travel could not be invoiced. Now non-unique; charge lines are locked while
+  stamped.
+- UI: the billing terms panel shows a "Standing authority limit per job"
+  field only for do and invoice ("No limit" when blank); Dispatch reads "Do and
+  invoice · standing authority · invoiced at actuals" and offers "Record client
+  approval" with the limit in the help; Completed work counts "callouts at
+  actuals" and holds over-limit jobs ("Fix in Dispatch first"); the agreement
+  Billing tab reads "Work invoiced at actuals" and warns about jobs waiting for
+  approval; the finance period bucket is "Billable, no Contract/Extra split"
+  with the per-model breakdown.
+- Tests: web `tsc` clean, vitest 382 files / 1,846 tests pass.
+- Atlas (refresh after merge): `crm_commercial_settings.standing_authority_limit`
+  read by `commercialModel.ts`, `CrmAgreementCommercialTermsPanel` and the
+  invoice/summary RPCs; new function `dispatch_job_over_standing_authority`.
+
+**Step H (invoiced monthly, due on the 20th; all before GST) - done 2026-10-25.**
+Owner ruling: every client is invoiced monthly; a month's work is invoiced in
+the first week of the next month and due on the 20th (October work due 20
+November); all rates and prices are before GST; no standing authority limit
+unless one is entered.
+
+- Migration `20261027090000_invoice_due_twentieth.sql` (applied live; live test
+  `supabase/tests/20261027090000_invoice_due_twentieth.sql` passes): new
+  `crm_commercial_settings.payment_due_day_of_month` (1-28), helper
+  `invoice_due_date`, used by both invoice generators. The agreement-price
+  invoice previously ignored the agreement terms (always 14 days); fixed.
+- All 19 R&M agreements set to monthly, due on the 20th (audited).
+- UI: billing terms ask "Payment due" (day of the month after the work, or
+  days after invoice) with a worked example; rates labelled excl. GST; CRM
+  invoice readiness shows the due rule and "prices before GST".
+- Confirmed: 13,333 per month is before GST. Standing authority: no limit for
+  any client unless entered.
+
+**Step I (monthly fee drawdown; standing rate card fallback) - done 2026-10-26.**
+Owner ruling: client rates come from the spreadsheets, and the standing rate
+card applies when a client has none. Each contracted job draws down the fixed
+monthly fee to $0:
+- unused value is credited;
+- work above the fee is Extra, justified unless pre-agreed (OneFortyOne).
+
+- Migration `20261028090000_monthly_fee_drawdown.sql` is applied live, and its
+  live test `supabase/tests/20261028090000_monthly_fee_drawdown.sql` passes.
+  - New: `crm_commercial_settings.fee_overrun_policy`; table
+    `agreement_fee_settlements` (RLS, admin read); `get_agreement_fee_drawdown`.
+  - Changed: `generate_crm_invoice_from_agreement` now takes
+    `p_overrun_decision` / `p_overrun_justification`, settles whole months
+    once, and is idempotent.
+  - Changed: the completed-work invoice skips patrol visits on fixed-fee
+    agreements.
+- OneFortyOne is set to `bill_as_extra` (audited). Checked against live data
+  in a rolled-back transaction:
+
+  | Month   | Result                                            |
+  |---------|---------------------------------------------------|
+  | 2026-09 | Credit $3,859.80, blocked by unclassified rows and an undecided callout |
+  | 2026-08 | Credit $4,412.77                                  |
+  | 2026-07 | Credit $1,693.12                                  |
+  | 2026-05 | Overrun $1,015.52                                 |
+  | 2025-12 | Overrun $3,276.57                                 |
+
+- UI:
+  - Billing terms has "Contracted work above the monthly fee".
+  - The agreement Billing tab has a "Monthly fee drawdown" table.
+  - The CRM invoice dialog asks for the month (default: last month) and
+    previews the fee, the work by source and the balance. It lists blockers
+    and asks "Bill as Extra" (with a reason) or "Absorb" for an overrun.
+- Rates: `resolve_rate_rule` already falls back to the rules with no client
+  (the standing rate card). R&M's 19 rules are all of that kind.
+- Still open:
+  - Per-client spreadsheet rates: done in Step J.
+  - The other fixed-price clients have no monthly fee recorded.
+  - Imported log rows and FCM-native lines are shown by source so that
+    transition-period double counting is visible.
+
+**Step J (client rates from the invoice workbooks) - done 2026-10-29.**
+Rates were read locally from the `Invoice Spreadsheets` workbooks (formulas,
+and cost / hours or km), nothing sent externally. Migration
+`20261029090000_client_rates_from_invoice_workbooks.sql` is applied live and
+its test `supabase/tests/20261029090000_client_rates_from_invoice_workbooks.sql`
+passes live. 23 client rules, each audited with its workbook, all excl. GST:
+
+| Client | Hourly (patrol, enquiry, investigation, cordon, camera review) | Travel | From |
+|--------|------|--------|------|
+| OneFortyOne | $58.30 | standing $1.04/km already matches | 2025-04-01 |
+| STAND (PF Olsen, workbook folder PFO) | $55.00 | $0.99/km | 2025-11-01 |
+| DART (Kea Conservation Trust, Operation Lizard) | $62.50 | $0.99/km | 2025-10-01 |
+| Nelson City Council | $60.00 | $0.99/km | 2026-08-01 |
+
+- Specialist work (engineering $79.50, excavator $116.60, two-person rates)
+  and the alarm/incident callout rate stay on the standing card.
+- Clients with no workbook rate (TDC Rabbit Island and others) use the
+  standing card; parts lists (Birdhurst, Goodmans, Staples) are not rates.
+- The CRM Finance tab's "Billing rates" now says the standing card applies
+  where no client rate exists, and shows "excl. GST" and the effective date.
+- Only new work and quotes use these rates; existing lines are not repriced.
+- Owner answers 2026-10-25, migration
+  `20261029100000_private_camera_clients_and_payg_models.sql` (applied live;
+  test passes live):
+  - Private community-camera customers: new clients "Private - Barber
+    (Motueka)", "Private - Coppins", "Private - Kaiteriteri", each with an
+    accepted pay-as-you-go agreement and $85/hr + $1.26/km from 2025-12-01. The
+    "R&M Other Private Clients" umbrella gets the same rates (on file since
+    wave 2). No sites yet: the workbooks give no address.
+  - Raptor Rotorua ($160/hr) is a one-off: not loaded.
+  - OneFortyOne's $137.80 = engineer + officer ("eng+1"); $135 = engineer +
+    $55.50 second person; $166.60 (goat cull) unexplained. Ruling: two-person
+    work is one line per person. Build needed: crew billing on dispatch jobs
+    (today one officer per job).
+  - STAND, TDC, Birdhurst, Stringer, Wrattens, Thomas Bros and Taylors are pay
+    as you go (no drawdown); OneFortyOne is the only fixed-price agreement.
+- Not loaded: OneFortyOne's pre-April-2025 $55 / $0.99 history.
+
+**Still to confirm or build.** GL codes and financial year from the
+statements; the 28 TYPE/code conflicts; crew (per-person) billing lines; the
+$166.60 rate; site addresses for the private camera clients.

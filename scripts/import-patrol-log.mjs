@@ -26,6 +26,8 @@ import { tmpdir } from 'node:os';
 import { basename, join } from 'node:path';
 import ExcelJS from 'exceljs';
 import { classifyPatrolWork } from './patrol-work-classifier.mjs';
+import { buildChargeCatalog, composeChargeCode } from './patrol-charge-code.mjs';
+import { materialsUsed } from './patrol-materials.mjs';
 import { buildPatrolImportProposals } from './patrol-import-proposals.mjs';
 import { aucklandInstantFromLocalParts } from './rm-photo-matcher.mjs';
 
@@ -200,10 +202,11 @@ function parseImportContextRows(rows) {
   const sourceProfile = rows.find((row) => row.record_type === 'source_profile')?.payload ?? null;
   const personAliases = Object.fromEntries(rows.filter((row) => row.record_type === 'person_alias').map((row) => [row.payload.alias_norm, row.payload.user_profile_id]));
   const classificationRules = rows.filter((row) => row.record_type === 'classification_rule').map((row) => row.payload);
+  const chargeCatalogRows = rows.filter((row) => row.record_type === 'charge_catalog').map((row) => row.payload);
   if (!sourceProfile || sourceProfile.parser !== 'csv' || typeof sourceProfile.column_mappings !== 'object' || typeof sourceProfile.target_mappings !== 'object') throw new Error(`No active CSV source profile is configured for ${classificationProfile}`);
   if (Object.keys(personAliases).length === 0) throw new Error(`No person aliases are configured for ${classificationProfile}`);
   if (classificationRules.length === 0) throw new Error(`No classification rules are configured for ${classificationProfile}`);
-  return { sourceProfile, personAliases, classificationRules };
+  return { sourceProfile, personAliases, classificationRules, chargeCatalogRows };
 }
 
 async function loadImportContext() {
@@ -247,6 +250,13 @@ WHERE rule.organization_id = '${providerOrgId}'::uuid
   AND rule.source_profile = '${profile}'
   AND rule.active
   AND code.is_active
+UNION ALL
+SELECT 'charge_catalog',
+       jsonb_build_object('id', code.id, 'code_type', code.code_type, 'code', code.code, 'external_refs', code.external_refs)
+FROM public.reference_codes code
+WHERE code.organization_id = '${providerOrgId}'::uuid
+  AND code.code_type IN ('charge_source', 'charge_subject', 'charge_issue', 'charge_code')
+  AND code.is_active
 ) records
 ORDER BY record_type,
   coalesce((payload->>'priority')::integer, 0),
@@ -261,11 +271,12 @@ ORDER BY record_type,
   return parseImportContextRows(rows);
 }
 
-const { sourceProfile, personAliases, classificationRules } = await loadImportContext();
+const { sourceProfile, personAliases, classificationRules, chargeCatalogRows } = await loadImportContext();
+const chargeCatalog = buildChargeCatalog(chargeCatalogRows);
 const actorId = sourceProfile.import_actor_id;
 if (!/^[a-f0-9]{8}-[a-f0-9]{4}-[1-5][a-f0-9]{3}-[89ab][a-f0-9]{3}-[a-f0-9]{12}$/i.test(actorId ?? '')) throw new Error(`Source profile ${classificationProfile} has no valid import actor`);
 const importConfigurationHash = createHash('sha256')
-  .update(JSON.stringify({ sourceProfile, personAliases, classificationRules, sourceColumnAliases }))
+  .update(JSON.stringify({ sourceProfile, personAliases, classificationRules, sourceColumnAliases, ...(chargeCatalogRows.length ? { chargeCatalogRows } : {}) }))
   .digest('hex');
 
 const sourceBytes = readFileSync(inputPath);
@@ -322,7 +333,8 @@ const eventsBatch = [];
 const proposalsBatch = [];
 const seenExternalRefs = new Set();
 const unresolvedAliasValues = new Set();
-const classificationCounts = { work_subject: {}, work_activity: {} };
+const classificationCounts = { work_subject: {}, work_activity: {}, biosecurity_species: {}, equipment_type: {}, material_type: {} };
+const chargeCodeCounts = {};
 const costEvidenceTotals = { job_cost: 0, travel_cost: 0, total_cost: 0, rows: 0 };
 let skipped = 0;
 let skippedNoZone = 0;
@@ -353,7 +365,10 @@ for (const [rowIndex, r] of table.slice(1).entries()) {
   const plates = regPlates.length ? regPlates : extractPlates(comments);
   const primaryPlate = plates[0] ?? null;
   const isCamera = /^camera$/i.test(patroller);
-  const workClassification = classifyPatrolWork({ subject: r[col.subject], issue: r[col.issue], description: comments }, classificationRules);
+  const workClassification = classifyPatrolWork({ subject: r[col.subject], issue: r[col.issue], description: comments, source: col.workSource === -1 ? null : r[col.workSource] }, classificationRules);
+  const chargeCode = composeChargeCode({ source: col.workSource === -1 ? null : r[col.workSource], subject: r[col.subject], issue: r[col.issue] }, chargeCatalog);
+  const { material_type_detail_fields: materialDetailFields, ...workCodes } = workClassification;
+  const materials = materialsUsed(workCodes.material_type_code, materialDetailFields, comments);
   // Some rows record TWO officers on a joint patrol, separated by a newline/comma in one cell
   // (e.g. "Colin Eathorne\nWade Sutherland-Berkett") - take the first name that resolves to a
   // known officer rather than requiring the whole raw cell to match a single known name exactly.
@@ -399,12 +414,16 @@ for (const [rowIndex, r] of table.slice(1).entries()) {
           }])),
       } : {}),
     } : {}),
-    ...workClassification,
+    ...workCodes,
+    ...chargeCode,
+    ...(materials.length ? { materials_used: materials } : {}),
   };
 
-  for (const [type, code] of [['work_subject', workClassification.work_subject_code], ['work_activity', workClassification.work_activity_code]]) {
+  for (const type of Object.keys(classificationCounts)) {
+    const code = workCodes[`${type}_code`];
     if (code) classificationCounts[type][code] = (classificationCounts[type][code] ?? 0) + 1;
   }
+  if (chargeCode.charge_code_status) chargeCodeCounts[chargeCode.charge_code_status] = (chargeCodeCounts[chargeCode.charge_code_status] ?? 0) + 1;
   if ([payload.job_cost, payload.travel_cost, payload.total_cost].some((value) => typeof value === 'number')) {
     costEvidenceTotals.rows += 1;
     for (const field of ['job_cost', 'travel_cost', 'total_cost']) costEvidenceTotals[field] += Number(payload[field] ?? 0);
@@ -454,6 +473,7 @@ const dryRunReceipt = {
   parsed_rows: table.length - 1,
   evidence: { observations: observationsBatch.length, location_events: eventsBatch.length },
   classifications: classificationCounts,
+  charge_codes: chargeCodeCounts,
   electronic_lock_rows: classificationCounts.work_subject.electronic_lock ?? 0,
   physical_lock_rows: classificationCounts.work_subject.physical_lock ?? 0,
   work_order_candidates: proposalsBatch.filter((proposal) => proposal.target_type === 'workshop_work_order').length,
