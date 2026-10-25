@@ -5,7 +5,7 @@ import BuilderControlRoomPage from './BuilderControlRoomPage';
 
 const { invoke } = vi.hoisted(() => ({ invoke: vi.fn() }));
 vi.mock('../lib/supabase', () => ({ supabase: { functions: { invoke } } }));
-vi.mock('../components/BobPanel', () => ({ BobPanel: () => null }));
+vi.mock('../components/BuilderChatPanel', () => ({ BuilderChatPanel: () => null }));
 vi.mock('../components/ChangeRequestQueue', () => ({ ChangeRequestQueue: () => null }));
 afterEach(() => { cleanup(); vi.resetAllMocks(); });
 

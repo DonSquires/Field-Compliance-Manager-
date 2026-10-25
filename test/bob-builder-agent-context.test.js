@@ -68,3 +68,9 @@ test('Bob proposals provide clickable choices and state the owner-controlled mer
   assert.match(source, /Deployment remains a separate release-lane receipt/);
   assert.doesNotMatch(source, /I merge it myself and the release lane puts it live/);
 });
+test('the in-app OnSpace chat refuses Builder turns before any conversation or model work', () => {
+  const guard = source.indexOf("if (body?.context?.agent_mode === 'builder')");
+  assert.ok(guard > 0, 'builder turns are refused');
+  assert.ok(guard < source.indexOf('const agentWorkspaceContext = safeAgentWorkspaceContext(body.context);'), 'refused before context, conversation or model work');
+  assert.match(source.slice(guard, guard + 600), /error: 'builder_lane_separate'[\s\S]*409/);
+});

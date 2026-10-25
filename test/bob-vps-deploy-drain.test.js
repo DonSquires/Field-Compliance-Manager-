@@ -21,7 +21,7 @@ test('deploy builds before checking idle, immediately before replacing the contr
   execFileSync('bash', ['-n', scriptPath]);
 });
 
-test('shared probe checks workers, models, vibe turns and runtime and never applies an age cutoff', async () => {
+test('shared probe checks workers, models, vibe and Builder chat turns and runtime and never applies an age cutoff', async () => {
   const urls = [];
   const result = await checkRuntimeIdle({
     url: 'https://fixture.invalid', key: 'fixture',
@@ -36,6 +36,7 @@ test('shared probe checks workers, models, vibe turns and runtime and never appl
   assert.ok(urls.some(url => url.includes('builder_worker_runs')));
   assert.ok(urls.some(url => url.includes('builder_model_runs')));
   assert.ok(urls.some(url => url.includes('builder_vibe_messages')));
+  assert.ok(urls.some(url => url.includes('builder_chat_messages')));
   assert.ok(urls.every(url => !url.includes('created_at')));
 });
 
@@ -44,6 +45,8 @@ test('shared probe defers for live work, absent credentials, network and respons
     { workers: [{ id: 'verifier' }] },
     { models: [{ id: 'four-hour-author' }] },
     { vibe: [{ id: 'vibe-message' }] },
+    { chat: [{ id: 'builder-chat-message' }] },
+    { chat: {} },
     { runtime: { runningBuilderJobs: 1 } },
     { runtime: {} },
     { runtime: null },
@@ -66,6 +69,7 @@ test('shared probe defers for live work, absent credentials, network and respons
             return url.includes('builder_worker_runs') ? fixture.workers ?? []
               : url.includes('builder_model_runs') ? fixture.models ?? []
                 : url.includes('builder_vibe_messages') ? fixture.vibe ?? []
+                : url.includes('builder_chat_messages') ? fixture.chat ?? []
                 : fixture.runtime === undefined ? { runningBuilderJobs: 0 } : fixture.runtime;
           },
         };

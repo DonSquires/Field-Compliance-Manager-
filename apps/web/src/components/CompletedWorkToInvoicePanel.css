@@ -66,6 +66,11 @@
   color: var(--color-text-secondary);
 }
 
+.completed-work__row > div:first-child .completed-work__blocker {
+  color: var(--color-warning-text, #8a5a00);
+  font-weight: 600;
+}
+
 .completed-work__amount {
   font-weight: 700;
   font-size: 16px;

@@ -1,0 +1,304 @@
+.bchat {
+  display: flex;
+  flex-direction: column;
+  height: 100%;
+  min-height: 0;
+  background: var(--color-bg-surface);
+  color: var(--color-text-primary);
+  overflow: hidden;
+}
+
+.builder-agent-dock .bchat {
+  background: transparent;
+}
+
+.bchat__head {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+  padding: 12px 14px;
+  border-bottom: 1px solid var(--color-border);
+  background: var(--color-bg-elevated);
+}
+
+.bchat__head h2 {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  margin: 0;
+  font-size: 15px;
+}
+
+.bchat__head p {
+  margin: 2px 0 0;
+  font-size: 12px;
+  color: var(--color-text-secondary);
+}
+
+.bchat__head-actions {
+  display: flex;
+  gap: 6px;
+}
+
+.bchat button {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  min-height: 32px;
+  padding: 6px 10px;
+  font: inherit;
+  font-size: 13px;
+  color: var(--color-text-primary);
+  background: var(--color-bg-tertiary);
+  border: 1px solid var(--color-border);
+  border-radius: 8px;
+  cursor: pointer;
+}
+
+.bchat button:hover:not(:disabled) {
+  background: var(--color-bg-hover);
+}
+
+.bchat button:focus-visible,
+.bchat textarea:focus-visible {
+  outline: 2px solid var(--color-primary);
+  outline-offset: 2px;
+}
+
+.bchat button:disabled {
+  opacity: 0.55;
+  cursor: not-allowed;
+}
+
+.bchat__thread {
+  flex: 1;
+  min-height: 0;
+  overflow-y: auto;
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+  padding: 14px;
+}
+
+.bchat__state {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: 10px;
+  font-size: 13px;
+  color: var(--color-text-secondary);
+}
+
+.bchat__empty p {
+  margin: 0 0 10px;
+  font-size: 13px;
+  color: var(--color-text-secondary);
+}
+
+.bchat__empty ul {
+  display: grid;
+  gap: 6px;
+  margin: 0;
+  padding: 0;
+  list-style: none;
+}
+
+.bchat__empty button {
+  width: 100%;
+  justify-content: flex-start;
+  text-align: left;
+}
+
+.bchat-msg {
+  max-width: 92%;
+  padding: 9px 12px;
+  border-radius: 10px;
+  font-size: 13.5px;
+  line-height: 1.5;
+  background: var(--color-bg-tertiary);
+  border: 1px solid var(--color-border);
+}
+
+.bchat-msg p {
+  margin: 0;
+  white-space: pre-wrap;
+  overflow-wrap: anywhere;
+}
+
+.bchat-msg--owner {
+  align-self: flex-end;
+  background: var(--color-bg-elevated);
+  border-color: var(--color-border-strong);
+}
+
+.bchat-msg.is-error {
+  border-color: var(--color-error);
+}
+
+.bchat-msg.is-status {
+  max-width: 100%;
+  font-size: 12px;
+  color: var(--color-text-secondary);
+  background: transparent;
+  border-style: dashed;
+}
+
+.bchat-msg__meta {
+  display: block;
+  margin-top: 4px;
+  font-size: 11px;
+  color: var(--color-text-secondary);
+}
+
+.bchat-steps button {
+  min-height: 28px;
+  font-size: 12px;
+  color: var(--color-text-secondary);
+  background: transparent;
+  border-color: transparent;
+}
+
+.bchat-steps ol {
+  margin: 4px 0 0;
+  padding-left: 28px;
+  font-size: 12px;
+  color: var(--color-text-secondary);
+}
+
+.bchat-steps li.is-failed {
+  color: var(--color-error);
+}
+
+.bchat-proposal {
+  display: grid;
+  gap: 8px;
+  padding: 12px;
+  border: 1px solid var(--color-primary);
+  border-radius: 10px;
+  background: var(--color-bg-elevated);
+}
+
+.bchat-proposal header span {
+  font-size: 11px;
+  font-weight: 600;
+  letter-spacing: 0.04em;
+  text-transform: uppercase;
+  color: var(--color-text-secondary);
+}
+
+.bchat-proposal h3 {
+  margin: 2px 0 0;
+  font-size: 14px;
+}
+
+.bchat-proposal p {
+  margin: 0;
+  font-size: 13px;
+  line-height: 1.5;
+  white-space: pre-wrap;
+  overflow-wrap: anywhere;
+}
+
+.bchat-proposal__why {
+  color: var(--color-text-secondary);
+}
+
+.bchat-proposal__actions,
+.bchat-proposal__done {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 8px;
+  font-size: 12px;
+  color: var(--color-text-secondary);
+}
+
+.bchat-proposal__done {
+  justify-content: flex-start;
+  color: var(--color-success);
+}
+
+.bchat-proposal__actions button {
+  color: var(--color-primary-text);
+  background: var(--color-primary);
+  border-color: var(--color-primary);
+}
+
+.bchat-proposal__actions button:hover:not(:disabled) {
+  background: var(--color-primary-hover);
+}
+
+.bchat__error {
+  margin: 0;
+  padding: 8px 14px;
+  font-size: 13px;
+  color: var(--color-error);
+  border-top: 1px solid var(--color-border);
+}
+
+.bchat__context {
+  margin: 0;
+  padding: 6px 14px;
+  font-size: 12px;
+  color: var(--color-text-secondary);
+  border-top: 1px solid var(--color-border);
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.bchat__context strong {
+  color: var(--color-text-primary);
+  font-weight: 600;
+}
+
+.bchat__hint {
+  flex-basis: 100%;
+  order: 3;
+  font-size: 11px;
+  color: var(--color-text-tertiary);
+}
+
+.bchat__composer {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: flex-end;
+  gap: 8px;
+  padding: 10px 12px;
+  border-top: 1px solid var(--color-border);
+}
+
+.bchat__composer textarea {
+  flex: 1 1 0;
+  min-width: 0;
+  resize: vertical;
+  padding: 8px 10px;
+  font: inherit;
+  font-size: 13.5px;
+  color: var(--color-text-primary);
+  background: var(--color-bg-primary);
+  border: 1px solid var(--color-border);
+  border-radius: 8px;
+}
+
+.bchat__sr {
+  position: absolute;
+  width: 1px;
+  height: 1px;
+  overflow: hidden;
+  clip: rect(0 0 0 0);
+  white-space: nowrap;
+}
+
+.bchat-spin {
+  animation: bchat-spin 0.9s linear infinite;
+}
+
+@keyframes bchat-spin {
+  to { transform: rotate(360deg); }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .bchat-spin { animation: none; }
+}

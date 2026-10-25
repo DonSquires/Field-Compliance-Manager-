@@ -1,6 +1,6 @@
 import React, { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { AlertTriangle, Bot, CheckCircle2, ChevronRight, CircleStop, Clock3, Database, FileCode2, FolderTree, MessageSquareText, Play, Plus, RefreshCw, Search, ShieldCheck, Sparkles, TerminalSquare, Workflow, X } from 'lucide-react';
-import { BobPanel } from '../components/BobPanel';
+import { BuilderChatPanel, type BuilderChatProposal } from '../components/BuilderChatPanel';
 import { ChangeRequestQueue } from '../components/ChangeRequestQueue';
 import { BuilderApprovalBrief } from '../components/BuilderApprovalBrief';
 import { jobMatchesSearch } from '../lib/builderJobSearch';
@@ -447,6 +447,27 @@ const BuilderControlRoomPage: React.FC<{ onOpenBob?: (prompt: string) => void; o
     }
   };
 
+  const createJobFromProposal = async (proposal: BuilderChatProposal): Promise<string | null> => {
+    if (!selectedProject) throw new Error('Choose a Builder project before creating a job.');
+    setNotice(null);
+    const data = await invoke({
+      action: 'create', organization_id: selectedProject.organization_id, project_id: selectedProject.id,
+      title: proposal.title, task_description: proposal.task_description,
+      target_sha: 'main', branch_name: 'main', frontend_required: proposal.frontend_required,
+      backend_required: proposal.backend_required, code_review_mode: form.codeReviewMode,
+      requested_action: 'prepare_change', target_environment: 'development', autopilot: form.autopilot,
+    });
+    setNotice(autopilotNotice(data, 'Builder job created from the Bob Builder chat proposal.'));
+    await loadList();
+    const jobId = typeof data?.job?.id === 'string' ? data.job.id : null;
+    if (jobId) setSelectedId(jobId);
+    return jobId;
+  };
+
+  const proposalSettings = selectedProject
+    ? `${selectedProject.name} · main · development · ${form.codeReviewMode === 'none' ? 'no code review' : form.codeReviewMode === 'human' ? 'human review' : 'independent AI review'} · ${form.autopilot ? 'Bob drives to the next gate' : 'manual steps'}`
+    : undefined;
+
   const advance = async (action: 'advance' | 'run') => {
     if (!selectedId) return;
     setBusy(action);
@@ -645,7 +666,7 @@ const BuilderControlRoomPage: React.FC<{ onOpenBob?: (prompt: string) => void; o
         <div className="builder-heading-actions">
           {onOpenVibe && <button type="button" onClick={onOpenVibe} title="Back to the Vibe Builder chat"><Sparkles size={16} /> Vibe Builder</button>}
           <button type="button" onClick={() => void loadList()} disabled={loading}><RefreshCw size={16} className={loading ? 'is-spinning' : ''} /> Refresh</button>
-          <button type="button" onClick={() => { setBobOpen(current => !current); setMobileWorkspaceView('agent'); }} title={bobOpen ? 'Hide the docked Bob Builder agent' : 'Open the docked Bob Builder agent'} aria-pressed={bobOpen}><MessageSquareText size={16} /> {bobOpen ? 'Hide agent' : 'Open agent'}</button>
+          <button type="button" onClick={() => { setBobOpen(current => !current); setMobileWorkspaceView('agent'); }} title={bobOpen ? 'Hide the Bob Builder chat (separate from in-app Bob)' : 'Open the Bob Builder chat (separate from in-app Bob)'} aria-pressed={bobOpen}><MessageSquareText size={16} /> {bobOpen ? 'Hide Builder chat' : 'Builder chat'}</button>
           <button type="button" className="is-primary" onClick={() => setShowCreate(true)}><Plus size={16} /> New job</button>
         </div>
       </header>
@@ -880,11 +901,11 @@ const BuilderControlRoomPage: React.FC<{ onOpenBob?: (prompt: string) => void; o
         </section>
         {bobOpen && (
           <aside className={`builder-agent-dock ${mobileWorkspaceView === 'agent' ? 'is-mobile-active' : ''}`} aria-label="Dedicated Bob Builder agent">
-            <BobPanel
-              open
-              presentation="docked"
+            <BuilderChatPanel
               onClose={() => { setBobOpen(false); setMobileWorkspaceView(selectedJob ? 'workbench' : 'queue'); }}
-              mode="builder"
+              onCreateJob={createJobFromProposal}
+              onOpenJob={jobId => { setSelectedId(jobId); setMobileWorkspaceView('workbench'); }}
+              jobSettings={proposalSettings}
               context={{
                 surface: 'builder_control_room',
                 job_id: selectedJob?.id ?? null,

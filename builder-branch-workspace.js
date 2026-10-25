@@ -317,6 +317,25 @@ async function githubApi({ fetchImpl, githubToken, method, urlPath, body }) {
   return { ok: response.ok, status: response.status, data };
 }
 
+// Reads what the owner did with a published pull request. Only PRs in the configured repository
+// are read; anything else is reported as unknown rather than trusted.
+async function readGitHubPullRequestState({ url, githubToken, owner, repo, fetchImpl = globalThis.fetch }) {
+  if (!githubToken || !owner || !repo || typeof fetchImpl !== 'function') return { state: 'unknown', error: 'Builder GitHub integration is not configured' };
+  githubRepoUrl(owner, repo);
+  const match = String(url || '').match(/^https:\/\/github\.com\/([^/]+)\/([^/]+)\/pull\/(\d+)\/?$/);
+  if (!match || match[1].toLowerCase() !== String(owner).toLowerCase() || match[2].toLowerCase() !== String(repo).toLowerCase()) {
+    return { state: 'unknown', error: 'pull request is not in the configured GitHub repository' };
+  }
+  const pull = await githubApi({ fetchImpl, githubToken, method: 'GET', urlPath: `/repos/${encodeURIComponent(owner)}/${encodeURIComponent(repo)}/pulls/${Number(match[3])}` });
+  if (!pull.ok) return { state: 'unknown', error: `GitHub pull request lookup returned HTTP ${pull.status}` };
+  const data = pull.data || {};
+  if (data.merged === true || data.merged_at) {
+    return { state: 'merged', mergeSha: data.merge_commit_sha ?? null, mergedAt: data.merged_at ?? null, mergedBy: data.merged_by?.login ?? null, headSha: data.head?.sha ?? null, baseRef: data.base?.ref ?? null };
+  }
+  if (data.state === 'closed') return { state: 'closed', closedAt: data.closed_at ?? null };
+  return { state: 'open', draft: data.draft === true };
+}
+
 async function githubGraphql({ fetchImpl, githubToken, query, variables }) {
   const response = await fetchImpl('https://api.github.com/graphql', {
     method: 'POST',
@@ -418,4 +437,4 @@ function publicGiteaUrl(url, { baseUrl, publicBaseUrl }) {
   return url;
 }
 
-module.exports = { BRANCH_PREFIX, VIBE_BRANCH_PREFIX, isPublishableBranch, BUILDER_NAME, BUILDER_EMAIL, VERIFIED_GITHUB_EMAIL, builderCommitIdentity, branchNameForJob, workspacePathForBranch, createBranchWorkspace, createDetachedWorkspace, retireTerminalWorkspace, commitVerifiedPatch, publishWorkspaceBranch, giteaRepositoryPath, createGiteaPullRequest, publicGiteaUrl, verifySnapshot, githubAuthHeader, githubRepoUrl, githubSshRepoUrl, resolveRemoteHead, ensureSourceCheckout, createGitHubPullRequest, mergeGitHubPullRequest, redactGitError, gitSpawnFault };
+module.exports = { BRANCH_PREFIX, VIBE_BRANCH_PREFIX, isPublishableBranch, BUILDER_NAME, BUILDER_EMAIL, VERIFIED_GITHUB_EMAIL, builderCommitIdentity, branchNameForJob, workspacePathForBranch, createBranchWorkspace, createDetachedWorkspace, retireTerminalWorkspace, commitVerifiedPatch, publishWorkspaceBranch, giteaRepositoryPath, createGiteaPullRequest, publicGiteaUrl, verifySnapshot, githubAuthHeader, githubRepoUrl, githubSshRepoUrl, resolveRemoteHead, ensureSourceCheckout, createGitHubPullRequest, mergeGitHubPullRequest, readGitHubPullRequestState, redactGitError, gitSpawnFault };
