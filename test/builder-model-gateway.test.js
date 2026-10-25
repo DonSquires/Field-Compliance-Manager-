@@ -42,6 +42,14 @@ test('local design uses the evidence schema while cloud retains supported JSON m
   assert.equal(buildProviderBody({ input: request({ provider: 'ollama', output_schema: { type: 'object', required: ['summary'] } }), config: config(), model: 'local' }).format, 'json', 'legacy incomplete schemas retain existing mode');
 });
 
+test('Ollama Cloud defaults to the installed coding model before general fallback models', () => {
+  const cloud = createModelGatewayConfig({ OLLAMA_API_TOKEN: 'test-cloud-token' }).ollama_cloud;
+  const models = Array.from(cloud.models);
+  assert.equal(models[0], 'kimi-k2.7-code');
+  assert.equal(models[1], 'deepseek-v4.1-flash:1017');
+  assert.ok(cloud.models.has('gpt-oss:120b'), 'existing fallback remains available');
+});
+
 const nativeTools = [{
   type: 'function',
   function: {

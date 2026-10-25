@@ -98,7 +98,7 @@ function vibeSystemPrompt(limits = VIBE_LIMITS) {
     '- Start with VERIFIED STARTING FILES: these are tracked candidates discovered from the request, not permission to edit blindly. Read the relevant file and existing design tokens before changing it. Do not invent a page filename from a screen label or interpret CSS as a new subsystem. A failed filename lookup disproves that guess; search visible text or use the starting map instead.',
     '- Make the smallest change that does what the owner asked. Prefer replace_in_file. Keep existing conventions, accessibility, loading/empty/error states.',
     '- You write the code and supply complete tool arguments. A tool validation error is yours to repair, not a reason to ask the owner for source code, filenames or replacement text already discoverable in the worktree. For UI changes, read docs/BOB_ENTERPRISE_SAAS_UX_TRAINING.md and the existing page CSS/design tokens; do not append a second screen implementation to the application shell.',
-    '- Verify: run the relevant tests (node --test test/<file>.test.js, npm run test --prefix apps/web -- <pattern>, npm run lint|build --prefix apps/web) and fix failures you caused. For web TypeScript edits run npm run lint --prefix apps/web before handoff; the runtime also checks the current draft at handoff, so an earlier pass cannot certify a later edit. Read the exact failed output before editing again. Source guard tests importing node:fs/node:path need --environment node; rendering tests need jsdom. Read the test before choosing its environment. If verification remains blocked, reply with args.blocked_reason and explain it; do not present failed checks as a finished repair.',
+    '- Verify: run the relevant tests (node --test test/<file>.test.js, npm run test --prefix apps/web -- <pattern>, npm run lint|build --prefix apps/web) and fix failures you caused. For web TypeScript edits run npm run lint --prefix apps/web before handoff; the runtime also checks the current draft at handoff, so an earlier pass cannot certify a later edit. Read the exact failed output before editing again. Source guard tests importing node:fs/node:path need --environment node; rendering tests need jsdom. Read the test before choosing its environment. The run tool forces NODE_ENV=test for web test commands. React hooks may only be called at the top level of a component or custom hook, never inside event handlers or conditions; use a ref/effect for transition behaviour. Preserve existing tests and imports: add the requested regression test without replacing unrelated assertions. If verification remains blocked, reply with args.blocked_reason and explain it; do not present failed checks as a finished repair.',
     '- Match the runner to the test: npm run test --prefix apps/web runs Vitest with selectors relative to apps/web (src/..., not apps/web/src/...). Playwright specs under e2e/ belong to human_test, not Vitest. A runner-discovery error is not an application defect: fix the runner configuration, never add any-typed imports, VITEST branches, empty placeholder edits or skipped assertions to a Playwright spec. A legitimate source repair allows a fresh check; unchanged failed checks do not justify a retry loop.',
     '- Workflow acceptance: read docs/BOB_ENTERPRISE_SAAS_UX_TRAINING.md section 8. Define expected BEFORE (role, organisation, route, records), DURING (selection, validation, request/RPC, audit, loading/errors), AFTER (saved record, reload, back/forward, downstream status and next actor). Use Atlas capability/direct edges/flow_reach and schema writers; keep structural fk_reach separate. The generic human_test walk is read-only smoke/UX evidence, not proof of writes or persistence. Add targeted fixture-backed workflow assertions for those outcomes; name untested stages instead of declaring the whole workflow passed.',
     '- Test data: text values start with "Bob Test"; numeric-only values start with "999"; dates may be chosen for the scenario. For constrained fields (email, UUID, enum, phone, bounded number), use a valid dedicated fixture value and record why the prefix cannot apply. Archive/suspend/reactivate only records created by that test, identified by ID, tenant and run provenance, never a real record that happens to share a prefix. Test data labels do not grant live-write, messaging, billing or destructive authority.',
@@ -143,12 +143,22 @@ function vibeProviderCandidates(modelRequest, health) {
   const primary = selectProviders(routed, { health });
   const candidates = [];
   for (const candidate of primary) {
-    const alternatives = [candidate, ...selectProviders({ ...modelRequest, chain: [candidate.provider] }, {
-      health, avoid: [{ provider: candidate.provider, model: candidate.model }],
-    })];
-    for (const entry of alternatives) {
-      if (candidates.some(item => item.model === entry.model && (entry.model || item.provider === entry.provider))) continue;
+    const providerSeen = new Set();
+    const add = entry => {
+      const key = `${entry.provider}:${entry.model || ''}`;
+      if (providerSeen.has(key) || candidates.some(item => item.model === entry.model && (entry.model || item.provider === entry.provider))) return false;
+      providerSeen.add(key);
       candidates.push(entry);
+      return true;
+    };
+    add(candidate);
+    const avoid = [{ provider: candidate.provider, model: candidate.model }];
+    // Keep walking the configured, installed model list. Limiting each provider to one recovery
+    // model meant Vibe skipped every later Cloud option after two weak/malformed replies.
+    while (true) {
+      const [next] = selectProviders({ ...modelRequest, chain: [candidate.provider] }, { health, avoid });
+      if (!next || !add(next)) break;
+      avoid.push({ provider: next.provider, model: next.model });
     }
   }
   return candidates;

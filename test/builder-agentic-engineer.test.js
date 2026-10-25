@@ -668,6 +668,29 @@ test('run chains allowlisted commands with && and stops at the first failure; a 
   fs.rmSync(repo.root, { recursive: true, force: true });
 });
 
+test('web test commands override a production worker environment with NODE_ENV=test', async () => {
+  const repo = makeRepo();
+  const workspaceRoot = path.join(repo.root, 'workspaces');
+  const { createBranchWorkspace } = require('../builder-branch-workspace');
+  const ws = createBranchWorkspace({ sourceDir: repo.source, workspaceRoot, jobId: '7e5700007e5700007e570000', targetSha: repo.sha });
+  const web = path.join(ws.workspacePath, 'apps', 'web');
+  fs.mkdirSync(web, { recursive: true });
+  fs.writeFileSync(path.join(web, 'package.json'), JSON.stringify({ name: 'web-fixture', scripts: { test: 'node print-env.cjs' } }));
+  fs.writeFileSync(path.join(web, 'print-env.cjs'), "process.stdout.write(process.env.NODE_ENV || 'unset');\n");
+  const tools = createTools({ workspacePath: ws.workspacePath, repoRoot: repo.source, lane: 'frontend', supabase: null, limits: DEFAULT_LIMITS, log() {} });
+  const previous = process.env.NODE_ENV;
+  try {
+    process.env.NODE_ENV = 'production';
+    const result = await tools.run({ command: 'npm test --prefix apps/web -- print-env.cjs' });
+    assert.equal(result.exit_code, 0, JSON.stringify(result));
+    assert.match(result.stdout, /> node print-env\.cjs[\s\S]*\ntest/, 'Vitest/React receive test mode even when the control plane is production');
+  } finally {
+    if (previous === undefined) delete process.env.NODE_ENV;
+    else process.env.NODE_ENV = previous;
+    fs.rmSync(repo.root, { recursive: true, force: true });
+  }
+});
+
 test('a review revision starts from the previous patch; an unappliable seed stops without restarting from main', async () => {
   const repo = makeRepo();
   const workspaceRoot = path.join(repo.root, 'workspaces');
