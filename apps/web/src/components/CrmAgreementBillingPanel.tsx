@@ -4,6 +4,7 @@ import { supabase } from '../lib/supabase';
 import { money } from '../lib/workshop';
 import { billingAttention, billingPeriodBounds, monthLabel, parseAgreementBillingSummary, recordedWorkTotal, type AgreementBillingSummary, type BillingPeriod } from '../lib/agreementBillingSummary';
 import { commercialModelLabel, usesContractExtra, type CommercialModel } from '../lib/commercialModel';
+import { describeDrawdown, parseFeeDrawdown, settlementLabel, type FeeDrawdown } from '../lib/feeDrawdown';
 import './CrmAgreementObligationsPanel.css';
 import './CrmAgreementExtraWorksPanel.css';
 import './CrmAgreementBillingPanel.css';
@@ -91,7 +92,7 @@ export function CrmAgreementBillingPanel({ agreementId, commercialModel = null }
         <div role="listitem" className="agreement-billing-card is-contract">
           <span>Contracted work</span>
           <strong>{money(summary.totals.contract_cost)}</strong>
-          <small>Covered by the contract price</small>
+          <small>{commercialModel === 'fixed_price_with_extras' ? 'Draws down the monthly fee' : 'Covered by the contract price'}</small>
         </div>
         <div role="listitem" className="agreement-billing-card is-extra">
           <span>Extra</span>
@@ -128,6 +129,44 @@ export function CrmAgreementBillingPanel({ agreementId, commercialModel = null }
         <thead><tr><th scope="col">Month</th><th scope="col">Contracted</th><th scope="col">Extra</th><th scope="col">Not classified</th></tr></thead>
         <tbody>{[...summary.months].reverse().map((row) => <tr key={row.month}><th scope="row">{monthLabel(row.month)}</th><td>{money(row.contract_cost)}</td><td>{money(row.extra_cost)}</td><td>{row.unclassified_cost > 0 ? money(row.unclassified_cost) : '—'}</td></tr>)}</tbody>
       </table>}
+      {commercialModel === 'fixed_price_with_extras' && <FeeDrawdownTable agreementId={agreementId} />}
     </>}
   </section>;
+}
+
+/** Fixed price plus Extra: each month's contracted work against the monthly fee, and how the month was settled. */
+function FeeDrawdownTable({ agreementId }: { agreementId: string }) {
+  const [drawdown, setDrawdown] = useState<FeeDrawdown | null>(null);
+  const [loading, setLoading] = useState(true);
+  const [error, setError] = useState<string | null>(null);
+
+  const load = useCallback(async () => {
+    setLoading(true);
+    setError(null);
+    // ATLAS CALLS: get_agreement_fee_drawdown (read-only, provider finance admin)
+    const { data, error: rpcError } = await supabase.rpc('get_agreement_fee_drawdown', { p_service_agreement_id: agreementId });
+    if (rpcError) { setDrawdown(null); setError(`The monthly fee drawdown could not be loaded: ${rpcError.message}`); }
+    else setDrawdown(parseFeeDrawdown(data));
+    setLoading(false);
+  }, [agreementId]);
+
+  useEffect(() => { void load(); }, [load]);
+
+  if (error) return <div className="agreement-obligation-message is-error" role="alert"><AlertTriangle size={15} />{error}<button type="button" className="agreement-extra-retry" onClick={() => void load()}>Retry</button></div>;
+  if (loading && !drawdown) return <div className="agreement-setup-loading"><RefreshCw size={18} className="is-spinning" />Loading the monthly fee drawdown</div>;
+  if (!drawdown?.applies) return null;
+  if (drawdown.fee == null) return <div className="agreement-setup-empty">No monthly fee is recorded, so contracted work cannot be drawn down. Record the fee as an accepted quote line.</div>;
+
+  return <table className="agreement-billing-table agreement-fee-drawdown" aria-describedby="agreement-fee-drawdown-help">
+    <caption>Monthly fee drawdown<small id="agreement-fee-drawdown-help">Each contracted job draws down the {money(drawdown.fee)} monthly fee. A fully delivered month nets to $0. Unused value is credited; work above the fee is Extra{drawdown.overrunPolicy === 'bill_as_extra' ? ', billed as already agreed with the client' : ', billed only with a justification'}.</small></caption>
+    <thead><tr><th scope="col">Month</th><th scope="col">Contracted work</th><th scope="col">Against the fee</th><th scope="col">Invoice</th></tr></thead>
+    <tbody>{drawdown.months.map((month) => <tr key={month.month} className={month.outcome ? `is-${month.outcome}` : undefined}>
+      <th scope="row">{month.label}</th>
+      <td>{money(month.work.total)}{(month.work.callouts > 0 || month.work.patrolVisits > 0) && <small>Log {money(month.work.imported)} · callouts {money(month.work.callouts)} · visits {money(month.work.patrolVisits)}</small>}</td>
+      <td>{describeDrawdown(month)}</td>
+      <td>{month.settlement
+        ? <>{settlementLabel(month.settlement)}<small>{month.settlement.invoiceNumber} · {month.settlement.invoiceStatus}</small></>
+        : month.blockers.length > 0 ? <>Not ready<small>{month.blockers[0].message}</small></> : 'Ready to invoice'}</td>
+    </tr>)}</tbody>
+  </table>;
 }

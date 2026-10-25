@@ -2849,7 +2849,48 @@ unless one is entered.
 - Confirmed: 13,333 per month is before GST. Standing authority: no limit for
   any client unless entered.
 
-**Still to confirm or build.** Rates per client (seeded defaults only); the
-recurring monthly OneFortyOne contract invoice (not generated); loading the
+**Step I (monthly fee drawdown; standing rate card fallback) - done 2026-10-26.**
+Owner ruling: client rates come from the spreadsheets, and the standing rate
+card applies when a client has none. Each contracted job draws down the fixed
+monthly fee to $0:
+- unused value is credited;
+- work above the fee is Extra, justified unless pre-agreed (OneFortyOne).
+
+- Migration `20261028090000_monthly_fee_drawdown.sql` is applied live, and its
+  live test `supabase/tests/20261028090000_monthly_fee_drawdown.sql` passes.
+  - New: `crm_commercial_settings.fee_overrun_policy`; table
+    `agreement_fee_settlements` (RLS, admin read); `get_agreement_fee_drawdown`.
+  - Changed: `generate_crm_invoice_from_agreement` now takes
+    `p_overrun_decision` / `p_overrun_justification`, settles whole months
+    once, and is idempotent.
+  - Changed: the completed-work invoice skips patrol visits on fixed-fee
+    agreements.
+- OneFortyOne is set to `bill_as_extra` (audited). Checked against live data
+  in a rolled-back transaction:
+
+  | Month   | Result                                            |
+  |---------|---------------------------------------------------|
+  | 2026-09 | Credit $3,859.80, blocked by unclassified rows and an undecided callout |
+  | 2026-08 | Credit $4,412.77                                  |
+  | 2026-07 | Credit $1,693.12                                  |
+  | 2026-05 | Overrun $1,015.52                                 |
+  | 2025-12 | Overrun $3,276.57                                 |
+
+- UI:
+  - Billing terms has "Contracted work above the monthly fee".
+  - The agreement Billing tab has a "Monthly fee drawdown" table.
+  - The CRM invoice dialog asks for the month (default: last month) and
+    previews the fee, the work by source and the balance. It lists blockers
+    and asks "Bill as Extra" (with a reason) or "Absorb" for an overrun.
+- Rates: `resolve_rate_rule` already falls back to the rules with no client
+  (the standing rate card). R&M's 19 rules are all of that kind.
+- Still open:
+  - Per-client spreadsheet rates are not loaded; they need governed extraction
+    and review.
+  - The other fixed-price clients have no monthly fee recorded.
+  - Imported log rows and FCM-native lines are shown by source so that
+    transition-period double counting is visible.
+
+**Still to confirm or build.** Rates per client (seeded defaults only); loading the
 rate cards into `rate_rules`; GL codes and financial year from the statements;
 the 28 TYPE/code conflicts.

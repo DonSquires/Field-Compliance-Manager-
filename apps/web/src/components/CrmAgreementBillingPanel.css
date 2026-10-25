@@ -118,3 +118,5 @@
 		padding: 6px 4px;
 	}
 }
+
+.agreement-fee-drawdown caption small{display:block;margin-top:2px;font-weight:400;text-transform:none}.agreement-fee-drawdown td small{display:block;opacity:.75}.agreement-fee-drawdown tr.is-credit td:nth-child(3){color:#7fd8a8}.agreement-fee-drawdown tr.is-overrun td:nth-child(3){color:#f4d88a}

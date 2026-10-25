@@ -6,8 +6,11 @@ import {
   COMMERCIAL_MODELS,
   COMMERCIAL_MODEL_HELP,
   COMMERCIAL_MODEL_LABEL,
+  FEE_OVERRUN_POLICIES,
+  FEE_OVERRUN_POLICY_LABEL,
   RATE_FIELDS,
   asCommercialModel,
+  asFeeOverrunPolicy,
   commercialModelLabel,
   commercialTermsFormFrom,
   commercialTermsPayload,
@@ -45,7 +48,7 @@ export function CrmAgreementCommercialTermsPanel({ agreementId, onModelChange }:
     setLoadError(null);
     // ATLAS READS: crm_commercial_settings (RLS: provider or client org access)
     const { data, error: readError } = await supabase.from('crm_commercial_settings')
-      .select('commercial_model,billing_cycle,payment_terms_days,payment_due_day_of_month,invoice_email,purchase_order_number,notes,base_rate_per_hour,overtime_rate_per_hour,callout_rate_per_hour,callout_minimum_hours,travel_rate_per_km,standing_authority_limit,updated_at')
+      .select('commercial_model,billing_cycle,payment_terms_days,payment_due_day_of_month,invoice_email,purchase_order_number,notes,base_rate_per_hour,overtime_rate_per_hour,callout_rate_per_hour,callout_minimum_hours,travel_rate_per_km,standing_authority_limit,fee_overrun_policy,updated_at')
       .eq('service_agreement_id', agreementId)
       .maybeSingle();
     if (readError) {
@@ -105,6 +108,7 @@ export function CrmAgreementCommercialTermsPanel({ agreementId, onModelChange }:
     {!editing && !loading && !loadError && (savedModel ? <dl className="agreement-commercial-summary">
       <div className="is-wide"><dt>Billing model</dt><dd><strong>{commercialModelLabel(savedModel)}</strong><small>{COMMERCIAL_MODEL_HELP[savedModel]}</small></dd></div>
       {savedModel === 'do_and_invoice' && <div className="is-wide"><dt>Standing authority limit per job</dt><dd>{saved?.standing_authority_limit != null ? <>{formatLimit(Number(saved.standing_authority_limit))}<small>A job costing more than this needs the client's approval reference in Dispatch before it is invoiced.</small></> : <>No limit<small>Every job is invoiced at actuals without asking first. Set a limit if the client caps what one job may cost.</small></>}</dd></div>}
+      {savedModel === 'fixed_price_with_extras' && <div className="is-wide"><dt>Monthly fee drawdown</dt><dd>{FEE_OVERRUN_POLICY_LABEL[asFeeOverrunPolicy(saved?.fee_overrun_policy)]}<small>Each contracted job draws down the monthly fee. Unused value is credited on the month's invoice. Contracted work above the fee is Extra.</small></dd></div>}
       <div><dt>Billing cycle</dt><dd>{saved?.billing_cycle ? cycleLabels[saved.billing_cycle as keyof typeof cycleLabels] ?? saved.billing_cycle : 'Not set'}</dd></div>
       <div><dt>Payment due</dt><dd>{describePaymentTerms(saved)}{saved?.payment_due_day_of_month != null && <small>October's work, invoiced early November, is due {ordinalDay(saved.payment_due_day_of_month)} November. Invoiced after that day, it is due the next month.</small>}</dd></div>
       <div><dt>Invoice email</dt><dd>{saved?.invoice_email || 'Not set'}</dd></div>
@@ -128,6 +132,7 @@ export function CrmAgreementCommercialTermsPanel({ agreementId, onModelChange }:
       </div>}
       <div className="agreement-obligation-grid">
         {form.model === 'do_and_invoice' && <label className="is-wide"><span>Standing authority limit per job, excl. GST (optional)</span><input inputMode="decimal" value={form.standingAuthorityLimit} aria-describedby="commercial-limit-help" onChange={(event) => setForm({ ...form, standingAuthorityLimit: event.target.value })} placeholder="No limit" /><small id="commercial-limit-help">The most one job may cost before R&amp;M needs the client's approval. Leave blank if the client has not set a cap.</small></label>}
+        {form.model === 'fixed_price_with_extras' && <label className="is-wide"><span>Contracted work above the monthly fee</span><select value={form.feeOverrunPolicy} aria-describedby="commercial-overrun-help" onChange={(event) => setForm({ ...form, feeOverrunPolicy: asFeeOverrunPolicy(event.target.value) })}>{FEE_OVERRUN_POLICIES.map((policy) => <option key={policy} value={policy}>{FEE_OVERRUN_POLICY_LABEL[policy]}</option>)}</select><small id="commercial-overrun-help">Each contracted job draws down the monthly fee, so a fully delivered month nets to $0. Unused value is credited. Choose "Already agreed" only when the contract says work above the fee is billed.</small></label>}
         <label><span>Billing cycle</span><select value={form.billingCycle} onChange={(event) => setForm({ ...form, billingCycle: event.target.value as CommercialTermsForm['billingCycle'] })}>{BILLING_CYCLES.map((cycle) => <option key={cycle} value={cycle}>{cycleLabels[cycle]}</option>)}</select></label>
         <label><span>Payment due</span><select value={form.paymentDueMode} onChange={(event) => setForm({ ...form, paymentDueMode: event.target.value as PaymentDueMode })}><option value="day_of_next_month">On a day of the month after the work</option><option value="days_after_invoice">A number of days after the invoice date</option></select></label>
         {form.paymentDueMode === 'day_of_next_month'

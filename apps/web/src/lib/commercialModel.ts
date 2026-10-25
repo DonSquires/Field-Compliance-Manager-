@@ -135,6 +135,19 @@ export interface CommercialTermsForm {
   rates: Record<RateKey, string>;
   /** Do and invoice only; blank = no cap. */
   standingAuthorityLimit: string;
+  /** Fixed price plus Extra only: what happens to contracted work above the monthly fee. */
+  feeOverrunPolicy: FeeOverrunPolicy;
+}
+
+/** Owner ruling 2026-10-25: contracted work above a fixed monthly fee is Extra; billed only when pre-agreed or justified. */
+export const FEE_OVERRUN_POLICIES = ['justify', 'bill_as_extra'] as const;
+export type FeeOverrunPolicy = (typeof FEE_OVERRUN_POLICIES)[number];
+export const FEE_OVERRUN_POLICY_LABEL: Record<FeeOverrunPolicy, string> = {
+  justify: 'Needs a justification each month (otherwise R&M absorbs it)',
+  bill_as_extra: 'Already agreed with the client: bill it as Extra',
+};
+export function asFeeOverrunPolicy(value: unknown): FeeOverrunPolicy {
+  return value === 'bill_as_extra' ? 'bill_as_extra' : 'justify';
 }
 
 export interface CommercialSettingsRow {
@@ -151,6 +164,7 @@ export interface CommercialSettingsRow {
   callout_minimum_hours: number | null;
   travel_rate_per_km: number | null;
   standing_authority_limit?: number | null;
+  fee_overrun_policy?: string | null;
   updated_at?: string | null;
 }
 
@@ -171,6 +185,7 @@ export function commercialTermsFormFrom(row: CommercialSettingsRow | null): Comm
     notes: row?.notes ?? '',
     rates: Object.fromEntries(RATE_FIELDS.map(({ key }) => [key, text(row?.[key])])) as Record<RateKey, string>,
     standingAuthorityLimit: text(row?.standing_authority_limit),
+    feeOverrunPolicy: asFeeOverrunPolicy(row?.fee_overrun_policy),
   };
 }
 
@@ -199,12 +214,13 @@ export function commercialTermsProblem(form: CommercialTermsForm, savedModel: Co
   return null;
 }
 
-/** The p_terms object: every editable key is sent; blank rates and text clear the stored value. Other models always clear the standing authority limit. */
+/** The p_terms object: every editable key is sent; blank rates and text clear the stored value. Other models always clear the standing authority limit and the fee overrun policy. */
 export function commercialTermsPayload(form: CommercialTermsForm): Record<string, string | number | null> {
   const blankToNull = (value: string) => (value.trim() ? value.trim() : null);
   const limit = form.standingAuthorityLimit.trim();
   return {
     standing_authority_limit: form.model === 'do_and_invoice' && limit ? Number(limit) : null,
+    fee_overrun_policy: form.model === 'fixed_price_with_extras' ? form.feeOverrunPolicy : null,
     billing_cycle: form.billingCycle,
     payment_terms_days: Number(form.paymentTermsDays.trim()),
     payment_due_day_of_month: form.paymentDueMode === 'day_of_next_month' ? Number(form.paymentDueDay.trim()) : null,

@@ -31,10 +31,22 @@ describe('billing follows each client agreement commercial model', () => {
     expect(billing).toContain('Record client approval');
     expect(billing).toContain('without it a job over the limit cannot be invoiced');
     expect(billing).toContain('No standing authority limit is set for this client');
-    expect(terms).toContain('standing_authority_limit,updated_at');
+    expect(terms).toContain('standing_authority_limit,fee_overrun_policy,updated_at');
     expect(terms).toContain("form.model === 'do_and_invoice' && <label");
     expect(terms).toContain('Standing authority limit per job');
     expect(terms).toContain('Leave blank if the client has not set a cap.');
+  });
+
+  it('fixed price plus Extra draws down the monthly fee and the invoice settles one whole month', () => {
+    const crm = read('src/pages/CRMPage.tsx');
+    const panel = read('src/components/CrmAgreementBillingPanel.tsx');
+    expect(terms).toContain("form.model === 'fixed_price_with_extras' && <label");
+    expect(terms).toContain('Contracted work above the monthly fee');
+    expect(panel).toContain("supabase.rpc('get_agreement_fee_drawdown', { p_service_agreement_id: agreementId })");
+    expect(crm).toContain("supabase.rpc('get_agreement_fee_drawdown', { p_service_agreement_id: selectedAgreementId, p_from: start, p_to: start })");
+    expect(crm).toContain('p_overrun_decision: fixedFee ? overrunDecision : null');
+    expect(crm).toContain('drawdownBlocksInvoice');
+    expect(crm).toContain('Void that invoice first to settle the month again.');
   });
 
   it('agreement billing terms are written only through set_agreement_commercial_terms, with every state shown', () => {

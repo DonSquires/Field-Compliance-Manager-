@@ -402,3 +402,55 @@ invoice is created. No standing authority limit applies unless one is entered.
   R&M agreements to monthly billing, due on the 20th (audited as
   `agreement_commercial_terms_set`). New billing terms start on the 20th in the
   form; saved day-count terms are kept until changed.
+
+## Ruling 2026-10-26 — client rates, and the monthly fee is drawn down to $0
+
+Owner ruling (Don Squires): each client's rates are in the invoice
+spreadsheets. When a client has no rate of its own, the **standing rate card**
+applies; that is what the rate bureau is for. On a fixed monthly fee, each
+contracted job or action charged to the client **draws down the fee**, so a
+fully delivered month nets to **$0**.
+
+- **If the month nets above $0**, contracted value was not delivered. R&M
+  credits it.
+- **If the month goes below $0**, the work above the fee is **Extra**. It must
+  be justified, unless the agreement already says it is billed. OneFortyOne's
+  does.
+
+How the build holds this:
+
+- **Rates.** `resolve_rate_rule` prefers a rule for the client over a rule with
+  no client, so rules with no client are the standing rate card. Per-client
+  rates from the spreadsheets are not loaded yet. They need a governed
+  extraction with review before promotion.
+- **Fee and work.** `get_agreement_fee_drawdown` reports each month's fee: the
+  accepted quote lines, or the commercial base rate. It reports contracted work
+  from three sources:
+  - imported patrol log rows classified Contract;
+  - Dispatch charge lines on the contract basis;
+  - patrol visit charge lines.
+- **Blockers.** The report lists what stops a month being settled:
+  - the month has not finished;
+  - unclassified log rows;
+  - undecided or unpriced callouts;
+  - unresolved patrol visits;
+  - no fee;
+  - no work.
+- **Settlement.** It applies only to `fixed_price_with_extras`.
+  `generate_crm_invoice_from_agreement` settles one whole calendar month once,
+  recorded in `agreement_fee_settlements`:
+  - a credit line for unused value;
+  - an Extra line for work above the fee, when billed;
+  - nothing, when absorbed.
+- **Who decides on work above the fee.**
+  `crm_commercial_settings.fee_overrun_policy` sets this per agreement:
+  - `bill_as_extra`: already agreed with the client;
+  - `justify` (the default): the invoicer bills it with a 10–500 character
+    reason, or absorbs it.
+- **Redoing a month.** Voiding the invoice frees the month to be settled again.
+- **No double billing.** The completed-work invoice no longer bills patrol
+  visits on these agreements, because they are drawn down against the fee.
+- **OneFortyOne.** Set to `bill_as_extra` in migration
+  `20261028090000_monthly_fee_drawdown.sql`, audited. The other fixed-price
+  clients have no fee recorded, so they show "no monthly fee" until one is
+  added.

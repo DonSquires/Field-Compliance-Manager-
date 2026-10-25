@@ -1,7 +1,7 @@
 import { describe, expect, it } from 'vitest';
 
 import { billingAttention, type AgreementBillingSummary } from './agreementBillingSummary';
-import { asCommercialModel, COMMERCIAL_MODEL_HELP, COMMERCIAL_MODEL_PRICING, commercialTermsFormFrom, commercialTermsPayload, commercialTermsProblem, describePaymentTerms, ordinalDay, overStandingAuthority, usesContractExtra } from './commercialModel';
+import { asCommercialModel, asFeeOverrunPolicy, COMMERCIAL_MODEL_HELP, COMMERCIAL_MODEL_PRICING, commercialTermsFormFrom, commercialTermsPayload, commercialTermsProblem, describePaymentTerms, FEE_OVERRUN_POLICY_LABEL, ordinalDay, overStandingAuthority, usesContractExtra } from './commercialModel';
 
 describe('commercial model', () => {
   it('only fixed price + Extra, or no model yet, uses the Contracted work / Extra decision', () => {
@@ -52,8 +52,18 @@ describe('commercial model', () => {
   it('sends only the keys the RPC accepts, clearing blanks', () => {
     const form = { ...commercialTermsFormFrom(null), model: 'pay_as_you_go' as const, paymentTermsDays: ' 20 ', invoiceEmail: ' ', rates: { ...commercialTermsFormFrom(null).rates, base_rate_per_hour: '45.5' } };
     const payload = commercialTermsPayload(form);
-    expect(Object.keys(payload).sort()).toEqual(['base_rate_per_hour', 'billing_cycle', 'callout_minimum_hours', 'callout_rate_per_hour', 'invoice_email', 'notes', 'overtime_rate_per_hour', 'payment_due_day_of_month', 'payment_terms_days', 'purchase_order_number', 'standing_authority_limit', 'travel_rate_per_km']);
-    expect(payload).toMatchObject({ billing_cycle: 'monthly', payment_terms_days: 20, invoice_email: null, base_rate_per_hour: 45.5, travel_rate_per_km: null, standing_authority_limit: null });
+    expect(Object.keys(payload).sort()).toEqual(['base_rate_per_hour', 'billing_cycle', 'callout_minimum_hours', 'callout_rate_per_hour', 'fee_overrun_policy', 'invoice_email', 'notes', 'overtime_rate_per_hour', 'payment_due_day_of_month', 'payment_terms_days', 'purchase_order_number', 'standing_authority_limit', 'travel_rate_per_km']);
+    expect(payload).toMatchObject({ billing_cycle: 'monthly', payment_terms_days: 20, invoice_email: null, base_rate_per_hour: 45.5, travel_rate_per_km: null, standing_authority_limit: null, fee_overrun_policy: null });
+  });
+
+  it('sends the monthly fee overrun policy only for fixed price plus Extra, defaulting to needs a justification', () => {
+    const fixed = { ...commercialTermsFormFrom({ commercial_model: 'fixed_price_with_extras', fee_overrun_policy: 'bill_as_extra' } as never), model: 'fixed_price_with_extras' as const };
+    expect(fixed.feeOverrunPolicy).toBe('bill_as_extra');
+    expect(commercialTermsPayload(fixed).fee_overrun_policy).toBe('bill_as_extra');
+    expect(commercialTermsFormFrom(null).feeOverrunPolicy).toBe('justify');
+    expect(asFeeOverrunPolicy('junk')).toBe('justify');
+    expect(commercialTermsPayload({ ...fixed, model: 'pay_as_you_go' }).fee_overrun_policy).toBeNull();
+    expect(FEE_OVERRUN_POLICY_LABEL.bill_as_extra).toBeTruthy();
   });
 
   it('keeps do and invoice distinct from pay as you go: a standing authority limit, validated and sent only for do and invoice', () => {
