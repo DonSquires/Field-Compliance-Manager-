@@ -5,6 +5,15 @@ import { extraWorkOrderInForce, type ExtraWorkOrder } from '../lib/extraWorkOrde
 
 export type BillingBasis = 'contract' | 'extra';
 export type BillingChoice = BillingBasis | 'unset';
+/** '' = the dispatcher has not chosen yet. There is deliberately no default: regular security work is Contract, so assuming Extra would overcharge. */
+export type BillingFormChoice = BillingChoice | '';
+
+export const billingChoiceHelp = (choice: BillingFormChoice) => {
+  if (choice === 'extra') return 'Charged on top of the contract price.';
+  if (choice === 'contract') return 'Covered by the agreement; not charged separately.';
+  if (choice === 'unset') return 'The job will show "Billing not set" until someone classifies it.';
+  return 'Regular security work (patrols, gate open/close, lock checks and replacement) is contracted work. Choose Extra only for work outside the agreement.';
+};
 
 export interface JobBillingState {
   billingBasis: BillingBasis | null;
@@ -45,24 +54,23 @@ export function BillingBasisChip({ job }: { job: JobBillingState }) {
 /** Basis and optional Extra works order. Used by the create form and the job detail dialog. */
 export function BillingBasisFields({ idPrefix, choice, orderId, orders, day, onChange }: {
   idPrefix: string;
-  choice: BillingChoice;
+  choice: BillingFormChoice;
   orderId: string;
   orders: OrderSummary[];
   day: string;
-  onChange: (next: { choice: BillingChoice; orderId: string }) => void;
+  onChange: (next: { choice: BillingFormChoice; orderId: string }) => void;
 }) {
   const inForce = orders.filter((order) => extraWorkOrderInForce(order, day));
   return <>
     <div className="dispatch-console-form-field">
       <label className="dispatch-console-form-label" htmlFor={`${idPrefix}-basis`}>Billing</label>
-      <select id={`${idPrefix}-basis`} value={choice} onChange={(event) => onChange({ choice: event.target.value as BillingChoice, orderId: event.target.value === 'extra' ? orderId : '' })} aria-describedby={`${idPrefix}-basis-help`}>
-        <option value="extra">Extra (outside the contract)</option>
+      <select id={`${idPrefix}-basis`} required value={choice} aria-invalid={choice === '' ? true : undefined} onChange={(event) => onChange({ choice: event.target.value as BillingFormChoice, orderId: event.target.value === 'extra' ? orderId : '' })} aria-describedby={`${idPrefix}-basis-help`}>
+        <option value="" disabled>Choose billing…</option>
         <option value="contract">Contracted work (in the monthly price)</option>
+        <option value="extra">Extra (outside the contract)</option>
         <option value="unset">Decide later</option>
       </select>
-      <div id={`${idPrefix}-basis-help`} className="dispatch-console-form-note">
-        {choice === 'extra' ? 'Charged on top of the contract price.' : choice === 'contract' ? 'Covered by the agreement; not charged separately.' : 'The job will show "Billing not set" until someone classifies it.'}
-      </div>
+      <div id={`${idPrefix}-basis-help`} className="dispatch-console-form-note">{billingChoiceHelp(choice)}</div>
     </div>
     {choice === 'extra' && <div className="dispatch-console-form-field">
       <label className="dispatch-console-form-label" htmlFor={`${idPrefix}-order`}>Extra works order</label>
@@ -91,7 +99,7 @@ export function DispatchJobBillingPanel({ job, onSaved }: {
 }) {
   const { orders, error: ordersError } = useExtraWorkOrders(job.serviceAgreementId);
   const [editing, setEditing] = useState(false);
-  const [choice, setChoice] = useState<BillingChoice>(job.billingBasis ?? 'extra');
+  const [choice, setChoice] = useState<BillingFormChoice>(job.billingBasis ?? '');
   const [orderId, setOrderId] = useState(job.extraWorkOrderId ?? '');
   const [reason, setReason] = useState('');
   const [saving, setSaving] = useState(false);
@@ -100,10 +108,10 @@ export function DispatchJobBillingPanel({ job, onSaved }: {
   const reclassifying = job.billingBasis !== null;
   const unchanged = choice === job.billingBasis && (orderId || null) === job.extraWorkOrderId;
 
-  useEffect(() => { setChoice(job.billingBasis ?? 'extra'); setOrderId(job.extraWorkOrderId ?? ''); setEditing(false); setReason(''); setError(null); }, [job.id, job.billingBasis, job.extraWorkOrderId]);
+  useEffect(() => { setChoice(job.billingBasis ?? ''); setOrderId(job.extraWorkOrderId ?? ''); setEditing(false); setReason(''); setError(null); }, [job.id, job.billingBasis, job.extraWorkOrderId]);
 
   const save = async () => {
-    if (choice === 'unset') return;
+    if (choice !== 'contract' && choice !== 'extra') return;
     setSaving(true);
     setError(null);
     const { error: saveError } = await saveJobBillingBasis(job.id, choice, orderId, reclassifying ? reason.trim() : null);
@@ -123,7 +131,7 @@ export function DispatchJobBillingPanel({ job, onSaved }: {
       {ordersError && <div className="dispatch-console-inline-warning" role="status">Extra works orders could not be loaded: {ordersError}</div>}
       {error && <div className="dispatch-console-inline-error" role="alert">{error}</div>}
       <div className="dispatch-console-form-actions">
-        <button type="button" className="dispatch-console-primary-button" disabled={saving || choice === 'unset' || unchanged || (reclassifying && reason.trim().length < 3)} onClick={() => void save()}>{saving ? 'Saving…' : 'Save billing'}</button>
+        <button type="button" className="dispatch-console-primary-button" disabled={saving || (choice !== 'contract' && choice !== 'extra') || unchanged || (reclassifying && reason.trim().length < 3)} onClick={() => void save()}>{saving ? 'Saving…' : 'Save billing'}</button>
         <button type="button" className="dispatch-console-secondary-button" disabled={saving} onClick={() => setEditing(false)}>Cancel</button>
       </div>
     </>}

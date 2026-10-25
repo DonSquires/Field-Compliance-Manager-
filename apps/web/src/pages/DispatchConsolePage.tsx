@@ -28,7 +28,7 @@ import {
   shiftHealthBadge,
 } from '../lib/dispatchStatus';
 import { shiftStopStatusLabel } from '../lib/shiftStopStatus';
-import { BillingBasisChip, BillingBasisFields, DispatchJobBillingPanel, saveJobBillingBasis, useExtraWorkOrders, type BillingBasis, type BillingChoice } from '../components/DispatchBillingBasis';
+import { BillingBasisChip, BillingBasisFields, DispatchJobBillingPanel, saveJobBillingBasis, useExtraWorkOrders, type BillingBasis, type BillingFormChoice } from '../components/DispatchBillingBasis';
 import { localToday } from '../lib/agreementTerm';
 import { resolveDispatchBillingRule, type DispatchBillingRule } from '../lib/dispatchBillingRate';
 import { findNearestAvailableUnit } from '../lib/dispatch/nearestUnit';
@@ -318,7 +318,7 @@ const DispatchConsolePage: React.FC = () => {
   const [formAlarmSignalType, setFormAlarmSignalType] = useState<AlarmSignalType>('burglary');
   const [formAlarmReceivedAt, setFormAlarmReceivedAt] = useState(() => localDateTimeValue(new Date()));
   const [formZoneId, setFormZoneId] = useState<string>('');
-  const [formBilling, setFormBilling] = useState<BillingChoice>('extra');
+  const [formBilling, setFormBilling] = useState<BillingFormChoice>('');
   const [formExtraOrderId, setFormExtraOrderId] = useState('');
   // Harmed party (complainant) for dual-place jobs: place on the job, identity behind the guarded RPC.
   const [formComplainantAddress, setFormComplainantAddress] = useState('');
@@ -664,6 +664,10 @@ const DispatchConsolePage: React.FC = () => {
       setError('Resolve the incident address before dispatching');
       return;
     }
+    if (!formBilling) {
+      setError('Choose billing for this job: Contracted work, Extra, or Decide later.');
+      return;
+    }
 
     try {
       setSaving(true);
@@ -753,7 +757,7 @@ const DispatchConsolePage: React.FC = () => {
         else if (complainantAddress && !formComplainantSiteId && !harmedPartyReceipt?.out_harmed_party_site_id) setWarning('Job created. The complainant address was not resolved to coordinates, so attendance there will be recorded by time only.');
       }
 
-      if (formBilling !== 'unset') {
+      if (formBilling === 'contract' || formBilling === 'extra') {
         const { error: billingError } = await saveJobBillingBasis((data as Array<{ id: string }>)[0].id, formBilling, formExtraOrderId, null);
         if (billingError) setWarning(`Job created, but its billing was not set: ${billingError.message}. Open the job and set billing before it is invoiced.`);
       }
@@ -775,7 +779,7 @@ const DispatchConsolePage: React.FC = () => {
       setFormAlarmSignalType('burglary');
       setFormAlarmReceivedAt(localDateTimeValue(new Date()));
       setFormZoneId('');
-      setFormBilling('extra');
+      setFormBilling('');
       setFormExtraOrderId('');
       setFormComplainantAddress('');
       setResolvedComplainant(null);

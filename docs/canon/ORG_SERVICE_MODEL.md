@@ -267,8 +267,10 @@ and is charged on top. It does not change the agreement.
 
 - **One-off Extra (dispatch).** A dispatcher classifies each dispatch job as
   `contract` or `extra` (`dispatch_jobs.billing_basis`, NULL = not yet
-  classified) through `set_dispatch_job_billing_basis`. Non-routine jobs sent
-  by dispatch default to Extra in the console. Changing an existing
+  classified) through `set_dispatch_job_billing_basis`. The console has no
+  default: the dispatcher must choose Contracted, Extra or Decide later,
+  because regular security work (patrols, gate open/close, lock checks and
+  replacement) is Contract and must not be swept into Extra. Changing an existing
   classification needs a reason; every change is audited; an invoiced job is
   corrected by credit note, not reclassified. Charge lines inherit the job's
   basis.

@@ -2682,7 +2682,9 @@ live; behavioural test passes live under rollback).**
   charge lines inherit the basis.
 - UI: Client Portfolios -> agreement setup -> **Extra works** tab (list with
   status, authorise/edit/end with reason, empty and error states). Dispatch
-  Console: Billing choice (Extra default, Contracted, Decide later) and Extra
+  Console: required Billing choice with no default (Contracted, Extra, Decide
+  later; owner ruling 2026-10-25 keeps lock replace and gate open/closed as
+  Contract) and Extra
   works order picker on job creation; basis chip in the job list; Billing
   section in the job dialog to set or change with a reason.
 
