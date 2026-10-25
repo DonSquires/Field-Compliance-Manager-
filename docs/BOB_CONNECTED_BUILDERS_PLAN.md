@@ -226,6 +226,73 @@ conflicting edits, repeated discovery and contradictory completion claims.
 
 ### 5. Measured efficiency
 
+#### Conductor / Caddie / Oracle comparison (owner direction, 2026-10-25)
+
+Source inspection, not Atlas alone, establishes these current differences:
+
+- In-app Conductor (`onspace-ai-chat/index.ts`) authenticates, assembles context,
+  asks the model, enforces at the pre-effect seam and records results. It is
+  not intended to select tools by keywords.
+- Caddie (`onspace-ai-chat/caddie.ts`) builds the capability menu with canonical
+  purpose/governance/effect descriptions and Atlas provenance. It exposes broad
+  awareness; the model chooses, and dispatch enforces authority. It is not a
+  model selector or proof that a tool invocation works. Its source includes
+  an explicit labelled fallback when Atlas cannot generate the catalogue.
+- The domain-neutral Oracle helper (`conductor-oracle.ts`) normalizes supplied
+  truth/effect state; its concrete use in `conductor-welfare-seam.ts` is not
+  an independent model critic or universal evidence verifier.
+- Builder Chat/Vibe already share native tool contracts and model candidates,
+  but candidate order is principally configured health/installation order.
+  Repeated calls/timeouts trigger another candidate; this is not measured
+  task-fit selection. Chat still has keyword-derived mandatory proposal intent.
+
+Observed first-model diagnostic: same private `qwen2.5-coder:7b`, same real
+guidance request and retained canonical cards; no proposed tool was executed.
+The opening packet had 9,802 system characters, 8,431 task/context characters,
+15 tool definitions and a 6,176-character output schema. Despite a "native"
+request, the gateway reported JSON compatibility. Full instructions selected
+`read_canon` even after removing the false mandatory-proposal suffix. Reordering
+schema branches did not fix selection. Generic JSON invented a nonexistent
+tool; a compact system produced a reply in roughly 8–10 seconds without
+escalation, but still imported the unrelated selected-job subject and overstated
+what the method could prove. A quicker reply is not adequate acceptance.
+
+The exact UI request was also misclassified before model inference:
+"do not investigate or change any particular feature, create a job" exceeded
+the negation matcher's 24-character gap. Correct that producer contradiction
+and test the actual opening packet, preserving positive planning instructions
+in separate or contrastive clauses. This does not solve general NLU.
+
+Next measured slice, reusing the existing delivery lanes rather than adding
+another product or a model call before every answer:
+
+1. A compact, shared engineering turn packet: current task distinct from page
+   background, canonical guidance distinct from observed evidence, and revision,
+   holds and unknowns explicit. Do not promote maps/cards into live facts.
+2. A Caddie-style capability view generated from existing callable contracts:
+   exact names, purposes, arguments, effects and availability. Preserve broad
+   capability awareness and post-selection guards. JSON compatibility must get
+   a readable catalogue as well as grammar; schema constraints alone are not
+   instructions or evidence of semantic understanding.
+3. An Oracle-style evidence state derived from actual receipts, not model
+   assertions: map lead, source inspection, fixture test and live observation
+   remain distinct. Reuse the domain-neutral contract where appropriate; do not
+   import welfare assumptions or in-app tenant conversations.
+4. Benchmark the first eligible private model on guidance, source investigation,
+   coding, vision/documents and recovery. Score factual adequacy and tool validity,
+   not just speed or JSON shape. Select by measured task fit within existing
+   egress/spend/memory boundaries, not a keyword model router.
+5. One adequate model response should end a simple turn. Fallback remains for
+   actual failures, not normal choreography; preserve accumulated evidence and
+   explain the reason. Do not remove fallback or change the default author based
+   on one favorable synthetic answer.
+
+Acceptance requires varied, held-out requests (including negation, unrelated
+page context and ordinary "continue"), correct answers with bounded tool use,
+no unsupported evidence claims, and unchanged authority/privacy/release gates.
+No compact prompt or new cross-mode selection system has been promoted from
+these diagnostic results.
+
 Benchmark tool correctness, discovery, evidence-supported diagnosis, implementation,
 recovery, visual/document interpretation, elapsed time and inference consumed per
 verified outcome. Route by demonstrated fit within current data/spending authority.

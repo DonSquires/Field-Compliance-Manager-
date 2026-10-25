@@ -772,6 +772,25 @@ test('explanations and negated requests are not mandatory proposals', () => {
   assert.equal(chat.proposeIntent("Don't propose a job yet, just look at the dispatch page"), false);
   assert.equal(chat.proposeIntent('Can you propose a job for the dispatch spacing?'), true);
   assert.equal(chat.proposeIntent('Do not propose a repair plan yet; just inspect the source.'), false);
+  assert.equal(chat.proposeIntent('How will you use Atlas to guide your research into an app change and understand its blast radius and butterfly effect? Explain how you would choose the next useful check, distinguish flow reach from foreign-key structure, interpret graph direction, and verify before/during/after. This is a guidance question: do not investigate or change any particular feature, create a job, or read business records. Say what this method can and cannot prove.'), false);
+  assert.equal(chat.proposeIntent('Please do not investigate or change any feature, create a Builder job or draft a repair plan; explain the method.'), false);
+  assert.equal(chat.proposeIntent('Do not weaken the guards; please propose a Builder job to fix the source.'), true);
+  assert.equal(chat.proposeIntent('Do not create a job, but please propose a repair plan.'), true);
+  assert.equal(chat.proposeIntent('Explain the process instead of proposing a job.'), false);
+});
+
+test('a coordinated no-job instruction does not inject mandatory planning into the model packet', async () => {
+  const { store, deps, model } = setup([
+    { tool: 'reply', args: { message: 'Atlas guides where to investigate; source and authorized checks establish facts.' } },
+  ]);
+  const message = ownerMessage('How will you use Atlas to guide your research? This is a guidance question: do not investigate or change any particular feature, create a job, or read business records. Say what the method can and cannot prove.');
+  const outcome = await chat.processBuilderChatMessage({ store, message, deps });
+  assert.equal(outcome.error, undefined);
+  assert.equal(store.state.completed[message.id], 'done');
+  assert.equal(model.calls.length, 1);
+  assert.doesNotMatch(model.calls[0].request.messages[1].content, /THE OWNER ASKED FOR A PROPOSAL/);
+  assert.match(model.calls[0].request.messages[1].content, /CURRENT OWNER REQUEST/);
+  assert.equal(store.rows.some(row => row.kind === 'proposal'), false);
 });
 
 test('a rejected owner-requested proposal cannot end as a successfully answered ordinary conversation', async () => {
