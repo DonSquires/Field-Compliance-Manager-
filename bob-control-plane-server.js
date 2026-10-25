@@ -22,7 +22,9 @@ const { loadBuilderRuntimeSnapshot, advanceBuilderJob, runBuilderUntilPause, rec
 const { fileSha256, listRepositoryTree, readRepositoryFile, searchRepository } = require('./builder-repository-read');
 const { autopilotTick, listAutopilotJobs, listPendingApprovals } = require('./builder-autopilot');
 const { laptopStatus, runLaptopCommand, laptopConfig, loadLaptopLink, mergeLaptopLink, describeLink } = require('./bob-laptop-shell');
-const { createVibeWorker, vibeWorkspacePath } = require('./builder-vibe-session');
+const { createVibeWorker, vibeWorkspacePath, assertLocalVisionUrl } = require('./builder-vibe-session');
+const { createKnowledgeTool } = require('./builder-knowledge');
+const { embedText, embeddingConfig } = require('./services/fcm-api/src/bob/knowledgeEmbedding');
 const { createBuilderChatWorker } = require('./builder-chat-session');
 const { createPlatformTools } = require('./bob-platform-diagnostics');
 const { runVibeHumanTest } = require('./builder-vibe-human-test');
@@ -67,6 +69,16 @@ const builderSupabase = process.env.SUPABASE_URL && process.env.SUPABASE_SERVICE
     auth: { persistSession: false, autoRefreshToken: false }
   })
   : null;
+const retrieveBuilderKnowledge = createKnowledgeTool({
+  supabase: builderSupabase,
+  embed: async text => {
+    const ollamaUrl = await assertLocalVisionUrl(modelGatewayConfig.ollama.baseUrl);
+    return embedText(text, {
+      config: { ...embeddingConfig(), ollamaUrl, timeoutMs: 15_000 },
+      fetchImpl: (url, options) => fetch(url, { ...options, redirect: 'error' }),
+    });
+  },
+});
 const builderGateway = {
   gatewayUrl: process.env.BOB_MODEL_GATEWAY_URL || `http://127.0.0.1:${port}`,
   apiToken: modelGatewayToken
@@ -1806,6 +1818,7 @@ const builderChatWorker = Boolean(builderSupabase) && process.env.BOB_BUILDER_CH
     workspaceRoot: builderWorkspaceRoot,
     gateway: builderGateway,
     platformTools,
+    retrieveKnowledge: retrieveBuilderKnowledge,
     sourceDirFor: sha => builderGitSource(sha),
     resolveHead: () => builderRepositoryHead('main').sha,
   },

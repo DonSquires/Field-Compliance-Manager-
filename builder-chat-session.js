@@ -17,8 +17,9 @@ const { redactGitError, gitSpawnFault } = require('./builder-branch-workspace');
 const { buildModelRunRequest, callModelGateway, fetchModelHealth, providerRequest } = require('./supabase/functions/_shared/builder-model-adapter');
 const { runBuilderResearch } = require('./builder-chat-research');
 const { PLATFORM_CONTRACTS, PLATFORM_DESCRIPTIONS } = require('./bob-platform-diagnostics');
+const { KNOWLEDGE_CONTRACT } = require('./builder-knowledge');
 
-const PROMPT_VERSION = 'builder-chat-v5';
+const PROMPT_VERSION = 'builder-chat-v6';
 const BUILDER_CHAT_LIMITS = Object.freeze({
   maxTurns: Math.max(4, Number(process.env.BOB_BUILDER_CHAT_TURNS || 14)),
   wallBudgetMs: Math.max(60_000, Number(process.env.BOB_BUILDER_CHAT_BUDGET_MS || 8 * 60_000)),
@@ -49,6 +50,8 @@ function builderChatSystemPrompt() {
     '- Investigate with read-only tools on the current main: find_files (filename/path discovery), search, read_file, outline, list_dir, git_log, read_canon, atlas (live build map), live_count (row counts).',
     '- Read the Builder job ledger: owner_queue (what is waiting on the owner), list_jobs, job_status.',
     '- Where provided, platform_capabilities lists bounded read-only platform actions and their evidence limits; inspect_platform runs one. Discover available actions instead of guessing. Availability is not established until an actual diagnostic succeeds.',
+    '- retrieve_knowledge searches active platform-canonical cards with source, version and hash receipts. Use relevant guidance, but do not treat a card or similarity score as live evidence. Canon outranks cards; experience notes are not authoritative.',
+    '- read_task_evidence retrieves this thread\'s prior tool receipts, including bounded result excerpts, source revision, observation time and failures. Continue from them rather than repeating unchanged checks. A changed revision or old runtime observation needs revalidation. Truncated excerpts are not complete evidence; inspect the missing range when needed.',
     '- Plan a build and propose it with propose_job. The owner then confirms it in the UI; only that creates the job, which runs through specification, implementation and release approval gates and publishes a pull request.',
     '- For interactive, iterative edits suggest the Vibe Builder tab (chat-to-code on a live branch).',
     '- Public cloud research is a separate owner-approved message mode in this chat: best available configured Ollama Cloud candidates first, no metered providers, prior conversation and repository tools excluded. The owner can attach reviewed non-sensitive screenshots and documents and request public web evidence. Never send private source, credentials or tenant records to that mode; ask the owner to use its explicit approval controls. Returned research is advisory, not release authority.',
@@ -104,6 +107,14 @@ function createBuilderChatStore(supabase) {
         // earlier queued turns that were posted after this message was sent).
         .or(`and(role.eq.owner,seq.lt.${Number(beforeSeq)}),role.eq.bob`).order('seq', { ascending: false }).limit(HISTORY_MESSAGES);
       if (error) throw new Error(`history read failed: ${error.message}`);
+      return (data || []).reverse();
+    },
+    async evidence(threadId, { seq, limit = 6 } = {}) {
+      let query = supabase.from('builder_chat_messages').select('seq,content,payload,created_at')
+        .eq('thread_id', threadId).eq('role', 'tool').eq('kind', 'tool');
+      if (seq !== undefined) query = query.eq('seq', seq);
+      const { data, error } = await query.order('seq', { ascending: false }).limit(Math.min(6, Math.max(1, limit)));
+      if (error) throw new Error('Task evidence read failed; prior tool receipts were not loaded.');
       return (data || []).reverse();
     },
     async releaseStaleClaims(olderThanMs = 30 * 60_000) {
@@ -200,12 +211,13 @@ function validateProposal(args) {
   return { proposal: { title, task_description: description, frontend_required: frontend, backend_required: backend, rationale: clip(String(args.rationale || '').trim(), 1500) } };
 }
 
-function createBuilderChatTools({ supabase, workspacePath, limits, platformTools }) {
+function createBuilderChatTools({ supabase, workspacePath, limits, platformTools, retrieveKnowledge }) {
   const base = workspacePath ? createTools({ workspacePath, repoRoot: workspacePath, lane: 'fullstack', supabase, limits, log: () => {} }) : {};
   const tools = Object.fromEntries(READ_TOOLS.filter(name => typeof base[name] === 'function').map(name => [name, base[name]]));
   for (const name of Object.keys(PLATFORM_CONTRACTS)) {
     if (typeof platformTools?.[name] === 'function') tools[name] = platformTools[name];
   }
+  if (typeof retrieveKnowledge === 'function') tools.retrieve_knowledge = retrieveKnowledge;
   if (workspacePath) {
     tools.read_file = (args = {}) => {
       const start = args.start_line === undefined ? 1 : Number(args.start_line);
@@ -394,6 +406,8 @@ function builderChatNativeTools(tools) {
   const text = { type: 'string' };
   const steps = { type: 'array', minItems: 2, maxItems: 12, items: { type: 'string', minLength: 10, maxLength: 1000 } };
   const custom = {
+    retrieve_knowledge: { description: 'Retrieve relevant active platform-canonical knowledge with source/version/hash provenance. Guidance, not live evidence. Tenant cards, conversations and experience notes are excluded.', parameters: { type: 'object', ...KNOWLEDGE_CONTRACT, additionalProperties: false } },
+    read_task_evidence: { description: 'Read up to six prior tool receipts in this thread; optional seq selects an exact receipt. Compare revision/time before reusing observations.', parameters: { type: 'object', properties: { seq: { type: 'integer', minimum: 1 }, limit: { type: 'integer', minimum: 1, maximum: 6 } }, additionalProperties: false } },
     ...Object.fromEntries(Object.entries(PLATFORM_CONTRACTS).map(([name, contract]) => [name, {
       description: PLATFORM_DESCRIPTIONS[name],
       parameters: { type: 'object', ...contract, additionalProperties: false },
@@ -441,7 +455,21 @@ function contextLine(context) {
 }
 
 async function runBuilderChat({ store, thread, message, workspacePath, head, gateway, deps, limits = BUILDER_CHAT_LIMITS }) {
-  const allTools = deps.tools || createBuilderChatTools({ supabase: deps.supabase, workspacePath, limits, platformTools: deps.platformTools });
+  const allTools = { ...(deps.tools || createBuilderChatTools({ supabase: deps.supabase, workspacePath, limits, platformTools: deps.platformTools, retrieveKnowledge: deps.retrieveKnowledge })) };
+  if (typeof store.evidence === 'function') allTools.read_task_evidence = async (args = {}) => {
+    const { seq, limit = 3 } = args;
+    if (Object.keys(args).some(key => !['seq', 'limit'].includes(key)) || (seq !== undefined && (!Number.isSafeInteger(seq) || seq < 1))
+      || !Number.isInteger(limit) || limit < 1 || limit > 6) return { error: 'Use an optional positive integer seq and limit 1-6. Thread scope is fixed to this conversation.' };
+    const rows = await store.evidence(thread.id, { seq, limit });
+    return { receipts: rows.map(row => ({
+      seq: row.seq, tool: row.payload?.tool, ok: row.payload?.ok,
+      observed_at: row.payload?.observed_at || row.created_at,
+      main_head: row.payload?.main_head || null,
+      revision_matches: Boolean(head && row.payload?.main_head === head),
+      result_text: row.payload?.result_text || row.payload?.preview || row.content,
+      truncated: row.payload?.result_truncated ?? true,
+    })), limitation: 'Historical receipts, not fresh reads. Revalidate runtime state or changed source before claiming the result is current.' };
+  };
   const intent = statusIntent(message.content);
   const preloadTool = intent ? { owner: 'owner_queue', job: 'job_status', jobs: 'list_jobs' }[intent.kind] : null;
   const statusMode = Boolean(preloadTool && typeof allTools[preloadTool] === 'function');
@@ -633,7 +661,11 @@ async function runBuilderChat({ store, thread, message, workspacePath, head, gat
     }
     await store.post(thread.id, {
       role: 'tool', kind: 'tool', content: `${call.tool}${args.path ? ` ${args.path}` : args.query ? ` "${clip(args.query, 80)}"` : args.job ? ` ${args.job}` : args.name ? ` ${args.name}` : ''}`,
-      payload: { message_id: message.id, tool: call.tool, ok: !result?.error, preview: clip(JSON.stringify(result), 600) },
+      payload: {
+        message_id: message.id, tool: call.tool, ok: !result?.error, preview: clip(JSON.stringify(result), 600),
+        main_head: head || null, observed_at: new Date().toISOString(),
+        ...(call.tool !== 'read_task_evidence' ? { result_text: clip(JSON.stringify(result), limits.readCapChars), result_truncated: JSON.stringify(result).length > limits.readCapChars } : {}),
+      },
     });
     if (!result?.error) recordLedger(call.tool, result);
     if (!result?.error) {

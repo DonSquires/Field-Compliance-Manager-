@@ -159,6 +159,49 @@ test('a question is answered after a read-only tool, with the tool step recorded
   assert.ok(!firstRequest.tools.some(tool => ['write_file', 'replace_in_file', 'apply_patch', 'run', 'finish'].includes(tool.function.name)));
 });
 
+test('continuation reads same-thread evidence with revision/freshness limits and persists new tool receipts', async () => {
+  const { store, deps } = setup([
+    { tool: 'read_task_evidence', args: { seq: 12, limit: 1 } },
+    { tool: 'read_file', args: { path: 'source.js' } },
+    { tool: 'reply', args: { message: 'The previous observation is historical; the source was read again.' } },
+  ]);
+  store.evidence = async (thread, args) => {
+    assert.equal(thread, THREAD_ID);
+    assert.deepEqual(args, { seq: 12, limit: 1 });
+    return [{ seq: 12, payload: { tool: 'inspect_platform', ok: false, main_head: 'old', observed_at: 'previous-time', result_text: '{"error":"not reachable"}', result_truncated: false } }];
+  };
+  await chat.processBuilderChatMessage({ store, message: ownerMessage('Continue from the earlier results.'), deps });
+  const rows = store.rows.filter(row => row.role === 'tool');
+  assert.match(rows[0].payload.preview, /"revision_matches":false/);
+  assert.equal(rows[0].payload.result_text, undefined, 'do not recursively persist retrieved receipts');
+  assert.equal(rows[1].payload.main_head, 'a'.repeat(40));
+  assert.match(rows[1].payload.result_text, /cctv-review/);
+  assert.equal(rows[1].payload.result_truncated, false);
+});
+
+test('task evidence queries cannot select another thread or accept invalid receipt bounds', async () => {
+  const { store, deps } = setup([
+    { tool: 'read_task_evidence', args: { seq: 0 } },
+    { tool: 'read_task_evidence', args: { thread_id: 'another-thread' } },
+    { tool: 'reply', args: { message: 'The invalid evidence reads were refused.' } },
+  ]);
+  store.evidence = async () => assert.fail('invalid arguments must not read any thread');
+  await chat.processBuilderChatMessage({ store, message: ownerMessage('Read a previous receipt.'), deps });
+  assert.ok(store.rows.filter(row => row.role === 'tool').every(row => row.payload.ok === false));
+});
+
+test('persistent evidence store applies exact thread, tool-role and receipt filters', async () => {
+  const calls = [];
+  const query = {};
+  for (const method of ['select', 'eq', 'order', 'limit']) query[method] = (...args) => { calls.push([method, ...args]); return query; };
+  query.then = resolve => resolve({ data: [{ seq: 7 }], error: null });
+  const store = chat.createBuilderChatStore({ from: table => { assert.equal(table, 'builder_chat_messages'); return query; } });
+  assert.deepEqual(await store.evidence(THREAD_ID, { seq: 7, limit: 1 }), [{ seq: 7 }]);
+  for (const [field, value] of [['thread_id', THREAD_ID], ['role', 'tool'], ['kind', 'tool'], ['seq', 7]]) {
+    assert.ok(calls.some(call => call[0] === 'eq' && call[1] === field && call[2] === value));
+  }
+});
+
 test('a proposed job is posted for owner confirmation and never created by the worker', async () => {
   const { store, deps } = setup([
     ...RESEARCH,
