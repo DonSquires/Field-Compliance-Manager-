@@ -7859,6 +7859,7 @@ export type Database = {
           billing_cycle: string
           callout_minimum_hours: number | null
           callout_rate_per_hour: number | null
+          commercial_model: string | null
           created_at: string
           currency: string
           id: string
@@ -7866,16 +7867,20 @@ export type Database = {
           invoice_email: string | null
           notes: string | null
           overtime_rate_per_hour: number | null
+          payment_due_day_of_month: number | null
           payment_terms_days: number
           purchase_order_number: string | null
           service_agreement_id: string
+          standing_authority_limit: number | null
           travel_rate_per_km: number | null
+          updated_at: string | null
         }
         Insert: {
           base_rate_per_hour?: number | null
           billing_cycle?: string
           callout_minimum_hours?: number | null
           callout_rate_per_hour?: number | null
+          commercial_model?: string | null
           created_at?: string
           currency?: string
           id?: string
@@ -7883,16 +7888,20 @@ export type Database = {
           invoice_email?: string | null
           notes?: string | null
           overtime_rate_per_hour?: number | null
+          payment_due_day_of_month?: number | null
           payment_terms_days?: number
           purchase_order_number?: string | null
           service_agreement_id: string
+          standing_authority_limit?: number | null
           travel_rate_per_km?: number | null
+          updated_at?: string | null
         }
         Update: {
           base_rate_per_hour?: number | null
           billing_cycle?: string
           callout_minimum_hours?: number | null
           callout_rate_per_hour?: number | null
+          commercial_model?: string | null
           created_at?: string
           currency?: string
           id?: string
@@ -7900,10 +7909,13 @@ export type Database = {
           invoice_email?: string | null
           notes?: string | null
           overtime_rate_per_hour?: number | null
+          payment_due_day_of_month?: number | null
           payment_terms_days?: number
           purchase_order_number?: string | null
           service_agreement_id?: string
+          standing_authority_limit?: number | null
           travel_rate_per_km?: number | null
+          updated_at?: string | null
         }
         Relationships: [
           {
@@ -9091,6 +9103,7 @@ export type Database = {
           billing_basis_set_at: string | null
           billing_basis_set_by: string | null
           briefing_notes: string | null
+          client_order_reference: string | null
           client_request_id: string | null
           client_site_id: string | null
           completed_at: string | null
@@ -9137,6 +9150,7 @@ export type Database = {
           billing_basis_set_at?: string | null
           billing_basis_set_by?: string | null
           briefing_notes?: string | null
+          client_order_reference?: string | null
           client_request_id?: string | null
           client_site_id?: string | null
           completed_at?: string | null
@@ -9183,6 +9197,7 @@ export type Database = {
           billing_basis_set_at?: string | null
           billing_basis_set_by?: string | null
           briefing_notes?: string | null
+          client_order_reference?: string | null
           client_request_id?: string | null
           client_site_id?: string | null
           completed_at?: string | null
@@ -34655,6 +34670,10 @@ export type Database = {
           isSetofReturn: false
         }
       }
+      agreement_commercial_model: {
+        Args: { p_service_agreement_id: string }
+        Returns: string
+      }
       agreement_service_delivery: {
         Args: {
           p_agreement_id: string
@@ -34662,6 +34681,10 @@ export type Database = {
           p_period_start: string
         }
         Returns: Json
+      }
+      agreement_uses_contract_extra: {
+        Args: { p_service_agreement_id: string }
+        Returns: boolean
       }
       apply_biosecurity_photo_review_to_perception: {
         Args: { p_assessment_id: string }
@@ -35021,6 +35044,7 @@ export type Database = {
           billing_basis_set_at: string | null
           billing_basis_set_by: string | null
           briefing_notes: string | null
+          client_order_reference: string | null
           client_request_id: string | null
           client_site_id: string | null
           completed_at: string | null
@@ -37321,6 +37345,63 @@ export type Database = {
           isSetofReturn: false
         }
       }
+      builder_record_pull_request_closed: {
+        Args: { _details?: Json; _job_id: string; _pull_request_url: string }
+        Returns: {
+          approval_required_at: string[] | null
+          autopilot_conversation_id: string | null
+          autopilot_report: Json | null
+          autopilot_reported_at: string | null
+          autopilot_requested_by: string | null
+          autopilot_source: string | null
+          autopilot_state: string | null
+          autopilot_updated_at: string | null
+          backend_required: boolean
+          branch_name: string | null
+          code_review_artifact_id: string | null
+          code_review_mode: string
+          code_review_status: string
+          created_at: string
+          created_by: string | null
+          current_step_index: number | null
+          current_step_name: string | null
+          description: string | null
+          error_count: number | null
+          frontend_required: boolean
+          id: string
+          last_error: string | null
+          organization_id: string
+          parent_job_id: string | null
+          project_id: string
+          repair_risk: string | null
+          requested_action: string
+          source_friction_packet_id: string | null
+          source_main_health_files: string[] | null
+          source_main_health_sha: string | null
+          status: string
+          target_environment: string
+          target_sha: string | null
+          task_description: string | null
+          task_run_id: string | null
+          title: string
+          total_steps: number | null
+          updated_at: string
+          workspace_branch: string | null
+          workspace_created_at: string | null
+          workspace_head_sha: string | null
+          workspace_published_at: string | null
+          workspace_published_head_sha: string | null
+          workspace_pull_request_created_at: string | null
+          workspace_pull_request_head_sha: string | null
+          workspace_pull_request_url: string | null
+        }
+        SetofOptions: {
+          from: "*"
+          to: "builder_jobs"
+          isOneToOne: true
+          isSetofReturn: false
+        }
+      }
       builder_record_workspace_commit: {
         Args: {
           _commit_sha: string
@@ -38575,6 +38656,7 @@ export type Database = {
         Args: { p_job_id: string }
         Returns: number
       }
+      commercial_model_label: { Args: { p_model: string }; Returns: string }
       commit_org_jurisdiction_stage: {
         Args: {
           p_boundary_source?: string
@@ -40437,6 +40519,10 @@ export type Database = {
       }
       desktop_signing_material: { Args: never; Returns: Json }
       disablelongtransactions: { Args: never; Returns: string }
+      dispatch_job_over_standing_authority: {
+        Args: { p_job_id: string; p_limit: number }
+        Returns: boolean
+      }
       dmetaphone: { Args: { "": string }; Returns: string }
       dmetaphone_alt: { Args: { "": string }; Returns: string }
       dropgeometrycolumn:
@@ -42282,6 +42368,15 @@ export type Database = {
           isSetofReturn: false
         }
       }
+      invoice_due_date: {
+        Args: {
+          p_due_day: number
+          p_invoice_date: string
+          p_period_end: string
+          p_terms_days: number
+        }
+        Returns: string
+      }
       is_admin_for_org: { Args: { target_org_id: string }; Returns: boolean }
       is_enforcement_operator_for_org: {
         Args: { target_org_id: string }
@@ -43757,6 +43852,7 @@ export type Database = {
           billing_basis_set_at: string | null
           billing_basis_set_by: string | null
           briefing_notes: string | null
+          client_order_reference: string | null
           client_request_id: string | null
           client_site_id: string | null
           completed_at: string | null
@@ -48866,6 +48962,15 @@ export type Database = {
         Args: { p_organization_id: string }
         Returns: undefined
       }
+      set_agreement_commercial_terms: {
+        Args: {
+          p_commercial_model: string
+          p_reason?: string
+          p_service_agreement_id: string
+          p_terms?: Json
+        }
+        Returns: Json
+      }
       set_cctv_import_manifest: {
         Args: { p_import_id: string; p_manifest: Json; p_status?: string }
         Returns: {
@@ -48958,6 +49063,10 @@ export type Database = {
           p_job_id: string
           p_reason?: string
         }
+        Returns: Json
+      }
+      set_dispatch_job_client_reference: {
+        Args: { p_job_id: string; p_reason?: string; p_reference: string }
         Returns: Json
       }
       set_dispatch_job_harmed_party: {

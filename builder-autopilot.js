@@ -404,6 +404,40 @@ function orderAutopilotJobs(jobs) {
   });
 }
 
+// A published pull request is the owner's to review. When the owner merges it on GitHub the ledger
+// must learn the merge so the verified-release path can mark it live; when the owner closes it, the
+// job is finished as declined. An open PR is rotated to the back of the queue so it cannot hold an
+// autopilot slot from jobs Bob can still drive (live: #25 sat "published" for weeks after its merge).
+async function readPullRequestState(job, actions) {
+  try { return await actions.pullRequestState(job); } catch (error) { return { state: 'unknown', error: plain(error?.message, 300) }; }
+}
+
+async function reconcileOwnerPullRequest({ job, actions, pr: known = null }) {
+  const pr = known ?? await readPullRequestState(job, actions);
+  const url = job.workspace_pull_request_url;
+  if (pr?.state === 'merged' && /^[a-f0-9]{40}$/i.test(String(pr.mergeSha || '')) && (!pr.baseRef || pr.baseRef === 'main')) {
+    await actions.record(job.id, 'published', {
+      ...(job.autopilot_report && typeof job.autopilot_report === 'object' ? job.autopilot_report : {}),
+      text: `Merged: "${plain(job.title, 160)}" was reviewed and merged on GitHub${pr.mergedBy ? ` by ${plain(pr.mergedBy, 80)}` : ''}. Bob is now checking that production picked it up.\nRepository receipt: ${url}`,
+      state: 'merged', merged: true, merge_sha: pr.mergeSha, merged_at: pr.mergedAt ?? null, merged_by_owner: true,
+    });
+    return { job: job.id, outcome: 'merged', url, merge_sha: pr.mergeSha };
+  }
+  if (pr?.state === 'closed') {
+    // The job itself must reach an audited terminal status, not only the autopilot ledger.
+    if (typeof actions.closeDeclinedJob === 'function') await actions.closeDeclinedJob(job, { closed_at: pr.closedAt ?? null });
+    await actions.record(job.id, 'done', {
+      ...(job.autopilot_report && typeof job.autopilot_report === 'object' ? job.autopilot_report : {}),
+      text: `Closed: the pull request for "${plain(job.title, 160)}" was closed without merging, so nothing from it is live. Ask Bob for a new job if the change is still wanted.\nRepository receipt: ${url}`,
+      state: 'closed_unmerged', merged: false, closed_at: pr.closedAt ?? null,
+    });
+    return { job: job.id, outcome: 'closed_unmerged', url };
+  }
+  // A null report keeps the owner's existing notice and only moves the job to the back of the queue.
+  await actions.record(job.id, 'published', null);
+  return { job: job.id, outcome: 'published', ...(pr?.state === 'unknown' ? { pr_state_error: pr.error ?? 'unknown' } : {}) };
+}
+
 // The independent reviewer blocked the change. That is the normal author -> review -> revise loop
 // of a coding agent, not a stop: the same brief goes again with the reviewer's findings folded in,
 // at most REVIEW_ROUNDS times per brief (job 019d2088, 2026-09-27: a correct high finding —
@@ -623,6 +657,15 @@ async function autopilotTick({ supabase, jobs, actions, log = () => {} }) {
             job.autopilot_report?.automerge === true
             || (job.autopilot_source === 'main_monitor' && job.autopilot_report?.automerge == null)
           );
+          // The owner may have merged or closed the PR while an automerge was pending; retrying the
+          // merge would then fail on the closed PR forever without recording the decision.
+          if (interruptedAutomerge && job.autopilot_state === 'published' && job.workspace_pull_request_url && typeof actions.pullRequestState === 'function') {
+            const pr = await readPullRequestState(job, actions);
+            if (pr?.state === 'merged' || pr?.state === 'closed') {
+              outcomes.push(await reconcileOwnerPullRequest({ job, actions, pr }));
+              continue;
+            }
+          }
           if (job.autopilot_state !== 'published' || interruptedAutomerge) {
             const snapshot = await loadBuilderRuntimeSnapshot(supabase, job.id);
             const evidence = await collectEvidence({ supabase, snapshot });
@@ -632,6 +675,11 @@ async function autopilotTick({ supabase, jobs, actions, log = () => {} }) {
             const state = published.merged === true ? 'merged' : 'published';
             await actions.record(job.id, 'published', { ...composeReport({ job, evidence, pullRequestUrl: published.pullRequestUrl, state, automerge }), automerge: automerge.ok, merged: published.merged === true, merge_sha: published.mergeSha ?? null });
             outcomes.push({ job: job.id, outcome: state, url: published.pullRequestUrl });
+            continue;
+          }
+          if (typeof actions.pullRequestState === 'function') {
+            const outcome = await reconcileOwnerPullRequest({ job, actions });
+            outcomes.push(outcome);
             continue;
           }
           outcomes.push({ job: job.id, outcome: 'published' });
@@ -730,4 +778,4 @@ async function listPendingApprovals(supabase, jobId) {
   return data || [];
 }
 
-module.exports = { AUTOMERGE_MARK, automergeEligible, autopilotTick, baselineBlock, collectEvidence, composeReport, composePullRequestBody, evaluateVerificationContract, evidentialHold, routineRepairHold, isRepairJob, isReopenedJob, listAutopilotJobs, listPendingApprovals, orderAutopilotJobs, repairJobFor, TERMINAL, GATES };
+module.exports = { AUTOMERGE_MARK, automergeEligible, autopilotTick, reconcileOwnerPullRequest, baselineBlock, collectEvidence, composeReport, composePullRequestBody, evaluateVerificationContract, evidentialHold, routineRepairHold, isRepairJob, isReopenedJob, listAutopilotJobs, listPendingApprovals, orderAutopilotJobs, repairJobFor, TERMINAL, GATES };
