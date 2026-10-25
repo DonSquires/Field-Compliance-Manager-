@@ -271,6 +271,11 @@ function filteringSupabase(tables) {
       not: (column, _op, _value) => { out = out.filter(row => row[column] != null); return b; },
       gte: (column, value) => { out = out.filter(row => row[column] >= value); return b; },
       in: (column, values) => { out = out.filter(row => values.includes(row[column])); return b; },
+      or: filter => {
+        const tests = filter.split(',').map(part => { const [column, op, value] = part.split('.'); return row => op === 'is' ? row[column] == null : op === 'neq' ? row[column] !== value : row[column] === value; });
+        out = out.filter(row => tests.some(match => match(row)));
+        return b;
+      },
       then: resolve => resolve({ data: out, error: null }),
     };
     return b;
@@ -461,4 +466,33 @@ test('the shared read-only checkout follows main and discards stray files', t =>
   assert.equal(refreshed.workspacePath, opened.workspacePath);
   assert.equal(fs.readFileSync(path.join(refreshed.workspacePath, 'a.txt'), 'utf8'), 'two\n');
   assert.equal(fs.existsSync(path.join(refreshed.workspacePath, 'stray.txt')), false);
+});
+
+test('a model re-reading the preloaded ledger is cut short with the ledger answer', async () => {
+  const queue = { approval_gates: [], pull_requests_to_review: [], merged_awaiting_deploy: [], awaiting_owner: [], blocked_recently: Array.from({ length: 8 }, (_, i) => ({ id: `${i}aaaaaaa-0000`, title: `Old repair ${i}`, status: 'failed' })) };
+  const { store, model, deps } = setup(Array.from({ length: 6 }, () => ({ tool: 'owner_queue', args: {} })));
+  let reads = 0;
+  deps.tools.owner_queue = async () => { reads++; return queue; };
+  const outcome = await chat.processBuilderChatMessage({ store, message: ownerMessage('What is waiting on me?'), deps });
+  assert.equal(outcome.error, undefined);
+  assert.equal(reads, 2, 'preload plus one model read; the repeat ends the loop');
+  assert.equal(model.calls.length, 2);
+  const reply = store.rows.at(-1).content;
+  assert.match(reply, /Old repair 4/);
+  assert.doesNotMatch(reply, /Old repair 5/);
+  assert.match(reply, /…and 3 more in the Builder queue/);
+});
+
+test('owner_queue leaves out a published job whose pull request the owner closed', async () => {
+  const now = new Date().toISOString();
+  const supabase = filteringSupabase({
+    builder_approvals: [],
+    builder_jobs: [
+      { id: 'c1', title: 'Closed PR', status: 'release_ready', autopilot_state: 'done', workspace_pull_request_url: 'https://github.com/o/r/pull/1', autopilot_report: { state: 'closed_unmerged' }, updated_at: now },
+      { id: 'c2', title: 'Open PR', status: 'release_ready', autopilot_state: 'published', workspace_pull_request_url: 'https://github.com/o/r/pull/2', autopilot_report: {}, updated_at: now },
+      { id: 'c3', title: 'Manual PR', status: 'release_ready', autopilot_state: null, workspace_pull_request_url: 'https://github.com/o/r/pull/3', autopilot_report: null, updated_at: now },
+    ],
+  });
+  const queue = await chat.createBuilderChatTools({ supabase, workspacePath: null, limits: chat.BUILDER_CHAT_LIMITS }).owner_queue();
+  assert.deepEqual(queue.pull_requests_to_review.map(job => job.title), ['Open PR', 'Manual PR']);
 });

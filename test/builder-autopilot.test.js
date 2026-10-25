@@ -685,3 +685,41 @@ test('a blocked main-monitor repair is handed back to the health monitor when ma
   const explicit = await autopilotTick({ supabase: fakeSupabase({ job: withWorkspace }), jobs: [withWorkspace], actions: published });
   assert.equal(explicit[0].outcome, 'blocked', 'a repair with a workspace needs explicit release handling, not a hand-back');
 });
+
+test('a published PR the owner merged on GitHub is recorded as merged so the release check can run', async () => {
+  const job = { id: 'job-owner-merge', title: 'CCTV tokens', status: 'release_ready', autopilot_state: 'published', workspace_pull_request_url: 'https://github.com/owner/repo/pull/202', autopilot_report: { text: 'Done: waiting for review.', merged: false } };
+  const actions = actionsRecorder();
+  actions.pullRequestState = async () => ({ state: 'merged', mergeSha: 'a'.repeat(40), mergedAt: '2026-10-25T02:40:00Z', mergedBy: 'DonSquires', baseRef: 'main' });
+  const outcomes = await autopilotTick({ supabase: fakeSupabase({ job }), jobs: [job], actions });
+  assert.deepEqual(outcomes, [{ job: 'job-owner-merge', outcome: 'merged', url: job.workspace_pull_request_url, merge_sha: 'a'.repeat(40) }]);
+  const [, , state, report] = actions.calls.find(([name]) => name === 'record');
+  assert.equal(state, 'published');
+  assert.equal(report.merged, true);
+  assert.equal(report.merge_sha, 'a'.repeat(40));
+  assert.equal(report.merged_by_owner, true);
+  assert.match(report.text, /merged on GitHub by DonSquires/);
+});
+
+test('a published PR the owner closed unmerged finishes the job as declined', async () => {
+  const job = { id: 'job-closed', title: 'Old idea', status: 'release_ready', autopilot_state: 'published', workspace_pull_request_url: 'https://github.com/owner/repo/pull/9', autopilot_report: {} };
+  const actions = actionsRecorder();
+  actions.pullRequestState = async () => ({ state: 'closed', closedAt: '2026-10-25T00:00:00Z' });
+  const outcomes = await autopilotTick({ supabase: fakeSupabase({ job }), jobs: [job], actions });
+  assert.equal(outcomes[0].outcome, 'closed_unmerged');
+  const [, , state, report] = actions.calls.find(([name]) => name === 'record');
+  assert.equal(state, 'done');
+  assert.equal(report.state, 'closed_unmerged');
+  assert.match(report.text, /closed without merging, so nothing from it is live/);
+});
+
+test('an open or unreadable published PR is only rotated, never re-reported or marked merged', async () => {
+  for (const pr of [{ state: 'open', draft: true }, { state: 'unknown', error: 'HTTP 502' }, { state: 'merged', mergeSha: null }, { state: 'merged', mergeSha: 'b'.repeat(40), baseRef: 'release' }]) {
+    const job = { id: 'job-open', title: 'T', status: 'release_ready', autopilot_state: 'published', workspace_pull_request_url: 'https://github.com/owner/repo/pull/3', autopilot_report: { merged: false } };
+    const actions = actionsRecorder();
+    actions.pullRequestState = async () => pr;
+    const outcomes = await autopilotTick({ supabase: fakeSupabase({ job }), jobs: [job], actions });
+    assert.equal(outcomes[0].outcome, 'published', JSON.stringify(pr));
+    const records = actions.calls.filter(([name]) => name === 'record');
+    assert.deepEqual(records.map(([, , state, report]) => [state, report]), [['published', null]], JSON.stringify(pr));
+  }
+});

@@ -28,7 +28,7 @@ const { runVibeHumanTest } = require('./builder-vibe-human-test');
 const { createFirewall } = require('./bob-firewall');
 const { createTailscale } = require('./bob-tailscale');
 const { createVibePreviewManager } = require('./builder-vibe-preview');
-const { createBranchWorkspace, createDetachedWorkspace, retireTerminalWorkspace, commitVerifiedPatch, publishWorkspaceBranch, createGiteaPullRequest, workspacePathForBranch, createGitHubPullRequest, mergeGitHubPullRequest, ensureSourceCheckout, githubAuthHeader, githubRepoUrl, githubSshRepoUrl, resolveRemoteHead, redactGitError } = require('./builder-branch-workspace');
+const { createBranchWorkspace, createDetachedWorkspace, retireTerminalWorkspace, commitVerifiedPatch, publishWorkspaceBranch, createGiteaPullRequest, workspacePathForBranch, createGitHubPullRequest, mergeGitHubPullRequest, readGitHubPullRequestState, ensureSourceCheckout, githubAuthHeader, githubRepoUrl, githubSshRepoUrl, resolveRemoteHead, redactGitError } = require('./builder-branch-workspace');
 const { executeWorker, summarizeHumanTest } = require('./worker-executor');
 const { createMainHealthMonitor } = require('./bob-main-health');
 const { TERMINAL_STATUSES: BUILDER_TERMINAL_STATUSES, jobHygieneDecision, historicalHealthResolution } = require('./builder-job-hygiene');
@@ -1221,6 +1221,7 @@ async function autopilotOnce() {
           return { pullRequestUrl: pullRequest.url, merged: false };
         },
         verifyRelease: async (job) => verifyGitHubProductionRelease(job.autopilot_report?.merge_sha),
+        ...(builderGitHost === 'github' ? { pullRequestState: async (job) => readGitHubPullRequestState({ url: job.workspace_pull_request_url, githubToken, owner: githubOwner, repo: githubRepo }) } : {}),
         markDeployed: async (jobId, deployment) => {
           if (deployment?.status !== 'success' || deployment?.live_verified !== true || !/^[a-f0-9]{40}$/i.test(String(deployment?.source_sha || ''))) {
             throw new Error('Builder deployment receipt is incomplete');
