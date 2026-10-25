@@ -18159,6 +18159,73 @@ export type Database = {
           },
         ]
       }
+      location_events_superseded: {
+        Row: {
+          batch_id: string
+          canonical_external_ref: string
+          canonical_location_event_id: string
+          client_organization_id: string
+          event_snapshot: Json
+          external_ref: string
+          id: string
+          location_event_id: string
+          provider_organization_id: string
+          reason_code: string
+          superseded_at: string
+          superseded_by: string
+        }
+        Insert: {
+          batch_id: string
+          canonical_external_ref: string
+          canonical_location_event_id: string
+          client_organization_id: string
+          event_snapshot: Json
+          external_ref: string
+          id?: string
+          location_event_id: string
+          provider_organization_id: string
+          reason_code: string
+          superseded_at?: string
+          superseded_by: string
+        }
+        Update: {
+          batch_id?: string
+          canonical_external_ref?: string
+          canonical_location_event_id?: string
+          client_organization_id?: string
+          event_snapshot?: Json
+          external_ref?: string
+          id?: string
+          location_event_id?: string
+          provider_organization_id?: string
+          reason_code?: string
+          superseded_at?: string
+          superseded_by?: string
+        }
+        Relationships: [
+          {
+            foreignKeyName: "location_events_superseded_batch_id_fkey"
+            columns: ["batch_id"]
+            isOneToOne: false
+            referencedRelation: "file_import_batches"
+            referencedColumns: ["id"]
+          },
+          {
+            foreignKeyName: "location_events_superseded_client_organization_id_fkey"
+            columns: ["client_organization_id"]
+            isOneToOne: false
+            referencedRelation: "organizations"
+            referencedColumns: ["id"]
+          },
+          {
+            foreignKeyName: "location_events_superseded_provider_organization_id_fkey"
+            columns: ["provider_organization_id"]
+            isOneToOne: false
+            referencedRelation: "organizations"
+            referencedColumns: ["id"]
+          },
+        ]
+      }
       location_module_assignments: {
         Row: {
           created_at: string
@@ -23132,7 +23199,9 @@ export type Database = {
           external_ref: string
           id: string
           is_current: boolean
+          overlay_source: Json | null
           provider_organization_id: string
+          record_fingerprint: string | null
           record_id: string
           record_kind: string
           source_file: string
@@ -23156,7 +23225,9 @@ export type Database = {
           external_ref: string
           id?: string
           is_current?: boolean
+          overlay_source?: Json | null
           provider_organization_id: string
+          record_fingerprint?: string | null
           record_id: string
           record_kind: string
           source_file: string
@@ -23180,7 +23251,9 @@ export type Database = {
           external_ref?: string
           id?: string
           is_current?: boolean
+          overlay_source?: Json | null
           provider_organization_id?: string
+          record_fingerprint?: string | null
           record_id?: string
           record_kind?: string
           source_file?: string
@@ -34874,6 +34947,21 @@ export type Database = {
           proposal_id: string
         }[]
       }
+      apply_dart_patrol_source_updates_and_supersede: {
+        Args: {
+          p_canonical_batch_id: string
+          p_client_organization_id: string
+          p_items: Json
+          p_provider_organization_id: string
+          p_update_batch_id: string
+        }
+        Returns: {
+          detail: string
+          external_ref: string
+          outcome: string
+          record_id: string
+        }[]
+      }
       apply_file_import_finance_batch: {
         Args: { p_batch_id: string }
         Returns: Json
@@ -39106,6 +39194,20 @@ export type Database = {
         Returns: {
           candidate_id: string
           onboarding_ledger_id: string
+        }[]
+      }
+      correct_legacy_patrol_source_records: {
+        Args: {
+          p_batch_id: string
+          p_client_organization_id: string
+          p_provider_organization_id: string
+          p_records: Json
+        }
+        Returns: {
+          detail: string
+          external_ref: string
+          outcome: string
+          record_id: string
         }[]
       }
       correct_timesheet_hours: {
@@ -45482,12 +45584,27 @@ export type Database = {
       }
       org_access_allowed: { Args: { target_org_id: string }; Returns: boolean }
       org_default_level: { Args: { p_type: string }; Returns: number }
+      patrol_nz_daylight: { Args: { p_at: string }; Returns: boolean }
       patrol_source_assert_row_provenance: {
         Args: {
           p_batch: Database["public"]["Tables"]["file_import_batches"]["Row"]
           p_item: Json
         }
         Returns: Json
+      }
+      patrol_source_event_dependency_hold: {
+        Args: {
+          p_batch_id: string
+          p_client_organization_id: string
+          p_event_id: string
+          p_external_ref: string
+          p_provider_organization_id: string
+        }
+        Returns: string
+      }
+      patrol_source_numeric_text_equal: {
+        Args: { p_left: Json; p_right: Json }
+        Returns: boolean
       }
       patrol_source_record_state: {
         Args: { p_kind: string; p_record_id: string }
@@ -50688,6 +50805,20 @@ export type Database = {
           id: string
           received_at: string
           review_state: string
+        }[]
+      }
+      supersede_duplicate_patrol_events: {
+        Args: {
+          p_batch_id: string
+          p_client_organization_id: string
+          p_items: Json
+          p_provider_organization_id: string
+        }
+        Returns: {
+          detail: string
+          external_ref: string
+          outcome: string
+          record_id: string
         }[]
       }
       sweep_missed_field_work: {
