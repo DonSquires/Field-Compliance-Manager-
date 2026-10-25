@@ -4,6 +4,15 @@ This is the minimum product-design and build standard for Bob in Field Complianc
 
 ## Builder research before a job proposal
 
+PM investigation delegation, 2026-10-25: the cloud PM can prepare an explicitly
+labelled investigation handoff for owner confirmation through the existing
+Builder job UI. This is not the researched repair proposal described below.
+The handoff quotes the approved user report and labels cause unknown; Builder
+must do the source/schema/Atlas/ledger investigation and satisfy its normal
+specification gates before implementation. A prose brief is not dispatched
+work, an unconfirmed card is not a job, and a job receipt is not a completed fix.
+The source-inspected repair-plan requirement remains unchanged.
+
 Owner correction, 2026-10-25: Builder chat must investigate and author the plan;
 the supervising engineer must not supply the solution and accept an echoed
 brief as evidence of Bob's capability. Read owning code/configuration, check

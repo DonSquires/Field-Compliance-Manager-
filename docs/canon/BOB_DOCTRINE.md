@@ -56,9 +56,24 @@ summary is distinct from disclosure: no automatic summarizer or classifier can
 replace the human review required by this selected cloud evidence flow.
 
 This supersedes the private-first default for new PM Chat turns, not the
-builders' model policy or existing private queued turns. A cloud handoff brief
-remains advisory: it does not satisfy the source-inspected executable proposal
+builders' model policy or existing private queued turns. A prose cloud handoff
+brief remains advisory: it does not satisfy the source-inspected repair-plan
 gate, start a builder, create a job, approve a change or establish completion.
+
+**Investigation handoff implementation, 2026-10-25:** following the owner's
+instruction to connect and UI-test PM-to-builder work, Chat may prepare a native
+`propose_builder_investigation` card for Bob Builder. This is an investigation
+delegation, explicitly not a source-verified repair proposal. It binds a quote
+from the approved current report, hypotheses, unknowns, investigation steps and
+acceptance checks to the originating message. The existing owner Create job
+control, reservation, control-room creation and persisted job receipt perform
+the handoff. No model prose starts work. Builder must check duplicate work,
+inspect source/schema/Atlas, establish cause and satisfy its existing
+specification/review/release gates before implementation. This narrow
+engineering implementation does not waive the source-inspected repair-plan
+gate or authorize private material to cloud. Vibe dispatch is not connected by
+this slice; independent QA remains advisory.
+
 Governed handoff and live acceptance remain separate delivery gates. The isolated
 cloud packet is an interim transport/reasoning slice, not the PM's target
 capability ceiling. It must not be presented as complete autonomous investigation

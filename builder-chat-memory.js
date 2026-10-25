@@ -1,5 +1,7 @@
 'use strict';
 
+const { HANDOFF_TOOL, investigationProposal } = require('./builder-chat-handoff');
+
 const SELF_MEMORY_TOOL = Object.freeze({
   type: 'function',
   function: {
@@ -27,20 +29,25 @@ function completedPmResult(result) {
   return result;
 }
 
-async function pmChatWithMemory({ api, request, supabase, message, post }) {
-  const first = completedPmResult(await api('chat', { ...request, tools: [SELF_MEMORY_TOOL] }, 90_000));
+async function pmChatWithMemory({ api, request, supabase, message, post, allowHandoff = false }) {
+  const first = completedPmResult(await api('chat', { ...request, tools: [SELF_MEMORY_TOOL, ...(allowHandoff ? [HANDOFF_TOOL] : [])] }, 90_000));
   const calls = first.message?.tool_calls;
   if (calls !== undefined && !Array.isArray(calls)) throw new Error('Cloud PM tool calls must be an array');
   if (!calls?.length) {
     assertNoUnreceiptedMemoryClaim(first);
     return { result: first, memoryReceipts: [] };
   }
-  if (calls.length !== 1 || calls[0]?.function?.name !== 'write_self_memory') {
-    throw new Error('Cloud PM may append only one diary entry per turn; no other tools are enabled in this stage');
+  const tool = calls[0]?.function?.name;
+  if (calls.length !== 1 || (tool !== 'write_self_memory' && !(allowHandoff && tool === HANDOFF_TOOL.function.name))) {
+    throw new Error('Cloud PM may use one diary or investigation handoff tool per turn; no other tools are enabled');
   }
   let args = calls[0].function.arguments;
   if (typeof args === 'string') {
-    try { args = JSON.parse(args); } catch { throw new Error('Diary tool arguments must be valid JSON'); }
+    try { args = JSON.parse(args); } catch { throw new Error('PM tool arguments must be valid JSON'); }
+  }
+  if (tool === HANDOFF_TOOL.function.name) {
+    const proposal = investigationProposal(args, message);
+    return { result: first, memoryReceipts: [], proposal };
   }
   if (!args || typeof args.content !== 'string' || !args.content.trim() || args.content.length > 2000
       || !['reflection', 'builder_note'].includes(args.memory_type)
