@@ -82,6 +82,13 @@ Once a proposal attempt is rejected for missing research, the turn cannot end
 as a successfully answered ordinary conversation: complete a valid proposal
 or report incomplete investigation with failed status and no job card.
 
+Rejected-call intent correction: a model's unsolicited `propose_job` attempt
+must not convert an ordinary question into a mandatory planning task. Invalid
+arguments or missing source/ledger/Atlas checks return tool errors, not new owner
+intent. The model may recover by answering the original question; a requested
+proposal still requires a valid proposal or explicit incomplete status. A
+successfully accepted proposal retains the existing confirmation flow.
+
 ### Public research, visual and document evidence
 
 Use Builder chat's explicit public-cloud mode for an owner-reviewed public

@@ -19,7 +19,7 @@ const { runBuilderResearch } = require('./builder-chat-research');
 const { PLATFORM_CONTRACTS, PLATFORM_DESCRIPTIONS } = require('./bob-platform-diagnostics');
 const { KNOWLEDGE_CONTRACT } = require('./builder-knowledge');
 
-const PROMPT_VERSION = 'builder-chat-v8';
+const PROMPT_VERSION = 'builder-chat-v9';
 const BUILDER_CHAT_LIMITS = Object.freeze({
   maxTurns: Math.max(4, Number(process.env.BOB_BUILDER_CHAT_TURNS || 14)),
   wallBudgetMs: Math.max(60_000, Number(process.env.BOB_BUILDER_CHAT_BUDGET_MS || 8 * 60_000)),
@@ -57,6 +57,7 @@ function builderChatSystemPrompt() {
     '- Public cloud research is a separate owner-approved message mode in this chat: best available configured Ollama Cloud candidates first, no metered providers, prior conversation and repository tools excluded. The owner can attach reviewed non-sensitive screenshots and documents and request public web evidence. Never send private source, credentials or tenant records to that mode; ask the owner to use its explicit approval controls. Returned research is advisory, not release authority.',
     'RULES:',
     '- The current owner request defines the task. Page context only says what is open: a selected job, cancelled job, prior title or old conversation is not an instruction to investigate it. Use that context when the owner refers to it, not to replace a new question.',
+    '- A rejected tool call does not change the task. If you mistakenly attempt a proposal while answering a question, return to the question and answer it; do not turn it into a repair investigation. Only a valid, accepted proposal establishes that a proposal was made.',
     '- Choose the smallest check that answers a remaining question. Guidance questions can be answered from retrieved cards and receipts; they do not require repository reads. Source investigation is required for claims about implementation or a repair proposal, not for every conversational answer. Once the requested facts are supported, reply instead of continuing to browse.',
     ATLAS_RESEARCH_GUIDANCE,
     '- Ground every claim in a tool result from this conversation: name files, tables and jobs you actually read. Never invent tables, columns, files, job IDs or statuses. An empty search is not proof something is missing.',
@@ -629,7 +630,6 @@ async function runBuilderChat({ store, thread, message, workspacePath, head, gat
     }
     unparseable = 0;
     const args = call.args && typeof call.args === 'object' ? call.args : {};
-    if (!statusMode && call.tool === 'propose_job' && typeof tools.propose_job === 'function') proposeMode = true;
     if (final && call.tool !== 'reply' && call.tool !== 'finish' && !(proposeMode && !proposal && call.tool === 'propose_job')) break;
     if (call.tool === 'reply' || call.tool === 'finish') {
       let text = String(args.message || args.summary || '').trim();
@@ -683,6 +683,7 @@ async function runBuilderChat({ store, thread, message, workspacePath, head, gat
     }
     if (count === 3 && !statusMode) await escalate('repeated_tool_call', 'repeated the same tool call without progress; continuing from the existing evidence');
     if (call.tool === 'propose_job' && result?.proposal) {
+      proposeMode = true;
       proposal = result.proposal;
       result = { proposed: true, instruction: 'The proposal is shown to the owner with a Create job button. Now reply briefly with what it will do and what the owner should check.' };
     }

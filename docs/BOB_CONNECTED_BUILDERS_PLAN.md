@@ -125,6 +125,14 @@ full runtime validation passed 1,715 tests with nine existing skips.
 
 ### 3. Evidence-supported investigation
 
+Post-#226 UI acceptance: corrected Atlas cards were retrieved, but the model
+repeated canon reads and attempted invalid proposals. Cancellation recovery no
+longer produced the observed `provider_busy` error. A rejected unsolicited
+proposal nevertheless switched ordinary guidance into required-proposal mode,
+causing the final reply to fail as unfinished planning. Preserve owner intent
+through rejected calls; only an accepted proposal may promote that mode.
+This protocol correction does not establish that tool-loop reasoning is fixed.
+
 Cancellation recovery follow-up: the private Chat client enforces a shorter
 turn deadline than the gateway's inference deadline. Source inspection found
 that a disconnected model-run HTTP caller did not cancel upstream inference,
