@@ -368,6 +368,43 @@ function createVibeStore(supabase) {
       const cutoff = new Date(Date.now() - olderThanMs).toISOString();
       await supabase.from('builder_vibe_messages').update({ status: 'failed', completed_at: new Date().toISOString() }).eq('status', 'claimed').lt('claimed_at', cutoff);
     },
+    // Startup only (this process is the sole Vibe worker). A deploy can restart the worker mid-turn:
+    // the owner's message is queued again once, and a session left "working" is reopened, because
+    // builder_vibe_claim_next never claims for a working session (live: session 11f20384 stuck).
+    async recoverInterruptedTurns() {
+      const now = new Date().toISOString();
+      const { data: claimed, error } = await supabase.from('builder_vibe_messages').select('id,session_id,payload').eq('status', 'claimed');
+      if (error) throw new Error(`Vibe restart recovery read failed: ${error.message}`);
+      const outcome = { requeued: 0, failed: 0, sessions: 0 };
+      for (const row of claimed || []) {
+        const payload = row.payload && typeof row.payload === 'object' ? row.payload : {};
+        const retryable = (payload.action || 'message') === 'message' && !(Number(payload.restart_retries) >= 1);
+        const patch = retryable
+          ? { status: 'queued', claimed_at: null, payload: { ...payload, restart_retries: (Number(payload.restart_retries) || 0) + 1 } }
+          : { status: 'failed', completed_at: now };
+        const { error: updateError } = await supabase.from('builder_vibe_messages').update(patch).eq('id', row.id).eq('status', 'claimed');
+        if (updateError) throw new Error(`Vibe restart recovery update failed: ${updateError.message}`);
+        const { error: postError } = await supabase.from('builder_vibe_messages').insert({
+          session_id: row.session_id, role: 'system', kind: retryable ? 'status' : 'error',
+          content: retryable
+            ? 'The Builder service restarted during this turn (usually a release going live). Your message is queued again and resumes from the branch as it stands.'
+            : 'The Builder service restarted during this step and it was not repeated automatically, to avoid doing it twice. Check the branch, then send it again.',
+          payload: { message_id: row.id, reason: 'worker_restart' },
+        });
+        if (postError) throw new Error(`Vibe restart notice failed: ${postError.message}`);
+        outcome[retryable ? 'requeued' : 'failed']++;
+      }
+      for (const [from, to] of [['working', 'open'], ['shipping', 'open']]) {
+        const { data: stuck, error: stuckError } = await supabase.from('builder_vibe_sessions').select('id,pr_url').eq('status', from);
+        if (stuckError) throw new Error(`Vibe restart recovery session read failed: ${stuckError.message}`);
+        for (const session of stuck || []) {
+          const { error: resetError } = await supabase.from('builder_vibe_sessions').update({ status: session.pr_url ? 'shipped' : to, updated_at: now }).eq('id', session.id).eq('status', from);
+          if (resetError) throw new Error(`Vibe restart recovery session reset failed: ${resetError.message}`);
+          outcome.sessions++;
+        }
+      }
+      return outcome;
+    },
   };
 }
 
@@ -1230,7 +1267,10 @@ function createVibeWorker({ supabase, deps, intervalMs = 3000, log = console }) 
     tick,
     start() {
       // This process is the only vibe worker: a claim left over from before a restart is orphaned.
-      store.releaseStaleClaims(0).catch(() => {});
+      store.recoverInterruptedTurns()
+        .then(outcome => { if (outcome.requeued || outcome.failed || outcome.sessions) log.info?.(`vibe worker: restart recovery ${JSON.stringify(outcome)}`); })
+        .catch(error => { log.error?.(`vibe worker: restart recovery failed: ${redactGitError(error && error.message)}`); return store.releaseStaleClaims(0); })
+        .catch(() => {});
       timer = setInterval(() => { tick(); }, intervalMs);
       timer.unref?.();
       setTimeout(() => { tick(); }, 2000).unref?.();
