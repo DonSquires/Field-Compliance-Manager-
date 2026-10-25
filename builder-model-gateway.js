@@ -337,9 +337,11 @@ function buildProviderBody({ input, config, model, nativeTools = false }) {
   return body;
 }
 
-async function invokeBuilderModel({ input, config, fetchImpl = globalThis.fetch }) {
+async function invokeBuilderModel({ input, config, fetchImpl = globalThis.fetch, signal }) {
   const validationError = validateModelRequest(input, config);
   if (validationError) return { status: 400, body: { error: validationError } };
+  const cancelled = () => ({ status: 499, body: { error: 'model request cancelled by caller', code: 'request_cancelled' } });
+  if (signal?.aborted) return cancelled();
 
   const providerConfig = config[input.provider];
   if (input.provider === 'openai' && !providerConfig.apiKey) {
@@ -385,10 +387,13 @@ async function invokeBuilderModel({ input, config, fetchImpl = globalThis.fetch 
   if (previousTimeouts && Date.now() - previousTimeouts.at < PLANNING_COOLDOWN_MS && previousTimeouts.count >= 2) {
     return { status: 429, body: { error: 'VPS structured planning is cooling down after two timeouts; continue the allowed fallback chain', code: 'provider_planning_cooldown', retry_after_ms: PLANNING_COOLDOWN_MS - (Date.now() - previousTimeouts.at) } };
   }
+  if (signal?.aborted) return cancelled();
   if (local && busyLocalProviders.has(input.provider)) return { status: 429, body: { error: `${input.provider} is already serving a request; no parallel local model was loaded`, code: 'provider_busy' } };
   if (local) busyLocalProviders.add(input.provider);
 
   const controller = new AbortController();
+  const abortFromCaller = () => controller.abort();
+  signal?.addEventListener('abort', abortFromCaller, { once: true });
   const timer = setTimeout(() => controller.abort(), Math.min(config.timeoutMs, planningTimeout || Infinity));
   try {
     const isOpenAI = input.provider === 'openai';
@@ -404,7 +409,11 @@ async function invokeBuilderModel({ input, config, fetchImpl = globalThis.fetch 
         signal: controller.signal
       }
     );
-    const data = await response.json().catch(() => null);
+    const data = await response.json().catch(error => {
+      if (controller.signal.aborted) throw error;
+      return null;
+    });
+    if (signal?.aborted) return cancelled();
     if (!response.ok || !data) {
       const detail = data?.error?.message ? `: ${String(data.error.message).slice(0, 200)}` : (typeof data?.error === 'string' ? `: ${data.error.slice(0, 200)}` : '');
       const quota = response.status === 429 && QUOTA_EXHAUSTED_PATTERN.test(`${detail} ${data?.error?.code || ''} ${data?.error?.type || ''}`);
@@ -464,6 +473,7 @@ async function invokeBuilderModel({ input, config, fetchImpl = globalThis.fetch 
       }
     };
   } catch (error) {
+    if (signal?.aborted) return cancelled();
     const timedOut = error?.name === 'AbortError';
     if (timedOut && planningTimeout) {
       const previous = planningTimeouts.get(planningKey);
@@ -476,6 +486,7 @@ async function invokeBuilderModel({ input, config, fetchImpl = globalThis.fetch 
     };
   } finally {
     clearTimeout(timer);
+    signal?.removeEventListener('abort', abortFromCaller);
     if (local) busyLocalProviders.delete(input.provider);
   }
 }

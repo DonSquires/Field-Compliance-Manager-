@@ -443,6 +443,55 @@ test('GPU health filters by installed byte size and reserves context headroom, n
   assert.throws(() => createModelGatewayConfig({ BOB_GPU_VRAM_MB: 'invalid' }), /GPU memory configuration/);
 });
 
+test('caller cancellation aborts generation or response body and releases the local serving guard', async () => {
+  for (const phase of ['generation', 'body']) {
+    const config = createModelGatewayConfig({
+      OLLAMA_BASE_URL: `http://cancel-${phase}.local:11434`,
+      BOB_OLLAMA_MODELS: 'cancel-model',
+    });
+    const input = request({ provider: 'ollama', model: 'cancel-model' });
+    const controller = new AbortController();
+    let reached;
+    const started = new Promise(resolve => { reached = resolve; });
+    let aborted = false;
+    const fetchImpl = async (url, options) => {
+      if (url.endsWith('/api/tags')) return { ok: true, json: async () => ({ models: [{ name: 'cancel-model' }] }) };
+      const wait = () => new Promise((_resolve, reject) => {
+        options.signal.addEventListener('abort', () => {
+          aborted = true;
+          reject(Object.assign(new Error('caller aborted'), { name: 'AbortError' }));
+        }, { once: true });
+        reached();
+      });
+      return phase === 'generation' ? wait() : { ok: true, json: wait };
+    };
+    const running = invokeBuilderModel({ input, config, fetchImpl, signal: controller.signal });
+    await started;
+    const busy = await invokeBuilderModel({ input, config, fetchImpl });
+    assert.equal(busy.body.code, 'provider_busy');
+    controller.abort();
+    const cancelled = await running;
+    assert.equal(aborted, true);
+    assert.equal(cancelled.status, 499);
+    assert.equal(cancelled.body.code, 'request_cancelled');
+    const next = await invokeBuilderModel({
+      input, config,
+      fetchImpl: async () => ({ ok: true, json: async () => ({ message: { content: 'next request works' } }) }),
+    });
+    assert.equal(next.status, 200, 'fallback can use the provider after cancelled inference unwinds');
+  }
+});
+
+test('an already cancelled caller does not probe or invoke a model', async () => {
+  const controller = new AbortController();
+  controller.abort();
+  const result = await invokeBuilderModel({
+    input: request({ provider: 'ollama', model: 'approved-local' }), config: config(),
+    signal: controller.signal, fetchImpl: () => { throw new Error('must not fetch'); },
+  });
+  assert.equal(result.body.code, 'request_cancelled');
+});
+
 // Keep last: it marks the module-level OpenAI health entry exhausted for the cooldown.
 test('an exhausted provider account returns 429 and is reported unavailable until the cooldown ends', async () => {
   const { modelHealth } = require('../builder-model-gateway');
