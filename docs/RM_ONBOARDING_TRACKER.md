@@ -161,15 +161,69 @@ inferred.
   2026 has 1,105 unchanged records and no holds. Both runner checks request
   zero writes. Every current canonical version exactly matches its saved
   `state_after`. Focused importer/reconciliation tests: 45/45 passing.
-  The resync fix still needs its PR release. Catalog-head CI has a runtime
-  failure under investigation; web types/build/tests and browser jobs passed,
-  so the protected GitHub Atlas refresh was skipped, not completed.
+  The resync fix was released in PR #219 (`6f87dbf8`). Main verification
+  `40181416033`, protected GitHub Atlas refresh `40181809581` and Vercel
+  deployment all succeeded. The earlier catalog-head runtime failure is not
+  the release status of this fix.
 - Rostering follows source reconciliation, not this correction transaction:
   forestry patrol pay is $32/hour; historical hours sum `job_time_hours` per
   officer/day. Unattributed jobs use the approved Relief Officer (No Name)
   identity. Engineer pay is $55/hour, distinct from the $79.50 client charge;
   digger hours/travel are equipment use, not labour. The $166.60 service amount
   includes time, travel and ammunition, not a per-person pay rate.
+
+### Phase B - historical labour readiness, not posted
+
+- Added the read-only `scripts/preview-rm-patrol-labour.mjs` and its behavioural
+  planner tests. Run with `--from YYYY-MM-DD --to YYYY-MM-DD --output <private
+  JSON outside the repository>`. There is deliberately no `--apply`. The
+  linked query runs in `BEGIN READ ONLY` / `ROLLBACK`, scopes clients through
+  R&M's provider agreements, uses Auckland work dates, and checks current
+  source versions for FCM edits. Output stdout is aggregate-only; the private
+  report retains record IDs, source references, available file/hash/row/version
+  provenance, daily groups and deterministic fingerprints.
+- Live readiness window 1900-01-01 through the database's current Auckland
+  date, 2026-10-25: 33,318 source records; 5,779 officer/date evidence groups
+  (including unattributed groups); 2,472 candidate groups, 794 evidence-only
+  groups and 2,513 held groups after the owner's explicit-zero ruling.
+  Four future-dated records are outside the window, including a year-2926
+  anomaly; none were corrected or imported by this check. No earlier records
+  were omitted. Full-source replay reproduced the same report/fingerprints.
+- The planner sums source job hours exactly, never first-to-last elapsed
+  windows. $32/hour is an owner-approved preview policy, not a resolved live
+  pay rule. The `FORESTRY-PATROL` pay code does not exist live yet. The existing
+  3,055 historical assignments have no pay-code metadata; the existing
+  `get_roster_labour_cost` reads scheduled slots, not these historical
+  assignments. Do not claim that historical pay is already wired.
+- Holds overlap: 1,595 groups contain missing/invalid hours;
+  978 need officer-identity review; 36 exceed
+  24 recorded hours without clipping; 45 have conflicting source identities;
+  40 have possible same-job/day overlap across year sheets; five need source
+  reconciliation review. Conservative narrative markers additionally flag
+  57 groups for engineering and 116 for equipment review, plus one crew
+  attribution review. Those markers are review prompts, not proven job
+  classifications or authority to apply an engineer rate.
+- Owner confirmed explicit-zero policy: zero contributes zero to the daily
+  sum, and all-zero days remain evidence only with no pay-code assignment or
+  pay estimate. Blank/invalid hours still hold the entire day, not a partial
+  payable total. Of the 3,357 groups containing zeros, 1,536 mix zero and
+  positive entries; 1,498 contain only explicit zeros. Other holds still apply:
+  not every all-zero group is clean evidence-only. The approved policy removes
+  1,886 zero-only holds: 1,092 become candidates and 794 become evidence-only.
+- Matching event/observation manifestations of one source identity are counted
+  once while both record IDs remain in provenance. Conflicting manifestations
+  hold; year sheets remain separate records and possible payment overlaps
+  hold rather than being silently collapsed. No anonymous group is payable:
+  the approved Relief Officer (No Name) identity still needs a governed
+  representation, not a fabricated login.
+- Atlas upstream flow reach for `roster_assignments` found four component and
+  two RPC nodes at depth two. Eleven direct FK-reference edges are separate
+  structural evidence, not extra proven flow. No schema, Atlas, roster,
+  timesheet, pay-code, payroll, invoice or notification writes were made.
+- Next: resolve the retained holds and historical
+  labour storage/reporting path; then build and rollback-test a governed seed
+  with exact insert/update/hold counts for bounded owner approval. This
+  readiness report is not that seed or an authorization to post payroll.
 
 ## PATROL SOURCE ROW SYNC (2026-10-25) - APPLIED (PR #189), LEGACY CORRECTION IS STEP B
 
