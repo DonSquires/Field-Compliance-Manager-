@@ -253,16 +253,17 @@ function createModelGatewayConfig(env = process.env) {
     // Ollama Cloud: strong hosted open models, tried after Bob's own compute and before OpenAI.
     // Ordered strongest-first. /api/tags lists every cloud model, including ones the plan does not
     // include (those fail at request time with 402/410), so the default names only models the plan
-    // serves. Pro-plan access probed 2026-10-21 (owner upgraded); qwen3-coder:480b is retired (410). Order
-    // follows a replay of the real "Repair Atlas gaps" analyst brief: gpt-oss:120b, deepseek-v4-pro:0813 and
-    // nemotron-3-ultra returned valid grounded specs; kimi-k2.7-code, kimi-k3 and mistral-large-4 answered but
-    // could exhaust the 16384-token cap; glm-5.3 and minimax-m3 returned empty JSON and are left out.
+    // serves. Pro-plan access probed 2026-10-21 (owner upgraded); qwen3-coder:480b is retired (410).
+    // The owner-approved Vibe Cloud route now tries Kimi K2.7 Code first (official Ollama code model,
+    // live-installed 2026-10-25); DeepSeek V4.1 Flash is the next coding fallback. Previously gpt-oss
+    // answered in prose and DeepSeek V4 Pro produced malformed JSX in Vibe session 11f20384. Remaining
+    // models retain the grounded-spec probe order; no provider or egress boundary changes.
     // The independent reviewer takes the next distinct model, so a different family reviews the author.
     ollama_cloud: {
       kind: 'ollama_cloud',
       apiKey: env.OLLAMA_API_KEY || env.OLLAMA_API_TOKEN || '',
       baseUrl: (env.OLLAMA_CLOUD_BASE_URL || 'https://ollama.com').replace(/\/+$/, ''),
-      models: parseModelAllowlist(env.BOB_OLLAMA_CLOUD_MODELS, 'gpt-oss:120b,deepseek-v4-pro:0813,nemotron-3-ultra,kimi-k2.7-code,kimi-k3,mistral-large-4,gemma4:31b,gpt-oss:20b'),
+      models: parseModelAllowlist(env.BOB_OLLAMA_CLOUD_MODELS, 'kimi-k2.7-code,deepseek-v4.1-flash:1017,deepseek-v4-pro:0813,nemotron-3-ultra,gpt-oss:120b,kimi-k3,mistral-large-4,gemma4:31b,gpt-oss:20b'),
       maxOutputTokens: Math.min(maxOutputTokens, 16384),
       numCtx: Math.max(8192, Number(env.BOB_OLLAMA_CLOUD_NUM_CTX) || 131072)
     },

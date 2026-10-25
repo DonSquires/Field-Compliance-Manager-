@@ -610,7 +610,12 @@ function createTools({ workspacePath, repoRoot, lane, supabase, limits, log, gen
     // Asynchronous: a full test suite can run for a minute, and a blocked event loop would stall
     // the control plane's own HTTP server (health, model gateway) for that long.
     return new Promise((resolve) => {
-      const child = spawn(argv[0], argv.slice(1), { cwd: workspacePath, env: { ...childEnv, CI: '1', FORCE_COLOR: '0' }, stdio: ['ignore', 'pipe', 'pipe'] });
+      const webTest = /^npm (?:run test|test) --prefix apps\/web -- /.test(text);
+      const child = spawn(argv[0], argv.slice(1), {
+        cwd: workspacePath,
+        env: { ...childEnv, ...(webTest ? { NODE_ENV: 'test' } : {}), CI: '1', FORCE_COLOR: '0' },
+        stdio: ['ignore', 'pipe', 'pipe'],
+      });
       let stdout = '';
       let stderr = '';
       let timedOut = false;
