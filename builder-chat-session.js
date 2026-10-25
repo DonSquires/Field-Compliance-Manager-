@@ -19,7 +19,7 @@ const { runBuilderResearch } = require('./builder-chat-research');
 const { PLATFORM_CONTRACTS, PLATFORM_DESCRIPTIONS } = require('./bob-platform-diagnostics');
 const { KNOWLEDGE_CONTRACT } = require('./builder-knowledge');
 
-const PROMPT_VERSION = 'builder-chat-v9';
+const PROMPT_VERSION = 'builder-chat-v10';
 const BUILDER_CHAT_LIMITS = Object.freeze({
   maxTurns: Math.max(4, Number(process.env.BOB_BUILDER_CHAT_TURNS || 14)),
   wallBudgetMs: Math.max(60_000, Number(process.env.BOB_BUILDER_CHAT_BUDGET_MS || 8 * 60_000)),
@@ -338,13 +338,14 @@ const INVESTIGATION = /\b(?:why|how (?:does|do))\b/i;
 // not a refusal: live thread 2026-10-25, qwen2.5-coder:7b read schema.sql 13 times and replied that
 // it had "no permission to modify the file" instead of proposing the fix it was asked for.
 const PROPOSE_REQUEST = /\b(?:propose|draft|plan|create|open|raise|queue|set up|make)\b[^.?!\n]{0,40}\b(?:builder\s+)?(?:job|build|fix|change|(?:repair|implementation)\s+plan)\b/i;
-const PROPOSE_NEGATED = /\b(?:don'?t|do not|does not|no need to|not yet|never|without|instead of|rather than|before you)\b[^.?!\n]{0,24}\b(?:propose|draft|plan|create|open|raise|queue|set up|make)\b|\b(?:propose|draft|create|open|raise|queue|make)\b[^.?!\n]{0,40}\b(?:job|build|fix|change)\b[^.?!\n]{0,12}\b(?:yet|later)\b/i;
+const PROPOSE_NEGATED = /\b(?:don'?t|do not|does not|no need to|not yet|never|without|instead of|rather than|before you)\b[^.?!\n]*\b(?:propose|draft|plan|create|open|raise|queue|set up|make)\b|\b(?:propose|draft|create|open|raise|queue|make)\b[^.?!\n]{0,40}\b(?:job|build|fix|change)\b[^.?!\n]{0,12}\b(?:yet|later)\b/i;
 // "How do I create a job?" asks for an explanation; "Can you propose a job?" asks Bob to act.
 const INFORMATIONAL = /^\s*(?:how|what|why|when|where|which|who|is|are|does|do|did|should|would it)\b/i;
 const ADDRESSED_REQUEST = /\b(?:can|could|would|will) you\b|\bplease\b/i;
 function proposeIntent(text) {
   const value = String(text || '');
-  const requested = value.split(/[.!?\n]+/).some(clause => PROPOSE_REQUEST.test(clause) && !PROPOSE_NEGATED.test(clause));
+  const requested = value.split(/[.!?;\n]+|\b(?:but|however|instead)\b(?!\s+of\b)/i)
+    .some(clause => PROPOSE_REQUEST.test(clause) && !PROPOSE_NEGATED.test(clause));
   if (!requested) return false;
   return !INFORMATIONAL.test(value) || ADDRESSED_REQUEST.test(value);
 }

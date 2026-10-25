@@ -89,6 +89,14 @@ intent. The model may recover by answering the original question; a requested
 proposal still requires a valid proposal or explicit incomplete status. A
 successfully accepted proposal retains the existing confirmation flow.
 
+Input-classification follow-up: negative lists can span multiple actions.
+"Do not investigate or change any particular feature, create a job, or read
+business records" is not a proposal request. Do not inject mandatory planning
+because the negation is more than a short fixed character distance from
+"create". A separate positive instruction ("do not weaken guards; propose a
+repair plan") still requests planning. Validate the actual model packet,
+not only the classification helper or eventual JSON shape.
+
 ### Public research, visual and document evidence
 
 Use Builder chat's explicit public-cloud mode for an owner-reviewed public
